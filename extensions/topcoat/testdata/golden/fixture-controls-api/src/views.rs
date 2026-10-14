@@ -20,8 +20,14 @@
 //! field's JSON key, for a stylesheet or a test, and no style of its own.
 
 use crate::choices::Choices;
-use crate::records::{OrderViewRecord, ReservationRecord, StockRunRecord};
+use crate::records::{OrderViewRecord, ReservationRecord, ShipmentRecord, StockRunRecord, WarehouseRecord};
 use topcoat::view::{View, component, view};
+
+/// A detail's accessible name: its title when it has one, else its type's
+/// noun.
+fn label_of(title: Option<&str>, noun: Option<&'static str>) -> Option<String> {
+    title.filter(|title| !title.is_empty()).or(noun).map(str::to_owned)
+}
 
 /// Text as a component shows it: the label the app's choices give it at
 /// `field`, else the text itself.
@@ -153,6 +159,71 @@ pub async fn reservation_table(
     })
 }
 
+/// `ShipmentRecord` as a description list: each field's label and value.
+/// `choices` labels the values they name.
+#[component]
+pub async fn shipment_detail(record: ShipmentRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
+    Ok(view! {
+        <div class="ss-detail" data-type="Shipment" role="group">
+            <dl>
+                <div data-field="id">
+                    <dt>"Id"</dt>
+                    <dd>(text_of(&choices, "id", &record.id))</dd>
+                </div>
+                <div data-field="warehouseId">
+                    <dt>"Warehouse"</dt>
+                    <dd>(text_of(&choices, "warehouseId", &record.warehouse_id))</dd>
+                </div>
+            </dl>
+        </div>
+    })
+}
+
+/// `ShipmentRecord`s as a table: a column per field and a row per record.
+/// `choices` labels the values they name. `hrefs` links each row to a
+/// page: the i-th, unless it is empty, row i's first cell; a row past
+/// its end links nowhere. A linked cell without text
+/// links the type's noun in its place, with the row's id when it has one.
+#[component]
+pub async fn shipment_table(
+    rows: Vec<ShipmentRecord>,
+    #[default] choices: Choices,
+    #[default] hrefs: Vec<String>,
+) -> topcoat::Result<impl View> {
+    Ok(view! {
+        <table class="ss-table" data-type="Shipment">
+            <thead>
+                <tr>
+                    <th scope="col" data-field="id">"Id"</th>
+                    <th scope="col" data-field="warehouseId">"Warehouse"</th>
+                </tr>
+            </thead>
+            <tbody>
+                for (index, row) in rows.into_iter().enumerate() {
+                    let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
+                    let untitled = (href.is_some() && row.id.trim().is_empty()).then_some("Shipment");
+                    <tr>
+                        <td data-field="id">
+                            if let Some(href) = &href {
+                                <a href=(href)>
+                                    if let Some(untitled) = untitled {
+                                        (untitled)
+                                    } else {
+                                        (text_of(&choices, "id", &row.id))
+                                    }
+                                </a>
+                            } else {
+                                (text_of(&choices, "id", &row.id))
+                            }
+                        </td>
+                        <td data-field="warehouseId">(text_of(&choices, "warehouseId", &row.warehouse_id))</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    })
+}
+
 /// `StockRunRecord` as a description list: each field's label and value.
 /// `choices` labels the values they name.
 #[component]
@@ -199,6 +270,73 @@ pub async fn stock_run_table(
                                 (if row.done { "Yes" } else { "No" })
                             }
                         </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    })
+}
+
+/// `WarehouseRecord` as a description list: each field's label and value.
+/// `choices` labels the values they name.
+#[component]
+pub async fn warehouse_detail(record: WarehouseRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
+    let label = label_of(Some(record.name.as_str()), Some("Warehouse"));
+    Ok(view! {
+        <div class="ss-detail" data-type="Warehouse" role="group" aria-label=(label)>
+            <dl>
+                <div data-field="id">
+                    <dt>"Id"</dt>
+                    <dd>(text_of(&choices, "id", &record.id))</dd>
+                </div>
+                <div data-field="name">
+                    <dt>"Name"</dt>
+                    <dd>(text_of(&choices, "name", &record.name))</dd>
+                </div>
+            </dl>
+        </div>
+    })
+}
+
+/// `WarehouseRecord`s as a table: a column per field and a row per record.
+/// `choices` labels the values they name. `hrefs` links each row to a
+/// page: the i-th, unless it is empty, row i's title cell; a row past
+/// its end links nowhere. A linked cell without text
+/// links the type's noun in its place, with the row's id when it has one.
+#[component]
+pub async fn warehouse_table(
+    rows: Vec<WarehouseRecord>,
+    #[default] choices: Choices,
+    #[default] hrefs: Vec<String>,
+) -> topcoat::Result<impl View> {
+    Ok(view! {
+        <table class="ss-table" data-type="Warehouse">
+            <caption>"Warehouses"</caption>
+            <thead>
+                <tr>
+                    <th scope="col" data-field="id">"Id"</th>
+                    <th scope="col" data-field="name">"Name"</th>
+                </tr>
+            </thead>
+            <tbody>
+                for (index, row) in rows.into_iter().enumerate() {
+                    let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
+                    let untitled = (href.is_some() && row.name.trim().is_empty()).then(|| format!("Warehouse {}", row.id));
+                    <tr>
+                        <td data-field="id">(text_of(&choices, "id", &row.id))</td>
+                        <th scope="row" data-field="name">
+                            if let Some(href) = &href {
+                                <a href=(href)>
+                                    if let Some(untitled) = untitled {
+                                        (untitled)
+                                    } else {
+                                        (text_of(&choices, "name", &row.name))
+                                    }
+                                </a>
+                            } else {
+                                (text_of(&choices, "name", &row.name))
+                            }
+                        </th>
                     </tr>
                 }
             </tbody>

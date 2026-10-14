@@ -12,13 +12,16 @@
 //! up to its maxLimit when it pages, from one call a request; when more
 //! follow, a select would hide them, and the control stays as it is. A
 //! record's labels come through the options operation's lookup, the list
-//! argument that narrows it to the values given, in chunks of the
-//! argument's listMax, at most `MAX_LOOKUP_CALLS` calls for one target;
-//! without a lookup, from the options' first page. A caller the operation
-//! refuses (401, 403), or whose call fails, gets the plain control and the
-//! values as they are, and the page does not fail. The calls are kept for
-//! the request (`#[memoize]`), and for no other: labels change, and callers
-//! differ.
+//! argument that narrows it to the values given, in chunks of the lesser
+//! of the argument's listMax and, when the operation pages, its maxLimit,
+//! at most `MAX_LOOKUP_CALLS` calls for one target in a `<record>_labels`
+//! call; without a lookup, from the options' first page.
+//! The console's pages meet the route controls of each options operation
+//! their forms and records call, as they meet their own operation's. A
+//! caller the operation refuses (401, 403), or whose call fails, gets the
+//! plain control and the values as they are, and the page does not fail.
+//! The calls are kept for the request (`#[memoize]`), and for no other:
+//! labels change, and callers differ.
 
 {{ with .References -}}
 {{ if .Records -}}
@@ -39,8 +42,9 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 use topcoat::context::{Cx, memoize};
 
-/// The most calls one target's lookup makes to name a render's values; a
-/// value past them shows as it is.
+/// The most calls one target's lookup makes for one `<record>_labels`
+/// call, which names the values of the records it is given; a value past
+/// them shows as it is.
 pub const MAX_LOOKUP_CALLS: usize = 10;
 {{- if .Records }}
 
@@ -236,7 +240,7 @@ async fn {{ .Fn }}(cx: &Cx, values: &[String]) -> Option<Vec<Value>> {
 {{- if $m.UsesChoices . }}
 
 {{ doc (printf "%s's items as options, each by its %s and named by %s: %s; none when the caller may not list them%s." .Target .Value (or (and .Label (printf "its %s" .Label)) "its value") (or (and .Options.Paged (printf "the first page of %s, when it holds them all" .Options.Operation)) (printf "the items %s lists" .Options.Operation)) (or (and .Options.Paged ", or more follow, which a select would hide") "")) }}
-async fn {{ .Base }}_choices(cx: &Cx) -> Option<Vec<Choice>> {
+async fn {{ .Base }}_target_choices(cx: &Cx) -> Option<Vec<Choice>> {
     let listed = {{ .Options.Fn }}(cx).await?;
     (!listed.more).then(|| choices_of(&listed.items, {{ rustString .Value }}, {{ .LabelExpr }}))
 }
@@ -250,7 +254,7 @@ async fn {{ .Base }}_choices(cx: &Cx) -> Option<Vec<Choice>> {
 
 {{ doc (printf "The labels of %s's `values`, by its %s: %s that hold them, since it has no lookup. A value no item there has is left out." .Target .Value (or (and .Options.Paged (printf "the items of the first page of %s" .Options.Operation)) (printf "the items %s lists" .Options.Operation))) }}
 {{- end }}
-async fn {{ .Base }}_labels(cx: &Cx, values: &BTreeSet<String>) -> Vec<Choice> {
+async fn {{ .Base }}_target_labels(cx: &Cx, values: &BTreeSet<String>) -> Vec<Choice> {
 {{- with .Lookup }}
     let values: Vec<String> = values.iter().cloned().collect();
     let mut out = Vec::new();
@@ -281,7 +285,7 @@ pub async fn {{ .Fn }}(cx: &Cx, choices: Choices) -> Choices {
     let mut found = Choices::new();
 {{- range .Sites }}
     if !named(&choices, {{ rustString .Path }})
-        && let Some(options) = {{ .Source.Base }}_choices(cx).await
+        && let Some(options) = {{ .Source.Base }}_target_choices(cx).await
     {
         found = found.with({{ rustString .Path }}, pairs(&options));
     }
@@ -298,7 +302,7 @@ pub async fn {{ .Fn }}(cx: &Cx, records: &[{{ .Record }}], choices: Choices) -> 
 {{- range .Groups }}
     let sites = unnamed(&choices, &[{{ range $i, $s := .Sites }}{{ if $i }}, {{ end }}({{ rustString $s.Path }}, {{ $s.KeysExpr }}){{ end }}]);
     if !sites.is_empty() {
-        let labels = {{ .Source.Base }}_labels(cx, &values_at(&json, &sites)).await;
+        let labels = {{ .Source.Base }}_target_labels(cx, &values_at(&json, &sites)).await;
         for (path, _) in sites {
             found = found.with(path, pairs(&labels));
         }

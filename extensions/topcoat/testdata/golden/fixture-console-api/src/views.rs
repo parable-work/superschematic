@@ -20,7 +20,7 @@
 //! field's JSON key, for a stylesheet or a test, and no style of its own.
 
 use crate::choices::Choices;
-use crate::records::{OrderInputRecord, OrderLineInputRecord, OrderLineRecord, OrderRecord, ProductRecord, ReviewRecord, SupplierRecord};
+use crate::records::{OrderInputRecord, OrderLineInputRecord, OrderLineRecord, OrderRecord, ProductRecord, ReviewRecord, SitePageRecord, SupplierRecord};
 use topcoat::view::{View, component, view};
 
 /// A detail's accessible name: its title when it has one, else its type's
@@ -401,6 +401,10 @@ pub async fn product_detail(record: ProductRecord, #[default] choices: Choices) 
                     <dt>"Sku"</dt>
                     <dd>(text_of(&choices, "sku", &record.sku))</dd>
                 </div>
+                <div data-field="supplierId">
+                    <dt>"Supplier"</dt>
+                    <dd>(text_of(&choices, "supplierId", &record.supplier_id))</dd>
+                </div>
                 <div data-field="inStock">
                     <dt>"In stock"</dt>
                     <dd>(if record.in_stock { "Yes" } else { "No" })</dd>
@@ -428,6 +432,7 @@ pub async fn product_table(
                 <tr>
                     <th scope="col" data-field="name">"Name"</th>
                     <th scope="col" data-field="sku">"Sku"</th>
+                    <th scope="col" data-field="supplierId">"Supplier"</th>
                     <th scope="col" data-field="inStock">"In stock"</th>
                 </tr>
             </thead>
@@ -450,6 +455,7 @@ pub async fn product_table(
                             }
                         </th>
                         <td data-field="sku">(text_of(&choices, "sku", &row.sku))</td>
+                        <td data-field="supplierId">(text_of(&choices, "supplierId", &row.supplier_id))</td>
                         <td data-field="inStock">(if row.in_stock { "Yes" } else { "No" })</td>
                     </tr>
                 }
@@ -528,6 +534,73 @@ pub async fn review_table(
                         </th>
                         <td data-field="rating">(number_of(&choices, "rating", row.rating))</td>
                         <td data-field="productId">(text_of(&choices, "productId", &row.product_id))</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    })
+}
+
+/// `SitePageRecord` as a description list: each field's label and value.
+/// `choices` labels the values they name.
+#[component]
+pub async fn site_page_detail(record: SitePageRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
+    let label = label_of(Some(record.title.as_str()), Some("Page"));
+    Ok(view! {
+        <div class="ss-detail" data-type="SitePage" role="group" aria-label=(label)>
+            <dl>
+                <div data-field="slug">
+                    <dt>"Slug"</dt>
+                    <dd>(text_of(&choices, "slug", &record.slug))</dd>
+                </div>
+                <div data-field="title">
+                    <dt>"Title"</dt>
+                    <dd>(text_of(&choices, "title", &record.title))</dd>
+                </div>
+            </dl>
+        </div>
+    })
+}
+
+/// `SitePageRecord`s as a table: a column per field and a row per record.
+/// `choices` labels the values they name. `hrefs` links each row to a
+/// page: the i-th, unless it is empty, row i's title cell; a row past
+/// its end links nowhere. A linked cell without text
+/// links the type's noun in its place, with the row's id when it has one.
+#[component]
+pub async fn site_page_table(
+    rows: Vec<SitePageRecord>,
+    #[default] choices: Choices,
+    #[default] hrefs: Vec<String>,
+) -> topcoat::Result<impl View> {
+    Ok(view! {
+        <table class="ss-table" data-type="SitePage">
+            <caption>"Pages"</caption>
+            <thead>
+                <tr>
+                    <th scope="col" data-field="slug">"Slug"</th>
+                    <th scope="col" data-field="title">"Title"</th>
+                </tr>
+            </thead>
+            <tbody>
+                for (index, row) in rows.into_iter().enumerate() {
+                    let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
+                    let untitled = (href.is_some() && row.title.trim().is_empty()).then_some("Page");
+                    <tr>
+                        <td data-field="slug">(text_of(&choices, "slug", &row.slug))</td>
+                        <th scope="row" data-field="title">
+                            if let Some(href) = &href {
+                                <a href=(href)>
+                                    if let Some(untitled) = untitled {
+                                        (untitled)
+                                    } else {
+                                        (text_of(&choices, "title", &row.title))
+                                    }
+                                </a>
+                            } else {
+                                (text_of(&choices, "title", &row.title))
+                            }
+                        </th>
                     </tr>
                 }
             </tbody>

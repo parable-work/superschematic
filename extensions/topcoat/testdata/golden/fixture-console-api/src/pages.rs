@@ -35,11 +35,11 @@ use std::fmt::Write as _;
 use crate::api::runtime;
 use crate::api::types;
 use crate::choices::Choices;
-use crate::forms::{FormErrors, OrderAddLineArgsForm, OrderInputForm, OrderListOrdersArgsForm, ProductListProductsArgsForm, Refusal, ReviewListReviewsArgsForm, SupplierListSuppliersArgsForm, order_add_line_args_fields, order_input_fields, order_list_orders_args_fields, product_list_products_args_fields, review_list_reviews_args_fields};
+use crate::forms::{FormErrors, OrderAddLineArgsForm, OrderInputForm, OrderListOrdersArgsForm, ProductListProductsArgsForm, Refusal, ReviewListReviewsArgsForm, SiteListPagesArgsForm, SupplierListSuppliersArgsForm, order_add_line_args_fields, order_input_fields, order_list_orders_args_fields, product_list_products_args_fields, review_list_reviews_args_fields};
 use crate::operations;
-use crate::records::{OrderRecord, ProductRecord, ReviewRecord, SupplierRecord};
+use crate::records::{OrderRecord, ProductRecord, ReviewRecord, SitePageRecord, SupplierRecord};
 use crate::references;
-use crate::views::{order_detail, order_table, product_detail, product_table, review_table, supplier_table};
+use crate::views::{order_detail, order_table, product_detail, product_table, review_table, site_page_table, supplier_table};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 use topcoat::context::{Cx, memoize, try_app_context};
@@ -64,6 +64,7 @@ path_param!(pub product_id);
 /// names it in `Settings::choices_for`.
 pub const RESOURCES: &[&str] = &[
     "orders",
+    "page",
     "products",
     "products/{product_id}/reviews",
     "suppliers",
@@ -236,7 +237,7 @@ fn title_or(title: &str, noun: &str) -> String {
 /// A list's query for one of its pages (D60): `pairs`, the filter's and
 /// the limit, then `cursor` when given, each name and value
 /// percent-encoded.
-fn page_query(pairs: &[(String, String)], cursor: Option<&str>) -> String {
+fn pager_query(pairs: &[(String, String)], cursor: Option<&str>) -> String {
     let cursor = cursor.map(|cursor| ("cursor", cursor));
     let mut query = String::new();
     for (name, value) in pairs.iter().map(|(name, value)| (name.as_str(), value.as_str())).chain(cursor) {
@@ -251,7 +252,7 @@ fn page_query(pairs: &[(String, String)], cursor: Option<&str>) -> String {
 }
 
 /// A list's page: its path, then its query unless that is empty.
-fn page_href(base: &str, query: &str) -> String {
+fn pager_href(base: &str, query: &str) -> String {
     if query.is_empty() { base.to_owned() } else { format!("{base}?{query}") }
 }
 
@@ -265,10 +266,10 @@ async fn pager(base: String, first: Option<String>, next: Option<String>) -> top
         if first.is_some() || next.is_some() {
             <nav class="ss-pager" aria-label="Pages">
                 if let Some(first) = first {
-                    <a rel="first" href=(page_href(&base, &first))>"First page"</a>
+                    <a rel="first" href=(pager_href(&base, &first))>"First page"</a>
                 }
                 if let Some(later) = next {
-                    <a rel="next" href=(page_href(&base, &later))>"Next page"</a>
+                    <a rel="next" href=(pager_href(&base, &later))>"Next page"</a>
                 }
             </nav>
         }
@@ -379,6 +380,8 @@ async fn listed(cx: &Cx) -> (Vec<Link>, bool) {
     let mut signed_out = false;
     let link = Link { href: "/console/orders", label: "Orders" };
     admit(operations::can_order_list_orders(cx).await.map_err(|err| err.status), link, &mut links, &mut signed_out);
+    let link = Link { href: "/console/page", label: "Pages" };
+    admit(operations::can_site_list_pages(cx).await.map_err(|err| err.status), link, &mut links, &mut signed_out);
     let link = Link { href: "/console/products", label: "Products" };
     admit(operations::can_product_list_products(cx).await.map_err(|err| err.status), link, &mut links, &mut signed_out);
     let link = Link { href: "/console/suppliers", label: "Suppliers" };
@@ -427,6 +430,20 @@ const TREE: &[Node] = &[
         edit: false,
         delete: false,
         actions: &[("add-line", "Add line")],
+        children: &[],
+    },
+    Node {
+        key: "page",
+        titled: false,
+        words: &["page"],
+        plural: "Pages",
+        noun: "Page",
+        list: true,
+        detail: false,
+        create: None,
+        edit: false,
+        delete: false,
+        actions: &[],
         children: &[],
     },
     Node {
@@ -738,10 +755,10 @@ async fn orders_list(cx: &Cx, query: String, next: String) -> topcoat::Result<im
     // the next page's while one follows, each with the query's filter and limit.
     let base = orders_href().unwrap_or_default();
     let pairs = filter.query_pairs();
-    let first_page = filter.cursor.is_some().then(|| page_query(&pairs, None));
+    let first_page = filter.cursor.is_some().then(|| pager_query(&pairs, None));
     let (listed, next_page) = match listed {
         Ok(page) => {
-            let next_page = page.next.map(|next| page_query(&pairs, Some(next.as_str())));
+            let next_page = page.next.map(|next| pager_query(&pairs, Some(next.as_str())));
             (Ok(page.items), next_page)
         }
         Err(refusal) => (Err(refusal), None),
@@ -772,7 +789,7 @@ async fn orders_list(cx: &Cx, query: String, next: String) -> topcoat::Result<im
         if first_page.is_some() || next_page.is_some() {
             <nav class="ss-pager" aria-label="Pages">
                 if let Some(first) = first_page {
-                    let href = page_href(&base, &first);
+                    let href = pager_href(&base, &first);
                     <a rel="first" href=(href.clone()) @click=$(|e: Event| {
                         e.prevent_default();
                         raw!("history.replaceState(history.state, '', ${href});", ());
@@ -780,7 +797,7 @@ async fn orders_list(cx: &Cx, query: String, next: String) -> topcoat::Result<im
                     })>"First page"</a>
                 }
                 if let Some(later) = next_page {
-                    let href = page_href(&base, &later);
+                    let href = pager_href(&base, &later);
                     <a rel="next" href=(href.clone()) @click=$(|e: Event| {
                         e.prevent_default();
                         raw!("history.replaceState(history.state, '', ${href});", ());
@@ -949,6 +966,96 @@ pub async fn orders_add_line_form_page(cx: &Cx, Form(form): Form<OrderAddLineArg
     })
 }
 
+/// The path of the pages: `/console/page`.
+fn page_href() -> Option<String> {
+    Some("/console/page".to_owned())
+}
+
+/// The list of pages, a page at a time, when the caller may list them.
+#[page("/console/page")]
+pub async fn page_list_page(cx: &Cx) -> topcoat::Result<impl View> {
+    let next = current(cx);
+    let admitted = operations::can_site_list_pages(cx).await;
+    Ok(view! {
+        match admitted {
+            Err(err) => refused(refusal: Refusal::from_api(&err), next: next),
+            Ok(_) => page_list(query: query_of(cx), next: next),
+        }
+    })
+}
+
+/// The pages, a page at a time (D60): the query's cursor and limit ask for the
+/// page, and after the table the links to the next page and, on a later one, to
+/// the first carry the limit. A shard at `/console/_live/page`: when the app
+/// loads Topcoat's runtime, a page's link sends its query, and the list renders
+/// again in place. The shard reads the query as the page reads its own, and its
+/// request, which meets no page's guard, is admitted and checked by the list's
+/// call.
+#[shard("/console/_live/page")]
+async fn page_list(cx: &Cx, query: String, next: String) -> topcoat::Result<impl View> {
+    // The page's query: the request's at first, then what a link sets.
+    let query = signal(cx, move || query);
+    let filter = Form::<SiteListPagesArgsForm>::from_bytes(query.get().as_bytes())?.0;
+    let listed = filter.submit(cx).await;
+    // The links of the page: the first page's while a cursor was sent, and
+    // the next page's while one follows, each with the query's limit.
+    let base = page_href().unwrap_or_default();
+    let pairs = filter.query_pairs();
+    let first_page = filter.cursor.is_some().then(|| pager_query(&pairs, None));
+    let (listed, next_page) = match listed {
+        Ok(page) => {
+            let next_page = page.next.map(|next| pager_query(&pairs, Some(next.as_str())));
+            (Ok(page.items), next_page)
+        }
+        Err(refusal) => (Err(refusal), None),
+    };
+    Ok(view! {
+        <h1>"Pages"</h1>
+        match listed {
+            Ok(items) => page_rows(items: items),
+            Err(refusal) => refused(refusal: page_refusal(refusal, &[]), next: next),
+        }
+        // Each link sets the shard's query, which renders the list again in
+        // place, and puts it in the address bar; without the runtime it is
+        // a link to the page.
+        if first_page.is_some() || next_page.is_some() {
+            <nav class="ss-pager" aria-label="Pages">
+                if let Some(first) = first_page {
+                    let href = pager_href(&base, &first);
+                    <a rel="first" href=(href.clone()) @click=$(|e: Event| {
+                        e.prevent_default();
+                        raw!("history.replaceState(history.state, '', ${href});", ());
+                        query.set(first.to_owned())
+                    })>"First page"</a>
+                }
+                if let Some(later) = next_page {
+                    let href = pager_href(&base, &later);
+                    <a rel="next" href=(href.clone()) @click=$(|e: Event| {
+                        e.prevent_default();
+                        raw!("history.replaceState(history.state, '', ${href});", ());
+                        query.set(later.to_owned())
+                    })>"Next page"</a>
+                }
+            </nav>
+        }
+    })
+}
+
+/// Pages as `site_page_table` renders them, the app's choices naming their
+/// values.
+#[component]
+async fn page_rows(cx: &Cx, items: Vec<types::SitePage>) -> topcoat::Result<impl View> {
+    let rows: Vec<SitePageRecord> = items.iter().map(SitePageRecord::from).collect();
+    let choices = choices_of(cx, "page");
+    Ok(view! {
+        if rows.is_empty() {
+            <p class="ss-empty">"There are no pages."</p>
+        } else {
+            site_page_table(rows: rows, choices: choices)
+        }
+    })
+}
+
 /// The path of the products: `/console/products`.
 fn products_href() -> Option<String> {
     Some("/console/products".to_owned())
@@ -997,10 +1104,10 @@ async fn products_list(cx: &Cx, query: String, next: String) -> topcoat::Result<
     // the next page's while one follows, each with the query's filter and limit.
     let base = products_href().unwrap_or_default();
     let pairs = filter.query_pairs();
-    let first_page = filter.cursor.is_some().then(|| page_query(&pairs, None));
+    let first_page = filter.cursor.is_some().then(|| pager_query(&pairs, None));
     let (listed, next_page) = match listed {
         Ok(page) => {
-            let next_page = page.next.map(|next| page_query(&pairs, Some(next.as_str())));
+            let next_page = page.next.map(|next| pager_query(&pairs, Some(next.as_str())));
             (Ok(page.items), next_page)
         }
         Err(refusal) => (Err(refusal), None),
@@ -1026,7 +1133,7 @@ async fn products_list(cx: &Cx, query: String, next: String) -> topcoat::Result<
         if first_page.is_some() || next_page.is_some() {
             <nav class="ss-pager" aria-label="Pages">
                 if let Some(first) = first_page {
-                    let href = page_href(&base, &first);
+                    let href = pager_href(&base, &first);
                     <a rel="first" href=(href.clone()) @click=$(|e: Event| {
                         e.prevent_default();
                         raw!("history.replaceState(history.state, '', ${href});", ());
@@ -1034,7 +1141,7 @@ async fn products_list(cx: &Cx, query: String, next: String) -> topcoat::Result<
                     })>"First page"</a>
                 }
                 if let Some(later) = next_page {
-                    let href = page_href(&base, &later);
+                    let href = pager_href(&base, &later);
                     <a rel="next" href=(href.clone()) @click=$(|e: Event| {
                         e.prevent_default();
                         raw!("history.replaceState(history.state, '', ${href});", ());
@@ -1047,12 +1154,12 @@ async fn products_list(cx: &Cx, query: String, next: String) -> topcoat::Result<
 }
 
 /// Products as `product_table` renders them, the app's choices naming their
-/// values, each row linked to its page.
+/// values, over the labels of what they refer to, each row linked to its page.
 #[component]
 async fn products_rows(cx: &Cx, items: Vec<types::Product>) -> topcoat::Result<impl View> {
     let rows: Vec<ProductRecord> = items.iter().map(ProductRecord::from).collect();
     let hrefs: Vec<String> = rows.iter().map(|row| products_item_href(&row.id).unwrap_or_default()).collect();
-    let choices = choices_of(cx, "products");
+    let choices = references::product_labels(cx, &rows, choices_of(cx, "products")).await;
     Ok(view! {
         if rows.is_empty() {
             <p class="ss-empty">"There are no products."</p>
@@ -1086,12 +1193,16 @@ async fn products_item(
         })
         .map_err(Refusal::clone);
     let choices = choices_of(cx, "products");
+    let labels = match &found {
+        Ok((_, record)) => references::product_labels(cx, std::slice::from_ref(record), choices.clone()).await,
+        Err(_) => choices.clone(),
+    };
     Ok(view! {
         match found {
             Err(refusal) => refused(refusal: refusal, next: href),
             Ok((heading, record)) => {
                 <h1>(heading)</h1>
-                product_detail(record: record, choices: choices.clone())
+                product_detail(record: record, choices: labels)
                 products_reviews_section(product_id: product_id.clone())
             },
         }
@@ -1148,10 +1259,10 @@ async fn products_reviews_list(cx: &Cx, product_id: String, query: String, next:
     // the next page's while one follows, each with the query's filter and limit.
     let base = products_reviews_href(&product_id).unwrap_or_default();
     let pairs = filter.query_pairs();
-    let first_page = filter.cursor.is_some().then(|| page_query(&pairs, None));
+    let first_page = filter.cursor.is_some().then(|| pager_query(&pairs, None));
     let (listed, next_page) = match listed {
         Ok(page) => {
-            let next_page = page.next.map(|next| page_query(&pairs, Some(next.as_str())));
+            let next_page = page.next.map(|next| pager_query(&pairs, Some(next.as_str())));
             (Ok(page.items), next_page)
         }
         Err(refusal) => (Err(refusal), None),
@@ -1177,7 +1288,7 @@ async fn products_reviews_list(cx: &Cx, product_id: String, query: String, next:
         if first_page.is_some() || next_page.is_some() {
             <nav class="ss-pager" aria-label="Pages">
                 if let Some(first) = first_page {
-                    let href = page_href(&base, &first);
+                    let href = pager_href(&base, &first);
                     <a rel="first" href=(href.clone()) @click=$(|e: Event| {
                         e.prevent_default();
                         raw!("history.replaceState(history.state, '', ${href});", ());
@@ -1185,7 +1296,7 @@ async fn products_reviews_list(cx: &Cx, product_id: String, query: String, next:
                     })>"First page"</a>
                 }
                 if let Some(later) = next_page {
-                    let href = page_href(&base, &later);
+                    let href = pager_href(&base, &later);
                     <a rel="next" href=(href.clone()) @click=$(|e: Event| {
                         e.prevent_default();
                         raw!("history.replaceState(history.state, '', ${href});", ());
@@ -1221,7 +1332,7 @@ async fn products_reviews_section(cx: &Cx, product_id: String) -> topcoat::Resul
         Err(_) => None,
     };
     let next_page = match &listed {
-        Some(Ok(page)) => page.next.as_ref().map(|next| page_query(&[], Some(next.as_str()))),
+        Some(Ok(page)) => page.next.as_ref().map(|next| pager_query(&[], Some(next.as_str()))),
         _ => None,
     };
     let listed = listed.map(|listed| listed.map(|page| page.items));
@@ -1276,10 +1387,10 @@ async fn suppliers_list(cx: &Cx, query: String, next: String) -> topcoat::Result
     // the next page's while one follows, each with the query's limit.
     let base = suppliers_href().unwrap_or_default();
     let pairs = filter.query_pairs();
-    let first_page = filter.cursor.is_some().then(|| page_query(&pairs, None));
+    let first_page = filter.cursor.is_some().then(|| pager_query(&pairs, None));
     let (listed, next_page) = match listed {
         Ok(page) => {
-            let next_page = page.next.map(|next| page_query(&pairs, Some(next.as_str())));
+            let next_page = page.next.map(|next| pager_query(&pairs, Some(next.as_str())));
             (Ok(page.items), next_page)
         }
         Err(refusal) => (Err(refusal), None),
@@ -1296,7 +1407,7 @@ async fn suppliers_list(cx: &Cx, query: String, next: String) -> topcoat::Result
         if first_page.is_some() || next_page.is_some() {
             <nav class="ss-pager" aria-label="Pages">
                 if let Some(first) = first_page {
-                    let href = page_href(&base, &first);
+                    let href = pager_href(&base, &first);
                     <a rel="first" href=(href.clone()) @click=$(|e: Event| {
                         e.prevent_default();
                         raw!("history.replaceState(history.state, '', ${href});", ());
@@ -1304,7 +1415,7 @@ async fn suppliers_list(cx: &Cx, query: String, next: String) -> topcoat::Result
                     })>"First page"</a>
                 }
                 if let Some(later) = next_page {
-                    let href = page_href(&base, &later);
+                    let href = pager_href(&base, &later);
                     <a rel="next" href=(href.clone()) @click=$(|e: Event| {
                         e.prevent_default();
                         raw!("history.replaceState(history.state, '', ${href});", ());

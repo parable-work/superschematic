@@ -67,6 +67,17 @@ pub async fn order_hold_order(cx: &Cx, args: crate::api::OrderHoldOrderArgs) -> 
         .await
 }
 
+/// stock.listShipments (`GET /api/shipments`): The shipments, with no control of their own.
+pub async fn stock_list_shipments(cx: &Cx) -> Result<Vec<types::Shipment>, ApiError> {
+    let caller = can_stock_list_shipments(cx).await?;
+    let setup: &Setup = app_context(cx);
+    setup
+        .implementations
+        .stock
+        .list_shipments(operations::STOCK_LIST_SHIPMENTS.context(caller))
+        .await
+}
+
 /// stock.reindexStock (`POST /api/stock/reindex`): Reindexes the stock, for a service that calls this API.
 /// Its route admits only a service caller (@requireService). This call applies
 /// the end-user step alone, as `OperationInfo::admit` does; whether it should
@@ -92,6 +103,17 @@ pub async fn stock_release_reservation(cx: &Cx, args: crate::api::StockReleaseRe
         .implementations
         .stock
         .release_reservation(operations::STOCK_RELEASE_RESERVATION.context(caller), args)
+        .await
+}
+
+/// stock.listWarehouses (`GET /api/warehouses`): The warehouses: two a minute and a second.
+pub async fn stock_list_warehouses(cx: &Cx) -> Result<Vec<types::Warehouse>, ApiError> {
+    let caller = can_stock_list_warehouses(cx).await?;
+    let setup: &Setup = app_context(cx);
+    setup
+        .implementations
+        .stock
+        .list_warehouses(operations::STOCK_LIST_WAREHOUSES.context(caller))
         .await
 }
 
@@ -127,6 +149,12 @@ pub async fn can_order_hold_order(cx: &Cx) -> Result<Option<Principal>, ApiError
     crate::admit(cx, &operations::ORDER_HOLD_ORDER).await
 }
 
+/// Admits the caller of stock.listShipments as its route does: it needs none, so
+/// `Ok(None)`.
+pub async fn can_stock_list_shipments(cx: &Cx) -> Result<Option<Principal>, ApiError> {
+    crate::admit(cx, &operations::STOCK_LIST_SHIPMENTS).await
+}
+
 /// Admits the caller of stock.reindexStock as its route does: it needs none, so
 /// `Ok(None)`.
 /// Its route admits only a service caller (@requireService), which a guard does
@@ -139,4 +167,10 @@ pub async fn can_stock_reindex_stock(cx: &Cx) -> Result<Option<Principal>, ApiEr
 /// never. The caller, for the implementation.
 pub async fn can_stock_release_reservation(cx: &Cx) -> Result<Option<Principal>, ApiError> {
     crate::admit(cx, &operations::STOCK_RELEASE_RESERVATION).await
+}
+
+/// Admits the caller of stock.listWarehouses as its route does: it needs none, so
+/// `Ok(None)`.
+pub async fn can_stock_list_warehouses(cx: &Cx) -> Result<Option<Principal>, ApiError> {
+    crate::admit(cx, &operations::STOCK_LIST_WAREHOUSES).await
 }

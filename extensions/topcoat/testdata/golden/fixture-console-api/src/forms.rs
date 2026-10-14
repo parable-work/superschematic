@@ -1592,6 +1592,151 @@ pub async fn review_list_reviews_args_fields(
     })
 }
 
+/// The arguments of site.listPages, each as the browser sends it. A filter,
+/// sent by GET and read from the query.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct SiteListPagesArgsForm {
+    /// The page asked for (D60): the cursor of the page before, a page's
+    /// `next`, and the limit, as the query sends them. No control renders
+    /// them, and `page` reads them by the route's rules.
+    pub cursor: Option<String>,
+    pub limit: Option<String>,
+    /// The browser sent more than `MAX_PAIRS` pairs, past which the form
+    /// read none: `parse` refuses it with the form's error.
+    pub overflow: bool,
+}
+
+impl SiteListPagesArgsForm {
+    /// How a page sends the form: `<form method=(Self::METHOD)>`.
+    pub const METHOD: &'static str = "get";
+
+    /// A new form: each argument's declared default.
+    pub fn new() -> Self {
+        Self {
+            cursor: None,
+            limit: None,
+            overflow: false,
+        }
+    }
+
+    /// The form a browser sent, from its pairs: each argument's first value and
+    /// a list's every value. `Form<SiteListPagesArgsForm>` decodes a query this
+    /// way.
+    pub fn from_pairs(pairs: impl IntoIterator<Item = (String, String)>) -> Self {
+        let posted = Posted::from_pairs(pairs);
+        Self {
+            cursor: posted.get("cursor").first(),
+            limit: posted.get("limit").first(),
+            overflow: posted.overflow,
+        }
+    }
+
+    /// The filter the current request's query holds, so a page's form shows
+    /// the filters in effect: what `Form<SiteListPagesArgsForm>` reads on GET.
+    pub fn from_query(cx: &Cx) -> topcoat::Result<Self> {
+        let query = uri(cx).query().unwrap_or_default();
+        Ok(Form::<Self>::from_bytes(query.as_bytes())?.0)
+    }
+
+    /// The operation's arguments: each written as the JSON a request carries
+    /// and decoded into its type, then checked as the router checks a request's
+    /// (`Args::check`); else each control's errors, or the form's when the
+    /// browser sent more than it reads. `check` refuses the first argument that
+    /// breaks a rule.
+    pub fn parse(&self) -> Result<crate::api::SiteListPagesArgs, FormErrors> {
+        if self.overflow {
+            return Err(overflowed());
+        }
+        let mut errors = FormErrors::default();
+        let page = match self.page() {
+            Ok(page) => Some(page),
+            Err(err) => {
+                errors.merge(FormErrors::from_api(&err));
+                None
+            }
+        };
+        let Some(page) = page else {
+            return Err(errors);
+        };
+        let args = crate::api::SiteListPagesArgs {
+            page,
+        };
+        args.check().map_err(|err| FormErrors::from_api(&err))?;
+        Ok(args)
+    }
+
+    /// The page the form asks for, its `cursor` and `limit` read by the
+    /// route's rules (`PageSpec::query`, D60): an absent cursor is the first
+    /// page and an absent limit the route's default, and a refusal is the
+    /// router's 400 at either.
+    pub fn page(&self) -> Result<runtime::page::PageRequest, ApiError> {
+        let pairs = [("cursor", &self.cursor), ("limit", &self.limit)]
+            .into_iter()
+            .filter_map(|(name, value)| value.clone().map(|value| (name.to_owned(), value)))
+            .collect();
+        crate::api::SiteListPagesArgs::PAGE.query(&QueryValues::new(pairs))
+    }
+
+    /// The pairs the form holds as a query sends them, in control order:
+    /// each argument's values as sent, then `limit` when sent, never
+    /// `cursor`. A page links the next page and the first with them, so each
+    /// keeps the filter and the limit.
+    pub fn query_pairs(&self) -> Vec<(String, String)> {
+        let mut pairs = Vec::new();
+        if let Some(limit) = &self.limit {
+            pairs.push(("limit".to_owned(), limit.clone()));
+        }
+        pairs
+    }
+
+    /// Parses the form, then calls the operation in-process
+    /// (`operations::site_list_pages`). A refusal is the status a page answers
+    /// with and the errors it renders the form again with: 422 and `parse`'s
+    /// errors, or the route's status (401, 403, 404, 409, ...) and the
+    /// operation's errors (`Refusal::from_api`).
+    pub async fn submit(&self, cx: &Cx) -> Result<runtime::page::Page<types::SitePage>, Refusal> {
+        // A cursor or a limit the route refuses is its 400, as the router
+        // answers it.
+        self.page().map_err(|err| Refusal::from_api(&err))?;
+        let args = self.parse()?;
+        operations::site_list_pages(cx, args).await.map_err(|err| Refusal::from_api(&err))
+    }
+
+    /// Whether the component shows the errors at `path`: at an argument's
+    /// control. A path argument's are the form's own.
+    fn shows(_path: &[Segment]) -> bool {
+        false
+    }
+}
+
+impl<'de> Deserialize<'de> for SiteListPagesArgsForm {
+    /// Reads the pairs a browser sends, as Topcoat's `Form` hands them, by
+    /// `from_pairs`.
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Vec::<(String, String)>::deserialize(deserializer).map(Self::from_pairs)
+    }
+}
+
+/// The controls of `SiteListPagesArgsForm`: each argument's, with its label,
+/// its value as sent, the attributes its rules give it and its errors, a path
+/// argument's a hidden input. `choices` turns a text or number control the app
+/// names into a select.
+#[component]
+pub async fn site_list_pages_args_fields(
+    #[default] form: SiteListPagesArgsForm,
+    #[default] errors: FormErrors,
+    #[default] choices: Choices,
+) -> topcoat::Result<impl View> {
+    let form_errors = errors.unshown(SiteListPagesArgsForm::shows);
+    let _ = choices;
+    let _ = form;
+    Ok(view! {
+        for message in form_errors {
+            <p class="form-error">(message)</p>
+        }
+    })
+}
+
 /// The arguments of supplier.listSuppliers, each as the browser sends it. A
 /// filter, sent by GET and read from the query.
 #[derive(Debug, Clone, Default, PartialEq)]

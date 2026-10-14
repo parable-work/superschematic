@@ -85,6 +85,44 @@ impl From<types::Reservation> for ReservationRecord {
     }
 }
 
+/// The record of `types::Shipment`.
+#[record]
+#[derive(Debug, Clone, PartialEq)]
+pub struct ShipmentRecord {
+    pub id: String,
+    pub warehouse_id: String,
+}
+
+impl ShipmentRecord {
+    /// The record of the type's JSON, as the API sends it.
+    pub fn from_wire(json: &serde_json::Value) -> Self {
+        Self {
+            id: wire::string(&json["id"]),
+            warehouse_id: wire::string(&json["warehouseId"]),
+        }
+    }
+
+    /// The type's JSON, as a request carries it.
+    pub fn to_wire(&self) -> serde_json::Value {
+        let mut json = serde_json::Map::new();
+        json.insert("id".to_owned(), wire::put_string(&self.id));
+        json.insert("warehouseId".to_owned(), wire::put_string(&self.warehouse_id));
+        serde_json::Value::Object(json)
+    }
+}
+
+impl From<&types::Shipment> for ShipmentRecord {
+    fn from(value: &types::Shipment) -> Self {
+        Self::from_wire(&serde_json::to_value(value).unwrap_or_default())
+    }
+}
+
+impl From<types::Shipment> for ShipmentRecord {
+    fn from(value: types::Shipment) -> Self {
+        Self::from(&value)
+    }
+}
+
 /// The record of `types::StockRun`.
 #[record]
 #[derive(Debug, Clone, PartialEq)]
@@ -116,6 +154,44 @@ impl From<&types::StockRun> for StockRunRecord {
 
 impl From<types::StockRun> for StockRunRecord {
     fn from(value: types::StockRun) -> Self {
+        Self::from(&value)
+    }
+}
+
+/// The record of `types::Warehouse`.
+#[record]
+#[derive(Debug, Clone, PartialEq)]
+pub struct WarehouseRecord {
+    pub id: String,
+    pub name: String,
+}
+
+impl WarehouseRecord {
+    /// The record of the type's JSON, as the API sends it.
+    pub fn from_wire(json: &serde_json::Value) -> Self {
+        Self {
+            id: wire::string(&json["id"]),
+            name: wire::string(&json["name"]),
+        }
+    }
+
+    /// The type's JSON, as a request carries it.
+    pub fn to_wire(&self) -> serde_json::Value {
+        let mut json = serde_json::Map::new();
+        json.insert("id".to_owned(), wire::put_string(&self.id));
+        json.insert("name".to_owned(), wire::put_string(&self.name));
+        serde_json::Value::Object(json)
+    }
+}
+
+impl From<&types::Warehouse> for WarehouseRecord {
+    fn from(value: &types::Warehouse) -> Self {
+        Self::from_wire(&serde_json::to_value(value).unwrap_or_default())
+    }
+}
+
+impl From<types::Warehouse> for WarehouseRecord {
+    fn from(value: types::Warehouse) -> Self {
         Self::from(&value)
     }
 }

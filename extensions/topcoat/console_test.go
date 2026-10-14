@@ -33,10 +33,12 @@ const consoleService = "fixture-console-api"
 // the listing for a reference by sku; a caller who may not list the items
 // gets the plain control and the value, the app's choices win and spare
 // the call, and more items than a page keeps the control. Products link
-// their rows through the reference of getProduct's productId, and a
-// product's page shows the first page of its reviews and a link to the
-// next. The live list's shard pages in place, and a procedure answers a
-// page record.
+// their rows through the reference of getProduct's productId, name their
+// suppliers, a target's own reference, beside the reviews and lines that
+// name products, and a product's page shows the first page of its reviews
+// and a link to the next. The live list's shard pages in place, a
+// procedure answers a page record, and the site's pages, a paged list at
+// the path page, link their next and first pages.
 func TestTheConsolePagesPicksAndSearches(t *testing.T) {
 	cargoTestCrate(t, consoleService, consoleAppTest)
 }
@@ -136,8 +138,10 @@ func TestAPagedOperationIsItsPageEverywhere(t *testing.T) {
 // from the one operation that lists the target, its labels through the
 // lookup in chunks of its listMax, or from the listing for a reference by
 // sku, which no lookup refers by; a choices function per form and a labels
-// function per record that holds a reference; the pages calling them; and
-// products' rows linked through getProduct's reference.
+// function per record that holds a reference, Product's among them, since
+// a product names its supplier, beside the private functions of Product as
+// a target; the pages calling them; and products' rows linked through
+// getProduct's reference.
 func TestReferencesResolveByTheCoreRule(t *testing.T) {
 	files, _ := readCrate(t, registry.DefaultNaming(), consoleService, livePagesOutputs())
 	references := files["references.rs"]
@@ -148,7 +152,11 @@ func TestReferencesResolveByTheCoreRule(t *testing.T) {
 		`(!listed.more).then(|| choices_of(&listed.items, "id", Some("name")))`,
 		`(!listed.more).then(|| choices_of(&listed.items, "sku", Some("name")))`,
 		"for chunk in values.chunks(5).take(MAX_LOOKUP_CALLS) {",
-		"async fn product_by_sku_labels(cx: &Cx, values: &BTreeSet<String>) -> Vec<Choice> {",
+		"async fn product_by_sku_target_labels(cx: &Cx, values: &BTreeSet<String>) -> Vec<Choice> {",
+		"async fn product_target_labels(cx: &Cx, values: &BTreeSet<String>) -> Vec<Choice> {",
+		"async fn product_target_choices(cx: &Cx) -> Option<Vec<Choice>> {",
+		"pub async fn product_labels(cx: &Cx, records: &[ProductRecord], choices: Choices) -> Choices {",
+		"let labels = supplier_target_labels(cx, &values_at(&json, &sites)).await;",
 		"pub async fn order_input_form_choices(cx: &Cx, choices: Choices) -> Choices {",
 		"pub async fn order_list_orders_args_form_choices(cx: &Cx, choices: Choices) -> Choices {",
 		"pub async fn order_add_line_args_form_choices(cx: &Cx, choices: Choices) -> Choices {",
@@ -167,6 +175,7 @@ func TestReferencesResolveByTheCoreRule(t *testing.T) {
 		"let add_line_form_choices = match &add_line_form {",
 		"let labels = match &found {",
 		"products_item_href(&row.id).unwrap_or_default()",
+		`let choices = references::product_labels(cx, &rows, choices_of(cx, "products")).await;`,
 	} {
 		if !strings.Contains(files["pages.rs"], want) {
 			t.Errorf("pages.rs lacks %q", want)
@@ -180,14 +189,88 @@ func TestReferencesResolveByTheCoreRule(t *testing.T) {
 	}
 }
 
+// TestReferenceFunctionsAreNamedApart builds fixture-console-api with a
+// type named ProductTarget that refers to a product, whose record's labels
+// function, product_target_labels, Product's private one as a target would
+// be: the target's functions take a number instead.
+func TestReferenceFunctionsAreNamedApart(t *testing.T) {
+	dir := consoleCopy(t, func(schema string) string {
+		schema = strings.Replace(schema, "types:\n", "types:\n  ProductTarget:\n    name: ProductTarget\n    role: APIView\n    fields:\n      - name: id\n        typeRef: { name: string }\n        required: true\n      - name: productId\n        typeRef: { name: Identity.UUID }\n        required: true\n        references: { type: Product }\n", 1)
+		return strings.Replace(schema, "operationSets:\n", "operationSets:\n  - name: TargetQueries\n    operations:\n      - name: listTargets\n        typeRef: { name: ProductTarget, isArray: true }\n        required: true\n        httpMethod: GET\n        restPath: targets\n        permissions: [products.read]\n", 1)
+	})
+	root := testpaths.TempDir(t)
+	if _, err := buildDir(t, registry.DefaultNaming(), dir, root, livePagesOutputs(), nil); err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(topcoat.Dir(root, consoleService), "src", "references.rs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	references := string(data)
+	for _, want := range []string{
+		"pub async fn product_target_labels(cx: &Cx, records: &[ProductTargetRecord], choices: Choices) -> Choices {",
+		"async fn product_2_target_labels(cx: &Cx, values: &BTreeSet<String>) -> Vec<Choice> {",
+		"async fn product_2_target_choices(cx: &Cx) -> Option<Vec<Choice>> {",
+		"let labels = product_2_target_labels(cx, &values_at(&json, &sites)).await;",
+	} {
+		if !strings.Contains(references, want) {
+			t.Errorf("references.rs lacks %q", want)
+		}
+	}
+	if n := strings.Count(references, "fn product_target_labels("); n != 1 {
+		t.Errorf("references.rs has %d functions product_target_labels, want 1", n)
+	}
+}
+
+// TestACollectionAtPagerIsNamedApart reads fixture-console-api's pages,
+// whose site pages at the path page have their page_href beside the
+// pager's pager_href, then builds it with them at the path pager, whose
+// <ident>_href would be pager_href: the collection's functions take a
+// number instead.
+func TestACollectionAtPagerIsNamedApart(t *testing.T) {
+	files, _ := readCrate(t, registry.DefaultNaming(), consoleService, livePagesOutputs())
+	for _, want := range []string{"fn page_href() -> Option<String> {", "fn pager_href(base: &str, query: &str) -> String {"} {
+		if n := strings.Count(files["pages.rs"], want); n != 1 {
+			t.Errorf("pages.rs has %q %d times, want once", want, n)
+		}
+	}
+	dir := consoleCopy(t, func(schema string) string {
+		return strings.Replace(schema, "        restPath: page\n", "        restPath: pager\n", 1)
+	})
+	root := testpaths.TempDir(t)
+	if _, err := buildDir(t, registry.DefaultNaming(), dir, root, livePagesOutputs(), nil); err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(topcoat.Dir(root, consoleService), "src", "pages.rs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pages := string(data)
+	for _, want := range []string{
+		"fn pager_2_href() -> Option<String> {",
+		`#[page("/console/pager")]`,
+		`#[shard("/console/_live/pager_2")]`,
+	} {
+		if !strings.Contains(pages, want) {
+			t.Errorf("pages.rs lacks %q", want)
+		}
+	}
+	if n := strings.Count(pages, "fn pager_href("); n != 1 {
+		t.Errorf("pages.rs has %d functions pager_href, want 1", n)
+	}
+}
+
 // TestAReferenceWithoutACallIsIgnored builds fixture-console-api with
-// listProducts behind a provider's signature, so it has no in-process
-// call: every reference to Product, whose options it is, is left out with
-// its reason in the build log, its controls stay as they were, and the
-// crate has no references module.
+// listProducts and listSuppliers behind a provider's signature, so neither
+// has an in-process call: every reference to Product and to Supplier,
+// whose options they are, is left out with its reason in the build log,
+// its controls stay as they were, and the crate has no references module.
 func TestAReferenceWithoutACallIsIgnored(t *testing.T) {
 	dir := consoleCopy(t, func(schema string) string {
-		return strings.Replace(schema, "        restPath: products\n        permissions: [products.read]\n", "        restPath: products\n        permissions: [products.read]\n        hmacVerifiedProvider: stripe\n", 1)
+		for _, path := range []string{"products", "suppliers"} {
+			schema = strings.Replace(schema, "        restPath: "+path+"\n        permissions: [products.read]\n", "        restPath: "+path+"\n        permissions: [products.read]\n        hmacVerifiedProvider: stripe\n", 1)
+		}
+		return schema
 	})
 	root := testpaths.TempDir(t)
 	var log strings.Builder
@@ -198,6 +281,7 @@ func TestAReferenceWithoutACallIsIgnored(t *testing.T) {
 		"topcoat: OrderLine.productId refers to Product, whose options operation ProductQueries.listProducts has no in-process call: its route checks a provider's signature first (@hmacVerified)",
 		"topcoat: OrderInput.giftSku refers to Product, whose options operation ProductQueries.listProducts has no in-process call",
 		"topcoat: order.listOrders(productId) refers to Product, whose options operation ProductQueries.listProducts has no in-process call",
+		"topcoat: Product.supplierId refers to Supplier, whose options operation SupplierQueries.listSuppliers has no in-process call",
 	} {
 		if !strings.Contains(log.String(), want) {
 			t.Errorf("the build log lacks %q:\n%s", want, log.String())
@@ -267,7 +351,7 @@ use schemas_fixture_console_api_topcoat::api::runtime::{ApiError, Authenticator,
 use schemas_fixture_console_api_topcoat::api::{
     types, Implementations, OrderAddLineArgs, OrderGetOrderArgs, OrderImplementation, OrderListOrdersArgs, OrderPlaceOrderArgs,
     ProductGetProductArgs, ProductImplementation, ProductListProductsArgs, ReviewImplementation, ReviewListReviewsArgs,
-    SupplierImplementation, SupplierListSuppliersArgs,
+    SiteImplementation, SiteListPagesArgs, SupplierImplementation, SupplierListSuppliersArgs,
 };
 use schemas_fixture_console_api_topcoat::choices::Choices;
 use schemas_fixture_console_api_topcoat::forms::{order_input_fields, FormErrors, OrderInputForm};
@@ -299,8 +383,10 @@ fn wire(id: &types::IdentityUUID) -> String {
     serde_json::to_value(id).unwrap().as_str().unwrap().to_owned()
 }
 
+// A product, which Acme supplies, or Bolt from C on.
 fn product(id: &str, name: &str) -> types::Product {
-    types::Product { id: uuid(id), name: name.to_owned(), sku: name.to_lowercase(), in_stock: true }
+    let supplier = if name < "C" { "acme" } else { "bolt" };
+    types::Product { id: uuid(id), name: name.to_owned(), sku: name.to_lowercase(), supplier_id: supplier.to_owned(), in_stock: true }
 }
 
 fn line(product: &str, quantity: f64) -> types::OrderLine {
@@ -428,6 +514,14 @@ impl SupplierImplementation for Shop {
 }
 
 #[async_trait]
+impl SiteImplementation for Shop {
+    async fn list_pages(&self, _ctx: RequestContext, args: SiteListPagesArgs) -> Result<Page<types::SitePage>, ApiError> {
+        let rows = [("about", "About us"), ("terms", "Terms")].map(|(slug, title)| types::SitePage { slug: slug.to_owned(), title: title.to_owned() });
+        page_of(rows.to_vec(), &args.page, |page| page.slug.clone())
+    }
+}
+
+#[async_trait]
 impl OrderImplementation for Shop {
     async fn list_orders(&self, _ctx: RequestContext, args: OrderListOrdersArgs) -> Result<Page<types::Order>, ApiError> {
         let terms = search::terms(args.q.as_deref().unwrap_or_default());
@@ -498,6 +592,7 @@ fn implementations(store: &Arc<Store>) -> Implementations {
         order: Arc::new(Shop(Arc::clone(store))),
         product: Arc::new(Shop(Arc::clone(store))),
         review: Arc::new(Shop(Arc::clone(store))),
+        site: Arc::new(Shop(Arc::clone(store))),
         supplier: Arc::new(Shop(Arc::clone(store))),
         authenticator: Arc::new(NoRequests),
     }
@@ -782,6 +877,11 @@ async fn products_link_through_their_reference_and_page_their_reviews() {
     let anvil = wire(&uuid(ANVIL));
     assert!(list.html.contains(&format!(r#"<a href="/console/products/{anvil}">Anvil</a>"#)), "{}", list.html);
     assert!(link(&list.html, "next").is_some(), "{}", list.html);
+    // A product names its supplier, from the suppliers' first page, while
+    // the reviews and the order lines that refer to products name them.
+    assert!(list.html.contains(r#"<td data-field="supplierId">Acme</td>"#), "{}", list.html);
+    let later = get(&app, "/console/products?q=drum", "clerk").await;
+    assert!(later.html.contains(r#"<td data-field="supplierId">Bolt</td>"#), "{}", later.html);
     let searched = get(&app, "/console/products?q=dr", "clerk").await;
     assert!(searched.html.contains(">Drum</a>") && !searched.html.contains(">Anvil</a>"), "{}", searched.html);
 
@@ -789,6 +889,7 @@ async fn products_link_through_their_reference_and_page_their_reviews() {
     // product, and a link to the next page of its list.
     let item = get(&app, &format!("/console/products/{anvil}"), "clerk").await;
     assert_eq!(item.status, StatusCode::OK, "{}", item.html);
+    assert!(item.html.contains("<dd>Acme</dd>"), "{}", item.html);
     let section = between(&item.html, r#"<section class="ss-section" data-resource="reviews">"#, "</section>");
     assert!(section.contains("Sturdy") && section.contains("Heavy") && !section.contains("Sturdy and heavy"), "{section}");
     assert!(section.contains(r#"<td data-field="productId">Anvil</td>"#), "{section}");
@@ -866,5 +967,18 @@ async fn a_paged_list_without_a_filter_renders_no_form_and_its_refusal_alone() {
     assert_eq!(refused.status, StatusCode::BAD_REQUEST, "{}", refused.html);
     assert!(refused.html.contains(r#"<section class="ss-refusal" data-status="400">"#), "{}", refused.html);
     assert!(refused.html.contains("<p>limit: must be at most 2</p>"), "{}", refused.html);
+}
+
+#[tokio::test]
+async fn a_list_at_page_pages_beside_the_pagers_helpers() {
+    let app = app(&Store::new());
+    let first = get(&app, "/console/page", "clerk").await;
+    assert_eq!(first.status, StatusCode::OK, "{}", first.html);
+    assert!(first.html.contains("About us") && !first.html.contains("Terms"), "{}", first.html);
+    let next = link(&first.html, "next").unwrap();
+    assert!(next.starts_with("/console/page?cursor="), "{next}");
+    let second = get(&app, &next, "clerk").await;
+    assert!(second.html.contains("Terms") && !second.html.contains("About us"), "{}", second.html);
+    assert_eq!(link(&second.html, "first").as_deref(), Some("/console/page"), "{}", second.html);
 }
 `

@@ -26,9 +26,10 @@
 {{- if .Pages.Uses "controls" }}
 //!
 //! A page's request meets the route controls (@rateLimit, @bodyLimit,
-//! @timeout) of the operation it is for, as the route's request does,
-//! through the layer `route_controls` adds: a refusal is the route's 429,
-//! with `Retry-After`, 413 or 504, as the pages' refusal.
+//! @timeout) of the operation it is for, as the route's request does, and
+//! the rate limit and timeout of each options operation its references
+//! call, through the layer `route_controls` adds: a refusal is the route's
+//! 429, with `Retry-After`, 413 or 504, as the pages' refusal.
 {{- end }}
 {{- if .Pages.Live }}
 //!
@@ -280,7 +281,7 @@ fn title_or(title: &str, noun: &str) -> String {
 /// A list's query for one of its pages (D60): `pairs`, the filter's and
 /// the limit, then `cursor` when given, each name and value
 /// percent-encoded.
-fn page_query(pairs: &[(String, String)], cursor: Option<&str>) -> String {
+fn pager_query(pairs: &[(String, String)], cursor: Option<&str>) -> String {
     let cursor = cursor.map(|cursor| ("cursor", cursor));
     let mut query = String::new();
     for (name, value) in pairs.iter().map(|(name, value)| (name.as_str(), value.as_str())).chain(cursor) {
@@ -295,7 +296,7 @@ fn page_query(pairs: &[(String, String)], cursor: Option<&str>) -> String {
 }
 
 /// A list's page: its path, then its query unless that is empty.
-fn page_href(base: &str, query: &str) -> String {
+fn pager_href(base: &str, query: &str) -> String {
     if query.is_empty() { base.to_owned() } else { format!("{base}?{query}") }
 }
 {{- end }}
@@ -311,10 +312,10 @@ async fn pager(base: String, first: Option<String>, next: Option<String>) -> top
         if first.is_some() || next.is_some() {
             <nav class="ss-pager" aria-label="Pages">
                 if let Some(first) = first {
-                    <a rel="first" href=(page_href(&base, &first))>"First page"</a>
+                    <a rel="first" href=(pager_href(&base, &first))>"First page"</a>
                 }
                 if let Some(later) = next {
-                    <a rel="next" href=(page_href(&base, &later))>"Next page"</a>
+                    <a rel="next" href=(pager_href(&base, &later))>"Next page"</a>
                 }
             </nav>
         }
@@ -841,10 +842,10 @@ async fn {{ $r.Ident }}_list(cx: &Cx{{ declareAfter $r.ColParams "String" }}{{ i
     // the next page's while one follows, each with the query's {{ if $r.Filters }}filter and {{ end }}limit.
     let base = {{ $r.BaseExpr }};
     let pairs = filter.query_pairs();
-    let first_page = filter.cursor.is_some().then(|| page_query(&pairs, None));
+    let first_page = filter.cursor.is_some().then(|| pager_query(&pairs, None));
     let (listed, next_page) = match listed {
         Ok(page) => {
-            let next_page = page.next.map(|next| page_query(&pairs, Some(next.as_str())));
+            let next_page = page.next.map(|next| pager_query(&pairs, Some(next.as_str())));
             (Ok(page.items), next_page)
         }
         Err(refusal) => (Err(refusal), None),
@@ -900,7 +901,7 @@ async fn {{ $r.Ident }}_list(cx: &Cx{{ declareAfter $r.ColParams "String" }}{{ i
         if first_page.is_some() || next_page.is_some() {
             <nav class="ss-pager" aria-label="Pages">
                 if let Some(first) = first_page {
-                    let href = page_href(&base, &first);
+                    let href = pager_href(&base, &first);
                     <a rel="first" href=(href.clone()) @click=$(|e: Event| {
                         e.prevent_default();
                         raw!("history.replaceState(history.state, '', ${href});", ());
@@ -908,7 +909,7 @@ async fn {{ $r.Ident }}_list(cx: &Cx{{ declareAfter $r.ColParams "String" }}{{ i
                     })>"First page"</a>
                 }
                 if let Some(later) = next_page {
-                    let href = page_href(&base, &later);
+                    let href = pager_href(&base, &later);
                     <a rel="next" href=(href.clone()) @click=$(|e: Event| {
                         e.prevent_default();
                         raw!("history.replaceState(history.state, '', ${href});", ());
@@ -956,7 +957,7 @@ async fn {{ .Ident }}_section(cx: &Cx, {{ declare .ColParams "String" }}) -> top
     };
 {{- if .Paged }}
     let next_page = match &listed {
-        Some(Ok(page)) => page.next.as_ref().map(|next| page_query(&[], Some(next.as_str()))),
+        Some(Ok(page)) => page.next.as_ref().map(|next| pager_query(&[], Some(next.as_str()))),
         _ => None,
     };
     let listed = listed.map(|listed| listed.map(|page| page.items));
@@ -1277,8 +1278,9 @@ pub async fn {{ $r.Ident }}_{{ .Field }}_page(cx: &Cx, Form(form): Form<{{ .ArgF
 {{- if .Pages.Uses "controls" }}
 
 /// Adds the layer that applies, to each page's request, the traffic
-/// controls of the operation the page is for (@rateLimit, @bodyLimit,
-/// @timeout). `{{ .SetupMethod }}` calls it.
+/// controls (@rateLimit, @bodyLimit, @timeout) of the operation the page is
+/// for and of the options operations its references call (D61).
+/// `{{ .SetupMethod }}` calls it.
 pub(crate) fn route_controls(router: RouterBuilder) -> RouterBuilder {
     router.layer(PageControls {
         controls: vec![
@@ -1288,7 +1290,7 @@ pub(crate) fn route_controls(router: RouterBuilder) -> RouterBuilder {
         ],
         pages: vec![
 {{- range .Pages.Controlled }}
-            (Method::{{ .Method }}, {{ rustString .Path }}, {{ .At }}),
+            (Method::{{ .Method }}, {{ rustString .Path }}, {{ .OwnExpr }}, {{ .CalledExpr }}),
 {{- end }}
         ],
     })
@@ -1339,24 +1341,25 @@ impl Controls {
 {{- end }}
 }
 
-/// Each page, by its method and the path it is registered at, whose
-/// operation's route has a traffic control, and the controls of each such
-/// operation, which every page that calls it shares.
+/// The controls of each operation a page calls whose route has one, which
+/// every page that calls the operation shares, and each page that meets
+/// one, by its method and the path it is registered at: the place of its
+/// operation's controls, none when its route has none, and those of the
+/// options operations its references call (D61).
 struct PageControls {
     controls: Vec<Controls>,
-    pages: Vec<(Method, &'static str, usize)>,
+    pages: Vec<(Method, &'static str, Option<usize>, &'static [usize])>,
 }
 
 impl PageControls {
-    /// The controls of the page the request is for, a HEAD's those of its
-    /// GET; none for a page whose operation's route has none.
-    fn of(&self, cx: &Cx) -> Option<&Controls> {
+    /// The controls the page the request is for meets, a HEAD's those of
+    /// its GET: its operation's, and those of the operations its references
+    /// call; none for a page that meets none.
+    fn of(&self, cx: &Cx) -> Option<(Option<&Controls>, Vec<&Controls>)> {
         let path = try_endpoint(cx)?.path().as_str();
         let method = if *method(cx) == Method::HEAD { Method::GET } else { method(cx).clone() };
-        self.pages
-            .iter()
-            .find(|(on, at, _)| *on == method && *at == path)
-            .map(|&(_, _, controls)| &self.controls[controls])
+        let &(_, _, own, called) = self.pages.iter().find(|(on, at, _, _)| *on == method && *at == path)?;
+        Some((own.map(|own| &self.controls[own]), called.iter().map(|&at| &self.controls[at]).collect()))
     }
 }
 
@@ -1367,10 +1370,15 @@ impl Layer for PageControls {
 
     fn handle<'a>(&'a self, cx: &'a Cx, body: Body, next: Next<'a>) -> LayerFuture<'a> {
         Box::pin(async move {
-            let Some(controls) = self.of(cx) else {
+            let Some((own, called)) = self.of(cx) else {
                 return next.run(cx, body).await;
             };
-            if let Some(limiter) = &controls.rate_limit {
+            // Each operation's limiter counts the request, the page's own
+            // first, as each route would count its call; the page's own
+            // operation bounds its body, which no other call carries; and
+            // the tightest timeout covers the page.
+            let every = || own.into_iter().chain(called.iter().copied());
+            for limiter in every().filter_map(|controls| controls.rate_limit.as_ref()) {
                 let client = client_ip(cx).map_or_else(|| "unknown".to_owned(), |ip| ip.to_string());
                 if let Err(retry_after) = limiter.take(&client) {
                     let mut response = control_refusal(&ApiError::too_many_requests("Too Many Requests"));
@@ -1380,7 +1388,7 @@ impl Layer for PageControls {
             }
             // The body is read up to the limit before the page decodes its
             // form: one that declares more, or sends more, is refused.
-            let (body, extractor_limit) = match &controls.body_limit {
+            let (body, extractor_limit) = match own.and_then(|controls| controls.body_limit.as_ref()) {
                 Some((limit, extractor_limit)) => {
                     let too_large = || ApiError::payload_too_large("Request body exceeds the accepted size");
                     let declared = headers(cx)
@@ -1404,7 +1412,7 @@ impl Layer for PageControls {
                     None => next.run(cx, body).await,
                 }
             };
-            match controls.timeout {
+            match every().filter_map(|controls| controls.timeout).min() {
                 Some(timeout) => match tokio::time::timeout(timeout, page).await {
                     Ok(response) => response,
                     Err(_) => Ok(control_refusal(&ApiError::gateway_timeout("Gateway Timeout"))),

@@ -1,16 +1,20 @@
 # A shop's console: products, listed a page at a time and searched, each
-# read by an id that refers to it, with its reviews, listed a page at a
-# time under it; suppliers, listed a page at a time with no filter; and
-# orders, listed a page at a time, filtered by status and by a product and
-# searched, read, placed from lines that each refer to a product, gifted a
-# product named by its sku, and given another line from the order's page.
+# read by an id that refers to it and naming its supplier, with its
+# reviews, listed a page at a time under it; suppliers, listed a page at a
+# time with no filter; orders, listed a page at a time, filtered by status
+# and by a product and searched, read, placed from lines that each refer
+# to a product, gifted a product named by its sku, and given another line
+# from the order's page; and the site's pages, listed a page at a time at
+# the path page, whose functions are named page_*, as the pager's are not.
 #
-# listProducts is every reference's options operation, since it is the
-# one GET that lists Product, and ids its lookup, the optional list query
-# argument that refers to Product by the same value. A reference by sku,
-# which no lookup refers by, is named from the options' first page.
-# Reading products needs products.read, reading orders orders.read and
-# changing one orders.write.
+# listProducts is the options operation of every reference to Product,
+# since it is the one GET that lists Product, and ids its lookup, the
+# optional list query argument that refers to Product by the same value.
+# A reference by sku, which no lookup refers by, is named from the
+# options' first page. A product refers to its supplier in turn, which
+# listSuppliers names from its first page: the target of a reference that
+# shows one itself. Reading products needs products.read, reading orders
+# orders.read and changing one orders.write.
 name: fixture-console-api
 kind: API
 scalars:
@@ -37,7 +41,7 @@ types:
       noun: Product
       plural: Products
       titleField: name
-      summaryFields: [name, sku, inStock]
+      summaryFields: [name, sku, supplierId, inStock]
     fields:
       - name: id
         typeRef: { name: Identity.UUID }
@@ -48,6 +52,12 @@ types:
       - name: sku
         typeRef: { name: string }
         required: true
+      # Who supplies it, named by the supplier's name.
+      - name: supplierId
+        title: Supplier
+        typeRef: { name: string }
+        required: true
+        references: { type: Supplier }
       - name: inStock
         title: In stock
         typeRef: { name: boolean }
@@ -89,6 +99,21 @@ types:
         typeRef: { name: string }
         required: true
       - name: name
+        typeRef: { name: string }
+        required: true
+  # A page of the shop's site, its about or its terms.
+  SitePage:
+    name: SitePage
+    role: APIView
+    display:
+      noun: Page
+      plural: Pages
+      titleField: title
+    fields:
+      - name: slug
+        typeRef: { name: string }
+        required: true
+      - name: title
         typeRef: { name: string }
         required: true
   # One line of an order: a product and how many of it.
@@ -211,6 +236,18 @@ operationSets:
         required: true
         httpMethod: GET
         restPath: suppliers
+        permissions: [products.read]
+        page: { defaultLimit: 1, maxLimit: 2 }
+  - name: SiteQueries
+    operations:
+      # The site's pages, one to a page unless the caller asks for two, at
+      # the path page: a paged list whose collection's functions are
+      # page_href and the rest, beside the pager's pager_href.
+      - name: listPages
+        typeRef: { name: SitePage, isArray: true }
+        required: true
+        httpMethod: GET
+        restPath: page
         permissions: [products.read]
         page: { defaultLimit: 1, maxLimit: 2 }
   - name: ReviewQueries

@@ -199,6 +199,7 @@ pub struct ProductRecord {
     pub id: String,
     pub name: String,
     pub sku: String,
+    pub supplier_id: String,
     pub in_stock: bool,
 }
 
@@ -209,6 +210,7 @@ impl ProductRecord {
             id: wire::string(&json["id"]),
             name: wire::string(&json["name"]),
             sku: wire::string(&json["sku"]),
+            supplier_id: wire::string(&json["supplierId"]),
             in_stock: wire::boolean(&json["inStock"]),
         }
     }
@@ -219,6 +221,7 @@ impl ProductRecord {
         json.insert("id".to_owned(), wire::put_string(&self.id));
         json.insert("name".to_owned(), wire::put_string(&self.name));
         json.insert("sku".to_owned(), wire::put_string(&self.sku));
+        json.insert("supplierId".to_owned(), wire::put_string(&self.supplier_id));
         json.insert("inStock".to_owned(), wire::put_boolean(&self.in_stock));
         serde_json::Value::Object(json)
     }
@@ -276,6 +279,44 @@ impl From<&types::Review> for ReviewRecord {
 
 impl From<types::Review> for ReviewRecord {
     fn from(value: types::Review) -> Self {
+        Self::from(&value)
+    }
+}
+
+/// The record of `types::SitePage`.
+#[record]
+#[derive(Debug, Clone, PartialEq)]
+pub struct SitePageRecord {
+    pub slug: String,
+    pub title: String,
+}
+
+impl SitePageRecord {
+    /// The record of the type's JSON, as the API sends it.
+    pub fn from_wire(json: &serde_json::Value) -> Self {
+        Self {
+            slug: wire::string(&json["slug"]),
+            title: wire::string(&json["title"]),
+        }
+    }
+
+    /// The type's JSON, as a request carries it.
+    pub fn to_wire(&self) -> serde_json::Value {
+        let mut json = serde_json::Map::new();
+        json.insert("slug".to_owned(), wire::put_string(&self.slug));
+        json.insert("title".to_owned(), wire::put_string(&self.title));
+        serde_json::Value::Object(json)
+    }
+}
+
+impl From<&types::SitePage> for SitePageRecord {
+    fn from(value: &types::SitePage) -> Self {
+        Self::from_wire(&serde_json::to_value(value).unwrap_or_default())
+    }
+}
+
+impl From<types::SitePage> for SitePageRecord {
+    fn from(value: types::SitePage) -> Self {
         Self::from(&value)
     }
 }
@@ -434,6 +475,46 @@ impl From<&runtime::page::Page<types::Review>> for ReviewPageRecord {
 
 impl From<runtime::page::Page<types::Review>> for ReviewPageRecord {
     fn from(page: runtime::page::Page<types::Review>) -> Self {
+        Self::from(&page)
+    }
+}
+
+/// A page of `SitePage`, as a paged operation returns it (D60): its
+/// items, and the cursor of the next page, which a caller sends back as
+/// `cursor`; none after the last page.
+#[record]
+#[derive(Debug, Clone, PartialEq)]
+pub struct SitePagePageRecord {
+    pub items: Vec<SitePageRecord>,
+    pub next: Option<String>,
+}
+
+impl SitePagePageRecord {
+    /// The record of the page's JSON, `{items, next}`, as the API sends it.
+    pub fn from_wire(json: &serde_json::Value) -> Self {
+        Self {
+            items: wire::list(&json["items"], SitePageRecord::from_wire),
+            next: wire::optional(&json["next"], wire::string),
+        }
+    }
+
+    /// The page's JSON, its `next` null after the last page.
+    pub fn to_wire(&self) -> serde_json::Value {
+        let mut json = serde_json::Map::new();
+        json.insert("items".to_owned(), wire::put_list(&self.items, SitePageRecord::to_wire));
+        json.insert("next".to_owned(), self.next.as_ref().map_or(serde_json::Value::Null, wire::put_string));
+        serde_json::Value::Object(json)
+    }
+}
+
+impl From<&runtime::page::Page<types::SitePage>> for SitePagePageRecord {
+    fn from(page: &runtime::page::Page<types::SitePage>) -> Self {
+        Self::from_wire(&serde_json::to_value(page).unwrap_or_default())
+    }
+}
+
+impl From<runtime::page::Page<types::SitePage>> for SitePagePageRecord {
+    fn from(page: runtime::page::Page<types::SitePage>) -> Self {
         Self::from(&page)
     }
 }

@@ -40,6 +40,8 @@ type refOptions struct {
 	ArgsName string
 	Nones    []string
 	Paged    bool
+	// controls are its route's, which a page that calls it meets.
+	controls routeControls
 }
 
 // refLookup is an options operation's lookup argument, the list query
@@ -71,7 +73,9 @@ func (l *refLookup) ChunkExpr() string {
 // the field its value holds, the field that labels an item, and the
 // options and lookup operations.
 type refSource struct {
-	Base   string // item_view, the stem of its functions
+	// Base is the stem of its private functions, <Base>_target_choices
+	// and <Base>_target_labels: item_view.
+	Base   string
 	Target string // ItemView
 	Value  string // id
 	// Label is the field that names an item, empty when none does and an
@@ -508,6 +512,7 @@ func (b *refBuilder) optionsOf(d declared) *refOptions {
 		Operation: e.Namespace + "." + e.Name,
 		Snake:     e.SnakeName(),
 		Paged:     e.Page != nil,
+		controls:  controlsOf(e),
 	}
 	if e.HasArgs() {
 		o.ArgsName = e.ArgsName
@@ -553,11 +558,33 @@ func (b *refBuilder) lookupOf(d declared, options *refOptions, arg *ir.ArgumentD
 	return l
 }
 
-// finish names each source's functions after its target, the value and
-// the label when they are not the default, and a number when two still
-// share a name, in the order of their keys.
+// finish names each source's functions after its target and its value
+// when it is not the default, and a number when two still share a name,
+// in the order of their keys. A source's functions are
+// <Base>_target_choices and <Base>_target_labels, apart from a form's
+// <form>_choices and a record's <record>_labels, which a target's own
+// record has too when it shows a reference itself (Product, whose
+// supplier it names, and the order lines that name products); a stem
+// whose functions would still be one of the module's others takes a
+// number.
 func (b *refBuilder) finish() {
+	module := map[string]bool{}
+	for _, f := range b.m.Forms {
+		module[f.Fn] = true
+	}
+	for _, r := range b.m.Records {
+		module[r.Fn] = true
+	}
+	for _, o := range b.m.Options {
+		module[o.Fn] = true
+	}
+	for _, l := range b.m.Lookups {
+		module[l.Fn] = true
+	}
 	taken := map[string]bool{}
+	clashes := func(name string) bool {
+		return taken[name] || module[name+"_target_choices"] || module[name+"_target_labels"]
+	}
 	for _, key := range sortedKeys(b.sources) {
 		s := b.sources[key]
 		base := componentName(s.Target)
@@ -565,7 +592,7 @@ func (b *refBuilder) finish() {
 			base += "_by_" + snakeWord(s.Value)
 		}
 		name := base
-		for i := 2; taken[name]; i++ {
+		for i := 2; clashes(name); i++ {
 			name = fmt.Sprintf("%s_%d", base, i)
 		}
 		taken[name] = true
@@ -610,6 +637,39 @@ func (m *referencesModel) FormChoices(form string) string {
 		}
 	}
 	return ""
+}
+
+// OptionsCalledBy are the options operations a form's choices function or
+// a record's labels function, fn, calls, listing their targets or looking
+// them up, once each in the order of its sites; none for an empty fn.
+func (m *referencesModel) OptionsCalledBy(fn string) []*refOptions {
+	if m == nil || fn == "" {
+		return nil
+	}
+	var sources []*refSource
+	for _, f := range m.Forms {
+		if f.Fn == fn {
+			for _, site := range f.Sites {
+				sources = append(sources, site.Source)
+			}
+		}
+	}
+	for _, r := range m.Records {
+		if r.Fn == fn {
+			for _, g := range r.Groups {
+				sources = append(sources, g.Source)
+			}
+		}
+	}
+	var called []*refOptions
+	seen := map[*refOptions]bool{}
+	for _, s := range sources {
+		if !seen[s.Options] {
+			seen[s.Options] = true
+			called = append(called, s.Options)
+		}
+	}
+	return called
 }
 
 // RecordLabels is the labels function of the record named record, or

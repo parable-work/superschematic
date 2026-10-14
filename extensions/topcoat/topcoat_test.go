@@ -2094,6 +2094,12 @@ impl StockImplementation for Shop {
     async fn release_reservation(&self, _ctx: RequestContext, args: StockReleaseReservationArgs) -> Result<types::Reservation, ApiError> {
         Ok(types::Reservation { id: args.id, held: false })
     }
+    async fn list_warehouses(&self, _ctx: RequestContext) -> Result<Vec<types::Warehouse>, ApiError> {
+        Ok(vec![types::Warehouse { id: "n".to_string(), name: "North".to_string() }])
+    }
+    async fn list_shipments(&self, _ctx: RequestContext) -> Result<Vec<types::Shipment>, ApiError> {
+        Ok(vec![types::Shipment { id: "1".to_string(), warehouse_id: "n".to_string() }])
+    }
 }
 
 #[async_trait]

@@ -110,6 +110,18 @@ pub async fn review_list_reviews(cx: &Cx, args: crate::api::ReviewListReviewsArg
         .await
 }
 
+/// site.listPages (`GET /api/page`): The site's pages, one to a page unless the caller asks for two, at
+pub async fn site_list_pages(cx: &Cx, args: crate::api::SiteListPagesArgs) -> Result<runtime::page::Page<types::SitePage>, ApiError> {
+    let caller = can_site_list_pages(cx).await?;
+    args.check()?;
+    let setup: &Setup = app_context(cx);
+    setup
+        .implementations
+        .site
+        .list_pages(operations::SITE_LIST_PAGES.context(caller), args)
+        .await
+}
+
 /// supplier.listSuppliers (`GET /api/suppliers`): The suppliers, by name, one to a page unless the caller asks for
 pub async fn supplier_list_suppliers(cx: &Cx, args: crate::api::SupplierListSuppliersArgs) -> Result<runtime::page::Page<types::Supplier>, ApiError> {
     let caller = can_supplier_list_suppliers(cx).await?;
@@ -162,6 +174,12 @@ pub async fn can_product_get_product(cx: &Cx) -> Result<Option<Principal>, ApiEr
 /// without one of products.read. The caller, for the implementation.
 pub async fn can_review_list_reviews(cx: &Cx) -> Result<Option<Principal>, ApiError> {
     crate::admit(cx, &operations::REVIEW_LIST_REVIEWS).await
+}
+
+/// Admits the caller of site.listPages as its route does: 401 without one, 403
+/// without one of products.read. The caller, for the implementation.
+pub async fn can_site_list_pages(cx: &Cx) -> Result<Option<Principal>, ApiError> {
+    crate::admit(cx, &operations::SITE_LIST_PAGES).await
 }
 
 /// Admits the caller of supplier.listSuppliers as its route does: 401 without one, 403

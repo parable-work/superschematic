@@ -133,6 +133,11 @@ pub(crate) fn route_controls(router: RouterBuilder) -> RouterBuilder {
                 .body_limit_megabytes(1)
                 .timeout_seconds(1),
         )
+        .layer(
+            ProcedureControls::new("/_superschematic/fixture-controls-api/stock/list-warehouses", refusal::<Vec<WarehouseRecord>>)
+                .rate_limit(2)
+                .timeout_seconds(1),
+        )
 }
 
 /// The traffic controls of a procedure's route, which a call meets as the
@@ -358,6 +363,19 @@ pub async fn call_order_hold_order(cx: &Cx, args: OrderHoldOrderArgsRecord) -> R
     Ok(OrderViewRecord::from_wire(&json))
 }
 
+/// stock.listShipments, called from the browser.
+#[procedure("/_superschematic/fixture-controls-api/stock/list-shipments")]
+pub async fn stock_list_shipments(cx: &Cx) -> topcoat::Result<Result<Vec<ShipmentRecord>, ProblemRecord>> {
+    Ok(call_stock_list_shipments(cx).await)
+}
+
+/// The body of the stock_list_shipments procedure.
+pub async fn call_stock_list_shipments(cx: &Cx) -> Result<Vec<ShipmentRecord>, ProblemRecord> {
+    let value = operations::stock_list_shipments(cx).await?;
+    let json = serde_json::to_value(&value).unwrap_or_default();
+    Ok(wire::list(&json, ShipmentRecord::from_wire))
+}
+
 /// The arguments of stock.releaseReservation, as browser code builds them.
 #[record]
 #[derive(Debug, Clone, PartialEq)]
@@ -387,4 +405,17 @@ pub async fn call_stock_release_reservation(cx: &Cx, args: StockReleaseReservati
     let value = operations::stock_release_reservation(cx, args).await?;
     let json = serde_json::to_value(&value).unwrap_or_default();
     Ok(ReservationRecord::from_wire(&json))
+}
+
+/// stock.listWarehouses, called from the browser.
+#[procedure("/_superschematic/fixture-controls-api/stock/list-warehouses")]
+pub async fn stock_list_warehouses(cx: &Cx) -> topcoat::Result<Result<Vec<WarehouseRecord>, ProblemRecord>> {
+    Ok(call_stock_list_warehouses(cx).await)
+}
+
+/// The body of the stock_list_warehouses procedure.
+pub async fn call_stock_list_warehouses(cx: &Cx) -> Result<Vec<WarehouseRecord>, ProblemRecord> {
+    let value = operations::stock_list_warehouses(cx).await?;
+    let json = serde_json::to_value(&value).unwrap_or_default();
+    Ok(wire::list(&json, WarehouseRecord::from_wire))
 }

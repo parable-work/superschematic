@@ -12,26 +12,30 @@
 //! up to its maxLimit when it pages, from one call a request; when more
 //! follow, a select would hide them, and the control stays as it is. A
 //! record's labels come through the options operation's lookup, the list
-//! argument that narrows it to the values given, in chunks of the
-//! argument's listMax, at most `MAX_LOOKUP_CALLS` calls for one target;
-//! without a lookup, from the options' first page. A caller the operation
-//! refuses (401, 403), or whose call fails, gets the plain control and the
-//! values as they are, and the page does not fail. The calls are kept for
-//! the request (`#[memoize]`), and for no other: labels change, and callers
-//! differ.
+//! argument that narrows it to the values given, in chunks of the lesser
+//! of the argument's listMax and, when the operation pages, its maxLimit,
+//! at most `MAX_LOOKUP_CALLS` calls for one target in a `<record>_labels`
+//! call; without a lookup, from the options' first page.
+//! The console's pages meet the route controls of each options operation
+//! their forms and records call, as they meet their own operation's. A
+//! caller the operation refuses (401, 403), or whose call fails, gets the
+//! plain control and the values as they are, and the page does not fail.
+//! The calls are kept for the request (`#[memoize]`), and for no other:
+//! labels change, and callers differ.
 
 use std::collections::BTreeSet;
 
 use crate::api::runtime::page::PageRequest;
 use crate::choices::{Choice, Choices};
 use crate::operations;
-use crate::records::{OrderInputRecord, OrderLineInputRecord, OrderLineRecord, OrderRecord, ReviewRecord};
+use crate::records::{OrderInputRecord, OrderLineInputRecord, OrderLineRecord, OrderRecord, ProductRecord, ReviewRecord};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 use topcoat::context::{Cx, memoize};
 
-/// The most calls one target's lookup makes to name a render's values; a
-/// value past them shows as it is.
+/// The most calls one target's lookup makes for one `<record>_labels`
+/// call, which names the values of the records it is given; a value past
+/// them shows as it is.
 pub const MAX_LOOKUP_CALLS: usize = 10;
 
 /// A place a record shows a reference: its path, as `Choices` names it, and
@@ -150,6 +154,19 @@ async fn product_list_products_options(cx: &Cx) -> Option<Listed> {
     Some(Listed { items: json_of(&page.items), more: page.next.is_some() })
 }
 
+/// supplier.listSuppliers as the caller lists it, kept for the request
+/// (`#[memoize]`): its first page of up to its maxLimit items, as JSON, and
+/// whether more follow. None when the caller may not call it (401, 403) or the
+/// call fails.
+#[memoize(as_ref)]
+async fn supplier_list_suppliers_options(cx: &Cx) -> Option<Listed> {
+    let args = crate::api::SupplierListSuppliersArgs {
+        page: PageRequest::first(crate::api::SupplierListSuppliersArgs::PAGE.max_limit()),
+    };
+    let page = operations::supplier_list_suppliers(cx, args).await.ok()?;
+    Some(Listed { items: json_of(&page.items), more: page.next.is_some() })
+}
+
 /// product.listProducts narrowed by its lookup, `ids`, to `values`, its items
 /// as JSON, kept for the request (`#[memoize]`). None when no value decodes as
 /// the argument's, or the caller may not call it, or the call fails.
@@ -168,7 +185,7 @@ async fn product_list_products_by_ids(cx: &Cx, values: &[String]) -> Option<Vec<
 /// Product's items as options, each by its id and named by its name: the first
 /// page of product.listProducts, when it holds them all; none when the caller
 /// may not list them, or more follow, which a select would hide.
-async fn product_choices(cx: &Cx) -> Option<Vec<Choice>> {
+async fn product_target_choices(cx: &Cx) -> Option<Vec<Choice>> {
     let listed = product_list_products_options(cx).await?;
     (!listed.more).then(|| choices_of(&listed.items, "id", Some("name")))
 }
@@ -176,7 +193,7 @@ async fn product_choices(cx: &Cx) -> Option<Vec<Choice>> {
 /// The labels of Product's `values`, by its id: through product.listProducts's
 /// lookup, `ids`, in chunks of 5 values, at most `MAX_LOOKUP_CALLS` calls. A
 /// value no item has is left out.
-async fn product_labels(cx: &Cx, values: &BTreeSet<String>) -> Vec<Choice> {
+async fn product_target_labels(cx: &Cx, values: &BTreeSet<String>) -> Vec<Choice> {
     let values: Vec<String> = values.iter().cloned().collect();
     let mut out = Vec::new();
     for chunk in values.chunks(5).take(MAX_LOOKUP_CALLS) {
@@ -190,7 +207,7 @@ async fn product_labels(cx: &Cx, values: &BTreeSet<String>) -> Vec<Choice> {
 /// Product's items as options, each by its sku and named by its name: the first
 /// page of product.listProducts, when it holds them all; none when the caller
 /// may not list them, or more follow, which a select would hide.
-async fn product_by_sku_choices(cx: &Cx) -> Option<Vec<Choice>> {
+async fn product_by_sku_target_choices(cx: &Cx) -> Option<Vec<Choice>> {
     let listed = product_list_products_options(cx).await?;
     (!listed.more).then(|| choices_of(&listed.items, "sku", Some("name")))
 }
@@ -198,7 +215,7 @@ async fn product_by_sku_choices(cx: &Cx) -> Option<Vec<Choice>> {
 /// The labels of Product's `values`, by its sku: the items of the first page of
 /// product.listProducts that hold them, since it has no lookup. A value no item
 /// there has is left out.
-async fn product_by_sku_labels(cx: &Cx, values: &BTreeSet<String>) -> Vec<Choice> {
+async fn product_by_sku_target_labels(cx: &Cx, values: &BTreeSet<String>) -> Vec<Choice> {
     if values.is_empty() {
         return Vec::new();
     }
@@ -210,6 +227,21 @@ async fn product_by_sku_labels(cx: &Cx, values: &BTreeSet<String>) -> Vec<Choice
     out
 }
 
+/// The labels of Supplier's `values`, by its id: the items of the first page of
+/// supplier.listSuppliers that hold them, since it has no lookup. A value no
+/// item there has is left out.
+async fn supplier_target_labels(cx: &Cx, values: &BTreeSet<String>) -> Vec<Choice> {
+    if values.is_empty() {
+        return Vec::new();
+    }
+    let Some(listed) = supplier_list_suppliers_options(cx).await else {
+        return Vec::new();
+    };
+    let mut out = choices_of(&listed.items, "id", Some("name"));
+    out.retain(|choice| values.contains(&choice.value));
+    out
+}
+
 /// The options of each control of `OrderAddLineArgsForm` that refers to an
 /// item, by its path, under `choices`, the app's, which win where they name the
 /// control: `productId` (Product). A control keeps its own when the caller may
@@ -217,7 +249,7 @@ async fn product_by_sku_labels(cx: &Cx, values: &BTreeSet<String>) -> Vec<Choice
 pub async fn order_add_line_args_form_choices(cx: &Cx, choices: Choices) -> Choices {
     let mut found = Choices::new();
     if !named(&choices, "productId")
-        && let Some(options) = product_choices(cx).await
+        && let Some(options) = product_target_choices(cx).await
     {
         found = found.with("productId", pairs(&options));
     }
@@ -231,12 +263,12 @@ pub async fn order_add_line_args_form_choices(cx: &Cx, choices: Choices) -> Choi
 pub async fn order_input_form_choices(cx: &Cx, choices: Choices) -> Choices {
     let mut found = Choices::new();
     if !named(&choices, "lines.productId")
-        && let Some(options) = product_choices(cx).await
+        && let Some(options) = product_target_choices(cx).await
     {
         found = found.with("lines.productId", pairs(&options));
     }
     if !named(&choices, "giftSku")
-        && let Some(options) = product_by_sku_choices(cx).await
+        && let Some(options) = product_by_sku_target_choices(cx).await
     {
         found = found.with("giftSku", pairs(&options));
     }
@@ -250,7 +282,7 @@ pub async fn order_input_form_choices(cx: &Cx, choices: Choices) -> Choices {
 pub async fn order_list_orders_args_form_choices(cx: &Cx, choices: Choices) -> Choices {
     let mut found = Choices::new();
     if !named(&choices, "productId")
-        && let Some(options) = product_choices(cx).await
+        && let Some(options) = product_target_choices(cx).await
     {
         found = found.with("productId", pairs(&options));
     }
@@ -264,7 +296,7 @@ pub async fn order_list_orders_args_form_choices(cx: &Cx, choices: Choices) -> C
 pub async fn product_list_products_args_form_choices(cx: &Cx, choices: Choices) -> Choices {
     let mut found = Choices::new();
     if !named(&choices, "ids")
-        && let Some(options) = product_choices(cx).await
+        && let Some(options) = product_target_choices(cx).await
     {
         found = found.with("ids", pairs(&options));
     }
@@ -281,14 +313,14 @@ pub async fn order_input_labels(cx: &Cx, records: &[OrderInputRecord], choices: 
     let mut found = Choices::new();
     let sites = unnamed(&choices, &[("lines.productId", &["lines", "productId"])]);
     if !sites.is_empty() {
-        let labels = product_labels(cx, &values_at(&json, &sites)).await;
+        let labels = product_target_labels(cx, &values_at(&json, &sites)).await;
         for (path, _) in sites {
             found = found.with(path, pairs(&labels));
         }
     }
     let sites = unnamed(&choices, &[("giftSku", &["giftSku"])]);
     if !sites.is_empty() {
-        let labels = product_by_sku_labels(cx, &values_at(&json, &sites)).await;
+        let labels = product_by_sku_target_labels(cx, &values_at(&json, &sites)).await;
         for (path, _) in sites {
             found = found.with(path, pairs(&labels));
         }
@@ -306,14 +338,14 @@ pub async fn order_labels(cx: &Cx, records: &[OrderRecord], choices: Choices) ->
     let mut found = Choices::new();
     let sites = unnamed(&choices, &[("giftSku", &["giftSku"])]);
     if !sites.is_empty() {
-        let labels = product_by_sku_labels(cx, &values_at(&json, &sites)).await;
+        let labels = product_by_sku_target_labels(cx, &values_at(&json, &sites)).await;
         for (path, _) in sites {
             found = found.with(path, pairs(&labels));
         }
     }
     let sites = unnamed(&choices, &[("lines.productId", &["lines", "productId"])]);
     if !sites.is_empty() {
-        let labels = product_labels(cx, &values_at(&json, &sites)).await;
+        let labels = product_target_labels(cx, &values_at(&json, &sites)).await;
         for (path, _) in sites {
             found = found.with(path, pairs(&labels));
         }
@@ -331,7 +363,7 @@ pub async fn order_line_input_labels(cx: &Cx, records: &[OrderLineInputRecord], 
     let mut found = Choices::new();
     let sites = unnamed(&choices, &[("productId", &["productId"])]);
     if !sites.is_empty() {
-        let labels = product_labels(cx, &values_at(&json, &sites)).await;
+        let labels = product_target_labels(cx, &values_at(&json, &sites)).await;
         for (path, _) in sites {
             found = found.with(path, pairs(&labels));
         }
@@ -349,7 +381,25 @@ pub async fn order_line_labels(cx: &Cx, records: &[OrderLineRecord], choices: Ch
     let mut found = Choices::new();
     let sites = unnamed(&choices, &[("productId", &["productId"])]);
     if !sites.is_empty() {
-        let labels = product_labels(cx, &values_at(&json, &sites)).await;
+        let labels = product_target_labels(cx, &values_at(&json, &sites)).await;
+        for (path, _) in sites {
+            found = found.with(path, pairs(&labels));
+        }
+    }
+    choices.or(found)
+}
+
+/// The labels of the values `ProductRecord`s show that refer to an item, by
+/// their paths, under `choices`, the app's, which win where they name the
+/// field: `supplierId` (Supplier). One lookup a target, for every record's
+/// values; a value no item has, or that the caller may not list, shows as it
+/// is.
+pub async fn product_labels(cx: &Cx, records: &[ProductRecord], choices: Choices) -> Choices {
+    let json: Vec<Value> = records.iter().map(ProductRecord::to_wire).collect();
+    let mut found = Choices::new();
+    let sites = unnamed(&choices, &[("supplierId", &["supplierId"])]);
+    if !sites.is_empty() {
+        let labels = supplier_target_labels(cx, &values_at(&json, &sites)).await;
         for (path, _) in sites {
             found = found.with(path, pairs(&labels));
         }
@@ -367,7 +417,7 @@ pub async fn review_labels(cx: &Cx, records: &[ReviewRecord], choices: Choices) 
     let mut found = Choices::new();
     let sites = unnamed(&choices, &[("productId", &["productId"])]);
     if !sites.is_empty() {
-        let labels = product_labels(cx, &values_at(&json, &sites)).await;
+        let labels = product_target_labels(cx, &values_at(&json, &sites)).await;
         for (path, _) in sites {
             found = found.with(path, pairs(&labels));
         }

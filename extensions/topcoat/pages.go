@@ -71,22 +71,44 @@ type pagesModel struct {
 	Tree string
 	// LeftOut are the operations without a page, and why.
 	LeftOut []leftOut
-	// Controls are the route controls of each operation a page is for
-	// whose route has one, and Controlled each such page's method, path
-	// and its operation's place in Controls.
+	// Controls are the route controls of each operation a page calls
+	// whose route has one: the operation it is for, and the options
+	// operations its references call (D61); Controlled each page that
+	// meets one, by its method and path, with their places in Controls.
 	Controls   []routeControls
 	Controlled []controlledPage
 	uses       map[string]bool
 	imports    map[string]map[string]bool
 }
 
-// controlledPage is a page whose request meets its operation's route
-// controls: its method, its path as it is registered, and the place of
-// the operation's controls in pagesModel.Controls.
+// controlledPage is a page whose request meets route controls: its
+// method, its path as it is registered, the place in pagesModel.Controls
+// of its operation's controls, -1 when its route has none, and those of
+// the other operations it calls whose routes have one.
 type controlledPage struct {
 	Method string
 	Path   string
-	At     int
+	Own    int
+	Called []int
+}
+
+// OwnExpr is the Rust Option of the place of the page's operation's
+// controls.
+func (p controlledPage) OwnExpr() string {
+	if p.Own < 0 {
+		return "None"
+	}
+	return fmt.Sprintf("Some(%d)", p.Own)
+}
+
+// CalledExpr is the Rust slice of the places of the controls of the other
+// operations it calls.
+func (p controlledPage) CalledExpr() string {
+	places := make([]string, len(p.Called))
+	for i, at := range p.Called {
+		places[i] = fmt.Sprintf("%d", at)
+	}
+	return "&[" + strings.Join(places, ", ") + "]"
 }
 
 // Live reports whether a list updates in place through a shard.
@@ -99,9 +121,9 @@ func (m *pagesModel) Live() bool {
 	return false
 }
 
-// ControlsUse reports whether a page's operation's route has the control
-// ("rate_limit", "body_limit" or "timeout"), so pages.rs declares what
-// applies it.
+// ControlsUse reports whether the route of an operation a page calls has
+// the control ("rate_limit", "body_limit" or "timeout"), so pages.rs
+// declares what applies it.
 func (m *pagesModel) ControlsUse(control string) bool {
 	for _, c := range m.Controls {
 		switch {
@@ -416,7 +438,7 @@ func pagesOf(c *crate, schemas schemaSet, inProcess []declared, prefix, title st
 		records:  map[string]record{},
 		views:    map[string]view{},
 		params:   map[string]bool{},
-		idents:   map[string]bool{},
+		idents:   map[string]bool{pagerIdent: true},
 		prefills: map[string]*prefill{},
 		live:     live,
 		routes:   map[string]bool{},
@@ -466,53 +488,103 @@ func pagesOf(c *crate, schemas schemaSet, inProcess []declared, prefix, title st
 	return m, nil
 }
 
-// controls records, for each page that calls an operation whose route has
-// a traffic control, the page's method and path and the operation's
-// controls: a list's page, and its shard, the list's; an item's page, and
-// the edit and delete pages, which show the item, the detail's; a post the
-// operation it submits. The new page and the index call no operation.
+// controls records, for each page whose request meets a traffic control,
+// the page's method and path, the controls of the operation it is for and
+// those of the other operations it calls. The operation a page is for: a
+// list's page, and its shard, the list's; an item's page, and the edit and
+// delete pages, which show the item, the detail's; a post the operation it
+// submits; the new page and the index none. A form or a record of the page
+// that holds a reference calls its options operation (D61), listing or
+// looking up its target, so the page meets that operation's controls too:
+// the new page its form's, a list's page its filter's and its rows', an
+// item's page its detail's, its actions' forms' and its sections' rows',
+// the edit page its form's, the delete page its form's and the item's, and
+// a post those of the page it renders again. Not the lists the sections of
+// an item's page call, which keep to their own pages.
 func (b *pageBuilder) controls() {
 	m := b.m
 	at := map[string]int{}
-	add := func(method, path string, o *pageOp) {
-		if o == nil {
-			return
-		}
-		controls := controlsOf(o.c.d.endpoint)
+	place := func(snake string, controls routeControls) int {
 		if !controls.HasControls() {
-			return
+			return -1
 		}
-		i, ok := at[o.Snake]
+		i, ok := at[snake]
 		if !ok {
 			i = len(m.Controls)
-			at[o.Snake] = i
+			at[snake] = i
 			m.Controls = append(m.Controls, controls)
 		}
-		m.Controlled = append(m.Controlled, controlledPage{Method: method, Path: path, At: i})
+		return i
+	}
+	// add records a page, o the operation it is for, or nil, and refs the
+	// choices and labels functions it calls.
+	add := func(method, path string, o *pageOp, refs ...string) {
+		page := controlledPage{Method: method, Path: path, Own: -1}
+		if o != nil {
+			page.Own = place(o.Snake, controlsOf(o.c.d.endpoint))
+		}
+		seen := map[int]bool{page.Own: true}
+		for _, fn := range refs {
+			for _, options := range b.refs.OptionsCalledBy(fn) {
+				if i := place(options.Snake, options.controls); i >= 0 && !seen[i] {
+					seen[i] = true
+					page.Called = append(page.Called, i)
+				}
+			}
+		}
+		if page.Own >= 0 || len(page.Called) > 0 {
+			m.Controlled = append(m.Controlled, page)
+		}
+	}
+	choices := func(o *pageOp) string {
+		if o == nil {
+			return ""
+		}
+		return o.ChoicesFn
 	}
 	for _, r := range m.Resources {
-		add("GET", r.Path, r.List)
-		if r.Live {
-			add("POST", r.LivePath, r.List)
+		list := []string{choices(r.List), r.RowLabels}
+		item := []string{r.DetailLabels}
+		for _, o := range r.Actions {
+			item = append(item, o.ChoicesFn)
 		}
-		add("GET", r.ItemPath, r.Detail)
-		add("POST", r.Path+"/new", r.Create)
+		for _, s := range r.Sections {
+			item = append(item, s.RowLabels)
+		}
+		if r.List != nil {
+			add("GET", r.Path, r.List, list...)
+			if r.Live {
+				add("POST", r.LivePath, r.List, list...)
+			}
+		}
+		if r.Detail != nil {
+			add("GET", r.ItemPath, r.Detail, item...)
+		}
+		if r.Create != nil {
+			add("GET", r.Path+"/new", nil, r.Create.ChoicesFn)
+			add("POST", r.Path+"/new", r.Create, r.Create.ChoicesFn)
+		}
 		if r.Update != nil {
-			add("GET", r.ItemPath+"/edit", r.Detail)
-			add("POST", r.ItemPath+"/edit", r.Update)
+			add("GET", r.ItemPath+"/edit", r.Detail, r.Update.ChoicesFn)
+			add("POST", r.ItemPath+"/edit", r.Update, r.Update.ChoicesFn)
 		}
 		if r.Delete != nil {
-			add("GET", r.ItemPath+"/delete", r.Detail)
-			add("POST", r.ItemPath+"/delete", r.Delete)
+			add("GET", r.ItemPath+"/delete", r.Detail, r.DetailLabels, r.Delete.ChoicesFn)
+			add("POST", r.ItemPath+"/delete", r.Delete, r.DetailLabels, r.Delete.ChoicesFn)
 		}
 		for _, o := range r.Actions {
-			add("POST", r.ItemPath+"/"+o.Verb, o)
+			add("POST", r.ItemPath+"/"+o.Verb, o, item...)
 		}
 	}
 	if len(m.Controlled) > 0 {
 		m.use("controls")
 	}
 }
+
+// pagerIdent is the ident no resource takes: its <ident>_href would be
+// pager_href, the pager's own helper, beside pager and pager_query. A
+// collection at pager is pager_2, as a second one of an ident is.
+const pagerIdent = "pager"
 
 // pageBuilder builds each resource's pages.
 type pageBuilder struct {

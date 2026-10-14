@@ -349,6 +349,41 @@ pub async fn call_review_list_reviews(cx: &Cx, args: ReviewListReviewsArgsRecord
     Ok(ReviewPageRecord::from_wire(&json))
 }
 
+/// The arguments of site.listPages, as browser code builds them.
+/// The page asked for is `cursor`, a page's `next`, none for the first,
+/// and `limit`, none for the route's default (D60).
+#[record]
+#[derive(Debug, Clone, PartialEq)]
+pub struct SiteListPagesArgsRecord {
+    pub cursor: Option<String>,
+    pub limit: Option<i64>,
+}
+
+impl SiteListPagesArgsRecord {
+    /// The operation's arguments: each field's JSON, as a request carries
+    /// it, decoded into its Rust type, and the page asked for,
+    /// held to the route's limits as the router reads `cursor` and `limit`.
+    pub fn to_args(&self) -> Result<crate::api::SiteListPagesArgs, ProblemRecord> {
+        Ok(crate::api::SiteListPagesArgs {
+            page: crate::api::SiteListPagesArgs::PAGE.request(self.cursor.as_deref(), self.limit).map_err(ProblemRecord::from)?,
+        })
+    }
+}
+
+/// site.listPages, called from the browser.
+#[procedure("/_superschematic/fixture-console-api/site/list-pages")]
+pub async fn site_list_pages(cx: &Cx, args: SiteListPagesArgsRecord) -> topcoat::Result<Result<SitePagePageRecord, ProblemRecord>> {
+    Ok(call_site_list_pages(cx, args).await)
+}
+
+/// The body of the site_list_pages procedure.
+pub async fn call_site_list_pages(cx: &Cx, args: SiteListPagesArgsRecord) -> Result<SitePagePageRecord, ProblemRecord> {
+    let args = args.to_args()?;
+    let value = operations::site_list_pages(cx, args).await?;
+    let json = serde_json::to_value(&value).unwrap_or_default();
+    Ok(SitePagePageRecord::from_wire(&json))
+}
+
 /// The arguments of supplier.listSuppliers, as browser code builds them.
 /// The page asked for is `cursor`, a page's `next`, none for the first,
 /// and `limit`, none for the route's default (D60).

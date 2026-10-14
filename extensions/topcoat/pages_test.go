@@ -1470,7 +1470,10 @@ async fn an_action_without_callers_posts_and_refuses_by_its_status() {
 // third request in a minute with the route's 429 and Retry-After as the
 // pages' refusal, an order's page, whose detail has no control, is not
 // limited, and the hold action's post answers its route's rate limit,
-// body limit and timeout with 429, 413 and 504.
+// body limit and timeout with 429, 413 and 504. The shipments' page, whose
+// list has no control, names each warehouse through listWarehouses, and
+// meets its rate limit, which the warehouses' own page shares, and its
+// timeout.
 func TestPagesKeepTheirRoutesControls(t *testing.T) {
 	cargoTestCrateWith(t, controlsService, controlsPagesAppTest, crateOptions{
 		outputs:         livePagesOutputs(),
@@ -1536,7 +1539,8 @@ impl PageAuthenticator for Caller {
     }
 }
 
-// A shop whose holds take longer than their route allows when slow.
+// A shop whose holds and warehouses take longer than their routes allow
+// when slow.
 struct Shop {
     slow: bool,
 }
@@ -1555,6 +1559,15 @@ impl StockImplementation for Shop {
     }
     async fn release_reservation(&self, _ctx: RequestContext, args: StockReleaseReservationArgs) -> Result<types::Reservation, ApiError> {
         Ok(types::Reservation { id: args.id, held: false })
+    }
+    async fn list_warehouses(&self, _ctx: RequestContext) -> Result<Vec<types::Warehouse>, ApiError> {
+        if self.slow {
+            tokio::time::sleep(Duration::from_secs(5)).await;
+        }
+        Ok(vec![types::Warehouse { id: "n".to_string(), name: "North".to_string() }])
+    }
+    async fn list_shipments(&self, _ctx: RequestContext) -> Result<Vec<types::Shipment>, ApiError> {
+        Ok(vec![types::Shipment { id: "1".to_string(), warehouse_id: "n".to_string() }])
     }
 }
 
@@ -1680,6 +1693,29 @@ async fn an_actions_post_meets_its_routes_controls() {
     let slow = self::app(true);
     let started = Instant::now();
     refusal(&hold(&slow, "reason=Stock".to_owned(), None).await, 504, "Timed out", "Gateway Timeout");
+    assert!(started.elapsed() < Duration::from_secs(4), "{:?}", started.elapsed());
+}
+
+#[tokio::test]
+async fn a_page_meets_the_controls_of_the_operations_its_references_call() {
+    // The shipments' list has no control, but its rows name their
+    // warehouses through listWarehouses, two a minute: the page's third in
+    // a minute is refused, and the warehouses' own page shares the budget.
+    let app = app(false);
+    for _ in 0..2 {
+        let shipments = get(&app, "/console/shipments").await;
+        assert_eq!(shipments.status, StatusCode::OK, "{}", shipments.html);
+        assert!(shipments.html.contains(r#"<td data-field="warehouseId">North</td>"#), "{}", shipments.html);
+    }
+    let limited = get(&app, "/console/shipments").await;
+    refusal(&limited, 429, "Too many requests", "Too Many Requests");
+    assert!(limited.headers.contains_key(header::RETRY_AFTER), "{:?}", limited.headers);
+    refusal(&get(&app, "/console/warehouses").await, 429, "Too many requests", "Too Many Requests");
+
+    // A listing past its route's second times the page out.
+    let slow = self::app(true);
+    let started = Instant::now();
+    refusal(&get(&slow, "/console/shipments").await, 504, "Timed out", "Gateway Timeout");
     assert!(started.elapsed() < Duration::from_secs(4), "{:?}", started.elapsed());
 }
 `

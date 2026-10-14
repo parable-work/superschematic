@@ -15,6 +15,9 @@
 //! `fixture_controls_api` puts each route's traffic controls in front of its
 //! procedure.
 //! `views` renders each record as a description list and as a table.
+//! `references` names what a value that refers to an item holds (D61): a
+//! form's options and a display component's labels, from the operation
+//! that lists the items.
 //! `choices` holds the values the app names for a field, which a form
 //! offers and a display component labels.
 //!
@@ -26,6 +29,7 @@ pub mod forms;
 pub mod operations;
 pub mod procedures;
 pub mod records;
+pub mod references;
 mod wire;
 pub mod views;
 
