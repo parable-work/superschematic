@@ -42,12 +42,14 @@ mod guidance;
 // Milestone 12b: Queue, Budget and Blueprint.
 pub mod blueprint;
 pub mod budget;
+pub mod queue;
 pub use blueprint::{
     Blueprint, BlueprintConfig, BlueprintFrom, BlueprintStep, BlueprintWhen, MAX_STEPS,
 };
 pub use budget::{
     Budget, BudgetConfig, BudgetMeter, BudgetTransition, ReserveCheck, ScopeRead, ScopeValue,
 };
+pub use queue::{Queue, QueueClaim, QueueConfig, DEFAULT_MAX_CANDIDATES, EXCLUDED};
 
 use superschematic_engine::BehaviorSet;
 
@@ -72,6 +74,7 @@ const PORTED: &[(&str, Register)] = &[
     // Milestone 12a.
 
     // Milestone 12b.
+    ("Queue", |set| set.with(Queue)),
     ("Blueprint", |set| set.with(Blueprint)),
     ("Budget", |set| set.with(Budget)),
 ];

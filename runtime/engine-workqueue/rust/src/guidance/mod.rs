@@ -13,6 +13,7 @@
 // Milestone 12b: Queue, Budget and Blueprint.
 pub(crate) mod blueprint;
 pub(crate) mod budget;
+pub(crate) mod queue;
 
 use superschematic_engine::behaviors::{GuidanceError, OperationGuidance};
 
