@@ -5776,11 +5776,11 @@ does not define them; `scripts/engine-link-check.sh` links superscalar's,
 the version graph's and the engine's archives into one Go binary and runs
 it, in the engine-go CI job on linux-x64 and in the release's
 build-archives job on all four platforms, whose tarballs now carry the
-engine's archive and header. The config reader and the error mapping in
-the ffi crate have the shape of the Node-API addon's
-`EngineOptions::from_json` and `Error::thrown`, which replace them once
-they are on main. No generated server mounts the engine yet (milestone
-18).
+engine's archive and header. The ABI reads its config's `project` and
+hands the rest to `EngineOptions::from_json`, and writes an error as
+`Error::thrown` makes it, as the Node-API addon does, so the two bindings
+take one config and throw one error. No generated server mounts the
+engine yet (milestone 18).
 
 The rule is reversible until the first release.
 
