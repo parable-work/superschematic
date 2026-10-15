@@ -836,7 +836,7 @@ func TestApplyRefusesARustServerItCannotRun(t *testing.T) {
 		{
 			name:  "no cargo",
 			setup: func(t *testing.T, f *fixture) { f.runner.missing = []string{"cargo"} },
-			want:  "cargo is not on PATH; the local target builds each Rust server with cargo build",
+			want:  "cargo is not on PATH; the local target builds each Rust server, job and worker with cargo build",
 		},
 		{
 			name:  "no crate",
@@ -872,7 +872,7 @@ func TestApplyRefusesARustServerItCannotRun(t *testing.T) {
 				f.writeCrate(t, "shop-api", crate("server"))
 				f.writeCrate(t, "Orders", crate("server"))
 			},
-			want: "local: servers shop-api and Orders both build a binary named server into one Cargo target directory, target; name each crate's binary after its server",
+			want: "local: servers shop-api and Orders both build a binary named server into one Cargo target directory, target; name each crate's binary after its deployable",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

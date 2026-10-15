@@ -217,7 +217,7 @@ python:
 # Postgres SUPERSCHEMATIC_IDENTITY_TEST_DATABASE_URL names, when it is set),
 # and with a stack server's features (D57): postgres, whose tests run on the
 # Postgres SUPERSCHEMATIC_POSTGRES_TEST_DATABASE_URL names, when it is set,
-# and logging.
+# logging, and the two at once, as a worker runs (D65).
 rust:
 	cd runtime/http/rust && cargo fmt --check && cargo clippy --all-targets -- -D warnings \
 		&& cargo clippy --all-targets --features serde_json/arbitrary_precision,serde_json/preserve_order -- -D warnings \
@@ -229,7 +229,9 @@ rust:
 		&& cargo clippy --all-targets --features postgres -- -D warnings \
 		&& cargo clippy --all-targets --features postgres,identity-postgres,identity-sqlite -- -D warnings \
 		&& cargo test --features postgres,identity-postgres,identity-sqlite \
-		&& cargo clippy --all-targets --features logging -- -D warnings && cargo test --features logging
+		&& cargo clippy --all-targets --features logging -- -D warnings && cargo test --features logging \
+		&& cargo clippy --all-targets --features postgres,logging -- -D warnings \
+		&& cargo test --features postgres,logging
 	cd runtime/schema/rust && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test \
 		&& cargo test --features serde_json/arbitrary_precision,serde_json/preserve_order
 	cd runtime/schema/rust-ir && cargo fmt --check && cargo clippy --all-targets -- -D warnings \

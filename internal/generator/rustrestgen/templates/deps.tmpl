@@ -12,6 +12,23 @@
 //! ```
 //!
 //! which the entrypoint calls with the API's Deps.
+{{- if .HasBackgroundWork }}
+//!
+//! It also declares {{ if .HasJobs }}`Jobs`, a method per job of {{ .SchemaName }}{{ if .HasWorkers }}, and {{ end }}{{ end }}{{ if .HasWorkers }}`Workers`,
+//! a method per worker of {{ .SchemaName }}{{ end }} (D52, D53, D65; sections 8.7 and
+//! 8.8). The implementation's crate declares
+//!
+//! ```ignore
+{{- if .HasJobs }}
+//! pub async fn create_jobs(deps: Deps) -> Result<Arc<dyn Jobs>, BoxError>
+{{- end }}
+{{- if .HasWorkers }}
+//! pub async fn create_workers(deps: Deps) -> Result<Arc<dyn Workers>, BoxError>
+{{- end }}
+//! ```
+//!
+//! which a {{ if .HasJobs }}job's{{ if .HasWorkers }} or a {{ end }}{{ end }}{{ if .HasWorkers }}worker's{{ end }} entrypoint calls with the API's Deps.
+{{- end }}
 {{- $handlers := .HandlersFields }}
 {{ if .WebhookProviders }}
 use std::collections::HashMap;
@@ -100,3 +117,42 @@ impl Implementations {
         }
     }
 }
+{{- if .HasBackgroundWork }}
+
+/// The error a job's or a worker's method fails with: any error, which
+/// fails the run or the message. It is the HTTP runtime's.
+pub use {{ .RuntimeCrateIdent }}::BoxError;
+{{- end }}
+{{- if .HasJobs }}
+
+/// The jobs of {{ .SchemaName }}, a method per @job class. A job's entrypoint
+/// calls its method once per run, with a `Shutdown` that SIGTERM triggers,
+/// and the run fails when the method returns an error.
+#[async_trait]
+pub trait Jobs: Send + Sync {
+{{- range .Jobs }}
+    /// Runs the job {{ .Name }}{{ if .Schedule }}, on `{{ .Schedule }}` unless an
+    /// environment changes its schedule{{ end }}.
+{{ $.JobSignature . }}
+{{- end }}
+}
+{{- end }}
+{{- if .HasWorkers }}
+
+/// The workers of {{ .SchemaName }}, a method per @worker class, each of which
+/// handles one message of its queue. A worker's entrypoint calls its method
+/// once per message it claims. The message is done when the method returns
+/// `Ok`; an error, or a panic, fails it, and the queue retries it after its
+/// backoff until its retries are spent. When the worker stops and its grace
+/// is over, the entrypoint drops the futures that still run and gives their
+/// messages back. A message may come again after a worker dies holding it,
+/// so a method is idempotent.
+#[async_trait]
+pub trait Workers: Send + Sync {
+{{- range .Workers }}
+    /// Handles a message of the queue {{ .Queue }}, {{ if eq .Concurrency 1 }}one at a time{{ else }}{{ .Concurrency }} at a time{{ end }} unless an
+    /// environment changes the worker's concurrency.
+{{ $.WorkerSignature . }}
+{{- end }}
+}
+{{- end }}

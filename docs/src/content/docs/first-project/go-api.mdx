@@ -176,8 +176,13 @@ dependencies, then:
   to its schema;
 - builds each server and starts it, waiting until it answers `/readyz`,
   then prints where each one is reached;
+- builds each worker, `shop-orders`' `FulfilOrders` and `shop-stock`'s
+  `ReorderStock`, in Rust, and starts it as a process
+  ([Queues and workers](/superschematic/guides/queues/));
 - builds `shop-orders`' job `ShipOrders` and runs it every minute, as
-  `Dev`'s settings say ([Jobs](/superschematic/guides/stacks/#jobs)).
+  `Dev`'s settings say, and `shop-stock`'s Rust job `OrderRestocks`,
+  which `Dev` runs only when `superschematic stack run` asks
+  ([Jobs](/superschematic/guides/stacks/#jobs)).
 
 Nothing in the project names a port or a connection string. The build
 derives them and writes the environment it resolved to

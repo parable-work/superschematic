@@ -82,6 +82,12 @@ jobs:
       - name: Compile server stock
         working-directory: schemas/dist/server/stock-stack/stock
         run: cargo check --locked
+      - name: Compile job shop-stock-place-restock-orders
+        working-directory: schemas/dist/server/stock-stack/shop-stock-place-restock-orders
+        run: cargo check --locked
+      - name: Compile worker shop-stock-reorder-stock
+        working-directory: schemas/dist/server/stock-stack/shop-stock-reorder-stock
+        run: cargo check --locked
 
   plan-staging:
     name: plan Staging

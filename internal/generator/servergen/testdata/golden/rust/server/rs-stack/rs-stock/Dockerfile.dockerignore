@@ -5,14 +5,12 @@
 *
 !runtime/http/rust
 !runtime/schema/rust
-!rust/*/Cargo.toml
-!rust/*/src
-!rust/rs-stock
 !schemas/dist/Cargo.lock*
 !schemas/dist/Cargo.toml
 !schemas/dist/api/*/Cargo.toml
 !schemas/dist/api/*/openapi.json
 !schemas/dist/api/*/src
+!schemas/dist/impl
 !schemas/dist/sdk/rust
 !schemas/dist/server/*/*/Cargo.toml
 !schemas/dist/server/*/*/src

@@ -330,6 +330,10 @@ and `/readyz`, and a Dockerfile. `superschematic stack dev` runs it with
 `bun main.ts` after one `bun install` in `schemas/dist`. Each job and
 worker of the API gets a package of its own beside it, whose `main.ts`
 builds the same `Deps` and runs the job once, or the worker's claim loop.
+Neither serves a request, so a stack gives neither the callers field. For
+an API with one, `config.ts` adds `loadBackgroundEnvConfig()`, which the
+job's and the worker's `main.ts` call: it loads what `loadEnvConfig()`
+does, but leaves the callers field without issuers.
 
 An operation without an input type reads its other arguments from the JSON
 body object (on `GET`, from the query string). Each body argument is the

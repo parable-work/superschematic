@@ -799,7 +799,8 @@ jobs:
       # its optional http-client feature, with its identity features, whose
       # store and route tests run on SQLite here, and with a stack server's
       # features (D57): postgres, whose tests need a database and skip
-      # here, and logging.
+      # here, logging, and the two at once, as a worker runs, whose loop's
+      # log lines a test reads (D65).
       - name: fmt / clippy / test
         working-directory: runtime/http/rust
         run: |
@@ -818,6 +819,8 @@ jobs:
           cargo test --features postgres,identity-postgres,identity-sqlite
           cargo clippy --all-targets --features logging -- -D warnings
           cargo test --features logging
+          cargo clippy --all-targets --features postgres,logging -- -D warnings
+          cargo test --features postgres,logging
 
       - name: schema runtime fmt / clippy / test
         working-directory: runtime/schema/rust

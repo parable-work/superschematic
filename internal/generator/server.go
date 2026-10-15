@@ -14,7 +14,9 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/goutil"
+	"github.com/parable-work/superschematic/internal/generator/rustgen"
 	"github.com/parable-work/superschematic/internal/generator/rustrestgen"
+	"github.com/parable-work/superschematic/internal/generator/rustutil"
 	"github.com/parable-work/superschematic/internal/generator/servergen"
 	"github.com/parable-work/superschematic/internal/generator/stackgen"
 	"github.com/parable-work/superschematic/internal/generator/tsgen"
@@ -31,19 +33,19 @@ const serverGenerator = "server"
 
 // generateServers writes the entrypoint of each Go, TypeScript and Rust
 // server of the stack the schema declares under servergen.StackDir
-// (docs/stack-model.md, sections 8.1, 8.2 and 8.6), and of each Go and
-// TypeScript job and worker beside them (sections 8.7 and 8.8, D52, D53),
-// and scaffolds each served API's implementation that is missing, a Go
-// server's in Go, a TypeScript server's in TypeScript and a Rust server's
-// in Rust (sections 8.5 and 8.6). The Rust servers' crates are the members
-// of the output root's Cargo workspace, whose root and lockfile it writes
-// (D57). No environment changes the servers, the jobs or the workers, but
-// the entrypoint of a Go or TypeScript one that some environment connects
-// to a database on Cloud SQL links the Cloud SQL connector, or depends on
-// the Node one; a Rust one reaches Cloud SQL through its runtime alone. It
-// plans every entrypoint before it writes anything, so one it refuses
-// leaves the last build's entrypoints and every implementation as they
-// were. A build
+// (docs/stack-model.md, sections 8.1, 8.2 and 8.6), and of each Go,
+// TypeScript and Rust job and worker beside them (sections 8.7 and 8.8,
+// D52, D53, D65), and scaffolds each served API's implementation that is
+// missing, a Go server's in Go, a TypeScript server's in TypeScript and a
+// Rust server's in Rust (sections 8.5 and 8.6). The crates of the Rust
+// servers, jobs and workers are the members of the output root's Cargo
+// workspace, whose root and lockfile it writes (D57, D65). No environment
+// changes the servers, the jobs or the workers, but the entrypoint of a Go
+// or TypeScript one that some environment connects to a database on Cloud
+// SQL links the Cloud SQL connector, or depends on the Node one; a Rust
+// one reaches Cloud SQL through its runtime alone. It plans every
+// entrypoint before it writes anything, so one it refuses leaves the last
+// build's entrypoints and every implementation as they were. A build
 // without a repository root writes none: the implementations live under it.
 func (r run) generateServers() error {
 	if r.Options.RepositoryRoot == "" {
@@ -86,6 +88,7 @@ func (r run) generateServers() error {
 	var rustPlans []*servergen.RustServer
 	scaffolding := map[string]bool{}
 	tsScaffolding := map[string]bool{}
+	rustScaffolding := map[string]bool{}
 	var tsScaffolds []*tsrestgen.APIOutput
 	var rustScaffolds []*rustrestgen.APIOutput
 	for _, s := range servers {
@@ -116,6 +119,9 @@ func (r run) generateServers() error {
 			}
 			rustPlans = append(rustPlans, server)
 			rustScaffolds = append(rustScaffolds, scaffolds...)
+			for _, sc := range scaffolds {
+				rustScaffolding[sc.SchemaName] = true
+			}
 		default:
 			r.Logf("  - server %s: a %s server, which gets no generated entrypoint yet\n", s.Name, s.Language)
 		}
@@ -124,7 +130,7 @@ func (r run) generateServers() error {
 	if err != nil {
 		return err
 	}
-	if err := r.checkJobs(st.Name, jobs, services, scaffolding, tsScaffolding); err != nil {
+	if err := r.checkJobs(st.Name, jobs, services, scaffolding, tsScaffolding, rustScaffolding); err != nil {
 		return err
 	}
 	// The servers' plans scaffold the API of each job and worker, which a
@@ -143,6 +149,12 @@ func (r run) generateServers() error {
 				return err
 			}
 			tsPlans = append(tsPlans, job)
+		case APILanguageRust:
+			job, _, err := r.planRustServer(st.Name, j, nil)
+			if err != nil {
+				return err
+			}
+			rustPlans = append(rustPlans, job)
 		default:
 			r.Logf("  - job %s: a %s job, which gets no generated entrypoint yet\n", j.Name, j.Language)
 		}
@@ -151,7 +163,7 @@ func (r run) generateServers() error {
 	if err != nil {
 		return err
 	}
-	if err := r.checkWorkers(st.Name, workers, services, scaffolding, tsScaffolding); err != nil {
+	if err := r.checkWorkers(st.Name, workers, services, scaffolding, tsScaffolding, rustScaffolding); err != nil {
 		return err
 	}
 	for _, w := range workers {
@@ -171,6 +183,12 @@ func (r run) generateServers() error {
 				return err
 			}
 			tsPlans = append(tsPlans, worker)
+		case APILanguageRust:
+			worker, _, err := r.planRustServer(st.Name, w, nil)
+			if err != nil {
+				return err
+			}
+			rustPlans = append(rustPlans, worker)
 		default:
 			r.Logf("  - worker %s: a %s worker, which gets no generated entrypoint yet\n", w.Name, w.Language)
 		}
@@ -207,8 +225,12 @@ func (r run) generateServers() error {
 	}
 	if len(plans) == 0 && len(tsPlans) == 0 && len(rustPlans) == 0 {
 		// The stack's Rust servers are gone, if it had any: the workspace's
-		// root names the other stacks' alone, or is removed.
+		// root names the other stacks' alone, or is removed, and so do the
+		// implementations' mirrors.
 		if _, err := servergen.WriteRustWorkspace(r.Options.OutputRoot); err != nil {
+			return err
+		}
+		if err := servergen.PruneRustMirrors(r.Options.OutputRoot); err != nil {
 			return err
 		}
 		r.Skip(serverGenerator)
@@ -235,8 +257,11 @@ func (r run) generateServers() error {
 			return err
 		}
 		if server.Docker == nil {
-			r.Logf("  - server %s: no Dockerfile, since %s\n", server.Name, server.NoDocker)
+			r.Logf("  - %s %s: no Dockerfile, since %s\n", server.Kind, server.Name, server.NoDocker)
 		}
+	}
+	if err := r.writeRustMirrors(rustPlans); err != nil {
+		return fmt.Errorf("stack %s: %w", st.Name, err)
 	}
 	if err := r.writeRustWorkspace(len(rustPlans) > 0); err != nil {
 		return fmt.Errorf("stack %s: %w", st.Name, err)
@@ -245,9 +270,31 @@ func (r run) generateServers() error {
 	return nil
 }
 
-// writeRustWorkspace writes the output root's Cargo workspace for the Rust
-// server crates on disk, every stack's (D57), and, when this stack has
-// one, brings its lockfile up to date with cargo (servergen.
+// writeRustMirrors brings the mirror of each implementation the stack's
+// Rust servers, jobs and workers build against up to date under the output
+// root (D65; servergen's mirror.go), once for an implementation two of
+// them build against, after the scaffolds are written, then removes the
+// mirrors no crate under the output root's server/ depends on any longer,
+// whichever stack's. cargo update reads the mirrors next.
+func (r run) writeRustMirrors(servers []*servergen.RustServer) error {
+	written := map[string]bool{}
+	for _, server := range servers {
+		for _, m := range server.Mirrors {
+			if written[m.Dir] {
+				continue
+			}
+			written[m.Dir] = true
+			if err := servergen.WriteRustMirror(m); err != nil {
+				return err
+			}
+		}
+	}
+	return servergen.PruneRustMirrors(r.Options.OutputRoot)
+}
+
+// writeRustWorkspace writes the output root's Cargo workspace for the
+// crates of the Rust servers, jobs and workers on disk, every stack's (D57,
+// D65), and, when this stack has one, brings its lockfile up to date with cargo (servergen.
 // UpdateRustLockfile), which the project commits, and says in one line how
 // to commit it when git ignores it. Without cargo on PATH, or when cargo
 // cannot resolve the workspace, as after a build of the stack alone,
@@ -319,14 +366,16 @@ func (r run) noteIgnoredLockfile() {
 }
 
 // checkJobs refuses a stack one of whose Go APIs declares jobs while its
-// implementation declares no NewJobs (D52), or one of whose TypeScript APIs
-// does while its implementation exports no createJobs. The implementation
-// exists, so it is the engineer's, and the build writes into it no more: an
-// API that predates its jobs fails here, saying what to add, rather than in
-// the compile of a job's entrypoint, or when Bun runs it. An API whose
-// scaffold this build writes, scaffolding in Go and tsScaffolding in
-// TypeScript, gets them from it.
-func (r run) checkJobs(stackName string, jobs []*ir.ResolvedDeployable, services []stack.Service, scaffolding, tsScaffolding map[string]bool) error {
+// implementation declares no NewJobs (D52), one of whose TypeScript APIs
+// does while its implementation exports no createJobs, or one of whose
+// Rust APIs does while its implementation declares no create_jobs (D65).
+// The implementation exists, so it is the engineer's, and the build writes
+// into it no more: an API that predates its jobs fails here, saying what to
+// add, rather than in the compile of a job's entrypoint, or when Bun runs
+// it. An API whose scaffold this build writes, scaffolding in Go,
+// tsScaffolding in TypeScript and rustScaffolding in Rust, gets them from
+// it.
+func (r run) checkJobs(stackName string, jobs []*ir.ResolvedDeployable, services []stack.Service, scaffolding, tsScaffolding, rustScaffolding map[string]bool) error {
 	checked := map[string]bool{}
 	for _, job := range jobs {
 		api := job.Job.API
@@ -334,6 +383,23 @@ func (r run) checkJobs(stackName string, jobs []*ir.ResolvedDeployable, services
 			continue
 		}
 		checked[api] = true
+		if job.Language == APILanguageRust {
+			if rustScaffolding[api] {
+				continue
+			}
+			var methods []string
+			for _, svc := range services {
+				if svc.Name == api {
+					for _, j := range svc.Jobs {
+						methods = append(methods, fmt.Sprintf("      async fn %s(&self, shutdown: Shutdown) -> Result<(), BoxError> {\n          // ...\n      }", rustutil.Identifier(j.Name, "run")))
+					}
+				}
+			}
+			if err := r.checkRustFunc(stackName, api, "jobs", rustrestgen.JobsFunc, "Jobs", methods, "Deps, Jobs and BoxError are %s's, and Shutdown the HTTP runtime's", "8.7"); err != nil {
+				return err
+			}
+			continue
+		}
 		if job.Language == APILanguageTypeScript {
 			if tsScaffolding[api] {
 				continue
@@ -385,18 +451,43 @@ func (r run) checkJobs(stackName string, jobs []*ir.ResolvedDeployable, services
 }
 
 // checkWorkers refuses a stack one of whose Go APIs declares workers while
-// its implementation declares no NewWorkers (D53), or one of whose
+// its implementation declares no NewWorkers (D53), one of whose
 // TypeScript APIs does while its implementation exports no createWorkers,
-// as checkJobs refuses one without its jobs: the implementation is the
-// engineer's, and the build writes into it no more.
-func (r run) checkWorkers(stackName string, workers []*ir.ResolvedDeployable, services []stack.Service, scaffolding, tsScaffolding map[string]bool) error {
+// or one of whose Rust APIs does while its implementation declares no
+// create_workers (D65), as checkJobs refuses one without its jobs: the
+// implementation is the engineer's, and the build writes into it no more.
+// It refuses a Rust worker of a queue the Rust types of its database leave
+// out of src/queues.rs too (checkRustQueue).
+func (r run) checkWorkers(stackName string, workers []*ir.ResolvedDeployable, services []stack.Service, scaffolding, tsScaffolding, rustScaffolding map[string]bool) error {
 	checked := map[string]bool{}
 	for _, w := range workers {
+		if w.Language == APILanguageRust {
+			if err := r.checkRustQueue(stackName, w, services); err != nil {
+				return err
+			}
+		}
 		api := w.Worker.API
 		if checked[api] {
 			continue
 		}
 		checked[api] = true
+		if w.Language == APILanguageRust {
+			if rustScaffolding[api] {
+				continue
+			}
+			var methods []string
+			for _, svc := range services {
+				if svc.Name == api {
+					for _, worker := range svc.Workers {
+						methods = append(methods, fmt.Sprintf("      async fn %s(&self, message: %s::%s) -> Result<(), BoxError> {\n          // handle a message of %s\n      }", rustutil.Identifier(worker.Name, "handle"), rustrestgen.DatabaseTypesModule, worker.Queue, worker.Queue))
+					}
+				}
+			}
+			if err := r.checkRustFunc(stackName, api, "workers", rustrestgen.WorkersFunc, "Workers", methods, "Deps, Workers, BoxError and "+rustrestgen.DatabaseTypesModule+", the Rust types of the database that declares each queue, are %s's", "8.8"); err != nil {
+				return err
+			}
+			continue
+		}
 		if w.Language == APILanguageTypeScript {
 			if tsScaffolding[api] {
 				continue
@@ -478,17 +569,42 @@ func (r run) checkTypeScriptExport(stackName, api, what, fn, typ string, methods
 		stackName, api, what, dir, fn, fn, typ, strings.Join(methods, "\n"), typ, r.Options.Naming.NpmAPIPackage(api), section)
 }
 
-// checkTypeScriptQueue refuses a TypeScript worker whose queue the
-// TypeScript types of its database leave out of their ./queues entry, as
-// they leave out a queue whose message the TypeScript queue client cannot
-// hold yet (D53).
-func (r run) checkTypeScriptQueue(stackName string, w *ir.ResolvedDeployable, services []stack.Service) error {
+// checkRustFunc refuses a Rust API whose implementation exists and whose
+// src/lib.rs declares no fn, which returns the API crate's trait typ,
+// while the API declares what, its jobs or its workers, each a method of
+// methods (D65): the build no longer writes into the implementation, and
+// cargo would fail only when it builds the job's or the worker's crate.
+// names, a format of the API crate's name, says whose the names the code
+// to add takes are.
+func (r run) checkRustFunc(stackName, api, what, fn, typ string, methods []string, names, section string) error {
+	dir := r.Options.Naming.RustImplementationDir(r.Options.RepositoryRoot, api)
+	exists, err := rustrestgen.ImplementationExists(dir)
+	if err != nil || !exists {
+		return err
+	}
+	declares, err := rustrestgen.DeclaresFunc(dir, fn)
+	if err != nil || declares {
+		return err
+	}
+	crate := strings.ReplaceAll(r.Options.Naming.RustAPICrate(api), "-", "_")
+	return fmt.Errorf("stack %s: %s declares %s, and its implementation at %s, which the build no longer writes into, declares no %s in %s; add\n\n"+
+		"  pub async fn %s(deps: Deps) -> Result<Arc<dyn %s>, BoxError>\n\n"+
+		"returning a value that implements %s, with a method per %s:\n\n"+
+		"  #[async_trait]\n  impl %s for ... {\n%s\n  }\n\n"+
+		"where %s (docs/stack-model.md, section %s)",
+		stackName, api, what, dir, fn, rustrestgen.ImplementationLib, fn, typ, typ, strings.TrimSuffix(what, "s"), typ, strings.Join(methods, "\n"),
+		fmt.Sprintf(names, crate), section)
+}
+
+// workerDatabase is the database whose queue the worker w claims: the one
+// resolution gives it, or else its API's, its authDb or its one DB
+// dependency. Empty when the API connects to none.
+func workerDatabase(w *ir.ResolvedDeployable, services []stack.Service) string {
 	db := w.Worker.Database
 	for _, svc := range services {
 		if svc.Name != w.Worker.API || db != "" {
 			continue
 		}
-		// The API's database: its authDb, or its one DB dependency.
 		if svc.AuthDB != nil {
 			db = svc.AuthDB.Name
 		}
@@ -498,6 +614,40 @@ func (r run) checkTypeScriptQueue(stackName string, w *ir.ResolvedDeployable, se
 			}
 		}
 	}
+	return db
+}
+
+// checkRustQueue refuses a Rust worker whose queue the Rust types of its
+// database leave out of src/queues.rs, as they leave out a queue whose
+// message the Rust queue client cannot hold yet (D65), and as
+// checkTypeScriptQueue refuses a TypeScript one.
+func (r run) checkRustQueue(stackName string, w *ir.ResolvedDeployable, services []stack.Service) error {
+	db := workerDatabase(w, services)
+	if db == "" || r.Options.LoadDependency == nil {
+		return nil
+	}
+	schema, err := r.LoadDependency(db)
+	if err != nil {
+		return fmt.Errorf("stack %s: worker %s claims a queue of %s: %w", stackName, w.Name, db, err)
+	}
+	queues, err := rustgen.RustQueues(schema)
+	if err != nil {
+		return fmt.Errorf("stack %s: worker %s claims a queue of %s: %w", stackName, w.Name, db, err)
+	}
+	for _, q := range queues {
+		if q.Name == w.Worker.Queue && q.Unsupported != "" {
+			return fmt.Errorf("stack %s: Rust worker %s claims queue %s of %s, which the Rust queue client cannot hold yet: its %s; hold the value in a @jsonField type, or write the worker in Go (D65)", stackName, w.Name, q.Name, db, q.Unsupported)
+		}
+	}
+	return nil
+}
+
+// checkTypeScriptQueue refuses a TypeScript worker whose queue the
+// TypeScript types of its database leave out of their ./queues entry, as
+// they leave out a queue whose message the TypeScript queue client cannot
+// hold yet (D53).
+func (r run) checkTypeScriptQueue(stackName string, w *ir.ResolvedDeployable, services []stack.Service) error {
+	db := workerDatabase(w, services)
 	if db == "" || r.Options.LoadDependency == nil {
 		return nil
 	}
@@ -694,11 +844,12 @@ func (r run) planTypeScriptServer(stackName string, s *ir.ResolvedDeployable, cl
 }
 
 // planRustServer plans the entrypoint of the Rust server s of the stack
-// (D57): the Rust API crate of each API it serves, with its Deps, as that
-// API's own build writes it, its EnvConfig, and where each implementation
-// lives, at the naming file's [implementation_paths] rust template, by
-// the names its Cargo.toml gives it. It returns the APIs whose
-// implementation is missing, which the caller scaffolds.
+// (D57), or of its Rust job or worker (D65): the Rust API crate of each API
+// it serves, with its Deps, as that API's own build writes it, its
+// EnvConfig, and where each implementation lives, at the naming file's
+// [implementation_paths] rust template, by the names its Cargo.toml gives
+// it. It returns the APIs whose implementation is missing, which the
+// caller scaffolds.
 func (r run) planRustServer(stackName string, s *ir.ResolvedDeployable, cors map[string]bool) (*servergen.RustServer, []*rustrestgen.APIOutput, error) {
 	out := r.Options.OutputRoot
 	in := servergen.RustInput{
@@ -711,6 +862,12 @@ func (r run) planRustServer(stackName string, s *ir.ResolvedDeployable, cors map
 		ImplementationRoot: r.Options.RepositoryRoot,
 		SDKDirs:            map[string]string{},
 		Paths:              r.Options.Paths,
+	}
+	if s.Job != nil {
+		in.Job = &servergen.JobInput{Name: s.Job.Name}
+	}
+	if s.Worker != nil {
+		in.Worker = &servergen.WorkerInput{Name: s.Worker.Name, GraceSeconds: s.Worker.GraceSeconds}
 	}
 	var scaffolds []*rustrestgen.APIOutput
 	for _, ref := range s.Services {

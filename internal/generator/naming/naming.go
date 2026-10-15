@@ -976,6 +976,21 @@ func (n Naming) RustServerCrate(stack, server string) string {
 	return n.RustCratePrefix + strings.TrimPrefix(npm, n.NpmScope+"/")
 }
 
+// RustJobCrate returns the crate name of the entrypoint of a Rust job of a
+// stack (D65): the stack's name and the job's deployable, as
+// RustServerCrate spells them, with a suffix of its own, so a job and a
+// server of one name in one stack are two packages of the workspace. The
+// crate's binary is the job's name.
+func (n Naming) RustJobCrate(stack, job string) string {
+	return strings.TrimSuffix(n.RustServerCrate(stack, job), "-server") + "-job"
+}
+
+// RustWorkerCrate returns the crate name of the entrypoint of a Rust worker
+// of a stack (D65), as RustJobCrate names a job's, with the suffix -worker.
+func (n Naming) RustWorkerCrate(stack, worker string) string {
+	return strings.TrimSuffix(n.RustServerCrate(stack, worker), "-server") + "-worker"
+}
+
 // ScalarRustCrateIdent is the scalar crate as Rust source spells it: the
 // Cargo name with '-' folded to '_'.
 func (n Naming) ScalarRustCrateIdent() string {

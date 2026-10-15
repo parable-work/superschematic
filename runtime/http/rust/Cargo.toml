@@ -27,7 +27,13 @@ serde_json = "1.0.149"
 # The version is the release's, which scripts/bump_version.py sets with the
 # crate's own: cargo publish needs one beside the path.
 superschematic-schema-runtime = { version = "0.0.0", path = "../../schema/rust" }
-tokio = { version = "1.52.2", features = ["sync", "time"] }
+# rt, signal and macros for Shutdown::on_signals, which spawns the task
+# that waits for SIGTERM or SIGINT.
+tokio = { version = "1.52.2", features = ["macros", "rt", "signal", "sync", "time"] }
+# Shutdown's cancellation token (D65), and with the postgres feature the
+# task tracker of the worker loop's handlers. Already in tokio-postgres's
+# tree.
+tokio-util = "0.7.19"
 # Already in axum's tree: why a service credential was refused, for the log.
 tracing = { version = "0.1.41", default-features = false, features = ["std"] }
 uuid = { version = "1", features = ["serde", "v4"] }
@@ -52,6 +58,8 @@ rusqlite = { version = "0.40.2", features = ["bundled"], optional = true }
 # TLS of the http-client feature (native-tls) for a connection string.
 deadpool-postgres = { version = "0.14.2", default-features = false, features = ["rt_tokio_1"], optional = true }
 native-tls = { version = "0.2.18", optional = true }
+# The buffer a queue's text parameter writes into (D65), tokio-postgres's.
+bytes = { version = "1.12.1", optional = true }
 postgres-native-tls = { version = "0.5.3", optional = true }
 # The logging feature's subscriber (D57): its registry alone, since the
 # runtime writes the JSON lines itself, in the TypeScript logger's shape.
@@ -76,7 +84,11 @@ identity-sqlite = ["identity", "dep:rusqlite"]
 # instance, with an access token from the metadata server, which it asks
 # through the http-client feature. With identity-postgres, the identity
 # store runs over the same pool.
-postgres = ["http-client", "dep:deadpool-postgres", "dep:tokio-postgres", "dep:native-tls", "dep:postgres-native-tls", "tokio/rt"]
+#
+# With it, the queue client and the worker loop (D65): enqueue in a
+# caller's transaction, the claims of a queue its descriptor describes, and
+# the loop that claims and handles a worker's messages.
+postgres = ["http-client", "dep:deadpool-postgres", "dep:tokio-postgres", "dep:native-tls", "dep:postgres-native-tls", "dep:bytes", "tokio/rt", "tokio-util/rt"]
 # A stack server's log (D57): one JSON object per line on stdout, in the
 # TypeScript logger's shape, as a layer over tracing-subscriber's registry.
 logging = ["dep:tracing-subscriber"]
@@ -105,6 +117,17 @@ required-features = ["identity-sqlite"]
 [[test]]
 name = "postgres"
 required-features = ["postgres"]
+
+# The queue client and the worker loop over a queue table of the fixture's
+# DDL, on the same Postgres.
+[[test]]
+name = "queue"
+required-features = ["postgres"]
+
+# The worker loop's log lines, as a worker writes them.
+[[test]]
+name = "worker_log"
+required-features = ["postgres", "logging"]
 
 [lints.clippy]
 all = { level = "deny", priority = -1 }

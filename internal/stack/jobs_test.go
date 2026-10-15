@@ -243,6 +243,29 @@ func TestJobRefusals(t *testing.T) {
 	})
 }
 
+// TestJobInALanguageItsPlatformDoesNotRun: the fake target's job platform
+// runs Go and TypeScript, so a Rust job on it is refused with the
+// platform's languages. No decision leaves a Rust job out (D65), so the
+// refusal names the platform alone, until a decision that leaves one out
+// is listed, whose reason the refusal then gives.
+func TestJobInALanguageItsPlatformDoesNotRun(t *testing.T) {
+	s, services := jobShop()
+	services = stacktest.InRust(services, "shop-orders")
+	refusal := "job shop-orders-ship-orders is a RUST job, and platform " + stacktest.JobPlatform + " runs only GO, TYPESCRIPT"
+	_, errs := resolve(t, assemble(t), s, services, "Staging")
+	mustFail(t, errs, stack.CodeUnrealizable, refusal)
+	for _, e := range errs.Of(stack.CodeUnrealizable) {
+		if strings.Contains(e.Message, refusal+";") {
+			t.Errorf("the refusal names a decision that leaves Rust jobs out: %s", e.Message)
+		}
+	}
+
+	stack.UnbuiltDeployables[ir.DeployableJob] = map[string]string{registry.APILanguageRust: "Rust jobs are left out (D0)"}
+	t.Cleanup(func() { delete(stack.UnbuiltDeployables, ir.DeployableJob) })
+	_, errs = resolve(t, assemble(t), s, services, "Staging")
+	mustFail(t, errs, stack.CodeUnrealizable, refusal+"; Rust jobs are left out (D0)")
+}
+
 func names(env *ir.ResolvedEnvironment) []string {
 	var out []string
 	for _, d := range env.Deployables {

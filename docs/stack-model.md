@@ -1406,11 +1406,11 @@ Bootstrap reads the GitHub repository from the git remote.
 | --- | --- |
 | database | a Cloud SQL Postgres instance with IAM database authentication on, which refuses a connection that does not come through a Cloud SQL connector, and a database per hosted schema; a migration job |
 | server | a Cloud Run service with its own service account, which holds the Cloud Trace agent role; the config in environment variables, a derived field as one variable per member of its value; CPU allocated only while an instance handles a request, unless `cpuAlwaysAllocated` keeps it (section 7.5); a startup probe on the entrypoint's `GET /readyz` (section 8.1), every 5 seconds for up to two minutes, so an instance takes traffic once its databases answer, and a liveness probe on `GET /healthz`, every 15 seconds, which restarts an instance after three misses in a row |
-| job | a Cloud Run job (`gcp.cloudrunjob`) named after the deployable, with its own service account, which holds the Cloud Trace agent role, and the config, secrets, Cloud SQL volume and VPC egress a server of its API takes; one task, which runs the image to its end, with the job's timeout for each try and the job's retries, at most the 10 Cloud Run allows (D52) |
+| job | a Cloud Run job (`gcp.cloudrunjob`) named after the deployable, for a job in Go, TypeScript or Rust (D65), with its own service account, which holds the Cloud Trace agent role, and the config, secrets, Cloud SQL volume and VPC egress a server of its API takes; one task, which runs the image to its end, with the job's timeout for each try and the job's retries, at most the 10 Cloud Run allows (D52) |
 | schedule | for a job whose environment runs a schedule, a Cloud Scheduler job named as the job is, in the environment's region, on the job's cron in its time zone, which POSTs to the Cloud Run Admin API's `jobs/<job>:run` with an OAuth token for the job's own account; that account holds `roles/run.invoker` on that job alone, which grants it `run.jobs.run`. A job whose schedule is off has neither, and runs only on demand |
 | bucket | a Cloud Storage bucket (`gcp.storage`, D54) named `<project>-<stack>-<bucket>`, since a bucket's name is global, in the environment's region, with uniform bucket-level access, so IAM alone admits a reader, and public access prevention enforced; versioned when the settings say so (section 7.5). Only a member of a parameterized environment sets `forceDestroy`: its bucket is its own, which its destroy empties, where any other bucket keeps its objects and a destroy fails on it |
-| worker | a Cloud Run worker pool (`gcp.cloudrunworker`) named after the deployable, with its own service account, which holds the Cloud Trace agent role, and the config, secrets, Cloud SQL volume and VPC egress a server of its API takes; no port, no URL and no IAM of its own, since nothing calls it; manual scaling to the worker's instances, zero when the environment turns it off, so the pool and its pinned image stay; `WORKER_CONCURRENCY` set to its concurrency; `cpu`, one or more, and `memory` (D53). A worker whose grace is ten seconds or more is refused, since Cloud Run kills an instance ten seconds after SIGTERM |
-| sql edge | `roles/cloudsql.client` and `roles/cloudsql.instanceUser` for the server's, the job's or the worker's account, held to the edge's instance by an IAM condition; an IAM database user, which the migration job gives read and write privileges; the Cloud SQL connection, which the connector derives (instance connection name, database, IAM user) and the service, the job or the worker pool mounts at `/cloudsql`. The same for a Rust server, which dials the mount's socket as the IAM user (section 7.4, D57) |
+| worker | a Cloud Run worker pool (`gcp.cloudrunworker`) named after the deployable, for a worker in Go, TypeScript or Rust (D65), with its own service account, which holds the Cloud Trace agent role, and the config, secrets, Cloud SQL volume and VPC egress a server of its API takes; no port, no URL and no IAM of its own, since nothing calls it; manual scaling to the worker's instances, zero when the environment turns it off, so the pool and its pinned image stay; `WORKER_CONCURRENCY` set to its concurrency; `cpu`, one or more, and `memory` (D53). A worker whose grace is ten seconds or more is refused, since Cloud Run kills an instance ten seconds after SIGTERM |
+| sql edge | `roles/cloudsql.client` and `roles/cloudsql.instanceUser` for the server's, the job's or the worker's account, held to the edge's instance by an IAM condition; an IAM database user, which the migration job gives read and write privileges; the Cloud SQL connection, which the connector derives (instance connection name, database, IAM user) and the service, the job or the worker pool mounts at `/cloudsql`. The same for a Rust server, job or worker, which dials the mount's socket as the IAM user (section 7.4, D57, D65) |
 | http edge | `roles/run.invoker` on the callee for the caller's account; the callee's `run.app` URL in the caller's config, with a Google ID token for the callee's custom audience, its full resource name `//run.googleapis.com/projects/<project>/locations/<region>/services/<service>`, as the service credential, since the service's own callers field cannot reference its URL; every service lists its resource name in `customAudiences`. The callee's callers field gets Google's issuer and keys, and the caller's service account by its email (section 9.2): a job's, as a caller that serves its API |
 | bucket edge | `roles/storage.objectUser` on the bucket alone for the server's, the job's or the worker's account, which reads, writes, lists and deletes its objects and changes nothing of the bucket, and `roles/iam.serviceAccountTokenCreator` for that account on itself, which IAM's `signBlob` asks of an account that signs a URL as itself; the bucket's name, which the connector derives, with no credential, since the client takes the workload's own from the metadata server. A Rust server's, job's or worker's bucket edge is refused: its runtime has no `Bucket`, and buckets from a Rust server are not built (D57) |
 | internal server | internal-only ingress, with Cloud Run's invoker check on; callers also send the token in `X-Serverless-Authorization`, which the check reads |
@@ -1835,11 +1835,11 @@ runs an environment on the `local` target (`internal/stack/local`):
 | bucket | one fake-gcs-server container per environment and checkout beside Postgres's, `superschematic-<stack>-<environment>-<checkout>-storage`, from `fsouza/fake-gcs-server:1.56.1` unless the `storageImage` value names another, on plain HTTP and publishing its port on 127.0.0.1 only. It keeps its objects in the container's filesystem. A bucket per Bucket service, named after it (`shop-media`), which the provisioner creates through the emulator's JSON API (D54) |
 | migration | each run plans with `sqlmigrate` from the model the database recorded (`superschematic-migrate status --model`) to the schema's model, and applies the plan with `superschematic-migrate`, expand and contract back to back, since no server of the previous version runs. The runner is on `PATH`, or where `SUPERSCHEMATIC_MIGRATE` says |
 | server | a Go process built with `go build` (with `-mod=mod`) from its entrypoint module at `<output-root>/server/<stack>/<server>` (section 8.1); a TypeScript one, `bun main.ts` in its entrypoint package at the same place, after one `bun install` at the output root, the root of the Bun workspace (section 8.6); or a Rust one, built with `cargo build --release --locked` in its crate at the same place and run from `target/release/<binary>`, the binary its `Cargo.toml` names (D57). Its environment is its bindings, a derived field as one variable per member (section 3.4), and `PORT`, with nothing of the shell's but `PATH`, `HOME` and a few like them. It is ready once it answers `/readyz`, and each of its lines is printed with its name in front |
-| job | a Go process built as a server is, from its entrypoint module at `<output-root>/server/<stack>/<job>`, with a server's environment and no `PORT`. It runs on its schedule, in its time zone, while `stack dev` waits, and once with `superschematic stack run <environment> <job>`, each line of a run's output with its name in front. `jobs/<job>.lock` in the environment's state directory keeps a schedule's runs and `stack run`'s apart (section 8.7) |
-| worker | a Go process built as a server is, from its entrypoint module at `<output-root>/server/<stack>/<worker>`, started in its rollout wave with the servers: the same `local:process/process:Process` node with no port, `kind: worker` and a readiness of `started`, so it is ready once it runs. Its environment is a server's with no `PORT` and with `WORKER_CONCURRENCY`, the concurrency the environment gives it. One process runs whatever its `instances`, none when the environment turns it off; each line is printed with its name in front, and its exit stops the environment, as a server's does (section 8.8) |
+| job | a process built and run as a server in its language is, from its entrypoint at `<output-root>/server/<stack>/<job>`: a Go binary, `bun main.ts` for TypeScript, or for Rust the binary its crate's `Cargo.toml` names, built with `cargo build --release --locked` into the target directory the environment's Rust servers share (D65). It has a server's environment and no `PORT`. It runs on its schedule, in its time zone, while `stack dev` waits, and once with `superschematic stack run <environment> <job>`, each line of a run's output with its name in front. `jobs/<job>.lock` in the environment's state directory keeps a schedule's runs and `stack run`'s apart (section 8.7) |
+| worker | a process built and run as a server in its language is, Go, TypeScript or Rust (D65), from its entrypoint at `<output-root>/server/<stack>/<worker>`, started in its rollout wave with the servers: the same `local:process/process:Process` node with no port, `kind: worker` and a readiness of `started`, so it is ready once it runs. Its environment is a server's with no `PORT` and with `WORKER_CONCURRENCY`, the concurrency the environment gives it. One process runs whatever its `instances`, none when the environment turns it off; each line is printed with its name in front, and its exit stops the environment, as a server's does (section 8.8) |
 | site | built once, `bun run <build>` in its package at the naming file's `[implementation_paths] site` template after the workspace's install, then served from a file server of the provisioner's own on `http://127.0.0.1:<port>`: each file of its output, its config at `/__superschematic/config.json` with each API it calls at its loopback URL, and its fallback for a path that names no file. HTML files and the config are served `no-cache` and `no-store`, so a reload sees a rebuilt site (D55) |
 | sql edge | `postgres://postgres@127.0.0.1:<port>/<database>?sslmode=disable` |
-| bucket edge | the bucket's name and the emulator's `http://127.0.0.1:<port>` as its endpoint, with no credential. A Rust server's is refused, as on gcp: buckets from a Rust server are not built (D57) |
+| bucket edge | the bucket's name and the emulator's `http://127.0.0.1:<port>` as its endpoint, with no credential. A Rust server's, job's or worker's is refused, as on gcp: buckets from a Rust server are not built (D57) |
 | http edge | the callee's `http://127.0.0.1:<port>`, with a `signed-token` credential (D37): `iss` and `sub` the caller's deployable, `aud` the callee's, signed with an Ed25519 key pair per calling and called server. A call between two APIs one server serves stays on loopback with no credential |
 | site edge | the server's public address, its loopback URL, which is also its address. The server's CORS field lists the site's origin, `http://127.0.0.1:<port>` (D55) |
 | secret | a line `<Type>.<FIELD>=<value>` in `<schemas-root>/.superschematic/local/<stack>/<environment>/secrets.env` |
@@ -1905,9 +1905,8 @@ callers first, and SIGKILL ten seconds later.
 Policy rules refuse what a local environment cannot hold: a domain
 (`local-no-domain`), parameters (`local-no-parameters`), and two listeners
 on one port (`local-distinct-ports`), which names each container by its
-name. The platform runs Go, TypeScript and Rust servers; a TypeScript or
-Rust job or worker does not resolve (`unrealizable`), since D52, D53 and
-D57 leave them out.
+name. The platforms run Go, TypeScript and Rust servers, jobs and
+workers (D57, D65).
 
 Not built:
 
@@ -2121,7 +2120,11 @@ as they are, with no build step (D51). The pieces mirror Go's:
   variables Go's `stackconfig` reads, and throws a `StackConfigError`
   naming every variable at fault. Vectors shared by both runtimes
   (`runtime/http/testdata/stackconfig_parity.json`) hold them to one
-  encoding.
+  encoding. A job and a worker are given no callers field, and an API
+  with a callers field and a job or a worker gets
+  `loadBackgroundEnvConfig()` too, which their entrypoints call: it reads
+  what `loadEnvConfig()` reads but the callers field, which holds no
+  issuers (D65).
 - **Implementation.** `[implementation_paths] typescript` defaults to
   `typescript/{service}`. The API generator writes `Deps` and
   `Constructor`, `(deps: Deps) => Implementations |
@@ -2291,8 +2294,8 @@ package by hand.
 #### Rust servers
 
 A Rust server is the TypeScript server's twin on tokio (D57). A server is
-Rust when the APIs it serves are, by `outputs.api.language` `RUST`, and
-its jobs and workers stay Go's.
+Rust when the APIs it serves are, by `outputs.api.language` `RUST`, and so
+are the jobs and workers of a Rust API (D65; sections 8.7 and 8.8).
 
 - **Derived config.** The API crate's `config.rs` declares `EnvConfig`
   and `load_env_config()`: the `@envVars` settings beside a `Database` per
@@ -2300,7 +2303,12 @@ its jobs and workers stay Go's.
   field and, over the user model, the identity config, which the HTTP
   runtime's `stackconfig` readers and `identity::Config::parse` read from
   the variables Go's `stackconfig` reads. Its error names every variable
-  missing or invalid.
+  missing or invalid. A job and a worker are given no callers field, and
+  an API with a callers field and a job or a worker gets
+  `load_background_env_config()` too, which their entrypoints call: it
+  reads what `load_env_config()` reads but the callers field, which holds
+  no issuers. The identity config and CORS fields read as their defaults
+  when unset, so neither needs one.
 - **Implementation.** `[implementation_paths] rust` defaults to
   `rust/{service}`. The API crate's `deps.rs` declares `Deps` (`config`,
   `db`, a Postgres pool from the runtime's `postgres`, a client per callee
@@ -2309,20 +2317,51 @@ its jobs and workers stay Go's.
   them with what it builds through `Implementations::new`. The scaffold
   writes the crate once, in a directory that holds no `Cargo.toml`, as
   its own workspace, so no `Cargo.toml` above it claims it. The server's
-  crate depends on it by the package name its `Cargo.toml` gives it.
+  crate depends on its mirror by the package name its `Cargo.toml` gives
+  it.
+- **Mirror.** The crate names the API crate by its path under the output
+  root its scaffold was written for, which its editor and its own `cargo
+  test` build against. So each build of a stack copies each
+  implementation its Rust servers build against into
+  `<output-root>/impl/<service>/`, and the server crates depend on the
+  copy (D65): an output root builds against its own API crates alone,
+  `stack dev --out` builds anywhere, and two output roots build at once.
+  The copy's `Cargo.toml` is the crate's with every path dependency
+  re-based for the copy's directory: the API crate's names the current
+  output root's `api/<service>`, any other under the output root the
+  crate names its API crate under names the same place under the current
+  one, and the crate's `[workspace]` table and `package.workspace` go. A
+  crate that inherits a field or a dependency from a workspace
+  (`workspace = true`), or whose build script or targets lie outside it,
+  is refused. The copy holds the crate's other files as a package of it
+  would: not the root's `Cargo.lock` and `target/`, `.git`, or a
+  directory with a `Cargo.toml` of its own, nor what `[package] include`
+  leaves out when it is set, or else what `[package] exclude` and the
+  crate's `.gitignore` files leave out, so it holds what a fresh checkout
+  builds from. A build writes only the files whose content changed, so
+  Cargo's fingerprints keep a rebuild cheap, removes the files the crate
+  no longer has, and removes a mirror no server, job or worker crate
+  depends on. A change
+  to the crate reaches the servers with the next build of the stack, which
+  `stack dev` runs first; a source that includes a file outside its crate
+  by a relative path does not build from the copy.
 - **Workspace.** `<output-root>/Cargo.toml` is a virtual workspace whose
-  members are the Rust server crates of every stack built into the output
-  root, `server/<stack>/<server>`, listed by name since `server/*/*` holds
+  members are the crates of the Rust servers, jobs and workers of every
+  stack built into the output root, `server/<stack>/<deployable>`, listed
+  by name since `server/*/*` holds
   the Go and TypeScript servers too, and Cargo refuses a member without a
   `Cargo.toml`. It excludes `api`, `sdk` and `types`, so a generated crate
-  under the output root builds on its own, as before. The generated
-  crates the servers depend on and the implementations are path
-  dependencies, not members, and its lockfile, `<output-root>/Cargo.lock`,
-  pins every crate they reach. The lockfile lies outside
+  under the output root builds on its own, as before, and `impl`, so a
+  mirror is no member, whose dev-dependencies Cargo would resolve. The
+  generated crates the servers depend on and the implementations' mirrors
+  are path dependencies, not members, and its lockfile,
+  `<output-root>/Cargo.lock`, pins every crate they reach, and names no
+  path crate's directory, so it holds in any output root. The lockfile
+  lies outside
   `server/<stack>`, which each build empties, and the project commits it
   as it commits `bun.lock` (D51, amended): `dist/*` and `!dist/Cargo.lock`
   take it back from an ignored output root, and the build says so in one
-  line when git ignores it. Each build of a stack with a Rust server brings
+  line when git ignores it. Each build of a stack with a Rust crate brings
   it up to date with `cargo update --workspace`, which writes it when there
   is none, adds what a manifest gained, drops what none needs, and changes
   no version it pinned of a crate still needed. A build without cargo on
@@ -2330,7 +2369,8 @@ its jobs and workers stay Go's.
   its services, leaves it as it is and says so in one line. The crate's
   package is `<rust_crate_prefix><stack>-<server>-server`, unique in the
   workspace whichever stacks share a server's name, and its one binary is
-  the server's name.
+  the server's name; a job's is `...-<job>-job` and a worker's
+  `...-<worker>-worker`, each with a binary named after the deployable.
 - **Entrypoint.** `src/main.rs`, on a tokio runtime:
   - installs the runtime's JSON-line log (`logging::init_json`), with the
     stack and the server on every line;
@@ -2368,40 +2408,49 @@ its jobs and workers stay Go's.
   `tools.env` pins, builds the crate in the workspace with `cargo build
   --release --locked`, which fails on a lockfile that does not match the
   crates, and fails first, saying to build and commit it, when the context
-  holds none. The image runs the binary on distroless `cc`, which holds
-  the glibc, libgcc and OpenSSL it links, as the non-root user, with
-  `PORT=8080`. Cargo reads every member and every crate a member reaches
-  by path to check the lockfile, so `Dockerfile.dockerignore` takes in,
-  by pattern, every server crate's manifest and sources, every Rust API
+  holds none. A deploy's context gives every file one time, and Cargo
+  takes a path crate whose files are no newer than its last build as
+  built, so the stage touches the context's files before it builds: the
+  target cache every Rust image's build shares keeps the registry's crates
+  compiled, and the rest is compiled from the context. The image runs the
+  binary on distroless `cc`, which holds the glibc, libgcc and OpenSSL it
+  links, as the non-root user, with `PORT=8080` for a server and no port
+  for a job or a worker. Cargo reads every member and every crate a member
+  reaches by path to check the lockfile, so `Dockerfile.dockerignore`
+  takes in, by pattern, every member's manifest and sources, every Rust API
   crate's manifest, sources and `openapi.json`, the Rust SDKs and types,
-  and every implementation's manifest and sources, then the server's own
-  implementations whole and the checkouts of the HTTP runtime, the schema
-  runtime and superscalar's crate with its workspace's root manifest,
-  whose lints the crate inherits. Without `[paths] scalar_rust` or
-  `schema_runtime_rust`, or with a checkout outside the build context, no
-  Dockerfile is written, and the build says why.
-- **Local.** `stack dev` builds each Rust server's crate with `cargo build
-  --release --locked` into the program directory's Cargo target
-  directory and runs its binary (section 8.3). Its build of the stack has
-  brought the lockfile up to date first, so a manifest the engineer
-  changes reaches the lockfile through `stack dev`. The implementation's
-  `Cargo.toml` names the API crate by its path under the output root the
-  scaffold was written for, so the server builds in that output root
-  alone: with `--out` elsewhere, cargo finds two crates of the API's name
-  and refuses the workspace.
+  and every implementation's mirror under `impl/` whole, then the
+  checkouts of the HTTP runtime, the schema runtime and superscalar's
+  crate with its workspace's root manifest, whose lints the crate
+  inherits. No implementation's own directory goes in. Without `[paths]
+  scalar_rust` or `schema_runtime_rust`, or with a checkout outside the
+  build context, no Dockerfile is written, and the build says why.
+- **Local.** `stack dev` builds each Rust server's, job's and worker's
+  crate with `cargo build --release --locked` into the program directory's
+  Cargo target directory and runs its binary (section 8.3). Its build of the stack has
+  brought the mirrors and the lockfile up to date first, so a change the
+  engineer makes to an implementation, its manifest too, reaches the
+  servers and the lockfile through `stack dev`, with `--out` anywhere.
 - **CI.** The generated `check` sets up the Rust release before the build,
   refuses a lockfile git does not track or the build changed, and runs
-  `cargo check --locked` in each Rust server's crate (section 11.3).
+  `cargo check --locked` in each Rust server's, job's and worker's crate
+  (section 11.3).
 
 `TestStackDevRunsARustServer` runs a Rust server over Postgres that calls
 another, and signs an end user in with the identity runtime.
+`TestStackDevRunsRustJobsAndWorkers` runs a Rust API's server and worker,
+and its job through `stack run` (sections 8.7 and 8.8).
 acme-shop's `TestStackDevRunsTheShop` runs `shop-stock`, a Rust server
 over `shop-db` whose reservations admit only `shop-orders`' Go server,
 which reserves an order's stock through `shop-stock`'s Go SDK with its
-edge's credential and the shopper it forwards.
+edge's credential and the shopper it forwards. A reservation that takes a
+product's level below its threshold enqueues `StockLow` in its
+transaction; `shop-stock`'s Rust worker `ReorderStock` files the
+product's restock request, and its Rust job `OrderRestocks`, which
+the test runs with `stack run`, orders it (D65).
 
-Not built: Rust jobs and workers, buckets from a Rust server, and
-OpenTelemetry export (D57).
+Not built: buckets from a Rust server, job or worker, and OpenTelemetry
+export (D57, D65).
 
 ### 8.7 Jobs
 
@@ -2479,19 +2528,34 @@ export abstract class ShipOrders {}
   serves no port and answers no health check. A package that predates its
   jobs, with no `NewJobs`, fails the build with the signature to add
   (section 8.5). A TypeScript job's package (section 8.6) does the same on
-  Bun: `main.ts` calls the implementation's `createJobs`, then the job's
+  Bun: `main.ts` loads the API's `EnvConfig` with
+  `loadBackgroundEnvConfig()` where it has a callers field, which no job
+  is given, calls the implementation's `createJobs`, then the job's
   method once with the signal, logs `job started`, then `job done` or
   `job failed` with how long the run took in seconds, through the HTTP
   runtime's logger, and exits 1 when the method rejects. An
   implementation that exists and exports no `createJobs` fails the build
   with what to add; the build reads the exports from its source, a
   declaration, an export list or a re-export of a whole module, which
-  may export it.
+  may export it. A Rust job's crate (section 8.6, D65),
+  `<rust_crate_prefix><stack>-<job>-job`, a member of the output root's
+  Cargo workspace, does the same on tokio: `main.rs` loads the API's
+  `EnvConfig` with `load_background_env_config()` where it has a callers
+  field, which no job is given, calls the implementation's `create_jobs`,
+  then the job's method once with the HTTP runtime's
+  `Shutdown::on_signals()`, logs `job started`, then `job done` or `job
+  failed` with how long the run took in seconds, through the runtime's
+  `logging`, its lines naming the job as `job`, and exits 1 on any
+  failure. `Shutdown` logs `shutting down` on the first signal, a line
+  the Go and TypeScript jobs do not write, and a second ends the run at
+  once. An
+  implementation whose `src/lib.rs` declares no `create_jobs` fails the
+  build with what to add.
 - **Image.** A job's Dockerfile is a server's (section 8.2), with the
-  binary at `/job`. `stack build` builds it, `--image` and the deploy
-  manifest pin it, and the deploy rolls it out, as they do a server's
-  (section 11.2); the target's `ImageBuilder` takes the job's name in
-  `BuildRequest.Deployable`.
+  binary at `/job`, and a Rust job's at `/<job>`, with no port. `stack
+  build` builds it, `--image` and the deploy manifest pin it, and the
+  deploy rolls it out, as they do a server's (section 11.2); the target's
+  `ImageBuilder` takes the job's name in `BuildRequest.Deployable`.
 - **Schedule.** The decorator's schedule, a five-field cron in its time
   zone (UTC unless set), is the default. An environment's settings change
   it or turn it off: `{ of: ShopOrders, job: "ShipOrders", schedule,
@@ -2506,7 +2570,9 @@ export abstract class ShipOrders {}
   `local:process/job:Job` node, and `stack dev` builds its binary in its
   rollout wave, as it builds a server's, or, for a TypeScript job, installs
   the output root's workspace and runs `bun main.ts` in its package with
-  nothing to build, then runs each schedule beside
+  nothing to build, or, for a Rust job, builds its crate with cargo into
+  the target directory the environment's Rust servers share (D65), then
+  runs each schedule beside
   the servers until Ctrl-C (section 8.3): never two runs of one job at
   once, a run that comes due while the last goes on skipped, each line of
   its output with the job's name in front, a run stopped at the job's
@@ -2715,7 +2781,9 @@ export abstract class FulfilOrders {}
     exits 0.
 
   A TypeScript worker's package (section 8.6) does the same on Bun: its
-  `main.ts` calls the implementation's `createWorkers` and runs
+  `main.ts` loads the API's `EnvConfig` with `loadBackgroundEnvConfig()`
+  where it has a callers field, calls the implementation's
+  `createWorkers` and runs
   `runWorker` (`@superschematic/http-runtime/worker`), the twin of
   `worker.Run`, over `postgresQueue`'s claims, with the concurrency
   `workerConcurrency` reads from `WORKER_CONCURRENCY`. Each method gets a
@@ -2723,13 +2791,32 @@ export abstract class FulfilOrders {}
   method that ignores it: its message is released all the same, and its
   outcome, when it comes, is logged and changes nothing, since the process
   exits once the loop stops.
+
+  A Rust worker's crate (section 8.6, D65),
+  `<rust_crate_prefix><stack>-<worker>-worker`, does the same on tokio:
+  its `main.rs` loads the API's `EnvConfig` with
+  `load_background_env_config()` where it has a callers field, calls the
+  implementation's `create_workers`, reads its queue's descriptor from the
+  constant the database's Rust types hold (`database_types::STOCK_LOW_QUEUE`
+  through the API crate), and runs the HTTP runtime's `worker::run_worker`,
+  Go's loop ported, over a `queue::PostgresQueue` of it, with the
+  concurrency `worker::concurrency_from_env` reads from
+  `WORKER_CONCURRENCY` and the resolved grace. It logs `worker started`
+  with the API, the class, the queue and the concurrency, and the loop's
+  lines, which name the worker as `worker`, and `Shutdown` logs `shutting
+  down` on SIGTERM, a line the Go and TypeScript workers do not write.
+  Once the grace is over, a method still running is dropped where it
+  waits, and its message released. Its image, as a Rust job's, holds the
+  binary at `/<worker>` and no port.
 - **Local.** `stack dev` runs each worker as a process with no port,
-  a TypeScript one as `bun main.ts`, ready once it starts, its output
-  prefixed with its name. Its exit stops
-  the environment, as a server's does (section 8.3).
-- **gcp.** A worker, in Go or TypeScript, is a Cloud Run worker pool (`gcp.cloudrunworker`,
-  `gcp:cloudrunv2/workerPool:WorkerPool`, GA in the pinned pulumi-gcp
-  9.37.1), which has no port, no URL and no IAM of its own (section 7.2).
+  a TypeScript one as `bun main.ts` and a Rust one from the binary its
+  crate builds with cargo (D65), ready once it starts, its output
+  prefixed with its name. Its exit stops the environment, as a server's
+  does (section 8.3).
+- **gcp.** A worker, in Go, TypeScript or Rust, is a Cloud Run worker
+  pool (`gcp.cloudrunworker`, `gcp:cloudrunv2/workerPool:WorkerPool`, GA
+  in the pinned pulumi-gcp 9.37.1), which has no port, no URL and no IAM
+  of its own (section 7.2).
   It scales manually to the worker's instances, and to zero when the
   environment turns the worker off, which keeps the pool and its pinned
   image. Its account connects as a server's does, and the migration job
@@ -2744,7 +2831,6 @@ export abstract class FulfilOrders {}
 
 Not built:
 
-- A worker in Rust, and the claims in its runtime.
 - A `POINT` or `INTERVAL` column in a TypeScript queue's message.
 - Claims on SQLite and D1, whose write transaction would claim.
 - Removing `done` messages, which stay in the table, and an operator's
@@ -3816,13 +3902,14 @@ The GitHub workflow:
     carry their declarations, while a checkout that `[paths]` names needs
     its build output in the CI checkout, which the image builds for itself
     and the workflow does not.
-  - For a stack with a Rust server, `check` sets up the Rust release
-    `tools.env` pins with the runner's `rustup` before the build, which
-    brings the output root's Cargo lockfile up to date with it (section
-    8.6). After the build it fails, in a step that names the lockfile,
+  - For a stack with a Rust server, job or worker, `check` sets up the
+    Rust release `tools.env` pins with the runner's `rustup` before the
+    build, which brings the output root's Cargo lockfile up to date with
+    it (section 8.6). After the build it fails, in a step that names the lockfile,
     when git does not track the lockfile or the build changed it, and says
-    to build every service and commit it. Then each Rust server's crate
-    compiles with `cargo check --locked` (level 2), which checks the
+    to build every service and commit it. Then each Rust server's, job's
+    and worker's crate compiles with `cargo check --locked` (level 2), in
+    that order and each named for its kind, which checks the
     implementations it depends on. The crates name the runtime checkouts
     `[paths]` names by path, so the CI checkout holds them, as the image's
     context does. Every preview and deploy job, whose build runs the same

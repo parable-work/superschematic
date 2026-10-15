@@ -180,6 +180,14 @@ func TestWorkerRefusals(t *testing.T) {
 		_, errs := resolve(t, reg, s, services, "Staging")
 		mustFail(t, errs, stack.CodeUnrealizable, "worker shop-orders-fulfil-orders claims the messages of queue OrderPlaced of shop-db, which environment Staging places on shop-db, a sqlite database; a worker claims on Postgres")
 	})
+	t.Run("a Rust worker's queue on SQLite", func(t *testing.T) {
+		s, services := workerShop()
+		service(services, "shop-orders").Language = registry.APILanguageRust
+		service(services, "shop-db").Dialects = []string{registry.SQLDialectSQLite}
+		settingsFor(s.Environment("Staging"), stacktest.Of(stacktest.ShopDB)).Platform = stacktest.LitePlatform
+		_, errs := resolve(t, reg, s, services, "Staging")
+		mustFail(t, errs, stack.CodeUnrealizable, "worker shop-orders-fulfil-orders claims the messages of queue OrderPlaced of shop-db, which environment Staging places on shop-db, a sqlite database; a worker claims on Postgres, the one dialect the Go ORM and the TypeScript and Rust queue clients claim on (D53, D65)")
+	})
 	t.Run("a worker named like another deployable", func(t *testing.T) {
 		s, services := workerShop()
 		s.Deployables = append(s.Deployables, &ir.DeployableDecl{Name: stacktest.FulfilOrdersWorker, Kind: ir.DeployableDatabase, Hosts: []ir.ServiceRef{stacktest.ShopDB}})

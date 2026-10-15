@@ -926,18 +926,20 @@ func (r *resolver) placeServer(d *deployable) {
 	}
 }
 
-// unbuiltDeployable says which decision left a job or a worker in lang
-// out, so that a refusal of one names the scope rather than the platform
-// alone: a job or a worker is written in its API's language, and only Go
-// and TypeScript ones have an entrypoint (D52, D53, amended).
+// unbuiltDeployables names, by kind and then language, the decision that
+// leaves a deployable of that kind in that language out, so that a
+// refusal of one names the scope rather than the platform alone: a job or
+// a worker is written in its API's language, and has an entrypoint only
+// in a language a decision built one for. Go, TypeScript and Rust
+// servers, jobs and workers all have one (D51, D52, D53, D57, D65), so it
+// lists none; a decision that leaves a kind out in a language adds it here
+// with its reason.
+var unbuiltDeployables = map[ir.DeployableKind]map[string]string{}
+
+// unbuiltDeployable says which decision left a deployable of kind in lang
+// out, or "" when none did and the platform alone refuses it.
 func unbuiltDeployable(kind ir.DeployableKind, lang string) string {
-	if kind != ir.DeployableJob && kind != ir.DeployableWorker {
-		return ""
-	}
-	if lang == registry.APILanguageRust {
-		return "Rust jobs and workers are not built (D57)"
-	}
-	return ""
+	return unbuiltDeployables[kind][lang]
 }
 
 // serverLanguage returns the language of a server: that of the APIs it

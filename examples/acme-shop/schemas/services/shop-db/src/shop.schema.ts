@@ -64,4 +64,9 @@ export abstract class StockLevel extends Auditable {
   product: Relation<Product, { onDelete: "CASCADE" }>;
 
   quantity: Generic.Int64;
+
+  // The level below which the product is restocked: a reservation that
+  // takes the quantity below it enqueues StockLow. A product with none, or
+  // with zero, is never restocked.
+  threshold: Nullable<Generic.Int64>;
 }

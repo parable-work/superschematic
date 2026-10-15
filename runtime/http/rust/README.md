@@ -57,12 +57,13 @@ Signatures are checked with `ring`. The optional `http-client` feature adds
 `JwtServiceAuthenticator` and HTTP client of `GoogleIdTokenSource`. Without
 it, a service passes its own `KeyFetcher` or `HttpGetter`.
 
-## Running in a stack (D57)
+## Running in a stack (D57, D65)
 
-A generated Rust server in a stack reads its configuration from the
-environment, opens its databases, calls other APIs with a service
-credential and logs JSON lines, through these pieces, the twins of the Go
-and TypeScript runtimes' (D51):
+A generated Rust server, job or worker in a stack reads its configuration
+from the environment, opens its databases, calls other APIs with a service
+credential, enqueues and claims queue messages, stops on a signal and logs
+JSON lines, through these pieces, the twins of the Go and TypeScript
+runtimes' (D51):
 
 - `stackconfig`, with no feature: the readers of the fields an API's edges
   derive (section 3.4 of `docs/stack-model.md`), each from one variable per
@@ -135,12 +136,62 @@ and TypeScript runtimes' (D51):
   stdout at `info`, with the TypeScript `createLogger`'s members: `level`,
   `time` (RFC 3339 in UTC, to the millisecond) and `msg` first, then
   `stack` and `server`, the fields of the spans the event is in (`api`, in
-  an `api_span(api)`), and the event's own. It re-exports `tracing`.
+  an `api_span(api)`), and the event's own. A job's and a worker's
+  entrypoint install it with `init_json_as(stack, logging::JOB, name)` or
+  `logging::WORKER`, whose lines name the deployable `job` or `worker` in
+  place of `server`, as Go's and TypeScript's do. It re-exports `tracing`.
+- `Shutdown`, with no feature: the cancellation a job's method watches and
+  a worker's loop stops on, tokio-util's `CancellationToken` (re-exported)
+  under the name the generated code takes. `Shutdown::on_signals()`, inside
+  a tokio runtime, is cancelled by the first SIGTERM or SIGINT, which it
+  logs (`"shutting down"`); a second ends the process at once with 143 or
+  130, as a generated server's does. `BoxError` is the error a job's or a
+  worker's method returns.
+- The `postgres` feature's `queue` module, the twin of the Go ORM's
+  `queues.go` and TypeScript's `queue.ts` (D53): a DB's Rust types carry
+  each queue's descriptor as JSON, which `QueueDefinition::parse` reads in
+  TypeScript's `QueueDefinition` member names (`name`, `table`, `retries`,
+  `backoffSeconds`, `leaseSeconds`, `fields` with each `name`, `column`,
+  `json`, `list` and `default`, and the `statements`
+  `sqlutil.PostgresQueueStatements` writes). `enqueue(&tx, &queue, &message)`
+  writes a message in the caller's transaction, a deadpool `Transaction`,
+  each member of the message's serde form to its field's column, an unset
+  enum to its schema default. `PostgresQueue::<M>::new(pool, queue)` claims
+  (`claim(n, lease)`, expiring dead claims first, as Go does), `extend`s,
+  `complete`s, `fail`s (returning whether the message is dead) and
+  `release`s, each change refusing a token that no longer claims its
+  message with `QueueError::ClaimLost`. Parameters go as text, which
+  Postgres reads by each column's type, as node-postgres sends them, a
+  base62 `Identity.UUID` hyphenated; a claimed row's columns come back as
+  the JSON values a message's type reads: a `TIMESTAMPTZ` in RFC 3339 in
+  UTC as superscalar's `DateTime` writes it, a `UUID` hyphenated, a list
+  from its array, JSON as itself. A column of a type it does not read
+  (`POINT`, `INTERVAL`, which the descriptors leave out) is refused.
+- The `postgres` feature's `worker` module, Go's `worker.Run` ported:
+  `run_worker(queue, handler, Options { concurrency, grace, idle },
+  shutdown)` claims for each free slot up to the concurrency
+  (`concurrency_from_env(default)` reads `WORKER_CONCURRENCY`), waits the
+  idle second after a claim that found too few, and after a failed claim a
+  wait that doubles to 30 s. It runs each handler, any `Fn(M) -> impl
+  Future<Output = Result<(), BoxError>>`, in a task of its own, extends its
+  claim every third of the lease, completes the message on `Ok` and fails
+  it on an error or a panic, with the error's chain of causes, up to 4000
+  characters, as the cause. Each queue operation has 5 s to answer. Once
+  `shutdown` is cancelled it claims no more, lets the running handlers
+  finish within the grace (8 s by default), then drops the rest and
+  releases their messages. It logs Go's and TypeScript's messages and
+  fields (`queue`, `message`, `attempt`, `took`, `error`, `retryIn`) through
+  `tracing`. It claims through the `WorkerQueue` trait, which
+  `PostgresQueue` implements.
 
 The Postgres tests run on the database
 `SUPERSCHEMATIC_POSTGRES_TEST_DATABASE_URL` names, and skip without one;
 `SUPERSCHEMATIC_POSTGRES_TEST_TLS=1` says it offers TLS with a certificate
-the system's roots do not sign:
+the system's roots do not sign. `tests/queue.rs` runs the queue client and
+the worker loop over a schema of its own holding the tables of sqlgen's
+golden DDL of fixture-queue-db (`tests/testdata/queue/create.sql`), with
+the descriptors tsgen's golden `queues.ts` holds for them, as JSON. The
+loop's timing runs on tokio's paused clock with no database:
 
 ```
 cargo test --features postgres,identity-postgres,identity-sqlite,logging

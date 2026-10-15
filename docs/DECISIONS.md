@@ -5529,11 +5529,11 @@ Status: built.
 
 No Rust server has run on Cloud Run.
 
+D65 builds what this left out of a stack: Rust jobs and workers, and an
+output root that builds against a mirror of each implementation crate,
+so `stack dev --out` elsewhere no longer collides in Cargo's lockfile.
+
 Not built:
-- an implementation crate that builds with the API crate somewhere other
-  than the output root its `Cargo.toml` names by path, so `stack dev
-  --out` elsewhere collides in Cargo's lockfile;
-- Rust jobs and workers;
 - buckets from a Rust server;
 - OpenTelemetry export.
 
@@ -5824,8 +5824,9 @@ ORM's semantics, since one queue may have Go and TypeScript callers.
 | The claim loop is the runtime's `./worker` entry, `runWorker`, the twin of `worker.Run`: it claims for its free slots, extends each claim every third of the lease while the handler runs, completes a message when the handler resolves and fails it when the handler rejects or throws, logs each outcome, and waits a second after a claim that found too few messages, and longer, up to thirty seconds, after one that failed. When its signal aborts it claims no more, gives the running handlers the grace, then aborts the signal each handler was given and releases their messages. A worker's `main.ts` builds `Deps` as a job's does and runs it with `workerConcurrency` and the decorator's grace. JavaScript cannot stop a handler that ignores its signal: its message is released all the same, its late outcome changes nothing, and the process exits once the loop resolves. | A worker thread per handler, which could be stopped but would run the implementation apart from its `Deps`' pools. |
 | `local.worker`, `gcp.cloudrunworker` and the fake target's worker platform take TypeScript: locally the worker runs as `bun main.ts`, and on gcp its image runs in the worker pool. Claims stay on Postgres: the TypeScript client speaks Postgres alone, as the Go ORM does, and resolution refuses a worker, in either language, whose queue's database an environment places on another dialect. | Claims on SQLite in TypeScript through `bun:sqlite`, which the Go ORM cannot match yet. |
 
-Status: built in #348. `TestQueueParityWithTypeScriptOnPostgres` runs the
-Go ORM and the TypeScript client against one Postgres, and
+Status: built in #348. `TestQueueParityOfGoTypeScriptAndRustOnPostgres`
+(so named since D65 made Rust its third side) runs the Go ORM and the
+TypeScript client against one Postgres, and
 `TestQueuesWriteWhatTheGoORMWrites` holds `queues.ts` to the Go ORM.
 `TestTypeScriptJobAndWorkerRunOnPostgres` runs ts-shop's worker under Bun:
 it handles a message, retries one that fails once after the backoff, marks
@@ -6627,5 +6628,71 @@ when the storefront and a D1-backed API have run live. Section 18 of
 | acme-shop's storefront proves it first: a `storefront-stack` runs it alone on Workers, at workers.dev and then under a domain. The target is done when that, and a D1-backed TypeScript API, have run live. | Every Cloudflare kind live before calling it done. |
 
 Status: the core's artifacts are built, proved on `stack/stacktest`'s `fake.bundle` platform and fake bundle store: `PlatformSpec.Artifact` and the deployable's `artifact`; `{bundle-digest}`, `{bundle-sha256:<file>}` and `PinBundles`; the bundle's build, digest and publish through `TargetSpec.Bundles`, and its fetch (`registry.ArtifactFetcher`, also on a `SitePublisher`) and placement under the program's `artifacts/`; the manifest's `bundles` and `--bundle`; `StateBackend.Env`; and `TargetSpec.PreDestroy`. The cloudflare target itself is not built.
+
+## D65. A Rust API runs jobs and workers, its workers claim queues through a descriptor its types carry, and each output root builds against a mirror of its implementations
+
+D57 gave a Rust API a server and left out its jobs and workers: the
+resolver refuses them on `local.job` and `local.worker` ("Rust jobs and
+workers are not built (D57)"), `gcp.cloudrunworker` takes Go and
+TypeScript alone, and the generator logs that a Rust job or worker "gets
+no generated entrypoint yet". #348 gave TypeScript the same pieces Go has,
+and TypeScript workers claim without an ORM, through a queue descriptor
+the DB's types package carries and the SQL `sqlutil.PostgresQueueStatements`
+writes for both. D57 also left a defect: an implementation crate names the
+API crate by its path under the output root the scaffold saw, so a build
+into another output root holds two crates of one name, and Cargo refuses
+it. This entry finishes Rust's place in a stack, short of buckets.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A Rust API's crate gains a `Jobs` trait, one `async fn <job>(&self, shutdown: Shutdown) -> Result<(), BoxError>` per `@job`, and a `Workers` trait, one `async fn <worker>(&self, message: <Queue>) -> Result<(), BoxError>` per `@worker`, with the message type from the DB's Rust types. `Shutdown` is the runtime's cancellation token. The implementation crate's scaffold adds `create_jobs(deps)` and `create_workers(deps)` beside `create`, and the build refuses an implementation that lacks one its API needs, naming what to add, as it refuses a TypeScript one without `createJobs`. | A context argument on every method, as Go's, which Rust's futures do not need: a worker's handler is dropped after the grace, and a job watches `Shutdown`. |
+| The DB's Rust types crate writes `queues.rs`: per queue, the message type and a constant holding its descriptor as JSON (name, table, retries, backoff, lease, each field's column and form, and the statements `PostgresQueueStatements` writes), as TypeScript's `queues.ts` holds it as data. A queue with a field the descriptor cannot carry (POINT, INTERVAL) is left out, and a Rust worker of it refused, as TypeScript's are. | Types that depend on the runtime, which the types crates never do. SQL written again in Rust, which would drift from Go's and TypeScript's. |
+| The Rust runtime gains `queue`, behind `postgres`: `QueueDefinition::parse`, `enqueue` in a caller's transaction, and a `PostgresQueue` that claims, extends, completes, fails and releases by the descriptor's statements, refusing a lost claim. It gains `worker`, Go's loop ported: concurrency from `WORKER_CONCURRENCY`, a claim per free slot, a second's wait when idle, a growing wait after a failed claim, an extension every third of the lease, a handler's panic as its failure, a cause capped at 4000 characters, and on SIGTERM the grace, then the handlers dropped and their messages released. ormgen's queue parity test, which has Go and TypeScript claim each other's messages on Postgres, takes Rust as the third side. | A queue client per API, generated, which the descriptor makes unnecessary. |
+| servergen writes a Rust job's and a Rust worker's crate beside a server's, `<prefix><stack>-<deployable>-job` and `-worker`, each a member of the output root's workspace, with a binary named after the deployable, a `main.rs` and a Dockerfile. A job loads its API's `EnvConfig`, opens its pools, builds its `Deps` and calls its method once, exiting 1 on a failure so the platform retries it; a worker runs the loop over its queue. Neither builds an identity service or a router, as D52 and D53 have it. `local.job`, `local.worker` and `gcp.cloudrunworker` take Rust, and the local provisioner builds them with cargo as it builds a Rust server. | One binary that takes a job or worker name, which would make every deployable's image hold every other's code. |
+| Each build mirrors each Rust implementation crate it builds against into `<output-root>/impl/<service>/`, copying only what changed, with the crate's path dependencies rewritten for where the mirror sits, and the server, job and worker crates depend on the mirror. So an output root is self-contained: `stack dev --out` anywhere builds against that root's own API crates, an image's build context needs no implementation directory, and the crate the project edits keeps its path to the default output root for its editor and its own `cargo test`. | Rewriting the project's `Cargo.toml` each build, a source change per `--out`. A symlink the build repoints, which two output roots building at once would race on. Refusing another output root. `[patch]`, which cannot patch a path source. |
+| acme-shop proves it: `shop-db` gains a `StockLow` queue and a `RestockRequest` table; `shop-stock`'s reservation enqueues `StockLow` in its transaction when a level falls below its threshold; a Rust worker, `ReorderStock`, files one open restock request per product; and a Rust job, `OrderRestocks`, on a schedule, marks the open ones ordered. `TestStackDevRunsTheShop` places an order that runs a product low, sees the request filed, runs the job with `stack run`, and sees it ordered, and runs once more into an output root of its own. | A fixture alone, which nothing would run end to end. |
+
+Status: built.
+- The Rust HTTP runtime gains `Shutdown`, `queue` and `worker`, behind
+  `postgres`. Its tests claim on Postgres from sqlgen's own schema, and
+  run the loop's waits, extensions, panics and grace on tokio's paused
+  clock. `logging::init_json_as` names a job's or a worker's lines as Go
+  and TypeScript do. `TestQueueParityOfGoTypeScriptAndRustOnPostgres`
+  has each of Go, TypeScript and Rust enqueue, claim, extend, release,
+  fail and complete the others' messages, and refuse each other's lost
+  claims.
+- rustgen writes `queues.rs`, and `TestQueuesDescribeWhatTypeScriptWrites`
+  holds its descriptors to `queues.ts`. rustrestgen writes `Jobs` and
+  `Workers` and the scaffold's `create_jobs` and `create_workers`, and
+  `TestRustJobsAndWorkersCompile` runs clippy over them;
+  `TestRustJobsAndWorkersRefusals`,
+  `TestARustImplementationThatPredatesItsJobsFails` and
+  `TestARustWorkerOfAQueueTheClientCannotHoldFails` hold the refusals.
+  An API with a callers field gains `load_background_env_config`, which
+  a job and a worker load, since a stack gives them no callers field.
+  TypeScript's `config.ts` gains `loadBackgroundEnvConfig` likewise: a
+  TypeScript job or worker of such an API failed to start without it,
+  which `TestStackDevRunsTypeScriptJobsAndWorkers` now covers.
+- servergen writes each Rust job's and worker's crate and image, and
+  cigen's `check` compiles them. `TestRustJobAndWorkerRunOnPostgres` runs
+  the fixture's job and worker, `TestTheRustJobAndWorkerDockerfilesBuildImagesThatRun`
+  their images, and `TestStackDevRunsRustJobsAndWorkers` both under
+  `stack dev`, given only the variables the stack derives.
+- Each build mirrors each implementation into `<output-root>/impl/`.
+  `TestRustServersBuildInAnyOutputRoot` builds a fixture into two other
+  output roots, in turn and at once, with `--locked`, and fails without
+  the mirror on Cargo's collision.
+- acme-shop: `shop-stock`'s reservation enqueues `StockLow`, the Rust
+  worker `ReorderStock` files a restock request, and the Rust job
+  `OrderRestocks`, which Dev runs only on demand, orders it.
+  `TestStackDevRunsTheShop` drives both, then runs the shop once more
+  into an output root of its own.
+
+No Rust job or worker has run on Cloud Run.
+
+Not built, and out of this entry: buckets from a Rust server, job or
+worker; and OpenTelemetry export. A TypeScript build into another output
+root relinks the project's own `node_modules` there, as a Rust build did
+before the mirror.
 
 The rule is reversible until the first release.

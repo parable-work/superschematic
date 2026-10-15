@@ -48,6 +48,24 @@ CREATE TABLE product (
 
 COMMENT ON TABLE product IS 'Something the shop sells.';
 
+CREATE TABLE restock_request (
+  created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+  updated_at TIMESTAMPTZ,
+  id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
+  product_id UUID NOT NULL,
+  status TEXT NOT NULL,
+  quantity BIGINT NOT NULL,
+  open_product_id UUID,
+  ordered_at TIMESTAMPTZ
+);
+
+COMMENT ON TABLE restock_request IS 'A request to the supplier for more of a product: shop-stock''s worker
+ReorderStock files one when a reservation runs the product low, and its
+job OrderRestocks orders each open one. A product has at most one
+open request: openProductId is the product while the request is open and
+null once it is ordered, and the unique index over it admits one row per
+product, since a unique index lets nulls repeat.';
+
 CREATE TABLE review (
   created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
   updated_at TIMESTAMPTZ,
@@ -101,7 +119,8 @@ CREATE TABLE stock_level (
   updated_at TIMESTAMPTZ,
   id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
   product_id UUID NOT NULL,
-  quantity BIGINT NOT NULL
+  quantity BIGINT NOT NULL,
+  threshold BIGINT
 );
 
 COMMENT ON TABLE stock_level IS 'How many units of a product the warehouse holds, one row per product.';
@@ -158,6 +177,27 @@ COMMENT ON TABLE order_placed_queue IS 'Placed with each order, in the transacti
 worker FulfilOrders handles each message, and a message whose handler
 fails is retried every half minute, five times at most.';
 
+CREATE TABLE stock_low_queue (
+  id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
+  product_id UUID NOT NULL,
+  quantity BIGINT NOT NULL,
+  threshold BIGINT NOT NULL,
+  state TEXT DEFAULT 'ready' NOT NULL,
+  attempts INTEGER DEFAULT 0 NOT NULL,
+  due_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+  claim_expires_at TIMESTAMPTZ,
+  claim_token UUID,
+  last_error TEXT,
+  created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+  updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+COMMENT ON TABLE stock_low_queue IS 'Enqueued by shop-stock''s reservation, in its transaction, when it takes a
+product''s level below its threshold: shop-stock''s worker ReorderStock
+files a restock request for the product. The message holds the level and
+the threshold as the reservation left them. A message whose handler fails
+is retried every half minute, five times at most.';
+
 -- Add foreign key constraints
 
 ALTER TABLE "order"
@@ -177,6 +217,12 @@ ALTER TABLE order_line
   FOREIGN KEY (product_id)
   REFERENCES product(id)
   ON DELETE RESTRICT;
+
+ALTER TABLE restock_request
+  ADD CONSTRAINT fk_restock_request_product_id
+  FOREIGN KEY (product_id)
+  REFERENCES product(id)
+  ON DELETE CASCADE;
 
 ALTER TABLE review
   ADD CONSTRAINT fk_review_product_id
@@ -224,6 +270,8 @@ ALTER TABLE user_role_grant
 
 CREATE INDEX idx_order_customer_placed_at ON "order" USING BTREE (customer_id, placed_at);
 
+CREATE UNIQUE INDEX uq_restock_request_one_open_per_product ON restock_request USING BTREE (open_product_id);
+
 CREATE UNIQUE INDEX uq_review_one_per_author ON review USING BTREE (product_id, author_id) WHERE deleted_at IS NULL;
 
 CREATE INDEX idx_review_search_trgm ON review USING GIN (search_text gin_trgm_ops);
@@ -237,3 +285,7 @@ CREATE UNIQUE INDEX uq_user_role_grant_user_role ON user_role_grant USING BTREE 
 CREATE INDEX idx_order_placed_queue_due_at ON order_placed_queue USING BTREE (due_at) WHERE state = 'ready';
 
 CREATE INDEX idx_order_placed_queue_claim_expires_at ON order_placed_queue USING BTREE (claim_expires_at) WHERE state = 'claimed';
+
+CREATE INDEX idx_stock_low_queue_due_at ON stock_low_queue USING BTREE (due_at) WHERE state = 'ready';
+
+CREATE INDEX idx_stock_low_queue_claim_expires_at ON stock_low_queue USING BTREE (claim_expires_at) WHERE state = 'claimed';
