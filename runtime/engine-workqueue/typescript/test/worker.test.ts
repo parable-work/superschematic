@@ -60,7 +60,9 @@ function serve(behaviors: ReadonlyArray<{ name: string; config?: unknown }> = [L
   let skew = 0;
   let failing = false;
   let failingBeats = false;
-  const engine = openTestEngine({ clock: () => Date.now() + skew });
+  // Not recorded: the worker's requests come on its timers, on the wall's
+  // clock, and what it does is the worker's, a TypeScript runtime over HTTP.
+  const engine = openTestEngine({ clock: () => Date.now() + skew }, { record: false });
   publish(engine, jobsDocument([{ name: 'Workflow', config: jobFlow }, ...behaviors]));
   const app = engineApp(engine, { authenticate });
   const requests: string[] = [];

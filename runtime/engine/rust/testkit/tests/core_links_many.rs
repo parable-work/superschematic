@@ -7,8 +7,9 @@
 //! migration left is built again, its rows kept), on SQLite and, with the
 //! variable set, on Postgres. Its guidance and create parameters, which the
 //! TypeScript file reads through the describe document (milestone 6), are
-//! read through the behavior's hooks. The cases where Reactions and Rollups
-//! read a many-valued link wait for those behaviors (wave 3).
+//! read through the behavior's hooks. What reads one target of a link,
+//! Reactions' rules among them, refuses a many-valued link, at define and
+//! on the runner; Rollups and Reactions' revised read across the list.
 
 mod support;
 
@@ -18,9 +19,12 @@ use superschematic_engine::behaviors::{DescribeTarget, DescribedTypeOperation, O
 use superschematic_engine::storage::{Dialect, Lock, SqlValue};
 use superschematic_engine::{
     Behavior, BehaviorSet, CreateOptions, DefineOptions, Engine, EngineError, EngineEvent,
-    EngineOptions, InstanceRecord, ReadEvents, Result, SchemaTarget, WriteOptions,
+    EngineOptions, InstanceRecord, Principal, ReadEvents, Result, RunnerOptions, SchemaTarget,
+    SubscriptionState, WriteOptions,
 };
-use superschematic_engine_behaviors::{LinkPin, LinkSpec, Links, LinksConfig, Revisions, Workflow};
+use superschematic_engine_behaviors::{
+    LinkPin, LinkSpec, Links, LinksConfig, Reactions, Revisions, Rollups, Workflow,
+};
 use support::{alice, issue, issues_of, refusal, schema_document, targets, veto, Target};
 
 fn behaviors() -> BehaviorSet {
@@ -1131,6 +1135,259 @@ fn a_file_links_second_migration_left_is_built_again_keyed_by_target_its_rows_ke
         assert_eq!(
             links_of(&engine, "Task", "t2"),
             Some(json!({"reviewers": [person("p2"), person("p3")]}))
+        );
+    }
+}
+
+/// Links with Rollups and Reactions, which read a many-valued link: Rollups
+/// and a revised rule across its list, the other rules not at all.
+fn with_reactions() -> BehaviorSet {
+    BehaviorSet::new()
+        .with(Workflow)
+        .with(Revisions)
+        .with(Links)
+        .with(Rollups)
+        .with(Reactions)
+}
+
+fn open_with_reactions(target: &Target, max_attempts: Option<i64>) -> Engine {
+    target.open_core_with(|options| {
+        options.behaviors = with_reactions();
+        options.runner = Some(RunnerOptions {
+            max_attempts,
+            ..RunnerOptions::new(Principal::new("runner", Vec::<String>::new()))
+        });
+    })
+}
+
+fn todo_flow() -> Value {
+    json!({
+        "name": "Workflow",
+        "config": {
+            "states": ["todo", "doing", "done"],
+            "transitions": [{"from": "todo", "to": "doing"}, {"from": "doing", "to": "done"}]
+        }
+    })
+}
+
+fn reactions(rules: Value) -> Value {
+    json!({"name": "Reactions", "config": {"rules": rules}})
+}
+
+fn many_projects() -> Value {
+    json!({"name": "Links", "config": {"links": {"projects": {"schema": "Project", "many": true, "max": 3}}}})
+}
+
+// refused defines a document and returns its refusal's issues' messages,
+// joined.
+fn refused(engine: &Engine, document: &Value) -> String {
+    issues_of(&refusal(define(engine, document)))
+        .into_iter()
+        .map(|(_, message)| message)
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+#[test]
+fn reactions_refuses_a_then_link_and_an_all_terminal_any_terminal_or_holds_link_that_holds_a_list()
+{
+    for target in targets("links_many_reactions_config") {
+        let engine = open_with_reactions(&target, None);
+        let prefix = |type_name: &str| format!("type {type_name}: behavior Reactions config: ");
+        publish(&engine, &schema("Project", json!([todo_flow()])));
+        assert_eq!(
+            refused(
+                &engine,
+                &schema(
+                    "Task",
+                    json!([
+                        todo_flow(),
+                        many_projects(),
+                        reactions(json!([{"when": {"enters": "doing"}, "then": {"link": "projects", "transition": "doing"}}]))
+                    ])
+                )
+            ),
+            format!("{}rule 1: then.link projects holds a list of targets, and the rule reads the one instance it points at", prefix("Task"))
+        );
+        let parents = json!({"name": "Links", "config": {"links": {"parents": {"schema": "Task", "many": true, "max": 2}}}});
+        assert_eq!(
+            refused(
+                &engine,
+                &schema(
+                    "Task",
+                    json!([
+                        todo_flow(),
+                        parents,
+                        reactions(json!([{"when": {"allTerminal": {"schema": "Task", "link": "parents"}}, "then": {"transition": "done"}}]))
+                    ])
+                )
+            ),
+            format!("{}rule 1: when.allTerminal names link parents of Task, which holds a list of targets, and the rule reads the one instance it points at", prefix("Task"))
+        );
+        // A linked schema's live version is read when the schema is
+        // defined.
+        publish(
+            &engine,
+            &schema("Task", json!([todo_flow(), many_projects()])),
+        );
+        assert_eq!(
+            refused(
+                &engine,
+                &schema(
+                    "Project",
+                    json!([
+                        todo_flow(),
+                        reactions(json!([{"when": {"anyTerminal": {"schema": "Task", "link": "projects", "outcomes": ["success"]}}, "then": {"transition": "done"}}]))
+                    ])
+                )
+            ),
+            format!("{}rule 1: when.anyTerminal names link projects of Task, which holds a list of targets, and the rule reads the one instance it points at", prefix("Project"))
+        );
+        // Rollups reads across the list; a holds rule on it reads one
+        // instance.
+        let rollups = json!({"name": "Rollups", "config": {"rollups": {"finished": {"schema": "Task", "link": "projects", "function": "all"}}}});
+        define(
+            &engine,
+            &schema("Project", json!([todo_flow(), rollups.clone()])),
+        )
+        .expect("a rollup across a list");
+        assert_eq!(
+            refused(
+                &engine,
+                &schema(
+                    "Project",
+                    json!([
+                        todo_flow(),
+                        rollups,
+                        reactions(json!([{"when": {"holds": "finished"}, "then": {"transition": "done"}}]))
+                    ])
+                )
+            ),
+            format!("{}rule 1: when.holds names rollup finished, whose link projects of Task holds a list of targets, and the rule reads the one instance it points at", prefix("Project"))
+        );
+    }
+}
+
+#[test]
+fn a_linked_schema_whose_link_holds_a_list_since_the_rule_was_defined_halts_the_subscription() {
+    for target in targets("links_many_reactions_halt") {
+        let engine = open_with_reactions(&target, Some(1));
+        publish(
+            &engine,
+            &schema(
+                "Project",
+                json!([
+                    todo_flow(),
+                    reactions(
+                        json!([{"when": {"allTerminal": {"schema": "Task", "link": "projects"}}, "then": {"transition": "done"}}])
+                    )
+                ]),
+            ),
+        );
+        publish(
+            &engine,
+            &schema("Task", json!([todo_flow(), many_projects()])),
+        );
+        create(&engine, "Project", Some("p1"), None).expect("project");
+        create(
+            &engine,
+            "Task",
+            Some("t1"),
+            Some(json!({"Links": {"projects": ["p1"]}})),
+        )
+        .expect("task");
+        engine.runner().run_due().expect("run due");
+        let project = engine
+            .runner()
+            .status()
+            .expect("the runner's status")
+            .subscriptions
+            .into_iter()
+            .find(|subscription| subscription.schema == "Project")
+            .expect("Project's subscription");
+        assert_eq!(
+            (project.state, project.failure.map(|failure| failure.error)),
+            (
+                SubscriptionState::Halted,
+                Some("BehaviorError: behavior Reactions: allTerminal names link projects of Task, which holds a list of targets, and the rule reads the one instance it points at".to_owned())
+            )
+        );
+    }
+}
+
+#[test]
+fn rollups_counts_an_instance_in_every_target_its_list_holds_and_revised_hears_each_target() {
+    for target in targets("links_many_rollups_revised") {
+        let engine = open_with_reactions(&target, None);
+        publish(&engine, &schema("Spec", json!([{"name": "Revisions"}])));
+        publish(&engine, &schema("Project", json!([])));
+        let stale = json!({"name": "Workflow", "config": {"states": ["ready", "stale"], "transitions": [{"from": "ready", "to": "stale"}]}});
+        publish(
+            &engine,
+            &schema(
+                "Task",
+                json!([
+                    stale,
+                    {"name": "Links", "config": {"links": {
+                        "projects": {"schema": "Project", "many": true, "max": 3},
+                        "specs": {"schema": "Spec", "many": true, "max": 2, "pinned": true}
+                    }}},
+                    reactions(json!([{"when": {"revised": {"link": "specs"}}, "then": {"transition": "stale"}}]))
+                ]),
+            ),
+        );
+        publish(
+            &engine,
+            &schema(
+                "Project",
+                json!([{"name": "Rollups", "config": {"rollups": {"tasks": {"schema": "Task", "link": "projects", "function": "count"}}}}]),
+            ),
+        );
+        for id in ["p1", "p2"] {
+            create(&engine, "Project", Some(id), None).expect("project");
+        }
+        for id in ["s1", "s2"] {
+            create(&engine, "Spec", Some(id), None).expect("spec");
+        }
+        create(
+            &engine,
+            "Task",
+            Some("t1"),
+            Some(json!({"Links": {"projects": ["p1", "p2"], "specs": ["s1", "s2"]}})),
+        )
+        .expect("task");
+        create(
+            &engine,
+            "Task",
+            Some("t2"),
+            Some(json!({"Links": {"projects": ["p1"], "specs": ["s2"]}})),
+        )
+        .expect("task");
+        let read = |schema: &str, id: &str| {
+            engine
+                .instances()
+                .get(&alice(), schema, id, Default::default())
+                .expect("get")
+                .expect("the instance")
+        };
+        let rollup = |id: &str| read("Project", id).behaviors["Rollups"]["values"]["tasks"].clone();
+        assert_eq!([rollup("p1"), rollup("p2")], [json!(2), json!(1)]);
+        engine.runner().run_due().expect("run due");
+        engine
+            .instances()
+            .update(
+                &alice(),
+                "Spec",
+                "s1",
+                &json!({"title": "s1, revised"}),
+                WriteOptions::default(),
+            )
+            .expect("update");
+        engine.runner().run_due().expect("run due");
+        let status = |id: &str| read("Task", id).behaviors["Workflow"]["status"].clone();
+        assert_eq!(
+            [status("t1"), status("t2")],
+            [json!("stale"), json!("ready")]
         );
     }
 }

@@ -83,6 +83,65 @@ engine in the registry, as the engine's own optional peer dependency on
 package's build and tests link the checkout's engine
 (`typescript/scripts/link-local-deps.mjs`).
 
+### The Rust engine's crate
+
+`rust/` is `superschematic-engine-workqueue`, the same behaviors for the
+Rust engine (D58), a member of the engine's Cargo workspace
+(`runtime/engine/rust`), so it builds with that lock file and toolchain
+and `make engine-rust` lints and tests it. It reaches the engine through
+the plug-in API alone, as this package does, and the core's behaviors
+through the helpers the package imports from `@superschematic/engine`
+(`superschematic-engine-behaviors`). Each behavior embeds its
+declaration from `rust/declarations`, a copy `make behaviors` writes and
+`make behaviors-check` checks. A host registers them after the core's:
+
+```rust
+options.behaviors = superschematic_engine_behaviors::core()
+    .extend(superschematic_engine_workqueue::workqueue());
+```
+
+`workqueue()` is all seven, in `workQueueBehaviors`' order (`NAMES`),
+and `behavior(name)` one alone (milestone 12: Lease with directOn,
+Assignment, Presence and Retries in 12a; Queue, Budget and Blueprint in
+12b), each keeping this package's table and column names. The guidance
+tests are `rust/tests/guidance_<behavior>.rs`, each held to the text
+this package's built guidance returned under node, recorded in
+`rust/tests/guidance/<behavior>.json`; the behaviors' own tests, ports
+of `typescript/test/*.test.ts` on SQLite and on Postgres when
+`SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL` names one, are the engine test
+kit's `tests/workqueue_<file>.rs`, with the test behaviors of
+`typescript/test/fixtures.ts` in its `workqueue_fixtures`, and every
+case runs. The test kit's replay holds them to this suite's recording,
+`runtime/engine/testdata/scenarios/workqueue-*.json`, on both databases:
+211 of its 213 scenarios replay on SQLite (two are `js`) and 208 on
+Postgres (three more write the file with SQL of their own), each giving
+the recorded answers.
+
+The engine's Node-API addon (`runtime/engine/rust/napi`) is built with
+this crate: an engine opened through it registers, after the core's, the
+ones its options' `behaviors` name. With `ENGINE_IMPL=rust`,
+`typescript/test/helpers.ts` opens the Rust engine in place of the
+TypeScript one, passing each of this package's own objects by its
+declaration's name, so the addon runs the Rust behavior; any other
+behavior a test registers (a fixture, the Budget stand-in, a wrapper of
+one of this package's that counts its calls) is TypeScript code and
+waits for the engine's test-only bridge (D58's milestone 7b). The
+engine's `scripts/rust-ratchet.mjs --package` runs each test file so
+under Node.js and Bun and holds the result to
+`typescript/test/rust-pending.txt`, the files not passing yet and why
+(CI's `engine-napi` job):
+
+```
+scripts/engine-napi.sh                      # from the repository's root, after the engine's build
+cd runtime/engine-workqueue/typescript && bun run build
+bun run test:rust                           # Node.js, then Bun
+```
+
+11 of the 19 files pass on both, 211 of Node.js's 240 tests and 399 of
+Bun's 455, and no test that runs fails on what the Rust engine does: the
+rest read the behaviors' tables through `engine.storage`, register a
+behavior written in TypeScript, or wait on `events.watch`.
+
 ## Lease
 
 An exclusive, time-bounded lease on the instance, held by one principal

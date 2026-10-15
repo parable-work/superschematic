@@ -8,26 +8,26 @@
 //! scenario one test: the calls it made on the engines it opened and what
 //! each returned or threw. The replayer resolves the file's shared values,
 //! skips a scenario only the TypeScript engine can run (`js`), one that
-//! needs a behavior this engine does not have (a test behavior the kit has
-//! not ported, [`behaviors`], or a core behavior not ported yet,
-//! milestones 10 and 11), one that writes the file with SQL of its own on
-//! Postgres (`dialect: sqlite`), and one that calls a method that changes
-//! the engine and JSON cannot carry ([`UNBUILT_WRITES`]). It opens each
+//! needs a test behavior the kit has not ported ([`behaviors`]), one that
+//! writes the file with SQL of its own on Postgres (`dialect: sqlite`), and
+//! one that calls a method that changes the engine and JSON cannot carry
+//! ([`UNBUILT_WRITES`]). It opens each
 //! engine as the recording says, with a policy answering from the recorded
 //! answer table, seeded or fixed ids, a wall (strict) or fixed clock, the
-//! runner, retention and tool options, the core's behaviors ported so far
-//! ([`superschematic_engine_behaviors`]) and the test behaviors it names,
-//! then makes each step's call through [`superschematic_engine::calls`]
-//! (`behaviors.register` through the kit's behaviors and the core's) and
+//! runner, retention and tool options, the core's behaviors
+//! ([`superschematic_engine_behaviors`]) and the behaviors it names: the
+//! work queue's ([`superschematic_engine_workqueue`]), or a test's where
+//! the scenario lists it among its test behaviors (`testBehaviors`, as the
+//! Budget stand-in of Queue's tests), then makes each step's call through
+//! [`superschematic_engine::calls`] (`behaviors.register` through the
+//! kit's behaviors, the core's and the work queue's) and
 //! compares its result or its error (class, code, message and details),
 //! binding the symbols (`{{id:N}}`, `{{time:N}}`, `{{dir:N}}`,
 //! `{{opaque:N}}`) at their first appearance in an answer. On Postgres an
 //! event cursor is opaque too: the recording's are SQLite's, and a write a
 //! rollback undid leaves a gap in a Postgres identity column (D58), so each
 //! recorded cursor binds to the one read in its place, in the recorded
-//! order, and a cursor argument passes the one bound to it. A read of the
-//! registered behaviors that answers from a core behavior not ported yet
-//! ([`UNBUILT_READS`]) is skipped and counted.
+//! order, and a cursor argument passes the one bound to it.
 //!
 //! The HTTP corpus (`runtime/engine/testdata/http`) replays through the
 //! same runner: its cases are scenarios whose `app`, exchange and stream
@@ -36,6 +36,7 @@
 pub mod behaviors;
 pub mod core_fixtures;
 mod http;
+pub mod workqueue_fixtures;
 
 pub use http::HTTP_FILES;
 
@@ -50,70 +51,15 @@ use serde_json::{Map, Value};
 use superschematic_engine::json::js_equal;
 use superschematic_engine::storage::{Dialect, Lock, Row, SqlValue};
 use superschematic_engine::{
-    calls, AccessPolicy, AccessRequest, Clock, Engine, EngineError, EngineErrorKind, EngineOptions,
-    Error, IdCounter, IdQueue, Ids, MetaSchema, NamespaceOptions, Policy, Principal, Storage,
+    calls, AccessPolicy, AccessRequest, Clock, Engine, EngineError, EngineOptions, Error,
+    IdCounter, IdQueue, Ids, MetaSchema, NamespaceOptions, Policy, Principal, Storage,
     ValueOptions, SCENARIO_SEED,
 };
 
-/// The core's behaviors, which the TypeScript engine registers when it
-/// opens. The replayer opens every engine with the ones ported so far
-/// ([`superschematic_engine_behaviors::core`], whose names
-/// [`superschematic_engine_behaviors::NAMES`] lists); a scenario whose
-/// schemas compose one not ported yet (milestones 10 and 11) is skipped.
-pub const CORE_BEHAVIORS: [&str; 15] = [
-    "Workflow",
-    "Comments",
-    "Revisions",
-    "Dependencies",
-    "Links",
-    "Rollups",
-    "Search",
-    "Reactions",
-    "Constants",
-    "Variants",
-    "Branches",
-    "StateRules",
-    "Approvals",
-    "Timers",
-    "Numbering",
-];
-
 /// Calls that change the engine and are not built: a scenario that makes
 /// one is skipped, since the steps after it depend on it. A transaction of
-/// the file's own and a watch take functions; the search across schemas
-/// runs on the core's Search (milestone 10).
-pub const UNBUILT_WRITES: [&str; 3] = ["storage.transaction", "events.watch", "search"];
-
-/// Calls that read the registered behaviors, which answer from what this
-/// engine does not have yet where they list every core behavior (the names
-/// and the behavior catalog) or read one by name not ported yet: the step
-/// is skipped and counted ([`reads_unported`]). This engine registers the
-/// core's behaviors only in part until milestone 11.
-pub const UNBUILT_READS: [&str; 5] = [
-    "behaviors.has",
-    "behaviors.names",
-    "behaviors.declaration",
-    "tools.listBehaviors",
-    "tools.describeBehavior",
-];
-
-/// Whether a read of the registered behaviors ([`UNBUILT_READS`]) answers
-/// from a core behavior this engine does not register yet: a list of every
-/// behavior does, and a read of one by name does when it names one not
-/// ported.
-pub fn reads_unported(call: &str, step: &Value) -> bool {
-    match call {
-        "behaviors.names" | "tools.listBehaviors" => true,
-        _ => step
-            .get("args")
-            .and_then(|args| args.get(0))
-            .and_then(Value::as_str)
-            .is_some_and(|name| {
-                CORE_BEHAVIORS.contains(&name)
-                    && !superschematic_engine_behaviors::NAMES.contains(&name)
-            }),
-    }
-}
+/// the file's own and a watch take functions.
+pub const UNBUILT_WRITES: [&str; 2] = ["storage.transaction", "events.watch"];
 
 /// A scenario file, its shared values resolved.
 #[derive(Clone, Debug)]
@@ -305,50 +251,12 @@ fn skip_reason(
     }
     let missing: Vec<String> = names("testBehaviors")
         .into_iter()
-        .filter(|name| behaviors::test_behavior(file, name).is_none())
+        .filter(|name| {
+            behaviors::stand_in(name).is_none() && behaviors::test_behavior(file, name).is_none()
+        })
         .collect();
     if !missing.is_empty() {
         return Some(format!("test behaviors not ported: {}", missing.join(", ")));
-    }
-    // A schema an exchange defines over HTTP composes behaviors the
-    // recorder never saw, so its body is read for them too.
-    let mut composed = names("behaviors");
-    for step in steps {
-        if let Some(body) = step.get("request").and_then(|request| request.get("body")) {
-            for type_def in body
-                .get("types")
-                .and_then(Value::as_object)
-                .into_iter()
-                .flat_map(|types| types.values())
-            {
-                for behavior in type_def
-                    .get("behaviors")
-                    .and_then(Value::as_array)
-                    .into_iter()
-                    .flatten()
-                {
-                    if let Some(name) = behavior.get("name").and_then(Value::as_str) {
-                        if !composed.iter().any(|known| known == name) {
-                            composed.push(name.to_owned());
-                        }
-                    }
-                }
-            }
-        }
-    }
-    composed.sort();
-    let core: Vec<String> = composed
-        .into_iter()
-        .filter(|name| {
-            CORE_BEHAVIORS.contains(&name.as_str())
-                && !superschematic_engine_behaviors::NAMES.contains(&name.as_str())
-        })
-        .collect();
-    if !core.is_empty() {
-        return Some(format!(
-            "core behaviors not ported yet (milestones 10 and 11): {}",
-            core.join(", ")
-        ));
     }
     if scenario.get("dialect").and_then(Value::as_str) == Some("sqlite")
         && database.dialect() == Dialect::Postgres
@@ -425,6 +333,8 @@ struct Run<'d> {
     database: &'d Database,
     repository: &'d Path,
     file: &'d str,
+    /// The test behaviors the scenario lists (`testBehaviors`).
+    test_behaviors: Vec<String>,
     principals: Map<String, Value>,
     engines: Vec<(String, Opened)>,
     places: Vec<(String, Place)>,
@@ -444,6 +354,17 @@ impl<'d> Run<'d> {
             database,
             repository,
             file,
+            test_behaviors: scenario
+                .get("testBehaviors")
+                .and_then(Value::as_array)
+                .map(|names| {
+                    names
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_owned)
+                        .collect()
+                })
+                .unwrap_or_default(),
             principals: scenario
                 .get("principals")
                 .and_then(Value::as_object)
@@ -457,6 +378,20 @@ impl<'d> Run<'d> {
             unknown_questions: Arc::new(Mutex::new(Vec::new())),
             http: http::Served::default(),
         }
+    }
+
+    // behavior_set is a behavior a recording names: the stand-in a test
+    // registers under a work-queue behavior's name, which the scenario
+    // lists among its test behaviors; else the file's test behavior, the
+    // core's or the work queue's.
+    fn behavior_set(&self, name: &str) -> Option<superschematic_engine::BehaviorSet> {
+        self.test_behaviors
+            .iter()
+            .any(|known| known == name)
+            .then(|| behaviors::stand_in(name))
+            .flatten()
+            .or_else(|| behaviors::test_behavior(self.file, name))
+            .or_else(|| behaviors::core_behavior(name))
     }
 
     fn step(&mut self, step: &Value) -> Result<Outcome, String> {
@@ -475,9 +410,6 @@ impl<'d> Run<'d> {
             return http::stream(self, step);
         }
         let call = step.get("call").and_then(Value::as_str).unwrap_or_default();
-        if UNBUILT_READS.contains(&call) && reads_unported(call, step) {
-            return Ok(Outcome::Skipped);
-        }
         let mut args = match step.get("args") {
             Some(Value::Array(args)) => args
                 .iter()
@@ -510,8 +442,8 @@ impl<'d> Run<'d> {
                     .and_then(Value::as_str)
                     .unwrap_or_default()
                     .to_owned();
-                let set = behaviors::test_behavior(self.file, &name)
-                    .or_else(|| behaviors::core_behavior(&name))
+                let set = self
+                    .behavior_set(&name)
                     .ok_or_else(|| format!("the test kit has no behavior {name}"))?;
                 let engine = self
                     .engine_of(step)?
@@ -684,24 +616,12 @@ impl<'d> Run<'d> {
                 ))))
             }
         };
-        if let Some(Value::Object(namespaces)) = given.get("namespaces") {
-            options.namespaces = NamespaceOptions {
-                names: namespaces
-                    .get("names")
-                    .and_then(Value::as_array)
-                    .map(|names| {
-                        names
-                            .iter()
-                            .filter_map(Value::as_str)
-                            .map(str::to_owned)
-                            .collect()
-                    })
-                    .unwrap_or_default(),
-                shared: namespaces
-                    .get("shared")
-                    .and_then(Value::as_str)
-                    .map(str::to_owned),
-            };
+        // What a binding passes as it is, read as the engine reads a
+        // binding's options (EngineOptions::from_json): the namespaces and,
+        // below, the runner, retention, tools and value store.
+        if let Some(namespaces) = given.get("namespaces") {
+            options.namespaces =
+                NamespaceOptions::from_json(namespaces).map_err(|error| error_json(&error))?;
         }
         let mut queue = None;
         options.ids = match given.get("ids").and_then(Value::as_str) {
@@ -734,15 +654,18 @@ impl<'d> Run<'d> {
         options.behaviors = superschematic_engine_behaviors::core();
         if let Some(Value::Array(names)) = given.get("behaviors") {
             for name in names.iter().filter_map(Value::as_str) {
-                let set = behaviors::test_behavior(self.file, name)
-                    .or_else(|| behaviors::core_behavior(name))
-                    .ok_or_else(|| {
-                        error_json(&Error::Usage(format!(
-                            "the test kit has no behavior {name}"
-                        )))
-                    })?;
+                let set = self.behavior_set(name).ok_or_else(|| {
+                    error_json(&Error::Usage(format!(
+                        "the test kit has no behavior {name}"
+                    )))
+                })?;
                 options.behaviors = std::mem::take(&mut options.behaviors).extend(set);
             }
+        }
+        // In the order the TypeScript engine checks them.
+        if let Some(tools) = given.get("tools") {
+            options.tools = superschematic_engine::ToolOptions::from_json(tools)
+                .map_err(|error| error_json(&error))?;
         }
         if let Some(runner) = given.get("runner") {
             options.runner = Some(
@@ -750,23 +673,14 @@ impl<'d> Run<'d> {
                     .map_err(|error| error_json(&error))?,
             );
         }
+        if let Some(values) = given.get("values") {
+            options.values = ValueOptions::from_json(values).map_err(|error| error_json(&error))?;
+        }
         if let Some(retention) = given.get("retention") {
             options.retention = Some(
                 superschematic_engine::RetentionOptions::from_json(retention)
                     .map_err(|error| error_json(&error))?,
             );
-        }
-        if let Some(tools) = given.get("tools") {
-            options.tools = superschematic_engine::ToolOptions::from_json(tools)
-                .map_err(|error| error_json(&error))?;
-        }
-        if let Some(Value::Object(values)) = given.get("values") {
-            options.values = ValueOptions {
-                threshold_bytes: values.get("thresholdBytes").and_then(Value::as_u64),
-                cache_bytes: values.get("cacheBytes").and_then(Value::as_u64),
-                max_bytes: values.get("maxBytes").and_then(Value::as_u64),
-                driver: None,
-            };
         }
         let engine = Engine::open_shared(options).map_err(|error| error_json(&error))?;
         self.engines.push((
@@ -1047,6 +961,20 @@ impl<'d> Run<'d> {
             }
         };
         match self.bindings.get(&symbol.key()) {
+            // An instant bound from a number stands in a string as a
+            // date-time: Branches' times are RFC 3339 (D32), the
+            // instances' epoch milliseconds.
+            Some(known @ Bound::Time(_)) if actual.is_string() => {
+                if *known == bound {
+                    Ok(())
+                } else {
+                    Err(format!(
+                        "{at}: expected {{{{{}}}}}, bound to {}, got {actual}",
+                        symbol.text,
+                        render(symbol, known, false)
+                    ))
+                }
+            }
             Some(known) => {
                 let rendered = render(symbol, known, true);
                 if js_equal(&rendered, actual) {
@@ -1115,9 +1043,11 @@ impl<'d> Run<'d> {
                         Value::String(text) => text,
                         other => other.to_string(),
                     }];
-                    // An instant in text is a date-time, or, in JSON a
-                    // string carries, its epoch milliseconds.
+                    // An instant in text is a date-time, the version
+                    // graph's canonical one too, or, in JSON a string
+                    // carries, its epoch milliseconds.
                     if let (Bound::Time(ms), false) = (&known, symbol.micros) {
+                        forms.push(canonical_iso_of(*ms));
                         forms.push(ms.to_string());
                     }
                     return forms.iter().any(|text| {
@@ -1283,28 +1213,48 @@ pub fn iso_of(ms: i64) -> String {
     )
 }
 
-/// The instant an RFC 3339 date-time names, as [`iso_of`] writes it.
+/// An instant in epoch milliseconds as the version graph's canonical
+/// date-time writes it (D32): [`iso_of`]'s, its fraction of a second
+/// without trailing zeros and left out when zero.
+pub fn canonical_iso_of(ms: i64) -> String {
+    let iso = iso_of(ms);
+    let (whole, fraction) = iso.split_at(19);
+    let digits = fraction.trim_start_matches('.').trim_end_matches('Z');
+    let digits = digits.trim_end_matches('0');
+    if digits.is_empty() {
+        format!("{whole}Z")
+    } else {
+        format!("{whole}.{digits}Z")
+    }
+}
+
+/// The instant an RFC 3339 date-time names, as [`iso_of`] or
+/// [`canonical_iso_of`] writes it.
 pub fn ms_of_iso(text: &str) -> Option<i64> {
     let bytes = text.as_bytes();
-    if bytes.len() != 24
+    if bytes.len() < 20
         || bytes[4] != b'-'
         || bytes[7] != b'-'
         || bytes[10] != b'T'
         || bytes[13] != b':'
         || bytes[16] != b':'
-        || bytes[19] != b'.'
-        || bytes[23] != b'Z'
+        || bytes[bytes.len() - 1] != b'Z'
     {
         return None;
     }
     let number = |range: std::ops::Range<usize>| text.get(range)?.parse::<i64>().ok();
     let (year, month, day) = (number(0..4)?, number(5..7)?, number(8..10)?);
-    let (hour, minute, second, milli) = (
-        number(11..13)?,
-        number(14..16)?,
-        number(17..19)?,
-        number(20..23)?,
-    );
+    let fraction = text.get(19..text.len() - 1)?;
+    let milli = match fraction.strip_prefix('.') {
+        None if fraction.is_empty() => 0,
+        Some(digits)
+            if (1..=3).contains(&digits.len()) && digits.bytes().all(|b| b.is_ascii_digit()) =>
+        {
+            format!("{digits:0<3}").parse::<i64>().ok()?
+        }
+        _ => return None,
+    };
+    let (hour, minute, second) = (number(11..13)?, number(14..16)?, number(17..19)?);
     // Howard Hinnant's days_from_civil.
     let y = if month <= 2 { year - 1 } else { year };
     let era = y.div_euclid(400);
@@ -1314,7 +1264,7 @@ pub fn ms_of_iso(text: &str) -> Option<i64> {
     let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
     let days = era * 146_097 + doe - 719_468;
     let ms = days * 86_400_000 + hour * 3_600_000 + minute * 60_000 + second * 1000 + milli;
-    (iso_of(ms) == text).then_some(ms)
+    (iso_of(ms) == text || canonical_iso_of(ms) == text).then_some(ms)
 }
 
 /// The core meta-schema with behaviors let through, as the TypeScript
@@ -1346,83 +1296,20 @@ pub fn open_meta_schema(repository: &Path) -> Result<Value, String> {
 }
 
 /// An error as the corpus records it: its class, its code, its message,
-/// and its other members as `details`.
+/// and its other members as `details`, as the TypeScript engine throws it
+/// ([`Error::thrown`], which the Node-API addon throws too).
 pub fn error_json(error: &Error) -> Value {
+    let thrown = error.thrown();
     let mut out = Map::new();
-    match error {
-        Error::Engine(refusal) => {
-            out.insert("class".into(), Value::from(refusal.name()));
-            out.insert("code".into(), Value::from(refusal.code().as_str()));
-            out.insert("message".into(), Value::from(refusal.message()));
-            if let Some(details) = recorded_details(refusal) {
-                out.insert("details".into(), details);
-            }
-        }
-        Error::Behavior(defect) => {
-            out.insert("class".into(), Value::from("BehaviorError"));
-            out.insert("message".into(), Value::from(defect.to_string()));
-            let mut details = Map::new();
-            details.insert("behavior".into(), Value::from(defect.behavior.as_str()));
-            out.insert("details".into(), Value::Object(details));
-        }
-        Error::Usage(message) => {
-            out.insert("class".into(), Value::from("TypeError"));
-            out.insert("message".into(), Value::from(message.as_str()));
-        }
-        Error::Config(message) => {
-            out.insert("class".into(), Value::from("BehaviorConfigError"));
-            out.insert("message".into(), Value::from(message.as_str()));
-        }
-        Error::Storage(failure) => {
-            match failure.sqlite_code() {
-                Some(code) => {
-                    out.insert("class".into(), Value::from("SqliteError"));
-                    out.insert("code".into(), Value::from(code));
-                }
-                None => {
-                    out.insert("class".into(), Value::from("Error"));
-                }
-            }
-            out.insert("message".into(), Value::from(failure.to_string()));
-        }
-        other => {
-            out.insert("class".into(), Value::from("Error"));
-            out.insert("message".into(), Value::from(other.to_string()));
-        }
+    out.insert("class".into(), Value::from(thrown.class));
+    if let Some(code) = thrown.code {
+        out.insert("code".into(), code);
+    }
+    out.insert("message".into(), Value::from(thrown.message));
+    if let Some(members) = thrown.members {
+        out.insert("details".into(), Value::Object(members));
     }
     Value::Object(out)
-}
-
-// recorded_details is what a refusal holds beyond its code and message, by
-// the TypeScript error's own members.
-fn recorded_details(refusal: &EngineError) -> Option<Value> {
-    match refusal.kind() {
-        EngineErrorKind::BehaviorVeto {
-            behavior,
-            action,
-            reason,
-            veto_code,
-            veto_details,
-        } => {
-            let mut details = Map::new();
-            details.insert("behavior".into(), Value::from(behavior.as_str()));
-            details.insert("action".into(), Value::from(action.as_str()));
-            details.insert("reason".into(), Value::from(reason.as_str()));
-            if let Some(code) = veto_code {
-                details.insert("vetoCode".into(), Value::from(code.as_str()));
-            }
-            if let Some(inner) = veto_details {
-                details.insert("vetoDetails".into(), Value::Object(inner.clone()));
-            }
-            Some(Value::Object(details))
-        }
-        EngineErrorKind::UnknownTool { tool } => {
-            let mut details = Map::new();
-            details.insert("tool".into(), Value::from(tool.as_str()));
-            Some(Value::Object(details))
-        }
-        _ => refusal.details(),
-    }
 }
 
 // storage_call runs a step's SQL on the engine's SQLite file, as the
@@ -1576,21 +1463,30 @@ impl AccessPolicy for AnswerPolicy {
 }
 
 /// The files of the corpus a replay runs by default: the engine's own
-/// test files, whose scenarios need no behavior or few, and the core
-/// behaviors' files whose behaviors this engine has (a scenario that also
-/// composes one not ported yet is skipped).
-pub const ENGINE_FILES: [&str; 22] = [
+/// test files, whose scenarios need no behavior or few, the core
+/// behaviors' files and the work queue's (`workqueue-*`), whose engines
+/// register its behaviors by name after the core's
+/// ([`superschematic_engine_workqueue::behavior`]).
+pub const ENGINE_FILES: [&str; 45] = [
     "access",
     "compat",
     "core-approvals",
     "core-behaviors",
+    "core-branches",
+    "core-branches-sweep",
     "core-comments",
     "core-constants",
     "core-dependencies",
     "core-links",
     "core-links-many",
     "core-numbering",
+    "core-reactions",
+    "core-reactions-changes",
+    "core-reactions-holds-revised",
     "core-revisions",
+    "core-rollups",
+    "core-search",
+    "core-search-vectors",
     "core-staterules",
     "core-timers",
     "core-variants",
@@ -1602,6 +1498,21 @@ pub const ENGINE_FILES: [&str; 22] = [
     "normalize",
     "registry",
     "unique",
+    "workqueue-assignment",
+    "workqueue-blueprint",
+    "workqueue-budget",
+    "workqueue-filters",
+    "workqueue-lease",
+    "workqueue-lease-approvals",
+    "workqueue-lease-branches",
+    "workqueue-lease-direct-on",
+    "workqueue-lease-numbering",
+    "workqueue-lease-timers",
+    "workqueue-package",
+    "workqueue-presence",
+    "workqueue-queue",
+    "workqueue-queue-exclusion",
+    "workqueue-retries",
 ];
 
 /// Counts of a set of reports, by file.
@@ -1636,6 +1547,23 @@ mod tests {
         );
         assert_eq!(ms_of_iso("2025-13-09T08:53:20.123Z"), None);
         assert_eq!(iso_of(951_782_400_000), "2000-02-29T00:00:00.000Z");
+        // The version graph's canonical date-time trims its fraction.
+        assert_eq!(
+            canonical_iso_of(1_760_000_000_120),
+            "2025-10-09T08:53:20.12Z"
+        );
+        assert_eq!(canonical_iso_of(1_760_000_000_000), "2025-10-09T08:53:20Z");
+        assert_eq!(
+            ms_of_iso("2025-10-09T08:53:20.12Z"),
+            Some(1_760_000_000_120)
+        );
+        assert_eq!(ms_of_iso("2025-10-09T08:53:20Z"), Some(1_760_000_000_000));
+        assert_eq!(
+            ms_of_iso("2025-10-09T08:53:20.120Z"),
+            Some(1_760_000_000_120)
+        );
+        assert_eq!(ms_of_iso("2025-10-09T08:53:20.1200Z"), None);
+        assert_eq!(ms_of_iso("2025-10-09T08:53:20.Z"), None);
     }
 
     #[test]

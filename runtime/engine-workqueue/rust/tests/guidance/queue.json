@@ -1,0 +1,250 @@
+{
+  "fixture": {
+    "summary": "A claim takes an instance in queued: its lease, its budget reservation, and a move to running, in one write. claimNext claims the first the caller can, highest priority first, then oldest first, matching topic, trying at most 100. An instance is not claimed while it is exhausted (Retries), over its budget, here or in an enclosing scope (Budget), at 3 lease expiries or assigned to another principal.",
+    "operations": {
+      "claim": {
+        "useWhen": "Use to claim this Job when you know its id: it must be in queued.",
+        "doNotUseWhen": "Do not use to find work; call claimNext.",
+        "success": "Returns id, token, expiresAt and heartbeatMs; the status is running. Present the token as preconditions {\"Lease\": {\"token\": n}} on each write and heartbeat at least every heartbeatMs.",
+        "errors": [
+          {
+            "code": "not_claimable",
+            "commonCorrection": "None now: only an instance in queued is claimed. Call claimNext for work that is."
+          }
+        ]
+      },
+      "claimNext": {
+        "useWhen": "Use as a worker to take the next Job to work on, highest priority first, then oldest first. match filters on topic, each a value or a list of values. assignedOnly takes only work assigned to you.",
+        "doNotUseWhen": "Do not use to count the work waiting; call countClaimable.",
+        "success": "Returns claimed: id, token, expiresAt and heartbeatMs, or null when nothing is claimable now. Present the token as preconditions {\"Lease\": {\"token\": n}} on each write."
+      },
+      "countClaimable": {
+        "useWhen": "Use to count the work claimNext would try for you, a signal to scale workers on; it claims nothing.",
+        "success": "Returns count."
+      },
+      "refresh": {
+        "useWhen": "Use only to recompute Queue's copies of the instance's facts; Queue invokes it itself when a blocker, a budget scope or a pinned link's target changes.",
+        "success": "Returns {}."
+      },
+      "acquire": {
+        "doNotUseWhen": "Do not use: on Job the lease is taken by claim or claimNext.",
+        "errors": [
+          {
+            "code": "claim_required",
+            "commonCorrection": "Call claim, or claimNext."
+          }
+        ]
+      }
+    }
+  },
+  "plain": {
+    "summary": "A claim takes an instance in queued: its lease, and a move to running, in one write. claimNext claims the first the caller can, oldest first, trying at most 100. An instance is not claimed while it is blocked.",
+    "operations": {
+      "claim": {
+        "useWhen": "Use to claim this Job when you know its id: it must be in queued.",
+        "doNotUseWhen": "Do not use to find work; call claimNext.",
+        "success": "Returns id, token, expiresAt and heartbeatMs; the status is running. Present the token as preconditions {\"Lease\": {\"token\": n}} on each write and heartbeat at least every heartbeatMs.",
+        "errors": [
+          {
+            "code": "not_claimable",
+            "commonCorrection": "None now: only an instance in queued is claimed. Call claimNext for work that is."
+          },
+          {
+            "code": "blocked",
+            "commonCorrection": "Wait for its blockers to finish, or take other work with claimNext."
+          }
+        ]
+      },
+      "claimNext": {
+        "useWhen": "Use as a worker to take the next Job to work on, oldest first.",
+        "doNotUseWhen": "Do not use to count the work waiting; call countClaimable.",
+        "success": "Returns claimed: id, token, expiresAt and heartbeatMs, or null when nothing is claimable now. Present the token as preconditions {\"Lease\": {\"token\": n}} on each write."
+      },
+      "countClaimable": {
+        "useWhen": "Use to count the work claimNext would try for you, a signal to scale workers on; it claims nothing.",
+        "success": "Returns count."
+      },
+      "refresh": {
+        "useWhen": "Use only to recompute Queue's copies of the instance's facts; Queue invokes it itself when a blocker, a budget scope or a pinned link's target changes.",
+        "success": "Returns {}."
+      },
+      "acquire": {
+        "doNotUseWhen": "Do not use: on Job the lease is taken by claim or claimNext.",
+        "errors": [
+          {
+            "code": "claim_required",
+            "commonCorrection": "Call claim, or claimNext."
+          }
+        ]
+      }
+    }
+  },
+  "bare": {
+    "summary": "A claim takes an instance in queued or paused: its lease, and a move to running, in one write. claimNext claims the first the caller can, oldest first, trying at most 5.",
+    "operations": {
+      "claim": {
+        "useWhen": "Use to claim this Job when you know its id: it must be in queued or paused.",
+        "doNotUseWhen": "Do not use to find work; call claimNext.",
+        "success": "Returns id, token, expiresAt and heartbeatMs; the status is running. Present the token as preconditions {\"Lease\": {\"token\": n}} on each write and heartbeat at least every heartbeatMs.",
+        "errors": [
+          {
+            "code": "not_claimable",
+            "commonCorrection": "None now: only an instance in queued or paused is claimed. Call claimNext for work that is."
+          }
+        ]
+      },
+      "claimNext": {
+        "useWhen": "Use as a worker to take the next Job to work on, oldest first.",
+        "doNotUseWhen": "Do not use to count the work waiting; call countClaimable.",
+        "success": "Returns claimed: id, token, expiresAt and heartbeatMs, or null when nothing is claimable now. Present the token as preconditions {\"Lease\": {\"token\": n}} on each write."
+      },
+      "countClaimable": {
+        "useWhen": "Use to count the work claimNext would try for you, a signal to scale workers on; it claims nothing.",
+        "success": "Returns count."
+      },
+      "refresh": {
+        "useWhen": "Use only to recompute Queue's copies of the instance's facts; Queue invokes it itself when a blocker, a budget scope or a pinned link's target changes.",
+        "success": "Returns {}."
+      },
+      "acquire": {
+        "doNotUseWhen": "Do not use: on Job the lease is taken by claim or claimNext.",
+        "errors": [
+          {
+            "code": "claim_required",
+            "commonCorrection": "Call claim, or claimNext."
+          }
+        ]
+      }
+    }
+  },
+  "revision": {
+    "summary": "A claim takes an instance in queued: its lease, and a move to running, in one write. claimNext claims the first the caller can, oldest first, matching topic and urgent, trying at most 100. An instance is not claimed while it is pinned through spec to a revision its target has moved past.",
+    "operations": {
+      "claim": {
+        "useWhen": "Use to claim this Job when you know its id: it must be in queued.",
+        "doNotUseWhen": "Do not use to find work; call claimNext.",
+        "success": "Returns id, token, expiresAt and heartbeatMs; the status is running. Present the token as preconditions {\"Lease\": {\"token\": n}} on each write and heartbeat at least every heartbeatMs.",
+        "errors": [
+          {
+            "code": "not_claimable",
+            "commonCorrection": "None now: only an instance in queued is claimed. Call claimNext for work that is."
+          },
+          {
+            "code": "stale_link",
+            "commonCorrection": "Link spec to its target's newest revision first, or take other work."
+          }
+        ]
+      },
+      "claimNext": {
+        "useWhen": "Use as a worker to take the next Job to work on, oldest first. match filters on topic and urgent, each a value or a list of values.",
+        "doNotUseWhen": "Do not use to count the work waiting; call countClaimable.",
+        "success": "Returns claimed: id, token, expiresAt and heartbeatMs, or null when nothing is claimable now. Present the token as preconditions {\"Lease\": {\"token\": n}} on each write."
+      },
+      "countClaimable": {
+        "useWhen": "Use to count the work claimNext would try for you, a signal to scale workers on; it claims nothing.",
+        "success": "Returns count."
+      },
+      "refresh": {
+        "useWhen": "Use only to recompute Queue's copies of the instance's facts; Queue invokes it itself when a blocker, a budget scope or a pinned link's target changes.",
+        "success": "Returns {}."
+      },
+      "acquire": {
+        "doNotUseWhen": "Do not use: on Job the lease is taken by claim or claimNext.",
+        "errors": [
+          {
+            "code": "claim_required",
+            "commonCorrection": "Call claim, or claimNext."
+          }
+        ]
+      }
+    }
+  },
+  "release": {
+    "summary": "A claim takes an instance in queued: its lease, and a move to running, in one write. claimNext claims the first the caller can, oldest first, trying at most 100. An instance is not claimed while it is pinned through recipe to a release its target has moved past.",
+    "operations": {
+      "claim": {
+        "useWhen": "Use to claim this Job when you know its id: it must be in queued.",
+        "doNotUseWhen": "Do not use to find work; call claimNext.",
+        "success": "Returns id, token, expiresAt and heartbeatMs; the status is running. Present the token as preconditions {\"Lease\": {\"token\": n}} on each write and heartbeat at least every heartbeatMs.",
+        "errors": [
+          {
+            "code": "not_claimable",
+            "commonCorrection": "None now: only an instance in queued is claimed. Call claimNext for work that is."
+          },
+          {
+            "code": "stale_link",
+            "commonCorrection": "Link recipe to its target's newest release first, or take other work."
+          }
+        ]
+      },
+      "claimNext": {
+        "useWhen": "Use as a worker to take the next Job to work on, oldest first.",
+        "doNotUseWhen": "Do not use to count the work waiting; call countClaimable.",
+        "success": "Returns claimed: id, token, expiresAt and heartbeatMs, or null when nothing is claimable now. Present the token as preconditions {\"Lease\": {\"token\": n}} on each write."
+      },
+      "countClaimable": {
+        "useWhen": "Use to count the work claimNext would try for you, a signal to scale workers on; it claims nothing.",
+        "success": "Returns count."
+      },
+      "refresh": {
+        "useWhen": "Use only to recompute Queue's copies of the instance's facts; Queue invokes it itself when a blocker, a budget scope or a pinned link's target changes.",
+        "success": "Returns {}."
+      },
+      "acquire": {
+        "doNotUseWhen": "Do not use: on Job the lease is taken by claim or claimNext.",
+        "errors": [
+          {
+            "code": "claim_required",
+            "commonCorrection": "Call claim, or claimNext."
+          }
+        ]
+      }
+    }
+  },
+  "both": {
+    "summary": "A claim takes an instance in queued: its lease, its budget reservation, and a move to running, in one write. claimNext claims the first the caller can, oldest first, trying at most 100. An instance is not claimed while it is blocked, over its budget, here or in an enclosing scope (Budget) or pinned through spec or recipe to a revision or a release its target has moved past.",
+    "operations": {
+      "claim": {
+        "useWhen": "Use to claim this Job when you know its id: it must be in queued.",
+        "doNotUseWhen": "Do not use to find work; call claimNext.",
+        "success": "Returns id, token, expiresAt and heartbeatMs; the status is running. Present the token as preconditions {\"Lease\": {\"token\": n}} on each write and heartbeat at least every heartbeatMs.",
+        "errors": [
+          {
+            "code": "not_claimable",
+            "commonCorrection": "None now: only an instance in queued is claimed. Call claimNext for work that is."
+          },
+          {
+            "code": "blocked",
+            "commonCorrection": "Wait for its blockers to finish, or take other work with claimNext."
+          },
+          {
+            "code": "stale_link",
+            "commonCorrection": "Link spec or recipe to its target's newest revision or release first, or take other work."
+          }
+        ]
+      },
+      "claimNext": {
+        "useWhen": "Use as a worker to take the next Job to work on, oldest first.",
+        "doNotUseWhen": "Do not use to count the work waiting; call countClaimable.",
+        "success": "Returns claimed: id, token, expiresAt and heartbeatMs, or null when nothing is claimable now. Present the token as preconditions {\"Lease\": {\"token\": n}} on each write."
+      },
+      "countClaimable": {
+        "useWhen": "Use to count the work claimNext would try for you, a signal to scale workers on; it claims nothing.",
+        "success": "Returns count."
+      },
+      "refresh": {
+        "useWhen": "Use only to recompute Queue's copies of the instance's facts; Queue invokes it itself when a blocker, a budget scope or a pinned link's target changes.",
+        "success": "Returns {}."
+      },
+      "acquire": {
+        "doNotUseWhen": "Do not use: on Job the lease is taken by claim or claimNext.",
+        "errors": [
+          {
+            "code": "claim_required",
+            "commonCorrection": "Call claim, or claimNext."
+          }
+        ]
+      }
+    }
+  }
+}

@@ -19,6 +19,7 @@ use std::collections::BTreeSet;
 use serde_json::{Map, Value};
 
 use superschematic_engine_storage::behavior::{prefix_of, stored_key, BehaviorSql};
+use superschematic_engine_storage::fulltext::{FullTextMatches, FullTextQuery};
 use superschematic_engine_storage::{Dialect, Row, RunResult, Sql, SqlMode, SqlValue, Tx};
 
 use super::behavior::{StoredInstance, StowedObject};
@@ -214,6 +215,10 @@ impl Core for PublishCore<'_, '_, '_> {
                 handle.run(sql, params)
             }
         })
+    }
+
+    fn sql_fulltext(&self, query: &FullTextQuery<'_>) -> Result<FullTextMatches> {
+        self.sql(|handle| handle.fulltext(query))
     }
 
     fn values_load(&self, text: &str, refs: Option<&str>) -> Result<Map<String, Value>> {

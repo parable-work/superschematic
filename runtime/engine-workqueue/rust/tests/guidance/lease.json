@@ -1,0 +1,825 @@
+{
+  "plain": {
+    "summary": "A lease gives one principal the Job for 1 minute at a time, renewed by heartbeat at least every 20 seconds. The runner expires a lapsed lease within 5 seconds. While a lease is active only its holder writes; each acquire gives a new token, which the holder presents as preconditions {\"Lease\": {\"token\": n}}.",
+    "operations": {
+      "update": {
+        "doNotUseWhen": "Do not write under another principal's active lease; the holder may present its token as preconditions {\"Lease\": {\"token\": n}}, which a newer lease makes stale.",
+        "errors": [
+          {
+            "code": "held_by_another",
+            "commonCorrection": "Wait until expiresAt in details, or work on another instance."
+          },
+          {
+            "code": "token_stale",
+            "commonCorrection": "Stop: a newer lease replaced yours. Read behaviors.Lease, and acquire again only if it is free."
+          },
+          {
+            "code": "lapsed",
+            "commonCorrection": "Stop working on the instance: the lease has lapsed. Acquire it again once it has expired."
+          }
+        ]
+      },
+      "delete": {
+        "doNotUseWhen": "Do not write under another principal's active lease; the holder may present its token as preconditions {\"Lease\": {\"token\": n}}, which a newer lease makes stale.",
+        "errors": [
+          {
+            "code": "held_by_another",
+            "commonCorrection": "Wait until expiresAt in details, or work on another instance."
+          },
+          {
+            "code": "token_stale",
+            "commonCorrection": "Stop: a newer lease replaced yours. Read behaviors.Lease, and acquire again only if it is free."
+          },
+          {
+            "code": "lapsed",
+            "commonCorrection": "Stop working on the instance: the lease has lapsed. Acquire it again once it has expired."
+          }
+        ]
+      },
+      "transition": {
+        "doNotUseWhen": "Do not write under another principal's active lease; the holder may present its token as preconditions {\"Lease\": {\"token\": n}}, which a newer lease makes stale.",
+        "errors": [
+          {
+            "code": "held_by_another",
+            "commonCorrection": "Wait until expiresAt in details, or work on another instance."
+          },
+          {
+            "code": "token_stale",
+            "commonCorrection": "Stop: a newer lease replaced yours. Read behaviors.Lease, and acquire again only if it is free."
+          },
+          {
+            "code": "lapsed",
+            "commonCorrection": "Stop working on the instance: the lease has lapsed. Acquire it again once it has expired."
+          }
+        ]
+      },
+      "comment": {
+        "doNotUseWhen": "Do not write under another principal's active lease; the holder may present its token as preconditions {\"Lease\": {\"token\": n}}, which a newer lease makes stale.",
+        "errors": [
+          {
+            "code": "held_by_another",
+            "commonCorrection": "Wait until expiresAt in details, or work on another instance."
+          },
+          {
+            "code": "token_stale",
+            "commonCorrection": "Stop: a newer lease replaced yours. Read behaviors.Lease, and acquire again only if it is free."
+          },
+          {
+            "code": "lapsed",
+            "commonCorrection": "Stop working on the instance: the lease has lapsed. Acquire it again once it has expired."
+          }
+        ]
+      },
+      "list": {
+        "useWhen": "where: { \"Lease.holder\": <subject> } lists the Job instances whose lease a principal holds, a lapsed one until the runner expires it, and \"Lease.holder\": null the free ones."
+      },
+      "acquire": {
+        "useWhen": "Use to take the lease, for 1 minute or a shorter ttlMs, before working on the instance alone.",
+        "success": "Returns token, expiresAt and heartbeatMs: heartbeat at least every heartbeatMs and present the token as preconditions {\"Lease\": {\"token\": n}} on each write.",
+        "errors": [
+          {
+            "code": "held_by_another",
+            "commonCorrection": "Wait until expiresAt in details, or work on another instance."
+          },
+          {
+            "code": "held_by_caller",
+            "commonCorrection": "Keep the lease you hold: renew it with heartbeat."
+          },
+          {
+            "code": "token_stale",
+            "commonCorrection": "Stop: a newer lease replaced yours. Read behaviors.Lease, and acquire again only if it is free."
+          }
+        ]
+      },
+      "heartbeat": {
+        "useWhen": "Use as the holder at least every 20 seconds, presenting the token, to keep the lease; acknowledge takes the ids of directives handled.",
+        "success": "Returns the new expiresAt and the directives not yet acknowledged, oldest first.",
+        "errors": [
+          {
+            "code": "not_leased",
+            "commonCorrection": "Acquire the lease (or claim the instance) first."
+          },
+          {
+            "code": "not_holder",
+            "commonCorrection": "Only the holder may do this; acquire the lease once it is free."
+          },
+          {
+            "code": "token_required",
+            "commonCorrection": "Present the lease's token as preconditions {\"Lease\": {\"token\": n}}."
+          },
+          {
+            "code": "token_stale",
+            "commonCorrection": "Stop: a newer lease replaced yours. Read behaviors.Lease, and acquire again only if it is free."
+          },
+          {
+            "code": "lapsed",
+            "commonCorrection": "Stop working on the instance: the lease has lapsed. Acquire it again once it has expired."
+          }
+        ]
+      },
+      "release": {
+        "useWhen": "Use as the holder, presenting the token, when done with the instance or handing it back. abandon true gives it up as failed, which counts as an expiry.",
+        "success": "Returns {}; the lease is free and its token stale.",
+        "errors": [
+          {
+            "code": "not_leased",
+            "commonCorrection": "Acquire the lease (or claim the instance) first."
+          },
+          {
+            "code": "not_holder",
+            "commonCorrection": "Only the holder may do this; acquire the lease once it is free."
+          },
+          {
+            "code": "token_required",
+            "commonCorrection": "Present the lease's token as preconditions {\"Lease\": {\"token\": n}}."
+          },
+          {
+            "code": "token_stale",
+            "commonCorrection": "Stop: a newer lease replaced yours. Read behaviors.Lease, and acquire again only if it is free."
+          },
+          {
+            "code": "lapsed",
+            "commonCorrection": "Stop working on the instance: the lease has lapsed. Acquire it again once it has expired."
+          }
+        ]
+      },
+      "expire": {
+        "useWhen": "Use to apply the expiry of a lapsed lease; the runner's sweep does so within 5 seconds.",
+        "success": "Returns expired and its reason: ttl, maxHold or holder."
+      },
+      "direct": {
+        "doNotUseWhen": "Do not use: the config names no permission that sends directives.",
+        "success": "Returns the directive id, and created false when one with its dedupeKey stands.",
+        "errors": [
+          {
+            "code": "not_leased",
+            "commonCorrection": "Acquire the lease (or claim the instance) first."
+          },
+          {
+            "code": "lapsed",
+            "commonCorrection": "Stop working on the instance: the lease has lapsed. Acquire it again once it has expired."
+          },
+          {
+            "code": "not_configured",
+            "commonCorrection": "None: the type's Lease config names no permission that allows it."
+          }
+        ]
+      },
+      "acknowledge": {
+        "useWhen": "Use as the holder, presenting the token, to stop directives' delivery; heartbeat's acknowledge does the same in the heartbeat's write.",
+        "success": "Returns {}.",
+        "errors": [
+          {
+            "code": "not_leased",
+            "commonCorrection": "Acquire the lease (or claim the instance) first."
+          },
+          {
+            "code": "not_holder",
+            "commonCorrection": "Only the holder may do this; acquire the lease once it is free."
+          },
+          {
+            "code": "token_required",
+            "commonCorrection": "Present the lease's token as preconditions {\"Lease\": {\"token\": n}}."
+          },
+          {
+            "code": "token_stale",
+            "commonCorrection": "Stop: a newer lease replaced yours. Read behaviors.Lease, and acquire again only if it is free."
+          },
+          {
+            "code": "lapsed",
+            "commonCorrection": "Stop working on the instance: the lease has lapsed. Acquire it again once it has expired."
+          }
+        ]
+      },
+      "resetExpiries": {
+        "doNotUseWhen": "Do not use: the config names no overridePermission, which it needs.",
+        "errors": [
+          {
+            "code": "not_configured",
+            "commonCorrection": "None: the type's Lease config names no permission that allows it."
+          }
+        ]
+      },
+      "expireHolder": {
+        "doNotUseWhen": "Do not use: the config names no overridePermission, which it needs."
+      }
+    }
+  },
+  "full": {
+    "summary": "A lease gives one principal the Job for 30 seconds at a time, renewed by heartbeat at least every 10 seconds, and held at most the instance's timeLimitMs milliseconds, else 90 seconds. The runner expires a lapsed lease within 2 seconds; an expiry moves status from running to queued. After 3 expiries it is not leased again, and that expiry moves status from running or queued to failed instead. While a lease is active only its holder writes, but for Comments.comment; each acquire gives a new token, which the holder presents as preconditions {\"Lease\": {\"token\": n}} on every write. The runner sends the holder of an active lease directive rebase when the plan link's target gains a revision past the pinned one or a release, directive reread when the notes link's target gains a revision or a release and directive reload when the recipe link's target gains a revision or a release past the pinned one; an instance with no lease held hears nothing, and its next holder nothing either.",
+    "operations": {
+      "update": {
+        "doNotUseWhen": "Do not write under another principal's active lease; the holder presents its token as preconditions {\"Lease\": {\"token\": n}}. timeLimitMs does not change while a lease is held.",
+        "errors": [
+          {
+            "code": "held_by_another",
+            "commonCorrection": "Wait until expiresAt in details, or work on another instance."
+          },
+          {
+            "code": "token_stale",
+            "commonCorrection": "Stop: a newer lease replaced yours. Read behaviors.Lease, and acquire again only if it is free."
+          },
+          {
+            "code": "lapsed",
+            "commonCorrection": "Stop working on the instance: the lease has lapsed. Acquire it again once it has expired."
+          },
+          {
+            "code": "token_required",
+            "commonCorrection": "Present the lease's token as preconditions {\"Lease\": {\"token\": n}}."
+          },
+          {
+            "code": "hold_limit_fixed",
+            "commonCorrection": "Change the field once the lease has ended, or with the override permission."
+          }
+        ]
+      },
+      "delete": {
+        "doNotUseWhen": "Do not write under another principal's active lease; the holder presents its token as preconditions {\"Lease\": {\"token\": n}}.",
+        "errors": [
+          {
+            "code": "held_by_another",
+            "commonCorrection": "Wait until expiresAt in details, or work on another instance."
+          },
+          {
+            "code": "token_stale",
+            "commonCorrection": "Stop: a newer lease replaced yours. Read behaviors.Lease, and acquire again only if it is free."
+          },
+          {
+            "code": "lapsed",
+            "commonCorrection": "Stop working on the instance: the lease has lapsed. Acquire it again once it has expired."
+          },
+          {
+            "code": "token_required",
+            "commonCorrection": "Present the lease's token as preconditions {\"Lease\": {\"token\": n}}."
+          }
+        ]
+      },
+      "transition": {
+        "doNotUseWhen": "Do not write under another principal's active lease; the holder presents its token as preconditions {\"Lease\": {\"token\": n}}.",
+        "errors": [
+          {
+            "code": "held_by_another",
+            "commonCorrection": "Wait until expiresAt in details, or work on another instance."
+          },
+          {
+            "code": "token_stale",
+            "commonCorrection": "Stop: a newer lease replaced yours. Read behaviors.Lease, and acquire again only if it is free."
+          },
+          {
+            "code": "lapsed",
+            "commonCorrection": "Stop working on the instance: the lease has lapsed. Acquire it again once it has expired."
+          },
+          {
+            "code": "token_required",
+            "commonCorrection": "Present the lease's token as preconditions {\"Lease\": {\"token\": n}}."
+          }
+        ]
+      },
+      "link": {
+        "doNotUseWhen": "Do not write under another principal's active lease; the holder presents its token as preconditions {\"Lease\": {\"token\": n}}.",
+        "errors": [
+          {
+            "code": "held_by_another",
+            "commonCorrection": "Wait until expiresAt in details, or work on another instance."
+          },
+          {
+            "code": "token_stale",
+            "commonCorrection": "Stop: a newer lease replaced yours. Read behaviors.Lease, and acquire again only if it is free."
+          },
+          {
+            "code": "lapsed",
+            "commonCorrection": "Stop working on the instance: the lease has lapsed. Acquire it again once it has expired."
+          },
+          {
+            "code": "token_required",
+            "commonCorrection": "Present the lease's token as preconditions {\"Lease\": {\"token\": n}}."
+          }
+        ]
+      },
+      "claim": {
+        "doNotUseWhen": "Do not write under another principal's active lease; the holder presents its token as preconditions {\"Lease\": {\"token\": n}}.",
+        "errors": [
+          {
+            "code": "held_by_another",
+            "commonCorrection": "Wait until expiresAt in details, or work on another instance."
+          },
+          {
+            "code": "token_stale",
+            "commonCorrection": "Stop: a newer lease replaced yours. Read behaviors.Lease, and acquire again only if it is free."
+          },
+          {
+            "code": "lapsed",
+            "commonCorrection": "Stop working on the instance: the lease has lapsed. Acquire it again once it has expired."
+          },
+          {
+            "code": "token_required",
+            "commonCorrection": "Present the lease's token as preconditions {\"Lease\": {\"token\": n}}."
+          }
+        ]
+      },
+      "list": {
+        "useWhen": "where: { \"Lease.holder\": <subject> } lists the Job instances whose lease a principal holds, a lapsed one until the runner expires it, and \"Lease.holder\": null the free ones."
+      },
+      "acquire": {
+        "useWhen": "Use to take the lease, for 30 seconds or a shorter ttlMs, before working on the instance alone. It needs permission jobs.work, else the call is forbidden.",
+        "success": "Returns token, expiresAt and heartbeatMs: heartbeat at least every heartbeatMs and present the token as preconditions {\"Lease\": {\"token\": n}} on each write.",
+        "errors": [
+          {
+            "code": "held_by_another",
+            "commonCorrection": "Wait until expiresAt in details, or work on another instance."
+          },
+          {
+            "code": "held_by_caller",
+            "commonCorrection": "Keep the lease you hold: renew it with heartbeat."
+          },
+          {
+            "code": "token_stale",
+            "commonCorrection": "Stop: a newer lease replaced yours. Read behaviors.Lease, and acquire again only if it is free."
+          },
+          {
+            "code": "max_expiries",
+            "commonCorrection": "A caller with the override permission resets the count with resetExpiries."
+          }
+        ]
+      },
+      "heartbeat": {
+        "useWhen": "Use as the holder at least every 10 seconds, presenting the token, to keep the lease; acknowledge takes the ids of directives handled.",
+        "success": "Returns the new expiresAt and the directives not yet acknowledged, oldest first. A directive the runner sends when a link's target moves on (rebase, reread or reload) carries data.revised: the link, the target, and its revision, or its release and the release's commit.",
+        "errors": [
+          {
+            "code": "not_leased",
+            "commonCorrection": "Acquire the lease (or claim the instance) first."
+          },
+          {
+            "code": "not_holder",
+            "commonCorrection": "Only the holder may do this; acquire the lease once it is free."
+          },
+          {
+            "code": "token_required",
+            "commonCorrection": "Present the lease's token as preconditions {\"Lease\": {\"token\": n}}."
+          },
+          {
+            "code": "token_stale",
+            "commonCorrection": "Stop: a newer lease replaced yours. Read behaviors.Lease, and acquire again only if it is free."
+          },
+          {
+            "code": "lapsed",
+            "commonCorrection": "Stop working on the instance: the lease has lapsed. Acquire it again once it has expired."
+          }
+        ]
+      },
+      "release": {
+        "useWhen": "Use as the holder, presenting the token, when done with the instance or handing it back. abandon true gives it up as failed, which counts as an expiry and moves status from running to queued.",
+        "success": "Returns {}; the lease is free and its token stale.",
+        "errors": [
+          {
+            "code": "not_leased",
+            "commonCorrection": "Acquire the lease (or claim the instance) first."
+          },
+          {
+            "code": "not_holder",
+            "commonCorrection": "Only the holder may do this; acquire the lease once it is free."
+          },
+          {
+            "code": "token_required",
+            "commonCorrection": "Present the lease's token as preconditions {\"Lease\": {\"token\": n}}."
+          },
+          {
+            "code": "token_stale",
+            "commonCorrection": "Stop: a newer lease replaced yours. Read behaviors.Lease, and acquire again only if it is free."
+          },
+          {
+            "code": "lapsed",
+            "commonCorrection": "Stop working on the instance: the lease has lapsed. Acquire it again once it has expired."
+          }
+        ]
+      },
+      "expire": {
+        "useWhen": "Use to apply the expiry of a lapsed lease; the runner's sweep does so within 2 seconds. With holder, it expires that principal's lease at once, and needs permission jobs.override.",
+        "success": "Returns expired and its reason: ttl, maxHold or holder."
+      },
+      "direct": {
+        "useWhen": "Use to send a message to the holder of the active lease, which its next heartbeat returns; it needs permission jobs.direct.",
+        "success": "Returns the directive id, and created false when one with its dedupeKey stands.",
+        "errors": [
+          {
+            "code": "not_leased",
+            "commonCorrection": "Acquire the lease (or claim the instance) first."
+          },
+          {
+            "code": "lapsed",
+            "commonCorrection": "Stop working on the instance: the lease has lapsed. Acquire it again once it has expired."
+          }
+        ]
+      },
+      "acknowledge": {
+        "useWhen": "Use as the holder, presenting the token, to stop directives' delivery; heartbeat's acknowledge does the same in the heartbeat's write.",
+        "success": "Returns {}.",
+        "errors": [
+          {
+            "code": "not_leased",
+            "commonCorrection": "Acquire the lease (or claim the instance) first."
+          },
+          {
+            "code": "not_holder",
+            "commonCorrection": "Only the holder may do this; acquire the lease once it is free."
+          },
+          {
+            "code": "token_required",
+            "commonCorrection": "Present the lease's token as preconditions {\"Lease\": {\"token\": n}}."
+          },
+          {
+            "code": "token_stale",
+            "commonCorrection": "Stop: a newer lease replaced yours. Read behaviors.Lease, and acquire again only if it is free."
+          },
+          {
+            "code": "lapsed",
+            "commonCorrection": "Stop working on the instance: the lease has lapsed. Acquire it again once it has expired."
+          }
+        ]
+      },
+      "resetExpiries": {
+        "useWhen": "Use to let an instance that reached its expiries be leased again; it needs permission jobs.override.",
+        "success": "Returns the expiries it cleared."
+      },
+      "expireHolder": {
+        "useWhen": "Use when a worker is gone: it expires every lease its principal holds on the schema; it needs permission jobs.override. notRenewedAfter spares a lease renewed since then.",
+        "success": "Returns how many it expired, by reason, and their ids."
+      }
+    }
+  },
+  "overridden": {
+    "summary": "A lease gives one principal the Job for 2 minutes at a time, renewed by heartbeat at least every 1500 ms, and held at most 2 hours. The runner expires a lapsed lease within 1 minute; an expiry moves status from running or failed to queued. After 1 expiries it is not leased again. While a lease is active only its holder writes, but for Comments.comment and Workflow.transition; each acquire gives a new token, which the holder presents as preconditions {\"Lease\": {\"token\": n}}. The runner sends the holder of an active lease directive reread when the notes link's target gains a revision or a release; an instance with no lease held hears nothing, and its next holder nothing either.",
+    "operations": {
+      "update": {
+        "doNotUseWhen": "Do not write under another principal's active lease; the holder may present its token as preconditions {\"Lease\": {\"token\": n}}, which a newer lease makes stale.",
+        "errors": [
+          {
+            "code": "held_by_another",
+            "commonCorrection": "Wait until expiresAt in details, or work on another instance."
+          },
+          {
+            "code": "token_stale",
+            "commonCorrection": "Stop: a newer lease replaced yours. Read behaviors.Lease, and acquire again only if it is free."
+          },
+          {
+            "code": "lapsed",
+            "commonCorrection": "Stop working on the instance: the lease has lapsed. Acquire it again once it has expired."
+          }
+        ]
+      },
+      "delete": {
+        "doNotUseWhen": "Do not write under another principal's active lease; the holder may present its token as preconditions {\"Lease\": {\"token\": n}}, which a newer lease makes stale.",
+        "errors": [
+          {
+            "code": "held_by_another",
+            "commonCorrection": "Wait until expiresAt in details, or work on another instance."
+          },
+          {
+            "code": "token_stale",
+            "commonCorrection": "Stop: a newer lease replaced yours. Read behaviors.Lease, and acquire again only if it is free."
+          },
+          {
+            "code": "lapsed",
+            "commonCorrection": "Stop working on the instance: the lease has lapsed. Acquire it again once it has expired."
+          }
+        ]
+      },
+      "list": {
+        "useWhen": "where: { \"Lease.holder\": <subject> } lists the Job instances whose lease a principal holds, a lapsed one until the runner expires it, and \"Lease.holder\": null the free ones."
+      },
+      "acquire": {
+        "useWhen": "Use to take the lease, for 2 minutes or a shorter ttlMs, before working on the instance alone.",
+        "success": "Returns token, expiresAt and heartbeatMs: heartbeat at least every heartbeatMs and present the token as preconditions {\"Lease\": {\"token\": n}} on each write.",
+        "errors": [
+          {
+            "code": "held_by_another",
+            "commonCorrection": "Wait until expiresAt in details, or work on another instance."
+          },
+          {
+            "code": "held_by_caller",
+            "commonCorrection": "Keep the lease you hold: renew it with heartbeat."
+          },
+          {
+            "code": "token_stale",
+            "commonCorrection": "Stop: a newer lease replaced yours. Read behaviors.Lease, and acquire again only if it is free."
+          },
+          {
+            "code": "max_expiries",
+            "commonCorrection": "A caller with the override permission resets the count with resetExpiries."
+          }
+        ]
+      },
+      "heartbeat": {
+        "useWhen": "Use as the holder at least every 1500 ms, presenting the token, to keep the lease; acknowledge takes the ids of directives handled.",
+        "success": "Returns the new expiresAt and the directives not yet acknowledged, oldest first. A directive the runner sends when a link's target moves on (reread) carries data.revised: the link, the target, and its revision, or its release and the release's commit.",
+        "errors": [
+          {
+            "code": "not_leased",
+            "commonCorrection": "Acquire the lease (or claim the instance) first."
+          },
+          {
+            "code": "not_holder",
+            "commonCorrection": "Only the holder may do this; acquire the lease once it is free."
+          },
+          {
+            "code": "token_required",
+            "commonCorrection": "Present the lease's token as preconditions {\"Lease\": {\"token\": n}}."
+          },
+          {
+            "code": "token_stale",
+            "commonCorrection": "Stop: a newer lease replaced yours. Read behaviors.Lease, and acquire again only if it is free."
+          },
+          {
+            "code": "lapsed",
+            "commonCorrection": "Stop working on the instance: the lease has lapsed. Acquire it again once it has expired."
+          }
+        ]
+      },
+      "release": {
+        "useWhen": "Use as the holder, presenting the token, when done with the instance or handing it back. abandon true gives it up as failed, which counts as an expiry and moves status from running or failed to queued.",
+        "success": "Returns {}; the lease is free and its token stale.",
+        "errors": [
+          {
+            "code": "not_leased",
+            "commonCorrection": "Acquire the lease (or claim the instance) first."
+          },
+          {
+            "code": "not_holder",
+            "commonCorrection": "Only the holder may do this; acquire the lease once it is free."
+          },
+          {
+            "code": "token_required",
+            "commonCorrection": "Present the lease's token as preconditions {\"Lease\": {\"token\": n}}."
+          },
+          {
+            "code": "token_stale",
+            "commonCorrection": "Stop: a newer lease replaced yours. Read behaviors.Lease, and acquire again only if it is free."
+          },
+          {
+            "code": "lapsed",
+            "commonCorrection": "Stop working on the instance: the lease has lapsed. Acquire it again once it has expired."
+          }
+        ]
+      },
+      "expire": {
+        "useWhen": "Use to apply the expiry of a lapsed lease; the runner's sweep does so within 1 minute. With holder, it expires that principal's lease at once, and needs permission jobs.override.",
+        "success": "Returns expired and its reason: ttl, maxHold or holder."
+      },
+      "direct": {
+        "useWhen": "Use to send a message to the holder of the active lease, which its next heartbeat returns; it needs permission jobs.override.",
+        "success": "Returns the directive id, and created false when one with its dedupeKey stands.",
+        "errors": [
+          {
+            "code": "not_leased",
+            "commonCorrection": "Acquire the lease (or claim the instance) first."
+          },
+          {
+            "code": "lapsed",
+            "commonCorrection": "Stop working on the instance: the lease has lapsed. Acquire it again once it has expired."
+          }
+        ]
+      },
+      "acknowledge": {
+        "useWhen": "Use as the holder, presenting the token, to stop directives' delivery; heartbeat's acknowledge does the same in the heartbeat's write.",
+        "success": "Returns {}.",
+        "errors": [
+          {
+            "code": "not_leased",
+            "commonCorrection": "Acquire the lease (or claim the instance) first."
+          },
+          {
+            "code": "not_holder",
+            "commonCorrection": "Only the holder may do this; acquire the lease once it is free."
+          },
+          {
+            "code": "token_required",
+            "commonCorrection": "Present the lease's token as preconditions {\"Lease\": {\"token\": n}}."
+          },
+          {
+            "code": "token_stale",
+            "commonCorrection": "Stop: a newer lease replaced yours. Read behaviors.Lease, and acquire again only if it is free."
+          },
+          {
+            "code": "lapsed",
+            "commonCorrection": "Stop working on the instance: the lease has lapsed. Acquire it again once it has expired."
+          }
+        ]
+      },
+      "resetExpiries": {
+        "useWhen": "Use to let an instance that reached its expiries be leased again; it needs permission jobs.override.",
+        "success": "Returns the expiries it cleared."
+      },
+      "expireHolder": {
+        "useWhen": "Use when a worker is gone: it expires every lease its principal holds on the schema; it needs permission jobs.override. notRenewedAfter spares a lease renewed since then.",
+        "success": "Returns how many it expired, by reason, and their ids."
+      }
+    }
+  },
+  "field": {
+    "summary": "A lease gives one principal the Job for 10 seconds at a time, renewed by heartbeat at least every 3 seconds, and held at most the instance's timeLimitMs milliseconds. The runner expires a lapsed lease within 5 seconds. While a lease is active only its holder writes; each acquire gives a new token, which the holder presents as preconditions {\"Lease\": {\"token\": n}}.",
+    "operations": {
+      "update": {
+        "doNotUseWhen": "Do not write under another principal's active lease; the holder may present its token as preconditions {\"Lease\": {\"token\": n}}, which a newer lease makes stale. timeLimitMs does not change while a lease is held.",
+        "errors": [
+          {
+            "code": "held_by_another",
+            "commonCorrection": "Wait until expiresAt in details, or work on another instance."
+          },
+          {
+            "code": "token_stale",
+            "commonCorrection": "Stop: a newer lease replaced yours. Read behaviors.Lease, and acquire again only if it is free."
+          },
+          {
+            "code": "lapsed",
+            "commonCorrection": "Stop working on the instance: the lease has lapsed. Acquire it again once it has expired."
+          },
+          {
+            "code": "hold_limit_fixed",
+            "commonCorrection": "Change the field once the lease has ended, or with the override permission."
+          }
+        ]
+      },
+      "delete": {
+        "doNotUseWhen": "Do not write under another principal's active lease; the holder may present its token as preconditions {\"Lease\": {\"token\": n}}, which a newer lease makes stale.",
+        "errors": [
+          {
+            "code": "held_by_another",
+            "commonCorrection": "Wait until expiresAt in details, or work on another instance."
+          },
+          {
+            "code": "token_stale",
+            "commonCorrection": "Stop: a newer lease replaced yours. Read behaviors.Lease, and acquire again only if it is free."
+          },
+          {
+            "code": "lapsed",
+            "commonCorrection": "Stop working on the instance: the lease has lapsed. Acquire it again once it has expired."
+          }
+        ]
+      },
+      "transition": {
+        "doNotUseWhen": "Do not write under another principal's active lease; the holder may present its token as preconditions {\"Lease\": {\"token\": n}}, which a newer lease makes stale.",
+        "errors": [
+          {
+            "code": "held_by_another",
+            "commonCorrection": "Wait until expiresAt in details, or work on another instance."
+          },
+          {
+            "code": "token_stale",
+            "commonCorrection": "Stop: a newer lease replaced yours. Read behaviors.Lease, and acquire again only if it is free."
+          },
+          {
+            "code": "lapsed",
+            "commonCorrection": "Stop working on the instance: the lease has lapsed. Acquire it again once it has expired."
+          }
+        ]
+      },
+      "comment": {
+        "doNotUseWhen": "Do not write under another principal's active lease; the holder may present its token as preconditions {\"Lease\": {\"token\": n}}, which a newer lease makes stale.",
+        "errors": [
+          {
+            "code": "held_by_another",
+            "commonCorrection": "Wait until expiresAt in details, or work on another instance."
+          },
+          {
+            "code": "token_stale",
+            "commonCorrection": "Stop: a newer lease replaced yours. Read behaviors.Lease, and acquire again only if it is free."
+          },
+          {
+            "code": "lapsed",
+            "commonCorrection": "Stop working on the instance: the lease has lapsed. Acquire it again once it has expired."
+          }
+        ]
+      },
+      "list": {
+        "useWhen": "where: { \"Lease.holder\": <subject> } lists the Job instances whose lease a principal holds, a lapsed one until the runner expires it, and \"Lease.holder\": null the free ones."
+      },
+      "acquire": {
+        "useWhen": "Use to take the lease, for 10 seconds or a shorter ttlMs, before working on the instance alone.",
+        "success": "Returns token, expiresAt and heartbeatMs: heartbeat at least every heartbeatMs and present the token as preconditions {\"Lease\": {\"token\": n}} on each write.",
+        "errors": [
+          {
+            "code": "held_by_another",
+            "commonCorrection": "Wait until expiresAt in details, or work on another instance."
+          },
+          {
+            "code": "held_by_caller",
+            "commonCorrection": "Keep the lease you hold: renew it with heartbeat."
+          },
+          {
+            "code": "token_stale",
+            "commonCorrection": "Stop: a newer lease replaced yours. Read behaviors.Lease, and acquire again only if it is free."
+          }
+        ]
+      },
+      "heartbeat": {
+        "useWhen": "Use as the holder at least every 3 seconds, presenting the token, to keep the lease; acknowledge takes the ids of directives handled.",
+        "success": "Returns the new expiresAt and the directives not yet acknowledged, oldest first.",
+        "errors": [
+          {
+            "code": "not_leased",
+            "commonCorrection": "Acquire the lease (or claim the instance) first."
+          },
+          {
+            "code": "not_holder",
+            "commonCorrection": "Only the holder may do this; acquire the lease once it is free."
+          },
+          {
+            "code": "token_required",
+            "commonCorrection": "Present the lease's token as preconditions {\"Lease\": {\"token\": n}}."
+          },
+          {
+            "code": "token_stale",
+            "commonCorrection": "Stop: a newer lease replaced yours. Read behaviors.Lease, and acquire again only if it is free."
+          },
+          {
+            "code": "lapsed",
+            "commonCorrection": "Stop working on the instance: the lease has lapsed. Acquire it again once it has expired."
+          }
+        ]
+      },
+      "release": {
+        "useWhen": "Use as the holder, presenting the token, when done with the instance or handing it back. abandon true gives it up as failed, which counts as an expiry.",
+        "success": "Returns {}; the lease is free and its token stale.",
+        "errors": [
+          {
+            "code": "not_leased",
+            "commonCorrection": "Acquire the lease (or claim the instance) first."
+          },
+          {
+            "code": "not_holder",
+            "commonCorrection": "Only the holder may do this; acquire the lease once it is free."
+          },
+          {
+            "code": "token_required",
+            "commonCorrection": "Present the lease's token as preconditions {\"Lease\": {\"token\": n}}."
+          },
+          {
+            "code": "token_stale",
+            "commonCorrection": "Stop: a newer lease replaced yours. Read behaviors.Lease, and acquire again only if it is free."
+          },
+          {
+            "code": "lapsed",
+            "commonCorrection": "Stop working on the instance: the lease has lapsed. Acquire it again once it has expired."
+          }
+        ]
+      },
+      "expire": {
+        "useWhen": "Use to apply the expiry of a lapsed lease; the runner's sweep does so within 5 seconds.",
+        "success": "Returns expired and its reason: ttl, maxHold or holder."
+      },
+      "direct": {
+        "useWhen": "Use to send a message to the holder of the active lease, which its next heartbeat returns; it needs permission jobs.direct.",
+        "success": "Returns the directive id, and created false when one with its dedupeKey stands.",
+        "errors": [
+          {
+            "code": "not_leased",
+            "commonCorrection": "Acquire the lease (or claim the instance) first."
+          },
+          {
+            "code": "lapsed",
+            "commonCorrection": "Stop working on the instance: the lease has lapsed. Acquire it again once it has expired."
+          }
+        ]
+      },
+      "acknowledge": {
+        "useWhen": "Use as the holder, presenting the token, to stop directives' delivery; heartbeat's acknowledge does the same in the heartbeat's write.",
+        "success": "Returns {}.",
+        "errors": [
+          {
+            "code": "not_leased",
+            "commonCorrection": "Acquire the lease (or claim the instance) first."
+          },
+          {
+            "code": "not_holder",
+            "commonCorrection": "Only the holder may do this; acquire the lease once it is free."
+          },
+          {
+            "code": "token_required",
+            "commonCorrection": "Present the lease's token as preconditions {\"Lease\": {\"token\": n}}."
+          },
+          {
+            "code": "token_stale",
+            "commonCorrection": "Stop: a newer lease replaced yours. Read behaviors.Lease, and acquire again only if it is free."
+          },
+          {
+            "code": "lapsed",
+            "commonCorrection": "Stop working on the instance: the lease has lapsed. Acquire it again once it has expired."
+          }
+        ]
+      },
+      "resetExpiries": {
+        "doNotUseWhen": "Do not use: the config names no overridePermission, which it needs.",
+        "errors": [
+          {
+            "code": "not_configured",
+            "commonCorrection": "None: the type's Lease config names no permission that allows it."
+          }
+        ]
+      },
+      "expireHolder": {
+        "doNotUseWhen": "Do not use: the config names no overridePermission, which it needs."
+      }
+    }
+  }
+}

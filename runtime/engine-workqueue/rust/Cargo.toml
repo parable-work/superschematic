@@ -1,0 +1,35 @@
+[package]
+name = "superschematic-engine-workqueue"
+description = "The work queue's behaviors (D16) for the Rust engine (D58): Lease, Assignment, Queue, Presence, Blueprint, Budget and Retries, each over the declaration the compiler registers"
+# A member of the engine's workspace (runtime/engine/rust), outside its
+# directory: one lock file, and one toolchain for every archive a binding
+# links (D58).
+workspace = "../../engine/rust"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[features]
+# The databases the engine runs on, as the engine has them.
+default = ["sqlite", "postgres"]
+sqlite = ["superschematic-engine/sqlite", "superschematic-engine-behaviors/sqlite"]
+postgres = ["superschematic-engine/postgres", "superschematic-engine-behaviors/postgres"]
+
+[dependencies]
+serde = { version = "1.0.228", features = ["derive"] }
+# The engine's JSON features (D58): a number keeps its text, an object its
+# members' order.
+serde_json = { version = "1.0.149", features = ["arbitrary_precision", "preserve_order"] }
+# The plug-in API an extension's behavior uses, and nothing else of the
+# engine: these behaviors reach it as any extension's do.
+superschematic-engine = { path = "../../engine/rust/engine", default-features = false }
+# The core behaviors' public helpers the TypeScript package imports from
+# @superschematic/engine: Workflow's terminal states, Links' pins, and what
+# a move of a link's target moves on (revised).
+superschematic-engine-behaviors = { path = "../../engine/rust/behaviors", default-features = false }
+
+[lints]
+workspace = true

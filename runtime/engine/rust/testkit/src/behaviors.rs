@@ -18,18 +18,23 @@
 //!   `test/core-dependencies.test.ts` composes [`Reader`] too;
 //! - `test/core-dependencies.test.ts`: [`Finisher`];
 //! - `test/core-numbering.test.ts`: [`Refuser`];
+//! - `test/core-reactions-changes.test.ts`: [`Score`] and [`WorkflowTally`];
 //! - the D56 behaviors' test files: [`crate::core_fixtures`].
 //!
 //! A test file may define its own behavior under a name another file uses
 //! (`test.Hold`), so the replayer looks a behavior up by file and name
 //! ([`test_behavior`]).
 
+mod core_branches;
 mod core_dependencies;
 mod core_numbering;
+mod core_reactions;
 mod core_revisions;
 
+pub use core_branches::Keep;
 pub use core_dependencies::Finisher;
 pub use core_numbering::Refuser;
+pub use core_reactions::{Score, WorkflowTally};
 pub use core_revisions::RevisionHold;
 
 use std::sync::{Arc, Mutex, PoisonError};
@@ -1799,11 +1804,14 @@ impl Behavior for Dispatch {
 
 /// A core behavior by name, alone, for a step that registers one again or
 /// an open that names one: the engine refuses it, as the TypeScript engine
-/// refuses a name already registered. `None` for one not ported yet.
+/// refuses a name already registered. A work-queue behavior's name finds
+/// it ([`superschematic_engine_workqueue::behavior`]), as a recording names
+/// the package's behaviors its engine registered. `None` for a name neither
+/// the core's nor the work queue's.
 pub fn core_behavior(name: &str) -> Option<BehaviorSet> {
     use superschematic_engine_behaviors::{
-        Approvals, Comments, Constants, Dependencies, Links, Numbering, Revisions, StateRules,
-        Timers, Variants, Workflow,
+        Approvals, Branches, Comments, Constants, Dependencies, Links, Numbering, Reactions,
+        Revisions, Rollups, Search, StateRules, Timers, Variants, Workflow,
     };
     let set = BehaviorSet::new();
     Some(match name {
@@ -1812,19 +1820,38 @@ pub fn core_behavior(name: &str) -> Option<BehaviorSet> {
         "Revisions" => set.with(Revisions),
         "Dependencies" => set.with(Dependencies),
         "Links" => set.with(Links),
+        "Rollups" => set.with(Rollups),
+        "Search" => set.with(Search),
+        "Reactions" => set.with(Reactions),
         "Constants" => set.with(Constants),
         "Variants" => set.with(Variants),
+        "Branches" => set.with(Branches),
         "StateRules" => set.with(StateRules),
         "Approvals" => set.with(Approvals),
         "Numbering" => set.with(Numbering),
         "Timers" => set.with(Timers),
-        _ => return None,
+        _ => return superschematic_engine_workqueue::behavior(name),
     })
+}
+
+/// The stand-in a scenario lists among its test behaviors (`testBehaviors`)
+/// under the name of a work-queue behavior, in that behavior's place:
+/// Queue's tests register a Budget that holds a claim to Budget's contract
+/// ([`crate::workqueue_fixtures::BudgetStandIn`]). `None` for another name.
+pub fn stand_in(name: &str) -> Option<BehaviorSet> {
+    match name {
+        "Budget" => {
+            Some(BehaviorSet::new().with(crate::workqueue_fixtures::BudgetStandIn::default()))
+        }
+        _ => None,
+    }
 }
 
 /// The test behavior a scenario file names, by the file's name and the
 /// behavior's: each file's own where it defines one, else the shared
-/// fixtures'. `None` for one the test kit has not ported.
+/// fixtures', then the work queue's fixtures
+/// ([`crate::workqueue_fixtures`]) and its behaviors, which its tests
+/// register as theirs. `None` for one the test kit has not ported.
 pub fn test_behavior(file: &str, name: &str) -> Option<BehaviorSet> {
     let set = BehaviorSet::new();
     Some(match (file, name) {
@@ -1832,9 +1859,13 @@ pub fn test_behavior(file: &str, name: &str) -> Option<BehaviorSet> {
         ("core-staterules", "test.Recorder") => set.with(crate::core_fixtures::Recorder),
         ("core-timers", "test.Bounce") => set.with(crate::core_fixtures::Bounce),
         ("core-timers", "test.Hold") => set.with(crate::core_fixtures::FireHold),
+        ("core-search", "test.Tripwire") => set.with(crate::core_fixtures::Tripwire),
         ("core-revisions", "test.Hold") => set.with(RevisionHold),
         ("core-dependencies", "test.Finisher") => set.with(Finisher),
+        ("core-branches-sweep", "test.Keep") => set.with(Keep::default()),
         ("core-numbering", "test.Refuser") => set.with(Refuser),
+        ("core-reactions-changes", "test.Score") => set.with(Score),
+        ("core-reactions-changes", "Workflow.Tally") => set.with(WorkflowTally),
         ("list-filters", "test.Counter") => set.with(Counter::filtered()),
         (_, "test.Counter") => set.with(Counter::default()),
         (_, "test.Flag") => set.with(Flag),
@@ -1848,6 +1879,9 @@ pub fn test_behavior(file: &str, name: &str) -> Option<BehaviorSet> {
         (_, "test.Reader") => set.with(Reader),
         (_, "test.Broken") => set.with(Broken),
         (file, "test.Hold") if !file.starts_with("core-") => set.with(Hold::default()),
-        _ => return None,
+        (_, "test.Signal") => set.with(crate::workqueue_fixtures::Signal),
+        (_, "test.Gate") => set.with(crate::workqueue_fixtures::Gate),
+        (_, "test.Lock") => set.with(crate::workqueue_fixtures::Lock),
+        _ => return superschematic_engine_workqueue::behavior(name),
     })
 }

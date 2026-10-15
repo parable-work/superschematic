@@ -6,12 +6,16 @@
 //! text is plain ASCII and depends only on the config and the type.
 
 pub(crate) mod approvals;
+pub(crate) mod branches;
 pub(crate) mod comments;
 pub(crate) mod constants;
 pub(crate) mod dependencies;
 pub(crate) mod links;
 pub(crate) mod numbering;
+pub(crate) mod reactions;
 pub(crate) mod revisions;
+pub(crate) mod rollups;
+pub(crate) mod search;
 pub(crate) mod staterules;
 pub(crate) mod timers;
 pub(crate) mod variants;

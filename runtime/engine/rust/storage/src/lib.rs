@@ -24,6 +24,9 @@
 //! - A behavior's storage ([`behavior`]) is its prefix, its migrations and
 //!   its SQL handle, whose every statement passes the checker
 //!   ([`sql_refusal`]).
+//! - Full-text search is the engine's own ([`fulltext`]): an index a
+//!   behavior's migration creates and its SQL handle matches, FTS5 on
+//!   SQLite and a `tsvector` with a GIN index on Postgres.
 //! - [`Tx::notify`] wakes waiters on the [`Notifier`] when the write
 //!   commits, in every process on Postgres.
 //!
@@ -38,6 +41,7 @@ mod ddl;
 mod dialect;
 mod engine_migrations;
 mod error;
+pub mod fulltext;
 mod ident;
 mod migrations;
 mod notifier;

@@ -150,6 +150,14 @@ pub type TableName = Arc<dyn Fn(&str) -> String + Send + Sync>;
 /// epoch.
 pub type Clock = Arc<dyn Fn() -> i64 + Send + Sync>;
 
+/// The 128 bits of each new id, before the layout sets its version and
+/// variant: a host's own source, so a host that draws its own ids from a
+/// seeded generator draws the layout's from it too, in the order the
+/// layout asks for them (D58: a replay of the TypeScript engine's
+/// recordings, whose version graph drew from the recorder's one
+/// generator).
+pub type IdSource = Arc<dyn Fn() -> Result<[u8; 16], Error> + Send + Sync>;
+
 /// The default name of each table and index: `graph_` and its local name.
 pub fn default_table_name(local: &str) -> String {
     format!("graph_{local}")
@@ -168,6 +176,10 @@ pub struct Options {
     /// `BEGIN IMMEDIATE` has taken the write lock, so times order as the
     /// writes do. `None` is the system clock.
     pub clock: Option<Clock>,
+    /// Draws each new id's bits, in the order the layout writes them (a
+    /// row's id before a key the row lacks). `None` is the system's random
+    /// source.
+    pub ids: Option<IdSource>,
 }
 
 impl fmt::Debug for Options {
@@ -179,6 +191,7 @@ impl fmt::Debug for Options {
                 &self.table_name.as_ref().map(|_| "a function"),
             )
             .field("clock", &self.clock.as_ref().map(|_| "a function"))
+            .field("ids", &self.ids.as_ref().map(|_| "a function"))
             .finish()
     }
 }
@@ -568,8 +581,9 @@ struct DescriptorHistory {
 }
 
 /// The 128 random bits of each new id, before the adapter sets its version
-/// and variant: the system's random source, or a test's seeded one.
-pub(crate) type IdBits = Arc<dyn Fn() -> Result<[u8; 16], Error> + Send + Sync>;
+/// and variant: the system's random source, a host's ([`Options::ids`]) or
+/// a test's seeded one.
+pub(crate) type IdBits = IdSource;
 
 /// The system's random source.
 fn system_bits(dialect: Dialect) -> Result<[u8; 16], Error> {
@@ -715,7 +729,9 @@ impl FixedLayout {
             tables: Tables::new(dialect, table_name.as_ref())?,
             layout: layout(dialect, table_name.as_ref())?,
             clock: options.clock.unwrap_or_else(|| Arc::new(system_clock)),
-            ids: Arc::new(move || system_bits(dialect)),
+            ids: options
+                .ids
+                .unwrap_or_else(|| Arc::new(move || system_bits(dialect))),
             kinds,
         })
     }
@@ -2454,6 +2470,38 @@ mod tests {
             graph: "recipe".to_owned(),
             ..Options::default()
         }
+    }
+
+    /// A host's id source gives each new id its bits, in the order the
+    /// layout asks, the version and variant set as a random id's are.
+    #[test]
+    fn a_hosts_id_source_draws_each_new_id() {
+        let drawn = Arc::new(std::sync::atomic::AtomicU8::new(0));
+        let counter = Arc::clone(&drawn);
+        let layout = FixedLayout::with_dialect(
+            Dialect::Postgres,
+            &fixture().to_string(),
+            Options {
+                ids: Some(Arc::new(move || {
+                    let n = counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    Ok([n; 16])
+                })),
+                ..graph()
+            },
+        )
+        .expect("the adapter");
+        let ids: Vec<String> = (0..2)
+            .map(|_| {
+                canonical::uuid_hyphenated(&layout.new_id().expect("an id")).expect("hyphenated")
+            })
+            .collect();
+        assert_eq!(
+            ids,
+            [
+                "00000000-0000-4000-8000-000000000000",
+                "01010101-0101-4101-8101-010101010101"
+            ]
+        );
     }
 
     /// The adapter takes the fixture's descriptor and refuses what it cannot

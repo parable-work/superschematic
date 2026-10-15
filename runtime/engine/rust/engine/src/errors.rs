@@ -578,6 +578,75 @@ impl EngineError {
         };
         Some(value)
     }
+
+    /// The members the TypeScript engine's class for the refusal has
+    /// beyond `code` and `message`, by their names there: what
+    /// [`EngineError::details`] holds, but for a veto, whose class names
+    /// its code and details `vetoCode` and `vetoDetails`, and an unknown
+    /// tool, whose class holds the tool's name. `None` for a plain
+    /// `EngineError`.
+    pub fn members(&self) -> Option<Map<String, Value>> {
+        match &*self.kind {
+            EngineErrorKind::BehaviorVeto {
+                behavior,
+                action,
+                reason,
+                veto_code,
+                veto_details,
+            } => {
+                let mut members = Map::new();
+                members.insert("behavior".into(), Value::from(behavior.as_str()));
+                members.insert("action".into(), Value::from(action.as_str()));
+                members.insert("reason".into(), Value::from(reason.as_str()));
+                if let Some(code) = veto_code {
+                    members.insert("vetoCode".into(), Value::from(code.as_str()));
+                }
+                if let Some(inner) = veto_details {
+                    members.insert("vetoDetails".into(), Value::Object(inner.clone()));
+                }
+                Some(members)
+            }
+            EngineErrorKind::UnknownTool { tool } => {
+                let mut members = Map::new();
+                members.insert("tool".into(), Value::from(tool.as_str()));
+                Some(members)
+            }
+            _ => match self.details() {
+                Some(Value::Object(members)) => Some(members),
+                _ => None,
+            },
+        }
+    }
+}
+
+/// An error as the TypeScript engine throws it (D58): its class's name, its
+/// code, its message and the class's other members. A binding throws it so
+/// (the Node-API addon rebuilds the class from it), and the scenario corpus
+/// records it so.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Thrown {
+    /// `EngineError` or one of its subclasses ([`EngineError::name`]),
+    /// `BehaviorError`, `BehaviorConfigError`, `SqliteError`, `TypeError`
+    /// (an option or argument the engine cannot take) or `Error`.
+    pub class: &'static str,
+    /// A refusal's code, as text, or SQLite's extended result code, a
+    /// number; `None` for a class with no code.
+    pub code: Option<Value>,
+    pub message: String,
+    /// The class's members beyond `code` and `message`
+    /// ([`EngineError::members`]; a `BehaviorError`'s behavior).
+    pub members: Option<Map<String, Value>>,
+}
+
+impl Thrown {
+    fn of_class(class: &'static str, message: String) -> Self {
+        Thrown {
+            class,
+            code: None,
+            message,
+            members: None,
+        }
+    }
 }
 
 impl fmt::Display for EngineError {
@@ -722,6 +791,36 @@ impl Error {
 
     pub(crate) fn internal(message: impl Into<String>) -> Self {
         Error::Internal(message.into())
+    }
+
+    /// The error as the TypeScript engine throws it ([`Thrown`]).
+    pub fn thrown(&self) -> Thrown {
+        match self {
+            Error::Engine(refusal) => Thrown {
+                class: refusal.name(),
+                code: Some(Value::from(refusal.code().as_str())),
+                message: refusal.message().to_owned(),
+                members: refusal.members(),
+            },
+            Error::Behavior(defect) => {
+                let mut members = Map::new();
+                members.insert("behavior".into(), Value::from(defect.behavior.as_str()));
+                Thrown {
+                    members: Some(members),
+                    ..Thrown::of_class("BehaviorError", defect.to_string())
+                }
+            }
+            Error::Usage(message) => Thrown::of_class("TypeError", message.clone()),
+            Error::Config(message) => Thrown::of_class("BehaviorConfigError", message.clone()),
+            Error::Storage(failure) => match failure.sqlite_code() {
+                Some(code) => Thrown {
+                    code: Some(Value::from(code)),
+                    ..Thrown::of_class("SqliteError", failure.to_string())
+                },
+                None => Thrown::of_class("Error", failure.to_string()),
+            },
+            Error::Internal(message) => Thrown::of_class("Error", message.clone()),
+        }
     }
 }
 

@@ -2231,3 +2231,1234 @@ fn numbering_guidance_is_the_typescript_engines_text() {
         );
     }
 }
+
+/// The TypeScript guidance for the Rollups configs below
+/// (`rollupsGuidance`).
+const ROLLUPS: &str = r#"{
+  "gated": {
+    "summary": "behaviors.Rollups.values holds values computed from linked instances at each read: tasks, how many of the Task instances whose project points here there are; byStatus, how many of the Task instances whose project points here hold each value of Workflow.status; estimate, the sum of estimate over the Task instances whose project points here; smallest, the min of estimate over the Task instances whose project points here; longest, the max of hours over the Task instances whose project points here; last, the kind of the one of the Task instances whose project points here created last; finished, whether every one of the Task instances whose project points here is in a terminal state; started, whether one of the Task instances whose project points here is in a terminal state with outcome success or neutral; failed, whether one of the Task instances whose project points here is in a terminal state with outcome failure. A rollup over more than 500 linked instances reads {\"over\": true}. A move into done waits until finished holds; a move into done or dropped waits until started holds.",
+    "operations": {
+      "transition": {
+        "doNotUseWhen": "Read behaviors.Rollups.values before a move: a move into done waits until finished holds; a move into done or dropped waits until started holds.",
+        "errors": [
+          {
+            "code": "not_held",
+            "description": "A move into a state a rollup gates while the rollup does not hold; details names the rollup and counts the linked instances it read and counted.",
+            "commonCorrection": "Read behaviors.Rollups.values, and finish the linked work the rollup waits on, then try again."
+          }
+        ]
+      }
+    }
+  },
+  "plain": {
+    "summary": "behaviors.Rollups.values holds values computed from linked instances at each read: tasks, how many of the Task instances whose project points here there are; boards, how many of the Board instances whose project points here there are. A rollup over more than 500 linked instances reads {\"over\": true}.",
+    "operations": {}
+  }
+}"#;
+
+#[test]
+fn rollups_guidance_is_the_typescript_engines_text() {
+    use superschematic_engine_behaviors::{RollupFunction, RollupSpec, Rollups, RollupsConfig};
+
+    let expected: Value = serde_json::from_str(ROLLUPS).expect("the expected guidance");
+    let rollup = |schema: &str,
+                  function: RollupFunction,
+                  field: Option<&str>,
+                  gated: &[&str],
+                  outcomes: Option<&[WorkflowOutcome]>| RollupSpec {
+        schema: schema.to_owned(),
+        link: "project".to_owned(),
+        function,
+        field: field.map(str::to_owned),
+        gated_states: names(gated),
+        outcomes: outcomes.map(<[WorkflowOutcome]>::to_vec),
+    };
+    let config = |rollups: Vec<(&str, RollupSpec)>| RollupsConfig {
+        rollups: rollups
+            .into_iter()
+            .map(|(name, spec)| (name.to_owned(), spec))
+            .collect(),
+    };
+    let gated = config(vec![
+        (
+            "tasks",
+            rollup("Task", RollupFunction::Count, None, &[], None),
+        ),
+        (
+            "byStatus",
+            rollup(
+                "Task",
+                RollupFunction::CountBy,
+                Some("Workflow.status"),
+                &[],
+                None,
+            ),
+        ),
+        (
+            "estimate",
+            rollup("Task", RollupFunction::Sum, Some("estimate"), &[], None),
+        ),
+        (
+            "smallest",
+            rollup("Task", RollupFunction::Min, Some("estimate"), &[], None),
+        ),
+        (
+            "longest",
+            rollup("Task", RollupFunction::Max, Some("hours"), &[], None),
+        ),
+        (
+            "last",
+            rollup("Task", RollupFunction::Latest, Some("kind"), &[], None),
+        ),
+        (
+            "finished",
+            rollup("Task", RollupFunction::All, None, &["done"], None),
+        ),
+        (
+            "started",
+            rollup(
+                "Task",
+                RollupFunction::Any,
+                None,
+                &["done", "dropped"],
+                Some(&[WorkflowOutcome::Success, WorkflowOutcome::Neutral]),
+            ),
+        ),
+        (
+            "failed",
+            rollup(
+                "Task",
+                RollupFunction::Any,
+                None,
+                &[],
+                Some(&[WorkflowOutcome::Failure]),
+            ),
+        ),
+    ]);
+    let plain = config(vec![
+        (
+            "tasks",
+            rollup("Task", RollupFunction::Count, None, &[], None),
+        ),
+        (
+            "boards",
+            rollup("Board", RollupFunction::Count, None, &[], None),
+        ),
+    ]);
+    let guidance = Rollups.hooks().guidance.expect("guidance");
+    for (name, config) in [("gated", gated), ("plain", plain)] {
+        assert_eq!(
+            as_json(&guidance(&Rollups, &config, &target())),
+            expected[name],
+            "{name}"
+        );
+    }
+}
+
+/// The TypeScript guidance for the Reactions configs below
+/// (`reactionsGuidance`), on a Ticket whose operations are the built-in
+/// ones, Workflow's transition, Comments' comment and listComments, and
+/// Timers' snoozeTimer and fireTimer.
+const REACTIONS: &str = r#"{
+  "every": {
+    "summary": "After a change commits, the runner moves statuses by rules, through transition and its guards: when it enters doing, it moves the instance its project points to, to active; when priority changes to \"urgent\", it moves to escalated; when Comments.commentCount changes from 0, it moves to triaged; when Timers.deadlines.nudge.fired changes from false to true, it moves to escalated; when Workflow.status changes, it moves the instance its project points to, to active; when every Task linking here through project is in a terminal state, it moves to done; when every Step linking here through run is in a terminal state with outcome success or neutral, it moves to completed; when a Step linking here through run ends with outcome failure, it moves to failed; when rollup stepsPassed comes to hold, it moves to completed; when the target of spec gains a revision or a release, it moves to review. A move a guard vetoes, or that no transition allows, is left undone.",
+    "operations": {
+      "transition": {
+        "success": "Reactions' rules on Ticket may move it, or the instances it links to, again after the commit."
+      },
+      "create": {
+        "success": "Reactions' rules on Ticket may move it, or the instances it links to, again after the commit."
+      },
+      "update": {
+        "success": "Reactions' rules on Ticket may move it, or the instances it links to, again after the commit."
+      },
+      "comment": {
+        "success": "Reactions' rules on Ticket may move it, or the instances it links to, again after the commit."
+      },
+      "snoozeTimer": {
+        "success": "Reactions' rules on Ticket may move it, or the instances it links to, again after the commit."
+      },
+      "fireTimer": {
+        "success": "Reactions' rules on Ticket may move it, or the instances it links to, again after the commit."
+      }
+    }
+  },
+  "plain": {
+    "summary": "After a change commits, the runner moves statuses by rules, through transition and its guards: when it enters paid, it moves to packed. A move a guard vetoes, or that no transition allows, is left undone.",
+    "operations": {
+      "transition": {
+        "success": "Reactions' rules on Ticket may move it, or the instances it links to, again after the commit."
+      }
+    }
+  }
+}"#;
+
+#[test]
+fn reactions_guidance_is_the_typescript_engines_text() {
+    use superschematic_engine::behaviors::{DescribedTypeOperation, OperationScope};
+    use superschematic_engine_behaviors::{
+        Reactions, ReactionsChanges, ReactionsConfig, ReactionsField, ReactionsRule,
+        ReactionsTerminal, ReactionsThen, ReactionsWhen,
+    };
+
+    let expected: Value = serde_json::from_str(REACTIONS).expect("the expected guidance");
+    let then = |transition: &str, link: Option<&str>| ReactionsThen {
+        transition: transition.to_owned(),
+        link: link.map(str::to_owned),
+    };
+    let rule = |when: ReactionsWhen, then: ReactionsThen| ReactionsRule { when, then };
+    let changes = |field: &str, from: Option<Value>, to: Option<Value>| {
+        ReactionsWhen::Changes(ReactionsChanges {
+            field: field.to_owned(),
+            to,
+            from,
+        })
+    };
+    let terminal =
+        |schema: &str, link: &str, outcomes: Option<Vec<WorkflowOutcome>>| ReactionsTerminal {
+            schema: schema.to_owned(),
+            link: link.to_owned(),
+            outcomes,
+        };
+    let field = |behavior: Option<&str>, name: &str, members: &[&str]| ReactionsField {
+        behavior: behavior.map(str::to_owned),
+        field: name.to_owned(),
+        members: names(members),
+    };
+    let every = ReactionsConfig {
+        rules: vec![
+            rule(
+                ReactionsWhen::Enters("doing".to_owned()),
+                then("active", Some("project")),
+            ),
+            rule(
+                changes("priority", None, Some(json!("urgent"))),
+                then("escalated", None),
+            ),
+            rule(
+                changes("Comments.commentCount", Some(json!(0)), None),
+                then("triaged", None),
+            ),
+            rule(
+                changes(
+                    "Timers.deadlines.nudge.fired",
+                    Some(json!(false)),
+                    Some(json!(true)),
+                ),
+                then("escalated", None),
+            ),
+            rule(
+                changes("Workflow.status", None, None),
+                then("active", Some("project")),
+            ),
+            rule(
+                ReactionsWhen::AllTerminal(terminal("Task", "project", None)),
+                then("done", None),
+            ),
+            rule(
+                ReactionsWhen::AllTerminal(terminal(
+                    "Step",
+                    "run",
+                    Some(vec![WorkflowOutcome::Success, WorkflowOutcome::Neutral]),
+                )),
+                then("completed", None),
+            ),
+            rule(
+                ReactionsWhen::AnyTerminal(terminal(
+                    "Step",
+                    "run",
+                    Some(vec![WorkflowOutcome::Failure]),
+                )),
+                then("failed", None),
+            ),
+            rule(
+                ReactionsWhen::Holds("stepsPassed".to_owned()),
+                then("completed", None),
+            ),
+            rule(
+                ReactionsWhen::Revised {
+                    link: "spec".to_owned(),
+                },
+                then("review", None),
+            ),
+        ],
+        fields: vec![
+            ("priority".to_owned(), field(None, "priority", &[])),
+            (
+                "Comments.commentCount".to_owned(),
+                field(Some("Comments"), "commentCount", &[]),
+            ),
+            (
+                "Timers.deadlines.nudge.fired".to_owned(),
+                field(Some("Timers"), "deadlines", &["nudge", "fired"]),
+            ),
+            (
+                "Workflow.status".to_owned(),
+                field(Some("Workflow"), "status", &[]),
+            ),
+        ],
+        rollups: Vec::new(),
+        revised: Vec::new(),
+    };
+    let plain = ReactionsConfig {
+        rules: vec![rule(
+            ReactionsWhen::Enters("paid".to_owned()),
+            then("packed", None),
+        )],
+        ..ReactionsConfig::default()
+    };
+    let mut ticket = target();
+    ticket.schema = "Ticket".to_owned();
+    ticket.type_name = "Ticket".to_owned();
+    ticket.operations = [
+        ("create", None, true),
+        ("get", None, false),
+        ("update", None, true),
+        ("delete", None, true),
+        ("transition", Some("Workflow"), true),
+        ("comment", Some("Comments"), true),
+        ("listComments", Some("Comments"), false),
+        ("snoozeTimer", Some("Timers"), true),
+        ("fireTimer", Some("Timers"), true),
+    ]
+    .into_iter()
+    .map(|(name, behavior, writes)| DescribedTypeOperation {
+        name: name.to_owned(),
+        behavior: behavior.map(str::to_owned),
+        writes,
+        scope: OperationScope::Instance,
+    })
+    .collect();
+    let guidance = Reactions.hooks().guidance.expect("guidance");
+    for (name, config) in [("every", every), ("plain", plain)] {
+        assert_eq!(
+            as_json(&guidance(&Reactions, &config, &ticket)),
+            expected[name],
+            "{name}"
+        );
+    }
+}
+
+/// Branches' TypeScript guidance (`branchesGuidance`) for a Recipe of three
+/// kinds, one a singleton, without a sweep; a Book of one kind on a primary
+/// line named trunk, swept hourly with drafts abandoned after two days; and
+/// the Recipe swept every 90 seconds with no draft abandoned.
+const BRANCHES: &str = r#"{
+  "plain": {
+    "summary": "Each Recipe holds a version graph of rows of the kinds cover (Cover, one per tree), ingredient (Ingredient) and step (Step), on its primary line, main, and drafts of it. Work happens on a draft at its version and merges into the primary line; a tagged commit can be released, and behaviors.Branches.release holds the number of the latest release.",
+    "operations": {
+      "branch": {
+        "useWhen": "Use to start a draft from a ref's head, or without fromRef from main.",
+        "success": "Returns the draft, with its id and the version its next write names.",
+        "errors": [
+          {
+            "code": "name_taken",
+            "commonCorrection": "Pick another name, or discard the live ref that has it."
+          }
+        ]
+      },
+      "save": {
+        "useWhen": "Use to write rows on a draft at its version: by kind (cover, ingredient and step), upsert rows, delete entities or unset the draft's own rows.",
+        "doNotUseWhen": "Do not use on main; it takes writes only from merge.",
+        "success": "Returns the draft at its new version and the rows stored.",
+        "errors": [
+          {
+            "code": "version_conflict",
+            "commonCorrection": "Read the ref with refs (or the release log with releases) and try again at its version."
+          },
+          {
+            "code": "ref_sealed",
+            "commonCorrection": "Branch a new draft from the sealed one and write there."
+          },
+          {
+            "code": "primary_merge_only",
+            "commonCorrection": "Write on a draft, then merge it into the primary line."
+          },
+          {
+            "code": "entity_not_found",
+            "commonCorrection": "Read the draft with compose and name only entities it holds."
+          }
+        ]
+      },
+      "commit": {
+        "useWhen": "Use to commit what a draft at its version composes to; a tag makes the commit one a release can name.",
+        "success": "Returns the draft at its new version and the commit.",
+        "errors": [
+          {
+            "code": "version_conflict",
+            "commonCorrection": "Read the ref with refs (or the release log with releases) and try again at its version."
+          },
+          {
+            "code": "ref_sealed",
+            "commonCorrection": "Branch a new draft from the sealed one and write there."
+          },
+          {
+            "code": "primary_merge_only",
+            "commonCorrection": "Write on a draft, then merge it into the primary line."
+          },
+          {
+            "code": "nothing_to_commit",
+            "commonCorrection": "None: the draft has nothing new; save rows first."
+          },
+          {
+            "code": "invalid_tree",
+            "commonCorrection": "Fix the rows details.findings names, then try again."
+          }
+        ]
+      },
+      "seal": {
+        "useWhen": "Use to commit a draft at its version, when it has changes, and close it to writes.",
+        "success": "Returns the draft and the commit, null when there was nothing to commit.",
+        "errors": [
+          {
+            "code": "version_conflict",
+            "commonCorrection": "Read the ref with refs (or the release log with releases) and try again at its version."
+          },
+          {
+            "code": "ref_sealed",
+            "commonCorrection": "Branch a new draft from the sealed one and write there."
+          },
+          {
+            "code": "primary_merge_only",
+            "commonCorrection": "Write on a draft, then merge it into the primary line."
+          },
+          {
+            "code": "invalid_tree",
+            "commonCorrection": "Fix the rows details.findings names, then try again."
+          }
+        ]
+      },
+      "merge": {
+        "useWhen": "Use to merge a ref's head into another ref, main among them, at the target's version.",
+        "success": "Returns the target, the commit and the conflicts; with conflicts left it writes nothing, so resolve them and merge again.",
+        "errors": [
+          {
+            "code": "version_conflict",
+            "commonCorrection": "Read the ref with refs (or the release log with releases) and try again at its version."
+          },
+          {
+            "code": "ref_sealed",
+            "commonCorrection": "Branch a new draft from the sealed one and write there."
+          },
+          {
+            "code": "merge_into_itself",
+            "commonCorrection": "Name two different refs."
+          },
+          {
+            "code": "invalid_tree",
+            "commonCorrection": "Fix the rows details.findings names, then try again."
+          }
+        ]
+      },
+      "rebase": {
+        "useWhen": "Use to bring a draft at its version up to its parent's head.",
+        "success": "Returns the draft, the commit and the conflicts; with conflicts left it writes nothing.",
+        "errors": [
+          {
+            "code": "version_conflict",
+            "commonCorrection": "Read the ref with refs (or the release log with releases) and try again at its version."
+          },
+          {
+            "code": "ref_sealed",
+            "commonCorrection": "Branch a new draft from the sealed one and write there."
+          },
+          {
+            "code": "no_parent",
+            "commonCorrection": "None: a primary line has no parent; rebase a draft."
+          },
+          {
+            "code": "invalid_tree",
+            "commonCorrection": "Fix the rows details.findings names, then try again."
+          }
+        ]
+      },
+      "revert": {
+        "useWhen": "Use to make a draft at its version compose to an earlier commit's tree, as a new commit.",
+        "success": "Returns the draft and the commit.",
+        "errors": [
+          {
+            "code": "version_conflict",
+            "commonCorrection": "Read the ref with refs (or the release log with releases) and try again at its version."
+          },
+          {
+            "code": "ref_sealed",
+            "commonCorrection": "Branch a new draft from the sealed one and write there."
+          },
+          {
+            "code": "primary_merge_only",
+            "commonCorrection": "Write on a draft, then merge it into the primary line."
+          },
+          {
+            "code": "invalid_tree",
+            "commonCorrection": "Fix the rows details.findings names, then try again."
+          }
+        ]
+      },
+      "releaseCommit": {
+        "useWhen": "Use to release a tagged commit: it points the release pointer at it, at the pointer's version, which behaviors.Branches.release holds; 0 for the first release.",
+        "success": "Returns the commit and the release pointer at its new version.",
+        "errors": [
+          {
+            "code": "version_conflict",
+            "commonCorrection": "Read the ref with refs (or the release log with releases) and try again at its version."
+          },
+          {
+            "code": "not_tagged",
+            "commonCorrection": "Commit with a tag, then release that commit."
+          }
+        ]
+      },
+      "discard": {
+        "useWhen": "Use to drop a draft at its version, which frees its name.",
+        "doNotUseWhen": "Do not use on main, the primary line.",
+        "success": "Returns the draft, discarded.",
+        "errors": [
+          {
+            "code": "version_conflict",
+            "commonCorrection": "Read the ref with refs (or the release log with releases) and try again at its version."
+          },
+          {
+            "code": "primary_line",
+            "commonCorrection": "None: the primary line is not discarded."
+          }
+        ]
+      },
+      "refs": {
+        "useWhen": "Use to list the instance's live refs, main first, with each one's version.",
+        "success": "Returns items and next. Pass next as cursor for the page after, until it is null."
+      },
+      "releases": {
+        "useWhen": "Use to read the instance's release log, oldest first.",
+        "success": "Returns items and next. Pass next as cursor for the page after, until it is null."
+      },
+      "compose": {
+        "useWhen": "Use to read a ref's tree, its uncommitted rows included.",
+        "success": "Returns the tree, its content hash and any findings.",
+        "errors": [
+          {
+            "code": "walk_ceiling",
+            "commonCorrection": "Read a commit nearer to a snapshot, or wait for the sweep to write one."
+          }
+        ]
+      },
+      "materialize": {
+        "useWhen": "Use to read a commit's tree.",
+        "success": "Returns the tree, its content hash and any findings.",
+        "errors": [
+          {
+            "code": "walk_ceiling",
+            "commonCorrection": "Read a commit nearer to a snapshot, or wait for the sweep to write one."
+          }
+        ]
+      },
+      "released": {
+        "useWhen": "Use to read what is released: the tree of the commit the release pointer names.",
+        "success": "Returns the release and its tree; an instance never released is not_found.",
+        "errors": [
+          {
+            "code": "walk_ceiling",
+            "commonCorrection": "Read a commit nearer to a snapshot, or wait for the sweep to write one."
+          }
+        ]
+      },
+      "diff": {
+        "useWhen": "Use to list the entities two commits of the instance differ on.",
+        "success": "Returns the changes.",
+        "errors": [
+          {
+            "code": "walk_ceiling",
+            "commonCorrection": "Read a commit nearer to a snapshot, or wait for the sweep to write one."
+          }
+        ]
+      },
+      "history": {
+        "useWhen": "Use to list the commits a ref wrote, newest first.",
+        "success": "Returns the commits."
+      }
+    }
+  },
+  "swept": {
+    "summary": "Each Book holds a version graph of rows of the kinds page (Page), on its primary line, trunk, and drafts of it. Work happens on a draft at its version and merges into the primary line; a tagged commit can be released, and behaviors.Branches.release holds the number of the latest release. Every 1 hour the sweep discards drafts idle for 2 days and prunes history.",
+    "operations": {
+      "branch": {
+        "useWhen": "Use to start a draft from a ref's head, or without fromRef from trunk.",
+        "success": "Returns the draft, with its id and the version its next write names.",
+        "errors": [
+          {
+            "code": "name_taken",
+            "commonCorrection": "Pick another name, or discard the live ref that has it."
+          }
+        ]
+      },
+      "save": {
+        "useWhen": "Use to write rows on a draft at its version: by kind (page), upsert rows, delete entities or unset the draft's own rows.",
+        "doNotUseWhen": "Do not use on trunk; it takes writes only from merge.",
+        "success": "Returns the draft at its new version and the rows stored.",
+        "errors": [
+          {
+            "code": "version_conflict",
+            "commonCorrection": "Read the ref with refs (or the release log with releases) and try again at its version."
+          },
+          {
+            "code": "ref_sealed",
+            "commonCorrection": "Branch a new draft from the sealed one and write there."
+          },
+          {
+            "code": "primary_merge_only",
+            "commonCorrection": "Write on a draft, then merge it into the primary line."
+          },
+          {
+            "code": "entity_not_found",
+            "commonCorrection": "Read the draft with compose and name only entities it holds."
+          }
+        ]
+      },
+      "commit": {
+        "useWhen": "Use to commit what a draft at its version composes to; a tag makes the commit one a release can name.",
+        "success": "Returns the draft at its new version and the commit.",
+        "errors": [
+          {
+            "code": "version_conflict",
+            "commonCorrection": "Read the ref with refs (or the release log with releases) and try again at its version."
+          },
+          {
+            "code": "ref_sealed",
+            "commonCorrection": "Branch a new draft from the sealed one and write there."
+          },
+          {
+            "code": "primary_merge_only",
+            "commonCorrection": "Write on a draft, then merge it into the primary line."
+          },
+          {
+            "code": "nothing_to_commit",
+            "commonCorrection": "None: the draft has nothing new; save rows first."
+          },
+          {
+            "code": "invalid_tree",
+            "commonCorrection": "Fix the rows details.findings names, then try again."
+          }
+        ]
+      },
+      "seal": {
+        "useWhen": "Use to commit a draft at its version, when it has changes, and close it to writes.",
+        "success": "Returns the draft and the commit, null when there was nothing to commit.",
+        "errors": [
+          {
+            "code": "version_conflict",
+            "commonCorrection": "Read the ref with refs (or the release log with releases) and try again at its version."
+          },
+          {
+            "code": "ref_sealed",
+            "commonCorrection": "Branch a new draft from the sealed one and write there."
+          },
+          {
+            "code": "primary_merge_only",
+            "commonCorrection": "Write on a draft, then merge it into the primary line."
+          },
+          {
+            "code": "invalid_tree",
+            "commonCorrection": "Fix the rows details.findings names, then try again."
+          }
+        ]
+      },
+      "merge": {
+        "useWhen": "Use to merge a ref's head into another ref, trunk among them, at the target's version.",
+        "success": "Returns the target, the commit and the conflicts; with conflicts left it writes nothing, so resolve them and merge again.",
+        "errors": [
+          {
+            "code": "version_conflict",
+            "commonCorrection": "Read the ref with refs (or the release log with releases) and try again at its version."
+          },
+          {
+            "code": "ref_sealed",
+            "commonCorrection": "Branch a new draft from the sealed one and write there."
+          },
+          {
+            "code": "merge_into_itself",
+            "commonCorrection": "Name two different refs."
+          },
+          {
+            "code": "invalid_tree",
+            "commonCorrection": "Fix the rows details.findings names, then try again."
+          }
+        ]
+      },
+      "rebase": {
+        "useWhen": "Use to bring a draft at its version up to its parent's head.",
+        "success": "Returns the draft, the commit and the conflicts; with conflicts left it writes nothing.",
+        "errors": [
+          {
+            "code": "version_conflict",
+            "commonCorrection": "Read the ref with refs (or the release log with releases) and try again at its version."
+          },
+          {
+            "code": "ref_sealed",
+            "commonCorrection": "Branch a new draft from the sealed one and write there."
+          },
+          {
+            "code": "no_parent",
+            "commonCorrection": "None: a primary line has no parent; rebase a draft."
+          },
+          {
+            "code": "invalid_tree",
+            "commonCorrection": "Fix the rows details.findings names, then try again."
+          }
+        ]
+      },
+      "revert": {
+        "useWhen": "Use to make a draft at its version compose to an earlier commit's tree, as a new commit.",
+        "success": "Returns the draft and the commit.",
+        "errors": [
+          {
+            "code": "version_conflict",
+            "commonCorrection": "Read the ref with refs (or the release log with releases) and try again at its version."
+          },
+          {
+            "code": "ref_sealed",
+            "commonCorrection": "Branch a new draft from the sealed one and write there."
+          },
+          {
+            "code": "primary_merge_only",
+            "commonCorrection": "Write on a draft, then merge it into the primary line."
+          },
+          {
+            "code": "invalid_tree",
+            "commonCorrection": "Fix the rows details.findings names, then try again."
+          }
+        ]
+      },
+      "releaseCommit": {
+        "useWhen": "Use to release a tagged commit: it points the release pointer at it, at the pointer's version, which behaviors.Branches.release holds; 0 for the first release.",
+        "success": "Returns the commit and the release pointer at its new version.",
+        "errors": [
+          {
+            "code": "version_conflict",
+            "commonCorrection": "Read the ref with refs (or the release log with releases) and try again at its version."
+          },
+          {
+            "code": "not_tagged",
+            "commonCorrection": "Commit with a tag, then release that commit."
+          }
+        ]
+      },
+      "discard": {
+        "useWhen": "Use to drop a draft at its version, which frees its name.",
+        "doNotUseWhen": "Do not use on trunk, the primary line.",
+        "success": "Returns the draft, discarded.",
+        "errors": [
+          {
+            "code": "version_conflict",
+            "commonCorrection": "Read the ref with refs (or the release log with releases) and try again at its version."
+          },
+          {
+            "code": "primary_line",
+            "commonCorrection": "None: the primary line is not discarded."
+          }
+        ]
+      },
+      "refs": {
+        "useWhen": "Use to list the instance's live refs, trunk first, with each one's version.",
+        "success": "Returns items and next. Pass next as cursor for the page after, until it is null."
+      },
+      "releases": {
+        "useWhen": "Use to read the instance's release log, oldest first.",
+        "success": "Returns items and next. Pass next as cursor for the page after, until it is null."
+      },
+      "compose": {
+        "useWhen": "Use to read a ref's tree, its uncommitted rows included.",
+        "success": "Returns the tree, its content hash and any findings.",
+        "errors": [
+          {
+            "code": "walk_ceiling",
+            "commonCorrection": "Read a commit nearer to a snapshot, or wait for the sweep to write one."
+          }
+        ]
+      },
+      "materialize": {
+        "useWhen": "Use to read a commit's tree.",
+        "success": "Returns the tree, its content hash and any findings.",
+        "errors": [
+          {
+            "code": "walk_ceiling",
+            "commonCorrection": "Read a commit nearer to a snapshot, or wait for the sweep to write one."
+          }
+        ]
+      },
+      "released": {
+        "useWhen": "Use to read what is released: the tree of the commit the release pointer names.",
+        "success": "Returns the release and its tree; an instance never released is not_found.",
+        "errors": [
+          {
+            "code": "walk_ceiling",
+            "commonCorrection": "Read a commit nearer to a snapshot, or wait for the sweep to write one."
+          }
+        ]
+      },
+      "diff": {
+        "useWhen": "Use to list the entities two commits of the instance differ on.",
+        "success": "Returns the changes.",
+        "errors": [
+          {
+            "code": "walk_ceiling",
+            "commonCorrection": "Read a commit nearer to a snapshot, or wait for the sweep to write one."
+          }
+        ]
+      },
+      "history": {
+        "useWhen": "Use to list the commits a ref wrote, newest first.",
+        "success": "Returns the commits."
+      }
+    }
+  },
+  "pruned": {
+    "summary": "Each Recipe holds a version graph of rows of the kinds cover (Cover, one per tree), ingredient (Ingredient) and step (Step), on its primary line, main, and drafts of it. Work happens on a draft at its version and merges into the primary line; a tagged commit can be released, and behaviors.Branches.release holds the number of the latest release. Every 90 seconds the sweep prunes history.",
+    "operations": {
+      "branch": {
+        "useWhen": "Use to start a draft from a ref's head, or without fromRef from main.",
+        "success": "Returns the draft, with its id and the version its next write names.",
+        "errors": [
+          {
+            "code": "name_taken",
+            "commonCorrection": "Pick another name, or discard the live ref that has it."
+          }
+        ]
+      },
+      "save": {
+        "useWhen": "Use to write rows on a draft at its version: by kind (cover, ingredient and step), upsert rows, delete entities or unset the draft's own rows.",
+        "doNotUseWhen": "Do not use on main; it takes writes only from merge.",
+        "success": "Returns the draft at its new version and the rows stored.",
+        "errors": [
+          {
+            "code": "version_conflict",
+            "commonCorrection": "Read the ref with refs (or the release log with releases) and try again at its version."
+          },
+          {
+            "code": "ref_sealed",
+            "commonCorrection": "Branch a new draft from the sealed one and write there."
+          },
+          {
+            "code": "primary_merge_only",
+            "commonCorrection": "Write on a draft, then merge it into the primary line."
+          },
+          {
+            "code": "entity_not_found",
+            "commonCorrection": "Read the draft with compose and name only entities it holds."
+          }
+        ]
+      },
+      "commit": {
+        "useWhen": "Use to commit what a draft at its version composes to; a tag makes the commit one a release can name.",
+        "success": "Returns the draft at its new version and the commit.",
+        "errors": [
+          {
+            "code": "version_conflict",
+            "commonCorrection": "Read the ref with refs (or the release log with releases) and try again at its version."
+          },
+          {
+            "code": "ref_sealed",
+            "commonCorrection": "Branch a new draft from the sealed one and write there."
+          },
+          {
+            "code": "primary_merge_only",
+            "commonCorrection": "Write on a draft, then merge it into the primary line."
+          },
+          {
+            "code": "nothing_to_commit",
+            "commonCorrection": "None: the draft has nothing new; save rows first."
+          },
+          {
+            "code": "invalid_tree",
+            "commonCorrection": "Fix the rows details.findings names, then try again."
+          }
+        ]
+      },
+      "seal": {
+        "useWhen": "Use to commit a draft at its version, when it has changes, and close it to writes.",
+        "success": "Returns the draft and the commit, null when there was nothing to commit.",
+        "errors": [
+          {
+            "code": "version_conflict",
+            "commonCorrection": "Read the ref with refs (or the release log with releases) and try again at its version."
+          },
+          {
+            "code": "ref_sealed",
+            "commonCorrection": "Branch a new draft from the sealed one and write there."
+          },
+          {
+            "code": "primary_merge_only",
+            "commonCorrection": "Write on a draft, then merge it into the primary line."
+          },
+          {
+            "code": "invalid_tree",
+            "commonCorrection": "Fix the rows details.findings names, then try again."
+          }
+        ]
+      },
+      "merge": {
+        "useWhen": "Use to merge a ref's head into another ref, main among them, at the target's version.",
+        "success": "Returns the target, the commit and the conflicts; with conflicts left it writes nothing, so resolve them and merge again.",
+        "errors": [
+          {
+            "code": "version_conflict",
+            "commonCorrection": "Read the ref with refs (or the release log with releases) and try again at its version."
+          },
+          {
+            "code": "ref_sealed",
+            "commonCorrection": "Branch a new draft from the sealed one and write there."
+          },
+          {
+            "code": "merge_into_itself",
+            "commonCorrection": "Name two different refs."
+          },
+          {
+            "code": "invalid_tree",
+            "commonCorrection": "Fix the rows details.findings names, then try again."
+          }
+        ]
+      },
+      "rebase": {
+        "useWhen": "Use to bring a draft at its version up to its parent's head.",
+        "success": "Returns the draft, the commit and the conflicts; with conflicts left it writes nothing.",
+        "errors": [
+          {
+            "code": "version_conflict",
+            "commonCorrection": "Read the ref with refs (or the release log with releases) and try again at its version."
+          },
+          {
+            "code": "ref_sealed",
+            "commonCorrection": "Branch a new draft from the sealed one and write there."
+          },
+          {
+            "code": "no_parent",
+            "commonCorrection": "None: a primary line has no parent; rebase a draft."
+          },
+          {
+            "code": "invalid_tree",
+            "commonCorrection": "Fix the rows details.findings names, then try again."
+          }
+        ]
+      },
+      "revert": {
+        "useWhen": "Use to make a draft at its version compose to an earlier commit's tree, as a new commit.",
+        "success": "Returns the draft and the commit.",
+        "errors": [
+          {
+            "code": "version_conflict",
+            "commonCorrection": "Read the ref with refs (or the release log with releases) and try again at its version."
+          },
+          {
+            "code": "ref_sealed",
+            "commonCorrection": "Branch a new draft from the sealed one and write there."
+          },
+          {
+            "code": "primary_merge_only",
+            "commonCorrection": "Write on a draft, then merge it into the primary line."
+          },
+          {
+            "code": "invalid_tree",
+            "commonCorrection": "Fix the rows details.findings names, then try again."
+          }
+        ]
+      },
+      "releaseCommit": {
+        "useWhen": "Use to release a tagged commit: it points the release pointer at it, at the pointer's version, which behaviors.Branches.release holds; 0 for the first release.",
+        "success": "Returns the commit and the release pointer at its new version.",
+        "errors": [
+          {
+            "code": "version_conflict",
+            "commonCorrection": "Read the ref with refs (or the release log with releases) and try again at its version."
+          },
+          {
+            "code": "not_tagged",
+            "commonCorrection": "Commit with a tag, then release that commit."
+          }
+        ]
+      },
+      "discard": {
+        "useWhen": "Use to drop a draft at its version, which frees its name.",
+        "doNotUseWhen": "Do not use on main, the primary line.",
+        "success": "Returns the draft, discarded.",
+        "errors": [
+          {
+            "code": "version_conflict",
+            "commonCorrection": "Read the ref with refs (or the release log with releases) and try again at its version."
+          },
+          {
+            "code": "primary_line",
+            "commonCorrection": "None: the primary line is not discarded."
+          }
+        ]
+      },
+      "refs": {
+        "useWhen": "Use to list the instance's live refs, main first, with each one's version.",
+        "success": "Returns items and next. Pass next as cursor for the page after, until it is null."
+      },
+      "releases": {
+        "useWhen": "Use to read the instance's release log, oldest first.",
+        "success": "Returns items and next. Pass next as cursor for the page after, until it is null."
+      },
+      "compose": {
+        "useWhen": "Use to read a ref's tree, its uncommitted rows included.",
+        "success": "Returns the tree, its content hash and any findings.",
+        "errors": [
+          {
+            "code": "walk_ceiling",
+            "commonCorrection": "Read a commit nearer to a snapshot, or wait for the sweep to write one."
+          }
+        ]
+      },
+      "materialize": {
+        "useWhen": "Use to read a commit's tree.",
+        "success": "Returns the tree, its content hash and any findings.",
+        "errors": [
+          {
+            "code": "walk_ceiling",
+            "commonCorrection": "Read a commit nearer to a snapshot, or wait for the sweep to write one."
+          }
+        ]
+      },
+      "released": {
+        "useWhen": "Use to read what is released: the tree of the commit the release pointer names.",
+        "success": "Returns the release and its tree; an instance never released is not_found.",
+        "errors": [
+          {
+            "code": "walk_ceiling",
+            "commonCorrection": "Read a commit nearer to a snapshot, or wait for the sweep to write one."
+          }
+        ]
+      },
+      "diff": {
+        "useWhen": "Use to list the entities two commits of the instance differ on.",
+        "success": "Returns the changes.",
+        "errors": [
+          {
+            "code": "walk_ceiling",
+            "commonCorrection": "Read a commit nearer to a snapshot, or wait for the sweep to write one."
+          }
+        ]
+      },
+      "history": {
+        "useWhen": "Use to list the commits a ref wrote, newest first.",
+        "success": "Returns the commits."
+      }
+    }
+  }
+}"#;
+
+#[test]
+fn branches_guidance_is_the_typescript_engines_text() {
+    use std::collections::BTreeMap;
+
+    use superschematic_engine_behaviors::{
+        Branches, BranchesConfig, BranchesKind, BranchesSweep, DEFAULT_PRIMARY,
+    };
+
+    let expected: Value = serde_json::from_str(BRANCHES).expect("the expected guidance");
+    let kind = |type_name: &str, singleton: bool| BranchesKind {
+        type_name: type_name.to_owned(),
+        parent: None,
+        order: None,
+        singleton,
+        units: Vec::new(),
+        retention_days: None,
+        fields: vec![("name".to_owned(), "string".to_owned())],
+    };
+    let recipe: BTreeMap<String, BranchesKind> = [
+        ("cover", kind("Cover", true)),
+        ("ingredient", kind("Ingredient", false)),
+        ("step", kind("Step", false)),
+    ]
+    .into_iter()
+    .map(|(name, kind)| (name.to_owned(), kind))
+    .collect();
+    let book: BTreeMap<String, BranchesKind> = [("page".to_owned(), kind("Page", false))]
+        .into_iter()
+        .collect();
+    let mut recipes = target();
+    recipes.schema = "Recipe".to_owned();
+    recipes.type_name = "Recipe".to_owned();
+    let mut books = target();
+    books.schema = "Recipe".to_owned();
+    books.type_name = "Book".to_owned();
+    let guidance = Branches.hooks().guidance.expect("guidance");
+    for (name, config, on) in [
+        (
+            "plain",
+            BranchesConfig::new(
+                "Recipe",
+                recipe.clone(),
+                DEFAULT_PRIMARY.to_owned(),
+                64,
+                None,
+            ),
+            &recipes,
+        ),
+        (
+            "swept",
+            BranchesConfig::new(
+                "Recipe",
+                book,
+                "trunk".to_owned(),
+                64,
+                Some(BranchesSweep {
+                    interval_ms: 3_600_000,
+                    discard_grace: None,
+                    prune_batch: None,
+                    abandon_after: Some(172_800_000),
+                }),
+            ),
+            &books,
+        ),
+        (
+            "pruned",
+            BranchesConfig::new(
+                "Recipe",
+                recipe,
+                DEFAULT_PRIMARY.to_owned(),
+                64,
+                Some(BranchesSweep {
+                    interval_ms: 90_000,
+                    discard_grace: None,
+                    prune_batch: None,
+                    abandon_after: None,
+                }),
+            ),
+            &recipes,
+        ),
+    ] {
+        let config = config.expect("a config");
+        assert_eq!(
+            as_json(&guidance(&Branches, &config, on)),
+            expected[name],
+            "{name}"
+        );
+    }
+}
+
+/// Search's TypeScript guidance (`searchGuidance`) for a Note: one field
+/// and no vectors; three fields weighed 3, 1 and 0.5 with vectors; two
+/// fields, the second weighed 2.25.
+const SEARCH: &str = r#"{
+  "plain": {
+    "summary": "Full-text search over title. It keeps no vectors.",
+    "operations": {
+      "search": {
+        "useWhen": "Use to find Note instances by words in title: plain words match when the fields hold every one; syntax fts5 takes an FTS5 expression.",
+        "doNotUseWhen": "Do not use to page through every instance; call list.",
+        "success": "Returns hits best first, each its id, rank and a snippet of the field that matched. Pass next as cursor for the page after, until it is null."
+      },
+      "similar": {
+        "useWhen": "Use before creating a Note, to find near-duplicates to reuse or link instead: with id, the instances nearest to one you have; with text, the ones nearest to a draft's title.",
+        "doNotUseWhen": "Do not use to search by a few words; call search.",
+        "success": "Returns the nearest instances, leaving out the one named by id, and whether a vector ranked (embedded). Pass next as cursor for the page after, until it is null."
+      },
+      "staleEmbeddings": {
+        "doNotUseWhen": "Do not use: Search on Note keeps no vectors, so listing stale embeddings is refused."
+      },
+      "settleEmbeddings": {
+        "doNotUseWhen": "Do not use: Search on Note keeps no vectors, so a settle is refused."
+      },
+      "create": {
+        "doNotUseWhen": "Do not create a duplicate: call similar with the draft's text first, to find one to reuse."
+      }
+    }
+  },
+  "weighed": {
+    "summary": "Full-text search over title (weight 3), body and summary (weight 0.5). With vectors of 384 dimensions from model minilm-l6, which an outside embedder with permission notes.embed settles.",
+    "operations": {
+      "search": {
+        "useWhen": "Use to find Note instances by words in title, body or summary: plain words match when the fields hold every one; syntax fts5 takes an FTS5 expression. A vector of 384 numbers from model minilm-l6 ranks by similarity, alone or fused with a query.",
+        "doNotUseWhen": "Do not use to page through every instance; call list.",
+        "success": "Returns hits best first, each its id, rank and a snippet of the field that matched. Pass next as cursor for the page after, until it is null."
+      },
+      "similar": {
+        "useWhen": "Use before creating a Note, to find near-duplicates to reuse or link instead: with id, the instances nearest to one you have; with text, the ones nearest to a draft's title, body and summary, joined by a blank line. With text, a vector of 384 numbers from model minilm-l6 computed from the same text ranks by similarity too.",
+        "doNotUseWhen": "Do not use to search by a few words; call search.",
+        "success": "Returns the nearest instances, leaving out the one named by id, and whether a vector ranked (embedded). Pass next as cursor for the page after, until it is null."
+      },
+      "staleEmbeddings": {
+        "useWhen": "Use as an embedder: it lists the instances whose vector from minilm-l6 is missing or stale, with the text to embed and its hash.",
+        "success": "Returns the model, the dimensions and the items. Pass next as cursor for the page after, until it is null."
+      },
+      "settleEmbeddings": {
+        "useWhen": "Use as an embedder with permission notes.embed: it stores at most 100 vectors of 384 numbers, each with the hash staleEmbeddings gave.",
+        "doNotUseWhen": "Do not settle a vector computed from other text or another model: its hash no longer matches and it is skipped.",
+        "success": "Returns how many it settled and each skipped item with its reason, moved or not_found."
+      },
+      "create": {
+        "doNotUseWhen": "Do not create a duplicate: call similar with the draft's text first, to find one to reuse."
+      }
+    }
+  },
+  "two": {
+    "summary": "Full-text search over title and body (weight 2.25). It keeps no vectors.",
+    "operations": {
+      "search": {
+        "useWhen": "Use to find Note instances by words in title or body: plain words match when the fields hold every one; syntax fts5 takes an FTS5 expression.",
+        "doNotUseWhen": "Do not use to page through every instance; call list.",
+        "success": "Returns hits best first, each its id, rank and a snippet of the field that matched. Pass next as cursor for the page after, until it is null."
+      },
+      "similar": {
+        "useWhen": "Use before creating a Note, to find near-duplicates to reuse or link instead: with id, the instances nearest to one you have; with text, the ones nearest to a draft's title and body, joined by a blank line.",
+        "doNotUseWhen": "Do not use to search by a few words; call search.",
+        "success": "Returns the nearest instances, leaving out the one named by id, and whether a vector ranked (embedded). Pass next as cursor for the page after, until it is null."
+      },
+      "staleEmbeddings": {
+        "doNotUseWhen": "Do not use: Search on Note keeps no vectors, so listing stale embeddings is refused."
+      },
+      "settleEmbeddings": {
+        "doNotUseWhen": "Do not use: Search on Note keeps no vectors, so a settle is refused."
+      },
+      "create": {
+        "doNotUseWhen": "Do not create a duplicate: call similar with the draft's text first, to find one to reuse."
+      }
+    }
+  }
+}"#;
+
+#[test]
+fn search_guidance_is_the_typescript_engines_text() {
+    use superschematic_engine_behaviors::{Search, SearchConfig, SearchVectors};
+
+    let expected: Value = serde_json::from_str(SEARCH).expect("the expected guidance");
+    let mut note = target();
+    note.schema = "Note".to_owned();
+    note.type_name = "Note".to_owned();
+    let guidance = Search.hooks().guidance.expect("guidance");
+    for (name, config) in [
+        (
+            "plain",
+            SearchConfig {
+                fields: names(&["title"]),
+                weights: vec![1.0],
+                vectors: None,
+            },
+        ),
+        (
+            "weighed",
+            SearchConfig {
+                fields: names(&["title", "body", "summary"]),
+                weights: vec![3.0, 1.0, 0.5],
+                vectors: Some(SearchVectors {
+                    dimensions: 384,
+                    model: "minilm-l6".to_owned(),
+                    permission: "notes.embed".to_owned(),
+                }),
+            },
+        ),
+        (
+            "two",
+            SearchConfig {
+                fields: names(&["title", "body"]),
+                weights: vec![1.0, 2.25],
+                vectors: None,
+            },
+        ),
+    ] {
+        assert_eq!(
+            as_json(&guidance(&Search, &config, &note)),
+            expected[name],
+            "{name}"
+        );
+    }
+}
