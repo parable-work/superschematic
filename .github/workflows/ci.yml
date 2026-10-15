@@ -903,12 +903,15 @@ jobs:
       # the superscalar and version-graph scripts when it is parsed. Clippy
       # runs on every feature combination (each database alone, both, and
       # neither, and the axum router over one database, as a Rust server
-      # takes it), so a build that takes one database still compiles.
+      # takes it), so a build that takes one database still compiles, with
+      # the test addon's bridge (all features) and without it (the
+      # defaults, as an addon ships).
       - name: fmt / clippy (every feature combination)
         working-directory: runtime/engine/rust
         run: |
           cargo fmt --all --check
           cargo clippy --workspace --all-targets --all-features -- -D warnings
+          cargo clippy --workspace --all-targets -- -D warnings
           cargo clippy --workspace --all-targets --no-default-features -- -D warnings
           cargo clippy --workspace --all-targets --no-default-features --features superschematic-engine/sqlite -- -D warnings
           cargo clippy --workspace --all-targets --no-default-features --features superschematic-engine/postgres -- -D warnings
@@ -992,11 +995,16 @@ jobs:
           (cd runtime/versiongraph/typescript && bun install --frozen-lockfile && bun run build)
 
       - name: Build the engine and its Node-API addon
+        # The addon as it ships first, which must not have the bridge to
+        # behaviors written in TypeScript, then the test addon, which the
+        # suite runs on: its tests define behaviors with defineBehavior.
         working-directory: runtime/engine/typescript
         run: |
           bun install --frozen-lockfile
           bun run build
           ../../../scripts/engine-napi.sh
+          node -e "const a = require('./native/' + require('node:fs').readdirSync('native').find((f) => f.endsWith('.node'))); if (typeof a.bridgeCall !== 'undefined') { console.error('the shipped addon has the test bridge'); process.exit(1); }"
+          ../../../scripts/engine-napi.sh --js-behaviors
 
       - name: The engine's suite on the Rust engine against test/rust-pending.txt (Node.js and Bun)
         working-directory: runtime/engine/typescript

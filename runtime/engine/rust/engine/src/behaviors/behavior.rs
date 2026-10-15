@@ -640,6 +640,13 @@ impl BehaviorSet {
         self.behaviors.push(super::erased::erase(behavior));
     }
 
+    /// Adds a behavior whose hooks are named at run time after the ones
+    /// before it (the `dynamic` feature).
+    #[cfg(feature = "dynamic")]
+    pub fn push_dynamic<D: super::dynamic::DynamicBehavior>(&mut self, behavior: D) {
+        self.behaviors.push(super::dynamic::erase_dynamic(behavior));
+    }
+
     /// The set with every behavior of another after its own.
     pub fn extend(mut self, other: BehaviorSet) -> Self {
         self.behaviors.extend(other.behaviors);

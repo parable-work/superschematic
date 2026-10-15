@@ -44,7 +44,10 @@ import type { DescribeDocument, ToolManifest, ToolTarget } from '../tools/catalo
 import { resolveToolOptions, type ResolvedToolOptions } from '../tools/options.js';
 import type { StoredValue } from '../values/store.js';
 import type { ValueTarget } from '../values/values.js';
+import type { AnyBehaviorImplementation } from '../behaviors/behavior.js';
+import { deepFreeze } from '../behaviors/json.js';
 import { loadAddon, type AddonEngine } from './addon.js';
+import { Bridge } from './bridge.js';
 import { NativeUnsupportedError, restoreError } from './errors.js';
 import { nativeOptions, type HostedOptions, type NativeEngineOptions } from './options.js';
 
@@ -58,9 +61,17 @@ import { nativeOptions, type HostedOptions, type NativeEngineOptions } from './o
 class Hosts {
   private parked: { error: unknown } | undefined;
 
-  constructor(private readonly hosted: HostedOptions) {}
+  constructor(
+    private readonly hosted: HostedOptions,
+    /** The bridge to behaviors written in TypeScript, on the test addon. */
+    readonly bridge: Bridge
+  ) {}
 
   readonly answer = (kind: string, payload: string): string => {
+    if (kind === 'behavior') {
+      // The bridge writes what a hook threw into its answer.
+      return this.bridge.answer(payload);
+    }
     try {
       switch (kind) {
         case 'policy': {
@@ -102,17 +113,24 @@ class Calls {
   constructor(
     private readonly addon: AddonEngine,
     private readonly clock: (() => number) | undefined,
-    private readonly hosts: Hosts
+    private readonly hosts: Hosts,
+    private readonly watchers: Watchers
   ) {}
 
   sync(op: string, principal: Principal | undefined, args: readonly unknown[] = []): unknown {
     let text: string;
+    const bridge = this.hosts.bridge;
     try {
       text = this.addon.callSync(this.request(op, principal, args));
     } catch (error) {
+      const restored = restoreError(error, (token) => bridge.parkedValue(token));
+      bridge.settle();
+      this.watchers.poll();
       this.hosts.rethrow();
-      throw restoreError(error);
+      throw restored;
     }
+    bridge.settle();
+    this.watchers.poll();
     this.hosts.rethrow();
     return text === '' ? undefined : JSON.parse(text);
   }
@@ -141,7 +159,7 @@ class Calls {
 // carry; a mount's tool filter comes with the HTTP adapters (7b).
 function checkTarget(target: ToolTarget | undefined): ToolTarget | undefined {
   if (target?.filter !== undefined) {
-    throw new NativeUnsupportedError('a tool filter written in TypeScript (ToolTarget.filter)', 'bridge');
+    throw new NativeUnsupportedError('a tool filter written in TypeScript (ToolTarget.filter)', 'http');
   }
   return target;
 }
@@ -221,7 +239,7 @@ class NativeSchemas {
   }
 
   validator(): never {
-    throw new NativeUnsupportedError('schemas.validator, which returns a TypeScript SchemaValidator', 'bridge');
+    throw new NativeUnsupportedError('schemas.validator, which returns a TypeScript SchemaValidator', 'validator');
   }
 
   behaviors(principal: Principal, name: string, options?: ValidateOptions): ComposedBehavior[] {
@@ -269,8 +287,117 @@ class NativeInstances {
   }
 }
 
+// Watchers hears of the commits the engine makes, as the TypeScript
+// engine's notifier tells them (src/events/notifier.ts): after each commit
+// that appended events, once per event, with its cursor. A call this
+// facade makes is followed by a look at the notifier's epoch, so a
+// watcher hears of its commits before the call returns, as it would on
+// the TypeScript engine; a commit made elsewhere (the runner's thread, an
+// asynchronous call, another process on Postgres) reaches it through the
+// addon's watch, a weak threadsafe function, which never holds the
+// process open.
+class Watchers {
+  private readonly watchers = new Set<EventWatcher>();
+  private epoch = 0;
+  private head = 0;
+  private polling = false;
+  private watching = false;
+  closed = false;
+
+  constructor(private readonly addon: AddonEngine) {}
+
+  attach(calls: Calls): void {
+    this.calls = calls;
+  }
+
+  private calls: Calls | undefined;
+
+  get size(): number {
+    return this.watchers.size;
+  }
+
+  watch(watcher: EventWatcher): () => void {
+    if (this.closed) {
+      throw new Error('the engine is closed');
+    }
+    if (this.watchers.size === 0) {
+      this.epoch = this.addon.epoch;
+      this.head = this.calls?.sync('events.head', undefined) as number;
+    }
+    this.watchers.add(watcher);
+    if (!this.watching) {
+      this.watching = true;
+      this.addon.watch(() => this.poll());
+    }
+    return () => {
+      this.watchers.delete(watcher);
+    };
+  }
+
+  /** poll tells the watchers of the commits since it last looked. */
+  poll(): void {
+    if (this.polling || this.watchers.size === 0 || this.calls === undefined) {
+      return;
+    }
+    let epoch: number;
+    try {
+      epoch = this.addon.epoch;
+    } catch {
+      return;
+    }
+    if (epoch === this.epoch) {
+      return;
+    }
+    this.polling = true;
+    try {
+      this.epoch = epoch;
+      let head: number;
+      try {
+        head = this.calls.sync('events.head', undefined) as number;
+      } catch {
+        return;
+      }
+      for (let cursor = this.head + 1; cursor <= head; cursor += 1) {
+        for (const watcher of [...this.watchers]) {
+          try {
+            watcher.committed(cursor);
+          } catch {
+            // One watcher's failure is not the writer's, nor another watcher's.
+          }
+        }
+      }
+      this.head = Math.max(this.head, head);
+    } finally {
+      this.polling = false;
+    }
+  }
+
+  /** close tells every watcher the engine closed, then forgets them. */
+  close(): void {
+    if (this.closed) {
+      return;
+    }
+    this.closed = true;
+    if (this.watching) {
+      this.addon.unwatch();
+    }
+    const watchers = [...this.watchers];
+    this.watchers.clear();
+    for (const watcher of watchers) {
+      try {
+        watcher.closed?.();
+      } catch {
+        // As in poll.
+      }
+    }
+  }
+}
+
 class NativeEvents {
-  constructor(private readonly calls: Calls) {}
+  constructor(
+    private readonly calls: Calls,
+    private readonly watchers: Watchers
+  ) {}
 
   read(principal: Principal, options?: ReadEventsOptions): EventPage {
     return this.calls.sync('events.read', principal, [options]) as EventPage;
@@ -284,15 +411,18 @@ class NativeEvents {
     return this.calls.sync('events.floor', undefined, [namespace]) as number;
   }
 
-  watch(_watcher: EventWatcher): () => void {
-    throw new NativeUnsupportedError('events.watch', 'watch');
+  /** watch registers a watcher the engine calls after each commit that appended events, and once when it closes. */
+  watch(watcher: EventWatcher): () => void {
+    return this.watchers.watch(watcher);
   }
 
   get watching(): number {
-    return 0;
+    return this.watchers.size;
   }
 
-  close(): void {}
+  close(): void {
+    this.watchers.close();
+  }
 }
 
 class NativeTools {
@@ -323,28 +453,163 @@ class NativeTools {
   }
 }
 
-class NativeRunner {
-  constructor(private readonly calls: Calls) {}
+// HostedRunner runs the runner on this thread's event loop, as the
+// TypeScript engine's runner runs (src/runner/runner.ts): for an engine
+// whose policy, matcher or a behavior is written in TypeScript, which
+// answer on this thread alone, so the runner's own thread cannot run
+// them. It wakes on a commit (setImmediate) and at the next retry,
+// schedule or prune (setTimeout), and runs what is due (runner.runDue).
+class HostedRunner {
+  started = false;
+  private soon: ReturnType<typeof setImmediate> | undefined;
+  private timer: ReturnType<typeof setTimeout> | undefined;
+  private unwatch: (() => void) | undefined;
 
-  get running(): boolean {
-    return this.calls.sync('runner.running', undefined) as boolean;
-  }
+  constructor(
+    private readonly calls: Calls,
+    private readonly events: NativeEvents,
+    private readonly clock: () => number,
+    private readonly retryInitialMs: number,
+    private readonly runDue: () => unknown
+  ) {}
 
   start(): void {
-    this.calls.sync('runner.start', undefined);
+    if (this.started) {
+      return;
+    }
+    this.started = true;
+    this.unwatch = this.events.watch({ committed: () => this.wake(), closed: () => this.stop() });
+    this.wake();
   }
 
   stop(): void {
+    this.started = false;
+    this.unwatch?.();
+    this.unwatch = undefined;
+    if (this.soon !== undefined) {
+      clearImmediate(this.soon);
+      this.soon = undefined;
+    }
+    if (this.timer !== undefined) {
+      clearTimeout(this.timer);
+      this.timer = undefined;
+    }
+  }
+
+  private wake(): void {
+    if (!this.started || this.soon !== undefined) {
+      return;
+    }
+    this.soon = setImmediate(() => {
+      this.soon = undefined;
+      this.tick();
+    });
+  }
+
+  private tick(): void {
+    if (!this.started) {
+      return;
+    }
+    if (this.timer !== undefined) {
+      clearTimeout(this.timer);
+      this.timer = undefined;
+    }
+    try {
+      this.runDue();
+    } catch {
+      // The runner's own failure, not a reaction's: a busy file, say. It
+      // tries again after the first retry delay.
+      this.arm(this.clock() + this.retryInitialMs);
+      return;
+    }
+    let due: number | null;
+    try {
+      due = this.calls.sync('runner.nextWake', undefined) as number | null;
+    } catch {
+      return;
+    }
+    this.arm(due ?? undefined);
+  }
+
+  private arm(at: number | undefined): void {
+    if (at === undefined || !this.started) {
+      return;
+    }
+    const delay = Math.min(Math.max(0, at - this.clock()), MAX_TIMER_MS);
+    this.timer = setTimeout(() => {
+      this.timer = undefined;
+      this.tick();
+    }, delay);
+  }
+}
+
+// The longest setTimeout delay, as the TypeScript runner caps it.
+const MAX_TIMER_MS = 2_147_483_647;
+
+class NativeRunner {
+  private hostedRunner: HostedRunner | undefined;
+
+  constructor(
+    private readonly calls: Calls,
+    private readonly addon: AddonEngine,
+    private readonly events: NativeEvents,
+    private readonly runner: { principal?: unknown; retryInitialMs?: number } | undefined,
+    private readonly clock: () => number,
+    private readonly closed: () => boolean,
+    private readonly inHook: () => boolean
+  ) {}
+
+  get running(): boolean {
+    if (this.closed()) {
+      return false;
+    }
+    return this.hostedRunner?.started === true || (this.calls.sync('runner.running', undefined) as boolean);
+  }
+
+  start(): void {
+    if (!this.addon.hosted) {
+      this.calls.sync('runner.start', undefined);
+      return;
+    }
+    if (this.closed()) {
+      throw new Error('the engine is closed');
+    }
+    if (this.runner?.principal === undefined) {
+      throw new TypeError('runner.start needs a principal: open the engine with runner: { principal }');
+    }
+    this.hostedRunner ??= new HostedRunner(this.calls, this.events, this.clock, this.runner.retryInitialMs ?? 1000, () => this.runDue());
+    this.hostedRunner.start();
+  }
+
+  stop(): void {
+    if (this.hostedRunner !== undefined) {
+      this.hostedRunner.stop();
+    }
     this.calls.sync('runner.stop', undefined);
   }
 
   close(): void {
+    this.hostedRunner?.stop();
     this.stop();
   }
 
   runDue(): RunnerPass {
-    return this.calls.sync('runner.runDue', undefined) as RunnerPass;
+    // A hook that runs the runner: the TypeScript runner's refusals.
+    if (this.passing) {
+      throw new Error('the runner is already running: runDue cannot run inside a reaction or a schedule');
+    }
+    if (this.inHook()) {
+      throw new Error('the runner runs outside any transaction');
+    }
+    this.passing = true;
+    try {
+      return this.calls.sync('runner.runDue', undefined) as RunnerPass;
+    } finally {
+      this.passing = false;
+    }
   }
+
+  private passing = false;
 
   prune(): PruneResult {
     return this.calls.sync('runner.prune', undefined) as PruneResult;
@@ -380,10 +645,26 @@ class NativeValues {
 }
 
 class NativeBehaviors {
-  constructor(private readonly calls: Calls) {}
+  constructor(
+    private readonly calls: Calls,
+    private readonly addon: AddonEngine,
+    private readonly bridge: Bridge
+  ) {}
 
-  register(): never {
-    throw new NativeUnsupportedError('a behavior written in TypeScript (behaviors.register)', 'bridge');
+  /** register registers a behavior written in TypeScript, which the test addon's bridge runs. */
+  register(implementation: AnyBehaviorImplementation): void {
+    if (!this.addon.bridged) {
+      throw new NativeUnsupportedError('a behavior written in TypeScript (behaviors.register)', 'bridge');
+    }
+    const descriptor = this.bridge.describe(implementation);
+    try {
+      this.addon.registerBehavior(JSON.stringify(descriptor));
+    } catch (error) {
+      const restored = restoreError(error, (token) => this.bridge.parkedValue(token));
+      this.bridge.settle();
+      throw restored;
+    }
+    this.bridge.settle();
   }
 
   has(name: string): boolean {
@@ -395,7 +676,7 @@ class NativeBehaviors {
   }
 
   declaration(name: string): BehaviorDeclaration | undefined {
-    return this.calls.sync('behaviors.declaration', undefined, [name]) as BehaviorDeclaration | undefined;
+    return deepFreeze(this.calls.sync('behaviors.declaration', undefined, [name]) as BehaviorDeclaration | undefined);
   }
 
   lookup(): never {
@@ -419,19 +700,30 @@ export class NativeEngine {
   readonly dialect: 'sqlite' | 'postgres';
   private readonly addon: AddonEngine;
   private readonly calls: Calls;
+  private readonly watchers: Watchers;
 
-  private constructor(addon: AddonEngine, clock: (() => number) | undefined, hosts: Hosts, permissionMatcher: PermissionMatcher, tools: ResolvedToolOptions) {
+  private constructor(
+    addon: AddonEngine,
+    clock: (() => number) | undefined,
+    hosts: Hosts,
+    permissionMatcher: PermissionMatcher,
+    tools: ResolvedToolOptions,
+    runner: { principal?: unknown; retryInitialMs?: number } | undefined
+  ) {
     this.addon = addon;
     this.dialect = addon.dialect;
     this.permissionMatcher = permissionMatcher;
-    this.calls = new Calls(addon, clock, hosts);
+    const watchers = new Watchers(addon);
+    this.watchers = watchers;
+    this.calls = new Calls(addon, clock, hosts, watchers);
+    watchers.attach(this.calls);
     this.namespaces = new NativeNamespaces(this.calls);
-    this.behaviors = new NativeBehaviors(this.calls);
+    this.behaviors = new NativeBehaviors(this.calls, addon, hosts.bridge);
     this.schemas = new NativeSchemas(this.calls);
     this.instances = new NativeInstances(this.calls);
-    this.events = new NativeEvents(this.calls);
+    this.events = new NativeEvents(this.calls, watchers);
     this.tools = new NativeTools(this.calls, tools);
-    this.runner = new NativeRunner(this.calls);
+    this.runner = new NativeRunner(this.calls, addon, this.events, runner, clock ?? Date.now, () => watchers.closed, () => hosts.bridge.depth > 0);
     this.values = new NativeValues(this.calls);
   }
 
@@ -446,21 +738,36 @@ export class NativeEngine {
     // opens as the TypeScript engine resolves them: the Rust engine checks
     // the same, but a value JSON cannot carry (NaN) reaches it as another.
     const tools = resolveToolOptions(options.tools);
-    const hosts = new Hosts(hosted);
+    const bridge = new Bridge();
+    const hosts = new Hosts(hosted, bridge);
+    const loaded = loadAddon();
+    if (loaded.bridgeCall !== undefined) {
+      bridge.connect(loaded.bridgeCall);
+    }
+    bridge.restore = (error) => restoreError(error, (token) => bridge.parkedValue(token));
+    if (hosted.behaviors !== undefined) {
+      if (loaded.bridgeCall === undefined) {
+        throw new NativeUnsupportedError('a behavior written in TypeScript (defineBehavior), which only the test addon runs', 'bridge');
+      }
+      json.jsBehaviors = hosted.behaviors.map((implementation) => bridge.describe(implementation));
+    }
     let addon: AddonEngine;
     try {
-      addon = loadAddon().NativeEngine.open(JSON.stringify(json), hosts.answer);
+      addon = loaded.NativeEngine.open(JSON.stringify(json), hosts.answer);
     } catch (error) {
+      const restored = restoreError(error, (token) => bridge.parkedValue(token));
+      bridge.settle();
       hosts.rethrow();
-      throw restoreError(error);
+      throw restored;
     }
+    bridge.settle();
     try {
       hosts.rethrow();
     } catch (error) {
       addon.close();
       throw error;
     }
-    return new NativeEngine(addon, clock, hosts, options.permissionMatcher ?? hasAnyPermission, tools);
+    return new NativeEngine(addon, clock, hosts, options.permissionMatcher ?? hasAnyPermission, tools, options.runner);
   }
 
   /** The TypeScript engine's storage, which the Rust engine does not expose (milestone 7b decides how). */
@@ -483,11 +790,23 @@ export class NativeEngine {
 
   /** shutdown stops the runner and ends every event stream; every later call is refused. */
   shutdown(): void {
+    try {
+      this.runner.close();
+    } catch {
+      // Shut down already.
+    }
+    this.watchers.close();
     this.addon.shutdown();
   }
 
   /** close shuts the engine down and lets it go; its storage closes once a call in flight returns. */
   close(): void {
+    try {
+      this.runner.close();
+    } catch {
+      // Closed already.
+    }
+    this.watchers.close();
     this.addon.close();
   }
 }
