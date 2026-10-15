@@ -61,8 +61,12 @@ export interface AddonEngine {
   readonly storageInTransaction: boolean;
   /** Serves one HTTP request: its head as JSON and its body's bytes (SQLite). */
   handleHttp(head: string, body?: Buffer): HttpAnswer;
+  /** Serves one HTTP request off this thread (Postgres, or SQLite). */
+  handleHttpAsync(head: string, body?: Buffer): Promise<HttpAnswer>;
   /** Pulls an event stream handleHttp holds open, without waiting. */
   streamPull(id: number): StreamPull;
+  /** Pulls an event stream off this thread, waiting up to timeoutMs. */
+  streamPullAsync(id: number, timeoutMs: number): Promise<StreamPull>;
   /** Ends an event stream handleHttp holds open. */
   streamClose(id: number): void;
   /** How many commits that notified the engine's notifier has counted. */
@@ -101,6 +105,8 @@ export interface StreamPull {
 /** What the addon exports. */
 export interface Addon {
   abiVersion(): number;
+  /** The routes the engine serves (api::routes), as JSON. */
+  engineRoutes(): string;
   /** A behavior context's method, on the test addon alone (src/native/bridge.ts). */
   bridgeCall?(generation: number, method: string, args: string): string;
   /** Opens an engine; host answers what the options' `hosted` lists. */

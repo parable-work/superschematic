@@ -98,6 +98,13 @@ pub fn abi_version() -> u32 {
     ABI_VERSION
 }
 
+/// The routes the engine serves (`api::routes`), as JSON: what the
+/// facade's HTTP adapters mount, for any engine.
+#[napi]
+pub fn engine_routes() -> String {
+    serde_json::to_string(&superschematic_engine::api::routes()).unwrap_or_else(|_| "[]".to_owned())
+}
+
 /// What the addon throws: an `Error` named for the TypeScript class, with
 /// its code and its class's members.
 #[derive(Debug)]
@@ -573,7 +580,8 @@ pub struct StreamPull {
     pub end: bool,
 }
 
-// serve_http serves one request whose head is JSON.
+// serve_http serves one request whose head is JSON, on the JavaScript
+// thread.
 fn serve_http(
     engine: &Engine,
     head: &str,
@@ -593,8 +601,29 @@ fn serve_http(
             _ => None,
         };
     let reply = calls::http(engine, &head, body, filter).map_err(|error| Failure::of(&error))?;
+    Ok(answer_of(reply))
+}
+
+// serve_http_owned serves one request off the JavaScript thread, where no
+// filter written in TypeScript can be asked.
+fn serve_http_owned(
+    engine: &Engine,
+    head: &str,
+    body: Option<Vec<u8>>,
+) -> std::result::Result<calls::HttpReply, Failure> {
+    let head: Value = serde_json::from_str(head)
+        .map_err(|error| Failure::usage(format!("an HTTP request's head is JSON: {error}")))?;
+    if head.get("toolFilter") == Some(&Value::Bool(true)) {
+        return Err(Failure::usage(
+            "a tool filter written in TypeScript answers on the JavaScript thread: an engine served asynchronously takes none",
+        ));
+    }
+    calls::http(engine, &head, body, None).map_err(|error| Failure::of(&error))
+}
+
+fn answer_of(reply: calls::HttpReply) -> HttpAnswer {
     #[allow(clippy::cast_precision_loss)] // a stream id stays below 2^53
-    Ok(HttpAnswer {
+    HttpAnswer {
         status: u32::from(reply.status),
         headers: reply
             .headers
@@ -603,7 +632,24 @@ fn serve_http(
             .collect(),
         body: reply.body.map(Buffer::from),
         stream: reply.stream.map(|id| id as f64),
-    })
+    }
+}
+
+fn pull_of(pulled: superschematic_engine::api::Pull) -> StreamPull {
+    match pulled {
+        superschematic_engine::api::Pull::Data(bytes) => StreamPull {
+            data: Some(bytes.into()),
+            end: false,
+        },
+        superschematic_engine::api::Pull::Pending => StreamPull {
+            data: None,
+            end: false,
+        },
+        superschematic_engine::api::Pull::End => StreamPull {
+            data: None,
+            end: true,
+        },
+    }
 }
 
 /// A call on libuv's pool.
@@ -767,6 +813,87 @@ impl NativeEngine {
             |env, outcome| outcome.map_err(|failure| failure.into_napi(env)),
         )?;
         Ok(Either::B(promise))
+    }
+
+    /// Serves one HTTP request off the JavaScript thread, as `handleHttp`
+    /// does on it: what an engine on Postgres serves through (on SQLite as
+    /// well). Its promise resolves on the JavaScript thread. A tool filter
+    /// written in TypeScript, which answers on that thread, is refused.
+    #[napi(ts_return_type = "Promise<HttpAnswer>")]
+    pub fn handle_http_async<'env>(
+        &self,
+        env: &'env Env,
+        head: String,
+        body: Option<Buffer>,
+    ) -> Result<PromiseRaw<'env, HttpAnswer>> {
+        let engine = self.engine().map_err(|failure| failure.into_napi(env))?;
+        if self.hosted() {
+            return Err(Failure::usage(
+                "an engine whose policy, permission matcher or a behavior is written in TypeScript serves HTTP synchronously: they answer on the JavaScript thread",
+            )
+            .into_napi(env));
+        }
+        let body = body.map(|body| body.to_vec());
+        env.spawn_future_with_callback(
+            async move {
+                napi::bindgen_prelude::spawn_blocking(move || {
+                    match catch_unwind(AssertUnwindSafe(|| serve_http_owned(&engine, &head, body)))
+                    {
+                        Ok(outcome) => outcome,
+                        Err(payload) => Err(Failure::panic(payload.as_ref())),
+                    }
+                })
+                .await
+                .map_err(|error| {
+                    napi::Error::from_reason(format!(
+                        "the engine's request did not finish: {error}"
+                    ))
+                })
+            },
+            |env, outcome| match outcome {
+                Ok(reply) => Ok(answer_of(reply)),
+                Err(failure) => Err(failure.into_napi(env)),
+            },
+        )
+    }
+
+    /// Pulls an event stream off the JavaScript thread, waiting up to
+    /// `timeoutMs` for its next bytes: an engine on Postgres's stream
+    /// waits there for a commit in any process.
+    #[napi(ts_return_type = "Promise<StreamPull>")]
+    pub fn stream_pull_async<'env>(
+        &self,
+        env: &'env Env,
+        id: f64,
+        timeout_ms: u32,
+    ) -> Result<PromiseRaw<'env, StreamPull>> {
+        let engine = self.engine().map_err(|failure| failure.into_napi(env))?;
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let id = id as u64;
+        env.spawn_future_with_callback(
+            async move {
+                napi::bindgen_prelude::spawn_blocking(move || {
+                    match catch_unwind(AssertUnwindSafe(|| {
+                        calls::stream_pull(
+                            &engine,
+                            id,
+                            std::time::Duration::from_millis(u64::from(timeout_ms)),
+                        )
+                    })) {
+                        Ok(outcome) => outcome.map_err(|error| Failure::of(&error)),
+                        Err(payload) => Err(Failure::panic(payload.as_ref())),
+                    }
+                })
+                .await
+                .map_err(|error| {
+                    napi::Error::from_reason(format!("the stream's pull did not finish: {error}"))
+                })
+            },
+            |env, outcome| match outcome {
+                Ok(pulled) => Ok(pull_of(pulled)),
+                Err(failure) => Err(failure.into_napi(env)),
+            },
+        )
     }
 
     /// Runs raw SQL on the engine's SQLite file, as the TypeScript
@@ -941,18 +1068,7 @@ impl NativeEngine {
             calls::stream_pull(&engine, id, std::time::Duration::ZERO)
         }));
         match pulled {
-            Ok(Ok(superschematic_engine::api::Pull::Data(bytes))) => Ok(StreamPull {
-                data: Some(bytes.into()),
-                end: false,
-            }),
-            Ok(Ok(superschematic_engine::api::Pull::Pending)) => Ok(StreamPull {
-                data: None,
-                end: false,
-            }),
-            Ok(Ok(superschematic_engine::api::Pull::End)) => Ok(StreamPull {
-                data: None,
-                end: true,
-            }),
+            Ok(Ok(pulled)) => Ok(pull_of(pulled)),
             Ok(Err(error)) => Err(Failure::of(&error).into_napi(&env)),
             Err(payload) => Err(Failure::panic(payload.as_ref()).into_napi(&env)),
         }

@@ -89,6 +89,7 @@ import type { InstanceRecord } from '../instances/store.js';
 import { isPlainObject } from '../instances/patch.js';
 import type { SchemaRecord } from '../registry/catalog.js';
 import type { ToolFilter } from '../tools/catalog.js';
+import { AsyncNativeEngine } from '../native/async.js';
 import { NativeEngine } from '../native/engine.js';
 import { nativeEngineApp } from '../native/http.js';
 import { callerAuthenticator, principalOf } from './callers.js';
@@ -178,8 +179,8 @@ const EVENT_QUERY: readonly ParamSpec[] = [
  */
 export function engineApp(engine: Engine, options: EngineHttpOptions = {}): Hono {
   // The Rust engine serves its own routes (D58); this app is its adapter.
-  if ((engine as unknown) instanceof NativeEngine) {
-    return nativeEngineApp(engine as unknown as NativeEngine, options);
+  if ((engine as unknown) instanceof NativeEngine || (engine as unknown) instanceof AsyncNativeEngine) {
+    return nativeEngineApp(engine as unknown as NativeEngine | AsyncNativeEngine, options);
   }
   const stream = checkStreamOptions(options.stream ?? {});
   const deployed = options.onError;
