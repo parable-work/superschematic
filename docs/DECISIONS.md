@@ -4980,10 +4980,15 @@ authDb enables TypeScript types. servergen's
 database up and, when `SUPERSCHEMATIC_IDENTITY_TEST_DATABASE_URL` is set,
 on Postgres.
 
-Not built: the Rust stack entrypoint, which will read `<API>_IDENTITY` as
-the Go and TypeScript ones do.
+A Rust entrypoint (D57) builds the store with `identity::PostgresPool`
+over the authDb's pool, and the service from `<API>_IDENTITY`, which the
+API crate's `EnvConfig` parses. servergen's
+`TestRustEntrypointCompilesAndServes` signs a user in on it when
+`SUPERSCHEMATIC_IDENTITY_TEST_DATABASE_URL` is set, and `cli`'s
+`TestStackDevRunsARustServer` does under `stack dev`.
 
 The design is reversible until the first release.
+
 ### D30, amended: a Cloud Run server's CPU is allocated only while it handles a request
 
 The gcp target's Cloud Run platform sets every service's resource limits,
