@@ -93,6 +93,7 @@ pub use namespaces::{
     is_namespace_name, name_refusal, NamespaceConfig, NamespaceOptions, NamespaceOrigin,
     NamespaceRecord, NamespaceState, Namespaces, DEFAULT_NAMESPACE, NAMESPACE_NAME,
 };
+pub use options::OPTION_MEMBERS;
 pub use paging::{DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE};
 pub use principal::{
     actor_of, check_principal, Actor, Principal, PrincipalService, SERVICE_SUBJECT_PREFIX,

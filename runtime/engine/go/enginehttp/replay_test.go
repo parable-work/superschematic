@@ -116,20 +116,6 @@ func (k knownMismatch) matches(failure string) bool {
 var known = []knownMismatch{
 	{
 		"http",
-		"the behavior catalog > lists every behavior the engine runs, to any caller, and describes one by name",
-		3,
-		"the catalog lists all 15 of the core's behaviors beside the test's; the Rust engine registers those ported so far, whose entries match, until milestones 10 and 11 port the rest",
-		false,
-	},
-	{
-		"mcp",
-		"tools/call > list_behaviors and describe_behavior read the behaviors the engine runs, for any caller",
-		15,
-		"list_behaviors lists all 15 of the core's behaviors beside the test's; the Rust engine registers those ported so far, whose entries match, until milestones 10 and 11 port the rest",
-		false,
-	},
-	{
-		"http",
 		"refusals > the runtime answers an unknown path, bad percent-encoding and a large body as problems",
 		11,
 		"net/http answers a request target that is not percent-encoding (%ZZ) with its own 400 in text/plain before any handler sees it, where Hono hands it to the engine, which answers a problem document",
