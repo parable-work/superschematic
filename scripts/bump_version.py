@@ -132,6 +132,7 @@ GO_MODULES = [
     "runtime/schema/go",
     "runtime/http/go",
     "runtime/versiongraph/go",
+    "runtime/engine/go",
     "runtime/migrate/go",
     "",
     "extensions/gcp",

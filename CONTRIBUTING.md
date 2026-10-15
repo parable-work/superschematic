@@ -286,7 +286,8 @@ building anything. `0.0.0` means unreleased.
 The Go modules are versioned by tags, one per module because each is its own
 module: `vX.Y.Z` (root), `ir/vX.Y.Z`, `runtime/schema/go/vX.Y.Z`,
 `runtime/http/go/vX.Y.Z`, `runtime/versiongraph/go/vX.Y.Z`,
-`runtime/migrate/go/vX.Y.Z`, `extensions/gcp/vX.Y.Z`,
+`runtime/engine/go/vX.Y.Z`, `runtime/migrate/go/vX.Y.Z`,
+`extensions/gcp/vX.Y.Z`,
 `extensions/cloudflare/vX.Y.Z`, `extensions/pulumi/vX.Y.Z`,
 `extensions/topcoat/vX.Y.Z` and
 `cmd/superschematic/vX.Y.Z` (`bump_version.py go-modules` lists them, and
@@ -301,8 +302,9 @@ binary is not `go install`able: users download it from the release or run
 `superschematic-migrate`, whose module has none, installs that way.
 
 A generated Go server links superscalar's static archive, and the version
-graph's, through cgo, and no module the module proxy serves carries them.
-Each release ships them as `superschematic-archives_<version>_<platform>.tar.gz`
+graph's and the engine's (D58) when it uses them, through cgo, and no
+module the module proxy serves carries them. Each release ships them, with the engine's C ABI
+header, as `superschematic-archives_<version>_<platform>.tar.gz`
 beside the CLI, built by `scripts/release-archives.sh` with `RUST_VERSION`
 in the release's `build-archives` job, before the CLIs: each CLI links its
 platform's tarball and every tarball's SHA-256 (`internal/release`), which
@@ -348,6 +350,7 @@ A release is three steps, each started by a person. For the first release,
    `ir/v0.1.0-alpha.1`, `runtime/schema/go/v0.1.0-alpha.1`,
    `runtime/http/go/v0.1.0-alpha.1`,
    `runtime/versiongraph/go/v0.1.0-alpha.1`,
+   `runtime/engine/go/v0.1.0-alpha.1`,
    `runtime/migrate/go/v0.1.0-alpha.1` and the extension and
    `cmd/superschematic` tags on the same commit. `release.yml` runs
    the full CI and builds the CLI (`cmd/superschematic`, the core with the
@@ -371,7 +374,8 @@ A release is three steps, each started by a person. For the first release,
 
 After the release, `go get github.com/parable-work/superschematic@v0.1.0-alpha.1`
 (and `.../ir@`, `.../runtime/schema/go@`, `.../runtime/http/go@`,
-`.../runtime/versiongraph/go@`, `.../runtime/migrate/go@`,
+`.../runtime/versiongraph/go@`, `.../runtime/engine/go@`,
+`.../runtime/migrate/go@`,
 `.../extensions/gcp@`, `.../extensions/pulumi@` and
 `.../extensions/topcoat@` at the same version) resolves, so a downstream
 distribution can link the official extensions. The migration runner needs no cgo. The other Go modules

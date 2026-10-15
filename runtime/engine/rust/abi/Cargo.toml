@@ -1,0 +1,25 @@
+[package]
+name = "superschematic-engine-abi"
+description = "The engine's C ABI as a library (D58): its implementation and export_engine_c_abi!, which an archive crate expands once over its project"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[features]
+# The databases an engine's config may name, both by default, as the engine
+# has them.
+default = ["sqlite", "postgres"]
+sqlite = ["superschematic-engine/sqlite"]
+postgres = ["superschematic-engine/postgres"]
+
+[dependencies]
+# The engine's JSON features (D58): a number keeps its text, an object its
+# members' order.
+serde_json = { version = "1.0.149", features = ["arbitrary_precision", "preserve_order"] }
+superschematic-engine = { path = "../engine", default-features = false }
+
+[lints]
+workspace = true

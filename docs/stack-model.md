@@ -1769,8 +1769,9 @@ one of two places (D47, amended):
   takes the runtime modules from the module proxy, the image takes the
   archives the release of superschematic that wrote the Dockerfile ships:
   `superschematic-archives_<version>_<platform>.tar.gz` beside the CLI on
-  the release page, both archives built with one Rust release under
-  `lib/`. The release builds them before the CLIs and links each CLI with
+  the release page, its archives built with one Rust release under `lib/`
+  (superscalar's, the version graph's and, since D58, the engine's, with
+  its C ABI's header under `include/`). The release builds them before the CLIs and links each CLI with
   every platform's digest (`internal/release`), so the Dockerfile pins the
   digest for `linux/amd64` and `linux/arm64`. The Go stage downloads the
   tarball for its platform from `SUPERSCHEMATIC_RELEASE`, a build argument

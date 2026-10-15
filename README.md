@@ -370,8 +370,9 @@ and the [naming file reference](docs/src/content/docs/reference/naming.md).
 | [`docs/`](docs/) | The docs site, the decision log and the extension design |
 | [`superschematic.toml`](superschematic.toml) | The default naming file, every key written out |
 
-The repository has eleven Go modules: the root (the compiler), `ir`,
+The repository has twelve Go modules: the root (the compiler), `ir`,
 `runtime/schema/go`, `runtime/http/go`, `runtime/versiongraph/go`,
+`runtime/engine/go` (the engine's binding),
 `runtime/migrate/go` (the migration runner), `extensions/gcp`,
 `extensions/cloudflare`, `extensions/pulumi`, `extensions/topcoat` and
 `cmd/superschematic` (the installed binary). Generated code imports the

@@ -38,7 +38,10 @@ serde = { version = "1.0.228", features = ["derive"] }
 # written, so the canonical rules read a numeric column exactly; raw_value
 # reads each member of the SQLite adapter's stored JSON exactly as stored.
 serde_json = { version = "1.0.149", features = ["arbitrary_precision", "raw_value"] }
-superschematic-versiongraph = { path = "../rust" }
+# Without the core's C ABI (its ffi feature): the engine calls the core in
+# Rust, and the behavior engine's archive, which links this crate (D58), must
+# not define the vg_* symbols the version graph's own archive does.
+superschematic-versiongraph = { path = "../rust", default-features = false }
 tokio = { version = "1.52", features = ["macros", "sync", "time"] }
 tokio-postgres = { version = "0.7.18", optional = true }
 

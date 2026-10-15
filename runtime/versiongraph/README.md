@@ -891,7 +891,11 @@ pointer is null, writing nothing. Release each output with `vg_free`. A wasm
 host allocates its input and the two out slots with `vg_alloc` and releases
 them with `vg_dealloc`. `go/include/versiongraph.h` is the header. The
 Python binding and the Rust engine do not go through it: they call the
-crate's Rust API, and the binding returns the same documents.
+crate's Rust API, and the binding returns the same documents. The exports
+are the crate's default `ffi` feature; the Rust engine depends on the core
+without it, so an archive that links the Rust engine (the behavior
+engine's, D58) leaves `vg_*` to `libsuperschematic_versiongraph.a`, and a
+Go binary that links both defines each once.
 
 ## Build and test
 
