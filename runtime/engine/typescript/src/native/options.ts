@@ -63,6 +63,8 @@ export interface HostedOptions {
   permissionMatcher?: PermissionMatcher;
   /** Behaviors written in TypeScript, which the test addon's bridge runs. */
   behaviors?: readonly AnyBehaviorImplementation[];
+  /** An id source written in TypeScript, asked on this thread for each create that gives no id. */
+  ids?: () => string;
 }
 
 /** The options the addon opens with, the clock the facade sets before each call, and what it hosts. */
@@ -116,9 +118,10 @@ export function nativeOptions(options: NativeEngineOptions): ResolvedNativeOptio
       }
       case 'ids':
         if (typeof value === 'function') {
-          throw new NativeUnsupportedError('an id source written in TypeScript (ids)', 'ids');
+          hosted.ids = value as () => string;
+        } else {
+          json.ids = value;
         }
-        json.ids = value;
         break;
       case 'clock':
         if (typeof value === 'function') {

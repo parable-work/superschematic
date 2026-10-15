@@ -83,6 +83,10 @@ class Hosts {
           }
           return answer === true ? 'true' : 'false';
         }
+        case 'ids': {
+          const id: unknown = this.hosted.ids?.();
+          return JSON.stringify({ id: typeof id === 'string' ? id : String(id) });
+        }
         case 'permissionMatcher': {
           const [held, required] = JSON.parse(payload) as [string[], string[]];
           const answer: unknown = this.hosted.permissionMatcher?.(held, required);
@@ -96,7 +100,7 @@ class Hosts {
       }
     } catch (error) {
       this.parked ??= { error };
-      return 'false';
+      return kind === 'ids' ? '{}' : 'false';
     }
   };
 
@@ -109,6 +113,23 @@ class Hosts {
     }
   }
 }
+
+// The calls that never read the engine's clock on the TypeScript engine.
+const TIMELESS: ReadonlySet<string> = new Set([
+  'behaviors.has',
+  'behaviors.names',
+  'behaviors.declaration',
+  'namespaces.names',
+  'events.head',
+  'events.floor',
+  'values.thresholdBytes',
+  'values.maxBytes',
+  'runner.running',
+  'runner.nextWake',
+  'runner.start',
+  'runner.stop',
+  'api.routes',
+]);
 
 // Calls makes the engine's calls by name: { op, principal, args, now }.
 class Calls {
@@ -153,7 +174,11 @@ class Calls {
     while (end > 0 && args[end - 1] === undefined) {
       end -= 1;
     }
-    return JSON.stringify({ op, principal, args: args.slice(0, end), now: this.clock?.() });
+    // A clock function is read once for a call that may use the time, as
+    // the TypeScript engine reads it, and not for one that only reads what
+    // the engine holds, so a clock that counts its readings counts alike.
+    const now = TIMELESS.has(op) ? undefined : this.clock?.();
+    return JSON.stringify({ op, principal, args: args.slice(0, end), now });
   }
 }
 
@@ -205,6 +230,39 @@ class NativeNamespaces {
   }
 }
 
+/**
+ * A version's validator on the Rust engine: the TypeScript
+ * SchemaValidator's model and validate, built once per version.
+ */
+export class NativeSchemaValidator {
+  readonly model: { name: string; instanceType: string; document: Record<string, unknown>; canonical: string };
+
+  constructor(
+    record: SchemaRecord,
+    private readonly check: (value: unknown) => ValidationIssue[]
+  ) {
+    this.model = Object.freeze({
+      name: record.name,
+      instanceType: record.instanceType,
+      document: record.document as Record<string, unknown>,
+      canonical: record.canonical,
+    });
+  }
+
+  /** validate returns every issue with value as an instance of the version; empty means valid. */
+  validate(value: unknown): ValidationIssue[] {
+    return this.check(value);
+  }
+
+  normalize(): never {
+    throw new NativeUnsupportedError("SchemaValidator.normalize, the TypeScript validator's own", 'validator');
+  }
+
+  validateType(): never {
+    throw new NativeUnsupportedError("SchemaValidator.validateType, the TypeScript validator's own", 'validator');
+  }
+}
+
 class NativeSchemas {
   constructor(private readonly calls: Calls) {}
 
@@ -240,9 +298,33 @@ class NativeSchemas {
     return this.calls.sync('schemas.validate', principal, [name, value, options]) as ValidationIssue[];
   }
 
-  validator(): never {
-    throw new NativeUnsupportedError('schemas.validator, which returns a TypeScript SchemaValidator', 'validator');
+  /**
+   * validator is the validator of a name's live version, or of the given
+   * version, as the TypeScript engine's is built once per version: its
+   * model, and validate, which holds a value to that version on the Rust
+   * engine. It asks read on the schema, as schemas.live and
+   * schemas.version do.
+   */
+  validator(principal: Principal, name: string, options: ValidateOptions = {}): NativeSchemaValidator {
+    const target = options.namespace === undefined ? undefined : { namespace: options.namespace };
+    const record =
+      options.version === undefined ? this.live(principal, name, target) : this.version(principal, name, options.version, target);
+    if (record === undefined) {
+      const which = options.version === undefined ? 'no live version' : `no version ${options.version}`;
+      throw new EngineError('not_found', `schema ${name} has ${which} in namespace ${options.namespace ?? DEFAULT_NAMESPACE}`);
+    }
+    const key = `${record.namespace}\u0000${record.name}\u0000${String(record.version)}`;
+    let validator = this.validators.get(key);
+    if (validator === undefined) {
+      validator = new NativeSchemaValidator(record, (value) =>
+        this.calls.sync('schemas.validate', principal, [record.name, value, { namespace: record.namespace, version: record.version }]) as ValidationIssue[]
+      );
+      this.validators.set(key, validator);
+    }
+    return validator;
   }
+
+  private readonly validators = new Map<string, NativeSchemaValidator>();
 
   behaviors(principal: Principal, name: string, options?: ValidateOptions): ComposedBehavior[] {
     return this.calls.sync('schemas.behaviors', principal, [name, options]) as ComposedBehavior[];

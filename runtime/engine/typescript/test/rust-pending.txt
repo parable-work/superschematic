@@ -9,12 +9,11 @@
 # Milestone 7b's bridge runs the behaviors the suite writes in TypeScript
 # (defineBehavior, behaviors.register) on the Rust engine, on the JavaScript
 # thread, the runner on the event loop for an engine that has one,
-# events.watch over the engine's notifier, and engine.storage, raw SQL on
-# the engine's file and transactions the engine's calls run inside. What
-# the files below wait for, the first named on each line first:
+# events.watch over the engine's notifier, engine.storage, raw SQL on the
+# engine's file and transactions the engine's calls run inside, an id
+# source written in TypeScript (ids) and schemas.validator. What the files
+# below wait for, the first named on each line first:
 #
-#   ids        an id source written in TypeScript (ids)
-#   validator  schemas.validator, which returns the TypeScript SchemaValidator
 #   http       a tool filter written in TypeScript (ToolTarget.filter), which
 #              engineApp and engineMcp over the engine's own routes carry
 #   json       a value JSON cannot carry (NaN, a Date) reaches the Rust engine
@@ -27,17 +26,13 @@
 #
 # No test that runs here fails on what the Rust engine does.
 
-access.test.ts                           # validator
 behavior-create-params.test.ts           # json (NaN in a create's parameters)
-behavior-create.test.ts                  # ids
 behavior-instances.test.ts               # json (a Date in an operation's parameters)
 behavior-own-columns.test.ts             # internals (the plan of the SQL the engine runs for a filter, spied on through engine.storage.all)
 core-search-vectors.test.ts              # json (NaN in a vector to settle)
-corpus.test.ts                           # ids
-instances.test.ts                        # ids
+corpus.test.ts                           # http (it records mcp and operations, whose tool filters wait); json (registry)
 mcp.test.ts                              # http
 operations.test.ts                       # http
-recorder.test.ts                         # ids
-registry.test.ts                         # validator; json (NaN and a Date in validate)
+registry.test.ts                         # json (NaN and a Date in validate)
 tools.test.ts                            # http
 values.test.ts                           # driver

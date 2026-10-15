@@ -89,7 +89,38 @@ pub enum Ids {
     /// order: a replay of a recording whose test gave the engine ids of
     /// its own. Drawing from an empty queue is refused.
     Queue(IdQueue),
+    /// The ids a source of the host's makes ([`IdSource`]): one compiled
+    /// into the deployment's engine, or one a binding asks in the host's
+    /// language (the Node-API facade's `ids` function, on the JavaScript
+    /// thread alone). An id is checked as a caller's is when a create
+    /// takes it.
+    Custom(CustomIds),
 }
+
+/// What makes the id of an instance created without one, for
+/// [`Ids::Custom`].
+pub trait IdSource: Send + Sync {
+    /// The next id; an error refuses the create.
+    fn next_id(&self) -> Result<String>;
+}
+
+/// An [`IdSource`], as [`Ids::Custom`] holds it: equal to itself alone.
+#[derive(Clone)]
+pub struct CustomIds(pub Arc<dyn IdSource>);
+
+impl std::fmt::Debug for CustomIds {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("CustomIds")
+    }
+}
+
+impl PartialEq for CustomIds {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Eq for CustomIds {}
 
 /// The prefix of the scenario recorder's seed: its n-th id is
 /// [`seeded_uuid`]`(SCENARIO_SEED, n)`.
@@ -440,7 +471,7 @@ impl EngineClock {
 
 // The ids a create without one takes.
 #[derive(Debug)]
-struct IdSource {
+struct IdState {
     ids: Ids,
     next: AtomicU64,
 }
@@ -456,7 +487,7 @@ pub struct Engine {
     pub(crate) clock: EngineClock,
     pub(crate) catalog: Catalog,
     pub(crate) values: Arc<ValueStore>,
-    ids: IdSource,
+    ids: IdState,
     /// Set when a panic escaped the engine's own code while a transaction
     /// was held: the engine refuses every later call, so its host fails
     /// its readiness (D58).
@@ -532,7 +563,7 @@ impl Engine {
             clock,
             catalog: Catalog::new(loader, Arc::clone(&values), invocation),
             values,
-            ids: IdSource {
+            ids: IdState {
                 ids: options.ids,
                 next: AtomicU64::new(0),
             },
@@ -727,7 +758,9 @@ impl Engine {
             Ids::Seeded { prefix, drawn } => UuidSource {
                 seeded: Some((prefix.clone(), drawn.clone())),
             },
-            Ids::Uuid4 | Ids::Sequence { .. } | Ids::Queue(_) => UuidSource::random(),
+            Ids::Uuid4 | Ids::Sequence { .. } | Ids::Queue(_) | Ids::Custom(_) => {
+                UuidSource::random()
+            }
         }
     }
 
@@ -740,6 +773,7 @@ impl Engine {
                 format!("{prefix}{next}")
             }
             Ids::Seeded { prefix, drawn } => seeded_uuid(prefix, drawn.next()),
+            Ids::Custom(source) => source.0.next_id()?,
             Ids::Queue(queue) => queue.pop().ok_or_else(|| {
                 Error::usage(
                     "the engine's id queue is empty: queue the id a create draws (IdQueue::push)",
