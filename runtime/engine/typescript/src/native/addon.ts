@@ -53,6 +53,12 @@ export interface AddonEngine {
   readonly bridged: boolean;
   /** Registers a behavior written in TypeScript as the bridge describes it (src/native/bridge.ts). */
   registerBehavior(descriptor: string): void;
+  /** Raw SQL on the engine's SQLite file: get, all, run or exec, parameters as JSON (src/native/bridge.ts's encoding); the result as JSON. */
+  storageQuery(mode: 'get' | 'all' | 'run' | 'exec', sql: string, params: string): string;
+  /** Runs callback in a transaction this thread holds: true commits, false rolls back. Returns whether it committed. */
+  storageTransaction(callback: () => boolean): boolean;
+  /** Whether this thread holds a transaction on the engine's storage. */
+  readonly storageInTransaction: boolean;
   /** How many commits that notified the engine's notifier has counted. */
   readonly epoch: number;
   /** Calls back on this thread each time the notifier moves, through a weak threadsafe function; the last call follows a shutdown. */

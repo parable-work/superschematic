@@ -8,12 +8,11 @@
 #
 # Milestone 7b's bridge runs the behaviors the suite writes in TypeScript
 # (defineBehavior, behaviors.register) on the Rust engine, on the JavaScript
-# thread, the runner on the event loop for an engine that has one, and
-# events.watch over the engine's notifier. What the files below wait for,
-# the first named on each line first:
+# thread, the runner on the event loop for an engine that has one,
+# events.watch over the engine's notifier, and engine.storage, raw SQL on
+# the engine's file and transactions the engine's calls run inside. What
+# the files below wait for, the first named on each line first:
 #
-#   storage    raw SQL on the engine's file (engine.storage), which the
-#              identity routes' store takes too
 #   ids        an id source written in TypeScript (ids)
 #   validator  schemas.validator, which returns the TypeScript SchemaValidator
 #   http       a tool filter written in TypeScript (ToolTarget.filter), which
@@ -22,37 +21,23 @@
 #              as another
 #   driver     a value driver written in TypeScript (values.driver), which the
 #              Rust engine takes as config (D58)
+#   internals  a test of the TypeScript engine's own workings, which no
+#              other engine has: the SQL it runs, spied on through
+#              engine.storage
 #
 # No test that runs here fails on what the Rust engine does.
 
-behavior-composition.test.ts             # storage
+access.test.ts                           # validator
 behavior-create-params.test.ts           # json (NaN in a create's parameters)
 behavior-create.test.ts                  # ids
-behavior-instances.test.ts               # storage; json (a Date in an operation's parameters)
-behavior-own-columns.test.ts             # storage
-behavior-publish.test.ts                 # storage
-behavior-reach.test.ts                   # storage
-behavior-registration.test.ts            # storage
-behavior-sql.test.ts                     # storage
-core-links-many.test.ts                  # storage (a file Links v2 left, rebuilt through engine.storage)
-core-numbering.test.ts                   # storage
-core-search-vectors.test.ts              # storage; json (NaN in a vector to settle)
-core-search.test.ts                      # storage
-core-workflow.test.ts                    # storage
+behavior-instances.test.ts               # json (a Date in an operation's parameters)
+behavior-own-columns.test.ts             # internals (the plan of the SQL the engine runs for a filter, spied on through engine.storage.all)
+core-search-vectors.test.ts              # json (NaN in a vector to settle)
 corpus.test.ts                           # ids
-engine-migrations.test.ts                # storage
-events.test.ts                           # storage
-identity.test.ts                         # storage (the identity store on engine.storage)
-instances.test.ts                        # storage; ids
-list-filters.test.ts                     # storage
+instances.test.ts                        # ids
 mcp.test.ts                              # http
 operations.test.ts                       # http
 recorder.test.ts                         # ids
-registry.test.ts                         # storage; validator; json (NaN and a Date in validate)
-retention.test.ts                        # storage
-runner-schedules.test.ts                 # storage
-runner.test.ts                           # storage
+registry.test.ts                         # validator; json (NaN and a Date in validate)
 tools.test.ts                            # http
-unique.test.ts                           # storage
-values.test.ts                           # storage; driver
-access.test.ts                           # storage; validator
+values.test.ts                           # driver

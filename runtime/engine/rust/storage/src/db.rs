@@ -183,6 +183,27 @@ thread_local! {
     static OPEN: RefCell<Vec<usize>> = const { RefCell::new(Vec::new()) };
 }
 
+thread_local! {
+    // The host transactions this thread holds (Db::hold), by the address
+    // of their database's state, innermost last: a transaction this thread
+    // opens on one of them runs in a savepoint of it instead.
+    static HELD: RefCell<Vec<(usize, *const ())>> = const { RefCell::new(Vec::new()) };
+}
+
+// Holds a host transaction's place in HELD until dropped.
+struct Held(usize);
+
+impl Drop for Held {
+    fn drop(&mut self) {
+        HELD.with(|held| {
+            let mut held = held.borrow_mut();
+            if let Some(at) = held.iter().rposition(|(id, _)| *id == self.0) {
+                held.remove(at);
+            }
+        });
+    }
+}
+
 // Holds a database's place in OPEN until dropped.
 struct Opened(usize);
 
@@ -303,11 +324,68 @@ impl Db {
         self.transaction(TxKind::Read, f)
     }
 
+    /// Runs `f` in a write transaction this thread holds while `f` runs, a
+    /// host's (the TypeScript engine's `storage.transaction`): every
+    /// transaction this thread opens on the database inside it,
+    /// [`Db::write`]'s and [`Db::read`]'s, runs in a savepoint of it, so
+    /// the host's statements and the calls it makes commit together when
+    /// `f` returns `Ok` and roll back together when it returns `Err`. A
+    /// host transaction inside another is a savepoint of that one. It
+    /// holds the catalog's lock, so on Postgres it excludes every writer.
+    pub fn hold<'db, T, E, F>(&'db self, f: F) -> Result<T, E>
+    where
+        E: From<Error>,
+        F: FnOnce(&Tx<'db>) -> Result<T, E>,
+    {
+        let id = Arc::as_ptr(&self.inner) as usize;
+        if let Some(tx) = self.held() {
+            return tx.savepoint(|tx| {
+                HELD.with(|held| held.borrow_mut().push((id, std::ptr::from_ref(tx).cast())));
+                let _held = Held(id);
+                f(tx)
+            });
+        }
+        self.transaction(TxKind::Write(Lock::Catalog), |tx| {
+            HELD.with(|held| held.borrow_mut().push((id, std::ptr::from_ref(tx).cast())));
+            let _held = Held(id);
+            f(tx)
+        })
+    }
+
+    /// Whether this thread holds a host transaction on the database
+    /// ([`Db::hold`]).
+    pub fn holding(&self) -> bool {
+        self.held().is_some()
+    }
+
+    // held is the innermost host transaction this thread holds on the
+    // database.
+    fn held<'db>(&'db self) -> Option<&'db Tx<'db>> {
+        let id = Arc::as_ptr(&self.inner) as usize;
+        let pointer = HELD.with(|held| {
+            held.borrow()
+                .iter()
+                .rev()
+                .find(|(each, _)| *each == id)
+                .map(|(_, pointer)| *pointer)
+        })?;
+        // SAFETY: a HELD entry lives only while the Tx it points at is on
+        // this thread's stack, borrowed by the hold that pushed it (Held
+        // pops it before the Tx goes), and the Tx is of this database,
+        // whose state outlives it.
+        Some(unsafe { &*pointer.cast::<Tx<'db>>() })
+    }
+
     fn transaction<'db, T, E, F>(&'db self, kind: TxKind<'_>, f: F) -> Result<T, E>
     where
         E: From<Error>,
         F: FnOnce(&Tx<'db>) -> Result<T, E>,
     {
+        if let Some(tx) = self.held() {
+            // Inside a host's transaction: a savepoint of it. A read sees
+            // what the host's transaction has written so far.
+            return tx.savepoint(f);
+        }
         let _opened = Opened::enter(Arc::as_ptr(&self.inner) as usize)?;
         let conn = self.inner.backend.acquire(self.inner.busy_timeout)?;
         let tx = Tx::begin(&self.inner, conn, kind).map_err(|(error, _)| error)?;
