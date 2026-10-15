@@ -17,9 +17,9 @@ times than expected.
 
 Version sites (relative to the repository root):
   versions.env                        VERSION=
-  packages/{api,db,schema,schema-config}/package.json
+  packages/{api,db,schema,schema-config,stack}/package.json
                                       version
-  packages/bun.lock                   the four workspace entries
+  packages/bun.lock                   the five workspace entries
   ir/typescript/package.json          version
   runtime/schema/typescript/package.json
                                       version
@@ -121,7 +121,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 GO_MODULE = "github.com/parable-work/superschematic"
 
-NPM_WORKSPACE_PACKAGES = ["api", "db", "schema", "schema-config"]
+NPM_WORKSPACE_PACKAGES = ["api", "db", "schema", "schema-config", "stack"]
 
 # Directory of every Go module, in dependency order. The tag for a module in a
 # subdirectory is the directory followed by /vX.Y.Z; the root module's is

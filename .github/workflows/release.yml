@@ -26,8 +26,8 @@ name: release
 # build-migrate cross-compiles the migration runner, superschematic-migrate,
 # for the same four os/arch pairs on one runner, since it needs no cgo, and
 # records the commit too. assemble refuses a set whose binaries and archives
-# disagree on that commit, writes SHA256SUMS, packs the ten npm tarballs, and
-# builds the PyPI sdist and wheel.
+# disagree on that commit, writes SHA256SUMS, packs the eleven npm tarballs,
+# and builds the PyPI sdist and wheel.
 # github-release attaches everything to a GitHub release with build provenance
 # and an SBOM. The three publish jobs use trusted publishing (OIDC; no
 # registry tokens in this repository) and are gated on the repository variable
@@ -500,7 +500,7 @@ jobs:
           cat SHA256SUMS
 
       - name: Pack the npm tarballs
-        # The four authoring packages ship their TypeScript source; the
+        # The five authoring packages ship their TypeScript source; the
         # schema runtime, the http runtime, the engine and the engine's
         # work-queue package ship their compiled dist; the version-graph
         # package ships its compiled dist and the core's wasm module; the
@@ -520,7 +520,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p release-assets/npm
-          for pkg in schema db api schema-config; do
+          for pkg in schema db api schema-config stack; do
             (cd "packages/$pkg" && npm pack --pack-destination "$GITHUB_WORKSPACE/release-assets/npm" >/dev/null)
           done
           (cd ir/typescript && npm pack --pack-destination "$GITHUB_WORKSPACE/release-assets/npm" >/dev/null)
@@ -532,7 +532,7 @@ jobs:
             && npm pack --pack-destination "$GITHUB_WORKSPACE/release-assets/npm" >/dev/null)
           (cd runtime/engine-workqueue/typescript && bun install --frozen-lockfile && bun run build && npm pack --pack-destination "$GITHUB_WORKSPACE/release-assets/npm" >/dev/null)
           ls -l release-assets/npm
-          test "$(ls release-assets/npm/*.tgz | wc -l)" -eq 10
+          test "$(ls release-assets/npm/*.tgz | wc -l)" -eq 11
           python3 scripts/npm_local_specs.py release-assets/npm/*.tgz
 
       - name: Build the PyPI sdist and wheel
@@ -637,11 +637,12 @@ jobs:
   publish-npm:
     name: publish npm
     # Registration (npmjs.com -> package -> Settings -> Trusted Publisher, once
-    # per package; the ten exact names are
+    # per package; the eleven exact names are
     #   @superschematic/schema
     #   @superschematic/db
     #   @superschematic/api
     #   @superschematic/schema-config
+    #   @superschematic/stack
     #   @superschematic/schema-ir
     #   @superschematic/schema-runtime
     #   @superschematic/http-runtime
@@ -683,15 +684,16 @@ jobs:
           name: release-assets
           path: release-assets
 
-      - name: Publish the ten packages
+      - name: Publish the eleven packages
         # The tarballs are the attested release assets, byte for byte. Order:
         # @superschematic/schema first, since the other authoring packages
-        # name it in their docs, @superschematic/schema-ir before the schema
-        # runtime, which a consumer installs next to it, the engine after
-        # both, which it needs next to it, and after the version graph,
-        # which it depends on at the release's version, and the engine's
-        # work-queue package last, after the engine, its peer; no other
-        # package of the ten depends on another at install time.
+        # name it in their docs, @superschematic/stack after it and
+        # @superschematic/schema-config, its peers, @superschematic/schema-ir
+        # before the schema runtime, which a consumer installs next to it,
+        # the engine after both, which it needs next to it, and after the
+        # version graph, which it depends on at the release's version, and
+        # the engine's work-queue package last, after the engine, its peer;
+        # no other package of the eleven depends on another at install time.
         env:
           DIST_TAG: ${{ needs.preflight.outputs.npm_dist_tag }}
           VERSION: ${{ needs.preflight.outputs.version }}
@@ -701,7 +703,7 @@ jobs:
           npm --version
           node -e 'const [maj, min, pat] = process.versions.npm.split(".").map(Number); if (maj < 11 || (maj === 11 && (min < 5 || (min === 5 && pat < 1)))) { console.error("npm >= 11.5.1 is required for trusted publishing"); process.exit(1); }'
           cd release-assets/npm
-          for name in schema db api schema-config schema-ir schema-runtime http-runtime versiongraph engine engine-workqueue; do
+          for name in schema db api schema-config stack schema-ir schema-runtime http-runtime versiongraph engine engine-workqueue; do
             tgz="superschematic-${name}-${VERSION}.tgz"
             echo "==> $tgz"
             npm publish "./$tgz" --access public --tag "$DIST_TAG"
