@@ -63,7 +63,7 @@ type Naming struct {
 	PythonSDKModuleSuffix string `toml:"python_sdk_module_suffix"`
 
 	// RustCratePrefix prefixes generated crates: <prefix><name>-types,
-	// <prefix><name>-sdk, <prefix><name>-api.
+	// <prefix><name>-sdk, <prefix><name>-api, <prefix><name>-engine.
 	RustCratePrefix string `toml:"rust_crate_prefix"`
 
 	// Scalar library coordinates, one per target language.
@@ -421,9 +421,15 @@ type PathsConfig struct {
 	VersionGraphRust string `toml:"versiongraph_rust"`
 	// EngineRust holds the behavior engine's Rust crate,
 	// superschematic-engine (D58), which a Rust server links, with its
-	// postgres and axum features, to mount the engine's routes. No
-	// generated manifest names it yet.
+	// postgres and axum features, to mount the engine's routes, and the
+	// project's engine crate depends on (projectengine).
 	EngineRust string `toml:"engine_rust"`
+	// EngineBehaviorsRust and EngineWorkQueueRust hold the Rust crates of
+	// the core's behaviors and the work queue's (D58),
+	// superschematic-engine-behaviors and superschematic-engine-workqueue,
+	// which the project's engine crate depends on beside EngineRust.
+	EngineBehaviorsRust string `toml:"engine_behaviors_rust"`
+	EngineWorkQueueRust string `toml:"engine_workqueue_rust"`
 	// VersionGraphPython holds the version graph's Python package.
 	VersionGraphPython string `toml:"versiongraph_python"`
 	// HTTPRuntimeGo holds the http runtime Go module.
@@ -459,6 +465,8 @@ type LocalPaths struct {
 	VersionGraphTypeScript string
 	VersionGraphRust       string
 	EngineRust             string
+	EngineBehaviorsRust    string
+	EngineWorkQueueRust    string
 	VersionGraphPython     string
 	HTTPRuntimeGo          string
 	HTTPRuntimeRust        string
@@ -486,6 +494,8 @@ func (n Naming) LocalPaths(repoRoot string) LocalPaths {
 		VersionGraphTypeScript: resolve(n.Paths.VersionGraphTypeScript),
 		VersionGraphRust:       resolve(n.Paths.VersionGraphRust),
 		EngineRust:             resolve(n.Paths.EngineRust),
+		EngineBehaviorsRust:    resolve(n.Paths.EngineBehaviorsRust),
+		EngineWorkQueueRust:    resolve(n.Paths.EngineWorkQueueRust),
 		VersionGraphPython:     resolve(n.Paths.VersionGraphPython),
 		HTTPRuntimeGo:          resolve(n.Paths.HTTPRuntimeGo),
 		HTTPRuntimeRust:        resolve(n.Paths.HTTPRuntimeRust),
@@ -519,6 +529,8 @@ func (p PathsConfig) checkRelative() error {
 		{"versiongraph_typescript", p.VersionGraphTypeScript},
 		{"versiongraph_rust", p.VersionGraphRust},
 		{"engine_rust", p.EngineRust},
+		{"engine_behaviors_rust", p.EngineBehaviorsRust},
+		{"engine_workqueue_rust", p.EngineWorkQueueRust},
 		{"versiongraph_python", p.VersionGraphPython},
 		{"http_runtime_go", p.HTTPRuntimeGo},
 		{"http_runtime_rust", p.HTTPRuntimeRust},
@@ -957,6 +969,14 @@ func (n Naming) RustSDKCrate(schemaName string) string {
 // RustAPICrate returns the crate name of a schema's generated Rust server.
 func (n Naming) RustAPICrate(schemaName string) string {
 	return n.RustCratePrefix + schemaName + "-api"
+}
+
+// RustEngineCrate returns the crate name of a schema's project engine
+// (D58), which the projectengine generator writes when the schema's types
+// compose an extension's behavior: the core's behaviors, the work queue's
+// and the extensions' compiled into one engine.
+func (n Naming) RustEngineCrate(schemaName string) string {
+	return n.RustCratePrefix + schemaName + "-engine"
 }
 
 // RustImplementationCrate returns the crate name the scaffold gives an API
