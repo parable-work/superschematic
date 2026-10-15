@@ -280,6 +280,121 @@ func TestRegisterBehaviorPackage(t *testing.T) {
 	}
 }
 
+// An extension's spec may name the Rust crate that implements its
+// behavior (D58), which the registered behavior carries for the
+// projectengine generator; a core behavior names none, and a crate name,
+// path or register expression the project's engine crate could not use is
+// refused.
+func TestRegisterBehaviorRust(t *testing.T) {
+	rating := BehaviorRust{Crate: "acme-behaviors", Path: "crates/behaviors", Register: "acme_behaviors::Rating"}
+	reg := New(naming.Default())
+	for _, spec := range []BehaviorSpec{
+		{Extension: "acme", Rust: rating, Declaration: ratingDeclaration()},
+		{Extension: "acme", Rust: BehaviorRust{Crate: "acme_flags", Path: "../shared/flags", Register: "acme_flags::flag::Flag::new()"}, Declaration: declaration("acme.Flag", nil)},
+		{Extension: "acme", Declaration: declaration("acme.Pin", nil)},
+	} {
+		if err := reg.RegisterBehavior(spec); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for name, want := range map[string]BehaviorRust{
+		"acme.Rating": rating,
+		"acme.Flag":   {Crate: "acme_flags", Path: "../shared/flags", Register: "acme_flags::flag::Flag::new()"},
+		"acme.Pin":    {},
+	} {
+		if b, _ := reg.Behavior(name); b.Rust != want || b.Rust.Declared() != (want != BehaviorRust{}) {
+			t.Errorf("%s Rust = %+v, want %+v", name, b.Rust, want)
+		}
+	}
+	if got := rating.Ident(); got != "acme_behaviors" {
+		t.Errorf("Ident() = %q", got)
+	}
+
+	for _, test := range []struct {
+		extension string
+		rust      BehaviorRust
+		want      string
+	}{
+		{"", BehaviorRust{Crate: "acme-behaviors", Path: "crates/behaviors", Register: "acme_behaviors::Rating"},
+			`registry: core behavior Rating names Rust crate "acme-behaviors": the core's behaviors are the engine's own crates`},
+		{"acme", BehaviorRust{Crate: "1acme", Path: "crates/behaviors", Register: "acme::Rating"},
+			`registry: behavior acme.Rating Rust crate "1acme" is not a Cargo package name: a letter, then letters, digits, '-' and '_', at most 64 characters`},
+		{"acme", BehaviorRust{Crate: "acme behaviors", Path: "crates/behaviors", Register: "acme::Rating"},
+			`registry: behavior acme.Rating Rust crate "acme behaviors" is not a Cargo package name`},
+		{"acme", BehaviorRust{Crate: strings.Repeat("a", 65), Path: "crates/behaviors", Register: "a::Rating"},
+			`is not a Cargo package name`},
+		{"acme", BehaviorRust{Crate: "acme-behaviors", Register: "acme_behaviors::Rating"},
+			`registry: behavior acme.Rating Rust crate acme-behaviors has no path: the crate's directory relative to the project, the parent of the schemas root`},
+		{"acme", BehaviorRust{Crate: "acme-behaviors", Path: "/srv/crates/behaviors", Register: "acme_behaviors::Rating"},
+			`registry: behavior acme.Rating Rust crate acme-behaviors path "/srv/crates/behaviors" is an absolute path: it is relative to the project, the parent of the schemas root`},
+		{"acme", BehaviorRust{Crate: "acme-behaviors", Path: "crates/./behaviors/", Register: "acme_behaviors::Rating"},
+			`registry: behavior acme.Rating Rust crate acme-behaviors path "crates/./behaviors/" is not a clean slash-separated path (crates/behaviors)`},
+		{"acme", BehaviorRust{Crate: "acme-behaviors", Path: `crates\behaviors`, Register: "acme_behaviors::Rating"},
+			`is not a clean slash-separated path (crates/behaviors)`},
+		{"acme", BehaviorRust{Crate: "acme-behaviors", Path: "crates/behaviors"},
+			`registry: behavior acme.Rating Rust register "" is not a path into crate acme-behaviors: acme_behaviors::<Name>, or a call of one with no arguments`},
+		{"acme", BehaviorRust{Crate: "acme-behaviors", Path: "crates/behaviors", Register: "acme-behaviors::Rating"},
+			`Rust register "acme-behaviors::Rating" is not a path into crate acme-behaviors`},
+		{"acme", BehaviorRust{Crate: "acme-behaviors", Path: "crates/behaviors", Register: "other::Rating"},
+			`Rust register "other::Rating" is not a path into crate acme-behaviors`},
+		{"acme", BehaviorRust{Crate: "acme-behaviors", Path: "crates/behaviors", Register: "acme_behaviors"},
+			`Rust register "acme_behaviors" is not a path into crate acme-behaviors`},
+		{"acme", BehaviorRust{Crate: "acme-behaviors", Path: "crates/behaviors", Register: "acme_behaviors::Rating::with(5)"},
+			`Rust register "acme_behaviors::Rating::with(5)" is not a path into crate acme-behaviors`},
+		{"acme", BehaviorRust{Crate: "acme-behaviors", Path: "crates/behaviors", Register: "acme_behaviors::Rating;"},
+			`Rust register "acme_behaviors::Rating;" is not a path into crate acme-behaviors`},
+	} {
+		decl := ratingDeclaration()
+		if test.extension == "" {
+			decl = declaration("Rating", nil)
+		}
+		err := New(naming.Default()).RegisterBehavior(BehaviorSpec{Extension: test.extension, Rust: test.rust, Declaration: decl})
+		if err == nil || !strings.Contains(err.Error(), test.want) {
+			t.Errorf("%+v: err = %v, want %q", test.rust, err, test.want)
+		}
+	}
+}
+
+// Two behaviors may share a crate, at one path: the project's engine crate
+// depends on it once.
+func TestFinalizeHoldsARustCrateToOnePath(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		path string
+		want string
+	}{
+		{"one path", "crates/behaviors", ""},
+		{"two paths", "crates/other", `registry: behaviors acme.Flag and acme.Rating name Rust crate acme-behaviors at two paths, "crates/behaviors" and "crates/other"`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			reg := New(naming.Default())
+			for _, spec := range []BehaviorSpec{
+				{Extension: "acme", Rust: BehaviorRust{Crate: "acme-behaviors", Path: "crates/behaviors", Register: "acme_behaviors::Flag"}, Declaration: declaration("acme.Flag", nil)},
+				{Extension: "acme", Rust: BehaviorRust{Crate: "acme-behaviors", Path: test.path, Register: "acme_behaviors::Rating"}, Declaration: ratingDeclaration()},
+			} {
+				if err := reg.RegisterBehavior(spec); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for _, name := range []string{"types", "sql", "orm", "api", "sdks", "envConfig", "enginedoc", "stack", "site"} {
+				if err := reg.RegisterGenerator(GeneratorSpec{Name: name, Generate: noopGenerate}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			err := reg.Finalize()
+			if test.want == "" {
+				if err != nil {
+					t.Fatal(err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("Finalize() = %v, want %q", err, test.want)
+			}
+		})
+	}
+}
+
 // An operation's params schema sets "additionalProperties": false, the
 // engine's rule (D16): an operation's parameters are exactly the ones it
 // declares, so no alias of one reaches the handler without its guards

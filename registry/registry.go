@@ -78,9 +78,11 @@ type (
 
 	// BehaviorSpec registers a behavior from its JSON declaration, whose
 	// shape is BehaviorDeclaration with its BehaviorField,
-	// BehaviorOperation and BehaviorVeto entries. Behavior is a
+	// BehaviorOperation and BehaviorVeto entries, and BehaviorRust names
+	// the Rust crate that implements an extension's (D58). Behavior is a
 	// registered one, as Registry.Behavior returns it.
 	BehaviorSpec        = registry.BehaviorSpec
+	BehaviorRust        = registry.BehaviorRust
 	BehaviorDeclaration = registry.BehaviorDeclaration
 	BehaviorField       = registry.BehaviorField
 	BehaviorOperation   = registry.BehaviorOperation
