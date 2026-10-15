@@ -1690,6 +1690,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "superschematic-engine-ffi"
+version = "0.0.0"
+dependencies = [
+ "serde_json",
+ "superschematic-engine-abi",
+ "superschematic-engine-behaviors",
+]
+
+[[package]]
 name = "superschematic-engine-napi"
 version = "0.0.0"
 dependencies = [
@@ -1700,15 +1709,6 @@ dependencies = [
  "superschematic-engine",
  "superschematic-engine-behaviors",
  "superschematic-engine-workqueue",
-]
-
-[[package]]
-name = "superschematic-engine-ffi"
-version = "0.0.0"
-dependencies = [
- "serde_json",
- "superschematic-engine-abi",
- "superschematic-engine-behaviors",
 ]
 
 [[package]]
@@ -1736,16 +1736,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "superschematic-engine-workqueue"
-version = "0.0.0"
-dependencies = [
- "serde",
- "serde_json",
- "superschematic-engine",
- "superschematic-engine-behaviors",
-]
-
-[[package]]
 name = "superschematic-engine-testkit-ffi"
 version = "0.0.0"
 dependencies = [
@@ -1754,6 +1744,16 @@ dependencies = [
  "superschematic-engine-abi",
  "superschematic-engine-behaviors",
  "superschematic-engine-testkit",
+]
+
+[[package]]
+name = "superschematic-engine-workqueue"
+version = "0.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "superschematic-engine",
+ "superschematic-engine-behaviors",
 ]
 
 [[package]]
