@@ -65,7 +65,7 @@ use napi::threadsafe_function::ThreadsafeFunctionCallMode;
 use napi_derive::napi;
 use serde_json::Value;
 
-use superschematic_engine::storage::Dialect;
+use superschematic_engine::storage::{Dialect, Lock};
 use superschematic_engine::{
     calls, json, AccessPolicy, AccessRequest, Engine, EngineOptions, Error as Failed,
     PermissionMatcher, Policy, Thrown,
@@ -73,7 +73,6 @@ use superschematic_engine::{
 
 #[cfg(feature = "js-behaviors")]
 mod bridge;
-#[cfg(feature = "js-behaviors")]
 mod sql;
 #[cfg(feature = "js-behaviors")]
 pub use bridge::bridge_call;
@@ -663,6 +662,130 @@ impl NativeEngine {
             |env, outcome| outcome.map_err(|failure| failure.into_napi(env)),
         )?;
         Ok(Either::B(promise))
+    }
+
+    /// Runs raw SQL on the engine's SQLite file, as the TypeScript
+    /// engine's `engine.storage` does (`get`, `all` and `run` one statement
+    /// with its parameters, `exec` statements with none): in a write
+    /// transaction of its own, or in a savepoint of the host's
+    /// (`storageTransaction`). Nothing checks what it runs: it is the
+    /// deployment's own reach into the file, for what the engine's API does
+    /// not do (its tests' looks at the tables, an identity store's DDL),
+    /// and a write the engine does not expect is the deployment's to
+    /// answer for. An engine on Postgres refuses it.
+    #[napi]
+    pub fn storage_query(
+        &self,
+        env: Env,
+        mode: String,
+        sql: String,
+        params: String,
+    ) -> Result<String> {
+        if IN_HOST.get() {
+            return Err(reentry().into_napi(&env));
+        }
+        let engine = self.engine().map_err(|failure| failure.into_napi(&env))?;
+        if self.dialect == Dialect::Postgres {
+            return Err(Failure::usage(
+                "engine.storage is the engine's SQLite file: an engine on Postgres has none",
+            )
+            .into_napi(&env));
+        }
+        let _on_js_thread = OnJsThread::enter(&env);
+        let outcome = catch_unwind(AssertUnwindSafe(
+            || -> std::result::Result<Value, Failed> {
+                let params: Value = serde_json::from_str(&params)
+                    .map_err(|error| Failed::Usage(format!("SQL parameters are JSON: {error}")))?;
+                let params = sql::sql_params(Some(&params))?;
+                engine
+                    .db()
+                    .write(Lock::Catalog, |tx| -> std::result::Result<Value, Failed> {
+                        Ok(match mode.as_str() {
+                            "get" => tx
+                                .get(sql.as_str(), &params)?
+                                .map_or(Value::Null, |row| sql::row_json(&row)),
+                            "all" => Value::Array(
+                                tx.all(sql.as_str(), &params)?
+                                    .iter()
+                                    .map(sql::row_json)
+                                    .collect(),
+                            ),
+                            "run" => sql::run_json(&tx.run(sql.as_str(), &params)?),
+                            "exec" => {
+                                tx.exec(sql.as_str())?;
+                                Value::Null
+                            }
+                            other => {
+                                return Err(Failed::Usage(format!(
+                                    "storage runs get, all, run or exec, not {other}"
+                                )))
+                            }
+                        })
+                    })
+            },
+        ));
+        match outcome {
+            Ok(Ok(value)) => Ok(json::stringify(&value)),
+            Ok(Err(error)) => Err(Failure::of(&error).into_napi(&env)),
+            Err(payload) => Err(Failure::panic(payload.as_ref()).into_napi(&env)),
+        }
+    }
+
+    /// Runs `callback` in a write transaction on the engine's SQLite file
+    /// that this thread holds while it runs, as the TypeScript engine's
+    /// `storage.transaction` does: the raw SQL and the engine's calls it
+    /// makes run in savepoints of it, and commit together when it returns
+    /// true or roll back together when it returns false (the facade keeps
+    /// what it threw). Inside another, a savepoint of that one.
+    #[napi(ts_args_type = "callback: () => boolean")]
+    pub fn storage_transaction(&self, env: Env, callback: Function<(), bool>) -> Result<bool> {
+        if IN_HOST.get() {
+            return Err(reentry().into_napi(&env));
+        }
+        let engine = self.engine().map_err(|failure| failure.into_napi(&env))?;
+        if self.dialect == Dialect::Postgres {
+            return Err(Failure::usage(
+                "engine.storage is the engine's SQLite file: an engine on Postgres has none",
+            )
+            .into_napi(&env));
+        }
+        let _on_js_thread = OnJsThread::enter(&env);
+        // What the callback's own call left, when it failed in JavaScript.
+        let mut called: Option<napi::Error> = None;
+        let held = engine
+            .db()
+            .hold(|_tx| -> std::result::Result<bool, Failed> {
+                match callback.call(()) {
+                    Ok(true) => Ok(true),
+                    Ok(false) => Err(Failed::Usage(
+                        "the host's transaction rolled back".to_owned(),
+                    )),
+                    Err(error) => {
+                        called = Some(error);
+                        Err(Failed::Usage(
+                            "the host's transaction rolled back".to_owned(),
+                        ))
+                    }
+                }
+            });
+        if let Some(error) = called {
+            return Err(error);
+        }
+        match held {
+            Ok(_) => Ok(true),
+            Err(Failed::Usage(message)) if message == "the host's transaction rolled back" => {
+                Ok(false)
+            }
+            Err(error) => Err(Failure::of(&error).into_napi(&env)),
+        }
+    }
+
+    /// Whether this thread holds a transaction on the engine's storage: a
+    /// host's (`storageTransaction`), or the engine's own around a hook.
+    #[napi(getter)]
+    pub fn storage_in_transaction(&self) -> bool {
+        self.engine()
+            .is_ok_and(|engine| engine.db().in_transaction())
     }
 
     /// How many commits that notified the engine's notifier has counted

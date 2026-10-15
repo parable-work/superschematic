@@ -47,7 +47,9 @@ import type { ValueTarget } from '../values/values.js';
 import type { AnyBehaviorImplementation } from '../behaviors/behavior.js';
 import { deepFreeze } from '../behaviors/json.js';
 import { loadAddon, type AddonEngine } from './addon.js';
-import { Bridge } from './bridge.js';
+import { Bridge, rowOf, sqlParams } from './bridge.js';
+import type { Row, RunResult, SqlValue } from '../storage/driver.js';
+import { Storage } from '../storage/storage.js';
 import { NativeUnsupportedError, restoreError } from './errors.js';
 import { nativeOptions, type HostedOptions, type NativeEngineOptions } from './options.js';
 
@@ -684,6 +686,117 @@ class NativeBehaviors {
   }
 }
 
+/**
+ * The engine's SQLite file, as the TypeScript engine's `engine.storage`
+ * reaches it: raw SQL on the engine's own connection, nothing checked, and
+ * transactions the engine's calls inside run in savepoints of (D58: the
+ * deployment's reach into the file, for its tests' looks at the tables and
+ * an identity store's DDL). A store that runs transactions of its own
+ * statement by statement (BEGIN IMMEDIATE, then COMMIT), as the identity
+ * store does, takes a connection of its own on the file (connection()).
+ */
+export class NativeStorage {
+  private readonly connections: Array<{ close(): void }> = [];
+
+  constructor(
+    private readonly addon: AddonEngine,
+    /** The engine's file. */
+    readonly path: string,
+    private readonly committed: () => void
+  ) {}
+
+  /** Whether a transaction is open on the engine's connection on this thread. */
+  get inTransaction(): boolean {
+    return this.addon.storageInTransaction;
+  }
+
+  exec(sql: string): void {
+    this.query('exec', sql, []);
+  }
+
+  run(sql: string, params: readonly SqlValue[] = []): RunResult {
+    const { changes, lastInsertRowid } = this.query('run', sql, params) as { changes: number; lastInsertRowid: number | null };
+    return { changes, lastInsertRowid: lastInsertRowid ?? 0 };
+  }
+
+  get(sql: string, params: readonly SqlValue[] = []): Row | undefined {
+    return rowOf(this.query('get', sql, params)) as Row | undefined;
+  }
+
+  all(sql: string, params: readonly SqlValue[] = []): Row[] {
+    return (this.query('all', sql, params) as unknown[]).map((row) => rowOf(row) as Row);
+  }
+
+  /** changes is how many rows the engine's connection has written since it opened (SQLite's total_changes()). */
+  changes(): number {
+    return Number(this.get('SELECT total_changes() AS changes')?.changes ?? 0);
+  }
+
+  /**
+   * transaction runs fn in a transaction, commits when it returns and rolls
+   * back when it throws; the engine's calls inside it run in savepoints of
+   * it. Inside another, a savepoint of that one.
+   */
+  transaction<T>(fn: () => T): T {
+    let outcome: { value: T } | { error: unknown } | undefined;
+    try {
+      this.addon.storageTransaction(() => {
+        try {
+          const value = fn();
+          if ((typeof value === 'object' || typeof value === 'function') && value !== null && typeof (value as { then?: unknown }).then === 'function') {
+            (value as unknown as PromiseLike<unknown>).then(undefined, () => undefined);
+            throw new TypeError('a storage transaction is synchronous: its function returned a promise');
+          }
+          outcome = { value };
+          return true;
+        } catch (error) {
+          outcome = { error };
+          return false;
+        }
+      });
+    } catch (error) {
+      throw restoreError(error);
+    } finally {
+      this.committed();
+    }
+    if (outcome === undefined) {
+      throw new Error('the storage transaction did not run its function');
+    }
+    if ('error' in outcome) {
+      throw outcome.error;
+    }
+    return outcome.value;
+  }
+
+  /** connection opens a connection of its own on the engine's file, closed with the engine. */
+  connection(): Storage {
+    const storage = Storage.open(this.path);
+    this.connections.push(storage);
+    return storage;
+  }
+
+  /** close closes the connections connection() opened. */
+  close(): void {
+    for (const connection of this.connections.splice(0)) {
+      try {
+        connection.close();
+      } catch {
+        // Closed already.
+      }
+    }
+  }
+
+  private query(mode: 'get' | 'all' | 'run' | 'exec', sql: string, params: readonly SqlValue[]): unknown {
+    let text: string;
+    try {
+      text = this.addon.storageQuery(mode, String(sql), JSON.stringify(sqlParams(params)));
+    } catch (error) {
+      throw restoreError(error);
+    }
+    return JSON.parse(text);
+  }
+}
+
 /** The engine on the Rust engine: the TypeScript Engine's API over the addon. */
 export class NativeEngine {
   readonly namespaces: NativeNamespaces;
@@ -701,6 +814,7 @@ export class NativeEngine {
   private readonly addon: AddonEngine;
   private readonly calls: Calls;
   private readonly watchers: Watchers;
+  private readonly nativeStorage: NativeStorage | undefined;
 
   private constructor(
     addon: AddonEngine,
@@ -708,7 +822,8 @@ export class NativeEngine {
     hosts: Hosts,
     permissionMatcher: PermissionMatcher,
     tools: ResolvedToolOptions,
-    runner: { principal?: unknown; retryInitialMs?: number } | undefined
+    runner: { principal?: unknown; retryInitialMs?: number } | undefined,
+    path: string | undefined
   ) {
     this.addon = addon;
     this.dialect = addon.dialect;
@@ -725,6 +840,7 @@ export class NativeEngine {
     this.tools = new NativeTools(this.calls, tools);
     this.runner = new NativeRunner(this.calls, addon, this.events, runner, clock ?? Date.now, () => watchers.closed, () => hosts.bridge.depth > 0);
     this.values = new NativeValues(this.calls);
+    this.nativeStorage = path === undefined || addon.dialect !== 'sqlite' ? undefined : new NativeStorage(addon, path, () => watchers.poll());
   }
 
   /** open opens the Rust engine on the options, as Engine.open opens the TypeScript one. */
@@ -767,12 +883,15 @@ export class NativeEngine {
       addon.close();
       throw error;
     }
-    return new NativeEngine(addon, clock, hosts, options.permissionMatcher ?? hasAnyPermission, tools, options.runner);
+    return new NativeEngine(addon, clock, hosts, options.permissionMatcher ?? hasAnyPermission, tools, options.runner, options.path);
   }
 
-  /** The TypeScript engine's storage, which the Rust engine does not expose (milestone 7b decides how). */
-  get storage(): never {
-    throw new NativeUnsupportedError('engine.storage', 'storage');
+  /** The engine's SQLite file (NativeStorage); an engine on Postgres has none. */
+  get storage(): NativeStorage {
+    if (this.nativeStorage === undefined) {
+      throw new NativeUnsupportedError('engine.storage on Postgres, which is the SQLite file\'s', 'storage');
+    }
+    return this.nativeStorage;
   }
 
   /** search searches every schema the namespace reaches that composes Search, as Engine.search does. */
@@ -807,6 +926,7 @@ export class NativeEngine {
       // Closed already.
     }
     this.watchers.close();
+    this.nativeStorage?.close();
     this.addon.close();
   }
 }
