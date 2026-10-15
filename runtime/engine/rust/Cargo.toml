@@ -4,7 +4,7 @@
 
 [workspace]
 resolver = "2"
-members = ["behaviors", "engine", "ffi", "storage", "testkit", "testkit-ffi"]
+members = ["abi", "behaviors", "engine", "ffi", "storage", "testkit", "testkit-ffi"]
 
 [workspace.package]
 version = "0.0.0"

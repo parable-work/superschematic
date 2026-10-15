@@ -17,15 +17,17 @@ crate-type = ["staticlib"]
 
 [features]
 default = ["sqlite", "postgres"]
-sqlite = ["superschematic-engine-ffi/sqlite", "superschematic-engine-testkit/sqlite"]
-postgres = ["superschematic-engine-ffi/postgres", "superschematic-engine-testkit/postgres"]
+sqlite = ["superschematic-engine-abi/sqlite", "superschematic-engine-testkit/sqlite"]
+postgres = ["superschematic-engine-abi/postgres", "superschematic-engine-testkit/postgres"]
 
 [dependencies]
 serde_json = { version = "1.0.149", features = ["arbitrary_precision", "preserve_order"] }
 superschematic-engine = { path = "../engine", default-features = false }
+# The ABI, which this crate exports over its own project; not the core's
+# archive (superschematic-engine-ffi), whose exports these would define
+# again.
+superschematic-engine-abi = { path = "../abi", default-features = false }
 superschematic-engine-behaviors = { path = "../behaviors", default-features = false }
-# Without its core assembly: this crate exports the ABI over its own project.
-superschematic-engine-ffi = { path = "../ffi", default-features = false }
 superschematic-engine-testkit = { path = "../testkit", default-features = false }
 
 [lints]

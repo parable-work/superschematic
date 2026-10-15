@@ -1,6 +1,6 @@
 [package]
 name = "superschematic-engine-ffi"
-description = "The engine's C ABI (D58): the static archive a Go server links, and the macro a project's engine crate exports it with"
+description = "The core's engine archive (D58): the engine's C ABI over the core's behaviors, the static archive a Go server links"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,32 +11,26 @@ publish.workspace = true
 [lib]
 name = "superschematic_engine_ffi"
 # staticlib: libsuperschematic_engine.a, which cgo links with no shared
-# object to ship (scripts/engine-archive.sh names it so). rlib: the ABI's
-# implementation and export_engine_c_abi!, for a project's engine crate, and
-# the crate's own tests.
+# object to ship (scripts/engine-archive.sh names it so). rlib: the crate's
+# own tests, which call its exports.
 crate-type = ["staticlib", "rlib"]
 
 [features]
-default = ["core", "sqlite", "postgres"]
-# Emit the C ABI over the core's behaviors: what the release's
-# libsuperschematic_engine.a holds. A project's engine crate, which compiles
-# extension behaviors in, depends on this crate with default-features =
-# false and emits the ABI over its own (export_engine_c_abi!), which refuses
-# to expand beside this feature, since the archive would define every
-# symbol twice.
-core = []
 # The databases the engine opens, both by default, as the engine has them.
-sqlite = ["superschematic-engine/sqlite", "superschematic-engine-behaviors/sqlite"]
-postgres = ["superschematic-engine/postgres", "superschematic-engine-behaviors/postgres"]
+default = ["sqlite", "postgres"]
+sqlite = ["superschematic-engine-abi/sqlite", "superschematic-engine-behaviors/sqlite"]
+postgres = ["superschematic-engine-abi/postgres", "superschematic-engine-behaviors/postgres"]
 
 [dependencies]
-# The engine's JSON features (D58): a number keeps its text, an object its
-# members' order.
-serde_json = { version = "1.0.149", features = ["arbitrary_precision", "preserve_order"] }
-superschematic-engine = { path = "../engine", default-features = false }
-# The core's behaviors, which the core's assembly registers when an engine
-# opens: whatever core() returns when it is built.
+# The ABI's implementation and export_engine_c_abi!, which this crate
+# expands over the core's behaviors.
+superschematic-engine-abi = { path = "../abi", default-features = false }
+# The core's behaviors, which the archive registers when an engine opens:
+# whatever core() returns when it is built.
 superschematic-engine-behaviors = { path = "../behaviors", default-features = false }
+
+[dev-dependencies]
+serde_json = { version = "1.0.149", features = ["arbitrary_precision", "preserve_order"] }
 
 [lints]
 workspace = true

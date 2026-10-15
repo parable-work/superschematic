@@ -2,7 +2,7 @@
 //! documents and codes, the binding's own calls, an event stream pulled
 //! and woken, a panic caught, and the header held to the exports.
 
-#![cfg(all(feature = "core", feature = "sqlite"))]
+#![cfg(feature = "sqlite")]
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -582,7 +582,7 @@ fn null_pointers_write_nothing() {
 }
 
 fn panicking(
-    _options: &mut superschematic_engine_ffi::EngineOptions,
+    _options: &mut superschematic_engine_abi::EngineOptions,
     _project: Option<&Value>,
 ) -> Result<(), String> {
     panic!("a project's configure gave up")

@@ -1373,6 +1373,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "superschematic-engine-abi"
+version = "0.0.0"
+dependencies = [
+ "serde_json",
+ "superschematic-engine",
+]
+
+[[package]]
 name = "superschematic-engine-behaviors"
 version = "0.0.0"
 dependencies = [
@@ -1386,7 +1394,7 @@ name = "superschematic-engine-ffi"
 version = "0.0.0"
 dependencies = [
  "serde_json",
- "superschematic-engine",
+ "superschematic-engine-abi",
  "superschematic-engine-behaviors",
 ]
 
@@ -1415,8 +1423,8 @@ version = "0.0.0"
 dependencies = [
  "serde_json",
  "superschematic-engine",
+ "superschematic-engine-abi",
  "superschematic-engine-behaviors",
- "superschematic-engine-ffi",
  "superschematic-engine-testkit",
 ]
 

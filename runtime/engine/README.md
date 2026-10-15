@@ -59,8 +59,9 @@ test behaviors, runs the cases of `test/behavior-*.test.ts` and of the
 ported behaviors' `test/core-*.test.ts` against the Rust engine, and
 replays the scenario corpus (`testdata/scenarios`) and the HTTP corpus
 (`testdata/http`) through the engine's calls and routes, all on both
-databases. `superschematic-engine-ffi` (`rust/ffi`) is the engine's C ABI,
-which `go/`, the Go binding, links as the static archive
+databases. `superschematic-engine-abi` (`rust/abi`) is the engine's C ABI
+as a library, and `superschematic-engine-ffi` (`rust/ffi`) the core's
+archive of it, which `go/`, the Go binding, links as the static archive
 `libsuperschematic_engine.a`, and whose HTTP mount, `enginehttp`, serves
 the routes on chi ("The Go binding" below).
 
@@ -144,8 +145,8 @@ A Go server reaches the Rust engine through `go/`, the module
 links the static archive `libsuperschematic_engine.a` through cgo, as the
 version graph's Go binding links its own. `go/README.md` is its guide.
 
-- The archive is `rust/ffi`, the engine's C ABI
-  (`go/include/superschematic_engine.h`): JSON in and out, output the
+- The archive is `rust/ffi`, the engine's C ABI (`rust/abi`,
+  `go/include/superschematic_engine.h`) over the core's behaviors: JSON in and out, output the
   archive allocates and `eng_free` releases, and a panic caught at every
   export. `eng_open` and `eng_close` hold an engine by handle; `eng_call`
   makes any of the calls by name (`engine::calls`) and the binding's own

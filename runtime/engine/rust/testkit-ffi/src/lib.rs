@@ -1,5 +1,5 @@
 //! The test kit's engine archive (D58): the engine's C ABI
-//! (`superschematic-engine-ffi`) over a project that opens an engine as the
+//! (`superschematic-engine-abi`) over a project that opens an engine as the
 //! scenario replayer opens one, so a binding's replay of the corpora
 //! (`runtime/engine/testdata`) can run the cases that need what only a
 //! recording says: the test kit's behaviors, a policy that answers from the
@@ -124,4 +124,4 @@ impl AccessPolicy for Recorded {
     }
 }
 
-superschematic_engine_ffi::export_engine_c_abi!(configure = configure);
+superschematic_engine_abi::export_engine_c_abi!(configure = configure);

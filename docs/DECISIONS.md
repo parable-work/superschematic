@@ -5676,8 +5676,9 @@ milestones 10 and 11, and the work queue's milestone 12. Until the Rust
 engine passes the TypeScript suite, `@superschematic/engine` is the
 TypeScript implementation and nothing uses the workspace.
 
-The Go binding (milestone 15) is built. `superschematic-engine-ffi`
-(`runtime/engine/rust/ffi`) is the C ABI of the bindings section,
+The Go binding (milestone 15) is built. `superschematic-engine-abi`
+(`runtime/engine/rust/abi`) is the C ABI of the bindings section, as a
+library an archive crate expands once,
 `runtime/engine/go/include/superschematic_engine.h` its header, which a
 test holds to the exports: `eng_open` and `eng_close` over handles a
 closed engine leaves `ENG_CLOSED`; `eng_call` over the calls by name, and
@@ -5687,10 +5688,13 @@ hash), `health` and `abi`; `eng_http` over the transport-neutral routes,
 a stream a handle `eng_stream_poll` pulls without waiting; `eng_wait` on
 the notifier, one thread for every stream; `eng_runner`; and the codes
 `ENG_OK`, `ENG_ERROR` (the TypeScript class, the code, the message and
-the class's members), `ENG_BAD_ARGUMENTS` and `ENG_CLOSED`. The core's
-assembly exports it over `core()`; a project's engine crate exports it
+the class's members), `ENG_BAD_ARGUMENTS` and `ENG_CLOSED`.
+`superschematic-engine-ffi` (`runtime/engine/rust/ffi`), the core's
+archive, exports it over `core()`; a project's engine crate exports it
 over its own behaviors or configure with `export_engine_c_abi!`, as
-`runtime/engine/rust/testkit-ffi` does for the replays.
+`runtime/engine/rust/testkit-ffi` does for the replays. The library
+exports nothing itself, so archive crates in one Cargo workspace, whose
+features Cargo unifies, never define a symbol twice.
 `scripts/engine-archive.sh` builds `libsuperschematic_engine.a` (`--crate`
 a project's), and `runtime/engine/go` is the binding (`Open`, `Call`,
 `Deploy`, `Health`, `Runner`, `Close`, errors as `*engine.Error`) with

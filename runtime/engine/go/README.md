@@ -27,16 +27,17 @@ this checkout, a release's `superschematic-archives_<version>_<platform>.tar.gz`
 holds the three under `lib/` and the header under `include/`: build with
 `CGO_LDFLAGS=-L<dir>/lib`.
 
-The core's archive runs the core's behaviors (`superschematic_engine_behaviors::core()`).
-A project whose schemas compose an extension's behaviors builds its own
-archive from a crate that depends on `superschematic-engine-ffi` without
-its `core` feature and exports the ABI over its own behaviors:
+The core's archive (`runtime/engine/rust/ffi`) runs the core's behaviors
+(`superschematic_engine_behaviors::core()`). A project whose schemas
+compose an extension's behaviors builds its own archive from a crate that
+depends on `superschematic-engine-abi`, the ABI as a library, and exports
+it over its own behaviors:
 
 ```rust
-fn behaviors() -> superschematic_engine_ffi::BehaviorSet {
+fn behaviors() -> superschematic_engine_abi::BehaviorSet {
     superschematic_engine_behaviors::core().with(acme_behaviors::Rating)
 }
-superschematic_engine_ffi::export_engine_c_abi!(behaviors = behaviors);
+superschematic_engine_abi::export_engine_c_abi!(behaviors = behaviors);
 ```
 
 ```
@@ -44,7 +45,8 @@ scripts/engine-archive.sh --crate <the crate> --out <dir>   # then CGO_LDFLAGS="
 ```
 
 `-L<dir>` comes first on cgo's link line, so the project's archive is the
-one linked. `export_engine_c_abi!(configure = f)` takes a function that
+one linked. The crate depends on the ABI's library alone, never on the
+core's archive, whose exports its own would define again. `export_engine_c_abi!(configure = f)` takes a function that
 also reads the config's `project` member, for a Rust access policy of the
 project's own; `runtime/engine/rust/testkit-ffi`, the archive the replay
 links, is one.

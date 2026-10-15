@@ -6,57 +6,40 @@
 ///
 /// ```ignore
 /// // The behaviors alone: the core's and an extension's.
-/// fn behaviors() -> superschematic_engine_ffi::BehaviorSet {
+/// fn behaviors() -> superschematic_engine_abi::BehaviorSet {
 ///     superschematic_engine_behaviors::core().with(acme_behaviors::Rating)
 /// }
-/// superschematic_engine_ffi::export_engine_c_abi!(behaviors = behaviors);
+/// superschematic_engine_abi::export_engine_c_abi!(behaviors = behaviors);
 ///
 /// // A configure of its own, which also reads the config's `project`
 /// // member (a Rust access policy, say).
 /// fn configure(
-///     options: &mut superschematic_engine_ffi::EngineOptions,
-///     project: Option<&superschematic_engine_ffi::JsonValue>,
+///     options: &mut superschematic_engine_abi::EngineOptions,
+///     project: Option<&superschematic_engine_abi::JsonValue>,
 /// ) -> Result<(), String> {
 ///     options.behaviors = superschematic_engine_behaviors::core();
 ///     Ok(())
 /// }
-/// superschematic_engine_ffi::export_engine_c_abi!(configure = configure);
+/// superschematic_engine_abi::export_engine_c_abi!(configure = configure);
 /// ```
 ///
 /// The project's name, which `eng_open` and the `abi` call report, is the
 /// crate's (`CARGO_PKG_NAME`). `#[no_mangle]` exports each name verbatim,
-/// so a static library invokes the macro once, at the crate root, and
-/// depends on `superschematic-engine-ffi` with `default-features = false`:
-/// the macro refuses to expand beside the crate's `core` feature
-/// ([`crate::CORE_ASSEMBLY`]), whose archive already exports the ABI over
-/// the core's behaviors. The `@emit` arm is that assembly's own and skips
-/// the check.
+/// so a static library expands the macro once, at its root, and links no
+/// other archive crate (`superschematic-engine-ffi`, the core's, among
+/// them), whose exports its own would define again.
 #[macro_export]
 macro_rules! export_engine_c_abi {
     (behaviors = $behaviors:path) => {
-        const _: () = ::core::assert!(
-            !$crate::CORE_ASSEMBLY,
-            "superschematic-engine-ffi was built with its `core` feature and already exports the C ABI over the core's behaviors; depend on it with default-features = false"
-        );
-        $crate::export_engine_c_abi! { @emit behaviors = $behaviors }
-    };
-    (configure = $configure:path) => {
-        const _: () = ::core::assert!(
-            !$crate::CORE_ASSEMBLY,
-            "superschematic-engine-ffi was built with its `core` feature and already exports the C ABI over the core's behaviors; depend on it with default-features = false"
-        );
-        $crate::export_engine_c_abi! { @emit configure = $configure }
-    };
-    (@emit behaviors = $behaviors:path) => {
         fn __superschematic_engine_configure(
             options: &mut $crate::EngineOptions,
             project: ::core::option::Option<&$crate::JsonValue>,
         ) -> ::core::result::Result<(), ::std::string::String> {
             $crate::with_behaviors(options, project, $behaviors)
         }
-        $crate::export_engine_c_abi! { @emit configure = __superschematic_engine_configure }
+        $crate::export_engine_c_abi! { configure = __superschematic_engine_configure }
     };
-    (@emit configure = $configure:path) => {
+    (configure = $configure:path) => {
         static __SUPERSCHEMATIC_ENGINE_PROJECT: $crate::Project = $crate::Project {
             name: ::core::env!("CARGO_PKG_NAME"),
             configure: $configure,

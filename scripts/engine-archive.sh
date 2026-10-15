@@ -5,10 +5,10 @@
 #
 # By default the archive is the core's: runtime/engine/rust/ffi, the engine's
 # C ABI over the core's behaviors, which the release ships. --crate names a
-# project's engine crate instead, one that depends on superschematic-engine-ffi
-# without its core feature and exports the ABI over its own behaviors
-# (export_engine_c_abi!), and --out stages that archive in a directory of the
-# project's own, so the checkout's stays the core's. Whichever crate builds
+# project's engine crate instead, one that depends on superschematic-engine-abi
+# and exports the ABI over its own behaviors (export_engine_c_abi!), and --out
+# stages that archive in a directory of the project's own, so the checkout's
+# stays the core's. Whichever crate builds
 # it, the archive is named libsuperschematic_engine.a, the name the binding
 # links.
 #
