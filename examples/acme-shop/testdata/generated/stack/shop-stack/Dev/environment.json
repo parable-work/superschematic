@@ -408,6 +408,7 @@
         }
       ],
       "language": "RUST",
+      "artifact": "image",
       "job": {
         "api": "shop-stock",
         "name": "OrderRestocks",
@@ -438,6 +439,7 @@
         }
       ],
       "language": "RUST",
+      "artifact": "image",
       "worker": {
         "api": "shop-stock",
         "name": "ReorderStock",

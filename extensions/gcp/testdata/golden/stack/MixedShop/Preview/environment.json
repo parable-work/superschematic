@@ -120,6 +120,7 @@
         }
       ],
       "language": "GO",
+      "artifact": "image",
       "resourceName": {
         "$concat": [
           "orders-pr",
@@ -251,6 +252,7 @@
         }
       ],
       "language": "GO",
+      "artifact": "image",
       "exposed": true,
       "resourceName": {
         "$concat": [
@@ -497,6 +499,7 @@
         }
       ],
       "language": "GO",
+      "artifact": "image",
       "job": {
         "api": "shop-orders",
         "name": "ShipOrders",
@@ -623,6 +626,7 @@
         }
       ],
       "language": "TYPESCRIPT",
+      "artifact": "image",
       "exposed": true,
       "resourceName": {
         "$concat": [
@@ -734,6 +738,7 @@
         }
       ],
       "language": "TYPESCRIPT",
+      "artifact": "image",
       "exposed": true,
       "resourceName": {
         "$concat": [

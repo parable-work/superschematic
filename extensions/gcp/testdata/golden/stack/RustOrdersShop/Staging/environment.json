@@ -58,6 +58,7 @@
         }
       ],
       "language": "RUST",
+      "artifact": "image",
       "resourceName": "orders",
       "address": {
         "$output": {
@@ -140,6 +141,7 @@
         }
       ],
       "language": "GO",
+      "artifact": "image",
       "exposed": true,
       "resourceName": "shop-api",
       "address": {
@@ -255,6 +257,7 @@
         }
       ],
       "language": "RUST",
+      "artifact": "image",
       "worker": {
         "api": "shop-orders",
         "name": "FulfilOrders",
@@ -340,6 +343,7 @@
         }
       ],
       "language": "RUST",
+      "artifact": "image",
       "job": {
         "api": "shop-orders",
         "name": "ShipOrders",
