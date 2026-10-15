@@ -19,9 +19,15 @@
 # which depends on superscalar's core by path, so the superscalar checkout
 # must be there (scripts/superscalar-dep.sh --checkout).
 #
+# The test addon (--js-behaviors) adds the bridge that runs behaviors
+# written in TypeScript (the js-behaviors cargo feature, src/bridge.rs),
+# which the engine's TypeScript suite defines with defineBehavior; no
+# shipped addon has it.
+#
 # Usage:
-#   scripts/engine-napi.sh            # a release build
-#   scripts/engine-napi.sh --debug    # a debug build: quicker to build, slower to run
+#   scripts/engine-napi.sh                   # a release build
+#   scripts/engine-napi.sh --debug           # a debug build: quicker to build, slower to run
+#   scripts/engine-napi.sh --js-behaviors    # the test addon, with the bridge (either profile)
 #
 # Then, in runtime/engine/typescript, `bun run build` and
 # `node scripts/rust-ratchet.mjs` run the engine's suite against it
@@ -32,17 +38,21 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PKG="$ROOT/runtime/engine/typescript"
 
 profile=(--release)
-case "${1:-}" in
-  --debug)
-    profile=()
-    ;;
-  "")
-    ;;
-  *)
-    echo "usage: scripts/engine-napi.sh [--debug]" >&2
-    exit 2
-    ;;
-esac
+features=()
+for arg in "$@"; do
+  case "$arg" in
+    --debug)
+      profile=()
+      ;;
+    --js-behaviors)
+      features=(--features js-behaviors)
+      ;;
+    *)
+      echo "usage: scripts/engine-napi.sh [--debug] [--js-behaviors]" >&2
+      exit 2
+      ;;
+  esac
+done
 
 if [ ! -d "$ROOT/third_party/superscalar/crates/core" ]; then
   echo "no superscalar checkout under third_party/superscalar: run scripts/superscalar-dep.sh --checkout" >&2
@@ -58,7 +68,7 @@ if [ ! -x node_modules/.bin/napi ]; then
 fi
 # A stale addon of another triple or ABI must not linger beside the new one.
 rm -rf native
-node_modules/.bin/napi build --platform "${profile[@]}" \
+node_modules/.bin/napi build --platform ${profile[@]+"${profile[@]}"} ${features[@]+"${features[@]}"} \
   --manifest-path ../rust/napi/Cargo.toml --output-dir native --no-js -- --locked
 
 shopt -s nullglob

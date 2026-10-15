@@ -731,6 +731,32 @@ pub enum Error {
     /// A defect of the engine's own, or a stored row it cannot read, which
     /// the TypeScript engine throws as a plain Error.
     Internal(String),
+    /// What a hook written in the host's language threw (a behavior a
+    /// binding's bridge runs, the `dynamic` feature), carried back to the
+    /// host as it was thrown: the binding keeps the thrown value and names
+    /// it by its token.
+    Host(HostError),
+}
+
+/// What a host's hook threw, as the engine carries it: the binding's token
+/// for the value, its text, and how the runner's status names it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HostError {
+    /// The binding's name for the thrown value, which it throws again when
+    /// the error reaches the host.
+    pub token: u64,
+    /// The value's message, or its text for a value that is no error.
+    pub message: String,
+    /// The value as the runner's status names it: `<name>: <message>` for
+    /// an error, its text for any other value (the TypeScript runner's
+    /// `describe`).
+    pub described: String,
+}
+
+impl fmt::Display for HostError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.message)
+    }
 }
 
 /// An engine result.
@@ -820,6 +846,14 @@ impl Error {
                 None => Thrown::of_class("Error", failure.to_string()),
             },
             Error::Internal(message) => Thrown::of_class("Error", message.clone()),
+            Error::Host(thrown) => {
+                let mut members = Map::new();
+                members.insert("hostToken".into(), Value::from(thrown.token));
+                Thrown {
+                    members: Some(members),
+                    ..Thrown::of_class("HostError", thrown.message.clone())
+                }
+            }
         }
     }
 }
@@ -833,6 +867,7 @@ impl fmt::Display for Error {
             Error::Usage(message) | Error::Config(message) | Error::Internal(message) => {
                 f.write_str(message)
             }
+            Error::Host(thrown) => thrown.fmt(f),
         }
     }
 }

@@ -77,8 +77,8 @@ pub use engine::{
     Storage, UuidSource, SCENARIO_SEED,
 };
 pub use errors::{
-    BehaviorError, EngineError, EngineErrorCode, EngineErrorKind, Error, Result, SchemaChange,
-    SchemaIssue, Thrown, ValidationIssue, Veto,
+    BehaviorError, EngineError, EngineErrorCode, EngineErrorKind, Error, HostError, Result,
+    SchemaChange, SchemaIssue, Thrown, ValidationIssue, Veto,
 };
 pub use events::{
     cursor_refusal, EngineEvent, EventCause, EventPage, Events, EventsAfter, ReadEvents,

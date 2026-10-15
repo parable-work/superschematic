@@ -1,83 +1,58 @@
 # The engine's test files that do not pass yet on the Rust engine through its
 # Node-API addon (ENGINE_IMPL=rust; D58, milestone 7). scripts/rust-ratchet.mjs
-# runs each test file so under Node.js and Bun: a file that fails and is not
+# runs each test file so under Node.js and Bun, on the test addon
+# (scripts/engine-napi.sh --js-behaviors): a file that fails and is not
 # listed fails the run, and so does a listed file that passes, so the list
-# only shrinks. A line is a file under test/, then the runtimes it is pending
-# on when not both (node, bun), then why.
+# only shrinks. A line is a file under test/, then the runtimes it is
+# pending on when not both (node, bun), then why.
 #
-# Milestone 7a runs the engine's synchronous API over the addon, with a policy
-# or a permission matcher written in TypeScript asked on the JavaScript
-# thread, and the TypeScript HTTP and MCP adapters over it. What the files
-# below wait for, the first named on each line first:
+# Milestone 7b's bridge runs the behaviors the suite writes in TypeScript
+# (defineBehavior, behaviors.register) on the Rust engine, on the JavaScript
+# thread, the runner on the event loop for an engine that has one, and
+# events.watch over the engine's notifier. What the files below wait for,
+# the first named on each line first:
 #
-#   bridge     a behavior written in TypeScript (defineBehavior,
-#              behaviors.register) or an id source (ids): the test-only
-#              JavaScript behavior bridge (7b)
 #   storage    raw SQL on the engine's file (engine.storage), which the
-#              identity routes' store takes too (7b)
-#   watch      events.watch over the engine's notifier, which the event
-#              stream waits on (7b)
+#              identity routes' store takes too
+#   ids        an id source written in TypeScript (ids)
 #   validator  schemas.validator, which returns the TypeScript SchemaValidator
-#              (7b)
+#   http       a tool filter written in TypeScript (ToolTarget.filter), which
+#              engineApp and engineMcp over the engine's own routes carry
 #   json       a value JSON cannot carry (NaN, a Date) reaches the Rust engine
 #              as another
+#   driver     a value driver written in TypeScript (values.driver), which the
+#              Rust engine takes as config (D58)
 #
-# Milestone 7b also brings engineApp and engineMcp as Hono adapters over the
-# engine's own routes (api::handle), a mount's tool filter and onError, and
-# openEngineAsync beyond the basic async call. No test that runs here fails
-# on what the Rust engine does; the tests behind the bridge have yet to run.
+# No test that runs here fails on what the Rust engine does.
 
-# A behavior written in TypeScript.
-behavior-composition.test.ts             # bridge
-behavior-create-params.test.ts           # bridge
-behavior-create.test.ts                  # bridge
-behavior-guidance.test.ts                # bridge
-behavior-instances.test.ts               # bridge
-behavior-own-columns.test.ts             # bridge
-behavior-permissions.test.ts             # bridge
-behavior-publish.test.ts                 # bridge
-behavior-reach.test.ts                   # bridge
-behavior-refusals.test.ts                # bridge
-behavior-registration.test.ts            # bridge
-behavior-sql.test.ts                     # bridge
-behavior-types.test.ts                   # bridge
-behavior-unchanged.test.ts               # bridge
-behavior-updates.test.ts                 # bridge
-behavior-validation.test.ts              # bridge
-client-stream.test.ts                    # bridge
-client.test.ts                           # bridge
-core-behaviors.test.ts                   # bridge (behaviors.register, refused for a name the core has)
-core-branches-sweep.test.ts              # bridge
-core-dependencies.test.ts                # bridge
-core-numbering.test.ts                   # bridge; storage
-core-reactions-changes.test.ts           # bridge
-core-revisions.test.ts                   # bridge
-core-staterules.test.ts                  # bridge
-core-timers.test.ts                      # bridge
-core-workflow.test.ts                    # bridge; storage
-corpus.test.ts                           # bridge
-engine-migrations.test.ts                # bridge
-http.test.ts                             # bridge
-list-filters.test.ts                     # bridge; storage
-mcp.test.ts                              # bridge
-namespaces.test.ts                       # bridge
-normalize.test.ts                        # bridge
-operations.test.ts                       # bridge
-recorder.test.ts                         # bridge (behaviors and ids)
-retention.test.ts                        # bridge
-runner-schedules.test.ts                 # bridge
-runner.test.ts                           # bridge
-tools.test.ts                            # bridge
-unique.test.ts                           # bridge
-values.test.ts                           # bridge; storage
-
-# The engine's file, its notifier, and TypeScript objects.
-access.test.ts                           # validator; storage
+behavior-composition.test.ts             # storage
+behavior-create-params.test.ts           # json (NaN in a create's parameters)
+behavior-create.test.ts                  # ids
+behavior-instances.test.ts               # storage; json (a Date in an operation's parameters)
+behavior-own-columns.test.ts             # storage
+behavior-publish.test.ts                 # storage
+behavior-reach.test.ts                   # storage
+behavior-registration.test.ts            # storage
+behavior-sql.test.ts                     # storage
 core-links-many.test.ts                  # storage (a file Links v2 left, rebuilt through engine.storage)
+core-numbering.test.ts                   # storage
 core-search-vectors.test.ts              # storage; json (NaN in a vector to settle)
-core-search.test.ts                      # storage; bridge
-events.test.ts                           # watch; storage; bridge
+core-search.test.ts                      # storage
+core-workflow.test.ts                    # storage
+corpus.test.ts                           # ids
+engine-migrations.test.ts                # storage
+events.test.ts                           # storage
 identity.test.ts                         # storage (the identity store on engine.storage)
-instances.test.ts                        # storage; bridge (ids)
+instances.test.ts                        # storage; ids
+list-filters.test.ts                     # storage
+mcp.test.ts                              # http
+operations.test.ts                       # http
+recorder.test.ts                         # ids
 registry.test.ts                         # storage; validator; json (NaN and a Date in validate)
-stream.test.ts                           # watch; bridge
+retention.test.ts                        # storage
+runner-schedules.test.ts                 # storage
+runner.test.ts                           # storage
+tools.test.ts                            # http
+unique.test.ts                           # storage
+values.test.ts                           # storage; driver
+access.test.ts                           # storage; validator

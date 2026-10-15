@@ -15,6 +15,10 @@ publish.workspace = true
 default = ["sqlite", "postgres"]
 sqlite = ["superschematic-engine-storage/sqlite"]
 postgres = ["superschematic-engine-storage/postgres"]
+# Behaviors whose hooks are named at run time (behaviors::DynamicBehavior):
+# what a binding's test bridge registers for a behavior written in the
+# host's language. No production build turns it on (D58).
+dynamic = []
 
 [dependencies]
 # JavaScript's Number::toString, which JSON.stringify writes a number with:

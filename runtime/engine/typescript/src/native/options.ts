@@ -5,15 +5,17 @@ takes as a function is data there: allowAll is "allowAll", a
 permissionPolicy() made without a matcher "permission", and a policy of
 rules passes as it is. Any other policy, and a permissionMatcher other
 than hasAnyPermission, stays TypeScript: the addon asks it on this thread
-during a synchronous call (hosted, src/native/engine.ts). A clock
-function sets a manual clock before each call. A behavior, an id source
-or a value driver written in TypeScript needs the bridge milestone 7b
-builds.
+during a synchronous call (hosted, src/native/engine.ts). So does a
+behavior written in TypeScript, on the test addon, whose bridge runs it
+(src/native/bridge.ts). A clock function sets a manual clock before each
+call. An id source or a value driver written in TypeScript is not on the
+Rust engine.
 */
 
 import { hasAnyPermission, type PermissionMatcher } from '@superschematic/http-runtime';
 
 import { allowAll, isEnginePermissionPolicy, type AccessPolicy } from '../access.js';
+import type { AnyBehaviorImplementation } from '../behaviors/behavior.js';
 import type { EngineOptions } from '../engine.js';
 import { NativeUnsupportedError } from './errors.js';
 
@@ -32,7 +34,13 @@ export interface NativePostgresOptions {
 }
 
 /** The TypeScript engine's options, and the Rust engine's storage on Postgres in place of path. */
-export type NativeEngineOptions = Omit<EngineOptions, 'path' | 'policy'> & {
+export type NativeEngineOptions = Omit<EngineOptions, 'path' | 'policy' | 'behaviors'> & {
+  /**
+   * The behaviors besides the core's: a name, one the addon is built with
+   * (in Rust), or an implementation written in TypeScript, which the test
+   * addon's bridge runs.
+   */
+  behaviors?: readonly (string | AnyBehaviorImplementation)[];
   path?: string;
   /** A schema of a Postgres database, in place of path; the engine is then called through callAsync. */
   postgres?: NativePostgresOptions;
@@ -44,6 +52,8 @@ export type NativeEngineOptions = Omit<EngineOptions, 'path' | 'policy'> & {
 export interface HostedOptions {
   policy?: AccessPolicy;
   permissionMatcher?: PermissionMatcher;
+  /** Behaviors written in TypeScript, which the test addon's bridge runs. */
+  behaviors?: readonly AnyBehaviorImplementation[];
 }
 
 /** The options the addon opens with, the clock the facade sets before each call, and what it hosts. */
@@ -81,14 +91,23 @@ export function nativeOptions(options: NativeEngineOptions): ResolvedNativeOptio
           hosted.permissionMatcher = value as PermissionMatcher;
         }
         break;
-      case 'behaviors':
-        if ((value as readonly unknown[]).length > 0) {
-          throw new NativeUnsupportedError('a behavior written in TypeScript (defineBehavior)', 'bridge');
+      case 'behaviors': {
+        // A name is a behavior the addon is built with, in Rust; an
+        // implementation object is TypeScript's, which the test addon's
+        // bridge runs, whatever its declaration names.
+        const names = (value as readonly unknown[]).filter((each): each is string => typeof each === 'string');
+        const objects = (value as readonly unknown[]).filter((each) => typeof each !== 'string') as AnyBehaviorImplementation[];
+        if (names.length > 0) {
+          json.behaviors = names;
+        }
+        if (objects.length > 0) {
+          hosted.behaviors = objects;
         }
         break;
+      }
       case 'ids':
         if (typeof value === 'function') {
-          throw new NativeUnsupportedError('an id source written in TypeScript (ids)', 'bridge');
+          throw new NativeUnsupportedError('an id source written in TypeScript (ids)', 'ids');
         }
         json.ids = value;
         break;
@@ -103,7 +122,7 @@ export function nativeOptions(options: NativeEngineOptions): ResolvedNativeOptio
       case 'values': {
         const { driver, ...rest } = value as Record<string, unknown>;
         if (driver !== undefined) {
-          throw new NativeUnsupportedError('a value driver written in TypeScript (values.driver)', 'bridge');
+          throw new NativeUnsupportedError('a value driver written in TypeScript (values.driver)', 'driver');
         }
         json.values = rest;
         break;
@@ -112,7 +131,7 @@ export function nativeOptions(options: NativeEngineOptions): ResolvedNativeOptio
         json[key] = value;
     }
   }
-  const names = Object.keys(hosted);
+  const names = Object.keys(hosted).filter((name) => name !== 'behaviors');
   if (names.length > 0) {
     json.hosted = names;
   }

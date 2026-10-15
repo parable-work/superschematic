@@ -2146,6 +2146,7 @@ pub fn describe(error: &Error) -> String {
         Error::Behavior(defect) => format!("BehaviorError: {defect}"),
         Error::Usage(message) => format!("TypeError: {message}"),
         Error::Config(message) => format!("BehaviorConfigError: {message}"),
+        Error::Host(thrown) => thrown.described.clone(),
         other => format!("Error: {other}"),
     }
 }
