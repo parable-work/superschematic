@@ -200,6 +200,14 @@ export class Bridge {
     this.parked.clear();
   }
 
+  /** firstParked is the first value a hook threw since the bridge settled, if one did. */
+  firstParked(): { value: unknown } | undefined {
+    for (const value of this.parked.values()) {
+      return { value };
+    }
+    return undefined;
+  }
+
   /** parkedValue is what a hook threw under a token, if the bridge still holds it. */
   parkedValue(token: number): { value: unknown } | undefined {
     return this.parked.has(token) ? { value: this.parked.get(token) } : undefined;

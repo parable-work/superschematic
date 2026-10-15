@@ -59,6 +59,12 @@ export interface AddonEngine {
   storageTransaction(callback: () => boolean): boolean;
   /** Whether this thread holds a transaction on the engine's storage. */
   readonly storageInTransaction: boolean;
+  /** Serves one HTTP request: its head as JSON and its body's bytes (SQLite). */
+  handleHttp(head: string, body?: Buffer): HttpAnswer;
+  /** Pulls an event stream handleHttp holds open, without waiting. */
+  streamPull(id: number): StreamPull;
+  /** Ends an event stream handleHttp holds open. */
+  streamClose(id: number): void;
   /** How many commits that notified the engine's notifier has counted. */
   readonly epoch: number;
   /** Calls back on this thread each time the notifier moves, through a weak threadsafe function; the last call follows a shutdown. */
@@ -77,6 +83,20 @@ export interface AddonEngine {
  * the question's kind and JSON, answered as JSON. It must not throw.
  */
 export type AddonHost = (kind: string, payload: string) => string;
+
+/** One HTTP answer of the addon: status, headers as pairs, and body bytes or an event stream's id. */
+export interface HttpAnswer {
+  status: number;
+  headers: string[][];
+  body?: Buffer | null;
+  stream?: number | null;
+}
+
+/** One pull of an event stream: its bytes, or its end, or neither (nothing yet). */
+export interface StreamPull {
+  data?: Buffer | null;
+  end: boolean;
+}
 
 /** What the addon exports. */
 export interface Addon {

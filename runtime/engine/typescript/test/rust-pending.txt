@@ -11,18 +11,19 @@
 # thread, the runner on the event loop for an engine that has one,
 # events.watch over the engine's notifier, engine.storage, raw SQL on the
 # engine's file and transactions the engine's calls run inside, an id
-# source written in TypeScript (ids) and schemas.validator. What the files
-# below wait for, the first named on each line first:
+# source written in TypeScript (ids), schemas.validator, and engineApp and
+# engineMcp as Hono adapters over the engine's own routes, with a mount's
+# tool filter. What the files below wait for, the first named on each line
+# first:
 #
-#   http       a tool filter written in TypeScript (ToolTarget.filter), which
-#              engineApp and engineMcp over the engine's own routes carry
 #   json       a value JSON cannot carry (NaN, a Date) reaches the Rust engine
 #              as another
 #   driver     a value driver written in TypeScript (values.driver), which the
 #              Rust engine takes as config (D58)
 #   internals  a test of the TypeScript engine's own workings, which no
 #              other engine has: the SQL it runs, spied on through
-#              engine.storage
+#              engine.storage, and the reads its event stream makes, spied
+#              on through engine.events.read
 #
 # No test that runs here fails on what the Rust engine does.
 
@@ -30,9 +31,7 @@ behavior-create-params.test.ts           # json (NaN in a create's parameters)
 behavior-instances.test.ts               # json (a Date in an operation's parameters)
 behavior-own-columns.test.ts             # internals (the plan of the SQL the engine runs for a filter, spied on through engine.storage.all)
 core-search-vectors.test.ts              # json (NaN in a vector to settle)
-corpus.test.ts                           # http (it records mcp and operations, whose tool filters wait); json (registry)
-mcp.test.ts                              # http
-operations.test.ts                       # http
+corpus.test.ts                           # internals and json (it records stream, registry and core-search-vectors again, which fail here)
 registry.test.ts                         # json (NaN and a Date in validate)
-tools.test.ts                            # http
+stream.test.ts                           # internals (two tests spy on engine.events.read for the reads the TypeScript stream makes, which the Rust engine makes within)
 values.test.ts                           # driver

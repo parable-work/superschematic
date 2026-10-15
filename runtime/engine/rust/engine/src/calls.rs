@@ -113,6 +113,19 @@ pub fn call(
     principal: Option<&Principal>,
     args: &[Value],
 ) -> Result<Option<Value>> {
+    call_with(engine, method, principal, args, None)
+}
+
+/// [`call`], with the tool filter the tools calls (`tools.describe`,
+/// `tools.manifest`, `tools.call`) narrow by: a mount's, which a binding
+/// asks in the host's language (JSON carries no function).
+pub fn call_with(
+    engine: &Engine,
+    method: &str,
+    principal: Option<&Principal>,
+    args: &[Value],
+    filter: Option<&dyn crate::tools::ToolFilter>,
+) -> Result<Option<Value>> {
     let who = || {
         principal.ok_or_else(|| {
             Error::from(EngineError::invalid_argument(
@@ -423,7 +436,7 @@ pub fn call(
                 &text(arg(0)),
                 crate::tools::ToolTarget {
                     namespace: namespace.as_deref(),
-                    filter: None,
+                    filter,
                 },
             )
         }
@@ -433,7 +446,7 @@ pub fn call(
                 who()?,
                 crate::tools::ToolTarget {
                     namespace: namespace.as_deref(),
-                    filter: None,
+                    filter,
                 },
             )
         }
@@ -445,7 +458,7 @@ pub fn call(
                 arg(1),
                 crate::tools::ToolTarget {
                     namespace: namespace.as_deref(),
-                    filter: None,
+                    filter,
                 },
             )
         }
@@ -649,6 +662,57 @@ impl ReadArgs {
             exclude: self.exclude.clone(),
         }
     }
+}
+
+/// What a binding hands back for one HTTP request ([`http`]): the
+/// response's status and headers (lowercase names), its body's bytes, and
+/// the id of the event stream it holds open instead, which
+/// [`stream_pull`] pulls and `stream.close` ends.
+#[derive(Debug)]
+pub struct HttpReply {
+    pub status: u16,
+    pub headers: Vec<(String, String)>,
+    pub body: Option<Vec<u8>>,
+    pub stream: Option<u64>,
+}
+
+/// Serves one HTTP request whose head is JSON, as `api.handle` takes it
+/// but for its body, which comes as bytes, and the mount's options
+/// (`options`: `stream`, `mcp`) and tool filter: what a binding's HTTP
+/// adapter calls, with a typed body either way.
+pub fn http(
+    engine: &Engine,
+    head: &Value,
+    body: Option<Vec<u8>>,
+    tools: Option<std::sync::Arc<dyn crate::tools::ToolFilter>>,
+) -> Result<HttpReply> {
+    let mut request = request_of(head)?;
+    if body.is_some() {
+        request.body = body;
+    }
+    let mut options = api_options_of(head.get("options").and_then(Value::as_object))?;
+    options.tools = tools;
+    let response = api::handle(engine, &options, &request);
+    let (body, stream) = match response.body {
+        Body::Empty => (None, None),
+        Body::Bytes(bytes) => (Some(bytes), None),
+        Body::Stream(stream) => (None, Some(engine.streams.hold(stream))),
+    };
+    Ok(HttpReply {
+        status: response.status,
+        headers: response.headers,
+        body,
+        stream,
+    })
+}
+
+/// Pulls an event stream [`http`] or `stream.open` holds open, waiting up
+/// to `timeout` for its next bytes: what `stream.next` pulls, as bytes.
+pub fn stream_pull(engine: &Engine, id: u64, timeout: std::time::Duration) -> Result<api::Pull> {
+    engine
+        .streams
+        .next(id, timeout)
+        .ok_or_else(|| unknown_stream(id).into())
 }
 
 // request_of is the request `api.handle` takes as JSON: `method`, `path`,

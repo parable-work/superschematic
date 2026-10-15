@@ -50,10 +50,9 @@ const REFUSALS: Readonly<Record<string, { prototype: EngineError }>> = {
  * `storage`, raw access to the engine's SQLite file; `ids`, an id source
  * written in TypeScript; `validator`, the TypeScript SchemaValidator;
  * `driver`, a value driver written in TypeScript, which the Rust engine
- * takes as config (D58); `http`, a tool filter written in TypeScript
- * outside engineApp and engineMcp.
+ * takes as config (D58).
  */
-export type NativeGap = 'bridge' | 'storage' | 'ids' | 'validator' | 'driver' | 'http';
+export type NativeGap = 'bridge' | 'storage' | 'ids' | 'validator' | 'driver';
 
 /** A use of the TypeScript engine's API the Rust engine's facade does not have yet. */
 export class NativeUnsupportedError extends Error {
