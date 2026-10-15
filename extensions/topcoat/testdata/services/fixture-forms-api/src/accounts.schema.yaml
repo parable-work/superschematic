@@ -6,7 +6,8 @@
 # with an optional field, an optional nested object whose second line its
 # name labels, a list of objects with bounds, a list of enums, a date, a
 # time, a date-time, a secret, a list of secrets without a listMax, a
-# default, long text, any JSON value and a map.
+# default, long text, any JSON value and a map. An account's key has a
+# secret field and a @uiHidden one, so its record has none.
 name: fixture-forms-api
 kind: API
 scalars:
@@ -217,6 +218,17 @@ types:
       - name: newsletter
         typeRef: { name: boolean }
         required: true
+  AccountKey:
+    name: AccountKey
+    role: APIView
+    fields:
+      - name: key
+        typeRef: { name: string }
+        required: true
+        secret: true
+      - name: hint
+        typeRef: { name: string }
+        uiHidden: true
 operationSets:
   - name: AccountMutations
     operations:
@@ -256,6 +268,16 @@ operationSets:
             required: true
           - name: input
             typeRef: { name: NoteInput }
+      # Issue an account a new key.
+      - name: rotateKey
+        typeRef: { name: AccountKey }
+        required: true
+        httpMethod: POST
+        restPath: "accounts/{id}/key"
+        arguments:
+          - name: id
+            typeRef: { name: Identity.UUID }
+            required: true
   - name: BookingMutations
     operations:
       # Book a stay.

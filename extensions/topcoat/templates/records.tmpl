@@ -9,7 +9,9 @@
 //! reaches the browser.
 
 use crate::api::types;
+{{- if .RecordsUseWire }}
 use crate::wire;
+{{- end }}
 use topcoat::runtime::record;
 {{- range .Records }}
 
@@ -22,13 +24,29 @@ use topcoat::runtime::record;
 {{- end }}
 #[record]
 #[derive(Debug, Clone, PartialEq)]
+{{- if not .Fields }}
+pub struct {{ .Name }} {}
+{{- else }}
 pub struct {{ .Name }} {
 {{- range .Fields }}
     pub {{ .Name }}: {{ .Type }},
 {{- end }}
 }
+{{- end }}
 
 impl {{ .Name }} {
+{{- if not .Fields }}
+    /// The record of the type's JSON, as the API sends it: the type has no
+    /// field a record holds.
+    pub fn from_wire(_json: &serde_json::Value) -> Self {
+        Self {}
+    }
+
+    /// The type's JSON, as a request carries it: an empty object.
+    pub fn to_wire(&self) -> serde_json::Value {
+        serde_json::Value::Object(serde_json::Map::new())
+    }
+{{- else }}
     /// The record of the type's JSON, as the API sends it.
     pub fn from_wire(json: &serde_json::Value) -> Self {
         Self {
@@ -52,6 +70,7 @@ impl {{ .Name }} {
 {{- end }}
         serde_json::Value::Object(json)
     }
+{{- end }}
 }
 
 impl From<&types::{{ .TypeName }}> for {{ .Name }} {

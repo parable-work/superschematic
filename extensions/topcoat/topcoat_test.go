@@ -321,7 +321,9 @@ func TestACrateWithoutCallersBuilds(t *testing.T) {
 // valid post books with the input's JSON; a refused field, nested or in a
 // row, renders at its control with the values as sent and the secret
 // blank; row buttons add and remove rows within the list's bounds without
-// calling the operation; and the app's choices render a select.
+// calling the operation; and the app's choices render a select. Its
+// AccountKey, whose fields are a secret one and a @uiHidden one, is an
+// empty record that clippy passes with warnings denied.
 func TestFormsServeATopcoatApp(t *testing.T) {
 	cargoTestCrate(t, formsService, formsAppTest)
 }
@@ -1035,12 +1037,13 @@ const formsAppTest = `use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use schemas_fixture_forms_api_topcoat::api::runtime::{ApiError, RequestContext};
 use schemas_fixture_forms_api_topcoat::api::{
-    types, AccountAnnotateArgs, AccountDraftNoteArgs, AccountImplementation, AccountSignUpArgs, BookingBookArgs, BookingImplementation,
+    types, AccountAnnotateArgs, AccountDraftNoteArgs, AccountImplementation, AccountRotateKeyArgs, AccountSignUpArgs, BookingBookArgs, BookingImplementation,
     Implementations,
 };
 use schemas_fixture_forms_api_topcoat::forms::{
     booking_input_fields, signup_input_fields, BookingInputForm, Choices, FormErrors, NoteInputForm, RoomRequestForm, SignupInputForm,
 };
+use schemas_fixture_forms_api_topcoat::records::AccountKeyRecord;
 use schemas_fixture_forms_api_topcoat::{operations, RouterBuilderFixtureFormsApiExt};
 use serde_json::json;
 use topcoat::context::Cx;
@@ -1077,6 +1080,9 @@ impl AccountImplementation for Accounts {
     }
     async fn draft_note(&self, _ctx: RequestContext, _args: AccountDraftNoteArgs) -> Result<types::AccountView, ApiError> {
         Err(ApiError::not_implemented("draft_note"))
+    }
+    async fn rotate_key(&self, _ctx: RequestContext, _args: AccountRotateKeyArgs) -> Result<types::AccountKey, ApiError> {
+        Err(ApiError::not_implemented("rotateKey"))
     }
 }
 
@@ -1746,6 +1752,14 @@ async fn a_list_of_secrets_books_and_is_never_rendered_back() {
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
     assert!(html.contains(r#"<input id="booking-input-backup-codes-0" name="backupCodes[0]" type="password" required="" autocomplete="off">"#), "{html}");
     assert!(!html.contains("1111-2222"), "{html}");
+}
+
+#[test]
+fn a_record_whose_fields_are_all_left_out_is_empty() {
+    let key = types::AccountKey { key: "sk_123".to_string(), hint: Some("sk_".to_string()) };
+    let record = AccountKeyRecord::from(&key);
+    assert_eq!(record, AccountKeyRecord {});
+    assert_eq!(record.to_wire(), json!({}));
 }
 `
 
