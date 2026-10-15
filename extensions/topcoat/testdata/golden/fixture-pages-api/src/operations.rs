@@ -161,6 +161,28 @@ pub async fn project_create_project(cx: &Cx, args: crate::api::ProjectCreateProj
         .await
 }
 
+/// project.listArchivedProjects (`GET /api/projects/archived`): The archived projects, a collection whose path extends the
+pub async fn project_list_archived_projects(cx: &Cx) -> Result<Vec<types::Project>, ApiError> {
+    let caller = can_project_list_archived_projects(cx).await?;
+    let setup: &Setup = app_context(cx);
+    setup
+        .implementations
+        .project
+        .list_archived_projects(operations::PROJECT_LIST_ARCHIVED_PROJECTS.context(caller))
+        .await
+}
+
+/// project.listNewProjects (`GET /api/projects/new`): The projects started this week, at a path the projects' new page
+pub async fn project_list_new_projects(cx: &Cx) -> Result<Vec<types::Project>, ApiError> {
+    let caller = can_project_list_new_projects(cx).await?;
+    let setup: &Setup = app_context(cx);
+    setup
+        .implementations
+        .project
+        .list_new_projects(operations::PROJECT_LIST_NEW_PROJECTS.context(caller))
+        .await
+}
+
 /// project.deleteProject (`DELETE /api/projects/{id}`): Deletes a project and its tasks.
 pub async fn project_delete_project(cx: &Cx, args: crate::api::ProjectDeleteProjectArgs) -> Result<types::Project, ApiError> {
     let caller = can_project_delete_project(cx).await?;
@@ -209,6 +231,53 @@ pub async fn project_archive_project(cx: &Cx, args: crate::api::ProjectArchivePr
         .await
 }
 
+/// project.listProjectDeletions (`GET /api/projects/{projectId}/delete`): A project's deletions, at the path of its delete page, so they have
+pub async fn project_list_project_deletions(cx: &Cx, args: crate::api::ProjectListProjectDeletionsArgs) -> Result<Vec<types::Comment>, ApiError> {
+    let caller = can_project_list_project_deletions(cx).await?;
+    args.check()?;
+    let setup: &Setup = app_context(cx);
+    setup
+        .implementations
+        .project
+        .list_project_deletions(operations::PROJECT_LIST_PROJECT_DELETIONS.context(caller), args)
+        .await
+}
+
+/// project.listProjectEdits (`GET /api/projects/{projectId}/edit`): A project's edits, at the path of its edit page, so they have no
+pub async fn project_list_project_edits(cx: &Cx, args: crate::api::ProjectListProjectEditsArgs) -> Result<Vec<types::Comment>, ApiError> {
+    let caller = can_project_list_project_edits(cx).await?;
+    args.check()?;
+    let setup: &Setup = app_context(cx);
+    setup
+        .implementations
+        .project
+        .list_project_edits(operations::PROJECT_LIST_PROJECT_EDITS.context(caller), args)
+        .await
+}
+
+/// shelf.listShelves (`GET /api/shelves`): Every shelf.
+pub async fn shelf_list_shelves(cx: &Cx) -> Result<Vec<types::Shelf>, ApiError> {
+    let caller = can_shelf_list_shelves(cx).await?;
+    let setup: &Setup = app_context(cx);
+    setup
+        .implementations
+        .shelf
+        .list_shelves(operations::SHELF_LIST_SHELVES.context(caller))
+        .await
+}
+
+/// shelf.getShelf (`GET /api/shelves/{id}`): One shelf.
+pub async fn shelf_get_shelf(cx: &Cx, args: crate::api::ShelfGetShelfArgs) -> Result<types::Shelf, ApiError> {
+    let caller = can_shelf_get_shelf(cx).await?;
+    args.check()?;
+    let setup: &Setup = app_context(cx);
+    setup
+        .implementations
+        .shelf
+        .get_shelf(operations::SHELF_GET_SHELF.context(caller), args)
+        .await
+}
+
 /// task.listLabelledTasks (`GET /api/labels/{label}/tasks`): The tasks a label marks, under a label nothing lists or reads.
 pub async fn task_list_labelled_tasks(cx: &Cx, args: crate::api::TaskListLabelledTasksArgs) -> Result<Vec<types::Task>, ApiError> {
     let caller = can_task_list_labelled_tasks(cx).await?;
@@ -221,7 +290,7 @@ pub async fn task_list_labelled_tasks(cx: &Cx, args: crate::api::TaskListLabelle
         .await
 }
 
-/// task.listTasks (`GET /api/projects/{projectId}/tasks`): A project's tasks.
+/// task.listTasks (`GET /api/projects/{projectId}/tasks`): A project's tasks, the done ones or the open ones when the query
 pub async fn task_list_tasks(cx: &Cx, args: crate::api::TaskListTasksArgs) -> Result<Vec<types::Task>, ApiError> {
     let caller = can_task_list_tasks(cx).await?;
     args.check()?;
@@ -340,6 +409,18 @@ pub async fn can_project_create_project(cx: &Cx) -> Result<Option<Principal>, Ap
     crate::admit(cx, &operations::PROJECT_CREATE_PROJECT).await
 }
 
+/// Admits the caller of project.listArchivedProjects as its route does: 401 without one, 403
+/// without one of projects.audit. The caller, for the implementation.
+pub async fn can_project_list_archived_projects(cx: &Cx) -> Result<Option<Principal>, ApiError> {
+    crate::admit(cx, &operations::PROJECT_LIST_ARCHIVED_PROJECTS).await
+}
+
+/// Admits the caller of project.listNewProjects as its route does: 401 without one, 403
+/// without one of projects.read. The caller, for the implementation.
+pub async fn can_project_list_new_projects(cx: &Cx) -> Result<Option<Principal>, ApiError> {
+    crate::admit(cx, &operations::PROJECT_LIST_NEW_PROJECTS).await
+}
+
 /// Admits the caller of project.deleteProject as its route does: 401 without one, 403
 /// without one of projects.write. The caller, for the implementation.
 pub async fn can_project_delete_project(cx: &Cx) -> Result<Option<Principal>, ApiError> {
@@ -362,6 +443,30 @@ pub async fn can_project_update_project(cx: &Cx) -> Result<Option<Principal>, Ap
 /// without one of projects.write. The caller, for the implementation.
 pub async fn can_project_archive_project(cx: &Cx) -> Result<Option<Principal>, ApiError> {
     crate::admit(cx, &operations::PROJECT_ARCHIVE_PROJECT).await
+}
+
+/// Admits the caller of project.listProjectDeletions as its route does: 401 without one, 403
+/// without one of projects.read. The caller, for the implementation.
+pub async fn can_project_list_project_deletions(cx: &Cx) -> Result<Option<Principal>, ApiError> {
+    crate::admit(cx, &operations::PROJECT_LIST_PROJECT_DELETIONS).await
+}
+
+/// Admits the caller of project.listProjectEdits as its route does: 401 without one, 403
+/// without one of projects.read. The caller, for the implementation.
+pub async fn can_project_list_project_edits(cx: &Cx) -> Result<Option<Principal>, ApiError> {
+    crate::admit(cx, &operations::PROJECT_LIST_PROJECT_EDITS).await
+}
+
+/// Admits the caller of shelf.listShelves as its route does: 401 without one, 403
+/// without one of shelves.read. The caller, for the implementation.
+pub async fn can_shelf_list_shelves(cx: &Cx) -> Result<Option<Principal>, ApiError> {
+    crate::admit(cx, &operations::SHELF_LIST_SHELVES).await
+}
+
+/// Admits the caller of shelf.getShelf as its route does: 401 without one, 403
+/// without one of shelves.read. The caller, for the implementation.
+pub async fn can_shelf_get_shelf(cx: &Cx) -> Result<Option<Principal>, ApiError> {
+    crate::admit(cx, &operations::SHELF_GET_SHELF).await
 }
 
 /// Admits the caller of task.listLabelledTasks as its route does: 401 without one, 403

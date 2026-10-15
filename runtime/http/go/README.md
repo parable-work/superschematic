@@ -16,9 +16,11 @@ depends on a generated type.
 | `serviceauth` | the service step (D37): the `Authenticator` seam and `Caller`, the standard JWT `Verifier` over a `Config` of issuers, keys and callers (RS256, ES256, EdDSA, with a JWKS cache), the route gate (`Authenticate`, `Require`, `AllowOr`), end-user forwarding (`ForwardedToken`), and the client credential sources (`GoogleIDToken`, `TokenFile`, `SignedToken`) |
 | `identity` | the core user model's runtime (D50): the identity `Config`, argon2id passwords as PHC strings, session tokens, the session cookie, the credential a request carries (`ExtractCredential`), the cross-origin check and the credentialed `CORS` middleware, roles and capabilities, the `Store` with its `database/sql` `SQLStore` for Postgres and SQLite, the `Service` with every session and administration operation, its handlers and its `Middleware` |
 | `filterparse` | list-endpoint filter expression parsing |
+| `paging` | the page of a `@paginated` operation (D60): `Read`, the router's reader of `cursor` and `limit` with a query parameter's 400s, from the raw query as the TypeScript and Rust routers parse one (`QueryValues`), `EncodeCursor` and `DecodeCursor`, a position as the unpadded base64url of its JSON, the encoder failing for a key no router reads back, and `FromRows`, the page of the `limit + 1` rows an implementation read; it writes `runtime/http/testdata/page_parity.json` (`go test ./paging -run TestWriteParityVectors -update`) |
 | `stackconfig` | the config fields an API's edges derive in a stack: a database connection, a service endpoint, a bucket connection and an API's callers field, and their loaders from the environment variables a platform sets (`docs/stack-model.md`, section 3.4), which the TypeScript runtime's readers twin |
 | `bucket` | the provider-neutral `Bucket` a generated `Deps` holds per bucket an API lists (D54): put, get, delete, list and signed URLs. No provider's client: the GCS implementation is generated into the entrypoint of a server whose APIs list a bucket (`buckets.go`) |
 | `bodyargs` | decoding the body arguments of an operation without an input type: each from its JSON value, with the list rules and the value rules, every failure at its path, and a JSON-object scalar's value first checked on its own JSON by the check the route passes in (`CheckJSON`); and a list argument of a `GET` operation from the query string (`QueryList`), with the same rules |
+| `search` | what an implementation needs to answer a `SearchQuery` argument (D62): the search text's words (`Terms`), each word's `LIKE ... ESCAPE '\'` pattern (`LikePattern`), and the case folding an in-memory match compares by (`Fold`, `Matches`), with the lowercase mappings of the TypeScript and Rust runtimes' newer Unicode in `fold_table.go`, which `go generate` writes from the Rust runtime's `fold_mappings` example |
 | `cmd/superschematic-identity` | the identity runner, the binary that creates a database's first administrator (below) |
 
 The generated API package keeps `Config`, `Implementations`, the route table,
@@ -165,3 +167,21 @@ field, and holds an `ir` derived value, the variables `ir.DerivedVariables`
 makes of it, edits to them for an environment no value encodes, and the
 loaded value or the messages of the refusal. The file's `comment` states
 the harness in full.
+
+## Search parity vectors
+
+`runtime/http/testdata/search_parity.json` holds the answers of the Go
+`search` package, which the TypeScript (`searchTerms`, `likePattern`,
+`foldText`, `searchMatches`) and Rust (`search::terms`,
+`search::like_pattern`, `search::fold`, `search::matches`) runtimes give
+too (D62). The `search` package writes it:
+
+```
+cd runtime/http/go && go test ./search -run TestWriteParityVectors -update
+```
+
+A word is a run of characters that are not Unicode `White_Space` (U+0085
+and U+00A0 separate, U+FEFF and U+200B do not), and the first 8 count. A
+pattern escapes `\`, `%` and `_` with `\` and is wrapped in `%`. A fold maps
+each character to its simple lowercase, one for one (`İ` is `i`, and a
+final `Σ` is `σ`). The file's `comment` states the harness.

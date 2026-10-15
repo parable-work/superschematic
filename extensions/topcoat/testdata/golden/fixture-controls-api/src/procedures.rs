@@ -118,9 +118,24 @@ fn decode<T: DeserializeOwned>(argument: &str, value: Value) -> Result<T, Proble
 pub(crate) fn route_controls(router: RouterBuilder) -> RouterBuilder {
     router
         .layer(
+            ProcedureControls::new("/_superschematic/fixture-controls-api/order/list-orders", refusal::<Vec<OrderViewRecord>>)
+                .rate_limit(2),
+        )
+        .layer(
             ProcedureControls::new("/_superschematic/fixture-controls-api/order/place-order", refusal::<OrderViewRecord>)
                 .rate_limit(2)
                 .body_limit_megabytes(3)
+                .timeout_seconds(1),
+        )
+        .layer(
+            ProcedureControls::new("/_superschematic/fixture-controls-api/order/hold-order", refusal::<OrderViewRecord>)
+                .rate_limit(2)
+                .body_limit_megabytes(1)
+                .timeout_seconds(1),
+        )
+        .layer(
+            ProcedureControls::new("/_superschematic/fixture-controls-api/stock/list-warehouses", refusal::<Vec<WarehouseRecord>>)
+                .rate_limit(2)
                 .timeout_seconds(1),
         )
 }
@@ -240,6 +255,37 @@ where
     Json(Err::<T, ProblemRecord>(problem).into_surrogate()).into_response(cx)
 }
 
+/// The arguments of order.listOrders, as browser code builds them.
+#[record]
+#[derive(Debug, Clone, PartialEq)]
+pub struct OrderListOrdersArgsRecord {
+    pub status: Option<String>,
+}
+
+impl OrderListOrdersArgsRecord {
+    /// The operation's arguments: each field's JSON, as a request carries
+    /// it, decoded into its Rust type.
+    pub fn to_args(&self) -> Result<crate::api::OrderListOrdersArgs, ProblemRecord> {
+        Ok(crate::api::OrderListOrdersArgs {
+            status: decode("status", self.status.as_ref().map_or(Value::Null, wire::put_string))?,
+        })
+    }
+}
+
+/// order.listOrders, called from the browser.
+#[procedure("/_superschematic/fixture-controls-api/order/list-orders")]
+pub async fn order_list_orders(cx: &Cx, args: OrderListOrdersArgsRecord) -> topcoat::Result<Result<Vec<OrderViewRecord>, ProblemRecord>> {
+    Ok(call_order_list_orders(cx, args).await)
+}
+
+/// The body of the order_list_orders procedure.
+pub async fn call_order_list_orders(cx: &Cx, args: OrderListOrdersArgsRecord) -> Result<Vec<OrderViewRecord>, ProblemRecord> {
+    let args = args.to_args()?;
+    let value = operations::order_list_orders(cx, args).await?;
+    let json = serde_json::to_value(&value).unwrap_or_default();
+    Ok(wire::list(&json, OrderViewRecord::from_wire))
+}
+
 /// order.placeOrder, called from the browser.
 #[procedure("/_superschematic/fixture-controls-api/order/place-order")]
 pub async fn order_place_order(cx: &Cx) -> topcoat::Result<Result<OrderViewRecord, ProblemRecord>> {
@@ -251,6 +297,83 @@ pub async fn call_order_place_order(cx: &Cx) -> Result<OrderViewRecord, ProblemR
     let value = operations::order_place_order(cx).await?;
     let json = serde_json::to_value(&value).unwrap_or_default();
     Ok(OrderViewRecord::from_wire(&json))
+}
+
+/// The arguments of order.getOrder, as browser code builds them.
+#[record]
+#[derive(Debug, Clone, PartialEq)]
+pub struct OrderGetOrderArgsRecord {
+    pub id: String,
+}
+
+impl OrderGetOrderArgsRecord {
+    /// The operation's arguments: each field's JSON, as a request carries
+    /// it, decoded into its Rust type.
+    pub fn to_args(&self) -> Result<crate::api::OrderGetOrderArgs, ProblemRecord> {
+        Ok(crate::api::OrderGetOrderArgs {
+            id: decode("id", wire::put_string(&self.id))?,
+        })
+    }
+}
+
+/// order.getOrder, called from the browser.
+#[procedure("/_superschematic/fixture-controls-api/order/get-order")]
+pub async fn order_get_order(cx: &Cx, args: OrderGetOrderArgsRecord) -> topcoat::Result<Result<OrderViewRecord, ProblemRecord>> {
+    Ok(call_order_get_order(cx, args).await)
+}
+
+/// The body of the order_get_order procedure.
+pub async fn call_order_get_order(cx: &Cx, args: OrderGetOrderArgsRecord) -> Result<OrderViewRecord, ProblemRecord> {
+    let args = args.to_args()?;
+    let value = operations::order_get_order(cx, args).await?;
+    let json = serde_json::to_value(&value).unwrap_or_default();
+    Ok(OrderViewRecord::from_wire(&json))
+}
+
+/// The arguments of order.holdOrder, as browser code builds them.
+#[record]
+#[derive(Debug, Clone, PartialEq)]
+pub struct OrderHoldOrderArgsRecord {
+    pub id: String,
+    pub reason: String,
+}
+
+impl OrderHoldOrderArgsRecord {
+    /// The operation's arguments: each field's JSON, as a request carries
+    /// it, decoded into its Rust type.
+    pub fn to_args(&self) -> Result<crate::api::OrderHoldOrderArgs, ProblemRecord> {
+        Ok(crate::api::OrderHoldOrderArgs {
+            id: decode("id", wire::put_string(&self.id))?,
+            reason: decode("reason", wire::put_string(&self.reason))?,
+        })
+    }
+}
+
+/// order.holdOrder, called from the browser.
+#[procedure("/_superschematic/fixture-controls-api/order/hold-order")]
+pub async fn order_hold_order(cx: &Cx, args: OrderHoldOrderArgsRecord) -> topcoat::Result<Result<OrderViewRecord, ProblemRecord>> {
+    Ok(call_order_hold_order(cx, args).await)
+}
+
+/// The body of the order_hold_order procedure.
+pub async fn call_order_hold_order(cx: &Cx, args: OrderHoldOrderArgsRecord) -> Result<OrderViewRecord, ProblemRecord> {
+    let args = args.to_args()?;
+    let value = operations::order_hold_order(cx, args).await?;
+    let json = serde_json::to_value(&value).unwrap_or_default();
+    Ok(OrderViewRecord::from_wire(&json))
+}
+
+/// stock.listShipments, called from the browser.
+#[procedure("/_superschematic/fixture-controls-api/stock/list-shipments")]
+pub async fn stock_list_shipments(cx: &Cx) -> topcoat::Result<Result<Vec<ShipmentRecord>, ProblemRecord>> {
+    Ok(call_stock_list_shipments(cx).await)
+}
+
+/// The body of the stock_list_shipments procedure.
+pub async fn call_stock_list_shipments(cx: &Cx) -> Result<Vec<ShipmentRecord>, ProblemRecord> {
+    let value = operations::stock_list_shipments(cx).await?;
+    let json = serde_json::to_value(&value).unwrap_or_default();
+    Ok(wire::list(&json, ShipmentRecord::from_wire))
 }
 
 /// The arguments of stock.releaseReservation, as browser code builds them.
@@ -282,4 +405,17 @@ pub async fn call_stock_release_reservation(cx: &Cx, args: StockReleaseReservati
     let value = operations::stock_release_reservation(cx, args).await?;
     let json = serde_json::to_value(&value).unwrap_or_default();
     Ok(ReservationRecord::from_wire(&json))
+}
+
+/// stock.listWarehouses, called from the browser.
+#[procedure("/_superschematic/fixture-controls-api/stock/list-warehouses")]
+pub async fn stock_list_warehouses(cx: &Cx) -> topcoat::Result<Result<Vec<WarehouseRecord>, ProblemRecord>> {
+    Ok(call_stock_list_warehouses(cx).await)
+}
+
+/// The body of the stock_list_warehouses procedure.
+pub async fn call_stock_list_warehouses(cx: &Cx) -> Result<Vec<WarehouseRecord>, ProblemRecord> {
+    let value = operations::stock_list_warehouses(cx).await?;
+    let json = serde_json::to_value(&value).unwrap_or_default();
+    Ok(wire::list(&json, WarehouseRecord::from_wire))
 }

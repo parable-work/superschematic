@@ -24,6 +24,11 @@ Its entry points:
   (below), a token-bucket rate limiter with a pluggable store, and what a
   generated server reads at startup: the stack's derived config fields
   and a JSON-lines logger (below).
+  `readPage` reads a `@paginated` operation's `cursor` and `limit` (D60)
+  with a query parameter's 400s; `encodeCursor`, `decodeCursor` and
+  `pageFromRows` build its `Page`, `{items, next}`, as the Go and Rust
+  runtimes do (`runtime/http/testdata/page_parity.json`), the encoder
+  throwing for a key no router reads back.
   `decodeParam` reads a path or query value from its strings; a query
   list accepts repeated keys and comma-separated values.
   `decodeJsonParam` reads every body parameter from its JSON value, with

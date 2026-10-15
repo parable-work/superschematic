@@ -1,0 +1,76 @@
+name: fixture-refs-api
+kind: API
+scalars:
+  Identity.Slug: { name: Identity.Slug, languagePrimitive: string, typeMappings: { sql: CITEXT } }
+  Identity.UUID: { name: Identity.UUID, languagePrimitive: string, typeMappings: { sql: UUID } }
+types:
+  ItemView:
+    name: ItemView
+    comment: |-
+      An item as the catalog lists it: its title, and so the label of every
+      reference to it, is its name.
+    role: EmbeddedStruct
+    display: { noun: Item, plural: Items, titleField: name, summaryFields: [name, sku] }
+    fields:
+      - { name: id, typeRef: { name: Identity.UUID }, required: true }
+      - { name: name, typeRef: { name: string }, required: true }
+      - { name: sku, typeRef: { name: Identity.Slug }, required: true }
+      - { name: inStock, typeRef: { name: boolean }, required: true }
+  BasketLine:
+    name: BasketLine
+    comment: A line names its item by id, which listItems lists.
+    role: EmbeddedStruct
+    fields:
+      - name: itemId
+        typeRef: { name: Identity.UUID }
+        required: true
+        references: { type: ItemView }
+      - { name: quantity, typeRef: { name: number }, required: true, validateMin: 1, validateMax: 9 }
+  BasketInput:
+    name: BasketInput
+    role: APIInput
+    fields:
+      - { name: lines, typeRef: { name: BasketLine, isArray: true }, required: true, validateListMin: 1, validateListMax: 5 }
+      - name: giftSku
+        comment: A gift named by its sku, with every member said.
+        typeRef: { name: Identity.Slug }
+        references: { type: ItemView, options: Catalog.listItems, value: sku, label: name }
+  BasketView:
+    name: BasketView
+    role: EmbeddedStruct
+    fields:
+      - { name: id, typeRef: { name: Identity.UUID }, required: true }
+      - { name: lines, typeRef: { name: BasketLine, isArray: true }, required: true }
+operationSets:
+  - name: Catalog
+    operations:
+      - name: listItems
+        comment: |-
+          The items, narrowed by a search of their text and by ids, the lookup
+          a UI names the references' values through.
+        httpMethod: GET
+        restPath: items
+        typeRef: { name: ItemView, isArray: true }
+        required: true
+        arguments:
+          - { name: q, typeRef: { name: string }, validateMaxLength: 50, isQuery: true, search: true }
+          - name: ids
+            typeRef: { name: Identity.UUID, isArray: true }
+            validateListMax: 5
+            isQuery: true
+            references: { type: ItemView }
+          - { name: inStock, typeRef: { name: boolean }, isQuery: true }
+      - name: getItem
+        httpMethod: GET
+        restPath: items/{itemId}
+        typeRef: { name: ItemView }
+        required: true
+        arguments:
+          - { name: itemId, typeRef: { name: Identity.UUID }, required: true, references: { type: ItemView } }
+      - name: placeBasket
+        httpMethod: POST
+        restPath: baskets
+        typeRef: { name: BasketView }
+        required: true
+        arguments:
+          - { name: input, typeRef: { name: BasketInput }, required: true }

@@ -110,7 +110,7 @@ A method's arguments say where each value comes from:
 
 - **Path**: an argument named in the path, such as `id` in `orders/{id}`.
 - **Query**: `QueryParam<T>`. `Nullable<T>` makes it optional, and the Go
-  implementation receives a pointer (`limit *float64`) or a nil slice. A
+  implementation receives a pointer (`minRating *float64`) or a nil slice. A
   list is read from repeated keys and comma-separated values
   (`?statuses=placed,shipped`), and each item is checked at
   `statuses[i]`.
@@ -159,6 +159,62 @@ The Topcoat app's table of orders reads it
 ([Display components](/superschematic/guides/topcoat/#display-components)).
 
 <Snippet file="go/shop-orders/orders.go" symbol="orderView" />
+
+### Pages
+
+A list operation pages when it declares `@paginated` from
+`@superschematic/api` (D60):
+
+```ts
+@rest(HttpMethod.GET, "items")
+@paginated({ defaultLimit: 20, maxLimit: 100 })
+listItems(inStock: QueryParam<Nullable<boolean>>): ItemView[] {
+  throw new Error("schema declaration only");
+}
+```
+
+The route takes two query parameters the method does not declare: `limit`,
+a whole number from 1 to `maxLimit` (100 when left out), `defaultLimit` when
+the request sends none (20, or `maxLimit` when that is less); and `cursor`,
+the `next` of the page before. `data` is the page,
+`{"items": [...], "next": "<cursor>"}`, which may hold fewer items than its
+limit, and `next` is null after the last page. A cursor is opaque: the
+implementation names the position of a page's last item in the operation's
+order, a key such as an order's `placedAt` and `id`, and the runtime writes
+it as the unpadded base64url of its JSON. A cursor it cannot read back is a
+400 at `cursor`, and the caller starts again. The operation must be a GET
+returning `T[]`, with no argument named `cursor`, `limit` or `page`, and no
+operation named `<operation>All` beside it, the name the SDKs give its
+iterator. The OpenAPI document and the MCP tool describe both parameters
+and the page.
+
+Each runtime reads and builds a page: Go's `paging` package (`Read`,
+`FromRows`, `EncodeCursor`, `DecodeCursor`), TypeScript's `readPage`,
+`pageFromRows`, `encodeCursor` and `decodeCursor`, and Rust's `page` module
+(`PageSpec`, `Page::from_rows`, `Cursor`). An implementation reads up to
+`limit + 1` rows after the cursor's position and builds the page from them.
+Every server and SDK renders it: the implementation takes `page`, the
+page request, and returns the page, and each SDK's method takes `cursor`
+and `limit` and returns the page, beside `<operation>All`, which yields
+every item, asking for each page with the last one's `next`. A Topcoat
+crate's call, procedure and argument form take the page too, and its
+console links a list's next and first pages
+([A paged list and a search box](/superschematic/guides/topcoat/#a-paged-list-and-a-search-box)).
+
+`shop-orders` pages its orders, a product's reviews and its catalog. Its Go
+implementation reads a page of orders in two steps: the keys of up to
+`limit + 1` orders after the cursor's, `placedAt` then `id`, with a query
+that compares the pair, which the ORM's filters cannot say, then the
+orders the page keeps, with their lines, through the ORM:
+
+<Snippet file="go/shop-orders/orders.go" symbol={['orderKey', 'Orders.ListOrders']} />
+
+`listReviews` also takes a search, `q`, a `SearchQuery`
+([References and search](/superschematic/reference/references-and-search/)),
+which keeps the reviews whose
+[`search_text`](/superschematic/guides/database-tables/#text-search) holds
+each of its words: one `ILIKE` per word, with the pattern the runtime's
+`search.LikePattern` escapes.
 
 ## Errors
 
@@ -346,7 +402,7 @@ namespace's trait, and the authenticator that says who the caller is.
 `shop-orders`' users are the core user model's, so that is the identity
 runtime's `IdentityAuthenticator`, over the API's identity service
 ([Auth and permissions](/superschematic/guides/auth-and-permissions/#say-who-the-caller-is-rust)).
-One shop serves both namespaces here, and the users are in a SQLite
+One shop serves every namespace here, and the users are in a SQLite
 database of `shop-db`'s identity tables:
 
 <Snippet file="rust-server/src/lib.rs" symbol={['users', 'implementations']} />

@@ -206,6 +206,12 @@ type EndpointInfo struct {
 	Encrypted  bool
 	Filterable bool
 
+	// Page is the operation's @paginated (D60), nil for every other
+	// endpoint. Its two query parameters, cursor and limit, are not IR
+	// arguments and so not in QueryParams: each writer renders them from
+	// Page, and wraps the response, still OutputIsArray, in the page.
+	Page *PageInfo
+
 	// ManualRouteRegistration marks operations excluded from generated route
 	// registration. The handler factory and interface method are still
 	// generated so services can register the route themselves.
@@ -1049,6 +1055,7 @@ func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *
 		Timeout:                      timeout,
 		Encrypted:                    operationEncrypted(set, op),
 		Filterable:                   op.Filterable,
+		Page:                         pageInfo(set, op),
 		ManualRouteRegistration:      op.ManualRouteRegistration,
 		IdentityOperation:            op.IdentityOperation,
 		IsWebhook:                    op.Webhook,

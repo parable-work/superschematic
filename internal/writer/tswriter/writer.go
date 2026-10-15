@@ -138,8 +138,10 @@ var symbolPackages = map[string]string{
 	"requireService": "@superschematic/api", "allowService": "@superschematic/api",
 	"timeout": "@superschematic/api", "uiHidden": "@superschematic/api",
 	"HttpMethod": "@superschematic/api", "EncryptedField": "@superschematic/api", "QueryParam": "@superschematic/api",
+	"RefersTo": "@superschematic/api", "SearchQuery": "@superschematic/api",
 	"mcp": "@superschematic/api", "userSessions": "@superschematic/api", "userAdministration": "@superschematic/api",
 	"job": "@superschematic/api", "worker": "@superschematic/api",
+	"paginated": "@superschematic/api",
 	// @superschematic/schema-config
 	"envVars": "@superschematic/schema-config",
 	// @superschematic/stack

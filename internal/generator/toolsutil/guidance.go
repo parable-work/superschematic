@@ -2,7 +2,9 @@ package toolsutil
 
 import (
 	"maps"
+	"strings"
 
+	"github.com/parable-work/superschematic/internal/generator/apigen"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -62,4 +64,19 @@ func ExpectedRevisionPointers(docs *ir.OperationDocs) []string {
 		return nil
 	}
 	return append([]string(nil), docs.ExpectedRevisionPointers...)
+}
+
+// PageSentence is what a paged operation's tool description adds (D60).
+const PageSentence = "Pages: pass the result's `next` back as `cursor` for the next page; `next` is null after the last."
+
+// PagedDescription is a tool's description with PageSentence after it when
+// the endpoint pages, and the description as it is otherwise.
+func PagedDescription(description string, page *apigen.PageInfo) string {
+	if page == nil {
+		return description
+	}
+	if description == "" {
+		return PageSentence
+	}
+	return strings.TrimRight(description, " ") + " " + PageSentence
 }

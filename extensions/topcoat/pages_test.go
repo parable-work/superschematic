@@ -23,6 +23,14 @@ func pagesOutputs() map[string]any {
 	return outputs
 }
 
+// livePagesOutputs are pagesOutputs with the lists live: a list with a
+// filter renders through a shard.
+func livePagesOutputs() map[string]any {
+	outputs := rustOutputs()
+	outputs["topcoat"] = map[string]any{"enabled": true, "pages": map[string]any{"enabled": true, "live": true}}
+	return outputs
+}
+
 // TestPagesServeATopcoatApp builds fixture-pages-api's crates with the
 // pages on and runs cargo clippy, then cargo test, with pagesAppTest: an
 // app discovers the pages; the index and the nav list what the caller may
@@ -231,6 +239,89 @@ pages_prefix = { "fixture-pages-api" = "/admin/projects" }
 	}
 }
 
+// TestLiveListsAreOptIn builds fixture-pages-api with the pages on: without
+// live, a list's filter is a component and the crate has no shard and
+// loads nothing of Topcoat's runtime; with it, each list with a filter is a
+// shard at its own path under the prefix, the projects' and a project's
+// tasks', and a list without a filter, the documents', stays a component.
+// [extension.topcoat]'s pages_live turns them on too, and needs a
+// pages_prefix.
+func TestLiveListsAreOptIn(t *testing.T) {
+	files, _ := readCrate(t, registry.DefaultNaming(), pagesService, pagesOutputs())
+	for _, unwanted := range []string{"#[shard", "topcoat::runtime", "_live", "signal("} {
+		if strings.Contains(files["pages.rs"], unwanted) {
+			t.Errorf("pages.rs without live lists has %s", unwanted)
+		}
+	}
+	if !strings.Contains(files["pages.rs"], "#[component]\nasync fn projects_list(cx: &Cx, filter: ProjectListProjectsArgsForm, next: String)") {
+		t.Error("pages.rs without live lists renders no projects_list component")
+	}
+	live, _ := readCrate(t, registry.DefaultNaming(), pagesService, livePagesOutputs())
+	for _, want := range []string{
+		"use topcoat::runtime::{Event, shard, signal};",
+		"#[shard(\"/console/_live/projects\")]\nasync fn projects_list(cx: &Cx, query: String, next: String)",
+		"#[shard(\"/console/_live/projects_tasks\")]\nasync fn projects_tasks_list(cx: &Cx, project_id: String, query: String, next: String)",
+		"pub async fn projects_list_page(cx: &Cx) -> topcoat::Result<impl View> {",
+		"Ok(_) => projects_list(query: query_of(cx), next: next),",
+		"#[component]\nasync fn documents_list(cx: &Cx, next: String)",
+	} {
+		if !strings.Contains(live["pages.rs"], want) {
+			t.Errorf("pages.rs with live lists lacks %q", want)
+		}
+	}
+
+	names, err := registry.ParseNaming([]byte("[extension.topcoat]\nservices = [\"fixture-pages-api\"]\npages_prefix = \"/admin\"\npages_live = true\n"), "superschematic.toml")
+	if err != nil {
+		t.Fatalf("ParseNaming: %v", err)
+	}
+	outputs := rustOutputs()
+	delete(outputs, "topcoat")
+	if files, _ := readCrate(t, names, pagesService, outputs); !strings.Contains(files["pages.rs"], `#[shard("/admin/_live/projects")]`) {
+		t.Error("pages_live in the table wrote no live list")
+	}
+	for table, want := range map[string]string{
+		"services = [\"a\"]\npages_live = true":                                 "has no pages_prefix",
+		"services = [\"a\"]\npages_prefix = \"/console\"\npages_live = \"yes\"": "pages_live must be true or false",
+	} {
+		names, err := registry.ParseNaming([]byte("[extension.topcoat]\n"+table+"\n"), "superschematic.toml")
+		if err != nil {
+			t.Fatalf("ParseNaming: %v", err)
+		}
+		if _, err := registry.Assemble(names, topcoat.Extension{}); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("[extension.topcoat] %s: %v, want it refused with %q", table, err, want)
+		}
+	}
+}
+
+// TestPagesThatWouldMeetAreLeftOut builds fixture-pages-api, whose
+// projects/new list would be served at the projects' new page and whose
+// projects/{id}/edit and projects/{id}/delete lists at a project's edit
+// and delete pages: each is left out, with its reason in the build log,
+// and its collection has no place in the trail, so the app's router never
+// meets a page twice. The pages' route controls name no page of
+// fixture-pages-api, whose routes have none.
+func TestPagesThatWouldMeetAreLeftOut(t *testing.T) {
+	files, log := readCrate(t, registry.DefaultNaming(), pagesService, livePagesOutputs())
+	for _, want := range []string{
+		"no page for project.listNewProjects: its collection, projects/new, has no pages, since the list of projects/new would be served at GET projects/new, the new page of projects",
+		"no page for project.listProjectEdits: its collection, projects/{}/edit, has no pages, since the list of projects/{}/edit would be served at GET projects/{}/edit, the edit page of an item of projects",
+		"no page for project.listProjectDeletions: its collection, projects/{}/delete, has no pages, since the list of projects/{}/delete would be served at GET projects/{}/delete, the delete page of an item of projects",
+	} {
+		if !strings.Contains(log, want) {
+			t.Errorf("the build log lacks %q:\n%s", want, log)
+		}
+	}
+	pages := files["pages.rs"]
+	for _, unwanted := range []string{`words: &["projects", "new"]`, `words: &["edit"]`, `words: &["delete"]`, "projects_new_list", "projects_edit_list", "route_controls"} {
+		if strings.Contains(pages, unwanted) {
+			t.Errorf("pages.rs has %s", unwanted)
+		}
+	}
+	if strings.Count(pages, `#[page("/console/projects/new")]`) != 1 || strings.Count(pages, `#[page("/console/projects/{project_id}/edit")]`) != 1 {
+		t.Error("pages.rs registers the projects' new page or a project's edit page other than once")
+	}
+}
+
 // TestATableLinksItsRows builds fixture-views-api, whose crate has no
 // pages: a table's hrefs link each row's title cell, or its first cell for
 // a type whose columns hold no title, and a row without an href, or past
@@ -266,7 +357,8 @@ func TestATableLinksItsRows(t *testing.T) {
 }
 
 // pagesAppTest is tests/app.rs of fixture-pages-api's Topcoat crate.
-const pagesAppTest = `use std::sync::{Arc, Mutex};
+const pagesAppTest = `use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use http::request::Parts;
@@ -275,7 +367,8 @@ use schemas_fixture_pages_api_topcoat::api::{
     types, DocumentClearCommentsArgs, DocumentCreateDocumentArgs, DocumentGetDocumentArgs, DocumentImplementation,
     DocumentListCommentsArgs, DocumentRemoveCoverArgs, DocumentReplaceCommentsArgs, DocumentReplaceDocumentArgs, Implementations,
     MemberImplementation, ProjectArchiveProjectArgs, ProjectCreateProjectArgs, ProjectDeleteProjectArgs, ProjectGetProjectArgs,
-    ProjectImplementation, ProjectListProjectsArgs, ProjectUpdateProjectArgs, TaskAddTaskArgs, TaskGetTaskArgs, TaskImplementation,
+    ProjectImplementation, ProjectListProjectDeletionsArgs, ProjectListProjectEditsArgs, ProjectListProjectsArgs,
+    ProjectUpdateProjectArgs, ShelfGetShelfArgs, ShelfImplementation, TaskAddTaskArgs, TaskGetTaskArgs, TaskImplementation,
     TaskListLabelledTasksArgs, TaskListTasksArgs, ViewerImplementation,
 };
 use schemas_fixture_pages_api_topcoat::choices::Choices;
@@ -414,6 +507,23 @@ impl ProjectImplementation for Shop {
         self.0.projects.lock().unwrap().retain(|project| project.id != args.id);
         Ok(project)
     }
+    async fn list_new_projects(&self, _ctx: RequestContext) -> Result<Vec<types::Project>, ApiError> {
+        Err(ApiError::not_implemented("list_new_projects"))
+    }
+    async fn list_archived_projects(&self, _ctx: RequestContext) -> Result<Vec<types::Project>, ApiError> {
+        let projects = self.0.projects.lock().unwrap();
+        Ok(projects.iter().filter(|project| project.archived).cloned().collect())
+    }
+    async fn list_project_edits(&self, _ctx: RequestContext, _args: ProjectListProjectEditsArgs) -> Result<Vec<types::Comment>, ApiError> {
+        Err(ApiError::not_implemented("list_project_edits"))
+    }
+    async fn list_project_deletions(
+        &self,
+        _ctx: RequestContext,
+        _args: ProjectListProjectDeletionsArgs,
+    ) -> Result<Vec<types::Comment>, ApiError> {
+        Err(ApiError::not_implemented("list_project_deletions"))
+    }
     async fn archive_project(&self, _ctx: RequestContext, args: ProjectArchiveProjectArgs) -> Result<types::Project, ApiError> {
         let mut projects = self.0.projects.lock().unwrap();
         let project = projects.iter_mut().find(|project| project.id == args.id).ok_or_else(|| ApiError::not_found("No such project"))?;
@@ -431,7 +541,11 @@ impl TaskImplementation for Shop {
     async fn list_tasks(&self, _ctx: RequestContext, args: TaskListTasksArgs) -> Result<Vec<types::Task>, ApiError> {
         self.0.project(&args.project_id)?;
         let tasks = self.0.tasks.lock().unwrap();
-        Ok(tasks.iter().filter(|(project, _)| *project == args.project_id).map(|(_, task)| task.clone()).collect())
+        Ok(tasks
+            .iter()
+            .filter(|(project, task)| *project == args.project_id && args.done.is_none_or(|done| task.done == done))
+            .map(|(_, task)| task.clone())
+            .collect())
     }
     async fn get_task(&self, _ctx: RequestContext, args: TaskGetTaskArgs) -> Result<types::Task, ApiError> {
         let tasks = self.0.tasks.lock().unwrap();
@@ -496,6 +610,16 @@ impl DocumentImplementation for Shop {
 }
 
 #[async_trait]
+impl ShelfImplementation for Shop {
+    async fn list_shelves(&self, _ctx: RequestContext) -> Result<Vec<types::Shelf>, ApiError> {
+        Ok(vec![types::Shelf { id: "top".to_owned(), label: "Top shelf".to_owned() }])
+    }
+    async fn get_shelf(&self, _ctx: RequestContext, args: ShelfGetShelfArgs) -> Result<types::Shelf, ApiError> {
+        Ok(types::Shelf { id: args.id, label: "Top shelf".to_owned() })
+    }
+}
+
+#[async_trait]
 impl MemberImplementation for Shop {
     async fn list_members(&self, _ctx: RequestContext) -> Result<Vec<types::Member>, ApiError> {
         Ok(vec![types::Member { id: uuid(NOWHERE), email: "ada@example.com".to_owned() }])
@@ -520,18 +644,25 @@ impl Authenticator for NoRequests {
 }
 
 // A page's caller, by the x-caller header: a reader of projects, a writer,
-// a reader of members, an editor of documents, one with no permission, or
-// none.
-struct Callers;
+// an auditor, a reader of members, a reader of shelves, an editor of
+// documents, one with no permission, or none. It counts the times it is
+// asked.
+#[derive(Default)]
+struct Callers {
+    asked: Arc<AtomicUsize>,
+}
 
 #[async_trait]
 impl PageAuthenticator for Callers {
     async fn principal(&self, cx: &Cx) -> Result<Option<Principal>, ApiError> {
+        self.asked.fetch_add(1, Ordering::SeqCst);
         let caller = parts(cx).headers.get("x-caller").and_then(|value| value.to_str().ok()).unwrap_or_default();
         let permissions: &[&str] = match caller {
             "reader" => &["projects.read"],
             "writer" => &["projects"],
+            "auditor" => &["projects.read", "projects.audit"],
             "members" => &["members.read"],
+            "shelver" => &["shelves.read"],
             "editor" => &["documents"],
             "nobody" => &[],
             _ => return Ok(None),
@@ -545,6 +676,7 @@ fn implementations(store: &Arc<Store>) -> Implementations {
         document: Arc::new(Shop(Arc::clone(store))),
         member: Arc::new(Shop(Arc::clone(store))),
         project: Arc::new(Shop(Arc::clone(store))),
+        shelf: Arc::new(Shop(Arc::clone(store))),
         task: Arc::new(Shop(Arc::clone(store))),
         viewer: Arc::new(Shop(Arc::clone(store))),
         authenticator: Arc::new(NoRequests),
@@ -556,7 +688,7 @@ fn app(store: &Arc<Store>) -> Router {
     Router::builder()
         .discover()
         .app_context(Settings::new().title("Projects console").sign_in("/sign-in").choices(owners()))
-        .fixture_pages_api(implementations(store), Callers)
+        .fixture_pages_api(implementations(store), Callers::default())
         .build()
 }
 
@@ -567,7 +699,7 @@ fn owners() -> Choices {
 
 // The same app without settings: a refusal has no sign-in link.
 fn bare_app(store: &Arc<Store>) -> Router {
-    Router::builder().discover().fixture_pages_api(implementations(store), Callers).build()
+    Router::builder().discover().fixture_pages_api(implementations(store), Callers::default()).build()
 }
 
 struct Answer {
@@ -638,7 +770,7 @@ async fn a_list_filters_links_its_rows_and_offers_a_new_page_to_a_writer() {
     assert!(list.html.contains(&format!(r#"<a href="/console/projects/{gemini}">Gemini</a>"#)), "{}", list.html);
     assert!(!list.html.contains("Start a project"), "a reader may not create: {}", list.html);
     assert!(list.html.contains(r#"<td data-field="ownerId">Ada Lovelace</td>"#), "{}", list.html);
-    assert!(list.html.contains(r#"<form method="get" class="ss-filter">"#), "{}", list.html);
+    assert!(list.html.contains(r#"<form method="get" class="ss-filter" data-ss-live="projects""#), "{}", list.html);
     assert!(list.html.contains(r#"<li><a href="/console">Projects console</a></li><li><span aria-current="page">Projects</span></li>"#), "{}", list.html);
 
     let list = get(&app, "/console/projects", "writer").await;
@@ -889,7 +1021,7 @@ async fn a_nested_resource_has_pages_under_its_parents_item() {
     let labelled = get(&app, "/console/labels/rocket/tasks", "reader").await;
     assert_eq!(labelled.status, StatusCode::OK, "{}", labelled.html);
     assert!(labelled.html.contains(r#"<th scope="row" data-field="title">Build the rocket</th>"#), "{}", labelled.html);
-    assert!(labelled.html.contains(r#"<li><span>Labels</span></li><li><span>Label rocket</span></li><li><span aria-current="page">Tasks</span></li>"#), "{}", labelled.html);
+    assert!(labelled.html.contains(r#"<li><span>Labels</span></li><li><span>rocket</span></li><li><span aria-current="page">Tasks</span></li>"#), "{}", labelled.html);
     let index = get(&app, "/console", "reader").await;
     assert!(!index.html.contains("/console/labels"), "{}", index.html);
 }
@@ -1013,6 +1145,202 @@ async fn a_refused_caller_keeps_the_routes_status() {
     assert_eq!(members.status, StatusCode::OK, "{}", members.html);
     assert!(members.html.contains("ada@example.com"), "{}", members.html);
 }
+
+// A shard's request, as Topcoat's runtime sends one: its arguments and the
+// values of the signals its content holds, in JSON, under the shard's
+// identity when the page gave one.
+async fn shard(router: &Router, uri: &str, caller: &str, body: serde_json::Value, identity: Option<&str>) -> Answer {
+    let mut request = http::Request::builder().method("POST").uri(uri).header(header::CONTENT_TYPE, "application/json");
+    if !caller.is_empty() {
+        request = request.header("x-caller", caller);
+    }
+    if let Some(identity) = identity {
+        request = request.header("x-topcoat-identity", identity);
+    }
+    let response = router.handle(request.body(Body::from(body.to_string())).unwrap()).await;
+    let status = response.status();
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    Answer { status, html: String::from_utf8(bytes.to_vec()).unwrap(), location: None }
+}
+
+// The text of html between the first start and the end after it.
+fn between<'a>(html: &'a str, start: &str, end: &str) -> &'a str {
+    let rest = &html[html.find(start).unwrap_or_else(|| panic!("no {start} in {html}")) + start.len()..];
+    &rest[..rest.find(end).unwrap()]
+}
+
+#[tokio::test]
+async fn a_live_list_renders_its_filter_through_a_shard() {
+    let app = app(&Store::new());
+    // Without Topcoat's runtime the page works as before: its filter is a
+    // GET form and its results follow it, between the shard's markers.
+    let list = get(&app, "/console/projects?statuses=planned", "reader").await;
+    assert_eq!(list.status, StatusCode::OK, "{}", list.html);
+    for want in [
+        r#"<!--::topcoat::shard::start("/console/_live/projects", "#,
+        r#"<form method="get" class="ss-filter" data-ss-live="projects" data-topcoat-on:submit=""#,
+        r#"<input type="hidden" data-ss-query="" data-topcoat-on:input=""#,
+        r#"value="planned" checked="""#,
+    ] {
+        assert!(list.html.contains(want), "the list lacks {want}: {}", list.html);
+    }
+    assert!(list.html.contains("Gemini") && !list.html.contains("Apollo"), "{}", list.html);
+
+    // The shard's request renders the list for the query it sends, without
+    // the layout around it.
+    let live = shard(&app, "/console/_live/projects", "reader", serde_json::json!({"args": ["statuses=active", "/console/projects"]}), None).await;
+    assert_eq!(live.status, StatusCode::OK, "{}", live.html);
+    assert!(live.html.contains("Apollo") && !live.html.contains("Gemini"), "{}", live.html);
+    assert!(live.html.contains(r#"value="active" checked="""#), "{}", live.html);
+    assert!(!live.html.contains("ss-nav"), "{}", live.html);
+
+    // As the runtime renders it again, under the shard's identity, with the
+    // query the filter's submit set in its signal, which wins over the
+    // query the page first gave it.
+    let identity = between(&list.html, r#"::topcoat::shard::start("/console/_live/projects", ""#, "\"");
+    let signal = between(&list.html, "::topcoat::signal({&quot;t&quot;:&quot;signal&quot;,&quot;id&quot;:&quot;", "&quot;");
+    let body = serde_json::json!({"args": ["statuses=planned", "/console/projects"], "signals": {signal: "statuses=active"}});
+    let rerun = shard(&app, "/console/_live/projects", "reader", body, Some(identity)).await;
+    assert_eq!(rerun.status, StatusCode::OK, "{}", rerun.html);
+    assert!(rerun.html.contains("Apollo") && !rerun.html.contains("Gemini"), "{}", rerun.html);
+
+    // A filter the rules refuse answers 422, its message at its control,
+    // as the page does; a name no control has, or an id, is ignored.
+    let refused = shard(&app, "/console/_live/projects", "reader", serde_json::json!({"args": ["statuses=lost", "/console/projects"]}), None).await;
+    assert_eq!(refused.status, StatusCode::UNPROCESSABLE_ENTITY, "{}", refused.html);
+    assert!(!refused.html.contains("<table"), "{}", refused.html);
+    let forged = format!("statuses=planned&id={APOLLO}&owner=ada");
+    let ignored = shard(&app, "/console/_live/projects", "reader", serde_json::json!({"args": [forged, "/console/projects"]}), None).await;
+    assert_eq!(ignored.status, StatusCode::OK, "{}", ignored.html);
+    assert!(ignored.html.contains("Gemini") && !ignored.html.contains("Apollo"), "{}", ignored.html);
+
+    // A shard's request meets no page's guard: the list's call admits its
+    // caller, and refuses one the list refuses with the route's status and
+    // none of the projects.
+    for (caller, status) in [("", StatusCode::UNAUTHORIZED), ("nobody", StatusCode::FORBIDDEN), ("members", StatusCode::FORBIDDEN)] {
+        let refused = shard(&app, "/console/_live/projects", caller, serde_json::json!({"args": ["", "/console/projects"]}), None).await;
+        assert_eq!(refused.status, status, "{caller}: {}", refused.html);
+        assert!(!refused.html.contains("Apollo") && !refused.html.contains("<table"), "{caller}: {}", refused.html);
+    }
+    let signed_out = shard(&app, "/console/_live/projects", "", serde_json::json!({"args": ["", "/console/projects"]}), None).await;
+    assert!(signed_out.html.contains(r#"<a class="ss-sign-in" href="/sign-in?next=%2Fconsole%2Fprojects">Sign in</a>"#), "{}", signed_out.html);
+
+    // A nested list's shard takes its project from its arguments, as its
+    // page does from its route: the query's projectId is ignored, and one
+    // that is no project's id is no page.
+    let open = format!("done=false&projectId={GEMINI}");
+    let tasks = shard(&app, "/console/_live/projects_tasks", "reader", serde_json::json!({"args": [APOLLO, open, "/x"]}), None).await;
+    assert_eq!(tasks.status, StatusCode::OK, "{}", tasks.html);
+    assert!(tasks.html.contains("Build the rocket"), "{}", tasks.html);
+    let done = shard(&app, "/console/_live/projects_tasks", "reader", serde_json::json!({"args": [APOLLO, "done=true", "/x"]}), None).await;
+    assert!(done.html.contains(r#"<p class="ss-empty">There are no tasks.</p>"#), "{}", done.html);
+    let unparsed = shard(&app, "/console/_live/projects_tasks", "reader", serde_json::json!({"args": ["not-a-uuid", "", "/x"]}), None).await;
+    assert_eq!(unparsed.status, StatusCode::NOT_FOUND, "{}", unparsed.html);
+    let signed_out = shard(&app, "/console/_live/projects_tasks", "", serde_json::json!({"args": [APOLLO, "", "/x"]}), None).await;
+    assert_eq!(signed_out.status, StatusCode::UNAUTHORIZED, "{}", signed_out.html);
+    assert!(!signed_out.html.contains("Build the rocket"), "{}", signed_out.html);
+}
+
+#[tokio::test]
+async fn a_render_authenticates_its_caller_once() {
+    let store = Store::new();
+    let callers = Callers::default();
+    let asked = Arc::clone(&callers.asked);
+    let app = Router::builder().discover().fixture_pages_api(implementations(&store), callers).build();
+    // The index asks each list's guard for the nav and for itself, a list
+    // its guard, its filter's call and the new page's guard, and a
+    // project's page its detail, the guards of its links and its action
+    // and its tasks' section: each authenticates its caller once.
+    for (path, caller) in [
+        "/console".to_owned(),
+        "/console/projects".to_owned(),
+        format!("/console/projects/{APOLLO}"),
+        format!("/console/projects/{APOLLO}/edit"),
+        format!("/console/projects/{APOLLO}/tasks"),
+    ]
+    .iter()
+    .zip(["reader", "writer", "writer", "writer", "reader"])
+    {
+        asked.store(0, Ordering::SeqCst);
+        let page = get(&app, path, caller).await;
+        assert_eq!(page.status, StatusCode::OK, "{path}: {}", page.html);
+        assert_eq!(asked.load(Ordering::SeqCst), 1, "{path} asked for its caller more than once");
+    }
+}
+
+#[tokio::test]
+async fn a_resources_own_choices_win_on_its_pages() {
+    let store = Store::new();
+    let settings = Settings::new()
+        .choices(owners().with("title", [("Build the rocket", "The rocket")]))
+        .choices_for("projects", Choices::new().with("ownerId", [("ada", "Countess Ada")]))
+        .choices_for("projects/{project_id}/tasks", Choices::new().with("title", [("Build the rocket", "Rocket building")]));
+    let app = Router::builder().discover().app_context(settings).fixture_pages_api(implementations(&store), Callers::default()).build();
+    // The projects' own choice of an owner is the only one their pages
+    // take for the field, so a value it does not name shows as it is.
+    let list = get(&app, "/console/projects", "reader").await;
+    assert!(list.html.contains(r#"<td data-field="ownerId">Countess Ada</td>"#), "{}", list.html);
+    assert!(list.html.contains(r#"<td data-field="ownerId">grace</td>"#), "{}", list.html);
+    let new = get(&app, "/console/projects/new", "writer").await;
+    assert!(new.html.contains(r#"<option value="ada">Countess Ada</option>"#) && !new.html.contains("Grace Hopper"), "{}", new.html);
+    let item = get(&app, &format!("/console/projects/{APOLLO}"), "reader").await;
+    assert!(item.html.contains(r#"<div data-field="ownerId"><dt>Owner</dt><dd>Countess Ada</dd></div>"#), "{}", item.html);
+    // The tasks' section on a project's page is the tasks', whose own
+    // choices win over the app's.
+    assert!(item.html.contains(">Rocket building</a>"), "{}", item.html);
+    // A label's tasks, which have no choices of their own, take the app's.
+    let labelled = get(&app, "/console/labels/rocket/tasks", "reader").await;
+    assert!(labelled.html.contains(">The rocket<") && !labelled.html.contains("Rocket building"), "{}", labelled.html);
+}
+
+#[test]
+#[should_panic(expected = "no resource of these pages is at \"project\"")]
+fn a_choice_for_no_resource_is_refused() {
+    let _ = Settings::new().choices_for("project", Choices::new());
+}
+
+#[tokio::test]
+async fn names_come_from_the_type_and_the_path_never_a_guessed_singular() {
+    let app = app(&Store::new());
+    // Shelf declares no @display: the shelves are titled by their path's
+    // word and a shelf by its type's name, never "Shelve".
+    let shelves = get(&app, "/console/shelves", "shelver").await;
+    assert_eq!(shelves.status, StatusCode::OK, "{}", shelves.html);
+    assert!(shelves.html.contains("<h1>Shelves</h1>"), "{}", shelves.html);
+    assert!(shelves.html.contains(r#"<li><a href="/console/shelves" aria-current="page">Shelves</a></li>"#), "{}", shelves.html);
+    let shelf = get(&app, "/console/shelves/top", "shelver").await;
+    assert_eq!(shelf.status, StatusCode::OK, "{}", shelf.html);
+    assert!(shelf.html.contains("<h1>Shelf</h1>"), "{}", shelf.html);
+    assert!(shelf.html.contains(r#"<li><span aria-current="page">Shelf top</span></li>"#), "{}", shelf.html);
+    assert!(!shelf.html.contains("Shelve ") && !shelves.html.contains(">Shelve<"), "{}", shelf.html);
+
+    // The archived projects' path extends the projects': they are titled
+    // by their own word, not by Project's plural, and only an auditor
+    // lists them.
+    let archived = get(&app, "/console/projects/archived", "auditor").await;
+    assert_eq!(archived.status, StatusCode::OK, "{}", archived.html);
+    assert!(archived.html.contains("<h1>Archived</h1>"), "{}", archived.html);
+    assert!(archived.html.contains(r#"<li><a href="/console/projects/archived" aria-current="page">Archived</a></li>"#), "{}", archived.html);
+    assert!(archived.html.contains(r#"<li><a href="/console/projects">Projects</a></li>"#), "{}", archived.html);
+    let reader = get(&app, "/console/projects", "reader").await;
+    assert!(!reader.html.contains("/console/projects/archived"), "{}", reader.html);
+}
+
+#[tokio::test]
+async fn a_collection_whose_pages_would_meet_anothers_has_none() {
+    // The app builds: projects/new, projects/{id}/edit and
+    // projects/{id}/delete are the projects' new, edit and delete pages,
+    // which Topcoat's router would refuse to register twice.
+    let app = app(&Store::new());
+    let new = get(&app, "/console/projects/new", "writer").await;
+    assert!(new.html.contains("<h1>Start a project</h1>"), "{}", new.html);
+    let edit = get(&app, &format!("/console/projects/{APOLLO}/edit"), "writer").await;
+    assert!(edit.html.contains("<h1>Edit the project</h1>"), "{}", edit.html);
+    let delete = get(&app, &format!("/console/projects/{APOLLO}/delete"), "writer").await;
+    assert!(delete.html.contains("<h1>Delete the project</h1>"), "{}", delete.html);
+    let item = get(&app, &format!("/console/projects/{APOLLO}"), "writer").await;
+    assert!(!item.html.contains(r#"data-resource="edit""#) && !item.html.contains(r#"data-resource="delete""#), "{}", item.html);
+}
 `
 
 // argsPagesAppTest is tests/app.rs of fixture-args-api's Topcoat crate with
@@ -1133,5 +1461,261 @@ async fn an_action_without_callers_posts_and_refuses_by_its_status() {
     // A review, whose product nothing lists or reads, has no page.
     let (status, _, _) = send("GET", &format!("/console/products/{PRODUCT}/reviews/new"), "").await;
     assert_eq!(status, StatusCode::NOT_FOUND);
+}
+`
+
+// TestPagesKeepTheirRoutesControls builds fixture-controls-api with the
+// pages on, their lists live, and runs controlsPagesAppTest: the orders'
+// list page, and its shard, which share the list's limiter, answer the
+// third request in a minute with the route's 429 and Retry-After as the
+// pages' refusal, an order's page, whose detail has no control, is not
+// limited, and the hold action's post answers its route's rate limit,
+// body limit and timeout with 429, 413 and 504. The shipments' page, whose
+// list has no control, names each warehouse through listWarehouses, and
+// meets its rate limit, which the warehouses' own page shares, and its
+// timeout.
+func TestPagesKeepTheirRoutesControls(t *testing.T) {
+	cargoTestCrateWith(t, controlsService, controlsPagesAppTest, crateOptions{
+		outputs:         livePagesOutputs(),
+		devDependencies: `axum = "0.8.9"` + "\n",
+	})
+}
+
+// controlsPagesAppTest is tests/app.rs of fixture-controls-api's Topcoat
+// crate with the pages on.
+const controlsPagesAppTest = `use std::collections::HashMap;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use async_trait::async_trait;
+use axum::extract::Request;
+use axum::middleware::Next;
+use axum::response::{IntoResponse, Response};
+use http::request::Parts;
+use schemas_fixture_controls_api_topcoat::api::runtime::{
+    ApiError, Authenticator, Principal, RequestContext, ServiceAuthenticator, ServiceCaller,
+};
+use schemas_fixture_controls_api_topcoat::api::{
+    types, HookImplementation, HookReceivePaymentArgs, Implementations, OrderGetOrderArgs, OrderHoldOrderArgs,
+    OrderImplementation, OrderListOrdersArgs, StockImplementation, StockReleaseReservationArgs, WebhookVerifier,
+};
+use schemas_fixture_controls_api_topcoat::{PageAuthenticator, RouterBuilderFixtureControlsApiExt};
+use topcoat::context::Cx;
+use topcoat::router::{header, to_bytes, Body, Router, RouterBuilderDiscoverExt, StatusCode};
+
+struct NoRequests;
+
+#[async_trait]
+impl Authenticator for NoRequests {
+    async fn authenticate(&self, _request: &Parts) -> Result<Option<Principal>, ApiError> {
+        Ok(None)
+    }
+}
+
+struct NoServices;
+
+#[async_trait]
+impl ServiceAuthenticator for NoServices {
+    async fn authenticate(&self, _request: &Parts) -> Result<Option<ServiceCaller>, ApiError> {
+        Ok(None)
+    }
+}
+
+struct Unsigned;
+
+#[async_trait]
+impl WebhookVerifier for Unsigned {
+    async fn verify(&self, _request: Request, _next: Next) -> Response {
+        (StatusCode::UNAUTHORIZED, "unsigned").into_response()
+    }
+}
+
+struct Caller;
+
+#[async_trait]
+impl PageAuthenticator for Caller {
+    async fn principal(&self, _cx: &Cx) -> Result<Option<Principal>, ApiError> {
+        Ok(Some(Principal::new("ada", ["stock"])))
+    }
+}
+
+// A shop whose holds and warehouses take longer than their routes allow
+// when slow.
+struct Shop {
+    slow: bool,
+}
+
+#[async_trait]
+impl HookImplementation for Shop {
+    async fn receive_payment(&self, _ctx: RequestContext, args: HookReceivePaymentArgs) -> Result<types::Receipt, ApiError> {
+        Ok(types::Receipt { event_id: args.input.event_id })
+    }
+}
+
+#[async_trait]
+impl StockImplementation for Shop {
+    async fn reindex_stock(&self, _ctx: RequestContext) -> Result<types::StockRun, ApiError> {
+        Ok(types::StockRun { done: true })
+    }
+    async fn release_reservation(&self, _ctx: RequestContext, args: StockReleaseReservationArgs) -> Result<types::Reservation, ApiError> {
+        Ok(types::Reservation { id: args.id, held: false })
+    }
+    async fn list_warehouses(&self, _ctx: RequestContext) -> Result<Vec<types::Warehouse>, ApiError> {
+        if self.slow {
+            tokio::time::sleep(Duration::from_secs(5)).await;
+        }
+        Ok(vec![types::Warehouse { id: "n".to_string(), name: "North".to_string() }])
+    }
+    async fn list_shipments(&self, _ctx: RequestContext) -> Result<Vec<types::Shipment>, ApiError> {
+        Ok(vec![types::Shipment { id: "1".to_string(), warehouse_id: "n".to_string() }])
+    }
+}
+
+#[async_trait]
+impl OrderImplementation for Shop {
+    async fn list_orders(&self, _ctx: RequestContext, _args: OrderListOrdersArgs) -> Result<Vec<types::OrderView>, ApiError> {
+        Ok(vec![types::OrderView { id: "1".to_string() }])
+    }
+    async fn get_order(&self, _ctx: RequestContext, args: OrderGetOrderArgs) -> Result<types::OrderView, ApiError> {
+        Ok(types::OrderView { id: args.id })
+    }
+    async fn hold_order(&self, _ctx: RequestContext, args: OrderHoldOrderArgs) -> Result<types::OrderView, ApiError> {
+        if self.slow {
+            tokio::time::sleep(Duration::from_secs(5)).await;
+        }
+        Ok(types::OrderView { id: args.id })
+    }
+    async fn place_order(&self, _ctx: RequestContext) -> Result<types::OrderView, ApiError> {
+        Ok(types::OrderView { id: "1".to_string() })
+    }
+}
+
+fn app(slow: bool) -> Router {
+    let shop = Arc::new(Shop { slow });
+    let verifier: Arc<dyn WebhookVerifier> = Arc::new(Unsigned);
+    let implementations = Implementations {
+        hook: shop.clone(),
+        order: shop.clone(),
+        stock: shop,
+        authenticator: Arc::new(NoRequests),
+        service_authenticator: Arc::new(NoServices),
+        webhook_verifiers: HashMap::from([("stripe".to_string(), verifier)]),
+    };
+    Router::builder().discover().fixture_controls_api(implementations, Caller).build()
+}
+
+struct Answer {
+    status: StatusCode,
+    headers: http::HeaderMap,
+    html: String,
+}
+
+async fn send(router: &Router, method: &str, uri: &str, content_type: &str, body: String, length: Option<usize>) -> Answer {
+    let mut request = http::Request::builder().method(method).uri(uri).header(header::CONTENT_TYPE, content_type);
+    if let Some(length) = length {
+        request = request.header(header::CONTENT_LENGTH, length);
+    }
+    let response = router.handle(request.body(Body::from(body)).unwrap()).await;
+    let status = response.status();
+    let headers = response.headers().clone();
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    Answer { status, headers, html: String::from_utf8(bytes.to_vec()).unwrap() }
+}
+
+async fn get(router: &Router, uri: &str) -> Answer {
+    send(router, "GET", uri, "text/plain", String::new(), None).await
+}
+
+async fn hold(router: &Router, body: String, length: Option<usize>) -> Answer {
+    send(router, "POST", "/console/orders/1/hold", "application/x-www-form-urlencoded", body, length).await
+}
+
+// The pages' refusal of a route control: its status, heading and message,
+// without the layout.
+fn refusal(answer: &Answer, status: u16, heading: &str, message: &str) {
+    assert_eq!(answer.status.as_u16(), status, "{}", answer.html);
+    let want = format!(r#"<section class="ss-refusal" data-status="{status}"><h1>{heading}</h1><p>{message}</p></section>"#);
+    assert_eq!(answer.html, want);
+    assert_eq!(answer.headers.get(header::CONTENT_TYPE).unwrap(), "text/html; charset=utf-8");
+}
+
+#[tokio::test]
+async fn a_list_and_its_shard_meet_the_lists_rate_limit() {
+    let app = app(false);
+    // The list's route allows two a minute: its page's third is refused,
+    // with the route's Retry-After.
+    for _ in 0..2 {
+        let list = get(&app, "/console/orders?status=placed").await;
+        assert_eq!(list.status, StatusCode::OK, "{}", list.html);
+    }
+    let limited = get(&app, "/console/orders").await;
+    refusal(&limited, 429, "Too many requests", "Too Many Requests");
+    assert!(limited.headers.contains_key(header::RETRY_AFTER), "{:?}", limited.headers);
+    // The list's shard calls the list too, and shares its pages' budget.
+    let body = serde_json::json!({"args": ["", "/console/orders"]}).to_string();
+    let shard = send(&app, "POST", "/console/_live/orders", "application/json", body, None).await;
+    refusal(&shard, 429, "Too many requests", "Too Many Requests");
+    // An order's page calls its detail, whose route has no control.
+    for _ in 0..3 {
+        let order = get(&app, "/console/orders/1").await;
+        assert_eq!(order.status, StatusCode::OK, "{}", order.html);
+    }
+
+    // On another app the shard's request is admitted, and its two count.
+    let app = self::app(false);
+    let body = serde_json::json!({"args": ["status=placed", "/console/orders"]}).to_string();
+    for _ in 0..2 {
+        let shard = send(&app, "POST", "/console/_live/orders", "application/json", body.clone(), None).await;
+        assert_eq!(shard.status, StatusCode::OK, "{}", shard.html);
+    }
+    refusal(&get(&app, "/console/orders").await, 429, "Too many requests", "Too Many Requests");
+}
+
+#[tokio::test]
+async fn an_actions_post_meets_its_routes_controls() {
+    let app = app(false);
+    for _ in 0..2 {
+        let held = hold(&app, "reason=Stock".to_owned(), None).await;
+        assert_eq!(held.status, StatusCode::SEE_OTHER, "{}", held.html);
+    }
+    let limited = hold(&app, "reason=Stock".to_owned(), None).await;
+    refusal(&limited, 429, "Too many requests", "Too Many Requests");
+    assert!(limited.headers.contains_key(header::RETRY_AFTER), "{:?}", limited.headers);
+
+    // A body past the route's megabyte, sent or declared, is refused before
+    // the page reads its form.
+    let app = self::app(false);
+    let large = format!("reason={}", "a".repeat(1024 * 1024));
+    refusal(&hold(&app, large, None).await, 413, "Too large", "Request body exceeds the accepted size");
+    refusal(&hold(&app, "reason=Stock".to_owned(), Some(2 * 1024 * 1024)).await, 413, "Too large", "Request body exceeds the accepted size");
+
+    // A hold past the route's second is refused with 504.
+    let slow = self::app(true);
+    let started = Instant::now();
+    refusal(&hold(&slow, "reason=Stock".to_owned(), None).await, 504, "Timed out", "Gateway Timeout");
+    assert!(started.elapsed() < Duration::from_secs(4), "{:?}", started.elapsed());
+}
+
+#[tokio::test]
+async fn a_page_meets_the_controls_of_the_operations_its_references_call() {
+    // The shipments' list has no control, but its rows name their
+    // warehouses through listWarehouses, two a minute: the page's third in
+    // a minute is refused, and the warehouses' own page shares the budget.
+    let app = app(false);
+    for _ in 0..2 {
+        let shipments = get(&app, "/console/shipments").await;
+        assert_eq!(shipments.status, StatusCode::OK, "{}", shipments.html);
+        assert!(shipments.html.contains(r#"<td data-field="warehouseId">North</td>"#), "{}", shipments.html);
+    }
+    let limited = get(&app, "/console/shipments").await;
+    refusal(&limited, 429, "Too many requests", "Too Many Requests");
+    assert!(limited.headers.contains_key(header::RETRY_AFTER), "{:?}", limited.headers);
+    refusal(&get(&app, "/console/warehouses").await, 429, "Too many requests", "Too Many Requests");
+
+    // A listing past its route's second times the page out.
+    let slow = self::app(true);
+    let started = Instant::now();
+    refusal(&get(&slow, "/console/shipments").await, 504, "Timed out", "Gateway Timeout");
+    assert!(started.elapsed() < Duration::from_secs(4), "{:?}", started.elapsed());
 }
 `

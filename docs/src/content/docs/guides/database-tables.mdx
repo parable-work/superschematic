@@ -114,6 +114,11 @@ extension.
 The SQLite DDL has the same column, `VIRTUAL`, and no index over it:
 SQLite has no trigram index ([SQLite](/superschematic/reference/migrations/#types-and-defaults)).
 
+An API's search argument, a `SearchQuery`, is what reads it
+([References and search](/superschematic/reference/references-and-search/)):
+`shop-orders`' `listReviews` keeps the reviews whose `search_text` holds
+each word of its `q`, with `ILIKE` on Postgres and `LIKE` on SQLite.
+
 ## JSON columns
 
 A class marked `@jsonField` (from `@superschematic/schema`) is not a table.

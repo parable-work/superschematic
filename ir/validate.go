@@ -173,6 +173,9 @@ func (s *Schema) validateOperationSet(cfg *validateConfig, set *OperationSet) []
 			}
 			errs = append(errs, validateArrayOfArrays(fmt.Sprintf("%s.%s argument %q", set.Name, op.Name, arg.Name), arg.TypeRef)...)
 		}
+		if err := ValidateOperationPage(set.Name+"."+op.Name, op); err != nil {
+			errs = append(errs, err.(interface{ Unwrap() []error }).Unwrap()...)
+		}
 	}
 	return errs
 }

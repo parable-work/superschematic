@@ -34,6 +34,8 @@
 #      packages no longer match it; the generated Python
 #      packages import and python/'s type tests pass; the Rust client in
 #      rust/ builds against the generated Rust SDK and its type tests pass;
+#      the Rust server in rust-server/ builds, and its lists page and its
+#      reviews search alike in memory and over SQLite;
 #   4. the Go app in go/ builds, vets and passes its tests, which call the
 #      generated Go server through the generated Go SDK, then run the
 #      TypeScript, Python and Rust clients against the same server and
@@ -276,6 +278,9 @@ rm -rf "$SCHEMAS/dist-rust"
   superschematic build --with-deps --api-language RUST --out schemas/dist-rust schemas/services/shop-orders >/dev/null)
 (cd "$EXAMPLE_DIR/rust-server" && cargo build --locked -q)
 RUST_SERVER="${CARGO_TARGET_DIR:-$EXAMPLE_DIR/rust-server/target}/debug/acme-shop-orders-server"
+# Its lists page, and its reviews search, alike in memory and over a
+# SQLite database of shop-db's tables (D60, D62).
+(cd "$EXAMPLE_DIR/rust-server" && cargo test --locked -q --features sqlite)
 
 echo "==> Topcoat: the app's pages call shop-orders in-process"
 # The same build with the extension linked: superschematic.toml's

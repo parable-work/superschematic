@@ -9,6 +9,7 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
+	ir "github.com/parable-work/superschematic/ir"
 )
 
 // JSONSchemaObject is the JSON Schema of one tool's arguments. It encodes
@@ -187,11 +188,15 @@ func (property JSONSchemaProperty) withScalarKey(key string) JSONSchemaProperty 
 	return property
 }
 
-// JSONSchemaReturn represents the return type schema.
+// JSONSchemaReturn represents the return type schema. Properties and
+// Required are a page's (D60), {items, next}; every other return leaves
+// them empty.
 type JSONSchemaReturn struct {
-	Type        string              `json:"type"`
-	Description string              `json:"description,omitempty"`
-	Items       *JSONSchemaProperty `json:"items,omitempty"`
+	Type        string                        `json:"type"`
+	Description string                        `json:"description,omitempty"`
+	Items       *JSONSchemaProperty           `json:"items,omitempty"`
+	Properties  map[string]JSONSchemaProperty `json:"properties,omitempty"`
+	Required    []string                      `json:"required,omitempty"`
 }
 
 // ToolPathParam represents a path parameter for tool invocation helpers.
@@ -261,8 +266,9 @@ func BuildInputTypeFieldsMap(apiOutput *apigen.APIOutput) map[string][]apigen.Pa
 // BuildParametersSchema builds the JSON Schema for tool parameters: path
 // parameters, query parameters, the input type's fields (nested objects
 // expanded, unions as oneOf, enums with their values) or the scalar
-// arguments, and the encryption key of an encrypted endpoint. keys supplies
-// the vendor keys.
+// arguments, the encryption key of an encrypted endpoint, and a paged
+// endpoint's cursor and limit (D60), both optional. keys supplies the
+// vendor keys; page is nil for an endpoint that does not page.
 func BuildParametersSchema(
 	pathParams []ToolPathParam,
 	queryArgs []ToolQueryArg,
@@ -276,6 +282,7 @@ func BuildParametersSchema(
 	scalars map[string]apigen.ScalarJSONSchemaInfo,
 	paramKeyFn ParamKeyFn,
 	keys apigen.ToolKeys,
+	page *apigen.PageInfo,
 ) JSONSchemaObject {
 	schema := JSONSchemaObject{
 		Vendor:     append([]apigen.ToolKeyValue(nil), keys.Parameters...),
@@ -353,6 +360,12 @@ func BuildParametersSchema(
 				},
 			},
 			Required: []string{"publicKey", "algorithm", "keyId"},
+		}
+	}
+
+	if page != nil {
+		for name, prop := range PageParameters(page) {
+			schema.Properties[paramKeyFn(name, "")] = prop
 		}
 	}
 
@@ -589,6 +602,53 @@ func BuildReturnSchemaAtDepth(typeName string, arrayDepth int, scalars map[strin
 		Type:        "array",
 		Description: arrayDescription(arrayDepth, typeName, ""),
 		Items:       &items,
+	}
+}
+
+// PageParameters are a paged endpoint's two tool parameters by name (D60),
+// with the bounds the OpenAPI document gives them: the cursor, the `next`
+// of the previous page, and the limit.
+func PageParameters(page *apigen.PageInfo) map[string]JSONSchemaProperty {
+	minLength, maxLength := 1, ir.PageCursorMaxLength
+	minimum, maximum := int64(1), int64(page.MaxLimit)
+	return map[string]JSONSchemaProperty{
+		apigen.PageCursorParam: {
+			Type: "string", Description: apigen.PageCursorDescription,
+			MinLength: &minLength, MaxLength: &maxLength, Pattern: ir.PageCursorPattern,
+		},
+		apigen.PageLimitParam: {
+			Type: "integer", Description: apigen.PageLimitDescription(page),
+			Minimum: &minimum, Maximum: &maximum,
+		},
+	}
+}
+
+// BuildEndpointReturnSchema builds the JSON Schema an endpoint's tool
+// returns: its page when it has one (D60), else its T, T[] or T[][]
+// (BuildReturnSchemaAtDepth).
+func BuildEndpointReturnSchema(typeName string, arrayDepth int, page *apigen.PageInfo, scalars map[string]apigen.ScalarJSONSchemaInfo) JSONSchemaReturn {
+	if page == nil {
+		return BuildReturnSchemaAtDepth(typeName, arrayDepth, scalars)
+	}
+	return BuildPageReturnSchema(typeName, scalars)
+}
+
+// BuildPageReturnSchema builds the JSON Schema of a page of typeName
+// (D60): {items, next}, items the list the operation returns and next the
+// cursor of the next page, null after the last.
+func BuildPageReturnSchema(typeName string, scalars map[string]apigen.ScalarJSONSchemaInfo) JSONSchemaReturn {
+	list := BuildReturnSchemaAtDepth(typeName, 1, scalars)
+	return JSONSchemaReturn{
+		Type:        "object",
+		Description: fmt.Sprintf("A page of %s", typeName),
+		Properties: map[string]JSONSchemaProperty{
+			"items": {Type: list.Type, Description: list.Description, Items: list.Items},
+			"next": {
+				Type: "string", Nullable: true,
+				Description: apigen.PageNextDescription,
+			},
+		},
+		Required: []string{"items", "next"},
 	}
 }
 

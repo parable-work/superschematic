@@ -1,0 +1,345 @@
+# A shop's console: products, listed a page at a time and searched, each
+# read by an id that refers to it and naming its supplier, with its
+# reviews, listed a page at a time under it; suppliers, listed a page at a
+# time with no filter; orders, listed a page at a time, filtered by status
+# and by a product and searched, read, placed from lines that each refer
+# to a product, gifted a product named by its sku, and given another line
+# from the order's page; and the site's pages, listed a page at a time at
+# the path page, whose functions are named page_*, as the pager's are not.
+#
+# listProducts is the options operation of every reference to Product,
+# since it is the one GET that lists Product, and ids its lookup, the
+# optional list query argument that refers to Product by the same value.
+# A reference by sku, which no lookup refers by, is named from the
+# options' first page. A product refers to its supplier in turn, which
+# listSuppliers names from its first page: the target of a reference that
+# shows one itself. Reading products needs products.read, reading orders
+# orders.read and changing one orders.write.
+name: fixture-console-api
+kind: API
+scalars:
+  Identity.UUID:
+    name: Identity.UUID
+    languagePrimitive: string
+enums:
+  # Where an order is.
+  OrderStatus:
+    name: OrderStatus
+    values:
+      - name: Placed
+        serializedAs: placed
+      - name: Shipped
+        serializedAs: shipped
+      - name: Cancelled
+        serializedAs: cancelled
+types:
+  # A product as the shop lists it: its name labels every reference to it.
+  Product:
+    name: Product
+    role: APIView
+    display:
+      noun: Product
+      plural: Products
+      titleField: name
+      summaryFields: [name, sku, supplierId, inStock]
+    fields:
+      - name: id
+        typeRef: { name: Identity.UUID }
+        required: true
+      - name: name
+        typeRef: { name: string }
+        required: true
+      - name: sku
+        typeRef: { name: string }
+        required: true
+      # Who supplies it, named by the supplier's name.
+      - name: supplierId
+        title: Supplier
+        typeRef: { name: string }
+        required: true
+        references: { type: Supplier }
+      - name: inStock
+        title: In stock
+        typeRef: { name: boolean }
+        required: true
+  # A product's review.
+  Review:
+    name: Review
+    role: APIView
+    display:
+      noun: Review
+      plural: Reviews
+      titleField: title
+      summaryFields: [title, rating, productId]
+    fields:
+      - name: id
+        typeRef: { name: string }
+        required: true
+      - name: productId
+        title: Product
+        typeRef: { name: Identity.UUID }
+        required: true
+        references: { type: Product }
+      - name: rating
+        typeRef: { name: number }
+        required: true
+      - name: title
+        typeRef: { name: string }
+        required: true
+  # Who supplies the shop's products.
+  Supplier:
+    name: Supplier
+    role: APIView
+    display:
+      noun: Supplier
+      plural: Suppliers
+      titleField: name
+    fields:
+      - name: id
+        typeRef: { name: string }
+        required: true
+      - name: name
+        typeRef: { name: string }
+        required: true
+  # A page of the shop's site, its about or its terms.
+  SitePage:
+    name: SitePage
+    role: APIView
+    display:
+      noun: Page
+      plural: Pages
+      titleField: title
+    fields:
+      - name: slug
+        typeRef: { name: string }
+        required: true
+      - name: title
+        typeRef: { name: string }
+        required: true
+  # One line of an order: a product and how many of it.
+  OrderLine:
+    name: OrderLine
+    role: APIView
+    display:
+      noun: Line
+    fields:
+      - name: productId
+        title: Product
+        typeRef: { name: Identity.UUID }
+        required: true
+        references: { type: Product }
+      - name: quantity
+        typeRef: { name: number }
+        required: true
+  Order:
+    name: Order
+    role: APIView
+    display:
+      noun: Order
+      plural: Orders
+      titleField: number
+      summaryFields: [number, status, giftSku]
+    fields:
+      - name: id
+        typeRef: { name: Identity.UUID }
+        required: true
+      - name: number
+        typeRef: { name: string }
+        required: true
+      - name: status
+        typeRef: { name: OrderStatus }
+        required: true
+      - name: note
+        typeRef: { name: string }
+      # A gift, the product its sku names.
+      - name: giftSku
+        title: Gift
+        typeRef: { name: string }
+        references: { type: Product, value: sku }
+      - name: lines
+        typeRef: { name: OrderLine, isArray: true }
+        required: true
+  OrderLineInput:
+    name: OrderLineInput
+    role: APIInput
+    display:
+      noun: Line
+      createLabel: Add a line
+    fields:
+      - name: productId
+        title: Product
+        typeRef: { name: Identity.UUID }
+        required: true
+        references: { type: Product }
+      - name: quantity
+        typeRef: { name: number }
+        required: true
+        validateMin: 1
+        validateMax: 9
+  OrderInput:
+    name: OrderInput
+    role: APIInput
+    fields:
+      - name: lines
+        typeRef: { name: OrderLineInput, isArray: true }
+        required: true
+        validateListMin: 1
+        validateListMax: 3
+      - name: giftSku
+        title: Gift
+        typeRef: { name: string }
+        references: { type: Product, value: sku, label: name }
+      - name: note
+        typeRef: { name: string }
+        validateMaxLength: 200
+operationSets:
+  - name: ProductQueries
+    operations:
+      # The products, by name, two to a page unless the caller asks for up
+      # to five, narrowed by a search of their names and by their ids.
+      - name: listProducts
+        typeRef: { name: Product, isArray: true }
+        required: true
+        httpMethod: GET
+        restPath: products
+        permissions: [products.read]
+        page: { defaultLimit: 2, maxLimit: 5 }
+        arguments:
+          - name: q
+            typeRef: { name: string }
+            isQuery: true
+            search: true
+            validateMaxLength: 50
+          - name: ids
+            typeRef: { name: Identity.UUID, isArray: true }
+            isQuery: true
+            validateListMax: 5
+            references: { type: Product }
+      # One product, by an id that refers to it.
+      - name: getProduct
+        typeRef: { name: Product }
+        required: true
+        httpMethod: GET
+        restPath: "products/{productId}"
+        permissions: [products.read]
+        arguments:
+          - name: productId
+            typeRef: { name: Identity.UUID }
+            required: true
+            references: { type: Product }
+  - name: SupplierQueries
+    operations:
+      # The suppliers, by name, one to a page unless the caller asks for
+      # two: a paged list with nothing to filter by.
+      - name: listSuppliers
+        typeRef: { name: Supplier, isArray: true }
+        required: true
+        httpMethod: GET
+        restPath: suppliers
+        permissions: [products.read]
+        page: { defaultLimit: 1, maxLimit: 2 }
+  - name: SiteQueries
+    operations:
+      # The site's pages, one to a page unless the caller asks for two, at
+      # the path page: a paged list whose collection's functions are
+      # page_href and the rest, beside the pager's pager_href.
+      - name: listPages
+        typeRef: { name: SitePage, isArray: true }
+        required: true
+        httpMethod: GET
+        restPath: page
+        permissions: [products.read]
+        page: { defaultLimit: 1, maxLimit: 2 }
+  - name: ReviewQueries
+    operations:
+      # A product's reviews, two to a page unless the caller asks for up to
+      # three, searched and by their least rating.
+      - name: listReviews
+        typeRef: { name: Review, isArray: true }
+        required: true
+        httpMethod: GET
+        restPath: "products/{productId}/reviews"
+        permissions: [products.read]
+        page: { defaultLimit: 2, maxLimit: 3 }
+        arguments:
+          - name: productId
+            typeRef: { name: Identity.UUID }
+            required: true
+            references: { type: Product }
+          - name: q
+            typeRef: { name: string }
+            isQuery: true
+            search: true
+            validateMaxLength: 100
+          - name: minRating
+            typeRef: { name: number }
+            isQuery: true
+  - name: OrderQueries
+    operations:
+      # The orders, by number, two to a page unless the caller asks for up
+      # to five, in any of the statuses, holding a product, and searched by
+      # their numbers and notes.
+      - name: listOrders
+        typeRef: { name: Order, isArray: true }
+        required: true
+        httpMethod: GET
+        restPath: orders
+        permissions: [orders.read]
+        page: { defaultLimit: 2, maxLimit: 5 }
+        arguments:
+          - name: statuses
+            typeRef: { name: OrderStatus, isArray: true }
+            isQuery: true
+          - name: productId
+            typeRef: { name: Identity.UUID }
+            isQuery: true
+            references: { type: Product }
+          - name: q
+            typeRef: { name: string }
+            isQuery: true
+            search: true
+            validateMaxLength: 50
+      # One order.
+      - name: getOrder
+        typeRef: { name: Order }
+        required: true
+        httpMethod: GET
+        restPath: "orders/{id}"
+        permissions: [orders.read]
+        arguments:
+          - name: id
+            typeRef: { name: Identity.UUID }
+            required: true
+  - name: OrderMutations
+    operations:
+      # Places an order.
+      - name: placeOrder
+        typeRef: { name: Order }
+        required: true
+        httpMethod: POST
+        restPath: orders
+        permissions: [orders.write]
+        arguments:
+          - name: input
+            typeRef: { name: OrderInput }
+            required: true
+      # Adds a line to an order.
+      - name: addLine
+        typeRef: { name: Order }
+        required: true
+        httpMethod: POST
+        restPath: "orders/{id}/add-line"
+        permissions: [orders.write]
+        arguments:
+          - name: id
+            typeRef: { name: Identity.UUID }
+            required: true
+          - name: productId
+            typeRef: { name: Identity.UUID }
+            required: true
+            references: { type: Product }
+          - name: quantity
+            typeRef: { name: number }
+            required: true
+            validateMin: 1
+            validateMax: 9

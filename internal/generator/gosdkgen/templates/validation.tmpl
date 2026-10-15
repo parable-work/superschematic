@@ -124,3 +124,19 @@ func checkQueryListItem(validationErrors types.ValidationErrors, path, text stri
 	return false
 }
 {{- end}}
+{{- if .HasPagedEndpoints}}
+
+// pageLimitErrors checks the limit of a paged operation's page request as
+// its route reads it (D60): 0 asks for the operation's default, and any
+// other limit is 1 to maxLimit.
+func pageLimitErrors(limit, maxLimit int) types.ValidationErrors {
+	validationErrors := types.NewValidationErrors()
+	switch {
+	case limit < 0:
+		validationErrors.AddFieldError("limit", "min", "must be at least 1")
+	case limit > maxLimit:
+		validationErrors.AddFieldError("limit", "max", fmt.Sprintf("must be at most %d", maxLimit))
+	}
+	return validationErrors
+}
+{{- end}}

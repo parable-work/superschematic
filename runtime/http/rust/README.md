@@ -20,6 +20,15 @@ This crate provides:
 - `ParamSpec`: how the generated router decodes one path, query or body
   argument, as the TypeScript runtime's `params.ts` does, refusing a value
   with a 400 whose `details` name it
+- `page`: the page of a `@paginated` operation (D60). `PageSpec::query`
+  reads `cursor` and `limit` from the query with a parameter's 400s,
+  `PageSpec::request` and `PageSpec::check` hold a request an in-process
+  caller built to the route's spec, `Cursor::encode` and `Cursor::decode`
+  write and read a position as the unpadded base64url of its JSON, the
+  encoder's error a 500 for a key no router reads back, and
+  `Page::from_rows` keeps `limit` of the `limit + 1` rows an
+  implementation read and sets `next`, or returns that error. `tests/page_parity.rs` runs
+  `runtime/http/testdata/page_parity.json`
 - `input`, `required_input` and `input_refusal`: an operation's input
   parsed by its type's generated `parse_<type>`, with undeclared keys
   refused and field errors in the problem's `errors`; `body_fields` and
@@ -97,6 +106,16 @@ and TypeScript runtimes' (D51):
   router answers the origins its identity config trusts (D55, amended).
   `Policy::decide` is the decision `runtime/http/testdata/cors_parity.json`
   holds the three runtimes to; `tests/cors_parity.rs` runs every vector.
+- `search`, with no feature: what an implementation needs to answer a
+  `SearchQuery` argument (D62), the twin of Go's `search` package and
+  TypeScript's `searchTerms`. `search::terms(q)` is the text's words (runs
+  of non-`White_Space`, the first 8), `search::like_pattern(word)` the
+  value of one `search_text LIKE ? ESCAPE '\'` condition (`ILIKE` on
+  Postgres), and `search::matches(text, &terms)` an in-memory match, by
+  `search::fold`, each character's simple lowercase.
+  `tests/search_parity.rs` runs `runtime/http/testdata/search_parity.json`,
+  and `examples/fold_mappings.rs` prints every fold, from which the Go
+  runtime writes the mappings its older Unicode tables lack.
 - The `postgres` feature's `postgres` module: `connect(&Database)` opens a
   `deadpool-postgres` pool, which connects when first used, and
   `ping(&Pool)` is the `SELECT 1` a server's `/readyz` makes. A URL

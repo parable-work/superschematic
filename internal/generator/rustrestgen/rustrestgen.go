@@ -47,7 +47,13 @@ type EndpointInfo struct {
 	// Input is the operation's input type, read from the body; nil without
 	// one.
 	Input *InputInfo
-	// OutputRustType is the Rust type of the operation's result.
+	// Page is the operation's @paginated (D60), nil for every other: its
+	// Args carry the page asked for, read from the cursor and limit query
+	// parameters, and it returns a page of the list it declares.
+	Page *PageInfo
+	// OutputRustType is the Rust type of the operation's result: for a
+	// paged operation the page, runtime::page::Page<types::ItemView>, which
+	// names the runtime by the API crate's re-export (D43).
 	OutputRustType string
 	// WebhookProvider is the @hmacVerified provider, or empty. build_router
 	// wraps the route in webhook_verified with that provider's verifier.
@@ -86,6 +92,28 @@ type EndpointInfo struct {
 	// other. The identity runtime serves it: build_router mounts the
 	// runtime's handler, and no namespace trait has a method for it.
 	IdentityOperation string
+}
+
+// PageInfo is a paged operation's @paginated (D60) as the crate renders it.
+// Its Args struct has the associated const PAGE,
+// PageSpec::new(DefaultLimit, MaxLimit), by which the router reads the page
+// asked for into its page field and its check holds a caller's to the
+// route's rules; the implementation returns runtime::page::Page of
+// ItemRustType, which the router answers as the envelope's data,
+// {items, next}.
+type PageInfo struct {
+	// DefaultLimit is the limit of a request that sends none, and MaxLimit
+	// the largest one may send.
+	DefaultLimit int
+	MaxLimit     int
+	// ItemRustType is the Rust type of the page's items, the element of the
+	// list the operation declares: types::ItemView, or String.
+	ItemRustType string
+}
+
+// SpecExpr is the PageSpec of the route's limits.
+func (p PageInfo) SpecExpr() string {
+	return fmt.Sprintf("PageSpec::new(%d, %d)", p.DefaultLimit, p.MaxLimit)
 }
 
 // IdentityConst is the identity runtime's constant naming the user model's
@@ -134,9 +162,16 @@ func (e EndpointInfo) SnakeName() string {
 	return e.ImplementationsField() + "_" + e.FunctionName
 }
 
-// HasArgs reports whether the implementation method takes an Args struct.
+// HasArgs reports whether the implementation method takes an Args struct:
+// a paged operation's holds its page, even without an argument.
 func (e EndpointInfo) HasArgs() bool {
-	return e.Input != nil || len(e.PathArgs) > 0 || len(e.QueryArgs) > 0 || len(e.BodyArgs) > 0
+	return e.Input != nil || len(e.PathArgs) > 0 || len(e.QueryArgs) > 0 || len(e.BodyArgs) > 0 || e.Page != nil
+}
+
+// ReadsQuery reports whether the handler's decode function reads the query
+// string: for a query argument, or for the page's cursor and limit.
+func (e EndpointInfo) ReadsQuery() bool {
+	return len(e.QueryArgs) > 0 || e.Page != nil
 }
 
 // ReadsBody reports whether the handler reads the request body: for the
@@ -152,7 +187,7 @@ func (e EndpointInfo) DecodeParams() []string {
 	if len(e.PathArgs) > 0 {
 		params = append(params, "captures: &HashMap<String, String>")
 	}
-	if len(e.QueryArgs) > 0 {
+	if e.ReadsQuery() {
 		params = append(params, "query: &QueryValues")
 	}
 	if e.ReadsBody() {
@@ -167,7 +202,7 @@ func (e EndpointInfo) DecodeCall() string {
 	if len(e.PathArgs) > 0 {
 		args = append(args, "&path_params")
 	}
-	if len(e.QueryArgs) > 0 {
+	if e.ReadsQuery() {
 		args = append(args, "&query")
 	}
 	if e.ReadsBody() {
@@ -298,6 +333,22 @@ type APIOutput struct {
 	DependencyCrates []DependencyCrate
 }
 
+// HasPages reports whether a mounted operation pages (D60): the router then
+// names the runtime's PageSpec, and the interfaces its page module.
+func (o *APIOutput) HasPages() bool {
+	return pages(o.Endpoints)
+}
+
+// pages reports whether one of endpoints pages.
+func pages(endpoints []EndpointInfo) bool {
+	for _, endpoint := range endpoints {
+		if endpoint.Page != nil {
+			return true
+		}
+	}
+	return false
+}
+
 // AllEndpoints are the mounted, the manual and the user model's operations,
 // in the order sortEndpoints gives them: the operations module declares
 // each.
@@ -363,6 +414,12 @@ func (n NamespaceOutput) UsesTypes() bool {
 	return false
 }
 
+// HasPages reports whether a method of the namespace returns a page, whose
+// type names the runtime (D60).
+func (n NamespaceOutput) HasPages() bool {
+	return pages(n.Endpoints)
+}
+
 // ArgsNames are the Args structs the namespace's methods take.
 func (n NamespaceOutput) ArgsNames() []string {
 	var names []string
@@ -421,6 +478,13 @@ type Options struct {
 // that decrypts a request body and none that reads a multipart one, so an
 // encrypted operation or a file upload that is not
 // @manualRouteRegistration is refused.
+//
+// A @paginated operation (D60) takes the page asked for in its Args,
+// page, which the router reads from the cursor and limit query parameters
+// after the operation's own, by the Args' PAGE spec, and which check holds
+// to the same spec. Its method returns runtime::page::Page of the list's
+// element, which the router answers as the envelope's data, {items, next};
+// an in-process caller gets the same page.
 //
 // An @hmacVerified operation's route runs its provider's WebhookVerifier
 // before the handler, as the Go router runs the provider's WebhookVerifier

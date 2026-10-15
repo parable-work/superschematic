@@ -19,6 +19,9 @@ import (
 {{- if .HasFilterableEndpoints }}
 	"{{ $.Naming.HTTPRuntimeGoModule }}/filterparse"
 {{- end }}
+{{- if .HasPagedEndpoints }}
+	"{{ $.Naming.HTTPRuntimeGoModule }}/paging"
+{{- end }}
 {{- if .NeedsTypesImport }}
 	types "{{ .TypesModule }}"
 {{- end }}
@@ -56,6 +59,15 @@ type {{ toGoName . }}Implementation interface {
 	// The filters slice is parsed from the URL; field names match [a-zA-Z0-9_]+.
 	// Validate filter.Field against an allowlist before using it in queries.
 {{- end }}
+{{- if .Page }}
+	//
+	// This endpoint pages its list (@paginated): page is the request's cursor,
+	// "" for the first page, and its limit, 1 to {{ .Page.MaxLimit }} ({{ .Page.DefaultLimit }} when the request
+	// sends none). Return the items after the cursor in the operation's own
+	// order and, while more follow, the cursor of the last one: read up to
+	// page.Limit+1 rows and build the page with paging.FromRows, and read the
+	// cursor back with paging.DecodeCursor, which refuses one it cannot read.
+{{- end }}
 {{- if .HasFileUpload }}
 	//
 	// This endpoint accepts file uploads. The files parameter contains uploaded file data
@@ -64,7 +76,7 @@ type {{ toGoName . }}Implementation interface {
 	//   - {{ .Name }} ({{ .ScalarType }}{{ if not .Required }}, optional{{ end }}): max {{ .MaxSize }} bytes, types: {{ join .AllowedTypes ", " }}
 {{- end }}
 {{- end }}
-	{{ .ShortImplName }}(ctx context.Context{{- range .PathParams }}, {{ .Name }} {{ .GoType }}{{- end }}{{- range .QueryParams }}, {{ .Name }} {{ if .IsArray }}[]{{ else if not .Required }}*{{ end }}{{ .GoType }}{{- end }}{{- if .Filterable }}, filters []filterparse.Filter{{- end }}{{- if .HasInput }}, input *types.{{ .InputType }}{{- else if .ScalarArgs }}{{- range .ScalarArgs }}, {{ .Name }} {{ .GoListType }}{{- end }}{{- end }}{{- if .HasFileUpload }}, files map[string]*FileUploadData{{- end }}) ({{- if .OutputIsArray }}{{ .OutputGoListType }}{{- else }}*{{ .OutputGoType }}{{- end }}, error)
+	{{ .ShortImplName }}(ctx context.Context{{- range .PathParams }}, {{ .Name }} {{ .GoType }}{{- end }}{{- range .QueryParams }}, {{ .Name }} {{ if .IsArray }}[]{{ else if not .Required }}*{{ end }}{{ .GoType }}{{- end }}{{- if .Filterable }}, filters []filterparse.Filter{{- end }}{{- if .HasInput }}, input *types.{{ .InputType }}{{- else if .ScalarArgs }}{{- range .ScalarArgs }}, {{ .Name }} {{ .GoListType }}{{- end }}{{- end }}{{- if .HasFileUpload }}, files map[string]*FileUploadData{{- end }}{{- if .Page }}, page paging.Request{{- end }}) ({{ .GoResultType }}, error)
 {{- end }}
 {{- end }}
 }

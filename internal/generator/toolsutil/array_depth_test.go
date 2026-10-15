@@ -60,7 +60,7 @@ func TestScalarArgumentListShapes(t *testing.T) {
 		{Name: "note", Type: "string"},
 		{Name: "tags", Type: "string", Required: true, IsArray: true},
 		{Name: "rows", Type: "string", IsArray: true, IsArrayOfArrays: true},
-	}, false, scalars, byName, apigen.ToolKeys{})
+	}, false, scalars, byName, apigen.ToolKeys{}, nil)
 	encoded, err := json.Marshal(schema.Properties)
 	if err != nil {
 		t.Fatal(err)
@@ -90,7 +90,7 @@ func TestScalarArgumentMapsAndEnums(t *testing.T) {
 			{Name: "labels", Type: "string", Required: true, IsMap: true, IsArray: true},
 			{Name: "toneByName", Type: "Tone", Required: true, IsMap: true},
 			{Name: "maybeTone", Type: "Tone"},
-		}, false, scalars, byName, apigen.ToolKeys{})
+		}, false, scalars, byName, apigen.ToolKeys{}, nil)
 	encoded, err := json.Marshal(schema.Properties)
 	if err != nil {
 		t.Fatal(err)

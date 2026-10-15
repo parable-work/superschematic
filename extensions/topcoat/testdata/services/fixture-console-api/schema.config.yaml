@@ -1,0 +1,5 @@
+# The Topcoat extension's fixture for a console that pages its lists
+# (D60), picks and names what an id refers to (D61) and searches (D62).
+name: fixture-console-api
+kind: API
+outputs: {}

@@ -43,7 +43,10 @@ type crate struct {
 	Operations []operation
 	Guards     []operation
 	Records    []record
-	Forms      []form
+	// PageRecords are the records of the pages the paged operations
+	// return (D60).
+	PageRecords []pageRecord
+	Forms       []form
 	// FormStructs are the structs of the forms' input types and of the
 	// object types they nest.
 	FormStructs []*formStruct
@@ -55,9 +58,15 @@ type crate struct {
 	// label functions of the enums they show.
 	Views      []view
 	EnumLabels []enumLabel
+	// References are the options and labels of what the forms and the
+	// records hold that refers to an item (D61), nil when nothing does
+	// (references.go).
+	References *referencesModel
 	// Pages are the pages of each resource the operations describe, nil
 	// unless outputs.topcoat.pages turns them on (pages.go).
 	Pages *pagesModel
+	// noCalls is why each operation without an in-process call has none.
+	noCalls map[*ir.FieldDef]string
 }
 
 // operation is one operation of the service, from the API crate's own
@@ -80,6 +89,8 @@ type operation struct {
 	// caller (@requireService). Its in-process call admits the end user
 	// alone, and its doc says so (D37, amended).
 	ServiceOnly bool
+	// Paged marks a @paginated operation (D60), whose call returns a page.
+	Paged bool
 	// NoCall is why the operation has no in-process call, and so no
 	// procedure; NoProcedure why one with a call has no procedure. Each is
 	// a reason (noCall, noProcedure), empty when the operation has the
@@ -103,6 +114,7 @@ func operationOf(e registry.RustEndpoint) operation {
 		RequiresAuth: e.RequiresAuth,
 		Permissions:  e.RequiredPerms,
 		ServiceOnly:  requiresService(e),
+		Paged:        e.Page != nil,
 	}
 	if e.HasArgs() {
 		op.ArgsName = e.ArgsName
@@ -177,6 +189,7 @@ func newCrate(c registry.GenerateContext, api *registry.RustAPI, cfg Config) (*c
 		SetupMethod:   registry.RustIdentifier(service, "service"),
 		HasAuth:       api.HasAuth,
 		Identity:      api.Identity != nil,
+		noCalls:       map[*ir.FieldDef]string{},
 	}
 	schemas, err := schemasOf(c)
 	if err != nil {
@@ -200,6 +213,9 @@ func newCrate(c registry.GenerateContext, api *registry.RustAPI, cfg Config) (*c
 			o.NoProcedure = noProcedure(endpoint)
 		}
 		out.Guards = append(out.Guards, o)
+		if o.NoCall != "" && op != nil {
+			out.noCalls[op] = o.NoCall
+		}
 		if o.NoCall != "" {
 			c.Logf("  - topcoat: no in-process call for %s.%s: %s\n", o.Namespace, o.Name, o.NoCall)
 			continue
@@ -225,6 +241,7 @@ func newCrate(c registry.GenerateContext, api *registry.RustAPI, cfg Config) (*c
 			}
 		}
 		out.Records = records.sorted()
+		out.PageRecords = records.sortedPages()
 		if cfg.WritesViews() {
 			if out.Views, out.EnumLabels, err = viewsOf(schemas, out.Records); err != nil {
 				return nil, err
@@ -243,9 +260,12 @@ func newCrate(c registry.GenerateContext, api *registry.RustAPI, cfg Config) (*c
 			return nil, err
 		}
 	}
+	if out.References, err = referencesOf(out, schemas, inProcess, c.Logf); err != nil {
+		return nil, err
+	}
 	if cfg.WritesPages() {
 		title := humanize(strings.ReplaceAll(service, "-", " "))
-		if out.Pages, err = pagesOf(out, schemas, inProcess, cfg.PagesPrefix(), title, c.Logf); err != nil {
+		if out.Pages, err = pagesOf(out, schemas, inProcess, cfg.PagesPrefix(), title, cfg.PagesLive(), c.Logf); err != nil {
 			return nil, err
 		}
 	}
@@ -266,11 +286,40 @@ func schemasOf(c registry.GenerateContext) (schemaSet, error) {
 	return schemas, nil
 }
 
-// ProceduresTakeArgs reports whether a procedure takes arguments, so
-// procedures.rs declares the decode its records' to_args call.
+// ProceduresTakeArgs reports whether a procedure takes arguments beside a
+// page, so procedures.rs declares the decode its records' to_args call.
 func (c *crate) ProceduresTakeArgs() bool {
 	for _, p := range c.Procedures {
-		if p.ArgsRecord != "" {
+		if len(p.Args) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// HasRecords reports whether the crate has a record, of a type or of a
+// page, so it writes records.rs and wire.rs.
+func (c *crate) HasRecords() bool { return len(c.Records) > 0 || len(c.PageRecords) > 0 }
+
+// RecordsUseTypes reports whether records.rs names the types module: a
+// record converts from its type, and a page record from a page of one.
+func (c *crate) RecordsUseTypes() bool {
+	if len(c.Records) > 0 {
+		return true
+	}
+	for _, p := range c.PageRecords {
+		if strings.Contains(p.Page, "types::") {
+			return true
+		}
+	}
+	return false
+}
+
+// Paged reports whether an operation with an in-process call pages (D60),
+// so operations.rs names the runtime its result's page is of.
+func (c *crate) Paged() bool {
+	for _, o := range c.Operations {
+		if o.Paged {
 			return true
 		}
 	}
@@ -278,10 +327,14 @@ func (c *crate) ProceduresTakeArgs() bool {
 }
 
 // RecordsUseWire reports whether a record field reads its value with a
-// wire helper, so records.rs imports the module. A record whose fields are
-// all left out reads none, and neither does a field that holds a nested
-// record by itself.
+// wire helper, or the crate has a page record (D60), which reads its items
+// and cursor with them, so records.rs imports the module. A record whose
+// fields are all left out reads none, and neither does a field that holds
+// a nested record by itself.
 func (c *crate) RecordsUseWire() bool {
+	if len(c.PageRecords) > 0 {
+		return true
+	}
 	for _, r := range c.Records {
 		for _, field := range r.Fields {
 			if strings.Contains(field.Read, "wire::") {
@@ -353,6 +406,9 @@ func (c *crate) formUses() map[string]bool {
 		uses["args"], uses["choosable"] = true, uses["choosable"] || f.Choosable
 		uses["query"] = uses["query"] || f.IsGet()
 		uses["argsInput"] = uses["argsInput"] || f.Input != nil
+		if f.Paged {
+			uses["paged"], uses["first"] = true, true
+		}
 		for _, a := range f.Fields {
 			uses["read"], uses[a.Read] = true, true
 			if a.IsList() {
@@ -395,6 +451,31 @@ func (c *crate) ControlledProcedures() []procedure {
 	return out
 }
 
+// ControlledPages reports whether a page calls an operation whose route
+// has a traffic control, so `<service>(...)` adds the pages' layer that
+// applies it.
+func (c *crate) ControlledPages() bool { return c.Pages != nil && len(c.Pages.Controlled) > 0 }
+
+// SetupLayers is the expression `<service>(...)` returns its router
+// through, `router` wrapped in each module's call that adds its route
+// controls' layers; empty when no procedure or page has any.
+func (c *crate) SetupLayers() string {
+	expr := ""
+	wrap := func(call string) {
+		if expr == "" {
+			expr = "router"
+		}
+		expr = call + "(" + expr + ")"
+	}
+	if len(c.ControlledProcedures()) > 0 {
+		wrap("procedures::route_controls")
+	}
+	if c.ControlledPages() {
+		wrap("pages::route_controls")
+	}
+	return expr
+}
+
 // ControlsUse reports whether a procedure's route has the control
 // ("rate_limit", "body_limit" or "timeout"), so procedures.rs declares
 // ProcedureControls' builder method for it.
@@ -417,7 +498,7 @@ func (c *crate) write(dir string) error {
 		{"lib.tmpl", filepath.Join("src", "lib.rs")},
 		{"operations.tmpl", filepath.Join("src", "operations.rs")},
 	}
-	if len(c.Records) > 0 {
+	if c.HasRecords() {
 		files = append(files,
 			struct{ template, path string }{"records.tmpl", filepath.Join("src", "records.rs")},
 			struct{ template, path string }{"wire.tmpl", filepath.Join("src", "wire.rs")},
@@ -434,6 +515,9 @@ func (c *crate) write(dir string) error {
 	}
 	if len(c.Views) > 0 {
 		files = append(files, struct{ template, path string }{"views.tmpl", filepath.Join("src", "views.rs")})
+	}
+	if c.References != nil {
+		files = append(files, struct{ template, path string }{"references.tmpl", filepath.Join("src", "references.rs")})
 	}
 	if c.Pages != nil {
 		files = append(files, struct{ template, path string }{"pages.tmpl", filepath.Join("src", "pages.rs")})
@@ -454,7 +538,7 @@ func (c *crate) write(dir string) error {
 	}
 	// A crate written before with records or forms keeps no stale module,
 	// arg_forms.rs among them, which argument forms were once written to.
-	for _, stale := range []string{"records.rs", "wire.rs", "choices.rs", "forms.rs", "arg_forms.rs", "procedures.rs", "views.rs", "pages.rs"} {
+	for _, stale := range []string{"records.rs", "wire.rs", "choices.rs", "forms.rs", "arg_forms.rs", "procedures.rs", "views.rs", "references.rs", "pages.rs"} {
 		if err := os.Remove(filepath.Join(dir, "src", stale)); err != nil && !os.IsNotExist(err) {
 			return err
 		}

@@ -12,6 +12,8 @@ import (
 	"testing"
 
 	sdk "example.com/acme/sdk/go/shop-orders"
+	"example.com/acme/sdk/go/shop-orders/namespaces"
+	"example.com/acme/sdk/go/shop-orders/runtime"
 	types "example.com/acme/types/go/shop-orders"
 	scalars "github.com/parable-work/superscalar/go"
 )
@@ -31,11 +33,32 @@ func ordersClientGo(ctx context.Context, baseURL, token string) (string, error) 
 	product, _ := scalars.ParseUUID("00000000-0000-4000-8000-0000000000b1")
 	var out strings.Builder
 
-	reviews, err := anonymous.ProductReviewsNamespace.ListReviews(ctx, product.String(), nil)
+	// A paged list answers one page; its All method yields every item,
+	// asking for each page with the next of the one before.
+	products, err := anonymous.ProductCatalogNamespace.ListProducts(ctx, nil, runtime.PageRequest{Limit: 2})
 	if err != nil {
 		return "", err
 	}
-	fmt.Fprintf(&out, "reviews: %d\n", len(reviews))
+	fmt.Fprintf(&out, "products: %d, %s\n", len(products.Items), lastPage(products.Next))
+	every := 0
+	for _, err := range anonymous.ProductCatalogNamespace.ListProductsAll(ctx, nil, runtime.PageRequest{Limit: 2}) {
+		if err != nil {
+			return "", err
+		}
+		every++
+	}
+	fmt.Fprintf(&out, "every product: %d\n", every)
+
+	_, err = anonymous.ProductCatalogNamespace.GetProduct(ctx, product.String())
+	fmt.Fprintf(&out, "get a missing product: %s\n", status(err))
+
+	smoky := "smoky"
+	reviews, err := anonymous.ProductReviewsNamespace.ListReviews(ctx, product.String(),
+		&namespaces.ProductReviewsListReviewsQueryParams{Q: &smoky}, runtime.PageRequest{})
+	if err != nil {
+		return "", err
+	}
+	fmt.Fprintf(&out, "reviews that say smoky: %d, %s\n", len(reviews.Items), lastPage(reviews.Next))
 
 	_, err = anonymous.ProductReviewsNamespace.WriteReview(ctx, product.String(), types.WriteReviewInput{
 		Rating: 5, Title: "Lovely", Body: "Smoky and smooth.",
@@ -48,9 +71,36 @@ func ordersClientGo(ctx context.Context, baseURL, token string) (string, error) 
 	})
 	fmt.Fprintf(&out, "order a product that does not exist: %s\n", status(err))
 
+	orders, err := shopper.OrderNamespace.ListOrders(ctx, nil, runtime.PageRequest{Limit: 1})
+	if err != nil {
+		return "", err
+	}
+	fmt.Fprintf(&out, "orders: %d, %s\n", len(orders.Items), lastPage(orders.Next))
+	every = 0
+	for _, err := range shopper.OrderNamespace.ListOrdersAll(ctx, nil, runtime.PageRequest{Limit: 1}) {
+		if err != nil {
+			return "", err
+		}
+		every++
+	}
+	fmt.Fprintf(&out, "every order: %d\n", every)
+
+	// e30 is the cursor of {}, a key that names no order.
+	_, err = shopper.OrderNamespace.ListOrders(ctx, nil, runtime.PageRequest{Cursor: "e30"})
+	fmt.Fprintf(&out, "orders after a cursor the server never returned: %s\n", status(err))
+
 	_, err = shopper.OrderNamespace.GetOrder(ctx, "00000000-0000-4000-8000-0000000000c1")
 	fmt.Fprintf(&out, "get a missing order: %s\n", status(err))
 	return out.String(), nil
+}
+
+// lastPage says whether a page is the last, which its next cursor, nil,
+// says.
+func lastPage(next *string) string {
+	if next == nil {
+		return "the last page"
+	}
+	return "more after it"
 }
 
 // status reports the HTTP status of a failed call. A 401 or 403 comes back as
@@ -77,7 +127,17 @@ func status(err error) string {
 
 // clientsSee is what every client prints against shop-orders, served in
 // Go or in Rust.
-const clientsSee = "reviews: 0\nwrite a review without a token: 401\norder a product that does not exist: 400\nget a missing order: 404\n"
+const clientsSee = `products: 0, the last page
+every product: 0
+get a missing product: 404
+reviews that say smoky: 0, the last page
+write a review without a token: 401
+order a product that does not exist: 400
+orders: 0, the last page
+every order: 0
+orders after a cursor the server never returned: 400
+get a missing order: 404
+`
 
 // Every generated SDK calls the same Go server and sees the same answers,
 // as a shopper signed in through shop-api's login. scripts/check.sh sets

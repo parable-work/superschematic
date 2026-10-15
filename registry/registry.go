@@ -99,13 +99,14 @@ type (
 	// operation, mounted (Endpoints), manual (ManualEndpoints) or the user
 	// model's, which the identity runtime serves (IdentityEndpoints, D50),
 	// as a RustEndpoint with its Args struct, its arguments (RustParam),
-	// its input (RustInput), its result type and its auth rules. Identity
-	// is set when the crate authenticates with the identity runtime.
-	// RustAPIOf returns it.
+	// its input (RustInput), its page when it is @paginated (RustPage,
+	// D60), its result type and its auth rules. Identity is set when the
+	// crate authenticates with the identity runtime. RustAPIOf returns it.
 	RustAPI      = rustrestgen.APIOutput
 	RustEndpoint = rustrestgen.EndpointInfo
 	RustParam    = rustrestgen.ParamInfo
 	RustInput    = rustrestgen.InputInfo
+	RustPage     = rustrestgen.PageInfo
 
 	// The auth provider seam (docs/extension-model.md section 8). An
 	// extension registers one with Registry.RegisterAuthProvider; the api

@@ -70,18 +70,35 @@ type schemaSet []*ir.Schema
 type recordBuilder struct {
 	schemaSet
 	records map[string]*record
+	pages   map[string]*pageRecord
 }
 
 func newRecordBuilder(schemas schemaSet) *recordBuilder {
-	return &recordBuilder{schemaSet: schemas, records: map[string]*record{}}
+	return &recordBuilder{schemaSet: schemas, records: map[string]*record{}, pages: map[string]*pageRecord{}}
+}
+
+// pageRecord is the record of a page a @paginated operation returns (D60):
+// its items, each as a record holds one of the list's elements, and the
+// cursor of the next page, none after the last.
+type pageRecord struct {
+	Name string // ItemViewPageRecord
+	// Element is the list's element as the schema names it, ItemView, and
+	// Page the Rust type of the page the in-process call returns.
+	Element string
+	Page    string
+	// Item is how the record holds an item, ItemViewRecord or String, and
+	// ReadItem and PutItem the functions that read and write one as JSON.
+	Item     string
+	ReadItem string
+	PutItem  string
 }
 
 // addResults adds a record per object type one of ops returns, and per
-// object type such a type nests. ops are the operations a page calls
-// in-process: the result of one without the call reaches no page. So the
-// user model's operations (D50) add none: the identity runtime serves them,
-// and their results carry what a page has no use for, such as login's
-// session token.
+// object type such a type nests, and a page record per list a paged one
+// returns. ops are the operations a page calls in-process: the result of
+// one without the call reaches no page. So the user model's operations
+// (D50) add none: the identity runtime serves them, and their results
+// carry what a page has no use for, such as login's session token.
 func (b *recordBuilder) addResults(ops []declared) error {
 	for _, d := range ops {
 		if b.objectType(d.op.TypeRef.Name) != nil {
@@ -89,8 +106,58 @@ func (b *recordBuilder) addResults(ops []declared) error {
 				return err
 			}
 		}
+		if d.endpoint.Page != nil {
+			if _, err := b.pageOf(d); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
+}
+
+// pageOf is the page record of the paged operation d, added once per
+// element type: `<Element>PageRecord`, which the build refuses when the
+// schemas declare a type named `<Element>Page`, whose record it would be
+// too.
+func (b *recordBuilder) pageOf(d declared) (*pageRecord, error) {
+	element := d.op.TypeRef.Name
+	if page, done := b.pages[element]; done {
+		return page, nil
+	}
+	s, err := b.element(element)
+	if err != nil {
+		return nil, err
+	}
+	base := pascalCase(element)
+	if b.objectType(element) != nil {
+		base = element
+	}
+	if b.objectType(base+"Page") != nil {
+		return nil, fmt.Errorf("the page %s.%s returns is the record %sPageRecord, and so is the record of the type %sPage; rename the type", d.endpoint.Namespace, d.endpoint.Name, base, base)
+	}
+	page := &pageRecord{
+		Name:     base + "PageRecord",
+		Element:  element,
+		Page:     "runtime::page::Page<" + d.endpoint.Page.ItemRustType + ">",
+		Item:     s.rustType,
+		ReadItem: s.read,
+		PutItem:  s.put,
+	}
+	b.pages[element] = page
+	return page, nil
+}
+
+// sortedPages is every page record added, by name.
+func (b *recordBuilder) sortedPages() []pageRecord {
+	byName := map[string]*pageRecord{}
+	for _, page := range b.pages {
+		byName[page.Name] = page
+	}
+	out := make([]pageRecord, 0, len(byName))
+	for _, name := range sortedKeys(byName) {
+		out = append(out, *byName[name])
+	}
+	return out
 }
 
 // sorted is every record added, by name.

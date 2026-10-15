@@ -164,6 +164,10 @@ func (e *emitter) emitOperation(setName string, op *ir.FieldDef) {
 	if op.ManualRouteRegistration {
 		fmt.Fprintf(&e.body, "  @%s\n", e.use("manualRouteRegistration"))
 	}
+	if op.Page != nil {
+		// Both limits, as the loader filled them in (D60).
+		fmt.Fprintf(&e.body, "  @%s({ defaultLimit: %d, maxLimit: %d })\n", e.use("paginated"), op.Page.DefaultLimit, op.Page.MaxLimit)
+	}
 	e.emitMiddlewareDecorators("  ", op.Middleware)
 
 	params := make([]string, 0, len(op.Arguments))
@@ -260,6 +264,7 @@ func (e *emitter) checkOperationField(op *ir.FieldDef, owner string) {
 	rest.RequireOwnership = false
 	rest.ServiceCallers = nil
 	rest.ManualRouteRegistration = false
+	rest.Page = nil
 	rest.Middleware = nil
 	rest.Arguments = nil
 	if !reflect.DeepEqual(&rest, &ir.FieldDef{}) {

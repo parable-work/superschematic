@@ -130,9 +130,36 @@ var parityInputs = []struct{ name, registry, input string }{
 			{"name": "number", "typeRef": {"name": "String"}, "required": true, "encrypted": true}]}]}`},
 	{"a non-boolean encrypted argument flag", "core", `{"kind": "OperationSet", "name": "CardOps", "operations": [
 		{"name": "storeCard", "typeRef": {"name": "Card"}, "arguments": [{"name": "number", "typeRef": {"name": "String"}, "encrypted": "yes"}]}]}`},
+	// RefersTo on a field and an argument, and a search argument (D61,
+	// D62): members as written, empty ones omitted, and none blank.
+	{"references and a search", "core", `{"kind": "API", "name": "catalog", "types": {
+		"BasketLine": {"name": "BasketLine", "role": "APIInput", "fields": [
+			{"name": "itemId", "typeRef": {"name": "Identity.UUID"}, "required": true, "references": {"type": "ItemView"}},
+			{"name": "skus", "typeRef": {"name": "Identity.Slug", "isArray": true}, "references": {"type": "ItemView", "options": "Catalog.listItems", "value": "sku", "label": "name"}}]}},
+		"operationSets": [{"name": "Catalog", "operations": [{"name": "listItems", "typeRef": {"name": "ItemView", "isArray": true}, "httpMethod": "GET", "arguments": [
+			{"name": "q", "typeRef": {"name": "String"}, "isQuery": true, "search": true},
+			{"name": "ids", "typeRef": {"name": "Identity.UUID", "isArray": true}, "isQuery": true, "references": {"type": "ItemView", "value": "id"}, "search": false}]}]}]}`},
+	{"a reference with an empty options", "core", `{"name": "BasketLine", "role": "APIInput", "fields": [{"name": "itemId", "typeRef": {"name": "Identity.UUID"}, "references": {"type": "ItemView", "options": ""}}]}`},
+	{"a reference without its type", "core", `{"name": "BasketLine", "role": "APIInput", "fields": [{"name": "itemId", "typeRef": {"name": "Identity.UUID"}, "references": {"options": "listItems"}}]}`},
+	{"a reference to an empty type", "core", `{"name": "BasketLine", "role": "APIInput", "fields": [{"name": "itemId", "typeRef": {"name": "Identity.UUID"}, "references": {"type": ""}}]}`},
+	{"an unknown key on a reference", "core", `{"name": "BasketLine", "role": "APIInput", "fields": [{"name": "itemId", "typeRef": {"name": "Identity.UUID"}, "references": {"type": "ItemView", "target": "ItemView"}}]}`},
+	{"a non-boolean search flag", "core", `{"kind": "OperationSet", "name": "Catalog", "operations": [
+		{"name": "listItems", "typeRef": {"name": "ItemView", "isArray": true}, "arguments": [{"name": "q", "typeRef": {"name": "String"}, "isQuery": true, "search": "yes"}]}]}`},
 	{"a service clause on a set and an operation", "core", `{"kind": "OperationSet", "name": "StockOps", "serviceCallers": {"mode": "require", "from": ["orders-api"]}, "operations": [
 		{"name": "release", "typeRef": {"name": "Order"}, "auth": true, "serviceCallers": {"mode": "allow", "from": []}}]}`},
 	{"a service clause mode outside the enum", "core", `{"kind": "OperationSet", "name": "StockOps", "serviceCallers": {"mode": "sometimes"}, "operations": []}`},
+	// A page (D60): the decoder keeps the members as written, the merge
+	// fills the ones left out.
+	{"a page with its members left out and written", "core", `{"kind": "OperationSet", "name": "Catalog", "operations": [
+		{"name": "listItems", "typeRef": {"name": "Item", "isArray": true}, "httpMethod": "GET", "page": {}},
+		{"name": "listTags", "typeRef": {"name": "String", "isArray": true}, "httpMethod": "GET", "page": {"maxLimit": 10}},
+		{"name": "listSkus", "typeRef": {"name": "String", "isArray": true}, "httpMethod": "GET", "page": {"defaultLimit": 2, "maxLimit": 5}}]}`},
+	{"a page limit of 0", "core", `{"kind": "OperationSet", "name": "Catalog", "operations": [
+		{"name": "listItems", "typeRef": {"name": "Item", "isArray": true}, "page": {"maxLimit": 0}}]}`},
+	{"a page limit past 1000", "core", `{"kind": "OperationSet", "name": "Catalog", "operations": [
+		{"name": "listItems", "typeRef": {"name": "Item", "isArray": true}, "page": {"defaultLimit": 1001}}]}`},
+	{"an unknown key on a page", "core", `{"kind": "OperationSet", "name": "Catalog", "operations": [
+		{"name": "listItems", "typeRef": {"name": "Item", "isArray": true}, "page": {"pageSize": 10}}]}`},
 	// The user model's traits (D50): User's config and UserRole's empty
 	// object, which a pointer keeps.
 	{"the user model's traits", "core", `{"kind": "DB", "name": "accounts", "types": {

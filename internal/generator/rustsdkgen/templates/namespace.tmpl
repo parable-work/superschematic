@@ -34,7 +34,7 @@ pub struct {{.ScalarInputStructName}} {
 
 {{end}}
 {{- if .HasQueryParams}}
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone{{if .QueryDerivesDefault}}, Default{{end}})]
 pub struct {{.QueryStructName}} {
 {{- range .QueryParams}}
 {{- if .Required}}
@@ -86,6 +86,13 @@ impl {{.Namespace.StructName}} {
 {{- if .HasQueryParams}}
     ///
     /// - `query`: optional query parameters for this request.
+{{- end}}
+{{- if .Page}}
+    ///
+    /// Answers one page (D60): `query.cursor` is the `next` of the page
+    /// before, `None` for the first, and `query.limit` the most items the
+    /// page holds, 1 to {{.Page.MaxLimit}}, {{.Page.DefaultLimit}} when `None`. `{{.AllMethodName}}`
+    /// yields every item, page after page.
 {{- end}}
 {{- if .Filterable}}
     ///
@@ -389,6 +396,78 @@ impl {{.Namespace.StructName}} {
 {{- end}}
     }
 
+{{- if .Page}}
+    /// Yields every item of `{{.MethodName}}`, page after page (D60). The
+    /// first page is the one `query.cursor` names, the first of the list
+    /// when it is `None`, and each page holds up to `query.limit` items. A
+    /// page is asked for, with the last one's `next`, only when the items
+    /// before it are taken; an error ends the iteration, and so does a page
+    /// whose `next` is the cursor it was asked with, after its items.
+{{- if .PathParams}}
+    // Each page's request takes its own copy of a path value, whose type
+    // may be Copy (a number or an enum).
+    #[allow(clippy::clone_on_copy)]
+{{- end}}
+    pub fn {{.AllMethodName}}<'a>(
+        &'a self,
+{{- range .PathParams}}
+        {{.RustName}}: {{.RustType}},
+{{- end}}
+{{- if .HasInput}}
+        input: {{.InputType}},
+{{- else if .HasScalarArgs}}
+        input: {{.ScalarInputStructName}},
+{{- end}}
+        query: Option<&{{.QueryStructName}}>,
+{{- if .Filterable}}
+        filters: Option<&'a std::collections::HashMap<String, runtime::FilterValue>>,
+{{- end}}
+        options: Option<&'a runtime::RequestOptions>,
+    ) -> runtime::Pager<'a, {{.PageItemRustType}}> {
+{{- if .QueryDerivesDefault}}
+        let mut query = query.cloned().unwrap_or_default();
+        let cursor = query.cursor.take();
+{{- else}}
+        // The method refuses a missing query, which has required fields.
+        let mut query = query.cloned();
+        let cursor = query.as_mut().and_then(|query| query.cursor.take());
+{{- end}}
+        runtime::Pager::new("{{.MethodName}}", cursor, move |cursor| {
+{{- if .QueryDerivesDefault}}
+            query.cursor = cursor;
+            let page_query = query.clone();
+{{- else}}
+            if let Some(query) = query.as_mut() {
+                query.cursor = cursor;
+            }
+            let page_query = query.clone();
+{{- end}}
+{{- range .PathParams}}
+            let {{.RustName}} = {{.RustName}}.clone();
+{{- end}}
+{{- if or .HasInput .HasScalarArgs}}
+            let input = input.clone();
+{{- end}}
+            Box::pin(async move {
+                self.{{.MethodName}}(
+{{- range .PathParams}}
+                    {{.RustName}},
+{{- end}}
+{{- if or .HasInput .HasScalarArgs}}
+                    input,
+{{- end}}
+                    {{if .QueryDerivesDefault}}Some(&page_query){{else}}page_query.as_ref(){{end}},
+{{- if .Filterable}}
+                    filters,
+{{- end}}
+                    options,
+                )
+                .await
+            })
+        })
+    }
+
+{{- end}}
 {{- if .SupportsListAll}}
     /// Fetches every page of `{{.MethodName}}` via limit/offset until a page
     /// comes back shorter than the server's maximum page size
@@ -508,6 +587,9 @@ checks per item. */}}
 {{- else if .IsArray}}
             // An empty list is left out: the route refuses a present empty value.
             if let Some(query_param_value) = query.{{.RustName}}.as_ref().filter(|list| !list.is_empty()) {
+{{- else if .EmptyIsAbsent}}
+            // An empty value is left out, as the route reads it: none.
+            if let Some(query_param_value) = query.{{.RustName}}.as_ref().filter(|text| !text.is_empty()) {
 {{- else}}
             if let Some(query_param_value) = &query.{{.RustName}} {
 {{- end}}

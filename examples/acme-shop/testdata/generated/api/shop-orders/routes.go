@@ -18,6 +18,7 @@ import (
 	"github.com/parable-work/superschematic/runtime/http/go/bodyargs"
 	"github.com/parable-work/superschematic/runtime/http/go/identity"
 	runtimemiddleware "github.com/parable-work/superschematic/runtime/http/go/middleware"
+	"github.com/parable-work/superschematic/runtime/http/go/paging"
 	runtimerouting "github.com/parable-work/superschematic/runtime/http/go/routing"
 	runtimesession "github.com/parable-work/superschematic/runtime/http/go/session"
 	"go.uber.org/zap"
@@ -94,6 +95,7 @@ func (c *Config) Validate() error {
 //		Identity:                    identityService,
 //		Implementations: shoporders.Implementations{
 //			Order: &myOrderImpl{},
+//			ProductCatalog: &myProductCatalogImpl{},
 //			ProductReviews: &myProductReviewsImpl{},
 //		},
 //	})
@@ -160,6 +162,23 @@ func utilityRoutes(apiVersion, baseURL string) []runtimerouting.Route {
 
 func publicAPIRoutes(cfg Config) []runtimerouting.Route {
 	return []runtimerouting.Route{
+		// The products, by name, then by id; ids narrows them to the products
+		// with those ids, the lookup a page names its products' ids through.
+		{
+			Method:  "GET",
+			Path:    "/products",
+			Handler: createProductCatalogListProductsHandler(cfg.Implementations.ProductCatalog),
+		},
+		// One product. Its parameter is productId, as the reviews' routes name
+		// the parameter at that place.
+		{
+			Method:  "GET",
+			Path:    "/products/{productId}",
+			Handler: createProductCatalogGetProductHandler(cfg.Implementations.ProductCatalog),
+		},
+		// The product's reviews, oldest first: by when each was written, then by
+		// its id. q keeps the reviews whose title or body holds each of its
+		// words.
 		{
 			Method:  "GET",
 			Path:    "/products/{productId}/reviews",
@@ -170,6 +189,7 @@ func publicAPIRoutes(cfg Config) []runtimerouting.Route {
 
 func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 	return []runtimerouting.Route{
+		// The orders, oldest first: by when each was placed, then by its id.
 		{
 			Method:  "GET",
 			Path:    "/orders",
@@ -222,6 +242,8 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 // implementation method. This allows for dependency injection and testing.
 
 // createOrderListOrdersHandler creates a handler for GET /api/orders
+//
+// The orders, oldest first: by when each was placed, then by its id.
 func createOrderListOrdersHandler(impl OrderImplementation) gohttp.HandlerFunc {
 	// List arguments in the query string: the JSON type of each item, then
 	// its rules in the order they are checked (the scalar type's own, then
@@ -243,17 +265,11 @@ func createOrderListOrdersHandler(impl OrderImplementation) gohttp.HandlerFunc {
 				return
 			}
 		}
-		Limit := parseFloat64QueryParamPtr(r, "limit")
-		if Limit != nil && *Limit < float64(1) {
-			validationErrors := types.NewValidationErrors()
-			validationErrors.SetFieldErrors("limit", []types.ValidationError{{Validator: "min", Message: "must be at least 1"}})
-			RespondValidationErrors(w, r, validationErrors)
-			return
-		}
-		if Limit != nil && *Limit > float64(100) {
-			validationErrors := types.NewValidationErrors()
-			validationErrors.SetFieldErrors("limit", []types.ValidationError{{Validator: "max", Message: "must be at most 100"}})
-			RespondValidationErrors(w, r, validationErrors)
+
+		// Read the page's cursor and limit (@paginated): its own reader, whose
+		// refusal is the 400 every server answers at cursor or limit.
+		page, ok := paging.Read(w, r, paging.Spec{DefaultLimit: 20, MaxLimit: 100})
+		if !ok {
 			return
 		}
 
@@ -265,7 +281,7 @@ func createOrderListOrdersHandler(impl OrderImplementation) gohttp.HandlerFunc {
 		}
 
 		// Call implementation
-		result, err := impl.ListOrders(r.Context(), Statuses, Limit)
+		result, err := impl.ListOrders(r.Context(), Statuses, page)
 		if err != nil {
 			// Get logger from context and use proper error handling
 			logger := LoggerFromContext(r.Context())
@@ -274,7 +290,9 @@ func createOrderListOrdersHandler(impl OrderImplementation) gohttp.HandlerFunc {
 		}
 
 		// Respond with result
-		RespondCollectionEnvelope(w, gohttp.StatusOK, result, r)
+		// The page is the envelope's data, {items, next}: nil items are [] and
+		// no next is null.
+		RespondJSONEnvelope(w, gohttp.StatusOK, result, r)
 	}
 }
 
@@ -425,7 +443,110 @@ func createOrderCancelOrderHandler(impl OrderImplementation) gohttp.HandlerFunc 
 	}
 }
 
+// createProductCatalogListProductsHandler creates a handler for GET /api/products
+//
+// The products, by name, then by id; ids narrows them to the products
+// with those ids, the lookup a page names its products' ids through.
+func createProductCatalogListProductsHandler(impl ProductCatalogImplementation) gohttp.HandlerFunc {
+	// List arguments in the query string: the JSON type of each item, then
+	// its rules in the order they are checked (the scalar type's own, then
+	// the argument's).
+	queryListIdsArg := bodyargs.NewArg("ids", bodyargs.String, bodyargs.ListMax(100), bodyargs.Pattern(`^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$`))
+	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
+		// Extract query parameters
+
+		// ids travels in the query string as repeated keys,
+		// comma-separated values or both. Each item is read as its JSON type
+		// and checked as a list element at ids[i]; no item is an
+		// absent list.
+		var Ids []types.IdentityUUID
+		{
+			listErrors := types.NewValidationErrors()
+			Ids = bodyargs.QueryList[types.IdentityUUID](listErrors, r.URL.Query(), queryListIdsArg)
+			if listErrors.HasErrors() {
+				RespondValidationErrors(w, r, listErrors)
+				return
+			}
+		}
+
+		// Read the page's cursor and limit (@paginated): its own reader, whose
+		// refusal is the 400 every server answers at cursor or limit.
+		page, ok := paging.Read(w, r, paging.Spec{DefaultLimit: 20, MaxLimit: 100})
+		if !ok {
+			return
+		}
+
+		// Ensure request context is still valid before entering implementation logic.
+		if err := CheckContext(r.Context()); err != nil {
+			logger := LoggerFromContext(r.Context())
+			RespondAppError(w, logger, err)
+			return
+		}
+
+		// Call implementation
+		result, err := impl.ListProducts(r.Context(), Ids, page)
+		if err != nil {
+			// Get logger from context and use proper error handling
+			logger := LoggerFromContext(r.Context())
+			RespondAppError(w, logger, err)
+			return
+		}
+
+		// Respond with result
+		// The page is the envelope's data, {items, next}: nil items are [] and
+		// no next is null.
+		RespondJSONEnvelope(w, gohttp.StatusOK, result, r)
+	}
+}
+
+// createProductCatalogGetProductHandler creates a handler for GET /api/products/{productId}
+//
+// One product. Its parameter is productId, as the reviews' routes name
+// the parameter at that place.
+func createProductCatalogGetProductHandler(impl ProductCatalogImplementation) gohttp.HandlerFunc {
+	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
+		// Extract path parameters, each percent-decoded once
+		ProductIdStr, err := runtimerouting.PathParam(r, "productId")
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "productId must be percent-encoded UTF-8")
+			return
+		}
+		if ProductIdStr == "" {
+			RespondError(w, r, gohttp.StatusBadRequest, "productId is required")
+			return
+		}
+		ProductId, err := types.ParseIdentityUUID(ProductIdStr)
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "productId must be a valid UUID")
+			return
+		}
+
+		// Ensure request context is still valid before entering implementation logic.
+		if err := CheckContext(r.Context()); err != nil {
+			logger := LoggerFromContext(r.Context())
+			RespondAppError(w, logger, err)
+			return
+		}
+
+		// Call implementation
+		result, err := impl.GetProduct(r.Context(), ProductId)
+		if err != nil {
+			// Get logger from context and use proper error handling
+			logger := LoggerFromContext(r.Context())
+			RespondAppError(w, logger, err)
+			return
+		}
+
+		// Respond with result
+		RespondJSONEnvelope(w, gohttp.StatusOK, result, r)
+	}
+}
+
 // createProductReviewsListReviewsHandler creates a handler for GET /api/products/{productId}/reviews
+//
+// The product's reviews, oldest first: by when each was written, then by
+// its id. q keeps the reviews whose title or body holds each of its
+// words.
 func createProductReviewsListReviewsHandler(impl ProductReviewsImplementation) gohttp.HandlerFunc {
 	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
 		// Extract path parameters, each percent-decoded once
@@ -445,6 +566,20 @@ func createProductReviewsListReviewsHandler(impl ProductReviewsImplementation) g
 		}
 		// Extract query parameters
 		MinRating := parseFloat64QueryParamPtr(r, "minRating")
+		Q := parseStringQueryParamPtr(r, "q")
+		if Q != nil && len([]rune(*Q)) > 100 {
+			validationErrors := types.NewValidationErrors()
+			validationErrors.SetFieldErrors("q", []types.ValidationError{{Validator: "maxLength", Message: "must be at most 100 characters"}})
+			RespondValidationErrors(w, r, validationErrors)
+			return
+		}
+
+		// Read the page's cursor and limit (@paginated): its own reader, whose
+		// refusal is the 400 every server answers at cursor or limit.
+		page, ok := paging.Read(w, r, paging.Spec{DefaultLimit: 20, MaxLimit: 50})
+		if !ok {
+			return
+		}
 
 		// Ensure request context is still valid before entering implementation logic.
 		if err := CheckContext(r.Context()); err != nil {
@@ -454,7 +589,7 @@ func createProductReviewsListReviewsHandler(impl ProductReviewsImplementation) g
 		}
 
 		// Call implementation
-		result, err := impl.ListReviews(r.Context(), ProductId, MinRating)
+		result, err := impl.ListReviews(r.Context(), ProductId, MinRating, Q, page)
 		if err != nil {
 			// Get logger from context and use proper error handling
 			logger := LoggerFromContext(r.Context())
@@ -463,7 +598,9 @@ func createProductReviewsListReviewsHandler(impl ProductReviewsImplementation) g
 		}
 
 		// Respond with result
-		RespondCollectionEnvelope(w, gohttp.StatusOK, result, r)
+		// The page is the envelope's data, {items, next}: nil items are [] and
+		// no next is null.
+		RespondJSONEnvelope(w, gohttp.StatusOK, result, r)
 	}
 }
 

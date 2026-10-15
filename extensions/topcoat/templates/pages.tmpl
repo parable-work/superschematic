@@ -21,13 +21,37 @@
 //! message the form's own; a refused caller (401, 403) and an item that is
 //! not there (404) render on their own, a 401 with a link to the app's
 //! sign-in page (`Settings`). Every form and display component takes the
-//! app's `Settings` choices.
+//! app's `Settings` choices, and a resource's own where the app scopes some
+//! to it.
+{{- if .Pages.Uses "controls" }}
+//!
+//! A page's request meets the route controls (@rateLimit, @bodyLimit,
+//! @timeout) of the operation it is for, as the route's request does, and
+//! the rate limit and timeout of each options operation its references
+//! call, through the layer `route_controls` adds: a refusal is the route's
+//! 429, with `Retry-After`, 413 or 504, as the pages' refusal.
+{{- end }}
+{{- if .Pages.Live }}
+//!
+//! A list with a filter renders through a shard: an app that loads
+//! Topcoat's runtime gets the filter's results in place, without a reload,
+//! and one that does not gets the page as before.
+{{- end }}
 //!
 //! The app's `.discover()` registers the pages and the layout. The markup
 //! is semantic HTML with `ss-` classes and ships no styles.
 
 use std::fmt::Write as _;
+{{- if .Pages.Uses "controls" }}
+use std::time::Duration;
+{{- end }}
 
+{{- if .Pages.Uses "runtime" }}
+use crate::api::runtime;
+{{- end }}
+{{- if .Pages.Uses "controls" }}
+use crate::api::runtime::{ApiError, RateLimiter};
+{{- end }}
 {{- if .Pages.Uses "types" }}
 use crate::api::types;
 {{- end }}
@@ -35,6 +59,9 @@ use crate::choices::Choices;
 use crate::forms::{ {{- .Pages.Imports "forms" -}} };
 use crate::operations;
 use crate::records::{ {{- .Pages.Imports "records" -}} };
+{{- if .Pages.Uses "references" }}
+use crate::references;
+{{- end }}
 use crate::views::{ {{- .Pages.Imports "views" -}} };
 {{- if .Pages.Uses "routeValue" }}
 use serde::de::DeserializeOwned;
@@ -42,7 +69,7 @@ use serde::de::DeserializeOwned;
 {{- if .Pages.Uses "value" }}
 use serde_json::Value;
 {{- end }}
-use topcoat::context::{Cx, {{ if .Pages.Uses "memoize" }}memoize, {{ end }}try_app_context};
+use topcoat::context::{Cx, memoize, try_app_context};
 {{- if .Pages.Uses "form" }}
 use topcoat::router::content::Form;
 {{- end }}
@@ -51,6 +78,15 @@ use topcoat::router::error::see_other;
 {{- end }}
 use topcoat::router::request::uri;
 use topcoat::router::{Slot, StatusCode, layout, page, path_param};
+{{- if .Pages.Uses "controls" }}
+use topcoat::router::error::ContentTooLargeError;
+use topcoat::router::request::{client_ip, headers, method};
+use topcoat::router::response::Response;
+use topcoat::router::{Body, BodyLimit, HeaderValue, Layer, LayerFuture, Method, Next, Path, RouterBuilder, header, to_bytes, try_endpoint};
+{{- end }}
+{{- if .Pages.Live }}
+use topcoat::runtime::{Event, shard, signal};
+{{- end }}
 use topcoat::view::{View, component, view};
 
 /// Where the pages are served: every page's path begins with it.
@@ -63,19 +99,31 @@ const TITLE: &str = {{ rustString .Pages.Title }};
 path_param!(pub {{ .Name }});
 {{- end }}
 
+/// The resources of the pages, each by its path below the prefix, which
+/// names it in `Settings::choices_for`.
+pub const RESOURCES: &[&str] = &[
+{{- range .Pages.Resources }}
+    {{ rustString .Name }},
+{{- end }}
+];
+
 /// What the app tells the pages, in its app context
 /// (`.app_context(pages::Settings::new().sign_in("/sign-in"))`): the site's
 /// title, which heads every page; its sign-in page, which a page that
 /// refuses a caller who is not signed in (401) links to, with the page to
 /// come back to as `next`; and the choices every form and display component
 /// the pages render takes, by each field's path (`lines.productId`), so a
-/// form offers an id's records and a table names them. Without it the title
-/// is the service's name, a refusal has no link and there are no choices.
+/// form offers an id's records and a table names them, the app's for every
+/// resource and a resource's own (`choices_for`), which win on its pages.
+/// Without it the title is the service's name, a refusal has no link and
+/// there are no choices.
 #[derive(Debug, Clone, Default)]
 pub struct Settings {
     pub title: Option<String>,
     pub sign_in: Option<String>,
     pub choices: Choices,
+    /// Each resource's own choices, by its path below the prefix.
+    pub resource_choices: Vec<(String, Choices)>,
 }
 
 impl Settings {
@@ -106,6 +154,35 @@ impl Settings {
         self
     }
 
+    /// These settings with `choices` for the pages of one resource, named
+    /// by its path below the prefix, its parameters as its pages name them,
+    /// as `RESOURCES` lists it: they win over the app's `choices` where both
+    /// name a field, and no other resource's pages see them.
+    ///
+    /// # Panics
+    ///
+    /// When `resource` is none of `RESOURCES`, which a typo would be.
+    #[must_use]
+    #[track_caller]
+    pub fn choices_for(mut self, resource: impl Into<String>, choices: Choices) -> Self {
+        let resource = resource.into();
+        assert!(
+            RESOURCES.contains(&resource.as_str()),
+            "pages::Settings::choices_for: no resource of these pages is at {resource:?}; RESOURCES lists them",
+        );
+        self.resource_choices.push((resource, choices));
+        self
+    }
+
+    /// The choices of one resource's pages: the app's, then the resource's
+    /// own, which win.
+    fn choices_of(&self, resource: &str) -> Choices {
+        self.resource_choices
+            .iter()
+            .filter(|(at, _)| at == resource)
+            .fold(self.choices.clone(), |all, (_, own)| all.and(own))
+    }
+
     /// The settings the app put in its context, or the defaults.
     fn of(cx: &Cx) -> Self {
         try_app_context::<Settings>(cx).cloned().unwrap_or_default()
@@ -124,10 +201,10 @@ impl Settings {
     }
 }
 
-/// The choices the app's `Settings` give the pages' forms and display
-/// components.
-fn choices_of(cx: &Cx) -> Choices {
-    try_app_context::<Settings>(cx).map(|settings| settings.choices.clone()).unwrap_or_default()
+/// The choices the app's `Settings` give the forms and display components
+/// of one resource's pages, `resource` its path below the prefix.
+fn choices_of(cx: &Cx, resource: &str) -> Choices {
+    try_app_context::<Settings>(cx).map(|settings| settings.choices_of(resource)).unwrap_or_default()
 }
 
 /// The current page's path and query, which a sign-in link comes back to.
@@ -135,6 +212,14 @@ fn current(cx: &Cx) -> String {
     let uri = uri(cx);
     uri.path_and_query().map_or_else(|| uri.path().to_owned(), |path| path.as_str().to_owned())
 }
+{{- if .Pages.Live }}
+
+/// The current page's query, from which a live list's shard reads its
+/// filter.
+fn query_of(cx: &Cx) -> String {
+    uri(cx).query().unwrap_or_default().to_owned()
+}
+{{- end }}
 {{- if .Pages.Uses "seg" }}
 
 /// A value as one segment of a page's path, percent-encoded; none for a
@@ -189,6 +274,52 @@ fn decode(segment: &str) -> String {
 /// empty.
 fn title_or(title: &str, noun: &str) -> String {
     if title.trim().is_empty() { noun.to_owned() } else { title.to_owned() }
+}
+{{- end }}
+{{- if .Pages.Uses "pageQuery" }}
+
+/// A list's query for one of its pages (D60): `pairs`, the filter's and
+/// the limit, then `cursor` when given, each name and value
+/// percent-encoded.
+fn pager_query(pairs: &[(String, String)], cursor: Option<&str>) -> String {
+    let cursor = cursor.map(|cursor| ("cursor", cursor));
+    let mut query = String::new();
+    for (name, value) in pairs.iter().map(|(name, value)| (name.as_str(), value.as_str())).chain(cursor) {
+        if !query.is_empty() {
+            query.push('&');
+        }
+        query.push_str(&encode(name));
+        query.push('=');
+        query.push_str(&encode(value));
+    }
+    query
+}
+
+/// A list's page: its path, then its query unless that is empty.
+fn pager_href(base: &str, query: &str) -> String {
+    if query.is_empty() { base.to_owned() } else { format!("{base}?{query}") }
+}
+{{- end }}
+{{- if .Pages.Uses "pager" }}
+
+/// The links of a paged list (D60), after its table: the first page's while
+/// the page is a later one, and the next page's while one follows, each
+/// `base` with its query. Nothing when neither applies: a list has no
+/// previous page, nor a page's number, which a cursor cannot give.
+#[component]
+async fn pager(base: String, first: Option<String>, next: Option<String>) -> topcoat::Result<impl View> {
+    Ok(view! {
+        if first.is_some() || next.is_some() {
+            <nav class="ss-pager" aria-label="Pages">
+                if let Some(first) = first {
+                    <a rel="first" href=(pager_href(&base, &first))>"First page"</a>
+                }
+                if let Some(later) = next {
+                    <a rel="next" href=(pager_href(&base, &later))>"Next page"</a>
+                }
+            </nav>
+        }
+    })
 }
 {{- end }}
 {{- if .Pages.Uses "pageRefusal" }}
@@ -312,17 +443,11 @@ fn messages(refusal: &Refusal) -> Vec<String> {
 async fn refused(cx: &Cx, refusal: Refusal, #[into] next: String) -> topcoat::Result<impl View> {
     let status = refusal.status;
     let sign_in = if status == StatusCode::UNAUTHORIZED { Settings::of(cx).sign_in_href(&next) } else { None };
-    let heading = match status.as_u16() {
-        401 => "Sign in to see this page",
-        403 => "Not allowed",
-        404 => "Not found",
-        _ => "Refused",
-    };
     let messages = messages(&refusal);
     Ok(view! {
         (status)
         <section class="ss-refusal" data-status=(status.as_str().to_owned())>
-            <h1>(heading)</h1>
+            <h1>(heading(status))</h1>
             for message in messages {
                 <p>(message)</p>
             }
@@ -333,6 +458,19 @@ async fn refused(cx: &Cx, refusal: Refusal, #[into] next: String) -> topcoat::Re
     })
 }
 
+/// The heading of a refusal by its status.
+fn heading(status: StatusCode) -> &'static str {
+    match status.as_u16() {
+        401 => "Sign in to see this page",
+        403 => "Not allowed",
+        404 => "Not found",
+        413 => "Too large",
+        429 => "Too many requests",
+        504 => "Timed out",
+        _ => "Refused",
+    }
+}
+
 /// A link of the nav and the index: a resource's list.
 struct Link {
     href: &'static str,
@@ -341,7 +479,9 @@ struct Link {
 
 /// The resources no item holds whose list the caller may use (`can_*`),
 /// and whether a guard refused a caller who is not signed in (401), whom
-/// signing in may admit.
+/// signing in may admit. The request keeps it (`#[memoize]`), so the nav
+/// and the index ask each guard once.
+#[memoize]
 async fn listed(cx: &Cx) -> (Vec<Link>, bool) {
 {{- if .Pages.Top }}
     let mut links = Vec::new();
@@ -443,10 +583,10 @@ fn trail(path: &str, title: &str) -> Vec<Crumb> {
         ids.push(decode(item));
         crumbs.push(Crumb {
             item: node.titled.then(|| (node.key, ids.clone())),
-            ..crumb(format!("{} {}", node.noun, decode(item)), node.detail.then(|| base.clone()))
+            ..crumb(item_label(node.noun, decode(item)), node.detail.then(|| base.clone()))
         });
 {{- else }}
-        crumbs.push(crumb(format!("{} {}", node.noun, decode(item)), node.detail.then(|| base.clone())));
+        crumbs.push(crumb(item_label(node.noun, decode(item)), node.detail.then(|| base.clone())));
 {{- end }}
         at += 1;
         let Some(&page) = segments.get(at) else {
@@ -471,6 +611,12 @@ fn trail(path: &str, title: &str) -> Vec<Crumb> {
         last.current = true;
     }
     crumbs
+}
+
+/// An item in the trail without a title: its noun and id, or its id alone
+/// for a collection without pages, whose items no type names.
+fn item_label(noun: &str, id: String) -> String {
+    if noun.is_empty() { id } else { format!("{noun} {id}") }
 }
 {{- if .Pages.Uses "itemTitle" }}
 
@@ -509,7 +655,7 @@ pub async fn pages_layout(cx: &Cx, slot: Slot<'_>) -> topcoat::Result<impl View>
     let at = |href: &str| path.strip_prefix(href).is_some_and(|rest| rest.is_empty() || rest.starts_with('/'));
     let under = links.iter().map(|link| link.href).filter(|href| at(href)).max_by_key(|href| href.len());
     let nav: Vec<(&'static str, &'static str, Option<&'static str>)> = links
-        .into_iter()
+        .iter()
         .map(|link| {
             let current = match under {
                 Some(href) if href == link.href && path == href => Some("page"),
@@ -569,7 +715,7 @@ pub async fn pages_layout(cx: &Cx, slot: Slot<'_>) -> topcoat::Result<impl View>
 pub async fn pages_index_page(cx: &Cx) -> topcoat::Result<impl View> {
     let settings = Settings::of(cx);
     let (links, signed_out) = listed(cx).await;
-    let sign_in = if signed_out { settings.sign_in_href(&current(cx)) } else { None };
+    let sign_in = if *signed_out { settings.sign_in_href(&current(cx)) } else { None };
     Ok(view! {
         <h1>(settings.site_title())</h1>
         if links.is_empty() {
@@ -642,22 +788,37 @@ fn {{ .Ident }}_item_href({{ declare .ItemParams "&str" }}) -> Option<String> {
 {{- end }}
 {{- with .List }}
 
-{{ doc (printf "The list of %s%s, when the caller may list them." $r.PluralLower (or (and .ArgForm ", filtered by the query") "")) }}
+{{ doc (printf "The list of %s%s, when the caller may list them." $r.PluralLower (or (and $r.Filters ", filtered by the query") (and .Paged ", a page at a time") "")) }}
 #[page({{ rustString $r.Path }})]
-pub async fn {{ $r.Ident }}_list_page(cx: &Cx{{ if .ArgForm }}, Form(filter): Form<{{ .ArgForm.Name }}>{{ end }}) -> topcoat::Result<impl View> {
+pub async fn {{ $r.Ident }}_list_page(cx: &Cx{{ if and .ArgForm (not $r.Live) }}, Form(filter): Form<{{ .ArgForm.Name }}>{{ end }}) -> topcoat::Result<impl View> {
 {{ reads $r.ColParams }}    let next = current(cx);
     let admitted = operations::can_{{ .Snake }}(cx).await;
     Ok(view! {
         match admitted {
             Err(err) => refused(refusal: Refusal::from_api(&err), next: next),
-            Ok(_) => {{ $r.Ident }}_list({{ props $r.ColParams }}{{ if .ArgForm }}filter: filter, {{ end }}next: next),
+            Ok(_) => {{ $r.Ident }}_list({{ props $r.ColParams }}{{ if $r.Live }}query: query_of(cx), {{ else if .ArgForm }}filter: filter, {{ end }}next: next),
         }
     })
 }
 
-{{ doc (printf "The %s%s%s." $r.PluralLower (or (and .ArgForm " the filter finds, after the filter, which answers with its refusal's status") "") (or (and $r.Create ", and a link to the new page when the caller may create one") "")) }}
+{{ doc (printf "The %s%s%s%s.%s" $r.PluralLower (or (and $r.Filters " the filter finds, after the filter, which answers with its refusal's status") "") (or (and .Paged (printf ", a page at a time (D60): the query's cursor and limit ask for the page, and after the table the links to the next page and, on a later one, to the first carry %s" (or (and $r.Filters "the filter and the limit") "the limit"))) "") (or (and $r.Create ", and a link to the new page when the caller may create one") "") (or (and $r.Live (printf " A shard at `%s`: when the app loads Topcoat's runtime, %s, and the list renders again in place. The shard reads the query as the page reads its own, and its request, which meets no page's guard, is admitted and checked by the list's call." $r.LivePath (or (and $r.Filters .Paged "the filter's submit sends the query it holds, and a page's link its own") (and $r.Filters "the filter's submit sends the query it holds") "a page's link sends its query"))) "")) }}
+{{- if $r.Live }}
+#[shard({{ rustString $r.LivePath }})]
+async fn {{ $r.Ident }}_list(cx: &Cx{{ declareAfter $r.ColParams "String" }}, query: String, next: String) -> topcoat::Result<impl View> {
+{{- if and .Paged (not $r.Filters) }}
+    // The page's query: the request's at first, then what a link sets.
+{{- else if .Paged }}
+    // The filter's query: the page's at first, then what its submit or a
+    // link sets.
+{{- else }}
+    // The filter's query: the page's at first, then what its submit sets.
+{{- end }}
+    let query = signal(cx, move || query);
+    let filter = Form::<{{ .ArgForm.Name }}>::from_bytes(query.get().as_bytes())?.0;
+{{- else }}
 #[component]
 async fn {{ $r.Ident }}_list(cx: &Cx{{ declareAfter $r.ColParams "String" }}{{ if .ArgForm }}, filter: {{ .ArgForm.Name }}{{ end }}, next: String) -> topcoat::Result<impl View> {
+{{- end }}
 {{- if .ArgForm }}
 {{- if .RouteFields }}
     // The route's values, never the hidden inputs, which a reader can change.
@@ -669,11 +830,27 @@ async fn {{ $r.Ident }}_list(cx: &Cx{{ declareAfter $r.ColParams "String" }}{{ i
     };
 {{- end }}
     let listed = filter.submit(cx).await;
+{{- if $r.Filters }}
     let errors = match &listed {
         Err(refusal) if !alone(refusal, &[{{ .RouteNames }}]) => refusal.errors.clone(),
         _ => FormErrors::default(),
     };
-    let choices = choices_of(cx);
+    let choices = {{ .ChoicesExpr $r.Name }};
+{{- end }}
+{{- if .Paged }}
+    // The links of the page: the first page's while a cursor was sent, and
+    // the next page's while one follows, each with the query's {{ if $r.Filters }}filter and {{ end }}limit.
+    let base = {{ $r.BaseExpr }};
+    let pairs = filter.query_pairs();
+    let first_page = filter.cursor.is_some().then(|| pager_query(&pairs, None));
+    let (listed, next_page) = match listed {
+        Ok(page) => {
+            let next_page = page.next.map(|next| pager_query(&pairs, Some(next.as_str())));
+            (Ok(page.items), next_page)
+        }
+        Err(refusal) => (Err(refusal), None),
+    };
+{{- end }}
 {{- else }}
     let listed = call_{{ .Snake }}(cx{{ passAfter .Params "&" }}).await;
 {{- end }}
@@ -688,8 +865,16 @@ async fn {{ $r.Ident }}_list(cx: &Cx{{ declareAfter $r.ColParams "String" }}{{ i
             <p class="ss-actions"><a class="ss-new" href=(new_href)>{{ rustString $r.CreateLabel }}</a></p>
         }
 {{- end }}
-{{- if .ArgForm }}
-        <form method="get" class="ss-filter">
+{{- if $r.Filters }}
+{{- if $r.Live }}
+        <form method="get" class="ss-filter"{{ if .ArgForm.HasSearch }} role="search"{{ end }} data-ss-live={{ rustString $r.Ident }} @submit=$(|e: Event| {
+            e.prevent_default();
+            raw!({{ rustString $r.LiveSubmit }}, ())
+        })>
+            <input type="hidden" data-ss-query="" @input=$(|e: Event| query.set(e.target.value))>
+{{- else }}
+        <form method="get" class="ss-filter"{{ if .ArgForm.HasSearch }} role="search"{{ end }}>
+{{- end }}
             {{ .ArgForm.Component }}(form: filter, errors: errors, choices: choices)
             <button type="submit">"Filter"</button>
         </form>
@@ -698,23 +883,59 @@ async fn {{ $r.Ident }}_list(cx: &Cx{{ declareAfter $r.ColParams "String" }}{{ i
             Err(refusal) if alone(&refusal, &[{{ .RouteNames }}]) => refused(refusal: page_refusal(refusal, &[{{ .RouteNames }}]), next: next),
             Err(refusal) => (refusal.status),
         }
+{{- else if .ArgForm }}
+        match listed {
+            Ok(items) => {{ $r.Ident }}_rows({{ if $r.Linked }}{{ props $r.ColParams }}{{ end }}items: items),
+            Err(refusal) => refused(refusal: page_refusal(refusal, &[{{ .RouteNames }}]), next: next),
+        }
 {{- else }}
         match listed {
             Ok(items) => {{ $r.Ident }}_rows({{ if $r.Linked }}{{ props $r.ColParams }}{{ end }}items: items),
             Err(refusal) => refused(refusal: refusal, next: next),
         }
 {{- end }}
+{{- if and .Paged $r.Live }}
+        // Each link sets the shard's query, which renders the list again in
+        // place, and puts it in the address bar; without the runtime it is
+        // a link to the page.
+        if first_page.is_some() || next_page.is_some() {
+            <nav class="ss-pager" aria-label="Pages">
+                if let Some(first) = first_page {
+                    let href = pager_href(&base, &first);
+                    <a rel="first" href=(href.clone()) @click=$(|e: Event| {
+                        e.prevent_default();
+                        raw!("history.replaceState(history.state, '', ${href});", ());
+                        query.set(first.to_owned())
+                    })>"First page"</a>
+                }
+                if let Some(later) = next_page {
+                    let href = pager_href(&base, &later);
+                    <a rel="next" href=(href.clone()) @click=$(|e: Event| {
+                        e.prevent_default();
+                        raw!("history.replaceState(history.state, '', ${href});", ());
+                        query.set(later.to_owned())
+                    })>"Next page"</a>
+                }
+            </nav>
+        }
+{{- else if .Paged }}
+        pager(base: base, first: first_page, next: next_page)
+{{- end }}
     })
 }
 
-{{ doc (printf "%s as `%s` renders them, the app's choices naming their values%s." $r.Plural $r.RowTable (or (and $r.Linked ", each row linked to its page") "")) }}
+{{ doc (printf "%s as `%s` renders them, the app's choices naming their values%s%s." $r.Plural $r.RowTable (or (and $r.RowLabels ", over the labels of what they refer to") "") (or (and $r.Linked ", each row linked to its page") "")) }}
 #[component]
-async fn {{ $r.Ident }}_rows(cx: &Cx{{ if $r.Linked }}{{ declareAfter $r.ColParams "String" }}{{ end }}, items: {{ .Output }}) -> topcoat::Result<impl View> {
+async fn {{ $r.Ident }}_rows(cx: &Cx{{ if $r.Linked }}{{ declareAfter $r.ColParams "String" }}{{ end }}, items: {{ .Items }}) -> topcoat::Result<impl View> {
     let rows: Vec<{{ $r.RowRecord }}> = items.iter().map({{ $r.RowRecord }}::from).collect();
 {{- if $r.Linked }}
     let hrefs: Vec<String> = rows.iter().map(|row| {{ $r.LinkExpr }}).collect();
 {{- end }}
-    let choices = choices_of(cx);
+{{- if $r.RowLabels }}
+    let choices = references::{{ $r.RowLabels }}(cx, &rows, choices_of(cx, {{ rustString $r.Name }})).await;
+{{- else }}
+    let choices = choices_of(cx, {{ rustString $r.Name }});
+{{- end }}
     Ok(view! {
         if rows.is_empty() {
             <p class="ss-empty">{{ rustString (printf "There are no %s." $r.PluralLower) }}</p>
@@ -726,7 +947,7 @@ async fn {{ $r.Ident }}_rows(cx: &Cx{{ if $r.Linked }}{{ declareAfter $r.ColPara
 {{- end }}
 {{- if .IsSection }}
 
-{{ doc (printf "The %s of an item, on the item's page: %s%s%s." .PluralLower (or (and .List "the list, when the caller may list them") "") (or (and .List .Create ", and ") "") (or (and .Create "a link to the new page, when the caller may create one") "")) }}
+{{ doc (printf "The %s of an item, on the item's page: %s%s%s." .PluralLower (or (and .List (or (and .List.Paged "the list's first page, when the caller may list them, and a link to the next") "the list, when the caller may list them")) "") (or (and .List .Create ", and ") "") (or (and .Create "a link to the new page, when the caller may create one") "")) }}
 #[component]
 async fn {{ .Ident }}_section(cx: &Cx, {{ declare .ColParams "String" }}) -> topcoat::Result<impl View> {
 {{- with .List }}
@@ -734,6 +955,13 @@ async fn {{ .Ident }}_section(cx: &Cx, {{ declare .ColParams "String" }}) -> top
         Ok(_) => Some(call_{{ .Snake }}(cx{{ passAfter .Params "&" }}).await),
         Err(_) => None,
     };
+{{- if .Paged }}
+    let next_page = match &listed {
+        Some(Ok(page)) => page.next.as_ref().map(|next| pager_query(&[], Some(next.as_str()))),
+        _ => None,
+    };
+    let listed = listed.map(|listed| listed.map(|page| page.items));
+{{- end }}
 {{- end }}
 {{- with .Create }}
     let creates = operations::can_{{ .Snake }}(cx).await.is_ok();
@@ -758,6 +986,9 @@ async fn {{ .Ident }}_section(cx: &Cx, {{ declare .ColParams "String" }}) -> top
                     Some(Err(refusal)) => <p class="ss-refused">(messages(&refusal).join(" "))</p>,
                     None => "",
                 }
+{{- if .List.Paged }}
+                pager(base: href.clone(), first: None, next: next_page)
+{{- end }}
 {{- end }}
             </section>
         }
@@ -791,7 +1022,13 @@ async fn {{ $r.Ident }}_item(
             ({{ $r.HeadingExpr }}, record)
         })
         .map_err(Refusal::clone);
-    let choices = choices_of(cx);
+    let choices = choices_of(cx, {{ rustString $r.Name }});
+{{- if $r.DetailLabels }}
+    let labels = match &found {
+        Ok((_, record)) => references::{{ $r.DetailLabels }}(cx, std::slice::from_ref(record), choices.clone()).await,
+        Err(_) => choices.clone(),
+    };
+{{- end }}
 {{- with $r.Update }}
     let edits = operations::can_{{ .Snake }}(cx).await.is_ok();
 {{- end }}
@@ -803,13 +1040,19 @@ async fn {{ $r.Ident }}_item(
         Some(sent) => Some(sent),
         None => operations::can_{{ .Snake }}(cx).await.is_ok().then(|| ({{ .NewFormOwned }}, FormErrors::default())),
     };
+{{- if .ChoicesFn }}
+    let {{ .Field }}_choices = match &{{ .Field }} {
+        Some(_) => references::{{ .ChoicesFn }}(cx, choices.clone()).await,
+        None => choices.clone(),
+    };
+{{- end }}
 {{- end }}
     Ok(view! {
         match found {
             Err(refusal) => refused(refusal: refusal, next: href),
             Ok((heading, record)) => {
                 <h1>(heading)</h1>
-                {{ $r.DetailView }}(record: record, choices: choices.clone())
+                {{ $r.DetailView }}(record: record, choices: {{ if $r.DetailLabels }}labels{{ else }}choices.clone(){{ end }})
 {{- if or $r.Update $r.Delete }}
                 if {{ if and $r.Update $r.Delete }}edits || deletes{{ else if $r.Update }}edits{{ else }}deletes{{ end }} {
                     <p class="ss-actions">
@@ -829,7 +1072,7 @@ async fn {{ $r.Ident }}_item(
 {{- range $r.Actions }}
                 if let Some((form, errors)) = {{ .Field }} {
                     <form method="post" action=(format!("{href}/{{ .Verb }}")) class="ss-action" data-action={{ rustString .Verb }}>
-                        {{ .ArgForm.Component }}(form: form, errors: errors, choices: choices.clone())
+                        {{ .ArgForm.Component }}(form: form, errors: errors, choices: {{ if .ChoicesFn }}{{ .Field }}_choices{{ else }}choices.clone(){{ end }})
                         <button type="submit">{{ rustString .Label }}</button>
                     </form>
                 }
@@ -877,7 +1120,7 @@ pub async fn {{ $r.Ident }}_create_page(cx: &Cx, Form(form): Form<{{ .FormName }
 /// The new page's form, new or as sent with its errors.
 #[component]
 async fn {{ $r.Ident }}_new(cx: &Cx, form: {{ .FormName }}, errors: FormErrors) -> topcoat::Result<impl View> {
-    let choices = choices_of(cx);
+    let choices = {{ .ChoicesExpr $r.Name }};
     Ok(view! {
         <h1>{{ rustString $r.CreateLabel }}</h1>
         <form method="post" class="ss-form">
@@ -930,7 +1173,7 @@ pub async fn {{ $r.Ident }}_update_page(cx: &Cx, Form(form): Form<{{ .ArgForm.Na
 /// The edit page's form, filled from the item or as sent with its errors.
 #[component]
 async fn {{ $r.Ident }}_edit(cx: &Cx, form: {{ .ArgForm.Name }}, errors: FormErrors) -> topcoat::Result<impl View> {
-    let choices = choices_of(cx);
+    let choices = {{ .ChoicesExpr $r.Name }};
     Ok(view! {
         <h1>{{ rustString (printf "Edit the %s" $r.NounLower) }}</h1>
         <form method="post" class="ss-form">
@@ -978,14 +1221,31 @@ pub async fn {{ $r.Ident }}_destroy_page(cx: &Cx, Form(form): Form<{{ .ArgForm.N
 async fn {{ $r.Ident }}_delete(cx: &Cx{{ declareAfter $r.ItemParams "String" }}, form: {{ .ArgForm.Name }}, errors: FormErrors) -> topcoat::Result<impl View> {
     let href = {{ $r.ItemExpr }};
     let found = call_{{ $r.Detail.Snake }}(cx{{ passAfter $r.Detail.Params "&" }}).await.map({{ $r.DetailRecord }}::from).map_err(Refusal::clone);
-    let choices = choices_of(cx);
+{{- if or $r.DetailLabels .ChoicesFn }}
+    let app = choices_of(cx, {{ rustString $r.Name }});
+{{- if $r.DetailLabels }}
+    let labels = match &found {
+        Ok(record) => references::{{ $r.DetailLabels }}(cx, std::slice::from_ref(record), app.clone()).await,
+        Err(_) => app.clone(),
+    };
+{{- else }}
+    let labels = app.clone();
+{{- end }}
+{{- if .ChoicesFn }}
+    let choices = references::{{ .ChoicesFn }}(cx, app).await;
+{{- else }}
+    let choices = app;
+{{- end }}
+{{- else }}
+    let choices = choices_of(cx, {{ rustString $r.Name }});
+{{- end }}
     Ok(view! {
         match found {
             Err(refusal) => refused(refusal: refusal, next: href),
             Ok(record) => {
                 <h1>{{ rustString (printf "Delete the %s" $r.NounLower) }}</h1>
                 <p class="ss-confirm">{{ rustString (printf "Delete this %s? It cannot be undone." $r.NounLower) }}</p>
-                {{ $r.DetailView }}(record: record, choices: choices.clone())
+                {{ $r.DetailView }}(record: record, choices: {{ if or $r.DetailLabels .ChoicesFn }}labels{{ else }}choices.clone(){{ end }})
                 <form method="post" class="ss-form" data-action="delete">
                     {{ .ArgForm.Component }}(form: form, errors: errors, choices: choices)
                     <button type="submit">{{ rustString (printf "Delete the %s" $r.NounLower) }}</button>
@@ -1014,4 +1274,168 @@ pub async fn {{ $r.Ident }}_{{ .Field }}_page(cx: &Cx, Form(form): Form<{{ .ArgF
     })
 }
 {{- end }}
+{{- end }}
+{{- if .Pages.Uses "controls" }}
+
+/// Adds the layer that applies, to each page's request, the traffic
+/// controls (@rateLimit, @bodyLimit, @timeout) of the operation the page is
+/// for and of the options operations its references call (D61).
+/// `{{ .SetupMethod }}` calls it.
+pub(crate) fn route_controls(router: RouterBuilder) -> RouterBuilder {
+    router.layer(PageControls {
+        controls: vec![
+{{- range .Pages.Controls }}
+            Controls::default(){{ range .ControlCalls }}{{ . }}{{ end }},
+{{- end }}
+        ],
+        pages: vec![
+{{- range .Pages.Controlled }}
+            (Method::{{ .Method }}, {{ rustString .Path }}, {{ .OwnExpr }}, {{ .CalledExpr }}),
+{{- end }}
+        ],
+    })
+}
+
+/// The traffic controls of an operation's route, which a page that calls
+/// it meets as the route's request does (`RouteControls`, D35): the rate
+/// limit, the body limit, read before the page decodes its form, then the
+/// timeout around the page. The page's in-process call checks the caller
+/// and the arguments.
+#[derive(Default)]
+struct Controls {
+    /// The operation's limiter for the pages, at its route's rate, which
+    /// counts each client by its IP address as Topcoat reads it
+    /// (`client_ip`). The JSON API's route and a procedure keep their own,
+    /// as two replicas would.
+    rate_limit: Option<RateLimiter>,
+    /// The limit in bytes, and the Topcoat layer that lets the page read
+    /// its form up to it.
+    body_limit: Option<(usize, BodyLimit)>,
+    timeout: Option<Duration>,
+}
+
+impl Controls {
+{{- if .Pages.ControlsUse "rate_limit" }}
+    /// `@rateLimit({ requestsPerMinute })`.
+    fn rate_limit(mut self, requests_per_minute: u32) -> Self {
+        self.rate_limit = Some(RateLimiter::per_minute(requests_per_minute));
+        self
+    }
+{{- end }}
+{{- if .Pages.ControlsUse "body_limit" }}
+
+    /// `@bodyLimit({ megabytes })`, in mebibytes as the route counts them.
+    fn body_limit_megabytes(mut self, megabytes: usize) -> Self {
+        let bytes = megabytes.saturating_mul(1024 * 1024);
+        self.body_limit = Some((bytes, BodyLimit::max(bytes)));
+        self
+    }
+{{- end }}
+{{- if .Pages.ControlsUse "timeout" }}
+
+    /// `@timeout({ seconds })`.
+    fn timeout_seconds(mut self, seconds: u64) -> Self {
+        self.timeout = Some(Duration::from_secs(seconds));
+        self
+    }
+{{- end }}
+}
+
+/// The controls of each operation a page calls whose route has one, which
+/// every page that calls the operation shares, and each page that meets
+/// one, by its method and the path it is registered at: the place of its
+/// operation's controls, none when its route has none, and those of the
+/// options operations its references call (D61).
+struct PageControls {
+    controls: Vec<Controls>,
+    pages: Vec<(Method, &'static str, Option<usize>, &'static [usize])>,
+}
+
+impl PageControls {
+    /// The controls the page the request is for meets, a HEAD's those of
+    /// its GET: its operation's, and those of the operations its references
+    /// call; none for a page that meets none.
+    fn of(&self, cx: &Cx) -> Option<(Option<&Controls>, Vec<&Controls>)> {
+        let path = try_endpoint(cx)?.path().as_str();
+        let method = if *method(cx) == Method::HEAD { Method::GET } else { method(cx).clone() };
+        let &(_, _, own, called) = self.pages.iter().find(|(on, at, _, _)| *on == method && *at == path)?;
+        Some((own.map(|own| &self.controls[own]), called.iter().map(|&at| &self.controls[at]).collect()))
+    }
+}
+
+impl Layer for PageControls {
+    fn path(&self) -> Option<&Path> {
+        Some(Path::new(PREFIX))
+    }
+
+    fn handle<'a>(&'a self, cx: &'a Cx, body: Body, next: Next<'a>) -> LayerFuture<'a> {
+        Box::pin(async move {
+            let Some((own, called)) = self.of(cx) else {
+                return next.run(cx, body).await;
+            };
+            // Each operation's limiter counts the request, the page's own
+            // first, as each route would count its call; the page's own
+            // operation bounds its body, which no other call carries; and
+            // the tightest timeout covers the page.
+            let every = || own.into_iter().chain(called.iter().copied());
+            for limiter in every().filter_map(|controls| controls.rate_limit.as_ref()) {
+                let client = client_ip(cx).map_or_else(|| "unknown".to_owned(), |ip| ip.to_string());
+                if let Err(retry_after) = limiter.take(&client) {
+                    let mut response = control_refusal(&ApiError::too_many_requests("Too Many Requests"));
+                    response.headers_mut().insert(header::RETRY_AFTER, retry_after.into());
+                    return Ok(response);
+                }
+            }
+            // The body is read up to the limit before the page decodes its
+            // form: one that declares more, or sends more, is refused.
+            let (body, extractor_limit) = match own.and_then(|controls| controls.body_limit.as_ref()) {
+                Some((limit, extractor_limit)) => {
+                    let too_large = || ApiError::payload_too_large("Request body exceeds the accepted size");
+                    let declared = headers(cx)
+                        .get(header::CONTENT_LENGTH)
+                        .and_then(|value| value.to_str().ok())
+                        .and_then(|value| value.parse::<u64>().ok());
+                    if declared.is_some_and(|length| length > *limit as u64) {
+                        return Ok(control_refusal(&too_large()));
+                    }
+                    match to_bytes(body, *limit).await {
+                        Ok(bytes) => (Body::from(bytes), Some(extractor_limit)),
+                        Err(err) if err.is::<ContentTooLargeError>() => return Ok(control_refusal(&too_large())),
+                        Err(_) => return Ok(control_refusal(&ApiError::bad_request("The request body could not be read"))),
+                    }
+                }
+                None => (body, None),
+            };
+            let page = async move {
+                match extractor_limit {
+                    Some(layer) => layer.handle(cx, body, next).await,
+                    None => next.run(cx, body).await,
+                }
+            };
+            match every().filter_map(|controls| controls.timeout).min() {
+                Some(timeout) => match tokio::time::timeout(timeout, page).await {
+                    Ok(response) => response,
+                    Err(_) => Ok(control_refusal(&ApiError::gateway_timeout("Gateway Timeout"))),
+                },
+                None => page.await,
+            }
+        })
+    }
+}
+
+/// A route control's refusal as the pages show a refusal: its status, and
+/// a section with its heading and its message. The page did not run, so no
+/// layout frames it.
+fn control_refusal(err: &ApiError) -> Response {
+    let message = err.message.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
+    let html = format!(
+        r#"<section class="ss-refusal" data-status="{}"><h1>{}</h1><p>{message}</p></section>"#,
+        err.status.as_str(),
+        heading(err.status),
+    );
+    let mut response = Response::new(Body::from(html));
+    *response.status_mut() = err.status;
+    response.headers_mut().insert(header::CONTENT_TYPE, HeaderValue::from_static("text/html; charset=utf-8"));
+    response
+}
 {{- end }}

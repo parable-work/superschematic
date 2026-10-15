@@ -5,6 +5,12 @@
 // operation table below is the schema's declaration of paths, parameters,
 // strict body parsers, auth requirements, and the @bodyLimit, @rateLimit
 // and @timeout directives, applied by {{ .RuntimePackage }}.
+{{- if .HasPages }}
+// A @paginated operation's page (D60) carries its limits: the route reads
+// the request's cursor and limit with readPage after the query parameters,
+// answering their 400 as the Go and Rust routers do, and sends the Page the
+// implementation returns as data.
+{{- end }}
 {{- if .Identity }}
 //
 // The API's authDb, {{ .Identity.AuthDB }}, has a User table (D50): the identity
@@ -19,7 +25,11 @@
 {{- end }}
 
 import { Hono, type Env } from 'hono';
+{{- if .HasPages }}
+import { readPage, type OperationSpec, type PageSpec } from '{{ .RuntimePackage }}';
+{{- else }}
 import type { OperationSpec } from '{{ .RuntimePackage }}';
+{{- end }}
 import {
 {{- if .HasManualMounts }}
   mountManualOperation,
@@ -85,6 +95,9 @@ export const operationSpecs = {
 {{- if .HasInput }}
     input: { parse: (value: unknown) => {{ .InputParser }}({{ .InputValidator }}(value)), required: {{ .InputRequired }} },
 {{- end }}
+{{- if .Page }}
+    page: { defaultLimit: {{ .Page.DefaultLimit }}, maxLimit: {{ .Page.MaxLimit }} },
+{{- end }}
 {{- if .OutputIsArrayOfArrays }}
     outputIsArrayOfArrays: true,
 {{- end }}
@@ -107,7 +120,7 @@ export const operationSpecs = {
     manual: {{ .Manual }},
   },
 {{- end }}
-} as const satisfies Record<OperationName, OperationSpec>;
+} as const satisfies Record<OperationName, OperationSpec{{ if .HasPages }} & { readonly page?: PageSpec }{{ end }}>;
 
 {{ if .Identity -}}
 export interface RouterOptions<E extends Env = Env> extends Omit<RouterRuntimeOptions, 'authenticate'> {
@@ -247,6 +260,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
 {{- end }}
 {{- if .HasInput }}
           input: request.input as {{ .InputType }}{{ if not .InputRequired }} | undefined{{ end }},
+{{- end }}
+{{- if .Page }}
+          page: readPage(ctx.query, operationSpecs.{{ .Name }}.page),
 {{- end }}
         },
 {{- end }}

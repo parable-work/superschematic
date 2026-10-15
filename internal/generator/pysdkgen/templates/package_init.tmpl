@@ -24,6 +24,9 @@ from .errors import (
     SDKError,
     ValidationError,
 )
+{{- if .HasPagedEndpoints}}
+from .page import Page
+{{- end}}
 from .sdk import {{.SDKClassName}}
 
 __all__ = [
@@ -41,6 +44,9 @@ __all__ = [
     "RateLimitError",
     "ValidationError",
     "NetworkError",
+{{- if .HasPagedEndpoints}}
+    "Page",
+{{- end}}
 {{- if .HasUnsetArgs}}
     "UNSET",
     "Unset",

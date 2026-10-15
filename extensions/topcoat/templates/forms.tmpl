@@ -23,8 +23,14 @@
 use std::collections::BTreeMap;
 use std::ops::Bound;
 
+{{ if .FormsUse "paged" -}}
+use crate::api::runtime;
+{{ end -}}
 use crate::api::runtime::ApiError;
 use crate::api::runtime::schema::ParseError;
+{{- if .FormsUse "paged" }}
+use crate::api::runtime::QueryValues;
+{{- end }}
 {{- if .Forms }}
 use crate::api::runtime::schema::UnknownFields;
 {{- end }}
@@ -183,9 +189,13 @@ impl FormErrors {
         }
         out
     }
-{{- if .FormsUse "argsInput" }}
-
+{{- if or (.FormsUse "argsInput") (.FormsUse "paged") }}
+{{ if .FormsUse "paged" }}
+    /// Adds an embedded input form's errors, or a page's, to its argument
+    /// form's.
+{{- else }}
     /// Adds an embedded input form's errors to its argument form's.
+{{- end }}
     fn merge(&mut self, refused: FormErrors) {
         for (field, messages) in refused.fields {
             for message in messages {

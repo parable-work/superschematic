@@ -1,6 +1,9 @@
 //! {{ .Endpoint.Namespace }}.{{ .Endpoint.Name }}: `{{ toUpper .Endpoint.Method }} {{ .Endpoint.Path }}`.
 //! NOTE: Generated once and never overwritten.
 
+{{- if .Endpoint.Page }}
+use {{ .CrateIdent }}::runtime;
+{{- end }}
 {{- if .Endpoint.UsesTypes }}
 use {{ .CrateIdent }}::types;
 {{- end }}

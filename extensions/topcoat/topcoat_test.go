@@ -81,11 +81,17 @@ func buildService(t *testing.T, name, outputRoot string, outputs map[string]any)
 // writing the build's log to log when it is not nil.
 func buildWithNaming(t *testing.T, names registry.Naming, name, outputRoot string, outputs map[string]any, log io.Writer) (*registry.Result, error) {
 	t.Helper()
+	return buildDir(t, names, serviceDir(name), outputRoot, outputs, log)
+}
+
+// buildDir is buildWithNaming of the service in dir, a fixture's or a
+// test's own copy of one.
+func buildDir(t *testing.T, names registry.Naming, service, outputRoot string, outputs map[string]any, log io.Writer) (*registry.Result, error) {
+	t.Helper()
 	reg, err := registry.Assemble(names, topcoat.Extension{})
 	if err != nil {
 		t.Fatalf("Assemble: %v", err)
 	}
-	service := serviceDir(name)
 	schema, cfg, err := loader.LoadServiceWithConfig(service, loader.WithRegistry(reg))
 	if err != nil {
 		t.Fatalf("LoadServiceWithConfig: %v", err)
@@ -211,10 +217,12 @@ func skipped(result *registry.Result, reason string) bool {
 // traffic controls, fixture-views-api, whose result's fields are of every
 // kind a display component renders, fixture-user-routes-api, whose users
 // are the core user model's (D50), fixture-args-api, whose arguments make
-// argument forms, and fixture-pages-api, whose resources make pages, with
-// testdata/golden/<service>; -update rewrites them.
+// argument forms, fixture-pages-api, whose resources make pages, and
+// fixture-console-api, whose lists page, whose ids refer to products and
+// whose lists search, with testdata/golden/<service>; -update rewrites
+// them.
 func TestGolden(t *testing.T) {
-	for _, service := range []string{"fixture-api", "fixture-nested-arrays-api", formsService, controlsService, viewsService, userRoutesService, argsService, pagesService} {
+	for _, service := range []string{"fixture-api", "fixture-nested-arrays-api", formsService, controlsService, viewsService, userRoutesService, argsService, pagesService, consoleService} {
 		root := testpaths.TempDir(t)
 		if _, err := buildService(t, service, root, outputsOf(service)); err != nil {
 			t.Fatalf("build %s: %v", service, err)
@@ -576,11 +584,12 @@ type crateOptions struct {
 }
 
 // outputsOf are a fixture's outputs in the tests that build every fixture
-// alike: rustOutputs, with the pages on for fixture-pages-api, the one
-// fixture whose crate has them.
+// alike: rustOutputs, with the pages on, their lists live, for
+// fixture-pages-api and fixture-console-api, the fixtures whose crates
+// have them.
 func outputsOf(service string) map[string]any {
-	if service == pagesService {
-		return pagesOutputs()
+	if service == pagesService || service == consoleService {
+		return livePagesOutputs()
 	}
 	return rustOutputs()
 }
@@ -2034,8 +2043,8 @@ use schemas_fixture_controls_api_topcoat::api::runtime::{
     ApiError, Authenticator, Principal, RequestContext, ServiceAuthenticator, ServiceCaller,
 };
 use schemas_fixture_controls_api_topcoat::api::{
-    types, HookImplementation, HookReceivePaymentArgs, Implementations, OrderImplementation, StockImplementation,
-    StockReleaseReservationArgs, WebhookVerifier,
+    types, HookImplementation, HookReceivePaymentArgs, Implementations, OrderGetOrderArgs, OrderHoldOrderArgs,
+    OrderImplementation, OrderListOrdersArgs, StockImplementation, StockReleaseReservationArgs, WebhookVerifier,
 };
 use schemas_fixture_controls_api_topcoat::{operations, PageAuthenticator, RouterBuilderFixtureControlsApiExt};
 use topcoat::context::Cx;
@@ -2099,10 +2108,25 @@ impl StockImplementation for Shop {
     async fn release_reservation(&self, _ctx: RequestContext, args: StockReleaseReservationArgs) -> Result<types::Reservation, ApiError> {
         Ok(types::Reservation { id: args.id, held: false })
     }
+    async fn list_warehouses(&self, _ctx: RequestContext) -> Result<Vec<types::Warehouse>, ApiError> {
+        Ok(vec![types::Warehouse { id: "n".to_string(), name: "North".to_string() }])
+    }
+    async fn list_shipments(&self, _ctx: RequestContext) -> Result<Vec<types::Shipment>, ApiError> {
+        Ok(vec![types::Shipment { id: "1".to_string(), warehouse_id: "n".to_string() }])
+    }
 }
 
 #[async_trait]
 impl OrderImplementation for Shop {
+    async fn list_orders(&self, _ctx: RequestContext, _args: OrderListOrdersArgs) -> Result<Vec<types::OrderView>, ApiError> {
+        Ok(vec![types::OrderView { id: "1".to_string() }])
+    }
+    async fn get_order(&self, _ctx: RequestContext, args: OrderGetOrderArgs) -> Result<types::OrderView, ApiError> {
+        Ok(types::OrderView { id: args.id })
+    }
+    async fn hold_order(&self, _ctx: RequestContext, args: OrderHoldOrderArgs) -> Result<types::OrderView, ApiError> {
+        Ok(types::OrderView { id: args.id })
+    }
     async fn place_order(&self, _ctx: RequestContext) -> Result<types::OrderView, ApiError> {
         if self.slow {
             tokio::time::sleep(Duration::from_secs(5)).await;

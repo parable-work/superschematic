@@ -176,6 +176,22 @@ export function hmacVerified(_cfg: HmacVerifiedConfig): MethodDecorator {
   return noopMethodDecorator;
 }
 
+export type PaginatedConfig = {
+  /** How many items a page holds when the caller sends no limit: 20, or maxLimit when that is less. */
+  readonly defaultLimit?: number;
+  /** The most items a caller may ask a page to hold: 1 to 1000, 100 when left out. */
+  readonly maxLimit?: number;
+};
+
+/**
+ * The operation's list result pages by an opaque cursor (D60): a GET whose
+ * result is a list takes the query parameters `cursor` and `limit` and
+ * answers `{ items, next }`, `next` null after the last page.
+ */
+export function paginated(_cfg?: PaginatedConfig): MethodDecorator {
+  return noopMethodDecorator;
+}
+
 /**
  * Only a listed service may call. With a user clause (@auth, an
  * Authenticated set, @requirePermission, @requireOwnership), it must forward

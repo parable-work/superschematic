@@ -24,6 +24,9 @@ mod jwt;
 pub mod logging;
 mod openapi;
 mod operation;
+// The page of a @paginated operation (D60): the router's reader, the
+// cursor, and the page an implementation returns.
+pub mod page;
 mod params;
 mod path;
 // A stack server's database (D57), with the `postgres` feature.
@@ -32,6 +35,8 @@ pub mod postgres;
 mod ratelimit;
 mod request_id;
 mod response;
+// The words, LIKE patterns and case folding of a SearchQuery (D62).
+pub mod search;
 mod service_auth;
 // The readers of the config fields an API's edges derive in a stack (D57).
 pub mod stackconfig;

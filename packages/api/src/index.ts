@@ -10,6 +10,7 @@ export {
   job,
   manualRouteRegistration,
   mcp,
+  paginated,
   publicRoute,
   rateLimit,
   requireOwnership,
@@ -38,6 +39,7 @@ export type {
   MCPConfig,
   MCPInvocationPolicy,
   MCPToolOptions,
+  PaginatedConfig,
   RateLimitConfig,
   ServiceCallersConfig,
   ServiceHandleRef,
@@ -47,4 +49,4 @@ export type {
   WorkerOptions
 } from "./decorators";
 export { HttpMethod } from "./enums";
-export type { EncryptedField, QueryParam } from "./wrappers";
+export type { EncryptedField, QueryParam, RefersTo, RefersToConfig, SearchQuery } from "./wrappers";

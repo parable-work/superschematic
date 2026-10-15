@@ -185,6 +185,40 @@ const result = await sdk.{{toCamelCase $nsName}}.{{$ep.Name}}();
 {{- end}}
 {{- end}}
 
+{{- if .HasPagedEndpoints}}
+{{- $paged := ""}}
+{{- $pagedNamespace := ""}}
+{{- range .Namespaces}}
+{{- $ns := .}}
+{{- range .Endpoints}}
+{{- if and .Page (not $paged) (not $ns.IsScopedNS) (not .PathParams) (not .ScalarArgs) (not .HasInput)}}
+{{- $paged = .Name}}
+{{- $pagedNamespace = toCamelCase $ns.Name}}
+{{- end}}
+{{- end}}
+{{- end}}
+
+### Paged Lists
+
+A paged operation (`@paginated`) returns one page, `{ items, next }`:
+pass `next` back as `cursor` for the page after it, until `next` is
+`null`. Its `<method>All` yields every item, asking for each page only
+when the loop reaches it.
+{{- if $paged}}
+
+```typescript
+const page = await sdk.{{$pagedNamespace}}.{{$paged}}();
+if (page.next !== null) {
+  const after = await sdk.{{$pagedNamespace}}.{{$paged}}({ cursor: page.next });
+}
+
+for await (const item of sdk.{{$pagedNamespace}}.{{$paged}}All()) {
+  console.log(item);
+}
+```
+{{- end}}
+{{- end}}
+
 ### Error Handling
 
 ```typescript

@@ -22,7 +22,11 @@
 // titles and its types' @display. When outputs.topcoat.pages asks for
 // them, pages under a prefix list, show, create, edit, delete and act on
 // each resource the operations' REST paths describe, through those calls,
-// forms and components, with a layout, a nav and an index.
+// forms and components, with a layout, a nav and an index. A paged
+// operation's call, form, procedure and list take and return its page
+// (D60); a value that refers to an item is a select of the items in a form
+// and its item's label in a component, from the operation that lists them
+// (D61); and a search argument is a form's search box (D62).
 //
 // The package uses only the public registry and ir packages, as an
 // out-of-tree extension would.
@@ -79,10 +83,12 @@ func (Extension) Register(r *registry.Registry) error {
 // enabled outputs.topcoat, which a binary without the extension never
 // reads: a project builds the same configs with the core binary and with
 // this one. PagesPrefixes turns on the pages of the listed services it
-// names, each under its prefix, as outputs.topcoat.pages would.
+// names, each under its prefix, as outputs.topcoat.pages would, and
+// PagesLive their live lists, as outputs.topcoat.pages.live would.
 type Table struct {
 	Services      []string
 	PagesPrefixes map[string]string
+	PagesLive     bool
 }
 
 // decodeTable decodes the [extension.topcoat] table, refusing a key it
@@ -92,7 +98,8 @@ type Table struct {
 // Two services' pages never share a prefix, nor is one's under another's:
 // an app that links both crates would register a page twice, which
 // Topcoat's router refuses, or put one console's layout around the
-// other's pages.
+// other's pages. pages_live = true turns on the live lists of the pages
+// pages_prefix turns on.
 func decodeTable(table map[string]any) (Table, error) {
 	var out Table
 	var prefix any
@@ -112,11 +119,20 @@ func decodeTable(table map[string]any) (Table, error) {
 			}
 		case "pages_prefix":
 			prefix = value
+		case "pages_live":
+			live, ok := value.(bool)
+			if !ok {
+				return out, fmt.Errorf("[extension.topcoat] pages_live must be true or false, got %T", value)
+			}
+			out.PagesLive = live
 		default:
-			return out, fmt.Errorf("[extension.topcoat]: unknown key %q (the table takes services and pages_prefix)", key)
+			return out, fmt.Errorf("[extension.topcoat]: unknown key %q (the table takes services, pages_prefix and pages_live)", key)
 		}
 	}
 	if prefix == nil {
+		if out.PagesLive {
+			return out, fmt.Errorf("[extension.topcoat] pages_live turns on the live lists of the pages pages_prefix turns on, and the table has no pages_prefix")
+		}
 		return out, nil
 	}
 	prefixes, err := pagesPrefixes(prefix, out.Services)
@@ -186,7 +202,8 @@ var OutputSchema = json.RawMessage(`{
       "description": "A page per resource the operations describe, under a prefix, with a layout and a nav (default off; needs records, forms and views).",
       "properties": {
         "enabled": {"type": "boolean"},
-        "prefix": {"type": "string", "description": "The path the pages are served under (default /console): it starts with /, ends without one, and is not under /api or /_superschematic."}
+        "prefix": {"type": "string", "description": "The path the pages are served under (default /console): it starts with /, ends without one, and is not under /api or /_superschematic."},
+        "live": {"type": "boolean", "description": "A list's filter updates its table in place through a Topcoat shard, for an app that loads Topcoat's runtime (default false)."}
       }
     }
   }
@@ -230,6 +247,10 @@ func (c Config) WritesViews() bool {
 // operations describe.
 func (c Config) WritesPages() bool { return c.Pages != nil && c.Pages.Enabled }
 
+// PagesLive reports whether a list's filter updates its table in place
+// through a shard, for an app that loads Topcoat's runtime.
+func (c Config) PagesLive() bool { return c.WritesPages() && c.Pages.Live }
+
 // PagesPrefix is the path the pages are served under.
 func (c Config) PagesPrefix() string {
 	if c.Pages != nil && c.Pages.Prefix != "" {
@@ -267,7 +288,7 @@ func configOf(c registry.GenerateContext, table Table) (Config, error) {
 	if c.Outputs == nil || c.Outputs.Raw[OutputKey] == nil {
 		cfg.Enabled = slices.Contains(table.Services, c.Config.Name)
 		if prefix, ok := table.PagesPrefixes[c.Config.Name]; cfg.Enabled && ok {
-			cfg.Pages = &PagesConfig{Enabled: true, Prefix: prefix}
+			cfg.Pages = &PagesConfig{Enabled: true, Prefix: prefix, Live: table.PagesLive}
 		}
 		return cfg, nil
 	}

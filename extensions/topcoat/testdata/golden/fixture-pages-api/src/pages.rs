@@ -21,7 +21,12 @@
 //! message the form's own; a refused caller (401, 403) and an item that is
 //! not there (404) render on their own, a 401 with a link to the app's
 //! sign-in page (`Settings`). Every form and display component takes the
-//! app's `Settings` choices.
+//! app's `Settings` choices, and a resource's own where the app scopes some
+//! to it.
+//!
+//! A list with a filter renders through a shard: an app that loads
+//! Topcoat's runtime gets the filter's results in place, without a reload,
+//! and one that does not gets the page as before.
 //!
 //! The app's `.discover()` registers the pages and the layout. The markup
 //! is semantic HTML with `ss-` classes and ships no styles.
@@ -29,10 +34,10 @@
 use std::fmt::Write as _;
 use crate::api::types;
 use crate::choices::Choices;
-use crate::forms::{DocumentGetDocumentArgsForm, DocumentInputForm, DocumentReplaceDocumentArgsForm, FormErrors, MilestoneInputForm, ProjectArchiveProjectArgsForm, ProjectDeleteProjectArgsForm, ProjectInputForm, ProjectListProjectsArgsForm, ProjectPatchForm, ProjectUpdateProjectArgsForm, Refusal, TaskAddTaskArgsForm, document_input_fields, document_replace_document_args_fields, project_archive_project_args_fields, project_delete_project_args_fields, project_input_fields, project_list_projects_args_fields, project_update_project_args_fields, task_add_task_args_fields};
+use crate::forms::{DocumentGetDocumentArgsForm, DocumentInputForm, DocumentReplaceDocumentArgsForm, FormErrors, MilestoneInputForm, ProjectArchiveProjectArgsForm, ProjectDeleteProjectArgsForm, ProjectInputForm, ProjectListProjectsArgsForm, ProjectPatchForm, ProjectUpdateProjectArgsForm, Refusal, TaskAddTaskArgsForm, TaskListTasksArgsForm, document_input_fields, document_replace_document_args_fields, project_archive_project_args_fields, project_delete_project_args_fields, project_input_fields, project_list_projects_args_fields, project_update_project_args_fields, task_add_task_args_fields, task_list_tasks_args_fields};
 use crate::operations;
-use crate::records::{CommentRecord, DocumentRecord, MemberRecord, ProjectRecord, TaskRecord};
-use crate::views::{comment_table, document_detail, document_table, member_table, project_detail, project_table, task_detail, task_table};
+use crate::records::{CommentRecord, DocumentRecord, MemberRecord, ProjectRecord, ShelfRecord, TaskRecord};
+use crate::views::{comment_table, document_detail, document_table, member_table, project_detail, project_table, shelf_detail, shelf_table, task_detail, task_table};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 use topcoat::context::{Cx, memoize, try_app_context};
@@ -40,6 +45,7 @@ use topcoat::router::content::Form;
 use topcoat::router::error::see_other;
 use topcoat::router::request::uri;
 use topcoat::router::{Slot, StatusCode, layout, page, path_param};
+use topcoat::runtime::{Event, shard, signal};
 use topcoat::view::{View, component, view};
 
 /// Where the pages are served: every page's path begins with it.
@@ -54,7 +60,23 @@ path_param!(pub label_id);
 
 path_param!(pub project_id);
 
+path_param!(pub shelve_id);
+
 path_param!(pub task_id);
+
+/// The resources of the pages, each by its path below the prefix, which
+/// names it in `Settings::choices_for`.
+pub const RESOURCES: &[&str] = &[
+    "documents",
+    "documents/{document_id}/comments",
+    "documents/drafts",
+    "labels/{label_id}/tasks",
+    "members",
+    "projects",
+    "projects/{project_id}/tasks",
+    "projects/archived",
+    "shelves",
+];
 
 /// What the app tells the pages, in its app context
 /// (`.app_context(pages::Settings::new().sign_in("/sign-in"))`): the site's
@@ -62,13 +84,17 @@ path_param!(pub task_id);
 /// refuses a caller who is not signed in (401) links to, with the page to
 /// come back to as `next`; and the choices every form and display component
 /// the pages render takes, by each field's path (`lines.productId`), so a
-/// form offers an id's records and a table names them. Without it the title
-/// is the service's name, a refusal has no link and there are no choices.
+/// form offers an id's records and a table names them, the app's for every
+/// resource and a resource's own (`choices_for`), which win on its pages.
+/// Without it the title is the service's name, a refusal has no link and
+/// there are no choices.
 #[derive(Debug, Clone, Default)]
 pub struct Settings {
     pub title: Option<String>,
     pub sign_in: Option<String>,
     pub choices: Choices,
+    /// Each resource's own choices, by its path below the prefix.
+    pub resource_choices: Vec<(String, Choices)>,
 }
 
 impl Settings {
@@ -99,6 +125,35 @@ impl Settings {
         self
     }
 
+    /// These settings with `choices` for the pages of one resource, named
+    /// by its path below the prefix, its parameters as its pages name them,
+    /// as `RESOURCES` lists it: they win over the app's `choices` where both
+    /// name a field, and no other resource's pages see them.
+    ///
+    /// # Panics
+    ///
+    /// When `resource` is none of `RESOURCES`, which a typo would be.
+    #[must_use]
+    #[track_caller]
+    pub fn choices_for(mut self, resource: impl Into<String>, choices: Choices) -> Self {
+        let resource = resource.into();
+        assert!(
+            RESOURCES.contains(&resource.as_str()),
+            "pages::Settings::choices_for: no resource of these pages is at {resource:?}; RESOURCES lists them",
+        );
+        self.resource_choices.push((resource, choices));
+        self
+    }
+
+    /// The choices of one resource's pages: the app's, then the resource's
+    /// own, which win.
+    fn choices_of(&self, resource: &str) -> Choices {
+        self.resource_choices
+            .iter()
+            .filter(|(at, _)| at == resource)
+            .fold(self.choices.clone(), |all, (_, own)| all.and(own))
+    }
+
     /// The settings the app put in its context, or the defaults.
     fn of(cx: &Cx) -> Self {
         try_app_context::<Settings>(cx).cloned().unwrap_or_default()
@@ -117,16 +172,22 @@ impl Settings {
     }
 }
 
-/// The choices the app's `Settings` give the pages' forms and display
-/// components.
-fn choices_of(cx: &Cx) -> Choices {
-    try_app_context::<Settings>(cx).map(|settings| settings.choices.clone()).unwrap_or_default()
+/// The choices the app's `Settings` give the forms and display components
+/// of one resource's pages, `resource` its path below the prefix.
+fn choices_of(cx: &Cx, resource: &str) -> Choices {
+    try_app_context::<Settings>(cx).map(|settings| settings.choices_of(resource)).unwrap_or_default()
 }
 
 /// The current page's path and query, which a sign-in link comes back to.
 fn current(cx: &Cx) -> String {
     let uri = uri(cx);
     uri.path_and_query().map_or_else(|| uri.path().to_owned(), |path| path.as_str().to_owned())
+}
+
+/// The current page's query, from which a live list's shard reads its
+/// filter.
+fn query_of(cx: &Cx) -> String {
+    uri(cx).query().unwrap_or_default().to_owned()
 }
 
 /// A value as one segment of a page's path, percent-encoded; none for a
@@ -252,17 +313,11 @@ fn messages(refusal: &Refusal) -> Vec<String> {
 async fn refused(cx: &Cx, refusal: Refusal, #[into] next: String) -> topcoat::Result<impl View> {
     let status = refusal.status;
     let sign_in = if status == StatusCode::UNAUTHORIZED { Settings::of(cx).sign_in_href(&next) } else { None };
-    let heading = match status.as_u16() {
-        401 => "Sign in to see this page",
-        403 => "Not allowed",
-        404 => "Not found",
-        _ => "Refused",
-    };
     let messages = messages(&refusal);
     Ok(view! {
         (status)
         <section class="ss-refusal" data-status=(status.as_str().to_owned())>
-            <h1>(heading)</h1>
+            <h1>(heading(status))</h1>
             for message in messages {
                 <p>(message)</p>
             }
@@ -273,6 +328,19 @@ async fn refused(cx: &Cx, refusal: Refusal, #[into] next: String) -> topcoat::Re
     })
 }
 
+/// The heading of a refusal by its status.
+fn heading(status: StatusCode) -> &'static str {
+    match status.as_u16() {
+        401 => "Sign in to see this page",
+        403 => "Not allowed",
+        404 => "Not found",
+        413 => "Too large",
+        429 => "Too many requests",
+        504 => "Timed out",
+        _ => "Refused",
+    }
+}
+
 /// A link of the nav and the index: a resource's list.
 struct Link {
     href: &'static str,
@@ -281,7 +349,9 @@ struct Link {
 
 /// The resources no item holds whose list the caller may use (`can_*`),
 /// and whether a guard refused a caller who is not signed in (401), whom
-/// signing in may admit.
+/// signing in may admit. The request keeps it (`#[memoize]`), so the nav
+/// and the index ask each guard once.
+#[memoize]
 async fn listed(cx: &Cx) -> (Vec<Link>, bool) {
     let mut links = Vec::new();
     let mut signed_out = false;
@@ -293,6 +363,10 @@ async fn listed(cx: &Cx) -> (Vec<Link>, bool) {
     admit(operations::can_member_list_members(cx).await.map_err(|err| err.status), link, &mut links, &mut signed_out);
     let link = Link { href: "/console/projects", label: "Projects" };
     admit(operations::can_project_list_projects(cx).await.map_err(|err| err.status), link, &mut links, &mut signed_out);
+    let link = Link { href: "/console/projects/archived", label: "Archived" };
+    admit(operations::can_project_list_archived_projects(cx).await.map_err(|err| err.status), link, &mut links, &mut signed_out);
+    let link = Link { href: "/console/shelves", label: "Shelves" };
+    admit(operations::can_shelf_list_shelves(cx).await.map_err(|err| err.status), link, &mut links, &mut signed_out);
     (links, signed_out)
 }
 
@@ -359,7 +433,7 @@ const TREE: &[Node] = &[
         titled: false,
         words: &["documents", "drafts"],
         plural: "Drafts",
-        noun: "Draft",
+        noun: "Document",
         list: true,
         detail: false,
         create: None,
@@ -373,7 +447,7 @@ const TREE: &[Node] = &[
         titled: false,
         words: &["labels"],
         plural: "Labels",
-        noun: "Label",
+        noun: "",
         list: false,
         detail: false,
         create: None,
@@ -440,6 +514,34 @@ const TREE: &[Node] = &[
             },
         ],
     },
+    Node {
+        key: "projects/archived",
+        titled: false,
+        words: &["projects", "archived"],
+        plural: "Archived",
+        noun: "Project",
+        list: true,
+        detail: false,
+        create: None,
+        edit: false,
+        delete: false,
+        actions: &[],
+        children: &[],
+    },
+    Node {
+        key: "shelves",
+        titled: false,
+        words: &["shelves"],
+        plural: "Shelves",
+        noun: "Shelf",
+        list: true,
+        detail: true,
+        create: None,
+        edit: false,
+        delete: false,
+        actions: &[],
+        children: &[],
+    },
 ];
 
 /// A step of the trail: its label, its link (none for a page that does not
@@ -489,7 +591,7 @@ fn trail(path: &str, title: &str) -> Vec<Crumb> {
         ids.push(decode(item));
         crumbs.push(Crumb {
             item: node.titled.then(|| (node.key, ids.clone())),
-            ..crumb(format!("{} {}", node.noun, decode(item)), node.detail.then(|| base.clone()))
+            ..crumb(item_label(node.noun, decode(item)), node.detail.then(|| base.clone()))
         });
         at += 1;
         let Some(&page) = segments.get(at) else {
@@ -514,6 +616,12 @@ fn trail(path: &str, title: &str) -> Vec<Crumb> {
         last.current = true;
     }
     crumbs
+}
+
+/// An item in the trail without a title: its noun and id, or its id alone
+/// for a collection without pages, whose items no type names.
+fn item_label(noun: &str, id: String) -> String {
+    if noun.is_empty() { id } else { format!("{noun} {id}") }
 }
 
 /// The title of the item of the collection `key` at the route's `ids`, its
@@ -554,7 +662,7 @@ pub async fn pages_layout(cx: &Cx, slot: Slot<'_>) -> topcoat::Result<impl View>
     let at = |href: &str| path.strip_prefix(href).is_some_and(|rest| rest.is_empty() || rest.starts_with('/'));
     let under = links.iter().map(|link| link.href).filter(|href| at(href)).max_by_key(|href| href.len());
     let nav: Vec<(&'static str, &'static str, Option<&'static str>)> = links
-        .into_iter()
+        .iter()
         .map(|link| {
             let current = match under {
                 Some(href) if href == link.href && path == href => Some("page"),
@@ -610,7 +718,7 @@ pub async fn pages_layout(cx: &Cx, slot: Slot<'_>) -> topcoat::Result<impl View>
 pub async fn pages_index_page(cx: &Cx) -> topcoat::Result<impl View> {
     let settings = Settings::of(cx);
     let (links, signed_out) = listed(cx).await;
-    let sign_in = if signed_out { settings.sign_in_href(&current(cx)) } else { None };
+    let sign_in = if *signed_out { settings.sign_in_href(&current(cx)) } else { None };
     Ok(view! {
         <h1>(settings.site_title())</h1>
         if links.is_empty() {
@@ -680,13 +788,10 @@ async fn call_project_get_project(cx: &Cx, project_id: &str) -> Result<types::Pr
     operations::project_get_project(cx, args).await.map_err(|err| page_refusal(Refusal::from_api(&err), &["id"]))
 }
 
-/// Calls task_list_tasks with the route's values; a refusal of a route's value
-/// is no such page.
+/// Calls task_list_tasks with the route's values and each other argument's
+/// default; a refusal of a route's value is no such page.
 async fn call_task_list_tasks(cx: &Cx, project_id: &str) -> Result<Vec<types::Task>, Refusal> {
-    let args = crate::api::TaskListTasksArgs {
-        project_id: route_value(project_id, as_text).ok_or_else(no_such_page)?,
-    };
-    operations::task_list_tasks(cx, args).await.map_err(|err| page_refusal(Refusal::from_api(&err), &["projectId"]))
+    TaskListTasksArgsForm::new(project_id).submit(cx).await.map_err(|refusal| page_refusal(refusal, &["projectId"]))
 }
 
 /// Calls task_get_task with the route's values; a refusal of a route's value is
@@ -699,6 +804,28 @@ async fn call_task_get_task(cx: &Cx, project_id: &str, task_id: &str) -> Result<
         id: route_value(task_id, as_text).ok_or_else(no_such_page)?,
     };
     operations::task_get_task(cx, args).await.map_err(|err| page_refusal(Refusal::from_api(&err), &["projectId", "id"]))
+}
+
+/// Calls project_list_archived_projects; a refusal of a route's value is no
+/// such page.
+async fn call_project_list_archived_projects(cx: &Cx) -> Result<Vec<types::Project>, Refusal> {
+    operations::project_list_archived_projects(cx).await.map_err(|err| Refusal::from_api(&err))
+}
+
+/// Calls shelf_list_shelves; a refusal of a route's value is no such page.
+async fn call_shelf_list_shelves(cx: &Cx) -> Result<Vec<types::Shelf>, Refusal> {
+    operations::shelf_list_shelves(cx).await.map_err(|err| Refusal::from_api(&err))
+}
+
+/// Calls shelf_get_shelf with the route's values; a refusal of a route's value
+/// is no such page. The request keeps its result, which the page and the trail
+/// share.
+#[memoize(as_ref)]
+async fn call_shelf_get_shelf(cx: &Cx, shelve_id: &str) -> Result<types::Shelf, Refusal> {
+    let args = crate::api::ShelfGetShelfArgs {
+        id: route_value(shelve_id, as_text).ok_or_else(no_such_page)?,
+    };
+    operations::shelf_get_shelf(cx, args).await.map_err(|err| page_refusal(Refusal::from_api(&err), &["id"]))
 }
 
 /// `DocumentInputForm` filled from a `Document` as the API sends it: each field
@@ -785,7 +912,7 @@ async fn documents_list(cx: &Cx, next: String) -> topcoat::Result<impl View> {
 async fn documents_rows(cx: &Cx, items: Vec<types::Document>) -> topcoat::Result<impl View> {
     let rows: Vec<DocumentRecord> = items.iter().map(DocumentRecord::from).collect();
     let hrefs: Vec<String> = rows.iter().map(|row| documents_item_href(&row.id).unwrap_or_default()).collect();
-    let choices = choices_of(cx);
+    let choices = choices_of(cx, "documents");
     Ok(view! {
         if rows.is_empty() {
             <p class="ss-empty">"There are no documents."</p>
@@ -818,7 +945,7 @@ async fn documents_item(
             (title_or(record.title.as_deref().unwrap_or_default(), "Document"), record)
         })
         .map_err(Refusal::clone);
-    let choices = choices_of(cx);
+    let choices = choices_of(cx, "documents");
     let edits = operations::can_document_replace_document(cx).await.is_ok();
     Ok(view! {
         match found {
@@ -882,7 +1009,7 @@ pub async fn documents_create_page(cx: &Cx, Form(form): Form<DocumentInputForm>)
 /// The new page's form, new or as sent with its errors.
 #[component]
 async fn documents_new(cx: &Cx, form: DocumentInputForm, errors: FormErrors) -> topcoat::Result<impl View> {
-    let choices = choices_of(cx);
+    let choices = choices_of(cx, "documents");
     Ok(view! {
         <h1>"New document"</h1>
         <form method="post" class="ss-form">
@@ -948,7 +1075,7 @@ pub async fn documents_update_page(cx: &Cx, Form(form): Form<DocumentReplaceDocu
 /// The edit page's form, filled from the item or as sent with its errors.
 #[component]
 async fn documents_edit(cx: &Cx, form: DocumentReplaceDocumentArgsForm, errors: FormErrors) -> topcoat::Result<impl View> {
-    let choices = choices_of(cx);
+    let choices = choices_of(cx, "documents");
     Ok(view! {
         <h1>"Edit the document"</h1>
         <form method="post" class="ss-form">
@@ -996,7 +1123,7 @@ async fn documents_comments_list(cx: &Cx, document_id: String, next: String) -> 
 #[component]
 async fn documents_comments_rows(cx: &Cx, items: Vec<types::Comment>) -> topcoat::Result<impl View> {
     let rows: Vec<CommentRecord> = items.iter().map(CommentRecord::from).collect();
-    let choices = choices_of(cx);
+    let choices = choices_of(cx, "documents/{document_id}/comments");
     Ok(view! {
         if rows.is_empty() {
             <p class="ss-empty">"There are no comments."</p>
@@ -1060,7 +1187,7 @@ async fn documents_drafts_list(cx: &Cx, next: String) -> topcoat::Result<impl Vi
 #[component]
 async fn documents_drafts_rows(cx: &Cx, items: Vec<types::Document>) -> topcoat::Result<impl View> {
     let rows: Vec<DocumentRecord> = items.iter().map(DocumentRecord::from).collect();
-    let choices = choices_of(cx);
+    let choices = choices_of(cx, "documents/drafts");
     Ok(view! {
         if rows.is_empty() {
             <p class="ss-empty">"There are no drafts."</p>
@@ -1101,7 +1228,7 @@ async fn labels_tasks_list(cx: &Cx, label_id: String, next: String) -> topcoat::
 #[component]
 async fn labels_tasks_rows(cx: &Cx, items: Vec<types::Task>) -> topcoat::Result<impl View> {
     let rows: Vec<TaskRecord> = items.iter().map(TaskRecord::from).collect();
-    let choices = choices_of(cx);
+    let choices = choices_of(cx, "labels/{label_id}/tasks");
     Ok(view! {
         if rows.is_empty() {
             <p class="ss-empty">"There are no tasks."</p>
@@ -1142,7 +1269,7 @@ async fn members_list(cx: &Cx, next: String) -> topcoat::Result<impl View> {
 #[component]
 async fn members_rows(cx: &Cx, items: Vec<types::Member>) -> topcoat::Result<impl View> {
     let rows: Vec<MemberRecord> = items.iter().map(MemberRecord::from).collect();
-    let choices = choices_of(cx);
+    let choices = choices_of(cx, "members");
     Ok(view! {
         if rows.is_empty() {
             <p class="ss-empty">"There are no members."</p>
@@ -1164,27 +1291,34 @@ fn projects_item_href(project_id: &str) -> Option<String> {
 
 /// The list of projects, filtered by the query, when the caller may list them.
 #[page("/console/projects")]
-pub async fn projects_list_page(cx: &Cx, Form(filter): Form<ProjectListProjectsArgsForm>) -> topcoat::Result<impl View> {
+pub async fn projects_list_page(cx: &Cx) -> topcoat::Result<impl View> {
     let next = current(cx);
     let admitted = operations::can_project_list_projects(cx).await;
     Ok(view! {
         match admitted {
             Err(err) => refused(refusal: Refusal::from_api(&err), next: next),
-            Ok(_) => projects_list(filter: filter, next: next),
+            Ok(_) => projects_list(query: query_of(cx), next: next),
         }
     })
 }
 
 /// The projects the filter finds, after the filter, which answers with its
 /// refusal's status, and a link to the new page when the caller may create one.
-#[component]
-async fn projects_list(cx: &Cx, filter: ProjectListProjectsArgsForm, next: String) -> topcoat::Result<impl View> {
+/// A shard at `/console/_live/projects`: when the app loads Topcoat's runtime,
+/// the filter's submit sends the query it holds, and the list renders again in
+/// place. The shard reads the query as the page reads its own, and its request,
+/// which meets no page's guard, is admitted and checked by the list's call.
+#[shard("/console/_live/projects")]
+async fn projects_list(cx: &Cx, query: String, next: String) -> topcoat::Result<impl View> {
+    // The filter's query: the page's at first, then what its submit sets.
+    let query = signal(cx, move || query);
+    let filter = Form::<ProjectListProjectsArgsForm>::from_bytes(query.get().as_bytes())?.0;
     let listed = filter.submit(cx).await;
     let errors = match &listed {
         Err(refusal) if !alone(refusal, &[]) => refusal.errors.clone(),
         _ => FormErrors::default(),
     };
-    let choices = choices_of(cx);
+    let choices = choices_of(cx, "projects");
     let creates = operations::can_project_create_project(cx).await.is_ok();
     let new_href = format!("{}/new", projects_href().unwrap_or_default());
     Ok(view! {
@@ -1192,7 +1326,11 @@ async fn projects_list(cx: &Cx, filter: ProjectListProjectsArgsForm, next: Strin
         if creates {
             <p class="ss-actions"><a class="ss-new" href=(new_href)>"Start a project"</a></p>
         }
-        <form method="get" class="ss-filter">
+        <form method="get" class="ss-filter" data-ss-live="projects" @submit=$(|e: Event| {
+            e.prevent_default();
+            raw!("(() => { const form = document.querySelector('form[data-ss-live=\"projects\"]'); const query = new URLSearchParams(new FormData(form)).toString(); history.replaceState(history.state, '', query === '' ? location.pathname : '?' + query); const sent = form.querySelector('input[data-ss-query]'); sent.value = query; sent.dispatchEvent(new Event('input')); })()", ())
+        })>
+            <input type="hidden" data-ss-query="" @input=$(|e: Event| query.set(e.target.value))>
             project_list_projects_args_fields(form: filter, errors: errors, choices: choices)
             <button type="submit">"Filter"</button>
         </form>
@@ -1210,7 +1348,7 @@ async fn projects_list(cx: &Cx, filter: ProjectListProjectsArgsForm, next: Strin
 async fn projects_rows(cx: &Cx, items: Vec<types::Project>) -> topcoat::Result<impl View> {
     let rows: Vec<ProjectRecord> = items.iter().map(ProjectRecord::from).collect();
     let hrefs: Vec<String> = rows.iter().map(|row| projects_item_href(&row.id).unwrap_or_default()).collect();
-    let choices = choices_of(cx);
+    let choices = choices_of(cx, "projects");
     Ok(view! {
         if rows.is_empty() {
             <p class="ss-empty">"There are no projects."</p>
@@ -1245,7 +1383,7 @@ async fn projects_item(
             (title_or(&record.name, "Project"), record)
         })
         .map_err(Refusal::clone);
-    let choices = choices_of(cx);
+    let choices = choices_of(cx, "projects");
     let edits = operations::can_project_update_project(cx).await.is_ok();
     let deletes = operations::can_project_delete_project(cx).await.is_ok();
     let archive_form = match archive_form {
@@ -1328,7 +1466,7 @@ pub async fn projects_create_page(cx: &Cx, Form(form): Form<ProjectInputForm>) -
 /// The new page's form, new or as sent with its errors.
 #[component]
 async fn projects_new(cx: &Cx, form: ProjectInputForm, errors: FormErrors) -> topcoat::Result<impl View> {
-    let choices = choices_of(cx);
+    let choices = choices_of(cx, "projects");
     Ok(view! {
         <h1>"Start a project"</h1>
         <form method="post" class="ss-form">
@@ -1397,7 +1535,7 @@ pub async fn projects_update_page(cx: &Cx, Form(form): Form<ProjectUpdateProject
 /// The edit page's form, filled from the item or as sent with its errors.
 #[component]
 async fn projects_edit(cx: &Cx, form: ProjectUpdateProjectArgsForm, errors: FormErrors) -> topcoat::Result<impl View> {
-    let choices = choices_of(cx);
+    let choices = choices_of(cx, "projects");
     Ok(view! {
         <h1>"Edit the project"</h1>
         <form method="post" class="ss-form">
@@ -1456,7 +1594,7 @@ pub async fn projects_destroy_page(cx: &Cx, Form(form): Form<ProjectDeleteProjec
 async fn projects_delete(cx: &Cx, project_id: String, form: ProjectDeleteProjectArgsForm, errors: FormErrors) -> topcoat::Result<impl View> {
     let href = projects_item_href(&project_id).unwrap_or_else(|| PREFIX.to_owned());
     let found = call_project_get_project(cx, &project_id).await.map(ProjectRecord::from).map_err(Refusal::clone);
-    let choices = choices_of(cx);
+    let choices = choices_of(cx, "projects");
     Ok(view! {
         match found {
             Err(refusal) => refused(refusal: refusal, next: href),
@@ -1515,7 +1653,7 @@ fn projects_tasks_item_href(project_id: &str, task_id: &str) -> Option<String> {
     Some(format!("{}/{}", projects_tasks_href(project_id)?, seg(task_id)?))
 }
 
-/// The list of tasks, when the caller may list them.
+/// The list of tasks, filtered by the query, when the caller may list them.
 #[page("/console/projects/{project_id}/tasks")]
 pub async fn projects_tasks_list_page(cx: &Cx) -> topcoat::Result<impl View> {
     let project_id = path_param::<ProjectId>(cx).to_owned();
@@ -1524,15 +1662,34 @@ pub async fn projects_tasks_list_page(cx: &Cx) -> topcoat::Result<impl View> {
     Ok(view! {
         match admitted {
             Err(err) => refused(refusal: Refusal::from_api(&err), next: next),
-            Ok(_) => projects_tasks_list(project_id: project_id, next: next),
+            Ok(_) => projects_tasks_list(project_id: project_id, query: query_of(cx), next: next),
         }
     })
 }
 
-/// The tasks, and a link to the new page when the caller may create one.
-#[component]
-async fn projects_tasks_list(cx: &Cx, project_id: String, next: String) -> topcoat::Result<impl View> {
-    let listed = call_task_list_tasks(cx, &project_id).await;
+/// The tasks the filter finds, after the filter, which answers with its
+/// refusal's status, and a link to the new page when the caller may create one.
+/// A shard at `/console/_live/projects_tasks`: when the app loads Topcoat's
+/// runtime, the filter's submit sends the query it holds, and the list renders
+/// again in place. The shard reads the query as the page reads its own, and its
+/// request, which meets no page's guard, is admitted and checked by the list's
+/// call.
+#[shard("/console/_live/projects_tasks")]
+async fn projects_tasks_list(cx: &Cx, project_id: String, query: String, next: String) -> topcoat::Result<impl View> {
+    // The filter's query: the page's at first, then what its submit sets.
+    let query = signal(cx, move || query);
+    let filter = Form::<TaskListTasksArgsForm>::from_bytes(query.get().as_bytes())?.0;
+    // The route's values, never the hidden inputs, which a reader can change.
+    let filter = TaskListTasksArgsForm {
+        project_id: Some(project_id.clone()),
+        ..filter
+    };
+    let listed = filter.submit(cx).await;
+    let errors = match &listed {
+        Err(refusal) if !alone(refusal, &["projectId"]) => refusal.errors.clone(),
+        _ => FormErrors::default(),
+    };
+    let choices = choices_of(cx, "projects/{project_id}/tasks");
     let creates = operations::can_task_add_task(cx).await.is_ok();
     let new_href = format!("{}/new", projects_tasks_href(&project_id).unwrap_or_default());
     Ok(view! {
@@ -1540,9 +1697,18 @@ async fn projects_tasks_list(cx: &Cx, project_id: String, next: String) -> topco
         if creates {
             <p class="ss-actions"><a class="ss-new" href=(new_href)>"New task"</a></p>
         }
+        <form method="get" class="ss-filter" data-ss-live="projects_tasks" @submit=$(|e: Event| {
+            e.prevent_default();
+            raw!("(() => { const form = document.querySelector('form[data-ss-live=\"projects_tasks\"]'); const query = new URLSearchParams(new FormData(form)).toString(); history.replaceState(history.state, '', query === '' ? location.pathname : '?' + query); const sent = form.querySelector('input[data-ss-query]'); sent.value = query; sent.dispatchEvent(new Event('input')); })()", ())
+        })>
+            <input type="hidden" data-ss-query="" @input=$(|e: Event| query.set(e.target.value))>
+            task_list_tasks_args_fields(form: filter, errors: errors, choices: choices)
+            <button type="submit">"Filter"</button>
+        </form>
         match listed {
             Ok(items) => projects_tasks_rows(project_id: project_id, items: items),
-            Err(refusal) => refused(refusal: refusal, next: next),
+            Err(refusal) if alone(&refusal, &["projectId"]) => refused(refusal: page_refusal(refusal, &["projectId"]), next: next),
+            Err(refusal) => (refusal.status),
         }
     })
 }
@@ -1553,7 +1719,7 @@ async fn projects_tasks_list(cx: &Cx, project_id: String, next: String) -> topco
 async fn projects_tasks_rows(cx: &Cx, project_id: String, items: Vec<types::Task>) -> topcoat::Result<impl View> {
     let rows: Vec<TaskRecord> = items.iter().map(TaskRecord::from).collect();
     let hrefs: Vec<String> = rows.iter().map(|row| projects_tasks_item_href(&project_id, &row.id).unwrap_or_default()).collect();
-    let choices = choices_of(cx);
+    let choices = choices_of(cx, "projects/{project_id}/tasks");
     Ok(view! {
         if rows.is_empty() {
             <p class="ss-empty">"There are no tasks."</p>
@@ -1614,7 +1780,7 @@ async fn projects_tasks_item(
             (title_or(&record.title, "Task"), record)
         })
         .map_err(Refusal::clone);
-    let choices = choices_of(cx);
+    let choices = choices_of(cx, "projects/{project_id}/tasks");
     Ok(view! {
         match found {
             Err(refusal) => refused(refusal: refusal, next: href),
@@ -1673,12 +1839,139 @@ pub async fn projects_tasks_create_page(cx: &Cx, Form(form): Form<TaskAddTaskArg
 /// The new page's form, new or as sent with its errors.
 #[component]
 async fn projects_tasks_new(cx: &Cx, form: TaskAddTaskArgsForm, errors: FormErrors) -> topcoat::Result<impl View> {
-    let choices = choices_of(cx);
+    let choices = choices_of(cx, "projects/{project_id}/tasks");
     Ok(view! {
         <h1>"New task"</h1>
         <form method="post" class="ss-form">
             task_add_task_args_fields(form: form, errors: errors, choices: choices)
             <button type="submit">"Create"</button>
         </form>
+    })
+}
+
+/// The list of archived, when the caller may list them.
+#[page("/console/projects/archived")]
+pub async fn projects_archived_list_page(cx: &Cx) -> topcoat::Result<impl View> {
+    let next = current(cx);
+    let admitted = operations::can_project_list_archived_projects(cx).await;
+    Ok(view! {
+        match admitted {
+            Err(err) => refused(refusal: Refusal::from_api(&err), next: next),
+            Ok(_) => projects_archived_list(next: next),
+        }
+    })
+}
+
+/// The archived.
+#[component]
+async fn projects_archived_list(cx: &Cx, next: String) -> topcoat::Result<impl View> {
+    let listed = call_project_list_archived_projects(cx).await;
+    Ok(view! {
+        <h1>"Archived"</h1>
+        match listed {
+            Ok(items) => projects_archived_rows(items: items),
+            Err(refusal) => refused(refusal: refusal, next: next),
+        }
+    })
+}
+
+/// Archived as `project_table` renders them, the app's choices naming their
+/// values.
+#[component]
+async fn projects_archived_rows(cx: &Cx, items: Vec<types::Project>) -> topcoat::Result<impl View> {
+    let rows: Vec<ProjectRecord> = items.iter().map(ProjectRecord::from).collect();
+    let choices = choices_of(cx, "projects/archived");
+    Ok(view! {
+        if rows.is_empty() {
+            <p class="ss-empty">"There are no archived."</p>
+        } else {
+            project_table(rows: rows, choices: choices)
+        }
+    })
+}
+
+/// The path of the shelves: `/console/shelves`.
+fn shelves_href() -> Option<String> {
+    Some("/console/shelves".to_owned())
+}
+
+/// The path of one of the shelves: `/console/shelves/{shelve_id}`.
+fn shelves_item_href(shelve_id: &str) -> Option<String> {
+    Some(format!("{}/{}", shelves_href()?, seg(shelve_id)?))
+}
+
+/// The list of shelves, when the caller may list them.
+#[page("/console/shelves")]
+pub async fn shelves_list_page(cx: &Cx) -> topcoat::Result<impl View> {
+    let next = current(cx);
+    let admitted = operations::can_shelf_list_shelves(cx).await;
+    Ok(view! {
+        match admitted {
+            Err(err) => refused(refusal: Refusal::from_api(&err), next: next),
+            Ok(_) => shelves_list(next: next),
+        }
+    })
+}
+
+/// The shelves.
+#[component]
+async fn shelves_list(cx: &Cx, next: String) -> topcoat::Result<impl View> {
+    let listed = call_shelf_list_shelves(cx).await;
+    Ok(view! {
+        <h1>"Shelves"</h1>
+        match listed {
+            Ok(items) => shelves_rows(items: items),
+            Err(refusal) => refused(refusal: refusal, next: next),
+        }
+    })
+}
+
+/// Shelves as `shelf_table` renders them, the app's choices naming their
+/// values, each row linked to its page.
+#[component]
+async fn shelves_rows(cx: &Cx, items: Vec<types::Shelf>) -> topcoat::Result<impl View> {
+    let rows: Vec<ShelfRecord> = items.iter().map(ShelfRecord::from).collect();
+    let hrefs: Vec<String> = rows.iter().map(|row| shelves_item_href(&row.id).unwrap_or_default()).collect();
+    let choices = choices_of(cx, "shelves");
+    Ok(view! {
+        if rows.is_empty() {
+            <p class="ss-empty">"There are no shelves."</p>
+        } else {
+            shelf_table(rows: rows, choices: choices, hrefs: hrefs)
+        }
+    })
+}
+
+/// One of the shelves, when the caller may read it, with the route's status
+/// when not.
+#[page("/console/shelves/{shelve_id}")]
+pub async fn shelves_item_page(cx: &Cx) -> topcoat::Result<impl View> {
+    let shelve_id = path_param::<ShelveId>(cx).to_owned();
+    Ok(view! { shelves_item(shelve_id: shelve_id) })
+}
+
+/// One of the shelves: its detail, each when the caller may.
+#[component]
+async fn shelves_item(
+    cx: &Cx,
+    shelve_id: String,
+) -> topcoat::Result<impl View> {
+    let href = shelves_item_href(&shelve_id).unwrap_or_else(|| PREFIX.to_owned());
+    let found = call_shelf_get_shelf(cx, &shelve_id)
+        .await
+        .map(|item| {
+            let record = ShelfRecord::from(item);
+            ("Shelf".to_owned(), record)
+        })
+        .map_err(Refusal::clone);
+    let choices = choices_of(cx, "shelves");
+    Ok(view! {
+        match found {
+            Err(refusal) => refused(refusal: refusal, next: href),
+            Ok((heading, record)) => {
+                <h1>(heading)</h1>
+                shelf_detail(record: record, choices: choices.clone())
+            },
+        }
     })
 }

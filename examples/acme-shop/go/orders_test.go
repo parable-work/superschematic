@@ -2,6 +2,7 @@ package shop_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,8 @@ import (
 	shoporders "example.com/acme/api/shop-orders"
 	orm "example.com/acme/orm/shop-db"
 	sdk "example.com/acme/sdk/go/shop-orders"
+	"example.com/acme/sdk/go/shop-orders/namespaces"
+	"example.com/acme/sdk/go/shop-orders/runtime"
 	shopordersimpl "example.com/acme/shop/shop-orders"
 	types "example.com/acme/types/go/shop-orders"
 	"github.com/go-chi/chi/v5"
@@ -87,9 +90,9 @@ func TestPublicAndAuthRoutes(t *testing.T) {
 	server, token := ordersServer(t)
 	ctx := context.Background()
 
-	reviews, err := ordersClient(t, server, "").ProductReviewsNamespace.ListReviews(ctx, productID, nil)
-	if err != nil || len(reviews) != 0 {
-		t.Fatalf("ListReviews without a token: %v, %v", reviews, err)
+	reviews, err := ordersClient(t, server, "").ProductReviewsNamespace.ListReviews(ctx, productID, nil, runtime.PageRequest{})
+	if err != nil || len(reviews.Items) != 0 || reviews.Next != nil {
+		t.Fatalf("ListReviews without a token: %+v, %v", reviews, err)
 	}
 
 	input := types.WriteReviewInput{Rating: 5, Title: "Lovely", Body: "Smoky and smooth."}
@@ -118,7 +121,7 @@ func TestPermissions(t *testing.T) {
 
 	readerServer, readerToken := ordersServer(t, "orders.read")
 	reader := ordersClient(t, readerServer, readerToken)
-	if _, err := reader.OrderNamespace.ListOrders(ctx, nil); err != nil {
+	if _, err := reader.OrderNamespace.ListOrders(ctx, nil, runtime.PageRequest{}); err != nil {
 		t.Fatalf("ListOrders with orders.read: %v", err)
 	}
 	_, err := reader.OrderNamespace.PlaceOrder(ctx, order)
@@ -158,6 +161,59 @@ func TestValidation(t *testing.T) {
 	status := post(t, server.URL+"/api/orders", token, `{"lines": [], "shippingAddress": {"recipient": "Ada", "line1": "1", "city": "London", "postcode": "N1", "country": "gb"}}`)
 	if status != http.StatusBadRequest {
 		t.Fatalf("POST /api/orders with no lines and a lowercase country answered %d", status)
+	}
+}
+
+// A paged list answers its page as data, {items, next}, next null after
+// the last page, and the router refuses a limit past the list's most, or
+// a cursor outside its alphabet, before the implementation runs. The
+// implementation refuses a cursor that decodes but names no order, and a
+// search longer than its rules allow is refused like any query parameter.
+// The no-op database holds no rows, so every page is empty and the last;
+// the stack's test pages through Postgres (TestStackDevRunsTheShop).
+func TestPagesAndSearch(t *testing.T) {
+	server, token := ordersServer(t, "orders")
+	page := func(path string) (int, string) {
+		t.Helper()
+		status, body := call(t, http.MethodGet, server.URL+path, token, "")
+		var answer struct {
+			Data   json.RawMessage `json:"data"`
+			Detail string          `json:"detail"`
+		}
+		if err := json.Unmarshal(body, &answer); err != nil {
+			t.Fatalf("GET %s: %d %s", path, status, body)
+		}
+		if status == http.StatusOK {
+			return status, string(answer.Data)
+		}
+		return status, answer.Detail
+	}
+	for _, path := range []string{"/api/orders", "/api/orders?statuses=placed&limit=100", "/api/products", "/api/products/" + productID + "/reviews?q=smoky+SMOOTH&minRating=4"} {
+		if status, data := page(path); status != http.StatusOK || data != `{"items":[],"next":null}` {
+			t.Errorf("GET %s answered %d %s, want an empty last page", path, status, data)
+		}
+	}
+	for path, detail := range map[string]string{
+		"/api/orders?limit=101":                            "Invalid query parameter limit: must be at most 100",
+		"/api/orders?limit=0":                              "Invalid query parameter limit: must be at least 1",
+		"/api/orders?cursor=a%3D":                          "Invalid query parameter cursor: does not match the required pattern",
+		"/api/orders?cursor=e30":                           "cursor is not one this operation returned",
+		"/api/products?cursor=bnVsbA":                      "cursor is not one this operation returned",
+		"/api/products/" + productID + "/reviews?limit=51": "Invalid query parameter limit: must be at most 50",
+	} {
+		if status, got := page(path); status != http.StatusBadRequest || got != detail {
+			t.Errorf("GET %s answered %d %q, want 400 %q", path, status, got, detail)
+		}
+	}
+	if status, _ := page("/api/products/" + productID + "/reviews?q=" + strings.Repeat("a", 101)); status != http.StatusBadRequest {
+		t.Errorf("a search of 101 characters answered %d, want 400", status)
+	}
+
+	// The SDK sends the lookup's ids as one list; the catalog is public.
+	products, err := ordersClient(t, server, "").ProductCatalogNamespace.ListProducts(context.Background(),
+		&namespaces.ProductCatalogListProductsQueryParams{Ids: []types.IdentityUUID{mustUUID(t, productID)}}, runtime.PageRequest{Limit: 100})
+	if err != nil || len(products.Items) != 0 || products.Next != nil {
+		t.Fatalf("ListProducts by id: %+v, %v", products, err)
 	}
 }
 
