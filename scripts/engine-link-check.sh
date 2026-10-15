@@ -15,9 +15,14 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 goos="$(go env GOOS)"
 goarch="$(go env GOARCH)"
 
-superscalar="$("$ROOT/scripts/superscalar-dep.sh" --archive)"
-versiongraph="$("$ROOT/scripts/versiongraph-archive.sh")"
-engine="$("$ROOT/scripts/engine-archive.sh")"
+# Built first, their output aside (a fresh superscalar build writes its
+# own lines to standard output), then each script's -L flag alone.
+"$ROOT/scripts/superscalar-dep.sh" --archive >/dev/null
+"$ROOT/scripts/versiongraph-archive.sh" >/dev/null
+"$ROOT/scripts/engine-archive.sh" >/dev/null
+superscalar="$("$ROOT/scripts/superscalar-dep.sh" --print)"
+versiongraph="$("$ROOT/scripts/versiongraph-archive.sh" --print)"
+engine="$("$ROOT/scripts/engine-archive.sh" --print)"
 
 # exported prints the functions an archive defines, without the leading
 # underscore macOS gives them. nm fails on a member that defines nothing,
@@ -48,9 +53,10 @@ check "$ROOT/third_party/superscalar/go/lib/${goos}_${goarch}/libsuperscalar_ffi
 check "$ROOT/runtime/versiongraph/go/lib/${goos}_${goarch}/libsuperschematic_versiongraph.a" vg "eng|scalar"
 check "$ROOT/runtime/engine/go/lib/${goos}_${goarch}/libsuperschematic_engine.a" eng "vg|scalar"
 
+engine_exports="$(exported "$ROOT/runtime/engine/go/lib/${goos}_${goarch}/libsuperschematic_engine.a")"
 for name in eng_abi_version eng_open eng_close eng_call eng_http eng_stream_poll \
   eng_stream_close eng_wait eng_runner eng_free; do
-  if ! exported "$ROOT/runtime/engine/go/lib/${goos}_${goarch}/libsuperschematic_engine.a" | grep -qx "$name"; then
+  if ! grep -qx "$name" <<<"$engine_exports"; then
     echo "link check: the engine's archive does not define $name" >&2
     exit 1
   fi

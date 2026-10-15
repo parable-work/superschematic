@@ -1,11 +1,10 @@
 //! The engine's C ABI (D58) as a library: what a Go server links, as the
 //! static archive `libsuperschematic_engine.a`, through the binding in
-//! `runtime/engine/go`.
-//! It follows the version graph's conventions
+//! `runtime/engine/go`. It follows the version graph's conventions
 //! (`runtime/versiongraph/rust/src/ffi.rs`): JSON in and out, output the
 //! engine allocates and `eng_free` releases, and a panic caught at every
 //! export. `runtime/engine/go/include/superschematic_engine.h` is the
-//! header, and a test holds it to the exports.
+//! header, which the core's archive's tests hold to the exports.
 //!
 //! | Export | Input | Output |
 //! |---|---|---|

@@ -681,6 +681,9 @@ func (r *run) step(step *object) (bool, error) {
 	if now, ok := integer(member(step, "now")); ok && e.fixedClock {
 		request.Now = &now
 	}
+	if !e.fixedClock {
+		r.pastLatest()
+	}
 	out, failed := e.e.Do(context.Background(), request)
 	if failed != nil || out == nil {
 		return r.compare(step, nil, false, failed, compare)
@@ -850,6 +853,17 @@ func (r *run) open(step *object, args []any) error {
 	}
 	r.engines = append(r.engines, &opened{name: name, e: e, fixedClock: fixed})
 	return nil
+}
+
+// pastLatest waits until the wall clock is past every instant a time
+// symbol is bound to. The recorder's wall clock is one strict clock for
+// every engine of a test, never one millisecond twice; each engine here
+// has a strict clock of its own, so a step on one engine starts past what
+// the others read.
+func (r *run) pastLatest() {
+	for latest := r.symbols.latest(); time.Now().UnixMilli() <= latest; {
+		time.Sleep(200 * time.Microsecond)
+	}
 }
 
 // app builds the mounts a case serves, behind a server of their own.
@@ -1115,6 +1129,9 @@ func (r *run) exchange(step *object) error {
 				if _, err := e.e.Do(context.Background(), engine.Request{Op: "abi", Now: &now}); err != nil {
 					return err
 				}
+			}
+			if !e.fixedClock {
+				r.pastLatest()
 			}
 			break
 		}

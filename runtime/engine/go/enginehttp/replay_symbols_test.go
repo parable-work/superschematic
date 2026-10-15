@@ -229,6 +229,17 @@ func (s *symbols) substitute(value any) (any, error) {
 	}
 }
 
+// latest is the latest instant a time symbol is bound to.
+func (s *symbols) latest() int64 {
+	var latest int64
+	for _, b := range s.bindings {
+		if b.isTime && b.time > latest {
+			latest = b.time
+		}
+	}
+	return latest
+}
+
 func (s *symbols) argument(sym symbol, whole bool) (any, error) {
 	if _, ok := s.bindings[sym.key()]; !ok && sym.kind == "dir" {
 		s.next++
