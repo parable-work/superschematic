@@ -73,8 +73,8 @@ pub use behaviors::{
     InstanceChange, InstanceCx, InstanceView, OperationCx, SchemaCx, ValidationRequest,
 };
 pub use engine::{
-    seeded_uuid, Clock, Engine, EngineClock, EngineOptions, IdCounter, IdQueue, Ids, MetaSchema,
-    Storage, UuidSource, SCENARIO_SEED,
+    seeded_uuid, Clock, CustomIds, Engine, EngineClock, EngineOptions, IdCounter, IdQueue,
+    IdSource, Ids, MetaSchema, Storage, UuidSource, SCENARIO_SEED,
 };
 pub use errors::{
     BehaviorError, EngineError, EngineErrorCode, EngineErrorKind, Error, HostError, Result,

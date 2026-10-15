@@ -64,8 +64,8 @@ use serde_json::Value;
 
 use superschematic_engine::storage::{Dialect, Lock};
 use superschematic_engine::{
-    calls, json, AccessPolicy, AccessRequest, Engine, EngineOptions, Error as Failed,
-    PermissionMatcher, Policy, Thrown,
+    calls, json, AccessPolicy, AccessRequest, CustomIds, Engine, EngineOptions, Error as Failed,
+    IdSource, Ids, PermissionMatcher, Policy, Thrown,
 };
 
 #[cfg(feature = "js-behaviors")]
@@ -291,6 +291,27 @@ struct Opening {
     released: bridge::Released,
 }
 
+// HostIds is an id source written in TypeScript (the engine's ids
+// option), asked on the JavaScript thread alone. What it threw the facade
+// keeps and rethrows once the call returns.
+struct HostIds(Host);
+
+impl IdSource for HostIds {
+    fn next_id(&self) -> std::result::Result<String, Failed> {
+        let answer = self.0.ask("ids", String::new()).ok_or_else(|| {
+            Failed::Usage(
+                "an id source written in TypeScript answers on the JavaScript thread alone, in a synchronous call".to_owned(),
+            )
+        })?;
+        let answer: Value = serde_json::from_str(&answer).unwrap_or(Value::Null);
+        answer
+            .get("id")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+            .ok_or_else(|| Failed::Internal("the id source written in TypeScript threw".to_owned()))
+    }
+}
+
 // options_of reads the options the facade passes: the engine's, and what
 // it hosts.
 fn options_of(text: &str, host: Option<HostFunction>) -> std::result::Result<Opening, Failure> {
@@ -306,7 +327,7 @@ fn options_of(text: &str, host: Option<HostFunction>) -> std::result::Result<Ope
         Some(Value::Array(names)) => names,
         Some(_) => {
             return Err(Failure::usage(
-                "hosted lists what the facade answers: policy, permissionMatcher",
+                "hosted lists what the facade answers: policy, permissionMatcher, ids",
             ))
         }
     };
@@ -331,9 +352,12 @@ fn options_of(text: &str, host: Option<HostFunction>) -> std::result::Result<Ope
             Some("permissionMatcher") => {
                 options.permission_matcher = Some(Arc::new(HostMatcher(needs_host()?)));
             }
+            Some("ids") => {
+                options.ids = Ids::Custom(CustomIds(Arc::new(HostIds(needs_host()?))));
+            }
             _ => {
                 return Err(Failure::usage(format!(
-                    "the facade hosts a policy or a permissionMatcher, not {}",
+                    "the facade hosts a policy, a permissionMatcher or ids, not {}",
                     json::stringify(name)
                 )))
             }

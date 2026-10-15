@@ -218,6 +218,63 @@ fn an_id_is_checked_whoever_made_it() {
     }
 }
 
+// Counter is a host's id source: c1, c2, ..., then a refusal past three,
+// and "not an id" when asked so.
+struct Counter {
+    next: std::sync::atomic::AtomicU64,
+    bad: bool,
+}
+
+impl superschematic_engine::IdSource for Counter {
+    fn next_id(&self) -> superschematic_engine::Result<String> {
+        if self.bad {
+            return Ok("not an id".into());
+        }
+        let n = self.next.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+        if n > 3 {
+            return Err(superschematic_engine::Error::Internal(
+                "the source ran dry".into(),
+            ));
+        }
+        Ok(format!("c{n}"))
+    }
+}
+
+#[test]
+fn a_hosts_id_source_makes_the_ids_and_its_ids_are_checked() {
+    for target in targets("a_hosts_id_source_makes_the_ids") {
+        for bad in [false, true] {
+            let engine = with_orders(&target.fresh(), |options| {
+                options.ids = Ids::Custom(superschematic_engine::CustomIds(std::sync::Arc::new(
+                    Counter {
+                        next: std::sync::atomic::AtomicU64::new(0),
+                        bad,
+                    },
+                )));
+            });
+            let create = || {
+                engine.instances().create(
+                    &alice(),
+                    "Order",
+                    &json!({"title": "Desk"}),
+                    CreateOptions::default(),
+                )
+            };
+            if bad {
+                assert!(refusal(create())
+                    .message()
+                    .starts_with("instance id \"not an id\""));
+                continue;
+            }
+            let made: Vec<String> = (0..3).map(|_| create().unwrap().id).collect();
+            assert_eq!(made, ["c1", "c2", "c3"]);
+            assert!(
+                matches!(create(), Err(superschematic_engine::Error::Internal(message)) if message == "the source ran dry")
+            );
+        }
+    }
+}
+
 #[test]
 fn a_duplicate_id_in_a_namespace_is_a_conflict_and_writes_nothing() {
     for target in targets("a_duplicate_id_in_a_namespace_is_a_conflict") {
