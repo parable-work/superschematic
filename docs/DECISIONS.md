@@ -5724,6 +5724,47 @@ and `engineMcp` over the engine's routes. Until the Rust engine passes
 the TypeScript suite, `@superschematic/engine` is the TypeScript
 implementation and nothing uses the workspace.
 
+The Go binding (milestone 15) is built. `superschematic-engine-abi`
+(`runtime/engine/rust/abi`) is the C ABI of the bindings section, as a
+library an archive crate expands once,
+`runtime/engine/go/include/superschematic_engine.h` its header, which a
+test holds to the exports: `eng_open` and `eng_close` over handles a
+closed engine leaves `ENG_CLOSED`; `eng_call` over the calls by name, and
+the binding's own `deploy` (each document defined and published as the
+engine's own principal, nothing written when the live version has its
+hash), `health` and `abi`; `eng_http` over the transport-neutral routes,
+a stream a handle `eng_stream_poll` pulls without waiting; `eng_wait` on
+the notifier, one thread for every stream; `eng_runner`; and the codes
+`ENG_OK`, `ENG_ERROR` (the TypeScript class, the code, the message and
+the class's members), `ENG_BAD_ARGUMENTS` and `ENG_CLOSED`.
+`superschematic-engine-ffi` (`runtime/engine/rust/ffi`), the core's
+archive, exports it over `core()`; a project's engine crate exports it
+over its own behaviors or configure with `export_engine_c_abi!`, as
+`runtime/engine/rust/testkit-ffi` does for the replays. The library
+exports nothing itself, so archive crates in one Cargo workspace, whose
+features Cargo unifies, never define a symbol twice.
+`scripts/engine-archive.sh` builds `libsuperschematic_engine.a` (`--crate`
+a project's), and `runtime/engine/go` is the binding (`Open`, `Call`,
+`Deploy`, `Health`, `Runner`, `Close`, errors as `*engine.Error`) with
+`enginehttp`, which mounts the routes, the event stream and MCP on chi,
+the host's timeout on every route but the stream's and MCP's. The Go
+replay sends the HTTP corpus through `enginehttp` over HTTP and the
+engine's own scenario files through `Engine.Do`, on SQLite and Postgres,
+with the Rust replay's counts and two steps a Go server answers otherwise
+(net/http's own 400 for a target that is not percent-encoding, and a live
+event a push host may write before a prune ends the stream). The version
+graph's `vg_*` exports are the core crate's default `ffi` feature, which
+the version graph's Rust engine leaves off, so an archive that links it
+does not define them; `scripts/engine-link-check.sh` links superscalar's,
+the version graph's and the engine's archives into one Go binary and runs
+it, in the engine-go CI job on linux-x64 and in the release's
+build-archives job on all four platforms, whose tarballs now carry the
+engine's archive and header. The config reader and the error mapping in
+the ffi crate have the shape of the Node-API addon's
+`EngineOptions::from_json` and `Error::thrown`, which replace them once
+they are on main. No generated server mounts the engine yet (milestone
+18).
+
 The rule is reversible until the first release.
 
 ### D52, amended: a TypeScript API's jobs run on Bun from packages of their own, with a signal for Go's context
