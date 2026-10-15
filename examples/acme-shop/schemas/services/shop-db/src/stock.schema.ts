@@ -25,7 +25,7 @@ export enum RestockStatus {
 
 // A request to the supplier for more of a product: shop-stock's worker
 // ReorderStock files one when a reservation runs the product low, and its
-// job PlaceRestockOrders orders each open one. A product has at most one
+// job OrderRestocks orders each open one. A product has at most one
 // open request: openProductId is the product while the request is open and
 // null once it is ordered, and the unique index over it admits one row per
 // product, since a unique index lets nulls repeat.
@@ -43,6 +43,6 @@ export abstract class RestockRequest extends Auditable {
 
   openProductId: Nullable<Identity.UUID>;
 
-  // When PlaceRestockOrders ordered it.
+  // When OrderRestocks ordered it.
   orderedAt: Nullable<Temporal.DateTime>;
 }

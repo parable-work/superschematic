@@ -15,10 +15,10 @@ kind, decorators and auth provider.
 | `schemas/services/shop-db` | DB: users and roles, with the core `User` and `UserRole` traits (D50), products, stock, a row per product with the threshold it is restocked below, restock requests, one open per product, orders and reviews, and the queues `OrderPlaced` and `StockLow`, built for Postgres and SQLite |
 | `schemas/services/shop-api` | API over `shop-db`, served in Go, with Go and TypeScript SDKs: products, and the user model's sign-in and administration routes |
 | `schemas/services/shop-orders` | API over `shop-db`, served in Go and in Rust, with SDKs in Go, TypeScript, Python and Rust; it calls `shop-stock`, which reserves each order's stock as it is placed; its worker `FulfilOrders` fulfils each order placed, from `OrderPlaced`, and its job `ShipOrders` ships the fulfilled ones |
-| `schemas/services/shop-stock` | API over `shop-db`'s stock, served in Rust (D57), with Go and Rust SDKs: anyone lists the stock, staff with `stock.write` set a product's level and its threshold, and only `shop-orders`' server reserves stock (`@requireService`), for a shopper with `orders.write` it forwards; a reservation that takes a level below its threshold enqueues `StockLow`, from which its Rust worker `ReorderStock` files a restock request, and its Rust job `PlaceRestockOrders` orders the open ones (D65) |
+| `schemas/services/shop-stock` | API over `shop-db`'s stock, served in Rust (D57), with Go and Rust SDKs: anyone lists the stock, staff with `stock.write` set a product's level and its threshold, and only `shop-orders`' server reserves stock (`@requireService`), for a shopper with `orders.write` it forwards; a reservation that takes a level below its threshold enqueues `StockLow`, from which its Rust worker `ReorderStock` files a restock request, and its Rust job `OrderRestocks` orders the open ones (D65) |
 | `schemas/services/shop-storefront` | API served in TypeScript, with a TypeScript SDK; uses `Price` |
 | `schemas/services/shop-web` | Site: the shop's static site, which calls `shop-api` from the browser (D55) |
-| `schemas/services/shop-stack` | Stack: deploys `shop-api` and `shop-orders`, each on a Go server, `shop-stock`, on a Rust server cargo builds, and `shop-storefront`, on a TypeScript server Bun runs, each on an entrypoint the build writes, `shop-orders`' Go worker and job and `shop-stock`'s Rust ones, and the site `shop-web`; its `Dev` environment runs on the `local` target, `ShipOrders` every minute and `PlaceRestockOrders` only on demand |
+| `schemas/services/shop-stack` | Stack: deploys `shop-api` and `shop-orders`, each on a Go server, `shop-stock`, on a Rust server cargo builds, and `shop-storefront`, on a TypeScript server Bun runs, each on an entrypoint the build writes, `shop-orders`' Go worker and job and `shop-stock`'s Rust ones, and the site `shop-web`; its `Dev` environment runs on the `local` target, `ShipOrders` every minute and `OrderRestocks` only on demand |
 | `go/` | the Go module and its tests, which sign in through `shop-api`'s login, call each API through the Go SDK, run every language's client against `shop-orders`, served in Go and in Rust, and run the stack with `stack dev` |
 | `go/shop-api`, `go/shop-orders` | each API's implementation over the generated ORM, at the naming file's `[implementation_paths]` default, `go/{service}`: `New(deps)`, which the generated entrypoints call, and `shop-orders`' `NewJobs(deps)` and `NewWorkers(deps)`, which its job's and its worker's do. No package authenticates a caller: both servers do it with the identity runtime |
 | `rust-impl/shop-stock` | `shop-stock`'s implementation, at the `[implementation_paths]` `rust` template the naming file sets, `rust-impl/{service}`, since the default, `rust/{service}`, would put it inside the client crate in `rust/`: `create(deps)`, which the generated entrypoint calls, reading and writing `shop-db`'s `stock_level` table with tokio-postgres over the pool its `Deps` holds, as there is no Rust ORM, and enqueueing `StockLow` with the HTTP runtime's queue client; and `create_workers(deps)` and `create_jobs(deps)`, which its worker's and its job's entrypoints call, filing and ordering `restock_request` rows |
@@ -43,14 +43,14 @@ generated Rust one, which cargo builds frozen to `schemas/dist/Cargo.lock`,
 worker `FulfilOrders`, which fulfils each order as it is placed, its job
 `ShipOrders` every minute, `shop-stock`'s Rust worker `ReorderStock`,
 which files a restock request for each product an order runs low, its
-Rust job `PlaceRestockOrders`, and the site `shop-web`, built once and
+Rust job `OrderRestocks`, and the site `shop-web`, built once and
 served on its own port with its config. It needs Docker, Go, Bun, cargo
 and the migration runner,
 `superschematic-migrate`, on `PATH`; it derives every connection string,
 URL, port and service credential, and Ctrl-C stops it. While it runs,
 `superschematic stack run Dev shop-orders-ship-orders` runs `ShipOrders`
-once, and `superschematic stack run Dev shop-stock-place-restock-orders`
-runs `PlaceRestockOrders`, which `Dev` runs only on demand, ordering the
+once, and `superschematic stack run Dev shop-stock-order-restocks`
+runs `OrderRestocks`, which `Dev` runs only on demand, ordering the
 open restock requests.
 
 Placing an order reserves its stock on `shop-stock`, so give the product

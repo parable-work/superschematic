@@ -68,7 +68,7 @@ import (
 // its transaction, and shop-stock's worker ReorderStock, a Rust process on
 // its generated entrypoint with the implementation's create_workers, files
 // the product's restock request in shop-db; shop-stock's job
-// PlaceRestockOrders, a Rust job Dev runs only on demand, orders it when
+// OrderRestocks, a Rust job Dev runs only on demand, orders it when
 // stack run runs it (D65). The test stops the stack as Ctrl-C does, which
 // with --remove-data removes the containers. Last, it runs stack dev once
 // more, into an output root of its own (--out), where shop-stock's server,
@@ -359,17 +359,17 @@ func TestStackDevRunsTheShop(t *testing.T) {
 		t.Fatalf("after stack run, order %s is %s, want shipped", order.Id, got)
 	}
 
-	// shop-stock's job PlaceRestockOrders, a Rust job (D65), runs only on
+	// shop-stock's job OrderRestocks, a Rust job (D65), runs only on
 	// demand in Dev, whose settings turn its schedule off. stack run runs
 	// it, and it orders the open restock request.
-	if !strings.Contains(output.String(), "job "+placeRestockOrders+" runs only on demand") {
-		t.Fatalf("stack dev scheduled %s", placeRestockOrders)
+	if !strings.Contains(output.String(), "job "+orderRestocks+" runs only on demand") {
+		t.Fatalf("stack dev scheduled %s", orderRestocks)
 	}
-	run = runJob(t, binary, placeRestockOrders)
+	run = runJob(t, binary, orderRestocks)
 	for _, want := range []string{
-		"job " + placeRestockOrders + ": start the run stack run asked for, try 1 of 2",
-		"job " + placeRestockOrders + ": the run stack run asked for, try 1 of 2 succeeded",
-		"[" + placeRestockOrders + "] ",
+		"job " + orderRestocks + ": start the run stack run asked for, try 1 of 2",
+		"job " + orderRestocks + ": the run stack run asked for, try 1 of 2 succeeded",
+		"[" + orderRestocks + "] ",
 		`"msg":"placed the open restock orders"`,
 	} {
 		if !strings.Contains(run, want) {
@@ -429,8 +429,8 @@ func TestStackDevRunsTheShop(t *testing.T) {
 	if status := get(t, againEnv.servers["shop-stock"]+"/api/stock"); status != http.StatusOK {
 		t.Fatalf("shop-stock built in %s answered GET /api/stock %d", other, status)
 	}
-	run = runJob(t, binary, placeRestockOrders, "--out", other)
-	if !strings.Contains(run, "job "+placeRestockOrders+": the run stack run asked for, try 1 of 2 succeeded") {
+	run = runJob(t, binary, orderRestocks, "--out", other)
+	if !strings.Contains(run, "job "+orderRestocks+": the run stack run asked for, try 1 of 2 succeeded") {
 		t.Fatalf("stack run --out printed:\n%s", run)
 	}
 	again.stop(t)
@@ -444,11 +444,11 @@ const shipOrders = "shop-orders-ship-orders"
 // named as a job's is (D53).
 const fulfilOrders = "shop-orders-fulfil-orders"
 
-// reorderStock and placeRestockOrders are the deployables of shop-stock's
-// Rust worker ReorderStock and job PlaceRestockOrders (D65).
+// reorderStock and orderRestocks are the deployables of shop-stock's
+// Rust worker ReorderStock and job OrderRestocks (D65).
 const (
-	reorderStock       = "shop-stock-reorder-stock"
-	placeRestockOrders = "shop-stock-place-restock-orders"
+	reorderStock  = "shop-stock-reorder-stock"
+	orderRestocks = "shop-stock-order-restocks"
 )
 
 // stackDev is a run of `superschematic stack dev --remove-data` from the
@@ -606,7 +606,7 @@ func otherOutputRoot(t *testing.T, outputRoot string) string {
 }
 
 // restockRequest is a row of shop-db's restock_request table, which
-// shop-stock's worker ReorderStock files and its job PlaceRestockOrders
+// shop-stock's worker ReorderStock files and its job OrderRestocks
 // orders.
 type restockRequest struct {
 	status    string

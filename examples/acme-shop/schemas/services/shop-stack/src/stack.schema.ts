@@ -24,13 +24,13 @@ export abstract class Shop {}
 // fulfils each order as it is placed; its job ShipOrders runs every minute
 // here, so an order placed while developing ships within one. shop-stock's
 // worker ReorderStock, a Rust process, files a restock request for each
-// product an order runs low, and its job PlaceRestockOrders runs only when
+// product an order runs low, and its job OrderRestocks runs only when
 // `superschematic stack run` asks, so each request stays open until then.
 @environment({
   target: "local",
   settings: [
     { of: ShopOrders, job: "ShipOrders", schedule: "* * * * *" },
-    { of: ShopStock, job: "PlaceRestockOrders", enabled: false }
+    { of: ShopStock, job: "OrderRestocks", enabled: false }
   ]
 })
 export abstract class Dev {}

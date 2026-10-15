@@ -12,7 +12,7 @@
 //! (D65). shop-stock's worker `ReorderStock`, a process of its own whose
 //! generated entrypoint calls `create_workers`, files a restock request in
 //! shop-db's `restock_request` table for each message; its job
-//! `PlaceRestockOrders`, whose entrypoint calls `create_jobs`, orders the
+//! `OrderRestocks`, whose entrypoint calls `create_jobs`, orders the
 //! open ones.
 //!
 //! The build scaffolded this crate once, at the naming file's
@@ -60,8 +60,8 @@ pub async fn create_workers(deps: Deps) -> Result<Arc<dyn Workers>, BoxError> {
 }
 
 /// Builds the jobs of shop-stock from its dependencies: the generated
-/// entrypoint of the job shop-stock-place-restock-orders calls it, then
-/// `place_restock_orders`, once per run.
+/// entrypoint of the job shop-stock-order-restocks calls it, then
+/// `order_restocks`, once per run.
 pub async fn create_jobs(deps: Deps) -> Result<Arc<dyn Jobs>, BoxError> {
     Ok(Arc::new(StockJobs {
         deps: Arc::new(deps),
@@ -328,7 +328,7 @@ impl Jobs for StockJobs {
     /// stops part-way keeps the orders it placed, and the next run places
     /// the rest. Once `shutdown` is cancelled, at the job's timeout or on
     /// SIGTERM, it orders no more and fails the run.
-    async fn place_restock_orders(&self, shutdown: Shutdown) -> Result<(), BoxError> {
+    async fn order_restocks(&self, shutdown: Shutdown) -> Result<(), BoxError> {
         let client = self.deps.db.get().await?;
         let open = client
             .query(

@@ -816,13 +816,13 @@ server, and exposes all four; `shop-db`, the `authDb` of `shop-api`,
 the bucket `shop-api` lists, as a bucket; `shop-orders`' `FulfilOrders`,
 which handles `shop-db`'s queue `OrderPlaced`, and `shop-stock`'s
 `ReorderStock`, in Rust, which handles its queue `StockLow`, as workers;
-`shop-orders`' `ShipOrders` and `shop-stock`'s `PlaceRestockOrders`, in
+`shop-orders`' `ShipOrders` and `shop-stock`'s `OrderRestocks`, in
 Rust, as jobs; and `shop-web`, a static site whose browser code calls
 `shop-api`, as a site. `shop-orders` calls
 `shop-stock`, whose reservations admit only `shop-orders`' server
 ([Service callers](#service-callers)), so its edge carries a service
 credential. Its one environment, `Dev`, is on the core's `local` target,
-runs `ShipOrders` every minute, and turns `PlaceRestockOrders`' schedule
+runs `ShipOrders` every minute, and turns `OrderRestocks`' schedule
 off, so it runs only when `stack run` asks:
 
 <Snippet file="schemas/services/shop-stack/src/stack.schema.ts" />
@@ -862,7 +862,7 @@ worker fulfil the order it placed and `ReorderStock` file the product's
 restock request, reads the site and its config, checks that `shop-api`
 answers CORS for the site's origin and no other, sees `ShipOrders` ship
 the order, once with `stack run` and once on the schedule, and sees
-`PlaceRestockOrders`, run with `stack run`, order the restock request.
+`OrderRestocks`, run with `stack run`, order the restock request.
 Then it runs `stack dev` and the job once more, into an output root of
 its own (`--out`), where `shop-stock`'s server, worker and job build
 against that root's mirror of `rust-impl/shop-stock`. `PlaceOrder`

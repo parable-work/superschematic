@@ -227,7 +227,7 @@ echo "==> the Rust server's, job's and worker's crates check, frozen to the comm
 # workspace, with the generated API crate and the mirror of the
 # implementation in rust-impl/shop-stock they depend on by path, as stack
 # dev, the images and the generated CI build them (D57, D65).
-for crate in shop-stock shop-stock-place-restock-orders shop-stock-reorder-stock; do
+for crate in shop-stock shop-stock-order-restocks shop-stock-reorder-stock; do
   echo "    server/shop-stack/$crate"
 done
 (cd "$DIST" && CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$DIST/target}" cargo check --locked --workspace -q)

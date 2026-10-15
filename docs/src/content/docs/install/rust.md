@@ -592,7 +592,7 @@ its crate's `deps` module, a method per class in snake case:
 ```rust
 #[async_trait]
 pub trait Jobs: Send + Sync {
-    async fn place_restock_orders(&self, shutdown: Shutdown) -> Result<(), BoxError>;
+    async fn order_restocks(&self, shutdown: Shutdown) -> Result<(), BoxError>;
 }
 
 #[async_trait]

@@ -13,7 +13,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "acme-shop-stack-shop-stock-place-restock-orders-job"
+name = "acme-shop-stack-shop-stock-order-restocks-job"
 version = "0.0.0"
 dependencies = [
  "acme-shop-stock-api",

@@ -450,7 +450,7 @@ mod tests {
     #[test]
     fn a_job_or_a_worker_is_named_by_its_kind() {
         for (kind, name) in [
-            (JOB, "shop-stock-place-restock-orders"),
+            (JOB, "shop-stock-order-restocks"),
             (WORKER, "shop-stock-reorder-stock"),
         ] {
             let lines = Arc::new(Mutex::new(Vec::new()));

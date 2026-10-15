@@ -393,7 +393,7 @@
       ]
     },
     {
-      "name": "shop-stock-place-restock-orders",
+      "name": "shop-stock-order-restocks",
       "kind": "job",
       "platform": "local.job",
       "services": [
@@ -405,12 +405,12 @@
       "language": "RUST",
       "job": {
         "api": "shop-stock",
-        "name": "PlaceRestockOrders",
+        "name": "OrderRestocks",
         "timeZone": "UTC",
         "timeoutSeconds": 300,
         "retries": 1
       },
-      "resourceName": "shop-stock-place-restock-orders",
+      "resourceName": "shop-stock-order-restocks",
       "bindings": [
         {
           "field": "SHOP_DB_DATABASE",
@@ -418,7 +418,7 @@
           "value": {
             "url": "postgres://postgres@127.0.0.1:30674/shop_db?sslmode=disable"
           },
-          "edge": "sql:shop-stock-place-restock-orders->shop-db"
+          "edge": "sql:shop-stock-order-restocks->shop-db"
         }
       ]
     },
@@ -630,9 +630,9 @@
       "field": "SHOP_DB_DATABASE"
     },
     {
-      "id": "sql:shop-stock-place-restock-orders->shop-db",
+      "id": "sql:shop-stock-order-restocks->shop-db",
       "kind": "sql",
-      "from": "shop-stock-place-restock-orders",
+      "from": "shop-stock-order-restocks",
       "to": "shop-db",
       "service": {
         "name": "shop-db",
@@ -978,7 +978,7 @@
         ]
       },
       {
-        "id": "shop-stock-place-restock-orders.job",
+        "id": "shop-stock-order-restocks.job",
         "type": "local:process/job:Job",
         "properties": {
           "api": "shop-stock",
@@ -988,17 +988,17 @@
               "value": "postgres://postgres@127.0.0.1:30674/shop_db?sslmode=disable"
             }
           ],
-          "job": "PlaceRestockOrders",
+          "job": "OrderRestocks",
           "language": "rust",
-          "module": "server/shop-stack/shop-stock-place-restock-orders",
-          "name": "shop-stock-place-restock-orders",
+          "module": "server/shop-stack/shop-stock-order-restocks",
+          "name": "shop-stock-order-restocks",
           "retries": 1,
           "timeZone": "UTC",
           "timeoutSeconds": 300
         },
         "phase": "rollout",
         "owners": [
-          "shop-stock-place-restock-orders"
+          "shop-stock-order-restocks"
         ]
       },
       {
@@ -1304,13 +1304,13 @@
       "deployables": [
         "shop-api",
         "shop-stock",
-        "shop-stock-place-restock-orders",
+        "shop-stock-order-restocks",
         "shop-stock-reorder-stock",
         "shop-storefront"
       ],
       "resources": [
         "shop-api.process",
-        "shop-stock-place-restock-orders.job",
+        "shop-stock-order-restocks.job",
         "shop-stock-reorder-stock.process",
         "shop-stock.process",
         "shop-storefront.process"
