@@ -272,7 +272,7 @@ func newFixtureWith(t *testing.T, s *ir.Stack, services []stack.Service, envName
 	dir := filepath.Join(root, "program")
 	outputRoot := filepath.Join(root, "dist")
 	for _, d := range env.Deployables {
-		if d.Kind.HasImage() {
+		if d.Kind.RunsCode() {
 			if err := os.MkdirAll(filepath.Join(outputRoot, local.ModulePath(env.Stack, d.Name)), 0o755); err != nil {
 				t.Fatal(err)
 			}

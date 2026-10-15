@@ -247,6 +247,66 @@ func TestProvisionRandom(t *testing.T) {
 	}
 }
 
+// TestStateBackendEnv: the CLI reads what the state store gives a run in
+// StateBackend.Env, after the run's credentials, so a store that keeps the
+// passphrase of its secrets provider hands it to each run (D64). The
+// provisioner and the process hold none, and a wrong one among the run's
+// credentials loses to the backend's.
+func TestStateBackendEnv(t *testing.T) {
+	requirePulumi(t)
+	t.Setenv("PULUMI_CONFIG_PASSPHRASE", "")
+	if err := os.Unsetenv("PULUMI_CONFIG_PASSPHRASE"); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PULUMI_CONFIG_PASSPHRASE_FILE", "")
+	if err := os.Unsetenv("PULUMI_CONFIG_PASSPHRASE_FILE"); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	progress := &syncBuffer{}
+	t.Cleanup(func() {
+		if t.Failed() {
+			t.Logf("pulumi progress:\n%s", progress.buf.String())
+		}
+	})
+	p := pulumi.Extension{ProviderVersions: map[string]string{"random": randomVersion}, Progress: progress}.Provisioner()
+	backend := passphraseBackend(t)
+	env := sharedEnvironment()
+
+	// With no passphrase anywhere, the CLI cannot make the stack's key.
+	bare := renderRequest(t, p, env, nil, backend)
+	if err := p.Apply(ctx, bare, *env.DeployOrder[0]); err == nil || !strings.Contains(err.Error(), "PULUMI_CONFIG_PASSPHRASE") {
+		t.Fatalf("apply with no passphrase: got %v, want an error naming PULUMI_CONFIG_PASSPHRASE", err)
+	}
+
+	backend.Env = map[string]string{"PULUMI_CONFIG_PASSPHRASE": "the store's passphrase"}
+	req := renderRequest(t, p, env, nil, backend)
+	if err := p.Apply(ctx, req, *env.DeployOrder[0]); err != nil {
+		t.Fatal(err)
+	}
+	if pet, _ := outputs(t, p, req)["shared.pet"]["id"].(string); !strings.HasPrefix(pet, "demo-") {
+		t.Fatalf("shared.pet.id is %q", pet)
+	}
+
+	// The stack's key is the store's passphrase's: a plan with another one
+	// cannot open the state.
+	wrong := renderRequest(t, p, env, nil, registry.StateBackend{
+		URL: backend.URL, SecretsProvider: backend.SecretsProvider,
+		Env: map[string]string{"PULUMI_CONFIG_PASSPHRASE": "a wrong one"},
+	})
+	if _, err := p.Plan(ctx, wrong); err == nil || !strings.Contains(err.Error(), "passphrase") {
+		t.Fatalf("plan with another passphrase: got %v, want a refusal of it", err)
+	}
+
+	// The backend's passphrase wins over one among the run's credentials.
+	mixed := renderRequest(t, p, env, nil, backend)
+	mixed.Env = map[string]string{"PULUMI_CONFIG_PASSPHRASE": "a wrong one"}
+	expectPlan(t, p, mixed)
+	if err := p.Destroy(ctx, mixed); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // plan returns a request's planned changes, one `node:action` per line.
 func plan(t *testing.T, p *pulumi.Provisioner, req registry.ProvisionRequest) string {
 	t.Helper()

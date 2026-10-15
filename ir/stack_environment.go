@@ -106,6 +106,11 @@ type ResolvedDeployable struct {
 	Language string `json:"language,omitempty"`
 	Dialect  string `json:"dialect,omitempty"`
 
+	// Artifact is what a deploy builds, pins and records for a server, a
+	// job or a worker, as its platform says: an image, or a bundle of files
+	// (D64). Empty for every other kind.
+	Artifact Artifact `json:"artifact,omitempty"`
+
 	// Job is what a job runs and when; nil for every other kind.
 	Job *ResolvedJob `json:"job,omitempty"`
 
@@ -144,6 +149,40 @@ type ResolvedDeployable struct {
 	// field. An optional field with no value and no default has none.
 	Bindings []*Binding `json:"bindings,omitempty"`
 }
+
+// HasImage reports whether a deploy builds, pins and records an image for
+// d: a server, a job or a worker whose artifact is not a bundle. One
+// resolved before D64 records no artifact, and has an image.
+func (d *ResolvedDeployable) HasImage() bool {
+	return d.Kind.RunsCode() && d.Artifact != ArtifactBundle
+}
+
+// HasBundle reports whether a deploy builds, pins and records a bundle for
+// d: a server, a job or a worker whose platform builds one (D64).
+func (d *ResolvedDeployable) HasBundle() bool {
+	return d.Kind.RunsCode() && d.Artifact == ArtifactBundle
+}
+
+// Artifact is what a deploy builds from a server's, a job's or a worker's
+// code, pins in its nodes and records in the deploy manifest (D64).
+type Artifact string
+
+const (
+	// ArtifactImage is a container image, which the target's ImageBuilder
+	// builds from the Dockerfile the stack's build writes, and which the
+	// deploy pins by digest (D46). The default.
+	ArtifactImage Artifact = "image"
+
+	// ArtifactBundle is a directory of files that `bun bundle.ts <dir>`
+	// writes in the deployable's package, which the target's
+	// BundlePublisher keeps under their digest, and which the deploy pins
+	// with BundleDigestToken and BundleFileToken and places beside the
+	// provisioner's program (D64).
+	ArtifactBundle Artifact = "bundle"
+)
+
+// Valid reports whether a is an artifact v1 knows.
+func (a Artifact) Valid() bool { return a == ArtifactImage || a == ArtifactBundle }
 
 // ResolvedJob is a job's run in one environment (D52): the method of its
 // API's Jobs interface it calls, and the schedule, time zone, timeout and

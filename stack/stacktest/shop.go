@@ -246,6 +246,8 @@ var (
 	ShopOrders = ir.ServiceRef{Name: "shop-orders", Kind: ir.SchemaKindAPI}
 	ShopWeb    = ir.ServiceRef{Name: "shop-web", Kind: ir.SchemaKindSite}
 	ShopMedia  = ir.ServiceRef{Name: "shop-media", Kind: ir.SchemaKindBucket}
+
+	ShopStorefront = ir.ServiceRef{Name: "shop-storefront", Kind: ir.SchemaKindAPI}
 )
 
 // ShipOrders is shop-orders' job (D52): the warehouse's pick run, which

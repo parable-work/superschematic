@@ -73,18 +73,23 @@ func (s *siteSources) sources() *stackdeploy.Sources {
 // TestDeployPublishesASite: a deploy builds the site after a frozen
 // install of the workspace, publishes its files and its config, shop-api's
 // public address, before the wave that rolls it out, pins the site's node
-// to the files' digest, and records the digest. A second deploy of the
-// same files uploads nothing; a change uploads the new files; --site
-// serves the first files again with no build.
+// to the files' digest, and records the digest. The fake site publisher
+// fetches files, so the deploy places them beside the program too (D64). A
+// second deploy of the same files uploads nothing; a change uploads the
+// new files; --site serves the first files again with no build, fetched
+// to be placed.
 func TestDeployPublishesASite(t *testing.T) {
 	f := newFixture(t)
 	env := f.siteEnv(t, "Staging")
 	f.ready(t, env)
 	src := newSiteSources(t)
+	program := t.TempDir()
 	deploy := func(sites map[string]string, sources *stackdeploy.Sources) *stackdeploy.Manifest {
 		t.Helper()
+		o := f.options(t, env, nil)
+		o.Dir = program
 		m, err := stackdeploy.Deploy(context.Background(), stackdeploy.DeployOptions{
-			Options: f.options(t, env, nil), Images: images(1), Sites: sites, Sources: sources, Planner: (&planner{to: 1}).plan, Now: fixedNow,
+			Options: o, Images: images(1), Sites: sites, Sources: sources, Planner: (&planner{to: 1}).plan, Now: fixedNow,
 		})
 		if err != nil {
 			t.Fatalf("deploy: %v\n%s", err, f.log)
@@ -116,6 +121,17 @@ func TestDeployPublishesASite(t *testing.T) {
 	if want := "/" + strings.TrimPrefix(digest, "sha256:") + "/"; site.Properties["prefix"] != want {
 		t.Errorf("the rendered site serves from %v, want %s", site.Properties["prefix"], want)
 	}
+	placed := func(digest string) string {
+		t.Helper()
+		data, err := os.ReadFile(filepath.Join(program, ir.ArtifactsDir, "shop-web", strings.TrimPrefix(digest, "sha256:"), "index.html"))
+		if err != nil {
+			t.Fatalf("the site's files are not beside the program: %v", err)
+		}
+		return string(data)
+	}
+	if got := placed(digest); got != "<main>v1</main>" {
+		t.Errorf("the placed index.html holds %q", got)
+	}
 
 	from = len(f.ext.Provisioner.Calls())
 	if again := deploy(nil, src.sources()); again.Sites["shop-web"] != digest {
@@ -137,8 +153,11 @@ func TestDeployPublishesASite(t *testing.T) {
 	if back.Sites["shop-web"] != digest || len(src.ran) != 0 {
 		t.Errorf("the rollback serves %s after running %v, want %s with no site build", back.Sites["shop-web"], src.ran, digest)
 	}
-	if calls := strings.Join(f.calls(from), "\n"); strings.Contains(calls, "upload") {
-		t.Errorf("the rollback uploaded files:\n%s", calls)
+	if calls := strings.Join(f.calls(from), "\n"); strings.Contains(calls, "upload") || !strings.Contains(calls, "fetch site shop-web: "+digest) {
+		t.Errorf("the rollback uploaded files, or fetched none:\n%s", calls)
+	}
+	if got := placed(digest); got != "<main>v1</main>" {
+		t.Errorf("the rollback placed index.html holding %q", got)
 	}
 
 	// Outputs renders the program the last deploy applied: the site

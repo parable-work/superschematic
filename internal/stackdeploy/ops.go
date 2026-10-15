@@ -15,9 +15,12 @@ import (
 type PlanOptions struct {
 	Options
 
-	// Images, Sites, Planner and Gate are a deploy's (DeployOptions).
+	// Images, Sites, Bundles, Planner and Gate are a deploy's
+	// (DeployOptions). A plan builds nothing: it fetches each bundle
+	// Bundles or the manifest names, to place it beside the program.
 	Images  map[string]string
 	Sites   map[string]string
+	Bundles map[string]string
 	Planner Planner
 	Gate    Gate
 }
@@ -49,6 +52,11 @@ type PlanResult struct {
 	// where their platform serves their files from (D55).
 	Unpublished []string `json:"unpublished,omitempty"`
 
+	// Unbundled are the servers, jobs and workers whose platform builds a
+	// bundle and that have none yet, planned with no digest where their
+	// platform reads its files from (D64).
+	Unbundled []string `json:"unbundled,omitempty"`
+
 	// MissingSecrets are the secrets with no value.
 	MissingSecrets []string `json:"missingSecrets,omitempty"`
 
@@ -76,10 +84,12 @@ func (r *PlanResult) Expected() map[string]string {
 }
 
 // Plan returns what a deploy of the run would do, changing nothing: the
-// provisioner's plan of the whole program with the images the manifest
-// records and Images pinned, and the migration plan of each database from
-// the schema the manifest records (docs/stack-model.md, sections 10 and
-// 11.2). A cloud preview with the read-only planner account runs it.
+// provisioner's plan of the whole program with the images, sites' files
+// and bundles the manifest records or Images, Sites and Bundles name
+// pinned, and the bundles fetched and placed beside the program, and the
+// migration plan of each database from the schema the manifest records
+// (docs/stack-model.md, sections 10 and 11.2). A cloud preview with the
+// read-only planner account runs it.
 func Plan(ctx context.Context, o PlanOptions) (*PlanResult, error) {
 	s, err := open(o.Options)
 	if err != nil {
@@ -95,7 +105,7 @@ func Plan(ctx context.Context, o PlanOptions) (*PlanResult, error) {
 	images := map[string]string{}
 	if prev != nil {
 		for server, image := range prev.Images {
-			if d := s.env.Deployable(server); d != nil && d.Kind.HasImage() {
+			if d := s.env.Deployable(server); d != nil && d.HasImage() {
 				images[server] = image
 			}
 		}
@@ -113,14 +123,32 @@ func Plan(ctx context.Context, o PlanOptions) (*PlanResult, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer sites.cleanup()
+	if err := s.fetchSites(ctx, sites); err != nil {
+		return nil, err
+	}
 	if pinned, err = PinSites(pinned, sites.digests); err != nil {
+		return nil, err
+	}
+	if err := s.checkBundles(); err != nil {
+		return nil, err
+	}
+	bundles, err := s.planBundles(ctx, prev, o.Bundles, nil, nil)
+	defer bundles.cleanup()
+	if err != nil {
+		return nil, err
+	}
+	if err := s.fetchBundles(ctx, bundles); err != nil {
+		return nil, err
+	}
+	if pinned, err = PinBundles(pinned, bundles.pins()); err != nil {
 		return nil, err
 	}
 	plans, pending, err := planMigrations(s.env, prev, o.Planner)
 	if err != nil {
 		return nil, err
 	}
-	out := &PlanResult{Run: s.run.Name(), Databases: plans, Unpinned: unpinned, Unpublished: sites.missing(s.env), Unallowed: o.Gate.unallowed(plans)}
+	out := &PlanResult{Run: s.run.Name(), Databases: plans, Unpinned: unpinned, Unpublished: sites.missing(s.env), Unbundled: bundles.missing(s.env), Unallowed: o.Gate.unallowed(plans)}
 	for _, database := range sortedKeys(pending) {
 		for _, p := range pending[database] {
 			out.Pending = append(out.Pending, PendingNote{Database: database, Service: p.Plan.Service, Phase: p.Phase, Plan: p.Plan.Hash})
@@ -136,7 +164,7 @@ func Plan(ctx context.Context, o PlanOptions) (*PlanResult, error) {
 	if s.env.DNS != nil && s.env.DNS.Platform == ir.ManualDNS {
 		out.ManualRecords = s.env.DNS.Records
 	}
-	req, err := s.request(ctx, pinned)
+	req, err := s.request(ctx, pinned, s.placed(sites, bundles))
 	if err != nil {
 		return nil, err
 	}
@@ -146,7 +174,10 @@ func Plan(ctx context.Context, o PlanOptions) (*PlanResult, error) {
 	return out, nil
 }
 
-// Destroy removes every resource of the run and its deploy manifest.
+// Destroy removes every resource of the run and its deploy manifest. It
+// renders the program the last deploy applied, with the bundles it ran
+// fetched and placed beside it, and has the target's registry.DestroyPreparer
+// ready the run's resources before the provisioner destroys them (D64).
 func Destroy(ctx context.Context, o Options) error {
 	s, err := open(o)
 	if err != nil {
@@ -155,9 +186,16 @@ func Destroy(ctx context.Context, o Options) error {
 	if err := s.requireDeploy(); err != nil {
 		return err
 	}
-	req, err := s.deployedRequest(ctx)
+	req, cleanup, err := s.deployedRequest(ctx, true)
+	defer cleanup()
 	if err != nil {
 		return err
+	}
+	if s.target.PreDestroy != nil {
+		s.logf("ready %s for its destroy", s.run.Name())
+		if err := s.target.PreDestroy.PrepareDestroy(ctx, s.run, s.log); err != nil {
+			return fmt.Errorf("ready %s for its destroy: %w", s.run.Name(), err)
+		}
 	}
 	s.logf("destroy %s", s.run.Name())
 	if err := s.prov.Destroy(ctx, req); err != nil {
@@ -181,7 +219,8 @@ func Outputs(ctx context.Context, o Options) (*RunOutputs, error) {
 	if err := s.requireDeploy(); err != nil {
 		return nil, err
 	}
-	req, err := s.deployedRequest(ctx)
+	req, cleanup, err := s.deployedRequest(ctx, false)
+	defer cleanup()
 	if err != nil {
 		return nil, err
 	}
@@ -245,35 +284,67 @@ func RunJob(ctx context.Context, o RunJobOptions) error {
 }
 
 // deployedRequest is the provisioner's request over the environment with
-// the images and the sites' files the manifest records pinned, so the
-// program it renders is the one the last deploy applied.
-func (s *session) deployedRequest(ctx context.Context) (registry.ProvisionRequest, error) {
+// the images, the sites' files and the bundles the manifest records
+// pinned, so the program it renders is the one the last deploy applied.
+// With place, it fetches the bundles, and the sites' files when the target
+// places them, and places them beside the program, for a provisioner that
+// runs it. The cleanup it returns removes what it fetched.
+func (s *session) deployedRequest(ctx context.Context, place bool) (registry.ProvisionRequest, func(), error) {
+	sites := &sitePlan{digests: map[string]string{}, files: map[string]*ArtifactFiles{}}
+	bundles := newBundlePlan()
+	cleanup := func() {
+		sites.cleanup()
+		bundles.cleanup()
+	}
 	prev, err := readManifest(ctx, s.target.State, s.run)
 	if err != nil {
-		return registry.ProvisionRequest{}, err
+		return registry.ProvisionRequest{}, cleanup, err
 	}
 	env := s.env
+	pins := map[string]Bundle{}
 	if prev != nil {
 		images := map[string]string{}
 		for server, image := range prev.Images {
-			if d := s.env.Deployable(server); d != nil && d.Kind.HasImage() {
+			if d := s.env.Deployable(server); d != nil && d.HasImage() {
 				images[server] = image
 			}
 		}
 		if env, err = PinImages(s.env, images); err != nil {
-			return registry.ProvisionRequest{}, err
+			return registry.ProvisionRequest{}, cleanup, err
 		}
-		sites := map[string]string{}
 		for site, digest := range prev.Sites {
 			if d := s.env.Deployable(site); d != nil && d.Kind == ir.DeployableSite {
-				sites[site] = digest
+				sites.digests[site] = digest
 			}
 		}
-		if env, err = PinSites(env, sites); err != nil {
-			return registry.ProvisionRequest{}, err
+		if env, err = PinSites(env, sites.digests); err != nil {
+			return registry.ProvisionRequest{}, cleanup, err
+		}
+		for name, b := range prev.Bundles {
+			if d := s.env.Deployable(name); d != nil && d.HasBundle() && b != nil {
+				bundles.digests[name] = b.Digest
+				pins[name] = *b
+			}
+		}
+		if place {
+			if err := s.fetchSites(ctx, sites); err != nil {
+				return registry.ProvisionRequest{}, cleanup, err
+			}
+			if err := s.fetchBundles(ctx, bundles); err != nil {
+				return registry.ProvisionRequest{}, cleanup, err
+			}
+			pins = bundles.pins()
+		}
+		if env, err = PinBundles(env, pins); err != nil {
+			return registry.ProvisionRequest{}, cleanup, err
 		}
 	}
-	return s.request(ctx, env)
+	var placed map[string]*ArtifactFiles
+	if place {
+		placed = s.placed(sites, bundles)
+	}
+	req, err := s.request(ctx, env, placed)
+	return req, cleanup, err
 }
 
 // BootstrapOptions is one bootstrap of the cloud project an environment

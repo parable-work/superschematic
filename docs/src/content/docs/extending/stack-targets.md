@@ -149,6 +149,29 @@ ready once it starts, and gcp's `gcp.cloudrunworker` to a Cloud Run worker
 pool scaled by hand to the instances, sharing the Cloud Run service's
 lowering of the account, secrets, config, Cloud SQL volume and egress.
 
+A server, job or worker platform says what a deploy builds for the
+deployables it places in `Artifact` (D64): `ir.ArtifactImage`, the
+default, an image the target's `Builder` builds from the Dockerfile a
+stack's build writes, which the platform writes into the graph as its
+repository path; or `ir.ArtifactBundle`, the files `bun bundle.ts <dir>`
+writes in the deployable's package, which the target's `Bundles` keeps.
+Resolution records it as the deployable's `artifact`. A bundle's platform
+names each file it reads relative to the provisioner's program, with
+`ir.BundlePath(deployable, file)`, `artifacts/<deployable>/{bundle-digest}/<file>`,
+and its SHA-256 with `ir.BundleFileToken(file)`; the deploy pins both and
+places the files there before the provisioner runs:
+
+```go
+modules = append(modules, map[string]any{
+	"name":          "main.js",
+	"contentFile":   ir.BundlePath(d.Name, "main.js"),
+	"contentSha256": ir.BundleFileToken("main.js"),
+})
+```
+
+`stack/stacktest`'s `fake.bundle` places a TypeScript server that way, as
+a script reading `main.js` and its source map.
+
 ## A connector
 
 `Connect` receives a `registry.ConnectorContext`: the environment, the
@@ -210,7 +233,7 @@ under the name `pulumi` for that reason.
 
 A target that resolves can be built and checked. To bootstrap, plan and
 deploy it with the `stack` commands and the generated CI, it also fills
-seven seams on its `TargetSpec`, each an interface in `registry`:
+seams on its `TargetSpec`, each an interface in `registry`:
 
 | Field | Interface | Does |
 | --- | --- | --- |
@@ -221,14 +244,28 @@ seven seams on its `TargetSpec`, each an interface in `registry`:
 | `Builder` | `ImageBuilder` | builds a server's or a job's image from the Dockerfile a stack's build writes, and returns it by digest; `BuildRequest.Deployable` names which |
 | `CI` | `CIIdentities` | says how a generated CI job signs in to a resolved environment as `planner` or `deployer`: a `CIIdentity`, or nil when it cannot yet |
 | `Jobs` | `JobRunner` | runs a deployed job once on demand, for `stack run`: a `JobRunRequest` names the run, the job and the image the deploy manifest records, and `RunJob` returns when the run ends, with the last try's error when it fails (D52) |
+| `Sites` | `SitePublisher` | puts a site's files under their digest, and its config for a run, where its platform serves them (D55) |
+| `Bundles` | `BundlePublisher` | keeps the files of a server's, job's or worker's bundle under their digest, `Publish(ctx, run, deployable, dir, digest)` (D64) |
+| `PreDestroy` | `DestroyPreparer` | readies a run's resources before `stack destroy` hands them to the provisioner, such as emptying a member's buckets; an error stops the destroy (D64) |
 
 A target with none of them resolves and does not deploy. `RegisterTarget`
-refuses `State`, `Bootstrap`, `Migrations`, `Builder`, `CI` or `Jobs`
-without a provisioner, and `Bootstrap`, `Migrations`, `Builder`, `CI` or
-`Jobs` without `State`. With no `Migrations`, a deploy that has a
-migration to run is refused; with no `Builder`, every image comes from
-`--image` or the deploy manifest; with no `Jobs`, `stack run` refuses the
-target's environments. The gcp target fills all seven: its migrations run
+refuses any of them but `Secrets` without a provisioner, and any of them
+but `State` and `Secrets` without `State`. With no `Migrations`, a deploy
+that has a migration to run is refused; with no `Builder`, every image
+comes from `--image` or the deploy manifest; with no `Jobs`, `stack run`
+refuses the target's environments; with no `Sites` or `Bundles`, an
+environment with a site, or with a deployable that runs a bundle, does not
+deploy.
+
+A `BundlePublisher` should also be a `registry.ArtifactFetcher`,
+`Fetch(ctx, run, deployable, digest, dest)`, which writes the files it
+keeps under a digest into `dest`, each executable when it was published
+so. A deploy fetches a bundle it did not build, for a `--bundle`
+rollback, a `--no-build` deploy, `stack plan` and `stack destroy`, checks
+it against the digest and places it beside the program. A
+`SitePublisher` that is an `ArtifactFetcher` has each site's files placed
+there too, at `artifacts/<site>/<hex>/`, for a provider that uploads them
+from the program; gcp's is not one. The gcp target fills all seven: its migrations run
 each phase as an execution of the stack's Cloud Run job, which runs
 `superschematic-migrate` on Cloud SQL (`gcp.Extension{Migrations: ...}`
 takes a runner of your own instead), its builder builds each changed
@@ -282,9 +319,11 @@ type Provisioner interface {
 
 A `ProvisionRequest` carries the resolved environment, the run's
 parameter values, the directory `Render` wrote, the build's output root,
-the `StateBackend` (its URL and its secrets provider), and `Env`, the
-platform credentials the run reads from the target's secret store, which
-the provisioner hands to its tool's process for that run only. `Render` takes the whole
+the `StateBackend` (its URL, its secrets provider, and `Env`, what the
+state store gives a run to reach the state and decrypt it, such as S3
+credentials and a passphrase), and `Env`, the platform credentials the run
+reads from the target's secret store. The provisioner hands both to its
+tool's process for that run only, the backend's last. `Render` takes the whole
 environment, not only its graph, because the program exports every output
 the environment references, a deployable's address included. `Apply`
 applies one step of the deploy order, so the deploy runs migrations
@@ -396,8 +435,11 @@ The deploy itself is public too: `stack.Deploy`, `stack.Plan`,
 `stack.Destroy`, `stack.Outputs`, `stack.Bootstrap`, `stack.SetSecrets`
 and `stack.RunJob` are what the commands call. `stack/stacktest` has
 in-memory seams (`FakeState`, `FakeSecrets`, `FakeMigrations`,
-`FakeBootstrap`, `FakeBuilder` and `FakeJobs`) that record each call, so a test reads the order a deploy
-ran in, and `FakeCI`, a CI seam shaped like gcp's.
+`FakeBootstrap`, `FakeBuilder`, `FakeJobs`, `FakeSites`, `FakeBundles` and
+`FakePreDestroy`) that record each call, so a test reads the order a deploy
+ran in, and `FakeCI`, a CI seam shaped like gcp's. `WithBundle` places
+shop-storefront on `fake.bundle`, and `WriteBundlePackage` writes the
+package whose `bundle.ts` a deploy runs.
 `extensions/pulumi/deploy_test.go` deploys through the real provisioner
 against a `file://` backend.
 

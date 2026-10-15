@@ -333,14 +333,15 @@ func (p *Provisioner) open(ctx context.Context, req registry.ProvisionRequest, c
 		return r, err
 	}
 	// The CLI runs with the provisioner's environment, then the run's
-	// credentials, which the providers read (ProvisionRequest.Env). Both
-	// reach the CLI's process only, never a file.
+	// credentials, which the providers read (ProvisionRequest.Env), then
+	// what the state store gives the run to reach the state and decrypt
+	// its secrets (StateBackend.Env, D64). Each reaches the CLI's process
+	// only, never a file.
 	vars := map[string]string{}
-	for k, v := range p.Env {
-		vars[k] = v
-	}
-	for k, v := range req.Env {
-		vars[k] = v
+	for _, env := range []map[string]string{p.Env, req.Env, req.Backend.Env} {
+		for k, v := range env {
+			vars[k] = v
+		}
 	}
 	vars["PULUMI_BACKEND_URL"] = req.Backend.URL
 	vars["PULUMI_SKIP_UPDATE_CHECK"] = "true"
