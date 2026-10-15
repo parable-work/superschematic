@@ -472,6 +472,16 @@ Default: unset. This repository's own file sets
 Directory of the version graph's Rust engine crate. Unset, a generated
 Rust types crate names the crate's version instead of a path.
 
+### `paths.engine_rust`
+
+Default: unset. This repository's own file sets
+`runtime/engine/rust/engine`.
+
+Directory of the behavior engine's Rust crate, `superschematic-engine`
+(D58), which a Rust server links with its `postgres` and `axum` features
+to mount the engine's routes. No generated manifest names it yet: the
+Rust servers that mount the engine are still to come.
+
 ### `paths.versiongraph_python`
 
 Default: unset. This repository's own file sets

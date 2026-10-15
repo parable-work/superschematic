@@ -241,9 +241,10 @@ rust:
 
 # The Rust engine's workspace (D58): every crate's format, its lints on
 # every feature combination of the databases (both, neither, and each
-# alone), and its tests, under the toolchain RUSTUP_TOOLCHAIN names. The
-# work queue's crate (runtime/engine-workqueue/rust) is a member, so it
-# builds, lints and tests here with the rest. The
+# alone) and on the axum router over Postgres, as a Rust server builds it,
+# and its tests, under the toolchain RUSTUP_TOOLCHAIN names. The work
+# queue's crate (runtime/engine-workqueue/rust) is a member, so it builds,
+# lints and tests here with the rest. The
 # engine reads schemas through runtime/schema/rust-ir, which needs the
 # superscalar checkout (scripts/superscalar-dep.sh --checkout). The engine's
 # and the storage's tests run on SQLite, and on Postgres as well when
@@ -252,7 +253,8 @@ rust:
 # each in a schema it creates and drops; without it they skip that pass.
 # The test kit replays the scenario corpus
 # (runtime/engine/testdata/scenarios, or the directory ENGINE_CORPUS_DIR
-# names) on the same databases, and fails when the corpus is missing.
+# names) on the same databases, and the HTTP corpus through the engine's
+# routes and its axum router, and fails when a corpus is missing.
 # CI runs the same commands as the engine-rust job, against its Postgres.
 engine-rust:
 	cd runtime/engine/rust && cargo fmt --all --check \
@@ -260,6 +262,7 @@ engine-rust:
 		&& cargo clippy --workspace --all-targets --no-default-features -- -D warnings \
 		&& cargo clippy --workspace --all-targets --no-default-features --features superschematic-engine/sqlite -- -D warnings \
 		&& cargo clippy --workspace --all-targets --no-default-features --features superschematic-engine/postgres -- -D warnings \
+		&& cargo clippy --workspace --all-targets --no-default-features --features superschematic-engine/postgres,superschematic-engine/axum,superschematic-engine-testkit/axum -- -D warnings \
 		&& cargo test --workspace --all-features
 
 # The version-graph core's static archive, staged where the Go binding links

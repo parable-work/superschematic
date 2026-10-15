@@ -419,6 +419,11 @@ type PathsConfig struct {
 	VersionGraphTypeScript string `toml:"versiongraph_typescript"`
 	// VersionGraphRust holds the version graph's Rust engine crate.
 	VersionGraphRust string `toml:"versiongraph_rust"`
+	// EngineRust holds the behavior engine's Rust crate,
+	// superschematic-engine (D58), which a Rust server links, with its
+	// postgres and axum features, to mount the engine's routes. No
+	// generated manifest names it yet.
+	EngineRust string `toml:"engine_rust"`
 	// VersionGraphPython holds the version graph's Python package.
 	VersionGraphPython string `toml:"versiongraph_python"`
 	// HTTPRuntimeGo holds the http runtime Go module.
@@ -453,6 +458,7 @@ type LocalPaths struct {
 	VersionGraphGo         string
 	VersionGraphTypeScript string
 	VersionGraphRust       string
+	EngineRust             string
 	VersionGraphPython     string
 	HTTPRuntimeGo          string
 	HTTPRuntimeRust        string
@@ -479,6 +485,7 @@ func (n Naming) LocalPaths(repoRoot string) LocalPaths {
 		VersionGraphGo:         resolve(n.Paths.VersionGraphGo),
 		VersionGraphTypeScript: resolve(n.Paths.VersionGraphTypeScript),
 		VersionGraphRust:       resolve(n.Paths.VersionGraphRust),
+		EngineRust:             resolve(n.Paths.EngineRust),
 		VersionGraphPython:     resolve(n.Paths.VersionGraphPython),
 		HTTPRuntimeGo:          resolve(n.Paths.HTTPRuntimeGo),
 		HTTPRuntimeRust:        resolve(n.Paths.HTTPRuntimeRust),
@@ -511,6 +518,7 @@ func (p PathsConfig) checkRelative() error {
 		{"versiongraph_go", p.VersionGraphGo},
 		{"versiongraph_typescript", p.VersionGraphTypeScript},
 		{"versiongraph_rust", p.VersionGraphRust},
+		{"engine_rust", p.EngineRust},
 		{"versiongraph_python", p.VersionGraphPython},
 		{"http_runtime_go", p.HTTPRuntimeGo},
 		{"http_runtime_rust", p.HTTPRuntimeRust},

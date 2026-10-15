@@ -139,7 +139,7 @@ func TestParseRejectsUnknownTopLevelKeyNextToExtensionTable(t *testing.T) {
 }
 
 func TestParseReadsPathsTable(t *testing.T) {
-	n, err := Parse([]byte("[paths]\nscalar_go = \"vendor/scalars/go\"\nhttp_runtime_rust = \"runtime/http/rust\"\nschema_runtime_rust = \"runtime/schema/rust\"\n"), "test")
+	n, err := Parse([]byte("[paths]\nscalar_go = \"vendor/scalars/go\"\nhttp_runtime_rust = \"runtime/http/rust\"\nschema_runtime_rust = \"runtime/schema/rust\"\nengine_rust = \"runtime/engine/rust/engine\"\n"), "test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,6 +155,9 @@ func TestParseReadsPathsTable(t *testing.T) {
 	}
 	if want := filepath.Join("/repo", "runtime", "schema", "rust"); local.SchemaRuntimeRust != want {
 		t.Fatalf("LocalPaths.SchemaRuntimeRust = %q, want %q", local.SchemaRuntimeRust, want)
+	}
+	if want := filepath.Join("/repo", "runtime", "engine", "rust", "engine"); local.EngineRust != want {
+		t.Fatalf("LocalPaths.EngineRust = %q, want %q", local.EngineRust, want)
 	}
 	if local.SchemaIR != "" {
 		t.Fatalf("unset key must resolve to empty, got %q", local.SchemaIR)

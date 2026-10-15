@@ -15,8 +15,20 @@ publish.workspace = true
 default = ["sqlite", "postgres"]
 sqlite = ["superschematic-engine-storage/sqlite"]
 postgres = ["superschematic-engine-storage/postgres"]
+# The engine's routes as an axum router (`superschematic_engine::axum`),
+# which a Rust server mounts (D58). Off by default, so the bindings' builds
+# (the C archive, the Node-API addon) leave axum and its runtime out.
+axum = ["dep:axum", "dep:futures-util", "dep:tokio"]
 
 [dependencies]
+# The axum feature's router, at the versions the generated Rust servers pin
+# (internal/generator/rustrestgen, runtime/http/rust), so a server builds
+# one axum. Only what the router uses: the host's own axum turns on the
+# rest (http1, json, matched-path, its serve).
+axum = { version = "0.8.9", default-features = false, features = ["original-uri"], optional = true }
+# The axum feature's stream body, as an unfold over the stream's pulls.
+# Already in axum's tree.
+futures-util = { version = "0.3.34", default-features = false, optional = true }
 # JavaScript's Number::toString, which JSON.stringify writes a number with:
 # what a client of the TypeScript engine reads, and what every hash covers.
 ryu-js = "1.0.3"
@@ -32,8 +44,19 @@ sha2 = "0.10.9"
 # so a path dependency (D58).
 superschematic-schema-ir = { path = "../../../schema/rust-ir", features = ["schemafile"] }
 superschematic-engine-storage = { path = "../storage", default-features = false }
+# The axum feature's blocking pool, which runs every engine call and event
+# stream pull off the server's async threads, and the channel that wakes
+# the streams a commit moves on.
+tokio = { version = "1.52.2", default-features = false, features = ["rt", "sync", "time"], optional = true }
 # Random version 4 ids, as the TypeScript engine's randomUUID makes them.
 uuid = { version = "1.28.0", features = ["v4"] }
+
+[dev-dependencies]
+# The axum feature's tests: requests through the router in process
+# (tower's oneshot) and over a TCP listener (axum's serve).
+axum = { version = "0.8.9", default-features = false, features = ["http1", "original-uri", "tokio"] }
+tokio = { version = "1.52.2", features = ["io-util", "net", "rt-multi-thread", "sync", "time"] }
+tower = { version = "0.5.3", default-features = false, features = ["util"] }
 
 [lints]
 workspace = true

@@ -192,6 +192,31 @@ pub struct Route {
     pub mcp: bool,
 }
 
+impl Route {
+    /// Whether its spec declares a request body: the seven routes a host's
+    /// body limit applies to ([`DEFAULT_BODY_LIMIT_BYTES`] unless the mount
+    /// sets one), as the HTTP runtimes apply theirs to a spec route. The
+    /// event stream and the MCP endpoint, which the TypeScript app mounts
+    /// by hand, are not among them; MCP caps its own body.
+    pub fn takes_body(&self) -> bool {
+        matches!(
+            self.name,
+            "createNamespace"
+                | "defineSchema"
+                | "createInstance"
+                | "updateInstance"
+                | "invokeOperation"
+                | "invokeSchemaOperation"
+                | "searchSchemas"
+        )
+    }
+}
+
+/// The body limit of a route that takes a body ([`Route::takes_body`])
+/// unless the host sets one: the HTTP runtimes' `DEFAULT_BODY_LIMIT_BYTES`,
+/// 1 MiB. A larger body is the host's 413 `payload_too_large`.
+pub const DEFAULT_BODY_LIMIT_BYTES: usize = 1024 * 1024;
+
 const fn route(name: &'static str, method: &'static str, path: &'static str) -> Route {
     Route {
         name,
@@ -495,5 +520,15 @@ mod tests {
         );
         assert_eq!(routes().len(), 29);
         assert_eq!(routes().iter().filter(|route| !route.mcp).count(), 26);
+        let bodies: Vec<&str> = routes()
+            .iter()
+            .filter(|route| route.takes_body())
+            .map(|route| route.name)
+            .collect();
+        assert_eq!(bodies.len(), 7, "{bodies:?}");
+        assert!(routes()
+            .iter()
+            .filter(|route| route.takes_body())
+            .all(|route| route.method == "POST" || route.method == "PATCH"));
     }
 }

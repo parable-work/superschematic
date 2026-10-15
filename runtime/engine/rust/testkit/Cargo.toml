@@ -13,8 +13,15 @@ publish = false
 default = ["sqlite", "postgres"]
 sqlite = ["superschematic-engine/sqlite", "superschematic-engine-behaviors/sqlite", "superschematic-engine-workqueue/sqlite"]
 postgres = ["superschematic-engine/postgres", "superschematic-engine-behaviors/postgres", "superschematic-engine-workqueue/postgres"]
+# The HTTP corpus through the engine's axum router as well (D58): each
+# exchange in process through tower's oneshot, a stream's body pulled
+# frame by frame.
+axum = ["superschematic-engine/axum", "dep:axum", "dep:futures-util", "dep:tokio", "dep:tower"]
 
 [dependencies]
+# The axum feature's transport, at the engine's versions.
+axum = { version = "0.8.9", default-features = false, optional = true }
+futures-util = { version = "0.3.34", default-features = false, optional = true }
 serde_json = { version = "1.0.149", features = ["arbitrary_precision", "preserve_order"] }
 superschematic-engine = { path = "../engine", default-features = false }
 # The core's behaviors, which the TypeScript engine registers when it opens:
@@ -24,6 +31,8 @@ superschematic-engine-behaviors = { path = "../behaviors", default-features = fa
 # registered @superschematic/engine-workqueue, and the work queue's tests
 # open with the core's.
 superschematic-engine-workqueue = { path = "../../../engine-workqueue/rust", default-features = false }
+tokio = { version = "1.52.2", default-features = false, features = ["rt-multi-thread", "time"], optional = true }
+tower = { version = "0.5.3", default-features = false, features = ["util"], optional = true }
 
 [lints]
 workspace = true

@@ -44,6 +44,10 @@
 
 mod access;
 pub mod api;
+// The engine's routes as an axum router, which a Rust server mounts (the
+// axum feature, D58).
+#[cfg(feature = "axum")]
+pub mod axum;
 pub mod behaviors;
 pub mod calls;
 mod engine;

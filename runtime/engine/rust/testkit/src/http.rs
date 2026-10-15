@@ -1,21 +1,24 @@
 //! The replayer of the HTTP corpus (`runtime/engine/testdata/http`, whose
 //! README is the format), through the engine's transport-neutral routes
-//! ([`superschematic_engine::api::handle`], D58): its `app` steps build the
-//! mounts a case serves, an exchange sends its request through them with
-//! the caller the recording established, and a stream step pulls the
-//! frames a stream sent.
+//! ([`superschematic_engine::api::handle`], D58) or a server runtime's
+//! adapter over them ([`Transport`]): its `app` steps build the mounts a
+//! case serves, an exchange sends its request through them with the caller
+//! the recording established, and a stream step pulls the frames a stream
+//! sent.
 //!
 //! The replayer is the host: it draws each request's id from the
 //! scenario's seeded generator (or takes the client's `X-Request-Id`), and
 //! applies the HTTP runtime's own steps before the engine sees a request,
 //! as `runtime/http/typescript/src/hono.ts` orders them: the rate limit
 //! (`rateLimitPerMinute`, a token bucket per route), the body limit
-//! (`bodyLimitBytes`, 1 MiB unless given, on a route that takes a body),
-//! and a path no mount serves, 404. The caller an exchange records
-//! (`principal`, `service`, `serviceRefused`) is what its authentication
-//! established, handed to the engine as [`Caller`].
+//! (`bodyLimitBytes`, 1 MiB unless given, on a route that takes a body;
+//! an adapter that applies the mount's limit itself takes it over), and a
+//! path no mount serves, 404. The caller an exchange records (`principal`,
+//! `service`, `serviceRefused`) is what its authentication established,
+//! handed to the engine as [`Caller`].
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::{Map, Value};
@@ -24,7 +27,7 @@ use superschematic_engine::api::{
     self, ApiOptions, Body, Caller, EventStream, McpOptions, Pull, Refusal, Request, ServiceCaller,
     StreamOptions,
 };
-use superschematic_engine::{seeded_uuid, Principal, SCENARIO_SEED};
+use superschematic_engine::{seeded_uuid, Engine, Principal, SCENARIO_SEED};
 
 use super::{Outcome, Run};
 
@@ -44,24 +47,126 @@ const RESPONSE_HEADERS: [&str; 9] = [
     "x-request-id",
 ];
 
-/// The body limit of a route that takes a body unless the app gives one:
-/// the HTTP runtime's `DEFAULT_BODY_LIMIT_BYTES`.
-const DEFAULT_BODY_LIMIT: usize = 1024 * 1024;
-
 /// How long a stream step waits for each frame it expects.
 const FRAME_WAIT: Duration = Duration::from_secs(10);
 
-// Routes whose spec declares a body: the runtime's body limit applies to
-// them, not to the manual routes (the event stream, MCP).
-const BODY_ROUTES: [&str; 7] = [
-    "createNamespace",
-    "defineSchema",
-    "createInstance",
-    "updateInstance",
-    "invokeOperation",
-    "invokeSchemaOperation",
-    "searchSchemas",
-];
+/// A mount of the app an exchange is sent to, as a [`Transport`] sees it.
+pub struct MountView<'a> {
+    /// The path it is mounted at; empty for the root.
+    pub prefix: &'a str,
+    /// Whether it is the MCP endpoint's (`engineMcp`), else the HTTP API's
+    /// (`engineApp`).
+    pub mcp: bool,
+    /// The engine's options for its routes.
+    pub options: &'a ApiOptions,
+    /// The body limit of a route that takes a body.
+    pub body_limit: usize,
+}
+
+/// A stream of server-sent events a transport hands back, pulled as
+/// [`EventStream::next`] is.
+pub trait Frames {
+    /// The stream's next bytes, waiting up to `timeout`.
+    fn next(&mut self, timeout: Duration) -> Pull;
+}
+
+impl Frames for EventStream {
+    fn next(&mut self, timeout: Duration) -> Pull {
+        EventStream::next(self, timeout)
+    }
+}
+
+/// A response's body as a transport hands it back.
+pub enum Answered {
+    Bytes(Vec<u8>),
+    Stream(Box<dyn Frames>),
+}
+
+/// What a transport answered an exchange.
+pub struct Answer {
+    pub status: u16,
+    /// Lowercase names.
+    pub headers: Vec<(String, String)>,
+    pub body: Answered,
+}
+
+impl Answer {
+    /// A header's value, by its lowercase name.
+    pub fn header(&self, name: &str) -> Option<&str> {
+        self.headers
+            .iter()
+            .find(|(key, _)| key == name)
+            .map(|(_, value)| value.as_str())
+    }
+
+    fn bytes(&self) -> &[u8] {
+        match &self.body {
+            Answered::Bytes(bytes) => bytes,
+            Answered::Stream(_) => &[],
+        }
+    }
+}
+
+impl From<api::Response> for Answer {
+    fn from(response: api::Response) -> Self {
+        Answer {
+            status: response.status,
+            headers: response.headers,
+            body: match response.body {
+                Body::Empty => Answered::Bytes(Vec::new()),
+                Body::Bytes(bytes) => Answered::Bytes(bytes),
+                Body::Stream(stream) => Answered::Stream(stream),
+            },
+        }
+    }
+}
+
+/// How the replayer's host hands an exchange's request to the engine once
+/// its own steps let it through: the engine's routes called directly
+/// ([`Direct`]), or a server runtime's adapter over them, which the same
+/// recorded answers hold to.
+pub trait Transport: Sync {
+    /// Serves `request` (its path the app's, prefix and all) on the app
+    /// whose mounts are `mounts`: through `mounts[served]`, the mount the
+    /// replayer's dispatch found under whose prefix the request falls and
+    /// whose kind serves its route, or, for `None`, no mount (the app's
+    /// 404). A transport that routes for itself may send it either way.
+    fn serve(
+        &self,
+        engine: &Arc<Engine>,
+        mounts: &[MountView<'_>],
+        served: Option<usize>,
+        request: Request,
+    ) -> Answer;
+
+    /// Whether it applies a mount's body limit itself, in place of the
+    /// replayer's host step.
+    fn limits_bodies(&self) -> bool {
+        false
+    }
+}
+
+/// The engine's transport-neutral routes, called directly
+/// ([`api::handle`]).
+pub struct Direct;
+
+impl Transport for Direct {
+    fn serve(
+        &self,
+        engine: &Arc<Engine>,
+        mounts: &[MountView<'_>],
+        served: Option<usize>,
+        request: Request,
+    ) -> Answer {
+        match served {
+            // No mount serves it: the app's notFound answers.
+            None => api::Problem::not_found("Not Found")
+                .response(&request.request_id)
+                .into(),
+            Some(index) => api::handle(engine, mounts[index].options, &request).into(),
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Kind {
@@ -85,7 +190,7 @@ struct App {
 struct OpenStream {
     /// The stream it pulls; `None` for an event stream the engine handed
     /// back whole (MCP's), whose frames are all in `frames`.
-    stream: Option<Box<EventStream>>,
+    stream: Option<Box<dyn Frames>>,
     buffer: String,
     frames: Vec<Value>,
     ended: bool,
@@ -143,7 +248,18 @@ fn mount_of(prefix: &str, kind: &str, options: &Value) -> Mount {
             .filter(|limit| *limit > 0.0),
         body_limit: member("bodyLimitBytes")
             .and_then(Value::as_u64)
-            .map_or(DEFAULT_BODY_LIMIT, |limit| limit as usize),
+            .map_or(api::DEFAULT_BODY_LIMIT_BYTES, |limit| limit as usize),
+    }
+}
+
+impl Mount {
+    fn view(&self) -> MountView<'_> {
+        MountView {
+            prefix: &self.prefix,
+            mcp: self.kind == Kind::Mcp,
+            options: &self.options,
+            body_limit: self.body_limit,
+        }
     }
 }
 
@@ -308,10 +424,10 @@ fn problem_bytes(
     code: &str,
     request_id: &str,
     details: Option<Value>,
-) -> api::Response {
+) -> Answer {
     let mut problem = api::Problem::new(status, detail, code);
     problem.details = details;
-    problem.response(request_id)
+    problem.response(request_id).into()
 }
 
 /// An exchange: the request through the host's steps and the engine's
@@ -384,23 +500,28 @@ pub(crate) fn exchange(run: &mut Run<'_>, step: &Value) -> Result<Outcome, Strin
     let id = request_id(run, &headers);
     // The mount that serves the request: one under whose prefix it falls
     // and whose kind serves its route.
-    let mounts = &run.http.apps[app_index].1.mounts;
-    let served = mounts.iter().enumerate().find_map(|(index, mount)| {
-        let rest = path.strip_prefix(mount.prefix.trim_end_matches('/'))?;
-        let route = api::route_of(&method, rest)?;
-        let kind = if route.mcp { Kind::Mcp } else { Kind::Engine };
-        (kind == mount.kind).then_some((index, route))
-    });
-    let response = match served {
-        // No mount serves it: the app's notFound answers.
-        None => api::Problem::not_found("Not Found").response(&id),
+    let served = run.http.apps[app_index]
+        .1
+        .mounts
+        .iter()
+        .enumerate()
+        .find_map(|(index, mount)| {
+            let rest = path.strip_prefix(mount.prefix.trim_end_matches('/'))?;
+            let route = api::route_of(&method, rest)?;
+            let kind = if route.mcp { Kind::Mcp } else { Kind::Engine };
+            (kind == mount.kind).then_some((index, route))
+        });
+    // The host's steps on the mount that serves it: the rate limit, then
+    // the body limit, unless the transport applies the mount's.
+    let refused = match &served {
+        None => None,
         Some((index, route)) => {
-            let (rate_limit, body_limit) = (mounts[index].rate_limit, mounts[index].body_limit);
+            let mount = &run.http.apps[app_index].1.mounts[*index];
+            let (rate_limit, body_limit) = (mount.rate_limit, mount.body_limit);
             let limited = match rate_limit {
                 Some(limit) => admit(&mut run.http, route.name, limit).err(),
                 None => None,
             };
-            let mount = &run.http.apps[app_index].1.mounts[index];
             if let Some(retry) = limited {
                 let mut response = problem_bytes(
                     429,
@@ -412,37 +533,48 @@ pub(crate) fn exchange(run: &mut Run<'_>, step: &Value) -> Result<Outcome, Strin
                 response
                     .headers
                     .insert(0, ("retry-after".to_owned(), retry.to_string()));
-                response
-            } else if BODY_ROUTES.contains(&route.name)
+                Some(response)
+            } else if !run.transport.limits_bodies()
+                && route.takes_body()
                 && body.as_ref().is_some_and(|bytes| bytes.len() > body_limit)
             {
-                problem_bytes(
+                Some(problem_bytes(
                     413,
                     "Request body exceeds the accepted size",
                     "payload_too_large",
                     &id,
                     None,
-                )
+                ))
             } else {
-                api::handle(
-                    &engine,
-                    &mount.options,
-                    &Request {
-                        method: method.clone(),
-                        prefix: mount.prefix.clone(),
-                        path: path.clone(),
-                        query: recorded
-                            .get("query")
-                            .and_then(Value::as_str)
-                            .unwrap_or_default()
-                            .to_owned(),
-                        headers: headers.clone(),
-                        body: body.clone(),
-                        caller: caller.clone(),
-                        request_id: id.clone(),
-                    },
-                )
+                None
             }
+        }
+    };
+    let response = match refused {
+        Some(response) => response,
+        None => {
+            let mounts = &run.http.apps[app_index].1.mounts;
+            let views: Vec<MountView<'_>> = mounts.iter().map(Mount::view).collect();
+            let index = served.as_ref().map(|(index, _)| *index);
+            run.transport.serve(
+                &engine,
+                &views,
+                index,
+                Request {
+                    method: method.clone(),
+                    prefix: index.map_or_else(String::new, |index| mounts[index].prefix.clone()),
+                    path: path.clone(),
+                    query: recorded
+                        .get("query")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_owned(),
+                    headers: headers.clone(),
+                    body: body.clone(),
+                    caller: caller.clone(),
+                    request_id: id.clone(),
+                },
+            )
         }
     };
     let expected = step.get("response").cloned().unwrap_or(Value::Null);
@@ -482,7 +614,7 @@ pub(crate) fn exchange(run: &mut Run<'_>, step: &Value) -> Result<Outcome, Strin
         .unwrap_or_default()
         .to_owned();
     match response.body {
-        Body::Stream(stream) => {
+        Answered::Stream(stream) => {
             let label = step
                 .get("stream")
                 .and_then(Value::as_str)
@@ -507,7 +639,7 @@ pub(crate) fn exchange(run: &mut Run<'_>, step: &Value) -> Result<Outcome, Strin
         // An event stream the engine wrote whole (MCP's answer on the 2025
         // revisions): the recording reads it as a stream that ends with
         // its last frame.
-        Body::Bytes(bytes) if content_type.starts_with("text/event-stream") => {
+        Answered::Bytes(bytes) if content_type.starts_with("text/event-stream") => {
             let label = step
                 .get("stream")
                 .and_then(Value::as_str)
@@ -528,7 +660,7 @@ pub(crate) fn exchange(run: &mut Run<'_>, step: &Value) -> Result<Outcome, Strin
             }
             Ok(Outcome::Passed)
         }
-        Body::Bytes(bytes) if !bytes.is_empty() => {
+        Answered::Bytes(bytes) if !bytes.is_empty() => {
             let text = String::from_utf8_lossy(&bytes).into_owned();
             let actual = if content_type.contains("json") {
                 serde_json::from_str::<Value>(&text)
