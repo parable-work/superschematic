@@ -597,7 +597,7 @@ func (p *Provisioner) lookPath(name string) (string, error) {
 		case "bun":
 			return "", fmt.Errorf("local: bun is not on PATH; the local target runs each TypeScript server on Bun (https://bun.sh): %w", err)
 		case "cargo":
-			return "", fmt.Errorf("local: cargo is not on PATH; the local target builds each Rust server with cargo build: %w", err)
+			return "", fmt.Errorf("local: cargo is not on PATH; the local target builds each Rust server, job and worker with cargo build: %w", err)
 		}
 		return "", fmt.Errorf("local: %s is not on PATH: %w", name, err)
 	}
@@ -937,7 +937,7 @@ func (p *Provisioner) startServers(ctx context.Context, req registry.ProvisionRe
 					return err
 				}
 			}
-			binary, err := p.buildRust(ctx, req.Dir, s, module, tools[s.Language], binaries[s.ID])
+			binary, err := p.buildRust(ctx, req, s.crate(), tools[s.Language], binaries[s.ID])
 			if err != nil {
 				return err
 			}
@@ -1011,56 +1011,80 @@ func toolOf(language string) string {
 	return "go"
 }
 
-// buildRust builds a Rust server's crate, in module, with `cargo build
-// --release --locked` into the program directory's Cargo target
-// directory, RustTargetDir, and returns the path of its binary there,
-// target/release/<binary> (D57). The target directory lies outside the
-// server's directory, which each build of the stack empties, so a rebuild
-// compiles only what changed. --locked builds the versions the crate's
-// Cargo.lock pins, and refuses a crate with none or a stale one; --quiet
-// leaves cargo's progress out of a failure, whose diagnostics reach the
-// user in the error, as `go build`'s do.
-func (p *Provisioner) buildRust(ctx context.Context, programDir string, s *Server, module, cargo, binary string) (string, error) {
-	target, err := filepath.Abs(filepath.Join(programDir, RustTargetDir))
+// rustCrate is the crate of a Rust server, worker or job: its node's ID,
+// what it is, its deployable, and its entrypoint module, relative to the
+// output root.
+type rustCrate struct{ id, what, deployable, module string }
+
+func (s *Server) crate() rustCrate { return rustCrate{s.ID, s.what(), s.Deployable, s.Module} }
+func (j *Job) crate() rustCrate    { return rustCrate{j.ID, "job", j.Deployable, j.Module} }
+
+// buildRust builds the crate of a Rust server, worker or job with `cargo
+// build --release --locked` in its entrypoint module into the program
+// directory's Cargo target directory, RustTargetDir, and returns the path
+// of its binary there, target/release/<binary> (D57, D65). The target
+// directory lies outside the deployable's directory, which each build of
+// the stack empties, so a rebuild compiles only what changed, and every
+// Rust deployable of the environment shares it, so the dependencies they
+// share compile once. --locked builds the versions the crate's Cargo.lock
+// pins, and refuses a crate with none or a stale one; --quiet leaves
+// cargo's progress out of a failure, whose diagnostics reach the user in
+// the error, as `go build`'s do.
+func (p *Provisioner) buildRust(ctx context.Context, req registry.ProvisionRequest, c rustCrate, cargo, binary string) (string, error) {
+	target, err := filepath.Abs(filepath.Join(req.Dir, RustTargetDir))
 	if err != nil {
 		return "", err
 	}
-	p.printf("build %s: cargo build --release --locked in %s", s.Deployable, s.Module)
+	p.printf("build %s: cargo build --release --locked in %s", c.deployable, c.module)
+	module := filepath.Join(req.OutputRoot, filepath.FromSlash(c.module))
 	if _, err := p.runner().Run(ctx, Command{Path: cargo, Args: []string{"build", "--release", "--locked", "--quiet", "--target-dir", target}, Dir: module, Env: os.Environ()}); err != nil {
-		return "", fmt.Errorf("local: build server %s: %w", s.Deployable, err)
+		return "", fmt.Errorf("local: build %s %s: %w", c.what, c.deployable, err)
 	}
 	return filepath.Join(target, "release", binary), nil
 }
 
-// rustBinaries returns the binary each Rust server of the program builds,
-// by the server's ID, as its crate's Cargo.toml names it (rustBinary).
-// Every Rust server of the environment builds into one target directory,
-// where two binaries of one name would be one file, so it refuses two
-// servers whose crates name the same binary.
+// rustBinaries returns the binary each Rust server, worker and job of the
+// program builds, by its node's ID, as its crate's Cargo.toml names it
+// (rustBinary). Every Rust deployable of the environment builds into one
+// target directory, where two binaries of one name would be one file, so
+// it refuses two whose crates name the same binary.
 func rustBinaries(outputRoot string, prog *Program) (map[string]string, error) {
-	binaries := map[string]string{}
-	builtBy := map[string]string{}
+	var crates []rustCrate
 	for _, s := range prog.Servers {
-		if s.Language != LanguageRust {
-			continue
+		if s.Language == LanguageRust {
+			crates = append(crates, s.crate())
 		}
-		name, err := rustBinary(filepath.Join(outputRoot, filepath.FromSlash(s.Module)))
+	}
+	for _, j := range prog.Jobs {
+		if j.Language == LanguageRust {
+			crates = append(crates, j.crate())
+		}
+	}
+	binaries := map[string]string{}
+	builtBy := map[string]rustCrate{}
+	for _, c := range crates {
+		name, err := rustBinary(filepath.Join(outputRoot, filepath.FromSlash(c.module)), c.what)
 		if err != nil {
-			return nil, fmt.Errorf("local: server %s: %w", s.Deployable, err)
+			return nil, fmt.Errorf("local: %s %s: %w", c.what, c.deployable, err)
 		}
 		if other, taken := builtBy[name]; taken {
-			return nil, fmt.Errorf("local: servers %s and %s both build a binary named %s into one Cargo target directory, %s; name each crate's binary after its server", other, s.Deployable, name, RustTargetDir)
+			both := fmt.Sprintf("%s %s and %s %s", other.what, other.deployable, c.what, c.deployable)
+			if other.what == c.what {
+				both = fmt.Sprintf("%ss %s and %s", c.what, other.deployable, c.deployable)
+			}
+			return nil, fmt.Errorf("local: %s both build a binary named %s into one Cargo target directory, %s; name each crate's binary after its deployable", both, name, RustTargetDir)
 		}
-		builtBy[name] = s.Deployable
-		binaries[s.ID] = name
+		builtBy[name] = c
+		binaries[c.id] = name
 	}
 	return binaries, nil
 }
 
-// rustBinary returns the binary the Rust crate in dir builds, as its
-// Cargo.toml names it: its one `[[bin]]`'s name, or else its package's,
-// which is the name cargo gives the binary of src/main.rs.
-func rustBinary(dir string) (string, error) {
+// rustBinary returns the binary the Rust crate in dir, a server's, a
+// job's or a worker's (what), builds, as its Cargo.toml names it: its one
+// `[[bin]]`'s name, or else its package's, which is the name cargo gives
+// the binary of src/main.rs.
+func rustBinary(dir, what string) (string, error) {
 	path := filepath.Join(dir, "Cargo.toml")
 	var manifest struct {
 		Package struct {
@@ -1071,7 +1095,7 @@ func rustBinary(dir string) (string, error) {
 		} `toml:"bin"`
 	}
 	if _, err := toml.DecodeFile(path, &manifest); errors.Is(err, fs.ErrNotExist) {
-		return "", fmt.Errorf("no Cargo.toml in %s, the crate the stack's build writes for a Rust server (D57)", dir)
+		return "", fmt.Errorf("no Cargo.toml in %s, the crate the stack's build writes for a Rust %s (D57, D65)", dir, what)
 	} else if err != nil {
 		return "", fmt.Errorf("read %s: %w", path, err)
 	}
@@ -1081,7 +1105,7 @@ func rustBinary(dir string) (string, error) {
 	case 1:
 		name = manifest.Bin[0].Name
 	default:
-		return "", fmt.Errorf("%s declares %d binaries; a server's crate builds one", path, len(manifest.Bin))
+		return "", fmt.Errorf("%s declares %d binaries; a %s's crate builds one", path, len(manifest.Bin), what)
 	}
 	if !binaryNamePattern.MatchString(name) {
 		return "", fmt.Errorf("%s names no binary cargo builds: its [package] name, or its one [[bin]]'s, is %q", path, name)

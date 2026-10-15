@@ -54,9 +54,10 @@ func ParseSites(values []string) (map[string]string, error) {
 	return sites, nil
 }
 
-// SiteFiles is the output of a site's build, digested.
-type SiteFiles struct {
-	// Dir is the directory the build wrote.
+// ArtifactFiles is the output of a site's or a bundle's build, digested,
+// or the files a deploy fetched under a digest (D55, D64).
+type ArtifactFiles struct {
+	// Dir is the directory that holds the files.
 	Dir string
 
 	// Digest is `sha256:` and the hex SHA-256 of the files' tar stream.
@@ -65,26 +66,38 @@ type SiteFiles struct {
 	// Files counts the files, and Size the bytes of the tar stream.
 	Files int
 	Size  int64
+
+	// Sums holds the hex SHA-256 of each file's content, by its
+	// slash-separated path below Dir: what a bundle's platform pins with
+	// ir.BundleFileToken (D64).
+	Sums map[string]string
 }
 
 // DigestSite digests the files under dir as WriteContext digests a build
 // context: a tar stream of every directory and regular file, in path
 // order, at the epoch, owned by root, with mode 0644, or 0755 for a
-// directory or an executable file. It refuses a directory that holds no
-// file, and a symbolic link, which a site's publisher could not upload as
-// the file it points at.
-func DigestSite(dir string) (*SiteFiles, error) {
+// directory or an executable file. It records each file's SHA-256 too. It
+// refuses a directory that holds no file, and a symbolic link, which a
+// site's publisher could not upload as the file it points at.
+func DigestSite(dir string) (*ArtifactFiles, error) { return digestFiles(dir, "site") }
+
+// DigestBundle digests the files a bundle's build wrote under dir as
+// DigestSite digests a site's (D64).
+func DigestBundle(dir string) (*ArtifactFiles, error) { return digestFiles(dir, "bundle") }
+
+// digestFiles digests the files of a site's or a bundle's build, what.
+func digestFiles(dir, what string) (*ArtifactFiles, error) {
 	root, err := filepath.Abs(dir)
 	if err != nil {
 		return nil, err
 	}
 	if info, err := os.Stat(root); err != nil || !info.IsDir() {
-		return nil, fmt.Errorf("no directory %s, which the site's build writes", root)
+		return nil, fmt.Errorf("no directory %s, which the %s's build writes", root, what)
 	}
 	sum := sha256.New()
 	counter := &countWriter{}
 	tw := tar.NewWriter(io.MultiWriter(sum, counter))
-	out := &SiteFiles{Dir: root}
+	out := &ArtifactFiles{Dir: root, Sums: map[string]string{}}
 	err = filepath.WalkDir(root, func(p string, entry fs.DirEntry, err error) error {
 		if err != nil || p == root {
 			return err
@@ -93,33 +106,74 @@ func DigestSite(dir string) (*SiteFiles, error) {
 		if err != nil {
 			return err
 		}
+		name := filepath.ToSlash(rel)
 		switch {
 		case entry.Type()&fs.ModeSymlink != 0:
-			return fmt.Errorf("%s is a symbolic link; a site's files are files", filepath.ToSlash(rel))
+			return fmt.Errorf("%s is a symbolic link; a %s's files are files", name, what)
 		case entry.IsDir():
 		case entry.Type().IsRegular():
 			out.Files++
+			if out.Sums[name], err = fileSum(p); err != nil {
+				return err
+			}
 		default:
 			return nil
 		}
-		return writeEntry(tw, p, filepath.ToSlash(rel), entry)
+		return writeEntry(tw, p, name, entry)
 	})
 	if err != nil {
-		return nil, fmt.Errorf("digest the site at %s: %w", root, err)
+		return nil, fmt.Errorf("digest the %s at %s: %w", what, root, err)
 	}
 	if err := tw.Close(); err != nil {
 		return nil, err
 	}
 	if out.Files == 0 {
-		return nil, fmt.Errorf("the site's build wrote no file into %s", root)
+		return nil, fmt.Errorf("the %s's build wrote no file into %s", what, root)
 	}
 	out.Digest = "sha256:" + hex.EncodeToString(sum.Sum(nil))
 	out.Size = counter.n
 	return out, nil
 }
 
+// fileSum returns the hex SHA-256 of a file's content.
+func fileSum(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = f.Close() }()
+	sum := sha256.New()
+	if _, err := io.Copy(sum, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(sum.Sum(nil)), nil
+}
+
 // RunCommand runs name with args in dir, writing its output to log.
 type RunCommand func(ctx context.Context, dir string, log io.Writer, name string, args ...string) error
+
+// run returns src.Run, or execCommand when it is nil.
+func (src *Sources) run() RunCommand {
+	if src.Run == nil {
+		return execCommand
+	}
+	return src.Run
+}
+
+// install runs one frozen install of the Bun workspace at the output root,
+// the first time a site or a bundle builds in the operation, what naming
+// the first (D51, amended).
+func (s *session) install(ctx context.Context, src *Sources, what string) error {
+	if s.installed {
+		return nil
+	}
+	s.logf("install the TypeScript workspace: bun install --frozen-lockfile in %s", src.OutputRoot)
+	if err := src.run()(ctx, src.OutputRoot, s.log, "bun", "install", "--frozen-lockfile"); err != nil {
+		return fmt.Errorf("install the TypeScript workspace, whose lockfile the %s's build installs from (D51, amended): %w", what, err)
+	}
+	s.installed = true
+	return nil
+}
 
 // execCommand is RunCommand with os/exec.
 func execCommand(ctx context.Context, dir string, log io.Writer, name string, args ...string) error {
@@ -137,11 +191,81 @@ type sitePlan struct {
 	// digests holds, by site, the digest of the files it serves.
 	digests map[string]string
 
-	// built holds, by site, the files a build wrote; built and unchanged
-	// name the sites whose files differ from and match the manifest's.
-	files     map[string]*SiteFiles
+	// files holds, by site, the files a build wrote, or the deploy fetched
+	// to place beside the program; built and unchanged name the sites
+	// whose build's files differ from and match the manifest's.
+	files     map[string]*ArtifactFiles
 	built     []string
 	unchanged []string
+
+	// dir holds the files fetched.
+	dir string
+}
+
+// cleanup removes the files the plan fetched.
+func (p *sitePlan) cleanup() {
+	if p.dir != "" {
+		_ = os.RemoveAll(p.dir)
+	}
+}
+
+// placesSites reports whether the target's site publisher fetches a site's
+// files, so the deploy places them beside the program (D64).
+func (s *session) placesSites() bool {
+	_, ok := s.target.Sites.(registry.ArtifactFetcher)
+	return ok
+}
+
+// fetchSites fetches, when the target places sites' files, the files of
+// each site the plan gives a digest and holds no files of, and checks them
+// against the digest.
+func (s *session) fetchSites(ctx context.Context, p *sitePlan) error {
+	if !s.placesSites() {
+		return nil
+	}
+	for _, site := range sortedKeys(p.digests) {
+		if p.files[site] != nil {
+			continue
+		}
+		if p.dir == "" {
+			dir, err := os.MkdirTemp("", "superschematic-sites-")
+			if err != nil {
+				return err
+			}
+			p.dir = dir
+		}
+		dest := filepath.Join(p.dir, site)
+		if err := os.MkdirAll(dest, 0o755); err != nil {
+			return err
+		}
+		files, err := s.fetchArtifact(ctx, s.target.Sites, "site", site, p.digests[site], dest)
+		if err != nil {
+			return err
+		}
+		p.files[site] = files
+	}
+	return nil
+}
+
+// placed returns the files of each site the deploy places beside the
+// program, when the target places them, and of each bundle, by deployable.
+func (s *session) placed(sites *sitePlan, bundles *bundlePlan) map[string]*ArtifactFiles {
+	out := map[string]*ArtifactFiles{}
+	if sites != nil && s.placesSites() {
+		for site, digest := range sites.digests {
+			if files := sites.files[site]; files != nil && files.Digest == digest {
+				out[site] = files
+			}
+		}
+	}
+	if bundles != nil {
+		for name, digest := range bundles.digests {
+			if files := bundles.files[name]; files != nil && files.Digest == digest {
+				out[name] = files
+			}
+		}
+	}
+	return out
 }
 
 // planSites decides the files of each site: given, by --site, first; then,
@@ -150,7 +274,7 @@ type sitePlan struct {
 // is built on every deploy, which is quick, and its files uploaded only
 // when their digest is new.
 func (s *session) planSites(ctx context.Context, prev *Manifest, given map[string]string, src *Sources, only []string) (*sitePlan, error) {
-	p := &sitePlan{digests: map[string]string{}, files: map[string]*SiteFiles{}}
+	p := &sitePlan{digests: map[string]string{}, files: map[string]*ArtifactFiles{}}
 	var sites []*ir.ResolvedDeployable
 	for _, d := range s.env.Deployables {
 		if d.Kind == ir.DeployableSite {
@@ -173,7 +297,6 @@ func (s *session) planSites(ctx context.Context, prev *Manifest, given map[strin
 	if src == nil || s.target.Sites == nil || len(sites) == 0 {
 		return p, nil
 	}
-	installed := false
 	for _, d := range sites {
 		if _, ok := given[d.Name]; ok || (len(only) > 0 && !slices.Contains(only, d.Name)) {
 			continue
@@ -184,20 +307,12 @@ func (s *session) planSites(ctx context.Context, prev *Manifest, given map[strin
 		if src.ImplementationRoot == "" {
 			return nil, fmt.Errorf("site %s: the deploy names no repository root, under which its package lies", d.Name)
 		}
-		run := src.Run
-		if run == nil {
-			run = execCommand
-		}
-		if !installed {
-			s.logf("install the TypeScript workspace: bun install --frozen-lockfile in %s", src.OutputRoot)
-			if err := run(ctx, src.OutputRoot, s.log, "bun", "install", "--frozen-lockfile"); err != nil {
-				return nil, fmt.Errorf("install the TypeScript workspace, whose lockfile the site's build installs from (D51, amended): %w", err)
-			}
-			installed = true
+		if err := s.install(ctx, src, "site"); err != nil {
+			return nil, err
 		}
 		dir := filepath.Join(src.ImplementationRoot, filepath.FromSlash(d.Site.Dir))
 		s.logf("site %s: bun run %s in %s", d.Name, d.Site.Build, dir)
-		if err := run(ctx, dir, s.log, "bun", "run", d.Site.Build); err != nil {
+		if err := src.run()(ctx, dir, s.log, "bun", "run", d.Site.Build); err != nil {
 			return nil, fmt.Errorf("build site %s: %w", d.Name, err)
 		}
 		files, err := DigestSite(filepath.Join(dir, filepath.FromSlash(d.Site.Output)))
@@ -282,15 +397,26 @@ func PinSites(env *ir.ResolvedEnvironment, digests map[string]string) (*ir.Resol
 // replaceToken replaces token in every string in v with value, and returns
 // how many strings it changed.
 func replaceToken(v any, token, value string) (any, int) {
+	return rewriteStrings(v, func(s string) (string, bool) {
+		if !strings.Contains(s, token) {
+			return s, false
+		}
+		return strings.ReplaceAll(s, token, value), true
+	})
+}
+
+// rewriteStrings replaces every string in v, in place, with what rewrite
+// returns for it, and returns how many strings rewrite said it changed.
+func rewriteStrings(v any, rewrite func(string) (string, bool)) (any, int) {
 	switch v := v.(type) {
 	case string:
-		if strings.Contains(v, token) {
-			return strings.ReplaceAll(v, token, value), 1
+		if s, changed := rewrite(v); changed {
+			return s, 1
 		}
 	case ir.Concat:
 		n := 0
 		for i, inner := range v {
-			replaced, count := replaceToken(inner, token, value)
+			replaced, count := rewriteStrings(inner, rewrite)
 			v[i] = replaced
 			n += count
 		}
@@ -298,7 +424,7 @@ func replaceToken(v any, token, value string) (any, int) {
 	case map[string]any:
 		n := 0
 		for key, inner := range v {
-			replaced, count := replaceToken(inner, token, value)
+			replaced, count := rewriteStrings(inner, rewrite)
 			v[key] = replaced
 			n += count
 		}
@@ -306,7 +432,7 @@ func replaceToken(v any, token, value string) (any, int) {
 	case []any:
 		n := 0
 		for i, inner := range v {
-			replaced, count := replaceToken(inner, token, value)
+			replaced, count := rewriteStrings(inner, rewrite)
 			v[i] = replaced
 			n += count
 		}

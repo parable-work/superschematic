@@ -32,8 +32,8 @@ const schemaResourceName = "schema-file.json"
 // The registry supplies what the structs cannot: the schema kinds, the
 // extension names and their decorators (closing every "extensions" slot),
 // the sidecar documents (closing "documents"), the behaviors (closing a
-// type's "behaviors" entries) and @display's argument schema (a type's
-// "display").
+// type's "behaviors" entries), @display's argument schema (a type's
+// "display") and @paginated's (an operation's "page").
 //
 // The root is a oneOf over the multi-definition Document and the
 // single-definition forms (a TypeDef, or an Enum / Union / Scalar /
@@ -112,6 +112,10 @@ func generateDefinition(reg *registry.Registry) ([]byte, error) {
 	}
 
 	if err := replaceDisplayDefs(defs, reg); err != nil {
+		return nil, err
+	}
+
+	if err := replacePageDefs(defs, reg); err != nil {
 		return nil, err
 	}
 
@@ -476,26 +480,43 @@ func closeBehaviors(defs map[string]any, reg *registry.Registry) error {
 // names, the transition keys, the closed tones). Each replacement must
 // name the members the IR struct does, so the two cannot drift apart.
 func replaceDisplayDefs(defs map[string]any, reg *registry.Registry) error {
-	spec, ok := reg.Decorator("display", registry.TargetType)
+	return replaceDefsWithArgs(defs, reg, "display", registry.TargetType, "TypeDisplay", "DisplayState")
+}
+
+// replacePageDefs replaces the reflected $defs/OperationPage with the
+// $defs of the registered @paginated spec's Args (D60): an operation's page
+// is the decorator's argument, so the data forms are held to the schema the
+// TypeScript frontend holds it to, which bounds each limit. The
+// replacement must name the members ir.OperationPage does, so the two
+// cannot drift apart.
+func replacePageDefs(defs map[string]any, reg *registry.Registry) error {
+	return replaceDefsWithArgs(defs, reg, "paginated", registry.TargetOperation, "OperationPage")
+}
+
+// replaceDefsWithArgs replaces the reflected $defs names with the $defs of
+// the Args of the decorator @name on target, refusing a replacement whose
+// properties are not the reflected struct's.
+func replaceDefsWithArgs(defs map[string]any, reg *registry.Registry, name string, target registry.DecoratorTarget, names ...string) error {
+	spec, ok := reg.Decorator(name, target)
 	if !ok || spec.Args == nil {
-		return fmt.Errorf("the registry has no @display decorator with Args")
+		return fmt.Errorf("the registry has no @%s decorator with Args", name)
 	}
 	var args struct {
 		Defs map[string]map[string]any `json:"$defs"`
 	}
 	if err := json.Unmarshal(spec.Args, &args); err != nil {
-		return fmt.Errorf("decorator @display Args: %w", err)
+		return fmt.Errorf("decorator @%s Args: %w", name, err)
 	}
-	for _, name := range []string{"TypeDisplay", "DisplayState"} {
-		reflected, err := propertiesOf(defs, name)
+	for _, def := range names {
+		reflected, err := propertiesOf(defs, def)
 		if err != nil {
 			return err
 		}
-		registered, _ := args.Defs[name]["properties"].(map[string]any)
+		registered, _ := args.Defs[def]["properties"].(map[string]any)
 		if !slices.Equal(sortedKeys(reflected), sortedKeys(registered)) {
-			return fmt.Errorf("@display Args $defs/%s has the properties %v, but ir.%s has %v", name, sortedKeys(registered), name, sortedKeys(reflected))
+			return fmt.Errorf("@%s Args $defs/%s has the properties %v, but ir.%s has %v", name, def, sortedKeys(registered), def, sortedKeys(reflected))
 		}
-		defs[name] = args.Defs[name]
+		defs[def] = args.Defs[def]
 	}
 	return nil
 }

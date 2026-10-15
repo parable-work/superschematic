@@ -7,15 +7,18 @@
 //! another, which column orders siblings, and how each content column merges.
 //! Rows are JSON objects keyed by column name, as Postgres `to_jsonb` renders
 //! them. The core is pure: no IO, clock or randomness. The Go binding calls it
-//! through the C ABI in [`ffi`], and the browser through the same exports
-//! built for `wasm32-unknown-unknown`. `runtime/versiongraph/README.md` is the
-//! contract; the vectors in `runtime/versiongraph/testdata/vectors` are its
-//! executable form.
+//! through the C ABI in `ffi` (the default `ffi` feature), and the browser
+//! through the same exports built for `wasm32-unknown-unknown`; a crate that
+//! links the core into an archive of its own turns the feature off, so the
+//! `vg_*` symbols are defined once in a binary that links both.
+//! `runtime/versiongraph/README.md` is the contract; the vectors in
+//! `runtime/versiongraph/testdata/vectors` are its executable form.
 
 mod compose;
 mod descriptor;
 mod diff;
 mod error;
+#[cfg(feature = "ffi")]
 pub mod ffi;
 mod finding;
 mod hash;

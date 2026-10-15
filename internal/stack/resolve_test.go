@@ -1057,7 +1057,7 @@ func (b *broken) Register(r *registry.Registry) error {
 		name = "shop-api"
 	}
 	if err := r.RegisterPlatform(registry.PlatformSpec{
-		Name: "broken.run", Kind: ir.DeployableServer, Languages: []string{registry.APILanguageGo},
+		Name: "broken.run", Provider: "broken", Kind: ir.DeployableServer, Languages: []string{registry.APILanguageGo},
 		NameOf:    func(registry.PlatformContext) any { return name },
 		AddressOf: func(registry.PlatformContext) any { return address },
 		Lower:     b.lower,
@@ -1065,7 +1065,7 @@ func (b *broken) Register(r *registry.Registry) error {
 		return err
 	}
 	if err := r.RegisterPlatform(registry.PlatformSpec{
-		Name: "broken.sql", Kind: ir.DeployableDatabase, Dialects: []string{registry.SQLDialectPostgres},
+		Name: "broken.sql", Provider: "broken", Kind: ir.DeployableDatabase, Dialects: []string{registry.SQLDialectPostgres},
 		NameOf:    func(registry.PlatformContext) any { return "shop-db" },
 		AddressOf: func(registry.PlatformContext) any { return "shop-db:5432" },
 		Lower: func(ctx registry.PlatformContext) (registry.Lowered, error) {

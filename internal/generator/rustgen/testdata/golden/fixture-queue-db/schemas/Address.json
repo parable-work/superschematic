@@ -1,0 +1,30 @@
+{
+  "name": "fixture-queue-db",
+  "kind": "General",
+  "rootType": "Address",
+  "types": {
+    "Address": {
+      "name": "Address",
+      "owner": "src/orders.schema.ts",
+      "comment": "Where an order ships, kept as JSON wherever it is stored.",
+      "role": "DBTable",
+      "fields": [
+        {
+          "name": "line1",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true
+        },
+        {
+          "name": "city",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true
+        }
+      ],
+      "jsonField": true
+    }
+  }
+}

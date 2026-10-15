@@ -4,8 +4,11 @@ import {
   Authenticated,
   HttpMethod,
   QueryParam,
+  RefersTo,
+  SearchQuery,
   auth,
   bodyLimit,
+  paginated,
   publicRoute,
   rateLimit,
   requirePermission,
@@ -14,7 +17,19 @@ import {
   timeout,
   virtual
 } from "@superschematic/api";
-import { Order, OrderLine, OrderStatus, Review, ShippingAddress } from "@acme/shop-db";
+import { Order, OrderLine, OrderStatus, Product, Review, ShippingAddress } from "@acme/shop-db";
+
+// A product as the order pages see it: a line of an order, a review and a
+// product's page refer to it by its id, and name it by its name.
+@source(Product)
+@display({ noun: "Product", plural: "Products", titleField: "name", summaryFields: ["name", "sku", "priceCents", "inStock"] })
+export abstract class ProductView {
+  id: Identity.UUID;
+  sku: Identity.Slug;
+  name: Identity.Name;
+  priceCents: Generic.Int64;
+  inStock: boolean;
+}
 
 // One line of an order as a caller sees it.
 @source(OrderLine)
@@ -25,7 +40,7 @@ export abstract class OrderLineView {
 
   // The product this line is for.
   @virtual
-  productId: Identity.UUID;
+  productId: RefersTo<Identity.UUID, ProductView>;
 }
 
 // An order as a caller sees it.
@@ -52,7 +67,7 @@ export abstract class OrderView {
 @display({ noun: "Line", createLabel: "Add a line" })
 export abstract class PlaceOrderLine {
   @docs({ title: "Product" })
-  productId: Identity.UUID;
+  productId: RefersTo<Identity.UUID, ProductView>;
   quantity: Validate<number, { min: 1; max: 99 }>;
 }
 
@@ -86,12 +101,11 @@ export class OrderQueries extends Authenticated {
     throw new Error("schema declaration only");
   }
 
+  // The orders, oldest first: by when each was placed, then by its id.
   @rest(HttpMethod.GET, "orders")
   @requirePermission(["orders.read"])
-  listOrders(
-    statuses: QueryParam<Nullable<OrderStatus[]>>,
-    limit: QueryParam<Nullable<Validate<number, { min: 1; max: 100 }>>>
-  ): OrderView[] {
+  @paginated({ defaultLimit: 20, maxLimit: 100 })
+  listOrders(statuses: QueryParam<Nullable<OrderStatus[]>>): OrderView[] {
     throw new Error("schema declaration only");
   }
 }
@@ -114,18 +128,49 @@ export class OrderMutations extends Authenticated {
   }
 }
 
+// The catalog a shopper orders from: anyone may read it. shop-api keeps
+// the staff's catalog, which adds and edits the products.
+export class ProductCatalog {
+  // The products, by name, then by id; ids narrows them to the products
+  // with those ids, the lookup a page names its products' ids through.
+  @rest(HttpMethod.GET, "products")
+  @publicRoute
+  @paginated({ defaultLimit: 20, maxLimit: 100 })
+  listProducts(
+    ids: QueryParam<Nullable<Validate<RefersTo<Identity.UUID, ProductView>[], { listMax: 100 }>>>
+  ): ProductView[] {
+    throw new Error("schema declaration only");
+  }
+
+  // One product. Its parameter is productId, as the reviews' routes name
+  // the parameter at that place.
+  @rest(HttpMethod.GET, "products/{productId}")
+  @publicRoute
+  getProduct(productId: RefersTo<Identity.UUID, ProductView>): ProductView {
+    throw new Error("schema declaration only");
+  }
+}
+
 // A product's reviews: anyone may read them, and a signed-in shopper may
 // write one.
 export class ProductReviews {
+  // The product's reviews, oldest first: by when each was written, then by
+  // its id. q keeps the reviews whose title or body holds each of its
+  // words.
   @rest(HttpMethod.GET, "products/{productId}/reviews")
   @publicRoute
-  listReviews(productId: Identity.UUID, minRating: QueryParam<Nullable<number>>): ReviewView[] {
+  @paginated({ defaultLimit: 20, maxLimit: 50 })
+  listReviews(
+    productId: RefersTo<Identity.UUID, ProductView>,
+    minRating: QueryParam<Nullable<number>>,
+    q: SearchQuery<Validate<string, { maxLength: 100 }>>
+  ): ReviewView[] {
     throw new Error("schema declaration only");
   }
 
   @rest(HttpMethod.POST, "products/{productId}/reviews")
   @auth
-  writeReview(productId: Identity.UUID, input: WriteReviewInput): ReviewView {
+  writeReview(productId: RefersTo<Identity.UUID, ProductView>, input: WriteReviewInput): ReviewView {
     throw new Error("schema declaration only");
   }
 }

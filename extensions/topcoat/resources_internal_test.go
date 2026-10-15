@@ -88,7 +88,10 @@ func one(name string) ir.TypeRef  { return ir.TypeRef{Name: name} }
 // item is nested, under a collection without pages of its own when nothing
 // lists or reads that one; and every other operation is left out with its
 // reason: a PUT or DELETE of a collection's path, nested or not, among
-// them, and a DELETE of a verb after an item, which no page asks first.
+// them, a DELETE of a verb after an item, which no page asks first, and a
+// collection whose pages would be served at another's: a list at things/new
+// beside the things' new page, and one named edit or delete under an item
+// with an edit or a delete page, which leave the trail too.
 func TestTheOperationsDescribeResources(t *testing.T) {
 	s := newShapes()
 	s.add("listThings", opShape{method: "GET", path: "things", result: list("Thing"), extra: "q", query: true, argForm: true})
@@ -120,6 +123,11 @@ func TestTheOperationsDescribeResources(t *testing.T) {
 	s.add("orderWidget", opShape{method: "POST", path: "widgets", result: one("Thing"), input: "WidgetInput"})
 	s.add("reindex", opShape{method: "GET", path: "index", result: list("Thing"), service: true})
 	s.add("readFile", opShape{method: "GET", path: "files/{name}.txt", result: one("Thing")})
+	// Collections whose pages would be served where another's are: a list
+	// at things/new, beside the things' new page, and a list named delete
+	// under a thing, beside its delete page.
+	s.add("listNewThings", opShape{method: "GET", path: "things/new", result: list("Thing")})
+	s.add("listDeletions", opShape{method: "GET", path: "things/{thingId}/delete", result: list("Part")})
 
 	roots, out := classify(schemaSet{s.schema}, s.ops, s.forms)
 
@@ -186,6 +194,8 @@ func TestTheOperationsDescribeResources(t *testing.T) {
 		"thing.orderWidget":   "no list or detail makes widgets a resource, nor POST widgets an action of one",
 		"thing.reindex":       "a browser holds no service credential (@requireService)",
 		"thing.readFile":      "its path segment {name}.txt is not a word or a parameter alone",
+		"thing.listNewThings": "its collection, things/new, has no pages, since the list of things/new would be served at GET things/new, the new page of things",
+		"thing.listDeletions": "its collection, things/{}/delete, has no pages, since the list of things/{}/delete would be served at GET things/{}/delete, the delete page of an item of things",
 	}
 	got := map[string]string{}
 	for _, left := range out {

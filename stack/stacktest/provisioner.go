@@ -2,10 +2,13 @@ package stacktest
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 
@@ -18,7 +21,9 @@ const ProgramFile = "program.json"
 
 // FakeProvisioner is a provisioner that runs nothing. It renders the
 // graph as a list of nodes, plans a create per node, and records each
-// call.
+// call. Like a provider that uploads a bundle's files from the program, its
+// Plan, Apply and Destroy refuse a node whose contentFile is not under the
+// program with the SHA-256 its contentSha256 holds (D64).
 type FakeProvisioner struct {
 	// Fail holds the error Apply returns for a step, keyed by the step's
 	// name (`rollout 2`, `exposure`).
@@ -104,6 +109,9 @@ func (p *FakeProvisioner) Plan(_ context.Context, req registry.ProvisionRequest)
 	if err := checkParameters(req); err != nil {
 		return nil, err
 	}
+	if err := checkFiles(req, nil); err != nil {
+		return nil, err
+	}
 	p.keepEnv(req)
 	var changes []registry.PlannedChange
 	for _, res := range req.Environment.Resources.Resources {
@@ -124,6 +132,9 @@ func (p *FakeProvisioner) Apply(_ context.Context, req registry.ProvisionRequest
 	if step.Wave > 0 {
 		name = fmt.Sprintf("%s %d", name, step.Wave)
 	}
+	if err := checkFiles(req, step.Resources); err != nil {
+		return err
+	}
 	p.keepEnv(req)
 	p.record("apply %s: %s", name, strings.Join(step.Resources, ", "))
 	return p.Fail[name]
@@ -131,8 +142,59 @@ func (p *FakeProvisioner) Apply(_ context.Context, req registry.ProvisionRequest
 
 // Destroy records the call.
 func (p *FakeProvisioner) Destroy(_ context.Context, req registry.ProvisionRequest) error {
+	if err := checkFiles(req, nil); err != nil {
+		return err
+	}
 	p.record("destroy %s", req.Environment.Environment)
 	return nil
+}
+
+// checkFiles checks each file a node of the request names in a
+// contentFile property, of the nodes ids names or of every node: that it
+// is under the program with the SHA-256 the property's contentSha256
+// holds. A path that still holds ir.BundleDigestToken names a bundle the
+// run has none of yet, and is planned as it is.
+func checkFiles(req registry.ProvisionRequest, ids []string) error {
+	for _, res := range req.Environment.Resources.Resources {
+		if res.Inherited || (ids != nil && !slices.Contains(ids, res.ID)) {
+			continue
+		}
+		var err error
+		walkMaps(map[string]any(res.Properties), func(m map[string]any) {
+			path, ok := m["contentFile"].(string)
+			if !ok || err != nil || strings.Contains(path, ir.BundleDigestToken) {
+				return
+			}
+			data, rerr := os.ReadFile(filepath.Join(req.Dir, filepath.FromSlash(path)))
+			if rerr != nil {
+				err = fmt.Errorf("node %s reads %s from the program: %w", res.ID, path, rerr)
+				return
+			}
+			sum := sha256.Sum256(data)
+			if want, _ := m["contentSha256"].(string); want != hex.EncodeToString(sum[:]) {
+				err = fmt.Errorf("node %s reads %s, whose SHA-256 is %x, not %s", res.ID, path, sum, want)
+			}
+		})
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// walkMaps calls visit with every map in v.
+func walkMaps(v any, visit func(map[string]any)) {
+	switch v := v.(type) {
+	case map[string]any:
+		visit(v)
+		for _, inner := range v {
+			walkMaps(inner, visit)
+		}
+	case []any:
+		for _, inner := range v {
+			walkMaps(inner, visit)
+		}
+	}
 }
 
 // Outputs returns each node's ID as its `id` output.

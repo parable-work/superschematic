@@ -40,6 +40,11 @@ const (
 	// Target is the target's name.
 	Target = "local"
 
+	// Provider is the provider each platform of the target runs on: the
+	// machine at hand. Its http edges are its own connector's, so the
+	// generic connector never serves two of its platforms (D63).
+	Provider = "local"
+
 	// ServerPlatform runs a server as a process; DatabasePlatform runs a
 	// database as databases on the environment's Postgres container;
 	// JobPlatform runs a job as a process on its schedule, or once on
@@ -151,10 +156,10 @@ const (
 	// (D51).
 	LanguageTypeScript = "typescript"
 
-	// LanguageRust is a Rust server, whose crate `cargo build --release`
-	// builds into the program directory's Cargo target directory,
-	// RustTargetDir, and whose binary, the one its Cargo.toml names, runs
-	// from there (D57).
+	// LanguageRust is a Rust server, job or worker, whose crate `cargo
+	// build --release` builds into the program directory's Cargo target
+	// directory, RustTargetDir, and whose binary, the one its Cargo.toml
+	// names, runs from there (D57, D65).
 	LanguageRust = "rust"
 )
 
@@ -191,9 +196,9 @@ func Register(r *registry.Registry) error {
 		{
 			Name: JobPlatform,
 			Kind: ir.DeployableJob,
-			// Go and TypeScript: no Rust job has an entrypoint yet (D52,
-			// D57).
-			Languages: []string{registry.APILanguageGo, registry.APILanguageTypeScript},
+			// A job is written in its API's language, as a server is
+			// (D52, D65).
+			Languages: []string{registry.APILanguageGo, registry.APILanguageTypeScript, registry.APILanguageRust},
 			NameOf:    processName,
 			AddressOf: func(registry.PlatformContext) any { return nil },
 			Lower:     lowerJob,
@@ -201,8 +206,8 @@ func Register(r *registry.Registry) error {
 		{
 			Name: WorkerPlatform,
 			Kind: ir.DeployableWorker,
-			// Go and TypeScript, as for a job (D53, D57).
-			Languages: []string{registry.APILanguageGo, registry.APILanguageTypeScript},
+			// In its API's language, as a job is (D53, D65).
+			Languages: []string{registry.APILanguageGo, registry.APILanguageTypeScript, registry.APILanguageRust},
 			NameOf:    processName,
 			AddressOf: func(registry.PlatformContext) any { return nil },
 			Lower:     lowerWorker,
@@ -223,6 +228,7 @@ func Register(r *registry.Registry) error {
 			Lower:     lowerBucket,
 		},
 	} {
+		spec.Provider = Provider
 		if err := r.RegisterPlatform(spec); err != nil {
 			return err
 		}
@@ -417,7 +423,7 @@ var resourceTypes = map[string]string{
 	  "properties": {
 	    "name": {"type": "string", "minLength": 1},
 	    "module": {"type": "string", "minLength": 1},
-	    "language": {"enum": ["go", "typescript"]},
+	    "language": {"enum": ["go", "typescript", "rust"]},
 	    "api": {"type": "string", "minLength": 1},
 	    "job": {"type": "string", "minLength": 1},
 	    "schedule": {"type": "string", "minLength": 1},

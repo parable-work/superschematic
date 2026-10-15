@@ -73,6 +73,7 @@ http_runtime_typescript = "../../runtime/http/typescript"
 versiongraph_go = "../../runtime/versiongraph/go"
 versiongraph_typescript = "../../runtime/versiongraph/typescript"
 versiongraph_rust = "../../runtime/versiongraph/rust-engine"
+engine_rust = "../../runtime/engine/rust/engine"
 versiongraph_python = "../../runtime/versiongraph/python"
 
 # build-all writes the dependency graph of the generated packages to

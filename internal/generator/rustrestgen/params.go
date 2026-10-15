@@ -151,6 +151,9 @@ func (b *builder) params(ep apigen.EndpointInfo, info *EndpointInfo) error {
 	if ep.HasInput {
 		fields["input"] = "its input"
 	}
+	if ep.Page != nil {
+		fields["page"] = "its page"
+	}
 	for _, p := range ep.PathParams {
 		param, err := add(p, inPath)
 		if err != nil {
@@ -189,11 +192,31 @@ func (b *builder) params(ep apigen.EndpointInfo, info *EndpointInfo) error {
 		}
 		info.Input = input
 	}
-	output, err := b.outputType(ep)
+	if ep.Page != nil {
+		return b.page(ep, info)
+	}
+	output, err := b.outputType(ep.OutputType, ep.OutputArrayDepth())
 	if err != nil {
 		return fmt.Errorf("rustrestgen: operation %s.%s: %w", ep.Namespace, ep.Name, err)
 	}
 	info.OutputRustType = output
+	return nil
+}
+
+// page fills a paged operation's page and result (D60): the page holds the
+// elements of the list it declares, and its method returns
+// runtime::page::Page of them, the runtime as the API crate re-exports it.
+func (b *builder) page(ep apigen.EndpointInfo, info *EndpointInfo) error {
+	depth := ep.OutputArrayDepth()
+	if depth < 1 {
+		return fmt.Errorf("rustrestgen: operation %s.%s is @paginated but returns %s, not a list", ep.Namespace, ep.Name, ep.OutputType)
+	}
+	item, err := b.outputType(ep.OutputType, depth-1)
+	if err != nil {
+		return fmt.Errorf("rustrestgen: operation %s.%s: %w", ep.Namespace, ep.Name, err)
+	}
+	info.Page = &PageInfo{DefaultLimit: ep.Page.DefaultLimit, MaxLimit: ep.Page.MaxLimit, ItemRustType: item}
+	info.OutputRustType = "runtime::page::Page<" + item + ">"
 	return nil
 }
 
@@ -404,10 +427,10 @@ func (b *builder) input(typeName string, required bool) (*InputInfo, error) {
 	return input, nil
 }
 
-// outputType is the Rust type of an operation's result: () without one, a
-// primitive, a scalar's alias or a declared type, in its Vec levels.
-func (b *builder) outputType(ep apigen.EndpointInfo) (string, error) {
-	name := ep.OutputType
+// outputType is the Rust type of an operation's result, name in depth list
+// levels: () without one, a primitive, a scalar's alias or a declared type,
+// in its Vec levels.
+func (b *builder) outputType(name string, depth int) (string, error) {
 	var elem string
 	switch {
 	case name == "":
@@ -427,7 +450,7 @@ func (b *builder) outputType(ep apigen.EndpointInfo) (string, error) {
 			return "", fmt.Errorf("output type %s is not declared by the schema or its dependencies", name)
 		}
 	}
-	return rustListType(elem, ep.OutputArrayDepth()), nil
+	return rustListType(elem, depth), nil
 }
 
 // declares reports whether the schema or a dependency declares the type,

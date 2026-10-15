@@ -5,6 +5,9 @@ import (
 {{- if .NeedsFmt}}
 	"fmt"
 {{- end}}
+{{- if .NeedsIter}}
+	"iter"
+{{- end}}
 {{- if .NeedsStrings}}
 	"strings"
 {{- end}}
@@ -108,28 +111,14 @@ type {{.FilesStructName}} struct {
 {{- if .RequiresAuth}}
 // Requires authentication.
 {{- end}}
+{{- if .Page}}
+//
+// It returns one page of the list (D60): page.Cursor is the Next of the
+// page before, "" for the first page, and page.Limit the most items the
+// page holds, 1 to {{.Page.MaxLimit}}, or 0 for {{.Page.DefaultLimit}}. {{.AllMethodName}} yields every item.
+{{- end}}
 func (n *{{$.Namespace.StructName}}) {{.MethodName}}(
-	ctx context.Context,
-	{{- range .PathParams}}
-	{{.GoName}} {{.GoType}},
-	{{- end}}
-	{{- if .HasInput}}
-	input {{.InputType}},
-	{{- else if .HasScalarArgs}}
-	input {{.ScalarInputStructName}},
-	{{- end}}
-	{{- if .HasFileUpload}}
-	files {{.FilesStructName}},
-	{{- end}}
-	{{- if .HasQueryParams}}
-	query *{{.QueryStructName}},
-	{{- end}}
-	{{- if .Filterable}}
-	filters []filterparse.Filter,
-	{{- end}}
-	{{- if .HasEncryptedBody}}
-	options *runtime.EncryptedRequestOptions,
-	{{- end}}
+	{{- template "parameters" .}}
 ) ({{.OutputGoType}}, error) {
 	{{- if .PathArgs}}
 	path := fmt.Sprintf("{{.PathFormat}}", {{range $i, $arg := .PathArgs}}{{if $i}}, {{end}}pathSegment({{$arg}}){{end}})
@@ -299,11 +288,24 @@ func (n *{{$.Namespace.StructName}}) {{.MethodName}}(
 	{{- end}}
 	{{- end}}
 
-	{{- if or .HasQueryParams .Filterable}}
+	{{- if .Page}}
+	if pageErrors := pageLimitErrors(page.Limit, {{.Page.MaxLimit}}); pageErrors.HasErrors() {
+		var zero {{.OutputGoType}}
+		return zero, NewValidationError(pageErrors)
+	}
+	{{- end}}
+
+	{{- if or .HasQueryParams .Filterable .Page}}
+	{{- if .Page}}
+	queryValues := url.Values{}
+	{{- else}}
 	var queryValues url.Values
+	{{- end}}
 	{{- if .HasQueryParams}}
 	if query != nil {
+		{{- if not .Page}}
 		queryValues = url.Values{}
+		{{- end}}
 		{{- range .QueryParams}}
 		{{- if .IsArray}}
 		runtime.AddQueryList(queryValues, "{{.Name}}", query.{{.GoName}})
@@ -328,6 +330,9 @@ func (n *{{$.Namespace.StructName}}) {{.MethodName}}(
 			queryValues[k] = v
 		}
 	}
+	{{- end}}
+	{{- if .Page}}
+	runtime.AddPageRequest(queryValues, page)
 	{{- end}}
 	{{- end}}
 
@@ -468,7 +473,7 @@ func (n *{{$.Namespace.StructName}}) {{.MethodName}}(
 	{{- else if or .HasInput .HasScalarArgs}}
 	{{- if and (not .HasInput) (eq .HTTPMethod "GET") .HasScalarArgs}}
 	// GET endpoints: scalar args go as query parameters, not request body.
-	{{- if not .HasQueryParams}}
+	{{- if not (or .HasQueryParams .Page)}}
 	queryValues := url.Values{}
 	{{- end}}
 	{{- range .ScalarArgs}}
@@ -494,6 +499,7 @@ func (n *{{$.Namespace.StructName}}) {{.MethodName}}(
 	{{- end}}
 	{{- end}}
 
+
 	{{- if .IsUnionOutput}}
 	var out {{.OutputUnionWrapperGoType}}
 	{{- else}}
@@ -503,7 +509,7 @@ func (n *{{$.Namespace.StructName}}) {{.MethodName}}(
 		ctx,
 		"{{.HTTPMethod}}",
 		path,
-		{{- if or .HasQueryParams (and (not .HasInput) (eq .HTTPMethod "GET") .HasScalarArgs) .Filterable}}
+		{{- if or .HasQueryParams (and (not .HasInput) (eq .HTTPMethod "GET") .HasScalarArgs) .Filterable .Page}}
 		queryValues,
 		{{- else}}
 		nil,
@@ -515,7 +521,17 @@ func (n *{{$.Namespace.StructName}}) {{.MethodName}}(
 		return zero, err
 	}
 
-	{{- if .IsUnionOutput}}
+	{{- if and .IsUnionOutput .Page}}
+	items := make([]{{.ItemGoType}}, len(out.Items))
+	for i, item := range out.Items {
+		if item.Value == nil {
+			var zero {{.OutputGoType}}
+			return zero, fmt.Errorf("decode {{.MethodName}} response: item %d: {{.OutputType}} union value is nil", i)
+		}
+		items[i] = item.Value
+	}
+	return {{.OutputGoType}}{Items: items, Next: out.Next}, nil
+	{{- else if .IsUnionOutput}}
 	if out.Value == nil {
 		var zero {{.OutputGoType}}
 		return zero, fmt.Errorf("decode {{.MethodName}} response: {{.OutputType}} union value is nil")
@@ -525,5 +541,54 @@ func (n *{{$.Namespace.StructName}}) {{.MethodName}}(
 	return out, nil
 	{{- end}}
 }
+{{- if .Page}}
 
+// {{.AllMethodName}} yields the items of every page of {{.MethodName}} in turn (D60),
+// asking for each page with the Next of the page before, from page.Cursor
+// ("" for the first page) with page.Limit items a page. It asks for a page
+// only when the loop has taken every item of the one before, and stops
+// after the page whose Next is nil. An error ends the iteration: the one a
+// page failed with, or one for a page whose Next is the cursor it was
+// asked with.
+func (n *{{$.Namespace.StructName}}) {{.AllMethodName}}(
+	{{- template "parameters" .}}
+) iter.Seq2[{{.ItemGoType}}, error] {
+	return runtime.AllItems("{{.Page.Operation}}", page, func(page runtime.PageRequest) (runtime.Page[{{.ItemGoType}}], error) {
+		return n.{{.MethodName}}(ctx
+			{{- range .PathParams}}, {{.GoName}}{{end}}
+			{{- if or .HasInput .HasScalarArgs}}, input{{end}}
+			{{- if .HasFileUpload}}, files{{end}}
+			{{- if .HasQueryParams}}, query{{end}}
+			{{- if .Filterable}}, filters{{end}}, page)
+	})
+}
+{{- end}}
+
+{{- end}}
+
+{{- define "parameters"}}
+	ctx context.Context,
+	{{- range .PathParams}}
+	{{.GoName}} {{.GoType}},
+	{{- end}}
+	{{- if .HasInput}}
+	input {{.InputType}},
+	{{- else if .HasScalarArgs}}
+	input {{.ScalarInputStructName}},
+	{{- end}}
+	{{- if .HasFileUpload}}
+	files {{.FilesStructName}},
+	{{- end}}
+	{{- if .HasQueryParams}}
+	query *{{.QueryStructName}},
+	{{- end}}
+	{{- if .Filterable}}
+	filters []filterparse.Filter,
+	{{- end}}
+	{{- if .HasEncryptedBody}}
+	options *runtime.EncryptedRequestOptions,
+	{{- end}}
+	{{- if .Page}}
+	page runtime.PageRequest,
+	{{- end}}
 {{- end}}

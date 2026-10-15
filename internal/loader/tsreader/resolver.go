@@ -50,6 +50,13 @@ type typeInfo struct {
 	queryParam       bool
 	encrypted        bool
 
+	// references is set by RefersTo<T, Target, C> (D61): the target and
+	// the config's members as written.
+	references *ir.ReferenceDef
+
+	// search is set by SearchQuery<T> (D62).
+	search bool
+
 	// Classification of the base reference.
 	isScalar    bool
 	isEnum      bool
@@ -75,6 +82,7 @@ var wrapperNames = map[string]bool{
 	"Default": true, "PlatformDefault": true, "Nullable": true, "Validate": true, "Secret": true,
 	"Relation": true, "HasMany": true, "ManyToMany": true, "AutoGenerate": true,
 	"JsonField": true, "QueryParam": true, "EncryptedField": true,
+	"RefersTo": true, "SearchQuery": true,
 }
 
 // resolveTypeNode resolves a type expression into a typeInfo. It works
@@ -323,6 +331,10 @@ func (w *walker) resolveRecordType(node *astNode) (*typeInfo, *SchemaError) {
 // payload type argument.
 func (w *walker) resolveWrapper(node *astNode, id symbolIdentity) (*typeInfo, *SchemaError) {
 	args := node.AsTypeReferenceNode().TypeArguments
+	if id.name == "SearchQuery" && (args == nil || len(args.Nodes) == 0) {
+		// SearchQuery<T extends string = string>: a bare SearchQuery is text.
+		return &typeInfo{ref: ir.TypeRef{Name: "string"}, isPrimitive: true, queryParam: true, nullable: true, search: true}, nil
+	}
 	if args == nil || len(args.Nodes) == 0 {
 		return nil, errorAtNode(node, "%s requires a type argument", id.name)
 	}
@@ -407,9 +419,66 @@ func (w *walker) resolveWrapper(node *astNode, id symbolIdentity) (*typeInfo, *S
 		info.queryParam = true
 	case "EncryptedField":
 		info.encrypted = true
+	case "RefersTo":
+		if info.references != nil {
+			return nil, errorAtNode(node, "RefersTo is written once on a value; this one already refers to %s", info.references.Type)
+		}
+		ref, serr := w.referenceFromTypeArgs(node, args.Nodes)
+		if serr != nil {
+			return nil, serr
+		}
+		info.references = ref
+	case "SearchQuery":
+		info.queryParam = true
+		info.search = true
+		info.markNullable()
 	}
 
 	return info, nil
+}
+
+// referenceFromTypeArgs reads RefersTo<T, Target, C> (D61): Target names a
+// schema type, an object type the loader holds the reference to, and C, when
+// given, is an object type of string literals under options, value and label.
+func (w *walker) referenceFromTypeArgs(node *astNode, args []*astNode) (*ir.ReferenceDef, *SchemaError) {
+	if len(args) < 2 {
+		return nil, errorAtNode(node, "RefersTo<T, Target> needs a schema type as Target")
+	}
+	target, serr := w.resolveTypeNode(args[1])
+	if serr != nil {
+		return nil, serr
+	}
+	if !target.isObject && !target.isEnum || target.ref.IsArray || target.ref.IsMap || target.nullable ||
+		target.validate != nil || target.defaultValue != nil || target.references != nil {
+		return nil, errorAtNode(args[1], "RefersTo<T, Target> needs a schema type as Target")
+	}
+	w.recordReference(target)
+	ref := &ir.ReferenceDef{Type: target.ref.Name}
+	if len(args) < 3 {
+		return ref, nil
+	}
+	t := w.checker.GetTypeFromTypeNode(args[2])
+	if t == nil {
+		return nil, errorAtNode(args[2], "cannot resolve the RefersTo config")
+	}
+	for _, prop := range w.checker.GetPropertiesOfType(t) {
+		v, ok := literalValue(w.checker.GetTypeOfSymbol(prop))
+		text, isText := v.(string)
+		if !ok || !isText || text == "" {
+			return nil, errorAtNode(args[2], "RefersTo %s must be a non-empty string literal", prop.Name)
+		}
+		switch prop.Name {
+		case "options":
+			ref.Options = text
+		case "value":
+			ref.Value = text
+		case "label":
+			ref.Label = text
+		default:
+			return nil, errorAtNode(args[2], "unsupported RefersTo config key %q (options, value, label)", prop.Name)
+		}
+	}
+	return ref, nil
 }
 
 // scalarBrand extracts the scalar identity from a branded type: the __brand

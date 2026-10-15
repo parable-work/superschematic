@@ -109,9 +109,13 @@ type ServiceCredential struct {
 	// Issuer is a signed token's `iss` and `sub`: the caller's deployable.
 	Issuer any `json:"issuer,omitempty"`
 
-	// Key is the private JWK a signed-token source signs with. It belongs
-	// in the caller's secret store, which the variable encoding lets a
-	// platform set it from (DerivedVariables).
+	// Key is the private key a signed-token source signs with: an Ed25519
+	// private JWK's JSON, as the local target's key pair gives it, or an
+	// Ed25519 private key's PKCS#8 PEM (RFC 8410), `-----BEGIN PRIVATE
+	// KEY-----`, as the generic connector's key node gives it (D63). It is
+	// a secret member (SecretDerivedMember): a connector derives it as a
+	// reference to an output, and a platform sets its variable from the
+	// caller's secret store (DerivedVariable.Secret).
 	Key any `json:"key,omitempty"`
 
 	// Headers are the headers the credential travels in, literal names
@@ -337,6 +341,28 @@ type DerivedVariable struct {
 
 	// Value is a string or a reference.
 	Value any
+
+	// Secret marks the variable of a secret member (SecretDerivedMember),
+	// such as a signed-token credential's private key. A platform sets it
+	// from its secret store, never as a plain value: gcp from a Secret
+	// Manager secret whose version the value references, the local target
+	// from its state directory, which its provisioner resolves the
+	// reference from when it starts the process (D63).
+	Secret bool
+}
+
+// secretDerivedMembers are the members of a derived value that hold a
+// secret, by their paths as DerivedMembers names them.
+var secretDerivedMembers = []string{"credential.key"}
+
+// SecretDerivedMember reports whether the member of a derived value at
+// path, dotted as DerivedMembers names it, holds a secret: a signed-token
+// credential's private key, the one today (section 3.4). A connector
+// derives a secret member as a reference to an output, never a literal,
+// so environment.json never holds it, and a platform sets its variable
+// from its secret store (DerivedVariable.Secret).
+func SecretDerivedMember(path string) bool {
+	return slices.Contains(secretDerivedMembers, path)
 }
 
 // DerivedVariables encodes a derived config field's value as environment
@@ -355,7 +381,8 @@ type DerivedVariable struct {
 //	SHOP_API_CALLERS_ISSUERS             the length of issuers
 //	SHOP_API_CALLERS_ISSUERS_0_AUDIENCE  issuers[0].audience
 //
-// A platform sets each variable on the server, and may set one from its
+// A platform sets each variable on the server, and sets the variable of a
+// secret member (SecretDerivedMember), which it marks Secret, from its
 // secret store; the generated loaders read them back. The variables are
 // sorted by name.
 func DerivedVariables(field string, value any) ([]DerivedVariable, error) {
@@ -364,15 +391,21 @@ func DerivedVariables(field string, value any) ([]DerivedVariable, error) {
 		return nil, err
 	}
 	var out []DerivedVariable
-	var walk func(name string, v any) error
-	walk = func(name string, v any) error {
+	// path is the member's path, dotted as DerivedMembers names it; a
+	// list's objects keep their list's.
+	var walk func(name, path string, v any) error
+	walk = func(name, path string, v any) error {
 		switch v := v.(type) {
 		case map[string]any:
 			if len(v) == 0 {
 				return fmt.Errorf("%s: an empty object has no variable", name)
 			}
 			for _, key := range sortedMemberKeys(v) {
-				if err := walk(name+"_"+DerivedVariableSegment(key), v[key]); err != nil {
+				inner := key
+				if path != "" {
+					inner = path + "." + key
+				}
+				if err := walk(name+"_"+DerivedVariableSegment(key), inner, v[key]); err != nil {
 					return err
 				}
 			}
@@ -383,7 +416,7 @@ func DerivedVariables(field string, value any) ([]DerivedVariable, error) {
 					if !isObject(item) {
 						return fmt.Errorf("%s: a list member is %s; a list holds objects or strings, not both", name, describeMember(item))
 					}
-					if err := walk(name+"_"+strconv.Itoa(i), item); err != nil {
+					if err := walk(name+"_"+strconv.Itoa(i), path, item); err != nil {
 						return err
 					}
 				}
@@ -430,13 +463,13 @@ func DerivedVariables(field string, value any) ([]DerivedVariable, error) {
 			}
 			out = append(out, DerivedVariable{Name: name, Value: strconv.FormatInt(int64(v), 10)})
 		case string, Output, Parameter, Concat:
-			out = append(out, DerivedVariable{Name: name, Value: v})
+			out = append(out, DerivedVariable{Name: name, Value: v, Secret: SecretDerivedMember(path)})
 		default:
 			return fmt.Errorf("%s: %s is not a string or a reference", name, describeMember(v))
 		}
 		return nil
 	}
-	if err := walk(field, v); err != nil {
+	if err := walk(field, "", v); err != nil {
 		return nil, err
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })

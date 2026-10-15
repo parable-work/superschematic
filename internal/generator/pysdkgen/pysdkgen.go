@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	ir "github.com/parable-work/superschematic/ir"
 )
 
 var pythonKeywords = map[string]struct{}{
@@ -51,8 +53,11 @@ type SDKOutput struct {
 	// and __init__.py, the default of an argument that keeps null
 	// (ScalarArg.KeepsNull).
 	HasUnsetArgs bool
-	Timestamp    string
-	Version      string
+	// HasPagedEndpoints gates page.py, its Page model, and the export of
+	// Page from __init__.py, for an operation that pages (D60).
+	HasPagedEndpoints bool
+	Timestamp         string
+	Version           string
 }
 
 // NamespaceInfo represents a namespace with its endpoints for the Python SDK.
@@ -95,6 +100,14 @@ type NamespaceInfo struct {
 	// refuses None as one of them, and reports a failure inside one at the
 	// argument's path.
 	JSONValueTypes []string
+	// HasPagedEndpoints gates the imports of Page, Iterator and SDKError and
+	// the _coerce_page helper, for an operation that pages (D60).
+	HasPagedEndpoints bool
+	// PageType is the name the namespace gives the SDK's Page: Page, or
+	// SDKPage when the namespace imports a schema type named Page, which
+	// would rebind the name for a type checker, as the TypeScript SDK
+	// names it.
+	PageType string
 }
 
 // EndpointInfo represents a single API endpoint for the Python SDK.
@@ -129,6 +142,14 @@ type EndpointInfo struct {
 	// OutputIsArrayOfArrays marks a T[][] response; OutputIsArray is also
 	// set.
 	OutputIsArrayOfArrays bool
+
+	// Paged marks an operation that pages its list (D60): the method takes
+	// cursor and limit, the last of its query parameters, and returns
+	// Page[ItemTypeHint], OutputTypeHint; AllMethodName, <method>_all,
+	// yields every item, asking for each page with the last one's next.
+	Paged         bool
+	ItemTypeHint  string
+	AllMethodName string
 }
 
 // PathParam represents a URL path parameter mapped to a Python identifier.
@@ -159,6 +180,11 @@ type QueryParam struct {
 	ValidateListMin   *int
 	ValidateListMax   *int
 	ValidatePattern   string
+
+	// EmptyIsAbsent marks a parameter whose empty value is left out, as
+	// the route reads it: a paged operation's cursor (D60), which an empty
+	// one would otherwise send for the first page.
+	EmptyIsAbsent bool
 }
 
 // ScalarArg represents a scalar input argument for an endpoint.
@@ -228,6 +254,9 @@ type FileUploadField struct {
 
 // MethodParam represents a single parameter declaration in a generated Python method signature.
 type MethodParam struct {
+	// Name is the parameter's Python name, which a paged operation's
+	// <method>_all passes on by keyword.
+	Name        string
 	Declaration string
 }
 
@@ -257,7 +286,6 @@ func Generate(apiOutput *apigen.APIOutput, packageName, typesPackage string, clo
 	if apiOutput == nil || len(apiOutput.Endpoints) == 0 {
 		return nil, nil
 	}
-
 	names := apiOutput.Naming.OrDefault()
 	resolvedPackageName := resolvePythonSDKPackageName(packageName, apiOutput.SchemaName, names)
 	resolvedTypesPackage := resolvePythonTypesPackageName(typesPackage, apiOutput.SchemaName, names)
@@ -358,12 +386,19 @@ func Generate(apiOutput *apigen.APIOutput, packageName, typesPackage string, clo
 		if converted.OutputIsArrayOfArrays && converted.OutputModelName != "" {
 			namespace.HasListOfListsModelOutput = true
 		}
+		if converted.Paged {
+			namespace.HasPagedEndpoints = true
+			output.HasPagedEndpoints = true
+		}
 
 		collectNamespaceImports(importsByNamespace[namespaceName], endpoint)
 	}
 
 	for name, importSet := range importsByNamespace {
 		namespaceMap[name].Imports = sortedKeys(importSet)
+	}
+	for _, namespace := range namespaceMap {
+		setPageType(namespace)
 	}
 	for name, jsonTypes := range jsonTypesByNamespace {
 		if len(jsonTypes) > 0 {
@@ -451,6 +486,9 @@ func convertEndpoint(endpoint apigen.EndpointInfo, isScopedNS bool, scopeParamOr
 			ValidateListMax:   param.ValidateListMax,
 			ValidatePattern:   param.ValidatePattern,
 		})
+	}
+	if endpoint.Page != nil {
+		queryParams = append(queryParams, pageQueryParams(endpoint.Page)...)
 	}
 
 	keepsNull := map[string]bool{}
@@ -571,8 +609,74 @@ func convertEndpoint(endpoint apigen.EndpointInfo, isScopedNS bool, scopeParamOr
 	if converted.OutputTypeHint == "" {
 		converted.OutputTypeHint = "Any"
 	}
+	if endpoint.Page != nil {
+		converted.Paged = true
+		converted.ItemTypeHint = pythonPageItemType(endpoint)
+		converted.OutputTypeHint = "Page[" + converted.ItemTypeHint + "]"
+		converted.AllMethodName = converted.MethodName + "_all"
+	}
 
 	return converted
+}
+
+// setPageType names the SDK's Page in a namespace that pages (D60): Page,
+// or SDKPage when the namespace imports a schema type named Page, and
+// each paged method's return type with it.
+func setPageType(namespace *NamespaceInfo) {
+	if !namespace.HasPagedEndpoints {
+		return
+	}
+	namespace.PageType = "Page"
+	if slices.Contains(namespace.Imports, "Page") {
+		namespace.PageType = "SDKPage"
+	}
+	for i := range namespace.Endpoints {
+		if endpoint := &namespace.Endpoints[i]; endpoint.Paged {
+			endpoint.OutputTypeHint = namespace.PageType + "[" + endpoint.ItemTypeHint + "]"
+		}
+	}
+}
+
+// pageQueryParams are a paged operation's two query parameters (D60),
+// after its own and as optional as they are: cursor, the next of the page
+// before, and limit, the most items the page holds. Each is checked before
+// the request by the bounds the route reads it with, so a cursor or limit
+// the route would refuse fails at its name; the route reads an empty
+// cursor as none, so an empty one is left out, the first page.
+func pageQueryParams(page *apigen.PageInfo) []QueryParam {
+	maxLength := ir.PageCursorMaxLength
+	minLimit, maxLimit := 1.0, float64(page.MaxLimit)
+	return []QueryParam{
+		{
+			Name:              apigen.PageCursorParam,
+			PyName:            apigen.PageCursorParam,
+			PyType:            "str",
+			ValidateMaxLength: &maxLength,
+			ValidatePattern:   ir.PageCursorPattern,
+			EmptyIsAbsent:     true,
+		},
+		{
+			Name:        apigen.PageLimitParam,
+			PyName:      apigen.PageLimitParam,
+			PyType:      "int",
+			ValidateMin: &minLimit,
+			ValidateMax: &maxLimit,
+		},
+	}
+}
+
+// pythonPageItemType is the Python type of one item of a paged
+// operation's list (D60): its output type without the list level the page
+// holds it in.
+func pythonPageItemType(endpoint apigen.EndpointInfo) string {
+	depth := endpoint.OutputArrayDepth() - 1
+	if outputIsJSONValue(endpoint) {
+		return pythonListType(pythonJSONType(endpoint.OutputType), depth)
+	}
+	if hint := mapIRTypeToPythonTypeRef(endpoint.OutputType, depth); hint != "" {
+		return hint
+	}
+	return "Any"
 }
 
 func buildMethodParams(
@@ -591,18 +695,21 @@ func buildMethodParams(
 
 	for _, param := range pathParams {
 		methodParams = append(methodParams, MethodParam{
+			Name:        param.PyName,
 			Declaration: fmt.Sprintf("%s: %s", param.PyName, param.PyType),
 		})
 	}
 
 	if hasInput {
 		methodParams = append(methodParams, MethodParam{
+			Name:        "input_data",
 			Declaration: fmt.Sprintf("input_data: %s", inputType),
 		})
 	}
 
 	if hasFileUpload && hasRequiredFileField {
 		methodParams = append(methodParams, MethodParam{
+			Name:        "files",
 			Declaration: fmt.Sprintf("files: %s", filesTypeName),
 		})
 	}
@@ -612,6 +719,7 @@ func buildMethodParams(
 			continue
 		}
 		methodParams = append(methodParams, MethodParam{
+			Name:        arg.PyName,
 			Declaration: fmt.Sprintf("%s: %s", arg.PyName, arg.PyType),
 		})
 	}
@@ -621,12 +729,14 @@ func buildMethodParams(
 			continue
 		}
 		methodParams = append(methodParams, MethodParam{
+			Name:        param.PyName,
 			Declaration: fmt.Sprintf("%s: %s", param.PyName, param.PyType),
 		})
 	}
 
 	if hasFileUpload && !hasRequiredFileField {
 		methodParams = append(methodParams, MethodParam{
+			Name:        "files",
 			Declaration: fmt.Sprintf("files: %s | None = None", filesTypeName),
 		})
 	}
@@ -639,7 +749,7 @@ func buildMethodParams(
 		if arg.KeepsNull {
 			declaration = fmt.Sprintf("%s: %s | None | Unset = UNSET", arg.PyName, arg.PyType)
 		}
-		methodParams = append(methodParams, MethodParam{Declaration: declaration})
+		methodParams = append(methodParams, MethodParam{Name: arg.PyName, Declaration: declaration})
 	}
 
 	for _, param := range queryParams {
@@ -647,27 +757,32 @@ func buildMethodParams(
 			continue
 		}
 		methodParams = append(methodParams, MethodParam{
+			Name:        param.PyName,
 			Declaration: fmt.Sprintf("%s: %s | None = None", param.PyName, param.PyType),
 		})
 	}
 
 	if isFilterable {
 		methodParams = append(methodParams, MethodParam{
+			Name:        "filters",
 			Declaration: "filters: dict[str, str | FilterSpec] | None = None",
 		})
 	}
 
 	if hasEncryptedBody {
 		methodParams = append(methodParams, MethodParam{
+			Name:        "options",
 			Declaration: "options: EncryptedRequestOptions | None = None",
 		})
 	}
 
 	methodParams = append(methodParams, MethodParam{
+		Name:        "timeout_seconds",
 		Declaration: "timeout_seconds: float | None = None",
 	})
 
 	methodParams = append(methodParams, MethodParam{
+		Name:        "extra_headers",
 		Declaration: "extra_headers: Mapping[str, str] | None = None",
 	})
 
@@ -925,6 +1040,11 @@ func WriteSDK(output *SDKOutput, outputDir string) error {
 	}
 	if err := generateFile("namespaces_init.tmpl", filepath.Join(namespacesDir, "__init__.py"), output); err != nil {
 		return fmt.Errorf("failed to generate namespaces __init__.py: %w", err)
+	}
+	if output.HasPagedEndpoints {
+		if err := generateFile("page.tmpl", filepath.Join(packageDir, "page.py"), output); err != nil {
+			return fmt.Errorf("failed to generate page.py: %w", err)
+		}
 	}
 
 	for _, namespace := range output.Namespaces {

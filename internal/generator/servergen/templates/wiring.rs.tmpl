@@ -1,0 +1,90 @@
+{{- /*
+The Rust entrypoints' shared Rust (D57, D65): main.rs.tmpl, job.rs.tmpl and
+worker.rs.tmpl each execute these with the planned RustServer.
+*/ -}}
+
+{{- define "rs-functions" }}
+/// An API's configuration, or a failure naming the API and each variable
+/// missing or invalid.
+fn configure<T, E: std::fmt::Display>(api: &str, loaded: Result<T, E>) -> Result<T, Failure> {
+    loaded.map_err(|err| format!("configuration of {api}: {err}").into())
+}
+{{- if .Databases }}
+
+/// Opens the pool of the database field named `field`, which the
+/// environment sets as `<field>_URL`, a connection string, or as a Cloud
+/// SQL instance, which the pool reaches over the socket Cloud Run mounts
+/// (the HTTP runtime's `postgres`). The pool connects when it is first
+/// used.
+fn connect(service: &str, field: &str, database: &Database) -> Result<Pool, Failure> {
+    postgres::connect(database)
+        .map_err(|err| format!("database {service}, from {field}: {err}").into())
+}
+{{- end }}
+{{- range .Clients }}
+{{ if $.Background }}
+/// Builds the client of {{ .Service }}. The {{ $.Kind }} calls it at `endpoint`, the
+/// field its edge derives, and the client sends the service credential the
+/// edge's connector chose (docs/stack-model.md, section 9.6), and no end
+/// user: a {{ $.Kind }} serves none.
+{{- else }}
+/// Builds the client of {{ .Service }}. The server calls it at `endpoint`, the
+/// field its edge derives, and the client sends the service credential the
+/// edge's connector chose (docs/stack-model.md, section 9.6). The end user
+/// travels per call: an implementation passes
+/// `RequestOptions::forward(ctx.bearer_token())` with each call it makes
+/// for a request.
+{{- end }}
+fn {{ .Constructor }}(endpoint: &Service) -> Result<{{ .Alias }}::{{ .Client }}, Failure> {
+    let service_credential = match &endpoint.credential {
+        Some(credential) => Some({{ .Alias }}::ServiceCredential {
+            token: stackconfig::credential_source(credential)
+                .map_err(|err| format!("client of {{ .Service }}: {err}"))?,
+            headers: credential.header_names(),
+        }),
+        None => None,
+    };
+    {{ .Alias }}::{{ .Client }}::new({{ .Alias }}::ClientConfig {
+        base_url: endpoint.url.clone(),
+        service_credential,
+        ..Default::default()
+    })
+    .map_err(|err| format!("client of {{ .Service }}: {err}").into())
+}
+{{- end }}
+{{- end }}
+
+{{- define "rs-background-deps" }}
+{{- $api := index .APIs 0 }}
+{{- if $api.Config }}
+{{ rustLetCall $api.Config "configure" "?" (rustString $api.Service) (printf "%s::config::%s()" $api.Alias $api.ConfigLoader) }}
+{{- end }}
+{{- if .Databases }}
+
+    // One pool per database, which connects when it is first used.
+{{- range .Databases }}
+{{ rustLetCall .Var "connect" "?" (rustString .Service) (rustString .Field) (printf "&%s" .From) }}
+{{- end }}
+{{- end }}
+{{- if .Clients }}
+
+    // One client per API called.
+{{- range .Clients }}
+{{ rustLetCall .Var .Constructor "?" (printf "&%s" .From) }}
+{{- end }}
+{{- end }}
+
+    // {{ $api.Service }}: its {{ .Kind }}s, built from its Deps.
+    let {{ $api.Deps }} = {{ $api.Alias }}::Deps {
+{{- if $api.Config }}
+        config: {{ $api.Config }},
+{{- end }}
+{{- if $api.Database }}
+        db: {{ $api.Database.Var }}{{ if .Worker }}.clone(){{ end }},
+{{- end }}
+{{- range $api.Calls }}
+        {{ .Field }}: {{ .Client.Var }},
+{{- end }}
+        span: logging::api_span({{ rustString $api.Service }}),
+    };
+{{- end }}

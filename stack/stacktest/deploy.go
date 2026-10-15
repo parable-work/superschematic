@@ -247,12 +247,15 @@ func (j *FakeJobs) RunJob(_ context.Context, req registry.JobRunRequest) error {
 // FakeSites is a site publisher in memory (D55): it records each publish
 // in the provisioner's call log, `publish site <site>: <digest>`, with
 // `upload <n> files` when it uploads and `config <json>` when it writes
-// the config, and keeps the files of each digest it was given.
+// the config, and keeps the files of each digest it was given. As an
+// ArtifactFetcher it writes them back, `fetch site <site>: <digest>`, so
+// a deploy on the fake target places each site's files beside the program
+// (D64).
 type FakeSites struct {
 	log *FakeProvisioner
 
 	mu    sync.Mutex
-	files map[string][]string
+	files map[string]map[string]storedFile
 	// configs holds the last config written for each site, by digest.
 	configs map[string]map[string]string
 
@@ -260,7 +263,10 @@ type FakeSites struct {
 	Fail map[string]error
 }
 
-var _ registry.SitePublisher = (*FakeSites)(nil)
+var (
+	_ registry.SitePublisher   = (*FakeSites)(nil)
+	_ registry.ArtifactFetcher = (*FakeSites)(nil)
+)
 
 // Publish records the publish, keeps the files of req.Dir under its
 // digest, and refuses a digest with no files when it is given none.
@@ -277,20 +283,12 @@ func (s *FakeSites) Publish(_ context.Context, req registry.SitePublishRequest) 
 	line := fmt.Sprintf("publish site %s: %s", req.Site, req.Digest)
 	switch _, known := s.files[key]; {
 	case req.Dir != "":
-		var files []string
-		err := filepath.WalkDir(req.Dir, func(path string, entry fs.DirEntry, err error) error {
-			if err != nil || entry.IsDir() {
-				return err
-			}
-			rel, err := filepath.Rel(req.Dir, path)
-			files = append(files, filepath.ToSlash(rel))
-			return err
-		})
+		files, err := readFiles(req.Dir)
 		if err != nil {
 			return err
 		}
 		if s.files == nil {
-			s.files = map[string][]string{}
+			s.files = map[string]map[string]storedFile{}
 		}
 		s.files[key] = files
 		line += fmt.Sprintf(", upload %d files", len(files))
@@ -313,13 +311,29 @@ func (s *FakeSites) Publish(_ context.Context, req registry.SitePublishRequest) 
 	return nil
 }
 
+// Fetch records the fetch and writes the files kept for a site under
+// digest into dest.
+func (s *FakeSites) Fetch(_ context.Context, run registry.Run, site, digest, dest string) error {
+	if err := run.Check(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	files, ok := s.files[site+"@"+digest]
+	s.mu.Unlock()
+	if s.log != nil {
+		s.log.Record("fetch site %s: %s", site, digest)
+	}
+	if !ok {
+		return fmt.Errorf("site %s: no files under %s", site, digest)
+	}
+	return writeFiles(dest, files)
+}
+
 // Files returns the files published for a site under digest, sorted.
 func (s *FakeSites) Files(site, digest string) []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	files := slices.Clone(s.files[site+"@"+digest])
-	sort.Strings(files)
-	return files
+	return sortedNames(s.files[site+"@"+digest])
 }
 
 // Config returns the config last written for a site under digest.
@@ -327,6 +341,168 @@ func (s *FakeSites) Config(site, digest string) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.configs[site][digest]
+}
+
+// FakeBundles is a bundle store in memory (D64): it records each publish
+// and each fetch in the provisioner's call log, `publish bundle
+// <deployable>: <digest>, upload <n> files` and `fetch bundle
+// <deployable>: <digest>`, keeps the files of each digest it was given,
+// and writes them back on Fetch.
+type FakeBundles struct {
+	log *FakeProvisioner
+
+	mu    sync.Mutex
+	files map[string]map[string]storedFile
+
+	// Fail holds the error to return for a deployable's publish.
+	Fail map[string]error
+}
+
+var (
+	_ registry.BundlePublisher = (*FakeBundles)(nil)
+	_ registry.ArtifactFetcher = (*FakeBundles)(nil)
+)
+
+// Publish records the publish and keeps the files of dir under digest,
+// unless they are there already.
+func (b *FakeBundles) Publish(_ context.Context, run registry.Run, deployable, dir, digest string) error {
+	if err := run.Check(); err != nil {
+		return err
+	}
+	if d := run.Environment.Deployable(deployable); d == nil || !d.HasBundle() {
+		return fmt.Errorf("publish: environment %s has no deployable %s that runs a bundle", run.Environment.Environment, deployable)
+	}
+	if err := b.Fail[deployable]; err != nil {
+		return err
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	key := deployable + "@" + digest
+	line := fmt.Sprintf("publish bundle %s: %s", deployable, digest)
+	if _, known := b.files[key]; known {
+		line += ", there already"
+	} else {
+		files, err := readFiles(dir)
+		if err != nil {
+			return err
+		}
+		if b.files == nil {
+			b.files = map[string]map[string]storedFile{}
+		}
+		b.files[key] = files
+		line += fmt.Sprintf(", upload %d files", len(files))
+	}
+	if b.log != nil {
+		b.log.Record("%s", line)
+	}
+	return nil
+}
+
+// Fetch records the fetch and writes the files kept for a deployable under
+// digest into dest.
+func (b *FakeBundles) Fetch(_ context.Context, run registry.Run, deployable, digest, dest string) error {
+	if err := run.Check(); err != nil {
+		return err
+	}
+	b.mu.Lock()
+	files, ok := b.files[deployable+"@"+digest]
+	b.mu.Unlock()
+	if b.log != nil {
+		b.log.Record("fetch bundle %s: %s", deployable, digest)
+	}
+	if !ok {
+		return fmt.Errorf("bundle %s: no files under %s", deployable, digest)
+	}
+	return writeFiles(dest, files)
+}
+
+// Files returns the files kept for a deployable's bundle under digest,
+// sorted.
+func (b *FakeBundles) Files(deployable, digest string) []string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return sortedNames(b.files[deployable+"@"+digest])
+}
+
+// FakePreDestroy readies nothing for a destroy (D64): it records each run
+// it is asked to ready in the provisioner's call log, `prepare destroy
+// <run>`, and returns Fail.
+type FakePreDestroy struct {
+	log *FakeProvisioner
+
+	// Fail is the error PrepareDestroy returns.
+	Fail error
+}
+
+var _ registry.DestroyPreparer = (*FakePreDestroy)(nil)
+
+// PrepareDestroy records the run, and returns Fail.
+func (p *FakePreDestroy) PrepareDestroy(_ context.Context, run registry.Run, _ io.Writer) error {
+	if p.log != nil {
+		p.log.Record("prepare destroy %s", run.Name())
+	}
+	return p.Fail
+}
+
+// storedFile is a file a fake store keeps: its content, and whether it is
+// executable, which a digest covers.
+type storedFile struct {
+	data       []byte
+	executable bool
+}
+
+// readFiles reads every regular file under dir, by its slash-separated
+// path.
+func readFiles(dir string) (map[string]storedFile, error) {
+	files := map[string]storedFile{}
+	err := filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
+			return err
+		}
+		rel, err := filepath.Rel(dir, path)
+		if err != nil {
+			return err
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		files[filepath.ToSlash(rel)] = storedFile{data: data, executable: info.Mode()&0o111 != 0}
+		return nil
+	})
+	return files, err
+}
+
+// writeFiles writes files under dest.
+func writeFiles(dest string, files map[string]storedFile) error {
+	for name, f := range files {
+		path := filepath.Join(dest, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return err
+		}
+		mode := os.FileMode(0o644)
+		if f.executable {
+			mode = 0o755
+		}
+		if err := os.WriteFile(path, f.data, mode); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// sortedNames returns the names of files, sorted.
+func sortedNames(files map[string]storedFile) []string {
+	var names []string
+	for name := range files {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 // archiveEntries lists a gzipped tarball's entries.

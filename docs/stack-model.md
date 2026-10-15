@@ -112,6 +112,11 @@ browser carries its end user's token. Resolution refuses a site that
 calls an API whose server the stack does not expose
 (`site-calls-unexposed`), which no browser reaches.
 
+An http edge between deployables on platforms of two providers, which the
+generic connector serves (section 6.2, D63), reaches the callee at its
+public address too, so its server must be exposed: resolution refuses one
+the stack does not expose (`cross-provider-unexposed`).
+
 A job takes its API's edges, from itself (D52): the sql edge to the API's
 database, an http edge to the server of each API its API calls, and a
 bucket edge to each bucket its API lists. A job
@@ -254,9 +259,9 @@ connector's value against it and refuses one that breaks it with a
 | Edge | Value | Members |
 | --- | --- | --- |
 | sql | `ir.DatabaseConnection` | `url`, a connection string; or `cloudSql`, a Cloud SQL connector configuration: `instance` (the instance connection name), `database` and `user` (the IAM database user) |
-| http | `ir.ServiceEndpoint` | `url`, the callee's base URL; and an optional `credential`: its `source` (`google-id-token`, `token-file` or `signed-token`, the runtimes' sources of section 9.6), the settings that source reads (`audience`, `tokenFile`, `issuer`, `key`), and the `headers` that carry it, which include `Service-Authorization` |
+| http | `ir.ServiceEndpoint` | `url`, the callee's base URL; and an optional `credential`: its `source` (`google-id-token`, `token-file` or `signed-token`, the runtimes' sources of section 9.6), the settings that source reads (`audience`, `tokenFile`, `issuer`, `key`), and the `headers` that carry it, which include `Service-Authorization`. A signed token's `key` is an Ed25519 private JWK's JSON or the PEM of its PKCS#8 encoding, and a secret member (below) |
 | bucket | `ir.BucketConnection` | `name`, the bucket's name with its provider; and an optional `endpoint`, the base URL of an emulator that serves the provider's API in its place. It holds no credential: on gcp the workload's own account reaches the bucket (D54) |
-| http, for the callee's `<API>_CALLERS` | `ir.ServiceAuth` | `issuers`, each an `ir.ServiceAuthIssuer`: `issuer` and `issuerAliases`, `audience`, `algorithms`, `jwksUrl` or `keys` (each a `jwk`, a public JWK's JSON), `subjectClaim`, `maxLifetimeSeconds`, and `callers`, each a `subject`, the `deployable` it is and the APIs it `serves`. A connector gives one issuer per edge, listing the edge's caller (`Connected.Callee`), and resolution merges the edges to the API by issuer (section 9.2) |
+| http, for the callee's `<API>_CALLERS` | `ir.ServiceAuth` | `issuers`, each an `ir.ServiceAuthIssuer`: `issuer` and `issuerAliases`, `audience`, `algorithms`, `jwksUrl` or `keys` (each a `jwk`, a public JWK's JSON, or a `pem`, an Ed25519 public key's SubjectPublicKeyInfo PEM, D63), `subjectClaim`, `maxLifetimeSeconds`, and `callers`, each a `subject`, the `deployable` it is and the APIs it `serves`. A connector gives one issuer per edge, listing the edge's caller (`Connected.Callee`), and resolution merges the edges to the API by issuer (section 9.2) |
 | site | `ir.SiteEndpoint` | `url`, the API's public base URL, its server's `PublicAddressOf` (section 6.1) |
 | site, for the callee's `<API>_CORS` | `ir.CORSPolicy` | `origins`, the public origin of each site whose site edge reaches the API, in the order of the edges, each once: `<scheme>://<host>[:<port>]` or a reference. Resolution writes it from the sites' public addresses (D55) |
 
@@ -281,6 +286,21 @@ whole number is its decimal. `ir.DerivedVariables` encodes a value that
 way for platforms, and the generated loaders read it back.
 Each variable is a plain string a platform can set from an output
 reference, or from its secret store for a member such as a signing key.
+
+A secret member is one the contract marks as holding a secret: a
+signed-token credential's `key`, today (`ir.SecretDerivedMember`). A
+connector derives it as a reference to an output, never a literal, so
+`environment.json` never holds it, and resolution refuses a literal one
+(`lowering`). `ir.DerivedVariables` marks its variable `Secret`, and a
+platform sets that variable from its secret store, never as a plain value
+(D63): gcp writes a Secret Manager secret of the deployable's own,
+`<stack>-<environment>-<deployable>-<variable>`, a version whose data is
+the reference, and the deployable's accessor grant, and mounts the
+variable with `valueSource.secretKeyRef` at that version, so a new key
+rolls out a new revision. The local target's process already reads the
+key it references from the environment's state directory, which its
+provisioner resolves when it starts the process (section 8.3). The Pulumi
+program exports no output a secret member references.
 
 Not taken: the value as one JSON document in one variable. Every
 provisioner would have to render references inside a JSON string, and no
@@ -719,6 +739,11 @@ A platform realizes one deployable kind on one runtime: Cloud Run servers,
 Cloud SQL databases, local processes, a local Postgres container. It
 registers a `PlatformSpec`:
 
+- `Provider`, the provider it runs its deployables on: `local`, `gcp`,
+  `cloudflare`, `fake` (D63). Two platforms of one provider meet only
+  through a connector that names both; between two of different providers
+  that no connector names, the generic connector serves an http or a site
+  edge (section 6.2);
 - `Kind`, the deployable kind, and what it accepts: `Languages` for a
   server, job or worker platform, spelt as `outputs.api.language` spells
   them (`GO`, `TYPESCRIPT`, `RUST`), since a job or a worker is written in
@@ -744,7 +769,7 @@ registers a `PlatformSpec`:
   its `run.app` URL without a domain, where its ingress lets a browser
   reach it; a site's is `https://<site>.<domain>`, or without a domain
   `http://` and its load balancer's address. The generic connector, which
-  joins deployables on two targets, will read it too;
+  joins deployables of two providers, reaches a callee there too (D63);
 - `Lower`, a pure function from the environment and the resolved
   deployable, bindings included, to the deployable's resources and, for an
   exposed server, the DNS records it needs (section 6.9).
@@ -786,9 +811,74 @@ authenticates with a key pair generated for the edge:
   `ServiceAuthenticator` (section 9.2) verifies it.
 
 This works between any two platforms and needs no long-lived cloud
-credential, such as a service account key, on the other provider. It lands
-with the second target (section 14), when there is a second provider to
-mix with.
+credential, such as a service account key, on the other provider.
+
+It is built (D63), ahead of the second target, in `internal/stack/generic`.
+The core registers it beside the local target, as two `ConnectorSpec`s
+with `Generic` set and no platform named: `generic.http` and
+`generic.site`. `Registry.Connector` returns the connector that names
+both platforms when one does, and otherwise the generic one of the edge's
+kind when both platforms are registered and their `Provider`s differ, so
+a specific connector always wins. Two platforms of one provider that no
+connector names still have none (`no-connector`), and a sql or a bucket
+edge across providers needs a connector that knows both, such as
+Hyperdrive to another cloud's Postgres (section 6.8).
+
+- **A site edge** derives the API's public address, as every site
+  connector does (`ir.SiteEndpoint`, D55), with no resource.
+- **An http edge** needs the callee exposed (`cross-provider-unexposed`,
+  section 3.3) with a public address its platform gives (`lowering`
+  without one). It adds the edge's key node,
+  `<caller>.calls.<callee>.key`, a `tls:index/privateKey:PrivateKey` of
+  the Pulumi `tls` provider with the algorithm `ED25519`, which two edges
+  from one caller to two APIs of one callee share. The caller's value is
+  the callee's public address and a `signed-token` credential, `issuer`
+  the caller's deployable and `audience` the callee's, whose `key`
+  references the node's `privateKeyPemPkcs8`, a secret member (section
+  3.4). The callee's issuer is the caller, with the node's `publicKeyPem`
+  as its one key (`pem`), EdDSA and tokens of at most 300 seconds.
+
+The provider generates the key, keeps it in the provisioner's state and
+writes it as PEM, the private key PKCS#8 and the public key
+SubjectPublicKeyInfo (RFC 8410), not as JWKs. So the HTTP runtimes read
+both PEMs beside a JWK, and compute the key's `kid`, its RFC 7638
+thumbprint, from the key itself (section 9.2). The root module pins the
+type's schema at pulumi-tls 5.6.2 (`internal/stack/generic/schemas`,
+`internal/tools/providerschemas`), and the connector registers it
+(`ConnectorSpec.ResourceTypes`), so a key node validates in an
+environment of any target; a distribution passes the version to the
+provisioner (`stack.GenericKeyProviderVersion`).
+
+The local target's connector names its two process platforms, so the
+generic one never serves a local edge, and its own key pair, whose
+`privateJwk` the provisioner resolves from the state directory, stays the
+local one. Each edge has one key slot: rotation (section 9.2) is not
+built.
+
+One environment still has one target and one provisioner, and the deploy
+seams follow the environment's target (`internal/stackdeploy`): its state,
+secrets, builder, migration runner, jobs runner and site publisher. A
+mixed environment resolves and renders offline, as `extensions/gcp`'s
+`MixedShop` goldens and the Pulumi render golden `gcp-mixedshop-staging`
+show with the fake target's edge platform beside Cloud Run. A real mixed
+deploy, for Cloudflare Workers beside gcp, will also need:
+
+- the credentials of each provider the environment places a deployable
+  on, not only the DNS platform's: `stackdeploy.CredentialsOf` returns
+  `dns.credentials` alone, so a Workers platform's API token and account
+  would come from a platform's credentials, resolved into
+  `environment.json` as a DNS platform's are, and handed to the run in
+  `ProvisionRequest.Env`;
+- a build per platform: the deploy's `Builder` is the target's and builds
+  container images, and `--image` and the manifest pin a server's
+  repository by digest, while a Worker is a script bundle, which would be
+  built and pinned by its digest as a site's files are (D55);
+- each platform's own secret store for `Secret<T>` fields, which the
+  target's `Secrets` seam holds today, and the Workers platform's lowering
+  of a secret member to a Workers secret from the key node's output;
+- a migration runner per database platform, for D1 beside Cloud SQL;
+- the target's policy rules over nodes of another provider, which they
+  must leave alone by type, as gcp's do.
 
 ### 6.3 Target
 
@@ -820,13 +910,15 @@ provisioner is the only one that applies them.
 Every deployable records its own placement in the IR from the start; the
 environment's target is only the default. A `settings` entry can place one
 deployable on another target's platform, for example a TypeScript server on
-Cloudflare Workers in an otherwise gcp environment. Until the generic
-connector lands (section 6.2), only edges a specific connector serves
-resolve. In v1 those are same-target edges, and any other edge is a resolve
-error that names the pair: "no connector from cloudflare.workers to
-gcp.cloudrun over http". The provisioner already runs several providers in
-one program, so adding mixing later changes connectors, not the IR or the
-provisioner.
+Cloudflare Workers in an otherwise gcp environment. An edge a specific
+connector serves resolves through it; an http or a site edge between
+platforms of two providers that none serves resolves through the generic
+connector (section 6.2, D63); any other edge is a resolve error that names
+the pair: "no connector from fake.run to fake.edge over http". The
+provisioner already runs several providers in one program, so mixing
+changed connectors and the runtimes' key formats, not the IR or the
+provisioner. The deploy seams are still the environment's target's
+(section 6.2 lists what a real mixed deploy will need).
 
 ### 6.4 Resource graph
 
@@ -868,6 +960,12 @@ connectors and DNS platform emit. `extensions/gcp/internal/tools/providerschemas
 writes one file per type beside it, and CI runs it with `-check`. The
 target registers each file as the JSON Schema of its type's properties,
 with every object type closed, since Pulumi refuses an unknown property.
+The root module pins one type the same way, the generic connector's key
+node, `tls:index/privateKey:PrivateKey` at pulumi-tls 5.6.2, in
+`internal/stack/generic/schemas`, which the connector registers itself
+(D63). pulumi-tls is bridged through the Terraform plugin framework, whose
+`bridge-metadata.json` has no alias table, so the tool takes a type's
+Terraform name from the metadata's renames table there.
 
 Each pinned file also records the type's Terraform name and any property
 renames, taken from the bridged provider's published mapping:
@@ -1073,15 +1171,20 @@ its platforms, connectors and provisioner (section 8.3, and D30, amended:
 the core registers the local target), and one CI renderer, `github`
 (D47); every other is an extension's.
 
-- `RegisterPlatform(PlatformSpec)` refuses a malformed or repeated name, an
+- `RegisterPlatform(PlatformSpec)` refuses a malformed or repeated name, a
+  missing or malformed provider (D63), an
   unknown deployable kind, a server platform without languages or a
   database platform without dialects (or either with the other's list), an
   unknown or repeated language or dialect, a settings schema that does not
   compile, an identity config that is not a server platform's JSON object,
   and a missing `NameOf`, `AddressOf` or `Lower`.
 - `RegisterConnector(ConnectorSpec)` refuses a malformed or repeated name,
-  an unknown edge kind, a missing platform or `Connect`, and a second
-  connector for one edge kind between the same two platforms.
+  an unknown edge kind, a missing platform or `Connect`, a second
+  connector for one edge kind between the same two platforms, and a
+  resource type schema that does not compile or that another registration
+  holds differently (`ResourceTypes`, for a type no target registers). A
+  generic connector (D63) names no platform, serves an http or a site
+  edge, and is the only one of its edge kind.
 - `RegisterTarget(TargetSpec)` refuses a malformed or repeated name, an
   unknown deployable kind, a values or resource type schema that does not
   compile, a resource type another target or a DNS platform registered
@@ -1106,8 +1209,8 @@ the core registers the local target), and one CI renderer, `github`
   relative path inside the repository.
 
 A name is lowercase words joined by dots or hyphens (`gcp.cloudrun`).
-`Finalize` checks that each connector joins registered platforms of the
-kinds its edge joins. It checks that each platform a target names is
+`Finalize` checks that each connector but a generic one joins registered
+platforms of the kinds its edge joins. It checks that each platform a target names is
 registered and of the kind it places, and that a DNS platform or
 provisioner the target names is registered; a target may name neither.
 
@@ -1123,7 +1226,7 @@ over the acme-shop services. Its golden `environment.json` files are under
 | --- | --- | --- | --- |
 | GKE | Kubernetes servers; Cloud SQL databases | GKE to Cloud SQL through Workload Identity and the Cloud SQL proxy; server to server through a Service and a NetworkPolicy derived from the edge | only the Cloud SQL connector; the Kubernetes server platform is shared |
 | Hosted Kubernetes (EKS, AKS, DOKS and others) | Kubernetes servers; the cloud's managed Postgres, or an in-cluster operator | a database connector per cloud; the shared Kubernetes connector between servers | the database platform and its connector |
-| Cloudflare | Workers for TypeScript servers (the generated TypeScript server uses Hono, which runs on Workers); D1 for SQLite-dialect databases | Hyperdrive to a Postgres database on another target; service bindings between Workers | everything, but through the same specs |
+| Cloudflare | Workers for TypeScript servers (the generated TypeScript server uses Hono, which runs on Workers); D1 for SQLite-dialect databases | Hyperdrive to a Postgres database on another target; service bindings between Workers | everything, but through the same specs; designed as a standalone target in section 18 (D64) |
 
 Resolution refuses a Go or Rust server on Workers, by the languages the
 platform declares (section 5.2).
@@ -1242,7 +1345,9 @@ Each failure carries a code, and `internal/stack/errors.go` lists them
 all. The checks of section 5.2 have one each: `unbound-field`,
 `unknown-env-key`, `secret-literal`, `kind-mismatch`, `unrealizable`,
 `no-connector`, `expose-not-server` and `policy`, and the check section
-9.3 adds has `unreachable-edge`. Malformed declarations,
+9.3 adds has `unreachable-edge`. A site that calls an unexposed API is
+`site-calls-unexposed` (D55), and an http edge across providers to an
+unexposed server `cross-provider-unexposed` (D63). Malformed declarations,
 unknown names and values that fail a schema have their own codes. So do
 three failures section 5.2 does not list:
 
@@ -1301,11 +1406,11 @@ Bootstrap reads the GitHub repository from the git remote.
 | --- | --- |
 | database | a Cloud SQL Postgres instance with IAM database authentication on, which refuses a connection that does not come through a Cloud SQL connector, and a database per hosted schema; a migration job |
 | server | a Cloud Run service with its own service account, which holds the Cloud Trace agent role; the config in environment variables, a derived field as one variable per member of its value; CPU allocated only while an instance handles a request, unless `cpuAlwaysAllocated` keeps it (section 7.5); a startup probe on the entrypoint's `GET /readyz` (section 8.1), every 5 seconds for up to two minutes, so an instance takes traffic once its databases answer, and a liveness probe on `GET /healthz`, every 15 seconds, which restarts an instance after three misses in a row |
-| job | a Cloud Run job (`gcp.cloudrunjob`) named after the deployable, with its own service account, which holds the Cloud Trace agent role, and the config, secrets, Cloud SQL volume and VPC egress a server of its API takes; one task, which runs the image to its end, with the job's timeout for each try and the job's retries, at most the 10 Cloud Run allows (D52) |
+| job | a Cloud Run job (`gcp.cloudrunjob`) named after the deployable, for a job in Go, TypeScript or Rust (D65), with its own service account, which holds the Cloud Trace agent role, and the config, secrets, Cloud SQL volume and VPC egress a server of its API takes; one task, which runs the image to its end, with the job's timeout for each try and the job's retries, at most the 10 Cloud Run allows (D52) |
 | schedule | for a job whose environment runs a schedule, a Cloud Scheduler job named as the job is, in the environment's region, on the job's cron in its time zone, which POSTs to the Cloud Run Admin API's `jobs/<job>:run` with an OAuth token for the job's own account; that account holds `roles/run.invoker` on that job alone, which grants it `run.jobs.run`. A job whose schedule is off has neither, and runs only on demand |
 | bucket | a Cloud Storage bucket (`gcp.storage`, D54) named `<project>-<stack>-<bucket>`, since a bucket's name is global, in the environment's region, with uniform bucket-level access, so IAM alone admits a reader, and public access prevention enforced; versioned when the settings say so (section 7.5). Only a member of a parameterized environment sets `forceDestroy`: its bucket is its own, which its destroy empties, where any other bucket keeps its objects and a destroy fails on it |
-| worker | a Cloud Run worker pool (`gcp.cloudrunworker`) named after the deployable, with its own service account, which holds the Cloud Trace agent role, and the config, secrets, Cloud SQL volume and VPC egress a server of its API takes; no port, no URL and no IAM of its own, since nothing calls it; manual scaling to the worker's instances, zero when the environment turns it off, so the pool and its pinned image stay; `WORKER_CONCURRENCY` set to its concurrency; `cpu`, one or more, and `memory` (D53). A worker whose grace is ten seconds or more is refused, since Cloud Run kills an instance ten seconds after SIGTERM |
-| sql edge | `roles/cloudsql.client` and `roles/cloudsql.instanceUser` for the server's, the job's or the worker's account, held to the edge's instance by an IAM condition; an IAM database user, which the migration job gives read and write privileges; the Cloud SQL connection, which the connector derives (instance connection name, database, IAM user) and the service, the job or the worker pool mounts at `/cloudsql`. The same for a Rust server, which dials the mount's socket as the IAM user (section 7.4, D57) |
+| worker | a Cloud Run worker pool (`gcp.cloudrunworker`) named after the deployable, for a worker in Go, TypeScript or Rust (D65), with its own service account, which holds the Cloud Trace agent role, and the config, secrets, Cloud SQL volume and VPC egress a server of its API takes; no port, no URL and no IAM of its own, since nothing calls it; manual scaling to the worker's instances, zero when the environment turns it off, so the pool and its pinned image stay; `WORKER_CONCURRENCY` set to its concurrency; `cpu`, one or more, and `memory` (D53). A worker whose grace is ten seconds or more is refused, since Cloud Run kills an instance ten seconds after SIGTERM |
+| sql edge | `roles/cloudsql.client` and `roles/cloudsql.instanceUser` for the server's, the job's or the worker's account, held to the edge's instance by an IAM condition; an IAM database user, which the migration job gives read and write privileges; the Cloud SQL connection, which the connector derives (instance connection name, database, IAM user) and the service, the job or the worker pool mounts at `/cloudsql`. The same for a Rust server, job or worker, which dials the mount's socket as the IAM user (section 7.4, D57, D65) |
 | http edge | `roles/run.invoker` on the callee for the caller's account; the callee's `run.app` URL in the caller's config, with a Google ID token for the callee's custom audience, its full resource name `//run.googleapis.com/projects/<project>/locations/<region>/services/<service>`, as the service credential, since the service's own callers field cannot reference its URL; every service lists its resource name in `customAudiences`. The callee's callers field gets Google's issuer and keys, and the caller's service account by its email (section 9.2): a job's, as a caller that serves its API |
 | bucket edge | `roles/storage.objectUser` on the bucket alone for the server's, the job's or the worker's account, which reads, writes, lists and deletes its objects and changes nothing of the bucket, and `roles/iam.serviceAccountTokenCreator` for that account on itself, which IAM's `signBlob` asks of an account that signs a URL as itself; the bucket's name, which the connector derives, with no credential, since the client takes the workload's own from the metadata server. A Rust server's, job's or worker's bucket edge is refused: its runtime has no `Bucket`, and buckets from a Rust server are not built (D57) |
 | internal server | internal-only ingress, with Cloud Run's invoker check on; callers also send the token in `X-Serverless-Authorization`, which the check reads |
@@ -1664,8 +1769,9 @@ one of two places (D47, amended):
   takes the runtime modules from the module proxy, the image takes the
   archives the release of superschematic that wrote the Dockerfile ships:
   `superschematic-archives_<version>_<platform>.tar.gz` beside the CLI on
-  the release page, both archives built with one Rust release under
-  `lib/`. The release builds them before the CLIs and links each CLI with
+  the release page, its archives built with one Rust release under `lib/`
+  (superscalar's, the version graph's and, since D58, the engine's, with
+  its C ABI's header under `include/`). The release builds them before the CLIs and links each CLI with
   every platform's digest (`internal/release`), so the Dockerfile pins the
   digest for `linux/amd64` and `linux/arm64`. The Go stage downloads the
   tarball for its platform from `SUPERSCHEMATIC_RELEASE`, a build argument
@@ -1729,11 +1835,11 @@ runs an environment on the `local` target (`internal/stack/local`):
 | bucket | one fake-gcs-server container per environment and checkout beside Postgres's, `superschematic-<stack>-<environment>-<checkout>-storage`, from `fsouza/fake-gcs-server:1.56.1` unless the `storageImage` value names another, on plain HTTP and publishing its port on 127.0.0.1 only. It keeps its objects in the container's filesystem. A bucket per Bucket service, named after it (`shop-media`), which the provisioner creates through the emulator's JSON API (D54) |
 | migration | each run plans with `sqlmigrate` from the model the database recorded (`superschematic-migrate status --model`) to the schema's model, and applies the plan with `superschematic-migrate`, expand and contract back to back, since no server of the previous version runs. The runner is on `PATH`, or where `SUPERSCHEMATIC_MIGRATE` says |
 | server | a Go process built with `go build` (with `-mod=mod`) from its entrypoint module at `<output-root>/server/<stack>/<server>` (section 8.1); a TypeScript one, `bun main.ts` in its entrypoint package at the same place, after one `bun install` at the output root, the root of the Bun workspace (section 8.6); or a Rust one, built with `cargo build --release --locked` in its crate at the same place and run from `target/release/<binary>`, the binary its `Cargo.toml` names (D57). Its environment is its bindings, a derived field as one variable per member (section 3.4), and `PORT`, with nothing of the shell's but `PATH`, `HOME` and a few like them. It is ready once it answers `/readyz`, and each of its lines is printed with its name in front |
-| job | a Go process built as a server is, from its entrypoint module at `<output-root>/server/<stack>/<job>`, with a server's environment and no `PORT`. It runs on its schedule, in its time zone, while `stack dev` waits, and once with `superschematic stack run <environment> <job>`, each line of a run's output with its name in front. `jobs/<job>.lock` in the environment's state directory keeps a schedule's runs and `stack run`'s apart (section 8.7) |
-| worker | a Go process built as a server is, from its entrypoint module at `<output-root>/server/<stack>/<worker>`, started in its rollout wave with the servers: the same `local:process/process:Process` node with no port, `kind: worker` and a readiness of `started`, so it is ready once it runs. Its environment is a server's with no `PORT` and with `WORKER_CONCURRENCY`, the concurrency the environment gives it. One process runs whatever its `instances`, none when the environment turns it off; each line is printed with its name in front, and its exit stops the environment, as a server's does (section 8.8) |
+| job | a process built and run as a server in its language is, from its entrypoint at `<output-root>/server/<stack>/<job>`: a Go binary, `bun main.ts` for TypeScript, or for Rust the binary its crate's `Cargo.toml` names, built with `cargo build --release --locked` into the target directory the environment's Rust servers share (D65). It has a server's environment and no `PORT`. It runs on its schedule, in its time zone, while `stack dev` waits, and once with `superschematic stack run <environment> <job>`, each line of a run's output with its name in front. `jobs/<job>.lock` in the environment's state directory keeps a schedule's runs and `stack run`'s apart (section 8.7) |
+| worker | a process built and run as a server in its language is, Go, TypeScript or Rust (D65), from its entrypoint at `<output-root>/server/<stack>/<worker>`, started in its rollout wave with the servers: the same `local:process/process:Process` node with no port, `kind: worker` and a readiness of `started`, so it is ready once it runs. Its environment is a server's with no `PORT` and with `WORKER_CONCURRENCY`, the concurrency the environment gives it. One process runs whatever its `instances`, none when the environment turns it off; each line is printed with its name in front, and its exit stops the environment, as a server's does (section 8.8) |
 | site | built once, `bun run <build>` in its package at the naming file's `[implementation_paths] site` template after the workspace's install, then served from a file server of the provisioner's own on `http://127.0.0.1:<port>`: each file of its output, its config at `/__superschematic/config.json` with each API it calls at its loopback URL, and its fallback for a path that names no file. HTML files and the config are served `no-cache` and `no-store`, so a reload sees a rebuilt site (D55) |
 | sql edge | `postgres://postgres@127.0.0.1:<port>/<database>?sslmode=disable` |
-| bucket edge | the bucket's name and the emulator's `http://127.0.0.1:<port>` as its endpoint, with no credential. A Rust server's is refused, as on gcp: buckets from a Rust server are not built (D57) |
+| bucket edge | the bucket's name and the emulator's `http://127.0.0.1:<port>` as its endpoint, with no credential. A Rust server's, job's or worker's is refused, as on gcp: buckets from a Rust server are not built (D57) |
 | http edge | the callee's `http://127.0.0.1:<port>`, with a `signed-token` credential (D37): `iss` and `sub` the caller's deployable, `aud` the callee's, signed with an Ed25519 key pair per calling and called server. A call between two APIs one server serves stays on loopback with no credential |
 | site edge | the server's public address, its loopback URL, which is also its address. The server's CORS field lists the site's origin, `http://127.0.0.1:<port>` (D55) |
 | secret | a line `<Type>.<FIELD>=<value>` in `<schemas-root>/.superschematic/local/<stack>/<environment>/secrets.env` |
@@ -1799,9 +1905,8 @@ callers first, and SIGKILL ten seconds later.
 Policy rules refuse what a local environment cannot hold: a domain
 (`local-no-domain`), parameters (`local-no-parameters`), and two listeners
 on one port (`local-distinct-ports`), which names each container by its
-name. The platform runs Go, TypeScript and Rust servers; a TypeScript or
-Rust job or worker does not resolve (`unrealizable`), since D52, D53 and
-D57 leave them out.
+name. The platforms run Go, TypeScript and Rust servers, jobs and
+workers (D57, D65).
 
 Not built:
 
@@ -2015,7 +2120,11 @@ as they are, with no build step (D51). The pieces mirror Go's:
   variables Go's `stackconfig` reads, and throws a `StackConfigError`
   naming every variable at fault. Vectors shared by both runtimes
   (`runtime/http/testdata/stackconfig_parity.json`) hold them to one
-  encoding.
+  encoding. A job and a worker are given no callers field, and an API
+  with a callers field and a job or a worker gets
+  `loadBackgroundEnvConfig()` too, which their entrypoints call: it reads
+  what `loadEnvConfig()` reads but the callers field, which holds no
+  issuers (D65).
 - **Implementation.** `[implementation_paths] typescript` defaults to
   `typescript/{service}`. The API generator writes `Deps` and
   `Constructor`, `(deps: Deps) => Implementations |
@@ -2185,8 +2294,8 @@ package by hand.
 #### Rust servers
 
 A Rust server is the TypeScript server's twin on tokio (D57). A server is
-Rust when the APIs it serves are, by `outputs.api.language` `RUST`, and
-its jobs and workers stay Go's.
+Rust when the APIs it serves are, by `outputs.api.language` `RUST`, and so
+are the jobs and workers of a Rust API (D65; sections 8.7 and 8.8).
 
 - **Derived config.** The API crate's `config.rs` declares `EnvConfig`
   and `load_env_config()`: the `@envVars` settings beside a `Database` per
@@ -2194,7 +2303,12 @@ its jobs and workers stay Go's.
   field and, over the user model, the identity config, which the HTTP
   runtime's `stackconfig` readers and `identity::Config::parse` read from
   the variables Go's `stackconfig` reads. Its error names every variable
-  missing or invalid.
+  missing or invalid. A job and a worker are given no callers field, and
+  an API with a callers field and a job or a worker gets
+  `load_background_env_config()` too, which their entrypoints call: it
+  reads what `load_env_config()` reads but the callers field, which holds
+  no issuers. The identity config and CORS fields read as their defaults
+  when unset, so neither needs one.
 - **Implementation.** `[implementation_paths] rust` defaults to
   `rust/{service}`. The API crate's `deps.rs` declares `Deps` (`config`,
   `db`, a Postgres pool from the runtime's `postgres`, a client per callee
@@ -2203,20 +2317,51 @@ its jobs and workers stay Go's.
   them with what it builds through `Implementations::new`. The scaffold
   writes the crate once, in a directory that holds no `Cargo.toml`, as
   its own workspace, so no `Cargo.toml` above it claims it. The server's
-  crate depends on it by the package name its `Cargo.toml` gives it.
+  crate depends on its mirror by the package name its `Cargo.toml` gives
+  it.
+- **Mirror.** The crate names the API crate by its path under the output
+  root its scaffold was written for, which its editor and its own `cargo
+  test` build against. So each build of a stack copies each
+  implementation its Rust servers build against into
+  `<output-root>/impl/<service>/`, and the server crates depend on the
+  copy (D65): an output root builds against its own API crates alone,
+  `stack dev --out` builds anywhere, and two output roots build at once.
+  The copy's `Cargo.toml` is the crate's with every path dependency
+  re-based for the copy's directory: the API crate's names the current
+  output root's `api/<service>`, any other under the output root the
+  crate names its API crate under names the same place under the current
+  one, and the crate's `[workspace]` table and `package.workspace` go. A
+  crate that inherits a field or a dependency from a workspace
+  (`workspace = true`), or whose build script or targets lie outside it,
+  is refused. The copy holds the crate's other files as a package of it
+  would: not the root's `Cargo.lock` and `target/`, `.git`, or a
+  directory with a `Cargo.toml` of its own, nor what `[package] include`
+  leaves out when it is set, or else what `[package] exclude` and the
+  crate's `.gitignore` files leave out, so it holds what a fresh checkout
+  builds from. A build writes only the files whose content changed, so
+  Cargo's fingerprints keep a rebuild cheap, removes the files the crate
+  no longer has, and removes a mirror no server, job or worker crate
+  depends on. A change
+  to the crate reaches the servers with the next build of the stack, which
+  `stack dev` runs first; a source that includes a file outside its crate
+  by a relative path does not build from the copy.
 - **Workspace.** `<output-root>/Cargo.toml` is a virtual workspace whose
-  members are the Rust server crates of every stack built into the output
-  root, `server/<stack>/<server>`, listed by name since `server/*/*` holds
+  members are the crates of the Rust servers, jobs and workers of every
+  stack built into the output root, `server/<stack>/<deployable>`, listed
+  by name since `server/*/*` holds
   the Go and TypeScript servers too, and Cargo refuses a member without a
   `Cargo.toml`. It excludes `api`, `sdk` and `types`, so a generated crate
-  under the output root builds on its own, as before. The generated
-  crates the servers depend on and the implementations are path
-  dependencies, not members, and its lockfile, `<output-root>/Cargo.lock`,
-  pins every crate they reach. The lockfile lies outside
+  under the output root builds on its own, as before, and `impl`, so a
+  mirror is no member, whose dev-dependencies Cargo would resolve. The
+  generated crates the servers depend on and the implementations' mirrors
+  are path dependencies, not members, and its lockfile,
+  `<output-root>/Cargo.lock`, pins every crate they reach, and names no
+  path crate's directory, so it holds in any output root. The lockfile
+  lies outside
   `server/<stack>`, which each build empties, and the project commits it
   as it commits `bun.lock` (D51, amended): `dist/*` and `!dist/Cargo.lock`
   take it back from an ignored output root, and the build says so in one
-  line when git ignores it. Each build of a stack with a Rust server brings
+  line when git ignores it. Each build of a stack with a Rust crate brings
   it up to date with `cargo update --workspace`, which writes it when there
   is none, adds what a manifest gained, drops what none needs, and changes
   no version it pinned of a crate still needed. A build without cargo on
@@ -2224,7 +2369,8 @@ its jobs and workers stay Go's.
   its services, leaves it as it is and says so in one line. The crate's
   package is `<rust_crate_prefix><stack>-<server>-server`, unique in the
   workspace whichever stacks share a server's name, and its one binary is
-  the server's name.
+  the server's name; a job's is `...-<job>-job` and a worker's
+  `...-<worker>-worker`, each with a binary named after the deployable.
 - **Entrypoint.** `src/main.rs`, on a tokio runtime:
   - installs the runtime's JSON-line log (`logging::init_json`), with the
     stack and the server on every line;
@@ -2262,40 +2408,49 @@ its jobs and workers stay Go's.
   `tools.env` pins, builds the crate in the workspace with `cargo build
   --release --locked`, which fails on a lockfile that does not match the
   crates, and fails first, saying to build and commit it, when the context
-  holds none. The image runs the binary on distroless `cc`, which holds
-  the glibc, libgcc and OpenSSL it links, as the non-root user, with
-  `PORT=8080`. Cargo reads every member and every crate a member reaches
-  by path to check the lockfile, so `Dockerfile.dockerignore` takes in,
-  by pattern, every server crate's manifest and sources, every Rust API
+  holds none. A deploy's context gives every file one time, and Cargo
+  takes a path crate whose files are no newer than its last build as
+  built, so the stage touches the context's files before it builds: the
+  target cache every Rust image's build shares keeps the registry's crates
+  compiled, and the rest is compiled from the context. The image runs the
+  binary on distroless `cc`, which holds the glibc, libgcc and OpenSSL it
+  links, as the non-root user, with `PORT=8080` for a server and no port
+  for a job or a worker. Cargo reads every member and every crate a member
+  reaches by path to check the lockfile, so `Dockerfile.dockerignore`
+  takes in, by pattern, every member's manifest and sources, every Rust API
   crate's manifest, sources and `openapi.json`, the Rust SDKs and types,
-  and every implementation's manifest and sources, then the server's own
-  implementations whole and the checkouts of the HTTP runtime, the schema
-  runtime and superscalar's crate with its workspace's root manifest,
-  whose lints the crate inherits. Without `[paths] scalar_rust` or
-  `schema_runtime_rust`, or with a checkout outside the build context, no
-  Dockerfile is written, and the build says why.
-- **Local.** `stack dev` builds each Rust server's crate with `cargo build
-  --release --locked` into the program directory's Cargo target
-  directory and runs its binary (section 8.3). Its build of the stack has
-  brought the lockfile up to date first, so a manifest the engineer
-  changes reaches the lockfile through `stack dev`. The implementation's
-  `Cargo.toml` names the API crate by its path under the output root the
-  scaffold was written for, so the server builds in that output root
-  alone: with `--out` elsewhere, cargo finds two crates of the API's name
-  and refuses the workspace.
+  and every implementation's mirror under `impl/` whole, then the
+  checkouts of the HTTP runtime, the schema runtime and superscalar's
+  crate with its workspace's root manifest, whose lints the crate
+  inherits. No implementation's own directory goes in. Without `[paths]
+  scalar_rust` or `schema_runtime_rust`, or with a checkout outside the
+  build context, no Dockerfile is written, and the build says why.
+- **Local.** `stack dev` builds each Rust server's, job's and worker's
+  crate with `cargo build --release --locked` into the program directory's
+  Cargo target directory and runs its binary (section 8.3). Its build of the stack has
+  brought the mirrors and the lockfile up to date first, so a change the
+  engineer makes to an implementation, its manifest too, reaches the
+  servers and the lockfile through `stack dev`, with `--out` anywhere.
 - **CI.** The generated `check` sets up the Rust release before the build,
   refuses a lockfile git does not track or the build changed, and runs
-  `cargo check --locked` in each Rust server's crate (section 11.3).
+  `cargo check --locked` in each Rust server's, job's and worker's crate
+  (section 11.3).
 
 `TestStackDevRunsARustServer` runs a Rust server over Postgres that calls
 another, and signs an end user in with the identity runtime.
+`TestStackDevRunsRustJobsAndWorkers` runs a Rust API's server and worker,
+and its job through `stack run` (sections 8.7 and 8.8).
 acme-shop's `TestStackDevRunsTheShop` runs `shop-stock`, a Rust server
 over `shop-db` whose reservations admit only `shop-orders`' Go server,
 which reserves an order's stock through `shop-stock`'s Go SDK with its
-edge's credential and the shopper it forwards.
+edge's credential and the shopper it forwards. A reservation that takes a
+product's level below its threshold enqueues `StockLow` in its
+transaction; `shop-stock`'s Rust worker `ReorderStock` files the
+product's restock request, and its Rust job `OrderRestocks`, which
+the test runs with `stack run`, orders it (D65).
 
-Not built: Rust jobs and workers, buckets from a Rust server, and
-OpenTelemetry export (D57).
+Not built: buckets from a Rust server, job or worker, and OpenTelemetry
+export (D57, D65).
 
 ### 8.7 Jobs
 
@@ -2373,19 +2528,34 @@ export abstract class ShipOrders {}
   serves no port and answers no health check. A package that predates its
   jobs, with no `NewJobs`, fails the build with the signature to add
   (section 8.5). A TypeScript job's package (section 8.6) does the same on
-  Bun: `main.ts` calls the implementation's `createJobs`, then the job's
+  Bun: `main.ts` loads the API's `EnvConfig` with
+  `loadBackgroundEnvConfig()` where it has a callers field, which no job
+  is given, calls the implementation's `createJobs`, then the job's
   method once with the signal, logs `job started`, then `job done` or
   `job failed` with how long the run took in seconds, through the HTTP
   runtime's logger, and exits 1 when the method rejects. An
   implementation that exists and exports no `createJobs` fails the build
   with what to add; the build reads the exports from its source, a
   declaration, an export list or a re-export of a whole module, which
-  may export it.
+  may export it. A Rust job's crate (section 8.6, D65),
+  `<rust_crate_prefix><stack>-<job>-job`, a member of the output root's
+  Cargo workspace, does the same on tokio: `main.rs` loads the API's
+  `EnvConfig` with `load_background_env_config()` where it has a callers
+  field, which no job is given, calls the implementation's `create_jobs`,
+  then the job's method once with the HTTP runtime's
+  `Shutdown::on_signals()`, logs `job started`, then `job done` or `job
+  failed` with how long the run took in seconds, through the runtime's
+  `logging`, its lines naming the job as `job`, and exits 1 on any
+  failure. `Shutdown` logs `shutting down` on the first signal, a line
+  the Go and TypeScript jobs do not write, and a second ends the run at
+  once. An
+  implementation whose `src/lib.rs` declares no `create_jobs` fails the
+  build with what to add.
 - **Image.** A job's Dockerfile is a server's (section 8.2), with the
-  binary at `/job`. `stack build` builds it, `--image` and the deploy
-  manifest pin it, and the deploy rolls it out, as they do a server's
-  (section 11.2); the target's `ImageBuilder` takes the job's name in
-  `BuildRequest.Deployable`.
+  binary at `/job`, and a Rust job's at `/<job>`, with no port. `stack
+  build` builds it, `--image` and the deploy manifest pin it, and the
+  deploy rolls it out, as they do a server's (section 11.2); the target's
+  `ImageBuilder` takes the job's name in `BuildRequest.Deployable`.
 - **Schedule.** The decorator's schedule, a five-field cron in its time
   zone (UTC unless set), is the default. An environment's settings change
   it or turn it off: `{ of: ShopOrders, job: "ShipOrders", schedule,
@@ -2400,7 +2570,9 @@ export abstract class ShipOrders {}
   `local:process/job:Job` node, and `stack dev` builds its binary in its
   rollout wave, as it builds a server's, or, for a TypeScript job, installs
   the output root's workspace and runs `bun main.ts` in its package with
-  nothing to build, then runs each schedule beside
+  nothing to build, or, for a Rust job, builds its crate with cargo into
+  the target directory the environment's Rust servers share (D65), then
+  runs each schedule beside
   the servers until Ctrl-C (section 8.3): never two runs of one job at
   once, a run that comes due while the last goes on skipped, each line of
   its output with the job's name in front, a run stopped at the job's
@@ -2609,7 +2781,9 @@ export abstract class FulfilOrders {}
     exits 0.
 
   A TypeScript worker's package (section 8.6) does the same on Bun: its
-  `main.ts` calls the implementation's `createWorkers` and runs
+  `main.ts` loads the API's `EnvConfig` with `loadBackgroundEnvConfig()`
+  where it has a callers field, calls the implementation's
+  `createWorkers` and runs
   `runWorker` (`@superschematic/http-runtime/worker`), the twin of
   `worker.Run`, over `postgresQueue`'s claims, with the concurrency
   `workerConcurrency` reads from `WORKER_CONCURRENCY`. Each method gets a
@@ -2617,13 +2791,32 @@ export abstract class FulfilOrders {}
   method that ignores it: its message is released all the same, and its
   outcome, when it comes, is logged and changes nothing, since the process
   exits once the loop stops.
+
+  A Rust worker's crate (section 8.6, D65),
+  `<rust_crate_prefix><stack>-<worker>-worker`, does the same on tokio:
+  its `main.rs` loads the API's `EnvConfig` with
+  `load_background_env_config()` where it has a callers field, calls the
+  implementation's `create_workers`, reads its queue's descriptor from the
+  constant the database's Rust types hold (`database_types::STOCK_LOW_QUEUE`
+  through the API crate), and runs the HTTP runtime's `worker::run_worker`,
+  Go's loop ported, over a `queue::PostgresQueue` of it, with the
+  concurrency `worker::concurrency_from_env` reads from
+  `WORKER_CONCURRENCY` and the resolved grace. It logs `worker started`
+  with the API, the class, the queue and the concurrency, and the loop's
+  lines, which name the worker as `worker`, and `Shutdown` logs `shutting
+  down` on SIGTERM, a line the Go and TypeScript workers do not write.
+  Once the grace is over, a method still running is dropped where it
+  waits, and its message released. Its image, as a Rust job's, holds the
+  binary at `/<worker>` and no port.
 - **Local.** `stack dev` runs each worker as a process with no port,
-  a TypeScript one as `bun main.ts`, ready once it starts, its output
-  prefixed with its name. Its exit stops
-  the environment, as a server's does (section 8.3).
-- **gcp.** A worker, in Go or TypeScript, is a Cloud Run worker pool (`gcp.cloudrunworker`,
-  `gcp:cloudrunv2/workerPool:WorkerPool`, GA in the pinned pulumi-gcp
-  9.37.1), which has no port, no URL and no IAM of its own (section 7.2).
+  a TypeScript one as `bun main.ts` and a Rust one from the binary its
+  crate builds with cargo (D65), ready once it starts, its output
+  prefixed with its name. Its exit stops the environment, as a server's
+  does (section 8.3).
+- **gcp.** A worker, in Go, TypeScript or Rust, is a Cloud Run worker
+  pool (`gcp.cloudrunworker`, `gcp:cloudrunv2/workerPool:WorkerPool`, GA
+  in the pinned pulumi-gcp 9.37.1), which has no port, no URL and no IAM
+  of its own (section 7.2).
   It scales manually to the worker's instances, and to zero when the
   environment turns the worker off, which keeps the pool and its pinned
   image. Its account connects as a server's does, and the migration job
@@ -2638,7 +2831,6 @@ export abstract class FulfilOrders {}
 
 Not built:
 
-- A worker in Rust, and the claims in its runtime.
 - A `POINT` or `INTERVAL` column in a TypeScript queue's message.
 - Claims on SQLite and D1, whose write transaction would claim.
 - Removing `done` messages, which stay in the table, and an operator's
@@ -2828,7 +3020,9 @@ config may leave `outputs` out.
   it pins an image, so the graph stays a function of the schemas. The
   deploy publishes a site before the wave that rolls it out applies, and
   the apply switches the site to the new files at once. The manifest
-  records each site's digest (`sites`).
+  records each site's digest (`sites`). A publisher that is also a
+  `registry.ArtifactFetcher` has the deploy place each site's files
+  beside the provisioner's program (section 18.5, D64).
 - **Local.** `stack dev` builds each site once and serves the built
   directory and its config from a small file server, with the single-page
   fallback and the Cache-Control the gcp target gives each file (below),
@@ -2943,6 +3137,7 @@ and refuses every service credential.
 | --- | --- | --- | --- | --- |
 | local | the caller's deployable | the edge's key pair's `publicJwk` output | the callee's deployable | the caller's deployable in `sub`; a token lives at most 300 seconds |
 | gcp | `https://accounts.google.com`, alias `accounts.google.com` | `https://www.googleapis.com/oauth2/v3/certs` | the callee's custom audience | the caller's service account, `<service>@<project>.iam.gserviceaccount.com`, in `email` |
+| generic (D63) | the caller's deployable | the edge's key node's `publicKeyPem` output, a SubjectPublicKeyInfo PEM (`pem`) | the callee's deployable | the caller's deployable in `sub`; a token lives at most 300 seconds |
 
 In environment variables the field follows section 3.4's encoding, with
 two rules it adds: a list of objects is a variable that holds the list's
@@ -3003,6 +3198,20 @@ The generic connector's token:
   clocks. The caller signs a new token when the one it holds has less than
   a minute left.
 
+The key's formats (D63): the local target's key pair is a JWK, whose
+`kid` is its thumbprint, and the generic connector's key node, a Pulumi
+`tls` PrivateKey, is PEM, the private key PKCS#8 and the public key
+SubjectPublicKeyInfo (RFC 8410). Each runtime's signed-token source takes
+the private JWK's JSON or the PKCS#8 PEM (Go `serviceauth.SignedToken`,
+TypeScript `signedTokenSource`, Rust `SignedKeySource::from_key`), and its
+callers reader takes a key's `jwk`, or its `pem`, which it reads as an
+Ed25519 JWK (`serviceauth.PublicJWKFromPEM`, `ed25519PublicJwkFromPem`,
+`ed25519_public_jwk_from_pem`). A PEM's `kid` is its key's RFC 7638
+thumbprint, which both sides compute from the key, so no `kid` travels in
+the graph. Only an Ed25519 key's RFC 8410 encodings are read, one PEM
+block with nothing but whitespace around it; the `signing` section of the
+parity vectors (section 9.8) holds the three runtimes to one token.
+
 Each edge has two key slots. Each slot is replaced every 180 days, the two
 offset by 90 days, by a `Rotating` node of the `time` provider in the
 resource graph; the period is a connector setting. The callee accepts both
@@ -3011,6 +3220,9 @@ deploy before callers (section 5.3), so a callee holds a new public key
 before any caller signs with it. A key pair is a credential the platform
 generates, not a secret a person enters (section 4.2): the private key goes
 into the caller's secret store, the public key into the callee's config.
+Rotation is not built: the generic connector and the local target give
+each edge one key slot today, and a key changes only when its node is
+replaced.
 
 The `local` target uses the same tokens. `stack dev` generates a key pair
 per edge into the gitignored local file, and the callee's callers field
@@ -3306,7 +3518,12 @@ for two, which D30 rejected.
   clause), the request's headers, and an end-user authenticator stub keyed
   by token;
 - the expected status and code, the `ServiceCaller` and end user on the
-  context, and whether the end-user authenticator ran.
+  context, and whether the end-user authenticator ran;
+- in `signing`, the signed-token source's vectors (D63): a key as a
+  credential holds it, a private JWK's JSON or a PKCS#8 PEM, and the
+  token's header, `kid` included, and claims but `jti`, which each runtime
+  signs and verifies against the SubjectPublicKeyInfo PEM read as a JWK;
+  and keys the source refuses, such as a P-256 key's PKCS#8.
 
 The cases cover each row of section 9.3's table; expiry, a token not yet
 valid, the wrong audience and the wrong issuer; an unknown `kid`, `alg:
@@ -3357,12 +3574,9 @@ The callers field has its own tests:
   mTLS identity in `X-Forwarded-Client-Cert`. A deployment can pass its
   own service authenticator today; a platform kind of credential can come
   with the first platform that needs it.
-- Workers service bindings. A call over a binding carries no token; the
-  caller's binding config sets `ctx.props`, which Cloudflare documents as
-  safe to trust unsigned, and the platform delivers it beside the request
-  rather than in it. The Workers platform (section 6.8) decides whether the
-  TypeScript service authenticator reads it there, or whether Workers
-  callers sign key-pair tokens like the generic connector's.
+- Workers service bindings, settled by D64: a service binding admits a
+  caller, and Workers callers sign key-pair tokens like the generic
+  connector's (section 18.10). No runtime reads `ctx.props`.
 - The cluster's certificate authority. A Kubernetes API server serves its
   keys over TLS signed by the cluster's own CA, which the runtimes' default
   HTTP clients do not trust. Until the Kubernetes platform lands, a
@@ -3523,7 +3737,9 @@ file.
    the stack's build writes (section 8.2), unless its build context is the
    one the image the manifest records was built from; else the image the
    manifest records. One with none of them is refused, and `--no-build`
-   builds nothing;
+   builds nothing. A server, job or worker whose platform's artifact is a
+   bundle has no image: its bundle is the one `--bundle` names, else a
+   build, else the manifest's (section 18.5, D64);
 2. plans each database's migration from the model the manifest records
    (D27), with the readers of the schemas root as the readers after the
    rollout, refuses a hazard of a `--fail-on` class (every class by
@@ -3537,7 +3753,10 @@ file.
    writes a server's image into the graph as its repository path, and the
    deploy pins it: every string property of the server's own nodes equal
    to the repository becomes `<repository>@<digest>`, so the program the
-   provisioner renders names each image by digest;
+   provisioner renders names each image by digest. It builds each site and
+   each bundle there too, publishes the bundles whose digest is new and
+   fetches the ones it did not build, pins them, renders the program and
+   places each bundle's files beside it (section 18.5);
 4. applies infrastructure;
 5. needs a value for every secret (section 4.2);
 6. runs each database's `expand` steps (`superschematic-migrate apply
@@ -3556,8 +3775,10 @@ file.
 10. writes a deploy manifest to the state bucket after every step and at
     the end: the resolved environment, the IR digest of each service, the
     image of each server and job with the digest of the build context the
-    deploy built it from, and each database's applied model with the servers
-    its runner last saw connect.
+    deploy built it from, the digest of each site's files, the bundle of
+    each server, job or worker that runs one with each file's hash, and
+    each database's applied model with the servers its runner last saw
+    connect.
 
 A build context is the repository root as the server's
 `Dockerfile.dockerignore` cuts it down, read by BuildKit's rules, written
@@ -3613,7 +3834,10 @@ bindings generator reads (section 6.6).
 
 `stack plan` builds nothing: it plans each server and job at the image
 `--image` names or the manifest records, and lists one with neither among
-those with no image yet.
+those with no image yet. It plans a server that runs a bundle at the
+bundle `--bundle` names or the manifest records, which it fetches from the
+target's store and places beside the program, and lists one with neither
+among those with no bundle yet (D64).
 
 ### 11.3 Generated CI
 
@@ -3678,13 +3902,14 @@ The GitHub workflow:
     carry their declarations, while a checkout that `[paths]` names needs
     its build output in the CI checkout, which the image builds for itself
     and the workflow does not.
-  - For a stack with a Rust server, `check` sets up the Rust release
-    `tools.env` pins with the runner's `rustup` before the build, which
-    brings the output root's Cargo lockfile up to date with it (section
-    8.6). After the build it fails, in a step that names the lockfile,
+  - For a stack with a Rust server, job or worker, `check` sets up the
+    Rust release `tools.env` pins with the runner's `rustup` before the
+    build, which brings the output root's Cargo lockfile up to date with
+    it (section 8.6). After the build it fails, in a step that names the lockfile,
     when git does not track the lockfile or the build changed it, and says
-    to build every service and commit it. Then each Rust server's crate
-    compiles with `cargo check --locked` (level 2), which checks the
+    to build every service and commit it. Then each Rust server's, job's
+    and worker's crate compiles with `cargo check --locked` (level 2), in
+    that order and each named for its kind, which checks the
     implementations it depends on. The crates name the runtime checkouts
     `[paths]` names by path, so the CI checkout holds them, as the image's
     context does. Every preview and deploy job, whose build runs the same
@@ -3884,7 +4109,9 @@ whatever the deploy decides is affected, and needs no list of its own.
 ## 13. Module layout
 
 - **The root module:** the Stack kind, the resolver, the registry specs,
-  the `local` target, the `stack` commands, and the `ci` generator with
+  the `local` target, the generic connector with its pinned pulumi-tls
+  schema (`internal/stack/generic`, D63), the `stack` commands, and the
+  `ci` generator with
   the `github` CI renderer (`internal/generator/cigen`): a workflow is
   text, with no dependency to keep out of the core (D47).
 - **`extensions/gcp`**, a Go module of its own (D1): the gcp target's
@@ -3901,15 +4128,17 @@ whatever the deploy decides is affected, and needs no list of its own.
 - **`extensions/cloudflare`**, a Go module of its own: the Cloudflare DNS
   platform and its pinned pulumi-cloudflare schemas (sections 6.4 and
   6.9), kept current by the gcp target's tool, which both share through
-  `stack/providerschema`. Built. Workers and D1 come later.
+  `stack/providerschema`. Built. The cloudflare target (section 18,
+  D64), with Workers, D1, R2, sites and Cron Triggers, joins it.
 - **`cmd/superschematic`**, a Go module of its own: the installed binary.
   Built: it is a distribution of the core and the official extensions, by
   `cli.New(cli.Config{Name: "superschematic"}, gcp.Extension{},
   cloudflare.Extension{}, pulumi.Extension{ProviderVersions:
   map[string]string{"gcp": gcp.ProviderVersion, cloudflare.Package:
-  cloudflare.ProviderVersion}})`, so the provisioner installs each
-  provider at the release whose schemas the target or the DNS platform
-  checks against. An engineer installs one binary and gets every official
+  cloudflare.ProviderVersion, stack.GenericKeyPackage:
+  stack.GenericKeyProviderVersion}})`, so the provisioner installs each
+  provider at the release whose schemas the target, the DNS platform or
+  the generic connector checks against. An engineer installs one binary and gets every official
   target. `extensions/topcoat` is not linked (D44); its own binary links
   it. A release builds this binary and tags the module with the others.
 
@@ -4036,9 +4265,21 @@ model, or retired, when it lands.
      Storage, never run against Google Cloud (section 8.9, D54);
    - queues in a DB service's database, and Go and TypeScript workers
      that handle them, on the local target and on gcp as Cloud Run worker
-     pools (section 8.8, D53).
-   
-   Not yet: a site's SDK clients in the browser, and a second target.
+     pools (section 8.8, D53);
+   - the generic connector (section 6.2, D63), ahead of the second target:
+     platforms name their provider, an http or a site edge between two
+     providers falls back to it, an http one signs with a per-edge Ed25519
+     key from the Pulumi `tls` provider whose private key reaches the
+     caller through its platform's secret store, and the three runtimes
+     read the key's PEMs. Proven offline, with the fake target's edge
+     platform beside gcp; no mixed environment has deployed.
+
+   Not yet: the second target, which is Cloudflare (section 18, D64), a
+   mixed environment's deploy (section 6.2 lists what it needs), key
+   rotation, and a site's SDK clients in the browser.
+
+   The second target is done when acme-shop's storefront has run live on
+   Workers and a D1-backed TypeScript API has run live (section 18.15).
 
 ## 15. Open questions
 
@@ -4103,3 +4344,471 @@ Not kept:
   see them;
 - raw Helm and YAML strings inside the model;
 - a closed set of environments, and one cloud built into the generators.
+
+## 18. The cloudflare target
+
+`extensions/cloudflare` builds this section beside its Cloudflare DNS
+platform (section 6.9) (D64):
+- the target;
+- its Workers, Cron, D1, R2 and site platforms and their connectors;
+- the policy rules;
+- the pinned schemas at pulumi-cloudflare 6.22.0;
+- bootstrap, with the R2 state bucket, the Secrets Store and the CI
+  tokens;
+- bundles, D1 migrations from the deploying machine, and the site
+  publisher.
+
+An environment on `cloudflare` runs only on Cloudflare. A Worker in a gcp
+environment, or a Worker calling Cloud Run, waits for mixing: the generic
+connector (section 6.2, D63), plus a place for a platform's account and
+token outside its target's values.
+
+### 18.1 What the engineer enters
+
+```ts
+@environment({
+  target: "cloudflare",
+  cloudflare: { accountId: "0123456789abcdef0123456789abcdef" },
+  domain: "staging.acme.dev",
+  dns: { cloudflare: { zone: "acme.dev", zoneId: "023e105f4ecef8ad9ca31a8372d0c353" } },
+})
+export abstract class Staging {}
+```
+
+- **`accountId`** is required: 32 hex digits, from the dashboard.
+- **`workersSubdomain` and `secretsStoreId`** are recorded by bootstrap
+  beside `accountId`, through D47's `BootstrapValue`, and a person may
+  correct them:
+  - `workersSubdomain` names the account's workers.dev subdomain, under
+    which an exposed Worker without a domain is reached;
+  - `secretsStoreId` names the account's Secrets Store, which every
+    secret binding names.
+- **`domain`** is optional. With a domain, `dns` must be `cloudflare`, the
+  target's default DNS platform, and its zone must be in the same account.
+- **Secrets** come through `stack secrets set`.
+- **The token and passphrase.** The engineer's token is in
+  `CLOUDFLARE_API_TOKEN` and the state's passphrase in
+  `PULUMI_CONFIG_PASSPHRASE`, in the shell that runs the `stack` commands,
+  as gcp's commands use the shell's application default credentials.
+
+`stack init --cloudflare-account <id>` writes `src/cloudflare-target.ts`
+with the target's types, as it writes gcp's (D59):
+
+```ts
+declare module "@superschematic/stack" {
+  interface Targets {
+    cloudflare: {
+      values: { accountId: string; workersSubdomain?: string; secretsStoreId?: string };
+      server: { cpuMs?: number; placement?: "smart"; logs?: boolean; compatibilityDate?: string; compatibilityFlags?: string[] };
+      database: { locationHint?: "wnam" | "enam" | "weur" | "eeur" | "apac" | "oc"; jurisdiction?: "eu" | "fedramp" };
+      job: { cpuMs?: number; logs?: boolean };
+      site: {};
+      bucket: { locationHint?: string; jurisdiction?: string; storageClass?: "Standard" | "InfrequentAccess"; deleteAfterDays?: number };
+    };
+  }
+}
+```
+
+There is no `worker` key: resolution refuses the kind on this target.
+
+### 18.2 Realization
+
+| Stack concept | cloudflare |
+| --- | --- |
+| server | A `cloudflare:index/worker:Worker` named after the deployable, in infrastructure, with Workers Logs on unless `logs: false`, workers.dev on only for an exposed server without a domain, and previews off. Each rollout makes a `workerVersion` and a `workersDeployment` sending all traffic to it. The version holds the server's bundle (`main.js`, its source map and `superscalar.wasm`, each a `contentFile` under `artifacts/<server>/{bundle-digest}/` with its pinned `contentSha256`), `mainModule: main.js`, the compatibility date the extension pins unless set, `limits.cpuMs` and `placement` from the settings, and the server's config as bindings. TypeScript only; a name over 63 characters is refused. |
+| config | Each literal, parameter and derived variable is a `plain_text` binding named as the variable. A derived member flagged secret is a `secret_text` binding referencing the output that holds it. A `Secret<T>` field is a `secrets_store_secret` binding named after the field. A D1 database, an R2 bucket or a callee Worker is a binding named after the derived field, which the value's `binding` names. |
+| database | A `d1Database` per hosted DB schema, `<stack>-<db>`, with a suffix under a parameter, and `sqlite` dialect. `locationHint` and `jurisdiction` become `primaryLocationHint` and `jurisdiction`. |
+| sql edge | The value is `d1: { binding: "<FIELD>", database: <uuid output> }`. The platform writes `{type: "d1", name: <binding>, id: <database>}`, and the binding is the grant. |
+| migration | The runner on the deploying machine, against `d1://<accountId>/<uuid>`, with the run's token (section 18.6). |
+| http edge | A service binding `{type: "service", name: <binding>, service: <callee's Worker>}`, and D37's signed token with the edge's key. The value is `{url: "https://<callee's Worker>", binding: {name, worker}, credential: {source: signed-token, issuer, audience, key}}`, and the callee's callers field gets the edge's issuer. |
+| internal server | No workers.dev, no custom domain and no route: only a service binding reaches it. |
+| bucket | An `r2Bucket`, `<stack>-<bucket>`, with a suffix under a parameter. `deleteAfterDays` becomes an `r2BucketLifecycle`. |
+| bucket edge | An `r2_bucket` binding named after the field, and an `accountToken` scoped to the bucket's objects. The value is `{name, binding, r2: {account, accessKeyId: <token id>, token: <token value, secret>}}`. |
+| site | A Worker per site, whose version holds the site's files as `assets.directory` `artifacts/<site>/{site-digest}`, a fixed script module, an `assets` binding, and `SITE_CONFIG`, a `plain_text` binding composed from the site's bindings. |
+| site edge | The server's public address goes in the site's config, and the site's origin goes in the server's CORS field (section 8.10). |
+| job | A Worker per job, whose version runs the job's bundle, `scheduled.ts`, under a `workersCronTrigger` on the job's schedule in UTC. A job with no schedule has a Worker and no trigger. |
+| secret | A Secrets Store secret `<Stack>-<Environment>-<Type>-<FIELD>`, written by `stack secrets set`. A member of a parameterized environment reads its environment's. |
+| exposure | A `workersCustomDomain` for `<name>.<domain>`, in the exposure step; Cloudflare writes its DNS record and certificate. Without a domain, the public address is `https://<name>.<workersSubdomain>.workers.dev`. |
+| parameter | Names are suffixed with the parameter's value. Each member gets its own D1 database and R2 bucket, and the target's `DestroyPreparer` (`TargetSpec.PreDestroy`) empties the bucket before the member's destroy. Secrets are the environment's. |
+
+A Worker reaches a callee through its binding, exposed or not, so no
+caller waits for the exposure step. A call between two APIs that one
+server serves stays in process. The `worker` node is in infrastructure,
+so a callee exists before any caller's version binds to it, and the waves
+(section 5.3) put each callee's version first.
+
+### 18.3 State, bootstrap and CI
+
+**State.**
+- Pulumi's backend is `s3://superschematic-state` on R2's S3 endpoint,
+  `https://<accountId>.r2.cloudflarestorage.com`, with region `auto` and
+  path-style addressing. One bucket serves every stack in the account.
+- At each run, the store verifies the token through
+  `GET /accounts/{id}/tokens/verify`, falling back to
+  `/user/tokens/verify` for a user token, and returns `StateBackend.Env`:
+  - `AWS_ACCESS_KEY_ID` is the token's id;
+  - `AWS_SECRET_ACCESS_KEY` is the hex SHA-256 of its value;
+  - `PULUMI_CONFIG_PASSPHRASE` comes from the shell.
+- A run without the passphrase is refused before Pulumi starts, with what
+  to set.
+- Deploy manifests are written to
+  `superschematic/manifests/<stack>/<run>.json` and to a history copy,
+  `…/<run>/<RFC 3339>.json`, since R2 keeps no versions.
+- Bundles are kept under `superschematic/bundles/<stack>/<deployable>/<hex>/`
+  and site files under `superschematic/sites/<stack>/<site>/<hex>/`. Each
+  prefix gets a marker object written last, as gcp's site publisher does,
+  and each file the mode it was published with as metadata, which `Fetch`
+  restores. No lifecycle rule applies, since these are what `--bundle` and
+  `--site` roll back to.
+
+**Bootstrap.** `stack bootstrap <environment>` runs per account with the
+engineer's token, which needs to:
+- read the account and create R2 buckets;
+- create account API tokens;
+- create or read the Secrets Store;
+- write Workers, D1, and the zone's Workers routes and DNS, if the same
+  token also deploys.
+
+It then:
+1. verifies the token and the account;
+2. creates the state bucket directly, since Pulumi needs it first;
+3. handles the passphrase:
+   - Without one, it generates 32 random bytes and prints them once, saying
+     where to keep them: the password manager, and the GitHub secrets
+     below.
+   - With one, it checks it against `superschematic/passphrase-check`, an
+     object holding a random salt and an HMAC of it under the passphrase,
+     which bootstrap writes on its first run.
+4. finds the account's Secrets Store, or creates it;
+5. applies the bootstrap graph in Pulumi project `<stack>-bootstrap`, a
+   stack per account:
+   - **`<stack>-deployer`**, an `accountToken` with edit on the account's
+     Workers scripts, D1, Workers R2 storage, Secrets Store and account API
+     tokens, and on each environment zone's Workers routes and DNS.
+     Bucket edges mint tokens, so the deployer, like gcp's, can grant
+     itself more.
+   - **`<stack>-planner`**, an `accountToken` with read on those, and
+     object read and write on the state bucket alone, since a preview
+     takes the stack's lock.
+   - Permission group ids are read from the API before the graph renders;
+     the golden holds fixed ids.
+6. with `--github`, sets each token and the passphrase as the workflow's
+   secrets with `gh secret set`, at the scopes the CI seam names. Without
+   `gh`, it prints the commands and each token once.
+7. returns `workersSubdomain`, from `GET /accounts/{id}/workers/subdomain`,
+   and `secretsStoreId` beside `accountId`. An account without a
+   workers.dev subdomain is told to make one in the dashboard; bootstrap
+   does not choose it.
+
+**CI.** `TargetSpec.CI` returns kind `cloudflare-api-token`, whose fields
+`token` and `passphrase` name GitHub secrets:
+
+| Job | Token secret | Passphrase secret |
+| --- | --- | --- |
+| A plain environment's deploy job | `CLOUDFLARE_API_TOKEN`, a secret of the GitHub environment named for it | `PULUMI_CONFIG_PASSPHRASE`, in the same GitHub environment |
+| A plan job | `CLOUDFLARE_PLANNER_TOKEN_<ENV>`, a repository secret | `PULUMI_CONFIG_PASSPHRASE_<ENV>`, a repository secret |
+| A preview job | `CLOUDFLARE_PREVIEW_TOKEN_<ENV>`, a repository secret | `PULUMI_CONFIG_PASSPHRASE_<ENV>`, a repository secret |
+
+The `github` renderer learns the kind and writes job-level `env` from
+those secrets, with no action. Deploy and preview jobs of an environment
+with a Workers server or job set up Bun and install the workspace, as a
+site's do. With a D1 database, they also install `superschematic-migrate`
+from the release, checked against `SHA256SUMS`. `check` runs
+`bun bundle.ts --check` in each Workers server's and job's package
+(level 2). A plan job's credentials decrypt the state, and so the edges'
+private keys in it, as `planner` does on gcp through the KMS key, so they
+are as sensitive as those keys.
+
+### 18.4 Secrets
+
+The secret store keeps values in the Secrets Store:
+- **`Set`** creates or updates the secret. It needs no deploy first: a
+  secret exists apart from any Worker.
+- **`Exists` and `List`** read names, never values.
+- **`Get`** refuses: the Secrets Store gives a value to a Worker alone,
+  and no cloudflare environment has a platform credential to read.
+
+Section 4.2 says a cloud target's secret is a graph node without a value.
+On Cloudflare a secret does not exist without a value, so it is no node.
+The deploy still needs a value for each secret before the rollout, and
+asks for or names the missing ones as before. At run time the Workers
+entry awaits each secret binding's `get()` once per isolate, so a new
+value reaches each isolate when it starts, and every isolate after the
+next deploy.
+
+### 18.5 Bundles and the Workers entrypoint
+
+**Build.** A platform says what a deployable's artifact is:
+`PlatformSpec.Artifact` is `image`, the default, or `bundle`, and
+resolution records it as the deployable's `artifact` in
+`environment.json`. For each deployable whose artifact is a bundle, the
+deploy and `stack build`:
+1. run one frozen `bun install` at the output root, shared with the
+   sites' builds;
+2. run `bun bundle.ts <dir>` in the deployable's package,
+   `server/<stack>/<deployable>/`, `<dir>` being a new, empty directory;
+3. digest `<dir>` as a site's output is digested, and record each file's
+   SHA-256;
+4. publish through `TargetSpec.Bundles` when the digest is not the one the
+   manifest records, before the deploy's first step.
+
+A bundle is built on every deploy, as a site is, and its digest decides
+whether anything goes up. A `bundle.ts` that fails stops the deploy before
+any step, and a deployable with no `bundle.ts` keeps the manifest's
+bundle, as one with no Dockerfile keeps its image.
+
+**Pin and place.** The platform names each file's path relative to the
+program as `ir.BundlePath`, `artifacts/<deployable>/{bundle-digest}/<file>`,
+and its hash as `ir.BundleFileToken`, `{bundle-sha256:<file>}`.
+`PinBundles` replaces both in the deployable's own nodes, as `PinSites`
+replaces `{site-digest}`, and refuses a token of a file the bundle does not
+hold. After `Render` and before every `Plan`, `Apply` or `Destroy`, the
+core places each pinned bundle's files at
+`<program>/artifacts/<deployable>/<hex>/`, in place of what `artifacts/`
+held. It copies files it just built, or fetches them through the store's
+`registry.ArtifactFetcher` and checks them against the digest, as for a
+plan in CI, a `--bundle` rollback, a `--no-build` deploy or a destroy. A
+store that fetches writes each file back executable when it was published
+so, since the digest covers the bit. `stack plan` builds nothing: it
+fetches the manifest's bundles, or those `--bundle` names, and lists a
+deployable with none as having no bundle yet. `stack outputs` pins the
+manifest's bundles with the hashes it records, and fetches nothing. A site
+publisher that is an `ArtifactFetcher` gets the same placement for each
+site's files, at `artifacts/<site>/<hex>/`; gcp's is not one, and places
+nothing.
+
+The manifest records `bundles` beside `images` and `sites`: each bundle's
+digest and the SHA-256 of each of its files. `stack build` prints each as
+a `--bundle <deployable>=sha256:<hex>` flag, which `stack deploy` and
+`stack plan` take.
+
+**`bundle.ts`** (generated) calls `Bun.build` with:
+- `entrypoints: ['fetch.ts']`, or `['scheduled.ts']` for a job;
+- `target: 'browser'`, `format: 'esm'`, and `conditions: ['workerd',
+  'worker', 'browser']`, which select superscalar's `workerd` build;
+- `minify`, an external `sourcemap`, and `external: ['cloudflare:*']`;
+- `external: ['*.wasm']`, with superscalar's `superscalar_wasm_bg.wasm`
+  copied beside the bundle as `superscalar.wasm`. superscalar's `workerd`
+  build imports it as a `WebAssembly.Module`, since workerd refuses to
+  compile WebAssembly from bytes. Any other WebAssembly module is refused.
+
+The output is `main.js`, `main.js.map` and `superscalar.wasm`, the names
+the platform lists. With `--check`, it writes to a temporary directory and
+fails on a `node:` import, a Bun global or another `.wasm`.
+
+**`fetch.ts`** (generated) declares the few Workers types it uses, as
+`main.ts` declares Bun's:
+- **At module scope**, it imports `env` from `cloudflare:workers` and
+  reads each API's string config through
+  `loadEnvConfig(stackEnvOf(env))`, the string members alone. A refused
+  config throws there, so Cloudflare refuses the version's upload and the
+  rollout step fails, naming each variable: the twin of a server that
+  refuses to start.
+- **On the first request of an isolate**, and again after a failure, it:
+  - awaits each secret binding into the config;
+  - takes each D1, R2 and service binding by the name its value gives;
+  - builds one SDK client per callee, with `fetch` through the service
+    binding and `serviceCredentialFor` the signed token;
+  - builds each `Bucket` over its R2 binding;
+  - builds `Deps` with the logger and calls `create(deps)`, and
+    `authenticate(deps)` where a route needs an end user;
+  - mounts each `buildRouter` on one Hono app, with `authenticateService`
+    where an API has a service clause;
+  - adds the site CORS handler, `notFoundHandler`, `errorHandler`,
+    `/healthz`, and `/readyz`, which pings each D1 with `SELECT 1` within
+    two seconds.
+- **Every request** goes to `app.fetch(request, { requestIP })`, whose
+  `requestIP` reads `CF-Connecting-IP`, so the runtime keys rate limits by
+  the client.
+
+Per isolate it caches config strings, binding objects, SDK clients, the
+service authenticator with its keys, the credential sources with their
+tokens and `CryptoKey`s, the Hono app, and what `create` returned. None
+of these holds a request's I/O. An implementation that keeps a `Response`,
+a stream or a fetch in flight across requests fails on Workers. In-memory
+state belongs to one isolate, and Cloudflare runs many and drops them at
+will: the storefront's carts live per isolate there.
+
+Logs are `createLogger`'s JSON lines on `console.log`, which Workers Logs
+reads. A server needs no `nodejs_compat`. Rate limits are per isolate.
+There is no drain: Cloudflare finishes requests in flight on a new
+deployment.
+
+**Size.** superscalar's WebAssembly module is 2.2 MB, 661 KB gzipped, in
+its size-optimized build; a small Worker's upload is about 2.2 MB, 685 KB
+gzipped. Cloudflare's script limit is 64 MiB on both plans, with no
+compressed limit, since September 2026. Every Worker, servers and jobs
+alike, carries its own copy. Instantiation takes tens of milliseconds
+against the one-second startup limit, and the first parse of a phone
+number or URL costs about 80 ms once. The deploy logs each version's
+`startupTimeMs`.
+
+### 18.6 Databases on D1, and migrations
+
+A TypeScript API's `Deps.db` is typed by its database's DB service's
+first dialect:
+- `postgres` gives the `pg` Pool, as today;
+- `sqlite` gives `SqlDatabase`, the runtime's copy of D1's interface
+  (`prepare(sql).bind(…).first/all/run/raw`, `batch`, `exec`).
+
+A D1 binding provides `SqlDatabase` on Workers, and `openSqlite(path)`
+over `bun:sqlite` provides it under `stack dev`. Placeholders are `?` and
+`?N`, which both read. D1 has no interactive transaction, and `batch` is
+atomic.
+
+Resolution refuses (`unrealizable`) a TypeScript server, job or worker
+whose database resolves to another dialect than its DB service's first,
+since its `Deps.db` would be the wrong client. acme-shop's `shop-db` lists
+`postgres` first, so nothing of it changes. An identity store over SQLite
+is not built, so a sqlite-first database with the user model is refused
+for a TypeScript API.
+
+The target's migration runner works on the deploying machine:
+- it finds `superschematic-migrate` on `PATH` or at
+  `SUPERSCHEMATIC_MIGRATE`, as the local target does;
+- it looks up each database's uuid by its name through the API;
+- it writes a job document whose databases have
+  `databaseUrl: d1://<accountId>/<uuid>` and no privileges, writes the
+  plans beside it, and runs `superschematic-migrate job --job <path>` with
+  the run's `CLOUDFLARE_API_TOKEN`.
+
+D1 has no roles: every Worker bound to a database reads and writes all of
+it, the runner's state tables included. A phase with no steps whose
+servers changed does nothing. The D1 driver's lease (D27, amended) keeps
+two deploys apart. Before the first D1 deploy, `TestRealD1` must pass
+against a real database, which also verifies D27 amended's REST batch
+assumption.
+
+### 18.7 Buckets on R2
+
+The runtime's `./r2` entry implements D54's `Bucket`:
+- **Objects** are put, got, deleted and listed through the binding.
+- **`signUrl`** presigns a V4 query-string URL for
+  `https://<account>.r2.cloudflarestorage.com/<bucket>/<object>` with
+  WebCrypto HMAC, for at most seven days. The access key is the edge's
+  token id, and the secret is the hex SHA-256 of the token's value, which
+  the runtime computes once.
+
+Unlike gcp, the field carries a credential, since a workload on Workers
+has no identity to sign with. D54 refused credentials in the field only
+because gcp's workload identity makes them unnecessary. The token member
+is flagged secret, so it reaches the Worker as a `secret_text` binding.
+`buckets-never-public` refuses an `r2ManagedDomain` or an `r2CustomDomain`
+on a Bucket service's bucket. A browser's PUT to a signed URL needs the
+bucket's CORS; that gap is shared with gcp and lands for both later.
+
+### 18.8 Sites on Workers static assets
+
+A site's Worker serves the build's files as static assets. Its version
+holds:
+- `assets.directory` set to `artifacts/<site>/{site-digest}`, pinned and
+  placed as a bundle's files are;
+- `assets.config` with `htmlHandling: "none"` and
+  `notFoundHandling: "none"`;
+- an `assets` binding, `ASSETS`;
+- `SITE_CONFIG`, a `plain_text` binding with the JSON of section 8.10,
+  whose values are each API's public address, composed on this target from
+  names alone;
+- `SITE_FALLBACK` when set;
+- a script module the extension embeds, the same bytes in every release.
+
+Cloudflare runs the script only when no file matches. It answers
+`/__superschematic/config.json` with `no-store`, and any other path with
+the fallback's bytes at 200, or 404 without a fallback. The `Sites`
+seam's `Publish` keeps the files in R2 under their digest, and its `Fetch`
+places them for the provider; it writes no config, since the graph carries
+it. Files are served with Cloudflare's asset caching, which revalidates
+each by its ETag; D55's year-long `immutable` for content-hashed names is
+not given here.
+
+### 18.9 Jobs on Cron Triggers
+
+The `cloudflare.cron` platform gives each job a Worker named after the
+deployable, running `scheduled.ts`. `scheduled.ts` builds `Deps` as a
+server's does, with no identity, callers or CORS. Its `scheduled`
+handler:
+- calls `createJobs(deps)`, then the job's method with a signal that
+  aborts at the job's timeout;
+- logs `job started`, then `job done` or `job failed` with how long it
+  took;
+- runs the method again up to its retries, as `stack dev` does;
+- throws after the last failure, so Cloudflare records the run as failed.
+
+A schedule runs in UTC, so a job with another `timeZone` is refused, since
+daylight saving moves an offset. A job whose timeout times its tries
+exceeds Cloudflare's limit for a scheduled run is refused. `cpuMs` sets
+`limits.cpuMs`. Cloudflare starts a run at each firing, as Cloud Run does.
+No `Jobs` seam is built for this target, so `stack run` refuses it.
+
+### 18.10 Service auth on Workers
+
+Admission is the service binding: a Worker that is not exposed has no
+route, so only a Worker holding a binding to it reaches it. Identity is
+D37's signed token. The connector reuses the generic connector's edge key
+(a `tls:index/privateKey:PrivateKey` node per edge, D63) and its callee
+issuer: issuer and subject are the caller's deployable, the audience the
+callee's, EdDSA, at most 300 seconds. The private key's PEM reaches the
+caller as a `secret_text` binding through the secret flag. The value lives
+in Pulumi's state, encrypted with the passphrase, and never in the
+program. This settles section 9.9's Workers question: callers sign
+key-pair tokens, and no runtime reads `ctx.props`.
+
+### 18.11 DNS and exposure
+
+Exposure is a `workersCustomDomain` for `<name>.<domain>`, in the exposure
+step. Cloudflare finds the zone by the hostname within the account,
+writes the record and issues the certificate, so the Workers and site
+platforms return no `Records` and the DNS platform writes nothing for
+them. The rule `domain-on-cloudflare` refuses an environment with a
+domain whose DNS platform is not `cloudflare`, or whose zone the token
+cannot reach. Without a domain, an exposed Worker turns on workers.dev.
+
+### 18.12 Resource graph and provider
+
+The pin grows by `worker`, `workerVersion`, `workersDeployment`,
+`workersCustomDomain`, `workersCronTrigger`, `d1Database`, `r2Bucket`,
+`r2BucketLifecycle` and `accountToken`, and later `hyperdriveConfig`,
+written by `go run ./internal/tools/providerschemas` in
+`extensions/cloudflare`. The `tls` provider's pin comes with the generic
+connector. No provider node exists: every node names `accountId`, and the
+provider reads the token from the run's environment.
+
+### 18.13 Local development
+
+A stack with a cloudflare environment keeps a `Dev` on the `local` target:
+- servers run on Bun from `main.ts`;
+- a sqlite-first database is a file under the environment's state
+  directory, which the runner migrates from the same SQLite plan and the
+  server opens with `openSqlite`;
+- buckets stay on the storage emulator through the same `Bucket`
+  interface;
+- calls travel over loopback with signed tokens.
+
+`stack dev` does not run the Workers entry and its bindings. `check`
+bundles them for `workerd` on every pull request, and superschematic's
+runtime tests run fixture bundles under the `workerd` binary.
+
+### 18.14 Policy rules
+
+- **`nothing-public-unless-exposed`** refuses, for a deployable that is
+  not exposed, a Worker with workers.dev on, a `workersCustomDomain` or a
+  `workersRoute`; and all three for a job's Worker.
+- **`buckets-never-public`** is in section 18.7.
+- **`domain-on-cloudflare`** is in section 18.11.
+
+### 18.15 Not built
+
+- `stack run` on this target.
+- Queue workers, since D53 amended keeps claims on Postgres.
+- Hyperdrive to Cloud SQL, and any mixing of targets in one environment.
+- An identity API on Workers, whose argon2 is `node:crypto`'s (D50).
+- Engine types on Workers, whose binding is a Node-API addon (D58).
+- Rate limits shared across isolates; Workers' `ratelimit` binding is a
+  candidate store.
+- `immutable` caching for a site's hashed files.
+
+Milestone 7's second target is done when acme-shop's storefront has run
+live on Workers (workers.dev, then a domain, through the SDK, with a
+rollback and a destroy), and a D1-backed TypeScript API has run live
+(expand, rollout, contract). Buckets, sites and cron jobs follow as
+breadth.

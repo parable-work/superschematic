@@ -97,6 +97,16 @@
 {{- end}}
         }
 {{- end}}
+{{- if $tool.Returns.Properties}},
+        "properties": {
+{{- $returnProps := $tool.Returns.Properties}}
+{{- range $j, $propName := sortedKeys $returnProps}}
+{{- if $j}},{{end}}
+          "{{$propName}}": {{schemaJSON (index $returnProps $propName)}}
+{{- end}}
+        },
+        "required": [{{range $j, $r := $tool.Returns.Required}}{{if $j}}, {{end}}"{{$r}}"{{end}}]
+{{- end}}
       }
     }
 {{- end}}

@@ -4980,10 +4980,15 @@ authDb enables TypeScript types. servergen's
 database up and, when `SUPERSCHEMATIC_IDENTITY_TEST_DATABASE_URL` is set,
 on Postgres.
 
-Not built: the Rust stack entrypoint, which will read `<API>_IDENTITY` as
-the Go and TypeScript ones do.
+A Rust entrypoint (D57) builds the store with `identity::PostgresPool`
+over the authDb's pool, and the service from `<API>_IDENTITY`, which the
+API crate's `EnvConfig` parses. servergen's
+`TestRustEntrypointCompilesAndServes` signs a user in on it when
+`SUPERSCHEMATIC_IDENTITY_TEST_DATABASE_URL` is set, and `cli`'s
+`TestStackDevRunsARustServer` does under `stack dev`.
 
 The design is reversible until the first release.
+
 ### D30, amended: a Cloud Run server's CPU is allocated only while it handles a request
 
 The gcp target's Cloud Run platform sets every service's resource limits,
@@ -5524,11 +5529,11 @@ Status: built.
 
 No Rust server has run on Cloud Run.
 
+D65 builds what this left out of a stack: Rust jobs and workers, and an
+output root that builds against a mirror of each implementation crate,
+so `stack dev --out` elsewhere no longer collides in Cargo's lockfile.
+
 Not built:
-- an implementation crate that builds with the API crate somewhere other
-  than the output root its `Cargo.toml` names by path, so `stack dev
-  --out` elsewhere collides in Cargo's lockfile;
-- Rust jobs and workers;
 - buckets from a Rust server;
 - OpenTelemetry export.
 
@@ -5648,33 +5653,134 @@ and the D37 stand-in, the event stream's every byte, which the host
 pulls a frame at a time, and MCP's stateless JSON-RPC on the 2025
 revisions and 2026-07-28, the host keeping authentication, request ids,
 body and rate limits, timeouts and CORS; the calls by name for all of
-it, an event stream held by an id; and a Postgres connect bounded by its
-connect timeout end to end; `superschematic-engine-behaviors`, the
+it, an event stream held by an id; a Postgres connect bounded by its
+connect timeout end to end; and, behind the `axum` feature (milestone
+16), the axum router a Rust server mounts the routes with
+(`superschematic_engine::axum::router`): every route's path under the
+prefix, a method no route on it takes the engine's 404, the caller from
+the host's function or the request's extensions, the request id the host
+settled, the body limit of a route that takes a body, each call on
+tokio's blocking pool, and the event stream as a body that pulls its
+frames, woken by one thread per router that waits on the notifier,
+closed when the client goes away, the engine never reached or dropped on
+an async thread, since the Postgres client blocks on a runtime of its
+own; `[paths] engine_rust` names the crate for the Rust servers that
+will mount it (milestone 19); `superschematic-engine-behaviors`, the
 core's behaviors, each over the copy of its declaration that `make
 behaviors` writes into the crate and CI checks, which a host passes in
-its options (`core()`) since the engine cannot depend on them: wave 1
-(milestone 8) has ported Workflow (with D56's enteredAt), Comments,
-Constants and Variants, and wave 2 (milestone 9) Revisions,
+its options (`core()`) since the engine cannot depend on them, all
+fifteen: wave 1 (milestone 8), Workflow (with D56's enteredAt),
+Comments, Constants and Variants; wave 2 (milestone 9), Revisions,
 Dependencies, Links (with D56's many-valued links, and what a move of a
 link's target moves on, which Reactions and Lease hear), and D56's
 Numbering, StateRules, Approvals and Timers, whose deadlines the runner
-fires, with their guidance, migrations on both databases, configs,
-guards, fields, operations, schedules and veto codes; and
+fires; wave 3 (milestone 10), Rollups and Reactions (with D56's changes
+trigger), whose rules the runner runs, and Search, with its vectors,
+similar and the search across a namespace's schemas (`engine.search`,
+its route and its MCP tool), over full-text search the storage owns: on
+SQLite the FTS5 table the TypeScript engine creates; on Postgres a table
+of the fields with a generated `tsvector` each and one of them all under
+a GIN index, through a configuration of `unaccent` (the database's, or
+one the engine creates in `superschematic_extensions`) and `simple`,
+ranked by `ts_rank_cd` over the four classes the config's weights fall
+into (the distinct weights, highest first, A to D, the lower ones
+sharing D), with `ts_headline`'s snippets, an FTS5 expression translated
+before it runs and its NEAR groups and `^` refused, and an email
+address, a URL, a host, a path and a number with a point found whole
+rather than by their words; and milestone 11, Branches, the version
+graph's Rust engine over its fixed layout in the call's transaction on
+either database, its ids drawn from the engine's own source (a
+behavior's `uuids()`), whose releases a Reactions rule hears; each with
+its guidance, migrations on both databases, config, guard, fields,
+operations, reactions, schedules and veto codes;
+`superschematic-engine-workqueue` (milestone 12), the work queue's seven
+behaviors, Lease (with directOn), Assignment, Queue, Presence,
+Blueprint, Budget and Retries, over the plug-in API an extension's
+behavior uses, with their guidance, migrations on both databases and
+the TypeScript package's table and column names, which a host registers
+after the core's (`workqueue()`); and
 `superschematic-engine-testkit`, which ports the TypeScript tests'
-behaviors, runs the cases of `test/behavior-*.test.ts`, the runner's,
-retention's and the tools', and those of the ported behaviors'
-`test/core-*.test.ts` against the engine, and replays the scenario and
-HTTP corpora, those behaviors' files included, giving their recorded
-answers on SQLite and Postgres for every case whose behaviors it has,
-an event cursor on Postgres held to the recorded order rather than its
-number (a write a rollback undid leaves a gap in a Postgres identity
-column), but for a step it lists with what explains it (a change the
-recording does not see). CI tests the
-workspace on both databases. The Node-API addon is milestone 7, the
-other core behaviors (Rollups, Search and Reactions, then Branches)
-milestones 10 and 11, and the work queue's milestone 12. Until the Rust
-engine passes the TypeScript suite, `@superschematic/engine` is the
-TypeScript implementation and nothing uses the workspace.
+behaviors and the work queue's, runs the cases of
+`test/behavior-*.test.ts`, the runner's, retention's and the tools',
+those of the core behaviors' `test/core-*.test.ts` and those of the
+work queue's tests against the engine, and replays the scenario and
+HTTP corpora, the core behaviors' files, the work queue's (211 of its
+213 scenarios on SQLite and 208 on Postgres, the rest `js` or writing
+the file with SQL of their own) and the behavior catalog included, the
+HTTP corpus through the engine's routes and through its axum router,
+giving their recorded answers on SQLite and Postgres for every
+case whose test behaviors it has, an event cursor on Postgres held to
+the recorded order rather than its number (a write a rollback undid
+leaves a gap in a Postgres identity column), but for a step it lists
+with what explains it (a change the recording does not see). CI tests
+the workspace on both databases. `superschematic-engine-napi` (milestone 7a)
+is the Rust engine as a Node-API addon, with the core's behaviors it is
+built with and the work queue's an engine's options name (`behaviors`,
+by name: a behavior object is TypeScript code, even one whose
+declaration names one the addon has), and `@superschematic/engine`'s
+`src/native` gives it the
+package's synchronous API: a call by name with JSON in and out on the
+JavaScript thread over SQLite, a promise of one off that thread (an
+`AsyncTask`, or on Postgres a future that owns the engine), the package's
+error classes rebuilt from the class, code and members the addon throws,
+a panic caught at every entry, and a policy or permission matcher
+written in TypeScript asked on the JavaScript thread during a call. With
+`ENGINE_IMPL=rust` the package's suite runs on it, each file on its own
+under Node.js and Bun, held to `test/rust-pending.txt`, the files not
+passing yet and why, which a file leaves once it passes (CI's
+`engine-napi` job): with all fifteen of the core's behaviors, 15 of the
+66 pass on both (491 of Node.js's 913 tests, 827 of Bun's 1,564), and no
+test that runs fails on what the Rust engine does. The work queue's
+suite runs so too (`--package`), its `test/helpers.ts` passing the
+package's own behaviors by name, held to its own `test/rust-pending.txt`:
+11 of its 19 files pass on both (211 of Node.js's 240 tests, 399 of
+Bun's 455), and none fails on what the Rust engine does. The rest wait for
+milestone 7b's test-only bridge for behaviors written in TypeScript; it
+brings too raw SQL on the engine's file, `events.watch`, and `engineApp`
+and `engineMcp` over the engine's routes. Until the Rust engine passes
+the TypeScript suite, `@superschematic/engine` is the TypeScript
+implementation and nothing uses the workspace.
+
+The Go binding (milestone 15) is built. `superschematic-engine-abi`
+(`runtime/engine/rust/abi`) is the C ABI of the bindings section, as a
+library an archive crate expands once,
+`runtime/engine/go/include/superschematic_engine.h` its header, which a
+test holds to the exports: `eng_open` and `eng_close` over handles a
+closed engine leaves `ENG_CLOSED`; `eng_call` over the calls by name, and
+the binding's own `deploy` (each document defined and published as the
+engine's own principal, nothing written when the live version has its
+hash), `health` and `abi`; `eng_http` over the transport-neutral routes,
+a stream a handle `eng_stream_poll` pulls without waiting; `eng_wait` on
+the notifier, one thread for every stream; `eng_runner`; and the codes
+`ENG_OK`, `ENG_ERROR` (the TypeScript class, the code, the message and
+the class's members), `ENG_BAD_ARGUMENTS` and `ENG_CLOSED`.
+`superschematic-engine-ffi` (`runtime/engine/rust/ffi`), the core's
+archive, exports it over `core()`; a project's engine crate exports it
+over its own behaviors or configure with `export_engine_c_abi!`, as
+`runtime/engine/rust/testkit-ffi` does for the replays. The library
+exports nothing itself, so archive crates in one Cargo workspace, whose
+features Cargo unifies, never define a symbol twice.
+`scripts/engine-archive.sh` builds `libsuperschematic_engine.a` (`--crate`
+a project's), and `runtime/engine/go` is the binding (`Open`, `Call`,
+`Deploy`, `Health`, `Runner`, `Close`, errors as `*engine.Error`) with
+`enginehttp`, which mounts the routes, the event stream and MCP on chi,
+the host's timeout on every route but the stream's and MCP's. The Go
+replay sends the HTTP corpus through `enginehttp` over HTTP and the
+engine's own scenario files through `Engine.Do`, on SQLite and Postgres,
+with the Rust replay's counts and two steps a Go server answers otherwise
+(net/http's own 400 for a target that is not percent-encoding, and a live
+event a push host may write before a prune ends the stream). The version
+graph's `vg_*` exports are the core crate's default `ffi` feature, which
+the version graph's Rust engine leaves off, so an archive that links it
+does not define them; `scripts/engine-link-check.sh` links superscalar's,
+the version graph's and the engine's archives into one Go binary and runs
+it, in the engine-go CI job on linux-x64 and in the release's
+build-archives job on all four platforms, whose tarballs now carry the
+engine's archive and header. The config reader and the error mapping in
+the ffi crate have the shape of the Node-API addon's
+`EngineOptions::from_json` and `Error::thrown`, which replace them once
+they are on main. No generated server mounts the engine yet (milestone
+18).
 
 The rule is reversible until the first release.
 
@@ -5718,8 +5824,9 @@ ORM's semantics, since one queue may have Go and TypeScript callers.
 | The claim loop is the runtime's `./worker` entry, `runWorker`, the twin of `worker.Run`: it claims for its free slots, extends each claim every third of the lease while the handler runs, completes a message when the handler resolves and fails it when the handler rejects or throws, logs each outcome, and waits a second after a claim that found too few messages, and longer, up to thirty seconds, after one that failed. When its signal aborts it claims no more, gives the running handlers the grace, then aborts the signal each handler was given and releases their messages. A worker's `main.ts` builds `Deps` as a job's does and runs it with `workerConcurrency` and the decorator's grace. JavaScript cannot stop a handler that ignores its signal: its message is released all the same, its late outcome changes nothing, and the process exits once the loop resolves. | A worker thread per handler, which could be stopped but would run the implementation apart from its `Deps`' pools. |
 | `local.worker`, `gcp.cloudrunworker` and the fake target's worker platform take TypeScript: locally the worker runs as `bun main.ts`, and on gcp its image runs in the worker pool. Claims stay on Postgres: the TypeScript client speaks Postgres alone, as the Go ORM does, and resolution refuses a worker, in either language, whose queue's database an environment places on another dialect. | Claims on SQLite in TypeScript through `bun:sqlite`, which the Go ORM cannot match yet. |
 
-Status: built in #348. `TestQueueParityWithTypeScriptOnPostgres` runs the
-Go ORM and the TypeScript client against one Postgres, and
+Status: built in #348. `TestQueueParityOfGoTypeScriptAndRustOnPostgres`
+(so named since D65 made Rust its third side) runs the Go ORM and the
+TypeScript client against one Postgres, and
 `TestQueuesWriteWhatTheGoORMWrites` holds `queues.ts` to the Go ORM.
 `TestTypeScriptJobAndWorkerRunOnPostgres` runs ts-shop's worker under Bun:
 it handles a message, retries one that fails once after the backoff, marks
@@ -6016,3 +6123,576 @@ it.
 | `stack dev --remove-data` removes the environment's Postgres and storage containers and their data; `--remove-database` stays as its alias. | A removal flag per container, one more with each emulator. |
 
 Status: built in #334.
+
+## D60. A list operation pages by an opaque cursor when it declares `@paginated`
+
+A list operation answers its whole result. acme's `listOrders` takes a
+`limit` and stops there, with no way to the orders after it, and
+`listReviews` answers every review of a product. The console's list page
+(D44, amended) renders whatever comes back, so it grows with the table,
+and an SDK caller has no next page to ask for. The engine's `list`
+already pages (D16, amended): `limit` and `cursor` in the query, `{items,
+next}` in `data`, `next` an unpadded base64url cursor, null after the last
+page. Of what a generated API has, the Go runtime's envelope declares
+`meta.totalCount` and `links` and the OpenAPI document advertises them,
+but no server writes either, and the Rust SDK pages a list by the `limit`
+and `offset` arguments it finds by name (`<method>_all`).
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A core operation decorator, `@paginated({ defaultLimit, maxLimit })` from `@superschematic/api`, on a GET operation whose result is a list, `T[]`: one level, not a map, not `Nullable`. Both members are optional: `maxLimit` is 1 to 1000, 100 when unsaid, and `defaultLimit` 1 to `maxLimit`, 20 when unsaid or `maxLimit` when that is less. It writes `FieldDef.Page` (`ir.OperationPage`, JSON `page`), after `filterable`, with both numbers filled in by the loader in every form, so each reader sees the limits the routers apply. IR without it is the same bytes, and no operation pages unless it says so. | A page on every list, which changes every server, SDK and golden at once; arguments the author declares and a marker names, which each operation would spell its own way; offsets or page numbers, which skip and repeat items written between two pages and scan every row they skip |
+| The decorator gives the operation two query parameters that no schema declares. `cursor` is 1 to 1024 characters of the unpadded base64url alphabet (`A-Z a-z 0-9 - _`); `limit` is a whole number from 1 to `maxLimit`, `defaultLimit` when absent. Each runtime reads both with one reader, Go's `paging.Read`, TypeScript's `readPage` and Rust's `PageSpec::query`, whose refusals are the 400 a string or integer query parameter gets (D39, D42), at `cursor` or `limit`. An operation that also declares an argument named `cursor`, `limit` or `page`, or that is `@manualRouteRegistration` or encrypted, is refused. | Arguments the loader adds to `arguments`, which `format` would write back and each server would decode by its own older query rules; the bucket runtimes' `pageToken` and `pageSize`, which the engine's list does not use |
+| `data` is the page, `{"items": [...], "next": "<cursor>"}`, `next` null after the last page, as the engine's `list` answers; `meta` keeps `requestId` alone. A page may hold fewer items than its limit, even none, while `next` is not null. There is no total and no previous cursor. | `meta.nextCursor`, or the Go envelope's `links.next`, which the result type and an MCP tool's result would not carry and every SDK would read beside `data`; a total, a count per page; a previous cursor, a second order every implementation keeps |
+| A cursor is opaque and names a position in the operation's order, never an offset. The implementation chooses the key, the last item's `placedAt` and `id` for orders, and the runtime writes it as the unpadded base64url of its compact JSON (`Cursor::encode`, `paging.EncodeCursor`, `encodeCursor`) and reads it back into the implementation's key type, refusing one it cannot read with 400 `bad_request`, "cursor is not one this operation returned", at `cursor`. A cursor grants nothing: each page runs the operation's caller rule and filters again, so a forged one moves where a page starts. It does not expire; one the implementation can no longer read, after its order changes, is that 400, and the caller starts again. | Signing the cursor, which protects a position that grants nothing; a wrapper the router adds with the operation's name, a second encoding every server must agree on |
+| The order is the operation's own, total and fixed, and a cursor carries no filter. The next page is asked with the same filters; with others it goes on from the position under them, as the engine's filtered pages do. A UI that changes a filter starts at the first page. | Binding a cursor to the filters it was made under, a fingerprint of canonical arguments every server would compute alike, to refuse a request whose answer is already well defined |
+| The implementation takes `page`, the page request (`cursor`, a cursor or none, and `limit`, its default filled in), beside its arguments, and returns a page: Go `ListOrders(ctx, statuses, page paging.Request) (paging.Page[types.OrderView], error)`, TypeScript `args.page` and `Page<OrderView>`, Rust an `Args` field `page: PageRequest` and `Result<Page<types::OrderView>, ApiError>`. `Page::from_rows(rows, limit, key)` takes up to `limit + 1` rows, keeps `limit` and sets `next` to the key of the last one kept when there were more. The router neither trims nor counts the items. | `cursor` and `limit` as two arguments, whose default an in-process caller would fill in itself; a list the router cuts, which loads every row |
+| The in-process call (D43) returns the page, and `Args::check` checks `page` by the route's spec; a caller builds `PageRequest::first(limit)` or `PageRequest::after(cursor, limit)`. A Topcoat procedure's arguments record takes `cursor` and `limit` as records hold them, decoded as the router decodes the query, and answers `<Type>PageRecord { items, next }`. | |
+| Every SDK method of a paged operation takes `cursor` and `limit`, both optional, and returns the page: Go `runtime.Page[T]`, TypeScript `Page<T>`, Python `Page[T]`, Rust `runtime::Page<T>`. Beside it, `<operation>All` (`ListOrdersAll`, `listOrdersAll`, `list_orders_all`) yields the items of every page in turn, asking each with the last page's `next`: a Go `iter.Seq2[T, error]`, a TypeScript `AsyncIterable<T>`, a Python `Iterator[T]` and a Rust `Pager<T>` whose `next().await` yields each item. A page whose `next` is the cursor it was asked with ends the iteration with an error rather than a loop. An operation named `<operation>All` beside a paged one is refused. | Collecting every page into one list, as the Rust SDK's offset `_all` does, which holds the whole table in memory; leaving the loop to each caller |
+| The OpenAPI document gives a paged operation both parameters with their bounds and its `data` the page's schema. Its MCP tool takes both, returns the page, and its description says to pass `next` back as `cursor`. | |
+| A paged list's console page reads `cursor` and `limit` from its query beside its filters, renders the page's items in its table and, after it, a `<nav class="ss-pager">` with "Next page" (`rel="next"`), the same filters and limit with `cursor` set to `next`, while `next` is not null, and "First page", without the cursor, while one was given. The filter form holds neither as a control, so a submitted filter starts at the first page, and a cursor or limit the route refuses is the form's own message with the route's 400. | A previous link, which needs every cursor before it in the URL; numbered pages, which a cursor cannot give; a "more" button, which needs script |
+| `runtime/http/testdata/page_parity.json`, written by the Go runtime's test, holds the reader's answers (absent values, each bound, a limit that is no whole number, a cursor with padding, with a character outside the alphabet and of 1025 characters), cursors encoded and read back, and `from_rows`. The TypeScript and Rust runtimes read it. | |
+
+Status: designed; the core, the servers, the SDKs and the Topcoat console
+built. This batch builds all of it: the IR, the decorator, the readers, the JSON Schema and
+`format`; the OpenAPI document and the tool documents; the Go, TypeScript
+and Rust servers and the in-process call; the four SDKs and the vectors;
+and the Topcoat records, procedures and pager. acme's `listOrders`,
+`listReviews` and a new `listProducts` page. Built so far, the core:
+`ir.OperationPage` on `FieldDef.Page`, with `ir.ValidateOperationPage`;
+`@paginated` and its argument schema, which the schema-file JSON Schema
+takes; the merge that fills a data form's unsaid limits, so TypeScript,
+JSON and YAML read to one IR (`fixture-paged-api` and its JSON and YAML
+twins); `format`; the loader's checks (`internal/loader/verify/page.go`);
+`apigen.EndpointInfo.Page`, the OpenAPI document's parameters and page,
+and the tool documents' parameters, page and sentence (`toolsutil`); Go's
+`paging`, TypeScript's `readPage` and Rust's `page` module, held to
+`page_parity.json`; each reads a parameter's first value and an empty one
+as absent. Each parses the raw query as WHATWG's form-urlencoded parser
+does, pairs split at `&` alone and a `%` that starts no escape kept as it
+is (Go's `paging.QueryValues`, since `url.Query` drops a pair with a
+malformed escape and splits at `;`), so `?limit=%zz` and
+`?limit=500;x=1` are the limit's 400 in all three, not the first page;
+and each checks a cursor's alphabet before its length, on bytes, so a
+cursor outside ASCII is refused for its pattern however a runtime decodes
+a broken UTF-8 escape. Every runtime refuses to read a cursor whose key
+names no position, JSON `null` or an empty object (which Go would read
+into a struct key as its zero), or holds what one runtime cannot read: a
+number past `f64`'s range (which TypeScript would read as Infinity), a
+`\u` escape of a lone surrogate (which Go would read as U+FFFD) and
+arrays or objects nested 128 deep (serde_json's limit). `EncodeCursor`,
+`encodeCursor` and `Cursor::encode`, and so the three `from_rows`, fail
+on such a key and on one whose cursor would be past 1024 characters, the
+implementation's error rather than a `next` no router reads: Go's error,
+TypeScript's `RangeError`, and Rust's 500 `ApiError`, `Cursor::encode`
+and `Page::from_rows` returning `Result`. The vectors hold all of it
+(`refused`, and `unencodable`, the keys no runtime encodes). Two
+differences stay, the key's shape being the implementation's: an object
+that lacks a member of the key's type reads in Go, its field zero, and in
+TypeScript, which checks no shape, where serde refuses one that lacks a
+required field, so an implementation refuses a key without its id itself
+(acme's `decodeKey`); and an object that names a member twice reads as
+its last in Go, TypeScript and a serde `Value`, where a serde struct
+refuses it. Each server and SDK generator refused a paged operation until
+it rendered it, and every one renders it now, so the refusal
+(`apigen.RefusePages`) and its test are gone. The Go server's paged method takes `page paging.Request` last and returns
+`paging.Page[T]`, its route reads the page with `paging.Read` after its
+own parameters and answers the page as `data`, and
+`TestPagedRoutesServePages` pages `fixture-paged-api` over httptest, its
+filters on each page and every refusal as `page_parity.json` words it. The
+TypeScript server's paged route reads `cursor` and `limit` with `readPage`
+after the operation's own query parameters, the method takes `args.page`
+and returns a `Page`, and `fixture-paged-api`'s router answers
+`page_parity.json`'s reads and refused cursors over HTTP (`tsrestgen`'s
+`TestGeneratedPagedRouter`). The Rust server's paged operation has `Args`
+that carry `page`, which the router reads by `<Args>::PAGE` and `check`
+holds to it, and its method and its in-process call return
+`runtime::page::Page<T>` (`rustrestgen/page_test.go`). The Go and
+TypeScript SDKs' paged method takes the page request and returns
+`runtime.Page[T]` or `Page<T>`, `ListItemsAll` (an `iter.Seq2`) and
+`listItemsAll` (an `AsyncIterable`) ask for each page as the loop reaches
+it, and their tools take `cursor` and `limit` in the query and return the
+page; the Go SDK reads a page of a union's items through the union's
+wrapper, item by item (`TestPagedUnionSDKBuildsAndRuns`). The Python and
+Rust SDKs' paged method takes `cursor` and `limit`
+and returns `Page[T]` or `runtime::Page<T>`, and `<method>_all` yields
+every item, a lazy `Iterator[T]` or a `runtime::Pager<T>`, held by
+`fixture-paged-api`'s goldens and a stub server in `pysdkgen` and
+`rustsdkgen`. In every SDK an empty cursor asks for the first page, as
+the route reads one (Python and Rust leave it out, where they refused
+it), and a page without `next` is the last. A Python namespace that imports a
+schema type named `Page` imports the SDK's as `SDKPage`, as the
+TypeScript SDK names it. The Topcoat crate renders a paged operation wherever it
+renders a call: the in-process call returns the page; each element type a
+paged operation returns has a `<Element>PageRecord { items, next }`, which
+the build refuses when the schemas declare a type named `<Element>Page`;
+the procedure's arguments record takes `cursor` and `limit`, held to the
+route's limits by `PageSpec::request`, and answers the page record; and
+every paged operation has an argument form, one without another argument
+too, which holds `cursor` and `limit` as the query sends them, renders
+neither, reads them by `PageSpec::query` (`page()`), answers either's
+refusal from `submit` with the route's 400, and gives its links' query
+(`query_pairs()`). The console's list renders the page's items and its
+pager, a paged list without a filter no form and its refusal on its own,
+a nested list's section the first page and a link to the next, and a live
+list's links set its shard's query in place (D44, amended).
+`fixture-console-api`'s `TestTheConsolePagesPicksAndSearches` pages its
+orders, its suppliers and a product's reviews through `Router::handle`,
+the links carrying the filter and the limit, a forged cursor, a cursor
+outside the alphabet and a limit out of bounds the 400, the shard's
+request and its signal a later page, and a procedure a page record;
+`TestAPagedOperationIsItsPageEverywhere`, `TestAPageRecordNamedLikeATypeIsRefused`
+and `TestTheCoreFixturesPageAndRefer`, which compiles `fixture-paged-api`'s
+crate with its page of strings, check the generator.
+acme's `shop-orders` pages `listOrders`, without its `limit` argument,
+`listReviews` and a new `listProducts`: its Go implementation reads the
+keys of up to `limit + 1` rows after the cursor's with one query and the
+rows through the ORM, its Rust one pages in memory and over SQLite with
+`Page::from_rows`, `TestStackDevRunsTheShop` pages each list over Postgres,
+`rust-server/tests/shop.rs` in memory and over SQLite, and every
+language's client reads a page and iterates every item against the Go and
+the Rust server. Its Topcoat app pages the shopper's orders at `/orders`
+as the console pages a list: "Next page" and "First page" built from the
+filter's `query_pairs()`, and a forged cursor or a limit past 100 the
+route's 400 as the form's own message; its console pages the orders, the
+products and a product's reviews, a product's page shows their first page
+with a link to the next, and `call_order_list_orders` answers a page
+record, each in memory and over SQLite (`topcoat/tests/app.rs`).
+Parity is built now because the work per generator is bounded, acme builds
+`shop-orders` on a Go server with all four SDKs, and a server that ignored
+the decorator would answer a list where the others answer a page (D35,
+D42). Until a generator renders the decorator it refuses an operation that
+declares it, naming itself, as generators refused behaviors (D16). Follows:
+a sort argument; a previous cursor; a page size control in the console;
+and removing `meta.totalCount` and `links`, which the Go runtime declares
+and the OpenAPI document advertises and no server writes, a change to every
+golden of its own.
+
+The rule is reversible until the first release.
+
+## D61. A field or argument says what its value refers to with `RefersTo`, and a generated UI lists and names the items
+
+D44's forms and display components show an id as an id. The app supplies
+`Choices` by path, and acme's app keeps a catalog by hand for
+`lines.productId`. D44, amended twice, declined to infer what an id refers
+to from its name or from a source table's foreign key, which an API type
+does not declare, and nothing let an API type declare it: `Relation` is a
+DB schema's, and an argument takes no decorator. Its rules come from type
+wrappers (`QueryParam`, `Validate`).
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A type wrapper, `RefersTo<T, Target, { options, value, label }>` from `@superschematic/api`, on a field of an API schema's object type, input or output, and on an operation's argument. `T` is the value's own type; a list of them refers element by element. It writes `references: { type, options, value, label }` on `FieldDef`, after `relation`, and on `ArgumentDef`, after `encrypted`, members as written and absent when unsaid. IR without it is the same bytes. | A field decorator, `@references`, which an argument cannot take, and a second spelling for arguments; a decorator target for parameters, which the walker would read for this alone |
+| The target is an object type, the service's or a dependency's, that an operation of the same API lists: the items as the API returns them. | A DB type through `@source`, which an API without a database cannot name and whose rows no page receives; an operation alone, a name with no type behind it |
+| Each member is derived when unsaid, by `ir.ResolveReference`, which the loader and every generator call. `options` is the operation that lists the target, by name or `Set.operation`; unsaid, the API's one GET operation that returns `Target[]`, paged or not, takes no path argument and no required one, and admits an end user (neither `@requireService` nor manual). `value` is the target's field the reference holds, `id` unsaid. `label` is the field that names an item, unsaid the target's `@display` `titleField`, else none, and a UI shows the value. A nullable list query argument of the options operation that refers to its own target by the same value is its lookup (`ids`), which a UI calls with the values it must name. | Deriving the target as well, from `@source` and a `Relation`, which follows; the field a detail's path parameter names, a rule of the console's pages the core does not know |
+| The loader refuses, in every form: a target that is not an object type of the service or its dependencies; a reference outside an API schema, on an operation, on a map or on a list of lists; an `options` that is no such operation or does not list the target, or, unsaid, no operation or several; a `value` that is not a field of the target holding one value of the reference's type (`Identity.UUID` to `Identity.UUID`); and a `label` that is not a single text field, by `titleField`'s rule (D48). A reference is not checked at run time: an implementation refuses an id it cannot find, as it does now. | Checking each value against the options at run time, a read per request for what a foreign key or the implementation already holds |
+| The Topcoat crate gains a `references` module when a form or a record holds a reference. A control whose field or argument refers to a target is a select of the options operation's items, the label as each option's text and the value as its value, from one call per target per request, `PageRequest::first(maxLimit)` when the operation pages. A target with more items than one page holds keeps its text control, since a select would hide the rest. | Every page of the options, without bound; a select of the first page, which hides the item a reader wants |
+| A display component names a referenced value by its label. A page gathers the distinct values its records hold for each target and calls the lookup with them, in chunks of the lesser of its `listMax` and, when the options operation pages, its `maxLimit`, at most 10 calls a target each time it names a set of records; without a lookup it calls the options operation once, its first page, and names what that holds. A value not found shows as it is. The calls are kept for the request (`#[memoize]`), as an item's detail is, and nothing is cached across requests, since labels change and callers differ. | A detail call per value, a call per row; a cache shared by callers, which would show one caller another's items |
+| The pages give the options and labels to the forms and components as `Choices` by path, under the app's: the app's `Choices` win at any path they name. A caller whom the options or lookup operation refuses (401 or 403 from `can_*`), or whose call fails, gets the plain control and the values as they are; the page does not fail for it. A detail whose path parameter refers to its own result type links a list's rows by the reference's value, as one whose parameter names a field does (`products/{productId}` and `id`). | Refusing the page, whose own operation the caller may call; a second set of choices beside the app's |
+
+Status: built: the core, the Topcoat crate, acme's API and its Topcoat
+app. `RefersTo` and `RefersToConfig` come from `@superschematic/api`; the TypeScript
+reader writes `ir.ReferenceDef` (`references: { type, options, value,
+label }`, `type` required and no member blank) on `FieldDef` after
+`relation` and on `ArgumentDef` after `encrypted`, as the JSON and YAML
+forms do; `format` writes `RefersTo<T, Target, { ... }>` back with only
+the members said. `ir.ResolveReference(schema, dependencies, ref)`
+derives the target, options, value, label and lookup and reports the
+first rule broken, and `ir.ReferencesOf` lists every reference with its
+holder. `internal/loader/verify/references.go` runs it after the display
+checks, adds the refusals of placement and of the value's type, and reads
+the dependency whose type a reference names when the schema imports it:
+only a dependency its config declares, of a kind an API may reference
+types from, so two APIs that refer to each other get the import's own
+refusal, and a cycle of such reads is refused, not read without end.
+The tests: `ir/reference_test.go`, `verify/references_test.go`, the
+reader's `refers_to_test.go` with `broken-references`, the loader's
+`references_test.go` (a dependency's target and two APIs that refer to
+each other among them), and
+`fixture-refs-api` in TypeScript, JSON and YAML, which load to one IR and
+round-trip through every writer. No server, SDK or OpenAPI document
+changes. The Topcoat crate resolves each reference its forms and records
+hold by `ir.ResolveReference` and, when its options operation has an
+in-process call, writes `references`: per form a
+`<form>_choices(cx, choices)` and per record a
+`<record>_labels(cx, records, choices)`, each answering `Choices` by path
+under the app's, which win where they name a path and spare its call. A
+form's options are one listing a request (`#[memoize]`), the first page
+of up to its maxLimit when it pages, none when more follow; a record's
+labels come through the lookup, in chunks of the lesser of its listMax
+and, when the options operation pages, its maxLimit, at most
+`MAX_LOOKUP_CALLS`, 10, calls a target in a `<record>_labels` call, or,
+without a lookup, from the listing; a refused or failed call leaves the
+plain control and the value. A reference whose options operation has no
+in-process call is left out with its reason in the build log. The pages
+pass every form and component its references' choices, and a list's rows
+link to their items through a detail parameter that refers to its own
+result type. `TestTheConsolePagesPicksAndSearches` holds
+`fixture-console-api` to them through `Router::handle`, counting the
+implementation's listings and lookups, with a caller who may not list the
+products, the app's own choices, more products than a page, a reference
+by sku, which no lookup refers by, and the app's own page;
+`TestReferencesResolveByTheCoreRule`, `TestAReferenceWithoutACallIsIgnored`,
+`TestReferencesBuildWithFormsOrViewsAlone` and, over `fixture-refs-api`'s
+lookup that does not page, `TestTheCoreFixturesPageAndRefer` check the
+generator. acme's `PlaceOrderLine.productId`,
+`OrderLineView.productId` and the `productId` path arguments refer to a
+`ProductView` that `shop-orders` lists in a new `listProducts`, with a
+lookup, and reads in `getProduct`, built in its Go and Rust
+implementations. Its Topcoat app has dropped its hand-written catalog
+choices: the new-order page's selects come from
+`references::place_order_input_form_choices` and an order's page names
+its lines' products through `references::order_view_labels`, both through
+`listProducts`, and its console, given no choices, does the same, lists
+the products to anyone, links each row to its page by `getProduct`'s
+reference and names a product in its trail. Follows: the target derived from `@source` and a `Relation`; a
+reference to another service's type; a picker that searches (D62) when the
+options do not fit a page; a vendor key in the OpenAPI and tool documents;
+and a breadcrumb step named by the reference of its route parameter.
+
+The rule is reversible until the first release.
+
+## D62. A list operation's search text is a `SearchQuery` argument, and SQLite's FTS5 index stays for later
+
+A table with `@searchField`s gets a `search_text` column (D27), on SQLite a
+`VIRTUAL` column without an index (D27, amended), but no API says that a
+list searches it: acme's `listReviews` filters by rating alone, and a
+console has no box to type into.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A type wrapper, `SearchQuery<T>` from `@superschematic/api`, marks an argument as its operation's search text: an optional query parameter, as `QueryParam<Nullable<T>>` is, where `T` is `string` or a scalar whose values are strings, with its own rules (`SearchQuery<Validate<string, { maxLength: 100 }>>`). It writes `search: true` on the `ArgumentDef`, after `references`, with `isQuery` and without `required`. An operation takes one. The loader refuses, in every form, a search argument that is required, has a default, is not text or is a list, sits on an operation that is not a GET, or is a second. | A name the console recognizes (`q`, `search`), which a filter of that name would trip; an operation decorator naming its argument |
+| A search keeps the items whose searchable text contains each of its words, case-insensitively; a word is a run of characters that are not Unicode `White_Space`, the first 8 count, and blank text searches nothing. For a result type sourced (`@source`) from a table with search fields, the searchable text is the table's `search_text`: `ILIKE`, which Postgres's trigram index serves, and `LIKE` on SQLite, which reads every row and folds case in ASCII alone. A search filters and does not rank, so a paged search keeps the operation's order and its cursor (D60). | Ranking by relevance, which a cursor over the operation's order cannot page; the whole text as one substring, which misses "red anvil" in "Anvil, red" |
+| Each server's runtime gives the two steps an implementation needs, the words and each word's pattern (`\`, `%` and `_` escaped with `\`, then wrapped in `%`), for `LIKE ... ESCAPE '\'`: Go's `search.Terms` and `search.LikePattern`, TypeScript's `searchTerms` and `likePattern`, Rust's `search::terms` and `search::like_pattern`. `runtime/http/testdata/search_parity.json` holds Go, TypeScript and Rust to them. | Each implementation escaping its own patterns, where a `%` in a shopper's text matches everything |
+| The console's filter form renders the search argument first, as `<input type="search">` labeled "Search", holding the text sent, with its rules as attributes, and gives the form `role="search"`. A submitted search starts at the first page. | Its argument's name in words as its label, "Q" |
+| SQLite keeps the scan. An FTS5 table with the trigram tokenizer stays for later, for the reasons D27, amended, gave: a virtual table and triggers that the model, the diff and the runner do not know. acme's reviews are few, and a Topcoat app over a SQLite file serves one process. | Building it now, ahead of a SQLite reader that needs search to be fast |
+
+Status: built: the core, the runtimes' helpers, the console's box and
+acme. `SearchQuery` comes from
+`@superschematic/api`; the readers write `search: true` on `ArgumentDef`
+after `references`, with `isQuery` and without `required`, and `format`
+writes `SearchQuery<T>` back.
+`internal/loader/verify/search.go` refuses, in every form, a second search
+argument, one that is not a query parameter of a GET, is required, has a
+default, or holds anything but one text value (`ir.TextValue`, the rule
+`titleField` and a reference's label share). The runtimes give
+`search.Terms`, `search.LikePattern`, `search.Fold` and `search.Matches`
+in Go (`runtime/http/go/search`), `searchTerms`, `likePattern`,
+`foldText` and `searchMatches` in TypeScript, and `search::terms`,
+`search::like_pattern`, `search::fold` and `search::matches` in Rust: the
+fold is each character's simple lowercase, one for one, so an in-memory
+match is the same in the three. Go's `unicode` tables are Unicode 15.0,
+and Rust's `char` and Bun's ICU Unicode 17.0, so Go's `Fold` takes the 55
+simple lowercase mappings the later versions added first, from
+`fold_table.go`, which `go generate` writes from the Rust runtime's
+`fold_mappings` example, and the vectors fold and match each of them.
+`runtime/http/testdata/search_parity.json`, written by the Go package's
+test, holds them to the same words (Unicode `White_Space` without
+U+FEFF, the first 8), patterns, folds and matches.
+The tests: `verify/search_test.go`, the reader's and the loader's tests
+with `fixture-refs-api`, and each runtime's parity test. The Topcoat
+argument form puts its search argument first, a `type="search"` box
+labeled Search with its rules' attributes, which no choices make a
+select, the console's filter form holding one is `role="search"`, and a
+list's links carry it; `TestTheConsolePagesPicksAndSearches` searches
+`fixture-console-api`'s orders and a product's reviews by each word, in
+any case, and pages a search. acme's
+`listReviews` takes `q`, matched against `Review`'s `search_text` in
+memory, over SQLite and over Postgres (`rust-server/tests/shop.rs`,
+`TestStackDevRunsTheShop`), and its Topcoat app's console searches a
+product's reviews by it, the Search box first, by each word in any case,
+a `%` matching itself and a paged search's links carrying it, in memory
+and over SQLite (`the_console_searches_a_products_reviews`). Follows: FTS5; the search in the
+OpenAPI and tool documents; a Go ORM filter on `search_text`; and the
+picker that searches a reference's options (D61).
+
+The rule is reversible until the first release.
+
+### D44, amended: a list's filter updates it in place through a shard, and the pages keep their routes' controls
+
+A review of the generated pages found five gaps, beside a feature they
+lacked: a list's filter loaded the whole page again for each change,
+where Topcoat's runtime can render part of a page again. A list at
+`C/new` beside C's new page, or a collection named `edit` or `delete`
+under an item with an edit or a delete page, registered a page twice,
+which Topcoat's router refuses with a panic as the app builds. Choices
+were one set for every resource. The nav asked every top-level guard on
+each render, each guard asked the `PageAuthenticator` again, and the
+index asked them all once more. The pages skipped their routes'
+`@rateLimit`, `@bodyLimit` and `@timeout`, so acme's console was an
+unlimited twin of `placeOrder`, as its procedure was before the
+procedures amendment. And a collection whose type declares no `@display`
+named its items by a singular English rules guessed from its path,
+`shelves` a Shelve, while `orders/archived` took its type's `plural`,
+Orders, the title of `orders` too.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `outputs.topcoat.pages.live`, or `pages_live = true` beside `pages_prefix` in `[extension.topcoat]`, off by default, renders each list with a filter through a `#[shard]` at `<prefix>/_live/<resource>`, a path the build does not change. The shard holds the list's heading, its filter and its table, and a signal holds the filter's query, the page's at first. When the app loads Topcoat's runtime, the form's submit stops the browser's own, writes the form's query, as the browser would send it, to a hidden input whose input event sets the signal, and puts the query in the address bar; the runtime renders the shard again with it. Without the runtime the form is the GET form it was and the shard renders inline. A list without a filter has nothing to update and stays a component. | Live lists by default, whose endpoints an app without the runtime could not use; a signal per control, which each kind of control would bind its own way; setting the signal from the script itself (`cx.hydrate`), which the runtime does not document; re-rendering the page through a `link`, which the runtime offers for an anchor, not a form |
+| A shard's request meets no page's guard or layout, so the shard reads the query as the page reads its own, through the list's argument form, and calls the list through `operations`: the caller admitted and the filter checked as the route does, a refusal its route's status (401, 403, 404, 422) and the pages' refusal, as the page answers it. A nested list's shard takes its parent's id as an argument, which its call checks as the page's checks the route's, and ignores the query's hidden path value. The runtime applies only a 200, so a refused re-render leaves the table as it was, and a reload shows the refusal. | A guard of the shard's own, beside the call's; answering a refusal 200 so the runtime applies it, which would give the shard another status than its page |
+| An action's form keeps its POST-redirect-GET: the item's page does not refresh in place. | Posting it through a shard, which would run the operation inside a render; through a procedure, which would need the form's fields as a record the browser builds |
+| Collections are checked in key order, so a collection's pages come before those of one that extends its path or lies under its items. A collection one of whose routes another's page already serves has no pages: each of its operations is left out with the reason in the build log ("its collection, projects/new, has no pages, since the list of projects/new would be served at GET projects/new, the new page of projects"), and it leaves the trail unless a collection under it has pages. | Renaming its pages, which would put the console's paths out of step with the API's; leaving out the console's own new, edit or delete page, which its links and its trail name |
+| `Settings::choices_for(resource, choices)` scopes choices to one resource's pages: its list, its item's page, its new, edit and delete pages, and its section on its parent's page. The resource is named by its path below the prefix, its parameters as its pages name them, as `pages::RESOURCES` lists it; a name none has panics, as a typo would. On its pages a resource's choice for a field wins over the app's for that field, and its other fields keep the app's (`Choices::and`). | Choices per page, which the generated pages could not take; naming a resource by its Rust identifier or by the API's path, whose parameters operations name differently at one place |
+| A request asks the `PageAuthenticator` for its caller once: the crate's `admit` reads it through `#[memoize]`, so each guard is a permission check of that caller. The nav's list of what the caller may list is kept for the request too, which the index shares. | Memoizing each guard, which `#[memoize]` cannot key by an `OperationInfo`; a value the layout puts in the request's context, which Topcoat renders in no order beside its page |
+| A page's request meets the traffic controls of the operation it is for, in the route's order, through `PageControls`, one layer at the prefix that `<service>(...)` adds, which finds the page by its method and the path its route is registered at: a post its operation's; a GET page that shows an operation's result its operation's, a list's page the list's, an item's page and its edit and delete pages, which show the item, the detail's; a live list's shard its list's. The index calls no operation and meets none, and a GET page carries no body for a body limit to refuse. A page whose forms or records hold a reference (D61, the console amendment below) meets, besides, the rate limit and the timeout of each options operation they call, listing or looking up its target: the new page its form's, a list's page and its shard its filter's and its rows', an item's page its detail's, its actions' forms' and its sections' rows', the edit page its form's, the delete page its form's and the item's, and a post those of the page it renders again. Each limiter counts the request, the page's own operation's first, the tightest timeout covers the render, and the body limit is the page's own operation's, since no other call carries the body. Each operation's limiter for the pages, at its route's rate and keyed by Topcoat's `client_ip`, is shared by every page and shard that calls the operation; the route and the procedure keep theirs, as replicas would. The body is read up to its limit before the page decodes its form, and the timeout covers the render. A refusal is the route's 429 with `Retry-After`, 413 or 504, and the pages' refusal section, its heading and the route's message, without the layout, since the page did not run. Besides its references', a page meets its own operation's controls only, not those of the lists its sections show. | A layer per page, which Topcoat matches by prefix, so a list's would cover its items' pages; the controls in the in-process call, which would spend an operation's budget on the app's own pages; limits on posts alone, which would leave a list's page an unlimited read of its route; a page's own operation's controls alone, which would let a client repeat any page that holds a reference for up to a maxLimit of the options operation's items past its limits; the layout around a refusal, which only a page renders |
+| No label guesses a singular. An item is named by its type's `@display` noun, else by its type's name in words, as a table names an untitled row (`Shelf`, `OrderView` an Order view); a collection by its type's `plural`, else by its path's last word as given (Shelves); one whose path extends a sibling's, `orders/archived` beside `orders`, by its own words after the sibling's (Archived), never by its type's `plural`; an item of a collection without pages, which has no type, by its id alone in the trail. A route's parameter keeps its name (`shelve_id`), an identifier, not a label. | The plural with "item" ("Shelves item"), which reads as neither; a dictionary of English plurals; renaming the parameters, which an app's `href!` names |
+
+Status: built. `fixture-pages-api` gains a filter of a project's tasks
+by `done`, shelves whose type declares no `@display`, archived projects
+at `projects/archived` that only an auditor lists, and lists at
+`projects/new`, `projects/{id}/edit` and `projects/{id}/delete`, and its
+golden and cargo test have the lists live. `TestPagesServeATopcoatApp`
+drives it through `Router::handle`: a list renders its filter, as a GET
+form, between the shard's markers; the shard's own request renders the
+filtered list without the layout, and renders it again under the shard's
+identity from the signal the submit set; a filter the rules refuse is
+422; a query's id and unknown names are ignored; a caller the list
+refuses gets the route's 401, with the sign-in link, or 403, and no row;
+the tasks' shard reads its project from its argument and not from the
+query, and one that is no project's id is 404. A counting authenticator
+is asked once for the index, a list, an item's page, an edit page and a
+nested list. Choices scoped to the projects and to a project's tasks win
+on their pages, the app's hold on a label's tasks, and `choices_for` of
+no resource panics. Shelves are titled Shelves and a shelf Shelf, the
+archived projects Archived beside Projects, and the app builds with the
+colliding lists left out. `TestPagesThatWouldMeetAreLeftOut` reads their
+reasons in the build log, `TestLiveListsAreOptIn` the crate without and
+with live lists and through the table, and `TestTheOperationsDescribeResources`
+a list at `things/new` and one at `things/{id}/delete`.
+`fixture-controls-api` gains the orders' list, two a minute and
+filtered by a status, an order, and its hold, two a minute, a megabyte
+and a second; `TestPagesKeepTheirRoutesControls` turns its pages on, live:
+the list's third page in a minute is the route's 429 with `Retry-After`,
+its shard shares the budget both ways, an order's page is not limited,
+and the hold's third post is 429, a body past the megabyte, sent or
+declared, 413, and a slow hold 504, each as the pages' refusal. It also
+gains warehouses, listed two a minute and in a second, and shipments,
+whose list has no control and whose rows name their warehouses through
+the warehouses' list: the shipments' third page in a minute is 429, the
+warehouses' own page shares that budget, and a slow listing of the
+warehouses times the shipments' page out with 504. acme's
+console's new-order and cancel posts carry `placeOrder`'s and
+`cancelOrder`'s controls, its products' trail names a product by its id,
+and its lists are not live, since the app loads no runtime.
+
+The rule is reversible until the first release.
+
+### D44, amended: the console pages a list, picks and names what an id refers to, and searches
+
+D60, D61 and D62 give a list operation a page, a value the item it refers
+to, and a list a search text, and the Topcoat crate rendered none of them.
+A paged operation's `Args` carries the page asked for, which no argument
+form filled, so its call, its procedure and its console page had no way to
+ask for one; the console's list rendered the whole result; a form showed a
+product's id as a text input and a table as the id, unless the app wrote
+the catalog's choices by hand; and a search argument was a text input
+labeled "Q".
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Each element type a paged operation returns has a page record, `<Element>PageRecord { items, next }`, its items as a record holds the element and `next` the cursor's text, with `From<&Page<T>>`, `from_wire` and `to_wire`. The build refuses a schema that declares a type named `<Element>Page`, whose record the page record would be too. A paged operation's procedure takes `cursor: Option<String>` and `limit: Option<i64>` beside its arguments, which `to_args` holds to the route's limits with `PageSpec::request`, a refusal the route's 400 as a `ProblemRecord`, and answers its page record. | One generic page record, which a Topcoat record cannot be; the page's items alone, which drops the cursor the next call needs |
+| Every paged operation has an argument form, one with no other argument too. It holds `cursor` and `limit` as `Option<String>`, as the query sends them, renders a control for neither, and reads them with `page()`, `PageSpec::query` over the two values, so each refusal is the router's 400 at its parameter; `parse` builds the `Args`' `page` from it, and `submit` answers a refused cursor or limit with that 400 before it parses the rest. `query_pairs()` is the query the form holds, each argument's values in control order, then `limit` when sent, never `cursor`, from which a page builds its links. | Controls for the cursor and the limit, which D60 leaves out of the filter; a 422 for them, which the JSON API answers 400; a page reading the two values beside the form, which the procedure and the app's own pages would each read again |
+| A paged list's console page renders the page's items in its table and, after it, `<nav class="ss-pager">` with "First page" (`rel="first"`) while a cursor was sent and "Next page" (`rel="next"`) while one follows, each the list's path with `query_pairs()` and, for the next, `cursor`, percent-encoded. A paged list without a filter renders no form, and a refusal of its page renders on its own with its status, as a refused caller's does. A paged list that is a section of its parent's item page shows its first page and a "Next page" link to the list's own page. A live list's links each set its shard's query, which renders the list again in place, and put the query in the address bar; without the runtime they are links. The pager's helpers, `pager`, `pager_query` and `pager_href`, are named apart from a collection's functions, `page_href` for a list at `page`, and a collection whose functions would be the pager's takes a number, `pager_2`, as a second collection of one name does. | A previous link, numbered pages and a page size control (D60); paging a section in place, which would give an item's page a query of its own per section |
+| A search argument is its form's first control: `<input type="search">` labeled "Search", with its rules' attributes, which no choices make a select. The console's filter form that holds one is `role="search"`, and its links carry it. | Its argument's name in words, "Q" (D62); a separate search form, which would drop the filters on each search |
+| `references` is written when a form or a record the crate has holds a reference (`RefersTo`), resolved by `ir.ResolveReference`, whose options operation has an in-process call; one without is left out, its control and value as they were, with the reason in the build log. Per form, `<form>_choices(cx, choices) -> Choices` gives each control that holds a reference its target's items as options; per record, `<record>_labels(cx, records, choices) -> Choices` names each value the records hold, at any depth, by its item's label. The module's own functions for a target are `<target>_target_choices` and `<target>_target_labels`, apart from the labels function of the target's own record, which a target that shows a reference has, as a product names its supplier. Both answer by path under `choices`, the app's, through `Choices::or`: the app's win where they name a path, and no call is made for it. | Choices computed for every path, which would call for paths the app names; a function per page, which an app's own page could not call |
+| A form's options are one listing a request, kept with `#[memoize]` and shared by every reference to the target: its first page of up to its maxLimit when it pages, and none when more follow, since a select would hide them. A record's labels come through the options operation's lookup with the distinct values the records hold, in chunks of the lesser of its listMax and, when the options operation pages, its maxLimit, at most `MAX_LOOKUP_CALLS`, 10, calls a target in a `<record>_labels` call, each kept for the request; a reference by a value no lookup refers by, a sku say, is named from the listing. A value no item has shows as it is. A call the operation refuses (401, 403), or that fails, gives the plain control and the value; the page does not fail. A value is the text a record holds and a form sends, read from the item's JSON. | A call per value or per row; a cache across requests, which would show one caller another's items; failing the page, whose own operation the caller may call |
+| Each form a page renders takes its form's choices, a list's rows their record's labels, and an item's detail, on its page and on its delete page, its own; an action's form takes its own choices beside the detail's labels, since a record's path and a form's control may share a name. A detail whose path parameter refers to its own result type links a list's rows by the reference's value field, `products/{productId}` by `id`. | One set of choices per page, which would offer a detail's few labelled values as a form's options |
+
+Status: built. `fixture-console-api`, the extension's own, has products
+listed a page at a time, searched and read by a reference, each naming its
+supplier, their reviews a page at a time under them, suppliers a page at a
+time with no filter, orders a page at a time, filtered by status and by a
+product and searched, read, placed from lines that refer to products,
+gifted a product by its sku, and given a line from their page, and the
+site's pages a page at a time at the path `page`.
+`TestTheConsolePagesPicksAndSearches` drives its console through
+`Router::handle`: a list's next and first links, with the filter and the
+limit; a cursor outside the alphabet, a forged one and a limit out of
+bounds, each the route's 400 as the form's own message, a refused cursor
+still offering the first page; a list without a filter with no form and
+its refusal on its own; the search box first, `role="search"`, matching
+each word in any case and carried by the links, and a search past its
+rules 422; the new page's selects, the app's own page's and an action's,
+from one listing a render; an order's lines named through one lookup and
+its gift from the listing; a caller who may not list the products given
+text inputs and the ids, the app's choices winning and sparing the call,
+and six products kept as text and named in two chunks of five; products
+linked by their reference and a product's reviews a section with a link to
+their next page; a product naming its supplier on its page and its rows
+while its reviews name it; the live list's shard paging by its query and
+by its signal; a procedure answering a page record and its refusals; and
+the site's pages linking their next and first pages.
+`TestAPagedOperationIsItsPageEverywhere`,
+`TestReferencesResolveByTheCoreRule`,
+`TestReferenceFunctionsAreNamedApart`,
+`TestACollectionAtPagerIsNamedApart`,
+`TestAReferenceWithoutACallIsIgnored`,
+`TestAPageRecordNamedLikeATypeIsRefused`,
+`TestReferencesBuildWithFormsOrViewsAlone` and
+`TestTheCoreFixturesPageAndRefer`, which compiles `fixture-paged-api` and
+`fixture-refs-api` with their pages, check the generator, and of the eight
+earlier goldens only `fixture-controls-api`'s changes, by its warehouses
+and shipments (the amendment above). acme's Topcoat app gives the console
+no choices any more: its console and its own pages pick and name products
+through `references`, its `/orders` pages with the pager's links, and its
+tests, in memory and over SQLite, page the orders and the console's orders
+and products by their links, see a product's page show its reviews' first
+page and a link to the next, search a product's reviews, refuse a forged
+cursor and a limit out of range with the route's 400, and call the orders'
+procedure with a cursor and a limit.
+
+## D63. A generic connector joins deployables of two providers, with a per-edge Ed25519 key from the tls provider whose private key reaches the caller through its secret store
+
+Section 6.2 of `docs/stack-model.md` sketched the generic connector:
+between two platforms on different providers that no connector serves,
+the caller reaches the callee at its exposed address and signs a
+short-lived token with a key pair generated for the edge, whose private
+key goes into the caller's secret store and whose public key into the
+callee's callers field. D37 settled the token, D55 gave platforms a
+public address, and section 3.4 promised a member a platform sets from its
+secret store. The model had no notion of a provider, no way for a key pair
+to come out of a real provisioner, and runtimes that read keys only as
+JWKs. The maintainer chose Cloudflare Workers as the second target, and
+the generic connector first, proven offline.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `PlatformSpec` gains `Provider`, required: `local`, `gcp`, `cloudflare`, `fake`. The core registers the generic connector as two `ConnectorSpec`s with `Generic` set and no platform named, `generic.http` and `generic.site` (`internal/stack/generic`, from `generator.RegisterCore`). `Registry.Connector` returns the connector that names both platforms when one does, and otherwise the generic one of the edge's kind when both platforms are registered and their providers differ; an exact connector always wins. `RegisterConnector` refuses a generic one that names a platform, serves a sql or a bucket edge, or repeats an edge kind, and `Finalize` skips it. | The provider read from the platform name's first word, a naming rule nothing enforces. An optional `Provider`, under which a platform that forgot it would silently never mix. A generic connector per target pair, the matrix it exists to avoid. A generic sql or bucket edge, which needs a driver or a client that knows both providers, as Hyperdrive does. |
+| An http edge it serves reaches the callee at its public address (`PublicAddressOf`), so resolution refuses an edge across providers to a server the stack does not expose with a new code, `cross-provider-unexposed`, modeled on `site-calls-unexposed`, and one whose platform gives no public address with `lowering`. A site edge across providers derives the API's public address, as every site connector does. | Reaching the callee's internal address, which another provider's network cannot. Exposing the callee implicitly, which puts a server on the internet that the stack says is internal. |
+| The edge's key pair is a node of the Pulumi `tls` provider, `tls:index/privateKey:PrivateKey` with the algorithm `ED25519`, `<caller>.calls.<callee>.key`, which two edges from one caller to one callee share. The caller's credential is a `signed-token` whose `key` references its `privateKeyPemPkcs8`; the callee's issuer is the caller, with its `publicKeyPem` as its one key, EdDSA and 300 seconds. The root module pins the type at pulumi-tls 5.6.2 in `internal/stack/generic/schemas`, written by `internal/tools/providerschemas`, and the connector registers the schema itself through a new `ConnectorSpec.ResourceTypes`. A distribution pins the provider for the provisioner (`stack.GenericKeyProviderVersion`). pulumi-tls is bridged through the Terraform plugin framework, whose bridge metadata has no auto-aliasing table, so `pintool` falls back to its renames table for the Terraform type. | The pin in the target that lowers the key, gcp today and Workers next: two modules pinning one provider, which the registry refuses to register at two versions once a binary links both, and a node no binary without that target validates. A key the deploy generates outside the graph, which a provisioner's state would not track and a destroy would not remove. The `random` provider's bytes as a seed, which no runtime reads as a key. |
+| The provider writes the key as PEM, the private key PKCS#8 and the public key SubjectPublicKeyInfo (RFC 8410), so the runtimes read both beside a JWK: a signed-token source takes a private JWK's JSON or the PKCS#8 PEM (Go `serviceauth.SignedToken`, TypeScript `signedTokenSource`, Rust `SignedKeySource::from_pem` and `from_key`), and a callers field's key is a `jwk` or a `pem` (`ir.ServiceAuthKey.PEM`, `<field>_ISSUERS_<i>_KEYS_<j>_PEM`), which the reader turns into an Ed25519 JWK. A PEM's `kid` is the key's RFC 7638 thumbprint, which the signer and the reader each compute, so no `kid` travels in the graph. Only the RFC 8410 encodings of an Ed25519 key are read, one block with whitespace around it and nothing else, by one rule in the three runtimes. The TypeScript runtime computes the thumbprint with a synchronous SHA-256 of its own, since `loadCallers` is synchronous and imports nothing from `node:`. | A JWK the program builds from the PEM, which Pulumi YAML cannot express without a function call. A `kid` output, which the tls provider has none of. Parsing any PKCS#8 or SPKI with each language's library, whose leniencies differ, so the parity vectors could not hold them to one answer. |
+| A derived value's member may be a secret: `ir.SecretDerivedMember`, a signed-token credential's `key` today. A connector derives it as a reference to an output, and resolution refuses a literal (`lowering`), so `environment.json` never holds it. `ir.DerivedVariables` marks its variable `Secret`, and a platform sets it from its secret store. gcp writes a Secret Manager secret of the deployable's own, `<stack>-<environment>-<deployable>-<variable>`, a version whose data is the reference (`gcp:secretmanager/secretVersion:SecretVersion`, now pinned), and the deployable's accessor grant, and mounts the variable with `valueSource.secretKeyRef` at that version, so a new key rolls out a new revision. The fake platforms write a fake secret version. The local target already sets its key from the state directory, which its provisioner reads when it starts a process. The Pulumi program exports no output a secret member references. | The key as a plain environment variable, which every revision's spec and every reader of the service would see. The secret's `latest` version, which would not roll a revision when the key changes. A flag on the binding rather than the member, which would put a whole service endpoint in a secret. |
+| One key slot per edge. Rotation, two slots replaced in turn by the `time` provider's `Rotating` node (section 9.2), is not built: a key changes only when its node is replaced. | Two slots now, before any deploy has run the one. |
+
+One environment still has one target and one provisioner, and the deploy
+seams follow the environment's target (`internal/stackdeploy`). A mixed
+environment resolves and renders, but a real mixed deploy, for Workers
+beside gcp, will also need: each provider's credentials in the run, not
+only the DNS platform's (`stackdeploy.CredentialsOf`); a build and a pin
+per platform, since a Worker is a script bundle, not an image; each
+platform's own secret store for `Secret<T>` fields; a migration runner
+per database platform, for D1; and policy rules that leave another
+provider's nodes alone, as gcp's do. Section 6.2 of
+`docs/stack-model.md` lists them.
+
+Status: built, proven offline. `internal/registry`'s `TestGenericConnector`
+holds the registration and the fallback, and `internal/stack`'s
+`generic_test.go` resolves a fake server calling a server of a second
+provider and the reverse, a site across providers, the refusals, an exact
+connector that wins and a literal key. `extensions/gcp`'s `MixedShop`
+goldens, Staging and Preview, put stacktest's `EdgeShop` services on the
+fake target's TypeScript-only `fake.edge` beside Cloud Run: Orders, a
+Cloud Run service, and shop-orders' job, a Cloud Run job, call
+shop-pricing on `fake.edge`, and shop-storefront on `fake.edge` calls
+shop-api on Cloud Run, whose callers field then holds Google's issuer and
+the storefront's. `extensions/pulumi`'s render golden
+`gcp-mixedshop-staging` holds the key nodes, the secret versions and
+`secretKeyRef`. The local target's `TestGenericConnectorLeavesLocalEdgesAlone`
+holds its edges to its own connector. Go's
+`TestLoadCallersVerifiesAGenericCaller` and TypeScript's credentials test
+sign with a PKCS#8 key and verify against the SPKI key through the callers
+field; `serviceauth_parity.json` gains a `signing` section and
+`stackconfig_parity.json` the PEM key and its refusals, which the three
+runtimes pass. No mixed environment has deployed.
+
+## D64. A cloudflare target runs an environment on Cloudflare: TypeScript servers as Workers built as bundles the deploy pins, SQLite-dialect databases on D1, buckets on R2, sites on static assets and jobs on Cron Triggers
+
+Milestone 7 left a second target. The maintainer chose Cloudflare Workers,
+as a standalone target with its own state, secrets, bootstrap and CI
+identity, rather than Workers platforms mixed into a gcp environment. D1
+comes first and Hyperdrive to Cloud SQL later. Workers authenticate to
+each other with the generic connector's per-edge keys (D37, D63), not with
+a service binding's `ctx.props`. superscalar ships a WebAssembly build
+under `workerd` and `browser` export conditions, in its own repository.
+The maintainer also chose: bootstrap generates the state's passphrase and
+whoever deploys keeps it; bootstrap writes the CI tokens to GitHub with
+`gh`; `stack dev` stays on Bun and SQLite files; and the target is done
+when the storefront and a D1-backed API have run live. Section 18 of
+`docs/stack-model.md` is the full design.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `extensions/cloudflare` registers a target `cloudflare` beside its DNS platform, with platforms `cloudflare.workers` (servers, TypeScript), `cloudflare.cron` (jobs, TypeScript), `cloudflare.d1` (databases, `sqlite`), `cloudflare.r2` (buckets) and `cloudflare.sites` (sites), each with `Provider: "cloudflare"` (D63). It registers no worker platform. | Workers platforms placed by `settings.platform` in a gcp environment, which needs platform credentials, platform values outside the target and the generic connector before anything resolves. A target per product, which splits one account's state and bootstrap. |
+| An environment enters `cloudflare: { accountId }`. Bootstrap records `workersSubdomain` and `secretsStoreId` beside it in the schema, through D47's `BootstrapValue`. Every node sets `accountId`, so no provider node is needed, and the provider reads the run's token from `CLOUDFLARE_API_TOKEN` in the deploying process's environment. | Looking them up when the graph plans, a call the graph cannot express. A provider node whose token comes from config, which writes its ciphertext beside the program. |
+| State lives in one R2 bucket per account through Pulumi's S3 backend. The store derives the S3 credentials from the token (its id, and the SHA-256 of its value) and hands them to the provisioner in a new `StateBackend.Env`. The secrets provider is `passphrase`: bootstrap generates it once and whoever deploys keeps it, and CI holds it as a secret. R2 keeps no versions, so each manifest is written twice, current and history. | The passphrase stored in R2 beside the state, which makes the encryption decorative. Pulumi Cloud (D30). Another provider's KMS, a second cloud in a Cloudflare project. |
+| Application secrets live in the account's Secrets Store, one per secret identity per environment; `stack secrets set` writes it, and each reading Worker holds a `secrets_store_secret` binding. No value enters the graph or is read back. | Per-Worker `secret_text` set through the API, which deploys versions outside Pulumi that the next apply rolls back. Values in the state's config, which the deploy would read. |
+| Bootstrap runs per account with the engineer's token: it creates the state bucket, generates or checks the passphrase, finds or creates the Secrets Store, and applies a bootstrap graph with a `deployer` and a read-only `planner` account token. With `--github` it writes the tokens and the passphrase as GitHub Actions secrets with `gh`; otherwise it prints each once. `TargetSpec.CI` gives a `cloudflare-api-token` identity naming those secrets, the first CI identity that is a long-lived secret; federation stays the rule where a provider offers it. | Tokens a person creates from a printed template, which drift from what the graph needs. User-owned tokens, which leave with their person. |
+| A deployable's artifact is the platform's to say: `PlatformSpec.Artifact` is an image (the default) or a bundle. A bundle is built on the deploying machine after the workspace's frozen install, digested as a context is (D46), kept through a new `Bundles` seam in R2 under its digest, pinned with `{bundle-digest}` and per-file tokens, and placed under the program's `artifacts/` before each provisioner run. The manifest records bundles, and `--bundle` rolls a server back. | The bundle's bytes in the program, megabytes per Worker in every checkpoint. Uploading versions outside the graph, whose bindings reference graph outputs. A `HasImage` exception per kind. |
+| A Worker is three nodes: `worker` in infrastructure, a `workerVersion` per rollout, and a `workersDeployment` sending all traffic to it. | `workersScript`, which has no workers.dev URL output. A version with `deploy: true`, which hides the deployment the waves apply. |
+| The `server` generator writes `fetch.ts` and `bundle.ts` for each TypeScript server some environment places on Workers, beside `main.ts`. `bundle.ts` runs `Bun.build` for `workerd` and keeps superscalar's `.wasm` as a module of its own. `fetch.ts` reads config strings at module scope, so a refused config fails the version's upload, and builds `Deps` lazily once per isolate, with no Node API and no `nodejs_compat`. | `Deps` per request. `main.ts` under `nodejs_compat`. wrangler or esbuild, a Node toolchain beside Bun. |
+| Resolution refuses what Workers cannot run: a Go or Rust server; an API over the identity runtime (D50); a database holding engine types (D58); a queue worker (D53, amended); and a TypeScript workload whose database resolves to a dialect other than its DB service's first. | Admitting them and failing at run time. |
+| D1 hosts one database per DB schema. A sql edge derives `d1: { binding, database }`, and the binding is the grant. A TypeScript API whose DB service lists `sqlite` first gets `Deps.db` typed as the runtime's `SqlDatabase`, D1's interface, which `bun:sqlite` also provides locally. The runner migrates on the deploying machine against `d1://<account>/<uuid>`, once `TestRealD1` has passed. | A typed query layer first, a project of its own. Cloudflare's migrations tool (D27, amended). |
+| Workers call each other through a service binding plus D37's signed token: the binding admits the caller, since an internal Worker has no other way in, and the token identifies it. | Trusting `ctx.props`, a Workers-only verifier mode that Go and Rust callees could never share. The generic connector over public URLs, which exposes every callee. |
+| R2 holds one private bucket per Bucket service. A bucket edge derives an `r2_bucket` binding and a per-edge account token scoped to the bucket's objects, flagged secret, with which the runtime presigns S3 URLs. | URLs the Worker signs for itself, routing every upload through it. One S3 credential per environment, which reaches every bucket. |
+| A site is a Worker serving its files as static assets, with a fixed script that answers `/__superschematic/config.json` and the fallback. A job is a Worker of its own under a `workersCronTrigger`, in UTC only; `stack run` refuses the target for now. Exposure is a `workersCustomDomain` per exposed Worker, or workers.dev without a domain. | A trigger on the API's server Worker, which ties a job to a server (D52). Workers routes and DNS records of our own. |
+| `stack dev` stays on the `local` target: Bun servers, a SQLite file per sqlite-first database, the storage emulator for buckets. CI's `check` bundles every Workers server for `workerd`, and the runtime's tests run fixture bundles under the `workerd` binary. | Miniflare in `stack dev`, a Node toolchain and a second local mechanism. |
+| acme-shop's storefront proves it first: a `storefront-stack` runs it alone on Workers, at workers.dev and then under a domain. The target is done when that, and a D1-backed TypeScript API, have run live. | Every Cloudflare kind live before calling it done. |
+
+Status: the core's artifacts are built, proved on `stack/stacktest`'s `fake.bundle` platform and fake bundle store: `PlatformSpec.Artifact` and the deployable's `artifact`; `{bundle-digest}`, `{bundle-sha256:<file>}` and `PinBundles`; the bundle's build, digest and publish through `TargetSpec.Bundles`, and its fetch (`registry.ArtifactFetcher`, also on a `SitePublisher`) and placement under the program's `artifacts/`; the manifest's `bundles` and `--bundle`; `StateBackend.Env`; and `TargetSpec.PreDestroy`. The cloudflare target itself is not built.
+
+## D65. A Rust API runs jobs and workers, its workers claim queues through a descriptor its types carry, and each output root builds against a mirror of its implementations
+
+D57 gave a Rust API a server and left out its jobs and workers: the
+resolver refuses them on `local.job` and `local.worker` ("Rust jobs and
+workers are not built (D57)"), `gcp.cloudrunworker` takes Go and
+TypeScript alone, and the generator logs that a Rust job or worker "gets
+no generated entrypoint yet". #348 gave TypeScript the same pieces Go has,
+and TypeScript workers claim without an ORM, through a queue descriptor
+the DB's types package carries and the SQL `sqlutil.PostgresQueueStatements`
+writes for both. D57 also left a defect: an implementation crate names the
+API crate by its path under the output root the scaffold saw, so a build
+into another output root holds two crates of one name, and Cargo refuses
+it. This entry finishes Rust's place in a stack, short of buckets.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A Rust API's crate gains a `Jobs` trait, one `async fn <job>(&self, shutdown: Shutdown) -> Result<(), BoxError>` per `@job`, and a `Workers` trait, one `async fn <worker>(&self, message: <Queue>) -> Result<(), BoxError>` per `@worker`, with the message type from the DB's Rust types. `Shutdown` is the runtime's cancellation token. The implementation crate's scaffold adds `create_jobs(deps)` and `create_workers(deps)` beside `create`, and the build refuses an implementation that lacks one its API needs, naming what to add, as it refuses a TypeScript one without `createJobs`. | A context argument on every method, as Go's, which Rust's futures do not need: a worker's handler is dropped after the grace, and a job watches `Shutdown`. |
+| The DB's Rust types crate writes `queues.rs`: per queue, the message type and a constant holding its descriptor as JSON (name, table, retries, backoff, lease, each field's column and form, and the statements `PostgresQueueStatements` writes), as TypeScript's `queues.ts` holds it as data. A queue with a field the descriptor cannot carry (POINT, INTERVAL) is left out, and a Rust worker of it refused, as TypeScript's are. | Types that depend on the runtime, which the types crates never do. SQL written again in Rust, which would drift from Go's and TypeScript's. |
+| The Rust runtime gains `queue`, behind `postgres`: `QueueDefinition::parse`, `enqueue` in a caller's transaction, and a `PostgresQueue` that claims, extends, completes, fails and releases by the descriptor's statements, refusing a lost claim. It gains `worker`, Go's loop ported: concurrency from `WORKER_CONCURRENCY`, a claim per free slot, a second's wait when idle, a growing wait after a failed claim, an extension every third of the lease, a handler's panic as its failure, a cause capped at 4000 characters, and on SIGTERM the grace, then the handlers dropped and their messages released. ormgen's queue parity test, which has Go and TypeScript claim each other's messages on Postgres, takes Rust as the third side. | A queue client per API, generated, which the descriptor makes unnecessary. |
+| servergen writes a Rust job's and a Rust worker's crate beside a server's, `<prefix><stack>-<deployable>-job` and `-worker`, each a member of the output root's workspace, with a binary named after the deployable, a `main.rs` and a Dockerfile. A job loads its API's `EnvConfig`, opens its pools, builds its `Deps` and calls its method once, exiting 1 on a failure so the platform retries it; a worker runs the loop over its queue. Neither builds an identity service or a router, as D52 and D53 have it. `local.job`, `local.worker` and `gcp.cloudrunworker` take Rust, and the local provisioner builds them with cargo as it builds a Rust server. | One binary that takes a job or worker name, which would make every deployable's image hold every other's code. |
+| Each build mirrors each Rust implementation crate it builds against into `<output-root>/impl/<service>/`, copying only what changed, with the crate's path dependencies rewritten for where the mirror sits, and the server, job and worker crates depend on the mirror. So an output root is self-contained: `stack dev --out` anywhere builds against that root's own API crates, an image's build context needs no implementation directory, and the crate the project edits keeps its path to the default output root for its editor and its own `cargo test`. | Rewriting the project's `Cargo.toml` each build, a source change per `--out`. A symlink the build repoints, which two output roots building at once would race on. Refusing another output root. `[patch]`, which cannot patch a path source. |
+| acme-shop proves it: `shop-db` gains a `StockLow` queue and a `RestockRequest` table; `shop-stock`'s reservation enqueues `StockLow` in its transaction when a level falls below its threshold; a Rust worker, `ReorderStock`, files one open restock request per product; and a Rust job, `OrderRestocks`, on a schedule, marks the open ones ordered. `TestStackDevRunsTheShop` places an order that runs a product low, sees the request filed, runs the job with `stack run`, and sees it ordered, and runs once more into an output root of its own. | A fixture alone, which nothing would run end to end. |
+
+Status: built.
+- The Rust HTTP runtime gains `Shutdown`, `queue` and `worker`, behind
+  `postgres`. Its tests claim on Postgres from sqlgen's own schema, and
+  run the loop's waits, extensions, panics and grace on tokio's paused
+  clock. `logging::init_json_as` names a job's or a worker's lines as Go
+  and TypeScript do. `TestQueueParityOfGoTypeScriptAndRustOnPostgres`
+  has each of Go, TypeScript and Rust enqueue, claim, extend, release,
+  fail and complete the others' messages, and refuse each other's lost
+  claims.
+- rustgen writes `queues.rs`, and `TestQueuesDescribeWhatTypeScriptWrites`
+  holds its descriptors to `queues.ts`. rustrestgen writes `Jobs` and
+  `Workers` and the scaffold's `create_jobs` and `create_workers`, and
+  `TestRustJobsAndWorkersCompile` runs clippy over them;
+  `TestRustJobsAndWorkersRefusals`,
+  `TestARustImplementationThatPredatesItsJobsFails` and
+  `TestARustWorkerOfAQueueTheClientCannotHoldFails` hold the refusals.
+  An API with a callers field gains `load_background_env_config`, which
+  a job and a worker load, since a stack gives them no callers field.
+  TypeScript's `config.ts` gains `loadBackgroundEnvConfig` likewise: a
+  TypeScript job or worker of such an API failed to start without it,
+  which `TestStackDevRunsTypeScriptJobsAndWorkers` now covers.
+- servergen writes each Rust job's and worker's crate and image, and
+  cigen's `check` compiles them. `TestRustJobAndWorkerRunOnPostgres` runs
+  the fixture's job and worker, `TestTheRustJobAndWorkerDockerfilesBuildImagesThatRun`
+  their images, and `TestStackDevRunsRustJobsAndWorkers` both under
+  `stack dev`, given only the variables the stack derives.
+- Each build mirrors each implementation into `<output-root>/impl/`.
+  `TestRustServersBuildInAnyOutputRoot` builds a fixture into two other
+  output roots, in turn and at once, with `--locked`, and fails without
+  the mirror on Cargo's collision.
+- acme-shop: `shop-stock`'s reservation enqueues `StockLow`, the Rust
+  worker `ReorderStock` files a restock request, and the Rust job
+  `OrderRestocks`, which Dev runs only on demand, orders it.
+  `TestStackDevRunsTheShop` drives both, then runs the shop once more
+  into an output root of its own.
+
+No Rust job or worker has run on Cloud Run.
+
+Not built, and out of this entry: buckets from a Rust server, job or
+worker; and OpenTelemetry export. A TypeScript build into another output
+root relinks the project's own `node_modules` there, as a Rust build did
+before the mirror.
+
+The rule is reversible until the first release.

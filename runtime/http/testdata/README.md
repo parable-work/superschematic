@@ -5,9 +5,11 @@ behave alike.
 
 | Path | What it holds |
 |---|---|
-| `serviceauth_parity.json` | The service step's vectors (D37). Its `comment` states the harness; `runtime/http/go/README.md` describes it. |
+| `serviceauth_parity.json` | The service step's vectors (D37), and in `signing` the signed-token source's, over a private JWK and an Ed25519 key's PKCS#8 and SubjectPublicKeyInfo PEMs (D63). Its `comment` states the harness; `runtime/http/go/README.md` describes it. |
 | `cors_parity.json` | The decisions of a site's CORS (D55, amended): Go's `cors.Policy.Decide`, TypeScript's `corsDecision` and Rust's `cors::Policy::decide`. Its `comment` states the harness; `runtime/http/go/cors` writes it with `-update`. |
 | `stackconfig_parity.json` | The vectors of the readers of a stack's derived fields (D51, D57): `LoadDatabase`, `LoadService`, `LoadBucket`, `LoadCallers` and `LoadCORS` and their TypeScript and Rust twins. Its `comment` states the harness; `runtime/http/go/stackconfig` writes it with `-update`. |
+| `page_parity.json` | The page of a `@paginated` operation (D60): the reader of `cursor` and `limit` (Go's `paging.Parse`, TypeScript's `readPage`, Rust's `PageSpec::query`), cursors encoded and read back, cursors refused, and pages built from rows. Its `comment` states the harness; `runtime/http/go/paging` writes it with `-update`. |
+| `search_parity.json` | The answers of the search helpers (D62): Go's `search.Terms`, `LikePattern`, `Fold` and `Matches`, TypeScript's `searchTerms`, `likePattern`, `foldText` and `searchMatches`, and Rust's `search::terms`, `like_pattern`, `fold` and `matches`. Its `comment` states the harness; `runtime/http/go/search` writes it with `-update`. |
 | `identity_parity.json` | The identity runtime's vectors (D50), described below. |
 | `identity/` | The fixture the identity stores run against: `fixture-user-model-db.json` (its identity descriptor), `create.sql` (its Postgres DDL) and `sqlite/create.sql` (its SQLite DDL). `TestIdentityStoreFixtureIsCurrent` in `internal/generator` fails when they are stale and rewrites them with `-update`. |
 

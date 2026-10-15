@@ -81,6 +81,10 @@ export interface ToolDefinition {
     type: string;
     description?: string;
     items?: { type: string; description?: string{{if $.HasListOfListsReturns}}; items?: { type: string; description?: string }{{end}} };
+{{- if $.HasPagedReturns}}
+    properties?: Record<string, JSONSchemaProperty>;
+    required?: string[];
+{{- end}}
   };
 }
 
@@ -247,7 +251,14 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
           type: '{{.Returns.Items.Items.Type}}'{{if .Returns.Items.Items.Description}},
           description: `{{escapeBacktick .Returns.Items.Items.Description}}`{{end}}
         }{{end}}
-      }{{end}}
+      }{{end}}{{if .Returns.Properties}},
+      properties: {
+{{- $returnProps := .Returns.Properties}}
+{{- range $propName := sortedKeys $returnProps}}
+        {{$propName}}: {{schemaJSON (index $returnProps $propName)}},
+{{- end}}
+      },
+      required: [{{range $j, $r := .Returns.Required}}{{if $j}}, {{end}}'{{$r}}'{{end}}]{{end}}
     }
   }
 {{- end}}

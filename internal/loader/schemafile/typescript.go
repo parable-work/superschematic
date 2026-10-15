@@ -19,7 +19,7 @@ import (
 //
 // The emitter reads the subset of JSON Schema the reflection produces,
 // and the value constraints a registered schema adds to it (@display's
-// argument, D48), which no TypeScript type carries. Any other keyword or
+// argument, D48, and @paginated's, D60), which no TypeScript type carries. Any other keyword or
 // shape is an error that names where it sits, so a change to the
 // reflection that the types cannot express fails here rather than writing
 // a looser type.
@@ -503,9 +503,10 @@ func wrap(text string, width int) string {
 }
 
 // valueConstraints are the keywords that narrow a value without changing
-// its type: a string's pattern and length, a list's length and uniqueness,
-// an object's size and key names. The types leave them to the validators.
-var valueConstraints = []string{"pattern", "minLength", "maxLength", "minItems", "uniqueItems", "minProperties", "propertyNames"}
+// its type: a string's pattern and length, a number's range, a list's
+// length and uniqueness, an object's size and key names. The types leave
+// them to the validators.
+var valueConstraints = []string{"pattern", "minLength", "maxLength", "minimum", "maximum", "minItems", "uniqueItems", "minProperties", "propertyNames"}
 
 // onlyKeys fails on any keyword of node outside allowed.
 func onlyKeys(node map[string]any, at string, allowed ...string) error {

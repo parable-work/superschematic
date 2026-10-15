@@ -249,7 +249,12 @@ type TypeScriptAPI struct {
 	// its config, its Deps, its implementations and its authenticator.
 	// Config is empty when the API has no EnvConfig, and Authenticate when
 	// no route needs an end user or the identity service establishes it.
+	// ConfigLoader is the function of the API package that loads Config:
+	// loadEnvConfig, or for a job or a worker of an API with a callers
+	// field loadBackgroundEnvConfig, since a stack sets no callers field
+	// for either (D65).
 	Config          string
+	ConfigLoader    string
 	Deps            string
 	Implementations string
 	Authenticate    string
@@ -480,6 +485,7 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 			ImplPackage:     a.Implementation.Package,
 			Deps:            taken.take(stem + "Deps"),
 			Implementations: taken.take(stem + "Implementations"),
+			ConfigLoader:    "loadEnvConfig",
 		}
 		if in.ImplementationRoot != "" {
 			if rel, err := filepath.Rel(in.ImplementationRoot, a.Implementation.Dir); err == nil {
@@ -491,7 +497,10 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 			for _, f := range a.Config.Derived {
 				derived[string(f.Kind)+" "+f.Service] = f.Key
 			}
-			if !background {
+			switch {
+			case background && a.Config.CallersField != "":
+				api.ConfigLoader = "loadBackgroundEnvConfig"
+			case !background:
 				api.Callers = a.Config.CallersField
 			}
 		}

@@ -78,6 +78,7 @@
         }
       ],
       "language": "GO",
+      "artifact": "image",
       "resourceName": {
         "$concat": [
           "orders-",
@@ -179,6 +180,7 @@
         }
       ],
       "language": "GO",
+      "artifact": "image",
       "exposed": true,
       "resourceName": {
         "$concat": [
@@ -344,6 +346,7 @@
         }
       ],
       "language": "GO",
+      "artifact": "image",
       "worker": {
         "api": "shop-orders",
         "name": "FulfilOrders",
@@ -448,6 +451,7 @@
         }
       ],
       "language": "GO",
+      "artifact": "image",
       "job": {
         "api": "shop-orders",
         "name": "ShipOrders",

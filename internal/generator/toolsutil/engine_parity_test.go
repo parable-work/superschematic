@@ -314,6 +314,7 @@ func TestEngineToolParametersParity(t *testing.T) {
 			// have no jsonTag, so that is the field's name.
 			func(name, _ string) string { return name },
 			variant.keys,
+			nil,
 		)
 		encoded, err := json.Marshal(parameters)
 		if err != nil {

@@ -1,0 +1,129 @@
+{
+  "plain": {
+    "summary": "Each Job is assigned to one principal or none; while it is assigned, only its assignee acquires its lease or claims it. A principal assigns an unassigned instance to itself and unassigns itself; the config names no permission for anything else.",
+    "operations": {
+      "assign": {
+        "useWhen": "Use to assign an unassigned instance to yourself.",
+        "success": "Returns the assignee, when and by whom it was assigned.",
+        "errors": [
+          {
+            "code": "already_assigned",
+            "commonCorrection": "None: the instance is already assigned to that principal."
+          },
+          {
+            "code": "not_configured",
+            "commonCorrection": "None: only the assignee or an unassigned caller acts on its own assignment here."
+          }
+        ]
+      },
+      "unassign": {
+        "useWhen": "Use as the assignee to give the assignment up.",
+        "success": "Returns the assignee it had.",
+        "errors": [
+          {
+            "code": "not_assigned",
+            "commonCorrection": "None: the instance is not assigned."
+          },
+          {
+            "code": "not_configured",
+            "commonCorrection": "None: only the assignee or an unassigned caller acts on its own assignment here."
+          }
+        ]
+      },
+      "list": {
+        "useWhen": "where: { \"Assignment.assignee\": <subject> } lists the Job instances assigned to a principal, \"Assignment.assignee\": null the unassigned ones, and [null, <subject>] both."
+      }
+    }
+  },
+  "permitted": {
+    "summary": "Each Job is assigned to one principal or none; while it is assigned, only its assignee acquires its lease or claims it. A principal assigns an unassigned instance to itself and unassigns itself; assigning another principal, reassigning and unassigning another need permission jobs.assign.",
+    "operations": {
+      "assign": {
+        "useWhen": "Use to assign an unassigned instance to yourself, or, with permission jobs.assign, any instance to another principal.",
+        "success": "Returns the assignee, when and by whom it was assigned.",
+        "errors": [
+          {
+            "code": "already_assigned",
+            "commonCorrection": "None: the instance is already assigned to that principal."
+          }
+        ]
+      },
+      "unassign": {
+        "useWhen": "Use as the assignee to give the assignment up, or with permission jobs.assign to unassign another principal.",
+        "success": "Returns the assignee it had.",
+        "errors": [
+          {
+            "code": "not_assigned",
+            "commonCorrection": "None: the instance is not assigned."
+          }
+        ]
+      },
+      "list": {
+        "useWhen": "where: { \"Assignment.assignee\": <subject> } lists the Job instances assigned to a principal, \"Assignment.assignee\": null the unassigned ones, and [null, <subject>] both."
+      },
+      "acquire": {
+        "doNotUseWhen": "Do not use on an instance assigned to another principal.",
+        "errors": [
+          {
+            "code": "assigned_to_another",
+            "commonCorrection": "Take work assigned to you or to no one, or have it unassigned first."
+          }
+        ]
+      },
+      "claim": {
+        "doNotUseWhen": "Do not use on an instance assigned to another principal.",
+        "errors": [
+          {
+            "code": "assigned_to_another",
+            "commonCorrection": "Take work assigned to you or to no one, or have it unassigned first."
+          }
+        ]
+      }
+    }
+  },
+  "leased": {
+    "summary": "Each Job is assigned to one principal or none; while it is assigned, only its assignee acquires its lease or claims it. A principal assigns an unassigned instance to itself and unassigns itself; the config names no permission for anything else.",
+    "operations": {
+      "assign": {
+        "useWhen": "Use to assign an unassigned instance to yourself.",
+        "success": "Returns the assignee, when and by whom it was assigned.",
+        "errors": [
+          {
+            "code": "already_assigned",
+            "commonCorrection": "None: the instance is already assigned to that principal."
+          },
+          {
+            "code": "not_configured",
+            "commonCorrection": "None: only the assignee or an unassigned caller acts on its own assignment here."
+          }
+        ]
+      },
+      "unassign": {
+        "useWhen": "Use as the assignee to give the assignment up.",
+        "success": "Returns the assignee it had.",
+        "errors": [
+          {
+            "code": "not_assigned",
+            "commonCorrection": "None: the instance is not assigned."
+          },
+          {
+            "code": "not_configured",
+            "commonCorrection": "None: only the assignee or an unassigned caller acts on its own assignment here."
+          }
+        ]
+      },
+      "list": {
+        "useWhen": "where: { \"Assignment.assignee\": <subject> } lists the Job instances assigned to a principal, \"Assignment.assignee\": null the unassigned ones, and [null, <subject>] both."
+      },
+      "acquire": {
+        "doNotUseWhen": "Do not use on an instance assigned to another principal.",
+        "errors": [
+          {
+            "code": "assigned_to_another",
+            "commonCorrection": "Take work assigned to you or to no one, or have it unassigned first."
+          }
+        ]
+      }
+    }
+  }
+}

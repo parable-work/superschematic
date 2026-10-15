@@ -47,7 +47,7 @@ pub use metaschema::MetaSchemaError;
 use json::{escape_pointer, format_float64, literal_value, write_canonical, Node};
 use metaschema::{read_meta_schema, FileForm, MetaSchemaRules};
 
-use crate::ajv::{ajv_errors, json_string};
+use crate::ajv::{ajv_errors_in, json_string};
 
 /// The core registry's meta-schema, `superschematic json-schema` with no
 /// extension linked; internal/tools/schemafiletypes writes it, the same
@@ -139,6 +139,9 @@ struct DecodeFailure(SchemaFileIssue);
 pub struct SchemaFileLoader {
     rules: MetaSchemaRules,
     validators: HashMap<String, Validator>,
+    // The schema each validator compiled, by form, which ajv's messages
+    // read beside the failure (the item types a `uniqueItems` names).
+    schemas: HashMap<String, Value>,
 }
 
 impl fmt::Debug for SchemaFileLoader {
@@ -171,6 +174,7 @@ impl SchemaFileLoader {
     pub fn with_meta_schema(meta_schema: &Value) -> Result<Self, MetaSchemaError> {
         let rules = read_meta_schema(meta_schema)?;
         let mut validators = HashMap::new();
+        let mut schemas = HashMap::new();
         for form in rules.forms() {
             if validators.contains_key(&form.def) {
                 continue;
@@ -191,8 +195,13 @@ impl SchemaFileLoader {
                 MetaSchemaError::new(format!("cannot compile $defs/{}: {error}", form.def))
             })?;
             validators.insert(form.def.clone(), validator);
+            schemas.insert(form.def.clone(), schema);
         }
-        Ok(Self { rules, validators })
+        Ok(Self {
+            rules,
+            validators,
+            schemas,
+        })
     }
 
     /// A loader for a meta-schema given as JSON text.
@@ -240,7 +249,11 @@ impl SchemaFileLoader {
             let value = tree.to_value();
             let errors: Vec<_> = validator.iter_errors(&value).collect();
             if !errors.is_empty() {
-                return Err(SchemaFileError::new(source, ajv_issues(&errors, &value)));
+                let schema = self.schemas.get(&form.def);
+                return Err(SchemaFileError::new(
+                    source,
+                    ajv_issues(&errors, &value, schema),
+                ));
             }
         }
 
@@ -561,8 +574,12 @@ fn find_non_finite(node: &Node, path: &str) -> Option<String> {
 /// outside an enum; then sorted by pointer, ajv keyword and message, each
 /// by code point (the byte order of their UTF-8), as the TypeScript loader
 /// sorts ajv's errors.
-fn ajv_issues(errors: &[jsonschema::ValidationError<'_>], payload: &Value) -> Vec<SchemaFileIssue> {
-    let mut out: Vec<KeywordIssue> = ajv_errors(errors, payload)
+fn ajv_issues(
+    errors: &[jsonschema::ValidationError<'_>],
+    payload: &Value,
+    schema: Option<&Value>,
+) -> Vec<SchemaFileIssue> {
+    let mut out: Vec<KeywordIssue> = ajv_errors_in(errors, payload, schema)
         .into_iter()
         .map(|error| {
             let message = match (&error.additional_property, &error.allowed_values) {
@@ -711,6 +728,27 @@ mod tests {
                 ("/behaviors/0", "must match \"then\" schema"),
                 ("/behaviors/0/config", "unknown key \"threads\""),
             ]
+        );
+    }
+
+    #[test]
+    fn a_repeated_item_is_named_as_ajv_names_it_by_the_items_type() {
+        let loader = SchemaFileLoader::new();
+        let error = loader
+            .load(
+                r#"{"name": "Note", "role": "DBTable", "fields": [{"name": "title", "typeRef": {"name": "string"}}], "behaviors": [{"name": "Search", "config": {"fields": ["title", "title"]}}]}"#,
+                "x",
+            )
+            .unwrap_err();
+        assert!(
+            error
+                .issues()
+                .iter()
+                .any(|issue| issue.path == "/behaviors/0/config/fields"
+                    && issue.message
+                        == "must NOT have duplicate items (items ## 1 and 0 are identical)"),
+            "{:#?}",
+            error.issues()
         );
     }
 

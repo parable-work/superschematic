@@ -15,6 +15,9 @@
 //! `fixture_controls_api` puts each route's traffic controls in front of its
 //! procedure.
 //! `views` renders each record as a description list and as a table.
+//! `references` names what a value that refers to an item holds (D61): a
+//! form's options and a display component's labels, from the operation
+//! that lists the items.
 //! `choices` holds the values the app names for a field, which a form
 //! offers and a display component labels.
 //!
@@ -26,6 +29,7 @@ pub mod forms;
 pub mod operations;
 pub mod procedures;
 pub mod records;
+pub mod references;
 mod wire;
 pub mod views;
 
@@ -39,7 +43,7 @@ use api::runtime::ClientIp;
 use api::{build_router, Implementations};
 use api::runtime::{ApiError, OperationInfo, Principal};
 use async_trait::async_trait;
-use topcoat::context::{Cx, app_context};
+use topcoat::context::{Cx, app_context, memoize};
 use topcoat::router::request::{client_ip, parts};
 use topcoat::router::tower::TowerRoute;
 use topcoat::router::{Body, Layer, LayerFuture, Next, Path, RouterBuilder};
@@ -118,7 +122,16 @@ async fn admit(cx: &Cx, operation: &OperationInfo) -> Result<Option<Principal>, 
     if !operation.requires_auth {
         return Ok(None);
     }
+    let principal = caller(cx).await.map_err(ApiError::clone)?.clone();
     let setup: &Setup = app_context(cx);
-    let principal = setup.page_authenticator.principal(cx).await?;
     operation.admit(setup.implementations.authenticator.as_ref(), principal)
+}
+
+/// The request's caller, as the `PageAuthenticator` establishes it, once
+/// per request (`#[memoize]`): a page that asks several guards, as a nav
+/// does, authenticates its caller once.
+#[memoize(as_ref)]
+async fn caller(cx: &Cx) -> Result<Option<Principal>, ApiError> {
+    let setup: &Setup = app_context(cx);
+    setup.page_authenticator.principal(cx).await
 }

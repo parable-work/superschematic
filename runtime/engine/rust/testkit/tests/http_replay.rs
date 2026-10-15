@@ -3,9 +3,11 @@
 //! of `runtime/engine/testdata/http` ([`HTTP_FILES`]), on SQLite, and on
 //! Postgres when `SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL` names one. A case
 //! is skipped only when only the TypeScript engine can run it (`js`: a
-//! function the host gave the app), or when it composes a core behavior
-//! not ported yet (milestones 10 and 11); the counts of what ran and what
-//! was skipped, and why, print per file.
+//! function the host gave the app); the counts of what ran and what was
+//! skipped, and why, print per file. With the `axum` feature the same
+//! corpus, with the same skips and the same [`KNOWN`] steps, replays
+//! through the engine's axum router too (`AxumRouter`), as a Rust server
+//! mounts it.
 //!
 //! The corpus is `runtime/engine/testdata/http`, in the tree;
 //! `ENGINE_HTTP_CORPUS_DIR` names another directory, and `ENGINE_HTTP_ONLY`
@@ -14,7 +16,9 @@
 
 use std::path::{Path, PathBuf};
 
-use superschematic_engine_testkit::{load, replay_file, Database, FileReport, HTTP_FILES};
+use superschematic_engine_testkit::{
+    load, replay_file_through, Database, Direct, FileReport, Transport, HTTP_FILES,
+};
 
 const CORPUS_VARIABLE: &str = "ENGINE_HTTP_CORPUS_DIR";
 const DATABASE_VARIABLE: &str = "SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL";
@@ -22,18 +26,7 @@ const DATABASE_VARIABLE: &str = "SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL";
 /// Steps whose answers differ for a reason outside the routes, by file,
 /// case and step, with the reason. The test reports them and passes; once
 /// one gives the recorded answer, the test fails until it leaves this list.
-const KNOWN: [(&str, &str, &str); 2] = [
-    (
-        "http",
-        "the behavior catalog > lists every behavior the engine runs, to any caller, and describes one by name",
-        "the catalog lists all 15 of the core's behaviors beside the test's; the Rust engine registers those ported so far, whose entries match, until milestones 10 and 11 port the rest",
-    ),
-    (
-        "mcp",
-        "tools/call > list_behaviors and describe_behavior read the behaviors the engine runs, for any caller",
-        "list_behaviors lists all 15 of the core's behaviors beside the test's; the Rust engine registers those ported so far, whose entries match, until milestones 10 and 11 port the rest",
-    ),
-];
+const KNOWN: [(&str, &str, &str); 0] = [];
 
 fn repository() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../..")
@@ -62,6 +55,21 @@ fn databases() -> Vec<Database> {
 
 #[test]
 fn the_engines_routes_give_the_recorded_answers() {
+    replay_through(&Direct, "the engine's routes");
+}
+
+#[cfg(feature = "axum")]
+#[test]
+fn the_engines_axum_router_gives_the_recorded_answers() {
+    replay_through(
+        &superschematic_engine_testkit::AxumRouter::new(),
+        "the axum router",
+    );
+}
+
+// replay_through replays every file on every database through `transport`,
+// and fails on a step that differs, but for those KNOWN lists.
+fn replay_through(transport: &dyn Transport, label: &str) {
     let dir = corpus();
     assert!(
         dir.is_dir(),
@@ -84,9 +92,14 @@ fn the_engines_routes_give_the_recorded_answers() {
                 path.display(),
                 file.scenarios.len()
             );
-            reports.push(replay_file(&file, &database, &repository()));
+            reports.push(replay_file_through(
+                &file,
+                &database,
+                &repository(),
+                transport,
+            ));
         }
-        eprintln!("\nhttp replay on {:?}:", database.dialect());
+        eprintln!("\nhttp replay through {label} on {:?}:", database.dialect());
         for report in &reports {
             eprintln!("  {}", report.summary());
             let mut reasons: Vec<&str> = report
@@ -137,7 +150,7 @@ fn the_engines_routes_give_the_recorded_answers() {
     }
     assert!(
         failures.is_empty(),
-        "{} steps gave other answers:\n{}",
+        "{} steps gave other answers through {label}:\n{}",
         failures.len(),
         failures.join("\n")
     );

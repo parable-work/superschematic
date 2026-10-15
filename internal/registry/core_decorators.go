@@ -238,6 +238,8 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 			return nil
 		},
 	})
+	// A list operation that pages by a cursor (core_page.go, D60).
+	specs = append(specs, paginatedDecorator())
 	specs = append(specs, docsDecorators(r.ToolInvocationPolicy)...)
 	specs = append(specs, behaviorDecorator(r.Behavior, r.BehaviorNames))
 	specs = append(specs, displayDecorator())

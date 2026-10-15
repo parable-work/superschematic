@@ -12,6 +12,13 @@ pub struct {{ .Name }} {
 {{- range .Fields }}
     pub {{ .Name }}: {{ if .IsList }}Vec<String>{{ else }}Option<String>{{ end }},
 {{- end }}
+{{- if .Paged }}
+    /// The page asked for (D60): the cursor of the page before, a page's
+    /// `next`, and the limit, as the query sends them. No control renders
+    /// them, and `page` reads them by the route's rules.
+    pub cursor: Option<String>,
+    pub limit: Option<String>,
+{{- end }}
 {{- with .Input }}
     pub input: {{ .Struct.Name }},
 {{- end }}
@@ -34,6 +41,10 @@ impl {{ .Name }} {
             {{ .Name }}: {{ .NewValue }},
 {{- end }}
 {{- end }}
+{{- if .Paged }}
+            cursor: None,
+            limit: None,
+{{- end }}
 {{- with .Input }}
             input: {{ .Struct.Name }}::new(),
 {{- end }}
@@ -51,6 +62,10 @@ impl {{ .Name }} {
 {{- else }}
             {{ .Name }}: posted.get({{ rustString .JSONName }}).first(),
 {{- end }}
+{{- end }}
+{{- if .Paged }}
+            cursor: posted.get("cursor").first(),
+            limit: posted.get("limit").first(),
 {{- end }}
 {{- with .Input }}
             input: {{ .Struct.Name }}::from_post(&posted),
@@ -91,8 +106,22 @@ impl {{ .Name }} {
             }
         };
 {{- end }}
+{{- if .Paged }}
+        let page = match self.page() {
+            Ok(page) => Some(page),
+            Err(err) => {
+                errors.merge(FormErrors::from_api(&err));
+                None
+            }
+        };
+{{- end }}
 {{- range .Fields }}
         let Some({{ .Local }}) = {{ .Local }} else {
+            return Err(errors);
+        };
+{{- end }}
+{{- if .Paged }}
+        let Some(page) = page else {
             return Err(errors);
         };
 {{- end }}
@@ -108,13 +137,56 @@ impl {{ .Name }} {
 {{- with .Input }}
             input,
 {{- end }}
+{{- if .Paged }}
+            page,
+{{- end }}
         };
         args.check().map_err(|err| FormErrors::from_api(&err))?;
         Ok(args)
     }
+{{- if .Paged }}
+
+    /// The page the form asks for, its `cursor` and `limit` read by the
+    /// route's rules (`PageSpec::query`, D60): an absent cursor is the first
+    /// page and an absent limit the route's default, and a refusal is the
+    /// router's 400 at either.
+    pub fn page(&self) -> Result<runtime::page::PageRequest, ApiError> {
+        let pairs = [("cursor", &self.cursor), ("limit", &self.limit)]
+            .into_iter()
+            .filter_map(|(name, value)| value.clone().map(|value| (name.to_owned(), value)))
+            .collect();
+        crate::api::{{ .ArgsName }}::PAGE.query(&QueryValues::new(pairs))
+    }
+
+    /// The pairs the form holds as a query sends them, in control order:
+    /// each argument's values as sent, then `limit` when sent, never
+    /// `cursor`. A page links the next page and the first with them, so each
+    /// keeps the filter and the limit.
+    pub fn query_pairs(&self) -> Vec<(String, String)> {
+        let mut pairs = Vec::new();
+{{- range .QueryFields }}
+{{- if .IsList }}
+        pairs.extend(self.{{ .Name }}.iter().map(|value| ({{ rustString .JSONName }}.to_owned(), value.clone())));
+{{- else }}
+        if let Some(value) = &self.{{ .Name }} {
+            pairs.push(({{ rustString .JSONName }}.to_owned(), value.clone()));
+        }
+{{- end }}
+{{- end }}
+        if let Some(limit) = &self.limit {
+            pairs.push(("limit".to_owned(), limit.clone()));
+        }
+        pairs
+    }
+{{- end }}
 
     {{ doc4 (printf "Parses the form, then calls the operation in-process (`operations::%s`). A refusal is the status a page answers with and the errors it renders the form again with: 422 and `parse`'s errors, or the route's status (401, 403, 404, 409, ...) and the operation's errors (`Refusal::from_api`)." .Call) }}
     pub async fn submit(&self, cx: &Cx) -> Result<{{ .Output }}, Refusal> {
+{{- if .Paged }}
+        // A cursor or a limit the route refuses is its 400, as the router
+        // answers it.
+        self.page().map_err(|err| Refusal::from_api(&err))?;
+{{- end }}
         let args = self.parse()?;
         operations::{{ .Call }}(cx, args).await.map_err(|err| Refusal::from_api(&err))
     }

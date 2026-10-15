@@ -15,6 +15,7 @@ const (
 	TypeSchedulerJob        = "gcp:cloudscheduler/job:Job"
 	TypeSecret              = "gcp:secretmanager/secret:Secret"
 	TypeSecretIAMMember     = "gcp:secretmanager/secretIamMember:SecretIamMember"
+	TypeSecretVersion       = "gcp:secretmanager/secretVersion:SecretVersion"
 	TypeInstance            = "gcp:sql/databaseInstance:DatabaseInstance"
 	TypeDatabase            = "gcp:sql/database:Database"
 	TypeUser                = "gcp:sql/user:User"

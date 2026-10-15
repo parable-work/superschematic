@@ -74,7 +74,7 @@ func (r *resolver) deriveEdges() {
 			r.deriveSiteEdges(d)
 			continue
 		}
-		if !d.res.Kind.HasImage() {
+		if !d.res.Kind.RunsCode() {
 			continue
 		}
 		for _, served := range d.res.Services {
@@ -140,8 +140,29 @@ func (r *resolver) addEdge(kind ir.EdgeKind, from *deployable, service string) {
 		r.fail(CodeNoConnector, "edge %s: no connector from %s to %s over %s", id, from.res.Platform, to.res.Platform, kind)
 		return
 	}
+	if connector.Generic && kind == ir.EdgeHTTP && !r.reachesAcrossProviders(e) {
+		return
+	}
 	e.connector = connector
 	e.res.Connector = connector.Name
+}
+
+// reachesAcrossProviders checks an http edge the generic connector serves
+// (D63): the deployables are on two providers, and the generic connector
+// reaches the callee only at its public address, so its server must be
+// exposed, with a public address its platform gives.
+func (r *resolver) reachesAcrossProviders(e *edge) bool {
+	from, to := e.from, e.to
+	if !to.res.Exposed {
+		r.fail(CodeCrossProviderUnexposed, "edge %s: %s %s on %s (%s) calls %s, whose server %s on %s (%s) the stack does not expose; a deployable reaches a server of another provider only at its public address, so add %s to @stack's expose",
+			e.res.ID, from.res.Kind, from.res.Name, from.platform.Name, from.platform.Provider, e.res.Service.Name, to.res.Name, to.platform.Name, to.platform.Provider, e.res.Service.Name)
+		return false
+	}
+	if to.res.PublicAddress == nil {
+		r.fail(CodeLowering, "edge %s: %s %s calls %s across providers, and platform %s gives its server %s no public address to reach it at", e.res.ID, from.res.Kind, from.res.Name, e.res.Service.Name, to.platform.Name, to.res.Name)
+		return false
+	}
+	return true
 }
 
 // edgesFrom returns the edges from a deployable, sorted by ID.
@@ -167,7 +188,7 @@ func (r *resolver) bindConfig() {
 			r.bindSite(d)
 			continue
 		}
-		if !d.res.Kind.HasImage() {
+		if !d.res.Kind.RunsCode() {
 			for _, key := range sortedKeys(d.settings.env) {
 				r.fail(CodeUnknownEnvKey, "environment %s sets env %s on %s %s, which has no config", d.settings.envFrom[key], key, d.res.Kind, name)
 			}
@@ -318,6 +339,22 @@ func (r *resolver) bindField(d *deployable, f *field) *ir.Binding {
 	return nil
 }
 
+// literalSecret returns the variable of a derived value's secret member
+// (ir.SecretDerivedMember) that holds a literal rather than a reference,
+// or "" when none does.
+func literalSecret(field string, value any) string {
+	vars, err := ir.DerivedVariables(field, value)
+	if err != nil {
+		return "" // a platform reports the value it cannot encode
+	}
+	for _, v := range vars {
+		if _, literal := v.Value.(string); v.Secret && literal {
+			return v.Name
+		}
+	}
+	return ""
+}
+
 // contractOf names the derived value an edge of kind fills its field
 // with, for an error message.
 func contractOf(kind ir.EdgeKind) string {
@@ -407,6 +444,8 @@ func (r *resolver) connectEdges() {
 		case values[id] != nil:
 			if err := ir.CheckDerivedValue(e.res.Kind, values[id]); err != nil {
 				r.fail(CodeLowering, "connector %s on edge %s derives a value for %s that is no %s: %v", e.connector.Name, id, e.res.Field, contractOf(e.res.Kind), err)
+			} else if name := literalSecret(e.res.Field, values[id]); name != "" {
+				r.fail(CodeLowering, "connector %s on edge %s derives %s, a secret member, as a literal; a connector derives a secret as a reference to an output, so that environment.json never holds it (D63)", e.connector.Name, id, name)
 			}
 		}
 		r.checkParameters(where, values[id])

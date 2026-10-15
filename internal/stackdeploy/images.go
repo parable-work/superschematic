@@ -65,12 +65,13 @@ func SplitImage(image string) (repository, digest string, err error) {
 }
 
 // checkImages refuses an image for a deployable env does not have or that
-// has no image, a database, and returns the servers and jobs images names
-// none for, sorted by name.
+// has no image, a database or a server whose platform builds a bundle
+// (D64), and returns the servers, jobs and workers with an image that
+// images names none for, sorted by name.
 func checkImages(env *ir.ResolvedEnvironment, images map[string]string) (missing []string, err error) {
 	var withImages []string
 	for _, d := range env.Deployables {
-		if d.Kind.HasImage() {
+		if d.HasImage() {
 			withImages = append(withImages, d.Name)
 			if _, ok := images[d.Name]; !ok {
 				missing = append(missing, d.Name)
@@ -78,8 +79,8 @@ func checkImages(env *ir.ResolvedEnvironment, images map[string]string) (missing
 		}
 	}
 	for _, name := range sortedKeys(images) {
-		if d := env.Deployable(name); d == nil || !d.Kind.HasImage() {
-			return nil, fmt.Errorf("--image names %s, which is no server or job of environment %s (its servers and jobs: %s)", name, env.Environment, strings.Join(withImages, ", "))
+		if d := env.Deployable(name); d == nil || !d.HasImage() {
+			return nil, fmt.Errorf("--image names %s, which is no server or job of environment %s that runs an image (its servers and jobs that do: %s)", name, env.Environment, strings.Join(withImages, ", "))
 		}
 	}
 	return missing, nil

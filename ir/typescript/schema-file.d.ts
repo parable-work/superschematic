@@ -42,7 +42,9 @@ export interface ArgumentDef {
   encrypted?: boolean;
   isQuery?: boolean;
   name: string;
+  references?: ReferenceDef;
   required?: boolean;
+  search?: boolean;
   typeRef: TypeRef;
   validateListMax?: number;
   validateListMin?: number;
@@ -190,6 +192,7 @@ export interface FieldDef {
   mcp?: OperationMCP;
   middleware?: MiddlewareConfig;
   name: string;
+  page?: OperationPage;
   paramType?: 'query';
   permissions?: string[];
   placeholder?: string;
@@ -198,6 +201,7 @@ export interface FieldDef {
   projectedFunction?: ProjectionFunctionCall;
   public?: boolean;
   purpose?: string;
+  references?: ReferenceDef;
   relation?: RelationDef;
   requireOwnership?: boolean;
   required?: boolean;
@@ -329,6 +333,16 @@ export interface OperationMCP {
   [invocationPolicyKey: string]: unknown;
 }
 
+/**
+ * The operation's list result pages by an opaque cursor (@paginated): it takes
+ * the query parameters cursor and limit and answers {items, next}. A member
+ * left out takes its default.
+ */
+export interface OperationPage {
+  defaultLimit?: number;
+  maxLimit?: number;
+}
+
 export interface OperationSet {
   comment?: string;
   description?: string;
@@ -435,6 +449,13 @@ export interface QueueDef {
 export interface RawHeritage {
   extends?: string;
   implements?: string[];
+}
+
+export interface ReferenceDef {
+  label?: string;
+  options?: string;
+  type: string;
+  value?: string;
 }
 
 export interface RelationDef {

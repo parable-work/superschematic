@@ -13,6 +13,7 @@ import (
 func runPlatform(name string) PlatformSpec {
 	return PlatformSpec{
 		Name:      name,
+		Provider:  "fake",
 		Kind:      ir.DeployableServer,
 		Languages: []string{APILanguageGo},
 		NameOf:    func(PlatformContext) any { return "x" },
@@ -52,6 +53,8 @@ func TestRegisterPlatformRejects(t *testing.T) {
 	}{
 		{"no name", func(s *PlatformSpec) { s.Name = "" }, "has no name"},
 		{"malformed name", func(s *PlatformSpec) { s.Name = "Cloud Run" }, "must be lowercase words"},
+		{"no provider", func(s *PlatformSpec) { s.Provider = "" }, `platform "fake.run" names no provider`},
+		{"malformed provider", func(s *PlatformSpec) { s.Provider = "Google Cloud" }, `platform fake.run provider name "Google Cloud" must be lowercase words`},
 		{"unknown kind", func(s *PlatformSpec) { s.Kind = "queue" }, `deployable kind "queue"`},
 		{"server without languages", func(s *PlatformSpec) { s.Languages = nil }, "declares no languages"},
 		{"server with dialects", func(s *PlatformSpec) { s.Dialects = []string{SQLDialectPostgres} }, "only a database platform does"},
@@ -61,6 +64,7 @@ func TestRegisterPlatformRejects(t *testing.T) {
 		{"no NameOf", func(s *PlatformSpec) { s.NameOf = nil }, "needs NameOf, AddressOf and Lower"},
 		{"bad settings schema", func(s *PlatformSpec) { s.Settings = json.RawMessage(`{"type": 7}`) }, "Settings"},
 		{"identity config not an object", func(s *PlatformSpec) { s.IdentityConfig = `["cookie"]` }, "IdentityConfig is not a JSON object"},
+		{"unknown artifact", func(s *PlatformSpec) { s.Artifact = "tarball" }, `declares artifact "tarball" (want image or bundle)`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -83,6 +87,20 @@ func TestRegisterPlatformRejects(t *testing.T) {
 		spec := sqlPlatform("fake.sql")
 		spec.IdentityConfig = `{"cookie": {"secure": false}}`
 		if err := New(naming.Default()).RegisterPlatform(spec); err == nil || !strings.Contains(err.Error(), "only a server platform does") {
+			t.Fatalf("RegisterPlatform = %v", err)
+		}
+	})
+	t.Run("database with an artifact", func(t *testing.T) {
+		spec := sqlPlatform("fake.sql")
+		spec.Artifact = ir.ArtifactBundle
+		if err := New(naming.Default()).RegisterPlatform(spec); err == nil || !strings.Contains(err.Error(), "only a server, job or worker platform builds one") {
+			t.Fatalf("RegisterPlatform = %v", err)
+		}
+	})
+	t.Run("server with a bundle", func(t *testing.T) {
+		spec := runPlatform("fake.run")
+		spec.Artifact = ir.ArtifactBundle
+		if err := New(naming.Default()).RegisterPlatform(spec); err != nil {
 			t.Fatalf("RegisterPlatform = %v", err)
 		}
 	})
@@ -252,6 +270,88 @@ func TestRegisterConnectorRejects(t *testing.T) {
 			t.Fatalf("RegisterPlatform = %v", err)
 		}
 	})
+}
+
+// TestGenericConnector: a generic connector names no platform, serves an
+// http or a site edge, is one per edge kind and may bring its resource
+// types; Connector falls back to it between two registered platforms of
+// different providers, never between two of one provider, and a connector
+// that names both platforms wins (D63).
+func TestGenericConnector(t *testing.T) {
+	generic := ConnectorSpec{Name: "generic.http", Edge: ir.EdgeHTTP, Generic: true, Connect: connect}
+	for _, tc := range []struct {
+		name string
+		edit func(*ConnectorSpec)
+		want string
+	}{
+		{"a platform", func(s *ConnectorSpec) { s.From = "fake.run" }, `generic connector "generic.http" names a platform`},
+		{"a sql edge", func(s *ConnectorSpec) { s.Edge = ir.EdgeSQL }, "serves a sql edge; a generic connector serves an http or a site edge"},
+		{"a bucket edge", func(s *ConnectorSpec) { s.Edge = ir.EdgeBucket }, "serves a bucket edge"},
+		{"a bad resource type", func(s *ConnectorSpec) {
+			s.ResourceTypes = map[string]json.RawMessage{"tls:index/privateKey:PrivateKey": json.RawMessage(`{"type": []}`)}
+		}, `connector "generic.http" resource type tls:index/privateKey:PrivateKey`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			spec := generic
+			tc.edit(&spec)
+			err := New(naming.Default()).RegisterConnector(spec)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("RegisterConnector = %v, want an error containing %q", err, tc.want)
+			}
+		})
+	}
+
+	reg := New(naming.Default())
+	other := func(name string) PlatformSpec {
+		spec := runPlatform(name)
+		spec.Provider = "other"
+		return spec
+	}
+	for _, p := range []PlatformSpec{runPlatform("fake.run"), runPlatform("fake.edge"), other("other.run"), sqlPlatform("fake.sql")} {
+		if err := reg.RegisterPlatform(p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	generic.ResourceTypes = map[string]json.RawMessage{"tls:index/privateKey:PrivateKey": json.RawMessage(`{"type": "object"}`)}
+	exact := ConnectorSpec{Name: "fake.run-other", Edge: ir.EdgeHTTP, From: "fake.run", To: "other.run", Connect: connect}
+	for _, spec := range []ConnectorSpec{generic, exact} {
+		if err := reg.RegisterConnector(spec); err != nil {
+			t.Fatal(err)
+		}
+	}
+	second := generic
+	second.Name = "generic.http-2"
+	if err := reg.RegisterConnector(second); err == nil || !strings.Contains(err.Error(), `generic connectors "generic.http" and "generic.http-2" both serve http edges`) {
+		t.Errorf("a second generic http connector: %v", err)
+	}
+	site := ConnectorSpec{Name: "generic.site", Edge: ir.EdgeSite, Generic: true, Connect: connect}
+	if err := reg.RegisterConnector(site); err != nil {
+		t.Errorf("a generic site connector beside the http one: %v", err)
+	}
+	if err := finalizeStack(reg); err != nil {
+		t.Errorf("Finalize with generic connectors: %v", err)
+	}
+	if ok, err := reg.ValidateResource(&ir.Resource{Type: "tls:index/privateKey:PrivateKey", Properties: map[string]any{}}); !ok || err != nil {
+		t.Errorf("the generic connector's resource type: %v, %v", ok, err)
+	}
+	for _, tc := range []struct {
+		kind     ir.EdgeKind
+		from, to string
+		want     string
+	}{
+		{ir.EdgeHTTP, "fake.run", "other.run", "fake.run-other"}, // the exact connector wins
+		{ir.EdgeHTTP, "other.run", "fake.run", "generic.http"},   // providers differ
+		{ir.EdgeHTTP, "fake.edge", "other.run", "generic.http"},
+		{ir.EdgeSite, "other.run", "fake.run", "generic.site"},
+		{ir.EdgeHTTP, "fake.run", "fake.edge", ""}, // one provider
+		{ir.EdgeHTTP, "fake.run", "missing", ""},   // an unregistered platform
+		{ir.EdgeSQL, "other.run", "fake.sql", ""},  // no generic sql connector
+	} {
+		got, ok := reg.Connector(tc.kind, tc.from, tc.to)
+		if got.Name != tc.want || ok != (tc.want != "") {
+			t.Errorf("Connector(%s, %s, %s) = %q, %v; want %q", tc.kind, tc.from, tc.to, got.Name, ok, tc.want)
+		}
+	}
 }
 
 // finalizeStack runs the stack part of Finalize, which the other parts of

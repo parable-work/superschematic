@@ -263,21 +263,33 @@ where
 {{- if .ArgsRecord }}
 
 /// The arguments of {{ .Namespace }}.{{ .Name }}, as browser code builds them.
+{{- if .Paged }}
+/// The page asked for is `cursor`, a page's `next`, none for the first,
+/// and `limit`, none for the route's default (D60).
+{{- end }}
 #[record]
 #[derive(Debug, Clone, PartialEq)]
 pub struct {{ .ArgsRecord }} {
 {{- range .Args }}
     pub {{ .RecordField }}: {{ .Type }},
 {{- end }}
+{{- if .Paged }}
+    pub cursor: Option<String>,
+    pub limit: Option<i64>,
+{{- end }}
 }
 
 impl {{ .ArgsRecord }} {
     /// The operation's arguments: each field's JSON, as a request carries
-    /// it, decoded into its Rust type.
+    /// it, decoded into its Rust type{{ if .Paged }}, and the page asked for,
+    /// held to the route's limits as the router reads `cursor` and `limit`{{ end }}.
     pub fn to_args(&self) -> Result<crate::api::{{ .ArgsName }}, ProblemRecord> {
         Ok(crate::api::{{ .ArgsName }} {
 {{- range .Args }}
             {{ .Field }}: {{ .Decode }},
+{{- end }}
+{{- if .Paged }}
+            page: crate::api::{{ .ArgsName }}::PAGE.request(self.cursor.as_deref(), self.limit).map_err(ProblemRecord::from)?,
 {{- end }}
         })
     }

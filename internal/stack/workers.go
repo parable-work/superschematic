@@ -12,8 +12,8 @@ import (
 // `@worker` of a member API service is a deployable of kind worker, named
 // after its API and its class as a job is (ir.WorkerDeployableName). Its
 // edges, its config and its identity are its API's, as a job's are: the
-// resolver treats a worker as it treats a job wherever a deployable has an
-// image (ir.DeployableKind.HasImage). What is its own is decided here: the
+// resolver treats a worker as it treats a job wherever a deployable runs
+// code (ir.DeployableKind.RunsCode). What is its own is decided here: the
 // queue it claims from, which must be a queue of the database its API
 // connects to, a database the environment runs on Postgres, and how many
 // instances run, each handling how many messages at a time.
@@ -198,7 +198,7 @@ func (r *resolver) runWorkers() {
 		}
 		run.Database = db
 		if host := r.deployables[r.byService[db]]; host != nil && host.res.Dialect != "" && host.res.Dialect != registry.SQLDialectPostgres {
-			r.fail(CodeUnrealizable, "worker %s claims the messages of queue %s of %s, which environment %s places on %s, a %s database; a worker claims on Postgres, the one dialect of the Go ORM that claims (D53)",
+			r.fail(CodeUnrealizable, "worker %s claims the messages of queue %s of %s, which environment %s places on %s, a %s database; a worker claims on Postgres, the one dialect the Go ORM and the TypeScript and Rust queue clients claim on (D53, D65)",
 				name, run.Queue, db, r.envName(), host.res.Name, host.res.Dialect)
 		}
 		run.Concurrency = registry.WorkerConcurrency(d.worker)

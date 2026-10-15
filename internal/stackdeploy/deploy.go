@@ -27,7 +27,8 @@ type DeployOptions struct {
 	// the image of each server Images names none for whose context
 	// changed since the image the manifest records. It also says where
 	// each site's package is, and the deploy builds each site Sites names
-	// no digest for. Nil builds nothing.
+	// no digest for, and each bundle Bundles names none for (D64). Nil
+	// builds nothing.
 	Sources *Sources
 
 	// Sites are the digests of the files of the sites the deploy rolls
@@ -36,6 +37,14 @@ type DeployOptions struct {
 	// without one is built when Sources is set, and keeps the files the
 	// manifest records otherwise (D55).
 	Sites map[string]string
+
+	// Bundles are the digests of the bundles of the servers, jobs and
+	// workers whose platform builds one, by deployable (ParseBundles):
+	// files an earlier deploy or build published, which the deploy fetches
+	// and runs again without a build. One without a digest is built when
+	// Sources is set, and keeps the bundle the manifest records otherwise
+	// (D64).
+	Bundles map[string]string
 
 	// Planner plans each database's migration. Required when the
 	// environment has a database.
@@ -70,8 +79,12 @@ type DeployOptions struct {
 //     checks the plans against the gate and, when given, against the plans
 //     `stack plan` showed; when a migration phase is to run, it has the
 //     target's runner ready what the phases need, when the runner is a
-//     registry.MigrationPreparer; then it builds the images it decided to
-//     build and pins each server's image (PinImages);
+//     registry.MigrationPreparer; it builds each site and each bundle;
+//     then it builds the images it decided to build, publishes the
+//     bundles it built and fetches the ones it did not, pins each server's
+//     image, each site's files and each bundle (PinImages, PinSites,
+//     PinBundles), renders the program and places the bundles' files
+//     beside it;
 //  2. it runs the deploy order a step at a time: the provisioner applies
 //     the infrastructure; every secret then needs a value; the target's
 //     migration runner runs the expand phase of each plan (first finishing
@@ -141,11 +154,28 @@ func Deploy(ctx context.Context, o DeployOptions) (*Manifest, error) {
 	}
 
 	sites, err := s.planSitesFor(ctx, prev, o.Sites, o.Sources)
+	if sites != nil {
+		defer sites.cleanup()
+	}
+	if err != nil {
+		return nil, err
+	}
+	bundles, err := s.planBundlesFor(ctx, prev, o.Bundles, o.Sources)
+	defer bundles.cleanup()
 	if err != nil {
 		return nil, err
 	}
 
 	if err := s.runBuilds(ctx, images); err != nil {
+		return nil, err
+	}
+	if err := s.publishBundles(ctx, bundles, false); err != nil {
+		return nil, err
+	}
+	if err := s.fetchBundles(ctx, bundles); err != nil {
+		return nil, err
+	}
+	if err := s.fetchSites(ctx, sites); err != nil {
 		return nil, err
 	}
 	pinned, err := PinImages(s.env, images.images)
@@ -155,11 +185,15 @@ func Deploy(ctx context.Context, o DeployOptions) (*Manifest, error) {
 	if pinned, err = PinSites(pinned, sites.digests); err != nil {
 		return nil, err
 	}
-	req, err := s.request(ctx, pinned)
+	pins := bundles.pins()
+	if pinned, err = PinBundles(pinned, pins); err != nil {
+		return nil, err
+	}
+	req, err := s.request(ctx, pinned, s.placed(sites, bundles))
 	if err != nil {
 		return nil, err
 	}
-	d := &deploy{session: s, opts: o, now: now, req: req, images: images.images, contexts: images.contexts, sites: sites, plans: plans, pending: pending}
+	d := &deploy{session: s, opts: o, now: now, req: req, images: images.images, contexts: images.contexts, sites: sites, bundles: pins, plans: plans, pending: pending}
 	d.manifest = nextManifest(prev, s.run, o.Services)
 	if err := d.checkpoint(ctx, ""); err != nil {
 		return nil, err
@@ -201,6 +235,7 @@ type deploy struct {
 	images   map[string]string
 	contexts map[string]string
 	sites    *sitePlan
+	bundles  map[string]Bundle
 	plans    []*DatabasePlan
 	pending  map[string][]*PendingMigration
 	manifest *Manifest
@@ -262,11 +297,14 @@ func (d *deploy) step(ctx context.Context, step *ir.DeployStep) error {
 			return err
 		}
 		for _, name := range step.Deployables {
-			if dep := d.env.Deployable(name); dep != nil && dep.Kind == ir.DeployableSite {
+			switch dep := d.env.Deployable(name); {
+			case dep != nil && dep.Kind == ir.DeployableSite:
 				d.manifest.setSite(name, d.sites.digests[name])
-				continue
+			case dep != nil && dep.HasBundle():
+				d.manifest.setBundle(name, d.bundles[name])
+			default:
+				d.manifest.setImage(name, d.images[name], d.contexts[name])
 			}
-			d.manifest.setImage(name, d.images[name], d.contexts[name])
 		}
 		return nil
 	case ir.StepMigrate:

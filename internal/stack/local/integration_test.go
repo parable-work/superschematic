@@ -600,6 +600,244 @@ func TestLocalRustServerRuns(t *testing.T) {
 	_ = resp.Body.Close()
 }
 
+// rustDeployment is a local environment of one Rust API, ledger-rs, on its
+// server, resolved and rendered over an output root holding the fake Rust
+// server's crate and a crate per other deployable of the API's, each
+// copied from its testdata directory, with a state directory of its own.
+type rustDeployment struct {
+	env      *ir.ResolvedEnvironment
+	req      registry.ProvisionRequest
+	prov     *local.Provisioner
+	out      *syncBuffer
+	stateDir string
+	module   func(deployable string) string
+}
+
+// deployRust resolves and renders Dev of a stack that deploys api, the
+// ledger-rs service of services, on port, with settings besides the
+// port's, and copies the crate in testdata/<crate> into the entrypoint
+// module of each deployable crates names.
+func deployRust(t *testing.T, stackName string, services []stack.Service, port int, settings []*ir.DeployableSettings, crates map[string]string) *rustDeployment {
+	t.Helper()
+	api := ir.ServiceRef{Name: "ledger-rs", Kind: ir.SchemaKindAPI}
+	st := &ir.Stack{
+		Name:   stackName,
+		Deploy: []ir.ServiceRef{api},
+		Environments: []*ir.Environment{{
+			Name:     "Dev",
+			Target:   local.Target,
+			Settings: append([]*ir.DeployableSettings{{Of: ir.DeployableRef{Service: &api}, Values: map[string]any{"port": float64(port)}}}, settings...),
+		}},
+	}
+	reg, err := registry.Assemble(registry.DefaultNaming())
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	schemasRoot := filepath.Join(root, "schemas")
+	env, err := stack.Resolve(reg, stack.Input{Stack: st, Services: services, Environment: "Dev", SchemasRoot: schemasRoot})
+	if err != nil {
+		t.Fatal(err)
+	}
+	outputRoot := filepath.Join(root, "dist")
+	module := func(deployable string) string {
+		return filepath.Join(outputRoot, local.ModulePath(stackName, deployable))
+	}
+	for deployable, crate := range crates {
+		if err := os.CopyFS(module(deployable), os.DirFS(filepath.Join("testdata", crate))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stateDir, err := local.EnsureStateDir(schemasRoot, stackName, "Dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := &rustDeployment{env: env, out: &syncBuffer{}, stateDir: stateDir, module: module}
+	d.prov = &local.Provisioner{Out: d.out, ReadyTimeout: time.Minute}
+	d.req = registry.ProvisionRequest{Environment: env, Dir: filepath.Join(root, "program"), OutputRoot: outputRoot, Backend: local.StateBackend(stateDir)}
+	t.Cleanup(func() {
+		_ = d.prov.Destroy(context.Background(), d.req)
+		if t.Failed() || testing.Verbose() {
+			t.Logf("provisioner output:\n%s", d.out)
+		}
+	})
+	if err := d.prov.Render(env, d.req.Dir); err != nil {
+		t.Fatal(err)
+	}
+	return d
+}
+
+// binary is the path of a binary cargo built into the program directory's
+// target directory.
+func (d *rustDeployment) binary(name string) string {
+	return filepath.Join(d.req.Dir, local.RustTargetDir, "release", name)
+}
+
+// waitOutput waits until the provisioner's output holds want.
+func (d *rustDeployment) waitOutput(t *testing.T, want string) {
+	t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
+	for !strings.Contains(d.out.String(), want) {
+		if time.Now().After(deadline) {
+			t.Fatalf("the output never held %q:\n%s", want, d.out)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// TestLocalRustJobRuns applies a local environment of a Rust API with a
+// job for real, with cargo and no Docker (D65). The rollout builds the
+// server's crate and the job's into the program directory's one target
+// directory, starts the server, and runs the job on no schedule, since it
+// has none. stack run, from a provisioner of its own as the command makes
+// one, builds the job's crate again and runs the binary its one [[bin]]
+// names, in its module, with its resolved environment and no PORT.
+// JOB_EXIT, a secret each run reads afresh from the secrets file, says how
+// the job exits: 0, and the run succeeds; 1, and it fails with the job's
+// exit status after its retry.
+func TestLocalRustJobRuns(t *testing.T) {
+	if testing.Short() {
+		t.Skip("-short: the local stack builds a Rust server and job with cargo")
+	}
+	if _, err := exec.LookPath("cargo"); err != nil {
+		t.Skipf("cargo is not available: %v", err)
+	}
+	greeting := "hello"
+	services := []stack.Service{{
+		Name: "ledger-rs", Kind: ir.SchemaKindAPI, Language: registry.APILanguageRust,
+		Config: &stack.Config{
+			Type: "LedgerConfig",
+			Fields: []stack.ConfigField{
+				{Name: "GREETING", Required: true, Default: &greeting},
+				{Name: "JOB_EXIT", Required: true, Secret: true},
+			},
+		},
+		Operations: []stack.Operation{{Name: "Accounts.getBalance"}},
+		Jobs:       []ir.Job{{Name: "SettleLedger", Retries: 1}},
+	}}
+	job := ir.JobDeployableName("ledger-rs", "SettleLedger")
+	d := deployRust(t, fmt.Sprintf("local-target-rs-job-it-%d", os.Getpid()), services, freePort(t), nil,
+		map[string]string{"ledger-rs": "fakerustserver", job: "fakerustjob"})
+	secrets := filepath.Join(d.stateDir, local.SecretsFile)
+	if err := local.WriteSecret(secrets, "LedgerConfig.JOB_EXIT", "0"); err != nil {
+		t.Fatal(err)
+	}
+	for _, step := range d.env.DeployOrder {
+		if err := d.prov.Apply(context.Background(), d.req, *step); err != nil {
+			t.Fatal(err)
+		}
+	}
+	built, err := os.Stat(d.binary(job))
+	if err != nil {
+		t.Fatalf("the rollout built no job binary: %v", err)
+	}
+	if _, err := os.Stat(d.binary("fake-rust-server")); err != nil {
+		t.Errorf("the server's binary is not in the job's target directory: %v", err)
+	}
+	if entries, err := os.ReadDir(d.module(job)); err != nil || slices.ContainsFunc(entries, func(e os.DirEntry) bool { return e.Name() == "target" }) {
+		t.Errorf("cargo wrote a target directory into the job's module, which each build of the stack empties: %v", err)
+	}
+	if out := d.out.String(); !strings.Contains(out, "job "+job+" runs only on demand") || strings.Contains(out, "fake Rust job") {
+		t.Errorf("the rollout ran the job, or did not say it runs on demand:\n%s", out)
+	}
+
+	run := &local.Provisioner{Out: d.out, ReadyTimeout: time.Minute}
+	if err := run.RunJob(context.Background(), d.req, job); err != nil {
+		t.Fatalf("RunJob = %v", err)
+	}
+	for _, want := range []string{
+		"build " + job + ": cargo build --release --locked in " + filepath.ToSlash(filepath.Join("server", d.env.Stack, job)),
+		"[" + job + "] fake Rust job done, greeting hello",
+		"job " + job + ": the run stack run asked for, try 1 of 2 succeeded",
+	} {
+		if !strings.Contains(d.out.String(), want) {
+			t.Errorf("output lacks %q:\n%s", want, d.out)
+		}
+	}
+	again, err := os.Stat(d.binary(job))
+	if err != nil || !again.ModTime().Equal(built.ModTime()) {
+		t.Errorf("stack run's build wrote the job's binary again (%v); it should find it current in the target directory", err)
+	}
+
+	if err := local.WriteSecret(secrets, "LedgerConfig.JOB_EXIT", "1"); err != nil {
+		t.Fatal(err)
+	}
+	err = run.RunJob(context.Background(), d.req, job)
+	if err == nil || !strings.Contains(err.Error(), "local: job "+job+" failed: exit status 1") {
+		t.Errorf("RunJob of a failing run = %v, want the job's exit status", err)
+	}
+	for _, want := range []string{
+		"[" + job + "] fake Rust job failed, greeting hello",
+		"job " + job + ": the run stack run asked for, try 2 of 2 failed",
+	} {
+		if !strings.Contains(d.out.String(), want) {
+			t.Errorf("output lacks %q:\n%s", want, d.out)
+		}
+	}
+}
+
+// TestLocalRustWorkerRuns applies the rollout of a local environment of a
+// Rust API with a worker for real, with cargo and no Docker (D65). The
+// rollout builds the server's crate and the worker's into the program
+// directory's one target directory, and starts the worker from the binary
+// its one [[bin]] names, with no port and the concurrency the environment
+// gives it, ready once it starts. It applies the rollout steps alone: the
+// fake worker claims nothing, so it needs no Postgres container, and the
+// test no Docker. Destroy stops the worker with SIGTERM, which it answers
+// before it exits.
+func TestLocalRustWorkerRuns(t *testing.T) {
+	if testing.Short() {
+		t.Skip("-short: the local stack builds a Rust server and worker with cargo")
+	}
+	if _, err := exec.LookPath("cargo"); err != nil {
+		t.Skipf("cargo is not available: %v", err)
+	}
+	db := ir.ServiceRef{Name: "ledger-db", Kind: ir.SchemaKindDB}
+	api := ir.ServiceRef{Name: "ledger-rs", Kind: ir.SchemaKindAPI}
+	services := []stack.Service{
+		{Name: "ledger-db", Kind: ir.SchemaKindDB, Queues: []string{"EntryPosted"}},
+		{
+			Name: "ledger-rs", Kind: ir.SchemaKindAPI, Language: registry.APILanguageRust, AuthDB: &db,
+			Operations: []stack.Operation{{Name: "Accounts.getBalance"}},
+			Workers:    []ir.Worker{{Name: "PostEntries", Queue: "EntryPosted", Concurrency: 2}},
+		},
+	}
+	worker := ir.WorkerDeployableName("ledger-rs", "PostEntries")
+	three := 3
+	d := deployRust(t, fmt.Sprintf("local-target-rs-worker-it-%d", os.Getpid()), services, freePort(t),
+		[]*ir.DeployableSettings{{Of: ir.DeployableRef{Service: &api, Worker: "PostEntries"}, Concurrency: &three}},
+		map[string]string{"ledger-rs": "fakerustserver", worker: "fakerustworker"})
+	for _, step := range d.env.DeployOrder {
+		if step.Step != ir.StepRollout {
+			continue
+		}
+		if err := d.prov.Apply(context.Background(), d.req, *step); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := os.Stat(d.binary(worker)); err != nil {
+		t.Fatalf("the rollout built no worker binary: %v", err)
+	}
+	if _, err := os.Stat(d.binary("fake-rust-server")); err != nil {
+		t.Errorf("the server's binary is not in the worker's target directory: %v", err)
+	}
+	d.waitOutput(t, "["+worker+"] fake Rust worker running, concurrency 3")
+	if !strings.Contains(d.out.String(), "worker "+worker+" is running") {
+		t.Errorf("output does not say the worker runs:\n%s", d.out)
+	}
+
+	// Destroy stops the worker, then looks for the environment's Postgres
+	// container, which the rollout never started: without Docker that
+	// look fails, and only that may.
+	if err := d.prov.Destroy(context.Background(), d.req); err != nil && !strings.Contains(err.Error(), "docker") {
+		t.Fatal(err)
+	}
+	d.waitOutput(t, "["+worker+"] fake Rust worker stopped")
+}
+
 // checkToken checks a compact JWS as D37 says the callee does: its header's
 // alg is EdDSA and its kid the key's, its signature verifies with the
 // public JWK, iss and sub are the caller, aud the callee, and exp is 300

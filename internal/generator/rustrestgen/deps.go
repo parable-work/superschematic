@@ -6,11 +6,16 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/generator/rustgen"
 	"github.com/parable-work/superschematic/internal/generator/rustutil"
+	"github.com/parable-work/superschematic/internal/registry"
+	ir "github.com/parable-work/superschematic/ir"
 )
 
 // The implementation side of a Rust API (D57; docs/stack-model.md, section
@@ -35,7 +40,28 @@ type DepsInfo struct {
 
 	// Calls are the API's calls entries, in order.
 	Calls []DepsCall
+
+	// DatabaseTypesCrate is the Rust types crate of Database when the API
+	// declares a worker (D65): it declares the queues' messages, which the
+	// Workers trait takes, and holds their descriptors in src/queues.rs,
+	// which a worker claims with and an implementation enqueues with. The
+	// API crate re-exports it as database_types (DatabaseTypesModule), and
+	// DatabaseTypesPath is its directory relative to the API crate's,
+	// which Cargo.toml depends on. Both are empty otherwise.
+	DatabaseTypesCrate string
+	DatabaseTypesPath  string
 }
+
+// DatabaseTypesCrateIdent is DatabaseTypesCrate as Rust source spells it.
+func (d DepsInfo) DatabaseTypesCrateIdent() string {
+	return strings.ReplaceAll(d.DatabaseTypesCrate, "-", "_")
+}
+
+// DatabaseTypesModule is the name the API crate re-exports the Rust types
+// of its database as, for an API with workers (D65): the implementation
+// names a worker's message, and enqueues with a queue's descriptor,
+// through it, and a worker's entrypoint claims with the descriptor.
+const DatabaseTypesModule = "database_types"
 
 // DepsCall is a Rust SDK client in Deps.
 type DepsCall struct {
@@ -63,6 +89,163 @@ func (c DepsCall) CrateIdent() string {
 // depsFields are the fields every Deps may hold beside its clients.
 var depsFields = []string{"config", "db", "span"}
 
+// JobInfo is a job of the API (D52, D65): a method of the generated Jobs
+// trait, which a job's entrypoint calls once per run.
+type JobInfo struct {
+	// Name is the job's @job class, and Method the Jobs method that runs
+	// it, the class in snake case.
+	Name   string
+	Method string
+
+	// Schedule is the decorator's five-field cron, empty for a job that
+	// runs only on demand, and TimeZone the zone it is read in, empty for
+	// UTC.
+	Schedule string
+	TimeZone string
+
+	// TimeoutSeconds bounds one run: the decorator's timeout, or
+	// ir.DefaultJobTimeoutSeconds. Retries is how many times a failed run
+	// is run again.
+	TimeoutSeconds int
+	Retries        int
+}
+
+// WorkerInfo is a worker of the API (D53, D65): a method of the generated
+// Workers trait, which handles one message of its queue.
+type WorkerInfo struct {
+	// Name is the worker's @worker class, and Method the Workers method
+	// that handles a message, the class in snake case.
+	Name   string
+	Method string
+
+	// Queue is the @queue class of the API's database whose messages the
+	// worker handles: the message's type in the database's Rust types
+	// (DepsInfo.DatabaseTypesCrate), whose src/queues.rs holds the
+	// queue's descriptor in the constant QueueConst (ORDER_PLACED_QUEUE).
+	Queue      string
+	QueueConst string
+
+	// Concurrency is the decorator's concurrency, how many messages an
+	// instance handles at a time unless an environment changes it, and
+	// GraceSeconds the decorator's grace, how long a stopped worker lets
+	// its running handlers finish.
+	Concurrency  int
+	GraceSeconds int
+}
+
+// jobsOf reads the API's jobs, sorted by name.
+func jobsOf(schema *ir.Schema) ([]JobInfo, error) {
+	var jobs []JobInfo
+	for _, job := range schema.Jobs {
+		if job == nil {
+			continue
+		}
+		timeout := ir.DefaultJobTimeoutSeconds
+		if job.Timeout != "" {
+			seconds, err := registry.TimeoutSeconds(job.Timeout)
+			if err != nil {
+				return nil, fmt.Errorf("rustrestgen: job %s: timeout: %w", job.Name, err)
+			}
+			timeout = seconds
+		}
+		jobs = append(jobs, JobInfo{
+			Name:           job.Name,
+			Method:         rustutil.Identifier(job.Name, "run"),
+			Schedule:       job.Schedule,
+			TimeZone:       job.TimeZone,
+			TimeoutSeconds: timeout,
+			Retries:        job.Retries,
+		})
+	}
+	slices.SortFunc(jobs, func(a, b JobInfo) int { return strings.Compare(a.Name, b.Name) })
+	return jobs, nil
+}
+
+// workersOf reads the API's workers, sorted by name.
+func workersOf(schema *ir.Schema) ([]WorkerInfo, error) {
+	var workers []WorkerInfo
+	for _, w := range schema.Workers {
+		if w == nil {
+			continue
+		}
+		if err := registry.CheckWorker(w); err != nil {
+			return nil, fmt.Errorf("rustrestgen: worker %s: %w", w.Name, err)
+		}
+		workers = append(workers, WorkerInfo{
+			Name:         w.Name,
+			Method:       rustutil.Identifier(w.Name, "handle"),
+			Queue:        w.Queue,
+			QueueConst:   rustgen.QueueConst(w.Queue),
+			Concurrency:  registry.WorkerConcurrency(w),
+			GraceSeconds: registry.WorkerGraceSeconds(w),
+		})
+	}
+	slices.SortFunc(workers, func(a, b WorkerInfo) int { return strings.Compare(a.Name, b.Name) })
+	return workers, nil
+}
+
+// HasJobs reports whether the API declares a job, for which deps.rs
+// declares Jobs and the scaffold create_jobs.
+func (o *APIOutput) HasJobs() bool { return o.Deps != nil && len(o.Jobs) > 0 }
+
+// HasWorkers reports whether the API declares a worker, for which deps.rs
+// declares Workers and the scaffold create_workers.
+func (o *APIOutput) HasWorkers() bool { return o.Deps != nil && len(o.Workers) > 0 }
+
+// HasBackgroundWork reports whether deps.rs declares Jobs or Workers, and
+// BoxError, the error their methods return.
+func (o *APIOutput) HasBackgroundWork() bool { return o.HasJobs() || o.HasWorkers() }
+
+// The functions an implementation of an API with jobs or workers declares
+// in its src/lib.rs, which a job's and a worker's entrypoint call with the
+// API's Deps (D65).
+const (
+	JobsFunc    = "create_jobs"
+	WorkersFunc = "create_workers"
+)
+
+// JobSignature is the signature of job's method in the Jobs trait.
+func (o *APIOutput) JobSignature(job JobInfo) string {
+	return rustSignature("    ", "async fn "+job.Method, []string{"&self", "shutdown: Shutdown"}, "Result<(), BoxError>", ";")
+}
+
+// WorkerSignature is the signature of worker's method in the Workers
+// trait, its message typed by the database's Rust types.
+func (o *APIOutput) WorkerSignature(worker WorkerInfo) string {
+	return rustSignature("    ", "async fn "+worker.Method, []string{"&self", "message: " + o.Deps.DatabaseTypesCrateIdent() + "::" + worker.Queue}, "Result<(), BoxError>", ";")
+}
+
+// DepsExports are the items lib.rs re-exports from deps.rs: Deps and
+// Handlers, and Jobs, Workers and BoxError for an API with either.
+func (o *APIOutput) DepsExports() string {
+	names := []string{"Deps", "Handlers"}
+	if o.HasBackgroundWork() {
+		names = append(names, "BoxError")
+	}
+	if o.HasJobs() {
+		names = append(names, "Jobs")
+	}
+	if o.HasWorkers() {
+		names = append(names, "Workers")
+	}
+	return strings.TrimPrefix(rustutil.UseLine("deps", names), "use ")
+}
+
+// DatabaseTypesDependency is the Cargo.toml dependency on the database's
+// Rust types for an API with workers, nil without one or when the crate
+// depends on them already for a dependency's validators.
+func (o *APIOutput) DatabaseTypesDependency() *DependencyCrate {
+	if !o.HasWorkers() || o.Deps.DatabaseTypesCrate == "" {
+		return nil
+	}
+	for _, crate := range o.DependencyCrates {
+		if crate.Name == o.Deps.DatabaseTypesCrate {
+			return nil
+		}
+	}
+	return &DependencyCrate{Name: o.Deps.DatabaseTypesCrate, Path: o.Deps.DatabaseTypesPath}
+}
+
 // SetDeps sets what Deps holds, so the crate writes src/deps.rs, refusing
 // a client whose field would take the name of another of its fields.
 func (o *APIOutput) SetDeps(deps DepsInfo) error {
@@ -75,6 +258,9 @@ func (o *APIOutput) SetDeps(deps DepsInfo) error {
 			return fmt.Errorf("rustrestgen: %s calls %s, whose client would be Deps.%s, the field of %s", o.SchemaName, call.Service, call.Field, prev)
 		}
 		seen[call.Field] = call.Service
+	}
+	if len(o.Workers) > 0 && deps.DatabaseTypesCrate == "" {
+		return fmt.Errorf("rustrestgen: %s declares workers, whose messages are its database's Rust types, and its Deps names none", o.SchemaName)
 	}
 	o.Deps = &deps
 	return nil
@@ -113,8 +299,8 @@ func (o *APIOutput) HandlersFields() []string {
 
 // DepsUses are the use declarations of src/deps.rs beside std's: the
 // config, what it names from the interfaces module (each namespace's trait,
-// Implementations and the webhook verifier's trait), and the runtime's
-// pool and authenticators.
+// Implementations and the webhook verifier's trait), async_trait for Jobs
+// and Workers, and the runtime's pool, authenticators and Shutdown.
 func (o *APIOutput) DepsUses() []string {
 	var uses []string
 	if o.HasEnvConfig {
@@ -128,6 +314,11 @@ func (o *APIOutput) DepsUses() []string {
 		interfaces = append(interfaces, "WebhookVerifier")
 	}
 	uses = append(uses, rustutil.UseLine("crate::interfaces", interfaces))
+	if o.HasBackgroundWork() {
+		// The Jobs and Workers traits, after crate's paths, as rustfmt
+		// orders them.
+		uses = append(uses, "use async_trait::async_trait;")
+	}
 	var runtime []string
 	if o.Deps != nil && o.Deps.Database != "" {
 		runtime = append(runtime, "postgres::Pool")
@@ -140,6 +331,9 @@ func (o *APIOutput) DepsUses() []string {
 	}
 	if o.HasServiceCallers {
 		runtime = append(runtime, "ServiceAuthenticator")
+	}
+	if o.HasJobs() {
+		runtime = append(runtime, "Shutdown")
 	}
 	if len(runtime) > 0 {
 		uses = append(uses, rustutil.UseLine(o.RuntimeCrateIdent, runtime))
@@ -176,7 +370,13 @@ func (s ImplementationScaffold) NotImplemented(endpoint EndpointInfo) string {
 // indent: on one line when it fits in 100 columns, as rustfmt lays it out,
 // and otherwise a parameter to a line.
 func rustFn(indent, name string, params []string, result string) string {
-	line := indent + name + "(" + strings.Join(params, ", ") + ") -> " + result + " {"
+	return rustSignature(indent, name, params, result, " {")
+}
+
+// rustSignature is a function's signature followed by end, its opening
+// brace or, in a trait, a semicolon, laid out as rustFn lays one out.
+func rustSignature(indent, name string, params []string, result, end string) string {
+	line := indent + name + "(" + strings.Join(params, ", ") + ") -> " + result + end
 	if len(line) <= 100 {
 		return line
 	}
@@ -185,7 +385,7 @@ func rustFn(indent, name string, params []string, result string) string {
 	for _, param := range params {
 		b.WriteString(indent + "    " + param + ",\n")
 	}
-	b.WriteString(indent + ") -> " + result + " {")
+	b.WriteString(indent + ") -> " + result + end)
 	return b.String()
 }
 
@@ -257,7 +457,48 @@ func (s ImplementationScaffold) APIUse() string {
 			names = append(names, endpoint.ArgsName)
 		}
 	}
+	if s.HasBackgroundWork() {
+		names = append(names, "BoxError")
+	}
+	if s.HasJobs() {
+		names = append(names, "Jobs")
+	}
+	if s.HasWorkers() {
+		names = append(names, "Workers", DatabaseTypesModule)
+	}
 	return rustutil.UseLine(s.CrateIdent(), names)
+}
+
+// JobsStruct is the struct the scaffold implements Jobs with, named after
+// the API: ShopStockJobs.
+func (s ImplementationScaffold) JobsStruct() string {
+	return rustutil.ToPascalCase(s.SchemaName) + "Jobs"
+}
+
+// WorkersStruct is the struct the scaffold implements Workers with:
+// ShopStockWorkers.
+func (s ImplementationScaffold) WorkersStruct() string {
+	return rustutil.ToPascalCase(s.SchemaName) + "Workers"
+}
+
+// JobMethodSignature is the signature of job's method in the scaffold's
+// impl of Jobs.
+func (s ImplementationScaffold) JobMethodSignature(job JobInfo) string {
+	return rustFn("    ", "async fn "+job.Method, []string{"&self", "_shutdown: Shutdown"}, "Result<(), BoxError>")
+}
+
+// WorkerMethodSignature is the signature of worker's method in the
+// scaffold's impl of Workers, its message named through the API crate's
+// re-export of its database's types.
+func (s ImplementationScaffold) WorkerMethodSignature(worker WorkerInfo) string {
+	return rustFn("    ", "async fn "+worker.Method, []string{"&self", "_message: " + DatabaseTypesModule + "::" + worker.Queue}, "Result<(), BoxError>")
+}
+
+// Async reports whether the scaffold implements a trait, whose impls are
+// #[async_trait] and hold their deps in an Arc: a namespace's, the
+// authenticator's, Jobs or Workers.
+func (s ImplementationScaffold) Async() bool {
+	return len(s.Namespaces) > 0 || s.ChecksEndUsers() || s.HasBackgroundWork()
 }
 
 // RuntimeUse is the use declaration of what the implementation names from
@@ -274,6 +515,9 @@ func (s ImplementationScaffold) RuntimeUse() string {
 	}
 	if s.ChecksEndUsers() {
 		names = append(names, "Authenticator", "Principal")
+	}
+	if s.HasJobs() {
+		names = append(names, "Shutdown")
 	}
 	if len(names) == 0 {
 		return ""
@@ -305,9 +549,11 @@ var ImplementationLib = filepath.Join("src", "lib.rs")
 // crate that exists, so it never overwrites the engineer's code, and
 // reports whether it wrote. Its Cargo.toml depends on the API crate at
 // apiDir and on the HTTP runtime at paths.HTTPRuntimeRust, by paths
-// relative to dir, and its create(deps) returns the Handlers, each method
-// answering 501 Not Implemented. The output must have its Deps
-// (SetDeps).
+// relative to dir, for the crate's editor and its own `cargo test`; a
+// stack's server builds against the crate's mirror under its output root,
+// whose Cargo.toml names that root's API crate (D65). Its create(deps)
+// returns the Handlers, each method answering 501 Not Implemented. The
+// output must have its Deps (SetDeps).
 func WriteImplementationScaffold(output *APIOutput, dir, apiDir string, paths naming.LocalPaths, names naming.Naming) (bool, error) {
 	if output.Deps == nil {
 		return false, fmt.Errorf("rustrestgen: the implementation scaffold of %s needs its Deps", output.SchemaName)
@@ -338,6 +584,50 @@ func WriteImplementationScaffold(output *APIOutput, dir, apiDir string, paths na
 		}
 	}
 	return true, nil
+}
+
+// fnPattern matches a public function at the top of a file, by its name in
+// the match's first group: `pub async fn create_jobs`, or `pub fn`.
+var fnPattern = regexp.MustCompile(`(?m)^[ \t]*pub[ \t]+(?:async[ \t]+)?fn[ \t]+([A-Za-z_][A-Za-z0-9_]*)`)
+
+// usePattern matches a re-export, its tree in the match's first group:
+// `pub use jobs::create_jobs;`, `pub use jobs::{build as create_jobs};`.
+var usePattern = regexp.MustCompile(`(?m)^[ \t]*pub[ \t]+use[ \t]+([^;]*);`)
+
+// DeclaresFunc reports whether the Rust implementation crate at dir
+// declares, at its root, a public function named name, which a job's or a
+// worker's entrypoint calls (D65): its src/lib.rs declares one, or
+// re-exports one by that name. A glob re-export (`pub use jobs::*;`) may
+// export it, so it counts as declaring it, as tsrestgen.ExportsName counts
+// `export * from`.
+func DeclaresFunc(dir, name string) (bool, error) {
+	data, err := os.ReadFile(filepath.Join(dir, ImplementationLib))
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read implementation crate %s: %w", dir, err)
+	}
+	text := string(data)
+	for _, m := range fnPattern.FindAllStringSubmatch(text, -1) {
+		if m[1] == name {
+			return true, nil
+		}
+	}
+	for _, m := range usePattern.FindAllStringSubmatch(text, -1) {
+		for _, item := range strings.FieldsFunc(m[1], func(r rune) bool { return r == ',' || r == '{' || r == '}' }) {
+			fields := strings.Fields(item)
+			if len(fields) == 0 {
+				continue
+			}
+			// `path::create_jobs`, `path::build as create_jobs`, or a glob.
+			last := fields[len(fields)-1]
+			if strings.HasSuffix(last, "*") || last == name || strings.HasSuffix(last, "::"+name) {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
 }
 
 // ImplementationExists reports whether dir holds a Rust crate: a

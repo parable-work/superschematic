@@ -51,6 +51,10 @@ type session struct {
 	prov   registry.Provisioner
 	dir    string
 	log    io.Writer
+
+	// installed is set once the operation ran the frozen install of the
+	// Bun workspace that a site's or a bundle's build needs first.
+	installed bool
 }
 
 // open opens a session over a run, whose parameters it checks.
@@ -109,10 +113,11 @@ func (s *session) logf(format string, args ...any) {
 	_, _ = fmt.Fprintf(s.log, format+"\n", args...)
 }
 
-// request renders env, which may be s.env with its images pinned, and
-// returns the provisioner's request over it: the target's state backend,
-// and the environment's credentials.
-func (s *session) request(ctx context.Context, env *ir.ResolvedEnvironment) (registry.ProvisionRequest, error) {
+// request renders env, which may be s.env with its images, sites and
+// bundles pinned, places the files of place beside the program it rendered
+// (placeArtifacts), and returns the provisioner's request over it: the
+// target's state backend, and the environment's credentials.
+func (s *session) request(ctx context.Context, env *ir.ResolvedEnvironment, place map[string]*ArtifactFiles) (registry.ProvisionRequest, error) {
 	backend, err := s.target.State.Backend(ctx, env)
 	if err != nil {
 		return registry.ProvisionRequest{}, fmt.Errorf("the state backend of %s: %w", s.run.Name(), err)
@@ -123,6 +128,9 @@ func (s *session) request(ctx context.Context, env *ir.ResolvedEnvironment) (reg
 	}
 	if err := s.prov.Render(env, s.dir); err != nil {
 		return registry.ProvisionRequest{}, fmt.Errorf("render the program of %s: %w", s.run.Name(), err)
+	}
+	if err := placeArtifacts(s.dir, place); err != nil {
+		return registry.ProvisionRequest{}, fmt.Errorf("the program of %s: %w", s.run.Name(), err)
 	}
 	return registry.ProvisionRequest{
 		Environment: env,

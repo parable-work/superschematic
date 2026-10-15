@@ -745,3 +745,94 @@ fn parse_spki_public_key(public_key_pem: &str) -> Result<RsaPublicKey, SDKError>
         SDKError::config(format!("public encryption key is not valid PEM: {err}"))
     })
 }
+{{- if .HasPagedEndpoints}}
+
+/// A page of a paged list (D60): its items, and `next`, the cursor of the
+/// next page, `None` after the last. Pass `next` back as the query's
+/// `cursor` for the next page, with the same other parameters. A page may
+/// hold fewer items than its limit, even none, while `next` is not `None`.
+#[derive(Debug, Clone, PartialEq, Serialize, serde::Deserialize)]
+pub struct Page<T> {
+    pub items: Vec<T>,
+    pub next: Option<String>,
+}
+
+/// The request of one page a [`Pager`] asks for.
+pub type PageFuture<'a, T> =
+    std::pin::Pin<Box<dyn std::future::Future<Output = Result<Page<T>, SDKError>> + Send + 'a>>;
+
+/// Yields every item of a paged list (D60), as a paged operation's
+/// `<method>_all` returns it: `while let Some(item) = pager.next().await`.
+/// It asks for a page, with the last one's `next`, only when the items
+/// before it are taken, and holds one page at a time. An error is yielded
+/// once and ends it, and so does a page whose `next` is the cursor it was
+/// asked with, after that page's items.
+pub struct Pager<'a, T> {
+    operation: &'static str,
+    fetch: Box<dyn FnMut(Option<String>) -> PageFuture<'a, T> + Send + 'a>,
+    cursor: Option<String>,
+    items: std::vec::IntoIter<T>,
+    state: PagerState,
+}
+
+/// What a [`Pager`] does when its page's items run out.
+enum PagerState {
+    /// Ask for the page its cursor names.
+    More,
+    /// Nothing: the last page is taken, or an error was yielded.
+    Done,
+    /// Yield this error, once.
+    Failed(SDKError),
+}
+
+impl<'a, T> Pager<'a, T> {
+    /// A pager of `operation` whose first page is the one `cursor` names,
+    /// the first of the list when it is `None`; `fetch` asks for the page a
+    /// cursor names.
+    pub fn new(
+        operation: &'static str,
+        cursor: Option<String>,
+        fetch: impl FnMut(Option<String>) -> PageFuture<'a, T> + Send + 'a,
+    ) -> Self {
+        Self {
+            operation,
+            fetch: Box::new(fetch),
+            cursor,
+            items: Vec::new().into_iter(),
+            state: PagerState::More,
+        }
+    }
+
+    /// The next item, or the error that ends the iteration; `None` after
+    /// the last item and after an error.
+    pub async fn next(&mut self) -> Option<Result<T, SDKError>> {
+        loop {
+            if let Some(item) = self.items.next() {
+                return Some(Ok(item));
+            }
+            match std::mem::replace(&mut self.state, PagerState::Done) {
+                PagerState::Done => return None,
+                PagerState::Failed(err) => return Some(Err(err)),
+                PagerState::More => {}
+            }
+            let asked = self.cursor.take();
+            let page = match (self.fetch)(asked.clone()).await {
+                Ok(page) => page,
+                Err(err) => return Some(Err(err)),
+            };
+            self.items = page.items.into_iter();
+            self.state = match page.next {
+                None => PagerState::Done,
+                Some(next) if asked.as_ref() == Some(&next) => PagerState::Failed(SDKError::contract(format!(
+                    "{} returned the cursor it was sent",
+                    self.operation
+                ))),
+                Some(next) => {
+                    self.cursor = Some(next);
+                    PagerState::More
+                }
+            };
+        }
+    }
+}
+{{- end}}

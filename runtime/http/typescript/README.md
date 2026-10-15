@@ -24,6 +24,11 @@ Its entry points:
   (below), a token-bucket rate limiter with a pluggable store, and what a
   generated server reads at startup: the stack's derived config fields
   and a JSON-lines logger (below).
+  `readPage` reads a `@paginated` operation's `cursor` and `limit` (D60)
+  with a query parameter's 400s; `encodeCursor`, `decodeCursor` and
+  `pageFromRows` build its `Page`, `{items, next}`, as the Go and Rust
+  runtimes do (`runtime/http/testdata/page_parity.json`), the encoder
+  throwing for a key no router reads back.
   `decodeParam` reads a path or query value from its strings; a query
   list accepts repeated keys and comma-separated values.
   `decodeJsonParam` reads every body parameter from its JSON value, with
@@ -265,14 +270,18 @@ these, the twins of the Go runtime's `stackconfig` package (D51):
   when `field_CREDENTIAL_SOURCE` is set, the members that source reads.
   It returns a `Service`, `{ url, credential? }`, whose credential is a
   `google-id-token` (`audience`), a `token-file` (`tokenFile`) or a
-  `signed-token` (`audience`, `issuer`, `key`, a private JWK's JSON), with
-  the `headers` that carry it when they are set.
+  `signed-token` (`audience`, `issuer`, `key`, a private JWK's JSON or,
+  from the generic connector, an Ed25519 private key's PKCS#8 PEM, D63),
+  with the `headers` that carry it when they are set.
 - `loadBucket(field, env)` reads a bucket connection (D54): `field_NAME`,
   and `field_ENDPOINT` when an emulator serves the bucket. It returns a
   `BucketConnection`, `{ name, endpoint? }`.
 - `loadCallers(field, env)` reads an API's callers field
   (`<API>_CALLERS`): its issuers, keys and callers, as the
-  `ServiceAuthConfig` that `serviceAuthenticator` takes.
+  `ServiceAuthConfig` that `serviceAuthenticator` takes. A key is a JWK's
+  JSON, or an Ed25519 public key's SubjectPublicKeyInfo PEM from the
+  generic connector, which `ed25519PublicJwkFromPem` reads as a JWK whose
+  `kid` is its RFC 7638 thumbprint (D63).
 - `serviceCredentialFor(credential)` maps a loaded credential onto the
   credential sources above, as an SDK's `serviceCredential`: `{ token,
   headers }`, with `Service-Authorization` alone when the credential names

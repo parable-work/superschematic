@@ -5,7 +5,9 @@
 // server's Deps. The identity runtime authenticates its callers, with the
 // sessions shop-api's sign-in starts (D50). Placing an order reserves its
 // stock on shop-stock, a Rust server, through the client of shop-stock's
-// Go SDK its Deps holds (D57).
+// Go SDK its Deps holds (D57). Its lists of orders, reviews and products
+// answer a page at a time (D60), and the reviews' search reads each
+// review's search_text (D62).
 package shoporders
 
 import (
@@ -17,6 +19,7 @@ import (
 func New(deps api.Deps) (api.Implementations, error) {
 	return api.Implementations{
 		Order:          &Orders{DB: deps.DB, Stock: deps.ShopStock},
+		ProductCatalog: &Products{DB: deps.DB},
 		ProductReviews: &Reviews{DB: deps.DB},
 	}, nil
 }

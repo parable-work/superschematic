@@ -2,10 +2,10 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "noEmit": true,
-    "rootDir": ".",
+    "rootDir": "../..",
     "allowImportingTsExtensions": true,
     "erasableSyntaxOnly": true
   },
-  "comment": "The tests are TypeScript that Node.js (type stripping) and Bun run as they are, so they use only erasable syntax. They import the built package from dist/, the code that ships, and the engine from node_modules.",
+  "comment": "The tests are TypeScript that Node.js (type stripping) and Bun run as they are, so they use only erasable syntax. They import the built package from dist/, the code that ships, and the engine from node_modules; they record through the engine's own test recorder, runtime/engine/typescript/test/recorder.ts, which rootDir reaches.",
   "include": ["test/**/*.ts"]
 }

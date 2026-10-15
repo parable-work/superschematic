@@ -19,16 +19,23 @@ const retries = { name: 'Retries', config: { classes: { flaky: { attempts: 1 } }
 
 for (const driver of drivers) {
   // world opens an engine whose Job composes Workflow, Lease, Assignment
-  // and Retries, with jobs j1 to j4.
+  // and Retries, with jobs j1 to j4, or to the count given. The four are
+  // created one by one, calls a recording holds; more, past what one scan
+  // reads, in a transaction of the file's, which keeps the test quick.
   function world(count = 4): { engine: Engine; clock: Clock } {
     const clock = new Clock();
     const engine = openTestEngine({ driver, clock: clock.now });
     publish(engine, jobsDocument([{ name: 'Workflow', config: jobFlow }, { name: 'Lease', config: { ttlMs: 60_000 } }, { name: 'Assignment' }, retries]));
-    engine.storage.transaction(() => {
+    const create = () => {
       for (let index = 1; index <= count; index += 1) {
         engine.instances.create(alice, 'Job', { title: `j${index}` }, { id: `j${index}` });
       }
-    });
+    };
+    if (count <= 4) {
+      create();
+    } else {
+      engine.storage.transaction(create);
+    }
     return { engine, clock };
   }
 

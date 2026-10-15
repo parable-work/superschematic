@@ -25,7 +25,14 @@
         "name": {
           "type": "string"
         },
+        "references": {
+          "$ref": "#/$defs/ReferenceDef"
+        },
         "required": {
+          "default": false,
+          "type": "boolean"
+        },
+        "search": {
           "default": false,
           "type": "boolean"
         },
@@ -2678,6 +2685,9 @@
         "name": {
           "type": "string"
         },
+        "page": {
+          "$ref": "#/$defs/OperationPage"
+        },
         "paramType": {
           "default": "",
           "enum": [
@@ -2714,6 +2724,9 @@
         "purpose": {
           "default": "",
           "type": "string"
+        },
+        "references": {
+          "$ref": "#/$defs/ReferenceDef"
         },
         "relation": {
           "$ref": "#/$defs/RelationDef"
@@ -3189,6 +3202,27 @@
       ],
       "type": "object"
     },
+    "OperationPage": {
+      "additionalProperties": false,
+      "description": "The operation's list result pages by an opaque cursor (@paginated): it takes the query parameters cursor and limit and answers {items, next}. A member left out takes its default.",
+      "properties": {
+        "defaultLimit": {
+          "default": 0,
+          "description": "How many items a page holds when the caller sends no limit: 20, or maxLimit when that is less.",
+          "maximum": 1000,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "maxLimit": {
+          "default": 0,
+          "description": "The most items a caller may ask a page to hold: 1 to 1000, 100 when left out.",
+          "maximum": 1000,
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
     "OperationSet": {
       "additionalProperties": false,
       "properties": {
@@ -3581,6 +3615,34 @@
           "type": "array"
         }
       },
+      "type": "object"
+    },
+    "ReferenceDef": {
+      "additionalProperties": false,
+      "properties": {
+        "label": {
+          "default": "",
+          "minLength": 1,
+          "type": "string"
+        },
+        "options": {
+          "default": "",
+          "minLength": 1,
+          "type": "string"
+        },
+        "type": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "value": {
+          "default": "",
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
       "type": "object"
     },
     "RelationDef": {

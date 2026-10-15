@@ -508,7 +508,7 @@ values it lacks, and asks for them when it runs at a terminal.`,
 func newStackPlanCmd(a *app) *cobra.Command {
 	flags := &stackFlags{}
 	gate := &gateFlags{}
-	var images, sites []string
+	var images, sites, bundles []string
 	var out, format string
 	cmd := &cobra.Command{
 		Use:   "plan <environment>",
@@ -516,10 +516,13 @@ func newStackPlanCmd(a *app) *cobra.Command {
 		Long: `plan shows what stack deploy would do, and changes nothing: the
 provisioner's plan of every resource, with each server's image the deploy
 manifest records or --image names pinned, and the migration plan of each
-database from the schema the manifest records (D27). It also lists the
-secrets with no value, the servers with no image yet, and, for a domain
-no DNS platform holds, the records to create by hand. The read-only
-planner account runs it in CI.
+database from the schema the manifest records (D27). It builds nothing: a
+server whose platform runs a bundle is planned with the bundle the
+manifest records or --bundle names, which it fetches from the target and
+places beside the program (D64). It also lists the secrets with no value,
+the servers with no image or bundle yet, and, for a domain no DNS
+platform holds, the records to create by hand. The read-only planner
+account runs it in CI.
 
 With --fail-on, which is every hazard class by default, it exits 1 after
 printing when a plan has a hazard no --allow names. --out writes the plan
@@ -542,6 +545,10 @@ plans.`,
 			if err != nil {
 				return err
 			}
+			bundled, err := stackdeploy.ParseBundles(bundles)
+			if err != nil {
+				return err
+			}
 			g, err := gate.gate()
 			if err != nil {
 				return err
@@ -555,6 +562,7 @@ plans.`,
 				Options: c.options(cmd, params),
 				Images:  imgs,
 				Sites:   files,
+				Bundles: bundled,
 				Planner: c.planner(),
 				Gate:    g,
 			})
@@ -590,6 +598,7 @@ plans.`,
 	gate.register(cmd)
 	cmd.Flags().StringArrayVar(&images, "image", nil, "a server's or job's image: <deployable>=<repository>@sha256:<digest> (repeatable)")
 	cmd.Flags().StringArrayVar(&sites, "site", nil, "the files a site serves: <site>=sha256:<digest> (repeatable)")
+	cmd.Flags().StringArrayVar(&bundles, "bundle", nil, "the bundle a server, job or worker runs, published before: <deployable>=sha256:<digest> (repeatable)")
 	cmd.Flags().StringVar(&out, "out", "", "write the plan as JSON to this file, for stack deploy --expect")
 	cmd.Flags().StringVar(&format, "format", "text", "print the plan as text or json")
 	return cmd
@@ -628,6 +637,9 @@ func writePlanText(w io.Writer, environment string, r *stackdeploy.PlanResult) e
 	if len(r.Unpublished) > 0 {
 		fmt.Fprintf(&b, "\nSites with no files yet, planned with no digest: %s (deploy builds them, or takes them with --site)\n", strings.Join(r.Unpublished, ", "))
 	}
+	if len(r.Unbundled) > 0 {
+		fmt.Fprintf(&b, "\nServers and jobs with no bundle yet, planned with no digest: %s (deploy builds them, or takes them with --bundle)\n", strings.Join(r.Unbundled, ", "))
+	}
 	if len(r.MissingSecrets) > 0 {
 		fmt.Fprintf(&b, "\nSecrets with no value: %s (stack secrets set %s)\n", strings.Join(r.MissingSecrets, ", "), environment)
 	}
@@ -665,12 +677,16 @@ Each site builds with its package's build script after a frozen install of
 the Bun workspace, and its files go up where the target serves sites from,
 under their digest, when they differ from the ones it serves; they serve
 nothing until a deploy takes them (docs/stack-model.md, section 8.10).
+Each server, job or worker whose platform runs a bundle builds with bun
+bundle.ts in its package, after the same install, and the target keeps
+its files under their digest when they differ from the ones it runs
+(section 18.5).
 
-It prints each image as a stack deploy --image flag and each site's files
-as a --site flag; --format json prints the result, and --out writes it to
-a file. --deployable builds the servers, jobs and sites it names only, and
---force builds one whose context or files did not change. A build writes
-no deploy manifest.`,
+It prints each image as a stack deploy --image flag, each site's files as
+a --site flag and each bundle as a --bundle flag; --format json prints the
+result, and --out writes it to a file. --deployable builds the servers,
+jobs and sites it names only, and --force builds one whose context or
+files did not change. A build writes no deploy manifest.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if format != "text" && format != "json" {
@@ -719,6 +735,11 @@ no deploy manifest.`,
 					return err
 				}
 			}
+			for _, flag := range result.BundleFlags() {
+				if _, err := fmt.Fprintf(w, "--bundle %s\n", flag); err != nil {
+					return err
+				}
+			}
 			return nil
 		},
 	}
@@ -736,7 +757,7 @@ no deploy manifest.`,
 func newStackDeployCmd(a *app) *cobra.Command {
 	flags := &stackFlags{}
 	gate := &gateFlags{}
-	var images, sites []string
+	var images, sites, bundles []string
 	var expect string
 	var noBuild bool
 	cmd := &cobra.Command{
@@ -757,8 +778,11 @@ manifest records, or kept from the manifest. Each site builds with its
 package's build script, and its files go up under their digest when they
 are new, with its config for the run, before its wave points it at them;
 --site serves files a deploy or a build published before, which rolls a
-site back. The builds run before anything changes. --no-build builds
-nothing. Every secret needs a value before the first step after
+site back. A server, job or worker whose platform runs a bundle builds
+with bun bundle.ts in its package, and its files are kept under their
+digest when they are new; --bundle runs a bundle a deploy or a build
+published before, fetched from the target, which rolls it back (D64). The
+builds run before anything changes. --no-build builds nothing. Every secret needs a value before the first step after
 infrastructure; at a terminal, deploy asks for each one missing. A
 migration hazard of a --fail-on class stops the deploy unless --allow
 names it, and --expect refuses migration plans other than the ones stack
@@ -777,6 +801,10 @@ schema between the phases, and the next deploy plans from it.`,
 				return err
 			}
 			files, err := stackdeploy.ParseSites(sites)
+			if err != nil {
+				return err
+			}
+			bundled, err := stackdeploy.ParseBundles(bundles)
 			if err != nil {
 				return err
 			}
@@ -813,6 +841,7 @@ schema between the phases, and the next deploy plans from it.`,
 				Options:  c.options(cmd, params),
 				Images:   imgs,
 				Sites:    files,
+				Bundles:  bundled,
 				Sources:  src,
 				Planner:  c.planner(),
 				Services: digests,
@@ -831,8 +860,9 @@ schema between the phases, and the next deploy plans from it.`,
 	gate.register(cmd)
 	cmd.Flags().StringArrayVar(&images, "image", nil, "a server's or job's image: <deployable>=<repository>@sha256:<digest> (repeatable)")
 	cmd.Flags().StringArrayVar(&sites, "site", nil, "the files a site serves, published before: <site>=sha256:<digest> (repeatable)")
+	cmd.Flags().StringArrayVar(&bundles, "bundle", nil, "the bundle a server, job or worker runs, published before: <deployable>=sha256:<digest> (repeatable)")
 	cmd.Flags().StringVar(&expect, "expect", "", "a plan stack plan --out wrote: refuse migration plans other than its")
-	cmd.Flags().BoolVar(&noBuild, "no-build", false, "build no image and no site: take each from --image, --site or the manifest")
+	cmd.Flags().BoolVar(&noBuild, "no-build", false, "build no image, no site and no bundle: take each from --image, --site, --bundle or the manifest")
 	return cmd
 }
 

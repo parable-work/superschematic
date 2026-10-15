@@ -21,13 +21,16 @@ import (
 {{- if and .IsPublic (not .Auth.Identity) }}
 	"net/http"
 {{- end }}
-{{- if or .HasFilterableEndpoints .HasEncryptedEndpoints }}
+{{- if or .HasFilterableEndpoints .HasEncryptedEndpoints .HasPagedEndpoints }}
 {{ end }}
 {{- if .HasFilterableEndpoints }}
 	"{{ $.Naming.HTTPRuntimeGoModule }}/filterparse"
 {{- end }}
 {{- if .HasEncryptedEndpoints }}
 	runtimemiddleware "{{ $.Naming.HTTPRuntimeGoModule }}/middleware"
+{{- end }}
+{{- if .HasPagedEndpoints }}
+	"{{ $.Naming.HTTPRuntimeGoModule }}/paging"
 {{- end }}
 
 	api "{{ .ModulePath }}"
@@ -144,8 +147,8 @@ type {{ toGoName . }} struct {
 {{- if eq .Namespace $namespace }}
 
 // {{ .ShortImplName }} handles {{ .Method }} {{ .Path }}.
-func (impl *{{ toGoName $namespace }}) {{ .ShortImplName }}(ctx context.Context{{- range .PathParams }}, {{ .Name }} {{ .GoType }}{{- end }}{{- range .QueryParams }}, {{ .Name }} {{ if .IsArray }}[]{{ else if not .Required }}*{{ end }}{{ .GoType }}{{- end }}{{- if .Filterable }}, filters []filterparse.Filter{{- end }}{{- if .HasInput }}, input *types.{{ .InputType }}{{- else if .ScalarArgs }}{{- range .ScalarArgs }}, {{ .Name }} {{ .GoListType }}{{- end }}{{- end }}{{- if .HasFileUpload }}, files map[string]*api.FileUploadData{{- end }}) ({{- if .OutputIsArray }}{{ .OutputGoListType }}{{- else }}*{{ .OutputGoType }}{{- end }}, error) {
-	return nil, api.NotImplementedError("{{ toGoName $namespace }}.{{ .ShortImplName }}")
+func (impl *{{ toGoName $namespace }}) {{ .ShortImplName }}(ctx context.Context{{- range .PathParams }}, {{ .Name }} {{ .GoType }}{{- end }}{{- range .QueryParams }}, {{ .Name }} {{ if .IsArray }}[]{{ else if not .Required }}*{{ end }}{{ .GoType }}{{- end }}{{- if .Filterable }}, filters []filterparse.Filter{{- end }}{{- if .HasInput }}, input *types.{{ .InputType }}{{- else if .ScalarArgs }}{{- range .ScalarArgs }}, {{ .Name }} {{ .GoListType }}{{- end }}{{- end }}{{- if .HasFileUpload }}, files map[string]*api.FileUploadData{{- end }}{{- if .Page }}, page paging.Request{{- end }}) ({{ .GoResultType }}, error) {
+	return {{ .GoZeroResult }}, api.NotImplementedError("{{ toGoName $namespace }}.{{ .ShortImplName }}")
 }
 {{- end }}
 {{- end }}

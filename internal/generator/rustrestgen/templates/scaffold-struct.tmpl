@@ -4,6 +4,9 @@
 //! add it here and in a file of its own, as for the others.
 
 use async_trait::async_trait;
+{{- if .HasPages }}
+use {{ .CrateIdent }}::runtime;
+{{- end }}
 {{- if .UsesTypes }}
 use {{ .CrateIdent }}::types;
 {{- end }}

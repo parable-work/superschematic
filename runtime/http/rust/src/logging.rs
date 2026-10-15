@@ -1,7 +1,7 @@
-//! The log a generated Rust server writes (D57, section 8.6 of
-//! `docs/stack-model.md`): one JSON object per line on stdout, in the shape
-//! the TypeScript runtime's `createLogger` writes and the Go server's zap
-//! logger reads alike:
+//! The log a generated Rust server, job or worker writes (D57, D65; section
+//! 8.6 of `docs/stack-model.md`): one JSON object per line on stdout, in the
+//! shape the TypeScript runtime's `createLogger` writes and the Go server's
+//! zap logger reads alike:
 //!
 //! ```text
 //! {"level":"info","time":"2026-10-12T17:32:05.123Z","msg":"listening","stack":"shop-stack","server":"shop-stock","addr":":8080"}
@@ -10,11 +10,14 @@
 //! `level` is the event's level in lower case (`debug`, `info`, `warn`,
 //! `error`, and `trace`, which TypeScript does not have), `time` is RFC 3339
 //! in UTC to the millisecond, and `msg` is the event's message. Then come
-//! the fields every line carries, `stack` and `server`; the fields of the
+//! the fields every line carries, `stack` and `server`, which a job's line
+//! names `job` and a worker's `worker` ([`init_json_as`]); the fields of the
 //! spans the event is in, the outermost first, such as the `api` of an
 //! [`api_span`]; and the event's own. A later field replaces an earlier one
 //! of the same name in its place, and none replaces `level`, `time` or
-//! `msg`. A string, number or boolean field is written as itself, an error
+//! `msg`; a `message` field beside the event's message (`info!(message =
+//! id, "handled")`, as a worker logs a message's ID) is a field of that
+//! name. A string, number or boolean field is written as itself, an error
 //! (`error = &err as &dyn Error`) as its message, and any other value as
 //! its `Debug` or, with `%`, its `Display`.
 //!
@@ -51,10 +54,31 @@ pub fn init_json(
     stack: &str,
     server: &str,
 ) -> Result<(), tracing::subscriber::SetGlobalDefaultError> {
+    init_json_as(stack, SERVER, server)
+}
+
+/// [`init_json`] for a deployable of the kind `kind`, the field that names
+/// it on every line: a job's entrypoint installs it with [`JOB`] and a
+/// worker's with [`WORKER`] (D65), as Go's and TypeScript's job and worker
+/// loggers name theirs. It fails when the process already has a subscriber.
+pub fn init_json_as(
+    stack: &str,
+    kind: &str,
+    name: &str,
+) -> Result<(), tracing::subscriber::SetGlobalDefaultError> {
     tracing::subscriber::set_global_default(
-        tracing_subscriber::registry().with(json_lines(stack, server)),
+        tracing_subscriber::registry().with(json_lines_as(stack, kind, name)),
     )
 }
+
+/// The field that names a server on every line of its log.
+pub const SERVER: &str = "server";
+
+/// The field that names a job on every line of its log.
+pub const JOB: &str = "job";
+
+/// The field that names a worker on every line of its log.
+pub const WORKER: &str = "worker";
 
 /// The span of one API of the server: each line written in it carries
 /// `"api": api`. The generated `Deps` holds one, and the entrypoint runs the
@@ -68,10 +92,18 @@ pub fn api_span(api: &str) -> tracing::Span {
 /// The layer that writes each event as a JSON line, with `stack` and
 /// `server` on every line.
 pub fn json_lines(stack: &str, server: &str) -> JsonLines {
+    json_lines_as(stack, SERVER, server)
+}
+
+/// [`json_lines`] with `kind` in place of `server`: `stack` and `kind`, the
+/// field that names the deployable, on every line. A reserved name
+/// (`level`, `time` or `msg`) stays the head's, and leaves the line without
+/// the deployable's name.
+pub fn json_lines_as(stack: &str, kind: &str, name: &str) -> JsonLines {
     JsonLines {
         fields: vec![
             ("stack".to_string(), Value::from(stack)),
-            ("server".to_string(), Value::from(server)),
+            (kind.to_string(), Value::from(name)),
         ],
         level: LevelFilter::INFO,
         write: Arc::new(|line: &str| {
@@ -137,51 +169,82 @@ fn set(fields: &mut Vec<(String, Value)>, name: &str, value: Value) {
     }
 }
 
-/// Records a span's or an event's fields as JSON values.
-struct Fields<'a>(&'a mut Vec<(String, Value)>);
+/// Records a span's or an event's fields as JSON values. An event's first
+/// `message` that is text, which tracing's macros record first, is its
+/// message, kept apart; a later one, as in `info!(message = id, "handled")`,
+/// is a field of that name.
+struct Fields<'a> {
+    fields: &'a mut Vec<(String, Value)>,
+    message: Option<&'a mut Option<String>>,
+}
+
+impl<'a> Fields<'a> {
+    fn span(fields: &'a mut Vec<(String, Value)>) -> Self {
+        Self {
+            fields,
+            message: None,
+        }
+    }
+
+    fn event(fields: &'a mut Vec<(String, Value)>, message: &'a mut Option<String>) -> Self {
+        Self {
+            fields,
+            message: Some(message),
+        }
+    }
+
+    fn put(&mut self, name: &str, value: Value) {
+        match (&mut self.message, value) {
+            (Some(slot), Value::String(text)) if name == "message" && slot.is_none() => {
+                **slot = Some(text);
+            }
+            (_, value) => set(self.fields, name, value),
+        }
+    }
+}
 
 impl Visit for Fields<'_> {
     fn record_str(&mut self, field: &Field, value: &str) {
-        set(self.0, field.name(), Value::from(value));
+        self.put(field.name(), Value::from(value));
     }
 
     fn record_bool(&mut self, field: &Field, value: bool) {
-        set(self.0, field.name(), Value::from(value));
+        self.put(field.name(), Value::from(value));
     }
 
     fn record_i64(&mut self, field: &Field, value: i64) {
-        set(self.0, field.name(), Value::from(value));
+        self.put(field.name(), Value::from(value));
     }
 
     fn record_u64(&mut self, field: &Field, value: u64) {
-        set(self.0, field.name(), Value::from(value));
+        self.put(field.name(), Value::from(value));
     }
 
     fn record_i128(&mut self, field: &Field, value: i128) {
         let value =
             i64::try_from(value).map_or_else(|_| Value::from(value.to_string()), Value::from);
-        set(self.0, field.name(), value);
+        self.put(field.name(), value);
     }
 
     fn record_u128(&mut self, field: &Field, value: u128) {
         let value =
             u64::try_from(value).map_or_else(|_| Value::from(value.to_string()), Value::from);
-        set(self.0, field.name(), value);
+        self.put(field.name(), value);
     }
 
     fn record_f64(&mut self, field: &Field, value: f64) {
         // JSON has no NaN or infinity, which serde_json writes as null.
         let value = serde_json::Number::from_f64(value)
             .map_or_else(|| Value::from(value.to_string()), Value::Number);
-        set(self.0, field.name(), value);
+        self.put(field.name(), value);
     }
 
     fn record_error(&mut self, field: &Field, value: &(dyn Error + 'static)) {
-        set(self.0, field.name(), Value::from(value.to_string()));
+        self.put(field.name(), Value::from(value.to_string()));
     }
 
     fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
-        set(self.0, field.name(), Value::from(format!("{value:?}")));
+        self.put(field.name(), Value::from(format!("{value:?}")));
     }
 }
 
@@ -199,7 +262,7 @@ where
 
     fn on_new_span(&self, attrs: &Attributes<'_>, id: &Id, ctx: Context<'_, S>) {
         let mut fields = Vec::new();
-        attrs.record(&mut Fields(&mut fields));
+        attrs.record(&mut Fields::span(&mut fields));
         if let Some(span) = ctx.span(id) {
             span.extensions_mut().insert(SpanFields(fields));
         }
@@ -208,7 +271,7 @@ where
     fn on_record(&self, id: &Id, values: &Record<'_>, ctx: Context<'_, S>) {
         if let Some(span) = ctx.span(id) {
             if let Some(SpanFields(fields)) = span.extensions_mut().get_mut::<SpanFields>() {
-                values.record(&mut Fields(fields));
+                values.record(&mut Fields::span(fields));
             }
         }
     }
@@ -225,14 +288,12 @@ where
             }
         }
         let mut own = Vec::new();
-        event.record(&mut Fields(&mut own));
-        let mut msg = String::new();
+        let mut msg = None;
+        event.record(&mut Fields::event(&mut own, &mut msg));
         for (name, value) in own {
-            match (name.as_str(), value) {
-                ("message", Value::String(text)) => msg = text,
-                (name, value) => set(&mut fields, name, value),
-            }
+            set(&mut fields, &name, value);
         }
+        let msg = msg.unwrap_or_default();
         let head = [
             ("level", Value::from(level_name(*event.metadata().level()))),
             ("time", Value::from(format_time((self.now)()))),
@@ -277,16 +338,7 @@ fn format_time(t: SystemTime) -> String {
     let seconds = millis.div_euclid(1000);
     let days = seconds.div_euclid(86_400);
     let of_day = seconds.rem_euclid(86_400);
-    // Howard Hinnant's civil_from_days.
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z.rem_euclid(146_097);
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let day = doy - (153 * mp + 2) / 5 + 1;
-    let month = if mp < 10 { mp + 3 } else { mp - 9 };
-    let year = yoe + era * 400 + i64::from(month <= 2);
+    let (year, month, day) = crate::civil::from_days(days);
     format!(
         "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}.{:03}Z",
         of_day / 3600,
@@ -366,6 +418,22 @@ mod tests {
     }
 
     #[test]
+    fn a_message_field_beside_the_events_message_is_a_field() {
+        let (subscriber, lines) = capture(LevelFilter::INFO);
+        tracing::subscriber::with_default(subscriber, || {
+            tracing::info!(message = "m-1", attempt = 2, "message handled");
+            tracing::info!(message = "only a message");
+        });
+        assert_eq!(
+            lines.lock().unwrap().as_slice(),
+            [
+                r#"{"level":"info","time":"2026-10-12T17:32:05.123Z","msg":"message handled","stack":"shop-stack","server":"shop-stock","message":"m-1","attempt":2}"#,
+                r#"{"level":"info","time":"2026-10-12T17:32:05.123Z","msg":"only a message","stack":"shop-stack","server":"shop-stock"}"#,
+            ]
+        );
+    }
+
+    #[test]
     fn an_api_span_names_its_api_at_every_level() {
         let (subscriber, lines) = capture(LevelFilter::ERROR);
         tracing::subscriber::with_default(subscriber, || {
@@ -377,6 +445,29 @@ mod tests {
                 r#"{"level":"error","time":"2026-10-12T17:32:05.123Z","msg":"down","stack":"shop-stack","server":"shop-stock","api":"shop-stock"}"#
             ]
         );
+    }
+
+    #[test]
+    fn a_job_or_a_worker_is_named_by_its_kind() {
+        for (kind, name) in [
+            (JOB, "shop-stock-order-restocks"),
+            (WORKER, "shop-stock-reorder-stock"),
+        ] {
+            let lines = Arc::new(Mutex::new(Vec::new()));
+            let sink = Arc::clone(&lines);
+            let layer = json_lines_as("shop-stack", kind, name)
+                .with_clock(at)
+                .with_writer(move |line| sink.lock().unwrap().push(line.to_string()));
+            tracing::subscriber::with_default(tracing_subscriber::registry().with(layer), || {
+                tracing::info!(api = "shop-stock", "started");
+            });
+            assert_eq!(
+                lines.lock().unwrap().as_slice(),
+                [format!(
+                    r#"{{"level":"info","time":"2026-10-12T17:32:05.123Z","msg":"started","stack":"shop-stack","{kind}":"{name}","api":"shop-stock"}}"#
+                )]
+            );
+        }
     }
 
     #[test]

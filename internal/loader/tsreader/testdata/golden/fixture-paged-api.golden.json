@@ -1,0 +1,225 @@
+{
+  "name": "fixture-paged-api",
+  "kind": "API",
+  "scalars": {
+    "Identity.Slug": {
+      "name": "Identity.Slug",
+      "languagePrimitive": "string",
+      "typeMappings": {
+        "sql": "CITEXT"
+      }
+    },
+    "Identity.UUID": {
+      "name": "Identity.UUID",
+      "languagePrimitive": "string",
+      "typeMappings": {
+        "sql": "UUID"
+      }
+    }
+  },
+  "types": {
+    "BasketInput": {
+      "name": "BasketInput",
+      "owner": "src/catalog.schema.ts",
+      "comment": "Request body: the lines of a basket to place.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "lines",
+          "typeRef": {
+            "name": "BasketLine",
+            "isArray": true
+          },
+          "required": true,
+          "validateListMin": 1,
+          "validateListMax": 5
+        }
+      ]
+    },
+    "BasketLine": {
+      "name": "BasketLine",
+      "owner": "src/catalog.schema.ts",
+      "comment": "One line of a basket: an item and how many of it.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "itemId",
+          "typeRef": {
+            "name": "Identity.UUID"
+          },
+          "required": true
+        },
+        {
+          "name": "quantity",
+          "typeRef": {
+            "name": "number"
+          },
+          "required": true,
+          "validateMin": 1,
+          "validateMax": 9
+        }
+      ]
+    },
+    "BasketView": {
+      "name": "BasketView",
+      "owner": "src/catalog.schema.ts",
+      "comment": "A placed basket.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "id",
+          "typeRef": {
+            "name": "Identity.UUID"
+          },
+          "required": true
+        },
+        {
+          "name": "lines",
+          "typeRef": {
+            "name": "BasketLine",
+            "isArray": true
+          },
+          "required": true
+        }
+      ]
+    },
+    "ItemView": {
+      "name": "ItemView",
+      "owner": "src/catalog.schema.ts",
+      "comment": "An item of the catalog.",
+      "role": "EmbeddedStruct",
+      "display": {
+        "noun": "Item",
+        "plural": "Items",
+        "titleField": "name",
+        "summaryFields": [
+          "name",
+          "sku"
+        ]
+      },
+      "fields": [
+        {
+          "name": "id",
+          "typeRef": {
+            "name": "Identity.UUID"
+          },
+          "required": true
+        },
+        {
+          "name": "name",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true
+        },
+        {
+          "name": "sku",
+          "typeRef": {
+            "name": "Identity.Slug"
+          },
+          "required": true
+        },
+        {
+          "name": "inStock",
+          "typeRef": {
+            "name": "boolean"
+          },
+          "required": true
+        }
+      ]
+    }
+  },
+  "operationSets": [
+    {
+      "name": "Catalog",
+      "operations": [
+        {
+          "name": "listItems",
+          "comment": "The items, two to a page unless the caller asks for up to five, by\ntheir ids or their stock.",
+          "typeRef": {
+            "name": "ItemView",
+            "isArray": true
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "ids",
+              "typeRef": {
+                "name": "Identity.UUID",
+                "isArray": true
+              },
+              "validateListMax": 5,
+              "isQuery": true
+            },
+            {
+              "name": "inStock",
+              "typeRef": {
+                "name": "boolean"
+              },
+              "isQuery": true
+            }
+          ],
+          "page": {
+            "defaultLimit": 2,
+            "maxLimit": 5
+          },
+          "httpMethod": "GET",
+          "restPath": "items"
+        },
+        {
+          "name": "getItem",
+          "comment": "One item.",
+          "typeRef": {
+            "name": "ItemView"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "itemId",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            }
+          ],
+          "httpMethod": "GET",
+          "restPath": "items/{itemId}"
+        },
+        {
+          "name": "listTags",
+          "comment": "The tags items carry: a page of a primitive, with the default limits.",
+          "typeRef": {
+            "name": "string",
+            "isArray": true
+          },
+          "required": true,
+          "page": {
+            "defaultLimit": 20,
+            "maxLimit": 100
+          },
+          "httpMethod": "GET",
+          "restPath": "tags"
+        },
+        {
+          "name": "placeBasket",
+          "comment": "Place a basket.",
+          "typeRef": {
+            "name": "BasketView"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "BasketInput"
+              },
+              "required": true
+            }
+          ],
+          "httpMethod": "POST",
+          "restPath": "baskets"
+        }
+      ]
+    }
+  ]
+}

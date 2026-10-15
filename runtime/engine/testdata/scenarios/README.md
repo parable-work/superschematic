@@ -4,7 +4,8 @@ What the TypeScript engine (`runtime/engine/typescript`, `@superschematic/engine
 did, recorded as data, so a second implementation of the engine (D58: the Rust
 engine, its napi and C ABI bindings, and the servers that link it) can replay
 it and hold itself to the same answers. Each file is the recording of one test
-file of the engine's suite; each scenario in it is one test, the calls the
+file of the engine's suite, or, as `workqueue-<file>.json`, of the work
+queue's (below); each scenario in it is one test, the calls the
 test made on the engines it opened and what each call returned or threw.
 `../http` holds the same for the HTTP routes, the event stream and MCP.
 
@@ -53,6 +54,68 @@ small enough to review (about 4 MB):
 A scenario whose JSON is longer than 100,000 characters (one that creates
 hundreds of instances to reach a limit) is not written; its file names it in
 `omitted`.
+
+## The work queue's files
+
+The 15 `workqueue-*.json` files (about 1.8 MB) are the work queue's suite,
+`runtime/engine-workqueue/typescript/test`, recorded by the same recorder:
+its `test/helpers.ts` opens every engine through `recordOpen` and calls
+`recordPackage('workqueue-', workQueueBehaviors)`, which names each file
+`workqueue-<file>.json` and says which behaviors are the package's. Its
+`test/corpus.test.ts` lists the curated files (`SCENARIO_FILES`) and holds
+them to what the recorder writes, through the check the engine's own corpus
+test runs (`typescript/test/corpus.ts`); each check rewrites and holds only
+its own package's files:
+
+```
+cd runtime/engine-workqueue/typescript && bun run build   # after the engine's
+UPDATE_ENGINE_CORPUS=1 node --test test/corpus.test.ts     # rewrite scenarios/workqueue-*.json; review the diff
+```
+
+Every test file that opens an engine is in the corpus, but three:
+
+- `guidance.test.ts` reads the describe and tools documents; each of its
+  scenarios is past 100,000 characters;
+- `worker.test.ts` records nothing (`openTestEngine(options, { record: false })`):
+  the worker (`@superschematic/engine-workqueue/worker`) is a TypeScript
+  runtime that reaches the engine over HTTP on its own timers and the wall
+  clock, several handlers at once, so which calls the engine sees, and in
+  what order, changes from run to run, and what the tests hold to account is
+  the worker, not the engine;
+- `sqlite-corpus.test.ts` writes the SQLite corpus (`../sqlite`), opening its
+  engine directly.
+
+A replayer reads them as it reads the engine's, with these differences:
+
+- `open`'s `behaviors` names the work queue's behaviors, `Lease`,
+  `Assignment`, `Queue`, `Presence`, `Blueprint`, `Budget` and `Retries`, in
+  the order the test passed them: all seven, or a few beside test behaviors.
+  A replayer registers its own implementations of them by name, as it does
+  the core's; they are never `testBehaviors`. A test's copy of one that wraps
+  a hook or an operation only to count its calls (`queue-exclusion.test.ts`'s
+  `counting()`) carries the package's declaration and records as the
+  package's.
+- The test behaviors are `test/fixtures.ts`'s: `test.Signal`, `test.Gate`,
+  `test.Lock`, and a stand-in for Budget's reserve under Budget's own name,
+  which one scenario of `workqueue-queue` composes ("with Budget on the type,
+  claim reserves ..."), listing `Budget` in `testBehaviors`. A name in
+  `open`'s `behaviors` is a test behavior when the scenario's
+  `testBehaviors` lists it, and the package's otherwise. An engine that
+  registers one also loads its schemas against the open meta-schema
+  (`metaSchema: "open"`). No fixture reads state the test sets, so no
+  scenario is marked `testHook.*`: what the Budget stand-in hears goes to
+  an array the test reads and no behavior does.
+- Marked `js`: one scenario of `workqueue-filters` (`args`,
+  `storage.transaction`), which creates more jobs than one scan reads in a
+  transaction of the file (its four-job scenarios create them one by one, so
+  they replay); one of `workqueue-lease` (`options`, `values.driver`), on a
+  value store of the test's.
+- `dialect: "sqlite"`: three scenarios of `workqueue-queue` make a copy of
+  Queue's stale with `storage.run`, besides the one of `workqueue-filters`.
+  The `storage` reads in other scenarios (steps marked `dialect: "sqlite"`)
+  name the package's tables and columns, `bhv_lease__directives`,
+  `bhv_budget__meters`, `engine_instances.bhv_queue__status`, which a second
+  implementation keeps, as `../sqlite` holds it to.
 
 ## A file
 

@@ -98,8 +98,9 @@ pub fn page<T>(mut rows: Vec<T>, limit: i64, number_of: impl Fn(&T) -> i64) -> P
 
 const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 
-/// Bytes in unpadded base64url, as Node.js's `toString('base64url')`.
-fn base64url_encode(bytes: &[u8]) -> String {
+/// Bytes in unpadded base64url, as Node.js's `toString('base64url')`: a
+/// cursor of a behavior's own (Branches' refs).
+pub fn base64url_encode(bytes: &[u8]) -> String {
     let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
     for chunk in bytes.chunks(3) {
         let group = chunk.iter().enumerate().fold(0u32, |group, (at, byte)| {
@@ -131,7 +132,7 @@ fn sextet(c: u8) -> Option<u32> {
 /// reads it: characters outside the alphabets are passed over, the first
 /// `=` ends the input, a lone trailing character is dropped, and no more
 /// bytes come out than the text's length allows.
-fn base64url_decode(text: &str) -> Vec<u8> {
+pub fn base64url_decode(text: &str) -> Vec<u8> {
     let bytes = text.as_bytes();
     let mut size = bytes.len();
     if size < 2 {

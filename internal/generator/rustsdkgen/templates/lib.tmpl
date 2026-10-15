@@ -17,4 +17,7 @@ pub use runtime::{
     EncryptedPayloadEnvelope, EncryptedRequestOptions, ForwardedUser, MultipartBody, PublicEncryptionKey,
     RequestHook, RequestOptions, UploadFile,
 };
+{{- if .HasPagedEndpoints}}
+pub use runtime::{Page, Pager};
+{{- end}}
 pub use sdk::{{.SDKStructName}};

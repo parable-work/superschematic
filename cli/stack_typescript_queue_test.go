@@ -22,10 +22,10 @@ import (
 
 // tqServices is a TypeScript API with a queue, in the YAML form (D52,
 // D53): tq-db declares the queue Reminder, whose TypeScript types export its
-// definition; tq-shop, a TypeScript API on tq-db, declares the job
-// QueueReminders and the worker SendReminders, which handles Reminder two
-// at a time; tq-stack deploys tq-shop on the local target, on the ports
-// given.
+// definition; tq-shop, a TypeScript API on tq-db with a service clause,
+// declares the job QueueReminders and the worker SendReminders, which
+// handles Reminder two at a time; tq-stack deploys tq-shop on the local
+// target, on the ports given.
 func tqServices(pgPort, storagePort, apiPort int) map[string]string {
 	return map[string]string{
 		"tq-db/schema.config.yaml": "name: tq-db\nkind: DB\noutputs:\n  types:\n    go: { enabled: true }\n    typescript: { enabled: true }\n",
@@ -78,6 +78,14 @@ operationSets:
         required: true
         httpMethod: GET
         restPath: summary
+      # Only a calling service reads this one, so tq-shop has a callers
+      # field, which a stack gives its server alone (D65).
+      - name: getServiceSummary
+        typeRef: { name: Summary }
+        required: true
+        httpMethod: GET
+        restPath: service/summary
+        serviceCallers: { mode: require }
 jobs:
   - name: QueueReminders
 workers:
@@ -107,22 +115,22 @@ types:
 	}
 }
 
-// tqImplementation implements tq-shop: getSummary counts the queue's done
-// and dead messages, QueueReminders enqueues three in one transaction, and
-// SendReminders fails the one for the cart named poison.
+// tqImplementation implements tq-shop: getSummary and getServiceSummary
+// count the queue's done and dead messages, QueueReminders enqueues three
+// in one transaction, and SendReminders fails the one for the cart named
+// poison.
 const tqImplementation = `import { enqueue } from '@superschematic/http-runtime/postgres';
 import { reminderQueue } from '@schemas/tq-db-types/queues';
 import type { Constructor, JobsConstructor, WorkersConstructor } from '@schemas/tq-shop-api';
 
-export const create: Constructor = deps => ({
-  reminders: {
-    async getSummary() {
-      const { rows } = await deps.db.query('SELECT state, count(*)::int AS n FROM reminder_queue GROUP BY state');
-      const count = (state: string) => (rows as { state: string; n: number }[]).find(row => row.state === state)?.n ?? 0;
-      return { done: count('done'), dead: count('dead') };
-    },
-  },
-});
+export const create: Constructor = deps => {
+  async function summary() {
+    const { rows } = await deps.db.query('SELECT state, count(*)::int AS n FROM reminder_queue GROUP BY state');
+    const count = (state: string) => (rows as { state: string; n: number }[]).find(row => row.state === state)?.n ?? 0;
+    return { done: count('done'), dead: count('dead') };
+  }
+  return { reminders: { getSummary: summary, getServiceSummary: summary } };
+};
 
 export const createJobs: JobsConstructor = deps => ({
   async queueReminders() {
@@ -153,7 +161,10 @@ export const createWorkers: WorkersConstructor = deps => ({
 // and the server and the worker on Bun; stack run, from another command,
 // runs the job on Bun against it, which enqueues three messages in one
 // transaction; the worker handles two and fails the third, which is dead
-// at once, as the server's summary reads from the queue.
+// at once, as the server's summary reads from the queue. The server
+// refuses a request without a service credential where the service clause
+// asks for one, while the job and the worker, given no callers field,
+// start all the same (D65).
 func TestStackDevRunsTypeScriptJobsAndWorkers(t *testing.T) {
 	if testing.Short() {
 		t.Skip("-short: stack dev runs Docker, Postgres and Bun")
@@ -241,7 +252,7 @@ func TestStackDevRunsTypeScriptJobsAndWorkers(t *testing.T) {
 	summary := func() string {
 		t.Helper()
 		resp, err := http.Get(local.ServerURL(apiPort) + "/api/summary")
-		require.NoError(t, err)
+		require.NoError(t, err, dev.String())
 		body, err := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
 		require.NoError(t, err)
@@ -249,6 +260,12 @@ func TestStackDevRunsTypeScriptJobsAndWorkers(t *testing.T) {
 		return string(body)
 	}
 	require.Contains(t, summary(), `"done":0,"dead":0`)
+	// The server verifies callers against its callers field, which holds no
+	// issuers, since no server of tq-stack calls tq-shop.
+	resp, err := http.Get(local.ServerURL(apiPort) + "/api/service/summary")
+	require.NoError(t, err, dev.String())
+	_ = resp.Body.Close()
+	require.Equal(t, http.StatusUnauthorized, resp.StatusCode, dev.String())
 
 	// stack run, as from another terminal.
 	run := new(bytes.Buffer)

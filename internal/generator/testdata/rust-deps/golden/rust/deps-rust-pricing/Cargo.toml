@@ -1,8 +1,10 @@
 # The implementation of the deps-rust-pricing API (D57).
 #
 # superschematic wrote this crate once, as a scaffold, because it was
-# missing, and never writes it again: it is yours, and so is its name. A
-# stack's server entrypoint depends on it by path and calls its `create`.
+# missing, and never writes it again: it is yours, and so is its name. Each
+# build of a stack copies it into the output root's impl/deps-rust-pricing, with
+# its path dependencies re-based there, and the stack's server entrypoint
+# depends on that copy and calls its `create`.
 [package]
 name = "schemas-deps-rust-pricing-implementation"
 version = "0.1.0"

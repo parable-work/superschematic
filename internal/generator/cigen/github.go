@@ -240,16 +240,16 @@ func (g github) header(w *yamlWriter, notes []string) {
 // type-checks each TypeScript server and the implementation of each API
 // one serves (D51, amended), and builds each site with its build script,
 // as `stack deploy` does, so a site that does not build fails the pull
-// request (D55). For the Rust servers it sets up the Rust release
-// tools.env pins before the build, which brings the output root's Cargo
-// lockfile up to date with it, refuses a lockfile git does not track or
-// the build changed, and checks each Rust server, with the implementations
-// it depends on, frozen to the lockfile (D57).
+// request (D55). For the Rust servers, jobs and workers it sets up the
+// Rust release tools.env pins before the build, which brings the output
+// root's Cargo lockfile up to date with it, refuses a lockfile git does not
+// track or the build changed, and checks each one's crate, with the
+// implementation it depends on, frozen to the lockfile (D57, D65).
 func (g github) check() job {
 	st := g.req.Stack
 	servers := g.servers()
 	tsServers := g.typeScriptServers()
-	rustServers := g.rustServers()
+	rustCrates := g.rustCrates()
 	sites := slices.Sorted(maps.Keys(st.Sites))
 	workspace := len(tsServers) > 0 || len(sites) > 0
 	steps := []step{g.checkout(), g.install()}
@@ -263,7 +263,7 @@ func (g github) check() job {
 			with: [][2]string{{"go-version", servergen.GoVersion}, {"cache", "false"}},
 		})
 	}
-	if len(rustServers) > 0 {
+	if len(rustCrates) > 0 {
 		steps = append(steps, setupRust())
 	}
 	packages := g.packages()
@@ -298,12 +298,12 @@ func (g github) check() job {
 			})
 		}
 	}
-	if len(rustServers) > 0 {
+	if len(rustCrates) > 0 {
 		steps = append(steps, g.rustLockfile())
-		for _, server := range rustServers {
+		for _, c := range rustCrates {
 			steps = append(steps, step{
-				name: "Compile server " + server,
-				dir:  path.Join(st.OutputRoot, "server", st.Name, server),
+				name: "Compile " + string(c.kind) + " " + c.name,
+				dir:  path.Join(st.OutputRoot, "server", st.Name, c.name),
 				run:  rustCheck,
 			})
 		}
@@ -318,8 +318,9 @@ func (g github) check() job {
 	return job{id: "check", name: "check", cond: notClosed, steps: steps}
 }
 
-// rustCheck compiles a Rust server's crate and every crate it depends on,
-// the implementations among them, frozen to the workspace's lockfile.
+// rustCheck compiles the crate of a Rust server, job or worker and every
+// crate it depends on, the implementations among them, frozen to the
+// workspace's lockfile.
 const rustCheck = "cargo check --locked"
 
 // setupRust installs the Rust release tools.env pins,
@@ -593,11 +594,12 @@ func (g github) build() step {
 
 // buildSteps are the steps of a cloud job that builds the services before
 // its command: the build, after the Rust release tools.env pins for a
-// stack with a Rust server, so the build's cargo update --workspace runs
-// on the release check ran it on and leaves the lockfile check accepted as
-// it is (D57). The runner's own cargo may be another release.
+// stack with a Rust server, job or worker, so the build's cargo update
+// --workspace runs on the release check ran it on and leaves the lockfile
+// check accepted as it is (D57). The runner's own cargo may be another
+// release.
 func (g github) buildSteps() []step {
-	if len(g.rustServers()) == 0 {
+	if len(g.rustCrates()) == 0 {
 		return []step{g.build()}
 	}
 	return []step{setupRust(), g.build()}
@@ -618,16 +620,37 @@ func (g github) servers() []string { return g.serversIn(registry.APILanguageGo) 
 // packages the build writes into the output root's Bun workspace, sorted.
 func (g github) typeScriptServers() []string { return g.serversIn(registry.APILanguageTypeScript) }
 
-// rustServers are the stack's Rust servers, whose crates the build writes
-// into the output root's Cargo workspace, sorted (D57).
-func (g github) rustServers() []string { return g.serversIn(registry.APILanguageRust) }
+// rustCrate is the crate of a Rust server, job or worker of the stack,
+// which the build writes into the output root's Cargo workspace (D57,
+// D65): its deployable's kind and name.
+type rustCrate struct {
+	kind ir.DeployableKind
+	name string
+}
+
+// rustCrates are the crates of the stack's Rust servers, then its Rust
+// jobs, then its Rust workers, each sorted by name.
+func (g github) rustCrates() []rustCrate {
+	var crates []rustCrate
+	for _, kind := range []ir.DeployableKind{ir.DeployableServer, ir.DeployableJob, ir.DeployableWorker} {
+		for _, name := range g.deployablesIn(kind, registry.APILanguageRust) {
+			crates = append(crates, rustCrate{kind, name})
+		}
+	}
+	return crates
+}
 
 // serversIn are the stack's servers in language, sorted.
 func (g github) serversIn(language string) []string {
+	return g.deployablesIn(ir.DeployableServer, language)
+}
+
+// deployablesIn are the stack's deployables of kind in language, sorted.
+func (g github) deployablesIn(kind ir.DeployableKind, language string) []string {
 	var names []string
 	for _, env := range g.req.Environments {
 		for _, d := range env.Environment.Deployables {
-			if d.Kind == ir.DeployableServer && d.Language == language && !slices.Contains(names, d.Name) {
+			if d.Kind == kind && d.Language == language && !slices.Contains(names, d.Name) {
 				names = append(names, d.Name)
 			}
 		}

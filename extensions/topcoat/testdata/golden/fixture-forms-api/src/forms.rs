@@ -2118,3 +2118,103 @@ pub async fn account_draft_note_args_fields(
         </fieldset>
     })
 }
+
+/// The arguments of account.rotateKey, each as the browser sends it. Sent by
+/// POST.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct AccountRotateKeyArgsForm {
+    pub id: Option<String>,
+    /// The browser sent more than `MAX_PAIRS` pairs, past which the form
+    /// read none: `parse` refuses it with the form's error.
+    pub overflow: bool,
+}
+
+impl AccountRotateKeyArgsForm {
+    /// How a page sends the form: `<form method=(Self::METHOD)>`.
+    pub const METHOD: &'static str = "post";
+
+    /// A new form of one resource, whose path arguments, which the form holds
+    /// as hidden inputs, the page knows: each argument's declared default.
+    pub fn new(id: impl ToString) -> Self {
+        Self {
+            id: Some(id.to_string()),
+            overflow: false,
+        }
+    }
+
+    /// The form a browser sent, from its pairs: each argument's first value and
+    /// a list's every value. `Form<AccountRotateKeyArgsForm>` decodes a post
+    /// this way.
+    pub fn from_pairs(pairs: impl IntoIterator<Item = (String, String)>) -> Self {
+        let posted = Posted::from_pairs(pairs);
+        Self {
+            id: posted.get("id").first(),
+            overflow: posted.overflow,
+        }
+    }
+
+    /// The operation's arguments: each written as the JSON a request carries
+    /// and decoded into its type, then checked as the router checks a request's
+    /// (`Args::check`); else each control's errors, or the form's when the
+    /// browser sent more than it reads. `check` refuses the first argument that
+    /// breaks a rule.
+    pub fn parse(&self) -> Result<crate::api::AccountRotateKeyArgs, FormErrors> {
+        if self.overflow {
+            return Err(overflowed());
+        }
+        let mut errors = FormErrors::default();
+        let arg_id = single(&mut errors, "id", text(self.id.as_deref()));
+        let Some(arg_id) = arg_id else {
+            return Err(errors);
+        };
+        let args = crate::api::AccountRotateKeyArgs {
+            id: arg_id,
+        };
+        args.check().map_err(|err| FormErrors::from_api(&err))?;
+        Ok(args)
+    }
+
+    /// Parses the form, then calls the operation in-process
+    /// (`operations::account_rotate_key`). A refusal is the status a page
+    /// answers with and the errors it renders the form again with: 422 and
+    /// `parse`'s errors, or the route's status (401, 403, 404, 409, ...) and
+    /// the operation's errors (`Refusal::from_api`).
+    pub async fn submit(&self, cx: &Cx) -> Result<types::AccountKey, Refusal> {
+        let args = self.parse()?;
+        operations::account_rotate_key(cx, args).await.map_err(|err| Refusal::from_api(&err))
+    }
+
+    /// Whether the component shows the errors at `path`: at an argument's
+    /// control. A path argument's are the form's own.
+    fn shows(_path: &[Segment]) -> bool {
+        false
+    }
+}
+
+impl<'de> Deserialize<'de> for AccountRotateKeyArgsForm {
+    /// Reads the pairs a browser sends, as Topcoat's `Form` hands them, by
+    /// `from_pairs`.
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Vec::<(String, String)>::deserialize(deserializer).map(Self::from_pairs)
+    }
+}
+
+/// The controls of `AccountRotateKeyArgsForm`: each argument's, with its label,
+/// its value as sent, the attributes its rules give it and its errors, a path
+/// argument's a hidden input. `choices` turns a text or number control the app
+/// names into a select.
+#[component]
+pub async fn account_rotate_key_args_fields(
+    #[default] form: AccountRotateKeyArgsForm,
+    #[default] errors: FormErrors,
+    #[default] choices: Choices,
+) -> topcoat::Result<impl View> {
+    let form_errors = errors.unshown(AccountRotateKeyArgsForm::shows);
+    let _ = choices;
+    Ok(view! {
+        for message in form_errors {
+            <p class="form-error">(message)</p>
+        }
+        <input type="hidden" name="id" value=(form.id.clone())>
+    })
+}

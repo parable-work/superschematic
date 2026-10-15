@@ -31,6 +31,8 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer};
 use serde_json::Value;
 use topcoat::context::Cx;
+use topcoat::router::content::Form;
+use topcoat::router::request::uri;
 use topcoat::router::StatusCode;
 use topcoat::view::{View, component, view};
 
@@ -218,6 +220,43 @@ impl From<FormErrors> for Refusal {
     }
 }
 
+/// A select's options: each choice, selected when it is the value held,
+/// and the value held when no choice is it, so a form renders as sent.
+fn choice_options(options: &[Choice], held: Option<&str>) -> Vec<(String, String, bool)> {
+    let mut out: Vec<_> = options
+        .iter()
+        .map(|option| (option.value.clone(), option.label.clone(), held == Some(option.value.as_str())))
+        .collect();
+    if let Some(held) = held
+        && !options.iter().any(|option| option.value == held)
+    {
+        out.push((held.to_owned(), held.to_owned(), true));
+    }
+    out
+}
+
+/// The `<select>` the app's choices make of a text or number control when
+/// they name it (`Choices::of`): a blank option, selected when no choice
+/// is, then each choice (`choice_options`).
+#[component]
+async fn choice_select(
+    #[into] id: String,
+    #[into] name: String,
+    required: bool,
+    invalid: Option<&'static str>,
+    options: Vec<(String, String, bool)>,
+) -> topcoat::Result<impl View> {
+    let blank = !options.iter().any(|(_, _, selected)| *selected);
+    Ok(view! {
+        <select id=(id) name=(name) required=(required) aria-invalid=(invalid)>
+            <option value="" selected=(blank)>""</option>
+            for (value, label, selected) in options {
+                <option value=(value) selected=(selected)>(label)</option>
+            }
+        </select>
+    })
+}
+
 /// A step of a control's name: a field's key, or a row's index.
 #[derive(Debug, Clone, PartialEq)]
 enum Segment {
@@ -355,6 +394,249 @@ fn decode<T: DeserializeOwned>(errors: &mut FormErrors, key: &str, json: Value) 
             None
         }
     }
+}
+
+/// The arguments of order.holdOrder, each as the browser sends it. Sent by
+/// POST.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct OrderHoldOrderArgsForm {
+    pub id: Option<String>,
+    pub reason: Option<String>,
+    /// The browser sent more than `MAX_PAIRS` pairs, past which the form
+    /// read none: `parse` refuses it with the form's error.
+    pub overflow: bool,
+}
+
+impl OrderHoldOrderArgsForm {
+    /// How a page sends the form: `<form method=(Self::METHOD)>`.
+    pub const METHOD: &'static str = "post";
+
+    /// A new form of one resource, whose path arguments, which the form holds
+    /// as hidden inputs, the page knows: each argument's declared default.
+    pub fn new(id: impl ToString) -> Self {
+        Self {
+            id: Some(id.to_string()),
+            reason: None,
+            overflow: false,
+        }
+    }
+
+    /// The form a browser sent, from its pairs: each argument's first value and
+    /// a list's every value. `Form<OrderHoldOrderArgsForm>` decodes a post this
+    /// way.
+    pub fn from_pairs(pairs: impl IntoIterator<Item = (String, String)>) -> Self {
+        let posted = Posted::from_pairs(pairs);
+        Self {
+            id: posted.get("id").first(),
+            reason: posted.get("reason").first(),
+            overflow: posted.overflow,
+        }
+    }
+
+    /// The operation's arguments: each written as the JSON a request carries
+    /// and decoded into its type, then checked as the router checks a request's
+    /// (`Args::check`); else each control's errors, or the form's when the
+    /// browser sent more than it reads. `check` refuses the first argument that
+    /// breaks a rule.
+    pub fn parse(&self) -> Result<crate::api::OrderHoldOrderArgs, FormErrors> {
+        if self.overflow {
+            return Err(overflowed());
+        }
+        let mut errors = FormErrors::default();
+        let arg_id = single(&mut errors, "id", text(self.id.as_deref()));
+        let arg_reason = single(&mut errors, "reason", text(self.reason.as_deref()));
+        let Some(arg_id) = arg_id else {
+            return Err(errors);
+        };
+        let Some(arg_reason) = arg_reason else {
+            return Err(errors);
+        };
+        let args = crate::api::OrderHoldOrderArgs {
+            id: arg_id,
+            reason: arg_reason,
+        };
+        args.check().map_err(|err| FormErrors::from_api(&err))?;
+        Ok(args)
+    }
+
+    /// Parses the form, then calls the operation in-process
+    /// (`operations::order_hold_order`). A refusal is the status a page answers
+    /// with and the errors it renders the form again with: 422 and `parse`'s
+    /// errors, or the route's status (401, 403, 404, 409, ...) and the
+    /// operation's errors (`Refusal::from_api`).
+    pub async fn submit(&self, cx: &Cx) -> Result<types::OrderView, Refusal> {
+        let args = self.parse()?;
+        operations::order_hold_order(cx, args).await.map_err(|err| Refusal::from_api(&err))
+    }
+
+    /// Whether the component shows the errors at `path`: at an argument's
+    /// control. A path argument's are the form's own.
+    fn shows(path: &[Segment]) -> bool {
+        match path {
+            [Segment::Key(key), rest @ ..] => match key.as_str() {
+                "reason" => rest.is_empty(),
+                _ => false,
+            },
+            _ => false,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for OrderHoldOrderArgsForm {
+    /// Reads the pairs a browser sends, as Topcoat's `Form` hands them, by
+    /// `from_pairs`.
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Vec::<(String, String)>::deserialize(deserializer).map(Self::from_pairs)
+    }
+}
+
+/// The controls of `OrderHoldOrderArgsForm`: each argument's, with its label,
+/// its value as sent, the attributes its rules give it and its errors, a path
+/// argument's a hidden input. `choices` turns a text or number control the app
+/// names into a select.
+#[component]
+pub async fn order_hold_order_args_fields(
+    #[default] form: OrderHoldOrderArgsForm,
+    #[default] errors: FormErrors,
+    #[default] choices: Choices,
+) -> topcoat::Result<impl View> {
+    let form_errors = errors.unshown(OrderHoldOrderArgsForm::shows);
+    Ok(view! {
+        for message in form_errors {
+            <p class="form-error">(message)</p>
+        }
+        <input type="hidden" name="id" value=(form.id.clone())>
+        <div class="field">
+            <label for="order-hold-order-reason">"Reason"</label>
+            match choices.of("reason", "reason") {
+                Some(options) => choice_select(id: "order-hold-order-reason", name: "reason", required: true, invalid: errors.invalid("reason"), options: choice_options(options, form.reason.as_deref())),
+                None => <input id="order-hold-order-reason" name="reason" type="text" required=(true) maxlength="400" value=(form.reason.clone()) aria-invalid=(errors.invalid("reason"))>,
+            }
+            for message in errors.of("reason") {
+                <p class="field-error">(message)</p>
+            }
+        </div>
+    })
+}
+
+/// The arguments of order.listOrders, each as the browser sends it. A filter,
+/// sent by GET and read from the query.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct OrderListOrdersArgsForm {
+    pub status: Option<String>,
+    /// The browser sent more than `MAX_PAIRS` pairs, past which the form
+    /// read none: `parse` refuses it with the form's error.
+    pub overflow: bool,
+}
+
+impl OrderListOrdersArgsForm {
+    /// How a page sends the form: `<form method=(Self::METHOD)>`.
+    pub const METHOD: &'static str = "get";
+
+    /// A new form: each argument's declared default.
+    pub fn new() -> Self {
+        Self {
+            status: None,
+            overflow: false,
+        }
+    }
+
+    /// The form a browser sent, from its pairs: each argument's first value and
+    /// a list's every value. `Form<OrderListOrdersArgsForm>` decodes a query
+    /// this way.
+    pub fn from_pairs(pairs: impl IntoIterator<Item = (String, String)>) -> Self {
+        let posted = Posted::from_pairs(pairs);
+        Self {
+            status: posted.get("status").first(),
+            overflow: posted.overflow,
+        }
+    }
+
+    /// The filter the current request's query holds, so a page's form shows
+    /// the filters in effect: what `Form<OrderListOrdersArgsForm>` reads on GET.
+    pub fn from_query(cx: &Cx) -> topcoat::Result<Self> {
+        let query = uri(cx).query().unwrap_or_default();
+        Ok(Form::<Self>::from_bytes(query.as_bytes())?.0)
+    }
+
+    /// The operation's arguments: each written as the JSON a request carries
+    /// and decoded into its type, then checked as the router checks a request's
+    /// (`Args::check`); else each control's errors, or the form's when the
+    /// browser sent more than it reads. `check` refuses the first argument that
+    /// breaks a rule.
+    pub fn parse(&self) -> Result<crate::api::OrderListOrdersArgs, FormErrors> {
+        if self.overflow {
+            return Err(overflowed());
+        }
+        let mut errors = FormErrors::default();
+        let arg_status = single(&mut errors, "status", text(self.status.as_deref()));
+        let Some(arg_status) = arg_status else {
+            return Err(errors);
+        };
+        let args = crate::api::OrderListOrdersArgs {
+            status: arg_status,
+        };
+        args.check().map_err(|err| FormErrors::from_api(&err))?;
+        Ok(args)
+    }
+
+    /// Parses the form, then calls the operation in-process
+    /// (`operations::order_list_orders`). A refusal is the status a page
+    /// answers with and the errors it renders the form again with: 422 and
+    /// `parse`'s errors, or the route's status (401, 403, 404, 409, ...) and
+    /// the operation's errors (`Refusal::from_api`).
+    pub async fn submit(&self, cx: &Cx) -> Result<Vec<types::OrderView>, Refusal> {
+        let args = self.parse()?;
+        operations::order_list_orders(cx, args).await.map_err(|err| Refusal::from_api(&err))
+    }
+
+    /// Whether the component shows the errors at `path`: at an argument's
+    /// control. A path argument's are the form's own.
+    fn shows(path: &[Segment]) -> bool {
+        match path {
+            [Segment::Key(key), rest @ ..] => match key.as_str() {
+                "status" => rest.is_empty(),
+                _ => false,
+            },
+            _ => false,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for OrderListOrdersArgsForm {
+    /// Reads the pairs a browser sends, as Topcoat's `Form` hands them, by
+    /// `from_pairs`.
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Vec::<(String, String)>::deserialize(deserializer).map(Self::from_pairs)
+    }
+}
+
+/// The controls of `OrderListOrdersArgsForm`: each argument's, with its label,
+/// its value as sent, the attributes its rules give it and its errors, a path
+/// argument's a hidden input. `choices` turns a text or number control the app
+/// names into a select.
+#[component]
+pub async fn order_list_orders_args_fields(
+    #[default] form: OrderListOrdersArgsForm,
+    #[default] errors: FormErrors,
+    #[default] choices: Choices,
+) -> topcoat::Result<impl View> {
+    let form_errors = errors.unshown(OrderListOrdersArgsForm::shows);
+    Ok(view! {
+        for message in form_errors {
+            <p class="form-error">(message)</p>
+        }
+        <div class="field">
+            <label for="order-list-orders-status">"Status"</label>
+            match choices.of("status", "status") {
+                Some(options) => choice_select(id: "order-list-orders-status", name: "status", required: false, invalid: errors.invalid("status"), options: choice_options(options, form.status.as_deref())),
+                None => <input id="order-list-orders-status" name="status" type="text" value=(form.status.clone()) aria-invalid=(errors.invalid("status"))>,
+            }
+            for message in errors.of("status") {
+                <p class="field-error">(message)</p>
+            }
+        </div>
+    })
 }
 
 /// The arguments of stock.releaseReservation, each as the browser sends it.

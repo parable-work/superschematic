@@ -33,8 +33,15 @@ beside the API crate, at `<out>/topcoat/<service>`, and is named
   the schema's titles and its types' `@display`, a time in words and an
   id by the name the app's choices give it
   ([Display components](#display-components)).
+- pages a `@paginated` operation's call, form, procedure and list (D60),
+  offers what a `RefersTo` value refers to as a select and names it by
+  its item's label, from the operation that lists the items (D61), and
+  renders a `SearchQuery` argument as a search box (D62)
+  ([Pages, references and search](#pages-references-and-search)).
 - when asked, serves a page per resource the operations describe, under a
-  prefix, with a layout, a nav and an index ([Pages](#pages)).
+  prefix, with a layout, a nav and an index, each page under its
+  operation's route controls, and, for an app that loads Topcoat's
+  runtime, lists whose filter updates them in place ([Pages](#pages)).
 
 It is a Go module of its own, as `extensions/gcp` and `extensions/pulumi`
 are. Neither the core nor the installed `superschematic`, which links gcp
@@ -83,7 +90,9 @@ leave out their module;
 `records: false` leaves out the records, and with them the procedures and
 the views, which are built on records. Pages are off by default:
 `pages: { enabled: true, prefix: "/console" }` turns them on, and they
-need the records, the forms and the views ([Pages](#pages)).
+need the records, the forms and the views ([Pages](#pages)); `live: true`
+beside them renders each list with a filter through a shard ([Live
+lists](#live-lists)).
 
 The crate needs the Rust server. A service whose server is in another
 language skips `outputs.topcoat` and logs why, so one config can serve a Go
@@ -119,6 +128,10 @@ service it does not name has none:
 services = ["shop-orders", "shop-catalog"]
 pages_prefix = { "shop-orders" = "/console/orders", "shop-catalog" = "/console/catalog" }
 ```
+
+`pages_live = true` beside `pages_prefix` makes the lists of the pages it
+turns on live, as `pages.live` would ([Live lists](#live-lists)); without
+a `pages_prefix` the table refuses it.
 
 An app that links two crates registers each one's pages, layout and
 index at its prefix, so the table refuses one path for several services,
@@ -214,6 +227,13 @@ they have guards but no in-process call, so login's session token never
 reaches a record. A field whose name a record reserves (`clone`, `then`,
 ...) gets a trailing underscore. `From<types::X>` builds the record from
 the API's value.
+
+A `@paginated` operation's page (D60) is a page record per element type,
+`<Element>PageRecord { items, next }`: its items as a record holds the
+element, `OrderViewRecord` or `String`, and `next`, the cursor of the next
+page, none after the last. `From<&Page<types::X>>` builds it. A schema
+that declares a type named `<Element>Page`, whose record it would be too,
+fails the build.
 
 ## Forms
 
@@ -484,8 +504,9 @@ async fn book(cx: &Cx, Form(form): Form<BookingInputForm>) -> topcoat::Result<im
 
 ### Choices the app supplies
 
-An input type does not say which values an id may take: a line's
-`productId` is a UUID, not a product. The page says, with `Choices`
+An input type does not say which values an id may take unless it refers
+to an item (`RefersTo`, [What a value refers to](#what-a-value-refers-to)):
+a plain `productId` is a UUID, not a product. The page says, with `Choices`
 (`crate::choices`, re-exported from `forms`), which either kind of form
 component takes, as the [display components](#display-components) do: a
 text or number control it names renders as a `<select>` of the options,
@@ -524,8 +545,12 @@ Each operation a browser may call is a Topcoat procedure in `procedures`
   record, `<Op>ArgsRecord`, with a field per argument and the input as its
   type's record. `to_args()` writes each field as the JSON a request
   carries and decodes it into the `Args` struct. A UUID or timestamp that
-  does not parse is the router's 400.
-- **Result.** It answers `Result<OutputRecord, ProblemRecord>`.
+  does not parse is the router's 400. A paged operation's record also
+  takes `cursor: Option<String>`, a page's `next`, and
+  `limit: Option<i64>`, held to the route's limits as the router holds
+  the query's (`PageSpec::request`).
+- **Result.** It answers `Result<OutputRecord, ProblemRecord>`, a paged
+  operation its page record.
   `ProblemRecord` holds the route's status, code and detail, and each
   refused field's path, rule and message. A refusal reaches the browser as
   data; an `Err` of a procedure would reach it as a bare 500.
@@ -583,7 +608,9 @@ such procedure:
 A control a procedure could not apply as its route does would leave the
 procedure out, with the reason, rather than be skipped; all three apply.
 An in-process call from the app's own page applies none of them: the
-page is a route of the app, and its controls are the app's to set.
+page is a route of the app, and its controls are the app's to set. The
+[generated pages](#route-controls-of-the-pages) apply them to their own
+requests.
 
 ## Display components
 
@@ -638,10 +665,12 @@ sends it, for a script that shows it in the reader's own zone. Text that
 is no date or time shows as it is. `views::date_time_text`, `date_text`
 and `time_text` write it for a page's own markup.
 
-An API type does not say which record an id names either, so a component
-shows the label the app's `choices` give a text or number value, an
-order line's product's name for its `productId`, and the value itself
-when they give none. A field is named by its path without the rows'
+An API type does not say which record an id names either, unless the id
+refers to one (`RefersTo`), whose labels `references` gives ([What a
+value refers to](#what-a-value-refers-to)), so a component shows the label
+the app's `choices` give a text or number value, an order line's
+product's name for its `productId`, and the value itself when they give
+none. A field is named by its path without the rows'
 indexes, `lines.productId` for each line of an order's detail, and a
 nested record's component gets the choices under its field. A choice
 matches a value whose text is the choice's value exactly: an id as the
@@ -679,6 +708,135 @@ let hrefs: Vec<String> = rows.iter().map(|row| format!("/orders/{}", row.id)).co
 view! { order_view_table(rows: rows, hrefs: hrefs) }
 ```
 
+## Pages, references and search
+
+### A paged list
+
+A `@paginated` operation (D60) takes the page asked for in its `Args`,
+`page`, and returns a page, its items and the cursor of the next, none
+after the last. Its in-process call takes `PageRequest::first(limit)` or
+`PageRequest::after(next, limit)` and returns
+`runtime::page::Page<types::X>`; its procedure takes `cursor` and `limit`
+and answers its page record ([Records](#records)). Its argument form, which
+every paged operation has, one with no other argument too, holds `cursor`
+and `limit` as the query sends them and renders neither:
+
+- **`page()`** reads them by the route's rules (`PageSpec::query`): an
+  absent cursor is the first page and an absent limit the route's
+  default, and a cursor outside the base64url alphabet or a limit out of
+  bounds is the router's 400 at its parameter. `parse()` builds `page`
+  from it, and `submit(cx)` answers a refused cursor or limit with that
+  400, as the JSON API does; a cursor the implementation cannot read is
+  its own 400 at `cursor`.
+- **`query_pairs()`** is the query the form holds: each argument's values
+  in control order, then `limit` when it was sent, never `cursor`. A page
+  links its next page with it and `cursor` set to the page's `next`, and
+  its first page with it alone, so both keep the filter and the limit,
+  and a submitted filter, which holds no cursor, starts at the first page.
+
+```rust
+#[page("/orders")]
+async fn orders(cx: &Cx, Form(filter): Form<OrderListOrdersArgsForm>) -> topcoat::Result<impl View> {
+    let pairs = filter.query_pairs();
+    let (status, rows, next, errors) = match filter.submit(cx).await {
+        Ok(page) => {
+            let next = page.next.map(|next| format!("/orders?{}", query(&pairs, Some(next.as_str()))));
+            (StatusCode::OK, page.items.iter().map(OrderViewRecord::from).collect(), next, FormErrors::default())
+        }
+        Err(refused) => (refused.status, Vec::new(), None, refused.errors),
+    };
+    Ok(view! {
+        (status)
+        <form method=(OrderListOrdersArgsForm::METHOD)>
+            order_list_orders_args_fields(form: filter, errors: errors)
+            <button type="submit">"Filter"</button>
+        </form>
+        order_view_table(rows: rows)
+        if let Some(next) = next {
+            <a rel="next" href=(next)>"Next page"</a>
+        }
+    })
+}
+```
+
+(`query` percent-encodes the pairs, as the [pages](#what-each-page-does)
+do.) A paged list's console page shows its pager after its table.
+
+### What a value refers to
+
+A field or an argument declared `RefersTo<T, Target>` (D61) holds the
+value of an item of `Target`, as an operation of the API lists it: its
+options operation, its value field, `id` unless it says another, its
+label field, the target's `@display` titleField unless it says another,
+and its lookup, the options operation's optional list query argument that
+refers to the target by the same value, each derived by the core's
+`ir.ResolveReference`. When a form or a record the crate has holds one,
+and its options operation has an in-process call, the crate writes
+`references`:
+
+- **`<form>_choices(cx, choices) -> Choices`**, per form that holds a
+  reference (`order_input_form_choices`, `order_list_orders_args_form_choices`),
+  gives each such control, by its path (`lines.productId`, an argument by
+  its name), the target's items as options, each by its value and named
+  by its label. They are the options operation's items from one listing
+  a request, the first page of up to its maxLimit when it pages; when
+  more follow, a select would hide them, and the control stays as it is.
+- **`<record>_labels(cx, records, choices) -> Choices`**, per record that
+  shows a reference at any depth (`order_view_labels`), names each value
+  the records hold by its item's label: through the lookup with the
+  records' distinct values, in chunks of the lesser of its listMax and,
+  when the options operation pages, its maxLimit, at most
+  `references::MAX_LOOKUP_CALLS`, 10, calls a target each time it is
+  called; without a lookup, a reference by sku say, from the listing. A
+  value no item has shows as it is. A target's own record may show a
+  reference too, as a product names its supplier: its labels function is
+  still `<record>_labels`, and the functions `references` keeps for the
+  target are named apart from it.
+
+Both answer under `choices`, the app's, through `Choices::or`: the app's
+win where they name a path, and no call is made for it. The listing and
+each lookup are kept for the request (`#[memoize]`), so every reference
+to a target in a render shares them; nothing is kept across requests,
+since labels change and callers differ. A caller the operation refuses
+(401, 403), or a call that fails, gets the plain control and the value as
+it is; the page does not fail. A reference whose options operation has no
+in-process call, a signed webhook's say, is left out, its control and
+value as they were, with the reason in the build log: `PlaceOrderLine.productId
+refers to ProductView, whose options operation ProductCatalog.listProducts
+has no in-process call: ...`.
+
+An app's own page takes them as the console's pages do:
+
+```rust
+#[page("/orders/new")]
+async fn new_order(cx: &Cx) -> topcoat::Result<impl View> {
+    let choices = references::place_order_input_form_choices(cx, Choices::new()).await;
+    Ok(view! {
+        <form method="post">
+            place_order_input_fields(form: PlaceOrderInputForm::new(), choices: choices)
+            <button type="submit">"Place the order"</button>
+        </form>
+    })
+}
+
+#[page("/orders/{id}")]
+async fn show_order(cx: &Cx) -> topcoat::Result<impl View> {
+    let args = OrderGetOrderArgs { id: path_param::<Id>(cx)?.clone() };
+    let order = OrderViewRecord::from(operations::order_get_order(cx, args).await?);
+    let labels = references::order_view_labels(cx, std::slice::from_ref(&order), Choices::new()).await;
+    Ok(view! { order_view_detail(record: order, choices: labels) })
+}
+```
+
+### A search box
+
+A `SearchQuery` argument (D62) is its argument form's first control, an
+`<input type="search">` labeled "Search", with its rules' attributes
+(`maxlength`), which no choices make a select. The console's filter form
+that holds one is `role="search"`, and its links to the next and the
+first page carry it. The implementation matches it: `runtime::search::terms`
+and `like_pattern` over SQL, `matches` in memory.
+
 ## Pages
 
 `pages: { enabled: true }` in `outputs.topcoat` (or `pages_prefix` in
@@ -715,23 +873,46 @@ change all of it, and a `DELETE` of `C/{p}/<verb>`, since an action's
 form posts from the item's page in one click and a delete asks first.
 
 A resource is named by its type's `@display` (`noun`, `plural`,
-`createLabel`, `titleField`), else by its path's last word: `projects`
-is Projects, an item a Project, the new page "New project". A list's rows
-link to their items' pages when the list returns the detail's type and
-the detail's path parameter names one of its fields (`{id}` and `id`).
+`createLabel`, `titleField`) where it declares them. Else the collection
+is titled by its path's last word as the path gives it, `shelves` is
+Shelves, and an item by its type's name in words, `Shelf` is a Shelf,
+`OrderView` an Order view, as a table names an untitled row: no label
+guesses a singular from a plural, which English rules get wrong (shelves
+is no shelve). The new page is then "New shelf". A collection whose path
+extends another's, `documents/drafts` beside `documents`, is titled by its
+own words after the other's, Drafts, never by its type's `plural`. A
+collection without pages of its own, only a step to one under its items,
+names an item in the trail by its id alone. A list's rows link to their
+items' pages when the list returns the detail's type and the detail's
+path parameter names one of its fields (`{id}` and `id`), or refers to
+the detail's own type (`RefersTo`), by the reference's value field
+(`products/{productId}` and `id`).
+
+A collection whose pages would be served at another's has none, and the
+build log says why: a list at `projects/new`, beside the projects' new
+page, or a collection named `edit` or `delete` under an item that has an
+edit or a delete page, `projects/{id}/edit`. Topcoat's router refuses a
+page registered twice, so the console's own pages keep their paths:
+`no page for project.listNewProjects: its collection, projects/new, has no
+pages, since the list of projects/new would be served at GET projects/new,
+the new page of projects`.
 
 ### What each page does
 
 Every page calls its operation through `operations`, so the route's
-rules hold, and takes its input through the [forms](#forms). The route's
-traffic controls are not among those rules: an in-process call applies
-no `@rateLimit`, `@bodyLimit` or `@timeout` ([route
-controls](#route-controls)), so the pages are limited only as the app
-limits its own routes.
+rules hold, and takes its input through the [forms](#forms). Its request
+meets the route's traffic controls too ([Route controls of the
+pages](#route-controls-of-the-pages)).
 
 - **A list** checks the guard, renders the filter form (a GET, read from
-  the query), and the result as `<type>_table` with each row linked, and a
-  link to the new page when the caller may create one.
+  the query), its search box first, and the result as `<type>_table` with
+  each row linked, and a link to the new page when the caller may create
+  one. A paged list renders the page's items, then
+  `<nav class="ss-pager">`: "First page" (`rel="first"`) while a cursor
+  was sent and "Next page" (`rel="next"`) while one follows, each with the
+  filter and the limit. A paged list without a filter renders no form, and
+  a refusal of its page on its own, with its status. A paged section on an
+  item's page shows the first page and a link to the list's next.
 - **An item's page** renders `<type>_detail`, headed by its title, links
   to its edit and delete pages, a form per action and a section per
   resource under it, each only when the caller may.
@@ -740,6 +921,11 @@ limits its own routes.
   by JSON name and kind; any other starts as the form's `new()`.
 - **The delete page** shows the item and the form that deletes it, so a
   GET never deletes and no script confirms.
+
+Every form a page renders takes its references' options, and a list's
+rows and an item's detail their records' labels ([What a value refers
+to](#what-a-value-refers-to)), under the app's choices; an action's form
+takes its own beside the detail's labels.
 
 A route's values come from the page's path, set on the form over its
 hidden inputs, which a reader can change, and decoded as an argument form
@@ -768,7 +954,11 @@ another's, `widgets/archived` beside `widgets/{id}`, the longer is its own
 pages' collection, current in the nav and the trail, never an item named
 `archived`; under an item, a collection is read before the item's
 actions. The item's detail, which the
-item's page calls too, is called once per request (`#[memoize]`). The
+item's page calls too, is called once per request (`#[memoize]`), and so
+is the nav's list of what the caller may list, which the index shares. A
+request asks the `PageAuthenticator` for its caller once
+(`#[memoize]`), however many guards its page, its layout and its forms'
+calls ask: the nav's guards are permission checks of one caller. The
 index at the prefix lists the same resources. The markup is semantic HTML
 with `ss-` classes and ships no styles.
 
@@ -793,13 +983,144 @@ page for an action; without it a 401 has no link), and the
 [choices](#choices-the-app-supplies) every form and display component of
 the pages takes, by each field's path: `lines.productId` makes each
 line's product a select on the new-order page and its name in an order's
-lines. They are one set for every resource, so a path names its field in
-each form and component that holds one; choices per resource or per page
-are open. The page functions and their path parameters are public, so an
-app's own page can link to one with
+lines. `choices` are the app's for every resource, so a path names its
+field in each form and component that holds one. `choices_for` scopes
+choices to one resource's pages, its list, its item's page, its new, edit
+and delete pages and its section on its parent's page, named by its path
+below the prefix as `pages::RESOURCES` lists it, its parameters as its
+pages name them. A resource's choice for a field wins over the app's for
+that field on its pages, whose other fields keep the app's; a name no
+resource has panics, as a typo would. A field that refers to an item
+(`RefersTo`) needs none: its references give its options and labels, and
+the app's, where they name it, win:
+
+```rust
+let settings = pages::Settings::new()
+    .choices(Choices::new().with("ownerId", members))
+    .choices_for("projects/{project_id}/tasks", Choices::new().with("ownerId", assignees));
+```
+
+The page functions and their path parameters are public, so an app's own
+page can link to one with
 `href!(pages::projects_item_page, pages::ProjectId(id))`.
 
 An app that mounts two services' pages gives each a prefix of its own,
 as the [table](#the-config) requires: each crate registers its index and
 its layout at its prefix, and Topcoat's router refuses a page registered
 twice.
+
+### Route controls of the pages
+
+A page's request meets the `@rateLimit`, `@bodyLimit` and `@timeout` of
+the operation it is for, in the route's order, as the route's request
+does, and of the options operations its references call, so the console
+is no unlimited twin of a route ([D44](../../docs/DECISIONS.md)). `<service>(...)` adds one layer at the
+prefix, `PageControls`, which finds the page by its method and the path
+it is registered at:
+
+- a post meets the controls of the operation it submits: the new page's
+  create, the edit page's update, the delete page's delete, an action's
+  operation;
+- a GET page meets those of the operation it shows: a list its list's,
+  an item's page, its edit page and its delete page the detail's. The
+  index calls no operation, and meets none. A GET page carries no body
+  for a body limit to refuse;
+- a [live list](#live-lists)'s shard meets its list's;
+- a page whose forms or records hold a
+  [reference](#what-a-value-refers-to) meets, besides, the rate limit and
+  the timeout of each options operation they call, listing or looking up
+  its target: the new page its form's, a list's page and its shard its
+  filter's and its rows', an item's page its detail's, its actions' forms'
+  and its sections' rows', the edit page its form's, the delete page its
+  form's and the item's, and a post those of the page it renders again.
+  Not the lists its sections call, which keep to their own pages.
+
+The rate limit is the operation's own limiter for the pages, at its
+route's rate, which every page and shard that calls the operation shares,
+and counts each client by its IP address as Topcoat reads it
+(`client_ip`), as a procedure's does; the JSON API's route and the
+procedure keep theirs, as replicas would. A page that meets several
+operations' controls is counted by each limiter, its own operation's
+first, and the tightest timeout covers it; the body limit is its own
+operation's, since no other call carries the body. The body is read up
+to its limit before the page decodes its form, and the timeout covers
+the page's render, its calls included. A refusal is the route's status,
+429 with `Retry-After`, 413 or 504, and the pages' refusal section, its
+heading and the route's message, which no layout frames, since the page
+did not run:
+
+```html
+<section class="ss-refusal" data-status="429"><h1>Too many requests</h1><p>Too Many Requests</p></section>
+```
+
+Besides its references', a page meets the controls of its own operation
+only: the sections an item's page shows, and the item a refused delete
+renders again, are calls of a page already admitted. A reference's call
+is not: it lists up to a page's maxLimit of items, or looks up as many,
+on any page that holds one, so a client repeating the page would list
+them past the options operation's limits. An in-process call from the
+app's own page applies none of them, as before.
+
+### Live lists
+
+`pages: { enabled: true, live: true }` renders each list with a filter,
+or with a page, through a Topcoat shard, `<prefix>/_live/<resource>`, `/console/_live/orders`,
+a path that does not change with the build. Without Topcoat's runtime in
+the browser the page is as it was: the filter is a GET form, and its
+submit loads the page for the query. An app that loads the runtime gets
+the filter's results in place: the form's submit handler stops the
+browser's own, writes the form's query, as the browser would have sent
+it, to a hidden input whose input event sets the shard's signal, puts the
+query in the address bar, so a reload or a link keeps the filter, and the
+runtime renders the shard again with it, the heading, the filter with its
+errors and the table.
+
+The shard reads the query as the page reads its own, through the list's
+argument form, and calls the list through `operations`: a shard's
+request meets no page's guard or layout, so the call admits the caller
+and checks the filter as the route does, and answers a refusal with the
+route's status (401, 403, 404, 422), as the page does. A nested list's
+shard takes its parent's id as an argument, as the page takes it from
+its route, and its query's hidden path value is ignored, as the page's
+is. Topcoat's runtime applies only a 200: a refused re-render leaves the
+table as it was, and the browser's console names the failed request,
+while the page itself, reloaded, shows the refusal. The form's controls
+carry the rules a browser checks before the submit runs.
+
+A paged list's links set the shard's query too, so a page renders in
+place and its query goes in the address bar; without the runtime they
+are links to the page. A list without a filter or a page has nothing to
+update, and stays a component. An action's form, a post that changes the item, keeps its POST-redirect-GET
+without a reload of its own: a shard renders and a form posts, so posting
+through one would run the operation inside a render, and through a
+procedure would need the form's fields as a record the browser builds.
+
+An app loads the runtime once, for all its pages. The console's layout
+renders no `<html>`, so the app's own root layout gives the document its
+head and the runtime's script, around the console's layout, and the
+router serves the asset bundle (`topcoat asset bundle` builds it beside
+the binary) and the runtime's layer:
+
+```rust
+#[layout("/")]
+async fn document(slot: Slot<'_>) -> topcoat::Result<impl View> {
+    Ok(view! {
+        <!DOCTYPE html>
+        <html>
+            <head>topcoat::runtime::script()</head>
+            <body>(slot)</body>
+        </html>
+    })
+}
+
+Router::builder()
+    .discover()
+    .app_context(settings)
+    .shop_orders(implementations, page_authenticator)
+    .assets(AssetBundle::load()?)
+    .runtime()
+    .build()
+```
+
+An app that does not load it leaves `live` off, so it registers no shard
+it cannot use.

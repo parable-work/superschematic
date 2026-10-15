@@ -197,6 +197,36 @@ func TestDigestMismatch(t *testing.T) {
 	}
 }
 
+// TestRenamesTable: a provider without auto-aliasing entries, as one the
+// bridge maps through the Terraform plugin framework is, names its
+// Terraform type in its renames table. With no list fields known, a list
+// property is refused.
+func TestRenamesTable(t *testing.T) {
+	schema := `{"name": "gcp", "resources": {"gcp:test/widget:Widget": {"inputProperties": {"rsaBits": {"type": "integer"}}, "requiredInputs": []}}}`
+	metadata := `{"renames": {"resources": {"gcp:test/widget:Widget": "google_test_widget"}}}`
+	dir, fetch := fixture(t, schema, metadata)
+	if err := Run(dir, pinFile, "", false, fetch); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "test.widget.Widget.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var s providerschema.Schema
+	if err := json.Unmarshal(data, &s); err != nil {
+		t.Fatal(err)
+	}
+	if s.Terraform.Type != "google_test_widget" || s.Terraform.Renames["rsaBits"] != "rsa_bits" {
+		t.Errorf("terraform = %+v", s.Terraform)
+	}
+
+	listy := strings.Replace(schema, `"rsaBits": {"type": "integer"}`, `"names": {"type": "array", "items": {"type": "string"}}`, 1)
+	dir, fetch = fixture(t, listy, metadata)
+	if err := Run(dir, pinFile, "", false, fetch); err == nil || !strings.Contains(err.Error(), "property names") {
+		t.Fatalf("err = %v, want names refused for want of a list field", err)
+	}
+}
+
 func TestUnmatchedList(t *testing.T) {
 	metadata := strings.Replace(fixtureMetadata, `"env": {"maxItemsOne": false},`, "", 1)
 	dir, fetch := fixture(t, fixtureSchema, metadata)

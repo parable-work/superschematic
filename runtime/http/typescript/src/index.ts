@@ -46,9 +46,22 @@ export { OperationResult, envelope, envelopeResponse, requestIdOf } from './enve
 export type { Envelope, EnvelopeMeta } from './envelope.js';
 export { decodeJsonParam, decodeListOfLists, decodeMap, decodeParam, decodeParams } from './params.js';
 export type { ParamKind, ParamSpec, ParamLocation, ParamSource, ScalarConstraints } from './params.js';
+export {
+  PAGE_CURSOR_MAX_LENGTH,
+  REFUSED_CURSOR_DETAIL,
+  REFUSED_CURSOR_REASON,
+  decodeCursor,
+  encodeCursor,
+  lastPage,
+  morePage,
+  pageFromRows,
+  readPage,
+  refusedCursor,
+} from './page.js';
+export type { Page, PageQuery, PageRequest, PageSpec } from './page.js';
 export { authorize, covers, hasAnyPermission } from './auth.js';
 export type { Authenticator, PermissionMatcher, Principal } from './auth.js';
-export { authorizeService, serviceAuthenticator } from './serviceauth.js';
+export { authorizeService, ed25519PublicJwkFromPem, serviceAuthenticator } from './serviceauth.js';
 export type {
   PublicJwk,
   ServiceAuthAlgorithm,
@@ -117,5 +130,6 @@ export type {
   SignedUrlMethod,
   SignedUrlOptions,
 } from './bucket.js';
+export { MAX_SEARCH_TERMS, foldText, likePattern, searchMatches, searchTerms } from './search.js';
 export { LOG_LEVELS, createLogger } from './logger.js';
 export type { LogFields, LogLevel, Logger, LoggerOptions } from './logger.js';

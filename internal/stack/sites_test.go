@@ -153,7 +153,7 @@ type privateRun struct{}
 func (*privateRun) Name() string { return "private" }
 func (*privateRun) Register(r *registry.Registry) error {
 	if err := r.RegisterPlatform(registry.PlatformSpec{
-		Name: "private.run", Kind: ir.DeployableServer, Languages: []string{"GO"},
+		Name: "private.run", Provider: stacktest.Provider, Kind: ir.DeployableServer, Languages: []string{"GO"},
 		NameOf:    func(ctx registry.PlatformContext) any { return ctx.Deployable.Name },
 		AddressOf: func(ctx registry.PlatformContext) any { return "http://" + ctx.Deployable.Name },
 		Lower:     func(registry.PlatformContext) (registry.Lowered, error) { return registry.Lowered{}, nil },

@@ -4294,7 +4294,9 @@
     "ToolReturnSchema": [
       "type",
       "description",
-      "items"
+      "items",
+      "properties",
+      "required"
     ]
   },
   "names": [

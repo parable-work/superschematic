@@ -178,6 +178,18 @@ func TestRustGolden(t *testing.T) {
 	}
 }
 
+// TestRustOrdersGolden resolves RustOrdersShop, the shop with shop-orders
+// written in Rust (rustOrdersShop, D65), in Staging: its server Orders is a
+// Rust Cloud Run service, its job ShipOrders a Rust Cloud Run job with its
+// schedule, and its worker FulfilOrders a Rust worker pool, each with the
+// sql edge, the database user, the Cloud SQL volume and mount, and the
+// variables a Go one's has.
+func TestRustOrdersGolden(t *testing.T) {
+	s := shop()
+	s.Name = "RustOrdersShop"
+	checkGolden(t, assemble(t), s, rustOrdersShop(), "Staging")
+}
+
 // checkGolden resolves env of s and checks the environment.json it writes
 // against the golden file, which -update rewrites, and that it
 // round-trips.

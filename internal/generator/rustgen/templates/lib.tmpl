@@ -28,6 +28,9 @@ pub mod engine;
 {{if .Behaviors -}}
 pub mod behaviors;
 {{end -}}
+{{if .Queues -}}
+pub mod queues;
+{{end -}}
 {{range .VersionGraphs -}}
 pub mod versiongraph_{{.FileName}};
 {{end}}
@@ -51,6 +54,9 @@ pub use engine::*;
 {{end -}}
 {{if .Behaviors -}}
 pub use behaviors::*;
+{{end -}}
+{{if .WrittenQueues -}}
+pub use queues::*;
 {{end -}}
 {{range .VersionGraphs -}}
 pub use versiongraph_{{.FileName}}::*;

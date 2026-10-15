@@ -11,6 +11,12 @@ Generated TypeScript API server for the `{{ .SchemaName }}` schema. Built on
   class with typed arguments (path params as scalar types, query params
   optional unless required, the input type from the generated types package)
   and the `Implementations` record the router takes.
+{{- if .HasPages }} A
+  `@paginated` operation's method takes `args.page`, the `PageRequest` the
+  router read from the `cursor` and `limit` query parameters, and returns a
+  `Page`, `{items, next}` with `next` null after the last page; the runtime's
+  `pageFromRows`, `encodeCursor` and `decodeCursor` build and read one.
+{{- end }}
 {{- if .WebhookProviders }} Its
   `webhookVerifiers` holds the verifier of each `@hmacVerified` provider
   ({{ range $i, $p := .WebhookProviders }}{{ if $i }}, {{ end }}`{{ $p }}`{{ end }}), Hono middleware that checks a request's signature
@@ -63,7 +69,7 @@ stack's build (or `build --scaffold`) writes once when it is missing. Its
 | Method | Path | Operation | Auth |
 | --- | --- | --- | --- |
 {{- range .Endpoints }}
-| `{{ .Method }}` | `{{ .Path }}` | `{{ .Namespace }}.{{ .Name }}`{{ if .IdentityOperation }} (identity){{ end }}{{ if .ManualRouteRegistration }} (manual){{ end }}{{ if .WebhookProvider }} (signed: {{ .WebhookProvider }}){{ end }} | {{ .AuthSummary }} |
+| `{{ .Method }}` | `{{ .Path }}` | `{{ .Namespace }}.{{ .Name }}`{{ if .IdentityOperation }} (identity){{ end }}{{ if .Page }} (paged){{ end }}{{ if .ManualRouteRegistration }} (manual){{ end }}{{ if .WebhookProvider }} (signed: {{ .WebhookProvider }}){{ end }} | {{ .AuthSummary }} |
 {{- end }}
 
 ## Usage

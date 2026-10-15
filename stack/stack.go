@@ -9,6 +9,7 @@ package stack
 import (
 	"github.com/parable-work/superschematic/internal/registry"
 	"github.com/parable-work/superschematic/internal/stack"
+	"github.com/parable-work/superschematic/internal/stack/generic"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -54,6 +55,23 @@ const (
 	CodeCallCycle         = stack.CodeCallCycle
 	CodeLowering          = stack.CodeLowering
 	CodeGraph             = stack.CodeGraph
+
+	CodeSiteCallsUnexposed     = stack.CodeSiteCallsUnexposed
+	CodeCrossProviderUnexposed = stack.CodeCrossProviderUnexposed
+)
+
+// The generic connector (D63), which the core registers: the connector of
+// an http or a site edge between platforms of two providers that no
+// connector names. GenericKeyPackage is the Pulumi package of an http
+// edge's key node, and GenericKeyProviderVersion the release its type is
+// pinned at, which a distribution that links the pulumi provisioner passes
+// it beside each target's provider version, as cmd/superschematic does.
+const (
+	GenericHTTPConnector      = generic.HTTPConnector
+	GenericSiteConnector      = generic.SiteConnector
+	GenericKeyPackage         = generic.Package
+	GenericKeyProviderVersion = generic.ProviderVersion
+	GenericKeyType            = generic.TypeKeyPair
 )
 
 // OperationsOf reads an API service's operations for Service.Operations;

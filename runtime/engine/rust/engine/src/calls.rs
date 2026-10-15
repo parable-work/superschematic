@@ -46,7 +46,7 @@ use crate::principal::{check_principal, Principal};
 use crate::registry::{DefineOptions, SchemaInput, SchemaTarget, ValidateOptions};
 
 /// The calls [`call`] answers, by name.
-pub const CALLS: [&str; 54] = [
+pub const CALLS: [&str; 55] = [
     "schemas.define",
     "schemas.publish",
     "schemas.live",
@@ -74,6 +74,7 @@ pub const CALLS: [&str; 54] = [
     "namespaces.get",
     "namespaces.list",
     "namespaces.names",
+    "namespaces.resolve",
     "values.get",
     "values.sweep",
     "values.thresholdBytes",
@@ -396,6 +397,12 @@ pub fn call(
         "namespaces.get" => to_json(engine.namespaces().get(who()?, &text(arg(0)))?),
         "namespaces.list" => to_json(engine.namespaces().list(who()?)?),
         "namespaces.names" => to_json(engine.namespaces().names()?),
+        "namespaces.resolve" => {
+            let namespace = args.first().filter(|given| !given.is_null()).map(js_string);
+            Ok(Value::from(
+                engine.namespaces().resolve(namespace.as_deref())?,
+            ))
+        }
         "values.get" => {
             let namespace = text_member(options(1), "namespace");
             to_json(

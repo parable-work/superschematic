@@ -564,8 +564,12 @@ func lowerProcess(ctx registry.PlatformContext) (registry.Lowered, error) {
 // a literal is its value, a secret names the secret the provisioner reads
 // from the environment's secrets file, a parameter references the
 // parameter, and a derived field is one variable per member of its value,
-// as ir.DerivedVariables encodes it (section 3.4). claim refuses a name
-// the platform sets itself.
+// as ir.DerivedVariables encodes it (section 3.4). A secret member, the
+// signed-token key of an http edge, already comes from the target's secret
+// store: its value references the key pair node's privateJwk, which the
+// provisioner reads from the environment's state directory when it starts
+// the process, so no file under the output root holds it (D63). claim
+// refuses a name the platform sets itself.
 func processEnv(d ir.ResolvedDeployable, claim func(string) error) ([]any, error) {
 	var env []any
 	for _, b := range d.Bindings {

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/parable-work/superschematic/registry"
+	"github.com/parable-work/superschematic/stack"
 
 	"github.com/parable-work/superschematic/extensions/cloudflare"
 	"github.com/parable-work/superschematic/extensions/gcp"
@@ -56,6 +57,10 @@ func TestEveryTargetApplies(t *testing.T) {
 	if got := p.ProviderVersions[cloudflare.Package]; got != cloudflare.ProviderVersion {
 		t.Errorf("pulumi pins the %s provider at %q; the Cloudflare DNS platform's schemas are pulumi-cloudflare %s",
 			cloudflare.Package, got, cloudflare.ProviderVersion)
+	}
+	if got := p.ProviderVersions[stack.GenericKeyPackage]; got != stack.GenericKeyProviderVersion {
+		t.Errorf("pulumi pins the %s provider at %q; the generic connector's key node is pulumi-%s %s (D63)",
+			stack.GenericKeyPackage, got, stack.GenericKeyPackage, stack.GenericKeyProviderVersion)
 	}
 }
 

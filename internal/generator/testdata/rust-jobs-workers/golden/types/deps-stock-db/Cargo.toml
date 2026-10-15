@@ -1,0 +1,13 @@
+[package]
+name = "schemas-deps-stock-db-types"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.99.0"
+description = "Generated Rust types for deps-stock-db schema"
+license = "UNLICENSED"
+
+[dependencies]
+serde = { version = "1.0.228", features = ["derive"] }
+superscalar = { path = "../../../../../third_party/superscalar/crates/core" }
+serde_json = { version = "1.0" }
+superschematic-schema-runtime = { path = "../../../../../runtime/schema/rust" }

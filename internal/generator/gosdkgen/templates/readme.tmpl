@@ -13,3 +13,6 @@ Generated Go SDK for the `{{.SchemaName}}` API. Auto-generated from GraphQL sche
 - Encrypted payload helpers for encrypted endpoints
 - Multipart file upload helpers
 - Typed API errors by status code
+{{- if .HasPagedEndpoints}}
+- Paged lists (`@paginated`): a paged method takes a `runtime.PageRequest` and returns one `runtime.Page`, and its `<Method>All` yields every item as an `iter.Seq2`, asking for each page as the loop reaches it
+{{- end}}

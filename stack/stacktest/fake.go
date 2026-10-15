@@ -28,13 +28,23 @@ const (
 	DNSPlatform = "fake.dns"
 	Provisioner = "fake"
 
+	// Provider is the provider each fake platform runs on. A platform of
+	// another provider reaches a fake server, and a fake deployable a
+	// server of another provider, through the core's generic connector
+	// (D63).
+	Provider = "fake"
+
 	// RunPlatform runs Go and TypeScript servers; SQLPlatform runs
 	// Postgres databases.
 	RunPlatform = "fake.run"
 	SQLPlatform = "fake.sql"
 
 	// EdgePlatform runs only TypeScript servers and LitePlatform only
-	// SQLite databases. No connector reaches either.
+	// SQLite databases, as Cloudflare's Workers and D1 do (section 6.8).
+	// No fake connector reaches either; a deployable of another provider
+	// reaches an exposed server on EdgePlatform through the generic
+	// connector, and one on EdgePlatform calls an exposed server of
+	// another provider the same way (D63).
 	EdgePlatform = "fake.edge"
 	LitePlatform = "fake.lite"
 
@@ -67,6 +77,12 @@ const (
 	BucketConnector    = "fake.run-storage"
 	JobBucketConnector = "fake.job-storage"
 
+	// BundlePlatform runs TypeScript servers whose artifact is a bundle,
+	// as a Workers platform runs a Worker's files (D64): a script that reads
+	// each file of the bundle from the program's artifacts, with its hash.
+	// No connector reaches it.
+	BundlePlatform = "fake.bundle"
+
 	// WorkerSQLConnector, WorkerHTTPConnector and WorkerBucketConnector
 	// connect a worker, whose edges are its API's, as a job's connectors
 	// do.
@@ -93,13 +109,19 @@ const (
 	TypeRoute    = "fake:run/route:Route"
 	TypeSecret   = "fake:secrets/secret:Secret"
 	TypeInstance = "fake:sql/instance:Instance"
-	TypeDatabase = "fake:sql/database:Database"
-	TypeRecord   = "fake:dns/record:Record"
-	TypeJob      = "fake:run/job:Job"
-	TypeSchedule = "fake:scheduler/job:Job"
-	TypeSite     = "fake:storage/site:Site"
-	TypeBucket   = "fake:storage/bucket:Bucket"
-	TypePool     = "fake:run/pool:Pool"
+
+	// TypeSecretVersion is a version of a secret that holds a value the
+	// graph references, such as the private key of a generic connector's
+	// key node (D63).
+	TypeSecretVersion = "fake:secrets/version:Version"
+	TypeDatabase      = "fake:sql/database:Database"
+	TypeRecord        = "fake:dns/record:Record"
+	TypeJob           = "fake:run/job:Job"
+	TypeSchedule      = "fake:scheduler/job:Job"
+	TypeSite          = "fake:storage/site:Site"
+	TypeBucket        = "fake:storage/bucket:Bucket"
+	TypePool          = "fake:run/pool:Pool"
+	TypeScript        = "fake:edge/script:Script"
 )
 
 // Extension is the fake extension. Its Provisioner records the calls a
@@ -118,6 +140,8 @@ type Extension struct {
 	CI          *FakeCI
 	Jobs        *FakeJobs
 	Sites       *FakeSites
+	Bundles     *FakeBundles
+	PreDestroy  *FakePreDestroy
 	Tools       []registry.CLITool
 	NoJobRunner bool
 }
@@ -154,11 +178,19 @@ func (e *Extension) Register(r *registry.Registry) error {
 	if e.Sites == nil {
 		e.Sites = &FakeSites{}
 	}
+	if e.Bundles == nil {
+		e.Bundles = &FakeBundles{}
+	}
+	if e.PreDestroy == nil {
+		e.PreDestroy = &FakePreDestroy{}
+	}
 	e.Migrations.log = e.Provisioner
 	e.Bootstrap.log = e.Provisioner
 	e.Builder.log = e.Provisioner
 	e.Jobs.log = e.Provisioner
 	e.Sites.log = e.Provisioner
+	e.Bundles.log = e.Provisioner
+	e.PreDestroy.log = e.Provisioner
 	var jobs registry.JobRunner = e.Jobs
 	if e.NoJobRunner {
 		jobs = nil
@@ -199,6 +231,18 @@ func (e *Extension) Register(r *registry.Registry) error {
 	for _, spec := range []registry.PlatformSpec{
 		server(RunPlatform, registry.APILanguageGo, registry.APILanguageTypeScript),
 		server(EdgePlatform, registry.APILanguageTypeScript),
+		{
+			Name:      BundlePlatform,
+			Extension: Name,
+			Kind:      ir.DeployableServer,
+			Languages: []string{registry.APILanguageTypeScript},
+			Artifact:  ir.ArtifactBundle,
+			NameOf:    serverName,
+			AddressOf: func(ctx registry.PlatformContext) any {
+				return ir.Output{Resource: ctx.Deployable.Name + ".script", Name: "url"}
+			},
+			Lower: lowerBundle,
+		},
 		database(SQLPlatform, registry.SQLDialectPostgres),
 		database(LitePlatform, registry.SQLDialectSQLite),
 		{
@@ -244,6 +288,7 @@ func (e *Extension) Register(r *registry.Registry) error {
 			Lower:     lowerWorker,
 		},
 	} {
+		spec.Provider = Provider
 		if err := r.RegisterPlatform(spec); err != nil {
 			return err
 		}
@@ -305,6 +350,8 @@ func (e *Extension) Register(r *registry.Registry) error {
 		CI:         e.CI,
 		Jobs:       jobs,
 		Sites:      e.Sites,
+		Bundles:    e.Bundles,
+		PreDestroy: e.PreDestroy,
 	})
 }
 
@@ -386,6 +433,9 @@ var resourceTypes = map[string]string{
 	  "additionalProperties": false}`,
 	TypeRoute:  `{"type": "object", "required": ["host", "service"], "properties": {"host": {"type": "string"}, "service": {"type": "string"}}, "additionalProperties": false}`,
 	TypeSecret: `{"type": "object", "required": ["name"], "properties": {"name": {"type": "string"}}, "additionalProperties": false}`,
+	TypeSecretVersion: `{"type": "object", "required": ["secret", "data"],
+	  "properties": {"secret": {"type": "string"}, "data": {"type": "string"}},
+	  "additionalProperties": false}`,
 	TypeInstance: `{"type": "object", "required": ["name", "dialect"],
 	  "properties": {"name": {"type": "string"}, "dialect": {"type": "string"}, "tier": {"type": "string"}, "highAvailability": {"type": "boolean"}},
 	  "additionalProperties": false}`,
@@ -418,6 +468,17 @@ var resourceTypes = map[string]string{
 	  "properties": {
 	    "name": {"type": "string"}, "location": {"type": "string"}, "public": {"type": "boolean"},
 	    "versioning": {"type": "boolean"}, "forceDestroy": {"type": "boolean"}
+	  },
+	  "additionalProperties": false}`,
+	TypeScript: `{"type": "object", "required": ["name", "account", "mainModule", "modules"],
+	  "properties": {
+	    "name": {"type": "string"}, "account": {"type": "string"}, "mainModule": {"type": "string"},
+	    "modules": {"type": "array", "items": {"type": "object", "required": ["name", "contentFile", "contentSha256"],
+	      "properties": {"name": {"type": "string"}, "contentFile": {"type": "string"}, "contentSha256": {"type": "string"}},
+	      "additionalProperties": false}},
+	    "env": {"type": "array", "items": {"type": "object", "required": ["name"],
+	      "properties": {"name": {"type": "string"}, "value": {}, "secret": {"type": "string"}},
+	      "additionalProperties": false}}
 	  },
 	  "additionalProperties": false}`,
 	TypePool: `{"type": "object", "required": ["name", "image", "account", "language", "instances", "concurrency"],
@@ -485,6 +546,33 @@ func lowerServer(ctx registry.PlatformContext) (registry.Lowered, error) {
 	return out, nil
 }
 
+// lowerBundle lowers a server on the bundle platform (D64) to an account
+// and the secrets it reads, as a server's, and a script that runs its
+// bundle: each file BundleFiles names, read from the program's artifacts
+// under the bundle's digest with its SHA-256, which the deploy pins, and
+// the server's environment.
+func lowerBundle(ctx registry.PlatformContext) (registry.Lowered, error) {
+	d := ctx.Deployable
+	out, member, env, err := lowerAccount(ctx)
+	if err != nil {
+		return registry.Lowered{}, err
+	}
+	var modules []any
+	for _, file := range BundleFiles {
+		modules = append(modules, map[string]any{
+			"name":          file,
+			"contentFile":   ir.BundlePath(d.Name, file),
+			"contentSha256": ir.BundleFileToken(file),
+		})
+	}
+	script := map[string]any{"name": d.ResourceName, "account": member, "mainModule": BundleFiles[0], "modules": modules}
+	if len(env) > 0 {
+		script["env"] = env
+	}
+	out.Resources = append(out.Resources, &ir.Resource{ID: d.Name + ".script", Type: TypeScript, Properties: script})
+	return out, nil
+}
+
 // lowerAccount lowers what a server and a job share: the deployable's
 // account, and a secret and an accessor grant per secret binding. It
 // returns them with the account's member and the deployable's environment,
@@ -512,7 +600,25 @@ func lowerAccount(ctx registry.PlatformContext) (registry.Lowered, ir.Output, []
 				return registry.Lowered{}, member, nil, fmt.Errorf("binding %s: %w", b.Field, err)
 			}
 			for _, v := range vars {
-				env = append(env, map[string]any{"name": v.Name, "value": v.Value})
+				if !v.Secret {
+					env = append(env, map[string]any{"name": v.Name, "value": v.Value})
+					continue
+				}
+				// A secret member, such as the generic connector's
+				// signing key (D63): a secret of the deployable's own
+				// whose version holds the value, which the variable
+				// reads, as a real platform's secret store does.
+				secret, version := d.Name+".secret."+v.Name, d.Name+".secret-version."+v.Name
+				out.Resources = append(out.Resources,
+					&ir.Resource{ID: secret, Type: TypeSecret, Properties: map[string]any{"name": Join(d.ResourceName, "-", v.Name)}, Phase: ir.PhaseInfrastructure},
+					&ir.Resource{ID: version, Type: TypeSecretVersion, Phase: ir.PhaseInfrastructure, Properties: map[string]any{
+						"secret": ir.Output{Resource: secret, Name: "id"}, "data": v.Value,
+					}},
+					&ir.Resource{ID: d.Name + ".reads." + v.Name, Type: TypeGrant, Phase: ir.PhaseInfrastructure, Properties: map[string]any{
+						"role": "secret.accessor", "member": member, "resource": ir.Output{Resource: secret, Name: "id"},
+					}},
+				)
+				env = append(env, map[string]any{"name": v.Name, "secret": ir.Output{Resource: version, Name: "id"}})
 			}
 			continue
 		case ir.BindingLiteral:

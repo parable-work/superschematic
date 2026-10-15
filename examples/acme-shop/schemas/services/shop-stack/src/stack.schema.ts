@@ -22,9 +22,15 @@ export abstract class Shop {}
 // each server as a process, and derives every connection string, URL and
 // port. shop-orders' worker FulfilOrders runs as a process too, and
 // fulfils each order as it is placed; its job ShipOrders runs every minute
-// here, so an order placed while developing ships within one.
+// here, so an order placed while developing ships within one. shop-stock's
+// worker ReorderStock, a Rust process, files a restock request for each
+// product an order runs low, and its job OrderRestocks runs only when
+// `superschematic stack run` asks, so each request stays open until then.
 @environment({
   target: "local",
-  settings: [{ of: ShopOrders, job: "ShipOrders", schedule: "* * * * *" }]
+  settings: [
+    { of: ShopOrders, job: "ShipOrders", schedule: "* * * * *" },
+    { of: ShopStock, job: "OrderRestocks", enabled: false }
+  ]
 })
 export abstract class Dev {}

@@ -72,6 +72,16 @@ type KindSpec struct {
 	Verify func(schema *ir.Schema, r VerifyReporter)
 }
 
+// MayReference reports whether a schema of this kind may reference the
+// types of a service of kind: by AllowedReferences when the kind has that
+// allowlist, else unless DeniedReferences names it.
+func (k KindSpec) MayReference(kind string) bool {
+	if k.AllowedReferences != nil {
+		return k.AllowedReferences[kind]
+	}
+	return !k.DeniedReferences[kind]
+}
+
 // VerifyReporter receives the findings of a KindSpec.Verify or
 // CheckSpec.Verify run. file is the schema source path the finding points
 // at, or "" for a schema-level finding.
@@ -193,6 +203,12 @@ type DecoratorSpec struct {
 	// a type argument in an extension slot.
 	typeArgs int
 
+	// optionalArg lets the decorator be written without its argument when
+	// it has Args: @paginated() as well as @paginated({ maxLimit: 50 }).
+	// Apply then receives no argument. Only core decorators set it: the
+	// data forms write core decorators as typed IR fields.
+	optionalArg bool
+
 	compiledArgs *validator.Schema
 }
 
@@ -228,13 +244,17 @@ func (s DecoratorSpec) KindError(kind string) string {
 
 // ValidateArgs checks the decorator's argument against Args. It is a no-op
 // for decorators registered without Args. With Args set the decorator takes
-// exactly one argument and it must satisfy the schema; the error names the
-// decorator so the TS and data forms report the same text.
+// exactly one argument, or none when the argument is optional, and it must
+// satisfy the schema; the error names the decorator so the TS and data
+// forms report the same text.
 func (s DecoratorSpec) ValidateArgs(args []any) error {
-	if s.compiledArgs == nil {
+	if s.compiledArgs == nil || (s.optionalArg && len(args) == 0) {
 		return nil
 	}
 	if len(args) != 1 {
+		if s.optionalArg {
+			return fmt.Errorf("@%s takes at most one argument", s.Name)
+		}
 		return fmt.Errorf("@%s takes exactly one argument", s.Name)
 	}
 	raw, err := json.Marshal(args[0])

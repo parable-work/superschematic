@@ -20,7 +20,7 @@
 //! field's JSON key, for a stylesheet or a test, and no style of its own.
 
 use crate::choices::Choices;
-use crate::records::{AccountViewRecord, BillingAddressRecord, BookingInputRecord, BookingViewRecord, GuestRecord, NoteInputRecord, RoomRequestRecord, SignupInputRecord};
+use crate::records::{AccountKeyRecord, AccountViewRecord, BillingAddressRecord, BookingInputRecord, BookingViewRecord, GuestRecord, NoteInputRecord, RoomRequestRecord, SignupInputRecord};
 use topcoat::view::{View, component, view};
 
 /// Text as a component shows it: the label the app's choices give it at
@@ -193,6 +193,48 @@ pub fn plan_label(value: &str) -> &str {
         "pro" => "Pro",
         other => other,
     }
+}
+
+/// `AccountKeyRecord` as a description list: each field's label and value.
+/// `choices` labels the values they name.
+#[component]
+pub async fn account_key_detail(record: AccountKeyRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
+    let _ = record;
+    let _ = choices;
+    Ok(view! {
+        <div class="ss-detail" data-type="AccountKey" role="group">
+            <dl>
+            </dl>
+        </div>
+    })
+}
+
+/// `AccountKeyRecord`s as a table: a column per field and a row per record.
+/// `choices` labels the values they name. `hrefs` links each row to a
+/// page: the i-th, unless it is empty, row i's first cell; a row past
+/// its end links nowhere.
+#[component]
+pub async fn account_key_table(
+    rows: Vec<AccountKeyRecord>,
+    #[default] choices: Choices,
+    #[default] hrefs: Vec<String>,
+) -> topcoat::Result<impl View> {
+    let _ = choices;
+    let _ = hrefs;
+    Ok(view! {
+        <table class="ss-table" data-type="AccountKey">
+            <thead>
+                <tr>
+                </tr>
+            </thead>
+            <tbody>
+                for _row in rows {
+                    <tr>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    })
 }
 
 /// `AccountViewRecord` as a description list: each field's label and value.

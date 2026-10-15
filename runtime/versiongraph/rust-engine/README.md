@@ -201,6 +201,14 @@ let storage = adapter.bind(HostClient::new(&mut host));
 let main = engine.run_on(&storage, |e| e.create_primary(actor, root, "main"))?;
 ```
 
+A layout's options are fixed when it is built, so a host that keeps one
+layout across its calls gives it a clock (`Options::clock`) and an id
+source (`Options::ids`, each new id's 128 bits) that read the call it is
+running, as D58's Branches does: its ids come from the engine's own
+source, so a replay of a recording whose engine was seeded draws the
+graph's ids in the order the TypeScript adapter drew them, and the content
+hashes over generated keys match.
+
 ## Test
 
 ```

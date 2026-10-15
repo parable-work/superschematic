@@ -19,12 +19,14 @@
 #   1. build-all builds every service with the binary that links no
 #      extension, dependencies first, and the stack, shop-stack, last of
 #      the services it deploys, which writes the entrypoint of each server
-#      and of shop-orders' job and worker, and brings the Cargo workspace's
-#      lockfile up to date, which fails the check when that changes it;
+#      and of shop-orders' and shop-stock's jobs and workers, and brings the
+#      Cargo workspace's lockfile up to date, which fails the check when
+#      that changes it;
 #   2. every generated Go module builds and vets, the entrypoints of
 #      shop-stack's Go servers, job and worker included, and shop-stack's
-#      Rust server, shop-stock, checks with its implementation in
-#      rust-impl/shop-stock, frozen to the committed lockfile;
+#      Rust server, shop-stock, and its Rust job and worker check with its
+#      implementation in rust-impl/shop-stock, frozen to the committed
+#      lockfile;
 #   3. the generated TypeScript router and SDKs, the entrypoint of
 #      shop-stack's TypeScript server, the storefront's implementation in
 #      typescript/shop-storefront, the clients in typescript/clients and
@@ -34,6 +36,8 @@
 #      packages no longer match it; the generated Python
 #      packages import and python/'s type tests pass; the Rust client in
 #      rust/ builds against the generated Rust SDK and its type tests pass;
+#      the Rust server in rust-server/ builds, and its lists page and its
+#      reviews search alike in memory and over SQLite;
 #   4. the Go app in go/ builds, vets and passes its tests, which call the
 #      generated Go server through the generated Go SDK, then run the
 #      TypeScript, Python and Rust clients against the same server and
@@ -48,7 +52,8 @@
 #      Postgres, fake-gcs-server with shop-api's bucket shop-media, both Go
 #      servers, shop-stock's Rust server, which cargo builds, and the
 #      storefront's TypeScript server on Bun, each on its generated
-#      entrypoint, shop-orders' worker and the site shop-web, and the test
+#      entrypoint, shop-orders' worker, shop-stock's Rust worker and the
+#      site shop-web, and the test
 #      calls each Go and Rust API through its Go SDK and the storefront over
 #      HTTP, uploads a product's image to shop-media through the URL
 #      shop-api signs and reads it back (D54), sets a product's stock and
@@ -58,7 +63,11 @@
 #      the site and its config, and checks shop-api's CORS for the site's
 #      origin (milestones 1 and 7 of docs/stack-model.md), then sees
 #      shop-orders' job ship an order with `superschematic stack run` and
-#      on the every-minute schedule stack dev runs (D52);
+#      on the every-minute schedule stack dev runs (D52); and sees the
+#      order that ran a product below its threshold enqueue StockLow,
+#      shop-stock's Rust worker file the product's restock request, and its
+#      Rust job, run with `stack run`, order it, then runs stack dev and the
+#      job once more into an output root of the test's own (D65);
 #   4a. the Topcoat app in topcoat/ passes its tests: a shopper signs in
 #      with their password, and its pages call shop-orders in-process
 #      through the crate the Topcoat extension writes into
@@ -215,12 +224,14 @@ for entrypoint in shop-api shop-orders shop-orders-ship-orders shop-orders-fulfi
   (cd "$DIST/server/shop-stack/$entrypoint" && GOFLAGS=-mod=mod go build ./... && GOFLAGS=-mod=mod go vet ./...)
 done
 
-echo "==> the Rust server's crate checks, frozen to the committed lockfile"
-# shop-stock's server, the one member of schemas/dist's Cargo workspace,
-# with the generated API crate and the implementation in rust-impl/shop-stock
-# it depends on by path, as stack dev, the image and the generated CI build
-# it (D57).
-echo "    server/shop-stack/shop-stock"
+echo "==> the Rust server's, job's and worker's crates check, frozen to the committed lockfile"
+# shop-stock's server, job and worker, the members of schemas/dist's Cargo
+# workspace, with the generated API crate and the mirror of the
+# implementation in rust-impl/shop-stock they depend on by path, as stack
+# dev, the images and the generated CI build them (D57, D65).
+for crate in shop-stock shop-stock-order-restocks shop-stock-reorder-stock; do
+  echo "    server/shop-stack/$crate"
+done
 (cd "$DIST" && CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$DIST/target}" cargo check --locked --workspace -q)
 
 echo "==> TypeScript: the generated packages, the storefront's entrypoint and implementation, and the clients type-check"
@@ -276,6 +287,9 @@ rm -rf "$SCHEMAS/dist-rust"
   superschematic build --with-deps --api-language RUST --out schemas/dist-rust schemas/services/shop-orders >/dev/null)
 (cd "$EXAMPLE_DIR/rust-server" && cargo build --locked -q)
 RUST_SERVER="${CARGO_TARGET_DIR:-$EXAMPLE_DIR/rust-server/target}/debug/acme-shop-orders-server"
+# Its lists page, and its reviews search, alike in memory and over a
+# SQLite database of shop-db's tables (D60, D62).
+(cd "$EXAMPLE_DIR/rust-server" && cargo test --locked -q --features sqlite)
 
 echo "==> Topcoat: the app's pages call shop-orders in-process"
 # The same build with the extension linked: superschematic.toml's
@@ -297,11 +311,15 @@ test -f "$SCHEMAS/dist-rust/topcoat/shop-orders/src/operations.rs"
 
 echo "==> the Go app: build, vet, test; every SDK calls the Go server and the Rust server; stack dev runs the shop"
 (cd "$EXAMPLE_DIR/go" && GOFLAGS=-mod=mod go mod tidy >/dev/null && go build ./... && go vet ./...)
+# TestStackDevRunsTheShop runs stack dev twice, the second time into an
+# output root of its own, whose generated crates cargo compiles again, so
+# on a runner whose caches are cold the tests take more than go test's
+# default ten minutes.
 (cd "$EXAMPLE_DIR/go" &&
   ACME_SHOP_CLIENTS=1 ACME_SHOP_PYTHON="$PYTHON" ACME_SHOP_PYTHONPATH="$ACME_PYTHONPATH" \
     ACME_SHOP_RUST_CLIENT="$RUST_CLIENT" ACME_SHOP_RUST_SERVER="$RUST_SERVER" \
     ACME_SHOP_SUPERSCHEMATIC="$OUT/superschematic" SUPERSCHEMATIC_MIGRATE="$OUT/superschematic-migrate" \
-    go test -count=1 -v ./... >"$OUT/go-test.log" 2>&1) || { cat "$OUT/go-test.log"; exit 1; }
+    go test -count=1 -timeout 30m -v ./... >"$OUT/go-test.log" 2>&1) || { cat "$OUT/go-test.log"; exit 1; }
 grep -E '^(--- |ok)' "$OUT/go-test.log"
 for server in Go Rust; do
   for language in typescript python rust; do

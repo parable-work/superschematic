@@ -148,44 +148,27 @@ func TokenFile(path string, opts ...Option) TokenSource {
 }
 
 // SignedToken is the generic connector's and the local target's source: a
-// compact JWS signed with an edge's Ed25519 private key, privateJWK
-// ({"kty":"OKP","crv":"Ed25519","d":...,"x":...,"kid":...}). The header is
+// compact JWS signed with an edge's Ed25519 private key. privateKey is the
+// key as the caller's config holds it: a private JWK's JSON
+// ({"kty":"OKP","crv":"Ed25519","d":...,"x":...,"kid":...}), as the local
+// target's key pair gives it, or its PKCS#8 PEM (`-----BEGIN PRIVATE
+// KEY-----`, RFC 8410), as the generic connector's key node gives it, whose
+// kid is the key's RFC 7638 thumbprint (D63). The header is
 // {"alg":"EdDSA","kid":<kid>,"typ":"JWT"} and the claims
 // {"iss","sub","aud","iat","exp","jti"} in that order, exp 300 seconds
 // after iat and jti 16 random bytes, base64url. A new token is signed when
 // the one held has under 60 seconds left. It reads WithClock and
 // WithRandom.
-func SignedToken(privateJWK []byte, issuer, subject, audience string, opts ...Option) (TokenSource, error) {
-	var j JWK
-	if err := json.Unmarshal(privateJWK, &j); err != nil {
-		return nil, fmt.Errorf("serviceauth: signing key: %w", err)
-	}
-	if j.Kty != "OKP" || j.Crv != "Ed25519" {
-		return nil, fmt.Errorf("serviceauth: signing key is %s %s, not OKP Ed25519", j.Kty, j.Crv)
-	}
-	if j.Kid == "" {
-		return nil, errors.New("serviceauth: signing key has no kid")
-	}
-	seed, err := jwkBytes("d", j.D)
+func SignedToken(privateKey []byte, issuer, subject, audience string, opts ...Option) (TokenSource, error) {
+	key, kid, err := signingKey(privateKey)
 	if err != nil {
-		return nil, fmt.Errorf("serviceauth: signing key: %w", err)
-	}
-	if len(seed) != ed25519.SeedSize {
-		return nil, errors.New("serviceauth: signing key d is not 32 bytes")
-	}
-	key := ed25519.NewKeyFromSeed(seed)
-	x, err := jwkBytes("x", j.X)
-	if err != nil {
-		return nil, fmt.Errorf("serviceauth: signing key: %w", err)
-	}
-	if !bytes.Equal(x, key.Public().(ed25519.PublicKey)) {
-		return nil, errors.New("serviceauth: signing key x is not the public key of d")
+		return nil, err
 	}
 	header, err := compactJSON(struct {
 		Alg string `json:"alg"`
 		Kid string `json:"kid"`
 		Typ string `json:"typ"`
-	}{AlgEdDSA, j.Kid, "JWT"})
+	}{AlgEdDSA, kid, "JWT"})
 	if err != nil {
 		return nil, err
 	}
@@ -229,6 +212,45 @@ func SignedToken(privateJWK []byte, issuer, subject, audience string, opts ...Op
 		expiry = now + signedTokenLifetime
 		return token, nil
 	}, nil
+}
+
+// signingKey reads a signed-token source's key, a private JWK's JSON or a
+// PKCS#8 PEM, and returns it with its kid: the JWK's own, or the PEM's
+// thumbprint.
+func signingKey(privateKey []byte) (ed25519.PrivateKey, string, error) {
+	if IsPEM(privateKey) {
+		key, public, err := privateKeyFromPEM(privateKey)
+		if err != nil {
+			return nil, "", fmt.Errorf("serviceauth: signing key: %w", err)
+		}
+		return key, public.Kid, nil
+	}
+	var j JWK
+	if err := json.Unmarshal(privateKey, &j); err != nil {
+		return nil, "", fmt.Errorf("serviceauth: signing key: %w", err)
+	}
+	if j.Kty != "OKP" || j.Crv != "Ed25519" {
+		return nil, "", fmt.Errorf("serviceauth: signing key is %s %s, not OKP Ed25519", j.Kty, j.Crv)
+	}
+	if j.Kid == "" {
+		return nil, "", errors.New("serviceauth: signing key has no kid")
+	}
+	seed, err := jwkBytes("d", j.D)
+	if err != nil {
+		return nil, "", fmt.Errorf("serviceauth: signing key: %w", err)
+	}
+	if len(seed) != ed25519.SeedSize {
+		return nil, "", errors.New("serviceauth: signing key d is not 32 bytes")
+	}
+	key := ed25519.NewKeyFromSeed(seed)
+	x, err := jwkBytes("x", j.X)
+	if err != nil {
+		return nil, "", fmt.Errorf("serviceauth: signing key: %w", err)
+	}
+	if !bytes.Equal(x, key.Public().(ed25519.PublicKey)) {
+		return nil, "", errors.New("serviceauth: signing key x is not the public key of d")
+	}
+	return key, j.Kid, nil
 }
 
 // compactJSON marshals v without escaping <, > and &, as JSON.stringify and

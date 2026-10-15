@@ -37,11 +37,12 @@ type (
 	PendingNote = stackdeploy.PendingNote
 
 	// Manifest is a run's deploy manifest, with each database's
-	// AppliedSchema and any PendingMigration; Status is where its last
-	// deploy got to.
+	// AppliedSchema and any PendingMigration, and each Bundle (D64);
+	// Status is where its last deploy got to.
 	Manifest         = stackdeploy.Manifest
 	AppliedSchema    = stackdeploy.AppliedSchema
 	PendingMigration = stackdeploy.PendingMigration
+	Bundle           = stackdeploy.Bundle
 	Status           = stackdeploy.Status
 
 	// DatabasePlan is one DB service's migration plan, with its Hazards;
@@ -158,6 +159,18 @@ func ParseImages(values []string) (map[string]string, error) { return stackdeplo
 // internal/stackdeploy.PinImages.
 func PinImages(env *ir.ResolvedEnvironment, images map[string]string) (*ir.ResolvedEnvironment, error) {
 	return stackdeploy.PinImages(env, images)
+}
+
+// ParseBundles reads `--bundle <deployable>=sha256:<digest>` values; see
+// internal/stackdeploy.ParseBundles.
+func ParseBundles(values []string) (map[string]string, error) {
+	return stackdeploy.ParseBundles(values)
+}
+
+// PinBundles pins each bundle's digest and its files' hashes in its
+// deployable's nodes (D64); see internal/stackdeploy.PinBundles.
+func PinBundles(env *ir.ResolvedEnvironment, bundles map[string]Bundle) (*ir.ResolvedEnvironment, error) {
+	return stackdeploy.PinBundles(env, bundles)
 }
 
 // UnmarshalManifest decodes a deploy manifest; see

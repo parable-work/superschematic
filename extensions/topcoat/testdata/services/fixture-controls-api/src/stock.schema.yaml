@@ -1,7 +1,12 @@
 # A shop's stock: a webhook a payment provider signs, whose input a form
 # would hold, a run only a service may start, a release a user or a service
 # may make, and an order whose route limits its rate, its body and its
-# time.
+# time. The orders' list, filtered by a status, limits its rate, and an
+# order's hold, an action of its page, its rate, its body and its time, so
+# the pages that call them meet their routes' controls. The warehouses'
+# list limits its rate and its time, and the shipments' list, which has no
+# control, names each shipment's warehouse through it, so the shipments'
+# page meets the warehouses' controls.
 name: fixture-controls-api
 kind: API
 types:
@@ -36,6 +41,33 @@ types:
       - name: held
         typeRef: { name: boolean }
         required: true
+  Warehouse:
+    name: Warehouse
+    role: APIView
+    display:
+      noun: Warehouse
+      plural: Warehouses
+      titleField: name
+    fields:
+      - name: id
+        typeRef: { name: string }
+        required: true
+      - name: name
+        typeRef: { name: string }
+        required: true
+  Shipment:
+    name: Shipment
+    role: APIView
+    fields:
+      - name: id
+        typeRef: { name: string }
+        required: true
+      # The warehouse it leaves from, named by the warehouse's name.
+      - name: warehouseId
+        title: Warehouse
+        typeRef: { name: string }
+        required: true
+        references: { type: Warehouse }
   OrderView:
     name: OrderView
     role: APIView
@@ -44,6 +76,29 @@ types:
         typeRef: { name: string }
         required: true
 operationSets:
+  - name: OrderQueries
+    operations:
+      # The orders, of one status when the query names one: two a minute.
+      - name: listOrders
+        typeRef: { name: OrderView, isArray: true }
+        required: true
+        httpMethod: GET
+        restPath: orders
+        middleware: { rateLimit: 2 }
+        arguments:
+          - name: status
+            typeRef: { name: string }
+            isQuery: true
+      # One order.
+      - name: getOrder
+        typeRef: { name: OrderView }
+        required: true
+        httpMethod: GET
+        restPath: "orders/{id}"
+        arguments:
+          - name: id
+            typeRef: { name: string }
+            required: true
   - name: HookMutations
     operations:
       # A payment provider's event, signed with the provider's key.
@@ -58,6 +113,21 @@ operationSets:
           - name: input
             typeRef: { name: PaymentEvent }
             required: true
+  - name: StockQueries
+    operations:
+      # The warehouses: two a minute and a second.
+      - name: listWarehouses
+        typeRef: { name: Warehouse, isArray: true }
+        required: true
+        httpMethod: GET
+        restPath: warehouses
+        middleware: { rateLimit: 2, timeout: 1 }
+      # The shipments, with no control of their own.
+      - name: listShipments
+        typeRef: { name: Shipment, isArray: true }
+        required: true
+        httpMethod: GET
+        restPath: shipments
   - name: StockMutations
     operations:
       # Reindexes the stock, for a service that calls this API.
@@ -81,6 +151,21 @@ operationSets:
             required: true
   - name: OrderMutations
     operations:
+      # Holds an order, recording why: two a minute, a megabyte, a second.
+      - name: holdOrder
+        typeRef: { name: OrderView }
+        required: true
+        httpMethod: POST
+        restPath: "orders/{id}/hold"
+        middleware: { rateLimit: 2, bodyLimit: 1, timeout: 1 }
+        arguments:
+          - name: id
+            typeRef: { name: string }
+            required: true
+          - name: reason
+            typeRef: { name: string }
+            required: true
+            validateMaxLength: 400
       # Places an order: two a minute, three megabytes, a second.
       - name: placeOrder
         typeRef: { name: OrderView }

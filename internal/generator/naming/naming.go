@@ -419,6 +419,11 @@ type PathsConfig struct {
 	VersionGraphTypeScript string `toml:"versiongraph_typescript"`
 	// VersionGraphRust holds the version graph's Rust engine crate.
 	VersionGraphRust string `toml:"versiongraph_rust"`
+	// EngineRust holds the behavior engine's Rust crate,
+	// superschematic-engine (D58), which a Rust server links, with its
+	// postgres and axum features, to mount the engine's routes. No
+	// generated manifest names it yet.
+	EngineRust string `toml:"engine_rust"`
 	// VersionGraphPython holds the version graph's Python package.
 	VersionGraphPython string `toml:"versiongraph_python"`
 	// HTTPRuntimeGo holds the http runtime Go module.
@@ -453,6 +458,7 @@ type LocalPaths struct {
 	VersionGraphGo         string
 	VersionGraphTypeScript string
 	VersionGraphRust       string
+	EngineRust             string
 	VersionGraphPython     string
 	HTTPRuntimeGo          string
 	HTTPRuntimeRust        string
@@ -479,6 +485,7 @@ func (n Naming) LocalPaths(repoRoot string) LocalPaths {
 		VersionGraphGo:         resolve(n.Paths.VersionGraphGo),
 		VersionGraphTypeScript: resolve(n.Paths.VersionGraphTypeScript),
 		VersionGraphRust:       resolve(n.Paths.VersionGraphRust),
+		EngineRust:             resolve(n.Paths.EngineRust),
 		VersionGraphPython:     resolve(n.Paths.VersionGraphPython),
 		HTTPRuntimeGo:          resolve(n.Paths.HTTPRuntimeGo),
 		HTTPRuntimeRust:        resolve(n.Paths.HTTPRuntimeRust),
@@ -511,6 +518,7 @@ func (p PathsConfig) checkRelative() error {
 		{"versiongraph_go", p.VersionGraphGo},
 		{"versiongraph_typescript", p.VersionGraphTypeScript},
 		{"versiongraph_rust", p.VersionGraphRust},
+		{"engine_rust", p.EngineRust},
 		{"versiongraph_python", p.VersionGraphPython},
 		{"http_runtime_go", p.HTTPRuntimeGo},
 		{"http_runtime_rust", p.HTTPRuntimeRust},
@@ -966,6 +974,21 @@ func (n Naming) RustImplementationCrate(schemaName string) string {
 func (n Naming) RustServerCrate(stack, server string) string {
 	npm := n.NpmServerPackage(stack, server)
 	return n.RustCratePrefix + strings.TrimPrefix(npm, n.NpmScope+"/")
+}
+
+// RustJobCrate returns the crate name of the entrypoint of a Rust job of a
+// stack (D65): the stack's name and the job's deployable, as
+// RustServerCrate spells them, with a suffix of its own, so a job and a
+// server of one name in one stack are two packages of the workspace. The
+// crate's binary is the job's name.
+func (n Naming) RustJobCrate(stack, job string) string {
+	return strings.TrimSuffix(n.RustServerCrate(stack, job), "-server") + "-job"
+}
+
+// RustWorkerCrate returns the crate name of the entrypoint of a Rust worker
+// of a stack (D65), as RustJobCrate names a job's, with the suffix -worker.
+func (n Naming) RustWorkerCrate(stack, worker string) string {
+	return strings.TrimSuffix(n.RustServerCrate(stack, worker), "-server") + "-worker"
 }
 
 // ScalarRustCrateIdent is the scalar crate as Rust source spells it: the

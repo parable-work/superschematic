@@ -44,6 +44,18 @@ pub async fn account_draft_note(cx: &Cx, args: crate::api::AccountDraftNoteArgs)
         .await
 }
 
+/// account.rotateKey (`POST /api/accounts/{id}/key`): Issue an account a new key.
+pub async fn account_rotate_key(cx: &Cx, args: crate::api::AccountRotateKeyArgs) -> Result<types::AccountKey, ApiError> {
+    let caller = can_account_rotate_key(cx).await?;
+    args.check()?;
+    let setup: &Setup = app_context(cx);
+    setup
+        .implementations
+        .account
+        .rotate_key(operations::ACCOUNT_ROTATE_KEY.context(caller), args)
+        .await
+}
+
 /// account.annotate (`POST /api/accounts/{id}/notes`): Note something about an account.
 pub async fn account_annotate(cx: &Cx, args: crate::api::AccountAnnotateArgs) -> Result<types::AccountView, ApiError> {
     let caller = can_account_annotate(cx).await?;
@@ -78,6 +90,13 @@ pub async fn can_account_sign_up(cx: &Cx) -> Result<Option<Principal>, ApiError>
 /// Admits the caller of account.draftNote as its route does: it needs none, so
 /// `Ok(None)`.
 pub async fn can_account_draft_note(cx: &Cx) -> Result<Option<Principal>, ApiError> {
+    let _ = cx;
+    Ok(None)
+}
+
+/// Admits the caller of account.rotateKey as its route does: it needs none, so
+/// `Ok(None)`.
+pub async fn can_account_rotate_key(cx: &Cx) -> Result<Option<Principal>, ApiError> {
     let _ = cx;
     Ok(None)
 }

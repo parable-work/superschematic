@@ -83,6 +83,13 @@ type Manifest struct {
 	// finish keeps the digest the previous deploy recorded, and a deploy
 	// given an earlier digest with --site serves those files again.
 	Sites map[string]string `json:"sites,omitempty"`
+
+	// Bundles holds the bundle each server, job or worker whose platform
+	// builds one runs, by deployable: the digest of its files and each
+	// file's hash, which a deploy pinned (D64). One whose rollout wave did
+	// not finish keeps the bundle the previous deploy recorded, and a
+	// deploy given an earlier digest with --bundle runs those files again.
+	Bundles map[string]*Bundle `json:"bundles,omitempty"`
 }
 
 // AppliedSchema is the schema one DB service's database holds, as the
@@ -213,6 +220,14 @@ func (m *Manifest) setSite(site, digest string) {
 	m.Sites[site] = digest
 }
 
+// setBundle records the bundle a deployable runs.
+func (m *Manifest) setBundle(deployable string, b Bundle) {
+	if m.Bundles == nil {
+		m.Bundles = map[string]*Bundle{}
+	}
+	m.Bundles[deployable] = &Bundle{Digest: b.Digest, Files: maps.Clone(b.Files)}
+}
+
 // readManifest returns the run's manifest, or nil when the run was never
 // deployed. It refuses a manifest of another run.
 func readManifest(ctx context.Context, store registry.StateStore, run registry.Run) (*Manifest, error) {
@@ -234,8 +249,10 @@ func readManifest(ctx context.Context, store registry.StateStore, run registry.R
 }
 
 // nextManifest starts the manifest of a deploy from the previous one: the
-// images and the databases' schemas carry forward until a step changes
-// them. Only the deployables env still has are carried.
+// images, bundles, sites and the databases' schemas carry forward until a
+// step changes them. Only the deployables env still has are carried, and a
+// server's, a job's or a worker's artifact only when it is still of its
+// kind.
 func nextManifest(prev *Manifest, run registry.Run, digests map[string]string) *Manifest {
 	env := run.Environment
 	m := &Manifest{
@@ -254,7 +271,10 @@ func nextManifest(prev *Manifest, run registry.Run, digests map[string]string) *
 	for _, d := range env.Deployables {
 		switch d.Kind {
 		case ir.DeployableServer, ir.DeployableJob, ir.DeployableWorker:
-			if image, ok := prev.Images[d.Name]; ok {
+			if b := prev.Bundles[d.Name]; d.HasBundle() && b != nil {
+				m.setBundle(d.Name, *b)
+			}
+			if image, ok := prev.Images[d.Name]; ok && d.HasImage() {
 				m.setImage(d.Name, image, prev.Contexts[d.Name])
 			}
 		case ir.DeployableDatabase:

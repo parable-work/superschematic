@@ -20,6 +20,9 @@ import type {
   HttpRequestOptions,
   ForwardedUser,
   RequestOptions,
+{{- if .HasPagedEndpoints}}
+  Page,
+{{- end}}
 } from './types';
 
 export interface EncryptedPayloadEnvelope {
@@ -44,6 +47,36 @@ export function toRequestOptions(value: AbortSignal | RequestOptions | null | un
   return { signal: value.signal, forward: value.forward };
 }
 
+{{ if .HasPagedEndpoints -}}
+/**
+ * Yields the items of every page of a paged operation in turn (D60).
+ * fetchPage asks for one page: first with cursor, then with the next of the
+ * page before. It asks for a page only when the loop has taken every item
+ * of the one before, and stops after the page whose next is null. An error
+ * ends the iteration: the one a page failed with, or, for a page whose next
+ * is the cursor it was asked with, one naming the operation rather than a
+ * loop.
+ */
+export async function* pageItems<T>(
+  operation: string,
+  cursor: string | null | undefined,
+  fetchPage: (cursor: string | undefined) => Promise<Page<T>>
+): AsyncGenerator<T, void, undefined> {
+  let current = cursor ?? undefined;
+  for (;;) {
+    const page = await fetchPage(current);
+    yield* page.items;
+    if (page.next === null || page.next === undefined) {
+      return;
+    }
+    if (page.next === current) {
+      throw new Error(`${operation} returned the cursor it was sent`);
+    }
+    current = page.next;
+  }
+}
+
+{{ end -}}
 function isAbortSignal(value: unknown): value is AbortSignal {
   if (typeof AbortSignal !== 'undefined' && value instanceof AbortSignal) {
     return true;

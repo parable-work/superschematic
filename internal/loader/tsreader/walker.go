@@ -1118,6 +1118,10 @@ func (w *walker) fieldFromProperty(member *astNode) (*ir.FieldDef, *SchemaError)
 	if info.relation {
 		fd.Relation = &ir.RelationDef{Type: info.ref.Name, OnDelete: info.relationOnDelete}
 	}
+	if info.search {
+		return nil, errorAtNode(prop.Type, "SearchQuery marks an operation's argument; a field is no search")
+	}
+	fd.References = info.references
 	applyValidateConfig(info.validate, fd)
 
 	for _, d := range w.decoratorsOf(member) {
@@ -1288,12 +1292,17 @@ func (w *walker) walkTypeAlias(node *astNode) {
 			continue
 		}
 		w.recordReference(info)
+		if info.search {
+			w.addErr(errorAtNode(sig.Type, "SearchQuery marks an operation's argument; a field is no search"))
+			continue
+		}
 		optional := sig.PostfixToken != nil && sig.PostfixToken.Kind == kindQuestionToken
 		td.Fields = append(td.Fields, &ir.FieldDef{
-			Name:     m.Name().Text(),
-			Comment:  leadingComment(m),
-			TypeRef:  info.ref,
-			Required: !info.nullable && !optional,
+			Name:       m.Name().Text(),
+			Comment:    leadingComment(m),
+			TypeRef:    info.ref,
+			Required:   !info.nullable && !optional,
+			References: info.references,
 		})
 	}
 	if _, exists := w.schema.Types[name]; exists {
@@ -1398,12 +1407,17 @@ func (w *walker) operationFromMethod(m *astNode) (*ir.FieldDef, []decoratorRef, 
 	}
 	w.recordReference(info)
 
+	if info.search {
+		return nil, nil, errorAtNode(method.Type, "SearchQuery marks an operation's argument, not its result")
+	}
+	// A reference on the result is the loader's refusal, in every form.
 	op := &ir.FieldDef{
-		Name:      m.Name().Text(),
-		Comment:   leadingComment(m),
-		TypeRef:   info.ref,
-		Required:  !info.nullable,
-		Encrypted: info.encrypted,
+		Name:       m.Name().Text(),
+		Comment:    leadingComment(m),
+		TypeRef:    info.ref,
+		Required:   !info.nullable,
+		Encrypted:  info.encrypted,
+		References: info.references,
 	}
 
 	decorators := w.decoratorsOf(m)
@@ -1455,12 +1469,14 @@ func (w *walker) argumentFromParameter(p *astNode) (*ir.ArgumentDef, *SchemaErro
 	w.recordReference(info)
 
 	arg := &ir.ArgumentDef{
-		Name:      strings.TrimPrefix(p.Name().Text(), "_"),
-		TypeRef:   info.ref,
-		Required:  !info.nullable && param.QuestionToken == nil,
-		Default:   info.defaultValue,
-		IsQuery:   info.queryParam,
-		Encrypted: info.encrypted,
+		Name:       strings.TrimPrefix(p.Name().Text(), "_"),
+		TypeRef:    info.ref,
+		Required:   !info.nullable && param.QuestionToken == nil,
+		Default:    info.defaultValue,
+		IsQuery:    info.queryParam,
+		Encrypted:  info.encrypted,
+		References: info.references,
+		Search:     info.search,
 	}
 	if info.validate != nil {
 		fd := &ir.FieldDef{}

@@ -16,6 +16,7 @@ dependencies = [
 name = "acme-shop-orders-api"
 version = "0.1.0"
 dependencies = [
+ "acme-shop-db-types",
  "acme-shop-orders-types",
  "acme-shop-stock-sdk",
  "async-trait",
@@ -88,6 +89,7 @@ dependencies = [
 name = "acme-shop-stock-types"
 version = "0.1.0"
 dependencies = [
+ "acme-shop-db-types",
  "serde",
  "serde_json",
  "superscalar",
@@ -100,6 +102,7 @@ version = "0.0.0"
 dependencies = [
  "acme-shop-orders-server",
  "acme-shop-orders-topcoat",
+ "form_urlencoded",
  "http",
  "rusqlite",
  "serde",
@@ -2493,6 +2496,7 @@ dependencies = [
  "async-trait",
  "axum",
  "base64 0.22.1",
+ "bytes",
  "deadpool-postgres",
  "http",
  "http-body-util",
@@ -2506,6 +2510,7 @@ dependencies = [
  "superschematic-schema-runtime",
  "tokio",
  "tokio-postgres",
+ "tokio-util",
  "tower-layer",
  "tower-service",
  "tracing",
@@ -2726,6 +2731,7 @@ dependencies = [
  "bytes",
  "futures-core",
  "futures-sink",
+ "futures-util",
  "libc",
  "pin-project-lite",
  "tokio",

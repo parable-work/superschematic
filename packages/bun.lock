@@ -31,6 +31,10 @@
     "stack": {
       "name": "@superschematic/stack",
       "version": "0.0.0",
+      "peerDependencies": {
+        "@superschematic/schema": "*",
+        "@superschematic/schema-config": "*",
+      },
     },
   },
   "packages": {

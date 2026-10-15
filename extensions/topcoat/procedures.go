@@ -23,30 +23,42 @@ type procedure struct {
 	ArgsName   string
 	ArgsRecord string
 	Args       []procedureArg
+	// Paged marks a @paginated operation (D60): its arguments record takes
+	// the page asked for, `cursor` and `limit`, and its result is its page
+	// record.
+	Paged bool
 	// Output is the result's record type, "()" without a result, and
 	// ReadOutput the expression that reads it from the result's JSON
 	// (`json`).
 	Output     string
 	ReadOutput string
-	// RateLimit, BodyLimit and Timeout are the route's @rateLimit requests
-	// per minute, @bodyLimit megabytes and @timeout seconds, 0 without the
-	// directive. The procedure meets them as the route does
-	// (ProcedureControls).
+	// The route's traffic controls, which the procedure meets as the route
+	// does (ProcedureControls).
+	routeControls
+}
+
+// routeControls are an operation's route's @rateLimit requests per minute,
+// @bodyLimit megabytes and @timeout seconds, 0 without the directive.
+type routeControls struct {
 	RateLimit int
 	BodyLimit int
 	Timeout   int
 }
 
-// HasControls reports whether the procedure's route has a traffic
-// control, so a ProcedureControls layer goes on its path.
-func (p procedure) HasControls() bool {
+func controlsOf(e registry.RustEndpoint) routeControls {
+	return routeControls{RateLimit: e.RateLimit, BodyLimit: e.BodyLimit, Timeout: e.Timeout}
+}
+
+// HasControls reports whether the route has a traffic control, so a layer
+// applies it to a procedure or a page that calls the operation.
+func (p routeControls) HasControls() bool {
 	return p.RateLimit > 0 || p.BodyLimit > 0 || p.Timeout > 0
 }
 
-// ControlCalls are the ProcedureControls builder calls of the procedure,
-// in the order a request meets them on the route: the rate limit, the
-// body limit, then the timeout.
-func (p procedure) ControlCalls() []string {
+// ControlCalls are the builder calls of the route's controls, in the
+// order a request meets them on the route: the rate limit, the body limit,
+// then the timeout.
+func (p routeControls) ControlCalls() []string {
 	var calls []string
 	if p.RateLimit > 0 {
 		calls = append(calls, fmt.Sprintf(".rate_limit(%d)", p.RateLimit))
@@ -89,14 +101,12 @@ func proceduresOf(records *recordBuilder, ops []declared, service string) ([]pro
 	for _, d := range ops {
 		endpoint, op := d.endpoint, d.op
 		p := procedure{
-			Namespace: endpoint.Namespace,
-			Name:      endpoint.Name,
-			Route:     "/_superschematic/" + service + "/" + kebabCase(endpoint.Namespace) + "/" + kebabCase(endpoint.Name),
-			SnakeName: endpoint.SnakeName(),
-			Output:    "()",
-			RateLimit: endpoint.RateLimit,
-			BodyLimit: endpoint.BodyLimit,
-			Timeout:   endpoint.Timeout,
+			Namespace:     endpoint.Namespace,
+			Name:          endpoint.Name,
+			Route:         "/_superschematic/" + service + "/" + kebabCase(endpoint.Namespace) + "/" + kebabCase(endpoint.Name),
+			SnakeName:     endpoint.SnakeName(),
+			Output:        "()",
+			routeControls: controlsOf(endpoint),
 		}
 		var err error
 		if endpoint.HasArgs() {
@@ -105,7 +115,15 @@ func proceduresOf(records *recordBuilder, ops []declared, service string) ([]pro
 				return nil, fmt.Errorf("topcoat: procedure of %s.%s: %w", endpoint.Namespace, endpoint.Name, err)
 			}
 		}
-		if endpoint.OutputRustType != "()" {
+		switch {
+		case endpoint.Page != nil:
+			page, err := records.pageOf(d)
+			if err != nil {
+				return nil, fmt.Errorf("topcoat: procedure of %s.%s: %w", endpoint.Namespace, endpoint.Name, err)
+			}
+			p.Paged = true
+			p.Output, p.ReadOutput = page.Name, page.Name+"::from_wire(&json)"
+		case endpoint.OutputRustType != "()":
 			s, err := records.fieldShape(op.TypeRef, false)
 			if err != nil {
 				return nil, fmt.Errorf("topcoat: procedure of %s.%s: %w", endpoint.Namespace, endpoint.Name, err)

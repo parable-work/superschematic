@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "schemaVersion": "1.0",
+  "generatedAt": "2026-01-02T03:04:05Z",
+  "apiId": "fixture-paged-api",
+  "sdkClassName": "FixturePagedApiSDK",
+  "tools": [
+    {
+      "toolName": "catalog.placeBasket",
+      "apiId": "fixture-paged-api",
+      "namespace": "catalog",
+      "methodName": "placeBasket",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "lines",
+          "required": true,
+          "kind": "input",
+          "target": "input.lines"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "input",
+          "target": "input",
+          "sources": ["lines"]
+        }
+      ]
+    },
+    {
+      "toolName": "catalog.listItems",
+      "apiId": "fixture-paged-api",
+      "namespace": "catalog",
+      "methodName": "listItems",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "ids",
+          "required": false,
+          "kind": "query",
+          "target": "query.ids"
+        },
+        {
+          "toolParameter": "inStock",
+          "required": false,
+          "kind": "query",
+          "target": "query.inStock"
+        },
+        {
+          "toolParameter": "cursor",
+          "required": false,
+          "kind": "query",
+          "target": "query.cursor"
+        },
+        {
+          "toolParameter": "limit",
+          "required": false,
+          "kind": "query",
+          "target": "query.limit"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "query",
+          "target": "query",
+          "sources": ["ids", "inStock", "cursor", "limit"]
+        }
+      ]
+    },
+    {
+      "toolName": "catalog.getItem",
+      "apiId": "fixture-paged-api",
+      "namespace": "catalog",
+      "methodName": "getItem",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "itemId",
+          "required": true,
+          "kind": "path",
+          "target": "path.itemId"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["itemId"]
+        }
+      ]
+    },
+    {
+      "toolName": "catalog.listTags",
+      "apiId": "fixture-paged-api",
+      "namespace": "catalog",
+      "methodName": "listTags",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "cursor",
+          "required": false,
+          "kind": "query",
+          "target": "query.cursor"
+        },
+        {
+          "toolParameter": "limit",
+          "required": false,
+          "kind": "query",
+          "target": "query.limit"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "query",
+          "target": "query",
+          "sources": ["cursor", "limit"]
+        }
+      ]
+    }
+  ]
+}

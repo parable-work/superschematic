@@ -9,10 +9,13 @@ import (
 )
 
 // PagesConfig is outputs.topcoat.pages: whether the crate has a page per
-// resource its operations describe, and the path they are served under.
+// resource its operations describe, the path they are served under, and
+// whether a list's filter updates its table in place, through a shard, for
+// an app that loads Topcoat's runtime (Live).
 type PagesConfig struct {
 	Enabled bool   `json:"enabled"`
 	Prefix  string `json:"prefix,omitempty"`
+	Live    bool   `json:"live,omitempty"`
 }
 
 // DefaultPagesPrefix is where the pages are served when the config names
@@ -68,8 +71,69 @@ type pagesModel struct {
 	Tree string
 	// LeftOut are the operations without a page, and why.
 	LeftOut []leftOut
-	uses    map[string]bool
-	imports map[string]map[string]bool
+	// Controls are the route controls of each operation a page calls
+	// whose route has one: the operation it is for, and the options
+	// operations its references call (D61); Controlled each page that
+	// meets one, by its method and path, with their places in Controls.
+	Controls   []routeControls
+	Controlled []controlledPage
+	uses       map[string]bool
+	imports    map[string]map[string]bool
+}
+
+// controlledPage is a page whose request meets route controls: its
+// method, its path as it is registered, the place in pagesModel.Controls
+// of its operation's controls, -1 when its route has none, and those of
+// the other operations it calls whose routes have one.
+type controlledPage struct {
+	Method string
+	Path   string
+	Own    int
+	Called []int
+}
+
+// OwnExpr is the Rust Option of the place of the page's operation's
+// controls.
+func (p controlledPage) OwnExpr() string {
+	if p.Own < 0 {
+		return "None"
+	}
+	return fmt.Sprintf("Some(%d)", p.Own)
+}
+
+// CalledExpr is the Rust slice of the places of the controls of the other
+// operations it calls.
+func (p controlledPage) CalledExpr() string {
+	places := make([]string, len(p.Called))
+	for i, at := range p.Called {
+		places[i] = fmt.Sprintf("%d", at)
+	}
+	return "&[" + strings.Join(places, ", ") + "]"
+}
+
+// Live reports whether a list updates in place through a shard.
+func (m *pagesModel) Live() bool {
+	for _, r := range m.Resources {
+		if r.Live {
+			return true
+		}
+	}
+	return false
+}
+
+// ControlsUse reports whether the route of an operation a page calls has
+// the control ("rate_limit", "body_limit" or "timeout"), so pages.rs
+// declares what applies it.
+func (m *pagesModel) ControlsUse(control string) bool {
+	for _, c := range m.Controls {
+		switch {
+		case control == "rate_limit" && c.RateLimit > 0,
+			control == "body_limit" && c.BodyLimit > 0,
+			control == "timeout" && c.Timeout > 0:
+			return true
+		}
+	}
+	return false
 }
 
 // Uses reports whether pages.rs needs a helper (or an import) named item.
@@ -105,9 +169,21 @@ type routeParam struct {
 type pageResource struct {
 	node  *resourceNode
 	Ident string // projects_tasks
+	// Name is the resource's path below the prefix, by which the app's
+	// Settings scope choices to its pages: projects/{project_id}/tasks.
+	Name string
 	// Path is the list's route, ItemPath an item's.
 	Path     string
 	ItemPath string
+	// Live reports whether the list renders through a shard at LivePath,
+	// which its filter renders again in place when the app loads
+	// Topcoat's runtime.
+	Live     bool
+	LivePath string
+	// LiveSubmit is the script the filter's submit runs: it sends the
+	// form's query to the shard, through the hidden input whose input
+	// event sets the shard's signal, and puts it in the address bar.
+	LiveSubmit string
 	// ColParams are the route parameters of the collection, its
 	// ancestors' items'; ItemParams those and Item, an item's.
 	ColParams  []string
@@ -138,6 +214,14 @@ type pageResource struct {
 	RowRecord string
 	RowTable  string
 	LinkExpr  string
+	// RowLabels and DetailLabels are the references' functions that name
+	// what the rows' and the item's records refer to (D61), empty when
+	// they refer to nothing.
+	RowLabels    string
+	DetailLabels string
+	// BaseExpr is the list's path, which a paged list's links carry its
+	// query after (D60).
+	BaseExpr string
 	// DetailRecord and DetailView render an item; HeadingExpr is its
 	// heading, from `record`, and TitleExpr its title for the trail, an
 	// Option<String> from `item`, the detail's result, empty when its type
@@ -158,7 +242,14 @@ type pageResource struct {
 
 // NeedsHref reports whether pages.rs writes <ident>_href.
 func (r *pageResource) NeedsHref() bool {
-	return r.Detail != nil || r.Create != nil || r.Delete != nil || r.IsSection
+	return r.Detail != nil || r.Create != nil || r.Delete != nil || r.IsSection || r.List != nil && r.List.Paged
+}
+
+// Filters reports whether the list's page renders a filter form: its
+// argument form shows a control. A paged list without a filter has an
+// argument form for its page alone, and renders none.
+func (r *pageResource) Filters() bool {
+	return r.List != nil && r.List.ArgForm != nil && r.List.ArgForm.Shown()
 }
 
 // Linked reports whether the list's rows link to their items' pages.
@@ -205,6 +296,24 @@ type pageOp struct {
 	Label     string
 	Field     string
 	PrefillFn string
+	// Paged marks a @paginated list (D60): its call returns a page, whose
+	// items, Items, are the rows.
+	Paged bool
+	Items string
+	// ChoicesFn is the references' function that gives the form the page
+	// renders its options (D61), empty when it refers to nothing.
+	ChoicesFn string
+}
+
+// ChoicesExpr is the Rust of the choices the operation's form takes on
+// the pages of resource: the app's, and each reference's options under
+// them.
+func (o *pageOp) ChoicesExpr(resource string) string {
+	app := "choices_of(cx, " + rustString(resource) + ")"
+	if o.ChoicesFn == "" {
+		return app
+	}
+	return "references::" + o.ChoicesFn + "(cx, " + app + ").await"
 }
 
 // routeField is a path argument of an operation: the page route's
@@ -302,7 +411,7 @@ type prefill struct {
 // pagesOf builds the pages of the resources the operations of inProcess
 // describe, under cfg's prefix, from the crate's records, views and forms.
 // It logs each operation left out, and is nil when no resource has a page.
-func pagesOf(c *crate, schemas schemaSet, inProcess []declared, prefix, title string, logf func(format string, args ...any)) (*pagesModel, error) {
+func pagesOf(c *crate, schemas schemaSet, inProcess []declared, prefix, title string, live bool, logf func(format string, args ...any)) (*pagesModel, error) {
 	forms := pageForms{args: map[string]*argForm{}, inputs: map[string]*form{}}
 	for i := range c.ArgForms {
 		forms.args[c.ArgForms[i].ArgsName] = &c.ArgForms[i]
@@ -323,14 +432,28 @@ func pagesOf(c *crate, schemas schemaSet, inProcess []declared, prefix, title st
 	}
 	b := &pageBuilder{
 		m:        m,
+		refs:     c.References,
 		schemas:  schemas,
 		forms:    forms,
 		records:  map[string]record{},
 		views:    map[string]view{},
 		params:   map[string]bool{},
-		idents:   map[string]bool{},
+		idents:   map[string]bool{pagerIdent: true},
 		prefills: map[string]*prefill{},
+		live:     live,
+		routes:   map[string]bool{},
+		logf:     logf,
 	}
+	var taken func(nodes []*resourceNode)
+	taken = func(nodes []*resourceNode) {
+		for _, node := range nodes {
+			for _, r := range node.routes() {
+				b.routes[r.route] = true
+			}
+			taken(node.children)
+		}
+	}
+	taken(roots)
 	for _, rec := range c.Records {
 		b.records[rec.TypeName] = rec
 	}
@@ -360,13 +483,113 @@ func pagesOf(c *crate, schemas schemaSet, inProcess []declared, prefix, title st
 		m.Prefills = append(m.Prefills, b.prefills[name])
 	}
 	m.Tree = b.tree(roots, 0)
+	b.controls()
 	b.finish()
 	return m, nil
 }
 
+// controls records, for each page whose request meets a traffic control,
+// the page's method and path, the controls of the operation it is for and
+// those of the other operations it calls. The operation a page is for: a
+// list's page, and its shard, the list's; an item's page, and the edit and
+// delete pages, which show the item, the detail's; a post the operation it
+// submits; the new page and the index none. A form or a record of the page
+// that holds a reference calls its options operation (D61), listing or
+// looking up its target, so the page meets that operation's controls too:
+// the new page its form's, a list's page its filter's and its rows', an
+// item's page its detail's, its actions' forms' and its sections' rows',
+// the edit page its form's, the delete page its form's and the item's, and
+// a post those of the page it renders again. Not the lists the sections of
+// an item's page call, which keep to their own pages.
+func (b *pageBuilder) controls() {
+	m := b.m
+	at := map[string]int{}
+	place := func(snake string, controls routeControls) int {
+		if !controls.HasControls() {
+			return -1
+		}
+		i, ok := at[snake]
+		if !ok {
+			i = len(m.Controls)
+			at[snake] = i
+			m.Controls = append(m.Controls, controls)
+		}
+		return i
+	}
+	// add records a page, o the operation it is for, or nil, and refs the
+	// choices and labels functions it calls.
+	add := func(method, path string, o *pageOp, refs ...string) {
+		page := controlledPage{Method: method, Path: path, Own: -1}
+		if o != nil {
+			page.Own = place(o.Snake, controlsOf(o.c.d.endpoint))
+		}
+		seen := map[int]bool{page.Own: true}
+		for _, fn := range refs {
+			for _, options := range b.refs.OptionsCalledBy(fn) {
+				if i := place(options.Snake, options.controls); i >= 0 && !seen[i] {
+					seen[i] = true
+					page.Called = append(page.Called, i)
+				}
+			}
+		}
+		if page.Own >= 0 || len(page.Called) > 0 {
+			m.Controlled = append(m.Controlled, page)
+		}
+	}
+	choices := func(o *pageOp) string {
+		if o == nil {
+			return ""
+		}
+		return o.ChoicesFn
+	}
+	for _, r := range m.Resources {
+		list := []string{choices(r.List), r.RowLabels}
+		item := []string{r.DetailLabels}
+		for _, o := range r.Actions {
+			item = append(item, o.ChoicesFn)
+		}
+		for _, s := range r.Sections {
+			item = append(item, s.RowLabels)
+		}
+		if r.List != nil {
+			add("GET", r.Path, r.List, list...)
+			if r.Live {
+				add("POST", r.LivePath, r.List, list...)
+			}
+		}
+		if r.Detail != nil {
+			add("GET", r.ItemPath, r.Detail, item...)
+		}
+		if r.Create != nil {
+			add("GET", r.Path+"/new", nil, r.Create.ChoicesFn)
+			add("POST", r.Path+"/new", r.Create, r.Create.ChoicesFn)
+		}
+		if r.Update != nil {
+			add("GET", r.ItemPath+"/edit", r.Detail, r.Update.ChoicesFn)
+			add("POST", r.ItemPath+"/edit", r.Update, r.Update.ChoicesFn)
+		}
+		if r.Delete != nil {
+			add("GET", r.ItemPath+"/delete", r.Detail, r.DetailLabels, r.Delete.ChoicesFn)
+			add("POST", r.ItemPath+"/delete", r.Delete, r.DetailLabels, r.Delete.ChoicesFn)
+		}
+		for _, o := range r.Actions {
+			add("POST", r.ItemPath+"/"+o.Verb, o, item...)
+		}
+	}
+	if len(m.Controlled) > 0 {
+		m.use("controls")
+	}
+}
+
+// pagerIdent is the ident no resource takes: its <ident>_href would be
+// pager_href, the pager's own helper, beside pager and pager_query. A
+// collection at pager is pager_2, as a second one of an ident is.
+const pagerIdent = "pager"
+
 // pageBuilder builds each resource's pages.
 type pageBuilder struct {
 	m        *pagesModel
+	refs     *referencesModel
 	schemas  schemaSet
 	forms    pageForms
 	records  map[string]record
@@ -374,6 +597,12 @@ type pageBuilder struct {
 	params   map[string]bool
 	idents   map[string]bool
 	prefills map[string]*prefill
+	// live reports whether a list with a filter renders through a shard;
+	// routes are the routes the pages serve, "GET projects/{}", which a
+	// shard's path must not be.
+	live   bool
+	routes map[string]bool
+	logf   func(format string, args ...any)
 }
 
 // resource adds the pages of node, then of the collections under its
@@ -405,6 +634,7 @@ func (b *pageBuilder) resource(node *resourceNode, parent *pageResource) error {
 		r = &pageResource{
 			node:       node,
 			Ident:      ident,
+			Name:       strings.TrimPrefix(path, b.m.Prefix+"/"),
 			Path:       path,
 			ItemPath:   path + "/{" + node.param + "}",
 			ColParams:  colParams,
@@ -426,6 +656,7 @@ func (b *pageBuilder) resource(node *resourceNode, parent *pageResource) error {
 		if err := b.fill(r); err != nil {
 			return err
 		}
+		b.liveList(r)
 		// A route holds the collection's parameters, and an item's page,
 		// which only a detail gives, its own.
 		for _, param := range r.ColParams {
@@ -447,6 +678,50 @@ func (b *pageBuilder) resource(node *resourceNode, parent *pageResource) error {
 	return nil
 }
 
+// stepTitle is a collection's title from its path: the words after the
+// collection whose path it extends (`Drafts` for `documents/drafts`), else
+// its last word, as the path gives them.
+func stepTitle(node *resourceNode) string {
+	if len(node.extends) > 0 {
+		return humanize(strings.Join(node.words[len(node.extends):], " "))
+	}
+	return humanize(node.words[len(node.words)-1])
+}
+
+// liveSegment is the segment under the prefix of the shards' paths:
+// <prefix>/_live/<resource>.
+const liveSegment = "_live"
+
+// liveList makes a list with a filter render through a shard, when the
+// pages' lists are live: the shard's path, under the prefix, is its own,
+// unless a page serves it, which leaves the list as it is, with the reason
+// in the build log.
+func (b *pageBuilder) liveList(r *pageResource) {
+	if !b.live || r.List == nil || r.List.ArgForm == nil {
+		return
+	}
+	route := "POST " + liveSegment + "/" + r.Ident
+	if b.routes[route] {
+		b.logf("  - topcoat: %s's list is not live: its shard's path, %s/%s/%s, is a page's\n", r.node.key, b.m.Prefix, liveSegment, r.Ident)
+		return
+	}
+	b.routes[route] = true
+	r.Live, r.LivePath = true, b.m.Prefix+"/"+liveSegment+"/"+r.Ident
+	r.LiveSubmit = liveSubmit(r.Ident)
+}
+
+// liveSubmit is the script a live list's filter runs on submit, after
+// Topcoat's handler stops the browser's own: the form's query, as the
+// browser would send it, written to the form's hidden input, whose input
+// event sets the shard's signal, which renders the list again, and put in
+// the address bar, so a reload or a link keeps the filter.
+func liveSubmit(ident string) string {
+	return `(() => { const form = document.querySelector('form[data-ss-live="` + ident + `"]'); ` +
+		`const query = new URLSearchParams(new FormData(form)).toString(); ` +
+		`history.replaceState(history.state, '', query === '' ? location.pathname : '?' + query); ` +
+		`const sent = form.querySelector('input[data-ss-query]'); sent.value = query; sent.dispatchEvent(new Event('input')); })()`
+}
+
 // collectionWords are the words of each collection on the path to node.
 func collectionWords(node *resourceNode) []string {
 	var words []string
@@ -466,8 +741,17 @@ func (b *pageBuilder) fill(r *pageResource) error {
 	if node.list != nil {
 		rowType = node.list.d.op.TypeRef.Name
 	}
-	last := node.words[len(node.words)-1]
-	r.Plural, r.Noun = humanize(last), humanize(singular(last))
+	// An item is named by its type's @display noun, else by the type's
+	// name in words, as a display component names an untitled row; the
+	// collection by the type's plural, else by its path's last word as
+	// the path gives it. Neither guesses a word's singular, which English
+	// rules get wrong (shelves is no shelve). A collection whose path
+	// extends another's is titled by its own words.
+	typeName := itemType
+	if typeName == "" {
+		typeName = rowType
+	}
+	r.Plural, r.Noun = stepTitle(node), humanize(typeName)
 	createLabel := ""
 	for _, name := range []string{rowType, itemType} {
 		if name == "" {
@@ -477,7 +761,7 @@ func (b *pageBuilder) fill(r *pageResource) error {
 		if display.Noun != "" {
 			r.Noun = display.Noun
 		}
-		if display.Plural != "" {
+		if display.Plural != "" && len(node.extends) == 0 {
 			r.Plural = display.Plural
 		}
 		if display.CreateLabel != "" {
@@ -538,6 +822,10 @@ func (b *pageBuilder) fill(r *pageResource) error {
 		if r.Detail != nil && rowType == itemType {
 			r.LinkExpr = b.linkExpr(r, rec)
 		}
+		r.RowLabels = b.refs.RecordLabels(rec.Name)
+		if r.List.Paged {
+			r.BaseExpr = r.Ident + "_href(" + pass(r.ColParams, "&") + ").unwrap_or_default()"
+		}
 	}
 	if r.Detail != nil {
 		rec, ok := b.records[itemType]
@@ -546,6 +834,7 @@ func (b *pageBuilder) fill(r *pageResource) error {
 			return fmt.Errorf("topcoat: pages: the detail of %s returns %s, which has no record or no detail", r.Words, itemType)
 		}
 		r.DetailRecord, r.DetailView = rec.Name, v.Detail
+		r.DetailLabels = b.refs.RecordLabels(rec.Name)
 		b.m.importName("records", rec.Name)
 		b.m.importName("views", v.Detail)
 		r.HeadingExpr = rustString(r.Noun) + ".to_owned()"
@@ -613,11 +902,22 @@ func (b *pageBuilder) linkExpr(r *pageResource, rec record) string {
 }
 
 // idField is the record field the detail's path parameter names, by its
-// JSON name, when it holds a text or a whole number; else nil.
+// JSON name, when it holds a text or a whole number; else nil. A parameter
+// whose argument refers to the detail's own result type (RefersTo, D61)
+// names the reference's value field, `id` unsaid: `products/{productId}`
+// and `id`.
 func idField(detail *classified, rec record) *recordField {
-	last := detail.segs[len(detail.segs)-1]
+	name := detail.segs[len(detail.segs)-1].param
+	for _, arg := range detail.d.op.Arguments {
+		if arg.Name == name && arg.References != nil && arg.References.Type == detail.d.op.TypeRef.Name {
+			name = arg.References.Value
+			if name == "" {
+				name = ir.DefaultReferenceValue
+			}
+		}
+	}
 	for i, field := range rec.Fields {
-		if field.JSONName != last.param {
+		if field.JSONName != name {
 			continue
 		}
 		switch field.Type {
@@ -660,7 +960,12 @@ func (b *pageBuilder) op(c *classified, r *pageResource) (*pageOp, error) {
 		Snake:    info.SnakeName,
 		ArgsName: info.ArgsName,
 		Output:   info.Output,
+		Items:    info.Output,
 		Verb:     c.verb,
+		Paged:    e.Page != nil,
+	}
+	if o.Paged {
+		o.Items = "Vec<" + e.Page.ItemRustType + ">"
 	}
 	if strings.Contains(o.Output, "types::") {
 		b.m.use("types")
@@ -726,9 +1031,11 @@ func (b *pageBuilder) op(c *classified, r *pageResource) (*pageOp, error) {
 		o.PrefillFn = b.prefill(input.Struct, r.node.detail.d.op.TypeRef.Name)
 	}
 	// A page renders the form of every operation it submits; an item's
-	// page only submits its detail's, through call_<op>, and renders none.
-	if o.FormName() != "" && c.kind != pageDetail {
+	// page only submits its detail's, through call_<op>, and renders none,
+	// and a paged list without a filter renders none for its page.
+	if o.FormName() != "" && c.kind != pageDetail && (o.ArgForm == nil || o.ArgForm.Shown() || c.kind != pageList) {
 		b.m.importName("forms", o.FormComponent())
+		o.ChoicesFn = b.refs.FormChoices(o.FormName())
 	}
 	b.m.Ops = append(b.m.Ops, o)
 	return o, nil
@@ -855,7 +1162,9 @@ func (b *pageBuilder) tree(nodes []*resourceNode, level int) string {
 		for i, word := range node.words {
 			words[i] = rustString(word)
 		}
-		plural, noun := humanize(node.words[len(node.words)-1]), humanize(singular(node.words[len(node.words)-1]))
+		// A collection without pages names an item by its id alone: it has
+		// no type to name it by.
+		plural, noun := stepTitle(node), ""
 		list, detail, edit, del := false, false, false, false
 		create := "None"
 		var actions []string
@@ -909,8 +1218,14 @@ func (b *pageBuilder) finish() {
 	m := b.m
 	m.importName("forms", "Refusal")
 	for _, o := range m.Ops {
+		if o.ChoicesFn != "" {
+			m.use("references")
+		}
 		if !o.Call {
 			continue
+		}
+		if o.Paged {
+			m.use("runtime")
 		}
 		if o.Memoized {
 			m.use("memoize")
@@ -927,7 +1242,19 @@ func (b *pageBuilder) finish() {
 			m.use("seg")
 		}
 		if r.List != nil && r.List.ArgForm != nil {
-			m.use("form", "alone", "pageRefusal")
+			m.use("form", "pageRefusal")
+			if r.Filters() {
+				m.use("alone")
+			}
+		}
+		if r.RowLabels != "" || r.DetailLabels != "" {
+			m.use("references")
+		}
+		if r.List != nil && r.List.Paged {
+			m.use("pageQuery")
+			if !r.Live || r.IsSection {
+				m.use("pager")
+			}
 		}
 		posts := append([]*pageOp{r.Create, r.Update, r.Delete}, r.Actions...)
 		for _, o := range posts {

@@ -111,7 +111,7 @@ impl Error for PostgresError {}
 
 /// An error and its causes, each after a colon, leaving out a cause whose
 /// text the message already ends with.
-fn chain(err: &(dyn Error + 'static)) -> String {
+pub(crate) fn chain(err: &(dyn Error + 'static)) -> String {
     let mut out = err.to_string();
     let mut source = err.source();
     while let Some(cause) = source {

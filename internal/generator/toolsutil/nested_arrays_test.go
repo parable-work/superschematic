@@ -93,6 +93,7 @@ func buildToolSchemas(t *testing.T, output *apigen.APIOutput) []toolSchema {
 				return tsutil.ToCamelCase(name)
 			},
 			output.ToolKeys,
+			endpoint.Page,
 		)
 		encoded, err := json.Marshal(parameters)
 		if err != nil {

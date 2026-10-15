@@ -107,7 +107,7 @@ function {{ .Constructor }}(endpoint: Service): {{ .Module }}.{{ .Class }} {
 {{- define "ts-background-connections" }}
 {{- range .APIs }}
 {{- if .Config }}
-  const {{ .Config }} = configure({{ tsQuote .Service }}, () => {{ .Module }}.loadEnvConfig());
+  const {{ .Config }} = configure({{ tsQuote .Service }}, () => {{ .Module }}.{{ .ConfigLoader }}());
 {{- end }}
 {{- end }}
 {{- if .Databases }}

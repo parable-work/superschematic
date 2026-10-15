@@ -44,6 +44,10 @@
 
 mod access;
 pub mod api;
+// The engine's routes as an axum router, which a Rust server mounts (the
+// axum feature, D58).
+#[cfg(feature = "axum")]
+pub mod axum;
 pub mod behaviors;
 pub mod calls;
 mod engine;
@@ -53,11 +57,13 @@ mod indexes;
 pub mod instances;
 pub mod json;
 mod namespaces;
+mod options;
 mod paging;
 mod principal;
 mod registry;
 mod retention;
 mod runner;
+pub mod search;
 pub mod tools;
 mod values;
 
@@ -72,11 +78,11 @@ pub use behaviors::{
 };
 pub use engine::{
     seeded_uuid, Clock, Engine, EngineClock, EngineOptions, IdCounter, IdQueue, Ids, MetaSchema,
-    Storage, SCENARIO_SEED,
+    Storage, UuidSource, SCENARIO_SEED,
 };
 pub use errors::{
     BehaviorError, EngineError, EngineErrorCode, EngineErrorKind, Error, Result, SchemaChange,
-    SchemaIssue, ValidationIssue, Veto,
+    SchemaIssue, Thrown, ValidationIssue, Veto,
 };
 pub use events::{
     cursor_refusal, EngineEvent, EventCause, EventPage, Events, EventsAfter, ReadEvents,

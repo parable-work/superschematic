@@ -20,6 +20,15 @@ This crate provides:
 - `ParamSpec`: how the generated router decodes one path, query or body
   argument, as the TypeScript runtime's `params.ts` does, refusing a value
   with a 400 whose `details` name it
+- `page`: the page of a `@paginated` operation (D60). `PageSpec::query`
+  reads `cursor` and `limit` from the query with a parameter's 400s,
+  `PageSpec::request` and `PageSpec::check` hold a request an in-process
+  caller built to the route's spec, `Cursor::encode` and `Cursor::decode`
+  write and read a position as the unpadded base64url of its JSON, the
+  encoder's error a 500 for a key no router reads back, and
+  `Page::from_rows` keeps `limit` of the `limit + 1` rows an
+  implementation read and sets `next`, or returns that error. `tests/page_parity.rs` runs
+  `runtime/http/testdata/page_parity.json`
 - `input`, `required_input` and `input_refusal`: an operation's input
   parsed by its type's generated `parse_<type>`, with undeclared keys
   refused and field errors in the problem's `errors`; `body_fields` and
@@ -48,12 +57,13 @@ Signatures are checked with `ring`. The optional `http-client` feature adds
 `JwtServiceAuthenticator` and HTTP client of `GoogleIdTokenSource`. Without
 it, a service passes its own `KeyFetcher` or `HttpGetter`.
 
-## Running in a stack (D57)
+## Running in a stack (D57, D65)
 
-A generated Rust server in a stack reads its configuration from the
-environment, opens its databases, calls other APIs with a service
-credential and logs JSON lines, through these pieces, the twins of the Go
-and TypeScript runtimes' (D51):
+A generated Rust server, job or worker in a stack reads its configuration
+from the environment, opens its databases, calls other APIs with a service
+credential, enqueues and claims queue messages, stops on a signal and logs
+JSON lines, through these pieces, the twins of the Go and TypeScript
+runtimes' (D51):
 
 - `stackconfig`, with no feature: the readers of the fields an API's edges
   derive (section 3.4 of `docs/stack-model.md`), each from one variable per
@@ -73,7 +83,11 @@ and TypeScript runtimes' (D51):
   credential into the `TokenSource` it names: `GoogleIdTokenSource` for
   `google-id-token` (with the `http-client` feature), `TokenFileSource`
   for `token-file`, and `SignedKeySource` for `signed-token`, signing as
-  the issuer for the audience. A generated SDK's `ServiceTokenSource` is
+  the issuer for the audience with a private JWK or, from the generic
+  connector, an Ed25519 private key's PKCS#8 PEM (`SignedKeySource::from_pem`,
+  its `kid` the key's thumbprint, D63). A callers field's key may be the
+  public key's SubjectPublicKeyInfo PEM, which `ed25519_public_jwk_from_pem`
+  reads as a JWK. A generated SDK's `ServiceTokenSource` is
   the same type, so its `ServiceCredential` is
   `{ token: credential_source(c)?, headers: c.header_names() }`.
 - `cors`, with no feature: a site's CORS (D55), the twin of Go's
@@ -93,6 +107,16 @@ and TypeScript runtimes' (D51):
   router answers the origins its identity config trusts (D55, amended).
   `Policy::decide` is the decision `runtime/http/testdata/cors_parity.json`
   holds the three runtimes to; `tests/cors_parity.rs` runs every vector.
+- `search`, with no feature: what an implementation needs to answer a
+  `SearchQuery` argument (D62), the twin of Go's `search` package and
+  TypeScript's `searchTerms`. `search::terms(q)` is the text's words (runs
+  of non-`White_Space`, the first 8), `search::like_pattern(word)` the
+  value of one `search_text LIKE ? ESCAPE '\'` condition (`ILIKE` on
+  Postgres), and `search::matches(text, &terms)` an in-memory match, by
+  `search::fold`, each character's simple lowercase.
+  `tests/search_parity.rs` runs `runtime/http/testdata/search_parity.json`,
+  and `examples/fold_mappings.rs` prints every fold, from which the Go
+  runtime writes the mappings its older Unicode tables lack.
 - The `postgres` feature's `postgres` module: `connect(&Database)` opens a
   `deadpool-postgres` pool, which connects when first used, and
   `ping(&Pool)` is the `SELECT 1` a server's `/readyz` makes. A URL
@@ -112,12 +136,62 @@ and TypeScript runtimes' (D51):
   stdout at `info`, with the TypeScript `createLogger`'s members: `level`,
   `time` (RFC 3339 in UTC, to the millisecond) and `msg` first, then
   `stack` and `server`, the fields of the spans the event is in (`api`, in
-  an `api_span(api)`), and the event's own. It re-exports `tracing`.
+  an `api_span(api)`), and the event's own. A job's and a worker's
+  entrypoint install it with `init_json_as(stack, logging::JOB, name)` or
+  `logging::WORKER`, whose lines name the deployable `job` or `worker` in
+  place of `server`, as Go's and TypeScript's do. It re-exports `tracing`.
+- `Shutdown`, with no feature: the cancellation a job's method watches and
+  a worker's loop stops on, tokio-util's `CancellationToken` (re-exported)
+  under the name the generated code takes. `Shutdown::on_signals()`, inside
+  a tokio runtime, is cancelled by the first SIGTERM or SIGINT, which it
+  logs (`"shutting down"`); a second ends the process at once with 143 or
+  130, as a generated server's does. `BoxError` is the error a job's or a
+  worker's method returns.
+- The `postgres` feature's `queue` module, the twin of the Go ORM's
+  `queues.go` and TypeScript's `queue.ts` (D53): a DB's Rust types carry
+  each queue's descriptor as JSON, which `QueueDefinition::parse` reads in
+  TypeScript's `QueueDefinition` member names (`name`, `table`, `retries`,
+  `backoffSeconds`, `leaseSeconds`, `fields` with each `name`, `column`,
+  `json`, `list` and `default`, and the `statements`
+  `sqlutil.PostgresQueueStatements` writes). `enqueue(&tx, &queue, &message)`
+  writes a message in the caller's transaction, a deadpool `Transaction`,
+  each member of the message's serde form to its field's column, an unset
+  enum to its schema default. `PostgresQueue::<M>::new(pool, queue)` claims
+  (`claim(n, lease)`, expiring dead claims first, as Go does), `extend`s,
+  `complete`s, `fail`s (returning whether the message is dead) and
+  `release`s, each change refusing a token that no longer claims its
+  message with `QueueError::ClaimLost`. Parameters go as text, which
+  Postgres reads by each column's type, as node-postgres sends them, a
+  base62 `Identity.UUID` hyphenated; a claimed row's columns come back as
+  the JSON values a message's type reads: a `TIMESTAMPTZ` in RFC 3339 in
+  UTC as superscalar's `DateTime` writes it, a `UUID` hyphenated, a list
+  from its array, JSON as itself. A column of a type it does not read
+  (`POINT`, `INTERVAL`, which the descriptors leave out) is refused.
+- The `postgres` feature's `worker` module, Go's `worker.Run` ported:
+  `run_worker(queue, handler, Options { concurrency, grace, idle },
+  shutdown)` claims for each free slot up to the concurrency
+  (`concurrency_from_env(default)` reads `WORKER_CONCURRENCY`), waits the
+  idle second after a claim that found too few, and after a failed claim a
+  wait that doubles to 30 s. It runs each handler, any `Fn(M) -> impl
+  Future<Output = Result<(), BoxError>>`, in a task of its own, extends its
+  claim every third of the lease, completes the message on `Ok` and fails
+  it on an error or a panic, with the error's chain of causes, up to 4000
+  characters, as the cause. Each queue operation has 5 s to answer. Once
+  `shutdown` is cancelled it claims no more, lets the running handlers
+  finish within the grace (8 s by default), then drops the rest and
+  releases their messages. It logs Go's and TypeScript's messages and
+  fields (`queue`, `message`, `attempt`, `took`, `error`, `retryIn`) through
+  `tracing`. It claims through the `WorkerQueue` trait, which
+  `PostgresQueue` implements.
 
 The Postgres tests run on the database
 `SUPERSCHEMATIC_POSTGRES_TEST_DATABASE_URL` names, and skip without one;
 `SUPERSCHEMATIC_POSTGRES_TEST_TLS=1` says it offers TLS with a certificate
-the system's roots do not sign:
+the system's roots do not sign. `tests/queue.rs` runs the queue client and
+the worker loop over a schema of its own holding the tables of sqlgen's
+golden DDL of fixture-queue-db (`tests/testdata/queue/create.sql`), with
+the descriptors tsgen's golden `queues.ts` holds for them, as JSON. The
+loop's timing runs on tokio's paused clock with no database:
 
 ```
 cargo test --features postgres,identity-postgres,identity-sqlite,logging
