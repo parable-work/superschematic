@@ -319,14 +319,14 @@ jobs:
           export CGO_LDFLAGS="$(scripts/superscalar-dep.sh --print)"
           go run ./internal/tools/schemafiletypes -check
 
-      - name: Cache the pulumi-gcp and pulumi-cloudflare files the extensions pin
+      - name: Cache the pulumi-gcp, pulumi-cloudflare and pulumi-tls files the extensions and the core pin
         # pulumi-gcp's schema.json is about 90 MB; the tool reads each file
         # from the user cache and checks its digest against the pin either
         # way.
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/superschematic/providerschemas
-          key: providerschemas-${{ hashFiles('extensions/gcp/schemas/pulumi-gcp.json', 'extensions/cloudflare/schemas/pulumi-cloudflare.json') }}
+          key: providerschemas-${{ hashFiles('extensions/gcp/schemas/pulumi-gcp.json', 'extensions/cloudflare/schemas/pulumi-cloudflare.json', 'internal/stack/generic/schemas/pulumi-tls.json') }}
 
       - name: Pinned gcp provider schemas drift (extensions/gcp/schemas match the pinned pulumi-gcp release)
         env:
@@ -338,6 +338,11 @@ jobs:
         env:
           GOTOOLCHAIN: go${{ env.GO_VERSION }}
         working-directory: extensions/cloudflare
+        run: go run ./internal/tools/providerschemas -check
+
+      - name: Pinned tls provider schema drift (the generic connector's internal/stack/generic/schemas match the pinned pulumi-tls release)
+        env:
+          GOTOOLCHAIN: go${{ env.GO_VERSION }}
         run: go run ./internal/tools/providerschemas -check
 
       - name: Core behavior declarations drift (the engine's, the Rust engine's and the work-queue package's copies match the core registry)

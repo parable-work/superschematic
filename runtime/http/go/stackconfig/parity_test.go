@@ -3,8 +3,11 @@ package stackconfig
 import (
 	"bytes"
 	"crypto/ed25519"
+	"crypto/sha256"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"flag"
 	"fmt"
 	"os"
@@ -68,6 +71,28 @@ func parityKey() (private, public string) {
 	return private, public
 }
 
+// parityPEM is parityKey's key as the generic connector's key node writes
+// it (D63): the PKCS#8 PEM a signed-token source signs with, the
+// SubjectPublicKeyInfo PEM the callee's callers field holds, and the JWK
+// the callers reader makes of the latter, whose kid is its thumbprint.
+func parityPEM(t *testing.T) (private, public string, jwk map[string]any) {
+	t.Helper()
+	key := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{7}, ed25519.SeedSize))
+	der, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spki, err := x509.MarshalPKIXPublicKey(key.Public())
+	if err != nil {
+		t.Fatal(err)
+	}
+	x := base64.RawURLEncoding.EncodeToString(key.Public().(ed25519.PublicKey))
+	sum := sha256.Sum256([]byte(`{"crv":"Ed25519","kty":"OKP","x":"` + x + `"}`))
+	return string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})),
+		string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: spki})),
+		map[string]any{"kty": "OKP", "crv": "Ed25519", "kid": base64.RawURLEncoding.EncodeToString(sum[:]), "x": x}
+}
+
 func str(s string) *string { return &s }
 
 // parityCorpus builds the vectors: each value encoded by ir.DerivedVariables,
@@ -96,6 +121,22 @@ func parityCorpus(t *testing.T) parityFile {
 		"audience":           "shop-api",
 		"algorithms":         []any{"EdDSA"},
 		"keys":               []any{publicJWK},
+		"maxLifetimeSeconds": 300,
+		"callers":            map[string]any{"Orders": map[string]any{"deployable": "Orders", "serves": []any{"shop-orders"}}},
+	}}}
+	// The generic connector's issuer (D63): the caller's key as the PEM of
+	// its SubjectPublicKeyInfo.
+	privatePEM, publicPEM, pemJWK := parityPEM(t)
+	generic := map[string]any{"issuers": []any{func() map[string]any {
+		issuer := localIssuer()
+		issuer["keys"] = []any{map[string]any{"pem": publicPEM}}
+		return issuer
+	}()}}
+	genericWant := map[string]any{"issuers": []any{map[string]any{
+		"issuer":             "Orders",
+		"audience":           "shop-api",
+		"algorithms":         []any{"EdDSA"},
+		"keys":               []any{pemJWK},
 		"maxLifetimeSeconds": 300,
 		"callers":            map[string]any{"Orders": map[string]any{"deployable": "Orders", "serves": []any{"shop-orders"}}},
 	}}}
@@ -145,6 +186,9 @@ func parityCorpus(t *testing.T) parityFile {
 		{Name: "service: a signed token", Reader: readerService, Field: "SHOP_API_SERVICE",
 			Value: map[string]any{"url": "http://127.0.0.1:8081", "credential": map[string]any{"source": "signed-token", "audience": "shop-api", "issuer": "Orders", "key": private}},
 			Want:  map[string]any{"url": "http://127.0.0.1:8081", "credential": map[string]any{"source": "signed-token", "audience": "shop-api", "issuer": "Orders", "key": private}}},
+		{Name: "service: a signed token with a PKCS#8 PEM key", Reader: readerService, Field: "SHOP_API_SERVICE",
+			Value: map[string]any{"url": "https://shop-api.acme.dev", "credential": map[string]any{"source": "signed-token", "audience": "shop-api", "issuer": "Orders", "key": privatePEM}},
+			Want:  map[string]any{"url": "https://shop-api.acme.dev", "credential": map[string]any{"source": "signed-token", "audience": "shop-api", "issuer": "Orders", "key": privatePEM}}},
 		{Name: "service: unset", Reader: readerService, Field: "SHOP_API_SERVICE",
 			Refusals: []string{"required environment variable SHOP_API_SERVICE_URL is not set"}},
 		{Name: "service: a credential member without a source", Reader: readerService, Field: "SHOP_API_SERVICE",
@@ -248,6 +292,23 @@ func parityCorpus(t *testing.T) parityFile {
 		{Name: "callers: a key that is no JWK", Reader: readerCallers, Field: "SHOP_API_CALLERS",
 			Value: local, Edits: map[string]*string{calls + "0_KEYS_0_JWK": str("key")},
 			Refusals: []string{"environment variable SHOP_API_CALLERS_ISSUERS_0_KEYS_0_JWK is not a JWK"}},
+		{Name: "callers: a generic issuer with a key's PEM", Reader: readerCallers, Field: "SHOP_API_CALLERS",
+			Value: generic, Want: genericWant},
+		{Name: "callers: a key's PEM with CRLF lines", Reader: readerCallers, Field: "SHOP_API_CALLERS",
+			Value: generic, Edits: map[string]*string{calls + "0_KEYS_0_PEM": str(strings.ReplaceAll(publicPEM, "\n", "\r\n"))},
+			Want: genericWant},
+		{Name: "callers: a key's PEM that is a private key's", Reader: readerCallers, Field: "SHOP_API_CALLERS",
+			Value: generic, Edits: map[string]*string{calls + "0_KEYS_0_PEM": str(privatePEM)},
+			Refusals: []string{"environment variable SHOP_API_CALLERS_ISSUERS_0_KEYS_0_PEM is not an Ed25519 public key's PEM"}},
+		{Name: "callers: a key's PEM that is no Ed25519 key", Reader: readerCallers, Field: "SHOP_API_CALLERS",
+			Value: generic, Edits: map[string]*string{calls + "0_KEYS_0_PEM": str("-----BEGIN PUBLIC KEY-----\nMBMGByqGSM49AgEGCCqGSM49AwEHAwIABA==\n-----END PUBLIC KEY-----\n")},
+			Refusals: []string{"environment variable SHOP_API_CALLERS_ISSUERS_0_KEYS_0_PEM is not an Ed25519 public key's PEM"}},
+		{Name: "callers: a key with a JWK and a PEM", Reader: readerCallers, Field: "SHOP_API_CALLERS",
+			Value: generic, Edits: map[string]*string{calls + "0_KEYS_0_JWK": str(public)},
+			Refusals: []string{"environment variables SHOP_API_CALLERS_ISSUERS_0_KEYS_0_JWK and SHOP_API_CALLERS_ISSUERS_0_KEYS_0_PEM are both set; a key is a JWK or a PEM"}},
+		{Name: "callers: a key with neither a JWK nor a PEM", Reader: readerCallers, Field: "SHOP_API_CALLERS",
+			Value: local, Edits: map[string]*string{calls + "0_KEYS_0_JWK": nil},
+			Refusals: []string{"required environment variable SHOP_API_CALLERS_ISSUERS_0_KEYS_0_JWK or SHOP_API_CALLERS_ISSUERS_0_KEYS_0_PEM is not set"}},
 		{Name: "callers: a lifetime that is no whole number of seconds", Reader: readerCallers, Field: "SHOP_API_CALLERS",
 			Value: local, Edits: map[string]*string{calls + "0_MAX_LIFETIME_SECONDS": str("soon")},
 			Refusals: []string{`environment variable SHOP_API_CALLERS_ISSUERS_0_MAX_LIFETIME_SECONDS is "soon"; want a whole number of seconds above 0`}},

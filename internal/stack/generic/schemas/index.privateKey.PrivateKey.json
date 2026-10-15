@@ -1,0 +1,24 @@
+{
+  "token": "tls:index/privateKey:PrivateKey",
+  "terraform": {
+    "type": "tls_private_key",
+    "renames": {
+      "ecdsaCurve": "ecdsa_curve",
+      "rsaBits": "rsa_bits"
+    }
+  },
+  "inputProperties": {
+    "algorithm": {
+      "type": "string"
+    },
+    "ecdsaCurve": {
+      "type": "string"
+    },
+    "rsaBits": {
+      "type": "integer"
+    }
+  },
+  "requiredInputs": [
+    "algorithm"
+  ]
+}

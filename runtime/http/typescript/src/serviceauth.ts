@@ -1,5 +1,6 @@
 import type { OperationServiceCallers, RequestContext } from './operation.js';
 import { serviceForbidden, serviceUnauthorized, serviceUnavailable } from './problem.js';
+import { sha256 } from './sha256.js';
 
 /*
 Service callers (D37, section 9.5 of docs/stack-model.md). A deployable that
@@ -506,6 +507,78 @@ export function base64urlEncode(bytes: Uint8Array): string {
   let binary = '';
   for (const byte of bytes) binary += String.fromCharCode(byte);
   return btoa(binary).replace(/\+/gu, '-').replace(/\//gu, '_').replace(/=+$/u, '');
+}
+
+/*
+An Ed25519 key's PEM (D63). The generic connector's key node, the Pulumi tls
+provider's PrivateKey, writes the private key as PKCS#8 and the public key as
+SubjectPublicKeyInfo (RFC 8410), not as JWKs. The DER of each, up to the
+key's own 32 bytes, is fixed: a PKCS#8 (version 1) PrivateKeyInfo, whose 32
+bytes are the seed, and a SubjectPublicKeyInfo, whose 32 bytes are the key.
+No other encoding is read, as in the Go and Rust runtimes.
+*/
+const ED25519_SPKI_PREFIX = Uint8Array.of(0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00);
+const ED25519_PKCS8_PREFIX = Uint8Array.of(0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x04, 0x22, 0x04, 0x20);
+
+/** Whether a key's text is a PEM rather than a JWK's JSON: it begins, after whitespace, with `-----BEGIN `. */
+export function isPem(text: string): boolean {
+  return /^[ \t\r\n]*-----BEGIN /u.test(text);
+}
+
+/**
+ * The DER one PEM block labeled label holds: the text, without the
+ * whitespace around it, is `-----BEGIN <label>-----`, the base64 of the DER,
+ * padded, in lines of any length, and `-----END <label>-----`. Throws an
+ * Error saying why it is not.
+ */
+function pemContent(text: string, label: string): Uint8Array<ArrayBuffer> {
+  const begin = `-----BEGIN ${label}-----`;
+  const end = `-----END ${label}-----`;
+  const trimmed = text.replace(/^[ \t\r\n]+|[ \t\r\n]+$/gu, '');
+  if (!trimmed.startsWith(begin) || !trimmed.endsWith(end) || trimmed.length < begin.length + end.length) {
+    throw new Error(`no PEM ${label} block`);
+  }
+  const body = trimmed.slice(begin.length, trimmed.length - end.length).replace(/[ \t\r\n]/gu, '');
+  if (body.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/u.test(body)) throw new Error(`the PEM ${label} block is not base64`);
+  const binary = atob(body);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index);
+  return bytes;
+}
+
+function hasPrefix(bytes: Uint8Array, prefix: Uint8Array, length: number): boolean {
+  return bytes.length === length && prefix.every((byte, index) => bytes[index] === byte);
+}
+
+/** The RFC 7638 thumbprint of an Ed25519 public key given as its base64url x. */
+export function ed25519Thumbprint(x: string): string {
+  return base64urlEncode(sha256(new TextEncoder().encode(`{"crv":"Ed25519","kty":"OKP","x":"${x}"}`)));
+}
+
+/**
+ * Reads an Ed25519 public key's PEM, the SubjectPublicKeyInfo `-----BEGIN
+ * PUBLIC KEY-----` the generic connector's key node writes into a callee's
+ * callers field (D63), as the public JWK a config's keys hold: an OKP
+ * Ed25519 key whose kid is its RFC 7638 thumbprint, the kid
+ * signedTokenSource writes for its private half. Throws an Error for any
+ * other key.
+ */
+export function ed25519PublicJwkFromPem(text: string): PublicJwk {
+  const der = pemContent(text, 'PUBLIC KEY');
+  if (!hasPrefix(der, ED25519_SPKI_PREFIX, ED25519_SPKI_PREFIX.length + 32)) throw new Error("not an Ed25519 public key's SubjectPublicKeyInfo");
+  const x = base64urlEncode(der.subarray(ED25519_SPKI_PREFIX.length));
+  return { kty: 'OKP', crv: 'Ed25519', kid: ed25519Thumbprint(x), x };
+}
+
+/**
+ * The DER of an Ed25519 private key's PKCS#8 PEM, `-----BEGIN PRIVATE
+ * KEY-----` (RFC 8410), as the generic connector's key node writes it, for
+ * WebCrypto's pkcs8 import. Throws an Error for any other key.
+ */
+export function ed25519Pkcs8FromPem(text: string): Uint8Array<ArrayBuffer> {
+  const der = pemContent(text, 'PRIVATE KEY');
+  if (!hasPrefix(der, ED25519_PKCS8_PREFIX, ED25519_PKCS8_PREFIX.length + 32)) throw new Error("not an Ed25519 private key's PKCS#8");
+  return der;
 }
 
 /** A JWS header or payload: a JSON object, or undefined. */

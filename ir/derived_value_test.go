@@ -164,6 +164,47 @@ func TestDerivedVariables(t *testing.T) {
 	}
 }
 
+// TestDerivedVariablesMarkSecretMembers: the variable of a signed-token
+// credential's key is Secret, which a platform sets from its secret store,
+// and no other variable is (D63).
+func TestDerivedVariablesMarkSecretMembers(t *testing.T) {
+	key := Output{Resource: "Orders.calls.shop-edge.key", Name: "privateKeyPemPkcs8"}
+	got, err := DerivedVariables("SHOP_EDGE_SERVICE", ServiceEndpoint{
+		URL:        "https://shop-edge.acme.dev",
+		Credential: &ServiceCredential{Source: CredentialSignedToken, Audience: "shop-edge", Issuer: "Orders", Key: key},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []DerivedVariable{
+		{Name: "SHOP_EDGE_SERVICE_CREDENTIAL_AUDIENCE", Value: "shop-edge"},
+		{Name: "SHOP_EDGE_SERVICE_CREDENTIAL_ISSUER", Value: "Orders"},
+		{Name: "SHOP_EDGE_SERVICE_CREDENTIAL_KEY", Value: key, Secret: true},
+		{Name: "SHOP_EDGE_SERVICE_CREDENTIAL_SOURCE", Value: "signed-token"},
+		{Name: "SHOP_EDGE_SERVICE_URL", Value: "https://shop-edge.acme.dev"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("variables:\n got %#v\nwant %#v", got, want)
+	}
+	for _, path := range []string{"credential.key"} {
+		if !SecretDerivedMember(path) {
+			t.Errorf("%s is no secret member", path)
+		}
+	}
+	for _, kind := range []EdgeKind{EdgeSQL, EdgeHTTP, EdgeSite, EdgeBucket} {
+		for _, path := range DerivedMembers(kind) {
+			if SecretDerivedMember(path) != (path == "credential.key") {
+				t.Errorf("%s %s: SecretDerivedMember = %v", kind, path, SecretDerivedMember(path))
+			}
+		}
+	}
+	// A member of the same name deeper in another value is no secret.
+	got, err = DerivedVariables("F", map[string]any{"a": map[string]any{"credential": map[string]any{"key": "k"}}})
+	if err != nil || len(got) != 1 || got[0].Secret {
+		t.Errorf("a.credential.key: %#v, %v", got, err)
+	}
+}
+
 func TestDerivedVariableSegment(t *testing.T) {
 	for member, want := range map[string]string{
 		"url": "URL", "cloudSql": "CLOUD_SQL", "tokenFile": "TOKEN_FILE", "instance": "INSTANCE", "v2Key": "V2_KEY",

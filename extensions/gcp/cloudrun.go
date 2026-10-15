@@ -181,7 +181,9 @@ type workload struct {
 //   - its config as the container's environment variables: a literal as
 //     its value, a parameter as a reference to it, a secret as a reference
 //     to its Secret Manager secret, a derived field as one variable per
-//     member of the value its edge's connector derived;
+//     member of the value its edge's connector derived, a secret member,
+//     such as the generic connector's signing key, from a Secret Manager
+//     secret of its own (secretMemberNodes, D63);
 //   - the image's repository path, which the deploy pins to a digest
 //     (section 11.2), and the cpu and memory settings;
 //   - the Cloud SQL volume, holding the instances its connections name,
@@ -239,6 +241,12 @@ func lowerWorkload(ctx registry.PlatformContext) (registry.Lowered, workload, er
 				return registry.Lowered{}, workload{}, fmt.Errorf("binding %s: %w", b.Field, err)
 			}
 			for _, variable := range vars {
+				if variable.Secret {
+					nodes, source := secretMemberNodes(env, v, d, variable, member)
+					add(nodes...)
+					envs = append(envs, map[string]any{"name": variable.Name, "valueSource": source})
+					continue
+				}
 				envs = append(envs, map[string]any{"name": variable.Name, "value": variable.Value})
 			}
 			if instance := cloudSQLInstance(b.Value); instance != nil && !containsValue(instances, instance) {

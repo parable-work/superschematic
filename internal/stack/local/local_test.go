@@ -159,6 +159,48 @@ func TestServiceAuthGolden(t *testing.T) {
 	}
 }
 
+// TestGenericConnectorLeavesLocalEdgesAlone: the core registers the
+// generic connector beside the local target (D63), and every platform of
+// the target is the local provider's, so the local connector, which names
+// both processes, serves every http edge of a local environment: its key
+// pair is the local provider's, whose private JWK the provisioner reads
+// from the state directory, and no tls key node appears. The generic
+// connector serves no edge between two local platforms.
+func TestGenericConnectorLeavesLocalEdgesAlone(t *testing.T) {
+	reg := assemble(t)
+	if spec, ok := reg.Connector(ir.EdgeHTTP, local.ServerPlatform, local.ServerPlatform); !ok || spec.Name != local.HTTPConnector {
+		t.Errorf("Connector(http, %s, %s) = %q, want %s", local.ServerPlatform, local.ServerPlatform, spec.Name, local.HTTPConnector)
+	}
+	if spec, ok := reg.Connector(ir.EdgeHTTP, local.JobPlatform, local.BucketPlatform); ok {
+		t.Errorf("two local platforms no connector names got %s", spec.Name)
+	}
+	for _, name := range []string{local.ServerPlatform, local.JobPlatform, local.WorkerPlatform, local.SitePlatform, local.DatabasePlatform, local.BucketPlatform} {
+		if platform, _ := reg.Platform(name); platform.Provider != local.Provider {
+			t.Errorf("platform %s has provider %q, want %s", name, platform.Provider, local.Provider)
+		}
+	}
+	s := shop()
+	s.Name = "require-stack"
+	env := resolve(t, reg, s, stacktest.RequireServiceShop(), "Dev")
+	for _, e := range env.Edges {
+		if e.Kind == ir.EdgeHTTP && e.Connector != local.HTTPConnector && e.Connector != local.JobHTTPConnector && e.Connector != local.WorkerHTTPConnector {
+			t.Errorf("edge %s: connector %s", e.ID, e.Connector)
+		}
+	}
+	keys := 0
+	for _, res := range env.Resources.Resources {
+		if res.Type == stack.GenericKeyType {
+			t.Errorf("node %s is the generic connector's key", res.ID)
+		}
+		if res.Type == local.TypeKeyPair {
+			keys++
+		}
+	}
+	if keys == 0 {
+		t.Error("no local key pair")
+	}
+}
+
 // storefront is the shop with shop-storefront deployed and exposed too: a
 // TypeScript API, whose server Bun runs (D51).
 func storefront() *ir.Stack {

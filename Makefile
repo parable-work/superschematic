@@ -46,7 +46,7 @@ GO_BUILD_FLAGS := -trimpath -buildvcs=false
 
 .PHONY: all setup build test lint fmt vet go-build go-test go-vet go-fmt-check go-lint \
         go-goldens catalog-check schema-file-types schema-file-types-check behaviors behaviors-check \
-        gcp-schemas gcp-schemas-check cloudflare-schemas cloudflare-schemas-check ts python rust engine-rust \
+        gcp-schemas gcp-schemas-check cloudflare-schemas cloudflare-schemas-check generic-schemas generic-schemas-check ts python rust engine-rust \
         versiongraph versiongraph-scenarios versiongraph-scenarios-ts versiongraph-scenarios-rust \
         versiongraph-scenarios-python docs cli-smoke example-migrations scrub versions clean
 
@@ -137,6 +137,17 @@ cloudflare-schemas:
 
 cloudflare-schemas-check:
 	cd extensions/cloudflare && go run ./internal/tools/providerschemas -check
+
+# The core's generic connector's pinned provider schema (internal/stack/
+# generic/schemas, D63), from the pulumi-tls release its pulumi-tls.json
+# pins, by the same tool, from the root module. Move the pin with
+# `go run ./internal/tools/providerschemas -version X.Y.Z` and update
+# generic.ProviderVersion to match.
+generic-schemas:
+	go run ./internal/tools/providerschemas
+
+generic-schemas-check:
+	go run ./internal/tools/providerschemas -check
 
 # The engine and the work-queue package implement the core's behaviors over
 # a copy of each declaration (internal/registry/behaviors), which the core

@@ -222,6 +222,37 @@
       "refusals": null
     },
     {
+      "name": "service: a signed token with a PKCS#8 PEM key",
+      "reader": "service",
+      "field": "SHOP_API_SERVICE",
+      "value": {
+        "credential": {
+          "audience": "shop-api",
+          "issuer": "Orders",
+          "key": "-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIAcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcH\n-----END PRIVATE KEY-----\n",
+          "source": "signed-token"
+        },
+        "url": "https://shop-api.acme.dev"
+      },
+      "variables": {
+        "SHOP_API_SERVICE_CREDENTIAL_AUDIENCE": "shop-api",
+        "SHOP_API_SERVICE_CREDENTIAL_ISSUER": "Orders",
+        "SHOP_API_SERVICE_CREDENTIAL_KEY": "-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIAcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcH\n-----END PRIVATE KEY-----\n",
+        "SHOP_API_SERVICE_CREDENTIAL_SOURCE": "signed-token",
+        "SHOP_API_SERVICE_URL": "https://shop-api.acme.dev"
+      },
+      "want": {
+        "credential": {
+          "audience": "shop-api",
+          "issuer": "Orders",
+          "key": "-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIAcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcH\n-----END PRIVATE KEY-----\n",
+          "source": "signed-token"
+        },
+        "url": "https://shop-api.acme.dev"
+      },
+      "refusals": null
+    },
+    {
       "name": "service: unset",
       "reader": "service",
       "field": "SHOP_API_SERVICE",
@@ -936,6 +967,359 @@
       "want": null,
       "refusals": [
         "environment variable SHOP_API_CALLERS_ISSUERS_0_KEYS_0_JWK is not a JWK"
+      ]
+    },
+    {
+      "name": "callers: a generic issuer with a key's PEM",
+      "reader": "callers",
+      "field": "SHOP_API_CALLERS",
+      "value": {
+        "issuers": [
+          {
+            "algorithms": [
+              "EdDSA"
+            ],
+            "audience": "shop-api",
+            "callers": [
+              {
+                "deployable": "Orders",
+                "serves": [
+                  "shop-orders"
+                ],
+                "subject": "Orders"
+              }
+            ],
+            "issuer": "Orders",
+            "keys": [
+              {
+                "pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iw=\n-----END PUBLIC KEY-----\n"
+              }
+            ],
+            "maxLifetimeSeconds": 300
+          }
+        ]
+      },
+      "variables": {
+        "SHOP_API_CALLERS_ISSUERS": "1",
+        "SHOP_API_CALLERS_ISSUERS_0_ALGORITHMS": "EdDSA",
+        "SHOP_API_CALLERS_ISSUERS_0_AUDIENCE": "shop-api",
+        "SHOP_API_CALLERS_ISSUERS_0_CALLERS": "1",
+        "SHOP_API_CALLERS_ISSUERS_0_CALLERS_0_DEPLOYABLE": "Orders",
+        "SHOP_API_CALLERS_ISSUERS_0_CALLERS_0_SERVES": "shop-orders",
+        "SHOP_API_CALLERS_ISSUERS_0_CALLERS_0_SUBJECT": "Orders",
+        "SHOP_API_CALLERS_ISSUERS_0_ISSUER": "Orders",
+        "SHOP_API_CALLERS_ISSUERS_0_KEYS": "1",
+        "SHOP_API_CALLERS_ISSUERS_0_KEYS_0_PEM": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iw=\n-----END PUBLIC KEY-----\n",
+        "SHOP_API_CALLERS_ISSUERS_0_MAX_LIFETIME_SECONDS": "300"
+      },
+      "want": {
+        "issuers": [
+          {
+            "algorithms": [
+              "EdDSA"
+            ],
+            "audience": "shop-api",
+            "callers": {
+              "Orders": {
+                "deployable": "Orders",
+                "serves": [
+                  "shop-orders"
+                ]
+              }
+            },
+            "issuer": "Orders",
+            "keys": [
+              {
+                "crv": "Ed25519",
+                "kid": "--6IM5l0OosLj9yWskISYhUA3n_3CURQkmrYMSha_ck",
+                "kty": "OKP",
+                "x": "6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw"
+              }
+            ],
+            "maxLifetimeSeconds": 300
+          }
+        ]
+      },
+      "refusals": null
+    },
+    {
+      "name": "callers: a key's PEM with CRLF lines",
+      "reader": "callers",
+      "field": "SHOP_API_CALLERS",
+      "value": {
+        "issuers": [
+          {
+            "algorithms": [
+              "EdDSA"
+            ],
+            "audience": "shop-api",
+            "callers": [
+              {
+                "deployable": "Orders",
+                "serves": [
+                  "shop-orders"
+                ],
+                "subject": "Orders"
+              }
+            ],
+            "issuer": "Orders",
+            "keys": [
+              {
+                "pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iw=\n-----END PUBLIC KEY-----\n"
+              }
+            ],
+            "maxLifetimeSeconds": 300
+          }
+        ]
+      },
+      "variables": {
+        "SHOP_API_CALLERS_ISSUERS": "1",
+        "SHOP_API_CALLERS_ISSUERS_0_ALGORITHMS": "EdDSA",
+        "SHOP_API_CALLERS_ISSUERS_0_AUDIENCE": "shop-api",
+        "SHOP_API_CALLERS_ISSUERS_0_CALLERS": "1",
+        "SHOP_API_CALLERS_ISSUERS_0_CALLERS_0_DEPLOYABLE": "Orders",
+        "SHOP_API_CALLERS_ISSUERS_0_CALLERS_0_SERVES": "shop-orders",
+        "SHOP_API_CALLERS_ISSUERS_0_CALLERS_0_SUBJECT": "Orders",
+        "SHOP_API_CALLERS_ISSUERS_0_ISSUER": "Orders",
+        "SHOP_API_CALLERS_ISSUERS_0_KEYS": "1",
+        "SHOP_API_CALLERS_ISSUERS_0_KEYS_0_PEM": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iw=\n-----END PUBLIC KEY-----\n",
+        "SHOP_API_CALLERS_ISSUERS_0_MAX_LIFETIME_SECONDS": "300"
+      },
+      "edits": {
+        "SHOP_API_CALLERS_ISSUERS_0_KEYS_0_PEM": "-----BEGIN PUBLIC KEY-----\r\nMCowBQYDK2VwAyEA6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iw=\r\n-----END PUBLIC KEY-----\r\n"
+      },
+      "want": {
+        "issuers": [
+          {
+            "algorithms": [
+              "EdDSA"
+            ],
+            "audience": "shop-api",
+            "callers": {
+              "Orders": {
+                "deployable": "Orders",
+                "serves": [
+                  "shop-orders"
+                ]
+              }
+            },
+            "issuer": "Orders",
+            "keys": [
+              {
+                "crv": "Ed25519",
+                "kid": "--6IM5l0OosLj9yWskISYhUA3n_3CURQkmrYMSha_ck",
+                "kty": "OKP",
+                "x": "6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw"
+              }
+            ],
+            "maxLifetimeSeconds": 300
+          }
+        ]
+      },
+      "refusals": null
+    },
+    {
+      "name": "callers: a key's PEM that is a private key's",
+      "reader": "callers",
+      "field": "SHOP_API_CALLERS",
+      "value": {
+        "issuers": [
+          {
+            "algorithms": [
+              "EdDSA"
+            ],
+            "audience": "shop-api",
+            "callers": [
+              {
+                "deployable": "Orders",
+                "serves": [
+                  "shop-orders"
+                ],
+                "subject": "Orders"
+              }
+            ],
+            "issuer": "Orders",
+            "keys": [
+              {
+                "pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iw=\n-----END PUBLIC KEY-----\n"
+              }
+            ],
+            "maxLifetimeSeconds": 300
+          }
+        ]
+      },
+      "variables": {
+        "SHOP_API_CALLERS_ISSUERS": "1",
+        "SHOP_API_CALLERS_ISSUERS_0_ALGORITHMS": "EdDSA",
+        "SHOP_API_CALLERS_ISSUERS_0_AUDIENCE": "shop-api",
+        "SHOP_API_CALLERS_ISSUERS_0_CALLERS": "1",
+        "SHOP_API_CALLERS_ISSUERS_0_CALLERS_0_DEPLOYABLE": "Orders",
+        "SHOP_API_CALLERS_ISSUERS_0_CALLERS_0_SERVES": "shop-orders",
+        "SHOP_API_CALLERS_ISSUERS_0_CALLERS_0_SUBJECT": "Orders",
+        "SHOP_API_CALLERS_ISSUERS_0_ISSUER": "Orders",
+        "SHOP_API_CALLERS_ISSUERS_0_KEYS": "1",
+        "SHOP_API_CALLERS_ISSUERS_0_KEYS_0_PEM": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iw=\n-----END PUBLIC KEY-----\n",
+        "SHOP_API_CALLERS_ISSUERS_0_MAX_LIFETIME_SECONDS": "300"
+      },
+      "edits": {
+        "SHOP_API_CALLERS_ISSUERS_0_KEYS_0_PEM": "-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIAcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcH\n-----END PRIVATE KEY-----\n"
+      },
+      "want": null,
+      "refusals": [
+        "environment variable SHOP_API_CALLERS_ISSUERS_0_KEYS_0_PEM is not an Ed25519 public key's PEM"
+      ]
+    },
+    {
+      "name": "callers: a key's PEM that is no Ed25519 key",
+      "reader": "callers",
+      "field": "SHOP_API_CALLERS",
+      "value": {
+        "issuers": [
+          {
+            "algorithms": [
+              "EdDSA"
+            ],
+            "audience": "shop-api",
+            "callers": [
+              {
+                "deployable": "Orders",
+                "serves": [
+                  "shop-orders"
+                ],
+                "subject": "Orders"
+              }
+            ],
+            "issuer": "Orders",
+            "keys": [
+              {
+                "pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iw=\n-----END PUBLIC KEY-----\n"
+              }
+            ],
+            "maxLifetimeSeconds": 300
+          }
+        ]
+      },
+      "variables": {
+        "SHOP_API_CALLERS_ISSUERS": "1",
+        "SHOP_API_CALLERS_ISSUERS_0_ALGORITHMS": "EdDSA",
+        "SHOP_API_CALLERS_ISSUERS_0_AUDIENCE": "shop-api",
+        "SHOP_API_CALLERS_ISSUERS_0_CALLERS": "1",
+        "SHOP_API_CALLERS_ISSUERS_0_CALLERS_0_DEPLOYABLE": "Orders",
+        "SHOP_API_CALLERS_ISSUERS_0_CALLERS_0_SERVES": "shop-orders",
+        "SHOP_API_CALLERS_ISSUERS_0_CALLERS_0_SUBJECT": "Orders",
+        "SHOP_API_CALLERS_ISSUERS_0_ISSUER": "Orders",
+        "SHOP_API_CALLERS_ISSUERS_0_KEYS": "1",
+        "SHOP_API_CALLERS_ISSUERS_0_KEYS_0_PEM": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iw=\n-----END PUBLIC KEY-----\n",
+        "SHOP_API_CALLERS_ISSUERS_0_MAX_LIFETIME_SECONDS": "300"
+      },
+      "edits": {
+        "SHOP_API_CALLERS_ISSUERS_0_KEYS_0_PEM": "-----BEGIN PUBLIC KEY-----\nMBMGByqGSM49AgEGCCqGSM49AwEHAwIABA==\n-----END PUBLIC KEY-----\n"
+      },
+      "want": null,
+      "refusals": [
+        "environment variable SHOP_API_CALLERS_ISSUERS_0_KEYS_0_PEM is not an Ed25519 public key's PEM"
+      ]
+    },
+    {
+      "name": "callers: a key with a JWK and a PEM",
+      "reader": "callers",
+      "field": "SHOP_API_CALLERS",
+      "value": {
+        "issuers": [
+          {
+            "algorithms": [
+              "EdDSA"
+            ],
+            "audience": "shop-api",
+            "callers": [
+              {
+                "deployable": "Orders",
+                "serves": [
+                  "shop-orders"
+                ],
+                "subject": "Orders"
+              }
+            ],
+            "issuer": "Orders",
+            "keys": [
+              {
+                "pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iw=\n-----END PUBLIC KEY-----\n"
+              }
+            ],
+            "maxLifetimeSeconds": 300
+          }
+        ]
+      },
+      "variables": {
+        "SHOP_API_CALLERS_ISSUERS": "1",
+        "SHOP_API_CALLERS_ISSUERS_0_ALGORITHMS": "EdDSA",
+        "SHOP_API_CALLERS_ISSUERS_0_AUDIENCE": "shop-api",
+        "SHOP_API_CALLERS_ISSUERS_0_CALLERS": "1",
+        "SHOP_API_CALLERS_ISSUERS_0_CALLERS_0_DEPLOYABLE": "Orders",
+        "SHOP_API_CALLERS_ISSUERS_0_CALLERS_0_SERVES": "shop-orders",
+        "SHOP_API_CALLERS_ISSUERS_0_CALLERS_0_SUBJECT": "Orders",
+        "SHOP_API_CALLERS_ISSUERS_0_ISSUER": "Orders",
+        "SHOP_API_CALLERS_ISSUERS_0_KEYS": "1",
+        "SHOP_API_CALLERS_ISSUERS_0_KEYS_0_PEM": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iw=\n-----END PUBLIC KEY-----\n",
+        "SHOP_API_CALLERS_ISSUERS_0_MAX_LIFETIME_SECONDS": "300"
+      },
+      "edits": {
+        "SHOP_API_CALLERS_ISSUERS_0_KEYS_0_JWK": "{\"kty\":\"OKP\",\"kid\":\"orders-key\",\"use\":\"sig\",\"alg\":\"EdDSA\",\"crv\":\"Ed25519\",\"x\":\"6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw\"}"
+      },
+      "want": null,
+      "refusals": [
+        "environment variables SHOP_API_CALLERS_ISSUERS_0_KEYS_0_JWK and SHOP_API_CALLERS_ISSUERS_0_KEYS_0_PEM are both set; a key is a JWK or a PEM"
+      ]
+    },
+    {
+      "name": "callers: a key with neither a JWK nor a PEM",
+      "reader": "callers",
+      "field": "SHOP_API_CALLERS",
+      "value": {
+        "issuers": [
+          {
+            "algorithms": [
+              "EdDSA"
+            ],
+            "audience": "shop-api",
+            "callers": [
+              {
+                "deployable": "Orders",
+                "serves": [
+                  "shop-orders"
+                ],
+                "subject": "Orders"
+              }
+            ],
+            "issuer": "Orders",
+            "keys": [
+              {
+                "jwk": "{\"kty\":\"OKP\",\"kid\":\"orders-key\",\"use\":\"sig\",\"alg\":\"EdDSA\",\"crv\":\"Ed25519\",\"x\":\"6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw\"}"
+              }
+            ],
+            "maxLifetimeSeconds": 300
+          }
+        ]
+      },
+      "variables": {
+        "SHOP_API_CALLERS_ISSUERS": "1",
+        "SHOP_API_CALLERS_ISSUERS_0_ALGORITHMS": "EdDSA",
+        "SHOP_API_CALLERS_ISSUERS_0_AUDIENCE": "shop-api",
+        "SHOP_API_CALLERS_ISSUERS_0_CALLERS": "1",
+        "SHOP_API_CALLERS_ISSUERS_0_CALLERS_0_DEPLOYABLE": "Orders",
+        "SHOP_API_CALLERS_ISSUERS_0_CALLERS_0_SERVES": "shop-orders",
+        "SHOP_API_CALLERS_ISSUERS_0_CALLERS_0_SUBJECT": "Orders",
+        "SHOP_API_CALLERS_ISSUERS_0_ISSUER": "Orders",
+        "SHOP_API_CALLERS_ISSUERS_0_KEYS": "1",
+        "SHOP_API_CALLERS_ISSUERS_0_KEYS_0_JWK": "{\"kty\":\"OKP\",\"kid\":\"orders-key\",\"use\":\"sig\",\"alg\":\"EdDSA\",\"crv\":\"Ed25519\",\"x\":\"6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw\"}",
+        "SHOP_API_CALLERS_ISSUERS_0_MAX_LIFETIME_SECONDS": "300"
+      },
+      "edits": {
+        "SHOP_API_CALLERS_ISSUERS_0_KEYS_0_JWK": null
+      },
+      "want": null,
+      "refusals": [
+        "required environment variable SHOP_API_CALLERS_ISSUERS_0_KEYS_0_JWK or SHOP_API_CALLERS_ISSUERS_0_KEYS_0_PEM is not set"
       ]
     },
     {

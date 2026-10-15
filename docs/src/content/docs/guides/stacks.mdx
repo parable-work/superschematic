@@ -778,7 +778,8 @@ lowered:
 | `secret-literal` | a literal or a parameter for a `Secret<T>` field |
 | `kind-mismatch` | a handle whose kind is not the kind of the service it names, or a handle in a place that does not take its kind |
 | `unrealizable` | a deployable its platform cannot run, such as a Rust job on `local`, or a server whose APIs are in two languages |
-| `no-connector` | an edge no connector realizes between the two platforms |
+| `no-connector` | an edge no connector realizes between the two platforms. Between platforms of two providers, such as a server placed on another target's platform with a settings `platform`, the core's generic connector serves an http or a site edge |
+| `cross-provider-unexposed` | an http edge between deployables of two providers to a server the stack does not expose: the generic connector reaches a server only at its public address |
 | `expose-not-server` | an exposed deployable that is not a server |
 | `unreachable-edge` | a `calls` edge to an API none of whose operations admits the calling server |
 | `ambiguous-database` | an API with several DB dependencies and no `authDb` |

@@ -8,7 +8,15 @@ import {
   type SignedTokenSourceOptions,
   type TokenFileSourceOptions,
 } from './credentials.js';
-import type { PublicJwk, ServiceAuthAlgorithm, ServiceAuthConfig, ServiceAuthIssuer, ServiceCallerConfig } from './serviceauth.js';
+import {
+  ed25519PublicJwkFromPem,
+  isPem,
+  type PublicJwk,
+  type ServiceAuthAlgorithm,
+  type ServiceAuthConfig,
+  type ServiceAuthIssuer,
+  type ServiceCallerConfig,
+} from './serviceauth.js';
 
 /*
 The config fields an API's edges derive in a stack (section 3.4 of
@@ -304,6 +312,35 @@ class CallerVars {
     return value;
   }
 
+  /**
+   * The key whose variables begin with p: its JWK's JSON, or the PEM of an
+   * Ed25519 public key's SubjectPublicKeyInfo, which the generic
+   * connector's key node writes (D63) and which is read as an Ed25519 JWK
+   * whose kid is its thumbprint. Exactly one is set.
+   */
+  key(p: string): PublicJwk | undefined {
+    const jwkName = `${p}JWK`;
+    const pemName = `${p}PEM`;
+    const jwk = this.get(jwkName) ?? '';
+    const pem = this.get(pemName) ?? '';
+    if (jwk !== '' && pem !== '') {
+      this.fail(`environment variables ${jwkName} and ${pemName} are both set; a key is a JWK or a PEM`);
+    } else if (pem !== '') {
+      try {
+        return ed25519PublicJwkFromPem(pem);
+      } catch (error) {
+        this.fail(`environment variable ${pemName} is not an Ed25519 public key's PEM: ${(error as Error).message}`);
+      }
+    } else if (jwk !== '') {
+      const key = parseJwk(jwk);
+      if (typeof key !== 'string') return key;
+      this.fail(`environment variable ${jwkName} is not a JWK: ${key}`);
+    } else {
+      this.fail(`required environment variable ${jwkName} or ${pemName} is not set`);
+    }
+    return undefined;
+  }
+
   /** A list's length. */
   count(name: string, least: number): number {
     const value = this.required(name);
@@ -346,15 +383,8 @@ class CallerVars {
     if (this.get(`${p}KEYS`) !== undefined) {
       const n = this.count(`${p}KEYS`, 1);
       for (let j = 0; j < n; j++) {
-        const name = `${p}KEYS_${j}_JWK`;
-        const text = this.required(name);
-        if (text === '') continue;
-        const key = parseJwk(text);
-        if (typeof key === 'string') {
-          this.fail(`environment variable ${name} is not a JWK: ${key}`);
-          continue;
-        }
-        (keys ??= []).push(key);
+        const key = this.key(`${p}KEYS_${j}_`);
+        if (key) (keys ??= []).push(key);
       }
     }
     const subjectClaim = this.get(`${p}SUBJECT_CLAIM`);
@@ -422,7 +452,8 @@ function parseJwk(text: string): PublicJwk | string {
  *     field_ISSUERS_<i>_ALGORITHMS           RS256, ES256 or EdDSA, comma-separated
  *     field_ISSUERS_<i>_JWKS_URL             where the issuer's keys are, or
  *     field_ISSUERS_<i>_KEYS                 the number of keys, each
- *     field_ISSUERS_<i>_KEYS_<j>_JWK         a public JWK as JSON
+ *     field_ISSUERS_<i>_KEYS_<j>_JWK         a public JWK as JSON, or
+ *     field_ISSUERS_<i>_KEYS_<j>_PEM         an Ed25519 public key's PEM (D63)
  *     field_ISSUERS_<i>_SUBJECT_CLAIM        the claim that names the caller
  *     field_ISSUERS_<i>_MAX_LIFETIME_SECONDS the longest a token may live
  *     field_ISSUERS_<i>_CALLERS              the number of callers, each
@@ -470,7 +501,8 @@ export interface ServiceCredentialOptions {
  * audience, the token in its file, or a token signed with its key as its
  * issuer, for its audience. The headers are the credential's, or
  * Service-Authorization alone. Undefined for no credential. Throws when a
- * signed-token key is not an Ed25519 private JWK's JSON.
+ * signed-token key is neither an Ed25519 private JWK's JSON nor an Ed25519
+ * private key's PKCS#8 PEM, which the generic connector gives (D63).
  */
 export function serviceCredentialFor(credential: ServiceCredential, options?: ServiceCredentialOptions): ServiceCredentialConfig;
 export function serviceCredentialFor(credential: ServiceCredential | undefined, options?: ServiceCredentialOptions): ServiceCredentialConfig | undefined;
@@ -483,13 +515,16 @@ export function serviceCredentialFor(credential: ServiceCredential | undefined, 
     case 'token-file':
       return { token: tokenFileSource(credential.tokenFile, options.tokenFile), headers };
     case 'signed-token': {
+      const claims = { issuer: credential.issuer, subject: credential.issuer, audience: credential.audience };
+      // The generic connector's key is a PKCS#8 PEM, the local target's a
+      // JWK's JSON (D63).
+      if (isPem(credential.key)) return { token: signedTokenSource(credential.key, claims, options.signedToken), headers };
       let key: unknown;
       try {
         key = JSON.parse(credential.key);
       } catch {
-        throw new Error('serviceCredentialFor: the signed-token key is not a JWK');
+        throw new Error('serviceCredentialFor: the signed-token key is not a JWK or a PEM');
       }
-      const claims = { issuer: credential.issuer, subject: credential.issuer, audience: credential.audience };
       return { token: signedTokenSource(key as Ed25519PrivateJwk, claims, options.signedToken), headers };
     }
   }

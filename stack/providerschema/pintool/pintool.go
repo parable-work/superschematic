@@ -65,12 +65,17 @@ const Command = "go run ./internal/tools/providerschemas"
 // Main is an extension's providerschemas command. pinFile is the name of
 // the extension's pin file (`pulumi-gcp.json`), in the directory -dir
 // names, `schemas` by default. It exits 1 on an error.
-func Main(pinFile string) {
+func Main(pinFile string) { MainIn("schemas", pinFile) }
+
+// MainIn is Main whose -dir is dir by default: the root module's command
+// pins the provider of the core's generic connector (D63) in
+// internal/stack/generic/schemas.
+func MainIn(dir, pinFile string) {
 	check := flag.Bool("check", false, "exit 1 when a committed file differs from the generated one")
 	version := flag.String("version", "", "move the pin to this provider release (without the v) and record its digests")
-	dir := flag.String("dir", "schemas", "the directory that holds the pin and the pinned schemas")
+	flag.StringVar(&dir, "dir", dir, "the directory that holds the pin and the pinned schemas")
 	flag.Parse()
-	if err := Run(*dir, pinFile, *version, *check, FetchCached); err != nil {
+	if err := Run(dir, pinFile, *version, *check, FetchCached); err != nil {
 		fmt.Fprintln(os.Stderr, "providerschemas:", err)
 		os.Exit(1)
 	}
@@ -225,7 +230,11 @@ type upstream struct {
 
 // bridgeMetadata is the part of bridge-metadata.json the tool reads: the
 // auto-aliasing table, which names each Terraform resource's current token
-// and records its list and block fields.
+// and records its list and block fields, and the renames table, which names
+// the Terraform resource of each token. A provider the bridge maps through
+// the Terraform plugin framework, such as pulumi-tls, has no auto-aliasing
+// entries: its renames table names the Terraform type, and the tool knows
+// no list field of it, so it refuses a list property there.
 type bridgeMetadata struct {
 	AutoAliasing struct {
 		Resources map[string]struct {
@@ -233,6 +242,9 @@ type bridgeMetadata struct {
 			Fields  map[string]*aliasField `json:"fields"`
 		} `json:"resources"`
 	} `json:"auto-aliasing"`
+	Renames struct {
+		Resources map[string]string `json:"resources"`
+	} `json:"renames"`
 }
 
 // aliasField is a Terraform list or block field.
@@ -285,6 +297,11 @@ func parseUpstream(pkg string, schemaJSON, metadataJSON []byte) (*upstream, erro
 		}
 		u.terraform[res.Current] = tf
 		u.fields[tf] = res.Fields
+	}
+	for _, token := range sortedKeys(meta.Renames.Resources) {
+		if _, aliased := u.terraform[token]; !aliased && meta.Renames.Resources[token] != "" {
+			u.terraform[token] = meta.Renames.Resources[token]
+		}
 	}
 	return u, nil
 }

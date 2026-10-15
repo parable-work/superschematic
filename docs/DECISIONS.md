@@ -6022,6 +6022,60 @@ it.
 
 Status: built in #334.
 
+## D63. A generic connector joins deployables of two providers, with a per-edge Ed25519 key from the tls provider whose private key reaches the caller through its secret store
+
+Section 6.2 of `docs/stack-model.md` sketched the generic connector:
+between two platforms on different providers that no connector serves,
+the caller reaches the callee at its exposed address and signs a
+short-lived token with a key pair generated for the edge, whose private
+key goes into the caller's secret store and whose public key into the
+callee's callers field. D37 settled the token, D55 gave platforms a
+public address, and section 3.4 promised a member a platform sets from its
+secret store. The model had no notion of a provider, no way for a key pair
+to come out of a real provisioner, and runtimes that read keys only as
+JWKs. The maintainer chose Cloudflare Workers as the second target, and
+the generic connector first, proven offline.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `PlatformSpec` gains `Provider`, required: `local`, `gcp`, `cloudflare`, `fake`. The core registers the generic connector as two `ConnectorSpec`s with `Generic` set and no platform named, `generic.http` and `generic.site` (`internal/stack/generic`, from `generator.RegisterCore`). `Registry.Connector` returns the connector that names both platforms when one does, and otherwise the generic one of the edge's kind when both platforms are registered and their providers differ; an exact connector always wins. `RegisterConnector` refuses a generic one that names a platform, serves a sql or a bucket edge, or repeats an edge kind, and `Finalize` skips it. | The provider read from the platform name's first word, a naming rule nothing enforces. An optional `Provider`, under which a platform that forgot it would silently never mix. A generic connector per target pair, the matrix it exists to avoid. A generic sql or bucket edge, which needs a driver or a client that knows both providers, as Hyperdrive does. |
+| An http edge it serves reaches the callee at its public address (`PublicAddressOf`), so resolution refuses an edge across providers to a server the stack does not expose with a new code, `cross-provider-unexposed`, modeled on `site-calls-unexposed`, and one whose platform gives no public address with `lowering`. A site edge across providers derives the API's public address, as every site connector does. | Reaching the callee's internal address, which another provider's network cannot. Exposing the callee implicitly, which puts a server on the internet that the stack says is internal. |
+| The edge's key pair is a node of the Pulumi `tls` provider, `tls:index/privateKey:PrivateKey` with the algorithm `ED25519`, `<caller>.calls.<callee>.key`, which two edges from one caller to one callee share. The caller's credential is a `signed-token` whose `key` references its `privateKeyPemPkcs8`; the callee's issuer is the caller, with its `publicKeyPem` as its one key, EdDSA and 300 seconds. The root module pins the type at pulumi-tls 5.6.2 in `internal/stack/generic/schemas`, written by `internal/tools/providerschemas`, and the connector registers the schema itself through a new `ConnectorSpec.ResourceTypes`. A distribution pins the provider for the provisioner (`stack.GenericKeyProviderVersion`). pulumi-tls is bridged through the Terraform plugin framework, whose bridge metadata has no auto-aliasing table, so `pintool` falls back to its renames table for the Terraform type. | The pin in the target that lowers the key, gcp today and Workers next: two modules pinning one provider, which the registry refuses to register at two versions once a binary links both, and a node no binary without that target validates. A key the deploy generates outside the graph, which a provisioner's state would not track and a destroy would not remove. The `random` provider's bytes as a seed, which no runtime reads as a key. |
+| The provider writes the key as PEM, the private key PKCS#8 and the public key SubjectPublicKeyInfo (RFC 8410), so the runtimes read both beside a JWK: a signed-token source takes a private JWK's JSON or the PKCS#8 PEM (Go `serviceauth.SignedToken`, TypeScript `signedTokenSource`, Rust `SignedKeySource::from_pem` and `from_key`), and a callers field's key is a `jwk` or a `pem` (`ir.ServiceAuthKey.PEM`, `<field>_ISSUERS_<i>_KEYS_<j>_PEM`), which the reader turns into an Ed25519 JWK. A PEM's `kid` is the key's RFC 7638 thumbprint, which the signer and the reader each compute, so no `kid` travels in the graph. Only the RFC 8410 encodings of an Ed25519 key are read, one block with whitespace around it and nothing else, by one rule in the three runtimes. The TypeScript runtime computes the thumbprint with a synchronous SHA-256 of its own, since `loadCallers` is synchronous and imports nothing from `node:`. | A JWK the program builds from the PEM, which Pulumi YAML cannot express without a function call. A `kid` output, which the tls provider has none of. Parsing any PKCS#8 or SPKI with each language's library, whose leniencies differ, so the parity vectors could not hold them to one answer. |
+| A derived value's member may be a secret: `ir.SecretDerivedMember`, a signed-token credential's `key` today. A connector derives it as a reference to an output, and resolution refuses a literal (`lowering`), so `environment.json` never holds it. `ir.DerivedVariables` marks its variable `Secret`, and a platform sets it from its secret store. gcp writes a Secret Manager secret of the deployable's own, `<stack>-<environment>-<deployable>-<variable>`, a version whose data is the reference (`gcp:secretmanager/secretVersion:SecretVersion`, now pinned), and the deployable's accessor grant, and mounts the variable with `valueSource.secretKeyRef` at that version, so a new key rolls out a new revision. The fake platforms write a fake secret version. The local target already sets its key from the state directory, which its provisioner reads when it starts a process. The Pulumi program exports no output a secret member references. | The key as a plain environment variable, which every revision's spec and every reader of the service would see. The secret's `latest` version, which would not roll a revision when the key changes. A flag on the binding rather than the member, which would put a whole service endpoint in a secret. |
+| One key slot per edge. Rotation, two slots replaced in turn by the `time` provider's `Rotating` node (section 9.2), is not built: a key changes only when its node is replaced. | Two slots now, before any deploy has run the one. |
+
+One environment still has one target and one provisioner, and the deploy
+seams follow the environment's target (`internal/stackdeploy`). A mixed
+environment resolves and renders, but a real mixed deploy, for Workers
+beside gcp, will also need: each provider's credentials in the run, not
+only the DNS platform's (`stackdeploy.CredentialsOf`); a build and a pin
+per platform, since a Worker is a script bundle, not an image; each
+platform's own secret store for `Secret<T>` fields; a migration runner
+per database platform, for D1; and policy rules that leave another
+provider's nodes alone, as gcp's do. Section 6.2 of
+`docs/stack-model.md` lists them.
+
+Status: built, proven offline. `internal/registry`'s `TestGenericConnector`
+holds the registration and the fallback, and `internal/stack`'s
+`generic_test.go` resolves a fake server calling a server of a second
+provider and the reverse, a site across providers, the refusals, an exact
+connector that wins and a literal key. `extensions/gcp`'s `MixedShop`
+goldens, Staging and Preview, put stacktest's `EdgeShop` services on the
+fake target's TypeScript-only `fake.edge` beside Cloud Run: Orders, a
+Cloud Run service, and shop-orders' job, a Cloud Run job, call
+shop-pricing on `fake.edge`, and shop-storefront on `fake.edge` calls
+shop-api on Cloud Run, whose callers field then holds Google's issuer and
+the storefront's. `extensions/pulumi`'s render golden
+`gcp-mixedshop-staging` holds the key nodes, the secret versions and
+`secretKeyRef`. The local target's `TestGenericConnectorLeavesLocalEdgesAlone`
+holds its edges to its own connector. Go's
+`TestLoadCallersVerifiesAGenericCaller` and TypeScript's credentials test
+sign with a PKCS#8 key and verify against the SPKI key through the callers
+field; `serviceauth_parity.json` gains a `signing` section and
+`stackconfig_parity.json` the PEM key and its refusals, which the three
+runtimes pass. No mixed environment has deployed.
+
 ## D64. A cloudflare target runs an environment on Cloudflare: TypeScript servers as Workers built as bundles the deploy pins, SQLite-dialect databases on D1, buckets on R2, sites on static assets and jobs on Cron Triggers
 
 Milestone 7 left a second target. The maintainer chose Cloudflare Workers,

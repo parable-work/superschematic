@@ -8,6 +8,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/sitegen"
 	"github.com/parable-work/superschematic/internal/generator/stackgen"
 	"github.com/parable-work/superschematic/internal/registry"
+	"github.com/parable-work/superschematic/internal/stack/generic"
 	"github.com/parable-work/superschematic/internal/stack/local"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -242,6 +243,12 @@ func RegisterCore(reg *registry.Registry) error {
 		}
 	}
 	if err := reg.RegisterCIRenderer(cigen.GitHub()); err != nil {
+		return err
+	}
+	// The generic connector joins deployables of two providers that no
+	// connector names (D63), so every binary that links a second target
+	// can mix them.
+	if err := generic.Register(reg); err != nil {
 		return err
 	}
 	return local.Register(reg)

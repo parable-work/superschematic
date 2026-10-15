@@ -16,7 +16,7 @@ use crate::jws::{self, decode, encode};
 use crate::jwt::{unix_seconds, Clock};
 use async_trait::async_trait;
 use ring::rand::{SecureRandom, SystemRandom};
-use ring::signature::Ed25519KeyPair;
+use ring::signature::{Ed25519KeyPair, KeyPair};
 use serde::Serialize;
 use serde_json::Value;
 use std::future::Future;
@@ -298,6 +298,56 @@ impl SignedKeySource {
             audience: audience.into(),
             clock: Arc::new(SystemTime::now),
         })
+    }
+
+    /// `private_pem` is the edge's private key as the PEM of its PKCS#8
+    /// encoding, `-----BEGIN PRIVATE KEY-----` (RFC 8410), as the generic
+    /// connector's key node writes it (D63). The `kid` is the key's RFC 7638
+    /// thumbprint, which the callee's callers field reads from the public
+    /// key's PEM.
+    ///
+    /// # Errors
+    ///
+    /// Why the text is no Ed25519 private key's PKCS#8 PEM.
+    pub fn from_pem(
+        private_pem: &str,
+        issuer: impl Into<String>,
+        subject: impl Into<String>,
+        audience: impl Into<String>,
+    ) -> Result<Self, String> {
+        let seed = jws::ed25519_seed_from_pem(private_pem)
+            .map_err(|err| format!("the signing key: {err}"))?;
+        let signer = Ed25519KeyPair::from_seed_unchecked(&seed)
+            .map_err(|err| format!("the signing key: {err}"))?;
+        Ok(Self {
+            kid: jws::ed25519_thumbprint(signer.public_key().as_ref()),
+            signer,
+            issuer: issuer.into(),
+            subject: subject.into(),
+            audience: audience.into(),
+            clock: Arc::new(SystemTime::now),
+        })
+    }
+
+    /// The source of a signed-token credential's key as the caller's
+    /// config holds it: a PKCS#8 PEM ([`Self::from_pem`]), or else a private
+    /// JWK's JSON ([`Self::new`]).
+    ///
+    /// # Errors
+    ///
+    /// Why the text is neither.
+    pub fn from_key(
+        key: &str,
+        issuer: impl Into<String>,
+        subject: impl Into<String>,
+        audience: impl Into<String>,
+    ) -> Result<Self, String> {
+        if jws::is_pem(key) {
+            return Self::from_pem(key, issuer, subject, audience);
+        }
+        let jwk: Value = serde_json::from_str(key)
+            .map_err(|_| "the signing key is not a JWK's JSON or a PEM".to_string())?;
+        Self::new(&jwk, issuer, subject, audience)
     }
 
     #[must_use]

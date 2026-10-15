@@ -1,0 +1,19 @@
+{
+  "package": "tls",
+  "version": "5.6.2",
+  "sources": [
+    {
+      "name": "schema.json",
+      "url": "https://raw.githubusercontent.com/pulumi/pulumi-tls/v5.6.2/provider/cmd/pulumi-resource-tls/schema.json",
+      "sha256": "d77529a3e0387789ade3ef46f5d2f39401f371448f025f10bc6052e541d2efda"
+    },
+    {
+      "name": "bridge-metadata.json",
+      "url": "https://raw.githubusercontent.com/pulumi/pulumi-tls/v5.6.2/provider/cmd/pulumi-resource-tls/bridge-metadata.json",
+      "sha256": "b2af6e2ea52f332a139c5ecf270cc643cb903b51d61b76092c5081d40aec1ae1"
+    }
+  ],
+  "types": [
+    "tls:index/privateKey:PrivateKey"
+  ]
+}

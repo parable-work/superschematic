@@ -156,7 +156,7 @@ func (*calleeTarget) Name() string { return "callee" }
 
 func (c *calleeTarget) Register(r *registry.Registry) error {
 	if err := r.RegisterPlatform(registry.PlatformSpec{
-		Name: "callee.run", Kind: ir.DeployableServer, Languages: []string{registry.APILanguageGo},
+		Name: "callee.run", Provider: "callee", Kind: ir.DeployableServer, Languages: []string{registry.APILanguageGo},
 		NameOf:    func(ctx registry.PlatformContext) any { return ctx.Deployable.Name },
 		AddressOf: func(ctx registry.PlatformContext) any { return "http://" + ctx.Deployable.Name },
 		Lower:     func(registry.PlatformContext) (registry.Lowered, error) { return registry.Lowered{}, nil },

@@ -5,7 +5,7 @@ behave alike.
 
 | Path | What it holds |
 |---|---|
-| `serviceauth_parity.json` | The service step's vectors (D37). Its `comment` states the harness; `runtime/http/go/README.md` describes it. |
+| `serviceauth_parity.json` | The service step's vectors (D37), and in `signing` the signed-token source's, over a private JWK and an Ed25519 key's PKCS#8 and SubjectPublicKeyInfo PEMs (D63). Its `comment` states the harness; `runtime/http/go/README.md` describes it. |
 | `cors_parity.json` | The decisions of a site's CORS (D55, amended): Go's `cors.Policy.Decide`, TypeScript's `corsDecision` and Rust's `cors::Policy::decide`. Its `comment` states the harness; `runtime/http/go/cors` writes it with `-update`. |
 | `stackconfig_parity.json` | The vectors of the readers of a stack's derived fields (D51, D57): `LoadDatabase`, `LoadService`, `LoadBucket`, `LoadCallers` and `LoadCORS` and their TypeScript and Rust twins. Its `comment` states the harness; `runtime/http/go/stackconfig` writes it with `-update`. |
 | `identity_parity.json` | The identity runtime's vectors (D50), described below. |

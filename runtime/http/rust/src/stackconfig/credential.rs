@@ -5,7 +5,7 @@
 use serde_json::Value;
 
 use super::{Credential, Source, StackConfigError};
-use crate::{GoogleIdTokenSource, SignedKeySource, TokenFileSource, TokenSource};
+use crate::{is_pem, GoogleIdTokenSource, SignedKeySource, TokenFileSource, TokenSource};
 
 /// The token source a [`Credential`] names, over the runtime's sources: a
 /// Google ID token for its audience from the metadata server
@@ -13,7 +13,9 @@ use crate::{GoogleIdTokenSource, SignedKeySource, TokenFileSource, TokenSource};
 /// token in its file ([`TokenFileSource`]), or a token signed with its key
 /// as its issuer, for its audience ([`SignedKeySource`], `iss` and `sub`
 /// both the issuer). It refuses a member the source reads that is missing,
-/// a `signed-token` key that is not an Ed25519 private JWK's JSON, and a
+/// a `signed-token` key that is neither an Ed25519 private JWK's JSON nor an
+/// Ed25519 private key's PKCS#8 PEM, as the generic connector gives it
+/// (D63), and a
 /// `google-id-token` source without the `http-client` feature. Its
 /// messages never carry the key.
 ///
@@ -69,13 +71,19 @@ pub(crate) fn credential_source_with(
             let audience = member(&credential.audience, "audience")?;
             let issuer = member(&credential.issuer, "issuer")?;
             let key = member(&credential.key, "key")?;
-            let jwk: Value = serde_json::from_str(&key).map_err(|_| {
-                StackConfigError::one("a signed-token credential's key is not a JWK's JSON")
-            })?;
-            let signer =
-                SignedKeySource::new(&jwk, issuer.clone(), issuer, audience).map_err(|err| {
-                    StackConfigError::one(format!("a signed-token credential: {err}"))
+            // The generic connector's key is a PKCS#8 PEM, the local
+            // target's a JWK's JSON (D63).
+            let signer = if is_pem(&key) {
+                SignedKeySource::from_pem(&key, issuer.clone(), issuer, audience)
+            } else {
+                let jwk: Value = serde_json::from_str(&key).map_err(|_| {
+                    StackConfigError::one(
+                        "a signed-token credential's key is not a JWK's JSON or a PEM",
+                    )
                 })?;
+                SignedKeySource::new(&jwk, issuer.clone(), issuer, audience)
+            }
+            .map_err(|err| StackConfigError::one(format!("a signed-token credential: {err}")))?;
             Ok(signer.build())
         }
     }

@@ -45,6 +45,7 @@
     "gcp:projects/iAMMember:IAMMember",
     "gcp:secretmanager/secret:Secret",
     "gcp:secretmanager/secretIamMember:SecretIamMember",
+    "gcp:secretmanager/secretVersion:SecretVersion",
     "gcp:serviceaccount/account:Account",
     "gcp:serviceaccount/iAMMember:IAMMember",
     "gcp:sql/database:Database",

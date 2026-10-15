@@ -40,6 +40,11 @@ const (
 	// Target is the target's name.
 	Target = "local"
 
+	// Provider is the provider each platform of the target runs on: the
+	// machine at hand. Its http edges are its own connector's, so the
+	// generic connector never serves two of its platforms (D63).
+	Provider = "local"
+
 	// ServerPlatform runs a server as a process; DatabasePlatform runs a
 	// database as databases on the environment's Postgres container;
 	// JobPlatform runs a job as a process on its schedule, or once on
@@ -223,6 +228,7 @@ func Register(r *registry.Registry) error {
 			Lower:     lowerBucket,
 		},
 	} {
+		spec.Provider = Provider
 		if err := r.RegisterPlatform(spec); err != nil {
 			return err
 		}

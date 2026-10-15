@@ -12,6 +12,7 @@ import (
 	"github.com/parable-work/superschematic/extensions/pulumi"
 	ir "github.com/parable-work/superschematic/ir"
 	"github.com/parable-work/superschematic/registry"
+	"github.com/parable-work/superschematic/stack"
 )
 
 var update = flag.Bool("update", false, "rewrite the golden files")
@@ -58,6 +59,11 @@ func TestRenderGoldens(t *testing.T) {
 			versions: gcpVersions},
 		{name: "gcp-shop-preview", env: func(t *testing.T) *ir.ResolvedEnvironment { return gcpEnvironment(t, "Preview") },
 			versions: gcpVersions},
+		// The generic connector's key node, the secret version that holds
+		// its private key and the secretKeyRef that mounts it (D63), with
+		// the tls provider pinned as the binary pins it.
+		{name: "gcp-mixedshop-staging", env: func(t *testing.T) *ir.ResolvedEnvironment { return gcpGolden(t, "MixedShop", "Staging") },
+			versions: map[string]string{"gcp": gcp.ProviderVersion, stack.GenericKeyPackage: stack.GenericKeyProviderVersion}},
 		{name: "demo-shared", env: func(*testing.T) *ir.ResolvedEnvironment { return sharedEnvironment() },
 			versions: map[string]string{"random": randomVersion}},
 		{name: "demo-preview", env: func(*testing.T) *ir.ResolvedEnvironment { return previewEnvironment(8, true) },
@@ -99,6 +105,34 @@ func TestRenderGoldens(t *testing.T) {
 				t.Errorf("render removed a stack settings file: %v", err)
 			}
 		})
+	}
+}
+
+// TestExportsLeaveSecretMembersOut: the mixed shop's program exports each
+// generic key node's public key, which a callee's callers field reads, but
+// not its private key, which a secret member references and only the
+// secret's version reads (D63).
+func TestExportsLeaveSecretMembersOut(t *testing.T) {
+	exports, err := pulumi.Exports(gcpGolden(t, "MixedShop", "Staging"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var keys []string
+	for _, exp := range exports {
+		if strings.Contains(exp.Key, ".calls.") {
+			keys = append(keys, exp.Key)
+		}
+	}
+	want := []string{
+		"Orders.calls.shop-pricing.key.id",
+		"Orders.calls.shop-pricing.key.publicKeyPem",
+		"shop-orders-ship-orders.calls.shop-pricing.key.id",
+		"shop-orders-ship-orders.calls.shop-pricing.key.publicKeyPem",
+		"shop-storefront.calls.shop-api.key.id",
+		"shop-storefront.calls.shop-api.key.publicKeyPem",
+	}
+	if strings.Join(keys, "\n") != strings.Join(want, "\n") {
+		t.Errorf("key exports:\n%s\nwant:\n%s", strings.Join(keys, "\n"), strings.Join(want, "\n"))
 	}
 }
 

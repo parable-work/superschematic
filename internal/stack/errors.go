@@ -44,6 +44,12 @@ const (
 	// not exposed, which no browser reaches (D55).
 	CodeSiteCallsUnexposed Code = "site-calls-unexposed"
 
+	// CodeCrossProviderUnexposed is an http edge between deployables of two
+	// providers, which the generic connector serves, to a server that is
+	// not exposed: the generic connector reaches a server only at its
+	// public address (D63).
+	CodeCrossProviderUnexposed Code = "cross-provider-unexposed"
+
 	// CodePolicy is a violation of a target's policy rule.
 	CodePolicy Code = "policy"
 

@@ -112,6 +112,11 @@ browser carries its end user's token. Resolution refuses a site that
 calls an API whose server the stack does not expose
 (`site-calls-unexposed`), which no browser reaches.
 
+An http edge between deployables on platforms of two providers, which the
+generic connector serves (section 6.2, D63), reaches the callee at its
+public address too, so its server must be exposed: resolution refuses one
+the stack does not expose (`cross-provider-unexposed`).
+
 A job takes its API's edges, from itself (D52): the sql edge to the API's
 database, an http edge to the server of each API its API calls, and a
 bucket edge to each bucket its API lists. A job
@@ -254,9 +259,9 @@ connector's value against it and refuses one that breaks it with a
 | Edge | Value | Members |
 | --- | --- | --- |
 | sql | `ir.DatabaseConnection` | `url`, a connection string; or `cloudSql`, a Cloud SQL connector configuration: `instance` (the instance connection name), `database` and `user` (the IAM database user) |
-| http | `ir.ServiceEndpoint` | `url`, the callee's base URL; and an optional `credential`: its `source` (`google-id-token`, `token-file` or `signed-token`, the runtimes' sources of section 9.6), the settings that source reads (`audience`, `tokenFile`, `issuer`, `key`), and the `headers` that carry it, which include `Service-Authorization` |
+| http | `ir.ServiceEndpoint` | `url`, the callee's base URL; and an optional `credential`: its `source` (`google-id-token`, `token-file` or `signed-token`, the runtimes' sources of section 9.6), the settings that source reads (`audience`, `tokenFile`, `issuer`, `key`), and the `headers` that carry it, which include `Service-Authorization`. A signed token's `key` is an Ed25519 private JWK's JSON or the PEM of its PKCS#8 encoding, and a secret member (below) |
 | bucket | `ir.BucketConnection` | `name`, the bucket's name with its provider; and an optional `endpoint`, the base URL of an emulator that serves the provider's API in its place. It holds no credential: on gcp the workload's own account reaches the bucket (D54) |
-| http, for the callee's `<API>_CALLERS` | `ir.ServiceAuth` | `issuers`, each an `ir.ServiceAuthIssuer`: `issuer` and `issuerAliases`, `audience`, `algorithms`, `jwksUrl` or `keys` (each a `jwk`, a public JWK's JSON), `subjectClaim`, `maxLifetimeSeconds`, and `callers`, each a `subject`, the `deployable` it is and the APIs it `serves`. A connector gives one issuer per edge, listing the edge's caller (`Connected.Callee`), and resolution merges the edges to the API by issuer (section 9.2) |
+| http, for the callee's `<API>_CALLERS` | `ir.ServiceAuth` | `issuers`, each an `ir.ServiceAuthIssuer`: `issuer` and `issuerAliases`, `audience`, `algorithms`, `jwksUrl` or `keys` (each a `jwk`, a public JWK's JSON, or a `pem`, an Ed25519 public key's SubjectPublicKeyInfo PEM, D63), `subjectClaim`, `maxLifetimeSeconds`, and `callers`, each a `subject`, the `deployable` it is and the APIs it `serves`. A connector gives one issuer per edge, listing the edge's caller (`Connected.Callee`), and resolution merges the edges to the API by issuer (section 9.2) |
 | site | `ir.SiteEndpoint` | `url`, the API's public base URL, its server's `PublicAddressOf` (section 6.1) |
 | site, for the callee's `<API>_CORS` | `ir.CORSPolicy` | `origins`, the public origin of each site whose site edge reaches the API, in the order of the edges, each once: `<scheme>://<host>[:<port>]` or a reference. Resolution writes it from the sites' public addresses (D55) |
 
@@ -281,6 +286,21 @@ whole number is its decimal. `ir.DerivedVariables` encodes a value that
 way for platforms, and the generated loaders read it back.
 Each variable is a plain string a platform can set from an output
 reference, or from its secret store for a member such as a signing key.
+
+A secret member is one the contract marks as holding a secret: a
+signed-token credential's `key`, today (`ir.SecretDerivedMember`). A
+connector derives it as a reference to an output, never a literal, so
+`environment.json` never holds it, and resolution refuses a literal one
+(`lowering`). `ir.DerivedVariables` marks its variable `Secret`, and a
+platform sets that variable from its secret store, never as a plain value
+(D63): gcp writes a Secret Manager secret of the deployable's own,
+`<stack>-<environment>-<deployable>-<variable>`, a version whose data is
+the reference, and the deployable's accessor grant, and mounts the
+variable with `valueSource.secretKeyRef` at that version, so a new key
+rolls out a new revision. The local target's process already reads the
+key it references from the environment's state directory, which its
+provisioner resolves when it starts the process (section 8.3). The Pulumi
+program exports no output a secret member references.
 
 Not taken: the value as one JSON document in one variable. Every
 provisioner would have to render references inside a JSON string, and no
@@ -719,6 +739,11 @@ A platform realizes one deployable kind on one runtime: Cloud Run servers,
 Cloud SQL databases, local processes, a local Postgres container. It
 registers a `PlatformSpec`:
 
+- `Provider`, the provider it runs its deployables on: `local`, `gcp`,
+  `cloudflare`, `fake` (D63). Two platforms of one provider meet only
+  through a connector that names both; between two of different providers
+  that no connector names, the generic connector serves an http or a site
+  edge (section 6.2);
 - `Kind`, the deployable kind, and what it accepts: `Languages` for a
   server, job or worker platform, spelt as `outputs.api.language` spells
   them (`GO`, `TYPESCRIPT`, `RUST`), since a job or a worker is written in
@@ -744,7 +769,7 @@ registers a `PlatformSpec`:
   its `run.app` URL without a domain, where its ingress lets a browser
   reach it; a site's is `https://<site>.<domain>`, or without a domain
   `http://` and its load balancer's address. The generic connector, which
-  joins deployables on two targets, will read it too;
+  joins deployables of two providers, reaches a callee there too (D63);
 - `Lower`, a pure function from the environment and the resolved
   deployable, bindings included, to the deployable's resources and, for an
   exposed server, the DNS records it needs (section 6.9).
@@ -786,9 +811,74 @@ authenticates with a key pair generated for the edge:
   `ServiceAuthenticator` (section 9.2) verifies it.
 
 This works between any two platforms and needs no long-lived cloud
-credential, such as a service account key, on the other provider. It lands
-with the second target (section 14), when there is a second provider to
-mix with.
+credential, such as a service account key, on the other provider.
+
+It is built (D63), ahead of the second target, in `internal/stack/generic`.
+The core registers it beside the local target, as two `ConnectorSpec`s
+with `Generic` set and no platform named: `generic.http` and
+`generic.site`. `Registry.Connector` returns the connector that names
+both platforms when one does, and otherwise the generic one of the edge's
+kind when both platforms are registered and their `Provider`s differ, so
+a specific connector always wins. Two platforms of one provider that no
+connector names still have none (`no-connector`), and a sql or a bucket
+edge across providers needs a connector that knows both, such as
+Hyperdrive to another cloud's Postgres (section 6.8).
+
+- **A site edge** derives the API's public address, as every site
+  connector does (`ir.SiteEndpoint`, D55), with no resource.
+- **An http edge** needs the callee exposed (`cross-provider-unexposed`,
+  section 3.3) with a public address its platform gives (`lowering`
+  without one). It adds the edge's key node,
+  `<caller>.calls.<callee>.key`, a `tls:index/privateKey:PrivateKey` of
+  the Pulumi `tls` provider with the algorithm `ED25519`, which two edges
+  from one caller to two APIs of one callee share. The caller's value is
+  the callee's public address and a `signed-token` credential, `issuer`
+  the caller's deployable and `audience` the callee's, whose `key`
+  references the node's `privateKeyPemPkcs8`, a secret member (section
+  3.4). The callee's issuer is the caller, with the node's `publicKeyPem`
+  as its one key (`pem`), EdDSA and tokens of at most 300 seconds.
+
+The provider generates the key, keeps it in the provisioner's state and
+writes it as PEM, the private key PKCS#8 and the public key
+SubjectPublicKeyInfo (RFC 8410), not as JWKs. So the HTTP runtimes read
+both PEMs beside a JWK, and compute the key's `kid`, its RFC 7638
+thumbprint, from the key itself (section 9.2). The root module pins the
+type's schema at pulumi-tls 5.6.2 (`internal/stack/generic/schemas`,
+`internal/tools/providerschemas`), and the connector registers it
+(`ConnectorSpec.ResourceTypes`), so a key node validates in an
+environment of any target; a distribution passes the version to the
+provisioner (`stack.GenericKeyProviderVersion`).
+
+The local target's connector names its two process platforms, so the
+generic one never serves a local edge, and its own key pair, whose
+`privateJwk` the provisioner resolves from the state directory, stays the
+local one. Each edge has one key slot: rotation (section 9.2) is not
+built.
+
+One environment still has one target and one provisioner, and the deploy
+seams follow the environment's target (`internal/stackdeploy`): its state,
+secrets, builder, migration runner, jobs runner and site publisher. A
+mixed environment resolves and renders offline, as `extensions/gcp`'s
+`MixedShop` goldens and the Pulumi render golden `gcp-mixedshop-staging`
+show with the fake target's edge platform beside Cloud Run. A real mixed
+deploy, for Cloudflare Workers beside gcp, will also need:
+
+- the credentials of each provider the environment places a deployable
+  on, not only the DNS platform's: `stackdeploy.CredentialsOf` returns
+  `dns.credentials` alone, so a Workers platform's API token and account
+  would come from a platform's credentials, resolved into
+  `environment.json` as a DNS platform's are, and handed to the run in
+  `ProvisionRequest.Env`;
+- a build per platform: the deploy's `Builder` is the target's and builds
+  container images, and `--image` and the manifest pin a server's
+  repository by digest, while a Worker is a script bundle, which would be
+  built and pinned by its digest as a site's files are (D55);
+- each platform's own secret store for `Secret<T>` fields, which the
+  target's `Secrets` seam holds today, and the Workers platform's lowering
+  of a secret member to a Workers secret from the key node's output;
+- a migration runner per database platform, for D1 beside Cloud SQL;
+- the target's policy rules over nodes of another provider, which they
+  must leave alone by type, as gcp's do.
 
 ### 6.3 Target
 
@@ -820,13 +910,15 @@ provisioner is the only one that applies them.
 Every deployable records its own placement in the IR from the start; the
 environment's target is only the default. A `settings` entry can place one
 deployable on another target's platform, for example a TypeScript server on
-Cloudflare Workers in an otherwise gcp environment. Until the generic
-connector lands (section 6.2), only edges a specific connector serves
-resolve. In v1 those are same-target edges, and any other edge is a resolve
-error that names the pair: "no connector from cloudflare.workers to
-gcp.cloudrun over http". The provisioner already runs several providers in
-one program, so adding mixing later changes connectors, not the IR or the
-provisioner.
+Cloudflare Workers in an otherwise gcp environment. An edge a specific
+connector serves resolves through it; an http or a site edge between
+platforms of two providers that none serves resolves through the generic
+connector (section 6.2, D63); any other edge is a resolve error that names
+the pair: "no connector from fake.run to fake.edge over http". The
+provisioner already runs several providers in one program, so mixing
+changed connectors and the runtimes' key formats, not the IR or the
+provisioner. The deploy seams are still the environment's target's
+(section 6.2 lists what a real mixed deploy will need).
 
 ### 6.4 Resource graph
 
@@ -868,6 +960,12 @@ connectors and DNS platform emit. `extensions/gcp/internal/tools/providerschemas
 writes one file per type beside it, and CI runs it with `-check`. The
 target registers each file as the JSON Schema of its type's properties,
 with every object type closed, since Pulumi refuses an unknown property.
+The root module pins one type the same way, the generic connector's key
+node, `tls:index/privateKey:PrivateKey` at pulumi-tls 5.6.2, in
+`internal/stack/generic/schemas`, which the connector registers itself
+(D63). pulumi-tls is bridged through the Terraform plugin framework, whose
+`bridge-metadata.json` has no alias table, so the tool takes a type's
+Terraform name from the metadata's renames table there.
 
 Each pinned file also records the type's Terraform name and any property
 renames, taken from the bridged provider's published mapping:
@@ -1073,15 +1171,20 @@ its platforms, connectors and provisioner (section 8.3, and D30, amended:
 the core registers the local target), and one CI renderer, `github`
 (D47); every other is an extension's.
 
-- `RegisterPlatform(PlatformSpec)` refuses a malformed or repeated name, an
+- `RegisterPlatform(PlatformSpec)` refuses a malformed or repeated name, a
+  missing or malformed provider (D63), an
   unknown deployable kind, a server platform without languages or a
   database platform without dialects (or either with the other's list), an
   unknown or repeated language or dialect, a settings schema that does not
   compile, an identity config that is not a server platform's JSON object,
   and a missing `NameOf`, `AddressOf` or `Lower`.
 - `RegisterConnector(ConnectorSpec)` refuses a malformed or repeated name,
-  an unknown edge kind, a missing platform or `Connect`, and a second
-  connector for one edge kind between the same two platforms.
+  an unknown edge kind, a missing platform or `Connect`, a second
+  connector for one edge kind between the same two platforms, and a
+  resource type schema that does not compile or that another registration
+  holds differently (`ResourceTypes`, for a type no target registers). A
+  generic connector (D63) names no platform, serves an http or a site
+  edge, and is the only one of its edge kind.
 - `RegisterTarget(TargetSpec)` refuses a malformed or repeated name, an
   unknown deployable kind, a values or resource type schema that does not
   compile, a resource type another target or a DNS platform registered
@@ -1106,8 +1209,8 @@ the core registers the local target), and one CI renderer, `github`
   relative path inside the repository.
 
 A name is lowercase words joined by dots or hyphens (`gcp.cloudrun`).
-`Finalize` checks that each connector joins registered platforms of the
-kinds its edge joins. It checks that each platform a target names is
+`Finalize` checks that each connector but a generic one joins registered
+platforms of the kinds its edge joins. It checks that each platform a target names is
 registered and of the kind it places, and that a DNS platform or
 provisioner the target names is registered; a target may name neither.
 
@@ -1242,7 +1345,9 @@ Each failure carries a code, and `internal/stack/errors.go` lists them
 all. The checks of section 5.2 have one each: `unbound-field`,
 `unknown-env-key`, `secret-literal`, `kind-mismatch`, `unrealizable`,
 `no-connector`, `expose-not-server` and `policy`, and the check section
-9.3 adds has `unreachable-edge`. Malformed declarations,
+9.3 adds has `unreachable-edge`. A site that calls an unexposed API is
+`site-calls-unexposed` (D55), and an http edge across providers to an
+unexposed server `cross-provider-unexposed` (D63). Malformed declarations,
 unknown names and values that fail a schema have their own codes. So do
 three failures section 5.2 does not list:
 
@@ -2945,6 +3050,7 @@ and refuses every service credential.
 | --- | --- | --- | --- | --- |
 | local | the caller's deployable | the edge's key pair's `publicJwk` output | the callee's deployable | the caller's deployable in `sub`; a token lives at most 300 seconds |
 | gcp | `https://accounts.google.com`, alias `accounts.google.com` | `https://www.googleapis.com/oauth2/v3/certs` | the callee's custom audience | the caller's service account, `<service>@<project>.iam.gserviceaccount.com`, in `email` |
+| generic (D63) | the caller's deployable | the edge's key node's `publicKeyPem` output, a SubjectPublicKeyInfo PEM (`pem`) | the callee's deployable | the caller's deployable in `sub`; a token lives at most 300 seconds |
 
 In environment variables the field follows section 3.4's encoding, with
 two rules it adds: a list of objects is a variable that holds the list's
@@ -3005,6 +3111,20 @@ The generic connector's token:
   clocks. The caller signs a new token when the one it holds has less than
   a minute left.
 
+The key's formats (D63): the local target's key pair is a JWK, whose
+`kid` is its thumbprint, and the generic connector's key node, a Pulumi
+`tls` PrivateKey, is PEM, the private key PKCS#8 and the public key
+SubjectPublicKeyInfo (RFC 8410). Each runtime's signed-token source takes
+the private JWK's JSON or the PKCS#8 PEM (Go `serviceauth.SignedToken`,
+TypeScript `signedTokenSource`, Rust `SignedKeySource::from_key`), and its
+callers reader takes a key's `jwk`, or its `pem`, which it reads as an
+Ed25519 JWK (`serviceauth.PublicJWKFromPEM`, `ed25519PublicJwkFromPem`,
+`ed25519_public_jwk_from_pem`). A PEM's `kid` is its key's RFC 7638
+thumbprint, which both sides compute from the key, so no `kid` travels in
+the graph. Only an Ed25519 key's RFC 8410 encodings are read, one PEM
+block with nothing but whitespace around it; the `signing` section of the
+parity vectors (section 9.8) holds the three runtimes to one token.
+
 Each edge has two key slots. Each slot is replaced every 180 days, the two
 offset by 90 days, by a `Rotating` node of the `time` provider in the
 resource graph; the period is a connector setting. The callee accepts both
@@ -3013,6 +3133,9 @@ deploy before callers (section 5.3), so a callee holds a new public key
 before any caller signs with it. A key pair is a credential the platform
 generates, not a secret a person enters (section 4.2): the private key goes
 into the caller's secret store, the public key into the callee's config.
+Rotation is not built: the generic connector and the local target give
+each edge one key slot today, and a key changes only when its node is
+replaced.
 
 The `local` target uses the same tokens. `stack dev` generates a key pair
 per edge into the gitignored local file, and the callee's callers field
@@ -3308,7 +3431,12 @@ for two, which D30 rejected.
   clause), the request's headers, and an end-user authenticator stub keyed
   by token;
 - the expected status and code, the `ServiceCaller` and end user on the
-  context, and whether the end-user authenticator ran.
+  context, and whether the end-user authenticator ran;
+- in `signing`, the signed-token source's vectors (D63): a key as a
+  credential holds it, a private JWK's JSON or a PKCS#8 PEM, and the
+  token's header, `kid` included, and claims but `jti`, which each runtime
+  signs and verifies against the SubjectPublicKeyInfo PEM read as a JWK;
+  and keys the source refuses, such as a P-256 key's PKCS#8.
 
 The cases cover each row of section 9.3's table; expiry, a token not yet
 valid, the wrong audience and the wrong issuer; an unknown `kid`, `alg:
@@ -3893,7 +4021,9 @@ whatever the deploy decides is affected, and needs no list of its own.
 ## 13. Module layout
 
 - **The root module:** the Stack kind, the resolver, the registry specs,
-  the `local` target, the `stack` commands, and the `ci` generator with
+  the `local` target, the generic connector with its pinned pulumi-tls
+  schema (`internal/stack/generic`, D63), the `stack` commands, and the
+  `ci` generator with
   the `github` CI renderer (`internal/generator/cigen`): a workflow is
   text, with no dependency to keep out of the core (D47).
 - **`extensions/gcp`**, a Go module of its own (D1): the gcp target's
@@ -3917,9 +4047,10 @@ whatever the deploy decides is affected, and needs no list of its own.
   `cli.New(cli.Config{Name: "superschematic"}, gcp.Extension{},
   cloudflare.Extension{}, pulumi.Extension{ProviderVersions:
   map[string]string{"gcp": gcp.ProviderVersion, cloudflare.Package:
-  cloudflare.ProviderVersion}})`, so the provisioner installs each
-  provider at the release whose schemas the target or the DNS platform
-  checks against. An engineer installs one binary and gets every official
+  cloudflare.ProviderVersion, stack.GenericKeyPackage:
+  stack.GenericKeyProviderVersion}})`, so the provisioner installs each
+  provider at the release whose schemas the target, the DNS platform or
+  the generic connector checks against. An engineer installs one binary and gets every official
   target. `extensions/topcoat` is not linked (D44); its own binary links
   it. A release builds this binary and tags the module with the others.
 
@@ -4046,12 +4177,19 @@ model, or retired, when it lands.
      Storage, never run against Google Cloud (section 8.9, D54);
    - queues in a DB service's database, and Go and TypeScript workers
      that handle them, on the local target and on gcp as Cloud Run worker
-     pools (section 8.8, D53).
-   
-   Not yet: a site's SDK clients in the browser, and the second target,
-   which is Cloudflare (section 18, D64), with the generic connector
-   (section 6.2, D63).
-   
+     pools (section 8.8, D53);
+   - the generic connector (section 6.2, D63), ahead of the second target:
+     platforms name their provider, an http or a site edge between two
+     providers falls back to it, an http one signs with a per-edge Ed25519
+     key from the Pulumi `tls` provider whose private key reaches the
+     caller through its platform's secret store, and the three runtimes
+     read the key's PEMs. Proven offline, with the fake target's edge
+     platform beside gcp; no mixed environment has deployed.
+
+   Not yet: the second target, which is Cloudflare (section 18, D64), a
+   mixed environment's deploy (section 6.2 lists what it needs), key
+   rotation, and a site's SDK clients in the browser.
+
    The second target is done when acme-shop's storefront has run live on
    Workers and a D1-backed TypeScript API has run live (section 18.15).
 
