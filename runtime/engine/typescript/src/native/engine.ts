@@ -1040,7 +1040,7 @@ export class NativeEngine {
 
   /** The routes the engine serves (api::routes): what engineApp and engineMcp mount. */
   routes(): EngineRoute[] {
-    return this.calls.sync('api.routes', undefined) as EngineRoute[];
+    return JSON.parse(loadAddon().engineRoutes()) as EngineRoute[];
   }
 
   /** handleHttp serves one request through the engine's own routes (src/native/http.ts). */

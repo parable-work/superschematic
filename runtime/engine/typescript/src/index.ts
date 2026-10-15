@@ -6,6 +6,9 @@ runtime/engine/README.md.
 */
 
 export { Engine, openEngine } from './engine.js';
+// The engine's API with every call a promise, on the Rust engine (D58):
+// for a server on Postgres.
+export { AsyncNativeEngine, openEngineAsync } from './native/async.js';
 export type { EngineOptions } from './engine.js';
 
 export { SERVICE_SUBJECT_PREFIX, allowAll, permissionPolicy, servicePrincipal, standsIn } from './access.js';

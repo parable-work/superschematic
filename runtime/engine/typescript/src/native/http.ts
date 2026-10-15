@@ -51,7 +51,59 @@ import { engineProblem } from '../http/problems.js';
 import { checkStreamOptions } from '../http/stream.js';
 import type { EngineMcpOptions } from '../mcp/app.js';
 import type { ToolFilter } from '../tools/catalog.js';
+import type { StreamPull } from './addon.js';
+import { AsyncNativeEngine } from './async.js';
 import type { EngineRoute, NativeEngine } from './engine.js';
+
+/** An engine these adapters serve: the synchronous facade's, or openEngineAsync's. */
+export type ServedEngine = NativeEngine | AsyncNativeEngine;
+
+// What a route's handler needs of the engine: one request served, the
+// event stream pulled and ended, and its commits watched.
+interface Serving {
+  routes(): EngineRoute[];
+  serve(head: Record<string, unknown>, body: Buffer | undefined, filter: ToolFilter | undefined): Promise<{ answer: HttpAnswerLike; thrown?: { value: unknown } }>;
+  /** A pull: at once on this thread (sync), or waiting off it up to the heartbeat (async). */
+  pull(id: number, heartbeatMs: number): Promise<StreamPull>;
+  /** Whether a pull that finds nothing should wait here for a commit or the heartbeat. */
+  readonly waitsHere: boolean;
+  close(id: number): void;
+  watch(wake: () => void): (() => void) | undefined;
+}
+
+interface HttpAnswerLike {
+  status: number;
+  headers: string[][];
+  body?: Buffer | null;
+  stream?: number | null;
+}
+
+function servingOf(engine: ServedEngine): Serving {
+  if (engine instanceof AsyncNativeEngine) {
+    return {
+      routes: () => engine.routes(),
+      serve: async (head, body, filter) => {
+        if (filter !== undefined) {
+          throw new TypeError('a tool filter written in TypeScript answers on the JavaScript thread: an engine opened with openEngineAsync serves without one');
+        }
+        return { answer: await engine.handleHttp(head, body) };
+      },
+      // The engine waits for a commit or its heartbeat off this thread.
+      pull: (id, heartbeatMs) => engine.streamPull(id, Math.min(heartbeatMs, 1000)),
+      waitsHere: false,
+      close: (id) => engine.streamClose(id),
+      watch: () => undefined,
+    };
+  }
+  return {
+    routes: () => engine.routes(),
+    serve: async (head, body, filter) => engine.handleHttp(head, body, filter),
+    pull: async (id) => engine.streamPull(id),
+    waitsHere: true,
+    close: (id) => engine.streamClose(id),
+    watch: (wake) => engine.events.watch({ committed: wake, closed: wake }),
+  };
+}
 
 // The routes whose body the runtime's body limit caps, as the TypeScript
 // app's routes that take an input.
@@ -73,7 +125,7 @@ interface Mount {
 }
 
 /** nativeEngineApp is engineApp for an engine on the Rust engine. */
-export function nativeEngineApp(engine: NativeEngine, options: EngineHttpOptions = {}): Hono {
+export function nativeEngineApp(engine: ServedEngine, options: EngineHttpOptions = {}): Hono {
   const stream = checkStreamOptions(options.stream ?? {});
   const { identity } = options;
   const deployed = options.onError;
@@ -84,8 +136,9 @@ export function nativeEngineApp(engine: NativeEngine, options: EngineHttpOptions
   };
   const app = new Hono();
   const cors = identity ? identityCorsRoutes(app, identity) : () => {};
-  mountRoutes(app, engine, cors, {
-    routes: engine.routes().filter((route) => !route.mcp),
+  const serving = servingOf(engine);
+  mountRoutes(app, serving, cors, {
+    routes: serving.routes().filter((route) => !route.mcp),
     runtime,
     rateLimitPerMinute: options.rateLimitPerMinute,
     timeoutSeconds: options.timeoutSeconds,
@@ -113,7 +166,7 @@ export function nativeEngineApp(engine: NativeEngine, options: EngineHttpOptions
 }
 
 /** nativeEngineMcp is engineMcp for an engine on the Rust engine: its MCP endpoint, the engine's own. */
-export function nativeEngineMcp(engine: NativeEngine, options: EngineMcpOptions = {}): Hono {
+export function nativeEngineMcp(engine: ServedEngine, options: EngineMcpOptions = {}): Hono {
   const deployed = options.onError;
   const authenticate = options.identity ? identityRouterOptions(options, 'engineMcp').authenticate : options.authenticate;
   const runtime: RouterRuntimeOptions = {
@@ -124,8 +177,9 @@ export function nativeEngineMcp(engine: NativeEngine, options: EngineMcpOptions 
   const app = new Hono();
   const cors = options.identity ? identityCorsRoutes(app, options.identity) : () => {};
   const serverInfo = options.serverInfo ?? packageInfo();
-  mountRoutes(app, engine, cors, {
-    routes: engine.routes().filter((route) => route.mcp),
+  const serving = servingOf(engine);
+  mountRoutes(app, serving, cors, {
+    routes: serving.routes().filter((route) => route.mcp),
     runtime,
     rateLimitPerMinute: options.rateLimitPerMinute,
     timeoutSeconds: options.timeoutSeconds,
@@ -139,7 +193,7 @@ export function nativeEngineMcp(engine: NativeEngine, options: EngineMcpOptions 
   return app;
 }
 
-function mountRoutes(app: Hono, engine: NativeEngine, cors: (spec: OperationSpec) => void, mount: Mount): void {
+function mountRoutes(app: Hono, engine: Serving, cors: (spec: OperationSpec) => void, mount: Mount): void {
   for (const route of mount.routes) {
     const spec: OperationSpec = {
       name: route.name,
@@ -162,7 +216,7 @@ function mountRoutes(app: Hono, engine: NativeEngine, cors: (spec: OperationSpec
   }
 }
 
-async function serve(engine: NativeEngine, route: EngineRoute, mount: Mount, c: Context, ctx: RequestContext): Promise<Response> {
+async function serve(engine: Serving, route: EngineRoute, mount: Mount, c: Context, ctx: RequestContext): Promise<Response> {
   const principal = principalOf(ctx);
   const caller =
     principal.service?.standsIn === true
@@ -190,7 +244,7 @@ async function serve(engine: NativeEngine, route: EngineRoute, mount: Mount, c: 
     requestId: ctx.requestId,
     options: mount.options,
   };
-  const { answer, thrown } = engine.handleHttp(head, body !== undefined && body.length > 0 ? body : undefined, mount.tools);
+  const { answer, thrown } = await engine.serve(head, body !== undefined && body.length > 0 ? body : undefined, mount.tools);
   if (thrown !== undefined && mount.onError !== undefined) {
     // What a behavior written in TypeScript threw: the mount's to map.
     const mapped = await mount.onError(thrown.value, ctx);
@@ -217,7 +271,7 @@ async function serve(engine: NativeEngine, route: EngineRoute, mount: Mount, c: 
 
 // eventBody pulls an event stream the engine holds open, on this thread:
 // a pull that finds nothing waits for a commit or the heartbeat.
-function eventBody(engine: NativeEngine, id: number, heartbeatMs: number, signal: AbortSignal): ReadableStream<Uint8Array> {
+function eventBody(engine: Serving, id: number, heartbeatMs: number, signal: AbortSignal): ReadableStream<Uint8Array> {
   let done = false;
   let wake: (() => void) | undefined;
   let beatAt: number | undefined;
@@ -230,7 +284,7 @@ function eventBody(engine: NativeEngine, id: number, heartbeatMs: number, signal
     unwatch?.();
     signal.removeEventListener('abort', teardown);
     try {
-      engine.streamClose(id);
+      engine.close(id);
     } catch {
       // Closed with the engine.
     }
@@ -239,7 +293,7 @@ function eventBody(engine: NativeEngine, id: number, heartbeatMs: number, signal
   return new ReadableStream<Uint8Array>({
     start() {
       try {
-        unwatch = engine.events.watch({ committed: () => wake?.(), closed: () => wake?.() });
+        unwatch = engine.watch(() => wake?.());
       } catch {
         // The engine closed: the first pull ends the stream.
       }
@@ -254,9 +308,9 @@ function eventBody(engine: NativeEngine, id: number, heartbeatMs: number, signal
           end(controller);
           return;
         }
-        let pulled;
+        let pulled: StreamPull;
         try {
-          pulled = engine.streamPull(id);
+          pulled = await engine.pull(id, heartbeatMs);
         } catch {
           teardown();
           end(controller);
@@ -271,6 +325,10 @@ function eventBody(engine: NativeEngine, id: number, heartbeatMs: number, signal
           beatAt = undefined;
           controller.enqueue(new Uint8Array(pulled.data));
           return;
+        }
+        if (!engine.waitsHere) {
+          // The pull waited off this thread and found nothing yet.
+          continue;
         }
         // Nothing yet: wait for a commit, or until the engine's heartbeat
         // is due.
