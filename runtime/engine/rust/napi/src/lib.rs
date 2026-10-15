@@ -298,6 +298,40 @@ struct Opening {
     released: bridge::Released,
 }
 
+// HostToolFilter is a mount's tool filter written in TypeScript (the
+// HTTP and MCP adapters' tools option, a ToolTarget's filter): each tool as
+// [principal, tool, namespace].
+struct HostToolFilter(Host);
+
+impl superschematic_engine::ToolFilter for HostToolFilter {
+    fn keeps(
+        &self,
+        principal: &superschematic_engine::Principal,
+        tool: &superschematic_engine::ToolSummary,
+        namespace: &str,
+    ) -> bool {
+        let mut summary = serde_json::Map::new();
+        summary.insert("handle".into(), Value::from(tool.handle.as_str()));
+        summary.insert("name".into(), Value::from(tool.name.as_str()));
+        if let Some(schema) = &tool.schema {
+            summary.insert("schema".into(), Value::from(schema.as_str()));
+        }
+        summary.insert("operation".into(), Value::from(tool.operation.as_str()));
+        if let Some(behavior) = &tool.behavior {
+            summary.insert("behavior".into(), Value::from(behavior.as_str()));
+        }
+        summary.insert("writes".into(), Value::Bool(tool.writes));
+        let question = Value::Array(vec![
+            serde_json::to_value(principal).unwrap_or(Value::Null),
+            Value::Object(summary),
+            Value::from(namespace),
+        ]);
+        self.0
+            .ask("toolFilter", json::stringify(&question))
+            .is_some_and(|answer| answer == "true")
+    }
+}
+
 // HostIds is an id source written in TypeScript (the engine's ids
 // option), asked on the JavaScript thread alone. What it threw the facade
 // keeps and rethrows once the call returns.
@@ -425,14 +459,24 @@ fn no_bridge() -> Failure {
 // its result written as JavaScript writes it, a panic caught. An engine
 // whose policy or matcher the facade hosts does not start the runner's
 // thread, where they could not be asked.
-fn run(engine: &Engine, request: &str, hosted: bool) -> std::result::Result<String, Failure> {
-    match catch_unwind(AssertUnwindSafe(|| call(engine, request, hosted))) {
+fn run(
+    engine: &Engine,
+    request: &str,
+    hosted: bool,
+    host: Option<&Host>,
+) -> std::result::Result<String, Failure> {
+    match catch_unwind(AssertUnwindSafe(|| call(engine, request, hosted, host))) {
         Ok(outcome) => outcome,
         Err(payload) => Err(Failure::panic(payload.as_ref())),
     }
 }
 
-fn call(engine: &Engine, request: &str, hosted: bool) -> std::result::Result<String, Failure> {
+fn call(
+    engine: &Engine,
+    request: &str,
+    hosted: bool,
+    host: Option<&Host>,
+) -> std::result::Result<String, Failure> {
     let request: Value = serde_json::from_str(request)
         .map_err(|error| Failure::usage(format!("an engine request is JSON: {error}")))?;
     let Value::Object(members) = &request else {
@@ -470,7 +514,21 @@ fn call(engine: &Engine, request: &str, hosted: bool) -> std::result::Result<Str
                 .map_err(|refusal| Failure::of(&Failed::Engine(refusal)))?,
         ),
     };
-    match calls::call(engine, op, principal.as_ref(), args) {
+    // A tools call through a mount's filter written in TypeScript, which
+    // the facade answers on this thread.
+    let filter = match (members.get("toolFilter"), host) {
+        (Some(Value::Bool(true)), Some(host)) => Some(HostToolFilter(host.clone())),
+        (Some(Value::Bool(true)), None) => {
+            return Err(Failure::usage(
+                "a tool filter written in TypeScript comes with the host function",
+            ))
+        }
+        _ => None,
+    };
+    let filter = filter
+        .as_ref()
+        .map(|filter| filter as &dyn superschematic_engine::ToolFilter);
+    match calls::call_with(engine, op, principal.as_ref(), args, filter) {
         Ok(None) => Ok(String::new()),
         Ok(Some(result)) => Ok(json::stringify(&result)),
         Err(error) => Err(Failure::of(&error)),
@@ -486,8 +544,8 @@ pub struct NativeEngine {
     // Whether the facade answers its policy, matcher or a behavior, on the
     // JavaScript thread alone.
     hosted: AtomicBool,
-    // The facade's host function, for a behavior registered later.
-    #[cfg_attr(not(feature = "js-behaviors"), allow(dead_code))]
+    // The facade's host function: what answers a tool filter written in
+    // TypeScript, and a behavior registered later.
     host: Option<Host>,
     // What stops the watch's thread.
     watching: Mutex<Option<Arc<AtomicBool>>>,
@@ -526,6 +584,57 @@ impl NativeEngine {
     }
 }
 
+/// One HTTP answer: its status, its headers as [name, value] pairs
+/// (lowercase names), and its body's bytes or the id of the event stream
+/// the engine holds open.
+#[napi(object)]
+pub struct HttpAnswer {
+    pub status: u32,
+    pub headers: Vec<Vec<String>>,
+    pub body: Option<Buffer>,
+    pub stream: Option<f64>,
+}
+
+/// One pull of an event stream: its bytes, or its end, or neither.
+#[napi(object)]
+pub struct StreamPull {
+    pub data: Option<Buffer>,
+    pub end: bool,
+}
+
+// serve_http serves one request whose head is JSON.
+fn serve_http(
+    engine: &Engine,
+    head: &str,
+    body: Option<Vec<u8>>,
+    host: Option<Host>,
+) -> std::result::Result<HttpAnswer, Failure> {
+    let head: Value = serde_json::from_str(head)
+        .map_err(|error| Failure::usage(format!("an HTTP request's head is JSON: {error}")))?;
+    let filter: Option<Arc<dyn superschematic_engine::ToolFilter>> =
+        match (head.get("toolFilter"), host) {
+            (Some(Value::Bool(true)), Some(host)) => Some(Arc::new(HostToolFilter(host))),
+            (Some(Value::Bool(true)), None) => {
+                return Err(Failure::usage(
+                    "a tool filter written in TypeScript comes with the host function",
+                ))
+            }
+            _ => None,
+        };
+    let reply = calls::http(engine, &head, body, filter).map_err(|error| Failure::of(&error))?;
+    #[allow(clippy::cast_precision_loss)] // a stream id stays below 2^53
+    Ok(HttpAnswer {
+        status: u32::from(reply.status),
+        headers: reply
+            .headers
+            .into_iter()
+            .map(|(name, value)| vec![name, value])
+            .collect(),
+        body: reply.body.map(Buffer::from),
+        stream: reply.stream.map(|id| id as f64),
+    })
+}
+
 /// A call on libuv's pool.
 pub struct CallTask {
     engine: Arc<Engine>,
@@ -537,7 +646,7 @@ impl Task for CallTask {
     type JsValue = String;
 
     fn compute(&mut self) -> Result<Self::Output> {
-        Ok(run(&self.engine, &self.request, false))
+        Ok(run(&self.engine, &self.request, false, None))
     }
 
     fn resolve(&mut self, env: Env, output: Self::Output) -> Result<String> {
@@ -652,7 +761,8 @@ impl NativeEngine {
         }
         let _on_js_thread = OnJsThread::enter(&env);
         let _entry = Entry::enter();
-        run(&engine, &request, self.hosted()).map_err(|failure| failure.into_napi(&env))
+        run(&engine, &request, self.hosted(), self.host.as_ref())
+            .map_err(|failure| failure.into_napi(&env))
     }
 
     /// Makes a call off the JavaScript thread, returning a promise of its
@@ -675,7 +785,7 @@ impl NativeEngine {
         }
         let promise = env.spawn_future_with_callback(
             async move {
-                napi::bindgen_prelude::spawn_blocking(move || run(&engine, &request, false))
+                napi::bindgen_prelude::spawn_blocking(move || run(&engine, &request, false, None))
                     .await
                     .map_err(|error| {
                         napi::Error::from_reason(format!(
@@ -810,6 +920,80 @@ impl NativeEngine {
     pub fn storage_in_transaction(&self) -> bool {
         self.engine()
             .is_ok_and(|engine| engine.db().in_transaction())
+    }
+
+    /// Serves one HTTP request on the JavaScript thread (SQLite): its head
+    /// as JSON (`method`, `prefix`, `path`, `query`, `headers`, `caller`,
+    /// `requestId`, the mount's `options` and whether its `toolFilter` is
+    /// the facade's), and its body's bytes. The answer's body is bytes,
+    /// or the id of an event stream the engine holds open, which
+    /// `streamPull` pulls.
+    #[napi]
+    pub fn handle_http(&self, env: Env, head: String, body: Option<Buffer>) -> Result<HttpAnswer> {
+        if IN_HOST.get() {
+            return Err(reentry().into_napi(&env));
+        }
+        let engine = self.engine().map_err(|failure| failure.into_napi(&env))?;
+        if self.dialect == Dialect::Postgres {
+            return Err(Failure::new(
+                "Error",
+                Some("sync_on_async_storage"),
+                "an engine on Postgres serves HTTP through handleHttpAsync, which returns a promise",
+            )
+            .into_napi(&env));
+        }
+        let _on_js_thread = OnJsThread::enter(&env);
+        let _entry = Entry::enter();
+        let host = self.host.clone();
+        let served = catch_unwind(AssertUnwindSafe(|| {
+            serve_http(&engine, &head, body.map(|body| body.to_vec()), host)
+        }));
+        match served {
+            Ok(Ok(answer)) => Ok(answer),
+            Ok(Err(failure)) => Err(failure.into_napi(&env)),
+            Err(payload) => Err(Failure::panic(payload.as_ref()).into_napi(&env)),
+        }
+    }
+
+    /// Pulls an event stream `handleHttp` holds open, on the JavaScript
+    /// thread and without waiting: its next bytes, `end` once it is over,
+    /// or neither while it has nothing yet (the facade waits for a commit
+    /// or the heartbeat, and pulls again).
+    #[napi]
+    pub fn stream_pull(&self, env: Env, id: f64) -> Result<StreamPull> {
+        let engine = self.engine().map_err(|failure| failure.into_napi(&env))?;
+        let _on_js_thread = OnJsThread::enter(&env);
+        let _entry = Entry::enter();
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let id = id as u64;
+        let pulled = catch_unwind(AssertUnwindSafe(|| {
+            calls::stream_pull(&engine, id, std::time::Duration::ZERO)
+        }));
+        match pulled {
+            Ok(Ok(superschematic_engine::api::Pull::Data(bytes))) => Ok(StreamPull {
+                data: Some(bytes.into()),
+                end: false,
+            }),
+            Ok(Ok(superschematic_engine::api::Pull::Pending)) => Ok(StreamPull {
+                data: None,
+                end: false,
+            }),
+            Ok(Ok(superschematic_engine::api::Pull::End)) => Ok(StreamPull {
+                data: None,
+                end: true,
+            }),
+            Ok(Err(error)) => Err(Failure::of(&error).into_napi(&env)),
+            Err(payload) => Err(Failure::panic(payload.as_ref()).into_napi(&env)),
+        }
+    }
+
+    /// Ends an event stream `handleHttp` holds open: the client went away.
+    #[napi]
+    pub fn stream_close(&self, id: f64) {
+        if let Ok(engine) = self.engine() {
+            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+            let _ = calls::call(&engine, "stream.close", None, &[Value::from(id as u64)]);
+        }
     }
 
     /// How many commits that notified the engine's notifier has counted

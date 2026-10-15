@@ -40,13 +40,13 @@ import { EngineError, type ValidationIssue } from '../errors.js';
 import { DEFAULT_NAMESPACE } from '../namespaces.js';
 import type { PruneResult, RunnerPass, RunnerStatus, SubscriptionKey, SubscriptionStatus } from '../runner/runner.js';
 import type { BehaviorDocument, BehaviorSummary } from '../tools/behaviors.js';
-import type { DescribeDocument, ToolManifest, ToolTarget } from '../tools/catalog.js';
+import type { DescribeDocument, ToolFilter, ToolManifest, ToolSummary, ToolTarget } from '../tools/catalog.js';
 import { resolveToolOptions, type ResolvedToolOptions } from '../tools/options.js';
 import type { StoredValue } from '../values/store.js';
 import type { ValueTarget } from '../values/values.js';
 import type { AnyBehaviorImplementation } from '../behaviors/behavior.js';
 import { deepFreeze } from '../behaviors/json.js';
-import { loadAddon, type AddonEngine } from './addon.js';
+import { loadAddon, type AddonEngine, type HttpAnswer, type StreamPull } from './addon.js';
 import { Bridge, rowOf, sqlParams } from './bridge.js';
 import type { Row, RunResult, SqlValue } from '../storage/driver.js';
 import { Storage } from '../storage/storage.js';
@@ -62,6 +62,8 @@ import { nativeOptions, type HostedOptions, type NativeEngineOptions } from './o
 // TypeScript engine's Access checks it.
 class Hosts {
   private parked: { error: unknown } | undefined;
+  /** The tool filter of the call this thread is making, if it has one. */
+  filter: ToolFilter | undefined;
 
   constructor(
     private readonly hosted: HostedOptions,
@@ -80,6 +82,14 @@ class Hosts {
           const answer: unknown = this.hosted.policy?.(JSON.parse(payload) as AccessRequest);
           if (typeof answer === 'object' && answer !== null && typeof (answer as { then?: unknown }).then === 'function') {
             throw new TypeError('an access policy is synchronous: it returned a promise');
+          }
+          return answer === true ? 'true' : 'false';
+        }
+        case 'toolFilter': {
+          const [principal, tool, namespace] = JSON.parse(payload) as [Principal, ToolSummary, string];
+          const answer: unknown = this.filter?.(principal, tool, namespace);
+          if (typeof answer === 'object' && answer !== null && typeof (answer as { then?: unknown }).then === 'function') {
+            throw new TypeError('a tool filter is synchronous: it returned a promise');
           }
           return answer === true ? 'true' : 'false';
         }
@@ -140,22 +150,56 @@ class Calls {
     private readonly watchers: Watchers
   ) {}
 
-  sync(op: string, principal: Principal | undefined, args: readonly unknown[] = []): unknown {
+  sync(op: string, principal: Principal | undefined, args: readonly unknown[] = [], filter?: ToolFilter): unknown {
     let text: string;
     const bridge = this.hosts.bridge;
+    const outer = this.hosts.filter;
+    this.hosts.filter = filter;
     try {
-      text = this.addon.callSync(this.request(op, principal, args));
+      text = this.addon.callSync(this.request(op, principal, args, filter !== undefined));
     } catch (error) {
       const restored = restoreError(error, (token) => bridge.parkedValue(token));
+      this.hosts.filter = outer;
       bridge.settle();
       this.watchers.poll();
       this.hosts.rethrow();
       throw restored;
     }
+    this.hosts.filter = outer;
     bridge.settle();
     this.watchers.poll();
     this.hosts.rethrow();
     return text === '' ? undefined : JSON.parse(text);
+  }
+
+  /**
+   * http serves one HTTP request on this thread: its head (as the addon's
+   * handleHttp takes it) and body, through the mount's tool filter. What a
+   * behavior written in TypeScript threw while it ran comes back beside the
+   * answer, for the mount's onError.
+   */
+  http(head: Record<string, unknown>, body: Buffer | undefined, filter: ToolFilter | undefined): { answer: HttpAnswer; thrown?: { value: unknown } } {
+    const bridge = this.hosts.bridge;
+    const outer = this.hosts.filter;
+    this.hosts.filter = filter;
+    let answer: HttpAnswer;
+    let thrown: { value: unknown } | undefined;
+    try {
+      answer = this.addon.handleHttp(JSON.stringify({ ...head, toolFilter: filter !== undefined }), body);
+      thrown = answer.status === 500 ? bridge.firstParked() : undefined;
+    } catch (error) {
+      const restored = restoreError(error, (token) => bridge.parkedValue(token));
+      this.hosts.filter = outer;
+      bridge.settle();
+      this.watchers.poll();
+      this.hosts.rethrow();
+      throw restored;
+    }
+    this.hosts.filter = outer;
+    bridge.settle();
+    this.watchers.poll();
+    this.hosts.rethrow();
+    return thrown === undefined ? { answer } : { answer, thrown };
   }
 
   async async(op: string, principal: Principal | undefined, args: readonly unknown[] = []): Promise<unknown> {
@@ -168,7 +212,7 @@ class Calls {
     return text === '' ? undefined : JSON.parse(text);
   }
 
-  private request(op: string, principal: Principal | undefined, args: readonly unknown[]): string {
+  private request(op: string, principal: Principal | undefined, args: readonly unknown[], toolFilter = false): string {
     // A trailing argument left out is one the call defaults.
     let end = args.length;
     while (end > 0 && args[end - 1] === undefined) {
@@ -178,17 +222,21 @@ class Calls {
     // the TypeScript engine reads it, and not for one that only reads what
     // the engine holds, so a clock that counts its readings counts alike.
     const now = TIMELESS.has(op) ? undefined : this.clock?.();
-    return JSON.stringify({ op, principal, args: args.slice(0, end), now });
+    return JSON.stringify({ op, principal, args: args.slice(0, end), now, ...(toolFilter ? { toolFilter: true } : {}) });
   }
 }
 
-// target checks a tool target: a filter is a function, which JSON cannot
-// carry; a mount's tool filter comes with the HTTP adapters (7b).
-function checkTarget(target: ToolTarget | undefined): ToolTarget | undefined {
-  if (target?.filter !== undefined) {
-    throw new NativeUnsupportedError('a tool filter written in TypeScript (ToolTarget.filter)', 'http');
+// targetOf is a tool target as JSON carries it: its filter, a function,
+// goes beside it, which the addon asks on this thread.
+function targetOf(target: ToolTarget | undefined): { target: Omit<ToolTarget, 'filter'> | undefined; filter: ToolFilter | undefined } {
+  if (target === undefined) {
+    return { target: undefined, filter: undefined };
   }
-  return target;
+  const { filter, ...rest } = target;
+  if (filter !== undefined && typeof filter !== 'function') {
+    throw new TypeError('a tool filter is a function (principal, tool, namespace) => boolean');
+  }
+  return { target: rest, filter };
 }
 
 class NativeNamespaces {
@@ -525,15 +573,18 @@ class NativeTools {
   }
 
   describe(principal: Principal, name: string, target?: ToolTarget): DescribeDocument {
-    return this.calls.sync('tools.describe', principal, [name, checkTarget(target)]) as DescribeDocument;
+    const { target: plain, filter } = targetOf(target);
+    return this.calls.sync('tools.describe', principal, [name, plain], filter) as DescribeDocument;
   }
 
   manifest(principal: Principal, target?: ToolTarget): ToolManifest {
-    return this.calls.sync('tools.manifest', principal, [checkTarget(target)]) as ToolManifest;
+    const { target: plain, filter } = targetOf(target);
+    return this.calls.sync('tools.manifest', principal, [plain], filter) as ToolManifest;
   }
 
   call(principal: Principal, handle: string, args: unknown, target?: ToolTarget): unknown {
-    return this.calls.sync('tools.call', principal, [handle, args, checkTarget(target)]);
+    const { target: plain, filter } = targetOf(target);
+    return this.calls.sync('tools.call', principal, [handle, args, plain], filter);
   }
 }
 
@@ -879,6 +930,17 @@ export class NativeStorage {
   }
 }
 
+/** One route the engine serves, as api::routes lists it. */
+export interface EngineRoute {
+  readonly name: string;
+  readonly method: 'GET' | 'POST' | 'PATCH' | 'DELETE';
+  readonly path: string;
+  /** Whether its response may be an event stream. */
+  readonly stream: boolean;
+  /** Whether it is the MCP endpoint's. */
+  readonly mcp: boolean;
+}
+
 /** The engine on the Rust engine: the TypeScript Engine's API over the addon. */
 export class NativeEngine {
   readonly namespaces: NativeNamespaces;
@@ -974,6 +1036,30 @@ export class NativeEngine {
       throw new NativeUnsupportedError('engine.storage on Postgres, which is the SQLite file\'s', 'storage');
     }
     return this.nativeStorage;
+  }
+
+  /** The routes the engine serves (api::routes): what engineApp and engineMcp mount. */
+  routes(): EngineRoute[] {
+    return this.calls.sync('api.routes', undefined) as EngineRoute[];
+  }
+
+  /** handleHttp serves one request through the engine's own routes (src/native/http.ts). */
+  handleHttp(head: Record<string, unknown>, body: Buffer | undefined, filter?: ToolFilter): { answer: HttpAnswer; thrown?: { value: unknown } } {
+    return this.calls.http(head, body, filter);
+  }
+
+  /** streamPull pulls an event stream handleHttp holds open, without waiting. */
+  streamPull(id: number): StreamPull {
+    try {
+      return this.addon.streamPull(id);
+    } catch (error) {
+      throw restoreError(error);
+    }
+  }
+
+  /** streamClose ends an event stream handleHttp holds open. */
+  streamClose(id: number): void {
+    this.addon.streamClose(id);
   }
 
   /** search searches every schema the namespace reaches that composes Search, as Engine.search does. */
