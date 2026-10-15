@@ -218,6 +218,30 @@ func RegisterCore(reg *registry.Registry) error {
 			},
 		},
 		{
+			// The project's engine crate of a schema whose types compose an
+			// extension's behavior (D58): engine/rust/<schema>, the engine
+			// with the core's behaviors, the work queue's when used and the
+			// extensions' crates compiled in
+			// (internal/generator/projectengine). It writes nothing for a
+			// schema whose types compose the core's alone, which the
+			// release's engine runs. It joins the DB pipeline, for a DB
+			// schema's engine types, and the General one, whose schema the
+			// engine runs as it is written. It claims no directory, as
+			// enginedoc claims none: whether it writes one depends on the
+			// schema, which the build cache's surface
+			// (ExpectedOutputDirs) does not read, and a claimed directory
+			// a schema leaves absent would keep a cached service from
+			// being up to date. It removes the crate itself when the
+			// schema no longer needs one.
+			Name:             projectengineGenerator,
+			Kinds:            []string{string(ir.SchemaKindDB), string(ir.SchemaKindGeneral)},
+			RendersBehaviors: true,
+			Generate: func(c registry.GenerateContext) error {
+				r := run{c}
+				return r.measure("output.engine-rust", r.generateProjectEngine)
+			},
+		},
+		{
 			// The engine document of a DB schema whose types compose
 			// behaviors, its engine types (D58): engine/<schema>.json in
 			// the Go types module, which the types generator holds as a
