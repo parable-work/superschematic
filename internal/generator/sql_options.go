@@ -10,8 +10,9 @@ import (
 
 // SQLOptions returns the sqlgen options a build passes for the DB service
 // cfg configures: its name, its declared dependencies (deps, keyed by
-// service name), outputs.sql.viewOwner, and the naming's metadata key
-// prefix and history actor setting. The clock is left to the caller.
+// service name), outputs.sql.viewOwner and sourceSchema, and the naming's
+// metadata key prefix and history actor setting. The clock is left to the
+// caller.
 // `migrate plan` resolves models with the same options, so a plan and
 // create.sql agree.
 func SQLOptions(cfg *schemaconfig.SchemaConfig, outputs *registry.Outputs, deps map[string]*ir.Schema, n naming.Naming) sqlgen.Options {
@@ -20,6 +21,7 @@ func SQLOptions(cfg *schemaconfig.SchemaConfig, outputs *registry.Outputs, deps 
 		SchemaName:          cfg.Name,
 		Dependencies:        deps,
 		ViewOwner:           outputs.SQLViewOwner(),
+		SourceSchema:        outputs.SQLSourceSchema(),
 		MetadataKeyPrefix:   n.MetadataKeyPrefix,
 		HistoryActorSetting: n.HistoryActorSetting,
 	}
