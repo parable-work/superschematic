@@ -96,6 +96,11 @@ type SQLOutputConfig struct {
 	// ViewOwner is the Postgres role the migrations create the views as
 	// (SET ROLE around the view DDL). Empty creates them as the runner.
 	ViewOwner string `json:"viewOwner,omitempty"`
+
+	// SourceSchema is the Postgres schema that holds the tables the views
+	// read; the views select schema.table. Empty leaves the tables
+	// unqualified.
+	SourceSchema string `json:"sourceSchema,omitempty"`
 }
 
 // API server language and protocol values.
@@ -280,6 +285,14 @@ func (o *Outputs) SQLViewOwner() string {
 		return ""
 	}
 	return o.SQL.ViewOwner
+}
+
+// SQLSourceSchema returns outputs.sql.sourceSchema ("" when unset).
+func (o *Outputs) SQLSourceSchema() string {
+	if o == nil || o.SQL == nil {
+		return ""
+	}
+	return o.SQL.SourceSchema
 }
 
 // APIEnabled reports whether the REST API server output is enabled.

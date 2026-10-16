@@ -391,6 +391,7 @@ func (r run) generateSQL() error {
 		Dependencies:        deps,
 		Clock:               r.Options.Clock,
 		ViewOwner:           r.Outputs.SQLViewOwner(),
+		SourceSchema:        r.Outputs.SQLSourceSchema(),
 		MetadataKeyPrefix:   names.MetadataKeyPrefix,
 		HistoryActorSetting: names.HistoryActorSetting,
 	})

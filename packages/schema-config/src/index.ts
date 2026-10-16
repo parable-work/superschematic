@@ -74,6 +74,10 @@ export type SqlOutputConfig = {
    * The Postgres role the migrations create the views as: SET ROLE around the view DDL and RESET ROLE after it, so the schema's default privileges for that role apply. The migration runner must be a member of the role. Unset creates the views as the runner.
    */
   readonly viewOwner?: string;
+  /**
+   * The Postgres schema that holds the tables the views read: each view selects <sourceSchema>.<table> for its source table and every joined table, so it does not depend on the migration runner's search_path. Unset leaves the tables unqualified.
+   */
+  readonly sourceSchema?: string;
 };
 
 export type SchemaOutputs = {

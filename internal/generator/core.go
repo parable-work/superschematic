@@ -12,7 +12,8 @@ var sqlOutputSchema = json.RawMessage(`{
 	"additionalProperties": false,
 	"properties": {
 		"migrationsDir": {"type": "string"},
-		"viewOwner": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"}
+		"viewOwner": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+		"sourceSchema": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"}
 	}
 }`)
 
