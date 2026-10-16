@@ -124,15 +124,15 @@ func TestParseOutputsReadsTheSQLSectionStrictly(t *testing.T) {
 	if err := reg.RegisterGenerator(GeneratorSpec{Name: "sql", OutputKey: "sql", Generate: func(GenerateContext) error { return nil }}); err != nil {
 		t.Fatal(err)
 	}
-	outputs, err := ParseOutputs(map[string]any{"sql": map[string]any{"migrationsDir": "db/migrations", "viewOwner": "app_view_owner"}}, reg)
+	outputs, err := ParseOutputs(map[string]any{"sql": map[string]any{"migrationsDir": "db/migrations", "viewOwner": "app_view_owner", "sourceSchema": "ledger"}}, reg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if outputs.SQLMigrationsDir() != "db/migrations" || outputs.SQLViewOwner() != "app_view_owner" {
+	if outputs.SQLMigrationsDir() != "db/migrations" || outputs.SQLViewOwner() != "app_view_owner" || outputs.SQLSourceSchema() != "ledger" {
 		t.Errorf("sql section = %+v", outputs.SQL)
 	}
-	if (&Outputs{}).SQLMigrationsDir() != "" || (*Outputs)(nil).SQLViewOwner() != "" {
-		t.Error("an absent sql section must leave both unset")
+	if (&Outputs{}).SQLMigrationsDir() != "" || (*Outputs)(nil).SQLViewOwner() != "" || (&Outputs{}).SQLSourceSchema() != "" || (*Outputs)(nil).SQLSourceSchema() != "" {
+		t.Error("an absent sql section must leave all three unset")
 	}
 	_, err = ParseOutputs(map[string]any{"sql": map[string]any{"migrationDir": "db"}}, reg)
 	if err == nil || !strings.Contains(err.Error(), `outputs.sql: json: unknown field "migrationDir"`) {
