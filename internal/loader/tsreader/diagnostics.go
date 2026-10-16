@@ -167,7 +167,9 @@ func leadingComment(node *astNode) string {
 		case strings.HasPrefix(line, "*/"):
 			// closing line of a block comment
 		case strings.HasPrefix(line, "*"):
-			if s := strings.TrimSpace(strings.TrimPrefix(line, "*")); s != "" {
+			// The last line of a block comment may carry text before "*/".
+			line = strings.TrimSuffix(strings.TrimPrefix(line, "*"), "*/")
+			if s := strings.TrimSpace(line); s != "" {
 				lines = append(lines, s)
 			}
 		}
