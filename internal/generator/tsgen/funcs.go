@@ -18,6 +18,7 @@ func customTemplateFuncs() template.FuncMap {
 		"scalarLibTypeName":        scalarLibTypeName,
 		"elemType":                 elemType,
 		"lowerFirst":               lowerFirst,
+		"tsDoc":                    tsDoc,
 		"hasStringValidator": func(s ScalarInfo) bool {
 			return s.TSType == "string" && s.Primitive == ir.LanguageString
 		},
@@ -182,6 +183,12 @@ func typePrimitiveHelpers(t *TypeInfo) []string {
 	}
 	sort.Strings(helpers)
 	return helpers
+}
+
+// tsDoc escapes "*/" in doc text placed inside a JSDoc comment, so the text
+// cannot close the comment early.
+func tsDoc(doc string) string {
+	return strings.ReplaceAll(doc, "*/", "*\\/")
 }
 
 // scalarLibTypeName returns the structured superscalar type name a scalar's
