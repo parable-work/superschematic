@@ -1,6 +1,9 @@
 package tsreader
 
-import "testing"
+import (
+	"path/filepath"
+	"testing"
+)
 
 func TestLineCol(t *testing.T) {
 	text := "abc\ndef\nghi"
@@ -38,6 +41,32 @@ func TestSkipTrivia(t *testing.T) {
 	for _, c := range cases {
 		if got := skipTrivia(c.text, 0); got != c.want {
 			t.Errorf("skipTrivia(%q) = %d, want %d", c.text, got, c.want)
+		}
+	}
+}
+
+// TestLeadingCommentStripsBlockMarkers loads one field per comment shape and
+// checks the IR comment text. A "*/" left in the text closes the doc comment
+// a generator wraps it in.
+func TestLeadingCommentStripsBlockMarkers(t *testing.T) {
+	schema, _, err := LoadService(filepath.Join("testdata", "services", "fixture-comments"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, field := range schema.Types["Commented"].Fields {
+		got[field.Name] = field.Comment
+	}
+	want := map[string]string{
+		"single":       "One line.",
+		"closedOnText": "First line.\nLast line carries the terminator.",
+		"closedAlone":  "First line.\nLast line.",
+		"plainBlock":   "Plain block.",
+		"lineComment":  "Line comment.",
+	}
+	for name, comment := range want {
+		if got[name] != comment {
+			t.Errorf("%s comment = %q, want %q", name, got[name], comment)
 		}
 	}
 }
