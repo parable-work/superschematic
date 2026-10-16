@@ -112,6 +112,10 @@ export type SqlOutputConfig = {
    */
   readonly viewOwner?: string;
   /**
+   * The Postgres schema that holds the tables the views read: each view selects <sourceSchema>.<table> for its source table and every joined table, so it does not depend on the migration runner's search_path. Unset leaves the tables unqualified.
+   */
+  readonly sourceSchema?: string;
+  /**
    * The databases the service is built for. With sqlite listed, the build also writes sqlite/create.sql and refuses a schema that uses what SQLite does not support, and migrate plan --dialect sqlite plans for it. The list must hold postgres: the Go ORM the kind always generates runs on Postgres. Unset is ["postgres"].
    */
   readonly dialects?: readonly SqlDialect[];

@@ -225,6 +225,13 @@ type Options struct {
 	// the migration runner. It must be a plain lowercase identifier.
 	ViewOwner string
 
+	// SourceSchema is the Postgres schema that holds the tables the
+	// projection views read: the source table and every joined table are
+	// selected as schema.table, so a view does not depend on the migration
+	// runner's search_path. Empty leaves them unqualified. It must be a
+	// plain lowercase identifier.
+	SourceSchema string
+
 	// MetadataKeyPrefix prefixes the keys of the projection Arrow schemas'
 	// metadata (Naming.MetadataKeyPrefix). Empty means "superschematic.".
 	MetadataKeyPrefix string
@@ -235,8 +242,9 @@ type Options struct {
 	HistoryActorSetting string
 }
 
-// viewOwnerPattern constrains Options.ViewOwner to a plain role name.
-var viewOwnerPattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+// plainIdentifierPattern constrains Options.ViewOwner to a plain role name
+// and Options.SourceSchema to a plain schema name.
+var plainIdentifierPattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 
 // DefaultMetadataKeyPrefix is the metadata key prefix when Options leaves it
 // empty; it matches naming.Default().
@@ -446,12 +454,24 @@ func Generate(schema *ir.Schema, opts Options) (*DDLOutput, error) {
 		return nil, err
 	}
 	if opts.ViewOwner != "" {
-		if !viewOwnerPattern.MatchString(opts.ViewOwner) {
+		if !plainIdentifierPattern.MatchString(opts.ViewOwner) {
 			return nil, fmt.Errorf("outputs.sql.viewOwner %q must be a lowercase Postgres role name", opts.ViewOwner)
 		}
 		for i := range projections {
 			projections[i].ViewOwner = opts.ViewOwner
 			projections[i].QuotedViewOwner = sqlutil.QuoteIdentifier(opts.ViewOwner)
+		}
+	}
+	if opts.SourceSchema != "" {
+		if !plainIdentifierPattern.MatchString(opts.SourceSchema) {
+			return nil, fmt.Errorf("outputs.sql.sourceSchema %q must be a lowercase Postgres schema name", opts.SourceSchema)
+		}
+		qualifier := sqlutil.QuoteIdentifier(opts.SourceSchema) + "."
+		for i := range projections {
+			projections[i].QuotedBaseTable = qualifier + projections[i].QuotedBaseTable
+			for j := range projections[i].Joins {
+				projections[i].Joins[j].QuotedTable = qualifier + projections[i].Joins[j].QuotedTable
+			}
 		}
 	}
 	metadataKeyPrefix := opts.MetadataKeyPrefix
