@@ -38,7 +38,11 @@ func coreKinds() []KindSpec {
 			ForbiddenPackages: map[string]bool{
 				pkgDB: true,
 			},
+			// An API may reference another API's types: one that returns
+			// what it reads from an API it calls says so in its own
+			// schema (D66).
 			AllowedReferences: map[string]bool{
+				string(ir.SchemaKindAPI):     true,
 				string(ir.SchemaKindDB):      true,
 				string(ir.SchemaKindGeneral): true,
 			},

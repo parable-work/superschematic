@@ -53,47 +53,50 @@ func TestReferencesResolveInTheLoadedFixture(t *testing.T) {
 }
 
 // TestReferenceToADependencysType: the loader reads the dependency whose
-// type a reference names, beside the service, and the check resolves it
-// there; without the import the target is no type of the service.
+// type a reference names, beside the service, a General service or another
+// API (D66), and the check resolves it there; without the import the target
+// is no type of the service.
 func TestReferenceToADependencysType(t *testing.T) {
-	root := t.TempDir()
-	write := func(rel, contents string) {
-		t.Helper()
-		path := filepath.Join(root, filepath.FromSlash(rel))
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	write("shelf-types/schema.config.json", `{"name": "shelf-types", "kind": "General", "outputs": {}}`)
-	write("shelf-types/src/shelf.schema.json", `{"types": {"ShelfView": {"name": "ShelfView", "role": "EmbeddedStruct",
-		"display": {"titleField": "title"},
-		"fields": [{"name": "id", "typeRef": {"name": "string"}, "required": true}, {"name": "title", "typeRef": {"name": "string"}, "required": true}]}}}`)
-	write("shop-api/schema.config.json", `{"name": "shop-api", "kind": "API", "dependencies": [{"name": "shelf-types", "kind": "General"}], "outputs": {}}`)
-	api := `{"imports": [{"package": "@schemas/shelf-types", "types": ["ShelfView"]}],
-		"types": {"PlaceInput": {"name": "PlaceInput", "role": "APIInput", "fields": [
-			{"name": "shelfId", "typeRef": {"name": "string"}, "required": true, "references": {"type": "ShelfView", "value": "VALUE"}}]}},
-		"operationSets": [{"name": "Shelves", "operations": [
-			{"name": "listShelves", "httpMethod": "GET", "restPath": "shelves", "typeRef": {"name": "ShelfView", "isArray": true}, "required": true}]}]}`
-	write("shop-api/src/shop.schema.json", strings.Replace(api, "VALUE", "id", 1))
-	if _, err := LoadService(filepath.Join(root, "shop-api")); err != nil {
-		t.Fatalf("LoadService: %v", err)
-	}
+	for _, kind := range []string{"General", "API"} {
+		t.Run(kind, func(t *testing.T) {
+			root := t.TempDir()
+			write := func(rel, contents string) {
+				t.Helper()
+				path := filepath.Join(root, filepath.FromSlash(rel))
+				if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			write("shelf-types/schema.config.json", `{"name": "shelf-types", "kind": "`+kind+`", "outputs": {}}`)
+			write("shelf-types/src/shelf.schema.json", `{"types": {"ShelfView": {"name": "ShelfView", "role": "EmbeddedStruct",
+				"display": {"titleField": "title"},
+				"fields": [{"name": "id", "typeRef": {"name": "string"}, "required": true}, {"name": "title", "typeRef": {"name": "string"}, "required": true}]}}}`)
+			write("shop-api/schema.config.json", `{"name": "shop-api", "kind": "API", "dependencies": [{"name": "shelf-types", "kind": "`+kind+`"}], "outputs": {}}`)
+			api := `{"imports": [{"package": "@schemas/shelf-types", "types": ["ShelfView"]}],
+				"types": {"PlaceInput": {"name": "PlaceInput", "role": "APIInput", "fields": [
+					{"name": "shelfId", "typeRef": {"name": "string"}, "required": true, "references": {"type": "ShelfView", "value": "VALUE"}}]}},
+				"operationSets": [{"name": "Shelves", "operations": [
+					{"name": "listShelves", "httpMethod": "GET", "restPath": "shelves", "typeRef": {"name": "ShelfView", "isArray": true}, "required": true}]}]}`
+			write("shop-api/src/shop.schema.json", strings.Replace(api, "VALUE", "id", 1))
+			if _, err := LoadService(filepath.Join(root, "shop-api")); err != nil {
+				t.Fatalf("LoadService: %v", err)
+			}
 
-	write("shop-api/src/shop.schema.json", strings.Replace(api, "VALUE", "code", 1))
-	_, err := LoadService(filepath.Join(root, "shop-api"))
-	if err == nil || !strings.Contains(err.Error(), "src/shop.schema.json: PlaceInput.shelfId: value code is not a field of ShelfView (fields: id, title)") {
-		t.Fatalf("a value the dependency's type lacks: %v", err)
+			write("shop-api/src/shop.schema.json", strings.Replace(api, "VALUE", "code", 1))
+			_, err := LoadService(filepath.Join(root, "shop-api"))
+			if err == nil || !strings.Contains(err.Error(), "src/shop.schema.json: PlaceInput.shelfId: value code is not a field of ShelfView (fields: id, title)") {
+				t.Fatalf("a value the dependency's type lacks: %v", err)
+			}
+		})
 	}
 }
 
 // TestAPIsReferringToEachOtherAreRefused: two APIs whose references name
-// each other's types are the import an API may not make, refused without
-// reading either again; and two whose configs call each other a General
-// service, which the loader then reads, are refused as a cycle, not read
-// without end (D61).
+// each other's types, which the loader reads (D66), are refused as a
+// cycle, not read without end (D61).
 func TestAPIsReferringToEachOtherAreRefused(t *testing.T) {
 	root := t.TempDir()
 	write := func(rel, contents string) {
@@ -106,8 +109,8 @@ func TestAPIsReferringToEachOtherAreRefused(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	api := func(self, other, own, theirs, kind string) {
-		write(self+"/schema.config.json", `{"name": "`+self+`", "kind": "API", "dependencies": [{"name": "`+other+`", "kind": "`+kind+`"}], "outputs": {}}`)
+	api := func(self, other, own, theirs string) {
+		write(self+"/schema.config.json", `{"name": "`+self+`", "kind": "API", "dependencies": [{"name": "`+other+`", "kind": "API"}], "outputs": {}}`)
 		write(self+"/src/api.schema.json", `{"imports": [{"package": "@schemas/`+other+`", "types": ["`+theirs+`"]}],
 		"types": {"`+own+`": {"name": "`+own+`", "role": "EmbeddedStruct", "fields": [
 			{"name": "id", "typeRef": {"name": "string"}, "required": true},
@@ -116,18 +119,11 @@ func TestAPIsReferringToEachOtherAreRefused(t *testing.T) {
 			{"name": "listOwn", "httpMethod": "GET", "restPath": "own", "typeRef": {"name": "`+own+`", "isArray": true}, "required": true},
 			{"name": "listTheirs", "httpMethod": "GET", "restPath": "theirs", "typeRef": {"name": "`+theirs+`", "isArray": true}, "required": true}]}]}`)
 	}
-	api("a-api", "b-api", "AView", "BView", "API")
-	api("b-api", "a-api", "BView", "AView", "API")
+	api("a-api", "b-api", "AView", "BView")
+	api("b-api", "a-api", "BView", "AView")
 	_, err := LoadService(filepath.Join(root, "a-api"))
-	if err == nil || !strings.Contains(err.Error(), `a API schema cannot reference types from API service "b-api"`) {
-		t.Fatalf("two APIs referring to each other: %v", err)
-	}
-
-	api("a-api", "b-api", "AView", "BView", "General")
-	api("b-api", "a-api", "BView", "AView", "General")
-	_, err = LoadService(filepath.Join(root, "a-api"))
 	if err == nil || !strings.Contains(err.Error(), "a-api is already being read for its references (a-api -> b-api -> a-api), a cycle") {
-		t.Fatalf("two APIs declared General referring to each other: %v", err)
+		t.Fatalf("two APIs referring to each other: %v", err)
 	}
 }
 

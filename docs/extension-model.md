@@ -243,11 +243,11 @@ The core kinds:
 
 DB may not import `@superschematic/api`, API may not import
 `@superschematic/db`, General and Stack may import neither. DB may
-reference General types, API may reference DB and General types, General
-may not reference DB or API types, and Stack references no other service's
-types. A Stack service names the services it deploys by their sentinels,
-so it sets `ImportsSiblingSentinels`, and nothing names it, so it sets
-`NoSentinel` (`docs/stack-model.md`, section 4.1).
+reference General types, API may reference DB, General and other API types
+(D66), General may not reference DB or API types, and Stack references no
+other service's types. A Stack service names the services it deploys by
+their sentinels, so it sets `ImportsSiblingSentinels`, and nothing names
+it, so it sets `NoSentinel` (`docs/stack-model.md`, section 4.1).
 
 `ir.SchemaKind` is a named string with constants for the four core kinds.
 Any registered name is a valid value.

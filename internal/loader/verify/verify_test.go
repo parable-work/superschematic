@@ -383,7 +383,7 @@ func TestCrossKindReferenceRules(t *testing.T) {
 	}{
 		{ir.SchemaKindAPI, ir.SchemaKindDB, true},
 		{ir.SchemaKindAPI, ir.SchemaKindGeneral, true},
-		{ir.SchemaKindAPI, ir.SchemaKindAPI, false},
+		{ir.SchemaKindAPI, ir.SchemaKindAPI, true},
 		{ir.SchemaKindDB, ir.SchemaKindGeneral, true},
 		{ir.SchemaKindDB, ir.SchemaKindDB, false},
 		{ir.SchemaKindDB, ir.SchemaKindAPI, false},

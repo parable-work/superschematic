@@ -6696,3 +6696,24 @@ root relinks the project's own `node_modules` there, as a Rust build did
 before the mirror.
 
 The rule is reversible until the first release.
+
+## D66. An API may reference another API's types
+
+The core kinds came from the source tree with its rule: an API may
+reference DB and General types, not another API's. A source tree whose
+API returns what it reads from an API it calls declared that API as a
+General dependency to pass the rule. #216 checks each handle's kind
+against the service it names (D30), so that declaration now fails, and
+the tree has no other way to say what it does.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The API kind's `AllowedReferences` adds API. A dependency of an API on another API declares the kind API, and its types are references as a General dependency's are. The generators read a dependency's kind only to find a DB, so the output is the one a General declaration gave. A dependency carries types alone: a server that calls the other API says so in `calls`. | Moving the shared types into a General service, which splits an API's contract across two services and gives each consumer one more package to depend on in each language. A types-only form of a dependency, which says what every API dependency already is. A registration through which an extension widens a core kind's rule, machinery for one rule. |
+| D61 reads an API dependency whose type a `RefersTo` names, as it reads a General one. Two APIs whose references name each other's types are refused as a cycle of reads, no longer by the import rule. | Keeping the import refusal for references alone, a second rule for one import. |
+
+Status: built. `TestCrossKindReferenceRules` admits API from API;
+`TestReferenceToADependencysType` resolves a reference to a General and to
+an API dependency's type; `TestAPIsReferringToEachOtherAreRefused` refuses
+two APIs that refer to each other as a cycle.
+
+The rule is reversible until the first release.
