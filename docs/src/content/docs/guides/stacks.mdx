@@ -1052,11 +1052,13 @@ A TypeScript server's package, beside the Go servers' modules, holds a
 `main.ts` that does the same on [Bun](https://bun.sh): it loads each API's
 config with `loadEnvConfig()`, opens one `pg` Pool per database, builds
 one TypeScript SDK client per API called with the credential its endpoint
-names, calls each implementation's `create(deps)`, and its
-`authenticate(deps)` where a route needs an end user, mounts each API's
-router on one Hono app, with the service authenticator over its callers
-field where an operation has a service clause, answers `/healthz` and
-`/readyz`, and drains on SIGTERM. The package is a member of the output
+names, calls each implementation's `create(deps)`, its
+`authenticate(deps)` where a route needs an end user, and its
+`createManualRoutes(deps)` where an operation is
+`@manualRouteRegistration`, mounts each API's router on one Hono app,
+with the service authenticator over its callers field where an operation
+has a service clause and those handlers as its `manualRoutes`, answers
+`/healthz` and `/readyz`, and drains on SIGTERM. The package is a member of the output
 root's Bun workspace, so `bun install` there links it to the API packages,
 the SDKs and the implementations. Its Dockerfile builds superscalar's Node
 addon in a Rust stage, from the checkout the naming file's `[paths]

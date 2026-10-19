@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -308,6 +309,10 @@ export const create: Constructor = deps => ({
 // named slow, so a test can stop the server with a request in flight, and
 // answers 501 for the one named unpriced.
 //
+// Its manual route, exportCart, answers the cart as CSV, with the region
+// its Deps' config holds and the request's id, which the router hands the
+// handler beside the Hono context (D51).
+//
 // Its job, SweepCarts, enqueues a CartAbandoned message per SKU of
 // SWEEP_SKUS, each in a transaction of its own that commits, after one in
 // a transaction that rolls back; with SWEEP_FAIL set it fails. Its worker,
@@ -318,7 +323,7 @@ const tsShopImplementation = `import { notImplemented } from '@superschematic/ht
 import { enqueue } from '@superschematic/http-runtime/postgres';
 import { cartAbandonedQueue } from '@schemas/ts-db-types/queues';
 import type { CartAbandoned } from '@schemas/ts-db-types';
-import type { AuthenticatorFactory, Constructor, JobsConstructor, WorkersConstructor } from '@schemas/ts-shop-api';
+import type { AuthenticatorFactory, Constructor, JobsConstructor, ManualRoutesConstructor, WorkersConstructor } from '@schemas/ts-shop-api';
 
 const newCartId = () => crypto.randomUUID() as CartAbandoned['cartId'];
 
@@ -380,6 +385,15 @@ export const create: Constructor = deps => ({
 });
 
 export const authenticate: AuthenticatorFactory = () => async () => null;
+
+export const createManualRoutes: ManualRoutesConstructor = deps => ({
+  async exportCart(c, ctx) {
+    deps.logger.info('exported', { id: c.req.param('id') });
+    return new Response('id,region\n' + c.req.param('id') + ',' + deps.config.STOREFRONT_REGION + '\n', {
+      headers: { 'content-type': 'text/csv', 'x-export-request': ctx.requestId },
+    });
+  },
+});
 `
 
 // edgeKey is an Ed25519 key pair as JWKs: the private one a caller signs
@@ -475,10 +489,13 @@ func installTypeScriptRuntime(t *testing.T, bun string, paths naming.LocalPaths)
 // credential against its callers field and refuses a request without one.
 // ts-shop starts with no database up, answers /healthz and reports the
 // database in /readyz, answers a cart with ts-pricing's quote, which it
-// asks for with a token signed with its edge's key, and refuses its
-// protected route without an end user. On SIGTERM it lets a request in
-// flight finish, then stops cleanly. Built for no environment on Cloud
-// SQL, it refuses to start on a Cloud SQL configuration.
+// asks for with a token signed with its edge's key, refuses its protected
+// route without an end user, and answers its manual route with the handler
+// the implementation's createManualRoutes built from its Deps (D51). On
+// SIGTERM it lets a request in flight finish, then stops cleanly. Built
+// for no environment on Cloud SQL, it refuses to start on a Cloud SQL
+// configuration. Before the implementations are written, each scaffold
+// type-checks against the API package it implements.
 func TestTypeScriptEntrypointCompilesAndServes(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping compile check in -short mode")
@@ -498,11 +515,6 @@ func TestTypeScriptEntrypointCompilesAndServes(t *testing.T) {
 	// enqueues on and its worker claims (D53).
 	f.build(t, repoRoot, paths, append([]string{"ts-db"}, append(slices.Clone(tsAPIs), "ts-stack")...)...)
 	names := naming.Default()
-	for service, code := range map[string]string{"ts-pricing": tsPricingImplementation, "ts-shop": tsShopImplementation} {
-		if err := os.WriteFile(filepath.Join(names.TypeScriptImplementationDir(repoRoot, service), "index.ts"), []byte(code), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
 	out := filepath.Join(repoRoot, "schemas", "dist")
 	run := func(dir, name string, args ...string) {
 		t.Helper()
@@ -518,6 +530,17 @@ func TestTypeScriptEntrypointCompilesAndServes(t *testing.T) {
 		testpaths.RequireOrSkipTS(t, fmt.Sprintf("bun install failed at the output root (likely offline): %v\n%s", err, output))
 	}
 	tsc := filepath.Join(paths.HTTPRuntimeTypeScript, "node_modules", ".bin", "tsc")
+	// The scaffolds the build wrote, ts-shop's createManualRoutes among
+	// them, type-check against the API packages before the engineer's code
+	// replaces them.
+	for _, service := range []string{"ts-pricing", "ts-shop"} {
+		run(names.TypeScriptImplementationDir(repoRoot, service), tsc, "--noEmit", "-p", "tsconfig.json")
+	}
+	for service, code := range map[string]string{"ts-pricing": tsPricingImplementation, "ts-shop": tsShopImplementation} {
+		if err := os.WriteFile(filepath.Join(names.TypeScriptImplementationDir(repoRoot, service), "index.ts"), []byte(code), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
 	pricingDir := servergen.ServerDir(out, "ts-stack", "ts-pricing")
 	shopDir := servergen.ServerDir(out, "ts-stack", "ts-shop")
 	for _, dir := range []string{
@@ -567,6 +590,7 @@ func TestTypeScriptEntrypointCompilesAndServes(t *testing.T) {
 	// the runtime from packages with different peers.
 	shop.expect(t, http.MethodGet, "/api/carts/unpriced", http.StatusNotImplemented, "carts.getCart for an unpriced cart")
 	shop.expect(t, http.MethodGet, "/api/me/cart", http.StatusUnauthorized)
+	exportCart(t, shop.base+"/api/carts/tea/export")
 	shop.expect(t, http.MethodGet, "/api/nowhere", http.StatusNotFound, "not_found")
 	if !strings.Contains(pricing.out.String(), `"msg":"quoted"`) || !strings.Contains(pricing.out.String(), `"caller":"ts-shop"`) {
 		t.Errorf("ts-pricing did not log the quote for ts-shop:\n%s", pricing.out.String())
@@ -608,6 +632,35 @@ func TestTypeScriptEntrypointCompilesAndServes(t *testing.T) {
 	refused, err = cmd.CombinedOutput()
 	if want := "configuration of ts-shop: "; err == nil || !strings.Contains(string(refused), want) || !strings.Contains(string(refused), "TS_PRICING_SERVICE_URL") {
 		t.Errorf("ts-shop without its configuration = %v, want it to stop naming the variables:\n%s", err, refused)
+	}
+}
+
+// exportCart calls ts-shop's manual route at url: the router hands the
+// request to the implementation's handler, whose Response it sends as it
+// is, the CSV with the region ts-shop's config holds, not the JSON
+// envelope, and with the request's id, which the router read onto the
+// RequestContext it handed the handler.
+func exportCart(t *testing.T, url string) {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("X-Request-Id", "export-1")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK || string(body) != "id,region\ntea,eu\n" || resp.Header.Get("Content-Type") != "text/csv" {
+		t.Errorf("GET %s = %d %s: %q, want 200 text/csv from the manual route's handler", url, resp.StatusCode, resp.Header.Get("Content-Type"), body)
+	}
+	if id := resp.Header.Get("X-Export-Request"); id != "export-1" {
+		t.Errorf("GET %s: the handler's RequestContext held request id %q, want the request's export-1", url, id)
 	}
 }
 

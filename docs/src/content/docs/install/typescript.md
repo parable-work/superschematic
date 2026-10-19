@@ -288,8 +288,12 @@ for `shop-api`) and a `logger`, the HTTP runtime's JSON-lines logger.
 is the type of the implementation's `create`, and an API with a route
 that needs an end user also declares `AuthenticatorFactory`, the type of
 its `authenticate`, which builds the `Authenticator` from `Deps`. An API
-with [jobs](/superschematic/guides/stacks/#jobs) declares `Jobs`, a method
-per job, `shipOrders(signal: AbortSignal): Promise<void>`, and
+with a `@manualRouteRegistration` operation declares `ManualRoutes`, a
+`ManualRouteHandler` per such operation, and `ManualRoutesConstructor`,
+the type of the implementation's `createManualRoutes`, which builds the
+handlers from `Deps`. An API with
+[jobs](/superschematic/guides/stacks/#jobs) declares `Jobs`, a method per
+job, `shipOrders(signal: AbortSignal): Promise<void>`, and
 `JobsConstructor`, the type of the implementation's `createJobs`; one with
 [workers](/superschematic/guides/queues/) declares `Workers`, a method
 per worker that handles one message of its queue,
@@ -314,22 +318,25 @@ API its servers serve, and so do `build --scaffold` and
 whose `create` is a `Constructor` and whose methods throw the runtime's
 `notImplemented()`, which answers 501, with an `authenticate` that
 establishes no end user, a verifier for each `@hmacVerified` provider
-that refuses every request, and a `createJobs` and a `createWorkers`
-whose methods throw it too. It never writes into a directory that holds
-a `.ts` file, so an implementation that predates its jobs or workers
-fails the stack's build, which says what to add.
+that refuses every request, and a `createManualRoutes`, a `createJobs`
+and a `createWorkers` whose handlers and methods throw it too. It never
+writes into a directory that holds a `.ts` file, so an implementation
+that predates its manual routes, jobs or workers fails the stack's build,
+which says what to add.
 
 In a [stack](/superschematic/guides/stacks/), the build writes each
 TypeScript server's entrypoint at `schemas/dist/server/<stack>/<server>`:
 a `package.json` in the output root's Bun workspace, which depends on the
 API packages, the implementations by their `package.json` names and the
 SDKs of the APIs called, a `main.ts` that builds each implementation from
-its `Deps` with `create(deps)` and `authenticate(deps)`, mounts each
-router on one Hono app and serves it with `Bun.serve` beside `/healthz`
-and `/readyz`, and a Dockerfile. `superschematic stack dev` runs it with
-`bun main.ts` after one `bun install` in `schemas/dist`. Each job and
-worker of the API gets a package of its own beside it, whose `main.ts`
-builds the same `Deps` and runs the job once, or the worker's claim loop.
+its `Deps` with `create(deps)` and `authenticate(deps)`, and the handlers
+of its manual routes with `createManualRoutes(deps)`, which it hands the
+router as `manualRoutes`, mounts each router on one Hono app and serves
+it with `Bun.serve` beside `/healthz` and `/readyz`, and a Dockerfile.
+`superschematic stack dev` runs it with `bun main.ts` after one `bun
+install` in `schemas/dist`. Each job and worker of the API gets a package
+of its own beside it, whose `main.ts` builds the same `Deps` and runs the
+job once, or the worker's claim loop.
 Neither serves a request, so a stack gives neither the callers field. For
 an API with one, `config.ts` adds `loadBackgroundEnvConfig()`, which the
 job's and the worker's `main.ts` call: it loads what `loadEnvConfig()`
@@ -409,8 +416,10 @@ nested under it (`carts` covers `carts.write`). Pass `permissionMatcher` to
 use another rule. An operation declared `@manualRouteRegistration` is gated
 the same way and then handed to `options.manualRoutes.<operation>` with the
 Hono context, for a streaming response or anything else the JSON router
-cannot express. The config needs neither `public` nor `authDb` for this
-server: those wire the Go server's auth middleware to an auth store.
+cannot express. A stack's server passes the handlers the implementation's
+`createManualRoutes` builds. The config needs neither `public` nor
+`authDb` for this server: those wire the Go server's auth middleware to
+an auth store.
 `ctx.bearerToken` holds the token of a `Bearer` `Authorization` header;
 any other scheme, such as an API key, reaches `authenticate` untouched in
 `ctx.headers`.

@@ -569,6 +569,21 @@ func (r run) checkTypeScriptExport(stackName, api, what, fn, typ string, methods
 		stackName, api, what, dir, fn, fn, typ, strings.Join(methods, "\n"), typ, r.Options.Naming.NpmAPIPackage(api), section)
 }
 
+// checkTypeScriptManualRoutes refuses a TypeScript API with a
+// @manualRouteRegistration operation whose implementation exists and
+// exports no createManualRoutes (D51): a server's main.ts builds the
+// handlers its router mounts with it, and the build no longer writes into
+// the implementation, so one that predates the operation, or the
+// entrypoint's handing its handlers to buildRouter, fails here, saying
+// what to add, rather than when tsc checks main.ts or Bun runs it.
+func (r run) checkTypeScriptManualRoutes(stackName string, output *tsrestgen.APIOutput) error {
+	var handlers []string
+	for _, ep := range output.ManualEndpoints {
+		handlers = append(handlers, fmt.Sprintf("    async %s(c, ctx) {\n      // answer %s %s with a Response\n    },", ep.Name, ep.Method, ep.Path))
+	}
+	return r.checkTypeScriptExport(stackName, output.SchemaName, "@manualRouteRegistration operations", tsrestgen.ManualRoutesFunc, "ManualRoutesConstructor", handlers, "8.6")
+}
+
 // checkRustFunc refuses a Rust API whose implementation exists and whose
 // src/lib.rs declares no fn, which returns the API crate's trait typ,
 // while the API declares what, its jobs or its workers, each a method of
@@ -813,6 +828,10 @@ func (r run) planTypeScriptServer(stackName string, s *ir.ResolvedDeployable, cl
 			scaffolds = append(scaffolds, output)
 		} else if _, err := os.Stat(filepath.Join(dir, servergen.TypeScriptPackageFile)); errors.Is(err, fs.ErrNotExist) {
 			return nil, nil, fmt.Errorf("stack %s: server %s serves %s, whose implementation %s holds no package.json, by which the Bun workspace links it; add one named %s", stackName, s.Name, ref.Name, dir, r.Options.Naming.NpmImplementationPackage(ref.Name))
+		} else if s.Kind == ir.DeployableServer && output.HasManualRoutes() {
+			if err := r.checkTypeScriptManualRoutes(stackName, output); err != nil {
+				return nil, nil, err
+			}
 		}
 		pkg, err := servergen.ImplementationPackage(r.Options.Naming, ref.Name, dir)
 		if err != nil {

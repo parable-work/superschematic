@@ -2131,16 +2131,24 @@ as they are, with no build step (D51). The pieces mirror Go's:
   Promise<Implementations>`, in `deps.ts`, and, for an API with a route
   that needs an end user, `AuthenticatorFactory`, the type of the
   implementation's `authenticate`, which builds the router's
-  `Authenticator` from `Deps` as Go's `AuthMiddleware(deps)` does. `Deps`
-  holds `config`, `db`, a client per callee in a member named after it
-  (`shopApi`), and `logger`, each left out by Go's rule. The scaffold
-  writes the package once, as Go's does (section 8.5), in a directory
-  that holds no `.ts` file: `package.json`
+  `Authenticator` from `Deps` as Go's `AuthMiddleware(deps)` does. For an
+  API with a `@manualRouteRegistration` operation it writes
+  `ManualRoutes`, a `ManualRouteHandler` per such operation, and
+  `ManualRoutesConstructor`, the type of the implementation's
+  `createManualRoutes`, which builds them from `Deps` for the router's
+  `manualRoutes` (D51). `Deps` holds `config`, `db`, a client per callee
+  in a member named after it (`shopApi`), and `logger`, each left out by
+  Go's rule. The scaffold writes the package once, as Go's does (section
+  8.5), in a directory that holds no `.ts` file: `package.json`
   (`<npm_scope>/<service>-implementation`), `tsconfig.json`, and an
   `index.ts` whose `create` is a `Constructor` and whose methods throw the
   runtime's `notImplemented()`, with an `authenticate` that establishes no
-  end user and a verifier per `@hmacVerified` provider that refuses every
-  request. `deps.db` is a `pg` Pool that the runtime's `connectPostgres`
+  end user, a `createManualRoutes` whose handlers throw it too, and a
+  verifier per `@hmacVerified` provider that refuses every request. An
+  implementation that exists and exports no `createManualRoutes` while its
+  API declares a manual route fails a stack's build, which says what to
+  add, as one without its `createJobs` does (section 8.7). `deps.db` is a
+  `pg` Pool that the runtime's `connectPostgres`
   (`@superschematic/http-runtime/postgres`) opens from the derived
   connection; a TypeScript ORM, when one exists, adds a typed client on
   the same pool. The Node Cloud SQL connector reads the instance's
@@ -2225,8 +2233,13 @@ as they are, with no build step (D51). The pieces mirror Go's:
     captures it as Go's `CaptureAuthorization` does;
   - mounts each API's `buildRouter` on one Hono app, with
     `authenticateService: serviceAuthenticator(config.<API>_CALLERS)` for
-    an API with a service clause, then the runtime's `notFoundHandler` and
-    `errorHandler`. Hono merges the routers' routes, so an identity API's
+    an API with a service clause, and `manualRoutes`, the handlers the
+    implementation's `createManualRoutes(deps)` builds, for an API with a
+    `@manualRouteRegistration` operation, which the router mounts behind
+    the operation's route controls and auth gate (D51), then the
+    runtime's `notFoundHandler` and `errorHandler`. A Go server's
+    `RegisterRoutes` leaves such an operation out, and its `main` mounts
+    none. Hono merges the routers' routes, so an identity API's
     router registers its CORS on each of its own routes: a request gets
     the CORS of the API that serves it alone, and a preflight that of the
     API that registers the method it asks for, as Go's dispatch does.
