@@ -946,6 +946,70 @@ func TestSitesInTheWorkflow(t *testing.T) {
 	}
 }
 
+// TestBundlesInTheWorkflow: check bundles each TypeScript server some
+// environment places on a platform whose artifact is a bundle with
+// bundle.ts --check after type-checking it, as a deploy bundles it, and no
+// server only on images; the deploy and preview jobs of an environment
+// with a bundle set up Bun and install the workspace before they deploy,
+// since the deploy runs bundle.ts on the runner, and the plan job, which
+// builds nothing, does neither (D64).
+func TestBundlesInTheWorkflow(t *testing.T) {
+	identity := &publicregistry.CIIdentity{Kind: stacktest.WorkloadIdentity, Fields: map[string]string{"provider": "projects/1/p", "account": "a@b"}}
+	env := func(name string, artifact ir.Artifact, params ...string) *ir.ResolvedEnvironment {
+		return &ir.ResolvedEnvironment{Stack: "edge-stack", Environment: name, Target: stacktest.Target, Parameters: params, Deployables: []*ir.ResolvedDeployable{
+			{Name: "shop-storefront", Kind: ir.DeployableServer, Language: publicregistry.APILanguageTypeScript, Artifact: artifact},
+			{Name: "shop-pricing", Kind: ir.DeployableServer, Language: publicregistry.APILanguageTypeScript, Artifact: ir.ArtifactImage},
+		}}
+	}
+	req := publicregistry.CIRequest{
+		Stack: publicregistry.CIStack{
+			Name: "edge-stack", Dir: "schemas/services/edge-stack", ServicesRoot: "schemas/services", SchemasRoot: "schemas", OutputRoot: "schemas/dist",
+			PackageManager: publicregistry.PackageManagerNPM,
+		},
+		Options: publicregistry.CIOptions{Branch: "main"},
+		Version: version,
+		Environments: []publicregistry.CIEnvironment{
+			{Environment: env("Dev", ir.ArtifactImage), HasSeam: true, Planner: identity, Deployer: identity},
+			{Environment: env("Staging", ir.ArtifactBundle), HasSeam: true, Planner: identity, Deployer: identity},
+			{Environment: env("Preview", ir.ArtifactBundle, "pr"), HasSeam: true, Planner: identity, Deployer: identity},
+		},
+	}
+	files, err := cigen.GitHub().Render(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "edge-stack.yml")
+	if err := os.WriteFile(path, files[0].Data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	lint(t, path)
+
+	w := parseWorkflow(t, files[0].Data)
+	check := w.jobs["check"]
+	bundle := "Bundle server shop-storefront for Workers"
+	if s := check.step(bundle); s == nil || s.WorkingDirectory != "schemas/dist/server/edge-stack/shop-storefront" || s.Run != "bun bundle.ts --check" {
+		t.Errorf("check bundles the storefront with %+v", s)
+	}
+	if i, j := check.index("Type-check server shop-storefront"), check.index(bundle); i < 0 || j < i {
+		t.Errorf("check bundles the storefront at step %d, before it type-checks it at step %d", j, i)
+	}
+	if check.step("Bundle server shop-pricing for Workers") != nil {
+		t.Error("check bundles shop-pricing, which every environment runs from an image")
+	}
+	install := "Install the TypeScript workspace from schemas/dist/bun.lock"
+	for _, id := range []string{"deploy-staging", "preview-preview"} {
+		job := w.jobs[id]
+		if job.step("Set up Bun") == nil || job.step(install) == nil {
+			t.Errorf("%s does not set up Bun and install the workspace before it bundles", id)
+		}
+	}
+	for _, id := range []string{"deploy-dev", "plan-staging"} {
+		if job := w.jobs[id]; job.step("Set up Bun") != nil || job.step(install) != nil {
+			t.Errorf("%s sets up Bun or installs the workspace, though it bundles nothing", id)
+		}
+	}
+}
+
 // parsed is a workflow as yaml.v3 reads it, its jobs in order.
 type parsed struct {
 	name  string

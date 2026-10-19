@@ -1,0 +1,29 @@
+# ts-pricing's server, exposed, in two environments: Edge on stacktest's
+# fake target, which places it on the fake bundle platform, whose artifact
+# is a bundle as Cloudflare Workers' is (D64), and Local on the local
+# target, which runs main.ts on Bun. Its package gets fetch.ts and
+# bundle.ts beside main.ts.
+kind: Stack
+types:
+  Pricing:
+    name: Pricing
+    role: EmbeddedStruct
+    stack:
+      deploy:
+        - { name: ts-pricing, kind: API }
+      expose:
+        - service: { name: ts-pricing, kind: API }
+  Edge:
+    name: Edge
+    role: EmbeddedStruct
+    environment:
+      target: fake
+      values: { project: acme-edge, region: us-east1 }
+      settings:
+        - of: { service: { name: ts-pricing, kind: API } }
+          platform: fake.bundle
+  Local:
+    name: Local
+    role: EmbeddedStruct
+    environment:
+      target: local
