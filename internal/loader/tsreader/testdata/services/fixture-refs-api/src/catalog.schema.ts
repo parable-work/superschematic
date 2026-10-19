@@ -29,6 +29,26 @@ export abstract class BasketView {
   lines: BasketLine[];
 }
 
+// The kinds of item the catalog shelves.
+export enum ItemKind {
+  Book = "book",
+  Game = "game"
+}
+
+// A kind as the catalog lists it, by its code: a reference to it holds an
+// enum's value, whose schema is a component.
+@display({ noun: "Kind", plural: "Kinds", titleField: "name" })
+export abstract class KindView {
+  code: ItemKind;
+  name: string;
+}
+
+// Where an item is shelved: under a kind, named by its code.
+export abstract class ShelfEntry {
+  itemId: RefersTo<Identity.UUID, ItemView>;
+  kind: RefersTo<ItemKind, KindView, { value: "code" }>;
+}
+
 export class Catalog {
   // The items, narrowed by a search of their text and by ids, the lookup
   // a UI names the references' values through.
@@ -48,6 +68,18 @@ export class Catalog {
 
   @rest(HttpMethod.POST, "baskets")
   placeBasket(input: BasketInput): BasketView {
+    throw new Error("schema declaration only");
+  }
+
+  @rest(HttpMethod.GET, "kinds")
+  listKinds(): KindView[] {
+    throw new Error("schema declaration only");
+  }
+
+  // Shelves an item under a kind, a body argument that names it by its
+  // code.
+  @rest(HttpMethod.POST, "items/{itemId}/shelf")
+  shelveItem(itemId: RefersTo<Identity.UUID, ItemView>, kind: RefersTo<ItemKind, KindView, { value: "code" }>): ShelfEntry {
     throw new Error("schema declaration only");
   }
 }

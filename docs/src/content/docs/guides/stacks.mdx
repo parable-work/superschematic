@@ -940,6 +940,16 @@ says how to install it). It then:
 Ctrl-C stops the servers, callers first, and the containers, which keep
 their data for the next run; `--remove-data` removes them instead.
 
+A Go server, job or worker links superscalar's static archive through
+cgo. In a project whose naming file names no superscalar checkout
+([`[paths] scalar_go`](/superschematic/reference/naming/#pathsscalar_go)),
+a release of superschematic fetches the static archives it ships for your
+machine before the Go builds, checks them against the digest it names,
+keeps them in your cache directory, and builds with `CGO_LDFLAGS`
+pointing at them, after any you set; `stack run` does the same.
+`eval "$(superschematic env)"` sets the same `CGO_LDFLAGS` for a `go
+build` you run yourself ([`env`](/superschematic/reference/cli/#env-variable)).
+
 Each checkout of the repository runs an environment with containers and
 ports of its own, so two worktrees run `stack dev` on one stack at once.
 The containers are named after the stack, the environment and the
@@ -1209,7 +1219,9 @@ in every Go module it generates, to its own release. A Go stage links the
 server, and the image runs it on distroless `cc` as a non-root user. A
 server whose modules lie outside the repository root gets no Dockerfile,
 as does one without `[paths] scalar_go` built by a superschematic built
-from a checkout, which ships no archives; the build says why.
+from a checkout, which ships no archives; the build says why. Outside an
+image, `stack dev` and `superschematic env` fetch the same archives for
+your machine ([Run it locally](#run-it-locally)).
 
 ## Deploy to Google Cloud
 

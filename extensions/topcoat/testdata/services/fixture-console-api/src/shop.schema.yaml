@@ -1,7 +1,9 @@
 # A shop's console: products, listed a page at a time and searched, each
 # read by an id that refers to it and naming its supplier, with its
 # reviews, listed a page at a time under it; suppliers, listed a page at a
-# time with no filter; orders, listed a page at a time, filtered by status
+# time with no filter, and each one's products, listed under it, though no
+# operation reads a supplier, so the trail names one by what its id refers
+# to; orders, listed a page at a time, filtered by status
 # and by a product and searched, read, placed from lines that each refer
 # to a product, gifted a product named by its sku, and given another line
 # from the order's page; and the site's pages, listed a page at a time at
@@ -14,7 +16,8 @@
 # options' first page. A product refers to its supplier in turn, which
 # listSuppliers names from its first page: the target of a reference that
 # shows one itself. Reading products needs products.read, reading orders
-# orders.read and changing one orders.write.
+# orders.read and changing one orders.write; an order taker reads a
+# supplier's products with orders.read.
 name: fixture-console-api
 kind: API
 scalars:
@@ -238,6 +241,20 @@ operationSets:
         restPath: suppliers
         permissions: [products.read]
         page: { defaultLimit: 1, maxLimit: 2 }
+      # A supplier's products, by name, all on one page: a list under a
+      # supplier, whose supplierId refers to Supplier, which the trail
+      # names it by through listSuppliers.
+      - name: listSupplierProducts
+        typeRef: { name: Product, isArray: true }
+        required: true
+        httpMethod: GET
+        restPath: "suppliers/{supplierId}/products"
+        permissions: [orders.read]
+        arguments:
+          - name: supplierId
+            typeRef: { name: string }
+            required: true
+            references: { type: Supplier }
   - name: SiteQueries
     operations:
       # The site's pages, one to a page unless the caller asks for two, at

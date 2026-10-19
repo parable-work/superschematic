@@ -454,6 +454,13 @@ type TenantFilter struct {
 	// ReferencedByTenantUserTenant filters on the presence or absence of a
 	// TenantUser whose tenant points at this row.
 	ReferencedByTenantUserTenant *ReferencedByFilter
+	// SearchText keeps the rows whose search fields hold each of its words,
+	// in any case (D62): its runs of characters that are not White_Space,
+	// the first 8 of them. Each word is a condition on the table's
+	// search_text column, which the trigram index serves, ILIKE the word
+	// with its \, % and _ escaped, so they match themselves. A text without
+	// words, such as a blank one, keeps every row, and nil filters nothing.
+	SearchText *string
 }
 
 // TenantUpdate provides fields that can be updated
@@ -516,10 +523,29 @@ func (u *TenantUpdate) ApplyTo(row *types.Tenant) {
 	}
 }
 
-// buildWhereClause builds a WHERE clause from a TenantFilter
+// TenantFilterConditions are the filter's conditions for a query of
+// the caller's own, each column qualified by its table: each value is
+// appended to args, its placeholder numbered after those already there.
+// FindMany's WHERE is them joined by AND. A nil filter has none.
+func TenantFilterConditions(filter *TenantFilter, args *[]any) []string {
+	return filter.conditions(args, len(*args))
+}
+
+// buildWhereClause builds a WHERE clause from a TenantFilter: its
+// conditions joined by AND, or nothing when it has none.
 func (f *TenantFilter) buildWhereClause(args *[]interface{}, paramOffset int) string {
-	if f == nil {
+	conditions := f.conditions(args, paramOffset)
+	if len(conditions) == 0 {
 		return ""
+	}
+	return " WHERE " + strings.Join(conditions, " AND ")
+}
+
+// conditions are the filter's conditions, each value appended to args, its
+// placeholder numbered from paramOffset+1.
+func (f *TenantFilter) conditions(args *[]interface{}, paramOffset int) []string {
+	if f == nil {
+		return nil
 	}
 
 	var conditions []string
@@ -823,11 +849,15 @@ func (f *TenantFilter) buildWhereClause(args *[]interface{}, paramOffset int) st
 		}
 	}
 
-	if len(conditions) == 0 {
-		return ""
+	if f.SearchText != nil {
+		for _, term := range searchTerms(*f.SearchText) {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`tenant.search_text ILIKE $%d ESCAPE '\'`, paramNum))
+			*args = append(*args, searchLikePattern(term))
+		}
 	}
 
-	return " WHERE " + strings.Join(conditions, " AND ")
+	return conditions
 }
 
 // TenantUserFilter provides filtering for TenantUser queries
@@ -885,10 +915,32 @@ func (u *TenantUserUpdate) ApplyTo(row *types.TenantUser) {
 	}
 }
 
-// buildWhereClause builds a WHERE clause from a TenantUserFilter
+// TenantUserFilterConditions are the filter's conditions for a query of
+// the caller's own, each column qualified by its table: each value is
+// appended to args, its placeholder numbered after those already there.
+// FindMany's WHERE is them joined by AND, then deleted_at IS NULL unless
+// its options include deleted rows. That soft-delete condition is not
+// among them: a query that leaves deleted rows out adds it itself. A nil
+// filter has none.
+func TenantUserFilterConditions(filter *TenantUserFilter, args *[]any) []string {
+	return filter.conditions(args, len(*args))
+}
+
+// buildWhereClause builds a WHERE clause from a TenantUserFilter: its
+// conditions joined by AND, or nothing when it has none.
 func (f *TenantUserFilter) buildWhereClause(args *[]interface{}, paramOffset int) string {
-	if f == nil {
+	conditions := f.conditions(args, paramOffset)
+	if len(conditions) == 0 {
 		return ""
+	}
+	return " WHERE " + strings.Join(conditions, " AND ")
+}
+
+// conditions are the filter's conditions, each value appended to args, its
+// placeholder numbered from paramOffset+1.
+func (f *TenantUserFilter) conditions(args *[]interface{}, paramOffset int) []string {
+	if f == nil {
+		return nil
 	}
 
 	var conditions []string
@@ -1080,9 +1132,5 @@ func (f *TenantUserFilter) buildWhereClause(args *[]interface{}, paramOffset int
 		}
 	}
 
-	if len(conditions) == 0 {
-		return ""
-	}
-
-	return " WHERE " + strings.Join(conditions, " AND ")
+	return conditions
 }

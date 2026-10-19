@@ -520,18 +520,18 @@ func TestARustImplementationThatPredatesItsJobsFails(t *testing.T) {
 
 // TestARustWorkerOfAQueueTheClientCannotHoldFails: a Rust worker whose
 // queue's message holds a value the Rust queue client cannot write and read
-// back yet, a Temporal.Duration, which Postgres holds as an INTERVAL, is
-// refused, naming the field; the database's Rust types leave the queue out
-// of src/queues.rs, and the other worker's queue in (D65).
+// back yet, a list of a scalar Postgres holds as JSONB, a JSONB[] column,
+// is refused, naming the field; the database's Rust types leave the queue
+// out of src/queues.rs, and the other worker's queue in (D65).
 func TestARustWorkerOfAQueueTheClientCannotHoldFails(t *testing.T) {
 	repoRoot := t.TempDir()
 	outputRoot := filepath.Join(repoRoot, "schemas", "dist")
 	paths := rustGoldenPaths(repoRoot)
 	schemas, configs := rustJobsFixtures(t)
 	db := schemas["deps-stock-db"]
-	db.Scalars["Temporal.Duration"] = &ir.ScalarDef{Name: "Temporal.Duration", LanguagePrimitive: ir.LanguageString, TypeMappings: map[string]string{"sql": "INTERVAL"}}
+	db.Scalars["Test.Labels"] = &ir.ScalarDef{Name: "Test.Labels", LanguagePrimitive: ir.LanguageString, TypeMappings: map[string]string{"sql": "JSONB"}}
 	queue := db.Types["StockLow"]
-	queue.Fields = append(queue.Fields, &ir.FieldDef{Name: "lowFor", TypeRef: ir.TypeRef{Name: "Temporal.Duration"}, Required: true})
+	queue.Fields = append(queue.Fields, &ir.FieldDef{Name: "labels", TypeRef: ir.TypeRef{Name: "Test.Labels", IsArray: true}, Required: true})
 	for _, service := range []string{"deps-stock-db", "deps-rust-stock"} {
 		if err := runRustJobs(schemas, configs, service, outputRoot, repoRoot, paths); err != nil {
 			t.Fatalf("run %s: %v", service, err)
@@ -541,11 +541,11 @@ func TestARustWorkerOfAQueueTheClientCannotHoldFails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(queues), "//! Queue StockLow is left out: field lowFor is a Temporal.Duration, an INTERVAL column") || strings.Contains(string(queues), "STOCK_LOW_QUEUE") || !strings.Contains(string(queues), "RECOUNT_QUEUE") {
+	if !strings.Contains(string(queues), "//! Queue StockLow is left out: field labels is a list of JSON values") || strings.Contains(string(queues), "STOCK_LOW_QUEUE") || !strings.Contains(string(queues), "RECOUNT_QUEUE") {
 		t.Errorf("queues.rs should leave StockLow out and write Recount:\n%s", queues)
 	}
 	err = runRustJobs(schemas, configs, "deps-rust-stock-stack", outputRoot, repoRoot, paths)
-	want := "stack deps-rust-stock-stack: Rust worker deps-rust-stock-reorder-stock claims queue StockLow of deps-stock-db, which the Rust queue client cannot hold yet: its field lowFor is a Temporal.Duration, an INTERVAL column, which the Rust queue client does not read yet; hold the value in a @jsonField type, or write the worker in Go (D65)"
+	want := "stack deps-rust-stock-stack: Rust worker deps-rust-stock-reorder-stock claims queue StockLow of deps-stock-db, which the Rust queue client cannot hold yet: its field labels is a list of JSON values"
 	if err == nil || !strings.Contains(err.Error(), want) {
 		t.Fatalf("build = %v, want it to say %q", err, want)
 	}

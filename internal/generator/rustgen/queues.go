@@ -93,6 +93,12 @@ type QueueField struct {
 	// Default is the schema's default of an enum field, which a message
 	// that leaves the field unset writes, as the Go ORM writes it.
 	Default string `json:"default,omitempty"`
+
+	// Point is a location the column holds as a POINT, and Interval a
+	// duration it holds as an INTERVAL, as queues.ts marks them. The Rust
+	// client writes and reads each by the column's type.
+	Point    bool `json:"point,omitempty"`
+	Interval bool `json:"interval,omitempty"`
 }
 
 // QueueStatements are a queue's statements on Postgres
@@ -209,11 +215,13 @@ func queueField(schema *ir.Schema, f *ir.FieldDef, sqlTypes map[string]string) (
 	switch {
 	case field.List && anyJSON:
 		return field, "is a list of JSON values, which a queue's message does not hold yet; hold it in a @jsonField type"
-	case !field.JSON && sqlType == "POINT":
-		return field, fmt.Sprintf("is a %s, a POINT column, which the Rust queue client does not read yet", ref.Name)
-	case !field.JSON && sqlType == "INTERVAL":
-		return field, fmt.Sprintf("is a %s, an INTERVAL column, which the Rust queue client does not read yet", ref.Name)
+	case field.List && sqlType == "POINT":
+		return field, fmt.Sprintf("is a list of %s values, a POINT[] column, which the Rust queue client does not read yet", ref.Name)
+	case field.List && sqlType == "INTERVAL":
+		return field, fmt.Sprintf("is a list of %s values, an INTERVAL[] column, which the Rust queue client does not read yet", ref.Name)
 	}
+	field.Point = !field.JSON && !field.List && sqlType == "POINT"
+	field.Interval = !field.JSON && !field.List && sqlType == "INTERVAL"
 	if enum := schema.Enums[ref.Name]; enum != nil && f.Required && !ref.IsArray && !ref.IsMap && f.Default != nil {
 		field.Default = *f.Default
 	}

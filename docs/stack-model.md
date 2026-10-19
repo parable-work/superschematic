@@ -1796,7 +1796,9 @@ one of two places (D47, amended):
   way, so each also builds on its own. A binary built from a checkout is
   no release, and one the release workflow did not build names no
   digests: neither writes a Dockerfile without `[paths] scalar_go`, and
-  the build says why.
+  the build says why. Outside an image, `stack dev`, `stack run` and
+  `superschematic env` fetch the same tarball for the machine's platform
+  (section 8.3).
 
 Either way the Go stage, on the Go release `tools.env` pins, builds the
 server with `-mod=mod`, and the binary runs on distroless `cc`, which
@@ -1912,6 +1914,31 @@ elsewhere leaves them linked to that output root until the next install
 in the usual one. Each server runs in a process group of its own, so
 Ctrl-C reaches `stack dev` first, which sends each server SIGTERM,
 callers first, and SIGKILL ten seconds later.
+
+A Go server, job or worker links superscalar's static archive, and the
+version graph's and the engine's when it reaches them, through cgo. With
+`[paths] scalar_go` naming a checkout, cgo finds each archive beside its
+binding, where `make setup` builds it. Without it, the Go modules come
+from the module proxy, which carries no archive, so a release of
+superschematic hands the local provisioner the archives it ships, as the
+generated CI's `check` does (section 11.3): before the rollout, `stack
+dev` downloads `superschematic-archives_<version>_<platform>.tar.gz` for
+the machine's platform from the release's page, or the mirror
+`SUPERSCHEMATIC_RELEASE` names, checks it against the digest the binary
+names, and unpacks it into `superschematic/archives/<digest>` in the
+user's cache directory (`os.UserCacheDir`), where later runs find it.
+The request's `BuildEnv` then carries `CGO_LDFLAGS` with `-L` and its
+`lib/`, after any `CGO_LDFLAGS` of the shell's, and every `go build` the
+provisioner runs takes it, while the processes it starts do not. `stack
+run` does the same for the job it builds. Nothing is fetched for an
+environment without Go, for a naming file that renames superscalar's Go
+module, which the release does not pin, or for a binary built from a
+checkout, which pins nothing; a fetch that fails stops the run unless
+`CGO_LDFLAGS` is set, which the builds then take as it is. A `go build`
+run by hand takes the same flags from `superschematic env`, which
+fetches the archives as `stack dev` does and prints `export
+CGO_LDFLAGS=...` for a POSIX shell to evaluate, or with the variable's
+name its value alone (D47, amended).
 
 Policy rules refuse what a local environment cannot hold: a domain
 (`local-no-domain`), parameters (`local-no-parameters`), and two listeners
@@ -2761,7 +2788,14 @@ export abstract class FulfilOrders {}
   `TxInterface`: the message commits with the writes that caused it, or
   not at all. Each field reaches its column as a table's does through a
   repository's `CreateOne`, and an optional field that is unset, or a
-  required list that is nil, takes its column's default.
+  required list that is nil, takes its column's default. A location
+  (`Geo.Location`) goes to its `POINT` column as a `pgtype.Point`, x the
+  longitude and y the latitude, and a duration (`Temporal.Duration`) to
+  its `INTERVAL` column as a `time.Duration`, which pgx writes as its
+  whole microseconds, so the sign of `-1h2m` holds for the whole; a claim
+  reads an interval back with a day as 24 hours and a month as 30 days,
+  as pgx does. A list of either, a `POINT[]` or an `INTERVAL[]` column, is
+  refused for now, naming the field.
 - **The TypeScript client.** There is no TypeScript ORM, so the DB's
   TypeScript types package carries each queue as data in `queues.ts`,
   which its `package.json` exports as `./queues`, as it carries the
@@ -2779,12 +2813,20 @@ export abstract class FulfilOrders {}
   returns the claims below, with `ClaimLostError` for a lost claim. A
   field writes its column as the Go ORM writes it, classified alike: a
   JSON field its JSON text, an unset optional field or list nothing, so
-  the column's default, and an unset enum its schema default. Read back,
-  each column is what the TypeScript types hold: a timestamp a `Date`, a
-  date its `YYYY-MM-DD` text, a 64-bit integer a number, a JSON column its
-  value. A queue whose message holds a value the client cannot write and
-  read back yet, a `POINT` or an `INTERVAL` column, is left out of
-  `queues.ts`, which says why.
+  the column's default, and an unset enum its schema default. A field
+  marked `point` writes its location as `(lon,lat)`, and one marked
+  `interval` its duration as its whole microseconds,
+  `[-]H:MM:SS.ffffff`, a nanosecond remainder truncated toward zero, as
+  the Go ORM's `time.Duration` goes. Read back, each column is what the
+  TypeScript types hold: a timestamp a `Date`, a date its `YYYY-MM-DD`
+  text, a 64-bit integer a number, a JSON column its value, a `POINT` the
+  location `{lat, lon}`, and an `INTERVAL` its duration in the scalar
+  core's canonical text (`1h30m0s`, `1.5s`, `250us`), a day 24 hours and a
+  month 30 days. The Rust types' `queues.rs` carries the same definitions
+  as JSON, and the Rust runtime's `queue` module writes and reads each
+  column alike, by its type (D65). A queue whose message holds a value the
+  client cannot write and read back yet, a union or a list of locations
+  or durations, is left out of `queues.ts`, which says why.
 - **Claim.** `<Database>.<Queue>Queue()` returns the queue's claims: `Claim`
   takes up to n messages that are ready and due, or claimed past their
   claim's expiry, with `FOR UPDATE SKIP LOCKED`, gives each a new claim
@@ -2913,7 +2955,8 @@ export abstract class FulfilOrders {}
 
 Not built:
 
-- A `POINT` or `INTERVAL` column in a TypeScript queue's message.
+- A list of locations or durations, a `POINT[]` or `INTERVAL[]` column,
+  in a queue's message.
 - Claims on SQLite and D1, whose write transaction would claim.
 - Removing `done` messages, which stay in the table, and an operator's
   command to read and retry dead ones.
@@ -4149,6 +4192,10 @@ hold its config, and on the binary, which names the release, so it needs
 no key of its own. Only servers whose build context changed
 are built and rolled (section 11.2), so the workflow builds and deploys
 whatever the deploy decides is affected, and needs no list of its own.
+
+The archives `check` installs are the ones `stack dev`, `stack run` and
+`superschematic env` fetch outside CI, for the machine's platform, into
+the user's cache, checked against the same digests (section 8.3).
 
 ## 12. Core changes
 

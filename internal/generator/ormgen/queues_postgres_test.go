@@ -12,9 +12,43 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/typegen"
 	"github.com/parable-work/superschematic/internal/loader"
 	"github.com/parable-work/superschematic/internal/testpaths"
+	ir "github.com/parable-work/superschematic/ir"
 )
 
 const queueFixture = "fixture-queue-db"
+
+// queueGeoFixture holds DeliveryPlanned, a queue whose message holds
+// locations, POINT columns, and durations, INTERVAL ones, which SQLite
+// cannot store, so it is Postgres alone, apart from queueFixture, which
+// writes its queues in both dialects.
+const queueGeoFixture = "fixture-queue-geo-db"
+
+// queueSchema is queueFixture with the queue of queueGeoFixture beside its
+// own, so one ORM module, one TypeScript types package and one Rust types
+// crate hold the queues of both.
+func queueSchema(t *testing.T) *ir.Schema {
+	t.Helper()
+	schema, err := loader.LoadService(filepath.Join(fixturesDir, queueFixture))
+	if err != nil {
+		t.Fatalf("load %s: %v", queueFixture, err)
+	}
+	geo, err := loader.LoadService(filepath.Join(fixturesDir, queueGeoFixture))
+	if err != nil {
+		t.Fatalf("load %s: %v", queueGeoFixture, err)
+	}
+	for name, scalar := range geo.Scalars {
+		if _, ok := schema.Scalars[name]; !ok {
+			schema.Scalars[name] = scalar
+		}
+	}
+	for name, td := range geo.Types {
+		if _, clash := schema.Types[name]; clash {
+			t.Fatalf("%s and %s both declare %s", queueFixture, queueGeoFixture, name)
+		}
+		schema.Types[name] = td
+	}
+	return schema
+}
 
 // TestGeneratedQueuesOnPostgres generates the Go types module and the ORM
 // module for fixture-queue-db, whose queue OrderPlaced holds a field of
@@ -24,17 +58,17 @@ const queueFixture = "fixture-queue-db"
 // rolls back and in one that commits, claims and reads each field back,
 // claims with two pools at once, extends, completes, fails until the
 // message is dead, releases, takes back a claim that expired, and marks
-// dead a message whose last attempt's claim expired. It skips without the
+// dead a message whose last attempt's claim expired. A second generated
+// test enqueues and claims DeliveryPlanned of fixture-queue-geo-db, whose
+// locations are POINT columns and whose durations are INTERVAL ones, and
+// reads the columns as Postgres holds them. It skips without the
 // database.
 func TestGeneratedQueuesOnPostgres(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping compile check in -short mode")
 	}
 	paths := testpaths.Local(t)
-	schema, err := loader.LoadService(filepath.Join(fixturesDir, queueFixture))
-	if err != nil {
-		t.Fatalf("load %s: %v", queueFixture, err)
-	}
+	schema := queueSchema(t)
 	fixedClock := codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC))
 	typesModule := "example.com/schemas/types/go/" + queueFixture
 	tempRoot := t.TempDir()
@@ -75,8 +109,12 @@ func TestGeneratedQueuesOnPostgres(t *testing.T) {
 		t.Fatalf("write ddl: %v", err)
 	}
 	out := runGeneratedORMModule(t, ormDir, filepath.Join(ddlDir, "create.sql"), "queues_test.go", queuesORMTest)
-	if os.Getenv("SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL") != "" && !strings.Contains(out, "--- PASS: TestQueueOnPostgres") {
-		t.Fatal("the generated queue test did not pass")
+	if os.Getenv("SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL") != "" {
+		for _, test := range []string{"TestQueueOnPostgres", "TestLocationsAndDurationsOnPostgres"} {
+			if !strings.Contains(out, "--- PASS: "+test+" ") {
+				t.Errorf("the generated %s did not pass", test)
+			}
+		}
 	}
 }
 
@@ -313,6 +351,94 @@ func TestQueueOnPostgres(t *testing.T) {
 	}
 	if s, _, lastError := state(t, pool, retaken[0].ID); s != "dead" || !strings.Contains(lastError, "claim of its last attempt expired") {
 		t.Fatalf("message past its last attempt is %s (%q), want dead", s, lastError)
+	}
+}
+
+// TestLocationsAndDurationsOnPostgres: a location is a POINT whose x is the
+// longitude and y the latitude, and a duration an INTERVAL of its
+// microseconds, the sign of the whole duration kept and a nanosecond
+// remainder truncated toward zero. Each reads back as it was written, an
+// unset optional one as NULL and back as nil, and an interval written by
+// hand with days and months reads as their hours, a day 24 and a month
+// 30 days.
+func TestLocationsAndDurationsOnPostgres(t *testing.T) {
+	db, pool, _ := openQueueDatabase(t)
+	ctx := context.Background()
+	queue := db.DeliveryPlannedQueue()
+	id, _ := scalars.ParseUUID("6f1c2f2e-7d1a-4b4a-9d43-3c7a1b2c3d4e")
+	meet := types.GeoLocation{Lat: -33.8688, Lon: 151.2093}
+	grace := types.TemporalDuration(-(time.Minute + 30*time.Second + 250*time.Millisecond))
+	for _, msg := range []*types.DeliveryPlanned{
+		{OrderId: id, DropAt: types.GeoLocation{Lat: 37.7749, Lon: -122.4194}, Wait: types.TemporalDuration(26*time.Hour + 1500), MeetAt: &meet, Grace: &grace},
+		{OrderId: id, Wait: types.TemporalDuration(-1500)},
+	} {
+		if err := db.Transaction(ctx, func(tx TxInterface) error { return EnqueueDeliveryPlanned(ctx, tx, msg) }); err != nil {
+			t.Fatalf("enqueue: %v", err)
+		}
+	}
+	type row struct {
+		x, y        float64
+		wait        string
+		meet, grace *string
+	}
+	var rows []row
+	read, err := pool.Query(ctx, "SELECT (drop_at)[0], (drop_at)[1], wait::text, meet_at::text, grace::text FROM delivery_planned_queue ORDER BY wait DESC")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for read.Next() {
+		var r row
+		if err := read.Scan(&r.x, &r.y, &r.wait, &r.meet, &r.grace); err != nil {
+			t.Fatal(err)
+		}
+		rows = append(rows, r)
+	}
+	if err := read.Err(); err != nil {
+		t.Fatal(err)
+	}
+	text := func(s *string) string {
+		if s == nil {
+			return "NULL"
+		}
+		return *s
+	}
+	if len(rows) != 2 || rows[0].x != -122.4194 || rows[0].y != 37.7749 || rows[0].wait != "26:00:00.000001" || text(rows[0].meet) != "(151.2093,-33.8688)" || text(rows[0].grace) != "-00:01:30.25" ||
+		rows[1].x != 0 || rows[1].y != 0 || rows[1].wait != "-00:00:00.000001" || rows[1].meet != nil || rows[1].grace != nil {
+		t.Fatalf("the columns hold %+v", rows)
+	}
+
+	claims, err := queue.Claim(ctx, 10, time.Minute)
+	if err != nil || len(claims) != 2 {
+		t.Fatalf("Claim = %+v, %v, want both", claims, err)
+	}
+	for _, c := range claims {
+		m := c.Message
+		switch {
+		case m.MeetAt != nil:
+			if m.DropAt != (types.GeoLocation{Lat: 37.7749, Lon: -122.4194}) || m.Wait != types.TemporalDuration(26*time.Hour+time.Microsecond) || *m.MeetAt != meet || m.Grace == nil || *m.Grace != grace {
+				t.Errorf("the full message reads as %+v", m)
+			}
+		default:
+			if m.DropAt != (types.GeoLocation{}) || m.Wait != types.TemporalDuration(-time.Microsecond) || m.Grace != nil {
+				t.Errorf("the message that leaves its options unset reads as %+v", m)
+			}
+		}
+		if err := queue.Release(ctx, c.ID, c.Token); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if _, err := pool.Exec(ctx, "UPDATE delivery_planned_queue SET wait = '1 mon 1 day -01:00:00', grace = '-2 days'"); err != nil {
+		t.Fatal(err)
+	}
+	claims, err = queue.Claim(ctx, 10, time.Minute)
+	if err != nil || len(claims) != 2 {
+		t.Fatalf("Claim = %+v, %v, want both", claims, err)
+	}
+	for _, c := range claims {
+		if c.Message.Wait != types.TemporalDuration(743*time.Hour) || c.Message.Grace == nil || *c.Message.Grace != types.TemporalDuration(-48*time.Hour) {
+			t.Errorf("a message with days and months reads as %+v", c.Message)
+		}
 	}
 }
 `

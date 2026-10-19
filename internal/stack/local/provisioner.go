@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -959,7 +960,7 @@ func (p *Provisioner) startServers(ctx context.Context, req registry.ProvisionRe
 			return err
 		}
 		p.printf("build %s: go build %s", s.Deployable, s.Module)
-		if _, err := p.runner().Run(ctx, Command{Path: tools[s.Language], Args: []string{"build", "-o", binary, "."}, Dir: module, Env: buildEnv()}); err != nil {
+		if _, err := p.runner().Run(ctx, Command{Path: tools[s.Language], Args: []string{"build", "-o", binary, "."}, Dir: module, Env: buildEnv(req)}); err != nil {
 			return fmt.Errorf("local: build server %s: %w", s.Deployable, err)
 		}
 		builds = append(builds, built{server: s, cmd: Command{Path: binary, Dir: module, Env: env}})
@@ -1187,8 +1188,9 @@ func (p *Provisioner) runOutputs(req registry.ProvisionRequest, prog *Program) (
 // list it, is off. The build writes no go.sum, so the module's own go.mod
 // and go.sum may change: -mod=mod replaces any -mod in GOFLAGS. Only the
 // server module's files change, never the implementation packages it
-// requires.
-func buildEnv() []string {
+// requires. The request's BuildEnv comes last, so it wins: the CGO_LDFLAGS
+// that point cgo's linker at the release's static archives (D47, amended).
+func buildEnv(req registry.ProvisionRequest) []string {
 	var flags []string
 	for _, flag := range strings.Fields(os.Getenv("GOFLAGS")) {
 		if !strings.HasPrefix(flag, "-mod=") {
@@ -1196,7 +1198,11 @@ func buildEnv() []string {
 		}
 	}
 	flags = append(flags, "-mod=mod")
-	return append(os.Environ(), "GOWORK=off", "GOFLAGS="+strings.Join(flags, " "))
+	env := append(os.Environ(), "GOWORK=off", "GOFLAGS="+strings.Join(flags, " "))
+	for _, name := range slices.Sorted(maps.Keys(req.BuildEnv)) {
+		env = append(env, name+"="+req.BuildEnv[name])
+	}
+	return env
 }
 
 // waitReady probes a server's readiness path until it answers 200. A

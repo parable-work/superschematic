@@ -32,6 +32,10 @@ export interface QueueField {
   readonly list?: boolean;
   /** The schema's default of an enum, which a message that leaves the member unset writes. */
   readonly default?: string;
+  /** The column is a POINT, which a location, {lat, lon}, writes as (lon,lat). */
+  readonly point?: boolean;
+  /** The column is an INTERVAL, which a duration's text writes as its whole microseconds. */
+  readonly interval?: boolean;
 }
 
 /**
@@ -88,7 +92,7 @@ export const {{.Const}}: QueueDefinition<{{.Name}}> = {
   leaseSeconds: {{.LeaseSeconds}},
   fields: [
 {{- range .Fields}}
-    { name: {{jsonString .Name}}, column: {{jsonString .Column}}{{if .JSON}}, json: true{{end}}{{if .List}}, list: true{{end}}{{if .Default}}, default: {{jsonString .Default}}{{end}} },
+    { name: {{jsonString .Name}}, column: {{jsonString .Column}}{{if .JSON}}, json: true{{end}}{{if .List}}, list: true{{end}}{{if .Default}}, default: {{jsonString .Default}}{{end}}{{if .Point}}, point: true{{end}}{{if .Interval}}, interval: true{{end}} },
 {{- end}}
   ],
   statements: {

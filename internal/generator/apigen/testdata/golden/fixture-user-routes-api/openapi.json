@@ -292,37 +292,11 @@
         ],
         "type": "object"
       },
-      "ResponseLinks": {
-        "properties": {
-          "first": {
-            "nullable": true,
-            "type": "string"
-          },
-          "last": {
-            "nullable": true,
-            "type": "string"
-          },
-          "next": {
-            "nullable": true,
-            "type": "string"
-          },
-          "prev": {
-            "nullable": true,
-            "type": "string"
-          }
-        },
-        "type": "object"
-      },
       "ResponseMeta": {
         "properties": {
           "requestId": {
             "description": "Unique identifier for the request",
             "type": "string"
-          },
-          "totalCount": {
-            "description": "Total count of items for paginated responses",
-            "nullable": true,
-            "type": "integer"
           }
         },
         "required": [
@@ -452,9 +426,6 @@
                       },
                       "type": "array"
                     },
-                    "links": {
-                      "$ref": "#/components/schemas/ResponseLinks"
-                    },
                     "meta": {
                       "$ref": "#/components/schemas/ResponseMeta"
                     }
@@ -541,9 +512,6 @@
                   "properties": {
                     "data": {
                       "$ref": "#/components/schemas/IdentityRole"
-                    },
-                    "links": {
-                      "$ref": "#/components/schemas/ResponseLinks"
                     },
                     "meta": {
                       "$ref": "#/components/schemas/ResponseMeta"
@@ -656,9 +624,6 @@
                     "data": {
                       "type": "boolean"
                     },
-                    "links": {
-                      "$ref": "#/components/schemas/ResponseLinks"
-                    },
                     "meta": {
                       "$ref": "#/components/schemas/ResponseMeta"
                     }
@@ -767,9 +732,6 @@
                   "properties": {
                     "data": {
                       "$ref": "#/components/schemas/IdentityRole"
-                    },
-                    "links": {
-                      "$ref": "#/components/schemas/ResponseLinks"
                     },
                     "meta": {
                       "$ref": "#/components/schemas/ResponseMeta"
@@ -883,9 +845,6 @@
                       },
                       "type": "array"
                     },
-                    "links": {
-                      "$ref": "#/components/schemas/ResponseLinks"
-                    },
                     "meta": {
                       "$ref": "#/components/schemas/ResponseMeta"
                     }
@@ -972,9 +931,6 @@
                   "properties": {
                     "data": {
                       "$ref": "#/components/schemas/IdentityUser"
-                    },
-                    "links": {
-                      "$ref": "#/components/schemas/ResponseLinks"
                     },
                     "meta": {
                       "$ref": "#/components/schemas/ResponseMeta"
@@ -1077,9 +1033,6 @@
                     "data": {
                       "$ref": "#/components/schemas/IdentityUser"
                     },
-                    "links": {
-                      "$ref": "#/components/schemas/ResponseLinks"
-                    },
                     "meta": {
                       "$ref": "#/components/schemas/ResponseMeta"
                     }
@@ -1181,9 +1134,6 @@
                     "data": {
                       "$ref": "#/components/schemas/IdentityUser"
                     },
-                    "links": {
-                      "$ref": "#/components/schemas/ResponseLinks"
-                    },
                     "meta": {
                       "$ref": "#/components/schemas/ResponseMeta"
                     }
@@ -1284,9 +1234,6 @@
                   "properties": {
                     "data": {
                       "$ref": "#/components/schemas/IdentityUser"
-                    },
-                    "links": {
-                      "$ref": "#/components/schemas/ResponseLinks"
                     },
                     "meta": {
                       "$ref": "#/components/schemas/ResponseMeta"
@@ -1399,9 +1346,6 @@
                     "data": {
                       "type": "boolean"
                     },
-                    "links": {
-                      "$ref": "#/components/schemas/ResponseLinks"
-                    },
                     "meta": {
                       "$ref": "#/components/schemas/ResponseMeta"
                     }
@@ -1513,9 +1457,6 @@
                     "data": {
                       "$ref": "#/components/schemas/IdentityUser"
                     },
-                    "links": {
-                      "$ref": "#/components/schemas/ResponseLinks"
-                    },
                     "meta": {
                       "$ref": "#/components/schemas/ResponseMeta"
                     }
@@ -1625,9 +1566,6 @@
                     "data": {
                       "$ref": "#/components/schemas/IdentityUser"
                     },
-                    "links": {
-                      "$ref": "#/components/schemas/ResponseLinks"
-                    },
                     "meta": {
                       "$ref": "#/components/schemas/ResponseMeta"
                     }
@@ -1717,9 +1655,6 @@
                     "data": {
                       "$ref": "#/components/schemas/Capabilities"
                     },
-                    "links": {
-                      "$ref": "#/components/schemas/ResponseLinks"
-                    },
                     "meta": {
                       "$ref": "#/components/schemas/ResponseMeta"
                     }
@@ -1799,9 +1734,6 @@
                     "data": {
                       "$ref": "#/components/schemas/LoginResult"
                     },
-                    "links": {
-                      "$ref": "#/components/schemas/ResponseLinks"
-                    },
                     "meta": {
                       "$ref": "#/components/schemas/ResponseMeta"
                     }
@@ -1875,9 +1807,6 @@
                   "properties": {
                     "data": {
                       "type": "boolean"
-                    },
-                    "links": {
-                      "$ref": "#/components/schemas/ResponseLinks"
                     },
                     "meta": {
                       "$ref": "#/components/schemas/ResponseMeta"
@@ -1958,9 +1887,6 @@
                     "data": {
                       "$ref": "#/components/schemas/CurrentUser"
                     },
-                    "links": {
-                      "$ref": "#/components/schemas/ResponseLinks"
-                    },
                     "meta": {
                       "$ref": "#/components/schemas/ResponseMeta"
                     }
@@ -2039,9 +1965,6 @@
                   "properties": {
                     "data": {
                       "type": "boolean"
-                    },
-                    "links": {
-                      "$ref": "#/components/schemas/ResponseLinks"
                     },
                     "meta": {
                       "$ref": "#/components/schemas/ResponseMeta"
@@ -2132,9 +2055,6 @@
                     "data": {
                       "$ref": "#/components/schemas/LoginResult"
                     },
-                    "links": {
-                      "$ref": "#/components/schemas/ResponseLinks"
-                    },
                     "meta": {
                       "$ref": "#/components/schemas/ResponseMeta"
                     }
@@ -2207,9 +2127,6 @@
                   "properties": {
                     "data": {
                       "$ref": "#/components/schemas/Greeting"
-                    },
-                    "links": {
-                      "$ref": "#/components/schemas/ResponseLinks"
                     },
                     "meta": {
                       "$ref": "#/components/schemas/ResponseMeta"

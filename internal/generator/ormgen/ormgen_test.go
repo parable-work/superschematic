@@ -60,7 +60,7 @@ func TestWriteORMGolden(t *testing.T) {
 		svc          string
 		repositories []string
 	}{
-		{"fixture-db", []string{"repository_tenant.go", "repository_tenant_user.go"}},
+		{"fixture-db", []string{"repository_tenant.go", "repository_tenant_user.go", "search.go"}},
 		{"fixture-nested-arrays-db", []string{"repository_board.go"}},
 		{"fixture-version-graph-db", []string{
 			"repository_cover.go", "repository_ingredient.go", "repository_note.go", "repository_recipe.go",
@@ -442,6 +442,96 @@ func TestGenerateReferencedByAndAuditTimestampFilters(t *testing.T) {
 	}
 	if strings.Contains(got, "UpdatedBy *UUIDFilter") {
 		t.Error("audit actor columns must stay unfilterable")
+	}
+}
+
+// TestGenerateSearchTextFilter covers D62's search in the ORM (amended): a
+// table with search fields (fixture-db's Tenant.name) gets SearchText on its
+// filter, each of whose words is an ILIKE condition on its search_text
+// column, escaped, and search.go, which writes the words and their
+// patterns. A table without search fields (TenantUser) gets neither field
+// nor condition, and a schema without any gets no search.go, which a later
+// build removes. Every table gets <Type>FilterConditions.
+func TestGenerateSearchTextFilter(t *testing.T) {
+	output := generateFixtureDB(t)
+	if !output.HasSearch {
+		t.Fatal("fixture-db's Tenant.name is a search field; the output should have search")
+	}
+	for _, repo := range output.Repositories {
+		if want := repo.TypeName == "Tenant"; repo.HasSearch != want {
+			t.Errorf("%s.HasSearch = %t, want %t", repo.TypeName, repo.HasSearch, want)
+		}
+	}
+
+	outDir := t.TempDir()
+	if err := WriteORM(output, outDir); err != nil {
+		t.Fatalf("write orm: %v", err)
+	}
+	read := func(name string) string {
+		t.Helper()
+		data, err := os.ReadFile(filepath.Join(outDir, name))
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		return string(data)
+	}
+	query := read("query.go")
+	block := func(start string) string {
+		t.Helper()
+		i := strings.Index(query, start)
+		if i < 0 {
+			t.Fatalf("query.go has no %q", start)
+		}
+		end := strings.Index(query[i:], "\n}\n")
+		return query[i : i+end]
+	}
+	if !regexp.MustCompile(`\n\s+SearchText\s+\*string\b`).MatchString(block("type TenantFilter struct {")) {
+		t.Error("TenantFilter should have SearchText *string")
+	}
+	if strings.Contains(block("type TenantUserFilter struct {"), "SearchText") {
+		t.Error("TenantUserFilter has no search fields, so no SearchText")
+	}
+	condition := "conditions = append(conditions, fmt.Sprintf(`tenant.search_text ILIKE $%d ESCAPE '\\'`, paramNum))"
+	if !strings.Contains(block("func (f *TenantFilter) conditions("), condition) {
+		t.Errorf("TenantFilter's conditions should hold %s", condition)
+	}
+	if strings.Contains(block("func (f *TenantUserFilter) conditions("), "search_text") {
+		t.Error("TenantUserFilter's conditions should not touch search_text")
+	}
+	for _, want := range []string{
+		"func TenantFilterConditions(filter *TenantFilter, args *[]any) []string {",
+		"func TenantUserFilterConditions(filter *TenantUserFilter, args *[]any) []string {",
+		"*args = append(*args, searchLikePattern(term))",
+	} {
+		if !strings.Contains(query, want) {
+			t.Errorf("query.go is missing %q", want)
+		}
+	}
+	search := read("search.go")
+	for _, want := range []string{
+		"const searchMaxTerms = 8",
+		"func searchTerms(text string) []string {",
+		"func searchLikePattern(term string) string {",
+	} {
+		if !strings.Contains(search, want) {
+			t.Errorf("search.go is missing %q", want)
+		}
+	}
+
+	// A schema without search fields writes no search.go, and removes one
+	// an earlier build wrote.
+	plain := generateFixture(t, queueFixture)
+	if plain.HasSearch {
+		t.Fatalf("%s has no search fields", queueFixture)
+	}
+	if err := WriteORM(plain, outDir); err != nil {
+		t.Fatalf("write orm: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(outDir, "search.go")); !os.IsNotExist(err) {
+		t.Errorf("search.go after a build without search fields: %v, want it removed", err)
+	}
+	if strings.Contains(read("query.go"), "SearchText") {
+		t.Errorf("%s's query.go should not mention SearchText", queueFixture)
 	}
 }
 

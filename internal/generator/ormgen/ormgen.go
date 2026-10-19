@@ -23,6 +23,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/goutil"
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/generator/sqlgen"
 	"github.com/parable-work/superschematic/internal/generator/sqlutil"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -124,6 +125,12 @@ type ORMOutput struct {
 	// Queues are the schema's queues, sorted by name (D53). Any writes
 	// queues.go, which enqueues and claims their messages.
 	Queues []Queue
+
+	// HasSearch is true when a repository's table has search fields
+	// (Repository.HasSearch); it writes search.go, the words of a search
+	// text and each word's LIKE pattern, which the filters' SearchText
+	// conditions take (D62, amended).
+	HasSearch bool
 }
 
 // ModuleDependencyReplace keeps local generated type dependencies resolvable
@@ -176,6 +183,17 @@ type Repository struct {
 	// the history actor setting from the context user for the statement.
 	HistoryActorCol string
 
+	// HasSearch is true when a column of the table is a search field
+	// (@searchField), as sqlgen's Table.SearchFields counts them, so the
+	// table has the generated search_text column. Its filter then has
+	// SearchText, whose words are each a condition on QuotedSearchColumn
+	// (D62, amended).
+	HasSearch bool
+
+	// QuotedSearchColumn is the search_text column as SQL names it, quoted
+	// when it must be; empty when the table has no search fields.
+	QuotedSearchColumn string
+
 	// Import requirements computed from the field/relationship shapes so the
 	// repository template emits exactly the imports it uses.
 	NeedsTime               bool
@@ -224,6 +242,8 @@ type Field struct {
 	IsDateTimeScalar   bool   // non-array datetime-like scalar: values coerce via time.Time()
 	IsGeoPoint         bool   // single scalar stored as POINT (Geo.Location): values convert through pgtype.Point, x = Lon, y = Lat
 	IsGeoPointList     bool   // list of a scalar stored as POINT, a native POINT[] column: values convert through []pgtype.Point
+	IsInterval         bool   // single scalar stored as INTERVAL (Temporal.Duration): a queue's values convert through time.Duration
+	IsIntervalList     bool   // list of a scalar stored as INTERVAL, a native INTERVAL[] column
 	IsUUIDLike         bool
 	IsStringLike       bool
 	IsIntLike          bool
@@ -540,6 +560,12 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 	hasJSONListFields := false
 	hasGenericJSONLists := false
 	hasElementPointerLists := false
+	hasSearch := false
+	for _, repo := range repositories {
+		if repo.HasSearch {
+			hasSearch = true
+		}
+	}
 	geoPointListGoTypes := make(map[string]string)
 	for _, repo := range append(slices.Clone(repositories), queueRepositories...) {
 		if repo.HasSoftDelete {
@@ -608,6 +634,7 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 		UserIDGoType:             resolveUserIDGoType(tableTypes, scalarMap, uuidGoType),
 		VersionGraphs:            graphs,
 		Queues:                   queues,
+		HasSearch:                hasSearch,
 	}
 
 	return output, nil
@@ -906,6 +933,10 @@ func extractRepository(typeDef *ir.TypeDef, schema *ir.Schema, scalars map[strin
 		}
 
 		field := extractField(fieldDef, schema, scalars, unionNames)
+		if fieldDef.SearchField {
+			repo.HasSearch = true
+			repo.QuotedSearchColumn = sqlutil.QuoteIdentifier(sqlgen.SearchTextColumn)
+		}
 		if enumNames[field.IRType] && field.IsRequired && !field.IsArray && fieldDef.Default != nil {
 			field.EnumDefault = *fieldDef.Default
 		}
@@ -1059,6 +1090,9 @@ func extractField(fieldDef *ir.FieldDef, schema *ir.Schema, scalars map[string]s
 	// sqlgen stores a scalar mapped to POINT as POINT, and a list of it as
 	// POINT[]; a list of lists, a map and @jsonField are JSONB.
 	storedAsPoint := isScalar && !isMap && !fieldDef.JsonField && !fieldDef.TypeRef.IsArrayOfArrays && strings.EqualFold(scalar.sqlType, "POINT")
+	// Likewise a scalar mapped to INTERVAL (Temporal.Duration), whose Go
+	// type is a time.Duration.
+	storedAsInterval := isScalar && !isMap && !fieldDef.JsonField && !fieldDef.TypeRef.IsArrayOfArrays && strings.EqualFold(scalar.sqlType, "INTERVAL")
 
 	field := Field{
 		Name:                      fieldDef.Name,
@@ -1087,6 +1121,8 @@ func extractField(fieldDef *ir.FieldDef, schema *ir.Schema, scalars map[string]s
 		IsDateTimeScalar:          isScalar && !isArray && traits.IsDateTimeLike,
 		IsGeoPoint:                storedAsPoint && !isArray,
 		IsGeoPointList:            storedAsPoint && isArray,
+		IsInterval:                storedAsInterval && !isArray,
+		IsIntervalList:            storedAsInterval && isArray,
 		IsUUIDLike:                traits.IsUUIDLike,
 		IsStringLike:              traits.IsStringLike || irType == codegen.PrimitiveString,
 		IsIntLike:                 traits.IsIntegerLike,

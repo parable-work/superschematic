@@ -50,6 +50,10 @@ type walker struct {
 	// fields so composite defaults can validate serialized enum values.
 	externalEnums map[string]*ir.EnumDef
 
+	// relationTargets holds the class declaration each Relation field names,
+	// so applySource can flatten the types an @source target relates to.
+	relationTargets map[*ir.FieldDef]*astNode
+
 	// suppressRecording disables import recording while resolving a foreign
 	// class's fields (an @source target): only this schema's own references
 	// belong in Imports.
@@ -83,6 +87,8 @@ func newWalker(sp *serviceProgram, cfg *SchemaConfig, schema *ir.Schema, package
 		externals:     make(map[string]bool),
 		externalTypes: make(map[string]*ir.TypeDef),
 		externalEnums: make(map[string]*ir.EnumDef),
+
+		relationTargets: make(map[*ir.FieldDef]*astNode),
 
 		identityTables: make(map[string]*astNode),
 	}
@@ -1059,6 +1065,9 @@ func (w *walker) resolveClassFieldDefs(node *astNode) ([]*ir.FieldDef, bool) {
 				if inherited.InheritedFrom == "" {
 					inherited.InheritedFrom = id.name
 				}
+				if decl := w.relationTargets[bf]; decl != nil {
+					w.relationTargets[&inherited] = decl
+				}
 				fields = append(fields, &inherited)
 			}
 		}
@@ -1117,6 +1126,9 @@ func (w *walker) fieldFromProperty(member *astNode) (*ir.FieldDef, *SchemaError)
 	}
 	if info.relation {
 		fd.Relation = &ir.RelationDef{Type: info.ref.Name, OnDelete: info.relationOnDelete}
+		if info.decl != nil && info.decl.Kind == kindClassDeclaration {
+			w.relationTargets[fd] = info.decl
+		}
 	}
 	if info.search {
 		return nil, errorAtNode(prop.Type, "SearchQuery marks an operation's argument; a field is no search")
@@ -1205,6 +1217,7 @@ func (w *walker) applySource(td *ir.TypeDef, src *decoratorRef) {
 	target := targetService + "." + id.name
 	if external {
 		w.externalTypes[target] = &ir.TypeDef{Name: id.name, Fields: sourceFields}
+		w.flattenRelatedTypes(targetService, sourceFields)
 	}
 
 	sourceByName := make(map[string]*ir.FieldDef, len(sourceFields))
@@ -1226,6 +1239,77 @@ func (w *walker) applySource(td *ir.TypeDef, src *decoratorRef) {
 		}
 	}
 	td.Source = ref
+}
+
+// flattenRelatedTypes records, beside a cross-service @source target in
+// externalTypes, the flattened type each of its single Relation fields
+// names, as service.Type. A field <r>Id of the projection reads r's key,
+// and the verification pass holds its type to the related type's id
+// (D61, amended). The related type is read for that alone, so it records
+// nothing of the schema's (resolveDetached).
+func (w *walker) flattenRelatedTypes(service string, sourceFields []*ir.FieldDef) {
+	for _, f := range sourceFields {
+		if f.Relation == nil || f.HasMany || f.ManyToMany || f.TypeRef.IsArray || f.TypeRef.IsMap {
+			continue
+		}
+		decl := w.relationTargets[f]
+		if decl == nil || decl.Name() == nil {
+			continue
+		}
+		name := decl.Name().Text()
+		related := service + "." + name
+		if _, done := w.externalTypes[related]; done {
+			continue
+		}
+		w.externalTypes[related] = &ir.TypeDef{Name: name, Fields: w.resolveDetached(decl)}
+	}
+}
+
+// resolveDetached resolves the fields of a dependency's class that the
+// verification pass reads and the schema does not use, recording nothing
+// of the schema's: no import (suppressRecording), no scalar its fields
+// hold, no dependency enum and no error. A scalar or an enum that one of
+// the schema's own fields holds is recorded when that field is resolved,
+// before or after: the classes resolved here are not memoized, so a class
+// of the schema that extends one resolves its fields, and records them,
+// again.
+func (w *walker) resolveDetached(decl *astNode) []*ir.FieldDef {
+	classes := make(map[*astNode]bool, len(w.classFields))
+	for node := range w.classFields {
+		classes[node] = true
+	}
+	scalars := make(map[string]bool, len(w.schema.Scalars))
+	for name := range w.schema.Scalars {
+		scalars[name] = true
+	}
+	enums := make(map[string]bool, len(w.externalEnums))
+	for name := range w.externalEnums {
+		enums[name] = true
+	}
+	errs := len(w.errs)
+	prevSuppress := w.suppressRecording
+	w.suppressRecording = true
+
+	fields, _ := w.resolveClassFieldDefs(decl)
+
+	w.suppressRecording = prevSuppress
+	w.errs = w.errs[:errs]
+	for node := range w.classFields {
+		if !classes[node] {
+			delete(w.classFields, node)
+		}
+	}
+	for name := range w.schema.Scalars {
+		if !scalars[name] {
+			delete(w.schema.Scalars, name)
+		}
+	}
+	for name := range w.externalEnums {
+		if !enums[name] {
+			delete(w.externalEnums, name)
+		}
+	}
+	return fields
 }
 
 // walkEnum converts an exported enum declaration into an EnumDef. Only
