@@ -42,6 +42,10 @@ type ResolvedReference struct {
 	// TargetName is the target's name as the reference spells it.
 	TargetName string
 
+	// TargetService is the dependency that declares Target, by its
+	// service name; empty when the schema declares it.
+	TargetService string
+
 	// OptionsSet is the operation set that holds Options.
 	OptionsSet *OperationSet
 
@@ -68,8 +72,9 @@ type ResolvedReference struct {
 // first rule it breaks with the loader's wording, without the owner the
 // loader puts before it:
 //
-//   - the target is an object type of the schema or of a dependency (the
-//     schema's own first, then the dependencies by name);
+//   - the target is an object type of the schema or of a dependency: the
+//     schema's own first, then the dependency whose package an import of
+//     the schema lists the name in, then the dependencies by name;
 //   - options names an operation of the schema, by name when the name is
 //     unique among its operations, or as Set.operation; unsaid, it is the
 //     schema's one operation that lists the target. An operation lists the
@@ -97,11 +102,11 @@ func ResolveReference(schema *Schema, dependencies map[string]*Schema, ref *Refe
 	if strings.TrimSpace(ref.Type) == "" {
 		return out, errors.New("RefersTo names no type")
 	}
-	target, owner, err := referenceTarget(schema, dependencies, ref.Type)
+	target, owner, service, err := referenceTarget(schema, dependencies, ref.Type)
 	if err != nil {
 		return out, err
 	}
-	out.Target, out.TargetName = target, ref.Type
+	out.Target, out.TargetName, out.TargetService = target, ref.Type, service
 
 	valueName := ref.Value
 	if valueName == "" {
@@ -157,33 +162,84 @@ func ResolveReference(schema *Schema, dependencies map[string]*Schema, ref *Refe
 	return out, nil
 }
 
-// referenceTarget finds the type a reference names: the schema's own, else
-// a dependency's, the dependencies in name order. It returns the schema
-// that declares it, whose scalars type its fields.
-func referenceTarget(schema *Schema, dependencies map[string]*Schema, name string) (*TypeDef, *Schema, error) {
-	schemas := []*Schema{schema}
-	for _, dep := range sortedStringMapKeys(dependencies) {
-		if dependencies[dep] != nil {
-			schemas = append(schemas, dependencies[dep])
+// LookupScope is one schema a type's name is looked up in, and its service
+// name among the dependencies: empty for the API schema's own.
+type LookupScope struct {
+	Service string
+	Schema  *Schema
+}
+
+// LookupScopes lists the schemas a type named name is looked up in, in
+// order (D61, amended; D66): the schema itself; then the dependency whose
+// package an import of the schema lists the name in; then every other
+// dependency, in name order. A nil schema is left out. [ResolveReference]
+// finds a reference's target in this order, and a generator that finds a
+// dependency's type by its name looks in this order too. So the loader,
+// which reads only the dependency an import names, and a generator, which
+// has every one, find one type.
+func LookupScopes(schema *Schema, dependencies map[string]*Schema, name string) []LookupScope {
+	var out []LookupScope
+	imported := ""
+	if schema != nil {
+		out = append(out, LookupScope{Schema: schema})
+		if service := importedService(schema, name); service != "" && service != schema.Name && dependencies[service] != nil {
+			imported = service
+			out = append(out, LookupScope{Service: service, Schema: dependencies[service]})
 		}
 	}
-	for _, s := range schemas {
+	for _, dep := range sortedStringMapKeys(dependencies) {
+		if dep != imported && dependencies[dep] != nil {
+			out = append(out, LookupScope{Service: dep, Schema: dependencies[dep]})
+		}
+	}
+	return out
+}
+
+// referenceTarget finds the type a reference names, the first of
+// [LookupScopes] that declares the name. It returns the schema that
+// declares it, whose scalars type its fields, and that schema's service
+// name among the dependencies, empty for the schema's own.
+func referenceTarget(schema *Schema, dependencies map[string]*Schema, name string) (*TypeDef, *Schema, string, error) {
+	for _, c := range LookupScopes(schema, dependencies, name) {
+		s := c.Schema
 		if td := s.Types[name]; td != nil {
 			if td.IsTrait || td.Role == RoleTrait {
-				return nil, nil, fmt.Errorf("RefersTo names %s, a trait; a reference names an object type", name)
+				return nil, nil, "", fmt.Errorf("RefersTo names %s, a trait; a reference names an object type", name)
 			}
-			return td, s, nil
+			return td, s, c.Service, nil
 		}
 		switch {
 		case s.Enums[name] != nil:
-			return nil, nil, fmt.Errorf("RefersTo names %s, an enum; a reference names an object type", name)
+			return nil, nil, "", fmt.Errorf("RefersTo names %s, an enum; a reference names an object type", name)
 		case s.Unions[name] != nil:
-			return nil, nil, fmt.Errorf("RefersTo names %s, a union; a reference names an object type", name)
+			return nil, nil, "", fmt.Errorf("RefersTo names %s, a union; a reference names an object type", name)
 		case s.Scalars[name] != nil:
-			return nil, nil, fmt.Errorf("RefersTo names %s, a scalar; a reference names an object type", name)
+			return nil, nil, "", fmt.Errorf("RefersTo names %s, a scalar; a reference names an object type", name)
 		}
 	}
-	return nil, nil, fmt.Errorf("RefersTo names %s, which is not a type of %s or its dependencies", name, schema.Name)
+	return nil, nil, "", fmt.Errorf("RefersTo names %s, which is not a type of %s or its dependencies", name, schema.Name)
+}
+
+// importedService is the service of the first import of schema that lists
+// name, or "" when none does.
+func importedService(schema *Schema, name string) string {
+	for _, imp := range schema.Imports {
+		for _, t := range imp.Types {
+			if t == name {
+				return ServiceNameForPackage(imp.Package)
+			}
+		}
+	}
+	return ""
+}
+
+// ServiceNameForPackage is the service a schema package names: its last
+// "/" segment, without the scope ("@schemas/web-db" is web-db).
+func ServiceNameForPackage(pkg string) string {
+	if i := strings.LastIndex(pkg, "/"); i >= 0 {
+		return pkg[i+1:]
+	}
+	return pkg
 }
 
 // checkLabelField holds a named label to @display titleField's rule: one
@@ -431,9 +487,230 @@ type HeldReference struct {
 	Field    *FieldDef
 	Argument *ArgumentDef
 
-	// Ref is the reference as written.
+	// Ref is the reference as written, or as derived when Derived is set.
 	Ref *ReferenceDef
 
 	// TypeRef is the holder's type.
 	TypeRef TypeRef
+
+	// Derived reports a reference the field does not write: a relation's
+	// key on a type with @source, which refers to the API's one type with
+	// the same @source as the relation (D61, amended). DerivedReferences
+	// lists these; ReferencesOf lists only the written ones.
+	Derived bool
+}
+
+// FieldReference is the reference that field of holder holds: its
+// RefersTo, as written; or, when it writes none, the one derived from
+// holder's @source when the field is a relation's key (D61, amended) and
+// the derived reference resolves. derived reports the second. It is nil
+// when the field refers to nothing.
+//
+// A holder that is not one of the schema's own types, a dependency's type
+// the API's operations take or return, is read against the schema too:
+// the API's operations are the only ones a reference of the API names.
+// So its written RefersTo holds only when [ResolveReference] resolves it
+// in the schema to a value of the field's type; the loader checked it
+// against the dependency's own operations, not the schema's.
+//
+// The derived reference names the one object type W of the schema whose
+// @source is the relation's type U, by its id, with every other member
+// unsaid: { type: W }. With no such type, or two or more, or when
+// [ResolveReference] refuses it (no operation lists W, or two do), or when
+// W's value is not of the key's type, the key refers to nothing. A field
+// that does not hold one value of the type of U's id is no key
+// ([RelationKeyFits]) and derives nothing: a @virtual one is a field the
+// implementation fills, and the loader refuses any other.
+//
+// holder's @source target and the relation's type are read from the schema
+// or from dependencies, by the target's service name.
+func FieldReference(schema *Schema, dependencies map[string]*Schema, holder *TypeDef, field *FieldDef) (ref *ReferenceDef, derived bool) {
+	if field == nil {
+		return nil, false
+	}
+	if field.References != nil {
+		if holder != nil && schema != nil && schema.Types[holder.Name] != holder {
+			resolved, err := ResolveReference(schema, dependencies, field.References)
+			if err != nil || resolved.Value.TypeRef.Name != field.TypeRef.Name {
+				return nil, false
+			}
+		}
+		return field.References, false
+	}
+	if schema == nil || schema.Kind != SchemaKindAPI || holder == nil || holder.Source == nil ||
+		field.TypeRef.IsArray || field.TypeRef.IsMap {
+		return nil, false
+	}
+	service, _ := splitSourceTarget(holder.Source.Target)
+	relation, ok := RelationKey(sourceType(schema, dependencies, holder.Source.Target), field)
+	if !ok {
+		return nil, false
+	}
+	related := relation.TypeRef.Name
+	if relation.Relation.Type != "" {
+		related = relation.Relation.Type
+	}
+	_, related = splitSourceTarget(related)
+	target := related
+	if service != "" {
+		target = service + "." + related
+	}
+	if !RelationKeyFits(sourceType(schema, dependencies, target), field) {
+		return nil, false
+	}
+	candidates := SourcedBy(schema, target)
+	if len(candidates) != 1 {
+		return nil, false
+	}
+	ref = &ReferenceDef{Type: candidates[0].Name}
+	resolved, err := ResolveReference(schema, dependencies, ref)
+	if err != nil || resolved.Value.TypeRef.Name != field.TypeRef.Name {
+		return nil, false
+	}
+	return ref, true
+}
+
+// RelationKey reports the relation whose key field is, on a type sourced
+// from source (D61, amended): source's field r, one Relation (not HasMany,
+// not many-to-many, not a list or a map), when field is named r+"Id" and
+// source declares no field of that name. The key reads r's foreign key,
+// the column sqlgen names r_id. It does not look at field's type:
+// [RelationKeyFits] does, against the related type.
+func RelationKey(source *TypeDef, field *FieldDef) (relation *FieldDef, ok bool) {
+	if source == nil || field == nil {
+		return nil, false
+	}
+	name, isKey := strings.CutSuffix(field.Name, "Id")
+	if !isKey || name == "" {
+		return nil, false
+	}
+	for _, f := range source.Fields {
+		if f == nil {
+			continue
+		}
+		switch f.Name {
+		case field.Name:
+			return nil, false
+		case name:
+			relation = f
+		}
+	}
+	if relation == nil || relation.Relation == nil || relation.HasMany || relation.ManyToMany ||
+		relation.TypeRef.IsArray || relation.TypeRef.IsMap {
+		return nil, false
+	}
+	return relation, true
+}
+
+// RelatedKeyField is the field a relation's foreign key holds on the
+// related type: its id, else its @key field; nil when related is nil or
+// has neither.
+func RelatedKeyField(related *TypeDef) *FieldDef {
+	if related == nil {
+		return nil
+	}
+	var key *FieldDef
+	for _, f := range related.Fields {
+		switch {
+		case f == nil:
+		case f.Name == "id":
+			return f
+		case f.Key && key == nil:
+			key = f
+		}
+	}
+	return key
+}
+
+// RelationKeyFits reports whether field, which [RelationKey] names a
+// relation's key, holds what the relation's foreign key holds: one value,
+// not a list or a map, of the type of related's id ([RelatedKeyField]).
+// With related nil or without an id, its type is not known, and only the
+// shape is checked.
+//
+// A field that does not fit is no key (D61, amended): a @virtual one is a
+// field the implementation fills, which derives no reference, and the
+// loader refuses any other.
+func RelationKeyFits(related *TypeDef, field *FieldDef) bool {
+	if field == nil || field.TypeRef.IsArray || field.TypeRef.IsMap {
+		return false
+	}
+	id := RelatedKeyField(related)
+	return id == nil || id.TypeRef.Name == field.TypeRef.Name && !id.TypeRef.IsArray && !id.TypeRef.IsMap
+}
+
+// SourcedBy lists schema's own object types whose @source is target, a
+// service-qualified type ("shop-db.Product"), sorted by name. An
+// unqualified @source, or one qualified with the schema's own name, is the
+// schema's own type, and matches either spelling.
+func SourcedBy(schema *Schema, target string) []*TypeDef {
+	if schema == nil {
+		return nil
+	}
+	want := qualifiedSourceTarget(schema, target)
+	var out []*TypeDef
+	for _, name := range sortedStringMapKeys(schema.Types) {
+		td := schema.Types[name]
+		if td == nil || td.Source == nil || td.IsTrait || td.Role == RoleTrait {
+			continue
+		}
+		if qualifiedSourceTarget(schema, td.Source.Target) == want {
+			out = append(out, td)
+		}
+	}
+	return out
+}
+
+// DerivedReferences lists every reference [FieldReference] derives on the
+// schema's types, as [ReferencesOf] lists the written ones: types by name,
+// fields in declaration order, each with Derived set.
+func DerivedReferences(schema *Schema, dependencies map[string]*Schema) []HeldReference {
+	var out []HeldReference
+	if schema == nil || schema.Kind != SchemaKindAPI {
+		return out
+	}
+	for _, name := range sortedStringMapKeys(schema.Types) {
+		td := schema.Types[name]
+		if td == nil || td.Source == nil {
+			continue
+		}
+		for _, f := range td.Fields {
+			if ref, derived := FieldReference(schema, dependencies, td, f); derived {
+				out = append(out, HeldReference{Holder: td.Name + "." + f.Name, Type: td, Field: f, Ref: ref, TypeRef: f.TypeRef, Derived: true})
+			}
+		}
+	}
+	return out
+}
+
+// sourceType finds a @source target ("shop-db.OrderLine"): the schema's own
+// type when the target is unqualified or names the schema, else the type
+// of the dependency the target names. Nil when neither declares it.
+func sourceType(schema *Schema, dependencies map[string]*Schema, target string) *TypeDef {
+	service, name := splitSourceTarget(target)
+	if service == "" || service == schema.Name {
+		return schema.Types[name]
+	}
+	if dep := dependencies[service]; dep != nil {
+		return dep.Types[name]
+	}
+	return nil
+}
+
+// splitSourceTarget splits "service.Type" at its last dot; an unqualified
+// target has no service.
+func splitSourceTarget(target string) (service, name string) {
+	if i := strings.LastIndex(target, "."); i >= 0 {
+		return target[:i], target[i+1:]
+	}
+	return "", target
+}
+
+// qualifiedSourceTarget writes a @source target with its service, the
+// schema's own name for an unqualified one.
+func qualifiedSourceTarget(schema *Schema, target string) string {
+	if service, _ := splitSourceTarget(target); service == "" {
+		return schema.Name + "." + target
+	}
+	return target
 }

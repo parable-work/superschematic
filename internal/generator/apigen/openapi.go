@@ -19,6 +19,9 @@ func generateOpenAPISpec(output *APIOutput, schema *ir.Schema, dependencies map[
 	scalarMap := buildOpenAPIScalarMap(schema, dependencies)
 	scalarExamples, scalarDescriptions := collectOpenAPIScalarMetadata(schema, dependencies)
 
+	components, built := buildOpenAPISchemas(output.Endpoints, scalarExamples, scalarDescriptions, scalarMap, schema, dependencies)
+	addOpenAPIFieldReferences(components, built.types, schema, dependencies)
+
 	// info.version and servers are placeholders: the generated server
 	// replaces both at startup (injectOpenAPIRuntimeValues in routes.tmpl).
 	spec := map[string]interface{}{
@@ -36,7 +39,7 @@ func generateOpenAPISpec(output *APIOutput, schema *ir.Schema, dependencies map[
 		},
 		"paths": buildOpenAPIPaths(output, scalarExamples, scalarDescriptions, scalarMap, schema, dependencies),
 		"components": map[string]interface{}{
-			"schemas": buildOpenAPISchemas(output.Endpoints, scalarExamples, scalarDescriptions, scalarMap, schema, dependencies),
+			"schemas": components,
 			"securitySchemes": map[string]interface{}{
 				"bearerAuth": map[string]interface{}{
 					"type":         "http",
@@ -71,6 +74,8 @@ func generateOpenAPISpec(output *APIOutput, schema *ir.Schema, dependencies map[
 // it references under definitions, so it can be handed to a consumer
 // without the surrounding API document. References to the type itself
 // become "#" and references to other components "#/definitions/<Name>".
+// Its fields carry no reference key (OpenAPIReferenceKey): the options
+// operation a reference names is an operation of the API's document.
 func TypeOpenAPISchema(typeName string, schema *ir.Schema, dependencies map[string]*ir.Schema) (map[string]interface{}, error) {
 	if schema == nil || schema.Types[typeName] == nil {
 		return nil, fmt.Errorf("build OpenAPI schema for unknown type %q", typeName)
@@ -79,7 +84,7 @@ func TypeOpenAPISchema(typeName string, schema *ir.Schema, dependencies map[stri
 	scalarMap := buildOpenAPIScalarMap(schema, dependencies)
 	scalarExamples, scalarDescriptions := collectOpenAPIScalarMetadata(schema, dependencies)
 	components := make(map[string]interface{})
-	addSchemaFromIR(components, typeName, schema, dependencies, scalarExamples, scalarDescriptions, scalarMap, make(map[string]bool))
+	addSchemaFromIR(components, typeName, schema, dependencies, scalarExamples, scalarDescriptions, scalarMap, newOpenAPIComponents())
 
 	root, ok := components[typeName].(map[string]interface{})
 	if !ok {
@@ -218,6 +223,8 @@ func buildCommonHeaderParameters(output *APIOutput) []map[string]interface{} {
 // present or absent, never null, so the schema is never nullable;
 // "required" says whether it may be absent. A list uses style=form and
 // explode=false, the ?name=a,b encoding the generated servers and SDKs use.
+// A parameter that refers to an item gives its reference, and the search
+// argument says so, on the parameter object (D61, D62).
 func buildQueryParams(params []Param, scalarExamples, scalarDescriptions, scalarMap map[string]string, schema *ir.Schema, dependencies map[string]*ir.Schema) []map[string]interface{} {
 	var result []map[string]interface{}
 	for _, param := range params {
@@ -237,6 +244,7 @@ func buildQueryParams(params []Param, scalarExamples, scalarDescriptions, scalar
 			definition["style"] = "form"
 			definition["explode"] = false
 		}
+		openAPIParameterKeys(definition, param)
 		result = append(result, definition)
 	}
 	return result
@@ -308,13 +316,15 @@ func buildOpenAPIPaths(output *APIOutput, scalarExamples, scalarDescriptions, sc
 		parameters := buildCommonHeaderParameters(output)
 		for _, param := range endpoint.PathParams {
 			paramSchema := typeToOpenAPISchema(param.Type, scalarExamples, scalarDescriptions, scalarMap)
-			parameters = append(parameters, map[string]interface{}{
+			definition := map[string]interface{}{
 				"name":        param.Name,
 				"in":          "path",
 				"required":    true, // OpenAPI 3.0 spec: path parameters MUST be required
 				"description": fmt.Sprintf("%s parameter", param.Name),
 				"schema":      paramSchema,
-			})
+			}
+			openAPIParameterKeys(definition, param)
+			parameters = append(parameters, definition)
 		}
 
 		// GET endpoints carry scalar args in the query string instead of a body.
@@ -406,12 +416,14 @@ func buildOpenAPIPaths(output *APIOutput, scalarExamples, scalarDescriptions, sc
 				if arg.Required {
 					required = append(required, arg.Name)
 				}
-				properties[arg.Name] = openAPIFieldSchema(typeRef, arg.Required, openAPIBounds{
+				property := openAPIFieldSchema(typeRef, arg.Required, openAPIBounds{
 					min: arg.ValidateMin, max: arg.ValidateMax,
 					minLength: arg.ValidateMinLength, maxLength: arg.ValidateMaxLength,
 					pattern: arg.ValidatePattern,
 					listMin: arg.ValidateListMin, listMax: arg.ValidateListMax,
 				}, scalarExamples, scalarDescriptions, scalarMap, schema, dependencies)
+				openAPIParameterKeys(property, arg)
+				properties[arg.Name] = property
 			}
 
 			schemaObj := map[string]interface{}{
@@ -448,13 +460,14 @@ func buildOpenAPIPaths(output *APIOutput, scalarExamples, scalarDescriptions, sc
 			// The list is the page's items (D60).
 			responseSchema = pageOpenAPISchema(responseSchema)
 		}
+		// The envelope of every 2xx JSON response: {data, meta}, meta the
+		// request's id alone (D60, amended).
 		envelopeSchema := map[string]interface{}{
 			"type":     "object",
 			"required": []string{"data", "meta"},
 			"properties": map[string]interface{}{
-				"data":  responseSchema,
-				"meta":  map[string]interface{}{"$ref": "#/components/schemas/ResponseMeta"},
-				"links": map[string]interface{}{"$ref": "#/components/schemas/ResponseLinks"},
+				"data": responseSchema,
+				"meta": map[string]interface{}{"$ref": "#/components/schemas/ResponseMeta"},
 			},
 		}
 
@@ -519,11 +532,24 @@ func buildOpenAPIPaths(output *APIOutput, scalarExamples, scalarDescriptions, sc
 	return paths
 }
 
+// openAPIComponents is what building a document's components has done:
+// the names it has visited, and the object type each object component was
+// built from, whose fields addOpenAPIFieldReferences reads.
+type openAPIComponents struct {
+	visited map[string]bool
+	types   map[string]*ir.TypeDef
+}
+
+func newOpenAPIComponents() *openAPIComponents {
+	return &openAPIComponents{visited: make(map[string]bool), types: make(map[string]*ir.TypeDef)}
+}
+
 // buildOpenAPISchemas builds the components/schemas section from the types
-// referenced by endpoints, recursing through field types.
-func buildOpenAPISchemas(endpoints []EndpointInfo, scalarExamples, scalarDescriptions, scalarMap map[string]string, schema *ir.Schema, dependencies map[string]*ir.Schema) map[string]interface{} {
+// referenced by endpoints, recursing through field types, and returns what
+// it built them from.
+func buildOpenAPISchemas(endpoints []EndpointInfo, scalarExamples, scalarDescriptions, scalarMap map[string]string, schema *ir.Schema, dependencies map[string]*ir.Schema) (map[string]interface{}, *openAPIComponents) {
 	schemas := make(map[string]interface{})
-	processedTypes := make(map[string]bool)
+	built := newOpenAPIComponents()
 
 	schemas["Error"] = map[string]interface{}{
 		"type": "object",
@@ -542,99 +568,64 @@ func buildOpenAPISchemas(endpoints []EndpointInfo, scalarExamples, scalarDescrip
 				"type":        "string",
 				"description": "Unique identifier for the request",
 			},
-			"totalCount": map[string]interface{}{
-				"type":        "integer",
-				"nullable":    true,
-				"description": "Total count of items for paginated responses",
-			},
-		},
-	}
-	schemas["ResponseLinks"] = map[string]interface{}{
-		"type": "object",
-		"properties": map[string]interface{}{
-			"first": map[string]interface{}{"type": "string", "nullable": true},
-			"prev":  map[string]interface{}{"type": "string", "nullable": true},
-			"next":  map[string]interface{}{"type": "string", "nullable": true},
-			"last":  map[string]interface{}{"type": "string", "nullable": true},
 		},
 	}
 
 	for _, endpoint := range endpoints {
-		if endpoint.InputType != "" && !processedTypes[endpoint.InputType] {
-			addSchemaFromIR(schemas, endpoint.InputType, schema, dependencies, scalarExamples, scalarDescriptions, scalarMap, processedTypes)
+		if endpoint.InputType != "" {
+			addSchemaFromIR(schemas, endpoint.InputType, schema, dependencies, scalarExamples, scalarDescriptions, scalarMap, built)
 		}
-		if endpoint.OutputType != "" && !processedTypes[endpoint.OutputType] {
-			addSchemaFromIR(schemas, endpoint.OutputType, schema, dependencies, scalarExamples, scalarDescriptions, scalarMap, processedTypes)
+		if endpoint.OutputType != "" {
+			addSchemaFromIR(schemas, endpoint.OutputType, schema, dependencies, scalarExamples, scalarDescriptions, scalarMap, built)
 		}
 		for _, param := range append(append(endpoint.PathParams, endpoint.QueryParams...), endpoint.ScalarArgs...) {
-			if param.Type != "" && !processedTypes[param.Type] {
-				addSchemaFromIR(schemas, param.Type, schema, dependencies, scalarExamples, scalarDescriptions, scalarMap, processedTypes)
+			if param.Type != "" {
+				addSchemaFromIR(schemas, param.Type, schema, dependencies, scalarExamples, scalarDescriptions, scalarMap, built)
 			}
 		}
 	}
 
-	return schemas
+	return schemas, built
+}
+
+// componentOwner is the schema that declares the type, enum or union
+// typeName names, read from schema: the first of ir.LookupScopes that
+// declares it, the order a reference's target is found in (D61, amended;
+// D66). Nil when none does.
+func componentOwner(schema *ir.Schema, dependencies map[string]*ir.Schema, typeName string) *ir.Schema {
+	for _, scope := range ir.LookupScopes(schema, dependencies, typeName) {
+		if s := scope.Schema; s.Types[typeName] != nil || s.Enums[typeName] != nil || s.Unions[typeName] != nil {
+			return s
+		}
+	}
+	return nil
 }
 
 // addSchemaFromIR recursively adds a type and its dependencies to the
-// OpenAPI schemas.
-func addSchemaFromIR(schemas map[string]interface{}, typeName string, schema *ir.Schema, dependencies map[string]*ir.Schema, scalarExamples, scalarDescriptions, scalarMap map[string]string, processed map[string]bool) {
-	if processed[typeName] {
+// OpenAPI schemas: the declaration componentOwner finds, so a name two
+// dependencies declare is built from one of them on every run, the one a
+// reference to it resolves to. built records the object type each object
+// component comes from.
+func addSchemaFromIR(schemas map[string]interface{}, typeName string, schema *ir.Schema, dependencies map[string]*ir.Schema, scalarExamples, scalarDescriptions, scalarMap map[string]string, built *openAPIComponents) {
+	if built.visited[typeName] {
 		return
 	}
-	processed[typeName] = true
+	built.visited[typeName] = true
 
 	if _, isScalar := scalarMap[typeName]; isScalar {
 		return
 	}
 
-	if typeDef, ok := schema.Types[typeName]; ok && typeDef != nil {
-		schemas[typeName] = openAPITypeSchema(typeDef, schemas, schema, dependencies, scalarExamples, scalarDescriptions, scalarMap, processed)
-		return
-	}
-
-	if enumDef, ok := schema.Enums[typeName]; ok {
-		schemas[typeName] = openAPIEnumSchema(enumDef)
-		return
-	}
-	if unionDef, ok := schema.Unions[typeName]; ok && unionDef != nil {
-		schemas[typeName] = openAPIUnionSchema(
-			unionDef,
-			schemas,
-			schema,
-			dependencies,
-			scalarExamples,
-			scalarDescriptions,
-			scalarMap,
-			processed,
-		)
-		return
-	}
-	for _, depSchema := range dependencies {
-		if depSchema == nil {
-			continue
-		}
-		if typeDef, ok := depSchema.Types[typeName]; ok && typeDef != nil {
-			schemas[typeName] = openAPITypeSchema(typeDef, schemas, depSchema, dependencies, scalarExamples, scalarDescriptions, scalarMap, processed)
-			return
-		}
-		if enumDef, ok := depSchema.Enums[typeName]; ok {
-			schemas[typeName] = openAPIEnumSchema(enumDef)
-			return
-		}
-		if unionDef, ok := depSchema.Unions[typeName]; ok && unionDef != nil {
-			schemas[typeName] = openAPIUnionSchema(
-				unionDef,
-				schemas,
-				depSchema,
-				dependencies,
-				scalarExamples,
-				scalarDescriptions,
-				scalarMap,
-				processed,
-			)
-			return
-		}
+	owner := componentOwner(schema, dependencies, typeName)
+	switch {
+	case owner == nil:
+	case owner.Types[typeName] != nil:
+		built.types[typeName] = owner.Types[typeName]
+		schemas[typeName] = openAPITypeSchema(owner.Types[typeName], schemas, owner, dependencies, scalarExamples, scalarDescriptions, scalarMap, built)
+	case owner.Enums[typeName] != nil:
+		schemas[typeName] = openAPIEnumSchema(owner.Enums[typeName])
+	default:
+		schemas[typeName] = openAPIUnionSchema(owner.Unions[typeName], schemas, owner, dependencies, scalarExamples, scalarDescriptions, scalarMap, built)
 	}
 }
 
@@ -646,7 +637,7 @@ func openAPIUnionSchema(
 	scalarExamples map[string]string,
 	scalarDescriptions map[string]string,
 	scalarMap map[string]string,
-	processed map[string]bool,
+	built *openAPIComponents,
 ) map[string]interface{} {
 	oneOf := make([]map[string]interface{}, 0, len(unionDef.Types))
 	for _, memberType := range unionDef.Types {
@@ -661,7 +652,7 @@ func openAPIUnionSchema(
 			scalarExamples,
 			scalarDescriptions,
 			scalarMap,
-			processed,
+			built,
 		)
 	}
 
@@ -689,7 +680,7 @@ func openAPIUnionSchema(
 	return result
 }
 
-func openAPITypeSchema(typeDef *ir.TypeDef, schemas map[string]interface{}, schema *ir.Schema, dependencies map[string]*ir.Schema, scalarExamples, scalarDescriptions, scalarMap map[string]string, processed map[string]bool) map[string]interface{} {
+func openAPITypeSchema(typeDef *ir.TypeDef, schemas map[string]interface{}, schema *ir.Schema, dependencies map[string]*ir.Schema, scalarExamples, scalarDescriptions, scalarMap map[string]string, built *openAPIComponents) map[string]interface{} {
 	properties := make(map[string]interface{})
 	required := []string{}
 
@@ -711,7 +702,7 @@ func openAPITypeSchema(typeDef *ir.TypeDef, schemas map[string]interface{}, sche
 			required = append(required, field.Name)
 		}
 
-		addSchemaFromIR(schemas, field.TypeRef.Name, schema, dependencies, scalarExamples, scalarDescriptions, scalarMap, processed)
+		addSchemaFromIR(schemas, field.TypeRef.Name, schema, dependencies, scalarExamples, scalarDescriptions, scalarMap, built)
 	}
 
 	schemaObj := map[string]interface{}{
@@ -997,19 +988,12 @@ func nullableOpenAPISchema(schema map[string]interface{}, refType string) map[st
 	}
 }
 
-// openAPIRefType is the JSON type of the component typeName references:
-// string for enums, object for types and unions.
+// openAPIRefType is the JSON type of the component typeName references,
+// as componentOwner finds it: string for enums, object for types and
+// unions.
 func openAPIRefType(typeName string, schema *ir.Schema, dependencies map[string]*ir.Schema) string {
-	if _, ok := schema.Enums[typeName]; ok {
+	if owner := componentOwner(schema, dependencies, typeName); owner != nil && owner.Enums[typeName] != nil {
 		return "string"
-	}
-	for _, depSchema := range dependencies {
-		if depSchema == nil {
-			continue
-		}
-		if _, ok := depSchema.Enums[typeName]; ok {
-			return "string"
-		}
 	}
 	return "object"
 }

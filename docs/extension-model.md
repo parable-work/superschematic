@@ -137,7 +137,7 @@ public packages at the module root:
 
 | Package | What it is |
 | --- | --- |
-| `registry` | Aliases and forwarding functions over `internal/registry`, plus the helpers an extension calls: `Assemble`, `DecodeArgs`, `ArgErrorf`, `ParseOutputs`, `DecodeOutput`, `Generate`, `EnvConfigOf`, `RustAPIOf` and `APIDir` (the Rust API crate the `api` generator writes, as `RustAPI` with its `RustEndpoint`, `RustParam`, `RustInput` and `RustPage` records, and where), `HasTable`, `AnalyzeSessionStores`, `AuthSnippetFunc`, `CoreScalars`, `ScalarCatalogOf`, `ScalarCatalogWithUploads`, `ScalarCatalogWithRawBodyChecks`, `ScalarCatalogWithNpmPackages`, `DefaultNaming`, `LoadNaming`, `ParseNaming`, `GoPublicIdentifier`. The hook types (`BuildAllService`, `CheckSpec`, `VerifyReporter`, `OpenAPIHook`, `ToolHook`, `ToolSet`, `Tool`, `ToolKeys`, `ToolKeyValue`), the behavior types (`BehaviorSpec`, `BehaviorDeclaration`, `BehaviorField`, `BehaviorOperation`, `Behavior`), the default vendor keys (`OpenAPIDocsKey`, `DefaultToolScalarKey`, `DefaultToolGuidanceKey`) and the stack model's specs (`PlatformSpec`, `ConnectorSpec`, `TargetSpec`, `DNSPlatformSpec`, `ProvisionerSpec`, the `Provisioner` interface and their contexts) are aliased here too |
+| `registry` | Aliases and forwarding functions over `internal/registry`, plus the helpers an extension calls: `Assemble`, `DecodeArgs`, `ArgErrorf`, `ParseOutputs`, `DecodeOutput`, `Generate`, `EnvConfigOf`, `RustAPIOf` and `APIDir` (the Rust API crate the `api` generator writes, as `RustAPI` with its `RustEndpoint`, `RustParam`, `RustInput` and `RustPage` records, and where), `HasTable`, `AnalyzeSessionStores`, `AuthSnippetFunc`, `CoreScalars`, `ScalarCatalogOf`, `ScalarCatalogWithUploads`, `ScalarCatalogWithRawBodyChecks`, `ScalarCatalogWithNpmPackages`, `DefaultNaming`, `LoadNaming`, `ParseNaming`, `GoPublicIdentifier`. The hook types (`BuildAllService`, `CheckSpec`, `VerifyReporter`, `OpenAPIHook`, `ToolHook`, `ToolSet`, `Tool`, `ToolKeys`, `ToolKeyValue`), the behavior types (`BehaviorSpec`, `BehaviorDeclaration`, `BehaviorField`, `BehaviorOperation`, `Behavior`), the default vendor keys (`OpenAPIDocsKey`, `OpenAPIReferenceKey`, `OpenAPISearchKey`, `DefaultToolScalarKey`, `DefaultToolReferenceKey`, `DefaultToolSearchKey`, `DefaultToolGuidanceKey`) and the stack model's specs (`PlatformSpec`, `ConnectorSpec`, `TargetSpec`, `DNSPlatformSpec`, `ProvisionerSpec`, the `Provisioner` interface and their contexts) are aliased here too |
 | `loader` | `LoadService` and `LoadServiceWithConfig` with `WithRegistry`, `WithNaming` and `WithSchemaCatalog`, for extension tests against real fixtures; `NewDeclarationProgram`, a type-checked TypeScript program over in-memory files with the loader's compiler, lib files and module resolution, for an extension that checks declarations the schema frontend does not walk; `SchemaError` and `SchemaErrorList`, its located diagnostics |
 | `cli` | `cli.New`, `cli.Config`, `cli.CommandProvider` |
 | `ir` | The IR, its own Go module, with the extension codecs (section 4.2) |
@@ -727,14 +727,18 @@ type ToolHook struct {
 
 A tool hook edits what the SDK generators publish about an API's MCP tools.
 The `ToolSet` holds the vendor keys of the tool documents (`ToolKeys`: the
-key a scalar argument names its scalar under, the `_meta` key of a visible
-tool's `@docs` guidance, and extra keys written at the root of every
-argument schema) and one `Tool` per operation, whose `MCP` field is a copy
-of the resolved `@mcp` record the hook may edit. Hooks run in registration
-order in the `api` generator, before the tool collision checks; the SDK
-generators publish what they leave. An error fails the generator and names
-the hook. With no hook the keys are `DefaultToolScalarKey`
-(`x-superschematic-scalar`), `DefaultToolGuidanceKey` and no extra keys.
+key a scalar argument names its scalar under, the keys of a value's
+reference (D61) and of a search argument's mark (D62), the `_meta` key of
+a visible tool's `@docs` guidance, and extra keys written at the root of
+every argument schema) and one `Tool` per operation, whose `MCP` field is
+a copy of the resolved `@mcp` record the hook may edit. Hooks run in
+registration order in the `api` generator, before the tool collision
+checks; the SDK generators publish what they leave. An error fails the
+generator and names the hook. With no hook the keys are
+`DefaultToolScalarKey` (`x-superschematic-scalar`),
+`DefaultToolReferenceKey` (`x-superschematic-reference`),
+`DefaultToolSearchKey` (`x-superschematic-search`),
+`DefaultToolGuidanceKey` and no extra keys.
 A hook may change a visible tool's invocation policy, but only to another
 value of the registry's policy (section 3.15); the generator checks every
 tool again after the hooks.

@@ -1,6 +1,7 @@
 package verify
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 
@@ -16,7 +17,14 @@ import (
 //  2. A field of V that matches a field of S by name must be type-assignable
 //     (hard error otherwise).
 //  3. A field of V that matches nothing in S must be marked @virtual (hard
-//     error otherwise).
+//     error otherwise), unless it is a relation's key: a field <r>Id where
+//     S's field r is one Relation<U> reads r's foreign key (D61, amended).
+//     A key holds one value of the type of U's id, a written RefersTo on it
+//     names a type that is @source(U) or none, and with no RefersTo, two or
+//     more of an API's types that are @source(U) draw a warning: the key
+//     then refers to nothing (checkRelationKey). A @virtual field <r>Id
+//     that does not hold one value of the type of U's id is no key, and is
+//     a @virtual field like any other (isRelationKey).
 //  4. Removal is silent: V omitting a field of S is the intended pattern.
 //     The exception is opt-in: omitting a field S marks @sourceMustProject
 //     draws a warning.
@@ -61,11 +69,22 @@ func checkSourceProjections(schema *ir.Schema, in Input, r *Result) {
 		viewNames := make(map[string]bool, len(td.Fields))
 		for _, f := range td.Fields {
 			viewNames[f.Name] = true
+			sf, onSource := sourceByName[f.Name]
+			if !onSource {
+				if relation, ok := ir.RelationKey(src, f); ok && isRelationKey(schema, in, td, f, relation) {
+					// The key reads the relation's foreign key; @virtual
+					// still makes it a field the implementation fills.
+					checkRelationKey(schema, in, td, f, relation, r)
+					if f.Virtual {
+						virtual = append(virtual, f.Name)
+					}
+					continue
+				}
+			}
 			if f.Virtual {
 				virtual = append(virtual, f.Name)
 				continue
 			}
-			sf, onSource := sourceByName[f.Name]
 			if !onSource {
 				r.errorf(td.Owner, "%s.%s is not in source type %s and is not marked @virtual",
 					td.Name, f.Name, td.Source.Target)
@@ -92,6 +111,115 @@ func checkSourceProjections(schema *ir.Schema, in Input, r *Result) {
 		td.Source.Virtual = virtual
 		td.Source.OmittedFromSource = omitted
 	}
+}
+
+// relatedOf names the type a relation of view's @source relates to: by its
+// name, and as a @source target qualified with the service of view's
+// @source.
+func relatedOf(view *ir.TypeDef, relation *ir.FieldDef) (name, target string) {
+	service, _ := splitTarget(view.Source.Target)
+	name = relation.TypeRef.Name
+	if relation.Relation.Type != "" {
+		name = relation.Relation.Type
+	}
+	name = unqualifiedName(name)
+	if service == "" {
+		return name, name
+	}
+	return name, service + "." + name
+}
+
+// isRelationKey reports whether key, which ir.RelationKey names the key of
+// relation, is one (D61, amended). A field that is not @virtual is, and
+// checkRelationKey holds it to the key's rules. A @virtual one is only
+// when it holds one value of the type of the related type's id, or the
+// related type is not at hand: a @virtual field of another type is a
+// field the implementation fills, as any @virtual field is.
+func isRelationKey(schema *ir.Schema, in Input, view *ir.TypeDef, key, relation *ir.FieldDef) bool {
+	if !key.Virtual {
+		return true
+	}
+	_, related := relatedOf(view, relation)
+	target, _ := resolveSourceType(schema, in, related)
+	return ir.RelationKeyFits(target, key)
+}
+
+// checkRelationKey holds a relation's key of the projection view to the
+// rules of D61, amended: it is one value, of the type of the related type's
+// id when that type is at hand (a cross-service one is at hand when the
+// reader flattened it into Input.ExternalTypes). In an API, a RefersTo it
+// writes names no type that is @source of another table, the schema's own
+// or a dependency's, and with none, two or more types that are @source of
+// the related type draw a warning: ir.FieldReference then derives no
+// reference, and the key is a plain value.
+func checkRelationKey(schema *ir.Schema, in Input, view *ir.TypeDef, key, relation *ir.FieldDef, r *Result) {
+	relatedName, related := relatedOf(view, relation)
+	reads := fmt.Sprintf("%s.%s reads the key of %s.%s", view.Name, key.Name, view.Source.Target, relation.Name)
+	if key.TypeRef.IsArray || key.TypeRef.IsMap {
+		r.errorf(view.Owner, "%s, a Relation to %s; a key is one value, not a list or a map", reads, relatedName)
+		return
+	}
+	if target, ok := resolveSourceType(schema, in, related); ok && !ir.RelationKeyFits(target, key) {
+		id := ir.RelatedKeyField(target)
+		r.errorf(view.Owner, "%s, a Relation to %s, whose id is %s, not %s", reads, relatedName, typeRefString(id.TypeRef), typeRefString(key.TypeRef))
+		return
+	}
+	if schema.Kind != ir.SchemaKindAPI {
+		return
+	}
+	if key.References != nil {
+		if named, owner := referencedType(schema, in, key.References.Type); named != nil && named.Source != nil {
+			if source := qualifiedTarget(owner, named.Source.Target); source != qualifiedTarget(schema, related) {
+				r.errorf(view.Owner, "%s.%s: RefersTo names %s, which is @source(%s), but the field reads the key of %s.%s, a Relation to %s",
+					view.Name, key.Name, key.References.Type, source, view.Source.Target, relation.Name, relatedName)
+			}
+		}
+		return
+	}
+	candidates := ir.SourcedBy(schema, related)
+	if len(candidates) > 1 {
+		names := make([]string, len(candidates))
+		for i, c := range candidates {
+			names[i] = c.Name
+		}
+		all := "all"
+		if len(names) == 2 {
+			all = "both"
+		}
+		r.warnf(view.Owner, "%s and refers to nothing: %s are %s @source(%s); name one with RefersTo", reads, joinAnd(names), all, related)
+	}
+}
+
+// referencedType finds the type a RefersTo names as ir.ResolveReference
+// finds it: the schema's own, else a dependency's, from
+// Input.DependencySchemas, through the import that names it first
+// (ir.LookupScopes). It returns the schema that declares it too; nil when
+// none of them declares it.
+func referencedType(schema *ir.Schema, in Input, name string) (*ir.TypeDef, *ir.Schema) {
+	for _, scope := range ir.LookupScopes(schema, in.DependencySchemas, name) {
+		if td := scope.Schema.Types[name]; td != nil {
+			return td, scope.Schema
+		}
+	}
+	return nil, nil
+}
+
+// qualifiedTarget writes a @source target of one of owner's types with its
+// service: owner's own name for an unqualified one, as ir.SourcedBy
+// compares them.
+func qualifiedTarget(owner *ir.Schema, target string) string {
+	if service, _ := splitTarget(target); service == "" {
+		return owner.Name + "." + target
+	}
+	return target
+}
+
+// joinAnd writes names as "A", "A and B" or "A, B and C".
+func joinAnd(names []string) string {
+	if len(names) < 2 {
+		return strings.Join(names, "")
+	}
+	return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
 }
 
 // resolveSourceType resolves a service-qualified @source target to its

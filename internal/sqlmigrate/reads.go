@@ -13,7 +13,10 @@ import (
 // @source views read: for every view whose @source target is a table type
 // of database, the column behind each field, found by its origin in model
 // (a relation field reads its foreign-key column; a @virtual field reads
-// nothing). Reads are sorted by table, column, then via.
+// nothing). A field <r>Id that the table type does not declare, where r is
+// one Relation, is the relation's key (D61, amended): it reads r's
+// foreign-key column too, as ir.RelationKey finds it in the IR. Reads are
+// sorted by table, column, then via.
 //
 // A target is split as the loader's @source verification splits it: the
 // service is everything before the last dot. A view of a type that is not
@@ -51,11 +54,11 @@ func SourceReads(consumer *ir.Schema, database string, model *Model) ([]Read, er
 			if field.Virtual || slices.Contains(view.Source.Virtual, field.Name) {
 				continue
 			}
-			origin := typeName + "." + field.Name
-			for _, column := range table.Columns {
-				if column.Origin != origin {
-					continue
-				}
+			columns := originColumns(table, typeName+"."+field.Name)
+			if len(columns) == 0 {
+				columns = relationKeyColumns(table, typeName, field.Name)
+			}
+			for _, column := range columns {
 				reads = append(reads, Read{
 					Reader: consumer.Name,
 					Via:    view.Name + "." + field.Name,
@@ -67,6 +70,41 @@ func SourceReads(consumer *ir.Schema, database string, model *Model) ([]Read, er
 	}
 	sortReads(reads)
 	return reads, nil
+}
+
+// originColumns lists the table's columns whose origin is origin
+// ("Order.total").
+func originColumns(table *Table, origin string) []*Column {
+	var out []*Column
+	for _, column := range table.Columns {
+		if column.Origin == origin {
+			out = append(out, column)
+		}
+	}
+	return out
+}
+
+// relationKeyColumns lists the foreign-key column a relation's key field
+// reads: for a field <r>Id that has no column of its own, the column of
+// origin typeName.r that is the one column of one of the table's foreign
+// keys, the column a single Relation r stores. A list relation stores no
+// column in its own table, and a plain field r is no foreign key, so
+// either reads nothing.
+func relationKeyColumns(table *Table, typeName, field string) []*Column {
+	relation, ok := strings.CutSuffix(field, "Id")
+	if !ok || relation == "" {
+		return nil
+	}
+	var out []*Column
+	for _, column := range originColumns(table, typeName+"."+relation) {
+		for _, fk := range table.ForeignKeys {
+			if len(fk.Columns) == 1 && fk.Columns[0] == column.Name {
+				out = append(out, column)
+				break
+			}
+		}
+	}
+	return out
 }
 
 // MergeReads returns the reads of every set, each read once, sorted by

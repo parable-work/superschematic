@@ -50,37 +50,11 @@
         ],
         "type": "object"
       },
-      "ResponseLinks": {
-        "properties": {
-          "first": {
-            "nullable": true,
-            "type": "string"
-          },
-          "last": {
-            "nullable": true,
-            "type": "string"
-          },
-          "next": {
-            "nullable": true,
-            "type": "string"
-          },
-          "prev": {
-            "nullable": true,
-            "type": "string"
-          }
-        },
-        "type": "object"
-      },
       "ResponseMeta": {
         "properties": {
           "requestId": {
             "description": "Unique identifier for the request",
             "type": "string"
-          },
-          "totalCount": {
-            "description": "Total count of items for paginated responses",
-            "nullable": true,
-            "type": "integer"
           }
         },
         "required": [
@@ -164,9 +138,6 @@
                     "data": {
                       "description": "Any valid JSON value: object, array, primitive, or null"
                     },
-                    "links": {
-                      "$ref": "#/components/schemas/ResponseLinks"
-                    },
                     "meta": {
                       "$ref": "#/components/schemas/ResponseMeta"
                     }
@@ -228,9 +199,6 @@
                   "properties": {
                     "data": {
                       "description": "Any valid JSON value: object, array, primitive, or null"
-                    },
-                    "links": {
-                      "$ref": "#/components/schemas/ResponseLinks"
                     },
                     "meta": {
                       "$ref": "#/components/schemas/ResponseMeta"
@@ -341,9 +309,6 @@
                     "data": {
                       "description": "A string-to-string map stored as JSON",
                       "type": "object"
-                    },
-                    "links": {
-                      "$ref": "#/components/schemas/ResponseLinks"
                     },
                     "meta": {
                       "$ref": "#/components/schemas/ResponseMeta"
@@ -573,9 +538,6 @@
                       },
                       "type": "array"
                     },
-                    "links": {
-                      "$ref": "#/components/schemas/ResponseLinks"
-                    },
                     "meta": {
                       "$ref": "#/components/schemas/ResponseMeta"
                     }
@@ -697,9 +659,6 @@
                       },
                       "type": "array"
                     },
-                    "links": {
-                      "$ref": "#/components/schemas/ResponseLinks"
-                    },
                     "meta": {
                       "$ref": "#/components/schemas/ResponseMeta"
                     }
@@ -818,9 +777,6 @@
                     "data": {
                       "type": "boolean"
                     },
-                    "links": {
-                      "$ref": "#/components/schemas/ResponseLinks"
-                    },
                     "meta": {
                       "$ref": "#/components/schemas/ResponseMeta"
                     }
@@ -910,9 +866,6 @@
                     "data": {
                       "type": "boolean"
                     },
-                    "links": {
-                      "$ref": "#/components/schemas/ResponseLinks"
-                    },
                     "meta": {
                       "$ref": "#/components/schemas/ResponseMeta"
                     }
@@ -998,9 +951,6 @@
                   "properties": {
                     "data": {
                       "type": "boolean"
-                    },
-                    "links": {
-                      "$ref": "#/components/schemas/ResponseLinks"
                     },
                     "meta": {
                       "$ref": "#/components/schemas/ResponseMeta"
@@ -1101,9 +1051,6 @@
                   "properties": {
                     "data": {
                       "type": "boolean"
-                    },
-                    "links": {
-                      "$ref": "#/components/schemas/ResponseLinks"
                     },
                     "meta": {
                       "$ref": "#/components/schemas/ResponseMeta"
@@ -1210,9 +1157,6 @@
                         "type": "string"
                       },
                       "type": "array"
-                    },
-                    "links": {
-                      "$ref": "#/components/schemas/ResponseLinks"
                     },
                     "meta": {
                       "$ref": "#/components/schemas/ResponseMeta"
@@ -1349,9 +1293,6 @@
                         "type": "string"
                       },
                       "type": "array"
-                    },
-                    "links": {
-                      "$ref": "#/components/schemas/ResponseLinks"
                     },
                     "meta": {
                       "$ref": "#/components/schemas/ResponseMeta"

@@ -61,6 +61,77 @@ func TestToolManifestsRoundTripThroughIRWireTypes(t *testing.T) {
 	})
 }
 
+// TestToolManifestRoundTripsReferencesAndSearch: fixture-refs-api's
+// tools/schema.json, whose properties carry D61's reference and D62's
+// search mark, decodes into ir.ToolManifest with unknown fields refused,
+// each reference and mark where the arguments hold them, and re-encodes to
+// the same JSON.
+func TestToolManifestRoundTripsReferencesAndSearch(t *testing.T) {
+	rendered := readRendered(t, writeRefsTools(t), "tools/schema.json")
+	var manifest ir.ToolManifest
+	decodeDisallowingUnknownFields(t, rendered, &manifest)
+	byID := &ir.ToolSchemaReference{Target: "ItemView", Options: "catalog.listItems", Value: "id", Label: "name", Lookup: "ids"}
+	list, _ := manifestTool(manifest, "catalog.listItems")
+	get, _ := manifestTool(manifest, "catalog.getItem")
+	place, _ := manifestTool(manifest, "catalog.placeBasket")
+	for _, check := range []struct {
+		where string
+		got   *ir.ToolSchemaReference
+		want  *ir.ToolSchemaReference
+	}{
+		{"listItems(ids)", list.Parameters.Properties["ids"].Reference, byID},
+		{"getItem(itemId)", get.Parameters.Properties["itemId"].Reference, byID},
+		{"placeBasket lines[].itemId", place.Parameters.Properties["lines"].Items.Properties["itemId"].Reference, byID},
+		{"placeBasket giftSku", place.Parameters.Properties["giftSku"].Reference,
+			&ir.ToolSchemaReference{Target: "ItemView", Options: "catalog.listItems", Value: "sku", Label: "name"}},
+	} {
+		if !reflect.DeepEqual(check.got, check.want) {
+			t.Errorf("%s decoded as %+v, want %+v", check.where, check.got, check.want)
+		}
+	}
+	if !list.Parameters.Properties["q"].Search || list.Parameters.Properties["inStock"].Search {
+		t.Error("listItems: q did not decode as the search, or inStock did")
+	}
+	assertManifestRoundTrip(t, rendered, manifest, len(manifest.Tools))
+}
+
+// renamingRefsHook renames D61's and D62's tool keys, as a distribution's
+// hook renames the scalar key.
+var renamingRefsHook = apigen.ToolHook{
+	Name: "vendor-refs",
+	Edit: func(_ *ir.Schema, tools *apigen.ToolSet) error {
+		tools.Keys.Reference, tools.Keys.Search = "x-vendor-reference", "x-vendor-search"
+		return nil
+	},
+}
+
+// TestToolHookRenamesTheReferenceAndSearchKeys: the reference and search
+// keys a tool hook leaves are the ones every TypeScript tool document
+// writes, and tools/index.ts types; none keeps a core key.
+func TestToolHookRenamesTheReferenceAndSearchKeys(t *testing.T) {
+	outDir := writeRefsTools(t, renamingRefsHook)
+	for _, name := range []string{"tools/index.ts", "tools/schema.json"} {
+		rendered := string(readRendered(t, outDir, name))
+		for _, core := range []string{apigen.DefaultToolReferenceKey, apigen.DefaultToolSearchKey} {
+			if strings.Contains(rendered, core) {
+				t.Errorf("%s still carries the core key %s", name, core)
+			}
+		}
+	}
+	schema := string(readRendered(t, outDir, "tools/schema.json"))
+	for _, want := range []string{`"x-vendor-reference":{"label":"name","lookup":"ids","options":"catalog.listItems","target":"ItemView","value":"id"}`, `"x-vendor-search":true`} {
+		if !strings.Contains(schema, want) {
+			t.Errorf("tools/schema.json lacks %s", want)
+		}
+	}
+	index := string(readRendered(t, outDir, "tools/index.ts"))
+	for _, want := range []string{`'x-vendor-reference'?: { target: string;`, `'x-vendor-search'?: boolean;`} {
+		if !strings.Contains(index, want) {
+			t.Errorf("tools/index.ts lacks %s", want)
+		}
+	}
+}
+
 // TestInputSchemaDigestHashesTheEncodedArguments: a tool's digest is the
 // sha256 of its argument schema as toolsutil encodes it, so it changes
 // with a vendor key a hook adds.

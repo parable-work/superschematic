@@ -170,11 +170,14 @@ use the Rust method names.
 ### `tools/schema.json`
 
 One entry per operation, with these keys in this order: `name`
-(`<namespace>.<method>`), `operationId`, `title`, `mcp` (absent without
-`@mcp`), `capability`, `lifecycle`, `visibility`, `audience`, `guidance`,
-`replay`, `description`, `namespace`, `methodName`, `httpMethod`,
-`httpPath`, `requiresAuth`, `requiredPermissions`, `isScoped`,
-`bindingStatus`, `inputSchemaDigest`, `parameters`, `returns`.
+(`<namespace>.<method>`, the TypeScript SDK's method name in every SDK's
+documents, so an operation `list_items` is `catalog.listItems`; a
+reference's `options` names its tool so), `operationId`, `title`, `mcp`
+(absent without `@mcp`), `capability`, `lifecycle`, `visibility`,
+`audience`, `guidance`, `replay`, `description`, `namespace`,
+`methodName`, `httpMethod`, `httpPath`, `requiresAuth`,
+`requiredPermissions`, `isScoped`, `bindingStatus`, `inputSchemaDigest`,
+`parameters`, `returns`.
 
 ```json
 "mcp": {
@@ -217,11 +220,41 @@ One entry per operation, with these keys in this order: `name`
   schema for a map of lists); `Validate<>` bounds carry over. A body field
   that is not required is nullable (`"type": ["string", "null"]`); an
   optional query parameter is left out instead. A property of a schema
-  scalar names it under `x-superschematic-scalar`.
+  scalar names it under `x-superschematic-scalar`. A property whose value
+  refers to an item gives the reference under
+  `x-superschematic-reference`, and the search argument's property says
+  `"x-superschematic-search": true` (see below).
 - `inputSchemaDigest` is `sha256:` and the hex SHA-256 of `parameters` as
   the generator encodes it (vendor keys first, then `additionalProperties`,
-  `type`, `properties`, `required`), so a change to the arguments changes
-  the digest.
+  `type`, `properties`, `required`; in each property its scalar,
+  reference and search keys first, in that order), so a change to the
+  arguments changes the digest.
+
+A path or query argument, a body argument or a field of the input type,
+at any depth, that holds a reference (D61), as `RefersTo` writes it or as
+a relation's key derives it, gives the reference resolved:
+
+```json
+"productId": {
+  "x-superschematic-scalar": "Identity.UUID",
+  "x-superschematic-reference": {"target": "ProductView", "options": "catalog.listProducts", "value": "id", "label": "name", "lookup": "ids"},
+  "type": "string"
+},
+"q": {"x-superschematic-search": true, "type": "string", "maxLength": 100}
+```
+
+`target` is the type's name and `options` the tool name of the operation
+that lists it. `value` and `label` are the target's keys, and `lookup` is
+the options operation's argument that narrows its list to given values;
+`label` and `lookup` are absent when there is none. On a list the key sits
+on the list's property, and each item refers. The search argument's
+property (`SearchQuery`, D62) says `"x-superschematic-search": true`. The
+OpenAPI document gives the same keys, with the target as its component
+and the options operation by its `operationId`
+([In the documents](/superschematic/reference/references-and-search/#in-the-documents)).
+`tools/index.ts` types each key on its `JSONSchemaProperty` when a tool
+holds one. `inputSchemaDigest` changes only for the tools whose arguments
+hold a reference or a search.
 
 `ir.ToolManifest` (in the `ir` module) is the Go type of this document and
 `ir.ToolBindingManifest` of `tools/mcp-binding.json`. A test in the SDK
@@ -390,14 +423,23 @@ SDK language reads what they leave.
 | `ToolKeys` field | Default | Written as |
 | --- | --- | --- |
 | `Scalar` | `x-superschematic-scalar` | the key of a property's scalar name; empty leaves it out |
+| `Reference` | `x-superschematic-reference` | the key of a property's resolved reference (D61), after the scalar key in the digest input; empty leaves it out |
+| `Search` | `x-superschematic-search` | the key, `true`, of the search argument's property (D62), after the reference key in the digest input; empty leaves it out |
 | `Guidance` | `superschematic/operation-guidance` | the `_meta` key of a visible tool's guidance; empty leaves it out |
 | `Parameters` | none | key/value pairs at the root of every argument schema: first in the digest input, after `additionalProperties` in the documents, and as literal types in `tools/index.ts` |
 
 A `Parameters` key may not be empty, repeat, or reuse `type`,
-`additionalProperties`, `properties`, `required` or the scalar key; a hook
+`additionalProperties`, `properties`, `required`, the scalar key, the
+reference key or the search key, and no two of the scalar, reference and
+search keys may be the same. None of those three may be a JSON Schema
+keyword that a property is written with: `type`, `description`, `format`,
+`pattern`, `enum`, `minLength`, `maxLength`, `minimum`, `maximum`,
+`minItems`, `maxItems`, `items`, `properties`, `required`, `oneOf`,
+`additionalProperties`, `$ref`, `allOf`, `anyOf` or `nullable`. A hook
 that adds or removes tools fails the build, as does a hook error, which
-names the hook. The `ir` wire types spell the default keys: a distribution
-that renames them decodes its documents with its own types.
+names the hook. The `ir` wire types spell the default keys: a
+distribution that renames them decodes its documents with its own
+types.
 
 A distribution's own invocation policy is
 `Registry.RegisterToolInvocationPolicy` with a `ToolInvocationPolicy`:

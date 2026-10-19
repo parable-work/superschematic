@@ -1,0 +1,5 @@
+# The Topcoat extension's fixture for an API whose type another API's
+# reference names (D66): fixture-console-api's tests import its Supplier.
+name: fixture-console-suppliers-api
+kind: API
+outputs: {}

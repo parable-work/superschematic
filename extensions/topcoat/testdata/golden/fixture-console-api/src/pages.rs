@@ -60,6 +60,8 @@ path_param!(pub order_id);
 
 path_param!(pub product_id);
 
+path_param!(pub supplier_id);
+
 /// The resources of the pages, each by its path below the prefix, which
 /// names it in `Settings::choices_for`.
 pub const RESOURCES: &[&str] = &[
@@ -68,6 +70,7 @@ pub const RESOURCES: &[&str] = &[
     "products",
     "products/{product_id}/reviews",
     "suppliers",
+    "suppliers/{supplier_id}/products",
 ];
 
 /// What the app tells the pages, in its app context
@@ -235,12 +238,12 @@ fn title_or(title: &str, noun: &str) -> String {
 }
 
 /// A list's query for one of its pages (D60): `pairs`, the filter's and
-/// the limit, then `cursor` when given, each name and value
-/// percent-encoded.
-fn pager_query(pairs: &[(String, String)], cursor: Option<&str>) -> String {
-    let cursor = cursor.map(|cursor| ("cursor", cursor));
+/// the limit, then `cursor` and `back` when given, each name and value
+/// percent-encoded, which leaves a cursor and `back` as they are.
+fn pager_query(pairs: &[(String, String)], cursor: Option<&str>, back: Option<&str>) -> String {
+    let paging = [("cursor", cursor), ("back", back)].into_iter().filter_map(|(name, value)| Some((name, value?)));
     let mut query = String::new();
-    for (name, value) in pairs.iter().map(|(name, value)| (name.as_str(), value.as_str())).chain(cursor) {
+    for (name, value) in pairs.iter().map(|(name, value)| (name.as_str(), value.as_str())).chain(paging) {
         if !query.is_empty() {
             query.push('&');
         }
@@ -256,20 +259,166 @@ fn pager_href(base: &str, query: &str) -> String {
     if query.is_empty() { base.to_owned() } else { format!("{base}?{query}") }
 }
 
-/// The links of a paged list (D60), after its table: the first page's while
-/// the page is a later one, and the next page's while one follows, each
-/// `base` with its query. Nothing when neither applies: a list has no
-/// previous page, nor a page's number, which a cursor cannot give.
+/// The most characters `back` holds (D44, amended): the cursors of the
+/// pages before a paged list's page, oldest first, from the second page on.
+const MAX_BACK: usize = 4096;
+
+/// The pages before a paged list's page, as its query's `back` says (D44,
+/// amended): the cursors of those after the first, oldest first, and
+/// whether earlier ones were dropped (`~`), which leaves the page before the
+/// oldest unknown. The first page has no cursor and is never among them.
+#[derive(Debug, Clone, Default, PartialEq)]
+struct Back {
+    dropped: bool,
+    cursors: Vec<String>,
+}
+
+impl Back {
+    /// `back` as `query` holds it, its first value, read as a form reads a
+    /// query: absent or empty is no history. With a cursor sent, a value that
+    /// breaks the rule reads as `~`, the page before unknown; without one,
+    /// any value is ignored. It is never a refusal.
+    fn read(query: &str, cursor_sent: bool) -> Back {
+        if !cursor_sent {
+            return Back::default();
+        }
+        let sent = Form::<Vec<(String, String)>>::from_bytes(query.as_bytes())
+            .ok()
+            .and_then(|Form(pairs)| pairs.into_iter().find(|(name, _)| name == "back"))
+            .map(|(_, value)| value)
+            .unwrap_or_default();
+        if sent.is_empty() {
+            return Back::default();
+        }
+        Back::parse(&sent).unwrap_or(Back { dropped: true, cursors: Vec::new() })
+    }
+
+    /// `back` held to its rule: at most `MAX_BACK` characters, its entries
+    /// joined by `.`, the first a cursor or `~`, every other a cursor.
+    fn parse(text: &str) -> Option<Back> {
+        if text.len() > MAX_BACK {
+            return None;
+        }
+        let mut entries = text.split('.').peekable();
+        let dropped = entries.next_if_eq(&"~").is_some();
+        let cursors = entries.map(|entry| is_cursor(entry).then(|| entry.to_owned())).collect::<Option<Vec<_>>>()?;
+        Some(Back { dropped, cursors })
+    }
+
+    /// The `back` of the next page: this one with `cursor`, the current
+    /// page's, after it, the oldest dropped, `~` first, until it fits in
+    /// `MAX_BACK`.
+    fn push(&self, cursor: &str) -> String {
+        let mut cursors: Vec<&str> = self.cursors.iter().map(String::as_str).chain([cursor]).collect();
+        let mut dropped = self.dropped;
+        let mut text = back_text(dropped, &cursors);
+        while text.len() > MAX_BACK && cursors.len() > 1 {
+            cursors.remove(0);
+            dropped = true;
+            text = back_text(dropped, &cursors);
+        }
+        text
+    }
+
+    /// The page before: its cursor, none for the first page, and its own
+    /// `back`; none when it is unknown, `~` with no cursor after it.
+    fn pop(&self) -> Option<(Option<String>, Option<String>)> {
+        match self.cursors.split_last() {
+            Some((last, rest)) => {
+                let earlier: Vec<&str> = rest.iter().map(String::as_str).collect();
+                let back = (self.dropped || !earlier.is_empty()).then(|| back_text(self.dropped, &earlier));
+                Some((Some(last.clone()), back))
+            }
+            None if self.dropped => None,
+            None => Some((None, None)),
+        }
+    }
+}
+
+/// `back` as a query holds it: `~` when cursors were dropped, then the
+/// cursors, oldest first, joined by `.`.
+fn back_text(dropped: bool, cursors: &[&str]) -> String {
+    dropped.then_some("~").into_iter().chain(cursors.iter().copied()).collect::<Vec<_>>().join(".")
+}
+
+/// A cursor by D60's rule, as the route reads one: 1 to 1024 characters of
+/// the unpadded base64url alphabet.
+fn is_cursor(text: &str) -> bool {
+    runtime::page::Cursor::parse(text).is_ok()
+}
+
+/// The limit sent, as the query sent it, when the route admits it, as its
+/// router reads a limit (`PageSpec::query`); none for one it refuses, or an
+/// empty one, its default. A link and a form keep only an admitted limit,
+/// since a refused one would refuse each page they lead to.
+fn admitted_limit<'a>(sent: Option<&'a str>, page: &runtime::page::PageSpec) -> Option<&'a str> {
+    let limit = sent.filter(|limit| !limit.is_empty())?;
+    let query = runtime::QueryValues::new(vec![("limit".to_owned(), limit.to_owned())]);
+    page.query(&query).is_ok().then_some(limit)
+}
+
+/// A paged list's query pairs without a limit the route refuses, which a
+/// page's links carry: a refused page's First link starts again at the
+/// route's default.
+fn admitted_pairs(pairs: Vec<(String, String)>, page: &runtime::page::PageSpec) -> Vec<(String, String)> {
+    pairs.into_iter().filter(|(name, value)| name != "limit" || admitted_limit(Some(value), page).is_some()).collect()
+}
+
+/// The sizes of a paged list's size form (D44, amended): its own, `own`,
+/// then the limit sent when the route admits it, in order and each once,
+/// each marked when it is the page's own, the limit sent, else the route's
+/// default. None when there is one size, which needs no form.
+fn page_sizes(own: &[i64], page: &runtime::page::PageSpec, sent: Option<&str>) -> Vec<(i64, bool)> {
+    let sent = admitted_limit(sent, page).and_then(|limit| limit.parse::<i64>().ok());
+    let mut sizes: Vec<i64> = own.iter().copied().chain(sent).collect();
+    sizes.sort_unstable();
+    sizes.dedup();
+    if sizes.len() < 2 {
+        return Vec::new();
+    }
+    let shown = sent.unwrap_or(page.default_limit());
+    sizes.into_iter().map(|size| (size, size == shown)).collect()
+}
+
+/// The pairs a paged list's size form holds as hidden inputs: its query's,
+/// the filter's, without `limit`, which its select sends.
+fn size_pairs(pairs: &[(String, String)]) -> Vec<(String, String)> {
+    pairs.iter().filter(|(name, _)| name != "limit").cloned().collect()
+}
+
+/// The links of a paged list (D60, D44 amended), after its table, each
+/// `base` with its query: the first page's while the page is a later one,
+/// the page before's while it is known, and the next page's while one
+/// follows; then, for more than one size, a GET form of `sizes` that holds
+/// `hidden`, the filter's pairs, and starts again at the first page.
+/// Nothing when none applies: a list has no page's number, which a cursor
+/// cannot give.
 #[component]
-async fn pager(base: String, first: Option<String>, next: Option<String>) -> topcoat::Result<impl View> {
+async fn pager(base: String, first: Option<String>, prev: Option<String>, next: Option<String>, #[default] sizes: Vec<(i64, bool)>, #[default] hidden: Vec<(String, String)>) -> topcoat::Result<impl View> {
     Ok(view! {
-        if first.is_some() || next.is_some() {
+        if first.is_some() || prev.is_some() || next.is_some() || !sizes.is_empty() {
             <nav class="ss-pager" aria-label="Pages">
                 if let Some(first) = first {
                     <a rel="first" href=(pager_href(&base, &first))>"First page"</a>
                 }
+                if let Some(earlier) = prev {
+                    <a rel="prev" href=(pager_href(&base, &earlier))>"Previous page"</a>
+                }
                 if let Some(later) = next {
                     <a rel="next" href=(pager_href(&base, &later))>"Next page"</a>
+                }
+                if !sizes.is_empty() {
+                    <form method="get" class="ss-page-size">
+                        for (name, value) in hidden {
+                            <input type="hidden" name=(name) value=(value)>
+                        }
+                        <label>"Per page " <select name="limit">
+                            for (size, selected) in sizes {
+                                <option value=(size.to_string()) selected=(selected)>(size.to_string())</option>
+                            }
+                        </select></label>
+                        <button type="submit">"Show"</button>
+                    </form>
                 }
             </nav>
         }
@@ -399,11 +548,13 @@ fn admit<T>(admitted: Result<T, StatusCode>, link: Link, links: &mut Vec<Link>, 
 }
 
 /// A collection in the trail: its key, its words in a path, its labels,
-/// which of its pages exist, whether an item has a title, and the
-/// collections under its items.
+/// which of its pages exist, whether an item has a title, whether a
+/// reference names an item by its route's value, and the collections under
+/// its items.
 struct Node {
     key: &'static str,
     titled: bool,
+    reference: Option<&'static str>,
     words: &'static [&'static str],
     plural: &'static str,
     noun: &'static str,
@@ -421,6 +572,7 @@ const TREE: &[Node] = &[
     Node {
         key: "orders",
         titled: true,
+        reference: None,
         words: &["orders"],
         plural: "Orders",
         noun: "Order",
@@ -435,6 +587,7 @@ const TREE: &[Node] = &[
     Node {
         key: "page",
         titled: false,
+        reference: None,
         words: &["page"],
         plural: "Pages",
         noun: "Page",
@@ -449,6 +602,7 @@ const TREE: &[Node] = &[
     Node {
         key: "products",
         titled: true,
+        reference: Some("products"),
         words: &["products"],
         plural: "Products",
         noun: "Product",
@@ -462,6 +616,7 @@ const TREE: &[Node] = &[
             Node {
                 key: "products/{}/reviews",
                 titled: false,
+                reference: None,
                 words: &["reviews"],
                 plural: "Reviews",
                 noun: "Review",
@@ -478,6 +633,7 @@ const TREE: &[Node] = &[
     Node {
         key: "suppliers",
         titled: false,
+        reference: Some("suppliers"),
         words: &["suppliers"],
         plural: "Suppliers",
         noun: "Supplier",
@@ -487,19 +643,37 @@ const TREE: &[Node] = &[
         edit: false,
         delete: false,
         actions: &[],
-        children: &[],
+        children: &[
+            Node {
+                key: "suppliers/{}/products",
+                titled: false,
+                reference: None,
+                words: &["products"],
+                plural: "Products",
+                noun: "Product",
+                list: true,
+                detail: false,
+                create: None,
+                edit: false,
+                delete: false,
+                actions: &[],
+                children: &[],
+            },
+        ],
     },
 ];
 
 /// A step of the trail: its label, its link (none for a page that does not
-/// exist and for the page itself), whether it is the page itself, and for
-/// an item whose type has a title the collection's key and the route's
-/// values to read it with.
+/// exist and for the page itself), whether it is the page itself, for an
+/// item whose type has a title the collection's key and the route's values
+/// to read it with, and for an item a reference names the collection's key
+/// and the route's value.
 struct Crumb {
     label: String,
     href: Option<String>,
     current: bool,
     item: Option<(&'static str, Vec<String>)>,
+    reference: Option<(&'static str, String)>,
 }
 
 /// The trail from the index to the page at `path`: the index, then each
@@ -509,7 +683,7 @@ struct Crumb {
 /// is its collection (`widgets/archived`, not an item of `widgets`), and a
 /// collection under an item is read before the item's own pages.
 fn trail(path: &str, title: &str) -> Vec<Crumb> {
-    let crumb = |label: String, href: Option<String>| Crumb { label, href, current: false, item: None };
+    let crumb = |label: String, href: Option<String>| Crumb { label, href, current: false, item: None, reference: None };
     let mut crumbs = vec![crumb(title.to_owned(), Some(PREFIX.to_owned()))];
     let segments: Vec<&str> =
         path.strip_prefix(PREFIX).unwrap_or_default().split('/').filter(|segment| !segment.is_empty()).collect();
@@ -538,6 +712,7 @@ fn trail(path: &str, title: &str) -> Vec<Crumb> {
         ids.push(decode(item));
         crumbs.push(Crumb {
             item: node.titled.then(|| (node.key, ids.clone())),
+            reference: node.reference.map(|key| (key, decode(item))),
             ..crumb(item_label(node.noun, decode(item)), node.detail.then(|| base.clone()))
         });
         at += 1;
@@ -590,6 +765,19 @@ async fn item_title(cx: &Cx, key: &str, ids: &[String]) -> Option<String> {
     .filter(|title| !title.trim().is_empty())
 }
 
+/// The label of the item that the route's `value` at a step of the trail,
+/// the collection `key`'s, refers to (D61), when its title does not name it:
+/// the label of the target every operation's parameter there refers to
+/// (D44, amended). None when no item has the value, its label is blank, or
+/// the call is refused or fails.
+async fn item_reference(cx: &Cx, key: &str, value: &str) -> Option<String> {
+    match key {
+        "products" => references::product_target_label(cx, value).await,
+        "suppliers" => references::supplier_target_label(cx, value).await,
+        _ => None,
+    }
+}
+
 /// Every page under `/console`: the site's title, a nav of each resource the
 /// caller may list, the current one marked (`aria-current`), the one whose
 /// path is the longest the page's begins with, the trail from the index to
@@ -615,12 +803,20 @@ pub async fn pages_layout(cx: &Cx, slot: Slot<'_>) -> topcoat::Result<impl View>
             (link.href, link.label, current)
         })
         .collect();
+    // An item's step is named by its title, else by what its route's value
+    // refers to, else by its noun and id.
     let mut crumbs = trail(&path, &title);
     for crumb in &mut crumbs {
-        if let Some((key, ids)) = &crumb.item
-            && let Some(title) = item_title(cx, key, ids).await
-        {
+        let titled = match &crumb.item {
+            Some((key, ids)) => item_title(cx, key, ids).await,
+            None => None,
+        };
+        if let Some(title) = titled {
             crumb.label = title;
+        } else if let Some((key, value)) = &crumb.reference
+            && let Some(label) = item_reference(cx, key, value).await
+        {
+            crumb.label = label;
         }
     }
     let crumbs: Vec<(String, Option<String>, bool)> =
@@ -707,6 +903,15 @@ async fn call_review_list_reviews(cx: &Cx, product_id: &str) -> Result<runtime::
     ReviewListReviewsArgsForm::new(product_id).submit(cx).await.map_err(|refusal| page_refusal(refusal, &["productId"]))
 }
 
+/// Calls supplier_list_supplier_products with the route's values; a refusal of
+/// a route's value is no such page.
+async fn call_supplier_list_supplier_products(cx: &Cx, supplier_id: &str) -> Result<Vec<types::Product>, Refusal> {
+    let args = crate::api::SupplierListSupplierProductsArgs {
+        supplier_id: route_value(supplier_id, as_text).ok_or_else(no_such_page)?,
+    };
+    operations::supplier_list_supplier_products(cx, args).await.map_err(|err| page_refusal(Refusal::from_api(&err), &["supplierId"]))
+}
+
 /// The path of the orders: `/console/orders`.
 fn orders_href() -> Option<String> {
     Some("/console/orders".to_owned())
@@ -730,39 +935,57 @@ pub async fn orders_list_page(cx: &Cx) -> topcoat::Result<impl View> {
     })
 }
 
+/// The sizes the size form of the orders offers whatever the query sends (D44,
+/// amended): 2 and 5.
+const ORDERS_PAGE_SIZES: &[i64] = &[2, 5];
+
 /// The orders the filter finds, after the filter, which answers with its
 /// refusal's status, a page at a time (D60): the query's cursor and limit ask
 /// for the page, and after the table the links to the next page and, on a later
-/// one, to the first carry the filter and the limit, and a link to the new page
-/// when the caller may create one. A shard at `/console/_live/orders`: when the
-/// app loads Topcoat's runtime, the filter's submit sends the query it holds,
-/// and a page's link its own, and the list renders again in place. The shard
-/// reads the query as the page reads its own, and its request, which meets no
-/// page's guard, is admitted and checked by the list's call.
+/// one, to the first and to the one before, which the query's `back` keeps,
+/// carry the filter and the limit, beside a form of the page's sizes (D44,
+/// amended), and a link to the new page when the caller may create one. A shard
+/// at `/console/_live/orders`: when the app loads Topcoat's runtime, the
+/// filter's submit sends the query it holds, and a page's link and the size
+/// form theirs, and the list renders again in place. The shard reads the query
+/// as the page reads its own, and its request, which meets no page's guard, is
+/// admitted and checked by the list's call.
 #[shard("/console/_live/orders")]
 async fn orders_list(cx: &Cx, query: String, next: String) -> topcoat::Result<impl View> {
     // The filter's query: the page's at first, then what its submit or a
     // link sets.
     let query = signal(cx, move || query);
-    let filter = Form::<OrderListOrdersArgsForm>::from_bytes(query.get().as_bytes())?.0;
+    let sent = query.get();
+    let filter = Form::<OrderListOrdersArgsForm>::from_bytes(sent.as_bytes())?.0;
     let listed = filter.submit(cx).await;
     let errors = match &listed {
         Err(refusal) if !alone(refusal, &[]) => refusal.errors.clone(),
         _ => FormErrors::default(),
     };
     let choices = references::order_list_orders_args_form_choices(cx, choices_of(cx, "orders")).await;
-    // The links of the page: the first page's while a cursor was sent, and
-    // the next page's while one follows, each with the query's filter and limit.
+    // The links of the page: the first page's while a cursor was sent,
+    // the page before's while `back` knows it, and the next page's while
+    // one follows, its `back` this one's with the current cursor after it,
+    // each with the query's filter and limit, a refused limit dropped.
+    // Then, on a page that rendered, the size form, which keeps the rest of
+    // the query and starts again at the first page.
     let base = orders_href().unwrap_or_default();
-    let pairs = filter.query_pairs();
-    let first_page = filter.cursor.is_some().then(|| pager_query(&pairs, None));
-    let (listed, next_page) = match listed {
+    let pairs = admitted_pairs(filter.query_pairs(), &crate::api::OrderListOrdersArgs::PAGE);
+    let first_page = filter.cursor.is_some().then(|| pager_query(&pairs, None, None));
+    let cursor = filter.cursor.as_deref().filter(|cursor| !cursor.is_empty());
+    let back = Back::read(&sent, cursor.is_some());
+    let (listed, prev_page, next_page, sizes) = match listed {
         Ok(page) => {
-            let next_page = page.next.map(|next| pager_query(&pairs, Some(next.as_str())));
-            (Ok(page.items), next_page)
+            let prev_page = cursor.and(back.pop()).map(|(earlier, back)| pager_query(&pairs, earlier.as_deref(), back.as_deref()));
+            let next_back = cursor.map(|cursor| back.push(cursor));
+            let next_page = page.next.map(|next| pager_query(&pairs, Some(next.as_str()), next_back.as_deref()));
+            (Ok(page.items), prev_page, next_page, page_sizes(ORDERS_PAGE_SIZES, &crate::api::OrderListOrdersArgs::PAGE, filter.limit.as_deref()))
         }
-        Err(refusal) => (Err(refusal), None),
+        Err(refusal) => (Err(refusal), None, None, Vec::new()),
     };
+    let hidden = size_pairs(&pairs);
+    // The filter keeps the limit sent, unless the route refused it.
+    let limit = admitted_limit(filter.limit.as_deref(), &crate::api::OrderListOrdersArgs::PAGE).map(str::to_owned);
     let creates = operations::can_order_place_order(cx).await.is_ok();
     let new_href = format!("{}/new", orders_href().unwrap_or_default());
     Ok(view! {
@@ -776,6 +999,9 @@ async fn orders_list(cx: &Cx, query: String, next: String) -> topcoat::Result<im
         })>
             <input type="hidden" data-ss-query="" @input=$(|e: Event| query.set(e.target.value))>
             order_list_orders_args_fields(form: filter, errors: errors, choices: choices)
+            if let Some(limit) = limit {
+                <input type="hidden" name="limit" value=(limit)>
+            }
             <button type="submit">"Filter"</button>
         </form>
         match listed {
@@ -784,9 +1010,10 @@ async fn orders_list(cx: &Cx, query: String, next: String) -> topcoat::Result<im
             Err(refusal) => (refusal.status),
         }
         // Each link sets the shard's query, which renders the list again in
-        // place, and puts it in the address bar; without the runtime it is
-        // a link to the page.
-        if first_page.is_some() || next_page.is_some() {
+        // place, and puts it in the address bar, and the size form's submit
+        // sets it as the filter's does; without the runtime each link loads
+        // the page, and the form is a GET of it.
+        if first_page.is_some() || prev_page.is_some() || next_page.is_some() || !sizes.is_empty() {
             <nav class="ss-pager" aria-label="Pages">
                 if let Some(first) = first_page {
                     let href = pager_href(&base, &first);
@@ -796,6 +1023,14 @@ async fn orders_list(cx: &Cx, query: String, next: String) -> topcoat::Result<im
                         query.set(first.to_owned())
                     })>"First page"</a>
                 }
+                if let Some(earlier) = prev_page {
+                    let href = pager_href(&base, &earlier);
+                    <a rel="prev" href=(href.clone()) @click=$(|e: Event| {
+                        e.prevent_default();
+                        raw!("history.replaceState(history.state, '', ${href});", ());
+                        query.set(earlier.to_owned())
+                    })>"Previous page"</a>
+                }
                 if let Some(later) = next_page {
                     let href = pager_href(&base, &later);
                     <a rel="next" href=(href.clone()) @click=$(|e: Event| {
@@ -803,6 +1038,23 @@ async fn orders_list(cx: &Cx, query: String, next: String) -> topcoat::Result<im
                         raw!("history.replaceState(history.state, '', ${href});", ());
                         query.set(later.to_owned())
                     })>"Next page"</a>
+                }
+                if !sizes.is_empty() {
+                    <form method="get" class="ss-page-size" data-ss-live-size="orders" @submit=$(|e: Event| {
+                        e.prevent_default();
+                        raw!("(() => { const form = document.querySelector('form[data-ss-live-size=\"orders\"]'); const query = new URLSearchParams(new FormData(form)).toString(); history.replaceState(history.state, '', query === '' ? location.pathname : '?' + query); const sent = form.querySelector('input[data-ss-query]'); sent.value = query; sent.dispatchEvent(new Event('input')); })()", ())
+                    })>
+                        <input type="hidden" data-ss-query="" @input=$(|e: Event| query.set(e.target.value))>
+                        for (name, value) in hidden {
+                            <input type="hidden" name=(name) value=(value)>
+                        }
+                        <label>"Per page " <select name="limit">
+                            for (size, selected) in sizes {
+                                <option value=(size.to_string()) selected=(selected)>(size.to_string())</option>
+                            }
+                        </select></label>
+                        <button type="submit">"Show"</button>
+                    </form>
                 }
             </nav>
         }
@@ -984,31 +1236,46 @@ pub async fn page_list_page(cx: &Cx) -> topcoat::Result<impl View> {
     })
 }
 
+/// The sizes the size form of the pages offers whatever the query sends (D44,
+/// amended): 1 and 2.
+const PAGE_PAGE_SIZES: &[i64] = &[1, 2];
+
 /// The pages, a page at a time (D60): the query's cursor and limit ask for the
 /// page, and after the table the links to the next page and, on a later one, to
-/// the first carry the limit. A shard at `/console/_live/page`: when the app
-/// loads Topcoat's runtime, a page's link sends its query, and the list renders
-/// again in place. The shard reads the query as the page reads its own, and its
-/// request, which meets no page's guard, is admitted and checked by the list's
-/// call.
+/// the first and to the one before, which the query's `back` keeps, carry the
+/// limit, beside a form of the page's sizes (D44, amended). A shard at
+/// `/console/_live/page`: when the app loads Topcoat's runtime, a page's link
+/// and the size form send their queries, and the list renders again in place.
+/// The shard reads the query as the page reads its own, and its request, which
+/// meets no page's guard, is admitted and checked by the list's call.
 #[shard("/console/_live/page")]
 async fn page_list(cx: &Cx, query: String, next: String) -> topcoat::Result<impl View> {
     // The page's query: the request's at first, then what a link sets.
     let query = signal(cx, move || query);
-    let filter = Form::<SiteListPagesArgsForm>::from_bytes(query.get().as_bytes())?.0;
+    let sent = query.get();
+    let filter = Form::<SiteListPagesArgsForm>::from_bytes(sent.as_bytes())?.0;
     let listed = filter.submit(cx).await;
-    // The links of the page: the first page's while a cursor was sent, and
-    // the next page's while one follows, each with the query's limit.
+    // The links of the page: the first page's while a cursor was sent,
+    // the page before's while `back` knows it, and the next page's while
+    // one follows, its `back` this one's with the current cursor after it,
+    // each with the query's limit, a refused limit dropped.
+    // Then, on a page that rendered, the size form, which keeps the rest of
+    // the query and starts again at the first page.
     let base = page_href().unwrap_or_default();
-    let pairs = filter.query_pairs();
-    let first_page = filter.cursor.is_some().then(|| pager_query(&pairs, None));
-    let (listed, next_page) = match listed {
+    let pairs = admitted_pairs(filter.query_pairs(), &crate::api::SiteListPagesArgs::PAGE);
+    let first_page = filter.cursor.is_some().then(|| pager_query(&pairs, None, None));
+    let cursor = filter.cursor.as_deref().filter(|cursor| !cursor.is_empty());
+    let back = Back::read(&sent, cursor.is_some());
+    let (listed, prev_page, next_page, sizes) = match listed {
         Ok(page) => {
-            let next_page = page.next.map(|next| pager_query(&pairs, Some(next.as_str())));
-            (Ok(page.items), next_page)
+            let prev_page = cursor.and(back.pop()).map(|(earlier, back)| pager_query(&pairs, earlier.as_deref(), back.as_deref()));
+            let next_back = cursor.map(|cursor| back.push(cursor));
+            let next_page = page.next.map(|next| pager_query(&pairs, Some(next.as_str()), next_back.as_deref()));
+            (Ok(page.items), prev_page, next_page, page_sizes(PAGE_PAGE_SIZES, &crate::api::SiteListPagesArgs::PAGE, filter.limit.as_deref()))
         }
-        Err(refusal) => (Err(refusal), None),
+        Err(refusal) => (Err(refusal), None, None, Vec::new()),
     };
+    let hidden = size_pairs(&pairs);
     Ok(view! {
         <h1>"Pages"</h1>
         match listed {
@@ -1016,9 +1283,10 @@ async fn page_list(cx: &Cx, query: String, next: String) -> topcoat::Result<impl
             Err(refusal) => refused(refusal: page_refusal(refusal, &[]), next: next),
         }
         // Each link sets the shard's query, which renders the list again in
-        // place, and puts it in the address bar; without the runtime it is
-        // a link to the page.
-        if first_page.is_some() || next_page.is_some() {
+        // place, and puts it in the address bar, and the size form's submit
+        // sets it as the filter's does; without the runtime each link loads
+        // the page, and the form is a GET of it.
+        if first_page.is_some() || prev_page.is_some() || next_page.is_some() || !sizes.is_empty() {
             <nav class="ss-pager" aria-label="Pages">
                 if let Some(first) = first_page {
                     let href = pager_href(&base, &first);
@@ -1028,6 +1296,14 @@ async fn page_list(cx: &Cx, query: String, next: String) -> topcoat::Result<impl
                         query.set(first.to_owned())
                     })>"First page"</a>
                 }
+                if let Some(earlier) = prev_page {
+                    let href = pager_href(&base, &earlier);
+                    <a rel="prev" href=(href.clone()) @click=$(|e: Event| {
+                        e.prevent_default();
+                        raw!("history.replaceState(history.state, '', ${href});", ());
+                        query.set(earlier.to_owned())
+                    })>"Previous page"</a>
+                }
                 if let Some(later) = next_page {
                     let href = pager_href(&base, &later);
                     <a rel="next" href=(href.clone()) @click=$(|e: Event| {
@@ -1035,6 +1311,23 @@ async fn page_list(cx: &Cx, query: String, next: String) -> topcoat::Result<impl
                         raw!("history.replaceState(history.state, '', ${href});", ());
                         query.set(later.to_owned())
                     })>"Next page"</a>
+                }
+                if !sizes.is_empty() {
+                    <form method="get" class="ss-page-size" data-ss-live-size="page" @submit=$(|e: Event| {
+                        e.prevent_default();
+                        raw!("(() => { const form = document.querySelector('form[data-ss-live-size=\"page\"]'); const query = new URLSearchParams(new FormData(form)).toString(); history.replaceState(history.state, '', query === '' ? location.pathname : '?' + query); const sent = form.querySelector('input[data-ss-query]'); sent.value = query; sent.dispatchEvent(new Event('input')); })()", ())
+                    })>
+                        <input type="hidden" data-ss-query="" @input=$(|e: Event| query.set(e.target.value))>
+                        for (name, value) in hidden {
+                            <input type="hidden" name=(name) value=(value)>
+                        }
+                        <label>"Per page " <select name="limit">
+                            for (size, selected) in sizes {
+                                <option value=(size.to_string()) selected=(selected)>(size.to_string())</option>
+                            }
+                        </select></label>
+                        <button type="submit">"Show"</button>
+                    </form>
                 }
             </nav>
         }
@@ -1079,39 +1372,56 @@ pub async fn products_list_page(cx: &Cx) -> topcoat::Result<impl View> {
     })
 }
 
+/// The sizes the size form of the products offers whatever the query sends
+/// (D44, amended): 2 and 5.
+const PRODUCTS_PAGE_SIZES: &[i64] = &[2, 5];
+
 /// The products the filter finds, after the filter, which answers with its
 /// refusal's status, a page at a time (D60): the query's cursor and limit ask
 /// for the page, and after the table the links to the next page and, on a later
-/// one, to the first carry the filter and the limit. A shard at
-/// `/console/_live/products`: when the app loads Topcoat's runtime, the
-/// filter's submit sends the query it holds, and a page's link its own, and the
-/// list renders again in place. The shard reads the query as the page reads its
-/// own, and its request, which meets no page's guard, is admitted and checked
-/// by the list's call.
+/// one, to the first and to the one before, which the query's `back` keeps,
+/// carry the filter and the limit, beside a form of the page's sizes (D44,
+/// amended). A shard at `/console/_live/products`: when the app loads Topcoat's
+/// runtime, the filter's submit sends the query it holds, and a page's link and
+/// the size form theirs, and the list renders again in place. The shard reads
+/// the query as the page reads its own, and its request, which meets no page's
+/// guard, is admitted and checked by the list's call.
 #[shard("/console/_live/products")]
 async fn products_list(cx: &Cx, query: String, next: String) -> topcoat::Result<impl View> {
     // The filter's query: the page's at first, then what its submit or a
     // link sets.
     let query = signal(cx, move || query);
-    let filter = Form::<ProductListProductsArgsForm>::from_bytes(query.get().as_bytes())?.0;
+    let sent = query.get();
+    let filter = Form::<ProductListProductsArgsForm>::from_bytes(sent.as_bytes())?.0;
     let listed = filter.submit(cx).await;
     let errors = match &listed {
         Err(refusal) if !alone(refusal, &[]) => refusal.errors.clone(),
         _ => FormErrors::default(),
     };
     let choices = references::product_list_products_args_form_choices(cx, choices_of(cx, "products")).await;
-    // The links of the page: the first page's while a cursor was sent, and
-    // the next page's while one follows, each with the query's filter and limit.
+    // The links of the page: the first page's while a cursor was sent,
+    // the page before's while `back` knows it, and the next page's while
+    // one follows, its `back` this one's with the current cursor after it,
+    // each with the query's filter and limit, a refused limit dropped.
+    // Then, on a page that rendered, the size form, which keeps the rest of
+    // the query and starts again at the first page.
     let base = products_href().unwrap_or_default();
-    let pairs = filter.query_pairs();
-    let first_page = filter.cursor.is_some().then(|| pager_query(&pairs, None));
-    let (listed, next_page) = match listed {
+    let pairs = admitted_pairs(filter.query_pairs(), &crate::api::ProductListProductsArgs::PAGE);
+    let first_page = filter.cursor.is_some().then(|| pager_query(&pairs, None, None));
+    let cursor = filter.cursor.as_deref().filter(|cursor| !cursor.is_empty());
+    let back = Back::read(&sent, cursor.is_some());
+    let (listed, prev_page, next_page, sizes) = match listed {
         Ok(page) => {
-            let next_page = page.next.map(|next| pager_query(&pairs, Some(next.as_str())));
-            (Ok(page.items), next_page)
+            let prev_page = cursor.and(back.pop()).map(|(earlier, back)| pager_query(&pairs, earlier.as_deref(), back.as_deref()));
+            let next_back = cursor.map(|cursor| back.push(cursor));
+            let next_page = page.next.map(|next| pager_query(&pairs, Some(next.as_str()), next_back.as_deref()));
+            (Ok(page.items), prev_page, next_page, page_sizes(PRODUCTS_PAGE_SIZES, &crate::api::ProductListProductsArgs::PAGE, filter.limit.as_deref()))
         }
-        Err(refusal) => (Err(refusal), None),
+        Err(refusal) => (Err(refusal), None, None, Vec::new()),
     };
+    let hidden = size_pairs(&pairs);
+    // The filter keeps the limit sent, unless the route refused it.
+    let limit = admitted_limit(filter.limit.as_deref(), &crate::api::ProductListProductsArgs::PAGE).map(str::to_owned);
     Ok(view! {
         <h1>"Products"</h1>
         <form method="get" class="ss-filter" role="search" data-ss-live="products" @submit=$(|e: Event| {
@@ -1120,6 +1430,9 @@ async fn products_list(cx: &Cx, query: String, next: String) -> topcoat::Result<
         })>
             <input type="hidden" data-ss-query="" @input=$(|e: Event| query.set(e.target.value))>
             product_list_products_args_fields(form: filter, errors: errors, choices: choices)
+            if let Some(limit) = limit {
+                <input type="hidden" name="limit" value=(limit)>
+            }
             <button type="submit">"Filter"</button>
         </form>
         match listed {
@@ -1128,9 +1441,10 @@ async fn products_list(cx: &Cx, query: String, next: String) -> topcoat::Result<
             Err(refusal) => (refusal.status),
         }
         // Each link sets the shard's query, which renders the list again in
-        // place, and puts it in the address bar; without the runtime it is
-        // a link to the page.
-        if first_page.is_some() || next_page.is_some() {
+        // place, and puts it in the address bar, and the size form's submit
+        // sets it as the filter's does; without the runtime each link loads
+        // the page, and the form is a GET of it.
+        if first_page.is_some() || prev_page.is_some() || next_page.is_some() || !sizes.is_empty() {
             <nav class="ss-pager" aria-label="Pages">
                 if let Some(first) = first_page {
                     let href = pager_href(&base, &first);
@@ -1140,6 +1454,14 @@ async fn products_list(cx: &Cx, query: String, next: String) -> topcoat::Result<
                         query.set(first.to_owned())
                     })>"First page"</a>
                 }
+                if let Some(earlier) = prev_page {
+                    let href = pager_href(&base, &earlier);
+                    <a rel="prev" href=(href.clone()) @click=$(|e: Event| {
+                        e.prevent_default();
+                        raw!("history.replaceState(history.state, '', ${href});", ());
+                        query.set(earlier.to_owned())
+                    })>"Previous page"</a>
+                }
                 if let Some(later) = next_page {
                     let href = pager_href(&base, &later);
                     <a rel="next" href=(href.clone()) @click=$(|e: Event| {
@@ -1147,6 +1469,23 @@ async fn products_list(cx: &Cx, query: String, next: String) -> topcoat::Result<
                         raw!("history.replaceState(history.state, '', ${href});", ());
                         query.set(later.to_owned())
                     })>"Next page"</a>
+                }
+                if !sizes.is_empty() {
+                    <form method="get" class="ss-page-size" data-ss-live-size="products" @submit=$(|e: Event| {
+                        e.prevent_default();
+                        raw!("(() => { const form = document.querySelector('form[data-ss-live-size=\"products\"]'); const query = new URLSearchParams(new FormData(form)).toString(); history.replaceState(history.state, '', query === '' ? location.pathname : '?' + query); const sent = form.querySelector('input[data-ss-query]'); sent.value = query; sent.dispatchEvent(new Event('input')); })()", ())
+                    })>
+                        <input type="hidden" data-ss-query="" @input=$(|e: Event| query.set(e.target.value))>
+                        for (name, value) in hidden {
+                            <input type="hidden" name=(name) value=(value)>
+                        }
+                        <label>"Per page " <select name="limit">
+                            for (size, selected) in sizes {
+                                <option value=(size.to_string()) selected=(selected)>(size.to_string())</option>
+                            }
+                        </select></label>
+                        <button type="submit">"Show"</button>
+                    </form>
                 }
             </nav>
         }
@@ -1229,21 +1568,27 @@ pub async fn products_reviews_list_page(cx: &Cx) -> topcoat::Result<impl View> {
     })
 }
 
+/// The sizes the size form of the reviews offers whatever the query sends (D44,
+/// amended): 2 and 3.
+const PRODUCTS_REVIEWS_PAGE_SIZES: &[i64] = &[2, 3];
+
 /// The reviews the filter finds, after the filter, which answers with its
 /// refusal's status, a page at a time (D60): the query's cursor and limit ask
 /// for the page, and after the table the links to the next page and, on a later
-/// one, to the first carry the filter and the limit. A shard at
-/// `/console/_live/products_reviews`: when the app loads Topcoat's runtime, the
-/// filter's submit sends the query it holds, and a page's link its own, and the
-/// list renders again in place. The shard reads the query as the page reads its
-/// own, and its request, which meets no page's guard, is admitted and checked
-/// by the list's call.
+/// one, to the first and to the one before, which the query's `back` keeps,
+/// carry the filter and the limit, beside a form of the page's sizes (D44,
+/// amended). A shard at `/console/_live/products_reviews`: when the app loads
+/// Topcoat's runtime, the filter's submit sends the query it holds, and a
+/// page's link and the size form theirs, and the list renders again in place.
+/// The shard reads the query as the page reads its own, and its request, which
+/// meets no page's guard, is admitted and checked by the list's call.
 #[shard("/console/_live/products_reviews")]
 async fn products_reviews_list(cx: &Cx, product_id: String, query: String, next: String) -> topcoat::Result<impl View> {
     // The filter's query: the page's at first, then what its submit or a
     // link sets.
     let query = signal(cx, move || query);
-    let filter = Form::<ReviewListReviewsArgsForm>::from_bytes(query.get().as_bytes())?.0;
+    let sent = query.get();
+    let filter = Form::<ReviewListReviewsArgsForm>::from_bytes(sent.as_bytes())?.0;
     // The route's values, never the hidden inputs, which a reader can change.
     let filter = ReviewListReviewsArgsForm {
         product_id: Some(product_id.clone()),
@@ -1255,18 +1600,29 @@ async fn products_reviews_list(cx: &Cx, product_id: String, query: String, next:
         _ => FormErrors::default(),
     };
     let choices = choices_of(cx, "products/{product_id}/reviews");
-    // The links of the page: the first page's while a cursor was sent, and
-    // the next page's while one follows, each with the query's filter and limit.
+    // The links of the page: the first page's while a cursor was sent,
+    // the page before's while `back` knows it, and the next page's while
+    // one follows, its `back` this one's with the current cursor after it,
+    // each with the query's filter and limit, a refused limit dropped.
+    // Then, on a page that rendered, the size form, which keeps the rest of
+    // the query and starts again at the first page.
     let base = products_reviews_href(&product_id).unwrap_or_default();
-    let pairs = filter.query_pairs();
-    let first_page = filter.cursor.is_some().then(|| pager_query(&pairs, None));
-    let (listed, next_page) = match listed {
+    let pairs = admitted_pairs(filter.query_pairs(), &crate::api::ReviewListReviewsArgs::PAGE);
+    let first_page = filter.cursor.is_some().then(|| pager_query(&pairs, None, None));
+    let cursor = filter.cursor.as_deref().filter(|cursor| !cursor.is_empty());
+    let back = Back::read(&sent, cursor.is_some());
+    let (listed, prev_page, next_page, sizes) = match listed {
         Ok(page) => {
-            let next_page = page.next.map(|next| pager_query(&pairs, Some(next.as_str())));
-            (Ok(page.items), next_page)
+            let prev_page = cursor.and(back.pop()).map(|(earlier, back)| pager_query(&pairs, earlier.as_deref(), back.as_deref()));
+            let next_back = cursor.map(|cursor| back.push(cursor));
+            let next_page = page.next.map(|next| pager_query(&pairs, Some(next.as_str()), next_back.as_deref()));
+            (Ok(page.items), prev_page, next_page, page_sizes(PRODUCTS_REVIEWS_PAGE_SIZES, &crate::api::ReviewListReviewsArgs::PAGE, filter.limit.as_deref()))
         }
-        Err(refusal) => (Err(refusal), None),
+        Err(refusal) => (Err(refusal), None, None, Vec::new()),
     };
+    let hidden = size_pairs(&pairs);
+    // The filter keeps the limit sent, unless the route refused it.
+    let limit = admitted_limit(filter.limit.as_deref(), &crate::api::ReviewListReviewsArgs::PAGE).map(str::to_owned);
     Ok(view! {
         <h1>"Reviews"</h1>
         <form method="get" class="ss-filter" role="search" data-ss-live="products_reviews" @submit=$(|e: Event| {
@@ -1275,6 +1631,9 @@ async fn products_reviews_list(cx: &Cx, product_id: String, query: String, next:
         })>
             <input type="hidden" data-ss-query="" @input=$(|e: Event| query.set(e.target.value))>
             review_list_reviews_args_fields(form: filter, errors: errors, choices: choices)
+            if let Some(limit) = limit {
+                <input type="hidden" name="limit" value=(limit)>
+            }
             <button type="submit">"Filter"</button>
         </form>
         match listed {
@@ -1283,9 +1642,10 @@ async fn products_reviews_list(cx: &Cx, product_id: String, query: String, next:
             Err(refusal) => (refusal.status),
         }
         // Each link sets the shard's query, which renders the list again in
-        // place, and puts it in the address bar; without the runtime it is
-        // a link to the page.
-        if first_page.is_some() || next_page.is_some() {
+        // place, and puts it in the address bar, and the size form's submit
+        // sets it as the filter's does; without the runtime each link loads
+        // the page, and the form is a GET of it.
+        if first_page.is_some() || prev_page.is_some() || next_page.is_some() || !sizes.is_empty() {
             <nav class="ss-pager" aria-label="Pages">
                 if let Some(first) = first_page {
                     let href = pager_href(&base, &first);
@@ -1295,6 +1655,14 @@ async fn products_reviews_list(cx: &Cx, product_id: String, query: String, next:
                         query.set(first.to_owned())
                     })>"First page"</a>
                 }
+                if let Some(earlier) = prev_page {
+                    let href = pager_href(&base, &earlier);
+                    <a rel="prev" href=(href.clone()) @click=$(|e: Event| {
+                        e.prevent_default();
+                        raw!("history.replaceState(history.state, '', ${href});", ());
+                        query.set(earlier.to_owned())
+                    })>"Previous page"</a>
+                }
                 if let Some(later) = next_page {
                     let href = pager_href(&base, &later);
                     <a rel="next" href=(href.clone()) @click=$(|e: Event| {
@@ -1302,6 +1670,23 @@ async fn products_reviews_list(cx: &Cx, product_id: String, query: String, next:
                         raw!("history.replaceState(history.state, '', ${href});", ());
                         query.set(later.to_owned())
                     })>"Next page"</a>
+                }
+                if !sizes.is_empty() {
+                    <form method="get" class="ss-page-size" data-ss-live-size="products_reviews" @submit=$(|e: Event| {
+                        e.prevent_default();
+                        raw!("(() => { const form = document.querySelector('form[data-ss-live-size=\"products_reviews\"]'); const query = new URLSearchParams(new FormData(form)).toString(); history.replaceState(history.state, '', query === '' ? location.pathname : '?' + query); const sent = form.querySelector('input[data-ss-query]'); sent.value = query; sent.dispatchEvent(new Event('input')); })()", ())
+                    })>
+                        <input type="hidden" data-ss-query="" @input=$(|e: Event| query.set(e.target.value))>
+                        for (name, value) in hidden {
+                            <input type="hidden" name=(name) value=(value)>
+                        }
+                        <label>"Per page " <select name="limit">
+                            for (size, selected) in sizes {
+                                <option value=(size.to_string()) selected=(selected)>(size.to_string())</option>
+                            }
+                        </select></label>
+                        <button type="submit">"Show"</button>
+                    </form>
                 }
             </nav>
         }
@@ -1332,7 +1717,7 @@ async fn products_reviews_section(cx: &Cx, product_id: String) -> topcoat::Resul
         Err(_) => None,
     };
     let next_page = match &listed {
-        Some(Ok(page)) => page.next.as_ref().map(|next| pager_query(&[], Some(next.as_str()))),
+        Some(Ok(page)) => page.next.as_ref().map(|next| pager_query(&[], Some(next.as_str()), None)),
         _ => None,
     };
     let listed = listed.map(|listed| listed.map(|page| page.items));
@@ -1346,7 +1731,7 @@ async fn products_reviews_section(cx: &Cx, product_id: String) -> topcoat::Resul
                     Some(Err(refusal)) => <p class="ss-refused">(messages(&refusal).join(" "))</p>,
                     None => "",
                 }
-                pager(base: href.clone(), first: None, next: next_page)
+                pager(base: href.clone(), first: None, prev: None, next: next_page)
             </section>
         }
     })
@@ -1370,31 +1755,47 @@ pub async fn suppliers_list_page(cx: &Cx) -> topcoat::Result<impl View> {
     })
 }
 
+/// The sizes the size form of the suppliers offers whatever the query sends
+/// (D44, amended): 1 and 2.
+const SUPPLIERS_PAGE_SIZES: &[i64] = &[1, 2];
+
 /// The suppliers, a page at a time (D60): the query's cursor and limit ask for
 /// the page, and after the table the links to the next page and, on a later
-/// one, to the first carry the limit. A shard at `/console/_live/suppliers`:
-/// when the app loads Topcoat's runtime, a page's link sends its query, and the
-/// list renders again in place. The shard reads the query as the page reads its
-/// own, and its request, which meets no page's guard, is admitted and checked
-/// by the list's call.
+/// one, to the first and to the one before, which the query's `back` keeps,
+/// carry the limit, beside a form of the page's sizes (D44, amended). A shard
+/// at `/console/_live/suppliers`: when the app loads Topcoat's runtime, a
+/// page's link and the size form send their queries, and the list renders again
+/// in place. The shard reads the query as the page reads its own, and its
+/// request, which meets no page's guard, is admitted and checked by the list's
+/// call.
 #[shard("/console/_live/suppliers")]
 async fn suppliers_list(cx: &Cx, query: String, next: String) -> topcoat::Result<impl View> {
     // The page's query: the request's at first, then what a link sets.
     let query = signal(cx, move || query);
-    let filter = Form::<SupplierListSuppliersArgsForm>::from_bytes(query.get().as_bytes())?.0;
+    let sent = query.get();
+    let filter = Form::<SupplierListSuppliersArgsForm>::from_bytes(sent.as_bytes())?.0;
     let listed = filter.submit(cx).await;
-    // The links of the page: the first page's while a cursor was sent, and
-    // the next page's while one follows, each with the query's limit.
+    // The links of the page: the first page's while a cursor was sent,
+    // the page before's while `back` knows it, and the next page's while
+    // one follows, its `back` this one's with the current cursor after it,
+    // each with the query's limit, a refused limit dropped.
+    // Then, on a page that rendered, the size form, which keeps the rest of
+    // the query and starts again at the first page.
     let base = suppliers_href().unwrap_or_default();
-    let pairs = filter.query_pairs();
-    let first_page = filter.cursor.is_some().then(|| pager_query(&pairs, None));
-    let (listed, next_page) = match listed {
+    let pairs = admitted_pairs(filter.query_pairs(), &crate::api::SupplierListSuppliersArgs::PAGE);
+    let first_page = filter.cursor.is_some().then(|| pager_query(&pairs, None, None));
+    let cursor = filter.cursor.as_deref().filter(|cursor| !cursor.is_empty());
+    let back = Back::read(&sent, cursor.is_some());
+    let (listed, prev_page, next_page, sizes) = match listed {
         Ok(page) => {
-            let next_page = page.next.map(|next| pager_query(&pairs, Some(next.as_str())));
-            (Ok(page.items), next_page)
+            let prev_page = cursor.and(back.pop()).map(|(earlier, back)| pager_query(&pairs, earlier.as_deref(), back.as_deref()));
+            let next_back = cursor.map(|cursor| back.push(cursor));
+            let next_page = page.next.map(|next| pager_query(&pairs, Some(next.as_str()), next_back.as_deref()));
+            (Ok(page.items), prev_page, next_page, page_sizes(SUPPLIERS_PAGE_SIZES, &crate::api::SupplierListSuppliersArgs::PAGE, filter.limit.as_deref()))
         }
-        Err(refusal) => (Err(refusal), None),
+        Err(refusal) => (Err(refusal), None, None, Vec::new()),
     };
+    let hidden = size_pairs(&pairs);
     Ok(view! {
         <h1>"Suppliers"</h1>
         match listed {
@@ -1402,9 +1803,10 @@ async fn suppliers_list(cx: &Cx, query: String, next: String) -> topcoat::Result
             Err(refusal) => refused(refusal: page_refusal(refusal, &[]), next: next),
         }
         // Each link sets the shard's query, which renders the list again in
-        // place, and puts it in the address bar; without the runtime it is
-        // a link to the page.
-        if first_page.is_some() || next_page.is_some() {
+        // place, and puts it in the address bar, and the size form's submit
+        // sets it as the filter's does; without the runtime each link loads
+        // the page, and the form is a GET of it.
+        if first_page.is_some() || prev_page.is_some() || next_page.is_some() || !sizes.is_empty() {
             <nav class="ss-pager" aria-label="Pages">
                 if let Some(first) = first_page {
                     let href = pager_href(&base, &first);
@@ -1414,6 +1816,14 @@ async fn suppliers_list(cx: &Cx, query: String, next: String) -> topcoat::Result
                         query.set(first.to_owned())
                     })>"First page"</a>
                 }
+                if let Some(earlier) = prev_page {
+                    let href = pager_href(&base, &earlier);
+                    <a rel="prev" href=(href.clone()) @click=$(|e: Event| {
+                        e.prevent_default();
+                        raw!("history.replaceState(history.state, '', ${href});", ());
+                        query.set(earlier.to_owned())
+                    })>"Previous page"</a>
+                }
                 if let Some(later) = next_page {
                     let href = pager_href(&base, &later);
                     <a rel="next" href=(href.clone()) @click=$(|e: Event| {
@@ -1421,6 +1831,23 @@ async fn suppliers_list(cx: &Cx, query: String, next: String) -> topcoat::Result
                         raw!("history.replaceState(history.state, '', ${href});", ());
                         query.set(later.to_owned())
                     })>"Next page"</a>
+                }
+                if !sizes.is_empty() {
+                    <form method="get" class="ss-page-size" data-ss-live-size="suppliers" @submit=$(|e: Event| {
+                        e.prevent_default();
+                        raw!("(() => { const form = document.querySelector('form[data-ss-live-size=\"suppliers\"]'); const query = new URLSearchParams(new FormData(form)).toString(); history.replaceState(history.state, '', query === '' ? location.pathname : '?' + query); const sent = form.querySelector('input[data-ss-query]'); sent.value = query; sent.dispatchEvent(new Event('input')); })()", ())
+                    })>
+                        <input type="hidden" data-ss-query="" @input=$(|e: Event| query.set(e.target.value))>
+                        for (name, value) in hidden {
+                            <input type="hidden" name=(name) value=(value)>
+                        }
+                        <label>"Per page " <select name="limit">
+                            for (size, selected) in sizes {
+                                <option value=(size.to_string()) selected=(selected)>(size.to_string())</option>
+                            }
+                        </select></label>
+                        <button type="submit">"Show"</button>
+                    </form>
                 }
             </nav>
         }
@@ -1438,6 +1865,48 @@ async fn suppliers_rows(cx: &Cx, items: Vec<types::Supplier>) -> topcoat::Result
             <p class="ss-empty">"There are no suppliers."</p>
         } else {
             supplier_table(rows: rows, choices: choices)
+        }
+    })
+}
+
+/// The list of products, when the caller may list them.
+#[page("/console/suppliers/{supplier_id}/products")]
+pub async fn suppliers_products_list_page(cx: &Cx) -> topcoat::Result<impl View> {
+    let supplier_id = path_param::<SupplierId>(cx).to_owned();
+    let next = current(cx);
+    let admitted = operations::can_supplier_list_supplier_products(cx).await;
+    Ok(view! {
+        match admitted {
+            Err(err) => refused(refusal: Refusal::from_api(&err), next: next),
+            Ok(_) => suppliers_products_list(supplier_id: supplier_id, next: next),
+        }
+    })
+}
+
+/// The products.
+#[component]
+async fn suppliers_products_list(cx: &Cx, supplier_id: String, next: String) -> topcoat::Result<impl View> {
+    let listed = call_supplier_list_supplier_products(cx, &supplier_id).await;
+    Ok(view! {
+        <h1>"Products"</h1>
+        match listed {
+            Ok(items) => suppliers_products_rows(items: items),
+            Err(refusal) => refused(refusal: refusal, next: next),
+        }
+    })
+}
+
+/// Products as `product_table` renders them, the app's choices naming their
+/// values, over the labels of what they refer to.
+#[component]
+async fn suppliers_products_rows(cx: &Cx, items: Vec<types::Product>) -> topcoat::Result<impl View> {
+    let rows: Vec<ProductRecord> = items.iter().map(ProductRecord::from).collect();
+    let choices = references::product_labels(cx, &rows, choices_of(cx, "suppliers/{supplier_id}/products")).await;
+    Ok(view! {
+        if rows.is_empty() {
+            <p class="ss-empty">"There are no products."</p>
+        } else {
+            product_table(rows: rows, choices: choices)
         }
     })
 }
