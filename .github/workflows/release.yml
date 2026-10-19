@@ -16,7 +16,11 @@ name: release
 # tools.env's Rust, so they link into one binary, which the runner's link
 # check proves on each of the four platforms (scripts/release-archives.sh,
 # scripts/engine-link-check.sh; docs/stack-model.md, section 8.2; D47,
-# amended; D58). build produces, per runner, the superschematic CLI for its
+# amended; D58), and packs the engine's prebuilt Node-API addon for its
+# platform as the npm package @superschematic/engine-<target> (darwin-arm64,
+# darwin-x64, linux-x64-gnu, linux-arm64-gnu), the core's addon built with
+# the dist profile, LTO and stripped (scripts/release-engine-addon.sh,
+# which loads it and opens an engine on it first). build produces, per runner, the superschematic CLI for its
 # os/arch: the installed binary, cmd/superschematic, which links the core and
 # the official extensions (docs/stack-model.md, section 13). It links the
 # superscalar archive its platform's tarball holds, and every tarball's
@@ -28,8 +32,10 @@ name: release
 # build-migrate cross-compiles the migration runner, superschematic-migrate,
 # for the same four os/arch pairs on one runner, since it needs no cgo, and
 # records the commit too. assemble refuses a set whose binaries and archives
-# disagree on that commit, writes SHA256SUMS, packs the eleven npm tarballs,
-# and builds the PyPI sdist and wheel.
+# disagree on that commit, writes SHA256SUMS, packs the npm tarballs beside
+# the four addon packages, fifteen in all, @superschematic/engine naming the
+# addon packages as optional dependencies at the release's version, and
+# builds the PyPI sdist and wheel.
 # github-release attaches everything to a GitHub release with build provenance
 # and an SBOM. The three publish jobs use trusted publishing (OIDC; no
 # registry tokens in this repository) and are gated on the repository variable
@@ -181,6 +187,19 @@ jobs:
           rustup toolchain install "$RUST_VERSION" --profile minimal
           rustup default "$RUST_VERSION"
 
+      - name: Setup Bun
+        # The napi CLI the engine's package pins, installed with its
+        # dependencies, builds the addon.
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Setup Node.js
+        # Loads the addon before it is packed, and packs it.
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
       - name: Build and pack the static archives
         env:
           VERSION: ${{ needs.preflight.outputs.version }}
@@ -197,11 +216,33 @@ jobs:
           CGO_ENABLED: "1"
         run: scripts/engine-link-check.sh
 
+      - name: Build and pack the engine's addon package
+        # @superschematic/engine-<target>, the core's addon for this
+        # platform, built with the dist profile (fat LTO, one codegen unit,
+        # symbols stripped) and loaded before it is packed: the core's, the
+        # facade's contract, no test bridge, an engine on SQLite with the
+        # core's behaviors and the work queue's. On Linux it logs the newest
+        # glibc symbol version it needs, the oldest glibc it loads on.
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+          NAME: ${{ matrix.name }}
+        run: scripts/release-engine-addon.sh "$VERSION" "$NAME" dist
+
       - name: Upload the tarball
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: build-archives-${{ matrix.name }}
           path: dist/*.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload the addon package
+        # The same commit as the archives tarball beside it, whose
+        # BUILD_COMMIT assemble checks: one job built both.
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: build-addon-${{ matrix.name }}
+          path: dist/*.tgz
           if-no-files-found: error
           retention-days: 7
 
@@ -518,6 +559,12 @@ jobs:
         # work-queue package ship their compiled dist; the version-graph
         # package ships its compiled dist and the core's wasm module; the
         # schema IR ships its declarations and the schema-file JSON Schema.
+        # The four addon packages, @superschematic/engine-<target>, which
+        # build-archives packed on each platform's runner, ship the core's
+        # Node-API addon for their platform; the engine names each as an
+        # optional dependency at the release's version, of which npm
+        # installs the one whose os, cpu and libc match the host, and its
+        # loader requires it.
         # The engine builds after the schema and http runtimes and the
         # version graph, whose dist/ its link script copies, and the
         # work-queue package after the engine, which its link script links.
@@ -533,6 +580,14 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p release-assets/npm
+          addons=(darwin-arm64 darwin-x64 linux-x64-gnu linux-arm64-gnu)
+          for target in "${addons[@]}"; do
+            mv "builds/superschematic-engine-${target}-${VERSION}.tgz" release-assets/npm/
+          done
+          optional=()
+          for target in "${addons[@]}"; do
+            optional+=("optionalDependencies.@superschematic/engine-${target}=$VERSION")
+          done
           for pkg in schema db api schema-config stack; do
             (cd "packages/$pkg" && npm pack --pack-destination "$GITHUB_WORKSPACE/release-assets/npm" >/dev/null)
           done
@@ -541,11 +596,11 @@ jobs:
           (cd runtime/http/typescript && bun install --frozen-lockfile && bun run build && npm pack --pack-destination "$GITHUB_WORKSPACE/release-assets/npm" >/dev/null)
           (cd runtime/versiongraph/typescript && bun install --frozen-lockfile && bun run build && npm pack --pack-destination "$GITHUB_WORKSPACE/release-assets/npm" >/dev/null)
           (cd runtime/engine/typescript && bun install --frozen-lockfile && bun run build \
-            && npm pkg set "dependencies.@superschematic/versiongraph=$VERSION" \
+            && npm pkg set "dependencies.@superschematic/versiongraph=$VERSION" "${optional[@]}" \
             && npm pack --pack-destination "$GITHUB_WORKSPACE/release-assets/npm" >/dev/null)
           (cd runtime/engine-workqueue/typescript && bun install --frozen-lockfile && bun run build && npm pack --pack-destination "$GITHUB_WORKSPACE/release-assets/npm" >/dev/null)
           ls -l release-assets/npm
-          test "$(ls release-assets/npm/*.tgz | wc -l)" -eq 11
+          test "$(ls release-assets/npm/*.tgz | wc -l)" -eq 15
           python3 scripts/npm_local_specs.py release-assets/npm/*.tgz
 
       - name: Build the PyPI sdist and wheel
@@ -623,6 +678,7 @@ jobs:
             echo
             echo "The CLI is \`superschematic_${VERSION}_<platform>.tar.gz\`, the identity runner \`superschematic-identity_${VERSION}_<platform>.tar.gz\` and the migration runner \`superschematic-migrate_${VERSION}_<platform>.tar.gz\`, for linux-x64, linux-arm64, darwin-x64 and darwin-arm64."
             echo "\`superschematic-archives_${VERSION}_<platform>.tar.gz\` holds the static archives a generated Go server links through cgo, superscalar's, the version graph's and the engine's, under \`lib/\`, and the engine's C ABI header under \`include/\`: build with \`CGO_LDFLAGS=-L<dir>/lib\`. The CLI pins each one's digest in the Dockerfiles and workflows it generates."
+            echo "\`@superschematic/engine\` installs the engine's prebuilt Node-API addon from \`@superschematic/engine-<target>\`, one npm package per platform: darwin-arm64, darwin-x64, linux-x64-gnu and linux-arm64-gnu."
             echo "Every binary was built from commit \`$GITHUB_SHA\` and is listed in \`SHA256SUMS\`."
             echo "Verify provenance with: \`gh attestation verify <asset> --repo ${GITHUB_REPOSITORY}\`."
             echo
@@ -650,7 +706,7 @@ jobs:
   publish-npm:
     name: publish npm
     # Registration (npmjs.com -> package -> Settings -> Trusted Publisher, once
-    # per package; the eleven exact names are
+    # per package; the fifteen exact names are
     #   @superschematic/schema
     #   @superschematic/db
     #   @superschematic/api
@@ -660,6 +716,10 @@ jobs:
     #   @superschematic/schema-runtime
     #   @superschematic/http-runtime
     #   @superschematic/versiongraph
+    #   @superschematic/engine-darwin-arm64
+    #   @superschematic/engine-darwin-x64
+    #   @superschematic/engine-linux-x64-gnu
+    #   @superschematic/engine-linux-arm64-gnu
     #   @superschematic/engine
     #   @superschematic/engine-workqueue
     # with organization or user: parable-work, repository: superschematic,
@@ -697,16 +757,18 @@ jobs:
           name: release-assets
           path: release-assets
 
-      - name: Publish the eleven packages
+      - name: Publish the fifteen packages
         # The tarballs are the attested release assets, byte for byte. Order:
         # @superschematic/schema first, since the other authoring packages
         # name it in their docs, @superschematic/stack after it and
         # @superschematic/schema-config, its peers, @superschematic/schema-ir
         # before the schema runtime, which a consumer installs next to it,
-        # the engine after both, which it needs next to it, and after the
+        # the engine after both, which it needs next to it, after the
         # version graph, which it depends on at the release's version, and
-        # the engine's work-queue package last, after the engine, its peer;
-        # no other package of the eleven depends on another at install time.
+        # after its four addon packages, its optional dependencies at that
+        # version, which an install that finds none skips, and the engine's
+        # work-queue package last, after the engine, its peer; no other
+        # package of the fifteen depends on another at install time.
         env:
           DIST_TAG: ${{ needs.preflight.outputs.npm_dist_tag }}
           VERSION: ${{ needs.preflight.outputs.version }}
@@ -716,7 +778,8 @@ jobs:
           npm --version
           node -e 'const [maj, min, pat] = process.versions.npm.split(".").map(Number); if (maj < 11 || (maj === 11 && (min < 5 || (min === 5 && pat < 1)))) { console.error("npm >= 11.5.1 is required for trusted publishing"); process.exit(1); }'
           cd release-assets/npm
-          for name in schema db api schema-config stack schema-ir schema-runtime http-runtime versiongraph engine engine-workqueue; do
+          for name in schema db api schema-config stack schema-ir schema-runtime http-runtime versiongraph \
+            engine-darwin-arm64 engine-darwin-x64 engine-linux-x64-gnu engine-linux-arm64-gnu engine engine-workqueue; do
             tgz="superschematic-${name}-${VERSION}.tgz"
             echo "==> $tgz"
             npm publish "./$tgz" --access public --tag "$DIST_TAG"

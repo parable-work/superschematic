@@ -29,6 +29,9 @@ Version sites (relative to the repository root):
                                       version
   runtime/engine/typescript/package.json
                                       version
+  runtime/engine/typescript/npm/{darwin-arm64,darwin-x64,linux-x64-gnu,linux-arm64-gnu}/package.json
+                                      version: the prebuilt addons'
+                                      packages, @superschematic/engine-<target>
   runtime/engine-workqueue/typescript/package.json
                                       version
   runtime/schema/python/pyproject.toml
@@ -122,6 +125,11 @@ ROOT = Path(__file__).resolve().parent.parent
 GO_MODULE = "github.com/parable-work/superschematic"
 
 NPM_WORKSPACE_PACKAGES = ["api", "db", "schema", "schema-config", "stack"]
+
+# The targets of the engine's prebuilt Node-API addon, one npm package each
+# (@superschematic/engine-<target>, runtime/engine/typescript/npm/<target>),
+# which the release builds on the runner of each (release.yml, build-archives).
+ENGINE_ADDON_TARGETS = ["darwin-arm64", "darwin-x64", "linux-x64-gnu", "linux-arm64-gnu"]
 
 # Directory of every Go module, in dependency order. The tag for a module in a
 # subdirectory is the directory followed by /vX.Y.Z; the root module's is
@@ -251,6 +259,14 @@ def sites():
             "semver",
         )
     )
+    for target in ENGINE_ADDON_TARGETS:
+        out.append(
+            (
+                ROOT / "runtime" / "engine" / "typescript" / "npm" / target / "package.json",
+                [(r'(\n  "version": ")' + V + r'(",)', 1)],
+                "semver",
+            )
+        )
     out.append(
         (
             ROOT / "runtime" / "engine-workqueue" / "typescript" / "package.json",

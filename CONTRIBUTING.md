@@ -270,7 +270,9 @@ and concrete.
 
 One version for everything: the npm packages (`@superschematic/schema`, `db`,
 `api`, `schema-config`, `stack`, `schema-ir`, `schema-runtime`,
-`http-runtime`, `versiongraph`, `engine`, `engine-workqueue`), the
+`http-runtime`, `versiongraph`, `engine`, `engine-workqueue`, and the
+engine's prebuilt addons `engine-darwin-arm64`, `engine-darwin-x64`,
+`engine-linux-x64-gnu` and `engine-linux-arm64-gnu`), the
 PyPI distributions (`superschematic-schema-runtime`, and
 `superschematic-versiongraph`, which is not published), the crates
 (`superschematic-schema-runtime`, `superschematic-http-runtime`, and
@@ -311,6 +313,20 @@ platform's tarball and every tarball's SHA-256 (`internal/release`), which
 the Dockerfiles and workflows it generates pin
 ([`docs/stack-model.md`](docs/stack-model.md), section 8.2; D47, amended).
 A CLI built any other way names no digests.
+
+The same job packs the engine's prebuilt Node-API addon for its platform
+(D58): `scripts/release-engine-addon.sh` builds the core's addon
+(`runtime/engine/rust/addon`) with the engine workspace's `dist` profile
+(fat LTO, one codegen unit, symbols stripped), loads it and opens an
+engine on it, and packs `@superschematic/engine-<target>` from
+`runtime/engine/typescript/npm/<target>` (napi-rs's per-platform layout:
+the package's `os`, `cpu` and, on Linux, `libc`, and the `.node`).
+`assemble` names the four as `@superschematic/engine`'s
+`optionalDependencies` at the release's version, so npm installs the one
+for its host, and `publish-npm` publishes them before the engine. On
+Linux the job logs the newest glibc symbol version the addon needs, which
+the runner's glibc sets: an older glibc builds the addon from source
+(`scripts/engine-napi.sh`), as a Docker image does.
 
 `release-pr.yml` opens a pull request with the workflow token, which the
 repository setting "Allow GitHub Actions to create and approve pull requests"
