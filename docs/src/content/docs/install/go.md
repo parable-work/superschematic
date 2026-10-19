@@ -310,6 +310,41 @@ adds `Config.ServiceAuthenticator`, a `serviceauth.Authenticator` from the
 HTTP runtime, which `Config.Validate` requires. A handler reads the
 calling service with `serviceauth.CallerFromContext(ctx)`.
 
+An operation declared `@manualRouteRegistration` answers with a handler
+you write, for a response the JSON envelope cannot hold, such as a file
+or a stream. `Config` gains `ManualRoutes`, a `*ManualRoutes` with an
+`http.Handler` per such operation, named by its namespace and operation
+(`OrderExportOrder`). With it set, `RegisterRoutes` mounts each handler
+at its operation's route behind the middlewares the route would have as
+any other: the request log, the auth middleware of a route that needs a
+caller, the webhook verifier, the rate limit, the body limit, the service
+step, the permission check, the payload decryptor and the timeout. A nil
+handler answers 501. Without it, `RegisterRoutes` mounts none, and you
+mount each route on the router yourself. The namespace's interface keeps
+a method for the operation, which a route mounted from `ManualRoutes`
+does not call.
+
+In a [stack](/superschematic/guides/stacks/#the-generated-server), the
+server's `main.go` sets `ManualRoutes` from your implementation's
+`NewManualRoutes(deps)`, of the generated `ManualRoutesConstructor`'s
+signature, which the scaffold writes with a handler per operation that
+answers 501:
+
+```go
+func NewManualRoutes(deps api.Deps) (api.ManualRoutes, error) {
+	return api.ManualRoutes{
+		OrderExportOrder: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/csv")
+			fmt.Fprintf(w, "id,region\n%s,%s\n", chi.URLParam(r, "id"), deps.Config.FulfillmentRegion)
+		}),
+	}, nil
+}
+```
+
+A stack's build fails on an implementation that declares no
+`NewManualRoutes` while its API declares a manual route, and says what to
+add.
+
 ## Consume a generated SDK
 
 An API schema with `outputs.sdk.go` enabled writes

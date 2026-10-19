@@ -9,6 +9,9 @@
 {{- if .HasWorkers }} Each worker fails
 // every message until you implement it.
 {{- end }}
+{{- if .HasManualRoutes }} Each manual
+// route answers 501 until you implement its handler.
+{{- end }}
 package {{ toPackageName .SchemaName }}
 
 import (
@@ -18,7 +21,7 @@ import (
 {{- if .HasEncryptedEndpoints }}
 	"errors"
 {{- end }}
-{{- if and .IsPublic (not .Auth.Identity) }}
+{{- if or (and .IsPublic (not .Auth.Identity)) .HasManualRoutes }}
 	"net/http"
 {{- end }}
 {{- if or .HasFilterableEndpoints .HasEncryptedEndpoints .HasPagedEndpoints }}
@@ -58,6 +61,32 @@ func New(deps api.Deps) (api.Implementations, error) {
 }
 
 var _ api.Constructor = New
+{{- if .HasManualRoutes }}
+
+// NewManualRoutes builds the handlers of the @manualRouteRegistration
+// operations of {{ .SchemaName }} from the API's dependencies. Its signature is the
+// generated one, api.ManualRoutesConstructor. The server's entrypoint
+// passes them to the generated Config.ManualRoutes, and RegisterRoutes
+// mounts each behind its route's auth, traffic controls and request log,
+// then hands it the request to answer as it will.
+func NewManualRoutes(deps api.Deps) (api.ManualRoutes, error) {
+	return api.ManualRoutes{
+{{- range .ManualEndpoints }}
+		// {{ .Method }} {{ .Path }}
+		{{ .ImplName }}: notImplemented("{{ toGoName .Namespace }}.{{ .ShortImplName }}"),
+{{- end }}
+	}, nil
+}
+
+var _ api.ManualRoutesConstructor = NewManualRoutes
+
+// notImplemented answers 501 Not Implemented, naming the operation.
+func notImplemented(operation string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		api.RespondAppError(w, api.LoggerFromContext(r.Context()), api.NotImplementedError(operation))
+	})
+}
+{{- end }}
 {{- if .HasJobs }}
 
 // NewJobs builds the jobs of {{ .SchemaName }} from the API's dependencies. Its
@@ -147,6 +176,10 @@ type {{ toGoName . }} struct {
 {{- if eq .Namespace $namespace }}
 
 // {{ .ShortImplName }} handles {{ .Method }} {{ .Path }}.
+{{- if .ManualRouteRegistration }} It is
+// @manualRouteRegistration: the server mounts the handler NewManualRoutes
+// builds at its route, not this method.
+{{- end }}
 func (impl *{{ toGoName $namespace }}) {{ .ShortImplName }}(ctx context.Context{{- range .PathParams }}, {{ .Name }} {{ .GoType }}{{- end }}{{- range .QueryParams }}, {{ .Name }} {{ if .IsArray }}[]{{ else if not .Required }}*{{ end }}{{ .GoType }}{{- end }}{{- if .Filterable }}, filters []filterparse.Filter{{- end }}{{- if .HasInput }}, input *types.{{ .InputType }}{{- else if .ScalarArgs }}{{- range .ScalarArgs }}, {{ .Name }} {{ .GoListType }}{{- end }}{{- end }}{{- if .HasFileUpload }}, files map[string]*api.FileUploadData{{- end }}{{- if .Page }}, page paging.Request{{- end }}) ({{ .GoResultType }}, error) {
 	return {{ .GoZeroResult }}, api.NotImplementedError("{{ toGoName $namespace }}.{{ .ShortImplName }}")
 }

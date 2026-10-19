@@ -279,10 +279,23 @@ func TestGoldenWorkflow(t *testing.T) {
 		t.Errorf("preview-review's destroy = %+v", s)
 	}
 	check := w.jobs["check"]
-	for _, server := range []string{"Orders", "shop-api"} {
-		s := check.step("Compile server " + server)
-		if s == nil || s.Run != "go build -mod=mod -o /dev/null ." || s.WorkingDirectory != "schemas/dist/server/shop-stack/"+server {
-			t.Errorf("check compiles server %s with %+v", server, s)
+	// check compiles the module of each Go server, then of each Go job and
+	// worker, shop-orders' ShipOrders and FulfilOrders, which link the same
+	// archives and import the same implementation.
+	compiles := []struct{ kind, name string }{
+		{"server", "Orders"}, {"server", "shop-api"}, {"job", "shop-orders-ship-orders"}, {"worker", "shop-orders-fulfil-orders"},
+	}
+	previous := check.index("Build the services")
+	for _, c := range compiles {
+		name := "Compile " + c.kind + " " + c.name
+		s := check.step(name)
+		if s == nil || s.Run != "go build -mod=mod -o /dev/null ." || s.WorkingDirectory != "schemas/dist/server/shop-stack/"+c.name {
+			t.Errorf("check compiles %s %s with %+v", c.kind, c.name, s)
+		}
+		if i := check.index(name); i != previous+1 {
+			t.Errorf("check compiles %s %s at step %d, want %d, after the step before it", c.kind, c.name, i, previous+1)
+		} else {
+			previous = i
 		}
 	}
 	if s := check.step("Build the services"); s == nil || s.Run != "superschematic build-all schemas/services" {
@@ -553,19 +566,59 @@ func TestRendererNamesEnvironmentsWithNoJob(t *testing.T) {
 	}
 }
 
-// tsGolden is the workflow of a stack whose TypeScript servers stand beside
-// a Go one, which TestTypeScriptServersInCheck renders.
+// TestGoJobsAndWorkersInCheck: a stack whose Go deployables are a job and
+// a worker alone, with no Go server, still gets the release's archives and
+// Go in check, which compiles the job's module, then the worker's.
+func TestGoJobsAndWorkersInCheck(t *testing.T) {
+	req := storefrontRequest()
+	env := *req.Environments[0].Environment
+	env.Deployables = []*ir.ResolvedDeployable{
+		{Name: "shop-orders-fulfil-orders", Kind: ir.DeployableWorker, Language: publicregistry.APILanguageGo, Services: []ir.ServiceRef{{Name: "shop-orders", Kind: ir.SchemaKindAPI}}},
+		{Name: "shop-orders-ship-orders", Kind: ir.DeployableJob, Language: publicregistry.APILanguageGo, Services: []ir.ServiceRef{{Name: "shop-orders", Kind: ir.SchemaKindAPI}}},
+	}
+	req.Environments[0].Environment = &env
+	req.Stack.TypeScriptImplementations = nil
+	files, err := cigen.GitHub().Render(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "storefront-stack.yml")
+	if err := os.WriteFile(path, files[0].Data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	lint(t, path)
+	var names []string
+	for _, s := range parseWorkflow(t, files[0].Data).jobs["check"].Steps {
+		names = append(names, s.Name)
+	}
+	want := []string{
+		"Check out", "Install superschematic " + version, "Install the static archives", "Set up Go", "Build the services",
+		"Compile job shop-orders-ship-orders", "Compile worker shop-orders-fulfil-orders",
+	}
+	if !slices.Equal(names, want) {
+		t.Errorf("check's steps:\n%q\nwant:\n%q", names, want)
+	}
+}
+
+// tsGolden is the workflow of a stack whose TypeScript servers, job and
+// worker stand beside a Go server, which TestTypeScriptServersInCheck
+// renders.
 const tsGolden = "testdata/golden/storefront-stack.yml"
 
-// storefrontRequest is a stack with a Go server and two TypeScript ones,
-// whose schemas root has no lockfile, in one cloud environment.
+// storefrontRequest is a stack with a Go server, two TypeScript ones, a
+// TypeScript job of shop-pricing and a TypeScript worker of
+// shop-storefront (D52, D53), whose schemas root has no lockfile, in one
+// cloud environment.
 func storefrontRequest() publicregistry.CIRequest {
-	server := func(name, language string, services ...string) *ir.ResolvedDeployable {
-		d := &ir.ResolvedDeployable{Name: name, Kind: ir.DeployableServer, Language: language}
+	deployable := func(kind ir.DeployableKind, name, language string, services ...string) *ir.ResolvedDeployable {
+		d := &ir.ResolvedDeployable{Name: name, Kind: kind, Language: language}
 		for _, s := range services {
 			d.Services = append(d.Services, ir.ServiceRef{Name: s, Kind: ir.SchemaKindAPI})
 		}
 		return d
+	}
+	server := func(name, language string, services ...string) *ir.ResolvedDeployable {
+		return deployable(ir.DeployableServer, name, language, services...)
 	}
 	identity := func(role string) *publicregistry.CIIdentity {
 		return &publicregistry.CIIdentity{Kind: stacktest.WorkloadIdentity, Fields: map[string]string{
@@ -589,6 +642,8 @@ func storefrontRequest() publicregistry.CIRequest {
 				server("Orders", publicregistry.APILanguageGo, "shop-orders"),
 				server("pricing", publicregistry.APILanguageTypeScript, "shop-pricing"),
 				server("storefront", publicregistry.APILanguageTypeScript, "shop-storefront"),
+				deployable(ir.DeployableWorker, "shop-storefront-remind-shoppers", publicregistry.APILanguageTypeScript, "shop-storefront"),
+				deployable(ir.DeployableJob, "shop-pricing-refresh-quotes", publicregistry.APILanguageTypeScript, "shop-pricing"),
 			}},
 			HasSeam: true, Planner: identity("planner"), Deployer: identity("deployer"),
 		}},
@@ -598,10 +653,11 @@ func storefrontRequest() publicregistry.CIRequest {
 // TestTypeScriptServersInCheck: check sets up Bun at the release tools.env
 // pins, though the schemas root has no lockfile, and after the build and
 // the Go server's compile installs the output root's Bun workspace from
-// its lockfile, then type-checks each TypeScript server and the
-// implementation of each API one serves with the compiler the install
-// linked (D51, amended). No other job installs the workspace. The golden,
-// which -update rewrites, shows the job.
+// its lockfile, then type-checks each TypeScript server's package, then
+// each TypeScript job's and worker's (D52, D53), then the implementation
+// each imports, with the compiler the install linked (D51, amended). No
+// other job installs the workspace. The golden, which -update rewrites,
+// shows the job.
 func TestTypeScriptServersInCheck(t *testing.T) {
 	files, err := cigen.GitHub().Render(storefrontRequest())
 	if err != nil {
@@ -629,6 +685,7 @@ func TestTypeScriptServersInCheck(t *testing.T) {
 		"Check out", "Install superschematic " + version, "Install the static archives", "Set up Go", "Set up Bun",
 		"Build the services", "Compile server Orders", install,
 		"Type-check server pricing", "Type-check server storefront",
+		"Type-check job shop-pricing-refresh-quotes", "Type-check worker shop-storefront-remind-shoppers",
 		"Type-check the implementation of shop-pricing", "Type-check the implementation of shop-storefront",
 	}
 	if !slices.Equal(names, want) {
@@ -641,10 +698,12 @@ func TestTypeScriptServersInCheck(t *testing.T) {
 		t.Errorf("check installs the workspace with %+v", s)
 	}
 	for name, dir := range map[string]string{
-		"Type-check server pricing":                        "schemas/dist/server/storefront-stack/pricing",
-		"Type-check server storefront":                     "schemas/dist/server/storefront-stack/storefront",
-		"Type-check the implementation of shop-pricing":    "typescript/shop-pricing",
-		"Type-check the implementation of shop-storefront": "typescript/shop-storefront",
+		"Type-check server pricing":                         "schemas/dist/server/storefront-stack/pricing",
+		"Type-check server storefront":                      "schemas/dist/server/storefront-stack/storefront",
+		"Type-check job shop-pricing-refresh-quotes":        "schemas/dist/server/storefront-stack/shop-pricing-refresh-quotes",
+		"Type-check worker shop-storefront-remind-shoppers": "schemas/dist/server/storefront-stack/shop-storefront-remind-shoppers",
+		"Type-check the implementation of shop-pricing":     "typescript/shop-pricing",
+		"Type-check the implementation of shop-storefront":  "typescript/shop-storefront",
 	} {
 		if s := check.step(name); s.WorkingDirectory != dir || s.Run != "bun x --no-install tsc --noEmit -p tsconfig.json" {
 			t.Errorf("%s: %+v", name, s)
@@ -724,7 +783,8 @@ func TestTheWorkspaceStepRefusesALockfileItCannotInstall(t *testing.T) {
 }
 
 // TestCheckFindsTheTypeScriptImplementations builds a stack of TypeScript
-// servers: the workflow's check type-checks each served API's
+// servers, with ts-shop's job and worker: the workflow's check type-checks
+// each server's, job's and worker's package, and each served API's
 // implementation where the naming file's [implementation_paths]
 // typescript template puts it, relative to the repository root.
 func TestCheckFindsTheTypeScriptImplementations(t *testing.T) {
@@ -780,9 +840,11 @@ func TestCheckFindsTheTypeScriptImplementations(t *testing.T) {
 					t.Errorf("check type-checks %s's implementation with %+v, want it in %s", service, s, dir)
 				}
 			}
-			for _, server := range []string{"ts-pricing", "ts-shop"} {
-				if s := check.step("Type-check server " + server); s == nil || s.WorkingDirectory != "schemas/dist/server/ts-cloud-stack/"+server {
-					t.Errorf("check type-checks server %s with %+v", server, s)
+			for _, p := range []struct{ kind, name string }{
+				{"server", "ts-pricing"}, {"server", "ts-shop"}, {"job", "ts-shop-sweep-carts"}, {"worker", "ts-shop-remind-shoppers"},
+			} {
+				if s := check.step("Type-check " + p.kind + " " + p.name); s == nil || s.WorkingDirectory != "schemas/dist/server/ts-cloud-stack/"+p.name {
+					t.Errorf("check type-checks %s %s with %+v", p.kind, p.name, s)
 				}
 			}
 			if check.step("Set up Go") != nil {
@@ -797,7 +859,8 @@ func TestCheckFindsTheTypeScriptImplementations(t *testing.T) {
 // release tools.env pins, installs the output root's workspace and builds
 // the site; each deploy and preview job sets up Bun and installs the
 // workspace after the build; a plan job, which builds no site, does
-// neither. A stack whose environment deploys a site it does not locate is
+// neither. Every job sets up Node.js at the release tools.env pins for
+// npm ci. A stack whose environment deploys a site it does not locate is
 // refused.
 func TestSitesInTheWorkflow(t *testing.T) {
 	identity := &publicregistry.CIIdentity{Kind: stacktest.WorkloadIdentity, Fields: map[string]string{"provider": "projects/1/p", "account": "a@b"}}
@@ -853,6 +916,16 @@ func TestSitesInTheWorkflow(t *testing.T) {
 		if s := w.jobs[id].step("Set up Bun"); s == nil || s.With["bun-version"] != servergen.BunVersion {
 			t.Errorf("%s sets up Bun with %+v, want tools.env's %s", id, s, servergen.BunVersion)
 		}
+	}
+	// The npm project's packages install on tools.env's Node in every job,
+	// the plan's included, never on whichever release is the current LTS.
+	for _, id := range w.order {
+		if s := w.jobs[id].step("Set up Node.js"); s == nil || s.With["node-version"] != cigen.NodeVersion {
+			t.Errorf("%s sets up Node.js with %+v, want tools.env's %s", id, s, cigen.NodeVersion)
+		}
+	}
+	if !bytes.Contains(files[0].Data, []byte(`node-version: "`+cigen.NodeVersion+`"`)) {
+		t.Errorf("the workflow does not quote Node's release %s, which YAML would read as a number:\n%s", cigen.NodeVersion, files[0].Data)
 	}
 	preview := w.jobs["preview-preview"]
 	if s := preview.step(install); s == nil || s.If != "github.event.action != 'closed'" {

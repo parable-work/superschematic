@@ -37,7 +37,7 @@ balancer and DNS resources that the Pulumi provisioner applies.
 | the Cloudflare DNS platform, linked in the installed binary; bootstrap stores its API token and deploys read it | |
 | `@requireService` and `@allowService`, and the stack's check that every `calls` edge reaches an operation | the callee's half of service auth: a server whose API has a service clause does not start yet |
 | [generated CI](#generated-ci): `outputs.ci` writes a GitHub Actions workflow that checks, plans, previews and deploys the stack, signing in to gcp through Workload Identity Federation | other CI systems; a check that the committed workflow is current |
-| [buckets](/superschematic/guides/buckets/): the `Bucket` kind, `buckets` in an API's config, the `bucket` deployable and edge, a provider-neutral bucket in `Deps` over GCS with signed URLs, fake-gcs-server under `stack dev`, and on gcp a private Cloud Storage bucket | a bucket for a Rust server, job or worker; a bucket on another provider |
+| [buckets](/superschematic/guides/buckets/): the `Bucket` kind, `buckets` in an API's config, the `bucket` deployable and edge, a provider-neutral bucket in `Deps` over GCS with signed URLs, in Go, TypeScript and Rust, fake-gcs-server under `stack dev`, and on gcp a private Cloud Storage bucket | a bucket on another provider |
 | [jobs](#jobs): `@job`, the `job` deployable with its API's edges, its schedule per environment, Go's `Jobs` and `NewJobs`, TypeScript's `Jobs` and `createJobs`, Rust's `Jobs` and `create_jobs`, each job's entrypoint and image, `stack dev`'s schedules and `stack run`; on gcp a Cloud Run job, its schedule a Cloud Scheduler job, and `stack run` an execution | a job that runs on every deploy |
 | [static sites](/superschematic/guides/static-sites/): the `Site` kind, the `site` deployable and edge, each API's CORS for the sites that call it, `stack dev`'s file server, the deploy's publish through a target's `Sites` seam, and on gcp a bucket per site behind a load balancer with Cloud CDN | a site's SDK clients in the browser |
 | [queues and workers](#queues-and-workers): `@queue` on a DB service's message class, its table in every dialect, the Go ORM's `Enqueue` in your transaction and its claims; `@worker`, the `worker` deployable with its API's edges and its instances and concurrency per environment, Go's `Workers` and `NewWorkers`, TypeScript's `Workers` and `createWorkers` over the HTTP runtime's queue client, Rust's `Workers` and `create_workers` over the Rust HTTP runtime's, each worker's entrypoint and image, and `stack dev`'s worker processes; on gcp a Cloud Run worker pool | claims on SQLite and D1 |
@@ -753,8 +753,9 @@ describes, and each one a Go server serves: `implementation.go` at the naming fi
 `New` has the `Constructor` signature and whose every method answers 501
 until you implement it. Where the API's generated `Config` takes them, it
 also writes `AuthMiddleware(deps)`, which refuses every request with 401
-until it verifies your end users, and `PayloadDecryptor(deps)`, which
-refuses every encrypted payload. An API over the user model takes the
+until it verifies your end users, `PayloadDecryptor(deps)`, which
+refuses every encrypted payload, and `NewManualRoutes(deps)`, with a
+handler per `@manualRouteRegistration` operation that answers 501. An API over the user model takes the
 identity service instead of an auth middleware, or a TypeScript
 implementation's `authenticate`, which the entrypoint builds over its
 database and its identity config field, `<API>_IDENTITY`; a job's
@@ -799,7 +800,7 @@ lowered:
 | `call-cycle` | servers that call each other, which no callee-first rollout serves |
 | `field-collision` | a config field two types declare for one server, or one a derived field takes |
 | `invalid-values`, `invalid-settings` | target, DNS or platform values that fail their JSON Schema |
-| `lowering` | an error a platform, connector or DNS platform returned, such as a Rust server's bucket edge on gcp |
+| `lowering` | an error a platform, connector or DNS platform returned, such as a bucket whose name GCS refuses |
 | `graph` | a dangling or cyclic dependency, an undeclared parameter, properties that fail the schema of their resource type, or an inherited node the parent lacks |
 | `policy` | a target's policy rule |
 
@@ -1034,11 +1035,14 @@ environment. It loads each served API's `EnvConfig`, opens one pgx pool
 per database, shared by the APIs on it and connecting on first use, and
 builds one Go SDK client per API called, which sends the service
 credential its endpoint names and forwards the request's end user. It
-calls each implementation's `New` with its `Deps`, routes each request to
-the API that registers its method and path, answers `GET /healthz` and
-`GET /readyz`, listens on `$PORT` (8080 when unset), logs JSON, and drains
-on SIGTERM. The build refuses two served APIs that register one method
-and path.
+calls each implementation's `New` with its `Deps`, and its
+`NewManualRoutes(deps)` where an operation is `@manualRouteRegistration`,
+whose handlers `RegisterRoutes` mounts behind the auth, traffic controls
+and request log of their routes, routes each request to the API that
+registers its method and path, answers `GET /healthz` and `GET /readyz`,
+listens on `$PORT` (8080 when unset), logs JSON, and drains on SIGTERM.
+The build refuses two served APIs that register one method and path, a
+manual route included.
 
 A server whose database some environment of the stack places on Cloud
 SQL links the Cloud SQL Go connector and logs in with IAM database
@@ -1052,11 +1056,13 @@ A TypeScript server's package, beside the Go servers' modules, holds a
 `main.ts` that does the same on [Bun](https://bun.sh): it loads each API's
 config with `loadEnvConfig()`, opens one `pg` Pool per database, builds
 one TypeScript SDK client per API called with the credential its endpoint
-names, calls each implementation's `create(deps)`, and its
-`authenticate(deps)` where a route needs an end user, mounts each API's
-router on one Hono app, with the service authenticator over its callers
-field where an operation has a service clause, answers `/healthz` and
-`/readyz`, and drains on SIGTERM. The package is a member of the output
+names, calls each implementation's `create(deps)`, its
+`authenticate(deps)` where a route needs an end user, and its
+`createManualRoutes(deps)` where an operation is
+`@manualRouteRegistration`, mounts each API's router on one Hono app,
+with the service authenticator over its callers field where an operation
+has a service clause and those handlers as its `manualRoutes`, answers
+`/healthz` and `/readyz`, and drains on SIGTERM. The package is a member of the output
 root's Bun workspace, so `bun install` there links it to the API packages,
 the SDKs and the implementations. Its Dockerfile builds superscalar's Node
 addon in a Rust stage, from the checkout the naming file's `[paths]
@@ -1094,9 +1100,12 @@ naming every variable missing, when one fails; opens one Postgres pool
 per database, which reaches Cloud SQL over the socket Cloud Run mounts, so
 a Rust server needs no connector; builds one Rust SDK client per API
 called with the credential its endpoint names; calls each implementation's
-`create(deps)`; builds an API's identity service over its database's pool
-from `<API>_IDENTITY`, and its service authenticator from `<API>_CALLERS`;
-and joins them with the handlers through `Implementations::new`. It hands
+`create(deps)`, and its `create_manual_routes(deps)` where an operation is
+`@manualRouteRegistration`, whose handlers it mounts with
+`build_router_with_manual_routes`; builds an API's identity service over
+its database's pool from `<API>_IDENTITY`, and its service authenticator
+from `<API>_CALLERS`; and joins them with the handlers through
+`Implementations::new`. It hands
 each request to the API whose operations take it, answers the site CORS
 of an API a site calls, serves `/healthz` and `/readyz`, logs JSON lines,
 and drains for ten seconds on SIGTERM.
@@ -1165,7 +1174,9 @@ crate with `cargo build --release --locked` on the Rust release
 naming file's `[paths]` `http_runtime_rust`, `schema_runtime_rust` and
 `scalar_rust` name, and runs the binary on distroless `cc` as a non-root
 user, and a job's and a worker's image runs theirs with no port.
-Buckets from a Rust server, job or worker are not built.
+A Rust API that lists a bucket gets it in `Deps` as an `Arc<dyn Bucket>`,
+which its server, job and worker open with the HTTP runtime's `gcs`
+feature, with no Google library ([Buckets](/superschematic/guides/buckets/)).
 
 No `go.sum` is generated: build with `go build -mod=mod`, which fills it.
 `go mod tidy` can fail, because it also resolves the imports of the
@@ -1208,7 +1219,7 @@ and the [generated CI](#generated-ci) signs in with.
 | bucket | a Cloud Storage bucket `<project>-<stack>-<bucket>` in the region, with uniform bucket-level access and public access prevention enforced |
 | sql edge | `roles/cloudsql.client` and `roles/cloudsql.instanceUser` for the server's or job's account, held to the instance by an IAM condition, and an IAM database user. The derived value is the Cloud SQL connection, with no password, which a Rust server dials over the socket the service mounts at `/cloudsql` |
 | http edge | `roles/run.invoker` on the callee for the caller's account. The derived value is the callee's `run.app` URL with a Google ID token for it as the service credential, sent in `Service-Authorization` and, to an internal callee, also in `X-Serverless-Authorization`. A call to an API the same server serves stays on loopback |
-| bucket edge | `roles/storage.objectUser` on the bucket and `roles/iam.serviceAccountTokenCreator` on its own account for the server's or job's account, so it signs URLs as itself. The derived value is the bucket's name. A Rust server's bucket edge is refused |
+| bucket edge | `roles/storage.objectUser` on the bucket and `roles/iam.serviceAccountTokenCreator` on its own account for the server's, job's or worker's account, so it signs URLs as itself, in Go, TypeScript or Rust. The derived value is the bucket's name |
 | internal server | internal ingress only, with Cloud Run's invoker check on |
 | calling server or job | Direct VPC egress through the environment's network: a VPC, a subnet with Private Google Access, a router and Cloud NAT |
 | exposed server | with a domain, a global external Application Load Balancer and a Certificate Manager certificate for its host, authorized by a DNS record, with the service taking traffic from the load balancer only; without one, its public `run.app` URL |
@@ -1402,23 +1413,26 @@ The workflow:
   links, and the schemas root's packages (`bun install --frozen-lockfile`
   for a `bun.lock`, `npm ci` for a `package-lock.json`), runs `build-all`,
   which resolves every environment and checks its graph, and compiles
-  each Go server's entrypoint module with `go build -mod=mod`. It needs no
-  credentials, and no Rust or superscalar checkout for a stack with no
-  Rust server. For a stack with a Rust server it sets up the Rust release
-  `tools.env` pins before the build, fails when `schemas/dist/Cargo.lock`
-  is not committed or the build changed it, and compiles each Rust server
-  with `cargo check --locked`; every job that builds sets up the same
-  release. For a stack with a
-  TypeScript server it then installs `schemas/dist`'s Bun workspace with
-  `bun install --frozen-lockfile`, failing when `schemas/dist/bun.lock`
-  is not committed or no longer matches the packages the build wrote, and
-  type-checks each TypeScript server and the implementation of each API
-  one serves with `tsc --noEmit`. For a stack with a
+  each Go server's, job's and worker's entrypoint module with `go build
+  -mod=mod`. It needs no credentials, and no Rust or superscalar checkout
+  for a stack with no Rust server, job or worker. For a stack with one it
+  sets up the Rust release `tools.env` pins before the build, fails when
+  `schemas/dist/Cargo.lock` is not committed or the build changed it, and
+  compiles each Rust server, job and worker with `cargo check --locked`;
+  every job that builds sets up the same release. For a stack with a
+  TypeScript server, job or worker it then installs `schemas/dist`'s Bun
+  workspace with `bun install --frozen-lockfile`, failing when
+  `schemas/dist/bun.lock` is not committed or no longer matches the
+  packages the build wrote, and type-checks each TypeScript server's,
+  job's and worker's package and the implementation each imports with
+  `tsc --noEmit`. For a stack with a
   [static site](/superschematic/guides/static-sites/) it installs the same
   workspace and builds each site with its build script, as `stack deploy`
   does, so a site that does not build fails the pull request. Every job
   that sets up Bun installs the release a TypeScript server's image runs
-  on.
+  on, and every job of a project that installs with npm sets up the
+  Node.js release superschematic's own CI runs on, so `npm ci` runs on
+  the same release from run to run.
 - After it, `plan-<environment>` runs `stack plan` for each cloud
   environment without parameters, as the environment's `planner`
   account, and `preview-<environment>` runs `stack deploy <environment>

@@ -34,5 +34,5 @@ pub use {{ .Deps.DatabaseTypesCrateIdent }} as {{ databaseTypesModule }};
 pub use {{ .DepsExports }}
 {{ end -}}
 pub use interfaces::*;
-pub use router::{build_router, build_router_with, {{ if .WebhookProviders }}webhook_verified, {{ end }}RouterState};
+pub use router::{build_router, build_router_with, {{ if .ManualEndpoints }}build_router_with_manual_routes, {{ end }}{{ if .WebhookProviders }}webhook_verified, {{ end }}RouterState};
 pub use {{ .RuntimeCrateIdent }}::{request_ids, RouterOptions};

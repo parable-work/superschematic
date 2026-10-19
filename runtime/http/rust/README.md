@@ -60,10 +60,10 @@ it, a service passes its own `KeyFetcher` or `HttpGetter`.
 ## Running in a stack (D57, D65)
 
 A generated Rust server, job or worker in a stack reads its configuration
-from the environment, opens its databases, calls other APIs with a service
-credential, enqueues and claims queue messages, stops on a signal and logs
-JSON lines, through these pieces, the twins of the Go and TypeScript
-runtimes' (D51):
+from the environment, opens its databases and its buckets, calls other APIs
+with a service credential, enqueues and claims queue messages, stops on a
+signal and logs JSON lines, through these pieces, the twins of the Go and
+TypeScript runtimes' (D51):
 
 - `stackconfig`, with no feature: the readers of the fields an API's edges
   derive (section 3.4 of `docs/stack-model.md`), each from one variable per
@@ -183,6 +183,48 @@ runtimes' (D51):
   fields (`queue`, `message`, `attempt`, `took`, `error`, `retryIn`) through
   `tracing`. It claims through the `WorkerQueue` trait, which
   `PostgresQueue` implements.
+
+- `bucket`, with no feature: the provider-neutral interface of a bucket an
+  API lists in its `buckets` (D54), which its `Deps` holds as an
+  `Arc<dyn Bucket>`, the twin of Go's `bucket.Bucket` and TypeScript's
+  `Bucket`: `put(name, body, PutOptions)` (a `Body` of bytes, text or a
+  `Stream` of chunks, such as an axum request's data stream, with its
+  content type), `get(name)` (a `Reader`, the object's `Object` and its
+  bytes as a `Stream`, which an axum handler answers with as
+  `Body::from_stream(reader)`), `delete(name)`, `list(ListOptions)` (a
+  `Page` of the objects under a prefix, in name order, up to 1000 unless it
+  asks fewer, with the next page's token) and `signed_url(name,
+  SignedUrlOptions)` (a V4 URL to `GET` or `PUT` one object, a whole number
+  of seconds up to seven days, a `PUT`'s content type signed). A missing
+  object is `BucketError::NotFound`; a name that is empty, over 1024 bytes
+  or holds a CR, LF or NUL, and options no provider signs, are
+  `BucketError::Invalid` before any request, with Go's and TypeScript's
+  messages; anything else is `BucketError::Failed`, naming the bucket, the
+  operation and its causes.
+- The `gcs` feature's `gcs` module: `open_bucket(&stackconfig::Bucket)`, a
+  `GcsBucket` over Cloud Storage's JSON API, with no Google library, as
+  Cloud SQL's connection has none. On GCS it sends an access token for the
+  workload's account from the metadata server (`GCE_METADATA_HOST`
+  honoured), kept until 3 min 45 s before it expires, and signs a URL by
+  IAM's `signBlob` as the account the metadata server names, which needs
+  `roles/iam.serviceAccountTokenCreator` on itself, as the gcp target
+  grants. It reads no credentials file, so off Google Cloud it reaches a
+  bucket through an emulator. A connection with an endpoint, or `STORAGE_EMULATOR_HOST`,
+  reaches an emulator with no credential, and signs its URLs for the
+  emulator's host with a key the process makes, which fake-gcs-server takes
+  without checking. `put` is one multipart upload, streamed for a stream;
+  `get` reads the metadata, then that generation's bytes; reads that fail
+  with 408, 429, a 5xx or no answer are tried twice more. The V4 signature
+  is the one `@google-cloud/storage` writes, which a vector of its output
+  holds it to. `GcsClient::with_options` points it elsewhere, as the tests
+  do. `tests/gcs.rs` runs it against a fake Cloud Storage, metadata server
+  and IAM, and against the fake-gcs-server
+  `SUPERSCHEMATIC_TEST_GCS_EMULATOR` names, when it is set:
+
+  ```
+  docker run --rm -p 127.0.0.1:4443:4443 fsouza/fake-gcs-server:1.56.1 -scheme http -port 4443 -public-host 127.0.0.1:4443
+  SUPERSCHEMATIC_TEST_GCS_EMULATOR=http://127.0.0.1:4443 cargo test --features gcs --test gcs
+  ```
 
 The Postgres tests run on the database
 `SUPERSCHEMATIC_POSTGRES_TEST_DATABASE_URL` names, and skip without one;
