@@ -6794,13 +6794,14 @@ key's `RefersTo` to an imported type is held to the related table. The
 TypeScript reader flattens the types an `@source` target relates to, so
 the key's type is checked against the related type's id, and records
 nothing of them in the API: a scalar only a related type holds is not the
-API's. The OpenAPI
-document gives each reference, written or derived, under
-`x-superschematic-reference` (`apigen.OpenAPIReferenceKey`) on the field's
-or body argument's property and on the path or query parameter, and the
-tool documents give it under `ToolKeys.Reference`, with the target's name
-and the options operation's tool name; `tools/index.ts` types the key when
-a tool holds one. The tests are these:
+API's. The OpenAPI document gives each reference, written or derived,
+under `x-superschematic-reference` (`registry.OpenAPIReferenceKey`) on the
+field's or body argument's property, beside an `allOf` for a bare `$ref`,
+and on the path or query parameter. The tool documents give it under
+`ToolKeys.Reference`, with the target's name and the options operation's
+tool name (`apigen.ToolName`), and a hook cannot rename a key to a JSON
+Schema keyword; `tools/index.ts` types the key when a tool holds one. The
+tests are these:
 
 - ir's `TestFieldReference`: a derived key; an explicit target that wins; two sourced types; an unlisted target; and the cases that derive nothing, a `@virtual` field of another type than the related type's id among them. `TestResolveReferenceThroughTheImport`: a dependency's type found through its import beside a same-named type of a General dependency. `TestLookupScopes` and `TestRelationKeyFits` hold the lookup's order and the key's rule. `TestFieldReferenceOfADependencysType` holds a dependency's `RefersTo` to the field's type in the API. All are built.
 - verify's `TestARelationsKeyNeedsNoVirtual`, `TestARelationsKeyRefusalsAndWarning` and `TestARelationsKeyAccepted`, one for each message, are built; the refusals and the accepted cases include a `RefersTo` to an imported type of another table and of the related table. `TestAVirtualFieldOfAnotherTypeIsNoKey` shows a `@virtual` `<r>Id` of another type, a list or a map refused for nothing, still virtual, and deriving nothing.
