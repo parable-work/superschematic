@@ -937,7 +937,9 @@ pages](#route-controls-of-the-pages)).
   (`rel="prev"`) while the page before is known, and "Next page"
   (`rel="next"`) while one follows. On the second page Previous is First,
   and both render, so each page offers its links in the same places. A
-  refused cursor or limit offers the first page alone. A paged section
+  refused cursor offers the first page alone. A refused limit is kept by
+  no link and no form, so the 400's First link, while a cursor was sent,
+  and its filter start again at the route's default. A paged section
   on an item's page shows the first page and a link to the list's next,
   with no history and no size form. A paged list without a filter renders
   no filter form, and a refusal of its page on its own, with its status.
@@ -965,9 +967,9 @@ pages](#route-controls-of-the-pages)).
   the limit sent selected, else the default: 2 and 5 for a route of
   `{ defaultLimit: 2, maxLimit: 5 }`, 10, 20, 50 and 100 for the defaults.
   A route of one size has no form. It sends no cursor and no `back`, so a
-  new size starts at the first page; the filter form holds the limit sent
-  as a hidden input, so a filter keeps the size, and it too starts at the
-  first page.
+  new size starts at the first page; the filter form holds the limit sent,
+  when the route admits it, as a hidden input, so a filter keeps the size,
+  and it too starts at the first page.
 - **An item's page** renders `<type>_detail`, headed by its title, links
   to its edit and delete pages, a form per action and a section per
   resource under it, each only when the caller may.

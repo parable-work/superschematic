@@ -392,12 +392,29 @@ fn is_cursor(text: &str) -> bool {
 {{- end }}
 {{- if .Pages.Uses "pageSizes" }}
 
+/// The limit sent, as the query sent it, when the route admits it, as its
+/// router reads a limit (`PageSpec::query`); none for one it refuses, or an
+/// empty one, its default. A link and a form keep only an admitted limit,
+/// since a refused one would refuse each page they lead to.
+fn admitted_limit<'a>(sent: Option<&'a str>, page: &runtime::page::PageSpec) -> Option<&'a str> {
+    let limit = sent.filter(|limit| !limit.is_empty())?;
+    let query = runtime::QueryValues::new(vec![("limit".to_owned(), limit.to_owned())]);
+    page.query(&query).is_ok().then_some(limit)
+}
+
+/// A paged list's query pairs without a limit the route refuses, which a
+/// page's links carry: a refused page's First link starts again at the
+/// route's default.
+fn admitted_pairs(pairs: Vec<(String, String)>, page: &runtime::page::PageSpec) -> Vec<(String, String)> {
+    pairs.into_iter().filter(|(name, value)| name != "limit" || admitted_limit(Some(value), page).is_some()).collect()
+}
+
 /// The sizes of a paged list's size form (D44, amended): its own, `own`,
 /// then the limit sent when the route admits it, in order and each once,
 /// each marked when it is the page's own, the limit sent, else the route's
 /// default. None when there is one size, which needs no form.
 fn page_sizes(own: &[i64], page: &runtime::page::PageSpec, sent: Option<&str>) -> Vec<(i64, bool)> {
-    let sent = sent.and_then(|limit| limit.parse::<i64>().ok()).filter(|limit| (1..=page.max_limit()).contains(limit));
+    let sent = admitted_limit(sent, page).and_then(|limit| limit.parse::<i64>().ok());
     let mut sizes: Vec<i64> = own.iter().copied().chain(sent).collect();
     sizes.sort_unstable();
     sizes.dedup();
@@ -1041,22 +1058,22 @@ async fn {{ $r.Ident }}_list(cx: &Cx{{ declareAfter $r.ColParams "String" }}{{ i
 {{- end }}
 {{- if .Paged }}
 {{- if $r.Prev }}
-    // The links of the page, each with the query's {{ if $r.Filters }}filter and {{ end }}limit: the
-    // first page's while a cursor was sent, the page before's while `back`
-    // knows it, and the next page's while one follows, its `back` this
-    // one's with the current cursor after it. Then, on a page that
+    // The links of the page: the first page's while a cursor was sent,
+    // the page before's while `back` knows it, and the next page's while
+    // one follows, its `back` this one's with the current cursor after it,
+    // each with the query's {{ if $r.Filters }}filter and {{ end }}limit, a refused limit dropped.
+    // Then, on a page that rendered, the size form, which keeps the rest of
+    // the query and starts again at the first page.
+{{- else }}
+    // The links of the page: the first page's while a cursor was sent and
+    // the next page's while one follows, but none to the page before, since
+    // the operation's own argument is named back, each with the query's
+    // {{ if $r.Filters }}filter and {{ end }}limit, a refused limit dropped. Then, on a page that
     // rendered, the size form, which keeps the rest of the query and starts
     // again at the first page.
-{{- else }}
-    // The links of the page, each with the query's {{ if $r.Filters }}filter and {{ end }}limit: the
-    // first page's while a cursor was sent and the next page's while one
-    // follows, but none to the page before, since the operation's own
-    // argument is named back. Then, on a page that rendered, the size
-    // form, which keeps the rest of the query and starts again at the
-    // first page.
 {{- end }}
     let base = {{ $r.BaseExpr }};
-    let pairs = filter.query_pairs();
+    let pairs = admitted_pairs(filter.query_pairs(), &crate::api::{{ .ArgsName }}::PAGE);
     let first_page = filter.cursor.is_some().then(|| pager_query(&pairs, None, None));
 {{- if $r.Prev }}
     let cursor = filter.cursor.as_deref().filter(|cursor| !cursor.is_empty());
@@ -1081,7 +1098,8 @@ async fn {{ $r.Ident }}_list(cx: &Cx{{ declareAfter $r.ColParams "String" }}{{ i
 {{- end }}
     let hidden = size_pairs(&pairs);
 {{- if $r.Filters }}
-    let limit = filter.limit.clone();
+    // The filter keeps the limit sent, unless the route refused it.
+    let limit = admitted_limit(filter.limit.as_deref(), &crate::api::{{ .ArgsName }}::PAGE).map(str::to_owned);
 {{- end }}
 {{- end }}
 {{- else }}
