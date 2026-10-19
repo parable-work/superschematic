@@ -6738,20 +6738,23 @@ links that a client could only ever find absent.
 | In the Go runtime, `response.Meta` holds `RequestID` alone and `Envelope` holds `Data` and `Meta`. `Links` goes, and so does the `links` parameter of `JSONEnvelope` and `CollectionEnvelope`, so a server cannot write keys the document does not declare. The generated `response.go` and the identity runtime call both functions without it. The TypeScript client's comment that a caller can read `meta.totalCount` and `links` goes. | Keeping the Go types for a distribution's own envelope, which would write keys its document does not declare. An OpenAPI hook that adds them back stays open to a distribution. |
 | The change is to the document and the Go runtime alone. The TypeScript and Rust runtimes, every SDK and the tools already read and write `{data, meta: {requestId}}`. | |
 
-Status: designed; nothing built. The goldens it changes are the generated
-OpenAPI documents. In apigen that is eight files in seven fixtures:
+Status: built. The goldens it changes are the generated OpenAPI
+documents. In apigen that is eight files in seven fixtures:
 body-args-api; fixture-api-session's `openapi.json` and the `openapi.go`
 that embeds it; fixture-docs; fixture-nested-arrays-api;
 fixture-paged-api; fixture-service-auth-api; and fixture-user-routes-api.
 In rustrestgen it is six `openapi.json`: fixture-api,
 fixture-multiword-api, fixture-paged-api, fixture-service-auth-api,
 fixture-user-routes-api and fixture-webhooks-api. Each loses the
-envelope's `links`, the `ResponseLinks` component and `totalCount`. The
-other changes are fixture-api-session's `response.go`, and sdkgen's four
-`client.ts` (fixture-api, fixture-nested-arrays-api, fixture-paged-api,
+envelope's `links`, the `ResponseLinks` component and `totalCount`, and
+nothing else. The other changes are fixture-api-session's `response.go`,
+which calls both functions without links, and sdkgen's four `client.ts`
+(fixture-api, fixture-nested-arrays-api, fixture-paged-api,
 fixture-user-routes-api), which change by the comment alone. The test of
-`runtime/http/go/response` loses its case with links. acme-shop pins no
-OpenAPI document.
+`runtime/http/go/response` replaces its case with links by one that
+`meta` holds the request's id alone. No runtime, SDK, example, scenario
+or guide read either key, and acme-shop pins no OpenAPI document, so
+nothing else changes.
 
 The rule is reversible until the first release.
 

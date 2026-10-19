@@ -440,13 +440,14 @@ func buildOpenAPIPaths(output *APIOutput, scalarExamples, scalarDescriptions, sc
 			// The list is the page's items (D60).
 			responseSchema = pageOpenAPISchema(responseSchema)
 		}
+		// The envelope of every 2xx JSON response: {data, meta}, meta the
+		// request's id alone (D60, amended).
 		envelopeSchema := map[string]interface{}{
 			"type":     "object",
 			"required": []string{"data", "meta"},
 			"properties": map[string]interface{}{
-				"data":  responseSchema,
-				"meta":  map[string]interface{}{"$ref": "#/components/schemas/ResponseMeta"},
-				"links": map[string]interface{}{"$ref": "#/components/schemas/ResponseLinks"},
+				"data": responseSchema,
+				"meta": map[string]interface{}{"$ref": "#/components/schemas/ResponseMeta"},
 			},
 		}
 
@@ -534,20 +535,6 @@ func buildOpenAPISchemas(endpoints []EndpointInfo, scalarExamples, scalarDescrip
 				"type":        "string",
 				"description": "Unique identifier for the request",
 			},
-			"totalCount": map[string]interface{}{
-				"type":        "integer",
-				"nullable":    true,
-				"description": "Total count of items for paginated responses",
-			},
-		},
-	}
-	schemas["ResponseLinks"] = map[string]interface{}{
-		"type": "object",
-		"properties": map[string]interface{}{
-			"first": map[string]interface{}{"type": "string", "nullable": true},
-			"prev":  map[string]interface{}{"type": "string", "nullable": true},
-			"next":  map[string]interface{}{"type": "string", "nullable": true},
-			"last":  map[string]interface{}{"type": "string", "nullable": true},
 		},
 	}
 
