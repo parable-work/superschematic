@@ -1746,12 +1746,13 @@ The build refuses an engine database that composes an extension's
 behavior no Rust crate implements, and a server whose engine databases
 would each need a project archive of its own, since a binary links one.
 A release's image, which downloads the core's archive, cannot take a
-project's, so it gets no Dockerfile. A TypeScript server opens no engine
-yet, and the build says so.
+project's, so it gets no Dockerfile. A Rust server opens the engine as
+section 8.6 says; a TypeScript server opens none yet, and the build says
+so.
 
 An engine database's runner is an entrypoint of its own,
 `<db>-engine-runner` (section 3.1), in the language of the first API on
-it: a Go one's `main.go` reads the database's connection field alone,
+it: a Go one's `main.go`, or a Rust one's (section 8.6), reads the database's connection field alone,
 opens the engine on it as a server does, deploying nothing, starts the
 engine's runner as the deployable's name, holding each engine type's name
 as a permission, and runs until SIGTERM. On Postgres it runs while it
@@ -2474,6 +2475,26 @@ are the jobs and workers of a Rust API (D65; sections 8.7 and 8.8).
     rate limits, and on SIGTERM or SIGINT answers `/readyz` 503, stops
     taking connections and gives those in flight ten seconds; a second
     signal exits at once.
+- **Engine.** An API whose database is an engine database (D58) holds the
+  engine in its `Deps` (`engine`, a `superschematic_engine::background::Background`),
+  which `src/engine.rs`, beside `main.rs`, opens through the engine's
+  crate, linked in with the core's behaviors or the project's engine
+  crate's: in the background on a task of the server's runtime, each
+  attempt on the blocking pool, retrying a second apart and doubling to
+  thirty, over the database's connection field, a URL or, for Cloud SQL,
+  the socket Cloud Run mounts with an IAM access token as each new
+  connection's password (`postgres::sync_connection`). The server deploys
+  the `ENGINE_DOCUMENT` of the database's Rust types before `/readyz`,
+  which names `<db> engine`, reports it ready, and merges the engine's
+  routes (`axum::background_router`, 503 `unavailable` until it opens) at
+  `outputs.engine.mount` before the API router's fallback, behind the
+  API's identity session and service caller, with the identity config's
+  trusted origins' CORS and a calling site's. At SIGTERM it ends every
+  event stream as it stops taking connections, then shuts the engine down
+  off the runtime. A job and a worker open the engine for their `Deps`
+  and deploy nothing; the database's runner, when the first API on it is
+  Rust, is a crate of its own whose `main.rs` reads the database's field
+  alone and runs the engine's runner as its deployable.
 - **Image.** The Dockerfile's build stage, on `rust` at the release
   `tools.env` pins, builds the crate in the workspace with `cargo build
   --release --locked`, which fails on a lockfile that does not match the
@@ -2492,9 +2513,12 @@ are the jobs and workers of a Rust API (D65; sections 8.7 and 8.8).
   and every implementation's mirror under `impl/` whole, then the
   checkouts of the HTTP runtime, the schema runtime and superscalar's
   crate with its workspace's root manifest, whose lints the crate
-  inherits. No implementation's own directory goes in. Without `[paths]
-  scalar_rust` or `schema_runtime_rust`, or with a checkout outside the
-  build context, no Dockerfile is written, and the build says why.
+  inherits, and, with `[paths] engine_rust` set, the engine's Cargo
+  workspace with the crates it reaches and the project engine crates under
+  the output root (D58). No implementation's own directory goes in.
+  Without `[paths] scalar_rust` or `schema_runtime_rust`, or with a
+  checkout outside the build context, no Dockerfile is written, and the
+  build says why.
 - **Local.** `stack dev` builds each Rust server's, job's and worker's
   crate with `cargo build --release --locked` into the program directory's
   Cargo target directory and runs its binary (section 8.3). Its build of the stack has
@@ -2508,6 +2532,9 @@ are the jobs and workers of a Rust API (D65; sections 8.7 and 8.8).
 
 `TestStackDevRunsARustServer` runs a Rust server over Postgres that calls
 another, and signs an end user in with the identity runtime.
+`TestRustEngineEntrypointServes` builds a Rust server, its job and the
+Rust runner of its engine database, and runs them offline and on Postgres
+(D58).
 `TestStackDevRunsRustJobsAndWorkers` runs a Rust API's server and worker,
 and its job through `stack run` (sections 8.7 and 8.8).
 acme-shop's `TestStackDevRunsTheShop` runs `shop-stock`, a Rust server

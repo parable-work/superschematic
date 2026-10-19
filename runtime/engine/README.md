@@ -4414,7 +4414,9 @@ let app = Router::new().merge(routes).fallback_service(api_router);
   at its next write and drops the body, which closes the stream.
   `Engine::shutdown` ends every stream, so a server that shuts its engine
   down on SIGTERM can drain: a graceful shutdown waits for the responses
-  still open.
+  still open. `Options::done`, a watch the host moves as it stops serving,
+  ends them without shutting the engine down, so the requests in flight
+  still get their answers.
 - **The engine and the async runtime.** The engine is synchronous, so a
   host calls it off the runtime's threads (`spawn_blocking`):
   `Engine::open_shared`, `Engine::shutdown` and the engine's last drop
@@ -4437,8 +4439,33 @@ let app = Router::new().merge(routes).fallback_service(api_router);
   `Mcp-Protocol-Version` and `Mcp-Session-Id`, and reads `ETag`,
   `Location`, `Mcp-Session-Id`, `Retry-After` and `X-Request-Id`.
 
+- **An engine that opens while the server serves.** The `background`
+  feature, which `axum` turns on, has `background::Background`: the
+  engine opened on a task of the host's runtime from options a function
+  builds each attempt, the open and a setup (a server's deploy, a
+  runner's start) on the blocking pool, retrying a second apart and
+  doubling to thirty, each failure told to `on_error`, as the Go
+  binding's `engine.Background` does. `engine()` hands it out once it
+  opens, `wait()` waits for it, `ready()` is a readiness check (open, not
+  poisoned, its database answering a read) and `shutdown()` stops trying
+  and shuts the engine down off the runtime.
+  `axum::background_router(background, options)` registers the routes
+  from the start, each 503 `unavailable` ("The engine is not available")
+  until the engine opens, as `enginehttp.Background` answers, then serves
+  them as `router` does. `Engine::deploy(documents, namespace)` is a
+  server's deploy: each schema document defined and published as the
+  engine's own principal, one whose live version has its hash left as it
+  is; the C ABI's `deploy` calls it.
+- **A password the host refreshes.** `storage::PostgresOptions::password`,
+  a `PasswordProvider`, gives each new connection's password (the pool's,
+  the listener's, a lease's), asked on the thread that opens it, in the
+  URL's place: an IAM access token over the `/cloudsql/<instance>`
+  socket, which the HTTP runtime's `postgres::sync_connection` fetches.
+
 `engine/tests/axum.rs` drives the router in process and over a TCP
-listener, on both databases. The test kit replays the HTTP corpus
+listener, on both databases; `engine/tests/background.rs` the
+background open and its router, and `storage/tests/password.rs` the
+password provider on Postgres. The test kit replays the HTTP corpus
 through it (`AxumRouter`, the test kit's `axum` feature), as it replays
 the corpus through `api::handle`, with the same skips and known steps.
 

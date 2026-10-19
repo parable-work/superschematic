@@ -350,12 +350,16 @@ a type the document defines after it.
 
 ### In a generated server
 
-A generated Go server whose API's database is an engine database does
-this itself (D58): it opens the engine on the database in the background,
-deploys the document before `/readyz` reports the engine ready, and mounts
-the engine's routes, its event stream and its MCP endpoint at
-`/engine/<db>`, behind the API's identity and service callers. Two more
-keys of the database's `outputs.engine` say how:
+A generated Go or Rust server whose API's database is an engine database
+does this itself (D58): it opens the engine on the database in the
+background, deploys the document before `/readyz` reports the engine
+ready, and mounts the engine's routes, its event stream and its MCP
+endpoint at `/engine/<db>`, behind the API's identity and service
+callers. The API's `Deps` holds the engine: in Go an
+`*engine.Background`, whose `Wait(ctx)` returns it once it opens; in Rust
+a `superschematic_engine::background::Background`, whose `wait().await`
+does, an engine to call off the async threads (`spawn_blocking`). Two
+more keys of the database's `outputs.engine` say how:
 
 ```json
 {
@@ -383,8 +387,22 @@ The engine's runner, which runs reactions, schedules and Timers'
 deadlines, is a deployable of its own, `<db>-engine-runner`, one instance
 in the language of the first API on the database: a Cloud Run worker pool
 on gcp, a process of its own under `stack dev`. It acts as its deployable's
-name, holding each engine type's name as a permission. A TypeScript or
-Rust server opens no engine yet.
+name, holding each engine type's name as a permission. A TypeScript
+server opens no engine yet.
+
+A Topcoat app (D44) whose API's database is an engine database keeps the
+engine in-process on SQLite: the crate the Topcoat extension writes has
+`engine::open(path)`, which opens the engine on a SQLite file and deploys
+the document, and its setup method takes the engine and mounts its
+routes at `/engine`, behind the API's `Authenticator`:
+
+```rust
+let engine = shop_orders_topcoat::engine::open("shop.engine.db")?;
+let app = Router::builder()
+    .discover()
+    .shop_orders(implementations, page_authenticator, engine)
+    .build();
+```
 
 ### The project's engine crate
 
