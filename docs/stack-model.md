@@ -1598,8 +1598,9 @@ The target sets defaults that `settings` can override:
 - a bucket with object versioning off (`versioning`) and no lifecycle
   rule, unless `deleteAfterDays` deletes each object that many days after
   it was written (D54);
-- logs to Cloud Logging, and traces to Cloud Trace through the entrypoint's
-  OpenTelemetry setup.
+- logs to Cloud Logging. Each account may write to Cloud Trace, but no
+  entrypoint exports traces yet: OpenTelemetry export is not built
+  (section 8.1).
 
 Cloud Run allocates a service's CPU only while it handles a request, and
 bills its instances for that time and their starts and stops, unless the
@@ -3424,10 +3425,10 @@ credential. It refuses a credential it cannot verify with 401, code
 `service_unauthorized`, and a verified identity that is no caller of this
 server with 403, code `service_forbidden`. A failure that is not the
 caller's, such as keys it cannot fetch, answers 503. Each runtime ships one
-implementation over the config of section 9.2, which the generated Go
-entrypoint builds from the API's callers field (section 8.1), and the
-TypeScript and Rust entrypoints will when they exist; a deployment with a
-credential that config cannot express passes its own.
+implementation over the config of section 9.2, which the generated Go,
+TypeScript and Rust entrypoints build from the API's callers field
+(sections 8.1 and 8.6); a deployment with a credential that config
+cannot express passes its own.
 
 A route runs its steps in this order:
 
@@ -3568,8 +3569,8 @@ The callers field has its own tests:
 - A deployable that serves no API has no handle to put in `from`, and may
   call only operations whose `from` is empty. A job is not one: it serves
   its API in a callee's callers field, so `from` names it by its API
-  (section 8.7, D52). A worker, when queues land, may follow the same
-  rule.
+  (section 8.7, D52). A worker is not one either: it follows the same
+  rule (section 8.8, D53).
 - A credential the callee config cannot express, such as a service mesh's
   mTLS identity in `X-Forwarded-Client-Cert`. A deployment can pass its
   own service authenticator today; a platform kind of credential can come
@@ -4058,9 +4059,9 @@ whatever the deploy decides is affected, and needs no list of its own.
    `server` generator writes each TypeScript server's package, `main.ts`
    and Dockerfile at `server/<stack>/<server>` in the pass that writes the
    Go servers' (section 8.6). For Rust, `Deps`, `Handlers`,
-   `Implementations::new` and the scaffold at `[implementation_paths]
-   rust` have landed (D57). Next: OpenTelemetry export; then the
-   entrypoint in Rust.
+   `Implementations::new`, the scaffold at `[implementation_paths]
+   rust` and each Rust server's entrypoint crate and Dockerfile have
+   landed (D57). Next: OpenTelemetry export.
    `examples/acme-shop` keeps its implementations at the scaffold layout,
    `go/shop-api`, `go/shop-orders` and `typescript/shop-storefront`,
    which the entrypoints of its `shop-stack` import (section 14,
@@ -4100,11 +4101,11 @@ whatever the deploy decides is affected, and needs no list of its own.
    that runs `superschematic-migrate job` on Cloud SQL and owns the
    servers' privileges (section 8.4, D46), and `stackdeploy.CredentialsOf`
    reading the credentials a DNS platform resolves into
-   `dns.credentials`. Next: a deploy lock beyond the provisioner's and
-   the runner's, and the generated CI of section 11.3.
+   `dns.credentials`. So has the generated CI of section 11.3 (D47).
+   Next: a deploy lock beyond the provisioner's and the runner's.
 8. **CLI.** The `stack` command group. Landed: `stack dev` (section 8.3),
-   which runs Go and TypeScript servers, and `bootstrap`, `secrets set`,
-   `plan`, `deploy`, `destroy` and `outputs` (section 11).
+   which runs Go, TypeScript and Rust servers, and `bootstrap`, `secrets
+   set`, `plan`, `deploy`, `destroy` and `outputs` (section 11).
 
 ## 13. Module layout
 
@@ -4243,8 +4244,18 @@ model, or retired, when it lands.
    and a calling server's network, which waits for a stack with `calls`
    edges (milestone 4).
 4. **Service auth.** Admission and identity (section 9) on Cloud Run.
+   Built (D37, amended; D51; D57): gcp's http connector gives each
+   caller a Google ID token for its callee's audience, and the Go,
+   TypeScript and Rust servers verify it against their callers field.
+   It has not run on Cloud Run: milestone 3's run had no `calls` edge,
+   which acme-shop's stack has since gained.
 5. **Database lifecycle.** The `sqlgen` migration plan and apply step in
-   deploys, the hazard gate and the deploy manifest.
+   deploys, the hazard gate and the deploy manifest. Built (D45, D46):
+   each deploy plans its databases' migrations, gates their hazards,
+   records the manifest, and on gcp runs each phase as the migration
+   job. Milestone 3's run applied an expand phase on Cloud SQL; no
+   contract phase has run there, and a deploy lock beyond the
+   provisioner's and the runner's is not built.
 6. **CI generation and parameterized environments.** Built (D47). A
    stack's `outputs.ci` writes its GitHub Actions workflow (section
    11.3), which checks with no credentials, plans each cloud environment
@@ -4255,17 +4266,18 @@ model, or retired, when it lands.
 7. **Breadth.** Jobs and scheduled jobs, buckets, queues and static sites,
    and a second target (GKE or Cloudflare) added as a registration, with
    the generic connector (section 6.2) so compute can mix. Built so far:
-   - TypeScript servers on Bun (section 8.6, D51);
-   - jobs and scheduled jobs, in Go and TypeScript, on the local target
-     and on gcp as Cloud Run jobs with Cloud Scheduler (section 8.7, D52);
+   - TypeScript servers on Bun, and Rust servers (section 8.6, D51, D57);
+   - jobs and scheduled jobs, in Go, TypeScript and Rust, on the local
+     target and on gcp as Cloud Run jobs with Cloud Scheduler (section
+     8.7, D52, D65);
    - static sites, on the local target and on gcp from a bucket behind a
      load balancer with Cloud CDN, never run against Google Cloud
      (section 8.10, D55);
    - buckets, on the local target's storage emulator and on gcp in Cloud
      Storage, never run against Google Cloud (section 8.9, D54);
-   - queues in a DB service's database, and Go and TypeScript workers
-     that handle them, on the local target and on gcp as Cloud Run worker
-     pools (section 8.8, D53);
+   - queues in a DB service's database, and Go, TypeScript and Rust
+     workers that handle them, on the local target and on gcp as Cloud
+     Run worker pools (section 8.8, D53, D65);
    - the generic connector (section 6.2, D63), ahead of the second target:
      platforms name their provider, an http or a site edge between two
      providers falls back to it, an http one signs with a per-edge Ed25519
