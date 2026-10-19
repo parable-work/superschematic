@@ -80,6 +80,36 @@ func DocText(description, comment string) string {
 	return comment
 }
 
+// JSDocEscape writes "*/" in text placed inside a JSDoc comment as "*\/", so
+// the text cannot close the comment early.
+func JSDocEscape(text string) string {
+	return strings.ReplaceAll(text, "*/", "*\\/")
+}
+
+// JSDocText writes doc text into a JSDoc comment whose template writes the
+// first line's prefix itself: "*/" is escaped (JSDocEscape), and every line
+// after the first starts with linePrefix, the prefix of the comment's own
+// lines such as "   * ", so a multi-line description keeps the comment's
+// asterisks. A blank line gets linePrefix without its trailing space, and
+// the text's surrounding blank space and each line's trailing space are
+// dropped.
+func JSDocText(text, linePrefix string) string {
+	text = strings.ReplaceAll(strings.TrimSpace(text), "\r\n", "\n")
+	lines := strings.Split(JSDocEscape(text), "\n")
+	for i, line := range lines {
+		line = strings.TrimRight(line, " \t")
+		switch {
+		case i == 0:
+			lines[i] = line
+		case line == "":
+			lines[i] = strings.TrimRight(linePrefix, " \t")
+		default:
+			lines[i] = linePrefix + line
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
 // EscapeString escapes special characters in a string for safe use in
 // generated code. Handles quotes, newlines, carriage returns, and tabs.
 func EscapeString(s string) string {

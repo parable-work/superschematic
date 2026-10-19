@@ -99,10 +99,15 @@ acme-shop. Without a stack, your own `main` does that, as the tutorial's
 tests do in-process
 ([Call it from Go](/superschematic/first-project/go-api/#call-it-from-go)).
 A TypeScript API package has its `Deps` too, with a `pg` Pool as its
-database, and its implementation is scaffolded at `typescript/<service>`
+database, and its implementation is scaffolded at `typescript/<service>`.
+A stack's build writes each TypeScript server's `main.ts`, which builds
+each implementation from its `Deps` and serves the routers on Bun
 ([TypeScript](/superschematic/install/typescript/#serve-a-generated-api)).
-The TypeScript entrypoint is not built yet, and neither `Deps` nor the
-entrypoint is built for Rust servers.
+A Rust API crate has its `Deps` as well, with a Postgres pool as its
+database, and its implementation crate is scaffolded at `rust/<service>`.
+A stack's build writes each Rust server's crate, whose `src/main.rs`
+builds each `Deps`, calls the implementation's `create` and serves the
+routers ([Rust](/superschematic/install/rust/#rust-servers)).
 
 ## Arguments
 

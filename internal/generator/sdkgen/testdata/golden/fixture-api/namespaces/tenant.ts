@@ -29,10 +29,10 @@ export class TenantNamespace {
 
   /**
    * customHandler endpoint
-  * @param options - Optional encrypted request options
-  * @param options.publicEncryptionKey - Optional per-request public encryption key override
-  * @param options.signal - Optional AbortSignal for request cancellation
-  * @param options.forward - Optional end user to forward, such as a server's RequestContext
+   * @param options - Optional encrypted request options
+   * @param options.publicEncryptionKey - Optional per-request public encryption key override
+   * @param options.signal - Optional AbortSignal for request cancellation
+   * @param options.forward - Optional end user to forward, such as a server's RequestContext
    * @returns TenantView
    * @throws {ValidationError} if input validation fails
    * @throws {ApiError} if the API request fails
@@ -58,7 +58,7 @@ export class TenantNamespace {
    * Array query parameters: ?ids=a,b&statuses=active,suspended.
    * @requires Authentication
    * @param params - Optional query parameters
-  * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
+   * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
    * @returns Array of TenantView
    * @throws {ValidationError} if input validation fails
    * @throws {ApiError} if the API request fails
@@ -139,10 +139,10 @@ export class TenantNamespace {
    * createTenant endpoint
    * @requires Authentication
    * @param input - Request payload
-  * @param options - Optional encrypted request options
-  * @param options.publicEncryptionKey - Optional per-request public encryption key override
-  * @param options.signal - Optional AbortSignal for request cancellation
-  * @param options.forward - Optional end user to forward, such as a server's RequestContext
+   * @param options - Optional encrypted request options
+   * @param options.publicEncryptionKey - Optional per-request public encryption key override
+   * @param options.signal - Optional AbortSignal for request cancellation
+   * @param options.forward - Optional end user to forward, such as a server's RequestContext
    * @returns TenantView
    * @throws {ValidationError} if input validation fails
    * @throws {ApiError} if the API request fails
@@ -178,7 +178,7 @@ export class TenantNamespace {
    * @requires Authentication
    * @param id - id parameter
    * @param params - Optional query parameters
-  * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
+   * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
    * @returns TenantView
    * @throws {ValidationError} if input validation fails
    * @throws {ApiError} if the API request fails
@@ -202,10 +202,10 @@ export class TenantNamespace {
    * @requires Authentication
    * @param id - id parameter
    * @param secret - secret argument
-  * @param options - Optional encrypted request options
-  * @param options.publicEncryptionKey - Optional per-request public encryption key override
-  * @param options.signal - Optional AbortSignal for request cancellation
-  * @param options.forward - Optional end user to forward, such as a server's RequestContext
+   * @param options - Optional encrypted request options
+   * @param options.publicEncryptionKey - Optional per-request public encryption key override
+   * @param options.signal - Optional AbortSignal for request cancellation
+   * @param options.forward - Optional end user to forward, such as a server's RequestContext
    * @returns TenantView
    * @throws {ValidationError} if input validation fails
    * @throws {ApiError} if the API request fails

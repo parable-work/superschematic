@@ -1,0 +1,55 @@
+# The union Shape (Circle | Square) as the response of an operation that
+# does not page: a list of it, a list of lists of it and one of it. An SDK
+# decodes each element through the union; the Go SDK through
+# types.ShapeWrapper, since a union is an interface that encoding/json
+# cannot fill. The SDK tests load it through sdktest.LoadUnionListsService.
+name: union-lists-api
+kind: API
+types:
+  # A circle, by its radius.
+  Circle:
+    name: Circle
+    role: APIView
+    fields:
+      - name: radius
+        typeRef: { name: number }
+        required: true
+  # A square, by its side.
+  Square:
+    name: Square
+    role: APIView
+    fields:
+      - name: side
+        typeRef: { name: number }
+        required: true
+unions:
+  # A circle or a square.
+  Shape:
+    name: Shape
+    types: [Circle, Square]
+operationSets:
+  - name: ShapeQueries
+    operations:
+      # Every shape, circles and squares mixed, in one list that does not
+      # page.
+      - name: listShapes
+        typeRef: { name: Shape, isArray: true }
+        required: true
+        httpMethod: GET
+        restPath: "shapes"
+      # The shapes in rows, a list of lists.
+      - name: shapeRows
+        typeRef: { name: Shape, isArray: true, isArrayOfArrays: true }
+        required: true
+        httpMethod: GET
+        restPath: "shapes/rows"
+      # One shape, by its id.
+      - name: getShape
+        typeRef: { name: Shape }
+        required: true
+        httpMethod: GET
+        restPath: "shapes/{id}"
+        arguments:
+          - name: id
+            typeRef: { name: string }
+            required: true

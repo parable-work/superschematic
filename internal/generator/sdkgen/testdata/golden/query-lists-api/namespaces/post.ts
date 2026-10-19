@@ -25,7 +25,7 @@ export class PostNamespace {
   /**
    * Count the posts that match every filter.
    * @param params - Optional query parameters
-  * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
+   * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
    * @returns number
    * @throws {ValidationError} if input validation fails
    * @throws {ApiError} if the API request fails

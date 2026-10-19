@@ -160,6 +160,13 @@ type EndpointInfo struct {
 	FilesStructName          string
 	Filterable               bool
 
+	// OutputArrayDepth is the number of list levels of the response: 0, 1
+	// for a list, 2 for a list of lists.
+	OutputArrayDepth int
+	// OutputUnionGoType is the union a union response holds (types.X),
+	// each element of a list of it decoded through its wrapper.
+	OutputUnionGoType string
+
 	// Page is the endpoint's @paginated (D60), nil when it does not page.
 	// The method then takes a runtime.PageRequest after its arguments and
 	// returns a runtime.Page of ItemGoType (OutputGoType), and
@@ -550,6 +557,7 @@ func convertEndpoint(ep apigen.EndpointInfo, isScopedNS bool, scopeParamName str
 		InputType:             qualifyType(ep.InputType, scalarSymbols),
 		OutputType:            ep.OutputType,
 		OutputGoType:          outputGoType,
+		OutputArrayDepth:      ep.OutputArrayDepth(),
 		HasInput:              ep.HasInput,
 		RequiresAuth:          ep.RequiresAuth,
 		PathParams:            pathParams,
@@ -693,12 +701,19 @@ func WriteSDKWithToolsProfiled(output *SDKOutput, apiOutput *apigen.APIOutput, o
 						continue
 					}
 					endpoint.IsUnionOutput = true
-					endpoint.OutputUnionWrapperGoType = "types." + outputType + "Wrapper"
+					endpoint.OutputUnionGoType = "types." + outputType
+					wrapper := endpoint.OutputUnionGoType + "Wrapper"
 					if endpoint.Page != nil {
 						// A page of a union decodes each item through its
 						// wrapper, since a union is an interface, and
 						// returns the page of the items the wrappers hold.
-						endpoint.OutputUnionWrapperGoType = "runtime.Page[" + endpoint.OutputUnionWrapperGoType + "]"
+						endpoint.OutputUnionWrapperGoType = "runtime.Page[" + wrapper + "]"
+					} else {
+						// A list or a list of lists of a union decodes
+						// each element through its wrapper, as a page's
+						// items are, and returns the values the wrappers
+						// hold, at the same list levels.
+						endpoint.OutputUnionWrapperGoType = goListType(wrapper, endpoint.OutputArrayDepth)
 					}
 				}
 			}

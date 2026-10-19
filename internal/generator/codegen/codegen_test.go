@@ -185,6 +185,25 @@ func TestDocText(t *testing.T) {
 	}
 }
 
+// TestJSDocText checks that every line of a multi-line description keeps
+// the comment's prefix, a blank line keeps a bare asterisk, and "*/" cannot
+// close the comment.
+func TestJSDocText(t *testing.T) {
+	cases := []struct{ name, text, want string }{
+		{"one line", "Place a basket.", "Place a basket."},
+		{"surrounding space", "  Place a basket. \n", "Place a basket."},
+		{"lines", "The items,\nby their ids.", "The items,\n   * by their ids."},
+		{"indent kept", "Steps:\n  - one\r\n  - two", "Steps:\n   *   - one\n   *   - two"},
+		{"blank line", "First.\n\nSecond.  ", "First.\n   *\n   * Second."},
+		{"terminator", "Globs src/*/ and\nends */", "Globs src/*\\/ and\n   * ends *\\/"},
+	}
+	for _, tc := range cases {
+		if got := JSDocText(tc.text, "   * "); got != tc.want {
+			t.Errorf("%s: JSDocText(%q) = %q, want %q", tc.name, tc.text, got, tc.want)
+		}
+	}
+}
+
 func TestRunParallelReturnsLowestIndexedError(t *testing.T) {
 	firstErr := errors.New("first")
 	secondErr := errors.New("second")
