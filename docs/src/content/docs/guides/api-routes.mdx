@@ -152,8 +152,13 @@ SDKs unwrap it.
 
 A view can be declared over a table of the DB schema with `@source`. It
 lists the columns a caller may see, and the loader checks each against the
-table's field of the same name. A field with no column behind it is
-`@virtual`, and the implementation fills it in:
+table's field of the same name. A relation's key reads the relation's
+foreign key: `OrderLineView.productId` is the `product_id` of
+`OrderLine.product`, and it refers to `ProductView`, the API's view of the
+products' table, with no `RefersTo` written
+([What a value refers to](/superschematic/reference/references-and-search/#what-a-value-refers-to)).
+A field with no column behind it is `@virtual`, and the implementation
+fills it in:
 
 <Snippet file="schemas/services/shop-orders/src/orders.schema.ts" symbol={['OrderLineView', 'OrderView']} />
 
