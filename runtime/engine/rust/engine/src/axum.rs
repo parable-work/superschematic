@@ -195,6 +195,11 @@ pub struct Options {
     /// `payload_too_large` before the caller is asked. The MCP endpoint
     /// reads up to its own cap and refuses past it as JSON-RPC.
     pub body_limit: usize,
+    /// When set, moves to `true` when the host stops serving: every event
+    /// stream of the router ends then, as when its client goes away, so a
+    /// server's graceful shutdown waits for none, as the Go binding's
+    /// `enginehttp.Options.Done` ends them.
+    pub done: Option<watch::Receiver<bool>>,
 }
 
 impl Default for Options {
@@ -205,6 +210,7 @@ impl Default for Options {
             callers: Arc::new(FromExtensions),
             serves: Serves::All,
             body_limit: api::DEFAULT_BODY_LIMIT_BYTES,
+            done: None,
         }
     }
 }
@@ -250,6 +256,13 @@ impl Options {
     /// The body limit of a route that takes a body.
     pub fn body_limit(mut self, bytes: usize) -> Self {
         self.body_limit = bytes;
+        self
+    }
+
+    /// What ends every event stream when it moves to `true`: the host's
+    /// shutdown.
+    pub fn done(mut self, done: watch::Receiver<bool>) -> Self {
+        self.done = Some(done);
         self
     }
 }
@@ -423,6 +436,7 @@ impl Mount {
             serves: options.serves,
             body_limit: options.body_limit,
             heartbeat,
+            done: options.done,
         })
     }
 }
@@ -437,6 +451,7 @@ struct Mount {
     body_limit: usize,
     heartbeat: Duration,
     wakes: Arc<Wakes>,
+    done: Option<watch::Receiver<bool>>,
 }
 
 /// The engine a router holds, let go of off the async runtime when the
@@ -670,6 +685,7 @@ fn frames(
         heartbeat: mount.heartbeat,
         idle_since: None,
         _wakes: Arc::clone(&mount.wakes),
+        done: mount.done.clone(),
     };
     futures_util::stream::unfold(pulling, |mut pulling| async move {
         let bytes = pulling.frame().await?;
@@ -688,6 +704,8 @@ struct Pulling {
     idle_since: Option<Instant>,
     /// The wakes it subscribed to, kept while it waits.
     _wakes: Arc<Wakes>,
+    /// The host's shutdown, which ends the stream.
+    done: Option<watch::Receiver<bool>>,
 }
 
 impl Pulling {
@@ -695,6 +713,11 @@ impl Pulling {
     // between pulls for a commit or its heartbeat.
     async fn frame(&mut self) -> Option<Bytes> {
         loop {
+            if self.done.as_ref().is_some_and(|done| *done.borrow()) {
+                // The host stopped serving: the body ends, and its drop
+                // closes the stream.
+                return None;
+            }
             let mut stream = self.stream.take()?;
             self.receiver.borrow_and_update();
             // The stream reaches its engine only on the blocking pool, so
@@ -730,7 +753,18 @@ impl Pulling {
                     if !moved {
                         let beat =
                             tokio::time::Instant::from_std(idle + self.heartbeat + BEAT_SLACK);
-                        let _ = tokio::time::timeout_at(beat, self.receiver.changed()).await;
+                        let woken = tokio::time::timeout_at(beat, self.receiver.changed());
+                        match self.done.as_mut() {
+                            Some(done) => {
+                                tokio::select! {
+                                    _ = woken => {}
+                                    _ = done.wait_for(|done| *done) => {}
+                                }
+                            }
+                            None => {
+                                let _ = woken.await;
+                            }
+                        }
                     }
                 }
             }
