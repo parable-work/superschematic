@@ -214,7 +214,7 @@ impl Db {
             None => session,
         };
         config.options(&options_text);
-        let config = Connecting {
+        let mut config = Connecting {
             config,
             password: options.password.clone(),
         };
@@ -223,7 +223,7 @@ impl Db {
             // The first connection takes the owner's role now; every
             // later one, the pool's and the lease's, as it starts.
             act_as(&mut first.client, &schema, &owner)?;
-            config.options(&format!(
+            config.config.options(&format!(
                 "{options_text} -c role={}",
                 startup_option_value(&owner)
             ));
