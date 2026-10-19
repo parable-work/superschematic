@@ -421,7 +421,7 @@ The core generators:
 | Name | Output key | Writes |
 | --- | --- | --- |
 | `types` | `types` | Go, TypeScript, Python and Rust types, one switch per language |
-| `sql` | `sql` | Postgres DDL, projection views with their migrations and Arrow schemas, and SQLite DDL when `outputs.sql.dialects` lists `sqlite`; implied by the DB kind, and `outputs.sql` places the view migrations (`migrationsDir`), sets their role (`viewOwner`) and lists the dialects (`dialects`) |
+| `sql` | `sql` | Postgres DDL, projection views with their migrations and Arrow schemas, and SQLite DDL when `outputs.sql.dialects` lists `sqlite`; implied by the DB kind, and `outputs.sql` places the view migrations (`migrationsDir`), sets their role (`viewOwner`), qualifies the tables the views read (`sourceSchema`) and lists the dialects (`dialects`) |
 | `orm` | none | the Go ORM; implied by the DB kind |
 | `enginedoc` | `engine` | the engine document of a DB schema whose types compose behaviors, its engine types: `engine/<schema>.json` in the Go types module, which the types hold as a constant too (section 3.16); last in the DB kind's pipeline, and `outputs.engine.namespace` names the engine namespace |
 | `api` | `api` | the Go chi server, the Rust axum crate or the TypeScript Hono package (`outputs.api.language`), and OpenAPI |

@@ -19,7 +19,7 @@ func TestSQLOptions(t *testing.T) {
 	cfg := &schemaconfig.SchemaConfig{
 		Name:    "shop-db",
 		Kind:    ir.SchemaKindDB,
-		Outputs: map[string]any{"sql": map[string]any{"viewOwner": "app_view_owner"}},
+		Outputs: map[string]any{"sql": map[string]any{"viewOwner": "app_view_owner", "sourceSchema": "ledger"}},
 	}
 	names := naming.Default()
 	names.MetadataKeyPrefix = "acme."
@@ -32,6 +32,7 @@ func TestSQLOptions(t *testing.T) {
 		SchemaName:          "shop-db",
 		Dependencies:        deps,
 		ViewOwner:           "app_view_owner",
+		SourceSchema:        "ledger",
 		MetadataKeyPrefix:   "acme.",
 		HistoryActorSetting: "acme.actor_id",
 	}, SQLOptions(cfg, outputs, deps, names))
@@ -41,4 +42,5 @@ func TestSQLOptions(t *testing.T) {
 	assert.Equal(t, sqlgen.DefaultMetadataKeyPrefix, opts.MetadataKeyPrefix)
 	assert.Equal(t, sqlgen.DefaultHistoryActorSetting, opts.HistoryActorSetting)
 	assert.Empty(t, opts.ViewOwner)
+	assert.Empty(t, opts.SourceSchema)
 }

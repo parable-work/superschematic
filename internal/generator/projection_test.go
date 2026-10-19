@@ -63,8 +63,9 @@ func TestRunWritesProjectionsUnderTheSQLOutput(t *testing.T) {
 }
 
 // TestRunPlacesProjectionMigrationsFromOutputsSQL: outputs.sql.migrationsDir
-// is relative to the service directory, and outputs.sql.viewOwner renders
-// SET ROLE in the up migration.
+// is relative to the service directory, outputs.sql.viewOwner renders
+// SET ROLE in the up migration, and outputs.sql.sourceSchema qualifies the
+// tables the view reads.
 func TestRunPlacesProjectionMigrationsFromOutputsSQL(t *testing.T) {
 	schema, cfg, err := loader.LoadServiceWithConfig(filepath.Join(tsFixtures, "fixture-projection"))
 	if err != nil {
@@ -73,7 +74,7 @@ func TestRunPlacesProjectionMigrationsFromOutputsSQL(t *testing.T) {
 	service := t.TempDir()
 	cfg.Outputs = map[string]any{
 		"types": map[string]any{"go": map[string]any{"enabled": true}},
-		"sql":   map[string]any{"migrationsDir": "db/migrations", "viewOwner": "app_view_owner"},
+		"sql":   map[string]any{"migrationsDir": "db/migrations", "viewOwner": "app_view_owner", "sourceSchema": "ledger"},
 	}
 	out := t.TempDir()
 	if _, err := Run(schema, cfg, Options{OutputRoot: out, ServicePath: service, Naming: naming.Default()}); err != nil {
@@ -86,6 +87,9 @@ func TestRunPlacesProjectionMigrationsFromOutputsSQL(t *testing.T) {
 	if !strings.Contains(string(up), "SET ROLE app_view_owner;") || !strings.Contains(string(up), "RESET ROLE;") {
 		t.Errorf("the up migration does not create the view as its owner:\n%s", up)
 	}
+	if !strings.Contains(string(up), "FROM ledger.preference AS base") {
+		t.Errorf("the up migration does not read the source schema's table:\n%s", up)
+	}
 	if _, err := os.Stat(filepath.Join(SQLDir(out, "fixture-projection"), sqlgen.ProjectionsSubdir, "migrations")); !os.IsNotExist(err) {
 		t.Errorf("migrations were also written under the output root: %v", err)
 	}
@@ -93,6 +97,10 @@ func TestRunPlacesProjectionMigrationsFromOutputsSQL(t *testing.T) {
 	cfg.Outputs = map[string]any{"sql": map[string]any{"viewOwner": "Owner; DROP ROLE x"}}
 	if _, err := Run(schema, cfg, Options{OutputRoot: t.TempDir(), ServicePath: service, Naming: naming.Default()}); err == nil || !strings.Contains(err.Error(), "viewOwner") {
 		t.Fatalf("an unsafe view owner generated: %v", err)
+	}
+	cfg.Outputs = map[string]any{"sql": map[string]any{"sourceSchema": "Ledger; DROP SCHEMA x"}}
+	if _, err := Run(schema, cfg, Options{OutputRoot: t.TempDir(), ServicePath: service, Naming: naming.Default()}); err == nil || !strings.Contains(err.Error(), "sourceSchema") {
+		t.Fatalf("an unsafe source schema generated: %v", err)
 	}
 	cfg.Outputs = map[string]any{"sql": map[string]any{"migrationDir": "db"}}
 	if _, err := Run(schema, cfg, Options{OutputRoot: t.TempDir(), ServicePath: service, Naming: naming.Default()}); err == nil {

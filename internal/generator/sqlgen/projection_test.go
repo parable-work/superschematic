@@ -594,6 +594,64 @@ func TestProjectionViewOwnerRendersSetRole(t *testing.T) {
 	}
 }
 
+// TestProjectionSourceSchemaQualifiesTables checks outputs.sql.sourceSchema:
+// the view selects its source table and both joined tables as
+// schema.table, in the migration and in create.sql, an unset schema leaves
+// them unqualified, and a schema name that is not a plain identifier is
+// refused.
+func TestProjectionSourceSchemaQualifiesTables(t *testing.T) {
+	schema := loadProjectionFixture(t)
+	if _, err := Generate(schema, Options{SchemaName: "fixture-projection", SourceSchema: "app; DROP SCHEMA public"}); err == nil || !strings.Contains(err.Error(), "outputs.sql.sourceSchema") {
+		t.Fatalf("an unsafe source schema generated: %v", err)
+	}
+	output, err := Generate(schema, Options{SchemaName: "fixture-projection", SourceSchema: "ledger"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	migrations := filepath.Join(dir, "migrations")
+	if err := WriteDDL(output, dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteProjections(schema, output, dir, migrations); err != nil {
+		t.Fatal(err)
+	}
+	up, err := os.ReadFile(filepath.Join(migrations, output.Projections[0].UpFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ddl, err := os.ReadFile(filepath.Join(dir, "create.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, text := range map[string]string{"the up migration": string(up), "create.sql": string(ddl)} {
+		for _, want := range []string{
+			"FROM ledger.preference AS base\n",
+			"  INNER JOIN ledger.channel AS channel ON base.channel_id = channel.id\n",
+			"  LEFT JOIN ledger.channel AS branch ON base.branch_id = branch.id\n",
+		} {
+			if !strings.Contains(text, want) {
+				t.Errorf("%s lacks %q:\n%s", name, want, text)
+			}
+		}
+	}
+	if !strings.Contains(string(ddl), "CREATE TABLE preference (") {
+		t.Errorf("create.sql must keep creating the tables unqualified:\n%s", ddl)
+	}
+	plain, err := Generate(schema, Options{SchemaName: "fixture-projection"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := plain.Projections[0].QuotedBaseTable; got != "preference" {
+		t.Errorf("an unset source schema must leave the source table unqualified, got %q", got)
+	}
+	for _, join := range plain.Projections[0].Joins {
+		if join.QuotedTable != "channel" {
+			t.Errorf("an unset source schema must leave a joined table unqualified, got %q", join.QuotedTable)
+		}
+	}
+}
+
 // TestSchemaWithoutProjectionsWritesNoProjectionFiles: a DB service that
 // declares no view gets no projections directory and no migrations.
 func TestSchemaWithoutProjectionsWritesNoProjectionFiles(t *testing.T) {
