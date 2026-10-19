@@ -9,7 +9,6 @@
 //! engine shuts down at once, and its storage closes when the last call
 //! returns.
 
-use std::borrow::Cow;
 use std::collections::HashMap;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -24,9 +23,7 @@ use superschematic_engine::api::{
 };
 use superschematic_engine::calls::{self, js_string};
 use superschematic_engine::storage::Dialect;
-use superschematic_engine::{
-    json, BehaviorSet, DefineOptions, Engine, EngineOptions, Principal, SchemaInput, SchemaTarget,
-};
+use superschematic_engine::{json, BehaviorSet, Engine, EngineOptions, Principal};
 
 use crate::config::{self, member, safe_integer};
 use crate::failure::Failure;
@@ -350,7 +347,8 @@ fn called(handle: &Handle, request: &[u8]) -> Result<Vec<u8>, Failure> {
 }
 
 // deploy defines and publishes a server's schema documents as the engine's
-// own principal, each one whose live version has its hash left as it is.
+// own principal, each one whose live version has its hash left as it is
+// (Engine::deploy).
 fn deploy(engine: &Engine, args: &[Value]) -> Result<Value, Failure> {
     let Some(Value::Array(documents)) = args.first() else {
         return Err(Failure::usage(
@@ -362,67 +360,15 @@ fn deploy(engine: &Engine, args: &[Value]) -> Result<Value, Failure> {
         .and_then(Value::as_object)
         .and_then(|options| member(options, "namespace"))
         .map(js_string);
-    let target = || SchemaTarget {
-        namespace: namespace.as_deref(),
-    };
-    let system = Principal::system();
-    let failed = |error: superschematic_engine::Error| Failure::of(&error);
-    let mut deployed = Vec::new();
-    for given in documents {
-        let document: Cow<'_, Value> = match given {
-            Value::String(text) => Cow::Owned(parse(text.as_bytes(), "a schema document's text")?),
-            other => Cow::Borrowed(other),
-        };
-        let name = document
-            .get("name")
-            .and_then(Value::as_str)
-            .ok_or_else(|| Failure::usage("deploy: a schema document names its schema (name)"))?
-            .to_owned();
-        let hash = json::canonical_json(&document)
-            .map(|canonical| json::sha256_hex(&canonical))
-            .ok();
-        let live = engine
-            .schemas()
-            .live(&system, &name, target())
-            .map_err(failed)?;
-        let mut out = Map::new();
-        out.insert("name".into(), Value::from(name.as_str()));
-        match live {
-            Some(live) if hash.as_deref() == Some(live.hash.as_str()) => {
-                out.insert("namespace".into(), Value::from(live.namespace));
-                out.insert("version".into(), Value::from(live.version));
-                out.insert("defined".into(), Value::Bool(false));
-                out.insert("published".into(), Value::Bool(false));
-            }
-            _ => {
-                let input = match given {
-                    Value::String(text) => SchemaInput::Text(Cow::Borrowed(text)),
-                    other => SchemaInput::Document(Cow::Borrowed(other)),
-                };
-                engine
-                    .schemas()
-                    .define(
-                        &system,
-                        input,
-                        DefineOptions {
-                            namespace: namespace.as_deref(),
-                            source: None,
-                        },
-                    )
-                    .map_err(failed)?;
-                let published = engine
-                    .schemas()
-                    .publish(&system, &name, target())
-                    .map_err(failed)?;
-                out.insert("namespace".into(), Value::from(published.namespace));
-                out.insert("version".into(), Value::from(published.version));
-                out.insert("defined".into(), Value::Bool(true));
-                out.insert("published".into(), Value::Bool(published.published));
-            }
-        }
-        deployed.push(Value::Object(out));
-    }
-    Ok(Value::Array(deployed))
+    let deployed = engine
+        .deploy(documents, namespace.as_deref())
+        .map_err(|error| Failure::of(&error))?;
+    Ok(Value::Array(
+        deployed
+            .iter()
+            .map(superschematic_engine::Deployed::to_json)
+            .collect(),
+    ))
 }
 
 // health is what a server's readiness reads: not ready once the engine

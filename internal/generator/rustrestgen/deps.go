@@ -50,6 +50,43 @@ type DepsInfo struct {
 	// which Cargo.toml depends on. Both are empty otherwise.
 	DatabaseTypesCrate string
 	DatabaseTypesPath  string
+
+	// Engine is the engine of the API's engine database (D58), which Deps
+	// holds when the database's types compose behaviors; nil otherwise.
+	Engine *DepsEngine
+}
+
+// DepsEngine is the engine Deps holds: the engine database's, opened in
+// the background by the entrypoint, a superschematic_engine::background::
+// Background from the engine's crate, Crate, at Path relative to the API
+// crate's directory ([paths] engine_rust).
+type DepsEngine struct {
+	Database  string
+	Namespace string
+	Crate     string
+	Path      string
+
+	// Policy is the access policy's JSON (outputs.engine.policy of the
+	// database's config, "permission" unless set), and Project the
+	// project's engine crate whose behaviors the engine runs, nil for the
+	// core's: what a host that opens the engine itself reads, as the
+	// Topcoat extension's crate does.
+	Policy  string
+	Project *DepsProject
+}
+
+// DepsProject is the project's engine crate of the engine database (D58;
+// projectengine): its package name, its name in Rust source, and its
+// directory relative to the API crate's.
+type DepsProject struct {
+	Crate string
+	Ident string
+	Path  string
+}
+
+// CrateIdent is Crate as Rust source spells it.
+func (e DepsEngine) CrateIdent() string {
+	return strings.ReplaceAll(e.Crate, "-", "_")
 }
 
 // DatabaseTypesCrateIdent is DatabaseTypesCrate as Rust source spells it.
@@ -87,7 +124,7 @@ func (c DepsCall) CrateIdent() string {
 }
 
 // depsFields are the fields every Deps may hold beside its clients.
-var depsFields = []string{"config", "db", "span"}
+var depsFields = []string{"config", "db", "engine", "span"}
 
 // JobInfo is a job of the API (D52, D65): a method of the generated Jobs
 // trait, which a job's entrypoint calls once per run.

@@ -1,0 +1,13 @@
+# desk-api's twin in Rust (D57): a public Rust API over desk-db that serves
+# the user model's session routes and a route of its own; its server opens
+# the engine on desk-db and mounts it at /engine/desk-db, behind the
+# session the identity runtime authenticates and the service caller its
+# service authenticator verifies (D58, D50, D37).
+name: desk-rs-api
+kind: API
+public: true
+authDb: desk-db
+outputs:
+  types:
+    rust: { enabled: true }
+  api: { enabled: true, language: RUST }

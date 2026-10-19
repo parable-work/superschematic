@@ -33,3 +33,15 @@ tokio = { version = "1.52.2", features = ["time"] }
 tokio = { version = "1.52.2", features = ["time"] }
 {{- end }}
 topcoat = { version = "0.10", features = ["tower"] }
+{{- with .Engine }}
+# The engine of {{ .Database }} (D58), in-process on SQLite: its routes as an
+# axum router, the behaviors it runs, and the engine document of the
+# database's Rust types.
+{{ .EngineCrate }} = { path = "{{ .EnginePath }}", default-features = false, features = ["axum", "sqlite"] }
+{{ .BehaviorsCrate }} = { path = "{{ .BehaviorsPath }}", default-features = false, features = ["sqlite"] }
+{{ .TypesCrate }} = { path = "{{ .TypesPath }}" }
+axum = { version = "0.8.9", default-features = false }
+{{- if not (or $.HasRecords $.HasForms) }}
+serde_json = "1.0.149"
+{{- end }}
+{{- end }}

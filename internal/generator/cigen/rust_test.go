@@ -34,6 +34,8 @@ func stockRequest() publicregistry.CIRequest {
 		{Name: "stock", Kind: ir.DeployableServer, Language: publicregistry.APILanguageRust, Services: []ir.ServiceRef{{Name: "shop-stock", Kind: ir.SchemaKindAPI}}},
 		{Name: "shop-stock-reorder-stock", Kind: ir.DeployableWorker, Language: publicregistry.APILanguageRust, Services: []ir.ServiceRef{{Name: "shop-stock", Kind: ir.SchemaKindAPI}}},
 		{Name: "shop-stock-place-restock-orders", Kind: ir.DeployableJob, Language: publicregistry.APILanguageRust, Services: []ir.ServiceRef{{Name: "shop-stock", Kind: ir.SchemaKindAPI}}},
+		{Name: "stock-db-engine-runner", Kind: ir.DeployableRunner, Language: publicregistry.APILanguageRust, Services: []ir.ServiceRef{{Name: "stock-db", Kind: ir.SchemaKindDB}},
+			Runner: &ir.ResolvedRunner{Database: "stock-db", API: "shop-stock", Instances: 1}},
 	}
 	req.Environments[0].Environment = &env
 	return req
@@ -74,6 +76,7 @@ func TestRustServersInCheck(t *testing.T) {
 		"Check out", "Install superschematic " + version, "Install the static archives", "Set up Go", "Set up Rust",
 		"Build the services", "Compile server Orders", lockfile, "Compile server pricing", "Compile server stock",
 		"Compile job shop-stock-place-restock-orders", "Compile worker shop-stock-reorder-stock",
+		"Compile runner stock-db-engine-runner",
 	}
 	if !slices.Equal(names, want) {
 		t.Fatalf("check's steps:\n%q\nwant:\n%q", names, want)
@@ -89,6 +92,7 @@ func TestRustServersInCheck(t *testing.T) {
 		"Compile server stock":                        "schemas/dist/server/stock-stack/stock",
 		"Compile job shop-stock-place-restock-orders": "schemas/dist/server/stock-stack/shop-stock-place-restock-orders",
 		"Compile worker shop-stock-reorder-stock":     "schemas/dist/server/stock-stack/shop-stock-reorder-stock",
+		"Compile runner stock-db-engine-runner":       "schemas/dist/server/stock-stack/stock-db-engine-runner",
 	} {
 		if s := check.step(name); s.WorkingDirectory != dir || s.Run != "cargo check --locked" {
 			t.Errorf("%s: %+v", name, s)

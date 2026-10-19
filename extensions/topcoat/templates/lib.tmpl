@@ -73,12 +73,15 @@ mod wire;
 {{- if .Views }}
 pub mod views;
 {{- end }}
+{{- if .Engine }}
+pub mod engine;
+{{- end }}
 
 /// The service's API crate: its `Implementations`, `Args` structs and
 /// `types`.
 pub use {{ .APICrateIdent }} as api;
 
-{{- if .HasAuth }}
+{{- if or .HasAuth .Engine }}
 
 use std::sync::Arc;
 {{- end }}
@@ -173,6 +176,11 @@ pub struct Setup {
 {{- if .HasAuth }}
     pub page_authenticator: Arc<dyn PageAuthenticator>,
 {{- end }}
+{{- with .Engine }}
+    /// The engine of {{ .Database }} (D58), which [`engine::open`] opens in-process
+    /// on SQLite.
+    pub engine: Arc<{{ .EngineIdent }}::Engine>,
+{{- end }}
 }
 
 /// Adds the {{ .SchemaName }} API to a Topcoat app.
@@ -188,13 +196,20 @@ pub trait {{ .ExtTrait }} {
     /// Adds the layer that applies each operation's route controls to the
     /// pages that call it (`pages::route_controls`).
 {{- end }}
+{{- with .Engine }}
+    /// Mounts the routes of `engine`, the engine of {{ .Database }} (D58), at
+    /// `{{ engineMount }}/{*rest}` (`engine::routes`), and keeps it in the app context.
+{{- end }}
     #[must_use]
-    fn {{ .SetupMethod }}(self, implementations: Implementations{{ if .HasAuth }}, page_authenticator: impl PageAuthenticator{{ end }}) -> Self;
+    fn {{ .SetupMethod }}(self, implementations: Implementations{{ if .HasAuth }}, page_authenticator: impl PageAuthenticator{{ end }}{{ with .Engine }}, engine: Arc<{{ .EngineIdent }}::Engine>{{ end }}) -> Self;
 }
 
 impl {{ .ExtTrait }} for RouterBuilder {
-    fn {{ .SetupMethod }}(self, implementations: Implementations{{ if .HasAuth }}, page_authenticator: impl PageAuthenticator{{ end }}) -> Self {
+    fn {{ .SetupMethod }}(self, implementations: Implementations{{ if .HasAuth }}, page_authenticator: impl PageAuthenticator{{ end }}{{ with .Engine }}, engine: Arc<{{ .EngineIdent }}::Engine>{{ end }}) -> Self {
         let api = build_router(implementations.clone());
+{{- if .Engine }}
+        let engine_routes = engine::routes(Arc::clone(&engine){{ if .HasAuth }}, Arc::clone(&implementations.authenticator){{ end }});
+{{- end }}
 {{- if .SetupLayers }}
         let router = self
 {{- else }}
@@ -205,8 +220,14 @@ impl {{ .ExtTrait }} for RouterBuilder {
 {{- if .HasAuth }}
                 page_authenticator: Arc::new(page_authenticator),
 {{- end }}
+{{- if .Engine }}
+                engine,
+{{- end }}
             })
             .route(TowerRoute::any("/api/{*rest}", api))
+{{- if .Engine }}
+            .route(TowerRoute::any("{{ engineMount }}/{*rest}", engine_routes))
+{{- end }}
             .layer(ClientAddress){{ with .SetupLayers }};
         {{ . }}{{ end }}
     }

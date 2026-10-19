@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
@@ -198,22 +199,14 @@ func (r run) engineDatabase(deps map[string]*ir.Schema) (*apigen.EngineInfo, err
 }
 
 // generateProjectEngine writes the project's engine crate of a schema
-// whose types compose an extension's behavior into engine/rust/<schema>
-// (internal/generator/projectengine), and removes the one an earlier build
-// wrote when the schema needs none now. An extension behavior that names
-// no Rust crate, or one the project does not hold, leaves the schema to the
-// TypeScript engine, and the log says so.
+// whose types compose a behavior of the work queue or of an extension into
+// engine/rust/<schema> (internal/generator/projectengine), and removes the
+// one an earlier build wrote when the schema needs none now. An extension
+// behavior that names no Rust crate, or one the project does not hold,
+// leaves the schema to the TypeScript engine, and the log says so.
 func (r run) generateProjectEngine() error {
 	dir := EngineDir(r.Options.OutputRoot, LangRust, r.Config.Name)
-	crate, why, err := projectengine.Build(r.Schema, projectengine.Options{
-		SchemaName:     r.Config.Name,
-		Registry:       r.Registry,
-		Naming:         r.Options.Naming,
-		RepositoryRoot: r.Options.RepositoryRoot,
-		Paths:          r.Options.Paths,
-		Dir:            dir,
-		RustVersion:    servergen.RustVersion,
-	})
+	crate, why, err := projectengine.Build(r.Schema, r.projectEngineOptions(r.Config.Name, dir))
 	if err != nil {
 		return fmt.Errorf("generator: engine crate for %s: %w", r.Config.Name, err)
 	}
@@ -227,5 +220,71 @@ func (r run) generateProjectEngine() error {
 		return fmt.Errorf("generator: engine crate for %s: %w", r.Config.Name, err)
 	}
 	r.Done("engine-rust", dir)
+	return nil
+}
+
+// projectEngineOptions are the options the project's engine crate of the
+// schema named schema, in dir, is built with: the build's registry,
+// naming, project and [paths].
+func (r run) projectEngineOptions(schema, dir string) projectengine.Options {
+	return projectengine.Options{
+		SchemaName:     schema,
+		Registry:       r.Registry,
+		Naming:         r.Options.Naming,
+		RepositoryRoot: r.Options.RepositoryRoot,
+		Paths:          r.Options.Paths,
+		Dir:            dir,
+		RustVersion:    servergen.RustVersion,
+	}
+}
+
+// projectEngine is the project's engine crate of the engine database db
+// (D58), which db's own build writes (generateProjectEngine), for an
+// entrypoint whose engine opens on it: nil when the core's engine archive
+// runs every behavior db composes. what names the entrypoint and the API
+// it serves in the error of a database whose behaviors no Rust engine
+// runs, an extension's that names no Rust crate or one the project does
+// not hold.
+func (r run) projectEngine(what, db string) (*servergen.EngineProject, error) {
+	schema, err := r.LoadDependency(db)
+	if err != nil {
+		return nil, fmt.Errorf("%s, whose engine database is %s: %w", what, db, err)
+	}
+	dir := EngineDir(r.Options.OutputRoot, LangRust, db)
+	crate, why, err := projectengine.Build(schema, r.projectEngineOptions(db, dir))
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", what, err)
+	}
+	if crate == nil {
+		if why != "" {
+			return nil, fmt.Errorf("%s, whose engine database is %s, and %s", what, db, why)
+		}
+		return nil, nil
+	}
+	project := &servergen.EngineProject{
+		Database: db,
+		Dir:      dir,
+		Crate:    crate.Name,
+		Ident:    crate.Ident,
+		Archive:  "lib" + strings.ReplaceAll(crate.FFIName(), "-", "_") + ".a",
+	}
+	for _, ext := range crate.Extensions {
+		project.Crates = append(project.Crates, filepath.Clean(filepath.Join(dir, filepath.FromSlash(ext.Path))))
+	}
+	return project, nil
+}
+
+// linkEngineProject records project, the project's engine crate of an
+// engine the entrypoint opens, as the one its binary links, or refuses a
+// second: a binary links one engine archive, and each project's holds the
+// behaviors of its own database alone.
+func linkEngineProject(what string, linked **servergen.EngineProject, project *servergen.EngineProject) error {
+	if project == nil {
+		return nil
+	}
+	if *linked != nil && (*linked).Dir != project.Dir {
+		return fmt.Errorf("%s opens the engines of %s and %s, which each compose behaviors only their own project's engine archive runs, and a binary links one engine archive; serve the APIs on them from servers of their own", what, (*linked).Database, project.Database)
+	}
+	*linked = project
 	return nil
 }

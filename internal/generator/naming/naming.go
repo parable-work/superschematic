@@ -1037,6 +1037,13 @@ func (n Naming) RustWorkerCrate(stack, worker string) string {
 	return strings.TrimSuffix(n.RustServerCrate(stack, worker), "-server") + "-worker"
 }
 
+// RustRunnerCrate returns the crate name of the entrypoint of a Rust
+// engine's runner of a stack (D58), as RustJobCrate names a job's, without
+// a suffix: a runner's deployable, <db>-engine-runner, names it.
+func (n Naming) RustRunnerCrate(stack, runner string) string {
+	return strings.TrimSuffix(n.RustServerCrate(stack, runner), "-server")
+}
+
 // ScalarRustCrateIdent is the scalar crate as Rust source spells it: the
 // Cargo name with '-' folded to '_'.
 func (n Naming) ScalarRustCrateIdent() string {

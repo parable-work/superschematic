@@ -59,6 +59,39 @@ use crate::notifier::Notifier;
 use crate::tokens::{postgres_placeholders, statement_changes_tables, statement_writes};
 use crate::value::SqlValue;
 
+/// Where a connection's password comes from when the URL names none
+/// ([`PostgresOptions::password`]): asked once for each new connection,
+/// the pool's, the listener's and a lease's, so a host can hand out a
+/// credential it refreshes, as an IAM access token for Cloud SQL is (D58).
+/// It runs on the thread that opens the connection, never an async one,
+/// and may block. An error fails that connection as a connection failure,
+/// its message the error's; the connect is tried again as any failed
+/// connect is.
+#[derive(Clone)]
+pub struct PasswordProvider(Arc<dyn Fn() -> std::result::Result<String, String> + Send + Sync>);
+
+impl PasswordProvider {
+    /// The provider that calls `provide` for each new connection.
+    pub fn new(
+        provide: impl Fn() -> std::result::Result<String, String> + Send + Sync + 'static,
+    ) -> Self {
+        PasswordProvider(Arc::new(provide))
+    }
+
+    /// The password for a connection about to open.
+    pub fn password(&self) -> std::result::Result<String, String> {
+        (self.0)()
+    }
+}
+
+impl std::fmt::Debug for PasswordProvider {
+    // Never the password: the provider is a function, and what it gives
+    // stays secret.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("PasswordProvider")
+    }
+}
+
 /// How a Postgres storage opens.
 #[derive(Clone, Debug)]
 pub struct PostgresOptions {
@@ -96,6 +129,11 @@ pub struct PostgresOptions {
     /// (a behavior's, a host's policy) meets it, and its call fails as a
     /// lost connection.
     pub idle_in_transaction_timeout: Option<Duration>,
+    /// The password of each new connection, asked as it opens, when the
+    /// URL names none: a host's refreshed credential, an IAM access token
+    /// over the `/cloudsql/<instance>` socket. `None` connects with the
+    /// URL's password, if any.
+    pub password: Option<PasswordProvider>,
 }
 
 /// The schema the engine's tables live in unless configured.
@@ -117,6 +155,7 @@ impl Default for PostgresOptions {
             connect_timeout: Duration::from_secs(10),
             migration_timeout: Duration::from_secs(60),
             idle_in_transaction_timeout: Some(DEFAULT_IDLE_IN_TRANSACTION_TIMEOUT),
+            password: None,
         }
     }
 }
@@ -152,7 +191,10 @@ impl Db {
             .get_connect_timeout()
             .copied()
             .unwrap_or(options.connect_timeout);
-        let listen_config = config.clone();
+        let listen_config = Connecting {
+            config: config.clone(),
+            password: options.password.clone(),
+        };
         // Every execution is planned for its values: the engine's reads
         // are range reads whose plan turns on them (a partial index on one
         // schema's rows, a value that names one instance), and a generic
@@ -172,6 +214,10 @@ impl Db {
             None => session,
         };
         config.options(&options_text);
+        let config = Connecting {
+            config,
+            password: options.password.clone(),
+        };
         let mut first = PgConn::connect(&config, deadline)?;
         if let Some(owner) = open_schema(&mut first.client, &schema)? {
             // The first connection takes the owner's role now; every
@@ -335,7 +381,7 @@ struct PostgresBackend {
     channel: String,
     pool: Pool<PgConn>,
     /// What a lease's own connection opens with, and how long it may take.
-    lease_config: Config,
+    lease_config: Connecting,
     deadline: Duration,
 }
 
@@ -420,7 +466,7 @@ struct PgConn {
 }
 
 impl PgConn {
-    fn connect(config: &Config, deadline: Duration) -> Result<PgConn> {
+    fn connect(config: &Connecting, deadline: Duration) -> Result<PgConn> {
         let client = connect_within(config, deadline)?;
         Ok(PgConn {
             client,
@@ -800,25 +846,51 @@ fn numeric(raw: &[u8]) -> Result<SqlValue, String> {
         .map_err(|_| format!("a numeric value {out} that is no number"))
 }
 
-/// A Postgres failure as the storage's error.
+/// What a connection opens with: the client's config, and the provider of
+/// its password when the host gives one.
+#[derive(Clone)]
+struct Connecting {
+    config: Config,
+    password: Option<PasswordProvider>,
+}
+
+impl Connecting {
+    // connect opens one connection, the provider's password asked first,
+    // on the calling thread.
+    fn connect(&self) -> std::result::Result<Client, Error> {
+        match &self.password {
+            None => self.config.connect(NoTls).map_err(pg_error),
+            Some(provider) => {
+                let password = provider.password().map_err(|message| Error::Connection {
+                    message: format!("the password of a Postgres connection: {message}"),
+                })?;
+                let mut config = self.config.clone();
+                config.password(password);
+                config.connect(NoTls).map_err(pg_error)
+            }
+        }
+    }
+}
+
 /// Opens a connection, refusing one that has not opened within `deadline`
-/// as a connection failure. The connect runs on a thread of its own, since
-/// the synchronous client cannot be cancelled: past the deadline it is
-/// left to finish or fail, and a connection it opens then is closed as its
-/// result is dropped.
-fn connect_within(config: &Config, deadline: Duration) -> Result<Client> {
+/// as a connection failure. The connect, and the password provider's
+/// answer before it, run on a thread of its own, since the synchronous
+/// client cannot be cancelled: past the deadline it is left to finish or
+/// fail, and a connection it opens then is closed as its result is
+/// dropped.
+fn connect_within(config: &Connecting, deadline: Duration) -> Result<Client> {
     let (sender, receiver) = mpsc::sync_channel(1);
     let connecting = config.clone();
     thread::Builder::new()
         .name("engine-storage-connect".to_owned())
         .spawn(move || {
-            let _ = sender.send(connecting.connect(NoTls));
+            let _ = sender.send(connecting.connect());
         })
         .map_err(|error| Error::Connection {
             message: format!("could not start a thread to connect to Postgres: {error}"),
         })?;
     match receiver.recv_timeout(deadline) {
-        Ok(connected) => connected.map_err(pg_error),
+        Ok(connected) => connected,
         Err(RecvTimeoutError::Timeout) => Err(Error::Connection {
             message: format!(
                 "connecting to Postgres took longer than the connect timeout ({} ms)",
@@ -884,7 +956,7 @@ fn read_error(error: postgres::Error) -> Error {
 
 // listen starts the listener thread and returns what stops it.
 fn listen(
-    config: Config,
+    config: Connecting,
     deadline: Duration,
     channel: String,
     notifier: Arc<Notifier>,
@@ -904,7 +976,7 @@ fn listen(
 }
 
 fn listen_loop(
-    config: &Config,
+    config: &Connecting,
     deadline: Duration,
     channel: &str,
     notifier: &Notifier,

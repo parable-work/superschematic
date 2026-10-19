@@ -1,0 +1,13 @@
+# A public Go API over queue-db, whose operations only a calling service
+# may call: its server opens queue-db's engine from the project's engine
+# archive and mounts it at /engine/queue-db, where a verified service
+# stands in for an end user (D58, D37).
+name: queue-api
+kind: API
+public: true
+dependencies:
+  - { name: queue-db, kind: DB }
+outputs:
+  types:
+    go: { enabled: true }
+  api: { enabled: true }
