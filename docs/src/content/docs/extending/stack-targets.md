@@ -445,8 +445,9 @@ renderer's options from the config (`branch` and `install`, with their
 defaults applied); `Version`, the release of superschematic that
 renders, empty for a binary built from a checkout; and `Archives`, by
 platform (`linux-x64`), the URL and SHA-256 of the static archives the
-release ships, which a job that compiles a Go server installs and points
-`CGO_LDFLAGS` at, empty for a binary the release workflow did not build.
+release ships, which a CI job that compiles a Go server, job or worker
+installs and points `CGO_LDFLAGS` at, empty for a binary the release
+workflow did not build.
 Each `CIFile` is a
 path relative to the install directory and its bytes. The Stack kind's
 `ci` generator writes them under `<output-root>/ci/<stack>/<renderer>/`

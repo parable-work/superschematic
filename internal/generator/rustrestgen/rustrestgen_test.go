@@ -161,25 +161,34 @@ func writeGoldenAPI(t *testing.T, name string, output *APIOutput) map[string]str
 }
 
 // TestWriteRustAPIGolden pins the crate for fixture-api. Its
-// tenant.customHandler is @manualRouteRegistration, so the router does not
-// mount it and TenantImplementation has no method for it, as the Go server
-// leaves it out of RegisterRoutes and the TypeScript server out of its
-// implementation interfaces. build_router's doc names its method and path
-// for the service, which adds the route to the router it returns.
+// tenant.customHandler is @manualRouteRegistration, so TenantImplementation
+// has no method for it, as the TypeScript server leaves it out of its
+// implementation interfaces: ManualRoutes has its handler, which
+// build_router_with_manual_routes mounts and build_router does not (D51).
+// build_router's doc names its method and path for a service that adds the
+// route to the router it returns.
 func TestWriteRustAPIGolden(t *testing.T) {
 	generated := writeGoldenAPI(t, "fixture-api", generateFixtureAPIRust(t))
 
 	router := generated["src/router.rs"]
-	for _, mounted := range []string{"handle_tenant_custom_handler", `"/api/tenant/custom-handler"`} {
-		if strings.Contains(router, mounted) {
-			t.Errorf("router.rs mounts the manual operation tenant.customHandler: it contains %q", mounted)
+	for _, want := range []string{
+		"/// - `POST /api/tenant/custom-handler` (tenant.customHandler)",
+		"pub fn build_router_with_manual_routes(",
+		"    mount(implementations, options, None)\n",
+		"    if let Some(manual_routes) = manual_routes {\n",
+		"post(handle_tenant_custom_handler).with_state(Arc::clone(&manual_routes))",
+		"    match manual_routes.tenant_custom_handler(ctx, request).await {\n",
+	} {
+		if !strings.Contains(router, want) {
+			t.Errorf("router.rs does not mount the manual operation tenant.customHandler from ManualRoutes alone: missing %q", want)
 		}
 	}
-	if want := "/// - `POST /api/tenant/custom-handler` (tenant.customHandler)"; !strings.Contains(router, want) {
-		t.Errorf("router.rs does not name the manual operation for the service: missing %q", want)
+	interfaces := generated["src/interfaces.rs"]
+	if strings.Contains(interfaces, "fn custom_handler") {
+		t.Error("interfaces.rs declares a method of TenantImplementation for the manual operation tenant.customHandler")
 	}
-	if interfaces := generated["src/interfaces.rs"]; strings.Contains(interfaces, "fn custom_handler") {
-		t.Error("interfaces.rs declares a method for the manual operation tenant.customHandler")
+	if want := "    async fn tenant_custom_handler(\n        &self,\n        ctx: RequestContext,\n        request: Request,\n    ) -> Result<Response, ApiError>;\n"; !strings.Contains(interfaces, "pub trait ManualRoutes") || !strings.Contains(interfaces, want) {
+		t.Errorf("interfaces.rs declares no handler of tenant.customHandler in ManualRoutes: missing %q", want)
 	}
 }
 

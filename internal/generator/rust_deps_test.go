@@ -23,9 +23,10 @@ import (
 
 // The Rust deps fixtures (D57): deps-rust-shop, a Rust API whose database
 // is its authDb deps-users-db, over whose User table the identity runtime
-// authenticates its end users, which calls deps-rust-pricing and has a
-// setting and a service clause; and deps-rust-pricing, which has none of
-// them, establishes its end users itself and verifies a webhook.
+// authenticates its end users, which calls deps-rust-pricing, lists the
+// bucket deps-media (D54) and has a setting and a service clause; and
+// deps-rust-pricing, which has none of them, establishes its end users
+// itself and verifies a webhook.
 const rustDepsGoldenDir = "testdata/rust-deps/golden"
 
 // rustDepsFixtures loads the fixtures' schemas and configs.
@@ -86,11 +87,12 @@ func rustGoldenPaths(repoRoot string) naming.LocalPaths {
 }
 
 // TestRustDepsAndScaffoldGolden: deps-rust-shop's crate declares Deps with
-// its config, a Postgres pool and a client of deps-rust-pricing's Rust SDK
-// and its span, Handlers with a field per namespace, and
-// Implementations::new, which takes the identity authenticator and the
-// service authenticator; its config.rs reads its setting, its database,
-// service, callers, CORS and identity fields; its Cargo.toml turns on the
+// its config, a Postgres pool, a client of deps-rust-pricing's Rust SDK,
+// the runtime's Bucket for deps-media and its span, Handlers with a field
+// per namespace, and Implementations::new, which takes the identity
+// authenticator and the service authenticator; its config.rs reads its
+// setting, its database, service, bucket, callers, CORS and identity
+// fields; its Cargo.toml turns on the
 // runtime's postgres, identity-postgres and http-client features and
 // depends on the SDK by path. deps-rust-pricing's Handlers hold its
 // authenticator and its webhook verifiers, and its config holds its CORS
@@ -178,8 +180,8 @@ func TestRustScaffoldNeverOverwrites(t *testing.T) {
 
 // TestRustDepsRefusals: Deps holds a Rust SDK client per call, so a callee
 // whose config the build has and that generates no Rust SDK is refused,
-// naming the switch to turn on; and a Rust server builds no bucket, so an
-// API that lists one is refused (D57).
+// naming the switch to turn on; and a bucket whose Deps field would take
+// another field's name is refused (D54).
 func TestRustDepsRefusals(t *testing.T) {
 	run := func(schemas map[string]*ir.Schema, configs map[string]*schemaconfig.SchemaConfig) error {
 		_, err := Run(schemas["deps-rust-shop"], configs["deps-rust-shop"], Options{
@@ -203,17 +205,18 @@ func TestRustDepsRefusals(t *testing.T) {
 	}
 
 	schemas, configs = rustDepsFixtures(t)
-	schemas["deps-rust-shop"].Buckets = []ir.ServiceRef{{Name: "deps-media", Kind: ir.SchemaKindBucket}}
-	if err := run(schemas, configs); err == nil || !strings.Contains(err.Error(), "buckets from a Rust server are not built (D57)") {
-		t.Errorf("Run = %v, want the refusal of a Rust API that lists a bucket", err)
+	schemas["deps-rust-shop"].Buckets = append(schemas["deps-rust-shop"].Buckets, ir.ServiceRef{Name: "deps-rust-pricing", Kind: ir.SchemaKindBucket})
+	if err := run(schemas, configs); err == nil || !strings.Contains(err.Error(), "deps-rust-shop lists bucket deps-rust-pricing, which would be Deps.deps_rust_pricing, the field of deps-rust-pricing") {
+		t.Errorf("Run = %v, want the refusal of a bucket whose field is a client's", err)
 	}
 }
 
 // rustDepsTest is tests/deps.rs of deps-rust-shop's implementation crate:
 // it builds the implementation as the entrypoint does, from the
 // configuration load_env_config reads (env, the variables
-// ir.DerivedVariables makes), a lazy Postgres pool and a client of
-// deps-rust-pricing with its credential source, joins the handlers with
+// ir.DerivedVariables makes), a lazy Postgres pool, a client of
+// deps-rust-pricing with its credential source and deps-media on GCS
+// (D54), which opening does not reach, joins the handlers with
 // the identity and service authenticators, and calls the router: an
 // operation anyone may call answers 501, and one that needs a caller 401.
 // Before the variables are set, load_env_config names each one missing.
@@ -224,8 +227,9 @@ use axum::http::{Request, StatusCode};
 use schemas_deps_rust_pricing_sdk::{ClientConfig, DepsRustPricingSdk, ServiceCredential};
 use schemas_deps_rust_shop_api::config::{load_env_config, EnvConfig};
 use schemas_deps_rust_shop_api::runtime::identity::{IdentityAuthenticator, PostgresPool};
+use schemas_deps_rust_shop_api::runtime::bucket::Bucket;
 use schemas_deps_rust_shop_api::runtime::stackconfig::{self, Database};
-use schemas_deps_rust_shop_api::runtime::{postgres, JwtServiceAuthenticator};
+use schemas_deps_rust_shop_api::runtime::{gcs, postgres, JwtServiceAuthenticator};
 use schemas_deps_rust_shop_api::{build_router, identity, Deps, Handlers, Implementations};
 use schemas_deps_rust_shop_implementation::create;
 use tower::ServiceExt;
@@ -246,10 +250,13 @@ async fn implementations(config: EnvConfig) -> Implementations {
         ..ClientConfig::default()
     })
     .expect("the client builds");
+    let media = gcs::open_bucket(&config.deps_media_bucket).expect("the bucket opens");
+    assert_eq!(media.name(), "acme-shop-deps-media");
     let deps = Deps {
         config: config.clone(),
         db: pool.clone(),
         deps_rust_pricing: pricing,
+        deps_media: Arc::new(media),
         span: tracing::info_span!("api", name = "deps-rust-shop"),
     };
     let handlers: Handlers = create(deps).await.expect("create builds the handlers");
@@ -270,6 +277,7 @@ async fn the_implementation_builds_from_deps_and_answers_501() {
     for variable in [
         "DEPS_USERS_DB_DATABASE_URL",
         "DEPS_RUST_PRICING_SERVICE_URL",
+        "DEPS_MEDIA_BUCKET_NAME",
         "DEPS_RUST_SHOP_CALLERS_ISSUERS",
     ] {
         assert!(missing.contains(variable), "{missing}");
@@ -285,6 +293,8 @@ async fn the_implementation_builds_from_deps_and_answers_501() {
     };
     assert_eq!(cloud_sql.instance, "acme:us-central1:shop");
     assert_eq!(config.deps_rust_pricing_service.url, "https://deps-rust-pricing.run.app");
+    assert_eq!(config.deps_media_bucket.name, "acme-shop-deps-media");
+    assert_eq!(config.deps_media_bucket.endpoint, None);
     assert!(config.deps_rust_shop_callers.issuers.is_empty());
     assert_eq!(config.deps_rust_shop_cors.origins, ["https://shop.example.com"]);
     assert!(!config.deps_rust_shop_identity.cookie.secure);
@@ -353,6 +363,7 @@ func TestRustDepsAndScaffoldCompile(t *testing.T) {
 		"DEPS_RUST_PRICING_SERVICE": ir.ServiceEndpoint{URL: "https://deps-rust-pricing.run.app", Credential: &ir.ServiceCredential{
 			Source: ir.CredentialGoogleIDToken, Audience: "https://deps-rust-pricing.run.app",
 		}},
+		"DEPS_MEDIA_BUCKET": ir.BucketConnection{Name: "acme-shop-deps-media"},
 	} {
 		vars, err := ir.DerivedVariables(field, value)
 		if err != nil {
@@ -389,14 +400,21 @@ tracing = { version = "` + rustrestgen.TracingVersion + `", default-features = f
 			t.Fatal(err)
 		}
 		// The shop's test builds the client of deps-rust-pricing, as the
-		// entrypoint does, from the SDK crate the API crate depends on.
+		// entrypoint does, from the SDK crate the API crate depends on, and
+		// opens deps-media on GCS with the runtime's gcs feature, as the
+		// entrypoint turns it on.
 		dev := devDependencies
 		if service == "deps-rust-shop" {
 			sdk, err := naming.RelPath(dir, SDKDir(outputRoot, LangRust, "deps-rust-pricing"))
 			if err != nil {
 				t.Fatal(err)
 			}
+			runtime, err := naming.RelPath(dir, paths.HTTPRuntimeRust)
+			if err != nil {
+				t.Fatal(err)
+			}
 			dev += names.RustSDKCrate("deps-rust-pricing") + ` = { path = "` + sdk + `" }` + "\n"
+			dev += names.HTTPRuntimeRustCrate + ` = { path = "` + runtime + `", features = ["gcs"] }` + "\n"
 		}
 		if err := os.WriteFile(manifest, append(cargoToml, dev...), 0o644); err != nil {
 			t.Fatal(err)

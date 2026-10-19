@@ -192,9 +192,6 @@ type Input struct {
 	// connects to.
 	CloudSQL []string
 
-	// manualRoutes counts a manually registered operation among an API's
-	// routes, as a router that mounts it does: a TypeScript one.
-	manualRoutes bool
 	// Job, when set, plans the entrypoint of a job of the one API in APIs
 	// rather than a server's (D52): Server is then the job's deployable.
 	Job *JobInput
@@ -353,12 +350,15 @@ type API struct {
 	// needs (D37); Identity when it authenticates with the identity
 	// runtime over the user model (D50), so its Config takes the identity
 	// service, built over its database's identity store, in place of an
-	// auth middleware.
-	Config      bool
-	Public      bool
-	Encrypted   bool
-	ServiceAuth bool
-	Identity    bool
+	// auth middleware; ManualRoutes when it takes the handlers of its
+	// @manualRouteRegistration operations, which the implementation's
+	// NewManualRoutes builds from Deps (D51).
+	Config       bool
+	Public       bool
+	Encrypted    bool
+	ServiceAuth  bool
+	Identity     bool
+	ManualRoutes bool
 
 	// CORS is true when a site of the stack calls the API, whose server
 	// then answers CORS for the origins its CORS field lists, with
@@ -617,8 +617,9 @@ func Plan(in Input) (*Server, error) {
 			Config:  o.HasEnvConfig(),
 		}
 		if !s.Background() {
-			// A job or a worker serves no request: it mounts no routes,
-			// verifies no end user or caller, and decrypts no payload. So it
+			// A job or a worker serves no request: it mounts no routes, a
+			// manual one included, verifies no end user or caller, and
+			// decrypts no payload. So it
 			// builds no identity service either, though its API's authDb
 			// holds the user model (D50): its Deps reach the tables through
 			// the ORM.
@@ -626,6 +627,7 @@ func Plan(in Input) (*Server, error) {
 			apis[i].Encrypted = o.HasEncryptedEndpoints
 			apis[i].ServiceAuth = o.HasServiceCallers
 			apis[i].Identity = o.Auth.Identity
+			apis[i].ManualRoutes = o.HasManualRoutes()
 			if a.CORS {
 				apis[i].CORS = true
 				apis[i].CORSMethods = endpointMethods(o)
@@ -906,10 +908,9 @@ func releaseArchives(r release.Release) (*Archives, string) {
 var routeParam = regexp.MustCompile(`\{[^}]*\}`)
 
 // checkRoutes refuses two served APIs that register one method and path:
-// one router answers each once. A manually registered operation is the
-// implementation's to route on a Go server, so it is left out there, as
-// apigen leaves it out of its own collision check; a TypeScript router
-// mounts it (manualRoutes).
+// one router answers each once. A manually registered operation counts:
+// every server's router mounts it, with the handler the implementation
+// builds (D51).
 func checkRoutes(in Input) error {
 	type route struct{ method, path string }
 	owner := map[route]string{}
@@ -917,9 +918,6 @@ func checkRoutes(in Input) error {
 	var problems []string
 	for _, a := range in.APIs {
 		for _, ep := range a.Output.Endpoints {
-			if ep.ManualRouteRegistration && !in.manualRoutes {
-				continue
-			}
 			key := route{ep.Method, routeParam.ReplaceAllString(ep.Path, "{}")}
 			prev, clash := owner[key]
 			if !clash {

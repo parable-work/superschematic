@@ -165,11 +165,13 @@ func writeFiles(dir string, files []registry.CIFile) error {
 // repository root is the one the install resolves against, or the parent
 // of the schemas root outside a repository. The schemas root is the
 // parent of the services root, which holds the stack's service, as the CLI
-// reads it. The implementations of the APIs a TypeScript server serves
-// lie under the build's repository root, the parent of the schemas root,
-// at the naming file's [implementation_paths] typescript template, where
-// the server generator finds them, and each site's package lies at its
-// resolved directory under the same root, where the deploy builds it.
+// reads it. The implementations of the APIs a TypeScript server serves,
+// and of the API whose job or worker a TypeScript job's or worker's
+// package runs, lie under the build's repository root, the parent of the
+// schemas root, at the naming file's [implementation_paths] typescript
+// template, where the server generator finds them, and each site's
+// package lies at its resolved directory under the same root, where the
+// deploy builds it.
 func stackOf(c registry.GenerateContext, name string, envs []*ir.ResolvedEnvironment) (registry.CIStack, error) {
 	if c.Options.ServicePath == "" {
 		return registry.CIStack{}, fmt.Errorf("stack %s: the ci generator locates the stack from its service path, and the build has none", name)
@@ -233,7 +235,7 @@ func stackOf(c registry.GenerateContext, name string, envs []*ir.ResolvedEnviron
 				out.Sites[d.Name] = registry.CISite{Dir: dir, Build: d.Site.Build}
 				continue
 			}
-			if d.Kind != ir.DeployableServer || d.Language != registry.APILanguageTypeScript {
+			if !d.Kind.RunsCode() || d.Language != registry.APILanguageTypeScript {
 				continue
 			}
 			for _, svc := range d.Services {

@@ -1,6 +1,7 @@
 # Served with shop-reviews by the declared server Storefront. Its edges are
 # shop-db, its authDb, shop-api, which it calls, and shop-media, the bucket
-# it lists with shop-reviews (D54).
+# it lists with shop-reviews (D54). It leaves one operation to a handler of
+# its own (@manualRouteRegistration, D51).
 name: shop-orders
 kind: API
 authDb: shop-db

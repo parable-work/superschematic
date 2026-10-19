@@ -3,6 +3,7 @@
 
 use crate::interfaces::*;
 use crate::types;
+use axum::extract::Request;
 use axum::body::Bytes;
 use axum::extract::rejection::{BytesRejection, PathRejection, QueryRejection};
 use axum::extract::{Path, Query, State};
@@ -39,8 +40,9 @@ pub struct RouterState {
 }
 
 /// Mounts every operation except those declared @manualRouteRegistration,
-/// which the service mounts itself by adding a route for each to the
-/// returned router:
+/// which `build_router_with_manual_routes` mounts with the handlers a
+/// `ManualRoutes` holds (D51), or the service mounts itself by adding a
+/// route for each to the returned router:
 ///
 /// - `POST /api/tenant/custom-handler` (tenant.customHandler)
 ///
@@ -61,6 +63,31 @@ pub fn build_router(implementations: Implementations) -> Router {
 /// `options.openapi_base_url` as the generated Go server states its
 /// `Config`'s.
 pub fn build_router_with(implementations: Implementations, options: RouterOptions) -> Router {
+    mount(implementations, options, None)
+}
+
+/// `build_router_with` that also mounts each @manualRouteRegistration
+/// operation, with the handler `manual_routes` holds for it, behind every
+/// step its route would have as a mounted one, the request id, a webhook's
+/// verifier and its controls (D51): the router builds its `RequestContext`,
+/// the caller included, and hands it the request, whose response it sends.
+/// A stack's server mounts what the implementation's `create_manual_routes`
+/// builds.
+pub fn build_router_with_manual_routes(
+    implementations: Implementations,
+    options: RouterOptions,
+    manual_routes: Arc<dyn ManualRoutes>,
+) -> Router {
+    mount(implementations, options, Some(manual_routes))
+}
+
+/// The router of `build_router_with`, with the manual routes when
+/// `manual_routes` holds their handlers.
+fn mount(
+    implementations: Implementations,
+    options: RouterOptions,
+    manual_routes: Option<Arc<dyn ManualRoutes>>,
+) -> Router {
     let state = Arc::new(RouterState { implementations });
     let mut router: Router<Arc<RouterState>> = Router::new();
     let route = RouteControls::new()
@@ -88,6 +115,10 @@ pub fn build_router_with(implementations: Implementations, options: RouterOption
         .authorize(Arc::clone(&state.implementations.authenticator), &["tenants.write"])
         .apply(patch(handle_tenant_update_secret));
     router = router.route("/api/tenants/{id}", route);
+    if let Some(manual_routes) = manual_routes {
+        let route = post(handle_tenant_custom_handler).with_state(Arc::clone(&manual_routes));
+        router = router.route("/api/tenant/custom-handler", route);
+    }
     router
         .with_state(state)
         .layer(axum::middleware::from_fn(request_ids))
@@ -371,4 +402,25 @@ async fn handle_tenant_update_secret(
         .update_secret(ctx, args)
         .await;
     operation_response(result, request_id.as_deref())
+}
+
+/// Hands a request of tenant.customHandler to its handler in `ManualRoutes`,
+/// with the `RequestContext` a mounted route builds, and answers with its
+/// response, or an `Err` as its problem.
+async fn handle_tenant_custom_handler(
+    State(manual_routes): State<Arc<dyn ManualRoutes>>,
+    query: Result<Query<Vec<(String, String)>>, QueryRejection>,
+    request: Request,
+) -> Response {
+    let query = match query_values(query) {
+        Ok(query) => query,
+        Err(err) => return error_response(err),
+    };
+    let mut ctx = RequestContext::new(Method::POST, "/api/tenant/custom-handler".to_string());
+    ctx.headers = headers_to_map(request.headers());
+    ctx.query_params = query.last_values();
+    match manual_routes.tenant_custom_handler(ctx, request).await {
+        Ok(response) => response,
+        Err(err) => error_response(err),
+    }
 }
