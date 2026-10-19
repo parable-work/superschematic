@@ -187,8 +187,17 @@ is the connection. On Postgres one instance runs the engine's runner at a
 time, under the runner's lock, so the platform runs one with CPU between
 requests: `stack/stacktest`'s `fake.runner` lowers it to a pool of one,
 the local target's `local.runner` to a process with no port, and gcp's
-`gcp.cloudrunrunner` to a Cloud Run worker pool of one instance. A target
-with no runner platform cannot run a stack whose APIs open the engine.
+`gcp.cloudrunrunner` to a Cloud Run worker pool of one instance. Its
+`Instances` is zero when a settings element turns the runner off
+(`{ of: ShopDb, runner: true, enabled: false }`), and the platform then
+runs none. A target with no runner platform cannot run a stack whose APIs
+open the engine unless a settings `platform` places the runner on
+another's. A target whose deployables reach Postgres each as a user of
+its own readies the engine's schema in its migration runner, as gcp's
+does: a `MigrationPlan` whose `Engine` is set is an engine database's,
+whose every server opens the engine, and the job document's
+`privileges.engine` gives them a role they share that owns the schema
+(`runtime/migrate/README.md`, "Jobs").
 
 A server, job or worker platform says what a deploy builds for the
 deployables it places in `Artifact` (D64): `ir.ArtifactImage`, the
