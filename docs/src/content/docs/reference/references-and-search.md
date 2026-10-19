@@ -104,6 +104,89 @@ names each value by its item's label in its display components, through
 the options operation and its lookup
 ([Choices from references](/superschematic/guides/topcoat/#choices-from-references)).
 
+## What a value refers to
+
+A field or argument refers to what its `RefersTo` names. On a type with
+`@source`, a relation's key refers to an item with no `RefersTo` written
+(D61, amended):
+
+```ts
+import { Identity } from "superscalar";
+import { display } from "@superschematic/schema";
+import { source } from "@superschematic/api";
+import { OrderLine, Product } from "@acme/shop-db";
+
+@source(Product)
+@display({ noun: "Product", titleField: "name" })
+export abstract class ProductView {
+  id: Identity.UUID;
+  name: string;
+}
+
+@source(OrderLine)
+export abstract class OrderLineView {
+  id: Identity.UUID;
+  // OrderLine.product is a Relation<Product>, and ProductView is the
+  // API's one type that is @source(Product): this refers to it.
+  productId: Identity.UUID;
+}
+```
+
+A field is a relation's key when it is on a type with `@source(T)`, is
+named `<r>Id`, and `T` declares no field of that name, where `T`'s field
+`r` is one `Relation<U>`, not `HasMany` and not `ManyToMany`. It reads
+`r`'s foreign key, the column `<r>_id`, so it needs no `@virtual`.
+`@virtual` still makes it a field the implementation fills. Its type is
+the type of `U`'s `id`, one value.
+
+A key that writes no `RefersTo` refers to the API's one object type that
+is `@source(U)`, by its `id`. Every other member is unsaid, and
+`ir.ResolveReference` derives it, as for a written one. The reference
+exists only when it resolves:
+
+- With no such type, the key is a plain value.
+- With such a type that no operation lists, or that two operations list,
+  the key is a plain value.
+- With two or more such types, the key is a plain value, and the loader
+  warns: `OrderLineView.productId reads the key of shop-db.OrderLine.product
+  and refers to nothing: ProductCard and ProductView are both
+  @source(shop-db.Product); name one with RefersTo`.
+
+A written `RefersTo` always wins, with its members as written. An argument
+or an input type has no `@source`, so it says `RefersTo`.
+
+The reference is derived each time it is read and never written into the
+IR, so `format` writes the key as its type alone, and the JSON and YAML
+forms carry no `references` on it. In the public `ir` module,
+`ir.FieldReference(schema, dependencies, holder, field)` gives the
+reference a field holds and says whether it was derived.
+`ir.DerivedReferences(schema, dependencies)` lists the derived ones, as
+`ir.ReferencesOf(schema)` lists the written ones. The dependencies hold
+the table types that the `@source` names. The loader and the generators
+read references through these functions, not through the field's
+`references`.
+
+Where its `@source` checks run, the loader refuses three things:
+
+- a key whose type is not the type of `U`'s id:
+  `OrderLineView.productId reads the key of shop-db.OrderLine.product, a
+  Relation to Product, whose id is Identity.UUID, not string`;
+- a key that is a list or a map;
+- a `RefersTo` on a key that names a type that is `@source` of another
+  table: `OrderLineView.productId: RefersTo names SupplierView, which is
+  @source(shop-db.Supplier), but the field reads the key of
+  shop-db.OrderLine.product, a Relation to Product`.
+
+The data forms skip these checks, as they skip the other `@source` checks.
+`migrate` counts a key as a read of its foreign-key column, as it counts
+the relation field.
+
+A reference's target need not be the API's own type. It may be a
+dependency's. That type is found through the schema's import that names
+it, else by name in each dependency, in name order. So two dependencies
+that declare types of one name resolve one reference to one type, the one
+the schema imports, in the loader and in every generator (D66).
+
 ## `SearchQuery`: a list's search text
 
 `SearchQuery<T>` marks an argument as its operation's search text (D62).

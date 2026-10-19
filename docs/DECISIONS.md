@@ -6783,11 +6783,20 @@ schema imports the type from, and the crate reads every dependency.
 | The OpenAPI document gives each value that refers to an item the vendor key `x-superschematic-reference`, holding the resolved reference: `{"target": "#/components/schemas/ProductView", "options": "<operationId>", "value": "id", "label": "name", "lookup": "ids"}`. `value` and `label` are the target's JSON keys; `label` and `lookup` are absent when there is none. The key sits on the property schema of a field, an input field or a body argument, and on the parameter object of a path or query argument. On a list, the key sits on the list, and each item refers. A tool's parameters give the same key on the property of the argument or field; there `target` is the type's name and `options` is the tool name of the options operation. Derived references are written like written ones. Both keys are constants that an OpenAPI hook renames, as it renames `x-superschematic-docs`; in the tools a `ToolHook` renames the key through `ToolKeys.Reference`, as it renames the scalar key. | A list of references at the operation, which a client would have to match back to paths. The members as written, which would leave every client to derive the rest by D61's rule. A JSON Schema `$ref` to the target, which tools would resolve as the value's own schema. |
 | A dependency's type that a reference names is found through the import that names it. When no import names it, it is found by name in each dependency in turn, as before. The loader and every generator, which has every dependency, therefore resolve it alike (D66). | Passing generators only the imported dependencies, which every caller of `ResolveReference` would have to compute. |
 
-Status: designed; nothing built. The tests are these:
+Status: the core is built; the documents' key and acme's change are not.
+`ir.FieldReference` and `ir.DerivedReferences` derive a relation key's
+reference, `ResolveReference` finds a dependency's target through its
+import first, and `ResolvedReference.TargetService` names the dependency.
+The loader accepts a key without `@virtual`, refuses the three keys and
+warns of the ambiguity, and `SourceReads` counts the key's column. The
+TypeScript reader flattens the types an `@source` target relates to, so
+the key's type is checked against the related type's id. The tests are
+these:
 
-- ir's `TestFieldReference`: a derived key; an explicit target that wins; two sourced types; an unlisted target; and a dependency's type found through its import beside a same-named type of a General dependency.
-- The `@source` and references tests of verify, one for each message.
-- The reads test of `sqlmigrate`.
+- ir's `TestFieldReference`: a derived key; an explicit target that wins; two sourced types; an unlisted target; and the cases that derive nothing. `TestResolveReferenceThroughTheImport`: a dependency's type found through its import beside a same-named type of a General dependency. Both are built.
+- verify's `TestARelationsKeyNeedsNoVirtual`, `TestARelationsKeyRefusalsAndWarning` and `TestARelationsKeyAccepted`, one for each message, are built.
+- The reads test of `sqlmigrate` is built.
+- The loader's `TestADerivedReferenceRoundTripsWithoutRefersTo` loads `fixture-refs-keys-api`, writes it as JSON, YAML and TypeScript with no `RefersTo`, and reads each back to the same derived reference. `TestARelationsKeyIsCheckedInTheTypeScriptForm` holds the key to the related type's id and warns of two sourced types. Both are built.
 - New apigen and toolsutil goldens of `fixture-refs-api`, whose basket lines, gift, lookup, path argument and search hold every placement, and a unit test that a derived reference writes the key a written one does.
 - The tool manifest contract's round trip.
 
