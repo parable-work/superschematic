@@ -48,6 +48,23 @@ func LoadOptionalJSONService() (*ir.Schema, error) {
 	return loader.LoadService(filepath.Join(filepath.Dir(file), "testdata", OptionalJSONService))
 }
 
+// UnionListsService is the name of the schema LoadUnionListsService loads.
+const UnionListsService = "union-lists-api"
+
+// LoadUnionListsService loads union-lists-api from this package's testdata:
+// the union Shape (Circle | Square) as the response of three operations
+// that do not page, ShapeQueries.listShapes (a list of it),
+// ShapeQueries.shapeRows (a list of lists of it) and ShapeQueries.getShape
+// (one of it). An SDK decodes each element through the union. It is local
+// to the SDK generator tests, so no other generator's goldens read it.
+func LoadUnionListsService() (*ir.Schema, error) {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		return nil, fmt.Errorf("locate package sdktest")
+	}
+	return loader.LoadService(filepath.Join(filepath.Dir(file), "testdata", UnionListsService))
+}
+
 // AddPaintOperation adds grid.paint to the loaded fixture-nested-arrays-api
 // schema: a PUT whose body arguments are a required list of lists of the
 // Shade enum and an optional list of lists of the Point object, and whose

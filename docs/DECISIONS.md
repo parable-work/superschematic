@@ -6302,8 +6302,9 @@ holder. `internal/loader/verify/references.go` runs it after the display
 checks, adds the refusals of placement and of the value's type, and reads
 the dependency whose type a reference names when the schema imports it:
 only a dependency its config declares, of a kind an API may reference
-types from, so two APIs that refer to each other get the import's own
-refusal, and a cycle of such reads is refused, not read without end.
+types from, which D66 widens to another API, and a cycle of such reads is
+refused, not read without end: since D66, two APIs that refer to each
+other are refused as that cycle, no longer by the import rule.
 The tests: `ir/reference_test.go`, `verify/references_test.go`, the
 reader's `refers_to_test.go` with `broken-references`, the loader's
 `references_test.go` (a dependency's target and two APIs that refer to
@@ -6345,7 +6346,9 @@ its lines' products through `references::order_view_labels`, both through
 `listProducts`, and its console, given no choices, does the same, lists
 the products to anyone, links each row to its page by `getProduct`'s
 reference and names a product in its trail. Follows: the target derived from `@source` and a `Relation`; a
-reference to another service's type; a picker that searches (D62) when the
+reference to another service's type, half done: D66 lets the type be a
+dependency's, an API's among them, but the options operation must still
+be the referring API's own; a picker that searches (D62) when the
 options do not fit a page; a vendor key in the OpenAPI and tool documents;
 and a breadcrumb step named by the reference of its route parameter.
 

@@ -23,9 +23,12 @@ export abstract class User extends Auditable implements UserTrait<{ login: "emai
   name: Identity.Name;
 }
 
-// A named set of permissions a user is granted: staff hold products, to
-// add products, and shoppers orders, to place them. Users hold roles
-// through the UserRoleGrant table the build adds.
+// A named set of permissions a user is granted: shoppers hold orders.read
+// and orders.write, to place their orders and read and cancel them, and
+// staff products, to add products, and orders.read, orders.write and
+// orders.any, or simply orders, to read and cancel every customer's
+// orders. orders.any widens what the other two allow and opens no route
+// alone. Users hold roles through the UserRoleGrant table the build adds.
 export abstract class Role extends Auditable implements UserRole {
   @key
   id: AutoGenerate<Identity.UUID>;

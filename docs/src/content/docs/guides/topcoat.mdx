@@ -27,7 +27,10 @@ line's product from the catalog `shop-orders` lists, filters their orders
 at `/orders` and pages through them, and cancels one from its page,
 `/orders/{id}`, each page's input taken through a form the crate builds.
 The crate also generates a console of the shop's resources at `/console`
-([Generated pages](#generated-pages)).
+([Generated pages](#generated-pages)). The pages and the console show a
+shopper their own orders alone, since the implementations list, read
+and cancel no other customer's, and staff, who hold `orders.any`, every
+customer's.
 
 ## Build the crate
 
@@ -693,10 +696,15 @@ With `DATABASE_URL` set, the app opens that file, which must hold
 orders, users and sessions outlive the process; without it, the shop and
 its users are in memory. Either way the app stocks the shop from its
 catalog, which `listProducts` lists and an order's lines are priced from,
-in SQLite from the product's row. `DATABASE_URL` is a `sqlite:`
-URL, a `file:` URI or a path. A URL of another database, such as a
-Postgres one already in the shell, stops the app with an error that names
-its scheme alone, since the URL may hold a password:
+in SQLite from the product's row, and adds the demo shopper and staff
+unless the file holds them. `add_people` first rewrites the `shopper`
+and `staff` roles to the permissions they grant now, so a file made
+before staff held `orders.any`, whose `shopper` role grants all of
+`orders`, stops showing a shopper every customer's orders.
+`DATABASE_URL` is a `sqlite:` URL, a `file:` URI or a path. A URL of
+another database, such as a Postgres one already in the shell, stops the
+app with an error that names its scheme alone, since the URL may hold a
+password:
 
 <Snippet file="topcoat/src/main.rs" symbol="main" />
 
@@ -726,6 +734,13 @@ invalid), post a valid one, and read it back from the page and from the
 JSON API:
 
 <Snippet file="topcoat/tests/app.rs" symbol="a_review_needs_a_signed_in_shopper_and_its_rules" />
+
+Another test signs two shoppers and staff in, over the shop in memory and
+over SQLite (`a_shopper_sees_their_own_orders_and_staff_every_customers`).
+Each shopper's `/orders`, a page at a time, and `/console/orders` list
+their own orders alone; another customer's order is a 404 on its page, its
+console page, both cancels and the JSON API's routes, and stays placed;
+staff list all four orders and cancel any.
 
 The orders tests place an order through its form: a row button adds a
 line and renders the form again without placing the order, a quantity of

@@ -144,8 +144,10 @@ var StepQuotedFields = map[string]string{
 	"ref_id":         `ref_id`,
 }
 
-// buildStepOrderByClause builds an ORDER BY clause for Step
-func buildStepOrderByClause(orderBy []StepOrderBy, tableName string) string {
+// buildStepOrderByClause builds an ORDER BY clause for Step.
+// quotedTable is the table's name as the FROM clause spells it, quoted when
+// it is a keyword (a table named order is "order").
+func buildStepOrderByClause(orderBy []StepOrderBy, quotedTable string) string {
 	if len(orderBy) == 0 {
 		return ""
 	}
@@ -162,7 +164,7 @@ func buildStepOrderByClause(orderBy []StepOrderBy, tableName string) string {
 		if !ok {
 			quotedField = fieldStr // Fallback to unquoted if not found
 		}
-		clauses = append(clauses, fmt.Sprintf("%s.%s %s", tableName, quotedField, direction))
+		clauses = append(clauses, fmt.Sprintf("%s.%s %s", quotedTable, quotedField, direction))
 	}
 
 	if len(clauses) == 0 {
@@ -1061,7 +1063,7 @@ func (r *StepRepository) FindOne(ctx context.Context, filter *StepFilter, opts *
 	whereClause := filter.buildWhereClause(&args, 0)
 
 	// Build ORDER BY clause
-	orderByClause := buildStepOrderByClause(opts.OrderBy, "step")
+	orderByClause := buildStepOrderByClause(opts.OrderBy, `step`)
 
 	// Build query
 	query := fmt.Sprintf(`SELECT %s FROM step%s%s LIMIT 1`, selectFields, whereClause, orderByClause)
@@ -1340,7 +1342,7 @@ func (r *StepRepository) FindMany(ctx context.Context, filter *StepFilter, opts 
 	whereClause := filter.buildWhereClause(&args, 0)
 
 	// Build ORDER BY clause
-	orderByClause := buildStepOrderByClause(opts.OrderBy, "step")
+	orderByClause := buildStepOrderByClause(opts.OrderBy, `step`)
 
 	// Build LIMIT/OFFSET clause
 	limitOffsetClause := buildLimitOffsetClauseTyped(opts.Limit, opts.Offset)

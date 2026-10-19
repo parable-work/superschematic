@@ -168,7 +168,7 @@ func jsString(value string) string {
 // typeScriptDoc flattens a schema description into one JSDoc-safe line.
 func typeScriptDoc(description string) string {
 	flat := strings.Join(strings.Fields(description), " ")
-	return strings.ReplaceAll(flat, "*/", "*\\/")
+	return codegen.JSDocEscape(flat)
 }
 
 // TypeScriptEnvConfigFile is the file of a generated TypeScript API

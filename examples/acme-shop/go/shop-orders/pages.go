@@ -17,7 +17,9 @@ import (
 // the list's order, a comparison of two columns that the ORM's filters
 // cannot say, then, through the ORM, the rows of the keys paging.FromRows
 // keeps, with their columns and an order's lines as GetOrder reads them,
-// put in the keys' order. A page's cursor is the key of its last row.
+// in the keys' order: the ORM sorts the orders, and inKeyOrder puts the
+// reviews and the products found by their ids in it. A page's cursor is
+// the key of its last row.
 
 // rowKey is a row's place in a list's order: the columns the list orders
 // by, the row's id last, which makes the order total.
@@ -61,7 +63,8 @@ func decodeKey[K rowKey](cursor string) (K, error) {
 // readPage reads a page of table's rows that meet the query's conditions,
 // in the order of the key columns, which K's fields hold in turn: the keys
 // of up to page.Limit+1 rows, then, with read, the rows of the ids the
-// page keeps, which inKeyOrder puts in the keys' order.
+// page keeps, in the keys' order. table is spelled as SQL names it, quoted
+// when it is a keyword.
 func readPage[K rowKey, T any](
 	ctx context.Context,
 	db orm.DatabaseInterface,

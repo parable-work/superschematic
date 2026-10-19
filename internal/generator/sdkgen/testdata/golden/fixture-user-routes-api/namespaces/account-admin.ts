@@ -31,7 +31,7 @@ export class AccountAdminNamespace {
   /**
    * Lists the roles and the permissions each grants.
    * @requires Authentication
-  * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
+   * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
    * @returns Array of IdentityRole
    * @throws {ValidationError} if input validation fails
    * @throws {ApiError} if the API request fails
@@ -52,7 +52,7 @@ export class AccountAdminNamespace {
    * Creates a role. The caller's own permissions must cover each permission it grants.
    * @requires Authentication
    * @param input - Request payload
-  * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
+   * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
    * @returns IdentityRole
    * @throws {ValidationError} if input validation fails
    * @throws {ApiError} if the API request fails
@@ -83,7 +83,7 @@ export class AccountAdminNamespace {
    * Deletes a role and every grant of it. It answers true.
    * @requires Authentication
    * @param id - id parameter
-  * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
+   * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
    * @returns boolean
    * @throws {ValidationError} if input validation fails
    * @throws {ApiError} if the API request fails
@@ -107,7 +107,7 @@ export class AccountAdminNamespace {
    * @requires Authentication
    * @param id - id parameter
    * @param input - Request payload
-  * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
+   * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
    * @returns IdentityRole
    * @throws {ValidationError} if input validation fails
    * @throws {ApiError} if the API request fails
@@ -138,7 +138,7 @@ export class AccountAdminNamespace {
   /**
    * Lists the users and the roles each holds.
    * @requires Authentication
-  * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
+   * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
    * @returns Array of IdentityUser
    * @throws {ValidationError} if input validation fails
    * @throws {ApiError} if the API request fails
@@ -159,7 +159,7 @@ export class AccountAdminNamespace {
    * Creates a user with the login, name and password given.
    * @requires Authentication
    * @param input - Request payload
-  * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
+   * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
    * @returns IdentityUser
    * @throws {ValidationError} if input validation fails
    * @throws {ApiError} if the API request fails
@@ -190,7 +190,7 @@ export class AccountAdminNamespace {
    * One user and the roles they hold.
    * @requires Authentication
    * @param id - id parameter
-  * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
+   * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
    * @returns IdentityUser
    * @throws {ValidationError} if input validation fails
    * @throws {ApiError} if the API request fails
@@ -212,7 +212,7 @@ export class AccountAdminNamespace {
    * Disables a user, who can no longer sign in, and ends their sessions.
    * @requires Authentication
    * @param id - id parameter
-  * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
+   * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
    * @returns IdentityUser
    * @throws {ValidationError} if input validation fails
    * @throws {ApiError} if the API request fails
@@ -235,7 +235,7 @@ export class AccountAdminNamespace {
    * Enables a disabled user.
    * @requires Authentication
    * @param id - id parameter
-  * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
+   * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
    * @returns IdentityUser
    * @throws {ValidationError} if input validation fails
    * @throws {ApiError} if the API request fails
@@ -259,7 +259,7 @@ export class AccountAdminNamespace {
    * @requires Authentication
    * @param id - id parameter
    * @param input - Request payload
-  * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
+   * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
    * @returns boolean
    * @throws {ValidationError} if input validation fails
    * @throws {ApiError} if the API request fails
@@ -292,7 +292,7 @@ export class AccountAdminNamespace {
    * @requires Authentication
    * @param id - id parameter
    * @param roleId - roleId parameter
-  * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
+   * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
    * @returns IdentityUser
    * @throws {ValidationError} if input validation fails
    * @throws {ApiError} if the API request fails
@@ -317,7 +317,7 @@ export class AccountAdminNamespace {
    * @requires Authentication
    * @param id - id parameter
    * @param roleId - roleId parameter
-  * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
+   * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
    * @returns IdentityUser
    * @throws {ValidationError} if input validation fails
    * @throws {ApiError} if the API request fails

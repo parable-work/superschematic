@@ -737,6 +737,7 @@ func suffixProfilePrefixes(phasePrefixes []string, suffix string) []string {
 // These are merged with the base functions from tsutil
 func customTemplateFuncs() template.FuncMap {
 	return template.FuncMap{
+		"jsdoc": codegen.JSDocText,
 		"join_params": func(params []PathParam) string {
 			names := make([]string, len(params))
 			for i, p := range params {

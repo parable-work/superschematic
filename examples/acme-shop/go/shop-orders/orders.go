@@ -17,10 +17,13 @@ import (
 	scalars "github.com/parable-work/superscalar/go"
 	"github.com/parable-work/superschematic/runtime/http/go/paging"
 	"github.com/parable-work/superschematic/runtime/http/go/search"
+	"github.com/parable-work/superschematic/runtime/http/go/session"
 )
 
 // Orders implements the order namespace of shop-orders, which the
-// OrderQueries and OrderMutations operation sets share.
+// OrderQueries and OrderMutations operation sets share. A shopper reads,
+// lists and cancels their own orders; staff, whose roles cover
+// orders.any, every customer's.
 type Orders struct {
 	DB orm.DatabaseInterface
 
@@ -116,11 +119,43 @@ func (o *Orders) reserve(ctx context.Context, reservation stocktypes.ReserveStoc
 	return nil
 }
 
-func (o *Orders) GetOrder(ctx context.Context, id types.IdentityUUID) (*types.OrderView, error) {
-	order, err := o.DB.GetOrderRepository().GetOne(ctx, id, withLines())
+// everyOrder is the permission of staff, who read and cancel every
+// customer's orders. A shopper holds orders.read and orders.write, and
+// reads and cancels their own: orders.any is nested under orders, so a
+// role that grants orders grants it too.
+const everyOrder = "orders.any"
+
+// seesEveryOrder reports whether the caller is staff: one of their roles
+// covers orders.any.
+func seesEveryOrder(ctx context.Context) bool {
+	return session.AnyRoleCovers(api.GetRoles(ctx), everyOrder)
+}
+
+// callersOrder reads the order with id, with opts, when the caller may see
+// it: their own, or any order for staff. getOrder and cancelOrder are
+// @requireOwnership, which leaves the check to the implementation:
+// another customer's order is the 404 of one no one placed, so an id
+// tells a shopper nothing of whose it is.
+func callersOrder(ctx context.Context, orders orm.OrderRepositoryInterface, id types.IdentityUUID, opts *orm.OrderGetOptions) (*db.Order, error) {
+	customer, err := caller(ctx)
+	if err != nil {
+		return nil, err
+	}
+	order, err := orders.GetOne(ctx, id, opts)
 	if errors.Is(err, orm.ErrNotFound) {
 		return nil, api.NotFoundError("order", err)
 	}
+	if err != nil {
+		return nil, err
+	}
+	if !seesEveryOrder(ctx) && (order.Customer.Id == nil || *order.Customer.Id != customer) {
+		return nil, api.NotFoundError("order", orm.ErrNotFound)
+	}
+	return order, nil
+}
+
+func (o *Orders) GetOrder(ctx context.Context, id types.IdentityUUID) (*types.OrderView, error) {
+	order, err := callersOrder(ctx, o.DB.GetOrderRepository(), id, withLines())
 	if err != nil {
 		return nil, err
 	}
@@ -137,10 +172,19 @@ type orderKey struct {
 
 func (key orderKey) rowID() types.IdentityUUID { return key.ID }
 
-// ListOrders answers a page of the orders, oldest first, with the given
-// statuses, or of every status when there are none.
+// ListOrders answers a page of the caller's orders, or of every
+// customer's for staff, oldest first, with the given statuses, or of every
+// status when there are none. A cursor names a place among the orders the
+// caller lists, so a shopper's pages hold their own orders alone.
 func (o *Orders) ListOrders(ctx context.Context, statuses []types.OrderStatus, page paging.Request) (paging.Page[types.OrderView], error) {
 	query := &keyQuery{}
+	if !seesEveryOrder(ctx) {
+		customer, err := caller(ctx)
+		if err != nil {
+			return paging.Page[types.OrderView]{}, err
+		}
+		query.where("customer_id = %s::uuid", customer.ToUUID())
+	}
 	if len(statuses) > 0 {
 		in := make([]string, 0, len(statuses))
 		for _, status := range statuses {
@@ -155,45 +199,80 @@ func (o *Orders) ListOrders(ctx context.Context, statuses []types.OrderStatus, p
 		}
 		query.where("(placed_at, id) > (%s::timestamptz, %s::uuid)", after.PlacedAt, after.ID.ToUUID())
 	}
+	// The table is named order, a keyword, so the keys' query quotes it.
 	return readPage[orderKey](ctx, o.DB, query, `"order"`, "placed_at, id", page,
 		func(tx orm.TxInterface, ids []types.IdentityUUID) ([]types.OrderView, error) {
-			// FindMany answers the orders in no order, and inKeyOrder puts
-			// them in the keys': the ORM's OrderBy leaves a table's name
-			// unquoted, which "order" needs.
+			// The page's orders, with their lines, in the keys' order.
 			orders, _, err := tx.GetOrderRepository().FindMany(ctx, &orm.OrderFilter{Id: &orm.UUIDFilter{In: ids}},
-				&orm.OrderFindOptions{Fields: withLines().Fields, Limit: len(ids)})
+				&orm.OrderFindOptions{
+					Fields:  withLines().Fields,
+					OrderBy: []orm.OrderOrderBy{{Field: orm.OrderOrderByPlacedAt}, {Field: orm.OrderOrderById}},
+					Limit:   len(ids),
+				})
 			if err != nil {
 				return nil, err
 			}
-			found := make(map[types.IdentityUUID]*db.Order, len(orders))
+			views := make([]types.OrderView, 0, len(orders))
 			for _, order := range orders {
-				found[*order.Id] = order
+				views = append(views, orderView(order))
 			}
-			return inKeyOrder(ids, found, orderView), nil
+			return views, nil
 		})
 }
 
+// CancelOrder cancels the caller's order, or any order for staff, while
+// it is placed, recording why. The update is the check: it cancels the
+// order only while it is placed, as FulfilOrders fulfils it only while it
+// is, so the worker fulfilling it between a read and the write cannot be
+// undone. When it cancels nothing, the order, read as the caller may see
+// it, is the 409 of one no longer placed, or the 404 of one the caller
+// may not see or no one placed.
 func (o *Orders) CancelOrder(ctx context.Context, id types.IdentityUUID, reason string) (*types.OrderView, error) {
 	ctx = actingUser(ctx)
-	order, err := o.DB.GetOrderRepository().GetOne(ctx, id, nil)
-	if errors.Is(err, orm.ErrNotFound) {
-		return nil, api.NotFoundError("order", err)
-	}
+	filter, err := callersOrderFilter(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	if order.Status != db.OrderStatus_Placed {
-		return nil, api.ConflictError(fmt.Sprintf("order %s is %s", id, order.Status), nil)
-	}
+	placed := string(db.OrderStatus_Placed)
+	whilePlaced := *filter
+	whilePlaced.Status = &orm.StringFilter{Eq: &placed}
 	cancelled := db.OrderStatus_Cancelled
 	update := &orm.OrderUpdate{Status: &cancelled}
 	if reason != "" {
 		update.CancelReason = &reason
 	}
-	if _, err := o.DB.GetOrderRepository().UpdateOne(ctx, id, update); err != nil {
+	orders := o.DB.GetOrderRepository()
+	n, err := orders.UpdateMany(ctx, &whilePlaced, update)
+	if err != nil {
 		return nil, err
 	}
+	if n == 0 {
+		order, err := orders.FindOne(ctx, filter, nil)
+		if errors.Is(err, orm.ErrNotFound) {
+			return nil, api.NotFoundError("order", err)
+		}
+		if err != nil {
+			return nil, err
+		}
+		return nil, api.ConflictError(fmt.Sprintf("order %s is %s", id, order.Status), nil)
+	}
 	return o.GetOrder(ctx, id)
+}
+
+// callersOrderFilter filters the orders to the one with id when the caller
+// may see it: their own, by its customer, as the SQLite shop reads it, or
+// any order for staff. Another customer's order matches nothing, as one no
+// one placed does.
+func callersOrderFilter(ctx context.Context, id types.IdentityUUID) (*orm.OrderFilter, error) {
+	customer, err := caller(ctx)
+	if err != nil {
+		return nil, err
+	}
+	filter := &orm.OrderFilter{Id: &orm.UUIDFilter{Eq: &id}}
+	if !seesEveryOrder(ctx) {
+		filter.CustomerID = &orm.UUIDFilter{Eq: &customer}
+	}
+	return filter, nil
 }
 
 // orderView copies an order and its lines into the view a caller sees, and

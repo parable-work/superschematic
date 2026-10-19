@@ -34,7 +34,7 @@ import * as {{.Alias}} from '{{.Path}}';
 {{- range .ImportedTypes}}
 {{if .Doc -}}
 /**
- * {{.Name}} - {{tsDoc .Doc}}
+ * {{.Name}} - {{tsDoc .Doc " * "}}
  */
 {{end -}}
 export type {{.Name}} = {{.ImportAlias}}.{{.Name}};
@@ -52,13 +52,13 @@ export interface HistoryRecord<T> {
 {{- range .Types}}
 {{if .Doc -}}
 /**
- * {{.Name}} - {{tsDoc .Doc}}
+ * {{.Name}} - {{tsDoc .Doc " * "}}
  */
 {{end -}}
 export interface {{.Name}} {
 {{- range .Fields}}
   {{- if .Doc}}
-  /** {{tsDoc .Doc}} */
+  /** {{tsDoc .Doc "   * "}} */
   {{- end}}
   {{- if and $.Naming.ScalarJSDocTag .ScalarInfo}}
   /** @{{$.Naming.ScalarJSDocTag}} {{.ScalarInfo.Name}} */

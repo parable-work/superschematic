@@ -14,7 +14,7 @@ kind, decorators and auth provider.
 | `schemas/services/shop-common` | General: `Price`, `Currency` and the `@strictJSON` `FeedItem`, in all four languages |
 | `schemas/services/shop-db` | DB: users and roles, with the core `User` and `UserRole` traits (D50), products, stock, a row per product with the threshold it is restocked below, restock requests, one open per product, orders and reviews, and the queues `OrderPlaced` and `StockLow`, built for Postgres and SQLite |
 | `schemas/services/shop-api` | API over `shop-db`, served in Go, with Go and TypeScript SDKs: products, and the user model's sign-in and administration routes |
-| `schemas/services/shop-orders` | API over `shop-db`, served in Go and in Rust, with SDKs in Go, TypeScript, Python and Rust; it calls `shop-stock`, which reserves each order's stock as it is placed; its worker `FulfilOrders` fulfils each order placed, from `OrderPlaced`, and its job `ShipOrders` ships the fulfilled ones. Its lists of orders, of a product's reviews and of the catalog page by cursor (D60), an order's lines and the reviews' routes refer to the catalog's products (D61), and the reviews are searched by their words (D62) |
+| `schemas/services/shop-orders` | API over `shop-db`, served in Go and in Rust, with SDKs in Go, TypeScript, Python and Rust; it calls `shop-stock`, which reserves each order's stock as it is placed; its worker `FulfilOrders` fulfils each order placed, from `OrderPlaced`, and its job `ShipOrders` ships the fulfilled ones. A shopper, who holds `orders.read` and `orders.write`, lists, reads and cancels their own orders, another customer's answering 404 (`@requireOwnership`), and staff, who hold `orders.read`, `orders.write` and `orders.any` (or simply `orders`), every customer's: `orders.any` opens no route alone, and since only the implementations check it, it is missing from `permissions.json`, so `identity bootstrap --permission orders.any` warns that it is uncatalogued. Its lists of orders, of a product's reviews and of the catalog page by cursor (D60), an order's lines and the reviews' routes refer to the catalog's products (D61), and the reviews are searched by their words (D62) |
 | `schemas/services/shop-stock` | API over `shop-db`'s stock, served in Rust (D57), with Go and Rust SDKs: anyone lists the stock, staff with `stock.write` set a product's level and its threshold, and only `shop-orders`' server reserves stock (`@requireService`), for a shopper with `orders.write` it forwards; a reservation that takes a level below its threshold enqueues `StockLow`, from which its Rust worker `ReorderStock` files a restock request, and its Rust job `OrderRestocks` orders the open ones (D65) |
 | `schemas/services/shop-storefront` | API served in TypeScript, with a TypeScript SDK; uses `Price` |
 | `schemas/services/shop-web` | Site: the shop's static site, which calls `shop-api` from the browser (D55) |
@@ -76,11 +76,12 @@ It serves `http://127.0.0.1:3000`, each page linking to the others:
   select of the products `listProducts` lists (the app's catalog, its one
   product, an anvil), buttons that add and remove lines without
   JavaScript, and the shipping address;
-- `/orders` lists the shopper's orders, filtered by status through a GET
-  form, 20 a page, or the `limit` its query gives, with a link to each
+- `/orders` lists the shopper's own orders, filtered by status through a
+  GET form, 20 a page, or the `limit` its query gives, with a link to each
   order's page and links to the next page and back to the first;
-- `/orders/{id}` shows an order, its lines by their products' names and,
-  while it is placed, a form that cancels it with a reason;
+- `/orders/{id}` shows an order of the shopper's, its lines by their
+  products' names and, while it is placed, a form that cancels it with a
+  reason; another customer's order is not found (404);
 - `/reviews` lists the anvil's first 20 reviews, with the form to write
   one;
 - `/console` is the console the crate generates: the orders and the
@@ -90,8 +91,9 @@ It serves `http://127.0.0.1:3000`, each page linking to the others:
 A refused form comes back with each message at its control. A page whose
 operation needs a signed-in shopper shows a Sign in button, which opens
 the sign-in page and then comes back to the page: sign in as
-grace@example.com, with the password in `topcoat/src/main.rs`. The JSON
-API at `/api` admits the same session.
+grace@example.com, a shopper, with the password in `topcoat/src/main.rs`,
+or as ada@example.com, staff, who see and cancel every customer's orders
+on the same pages. The JSON API at `/api` admits the same session.
 
 ### The Topcoat app on SQLite
 
@@ -110,8 +112,12 @@ superschematic-migrate apply --plan shop-db.sqlite.plan.json --database-url sqli
 cd topcoat && DATABASE_URL=sqlite:../shop.db cargo run
 ```
 
-The app adds the demo shopper and the catalog's product to the file,
-unless an earlier run added them, as a shop's own flows would.
+The app adds the demo shopper and staff and the catalog's product to the
+file, unless an earlier run added them, as a shop's own flows would. Each
+run also rewrites the `shopper` and `staff` roles to the permissions they
+grant now, so a `shop.db` made before staff held `orders.any`, whose
+`shopper` role grants all of `orders` and so every customer's orders,
+needs only the app started on it again.
 
 ## Check it
 
@@ -148,7 +154,9 @@ candidate run on `main` twice a day and before every release, not on pull
 requests (D40).
 
 The Go tests serve each API in-process over the ORM's no-op database,
-with the identity runtime over a store in memory (`go/users_test.go`); only
+or, to show a shopper gets and cancels no other customer's order, over a
+few orders of their own, with the identity runtime over a store in memory
+(`go/users_test.go`); only
 `TestStackDevRunsTheShop` needs Postgres, which `stack dev` runs in Docker,
 and cargo, for `shop-stock`'s server, and it skips without either. It
 creates a user with the identity runtime's store over Postgres and signs
@@ -156,6 +164,8 @@ them in through `shop-api`'s login, sets a product's stock and threshold
 on `shop-stock`, places an order that reserves it through `shop-orders`'
 service credential and runs it low, sees an order beyond the stock
 refused, and a reservation with the shopper's session alone refused 401,
+signs two shoppers in, each of whom lists and pages their own orders
+alone and gets 404 for the other's, while staff list everyone's,
 sees `shop-stock`'s Rust worker file the product's restock request and
 its Rust job, run with `stack run`, order it, and then runs `stack dev`
 and the job once more, into an output root of its own, where

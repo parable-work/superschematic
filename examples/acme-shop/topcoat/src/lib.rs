@@ -5,7 +5,9 @@
 //! their email and password, writes a review (`WriteReviewInputForm`),
 //! places an order with its lines as rows (`PlaceOrderInputForm`), filters
 //! their orders (`OrderListOrdersArgsForm`, a GET form) and cancels one
-//! (`OrderCancelOrderArgsForm`). The reviews and the orders render through
+//! (`OrderCancelOrderArgsForm`). A shopper's orders are their own: the
+//! implementations list, read and cancel no other customer's, and staff,
+//! who hold `orders.any`, every customer's. The reviews and the orders render through
 //! the display components the crate builds from their types, and the orders
 //! a page at a time, with links to the next page and back to the first.
 //! An order line's product is a select of the catalog's products, and an
@@ -20,8 +22,8 @@
 use std::sync::Arc;
 
 use acme_shop_orders_server::sqlite::SqliteShop;
-use acme_shop_orders_server::{Shop, ShopImplementation, implementations};
-use acme_shop_orders_topcoat::api::runtime::identity::{LoginInput, Service};
+use acme_shop_orders_server::{Shop, ShopImplementation, add_shopper, add_staff, implementations, update_roles};
+use acme_shop_orders_topcoat::api::runtime::identity::{LoginInput, Service, StoreError};
 use acme_shop_orders_topcoat::api::runtime::{ApiError, Principal};
 use acme_shop_orders_topcoat::api::{
     OrderGetOrderArgs, OrderPlaceOrderArgs, ProductReviewsListReviewsArgs, ProductReviewsWriteReviewArgs, types,
@@ -94,6 +96,28 @@ pub fn shop_in_memory() -> Shop {
 pub fn stock_sqlite(shop: &SqliteShop) -> Result<(), Box<dyn std::error::Error>> {
     for product in CATALOG {
         shop.add_product(&product.id(), product.sku, product.name, product.price_cents)?;
+    }
+    Ok(())
+}
+
+/// A user the app adds: their email, name and password.
+pub type Person = (&'static str, &'static str, &'static str);
+
+/// Adds `shopper`, holding the `shopper` role, and `staff`, holding the
+/// `staff` role, to `users`, each unless an earlier run over the same file
+/// added them, as a real shop's own flows would. It first brings both
+/// roles to the permissions they grant now (`update_roles`), users or no
+/// users: a file made before staff held `orders.any` has a `shopper` role
+/// that grants all of `orders`, and so every customer's orders.
+pub async fn add_people(users: &Service, shopper: Person, staff: Person) -> Result<(), Box<dyn std::error::Error>> {
+    update_roles(users).await?;
+    for ((login, name, password), is_staff) in [(shopper, false), (staff, true)] {
+        match users.store().find_login(login).await {
+            Ok(_) => {}
+            Err(StoreError::NotFound) if is_staff => add_staff(users, login, name, password).await?,
+            Err(StoreError::NotFound) => add_shopper(users, login, name, password).await?,
+            Err(err) => return Err(err.into()),
+        }
     }
     Ok(())
 }
@@ -345,9 +369,10 @@ async fn post_review(cx: &Cx, Form(form): Form<WriteReviewInputForm>) -> topcoat
     })
 }
 
-/// The shopper's orders, which need `orders.read`, a page at a time,
-/// filtered by the GET form `OrderListOrdersArgsForm` reads from the query,
-/// its controls showing the filters in effect. The query's `cursor` and
+/// The shopper's own orders, or every customer's for staff, which need
+/// `orders.read`, a page at a time, filtered by the GET form
+/// `OrderListOrdersArgsForm` reads from the query, its controls showing the
+/// filters in effect. The query's `cursor` and
 /// `limit` ask for the page, and no control holds them, so a submitted
 /// filter starts at the first page. After the orders, "Next page" links
 /// the page after this one, while one follows, and "First page" the first,
@@ -451,7 +476,8 @@ path_param!(id: types::IdentityUUID, error = not_found);
 /// One order, as `order_view_detail` renders it, which needs `orders.read`,
 /// each line's product by its name, which `references::order_view_labels`
 /// looks up through `listProducts`, with the route's status when the call
-/// is refused (401, 403, 404). While the order is placed, the form that
+/// is refused (401, 403, 404, which another customer's order answers as
+/// one no one placed does). While the order is placed, the form that
 /// cancels it: `cancel` as sent and its errors after a refused cancel,
 /// which keeps the form, and its form-level message, on the page even when
 /// the order is no longer placed.

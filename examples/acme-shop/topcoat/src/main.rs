@@ -1,8 +1,10 @@
 //! Serves the acme shop's Topcoat app on 127.0.0.1:3000, its catalog
-//! holding the one product and its users one shopper. Open `/orders/new`
-//! or `/reviews`, sign in with the button there as grace@example.com, with
-//! the password below, then place an order, filter and cancel it at
-//! `/orders`, and write a review.
+//! holding the one product and its users a shopper and a member of staff.
+//! Open `/orders/new` or `/reviews`, sign in with the button there as
+//! grace@example.com, with the password below, then place an order, filter
+//! and cancel it at `/orders`, and write a review. A shopper sees their own
+//! orders alone; sign in as ada@example.com, staff, to see and cancel every
+//! customer's.
 //!
 //! With `DATABASE_URL` set, as superschematic-migrate reads it
 //! (`sqlite:shop.db`, a `file:` URI, or a path), the shop and its users are
@@ -15,14 +17,14 @@
 use std::sync::Arc;
 
 use acme_shop_orders_server::sqlite::SqliteShop;
-use acme_shop_orders_server::{add_shopper, users_at, users_in_memory};
-use acme_shop_orders_topcoat::api::runtime::identity::StoreError;
-use acme_shop_topcoat::{IDENTITY_CONFIG, app, shop_in_memory, stock_sqlite};
+use acme_shop_orders_server::{users_at, users_in_memory};
+use acme_shop_topcoat::{IDENTITY_CONFIG, Person, add_people, app, shop_in_memory, stock_sqlite};
 
 /// The demo shopper's email, name and password.
-const LOGIN: &str = "grace@example.com";
-const NAME: &str = "Grace Hopper";
-const PASSWORD: &str = "grace's password";
+const SHOPPER: Person = ("grace@example.com", "Grace Hopper", "grace's password");
+
+/// The demo staff's, who read and cancel every customer's orders.
+const STAFF: Person = ("ada@example.com", "Ada Lovelace", "ada's password");
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -30,20 +32,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Ok(url) => {
             let shop = SqliteShop::open(&url).map_err(|err| format!("DATABASE_URL: {err}"))?;
             let users = users_at(&url, IDENTITY_CONFIG).map_err(|err| format!("DATABASE_URL: {err}"))?;
-            // The demo's shopper and the catalog's products, which a real
-            // shop's own flows add, unless an earlier run added them.
-            match users.store().find_login(LOGIN).await {
-                Ok(_) => {}
-                Err(StoreError::NotFound) => add_shopper(&users, LOGIN, NAME, PASSWORD).await?,
-                Err(err) => return Err(err.into()),
-            }
+            // The demo's shopper and staff and the catalog's products,
+            // which a real shop's own flows add, unless an earlier run
+            // added them. A file an earlier version made keeps its
+            // users, and add_people brings their roles up to date.
+            add_people(&users, SHOPPER, STAFF).await?;
             stock_sqlite(&shop)?;
             println!("the shop is in {url}");
             app(Arc::new(shop), users)
         }
         Err(_) => {
             let users = users_in_memory(IDENTITY_CONFIG)?;
-            add_shopper(&users, LOGIN, NAME, PASSWORD).await?;
+            add_people(&users, SHOPPER, STAFF).await?;
             app(Arc::new(shop_in_memory()), users)
         }
     };
