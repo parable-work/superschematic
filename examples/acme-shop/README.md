@@ -85,10 +85,12 @@ It serves `http://127.0.0.1:3000`, each page linking to the others:
 - `/reviews` lists the anvil's first 20 reviews, with the form to write
   one;
 - `/console` is the console the crate generates: the orders and the
-  products a page at a time, an order's and a product's pages, and a
-  product's reviews with a search box. Its lists are live
+  products a page at a time, with links to the next, the previous and the
+  first page and a choice of page size, an order's and a product's pages,
+  and a product's reviews with a search box. Its lists are live
   (`pages_live` in `superschematic.toml`): with Topcoat's runtime loaded,
-  a filter, a search and a page's links render the list again in place.
+  a filter, a search, a page's links and its size render the list again
+  in place.
 
 Every page renders in one HTML document, whose head loads Topcoat's
 runtime when the app finds its asset bundle beside the binary. `cargo run`

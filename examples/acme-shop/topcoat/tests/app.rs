@@ -1209,6 +1209,15 @@ async fn the_consoles_lists_are_live() {
         assert_eq!(second.status, StatusCode::OK, "{shop}: {}", second.body);
         assert_eq!(console_orders(&second.body), ids[1..2], "{shop}");
         assert_eq!(link(&second.body, "first").as_deref(), Some("/console/orders?limit=1"), "{shop}");
+        assert_eq!(link(&second.body, "prev"), link(&second.body, "first"), "{shop}");
+        // The next page's query holds the history, so the shard renders its
+        // Previous link from it, back to the page before.
+        let third = link(&second.body, "next").expect("a third page");
+        let query = third.strip_prefix("/console/orders?").expect("the list's query");
+        assert!(query.contains("&back="), "{shop}: {query}");
+        let third = shard(&router, "/console/_live/orders", Some(&cookie), &[query, "/console/orders"]).await;
+        assert_eq!(console_orders(&third.body), ids[2..], "{shop}");
+        assert_eq!(link(&third.body, "prev"), Some(next), "{shop}");
 
         // A signed-out shard is refused as the list is.
         let signed_out = shard(&router, "/console/_live/orders", None, &["", "/console/orders"]).await;
@@ -1221,6 +1230,84 @@ async fn the_consoles_lists_are_live() {
         assert_eq!(again.status, StatusCode::OK, "{shop}: {}", again.body);
         assert!(again.body.starts_with("<!DOCTYPE html>"), "{shop}: {}", again.body);
         assert_eq!(console_orders(&again.body), [ids[0], ids[2]], "{shop}");
+    }
+}
+
+/// The page-size form of a list, when it has one: the sizes it offers, the
+/// size selected, and the names of its hidden inputs, which carry the
+/// filter.
+fn size_form(body: &str) -> Option<(Vec<&str>, Vec<&str>, Vec<&str>)> {
+    let (_, rest) = body.split_once(r#"<form method="get" class="ss-page-size""#)?;
+    let (form, _) = rest.split_once("</form>")?;
+    Some((
+        each_between(form, r#"<option value=""#, "\""),
+        each_between(form, r#" selected="">"#, "</option>"),
+        each_between(form, r#"<input type="hidden" name=""#, "\""),
+    ))
+}
+
+#[tokio::test]
+async fn the_console_goes_back_a_page_and_sets_its_size() {
+    for (shop, router) in each_shop("back-and-size.db", &[]).await {
+        let cookie = sign_in(&router).await;
+        let placed = place_orders(&router, &cookie, 25).await;
+        let ids = order_ids(&placed);
+
+        // The size form offers the route's sizes, the default selected,
+        // and holds no limit of its own.
+        let all = send(&router, "GET", "/console/orders", Some(&cookie), None).await;
+        assert_eq!(size_form(&all.body), Some((vec!["10", "20", "50", "100"], vec!["20"], vec![])), "{shop}: {}", all.body);
+        let products = send(&router, "GET", "/console/products", None, None).await;
+        assert_eq!(size_form(&products.body).map(|(sizes, ..)| sizes), Some(vec!["10", "20", "50", "100"]), "{shop}");
+        let reviews = send(&router, "GET", &format!("/console/products/{PRODUCT}/reviews"), None, None).await;
+        assert_eq!(size_form(&reviews.body).map(|(sizes, ..)| sizes), Some(vec!["10", "20", "50"]), "{shop}");
+
+        // Its submit, a GET of limit=10: the first page at that size, with
+        // a next and nothing before it, the filter holding the limit.
+        let first = send(&router, "GET", "/console/orders?limit=10", Some(&cookie), None).await;
+        assert_eq!(first.status, StatusCode::OK, "{shop}: {}", first.body);
+        assert_eq!(console_orders(&first.body), ids[..10], "{shop}");
+        assert_eq!((link(&first.body, "first"), link(&first.body, "prev")), (None, None), "{shop}");
+        assert_eq!(size_form(&first.body).map(|(_, selected, _)| selected), Some(vec!["10"]), "{shop}");
+        assert!(first.body.contains(r#"<input type="hidden" name="limit" value="10">"#), "{shop}: {}", first.body);
+
+        // Next, twice: the second page goes back to the first, by First and
+        // by Previous alike, and the third holds the second in its history.
+        let second_href = link(&first.body, "next").expect("a second page");
+        assert!(second_href.starts_with("/console/orders?limit=10&cursor=") && !second_href.contains("back="), "{shop}: {second_href}");
+        let second = send(&router, "GET", &second_href, Some(&cookie), None).await;
+        assert_eq!(console_orders(&second.body), ids[10..20], "{shop}");
+        assert_eq!(link(&second.body, "first").as_deref(), Some("/console/orders?limit=10"), "{shop}");
+        assert_eq!(link(&second.body, "prev"), link(&second.body, "first"), "{shop}");
+        let third_href = link(&second.body, "next").expect("a third page");
+        assert!(third_href.contains("&back="), "{shop}: {third_href}");
+        let third = send(&router, "GET", &third_href, Some(&cookie), None).await;
+        assert_eq!(console_orders(&third.body), ids[20..], "{shop}");
+        assert_eq!(link(&third.body, "next"), None, "{shop}");
+
+        // Previous lands on each page it left.
+        assert_eq!(link(&third.body, "prev").as_deref(), Some(second_href.as_str()), "{shop}");
+        let back = send(&router, "GET", &second_href, Some(&cookie), None).await;
+        assert_eq!(console_orders(&back.body), ids[10..20], "{shop}");
+        let back = send(&router, "GET", &link(&back.body, "prev").expect("a previous page"), Some(&cookie), None).await;
+        assert_eq!(console_orders(&back.body), ids[..10], "{shop}");
+
+        // A filter keeps the size: the size form holds the filter, not the
+        // limit, and the links give the filter and the limit first.
+        let filtered = send(&router, "GET", "/console/orders?statuses=placed&limit=10", Some(&cookie), None).await;
+        assert_eq!(size_form(&filtered.body).map(|(_, _, hidden)| hidden), Some(vec!["statuses"]), "{shop}");
+        let next = link(&filtered.body, "next").expect("a next page");
+        assert!(next.starts_with("/console/orders?statuses=placed&limit=10&cursor="), "{shop}: {next}");
+
+        // In place: the shard renders a page's Previous from the history
+        // its query holds, and a new size from the first page.
+        let query = third_href.strip_prefix("/console/orders?").expect("the list's query");
+        let live = shard(&router, "/console/_live/orders", Some(&cookie), &[query, "/console/orders"]).await;
+        assert_eq!(console_orders(&live.body), ids[20..], "{shop}");
+        assert_eq!(link(&live.body, "prev").as_deref(), Some(second_href.as_str()), "{shop}");
+        let sized = shard(&router, "/console/_live/orders", Some(&cookie), &["limit=50", "/console/orders"]).await;
+        assert_eq!(console_orders(&sized.body), ids, "{shop}");
+        assert_eq!(size_form(&sized.body).map(|(_, selected, _)| selected), Some(vec!["50"]), "{shop}");
     }
 }
 

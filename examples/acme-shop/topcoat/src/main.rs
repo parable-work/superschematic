@@ -15,11 +15,12 @@
 //! Without it both are in memory.
 //!
 //! The console's lists are live: with Topcoat's runtime in the browser, a
-//! filter and a page's links render the list again in place. The runtime's
-//! script is a file of the asset bundle, which `topcoat asset bundle --bin
-//! acme-shop-topcoat` (Topcoat's CLI) writes beside the built binary, in
-//! `assets/`. Without a bundle there the app says so and serves the pages
-//! without the runtime: a filter and a page's links load the page.
+//! filter, a page's links and its size render the list again in place. The
+//! runtime's script is a file of the asset bundle, which `topcoat asset
+//! bundle --bin acme-shop-topcoat` (Topcoat's CLI) writes beside the built
+//! binary, in `assets/`. Without a bundle there the app says so and serves
+//! the pages without the runtime: a filter, a page's links and its size
+//! load the page.
 
 use std::sync::Arc;
 
