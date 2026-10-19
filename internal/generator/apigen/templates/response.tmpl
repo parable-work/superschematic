@@ -51,12 +51,12 @@ func RespondNoContent(w http.ResponseWriter) {
 
 // RespondJSONEnvelope sends a JSON response wrapped in the success envelope format.
 func RespondJSONEnvelope(w http.ResponseWriter, status int, data interface{}, r *http.Request) {
-	runtimeresponse.JSONEnvelope(w, status, data, requestMeta(r), nil)
+	runtimeresponse.JSONEnvelope(w, status, data, requestMeta(r))
 }
 
 // RespondCollectionEnvelope sends a collection JSON response ensuring nil slices serialize as [].
 func RespondCollectionEnvelope(w http.ResponseWriter, status int, data interface{}, r *http.Request) {
-	runtimeresponse.CollectionEnvelope(w, status, data, requestMeta(r), nil)
+	runtimeresponse.CollectionEnvelope(w, status, data, requestMeta(r))
 }
 
 func requestMeta(r *http.Request) *runtimeresponse.Meta {

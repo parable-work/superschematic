@@ -106,6 +106,59 @@ func TestWriteToolsUnderAnExtensionsInvocationPolicy(t *testing.T) {
 	}
 }
 
+// loadRefsFixture generates the API output of fixture-refs-api, whose
+// fields and arguments refer to the catalog's items (D61) and whose
+// listing has a search argument (D62).
+func loadRefsFixture(t *testing.T, hooks ...apigen.ToolHook) (*apigen.APIOutput, map[string]bool) {
+	t.Helper()
+	schema, err := loader.LoadService(filepath.Join(fixturesDir, "fixture-refs-api"))
+	if err != nil {
+		t.Fatalf("load fixture-refs-api: %v", err)
+	}
+	apiOutput, err := apigen.Generate(schema, apigen.Options{
+		Provider:    sessionauth.Provider{},
+		SchemaName:  "fixture-refs-api",
+		ModulePath:  "example.com/schemas/api/fixture-refs-api",
+		TypesModule: "example.com/schemas/types/go/fixture-refs-api",
+		ToolHooks:   hooks,
+	})
+	if err != nil {
+		t.Fatalf("apigen.Generate: %v", err)
+	}
+	tsOutput, err := tsgen.Generate(schema, tsgen.Options{SchemaName: "fixture-refs-api"})
+	if err != nil {
+		t.Fatalf("tsgen.Generate: %v", err)
+	}
+	return apiOutput, tsgen.ParseableTypeNames(tsOutput)
+}
+
+func writeRefsTools(t *testing.T, hooks ...apigen.ToolHook) string {
+	t.Helper()
+	apiOutput, parseable := loadRefsFixture(t, hooks...)
+	sdkOutput, err := Generate(apiOutput, parseable, mcpClock)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	outDir := t.TempDir()
+	if err := WriteSDKWithTools(sdkOutput, apiOutput, outDir, mcpClock); err != nil {
+		t.Fatalf("WriteSDKWithTools: %v", err)
+	}
+	return outDir
+}
+
+// TestWriteToolsGoldenRefs pins the TypeScript SDK's tool documents of
+// fixture-refs-api: each value that refers to an item gives its reference
+// under x-superschematic-reference (D61), the search argument says
+// x-superschematic-search (D62), and tools/index.ts types both keys.
+// Regenerate with:
+// go test ./internal/generator/sdkgen -run TestWriteToolsGoldenRefs -update
+func TestWriteToolsGoldenRefs(t *testing.T) {
+	outDir := writeRefsTools(t)
+	for _, name := range []string{"tools/index.ts", "tools/schema.json"} {
+		compareGolden(t, outDir, filepath.Join("testdata", "golden", "fixture-refs-api"), name)
+	}
+}
+
 func compareGolden(t *testing.T, outDir, goldenDir, name string) {
 	t.Helper()
 	got, err := os.ReadFile(filepath.Join(outDir, name))

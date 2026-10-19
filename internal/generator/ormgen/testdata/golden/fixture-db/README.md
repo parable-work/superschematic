@@ -11,6 +11,7 @@ Generated at: 2026-01-02T03:04:05Z
 - `interfaces.go` -- repository/database/transaction interfaces + no-op implementations
 - `query.go` -- typed field selectors, filters, update structs, snapshot builders, and `ApplyTo`
 - `utils.go` -- shared query helpers
+- `search.go` -- the words of a filter's `SearchText` and their `LIKE` patterns
 - `repository_tenant.go` -- Tenant repository
 - `repository_tenant_user.go` -- TenantUser repository
 
@@ -41,3 +42,10 @@ deletes additionally expose `HardDeleteOne`.
 Each `*Update` type has `ApplyTo(*types.T)` to project set and `SetNull`
 fields onto a stored row, and `New*SnapshotUpdate` to build a full
 replacement from a complete value.
+
+`<Type>FilterConditions(filter, &args)` gives a filter's conditions, each
+column qualified by its table, for a query of your own: its values are
+appended to `args`, their placeholders numbered after those already there.
+A table with search fields (`@searchField`) has `SearchText` on its filter,
+which keeps the rows whose `search_text` holds each of its words, in any
+case.

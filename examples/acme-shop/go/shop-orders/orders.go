@@ -16,7 +16,6 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	scalars "github.com/parable-work/superscalar/go"
 	"github.com/parable-work/superschematic/runtime/http/go/paging"
-	"github.com/parable-work/superschematic/runtime/http/go/search"
 	"github.com/parable-work/superschematic/runtime/http/go/session"
 )
 
@@ -320,21 +319,18 @@ func (key reviewKey) rowID() types.IdentityUUID { return key.ID }
 
 // ListReviews answers a page of a product's reviews, oldest first, those
 // rated minRating or more when it is given. A search, q, keeps the reviews
-// whose title or body holds each of its words, in any case (D62): each
-// word is a condition on the table's search_text, which Postgres's trigram
-// index serves. Deleted reviews are left out.
+// whose title or body holds each of its words, in any case (D62): the
+// ORM's ReviewFilter.SearchText makes each word a condition on the table's
+// search_text, which Postgres's trigram index serves. Deleted reviews are
+// left out.
 func (r *Reviews) ListReviews(ctx context.Context, productID types.IdentityUUID, minRating *float64, q *string, page paging.Request) (paging.Page[types.ReviewView], error) {
-	query := &keyQuery{}
-	query.where("product_id = %s::uuid", productID.ToUUID())
-	query.where("deleted_at IS NULL")
+	filter := &orm.ReviewFilter{ProductID: &orm.UUIDFilter{Eq: &productID}, SearchText: q}
 	if minRating != nil {
-		query.where("rating >= %s::double precision", *minRating)
+		filter.Rating = &orm.FloatFilter{Gte: minRating}
 	}
-	if q != nil {
-		for _, term := range search.Terms(*q) {
-			query.where(`search_text ILIKE %s ESCAPE '\'`, search.LikePattern(term))
-		}
-	}
+	query := &keyQuery{}
+	query.conditions = orm.ReviewFilterConditions(filter, &query.args)
+	query.where("deleted_at IS NULL")
 	if page.Cursor != "" {
 		after, err := decodeKey[reviewKey](page.Cursor)
 		if err != nil {
@@ -344,11 +340,21 @@ func (r *Reviews) ListReviews(ctx context.Context, productID types.IdentityUUID,
 	}
 	return readPage[reviewKey](ctx, r.DB, query, "review", "created_at, id", page,
 		func(tx orm.TxInterface, ids []types.IdentityUUID) ([]types.ReviewView, error) {
-			reviews, err := tx.GetReviewRepository().GetManyByIDs(ctx, ids)
+			// The page's reviews, in the keys' order.
+			reviews, _, err := tx.GetReviewRepository().FindMany(ctx, &orm.ReviewFilter{Id: &orm.UUIDFilter{In: ids}},
+				&orm.ReviewFindOptions{
+					Fields:  orm.ReviewFields{}.All(),
+					OrderBy: []orm.ReviewOrderBy{{Field: orm.ReviewOrderByCreatedAt}, {Field: orm.ReviewOrderById}},
+					Limit:   len(ids),
+				})
 			if err != nil {
 				return nil, err
 			}
-			return inKeyOrder(ids, reviews, reviewView), nil
+			views := make([]types.ReviewView, 0, len(reviews))
+			for _, review := range reviews {
+				views = append(views, reviewView(review))
+			}
+			return views, nil
 		})
 }
 

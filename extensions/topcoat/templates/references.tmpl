@@ -22,9 +22,16 @@
 //! plain control and the values as they are, and the page does not fail.
 //! The calls are kept for the request (`#[memoize]`), and for no other:
 //! labels change, and callers differ.
+{{- if .References.Trails }}
+//!
+//! The console's trail names an item's step whose title does not name it
+//! by the label of what the route's value there refers to
+//! (`<target>_target_label`), when every operation whose route holds the
+//! value there refers to one target by one value (D44, amended).
+{{- end }}
 
 {{ with .References -}}
-{{ if .Records -}}
+{{ if or .Records .Trails -}}
 use std::collections::BTreeSet;
 
 {{ end -}}
@@ -275,6 +282,15 @@ async fn {{ .Base }}_target_labels(cx: &Cx, values: &BTreeSet<String>) -> Vec<Ch
     out.retain(|choice| values.contains(&choice.value));
     out
 {{- end }}
+}
+{{- end }}
+{{- if $m.UsesTrail . }}
+
+{{ doc (printf "The label of the item of %s whose %s is `value`, for the console's trail: %s. None when no item has it, its label is blank, or the call is refused or fails." .Target .Value (or (and .Lookup (printf "through %s's lookup with that one value" .Options.Operation)) (printf "from %s" (or (and .Options.Paged (printf "the first page of %s" .Options.Operation)) (printf "the items %s lists" .Options.Operation))))) }}
+pub(crate) async fn {{ .Base }}_target_label(cx: &Cx, value: &str) -> Option<String> {
+    let values = BTreeSet::from([value.to_owned()]);
+    let labels = {{ .Base }}_target_labels(cx, &values).await;
+    labels.into_iter().find(|choice| choice.value == value).map(|choice| choice.label).filter(|label| label != value)
 }
 {{- end }}
 {{- end }}

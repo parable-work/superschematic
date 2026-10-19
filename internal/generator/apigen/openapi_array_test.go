@@ -26,7 +26,7 @@ func TestOpenAPIArrayLengthConstraints(t *testing.T) {
 				Name: "values", TypeRef: ir.TypeRef{Name: "string", IsArray: true},
 				Required: true, ValidateListMin: tc.min, ValidateListMax: tc.max,
 			}}}
-			result := openAPITypeSchema(def, map[string]interface{}{}, schema, nil, nil, nil, nil, map[string]bool{})
+			result := openAPITypeSchema(def, map[string]interface{}{}, schema, nil, nil, nil, nil, newOpenAPIComponents())
 			field := result["properties"].(map[string]interface{})["values"].(map[string]interface{})
 			for name, limit := range map[string]*int{"minItems": tc.min, "maxItems": tc.max} {
 				got, present := field[name]

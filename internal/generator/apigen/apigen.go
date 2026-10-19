@@ -63,6 +63,14 @@ type Param struct {
 	ValidateListMin   *int
 	ValidateListMax   *int
 	ValidatePattern   string
+
+	// Reference is the reference the argument or field holds (D61), as
+	// written or, for a field, derived from a relation's key, resolved in
+	// the API schema; nil when it refers to nothing. The OpenAPI document
+	// and the tool documents write it under their reference keys.
+	Reference *Reference
+	// Search marks the operation's search argument (SearchQuery, D62).
+	Search bool
 }
 
 // ArrayDepth is 0 for T, 1 for T[] and 2 for T[][], as ir.TypeRef.ArrayDepth.
@@ -960,6 +968,18 @@ func defaultMethodForSet(setName string) string {
 	return "GET"
 }
 
+// implementationName is an operation's implementation name, its namespace
+// and its name in PascalCase ("CatalogListItems").
+func implementationName(namespace, operation string) string {
+	return codegen.ToPascalCase(namespace) + codegen.ToPascalCase(operation)
+}
+
+// handlerName is an operation's handler name, its OpenAPI operationId
+// ("CatalogListItemsHandler").
+func handlerName(namespace, operation string) string {
+	return implementationName(namespace, operation) + "Handler"
+}
+
 // operationToEndpoint converts an operation FieldDef into an endpoint.
 func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *ir.OperationSet, types *typeMapper, schema *ir.Schema, provider AuthProvider, invocation ToolInvocationPolicy) (*EndpointInfo, error) {
 	if err := ir.ValidateOperationDocs(op.Docs); err != nil {
@@ -974,9 +994,8 @@ func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *
 		method = defaultMethod
 	}
 
-	namespacePascal := codegen.ToPascalCase(namespace)
 	shortImplName := codegen.ToPascalCase(op.Name)
-	implName := namespacePascal + shortImplName
+	implName := implementationName(namespace, op.Name)
 
 	embeddedParams := extractEmbeddedParams(op.RestPath)
 
@@ -1080,7 +1099,7 @@ func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *
 		Path:                         path,
 		RoutePath:                    strings.TrimPrefix(path, "/api"),
 		Method:                       method,
-		HandlerName:                  implName + "Handler",
+		HandlerName:                  handlerName(namespace, op.Name),
 		ImplName:                     implName,
 		ShortImplName:                shortImplName,
 		Namespace:                    namespace,
@@ -1362,15 +1381,12 @@ func (m *typeMapper) isInputType(ref ir.TypeRef) bool {
 	}
 }
 
+// findTypeDef finds an object type of the schema or of a dependency, in
+// the order a reference's target is found (ir.LookupScopes): the schema's
+// own, the dependency an import names it in, then the rest by name.
 func (m *typeMapper) findTypeDef(name string) (*ir.TypeDef, bool) {
-	if typeDef, ok := m.schema.Types[name]; ok {
-		return typeDef, true
-	}
-	for _, dep := range m.dependencies {
-		if dep == nil {
-			continue
-		}
-		if typeDef, ok := dep.Types[name]; ok {
+	for _, scope := range ir.LookupScopes(m.schema, m.dependencies, name) {
+		if typeDef, ok := scope.Schema.Types[name]; ok {
 			return typeDef, true
 		}
 	}
@@ -1409,6 +1425,8 @@ func (m *typeMapper) mapArgument(arg *ir.ArgumentDef) (Param, error) {
 		ValidateListMin:   arg.ValidateListMin,
 		ValidateListMax:   arg.ValidateListMax,
 		ValidatePattern:   arg.ValidatePattern,
+		Reference:         resolveReference(m.schema, m.dependencies, arg.References),
+		Search:            arg.Search,
 	}
 	m.applyGoMapping(&param, arg.TypeRef.Name)
 	return param, nil
@@ -1488,8 +1506,8 @@ func (m *typeMapper) inputTypeFields(inputTypeName string) []Param {
 	return m.fieldsFromTypeDef(typeDef)
 }
 
-// fieldsFromTypeDef maps a type's fields to Params, with their shape and
-// Validate<> bounds.
+// fieldsFromTypeDef maps a type's fields to Params, with their shape,
+// Validate<> bounds and reference.
 func (m *typeMapper) fieldsFromTypeDef(typeDef *ir.TypeDef) []Param {
 	var fields []Param
 	for _, field := range typeDef.Fields {
@@ -1508,6 +1526,7 @@ func (m *typeMapper) fieldsFromTypeDef(typeDef *ir.TypeDef) []Param {
 			ValidateListMin:   field.ValidateListMin,
 			ValidateListMax:   field.ValidateListMax,
 			ValidatePattern:   field.ValidatePattern,
+			Reference:         m.fieldReference(typeDef, field),
 		}
 		m.applyGoMapping(&param, field.TypeRef.Name)
 		fields = append(fields, param)
