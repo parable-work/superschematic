@@ -1,7 +1,6 @@
 package gcp_test
 
 import (
-	"errors"
 	"slices"
 	"strings"
 	"testing"
@@ -68,33 +67,37 @@ func TestRustJobAndWorker(t *testing.T) {
 	}
 }
 
-// TestBucketConnectorRefusesARustJobAndWorker: with shop-orders in Rust
-// listing shop-media, its job's and its worker's bucket edges, which are
-// its own (D52, D53), are refused as its server's is: the Rust runtime has
-// no Bucket, and D57 leaves buckets from a Rust server out. Nothing else
-// fails.
-func TestBucketConnectorRefusesARustJobAndWorker(t *testing.T) {
-	services := stacktest.InRust(withBuckets([]string{stacktest.ShopOrders.Name}, stacktest.ShopMedia), stacktest.ShopOrders.Name)
-	_, err := stack.Resolve(assemble(t), stack.Input{Stack: shop(), Services: services, Environment: "Staging"})
-	var errs *stack.Errors
-	if !errors.As(err, &errs) {
-		t.Fatalf("err = %v, want resolution errors", err)
-	}
-	var got []string
-	for _, e := range errs.List {
-		if e.Code != stack.CodeLowering {
-			t.Errorf("a %s failure: %s", e.Code, e.Message)
+// TestBucketConnectorServesARustJobAndWorker: with shop-orders in Rust
+// listing shop-media, its server's, its job's and its worker's bucket
+// edges, which are each its own (D52, D53), lower as a Go one's do (D54):
+// the object user role on the bucket and the right to sign as its own
+// account, for its own account, and the bucket's name.
+func TestBucketConnectorServesARustJobAndWorker(t *testing.T) {
+	reg := assemble(t)
+	services := withBuckets([]string{stacktest.ShopOrders.Name}, stacktest.ShopMedia)
+	goEnv := resolve(t, reg, shop(), services, "Staging")
+	env := resolve(t, reg, shop(), stacktest.InRust(services, stacktest.ShopOrders.Name), "Staging")
+	for name, connector := range map[string]string{
+		"Orders":                     gcp.BucketConnector,
+		stacktest.ShipOrdersJob:      gcp.JobBucketConnector,
+		stacktest.FulfilOrdersWorker: gcp.WorkerBucketConnector,
+	} {
+		if d := env.Deployable(name); d == nil || d.Language != registry.APILanguageRust {
+			t.Fatalf("%s is %+v, want a Rust deployable", name, d)
 		}
-		got = append(got, e.Message)
-	}
-	for _, d := range []string{"server Orders", "job " + stacktest.ShipOrdersJob, "worker " + stacktest.FulfilOrdersWorker} {
-		kind, _, _ := strings.Cut(d, " ")
-		want := d + " is a RUST " + kind + ", which has no Bucket in its runtime to reach bucket shop-media with: buckets from a Rust server are not built (D57)"
-		if !slices.ContainsFunc(got, func(m string) bool { return strings.Contains(m, want) }) {
-			t.Errorf("no failure says %q in:\n%s", want, strings.Join(got, "\n"))
+		edge := "bucket:" + name + "->shop-media"
+		i := slices.IndexFunc(env.Edges, func(e *ir.Edge) bool { return e.ID == edge })
+		if i < 0 || env.Edges[i].Connector != connector {
+			t.Fatalf("%s is not connected by %s", edge, connector)
 		}
-	}
-	if len(got) != 3 {
-		t.Errorf("got %d failures, want the three bucket edges':\n%s", len(got), strings.Join(got, "\n"))
+		ids, goIDs := ownedBy(env, edge), ownedBy(goEnv, edge)
+		if want := name + ".sign-as-self, " + name + ".storage.shop-media"; strings.Join(ids, ", ") != want || !slices.Equal(ids, goIDs) {
+			t.Errorf("%s produces %v, want %s, as a Go one's produces %v", edge, ids, want, goIDs)
+		}
+		for _, id := range ids {
+			wantJSON(t, id, node(t, env, id).Properties, mustJSON(t, node(t, goEnv, id).Properties))
+		}
+		wantJSON(t, name+"'s bucket connection", binding(t, env, name, "SHOP_MEDIA_BUCKET").Value,
+			`{"name":{"$output":{"resource":"shop-media.bucket","name":"name"}}}`)
 	}
 }
