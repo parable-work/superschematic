@@ -55,10 +55,10 @@ interface BunRuntime {
 
 const logger = createLogger({ stack: 'ts-stack', server: 'ts-shop' });
 
-/** A database /readyz pings, by its service. */
+/** What /readyz checks, by its name: a database, by a ping. */
 interface Dependency {
   readonly name: string;
-  readonly pool: Pool;
+  check(): Promise<void>;
 }
 
 /** The exit status of a process a signal ends at once: 128 and its number. */
@@ -75,8 +75,9 @@ async function main(): Promise<void> {
   // it is first used, so the server starts while its database is not up yet
   // and /readyz reports it.
   const tsDbPool = await connect('ts-db', 'TS_DB_DATABASE', tsShopConfig.TS_DB_DATABASE);
+  const pools: readonly Pool[] = [tsDbPool];
   const dependencies: readonly Dependency[] = [
-    { name: 'ts-db', pool: tsDbPool },
+    { name: 'ts-db', check: () => ping(tsDbPool, READINESS_TIMEOUT_MS) },
   ];
 
   // One client per API called, shared by every API that calls it.
@@ -93,7 +94,7 @@ async function main(): Promise<void> {
     if (draining) return c.json({ status: 'draining' }, 503);
     const failed = await Promise.all(
       dependencies.map(dependency =>
-        ping(dependency.pool, READINESS_TIMEOUT_MS).then(
+        dependency.check().then(
           () => undefined,
           (error: unknown) => {
             logger.warn('not ready', { dependency: dependency.name, error });
@@ -156,7 +157,7 @@ async function main(): Promise<void> {
     stopping = true;
     draining = true;
     logger.info('shutting down', { signal });
-    drain(server, dependencies.map(dependency => dependency.pool)).then(
+    drain(server, pools).then(
       () => {
         logger.info('stopped');
         process.exit(0);

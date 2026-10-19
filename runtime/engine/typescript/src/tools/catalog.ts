@@ -77,7 +77,7 @@ import { BEHAVIOR_NAME, type BehaviorDeclaration, type BehaviorOperationDeclarat
 import type { BehaviorRegistry } from '../behaviors/registry.js';
 import { jsonCopy } from '../behaviors/json.js';
 import { synchronous } from '../behaviors/storage.js';
-import { BehaviorError, EngineError } from '../errors.js';
+import { BehaviorError, EngineError, UnknownToolError } from '../errors.js';
 import { isPlainObject } from '../instances/patch.js';
 import { MAX_FILTER_VALUES, type Filterable } from '../instances/filters.js';
 import type { OwnIndex } from '../instances/indexes.js';
@@ -271,16 +271,9 @@ export interface ToolSummary {
  */
 export type ToolFilter = (principal: Principal, tool: ToolSummary, namespace: string) => boolean;
 
-/** A tool call named a handle the namespace has no tool for, as the caller sees it. */
-export class UnknownToolError extends EngineError {
-  readonly tool: string;
-
-  constructor(tool: string, namespace: string) {
-    super('not_found', `namespace ${namespace} has no tool ${JSON.stringify(tool)}`);
-    this.name = 'UnknownToolError';
-    this.tool = tool;
-  }
-}
+// UnknownToolError is errors.ts's, beside the other refusals, so the Rust
+// engine's facade restores it without loading the catalog.
+export { UnknownToolError } from '../errors.js';
 
 type ToolKind =
   | 'create'

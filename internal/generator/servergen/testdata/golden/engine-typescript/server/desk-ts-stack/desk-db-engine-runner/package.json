@@ -1,0 +1,22 @@
+{
+  "name": "@schemas/desk-ts-stack-desk-db-engine-runner-server",
+  "version": "0.0.0",
+  "description": "Runner desk-db-engine-runner of stack desk-ts-stack, which superschematic writes on every build of the stack. DO NOT EDIT.",
+  "private": true,
+  "type": "module",
+  "main": "main.ts",
+  "scripts": {
+    "start": "bun main.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@schemas/desk-db-types": "workspace:*",
+    "@superschematic/engine": "*",
+    "@superschematic/http-runtime": "*",
+    "hono": "4.13.8"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.9",
+    "typescript": "5.9.3"
+  }
+}

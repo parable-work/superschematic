@@ -422,15 +422,15 @@ func variables(t *testing.T, field string, value any) []string {
 func bunServer(t *testing.T, bun, dir string, env ...string) *started {
 	t.Helper()
 	port := freePort(t)
-	var out strings.Builder
+	out := &syncBuilder{}
 	cmd := exec.Command(bun, servergen.TypeScriptMainFile)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), append(env, "PORT="+port)...)
-	cmd.Stdout, cmd.Stderr = &out, &out
+	cmd.Stdout, cmd.Stderr = out, out
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	s := &started{cmd: cmd, base: "http://127.0.0.1:" + port, out: &out}
+	s := &started{cmd: cmd, base: "http://127.0.0.1:" + port, out: out}
 	t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
 	deadline := time.Now().Add(30 * time.Second)
 	for {
@@ -644,7 +644,9 @@ func TestTheTypeScriptDockerfileBuildsAnImageThatServes(t *testing.T) {
 		}
 	}
 	f := loadTypeScriptFixture(t)
-	f.build(t, repoRoot, tsFakePaths(repoRoot), append(slices.Clone(tsAPIs), tsCloudStack)...)
+	// ts-db's TypeScript types export the queue ts-shop's worker claims
+	// (D53), which the workspace's install needs.
+	f.build(t, repoRoot, tsFakePaths(repoRoot), append([]string{"ts-db"}, append(slices.Clone(tsAPIs), tsCloudStack)...)...)
 	out := filepath.Join(repoRoot, "schemas", "dist")
 	install := exec.Command(bun, "install")
 	install.Dir = out

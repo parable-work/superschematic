@@ -1,7 +1,7 @@
 {
   "name": "@superschematic/engine",
   "version": "0.0.0",
-  "description": "An engine that runs a schema with no generated code: it takes schema-file documents as data, versions them, and stores their instances in one SQLite file. Runs on Node.js 24 and Bun. Needs @superschematic/schema-runtime, @superschematic/schema-ir, @superschematic/http-runtime and superscalar next to it in node_modules; see scripts/link-local-deps.mjs. Depends on @superschematic/versiongraph, whose engine and SQLite adapter the core Branches behavior runs. The main entry point imports the HTTP runtime's framework-free entry point for its default permission matcher; the ./http subpath serves an engine over HTTP on the HTTP runtime and Hono, and the ./mcp subpath serves its MCP tools there too on @modelcontextprotocol/server. Hono and the MCP SDK are optional peer dependencies. The ./client subpath is a typed client for the HTTP API, its event stream and the controller pattern over it, which imports nothing of the server side, Node.js or the HTTP runtime, so it runs in a browser or a worker runtime.",
+  "description": "An engine that runs a schema with no generated code: it takes schema-file documents as data, versions them, and stores their instances in one SQLite file. Runs on Node.js 24 and Bun. Needs @superschematic/schema-runtime, @superschematic/schema-ir, @superschematic/http-runtime and superscalar next to it in node_modules; see scripts/link-local-deps.mjs. Depends on @superschematic/versiongraph, whose engine and SQLite adapter the core Branches behavior runs. The main entry point imports the HTTP runtime's framework-free entry point for its default permission matcher; the ./http subpath serves an engine over HTTP on the HTTP runtime and Hono, and the ./mcp subpath serves its MCP tools there too on @modelcontextprotocol/server. Hono and the MCP SDK are optional peer dependencies. The ./server subpath is what a server on the Rust engine opens and mounts (D58): openEngineInBackground, and engineApp and engineMcp over the engine it opens, loading the Node-API addon's facade and the HTTP runtime alone. The ./client subpath is a typed client for the HTTP API, its event stream and the controller pattern over it, which imports nothing of the server side, Node.js or the HTTP runtime, so it runs in a browser or a worker runtime.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -17,6 +17,10 @@
     "./mcp": {
       "types": "./dist/mcp/index.d.ts",
       "import": "./dist/mcp/index.js"
+    },
+    "./server": {
+      "types": "./dist/server/index.d.ts",
+      "import": "./dist/server/index.js"
     },
     "./client": {
       "types": "./dist/client/index.d.ts",

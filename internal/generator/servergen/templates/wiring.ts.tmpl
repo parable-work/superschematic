@@ -20,6 +20,9 @@ APIs.
 {{- range .Buckets }}
     {{ .Field }}: {{ .Bucket.Var }},
 {{- end }}
+{{- if .Engine }}
+    engine: {{ .Engine.Var }}.background,
+{{- end }}
     logger: logger.child({ api: {{ tsQuote .Service }} }),
   };
 {{- end }}
@@ -118,6 +121,14 @@ function {{ .Constructor }}(endpoint: Service): {{ .Module }}.{{ .Class }} {
   pools.push({{ .Var }});
 {{- end }}
 {{- end }}
+{{- range .Engines }}
+
+  // The engine of {{ .Service }}, an engine database (D58), for the API's Deps:
+  // opened on the same database in the background, retrying until it
+  // answers. It deploys nothing, which the servers do.
+  const {{ .Var }} = await openEngine({{ tsQuote .Service }}, {{ tsQuote .Database.Field }}, {{ .Database.From }}, {{ .Document }}, {{ .PolicyLiteral }}{{ .OpenOptions }});
+  engines.push({{ .Var }});
+{{- end }}
 {{- if .Clients }}
 
   // One client per API called.
@@ -140,7 +151,8 @@ function {{ .Constructor }}(endpoint: Service): {{ .Module }}.{{ .Class }} {
 const exitCodes: Readonly<Record<string, number>> = { SIGINT: 130, SIGTERM: 143 };
 
 /**
- * Runs the {{ .Kind }} until it ends or SIGTERM or SIGINT stops it{{ if .Databases }}, then ends
+ * Runs the {{ .Kind }} until it ends or SIGTERM or SIGINT stops it{{ if .Engines }}, then closes the
+ * engines and ends the pools{{ else if .Databases }}, then ends
  * the pools{{ end }}. A second signal exits at once.
  */
 function main(): void {
@@ -154,13 +166,19 @@ function main(): void {
   process.on('SIGTERM', () => onSignal('SIGTERM'));
   process.on('SIGINT', () => onSignal('SIGINT'));
   const pools: { end(): Promise<void> }[] = [];
+{{- if .Engines }}
+  const engines: { close(): void }[] = [];
+{{- end }}
 {{- if .Job }}
   const started = Date.now();
 {{- end }}
   const end = (code: number): void => {
+{{- if .Engines }}
+    for (const engine of engines) engine.close();
+{{- end }}
     void Promise.allSettled(pools.map(pool => pool.end())).then(() => process.exit(code));
   };
-  run(stop.signal, pools).then(
+  run(stop.signal, pools{{ if .Engines }}, engines{{ end }}).then(
     () => {
 {{- if .Job }}
       logger.info('job done', { took: (Date.now() - started) / 1000 });
@@ -177,4 +195,170 @@ function main(): void {
     }
   );
 }
+{{- end }}
+
+{{- define "ts-engine" -}}
+/**
+ * What an engine database's engine document holds (its TypeScript types'
+ * ./engine entry, engineDocument): the namespace its engine types live in,
+ * the tool options and the meta-schema the engine reads them with, and one
+ * schema-file document per engine type (D58).
+ */
+interface EngineDocumentOf {
+  readonly namespace: string;
+  readonly tools: NativeEngineOptions['tools'];
+  readonly metaSchema: NativeEngineOptions['metaSchema'];
+  readonly schemas: readonly unknown[];
+}
+
+/** What runs on an engine once it opens, before it is handed out{{ if not .Background }}: the server's deploy{{ else if .Runner }}: the runner's start{{ end }}. */
+type EngineSetup = (engine: AsyncNativeEngine, document: EngineDocumentOf, log: Logger) => Promise<void>;
+
+/**
+ * An engine opened in the background, and what serves its database's
+ * connection, which close releases after the engine: a Cloud SQL
+ * connection's socket.
+ */
+interface OpenedEngine {
+  readonly background: EngineBackground;
+  close(): void;
+}
+
+/**
+ * Opens, in the background, the engine of the engine database service on
+ * the database the field named field holds, db, with document, its engine
+ * document, and the access policy policy. behaviors are the work queue's
+ * the engine types compose, which the engine's addon carries and registers
+ * by name after the core's. runner, for an engine's runner, is the
+ * principal its reactions and schedules act as. setup runs on the engine
+ * once it opens; none sets nothing up. Each attempt that fails is logged
+ * with the wait before the next.
+ */
+async function openEngine(
+  service: string,
+  field: string,
+  db: Database,
+  document: EngineDocumentOf,
+  policy: NativeEngineOptions['policy'],
+  options: { readonly behaviors?: readonly string[]; readonly runner?: Principal; readonly setup?: EngineSetup } = {}
+): Promise<OpenedEngine> {
+  const { url, release } = await engineURL(field, db);
+  const log = logger.child({ engine: service, namespace: document.namespace });
+  const setup = options.setup;
+  const background = openEngineInBackground(
+    {
+      postgres: { url },
+      policy,
+      namespaces: { names: [document.namespace] },
+      metaSchema: document.metaSchema,
+      tools: document.tools,
+      ...(options.behaviors !== undefined ? { behaviors: options.behaviors } : {}),
+      ...(options.runner !== undefined ? { runner: { principal: options.runner } } : {}),
+    },
+    {
+      ...(setup !== undefined ? { setup: (engine: AsyncNativeEngine) => setup(engine, document, log) } : {}),
+      onError: (error, retryMs) => log.warn('engine not open', { error, retry: retryMs / 1000 }),
+      onOpen: engine => log.info('engine open', { dialect: engine.dialect }),
+    }
+  );
+  return {
+    background,
+    close: () => {
+      background.close();
+      release();
+    },
+  };
+}
+
+/**
+ * What the engine opens the database field named field on, db: its
+ * connection string, field_URL, or, for a Cloud SQL connector
+ * configuration, a socket the Cloud SQL Node connector serves with IAM
+ * database authentication (cloudSqlSocket). release stops what serves it.
+ */
+async function engineURL(field: string, db: Database): Promise<{ readonly url: string; readonly release: () => void }> {
+  if ('cloudSql' in db) {
+{{- if .CloudSQL }}
+    try {
+      const socket = await cloudSqlSocket(db.cloudSql);
+      return { url: socket.url, release: () => socket.close() };
+    } catch (error) {
+      throw new Error(`${field}: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+    }
+{{- else }}
+    throw new Error(
+      `${field} is a Cloud SQL connector configuration, which {{ .Kind }} {{ .Name }} does not depend on: no environment of stack {{ .Stack }} placed its databases on Cloud SQL when it was built; set ${field}_URL, or build the stack again`
+    );
+{{- end }}
+  }
+  return { url: db.url, release: () => undefined };
+}
+{{- if not .Background }}
+
+/**
+ * Defines and publishes document's schemas in its namespace, as the
+ * engine's own principal, before the engine is ready: a schema whose live
+ * version has the document's hash is left as it is, and a changed one
+ * becomes its next version if the compatibility rule allows it.
+ */
+async function deployEngine(engine: AsyncNativeEngine, document: EngineDocumentOf, log: Logger): Promise<void> {
+  let deployed;
+  try {
+    deployed = await engine.deploy(document.schemas, { namespace: document.namespace });
+  } catch (error) {
+    throw new Error(`deploy: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+  }
+  for (const schema of deployed) {
+    log.info('engine schema deployed', { schema: schema.name, version: schema.version, defined: schema.defined, published: schema.published });
+  }
+}
+
+/**
+ * Resolves while engine is open and ready, and rejects with why not, or
+ * when it does not answer within timeoutMs: what /readyz asks of each
+ * engine.
+ */
+async function engineReady(engine: OpenedEngine, timeoutMs: number): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`the engine did not answer within ${timeoutMs} ms`)), timeoutMs);
+  });
+  try {
+    await Promise.race([engine.background.ready(), timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** The callers an engine's routes admit: an API's identity service and its service authenticator. */
+type EngineCallers = Pick<EngineHttpOptions, 'identity' | 'authenticateService'>;
+
+/**
+ * Mounts the routes of engine at prefix on app: its HTTP API, its event
+ * stream and its MCP endpoint, which answer 503 unavailable until it opens.
+ * callers are those of the API that serves them, as its own routes admit
+ * them: its identity service authenticates the end user (D50), with their
+ * roles' permissions, and answers its trusted origins' CORS on the routes,
+ * the API serving the user model's routes itself; a calling service its
+ * service authenticator verifies (D37) stands in for an end user when the
+ * request has no session, and one it refuses is answered in the engine's
+ * place. Aborting streams ends every event stream.
+ */
+function mountEngine(app: Hono, engine: OpenedEngine, prefix: string, callers: EngineCallers, streams: AbortSignal): void {
+  app.route(prefix, engineApp(engine.background, { ...callers, identityRoutes: { sessions: false }, timeoutSeconds: ENGINE_TIMEOUT_SECONDS, done: streams }));
+  app.route(prefix, engineMcp(engine.background, { ...callers, done: streams }));
+}
+{{- end }}
+{{- if .Runner }}
+
+/** Starts the engine's runner on its own thread. */
+async function startRunner(engine: AsyncNativeEngine, _document: EngineDocumentOf, log: Logger): Promise<void> {
+  try {
+    await engine.runner.start();
+  } catch (error) {
+    throw new Error(`start the runner: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+  }
+  log.info('runner started');
+}
+{{- end }}
 {{- end }}

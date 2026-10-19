@@ -8,8 +8,13 @@
 // @envVars settings and the fields its edges derive, one variable per
 // member (section 3.4). It listens on $PORT, 8080 when unset, answers
 // GET /healthz while the process runs and GET /readyz while its databases
+{{- if .Engines }}
+// answer and its engines are open (D58), and on SIGTERM or SIGINT stops
+// taking requests and lets those in flight finish.
+{{- else }}
 // answer, and on SIGTERM or SIGINT stops taking requests and lets those in
 // flight finish.
+{{- end }}
 //
 // Each API's implementation is the package at the naming file's
 // [implementation_paths] typescript template, which the build scaffolded
@@ -24,6 +29,17 @@
 // the identity runtime over that database (D50), with the identity config
 // its identity config field holds.
 {{- end }}
+{{- if .Engines }}
+//
+// An API whose database is an engine database, a DB service whose types
+// compose behaviors, holds the engine of that database in its Deps (D58):
+// the server opens it through the engine's Node-API addon in the
+// background, retrying until the database answers, defines and publishes
+// the database's engine document before /readyz reports the engine ready,
+// and mounts the engine's routes, its event stream and its MCP endpoint at
+// the database's engine mount, behind the callers the API's own routes
+// admit.
+{{- end }}
 
 import { Hono } from 'hono';
 import { {{ join .RuntimeImports ", " }} } from '{{ .Naming.HTTPRuntimeNpmPackage }}';
@@ -32,8 +48,11 @@ import { errorHandler, notFoundHandler } from '{{ .Naming.HTTPRuntimeNpmPackage 
 import { parseIdentityConfigJSON, postgresIdentityStore, type IdentityConfig } from '{{ .Naming.HTTPRuntimeNpmPackage }}/identity';
 {{- end }}
 {{- if .Databases }}
-import { connectPostgres, ping } from '{{ .Naming.HTTPRuntimeNpmPackage }}/postgres';
+import { {{ if .CloudSQL }}{{ if .Engines }}cloudSqlSocket, {{ end }}{{ end }}connectPostgres, ping } from '{{ .Naming.HTTPRuntimeNpmPackage }}/postgres';
 import type { Pool } from 'pg';
+{{- end }}
+{{- if .Engines }}
+import { {{ join .EngineImports ", " }} } from '{{ .Naming.EngineNpmPackage }}/server';
 {{- end }}
 {{- if .Buckets }}
 import { openBucket } from '{{ .Naming.HTTPRuntimeNpmPackage }}/gcs';
@@ -50,6 +69,9 @@ import * as {{ .Module }} from '{{ .Package }}';
 import { identityDescriptor as {{ .Descriptor }} } from '{{ .DescriptorModule }}';
 {{- end }}
 {{- end }}
+{{- range .Engines }}
+import { engineDocument as {{ .Document }} } from '{{ .DocumentModule }}';
+{{- end }}
 
 /** The port the server listens on when $PORT is unset. */
 const DEFAULT_PORT = 8080;
@@ -60,6 +82,11 @@ const SHUTDOWN_TIMEOUT_MS = 10_000;
 
 /** How long each check /readyz makes may take. */
 const READINESS_TIMEOUT_MS = 2_000;
+{{- end }}
+{{- if .Engines }}
+
+/** How long each of an engine's routes may take but its event stream's and MCP's, whose responses last as long as their clients. */
+const ENGINE_TIMEOUT_SECONDS = 30;
 {{- end }}
 
 /**
@@ -82,10 +109,10 @@ interface BunRuntime {
 const logger = createLogger({ stack: {{ tsQuote .Stack }}, server: {{ tsQuote .Name }} });
 {{- if .Databases }}
 
-/** A database /readyz pings, by its service. */
+/** What /readyz checks, by its name: a database, by a ping{{ if .Engines }}, and an engine, open and its database answering{{ end }}. */
 interface Dependency {
   readonly name: string;
-  readonly pool: Pool;
+  check(): Promise<void>;
 }
 {{- end }}
 
@@ -112,11 +139,7 @@ async function main(): Promise<void> {
 {{- range .Databases }}
   const {{ .Var }} = await connect({{ tsQuote .Service }}, {{ tsQuote .Field }}, {{ .From }});
 {{- end }}
-  const dependencies: readonly Dependency[] = [
-{{- range .Databases }}
-    { name: {{ tsQuote .Service }}, pool: {{ .Var }} },
-{{- end }}
-  ];
+  const pools: readonly Pool[] = [{{ range $i, $d := .Databases }}{{ if $i }}, {{ end }}{{ $d.Var }}{{ end }}];
 {{- range .Databases }}
 {{- if .Store }}
 
@@ -125,6 +148,29 @@ async function main(): Promise<void> {
   const {{ .Store }} = postgresIdentityStore({{ .Var }}, {{ .Descriptor }});
 {{- end }}
 {{- end }}
+{{- range .Engines }}
+
+  // The engine of {{ .Service }}, an engine database (D58), opened on the same
+  // database in the background, as the pool connects when first used, so
+  // /readyz reports it until it opens and deploys the database's engine
+  // document.
+  const {{ .Var }} = await openEngine({{ tsQuote .Service }}, {{ tsQuote .Database.Field }}, {{ .Database.From }}, {{ .Document }}, {{ .PolicyLiteral }}{{ .OpenOptions "setup: deployEngine" }});
+{{- end }}
+{{- if .Engines }}
+  const engines: readonly OpenedEngine[] = [{{ range $i, $e := .Engines }}{{ if $i }}, {{ end }}{{ $e.Var }}{{ end }}];
+
+  // Aborted as the server shuts down, which ends every event stream of the
+  // engines' routes, so the shutdown waits for none.
+  const engineStreams = new AbortController();
+{{- end }}
+  const dependencies: readonly Dependency[] = [
+{{- range .Databases }}
+    { name: {{ tsQuote .Service }}, check: () => ping({{ .Var }}, READINESS_TIMEOUT_MS) },
+{{- end }}
+{{- range .Engines }}
+    { name: {{ tsQuote .ReadinessName }}, check: () => engineReady({{ .Var }}, READINESS_TIMEOUT_MS) },
+{{- end }}
+  ];
 {{- end }}
 {{- if .Clients }}
 
@@ -150,7 +196,7 @@ async function main(): Promise<void> {
 {{- if .Databases }}
     const failed = await Promise.all(
       dependencies.map(dependency =>
-        ping(dependency.pool, READINESS_TIMEOUT_MS).then(
+        dependency.check().then(
           () => undefined,
           (error: unknown) => {
             logger.warn('not ready', { dependency: dependency.name, error });
@@ -179,7 +225,17 @@ async function main(): Promise<void> {
     {{ .Module }}.identityService({ store: {{ .Database.Store }}, config: identityConfig({{ tsQuote .IdentityField }}) })
   );
 {{- end }}
+{{- if .ServiceAuthenticator }}
+  // The service authenticator over its callers field (D37), which its
+  // routes and the engine's verify a calling service with.
+  const {{ .ServiceAuthenticator }} = serviceAuthenticator({{ .Config }}.{{ .Callers }});
+{{- end }}
   app.route('/', {{ .Module }}.buildRouter({{ .Implementations }}{{ if .RouterOptions }}, { {{ join .RouterOptions ", " }} }{{ end }}));
+{{- if .MountsEngine }}
+  // The engine's routes, its event stream and its MCP endpoint (D58),
+  // behind the callers the API's own routes admit.
+  mountEngine(app, {{ .Engine.Var }}, {{ tsQuote .Engine.Mount }}, { {{ join .EngineCallers ", " }} }, engineStreams.signal);
+{{- end }}
 {{- end }}
   app.notFound(notFoundHandler());
   app.onError(errorHandler());
@@ -190,14 +246,27 @@ async function main(): Promise<void> {
   // request is by the operations that take it, and hands a preflight from
   // another origin on to the app, so an identity API's CORS still answers
   // its trusted origins (section 8.10).
+{{- range .Engines }}
+{{- if .Routes }}
+  // The engine's routes the API mounts, which its CORS answers too (D58).
+  const {{ .Routes }} = engineRouteSpecs({{ tsQuote .Mount }});
+{{- end }}
+{{- end }}
   const handle = corsHandler(
     [
 {{- range .APIs }}
 {{- if .CORS }}
+{{- if and .MountsEngine .Engine.Routes }}
+      {
+        policy: { origins: {{ .CORS }}, methods: corsMethods([...Object.values({{ .Module }}.operationSpecs), ...{{ .Engine.Routes }}]) },
+        match: matchOperations([...Object.values({{ .Module }}.operationSpecs), ...{{ .Engine.Routes }}]),
+      },
+{{- else }}
       {
         policy: { origins: {{ .CORS }}, methods: corsMethods(Object.values({{ .Module }}.operationSpecs)) },
         match: matchOperations(Object.values({{ .Module }}.operationSpecs)),
       },
+{{- end }}
 {{- end }}
 {{- end }}
     ],
@@ -229,7 +298,10 @@ async function main(): Promise<void> {
     stopping = true;
     draining = true;
     logger.info('shutting down', { signal });
-    drain(server{{ if .Databases }}, dependencies.map(dependency => dependency.pool){{ end }}).then(
+{{- if .Engines }}
+    engineStreams.abort();
+{{- end }}
+    drain(server{{ if .Databases }}, pools{{ end }}{{ if .Engines }}, engines{{ end }}).then(
       () => {
         logger.info('stopped');
         process.exit(0);
@@ -282,14 +354,19 @@ function identityConfig(field: string): IdentityConfig | undefined {
 
 {{ template "ts-connect" . }}
 {{- end }}
+{{- if .Engines }}
+
+{{ template "ts-engine" . }}
+{{- end }}
 {{- template "ts-clients" . }}
 
 /**
  * Stops taking requests and gives those in flight SHUTDOWN_TIMEOUT_MS to
- * finish, then closes the connections still open.{{ if .Databases }} It ends the pools last.{{ end }}
+ * finish, then closes the connections still open.{{ if .Engines }} It closes the engines
+ * after the requests in flight, then ends the pools.{{ else if .Databases }} It ends the pools last.{{ end }}
  * It rejects when requests were still in flight.
  */
-async function drain(server: BunServer{{ if .Databases }}, pools: readonly Pool[]{{ end }}): Promise<void> {
+async function drain(server: BunServer{{ if .Databases }}, pools: readonly Pool[]{{ end }}{{ if .Engines }}, engines: readonly OpenedEngine[]{{ end }}): Promise<void> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timedOut = new Promise<boolean>(resolve => {
     timer = setTimeout(() => resolve(true), SHUTDOWN_TIMEOUT_MS);
@@ -297,6 +374,9 @@ async function drain(server: BunServer{{ if .Databases }}, pools: readonly Pool[
   const late = await Promise.race([server.stop().then(() => false), timedOut]);
   clearTimeout(timer);
   if (late) await server.stop(true);
+{{- if .Engines }}
+  for (const engine of engines) engine.close();
+{{- end }}
 {{- if .Databases }}
   await Promise.allSettled(pools.map(pool => pool.end()));
 {{- end }}

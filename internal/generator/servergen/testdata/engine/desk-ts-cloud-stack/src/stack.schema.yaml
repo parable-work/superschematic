@@ -1,0 +1,25 @@
+# desk-ts-stack's server and runner in two environments: Staging on
+# stacktest's fake target, whose sql connector derives a Cloud SQL
+# connector configuration as the gcp target's does, and Local on the local
+# target. desk-ts-api's server and desk-db's runner depend on the Cloud SQL
+# Node connector, and the engine reaches Cloud SQL through a socket its
+# local proxy serves (D58).
+kind: Stack
+types:
+  DeskTsCloud:
+    name: DeskTsCloud
+    role: EmbeddedStruct
+    stack:
+      deploy:
+        - { name: desk-ts-api, kind: API }
+  Staging:
+    name: Staging
+    role: EmbeddedStruct
+    environment:
+      target: fake
+      values: { project: acme-staging, region: us-east1 }
+  Local:
+    name: Local
+    role: EmbeddedStruct
+    environment:
+      target: local

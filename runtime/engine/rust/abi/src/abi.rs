@@ -327,8 +327,14 @@ fn called(handle: &Handle, request: &[u8]) -> Result<Vec<u8>, Failure> {
             .map_err(|error| Failure::of(&error))?;
     }
     match op {
-        "deploy" => return deploy(engine, args).map(|result| written(&result)),
-        "health" => return Ok(written(&health(engine))),
+        // A server's calls (superschematic_engine::calls::deploy, health),
+        // which take no principal.
+        "deploy" => {
+            return calls::deploy(engine, args)
+                .map(|result| written(&result))
+                .map_err(|error| Failure::of(&error))
+        }
+        "health" => return Ok(written(&calls::health(engine))),
         "abi" => return Ok(written(&info(engine, handle.project))),
         _ => {}
     }
@@ -344,63 +350,6 @@ fn called(handle: &Handle, request: &[u8]) -> Result<Vec<u8>, Failure> {
         Ok(Some(result)) => Ok(written(&result)),
         Err(error) => Err(Failure::of(&error)),
     }
-}
-
-// deploy defines and publishes a server's schema documents as the engine's
-// own principal, each one whose live version has its hash left as it is
-// (Engine::deploy).
-fn deploy(engine: &Engine, args: &[Value]) -> Result<Value, Failure> {
-    let Some(Value::Array(documents)) = args.first() else {
-        return Err(Failure::usage(
-            "deploy takes [documents, { namespace? }]: a list of schema documents",
-        ));
-    };
-    let namespace = args
-        .get(1)
-        .and_then(Value::as_object)
-        .and_then(|options| member(options, "namespace"))
-        .map(js_string);
-    let deployed = engine
-        .deploy(documents, namespace.as_deref())
-        .map_err(|error| Failure::of(&error))?;
-    Ok(Value::Array(
-        deployed
-            .iter()
-            .map(superschematic_engine::Deployed::to_json)
-            .collect(),
-    ))
-}
-
-// health is what a server's readiness reads: not ready once the engine
-// closed or panicked inside a transaction, or while its database does not
-// answer a read.
-fn health(engine: &Engine) -> Value {
-    let closed = engine.is_closed();
-    let poisoned = engine.poisoned();
-    let error = if closed || poisoned {
-        None
-    } else {
-        engine.events().head().err().map(|error| error.to_string())
-    };
-    let mut out = Map::new();
-    out.insert(
-        "ready".into(),
-        Value::Bool(!closed && !poisoned && error.is_none()),
-    );
-    out.insert("closed".into(), Value::Bool(closed));
-    out.insert("poisoned".into(), Value::Bool(poisoned));
-    out.insert(
-        "dialect".into(),
-        Value::from(dialect_name(engine.dialect())),
-    );
-    out.insert(
-        "listening".into(),
-        Value::Bool(engine.db().notifier().listening()),
-    );
-    if let Some(error) = error {
-        out.insert("error".into(), Value::from(error));
-    }
-    Value::Object(out)
 }
 
 /// `eng_http`.

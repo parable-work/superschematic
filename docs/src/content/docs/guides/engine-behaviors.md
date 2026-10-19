@@ -350,14 +350,18 @@ a type the document defines after it.
 
 ### In a generated server
 
-A generated Go or Rust server whose API's database is an engine database
-does this itself (D58): it opens the engine on the database in the
-background, deploys the document before `/readyz` reports the engine
-ready, and mounts the engine's routes, its event stream and its MCP
-endpoint at `/engine/<db>`, behind the API's identity and service
+A generated Go, TypeScript or Rust server whose API's database is an
+engine database does this itself (D58): it opens the engine on the
+database in the background, deploys the document before `/readyz` reports
+the engine ready, and mounts the engine's routes, its event stream and its
+MCP endpoint at `/engine/<db>`, behind the API's identity and service
 callers. The API's `Deps` holds the engine: in Go an
-`*engine.Background`, whose `Wait(ctx)` returns it once it opens; in Rust
-a `superschematic_engine::background::Background`, whose `wait().await`
+`*engine.Background`, whose `Wait(ctx)` returns it once it opens; in
+TypeScript an `EngineBackground` of `@superschematic/engine/server`, whose
+`wait()` resolves with it, every call a promise, the server opening it
+through the engine's Node-API addon and mounting `engineApp` and
+`engineMcp` on its Hono app; in Rust a
+`superschematic_engine::background::Background`, whose `wait().await`
 does, an engine to call off the async threads (`spawn_blocking`). Two
 more keys of the database's `outputs.engine` say how:
 
@@ -387,8 +391,7 @@ The engine's runner, which runs reactions, schedules and Timers'
 deadlines, is a deployable of its own, `<db>-engine-runner`, one instance
 in the language of the first API on the database: a Cloud Run worker pool
 on gcp, a process of its own under `stack dev`. It acts as its deployable's
-name, holding each engine type's name as a permission. A TypeScript
-server opens no engine yet.
+name, holding each engine type's name as a permission.
 
 A Topcoat app (D44) whose API's database is an engine database keeps the
 engine in-process on SQLite: the crate the Topcoat extension writes has
@@ -460,7 +463,10 @@ CGO_LDFLAGS="-L$PWD/dist/engine/lib ..." go build ./...
 ```
 
 A TypeScript server's addon will be the workspace's next member, `napi/`,
-once the Node-API addon exports `export_engine_napi!`; until then the
+once the Node-API addon exports `export_engine_napi!`; until then a
+generated TypeScript server runs the core's addon, which carries the work
+queue's behaviors too, registered by name, so its build refuses only an
+engine database that composes an extension's behavior, and the
 TypeScript engine runs an extension's TypeScript implementation.
 
 A generated Go server and runner on the database link it so: the

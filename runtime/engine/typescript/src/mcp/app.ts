@@ -42,6 +42,7 @@ import { callerAuthenticator, principalOf } from '../http/callers.js';
 import { AsyncNativeEngine } from '../native/async.js';
 import { NativeEngine } from '../native/engine.js';
 import { nativeEngineMcp } from '../native/http.js';
+import { EngineBackground } from '../server/background.js';
 import { engineProblem } from '../http/problems.js';
 import { isPlainObject } from '../instances/patch.js';
 import { UnknownToolError, type ToolFilter } from '../tools/catalog.js';
@@ -72,6 +73,12 @@ export interface EngineMcpOptions extends RouterRuntimeOptions {
    * the caller see.
    */
   tools?: ToolFilter;
+  /**
+   * Aborted when the host stops serving, which ends every response the
+   * endpoint streams, so a server's shutdown waits for none. On the Rust
+   * engine.
+   */
+  done?: AbortSignal;
 }
 
 /** The MCP endpoint's path, relative to where the app is mounted. */
@@ -91,10 +98,10 @@ interface Caller {
  * options. It serves the Rust engine too, openEngineAsync's on Postgres
  * included, as an adapter over the engine's own MCP endpoint (D58).
  */
-export function engineMcp(engine: Engine | AsyncNativeEngine, options: EngineMcpOptions = {}): Hono {
+export function engineMcp(engine: Engine | AsyncNativeEngine | EngineBackground, options: EngineMcpOptions = {}): Hono {
   // The Rust engine serves its own MCP endpoint (D58); this app is its adapter.
-  if (engine instanceof AsyncNativeEngine || (engine as unknown) instanceof NativeEngine) {
-    return nativeEngineMcp(engine as unknown as NativeEngine | AsyncNativeEngine, options);
+  if (engine instanceof AsyncNativeEngine || engine instanceof EngineBackground || (engine as unknown) instanceof NativeEngine) {
+    return nativeEngineMcp(engine as unknown as NativeEngine | AsyncNativeEngine | EngineBackground, options);
   }
   const deployed = options.onError;
   const mapError = async (error: unknown, ctx: RequestContext): Promise<HttpProblem | Response | undefined> =>

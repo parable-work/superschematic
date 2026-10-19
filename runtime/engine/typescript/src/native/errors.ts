@@ -20,11 +20,11 @@ import {
   PreconditionsError,
   SchemaDocumentError,
   UniqueConflictError,
+  UnknownToolError,
   ValueTooLargeError,
   type EngineErrorCode,
 } from '../errors.js';
 import { SqliteError } from '../storage/driver.js';
-import { UnknownToolError } from '../tools/catalog.js';
 import { Bridge } from './bridge.js';
 
 // The EngineError classes by name; each takes its members from details.

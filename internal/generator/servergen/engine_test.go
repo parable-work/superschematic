@@ -258,10 +258,16 @@ func TestEngineEntrypointServes(t *testing.T) {
 	offline.expect(t, http.MethodGet, "/engine/desk-db/namespaces/desk-db/schemas", http.StatusServiceUnavailable, `"code":"unavailable"`, "The engine is not available")
 	offline.expectPreflight(t, "/engine/desk-db/namespaces/desk-db/schemas/Ticket/instances", http.MethodPost)
 	offline.expect(t, http.MethodGet, "/api/summary", http.StatusUnauthorized)
-	offline.stop(t)
-	if !strings.Contains(offline.out.String(), `"msg":"engine not open"`) {
-		t.Errorf("the server did not log the engine's failed opens:\n%s", offline.out.String())
+	// The first attempt to open the engine fails in the background, and is
+	// logged once it does, which a loaded machine may take a while to get to.
+	for wait := time.Now().Add(10 * time.Second); !strings.Contains(offline.out.String(), `"msg":"engine not open"`); {
+		if time.Now().After(wait) {
+			t.Errorf("the server did not log the engine's failed opens:\n%s", offline.out.String())
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
+	offline.stop(t)
 
 	postgres := os.Getenv(engineDatabaseEnv)
 	if postgres == "" {

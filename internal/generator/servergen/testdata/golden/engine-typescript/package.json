@@ -1,0 +1,21 @@
+{
+  "name": "@schemas/workspace",
+  "private": true,
+  "workspaces": [
+    "types/typescript/*",
+    "sdk/typescript/*",
+    "api/*",
+    "server/*/*",
+    "../../typescript/*",
+    "../../web/*"
+  ],
+  "dependencies": {
+    "superscalar": "file:../../third_party/superscalar/bindings/typescript"
+  },
+  "overrides": {
+    "@superschematic/engine": "file:../../runtime/engine/typescript",
+    "@superschematic/http-runtime": "file:../../runtime/http/typescript",
+    "@superschematic/versiongraph": "file:../../runtime/versiongraph/typescript",
+    "superscalar": "file:../../third_party/superscalar/bindings/typescript"
+  }
+}

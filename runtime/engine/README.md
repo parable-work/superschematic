@@ -154,6 +154,44 @@ package.json spec is a `file:` path into this checkout, as the TypeScript
 types tsgen writes for a graph depend on it, and the build replaces bun's
 copy with the package as `runtime/versiongraph/typescript` last built it.
 
+### A TypeScript server: `./server`
+
+`@superschematic/engine/server` is what a server on the Rust engine opens
+and mounts (D58), the twin of the Go binding below, and what a generated
+TypeScript server imports: it loads the addon's facade (`src/native`) and
+the HTTP runtime, none of the TypeScript engine, so a server needs neither
+the schema runtime nor the version graph to run it.
+
+- `openEngineInBackground(options, { setup, retryMinMs, retryMaxMs,
+  onError, onOpen })` opens the engine with `openEngineAsync`, off the
+  JavaScript thread (the addon's `openAsync`, contract 3), and tries again
+  after each failure, the open's or the setup's, waiting a second,
+  doubling to thirty, until it opens or `close()`. Its `EngineBackground`
+  is `current` (the open engine or `undefined`), `engine()` (it, or
+  `EngineNotOpenError` with why the last attempt failed), `wait(signal?)`,
+  `ready()` (open, and `health()` ready) and `close()`. A setup runs on the
+  engine before it is handed out; one that rejects closes the engine, and
+  the next attempt opens it again.
+- `AsyncNativeEngine.deploy(documents, { namespace })` defines and
+  publishes a server's schema documents as the engine's own principal,
+  each one whose live version has its hash left as it is, and `health()`
+  is what readiness reads; both are the engine's calls (`engine::calls`),
+  which the C ABI makes too. Its members are typed as the synchronous
+  engine's, each method returning a promise of what that one returns.
+- `engineApp` and `engineMcp` serve a background engine from the start:
+  every route answers 503 `unavailable` ("The engine is not available")
+  until it opens, after the identity service's CORS and before any
+  authentication, as `enginehttp.Background` does. `identityRoutes: {
+  sessions: false }` takes an API's identity service for its callers and
+  CORS alone, the API serving the user model's routes itself; `done`, a
+  signal, ends every event stream when the host stops serving. They are the
+  `./http` and `./mcp` entries' functions, which take a background engine
+  too.
+- `engineRouteSpecs(prefix)` are the engine's routes under a mount, for a
+  host's CORS.
+- `tsconfig.server.json` emits the entry's modules without checking types,
+  so an image builds them without the TypeScript engine's dependencies.
+
 ### The Go binding
 
 A Go server reaches the Rust engine through `go/`, the module
