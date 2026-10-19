@@ -392,7 +392,8 @@ The Rust engine (D58) runs an extension's behavior from a Rust crate
 that implements the engine's `Behavior` trait, which the extension's
 `BehaviorSpec` names (`Rust`: the crate, its path in the project and
 the expression that registers it). When a DB or General schema's types
-compose such a behavior, the `projectengine` generator writes the
+compose such a behavior, or one of the work queue's, which the core's
+engine archive leaves out, the `projectengine` generator writes the
 project's engine crate, `engine/rust/<service>`, named
 `<rust_crate_prefix><service>-engine`:
 
@@ -444,10 +445,14 @@ A TypeScript server's addon will be the workspace's next member, `napi/`,
 once the Node-API addon exports `export_engine_napi!`; until then the
 TypeScript engine runs an extension's TypeScript implementation.
 
+A generated Go server and runner on the database link it so: the
+checkout's Dockerfile builds the `ffi` member in its engine stage, and
+the generated CI's `check` builds it before it compiles the server.
+
 A schema whose types compose the core's behaviors alone gets no crate,
 since the engine's release carries them, and one that composes an
 extension's behavior without a crate gets none either: the TypeScript
-engine runs it. acme's `crates/behaviors` is the worked example
+engine runs it, and the build refuses a Go server on it. acme's `crates/behaviors` is the worked example
 (`examples/acme-schematic`).
 
 ## Display

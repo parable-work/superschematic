@@ -146,7 +146,9 @@ func newEngine(d *Database, info *apigen.EngineInfo, taken names) *Engine {
 // engineDocker is where a checkout's Dockerfile builds the engine's
 // archive from (D58): the Cargo workspace beside the Go binding, and the
 // crates outside it its manifests reach by path, at their places in the
-// checkout, each relative to the build context.
+// checkout, each relative to the build context; and, for an engine whose
+// database composes a behavior the core's archive does not run, the
+// project's engine crate, whose ffi member it builds in the core's place.
 type engineDocker struct {
 	// Go is the Go binding, Workspace the Cargo workspace, beside it.
 	Go        string
@@ -155,6 +157,41 @@ type engineDocker struct {
 	// work queue's crate, a member of it; the schema IR's and the schema
 	// runtime's; the version graph's engine and core; and superscalar's
 	// core, with the workspace manifest it takes its lints from.
+	Crates []string
+
+	// Project is the project's engine crate, empty for the core's
+	// archive; ProjectCrates the extensions' crates it reaches by path,
+	// and ProjectArchive the static library its ffi member builds.
+	Project        string
+	ProjectCrates  []string
+	ProjectArchive string
+}
+
+// EngineProject is the project's engine crate (D58; projectengine) an
+// entrypoint's engine is built from, when its engine database composes a
+// behavior the core's engine archive does not run, the work queue's or an
+// extension's: <output root>/engine/rust/<db>, which the database's own
+// build writes.
+type EngineProject struct {
+	// Database is the engine database.
+	Database string
+
+	// Dir is the crate's directory.
+	Dir string
+
+	// Crate is the library's package name, and Ident the name Rust source
+	// gives it: a Rust server depends on it and opens the engine with its
+	// behaviors().
+	Crate string
+	Ident string
+
+	// Archive is the file name of the static library the crate's ffi
+	// member builds, which a Go server links in the core's place, as
+	// libsuperschematic_engine.a.
+	Archive string
+
+	// Crates are the directories of the extensions' crates the crate
+	// reaches by path, which an image builds with it.
 	Crates []string
 }
 
@@ -174,9 +211,11 @@ var engineCrates = []string{
 }
 
 // planEngineDocker plans the engine stage of a checkout's Dockerfile from
-// the engine's Go binding at engineGo, or says why it cannot: the binding
-// and the checkout it lies in must be under the build context, root.
-func planEngineDocker(engineGo, root string, rel func(string) (string, bool)) (*engineDocker, string) {
+// the engine's Go binding at engineGo, and from the project's engine crate
+// when project is set, or says why it cannot: the binding, the checkout it
+// lies in, the project's crate and the extensions' crates it reaches must
+// be under the build context, root.
+func planEngineDocker(engineGo string, project *EngineProject, root string, rel func(string) (string, bool)) (*engineDocker, string) {
 	binding, ok := rel(engineGo)
 	if !ok {
 		return nil, fmt.Sprintf("the engine's Go binding %s lies outside the repository root %s, the build context", engineGo, root)
@@ -190,6 +229,20 @@ func planEngineDocker(engineGo, root string, rel func(string) (string, bool)) (*
 		}
 		d.Crates = append(d.Crates, dir)
 	}
+	if project == nil {
+		return d, ""
+	}
+	if d.Project, ok = rel(project.Dir); !ok {
+		return nil, fmt.Sprintf("the project's engine crate of %s, %s, lies outside the repository root %s, the build context", project.Database, project.Dir, root)
+	}
+	for _, crate := range project.Crates {
+		dir, ok := rel(crate)
+		if !ok {
+			return nil, fmt.Sprintf("%s, which the project's engine crate of %s reaches, lies outside the repository root %s, the build context", crate, project.Database, root)
+		}
+		d.ProjectCrates = append(d.ProjectCrates, dir)
+	}
+	d.ProjectArchive = project.Archive
 	return d, ""
 }
 
@@ -224,6 +277,11 @@ type RunnerInput struct {
 	Release        release.Release
 	VersionGraphGo string
 	EngineGo       string
+
+	// EngineProject is the project's engine crate of the database, nil
+	// when the core's archive runs every behavior it composes: the image
+	// builds its archive in the core's place.
+	EngineProject *EngineProject
 
 	// CloudSQL is true when some environment of the stack places the
 	// database on Cloud SQL: cloudsql.go then serves the engine's socket
@@ -278,6 +336,7 @@ func PlanRunner(in RunnerInput) (*Server, error) {
 		Release:        in.Release,
 		VersionGraphGo: in.VersionGraphGo,
 		EngineGo:       in.EngineGo,
+		EngineProject:  in.EngineProject,
 		opensEngine:    true,
 	}
 	if err := s.planModule(input, dir); err != nil {

@@ -229,6 +229,34 @@ func TestBuildOfAGeneralSchemaNamesTheEnginesVersionWithoutPaths(t *testing.T) {
 	rustfmtCheck(t, files[projectengine.FFILibFile])
 }
 
+// A schema whose types compose the work queue's Lease beside the core's
+// behaviors, and no extension's, gets a crate all the same: the core's
+// archive, which a Go server links, leaves the work queue out (D58). The
+// crate depends on the work queue's crate and registers its behaviors
+// after the core's, with no extension crate.
+func TestBuildOfAWorkQueueSchemaWritesACrate(t *testing.T) {
+	reg := extensions(t)
+	_, opts := project(t, reg, true)
+	crate := build(t, schema(ir.SchemaKindDB, []string{"Workflow", "Lease"}, nil), opts)
+	if crate.WorkQueue == nil || len(crate.Extensions) != 0 {
+		t.Fatalf("WorkQueue = %+v, Extensions = %+v; want the work queue alone", crate.WorkQueue, crate.Extensions)
+	}
+	files, err := crate.Files()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "superschematic-engine-workqueue = { path = \"../../../../../runtime/engine-workqueue/rust\", default-features = false }\n"; !strings.Contains(string(files[projectengine.ManifestFile]), want) {
+		t.Errorf("Cargo.toml depends on no work queue crate:\n%s", files[projectengine.ManifestFile])
+	}
+	if want := "# schema's types compose compiled in: the core's behaviors,\n# the work queue's.\n"; !strings.Contains(string(files[projectengine.ManifestFile]), want) {
+		t.Errorf("Cargo.toml's header names an extension:\n%s", files[projectengine.ManifestFile])
+	}
+	if want := "    superschematic_engine_behaviors::core()\n        .extend(superschematic_engine_workqueue::workqueue())\n}\n"; !strings.Contains(string(files[projectengine.LibFile]), want) {
+		t.Errorf("lib.rs registers more than the core's and the work queue's:\n%s", files[projectengine.LibFile])
+	}
+	rustfmtCheck(t, files[projectengine.LibFile])
+}
+
 // No crate when the schema composes the core's behaviors alone, which the
 // release's engine runs, or none; and none, with the reason, when an
 // extension behavior it composes names no crate, or names one the project
@@ -236,7 +264,7 @@ func TestBuildOfAGeneralSchemaNamesTheEnginesVersionWithoutPaths(t *testing.T) {
 func TestBuildWritesNoCrateItDoesNotNeedOrCannotWrite(t *testing.T) {
 	reg := extensions(t)
 	_, opts := project(t, reg, true)
-	for _, behaviors := range [][]string{nil, {"Workflow", "Lease"}} {
+	for _, behaviors := range [][]string{nil, {"Workflow", "Comments"}} {
 		crate, why, err := projectengine.Build(schema(ir.SchemaKindDB, behaviors, nil), opts)
 		if crate != nil || why != "" || err != nil {
 			t.Errorf("%v: Build = %v, %q, %v; want no crate and no reason", behaviors, crate, why, err)

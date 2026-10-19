@@ -1,0 +1,18 @@
+# queue-api runs on its default server, which links queue-db's project
+# engine archive, and queue-db's runner beside it (D58). Its one
+# environment, Local, runs on the local target.
+kind: Stack
+types:
+  Queues:
+    name: Queues
+    role: EmbeddedStruct
+    stack:
+      deploy:
+        - { name: queue-api, kind: API }
+      expose:
+        - service: { name: queue-api, kind: API }
+  Local:
+    name: Local
+    role: EmbeddedStruct
+    environment:
+      target: local

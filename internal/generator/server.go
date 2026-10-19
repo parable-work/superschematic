@@ -763,8 +763,15 @@ func (r run) planEntrypoint(stackName string, s *ir.ResolvedDeployable, cloudSQL
 			if s.Kind == ir.DeployableServer && output.IsPublic && !output.Auth.Identity {
 				r.Logf("  - server %s: %s authenticates its users with its own AuthMiddleware, so the engine of %s it mounts at %s admits service callers alone; authenticate with the user model's identity runtime (D50) to reach it as an end user\n", s.Name, ref.Name, output.Engine.Database, output.Engine.Mount)
 			}
-			if !output.Engine.CoreBehaviorsOnly(registry.EnginePackage) {
-				return nil, nil, fmt.Errorf("stack %s: %s %s serves %s, whose engine database %s composes %s, which the core's engine archive does not run; a project's engine archive, built with them, comes with the project's engine crate (D58)", stackName, s.Kind, s.Name, ref.Name, output.Engine.Database, strings.Join(extensionBehaviors(output.Engine), ", "))
+			// A database whose types compose a behavior the core's archive
+			// does not run links its project's engine archive (D58).
+			what := fmt.Sprintf("stack %s: %s %s serves %s", stackName, s.Kind, s.Name, ref.Name)
+			project, err := r.projectEngine(what, output.Engine.Database)
+			if err != nil {
+				return nil, nil, err
+			}
+			if err := linkEngineProject(fmt.Sprintf("stack %s: %s %s", stackName, s.Kind, s.Name), &in.EngineProject, project); err != nil {
+				return nil, nil, err
 			}
 		}
 		in.APIs = append(in.APIs, servergen.APIInput{Output: output, Implementation: impl, CORS: cors[ref.Name]})
@@ -1164,19 +1171,6 @@ func (r run) goServerModules(o *apigen.APIOutput, job bool) []servergen.Module {
 	return modules
 }
 
-// extensionBehaviors are the behaviors an engine database composes that
-// the core's engine archive does not run: the work queue's and the
-// extensions', by name.
-func extensionBehaviors(e *apigen.EngineInfo) []string {
-	var out []string
-	for _, b := range e.Behaviors {
-		if b.Extension != "" || b.Package != registry.EnginePackage {
-			out = append(out, b.Name)
-		}
-	}
-	return out
-}
-
 // planRunner plans the entrypoint of the Go engine's runner rn of the
 // stack (D58): its engine database's connection field, the engine info of
 // the first API on it, rn's API, as that API's own build reads it, and the
@@ -1193,8 +1187,9 @@ func (r run) planRunner(stackName string, rn *ir.ResolvedDeployable, cloudSQL []
 	if output.Engine == nil || output.Engine.Database != db {
 		return nil, fmt.Errorf("stack %s: runner %s runs the engine of %s, which is not the engine database of %s", stackName, rn.Name, db, api)
 	}
-	if !output.Engine.CoreBehaviorsOnly(registry.EnginePackage) {
-		return nil, fmt.Errorf("stack %s: runner %s runs the engine of %s, which composes %s, which the core's engine archive does not run; a project's engine archive, built with them, comes with the project's engine crate (D58)", stackName, rn.Name, db, strings.Join(extensionBehaviors(output.Engine), ", "))
+	project, err := r.projectEngine(fmt.Sprintf("stack %s: runner %s runs the engine of %s for %s", stackName, rn.Name, db, api), db)
+	if err != nil {
+		return nil, err
 	}
 	field := ""
 	if output.EnvConfig != nil {
@@ -1235,6 +1230,7 @@ func (r run) planRunner(stackName string, rn *ir.ResolvedDeployable, cloudSQL []
 		ScalarGo:       paths.ScalarGo,
 		Release:        r.Options.ReleaseInfo(),
 		EngineGo:       paths.EngineGo,
+		EngineProject:  project,
 		CloudSQL:       slices.Contains(cloudSQL, db),
 	}
 	if versionGraph {

@@ -58,6 +58,21 @@ var engineOrder = []string{"desk-db", "desk-api", engineStack}
 
 const engineCloudStack = "desk-cloud-stack"
 
+// queueOrder is the order a build-all builds the queue fixture in: queue-db,
+// an engine database whose Job composes the work queue's behaviors, which
+// the core's engine archive leaves out; queue-api, a Go API over it whose
+// operations only a calling service may call; and queue-stack, which serves
+// queue-api on the local target beside queue-db's runner (D58).
+var queueOrder = []string{"queue-db", "queue-api", queueStack}
+
+// queueStack is the queue fixture's stack, queueServer its server and
+// queueRunner the engine's runner of queue-db.
+const (
+	queueStack  = "queue-stack"
+	queueServer = "queue-api"
+	queueRunner = "queue-db-engine-runner"
+)
+
 // loadEngineFixture loads the engine fixture with the core registry, whose
 // local target the stacks' environments run on, and stacktest's fake
 // target, whose sql connector derives a Cloud SQL connector configuration
@@ -69,7 +84,7 @@ func loadEngineFixture(t *testing.T) fixture {
 		t.Fatal(err)
 	}
 	f := fixture{reg: reg, schemas: map[string]*ir.Schema{}, configs: map[string]*schemaconfig.SchemaConfig{}}
-	for _, name := range append(slices.Clone(engineOrder), engineCloudStack) {
+	for _, name := range append(append(slices.Clone(engineOrder), engineCloudStack), queueOrder...) {
 		schema, cfg, err := loader.LoadServiceWithConfig(filepath.Join(engineRoot, name), loader.WithRegistry(reg))
 		if err != nil {
 			t.Fatalf("load %s: %v", name, err)

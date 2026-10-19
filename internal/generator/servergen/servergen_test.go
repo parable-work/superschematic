@@ -172,6 +172,12 @@ func fakePaths(repoRoot string) naming.LocalPaths {
 		HTTPRuntimeGo:   filepath.Join(repoRoot, "runtime", "http", "go"),
 		VersionGraphGo:  filepath.Join(repoRoot, "runtime", "versiongraph", "go"),
 		EngineGo:        filepath.Join(repoRoot, "runtime", "engine", "go"),
+		// The engine's crates, which a project's engine crate depends on
+		// (D58).
+		EngineRust:          filepath.Join(repoRoot, "runtime", "engine", "rust", "engine"),
+		EngineBehaviorsRust: filepath.Join(repoRoot, "runtime", "engine", "rust", "behaviors"),
+		EngineWorkQueueRust: filepath.Join(repoRoot, "runtime", "engine-workqueue", "rust"),
+		EngineABIRust:       filepath.Join(repoRoot, "runtime", "engine", "rust", "abi"),
 	}
 }
 

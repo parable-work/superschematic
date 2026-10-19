@@ -1736,10 +1736,18 @@ opens. Every API on the database holds the engine in its `Deps`, an
 `*engine.Background`, whose `Wait(ctx)` returns the engine once it opens.
 At shutdown the server ends every event stream as it stops taking
 requests, and closes the engine after the requests in flight finish. The
-server links the core's engine archive, so the build refuses an engine
-database that composes the work queue's behaviors or an extension's,
-which a project's engine archive runs. A TypeScript or a Rust server opens
-no engine yet, and the build says so.
+server links the core's engine archive, unless its engine database
+composes a behavior the core's archive leaves out, the work queue's or an
+extension's: then it links the archive of the project's engine crate,
+`<out>/engine/rust/<db>`, which the database's build writes with its
+`ffi` member, and the checkout's Dockerfile builds that archive in the
+engine stage, the crate's lock file seeded from the engine workspace's.
+The build refuses an engine database that composes an extension's
+behavior no Rust crate implements, and a server whose engine databases
+would each need a project archive of its own, since a binary links one.
+A release's image, which downloads the core's archive, cannot take a
+project's, so it gets no Dockerfile. A TypeScript server opens no engine
+yet, and the build says so.
 
 An engine database's runner is an entrypoint of its own,
 `<db>-engine-runner` (section 3.1), in the language of the first API on

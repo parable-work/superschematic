@@ -198,6 +198,12 @@ type Input struct {
 	// workspace beside it.
 	EngineGo string
 
+	// EngineProject is the project's engine crate the entrypoint's engine
+	// is built from, nil when the core's archive runs every behavior its
+	// engine databases compose (D58): the checkout's Dockerfile builds the
+	// archive of the crate's ffi member in the core's place.
+	EngineProject *EngineProject
+
 	// manualRoutes counts a manually registered operation among an API's
 	// routes, as a router that mounts it does: a TypeScript one.
 	manualRoutes bool
@@ -880,8 +886,11 @@ func planDocker(in Input, dir string) (*Docker, string, error) {
 	d.Dockerfile = path.Join(d.Context, DockerFile)
 	include := []string{d.Context}
 	if archives != nil {
-		// The release's archives hold the engine's beside superscalar's and
-		// the version graph's (D58).
+		// The release's archives hold the core's engine archive beside
+		// superscalar's and the version graph's (D58), not a project's.
+		if p := in.EngineProject; p != nil {
+			return nil, fmt.Sprintf("the engine of %s composes behaviors the release's engine archive does not run, so the image builds the archive of the project's engine crate %s, whose crates the engine's checkout holds, and the naming file's [paths] scalar_go is unset; set scalar_go and engine_go to a checkout's runtimes", p.Database, p.Dir), nil
+		}
 		d.Archives = archives
 		if in.VersionGraphGo != "" {
 			if d.VersionGraphGo, ok = rel(in.VersionGraphGo); !ok {
@@ -906,13 +915,17 @@ func planDocker(in Input, dir string) (*Docker, string, error) {
 		return nil, "the entrypoint opens the engine (D58), and the naming file's [paths] engine_go, the engine's Go binding, whose Cargo workspace the image builds the engine's archive from, is unset while [paths] scalar_go names a checkout to build superscalar's from; set engine_go to the same checkout's runtime/engine/go", nil
 	}
 	if in.EngineGo != "" {
-		engine, why := planEngineDocker(in.EngineGo, root, rel)
+		engine, why := planEngineDocker(in.EngineGo, in.EngineProject, root, rel)
 		if engine == nil {
 			return nil, why, nil
 		}
 		d.Engine = engine
 		include = append(include, engine.Go, engine.Workspace)
 		include = append(include, engine.Crates...)
+		if engine.Project != "" {
+			include = append(include, engine.Project)
+			include = append(include, engine.ProjectCrates...)
+		}
 	}
 	return finish(d, in, root, include, rel)
 }
