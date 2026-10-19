@@ -37,6 +37,7 @@ import { BehaviorConfigError, type AnyBehaviorImplementation } from '../behavior
 import { deepFreeze, jsonCopy } from '../behaviors/json.js';
 import { BehaviorError, BehaviorVetoError, EngineError } from '../errors.js';
 import { isPlainObject } from '../instances/patch.js';
+import { carry } from './carry.js';
 
 /** The addon's entry for a context's method: generation, method, arguments as JSON; the result as JSON, '' for undefined. */
 export type BridgeCall = (generation: number, method: string, args: string) => string;
@@ -275,7 +276,7 @@ export class Bridge {
     }
     let text: string;
     try {
-      text = native(gen, method, JSON.stringify(args.map(encodeValue)));
+      text = native(gen, method, JSON.stringify(carry(args.map(encodeValue))));
     } catch (error) {
       throw this.restore(error);
     }

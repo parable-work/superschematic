@@ -24,6 +24,7 @@ import { EngineError } from '../errors.js';
 import { resolveToolOptions, type ResolvedToolOptions } from '../tools/options.js';
 import { loadAddon, type AddonEngine, type HttpAnswer, type StreamPull } from './addon.js';
 import type { EngineRoute } from './engine.js';
+import { carry } from './carry.js';
 import { restoreError } from './errors.js';
 import { nativeOptions, type NativeEngineOptions } from './options.js';
 
@@ -219,7 +220,7 @@ export class AsyncNativeEngine {
     while (end > 0 && args[end - 1] === undefined) {
       end -= 1;
     }
-    const request = JSON.stringify({ op, principal, args: args.slice(0, end), now: this.clock?.() });
+    const request = JSON.stringify({ op, principal, args: carry(args.slice(0, end)), now: this.clock?.() });
     let text: string;
     try {
       text = await this.addon.call(request);

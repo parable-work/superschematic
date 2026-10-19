@@ -1649,6 +1649,15 @@ pub(crate) fn check_params(
     operation: &OperationSpec,
     params: &Value,
 ) -> Result<Value, EngineError> {
+    // A value a binding marked as no JSON, refused first and alone, as the
+    // TypeScript engine's jsonCopy refuses it.
+    if let Some((path, problem)) = json::first_not_json(params) {
+        return Err(EngineError::operation_params(
+            &behavior.name,
+            &operation.name,
+            vec![SchemaIssue::new(json::path_pointer(&path), problem)],
+        ));
+    }
     if !operation.params.is_valid(params) {
         return Err(EngineError::operation_params(
             &behavior.name,
@@ -1864,6 +1873,13 @@ pub(crate) fn check_create_params(
             found.push(SchemaIssue::new(
                 at,
                 format!("behavior {name} takes no create parameters"),
+            ));
+            continue;
+        }
+        if let Some((path, problem)) = json::first_not_json(entry) {
+            found.push(SchemaIssue::new(
+                format!("{at}{}", json::path_pointer(&path)),
+                problem,
             ));
             continue;
         }

@@ -48,6 +48,7 @@ import type { AnyBehaviorImplementation } from '../behaviors/behavior.js';
 import { deepFreeze } from '../behaviors/json.js';
 import { loadAddon, type AddonEngine, type HttpAnswer, type StreamPull } from './addon.js';
 import { Bridge, rowOf, sqlParams } from './bridge.js';
+import { carry } from './carry.js';
 import type { Row, RunResult, SqlValue } from '../storage/driver.js';
 import { Storage } from '../storage/storage.js';
 import { NativeUnsupportedError, restoreError } from './errors.js';
@@ -132,6 +133,15 @@ const TIMELESS: ReadonlySet<string> = new Set([
   'namespaces.names',
   'events.head',
   'events.floor',
+  'events.read',
+  'schemas.live',
+  'schemas.draft',
+  'schemas.version',
+  'schemas.list',
+  'namespaces.list',
+  'namespaces.get',
+  'tools.listBehaviors',
+  'tools.describeBehavior',
   'values.thresholdBytes',
   'values.maxBytes',
   'runner.running',
@@ -222,7 +232,7 @@ class Calls {
     // the TypeScript engine reads it, and not for one that only reads what
     // the engine holds, so a clock that counts its readings counts alike.
     const now = TIMELESS.has(op) ? undefined : this.clock?.();
-    return JSON.stringify({ op, principal, args: args.slice(0, end), now, ...(toolFilter ? { toolFilter: true } : {}) });
+    return JSON.stringify({ op, principal, args: carry(args.slice(0, end)), now, ...(toolFilter ? { toolFilter: true } : {}) });
   }
 }
 
@@ -280,9 +290,10 @@ class NativeNamespaces {
 
 /**
  * A version's validator on the Rust engine: the TypeScript
- * SchemaValidator's model and validate, built once per version.
+ * SchemaValidator's model and validate, built once per version, under the
+ * TypeScript class's name, as a recording names a result's class.
  */
-export class NativeSchemaValidator {
+class SchemaValidator {
   readonly model: { name: string; instanceType: string; document: Record<string, unknown>; canonical: string };
 
   constructor(
@@ -310,6 +321,8 @@ export class NativeSchemaValidator {
     throw new NativeUnsupportedError("SchemaValidator.validateType, the TypeScript validator's own", 'validator');
   }
 }
+
+export { SchemaValidator as NativeSchemaValidator };
 
 class NativeSchemas {
   constructor(private readonly calls: Calls) {}
@@ -353,7 +366,7 @@ class NativeSchemas {
    * engine. It asks read on the schema, as schemas.live and
    * schemas.version do.
    */
-  validator(principal: Principal, name: string, options: ValidateOptions = {}): NativeSchemaValidator {
+  validator(principal: Principal, name: string, options: ValidateOptions = {}): SchemaValidator {
     const target = options.namespace === undefined ? undefined : { namespace: options.namespace };
     const record =
       options.version === undefined ? this.live(principal, name, target) : this.version(principal, name, options.version, target);
@@ -364,7 +377,7 @@ class NativeSchemas {
     const key = `${record.namespace}\u0000${record.name}\u0000${String(record.version)}`;
     let validator = this.validators.get(key);
     if (validator === undefined) {
-      validator = new NativeSchemaValidator(record, (value) =>
+      validator = new SchemaValidator(record, (value) =>
         this.calls.sync('schemas.validate', principal, [record.name, value, { namespace: record.namespace, version: record.version }]) as ValidationIssue[]
       );
       this.validators.set(key, validator);
@@ -372,7 +385,7 @@ class NativeSchemas {
     return validator;
   }
 
-  private readonly validators = new Map<string, NativeSchemaValidator>();
+  private readonly validators = new Map<string, SchemaValidator>();
 
   behaviors(principal: Principal, name: string, options?: ValidateOptions): ComposedBehavior[] {
     return this.calls.sync('schemas.behaviors', principal, [name, options]) as ComposedBehavior[];
