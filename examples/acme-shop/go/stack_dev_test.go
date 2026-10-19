@@ -253,17 +253,18 @@ func TestStackDevRunsTheShop(t *testing.T) {
 	reserved := traces.Wait(t, 30*time.Second, "of shop-stock's reservation for shop-orders", func(s otlptest.Span) bool {
 		return s.Service() == "shop-stock" && s.Kind == otlptest.KindServer && s.Name == "POST /api/stock/reservations" && s.ParentSpanID != ""
 	})
-	reservation := traces.Wait(t, 30*time.Second, "of shop-orders' call to shop-stock", func(s otlptest.Span) bool {
+	reserving := traces.Wait(t, 30*time.Second, "of shop-orders' call to shop-stock", func(s otlptest.Span) bool {
 		return s.SpanID == reserved.ParentSpanID
 	})
 	placed := traces.Wait(t, 30*time.Second, "of shop-orders' request", func(s otlptest.Span) bool {
-		return s.SpanID == reservation.ParentSpanID
+		return s.SpanID == reserving.ParentSpanID
 	})
-	if reservation.Service() != "shop-orders" || reservation.Kind != otlptest.KindClient || reservation.Name != "POST" ||
+	if reserving.Service() != "shop-orders" || reserving.Kind != otlptest.KindClient || reserving.Name != "POST" ||
 		placed.Service() != "shop-orders" || placed.Kind != otlptest.KindServer || !strings.HasPrefix(placed.Name, "POST /api/") ||
-		reservation.TraceID != reserved.TraceID || placed.TraceID != reserved.TraceID {
-		t.Fatalf("the order's spans are %v, %v and %v; want shop-orders' request, its call and shop-stock's reservation, in one trace", placed, reservation, reserved)
+		reserving.TraceID != reserved.TraceID || placed.TraceID != reserved.TraceID {
+		t.Fatalf("the order's spans are %v, %v and %v; want shop-orders' request, its call and shop-stock's reservation, in one trace", placed, reserving, reserved)
 	}
+	t.Logf("the order's trace:\n  %v\n  %v\n  %v", placed, reserving, reserved)
 
 	// An order beyond the stock is refused with shop-stock's reason, and
 	// reserves nothing.
