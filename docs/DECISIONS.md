@@ -5714,10 +5714,22 @@ the recorded order rather than its number (a write a rollback undid
 leaves a gap in a Postgres identity column), but for a step it lists
 with what explains it (a change the recording does not see). CI tests
 the workspace on both databases. `superschematic-engine-napi` (milestones
-7a and 7b) is the Rust engine as a Node-API addon, with the core's
-behaviors it is built with and the work queue's an engine's options name
+7a and 7b) is the Rust engine as a Node-API addon, as a library whose
+`export_engine_napi!(behaviors = path)`, the twin of
+`export_engine_c_abi!`, a cdylib expands once:
+`superschematic-engine-addon` (`runtime/engine/rust/addon`) is the core's
+addon, over the core's behaviors and the work queue's, an engine
+registering the core's when it opens and each other one its options name
 (`behaviors`, by name: a behavior object is TypeScript code, even one
-whose declaration names one the addon has), and `@superschematic/engine`'s
+whose declaration names one the addon has, and a name the addon is not
+built with is refused). An engine opens on a project's addon when the
+host names its file (the engine option `addon`, or
+`SUPERSCHEMATIC_ENGINE_ADDON`), else on the checkout's `native/`, else on
+the release's prebuilt `@superschematic/engine-<target>` (darwin-arm64,
+darwin-x64, linux-x64-gnu, linux-arm64-gnu, built with the workspace's
+`dist` profile, fat LTO and stripped, on the build-archives runners, and
+optional dependencies of `@superschematic/engine` at its version); a
+Docker image builds the addon from source. `@superschematic/engine`'s
 `src/native` gives it the package's synchronous API: a call by name with
 JSON in and out on the JavaScript thread over SQLite, the package's error
 classes rebuilt from the class, code and members the addon throws, a
@@ -5778,10 +5790,15 @@ language links: `ffi/`, `<crate>-ffi`, expands `export_engine_c_abi!`
 from `superschematic-engine-abi` (`[paths] engine_abi_rust`) into the
 archive a Go server links in the core's place (`scripts/engine-archive.sh
 --crate <crate>/ffi --out <dir>`), its test opening an engine through
-its own `eng_open`; a TypeScript server's addon joins them as `napi/`
-once the Node-API addon exports `export_engine_napi!`, the twin of
-`export_engine_c_abi!`. acme's smoke builds and tests the one its binary
-writes, both members. A schema of the core's behaviors alone gets none,
+its own `eng_open`; and `napi/`, `<crate>-napi`, expands
+`export_engine_napi!` from `superschematic-engine-napi` (`[paths]
+engine_napi_rust`) into the addon a TypeScript server loads in the core's
+place (`scripts/engine-napi.sh --crate <crate>/napi --out <dir>`), the
+library's manifest pinning napi-derive-backend, which a fresh resolve of
+the crate's lock-less workspace would move past the version napi-derive
+compiles with. acme's smoke builds and tests the one its binary writes,
+its members with it, and runs `rating.test.ts`'s cases on its addon
+through `openEngineAsync`, acme.Rating in Rust. A schema of the core's behaviors alone gets none,
 and the release's engine runs it. Until the cutover (milestone 14), `@superschematic/engine`'s
 `openEngine` is the TypeScript implementation, and acme's `@acme/behaviors`
 implements acme.Rating for it until the cutover removes the package.

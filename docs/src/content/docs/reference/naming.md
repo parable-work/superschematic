@@ -517,6 +517,17 @@ Directory of the engine's C ABI as a library, `superschematic-engine-abi`
 member expands into the archive a Go server links. Unset, it names the
 crate's version instead of a path.
 
+### `paths.engine_napi_rust`
+
+Default: unset. This repository's own file sets
+`runtime/engine/rust/napi`.
+
+Directory of the engine's Node-API addon as a library,
+`superschematic-engine-napi` (D58), whose `export_engine_napi!` the
+project's engine crate's `napi` member expands into the addon a
+TypeScript server loads. Unset, it names the crate's version instead of a
+path.
+
 ### `paths.versiongraph_python`
 
 Default: unset. This repository's own file sets
