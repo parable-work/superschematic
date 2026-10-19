@@ -13,7 +13,8 @@ import (
 )
 
 // loadUnionListsAPI loads union-lists-api (sdktest.LoadUnionListsService):
-// the union Shape as a list, a list of lists and one value, none paged.
+// the union Shape as a list, a list of lists, one value, a map, a map of
+// lists, and one value or a list that may be null, none paged.
 func loadUnionListsAPI(t *testing.T) (*ir.Schema, *apigen.APIOutput) {
 	t.Helper()
 	schema, err := sdktest.LoadUnionListsService()
@@ -64,16 +65,21 @@ func writeUnionListsSDK(t *testing.T, schema *ir.Schema, apiOutput *apigen.APIOu
 }
 
 // TestUnionListsDecodeThroughTheirWrappers: a response of a union that does
-// not page, a list, a list of lists or one value, decodes through
-// types.ShapeWrapper at the response's list levels, and its method returns
-// the union at the same levels.
+// not page, a list, a list of lists, one value, a map or a map of lists,
+// decodes through types.ShapeWrapper at the response's list levels and
+// keys, and its method returns the union at the same levels and keys. One
+// value that may be null decodes through a pointer to the wrapper.
 func TestUnionListsDecodeThroughTheirWrappers(t *testing.T) {
 	schema, apiOutput := loadUnionListsAPI(t)
 	_, sdkOutput := writeUnionListsSDK(t, schema, apiOutput)
 	want := map[string]struct{ output, wrapper string }{
-		"ListShapes": {"[]types.Shape", "[]types.ShapeWrapper"},
-		"ShapeRows":  {"[][]types.Shape", "[][]types.ShapeWrapper"},
-		"GetShape":   {"types.Shape", "types.ShapeWrapper"},
+		"ListShapes":   {"[]types.Shape", "[]types.ShapeWrapper"},
+		"ShapeRows":    {"[][]types.Shape", "[][]types.ShapeWrapper"},
+		"GetShape":     {"types.Shape", "types.ShapeWrapper"},
+		"ShapesByName": {"map[string]types.Shape", "map[string]types.ShapeWrapper"},
+		"ShapeGroups":  {"map[string][]types.Shape", "map[string][]types.ShapeWrapper"},
+		"FindShape":    {"types.Shape", "*types.ShapeWrapper"},
+		"FindShapes":   {"[]types.Shape", "[]types.ShapeWrapper"},
 	}
 	for _, ns := range sdkOutput.Namespaces {
 		for _, ep := range ns.Endpoints {

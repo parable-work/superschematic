@@ -141,7 +141,7 @@ export class {{.Namespace.ClassName}} {
    * @param params - Optional query parameters
    {{- end}}
    * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
-   * @returns {{if .OutputIsArrayOfArrays}}Array of arrays of {{else if .OutputIsArray}}Array of {{end}}{{type_ref .OutputType}}
+   * @returns {{if .OutputIsMap}}Map of {{if .OutputIsArray}}arrays of {{end}}{{else if .OutputIsArrayOfArrays}}Array of arrays of {{else if .OutputIsArray}}Array of {{end}}{{type_ref .OutputType}}{{if .OutputNullable}}, or null{{end}}
    * @throws {ValidationError} if input validation fails
    * @throws {ApiError} if the API request fails
    */
@@ -179,12 +179,20 @@ export class {{.Namespace.ClassName}} {
     );
 
     {{- if $endpoint.HasOutputParser}}
-    {{- if $endpoint.OutputIsArrayOfArrays}}
+    {{- if $endpoint.OutputIsMap}}
+    return result !== null && typeof result === 'object'
+      ? Object.fromEntries(
+          Object.entries(result).map(([key, value]) => [key, {{if $endpoint.OutputIsArray}}Array.isArray(value) ? value.map(parse{{type_ref $endpoint.OutputType}}FromJSON) : value{{else}}parse{{type_ref $endpoint.OutputType}}FromJSON(value){{end}}])
+        )
+      : result;
+    {{- else if $endpoint.OutputIsArrayOfArrays}}
     return Array.isArray(result)
       ? result.map((row) => (Array.isArray(row) ? row.map(parse{{type_ref $endpoint.OutputType}}FromJSON) : row))
       : result;
     {{- else if $endpoint.OutputIsArray}}
     return Array.isArray(result) ? result.map(parse{{type_ref $endpoint.OutputType}}FromJSON) : result;
+    {{- else if $endpoint.OutputNullable}}
+    return result === null ? null : parse{{type_ref $endpoint.OutputType}}FromJSON(result);
     {{- else}}
     return parse{{type_ref $endpoint.OutputType}}FromJSON(result);
     {{- end}}
@@ -217,7 +225,7 @@ export class {{.Namespace.ClassName}} {
    * @param params - Optional query parameters
    {{- end}}
    * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
-   * @returns {{if .OutputIsArrayOfArrays}}Array of arrays of {{else if .OutputIsArray}}Array of {{end}}{{type_ref .OutputType}}
+   * @returns {{if .OutputIsMap}}Map of {{if .OutputIsArray}}arrays of {{end}}{{else if .OutputIsArrayOfArrays}}Array of arrays of {{else if .OutputIsArray}}Array of {{end}}{{type_ref .OutputType}}{{if .OutputNullable}}, or null{{end}}
    * @throws {ApiError} if the API request fails
    */
   public async {{.Name}}Raw(
@@ -237,12 +245,20 @@ export class {{.Namespace.ClassName}} {
     );
 
     {{- if $endpoint.HasOutputParser}}
-    {{- if $endpoint.OutputIsArrayOfArrays}}
+    {{- if $endpoint.OutputIsMap}}
+    return result !== null && typeof result === 'object'
+      ? Object.fromEntries(
+          Object.entries(result).map(([key, value]) => [key, {{if $endpoint.OutputIsArray}}Array.isArray(value) ? value.map(parse{{type_ref $endpoint.OutputType}}FromJSON) : value{{else}}parse{{type_ref $endpoint.OutputType}}FromJSON(value){{end}}])
+        )
+      : result;
+    {{- else if $endpoint.OutputIsArrayOfArrays}}
     return Array.isArray(result)
       ? result.map((row) => (Array.isArray(row) ? row.map(parse{{type_ref $endpoint.OutputType}}FromJSON) : row))
       : result;
     {{- else if $endpoint.OutputIsArray}}
     return Array.isArray(result) ? result.map(parse{{type_ref $endpoint.OutputType}}FromJSON) : result;
+    {{- else if $endpoint.OutputNullable}}
+    return result === null ? null : parse{{type_ref $endpoint.OutputType}}FromJSON(result);
     {{- else}}
     return parse{{type_ref $endpoint.OutputType}}FromJSON(result);
     {{- end}}
@@ -291,7 +307,7 @@ export class {{.Namespace.ClassName}} {
    {{- if .Page}}
    * @returns One page of {{type_ref .OutputType}}: its items and next, null after the last page; {{.AllName}} yields every item
    {{- else}}
-   * @returns {{if .OutputIsArrayOfArrays}}Array of arrays of {{else if .OutputIsArray}}Array of {{end}}{{type_ref .OutputType}}
+   * @returns {{if .OutputIsMap}}Map of {{if .OutputIsArray}}arrays of {{end}}{{else if .OutputIsArrayOfArrays}}Array of arrays of {{else if .OutputIsArray}}Array of {{end}}{{type_ref .OutputType}}{{if .OutputNullable}}, or null{{end}}
    {{- end}}
    * @throws {ValidationError} if input validation fails
    * @throws {ApiError} if the API request fails
@@ -764,12 +780,20 @@ export class {{.Namespace.ClassName}} {
       items: Array.isArray(result.items) ? result.items.map(parse{{type_ref $endpoint.OutputType}}FromJSON) : result.items,
       next: result.next,
     };
+    {{- else if $endpoint.OutputIsMap}}
+    return result !== null && typeof result === 'object'
+      ? Object.fromEntries(
+          Object.entries(result).map(([key, value]) => [key, {{if $endpoint.OutputIsArray}}Array.isArray(value) ? value.map(parse{{type_ref $endpoint.OutputType}}FromJSON) : value{{else}}parse{{type_ref $endpoint.OutputType}}FromJSON(value){{end}}])
+        )
+      : result;
     {{- else if $endpoint.OutputIsArrayOfArrays}}
     return Array.isArray(result)
       ? result.map((row) => (Array.isArray(row) ? row.map(parse{{type_ref $endpoint.OutputType}}FromJSON) : row))
       : result;
     {{- else if $endpoint.OutputIsArray}}
     return Array.isArray(result) ? result.map(parse{{type_ref $endpoint.OutputType}}FromJSON) : result;
+    {{- else if $endpoint.OutputNullable}}
+    return result === null ? null : parse{{type_ref $endpoint.OutputType}}FromJSON(result);
     {{- else}}
     return parse{{type_ref $endpoint.OutputType}}FromJSON(result);
     {{- end}}

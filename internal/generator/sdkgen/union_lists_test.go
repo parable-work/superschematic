@@ -16,12 +16,19 @@ import (
 )
 
 // loadUnionListsAPI loads union-lists-api (sdktest.LoadUnionListsService):
-// the union Shape as a list, a list of lists and one value, none paged.
-func loadUnionListsAPI(t *testing.T) (*ir.Schema, *apigen.APIOutput, map[string]bool) {
+// the union Shape as a list, a list of lists, one value, a map, a map of
+// lists, and one value or a list that may be null, none paged. Each mutate
+// changes the schema before the API is generated.
+func loadUnionListsAPI(t *testing.T, mutate ...func(*ir.Schema) error) (*ir.Schema, *apigen.APIOutput, map[string]bool) {
 	t.Helper()
 	schema, err := sdktest.LoadUnionListsService()
 	if err != nil {
 		t.Fatalf("load %s: %v", sdktest.UnionListsService, err)
+	}
+	for _, m := range mutate {
+		if err := m(schema); err != nil {
+			t.Fatal(err)
+		}
 	}
 	apiOutput, err := apigen.Generate(schema, apigen.Options{
 		Provider:   sessionauth.Provider{},
@@ -61,10 +68,52 @@ func TestWriteSDKGoldenUnionLists(t *testing.T) {
 	compareGolden(t, outDir, filepath.Join("testdata", "golden", sdktest.UnionListsService), "namespaces/shape.ts")
 }
 
+// TestUnionListsSDKOutputTypes: a map response is a Record of the output
+// at its list levels, and one that may be null adds | null, for the union
+// and for Circle (sdktest.AddCircleOperations) alike.
+func TestUnionListsSDKOutputTypes(t *testing.T) {
+	_, apiOutput, parseable := loadUnionListsAPI(t, sdktest.AddCircleOperations)
+	sdkOutput, err := Generate(apiOutput, parseable, nestedArraysClock)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	want := map[string]string{
+		"listShapes":    "Shape[]",
+		"shapeRows":     "Shape[][]",
+		"getShape":      "Shape",
+		"shapesByName":  "Record<string, Shape>",
+		"shapeGroups":   "Record<string, Shape[]>",
+		"findShape":     "Shape | null",
+		"findShapes":    "Shape[] | null",
+		"circlesByName": "Record<string, Circle>",
+		"circleGroups":  "Record<string, Circle[]>",
+		"findCircle":    "Circle | null",
+	}
+	for _, ns := range sdkOutput.Namespaces {
+		for _, ep := range ns.Endpoints {
+			w, ok := want[ep.Name]
+			if !ok {
+				t.Errorf("unexpected endpoint %s", ep.Name)
+				continue
+			}
+			delete(want, ep.Name)
+			if got := ep.TSOutputType(); got != w {
+				t.Errorf("%s returns %s, want %s", ep.Name, got, w)
+			}
+		}
+	}
+	if len(want) > 0 {
+		t.Errorf("missing endpoints %v", want)
+	}
+}
+
 // TestUnionListsSDKCompilesAndRuns type-checks the TypeScript SDK of
-// union-lists-api against its generated types package, then runs
-// test_union_lists.js: a list, a list of lists and one value of the union
-// reach the caller as the server sent them.
+// union-lists-api, with sdktest.AddCircleOperations, against its generated
+// types package, then runs test_union_lists.js: a list, a list of lists,
+// one value, a map and a map of lists of the union reach the caller as the
+// server sent them, as do a map and a map of lists of Circle, parsed value
+// by value, and a response that may be null is null when the server
+// answers null.
 func TestUnionListsSDKCompilesAndRuns(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping compile check in -short mode")
@@ -78,7 +127,7 @@ func TestUnionListsSDKCompilesAndRuns(t *testing.T) {
 		t.Fatalf("resolve temp dir: %v", err)
 	}
 
-	schema, apiOutput, parseable := loadUnionListsAPI(t)
+	schema, apiOutput, parseable := loadUnionListsAPI(t, sdktest.AddCircleOperations)
 	typesDir := writeTypesPackage(t, bunPath, schema, sdktest.UnionListsService, tempRoot)
 	sdkDir := filepath.Join(tempRoot, "sdk", "typescript", sdktest.UnionListsService)
 	writeUnionListsSDK(t, apiOutput, parseable, sdkDir)
