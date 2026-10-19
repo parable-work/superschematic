@@ -68,6 +68,9 @@ pub enum Lock<'a> {
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum TxKind<'a> {
     Read,
+    /// A read that begins once the writers a lock names have finished
+    /// ([`Db::read_settled`]).
+    Settled(Lock<'a>),
     Write(Lock<'a>),
     /// A migration: a catalog write whose locks wait up to `timeout`.
     Migrate {
@@ -303,6 +306,25 @@ impl Db {
         self.transaction(TxKind::Read, f)
     }
 
+    /// Runs `f` in a read-only transaction that begins once the writers
+    /// `lock` names have finished: on Postgres it takes their advisory
+    /// locks shared (so it waits for a writer that holds one, and readers
+    /// do not wait for each other) and reads at READ COMMITTED, so each
+    /// statement sees what they committed; on SQLite, whose one writer
+    /// commits before the next begins, it is [`Db::read`]. A cursor of an
+    /// identity read in it is one that no write in flight in those
+    /// namespaces drew a lower value than, since a writer draws its values
+    /// under its lock: what the log's head needs on Postgres, where a
+    /// write's identity is drawn before it commits. A lock that waits past
+    /// the busy timeout is [`Error::Busy`].
+    pub fn read_settled<'db, T, E, F>(&'db self, lock: Lock<'_>, f: F) -> Result<T, E>
+    where
+        E: From<Error>,
+        F: FnOnce(&Tx<'db>) -> Result<T, E>,
+    {
+        self.transaction(TxKind::Settled(lock), f)
+    }
+
     fn transaction<'db, T, E, F>(&'db self, kind: TxKind<'_>, f: F) -> Result<T, E>
     where
         E: From<Error>,
@@ -427,13 +449,14 @@ impl<'db> Tx<'db> {
         let mut namespaces = Vec::new();
         let sql = match backend.dialect() {
             Dialect::Sqlite => match kind {
-                TxKind::Read => "BEGIN".to_owned(),
+                TxKind::Read | TxKind::Settled(_) => "BEGIN".to_owned(),
                 TxKind::Write(_) | TxKind::Migrate { .. } => "BEGIN IMMEDIATE".to_owned(),
             },
             Dialect::Postgres => {
                 let schema = backend.postgres_schema().unwrap_or_default();
                 let (timeout, locks) = match kind {
                     TxKind::Read => (inner.busy_timeout, String::new()),
+                    TxKind::Settled(lock) => (inner.busy_timeout, settled_locks(schema, lock)),
                     TxKind::Write(Lock::Catalog) => (
                         inner.busy_timeout,
                         format!("pg_advisory_xact_lock({})", catalog_lock_key(schema)),
@@ -453,6 +476,7 @@ impl<'db> Tx<'db> {
                 };
                 let isolation = match kind {
                     TxKind::Read => "REPEATABLE READ READ ONLY",
+                    TxKind::Settled(_) => "READ COMMITTED READ ONLY",
                     _ => "READ COMMITTED",
                 };
                 let mut sql = format!(
@@ -477,7 +501,7 @@ impl<'db> Tx<'db> {
         Ok(Tx {
             inner,
             conn: RefCell::new(Some(conn)),
-            read_only: matches!(kind, TxKind::Read),
+            read_only: matches!(kind, TxKind::Read | TxKind::Settled(_)),
             depth: Cell::new(0),
             changes: Cell::new(0),
             aborted: RefCell::new(None),
@@ -867,6 +891,30 @@ impl Drop for Savepoint<'_, '_> {
 fn lock_timeout_ms(timeout: Duration) -> u128 {
     // Postgres reads 0 as no timeout; SQLite's 0 fails at once.
     timeout.as_millis().max(1)
+}
+
+// settled_locks is what a settled read selects: the catalog's lock shared,
+// then each namespace's shared, in key order, as a writer takes them.
+fn settled_locks(schema: &str, lock: Lock<'_>) -> String {
+    let mut keys: Vec<i64> = match lock {
+        Lock::Catalog => Vec::new(),
+        Lock::Namespace(namespace) => vec![namespace_lock_key(schema, namespace)],
+        Lock::Namespaces(list) => list
+            .iter()
+            .map(|namespace| namespace_lock_key(schema, namespace))
+            .collect(),
+    };
+    keys.sort_unstable();
+    keys.dedup();
+    let mut locks = vec![format!(
+        "pg_advisory_xact_lock_shared({})",
+        catalog_lock_key(schema)
+    )];
+    locks.extend(
+        keys.iter()
+            .map(|key| format!("pg_advisory_xact_lock_shared({key})")),
+    );
+    locks.join(", ")
 }
 
 // writer_locks is what a namespace write selects: the catalog's lock
