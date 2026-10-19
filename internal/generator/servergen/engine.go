@@ -5,6 +5,7 @@ import (
 	"path"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/apigen"
@@ -72,8 +73,12 @@ func (e *Engine) ReadinessName() string {
 	return e.Service + " engine"
 }
 
-// PolicyLiteral is the policy as a Go raw string literal.
+// PolicyLiteral is the policy as a Go string literal: a raw one, unless
+// the policy's JSON holds a backquote.
 func (e *Engine) PolicyLiteral() string {
+	if strings.Contains(e.Policy, "`") {
+		return strconv.Quote(e.Policy)
+	}
 	return "`" + e.Policy + "`"
 }
 

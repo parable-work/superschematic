@@ -3,10 +3,16 @@
 // This file defines Deps, what the implementation of desk-api is built
 // from, and Constructor, the signature of the implementation's constructor
 // (docs/stack-model.md, section 8.5).
+//
+// It also defines Jobs, a method per job of desk-api, and JobsConstructor,
+// the signature of the implementation's constructor of its jobs (section
+// 8.7).
 
 package deskapi
 
 import (
+	"context"
+
 	orm "example.com/schemas/orm/desk-db"
 	engine "github.com/parable-work/superschematic/runtime/engine/go"
 	"go.uber.org/zap"
@@ -39,3 +45,17 @@ type Deps struct {
 // New(deps Deps) (Implementations, error), which the entrypoint calls. The
 // scaffolded implementation asserts it: var _ deskapi.Constructor = New.
 type Constructor func(deps Deps) (Implementations, error)
+
+// Jobs are the jobs of desk-api, a method per @job class. A job's
+// entrypoint calls its method once per run, with a context that SIGTERM
+// cancels, and the run fails when the method returns an error.
+type Jobs interface {
+	// CloseStaleTickets runs the job CloseStaleTickets.
+	CloseStaleTickets(ctx context.Context) error
+}
+
+// JobsConstructor is the signature of the implementation's constructor of
+// its jobs, NewJobs(deps Deps) (Jobs, error), which a job's entrypoint calls
+// with the API's Deps. The scaffolded implementation asserts it:
+// var _ deskapi.JobsConstructor = NewJobs.
+type JobsConstructor func(deps Deps) (Jobs, error)

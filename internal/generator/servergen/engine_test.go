@@ -43,6 +43,7 @@ const (
 	engineStack  = "desk-stack"
 	engineServer = "desk-api"
 	engineRunner = "desk-db-engine-runner"
+	engineJob    = "desk-api-close-stale-tickets"
 
 	// engineDatabaseEnv names the Postgres the engine fixture's server and
 	// runner also run on, as the identity fixture's entrypoint test reads
@@ -142,8 +143,9 @@ func TestTheEngineDatabaseOfAnAPI(t *testing.T) {
 // reports it ready, mounts its routes on desk-api's router at
 // /engine/desk-db behind the identity runtime's session and the service
 // authenticator, holds it in desk-api's Deps, and its checkout Dockerfile
-// builds the engine's archive; desk-db's runner opens the engine and runs
-// its runner, as itself, holding each engine type (D58). In
+// builds the engine's archive; desk-api's job opens it for its Deps and
+// deploys nothing; desk-db's runner opens the engine and runs its runner,
+// as itself, holding each engine type (D58). In
 // desk-cloud-stack, whose Staging places desk-db on Cloud SQL, each serves
 // the engine a socket over the Cloud SQL connector. Regenerate with:
 //
@@ -163,6 +165,7 @@ func TestEngineEntrypointGolden(t *testing.T) {
 	}{
 		{engineServer, []string{servergen.MainFile, servergen.EngineFile, servergen.ServiceAuthFile, servergen.ModFile, servergen.DockerFile, servergen.DockerIgnoreFile}},
 		{engineRunner, []string{servergen.MainFile, servergen.EngineFile, servergen.ModFile, servergen.DockerFile, servergen.DockerIgnoreFile}},
+		{engineJob, []string{servergen.MainFile, servergen.EngineFile}},
 	} {
 		for _, file := range d.files {
 			files[filepath.Join("server", engineStack, d.name, file)] = filepath.Join(servergen.ServerDir(out, engineStack, d.name), file)
@@ -173,7 +176,7 @@ func TestEngineEntrypointGolden(t *testing.T) {
 }
 
 // TestEngineEntrypointServes: desk-api's server and desk-db's runner build
-// and vet, linking the engine's archive. The server starts with no
+// and vet, linking the engine's archive, and so does desk-api's job. The server starts with no
 // database up and answers what needs none: /readyz names the engine, its
 // routes under /engine/desk-db answer 503 unavailable until it opens, and
 // a trusted origin's preflight of one gets the identity runtime's CORS.
@@ -209,6 +212,10 @@ func TestEngineEntrypointServes(t *testing.T) {
 	goCommand(t, runnerDir, "vet", ".")
 	runnerBinary := filepath.Join(t.TempDir(), engineRunner)
 	goCommand(t, runnerDir, "build", "-o", runnerBinary, ".")
+	// desk-api's job opens the engine for its Deps too.
+	jobDir := servergen.ServerDir(out, engineStack, engineJob)
+	goCommand(t, jobDir, "mod", "tidy")
+	goCommand(t, jobDir, "vet", ".")
 
 	identityConfig := `{"trustedOrigins": ["https://app.example.com"], "cookie": {"secure": false}, "password": {"argon2": {"memoryKiB": 64, "iterations": 1, "parallelism": 1}}}`
 	public, key, err := ed25519.GenerateKey(rand.Reader)

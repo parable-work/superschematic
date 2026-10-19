@@ -69,7 +69,12 @@ the `enginedoc` generator writes the schema's engine document,
 constant too
 ([Engine types](/superschematic/guides/engine-behaviors/#engine-types)).
 `outputs.engine.namespace` names the engine namespace its documents live
-in, the service's name unless set. The build fails before its generators
+in, the service's name unless set; `outputs.engine.mount` where a Go
+server of an API on the database mounts the engine's routes,
+`/engine/<service>` unless set; and `outputs.engine.policy` the access
+policy it opens the engine with, `permission` unless set
+([In a generated server](/superschematic/guides/engine-behaviors/#in-a-generated-server)).
+The build fails before its generators
 run, one line per problem, when an engine type reaches a table or another
 engine type through a field, a table references an engine type, or an
 engine type declares what only a table has:

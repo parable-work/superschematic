@@ -25,3 +25,7 @@ operationSets:
         httpMethod: GET
         restPath: summary
         serviceCallers: { mode: allow }
+# A job of the API, a deployable of its own with the API's Deps (D52),
+# which hold the engine of desk-db: the job opens it, and deploys nothing.
+jobs:
+  - name: CloseStaleTickets

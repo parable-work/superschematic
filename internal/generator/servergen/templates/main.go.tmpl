@@ -7,9 +7,14 @@
 // It reads its whole configuration from the environment: each API's @envVars
 // settings and the fields its edges derive, one variable per member (section
 // 3.4). It listens on $PORT, 8080 when unset, answers GET /healthz while the
-// process runs and GET /readyz while its databases answer{{ if .Engines }} and its engines are
-// open (D58){{ end }}, and on SIGTERM or SIGINT stops taking requests and lets those in
+{{- if .Engines }}
+// process runs and GET /readyz while its databases answer and its engines are
+// open (D58), and on SIGTERM or SIGINT stops taking requests and lets those in
 // flight finish.
+{{- else }}
+// process runs and GET /readyz while its databases answer, and on SIGTERM or
+// SIGINT stops taking requests and lets those in flight finish.
+{{- end }}
 //
 // Each API's implementation is the package at the naming file's
 // [implementation_paths] go template, which the build scaffolded once when
