@@ -1977,10 +1977,29 @@ func (u *CoverUpdate) ApplyTo(row *types.Cover) {
 	}
 }
 
-// buildWhereClause builds a WHERE clause from a CoverFilter
+// CoverFilterConditions are the filter's conditions for a query of
+// the caller's own, each column qualified by its table: each value is
+// appended to args, its placeholder numbered after those already there.
+// FindMany's WHERE is them joined by AND. A nil filter has none.
+func CoverFilterConditions(filter *CoverFilter, args *[]any) []string {
+	return filter.conditions(args, len(*args))
+}
+
+// buildWhereClause builds a WHERE clause from a CoverFilter: its
+// conditions joined by AND, or nothing when it has none.
 func (f *CoverFilter) buildWhereClause(args *[]interface{}, paramOffset int) string {
-	if f == nil {
+	conditions := f.conditions(args, paramOffset)
+	if len(conditions) == 0 {
 		return ""
+	}
+	return " WHERE " + strings.Join(conditions, " AND ")
+}
+
+// conditions are the filter's conditions, each value appended to args, its
+// placeholder numbered from paramOffset+1.
+func (f *CoverFilter) conditions(args *[]interface{}, paramOffset int) []string {
+	if f == nil {
+		return nil
 	}
 
 	var conditions []string
@@ -2139,11 +2158,7 @@ func (f *CoverFilter) buildWhereClause(args *[]interface{}, paramOffset int) str
 		}
 	}
 
-	if len(conditions) == 0 {
-		return ""
-	}
-
-	return " WHERE " + strings.Join(conditions, " AND ")
+	return conditions
 }
 
 // IngredientFilter provides filtering for Ingredient queries
@@ -2221,10 +2236,29 @@ func (u *IngredientUpdate) ApplyTo(row *types.Ingredient) {
 	}
 }
 
-// buildWhereClause builds a WHERE clause from a IngredientFilter
+// IngredientFilterConditions are the filter's conditions for a query of
+// the caller's own, each column qualified by its table: each value is
+// appended to args, its placeholder numbered after those already there.
+// FindMany's WHERE is them joined by AND. A nil filter has none.
+func IngredientFilterConditions(filter *IngredientFilter, args *[]any) []string {
+	return filter.conditions(args, len(*args))
+}
+
+// buildWhereClause builds a WHERE clause from a IngredientFilter: its
+// conditions joined by AND, or nothing when it has none.
 func (f *IngredientFilter) buildWhereClause(args *[]interface{}, paramOffset int) string {
-	if f == nil {
+	conditions := f.conditions(args, paramOffset)
+	if len(conditions) == 0 {
 		return ""
+	}
+	return " WHERE " + strings.Join(conditions, " AND ")
+}
+
+// conditions are the filter's conditions, each value appended to args, its
+// placeholder numbered from paramOffset+1.
+func (f *IngredientFilter) conditions(args *[]interface{}, paramOffset int) []string {
+	if f == nil {
+		return nil
 	}
 
 	var conditions []string
@@ -2427,11 +2461,7 @@ func (f *IngredientFilter) buildWhereClause(args *[]interface{}, paramOffset int
 		}
 	}
 
-	if len(conditions) == 0 {
-		return ""
-	}
-
-	return " WHERE " + strings.Join(conditions, " AND ")
+	return conditions
 }
 
 // NoteFilter provides filtering for Note queries
@@ -2510,10 +2540,29 @@ func (u *NoteUpdate) ApplyTo(row *types.Note) {
 	}
 }
 
-// buildWhereClause builds a WHERE clause from a NoteFilter
+// NoteFilterConditions are the filter's conditions for a query of
+// the caller's own, each column qualified by its table: each value is
+// appended to args, its placeholder numbered after those already there.
+// FindMany's WHERE is them joined by AND. A nil filter has none.
+func NoteFilterConditions(filter *NoteFilter, args *[]any) []string {
+	return filter.conditions(args, len(*args))
+}
+
+// buildWhereClause builds a WHERE clause from a NoteFilter: its
+// conditions joined by AND, or nothing when it has none.
 func (f *NoteFilter) buildWhereClause(args *[]interface{}, paramOffset int) string {
-	if f == nil {
+	conditions := f.conditions(args, paramOffset)
+	if len(conditions) == 0 {
 		return ""
+	}
+	return " WHERE " + strings.Join(conditions, " AND ")
+}
+
+// conditions are the filter's conditions, each value appended to args, its
+// placeholder numbered from paramOffset+1.
+func (f *NoteFilter) conditions(args *[]interface{}, paramOffset int) []string {
+	if f == nil {
+		return nil
 	}
 
 	var conditions []string
@@ -2695,11 +2744,7 @@ func (f *NoteFilter) buildWhereClause(args *[]interface{}, paramOffset int) stri
 		}
 	}
 
-	if len(conditions) == 0 {
-		return ""
-	}
-
-	return " WHERE " + strings.Join(conditions, " AND ")
+	return conditions
 }
 
 // RecipeFilter provides filtering for Recipe queries
@@ -2766,10 +2811,29 @@ func (u *RecipeUpdate) ApplyTo(row *types.Recipe) {
 	}
 }
 
-// buildWhereClause builds a WHERE clause from a RecipeFilter
+// RecipeFilterConditions are the filter's conditions for a query of
+// the caller's own, each column qualified by its table: each value is
+// appended to args, its placeholder numbered after those already there.
+// FindMany's WHERE is them joined by AND. A nil filter has none.
+func RecipeFilterConditions(filter *RecipeFilter, args *[]any) []string {
+	return filter.conditions(args, len(*args))
+}
+
+// buildWhereClause builds a WHERE clause from a RecipeFilter: its
+// conditions joined by AND, or nothing when it has none.
 func (f *RecipeFilter) buildWhereClause(args *[]interface{}, paramOffset int) string {
-	if f == nil {
+	conditions := f.conditions(args, paramOffset)
+	if len(conditions) == 0 {
 		return ""
+	}
+	return " WHERE " + strings.Join(conditions, " AND ")
+}
+
+// conditions are the filter's conditions, each value appended to args, its
+// placeholder numbered from paramOffset+1.
+func (f *RecipeFilter) conditions(args *[]interface{}, paramOffset int) []string {
+	if f == nil {
+		return nil
 	}
 
 	var conditions []string
@@ -2936,11 +3000,7 @@ func (f *RecipeFilter) buildWhereClause(args *[]interface{}, paramOffset int) st
 		}
 	}
 
-	if len(conditions) == 0 {
-		return ""
-	}
-
-	return " WHERE " + strings.Join(conditions, " AND ")
+	return conditions
 }
 
 // RecipeCommitFilter provides filtering for RecipeCommit queries
@@ -3059,10 +3119,29 @@ func (u *RecipeCommitUpdate) ApplyTo(row *types.RecipeCommit) {
 	}
 }
 
-// buildWhereClause builds a WHERE clause from a RecipeCommitFilter
+// RecipeCommitFilterConditions are the filter's conditions for a query of
+// the caller's own, each column qualified by its table: each value is
+// appended to args, its placeholder numbered after those already there.
+// FindMany's WHERE is them joined by AND. A nil filter has none.
+func RecipeCommitFilterConditions(filter *RecipeCommitFilter, args *[]any) []string {
+	return filter.conditions(args, len(*args))
+}
+
+// buildWhereClause builds a WHERE clause from a RecipeCommitFilter: its
+// conditions joined by AND, or nothing when it has none.
 func (f *RecipeCommitFilter) buildWhereClause(args *[]interface{}, paramOffset int) string {
-	if f == nil {
+	conditions := f.conditions(args, paramOffset)
+	if len(conditions) == 0 {
 		return ""
+	}
+	return " WHERE " + strings.Join(conditions, " AND ")
+}
+
+// conditions are the filter's conditions, each value appended to args, its
+// placeholder numbered from paramOffset+1.
+func (f *RecipeCommitFilter) conditions(args *[]interface{}, paramOffset int) []string {
+	if f == nil {
+		return nil
 	}
 
 	var conditions []string
@@ -3368,11 +3447,7 @@ func (f *RecipeCommitFilter) buildWhereClause(args *[]interface{}, paramOffset i
 		}
 	}
 
-	if len(conditions) == 0 {
-		return ""
-	}
-
-	return " WHERE " + strings.Join(conditions, " AND ")
+	return conditions
 }
 
 // RecipePatchFilter provides filtering for RecipePatch queries
@@ -3442,10 +3517,29 @@ func (u *RecipePatchUpdate) ApplyTo(row *types.RecipePatch) {
 	}
 }
 
-// buildWhereClause builds a WHERE clause from a RecipePatchFilter
+// RecipePatchFilterConditions are the filter's conditions for a query of
+// the caller's own, each column qualified by its table: each value is
+// appended to args, its placeholder numbered after those already there.
+// FindMany's WHERE is them joined by AND. A nil filter has none.
+func RecipePatchFilterConditions(filter *RecipePatchFilter, args *[]any) []string {
+	return filter.conditions(args, len(*args))
+}
+
+// buildWhereClause builds a WHERE clause from a RecipePatchFilter: its
+// conditions joined by AND, or nothing when it has none.
 func (f *RecipePatchFilter) buildWhereClause(args *[]interface{}, paramOffset int) string {
-	if f == nil {
+	conditions := f.conditions(args, paramOffset)
+	if len(conditions) == 0 {
 		return ""
+	}
+	return " WHERE " + strings.Join(conditions, " AND ")
+}
+
+// conditions are the filter's conditions, each value appended to args, its
+// placeholder numbered from paramOffset+1.
+func (f *RecipePatchFilter) conditions(args *[]interface{}, paramOffset int) []string {
+	if f == nil {
+		return nil
 	}
 
 	var conditions []string
@@ -3620,11 +3714,7 @@ func (f *RecipePatchFilter) buildWhereClause(args *[]interface{}, paramOffset in
 		}
 	}
 
-	if len(conditions) == 0 {
-		return ""
-	}
-
-	return " WHERE " + strings.Join(conditions, " AND ")
+	return conditions
 }
 
 // RecipeRefFilter provides filtering for RecipeRef queries
@@ -3752,10 +3842,29 @@ func (u *RecipeRefUpdate) ApplyTo(row *types.RecipeRef) {
 	}
 }
 
-// buildWhereClause builds a WHERE clause from a RecipeRefFilter
+// RecipeRefFilterConditions are the filter's conditions for a query of
+// the caller's own, each column qualified by its table: each value is
+// appended to args, its placeholder numbered after those already there.
+// FindMany's WHERE is them joined by AND. A nil filter has none.
+func RecipeRefFilterConditions(filter *RecipeRefFilter, args *[]any) []string {
+	return filter.conditions(args, len(*args))
+}
+
+// buildWhereClause builds a WHERE clause from a RecipeRefFilter: its
+// conditions joined by AND, or nothing when it has none.
 func (f *RecipeRefFilter) buildWhereClause(args *[]interface{}, paramOffset int) string {
-	if f == nil {
+	conditions := f.conditions(args, paramOffset)
+	if len(conditions) == 0 {
 		return ""
+	}
+	return " WHERE " + strings.Join(conditions, " AND ")
+}
+
+// conditions are the filter's conditions, each value appended to args, its
+// placeholder numbered from paramOffset+1.
+func (f *RecipeRefFilter) conditions(args *[]interface{}, paramOffset int) []string {
+	if f == nil {
+		return nil
 	}
 
 	var conditions []string
@@ -4125,11 +4234,7 @@ func (f *RecipeRefFilter) buildWhereClause(args *[]interface{}, paramOffset int)
 		}
 	}
 
-	if len(conditions) == 0 {
-		return ""
-	}
-
-	return " WHERE " + strings.Join(conditions, " AND ")
+	return conditions
 }
 
 // RecipeReleaseFilter provides filtering for RecipeRelease queries
@@ -4182,10 +4287,29 @@ func (u *RecipeReleaseUpdate) ApplyTo(row *types.RecipeRelease) {
 	}
 }
 
-// buildWhereClause builds a WHERE clause from a RecipeReleaseFilter
+// RecipeReleaseFilterConditions are the filter's conditions for a query of
+// the caller's own, each column qualified by its table: each value is
+// appended to args, its placeholder numbered after those already there.
+// FindMany's WHERE is them joined by AND. A nil filter has none.
+func RecipeReleaseFilterConditions(filter *RecipeReleaseFilter, args *[]any) []string {
+	return filter.conditions(args, len(*args))
+}
+
+// buildWhereClause builds a WHERE clause from a RecipeReleaseFilter: its
+// conditions joined by AND, or nothing when it has none.
 func (f *RecipeReleaseFilter) buildWhereClause(args *[]interface{}, paramOffset int) string {
-	if f == nil {
+	conditions := f.conditions(args, paramOffset)
+	if len(conditions) == 0 {
 		return ""
+	}
+	return " WHERE " + strings.Join(conditions, " AND ")
+}
+
+// conditions are the filter's conditions, each value appended to args, its
+// placeholder numbered from paramOffset+1.
+func (f *RecipeReleaseFilter) conditions(args *[]interface{}, paramOffset int) []string {
+	if f == nil {
+		return nil
 	}
 
 	var conditions []string
@@ -4379,11 +4503,7 @@ func (f *RecipeReleaseFilter) buildWhereClause(args *[]interface{}, paramOffset 
 		}
 	}
 
-	if len(conditions) == 0 {
-		return ""
-	}
-
-	return " WHERE " + strings.Join(conditions, " AND ")
+	return conditions
 }
 
 // RecipeSnapshotEntryFilter provides filtering for RecipeSnapshotEntry queries
@@ -4447,10 +4567,29 @@ func (u *RecipeSnapshotEntryUpdate) ApplyTo(row *types.RecipeSnapshotEntry) {
 	}
 }
 
-// buildWhereClause builds a WHERE clause from a RecipeSnapshotEntryFilter
+// RecipeSnapshotEntryFilterConditions are the filter's conditions for a query of
+// the caller's own, each column qualified by its table: each value is
+// appended to args, its placeholder numbered after those already there.
+// FindMany's WHERE is them joined by AND. A nil filter has none.
+func RecipeSnapshotEntryFilterConditions(filter *RecipeSnapshotEntryFilter, args *[]any) []string {
+	return filter.conditions(args, len(*args))
+}
+
+// buildWhereClause builds a WHERE clause from a RecipeSnapshotEntryFilter: its
+// conditions joined by AND, or nothing when it has none.
 func (f *RecipeSnapshotEntryFilter) buildWhereClause(args *[]interface{}, paramOffset int) string {
-	if f == nil {
+	conditions := f.conditions(args, paramOffset)
+	if len(conditions) == 0 {
 		return ""
+	}
+	return " WHERE " + strings.Join(conditions, " AND ")
+}
+
+// conditions are the filter's conditions, each value appended to args, its
+// placeholder numbered from paramOffset+1.
+func (f *RecipeSnapshotEntryFilter) conditions(args *[]interface{}, paramOffset int) []string {
+	if f == nil {
+		return nil
 	}
 
 	var conditions []string
@@ -4604,11 +4743,7 @@ func (f *RecipeSnapshotEntryFilter) buildWhereClause(args *[]interface{}, paramO
 		}
 	}
 
-	if len(conditions) == 0 {
-		return ""
-	}
-
-	return " WHERE " + strings.Join(conditions, " AND ")
+	return conditions
 }
 
 // StepFilter provides filtering for Step queries
@@ -4706,10 +4841,29 @@ func (u *StepUpdate) ApplyTo(row *types.Step) {
 	}
 }
 
-// buildWhereClause builds a WHERE clause from a StepFilter
+// StepFilterConditions are the filter's conditions for a query of
+// the caller's own, each column qualified by its table: each value is
+// appended to args, its placeholder numbered after those already there.
+// FindMany's WHERE is them joined by AND. A nil filter has none.
+func StepFilterConditions(filter *StepFilter, args *[]any) []string {
+	return filter.conditions(args, len(*args))
+}
+
+// buildWhereClause builds a WHERE clause from a StepFilter: its
+// conditions joined by AND, or nothing when it has none.
 func (f *StepFilter) buildWhereClause(args *[]interface{}, paramOffset int) string {
-	if f == nil {
+	conditions := f.conditions(args, paramOffset)
+	if len(conditions) == 0 {
 		return ""
+	}
+	return " WHERE " + strings.Join(conditions, " AND ")
+}
+
+// conditions are the filter's conditions, each value appended to args, its
+// placeholder numbered from paramOffset+1.
+func (f *StepFilter) conditions(args *[]interface{}, paramOffset int) []string {
+	if f == nil {
+		return nil
 	}
 
 	var conditions []string
@@ -5029,11 +5183,7 @@ func (f *StepFilter) buildWhereClause(args *[]interface{}, paramOffset int) stri
 		}
 	}
 
-	if len(conditions) == 0 {
-		return ""
-	}
-
-	return " WHERE " + strings.Join(conditions, " AND ")
+	return conditions
 }
 
 // TastingFilter provides filtering for Tasting queries
@@ -5171,10 +5321,29 @@ func (u *TastingUpdate) ApplyTo(row *types.Tasting) {
 	}
 }
 
-// buildWhereClause builds a WHERE clause from a TastingFilter
+// TastingFilterConditions are the filter's conditions for a query of
+// the caller's own, each column qualified by its table: each value is
+// appended to args, its placeholder numbered after those already there.
+// FindMany's WHERE is them joined by AND. A nil filter has none.
+func TastingFilterConditions(filter *TastingFilter, args *[]any) []string {
+	return filter.conditions(args, len(*args))
+}
+
+// buildWhereClause builds a WHERE clause from a TastingFilter: its
+// conditions joined by AND, or nothing when it has none.
 func (f *TastingFilter) buildWhereClause(args *[]interface{}, paramOffset int) string {
-	if f == nil {
+	conditions := f.conditions(args, paramOffset)
+	if len(conditions) == 0 {
 		return ""
+	}
+	return " WHERE " + strings.Join(conditions, " AND ")
+}
+
+// conditions are the filter's conditions, each value appended to args, its
+// placeholder numbered from paramOffset+1.
+func (f *TastingFilter) conditions(args *[]interface{}, paramOffset int) []string {
+	if f == nil {
+		return nil
 	}
 
 	var conditions []string
@@ -5571,11 +5740,7 @@ func (f *TastingFilter) buildWhereClause(args *[]interface{}, paramOffset int) s
 		}
 	}
 
-	if len(conditions) == 0 {
-		return ""
-	}
-
-	return " WHERE " + strings.Join(conditions, " AND ")
+	return conditions
 }
 
 // UtensilFilter provides filtering for Utensil queries
@@ -5641,10 +5806,29 @@ func (u *UtensilUpdate) ApplyTo(row *types.Utensil) {
 	}
 }
 
-// buildWhereClause builds a WHERE clause from a UtensilFilter
+// UtensilFilterConditions are the filter's conditions for a query of
+// the caller's own, each column qualified by its table: each value is
+// appended to args, its placeholder numbered after those already there.
+// FindMany's WHERE is them joined by AND. A nil filter has none.
+func UtensilFilterConditions(filter *UtensilFilter, args *[]any) []string {
+	return filter.conditions(args, len(*args))
+}
+
+// buildWhereClause builds a WHERE clause from a UtensilFilter: its
+// conditions joined by AND, or nothing when it has none.
 func (f *UtensilFilter) buildWhereClause(args *[]interface{}, paramOffset int) string {
-	if f == nil {
+	conditions := f.conditions(args, paramOffset)
+	if len(conditions) == 0 {
 		return ""
+	}
+	return " WHERE " + strings.Join(conditions, " AND ")
+}
+
+// conditions are the filter's conditions, each value appended to args, its
+// placeholder numbered from paramOffset+1.
+func (f *UtensilFilter) conditions(args *[]interface{}, paramOffset int) []string {
+	if f == nil {
+		return nil
 	}
 
 	var conditions []string
@@ -5803,9 +5987,5 @@ func (f *UtensilFilter) buildWhereClause(args *[]interface{}, paramOffset int) s
 		}
 	}
 
-	if len(conditions) == 0 {
-		return ""
-	}
-
-	return " WHERE " + strings.Join(conditions, " AND ")
+	return conditions
 }

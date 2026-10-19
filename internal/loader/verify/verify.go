@@ -231,6 +231,7 @@ func Run(schema *ir.Schema, in Input) *Result {
 	checkDerivedFields(schema, in, r)
 	checkIndexTables(schema, r)
 	checkIndexKeys(schema, r)
+	checkSearchColumns(schema, r)
 	reg := in.registry()
 	checkBehaviors(schema, reg, r)
 	checkDisplays(schema, reg, r)
