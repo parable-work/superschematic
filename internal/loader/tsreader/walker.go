@@ -50,6 +50,10 @@ type walker struct {
 	// fields so composite defaults can validate serialized enum values.
 	externalEnums map[string]*ir.EnumDef
 
+	// relationTargets holds the class declaration each Relation field names,
+	// so applySource can flatten the types an @source target relates to.
+	relationTargets map[*ir.FieldDef]*astNode
+
 	// suppressRecording disables import recording while resolving a foreign
 	// class's fields (an @source target): only this schema's own references
 	// belong in Imports.
@@ -83,6 +87,8 @@ func newWalker(sp *serviceProgram, cfg *SchemaConfig, schema *ir.Schema, package
 		externals:     make(map[string]bool),
 		externalTypes: make(map[string]*ir.TypeDef),
 		externalEnums: make(map[string]*ir.EnumDef),
+
+		relationTargets: make(map[*ir.FieldDef]*astNode),
 
 		identityTables: make(map[string]*astNode),
 	}
@@ -1059,6 +1065,9 @@ func (w *walker) resolveClassFieldDefs(node *astNode) ([]*ir.FieldDef, bool) {
 				if inherited.InheritedFrom == "" {
 					inherited.InheritedFrom = id.name
 				}
+				if decl := w.relationTargets[bf]; decl != nil {
+					w.relationTargets[&inherited] = decl
+				}
 				fields = append(fields, &inherited)
 			}
 		}
@@ -1117,6 +1126,9 @@ func (w *walker) fieldFromProperty(member *astNode) (*ir.FieldDef, *SchemaError)
 	}
 	if info.relation {
 		fd.Relation = &ir.RelationDef{Type: info.ref.Name, OnDelete: info.relationOnDelete}
+		if info.decl != nil && info.decl.Kind == kindClassDeclaration {
+			w.relationTargets[fd] = info.decl
+		}
 	}
 	if info.search {
 		return nil, errorAtNode(prop.Type, "SearchQuery marks an operation's argument; a field is no search")
@@ -1205,6 +1217,7 @@ func (w *walker) applySource(td *ir.TypeDef, src *decoratorRef) {
 	target := targetService + "." + id.name
 	if external {
 		w.externalTypes[target] = &ir.TypeDef{Name: id.name, Fields: sourceFields}
+		w.flattenRelatedTypes(targetService, sourceFields)
 	}
 
 	sourceByName := make(map[string]*ir.FieldDef, len(sourceFields))
@@ -1226,6 +1239,34 @@ func (w *walker) applySource(td *ir.TypeDef, src *decoratorRef) {
 		}
 	}
 	td.Source = ref
+}
+
+// flattenRelatedTypes records, beside a cross-service @source target in
+// externalTypes, the flattened type each of its single Relation fields
+// names, as service.Type. A field <r>Id of the projection reads r's key,
+// and the verification pass holds its type to the related type's id
+// (D61, amended). Like the target, the related type is never recorded as
+// an import.
+func (w *walker) flattenRelatedTypes(service string, sourceFields []*ir.FieldDef) {
+	for _, f := range sourceFields {
+		if f.Relation == nil || f.HasMany || f.ManyToMany || f.TypeRef.IsArray || f.TypeRef.IsMap {
+			continue
+		}
+		decl := w.relationTargets[f]
+		if decl == nil || decl.Name() == nil {
+			continue
+		}
+		name := decl.Name().Text()
+		related := service + "." + name
+		if _, done := w.externalTypes[related]; done {
+			continue
+		}
+		prevSuppress := w.suppressRecording
+		w.suppressRecording = true
+		fields, _ := w.resolveClassFieldDefs(decl)
+		w.suppressRecording = prevSuppress
+		w.externalTypes[related] = &ir.TypeDef{Name: name, Fields: fields}
+	}
 }
 
 // walkEnum converts an exported enum declaration into an EnumDef. Only
