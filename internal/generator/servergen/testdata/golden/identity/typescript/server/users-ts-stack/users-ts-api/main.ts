@@ -59,10 +59,10 @@ interface BunRuntime {
 
 const logger = createLogger({ stack: 'users-ts-stack', server: 'users-ts-api' });
 
-/** A database /readyz pings, by its service. */
+/** What /readyz checks, by its name: a database, by a ping. */
 interface Dependency {
   readonly name: string;
-  readonly pool: Pool;
+  check(): Promise<void>;
 }
 
 /** The exit status of a process a signal ends at once: 128 and its number. */
@@ -77,13 +77,14 @@ async function main(): Promise<void> {
   // it is first used, so the server starts while its database is not up yet
   // and /readyz reports it.
   const usersDbPool = await connect('users-db', 'USERS_DB_DATABASE', usersTsApiConfig.USERS_DB_DATABASE);
-  const dependencies: readonly Dependency[] = [
-    { name: 'users-db', pool: usersDbPool },
-  ];
+  const pools: readonly Pool[] = [usersDbPool];
 
   // The identity store of the user model in users-db (D50), over the
   // same pool, for every API that authenticates its users against it.
   const usersDbIdentityStore = postgresIdentityStore(usersDbPool, usersDbIdentityDescriptor);
+  const dependencies: readonly Dependency[] = [
+    { name: 'users-db', check: () => ping(usersDbPool, READINESS_TIMEOUT_MS) },
+  ];
 
   const app = new Hono();
   let draining = false;
@@ -92,7 +93,7 @@ async function main(): Promise<void> {
     if (draining) return c.json({ status: 'draining' }, 503);
     const failed = await Promise.all(
       dependencies.map(dependency =>
-        ping(dependency.pool, READINESS_TIMEOUT_MS).then(
+        dependency.check().then(
           () => undefined,
           (error: unknown) => {
             logger.warn('not ready', { dependency: dependency.name, error });
@@ -142,7 +143,7 @@ async function main(): Promise<void> {
     stopping = true;
     draining = true;
     logger.info('shutting down', { signal });
-    drain(server, dependencies.map(dependency => dependency.pool)).then(
+    drain(server, pools).then(
       () => {
         logger.info('stopped');
         process.exit(0);

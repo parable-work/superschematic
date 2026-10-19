@@ -448,6 +448,16 @@ type PathsConfig struct {
 	// the work queue's crate, the schema IR's and the version graph's
 	// engine at their places in the same checkout.
 	EngineGo string `toml:"engine_go"`
+	// EngineTypeScript holds the behavior engine's npm package (D58),
+	// @superschematic/engine (its package.json), whose ./server entry a
+	// TypeScript server whose API's database holds engine types opens the
+	// engine with, through the engine's Node-API addon. The output root's
+	// Bun workspace overrides the servers' dependency on it with it, and
+	// the version graph's package with the checkout's beside it, which the
+	// engine's package depends on by path, unless versiongraph_typescript
+	// names another. A server's checkout Dockerfile builds the addon from
+	// the Cargo workspace beside it (the package's ../rust).
+	EngineTypeScript string `toml:"engine_typescript"`
 	// VersionGraphPython holds the version graph's Python package.
 	VersionGraphPython string `toml:"versiongraph_python"`
 	// HTTPRuntimeGo holds the http runtime Go module.
@@ -487,6 +497,7 @@ type LocalPaths struct {
 	EngineWorkQueueRust    string
 	EngineABIRust          string
 	EngineGo               string
+	EngineTypeScript       string
 	VersionGraphPython     string
 	HTTPRuntimeGo          string
 	HTTPRuntimeRust        string
@@ -518,6 +529,7 @@ func (n Naming) LocalPaths(repoRoot string) LocalPaths {
 		EngineWorkQueueRust:    resolve(n.Paths.EngineWorkQueueRust),
 		EngineABIRust:          resolve(n.Paths.EngineABIRust),
 		EngineGo:               resolve(n.Paths.EngineGo),
+		EngineTypeScript:       resolve(n.Paths.EngineTypeScript),
 		VersionGraphPython:     resolve(n.Paths.VersionGraphPython),
 		HTTPRuntimeGo:          resolve(n.Paths.HTTPRuntimeGo),
 		HTTPRuntimeRust:        resolve(n.Paths.HTTPRuntimeRust),
@@ -525,6 +537,21 @@ func (n Naming) LocalPaths(repoRoot string) LocalPaths {
 		Ptr:                    resolve(n.Paths.Ptr),
 		BuildContext:           resolve(n.Paths.BuildContext),
 	}
+}
+
+// VersionGraphTypeScriptPackage is the version graph's npm package the
+// output root's Bun workspace overrides its dependents' dependency with:
+// [paths] versiongraph_typescript, else, when [paths] engine_typescript
+// names the engine's package, the checkout's beside it
+// (runtime/versiongraph/typescript), which the engine's package depends
+// on by path (D58); "" when neither is set. A path dependency inside a
+// package the workspace installs from a path resolves against the
+// workspace, not the package, so the workspace names it.
+func (p LocalPaths) VersionGraphTypeScriptPackage() string {
+	if p.VersionGraphTypeScript != "" || p.EngineTypeScript == "" {
+		return p.VersionGraphTypeScript
+	}
+	return filepath.Join(filepath.Dir(filepath.Dir(p.EngineTypeScript)), "versiongraph", "typescript")
 }
 
 // BuildContext returns the build context of the stack's server images:
@@ -555,6 +582,7 @@ func (p PathsConfig) checkRelative() error {
 		{"engine_workqueue_rust", p.EngineWorkQueueRust},
 		{"engine_abi_rust", p.EngineABIRust},
 		{"engine_go", p.EngineGo},
+		{"engine_typescript", p.EngineTypeScript},
 		{"versiongraph_python", p.VersionGraphPython},
 		{"http_runtime_go", p.HTTPRuntimeGo},
 		{"http_runtime_rust", p.HTTPRuntimeRust},

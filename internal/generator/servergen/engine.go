@@ -175,11 +175,14 @@ var engineCrates = []string{
 
 // planEngineDocker plans the engine stage of a checkout's Dockerfile from
 // the engine's Go binding at engineGo, or says why it cannot: the binding
-// and the checkout it lies in must be under the build context, root.
-func planEngineDocker(engineGo, root string, rel func(string) (string, bool)) (*engineDocker, string) {
+// and the checkout it lies in must be under the build context, root. A
+// TypeScript entrypoint's plans it from the engine's npm package, which
+// lies beside the binding (what names it): its Go field is then the
+// package.
+func planEngineDocker(engineGo, root string, rel func(string) (string, bool), what string) (*engineDocker, string) {
 	binding, ok := rel(engineGo)
 	if !ok {
-		return nil, fmt.Sprintf("the engine's Go binding %s lies outside the repository root %s, the build context", engineGo, root)
+		return nil, fmt.Sprintf("%s %s lies outside the repository root %s, the build context", what, engineGo, root)
 	}
 	d := &engineDocker{Go: binding, Workspace: path.Join(path.Dir(binding), "rust")}
 	checkout := filepath.Dir(filepath.Dir(filepath.Dir(engineGo)))

@@ -906,7 +906,7 @@ func planDocker(in Input, dir string) (*Docker, string, error) {
 		return nil, "the entrypoint opens the engine (D58), and the naming file's [paths] engine_go, the engine's Go binding, whose Cargo workspace the image builds the engine's archive from, is unset while [paths] scalar_go names a checkout to build superscalar's from; set engine_go to the same checkout's runtime/engine/go", nil
 	}
 	if in.EngineGo != "" {
-		engine, why := planEngineDocker(in.EngineGo, root, rel)
+		engine, why := planEngineDocker(in.EngineGo, root, rel, "the engine's Go binding")
 		if engine == nil {
 			return nil, why, nil
 		}
@@ -1219,10 +1219,8 @@ func templateFuncs() template.FuncMap {
 		"anyMountsEngine": func(apis []*API) bool {
 			return slices.ContainsFunc(apis, func(a *API) bool { return a.MountsEngine })
 		},
-		"tsQuote": func(s string) string {
-			return "'" + strings.NewReplacer(`\`, `\\`, `'`, `\'`, "\n", `\n`).Replace(s) + "'"
-		},
-		"join": strings.Join,
+		"tsQuote": tsQuote,
+		"join":    strings.Join,
 		"tsServiceList": func(apis []*TypeScriptAPI) string {
 			names := make([]string, len(apis))
 			for i, a := range apis {
@@ -1243,6 +1241,11 @@ func templateFuncs() template.FuncMap {
 		"rustLetChain": rustLetChain,
 		"rustMacro":    rustMacro,
 	}
+}
+
+// tsQuote is s as a TypeScript string literal, in single quotes.
+func tsQuote(s string) string {
+	return "'" + strings.NewReplacer(`\`, `\\`, `'`, `\'`, "\n", `\n`).Replace(s) + "'"
 }
 
 // joinNames joins names as a sentence lists them: a, b and c.

@@ -24,6 +24,9 @@ import type { {{ .Client }} } from '{{ .Package }}';
 {{- if .HasWorkers }}
 import type { {{ join .WorkerQueues ", " }} } from '{{ .Deps.DatabaseTypesPackage }}';
 {{- end }}
+{{- if .Deps.Engine }}
+import type { EngineBackground } from '{{ .Deps.Engine.Package }}/server';
+{{- end }}
 {{- if .HasEnvConfig }}
 import type { EnvConfig } from './config';
 {{- end }}
@@ -46,6 +49,16 @@ export interface Deps {
 {{- range .Deps.Buckets }}
   /** {{ .Service }}, a bucket the API lists: private object storage it puts, gets, deletes and lists objects in, and signs URLs for (D54). */
   readonly {{ .Field }}: Bucket;
+{{- end }}
+{{- with .Deps.Engine }}
+  /**
+   * The engine of {{ .Database }}, the API's engine database (D58), which the
+   * entrypoint opens in the background, so it starts while the database is
+   * not up yet: engine.wait() resolves with it once it opens, and
+   * engine.engine() returns it at once, or throws why it is not open. Its
+   * types' instances are the engine's, in namespace {{ .Namespace }}.
+   */
+  readonly engine: EngineBackground;
 {{- end }}
   /** The API's logger. */
   readonly logger: Logger;

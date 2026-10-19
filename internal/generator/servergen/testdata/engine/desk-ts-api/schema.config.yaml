@@ -1,0 +1,13 @@
+# A public TypeScript API over desk-db, the twin of desk-api: it serves the
+# user model's session routes and a route of its own, and its server opens
+# the engine on desk-db through the engine's Node-API addon and mounts it
+# at /engine/desk-db, behind the session its identity service authenticates
+# and the service caller its service authenticator verifies (D58, D50, D37).
+name: desk-ts-api
+kind: API
+public: true
+authDb: desk-db
+outputs:
+  types:
+    typescript: { enabled: true }
+  api: { enabled: true, language: TYPESCRIPT }

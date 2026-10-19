@@ -31,6 +31,18 @@
 # images of one commit may then differ. The generated CI's check refuses a
 # missing or stale lockfile before any deploy. The image runs main.ts on the
 # Bun release tools.env pins, as a non-root user.
+{{- if .Docker.Engine }}
+#
+# The {{ .Kind }} opens the behavior engine (D58) through the engine's Node-API
+# addon, which no published package ships yet either. The engine stage
+# builds the core's addon (superschematic-engine-napi) for the image's
+# platform from the Cargo workspace beside the engine's package, the
+# naming file's [paths] engine_typescript, with the crates it reaches by
+# path at their places in the checkout. The build stage puts it in the
+# package's native/, where the engine's loader looks for it, and emits the
+# package's ./server entry, which the workspace's root overrides the package
+# with.
+{{- end }}
 
 ARG RUST_VERSION={{ .RustVersion }}
 ARG BUN_VERSION={{ .BunVersion }}
@@ -48,6 +60,24 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     esac \
     && mkdir /native \
     && cp target/release/libsuperscalar_napi.so "/native/superscalar-napi.$triple.node"
+{{- with .Docker.Engine }}
+
+FROM rust:${RUST_VERSION}-trixie AS engine
+WORKDIR /src
+COPY {{ .Workspace }} {{ .Workspace }}
+{{- range .Crates }}
+COPY {{ . }} {{ . }}
+{{- end }}
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    cargo build --locked --release --manifest-path {{ .Workspace }}/Cargo.toml -p superschematic-engine-napi \
+    && case "$(uname -m)" in \
+      x86_64) triple=linux-x64-gnu ;; \
+      aarch64) triple=linux-arm64-gnu ;; \
+      *) echo "the engine builds no Node-API addon for linux/$(uname -m)" >&2; exit 1 ;; \
+    esac \
+    && mkdir /native \
+    && cp {{ .Workspace }}/target/release/libsuperschematic_engine_napi.so "/native/superschematic-engine.$triple.node"
+{{- end }}
 
 FROM oven/bun:${BUN_VERSION} AS build
 WORKDIR /src
@@ -64,6 +94,11 @@ RUN --mount=type=cache,target=/root/.bun/install/cache \
     && bun install --frozen-lockfile \
     && ln -sfn {{ .Docker.ScalarLink }} node_modules/superscalar \
     && bunx tsc -p tsconfig.json
+{{- with .Docker.Engine }}
+COPY --from=engine /native/ {{ .TypeScript }}/native/
+RUN cd {{ .TypeScript }} \
+    && /src/{{ $.Docker.HTTPRuntime }}/node_modules/.bin/tsc -p tsconfig.server.json
+{{- end }}
 WORKDIR /src/{{ .Docker.Workspace }}
 RUN --mount=type=cache,target=/root/.bun/install/cache \
     if [ -f bun.lock ]; then frozen=--frozen-lockfile; else frozen=; \

@@ -46,12 +46,30 @@ type DepsInfo struct {
 	// Buckets are the API's buckets entries, in order (D54).
 	Buckets []DepsBucket
 
+	// Engine is the engine Deps holds when Database is an engine database
+	// (D58), nil otherwise.
+	Engine *DepsEngine
+
 	// DatabaseTypesPackage is the TypeScript types package of Database
 	// when the API declares a worker (D53): it declares the queues'
 	// messages, which the Workers interface takes, and exports their
 	// definitions from its ./queues entry, which a worker claims with and
 	// an implementation enqueues with. Empty otherwise.
 	DatabaseTypesPackage string
+}
+
+// DepsEngine is the engine in Deps (D58): the engine of the API's engine
+// database, which the entrypoint opens in the background, an
+// EngineBackground of the engine's ./server entry.
+type DepsEngine struct {
+	// Database is the engine database, Namespace the namespace its engine
+	// types live in.
+	Database  string
+	Namespace string
+
+	// Package is the engine's npm package, whose ./server entry declares
+	// EngineBackground.
+	Package string
 }
 
 // DepsBucket is a bucket in Deps: the HTTP runtime's provider-neutral
@@ -82,7 +100,7 @@ type DepsCall struct {
 
 // depsFields are the members every Deps may hold beside its clients and
 // its buckets.
-var depsFields = []string{"config", "db", "logger"}
+var depsFields = []string{"config", "db", "engine", "logger"}
 
 // SetDeps sets what Deps holds, refusing a client or a bucket whose member
 // would take the name of another of its members.
@@ -127,7 +145,8 @@ func (o *APIOutput) ChecksEndUsers() bool {
 
 // DepsPeerPackages lists the packages deps.ts imports beside the runtime:
 // each callee's SDK, in order, then the types of the database whose queues
-// the Workers interface's messages are, when the API declares a worker.
+// the Workers interface's messages are, when the API declares a worker,
+// then the engine's package, when Deps holds the engine (D58).
 func (o *APIOutput) DepsPeerPackages() []string {
 	var out []string
 	for _, call := range o.Deps.Calls {
@@ -135,6 +154,9 @@ func (o *APIOutput) DepsPeerPackages() []string {
 	}
 	if o.HasWorkers() && o.Deps.DatabaseTypesPackage != "" && !slices.Contains(o.PeerPackages, o.Deps.DatabaseTypesPackage) {
 		out = append(out, o.Deps.DatabaseTypesPackage)
+	}
+	if o.Deps.Engine != nil && !slices.Contains(o.PeerPackages, o.Deps.Engine.Package) {
+		out = append(out, o.Deps.Engine.Package)
 	}
 	return out
 }

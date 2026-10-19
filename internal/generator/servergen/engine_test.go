@@ -222,7 +222,7 @@ func TestEngineEntrypointServes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	env := append([]string{"DESK_API_IDENTITY=" + identityConfig}, deskCallersVariables(t, public, "ops-key")...)
+	env := append([]string{"DESK_API_IDENTITY=" + identityConfig}, deskCallersVariables(t, "desk-api", public, "ops-key")...)
 
 	offline := start(t, binary, append([]string{"DESK_DB_DATABASE_URL=postgres://desk@127.0.0.1:9/desk_db?connect_timeout=1&sslmode=disable"}, env...)...)
 	offline.expect(t, http.MethodGet, "/readyz", http.StatusServiceUnavailable, `"desk-db engine"`)
@@ -287,17 +287,17 @@ func TestEngineEntrypointServes(t *testing.T) {
 	online.stop(t)
 }
 
-// deskCallersVariables are desk-api's callers field as an environment sets
-// it, ops an issuer of its own with an Ed25519 key: a caller that serves
-// ops-api.
-func deskCallersVariables(t *testing.T, public ed25519.PublicKey, kid string) []string {
+// deskCallersVariables are the callers field of api, desk-api or
+// desk-ts-api, as an environment sets it, ops an issuer of its own with an
+// Ed25519 key: a caller that serves ops-api.
+func deskCallersVariables(t *testing.T, api string, public ed25519.PublicKey, kid string) []string {
 	t.Helper()
 	jwk, err := json.Marshal(map[string]string{"kty": "OKP", "crv": "Ed25519", "kid": kid, "x": base64.RawURLEncoding.EncodeToString(public)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	vars, err := ir.DerivedVariables(ir.CallersField("desk-api"), ir.ServiceAuth{Issuers: []*ir.ServiceAuthIssuer{{
-		Issuer: "ops", Audience: "desk-api", Algorithms: []string{ir.AlgorithmEdDSA},
+	vars, err := ir.DerivedVariables(ir.CallersField(api), ir.ServiceAuth{Issuers: []*ir.ServiceAuthIssuer{{
+		Issuer: "ops", Audience: api, Algorithms: []string{ir.AlgorithmEdDSA},
 		Keys:               []ir.ServiceAuthKey{{JWK: string(jwk)}},
 		MaxLifetimeSeconds: 300,
 		Callers:            []ir.ServiceAuthCaller{{Subject: "ops", Deployable: "ops", Serves: []string{"ops-api"}}},

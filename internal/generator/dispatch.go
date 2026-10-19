@@ -686,6 +686,11 @@ func (r run) typeScriptAPI() (*tsrestgen.APIOutput, *envgen.ConfigOutput, error)
 	if err != nil {
 		return nil, nil, err
 	}
+	if e := apiOutput.Engine; e != nil {
+		// Deps holds the engine of the API's engine database, which a server
+		// opens in the background (D58).
+		tsDeps.Engine = &tsrestgen.DepsEngine{Database: e.Database, Namespace: e.Namespace, Package: r.Options.Naming.EngineNpmPackage}
+	}
 	if err := output.SetDeps(tsDeps); err != nil {
 		return nil, nil, fmt.Errorf("generator: %w", err)
 	}

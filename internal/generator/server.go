@@ -178,6 +178,12 @@ func (r run) generateServers() error {
 				return err
 			}
 			plans = append(plans, planned{server: runner})
+		case APILanguageTypeScript:
+			runner, err := r.planTypeScriptRunner(st.Name, rn, cloudSQL[rn.Name])
+			if err != nil {
+				return err
+			}
+			tsPlans = append(tsPlans, runner)
 		default:
 			r.Logf("  - runner %s: the engine's runner of %s in %s, which gets no generated entrypoint yet (D58)\n", rn.Name, rn.Runner.Database, rn.Language)
 		}
@@ -829,7 +835,9 @@ func (r run) planTypeScriptServer(stackName string, s *ir.ResolvedDeployable, cl
 		if err != nil {
 			return nil, nil, err
 		}
-		r.noteUnopenedEngine(s, ref.Name, routes, "TypeScript")
+		if err := r.checkTypeScriptEngine(stackName, s, ref.Name, routes); err != nil {
+			return nil, nil, err
+		}
 		dir := r.Options.Naming.TypeScriptImplementationDir(r.Options.RepositoryRoot, ref.Name)
 		exists, err := tsrestgen.ImplementationExists(dir)
 		if err != nil {
@@ -1279,10 +1287,83 @@ func (r run) runtimeModules(engine, versionGraph bool) []servergen.Module {
 	return modules
 }
 
+// checkTypeScriptEngine checks what a TypeScript server, job or worker s
+// opens of the engine database of api, which it serves, whose server
+// output is o (D58): its addon is the engine's own, which runs the core's
+// behaviors alone, so a database that composes the work queue's or an
+// extension's is refused until the project's engine crate builds an addon
+// with them. A server of a public API that authenticates with an
+// authenticator of its own gives the engine no end user, and the build
+// says so, as for a Go server.
+func (r run) checkTypeScriptEngine(stackName string, s *ir.ResolvedDeployable, api string, o *apigen.APIOutput) error {
+	if o == nil || o.Engine == nil {
+		return nil
+	}
+	if !o.Engine.CoreBehaviorsOnly(registry.EnginePackage) {
+		return fmt.Errorf("stack %s: %s %s serves %s, whose engine database %s composes %s, which the engine's Node-API addon does not run; a project's engine addon, built with them, comes with the project's engine crate's napi member (D58)", stackName, s.Kind, s.Name, api, o.Engine.Database, strings.Join(extensionBehaviors(o.Engine), ", "))
+	}
+	if s.Kind == ir.DeployableServer && o.IsPublic && !o.Auth.Identity {
+		r.Logf("  - server %s: %s authenticates its users with its own authenticate, so the engine of %s it mounts at %s admits service callers alone; authenticate with the user model's identity runtime (D50) to reach it as an end user\n", s.Name, api, o.Engine.Database, o.Engine.Mount)
+	}
+	return nil
+}
+
+// planTypeScriptRunner plans the entrypoint of the TypeScript engine's
+// runner rn of the stack (D58): its engine database's connection field and
+// the engine info of the first API on it, rn's API, as that API's own build
+// reads them. cloudSQL are the DB services some environment connects it to
+// on Cloud SQL.
+func (r run) planTypeScriptRunner(stackName string, rn *ir.ResolvedDeployable, cloudSQL []string) (*servergen.TypeScriptServer, error) {
+	db, api := rn.Runner.Database, rn.Runner.API
+	served, err := r.servedRun(stackName, rn.Name, api)
+	if err != nil {
+		return nil, err
+	}
+	routes, err := served.APIOutput()
+	if err != nil {
+		return nil, err
+	}
+	if routes == nil || routes.Engine == nil || routes.Engine.Database != db {
+		return nil, fmt.Errorf("stack %s: runner %s runs the engine of %s, which is not the engine database of %s", stackName, rn.Name, db, api)
+	}
+	if !routes.Engine.CoreBehaviorsOnly(registry.EnginePackage) {
+		return nil, fmt.Errorf("stack %s: runner %s runs the engine of %s, which composes %s, which the engine's Node-API addon does not run; a project's engine addon, built with them, comes with the project's engine crate's napi member (D58)", stackName, rn.Name, db, strings.Join(extensionBehaviors(routes.Engine), ", "))
+	}
+	_, config, err := served.typeScriptAPI()
+	if err != nil {
+		return nil, err
+	}
+	field := ""
+	if config != nil {
+		for _, f := range config.Derived {
+			if f.Kind == ir.EdgeSQL && f.Service == db {
+				field = f.Key
+			}
+		}
+	}
+	if field == "" {
+		return nil, fmt.Errorf("stack %s: runner %s runs the engine of %s, and %s's config has no field for it", stackName, rn.Name, db, api)
+	}
+	out := r.Options.OutputRoot
+	return servergen.PlanTypeScript(servergen.TypeScriptInput{
+		Stack:              stackName,
+		Server:             rn.Name,
+		Dir:                servergen.ServerDir(out, stackName, rn.Name),
+		OutputRoot:         out,
+		Naming:             r.Options.Naming,
+		RepositoryRoot:     r.Options.Naming.BuildContext(r.Options.RepositoryRoot),
+		ImplementationRoot: r.Options.RepositoryRoot,
+		PackageDirs:        map[string]string{},
+		Paths:              r.Options.Paths,
+		CloudSQL:           cloudSQL,
+		Runner:             &servergen.TypeScriptRunnerInput{Database: db, Field: field, Engine: routes.Engine},
+	})
+}
+
 // noteUnopenedEngine says, in one line, that the server, job or worker s,
 // in language, serves api, whose database is an engine database, and opens
-// no engine on it yet: a Go entrypoint opens it (D58), and the TypeScript
-// and Rust ones come with milestone 19.
+// no engine on it yet: a Go or TypeScript entrypoint opens it (D58), and
+// the Rust one comes with milestone 19.
 func (r run) noteUnopenedEngine(s *ir.ResolvedDeployable, api string, o *apigen.APIOutput, language string) {
 	if o == nil || o.Engine == nil {
 		return

@@ -540,6 +540,27 @@ beside it (`../rust`), which reaches the work queue's crate, the schema
 IR's and the version graph's engine at their places in the same checkout;
 unset, the image downloads it with the release's other archives.
 
+### `paths.engine_typescript`
+
+Default: unset. This repository's own file sets
+`runtime/engine/typescript`.
+
+Directory of the behavior engine's npm package, `@superschematic/engine`
+(D58). A TypeScript server, job, worker or engine runner whose API's
+database holds engine types imports its `./server` entry, which opens the
+engine through its Node-API addon, and depends on it with `*`; with this
+key set, the output root's Bun workspace overrides that with a `file:`
+path to the checkout, which the install copies with its `dist/` and the
+addon in its `native/`, so build both first (`bun run build` there, and
+`scripts/engine-napi.sh`). The workspace overrides the version graph's
+package too, which the engine's package depends on by a path in its
+checkout: with `paths.versiongraph_typescript` when it is set, else with
+the checkout's beside it. The server's Dockerfile builds the addon from
+the Cargo workspace beside the package (`../rust`), with the crates it
+reaches by path at their places in the same checkout, and the `./server`
+entry's `dist/`. Unset, such a server gets no Dockerfile, and the install
+fetches the package, which fails until it is published.
+
 ### `paths.versiongraph_python`
 
 Default: unset. This repository's own file sets
