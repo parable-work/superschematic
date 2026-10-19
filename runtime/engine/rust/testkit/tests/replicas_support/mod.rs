@@ -235,6 +235,32 @@ impl Admin {
             .map(|row| row.i64("pid").expect("a pid"))
     }
 
+    /// The application name of the session that holds the advisory lock
+    /// `key` as a lock of its session: which replica holds a lease.
+    pub fn lock_holder_name(&self, key: i64) -> Option<String> {
+        let pid = self.lock_holder(key)?;
+        self.db
+            .read(|tx| {
+                tx.get(
+                    "SELECT coalesce(application_name, '') AS name FROM pg_stat_activity WHERE pid = ?",
+                    &[SqlValue::Integer(pid)],
+                )
+            })
+            .expect("read the session")
+            .map(|row| row.text("name").expect("a name").to_owned())
+    }
+
+    /// Whether a replica has a session waiting for a lock (an advisory
+    /// lock, a row's).
+    pub fn waiting(&self, name: &str) -> bool {
+        !self
+            .sessions(
+                "application_name = ? AND wait_event_type = 'Lock'",
+                &[SqlValue::from(name)],
+            )
+            .is_empty()
+    }
+
     /// Ends the session that holds the advisory lock `key`, as its
     /// process's crash would; whether one did.
     pub fn terminate_lock_holder(&self, key: i64) -> bool {
