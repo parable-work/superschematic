@@ -1206,6 +1206,10 @@ impl Core for Ctx<'_, '_, '_> {
         })
     }
 
+    fn sql_explain(&self, sql: &Sql<'_>, params: &[SqlValue]) -> Result<Vec<String>> {
+        self.with_sql(|handle| handle.explain(sql, params))
+    }
+
     fn sql_run(&self, sql: &Sql<'_>, params: &[SqlValue], tried: bool) -> Result<RunResult> {
         self.with_sql(|handle| {
             if tried {

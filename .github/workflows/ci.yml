@@ -935,8 +935,11 @@ jobs:
     # (scripts/rust-ratchet.mjs, the command a person runs too): a failing
     # file not on the list fails the job, and so does a listed file that
     # passes. The work queue's suite runs so too, its behaviors the addon's,
-    # held to runtime/engine-workqueue/typescript/test/rust-pending.txt. The
-    # setup is the typescript job's, which the engine's build needs.
+    # held to runtime/engine-workqueue/typescript/test/rust-pending.txt. A
+    # test that loops over test/helpers.ts's backends runs on Postgres too,
+    # through openEngineAsync (ENGINE_TEST_PG_URL), as a TypeScript server
+    # opens the engine there. The setup is the typescript job's, which the
+    # engine's build needs.
     name: engine-napi (the engine's and the work queue's TypeScript suites on the Rust engine)
     if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
@@ -994,6 +997,22 @@ jobs:
           (cd runtime/http/typescript && bun install --frozen-lockfile && bun run build)
           (cd runtime/versiongraph/typescript && bun install --frozen-lockfile && bun run build)
 
+      - name: Start Postgres
+        # The backends' Postgres pass, each engine in a schema of its own.
+        # A role with a password: the runner's Postgres refuses a
+        # passwordless one off its loopback.
+        run: |
+          docker run --detach --name superschematic-pg \
+            --env POSTGRES_PASSWORD=superschematic \
+            --publish 5432:5432 \
+            "postgres:${POSTGRES_VERSION}-alpine"
+          for _ in $(seq 1 60); do
+            if docker exec superschematic-pg pg_isready --host 127.0.0.1 --username postgres >/dev/null 2>&1; then exit 0; fi
+            sleep 1
+          done
+          docker logs superschematic-pg
+          exit 1
+
       - name: Build the engine and its Node-API addon
         # The addon as it ships first, which must not have the bridge to
         # behaviors written in TypeScript, then the test addon, which the
@@ -1006,8 +1025,10 @@ jobs:
           node -e "const a = require('./native/' + require('node:fs').readdirSync('native').find((f) => f.endsWith('.node'))); if (typeof a.bridgeCall !== 'undefined') { console.error('the shipped addon has the test bridge'); process.exit(1); }"
           ../../../scripts/engine-napi.sh --js-behaviors
 
-      - name: The engine's suite on the Rust engine against test/rust-pending.txt (Node.js and Bun)
+      - name: The engine's suite on the Rust engine against test/rust-pending.txt (Node.js and Bun), on SQLite and Postgres
         working-directory: runtime/engine/typescript
+        env:
+          ENGINE_TEST_PG_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
         run: bun run test:rust
 
       - name: The work queue's suite on the Rust engine against its test/rust-pending.txt (Node.js and Bun)

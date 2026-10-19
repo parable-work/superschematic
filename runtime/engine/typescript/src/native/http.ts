@@ -274,6 +274,9 @@ async function serve(engine: Serving, route: EngineRoute, mount: Mount, c: Conte
 function eventBody(engine: Serving, id: number, heartbeatMs: number, signal: AbortSignal): ReadableStream<Uint8Array> {
   let done = false;
   let wake: (() => void) | undefined;
+  // Whether a commit came since the last pull began: one that lands while
+  // a pull is in flight, before the stream waits, must not be slept through.
+  let woken = false;
   let beatAt: number | undefined;
   let unwatch: (() => void) | undefined;
   const teardown = () => {
@@ -293,7 +296,10 @@ function eventBody(engine: Serving, id: number, heartbeatMs: number, signal: Abo
   return new ReadableStream<Uint8Array>({
     start() {
       try {
-        unwatch = engine.watch(() => wake?.());
+        unwatch = engine.watch(() => {
+          woken = true;
+          wake?.();
+        });
       } catch {
         // The engine closed: the first pull ends the stream.
       }
@@ -309,6 +315,7 @@ function eventBody(engine: Serving, id: number, heartbeatMs: number, signal: Abo
           return;
         }
         let pulled: StreamPull;
+        woken = false;
         try {
           pulled = await engine.pull(id, heartbeatMs);
         } catch {
@@ -326,8 +333,9 @@ function eventBody(engine: Serving, id: number, heartbeatMs: number, signal: Abo
           controller.enqueue(new Uint8Array(pulled.data));
           return;
         }
-        if (!engine.waitsHere) {
-          // The pull waited off this thread and found nothing yet.
+        if (!engine.waitsHere || woken) {
+          // The pull waited off this thread and found nothing yet, or a
+          // commit landed while it pulled: pull again.
           continue;
         }
         // Nothing yet: wait for a commit, or until the engine's heartbeat

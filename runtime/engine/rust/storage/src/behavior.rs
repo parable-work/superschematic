@@ -441,6 +441,31 @@ impl<'t, 'db> BehaviorSql<'t, 'db> {
         self.tx.all(prepared, params)
     }
 
+    /// The plan the database makes for a statement the behavior may run,
+    /// as it runs it, the relation's definition merged in: SQLite's
+    /// `EXPLAIN QUERY PLAN` details, or the lines of Postgres's `EXPLAIN`.
+    /// What a behavior's author reads to see a filter on its columns reach
+    /// the indexes its migrations list. It is checked as the statement is,
+    /// and names of the relation ask read as the statement would; nothing
+    /// runs.
+    pub fn explain<'s>(&self, sql: impl Into<Sql<'s>>, params: &[SqlValue]) -> Result<Vec<String>> {
+        let prepared = self.prepare(&sql.into())?;
+        let (statement, column) = match self.dialect() {
+            Dialect::Sqlite => (format!("EXPLAIN QUERY PLAN {prepared}"), 3),
+            Dialect::Postgres => (format!("EXPLAIN {prepared}"), 0),
+        };
+        Ok(self
+            .tx
+            .all(statement, params)?
+            .iter()
+            .map(|row| match row.values().get(column) {
+                Some(SqlValue::Text(text)) => text.clone(),
+                Some(other) => other.to_string(),
+                None => String::new(),
+            })
+            .collect())
+    }
+
     /// Runs one INSERT, UPDATE, DELETE or REPLACE (or a read).
     pub fn run<'s>(&self, sql: impl Into<Sql<'s>>, params: &[SqlValue]) -> Result<RunResult> {
         self.writable()?;

@@ -14,20 +14,28 @@
 # source written in TypeScript (ids), schemas.validator, engineApp and
 # engineMcp as Hono adapters over the engine's own routes, with a mount's
 # tool filter, openEngineAsync, and a value JSON cannot carry (NaN, a Date)
-# refused where the TypeScript engine refuses it. What the files below wait
-# for:
+# refused where the TypeScript engine refuses it. A test of the TypeScript
+# engine's own workings, which no other engine has, skips on the Rust
+# engine and names its Rust twin: the SQL it runs, spied on through
+# engine.storage (behavior-own-columns.test.ts), and a value driver
+# written in TypeScript (values.test.ts, TYPESCRIPT_DRIVER), dropped at the
+# cutover. A test that loops over test/helpers.ts's backends runs on
+# Postgres too with ENGINE_TEST_PG_URL set, through openEngineAsync
+# (stream.test.ts).
 #
-#   driver     a value driver written in TypeScript (values.driver), which the
-#              Rust engine takes as config (D58)
-#   internals  a test of the TypeScript engine's own workings, which no
-#              other engine has: the SQL it runs, spied on through
-#              engine.storage, and the reads its event stream makes, spied
-#              on through engine.events.read
+# What the file below waits for:
 #
-# No test that runs here fails on what the Rust engine does: what is left is
-# the TypeScript engine's own workings, and a value driver in TypeScript.
+#   corpus     the corpus is the TypeScript engine's recording until the
+#              cutover, which records it from the Rust engine (D58). Here
+#              it records the Rust engine, whose answers differ where the
+#              TypeScript engine's own workings show in a recording: how
+#              often a call reads a clock function (a counting clock in
+#              core-behaviors' publish, the wall clock's readings in the
+#              Reactions files, a namespaces.archive that changes nothing),
+#              the engine calls the TypeScript HTTP app makes for a request
+#              (core-search-vectors' HTTP and MCP cases), and the policy's
+#              read a closed engine asks before it refuses (http.json).
+#
+# No test that runs here fails on what the Rust engine does.
 
-behavior-own-columns.test.ts             # internals (the plan of the SQL the engine runs for a filter, spied on through engine.storage.all)
-corpus.test.ts                           # internals (it records the corpus again, here from the Rust engine, and stream.test.ts fails here)
-stream.test.ts                           # internals (two tests spy on engine.events.read for the reads the TypeScript stream makes, which the Rust engine makes within)
-values.test.ts                           # driver
+corpus.test.ts                           # corpus (the TypeScript engine's recording, recorded again on the Rust engine)

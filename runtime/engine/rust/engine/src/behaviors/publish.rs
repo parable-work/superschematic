@@ -207,6 +207,10 @@ impl Core for PublishCore<'_, '_, '_> {
         })
     }
 
+    fn sql_explain(&self, sql: &Sql<'_>, params: &[SqlValue]) -> Result<Vec<String>> {
+        self.sql(|handle| handle.explain(sql, params))
+    }
+
     fn sql_run(&self, sql: &Sql<'_>, params: &[SqlValue], tried: bool) -> Result<RunResult> {
         self.sql(|handle| {
             if tried {
