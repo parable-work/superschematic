@@ -22,9 +22,11 @@ which CI runs on Node.js and Bun.
 
 The core declares twenty-two behaviors, so every binary's meta-schema
 admits a schema that composes them. The engine implements fifteen itself
-and registers them when it opens. The other seven are claimable work,
-implemented by `@superschematic/engine-workqueue`; the engine refuses a
-schema that composes one until a deployment registers that package.
+and registers them when it opens. The other seven are claimable work, the
+work queue's Rust behaviors, which the engine's addon is built with; the
+engine refuses a schema that composes one until a deployment names them
+in the engine's `behaviors` option (`workQueueBehaviors`, from
+`@superschematic/engine-workqueue`).
 
 | Behavior | What it adds | Requires | Covered in |
 | --- | --- | --- | --- |
@@ -329,7 +331,7 @@ the types does not load it) and the Rust types as `ENGINE_DOCUMENT`:
   extension's behavior the Rust crate its registration names
   (`"crate"`), which the project's engine crate compiles in (below).
 
-With today's TypeScript engine:
+A TypeScript server opens the engine with it:
 
 ```ts
 import { engineDocument } from '@schemas/support-db-types/engine';
@@ -428,14 +430,14 @@ export SUPERSCHEMATIC_ENGINE_ADDON="$(scripts/engine-napi.sh --crate dist/engine
 const engine = await openEngineAsync({ postgres: { url }, policy: 'permission', behaviors: ['acme.Rating'], tools, metaSchema });
 ```
 
-Until the cutover (D58, milestone 14), `openEngine` is still the
-TypeScript engine, which runs an extension's TypeScript implementation.
+`openEngine({ path, ... })` opens the same addon on a SQLite file.
 
 A schema whose types compose the core's behaviors alone gets no crate,
 since the engine's release carries them, and one that composes an
-extension's behavior without a crate gets none either: the TypeScript
-engine runs it. acme's `crates/behaviors` is the worked example
-(`examples/acme-schematic`).
+extension's behavior whose registration names no crate gets none either:
+the build logs that no engine can run the schema's behaviors, and an
+engine refuses the schema. acme's `crates/behaviors` is the worked
+example (`examples/acme-schematic`).
 
 ## Display
 
@@ -1191,8 +1193,8 @@ drafts of it, which only a merge brings back. A tagged commit of the
 primary line is released with `releaseCommit`, the version graph's
 release, and a rollback is a release of an earlier one. The instance's
 own fields stay outside the graph. The graph lives
-in the behavior's own tables, through the version graph's SQLite
-adapter, in the transaction of the operation that writes it.
+in the behavior's own tables, kept by the version graph's Rust engine in
+the transaction of the operation that writes it.
 [Version graphs](/superschematic/reference/version-graphs/) covers the
 model under it: refs, commits, merges by conflict unit, releases,
 snapshots and the sweep.

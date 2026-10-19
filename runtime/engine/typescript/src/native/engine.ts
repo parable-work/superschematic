@@ -435,8 +435,8 @@ class EngineInstances {
 }
 
 // Watchers hears of the commits the engine makes, as the TypeScript
-// engine's notifier tells them (src/events/notifier.ts): after each commit
-// that appended events, once per event, with its cursor. A call this
+// engine's notifier told them: after each commit that appended events,
+// once per event, with its cursor. A call this
 // facade makes is followed by a look at the notifier's epoch, so a
 // watcher hears of its commits before the call returns, as it would on
 // the TypeScript engine; a commit made elsewhere (the runner's thread, an
@@ -604,7 +604,7 @@ class EngineTools {
 }
 
 // HostedRunner runs the runner on this thread's event loop, as the
-// TypeScript engine's runner runs (src/runner/runner.ts): for an engine
+// TypeScript engine's runner ran: for an engine
 // whose policy, matcher or a behavior is written in TypeScript, which
 // answer on this thread alone, so the runner's own thread cannot run
 // them. It wakes on a commit (setImmediate) and at the next retry,

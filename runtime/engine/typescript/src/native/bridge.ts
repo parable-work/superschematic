@@ -528,7 +528,7 @@ export class Bridge {
     }
   }
 
-  // The contexts, as src/behaviors/behavior.ts types them. Each method
+  // The contexts, as src/testing/behavior.ts types them. Each method
   // checks its arguments as the TypeScript engine's does, then calls the
   // addon with the context's generation.
 
