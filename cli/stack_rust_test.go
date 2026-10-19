@@ -25,9 +25,10 @@ import (
 const rustFixtures = "../internal/generator/servergen/testdata/rust/services"
 
 // rustDevStack deploys rs-stock, a Rust server over rs-db, its authDb,
-// and rs-pricing, the Rust server it calls, on the local target, each on
-// a port of its own.
-func rustDevStack(pgPort, stockPort, pricingPort int) map[string]string {
+// with the bucket rs-media (D54), and rs-pricing, the Rust server it
+// calls, on the local target, each on a port of its own, as are Postgres
+// and the storage emulator.
+func rustDevStack(pgPort, storagePort, stockPort, pricingPort int) map[string]string {
 	return map[string]string{
 		"schema.config.yaml": "name: rs-dev-stack\nkind: Stack\noutputs: {}\n",
 		"src/stack.schema.yaml": fmt.Sprintf(`kind: Stack
@@ -44,13 +45,13 @@ types:
     role: EmbeddedStruct
     environment:
       target: local
-      values: { postgresPort: %d }
+      values: { postgresPort: %d, storagePort: %d }
       settings:
         - of: { service: { name: rs-stock, kind: API } }
           values: { port: %d }
         - of: { service: { name: rs-pricing, kind: API } }
           values: { port: %d }
-`, pgPort, stockPort, pricingPort),
+`, pgPort, storagePort, stockPort, pricingPort),
 	}
 }
 
@@ -83,11 +84,13 @@ func writeRustRuntimePaths(t *testing.T, schemasRoot string) {
 // cargo (D57): it builds the stack and its services, which writes each
 // Rust server's crate into the output root's Cargo workspace and its
 // lockfile, and scaffolds each implementation; runs Postgres with rs-db
-// migrated; builds each crate with cargo, frozen to the lockfile, and
-// starts rs-pricing, then rs-stock, which calls it, each waited on until
-// /readyz answers. rs-stock answers on the port its setting gives it, its
-// scaffold answers 501, and an end user registers and signs in with the
-// identity runtime over the migrated user model.
+// migrated and fake-gcs-server with rs-stock's bucket, rs-media (D54);
+// builds each crate with cargo, frozen to the lockfile, and starts
+// rs-pricing, then rs-stock, which calls it and opens rs-media on the
+// emulator, each waited on until /readyz answers. rs-stock answers on the
+// port its setting gives it, its scaffold answers 501, and an end user
+// registers and signs in with the identity runtime over the migrated user
+// model.
 func TestStackDevRunsARustServer(t *testing.T) {
 	if testing.Short() {
 		t.Skip("-short: stack dev runs Docker, Postgres and cargo")
@@ -107,11 +110,11 @@ func TestStackDevRunsARustServer(t *testing.T) {
 	t.Setenv(local.MigrateEnv, runner)
 
 	servicesRoot := filepath.Join(testpaths.TempDir(t), "schemas", "services")
-	for _, service := range []string{"rs-db", "rs-pricing", "rs-stock"} {
+	for _, service := range []string{"rs-db", "rs-media", "rs-pricing", "rs-stock"} {
 		copyDir(t, filepath.Join(rustFixtures, service), filepath.Join(servicesRoot, service))
 	}
-	pgPort, stockPort, pricingPort := freeTCPPort(t), freeTCPPort(t), freeTCPPort(t)
-	writeFiles(t, filepath.Join(servicesRoot, "rs-dev-stack"), rustDevStack(pgPort, stockPort, pricingPort))
+	pgPort, storagePort, stockPort, pricingPort := freeTCPPort(t), freeTCPPort(t), freeTCPPort(t), freeTCPPort(t)
+	writeFiles(t, filepath.Join(servicesRoot, "rs-dev-stack"), rustDevStack(pgPort, storagePort, stockPort, pricingPort))
 	writeRustRuntimePaths(t, filepath.Dir(servicesRoot))
 	// Cargo resolves a crate's path dependencies from its directory's
 	// physical path, so the output root is one with no link above it, as
@@ -121,8 +124,9 @@ func TestStackDevRunsARustServer(t *testing.T) {
 	// build resolves it (D30, amended).
 	canonical, err := stack.CanonicalSchemasRoot(filepath.Dir(servicesRoot))
 	require.NoError(t, err)
-	container := local.ContainerName("rs-dev-stack", "Dev", local.Checkout(canonical, "rs-dev-stack", "Dev"))
-	t.Cleanup(func() { _ = exec.Command("docker", "rm", "--force", "--volumes", container).Run() })
+	checkout := local.Checkout(canonical, "rs-dev-stack", "Dev")
+	container, storage := local.ContainerName("rs-dev-stack", "Dev", checkout), local.StorageContainerName("rs-dev-stack", "Dev", checkout)
+	t.Cleanup(func() { _ = exec.Command("docker", "rm", "--force", "--volumes", container, storage).Run() })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -152,6 +156,12 @@ func TestStackDevRunsARustServer(t *testing.T) {
 		require.Contains(t, buf.String(), "+ implementation scaffold of "+server+" written to")
 	}
 	require.Contains(t, buf.String(), fmt.Sprintf(`"msg":"listening","stack":"rs-dev-stack","server":"rs-stock","addr":":%d"`, stockPort))
+	// rs-stock's bucket is on the emulator, which the summary names.
+	media, err := http.Get(local.StorageURL(storagePort) + local.StorageReadinessPath + "/rs-media")
+	require.NoError(t, err)
+	_ = media.Body.Close()
+	require.Equal(t, http.StatusOK, media.StatusCode, buf.String())
+	require.Contains(t, buf.String(), "bucket   rs-media")
 
 	base := local.ServerURL(stockPort)
 	call := func(method, path, token, body string, status int, want string) string {
@@ -194,4 +204,5 @@ func TestStackDevRunsARustServer(t *testing.T) {
 	require.Contains(t, buf.String(), `"server":"rs-stock"`)
 	require.Contains(t, buf.String(), `"msg":"stopped"`)
 	require.Contains(t, buf.String(), "removed container "+container)
+	require.Contains(t, buf.String(), "removed container "+storage)
 }

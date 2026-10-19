@@ -472,6 +472,7 @@ one line each.
 | --- | --- | --- |
 | `<db>_database` | `stackconfig::Database` | the API's database, its `authDb` or its one DB dependency |
 | `<api>_service` | `stackconfig::Service` | each API it `calls` |
+| `<bucket>_bucket` | `stackconfig::Bucket` | each bucket it lists in `buckets` (D54) |
 | `<api>_callers` | `ServiceAuthConfig` | an API with `@requireService` or `@allowService` |
 | `<api>_cors` | `stackconfig::Cors` | every API: the origins of the sites that call it, none where no site does |
 | `<api>_identity` | `identity::Config` | an API over the user model, parsed from `<API>_IDENTITY`'s JSON, the runtime's defaults when it is unset |
@@ -487,6 +488,8 @@ pub struct Deps {
     pub db: Pool,
     // a Rust SDK client per calls entry, here of shop-api
     pub shop_api: schemas_shop_api_sdk::ShopApiSdk,
+    // runtime::bucket::Bucket per buckets entry, here of shop-media
+    pub shop_media: Arc<dyn Bucket>,
     pub span: tracing::Span,
 }
 
@@ -504,9 +507,14 @@ the `authenticator` of an API whose operations need a caller and whose
 server builds: the `Arc<IdentityAuthenticator>` of an API over the user
 model, and the service authenticator of an API with a service clause,
 each a typed argument, so none is forgotten. A callee needs
-`outputs.sdk` for Rust, which the crate depends on by path, and an API
-that lists a bucket is refused, since buckets from a Rust server are not
-built. The crate turns on the runtime's `postgres` feature for a
+`outputs.sdk` for Rust, which the crate depends on by path. A bucket is
+the runtime's provider-neutral `bucket::Bucket`, which puts, gets,
+deletes and lists objects and signs URLs for them
+([Buckets](/superschematic/guides/buckets/)); the server, job or worker
+opens it on GCS, or on the emulator `stack dev` runs, with the runtime's
+`gcs` feature, which the entrypoint's crate turns on and the API crate
+does not. The crate turns on the
+runtime's `postgres` feature for a
 database, `identity-postgres` beside the user model, so the identity
 store runs over `Deps.db` (`runtime::identity::PostgresPool`), and
 `http-client` for a callee.
@@ -562,8 +570,9 @@ lacks; the compiler names it, and you add it with its file.
 In a [stack](/superschematic/guides/stacks/#rust-servers), a server that
 serves Rust APIs needs no `main` of yours: the stack's build writes its
 crate, `schemas/dist/server/<stack>/<server>/`, whose `src/main.rs`
-loads each API's `EnvConfig`, opens a Postgres pool per database, builds
-each `Deps` with its SDK clients and calls the implementation's `create`,
+loads each API's `EnvConfig`, opens a Postgres pool per database and each
+bucket its APIs list, builds each `Deps` with its SDK clients and
+buckets and calls the implementation's `create`,
 builds the identity and service authenticators and passes them to
 `Implementations::new`, and serves the routers with `/healthz`,
 `/readyz`, JSON logs and a drain on SIGTERM. The build scaffolds a
@@ -635,7 +644,7 @@ In a stack, each job and each worker gets a crate of its own beside the
 server's, `schemas/dist/server/<stack>/<job>/`, a member of the same
 workspace, named `schemas-<stack>-<job>-job` or `-worker`, whose binary is
 the deployable's name. Its `src/main.rs` loads the API's `EnvConfig`,
-opens the pool and the SDK clients, builds `Deps` and calls your
+opens the pool, the SDK clients and the buckets, builds `Deps` and calls your
 `create_jobs` or `create_workers`. A job then runs its method once with
 `Shutdown::on_signals()`, logs `job started` and `job done` or `job
 failed`, and exits 1 on a failure; a worker runs the runtime's

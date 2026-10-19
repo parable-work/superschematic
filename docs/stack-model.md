@@ -1412,7 +1412,7 @@ Bootstrap reads the GitHub repository from the git remote.
 | worker | a Cloud Run worker pool (`gcp.cloudrunworker`) named after the deployable, for a worker in Go, TypeScript or Rust (D65), with its own service account, which holds the Cloud Trace agent role, and the config, secrets, Cloud SQL volume and VPC egress a server of its API takes; no port, no URL and no IAM of its own, since nothing calls it; manual scaling to the worker's instances, zero when the environment turns it off, so the pool and its pinned image stay; `WORKER_CONCURRENCY` set to its concurrency; `cpu`, one or more, and `memory` (D53). A worker whose grace is ten seconds or more is refused, since Cloud Run kills an instance ten seconds after SIGTERM |
 | sql edge | `roles/cloudsql.client` and `roles/cloudsql.instanceUser` for the server's, the job's or the worker's account, held to the edge's instance by an IAM condition; an IAM database user, which the migration job gives read and write privileges; the Cloud SQL connection, which the connector derives (instance connection name, database, IAM user) and the service, the job or the worker pool mounts at `/cloudsql`. The same for a Rust server, job or worker, which dials the mount's socket as the IAM user (section 7.4, D57, D65) |
 | http edge | `roles/run.invoker` on the callee for the caller's account; the callee's `run.app` URL in the caller's config, with a Google ID token for the callee's custom audience, its full resource name `//run.googleapis.com/projects/<project>/locations/<region>/services/<service>`, as the service credential, since the service's own callers field cannot reference its URL; every service lists its resource name in `customAudiences`. The callee's callers field gets Google's issuer and keys, and the caller's service account by its email (section 9.2): a job's, as a caller that serves its API |
-| bucket edge | `roles/storage.objectUser` on the bucket alone for the server's, the job's or the worker's account, which reads, writes, lists and deletes its objects and changes nothing of the bucket, and `roles/iam.serviceAccountTokenCreator` for that account on itself, which IAM's `signBlob` asks of an account that signs a URL as itself; the bucket's name, which the connector derives, with no credential, since the client takes the workload's own from the metadata server. A Rust server's, job's or worker's bucket edge is refused: its runtime has no `Bucket`, and buckets from a Rust server are not built (D57) |
+| bucket edge | `roles/storage.objectUser` on the bucket alone for the server's, the job's or the worker's account, which reads, writes, lists and deletes its objects and changes nothing of the bucket, and `roles/iam.serviceAccountTokenCreator` for that account on itself, which IAM's `signBlob` asks of an account that signs a URL as itself; the bucket's name, which the connector derives, with no credential, since the client takes the workload's own from the metadata server. A Rust server's, job's or worker's edge lowers as a Go one's: its runtime's `gcs` asks the metadata server for the token and signs through `signBlob` (D54) |
 | internal server | internal-only ingress, with Cloud Run's invoker check on; callers also send the token in `X-Serverless-Authorization`, which the check reads |
 | calling server, job or worker | Direct VPC egress for all its traffic through the environment's network: a VPC, a subnet with Private Google Access, and Cloud NAT so the internet stays reachable. A job or a worker runs apart from every server, so it reaches each API its API calls this way, one its API's server serves too |
 | exposure | a global external Application Load Balancer per exposed server, with a Google-managed certificate from Certificate Manager on a host under the domain, authorized by a DNS record, and the records written by the environment's DNS platform (section 6.9); the service takes traffic from the load balancer only, with the invoker check off. Without a domain, the `run.app` URL, open to all traffic. The server's public address is `https://<server>.<domain>`, or without a domain its `run.app` URL |
@@ -1839,7 +1839,7 @@ runs an environment on the `local` target (`internal/stack/local`):
 | worker | a process built and run as a server in its language is, Go, TypeScript or Rust (D65), from its entrypoint at `<output-root>/server/<stack>/<worker>`, started in its rollout wave with the servers: the same `local:process/process:Process` node with no port, `kind: worker` and a readiness of `started`, so it is ready once it runs. Its environment is a server's with no `PORT` and with `WORKER_CONCURRENCY`, the concurrency the environment gives it. One process runs whatever its `instances`, none when the environment turns it off; each line is printed with its name in front, and its exit stops the environment, as a server's does (section 8.8) |
 | site | built once, `bun run <build>` in its package at the naming file's `[implementation_paths] site` template after the workspace's install, then served from a file server of the provisioner's own on `http://127.0.0.1:<port>`: each file of its output, its config at `/__superschematic/config.json` with each API it calls at its loopback URL, and its fallback for a path that names no file. HTML files and the config are served `no-cache` and `no-store`, so a reload sees a rebuilt site (D55) |
 | sql edge | `postgres://postgres@127.0.0.1:<port>/<database>?sslmode=disable` |
-| bucket edge | the bucket's name and the emulator's `http://127.0.0.1:<port>` as its endpoint, with no credential. A Rust server's, job's or worker's is refused, as on gcp: buckets from a Rust server are not built (D57) |
+| bucket edge | the bucket's name and the emulator's `http://127.0.0.1:<port>` as its endpoint, with no credential, which the Go, TypeScript and Rust runtimes' GCS implementations reach alike |
 | http edge | the callee's `http://127.0.0.1:<port>`, with a `signed-token` credential (D37): `iss` and `sub` the caller's deployable, `aud` the callee's, signed with an Ed25519 key pair per calling and called server. A call between two APIs one server serves stays on loopback with no credential |
 | site edge | the server's public address, its loopback URL, which is also its address. The server's CORS field lists the site's origin, `http://127.0.0.1:<port>` (D55) |
 | secret | a line `<Type>.<FIELD>=<value>` in `<schemas-root>/.superschematic/local/<stack>/<environment>/secrets.env` |
@@ -2299,7 +2299,8 @@ are the jobs and workers of a Rust API (D65; sections 8.7 and 8.8).
 
 - **Derived config.** The API crate's `config.rs` declares `EnvConfig`
   and `load_env_config()`: the `@envVars` settings beside a `Database` per
-  sql edge, a `Service` per `calls` entry, the callers field, the CORS
+  sql edge, a `Service` per `calls` entry, a `Bucket` per `buckets` entry
+  (D54), the callers field, the CORS
   field and, over the user model, the identity config, which the HTTP
   runtime's `stackconfig` readers and `identity::Config::parse` read from
   the variables Go's `stackconfig` reads. Its error names every variable
@@ -2312,7 +2313,9 @@ are the jobs and workers of a Rust API (D65; sections 8.7 and 8.8).
 - **Implementation.** `[implementation_paths] rust` defaults to
   `rust/{service}`. The API crate's `deps.rs` declares `Deps` (`config`,
   `db`, a Postgres pool from the runtime's `postgres`, a client per callee
-  from its Rust SDK, and `span`, the API's `tracing` span) and `Handlers`,
+  from its Rust SDK, an `Arc<dyn Bucket>` per bucket, the runtime's
+  provider-neutral `bucket::Bucket` (section 8.9), and `span`, the API's
+  `tracing` span) and `Handlers`,
   which the implementation's `create(deps)` returns; the entrypoint joins
   them with what it builds through `Implementations::new`. The scaffold
   writes the crate once, in a directory that holds no `Cargo.toml`, as
@@ -2384,6 +2387,11 @@ are the jobs and workers of a Rust API (D65; sections 8.7 and 8.8).
     it, with the token source its credential names
     (`stackconfig::credential_source`) and its header names; the end user
     travels per call, `RequestOptions::forward`;
+  - opens one bucket per Bucket service, shared by every API that lists
+    it, with the runtime's `gcs::open_bucket`, which makes no request: on
+    GCS as the workload's account, or on the emulator its connection
+    names (section 8.9). The crate turns on the runtime's `gcs` feature
+    only when one of its APIs lists a bucket;
   - calls each implementation's `create` with its `Deps`, then builds, for
     an API over the user model, one identity store per database
     (`identity::store` over `PostgresPool`) and the API's identity service
@@ -2437,9 +2445,13 @@ are the jobs and workers of a Rust API (D65; sections 8.7 and 8.8).
   (section 11.3).
 
 `TestStackDevRunsARustServer` runs a Rust server over Postgres that calls
-another, and signs an end user in with the identity runtime.
-`TestStackDevRunsRustJobsAndWorkers` runs a Rust API's server and worker,
-and its job through `stack run` (sections 8.7 and 8.8).
+another and opens its bucket on the emulator, and signs an end user in
+with the identity runtime. `TestStackDevRunsRustJobsAndWorkers` runs a
+Rust API's server and worker, and its job through `stack run` (sections
+8.7 and 8.8): the job puts an object per product in the API's bucket on
+the emulator, the worker reads each and deletes those it handles, and the
+server lists what is left and signs a URL that downloads it (section
+8.9).
 acme-shop's `TestStackDevRunsTheShop` runs `shop-stock`, a Rust server
 over `shop-db` whose reservations admit only `shop-orders`' Go server,
 which reserves an order's stock through `shop-stock`'s Go SDK with its
@@ -2449,8 +2461,7 @@ transaction; `shop-stock`'s Rust worker `ReorderStock` files the
 product's restock request, and its Rust job `OrderRestocks`, which
 the test runs with `stack run`, orders it (D65).
 
-Not built: buckets from a Rust server, job or worker, and OpenTelemetry
-export (D57, D65).
+Not built: OpenTelemetry export (D57, D65).
 
 ### 8.7 Jobs
 
@@ -2880,17 +2891,22 @@ export default defineConfig({ name: "shop-api", kind: SchemaKind.API, authDb: Sh
   locally and nowhere else. It holds no credential. The field is
   `{SERVICE}_BUCKET` (`[derived_fields] bucket`), its variables
   `SHOP_MEDIA_BUCKET_NAME` and `SHOP_MEDIA_BUCKET_ENDPOINT`, which Go's
-  `stackconfig.LoadBucket` and TypeScript's `loadBucket` read, held to one
-  encoding by the shared vectors (D51).
+  `stackconfig.LoadBucket`, TypeScript's `loadBucket` and Rust's
+  `stackconfig::load_bucket` read, held to one encoding by the shared
+  vectors (D51, D57).
 - **Code.** `Deps` gains a field per bucket the API lists, of the HTTP
   runtime's provider-neutral type: Go's `bucket.Bucket`
-  (`runtime/http/go/bucket`), TypeScript's `Bucket`. It puts an object
+  (`runtime/http/go/bucket`), TypeScript's `Bucket`, Rust's
+  `Arc<dyn bucket::Bucket>`. It puts an object
   from a stream, gets one as a stream with its metadata, deletes one,
   lists a page of the objects under a prefix with a token for the next,
   and signs a URL that lets its holder GET or PUT one object, with no
   other credential, for up to seven days, a PUT with the content type the
-  signature names. A missing object is `bucket.ErrNotFound`, or
-  `ObjectNotFoundError`.
+  signature names. A missing object is `bucket.ErrNotFound`,
+  `ObjectNotFoundError`, or `BucketError::NotFound`. Each refuses before
+  any request a name that is empty, longer than 1024 bytes or holds a
+  carriage return, a line feed or a NUL, and a URL's expiry out of range;
+  Rust's takes a URL's expiry in whole seconds, as TypeScript's does.
 - **GCS.** The implementation is GCS's, which reaches the local emulator
   too. The entrypoint of a Go server or job whose APIs list a bucket gets
   `buckets.go`, written beside `main.go` as `cloudsql.go` is, and its
@@ -2900,7 +2916,16 @@ export default defineConfig({ name: "shop-api", kind: SchemaKind.API, authDb: Sh
   bucket alone, where Cloud SQL's connector is decided per environment.
   A TypeScript server opens each bucket with `openBucket` from the HTTP
   runtime's `./gcs` entry, whose `@google-cloud/storage` is an optional
-  peer, and its `package.json` depends on it only with a bucket. A
+  peer, and its `package.json` depends on it only with a bucket. A Rust
+  server, job or worker opens each with `gcs::open_bucket`, behind the
+  runtime's `gcs` feature, which its crate turns on only with a bucket.
+  It links no Google library, as Rust's Cloud SQL connection links none
+  (D57): it calls Cloud Storage's JSON API over the runtime's reqwest
+  client with an OAuth access token for the workload's account from the
+  metadata server, kept until 3 minutes 45 seconds before it expires,
+  uploads an object in one multipart request, reads one's metadata then
+  that generation's bytes, and tries a read that fails with 408, 429 or a
+  5xx twice more. A
   process opens each bucket once, for every API that lists it, and one
   client per endpoint. A connection with an endpoint, or a process with
   `STORAGE_EMULATOR_HOST` set, reaches an emulator with no credential; on
@@ -2910,9 +2935,13 @@ export default defineConfig({ name: "shop-api", kind: SchemaKind.API, authDb: Sh
   object directly through a signed URL, which also avoids Cloud Run's
   32 MiB request limit. A signed URL is a V4 one. On gcp, the client signs
   it as the workload's own account through IAM's `signBlob`, which needs
-  the account to hold `roles/iam.serviceAccountTokenCreator` on itself.
-  Against an emulator, the runtime signs a V4 URL for the emulator's host
-  with an RSA key the process generates once, which nothing checks:
+  the account to hold `roles/iam.serviceAccountTokenCreator` on itself;
+  Rust's asks the metadata server for the account's email and IAM's
+  credentials API for the signature, and a vector of
+  `@google-cloud/storage`'s output holds its canonical request to
+  TypeScript's. Against an emulator, the runtime signs a V4 URL for the
+  emulator's host with a key the process makes once, which nothing
+  checks, an RSA key in Go and TypeScript and an HMAC key in Rust:
   fake-gcs-server takes a PUT at an object's path only when it carries a
   V4 signature's parameters, and checks no signature.
 - **Local.** `stack dev` runs fake-gcs-server in a container beside
@@ -2926,7 +2955,8 @@ export default defineConfig({ name: "shop-api", kind: SchemaKind.API, authDb: Sh
   bucket names are global, at most 63 characters, and holds no `google`,
   which Cloud Storage refuses. Its settings are `versioning`, off unless
   set, and `deleteAfterDays`, a lifecycle rule's age. The connectors from
-  a Cloud Run service and a Cloud Run job grant the workload's account
+  a Cloud Run service, job and worker pool, in Go, TypeScript or Rust,
+  grant the workload's account
   `roles/storage.objectUser` on the bucket and
   `roles/iam.serviceAccountTokenCreator` on itself, the right to sign as
   itself, one node however many buckets it reaches. A member of a
