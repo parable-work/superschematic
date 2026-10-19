@@ -87,6 +87,17 @@ func WriteORMWithProfile(output *ORMOutput, outputDir string, prof *profile.Prof
 	} else if err := os.Remove(queuesFile); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to remove queues.go: %w", err)
 	}
+	// search.go writes the words of a filter's SearchText and their LIKE
+	// patterns (D62, amended); a schema without search fields has none, so a
+	// file an earlier build wrote goes.
+	searchFile := filepath.Join(outputDir, "search.go")
+	if output.HasSearch {
+		if err := generateFile(generator, "search.tmpl", searchFile, output); err != nil {
+			return fmt.Errorf("failed to write search.go: %w", err)
+		}
+	} else if err := os.Remove(searchFile); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to remove search.go: %w", err)
+	}
 	if err := cleanStaleVersionGraphFiles(outputDir, output.VersionGraphs); err != nil {
 		return fmt.Errorf("failed to clean stale version graph files: %w", err)
 	}

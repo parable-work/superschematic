@@ -14,12 +14,15 @@ import (
 
 // The paged lists of shop-orders (D60) read a page in two steps, in one
 // transaction: the keys of up to page.Limit+1 rows after the cursor's, in
-// the list's order, a comparison of two columns that the ORM's filters
-// cannot say, then, through the ORM, the rows of the keys paging.FromRows
-// keeps, with their columns and an order's lines as GetOrder reads them,
-// in the keys' order: the ORM sorts the orders, and inKeyOrder puts the
-// reviews and the products found by their ids in it. A page's cursor is
-// the key of its last row.
+// the list's order, then, through the ORM, the rows of the keys
+// paging.FromRows keeps, with their columns and an order's lines as
+// GetOrder reads them, in the keys' order: the ORM sorts the orders and
+// the reviews, and inKeyOrder puts the products found by their ids in it.
+// A page's cursor is the key of its last row. The ORM gives the keys'
+// query a filter's conditions too (<Type>FilterConditions), as the reviews
+// take their product, rating and search; what stays the implementation's
+// is the keyset comparison of two columns, which the ORM's filters cannot
+// say, and the select of the keys.
 
 // rowKey is a row's place in a list's order: the columns the list orders
 // by, the row's id last, which makes the order total.

@@ -1,6 +1,7 @@
 package topcoat_test
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,11 +21,19 @@ const consoleService = "fixture-console-api"
 // with the pages on, their lists live, and runs cargo clippy, then cargo
 // test, with consoleAppTest. Through Router::handle: a paged list shows a
 // page of its rows, a "Next page" link carrying the next cursor and the
-// filter and the limit, and on a later page a "First page" link; the
-// filter holds neither; a limit or cursor the route refuses, and a cursor
+// filter and the limit, and on a later page a "First page" link and a
+// "Previous page" link, which the history in the query's back gives (D44,
+// amended): walked forward and back, each Previous lands on the page left,
+// a history past its bound drops its oldest cursor with the mark first,
+// and one that breaks its rule, or comes without a cursor, links no page
+// before and is never refused. After the links a size form offers the
+// route's sizes, the limit sent selected, holding the filter, and starts
+// at the first page; the filter holds the limit sent, and neither form a
+// cursor or a history. A limit the route refuses is kept by no link and no
+// form, so the 400's filter and First link start again at its default. A limit or cursor the route refuses, and a cursor
 // the implementation cannot read, is the route's 400 as the form's own
-// message, and a paged list without a filter renders no form and its
-// refusal alone. The search box is the filter's first control, a search
+// message, and a paged list without a filter renders no filter form and
+// its refusal alone. The search box is the filter's first control, a search
 // form's, labeled Search, and filters by each word in any case, its pages
 // carrying it. A reference is a select of the options operation's items
 // on the new page, the app's own page and an action's form, from one
@@ -36,9 +45,14 @@ const consoleService = "fixture-console-api"
 // their rows through the reference of getProduct's productId, name their
 // suppliers, a target's own reference, beside the reviews and lines that
 // name products, and a product's page shows the first page of its reviews
-// and a link to the next. The live list's shard pages in place, a
-// procedure answers a page record, and the site's pages, a paged list at
-// the path page, link their next and first pages.
+// and a link to the next. The live list's shard pages in place, back by
+// the history in its signal's query too, and its size form sets the
+// signal; a procedure answers a page record, and the site's pages, a paged
+// list at the path page, link their next and first pages. A supplier's
+// products, a list under a supplier that no operation reads, name the
+// supplier in the trail through what their route's supplierId refers to,
+// or by its id past listSuppliers' first page or to a caller who may not
+// list suppliers.
 func TestTheConsolePagesPicksAndSearches(t *testing.T) {
 	cargoTestCrate(t, consoleService, consoleAppTest)
 }
@@ -105,7 +119,7 @@ func TestAPagedOperationIsItsPageEverywhere(t *testing.T) {
 		},
 		"pages.rs": {
 			`<form method="get" class="ss-filter" role="search" data-ss-live="orders"`,
-			"pager(base: href.clone(), first: None, next: next_page)",
+			"pager(base: href.clone(), first: None, prev: None, next: next_page)",
 			"Ok(items) => suppliers_rows(items: items),\n            Err(refusal) => refused(refusal: page_refusal(refusal, &[]), next: next),",
 		},
 	} {
@@ -312,6 +326,392 @@ func TestAPageRecordNamedLikeATypeIsRefused(t *testing.T) {
 	}
 }
 
+// TestThePagerGoesBackAndSetsItsSize reads fixture-console-api's pages: a
+// paged list keeps the cursors of the pages before it in the query's back,
+// at most MAX_BACK characters, links the page before with rel="prev", and
+// renders a size form of the route's sizes, which a live list submits in
+// place.
+func TestThePagerGoesBackAndSetsItsSize(t *testing.T) {
+	files, _ := readCrate(t, registry.DefaultNaming(), consoleService, livePagesOutputs())
+	pages := files["pages.rs"]
+	for _, want := range []string{
+		"const MAX_BACK: usize = 4096;",
+		`<a rel="prev" href=(href.clone())`,
+		`<form method="get" class="ss-page-size" data-ss-live-size="orders"`,
+		`document.querySelector('form[data-ss-live-size=\"orders\"]')`,
+		"const ORDERS_PAGE_SIZES: &[i64] = &[2, 5];",
+		"const SUPPLIERS_PAGE_SIZES: &[i64] = &[1, 2];",
+		"let back = Back::read(&sent, cursor.is_some());",
+		`<input type="hidden" name="limit" value=(limit)>`,
+		// A link and the filter keep only a limit the route admits.
+		"let pairs = admitted_pairs(filter.query_pairs(), &crate::api::OrderListOrdersArgs::PAGE);",
+		"let limit = admitted_limit(filter.limit.as_deref(), &crate::api::OrderListOrdersArgs::PAGE).map(str::to_owned);",
+		"let sent = admitted_limit(sent, page).and_then(|limit| limit.parse::<i64>().ok());",
+	} {
+		if !strings.Contains(pages, want) {
+			t.Errorf("pages.rs lacks %q", want)
+		}
+	}
+	// A section's pager has no history and no size form.
+	if !strings.Contains(pages, "pager(base: href.clone(), first: None, prev: None, next: next_page)") {
+		t.Error("the reviews' section pages with more than its next page")
+	}
+	// Without the shards, the pager component renders them.
+	static, _ := readCrate(t, registry.DefaultNaming(), consoleService, pagesOutputs())
+	for _, want := range []string{
+		`<a rel="prev" href=(pager_href(&base, &earlier))>"Previous page"</a>`,
+		`<form method="get" class="ss-page-size">`,
+		"pager(base: base, first: first_page, prev: prev_page, next: next_page, sizes: sizes, hidden: hidden)",
+		"let back = Back::read(uri(cx).query().unwrap_or_default(), cursor.is_some());",
+	} {
+		if !strings.Contains(static["pages.rs"], want) {
+			t.Errorf("pages.rs without live lists lacks %q", want)
+		}
+	}
+	if strings.Contains(static["pages.rs"], "data-ss-live-size") {
+		t.Error("pages.rs without live lists submits a size form in place")
+	}
+}
+
+// TestAnArgumentNamedBackHasNoPreviousPage builds fixture-console-api with
+// a back argument on listOrders: the orders' list links no page before its
+// own and keeps no history, the build log says why, and the other lists go
+// back as before.
+func TestAnArgumentNamedBackHasNoPreviousPage(t *testing.T) {
+	dir := consoleCopy(t, func(schema string) string {
+		return strings.Replace(schema, "          - name: statuses\n", "          - name: back\n            typeRef: { name: string }\n            isQuery: true\n          - name: statuses\n", 1)
+	})
+	root := testpaths.TempDir(t)
+	var log strings.Builder
+	if _, err := buildDir(t, registry.DefaultNaming(), dir, root, livePagesOutputs(), &log); err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	want := "  - topcoat: no previous page for orders: order.listOrders declares an argument named back, the query parameter the console keeps the earlier pages' cursors in\n"
+	if !strings.Contains(log.String(), want) {
+		t.Errorf("the build log lacks %q:\n%s", want, log.String())
+	}
+	data, err := os.ReadFile(filepath.Join(topcoat.Dir(root, consoleService), "src", "pages.rs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pages := string(data)
+	orders := pages[strings.Index(pages, "async fn orders_list("):]
+	orders = orders[:strings.Index(orders, "\n}\n")]
+	for _, banned := range []string{`rel="prev"`, "Back::read", "back.push"} {
+		if strings.Contains(orders, banned) {
+			t.Errorf("the orders' list holds %q:\n%s", banned, orders)
+		}
+	}
+	if !strings.Contains(orders, "pager_query(&pairs, Some(next.as_str()), None)") || !strings.Contains(orders, `class="ss-page-size"`) {
+		t.Errorf("the orders' list lost its Next page or its size form:\n%s", orders)
+	}
+	products := pages[strings.Index(pages, "async fn products_list("):]
+	if !strings.Contains(products[:strings.Index(products, "\n}\n")], `rel="prev"`) {
+		t.Error("the products' list has no page before")
+	}
+}
+
+// TestATrailStepIsNamedByItsReference reads fixture-console-api's crate: a
+// supplier's step in the trail, which no detail titles, is named through
+// the reference of listSupplierProducts' supplierId, and a product's,
+// whose detail titles it, by the reference getProduct and listReviews
+// agree on when its title does not.
+func TestATrailStepIsNamedByItsReference(t *testing.T) {
+	files, _ := readCrate(t, registry.DefaultNaming(), consoleService, livePagesOutputs())
+	for file, wants := range map[string][]string{
+		"pages.rs": {
+			"        key: \"suppliers\",\n        titled: false,\n        reference: Some(\"suppliers\"),",
+			"        key: \"products\",\n        titled: true,\n        reference: Some(\"products\"),",
+			`"suppliers" => references::supplier_target_label(cx, value).await,`,
+			`"products" => references::product_target_label(cx, value).await,`,
+			"reference: node.reference.map(|key| (key, decode(item))),",
+			"} else if let Some((key, value)) = &crumb.reference",
+		},
+		"references.rs": {
+			"pub(crate) async fn supplier_target_label(cx: &Cx, value: &str) -> Option<String> {",
+			"pub(crate) async fn product_target_label(cx: &Cx, value: &str) -> Option<String> {",
+		},
+	} {
+		for _, want := range wants {
+			if !strings.Contains(files[file], want) {
+				t.Errorf("%s lacks %q", file, want)
+			}
+		}
+	}
+}
+
+// TestAStepWhoseReferencesDisagreeIsNamedByItsID builds fixture-console-api
+// with a second list under a supplier whose supplierId refers to a product
+// by its sku: the supplier's step is named by nothing but its id, and the
+// build log names each reference.
+func TestAStepWhoseReferencesDisagreeIsNamedByItsID(t *testing.T) {
+	dir := consoleCopy(t, func(schema string) string {
+		return strings.Replace(schema, "  - name: SiteQueries\n", `      - name: listSupplierOrders
+        typeRef: { name: Order, isArray: true }
+        required: true
+        httpMethod: GET
+        restPath: "suppliers/{supplierId}/orders"
+        permissions: [orders.read]
+        arguments:
+          - name: supplierId
+            typeRef: { name: string }
+            required: true
+            references: { type: Product, value: sku }
+  - name: SiteQueries
+`, 1)
+	})
+	root := testpaths.TempDir(t)
+	var log strings.Builder
+	if _, err := buildDir(t, registry.DefaultNaming(), dir, root, livePagesOutputs(), &log); err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	want := "  - topcoat: the trail names suppliers/{supplierId} by its id: supplier.listSupplierOrders(supplierId) refers to Product by sku, and supplier.listSupplierProducts(supplierId) to Supplier by id\n"
+	if !strings.Contains(log.String(), want) {
+		t.Errorf("the build log lacks %q:\n%s", want, log.String())
+	}
+	data, err := os.ReadFile(filepath.Join(topcoat.Dir(root, consoleService), "src", "pages.rs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pages := string(data)
+	if !strings.Contains(pages, "        key: \"suppliers\",\n        titled: false,\n        reference: None,") || strings.Contains(pages, `"suppliers" => references::`) {
+		t.Error("the supplier's step is named by a reference its operations disagree on")
+	}
+	if !strings.Contains(pages, `"products" => references::product_target_label(cx, value).await,`) {
+		t.Error("the product's step lost its reference")
+	}
+}
+
+// TestATrailStepMeetsItsOptionsControls builds fixture-console-api with a
+// rate limit on listSuppliers and a list of pages under a supplier, whose
+// rows refer to nothing: the list's page meets the limit, since its trail
+// names the supplier through listSuppliers.
+func TestATrailStepMeetsItsOptionsControls(t *testing.T) {
+	dir := consoleCopy(t, func(schema string) string {
+		schema = strings.Replace(schema, "        typeRef: { name: Product, isArray: true }\n        required: true\n        httpMethod: GET\n        restPath: \"suppliers/{supplierId}/products\"\n",
+			"        typeRef: { name: SitePage, isArray: true }\n        required: true\n        httpMethod: GET\n        restPath: \"suppliers/{supplierId}/pages\"\n", 1)
+		return strings.Replace(schema, "        restPath: suppliers\n        permissions: [products.read]\n", "        restPath: suppliers\n        permissions: [products.read]\n        middleware: { rateLimit: 30 }\n", 1)
+	})
+	root := testpaths.TempDir(t)
+	if _, err := buildDir(t, registry.DefaultNaming(), dir, root, livePagesOutputs(), nil); err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(topcoat.Dir(root, consoleService), "src", "pages.rs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pages := string(data)
+	controls := pages[strings.Index(pages, "        controls: vec![\n"):]
+	controls = controls[:strings.Index(controls, "        ],\n    })")]
+	limiter := strings.Count(controls[:strings.Index(controls, "Controls::default().rate_limit(30)")], "Controls::default()")
+	for _, want := range []string{
+		fmt.Sprintf(`(Method::GET, "/console/suppliers/{supplier_id}/pages", None, &[%d]),`, limiter),
+		fmt.Sprintf(`(Method::GET, "/console/suppliers", Some(%d), &[]),`, limiter),
+	} {
+		if !strings.Contains(pages, want) {
+			t.Errorf("pages.rs lacks %q:\n%s", want, controls)
+		}
+	}
+}
+
+// suppliersService is the extension's fixture of an API that declares
+// Supplier, which a copy of fixture-console-api imports (D66).
+const suppliersService = "fixture-console-suppliers-api"
+
+// suppliersCopy is a copy of fixture-console-api whose Supplier is
+// fixture-console-suppliers-api's, a dependency of kind API, after edit.
+func suppliersCopy(t *testing.T, edit func(schema string) string) string {
+	t.Helper()
+	dir := consoleCopy(t, func(schema string) string {
+		start := strings.Index(schema, "  # Who supplies the shop's products.\n")
+		end := strings.Index(schema, "  # A page of the shop's site")
+		schema = schema[:start] + schema[end:]
+		schema = strings.Replace(schema, "kind: API\n", "kind: API\nimports:\n  - package: \"@schemas/"+suppliersService+"\"\n    types: [Supplier]\n", 1)
+		return edit(schema)
+	})
+	config := filepath.Join(dir, "schema.config.yaml")
+	data, err := os.ReadFile(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, config, string(data)+"dependencies:\n  - name: "+suppliersService+"\n    kind: API\n")
+	return dir
+}
+
+// TestAReferenceToAnAPIDependencysType builds fixture-console-api with its
+// Supplier imported from fixture-console-suppliers-api, an API dependency
+// (D66), and a new product's form whose supplier refers to it: the
+// references offer and name suppliers through listSuppliers, the API's
+// own listing of the dependency's type, as they do a local type's, and
+// cargo clippy and cargo test run on the crate with supplierAppTest. With
+// listSuppliers behind a provider's signature, the build log names the
+// target by its service.
+func TestAReferenceToAnAPIDependencysType(t *testing.T) {
+	withForm := func(schema string) string {
+		schema = strings.Replace(schema, "  OrderLineInput:\n", `  # A new product, whose supplier is one of the suppliers.
+  ProductInput:
+    name: ProductInput
+    role: APIInput
+    fields:
+      - name: name
+        typeRef: { name: string }
+        required: true
+      - name: sku
+        typeRef: { name: string }
+        required: true
+      - name: supplierId
+        title: Supplier
+        typeRef: { name: string }
+        required: true
+        references: { type: Supplier }
+  OrderLineInput:
+`, 1)
+		return strings.Replace(schema, "  - name: SupplierQueries\n", `  - name: ProductMutations
+    operations:
+      # Adds a product.
+      - name: createProduct
+        typeRef: { name: Product }
+        required: true
+        httpMethod: POST
+        restPath: products
+        permissions: [products.read]
+        arguments:
+          - name: input
+            typeRef: { name: ProductInput }
+            required: true
+  - name: SupplierQueries
+`, 1)
+	}
+	dir := suppliersCopy(t, withForm)
+	root := testpaths.TempDir(t)
+	var log strings.Builder
+	if _, err := buildDir(t, registry.DefaultNaming(), dir, root, livePagesOutputs(), &log); err != nil {
+		t.Fatalf("build: %v\n%s", err, log.String())
+	}
+	data, err := os.ReadFile(filepath.Join(topcoat.Dir(root, consoleService), "src", "references.rs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	references := string(data)
+	for _, want := range []string{
+		"async fn supplier_target_choices(cx: &Cx) -> Option<Vec<Choice>> {",
+		"async fn supplier_target_labels(cx: &Cx, values: &BTreeSet<String>) -> Vec<Choice> {",
+		"pub async fn product_labels(cx: &Cx, records: &[ProductRecord], choices: Choices) -> Choices {",
+		`let sites = unnamed(&choices, &[("supplierId", &["supplierId"])]);`,
+		"let labels = supplier_target_labels(cx, &values_at(&json, &sites)).await;",
+		"pub async fn product_input_form_choices(cx: &Cx, choices: Choices) -> Choices {",
+	} {
+		if !strings.Contains(references, want) {
+			t.Errorf("references.rs lacks %q", want)
+		}
+	}
+	cargoTestCrateWith(t, consoleService, supplierAppTest, crateOptions{outputs: livePagesOutputs(), dir: dir, dependencies: []string{suppliersService}})
+
+	signed := suppliersCopy(t, func(schema string) string {
+		return strings.Replace(withForm(schema), "        restPath: suppliers\n        permissions: [products.read]\n", "        restPath: suppliers\n        permissions: [products.read]\n        hmacVerifiedProvider: stripe\n", 1)
+	})
+	log.Reset()
+	if _, err := buildDir(t, registry.DefaultNaming(), signed, testpaths.TempDir(t), livePagesOutputs(), &log); err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	for _, want := range []string{
+		"topcoat: Product.supplierId refers to fixture-console-suppliers-api.Supplier, whose options operation SupplierQueries.listSuppliers has no in-process call: its route checks a provider's signature first (@hmacVerified)",
+		"topcoat: ProductInput.supplierId refers to fixture-console-suppliers-api.Supplier, whose options operation SupplierQueries.listSuppliers has no in-process call",
+	} {
+		if !strings.Contains(log.String(), want) {
+			t.Errorf("the build log lacks %q:\n%s", want, log.String())
+		}
+	}
+}
+
+// TestADerivedReferenceLabelsRows builds fixture-console-api with its order
+// lines and products sourced from a database's lines and items, @source,
+// a line's product a Relation to Item, and with OrderLine.productId saying no
+// RefersTo: the key derives its reference to Product, the one type sourced
+// from the related table (D61, amended), so the crate's references are
+// those of the written reference, its order lines' products labeled
+// through the same lookup.
+func TestADerivedReferenceLabelsRows(t *testing.T) {
+	dir := consoleCopy(t, func(schema string) string {
+		schema = strings.Replace(schema, "kind: API\n", "kind: API\nimports:\n  - package: \"@schemas/fixture-console-db\"\n    types: [Item, Line]\n", 1)
+		schema = strings.Replace(schema, "  Product:\n    name: Product\n    role: APIView\n", "  Product:\n    name: Product\n    role: APIView\n    source: { target: fixture-console-db.Item }\n", 1)
+		return strings.Replace(schema, "  OrderLine:\n    name: OrderLine\n    role: APIView\n    display:\n      noun: Line\n    fields:\n      - name: productId\n        title: Product\n        typeRef: { name: Identity.UUID }\n        required: true\n        references: { type: Product }\n",
+			"  OrderLine:\n    name: OrderLine\n    role: APIView\n    source: { target: fixture-console-db.Line }\n    display:\n      noun: Line\n    fields:\n      - name: productId\n        title: Product\n        typeRef: { name: Identity.UUID }\n        required: true\n", 1)
+	})
+	config := filepath.Join(dir, "schema.config.yaml")
+	data, err := os.ReadFile(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, config, string(data)+"dependencies:\n  - name: fixture-console-db\n    kind: DB\n")
+	db := filepath.Join(filepath.Dir(dir), "fixture-console-db")
+	writeFile(t, filepath.Join(db, "schema.config.yaml"), "name: fixture-console-db\nkind: DB\noutputs: {}\n")
+	writeFile(t, filepath.Join(db, "src", "shop.schema.yaml"), `name: fixture-console-db
+kind: DB
+scalars:
+  Identity.UUID:
+    name: Identity.UUID
+    languagePrimitive: string
+types:
+  Item:
+    name: Item
+    role: DBTable
+    fields:
+      - name: id
+        typeRef: { name: Identity.UUID }
+        required: true
+        key: true
+      - name: name
+        typeRef: { name: string }
+        required: true
+  Line:
+    name: Line
+    role: DBTable
+    fields:
+      - name: id
+        typeRef: { name: Identity.UUID }
+        required: true
+        key: true
+      - name: product
+        typeRef: { name: Item }
+        required: true
+        relation: { type: Item }
+      - name: quantity
+        typeRef: { name: number }
+        required: true
+`)
+	root := testpaths.TempDir(t)
+	var log strings.Builder
+	if _, err := buildDir(t, registry.DefaultNaming(), dir, root, livePagesOutputs(), &log); err != nil {
+		t.Fatalf("build: %v\n%s", err, log.String())
+	}
+	got, err := os.ReadFile(filepath.Join(topcoat.Dir(root, consoleService), "src", "references.rs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := os.ReadFile(filepath.Join("testdata", "golden", consoleService, "src", "references.rs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(want) {
+		t.Errorf("references.rs with the derived reference differs from the written one's:\n%s", got)
+	}
+	if !strings.Contains(string(got), `let sites = unnamed(&choices, &[("lines.productId", &["lines", "productId"])]);`) {
+		t.Error("the order's lines do not name their products")
+	}
+}
+
+// writeFile writes text to path, making its directory.
+func writeFile(t *testing.T, path, text string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // consoleCopy is a copy of fixture-console-api whose schema edit changes.
 func consoleCopy(t *testing.T, edit func(schema string) string) string {
 	t.Helper()
@@ -351,7 +751,7 @@ use schemas_fixture_console_api_topcoat::api::runtime::{ApiError, Authenticator,
 use schemas_fixture_console_api_topcoat::api::{
     types, Implementations, OrderAddLineArgs, OrderGetOrderArgs, OrderImplementation, OrderListOrdersArgs, OrderPlaceOrderArgs,
     ProductGetProductArgs, ProductImplementation, ProductListProductsArgs, ReviewImplementation, ReviewListReviewsArgs,
-    SiteImplementation, SiteListPagesArgs, SupplierImplementation, SupplierListSuppliersArgs,
+    SiteImplementation, SiteListPagesArgs, SupplierImplementation, SupplierListSupplierProductsArgs, SupplierListSuppliersArgs,
 };
 use schemas_fixture_console_api_topcoat::choices::Choices;
 use schemas_fixture_console_api_topcoat::forms::{order_input_fields, FormErrors, OrderInputForm};
@@ -510,6 +910,10 @@ impl SupplierImplementation for Shop {
     async fn list_suppliers(&self, _ctx: RequestContext, args: SupplierListSuppliersArgs) -> Result<Page<types::Supplier>, ApiError> {
         let rows = ["Acme", "Bolt", "Cog"].map(|name| types::Supplier { id: name.to_lowercase(), name: name.to_owned() });
         page_of(rows.to_vec(), &args.page, |supplier| supplier.name.clone())
+    }
+    async fn list_supplier_products(&self, _ctx: RequestContext, args: SupplierListSupplierProductsArgs) -> Result<Vec<types::Product>, ApiError> {
+        let products = self.0.products.lock().unwrap();
+        Ok(products.iter().filter(|product| product.supplier_id == args.supplier_id).cloned().collect())
     }
 }
 
@@ -699,9 +1103,10 @@ async fn a_paged_list_links_its_next_and_its_first_page_with_its_filter() {
     assert_eq!(numbers(&first.html), ["A-1", "A-2"], "{}", first.html);
     assert!(first.html.contains(r#"<nav class="ss-pager" aria-label="Pages">"#), "{}", first.html);
     assert!(link(&first.html, "first").is_none(), "{}", first.html);
-    // The filter holds neither the cursor nor the limit, so a submitted
-    // filter starts at the first page.
-    assert!(!first.html.contains(r#"name="cursor""#) && !first.html.contains(r#"name="limit""#), "{}", first.html);
+    // The filter holds neither a cursor nor a limit the query did not send,
+    // so a submitted filter starts at the first page.
+    let filter = between(&first.html, r#"<form method="get" class="ss-filter""#, "</form>");
+    assert!(!filter.contains(r#"name="cursor""#) && !filter.contains(r#"name="limit""#), "{filter}");
 
     let next = link(&first.html, "next").unwrap();
     assert!(next.starts_with("/console/orders?cursor="), "{next}");
@@ -954,7 +1359,10 @@ async fn a_paged_list_without_a_filter_renders_no_form_and_its_refusal_alone() {
     let app = app(&Store::new());
     let first = get(&app, "/console/suppliers", "clerk").await;
     assert_eq!(first.status, StatusCode::OK, "{}", first.html);
-    assert!(!first.html.contains("<form"), "{}", first.html);
+    // Its one form is the pager's size form.
+    assert!(!first.html.contains("ss-filter"), "{}", first.html);
+    assert_eq!(first.html.matches("<form").count(), 1, "{}", first.html);
+    assert!(first.html.contains(r#"<form method="get" class="ss-page-size""#), "{}", first.html);
     assert!(first.html.contains(">Acme</th>") && !first.html.contains(">Bolt</th>"), "{}", first.html);
     let next = link(&first.html, "next").unwrap();
     assert!(next.starts_with("/console/suppliers?cursor="), "{next}");
@@ -969,6 +1377,282 @@ async fn a_paged_list_without_a_filter_renders_no_form_and_its_refusal_alone() {
     assert!(refused.html.contains("<p>limit: must be at most 2</p>"), "{}", refused.html);
 }
 
+// The value of a query parameter of href, as it is written, or none.
+fn param<'a>(href: &'a str, name: &str) -> Option<&'a str> {
+    href.split_once('?')?.1.split('&').find_map(|pair| pair.strip_prefix(name)?.strip_prefix('='))
+}
+
+// The text of a page's size form, which its pager holds after its links.
+fn size_form(html: &str) -> &str {
+    between(html, r#"<form method="get" class="ss-page-size""#, "</form>")
+}
+
+// Seven orders, so the orders' pages of two are four.
+fn seven_orders() -> Arc<Store> {
+    let store = Store::new();
+    store.orders.lock().unwrap().extend([
+        order(6, types::OrderStatus::Placed, None, None, vec![line(ANVIL, 1.0)]),
+        order(7, types::OrderStatus::Shipped, None, None, vec![line(BUCKET, 1.0)]),
+    ]);
+    store
+}
+
+#[tokio::test]
+async fn the_pager_goes_back_a_page_by_its_history() {
+    let app = app(&seven_orders());
+    // Next three times: each page's href and rows. Each Next carries the
+    // history of the pages before it, which grows by the cursor of the page
+    // it leaves, the first page's none.
+    let mut pages = vec![("/console/orders".to_owned(), get(&app, "/console/orders", "clerk").await)];
+    for _ in 0..3 {
+        let next = link(&pages.last().unwrap().1.html, "next").unwrap();
+        let page = get(&app, &next, "clerk").await;
+        assert_eq!(page.status, StatusCode::OK, "{}", page.html);
+        pages.push((next, page));
+    }
+    let rows: Vec<Vec<String>> = pages.iter().map(|(_, page)| numbers(&page.html)).collect();
+    assert_eq!(rows, [vec!["A-1", "A-2"], vec!["A-3", "A-4"], vec!["A-5", "A-6"], vec!["A-7"]]);
+    let cursors: Vec<&str> = pages[1..].iter().map(|(href, _)| param(href, "cursor").unwrap()).collect();
+    assert_eq!(param(&pages[1].0, "back"), None, "{}", pages[1].0);
+    assert_eq!(param(&pages[2].0, "back"), Some(cursors[0]), "{}", pages[2].0);
+    assert_eq!(param(&pages[3].0, "back"), Some(format!("{}.{}", cursors[0], cursors[1]).as_str()), "{}", pages[3].0);
+
+    // The first page has no Previous; each later page's is the page it was
+    // reached from, and following it lands on the rows that page showed.
+    assert!(link(&pages[0].1.html, "prev").is_none(), "{}", pages[0].1.html);
+    for at in 1..pages.len() {
+        let prev = link(&pages[at].1.html, "prev").unwrap();
+        assert_eq!(prev, pages[at - 1].0, "page {}: {}", at + 1, pages[at].1.html);
+        assert_eq!(numbers(&get(&app, &prev, "clerk").await.html), rows[at - 1], "page {}", at + 1);
+    }
+    // The order is First, Previous, Next, then the size form, and on the
+    // second page Previous is First, both rendered.
+    let second = &pages[1].1.html;
+    assert_eq!(link(second, "prev"), link(second, "first"), "{second}");
+    let pager = between(second, r#"<nav class="ss-pager" aria-label="Pages">"#, "</nav>");
+    let places: Vec<usize> = [r#"rel="first""#, r#"rel="prev""#, r#"rel="next""#, "ss-page-size"].iter().map(|at| pager.find(at).unwrap()).collect();
+    assert!(places.is_sorted(), "{pager}");
+}
+
+#[tokio::test]
+async fn a_history_past_its_bound_or_its_rule_has_no_previous_page() {
+    let app = app(&seven_orders());
+    // A cursor of 1024 characters, the most a route reads, after A-1, and
+    // entries of 1024 characters, which are cursors by the rule though no
+    // page returned them.
+    let long = Cursor::encode(&format!("A-1{}", "x".repeat(763))).unwrap();
+    assert_eq!(long.as_str().len(), 1024);
+    let long = long.as_str().to_owned();
+    let entry = "A".repeat(1024);
+
+    // Three entries are 3074 characters: the page goes back to the last,
+    // with the rest; its Next carries them with its cursor, past the bound,
+    // so the oldest is dropped, and the mark comes first.
+    let three = [entry.as_str(); 3].join(".");
+    let page = get(&app, &format!("/console/orders?cursor={long}&back={three}"), "clerk").await;
+    assert_eq!(page.status, StatusCode::OK, "{}", page.html);
+    assert_eq!(numbers(&page.html), ["A-2", "A-3"], "{}", page.html);
+    let prev = link(&page.html, "prev").unwrap();
+    assert_eq!(param(&prev, "cursor"), Some(entry.as_str()), "{prev}");
+    assert_eq!(param(&prev, "back"), Some([entry.as_str(); 2].join(".").as_str()), "{prev}");
+    let next = link(&page.html, "next").unwrap();
+    let pushed = param(&next, "back").unwrap();
+    assert_eq!(pushed, format!("~.{entry}.{entry}.{long}"), "{next}");
+    assert!(pushed.len() - 2 <= 4096, "{}", pushed.len());
+    // That page's history reads as sent: its Previous goes back to the long
+    // cursor, whose own history keeps the mark; one entry after the mark
+    // goes back to it, and the mark alone knows no page before.
+    let later = get(&app, &next, "clerk").await;
+    let back = link(&later.html, "prev").unwrap();
+    assert_eq!(param(&back, "cursor"), Some(long.as_str()), "{back}");
+    assert_eq!(param(&back, "back"), Some(format!("~.{entry}.{entry}").as_str()), "{back}");
+    let marked = get(&app, &format!("/console/orders?cursor={long}&back=~.{entry}"), "clerk").await;
+    assert_eq!(link(&marked.html, "prev").as_deref().and_then(|href| param(href, "back")), Some("~"), "{}", marked.html);
+    let mark = get(&app, &format!("/console/orders?cursor={long}&back=~"), "clerk").await;
+    assert!(link(&mark.html, "prev").is_none(), "{}", mark.html);
+
+    // Four entries are 4099 characters, past the bound, as is a malformed
+    // history: no Previous, the first page still offered, a 200, never the
+    // route's 400, and a Next whose history begins again at the mark.
+    let four = [entry.as_str(); 4].join(".");
+    let long_entry = "A".repeat(1025);
+    for back in [four.as_str(), "a..b", "~~", "%24", "a.~", ".", long_entry.as_str()] {
+        let page = get(&app, &format!("/console/orders?cursor={long}&back={back}"), "clerk").await;
+        assert_eq!(page.status, StatusCode::OK, "back={back}: {}", page.html);
+        assert!(link(&page.html, "prev").is_none(), "back={back}: {}", page.html);
+        assert_eq!(link(&page.html, "first").as_deref(), Some("/console/orders"), "back={back}");
+        assert_eq!(link(&page.html, "next").as_deref().and_then(|href| param(href, "back")), Some(format!("~.{long}").as_str()), "back={back}");
+    }
+    // Without a cursor the page is the first, whatever back says.
+    let first = get(&app, &format!("/console/orders?back={three}"), "clerk").await;
+    assert_eq!(first.status, StatusCode::OK, "{}", first.html);
+    assert_eq!(numbers(&first.html), ["A-1", "A-2"], "{}", first.html);
+    assert!(link(&first.html, "prev").is_none() && link(&first.html, "first").is_none(), "{}", first.html);
+    assert_eq!(link(&first.html, "next").as_deref().and_then(|href| param(href, "back")), None, "{}", first.html);
+}
+
+#[tokio::test]
+async fn the_size_form_sets_the_page_size_and_keeps_the_filter() {
+    let app = app(&seven_orders());
+    // The route's sizes, 2 and 5, the default selected, then the limit sent.
+    let first = get(&app, "/console/orders", "clerk").await;
+    assert!(size_form(&first.html).contains(r#"<label>Per page <select name="limit"><option value="2" selected="">2</option><option value="5">5</option></select></label>"#), "{}", first.html);
+    let five = get(&app, "/console/orders?limit=5", "clerk").await;
+    assert_eq!(numbers(&five.html), ["A-1", "A-2", "A-3", "A-4", "A-5"], "{}", five.html);
+    assert!(size_form(&five.html).contains(r#"<option value="2">2</option><option value="5" selected="">5</option>"#), "{}", five.html);
+    // The filter keeps the limit sent, and neither a cursor nor a history.
+    let filter = between(&five.html, r#"<form method="get" class="ss-filter""#, "</form>");
+    assert!(filter.contains(r#"<input type="hidden" name="limit" value="5">"#), "{filter}");
+
+    // A later page of a search: the size form holds the filter and the
+    // search, with the limit sent among the sizes, and never its cursor,
+    // its history or a second limit.
+    let searched = get(&app, "/console/orders?q=rush&statuses=placed&limit=1", "clerk").await;
+    let later = get(&app, &link(&searched.html, "next").unwrap(), "clerk").await;
+    assert_eq!(numbers(&later.html), ["A-3"], "{}", later.html);
+    let form = size_form(&later.html);
+    for want in [
+        r#"<input type="hidden" name="q" value="rush">"#,
+        r#"<input type="hidden" name="statuses" value="placed">"#,
+        r#"<option value="1" selected="">1</option><option value="2">2</option><option value="5">5</option>"#,
+        r#"<button type="submit">Show</button>"#,
+    ] {
+        assert!(form.contains(want), "the size form lacks {want}: {form}");
+    }
+    assert!(!form.contains(r#"name="cursor""#) && !form.contains(r#"name="back""#), "{form}");
+    assert_eq!(form.matches(r#"name="limit""#).count(), 1, "{form}");
+    let filter = between(&later.html, r#"<form method="get" class="ss-filter""#, "</form>");
+    assert!(!filter.contains(r#"name="cursor""#) && !filter.contains(r#"name="back""#), "{filter}");
+
+    // Its GET, as a browser sends it, is the first page at the new size.
+    let resized = get(&app, "/console/orders?q=rush&statuses=placed&limit=5", "clerk").await;
+    assert_eq!(numbers(&resized.html), ["A-1", "A-3"], "{}", resized.html);
+    assert!(link(&resized.html, "first").is_none() && link(&resized.html, "prev").is_none(), "{}", resized.html);
+
+    // A refused limit is the route's 400, with no cursor sent: no size form,
+    // nor a link to another page.
+    let refused = get(&app, "/console/orders?limit=6", "clerk").await;
+    assert_eq!(refused.status, StatusCode::BAD_REQUEST, "{}", refused.html);
+    assert!(!refused.html.contains("ss-page-size"), "{}", refused.html);
+
+    // The suppliers' route pages one at a time, up to two; the products'
+    // section shows no size form.
+    let suppliers = get(&app, "/console/suppliers", "clerk").await;
+    assert!(size_form(&suppliers.html).contains(r#"<option value="1" selected="">1</option><option value="2">2</option>"#), "{}", suppliers.html);
+    let item = get(&app, &format!("/console/products/{}", wire(&uuid(ANVIL))), "clerk").await;
+    let section = between(&item.html, r#"<section class="ss-section" data-resource="reviews">"#, "</section>");
+    assert!(!section.contains("ss-page-size") && !section.contains(r#"rel="prev""#), "{section}");
+}
+
+#[tokio::test]
+async fn a_refused_limit_is_kept_by_no_link_or_form() {
+    let app = app(&seven_orders());
+    let next = link(&get(&app, "/console/orders?statuses=placed", "clerk").await.html, "next").unwrap();
+    let cursor = param(&next, "cursor").unwrap().to_owned();
+    for limit in ["6", "0", "two"] {
+        // The route's 400, whose filter holds no limit, so its submit starts
+        // at the route's default, not at the 400 again.
+        let refused = get(&app, &format!("/console/orders?statuses=placed&limit={limit}"), "clerk").await;
+        assert_eq!(refused.status, StatusCode::BAD_REQUEST, "limit={limit}: {}", refused.html);
+        let filter = between(&refused.html, r#"<form method="get" class="ss-filter""#, "</form>");
+        assert!(!filter.contains(r#"name="limit""#), "limit={limit}: {filter}");
+        assert!(link(&refused.html, "first").is_none(), "limit={limit}: {}", refused.html);
+        // With a cursor, the First link keeps the filter and drops the
+        // limit, so it is a page and not the 400.
+        let later = get(&app, &format!("/console/orders?statuses=placed&limit={limit}&cursor={cursor}"), "clerk").await;
+        assert_eq!(later.status, StatusCode::BAD_REQUEST, "limit={limit}: {}", later.html);
+        let first = link(&later.html, "first").unwrap();
+        assert_eq!(first, "/console/orders?statuses=placed", "limit={limit}");
+        let filter = between(&later.html, r#"<form method="get" class="ss-filter""#, "</form>");
+        assert!(!filter.contains(r#"name="limit""#), "limit={limit}: {filter}");
+        assert_eq!(get(&app, &first, "clerk").await.status, StatusCode::OK, "limit={limit}");
+    }
+    // A limit the route admits stays, in the First link and the filter.
+    let kept = get(&app, &format!("/console/orders?statuses=placed&limit=5&cursor={cursor}"), "clerk").await;
+    assert_eq!(kept.status, StatusCode::OK, "{}", kept.html);
+    assert_eq!(link(&kept.html, "first").as_deref(), Some("/console/orders?statuses=placed&limit=5"), "{}", kept.html);
+    let filter = between(&kept.html, r#"<form method="get" class="ss-filter""#, "</form>");
+    assert!(filter.contains(r#"<input type="hidden" name="limit" value="5">"#), "{filter}");
+}
+
+#[tokio::test]
+async fn a_live_list_goes_back_and_sets_its_size_in_place() {
+    let app = app(&seven_orders());
+    let first = get(&app, "/console/orders", "clerk").await;
+    let second = get(&app, &link(&first.html, "next").unwrap(), "clerk").await;
+    let third = link(&second.html, "next").unwrap();
+    let query = third.strip_prefix("/console/orders?").unwrap().to_owned();
+    let c2 = param(&third, "back").unwrap().to_owned();
+    // The shard reads its query's history as the page reads it: its
+    // Previous is the page before, and sets the shard's query in place.
+    let live = shard(&app, "/console/_live/orders", "clerk", serde_json::json!({"args": [query, "/console/orders"]})).await;
+    assert_eq!(live.status, StatusCode::OK, "{}", live.html);
+    assert_eq!(numbers(&live.html), ["A-5", "A-6"], "{}", live.html);
+    assert_eq!(link(&live.html, "prev"), Some(format!("/console/orders?cursor={c2}")), "{}", live.html);
+    let prev = between(&live.html, r#"<a rel="prev""#, "</a>");
+    assert!(prev.contains("data-topcoat-on:click="), "{prev}");
+    // The size form's submit runs the filter's script over its own form,
+    // through its own hidden input, which sets the same signal.
+    let form = size_form(&live.html);
+    assert!(form.contains(r#"data-ss-live-size="orders""#) && form.contains("data-topcoat-on:submit="), "{form}");
+    assert!(form.contains("data-ss-query"), "{form}");
+    // A signal from the size form's query renders the first page at its
+    // size, under the shard's identity.
+    let identity = between(&first.html, r#"::topcoat::shard::start("/console/_live/orders", ""#, "\"");
+    let signal = between(&first.html, "::topcoat::signal({&quot;t&quot;:&quot;signal&quot;,&quot;id&quot;:&quot;", "&quot;");
+    let body = serde_json::json!({"args": ["", "/console/orders"], "signals": {signal: "limit=5"}});
+    let mut request = http::Request::builder().method("POST").uri("/console/_live/orders").header("x-caller", "clerk");
+    request = request.header(header::CONTENT_TYPE, "application/json").header("x-topcoat-identity", identity);
+    let response = app.handle(request.body(Body::from(body.to_string())).unwrap()).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let html = String::from_utf8(to_bytes(response.into_body(), usize::MAX).await.unwrap().to_vec()).unwrap();
+    assert_eq!(numbers(&html), ["A-1", "A-2", "A-3", "A-4", "A-5"], "{html}");
+    assert!(link(&html, "first").is_none() && link(&html, "prev").is_none(), "{html}");
+    assert!(size_form(&html).contains(r#"<option value="5" selected="">5</option>"#), "{html}");
+}
+
+// The trail of a page, each step's label, as the layout renders it.
+fn trail(html: &str) -> Vec<String> {
+    between(html, r#"<nav class="ss-trail" aria-label="Breadcrumb"><ol>"#, "</ol>")
+        .split("<li>")
+        .skip(1)
+        .map(|step| {
+            let step = step.trim_end_matches("</li>");
+            let text = step.split_once('>').map_or(step, |(_, rest)| rest);
+            text.split('<').next().unwrap_or_default().to_owned()
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn a_trail_names_a_supplier_by_what_its_route_refers_to() {
+    let app = app(&Store::new());
+    // No operation reads a supplier, so its step has no title: the supplier
+    // products' supplierId refers to Supplier, and listSuppliers names it.
+    let acme = get(&app, "/console/suppliers/acme/products", "clerk").await;
+    assert_eq!(acme.status, StatusCode::OK, "{}", acme.html);
+    assert_eq!(trail(&acme.html), ["Shop console", "Suppliers", "Acme", "Products"], "{}", acme.html);
+    assert!(acme.html.contains(">Anvil</th>") && !acme.html.contains(">Crate</th>"), "{}", acme.html);
+    let bolt = get(&app, "/console/suppliers/bolt/products", "clerk").await;
+    assert_eq!(trail(&bolt.html), ["Shop console", "Suppliers", "Bolt", "Products"], "{}", bolt.html);
+    // Cog is past the first page of listSuppliers, which has no lookup, so
+    // its step is its noun and id; so is a supplier no item has.
+    let cog = get(&app, "/console/suppliers/cog/products", "clerk").await;
+    assert_eq!(cog.status, StatusCode::OK, "{}", cog.html);
+    assert_eq!(trail(&cog.html), ["Shop console", "Suppliers", "Supplier cog", "Products"], "{}", cog.html);
+    let none = get(&app, "/console/suppliers/nobody/products", "clerk").await;
+    assert_eq!(trail(&none.html), ["Shop console", "Suppliers", "Supplier nobody", "Products"], "{}", none.html);
+    // An order taker may list a supplier's products but not the suppliers:
+    // the step is the supplier's id.
+    let taker = get(&app, "/console/suppliers/acme/products", "taker").await;
+    assert_eq!(taker.status, StatusCode::OK, "{}", taker.html);
+    assert_eq!(trail(&taker.html), ["Shop console", "Suppliers", "Supplier acme", "Products"], "{}", taker.html);
+    // A product's step keeps its title, which its detail gives.
+    let anvil = wire(&uuid(ANVIL));
+    let reviews = get(&app, &format!("/console/products/{anvil}/reviews"), "clerk").await;
+    assert_eq!(trail(&reviews.html), ["Shop console", "Products", "Anvil", "Reviews"], "{}", reviews.html);
+}
+
 #[tokio::test]
 async fn a_list_at_page_pages_beside_the_pagers_helpers() {
     let app = app(&Store::new());
@@ -980,5 +1664,168 @@ async fn a_list_at_page_pages_beside_the_pagers_helpers() {
     let second = get(&app, &next, "clerk").await;
     assert!(second.html.contains("Terms") && !second.html.contains("About us"), "{}", second.html);
     assert_eq!(link(&second.html, "first").as_deref(), Some("/console/page"), "{}", second.html);
+}
+`
+
+// supplierAppTest is tests/app.rs of the Topcoat crate of the copy of
+// fixture-console-api whose Supplier is fixture-console-suppliers-api's.
+const supplierAppTest = `use std::sync::{Arc, Mutex};
+
+use async_trait::async_trait;
+use http::request::Parts;
+use schemas_fixture_console_api_topcoat::api::runtime::page::Page;
+use schemas_fixture_console_api_topcoat::api::runtime::{ApiError, Authenticator, Principal, RequestContext};
+use schemas_fixture_console_api_topcoat::api::{
+    types, Implementations, OrderAddLineArgs, OrderGetOrderArgs, OrderImplementation, OrderListOrdersArgs, OrderPlaceOrderArgs,
+    ProductCreateProductArgs, ProductGetProductArgs, ProductImplementation, ProductListProductsArgs, ReviewImplementation,
+    ReviewListReviewsArgs, SiteImplementation, SiteListPagesArgs, SupplierImplementation, SupplierListSupplierProductsArgs,
+    SupplierListSuppliersArgs,
+};
+use schemas_fixture_console_api_topcoat::pages::Settings;
+use schemas_fixture_console_api_topcoat::{PageAuthenticator, RouterBuilderFixtureConsoleApiExt};
+use topcoat::context::Cx;
+use topcoat::router::{header, to_bytes, Body, Router, RouterBuilderDiscoverExt, StatusCode};
+
+const ANVIL: &str = "8d1f6c9e-0000-4000-8000-000000000001";
+const BUCKET: &str = "8d1f6c9e-0000-4000-8000-000000000002";
+const CRATE: &str = "8d1f6c9e-0000-4000-8000-000000000003";
+
+fn uuid(text: &str) -> types::IdentityUUID {
+    serde_json::from_value(serde_json::json!(text)).unwrap()
+}
+
+fn product(id: &str, name: &str, supplier: &str) -> types::Product {
+    types::Product { id: uuid(id), name: name.to_owned(), sku: name.to_lowercase(), supplier_id: supplier.to_owned(), in_stock: true }
+}
+
+// The products, two suppliers, which the dependency's type declares, and
+// nothing else.
+struct Shop(Mutex<Vec<types::Product>>);
+
+#[async_trait]
+impl ProductImplementation for Shop {
+    async fn list_products(&self, _ctx: RequestContext, args: ProductListProductsArgs) -> Result<Page<types::Product>, ApiError> {
+        let products = self.0.lock().unwrap();
+        Ok(Page::last(products.iter().filter(|product| args.ids.as_ref().is_none_or(|ids| ids.contains(&product.id))).cloned().collect()))
+    }
+    async fn get_product(&self, _ctx: RequestContext, args: ProductGetProductArgs) -> Result<types::Product, ApiError> {
+        let products = self.0.lock().unwrap();
+        products.iter().find(|product| product.id == args.product_id).cloned().ok_or_else(|| ApiError::not_found("No such product"))
+    }
+    async fn create_product(&self, _ctx: RequestContext, args: ProductCreateProductArgs) -> Result<types::Product, ApiError> {
+        let created = types::Product { name: args.input.name, sku: args.input.sku, supplier_id: args.input.supplier_id, ..product(CRATE, "", "") };
+        self.0.lock().unwrap().push(created.clone());
+        Ok(created)
+    }
+}
+
+#[async_trait]
+impl SupplierImplementation for Shop {
+    async fn list_suppliers(&self, _ctx: RequestContext, _args: SupplierListSuppliersArgs) -> Result<Page<types::Supplier>, ApiError> {
+        Ok(Page::last(["Acme", "Bolt"].map(|name| types::Supplier { id: name.to_lowercase(), name: name.to_owned() }).to_vec()))
+    }
+    async fn list_supplier_products(&self, _ctx: RequestContext, args: SupplierListSupplierProductsArgs) -> Result<Vec<types::Product>, ApiError> {
+        let products = self.0.lock().unwrap();
+        Ok(products.iter().filter(|product| product.supplier_id == args.supplier_id).cloned().collect())
+    }
+}
+
+#[async_trait]
+impl ReviewImplementation for Shop {
+    async fn list_reviews(&self, _ctx: RequestContext, _args: ReviewListReviewsArgs) -> Result<Page<types::Review>, ApiError> {
+        Ok(Page::last(Vec::new()))
+    }
+}
+
+#[async_trait]
+impl SiteImplementation for Shop {
+    async fn list_pages(&self, _ctx: RequestContext, _args: SiteListPagesArgs) -> Result<Page<types::SitePage>, ApiError> {
+        Ok(Page::last(Vec::new()))
+    }
+}
+
+#[async_trait]
+impl OrderImplementation for Shop {
+    async fn list_orders(&self, _ctx: RequestContext, _args: OrderListOrdersArgs) -> Result<Page<types::Order>, ApiError> {
+        Ok(Page::last(Vec::new()))
+    }
+    async fn place_order(&self, _ctx: RequestContext, _args: OrderPlaceOrderArgs) -> Result<types::Order, ApiError> {
+        Err(ApiError::not_found("No orders here"))
+    }
+    async fn get_order(&self, _ctx: RequestContext, _args: OrderGetOrderArgs) -> Result<types::Order, ApiError> {
+        Err(ApiError::not_found("No orders here"))
+    }
+    async fn add_line(&self, _ctx: RequestContext, _args: OrderAddLineArgs) -> Result<types::Order, ApiError> {
+        Err(ApiError::not_found("No orders here"))
+    }
+}
+
+struct NoRequests;
+
+#[async_trait]
+impl Authenticator for NoRequests {
+    async fn authenticate(&self, _request: &Parts) -> Result<Option<Principal>, ApiError> {
+        Ok(None)
+    }
+}
+
+// Every page's caller is a clerk, who reads products and suppliers.
+struct Clerk;
+
+#[async_trait]
+impl PageAuthenticator for Clerk {
+    async fn principal(&self, _cx: &Cx) -> Result<Option<Principal>, ApiError> {
+        Ok(Some(Principal::new("clerk", ["orders", "products.read"])))
+    }
+}
+
+fn app(shop: &Arc<Shop>) -> Router {
+    let implementations = Implementations {
+        order: Arc::clone(shop) as _,
+        product: Arc::clone(shop) as _,
+        review: Arc::clone(shop) as _,
+        site: Arc::clone(shop) as _,
+        supplier: Arc::clone(shop) as _,
+        authenticator: Arc::new(NoRequests),
+    };
+    Router::builder().discover().app_context(Settings::new().title("Shop console")).fixture_console_api(implementations, Clerk).build()
+}
+
+async fn send(router: &Router, method: &str, uri: &str, body: &str) -> (StatusCode, String) {
+    let mut request = http::Request::builder().method(method).uri(uri);
+    if method == "POST" {
+        request = request.header(header::CONTENT_TYPE, "application/x-www-form-urlencoded");
+    }
+    let response = router.handle(request.body(Body::from(body.to_owned())).unwrap()).await;
+    let status = response.status();
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    (status, String::from_utf8(bytes.to_vec()).unwrap())
+}
+
+#[tokio::test]
+async fn a_reference_to_a_dependencys_type_offers_and_names_its_items() {
+    let shop = Arc::new(Shop(Mutex::new(vec![product(ANVIL, "Anvil", "acme"), product(BUCKET, "Bucket", "bolt")])));
+    let app = app(&shop);
+    // The rows and a product's page name its supplier, the dependency's
+    // type, through listSuppliers.
+    let (status, list) = send(&app, "GET", "/console/products", "").await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert!(list.contains(r#"<td data-field="supplierId">Acme</td>"#) && list.contains(r#"<td data-field="supplierId">Bolt</td>"#), "{list}");
+    let anvil = serde_json::to_value(uuid(ANVIL)).unwrap().as_str().unwrap().to_owned();
+    let (_, item) = send(&app, "GET", &format!("/console/products/{anvil}"), "").await;
+    assert!(item.contains("<dd>Acme</dd>"), "{item}");
+    // The new product's supplier is a select of the suppliers, by name.
+    let (status, new) = send(&app, "GET", "/console/products/new", "").await;
+    assert_eq!(status, StatusCode::OK, "{new}");
+    assert!(new.contains(r#"<select id="product-input-supplier-id" name="supplierId" required"#), "{new}");
+    assert!(new.contains(r#"<option value="acme">Acme</option><option value="bolt">Bolt</option>"#), "{new}");
+    let (status, placed) = send(&app, "POST", "/console/products/new", "name=Crate&sku=crate&supplierId=bolt").await;
+    assert_eq!(status, StatusCode::SEE_OTHER, "{placed}");
+    assert_eq!(shop.0.lock().unwrap().last().map(|product| product.supplier_id.clone()).as_deref(), Some("bolt"));
+    // The trail names a supplier through the reference of its products'
+    // route.
+    let (_, products) = send(&app, "GET", "/console/suppliers/bolt/products", "").await;
+    assert!(products.contains("<li><span>Bolt</span></li>"), "{products}");
+    assert!(products.contains(">Bucket</th>") && products.contains(">Crate</th>"), "{products}");
 }
 `

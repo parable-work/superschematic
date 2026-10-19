@@ -22,6 +22,11 @@
 //! plain control and the values as they are, and the page does not fail.
 //! The calls are kept for the request (`#[memoize]`), and for no other:
 //! labels change, and callers differ.
+//!
+//! The console's trail names an item's step whose title does not name it
+//! by the label of what the route's value there refers to
+//! (`<target>_target_label`), when every operation whose route holds the
+//! value there refers to one target by one value (D44, amended).
 
 use std::collections::BTreeSet;
 
@@ -204,6 +209,15 @@ async fn product_target_labels(cx: &Cx, values: &BTreeSet<String>) -> Vec<Choice
     out
 }
 
+/// The label of the item of Product whose id is `value`, for the console's
+/// trail: through product.listProducts's lookup with that one value. None when
+/// no item has it, its label is blank, or the call is refused or fails.
+pub(crate) async fn product_target_label(cx: &Cx, value: &str) -> Option<String> {
+    let values = BTreeSet::from([value.to_owned()]);
+    let labels = product_target_labels(cx, &values).await;
+    labels.into_iter().find(|choice| choice.value == value).map(|choice| choice.label).filter(|label| label != value)
+}
+
 /// Product's items as options, each by its sku and named by its name: the first
 /// page of product.listProducts, when it holds them all; none when the caller
 /// may not list them, or more follow, which a select would hide.
@@ -240,6 +254,15 @@ async fn supplier_target_labels(cx: &Cx, values: &BTreeSet<String>) -> Vec<Choic
     let mut out = choices_of(&listed.items, "id", Some("name"));
     out.retain(|choice| values.contains(&choice.value));
     out
+}
+
+/// The label of the item of Supplier whose id is `value`, for the console's
+/// trail: from the first page of supplier.listSuppliers. None when no item has
+/// it, its label is blank, or the call is refused or fails.
+pub(crate) async fn supplier_target_label(cx: &Cx, value: &str) -> Option<String> {
+    let values = BTreeSet::from([value.to_owned()]);
+    let labels = supplier_target_labels(cx, &values).await;
+    labels.into_iter().find(|choice| choice.value == value).map(|choice| choice.label).filter(|label| label != value)
 }
 
 /// The options of each control of `OrderAddLineArgsForm` that refers to an

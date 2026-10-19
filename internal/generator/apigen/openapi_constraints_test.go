@@ -34,7 +34,7 @@ func TestOpenAPITypeSchemaPreservesFieldValidationConstraints(t *testing.T) {
 			{Name: "handleByName", TypeRef: ir.TypeRef{Name: "Example.Handle", IsMap: true}, Required: true},
 		},
 	}
-	schemas := buildOpenAPISchemas(
+	schemas, _ := buildOpenAPISchemas(
 		[]EndpointInfo{{InputType: "ProfileInput"}},
 		map[string]string{}, map[string]string{}, buildOpenAPIScalarMap(schema, nil),
 		schema, nil,

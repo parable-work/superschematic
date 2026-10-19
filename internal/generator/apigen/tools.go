@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"slices"
 	"sort"
+	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
+	"github.com/parable-work/superschematic/internal/generator/tsutil"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -16,6 +18,13 @@ const (
 	// DefaultToolScalarKey is the key a tool argument property carries its
 	// canonical scalar name under ("Identity.UUID").
 	DefaultToolScalarKey = "x-superschematic-scalar"
+	// DefaultToolReferenceKey is the key a tool argument property that
+	// refers to an item carries its resolved reference under (D61), the
+	// OpenAPI document's key.
+	DefaultToolReferenceKey = OpenAPIReferenceKey
+	// DefaultToolSearchKey is the key, true, that marks the property of an
+	// operation's search argument (D62), the OpenAPI document's key.
+	DefaultToolSearchKey = OpenAPISearchKey
 	// DefaultToolGuidanceKey is the MCP _meta key a visible tool carries its
 	// @docs guidance (useWhen, doNotUseWhen, success, errors) under.
 	DefaultToolGuidanceKey = "superschematic/operation-guidance"
@@ -28,6 +37,14 @@ type ToolKeys struct {
 	// Scalar is the key a tool argument property carries its canonical
 	// scalar name under. Empty leaves the name out.
 	Scalar string
+	// Reference is the key a tool argument property that refers to an
+	// item (D61) carries its resolved reference under: { target, options,
+	// value, label, lookup }, target the type's name and options the
+	// options operation's tool name. Empty leaves references out.
+	Reference string
+	// Search is the key, true, that marks the property of an operation's
+	// search argument (D62). Empty leaves the mark out.
+	Search string
 	// Guidance is the MCP _meta key a visible tool carries its @docs
 	// guidance under. Empty leaves the guidance out of _meta; the tool
 	// documents' own guidance member is written either way.
@@ -49,7 +66,10 @@ type ToolKeyValue struct {
 
 // DefaultToolKeys returns the keys the core writes.
 func DefaultToolKeys() ToolKeys {
-	return ToolKeys{Scalar: DefaultToolScalarKey, Guidance: DefaultToolGuidanceKey}
+	return ToolKeys{
+		Scalar: DefaultToolScalarKey, Reference: DefaultToolReferenceKey, Search: DefaultToolSearchKey,
+		Guidance: DefaultToolGuidanceKey,
+	}
 }
 
 // ToolHook edits what the SDK generators publish about an API's MCP tools:
@@ -90,9 +110,34 @@ type Tool struct {
 	MCP *ir.OperationMCP
 }
 
+// ToolName is the name the SDK tool documents give an operation's tool:
+// its endpoint namespace ("root" when it has none), a dot, and the
+// operation's name as the TypeScript SDK names its method
+// ("catalog.listItems" for list_items). Every SDK's tools and every
+// reference's options (Reference.OptionsTool) are named by it, so a
+// reference names a tool that exists.
+func ToolName(namespace, operation string) string {
+	if strings.TrimSpace(namespace) == "" {
+		namespace = "root"
+	}
+	return namespace + "." + tsutil.ToCamelCase(operation)
+}
+
 // reservedToolParameterKeys are the argument-schema keys the core writes;
 // ToolKeys.Parameters cannot reuse them.
 var reservedToolParameterKeys = []string{"type", "additionalProperties", "properties", "required"}
+
+// reservedToolPropertyKeys are the JSON Schema keywords a tool argument's
+// property is written with (toolsutil.JSONSchemaProperty), and those a
+// schema's property holds elsewhere ($ref, allOf, anyOf, nullable). The
+// scalar, reference and search keys cannot be one: the property would
+// carry the keyword twice, or a vendor value where JSON Schema reads its
+// own.
+var reservedToolPropertyKeys = []string{
+	"$ref", "additionalProperties", "allOf", "anyOf", "description", "enum", "format", "items",
+	"maxItems", "maxLength", "maximum", "minItems", "minLength", "minimum", "nullable", "oneOf",
+	"pattern", "properties", "required", "type",
+}
 
 // ResolveToolKeys returns the vendor keys the tool documents are written
 // with for schema: DefaultToolKeys as hooks leave them, run over a tool set
@@ -135,6 +180,20 @@ func applyToolHooks(schema *ir.Schema, endpoints []EndpointInfo, hooks []ToolHoo
 }
 
 func validateToolKeys(keys ToolKeys) error {
+	// A property's own keys: two of one name would write one key twice.
+	propertyKeys := []struct{ name, key string }{{"scalar", keys.Scalar}, {"reference", keys.Reference}, {"search", keys.Search}}
+	for _, k := range propertyKeys {
+		if slices.Contains(reservedToolPropertyKeys, k.key) {
+			return fmt.Errorf("the %s key %q is a JSON Schema keyword a tool argument's property is written with", k.name, k.key)
+		}
+	}
+	for i, a := range propertyKeys {
+		for _, b := range propertyKeys[i+1:] {
+			if a.key != "" && a.key == b.key {
+				return fmt.Errorf("the %s key and the %s key are both %q", a.name, b.name, a.key)
+			}
+		}
+	}
 	seen := make(map[string]bool, len(keys.Parameters))
 	for _, kv := range keys.Parameters {
 		switch {
@@ -144,6 +203,10 @@ func validateToolKeys(keys ToolKeys) error {
 			return fmt.Errorf("tool parameter key %q is written by the core", kv.Key)
 		case kv.Key == keys.Scalar:
 			return fmt.Errorf("tool parameter key %q is the scalar key", kv.Key)
+		case kv.Key == keys.Reference:
+			return fmt.Errorf("tool parameter key %q is the reference key", kv.Key)
+		case kv.Key == keys.Search:
+			return fmt.Errorf("tool parameter key %q is the search key", kv.Key)
 		case seen[kv.Key]:
 			return fmt.Errorf("tool parameter key %q is listed twice", kv.Key)
 		}
