@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -471,5 +472,81 @@ func TestPolicyNothingPublic(t *testing.T) {
 	}
 	if strings.Count(got, "\n") != 3 {
 		t.Errorf("the policy found more than the four:\n%s", got)
+	}
+}
+
+// TestWorkersCIGolden renders the Workers fixture's workflow with the
+// core's GitHub Actions renderer and checks it against the golden file,
+// which -update rewrites: check type-checks each server and bundles each
+// for Workers with bundle.ts --check; each deploy and preview job sets up
+// Bun and installs the workspace before it deploys, since the deploy runs
+// bundle.ts on the runner, and signs in with the account's token; a plan
+// job builds nothing and does neither (D64).
+func TestWorkersCIGolden(t *testing.T) {
+	reg := assemble(t)
+	renderer, ok := reg.CIRenderer("github")
+	if !ok {
+		t.Fatal("the core registers no github CI renderer")
+	}
+	var envs []registry.CIEnvironment
+	for _, name := range []string{"Staging", "Production", "Preview"} {
+		env, errs := resolveOver(t, reg, workersStack(), workersServices(), name)
+		if errs != nil {
+			t.Fatal(errs)
+		}
+		envs = append(envs, reg.CIEnvironment(env))
+	}
+	files, err := renderer.Render(registry.CIRequest{
+		Stack: registry.CIStack{
+			Name:           "workers-stack",
+			Dir:            "schemas/services/workers-stack",
+			ServicesRoot:   "schemas/services",
+			SchemasRoot:    "schemas",
+			OutputRoot:     "schemas/dist",
+			PackageManager: registry.PackageManagerBun,
+			TypeScriptImplementations: map[string]string{
+				"shop-pricing":    "typescript/shop-pricing",
+				"shop-storefront": "typescript/shop-storefront",
+			},
+		},
+		Environments: envs,
+		Options:      registry.CIOptions{}.WithDefaults(renderer),
+		Version:      "1.2.3",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 1 || files[0].Path != "workers-stack.yml" {
+		t.Fatalf("files = %+v", files)
+	}
+	golden := filepath.Join(goldenRoot, "ci", files[0].Path)
+	if *update {
+		if err := os.MkdirAll(filepath.Dir(golden), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(golden, files[0].Data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want, err := os.ReadFile(golden)
+	if err != nil {
+		t.Fatalf("%v (run with -update to write it)", err)
+	}
+	if !bytes.Equal(files[0].Data, want) {
+		t.Errorf("the workflow differs from %s; run with -update and review the diff", golden)
+	}
+	for _, line := range []string{
+		"name: Bundle server shop-pricing for Workers",
+		"name: Bundle server shop-storefront for Workers",
+		"run: bun bundle.ts --check",
+	} {
+		if !bytes.Contains(want, []byte(line)) {
+			t.Errorf("the workflow has no %q", line)
+		}
+	}
+	if bin, err := exec.LookPath("actionlint"); err == nil {
+		if out, err := exec.Command(bin, "-no-color", golden).CombinedOutput(); err != nil {
+			t.Errorf("actionlint %s: %v\n%s", golden, err, out)
+		}
 	}
 }
