@@ -328,8 +328,8 @@ func engineDockerIncludes(in RustInput, s *RustServer, rel func(string) (string,
 	engineWorkspace := filepath.Dir(in.Paths.EngineRust)
 	checkout := filepath.Dir(filepath.Dir(filepath.Dir(engineWorkspace)))
 	var include []string
-	add := func(abs, what string) string {
-		if len(s.Engines) == 0 {
+	add := func(abs, what string, needed bool) string {
+		if !needed {
 			if _, err := os.Stat(abs); err != nil {
 				return ""
 			}
@@ -341,14 +341,17 @@ func engineDockerIncludes(in RustInput, s *RustServer, rel func(string) (string,
 		include = append(include, r)
 		return ""
 	}
-	if why := add(engineWorkspace, "the engine's Cargo workspace "+engineWorkspace); why != "" {
+	opens := len(s.Engines) > 0
+	if why := add(engineWorkspace, "the engine's Cargo workspace "+engineWorkspace, opens); why != "" {
 		return nil, why
 	}
-	if why := add(filepath.Join(in.OutputRoot, "engine", "rust"), "the output root's project engine crates"); why != "" {
+	// The output root holds project engine crates when a database's build
+	// wrote one.
+	if why := add(filepath.Join(in.OutputRoot, "engine", "rust"), "the output root's project engine crates", s.EngineProject != nil); why != "" {
 		return nil, why
 	}
 	for _, crate := range engineCrates {
-		if why := add(filepath.Join(checkout, filepath.FromSlash(crate)), crate+", which the engine's workspace reaches,"); why != "" {
+		if why := add(filepath.Join(checkout, filepath.FromSlash(crate)), crate+", which the engine's workspace reaches,", opens); why != "" {
 			return nil, why
 		}
 	}

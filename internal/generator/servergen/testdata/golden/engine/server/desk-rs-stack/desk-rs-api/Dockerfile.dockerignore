@@ -15,7 +15,6 @@
 !schemas/dist/api/*/Cargo.toml
 !schemas/dist/api/*/openapi.json
 !schemas/dist/api/*/src
-!schemas/dist/engine/rust
 !schemas/dist/impl
 !schemas/dist/sdk/rust
 !schemas/dist/server/*/*/Cargo.toml
