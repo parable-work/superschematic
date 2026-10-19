@@ -151,23 +151,26 @@ type engineDocker struct {
 	// Go is the Go binding, Workspace the Cargo workspace, beside it.
 	Go        string
 	Workspace string
-	// Crates are the directories outside the workspace its crates reach:
-	// the work queue's crate, a member of it; the schema IR's and the
-	// schema runtime's; the version graph's engine and core; and
-	// superscalar's core.
+	// Crates are the paths outside the workspace its crates reach: the
+	// work queue's crate, a member of it; the schema IR's and the schema
+	// runtime's; the version graph's engine and core; and superscalar's
+	// core, with the workspace manifest it takes its lints from.
 	Crates []string
 }
 
-// engineCrates are the directories, relative to the checkout's root, that
-// the engine's workspace reaches by path: its runtime/engine/rust is the
+// engineCrates are the paths, relative to the checkout's root, that the
+// engine's workspace reaches by path: its runtime/engine/rust is the
 // binding's ../rust, so the binding is <root>/runtime/engine/go.
+// superscalar's core inherits its lints from its workspace's manifest,
+// which names every crate under crates/ a member.
 var engineCrates = []string{
 	"runtime/engine-workqueue/rust",
 	"runtime/schema/rust-ir",
 	"runtime/schema/rust",
 	"runtime/versiongraph/rust-engine",
 	"runtime/versiongraph/rust",
-	"third_party/superscalar/crates/core",
+	"third_party/superscalar/Cargo.toml",
+	"third_party/superscalar/crates",
 }
 
 // planEngineDocker plans the engine stage of a checkout's Dockerfile from

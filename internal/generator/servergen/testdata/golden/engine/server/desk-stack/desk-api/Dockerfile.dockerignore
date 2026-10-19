@@ -23,7 +23,6 @@
 !third_party/superscalar/Cargo.lock
 !third_party/superscalar/Cargo.toml
 !third_party/superscalar/crates
-!third_party/superscalar/crates/core
 !third_party/superscalar/go
 third_party/superscalar/go/lib
 runtime/engine/go/lib

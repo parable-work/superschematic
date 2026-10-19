@@ -44,7 +44,8 @@ COPY runtime/schema/rust-ir runtime/schema/rust-ir
 COPY runtime/schema/rust runtime/schema/rust
 COPY runtime/versiongraph/rust-engine runtime/versiongraph/rust-engine
 COPY runtime/versiongraph/rust runtime/versiongraph/rust
-COPY third_party/superscalar/crates/core third_party/superscalar/crates/core
+COPY third_party/superscalar/Cargo.toml third_party/superscalar/Cargo.toml
+COPY third_party/superscalar/crates third_party/superscalar/crates
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo build --locked --release --manifest-path runtime/engine/rust/Cargo.toml -p superschematic-engine-ffi \
     && cp runtime/engine/rust/target/release/libsuperschematic_engine_ffi.a /libsuperschematic_engine.a
