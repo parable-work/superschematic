@@ -244,6 +244,34 @@
       "error": "an unknown key on a page: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/OperationSetFile'\n- at '/operations/0/page': additional properties 'pageSize' not allowed"
     },
     {
+      "name": "a sort argument and its page's defaultSort",
+      "registry": "core",
+      "input": "{\"kind\": \"OperationSet\", \"name\": \"Catalog\", \"operations\": [\n\t\t{\"name\": \"listItems\", \"typeRef\": {\"name\": \"Item\", \"isArray\": true}, \"httpMethod\": \"GET\", \"arguments\": [\n\t\t\t{\"name\": \"sort\", \"typeRef\": {\"name\": \"string\"}, \"isQuery\": true, \"sort\": [\"sku\", \"name\"]}], \"page\": {\"defaultLimit\": 2, \"maxLimit\": 5, \"defaultSort\": \"-sku\"}}]}",
+      "accept": true,
+      "canonical": "{\"operationSets\":[{\"name\":\"Catalog\",\"operations\":[{\"arguments\":[{\"isQuery\":true,\"name\":\"sort\",\"sort\":[\"sku\",\"name\"],\"typeRef\":{\"name\":\"string\"}}],\"httpMethod\":\"GET\",\"name\":\"listItems\",\"page\":{\"defaultLimit\":2,\"defaultSort\":\"-sku\",\"maxLimit\":5},\"typeRef\":{\"isArray\":true,\"name\":\"Item\"}}]}]}"
+    },
+    {
+      "name": "a sort of numbers",
+      "registry": "core",
+      "input": "{\"kind\": \"OperationSet\", \"name\": \"Catalog\", \"operations\": [\n\t\t{\"name\": \"listItems\", \"typeRef\": {\"name\": \"Item\", \"isArray\": true}, \"arguments\": [{\"name\": \"sort\", \"typeRef\": {\"name\": \"string\"}, \"isQuery\": true, \"sort\": [1]}]}]}",
+      "accept": false,
+      "error": "a sort of numbers: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/OperationSetFile'\n- at '/operations/0/arguments/0/sort/0': got number, want string"
+    },
+    {
+      "name": "a defaultSort that is no sort",
+      "registry": "core",
+      "input": "{\"kind\": \"OperationSet\", \"name\": \"Catalog\", \"operations\": [\n\t\t{\"name\": \"listItems\", \"typeRef\": {\"name\": \"Item\", \"isArray\": true}, \"page\": {\"defaultSort\": \"--sku\"}}]}",
+      "accept": false,
+      "error": "a defaultSort that is no sort: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/OperationSetFile'\n- at '/operations/0/page/defaultSort': '--sku' does not match pattern '^-?[A-Za-z_][A-Za-z0-9_]*$'"
+    },
+    {
+      "name": "a defaultSort of two fields",
+      "registry": "core",
+      "input": "{\"kind\": \"OperationSet\", \"name\": \"Catalog\", \"operations\": [\n\t\t{\"name\": \"listItems\", \"typeRef\": {\"name\": \"Item\", \"isArray\": true}, \"page\": {\"defaultSort\": \"sku,id\"}}]}",
+      "accept": false,
+      "error": "a defaultSort of two fields: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/OperationSetFile'\n- at '/operations/0/page/defaultSort': 'sku,id' does not match pattern '^-?[A-Za-z_][A-Za-z0-9_]*$'"
+    },
+    {
       "name": "the user model's traits",
       "registry": "core",
       "input": "{\"kind\": \"DB\", \"name\": \"accounts\", \"types\": {\n\t\t\"Account\": {\"name\": \"Account\", \"role\": \"DBTable\", \"user\": {\"login\": \"email\", \"name\": \"displayName\"}},\n\t\t\"Admin\": {\"name\": \"Admin\", \"role\": \"DBTable\", \"user\": {\"login\": \"handle\", \"name\": \"\"}},\n\t\t\"Role\": {\"name\": \"Role\", \"role\": \"DBTable\", \"userRole\": {}}}}",
