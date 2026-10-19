@@ -15,6 +15,7 @@ declare module "../src/index" {
       job: { cpu?: string };
       bucket: { versioning?: boolean };
       worker: { memory?: string };
+      runner: { memory?: string };
     };
   }
 }
@@ -377,3 +378,61 @@ export abstract class WorkerOfDatabase {}
   settings: [{ of: ShopFulfilment, worker: "FulfilOrders", memory: "1Gi" }],
 })
 export abstract class LocalWorkerMemory {}
+
+// An engine's runner's element names its database's handle and
+// `runner: true`; it turns the runner on or off and takes the target's
+// runner settings (D58).
+@environment({
+  target: "fake",
+  fake: { project: "acme-staging", region: "us-east1" },
+  settings: [{ of: ShopDb, runner: true, enabled: false, memory: "1Gi" }],
+})
+export abstract class RunnerSettings {}
+
+@environment({
+  target: "local",
+  settings: [{ of: ShopDb, runner: true, enabled: true }],
+})
+export abstract class LocalRunner {}
+
+@environment({
+  target: "fake",
+  // A platform outside the target takes its own settings.
+  settings: [{ of: ShopDb, runner: true, platform: "other.runner", cpu: "2" }],
+})
+export abstract class RunnerElsewhere {}
+
+@environment({
+  target: "fake",
+  // @ts-expect-error an API's handle has no engine's runner
+  settings: [{ of: ShopApi, runner: true }],
+})
+export abstract class RunnerOfApi {}
+
+@environment({
+  target: "fake",
+  // @ts-expect-error runner names the runner with true
+  settings: [{ of: ShopDb, runner: false }],
+})
+export abstract class RunnerFalse {}
+
+@environment({
+  target: "fake",
+  // @ts-expect-error instances are a worker's setting
+  settings: [{ of: ShopDb, runner: true, instances: 2 }],
+})
+export abstract class InstancesOnRunner {}
+
+@environment({
+  target: "fake",
+  // @ts-expect-error a runner reads no env
+  settings: [{ of: ShopDb, runner: true, env: { LOG_LEVEL: "warn" } }],
+})
+export abstract class EnvOnRunner {}
+
+@environment({
+  target: "local",
+  // @ts-expect-error a local runner takes no settings
+  settings: [{ of: ShopDb, runner: true, memory: "1Gi" }],
+})
+export abstract class LocalRunnerMemory {}

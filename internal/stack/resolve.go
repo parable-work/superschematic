@@ -194,7 +194,8 @@ type settings struct {
 
 	// instances and concurrency are a worker's, with enabled: what the
 	// environment chain sets, the later over the earlier. workerFrom names
-	// the environment that set each (D53).
+	// the environment that set each (D53). An engine's runner takes enabled
+	// alone (D58).
 	instances, concurrency *int
 	workerFrom             map[string]string
 }
@@ -650,6 +651,8 @@ func (r *resolver) resolveDeployableRef(where string, ref ir.DeployableRef) (*de
 	case ref.Service != nil && ref.Deployable != "":
 		r.fail(CodeInvalidStack, "%s names both service %s and deployable %s", where, ref.Service.Name, ref.Deployable)
 		return nil, false
+	case ref.Runner:
+		return r.resolveRunnerRef(where, ref)
 	case ref.Worker != "":
 		return r.resolveWorkerRef(where, ref)
 	case ref.Job != "" && ref.Service == nil:
@@ -737,7 +740,7 @@ func (r *resolver) applySettings() {
 				s.env[key] = value
 				s.envFrom[key] = env.Name
 			}
-			if r.applyWorkerSettings(where, env.Name, d, entry) {
+			if r.applyWorkerSettings(where, env.Name, d, entry) || r.applyRunnerSettings(where, d, entry) {
 				continue
 			}
 			if entry.Schedule == "" && entry.TimeZone == "" && entry.Enabled == nil {

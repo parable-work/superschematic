@@ -96,6 +96,54 @@ func (r *resolver) defaultRunners() {
 	}
 }
 
+// resolveRunnerRef finds the engine's runner a settings `of` names beside
+// its database's handle (`{of: ShopDb, runner: true}`).
+func (r *resolver) resolveRunnerRef(where string, ref ir.DeployableRef) (*deployable, bool) {
+	switch {
+	case ref.Service == nil:
+		r.fail(CodeInvalidStack, "%s names a runner but no DB service; an engine's runner is named beside its database's handle", where)
+		return nil, false
+	case ref.Job != "" || ref.Worker != "":
+		r.fail(CodeInvalidStack, "%s names the runner and a job or a worker; an element names one", where)
+		return nil, false
+	}
+	if !r.checkRef(where, *ref.Service, ir.SchemaKindDB) {
+		return nil, false
+	}
+	db := ref.Service.Name
+	if !r.members[db] {
+		r.fail(CodeUnknownDeployable, "%s names service %s, which is not in stack %s", where, db, r.stack.Name)
+		return nil, false
+	}
+	if d, ok := r.deployables[ir.RunnerDeployableName(db)]; ok && d.res.Kind == ir.DeployableRunner {
+		return d, true
+	}
+	why := "no API of the stack connects to it, so nothing opens its engine"
+	if !r.services[db].Engine {
+		why = "none of its types composes a behavior, so it is no engine database"
+	}
+	r.fail(CodeUnknownDeployable, "%s names the engine's runner of %s, which has none: %s", where, db, why)
+	return nil, false
+}
+
+// applyRunnerSettings merges a runner's settings of one element: enabled
+// alone, which turns it on or off. It reports whether d is a runner, whose
+// element it was; a schedule or a time zone on one is refused, and
+// applyWorkerSettings refuses instances and concurrency.
+func (r *resolver) applyRunnerSettings(where string, d *deployable, entry *ir.DeployableSettings) bool {
+	if d.res.Kind != ir.DeployableRunner {
+		return false
+	}
+	if entry.Schedule != "" || entry.TimeZone != "" {
+		r.fail(CodeInvalidSettings, "%s sets a schedule or a time zone on runner %s, which runs until it is stopped; only a job takes them", where, d.res.Name)
+	}
+	if entry.Enabled != nil {
+		enabled := *entry.Enabled
+		d.settings.enabled = &enabled
+	}
+	return true
+}
+
 // connectsQuietly is databaseOf without its failure, which the server of
 // the API reports: the DB service an API connects to.
 func (r *resolver) connectsQuietly(svc *Service) (string, bool) {
@@ -142,9 +190,11 @@ func (r *resolver) placeRunner(d *deployable) {
 
 // runRunners decides what each runner runs in the environment: one
 // instance, on a database the environment runs on Postgres, where the
-// runner's lock lets one process run at a time. A runner of a database on
-// another dialect is refused: SQLite is a file one process writes, whose
-// engine its server runs in-process.
+// runner's lock lets one process run at a time, or none when its settings
+// turn it off, which leaves the engine's reactions, schedules, Timers'
+// deadlines and the event log's retention waiting until it is on again.
+// A runner of a database on another dialect is refused, on or off: SQLite
+// is a file one process writes, whose engine its server runs in-process.
 func (r *resolver) runRunners() {
 	for _, name := range sortedKeys(r.deployables) {
 		d := r.deployables[name]
@@ -153,6 +203,9 @@ func (r *resolver) runRunners() {
 		}
 		run := d.res.Runner
 		run.Instances = 1
+		if s := d.settings; s.enabled != nil && !*s.enabled {
+			run.Instances = 0
+		}
 		if host := r.deployables[r.byService[run.Database]]; host != nil && host.res.Dialect != "" && host.res.Dialect != registry.SQLDialectPostgres {
 			r.fail(CodeUnrealizable, "runner %s runs the engine of %s, which environment %s places on %s, a %s database; a runner of its own runs on Postgres, under the runner's lock (D58)",
 				name, run.Database, r.envName(), host.res.Name, host.res.Dialect)

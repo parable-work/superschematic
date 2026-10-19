@@ -123,8 +123,9 @@ func (k EdgeKind) Valid() bool {
 // DeployableRef names a deployable: by a service handle, which means the
 // deployable that hosts or serves that service, or by the name of a
 // declared deployable's class. Exactly one is set. With Job beside an API
-// service's handle, it names that job of the API (D52), and with Worker
-// that worker (D53).
+// service's handle, it names that job of the API (D52), with Worker that
+// worker (D53), and with Runner beside a DB service's handle the engine's
+// runner of that database (D58).
 type DeployableRef struct {
 	// Service is a handle to a service the deployable hosts or serves.
 	Service *ServiceRef `json:"service,omitempty" yaml:"service,omitempty"`
@@ -139,6 +140,11 @@ type DeployableRef struct {
 	// Worker names a worker of the API service Service names: the name of
 	// its `@worker` class (`{of: ShopOrders, worker: "FulfilOrders"}`).
 	Worker string `json:"worker,omitempty" yaml:"worker,omitempty"`
+
+	// Runner names the engine's runner of the DB service Service names, an
+	// engine database (`{of: ShopDb, runner: true}`): the deployable
+	// RunnerDeployableName names.
+	Runner bool `json:"runner,omitempty" yaml:"runner,omitempty"`
 }
 
 // String renders the reference the way resolution errors quote it.
@@ -149,6 +155,9 @@ func (r DeployableRef) String() string {
 		}
 		if r.Worker != "" {
 			return r.Service.Name + " worker " + r.Worker
+		}
+		if r.Runner {
+			return r.Service.Name + " runner"
 		}
 		return r.Service.Name
 	}
@@ -282,7 +291,11 @@ type DeployableSettings struct {
 	// except in a parameterized environment, whose members run none unless
 	// their settings turn it on. A job whose schedule is off runs only on
 	// demand. A worker's turns it on or off: one that is off runs no
-	// instance, and its queue's messages wait (D53).
+	// instance, and its queue's messages wait (D53). An engine's runner's
+	// turns it on or off too: one that is off runs no instance, so no
+	// reaction, schedule, Timers deadline or retention pass runs until it is
+	// on again, when each reaction reads on from its cursor, a schedule
+	// that came due runs once and every overdue deadline fires (D58).
 	Enabled *bool `json:"enabled,omitempty" yaml:"enabled,omitempty"`
 
 	// Instances is how many instances of a worker the environment runs,

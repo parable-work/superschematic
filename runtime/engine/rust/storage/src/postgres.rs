@@ -2,9 +2,22 @@
 //! 0.7, the client the version graph's Rust engine uses (D58).
 //!
 //! The engine's tables live in a schema of their own (`engine` unless
-//! configured), created when the storage opens, and every connection
-//! searches that schema alone (`search_path`), so a behavior's unqualified
-//! name reaches nothing else in the database. Connections come from a
+//! configured), created when the storage opens unless it exists, so a user
+//! without CREATE on the database opens a schema an administrator made,
+//! and every connection searches that schema alone (`search_path`), so a
+//! behavior's unqualified name reaches nothing else in the database.
+//!
+//! The storage acts as its schema's owner. When another role owns the
+//! schema, one the session's user is a member of, every connection acts
+//! as that role (`SET ROLE`, a startup option after the first), so what
+//! the engine creates in it, a table, an index or a text search
+//! configuration, is the owner's whichever process creates it, and every
+//! process that opens it as a member may change it later: a migration
+//! the engine runs at open, a behavior's at a publish (D58). A deploy's
+//! migration job makes the schema such a role's, and grants the role to
+//! every deployable that opens the engine, each as its own user.
+//!
+//! Connections come from a
 //! small pool (`pool_max`, 4 by default), each preparing a statement once
 //! per text: its `?` placeholders numbered `$1..$n`
 //! ([`crate::postgres_placeholders`]), then reused.
@@ -160,7 +173,15 @@ impl Db {
         };
         config.options(&options_text);
         let mut first = PgConn::connect(&config, deadline)?;
-        create_schema(&mut first.client, &schema)?;
+        if let Some(owner) = open_schema(&mut first.client, &schema)? {
+            // The first connection takes the owner's role now; every
+            // later one, the pool's and the lease's, as it starts.
+            act_as(&mut first.client, &schema, &owner)?;
+            config.options(&format!(
+                "{options_text} -c role={}",
+                startup_option_value(&owner)
+            ));
+        }
         let schemas = first
             .client
             .query("SELECT nspname FROM pg_catalog.pg_namespace", &[])
@@ -228,6 +249,42 @@ fn check_schema(schema: &str) -> Result<()> {
     Ok(())
 }
 
+// open_schema creates the engine's schema unless it exists, and returns
+// the role the storage acts as in it: its owner, when that is another
+// role the session's user is a member of, else none, the user itself.
+// Postgres checks CREATE on the database before it reads IF NOT EXISTS,
+// so a schema that exists is looked up first, and a user without that
+// privilege opens a schema an administrator made for it.
+fn open_schema(client: &mut Client, schema: &str) -> Result<Option<String>> {
+    let owner = |client: &mut Client| -> Result<Option<(String, bool, bool)>> {
+        let row = client
+            .query_opt(
+                "SELECT r.rolname::text, r.rolname = current_user, pg_catalog.pg_has_role(n.nspowner, 'MEMBER')
+                 FROM pg_catalog.pg_namespace AS n
+                 JOIN pg_catalog.pg_roles AS r ON r.oid = n.nspowner
+                 WHERE n.nspname = $1",
+                &[&schema],
+            )
+            .map_err(pg_error)?;
+        Ok(row.map(|row| (row.get(0), row.get(1), row.get(2))))
+    };
+    let found = match owner(client)? {
+        Some(found) => found,
+        None => {
+            create_schema(client, schema)?;
+            owner(client)?.ok_or_else(|| Error::Usage {
+                message: format!(
+                    "the engine's Postgres schema {schema} is missing just after it was created"
+                ),
+            })?
+        }
+    };
+    Ok(match found {
+        (role, false, true) => Some(role),
+        _ => None,
+    })
+}
+
 // create_schema creates the engine's schema unless it exists. Two
 // processes that create it at once can collide on the catalog's unique
 // index, which leaves it created.
@@ -239,6 +296,36 @@ fn create_schema(client: &mut Client, schema: &str) -> Result<()> {
             _ => Err(pg_error(error)),
         },
     }
+}
+
+// act_as makes the connection act as owner, the schema's, a role its user
+// is a member of. One whose membership does not let it SET ROLE, since
+// Postgres 16 a grant WITH SET FALSE, is refused, saying so.
+fn act_as(client: &mut Client, schema: &str, owner: &str) -> Result<()> {
+    client
+        .batch_execute(&format!("SET ROLE {}", quote_identifier(owner)))
+        .map_err(|error| match pg_error(error) {
+            Error::Database { code, message } => Error::Database {
+                code,
+                message: format!(
+                    "the engine acts as the owner of its schema {schema}, {owner}, and cannot: {message}; grant {owner} to the engine's user WITH SET TRUE"
+                ),
+            },
+            other => other,
+        })
+}
+
+// startup_option_value is value as a startup option's `-c name=value`
+// takes it: a backslash before each space and backslash.
+fn startup_option_value(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for c in value.chars() {
+        if c == ' ' || c == '\\' {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out
 }
 
 struct PostgresBackend {

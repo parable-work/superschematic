@@ -603,7 +603,7 @@ line that holds it.
   ```ts
   declare module "@superschematic/stack" {
     interface Targets {
-      gcp: { values: GcpValues; server: CloudRunSettings; database: CloudSqlSettings; job: CloudRunJobSettings; worker: WorkerPoolSettings };
+      gcp: { values: GcpValues; server: CloudRunSettings; database: CloudSqlSettings; job: CloudRunJobSettings; worker: WorkerPoolSettings; runner: WorkerPoolSettings };
     }
   }
   ```
@@ -624,6 +624,13 @@ line that holds it.
     `concurrency` and `enabled`, and an `env` typed from the handle's
     config type (D53);
   - a DB handle takes the target's `database` settings and no `env`;
+  - a DB handle beside `runner: true` names the engine's runner of the
+    database, which must be an engine database an API connects to, and
+    takes the target's `runner` settings and `enabled`, and no `env`
+    (D58). A runner that is off runs no instance: no reaction, schedule,
+    Timers deadline or event-log retention runs until it is on again,
+    when each reaction reads on from its cursor, a schedule that came due
+    runs once and every overdue deadline fires;
   - a Bucket handle takes the target's `bucket` settings and no `env`
     (D54);
   - an `@server` or `@database` class takes either kind's settings and an
@@ -1413,7 +1420,7 @@ Bootstrap reads the GitHub repository from the git remote.
 | schedule | for a job whose environment runs a schedule, a Cloud Scheduler job named as the job is, in the environment's region, on the job's cron in its time zone, which POSTs to the Cloud Run Admin API's `jobs/<job>:run` with an OAuth token for the job's own account; that account holds `roles/run.invoker` on that job alone, which grants it `run.jobs.run`. A job whose schedule is off has neither, and runs only on demand |
 | bucket | a Cloud Storage bucket (`gcp.storage`, D54) named `<project>-<stack>-<bucket>`, since a bucket's name is global, in the environment's region, with uniform bucket-level access, so IAM alone admits a reader, and public access prevention enforced; versioned when the settings say so (section 7.5). Only a member of a parameterized environment sets `forceDestroy`: its bucket is its own, which its destroy empties, where any other bucket keeps its objects and a destroy fails on it |
 | worker | a Cloud Run worker pool (`gcp.cloudrunworker`) named after the deployable, for a worker in Go, TypeScript or Rust (D65), with its own service account, which holds the Cloud Trace agent role, and the config, secrets, Cloud SQL volume and VPC egress a server of its API takes; no port, no URL and no IAM of its own, since nothing calls it; manual scaling to the worker's instances, zero when the environment turns it off, so the pool and its pinned image stay; `WORKER_CONCURRENCY` set to its concurrency; `cpu`, one or more, and `memory` (D53). A worker whose grace is ten seconds or more is refused, since Cloud Run kills an instance ten seconds after SIGTERM |
-| runner | a Cloud Run worker pool (`gcp.cloudrunrunner`) named after the deployable, an engine database's runner (D58), in its API's language, with its own service account and its database's Cloud SQL connection as its one config; one instance under manual scaling, which runs the engine's runner while it holds the runner's lock, since a Cloud Run service's instance has CPU only while it serves. Its database user is its own, so the migration job's privileges on the engine's schema, `engine`, are not built yet (D58) |
+| runner | a Cloud Run worker pool (`gcp.cloudrunrunner`) named after the deployable, an engine database's runner (D58), in its API's language, with its own service account and its database's Cloud SQL connection as its one config; one instance under manual scaling, which runs the engine's runner while it holds the runner's lock, since a Cloud Run service's instance has CPU only while it serves. Its database user is its own, a member of the role that owns the engine's schema, as each server's, job's and worker's on the database is (section 8.4, D58). A settings element that turns it off (`{ of: ShopDb, runner: true, enabled: false }`) leaves the pool no instance |
 | sql edge | `roles/cloudsql.client` and `roles/cloudsql.instanceUser` for the server's, the job's or the worker's account, held to the edge's instance by an IAM condition; an IAM database user, which the migration job gives read and write privileges; the Cloud SQL connection, which the connector derives (instance connection name, database, IAM user) and the service, the job or the worker pool mounts at `/cloudsql`. The same for a Rust server, job or worker, which dials the mount's socket as the IAM user (section 7.4, D57, D65) |
 | http edge | `roles/run.invoker` on the callee for the caller's account; the callee's `run.app` URL in the caller's config, with a Google ID token for the callee's custom audience, its full resource name `//run.googleapis.com/projects/<project>/locations/<region>/services/<service>`, as the service credential, since the service's own callers field cannot reference its URL; every service lists its resource name in `customAudiences`. The callee's callers field gets Google's issuer and keys, and the caller's service account by its email (section 9.2): a job's, as a caller that serves its API |
 | bucket edge | `roles/storage.objectUser` on the bucket alone for the server's, the job's or the worker's account, which reads, writes, lists and deletes its objects and changes nothing of the bucket, and `roles/iam.serviceAccountTokenCreator` for that account on itself, which IAM's `signBlob` asks of an account that signs a URL as itself; the bucket's name, which the connector derives, with no credential, since the client takes the workload's own from the metadata server. A Rust server's, job's or worker's bucket edge is refused: its runtime has no `Bucket`, and buckets from a Rust server are not built (D57) |
@@ -2042,6 +2049,32 @@ changed even when its plan has no steps, before the new server rolls out
 and before a removed server's user goes. Since Postgres drops no role that
 holds privileges, an IAM database user's node abandons the user when it
 goes.
+
+On an engine database (D58) every server, job, worker and the runner
+that connects opens the engine, each as its own IAM database user, and
+the first to open it runs the engine's migrations, which create its
+tables in the schema `engine`; a later engine release, or a publish that
+adds a behavior's storage, changes them from whichever opens it. So the
+job document's privileges gain `engine`, and after the read and write
+grants the job readies the schema for them all. It creates a role of the
+database's own, `<database>_engine` (a hash in its name past Postgres's
+63 bytes), which cannot log in, as `cloudsqlsuperuser`, which may create
+roles where the migrator's IAM user, which inherits no attribute, may
+not; makes the migrator a member that may act as it; creates `engine`
+owned by the role; and grants the role to each connecting deployable's
+IAM database user, taking it back from one that no longer connects, as
+it does the table grants. The engine acts as its schema's owner: when
+another role owns it, one the session's user is a member of, every
+connection takes that role (`SET ROLE`), so every table, index and text
+search configuration any of them creates is the role's, and each may
+change it later. It looks the schema up before it creates one, since
+Postgres checks CREATE on the database first and the IAM users hold none.
+The job also creates the `unaccent` extension the engine's Search needs
+on Postgres in `superschematic_extensions`, which only a
+`cloudsqlsuperuser` member may on Cloud SQL, and gives the role USAGE on
+it; a database that refuses it is reported and the job goes on. The read
+and write grants leave both schemas out. The local target needs none of
+this: every process connects as the container's one superuser.
 
 The runner's image is built once per release, with Cloud Build, from a
 generated Dockerfile that installs the runner with `go install` from its
