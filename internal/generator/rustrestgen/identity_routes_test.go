@@ -55,7 +55,7 @@ func TestWriteRustAPIGoldenUserRoutes(t *testing.T) {
 		},
 		"src/interfaces.rs": {"pub authenticator: Arc<IdentityAuthenticator>,"},
 		"src/router.rs": {
-			".rate_limit(10)\n        .apply(identity_handler(&identity_service, identity::OP_LOGIN));\n    router = router.route(\"/api/auth/login\", route);",
+			".rate_limiter(limits.of(&crate::operations::ACCOUNT_LOGIN))\n        .apply(identity_handler(&identity_service, identity::OP_LOGIN));\n    router = router.route(\"/api/auth/login\", route);",
 			`router = router.route("/api/auth/admin/users/{id}/roles/{roleId}", route);`,
 			".layer(identity_service.cors())",
 		},

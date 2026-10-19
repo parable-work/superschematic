@@ -17,7 +17,9 @@
 //!    a request without a caller (401 `service_unauthorized`) or with one
 //!    its `from` does not list (403 `service_forbidden`); `@allowService`
 //!    admits a listed caller and skips step 4. The caller reaches the
-//!    handler as a [`ServiceCaller`] request extension.
+//!    handler as a [`ServiceCaller`] request extension. An in-process call
+//!    meets the same rule through `OperationInfo::admit_service` (D37,
+//!    amended).
 //! 4. The permission check of a route that needs an end user (`@auth`,
 //!    `@requirePermission`, `@requireOwnership`, an `Authenticated` set):
 //!    401 `unauthorized` without a caller, 403 `forbidden` when the
@@ -516,6 +518,61 @@ mod tests {
         );
         assert_eq!(retry_after.as_deref(), Some("30"));
         assert_eq!(log.lock().unwrap().len(), 2);
+    }
+
+    // Two routes that take one operation's limiter from one registry count a
+    // client against one budget (D44, amended); a route from another
+    // registry has its own, and an operation without a rate limit none.
+    #[tokio::test]
+    async fn routes_built_from_one_registry_share_a_budget() {
+        const LIST: crate::OperationInfo = crate::OperationInfo {
+            namespace: "orders",
+            name: "listOrders",
+            method: "POST",
+            path: "/op",
+            requires_auth: false,
+            permissions: &[],
+            require_ownership: false,
+            manual: false,
+            rate_limit: Some(2),
+            service: None,
+        };
+        let log = Log::default();
+        let limits = crate::RateLimits::new();
+        let routed = |limits: &crate::RateLimits, operation| {
+            app(
+                RouteControls::new().rate_limiter(limits.of(operation)),
+                &log,
+            )
+        };
+        let first = routed(&limits, &LIST);
+        let second = routed(&limits.clone(), &LIST);
+        assert_eq!(send(&first, None, "").await.0, StatusCode::OK);
+        assert_eq!(send(&second, None, "").await.0, StatusCode::OK);
+        let (status, retry_after, _) = send(&first, None, "").await;
+        assert_eq!(
+            (status, retry_after.as_deref()),
+            (StatusCode::TOO_MANY_REQUESTS, Some("30"))
+        );
+        assert_eq!(
+            send(&second, None, "").await.0,
+            StatusCode::TOO_MANY_REQUESTS
+        );
+
+        let apart = routed(&crate::RateLimits::new(), &LIST);
+        assert_eq!(send(&apart, None, "").await.0, StatusCode::OK);
+        let open = crate::OperationInfo {
+            rate_limit: None,
+            ..LIST
+        };
+        let unlimited = routed(&limits, &open);
+        for _ in 0..5 {
+            assert_eq!(send(&unlimited, None, "").await.0, StatusCode::OK);
+        }
+        // None leaves a route's own limiter in place.
+        let own = app(RouteControls::new().rate_limit(1).rate_limiter(None), &log);
+        assert_eq!(send(&own, None, "").await.0, StatusCode::OK);
+        assert_eq!(send(&own, None, "").await.0, StatusCode::TOO_MANY_REQUESTS);
     }
 
     #[tokio::test]
