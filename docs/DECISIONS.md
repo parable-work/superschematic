@@ -6783,7 +6783,7 @@ schema imports the type from, and the crate reads every dependency.
 | The OpenAPI document gives each value that refers to an item the vendor key `x-superschematic-reference`, holding the resolved reference: `{"target": "#/components/schemas/ProductView", "options": "<operationId>", "value": "id", "label": "name", "lookup": "ids"}`. `value` and `label` are the target's JSON keys; `label` and `lookup` are absent when there is none. The key sits on the property schema of a field, an input field or a body argument, and on the parameter object of a path or query argument. On a list, the key sits on the list, and each item refers. A tool's parameters give the same key on the property of the argument or field; there `target` is the type's name and `options` is the tool name of the options operation. Derived references are written like written ones. Both keys are constants that an OpenAPI hook renames, as it renames `x-superschematic-docs`; in the tools a `ToolHook` renames the key through `ToolKeys.Reference`, as it renames the scalar key. | A list of references at the operation, which a client would have to match back to paths. The members as written, which would leave every client to derive the rest by D61's rule. A JSON Schema `$ref` to the target, which tools would resolve as the value's own schema. |
 | A dependency's type that a reference names is found through the import that names it. When no import names it, it is found by name in each dependency in turn, as before. The loader and every generator, which has every dependency, therefore resolve it alike (D66). | Passing generators only the imported dependencies, which every caller of `ResolveReference` would have to compute. |
 
-Status: the core and the documents' key are built; acme's change is not.
+Status: built, in the core, the documents and acme.
 `ir.FieldReference` and `ir.DerivedReferences` derive a relation key's
 reference, `ResolveReference` finds a dependency's target through its
 import first, and `ResolvedReference.TargetService` names the dependency.
@@ -6826,23 +6826,35 @@ text into words nor escapes `%` and `_`.
 | `<Type>FilterConditions(filter, args)`, a function of the ORM's package, gives a filter's conditions for a query of the caller's own. Each column is qualified by its table, and each value is appended to `args`, its placeholder numbered after those already there. `FindMany`'s `WHERE` is the same conditions joined by `AND`. acme's paged lists take their filters' conditions from it and add their keyset comparison (D60) themselves. | A method on the filter, whose name a field could also take. A keyset `After` on `FindOptions`, which is a page reader in the ORM and is left for the sort argument. |
 | The loader refuses a field whose column would be `search_text` on a table with search fields: `Review.searchText: its column is search_text, the column @searchField generates`. | |
 
-Status: the documents' key is built; the ORM's search and the loader's
-refusal are not. The OpenAPI document gives the search argument's
+Status: built. The OpenAPI document gives the search argument's
 parameter `x-superschematic-search: true` (`apigen.OpenAPISearchKey`), and
 the tool documents its property, under `ToolKeys.Search`. The goldens of
 `fixture-refs-api` (apigen's, toolsutil's, sdkgen's and rustsdkgen's) hold
 it on `listItems(q)`, and sdkgen's
-`TestToolHookRenamesTheReferenceAndSearchKeys` renames it. The ORM's tests
-are these:
+`TestToolHookRenamesTheReferenceAndSearchKeys` renames it. ormgen writes
+`SearchText` on the filter of each table with search fields, its
+conditions last among the filter's, the column qualified as the ORM names
+the table, quoted only where SQL needs it (`review.search_text`). Every
+filter's conditions are an unexported `conditions` method, which
+`buildWhereClause` joins as before and `<Type>FilterConditions` returns.
+`search.go` comes from `templates/search.tmpl`, and a build of a schema
+without search fields removes one an earlier build wrote. The loader's
+check is `verify.checkSearchColumns`; verify names the column with a
+constant of its own, which its test holds to `sqlgen.SearchTextColumn`,
+since sqlgen's tests load schemas through the loader and an import would
+be a cycle. The ORM's tests are these:
 
-- ormgen's fixture-db golden. `Tenant.name` is a search field, so `TenantFilter.SearchText`, `TenantFilterConditions` and `search.go` appear in it.
-- A test of the generated module against Postgres: each word, in any case, in either field; a `%` and a `_` that match themselves; a blank text; and conditions numbered after a caller's values.
-- The generated helpers held to `search_parity.json`.
-- The loader's refusal.
+- ormgen's fixture-db golden. `Tenant.name` is a search field, so `TenantFilter.SearchText`, `TenantFilterConditions` and `search.go` appear in it. Every other ORM golden changes by `<Type>FilterConditions` and the `conditions` method alone.
+- `TestGenerateSearchTextFilter`: the field and the condition on Tenant, neither on TenantUser, and no `search.go` for a schema without search fields.
+- `TestGeneratedSearchFilterOnPostgres`, the generated module against Postgres: each word, in any case and any order; a `%` and a `_` that match themselves; a blank text, an empty one and nil; a ninth word that does not count; another field's condition beside the search; and conditions numbered after a caller's values.
+- `TestGeneratedSearchHelpersMatchTheParity`: the generated helpers held to `search_parity.json`'s `terms` and `patterns`.
+- verify's `search_column_test.go`: the refusal, for a field, a `@jsonField` and a search field itself, and on the table that extends a base class; none for a relation or on a table without search fields.
 
 acme's `ListReviews` drops its search SQL: its product, its rating and its
-words are a `ReviewFilter`, and `TestStackDevRunsTheShop` searches as
-before.
+words are a `ReviewFilter`, whose conditions `ReviewFilterConditions`
+gives its keyset page's key query beside the cursor's comparison, and it
+reads the page's reviews through `FindMany`, sorted by the key.
+`TestStackDevRunsTheShop` searches as before.
 
 The rule is reversible until the first release.
 
@@ -6868,8 +6880,12 @@ in the console's URL, so the wire stays D60's `{items, next}`.
 | A reference whose target is an API dependency's type works as any other does. Its options operation is one of the API's own (D61), and it has an in-process call unless it is a webhook or checks a signature; then the reference is left out, as any is. When the target is a dependency's, the build log names it by its service: `PlaceInput.shelfId refers to fixture-shelves-api.ShelfView, whose options operation Shelves.listShelves has no in-process call: its route checks a provider's signature first (@hmacVerified)`. | Calling the dependency's own listing, which the crate has no call for: cross-service options, which come later. |
 | acme's `superschematic.toml` sets `pages_live = true`. Its app gains a root layout, `#[layout("/")] document`: the HTML document every page renders in. Its head has `topcoat::runtime::script()` when the router set the runtime up (`RuntimeSetup` is in the app context). `app(shop, users, assets)` takes an `Option<AssetConfig>`. With one, the router adds `.assets(config).runtime()` after `.shop_orders(...)`, so the pages' controls see a rerun as a GET. `main` loads `AssetBundle::load()`, which `topcoat asset bundle` writes beside the binary. Without a bundle, `main` says so and serves without the runtime, and the lists are the GET forms they are today. The tests build the app with a hosted catalog that holds only the runtime's script, so the script's tag renders without a bundle. | Requiring the bundle, so every `cargo run` and every test would need the Topcoat CLI. The runtime in the console's layout, which renders no document. |
 
-Status: built in `extensions/topcoat`, every row but the last; acme's
-console running live is designed, nothing built. The tests are these:
+Status: built, every row but the last in `extensions/topcoat` and the
+last in acme's Topcoat app (`examples/acme-shop/topcoat`). Topcoat nests
+a layer without a path, the runtime's, outside the console's
+`PageControls` at the prefix whatever their order, so acme's rerun reaches
+the controls as a GET either way; the app still adds the runtime last, as
+Topcoat's documents ask. The tests are these:
 
 - `TestTheConsolePagesPicksAndSearches` drives `fixture-console-api`:
   - The orders are walked forward and back by their links, and each Previous lands on the page that was left.
@@ -6884,10 +6900,11 @@ console running live is designed, nothing built. The tests are these:
 - `TestAReferenceToAnAPIDependencysType` moves `Supplier` into an API dependency. Selects and labels come through `listSuppliers`, under cargo test too. With the listing behind a signature, the build log names `fixture-console-suppliers-api.Supplier`.
 - `TestADerivedReferenceLabelsRows`: a relation's key with no `RefersTo` (D61, amended) gives the crate the references of the written one.
 - `fixture-console-api`'s golden changes, and `fixture-pages-api`'s by two doc comments; no other golden pages.
-- acme's Topcoat tests, in memory and over SQLite:
-  - Each page is one document with the runtime's script once.
-  - The console's lists render between their shards' markers, and their shards answer a filter, a page and a refused caller.
-  - The console's orders go back a page and change their size.
-  - Without a catalog, the pages render without the script, as they do today.
+- acme's Topcoat tests (`tests/app.rs`), in memory and, where they page or search, over SQLite too:
+  - `every_page_is_one_document_with_the_runtime`: each page, the shop's and the console's, is one document with the runtime's script once, in its head.
+  - `the_consoles_lists_are_live`: the orders render between their shard's markers, and the shard answers a filter, a page, a Previous link from the history in its query, and a refused caller (401); a page the runtime renders again (`x-topcoat-runtime`) answers as its GET.
+  - `the_reviews_shard_is_live`: a product's reviews' shard takes the product as its argument and carries the search across its pages.
+  - `the_console_goes_back_a_page_and_sets_its_size`: 25 orders at 10 a page, walked forward and back by Next and Previous; the sizes 10, 20, 50 and 100 for the orders and the products and 10, 20 and 50 for the reviews; the filter held by the size form and first in the links; and the shard rendering Previous and a new size.
+  - `without_the_runtime_the_pages_have_no_script`: built with no catalog, the pages render without a script, the lists are GET forms, and a rerun is no page's (405).
 
 The rule is reversible until the first release.

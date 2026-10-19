@@ -638,39 +638,7 @@ script in its head when the router set the runtime up, and `app` takes
 the asset bundle and, with one, adds the assets and the runtime after
 `shop_orders`:
 
-```rust
-pub fn app<S: ShopImplementation>(shop: Arc<S>, users: Arc<Service>, assets: Option<AssetConfig>) -> Router {
-    let implementations = implementations(shop, Arc::clone(&users));
-    let authenticator = IdentityPageAuthenticator::of(&implementations);
-    let builder = Router::builder()
-        .discover()
-        .app_context(users)
-        .app_context(console_settings())
-        .shop_orders(implementations, authenticator);
-    match assets {
-        Some(assets) => builder.assets(assets).runtime().build(),
-        None => builder.build(),
-    }
-}
-
-#[layout("/")]
-async fn document(cx: &Cx, slot: Slot<'_>) -> topcoat::Result<impl View> {
-    let live = try_app_context::<RuntimeSetup>(cx).is_some();
-    Ok(view! {
-        <!DOCTYPE html>
-        <html lang="en">
-            <head>
-                <meta charset="utf-8">
-                <title>"Acme shop"</title>
-                if live {
-                    topcoat::runtime::script()
-                }
-            </head>
-            <body>(slot)</body>
-        </html>
-    })
-}
-```
+<Snippet file="topcoat/src/lib.rs" symbol={['app', 'document']} />
 
 `main` loads `AssetBundle::load()`, the bundle that `topcoat asset bundle
 --bin acme-shop-topcoat` writes beside the binary, which holds the
