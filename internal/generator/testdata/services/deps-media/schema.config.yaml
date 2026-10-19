@@ -1,5 +1,5 @@
-# A bucket deps-orders and deps-ts-shop list (D54): its config is all it
-# has, and it generates nothing.
+# A bucket deps-orders, deps-ts-shop and deps-rust-shop list (D54): its
+# config is all it has, and it generates nothing.
 name: deps-media
 kind: Bucket
 outputs: {}

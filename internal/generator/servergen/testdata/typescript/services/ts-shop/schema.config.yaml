@@ -1,7 +1,8 @@
 # A TypeScript API with a database, a callee, a bucket and a setting: it
 # takes ts-db from its one DB-kind dependency, calls ts-pricing, lists the
-# bucket ts-media (D54), holds one setting in its @envVars type and checks
-# the end user on one operation.
+# bucket ts-media (D54), holds one setting in its @envVars type, checks
+# the end user on one operation and leaves one to a handler of its own
+# (@manualRouteRegistration, D51).
 name: ts-shop
 kind: API
 dependencies:

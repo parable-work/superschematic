@@ -115,7 +115,10 @@ async function main(): Promise<void> {
   };
   const tsShopImplementations = await construct('ts-shop', 'implementation', () => tsShopImpl.create(tsShopDeps));
   const tsShopAuthenticate = await construct('ts-shop', 'authenticator', () => tsShopImpl.authenticate(tsShopDeps));
-  app.route('/', tsShopApi.buildRouter(tsShopImplementations, { authenticate: tsShopAuthenticate }));
+  // The handlers of its @manualRouteRegistration operations, which its
+  // router mounts behind each one's auth gate (D51).
+  const tsShopManualRoutes = await construct('ts-shop', 'manual routes', () => tsShopImpl.createManualRoutes(tsShopDeps));
+  app.route('/', tsShopApi.buildRouter(tsShopImplementations, { authenticate: tsShopAuthenticate, manualRoutes: tsShopManualRoutes }));
   app.notFound(notFoundHandler());
   app.onError(errorHandler());
 

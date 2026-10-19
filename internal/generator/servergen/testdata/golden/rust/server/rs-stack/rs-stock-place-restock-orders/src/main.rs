@@ -20,8 +20,11 @@
 //! (section 8.6): schemas-rs-stock-implementation, at rust/rs-stock
 
 use std::process::ExitCode;
+use std::sync::Arc;
 use std::time::Instant;
 
+use superschematic_http_runtime::bucket::Bucket;
+use superschematic_http_runtime::gcs;
 use superschematic_http_runtime::logging::{self, tracing};
 use superschematic_http_runtime::postgres::{self, Pool};
 use superschematic_http_runtime::stackconfig::{self, Database, Service};
@@ -75,11 +78,19 @@ async fn run() -> Result<(), Failure> {
     // One client per API called.
     let rs_pricing_client = new_rs_pricing_client(&rs_stock_config.rs_pricing_service)?;
 
+    // One bucket per Bucket service, which opening does not reach.
+    let rs_media_bucket = open_bucket(
+        "rs-media",
+        "RS_MEDIA_BUCKET",
+        &rs_stock_config.rs_media_bucket,
+    )?;
+
     // rs-stock: its jobs, built from its Deps.
     let rs_stock_deps = rs_stock_api::Deps {
         config: rs_stock_config,
         db: rs_db_pool,
         rs_pricing: rs_pricing_client,
+        rs_media: rs_media_bucket,
         span: logging::api_span("rs-stock"),
     };
     let jobs = rs_stock_impl::create_jobs(rs_stock_deps)
@@ -107,6 +118,22 @@ fn configure<T, E: std::fmt::Display>(api: &str, loaded: Result<T, E>) -> Result
 fn connect(service: &str, field: &str, database: &Database) -> Result<Pool, Failure> {
     postgres::connect(database)
         .map_err(|err| format!("database {service}, from {field}: {err}").into())
+}
+
+/// Opens the bucket of the bucket field named `field`, which the
+/// environment sets as `<field>_NAME`, and as `<field>_ENDPOINT` when an
+/// emulator serves the bucket in GCS's place, such as the local target's
+/// (the HTTP runtime's `gcs`, D54). Opening makes no request; the first
+/// operation does.
+fn open_bucket(
+    service: &str,
+    field: &str,
+    connection: &stackconfig::Bucket,
+) -> Result<Arc<dyn Bucket>, Failure> {
+    match gcs::open_bucket(connection) {
+        Ok(bucket) => Ok(Arc::new(bucket)),
+        Err(err) => Err(format!("bucket {service}, from {field}: {err}").into()),
+    }
 }
 
 /// Builds the client of rs-pricing. The job calls it at `endpoint`, the

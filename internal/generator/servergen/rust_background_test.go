@@ -131,10 +131,10 @@ func TestRustJobAndWorkerRunOnPostgres(t *testing.T) {
 	}
 
 	// The variables the stack derives for rs-stock's job and worker: its
-	// database and the callee it holds a client of, which neither reaches
-	// here, and its setting.
-	env := append([]string{"RS_DB_DATABASE_URL=" + libpqSearchPath(t, databaseURL), "WAREHOUSE=north"},
-		variables(t, "RS_PRICING_SERVICE", ir.ServiceEndpoint{URL: "http://127.0.0.1:9"})...)
+	// database, the callee it holds a client of and its bucket (D54), which
+	// neither reaches here, and its setting.
+	env := append(append([]string{"RS_DB_DATABASE_URL=" + libpqSearchPath(t, databaseURL), "WAREHOUSE=north"},
+		variables(t, "RS_PRICING_SERVICE", ir.ServiceEndpoint{URL: "http://127.0.0.1:9"})...), rustMediaVariables(t)...)
 	cmd := exec.Command(filepath.Join(bin, rustStockJob))
 	cmd.Env = append(os.Environ(), append(slices.Clone(env), "RESTOCK_SKUS=tea,flaky,poison,slow")...)
 	output, err := cmd.CombinedOutput()

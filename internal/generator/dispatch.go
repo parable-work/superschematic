@@ -1215,16 +1215,13 @@ func (r run) rustAPI() (*rustrestgen.APIOutput, *envgen.ConfigOutput, error) {
 // which the API crate depends on by path. A callee whose config the build
 // has must generate that SDK; the database needs nothing generated, since
 // the pool is the runtime's, unless the API declares workers, whose
-// messages are the database's Rust types (rustQueueTypes, D65). A Rust
-// server builds no bucket, so an API that lists one is refused.
+// messages are the database's Rust types (rustQueueTypes, D65); and the
+// HTTP runtime's Bucket per buckets entry (D54), which needs nothing
+// generated either.
 func (r run) rustDeps() (rustrestgen.DepsInfo, error) {
 	var deps rustrestgen.DepsInfo
-	if len(r.Schema.Buckets) > 0 {
-		var buckets []string
-		for _, b := range r.Schema.Buckets {
-			buckets = append(buckets, b.Name)
-		}
-		return deps, fmt.Errorf("generator: the Rust server of %s holds the buckets it lists (%s) in its Deps, and buckets from a Rust server are not built (D57); serve %s in Go or TypeScript, or remove its buckets", r.Config.Name, strings.Join(buckets, ", "), r.Config.Name)
+	for _, b := range r.Schema.Buckets {
+		deps.Buckets = append(deps.Buckets, rustrestgen.DepsBucket{Service: b.Name, Field: rustrestgen.DepsField(b.Name)})
 	}
 	apiDir := APIDir(r.Options.OutputRoot, r.Config.Name)
 	if db, _, ok := r.Schema.Database(); ok {

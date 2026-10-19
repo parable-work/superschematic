@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -20,12 +21,14 @@ import (
 	"github.com/parable-work/superschematic/internal/testpaths"
 )
 
-// rqServices is a Rust API with a queue, in the YAML form (D65): rq-db
-// declares the queue StockLow, whose Rust types hold its descriptor;
-// rq-stock, a Rust API on rq-db, declares the job QueueRestocks and the
-// worker RestockProducts, which handles StockLow two at a time; rq-stack
-// deploys rq-stock on the local target, on the ports given.
-func rqServices(pgPort, apiPort int) map[string]string {
+// rqServices is a Rust API with a queue and a bucket, in the YAML form
+// (D65, D54): rq-db declares the queue StockLow, whose Rust types hold its
+// descriptor; rq-stock, a Rust API on rq-db that lists the bucket
+// rq-media, declares the job QueueRestocks and the worker RestockProducts,
+// which handles StockLow two at a time; rq-stack deploys rq-stock on the
+// local target, on the ports given, its database's, its storage
+// emulator's and its server's.
+func rqServices(pgPort, storagePort, apiPort int) map[string]string {
 	return map[string]string{
 		"rq-db/schema.config.yaml": "name: rq-db\nkind: DB\noutputs:\n  types:\n    go: { enabled: true }\n    rust: { enabled: true }\n",
 		"rq-db/src/db.schema.yaml": `name: rq-db
@@ -48,10 +51,13 @@ types:
     fields:
       - { name: sku, typeRef: { name: string }, required: true }
 `,
+		"rq-media/schema.config.yaml": "name: rq-media\nkind: Bucket\noutputs: {}\n",
 		"rq-stock/schema.config.yaml": `name: rq-stock
 kind: API
 dependencies:
   - { name: rq-db, kind: DB }
+buckets:
+  - { name: rq-media, kind: Bucket }
 outputs:
   types:
     rust: { enabled: true }
@@ -69,6 +75,8 @@ types:
     fields:
       - { name: done, typeRef: { name: number }, required: true }
       - { name: dead, typeRef: { name: number }, required: true }
+      - { name: objects, typeRef: { name: number }, required: true }
+      - { name: download, typeRef: { name: string }, required: true }
 operationSets:
   - name: Restocks
     operations:
@@ -98,24 +106,28 @@ types:
     role: EmbeddedStruct
     environment:
       target: local
-      values: { postgresPort: %d }
+      values: { postgresPort: %d, storagePort: %d }
       settings:
         - of: { service: { name: rq-stock, kind: API } }
           values: { port: %d }
-`, pgPort, apiPort),
+`, pgPort, storagePort, apiPort),
 	}
 }
 
 // rqImplementation implements rq-stock in Rust: getSummary counts the
-// queue's done and dead messages, QueueRestocks enqueues three in one
-// transaction, and RestockProducts fails the one for the product named
-// poison.
+// queue's done and dead messages and the restock sheets in rq-media, and
+// signs a URL to download poison's (D54); QueueRestocks puts a sheet per
+// product in rq-media, then enqueues the three in one transaction; and
+// RestockProducts reads the product's sheet, fails the one for the product
+// named poison, and deletes each other's.
 const rqImplementation = `use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use schemas_rq_stock_api::database_types::{self, StockLow};
 use schemas_rq_stock_api::types;
 use schemas_rq_stock_api::{BoxError, Deps, Handlers, Jobs, RestocksImplementation, Workers};
+use superschematic_http_runtime::bucket::{ListOptions, PutOptions, SignedUrlOptions};
 use superschematic_http_runtime::queue::{enqueue, QueueDefinition};
 use superschematic_http_runtime::{ApiError, RequestContext, Shutdown};
 
@@ -137,7 +149,20 @@ impl RestocksImplementation for Restocks {
             .query("SELECT state::text AS state, count(*)::int AS n FROM stock_low_queue GROUP BY state", &[])
             .await
             .map_err(|err| ApiError::internal(err.to_string()))?;
-        let mut summary = types::Summary { done: 0.0, dead: 0.0 };
+        let sheets = self
+            .deps
+            .rq_media
+            .list(ListOptions::prefix("restocks/"))
+            .await
+            .map_err(|err| ApiError::internal(err.to_string()))?;
+        let download = self
+            .deps
+            .rq_media
+            .signed_url("restocks/poison.txt", SignedUrlOptions::get(Duration::from_secs(300)))
+            .await
+            .map_err(|err| ApiError::internal(err.to_string()))?;
+        let objects = f64::from(u32::try_from(sheets.objects.len()).unwrap_or(u32::MAX));
+        let mut summary = types::Summary { done: 0.0, dead: 0.0, objects, download };
         for row in rows {
             let state: String = row.get("state");
             let n: i32 = row.get("n");
@@ -162,6 +187,14 @@ pub struct RestockJobs {
 #[async_trait]
 impl Jobs for RestockJobs {
     async fn queue_restocks(&self, _shutdown: Shutdown) -> Result<(), BoxError> {
+        for sku in ["tea", "coffee", "poison"] {
+            let stored = self
+                .deps
+                .rq_media
+                .put(&format!("restocks/{sku}.txt"), sku.to_string().into(), PutOptions::content_type("text/plain"))
+                .await?;
+            println!("stored {} of {} bytes", stored.name, stored.size);
+        }
         let queue = QueueDefinition::parse(database_types::STOCK_LOW_QUEUE)?;
         let mut client = self.deps.db.get().await?;
         let tx = client.transaction().await?;
@@ -174,18 +207,28 @@ impl Jobs for RestockJobs {
     }
 }
 
-pub async fn create_workers(_deps: Deps) -> Result<Arc<dyn Workers>, BoxError> {
-    Ok(Arc::new(RestockWorkers))
+pub async fn create_workers(deps: Deps) -> Result<Arc<dyn Workers>, BoxError> {
+    Ok(Arc::new(RestockWorkers { deps }))
 }
 
-pub struct RestockWorkers;
+pub struct RestockWorkers {
+    deps: Deps,
+}
 
 #[async_trait]
 impl Workers for RestockWorkers {
     async fn restock_products(&self, message: StockLow) -> Result<(), BoxError> {
+        let name = format!("restocks/{}.txt", message.sku);
+        let sheet = self.deps.rq_media.get(&name).await?;
+        let content_type = sheet.object.content_type.clone();
+        let text = sheet.bytes().await?;
+        if text != message.sku.as_bytes() || content_type.as_deref() != Some("text/plain") {
+            return Err(format!("{name} holds {:?} as {content_type:?}", String::from_utf8_lossy(&text)).into());
+        }
         if message.sku == "poison" {
             return Err("no such product".into());
         }
+        self.deps.rq_media.delete(&name).await?;
         println!("restocked {}", message.sku);
         Ok(())
     }
@@ -193,16 +236,20 @@ impl Workers for RestockWorkers {
 `
 
 // TestStackDevRunsRustJobsAndWorkers runs stack dev for real, with Docker
-// and cargo, on a Rust API with a job and a worker (D65), as
+// and cargo, on a Rust API with a job, a worker and a bucket (D65, D54), as
 // TestStackDevRunsTypeScriptJobsAndWorkers runs TypeScript's. The build
 // writes the job's and the worker's crates beside the server's, members of
 // the output root's Cargo workspace; stack dev runs Postgres with rq-db
-// migrated, its queue's table included, builds the three crates with cargo
-// and runs the server and the worker, each given the variables of its edges
-// alone, here its database's; stack run, from another command, builds and
-// runs the job against it, which enqueues three messages in one
-// transaction; the worker handles two and fails the third, which is dead at
-// once, as the server's summary reads from the queue.
+// migrated, its queue's table included, and fake-gcs-server with rq-media,
+// builds the three crates with cargo and runs the server and the worker,
+// each given the variables of its edges alone, here its database's and its
+// bucket's; stack run, from another command, builds and runs the job
+// against it, which puts a sheet per product in rq-media through the
+// emulator and enqueues three messages in one transaction; the worker
+// reads each sheet, handles two and deletes their sheets, and fails the
+// third, which is dead at once, as the server's summary reads from the
+// queue and lists from the bucket, and the URL it signs downloads the
+// sheet left from the emulator.
 func TestStackDevRunsRustJobsAndWorkers(t *testing.T) {
 	if testing.Short() {
 		t.Skip("-short: stack dev runs Docker, Postgres and cargo")
@@ -223,16 +270,17 @@ func TestStackDevRunsRustJobsAndWorkers(t *testing.T) {
 
 	repo := testpaths.TempDir(t)
 	servicesRoot := filepath.Join(repo, "schemas", "services")
-	pgPort, apiPort := freeTCPPort(t), freeTCPPort(t)
-	writeFiles(t, servicesRoot, rqServices(pgPort, apiPort))
+	pgPort, storagePort, apiPort := freeTCPPort(t), freeTCPPort(t), freeTCPPort(t)
+	writeFiles(t, servicesRoot, rqServices(pgPort, storagePort, apiPort))
 	writeRustRuntimePaths(t, filepath.Dir(servicesRoot))
 	// Cargo resolves a crate's path dependencies from its directory's
 	// physical path, so the output root is one with no link above it.
 	outputRoot := testpaths.TempDir(t)
 	canonical, err := stack.CanonicalSchemasRoot(filepath.Dir(servicesRoot))
 	require.NoError(t, err)
-	container := local.ContainerName("rq-stack", "Dev", local.Checkout(canonical, "rq-stack", "Dev"))
-	t.Cleanup(func() { _ = exec.Command("docker", "rm", "--force", "--volumes", container).Run() })
+	checkout := local.Checkout(canonical, "rq-stack", "Dev")
+	container, storage := local.ContainerName("rq-stack", "Dev", checkout), local.StorageContainerName("rq-stack", "Dev", checkout)
+	t.Cleanup(func() { _ = exec.Command("docker", "rm", "--force", "--volumes", container, storage).Run() })
 
 	// A first build scaffolds rq-stock's implementation, which the test
 	// replaces; no later build rewrites it.
@@ -277,6 +325,11 @@ func TestStackDevRunsRustJobsAndWorkers(t *testing.T) {
 	} {
 		require.Contains(t, dev.String(), want)
 	}
+	var read struct {
+		Data struct {
+			Download string `json:"download"`
+		} `json:"data"`
+	}
 	summary := func() string {
 		t.Helper()
 		resp, err := http.Get(local.ServerURL(apiPort) + "/api/summary")
@@ -285,9 +338,13 @@ func TestStackDevRunsRustJobsAndWorkers(t *testing.T) {
 		_ = resp.Body.Close()
 		require.NoError(t, err)
 		require.Equal(t, http.StatusOK, resp.StatusCode, "%s\n%s", body, dev)
+		require.NoError(t, json.Unmarshal(body, &read), string(body))
 		return string(body)
 	}
-	require.Contains(t, summary(), `"done":0.0,"dead":0.0`)
+	require.Contains(t, summary(), `"done":0.0,"dead":0.0,"objects":0.0`)
+	emulator := local.StorageURL(storagePort)
+	require.True(t, strings.HasPrefix(read.Data.Download, emulator+"/rq-media/restocks/poison.txt?X-Goog-Algorithm=GOOG4-RSA-SHA256&"), read.Data.Download)
+	require.Contains(t, dev.String(), "bucket   rq-media")
 
 	// stack run, as from another terminal.
 	run := new(bytes.Buffer)
@@ -296,12 +353,12 @@ func TestStackDevRunsRustJobsAndWorkers(t *testing.T) {
 	root.SetErr(run)
 	root.SetArgs([]string{"stack", "run", "Dev", "rq-stock-queue-restocks", "--stack", filepath.Join(servicesRoot, "rq-stack"), "--out", outputRoot})
 	require.NoError(t, root.ExecuteContext(ctx), "%s\n%s", run, dev)
-	for _, want := range []string{"build rq-stock-queue-restocks: cargo build --release --locked", "queued restocks", `"msg":"job started"`, `"msg":"job done"`, `"job":"rq-stock-queue-restocks"`} {
+	for _, want := range []string{"build rq-stock-queue-restocks: cargo build --release --locked", "stored restocks/tea.txt of 3 bytes", "queued restocks", `"msg":"job started"`, `"msg":"job done"`, `"job":"rq-stock-queue-restocks"`} {
 		require.Contains(t, run.String(), want)
 	}
 
 	deadline = time.Now().Add(time.Minute)
-	for !strings.Contains(summary(), `"done":2.0,"dead":1.0`) {
+	for !strings.Contains(summary(), `"done":2.0,"dead":1.0,"objects":1.0`) {
 		if time.Now().After(deadline) {
 			t.Fatalf("the worker did not handle the restocks: %s\n%s", summary(), dev)
 		}
@@ -315,6 +372,15 @@ func TestStackDevRunsRustJobsAndWorkers(t *testing.T) {
 	} {
 		require.Contains(t, dev.String(), want)
 	}
+	// The sheet the worker left, poison's, downloads from the emulator
+	// through the URL the server signed.
+	sheet, err := http.Get(read.Data.Download)
+	require.NoError(t, err)
+	body, err := io.ReadAll(sheet.Body)
+	_ = sheet.Body.Close()
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, sheet.StatusCode, string(body))
+	require.Equal(t, "poison", string(body))
 
 	cancel()
 	select {
@@ -325,5 +391,6 @@ func TestStackDevRunsRustJobsAndWorkers(t *testing.T) {
 	}
 	require.Contains(t, dev.String(), `"msg":"worker stopped"`)
 	require.Contains(t, dev.String(), "removed container "+container)
+	require.Contains(t, dev.String(), "removed container "+storage)
 	t.Log(dev.String())
 }

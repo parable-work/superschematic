@@ -23,9 +23,8 @@ import (
 // server's or a job's image is built again only when its context changed:
 // the deploy writes the context's archive, and when its digest is the one
 // the manifest records for the image the deployable runs, it keeps that
-// image. One whose language gets no Dockerfile yet, or whose Dockerfile the
-// build has not written, keeps the manifest's image or takes one from
-// --image.
+// image. One whose Dockerfile the build has not written keeps the
+// manifest's image or takes one from --image.
 
 // Sources says where a stack's build wrote each server's and job's
 // Dockerfile, and the directory every image builds from.

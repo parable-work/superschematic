@@ -49,8 +49,27 @@ type Config struct {
 	// PayloadDecryptor decrypts encrypted endpoint request bodies.
 	PayloadDecryptor runtimemiddleware.PayloadDecryptor
 
+	// ManualRoutes holds the handlers of the @manualRouteRegistration
+	// operations, which RegisterRoutes mounts behind the steps their routes
+	// would have as any other. Optional: nil mounts none, and leaves each
+	// route to you to mount.
+	ManualRoutes *ManualRoutes
+
 	// Implementations contains all namespace implementation instances
 	Implementations Implementations
+}
+
+// ManualRoutes are the handlers of the @manualRouteRegistration operations
+// of fixture-api, one per operation (D51). RegisterRoutes mounts each at its
+// operation's route, behind the steps every route of its kind runs: the
+// request log, the auth middleware of a route that needs a caller, then
+// the route's own middlewares, its rate limit, body limit, service step,
+// permission check and timeout among them. A nil handler answers 501 Not
+// Implemented. A stack's server builds them with the implementation's
+// NewManualRoutes (ManualRoutesConstructor).
+type ManualRoutes struct {
+	// TenantCustomHandler answers POST /api/tenant/custom-handler.
+	TenantCustomHandler gohttp.Handler
 }
 
 // Validate checks that all required dependencies are provided.
@@ -131,6 +150,7 @@ func RegisterRoutes(r chi.Router, cfg Config) error {
 			protectedAPIRoutes(cfg),
 			cfg.AuthMiddleware,
 		)
+		registerManualRoutes(r, cfg)
 	})
 
 	return nil
@@ -200,6 +220,38 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 	}
 }
 
+// registerManualRoutes mounts the routes of the @manualRouteRegistration
+// operations with the handlers cfg.ManualRoutes holds (D51), each behind
+// the middlewares its route would have as any other, one that needs a
+// caller in a protected group of its own, behind cfg.AuthMiddleware.
+// Without cfg.ManualRoutes it mounts none.
+func registerManualRoutes(r chi.Router, cfg Config) {
+	if cfg.ManualRoutes == nil {
+		return
+	}
+	runtimerouting.Register(r, []runtimerouting.Route{
+		{
+			Method:  "POST",
+			Path:    "/tenant/custom-handler",
+			Handler: manualHandler(cfg.ManualRoutes.TenantCustomHandler, "tenant.customHandler"),
+			Middlewares: []runtimerouting.Middleware{
+				runtimemiddleware.DecryptPayloadMiddleware(cfg.PayloadDecryptor, LoggerFromContext),
+			},
+		},
+	})
+}
+
+// manualHandler is handler, or, when it is nil, a handler that answers 501
+// Not Implemented, naming the operation.
+func manualHandler(handler gohttp.Handler, operation string) gohttp.Handler {
+	if handler != nil {
+		return handler
+	}
+	return gohttp.HandlerFunc(func(w gohttp.ResponseWriter, r *gohttp.Request) {
+		RespondAppError(w, LoggerFromContext(r.Context()), NotImplementedError(operation+" has no manual route handler"))
+	})
+}
+
 // =============================================================================
 // Handler factory functions
 // =============================================================================
@@ -233,8 +285,9 @@ func createSessionCurrentTenantHandler(impl SessionImplementation) gohttp.Handle
 
 // createTenantCustomHandlerHandler creates a handler for POST /api/tenant/custom-handler
 //
-// This endpoint uses @manualRouteRegistration: it is NOT registered by
-// RegisterRoutes. Register it yourself on the router.
+// This endpoint uses @manualRouteRegistration: RegisterRoutes mounts
+// Config.ManualRoutes.TenantCustomHandler at its route, not this handler,
+// or, without Config.ManualRoutes, leaves the route to you.
 func createTenantCustomHandlerHandler(impl TenantImplementation) gohttp.HandlerFunc {
 	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
 
