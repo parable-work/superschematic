@@ -138,7 +138,10 @@ named `<r>Id`, and `T` declares no field of that name, where `T`'s field
 `r` is one `Relation<U>`, not `HasMany` and not `ManyToMany`. It reads
 `r`'s foreign key, the column `<r>_id`, so it needs no `@virtual`.
 `@virtual` still makes it a field the implementation fills. Its type is
-the type of `U`'s `id`, one value.
+the type of `U`'s `id`, one value. A `@virtual` field named `<r>Id` that
+does not hold one value of that type is no key: it refers to nothing, the
+loader refuses nothing of it, and the implementation fills it, as it fills
+any `@virtual` field.
 
 A key that writes no `RefersTo` refers to the API's one object type that
 is `@source(U)`, by its `id`. Every other member is unsaid, and
@@ -169,14 +172,15 @@ read references through these functions, not through the field's
 
 Where its `@source` checks run, the loader refuses three things:
 
-- a key whose type is not the type of `U`'s id:
+- a key, not `@virtual`, whose type is not the type of `U`'s id:
   `OrderLineView.productId reads the key of shop-db.OrderLine.product, a
   Relation to Product, whose id is Identity.UUID, not string`;
-- a key that is a list or a map;
+- a key, not `@virtual`, that is a list or a map;
 - a `RefersTo` on a key that names a type that is `@source` of another
-  table: `OrderLineView.productId: RefersTo names SupplierView, which is
-  @source(shop-db.Supplier), but the field reads the key of
-  shop-db.OrderLine.product, a Relation to Product`.
+  table, the API's own or one it imports: `OrderLineView.productId:
+  RefersTo names SupplierView, which is @source(shop-db.Supplier), but the
+  field reads the key of shop-db.OrderLine.product, a Relation to
+  Product`.
 
 The data forms skip these checks, as they skip the other `@source` checks.
 `migrate` counts a key as a read of its foreign-key column, as it counts

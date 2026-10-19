@@ -162,34 +162,51 @@ func ResolveReference(schema *Schema, dependencies map[string]*Schema, ref *Refe
 	return out, nil
 }
 
-// referenceTarget finds the type a reference names: the schema's own; else
-// the dependency's whose package an import of the schema lists the name
-// in, so the loader, which reads only that dependency, and a generator,
-// which has every one, find the same type (D61, amended); else a
-// dependency's, the dependencies in name order. It returns the schema that
+// LookupScope is one schema a type's name is looked up in, and its service
+// name among the dependencies: empty for the API schema's own.
+type LookupScope struct {
+	Service string
+	Schema  *Schema
+}
+
+// LookupScopes lists the schemas a type named name is looked up in, in
+// order (D61, amended; D66): the schema itself; then the dependency whose
+// package an import of the schema lists the name in; then every other
+// dependency, in name order. A nil schema is left out. [ResolveReference]
+// finds a reference's target in this order, and a generator that finds a
+// dependency's type by its name looks in this order too. So the loader,
+// which reads only the dependency an import names, and a generator, which
+// has every one, find one type.
+func LookupScopes(schema *Schema, dependencies map[string]*Schema, name string) []LookupScope {
+	var out []LookupScope
+	imported := ""
+	if schema != nil {
+		out = append(out, LookupScope{Schema: schema})
+		if service := importedService(schema, name); service != "" && service != schema.Name && dependencies[service] != nil {
+			imported = service
+			out = append(out, LookupScope{Service: service, Schema: dependencies[service]})
+		}
+	}
+	for _, dep := range sortedStringMapKeys(dependencies) {
+		if dep != imported && dependencies[dep] != nil {
+			out = append(out, LookupScope{Service: dep, Schema: dependencies[dep]})
+		}
+	}
+	return out
+}
+
+// referenceTarget finds the type a reference names, the first of
+// [LookupScopes] that declares the name. It returns the schema that
 // declares it, whose scalars type its fields, and that schema's service
 // name among the dependencies, empty for the schema's own.
 func referenceTarget(schema *Schema, dependencies map[string]*Schema, name string) (*TypeDef, *Schema, string, error) {
-	type candidate struct {
-		service string
-		schema  *Schema
-	}
-	candidates := []candidate{{"", schema}}
-	if service := importedService(schema, name); service != "" && service != schema.Name && dependencies[service] != nil {
-		candidates = append(candidates, candidate{service, dependencies[service]})
-	}
-	for _, dep := range sortedStringMapKeys(dependencies) {
-		if dependencies[dep] != nil {
-			candidates = append(candidates, candidate{dep, dependencies[dep]})
-		}
-	}
-	for _, c := range candidates {
-		s := c.schema
+	for _, c := range LookupScopes(schema, dependencies, name) {
+		s := c.Schema
 		if td := s.Types[name]; td != nil {
 			if td.IsTrait || td.Role == RoleTrait {
 				return nil, nil, "", fmt.Errorf("RefersTo names %s, a trait; a reference names an object type", name)
 			}
-			return td, s, c.service, nil
+			return td, s, c.Service, nil
 		}
 		switch {
 		case s.Enums[name] != nil:
@@ -493,8 +510,10 @@ type HeldReference struct {
 // @source is the relation's type U, by its id, with every other member
 // unsaid: { type: W }. With no such type, or two or more, or when
 // [ResolveReference] refuses it (no operation lists W, or two do), or when
-// W's value is not of the key's type, the key refers to nothing. A key
-// that is a list or a map derives nothing; the loader refuses it.
+// W's value is not of the key's type, the key refers to nothing. A field
+// that does not hold one value of the type of U's id is no key
+// ([RelationKeyFits]) and derives nothing: a @virtual one is a field the
+// implementation fills, and the loader refuses any other.
 //
 // holder's @source target and the relation's type are read from the schema
 // or from dependencies, by the target's service name.
@@ -523,6 +542,9 @@ func FieldReference(schema *Schema, dependencies map[string]*Schema, holder *Typ
 	if service != "" {
 		target = service + "." + related
 	}
+	if !RelationKeyFits(sourceType(schema, dependencies, target), field) {
+		return nil, false
+	}
 	candidates := SourcedBy(schema, target)
 	if len(candidates) != 1 {
 		return nil, false
@@ -539,8 +561,8 @@ func FieldReference(schema *Schema, dependencies map[string]*Schema, holder *Typ
 // from source (D61, amended): source's field r, one Relation (not HasMany,
 // not many-to-many, not a list or a map), when field is named r+"Id" and
 // source declares no field of that name. The key reads r's foreign key,
-// the column sqlgen names r_id. It does not look at field's type, which
-// the loader holds to the type of the related type's id.
+// the column sqlgen names r_id. It does not look at field's type:
+// [RelationKeyFits] does, against the related type.
 func RelationKey(source *TypeDef, field *FieldDef) (relation *FieldDef, ok bool) {
 	if source == nil || field == nil {
 		return nil, false
@@ -565,6 +587,43 @@ func RelationKey(source *TypeDef, field *FieldDef) (relation *FieldDef, ok bool)
 		return nil, false
 	}
 	return relation, true
+}
+
+// RelatedKeyField is the field a relation's foreign key holds on the
+// related type: its id, else its @key field; nil when related is nil or
+// has neither.
+func RelatedKeyField(related *TypeDef) *FieldDef {
+	if related == nil {
+		return nil
+	}
+	var key *FieldDef
+	for _, f := range related.Fields {
+		switch {
+		case f == nil:
+		case f.Name == "id":
+			return f
+		case f.Key && key == nil:
+			key = f
+		}
+	}
+	return key
+}
+
+// RelationKeyFits reports whether field, which [RelationKey] names a
+// relation's key, holds what the relation's foreign key holds: one value,
+// not a list or a map, of the type of related's id ([RelatedKeyField]).
+// With related nil or without an id, its type is not known, and only the
+// shape is checked.
+//
+// A field that does not fit is no key (D61, amended): a @virtual one is a
+// field the implementation fills, which derives no reference, and the
+// loader refuses any other.
+func RelationKeyFits(related *TypeDef, field *FieldDef) bool {
+	if field == nil || field.TypeRef.IsArray || field.TypeRef.IsMap {
+		return false
+	}
+	id := RelatedKeyField(related)
+	return id == nil || id.TypeRef.Name == field.TypeRef.Name && !id.TypeRef.IsArray && !id.TypeRef.IsMap
 }
 
 // SourcedBy lists schema's own object types whose @source is target, a

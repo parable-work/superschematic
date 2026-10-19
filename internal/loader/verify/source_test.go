@@ -43,7 +43,7 @@ func keySchema() (*ir.Schema, Input) {
 		"shop-db.Supplier": {Name: "Supplier", Fields: []*ir.FieldDef{
 			{Name: "id", TypeRef: uuid, Required: true, Key: true},
 		}},
-	}}
+	}, DependencySchemas: map[string]*ir.Schema{}}
 	return schema, in
 }
 
@@ -106,10 +106,6 @@ func TestARelationsKeyRefusalsAndWarning(t *testing.T) {
 		{"a key of another type", func(s *ir.Schema, _ Input) {
 			s.Types["OrderLineView"].Fields[1].TypeRef = ir.TypeRef{Name: "string"}
 		}, []string{"src/orders.schema.ts: OrderLineView.productId reads the key of shop-db.OrderLine.product, a Relation to Product, whose id is Identity.UUID, not string"}, nil},
-		{"a @virtual key of another type", func(s *ir.Schema, _ Input) {
-			key := s.Types["OrderLineView"].Fields[1]
-			key.TypeRef, key.Virtual = ir.TypeRef{Name: "string"}, true
-		}, []string{"src/orders.schema.ts: OrderLineView.productId reads the key of shop-db.OrderLine.product, a Relation to Product, whose id is Identity.UUID, not string"}, nil},
 		{"a list key", func(s *ir.Schema, _ Input) {
 			s.Types["OrderLineView"].Fields[1].TypeRef.IsArray = true
 		}, []string{"src/orders.schema.ts: OrderLineView.productId reads the key of shop-db.OrderLine.product, a Relation to Product; a key is one value, not a list or a map"}, nil},
@@ -119,6 +115,10 @@ func TestARelationsKeyRefusalsAndWarning(t *testing.T) {
 		{"a RefersTo to another table's type", func(s *ir.Schema, _ Input) {
 			s.Types["OrderLineView"].Fields[1].References = &ir.ReferenceDef{Type: "SupplierView"}
 		}, []string{"src/orders.schema.ts: OrderLineView.productId: RefersTo names SupplierView, which is @source(shop-db.Supplier), but the field reads the key of shop-db.OrderLine.product, a Relation to Product"}, nil},
+		{"a RefersTo to an imported type of another table", func(s *ir.Schema, in Input) {
+			importCatalogCards(s, in)
+			s.Types["OrderLineView"].Fields[1].References = &ir.ReferenceDef{Type: "SupplierCard"}
+		}, []string{"src/orders.schema.ts: OrderLineView.productId: RefersTo names SupplierCard, which is @source(shop-db.Supplier), but the field reads the key of shop-db.OrderLine.product, a Relation to Product"}, nil},
 		{"two types sourced from the related table", func(s *ir.Schema, _ Input) {
 			s.Types["ProductCard"] = &ir.TypeDef{Name: "ProductCard", Role: ir.RoleAPIView, Source: &ir.SourceRef{Target: "shop-db.Product"}}
 		}, nil, []string{"src/orders.schema.ts: OrderLineView.productId reads the key of shop-db.OrderLine.product and refers to nothing: ProductCard and ProductView are both @source(shop-db.Product); name one with RefersTo"}},
@@ -139,7 +139,8 @@ func TestARelationsKeyRefusalsAndWarning(t *testing.T) {
 }
 
 // What the rules leave alone: a RefersTo that wins, to a type of the
-// related table or to a type with no @source; two sourced types when the
+// related table, the API's own or an imported one, or to a type with no
+// @source; two sourced types when the
 // key names one; a related type that is not at hand, whose id the check
 // cannot read; and a General schema, which holds no reference.
 func TestARelationsKeyAccepted(t *testing.T) {
@@ -154,6 +155,10 @@ func TestARelationsKeyAccepted(t *testing.T) {
 		{"a RefersTo to a type with no @source", func(s *ir.Schema, _ Input) {
 			s.Types["Pick"] = &ir.TypeDef{Name: "Pick", Role: ir.RoleAPIView}
 			s.Types["OrderLineView"].Fields[1].References = &ir.ReferenceDef{Type: "Pick"}
+		}},
+		{"a RefersTo to an imported type of the related table", func(s *ir.Schema, in Input) {
+			importCatalogCards(s, in)
+			s.Types["OrderLineView"].Fields[1].References = &ir.ReferenceDef{Type: "ProductCard"}
 		}},
 		{"a related type not at hand", func(s *ir.Schema, in Input) {
 			delete(in.ExternalTypes, "shop-db.Product")
@@ -171,6 +176,66 @@ func TestARelationsKeyAccepted(t *testing.T) {
 			tc.edit(schema, in)
 			if errs, warnings := sourceDiagnostics(schema, in); len(errs) != 0 || len(warnings) != 0 {
 				t.Fatalf("errors = %q, warnings = %q", errs, warnings)
+			}
+		})
+	}
+}
+
+// importCatalogCards gives the shop an API dependency, catalog-api, whose
+// ProductCard is @source(shop-db.Product) and SupplierCard
+// @source(shop-db.Supplier), and imports both, as the loader reads a
+// dependency whose type a RefersTo names (Input.DependencySchemas). A
+// General dependency declares a SupplierCard too, sourced from Product,
+// and sorts first: the import, not the name, picks the type.
+func importCatalogCards(s *ir.Schema, in Input) {
+	card := func(name, target string) *ir.TypeDef {
+		return &ir.TypeDef{Name: name, Role: ir.RoleAPIView, Source: &ir.SourceRef{Target: target}, Fields: []*ir.FieldDef{
+			{Name: "id", TypeRef: ir.TypeRef{Name: "Identity.UUID"}, Required: true},
+		}}
+	}
+	catalog := ir.NewSchema("catalog-api", ir.SchemaKindAPI)
+	catalog.Types["ProductCard"] = card("ProductCard", "shop-db.Product")
+	catalog.Types["SupplierCard"] = card("SupplierCard", "shop-db.Supplier")
+	general := ir.NewSchema("a-cards", ir.SchemaKindGeneral)
+	general.Types["SupplierCard"] = card("SupplierCard", "shop-db.Product")
+	s.Imports = append(s.Imports, ir.Import{Package: "@schemas/catalog-api", Types: []string{"ProductCard", "SupplierCard"}})
+	in.DependencySchemas["catalog-api"], in.DependencySchemas["a-cards"] = catalog, general
+}
+
+// A @virtual field named for a relation's key that does not hold one
+// value of the type of the related type's id is no key (D61, amended): it
+// is refused for nothing, stays virtual, derives no reference, and a
+// RefersTo on it is not held to the related table. One that is not
+// @virtual is refused (TestARelationsKeyRefusalsAndWarning).
+func TestAVirtualFieldOfAnotherTypeIsNoKey(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		edit func(key *ir.FieldDef)
+	}{
+		{"another type", func(key *ir.FieldDef) { key.TypeRef = ir.TypeRef{Name: "string"} }},
+		{"a list", func(key *ir.FieldDef) { key.TypeRef.IsArray = true }},
+		{"a map", func(key *ir.FieldDef) { key.TypeRef.IsMap = true }},
+		{"another type with a RefersTo to another table's type", func(key *ir.FieldDef) {
+			key.TypeRef, key.References = ir.TypeRef{Name: "string"}, &ir.ReferenceDef{Type: "SupplierView"}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			schema, in := keySchema()
+			line := schema.Types["OrderLineView"]
+			key := line.Fields[1]
+			key.Virtual = true
+			tc.edit(key)
+			if errs, warnings := sourceDiagnostics(schema, in); len(errs) != 0 || len(warnings) != 0 {
+				t.Fatalf("errors = %q, warnings = %q", errs, warnings)
+			}
+			if !slices.Equal(line.Source.Virtual, []string{"productId"}) {
+				t.Fatalf("virtual = %v, want [productId]", line.Source.Virtual)
+			}
+			deps := map[string]*ir.Schema{"shop-db": {Name: "shop-db", Kind: ir.SchemaKindDB, Types: map[string]*ir.TypeDef{
+				"OrderLine": in.ExternalTypes["shop-db.OrderLine"], "Product": in.ExternalTypes["shop-db.Product"],
+			}}}
+			if ref, derived := ir.FieldReference(schema, deps, line, key); derived || ref != key.References {
+				t.Fatalf("FieldReference = %+v, %v; want the field's own RefersTo, %+v, not derived", ref, derived, key.References)
 			}
 		})
 	}
