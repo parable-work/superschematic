@@ -110,6 +110,7 @@ func project(t *testing.T, reg *registry.Registry, withPaths bool) (string, proj
 			EngineRust:          filepath.Join(root, "runtime", "engine", "rust", "engine"),
 			EngineBehaviorsRust: filepath.Join(root, "runtime", "engine", "rust", "behaviors"),
 			EngineWorkQueueRust: filepath.Join(root, "runtime", "engine-workqueue", "rust"),
+			EngineABIRust:       filepath.Join(root, "runtime", "engine", "rust", "abi"),
 		}
 	}
 	return root, opts
@@ -164,9 +165,10 @@ func checkGoldens(t *testing.T, name string, crate *projectengine.Crate) map[str
 // depends on the engine's three crates at the [paths] checkouts and on
 // each extension crate at its path in the project, and registers each
 // composed extension behavior by its expression, by name, after the core's
-// and the work queue's, under the binary's tool options. Point, which
-// composes none, adds nothing; acme.Pin, which no type composes, needs no
-// crate.
+// and the work queue's, under the binary's tool options; its ffi member,
+// a member of the crate's workspace, exports the C ABI over behaviors(),
+// with the C ABI's library at its [paths] checkout. Point, which composes
+// none, adds nothing; acme.Pin, which no type composes, needs no crate.
 func TestBuildAssemblesTheCoreTheWorkQueueAndTheExtensionsCrates(t *testing.T) {
 	reg := extensions(t)
 	_, opts := project(t, reg, true)
@@ -183,17 +185,32 @@ func TestBuildAssemblesTheCoreTheWorkQueueAndTheExtensionsCrates(t *testing.T) {
 		`superschematic-engine-workqueue = { path = "../../../../../runtime/engine-workqueue/rust", default-features = false }`,
 		`acme-behaviors = { path = "../../../../../crates/behaviors" }`,
 		`desk-triage = { path = "../../../../../vendor/desk" }`,
+		"[workspace]\nresolver = \"2\"\nmembers = [\"ffi\"]",
 	} {
 		if !strings.Contains(string(files[projectengine.ManifestFile]), want+"\n") {
 			t.Errorf("Cargo.toml lacks %s", want)
 		}
 	}
+	for _, want := range []string{
+		`name = "schemas-shop-engine-ffi"`,
+		`crate-type = ["staticlib", "rlib"]`,
+		`schemas-shop-engine = { path = "..", default-features = false }`,
+		`superschematic-engine-abi = { path = "../../../../../../runtime/engine/rust/abi", default-features = false }`,
+	} {
+		if !strings.Contains(string(files[projectengine.FFIManifestFile]), want+"\n") {
+			t.Errorf("ffi/Cargo.toml lacks %s", want)
+		}
+	}
+	if want := "\nuse schemas_shop_engine as project;\n\nsuperschematic_engine_abi::export_engine_c_abi!(behaviors = project::behaviors);\n"; !strings.Contains(string(files[projectengine.FFILibFile]), want) {
+		t.Errorf("ffi/src/lib.rs exports no C ABI over the crate's behaviors:\n%s", files[projectengine.FFILibFile])
+	}
 	rustfmtCheck(t, files[projectengine.LibFile])
+	rustfmtCheck(t, files[projectengine.FFILibFile])
 }
 
 // A General schema the engine runs as it is written composes acme.Rating
 // alone: no work queue, and with no [paths] checkout of the engine's crates
-// the crate names their version.
+// the crate and its ffi member name their version.
 func TestBuildOfAGeneralSchemaNamesTheEnginesVersionWithoutPaths(t *testing.T) {
 	reg := extensions(t)
 	_, opts := project(t, reg, false)
@@ -205,7 +222,11 @@ func TestBuildOfAGeneralSchemaNamesTheEnginesVersionWithoutPaths(t *testing.T) {
 	if !strings.Contains(string(files[projectengine.ManifestFile]), "\nsuperschematic-engine = { version = \"0.0.0\", default-features = false }\n") {
 		t.Errorf("Cargo.toml names no engine version:\n%s", files[projectengine.ManifestFile])
 	}
+	if !strings.Contains(string(files[projectengine.FFIManifestFile]), "\nsuperschematic-engine-abi = { version = \"0.0.0\", default-features = false }\n") {
+		t.Errorf("ffi/Cargo.toml names no C ABI version:\n%s", files[projectengine.FFIManifestFile])
+	}
 	rustfmtCheck(t, files[projectengine.LibFile])
+	rustfmtCheck(t, files[projectengine.FFILibFile])
 }
 
 // No crate when the schema composes the core's behaviors alone, which the
@@ -249,28 +270,35 @@ func TestBuildWritesNoCrateItDoesNotNeedOrCannotWrite(t *testing.T) {
 	}
 }
 
-// Write puts the crate in its directory, replacing what an earlier build
-// wrote; RemoveStale takes away a crate a build wrote, and the directories
+// Write puts the crate and its ffi member in its directory, replacing the
+// sources an earlier build wrote; RemoveStale takes away a crate a build
+// wrote, its member with it, and the directories
 // it leaves empty up to the output root, and leaves a directory whose
 // Cargo.toml a build did not write.
 func TestWriteAndRemoveStale(t *testing.T) {
 	reg := extensions(t)
 	root, opts := project(t, reg, true)
 	crate := build(t, schema(ir.SchemaKindGeneral, []string{"acme.Rating"}, nil), opts)
-	stale := filepath.Join(opts.Dir, "src", "stale.rs")
-	if err := os.MkdirAll(filepath.Dir(stale), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(stale, nil, 0o644); err != nil {
-		t.Fatal(err)
+	var stale []string
+	for _, src := range []string{"src", "ffi/src"} {
+		path := filepath.Join(opts.Dir, filepath.FromSlash(src), "stale.rs")
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		stale = append(stale, path)
 	}
 	if err := crate.Write(opts.Dir); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(stale); !os.IsNotExist(err) {
-		t.Errorf("Write left %s: %v", stale, err)
+	for _, path := range stale {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Errorf("Write left %s: %v", path, err)
+		}
 	}
-	for _, file := range []string{projectengine.ManifestFile, projectengine.LibFile} {
+	for _, file := range []string{projectengine.ManifestFile, projectengine.LibFile, projectengine.FFIManifestFile, projectengine.FFILibFile} {
 		if _, err := os.Stat(filepath.Join(opts.Dir, filepath.FromSlash(file))); err != nil {
 			t.Error(err)
 		}

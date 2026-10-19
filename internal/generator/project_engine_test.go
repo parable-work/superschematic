@@ -71,7 +71,8 @@ func ratings(behaviors ...string) (*ir.Schema, *schemaconfig.SchemaConfig) {
 // The DB and General pipelines run projectengine: a schema whose types
 // compose an extension's behavior gets engine/rust/<schema>, depending on
 // the extension's crate at its path in the project and on the engine's at
-// the [paths] checkouts; a later build without it removes the crate and
+// the [paths] checkouts, with its ffi member, the archive a Go server
+// links; a later build without it removes the crate and
 // the directories it leaves empty; a schema whose types compose the core's
 // alone, the engine fixture, gets none.
 func TestProjectEngineCrateIsWrittenAndRemoved(t *testing.T) {
@@ -84,7 +85,7 @@ func TestProjectEngineCrateIsWrittenAndRemoved(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := filepath.Join(repo, "schemas", "dist")
-	paths := naming.LocalPaths{EngineRust: filepath.Join(repo, "engine"), EngineBehaviorsRust: filepath.Join(repo, "behaviors")}
+	paths := naming.LocalPaths{EngineRust: filepath.Join(repo, "engine"), EngineBehaviorsRust: filepath.Join(repo, "behaviors"), EngineABIRust: filepath.Join(repo, "abi")}
 	opts := Options{OutputRoot: out, Registry: reg, RepositoryRoot: repo, Paths: paths}
 
 	schema, cfg := ratings("acme.Rating", "Comments")
@@ -115,6 +116,13 @@ func TestProjectEngineCrateIsWrittenAndRemoved(t *testing.T) {
 	}
 	if !strings.Contains(string(lib), "\n        .with(acme_behaviors::Rating)\n") || !strings.Contains(string(lib), `"key": "confirm"`) {
 		t.Errorf("lib.rs registers no acme.Rating under acme's policy:\n%s", lib)
+	}
+	ffi, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(projectengine.FFILibFile)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(ffi), "export_engine_c_abi!(behaviors = project::behaviors);") {
+		t.Errorf("ffi/src/lib.rs exports no C ABI over the crate's behaviors:\n%s", ffi)
 	}
 
 	schema, cfg = ratings("Comments")
@@ -158,9 +166,11 @@ func TestProjectEngineCrateIsNotWrittenWithoutTheExtensionsCrate(t *testing.T) {
 
 // The crate the generator writes for shop-ratings, over acme's own crate
 // (examples/acme-schematic/crates/behaviors) and this checkout's engine,
-// builds and passes its test: the engine opens on SQLite with behaviors()
-// under tools(), acme's policy, and runs acme.Rating. It needs cargo, and
-// builds the engine: CARGO_TARGET_DIR shares a build.
+// builds and passes its tests, its ffi member's with them: the engine
+// opens on SQLite with behaviors() under tools(), acme's policy, and runs
+// acme.Rating, and so does the one the C ABI's archive opens through its
+// own eng_open, as a Go server would. It needs cargo, and builds the
+// engine: CARGO_TARGET_DIR shares a build.
 func TestProjectEngineCrateBuildsWithAcmeRating(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping cargo build in -short mode")
@@ -189,7 +199,7 @@ func TestProjectEngineCrateBuildsWithAcmeRating(t *testing.T) {
 	if target == "" {
 		target = filepath.Join(t.TempDir(), "target")
 	}
-	cmd := exec.Command(cargo, "test", "--quiet")
+	cmd := exec.Command(cargo, "test", "--workspace", "--quiet")
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "CARGO_TARGET_DIR="+target)
 	if output, err := cmd.CombinedOutput(); err != nil {

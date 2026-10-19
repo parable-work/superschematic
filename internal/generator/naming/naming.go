@@ -430,6 +430,11 @@ type PathsConfig struct {
 	// which the project's engine crate depends on beside EngineRust.
 	EngineBehaviorsRust string `toml:"engine_behaviors_rust"`
 	EngineWorkQueueRust string `toml:"engine_workqueue_rust"`
+	// EngineABIRust holds the engine's C ABI as a library,
+	// superschematic-engine-abi (D58), whose export_engine_c_abi! the
+	// project's engine crate's ffi member expands: the archive a Go server
+	// links in the core's place.
+	EngineABIRust string `toml:"engine_abi_rust"`
 	// VersionGraphPython holds the version graph's Python package.
 	VersionGraphPython string `toml:"versiongraph_python"`
 	// HTTPRuntimeGo holds the http runtime Go module.
@@ -467,6 +472,7 @@ type LocalPaths struct {
 	EngineRust             string
 	EngineBehaviorsRust    string
 	EngineWorkQueueRust    string
+	EngineABIRust          string
 	VersionGraphPython     string
 	HTTPRuntimeGo          string
 	HTTPRuntimeRust        string
@@ -496,6 +502,7 @@ func (n Naming) LocalPaths(repoRoot string) LocalPaths {
 		EngineRust:             resolve(n.Paths.EngineRust),
 		EngineBehaviorsRust:    resolve(n.Paths.EngineBehaviorsRust),
 		EngineWorkQueueRust:    resolve(n.Paths.EngineWorkQueueRust),
+		EngineABIRust:          resolve(n.Paths.EngineABIRust),
 		VersionGraphPython:     resolve(n.Paths.VersionGraphPython),
 		HTTPRuntimeGo:          resolve(n.Paths.HTTPRuntimeGo),
 		HTTPRuntimeRust:        resolve(n.Paths.HTTPRuntimeRust),
@@ -531,6 +538,7 @@ func (p PathsConfig) checkRelative() error {
 		{"engine_rust", p.EngineRust},
 		{"engine_behaviors_rust", p.EngineBehaviorsRust},
 		{"engine_workqueue_rust", p.EngineWorkQueueRust},
+		{"engine_abi_rust", p.EngineABIRust},
 		{"versiongraph_python", p.VersionGraphPython},
 		{"http_runtime_go", p.HTTPRuntimeGo},
 		{"http_runtime_rust", p.HTTPRuntimeRust},

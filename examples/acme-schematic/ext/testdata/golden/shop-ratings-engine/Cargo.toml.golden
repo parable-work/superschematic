@@ -15,6 +15,14 @@ description = "The engine of the shop-ratings schema, with the behaviors its typ
 license = "UNLICENSED"
 publish = false
 
+# The bindings a host of another language links, each a crate of its own
+# over behaviors(), built from this lock file into this target directory:
+# ffi, the C ABI's static archive a Go server links in the core's place
+# (scripts/engine-archive.sh --crate <this directory>/ffi --out <dir>).
+[workspace]
+resolver = "2"
+members = ["ffi"]
+
 # The databases the engine runs on: both by default, as the engine has
 # them. A host that needs one turns the default off and names it.
 [features]

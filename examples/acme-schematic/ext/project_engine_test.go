@@ -19,8 +19,10 @@ var update = flag.Bool("update", false, "rewrite the goldens in testdata/golden"
 // engine/rust/shop-ratings, which depends on the engine's crates and on
 // acme-behaviors at crates/behaviors and registers acme_behaviors::Rating
 // after the core's behaviors, under acme's invocation policy and vendor
-// keys. The crate is held to testdata/golden/shop-ratings-engine, the
-// checkout's path as <checkout>; rewrite the goldens with:
+// keys, and its ffi member, the C ABI's archive over those behaviors that
+// a Go server links. The crate is held to
+// testdata/golden/shop-ratings-engine, the checkout's path as <checkout>;
+// rewrite the goldens with:
 //
 //	go test ./ext -run TestRatingProjectEngine -update
 //
@@ -54,11 +56,17 @@ func TestRatingProjectEngine(t *testing.T) {
 	if result.Outputs["engine-rust"] != dir {
 		t.Fatalf("Outputs[engine-rust] = %q, want %q (outputs %v)", result.Outputs["engine-rust"], dir, result.Outputs)
 	}
-	checkout, err := filepath.Rel(dir, filepath.Join(project, "..", ".."))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, file := range []string{"Cargo.toml", filepath.Join("src", "lib.rs")} {
+	// Each crate's paths are relative to its own directory: the ffi
+	// member's to ffi/.
+	for _, file := range []string{"Cargo.toml", filepath.Join("src", "lib.rs"), filepath.Join("ffi", "Cargo.toml"), filepath.Join("ffi", "src", "lib.rs")} {
+		crate := dir
+		if strings.HasPrefix(file, "ffi"+string(filepath.Separator)) {
+			crate = filepath.Join(dir, "ffi")
+		}
+		checkout, err := filepath.Rel(crate, filepath.Join(project, "..", ".."))
+		if err != nil {
+			t.Fatal(err)
+		}
 		data, err := os.ReadFile(filepath.Join(dir, file))
 		if err != nil {
 			t.Fatal(err)
