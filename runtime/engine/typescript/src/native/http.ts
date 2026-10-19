@@ -50,13 +50,13 @@ import { callerAuthenticator, principalOf } from '../http/callers.js';
 import { engineProblem } from '../http/problems.js';
 import { checkStreamOptions } from '../http/stream.js';
 import type { EngineMcpOptions } from '../mcp/app.js';
-import type { ToolFilter } from '../tools/catalog.js';
+import type { ToolFilter } from '../types/tools.js';
 import type { StreamPull } from './addon.js';
-import { AsyncNativeEngine } from './async.js';
-import type { EngineRoute, NativeEngine } from './engine.js';
+import { AsyncEngine } from './async.js';
+import type { EngineRoute, Engine } from './engine.js';
 
 /** An engine these adapters serve: the synchronous facade's, or openEngineAsync's. */
-export type ServedEngine = NativeEngine | AsyncNativeEngine;
+export type ServedEngine = Engine | AsyncEngine;
 
 // What a route's handler needs of the engine: one request served, the
 // event stream pulled and ended, and its commits watched.
@@ -79,7 +79,7 @@ interface HttpAnswerLike {
 }
 
 function servingOf(engine: ServedEngine): Serving {
-  if (engine instanceof AsyncNativeEngine) {
+  if (engine instanceof AsyncEngine) {
     return {
       routes: () => engine.routes(),
       serve: async (head, body, filter) => {
