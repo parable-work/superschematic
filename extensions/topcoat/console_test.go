@@ -509,6 +509,116 @@ func TestATrailStepMeetsItsOptionsControls(t *testing.T) {
 	}
 }
 
+// suppliersService is the extension's fixture of an API that declares
+// Supplier, which a copy of fixture-console-api imports (D66).
+const suppliersService = "fixture-console-suppliers-api"
+
+// suppliersCopy is a copy of fixture-console-api whose Supplier is
+// fixture-console-suppliers-api's, a dependency of kind API, after edit.
+func suppliersCopy(t *testing.T, edit func(schema string) string) string {
+	t.Helper()
+	dir := consoleCopy(t, func(schema string) string {
+		start := strings.Index(schema, "  # Who supplies the shop's products.\n")
+		end := strings.Index(schema, "  # A page of the shop's site")
+		schema = schema[:start] + schema[end:]
+		schema = strings.Replace(schema, "kind: API\n", "kind: API\nimports:\n  - package: \"@schemas/"+suppliersService+"\"\n    types: [Supplier]\n", 1)
+		return edit(schema)
+	})
+	config := filepath.Join(dir, "schema.config.yaml")
+	data, err := os.ReadFile(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, config, string(data)+"dependencies:\n  - name: "+suppliersService+"\n    kind: API\n")
+	return dir
+}
+
+// TestAReferenceToAnAPIDependencysType builds fixture-console-api with its
+// Supplier imported from fixture-console-suppliers-api, an API dependency
+// (D66), and a new product's form whose supplier refers to it: the
+// references offer and name suppliers through listSuppliers, the API's
+// own listing of the dependency's type, as they do a local type's, and
+// cargo clippy and cargo test run on the crate with supplierAppTest. With
+// listSuppliers behind a provider's signature, the build log names the
+// target by its service.
+func TestAReferenceToAnAPIDependencysType(t *testing.T) {
+	withForm := func(schema string) string {
+		schema = strings.Replace(schema, "  OrderLineInput:\n", `  # A new product, whose supplier is one of the suppliers.
+  ProductInput:
+    name: ProductInput
+    role: APIInput
+    fields:
+      - name: name
+        typeRef: { name: string }
+        required: true
+      - name: sku
+        typeRef: { name: string }
+        required: true
+      - name: supplierId
+        title: Supplier
+        typeRef: { name: string }
+        required: true
+        references: { type: Supplier }
+  OrderLineInput:
+`, 1)
+		return strings.Replace(schema, "  - name: SupplierQueries\n", `  - name: ProductMutations
+    operations:
+      # Adds a product.
+      - name: createProduct
+        typeRef: { name: Product }
+        required: true
+        httpMethod: POST
+        restPath: products
+        permissions: [products.read]
+        arguments:
+          - name: input
+            typeRef: { name: ProductInput }
+            required: true
+  - name: SupplierQueries
+`, 1)
+	}
+	dir := suppliersCopy(t, withForm)
+	root := testpaths.TempDir(t)
+	var log strings.Builder
+	if _, err := buildDir(t, registry.DefaultNaming(), dir, root, livePagesOutputs(), &log); err != nil {
+		t.Fatalf("build: %v\n%s", err, log.String())
+	}
+	data, err := os.ReadFile(filepath.Join(topcoat.Dir(root, consoleService), "src", "references.rs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	references := string(data)
+	for _, want := range []string{
+		"async fn supplier_target_choices(cx: &Cx) -> Option<Vec<Choice>> {",
+		"async fn supplier_target_labels(cx: &Cx, values: &BTreeSet<String>) -> Vec<Choice> {",
+		"pub async fn product_labels(cx: &Cx, records: &[ProductRecord], choices: Choices) -> Choices {",
+		`let sites = unnamed(&choices, &[("supplierId", &["supplierId"])]);`,
+		"let labels = supplier_target_labels(cx, &values_at(&json, &sites)).await;",
+		"pub async fn product_input_form_choices(cx: &Cx, choices: Choices) -> Choices {",
+	} {
+		if !strings.Contains(references, want) {
+			t.Errorf("references.rs lacks %q", want)
+		}
+	}
+	cargoTestCrateWith(t, consoleService, supplierAppTest, crateOptions{outputs: livePagesOutputs(), dir: dir, dependencies: []string{suppliersService}})
+
+	signed := suppliersCopy(t, func(schema string) string {
+		return strings.Replace(withForm(schema), "        restPath: suppliers\n        permissions: [products.read]\n", "        restPath: suppliers\n        permissions: [products.read]\n        hmacVerifiedProvider: stripe\n", 1)
+	})
+	log.Reset()
+	if _, err := buildDir(t, registry.DefaultNaming(), signed, testpaths.TempDir(t), livePagesOutputs(), &log); err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	for _, want := range []string{
+		"topcoat: Product.supplierId refers to fixture-console-suppliers-api.Supplier, whose options operation SupplierQueries.listSuppliers has no in-process call: its route checks a provider's signature first (@hmacVerified)",
+		"topcoat: ProductInput.supplierId refers to fixture-console-suppliers-api.Supplier, whose options operation SupplierQueries.listSuppliers has no in-process call",
+	} {
+		if !strings.Contains(log.String(), want) {
+			t.Errorf("the build log lacks %q:\n%s", want, log.String())
+		}
+	}
+}
+
 // TestADerivedReferenceLabelsRows builds fixture-console-api with its order
 // lines and products sourced from a database's lines and items, @source,
 // a line's product a Relation to Item, and with OrderLine.productId saying no
@@ -1518,5 +1628,168 @@ async fn a_list_at_page_pages_beside_the_pagers_helpers() {
     let second = get(&app, &next, "clerk").await;
     assert!(second.html.contains("Terms") && !second.html.contains("About us"), "{}", second.html);
     assert_eq!(link(&second.html, "first").as_deref(), Some("/console/page"), "{}", second.html);
+}
+`
+
+// supplierAppTest is tests/app.rs of the Topcoat crate of the copy of
+// fixture-console-api whose Supplier is fixture-console-suppliers-api's.
+const supplierAppTest = `use std::sync::{Arc, Mutex};
+
+use async_trait::async_trait;
+use http::request::Parts;
+use schemas_fixture_console_api_topcoat::api::runtime::page::Page;
+use schemas_fixture_console_api_topcoat::api::runtime::{ApiError, Authenticator, Principal, RequestContext};
+use schemas_fixture_console_api_topcoat::api::{
+    types, Implementations, OrderAddLineArgs, OrderGetOrderArgs, OrderImplementation, OrderListOrdersArgs, OrderPlaceOrderArgs,
+    ProductCreateProductArgs, ProductGetProductArgs, ProductImplementation, ProductListProductsArgs, ReviewImplementation,
+    ReviewListReviewsArgs, SiteImplementation, SiteListPagesArgs, SupplierImplementation, SupplierListSupplierProductsArgs,
+    SupplierListSuppliersArgs,
+};
+use schemas_fixture_console_api_topcoat::pages::Settings;
+use schemas_fixture_console_api_topcoat::{PageAuthenticator, RouterBuilderFixtureConsoleApiExt};
+use topcoat::context::Cx;
+use topcoat::router::{header, to_bytes, Body, Router, RouterBuilderDiscoverExt, StatusCode};
+
+const ANVIL: &str = "8d1f6c9e-0000-4000-8000-000000000001";
+const BUCKET: &str = "8d1f6c9e-0000-4000-8000-000000000002";
+const CRATE: &str = "8d1f6c9e-0000-4000-8000-000000000003";
+
+fn uuid(text: &str) -> types::IdentityUUID {
+    serde_json::from_value(serde_json::json!(text)).unwrap()
+}
+
+fn product(id: &str, name: &str, supplier: &str) -> types::Product {
+    types::Product { id: uuid(id), name: name.to_owned(), sku: name.to_lowercase(), supplier_id: supplier.to_owned(), in_stock: true }
+}
+
+// The products, two suppliers, which the dependency's type declares, and
+// nothing else.
+struct Shop(Mutex<Vec<types::Product>>);
+
+#[async_trait]
+impl ProductImplementation for Shop {
+    async fn list_products(&self, _ctx: RequestContext, args: ProductListProductsArgs) -> Result<Page<types::Product>, ApiError> {
+        let products = self.0.lock().unwrap();
+        Ok(Page::last(products.iter().filter(|product| args.ids.as_ref().is_none_or(|ids| ids.contains(&product.id))).cloned().collect()))
+    }
+    async fn get_product(&self, _ctx: RequestContext, args: ProductGetProductArgs) -> Result<types::Product, ApiError> {
+        let products = self.0.lock().unwrap();
+        products.iter().find(|product| product.id == args.product_id).cloned().ok_or_else(|| ApiError::not_found("No such product"))
+    }
+    async fn create_product(&self, _ctx: RequestContext, args: ProductCreateProductArgs) -> Result<types::Product, ApiError> {
+        let created = types::Product { name: args.input.name, sku: args.input.sku, supplier_id: args.input.supplier_id, ..product(CRATE, "", "") };
+        self.0.lock().unwrap().push(created.clone());
+        Ok(created)
+    }
+}
+
+#[async_trait]
+impl SupplierImplementation for Shop {
+    async fn list_suppliers(&self, _ctx: RequestContext, _args: SupplierListSuppliersArgs) -> Result<Page<types::Supplier>, ApiError> {
+        Ok(Page::last(["Acme", "Bolt"].map(|name| types::Supplier { id: name.to_lowercase(), name: name.to_owned() }).to_vec()))
+    }
+    async fn list_supplier_products(&self, _ctx: RequestContext, args: SupplierListSupplierProductsArgs) -> Result<Vec<types::Product>, ApiError> {
+        let products = self.0.lock().unwrap();
+        Ok(products.iter().filter(|product| product.supplier_id == args.supplier_id).cloned().collect())
+    }
+}
+
+#[async_trait]
+impl ReviewImplementation for Shop {
+    async fn list_reviews(&self, _ctx: RequestContext, _args: ReviewListReviewsArgs) -> Result<Page<types::Review>, ApiError> {
+        Ok(Page::last(Vec::new()))
+    }
+}
+
+#[async_trait]
+impl SiteImplementation for Shop {
+    async fn list_pages(&self, _ctx: RequestContext, _args: SiteListPagesArgs) -> Result<Page<types::SitePage>, ApiError> {
+        Ok(Page::last(Vec::new()))
+    }
+}
+
+#[async_trait]
+impl OrderImplementation for Shop {
+    async fn list_orders(&self, _ctx: RequestContext, _args: OrderListOrdersArgs) -> Result<Page<types::Order>, ApiError> {
+        Ok(Page::last(Vec::new()))
+    }
+    async fn place_order(&self, _ctx: RequestContext, _args: OrderPlaceOrderArgs) -> Result<types::Order, ApiError> {
+        Err(ApiError::not_found("No orders here"))
+    }
+    async fn get_order(&self, _ctx: RequestContext, _args: OrderGetOrderArgs) -> Result<types::Order, ApiError> {
+        Err(ApiError::not_found("No orders here"))
+    }
+    async fn add_line(&self, _ctx: RequestContext, _args: OrderAddLineArgs) -> Result<types::Order, ApiError> {
+        Err(ApiError::not_found("No orders here"))
+    }
+}
+
+struct NoRequests;
+
+#[async_trait]
+impl Authenticator for NoRequests {
+    async fn authenticate(&self, _request: &Parts) -> Result<Option<Principal>, ApiError> {
+        Ok(None)
+    }
+}
+
+// Every page's caller is a clerk, who reads products and suppliers.
+struct Clerk;
+
+#[async_trait]
+impl PageAuthenticator for Clerk {
+    async fn principal(&self, _cx: &Cx) -> Result<Option<Principal>, ApiError> {
+        Ok(Some(Principal::new("clerk", ["orders", "products.read"])))
+    }
+}
+
+fn app(shop: &Arc<Shop>) -> Router {
+    let implementations = Implementations {
+        order: Arc::clone(shop) as _,
+        product: Arc::clone(shop) as _,
+        review: Arc::clone(shop) as _,
+        site: Arc::clone(shop) as _,
+        supplier: Arc::clone(shop) as _,
+        authenticator: Arc::new(NoRequests),
+    };
+    Router::builder().discover().app_context(Settings::new().title("Shop console")).fixture_console_api(implementations, Clerk).build()
+}
+
+async fn send(router: &Router, method: &str, uri: &str, body: &str) -> (StatusCode, String) {
+    let mut request = http::Request::builder().method(method).uri(uri);
+    if method == "POST" {
+        request = request.header(header::CONTENT_TYPE, "application/x-www-form-urlencoded");
+    }
+    let response = router.handle(request.body(Body::from(body.to_owned())).unwrap()).await;
+    let status = response.status();
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    (status, String::from_utf8(bytes.to_vec()).unwrap())
+}
+
+#[tokio::test]
+async fn a_reference_to_a_dependencys_type_offers_and_names_its_items() {
+    let shop = Arc::new(Shop(Mutex::new(vec![product(ANVIL, "Anvil", "acme"), product(BUCKET, "Bucket", "bolt")])));
+    let app = app(&shop);
+    // The rows and a product's page name its supplier, the dependency's
+    // type, through listSuppliers.
+    let (status, list) = send(&app, "GET", "/console/products", "").await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert!(list.contains(r#"<td data-field="supplierId">Acme</td>"#) && list.contains(r#"<td data-field="supplierId">Bolt</td>"#), "{list}");
+    let anvil = serde_json::to_value(uuid(ANVIL)).unwrap().as_str().unwrap().to_owned();
+    let (_, item) = send(&app, "GET", &format!("/console/products/{anvil}"), "").await;
+    assert!(item.contains("<dd>Acme</dd>"), "{item}");
+    // The new product's supplier is a select of the suppliers, by name.
+    let (status, new) = send(&app, "GET", "/console/products/new", "").await;
+    assert_eq!(status, StatusCode::OK, "{new}");
+    assert!(new.contains(r#"<select id="product-input-supplier-id" name="supplierId" required"#), "{new}");
+    assert!(new.contains(r#"<option value="acme">Acme</option><option value="bolt">Bolt</option>"#), "{new}");
+    let (status, placed) = send(&app, "POST", "/console/products/new", "name=Crate&sku=crate&supplierId=bolt").await;
+    assert_eq!(status, StatusCode::SEE_OTHER, "{placed}");
+    assert_eq!(shop.0.lock().unwrap().last().map(|product| product.supplier_id.clone()).as_deref(), Some("bolt"));
+    // The trail names a supplier through the reference of its products'
+    // route.
+    let (_, products) = send(&app, "GET", "/console/suppliers/bolt/products", "").await;
+    assert!(products.contains("<li><span>Bolt</span></li>"), "{products}");
+    assert!(products.contains(">Bucket</th>") && products.contains(">Crate</th>"), "{products}");
 }
 `
