@@ -2097,6 +2097,7 @@ dependencies = [
  "base64 0.22.1",
  "bytes",
  "deadpool-postgres",
+ "futures-core",
  "http",
  "http-body-util",
  "native-tls",
