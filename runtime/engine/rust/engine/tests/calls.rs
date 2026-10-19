@@ -504,9 +504,10 @@ fn deploy_publishes_a_document_once_and_health_reads_the_engine() {
                 json!([{"name": "Order", "namespace": "default", "version": 1, "defined": false, "published": false}])
             )
         );
-        let (code, message) = refused(call(&engine, "deploy", None, &[json!({})]));
-        assert_eq!(code, EngineErrorCode::InvalidArgument);
-        assert!(message.contains("a list of schema documents"), "{message}");
+        assert!(matches!(
+            call(&engine, "deploy", None, &[json!({})]),
+            Err(Error::Usage(message)) if message.contains("a list of schema documents")
+        ));
         let health = call(&engine, "health", None, &[]).unwrap().unwrap();
         assert_eq!(
             (&health["ready"], &health["closed"], &health["poisoned"]),

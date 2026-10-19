@@ -577,12 +577,13 @@ pub fn call_with(
 /// or its text. It returns, per document, its `name`, the `namespace` and
 /// live `version` after the deploy, whether it was `defined` (false when
 /// the live version had its hash) and whether a version was `published`.
+/// Arguments of another shape are a usage error (`TypeError`), as a host's
+/// misuse is, and a document the engine refuses its refusal.
 pub fn deploy(engine: &Engine, args: &[Value]) -> Result<Value> {
     let Some(Value::Array(documents)) = args.first() else {
-        return Err(EngineError::invalid_argument(
+        return Err(Error::usage(
             "deploy takes [documents, { namespace? }]: a list of schema documents",
-        )
-        .into());
+        ));
     };
     let namespace = args
         .get(1)
@@ -598,18 +599,14 @@ pub fn deploy(engine: &Engine, args: &[Value]) -> Result<Value> {
     for given in documents {
         let document: Cow<'_, Value> = match given {
             Value::String(text) => Cow::Owned(serde_json::from_str(text).map_err(|error| {
-                EngineError::invalid_argument(format!(
-                    "deploy: a schema document's text is JSON: {error}"
-                ))
+                Error::usage(format!("deploy: a schema document's text is JSON: {error}"))
             })?),
             other => Cow::Borrowed(other),
         };
         let name = document
             .get("name")
             .and_then(Value::as_str)
-            .ok_or_else(|| {
-                EngineError::invalid_argument("deploy: a schema document names its schema (name)")
-            })?
+            .ok_or_else(|| Error::usage("deploy: a schema document names its schema (name)"))?
             .to_owned();
         let hash = json::canonical_json(&document)
             .map(|canonical| json::sha256_hex(&canonical))
