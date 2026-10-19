@@ -3594,6 +3594,14 @@
           "default": "",
           "type": "string"
         },
+        "maxBackoff": {
+          "default": "",
+          "type": "string"
+        },
+        "retain": {
+          "default": "",
+          "type": "string"
+        },
         "retries": {
           "type": "integer"
         }

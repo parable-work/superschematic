@@ -23,7 +23,7 @@ export abstract class Order {
 }
 
 // Placed when an order is: the worker that fulfils orders handles it.
-@queue({ retries: 3, backoff: "1m", lease: "2m" })
+@queue({ retries: 3, backoff: "1m", maxBackoff: "200s", lease: "2m", retain: "1h" })
 export abstract class OrderPlaced {
   orderId: Identity.UUID;
 
@@ -41,7 +41,7 @@ export abstract class OrderPlaced {
 }
 
 // Sent when nobody asked for anything in particular.
-@queue()
+@queue({ retain: "0s" })
 export abstract class Ping {
   sentAt: Nullable<Temporal.DateTime>;
 }
