@@ -227,6 +227,37 @@ func TestRenamesTable(t *testing.T) {
 	}
 }
 
+// TestNestedAttributeFields: the plugin framework's single nested attribute
+// has no element, and its auto-aliasing entry lists its list fields
+// directly, as pulumi-cloudflare's account token's condition does. The
+// bridge pluralizes a list there, `in` to `ins`, as it does in a block.
+func TestNestedAttributeFields(t *testing.T) {
+	schema := `{"name": "gcp", "resources": {"gcp:test/widget:Widget": {"inputProperties": {
+		"condition": {"$ref": "#/types/gcp:test/WidgetCondition:WidgetCondition"}
+	}, "requiredInputs": []}}, "types": {
+		"gcp:test/WidgetCondition:WidgetCondition": {"type": "object", "properties": {"requestIp": {"$ref": "#/types/gcp:test/WidgetIp:WidgetIp"}}},
+		"gcp:test/WidgetIp:WidgetIp": {"type": "object", "properties": {"ins": {"type": "array", "items": {"type": "string"}}}}
+	}}`
+	metadata := `{"auto-aliasing": {"resources": {"google_test_widget": {"current": "gcp:test/widget:Widget", "fields": {
+		"condition": {"fields": {"request_ip": {"fields": {"in": {"maxItemsOne": false}}}}}
+	}}}}}`
+	dir, fetch := fixture(t, schema, metadata)
+	if err := Run(dir, pinFile, "", false, fetch); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "test.widget.Widget.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var s providerschema.Schema
+	if err := json.Unmarshal(data, &s); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.Terraform.Renames["condition.requestIp.ins"]; got != "in" {
+		t.Errorf("condition.requestIp.ins renames to %q, want in; renames %v", got, s.Terraform.Renames)
+	}
+}
+
 func TestUnmatchedList(t *testing.T) {
 	metadata := strings.Replace(fixtureMetadata, `"env": {"maxItemsOne": false},`, "", 1)
 	dir, fetch := fixture(t, fixtureSchema, metadata)

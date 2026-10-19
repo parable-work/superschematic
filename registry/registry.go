@@ -150,6 +150,11 @@ type (
 	PlannedChange    = registry.PlannedChange
 	StackEnvironment = registry.StackEnvironment
 
+	// A Provisioner that is a SecretOutputReader reads a secret output of
+	// an applied node, which a bootstrap hands on: the cloudflare target's
+	// CI tokens (D64).
+	SecretOutputReader = registry.SecretOutputReader
+
 	// The seams the cloud half of the `stack` commands drives
 	// (docs/stack-model.md, sections 7.3 and 11): a target's StateStore
 	// keeps its provisioner's state backend and each Run's deploy

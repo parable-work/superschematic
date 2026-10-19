@@ -544,15 +544,20 @@ type FakeBootstrap struct {
 
 var _ registry.Bootstrapper = (*FakeBootstrap)(nil)
 
-// Bootstrap records the environment, the repository and the credentials'
-// secrets, and returns Values.
+// Bootstrap records the environment, the repository, the credentials'
+// secrets and, when it was asked to store the CI's secrets, `github`, and
+// returns Values.
 func (b *FakeBootstrap) Bootstrap(_ context.Context, req registry.BootstrapRequest) (*registry.BootstrapResult, error) {
 	var secrets []string
 	for _, c := range req.Credentials {
 		secrets = append(secrets, c.Secret)
 	}
 	if b.log != nil {
-		b.log.Record("bootstrap %s: repository %s, credentials %s", req.Environment.Environment, req.Repository, strings.Join(secrets, ", "))
+		github := ""
+		if req.GitHub {
+			github = ", github"
+		}
+		b.log.Record("bootstrap %s: repository %s, credentials %s%s", req.Environment.Environment, req.Repository, strings.Join(secrets, ", "), github)
 	}
 	if len(b.Values) == 0 {
 		return nil, nil

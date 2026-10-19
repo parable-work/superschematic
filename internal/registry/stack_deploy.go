@@ -146,8 +146,22 @@ type BootstrapRequest struct {
 	Provisioner Provisioner
 	Dir         string
 
+	// GitHub asks the bootstrap to store what the generated CI signs in
+	// with as the GitHub repository's Actions secrets, at the scopes the
+	// target's CI seam names: the cloudflare target's tokens and its
+	// state's passphrase, through `gh` (D64). A target whose CI signs in
+	// without a secret, as gcp's does, ignores it.
+	GitHub bool
+
 	// Log receives progress. Nothing secret is written to it.
 	Log io.Writer
+
+	// Reveal receives what the bootstrap shows the person once and keeps
+	// nowhere they can read it back: a passphrase it generated, or a token
+	// it could not hand to `gh` (D64). The CLI writes it to stdout. A
+	// bootstrap that would need it and has none refuses before it makes the
+	// value.
+	Reveal io.Writer
 }
 
 // Bootstrapper prepares the cloud project an environment deploys to, once,

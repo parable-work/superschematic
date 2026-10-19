@@ -4391,8 +4391,11 @@ export abstract class Staging {}
   `PULUMI_CONFIG_PASSPHRASE`, in the shell that runs the `stack` commands,
   as gcp's commands use the shell's application default credentials.
 
-`stack init --cloudflare-account <id>` writes `src/cloudflare-target.ts`
-with the target's types, as it writes gcp's (D59):
+`stack init --cloudflare-account <id>` writes the environment and
+`src/cloudflare-target.ts` with the target's types, as it writes gcp's
+(D59). At a terminal, init asks for a cloudflare environment and its
+account when no gcp one is added. The values line is the one built; the
+settings lines come with the platforms:
 
 ```ts
 declare module "@superschematic/stack" {
@@ -4442,18 +4445,24 @@ so a callee exists before any caller's version binds to it, and the waves
 **State.**
 - Pulumi's backend is `s3://superschematic-state` on R2's S3 endpoint,
   `https://<accountId>.r2.cloudflarestorage.com`, with region `auto` and
-  path-style addressing. One bucket serves every stack in the account.
+  path-style addressing:
+  `s3://superschematic-state?endpoint=<endpoint>&region=auto&use_path_style=true`
+  (`cloudflare.StateURL`), the AWS SDK v2 parameters of the CLI's blob
+  store. One bucket serves every stack in the account.
 - At each run, the store verifies the token through
   `GET /accounts/{id}/tokens/verify`, falling back to
   `/user/tokens/verify` for a user token, and returns `StateBackend.Env`:
   - `AWS_ACCESS_KEY_ID` is the token's id;
   - `AWS_SECRET_ACCESS_KEY` is the hex SHA-256 of its value;
   - `PULUMI_CONFIG_PASSPHRASE` comes from the shell.
-- A run without the passphrase is refused before Pulumi starts, with what
-  to set.
+- A run without the passphrase, or without a token, is refused before
+  Pulumi starts, with what to set.
 - Deploy manifests are written to
   `superschematic/manifests/<stack>/<run>.json` and to a history copy,
-  `…/<run>/<RFC 3339>.json`, since R2 keeps no versions.
+  `…/<run>/<RFC 3339>.json`, in UTC to the millisecond, since R2 keeps no
+  versions. The copy is written first, so every manifest that was ever
+  current has one, and a destroy deletes the current one and keeps the
+  history.
 - Bundles are kept under `superschematic/bundles/<stack>/<deployable>/<hex>/`
   and site files under `superschematic/sites/<stack>/<site>/<hex>/`. Each
   prefix gets a marker object written last, as gcp's site publisher does,
@@ -4478,30 +4487,57 @@ It then:
      below.
    - With one, it checks it against `superschematic/passphrase-check`, an
      object holding a random salt and an HMAC of it under the passphrase,
-     which bootstrap writes on its first run.
-4. finds the account's Secrets Store, or creates it;
+     which bootstrap writes on its first run: JSON, `{salt, hmac}`, each
+     hex, the HMAC-SHA256 keyed by the passphrase. A first run with a
+     passphrase in the shell takes that one and writes its check.
+   - The check is written before a generated passphrase is printed, and a
+     bootstrap with nowhere to print one (`BootstrapRequest.Reveal`)
+     refuses before it makes one.
+4. finds the account's Secrets Store, or creates it: the one the values'
+   `secretsStoreId` names, which must exist, else the one named
+   `default_secrets_store`, else the account's only one; with several and
+   none of those, it refuses and says to set `secretsStoreId`. It creates
+   `default_secrets_store`, the name the dashboard gives an account's
+   first;
 5. applies the bootstrap graph in Pulumi project `<stack>-bootstrap`, a
    stack per account:
-   - **`<stack>-deployer`**, an `accountToken` with edit on the account's
-     Workers scripts, D1, Workers R2 storage, Secrets Store and account API
-     tokens, and on each environment zone's Workers routes and DNS.
-     Bucket edges mint tokens, so the deployer, like gcp's, can grant
-     itself more.
-   - **`<stack>-planner`**, an `accountToken` with read on those, and
-     object read and write on the state bucket alone, since a preview
-     takes the stack's lock.
-   - Permission group ids are read from the API before the graph renders;
-     the golden holds fixed ids.
+   - **`<stack>-deployer`**, an `accountToken` with `Workers Scripts
+     Write`, `D1 Write`, `Workers R2 Storage Write`, `Secrets Store Write`
+     and `Account API Tokens Write` on the account, and `Workers Routes
+     Write` and `DNS Write` on every zone of the account. Bucket edges
+     mint tokens, so the deployer, like gcp's, can grant itself more.
+   - **`<stack>-planner`**, an `accountToken` with the `Read` group of
+     each, and `Workers R2 Storage Bucket Item Write` on the state bucket
+     alone, `com.cloudflare.edge.r2.bucket.<accountId>_default_superschematic-state`,
+     since a preview takes the stack's lock.
+   - Both reach every zone of the account rather than each environment's:
+     the graph is one per account, and two environments of one account may
+     hold their domains in different zones, which a per-environment list
+     would swap at each bootstrap.
+   - Permission group ids are read from the API before the graph renders,
+     by name, preferring the group of the policy's scope; a name the API
+     does not list is refused. The golden holds fixed ids.
 6. with `--github`, sets each token and the passphrase as the workflow's
-   secrets with `gh secret set`, at the scopes the CI seam names. Without
-   `gh`, it prints the commands and each token once.
+   secrets with `gh secret set`, at the scopes the CI seam names: a plain
+   environment's planner and deployer secrets, a parameterized one's
+   deployer secrets alone. It creates the deploy job's GitHub environment
+   first when it is missing (`gh api --method PUT`), since a secret of a
+   missing environment cannot be set. It reads the tokens' values from
+   the bootstrap graph's state through `registry.SecretOutputReader`, a
+   provisioner's optional read of a secret output, which the Pulumi
+   provisioner implements over `stack export --show-secrets`. Without
+   `gh` on PATH, signed in, it prints the commands and each token once, to
+   `BootstrapRequest.Reveal`, and the passphrase not at all. Without
+   `--github` it touches no token and says how to set them.
 7. returns `workersSubdomain`, from `GET /accounts/{id}/workers/subdomain`,
    and `secretsStoreId` beside `accountId`. An account without a
    workers.dev subdomain is told to make one in the dashboard; bootstrap
    does not choose it.
 
 **CI.** `TargetSpec.CI` returns kind `cloudflare-api-token`, whose fields
-`token` and `passphrase` name GitHub secrets:
+`token` and `passphrase` name GitHub secrets, and `environment`, set for a
+deploy job's, the GitHub environment that holds them. `<ENV>` is the
+environment's name in upper case, its words joined by underscores:
 
 | Job | Token secret | Passphrase secret |
 | --- | --- | --- |
@@ -4510,7 +4546,9 @@ It then:
 | A preview job | `CLOUDFLARE_PREVIEW_TOKEN_<ENV>`, a repository secret | `PULUMI_CONFIG_PASSPHRASE_<ENV>`, a repository secret |
 
 The `github` renderer learns the kind and writes job-level `env` from
-those secrets, with no action. Deploy and preview jobs of an environment
+those secrets, `CLOUDFLARE_API_TOKEN` and `PULUMI_CONFIG_PASSPHRASE`, with
+no action and no `id-token: write`; it refuses a field that is no
+secret's name. Deploy and preview jobs of an environment
 with a Workers server or job set up Bun and install the workspace, as a
 site's do. With a D1 database, they also install `superschematic-migrate`
 from the release, checked against `SHA256SUMS`. `check` runs
@@ -4521,10 +4559,15 @@ are as sensitive as those keys.
 
 ### 18.4 Secrets
 
-The secret store keeps values in the Secrets Store:
-- **`Set`** creates or updates the secret. It needs no deploy first: a
-  secret exists apart from any Worker.
-- **`Exists` and `List`** read names, never values.
+The secret store keeps values in the Secrets Store the environment's
+`secretsStoreId` names, one secret per secret identity per environment,
+`<Stack>-<Environment>-<Type>-<FIELD>` (`cloudflare.SecretName`), which a
+parameterized environment's members share:
+- **`Set`** creates or updates the secret, created with the `workers`
+  scope. It needs no deploy first, since a secret exists apart from any
+  Worker, but it needs bootstrap's `secretsStoreId`.
+- **`Exists` and `List`** read names, never values; `List` reads the
+  environment's names with one search.
 - **`Get`** refuses: the Secrets Store gives a value to a Worker alone,
   and no cloudflare environment has a platform credential to read.
 
@@ -4760,8 +4803,10 @@ step. Cloudflare finds the zone by the hostname within the account,
 writes the record and issues the certificate, so the Workers and site
 platforms return no `Records` and the DNS platform writes nothing for
 them. The rule `domain-on-cloudflare` refuses an environment with a
-domain whose DNS platform is not `cloudflare`, or whose zone the token
-cannot reach. Without a domain, an exposed Worker turns on workers.dev.
+domain whose DNS platform is not `cloudflare`, a manual one included.
+Whether the token reaches the zone only Cloudflare knows, so a deploy
+finds that out. On this target the DNS platform names no credential: the
+run's token carries the zone. Without a domain, an exposed Worker turns on workers.dev.
 
 ### 18.12 Resource graph and provider
 
@@ -4769,7 +4814,11 @@ The pin grows by `worker`, `workerVersion`, `workersDeployment`,
 `workersCustomDomain`, `workersCronTrigger`, `d1Database`, `r2Bucket`,
 `r2BucketLifecycle` and `accountToken`, and later `hyperdriveConfig`,
 written by `go run ./internal/tools/providerschemas` in
-`extensions/cloudflare`. The `tls` provider's pin comes with the generic
+`extensions/cloudflare`. `accountToken` is pinned, for bootstrap's graph;
+each platform pins its own types as it comes. pulumi-cloudflare's bridge
+metadata lists a single nested attribute's list fields with no element,
+which `pintool` reads, so the token's `condition.requestIp.ins` pins as
+Terraform's `in`. The `tls` provider's pin comes with the generic
 connector. No provider node exists: every node names `accountId`, and the
 provider reads the token from the run's environment.
 

@@ -34,7 +34,7 @@ const zoneID = "0123456789abcdef0123456789abcdef"
 
 func assemble(t *testing.T) *registry.Registry {
 	t.Helper()
-	reg, err := registry.Assemble(registry.DefaultNaming(), &stacktest.Extension{}, cloudflare.Extension{})
+	reg, err := registry.Assemble(registry.DefaultNaming(), &stacktest.Extension{}, cloudflare.Extension{}, pulumiStub{})
 	if err != nil {
 		t.Fatalf("assemble: %v", err)
 	}

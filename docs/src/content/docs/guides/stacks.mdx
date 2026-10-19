@@ -28,13 +28,14 @@ balancer and DNS resources that the Pulumi provisioner applies.
 | Built | Not built yet |
 | --- | --- |
 | the Stack kind and `@superschematic/stack`; every build resolves each environment to `environment.json` | |
-| [`stack init`](#start-a-stack): a Stack service over the tree's APIs and sites, `Dev` and a gcp environment, the target's types, `outputs.ci` and the ignore rules | a stack written in YAML or JSON; an environment on a target other than gcp |
+| [`stack init`](#start-a-stack): a Stack service over the tree's APIs and sites, `Dev` and a gcp or cloudflare environment, the target's types, `outputs.ci` and the ignore rules | a stack written in YAML or JSON |
 | `calls` in an API's config, and a build ordered by output | |
 | Go, TypeScript and Rust: derived config fields in `EnvConfig`, a typed `Deps`, the implementation scaffold, and each server's entrypoint and Dockerfile, which reaches Cloud SQL with IAM database authentication where an environment places its database there | OpenTelemetry export |
 | the core's `local` target and `stack dev` | restarting a server that exits; key rotation |
 | the gcp target, with `stack bootstrap`, `secrets set`, `build`, `plan`, `deploy`, `destroy` and `outputs`; image builds on Cloud Build; each migration phase as a Cloud Run job that also grants the servers their privileges | a deploy lock beyond the provisioner's and the runner's |
 | the Pulumi provisioner and the typed bindings generator | |
 | the Cloudflare DNS platform, linked in the installed binary; bootstrap stores its API token and deploys read it | |
+| [the cloudflare target](#deploy-to-cloudflare)'s groundwork: its values, its state in R2, its secrets in the Secrets Store, `stack bootstrap` with the CI's account tokens and `--github`, and the generated CI's sign-in | its Workers, Cron, D1, R2 and site platforms, so no environment on it resolves a deployable yet |
 | `@requireService` and `@allowService`, and the stack's check that every `calls` edge reaches an operation | the callee's half of service auth: a server whose API has a service clause does not start yet |
 | [generated CI](#generated-ci): `outputs.ci` writes a GitHub Actions workflow that checks, plans, previews and deploys the stack, signing in to gcp through Workload Identity Federation | other CI systems; a check that the committed workflow is current |
 | [buckets](/superschematic/guides/buckets/): the `Bucket` kind, `buckets` in an API's config, the `bucket` deployable and edge, a provider-neutral bucket in `Deps` over GCS with signed URLs, fake-gcs-server under `stack dev`, and on gcp a private Cloud Storage bucket | a bucket for a Rust server, job or worker; a bucket on another provider |
@@ -96,7 +97,10 @@ export abstract class Staging {}
   project and a region, a second environment runs on gcp, `Staging`
   unless `--environment` names it, and `src/gcp-target.ts` types its
   values and settings for tsc ([Type a target's values](#type-a-targets-values)).
-  Only the installed binary links gcp; the core alone refuses one.
+  Given a Cloudflare account's id instead, `--cloudflare-account <id>`,
+  it runs on [cloudflare](#deploy-to-cloudflare), with
+  `src/cloudflare-target.ts`. Only the installed binary links gcp and
+  cloudflare; the core alone refuses either.
 - **The name** is `--name`, else the first word the deployed services'
   names share and `-stack`, else the naming file's `npm_scope`, else the
   project's directory.
@@ -118,8 +122,8 @@ repository's `dist/` still hides the lockfile, init adds `!/dist/` to take
 the directory back. Running init again adds nothing.
 
 At a terminal it asks for each value no flag gives: the name, whether to
-add a gcp environment, its name, project and region, CI, and what to
-expose, each with a default from the tree or from `gcloud config`.
+add a gcp environment, its name, project and region, or else a cloudflare
+one and its account, CI, and what to expose, each with a default from the tree or from `gcloud config`.
 Without a terminal it takes the flags and the defaults, so `stack init`
 alone writes `Dev` alone. A tree with a Stack service already needs
 `--force`, which replaces the stack of the same name or writes another
@@ -1367,6 +1371,85 @@ and the URL of its logs, where the runner's error is. The
 [CLI reference](/superschematic/reference/cli/#stack-deploy-environment)
 has every flag, the hazard gate and the manifest.
 
+## Deploy to Cloudflare
+
+The cloudflare target is `extensions/cloudflare`, linked in the installed
+binary beside its DNS platform (D64). An environment on it runs on one
+Cloudflare account, which its values name:
+
+```ts
+@environment({
+  target: "cloudflare",
+  cloudflare: { accountId: "0123456789abcdef0123456789abcdef" },
+  domain: "staging.acme.dev",
+  dns: { cloudflare: { zone: "acme.dev", zoneId: "023e105f4ecef8ad9ca31a8372d0c353" } },
+})
+export abstract class Staging {}
+```
+
+`accountId` is 32 hexadecimal digits, from the dashboard. `stack
+bootstrap` records `workersSubdomain`, the account's workers.dev
+subdomain, and `secretsStoreId`, its Secrets Store's, beside it, and you
+may correct either by hand. A domain must be on the `cloudflare` DNS
+platform, the target's default: the rule `domain-on-cloudflare` refuses
+any other. On this target the DNS platform names no credential, since the
+run's own token reaches the zone. `stack init --cloudflare-account <id>`
+writes the environment and `src/cloudflare-target.ts`.
+
+The target's Workers, Cron, D1, R2 and site platforms are not built yet,
+so an environment on it resolves no deployable. What is built is what
+they deploy through:
+
+- **The token and the passphrase.** Every `stack` command reads the API
+  token from `CLOUDFLARE_API_TOKEN` and the state's passphrase from
+  `PULUMI_CONFIG_PASSPHRASE`, in the shell, as gcp's commands read
+  application default credentials. Neither is ever written to a file.
+- **The state.** One R2 bucket per account, `superschematic-state`, holds
+  Pulumi's state for every stack in it, through Pulumi's S3 backend on
+  `https://<accountId>.r2.cloudflarestorage.com`, region `auto`,
+  path-style. Each run verifies the token, and hands the provisioner the
+  token's S3 credentials, its id and the SHA-256 of its value, and the
+  passphrase, which encrypts the secrets in the state. A run without a
+  token or a passphrase is refused before Pulumi starts. The deploy
+  manifests are in the same bucket under
+  `superschematic/manifests/<stack>/`, each written twice, as
+  `<run>.json` and as a copy under `<run>/` named by the time it was
+  written, since R2 keeps no versions.
+- **Secrets.** Each secret is one in the account's Secrets Store per
+  environment, `<Stack>-<Environment>-<Type>-<FIELD>`, which the members
+  of a parameterized environment share. `stack secrets set` writes it,
+  and needs no deploy first, only bootstrap. Nothing reads a value back:
+  the Secrets Store gives it only to a Worker that binds it.
+
+`stack bootstrap <environment>` runs once per account with your own token,
+one that reads the account, creates R2 buckets and account API tokens,
+and creates or reads the Secrets Store. It is safe to run again:
+
+1. it verifies the token, an account token or a user token;
+2. it creates the state bucket;
+3. on the account's first bootstrap, it generates the passphrase, 32
+   random bytes, and prints it once: keep it in your password manager,
+   and set it in `PULUMI_CONFIG_PASSPHRASE` from then on. Each later run
+   checks the passphrase in the shell against
+   `superschematic/passphrase-check` in the bucket, a salt and its HMAC
+   under the passphrase, and refuses another. Set a passphrase of your own
+   before the first run to have it take that one instead;
+4. it finds the account's Secrets Store, or creates it;
+5. it applies two account tokens for the CI in the Pulumi project
+   `<stack>-bootstrap`, a stack per account: `<stack>-deployer`, which
+   edits the account's Workers scripts, D1, R2, Secrets Store and account
+   API tokens and the Workers routes and DNS of its zones, and
+   `<stack>-planner`, which reads all of that and writes the objects of
+   the state bucket alone, since a preview takes the stack's lock;
+6. with `--github`, it sets each token and the passphrase as the
+   repository's GitHub Actions secrets with `gh`, at the scopes the
+   [generated CI](#generated-ci) reads them from, and creates the deploy
+   job's GitHub environment when it is missing. Without `gh` on PATH,
+   signed in, it prints the `gh secret set` commands and each token once;
+7. it records `secretsStoreId` and `workersSubdomain` beside `accountId`.
+   An account with no workers.dev subdomain yet is told to choose one in
+   the dashboard.
+
 ## Generated CI
 
 A stack opts in to a generated CI workflow in its config, under the name
@@ -1462,6 +1545,23 @@ run:
 gcp: { project: "acme-staging", projectNumber: "123456789012", region: "us-east1" }
 ```
 
+On cloudflare a job signs in with a long-lived account token, since
+Cloudflare offers no federation, and the state's passphrase, each a
+GitHub Actions secret `stack bootstrap --github` sets. No action signs
+in: the job's `env` reads them into `CLOUDFLARE_API_TOKEN` and
+`PULUMI_CONFIG_PASSPHRASE`, and the job asks GitHub for no identity token.
+
+| Job | Token | Passphrase |
+| --- | --- | --- |
+| a plain environment's deploy job | `CLOUDFLARE_API_TOKEN`, a secret of the GitHub environment of its name: the deployer's | `PULUMI_CONFIG_PASSPHRASE`, in the same GitHub environment |
+| a plan job | `CLOUDFLARE_PLANNER_TOKEN_<ENV>`, a repository secret: the planner's | `PULUMI_CONFIG_PASSPHRASE_<ENV>`, a repository secret |
+| a preview job | `CLOUDFLARE_PREVIEW_TOKEN_<ENV>`, a repository secret: the deployer's | `PULUMI_CONFIG_PASSPHRASE_<ENV>`, a repository secret |
+
+`<ENV>` is the environment's name in upper case, its words joined by
+underscores: `Staging` is `STAGING`. A plan job's credentials decrypt the
+state, and so every secret in it, so they are as sensitive as the
+deployer's.
+
 The cloud jobs also install the tools the environment's provisioner runs:
 the `pulumi` CLI at the release of the Pulumi SDK the binary links.
 
@@ -1512,7 +1612,9 @@ never a value.
 The installed binary links the Cloudflare extension, with its provider
 pin. `stack bootstrap` asks for the token and stores it in the target's
 secret store, and `plan`, `deploy`, `destroy` and `outputs` set
-`CLOUDFLARE_API_TOKEN` from it for each run. A distribution of your own
+`CLOUDFLARE_API_TOKEN` from it for each run. An environment on the
+[cloudflare target](#deploy-to-cloudflare) names no such credential: the
+token in the shell, or CI's, reaches the zone. A distribution of your own
 links it the same way:
 
 ```go

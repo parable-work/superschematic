@@ -257,15 +257,26 @@ type aliasField struct {
 	Elem *struct {
 		Fields map[string]*aliasField `json:"fields"`
 	} `json:"elem"`
+
+	// Fields holds the list fields of a single nested attribute, an object
+	// to which the Terraform plugin framework gives no element:
+	// pulumi-cloudflare's account token's `condition` and its `request_ip`,
+	// whose list `in` the bridge pluralizes to `ins`.
+	Fields map[string]*aliasField `json:"fields"`
 }
 
 func (f *aliasField) list() bool { return f.MaxItemsOne != nil && !*f.MaxItemsOne }
 
+// elemFields returns the fields of a block's element, or of a single
+// nested attribute.
 func (f *aliasField) elemFields() map[string]*aliasField {
-	if f == nil || f.Elem == nil {
+	switch {
+	case f == nil:
 		return nil
+	case f.Elem != nil:
+		return f.Elem.Fields
 	}
-	return f.Elem.Fields
+	return f.Fields
 }
 
 func parseUpstream(pkg string, schemaJSON, metadataJSON []byte) (*upstream, error) {

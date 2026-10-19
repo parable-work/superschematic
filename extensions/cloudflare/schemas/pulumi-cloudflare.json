@@ -14,6 +14,7 @@
     }
   ],
   "types": [
+    "cloudflare:index/accountToken:AccountToken",
     "cloudflare:index/dnsRecord:DnsRecord"
   ]
 }

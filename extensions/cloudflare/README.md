@@ -1,10 +1,13 @@
 # extensions/cloudflare
 
 The Cloudflare extension of the stack model
-([docs/stack-model.md](../../docs/stack-model.md), sections 6.8 and 6.9).
-In v1 it registers one DNS platform, `cloudflare`, which writes an
+([docs/stack-model.md](../../docs/stack-model.md), sections 6.9 and 18,
+D64). It registers the DNS platform `cloudflare`, which writes an
 environment's domain records into a Cloudflare zone, whatever target runs
-the environment's servers. Workers and D1 platforms come later, in this
+the environment's servers, and the target `cloudflare`, which runs an
+environment on one Cloudflare account. The target's values, its state in
+R2, its secrets in the Secrets Store, its bootstrap and its CI identity
+are built; its Workers, Cron, D1, R2 and site platforms come next, in this
 module.
 
 It is a Go module of its own, as `extensions/gcp` and `extensions/pulumi`
@@ -89,6 +92,32 @@ The DNS platform names it as a credential, which resolution writes into
   `CLOUDFLARE_API_TOKEN` in the environment the provisioner runs the
   pulumi CLI in, for that run only.
 
+## The cloudflare target
+
+An environment names its account; bootstrap records the rest beside it:
+
+```ts
+@environment({
+  target: "cloudflare",
+  cloudflare: { accountId: "0123456789abcdef0123456789abcdef" },
+})
+export abstract class Staging {}
+```
+
+| File | |
+| --- | --- |
+| `cloudflare.go`, `target.go` | the registration, the values, the state's layout in R2 (`StateBucket`, `StateURL`) |
+| `cloud.go`, `sigv4.go` | `Cloud`, what the target calls on Cloudflare outside the provisioner, over the REST API and R2's S3 API with plain `net/http` and SigV4; tests pass a fake |
+| `state.go` | the state store: Pulumi's S3 backend on R2, the passphrase secrets provider, and the manifests with a history copy |
+| `secrets.go` | the secret store over the Secrets Store, `<Stack>-<Environment>-<Type>-<FIELD>` |
+| `bootstrap.go`, `github.go` | bootstrap: the state bucket, the passphrase and its check, the Secrets Store, the deployer and planner account tokens, and `--github` through `gh` |
+| `ci.go` | the CI identity, `cloudflare-api-token`, naming the GitHub secrets each job reads |
+| `policy.go` | `domain-on-cloudflare` |
+
+Every command reads the token from `CLOUDFLARE_API_TOKEN` and the state's
+passphrase from `PULUMI_CONFIG_PASSPHRASE`. On the cloudflare target the
+DNS platform names no credential: the run's token carries the zone.
+
 ## Linking it
 
 A distribution links the extension beside its target and the pulumi
@@ -110,10 +139,12 @@ cli.New(cli.Config{Name: "superschematic"},
 ## Pinned schemas
 
 `schemas/pulumi-cloudflare.json` pins pulumi-cloudflare 6.22.0: the
-digest of each upstream file and the types the DNS platform emits.
+digest of each upstream file and the types the DNS platform and the
+target emit: the DNS record, and the account token of bootstrap's graph.
 `schemas/` holds one file per type, with its Terraform name and renames
-(section 6.4), and the platform registers each as the JSON Schema of its
-type's properties, so resolution checks every record offline. The tool is
+(section 6.4), and the DNS platform and the target register each as the
+JSON Schema of its type's properties, so resolution checks every node
+offline. The tool is
 the gcp target's, shared through `stack/providerschema/pintool`:
 
 ```bash
@@ -130,5 +161,10 @@ a pin at another version.
 
 `go test ./...` resolves the `stack/stacktest` shop stack with its domains
 on Cloudflare, DNS-only in Staging and Preview and proxied in Production,
-against the golden files under `testdata/golden`. Run it with `-update` to
-rewrite them, and review the diff.
+against the golden files under `testdata/golden/stack`, and checks the
+bootstrap graph (`testdata/golden/bootstrap`) and a cloudflare
+environment's workflow (`testdata/golden/ci`, through actionlint when it is
+installed). Bootstrap, the stores and the CI identity run against a fake
+`Cloud`, `gh` and provisioner, and `Cloud` itself against a local stand-in
+for the REST and S3 APIs. Run it with `-update` to rewrite the golden
+files, and review the diff. No test calls Cloudflare.

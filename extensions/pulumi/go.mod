@@ -13,6 +13,9 @@ replace github.com/parable-work/superschematic/ir => ../../ir
 // itself never imports a target.
 replace github.com/parable-work/superschematic/extensions/gcp => ../gcp
 
+// The state tests read the cloudflare target's state backend (D64).
+replace github.com/parable-work/superschematic/extensions/cloudflare => ../cloudflare
+
 // replace directives do not propagate across modules, so the core's pins
 // are repeated here. Keep them equal to the root go.mod.
 replace github.com/microsoft/typescript-go => github.com/parable-work/typescript-go v0.0.0-20260701192534-c5de5679073f
@@ -20,6 +23,7 @@ replace github.com/microsoft/typescript-go => github.com/parable-work/typescript
 require (
 	github.com/blang/semver v3.5.1+incompatible
 	github.com/parable-work/superschematic v0.0.0
+	github.com/parable-work/superschematic/extensions/cloudflare v0.0.0
 	github.com/parable-work/superschematic/extensions/gcp v0.0.0
 	github.com/parable-work/superschematic/ir v0.0.0
 	github.com/pulumi/pulumi/sdk/v3 v3.259.0

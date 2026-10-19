@@ -6632,6 +6632,33 @@ when the storefront and a D1-backed API have run live. Section 18 of
 
 Status: the core's artifacts are built, proved on `stack/stacktest`'s `fake.bundle` platform and fake bundle store: `PlatformSpec.Artifact` and the deployable's `artifact`; `{bundle-digest}`, `{bundle-sha256:<file>}` and `PinBundles`; the bundle's build, digest and publish through `TargetSpec.Bundles`, and its fetch (`registry.ArtifactFetcher`, also on a `SitePublisher`) and placement under the program's `artifacts/`; the manifest's `bundles` and `--bundle`; `StateBackend.Env`; and `TargetSpec.PreDestroy`. The cloudflare target itself is not built.
 
+### D64, amended: the CI's tokens reach every zone of the account, and bootstrap reads them from its graph's state
+
+Building the target's values, state, secrets, bootstrap and CI identity
+met four questions section 18 left open: which zones the CI's tokens
+reach when bootstrap's graph is one per account, how bootstrap reads the
+tokens its graph made when the provisioner's `Outputs` leaves secrets
+out, where it prints what it shows the person once, and how a GitHub
+environment's secrets are set before the environment exists.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The deployer's and the planner's zone permissions reach every zone of the account (`com.cloudflare.api.account.zone.*` under the account). | Each environment's zone, which bootstrap knows only for the environment it runs for: two environments of one account with domains in different zones would swap the list at each bootstrap of the one graph. |
+| A provisioner may also be a `registry.SecretOutputReader`, `SecretOutput(ctx, req, output)`, which reads one top-level output of an applied node, decrypted. The Pulumi provisioner reads it from `stack export --show-secrets`. Bootstrap's `--github` reads the two tokens' `value` with it; the deploy never calls it. | The tokens created through the API outside the graph, which section 18.3 rejected. Exporting the token values as stack outputs, which writes every secret a second time and lets `stack output --show-secrets` read them. Rotating the tokens at each `--github`, which breaks the CI between the rotation and the secrets' write. |
+| `BootstrapRequest` gains `GitHub`, set by `stack bootstrap --github`, and `Reveal`, where a bootstrap prints what it shows the person once: the CLI's stdout. The progress `Log` still holds no secret. A bootstrap that would generate a passphrase and has no `Reveal` refuses before it makes one. | The log, which the CLI writes to stderr beside progress that the promise says holds no secret. A file, which outlives the terminal. |
+| `--github` creates the deploy job's GitHub environment when it is missing (`gh api --method PUT repos/<repo>/environments/<name>`), and sets each secret with `gh secret set`, its value on stdin. A plain environment gets its planner's and deployer's secrets, a parameterized one its deployer's alone. Without `--github`, bootstrap touches no token. | Asking the person to create the environment, which `gh secret set --env` needs first. Printing the tokens on every bootstrap without `--github`, which repeats a long-lived secret on each run. |
+| The `cloudflare-api-token` identity's optional `environment` field names the GitHub environment that holds a deploy job's secrets, which bootstrap's scopes read. A job with such an identity gets no `id-token: write`. | One field set per kind, leaving bootstrap to know the renderer's rule for scopes. |
+| The Secrets Store bootstrap keeps is the one `secretsStoreId` names, else `default_secrets_store`, else the account's only one; with several it refuses. The secret store needs `secretsStoreId` for every call, so `stack secrets set` needs bootstrap first. | Choosing the first store an account lists, which may be another project's. |
+| `pintool` reads a single nested attribute's list fields, which pulumi-cloudflare 6's auto-aliasing table lists with no element, so the account token's `condition.requestIp.ins` pins as Terraform's `in`. | Leaving `condition` out of the pin, which the tool cannot do for one property. |
+
+Status: built, proven offline in `extensions/cloudflare` against a fake
+`Cloud`, a fake `gh` and a fake provisioner; the REST and S3 calls against
+a local stand-in, the S3 signature against AWS's published examples; and
+in `extensions/pulumi`, `SecretOutput` with the random provider and the
+state store's backend reaching the CLI, which signs its first request to a
+local S3 stand-in path-style with the token's id in region `auto`. No call
+has reached Cloudflare or GitHub.
+
 ## D65. A Rust API runs jobs and workers, its workers claim queues through a descriptor its types carry, and each output root builds against a mirror of its implementations
 
 D57 gave a Rust API a server and left out its jobs and workers: the

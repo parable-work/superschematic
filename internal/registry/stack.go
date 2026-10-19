@@ -510,6 +510,18 @@ type Provisioner interface {
 	Outputs(ctx context.Context, req ProvisionRequest) (map[string]map[string]any, error)
 }
 
+// SecretOutputReader is a Provisioner that also reads the value of a secret
+// output of an applied node, which Outputs leaves out: a bootstrap hands
+// the person, or the CI's secret store, a credential its own graph made,
+// such as the cloudflare target's account tokens (D64). The deploy never
+// calls it, since no binding and no manifest holds a secret.
+type SecretOutputReader interface {
+	// SecretOutput returns the string value of one top-level output of a
+	// node of req's environment, applied, or an error when the node or the
+	// output is missing or the value is not a string.
+	SecretOutput(ctx context.Context, req ProvisionRequest, out ir.Output) (string, error)
+}
+
 // ProvisionerSpec registers a provisioner.
 type ProvisionerSpec struct {
 	// Name is the registry key (`pulumi`).

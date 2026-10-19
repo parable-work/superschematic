@@ -25,7 +25,7 @@ The core has nine commands: `build`, `build-all`, `migrate`,
 `json-schema`, `format`, `behaviors`, `engine-client` and the `stack`
 and `identity` groups, beside cobra's own `help` and `completion`. The
 installed `superschematic` links the official extensions (the gcp target, the Cloudflare DNS platform and
-the Pulumi provisioner), which add none. The migration runner,
+target, and the Pulumi provisioner), which add none. The migration runner,
 `superschematic-migrate`, is a binary of its own ([The runner](/superschematic/reference/migrations/#the-runner)),
 and so is the identity runner, `superschematic-identity`
 ([below](#the-identity-runner-superschematic-identity)): each holds the
@@ -529,9 +529,9 @@ types schemas that link to each other.
 ## `stack init [<services-root>]`
 
 Write a Stack service over a tree that already has API services, with a
-local environment, a gcp one when given a project and a region, and the
-ignore rules a stack needs. It writes files and nothing else. The design
-is section 11.1 of
+local environment, a gcp one when given a project and a region or a
+cloudflare one when given an account, and the ignore rules a stack needs.
+It writes files and nothing else. The design is section 11.1 of
 [docs/stack-model.md](https://github.com/parable-work/superschematic/blob/main/docs/stack-model.md),
 and D59 records it; [Stacks](/superschematic/guides/stacks/#start-a-stack)
 walks through it.
@@ -548,9 +548,10 @@ walks through it.
    that has a `tsconfig.json` also has one, `tsconfig.json` extending
    that API's base, `schema.config.ts`, `src/stack.schema.ts`, whose
    `@stack` deploys every API and every Site service and exposes as step 2
-   decided, with `Dev` on the local target and the gcp environment, and,
-   for a gcp environment, `src/gcp-target.ts`, the gcp target's values and
-   settings types read from the JSON Schemas it registers.
+   decided, with `Dev` on the local target and the cloud environment, and
+   the cloud target's values and settings types read from the JSON Schemas
+   it registers: `src/gcp-target.ts` for a gcp environment,
+   `src/cloudflare-target.ts` for a cloudflare one (D64).
 5. Add the ignore rules to the `.gitignore` that covers the schemas root,
    the nearest at or above it in its repository, else a new one in the
    schemas root, anchored there: `/dist/*`, `!/dist/bun.lock` and
@@ -567,22 +568,27 @@ walks through it.
    find it on their own.
 
 At a terminal, init asks for the name, whether to add a gcp environment
-and its name, project and region, whether to turn the GitHub workflow on,
-and what to expose. Each question shows its default in brackets: the
+and its name, project and region, and, when you add none, whether to add
+a cloudflare environment and its name and account, whether to turn the
+GitHub workflow on, and what to expose. Each question shows its default in brackets: the
 tree's, or the project and region gcloud's active configuration names
 (`project`, then `run/region` or `compute/region`), read with no stdin and
 a ten-second deadline, and skipped without `gcloud`. Without a terminal,
 each value comes from its flag or its default, and a gcp environment needs
-both `--gcp-project` and `--region`.
+both `--gcp-project` and `--region`. A cloudflare environment's one value
+is its account, 32 hexadecimal digits from the dashboard; bootstrap
+records the rest.
 
 It refuses a tree with no API service; a tree with a Stack service, unless
-`--force`; a name that is another kind of service's; and a gcp
-environment in a binary that does not link the gcp target, the core
-alone.
+`--force`; a name that is another kind of service's; a gcp project
+beside a Cloudflare account, since init writes one cloud environment; and
+a gcp or cloudflare environment in a binary that does not link its target,
+the core alone.
 
 ```
 superschematic stack init
 superschematic stack init --gcp-project acme-staging --region us-east1 --ci github
+superschematic stack init --cloudflare-account 0123456789abcdef0123456789abcdef --ci github
 superschematic stack init ./schemas/services --name shop-stack --expose shop-api --force
 ```
 
@@ -591,7 +597,8 @@ superschematic stack init ./schemas/services --name shop-stack --expose shop-api
 | `--name` | the first word the deployed services' names share, then `-stack`; else the naming file's `npm_scope`, then `-stack`; else the project directory's | the Stack service's name and directory |
 | `--gcp-project` | none | the Google Cloud project of a gcp environment |
 | `--region` | none | the gcp environment's region, such as `us-east1` |
-| `--environment` | `Staging` | the gcp environment's name, a class name |
+| `--cloudflare-account` | none | the Cloudflare account of a cloudflare environment: its id, 32 hexadecimal digits |
+| `--environment` | `Staging` | the cloud environment's name, a class name |
 | `--ci` | none | the CI renderer `outputs.ci` turns on, `github` |
 | `--expose` | the APIs end users and sites call | the API services to expose, comma-separated, or `none` |
 | `--force` | false | write the stack though the tree has one: replace the Stack service of the same name, its config and `src`, or add another |
@@ -772,10 +779,28 @@ image builds run as, the `migrator` account the migration job runs as,
 and Workload Identity Federation for the GitHub repository, and creates
 the secret of each platform credential the environment needs.
 
+On cloudflare it runs with your token in `CLOUDFLARE_API_TOKEN`, once per
+account: it verifies the token, creates the R2 bucket
+`superschematic-state` that holds the state, finds or creates the
+account's Secrets Store, and applies the `<stack>-deployer` and
+`<stack>-planner` account tokens. On the account's first bootstrap it
+generates the passphrase that encrypts the state's secrets and prints it
+once, on standard output; keep it in your password manager and set it in
+`PULUMI_CONFIG_PASSPHRASE` for every later command. A later run checks
+the passphrase in the shell and refuses another. With `--github` it sets
+the tokens and the passphrase as the repository's GitHub Actions secrets
+through `gh`, at the scopes the [generated
+workflow](/superschematic/guides/stacks/#generated-ci) reads them from,
+creating the deploy job's GitHub environment when it is missing; without
+`gh` on PATH, signed in, it prints the `gh secret set` commands and each
+token once instead.
+
 Then it records in the stack's schema the values only the cloud knows: on
 gcp, the project's number, as `projectNumber` in the gcp values of the
 environment whose declaration sets `project`, the bootstrapped one or the
-nearest one it extends. It writes the value when the schema has none,
+nearest one it extends; on cloudflare, `secretsStoreId` and
+`workersSubdomain` beside `accountId`. An account with no workers.dev
+subdomain yet is told to choose one in the dashboard. It writes the value when the schema has none,
 writes it again when it differs, and leaves the file alone when it
 matches. A TypeScript schema changes in that property's text alone; a
 JSON or YAML schema is not edited. It prints one line per value on
@@ -795,6 +820,7 @@ for each credential with no value, with the terminal's echo off.
 | Flag | Default | Meaning |
 | --- | --- | --- |
 | `--repository` | read from the git remote `origin` | the GitHub repository the CI runs in, `owner/name`; `""` leaves Workload Identity Federation out |
+| `--github` | false | set what the generated CI signs in with as the repository's GitHub Actions secrets, through `gh`: the cloudflare target's tokens and passphrase. gcp's CI signs in with no secret and ignores it |
 
 ### `stack secrets set <environment> [Type.FIELD]`
 

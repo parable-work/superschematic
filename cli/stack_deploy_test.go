@@ -302,6 +302,11 @@ func TestStackCommands(t *testing.T) {
 	assert.Equal(t, `projectNumber 123456789012: not recorded: bootstrap edits no YAML schema; in src/stack.schema.yaml, add projectNumber: "123456789012" beside project in the environment values of Staging`+"\n", out)
 	ext.Bootstrap.Values = nil
 
+	// --github asks the target's bootstrap to store the CI's secrets (D64).
+	_, err = run("bootstrap", "Staging", "--repository", "acme/shop", "--github")
+	require.NoError(t, err)
+	assert.Contains(t, ext.Provisioner.Calls(), "bootstrap Staging: repository acme/shop, credentials , github")
+
 	// destroy asks at a terminal, and runs with --yes.
 	_, err = run("destroy", "Staging")
 	require.ErrorContains(t, err, "pass --yes to destroy Staging")

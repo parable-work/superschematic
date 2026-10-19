@@ -57,6 +57,18 @@ var (
 // application default credentials.
 const gcpWorkloadIdentity = "gcp-workload-identity"
 
+// cloudflareAPIToken is the identity kind of the cloudflare target's CI
+// seam (D64): a long-lived account token and the state's passphrase, each
+// a secret of the workflow, whose names its fields `token` and
+// `passphrase` give. No action signs in with it: the job's env reads both
+// secrets, CLOUDFLARE_API_TOKEN for the provider and the state store, and
+// PULUMI_CONFIG_PASSPHRASE for the state's secrets.
+const cloudflareAPIToken = "cloudflare-api-token"
+
+// secretName is a GitHub Actions secret's name: letters, digits and
+// underscores, not beginning with a digit.
+var secretName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
 // pulumiTool is the pulumi provisioner's CLI, which pulumi/actions
 // installs.
 const pulumiTool = "pulumi"
@@ -98,10 +110,22 @@ type job struct {
 	needs       string
 	cond        string
 	environment string
-	// cloud jobs sign in, so they may ask GitHub for an identity token.
+	// cloud jobs sign in with an identity token they ask GitHub for.
 	cloud       bool
 	concurrency string
-	steps       []step
+	// env is the job's environment variables, in order: what a job whose
+	// identity is a secret of the workflow signs in with (D64).
+	env   [][2]string
+	steps []step
+}
+
+// signedIn is how a cloud job signs in: a step, which may ask GitHub for
+// an identity token, or environment variables the job reads from the
+// workflow's secrets.
+type signedIn struct {
+	step    *step
+	idToken bool
+	env     [][2]string
 }
 
 // step is one step of a job.
@@ -385,7 +409,7 @@ func (g github) typeScriptWorkspace() step {
 // as planner: levels 5 and 6.
 func (g github) plan(env registry.CIEnvironment) (job, error) {
 	e := env.Environment
-	steps, err := g.cloudSetup(env, registry.CIPlanner)
+	steps, in, err := g.cloudSetup(env, registry.CIPlanner)
 	if err != nil {
 		return job{}, err
 	}
@@ -395,8 +419,9 @@ func (g github) plan(env registry.CIEnvironment) (job, error) {
 		name:        "plan " + e.Environment,
 		needs:       "check",
 		cond:        strings.Join([]string{onPullRequest, notClosed, sameRepository}, " && "),
-		cloud:       true,
+		cloud:       in.idToken,
 		concurrency: fmt.Sprintf("%s-plan-%s-%s", g.req.Stack.Name, e.Environment, prNumber),
+		env:         in.env,
 		steps:       steps,
 	}, nil
 }
@@ -406,7 +431,7 @@ func (g github) plan(env registry.CIEnvironment) (job, error) {
 // destroys it when the pull request closes: level 7.
 func (g github) preview(env registry.CIEnvironment) (job, error) {
 	e := env.Environment
-	steps, err := g.cloudSetup(env, registry.CIDeployer)
+	steps, in, err := g.cloudSetup(env, registry.CIDeployer)
 	if err != nil {
 		return job{}, err
 	}
@@ -431,8 +456,9 @@ func (g github) preview(env registry.CIEnvironment) (job, error) {
 		// check does not run when the pull request closes, and the
 		// destroy must run all the same.
 		cond:        fmt.Sprintf("!cancelled() && %s && %s && (%s || needs.check.result == 'success')", onPullRequest, sameRepository, closed),
-		cloud:       true,
+		cloud:       in.idToken,
 		concurrency: fmt.Sprintf("%s-%s-%s", g.req.Stack.Name, e.Environment, prNumber),
+		env:         in.env,
 		steps:       steps,
 	}, nil
 }
@@ -441,7 +467,7 @@ func (g github) preview(env registry.CIEnvironment) (job, error) {
 // after the job before it.
 func (g github) deploy(env registry.CIEnvironment, after string) (job, error) {
 	e := env.Environment
-	steps, err := g.cloudSetup(env, registry.CIDeployer)
+	steps, in, err := g.cloudSetup(env, registry.CIDeployer)
 	if err != nil {
 		return job{}, err
 	}
@@ -456,8 +482,9 @@ func (g github) deploy(env registry.CIEnvironment, after string) (job, error) {
 		needs:       after,
 		cond:        fmt.Sprintf("github.event_name != 'pull_request' && github.ref == 'refs/heads/%s'", g.branch),
 		environment: e.Environment,
-		cloud:       true,
+		cloud:       in.idToken,
 		concurrency: g.req.Stack.Name + "-" + e.Environment,
+		env:         in.env,
 		steps:       steps,
 	}, nil
 }
@@ -465,8 +492,8 @@ func (g github) deploy(env registry.CIEnvironment, after string) (job, error) {
 // cloudSetup is the steps a cloud job takes before its command: the
 // checkout, superschematic, the schemas root's packages, Bun for a
 // deployer of an environment with a site, the provisioner's tools, and
-// the sign-in as role.
-func (g github) cloudSetup(env registry.CIEnvironment, role registry.CIRole) ([]step, error) {
+// the sign-in as role, a step last, or the job's env.
+func (g github) cloudSetup(env registry.CIEnvironment, role registry.CIRole) ([]step, signedIn, error) {
 	steps := []step{g.checkout(), g.install()}
 	steps = append(steps, g.packages()...)
 	if role == registry.CIDeployer && hasSite(env) && g.req.Stack.PackageManager != registry.PackageManagerBun {
@@ -475,15 +502,18 @@ func (g github) cloudSetup(env registry.CIEnvironment, role registry.CIRole) ([]
 	for _, tool := range env.Tools {
 		s, err := toolStep(tool)
 		if err != nil {
-			return nil, fmt.Errorf("environment %s: %w", env.Environment.Environment, err)
+			return nil, signedIn{}, fmt.Errorf("environment %s: %w", env.Environment.Environment, err)
 		}
 		steps = append(steps, s)
 	}
-	s, err := signIn(env.Identity(role), role)
+	in, err := signIn(env.Identity(role), role)
 	if err != nil {
-		return nil, fmt.Errorf("environment %s: %w", env.Environment.Environment, err)
+		return nil, signedIn{}, fmt.Errorf("environment %s: %w", env.Environment.Environment, err)
 	}
-	return append(steps, s), nil
+	if in.step != nil {
+		steps = append(steps, *in.step)
+	}
+	return steps, in, nil
 }
 
 func (g github) checkout() step {
@@ -668,21 +698,33 @@ func toolStep(tool registry.CLITool) (step, error) {
 	return step{}, fmt.Errorf("the %s CI renderer has no step that installs tool %s", GitHubRenderer, tool.Name)
 }
 
-// signIn is the step that signs in as role with identity.
-func signIn(identity *registry.CIIdentity, role registry.CIRole) (step, error) {
+// signIn is how a job signs in as role with identity: Workload Identity
+// Federation's step, which asks GitHub for an identity token, or a
+// Cloudflare token and the state's passphrase, which the job's env reads
+// from the workflow's secrets with no action (D64).
+func signIn(identity *registry.CIIdentity, role registry.CIRole) (signedIn, error) {
 	switch identity.Kind {
 	case gcpWorkloadIdentity:
 		provider, account := identity.Fields["provider"], identity.Fields["account"]
 		if provider == "" || account == "" {
-			return step{}, fmt.Errorf("a %s identity needs a provider and an account", identity.Kind)
+			return signedIn{}, fmt.Errorf("a %s identity needs a provider and an account", identity.Kind)
 		}
-		return step{
+		return signedIn{idToken: true, step: &step{
 			name: "Sign in to Google Cloud as " + string(role),
 			uses: &actionGoogleAuth,
 			with: [][2]string{{"workload_identity_provider", provider}, {"service_account", account}},
-		}, nil
+		}}, nil
+	case cloudflareAPIToken:
+		token, passphrase := identity.Fields["token"], identity.Fields["passphrase"]
+		if !secretName.MatchString(token) || !secretName.MatchString(passphrase) {
+			return signedIn{}, fmt.Errorf("a %s identity needs a token and a passphrase, each the name of a GitHub Actions secret, not %q and %q", identity.Kind, token, passphrase)
+		}
+		return signedIn{env: [][2]string{
+			{"CLOUDFLARE_API_TOKEN", "${{ secrets." + token + " }}"},
+			{"PULUMI_CONFIG_PASSPHRASE", "${{ secrets." + passphrase + " }}"},
+		}}, nil
 	}
-	return step{}, fmt.Errorf("the %s CI renderer cannot sign in with a CI identity of kind %q", GitHubRenderer, identity.Kind)
+	return signedIn{}, fmt.Errorf("the %s CI renderer cannot sign in with a CI identity of kind %q", GitHubRenderer, identity.Kind)
 }
 
 // jobID is an environment's name as a job id: lower case, words joined by
@@ -728,6 +770,12 @@ func (j job) write(w *yamlWriter) {
 		w.line(2, "concurrency:")
 		w.line(3, "group: "+scalar(j.concurrency))
 		w.line(3, "cancel-in-progress: false")
+	}
+	if len(j.env) > 0 {
+		w.line(2, "env:")
+		for _, kv := range j.env {
+			w.line(3, kv[0]+": "+scalar(kv[1]))
+		}
 	}
 	w.line(2, "steps:")
 	for _, s := range j.steps {

@@ -897,6 +897,7 @@ type parsedJob struct {
 	If          string            `yaml:"if"`
 	Environment string            `yaml:"environment"`
 	Permissions map[string]string `yaml:"permissions"`
+	Env         map[string]string `yaml:"env"`
 	Concurrency struct {
 		Group            string `yaml:"group"`
 		CancelInProgress bool   `yaml:"cancel-in-progress"`
@@ -953,4 +954,82 @@ func parseWorkflow(t *testing.T, data []byte) parsed {
 		out.jobs[id] = j
 	}
 	return out
+}
+
+// TestAPITokenIdentity: a job whose identity is a cloudflare-api-token
+// (D64) signs in with no action and asks for no identity token: its env
+// reads the token and the state's passphrase from the workflow's secrets
+// the identity names, a deploy job's from its GitHub environment, a plan's
+// and a preview's from the repository's. A field that is no secret's name
+// is refused.
+func TestAPITokenIdentity(t *testing.T) {
+	identity := func(token, passphrase string) *publicregistry.CIIdentity {
+		return &publicregistry.CIIdentity{Kind: "cloudflare-api-token", Fields: map[string]string{"token": token, "passphrase": passphrase}}
+	}
+	env := func(name string, params ...string) *ir.ResolvedEnvironment {
+		return &ir.ResolvedEnvironment{Stack: "edge-stack", Environment: name, Target: "edge", Provisioner: "pulumi", Parameters: params}
+	}
+	tools := []publicregistry.CLITool{pulumi}
+	request := func(envs ...publicregistry.CIEnvironment) publicregistry.CIRequest {
+		return publicregistry.CIRequest{
+			Stack: publicregistry.CIStack{
+				Name: "edge-stack", Dir: "schemas/services/edge-stack", ServicesRoot: "schemas/services",
+				SchemasRoot: "schemas", OutputRoot: "schemas/dist",
+			},
+			Environments: envs,
+			Options:      publicregistry.CIOptions{Branch: "main"},
+			Version:      version,
+		}
+	}
+	files, err := cigen.GitHub().Render(request(
+		publicregistry.CIEnvironment{
+			Environment: env("Staging"), HasSeam: true, Tools: tools,
+			Planner:  identity("CLOUDFLARE_PLANNER_TOKEN_STAGING", "PULUMI_CONFIG_PASSPHRASE_STAGING"),
+			Deployer: identity("CLOUDFLARE_API_TOKEN", "PULUMI_CONFIG_PASSPHRASE"),
+		},
+		publicregistry.CIEnvironment{
+			Environment: env("Preview", "pr"), HasSeam: true, Tools: tools,
+			Deployer: identity("CLOUDFLARE_PREVIEW_TOKEN_PREVIEW", "PULUMI_CONFIG_PASSPHRASE_PREVIEW"),
+		},
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := parseWorkflow(t, files[0].Data)
+	if want := []string{"check", "plan-staging", "preview-preview", "deploy-staging"}; !slices.Equal(w.order, want) {
+		t.Fatalf("jobs = %v, want %v", w.order, want)
+	}
+	for id, want := range map[string][2]string{
+		"plan-staging":    {"CLOUDFLARE_PLANNER_TOKEN_STAGING", "PULUMI_CONFIG_PASSPHRASE_STAGING"},
+		"preview-preview": {"CLOUDFLARE_PREVIEW_TOKEN_PREVIEW", "PULUMI_CONFIG_PASSPHRASE_PREVIEW"},
+		"deploy-staging":  {"CLOUDFLARE_API_TOKEN", "PULUMI_CONFIG_PASSPHRASE"},
+	} {
+		j := w.jobs[id]
+		if got := j.Env; len(got) != 2 || got["CLOUDFLARE_API_TOKEN"] != "${{ secrets."+want[0]+" }}" || got["PULUMI_CONFIG_PASSPHRASE"] != "${{ secrets."+want[1]+" }}" {
+			t.Errorf("%s: env %v, want the secrets %v", id, got, want)
+		}
+		if j.Permissions != nil {
+			t.Errorf("%s asks for permissions %v; the token needs no identity token", id, j.Permissions)
+		}
+		for _, s := range j.Steps {
+			if strings.HasPrefix(s.Name, "Sign in") {
+				t.Errorf("%s has a sign-in step %q", id, s.Name)
+			}
+		}
+	}
+	if w.jobs["deploy-staging"].Environment != "Staging" {
+		t.Errorf("deploy-staging runs in GitHub environment %q, whose secrets it reads", w.jobs["deploy-staging"].Environment)
+	}
+	if w.jobs["check"].Env != nil {
+		t.Errorf("check has env %v", w.jobs["check"].Env)
+	}
+
+	_, err = cigen.GitHub().Render(request(publicregistry.CIEnvironment{
+		Environment: env("Staging"), HasSeam: true, Tools: tools,
+		Planner:  identity("CLOUDFLARE_PLANNER_TOKEN_STAGING", "PASS }} ${{ github.token"),
+		Deployer: identity("CLOUDFLARE_API_TOKEN", "PULUMI_CONFIG_PASSPHRASE"),
+	}))
+	if err == nil || !strings.Contains(err.Error(), "the name of a GitHub Actions secret") {
+		t.Errorf("a passphrase field that is no secret's name: %v", err)
+	}
 }

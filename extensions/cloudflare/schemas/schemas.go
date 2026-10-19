@@ -1,6 +1,6 @@
 // Package schemas holds the Cloudflare extension's pinned provider schemas
 // (docs/stack-model.md, section 6.4): one file per Pulumi `cloudflare`
-// resource type the extension's DNS platform emits, taken from the
+// resource type the extension's DNS platform and target emit, taken from the
 // pulumi-cloudflare provider at the version pulumi-cloudflare.json pins,
 // in the format of package providerschema. Each file records the type's
 // input properties, the object types they reference, and the type's
@@ -8,9 +8,9 @@
 // published mapping.
 //
 // internal/tools/providerschemas writes the files, and its -check mode
-// fails when they drift from the pinned provider. The DNS platform
-// registers each as the JSON Schema of its type's properties, so
-// resolution validates every node offline.
+// fails when they drift from the pinned provider. The DNS platform and
+// the target register each as the JSON Schema of its type's properties,
+// so resolution validates every node offline.
 package schemas
 
 import (

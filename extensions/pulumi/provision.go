@@ -291,6 +291,92 @@ func (p *Provisioner) Outputs(ctx context.Context, req registry.ProvisionRequest
 	return out, nil
 }
 
+var _ registry.SecretOutputReader = (*Provisioner)(nil)
+
+// SecretOutput reads one top-level output of an applied node from the
+// stack's state, decrypted: the value of a secret output, which Outputs
+// leaves out, for a bootstrap that hands it to the person or to CI, such
+// as the cloudflare target's account tokens (D64). The program exports
+// nothing for it, so the value never becomes a stack output.
+func (p *Provisioner) SecretOutput(ctx context.Context, req registry.ProvisionRequest, out ir.Output) (string, error) {
+	if strings.ContainsAny(out.Name, ".[") {
+		return "", fmt.Errorf("pulumi: output %q of node %s is a path; SecretOutput reads a top-level output", out.Name, out.Resource)
+	}
+	r, err := p.open(ctx, req, false)
+	if errors.Is(err, errNoStack) {
+		return "", fmt.Errorf("pulumi: environment %s has no stack %s; apply it first", req.Environment.Environment, r.name)
+	}
+	if err != nil {
+		return "", err
+	}
+	node := req.Environment.Resources.Resource(out.Resource)
+	if node == nil {
+		return "", fmt.Errorf("pulumi: environment %s has no node %s", req.Environment.Environment, out.Resource)
+	}
+	// The export decrypts every secret (`pulumi stack export
+	// --show-secrets`), which this reads one value of and drops.
+	exported, err := r.stack.Export(ctx)
+	if err != nil {
+		return "", fmt.Errorf("pulumi: read the state of %s: %w", r.name, err)
+	}
+	var state struct {
+		Resources []struct {
+			URN     string                     `json:"urn"`
+			Type    string                     `json:"type"`
+			Outputs map[string]json.RawMessage `json:"outputs"`
+		} `json:"resources"`
+	}
+	if len(exported.Deployment) > 0 {
+		if err := json.Unmarshal(exported.Deployment, &state); err != nil {
+			return "", fmt.Errorf("pulumi: read the state of %s: %w", r.name, err)
+		}
+	}
+	for _, res := range state.Resources {
+		if res.Type != node.Type || urnName(res.URN) != out.Resource {
+			continue
+		}
+		raw, ok := res.Outputs[out.Name]
+		if !ok {
+			return "", fmt.Errorf("pulumi: node %s of %s has no output %s", out.Resource, r.name, out.Name)
+		}
+		value, err := plainValue(raw)
+		if err != nil {
+			return "", fmt.Errorf("pulumi: output %s of node %s: %w", out.Name, out.Resource, err)
+		}
+		return value, nil
+	}
+	return "", fmt.Errorf("pulumi: stack %s holds no node %s; apply it first", r.name, out.Resource)
+}
+
+// secretSig is the key the state marks a secret value with, beside its
+// plaintext once the export decrypted it.
+const secretSig = "4dabf18193072939515e22adb298388d"
+
+// plainValue reads a string output of an exported state: a string, or a
+// decrypted secret, whose plaintext is the value's JSON.
+func plainValue(raw json.RawMessage) (string, error) {
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		return s, nil
+	}
+	var secret map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &secret); err != nil || secret[secretSig] == nil {
+		return "", errors.New("is not a string")
+	}
+	plaintext, ok := secret["plaintext"]
+	if !ok {
+		return "", errors.New("is a secret the export left encrypted")
+	}
+	var inner string
+	if err := json.Unmarshal(plaintext, &inner); err != nil {
+		return "", err
+	}
+	if err := json.Unmarshal([]byte(inner), &s); err != nil {
+		return "", errors.New("is a secret that is not a string")
+	}
+	return s, nil
+}
+
 // errNoStack is open's error for a run that has no stack yet.
 var errNoStack = errors.New("no stack")
 
