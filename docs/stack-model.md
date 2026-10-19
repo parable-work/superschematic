@@ -3083,9 +3083,9 @@ config may leave `outputs` out.
 - **CORS.** Each API answers CORS for the origins of the sites that call
   it. Those origins are derived into a field of the API, `<API>_CORS`
   (`ir.CORSPolicy`, one variable, `<API>_CORS_ORIGINS`), as its callers
-  are (section 9.2). The Go and TypeScript runtimes read it
-  (`stackconfig.LoadCORS`, `loadCors`) and check it (`runtime/http`'s
-  `cors`): a preflight from a listed origin is answered 204 with the
+  are (section 9.2). The Go, TypeScript and Rust runtimes read it
+  (`stackconfig.LoadCORS`, `loadCors`, `load_cors`) and check it
+  (`runtime/http`'s `cors`; Rust's `SiteCorsLayer`, D57): a preflight from a listed origin is answered 204 with the
   origin, credentials, `Accept`, `Authorization` and `Content-Type`, the
   methods of the API's operations and a max age of ten minutes, and any
   other request from it carries the origin and credentials. Any other
@@ -3098,7 +3098,7 @@ config may leave `outputs` out.
   origin that is both a site and trusted gets the site's answer. On a
   server that serves several APIs, a request is the API's whose routes
   take it, a preflight by the method it asks for. The vectors in
-  `runtime/http/testdata/cors_parity.json` hold both runtimes to one
+  `runtime/http/testdata/cors_parity.json` hold the three runtimes to one
   decision, which says whether the server answers a request itself, and
   the generated entrypoints wire it for each API a site of the stack
   calls, around the server and so outside each identity API's own CORS.
