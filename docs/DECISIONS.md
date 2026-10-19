@@ -6158,7 +6158,7 @@ SQLite gets a queue's table and its migrations, but no claim.
 
 Status: built in #336.
 
-### D53, amended: a queue's message holds a location and a duration, as a `POINT` and an `INTERVAL` of whole microseconds, in every language
+### D53, amended: a queue's message holds a location and a duration, as a `POINT` and an `INTERVAL` of whole microseconds, in every language, and the Go ORM's tables hold a duration the same way
 
 D53's TypeScript amendment left a queue whose message holds a `POINT` or
 an `INTERVAL` column out of `queues.ts`, and D65 left it out of
@@ -6170,7 +6170,16 @@ through its `Valuer` and `Scanner`, which write `-1h2m` for a duration
 Postgres reads as minus one hour plus two minutes, write `250µs`, which
 Postgres refuses, and read back `01:30:00`, which `time.ParseDuration`
 refuses. The "as the Go ORM writes it" of the TypeScript amendment had no
-Go behavior to copy.
+Go behavior to copy. The Go ORM's tables wrote and read a duration the
+same way, so a table with an `INTERVAL` column could not take a row:
+`CreateOne` wrote `1h30m0s`, then failed to read back the `01:30:00` its
+`RETURNING` gave. A duration's filter was a `StringFilter`, whose `Eq`
+sent Go's text and whose `ILike` Postgres has no operator for. A table's
+location was already a `POINT` (D14, amended), and no other language
+reads or writes a table's `INTERVAL` but the version graph's adapters,
+which write `[-]HH:MM:SS` with the nanoseconds, which Postgres rounds to
+microseconds where this entry truncates, and read their canonical form,
+which refuses a month (D19).
 
 | Decision | Alternatives not taken |
 |----------|------------------------|
@@ -6179,6 +6188,9 @@ Go behavior to copy.
 | The definition marks such a field, `point: true` or `interval: true`, in `queues.ts` and in the descriptor `queues.rs` holds, so the two stay one shape (`TestQueuesDescribeWhatTypeScriptWrites`). The TypeScript client needs the mark to write a location, since pg would send an object as JSON; it reads each by the column's type, with its own type parsers for `POINT` and `INTERVAL`. The Rust client writes and reads both by the column's type, which the prepared statement gives it. | A conversion by the shape of the value, `{lat, lon}` written as a point wherever it appears, which would guess. |
 | A list of locations or durations, a `POINT[]` or an `INTERVAL[]` column, is not held yet: the Go ORM refuses such a queue, naming the field, where before it generated a queue that failed at its first enqueue, and the TypeScript and Rust types leave it out, saying why. A list goes in a `@jsonField` type until a client converts each element. | Lists now, which need the Go ORM's `POINT[]` helpers in `queues.go` and an element conversion in each client, for a field no schema has asked for. |
 | `fixture-queue-geo-db` declares the queue `DeliveryPlanned` with a required and an optional location and duration, on Postgres alone, since SQLite has no storage for a `POINT` and `fixture-queue-db` writes its queues in both dialects. The ORM tests and the parity test add it to `fixture-queue-db`'s schema, so one module, one types package and one crate hold both. | A field of `fixture-queue-db`'s `OrderPlaced`, which would drop the fixture's SQLite dialect and the SQLite tests of a queue's table. |
+| The Go ORM's tables write and read a duration as its queue does. `CreateOne`, `CreateMany`, `UpdateOne` and `UpdateMany` pass a `time.Duration`. Each read scans a `time.Duration`: a required field through a `*time.Duration` that points at the field, an optional one through a `*time.Duration` it converts, so a NULL stays nil. The history decoder reads the interval's text, which `to_jsonb` writes (`1 mon 2 days 03:04:05`), with pgx's own parser and the same 30-day month, and still reads a version graph's canonical row, which holds the duration's text (`1.5ms`). | A fix in superscalar's `Valuer` and `Scanner`, in a repository this one pins: their text is Go's, which round-trips where a column is text, as a SQLite one is, and Postgres's interval text is pgx's to parse. The ORM converts at its boundary, as it does a date through `pgtype.Date` and a location through `pgtype.Point`. |
+| A list of durations in a table, an `INTERVAL[]` column, goes through a `[]time.Duration` and is scanned through `[]*time.Duration`, which refuses a NULL element at `field[i]` as any native list does, and the history decoder reads a JSON list of the texts. A queue still refuses one, as the row above says. | Leaving the table's list on the `Valuer`, since a queue refuses one; a table's `POINT[]` was already held, and generic helpers over `~int64` make the list a few lines. |
+| A duration's filter is `DurationFilter`: `Eq`, `Gt`, `Gte`, `Lt`, `Lte`, `Between` and `IsNull`, each a `time.Duration` that goes as its microseconds. Postgres compares intervals with a 30-day month and a 24-hour day, as the ORM reads them. A caller that set `Eq`, `In` or `ILike` of a `StringFilter` on a duration no longer compiles. | `StringFilter`, which compiled and failed or matched Go's text as Postgres read it. |
 
 Status: built. `TestQueueParityOfGoTypeScriptAndRustOnPostgres` gains
 `LocationsAndDurationsAgree`: Go, TypeScript and Rust each enqueue a
@@ -6191,11 +6203,18 @@ same for TypeScript and Rust, besides their parsers' cases.
 `TestQueuesWriteWhatTheGoORMWrites` and
 `TestQueuesDescribeWhatTypeScriptWrites` cover both fixtures, and
 `TestQueuesHoldALocationAndADuration` the Go ORM's refusal of a list.
+`TestDurationColumnsOnPostgres` writes a table's durations, positive,
+negative, of microseconds, over a day and with a nanosecond remainder,
+alone and in a list, through every write, holds the columns to what
+Postgres stores, writes intervals of a month and days with SQL, and reads
+each back through every read, a selection of fields and the history,
+beside the table's locations; it filters on each comparison, a range and
+`IS NULL`. `TestVersionGraphFacadeKeepsEveryClass` reads the tasting the
+version graph wrote through the table's repository.
 
-Not built: a list of locations or durations in a queue's message; the
-Go ORM's tables still write a duration through its `Valuer` and read it
-through its `Scanner`, the defects above, which this entry leaves to a
-fix of their own.
+Not built: a list of locations or durations in a queue's message. The
+history decoder reads Postgres's default `IntervalStyle`, `postgres`, as
+pgx does; a server set to another style writes history rows it refuses.
 
 ### D54, amended: a workload links the GCS client whenever its APIs list a bucket
 
