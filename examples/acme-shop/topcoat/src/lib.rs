@@ -22,8 +22,8 @@
 use std::sync::Arc;
 
 use acme_shop_orders_server::sqlite::SqliteShop;
-use acme_shop_orders_server::{Shop, ShopImplementation, implementations};
-use acme_shop_orders_topcoat::api::runtime::identity::{LoginInput, Service};
+use acme_shop_orders_server::{Shop, ShopImplementation, add_shopper, add_staff, implementations, update_roles};
+use acme_shop_orders_topcoat::api::runtime::identity::{LoginInput, Service, StoreError};
 use acme_shop_orders_topcoat::api::runtime::{ApiError, Principal};
 use acme_shop_orders_topcoat::api::{
     OrderGetOrderArgs, OrderPlaceOrderArgs, ProductReviewsListReviewsArgs, ProductReviewsWriteReviewArgs, types,
@@ -96,6 +96,28 @@ pub fn shop_in_memory() -> Shop {
 pub fn stock_sqlite(shop: &SqliteShop) -> Result<(), Box<dyn std::error::Error>> {
     for product in CATALOG {
         shop.add_product(&product.id(), product.sku, product.name, product.price_cents)?;
+    }
+    Ok(())
+}
+
+/// A user the app adds: their email, name and password.
+pub type Person = (&'static str, &'static str, &'static str);
+
+/// Adds `shopper`, holding the `shopper` role, and `staff`, holding the
+/// `staff` role, to `users`, each unless an earlier run over the same file
+/// added them, as a real shop's own flows would. It first brings both
+/// roles to the permissions they grant now (`update_roles`), users or no
+/// users: a file made before staff held `orders.any` has a `shopper` role
+/// that grants all of `orders`, and so every customer's orders.
+pub async fn add_people(users: &Service, shopper: Person, staff: Person) -> Result<(), Box<dyn std::error::Error>> {
+    update_roles(users).await?;
+    for ((login, name, password), is_staff) in [(shopper, false), (staff, true)] {
+        match users.store().find_login(login).await {
+            Ok(_) => {}
+            Err(StoreError::NotFound) if is_staff => add_staff(users, login, name, password).await?,
+            Err(StoreError::NotFound) => add_shopper(users, login, name, password).await?,
+            Err(err) => return Err(err.into()),
+        }
     }
     Ok(())
 }

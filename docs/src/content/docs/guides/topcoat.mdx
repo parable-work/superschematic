@@ -731,10 +731,15 @@ With `DATABASE_URL` set, the app opens that file, which must hold
 orders, users and sessions outlive the process; without it, the shop and
 its users are in memory. Either way the app stocks the shop from its
 catalog, which `listProducts` lists and an order's lines are priced from,
-in SQLite from the product's row. `DATABASE_URL` is a `sqlite:`
-URL, a `file:` URI or a path. A URL of another database, such as a
-Postgres one already in the shell, stops the app with an error that names
-its scheme alone, since the URL may hold a password:
+in SQLite from the product's row, and adds the demo shopper and staff
+unless the file holds them. `add_people` first rewrites the `shopper`
+and `staff` roles to the permissions they grant now, so a file made
+before staff held `orders.any`, whose `shopper` role grants all of
+`orders`, stops showing a shopper every customer's orders.
+`DATABASE_URL` is a `sqlite:` URL, a `file:` URI or a path. A URL of
+another database, such as a Postgres one already in the shell, stops the
+app with an error that names its scheme alone, since the URL may hold a
+password:
 
 <Snippet file="topcoat/src/main.rs" symbol="main" />
 

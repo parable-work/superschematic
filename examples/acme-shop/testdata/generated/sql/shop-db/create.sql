@@ -99,9 +99,10 @@ CREATE TABLE role (
 
 COMMENT ON TABLE role IS 'A named set of permissions a user is granted: shoppers hold orders.read
 and orders.write, to place their orders and read and cancel them, and
-staff products, to add products, and orders.any, to read and cancel
-every customer''s orders. Users hold roles through the UserRoleGrant
-table the build adds.';
+staff products, to add products, and orders.read, orders.write and
+orders.any, or simply orders, to read and cancel every customer''s
+orders. orders.any widens what the other two allow and opens no route
+alone. Users hold roles through the UserRoleGrant table the build adds.';
 
 CREATE TABLE "session" (
   id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,

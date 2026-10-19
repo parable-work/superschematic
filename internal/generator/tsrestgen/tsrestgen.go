@@ -973,7 +973,9 @@ func docLines(ep EndpointInfo) []string {
 	if ep.Title != "" {
 		lines = append(lines, ep.Title)
 	}
-	if desc := strings.TrimSpace(ep.Description); desc != "" {
+	// A description written with CRLF line ends splits on its LFs alone,
+	// so its CRs go first, as codegen's doc helpers drop them.
+	if desc := strings.TrimSpace(strings.ReplaceAll(ep.Description, "\r\n", "\n")); desc != "" {
 		lines = append(lines, strings.Split(desc, "\n")...)
 	}
 	if len(lines) > 0 {

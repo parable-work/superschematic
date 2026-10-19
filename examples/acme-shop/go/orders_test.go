@@ -165,9 +165,12 @@ func TestPermissions(t *testing.T) {
 
 // A shopper gets and cancels their own orders alone: another customer's
 // order is the 404 of one no one placed, to get and to cancel, and stays as
-// it was. Staff, who hold orders.any, get and cancel any. The orders are
-// rows of the test's own database; the stack's test lists and pages them
-// as each caller sees them, over Postgres (TestStackDevRunsTheShop).
+// it was. Staff, who hold orders.any, get and cancel any. An order the
+// worker has fulfilled is the 409 of one no longer placed, to its customer
+// and to staff, the 404 still to another shopper, and stays fulfilled. The
+// orders are rows of the test's own database; the stack's test lists and
+// pages them as each caller sees them, over Postgres
+// (TestStackDevRunsTheShop).
 func TestAShopperReadsAndCancelsOnlyTheirOwnOrders(t *testing.T) {
 	ctx := context.Background()
 	u := newUsers(t)
@@ -213,6 +216,40 @@ func TestAShopperReadsAndCancelsOnlyTheirOwnOrders(t *testing.T) {
 		}
 	}
 
+	fulfilled := orders.add(t, grace, db.OrderStatus_Fulfilled)
+	for who, client := range map[string]*sdk.ShopOrdersSDK{"grace": shoppers["grace"], "staff": staff} {
+		_, err := client.OrderNamespace.CancelOrder(ctx, fulfilled.String(), namespaces.OrderCancelOrderInput{Reason: &notMine})
+		var apiErr *sdk.APIError
+		if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusConflict {
+			t.Fatalf("%s's CancelOrder of a fulfilled order = %v, want 409", who, err)
+		}
+	}
+	_, err := shoppers["alan"].OrderNamespace.CancelOrder(ctx, fulfilled.String(), namespaces.OrderCancelOrderInput{Reason: &notMine})
+	notFound("alan's CancelOrder of grace's fulfilled order", err)
+	if status := orders.status(fulfilled); status != db.OrderStatus_Fulfilled {
+		t.Fatalf("after the refused cancels, the fulfilled order is %s", status)
+	}
+
+	// FulfilOrders fulfils an order right after a read of it, while
+	// Grace cancels it: the order is cancelled before the worker came, or
+	// the cancel is the 409 of a fulfilled order, never cancelled over the
+	// worker's fulfilment.
+	racing := orders.add(t, grace, db.OrderStatus_Placed)
+	orders.repository.mu.Lock()
+	orders.repository.fulfilAfterRead = &racing
+	orders.repository.mu.Unlock()
+	cancelled, err := shoppers["grace"].OrderNamespace.CancelOrder(ctx, racing.String(), namespaces.OrderCancelOrderInput{Reason: &notMine})
+	var apiErr *sdk.APIError
+	orders.repository.mu.Lock()
+	workerFulfilled := orders.repository.fulfilled
+	orders.repository.mu.Unlock()
+	switch status := orders.status(racing); {
+	case err == nil && cancelled.Status == types.OrderStatus_Cancelled && status == db.OrderStatus_Cancelled && !workerFulfilled:
+	case errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusConflict && status == db.OrderStatus_Fulfilled:
+	default:
+		t.Fatalf("CancelOrder while FulfilOrders runs = %+v, %v; the order is %s, the worker fulfilled it: %t", cancelled, err, status, workerFulfilled)
+	}
+
 	for who, id := range orders.of {
 		if got, err := staff.OrderNamespace.GetOrder(ctx, id.String()); err != nil || got.Id != id {
 			t.Fatalf("staff's GetOrder of %s's order = %+v, %v", who, got, err)
@@ -225,9 +262,10 @@ func TestAShopperReadsAndCancelsOnlyTheirOwnOrders(t *testing.T) {
 }
 
 // orderRows is the no-op database with an order of each customer's: their
-// ids are of, by the customer's first name, lowercase. GetOne reads one and
-// UpdateOne writes its status and its reason; every other call is the
-// no-op database's.
+// ids are of, by the customer's first name, lowercase. GetOne reads one by
+// its id, FindOne reads one and UpdateMany writes the status and the
+// reason of those that match the filter's id, customer and status, the
+// conditions CancelOrder sets; every other call is the no-op database's.
 type orderRows struct {
 	*orm.NoOpDatabase
 	repository *orderRepository
@@ -242,18 +280,26 @@ func newOrderRows(t *testing.T, customers ...identity.User) *orderRows {
 		of:           map[string]db.IdentityUUID{},
 	}
 	for _, customer := range customers {
-		customerID := mustUUID(t, customer.ID)
-		id := scalars.NewUUID()
-		rows.repository.rows[id] = db.Order{
-			Id:              &id,
-			Customer:        db.User{Id: &customerID},
-			Status:          db.OrderStatus_Placed,
-			PlacedAt:        db.TemporalDateTime(time.Now()),
-			ShippingAddress: address,
-		}
-		rows.of[strings.ToLower(strings.Fields(customer.Name)[0])] = id
+		rows.of[strings.ToLower(strings.Fields(customer.Name)[0])] = rows.add(t, customer, db.OrderStatus_Placed)
 	}
 	return rows
+}
+
+// add adds an order of customer's, with status: its id.
+func (rows *orderRows) add(t *testing.T, customer identity.User, status db.OrderStatus) db.IdentityUUID {
+	t.Helper()
+	customerID := mustUUID(t, customer.ID)
+	id := scalars.NewUUID()
+	rows.repository.mu.Lock()
+	defer rows.repository.mu.Unlock()
+	rows.repository.rows[id] = db.Order{
+		Id:              &id,
+		Customer:        db.User{Id: &customerID},
+		Status:          status,
+		PlacedAt:        db.TemporalDateTime(time.Now()),
+		ShippingAddress: address,
+	}
+	return id
 }
 
 func (rows *orderRows) GetOrderRepository() orm.OrderRepositoryInterface { return rows.repository }
@@ -267,6 +313,12 @@ type orderRepository struct {
 	orm.NoOpOrderRepository
 	mu   sync.Mutex
 	rows map[db.IdentityUUID]db.Order
+
+	// fulfilAfterRead is an order FulfilOrders fulfils right after a read
+	// of it, while it is placed, as the worker would between a cancel's
+	// read and its write; fulfilled is whether it did.
+	fulfilAfterRead *db.IdentityUUID
+	fulfilled       bool
 }
 
 func (r *orderRepository) GetOne(_ context.Context, id db.IdentityUUID, _ *orm.OrderGetOptions) (*db.Order, error) {
@@ -276,24 +328,65 @@ func (r *orderRepository) GetOne(_ context.Context, id db.IdentityUUID, _ *orm.O
 	if !ok {
 		return nil, orm.ErrNotFound
 	}
+	r.read(id)
 	return &order, nil
 }
 
-func (r *orderRepository) UpdateOne(_ context.Context, id db.IdentityUUID, update *orm.OrderUpdate) (*db.Order, error) {
+// read runs FulfilOrders on the order with id, when it is fulfilAfterRead
+// and still placed.
+func (r *orderRepository) read(id db.IdentityUUID) {
+	order := r.rows[id]
+	if r.fulfilAfterRead != nil && *r.fulfilAfterRead == id && order.Status == db.OrderStatus_Placed {
+		order.Status = db.OrderStatus_Fulfilled
+		r.rows[id] = order
+		r.fulfilled = true
+	}
+}
+
+// matches reports whether order passes filter's id, customer and status.
+func matches(order db.Order, filter *orm.OrderFilter) bool {
+	if filter.Id != nil && (order.Id == nil || filter.Id.Eq == nil || *order.Id != *filter.Id.Eq) {
+		return false
+	}
+	if filter.CustomerID != nil && (order.Customer.Id == nil || filter.CustomerID.Eq == nil || *order.Customer.Id != *filter.CustomerID.Eq) {
+		return false
+	}
+	if filter.Status != nil && (filter.Status.Eq == nil || string(order.Status) != *filter.Status.Eq) {
+		return false
+	}
+	return true
+}
+
+func (r *orderRepository) FindOne(_ context.Context, filter *orm.OrderFilter, _ *orm.OrderFindOptions) (*db.Order, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	order, ok := r.rows[id]
-	if !ok {
-		return nil, orm.ErrNotFound
+	for id, order := range r.rows {
+		if matches(order, filter) {
+			r.read(id)
+			return &order, nil
+		}
 	}
-	if update.Status != nil {
-		order.Status = *update.Status
+	return nil, orm.ErrNotFound
+}
+
+func (r *orderRepository) UpdateMany(_ context.Context, filter *orm.OrderFilter, update *orm.OrderUpdate) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for id, order := range r.rows {
+		if !matches(order, filter) {
+			continue
+		}
+		if update.Status != nil {
+			order.Status = *update.Status
+		}
+		if update.CancelReason != nil {
+			order.CancelReason = *update.CancelReason
+		}
+		r.rows[id] = order
+		n++
 	}
-	if update.CancelReason != nil {
-		order.CancelReason = *update.CancelReason
-	}
-	r.rows[id] = order
-	return &order, nil
+	return n, nil
 }
 
 // Both sides check an input against the schema: the SDK before it sends,
