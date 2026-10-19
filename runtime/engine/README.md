@@ -495,6 +495,20 @@ long (it needs `SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL`).
   wholly of the new; an instance whose build lacks a behavior the new
   version composes answers that version's writes `unavailable`, writing
   nothing.
+- **Users.** Instances may open the schema each as a database user of its
+  own, as the deployables of a stack do on Cloud SQL. The engine creates
+  its schema only when it is missing, so a user without `CREATE` on the
+  database opens one an administrator made, and it acts as the schema's
+  owner: when that is another role the session's user is a member of,
+  every connection takes the role (`SET ROLE`, a startup option after the
+  first), so every table, index and text search configuration any
+  instance creates is the owner's, and every member may change it at a
+  later migration or publish. A deploy's migration job makes the schema
+  such a role's and grants the role to each deployable that opens the
+  engine (D58); a member whose grant does not let it `SET ROLE` (Postgres
+  16's `WITH SET FALSE`) is refused at open, saying so.
+  `fresh_database::members_of_the_role_that_owns_the_schema_open_it_as_that_role`
+  opens one schema as two such users.
 - **Failures.** A lock waited for past the busy timeout, a statement the
   server's `statement_timeout` cancels, a deadlock and a serialization
   failure are `busy`: nothing was written, and over HTTP the 503 says
