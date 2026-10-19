@@ -48,7 +48,10 @@ pub const SQLITE_CONSTRAINT_PRIMARYKEY: i32 = 1555;
 pub enum Error {
     /// Another writer holds the lock past the busy timeout: SQLite's
     /// `SQLITE_BUSY`; Postgres's lock timeout, deadlock or serialization
-    /// failure; or no pooled connection came free in time (no code).
+    /// failure, or a statement the server cancelled (its
+    /// `statement_timeout`); or no pooled connection came free in time (no
+    /// code). The transaction rolled back, and the call may be tried
+    /// again.
     Busy {
         code: Option<DbCode>,
         message: String,
@@ -64,8 +67,16 @@ pub enum Error {
     },
     /// Any other failure the database reported.
     Database { code: DbCode, message: String },
-    /// The connection to the database failed or closed.
+    /// The connection to the database failed or closed: it could not
+    /// open, or the server ended it (a restart, a failover, an
+    /// administrator's `pg_terminate_backend`, a timeout of the server's)
+    /// or the network lost it, before the transaction committed, so the
+    /// server rolled the transaction back and nothing was written.
     Connection { message: String },
+    /// The connection to the database was lost while the transaction
+    /// committed: the server may have committed it or rolled it back, and
+    /// the storage cannot tell which.
+    CommitUnknown { message: String },
     /// A behavior's SQL refused before it ran, or a behavior's use of its
     /// storage the engine does not allow: the TypeScript engine's
     /// BehaviorError, whose message reads `behavior <name>: <message>`.
@@ -99,6 +110,12 @@ impl Error {
     /// Whether another writer held the lock past the busy timeout.
     pub fn is_busy(&self) -> bool {
         matches!(self, Error::Busy { .. })
+    }
+
+    /// Whether the connection to the database failed or closed before the
+    /// transaction committed, or while it did.
+    pub fn is_connection(&self) -> bool {
+        matches!(self, Error::Connection { .. } | Error::CommitUnknown { .. })
     }
 
     /// Whether a write would repeat a unique index's values.
@@ -166,6 +183,10 @@ impl fmt::Display for Error {
             | Error::Migration { message }
             | Error::Value { message }
             | Error::Usage { message } => f.write_str(message),
+            Error::CommitUnknown { message } => write!(
+                f,
+                "the connection to the database was lost while the transaction committed, so whether it committed is unknown: {message}"
+            ),
             Error::Behavior { behavior, message } => write!(f, "behavior {behavior}: {message}"),
             Error::Aborted { cause } => write!(
                 f,

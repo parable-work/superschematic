@@ -281,6 +281,10 @@ impl Backend for PostgresBackend {
         Some(&self.channel)
     }
 
+    fn stale_retries(&self) -> usize {
+        self.pool.max()
+    }
+
     fn try_lease(&self, key: i64) -> Result<Option<crate::db::Lease>> {
         let mut client = connect_within(&self.lease_config, self.deadline)?;
         let taken: bool = client
@@ -726,11 +730,25 @@ fn pg_error(error: postgres::Error) -> Error {
         return match state.as_str() {
             // lock_not_available (a lock_timeout), deadlock_detected,
             // serialization_failure: another writer held what this one
-            // needed.
-            "55P03" | "40P01" | "40001" => Error::Busy {
+            // needed; query_canceled: the server's statement_timeout, most
+            // often a wait for a lock too, or an administrator's cancel.
+            "55P03" | "40P01" | "40001" | "57014" => Error::Busy {
                 code: Some(DbCode::Postgres(state)),
                 message,
             },
+            // The server ended the session: connection_exception (class
+            // 08), admin_shutdown (pg_terminate_backend, a smart or fast
+            // shutdown), crash_shutdown, cannot_connect_now (starting or
+            // in recovery), idle_session_timeout and
+            // idle_in_transaction_session_timeout. Its transaction is
+            // gone with it.
+            code if code.starts_with("08")
+                || matches!(code, "57P01" | "57P02" | "57P03" | "57P05" | "25P03") =>
+            {
+                Error::Connection {
+                    message: format!("{message} (SQLSTATE {state})"),
+                }
+            }
             "23505" => Error::Unique {
                 index: db.constraint().map(str::to_owned),
                 code: DbCode::Postgres(state),

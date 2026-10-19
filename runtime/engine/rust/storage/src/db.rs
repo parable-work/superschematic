@@ -33,6 +33,14 @@
 //! the events a write appended, is queued with [`Tx::after_commit`]: it
 //! runs once the outermost transaction commits, and is dropped with the
 //! transaction or savepoint that queued it when that one rolls back.
+//!
+//! On Postgres the server can end a session (a restart, a failover,
+//! `pg_terminate_backend`, its own timeouts) or the network lose it. A
+//! pooled connection found closed at BEGIN is dropped and another taken,
+//! up to the pool's size, since nothing of the call ran; one lost inside a
+//! transaction fails the call as [`Error::Connection`], the server having
+//! rolled it back, and one lost at COMMIT as [`Error::CommitUnknown`]. A
+//! connection that failed so never goes back to the pool.
 
 use std::cell::{Cell, RefCell};
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -92,6 +100,12 @@ pub(crate) trait Backend: Send + Sync {
     fn schemas(&self) -> &[String];
     /// The Postgres channel commits notify; `None` on SQLite.
     fn channel(&self) -> Option<&str>;
+    /// How many times a transaction whose BEGIN found its pooled
+    /// connection closed takes another: as many as the pool holds on
+    /// Postgres, whose server can end an idle session; none on SQLite.
+    fn stale_retries(&self) -> usize {
+        0
+    }
     /// Takes the lease `key` names for this process's session, or `None`
     /// when another session holds it ([`Db::try_lease`]).
     fn try_lease(&self, key: i64) -> Result<Option<Lease>>;
@@ -331,8 +345,24 @@ impl Db {
         F: FnOnce(&Tx<'db>) -> Result<T, E>,
     {
         let _opened = Opened::enter(Arc::as_ptr(&self.inner) as usize)?;
-        let conn = self.inner.backend.acquire(self.inner.busy_timeout)?;
-        let tx = Tx::begin(&self.inner, conn, kind).map_err(|(error, _)| error)?;
+        let mut stale = 0;
+        let tx = loop {
+            let conn = self.inner.backend.acquire(self.inner.busy_timeout)?;
+            match Tx::begin(&self.inner, conn, kind) {
+                Ok(tx) => break tx,
+                // A pooled connection the server closed while it sat idle
+                // (a restart, a failover, a session an administrator
+                // ended) fails at BEGIN, before anything of the call ran:
+                // it is dropped, and the transaction takes another.
+                Err((Error::Connection { .. }, mut conn))
+                    if stale < self.inner.backend.stale_retries() =>
+                {
+                    conn.discard();
+                    stale += 1;
+                }
+                Err((error, _)) => return Err(error.into()),
+            }
+        };
         let result = f(&tx);
         tx.finish(result).0
     }
@@ -801,6 +831,12 @@ impl<'db> Tx<'db> {
                         let _ = catch_unwind(AssertUnwindSafe(work));
                     }
                     Ok(value)
+                }
+                // The connection went while the server committed: it may
+                // have committed or not, and nothing here can tell.
+                Err(Error::Connection { message }) => {
+                    self.roll_back();
+                    Err(Error::CommitUnknown { message }.into())
                 }
                 Err(error) => {
                     self.roll_back();
