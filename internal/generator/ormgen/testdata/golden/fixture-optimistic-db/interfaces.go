@@ -16,6 +16,7 @@ type ShelfRepositoryInterface interface {
 	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Shelf, error)
 	FindOne(ctx context.Context, filter *ShelfFilter, opts *ShelfFindOptions) (*types.Shelf, error)
 	FindMany(ctx context.Context, filter *ShelfFilter, opts *ShelfFindOptions) ([]*types.Shelf, int, error)
+	FindPage(ctx context.Context, filter *ShelfFilter, opts *ShelfPageOptions) (*ShelfPage, error)
 	CreateOne(ctx context.Context, input *types.Shelf) (*types.Shelf, error)
 	CreateMany(ctx context.Context, inputs []*types.Shelf) ([]*types.Shelf, error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *ShelfUpdate) (*types.Shelf, error)
@@ -33,6 +34,7 @@ type StockRepositoryInterface interface {
 	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Stock, error)
 	FindOne(ctx context.Context, filter *StockFilter, opts *StockFindOptions) (*types.Stock, error)
 	FindMany(ctx context.Context, filter *StockFilter, opts *StockFindOptions) ([]*types.Stock, int, error)
+	FindPage(ctx context.Context, filter *StockFilter, opts *StockPageOptions) (*StockPage, error)
 	CreateOne(ctx context.Context, input *types.Stock) (*types.Stock, error)
 	CreateMany(ctx context.Context, inputs []*types.Stock) ([]*types.Stock, error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *StockUpdate) (*types.Stock, error)
@@ -144,6 +146,10 @@ func (r *NoOpShelfRepository) FindMany(_ context.Context, _ *ShelfFilter, _ *She
 	return []*types.Shelf{}, 0, nil
 }
 
+func (r *NoOpShelfRepository) FindPage(_ context.Context, _ *ShelfFilter, _ *ShelfPageOptions) (*ShelfPage, error) {
+	return &ShelfPage{Rows: []*types.Shelf{}}, nil
+}
+
 func (r *NoOpShelfRepository) CreateOne(_ context.Context, input *types.Shelf) (*types.Shelf, error) {
 	return input, nil
 }
@@ -208,6 +214,10 @@ func (r *NoOpStockRepository) FindOne(_ context.Context, _ *StockFilter, _ *Stoc
 
 func (r *NoOpStockRepository) FindMany(_ context.Context, _ *StockFilter, _ *StockFindOptions) ([]*types.Stock, int, error) {
 	return []*types.Stock{}, 0, nil
+}
+
+func (r *NoOpStockRepository) FindPage(_ context.Context, _ *StockFilter, _ *StockPageOptions) (*StockPage, error) {
+	return &StockPage{Rows: []*types.Stock{}}, nil
 }
 
 func (r *NoOpStockRepository) CreateOne(_ context.Context, input *types.Stock) (*types.Stock, error) {

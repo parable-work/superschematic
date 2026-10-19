@@ -31,8 +31,8 @@ record, err := db.Order.GetOne(ctx, id, nil)
 ```
 
 Repositories expose `GetOne`, `GetManyByIDs`, `FindOne`, `FindMany`,
-`CreateOne`, `CreateMany`, `UpdateOne`, `UpdateMany`, `DeleteOne`, and
-`DeleteMany`. Versioned tables also expose `GetVersion`, `ListVersions`,
+`FindPage`, `CreateOne`, `CreateMany`, `UpdateOne`, `UpdateMany`, `DeleteOne`,
+and `DeleteMany`. Versioned tables also expose `GetVersion`, `ListVersions`,
 `GetAsOf`, `UpdateOneIfVersion`, and `DeleteOneIfVersion`, which soft-deletes
 a table with soft deletes and hard-deletes one without. Tables with soft
 deletes additionally expose `HardDeleteOne`.
@@ -44,3 +44,11 @@ replacement from a complete value.
 `<Type>FilterConditions(filter, &args)` gives a filter's conditions, each
 column qualified by its table, for a query of your own: its values are
 appended to `args`, their placeholders numbered after those already there.
+
+`FindPage(ctx, filter, opts)` reads a page of the rows a filter finds, in a
+`<Type>Sort`'s order of one column, ties broken by the primary key: one query
+of `Limit + 1` rows after `After`, and no count. The page's `Next` is the
+`<Type>PageKey` of its last row when more rows follow, which the next page
+takes as `After`. `Parse<Type>Sort` reads a page request's sort, `name` or
+`-name`, and refuses a field the table cannot sort by; an `After` of another
+sort is `ErrPageKey`.

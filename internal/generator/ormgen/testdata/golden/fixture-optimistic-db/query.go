@@ -3,6 +3,7 @@
 package orm
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -135,6 +136,11 @@ type ArrayStringFilter struct {
 	Eq       []string
 }
 
+// ErrPageKey is FindPage's error for an After that holds no primary key, or
+// a sort field other than its sort's: the key of a page in another order,
+// which names no row of this one (D60, amended).
+var ErrPageKey = errors.New("orm: the page key names no row of its sort")
+
 // ========================================
 // Type-Safe Field Selectors and Options
 // ========================================
@@ -266,6 +272,124 @@ type ShelfFindOptions struct {
 	IncludeDeleted bool
 }
 
+// ShelfSortField is a field FindPage orders Shelf rows by, by its
+// schema name (D60, amended): its primary key, or a column of one value of
+// text, a number or a time.
+type ShelfSortField string
+
+const (
+	ShelfSortById        ShelfSortField = "id"
+	ShelfSortByLabel     ShelfSortField = "label"
+	ShelfSortByCreatedAt ShelfSortField = "createdAt"
+	ShelfSortByUpdatedAt ShelfSortField = "updatedAt"
+)
+
+// ShelfSort is the order FindPage reads Shelf rows in: Field,
+// ascending, or descending when Desc; ties break by id in the same
+// direction. The zero value orders by id, ascending.
+type ShelfSort struct {
+	Field ShelfSortField
+	Desc  bool
+}
+
+// ParseShelfSort reads a sort as a page request writes it, "label" or
+// "-label": an error for a field Shelf cannot be sorted by.
+func ParseShelfSort(text string) (ShelfSort, error) {
+	parsed := ShelfSort{Field: ShelfSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
+	switch parsed.Field {
+	case ShelfSortById, ShelfSortByLabel, ShelfSortByCreatedAt, ShelfSortByUpdatedAt:
+		return parsed, nil
+	}
+	return ShelfSort{}, fmt.Errorf("orm: Shelf sorts by id, label, createdAt and updatedAt, not %q", text)
+}
+
+// ShelfPageKey is the position of a Shelf row in a FindPage order: its
+// sort field's value and its id, as a cursor holds them,
+// {"label": ..., "id": ...}. A key holds one sort field, and none
+// in an order by id.
+type ShelfPageKey struct {
+	Label     *string                 `json:"label,omitempty"`
+	CreatedAt *types.TemporalDateTime `json:"createdAt,omitempty"`
+	UpdatedAt *types.TemporalDateTime `json:"updatedAt,omitempty"`
+	Id        types.IdentityUUID      `json:"id"`
+}
+
+// args are the key's values in an order by field, as the repository writes
+// their columns: its sort field's, then its id, or its id alone in
+// an order by id. A key without its id, or with a sort field other
+// than field, is ErrPageKey.
+func (k *ShelfPageKey) args(field ShelfSortField) ([]any, error) {
+	var zeroKey types.IdentityUUID
+	if k.Id == zeroKey {
+		return nil, fmt.Errorf("%w: the Shelf key holds no id", ErrPageKey)
+	}
+	var held []string
+	var value any
+	if k.Label != nil {
+		held = append(held, "label")
+		value = *k.Label
+	}
+	if k.CreatedAt != nil {
+		held = append(held, "createdAt")
+		value = time.Time(*k.CreatedAt)
+	}
+	if k.UpdatedAt != nil {
+		held = append(held, "updatedAt")
+		value = time.Time(*k.UpdatedAt)
+	}
+	key := k.Id.ToUUID()
+	if field == ShelfSortById && len(held) == 0 {
+		return []any{key}, nil
+	}
+	if len(held) == 1 && held[0] == string(field) {
+		return []any{value, key}, nil
+	}
+	return nil, fmt.Errorf("%w: a page of Shelf rows by %s, a key of %s", ErrPageKey, field, strings.Join(append(held, "id"), " and "))
+}
+
+// shelfPageKeyOf is row's key in an order by field: its value of
+// field and its id.
+func shelfPageKeyOf(row *types.Shelf, field ShelfSortField) *ShelfPageKey {
+	key := &ShelfPageKey{}
+	if row.Id != nil {
+		key.Id = *row.Id
+	}
+	switch field {
+	case ShelfSortByLabel:
+		value := row.Label
+		key.Label = &value
+	case ShelfSortByCreatedAt:
+		value := row.CreatedAt
+		key.CreatedAt = &value
+	case ShelfSortByUpdatedAt:
+		value := row.UpdatedAt
+		key.UpdatedAt = &value
+	}
+	return key
+}
+
+// ShelfPageOptions are FindPage's options.
+type ShelfPageOptions struct {
+	// Fields specifies which fields to select, as FindMany's do; zero is an
+	// error. A page reads its sort's column and the id too, which Next holds.
+	Fields ShelfFields
+	// Sort is the order the rows are read in.
+	Sort ShelfSort
+	// After is the key of the last row of the page before, nil for the first page.
+	After *ShelfPageKey
+	// Limit is the rows a page holds: 1 or more, 100 when 0.
+	Limit int
+	// IncludeDeleted includes soft-deleted records in results (default false)
+	IncludeDeleted bool
+}
+
+// ShelfPage is a page of Shelf rows in FindPage's order: at most
+// Limit rows, and Next, the key of the last of them, when more rows follow.
+type ShelfPage struct {
+	Rows []*types.Shelf
+	Next *ShelfPageKey
+}
+
 // StockFields specifies which Stock fields to select
 type StockFields struct {
 	Id         bool
@@ -373,6 +497,115 @@ type StockFindOptions struct {
 	Offset int
 	// IncludeDeleted includes soft-deleted records in results (default false)
 	IncludeDeleted bool
+}
+
+// StockSortField is a field FindPage orders Stock rows by, by its
+// schema name (D60, amended): its primary key, or a column of one value of
+// text, a number or a time.
+type StockSortField string
+
+const (
+	StockSortById         StockSortField = "id"
+	StockSortByIngredient StockSortField = "ingredient"
+	StockSortByQuantity   StockSortField = "quantity"
+)
+
+// StockSort is the order FindPage reads Stock rows in: Field,
+// ascending, or descending when Desc; ties break by id in the same
+// direction. The zero value orders by id, ascending.
+type StockSort struct {
+	Field StockSortField
+	Desc  bool
+}
+
+// ParseStockSort reads a sort as a page request writes it, "ingredient" or
+// "-ingredient": an error for a field Stock cannot be sorted by.
+func ParseStockSort(text string) (StockSort, error) {
+	parsed := StockSort{Field: StockSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
+	switch parsed.Field {
+	case StockSortById, StockSortByIngredient, StockSortByQuantity:
+		return parsed, nil
+	}
+	return StockSort{}, fmt.Errorf("orm: Stock sorts by id, ingredient and quantity, not %q", text)
+}
+
+// StockPageKey is the position of a Stock row in a FindPage order: its
+// sort field's value and its id, as a cursor holds them,
+// {"ingredient": ..., "id": ...}. A key holds one sort field, and none
+// in an order by id.
+type StockPageKey struct {
+	Ingredient *string             `json:"ingredient,omitempty"`
+	Quantity   *types.GenericInt64 `json:"quantity,omitempty"`
+	Id         types.IdentityUUID  `json:"id"`
+}
+
+// args are the key's values in an order by field, as the repository writes
+// their columns: its sort field's, then its id, or its id alone in
+// an order by id. A key without its id, or with a sort field other
+// than field, is ErrPageKey.
+func (k *StockPageKey) args(field StockSortField) ([]any, error) {
+	var zeroKey types.IdentityUUID
+	if k.Id == zeroKey {
+		return nil, fmt.Errorf("%w: the Stock key holds no id", ErrPageKey)
+	}
+	var held []string
+	var value any
+	if k.Ingredient != nil {
+		held = append(held, "ingredient")
+		value = *k.Ingredient
+	}
+	if k.Quantity != nil {
+		held = append(held, "quantity")
+		value = *k.Quantity
+	}
+	key := k.Id.ToUUID()
+	if field == StockSortById && len(held) == 0 {
+		return []any{key}, nil
+	}
+	if len(held) == 1 && held[0] == string(field) {
+		return []any{value, key}, nil
+	}
+	return nil, fmt.Errorf("%w: a page of Stock rows by %s, a key of %s", ErrPageKey, field, strings.Join(append(held, "id"), " and "))
+}
+
+// stockPageKeyOf is row's key in an order by field: its value of
+// field and its id.
+func stockPageKeyOf(row *types.Stock, field StockSortField) *StockPageKey {
+	key := &StockPageKey{}
+	if row.Id != nil {
+		key.Id = *row.Id
+	}
+	switch field {
+	case StockSortByIngredient:
+		value := row.Ingredient
+		key.Ingredient = &value
+	case StockSortByQuantity:
+		value := row.Quantity
+		key.Quantity = &value
+	}
+	return key
+}
+
+// StockPageOptions are FindPage's options.
+type StockPageOptions struct {
+	// Fields specifies which fields to select, as FindMany's do; zero is an
+	// error. A page reads its sort's column and the id too, which Next holds.
+	Fields StockFields
+	// Sort is the order the rows are read in.
+	Sort StockSort
+	// After is the key of the last row of the page before, nil for the first page.
+	After *StockPageKey
+	// Limit is the rows a page holds: 1 or more, 100 when 0.
+	Limit int
+	// IncludeDeleted includes soft-deleted records in results (default false)
+	IncludeDeleted bool
+}
+
+// StockPage is a page of Stock rows in FindPage's order: at most
+// Limit rows, and Next, the key of the last of them, when more rows follow.
+type StockPage struct {
+	Rows []*types.Stock
+	Next *StockPageKey
 }
 
 // ========================================

@@ -211,6 +211,14 @@ crate's call, procedure and argument form take the page too, and its
 console links a list's next and first pages
 ([A paged list and a search box](/superschematic/guides/topcoat/#a-paged-list-and-a-search-box)).
 
+A Go implementation over a database service reads a page through the
+ORM: `FindPage` runs one query of `limit + 1` rows after a key, in the
+order of one column, then the key, with a filter's conditions beside the
+keyset, and its `Next` is the key the page's cursor holds
+([Pages](/superschematic/guides/database-tables/#pages)). `Parse<Type>Sort`
+reads the page request's sort into the ORM's order, and `ErrPageKey` is a
+cursor of another order.
+
 `shop-orders` pages its orders, a product's reviews and its catalog. Its Go
 implementation reads a page of orders in two steps: the keys of up to
 `limit + 1` of the caller's orders (every customer's for staff) after the

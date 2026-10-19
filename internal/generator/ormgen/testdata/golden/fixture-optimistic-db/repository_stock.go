@@ -37,6 +37,16 @@ var StockQuotedFields = map[string]string{
 	"shelf_id":   `shelf_id`,
 }
 
+// stockSortColumns are the columns of Stock's sort fields, by
+// field: the name FindPage selects, and the column as its ORDER BY and its
+// keyset condition write it. They are the only text of a sort that reaches
+// its SQL (D60, amended).
+var stockSortColumns = map[StockSortField]struct{ name, sql string }{
+	StockSortById:         {"id", `stock.id`},
+	StockSortByIngredient: {"ingredient", `stock.ingredient`},
+	StockSortByQuantity:   {"quantity", `stock.quantity`},
+}
+
 // buildStockOrderByClause builds an ORDER BY clause for Stock.
 // quotedTable is the table's name as the FROM clause spells it, quoted when
 // it is a keyword (a table named order is "order").
@@ -571,22 +581,7 @@ func (r *StockRepository) FindMany(ctx context.Context, filter *StockFilter, opt
 	}
 
 	// Build selected fields in OrderedMembers order so FK columns match scan order.
-	var fieldStrings []string
-	if opts.Fields.Id {
-		fieldStrings = append(fieldStrings, "id")
-	}
-	if opts.Fields.Shelf || !opts.Fields.ShelfNested.IsZero() {
-		fieldStrings = append(fieldStrings, "shelf_id")
-	}
-	if opts.Fields.Ingredient {
-		fieldStrings = append(fieldStrings, "ingredient")
-	}
-	if opts.Fields.Quantity {
-		fieldStrings = append(fieldStrings, "quantity")
-	}
-	if opts.Fields.Version {
-		fieldStrings = append(fieldStrings, "_version")
-	}
+	fieldStrings := stockFieldStrings(opts.Fields)
 
 	// Validate fields
 	if err := validateFields(fieldStrings, StockAllowedFields); err != nil {
@@ -626,6 +621,40 @@ func (r *StockRepository) FindMany(ctx context.Context, filter *StockFilter, opt
 		return nil, 0, fmt.Errorf("failed to get count: %w", err)
 	}
 
+	results, err := r.findRows(ctx, "FindMany", query, args, fieldStrings, opts.Fields)
+	if err != nil {
+		return nil, 0, err
+	}
+	return results, totalCount, nil
+}
+
+// stockFieldStrings are the columns fields selects, in OrderedMembers
+// order so FK columns match scan order, and the primary key when fields
+// hydrates a hasMany relation, which maps the children by it.
+func stockFieldStrings(fields StockFields) []string {
+	var fieldStrings []string
+	if fields.Id {
+		fieldStrings = append(fieldStrings, "id")
+	}
+	if fields.Shelf || !fields.ShelfNested.IsZero() {
+		fieldStrings = append(fieldStrings, "shelf_id")
+	}
+	if fields.Ingredient {
+		fieldStrings = append(fieldStrings, "ingredient")
+	}
+	if fields.Quantity {
+		fieldStrings = append(fieldStrings, "quantity")
+	}
+	if fields.Version {
+		fieldStrings = append(fieldStrings, "_version")
+	}
+	return fieldStrings
+}
+
+// findRows runs query, a select of the columns fieldStrings names, in turn,
+// with args, scans its rows, and hydrates the relations fields selects, as
+// FindMany and FindPage read them. method names the caller in an error.
+func (r *StockRepository) findRows(ctx context.Context, method, query string, args []interface{}, fieldStrings []string, fields StockFields) ([]*types.Stock, error) {
 	// Execute query
 	var rows pgx.Rows
 	var err error
@@ -635,7 +664,7 @@ func (r *StockRepository) FindMany(ctx context.Context, filter *StockFilter, opt
 		rows, err = r.db.pool.Query(ctx, query, args...)
 	}
 	if err != nil {
-		return nil, 0, fmt.Errorf("failed to execute query: %w", err)
+		return nil, fmt.Errorf("failed to execute query: %w", err)
 	}
 	defer rows.Close()
 
@@ -668,19 +697,19 @@ func (r *StockRepository) FindMany(ctx context.Context, filter *StockFilter, opt
 				scanDest[i] = &tempRelShelf
 				selectedRelShelf = true
 			default:
-				return nil, 0, fmt.Errorf("unexpected field %q for Stock.FindMany", fieldName)
+				return nil, fmt.Errorf("unexpected field %q for Stock.%s", fieldName, method)
 			}
 		}
 
 		if err := rows.Scan(scanDest...); err != nil {
-			return nil, 0, fmt.Errorf("failed to scan row: %w", err)
+			return nil, fmt.Errorf("failed to scan row: %w", err)
 		}
 
 		// Copy nullable fields when present
 		var jsonFieldDecodeErr error
 
 		if jsonFieldDecodeErr != nil {
-			return nil, 0, jsonFieldDecodeErr
+			return nil, jsonFieldDecodeErr
 		}
 
 		// Set relationship IDs from scanned FK values (hydration happens after loop)
@@ -692,11 +721,11 @@ func (r *StockRepository) FindMany(ctx context.Context, filter *StockFilter, opt
 	}
 
 	if err := rows.Err(); err != nil {
-		return nil, 0, fmt.Errorf("error iterating rows: %w", err)
+		return nil, fmt.Errorf("error iterating rows: %w", err)
 	}
 
 	// Batch hydrate relationships (outside the row loop for efficiency)
-	if opts.Fields.Shelf || !opts.Fields.ShelfNested.IsZero() {
+	if fields.Shelf || !fields.ShelfNested.IsZero() {
 		// Collect unique FK IDs from results (dedupe during collection)
 		shelfIDSet := make(map[types.IdentityUUID]bool)
 		var shelfIDs []types.IdentityUUID
@@ -712,8 +741,8 @@ func (r *StockRepository) FindMany(ctx context.Context, filter *StockFilter, opt
 		// Batch fetch related entities with typed child field options.
 		childFields := (ShelfFields{}).All()
 		childFieldsAreDefault := true
-		if !opts.Fields.ShelfNested.IsZero() {
-			childFields = opts.Fields.ShelfNested
+		if !fields.ShelfNested.IsZero() {
+			childFields = fields.ShelfNested
 			childFieldsAreDefault = false
 		}
 
@@ -722,7 +751,7 @@ func (r *StockRepository) FindMany(ctx context.Context, filter *StockFilter, opt
 			Limit:  len(shelfIDs),
 		}, childFieldsAreDefault)
 		if err != nil {
-			return nil, 0, fmt.Errorf("failed to batch fetch shelf: %w", err)
+			return nil, fmt.Errorf("failed to batch fetch shelf: %w", err)
 		}
 
 		// Hydrate results from map
@@ -736,7 +765,90 @@ func (r *StockRepository) FindMany(ctx context.Context, filter *StockFilter, opt
 		}
 	}
 
-	return results, totalCount, nil
+	return results, nil
+}
+
+// FindPage reads a page of the Stock rows filter finds (D60, amended), in
+// opts.Sort's order, ties broken by id in the same direction: up to
+// opts.Limit rows after opts.After, and Next when more follow. It runs one
+// query of opts.Limit + 1 rows and no count. An After that holds a field
+// other than opts.Sort's, or no id, is ErrPageKey.
+func (r *StockRepository) FindPage(ctx context.Context, filter *StockFilter, opts *StockPageOptions) (*StockPage, error) {
+	if opts == nil || opts.Fields.IsZero() {
+		return nil, fmt.Errorf("fields must be specified in PageOptions for performance")
+	}
+	if opts.Limit < 0 {
+		return nil, fmt.Errorf("orm: a page of Stock rows holds 1 or more, not %d", opts.Limit)
+	}
+	limit := opts.Limit
+	if limit == 0 {
+		limit = 100
+	}
+	field := opts.Sort.Field
+	if field == "" {
+		field = StockSortById
+	}
+	column, ok := stockSortColumns[field]
+	if !ok {
+		return nil, fmt.Errorf("orm: Stock sorts by id, ingredient and quantity, not %q", string(field))
+	}
+
+	// Next is the key of the page's last row, so the page reads its sort's
+	// column and its primary key whatever Fields selects.
+	fieldStrings := stockFieldStrings(opts.Fields)
+	for _, name := range []string{column.name, "id"} {
+		if !containsString(fieldStrings, name) {
+			fieldStrings = append(fieldStrings, name)
+		}
+	}
+	if err := validateFields(fieldStrings, StockAllowedFields); err != nil {
+		return nil, err
+	}
+	selectFields := buildSelectFieldsTyped(fieldStrings, "stock")
+	// The filter's conditions, each qualified by the table, then the
+	// keyset's.
+	var args []interface{}
+	conditions := filter.conditions(&args, 0)
+	comparison, direction := ">", "ASC"
+	if opts.Sort.Desc {
+		comparison, direction = "<", "DESC"
+	}
+	if opts.After != nil {
+		values, err := opts.After.args(field)
+		if err != nil {
+			return nil, err
+		}
+		placeholders := make([]string, len(values))
+		for i, value := range values {
+			args = append(args, value)
+			placeholders[i] = fmt.Sprintf("$%d", len(args))
+		}
+		if len(values) == 1 {
+			conditions = append(conditions, fmt.Sprintf("%s %s %s", column.sql, comparison, placeholders[0]))
+		} else {
+			conditions = append(conditions, fmt.Sprintf(`(%s, stock.id) %s (%s)`, column.sql, comparison, strings.Join(placeholders, ", ")))
+		}
+	}
+	whereClause := ""
+	if len(conditions) > 0 {
+		whereClause = " WHERE " + strings.Join(conditions, " AND ")
+	}
+	orderByClause := fmt.Sprintf(" ORDER BY %s %s", column.sql, direction)
+	if field != StockSortById {
+		orderByClause += fmt.Sprintf(`, stock.id %s`, direction)
+	}
+	query := fmt.Sprintf(`SELECT %s FROM stock%s%s LIMIT %d`, selectFields, whereClause, orderByClause, limit+1)
+
+	rows, err := r.findRows(ctx, "FindPage", query, args, fieldStrings, opts.Fields)
+	if err != nil {
+		return nil, err
+	}
+	page := &StockPage{Rows: rows}
+	if len(rows) > limit {
+		page.Rows = rows[:limit]
+		page.Next = stockPageKeyOf(page.Rows[limit-1], field)
+	}
+	return page, nil
 }
 
 // CreateOne inserts a new Stock record

@@ -38,6 +38,14 @@ var BoardQuotedFields = map[string]string{
 	"scores": `scores`,
 }
 
+// boardSortColumns are the columns of Board's sort fields, by
+// field: the name FindPage selects, and the column as its ORDER BY and its
+// keyset condition write it. They are the only text of a sort that reaches
+// its SQL (D60, amended).
+var boardSortColumns = map[BoardSortField]struct{ name, sql string }{
+	BoardSortById: {"id", `board.id`},
+}
+
 // buildBoardOrderByClause builds an ORDER BY clause for Board.
 // quotedTable is the table's name as the FROM clause spells it, quoted when
 // it is a keyword (a table named order is "order").
@@ -539,22 +547,7 @@ func (r *BoardRepository) FindMany(ctx context.Context, filter *BoardFilter, opt
 	}
 
 	// Build selected fields in OrderedMembers order so FK columns match scan order.
-	var fieldStrings []string
-	if opts.Fields.Id {
-		fieldStrings = append(fieldStrings, "id")
-	}
-	if opts.Fields.Labels {
-		fieldStrings = append(fieldStrings, "labels")
-	}
-	if opts.Fields.States {
-		fieldStrings = append(fieldStrings, "states")
-	}
-	if opts.Fields.Walls {
-		fieldStrings = append(fieldStrings, "walls")
-	}
-	if opts.Fields.Scores {
-		fieldStrings = append(fieldStrings, "scores")
-	}
+	fieldStrings := boardFieldStrings(opts.Fields)
 
 	// Validate fields
 	if err := validateFields(fieldStrings, BoardAllowedFields); err != nil {
@@ -594,6 +587,40 @@ func (r *BoardRepository) FindMany(ctx context.Context, filter *BoardFilter, opt
 		return nil, 0, fmt.Errorf("failed to get count: %w", err)
 	}
 
+	results, err := r.findRows(ctx, "FindMany", query, args, fieldStrings, opts.Fields)
+	if err != nil {
+		return nil, 0, err
+	}
+	return results, totalCount, nil
+}
+
+// boardFieldStrings are the columns fields selects, in OrderedMembers
+// order so FK columns match scan order, and the primary key when fields
+// hydrates a hasMany relation, which maps the children by it.
+func boardFieldStrings(fields BoardFields) []string {
+	var fieldStrings []string
+	if fields.Id {
+		fieldStrings = append(fieldStrings, "id")
+	}
+	if fields.Labels {
+		fieldStrings = append(fieldStrings, "labels")
+	}
+	if fields.States {
+		fieldStrings = append(fieldStrings, "states")
+	}
+	if fields.Walls {
+		fieldStrings = append(fieldStrings, "walls")
+	}
+	if fields.Scores {
+		fieldStrings = append(fieldStrings, "scores")
+	}
+	return fieldStrings
+}
+
+// findRows runs query, a select of the columns fieldStrings names, in turn,
+// with args, scans its rows, and hydrates the relations fields selects, as
+// FindMany and FindPage read them. method names the caller in an error.
+func (r *BoardRepository) findRows(ctx context.Context, method, query string, args []interface{}, fieldStrings []string, fields BoardFields) ([]*types.Board, error) {
 	// Execute query
 	var rows pgx.Rows
 	var err error
@@ -603,7 +630,7 @@ func (r *BoardRepository) FindMany(ctx context.Context, filter *BoardFilter, opt
 		rows, err = r.db.pool.Query(ctx, query, args...)
 	}
 	if err != nil {
-		return nil, 0, fmt.Errorf("failed to execute query: %w", err)
+		return nil, fmt.Errorf("failed to execute query: %w", err)
 	}
 	defer rows.Close()
 
@@ -637,12 +664,12 @@ func (r *BoardRepository) FindMany(ctx context.Context, filter *BoardFilter, opt
 			case "scores":
 				scanDest[i] = &tempScores
 			default:
-				return nil, 0, fmt.Errorf("unexpected field %q for Board.FindMany", fieldName)
+				return nil, fmt.Errorf("unexpected field %q for Board.%s", fieldName, method)
 			}
 		}
 
 		if err := rows.Scan(scanDest...); err != nil {
-			return nil, 0, fmt.Errorf("failed to scan row: %w", err)
+			return nil, fmt.Errorf("failed to scan row: %w", err)
 		}
 
 		// Copy nullable fields when present
@@ -669,7 +696,7 @@ func (r *BoardRepository) FindMany(ctx context.Context, filter *BoardFilter, opt
 			}
 		}
 		if jsonFieldDecodeErr != nil {
-			return nil, 0, jsonFieldDecodeErr
+			return nil, jsonFieldDecodeErr
 		}
 
 		// Set relationship IDs from scanned FK values (hydration happens after loop)
@@ -678,12 +705,95 @@ func (r *BoardRepository) FindMany(ctx context.Context, filter *BoardFilter, opt
 	}
 
 	if err := rows.Err(); err != nil {
-		return nil, 0, fmt.Errorf("error iterating rows: %w", err)
+		return nil, fmt.Errorf("error iterating rows: %w", err)
 	}
 
 	// Batch hydrate relationships (outside the row loop for efficiency)
 
-	return results, totalCount, nil
+	return results, nil
+}
+
+// FindPage reads a page of the Board rows filter finds (D60, amended), in
+// opts.Sort's order, ties broken by id in the same direction: up to
+// opts.Limit rows after opts.After, and Next when more follow. It runs one
+// query of opts.Limit + 1 rows and no count. An After that holds a field
+// other than opts.Sort's, or no id, is ErrPageKey.
+func (r *BoardRepository) FindPage(ctx context.Context, filter *BoardFilter, opts *BoardPageOptions) (*BoardPage, error) {
+	if opts == nil || opts.Fields.IsZero() {
+		return nil, fmt.Errorf("fields must be specified in PageOptions for performance")
+	}
+	if opts.Limit < 0 {
+		return nil, fmt.Errorf("orm: a page of Board rows holds 1 or more, not %d", opts.Limit)
+	}
+	limit := opts.Limit
+	if limit == 0 {
+		limit = 100
+	}
+	field := opts.Sort.Field
+	if field == "" {
+		field = BoardSortById
+	}
+	column, ok := boardSortColumns[field]
+	if !ok {
+		return nil, fmt.Errorf("orm: Board sorts by id, not %q", string(field))
+	}
+
+	// Next is the key of the page's last row, so the page reads its sort's
+	// column and its primary key whatever Fields selects.
+	fieldStrings := boardFieldStrings(opts.Fields)
+	for _, name := range []string{column.name, "id"} {
+		if !containsString(fieldStrings, name) {
+			fieldStrings = append(fieldStrings, name)
+		}
+	}
+	if err := validateFields(fieldStrings, BoardAllowedFields); err != nil {
+		return nil, err
+	}
+	selectFields := buildSelectFieldsTyped(fieldStrings, "board")
+	// The filter's conditions, each qualified by the table, then the
+	// keyset's.
+	var args []interface{}
+	conditions := filter.conditions(&args, 0)
+	comparison, direction := ">", "ASC"
+	if opts.Sort.Desc {
+		comparison, direction = "<", "DESC"
+	}
+	if opts.After != nil {
+		values, err := opts.After.args(field)
+		if err != nil {
+			return nil, err
+		}
+		placeholders := make([]string, len(values))
+		for i, value := range values {
+			args = append(args, value)
+			placeholders[i] = fmt.Sprintf("$%d", len(args))
+		}
+		if len(values) == 1 {
+			conditions = append(conditions, fmt.Sprintf("%s %s %s", column.sql, comparison, placeholders[0]))
+		} else {
+			conditions = append(conditions, fmt.Sprintf(`(%s, board.id) %s (%s)`, column.sql, comparison, strings.Join(placeholders, ", ")))
+		}
+	}
+	whereClause := ""
+	if len(conditions) > 0 {
+		whereClause = " WHERE " + strings.Join(conditions, " AND ")
+	}
+	orderByClause := fmt.Sprintf(" ORDER BY %s %s", column.sql, direction)
+	if field != BoardSortById {
+		orderByClause += fmt.Sprintf(`, board.id %s`, direction)
+	}
+	query := fmt.Sprintf(`SELECT %s FROM board%s%s LIMIT %d`, selectFields, whereClause, orderByClause, limit+1)
+
+	rows, err := r.findRows(ctx, "FindPage", query, args, fieldStrings, opts.Fields)
+	if err != nil {
+		return nil, err
+	}
+	page := &BoardPage{Rows: rows}
+	if len(rows) > limit {
+		page.Rows = rows[:limit]
+		page.Next = boardPageKeyOf(page.Rows[limit-1], field)
+	}
+	return page, nil
 }
 
 // CreateOne inserts a new Board record

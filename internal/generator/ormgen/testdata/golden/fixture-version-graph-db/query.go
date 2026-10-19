@@ -3,6 +3,7 @@
 package orm
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -135,6 +136,11 @@ type ArrayStringFilter struct {
 	Eq       []string
 }
 
+// ErrPageKey is FindPage's error for an After that holds no primary key, or
+// a sort field other than its sort's: the key of a page in another order,
+// which names no row of this one (D60, amended).
+var ErrPageKey = errors.New("orm: the page key names no row of its sort")
+
 // ========================================
 // Type-Safe Field Selectors and Options
 // ========================================
@@ -264,6 +270,117 @@ type CoverFindOptions struct {
 	Offset int
 	// IncludeDeleted includes soft-deleted records in results (default false)
 	IncludeDeleted bool
+}
+
+// CoverSortField is a field FindPage orders Cover rows by, by its
+// schema name (D60, amended): its primary key, or a column of one value of
+// text, a number or a time.
+type CoverSortField string
+
+const (
+	CoverSortById        CoverSortField = "id"
+	CoverSortByPhotoUrl  CoverSortField = "photoUrl"
+	CoverSortByEntityKey CoverSortField = "entityKey"
+)
+
+// CoverSort is the order FindPage reads Cover rows in: Field,
+// ascending, or descending when Desc; ties break by id in the same
+// direction. The zero value orders by id, ascending.
+type CoverSort struct {
+	Field CoverSortField
+	Desc  bool
+}
+
+// ParseCoverSort reads a sort as a page request writes it, "photoUrl" or
+// "-photoUrl": an error for a field Cover cannot be sorted by.
+func ParseCoverSort(text string) (CoverSort, error) {
+	parsed := CoverSort{Field: CoverSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
+	switch parsed.Field {
+	case CoverSortById, CoverSortByPhotoUrl, CoverSortByEntityKey:
+		return parsed, nil
+	}
+	return CoverSort{}, fmt.Errorf("orm: Cover sorts by id, photoUrl and entityKey, not %q", text)
+}
+
+// CoverPageKey is the position of a Cover row in a FindPage order: its
+// sort field's value and its id, as a cursor holds them,
+// {"photoUrl": ..., "id": ...}. A key holds one sort field, and none
+// in an order by id.
+type CoverPageKey struct {
+	PhotoUrl  *string             `json:"photoUrl,omitempty"`
+	EntityKey *types.IdentityUUID `json:"entityKey,omitempty"`
+	Id        types.IdentityUUID  `json:"id"`
+}
+
+// args are the key's values in an order by field, as the repository writes
+// their columns: its sort field's, then its id, or its id alone in
+// an order by id. A key without its id, or with a sort field other
+// than field, is ErrPageKey.
+func (k *CoverPageKey) args(field CoverSortField) ([]any, error) {
+	var zeroKey types.IdentityUUID
+	if k.Id == zeroKey {
+		return nil, fmt.Errorf("%w: the Cover key holds no id", ErrPageKey)
+	}
+	var held []string
+	var value any
+	if k.PhotoUrl != nil {
+		held = append(held, "photoUrl")
+		value = *k.PhotoUrl
+	}
+	if k.EntityKey != nil {
+		held = append(held, "entityKey")
+		value = k.EntityKey.ToUUID()
+	}
+	key := k.Id.ToUUID()
+	if field == CoverSortById && len(held) == 0 {
+		return []any{key}, nil
+	}
+	if len(held) == 1 && held[0] == string(field) {
+		return []any{value, key}, nil
+	}
+	return nil, fmt.Errorf("%w: a page of Cover rows by %s, a key of %s", ErrPageKey, field, strings.Join(append(held, "id"), " and "))
+}
+
+// coverPageKeyOf is row's key in an order by field: its value of
+// field and its id.
+func coverPageKeyOf(row *types.Cover, field CoverSortField) *CoverPageKey {
+	key := &CoverPageKey{}
+	if row.Id != nil {
+		key.Id = *row.Id
+	}
+	switch field {
+	case CoverSortByPhotoUrl:
+		value := row.PhotoUrl
+		key.PhotoUrl = &value
+	case CoverSortByEntityKey:
+		if row.EntityKey != nil {
+			value := *row.EntityKey
+			key.EntityKey = &value
+		}
+	}
+	return key
+}
+
+// CoverPageOptions are FindPage's options.
+type CoverPageOptions struct {
+	// Fields specifies which fields to select, as FindMany's do; zero is an
+	// error. A page reads its sort's column and the id too, which Next holds.
+	Fields CoverFields
+	// Sort is the order the rows are read in.
+	Sort CoverSort
+	// After is the key of the last row of the page before, nil for the first page.
+	After *CoverPageKey
+	// Limit is the rows a page holds: 1 or more, 100 when 0.
+	Limit int
+	// IncludeDeleted includes soft-deleted records in results (default false)
+	IncludeDeleted bool
+}
+
+// CoverPage is a page of Cover rows in FindPage's order: at most
+// Limit rows, and Next, the key of the last of them, when more rows follow.
+type CoverPage struct {
+	Rows []*types.Cover
+	Next *CoverPageKey
 }
 
 // CoverHistoryOptions contains options for Cover version history reads.
@@ -415,6 +532,126 @@ type IngredientFindOptions struct {
 	IncludeDeleted bool
 }
 
+// IngredientSortField is a field FindPage orders Ingredient rows by, by its
+// schema name (D60, amended): its primary key, or a column of one value of
+// text, a number or a time.
+type IngredientSortField string
+
+const (
+	IngredientSortById        IngredientSortField = "id"
+	IngredientSortByStepKey   IngredientSortField = "stepKey"
+	IngredientSortByQuantity  IngredientSortField = "quantity"
+	IngredientSortByEntityKey IngredientSortField = "entityKey"
+)
+
+// IngredientSort is the order FindPage reads Ingredient rows in: Field,
+// ascending, or descending when Desc; ties break by id in the same
+// direction. The zero value orders by id, ascending.
+type IngredientSort struct {
+	Field IngredientSortField
+	Desc  bool
+}
+
+// ParseIngredientSort reads a sort as a page request writes it, "stepKey" or
+// "-stepKey": an error for a field Ingredient cannot be sorted by.
+func ParseIngredientSort(text string) (IngredientSort, error) {
+	parsed := IngredientSort{Field: IngredientSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
+	switch parsed.Field {
+	case IngredientSortById, IngredientSortByStepKey, IngredientSortByQuantity, IngredientSortByEntityKey:
+		return parsed, nil
+	}
+	return IngredientSort{}, fmt.Errorf("orm: Ingredient sorts by id, stepKey, quantity and entityKey, not %q", text)
+}
+
+// IngredientPageKey is the position of a Ingredient row in a FindPage order: its
+// sort field's value and its id, as a cursor holds them,
+// {"stepKey": ..., "id": ...}. A key holds one sort field, and none
+// in an order by id.
+type IngredientPageKey struct {
+	StepKey   *types.IdentityUUID `json:"stepKey,omitempty"`
+	Quantity  *string             `json:"quantity,omitempty"`
+	EntityKey *types.IdentityUUID `json:"entityKey,omitempty"`
+	Id        types.IdentityUUID  `json:"id"`
+}
+
+// args are the key's values in an order by field, as the repository writes
+// their columns: its sort field's, then its id, or its id alone in
+// an order by id. A key without its id, or with a sort field other
+// than field, is ErrPageKey.
+func (k *IngredientPageKey) args(field IngredientSortField) ([]any, error) {
+	var zeroKey types.IdentityUUID
+	if k.Id == zeroKey {
+		return nil, fmt.Errorf("%w: the Ingredient key holds no id", ErrPageKey)
+	}
+	var held []string
+	var value any
+	if k.StepKey != nil {
+		held = append(held, "stepKey")
+		value = k.StepKey.ToUUID()
+	}
+	if k.Quantity != nil {
+		held = append(held, "quantity")
+		value = *k.Quantity
+	}
+	if k.EntityKey != nil {
+		held = append(held, "entityKey")
+		value = k.EntityKey.ToUUID()
+	}
+	key := k.Id.ToUUID()
+	if field == IngredientSortById && len(held) == 0 {
+		return []any{key}, nil
+	}
+	if len(held) == 1 && held[0] == string(field) {
+		return []any{value, key}, nil
+	}
+	return nil, fmt.Errorf("%w: a page of Ingredient rows by %s, a key of %s", ErrPageKey, field, strings.Join(append(held, "id"), " and "))
+}
+
+// ingredientPageKeyOf is row's key in an order by field: its value of
+// field and its id.
+func ingredientPageKeyOf(row *types.Ingredient, field IngredientSortField) *IngredientPageKey {
+	key := &IngredientPageKey{}
+	if row.Id != nil {
+		key.Id = *row.Id
+	}
+	switch field {
+	case IngredientSortByStepKey:
+		value := row.StepKey
+		key.StepKey = &value
+	case IngredientSortByQuantity:
+		value := row.Quantity
+		key.Quantity = &value
+	case IngredientSortByEntityKey:
+		if row.EntityKey != nil {
+			value := *row.EntityKey
+			key.EntityKey = &value
+		}
+	}
+	return key
+}
+
+// IngredientPageOptions are FindPage's options.
+type IngredientPageOptions struct {
+	// Fields specifies which fields to select, as FindMany's do; zero is an
+	// error. A page reads its sort's column and the id too, which Next holds.
+	Fields IngredientFields
+	// Sort is the order the rows are read in.
+	Sort IngredientSort
+	// After is the key of the last row of the page before, nil for the first page.
+	After *IngredientPageKey
+	// Limit is the rows a page holds: 1 or more, 100 when 0.
+	Limit int
+	// IncludeDeleted includes soft-deleted records in results (default false)
+	IncludeDeleted bool
+}
+
+// IngredientPage is a page of Ingredient rows in FindPage's order: at most
+// Limit rows, and Next, the key of the last of them, when more rows follow.
+type IngredientPage struct {
+	Rows []*types.Ingredient
+	Next *IngredientPageKey
+}
+
 // IngredientHistoryOptions contains options for Ingredient version history reads.
 type IngredientHistoryOptions struct {
 	// Limit limits the number of results (default 100)
@@ -557,6 +794,117 @@ type NoteFindOptions struct {
 	IncludeDeleted bool
 }
 
+// NoteSortField is a field FindPage orders Note rows by, by its
+// schema name (D60, amended): its primary key, or a column of one value of
+// text, a number or a time.
+type NoteSortField string
+
+const (
+	NoteSortById        NoteSortField = "id"
+	NoteSortByBody      NoteSortField = "body"
+	NoteSortByEntityKey NoteSortField = "entityKey"
+)
+
+// NoteSort is the order FindPage reads Note rows in: Field,
+// ascending, or descending when Desc; ties break by id in the same
+// direction. The zero value orders by id, ascending.
+type NoteSort struct {
+	Field NoteSortField
+	Desc  bool
+}
+
+// ParseNoteSort reads a sort as a page request writes it, "body" or
+// "-body": an error for a field Note cannot be sorted by.
+func ParseNoteSort(text string) (NoteSort, error) {
+	parsed := NoteSort{Field: NoteSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
+	switch parsed.Field {
+	case NoteSortById, NoteSortByBody, NoteSortByEntityKey:
+		return parsed, nil
+	}
+	return NoteSort{}, fmt.Errorf("orm: Note sorts by id, body and entityKey, not %q", text)
+}
+
+// NotePageKey is the position of a Note row in a FindPage order: its
+// sort field's value and its id, as a cursor holds them,
+// {"body": ..., "id": ...}. A key holds one sort field, and none
+// in an order by id.
+type NotePageKey struct {
+	Body      *string             `json:"body,omitempty"`
+	EntityKey *types.IdentityUUID `json:"entityKey,omitempty"`
+	Id        types.IdentityUUID  `json:"id"`
+}
+
+// args are the key's values in an order by field, as the repository writes
+// their columns: its sort field's, then its id, or its id alone in
+// an order by id. A key without its id, or with a sort field other
+// than field, is ErrPageKey.
+func (k *NotePageKey) args(field NoteSortField) ([]any, error) {
+	var zeroKey types.IdentityUUID
+	if k.Id == zeroKey {
+		return nil, fmt.Errorf("%w: the Note key holds no id", ErrPageKey)
+	}
+	var held []string
+	var value any
+	if k.Body != nil {
+		held = append(held, "body")
+		value = *k.Body
+	}
+	if k.EntityKey != nil {
+		held = append(held, "entityKey")
+		value = k.EntityKey.ToUUID()
+	}
+	key := k.Id.ToUUID()
+	if field == NoteSortById && len(held) == 0 {
+		return []any{key}, nil
+	}
+	if len(held) == 1 && held[0] == string(field) {
+		return []any{value, key}, nil
+	}
+	return nil, fmt.Errorf("%w: a page of Note rows by %s, a key of %s", ErrPageKey, field, strings.Join(append(held, "id"), " and "))
+}
+
+// notePageKeyOf is row's key in an order by field: its value of
+// field and its id.
+func notePageKeyOf(row *types.Note, field NoteSortField) *NotePageKey {
+	key := &NotePageKey{}
+	if row.Id != nil {
+		key.Id = *row.Id
+	}
+	switch field {
+	case NoteSortByBody:
+		value := row.Body
+		key.Body = &value
+	case NoteSortByEntityKey:
+		if row.EntityKey != nil {
+			value := *row.EntityKey
+			key.EntityKey = &value
+		}
+	}
+	return key
+}
+
+// NotePageOptions are FindPage's options.
+type NotePageOptions struct {
+	// Fields specifies which fields to select, as FindMany's do; zero is an
+	// error. A page reads its sort's column and the id too, which Next holds.
+	Fields NoteFields
+	// Sort is the order the rows are read in.
+	Sort NoteSort
+	// After is the key of the last row of the page before, nil for the first page.
+	After *NotePageKey
+	// Limit is the rows a page holds: 1 or more, 100 when 0.
+	Limit int
+	// IncludeDeleted includes soft-deleted records in results (default false)
+	IncludeDeleted bool
+}
+
+// NotePage is a page of Note rows in FindPage's order: at most
+// Limit rows, and Next, the key of the last of them, when more rows follow.
+type NotePage struct {
+	Rows []*types.Note
+	Next *NotePageKey
+}
+
 // NoteHistoryOptions contains options for Note version history reads.
 type NoteHistoryOptions struct {
 	// Limit limits the number of results (default 100)
@@ -659,6 +1007,115 @@ type RecipeFindOptions struct {
 	Offset int
 	// IncludeDeleted includes soft-deleted records in results (default false)
 	IncludeDeleted bool
+}
+
+// RecipeSortField is a field FindPage orders Recipe rows by, by its
+// schema name (D60, amended): its primary key, or a column of one value of
+// text, a number or a time.
+type RecipeSortField string
+
+const (
+	RecipeSortById        RecipeSortField = "id"
+	RecipeSortByTitle     RecipeSortField = "title"
+	RecipeSortByCreatedAt RecipeSortField = "createdAt"
+)
+
+// RecipeSort is the order FindPage reads Recipe rows in: Field,
+// ascending, or descending when Desc; ties break by id in the same
+// direction. The zero value orders by id, ascending.
+type RecipeSort struct {
+	Field RecipeSortField
+	Desc  bool
+}
+
+// ParseRecipeSort reads a sort as a page request writes it, "title" or
+// "-title": an error for a field Recipe cannot be sorted by.
+func ParseRecipeSort(text string) (RecipeSort, error) {
+	parsed := RecipeSort{Field: RecipeSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
+	switch parsed.Field {
+	case RecipeSortById, RecipeSortByTitle, RecipeSortByCreatedAt:
+		return parsed, nil
+	}
+	return RecipeSort{}, fmt.Errorf("orm: Recipe sorts by id, title and createdAt, not %q", text)
+}
+
+// RecipePageKey is the position of a Recipe row in a FindPage order: its
+// sort field's value and its id, as a cursor holds them,
+// {"title": ..., "id": ...}. A key holds one sort field, and none
+// in an order by id.
+type RecipePageKey struct {
+	Title     *string                 `json:"title,omitempty"`
+	CreatedAt *types.TemporalDateTime `json:"createdAt,omitempty"`
+	Id        types.IdentityUUID      `json:"id"`
+}
+
+// args are the key's values in an order by field, as the repository writes
+// their columns: its sort field's, then its id, or its id alone in
+// an order by id. A key without its id, or with a sort field other
+// than field, is ErrPageKey.
+func (k *RecipePageKey) args(field RecipeSortField) ([]any, error) {
+	var zeroKey types.IdentityUUID
+	if k.Id == zeroKey {
+		return nil, fmt.Errorf("%w: the Recipe key holds no id", ErrPageKey)
+	}
+	var held []string
+	var value any
+	if k.Title != nil {
+		held = append(held, "title")
+		value = *k.Title
+	}
+	if k.CreatedAt != nil {
+		held = append(held, "createdAt")
+		value = time.Time(*k.CreatedAt)
+	}
+	key := k.Id.ToUUID()
+	if field == RecipeSortById && len(held) == 0 {
+		return []any{key}, nil
+	}
+	if len(held) == 1 && held[0] == string(field) {
+		return []any{value, key}, nil
+	}
+	return nil, fmt.Errorf("%w: a page of Recipe rows by %s, a key of %s", ErrPageKey, field, strings.Join(append(held, "id"), " and "))
+}
+
+// recipePageKeyOf is row's key in an order by field: its value of
+// field and its id.
+func recipePageKeyOf(row *types.Recipe, field RecipeSortField) *RecipePageKey {
+	key := &RecipePageKey{}
+	if row.Id != nil {
+		key.Id = *row.Id
+	}
+	switch field {
+	case RecipeSortByTitle:
+		value := row.Title
+		key.Title = &value
+	case RecipeSortByCreatedAt:
+		value := row.CreatedAt
+		key.CreatedAt = &value
+	}
+	return key
+}
+
+// RecipePageOptions are FindPage's options.
+type RecipePageOptions struct {
+	// Fields specifies which fields to select, as FindMany's do; zero is an
+	// error. A page reads its sort's column and the id too, which Next holds.
+	Fields RecipeFields
+	// Sort is the order the rows are read in.
+	Sort RecipeSort
+	// After is the key of the last row of the page before, nil for the first page.
+	After *RecipePageKey
+	// Limit is the rows a page holds: 1 or more, 100 when 0.
+	Limit int
+	// IncludeDeleted includes soft-deleted records in results (default false)
+	IncludeDeleted bool
+}
+
+// RecipePage is a page of Recipe rows in FindPage's order: at most
+// Limit rows, and Next, the key of the last of them, when more rows follow.
+type RecipePage struct {
+	Rows []*types.Recipe
+	Next *RecipePageKey
 }
 
 // RecipeCommitFields specifies which RecipeCommit fields to select
@@ -811,6 +1268,124 @@ type RecipeCommitFindOptions struct {
 	IncludeDeleted bool
 }
 
+// RecipeCommitSortField is a field FindPage orders RecipeCommit rows by, by its
+// schema name (D60, amended): its primary key, or a column of one value of
+// text, a number or a time.
+type RecipeCommitSortField string
+
+const (
+	RecipeCommitSortById          RecipeCommitSortField = "id"
+	RecipeCommitSortBySchemaEpoch RecipeCommitSortField = "schemaEpoch"
+	RecipeCommitSortByContentHash RecipeCommitSortField = "contentHash"
+	RecipeCommitSortByCreatedAt   RecipeCommitSortField = "createdAt"
+)
+
+// RecipeCommitSort is the order FindPage reads RecipeCommit rows in: Field,
+// ascending, or descending when Desc; ties break by id in the same
+// direction. The zero value orders by id, ascending.
+type RecipeCommitSort struct {
+	Field RecipeCommitSortField
+	Desc  bool
+}
+
+// ParseRecipeCommitSort reads a sort as a page request writes it, "schemaEpoch" or
+// "-schemaEpoch": an error for a field RecipeCommit cannot be sorted by.
+func ParseRecipeCommitSort(text string) (RecipeCommitSort, error) {
+	parsed := RecipeCommitSort{Field: RecipeCommitSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
+	switch parsed.Field {
+	case RecipeCommitSortById, RecipeCommitSortBySchemaEpoch, RecipeCommitSortByContentHash, RecipeCommitSortByCreatedAt:
+		return parsed, nil
+	}
+	return RecipeCommitSort{}, fmt.Errorf("orm: RecipeCommit sorts by id, schemaEpoch, contentHash and createdAt, not %q", text)
+}
+
+// RecipeCommitPageKey is the position of a RecipeCommit row in a FindPage order: its
+// sort field's value and its id, as a cursor holds them,
+// {"schemaEpoch": ..., "id": ...}. A key holds one sort field, and none
+// in an order by id.
+type RecipeCommitPageKey struct {
+	SchemaEpoch *types.GenericInt64     `json:"schemaEpoch,omitempty"`
+	ContentHash *string                 `json:"contentHash,omitempty"`
+	CreatedAt   *types.TemporalDateTime `json:"createdAt,omitempty"`
+	Id          types.IdentityUUID      `json:"id"`
+}
+
+// args are the key's values in an order by field, as the repository writes
+// their columns: its sort field's, then its id, or its id alone in
+// an order by id. A key without its id, or with a sort field other
+// than field, is ErrPageKey.
+func (k *RecipeCommitPageKey) args(field RecipeCommitSortField) ([]any, error) {
+	var zeroKey types.IdentityUUID
+	if k.Id == zeroKey {
+		return nil, fmt.Errorf("%w: the RecipeCommit key holds no id", ErrPageKey)
+	}
+	var held []string
+	var value any
+	if k.SchemaEpoch != nil {
+		held = append(held, "schemaEpoch")
+		value = *k.SchemaEpoch
+	}
+	if k.ContentHash != nil {
+		held = append(held, "contentHash")
+		value = *k.ContentHash
+	}
+	if k.CreatedAt != nil {
+		held = append(held, "createdAt")
+		value = time.Time(*k.CreatedAt)
+	}
+	key := k.Id.ToUUID()
+	if field == RecipeCommitSortById && len(held) == 0 {
+		return []any{key}, nil
+	}
+	if len(held) == 1 && held[0] == string(field) {
+		return []any{value, key}, nil
+	}
+	return nil, fmt.Errorf("%w: a page of RecipeCommit rows by %s, a key of %s", ErrPageKey, field, strings.Join(append(held, "id"), " and "))
+}
+
+// recipeCommitPageKeyOf is row's key in an order by field: its value of
+// field and its id.
+func recipeCommitPageKeyOf(row *types.RecipeCommit, field RecipeCommitSortField) *RecipeCommitPageKey {
+	key := &RecipeCommitPageKey{}
+	if row.Id != nil {
+		key.Id = *row.Id
+	}
+	switch field {
+	case RecipeCommitSortBySchemaEpoch:
+		value := row.SchemaEpoch
+		key.SchemaEpoch = &value
+	case RecipeCommitSortByContentHash:
+		value := row.ContentHash
+		key.ContentHash = &value
+	case RecipeCommitSortByCreatedAt:
+		value := row.CreatedAt
+		key.CreatedAt = &value
+	}
+	return key
+}
+
+// RecipeCommitPageOptions are FindPage's options.
+type RecipeCommitPageOptions struct {
+	// Fields specifies which fields to select, as FindMany's do; zero is an
+	// error. A page reads its sort's column and the id too, which Next holds.
+	Fields RecipeCommitFields
+	// Sort is the order the rows are read in.
+	Sort RecipeCommitSort
+	// After is the key of the last row of the page before, nil for the first page.
+	After *RecipeCommitPageKey
+	// Limit is the rows a page holds: 1 or more, 100 when 0.
+	Limit int
+	// IncludeDeleted includes soft-deleted records in results (default false)
+	IncludeDeleted bool
+}
+
+// RecipeCommitPage is a page of RecipeCommit rows in FindPage's order: at most
+// Limit rows, and Next, the key of the last of them, when more rows follow.
+type RecipeCommitPage struct {
+	Rows []*types.RecipeCommit
+	Next *RecipeCommitPageKey
+}
+
 // RecipePatchFields specifies which RecipePatch fields to select
 type RecipePatchFields struct {
 	Id            bool
@@ -932,6 +1507,124 @@ type RecipePatchFindOptions struct {
 	Offset int
 	// IncludeDeleted includes soft-deleted records in results (default false)
 	IncludeDeleted bool
+}
+
+// RecipePatchSortField is a field FindPage orders RecipePatch rows by, by its
+// schema name (D60, amended): its primary key, or a column of one value of
+// text, a number or a time.
+type RecipePatchSortField string
+
+const (
+	RecipePatchSortById            RecipePatchSortField = "id"
+	RecipePatchSortByEntityKey     RecipePatchSortField = "entityKey"
+	RecipePatchSortByEntityId      RecipePatchSortField = "entityId"
+	RecipePatchSortByEntityVersion RecipePatchSortField = "entityVersion"
+)
+
+// RecipePatchSort is the order FindPage reads RecipePatch rows in: Field,
+// ascending, or descending when Desc; ties break by id in the same
+// direction. The zero value orders by id, ascending.
+type RecipePatchSort struct {
+	Field RecipePatchSortField
+	Desc  bool
+}
+
+// ParseRecipePatchSort reads a sort as a page request writes it, "entityKey" or
+// "-entityKey": an error for a field RecipePatch cannot be sorted by.
+func ParseRecipePatchSort(text string) (RecipePatchSort, error) {
+	parsed := RecipePatchSort{Field: RecipePatchSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
+	switch parsed.Field {
+	case RecipePatchSortById, RecipePatchSortByEntityKey, RecipePatchSortByEntityId, RecipePatchSortByEntityVersion:
+		return parsed, nil
+	}
+	return RecipePatchSort{}, fmt.Errorf("orm: RecipePatch sorts by id, entityKey, entityId and entityVersion, not %q", text)
+}
+
+// RecipePatchPageKey is the position of a RecipePatch row in a FindPage order: its
+// sort field's value and its id, as a cursor holds them,
+// {"entityKey": ..., "id": ...}. A key holds one sort field, and none
+// in an order by id.
+type RecipePatchPageKey struct {
+	EntityKey     *types.IdentityUUID `json:"entityKey,omitempty"`
+	EntityId      *types.IdentityUUID `json:"entityId,omitempty"`
+	EntityVersion *types.GenericInt64 `json:"entityVersion,omitempty"`
+	Id            types.IdentityUUID  `json:"id"`
+}
+
+// args are the key's values in an order by field, as the repository writes
+// their columns: its sort field's, then its id, or its id alone in
+// an order by id. A key without its id, or with a sort field other
+// than field, is ErrPageKey.
+func (k *RecipePatchPageKey) args(field RecipePatchSortField) ([]any, error) {
+	var zeroKey types.IdentityUUID
+	if k.Id == zeroKey {
+		return nil, fmt.Errorf("%w: the RecipePatch key holds no id", ErrPageKey)
+	}
+	var held []string
+	var value any
+	if k.EntityKey != nil {
+		held = append(held, "entityKey")
+		value = k.EntityKey.ToUUID()
+	}
+	if k.EntityId != nil {
+		held = append(held, "entityId")
+		value = k.EntityId.ToUUID()
+	}
+	if k.EntityVersion != nil {
+		held = append(held, "entityVersion")
+		value = *k.EntityVersion
+	}
+	key := k.Id.ToUUID()
+	if field == RecipePatchSortById && len(held) == 0 {
+		return []any{key}, nil
+	}
+	if len(held) == 1 && held[0] == string(field) {
+		return []any{value, key}, nil
+	}
+	return nil, fmt.Errorf("%w: a page of RecipePatch rows by %s, a key of %s", ErrPageKey, field, strings.Join(append(held, "id"), " and "))
+}
+
+// recipePatchPageKeyOf is row's key in an order by field: its value of
+// field and its id.
+func recipePatchPageKeyOf(row *types.RecipePatch, field RecipePatchSortField) *RecipePatchPageKey {
+	key := &RecipePatchPageKey{}
+	if row.Id != nil {
+		key.Id = *row.Id
+	}
+	switch field {
+	case RecipePatchSortByEntityKey:
+		value := row.EntityKey
+		key.EntityKey = &value
+	case RecipePatchSortByEntityId:
+		value := row.EntityId
+		key.EntityId = &value
+	case RecipePatchSortByEntityVersion:
+		value := row.EntityVersion
+		key.EntityVersion = &value
+	}
+	return key
+}
+
+// RecipePatchPageOptions are FindPage's options.
+type RecipePatchPageOptions struct {
+	// Fields specifies which fields to select, as FindMany's do; zero is an
+	// error. A page reads its sort's column and the id too, which Next holds.
+	Fields RecipePatchFields
+	// Sort is the order the rows are read in.
+	Sort RecipePatchSort
+	// After is the key of the last row of the page before, nil for the first page.
+	After *RecipePatchPageKey
+	// Limit is the rows a page holds: 1 or more, 100 when 0.
+	Limit int
+	// IncludeDeleted includes soft-deleted records in results (default false)
+	IncludeDeleted bool
+}
+
+// RecipePatchPage is a page of RecipePatch rows in FindPage's order: at most
+// Limit rows, and Next, the key of the last of them, when more rows follow.
+type RecipePatchPage struct {
+	Rows []*types.RecipePatch
+	Next *RecipePatchPageKey
 }
 
 // RecipeRefFields specifies which RecipeRef fields to select
@@ -1113,6 +1806,124 @@ type RecipeRefFindOptions struct {
 	IncludeDeleted bool
 }
 
+// RecipeRefSortField is a field FindPage orders RecipeRef rows by, by its
+// schema name (D60, amended): its primary key, or a column of one value of
+// text, a number or a time.
+type RecipeRefSortField string
+
+const (
+	RecipeRefSortById        RecipeRefSortField = "id"
+	RecipeRefSortByName      RecipeRefSortField = "name"
+	RecipeRefSortByCreatedAt RecipeRefSortField = "createdAt"
+	RecipeRefSortByUpdatedAt RecipeRefSortField = "updatedAt"
+)
+
+// RecipeRefSort is the order FindPage reads RecipeRef rows in: Field,
+// ascending, or descending when Desc; ties break by id in the same
+// direction. The zero value orders by id, ascending.
+type RecipeRefSort struct {
+	Field RecipeRefSortField
+	Desc  bool
+}
+
+// ParseRecipeRefSort reads a sort as a page request writes it, "name" or
+// "-name": an error for a field RecipeRef cannot be sorted by.
+func ParseRecipeRefSort(text string) (RecipeRefSort, error) {
+	parsed := RecipeRefSort{Field: RecipeRefSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
+	switch parsed.Field {
+	case RecipeRefSortById, RecipeRefSortByName, RecipeRefSortByCreatedAt, RecipeRefSortByUpdatedAt:
+		return parsed, nil
+	}
+	return RecipeRefSort{}, fmt.Errorf("orm: RecipeRef sorts by id, name, createdAt and updatedAt, not %q", text)
+}
+
+// RecipeRefPageKey is the position of a RecipeRef row in a FindPage order: its
+// sort field's value and its id, as a cursor holds them,
+// {"name": ..., "id": ...}. A key holds one sort field, and none
+// in an order by id.
+type RecipeRefPageKey struct {
+	Name      *string                 `json:"name,omitempty"`
+	CreatedAt *types.TemporalDateTime `json:"createdAt,omitempty"`
+	UpdatedAt *types.TemporalDateTime `json:"updatedAt,omitempty"`
+	Id        types.IdentityUUID      `json:"id"`
+}
+
+// args are the key's values in an order by field, as the repository writes
+// their columns: its sort field's, then its id, or its id alone in
+// an order by id. A key without its id, or with a sort field other
+// than field, is ErrPageKey.
+func (k *RecipeRefPageKey) args(field RecipeRefSortField) ([]any, error) {
+	var zeroKey types.IdentityUUID
+	if k.Id == zeroKey {
+		return nil, fmt.Errorf("%w: the RecipeRef key holds no id", ErrPageKey)
+	}
+	var held []string
+	var value any
+	if k.Name != nil {
+		held = append(held, "name")
+		value = *k.Name
+	}
+	if k.CreatedAt != nil {
+		held = append(held, "createdAt")
+		value = time.Time(*k.CreatedAt)
+	}
+	if k.UpdatedAt != nil {
+		held = append(held, "updatedAt")
+		value = time.Time(*k.UpdatedAt)
+	}
+	key := k.Id.ToUUID()
+	if field == RecipeRefSortById && len(held) == 0 {
+		return []any{key}, nil
+	}
+	if len(held) == 1 && held[0] == string(field) {
+		return []any{value, key}, nil
+	}
+	return nil, fmt.Errorf("%w: a page of RecipeRef rows by %s, a key of %s", ErrPageKey, field, strings.Join(append(held, "id"), " and "))
+}
+
+// recipeRefPageKeyOf is row's key in an order by field: its value of
+// field and its id.
+func recipeRefPageKeyOf(row *types.RecipeRef, field RecipeRefSortField) *RecipeRefPageKey {
+	key := &RecipeRefPageKey{}
+	if row.Id != nil {
+		key.Id = *row.Id
+	}
+	switch field {
+	case RecipeRefSortByName:
+		value := row.Name
+		key.Name = &value
+	case RecipeRefSortByCreatedAt:
+		value := row.CreatedAt
+		key.CreatedAt = &value
+	case RecipeRefSortByUpdatedAt:
+		value := row.UpdatedAt
+		key.UpdatedAt = &value
+	}
+	return key
+}
+
+// RecipeRefPageOptions are FindPage's options.
+type RecipeRefPageOptions struct {
+	// Fields specifies which fields to select, as FindMany's do; zero is an
+	// error. A page reads its sort's column and the id too, which Next holds.
+	Fields RecipeRefFields
+	// Sort is the order the rows are read in.
+	Sort RecipeRefSort
+	// After is the key of the last row of the page before, nil for the first page.
+	After *RecipeRefPageKey
+	// Limit is the rows a page holds: 1 or more, 100 when 0.
+	Limit int
+	// IncludeDeleted includes soft-deleted records in results (default false)
+	IncludeDeleted bool
+}
+
+// RecipeRefPage is a page of RecipeRef rows in FindPage's order: at most
+// Limit rows, and Next, the key of the last of them, when more rows follow.
+type RecipeRefPage struct {
+	Rows []*types.RecipeRef
+	Next *RecipeRefPageKey
+}
+
 // RecipeRefHistoryOptions contains options for RecipeRef version history reads.
 type RecipeRefHistoryOptions struct {
 	// Limit limits the number of results (default 100)
@@ -1251,6 +2062,115 @@ type RecipeReleaseFindOptions struct {
 	IncludeDeleted bool
 }
 
+// RecipeReleaseSortField is a field FindPage orders RecipeRelease rows by, by its
+// schema name (D60, amended): its primary key, or a column of one value of
+// text, a number or a time.
+type RecipeReleaseSortField string
+
+const (
+	RecipeReleaseSortById        RecipeReleaseSortField = "id"
+	RecipeReleaseSortByCreatedAt RecipeReleaseSortField = "createdAt"
+	RecipeReleaseSortByUpdatedAt RecipeReleaseSortField = "updatedAt"
+)
+
+// RecipeReleaseSort is the order FindPage reads RecipeRelease rows in: Field,
+// ascending, or descending when Desc; ties break by id in the same
+// direction. The zero value orders by id, ascending.
+type RecipeReleaseSort struct {
+	Field RecipeReleaseSortField
+	Desc  bool
+}
+
+// ParseRecipeReleaseSort reads a sort as a page request writes it, "createdAt" or
+// "-createdAt": an error for a field RecipeRelease cannot be sorted by.
+func ParseRecipeReleaseSort(text string) (RecipeReleaseSort, error) {
+	parsed := RecipeReleaseSort{Field: RecipeReleaseSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
+	switch parsed.Field {
+	case RecipeReleaseSortById, RecipeReleaseSortByCreatedAt, RecipeReleaseSortByUpdatedAt:
+		return parsed, nil
+	}
+	return RecipeReleaseSort{}, fmt.Errorf("orm: RecipeRelease sorts by id, createdAt and updatedAt, not %q", text)
+}
+
+// RecipeReleasePageKey is the position of a RecipeRelease row in a FindPage order: its
+// sort field's value and its id, as a cursor holds them,
+// {"createdAt": ..., "id": ...}. A key holds one sort field, and none
+// in an order by id.
+type RecipeReleasePageKey struct {
+	CreatedAt *types.TemporalDateTime `json:"createdAt,omitempty"`
+	UpdatedAt *types.TemporalDateTime `json:"updatedAt,omitempty"`
+	Id        types.IdentityUUID      `json:"id"`
+}
+
+// args are the key's values in an order by field, as the repository writes
+// their columns: its sort field's, then its id, or its id alone in
+// an order by id. A key without its id, or with a sort field other
+// than field, is ErrPageKey.
+func (k *RecipeReleasePageKey) args(field RecipeReleaseSortField) ([]any, error) {
+	var zeroKey types.IdentityUUID
+	if k.Id == zeroKey {
+		return nil, fmt.Errorf("%w: the RecipeRelease key holds no id", ErrPageKey)
+	}
+	var held []string
+	var value any
+	if k.CreatedAt != nil {
+		held = append(held, "createdAt")
+		value = time.Time(*k.CreatedAt)
+	}
+	if k.UpdatedAt != nil {
+		held = append(held, "updatedAt")
+		value = time.Time(*k.UpdatedAt)
+	}
+	key := k.Id.ToUUID()
+	if field == RecipeReleaseSortById && len(held) == 0 {
+		return []any{key}, nil
+	}
+	if len(held) == 1 && held[0] == string(field) {
+		return []any{value, key}, nil
+	}
+	return nil, fmt.Errorf("%w: a page of RecipeRelease rows by %s, a key of %s", ErrPageKey, field, strings.Join(append(held, "id"), " and "))
+}
+
+// recipeReleasePageKeyOf is row's key in an order by field: its value of
+// field and its id.
+func recipeReleasePageKeyOf(row *types.RecipeRelease, field RecipeReleaseSortField) *RecipeReleasePageKey {
+	key := &RecipeReleasePageKey{}
+	if row.Id != nil {
+		key.Id = *row.Id
+	}
+	switch field {
+	case RecipeReleaseSortByCreatedAt:
+		value := row.CreatedAt
+		key.CreatedAt = &value
+	case RecipeReleaseSortByUpdatedAt:
+		value := row.UpdatedAt
+		key.UpdatedAt = &value
+	}
+	return key
+}
+
+// RecipeReleasePageOptions are FindPage's options.
+type RecipeReleasePageOptions struct {
+	// Fields specifies which fields to select, as FindMany's do; zero is an
+	// error. A page reads its sort's column and the id too, which Next holds.
+	Fields RecipeReleaseFields
+	// Sort is the order the rows are read in.
+	Sort RecipeReleaseSort
+	// After is the key of the last row of the page before, nil for the first page.
+	After *RecipeReleasePageKey
+	// Limit is the rows a page holds: 1 or more, 100 when 0.
+	Limit int
+	// IncludeDeleted includes soft-deleted records in results (default false)
+	IncludeDeleted bool
+}
+
+// RecipeReleasePage is a page of RecipeRelease rows in FindPage's order: at most
+// Limit rows, and Next, the key of the last of them, when more rows follow.
+type RecipeReleasePage struct {
+	Rows []*types.RecipeRelease
+	Next *RecipeReleasePageKey
+}
+
 // RecipeReleaseHistoryOptions contains options for RecipeRelease version history reads.
 type RecipeReleaseHistoryOptions struct {
 	// Limit limits the number of results (default 100)
@@ -1373,6 +2293,124 @@ type RecipeSnapshotEntryFindOptions struct {
 	Offset int
 	// IncludeDeleted includes soft-deleted records in results (default false)
 	IncludeDeleted bool
+}
+
+// RecipeSnapshotEntrySortField is a field FindPage orders RecipeSnapshotEntry rows by, by its
+// schema name (D60, amended): its primary key, or a column of one value of
+// text, a number or a time.
+type RecipeSnapshotEntrySortField string
+
+const (
+	RecipeSnapshotEntrySortById            RecipeSnapshotEntrySortField = "id"
+	RecipeSnapshotEntrySortByEntityKey     RecipeSnapshotEntrySortField = "entityKey"
+	RecipeSnapshotEntrySortByEntityId      RecipeSnapshotEntrySortField = "entityId"
+	RecipeSnapshotEntrySortByEntityVersion RecipeSnapshotEntrySortField = "entityVersion"
+)
+
+// RecipeSnapshotEntrySort is the order FindPage reads RecipeSnapshotEntry rows in: Field,
+// ascending, or descending when Desc; ties break by id in the same
+// direction. The zero value orders by id, ascending.
+type RecipeSnapshotEntrySort struct {
+	Field RecipeSnapshotEntrySortField
+	Desc  bool
+}
+
+// ParseRecipeSnapshotEntrySort reads a sort as a page request writes it, "entityKey" or
+// "-entityKey": an error for a field RecipeSnapshotEntry cannot be sorted by.
+func ParseRecipeSnapshotEntrySort(text string) (RecipeSnapshotEntrySort, error) {
+	parsed := RecipeSnapshotEntrySort{Field: RecipeSnapshotEntrySortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
+	switch parsed.Field {
+	case RecipeSnapshotEntrySortById, RecipeSnapshotEntrySortByEntityKey, RecipeSnapshotEntrySortByEntityId, RecipeSnapshotEntrySortByEntityVersion:
+		return parsed, nil
+	}
+	return RecipeSnapshotEntrySort{}, fmt.Errorf("orm: RecipeSnapshotEntry sorts by id, entityKey, entityId and entityVersion, not %q", text)
+}
+
+// RecipeSnapshotEntryPageKey is the position of a RecipeSnapshotEntry row in a FindPage order: its
+// sort field's value and its id, as a cursor holds them,
+// {"entityKey": ..., "id": ...}. A key holds one sort field, and none
+// in an order by id.
+type RecipeSnapshotEntryPageKey struct {
+	EntityKey     *types.IdentityUUID `json:"entityKey,omitempty"`
+	EntityId      *types.IdentityUUID `json:"entityId,omitempty"`
+	EntityVersion *types.GenericInt64 `json:"entityVersion,omitempty"`
+	Id            types.IdentityUUID  `json:"id"`
+}
+
+// args are the key's values in an order by field, as the repository writes
+// their columns: its sort field's, then its id, or its id alone in
+// an order by id. A key without its id, or with a sort field other
+// than field, is ErrPageKey.
+func (k *RecipeSnapshotEntryPageKey) args(field RecipeSnapshotEntrySortField) ([]any, error) {
+	var zeroKey types.IdentityUUID
+	if k.Id == zeroKey {
+		return nil, fmt.Errorf("%w: the RecipeSnapshotEntry key holds no id", ErrPageKey)
+	}
+	var held []string
+	var value any
+	if k.EntityKey != nil {
+		held = append(held, "entityKey")
+		value = k.EntityKey.ToUUID()
+	}
+	if k.EntityId != nil {
+		held = append(held, "entityId")
+		value = k.EntityId.ToUUID()
+	}
+	if k.EntityVersion != nil {
+		held = append(held, "entityVersion")
+		value = *k.EntityVersion
+	}
+	key := k.Id.ToUUID()
+	if field == RecipeSnapshotEntrySortById && len(held) == 0 {
+		return []any{key}, nil
+	}
+	if len(held) == 1 && held[0] == string(field) {
+		return []any{value, key}, nil
+	}
+	return nil, fmt.Errorf("%w: a page of RecipeSnapshotEntry rows by %s, a key of %s", ErrPageKey, field, strings.Join(append(held, "id"), " and "))
+}
+
+// recipeSnapshotEntryPageKeyOf is row's key in an order by field: its value of
+// field and its id.
+func recipeSnapshotEntryPageKeyOf(row *types.RecipeSnapshotEntry, field RecipeSnapshotEntrySortField) *RecipeSnapshotEntryPageKey {
+	key := &RecipeSnapshotEntryPageKey{}
+	if row.Id != nil {
+		key.Id = *row.Id
+	}
+	switch field {
+	case RecipeSnapshotEntrySortByEntityKey:
+		value := row.EntityKey
+		key.EntityKey = &value
+	case RecipeSnapshotEntrySortByEntityId:
+		value := row.EntityId
+		key.EntityId = &value
+	case RecipeSnapshotEntrySortByEntityVersion:
+		value := row.EntityVersion
+		key.EntityVersion = &value
+	}
+	return key
+}
+
+// RecipeSnapshotEntryPageOptions are FindPage's options.
+type RecipeSnapshotEntryPageOptions struct {
+	// Fields specifies which fields to select, as FindMany's do; zero is an
+	// error. A page reads its sort's column and the id too, which Next holds.
+	Fields RecipeSnapshotEntryFields
+	// Sort is the order the rows are read in.
+	Sort RecipeSnapshotEntrySort
+	// After is the key of the last row of the page before, nil for the first page.
+	After *RecipeSnapshotEntryPageKey
+	// Limit is the rows a page holds: 1 or more, 100 when 0.
+	Limit int
+	// IncludeDeleted includes soft-deleted records in results (default false)
+	IncludeDeleted bool
+}
+
+// RecipeSnapshotEntryPage is a page of RecipeSnapshotEntry rows in FindPage's order: at most
+// Limit rows, and Next, the key of the last of them, when more rows follow.
+type RecipeSnapshotEntryPage struct {
+	Rows []*types.RecipeSnapshotEntry
+	Next *RecipeSnapshotEntryPageKey
 }
 
 // StepFields specifies which Step fields to select
@@ -1545,6 +2583,144 @@ type StepFindOptions struct {
 	Offset int
 	// IncludeDeleted includes soft-deleted records in results (default false)
 	IncludeDeleted bool
+}
+
+// StepSortField is a field FindPage orders Step rows by, by its
+// schema name (D60, amended): its primary key, or a column of one value of
+// text, a number or a time.
+type StepSortField string
+
+const (
+	StepSortById          StepSortField = "id"
+	StepSortByPosition    StepSortField = "position"
+	StepSortByInstruction StepSortField = "instruction"
+	StepSortByCreatedAt   StepSortField = "createdAt"
+	StepSortByUpdatedAt   StepSortField = "updatedAt"
+	StepSortByEntityKey   StepSortField = "entityKey"
+)
+
+// StepSort is the order FindPage reads Step rows in: Field,
+// ascending, or descending when Desc; ties break by id in the same
+// direction. The zero value orders by id, ascending.
+type StepSort struct {
+	Field StepSortField
+	Desc  bool
+}
+
+// ParseStepSort reads a sort as a page request writes it, "position" or
+// "-position": an error for a field Step cannot be sorted by.
+func ParseStepSort(text string) (StepSort, error) {
+	parsed := StepSort{Field: StepSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
+	switch parsed.Field {
+	case StepSortById, StepSortByPosition, StepSortByInstruction, StepSortByCreatedAt, StepSortByUpdatedAt, StepSortByEntityKey:
+		return parsed, nil
+	}
+	return StepSort{}, fmt.Errorf("orm: Step sorts by id, position, instruction, createdAt, updatedAt and entityKey, not %q", text)
+}
+
+// StepPageKey is the position of a Step row in a FindPage order: its
+// sort field's value and its id, as a cursor holds them,
+// {"position": ..., "id": ...}. A key holds one sort field, and none
+// in an order by id.
+type StepPageKey struct {
+	Position    *types.GenericInt64     `json:"position,omitempty"`
+	Instruction *string                 `json:"instruction,omitempty"`
+	CreatedAt   *types.TemporalDateTime `json:"createdAt,omitempty"`
+	UpdatedAt   *types.TemporalDateTime `json:"updatedAt,omitempty"`
+	EntityKey   *types.IdentityUUID     `json:"entityKey,omitempty"`
+	Id          types.IdentityUUID      `json:"id"`
+}
+
+// args are the key's values in an order by field, as the repository writes
+// their columns: its sort field's, then its id, or its id alone in
+// an order by id. A key without its id, or with a sort field other
+// than field, is ErrPageKey.
+func (k *StepPageKey) args(field StepSortField) ([]any, error) {
+	var zeroKey types.IdentityUUID
+	if k.Id == zeroKey {
+		return nil, fmt.Errorf("%w: the Step key holds no id", ErrPageKey)
+	}
+	var held []string
+	var value any
+	if k.Position != nil {
+		held = append(held, "position")
+		value = *k.Position
+	}
+	if k.Instruction != nil {
+		held = append(held, "instruction")
+		value = *k.Instruction
+	}
+	if k.CreatedAt != nil {
+		held = append(held, "createdAt")
+		value = time.Time(*k.CreatedAt)
+	}
+	if k.UpdatedAt != nil {
+		held = append(held, "updatedAt")
+		value = time.Time(*k.UpdatedAt)
+	}
+	if k.EntityKey != nil {
+		held = append(held, "entityKey")
+		value = k.EntityKey.ToUUID()
+	}
+	key := k.Id.ToUUID()
+	if field == StepSortById && len(held) == 0 {
+		return []any{key}, nil
+	}
+	if len(held) == 1 && held[0] == string(field) {
+		return []any{value, key}, nil
+	}
+	return nil, fmt.Errorf("%w: a page of Step rows by %s, a key of %s", ErrPageKey, field, strings.Join(append(held, "id"), " and "))
+}
+
+// stepPageKeyOf is row's key in an order by field: its value of
+// field and its id.
+func stepPageKeyOf(row *types.Step, field StepSortField) *StepPageKey {
+	key := &StepPageKey{}
+	if row.Id != nil {
+		key.Id = *row.Id
+	}
+	switch field {
+	case StepSortByPosition:
+		value := row.Position
+		key.Position = &value
+	case StepSortByInstruction:
+		value := row.Instruction
+		key.Instruction = &value
+	case StepSortByCreatedAt:
+		value := row.CreatedAt
+		key.CreatedAt = &value
+	case StepSortByUpdatedAt:
+		value := row.UpdatedAt
+		key.UpdatedAt = &value
+	case StepSortByEntityKey:
+		if row.EntityKey != nil {
+			value := *row.EntityKey
+			key.EntityKey = &value
+		}
+	}
+	return key
+}
+
+// StepPageOptions are FindPage's options.
+type StepPageOptions struct {
+	// Fields specifies which fields to select, as FindMany's do; zero is an
+	// error. A page reads its sort's column and the id too, which Next holds.
+	Fields StepFields
+	// Sort is the order the rows are read in.
+	Sort StepSort
+	// After is the key of the last row of the page before, nil for the first page.
+	After *StepPageKey
+	// Limit is the rows a page holds: 1 or more, 100 when 0.
+	Limit int
+	// IncludeDeleted includes soft-deleted records in results (default false)
+	IncludeDeleted bool
+}
+
+// StepPage is a page of Step rows in FindPage's order: at most
+// Limit rows, and Next, the key of the last of them, when more rows follow.
+type StepPage struct {
+	Rows []*types.Step
+	Next *StepPageKey
 }
 
 // StepHistoryOptions contains options for Step version history reads.
@@ -1766,6 +2942,171 @@ type TastingFindOptions struct {
 	IncludeDeleted bool
 }
 
+// TastingSortField is a field FindPage orders Tasting rows by, by its
+// schema name (D60, amended): its primary key, or a column of one value of
+// text, a number or a time.
+type TastingSortField string
+
+const (
+	TastingSortById        TastingSortField = "id"
+	TastingSortByTaster    TastingSortField = "taster"
+	TastingSortByScore     TastingSortField = "score"
+	TastingSortByServings  TastingSortField = "servings"
+	TastingSortByTastedOn  TastingSortField = "tastedOn"
+	TastingSortByTastedAt  TastingSortField = "tastedAt"
+	TastingSortByServedAt  TastingSortField = "servedAt"
+	TastingSortByRested    TastingSortField = "rested"
+	TastingSortByEntityKey TastingSortField = "entityKey"
+)
+
+// TastingSort is the order FindPage reads Tasting rows in: Field,
+// ascending, or descending when Desc; ties break by id in the same
+// direction. The zero value orders by id, ascending.
+type TastingSort struct {
+	Field TastingSortField
+	Desc  bool
+}
+
+// ParseTastingSort reads a sort as a page request writes it, "taster" or
+// "-taster": an error for a field Tasting cannot be sorted by.
+func ParseTastingSort(text string) (TastingSort, error) {
+	parsed := TastingSort{Field: TastingSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
+	switch parsed.Field {
+	case TastingSortById, TastingSortByTaster, TastingSortByScore, TastingSortByServings, TastingSortByTastedOn, TastingSortByTastedAt, TastingSortByServedAt, TastingSortByRested, TastingSortByEntityKey:
+		return parsed, nil
+	}
+	return TastingSort{}, fmt.Errorf("orm: Tasting sorts by id, taster, score, servings, tastedOn, tastedAt, servedAt, rested and entityKey, not %q", text)
+}
+
+// TastingPageKey is the position of a Tasting row in a FindPage order: its
+// sort field's value and its id, as a cursor holds them,
+// {"taster": ..., "id": ...}. A key holds one sort field, and none
+// in an order by id.
+type TastingPageKey struct {
+	Taster    *types.IdentityUserID   `json:"taster,omitempty"`
+	Score     *float64                `json:"score,omitempty"`
+	Servings  *types.GenericInt64     `json:"servings,omitempty"`
+	TastedOn  *types.TemporalDate     `json:"tastedOn,omitempty"`
+	TastedAt  *types.TemporalDateTime `json:"tastedAt,omitempty"`
+	ServedAt  *types.TemporalTime     `json:"servedAt,omitempty"`
+	Rested    *types.TemporalDuration `json:"rested,omitempty"`
+	EntityKey *types.IdentityUUID     `json:"entityKey,omitempty"`
+	Id        types.IdentityUUID      `json:"id"`
+}
+
+// args are the key's values in an order by field, as the repository writes
+// their columns: its sort field's, then its id, or its id alone in
+// an order by id. A key without its id, or with a sort field other
+// than field, is ErrPageKey.
+func (k *TastingPageKey) args(field TastingSortField) ([]any, error) {
+	var zeroKey types.IdentityUUID
+	if k.Id == zeroKey {
+		return nil, fmt.Errorf("%w: the Tasting key holds no id", ErrPageKey)
+	}
+	var held []string
+	var value any
+	if k.Taster != nil {
+		held = append(held, "taster")
+		value = k.Taster.ToUUID()
+	}
+	if k.Score != nil {
+		held = append(held, "score")
+		value = *k.Score
+	}
+	if k.Servings != nil {
+		held = append(held, "servings")
+		value = *k.Servings
+	}
+	if k.TastedOn != nil {
+		held = append(held, "tastedOn")
+		value = *k.TastedOn
+	}
+	if k.TastedAt != nil {
+		held = append(held, "tastedAt")
+		value = time.Time(*k.TastedAt)
+	}
+	if k.ServedAt != nil {
+		held = append(held, "servedAt")
+		value = *k.ServedAt
+	}
+	if k.Rested != nil {
+		held = append(held, "rested")
+		value = *k.Rested
+	}
+	if k.EntityKey != nil {
+		held = append(held, "entityKey")
+		value = k.EntityKey.ToUUID()
+	}
+	key := k.Id.ToUUID()
+	if field == TastingSortById && len(held) == 0 {
+		return []any{key}, nil
+	}
+	if len(held) == 1 && held[0] == string(field) {
+		return []any{value, key}, nil
+	}
+	return nil, fmt.Errorf("%w: a page of Tasting rows by %s, a key of %s", ErrPageKey, field, strings.Join(append(held, "id"), " and "))
+}
+
+// tastingPageKeyOf is row's key in an order by field: its value of
+// field and its id.
+func tastingPageKeyOf(row *types.Tasting, field TastingSortField) *TastingPageKey {
+	key := &TastingPageKey{}
+	if row.Id != nil {
+		key.Id = *row.Id
+	}
+	switch field {
+	case TastingSortByTaster:
+		value := row.Taster
+		key.Taster = &value
+	case TastingSortByScore:
+		value := row.Score
+		key.Score = &value
+	case TastingSortByServings:
+		value := row.Servings
+		key.Servings = &value
+	case TastingSortByTastedOn:
+		value := row.TastedOn
+		key.TastedOn = &value
+	case TastingSortByTastedAt:
+		value := row.TastedAt
+		key.TastedAt = &value
+	case TastingSortByServedAt:
+		value := row.ServedAt
+		key.ServedAt = &value
+	case TastingSortByRested:
+		value := row.Rested
+		key.Rested = &value
+	case TastingSortByEntityKey:
+		if row.EntityKey != nil {
+			value := *row.EntityKey
+			key.EntityKey = &value
+		}
+	}
+	return key
+}
+
+// TastingPageOptions are FindPage's options.
+type TastingPageOptions struct {
+	// Fields specifies which fields to select, as FindMany's do; zero is an
+	// error. A page reads its sort's column and the id too, which Next holds.
+	Fields TastingFields
+	// Sort is the order the rows are read in.
+	Sort TastingSort
+	// After is the key of the last row of the page before, nil for the first page.
+	After *TastingPageKey
+	// Limit is the rows a page holds: 1 or more, 100 when 0.
+	Limit int
+	// IncludeDeleted includes soft-deleted records in results (default false)
+	IncludeDeleted bool
+}
+
+// TastingPage is a page of Tasting rows in FindPage's order: at most
+// Limit rows, and Next, the key of the last of them, when more rows follow.
+type TastingPage struct {
+	Rows []*types.Tasting
+	Next *TastingPageKey
+}
+
 // TastingHistoryOptions contains options for Tasting version history reads.
 type TastingHistoryOptions struct {
 	// Limit limits the number of results (default 100)
@@ -1900,6 +3241,115 @@ type UtensilFindOptions struct {
 	Offset int
 	// IncludeDeleted includes soft-deleted records in results (default false)
 	IncludeDeleted bool
+}
+
+// UtensilSortField is a field FindPage orders Utensil rows by, by its
+// schema name (D60, amended): its primary key, or a column of one value of
+// text, a number or a time.
+type UtensilSortField string
+
+const (
+	UtensilSortById        UtensilSortField = "id"
+	UtensilSortByName      UtensilSortField = "name"
+	UtensilSortByEntityKey UtensilSortField = "entityKey"
+)
+
+// UtensilSort is the order FindPage reads Utensil rows in: Field,
+// ascending, or descending when Desc; ties break by id in the same
+// direction. The zero value orders by id, ascending.
+type UtensilSort struct {
+	Field UtensilSortField
+	Desc  bool
+}
+
+// ParseUtensilSort reads a sort as a page request writes it, "name" or
+// "-name": an error for a field Utensil cannot be sorted by.
+func ParseUtensilSort(text string) (UtensilSort, error) {
+	parsed := UtensilSort{Field: UtensilSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
+	switch parsed.Field {
+	case UtensilSortById, UtensilSortByName, UtensilSortByEntityKey:
+		return parsed, nil
+	}
+	return UtensilSort{}, fmt.Errorf("orm: Utensil sorts by id, name and entityKey, not %q", text)
+}
+
+// UtensilPageKey is the position of a Utensil row in a FindPage order: its
+// sort field's value and its id, as a cursor holds them,
+// {"name": ..., "id": ...}. A key holds one sort field, and none
+// in an order by id.
+type UtensilPageKey struct {
+	Name      *string             `json:"name,omitempty"`
+	EntityKey *types.IdentityUUID `json:"entityKey,omitempty"`
+	Id        types.IdentityUUID  `json:"id"`
+}
+
+// args are the key's values in an order by field, as the repository writes
+// their columns: its sort field's, then its id, or its id alone in
+// an order by id. A key without its id, or with a sort field other
+// than field, is ErrPageKey.
+func (k *UtensilPageKey) args(field UtensilSortField) ([]any, error) {
+	var zeroKey types.IdentityUUID
+	if k.Id == zeroKey {
+		return nil, fmt.Errorf("%w: the Utensil key holds no id", ErrPageKey)
+	}
+	var held []string
+	var value any
+	if k.Name != nil {
+		held = append(held, "name")
+		value = *k.Name
+	}
+	if k.EntityKey != nil {
+		held = append(held, "entityKey")
+		value = k.EntityKey.ToUUID()
+	}
+	key := k.Id.ToUUID()
+	if field == UtensilSortById && len(held) == 0 {
+		return []any{key}, nil
+	}
+	if len(held) == 1 && held[0] == string(field) {
+		return []any{value, key}, nil
+	}
+	return nil, fmt.Errorf("%w: a page of Utensil rows by %s, a key of %s", ErrPageKey, field, strings.Join(append(held, "id"), " and "))
+}
+
+// utensilPageKeyOf is row's key in an order by field: its value of
+// field and its id.
+func utensilPageKeyOf(row *types.Utensil, field UtensilSortField) *UtensilPageKey {
+	key := &UtensilPageKey{}
+	key.Id = row.Id
+	switch field {
+	case UtensilSortByName:
+		value := row.Name
+		key.Name = &value
+	case UtensilSortByEntityKey:
+		if row.EntityKey != nil {
+			value := *row.EntityKey
+			key.EntityKey = &value
+		}
+	}
+	return key
+}
+
+// UtensilPageOptions are FindPage's options.
+type UtensilPageOptions struct {
+	// Fields specifies which fields to select, as FindMany's do; zero is an
+	// error. A page reads its sort's column and the id too, which Next holds.
+	Fields UtensilFields
+	// Sort is the order the rows are read in.
+	Sort UtensilSort
+	// After is the key of the last row of the page before, nil for the first page.
+	After *UtensilPageKey
+	// Limit is the rows a page holds: 1 or more, 100 when 0.
+	Limit int
+	// IncludeDeleted includes soft-deleted records in results (default false)
+	IncludeDeleted bool
+}
+
+// UtensilPage is a page of Utensil rows in FindPage's order: at most
+// Limit rows, and Next, the key of the last of them, when more rows follow.
+type UtensilPage struct {
+	Rows []*types.Utensil
+	Next *UtensilPageKey
 }
 
 // UtensilHistoryOptions contains options for Utensil version history reads.

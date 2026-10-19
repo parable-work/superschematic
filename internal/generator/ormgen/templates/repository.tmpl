@@ -569,6 +569,16 @@ var {{ .TypeName }}QuotedFields = map[string]string{
 	{{- end }}
 }
 
+// {{ lowerFirst .TypeName }}SortColumns are the columns of {{ .TypeName }}'s sort fields, by
+// field: the name FindPage selects, and the column as its ORDER BY and its
+// keyset condition write it. They are the only text of a sort that reaches
+// its SQL (D60, amended).
+var {{ lowerFirst .TypeName }}SortColumns = map[{{ .TypeName }}SortField]struct{ name, sql string }{
+	{{- range .SortFields }}
+	{{ $.TypeName }}SortBy{{ toGoName .Name }}: {"{{ .DBName }}", `{{ $.QuotedTableName }}.{{ .QuotedDBName }}`},
+	{{- end }}
+}
+
 // build{{ .TypeName }}OrderByClause builds an ORDER BY clause for {{ .TypeName }}.
 // quotedTable is the table's name as the FROM clause spells it, quoted when
 // it is a keyword (a table named order is "order").
@@ -1609,32 +1619,7 @@ func (r *{{ .Name }}) FindMany(ctx context.Context, filter *{{ .TypeName }}Filte
 	}
 
 	// Build selected fields in OrderedMembers order so FK columns match scan order.
-	var fieldStrings []string
-	{{- range .OrderedMembers }}
-	{{- if .IsRelationship }}
-	if opts.Fields.{{ toGoName .Relationship.FieldName }} || {{- if .Relationship.NestedByPointer }} (opts.Fields.{{ toGoName .Relationship.FieldName }}Nested != nil && !opts.Fields.{{ toGoName .Relationship.FieldName }}Nested.IsZero()) {{- else }} !opts.Fields.{{ toGoName .Relationship.FieldName }}Nested.IsZero() {{- end }} {
-		fieldStrings = append(fieldStrings, "{{ .Relationship.DBColumnName }}")
-	}
-	{{- else }}
-	if opts.Fields.{{ toGoName .Field.Name }} {
-		fieldStrings = append(fieldStrings, "{{ .Field.DBName }}")
-	}
-	{{- end }}
-	{{- end }}
-	{{- if .HasArrayRelationships }}
-	// hasMany hydration needs the parent primary key for child mapping.
-	hasManyRequested := false
-	{{- range $i, $rel := .Relationships }}
-	{{- if $rel.IsArray }}
-	if opts.Fields.{{ toGoName $rel.FieldName }}Nested != nil {
-		hasManyRequested = true
-	}
-	{{- end }}
-	{{- end }}
-	if hasManyRequested && !containsString(fieldStrings, "{{ .PrimaryKeyCol }}") {
-		fieldStrings = append(fieldStrings, "{{ .PrimaryKeyCol }}")
-	}
-	{{- end }}
+	fieldStrings := {{ lowerFirst .TypeName }}FieldStrings(opts.Fields)
 
 	// Validate fields
 	if err := validateFields(fieldStrings, {{ .TypeName }}AllowedFields); err != nil {
@@ -1685,6 +1670,50 @@ func (r *{{ .Name }}) FindMany(ctx context.Context, filter *{{ .TypeName }}Filte
 		return nil, 0, fmt.Errorf("failed to get count: %w", err)
 	}
 
+	results, err := r.findRows(ctx, "FindMany", query, args, fieldStrings, opts.Fields)
+	if err != nil {
+		return nil, 0, err
+	}
+	return results, totalCount, nil
+}
+
+// {{ lowerFirst .TypeName }}FieldStrings are the columns fields selects, in OrderedMembers
+// order so FK columns match scan order, and the primary key when fields
+// hydrates a hasMany relation, which maps the children by it.
+func {{ lowerFirst .TypeName }}FieldStrings(fields {{ .TypeName }}Fields) []string {
+	var fieldStrings []string
+	{{- range .OrderedMembers }}
+	{{- if .IsRelationship }}
+	if fields.{{ toGoName .Relationship.FieldName }} || {{- if .Relationship.NestedByPointer }} (fields.{{ toGoName .Relationship.FieldName }}Nested != nil && !fields.{{ toGoName .Relationship.FieldName }}Nested.IsZero()) {{- else }} !fields.{{ toGoName .Relationship.FieldName }}Nested.IsZero() {{- end }} {
+		fieldStrings = append(fieldStrings, "{{ .Relationship.DBColumnName }}")
+	}
+	{{- else }}
+	if fields.{{ toGoName .Field.Name }} {
+		fieldStrings = append(fieldStrings, "{{ .Field.DBName }}")
+	}
+	{{- end }}
+	{{- end }}
+	{{- if .HasArrayRelationships }}
+	// hasMany hydration needs the parent primary key for child mapping.
+	hasManyRequested := false
+	{{- range $i, $rel := .Relationships }}
+	{{- if $rel.IsArray }}
+	if fields.{{ toGoName $rel.FieldName }}Nested != nil {
+		hasManyRequested = true
+	}
+	{{- end }}
+	{{- end }}
+	if hasManyRequested && !containsString(fieldStrings, "{{ .PrimaryKeyCol }}") {
+		fieldStrings = append(fieldStrings, "{{ .PrimaryKeyCol }}")
+	}
+	{{- end }}
+	return fieldStrings
+}
+
+// findRows runs query, a select of the columns fieldStrings names, in turn,
+// with args, scans its rows, and hydrates the relations fields selects, as
+// FindMany and FindPage read them. method names the caller in an error.
+func (r *{{ .Name }}) findRows(ctx context.Context, method, query string, args []interface{}, fieldStrings []string, fields {{ .TypeName }}Fields) ([]*types.{{ .TypeName }}, error) {
 	// Execute query
 	var rows pgx.Rows
 	var err error
@@ -1694,7 +1723,7 @@ func (r *{{ .Name }}) FindMany(ctx context.Context, filter *{{ .TypeName }}Filte
 		rows, err = r.db.pool.Query(ctx, query, args...)
 	}
 	if err != nil {
-		return nil, 0, fmt.Errorf("failed to execute query: %w", err)
+		return nil, fmt.Errorf("failed to execute query: %w", err)
 	}
 	defer rows.Close()
 
@@ -1735,19 +1764,19 @@ func (r *{{ .Name }}) FindMany(ctx context.Context, filter *{{ .TypeName }}Filte
 			{{- end }}
 			{{- end }}
 			default:
-				return nil, 0, fmt.Errorf("unexpected field %q for {{ .TypeName }}.FindMany", fieldName)
+				return nil, fmt.Errorf("unexpected field %q for {{ .TypeName }}.%s", fieldName, method)
 			}
 		}
 
 		if err := rows.Scan(scanDest...); err != nil {
-			return nil, 0, fmt.Errorf("failed to scan row: %w", err)
+			return nil, fmt.Errorf("failed to scan row: %w", err)
 		}
 
 		// Copy nullable fields when present
 		var jsonFieldDecodeErr error
 		{{ template "nullablePostCopyFields" .Fields }}
 		if jsonFieldDecodeErr != nil {
-			return nil, 0, jsonFieldDecodeErr
+			return nil, jsonFieldDecodeErr
 		}
 
 		// Set relationship IDs from scanned FK values (hydration happens after loop)
@@ -1768,13 +1797,13 @@ func (r *{{ .Name }}) FindMany(ctx context.Context, filter *{{ .TypeName }}Filte
 	}
 
 	if err := rows.Err(); err != nil {
-		return nil, 0, fmt.Errorf("error iterating rows: %w", err)
+		return nil, fmt.Errorf("error iterating rows: %w", err)
 	}
 
 	// Batch hydrate relationships (outside the row loop for efficiency)
 	{{- range $i, $rel := .Relationships }}
 	{{- if not $rel.IsArray }}
-	if opts.Fields.{{ toGoName $rel.FieldName }} || {{- if $rel.NestedByPointer }} (opts.Fields.{{ toGoName $rel.FieldName }}Nested != nil && !opts.Fields.{{ toGoName $rel.FieldName }}Nested.IsZero()) {{- else }} !opts.Fields.{{ toGoName $rel.FieldName }}Nested.IsZero() {{- end }} {
+	if fields.{{ toGoName $rel.FieldName }} || {{- if $rel.NestedByPointer }} (fields.{{ toGoName $rel.FieldName }}Nested != nil && !fields.{{ toGoName $rel.FieldName }}Nested.IsZero()) {{- else }} !fields.{{ toGoName $rel.FieldName }}Nested.IsZero() {{- end }} {
 		// Collect unique FK IDs from results (dedupe during collection)
 		{{ $rel.FieldName }}IDSet := make(map[{{ $.UUIDGoType }}]bool)
 		var {{ $rel.FieldName }}IDs []{{ $.UUIDGoType }}
@@ -1802,13 +1831,13 @@ func (r *{{ .Name }}) FindMany(ctx context.Context, filter *{{ .TypeName }}Filte
 		childFields := ({{ $rel.TargetType }}Fields{}).All()
 		childFieldsAreDefault := true
 		{{- if $rel.NestedByPointer }}
-		if opts.Fields.{{ toGoName $rel.FieldName }}Nested != nil && !opts.Fields.{{ toGoName $rel.FieldName }}Nested.IsZero() {
-			childFields = *opts.Fields.{{ toGoName $rel.FieldName }}Nested
+		if fields.{{ toGoName $rel.FieldName }}Nested != nil && !fields.{{ toGoName $rel.FieldName }}Nested.IsZero() {
+			childFields = *fields.{{ toGoName $rel.FieldName }}Nested
 			childFieldsAreDefault = false
 		}
 		{{- else }}
-		if !opts.Fields.{{ toGoName $rel.FieldName }}Nested.IsZero() {
-			childFields = opts.Fields.{{ toGoName $rel.FieldName }}Nested
+		if !fields.{{ toGoName $rel.FieldName }}Nested.IsZero() {
+			childFields = fields.{{ toGoName $rel.FieldName }}Nested
 			childFieldsAreDefault = false
 		}
 		{{- end }}
@@ -1818,7 +1847,7 @@ func (r *{{ .Name }}) FindMany(ctx context.Context, filter *{{ .TypeName }}Filte
 			Limit:  len({{ $rel.FieldName }}IDs),
 		}, childFieldsAreDefault)
 		if err != nil {
-			return nil, 0, fmt.Errorf("failed to batch fetch {{ $rel.FieldName }}: %w", err)
+			return nil, fmt.Errorf("failed to batch fetch {{ $rel.FieldName }}: %w", err)
 		}
 
 		// Hydrate results from map
@@ -1847,8 +1876,8 @@ func (r *{{ .Name }}) FindMany(ctx context.Context, filter *{{ .TypeName }}Filte
 	{{- end }}
 	{{- range $i, $rel := .Relationships }}
 	{{- if $rel.IsArray }}
-	if opts.Fields.{{ toGoName $rel.FieldName }}Nested != nil {
-		childFields := *opts.Fields.{{ toGoName $rel.FieldName }}Nested
+	if fields.{{ toGoName $rel.FieldName }}Nested != nil {
+		childFields := *fields.{{ toGoName $rel.FieldName }}Nested
 		if childFields.IsZero() {
 			childFields = {{ $rel.TargetType }}Fields{Id: true}
 		}
@@ -1898,7 +1927,7 @@ func (r *{{ .Name }}) FindMany(ctx context.Context, filter *{{ .TypeName }}Filte
 			} else if r.txDB != nil {
 				repo = r.txDB.{{ $rel.TargetType }}
 			} else {
-				return nil, 0, fmt.Errorf("no database connection available for {{ $rel.FieldName }} hydration")
+				return nil, fmt.Errorf("no database connection available for {{ $rel.FieldName }} hydration")
 			}
 
 			childFilter := &{{ $rel.TargetType }}Filter{}
@@ -1925,7 +1954,7 @@ func (r *{{ .Name }}) FindMany(ctx context.Context, filter *{{ .TypeName }}Filte
 				break
 			}
 			if !filterSet {
-				return nil, 0, fmt.Errorf("failed to locate hasMany FK filter for {{ $.TypeName }}.{{ $rel.FieldName }}")
+				return nil, fmt.Errorf("failed to locate hasMany FK filter for {{ $.TypeName }}.{{ $rel.FieldName }}")
 			}
 
 			// The other recursion point: these children hydrate their own relations.
@@ -1938,7 +1967,7 @@ func (r *{{ .Name }}) FindMany(ctx context.Context, filter *{{ .TypeName }}Filte
 					Limit:  1000000,
 				})
 				if findErr != nil {
-					return nil, 0, fmt.Errorf("failed to batch fetch {{ $rel.FieldName }}: %w", findErr)
+					return nil, fmt.Errorf("failed to batch fetch {{ $rel.FieldName }}: %w", findErr)
 				}
 				children = fetched
 			}
@@ -2017,7 +2046,101 @@ func (r *{{ .Name }}) FindMany(ctx context.Context, filter *{{ .TypeName }}Filte
 	{{- end }}
 	{{- end }}
 
-	return results, totalCount, nil
+	return results, nil
+}
+
+// FindPage reads a page of the {{ .TypeName }} rows filter finds (D60, amended), in
+// opts.Sort's order, ties broken by {{ .PrimaryKeySortField.Name }} in the same direction: up to
+// opts.Limit rows after opts.After, and Next when more follow. It runs one
+// query of opts.Limit + 1 rows and no count. An After that holds a field
+// other than opts.Sort's, or no {{ .PrimaryKeySortField.Name }}, is ErrPageKey.
+func (r *{{ .Name }}) FindPage(ctx context.Context, filter *{{ .TypeName }}Filter, opts *{{ .TypeName }}PageOptions) (*{{ .TypeName }}Page, error) {
+	if opts == nil || opts.Fields.IsZero() {
+		return nil, fmt.Errorf("fields must be specified in PageOptions for performance")
+	}
+	if opts.Limit < 0 {
+		return nil, fmt.Errorf("orm: a page of {{ .TypeName }} rows holds 1 or more, not %d", opts.Limit)
+	}
+	limit := opts.Limit
+	if limit == 0 {
+		limit = 100
+	}
+	field := opts.Sort.Field
+	if field == "" {
+		field = {{ .TypeName }}SortBy{{ toGoName .PrimaryKeySortField.Name }}
+	}
+	column, ok := {{ lowerFirst .TypeName }}SortColumns[field]
+	if !ok {
+		return nil, fmt.Errorf("orm: {{ .TypeName }} sorts by {{ .SortFieldList }}, not %q", string(field))
+	}
+
+	// Next is the key of the page's last row, so the page reads its sort's
+	// column and its primary key whatever Fields selects.
+	fieldStrings := {{ lowerFirst .TypeName }}FieldStrings(opts.Fields)
+	for _, name := range []string{column.name, "{{ .PrimaryKeyCol }}"} {
+		if !containsString(fieldStrings, name) {
+			fieldStrings = append(fieldStrings, name)
+		}
+	}
+	if err := validateFields(fieldStrings, {{ .TypeName }}AllowedFields); err != nil {
+		return nil, err
+	}
+	selectFields := buildSelectFieldsTyped(fieldStrings, "{{ .TableName }}")
+
+	{{- if .HasSoftDelete }}
+	// The filter's conditions, each qualified by the table, then the
+	// soft-delete condition, then the keyset's.
+	{{- else }}
+	// The filter's conditions, each qualified by the table, then the
+	// keyset's.
+	{{- end }}
+	var args []interface{}
+	conditions := filter.conditions(&args, 0)
+	{{- if .HasSoftDelete }}
+	if !opts.IncludeDeleted {
+		conditions = append(conditions, `{{ .QuotedTableName }}.deleted_at IS NULL`)
+	}
+	{{- end }}
+	comparison, direction := ">", "ASC"
+	if opts.Sort.Desc {
+		comparison, direction = "<", "DESC"
+	}
+	if opts.After != nil {
+		values, err := opts.After.args(field)
+		if err != nil {
+			return nil, err
+		}
+		placeholders := make([]string, len(values))
+		for i, value := range values {
+			args = append(args, value)
+			placeholders[i] = fmt.Sprintf("$%d", len(args))
+		}
+		if len(values) == 1 {
+			conditions = append(conditions, fmt.Sprintf("%s %s %s", column.sql, comparison, placeholders[0]))
+		} else {
+			conditions = append(conditions, fmt.Sprintf(`(%s, {{ .QuotedTableName }}.{{ .QuotedPrimaryKey }}) %s (%s)`, column.sql, comparison, strings.Join(placeholders, ", ")))
+		}
+	}
+	whereClause := ""
+	if len(conditions) > 0 {
+		whereClause = " WHERE " + strings.Join(conditions, " AND ")
+	}
+	orderByClause := fmt.Sprintf(" ORDER BY %s %s", column.sql, direction)
+	if field != {{ .TypeName }}SortBy{{ toGoName .PrimaryKeySortField.Name }} {
+		orderByClause += fmt.Sprintf(`, {{ .QuotedTableName }}.{{ .QuotedPrimaryKey }} %s`, direction)
+	}
+	query := fmt.Sprintf(`SELECT %s FROM {{ .QuotedTableName }}%s%s LIMIT %d`, selectFields, whereClause, orderByClause, limit+1)
+
+	rows, err := r.findRows(ctx, "FindPage", query, args, fieldStrings, opts.Fields)
+	if err != nil {
+		return nil, err
+	}
+	page := &{{ .TypeName }}Page{Rows: rows}
+	if len(rows) > limit {
+		page.Rows = rows[:limit]
+		page.Next = {{ lowerFirst .TypeName }}PageKeyOf(page.Rows[limit-1], field)
+	}
+	return page, nil
 }
 
 // CreateOne inserts a new {{ .TypeName }} record

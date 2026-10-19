@@ -3,6 +3,7 @@
 package orm
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -135,6 +136,11 @@ type ArrayStringFilter struct {
 	Eq       []string
 }
 
+// ErrPageKey is FindPage's error for an After that holds no primary key, or
+// a sort field other than its sort's: the key of a page in another order,
+// which names no row of this one (D60, amended).
+var ErrPageKey = errors.New("orm: the page key names no row of its sort")
+
 // ========================================
 // Type-Safe Field Selectors and Options
 // ========================================
@@ -221,6 +227,106 @@ type OrderFindOptions struct {
 	Offset int
 	// IncludeDeleted includes soft-deleted records in results (default false)
 	IncludeDeleted bool
+}
+
+// OrderSortField is a field FindPage orders Order rows by, by its
+// schema name (D60, amended): its primary key, or a column of one value of
+// text, a number or a time.
+type OrderSortField string
+
+const (
+	OrderSortById       OrderSortField = "id"
+	OrderSortByPlacedAt OrderSortField = "placedAt"
+)
+
+// OrderSort is the order FindPage reads Order rows in: Field,
+// ascending, or descending when Desc; ties break by id in the same
+// direction. The zero value orders by id, ascending.
+type OrderSort struct {
+	Field OrderSortField
+	Desc  bool
+}
+
+// ParseOrderSort reads a sort as a page request writes it, "placedAt" or
+// "-placedAt": an error for a field Order cannot be sorted by.
+func ParseOrderSort(text string) (OrderSort, error) {
+	parsed := OrderSort{Field: OrderSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
+	switch parsed.Field {
+	case OrderSortById, OrderSortByPlacedAt:
+		return parsed, nil
+	}
+	return OrderSort{}, fmt.Errorf("orm: Order sorts by id and placedAt, not %q", text)
+}
+
+// OrderPageKey is the position of a Order row in a FindPage order: its
+// sort field's value and its id, as a cursor holds them,
+// {"placedAt": ..., "id": ...}. A key holds one sort field, and none
+// in an order by id.
+type OrderPageKey struct {
+	PlacedAt *types.TemporalDateTime `json:"placedAt,omitempty"`
+	Id       types.IdentityUUID      `json:"id"`
+}
+
+// args are the key's values in an order by field, as the repository writes
+// their columns: its sort field's, then its id, or its id alone in
+// an order by id. A key without its id, or with a sort field other
+// than field, is ErrPageKey.
+func (k *OrderPageKey) args(field OrderSortField) ([]any, error) {
+	var zeroKey types.IdentityUUID
+	if k.Id == zeroKey {
+		return nil, fmt.Errorf("%w: the Order key holds no id", ErrPageKey)
+	}
+	var held []string
+	var value any
+	if k.PlacedAt != nil {
+		held = append(held, "placedAt")
+		value = time.Time(*k.PlacedAt)
+	}
+	key := k.Id.ToUUID()
+	if field == OrderSortById && len(held) == 0 {
+		return []any{key}, nil
+	}
+	if len(held) == 1 && held[0] == string(field) {
+		return []any{value, key}, nil
+	}
+	return nil, fmt.Errorf("%w: a page of Order rows by %s, a key of %s", ErrPageKey, field, strings.Join(append(held, "id"), " and "))
+}
+
+// orderPageKeyOf is row's key in an order by field: its value of
+// field and its id.
+func orderPageKeyOf(row *types.Order, field OrderSortField) *OrderPageKey {
+	key := &OrderPageKey{}
+	if row.Id != nil {
+		key.Id = *row.Id
+	}
+	switch field {
+	case OrderSortByPlacedAt:
+		value := row.PlacedAt
+		key.PlacedAt = &value
+	}
+	return key
+}
+
+// OrderPageOptions are FindPage's options.
+type OrderPageOptions struct {
+	// Fields specifies which fields to select, as FindMany's do; zero is an
+	// error. A page reads its sort's column and the id too, which Next holds.
+	Fields OrderFields
+	// Sort is the order the rows are read in.
+	Sort OrderSort
+	// After is the key of the last row of the page before, nil for the first page.
+	After *OrderPageKey
+	// Limit is the rows a page holds: 1 or more, 100 when 0.
+	Limit int
+	// IncludeDeleted includes soft-deleted records in results (default false)
+	IncludeDeleted bool
+}
+
+// OrderPage is a page of Order rows in FindPage's order: at most
+// Limit rows, and Next, the key of the last of them, when more rows follow.
+type OrderPage struct {
+	Rows []*types.Order
+	Next *OrderPageKey
 }
 
 // ========================================

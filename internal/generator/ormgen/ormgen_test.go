@@ -130,8 +130,8 @@ func TestWriteORMGolden(t *testing.T) {
 // repository methods, the fenced and history methods of a versioned table
 // among them. It is the same for every schema without an @optimistic table.
 const repositoryMethodsParagraph = "Repositories expose `GetOne`, `GetManyByIDs`, `FindOne`, `FindMany`,\n" +
-	"`CreateOne`, `CreateMany`, `UpdateOne`, `UpdateMany`, `DeleteOne`, and\n" +
-	"`DeleteMany`. Versioned tables also expose `GetVersion`, `ListVersions`,\n" +
+	"`FindPage`, `CreateOne`, `CreateMany`, `UpdateOne`, `UpdateMany`, `DeleteOne`,\n" +
+	"and `DeleteMany`. Versioned tables also expose `GetVersion`, `ListVersions`,\n" +
 	"`GetAsOf`, `UpdateOneIfVersion`, and `DeleteOneIfVersion`, which soft-deletes\n" +
 	"a table with soft deletes and hard-deletes one without. Tables with soft\n" +
 	"deletes additionally expose `HardDeleteOne`.\n\n"
@@ -532,6 +532,222 @@ func TestGenerateSearchTextFilter(t *testing.T) {
 	}
 	if strings.Contains(read("query.go"), "SearchText") {
 		t.Errorf("%s's query.go should not mention SearchText", queueFixture)
+	}
+}
+
+// sortFieldNames are the schema names of repo's sort fields, in order.
+func sortFieldNames(repo Repository) []string {
+	names := make([]string, len(repo.SortFields))
+	for i, field := range repo.SortFields {
+		names[i] = field.Name
+	}
+	return names
+}
+
+// TestGenerateFindPage covers FindPage's surface in the ORM (D60, amended):
+// fixture-db's Tenant sorts by its id, then by createdAt, name, slug, email
+// and seatCount, each a required column of one value, and not by its enum
+// status, its boolean isActive, its JSON metadata or its nullable
+// updatedAt; TenantUser's nullable displayName is no sort field either.
+// The repository takes its columns from a generated map, FindPage is on
+// the interface and the NoOp repository, and the README lists it.
+func TestGenerateFindPage(t *testing.T) {
+	output := generateFixtureDB(t)
+	want := map[string][]string{
+		"Tenant":     {"id", "createdAt", "name", "slug", "email", "seatCount"},
+		"TenantUser": {"id", "createdAt"},
+	}
+	for _, repo := range output.Repositories {
+		if got := sortFieldNames(repo); strings.Join(got, ",") != strings.Join(want[repo.TypeName], ",") {
+			t.Errorf("%s.SortFields = %q, want %q", repo.TypeName, got, want[repo.TypeName])
+		}
+	}
+
+	outDir := t.TempDir()
+	if err := WriteORM(output, outDir); err != nil {
+		t.Fatalf("write orm: %v", err)
+	}
+	read := func(name string) string {
+		t.Helper()
+		data, err := os.ReadFile(filepath.Join(outDir, name))
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		return string(data)
+	}
+	query := read("query.go")
+	for _, want := range []string{
+		`var ErrPageKey = errors.New("orm: the page key names no row of its sort")`,
+		`TenantSortById        TenantSortField = "id"`,
+		`TenantSortByCreatedAt TenantSortField = "createdAt"`,
+		`TenantSortByName      TenantSortField = "name"`,
+		`TenantSortBySeatCount TenantSortField = "seatCount"`,
+		`TenantUserSortByCreatedAt TenantUserSortField = "createdAt"`,
+		"func ParseTenantSort(text string) (TenantSort, error) {",
+		`fmt.Errorf("orm: Tenant sorts by id, createdAt, name, slug, email and seatCount, not %q", text)`,
+		"SeatCount *float64                `json:\"seatCount,omitempty\"`",
+		"Id        types.IdentityUUID      `json:\"id\"`",
+		"value = time.Time(*k.CreatedAt)",
+		"key := k.Id.ToUUID()",
+		"type TenantPageOptions struct {",
+		"type TenantPage struct {",
+	} {
+		if !strings.Contains(query, want) {
+			t.Errorf("query.go is missing %q", want)
+		}
+	}
+	for _, unwanted := range []string{"TenantSortByStatus", "TenantSortByIsActive", "TenantSortByMetadata", "TenantSortByUpdatedAt", "TenantSortByVersion", "TenantUserSortByDisplayName", "TenantUserSortByDeletedAt"} {
+		if strings.Contains(query, unwanted) {
+			t.Errorf("query.go declares %s, which is no sort field", unwanted)
+		}
+	}
+
+	repository := read("repository_tenant.go")
+	for _, want := range []string{
+		"var tenantSortColumns = map[TenantSortField]struct{ name, sql string }{",
+		"TenantSortByName:      {\"name\", `tenant.\"name\"`},",
+		"func (r *TenantRepository) FindPage(ctx context.Context, filter *TenantFilter, opts *TenantPageOptions) (*TenantPage, error) {",
+		"column, ok := tenantSortColumns[field]",
+		"conditions = append(conditions, fmt.Sprintf(`(%s, tenant.id) %s (%s)`, column.sql, comparison, strings.Join(placeholders, \", \")))",
+		"query := fmt.Sprintf(`SELECT %s FROM tenant%s%s LIMIT %d`, selectFields, whereClause, orderByClause, limit+1)",
+		`rows, err := r.findRows(ctx, "FindPage", query, args, fieldStrings, opts.Fields)`,
+		`results, err := r.findRows(ctx, "FindMany", query, args, fieldStrings, opts.Fields)`,
+	} {
+		if !strings.Contains(repository, want) {
+			t.Errorf("repository_tenant.go is missing %q", want)
+		}
+	}
+	if strings.Contains(repository, "tenant.deleted_at") {
+		t.Error("Tenant has no soft deletes, so FindPage adds no deleted_at condition")
+	}
+	if want := "conditions = append(conditions, `tenant_user.deleted_at IS NULL`)"; !strings.Contains(read("repository_tenant_user.go"), want) {
+		t.Errorf("repository_tenant_user.go is missing %q", want)
+	}
+
+	interfaces := read("interfaces.go")
+	for _, want := range []string{
+		"FindPage(ctx context.Context, filter *TenantFilter, opts *TenantPageOptions) (*TenantPage, error)",
+		"func (r *NoOpTenantRepository) FindPage(_ context.Context, _ *TenantFilter, _ *TenantPageOptions) (*TenantPage, error) {",
+	} {
+		if !strings.Contains(interfaces, want) {
+			t.Errorf("interfaces.go is missing %q", want)
+		}
+	}
+	if !strings.Contains(read("README.md"), "`FindPage(ctx, filter, opts)` reads a page") {
+		t.Error("README.md does not describe FindPage")
+	}
+}
+
+// sortRulesSchema is a table with a column of each kind that the sort
+// rule (Field.Sortable) takes or leaves out, and a key that is not named
+// id.
+const sortRulesSchema = `{
+  "name": "sort-rules",
+  "kind": "DB",
+  "scalars": {
+    "Identity.UUID": { "name": "Identity.UUID", "languagePrimitive": "string" },
+    "Temporal.DateTime": { "name": "Temporal.DateTime", "languagePrimitive": "string" },
+    "Temporal.Date": { "name": "Temporal.Date", "languagePrimitive": "string" },
+    "Geo.Location": { "name": "Geo.Location", "languagePrimitive": "string" },
+    "Generic.Int64": { "name": "Generic.Int64", "languagePrimitive": "number" },
+    "Generic.JSON": { "name": "Generic.JSON", "languagePrimitive": "string" }
+  },
+  "enums": {
+    "Mood": { "name": "Mood", "values": [{ "name": "Calm", "serializedAs": "calm" }, { "name": "Busy", "serializedAs": "busy" }] }
+  },
+  "types": {
+    "Entry": {
+      "name": "Entry",
+      "role": "DBTable",
+      "fields": [
+        { "name": "entryId", "typeRef": { "name": "Identity.UUID" }, "required": true, "key": true, "autoGenerated": true },
+        { "name": "title", "typeRef": { "name": "string" }, "required": true },
+        { "name": "token", "typeRef": { "name": "string" }, "required": true, "secret": true },
+        { "name": "subtitle", "typeRef": { "name": "string" } },
+        { "name": "rank", "typeRef": { "name": "Generic.Int64" }, "required": true },
+        { "name": "score", "typeRef": { "name": "number" }, "required": true },
+        { "name": "due", "typeRef": { "name": "Temporal.Date" }, "required": true },
+        { "name": "ownerId", "typeRef": { "name": "Identity.UUID" }, "required": true },
+        { "name": "done", "typeRef": { "name": "boolean" }, "required": true },
+        { "name": "mood", "typeRef": { "name": "Mood" }, "required": true },
+        { "name": "at", "typeRef": { "name": "Geo.Location" }, "required": true },
+        { "name": "tags", "typeRef": { "name": "string", "isArray": true }, "required": true },
+        { "name": "extra", "typeRef": { "name": "Generic.JSON" }, "required": true },
+        { "name": "createdAt", "typeRef": { "name": "Temporal.DateTime" }, "required": true },
+        { "name": "createdBy", "typeRef": { "name": "Identity.UUID" }, "required": true },
+        { "name": "updatedAt", "typeRef": { "name": "Temporal.DateTime" }, "required": true }
+      ]
+    }
+  }
+}
+`
+
+// sortRulesService writes sortRulesSchema as a service into a temporary
+// directory, and returns it.
+func sortRulesService(t *testing.T) string {
+	t.Helper()
+	serviceDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(serviceDir, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(serviceDir, "schema.config.json"), []byte(`{"name": "sort-rules", "kind": "DB", "outputs": {"types": {"go": {"enabled": true}}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(serviceDir, "src", "entries.schema.json"), []byte(sortRulesSchema), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return serviceDir
+}
+
+// TestSortableColumns holds the sort rule (Field.Sortable, D60 amended): a
+// table sorts by its key, whatever its name, first, then by each required
+// column of one value of text, a number, a time, a date or a UUID, and by
+// createdAt and updatedAt among the audit fields; not by a nullable column,
+// a @secret one, a boolean, an enum, a point, a list, JSON or another audit
+// field.
+func TestSortableColumns(t *testing.T) {
+	schema, err := loader.LoadService(sortRulesService(t))
+	if err != nil {
+		t.Fatalf("load sort-rules: %v", err)
+	}
+	output, err := Generate(schema, Options{
+		SchemaName:  "sort-rules",
+		ModulePath:  "example.com/schemas/orm/sort-rules",
+		TypesModule: "example.com/schemas/types/go/sort-rules",
+		Clock:       codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)),
+	})
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	if len(output.Repositories) != 1 {
+		t.Fatalf("got %d repositories, want Entry's", len(output.Repositories))
+	}
+	entry := output.Repositories[0]
+	want := []string{"entryId", "title", "rank", "score", "due", "ownerId", "createdAt", "updatedAt"}
+	if got := sortFieldNames(entry); strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("Entry.SortFields = %q, want %q", got, want)
+	}
+	if got := entry.SortFieldList(); got != "entryId, title, rank, score, due, ownerId, createdAt and updatedAt" {
+		t.Errorf("Entry.SortFieldList() = %q", got)
+	}
+
+	outDir := t.TempDir()
+	if err := WriteORM(output, outDir); err != nil {
+		t.Fatalf("write orm: %v", err)
+	}
+	query, err := os.ReadFile(filepath.Join(outDir, "query.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"EntryId   types.IdentityUUID      `json:\"entryId\"`",
+		"if field == EntrySortByEntryId && len(held) == 0 {",
+		"value = k.OwnerId.ToUUID()",
+		"value = *k.Rank",
+	} {
+		if !strings.Contains(string(query), want) {
+			t.Errorf("query.go is missing %q", want)
+		}
 	}
 }
 

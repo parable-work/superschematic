@@ -103,6 +103,11 @@ no field fails the build.
 `one_per_author` is unique only among rows that are not deleted: on a
 table with `deletedAt`, a unique index leaves deleted rows out.
 
+A [page](#pages) reads fastest with an index over the columns its filter
+compares for equality, then its sort's column, then the key: the index
+holds the page's rows in its order, from the cursor's on.
+`idx_order_customer_placed_at` serves a shopper's orders by `placedAt`.
+
 ## Text search
 
 `@searchField` on one or more fields adds a generated `search_text` column
@@ -134,6 +139,47 @@ include deleted rows ([Soft delete](#soft-delete)), so a query of your own
 that leaves deleted rows out adds it too. A field whose column would be
 `search_text` beside search fields fails the build, since the generated
 column takes that name.
+
+## Pages
+
+`FindPage` reads one page of the rows a filter finds, in the order of one
+column, as a paged list asks for it
+([Pages](/superschematic/guides/api-routes/#pages)):
+
+```go
+page, err := db.GetOrderRepository().FindPage(ctx, filter, &orm.OrderPageOptions{
+	Fields: orm.OrderFields{}.All(),
+	Sort:   orm.OrderSort{Field: orm.OrderSortByPlacedAt, Desc: true},
+	After:  after, // the Next of the page before; nil for the first page
+	Limit:  20,
+})
+```
+
+A table sorts by its key, and by each column of one value of text, a
+number, a time, a date or a UUID that is never null, `createdAt` and
+`updatedAt` among them. `OrderSortByPlacedAt` names one. A column that may
+be null, or holds an enum, a boolean, JSON, a list or a point, is not a sort
+field. `ParseOrderSort` reads a sort as a page request writes it,
+`placedAt` or `-placedAt`, and refuses a field the table cannot sort by. A
+sort never reaches the SQL as text: `FindPage` takes the column from the
+table's generated list of sort fields.
+
+The page is one query, with no count. Its conditions are the filter's, then
+`deleted_at IS NULL` unless the options set `IncludeDeleted`
+([Soft delete](#soft-delete)), then, after `After`, one row comparison,
+`("order".placed_at, "order".id) < ($1, $2)` for a descending sort. It
+orders by the column, then the key, both in the sort's direction, so rows
+of one value read in the order of their keys, and it reads one row more
+than `Limit`, 100 when it is 0. `Rows` holds up to `Limit` rows. When more
+follow, `Next`, an `OrderPageKey`, is the position of the last of them: its
+sort field's value and its key, under their schema names,
+`{"placedAt": "…", "id": "…"}`. An implementation encodes it as the page's
+cursor and decodes the next request's cursor into `After`. An `After` that
+holds a field other than the sort's, or no key, is `ErrPageKey`: the
+cursor of another order, which the implementation answers as a cursor it
+cannot read. `Fields` selects the columns as `FindMany`'s do, a nested
+selection hydrating its relations the same way, and the page reads its
+sort's column and its key besides, which `Next` holds.
 
 ## JSON columns
 

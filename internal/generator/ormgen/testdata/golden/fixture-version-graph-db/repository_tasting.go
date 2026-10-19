@@ -179,6 +179,22 @@ var TastingQuotedFields = map[string]string{
 	"ref_id":         `ref_id`,
 }
 
+// tastingSortColumns are the columns of Tasting's sort fields, by
+// field: the name FindPage selects, and the column as its ORDER BY and its
+// keyset condition write it. They are the only text of a sort that reaches
+// its SQL (D60, amended).
+var tastingSortColumns = map[TastingSortField]struct{ name, sql string }{
+	TastingSortById:        {"id", `tasting.id`},
+	TastingSortByTaster:    {"taster", `tasting.taster`},
+	TastingSortByScore:     {"score", `tasting.score`},
+	TastingSortByServings:  {"servings", `tasting.servings`},
+	TastingSortByTastedOn:  {"tasted_on", `tasting.tasted_on`},
+	TastingSortByTastedAt:  {"tasted_at", `tasting.tasted_at`},
+	TastingSortByServedAt:  {"served_at", `tasting.served_at`},
+	TastingSortByRested:    {"rested", `tasting.rested`},
+	TastingSortByEntityKey: {"entity_key", `tasting.entity_key`},
+}
+
 // buildTastingOrderByClause builds an ORDER BY clause for Tasting.
 // quotedTable is the table's name as the FROM clause spells it, quoted when
 // it is a keyword (a table named order is "order").
@@ -1410,64 +1426,7 @@ func (r *TastingRepository) FindMany(ctx context.Context, filter *TastingFilter,
 	}
 
 	// Build selected fields in OrderedMembers order so FK columns match scan order.
-	var fieldStrings []string
-	if opts.Fields.Id {
-		fieldStrings = append(fieldStrings, "id")
-	}
-	if opts.Fields.Recipe || !opts.Fields.RecipeNested.IsZero() {
-		fieldStrings = append(fieldStrings, "recipe_id")
-	}
-	if opts.Fields.Taster {
-		fieldStrings = append(fieldStrings, "taster")
-	}
-	if opts.Fields.Salty {
-		fieldStrings = append(fieldStrings, "salty")
-	}
-	if opts.Fields.Score {
-		fieldStrings = append(fieldStrings, "score")
-	}
-	if opts.Fields.Servings {
-		fieldStrings = append(fieldStrings, "servings")
-	}
-	if opts.Fields.TastedOn {
-		fieldStrings = append(fieldStrings, "tasted_on")
-	}
-	if opts.Fields.TastedAt {
-		fieldStrings = append(fieldStrings, "tasted_at")
-	}
-	if opts.Fields.ServedAt {
-		fieldStrings = append(fieldStrings, "served_at")
-	}
-	if opts.Fields.Rested {
-		fieldStrings = append(fieldStrings, "rested")
-	}
-	if opts.Fields.Verdict {
-		fieldStrings = append(fieldStrings, "verdict")
-	}
-	if opts.Fields.Remarks {
-		fieldStrings = append(fieldStrings, "remarks")
-	}
-	if opts.Fields.Tags {
-		fieldStrings = append(fieldStrings, "tags")
-	}
-	if opts.Fields.Helpers {
-		fieldStrings = append(fieldStrings, "helpers")
-	}
-	if opts.Fields.Bites {
-		fieldStrings = append(fieldStrings, "bites")
-	}
-	if opts.Fields.EntityKey {
-		fieldStrings = append(fieldStrings, "entity_key")
-	}
-	if opts.Fields.Ref || !opts.Fields.RefNested.IsZero() {
-		fieldStrings = append(fieldStrings, "ref_id")
-	}
-	if opts.Fields.DeletedOnRef {
-		fieldStrings = append(fieldStrings, "deleted_on_ref")
-	}
-	if opts.Fields.Version {
-		fieldStrings = append(fieldStrings, "_version")
-	}
+	fieldStrings := tastingFieldStrings(opts.Fields)
 
 	// Validate fields
 	if err := validateFields(fieldStrings, TastingAllowedFields); err != nil {
@@ -1507,6 +1466,82 @@ func (r *TastingRepository) FindMany(ctx context.Context, filter *TastingFilter,
 		return nil, 0, fmt.Errorf("failed to get count: %w", err)
 	}
 
+	results, err := r.findRows(ctx, "FindMany", query, args, fieldStrings, opts.Fields)
+	if err != nil {
+		return nil, 0, err
+	}
+	return results, totalCount, nil
+}
+
+// tastingFieldStrings are the columns fields selects, in OrderedMembers
+// order so FK columns match scan order, and the primary key when fields
+// hydrates a hasMany relation, which maps the children by it.
+func tastingFieldStrings(fields TastingFields) []string {
+	var fieldStrings []string
+	if fields.Id {
+		fieldStrings = append(fieldStrings, "id")
+	}
+	if fields.Recipe || !fields.RecipeNested.IsZero() {
+		fieldStrings = append(fieldStrings, "recipe_id")
+	}
+	if fields.Taster {
+		fieldStrings = append(fieldStrings, "taster")
+	}
+	if fields.Salty {
+		fieldStrings = append(fieldStrings, "salty")
+	}
+	if fields.Score {
+		fieldStrings = append(fieldStrings, "score")
+	}
+	if fields.Servings {
+		fieldStrings = append(fieldStrings, "servings")
+	}
+	if fields.TastedOn {
+		fieldStrings = append(fieldStrings, "tasted_on")
+	}
+	if fields.TastedAt {
+		fieldStrings = append(fieldStrings, "tasted_at")
+	}
+	if fields.ServedAt {
+		fieldStrings = append(fieldStrings, "served_at")
+	}
+	if fields.Rested {
+		fieldStrings = append(fieldStrings, "rested")
+	}
+	if fields.Verdict {
+		fieldStrings = append(fieldStrings, "verdict")
+	}
+	if fields.Remarks {
+		fieldStrings = append(fieldStrings, "remarks")
+	}
+	if fields.Tags {
+		fieldStrings = append(fieldStrings, "tags")
+	}
+	if fields.Helpers {
+		fieldStrings = append(fieldStrings, "helpers")
+	}
+	if fields.Bites {
+		fieldStrings = append(fieldStrings, "bites")
+	}
+	if fields.EntityKey {
+		fieldStrings = append(fieldStrings, "entity_key")
+	}
+	if fields.Ref || !fields.RefNested.IsZero() {
+		fieldStrings = append(fieldStrings, "ref_id")
+	}
+	if fields.DeletedOnRef {
+		fieldStrings = append(fieldStrings, "deleted_on_ref")
+	}
+	if fields.Version {
+		fieldStrings = append(fieldStrings, "_version")
+	}
+	return fieldStrings
+}
+
+// findRows runs query, a select of the columns fieldStrings names, in turn,
+// with args, scans its rows, and hydrates the relations fields selects, as
+// FindMany and FindPage read them. method names the caller in an error.
+func (r *TastingRepository) findRows(ctx context.Context, method, query string, args []interface{}, fieldStrings []string, fields TastingFields) ([]*types.Tasting, error) {
 	// Execute query
 	var rows pgx.Rows
 	var err error
@@ -1516,7 +1551,7 @@ func (r *TastingRepository) FindMany(ctx context.Context, filter *TastingFilter,
 		rows, err = r.db.pool.Query(ctx, query, args...)
 	}
 	if err != nil {
-		return nil, 0, fmt.Errorf("failed to execute query: %w", err)
+		return nil, fmt.Errorf("failed to execute query: %w", err)
 	}
 	defer rows.Close()
 
@@ -1588,12 +1623,12 @@ func (r *TastingRepository) FindMany(ctx context.Context, filter *TastingFilter,
 				scanDest[i] = &tempRelRef
 				selectedRelRef = true
 			default:
-				return nil, 0, fmt.Errorf("unexpected field %q for Tasting.FindMany", fieldName)
+				return nil, fmt.Errorf("unexpected field %q for Tasting.%s", fieldName, method)
 			}
 		}
 
 		if err := rows.Scan(scanDest...); err != nil {
-			return nil, 0, fmt.Errorf("failed to scan row: %w", err)
+			return nil, fmt.Errorf("failed to scan row: %w", err)
 		}
 
 		// Copy nullable fields when present
@@ -1619,7 +1654,7 @@ func (r *TastingRepository) FindMany(ctx context.Context, filter *TastingFilter,
 			}
 		}
 		if jsonFieldDecodeErr != nil {
-			return nil, 0, jsonFieldDecodeErr
+			return nil, jsonFieldDecodeErr
 		}
 
 		// Set relationship IDs from scanned FK values (hydration happens after loop)
@@ -1634,11 +1669,11 @@ func (r *TastingRepository) FindMany(ctx context.Context, filter *TastingFilter,
 	}
 
 	if err := rows.Err(); err != nil {
-		return nil, 0, fmt.Errorf("error iterating rows: %w", err)
+		return nil, fmt.Errorf("error iterating rows: %w", err)
 	}
 
 	// Batch hydrate relationships (outside the row loop for efficiency)
-	if opts.Fields.Recipe || !opts.Fields.RecipeNested.IsZero() {
+	if fields.Recipe || !fields.RecipeNested.IsZero() {
 		// Collect unique FK IDs from results (dedupe during collection)
 		recipeIDSet := make(map[types.IdentityUUID]bool)
 		var recipeIDs []types.IdentityUUID
@@ -1654,8 +1689,8 @@ func (r *TastingRepository) FindMany(ctx context.Context, filter *TastingFilter,
 		// Batch fetch related entities with typed child field options.
 		childFields := (RecipeFields{}).All()
 		childFieldsAreDefault := true
-		if !opts.Fields.RecipeNested.IsZero() {
-			childFields = opts.Fields.RecipeNested
+		if !fields.RecipeNested.IsZero() {
+			childFields = fields.RecipeNested
 			childFieldsAreDefault = false
 		}
 
@@ -1664,7 +1699,7 @@ func (r *TastingRepository) FindMany(ctx context.Context, filter *TastingFilter,
 			Limit:  len(recipeIDs),
 		}, childFieldsAreDefault)
 		if err != nil {
-			return nil, 0, fmt.Errorf("failed to batch fetch recipe: %w", err)
+			return nil, fmt.Errorf("failed to batch fetch recipe: %w", err)
 		}
 
 		// Hydrate results from map
@@ -1677,7 +1712,7 @@ func (r *TastingRepository) FindMany(ctx context.Context, filter *TastingFilter,
 			}
 		}
 	}
-	if opts.Fields.Ref || !opts.Fields.RefNested.IsZero() {
+	if fields.Ref || !fields.RefNested.IsZero() {
 		// Collect unique FK IDs from results (dedupe during collection)
 		refIDSet := make(map[types.IdentityUUID]bool)
 		var refIDs []types.IdentityUUID
@@ -1693,8 +1728,8 @@ func (r *TastingRepository) FindMany(ctx context.Context, filter *TastingFilter,
 		// Batch fetch related entities with typed child field options.
 		childFields := (RecipeRefFields{}).All()
 		childFieldsAreDefault := true
-		if !opts.Fields.RefNested.IsZero() {
-			childFields = opts.Fields.RefNested
+		if !fields.RefNested.IsZero() {
+			childFields = fields.RefNested
 			childFieldsAreDefault = false
 		}
 
@@ -1703,7 +1738,7 @@ func (r *TastingRepository) FindMany(ctx context.Context, filter *TastingFilter,
 			Limit:  len(refIDs),
 		}, childFieldsAreDefault)
 		if err != nil {
-			return nil, 0, fmt.Errorf("failed to batch fetch ref: %w", err)
+			return nil, fmt.Errorf("failed to batch fetch ref: %w", err)
 		}
 
 		// Hydrate results from map
@@ -1717,7 +1752,90 @@ func (r *TastingRepository) FindMany(ctx context.Context, filter *TastingFilter,
 		}
 	}
 
-	return results, totalCount, nil
+	return results, nil
+}
+
+// FindPage reads a page of the Tasting rows filter finds (D60, amended), in
+// opts.Sort's order, ties broken by id in the same direction: up to
+// opts.Limit rows after opts.After, and Next when more follow. It runs one
+// query of opts.Limit + 1 rows and no count. An After that holds a field
+// other than opts.Sort's, or no id, is ErrPageKey.
+func (r *TastingRepository) FindPage(ctx context.Context, filter *TastingFilter, opts *TastingPageOptions) (*TastingPage, error) {
+	if opts == nil || opts.Fields.IsZero() {
+		return nil, fmt.Errorf("fields must be specified in PageOptions for performance")
+	}
+	if opts.Limit < 0 {
+		return nil, fmt.Errorf("orm: a page of Tasting rows holds 1 or more, not %d", opts.Limit)
+	}
+	limit := opts.Limit
+	if limit == 0 {
+		limit = 100
+	}
+	field := opts.Sort.Field
+	if field == "" {
+		field = TastingSortById
+	}
+	column, ok := tastingSortColumns[field]
+	if !ok {
+		return nil, fmt.Errorf("orm: Tasting sorts by id, taster, score, servings, tastedOn, tastedAt, servedAt, rested and entityKey, not %q", string(field))
+	}
+
+	// Next is the key of the page's last row, so the page reads its sort's
+	// column and its primary key whatever Fields selects.
+	fieldStrings := tastingFieldStrings(opts.Fields)
+	for _, name := range []string{column.name, "id"} {
+		if !containsString(fieldStrings, name) {
+			fieldStrings = append(fieldStrings, name)
+		}
+	}
+	if err := validateFields(fieldStrings, TastingAllowedFields); err != nil {
+		return nil, err
+	}
+	selectFields := buildSelectFieldsTyped(fieldStrings, "tasting")
+	// The filter's conditions, each qualified by the table, then the
+	// keyset's.
+	var args []interface{}
+	conditions := filter.conditions(&args, 0)
+	comparison, direction := ">", "ASC"
+	if opts.Sort.Desc {
+		comparison, direction = "<", "DESC"
+	}
+	if opts.After != nil {
+		values, err := opts.After.args(field)
+		if err != nil {
+			return nil, err
+		}
+		placeholders := make([]string, len(values))
+		for i, value := range values {
+			args = append(args, value)
+			placeholders[i] = fmt.Sprintf("$%d", len(args))
+		}
+		if len(values) == 1 {
+			conditions = append(conditions, fmt.Sprintf("%s %s %s", column.sql, comparison, placeholders[0]))
+		} else {
+			conditions = append(conditions, fmt.Sprintf(`(%s, tasting.id) %s (%s)`, column.sql, comparison, strings.Join(placeholders, ", ")))
+		}
+	}
+	whereClause := ""
+	if len(conditions) > 0 {
+		whereClause = " WHERE " + strings.Join(conditions, " AND ")
+	}
+	orderByClause := fmt.Sprintf(" ORDER BY %s %s", column.sql, direction)
+	if field != TastingSortById {
+		orderByClause += fmt.Sprintf(`, tasting.id %s`, direction)
+	}
+	query := fmt.Sprintf(`SELECT %s FROM tasting%s%s LIMIT %d`, selectFields, whereClause, orderByClause, limit+1)
+
+	rows, err := r.findRows(ctx, "FindPage", query, args, fieldStrings, opts.Fields)
+	if err != nil {
+		return nil, err
+	}
+	page := &TastingPage{Rows: rows}
+	if len(rows) > limit {
+		page.Rows = rows[:limit]
+		page.Next = tastingPageKeyOf(page.Rows[limit-1], field)
+	}
+	return page, nil
 }
 
 // CreateOne inserts a new Tasting record
