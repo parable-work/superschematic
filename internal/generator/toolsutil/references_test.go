@@ -3,12 +3,14 @@ package toolsutil_test
 import (
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/apigen/sessionauth"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
+	"github.com/parable-work/superschematic/internal/generator/toolsutil"
 	"github.com/parable-work/superschematic/internal/loader"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -64,4 +66,41 @@ func TestToolSchemasGoldenRefs(t *testing.T) {
 		t.Error("listItems: q is not the search, or inStock is")
 	}
 	compareToolSchemasGolden(t, fixture, tools)
+}
+
+// TestAPropertyKeyIsNoKeywordAPropertyIsWrittenWith: a tool hook cannot
+// rename the scalar, reference or search key to a keyword a property is
+// written with, any of JSONSchemaProperty's keys, which the property
+// would then carry twice.
+func TestAPropertyKeyIsNoKeywordAPropertyIsWrittenWith(t *testing.T) {
+	var keywords []string
+	properties := reflect.TypeFor[toolsutil.JSONSchemaProperty]()
+	for i := range properties.NumField() {
+		name, _, _ := strings.Cut(properties.Field(i).Tag.Get("json"), ",")
+		if name != "" && name != "-" {
+			keywords = append(keywords, name)
+		}
+	}
+	if len(keywords) < 10 {
+		t.Fatalf("JSONSchemaProperty's keys = %v", keywords)
+	}
+	schema := ir.NewSchema("shop", ir.SchemaKindAPI)
+	for _, keyword := range append(keywords, "$ref", "allOf", "anyOf", "nullable") {
+		for _, key := range []struct {
+			name string
+			set  func(*apigen.ToolKeys)
+		}{
+			{"scalar", func(k *apigen.ToolKeys) { k.Scalar = keyword }},
+			{"reference", func(k *apigen.ToolKeys) { k.Reference = keyword }},
+			{"search", func(k *apigen.ToolKeys) { k.Search = keyword }},
+		} {
+			_, err := apigen.ResolveToolKeys(schema, []apigen.ToolHook{{Name: "rename", Edit: func(_ *ir.Schema, tools *apigen.ToolSet) error {
+				key.set(&tools.Keys)
+				return nil
+			}}})
+			if err == nil || !strings.Contains(err.Error(), "the "+key.name+" key \""+keyword+"\" is a JSON Schema keyword") {
+				t.Errorf("the %s key renamed to %q: err = %v", key.name, keyword, err)
+			}
+		}
+	}
 }

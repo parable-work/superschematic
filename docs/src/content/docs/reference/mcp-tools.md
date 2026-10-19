@@ -431,9 +431,15 @@ SDK language reads what they leave.
 A `Parameters` key may not be empty, repeat, or reuse `type`,
 `additionalProperties`, `properties`, `required`, the scalar key, the
 reference key or the search key, and no two of the scalar, reference and
-search keys may be the same; a hook that adds or removes tools fails the
-build, as does a hook error, which names the hook. The `ir` wire types spell the default keys: a distribution
-that renames them decodes its documents with its own types.
+search keys may be the same. None of those three may be a JSON Schema
+keyword that a property is written with: `type`, `description`, `format`,
+`pattern`, `enum`, `minLength`, `maxLength`, `minimum`, `maximum`,
+`minItems`, `maxItems`, `items`, `properties`, `required`, `oneOf`,
+`additionalProperties`, `$ref`, `allOf`, `anyOf` or `nullable`. A hook
+that adds or removes tools fails the build, as does a hook error, which
+names the hook. The `ir` wire types spell the default keys: a
+distribution that renames them decodes its documents with its own
+types.
 
 A distribution's own invocation policy is
 `Registry.RegisterToolInvocationPolicy` with a `ToolInvocationPolicy`:

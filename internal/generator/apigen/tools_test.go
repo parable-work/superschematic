@@ -109,6 +109,18 @@ func TestToolHookErrors(t *testing.T) {
 			tools.Keys.Parameters = []apigen.ToolKeyValue{{Key: apigen.DefaultToolSearchKey, Value: true}}
 			return nil
 		}, want: `tool parameter key "x-superschematic-search" is the search key`},
+		{name: "a scalar key that is a keyword", edit: func(_ *ir.Schema, tools *apigen.ToolSet) error {
+			tools.Keys.Scalar = "type"
+			return nil
+		}, want: `the scalar key "type" is a JSON Schema keyword a tool argument's property is written with`},
+		{name: "a reference key that is a keyword", edit: func(_ *ir.Schema, tools *apigen.ToolSet) error {
+			tools.Keys.Reference = "$ref"
+			return nil
+		}, want: `the reference key "$ref" is a JSON Schema keyword a tool argument's property is written with`},
+		{name: "a search key that is a keyword", edit: func(_ *ir.Schema, tools *apigen.ToolSet) error {
+			tools.Keys.Search = "nullable"
+			return nil
+		}, want: `the search key "nullable" is a JSON Schema keyword a tool argument's property is written with`},
 		{name: "one key for two", edit: func(_ *ir.Schema, tools *apigen.ToolSet) error {
 			tools.Keys.Reference = tools.Keys.Scalar
 			return nil
