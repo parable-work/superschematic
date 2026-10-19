@@ -113,7 +113,7 @@ kit's `tests/workqueue_<file>.rs`, with the test behaviors of
 `typescript/test/fixtures.ts` in its `workqueue_fixtures`, and every
 case runs. The test kit's replay holds them to this suite's recording,
 `runtime/engine/testdata/scenarios/workqueue-*.json`, on both databases:
-211 of its 213 scenarios replay on SQLite (two are `js`) and 208 on
+212 of its 213 scenarios replay on SQLite (one is `js`) and 209 on
 Postgres (three more write the file with SQL of their own), each giving
 the recorded answers.
 
@@ -124,23 +124,23 @@ ones its options' `behaviors` name. With `ENGINE_IMPL=rust`,
 TypeScript one, passing each of this package's own objects by its
 declaration's name, so the addon runs the Rust behavior; any other
 behavior a test registers (a fixture, the Budget stand-in, a wrapper of
-one of this package's that counts its calls) is TypeScript code and
-waits for the engine's test-only bridge (D58's milestone 7b). The
-engine's `scripts/rust-ratchet.mjs --package` runs each test file so
-under Node.js and Bun and holds the result to
+one of this package's that counts its calls) is TypeScript code, which
+the engine's test addon runs through its bridge (D58's milestone 7b). A
+test over a value driver written in TypeScript is the TypeScript
+engine's alone (`TYPESCRIPT_DRIVER`), unrecorded, beside a twin over the
+engine's own driver. The engine's `scripts/rust-ratchet.mjs --package`
+runs each test file so under Node.js and Bun and holds the result to
 `typescript/test/rust-pending.txt`, the files not passing yet and why
 (CI's `engine-napi` job):
 
 ```
-scripts/engine-napi.sh                      # from the repository's root, after the engine's build
+scripts/engine-napi.sh --js-behaviors       # from the repository's root, after the engine's build
 cd runtime/engine-workqueue/typescript && bun run build
 bun run test:rust                           # Node.js, then Bun
 ```
 
-11 of the 19 files pass on both, 211 of Node.js's 240 tests and 399 of
-Bun's 455, and no test that runs fails on what the Rust engine does: the
-rest read the behaviors' tables through `engine.storage`, register a
-behavior written in TypeScript, or wait on `events.watch`.
+All 19 files pass on both, Node.js's 240 tests and Bun's 455, and the
+corpus this suite records on the Rust engine is the committed one.
 
 ## Lease
 

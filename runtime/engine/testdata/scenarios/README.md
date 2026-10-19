@@ -108,8 +108,9 @@ A replayer reads them as it reads the engine's, with these differences:
 - Marked `js`: one scenario of `workqueue-filters` (`args`,
   `storage.transaction`), which creates more jobs than one scan reads in a
   transaction of the file (its four-job scenarios create them one by one, so
-  they replay); one of `workqueue-lease` (`options`, `values.driver`), on a
-  value store of the test's.
+  they replay). The test of `workqueue-lease` over a value driver of the
+  test's is not recorded: a driver written in TypeScript is the TypeScript
+  engine's alone, and its twin over the engine's own driver is.
 - `dialect: "sqlite"`: three scenarios of `workqueue-queue` make a copy of
   Queue's stale with `storage.run`, besides the one of `workqueue-filters`.
   The `storage` reads in other scenarios (steps marked `dialect: "sqlite"`)

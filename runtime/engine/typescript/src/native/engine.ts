@@ -9,8 +9,8 @@ NativeUnsupportedError, naming the gap (test/rust-pending.txt).
 
 On Postgres a synchronous call would hold this thread while it waits on
 the database, so the addon refuses it (sync_on_async_storage): an engine
-on Postgres is called through callAsync, until openEngineAsync gives it
-this API with promises (milestone 7b).
+on Postgres is openEngineAsync's (src/native/async.ts), this API with
+every call a promise.
 */
 
 import { hasAnyPermission, type PermissionMatcher } from '@superschematic/http-runtime';

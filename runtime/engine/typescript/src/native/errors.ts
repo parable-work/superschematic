@@ -44,15 +44,15 @@ const REFUSALS: Readonly<Record<string, { prototype: EngineError }>> = {
 };
 
 /**
- * What the Rust engine does not do through this facade
- * (runtime/engine/typescript/test/rust-pending.txt): `bridge`, a behavior
- * written in TypeScript on an addon built without the test bridge;
- * `storage`, raw access to the engine's SQLite file; `ids`, an id source
- * written in TypeScript; `validator`, the TypeScript SchemaValidator;
- * `driver`, a value driver written in TypeScript, which the Rust engine
- * takes as config (D58).
+ * What the Rust engine does not do through this facade: `bridge`, a
+ * behavior written in TypeScript on an addon built without the test
+ * bridge, or a TypeScript implementation asked for back; `storage`, raw
+ * SQL on Postgres, where the engine's file is no SQLite file; `validator`,
+ * the TypeScript SchemaValidator's own methods; `driver`, a value driver
+ * written in TypeScript, where the Rust engine's are Rust ValueDrivers
+ * (D58).
  */
-export type NativeGap = 'bridge' | 'storage' | 'ids' | 'validator' | 'driver';
+export type NativeGap = 'bridge' | 'storage' | 'validator' | 'driver';
 
 /** A use of the TypeScript engine's API the Rust engine's facade does not have yet. */
 export class NativeUnsupportedError extends Error {
