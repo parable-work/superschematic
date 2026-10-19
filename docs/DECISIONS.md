@@ -4082,9 +4082,9 @@ and its amendment on `Deps` left both to the build. Building them for Go
 | Each client of a `calls` edge sends the D37 credential its `ServiceEndpoint` names and forwards the request's end user. The service authenticator waits for the service-auth field: until a connector derives it, a server whose API has a service clause refuses to start. | A service-auth configuration in one JSON variable, the encoding section 3.4 refused for derived fields. Starting with no authenticator, whose routes would answer every service caller 401. |
 | The Dockerfile's context is the repository root, cut down by `Dockerfile.dockerignore`. A Rust stage builds superscalar's static archive (and the version graph's, when a database declares one) with `tools.env`'s Rust release, the Go stage links it on Debian's glibc, and the binary runs on distroless `cc` as a non-root user. | A `CGO_ENABLED=0` binary on a static base, which cgo against the archive rules out (D3). An archive from the host's checkout, whose platform is the host's. |
 
-OpenTelemetry export, the Cloud SQL connector and the entrypoints of
-TypeScript and Rust servers are not built. `examples/acme-shop` keeps its
-implementations at `go/{service}`, which the entrypoints of its
+The Cloud SQL connector and the entrypoints of TypeScript and Rust servers
+are not built; D67 builds OpenTelemetry export. `examples/acme-shop` keeps
+its implementations at `go/{service}`, which the entrypoints of its
 `shop-stack` import, and `stack dev` runs it (`docs/stack-model.md`,
 section 14, milestone 1).
 
@@ -4604,9 +4604,10 @@ No TypeScript server has run on Cloud Run.
 
 Not built:
 - passing manual-route handlers to `buildRouter`;
-- OpenTelemetry export;
 - `stack init`, which would write the amendment's ignore rule; D59
   builds it.
+
+D67 builds OpenTelemetry export.
 
 The rule is reversible until the first release.
 
@@ -5533,9 +5534,7 @@ D65 builds what this left out of a stack: Rust jobs and workers, and an
 output root that builds against a mirror of each implementation crate,
 so `stack dev --out` elsewhere no longer collides in Cargo's lockfile.
 
-Not built:
-- buckets from a Rust server;
-- OpenTelemetry export.
+Not built: buckets from a Rust server. D67 builds OpenTelemetry export.
 
 The rule is reversible until the first release.
 
@@ -6694,9 +6693,9 @@ Status: built.
 No Rust job or worker has run on Cloud Run.
 
 Not built, and out of this entry: buckets from a Rust server, job or
-worker; and OpenTelemetry export. A TypeScript build into another output
-root relinks the project's own `node_modules` there, as a Rust build did
-before the mirror.
+worker. D67 builds OpenTelemetry export. A TypeScript build into another
+output root relinks the project's own `node_modules` there, as a Rust
+build did before the mirror.
 
 The rule is reversible until the first release.
 
@@ -6718,5 +6717,91 @@ Status: built. `TestCrossKindReferenceRules` admits API from API;
 `TestReferenceToADependencysType` resolves a reference to a General and to
 an API dependency's type; `TestAPIsReferringToEachOtherAreRefused` refuses
 two APIs that refer to each other as a cycle.
+
+The rule is reversible until the first release.
+
+## D67. A server, job or worker exports its traces over OTLP when OpenTelemetry's own variables name an endpoint, and sets up nothing otherwise
+
+D30's amendment, D51, D57 and D65 left OpenTelemetry export out of every
+generated entrypoint. The Go runtime's request log middleware set
+`http.route` on a span that no entrypoint started, section 7.5 of
+`docs/stack-model.md` promised traces "through the entrypoint's
+OpenTelemetry setup", and no deployable of a stack exported a span. This
+entry builds traces for the Go, TypeScript and Rust servers, jobs and
+workers.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The configuration is OpenTelemetry's standard environment variables: `OTEL_EXPORTER_OTLP_ENDPOINT` and `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`, `OTEL_EXPORTER_OTLP_HEADERS` and the timeout, with their traces forms, `OTEL_EXPORTER_OTLP_PROTOCOL`, `OTEL_SERVICE_NAME`, `OTEL_RESOURCE_ATTRIBUTES`, `OTEL_TRACES_SAMPLER` and `OTEL_TRACES_SAMPLER_ARG`, `OTEL_PROPAGATORS` and `OTEL_SDK_DISABLED`. A schema says nothing about export. | An `otel` block in an API's config, or an `@envVars` field for each variable, which would put each collector, vendor and environment into the schemas. |
+| Export is off when neither endpoint variable is set, or when `OTEL_SDK_DISABLED` is `true`: no exporter, no context manager, no background thread, and the tracer stays a no-op. The server middleware, the client transport, and the job and message wrappers then only call through, and a deployable forwards no trace context. | OpenTelemetry's default endpoint, `localhost:4318`, to which every deployable would send, and retry, where nothing listens. Forwarding the context with export off, which the Rust runtime cannot do without the SDK's layer. |
+| The exporter is OTLP over HTTP in protobuf, through a batch processor. The protocol variables may name `http/protobuf` alone. | gRPC, which brings the transports of tonic and grpc-go into the Rust and Go binaries. JSON, which no collector needs. |
+| A value a runtime does not support stops the deployable with an error that names the variable: another protocol; a propagator other than `tracecontext`, `baggage` and `none`; a sampler other than the six standard ones; a sampler argument outside 0 to 1; an endpoint that is no http or https URL; and an `OTEL_RESOURCE_ATTRIBUTES` member without `=`. The three runtimes refuse alike. | The SDKs' own reading, which warns and goes on, so a typo shows only as traces that never arrive, and each SDK reads a different set. |
+| The generated entrypoint gives the defaults that only it knows: `service.name` the deployable's name, `service.namespace` the stack, and `superschematic.deployable.kind` `server`, `job` or `worker`. `OTEL_SERVICE_NAME` and `OTEL_RESOURCE_ATTRIBUTES` override each. The entrypoint knows neither the environment nor the image, so a target sets `deployment.environment.name` and `service.version` through `OTEL_RESOURCE_ATTRIBUTES`. | The environment in the entrypoint, which is one for every environment of the stack (D30, amended). |
+| The telemetry is in each HTTP runtime, behind one call from the entrypoint. Go's `telemetry.Start` returns the function that flushes. TypeScript's `startTelemetry` is in the runtime's own `./telemetry` entry, the only entry that imports the OpenTelemetry packages, so the entries that a Workers build bundles stay without them. Rust's `telemetry::start`, behind the runtime's `otel` feature, installs the JSON-line log with `tracing-opentelemetry`'s layer beside it, and returns a guard that flushes when it drops. | Instrumentation in each entrypoint, which would change every generated file for each change to it. An auto-instrumentation agent, which the three runtimes do not have in one form. |
+| The first signals are traces. A server makes a server span for each request but `/healthz` and `/readyz`, the child of an incoming `traceparent`, named `<METHOD> <route template>` (`GET /api/orders/{id}`), or by its method when no route takes the request. A `calls` edge's SDK client makes a client span for each call, and sends W3C `traceparent` and `tracestate`, through Go's `Transport`, TypeScript's `fetch`, and the `transport` that the Rust SDK gets. A job's run is a span with the name of its `@job` class. A worker's message is a consumer span, `process <queue>`, the root of a trace of its own. Each process flushes before it exits: a server after it drains, a job after its run, and a worker after its grace. | A span for each database query, which no runtime's pool records yet. A message span that continues the trace of the request that enqueued the message, which needs a column that the queue tables do not have. |
+| No target changes its resource graph. `stack dev` and `stack run` give each server, job and worker every `OTEL_` variable of the developer's shell but `OTEL_SERVICE_NAME`, which would give every deployable one name. Without them, export is off. The gcp target's `env` settings bind `@envVars` fields alone, so they cannot set these variables, and a gcp environment exports nothing yet. | A collector that `stack dev` starts in Docker, which a developer with another collector must then stop. All of the developer's environment, which section 8.3 keeps from the processes. |
+
+Metrics and logs are out of this entry. Metrics come next: the request
+duration and the queue's claims, through the meter providers of the same
+SDKs (Go's `otelhttp` already records them for a provider it is given).
+Then logs: first the `trace_id` and `span_id` of the current span on each
+JSON line, then OTLP log export through each SDK's log bridge.
+
+Status: built.
+- `runtime/http/go/telemetry`: `Start`, `Handler` (`otelhttp`), `Transport`
+  and `Job`, over `go.opentelemetry.io/otel` v1.46.0, its OTLP HTTP trace
+  exporter v1.46.0 and `otelhttp` v0.71.0. `RequestLogMiddleware` names the
+  server span by its chi route, and `worker.Run` makes the message spans.
+  `telemetry/otlptest` is an OTLP/HTTP receiver for tests, in the test's
+  process, which decodes the protobuf of each export.
+- `@superschematic/http-runtime/telemetry`: `startTelemetry`, with
+  `middleware()` for Hono, `fetch`, `job`, `message` and `shutdown`, over
+  `@opentelemetry/api` 1.9.1, `sdk-trace`, `resources`, `core` and
+  `context-async-hooks` 2.12.0, and `exporter-trace-otlp-proto` 0.223.0,
+  the runtime's optional peer dependencies. Bun's `AsyncLocalStorage`
+  carries a span's context through a request's awaits.
+- The Rust runtime's `otel` feature: `telemetry::start`, `dispatch`,
+  `ServerLayer`, `transport` and `job`, and the worker loop's message
+  spans, over `opentelemetry` and `opentelemetry_sdk` 0.33.1 with traces
+  alone, `opentelemetry-otlp` 0.33.1 with `http-proto` and no HTTP client of
+  its own, `opentelemetry-http` 0.33.1 and `tracing-opentelemetry` 0.34.0.
+  The exporter sends through the `http-client` feature's `reqwest`, on a
+  current-thread runtime of its own. The JSON-line log leaves out a span's
+  `otel.` fields, so its lines are the same with export on and off.
+- The Rust SDK's `ClientConfig` gets `transport`, which sends each request
+  in place of `reqwest::Client::execute`.
+- servergen: each Go, TypeScript and Rust server, job and worker calls the
+  runtime's start first and flushes as it exits, wraps its handler or app
+  in the server spans, gives each `calls` client the runtime's transport,
+  and runs a job's method in its span. A Bun package depends on the
+  OpenTelemetry packages, and a Rust crate turns on `otel`.
+- The local provisioner gives each process the shell's `OTEL_` variables
+  but `OTEL_SERVICE_NAME`.
+- Each runtime's tests export to a receiver in the test's process: a
+  request is a server span with its route template and its incoming
+  `traceparent` as parent, a call carries `traceparent` in a client span,
+  a job's run and a worker's message are spans, the flush sends a batch
+  that is not yet due, the variables override the defaults, the
+  refusals, and with no endpoint nothing starts. `TestStackDevRunsTheShop`
+  points `stack dev` at a receiver: an order is one trace from
+  shop-orders' Go server, through its client span, to shop-stock's Rust
+  server; the storefront's TypeScript requests are spans named by their
+  routes; each worker's message is a span; and each job's process sends
+  its span before it exits.
+
+Not built:
+- Export on gcp. A target would need to set the variables for each Cloud
+  Run service, job and worker pool, from a value of the environment, and a
+  place to send to: an OpenTelemetry Collector as a sidecar container,
+  with Google's exporter and the Cloud Trace agent role each workload's
+  account has (section 7.2), or Google's OTLP endpoint,
+  `telemetry.googleapis.com`, whose OAuth token expires, so a static
+  `OTEL_EXPORTER_OTLP_HEADERS` cannot carry it. The target would set
+  `deployment.environment.name` and the image digest in
+  `OTEL_RESOURCE_ATTRIBUTES` too.
+- The cloudflare target's Workers build, which does not import
+  `./telemetry`.
+- Metrics and logs, as above.
+- A message span that continues the trace that enqueued it.
 
 The rule is reversible until the first release.

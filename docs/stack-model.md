@@ -1598,8 +1598,9 @@ The target sets defaults that `settings` can override:
 - a bucket with object versioning off (`versioning`) and no lifecycle
   rule, unless `deleteAfterDays` deletes each object that many days after
   it was written (D54);
-- logs to Cloud Logging, and traces to Cloud Trace through the entrypoint's
-  OpenTelemetry setup.
+- logs to Cloud Logging, and no traces yet: each entrypoint exports its
+  traces over OTLP when its environment names a collector (section 8.11,
+  D67), and the gcp target does not set one.
 
 Cloud Run allocates a service's CPU only while it handles a request, and
 bills its instances for that time and their starts and stops, unless the
@@ -1701,9 +1702,16 @@ field: JSON, the runtime's defaults when unset, and a refused config stops
 the server. The implementation writes no auth middleware. A preflight
 goes to the router that registers the method it asks about, whose CORS
 middleware answers the trusted origins, a preflight the site's CORS hands
-on included (section 8.10). OpenTelemetry export
-is not set up: the runtime records spans through the global tracer, and an
-exporter would add the OTLP client's dependencies to every server.
+on included (section 8.10).
+
+`run` calls the HTTP runtime's `telemetry.Start` first, with the server's
+name, its stack and its kind, and defers the function it returns, which
+flushes the spans still buffered once the server drains. Export is on only
+when the environment names an OTLP endpoint (section 8.11, D67): then the
+handler is wrapped in `telemetry.Handler`, a server span per request but
+the probes, and each client's `Transport` is `telemetry.Transport`, a
+client span per call that carries the trace context. Off, both are what
+they wrap.
 
 The engineer writes the implementation of each served API, and nothing else
 (section 8.5). The entrypoint calls each implementation's constructor with
@@ -1834,7 +1842,7 @@ runs an environment on the `local` target (`internal/stack/local`):
 | database | one Postgres container per environment and checkout, `superschematic-<stack>-<environment>-<checkout>-postgres`, from `postgres:16-alpine` unless the `postgresImage` value names another; it publishes its port on 127.0.0.1 only and trusts every connection. A database per hosted DB schema, named after it in snake case (`shop_db`) |
 | bucket | one fake-gcs-server container per environment and checkout beside Postgres's, `superschematic-<stack>-<environment>-<checkout>-storage`, from `fsouza/fake-gcs-server:1.56.1` unless the `storageImage` value names another, on plain HTTP and publishing its port on 127.0.0.1 only. It keeps its objects in the container's filesystem. A bucket per Bucket service, named after it (`shop-media`), which the provisioner creates through the emulator's JSON API (D54) |
 | migration | each run plans with `sqlmigrate` from the model the database recorded (`superschematic-migrate status --model`) to the schema's model, and applies the plan with `superschematic-migrate`, expand and contract back to back, since no server of the previous version runs. The runner is on `PATH`, or where `SUPERSCHEMATIC_MIGRATE` says |
-| server | a Go process built with `go build` (with `-mod=mod`) from its entrypoint module at `<output-root>/server/<stack>/<server>` (section 8.1); a TypeScript one, `bun main.ts` in its entrypoint package at the same place, after one `bun install` at the output root, the root of the Bun workspace (section 8.6); or a Rust one, built with `cargo build --release --locked` in its crate at the same place and run from `target/release/<binary>`, the binary its `Cargo.toml` names (D57). Its environment is its bindings, a derived field as one variable per member (section 3.4), and `PORT`, with nothing of the shell's but `PATH`, `HOME` and a few like them. It is ready once it answers `/readyz`, and each of its lines is printed with its name in front |
+| server | a Go process built with `go build` (with `-mod=mod`) from its entrypoint module at `<output-root>/server/<stack>/<server>` (section 8.1); a TypeScript one, `bun main.ts` in its entrypoint package at the same place, after one `bun install` at the output root, the root of the Bun workspace (section 8.6); or a Rust one, built with `cargo build --release --locked` in its crate at the same place and run from `target/release/<binary>`, the binary its `Cargo.toml` names (D57). Its environment is its bindings, a derived field as one variable per member (section 3.4), and `PORT`, with nothing of the shell's but `PATH`, `HOME` and a few like them, and its OpenTelemetry variables but `OTEL_SERVICE_NAME`, so trace export is off unless the shell names a collector (section 8.11). It is ready once it answers `/readyz`, and each of its lines is printed with its name in front |
 | job | a process built and run as a server in its language is, from its entrypoint at `<output-root>/server/<stack>/<job>`: a Go binary, `bun main.ts` for TypeScript, or for Rust the binary its crate's `Cargo.toml` names, built with `cargo build --release --locked` into the target directory the environment's Rust servers share (D65). It has a server's environment and no `PORT`. It runs on its schedule, in its time zone, while `stack dev` waits, and once with `superschematic stack run <environment> <job>`, each line of a run's output with its name in front. `jobs/<job>.lock` in the environment's state directory keeps a schedule's runs and `stack run`'s apart (section 8.7) |
 | worker | a process built and run as a server in its language is, Go, TypeScript or Rust (D65), from its entrypoint at `<output-root>/server/<stack>/<worker>`, started in its rollout wave with the servers: the same `local:process/process:Process` node with no port, `kind: worker` and a readiness of `started`, so it is ready once it runs. Its environment is a server's with no `PORT` and with `WORKER_CONCURRENCY`, the concurrency the environment gives it. One process runs whatever its `instances`, none when the environment turns it off; each line is printed with its name in front, and its exit stops the environment, as a server's does (section 8.8) |
 | site | built once, `bun run <build>` in its package at the naming file's `[implementation_paths] site` template after the workspace's install, then served from a file server of the provisioner's own on `http://127.0.0.1:<port>`: each file of its output, its config at `/__superschematic/config.json` with each API it calls at its loopback URL, and its fallback for a path that names no file. HTML files and the config are served `no-cache` and `no-store`, so a reload sees a rebuilt site (D55) |
@@ -2203,8 +2211,10 @@ as they are, with no build step (D51). The pieces mirror Go's:
   package of each database an identity store reads, and on the runtime,
   Hono and, with a database, `pg`), `tsconfig.json` and
   `main.ts`. `main.ts` does what Go's `main` does:
-  - reads `$PORT`, 8080 when unset, and logs JSON lines through the HTTP
-    runtime's `createLogger`, bound to the stack and the server;
+  - starts trace export, which the environment turns on
+    (`startTelemetry`, section 8.11), reads `$PORT`, 8080 when unset, and
+    logs JSON lines through the HTTP runtime's `createLogger`, bound to
+    the stack and the server;
   - loads each API's config with `loadEnvConfig()`, and opens one pool per
     database with `connectPostgres`, shared by every API on it. Only a
     server some environment places on Cloud SQL depends on the Cloud SQL
@@ -2372,8 +2382,9 @@ are the jobs and workers of a Rust API (D65; sections 8.7 and 8.8).
   the server's name; a job's is `...-<job>-job` and a worker's
   `...-<worker>-worker`, each with a binary named after the deployable.
 - **Entrypoint.** `src/main.rs`, on a tokio runtime:
-  - installs the runtime's JSON-line log (`logging::init_json`), with the
-    stack and the server on every line;
+  - installs the runtime's JSON-line log, with the stack and the server on
+    every line, and trace export beside it when the environment names a
+    collector (`telemetry::start`, section 8.11);
   - loads each API's `EnvConfig`, and stops naming the API and each
     variable when one fails;
   - opens one pool per database, shared by every API on it
@@ -2449,8 +2460,8 @@ transaction; `shop-stock`'s Rust worker `ReorderStock` files the
 product's restock request, and its Rust job `OrderRestocks`, which
 the test runs with `stack run`, orders it (D65).
 
-Not built: buckets from a Rust server, job or worker, and OpenTelemetry
-export (D57, D65).
+Not built: buckets from a Rust server, job or worker (D57, D65). Trace
+export is section 8.11's.
 
 ### 8.7 Jobs
 
@@ -3058,6 +3069,67 @@ config may leave `outputs` out.
   browser's unsigned requests, so a project whose organization policy
   forbids public buckets cannot serve a site. With no domain, the site is
   served over HTTP at its load balancer's address (D55, amended).
+
+### 8.11 Trace export
+
+Every server, job and worker exports its traces over OTLP when its
+environment names a collector, and sets up nothing otherwise (D67). The
+configuration is OpenTelemetry's standard environment variables, which no
+schema names:
+
+| Variable | Read as |
+| --- | --- |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | the collector's base URL; the exporter adds `/v1/traces`. Export is on when it or the next is set |
+| `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | the full URL of the traces, in place of the base |
+| `OTEL_EXPORTER_OTLP_HEADERS`, `OTEL_EXPORTER_OTLP_TIMEOUT` and their `_TRACES_` forms | by each SDK's exporter |
+| `OTEL_EXPORTER_OTLP_PROTOCOL` and its `_TRACES_` form | `http/protobuf`, the only protocol, or unset |
+| `OTEL_SERVICE_NAME`, `OTEL_RESOURCE_ATTRIBUTES` | over the defaults below |
+| `OTEL_TRACES_SAMPLER`, `OTEL_TRACES_SAMPLER_ARG` | `always_on`, `always_off`, `traceidratio` and their `parentbased_` forms; `parentbased_always_on` unless set |
+| `OTEL_PROPAGATORS` | `tracecontext`, `baggage` or `none`; `tracecontext,baggage` unless set |
+| `OTEL_SDK_DISABLED` | `true` turns export off |
+
+A value a runtime does not support stops the deployable, naming the
+variable, as a refused config field does. With export off, no exporter,
+context manager or background thread starts, the tracer is a no-op, and
+the deployable forwards no trace context.
+
+Each entrypoint makes one call into its HTTP runtime first, with what only
+it knows: `service.name` is the deployable's name, `service.namespace` the
+stack, and `superschematic.deployable.kind` `server`, `job` or `worker`.
+The entrypoint is one for every environment, so it knows neither the
+environment nor the image: a target sets `deployment.environment.name` and
+`service.version` in `OTEL_RESOURCE_ATTRIBUTES`. The call is Go's
+`telemetry.Start`, TypeScript's `startTelemetry` from the runtime's
+`./telemetry` entry, and Rust's `telemetry::start`, behind the runtime's
+`otel` feature, which installs the JSON-line log too.
+
+The spans, the first signal:
+
+- **A request** to a server is a server span, but `/healthz` and `/readyz`,
+  the child of an incoming `traceparent`, named `<METHOD> <route
+  template>`, such as `GET /api/orders/{id}`: by the chi route in Go, the
+  route Hono matched in TypeScript, and the most literal operation whose
+  route takes it in Rust.
+- **A call** on a `calls` edge is a client span, named by its method,
+  whose context the call carries in `traceparent` and `tracestate`: the
+  SDK client's `Transport` in Go, its `fetch` in TypeScript, and its
+  `transport` in Rust. A callee's span is the call's child, so a request is
+  one trace across the servers it reaches, in whichever languages.
+- **A job's run** is a span named after its `@job` class, whose status
+  records the run's error.
+- **A worker's message** is a consumer span, `process <queue>`, the root of
+  a trace of its own.
+
+Each process flushes the spans still buffered before it exits: a server
+once it drains, a job after its run, and a worker after its grace.
+
+`stack dev` and `stack run` give each process the `OTEL_` variables of the
+developer's shell but `OTEL_SERVICE_NAME`, which would name every
+deployable alike, so a shell that points at a collector traces the whole
+environment (section 8.3). The gcp target sets none of them: an
+environment's `env` settings bind `@envVars` fields alone, and a gcp
+deployable exports nothing yet. D67 records what the target would need.
+Metrics and logs are not exported.
 
 
 ## 9. End-user auth and service auth
@@ -4059,8 +4131,9 @@ whatever the deploy decides is affected, and needs no list of its own.
    and Dockerfile at `server/<stack>/<server>` in the pass that writes the
    Go servers' (section 8.6). For Rust, `Deps`, `Handlers`,
    `Implementations::new` and the scaffold at `[implementation_paths]
-   rust` have landed (D57). Next: OpenTelemetry export; then the
-   entrypoint in Rust.
+   rust` have landed (D57), and so has the entrypoint in Rust. Every
+   entrypoint exports its traces over OTLP when its environment names a
+   collector (D67, section 8.11).
    `examples/acme-shop` keeps its implementations at the scaffold layout,
    `go/shop-api`, `go/shop-orders` and `typescript/shop-storefront`,
    which the entrypoints of its `shop-stack` import (section 14,

@@ -30,7 +30,8 @@ balancer and DNS resources that the Pulumi provisioner applies.
 | the Stack kind and `@superschematic/stack`; every build resolves each environment to `environment.json` | |
 | [`stack init`](#start-a-stack): a Stack service over the tree's APIs and sites, `Dev` and a gcp environment, the target's types, `outputs.ci` and the ignore rules | a stack written in YAML or JSON; an environment on a target other than gcp |
 | `calls` in an API's config, and a build ordered by output | |
-| Go, TypeScript and Rust: derived config fields in `EnvConfig`, a typed `Deps`, the implementation scaffold, and each server's entrypoint and Dockerfile, which reaches Cloud SQL with IAM database authentication where an environment places its database there | OpenTelemetry export |
+| Go, TypeScript and Rust: derived config fields in `EnvConfig`, a typed `Deps`, the implementation scaffold, and each server's entrypoint and Dockerfile, which reaches Cloud SQL with IAM database authentication where an environment places its database there | |
+| [traces](/superschematic/guides/traces/): each server, job and worker exports its spans over OTLP when OpenTelemetry's variables name a collector, under `stack dev` from your shell | export on gcp; metrics and logs |
 | the core's `local` target and `stack dev` | restarting a server that exits; key rotation |
 | the gcp target, with `stack bootstrap`, `secrets set`, `build`, `plan`, `deploy`, `destroy` and `outputs`; image builds on Cloud Build; each migration phase as a Cloud Run job that also grants the servers their privileges | a deploy lock beyond the provisioner's and the runner's |
 | the Pulumi provisioner and the typed bindings generator | |
@@ -971,6 +972,14 @@ pairs too; no secret or private key reaches the output root or
 two listeners on one port. The
 [CLI reference](/superschematic/reference/cli/#stack-dev-stack-service-dir)
 lists the flags.
+
+A process gets nothing else of your shell's environment but its
+OpenTelemetry variables, `OTEL_SERVICE_NAME` aside. Export a collector's
+address, `OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318`, before
+`stack dev`, and every server, job and worker sends it its traces;
+without it, none starts an exporter.
+[Traces](/superschematic/guides/traces/) shows a collector to run and what
+each deployable sends.
 
 ## What environment.json holds
 

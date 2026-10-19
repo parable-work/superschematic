@@ -648,8 +648,10 @@ an API with a callers field, the crate's config module adds
 `main.rs` call: it loads what `load_env_config()` does, but leaves the
 callers field without issuers. The identity config and CORS fields read
 as their defaults when unset. Their log lines name the deployable as
-`"job"` or `"worker"` (`logging::init_json_as`), where a server's name it
-`"server"`.
+`"job"` or `"worker"`, where a server's name it `"server"`. Each
+entrypoint installs its log with `telemetry::start`, the runtime's `otel`
+feature, which exports the deployable's traces when the environment names
+an OTLP collector ([Traces](/superschematic/guides/traces/)).
 
 ### Users and sessions
 

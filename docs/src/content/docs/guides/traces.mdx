@@ -1,0 +1,126 @@
+---
+title: Traces
+description: Send the traces of a stack's servers, jobs and workers to an OpenTelemetry collector, under stack dev and in your own environments, with OpenTelemetry's own environment variables.
+sidebar:
+  order: 5.7
+---
+
+Every server, job and worker a stack generates, in Go, TypeScript and
+Rust, exports its traces over OTLP when its environment names a
+collector. Nothing about it goes in a schema: the configuration is
+OpenTelemetry's standard environment variables, and without an endpoint
+no exporter starts and nothing is sent. D67 in `docs/DECISIONS.md`
+records the decisions, and section 8.11 of
+[docs/stack-model.md](https://github.com/parable-work/superschematic/blob/main/docs/stack-model.md)
+the design.
+
+## What is built
+
+| Built | Not built yet |
+| --- | --- |
+| traces over OTLP/HTTP in protobuf from every Go, TypeScript and Rust server, job and worker: a span per request, per call to another API, per job run and per worker message | metrics; logs over OTLP |
+| `stack dev` and `stack run` hand your shell's `OTEL_` variables to each process | a collector that `stack dev` starts for you |
+| | export on gcp, which sets no collector yet ([below](#on-google-cloud)) |
+
+## Trace a stack on your machine
+
+Run a collector that takes OTLP over HTTP on port 4318. Jaeger's image is
+one, with a UI on port 16686:
+
+```sh
+docker run --rm --name jaeger -p 16686:16686 -p 4318:4318 jaegertracing/jaeger:2.21.0
+```
+
+Point the stack at it from the shell you run `stack dev` in:
+
+```sh
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
+superschematic stack dev schemas/services/shop-stack
+```
+
+`stack dev` gives each process nothing of your shell's environment but
+`PATH`, `HOME` and a few like them, and every `OTEL_` variable but
+`OTEL_SERVICE_NAME`, which would give every deployable one name. Each
+server, job and worker logs `exporting traces` with the endpoint as it
+starts. Call the
+shop, then open `http://localhost:16686`: an order placed on shop-orders
+is one trace, from shop-orders' Go server, through its call, to
+shop-stock's Rust server. A job you run with `stack run` sends the span of
+its run before it exits.
+
+To stop, unset the variable, or set `OTEL_SDK_DISABLED=true`.
+
+## What each deployable sends
+
+| Span | Kind | Name |
+| --- | --- | --- |
+| a request to a server, but `/healthz` and `/readyz` | server | `<METHOD> <route template>`, such as `GET /api/orders/{id}`; the method alone when no route takes it |
+| a call to another API on a `calls` edge | client | the method |
+| a job's run | internal | the `@job` class, such as `ShipOrders` |
+| a message a worker handles | consumer | `process <queue>`, such as `process OrderPlaced` |
+
+A request's span is the child of the `traceparent` it carries, and a call
+sends `traceparent` and `tracestate`, so a callee's span is the call's
+child, whatever language each server is in. A job's run and a worker's
+message each begin a trace of their own. A span records an error when the
+response is a 5xx, the call fails, or the job or the message handler
+returns an error.
+
+Every span's resource names the deployable:
+
+| Attribute | Value |
+| --- | --- |
+| `service.name` | the deployable: `shop-orders`, `shop-orders-ship-orders` |
+| `service.namespace` | the stack: `shop-stack` |
+| `superschematic.deployable.kind` | `server`, `job` or `worker` |
+
+`OTEL_SERVICE_NAME` and `OTEL_RESOURCE_ATTRIBUTES` override each, and add
+others: the entrypoint is one for every environment, so name the
+environment yourself with
+`OTEL_RESOURCE_ATTRIBUTES=deployment.environment.name=Staging`.
+
+Spans you open in an implementation join the request's trace: in Go,
+start them from the handler's context with `otel.Tracer`; in TypeScript,
+with `trace.getTracer` from `@opentelemetry/api`, whose context follows
+the request through its awaits; and in Rust, open a `tracing` span at
+`info` or above inside the request, which `tracing-opentelemetry`
+exports. An API's `api_span`, which lives as long as the process, is not
+exported.
+
+## The variables
+
+| Variable | Read as |
+| --- | --- |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | the collector's base URL; `/v1/traces` is added. Export is on when it or the next is set |
+| `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | the full URL of the traces |
+| `OTEL_EXPORTER_OTLP_HEADERS` | headers on each export, such as a vendor's key: `x-api-key=...` |
+| `OTEL_EXPORTER_OTLP_TIMEOUT` | milliseconds an export may take, 10000 unless set |
+| `OTEL_EXPORTER_OTLP_PROTOCOL` | `http/protobuf`, the only protocol, or unset |
+| `OTEL_SERVICE_NAME`, `OTEL_RESOURCE_ATTRIBUTES` | over the defaults above |
+| `OTEL_TRACES_SAMPLER`, `OTEL_TRACES_SAMPLER_ARG` | `always_on`, `always_off`, `traceidratio`, and each as `parentbased_`; `parentbased_always_on` unless set. A ratio is 0 to 1 |
+| `OTEL_PROPAGATORS` | `tracecontext`, `baggage` or `none`; `tracecontext,baggage` unless set |
+| `OTEL_SDK_DISABLED` | `true` turns export off |
+
+A value the runtimes do not support, such as
+`OTEL_EXPORTER_OTLP_PROTOCOL=grpc` or a `b3` propagator, stops the server,
+job or worker at its start with an error that names the variable, as a
+config field that does not parse does. A collector takes OTLP over HTTP on
+port 4318 by convention: point the deployables there, not at its gRPC
+port, 4317.
+
+## On Google Cloud
+
+The gcp target sets none of these variables yet, so a deployable on Cloud
+Run exports nothing. An environment's `env` settings bind an API's
+`@envVars` fields alone, and declaring OTEL variables as fields to set
+them puts a collector's address in the schemas. Each Cloud Run service,
+job and worker pool already runs as an account that holds the Cloud Trace
+agent role. What the target needs, and does not have yet:
+
+- a value of the environment that it sets as the OTEL variables on each
+  service, job and worker pool, with `deployment.environment.name` and the
+  image's digest in `OTEL_RESOURCE_ATTRIBUTES`;
+- somewhere to send: an OpenTelemetry Collector beside each container,
+  with Google's exporter, or Google's OTLP endpoint,
+  `telemetry.googleapis.com`, whose access token expires, so a fixed
+  `OTEL_EXPORTER_OTLP_HEADERS` cannot carry it.
