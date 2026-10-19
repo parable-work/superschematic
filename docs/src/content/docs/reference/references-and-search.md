@@ -146,6 +146,22 @@ a table's [`search_text`](/superschematic/guides/database-tables/#text-search)
 serves, and `search_text LIKE ?1 ESCAPE '\'` on SQLite, which reads every
 row and folds case in ASCII alone.
 
+The Go ORM writes the Postgres conditions itself (D62, amended). A table
+with search fields has `SearchText *string` on its filter,
+`ReviewFilter.SearchText`: left out, it filters nothing; given, each of its
+words is `review.search_text ILIKE $n ESCAPE '\'`, its value the word's
+pattern, so a blank text keeps every row. The words and the patterns come
+from the ORM module's own `search.go`, written only for a schema with
+search fields and held to the same `search_parity.json`, so an ORM module
+needs no HTTP runtime. `<Type>FilterConditions(filter, &args)` gives a
+filter's conditions, each column qualified by its table, numbered after
+the values `args` already holds, to a query of the implementation's own:
+acme's `listReviews` puts its product, rating and search conditions into
+its keyset page's key query this way, and adds the cursor's comparison
+itself. The loader refuses a field whose column would be `search_text` on
+a table with search fields:
+`Review.searchText: its column is search_text, the column @searchField generates`.
+
 A Topcoat crate renders the search argument as its argument form's first
 control, an `<input type="search">` labeled Search, and the console's
 filter form that holds it as a search form

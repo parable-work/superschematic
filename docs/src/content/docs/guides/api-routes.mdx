@@ -219,8 +219,14 @@ lines, through the ORM, which sorts them by the same pair:
 ([References and search](/superschematic/reference/references-and-search/)),
 which keeps the reviews whose
 [`search_text`](/superschematic/guides/database-tables/#text-search) holds
-each of its words: one `ILIKE` per word, with the pattern the runtime's
-`search.LikePattern` escapes.
+each of its words. Its product, its rating and its search are a
+`ReviewFilter`, whose `SearchText` makes each word one `ILIKE` condition,
+and `ReviewFilterConditions` gives the filter's conditions to the page's
+key query, which adds only the comparison of the pair after the cursor's.
+The reviews the page keeps come back through `FindMany`, sorted by the
+same pair:
+
+<Snippet file="go/shop-orders/orders.go" symbol={['reviewKey', 'Reviews.ListReviews']} />
 
 ## Errors
 

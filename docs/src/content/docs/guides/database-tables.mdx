@@ -119,6 +119,19 @@ An API's search argument, a `SearchQuery`, is what reads it
 `shop-orders`' `listReviews` keeps the reviews whose `search_text` holds
 each word of its `q`, with `ILIKE` on Postgres and `LIKE` on SQLite.
 
+The Go ORM's filter of a table with search fields has `SearchText`
+(`ReviewFilter.SearchText`). Left out, it filters nothing. Given, it keeps
+the rows whose `search_text` holds each of its words, in any case: the
+first 8 runs of characters that are not white space, each one condition,
+`review.search_text ILIKE $1 ESCAPE '\'`, its `\`, `%` and `_` escaped so
+they match themselves. A blank text has no words and keeps every row.
+`ReviewFilterConditions(filter, &args)` gives a filter's conditions for a
+query of your own, each column qualified by its table and each value's
+placeholder numbered after the values `args` already holds; `FindMany`
+joins the same conditions with `AND`. A field whose column would be
+`search_text` beside search fields fails the build, since the generated
+column takes that name.
+
 ## JSON columns
 
 A class marked `@jsonField` (from `@superschematic/schema`) is not a table.
