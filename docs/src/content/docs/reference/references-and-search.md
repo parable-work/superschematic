@@ -304,10 +304,12 @@ The search argument's parameter object says
 }
 ```
 
-The keys are `apigen.OpenAPIReferenceKey` and `apigen.OpenAPISearchKey`.
-An OpenAPI hook renames them, as it renames `x-superschematic-docs`. A
-standalone type schema (`apigen.TypeOpenAPISchema`) carries no reference,
-since the operation it would name is in the API's document.
+The keys are `registry.OpenAPIReferenceKey` and
+`registry.OpenAPISearchKey`. An OpenAPI hook renames them, as it renames
+`x-superschematic-docs`. The OpenAPI schema that the Go types package
+gives a strict type on its own, outside any API's document, carries no
+reference, since the operation a reference names is in the API's
+document.
 
 A tool's parameters in `tools/schema.json`, the provider lists and
 `tools/index.ts` give each argument's or field's property the same keys,
