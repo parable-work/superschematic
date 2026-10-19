@@ -41,6 +41,30 @@ types:
     fields:
       - { name: id, typeRef: { name: Identity.UUID }, required: true }
       - { name: lines, typeRef: { name: BasketLine, isArray: true }, required: true }
+  KindView:
+    name: KindView
+    comment: |-
+      A kind as the catalog lists it, by its code: a reference to it holds an
+      enum's value, whose schema is a component.
+    role: EmbeddedStruct
+    display: { noun: Kind, plural: Kinds, titleField: name }
+    fields:
+      - { name: code, typeRef: { name: ItemKind }, required: true }
+      - { name: name, typeRef: { name: string }, required: true }
+  ShelfEntry:
+    name: ShelfEntry
+    comment: "Where an item is shelved: under a kind, named by its code."
+    role: EmbeddedStruct
+    fields:
+      - { name: itemId, typeRef: { name: Identity.UUID }, required: true, references: { type: ItemView } }
+      - { name: kind, typeRef: { name: ItemKind }, required: true, references: { type: KindView, value: code } }
+enums:
+  ItemKind:
+    name: ItemKind
+    comment: The kinds of item the catalog shelves.
+    values:
+      - { name: Book, serializedAs: book }
+      - { name: Game, serializedAs: game }
 operationSets:
   - name: Catalog
     operations:
@@ -74,3 +98,19 @@ operationSets:
         required: true
         arguments:
           - { name: input, typeRef: { name: BasketInput }, required: true }
+      - name: listKinds
+        httpMethod: GET
+        restPath: kinds
+        typeRef: { name: KindView, isArray: true }
+        required: true
+      - name: shelveItem
+        comment: |-
+          Shelves an item under a kind, a body argument that names it by its
+          code.
+        httpMethod: POST
+        restPath: items/{itemId}/shelf
+        typeRef: { name: ShelfEntry }
+        required: true
+        arguments:
+          - { name: itemId, typeRef: { name: Identity.UUID }, required: true, references: { type: ItemView } }
+          - { name: kind, typeRef: { name: ItemKind }, required: true, references: { type: KindView, value: code } }

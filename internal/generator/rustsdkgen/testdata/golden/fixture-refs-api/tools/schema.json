@@ -75,6 +75,41 @@
       }
     },
     {
+      "name": "catalog.listKinds",
+      "operationId": "CatalogListKindsHandler",
+      "title": "",
+      "capability": "",
+      "lifecycle": "",
+      "visibility": "",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "listKinds endpoint",
+      "namespace": "catalog",
+      "methodName": "list_kinds",
+      "httpMethod": "GET",
+      "httpPath": "/api/kinds",
+      "requiresAuth": false,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:c891cf2445087af59e0336855a83add164516ad33268063fa9d09110dd47ace7",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+        }
+      },
+      "returns": {
+        "type": "array",
+        "description": "Array of KindView",
+        "items": {
+          "type": "object",
+          "description": "KindView object"
+        }
+      }
+    },
+    {
       "name": "catalog.placeBasket",
       "operationId": "CatalogPlaceBasketHandler",
       "title": "",
@@ -106,6 +141,40 @@
       "returns": {
         "type": "object",
         "description": "BasketView object"
+      }
+    },
+    {
+      "name": "catalog.shelveItem",
+      "operationId": "CatalogShelveItemHandler",
+      "title": "",
+      "capability": "",
+      "lifecycle": "",
+      "visibility": "",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Shelves an item under a kind, a body argument that names it by its\ncode.",
+      "namespace": "catalog",
+      "methodName": "shelve_item",
+      "httpMethod": "POST",
+      "httpPath": "/api/items/{itemId}/shelf",
+      "requiresAuth": false,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:bd00406c1ed8a252d512081a4a4ada0a19645051386de2a4ae0d14c91ba77d2a",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "itemId": {"description":"itemId parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-reference":{"label":"name","lookup":"ids","options":"catalog.listItems","target":"ItemView","value":"id"},"x-superschematic-scalar":"Identity.UUID"},
+          "kind": {"description":"A ItemKind value","enum":["book","game"],"type":"string","x-superschematic-reference":{"label":"name","options":"catalog.listKinds","target":"KindView","value":"code"}}
+        },
+        "required": ["itemId", "kind"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "ShelfEntry object"
       }
     }
   ]

@@ -15,7 +15,8 @@ import (
 
 // TestReferencesResolveInTheLoadedFixture: fixture-refs-api's references
 // resolve to listItems, by id and labeled by ItemView's titleField, with
-// ids as the lookup, and the gift's to the members it names (D61).
+// ids as the lookup, the gift's to the members it names, and a shelf's
+// kind, an enum's value, to listKinds by code (D61).
 func TestReferencesResolveInTheLoadedFixture(t *testing.T) {
 	schema, err := LoadService(filepath.Join("tsreader", "testdata", "services", "fixture-refs-api"))
 	if err != nil {
@@ -32,6 +33,10 @@ func TestReferencesResolveInTheLoadedFixture(t *testing.T) {
 		{"BasketInput.giftSku", "listItems", "sku", "name", ""},
 		{"Catalog.listItems(ids)", "listItems", "id", "name", "ids"},
 		{"Catalog.getItem(itemId)", "listItems", "id", "name", "ids"},
+		{"ShelfEntry.itemId", "listItems", "id", "name", "ids"},
+		{"ShelfEntry.kind", "listKinds", "code", "name", ""},
+		{"Catalog.shelveItem(itemId)", "listItems", "id", "name", "ids"},
+		{"Catalog.shelveItem(kind)", "listKinds", "code", "name", ""},
 	} {
 		held, ok := byHolder[tc.holder]
 		if !ok {
@@ -51,7 +56,7 @@ func TestReferencesResolveInTheLoadedFixture(t *testing.T) {
 			t.Errorf("%s resolves to options %s, value %s, label %s, lookup %q", tc.holder, got.Options.Name, got.Value.Name, got.Label.Name, lookup)
 		}
 	}
-	if len(byHolder) != 4 {
+	if len(byHolder) != 8 {
 		t.Errorf("references = %v", byHolder)
 	}
 }

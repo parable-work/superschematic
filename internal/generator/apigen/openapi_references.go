@@ -142,16 +142,37 @@ func addOpenAPIFieldReferences(components map[string]interface{}, types map[stri
 				continue
 			}
 			if ref := fieldReference(schema, dependencies, holder, field); ref != nil {
-				property[OpenAPIReferenceKey] = ref.openAPIValue()
+				openAPIExtensionTarget(property)[OpenAPIReferenceKey] = ref.openAPIValue()
 			}
 		}
 	}
 }
 
+// openAPIExtensionTarget is the schema object a property's vendor keys go
+// on: the property itself, unless it is a bare $ref, whose sibling keys
+// OpenAPI 3.0.3 ignores (a Reference Object). Then the $ref moves into
+// allOf, and the property, which keeps the keys beside it (a field's
+// description), takes the vendor keys beside the allOf: an enum's or an
+// object's component, referenced. A list's or a nullable value's property
+// is no $ref and takes the keys as it is.
+func openAPIExtensionTarget(property map[string]interface{}) map[string]interface{} {
+	if ref, ok := property["$ref"]; ok {
+		delete(property, "$ref")
+		property["allOf"] = []interface{}{map[string]interface{}{"$ref": ref}}
+	}
+	return property
+}
+
 // openAPIParameterKeys gives a path or query parameter object, or a body
 // argument's property schema, the reference and search keys its argument
-// holds.
+// holds: on a property that is a bare $ref, beside an allOf that holds it
+// (openAPIExtensionTarget). A parameter object holds its schema under
+// "schema", and takes them as it is.
 func openAPIParameterKeys(target map[string]interface{}, param Param) {
+	if param.Reference == nil && !param.Search {
+		return
+	}
+	target = openAPIExtensionTarget(target)
 	if param.Reference != nil {
 		target[OpenAPIReferenceKey] = param.Reference.openAPIValue()
 	}

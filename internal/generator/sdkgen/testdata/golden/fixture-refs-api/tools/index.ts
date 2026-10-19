@@ -4,6 +4,7 @@ import type { FixtureRefsApiSDK } from '../index';
 import type {
   BasketInput,
   BasketLine,
+  ItemKind,
 } from '@schemas/fixture-refs-api-types';
 
 /**
@@ -23,6 +24,14 @@ export interface CatalogListItemsParams {
 
 export interface CatalogGetItemParams {
   itemId: string;
+}
+
+export interface CatalogShelveItemParams {
+  itemId: string;
+  kind: ItemKind;
+}
+
+export interface CatalogListKindsParams {
 }
 
 /**
@@ -141,6 +150,8 @@ export interface AnthropicTool {
 export const CATALOG_PLACE_BASKET = 'catalog.placeBasket' as const;
 export const CATALOG_LIST_ITEMS = 'catalog.listItems' as const;
 export const CATALOG_GET_ITEM = 'catalog.getItem' as const;
+export const CATALOG_SHELVE_ITEM = 'catalog.shelveItem' as const;
+export const CATALOG_LIST_KINDS = 'catalog.listKinds' as const;
 
 /**
  * Union type of all tool names
@@ -148,7 +159,9 @@ export const CATALOG_GET_ITEM = 'catalog.getItem' as const;
 export type ToolName =
   | typeof CATALOG_PLACE_BASKET
   | typeof CATALOG_LIST_ITEMS
-  | typeof CATALOG_GET_ITEM;
+  | typeof CATALOG_GET_ITEM
+  | typeof CATALOG_SHELVE_ITEM
+  | typeof CATALOG_LIST_KINDS;
 
 /**
  * All available tools as an array of names
@@ -157,6 +170,8 @@ export const TOOL_NAMES: ToolName[] = [
   CATALOG_PLACE_BASKET,
   CATALOG_LIST_ITEMS,
   CATALOG_GET_ITEM,
+  CATALOG_SHELVE_ITEM,
+  CATALOG_LIST_KINDS,
 ];
 
 /**
@@ -265,6 +280,74 @@ a UI names the references' values through.`,
       type: 'object',
       description: `ItemView object`
     }
+  },
+  [CATALOG_SHELVE_ITEM]: {
+    name: 'catalog.shelveItem',
+    operationId: 'CatalogShelveItemHandler',
+    title: ``,
+    mcp: null,
+    capability: '',
+    lifecycle: '',
+    visibility: '',
+    audience: '',
+    guidance: {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+    requiredPermissions: [],
+    replay: null,
+    description: `Shelves an item under a kind, a body argument that names it by its
+code.`,
+    namespace: 'catalog',
+    methodName: 'shelveItem',
+    requiresAuth: false,
+    isScoped: false,
+    bindingStatus: 'ready',
+    inputSchemaDigest: 'sha256:bd00406c1ed8a252d512081a4a4ada0a19645051386de2a4ae0d14c91ba77d2a',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        itemId: {"description":"itemId parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-reference":{"label":"name","lookup":"ids","options":"catalog.listItems","target":"ItemView","value":"id"},"x-superschematic-scalar":"Identity.UUID"},
+        kind: {"description":"A ItemKind value","enum":["book","game"],"type":"string","x-superschematic-reference":{"label":"name","options":"catalog.listKinds","target":"KindView","value":"code"}},
+      },
+      required: ['itemId', 'kind']
+    },
+    returns: {
+      type: 'object',
+      description: `ShelfEntry object`
+    }
+  },
+  [CATALOG_LIST_KINDS]: {
+    name: 'catalog.listKinds',
+    operationId: 'CatalogListKindsHandler',
+    title: ``,
+    mcp: null,
+    capability: '',
+    lifecycle: '',
+    visibility: '',
+    audience: '',
+    guidance: {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+    requiredPermissions: [],
+    replay: null,
+    description: `listKinds endpoint`,
+    namespace: 'catalog',
+    methodName: 'listKinds',
+    requiresAuth: false,
+    isScoped: false,
+    bindingStatus: 'ready',
+    inputSchemaDigest: 'sha256:c891cf2445087af59e0336855a83add164516ad33268063fa9d09110dd47ace7',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+      }
+    },
+    returns: {
+      type: 'array',
+      description: `Array of KindView`,
+      items: {
+        type: 'object',
+        description: `KindView object`
+      }
+    }
   }
 };
 
@@ -310,6 +393,30 @@ a UI names the references' values through.`,
         itemId: {"description":"itemId parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-reference":{"label":"name","lookup":"ids","options":"catalog.listItems","target":"ItemView","value":"id"},"x-superschematic-scalar":"Identity.UUID"},
       },
       required: ['itemId']
+    }
+  },
+  {
+    name: 'catalog.shelveItem',
+    description: `Shelves an item under a kind, a body argument that names it by its
+code.`,
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        itemId: {"description":"itemId parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-reference":{"label":"name","lookup":"ids","options":"catalog.listItems","target":"ItemView","value":"id"},"x-superschematic-scalar":"Identity.UUID"},
+        kind: {"description":"A ItemKind value","enum":["book","game"],"type":"string","x-superschematic-reference":{"label":"name","options":"catalog.listKinds","target":"KindView","value":"code"}},
+      },
+      required: ['itemId', 'kind']
+    }
+  },
+  {
+    name: 'catalog.listKinds',
+    description: `listKinds endpoint`,
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+      }
     }
   }
 ];
@@ -357,6 +464,30 @@ a UI names the references' values through.`,
       },
       required: ['itemId']
     }
+  },
+  {
+    name: 'catalog.shelveItem',
+    description: `Shelves an item under a kind, a body argument that names it by its
+code.`,
+    input_schema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        itemId: {"description":"itemId parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-reference":{"label":"name","lookup":"ids","options":"catalog.listItems","target":"ItemView","value":"id"},"x-superschematic-scalar":"Identity.UUID"},
+        kind: {"description":"A ItemKind value","enum":["book","game"],"type":"string","x-superschematic-reference":{"label":"name","options":"catalog.listKinds","target":"KindView","value":"code"}},
+      },
+      required: ['itemId', 'kind']
+    }
+  },
+  {
+    name: 'catalog.listKinds',
+    description: `listKinds endpoint`,
+    input_schema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+      }
+    }
   }
 ];
 
@@ -367,6 +498,8 @@ export type ToolParams = {
   [CATALOG_PLACE_BASKET]: CatalogPlaceBasketParams;
   [CATALOG_LIST_ITEMS]: CatalogListItemsParams;
   [CATALOG_GET_ITEM]: CatalogGetItemParams;
+  [CATALOG_SHELVE_ITEM]: CatalogShelveItemParams;
+  [CATALOG_LIST_KINDS]: CatalogListKindsParams;
 };
 
 /**
@@ -398,6 +531,10 @@ export async function invokeTool<T extends ToolName>(
       return sdk.catalog.listItems({ q: (params as CatalogListItemsParams).q, ids: (params as CatalogListItemsParams).ids, inStock: (params as CatalogListItemsParams).inStock });
     case CATALOG_GET_ITEM:
       return sdk.catalog.getItem((params as CatalogGetItemParams).itemId);
+    case CATALOG_SHELVE_ITEM:
+      return sdk.catalog.shelveItem((params as CatalogShelveItemParams).itemId, { kind: (params as CatalogShelveItemParams).kind });
+    case CATALOG_LIST_KINDS:
+      return sdk.catalog.listKinds();
     default:
       throw new Error(`Unknown tool: ${toolName}`);
   }

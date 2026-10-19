@@ -277,8 +277,24 @@ In the OpenAPI document, the value that refers gives
 The key sits on the property schema of a field (of an output or an input
 type) and of a body argument, and on the parameter object of a path or
 query argument, beside its `schema`. A list carries it on the list, not on
-its items, and each item refers. The search argument's parameter object
-says `"x-superschematic-search": true`:
+its items, and each item refers. A property that would be a bare `$ref`,
+as a value of an enum is, holds the `$ref` in an `allOf` and the key beside
+it, since OpenAPI 3.0 ignores the keys beside a `$ref`:
+
+```json
+"kind": {
+  "allOf": [{"$ref": "#/components/schemas/ItemKind"}],
+  "x-superschematic-reference": {
+    "target": "#/components/schemas/KindView",
+    "options": "CatalogListKindsHandler",
+    "value": "code",
+    "label": "name"
+  }
+}
+```
+
+The search argument's parameter object says
+`"x-superschematic-search": true`:
 
 ```json
 {
