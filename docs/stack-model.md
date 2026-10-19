@@ -2679,7 +2679,14 @@ export abstract class FulfilOrders {}
   `TxInterface`: the message commits with the writes that caused it, or
   not at all. Each field reaches its column as a table's does through a
   repository's `CreateOne`, and an optional field that is unset, or a
-  required list that is nil, takes its column's default.
+  required list that is nil, takes its column's default. A location
+  (`Geo.Location`) goes to its `POINT` column as a `pgtype.Point`, x the
+  longitude and y the latitude, and a duration (`Temporal.Duration`) to
+  its `INTERVAL` column as a `time.Duration`, which pgx writes as its
+  whole microseconds, so the sign of `-1h2m` holds for the whole; a claim
+  reads an interval back with a day as 24 hours and a month as 30 days,
+  as pgx does. A list of either, a `POINT[]` or an `INTERVAL[]` column, is
+  refused for now, naming the field.
 - **The TypeScript client.** There is no TypeScript ORM, so the DB's
   TypeScript types package carries each queue as data in `queues.ts`,
   which its `package.json` exports as `./queues`, as it carries the
@@ -2697,12 +2704,20 @@ export abstract class FulfilOrders {}
   returns the claims below, with `ClaimLostError` for a lost claim. A
   field writes its column as the Go ORM writes it, classified alike: a
   JSON field its JSON text, an unset optional field or list nothing, so
-  the column's default, and an unset enum its schema default. Read back,
-  each column is what the TypeScript types hold: a timestamp a `Date`, a
-  date its `YYYY-MM-DD` text, a 64-bit integer a number, a JSON column its
-  value. A queue whose message holds a value the client cannot write and
-  read back yet, a `POINT` or an `INTERVAL` column, is left out of
-  `queues.ts`, which says why.
+  the column's default, and an unset enum its schema default. A field
+  marked `point` writes its location as `(lon,lat)`, and one marked
+  `interval` its duration as its whole microseconds,
+  `[-]H:MM:SS.ffffff`, a nanosecond remainder truncated toward zero, as
+  the Go ORM's `time.Duration` goes. Read back, each column is what the
+  TypeScript types hold: a timestamp a `Date`, a date its `YYYY-MM-DD`
+  text, a 64-bit integer a number, a JSON column its value, a `POINT` the
+  location `{lat, lon}`, and an `INTERVAL` its duration in the scalar
+  core's canonical text (`1h30m0s`, `1.5s`, `250us`), a day 24 hours and a
+  month 30 days. The Rust types' `queues.rs` carries the same definitions
+  as JSON, and the Rust runtime's `queue` module writes and reads each
+  column alike, by its type (D65). A queue whose message holds a value the
+  client cannot write and read back yet, a union or a list of locations
+  or durations, is left out of `queues.ts`, which says why.
 - **Claim.** `<Database>.<Queue>Queue()` returns the queue's claims: `Claim`
   takes up to n messages that are ready and due, or claimed past their
   claim's expiry, with `FOR UPDATE SKIP LOCKED`, gives each a new claim
@@ -2831,7 +2846,8 @@ export abstract class FulfilOrders {}
 
 Not built:
 
-- A `POINT` or `INTERVAL` column in a TypeScript queue's message.
+- A list of locations or durations, a `POINT[]` or `INTERVAL[]` column,
+  in a queue's message.
 - Claims on SQLite and D1, whose write transaction would claim.
 - Removing `done` messages, which stay in the table, and an operator's
   command to read and retry dead ones.

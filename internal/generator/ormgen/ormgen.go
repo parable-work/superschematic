@@ -224,6 +224,8 @@ type Field struct {
 	IsDateTimeScalar   bool   // non-array datetime-like scalar: values coerce via time.Time()
 	IsGeoPoint         bool   // single scalar stored as POINT (Geo.Location): values convert through pgtype.Point, x = Lon, y = Lat
 	IsGeoPointList     bool   // list of a scalar stored as POINT, a native POINT[] column: values convert through []pgtype.Point
+	IsInterval         bool   // single scalar stored as INTERVAL (Temporal.Duration): a queue's values convert through time.Duration
+	IsIntervalList     bool   // list of a scalar stored as INTERVAL, a native INTERVAL[] column
 	IsUUIDLike         bool
 	IsStringLike       bool
 	IsIntLike          bool
@@ -1059,6 +1061,9 @@ func extractField(fieldDef *ir.FieldDef, schema *ir.Schema, scalars map[string]s
 	// sqlgen stores a scalar mapped to POINT as POINT, and a list of it as
 	// POINT[]; a list of lists, a map and @jsonField are JSONB.
 	storedAsPoint := isScalar && !isMap && !fieldDef.JsonField && !fieldDef.TypeRef.IsArrayOfArrays && strings.EqualFold(scalar.sqlType, "POINT")
+	// Likewise a scalar mapped to INTERVAL (Temporal.Duration), whose Go
+	// type is a time.Duration.
+	storedAsInterval := isScalar && !isMap && !fieldDef.JsonField && !fieldDef.TypeRef.IsArrayOfArrays && strings.EqualFold(scalar.sqlType, "INTERVAL")
 
 	field := Field{
 		Name:                      fieldDef.Name,
@@ -1087,6 +1092,8 @@ func extractField(fieldDef *ir.FieldDef, schema *ir.Schema, scalars map[string]s
 		IsDateTimeScalar:          isScalar && !isArray && traits.IsDateTimeLike,
 		IsGeoPoint:                storedAsPoint && !isArray,
 		IsGeoPointList:            storedAsPoint && isArray,
+		IsInterval:                storedAsInterval && !isArray,
+		IsIntervalList:            storedAsInterval && isArray,
 		IsUUIDLike:                traits.IsUUIDLike,
 		IsStringLike:              traits.IsStringLike || irType == codegen.PrimitiveString,
 		IsIntLike:                 traits.IsIntegerLike,

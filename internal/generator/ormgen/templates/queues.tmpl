@@ -171,7 +171,8 @@ const {{ .Name }}Lease = {{ .LeaseSeconds }} * time.Second
 
 // Enqueue{{ .Name }} writes msg into the queue {{ .Name }} in tx, the caller's
 // transaction: the message is due once tx commits, and never if it rolls
-// back. A field writes its column as a table's field does.
+// back. A field writes its column as a table's field does, but a duration,
+// which writes its microseconds.
 func Enqueue{{ .Name }}(ctx context.Context, tx TxInterface, msg *types.{{ .Name }}) error {
 	var columns []string
 	var values []any
@@ -196,6 +197,13 @@ func Enqueue{{ .Name }}(ctx context.Context, tx TxInterface, msg *types.{{ .Name
 	values = append(values, msg.{{ toGoName .Name }}.ToUUID())
 	{{- else if .IsDateTimeScalar }}
 	values = append(values, time.Time(msg.{{ toGoName .Name }}))
+	{{- else if .IsGeoPoint }}
+	// A POINT is (x, y): x is the longitude and y the latitude.
+	values = append(values, pgtype.Point{P: pgtype.Vec2{X: msg.{{ toGoName .Name }}.Lon, Y: msg.{{ toGoName .Name }}.Lat}, Valid: true})
+	{{- else if .IsInterval }}
+	// An INTERVAL goes as its microseconds, which pgx encodes from a
+	// time.Duration, sign and all.
+	values = append(values, time.Duration(msg.{{ toGoName .Name }}))
 	{{- else if .EnumDefault }}
 	// An unset enum takes its schema default; "" is never a member.
 	if msg.{{ toGoName .Name }} == "" {
@@ -225,6 +233,12 @@ func Enqueue{{ .Name }}(ctx context.Context, tx TxInterface, msg *types.{{ .Name
 		values = append(values, time.Time(*msg.{{ toGoName .Name }}))
 		{{- else if .IsDateTimeScalar }}
 		values = append(values, time.Time(msg.{{ toGoName .Name }}))
+		{{- else if .IsGeoPoint }}
+		values = append(values, pgtype.Point{P: pgtype.Vec2{X: msg.{{ toGoName .Name }}.Lon, Y: msg.{{ toGoName .Name }}.Lat}, Valid: true})
+		{{- else if and .IsInterval .DerefValue }}
+		values = append(values, time.Duration(*msg.{{ toGoName .Name }}))
+		{{- else if .IsInterval }}
+		values = append(values, time.Duration(msg.{{ toGoName .Name }}))
 		{{- else if .DerefValue }}
 		values = append(values, *msg.{{ toGoName .Name }})
 		{{- else }}
@@ -261,7 +275,8 @@ type {{ .Name }}Claim struct {
 }
 
 // Claim claims up to n due messages for lease. Each field reads its column
-// as a table's field does.
+// as a table's field does, but a duration, which reads the interval's
+// microseconds, a day as 24 hours and a month as 30 days.
 func (q *{{ .Name }}Queue) Claim(ctx context.Context, n int, lease time.Duration) ([]{{ .Name }}Claim, error) {
 	var claims []{{ .Name }}Claim
 	err := {{ lowerFirst .Name }}Queue.claim(ctx, q.pool, n, lease, func(rows pgx.Rows) error {
@@ -287,6 +302,25 @@ func (q *{{ .Name }}Queue) Claim(ctx context.Context, n int, lease time.Duration
 		if err := copyListElements({{ printf "%q" .Name }}, temp{{ toGoName .Name }}, &msg.{{ toGoName .Name }}); err != nil {
 			return fmt.Errorf("message %s field {{ .Name }}: %w", claim.ID, err)
 		}
+		{{- else if .IsGeoPoint }}
+		if temp{{ toGoName .Name }}.Valid {
+			// A POINT is (x, y): x is the longitude and y the latitude.
+			{{- if .IsNullableScalar }}
+			location := {{ .GoType }}{Lat: temp{{ toGoName .Name }}.P.Y, Lon: temp{{ toGoName .Name }}.P.X}
+			msg.{{ toGoName .Name }} = &location
+			{{- else }}
+			msg.{{ toGoName .Name }} = {{ .GoType }}{Lat: temp{{ toGoName .Name }}.P.Y, Lon: temp{{ toGoName .Name }}.P.X}
+			{{- end }}
+		}
+		{{- else if .IsInterval }}
+		{{- if .IsNullableScalar }}
+		if temp{{ toGoName .Name }} != nil {
+			duration := {{ .GoType }}(*temp{{ toGoName .Name }})
+			msg.{{ toGoName .Name }} = &duration
+		}
+		{{- else }}
+		msg.{{ toGoName .Name }} = {{ .GoType }}(temp{{ toGoName .Name }})
+		{{- end }}
 		{{- else if eq .QueueScanTemp "pgtype.Date" }}
 		if temp{{ toGoName .Name }}.Valid {
 			{{- if .IsNullableScalar }}

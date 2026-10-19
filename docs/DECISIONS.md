@@ -6109,6 +6109,44 @@ SQLite gets a queue's table and its migrations, but no claim.
 
 Status: built in #336.
 
+### D53, amended: a queue's message holds a location and a duration, as a `POINT` and an `INTERVAL` of whole microseconds, in every language
+
+D53's TypeScript amendment left a queue whose message holds a `POINT` or
+an `INTERVAL` column out of `queues.ts`, and D65 left it out of
+`queues.rs`, so a TypeScript or Rust worker of it was refused. The Go
+ORM's queue did not hold them either: it passed a `Geo.Location` struct
+to pgx, which has no encoding for it, and `Temporal.Duration` crossed
+through its `Valuer` and `Scanner`, which write `-1h2m` for a duration
+Postgres reads as minus one hour plus two minutes, write `250µs`, which
+Postgres refuses, and read back `01:30:00`, which `time.ParseDuration`
+refuses. The "as the Go ORM writes it" of the TypeScript amendment had no
+Go behavior to copy.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A location crosses as a `POINT` whose x is the longitude and y the latitude, as the Go ORM's tables write it (D14, amended): Go passes a `pgtype.Point`, TypeScript writes `(lon,lat)` with JavaScript's shortest round-trip text, and Rust writes the same text with Rust's. Each reads the point back as `{lat, lon}`. | A JSON column for a location in a queue alone, which would give one scalar two storages. |
+| A duration crosses as its whole microseconds, the precision of an `INTERVAL`, a nanosecond remainder truncated toward zero. Go passes a `time.Duration`, which pgx writes as an interval of microseconds; TypeScript and Rust parse the duration's text as the scalar core does and write `[-]H:MM:SS.ffffff`, a form whose sign Postgres gives to the whole time. A claim reads the interval's months, days and microseconds as pgx does, a month 30 days and a day 24 hours, and TypeScript and Rust write the result in the scalar core's canonical text (`1h30m0s`, `1.5s`, `250us`); Go scans a `time.Duration`. | The duration's text as Go's `Valuer` writes it, which loses the sign of a negative duration of two units and fails on microseconds. Refusing an interval with months or days, as the version graph's canonical form does, which would fail a claim of a row someone wrote by hand where Go's pgx reads it. |
+| The definition marks such a field, `point: true` or `interval: true`, in `queues.ts` and in the descriptor `queues.rs` holds, so the two stay one shape (`TestQueuesDescribeWhatTypeScriptWrites`). The TypeScript client needs the mark to write a location, since pg would send an object as JSON; it reads each by the column's type, with its own type parsers for `POINT` and `INTERVAL`. The Rust client writes and reads both by the column's type, which the prepared statement gives it. | A conversion by the shape of the value, `{lat, lon}` written as a point wherever it appears, which would guess. |
+| A list of locations or durations, a `POINT[]` or an `INTERVAL[]` column, is not held yet: the Go ORM refuses such a queue, naming the field, where before it generated a queue that failed at its first enqueue, and the TypeScript and Rust types leave it out, saying why. A list goes in a `@jsonField` type until a client converts each element. | Lists now, which need the Go ORM's `POINT[]` helpers in `queues.go` and an element conversion in each client, for a field no schema has asked for. |
+| `fixture-queue-geo-db` declares the queue `DeliveryPlanned` with a required and an optional location and duration, on Postgres alone, since SQLite has no storage for a `POINT` and `fixture-queue-db` writes its queues in both dialects. The ORM tests and the parity test add it to `fixture-queue-db`'s schema, so one module, one types package and one crate hold both. | A field of `fixture-queue-db`'s `OrderPlaced`, which would drop the fixture's SQLite dialect and the SQLite tests of a queue's table. |
+
+Status: built. `TestQueueParityOfGoTypeScriptAndRustOnPostgres` gains
+`LocationsAndDurationsAgree`: Go, TypeScript and Rust each enqueue a
+`DeliveryPlanned`, one with a remainder of nanoseconds and one negative,
+and each reads all three as its types hold them, then reads an interval
+written with a month and days as their hours. `TestGeneratedQueuesOnPostgres`
+holds the Go ORM's columns to what Postgres stores (`26:00:00.000001`,
+`-00:01:30.25`, `(151.2093,-33.8688)`), and the runtimes' tests do the
+same for TypeScript and Rust, besides their parsers' cases.
+`TestQueuesWriteWhatTheGoORMWrites` and
+`TestQueuesDescribeWhatTypeScriptWrites` cover both fixtures, and
+`TestQueuesHoldALocationAndADuration` the Go ORM's refusal of a list.
+
+Not built: a list of locations or durations in a queue's message; the
+Go ORM's tables still write a duration through its `Valuer` and read it
+through its `Scanner`, the defects above, which this entry leaves to a
+fix of their own.
+
 ### D54, amended: a workload links the GCS client whenever its APIs list a bucket
 
 D54 said only a workload some environment places on gcp links the GCS

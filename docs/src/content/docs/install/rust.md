@@ -614,9 +614,11 @@ re-exports as `database_types`. Their `queues` module holds each queue's
 descriptor as JSON, `STOCK_LOW_QUEUE`, which the runtime's
 `queue::QueueDefinition::parse` reads: an implementation enqueues with it
 in the transaction whose writes caused the message (`queue::enqueue`),
-and a worker claims with it. A queue whose message holds a `POINT` or
-`INTERVAL` column is left out, saying why, and the build refuses a Rust
-worker of it.
+and a worker claims with it. A location crosses as a `POINT` and a
+duration as an `INTERVAL` of its whole microseconds, as Go and TypeScript
+write them ([Queues](/superschematic/guides/queues/)). A queue whose
+message holds a list of either, a `POINT[]` or `INTERVAL[]` column, is
+left out, saying why, and the build refuses a Rust worker of it.
 
 The scaffold writes `create_jobs` and `create_workers` beside `create`,
 each method failing until you implement it:
