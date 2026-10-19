@@ -178,7 +178,9 @@ ts:
 	cd runtime/schema/typescript && bun install --frozen-lockfile && bun run typecheck && bun run build && bun run test
 	cd runtime/http/typescript && bun install --frozen-lockfile && bun run build && bun run test
 	cd runtime/versiongraph/typescript && bun install --frozen-lockfile && bun run typecheck && bun run test
-	cd runtime/engine/typescript && bun install --frozen-lockfile && bun run typecheck && bun run build && bun run test
+	cd runtime/engine/typescript && bun install --frozen-lockfile
+	scripts/engine-napi.sh --js-behaviors >/dev/null
+	cd runtime/engine/typescript && bun run typecheck && bun run build && bun run test
 	cd runtime/engine-workqueue/typescript && bun install --frozen-lockfile && bun run typecheck && bun run test
 	examples/engine-notes/scripts/check.sh
 	examples/engine-jobs/scripts/check.sh
