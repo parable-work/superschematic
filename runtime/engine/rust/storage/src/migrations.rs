@@ -16,7 +16,9 @@
 //! holds a lock of its session while it migrates (D58): engines that start
 //! together migrate one after another, and each later one finds the
 //! ledger up to date. A migration whose ledger row appeared while it waited
-//! (another process applied it) is skipped.
+//! (another process applied it) is skipped. A storage whose ledger is up to
+//! date already is only read: a process that starts beside running ones
+//! takes no lock, so it holds none of their writers up.
 
 use std::borrow::Cow;
 use std::fmt;
@@ -149,6 +151,14 @@ impl Db {
         for set in sets {
             check_set(set)?;
         }
+        // A storage the ledger has up to date (an earlier start, or another
+        // process that started first) is read and nothing more: no lock of
+        // the session and none of the catalog's, which would wait for every
+        // writer in flight and hold every later one behind it, so a process
+        // that starts beside running ones holds none of their writes up.
+        if let Some(results) = self.read(|tx| up_to_date(tx, sets))? {
+            return Ok(results);
+        }
         let mut session = self.session()?;
         let key = session.postgres_schema().map(migration_lock_key);
         if let Some(key) = key {
@@ -200,27 +210,10 @@ fn migrate_sets(
 fn migrate_set(session: &mut Session<'_>, set: &MigrationSet, now: i64) -> Result<MigrationResult> {
     let timeout = session.migration_timeout();
     let label = session.label().to_owned();
-    let holder = match session.dialect() {
-        Dialect::Sqlite => "the file",
-        Dialect::Postgres => "the schema",
-    };
+    let holder = holder_of(session.dialect());
     let recorded = session.transaction(TxKind::Read, |tx| applied_migrations(tx, &set.owner))?;
+    check_recorded(&label, holder, set, &recorded)?;
     let latest = set.migrations.len();
-    if recorded.len() > latest {
-        return Err(Error::migration(format!(
-            "{label}: {} storage is at migration {}, newer than this build's {latest}; migrations do not run backwards",
-            set.owner,
-            recorded.len()
-        )));
-    }
-    for (row, known) in recorded.iter().zip(&set.migrations) {
-        if row.version != known.version || row.name != known.name {
-            return Err(Error::migration(format!(
-                "{label}: {} migration {} is \"{}\" in this build, but {holder} records migration {} \"{}\" in its place",
-                set.owner, known.version, known.name, row.version, row.name
-            )));
-        }
-    }
     let from = recorded.len();
     let mut applied = Vec::new();
     for migration in &set.migrations[from..] {
@@ -268,28 +261,9 @@ fn migrate_set(session: &mut Session<'_>, set: &MigrationSet, now: i64) -> Resul
 /// exists (the engine's migrations made it).
 pub fn migrate_in(tx: &Tx<'_>, set: &MigrationSet, now: i64) -> Result<MigrationResult> {
     check_set(set)?;
-    let label = tx.label();
-    let holder = match tx.dialect() {
-        Dialect::Sqlite => "the file",
-        Dialect::Postgres => "the schema",
-    };
     let recorded = applied_migrations(tx, &set.owner)?;
+    check_recorded(tx.label(), holder_of(tx.dialect()), set, &recorded)?;
     let latest = set.migrations.len();
-    if recorded.len() > latest {
-        return Err(Error::migration(format!(
-            "{label}: {} storage is at migration {}, newer than this build's {latest}; migrations do not run backwards",
-            set.owner,
-            recorded.len()
-        )));
-    }
-    for (row, known) in recorded.iter().zip(&set.migrations) {
-        if row.version != known.version || row.name != known.name {
-            return Err(Error::migration(format!(
-                "{label}: {} migration {} is \"{}\" in this build, but {holder} records migration {} \"{}\" in its place",
-                set.owner, known.version, known.name, row.version, row.name
-            )));
-        }
-    }
     let from = recorded.len();
     let mut applied = Vec::new();
     for migration in &set.migrations[from..] {
@@ -314,6 +288,64 @@ pub fn migrate_in(tx: &Tx<'_>, set: &MigrationSet, now: i64) -> Result<Migration
         to: u32::try_from(latest).unwrap_or(u32::MAX),
         applied,
     })
+}
+
+// up_to_date reads each set's ledger rows and, when every set has all of
+// its migrations recorded, returns what migrating did (nothing); None when
+// any lacks one. A ledger ahead of a set, or one that names a version
+// differently, is refused here as it is when migrating.
+fn up_to_date(tx: &Tx<'_>, sets: &[&MigrationSet]) -> Result<Option<Vec<MigrationResult>>> {
+    let mut results = Vec::with_capacity(sets.len());
+    for set in sets {
+        let recorded = applied_migrations(tx, &set.owner)?;
+        check_recorded(tx.label(), holder_of(tx.dialect()), set, &recorded)?;
+        let latest = set.migrations.len();
+        if recorded.len() < latest {
+            return Ok(None);
+        }
+        let to = u32::try_from(latest).unwrap_or(u32::MAX);
+        results.push(MigrationResult {
+            owner: set.owner.clone(),
+            from: to,
+            to,
+            applied: Vec::new(),
+        });
+    }
+    Ok(Some(results))
+}
+
+// check_recorded refuses a ledger ahead of the set and one that records a
+// version under another name than the set's.
+fn check_recorded(
+    label: &str,
+    holder: &str,
+    set: &MigrationSet,
+    recorded: &[AppliedMigration],
+) -> Result<()> {
+    let latest = set.migrations.len();
+    if recorded.len() > latest {
+        return Err(Error::migration(format!(
+            "{label}: {} storage is at migration {}, newer than this build's {latest}; migrations do not run backwards",
+            set.owner,
+            recorded.len()
+        )));
+    }
+    for (row, known) in recorded.iter().zip(&set.migrations) {
+        if row.version != known.version || row.name != known.name {
+            return Err(Error::migration(format!(
+                "{label}: {} migration {} is \"{}\" in this build, but {holder} records migration {} \"{}\" in its place",
+                set.owner, known.version, known.name, row.version, row.name
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn holder_of(dialect: Dialect) -> &'static str {
+    match dialect {
+        Dialect::Sqlite => "the file",
+        Dialect::Postgres => "the schema",
+    }
 }
 
 /// The owner's ledger rows in version order, read on `tx`; none before
