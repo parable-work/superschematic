@@ -380,8 +380,9 @@ fn admit<T>(admitted: Result<T, StatusCode>, link: Link, links: &mut Vec<Link>, 
 }
 
 /// A collection in the trail: its key, its words in a path, its labels,
-/// which of its pages exist, whether an item has a title, and the
-/// collections under its items.
+/// which of its pages exist, whether an item has a title, whether a
+/// reference names an item by its route's value, and the collections under
+/// its items.
 struct Node {
     key: &'static str,
     titled: bool,
@@ -545,9 +546,10 @@ const TREE: &[Node] = &[
 ];
 
 /// A step of the trail: its label, its link (none for a page that does not
-/// exist and for the page itself), whether it is the page itself, and for
-/// an item whose type has a title the collection's key and the route's
-/// values to read it with.
+/// exist and for the page itself), whether it is the page itself, for an
+/// item whose type has a title the collection's key and the route's values
+/// to read it with, and for an item a reference names the collection's key
+/// and the route's value.
 struct Crumb {
     label: String,
     href: Option<String>,
