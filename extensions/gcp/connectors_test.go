@@ -121,12 +121,11 @@ func TestSQLConnectorUnderParameter(t *testing.T) {
 	}
 }
 
-// rustShop is the acme-shop services with shop-api written in Rust (D57)
-// and no bucket, which a Rust server does not reach yet: its server's
-// sql edge is its authDb's, to shop-db. It resolves over a stack
-// WithoutBucketSettings returns.
+// rustShop is the acme-shop services with shop-api written in Rust (D57):
+// its server's sql edge is its authDb's, to shop-db, and its bucket edge
+// is to shop-media (D54).
 func rustShop() []stack.Service {
-	return stacktest.InRust(stacktest.WithoutBuckets(stacktest.AcmeShop()), "shop-api")
+	return stacktest.InRust(stacktest.AcmeShop(), "shop-api")
 }
 
 // TestSQLConnectorServesRust checks that a Rust server's sql edge lowers
@@ -136,8 +135,8 @@ func rustShop() []stack.Service {
 // IAM user.
 func TestSQLConnectorServesRust(t *testing.T) {
 	reg := assemble(t)
-	goEnv := resolve(t, reg, stacktest.WithoutBucketSettings(shop()), stacktest.WithoutBuckets(stacktest.AcmeShop()), "Staging")
-	env := resolve(t, reg, stacktest.WithoutBucketSettings(shop()), rustShop(), "Staging")
+	goEnv := resolve(t, reg, shop(), stacktest.AcmeShop(), "Staging")
+	env := resolve(t, reg, shop(), rustShop(), "Staging")
 	if got := env.Deployable("shop-api").Language; got != registry.APILanguageRust {
 		t.Fatalf("shop-api's server is %s, want %s", got, registry.APILanguageRust)
 	}

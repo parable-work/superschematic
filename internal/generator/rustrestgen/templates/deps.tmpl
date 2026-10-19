@@ -59,6 +59,11 @@ pub struct Deps {
     /// server's service credential.
     pub {{ .Field }}: {{ .CrateIdent }}::{{ .Client }},
 {{- end }}
+{{- range .Buckets }}
+    /// {{ .Service }}, a bucket the API lists: private object storage it puts,
+    /// gets, deletes and lists objects in, and signs URLs for (D54).
+    pub {{ .Field }}: Arc<dyn Bucket>,
+{{- end }}
 {{- end }}
     /// The API's span: the implementation logs inside it, so each event
     /// names the API.

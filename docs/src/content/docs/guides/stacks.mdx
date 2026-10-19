@@ -37,7 +37,7 @@ balancer and DNS resources that the Pulumi provisioner applies.
 | the Cloudflare DNS platform, linked in the installed binary; bootstrap stores its API token and deploys read it | |
 | `@requireService` and `@allowService`, and the stack's check that every `calls` edge reaches an operation | the callee's half of service auth: a server whose API has a service clause does not start yet |
 | [generated CI](#generated-ci): `outputs.ci` writes a GitHub Actions workflow that checks, plans, previews and deploys the stack, signing in to gcp through Workload Identity Federation | other CI systems; a check that the committed workflow is current |
-| [buckets](/superschematic/guides/buckets/): the `Bucket` kind, `buckets` in an API's config, the `bucket` deployable and edge, a provider-neutral bucket in `Deps` over GCS with signed URLs, fake-gcs-server under `stack dev`, and on gcp a private Cloud Storage bucket | a bucket for a Rust server, job or worker; a bucket on another provider |
+| [buckets](/superschematic/guides/buckets/): the `Bucket` kind, `buckets` in an API's config, the `bucket` deployable and edge, a provider-neutral bucket in `Deps` over GCS with signed URLs, in Go, TypeScript and Rust, fake-gcs-server under `stack dev`, and on gcp a private Cloud Storage bucket | a bucket on another provider |
 | [jobs](#jobs): `@job`, the `job` deployable with its API's edges, its schedule per environment, Go's `Jobs` and `NewJobs`, TypeScript's `Jobs` and `createJobs`, Rust's `Jobs` and `create_jobs`, each job's entrypoint and image, `stack dev`'s schedules and `stack run`; on gcp a Cloud Run job, its schedule a Cloud Scheduler job, and `stack run` an execution | a job that runs on every deploy |
 | [static sites](/superschematic/guides/static-sites/): the `Site` kind, the `site` deployable and edge, each API's CORS for the sites that call it, `stack dev`'s file server, the deploy's publish through a target's `Sites` seam, and on gcp a bucket per site behind a load balancer with Cloud CDN | a site's SDK clients in the browser |
 | [queues and workers](#queues-and-workers): `@queue` on a DB service's message class, its table in every dialect, the Go ORM's `Enqueue` in your transaction and its claims; `@worker`, the `worker` deployable with its API's edges and its instances and concurrency per environment, Go's `Workers` and `NewWorkers`, TypeScript's `Workers` and `createWorkers` over the HTTP runtime's queue client, Rust's `Workers` and `create_workers` over the Rust HTTP runtime's, each worker's entrypoint and image, and `stack dev`'s worker processes; on gcp a Cloud Run worker pool | claims on SQLite and D1 |
@@ -799,7 +799,7 @@ lowered:
 | `call-cycle` | servers that call each other, which no callee-first rollout serves |
 | `field-collision` | a config field two types declare for one server, or one a derived field takes |
 | `invalid-values`, `invalid-settings` | target, DNS or platform values that fail their JSON Schema |
-| `lowering` | an error a platform, connector or DNS platform returned, such as a Rust server's bucket edge on gcp |
+| `lowering` | an error a platform, connector or DNS platform returned, such as a bucket whose name GCS refuses |
 | `graph` | a dangling or cyclic dependency, an undeclared parameter, properties that fail the schema of their resource type, or an inherited node the parent lacks |
 | `policy` | a target's policy rule |
 
@@ -1167,7 +1167,9 @@ crate with `cargo build --release --locked` on the Rust release
 naming file's `[paths]` `http_runtime_rust`, `schema_runtime_rust` and
 `scalar_rust` name, and runs the binary on distroless `cc` as a non-root
 user, and a job's and a worker's image runs theirs with no port.
-Buckets from a Rust server, job or worker are not built.
+A Rust API that lists a bucket gets it in `Deps` as an `Arc<dyn Bucket>`,
+which its server, job and worker open with the HTTP runtime's `gcs`
+feature, with no Google library ([Buckets](/superschematic/guides/buckets/)).
 
 No `go.sum` is generated: build with `go build -mod=mod`, which fills it.
 `go mod tidy` can fail, because it also resolves the imports of the
@@ -1210,7 +1212,7 @@ and the [generated CI](#generated-ci) signs in with.
 | bucket | a Cloud Storage bucket `<project>-<stack>-<bucket>` in the region, with uniform bucket-level access and public access prevention enforced |
 | sql edge | `roles/cloudsql.client` and `roles/cloudsql.instanceUser` for the server's or job's account, held to the instance by an IAM condition, and an IAM database user. The derived value is the Cloud SQL connection, with no password, which a Rust server dials over the socket the service mounts at `/cloudsql` |
 | http edge | `roles/run.invoker` on the callee for the caller's account. The derived value is the callee's `run.app` URL with a Google ID token for it as the service credential, sent in `Service-Authorization` and, to an internal callee, also in `X-Serverless-Authorization`. A call to an API the same server serves stays on loopback |
-| bucket edge | `roles/storage.objectUser` on the bucket and `roles/iam.serviceAccountTokenCreator` on its own account for the server's or job's account, so it signs URLs as itself. The derived value is the bucket's name. A Rust server's bucket edge is refused |
+| bucket edge | `roles/storage.objectUser` on the bucket and `roles/iam.serviceAccountTokenCreator` on its own account for the server's, job's or worker's account, so it signs URLs as itself, in Go, TypeScript or Rust. The derived value is the bucket's name |
 | internal server | internal ingress only, with Cloud Run's invoker check on |
 | calling server or job | Direct VPC egress through the environment's network: a VPC, a subnet with Private Google Access, a router and Cloud NAT |
 | exposed server | with a domain, a global external Application Load Balancer and a Certificate Manager certificate for its host, authorized by a DNS record, with the service taking traffic from the load balancer only; without one, its public `run.app` URL |

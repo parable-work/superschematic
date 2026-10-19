@@ -28,7 +28,8 @@ import (
 // (workspace.go), and a Dockerfile. main.rs does what the Go and
 // TypeScript entrypoints do, on a tokio runtime: it loads each API's
 // EnvConfig, opens one Postgres pool per database, builds one SDK client
-// per API called with its credential source, calls each API's `create`
+// per API called with its credential source, opens one bucket per Bucket
+// service on GCS or its emulator (D54), calls each API's `create`
 // with its Deps, builds each API's identity service over its authDb's pool
 // and its service authenticator from its callers field, joins them with
 // the handlers through `Implementations::new`, and serves every API's
@@ -39,7 +40,8 @@ import (
 // is a crate beside the servers', `<output-root>/server/<stack>/<job>/`, of
 // the same files and a member of the same workspace. Its main.rs builds its
 // one API's Deps as a server's does, from its EnvConfig, a pool per
-// database and a client per API called, and neither builds an identity
+// database, a client per API called and a bucket per Bucket service, and
+// neither builds an identity
 // service nor a router (D52, D53): a job's (job.rs.tmpl) calls the
 // implementation's `create_jobs`, then the job's method once with a
 // Shutdown that SIGTERM cancels, and exits 1 when it fails; a worker's
@@ -186,6 +188,10 @@ type RustServer struct {
 	Databases []*RustDatabase
 	Clients   []*RustClient
 
+	// Buckets are the buckets main.rs opens once, for every API that lists
+	// them (D54).
+	Buckets []*RustBucket
+
 	// Dependencies are Cargo.toml's, the registry crates first, then the
 	// HTTP runtime and the crates of the workspace, each in name order.
 	Dependencies []CargoDependency
@@ -283,12 +289,34 @@ type RustAPI struct {
 
 	// Calls are Deps' clients.
 	Calls []RustCall
+
+	// Buckets are Deps' buckets (D54).
+	Buckets []RustBucketUse
 }
 
 // RustCall is a client in an API's Deps.
 type RustCall struct {
 	Field  string
 	Client *RustClient
+}
+
+// RustBucketUse is a bucket in an API's Deps.
+type RustBucketUse struct {
+	Field  string
+	Bucket *RustBucket
+}
+
+// RustBucket is a bucket main.rs opens once, for every API that lists it,
+// on GCS or on the emulator its connection names, through the HTTP
+// runtime's gcs feature (D54).
+type RustBucket struct {
+	Service string
+	Var     string
+
+	// Field is the derived config field the connection is read from, and
+	// From the expression that reads it from the first API's config.
+	Field string
+	From  string
 }
 
 // RustDatabase is a database the server opens one pool to, for every API
@@ -359,7 +387,7 @@ var rustReserved = []string{
 	"healthz", "readyz", "dispatch", "port", "app", "readiness", "dependencies", "signals", "draining",
 	"api", "apis", "request", "router", "endpoint", "credential", "service_credential", "err",
 	"jobs", "workers", "worker", "queue", "shutdown", "started", "definition", "concurrency", "options",
-	"handle", "message",
+	"handle", "message", "bucket", "gcs", "open_bucket", "field", "service", "connection",
 }
 
 // rustNames hands out snake_case identifiers no other declaration of
@@ -388,7 +416,7 @@ func crateIdent(crate string) string {
 
 // PlanRust plans the entrypoint of one Rust server. It refuses a server
 // whose APIs register one method and path between them, and an API whose
-// config holds no field for a database, a callee or a clause its
+// config holds no field for a database, a callee, a bucket or a clause its
 // entrypoint needs. With in.Job it plans a job's entrypoint instead, and
 // with in.Worker a worker's (D65): one API, whose Deps it builds as a
 // server does, and no routes, identity service or service authenticator.
@@ -469,6 +497,7 @@ func PlanRust(in RustInput) (*RustServer, error) {
 	}
 	databases := map[string]*RustDatabase{}
 	clients := map[string]*RustClient{}
+	buckets := map[string]*RustBucket{}
 	for _, a := range in.APIs {
 		o := a.Output
 		stem := rustStem(o.SchemaName)
@@ -576,6 +605,24 @@ func PlanRust(in RustInput) (*RustServer, error) {
 			}
 			api.Calls = append(api.Calls, RustCall{Field: call.Field, Client: c})
 		}
+		for _, b := range o.Deps.Buckets {
+			h := buckets[b.Service]
+			if h == nil {
+				key, ok := derived[string(ir.EdgeBucket)+" "+b.Service]
+				if !ok || api.Config == "" {
+					return nil, fmt.Errorf("stack %s: %s %s serves %s, whose config has no field for bucket %s, which it lists", in.Stack, s.Kind, in.Server, o.SchemaName, b.Service)
+				}
+				h = &RustBucket{
+					Service: b.Service,
+					Var:     taken.take(rustStem(b.Service) + "_bucket"),
+					Field:   key,
+					From:    api.Config + "." + envgen.RustFieldName(key),
+				}
+				buckets[b.Service] = h
+				s.Buckets = append(s.Buckets, h)
+			}
+			api.Buckets = append(api.Buckets, RustBucketUse{Field: b.Field, Bucket: h})
+		}
 		if s.Worker != nil {
 			if api.Database == nil {
 				return nil, fmt.Errorf("stack %s: worker %s of %s opens no pool on %s, whose queue it claims", in.Stack, in.Server, o.SchemaName, o.Deps.Database)
@@ -613,7 +660,7 @@ func PlanRust(in RustInput) (*RustServer, error) {
 // planManifest plans Cargo.toml's dependencies: axum, serde_json and tokio
 // with the features main.rs uses, tower for a server of more than one API,
 // the HTTP runtime from its checkout with the features main.rs and the
-// served APIs use, each API crate, its implementation's mirror under the
+// served APIs use, gcs among them for a bucket (D54), each API crate, its implementation's mirror under the
 // output root (D65), and each callee's SDK, by paths relative to the
 // crate. A job's or a worker's main.rs serves nothing, and takes tokio
 // alone of the registry's crates, for its runtime.
@@ -640,6 +687,12 @@ func (s *RustServer) planManifest(in RustInput, dir string) error {
 		// A callee's credential may be a Google ID token, which the
 		// runtime asks the metadata server for.
 		features["http-client"] = true
+	}
+	if len(s.Buckets) > 0 {
+		// Every bucket connection is GCS's today, the local emulator's
+		// too, so the build decides by the bucket, as Go's and
+		// TypeScript's do (D54).
+		features["gcs"] = true
 	}
 	for _, a := range in.APIs {
 		for _, f := range a.Output.RuntimeFeatures() {
@@ -882,7 +935,7 @@ func (s *RustServer) RuntimeUses() []string {
 	if s.Background() {
 		return s.backgroundUses(runtime)
 	}
-	var uses []string
+	uses := s.bucketUses(runtime)
 	if s.AnyIdentity() {
 		uses = append(uses, rustutil.UseLine(runtime+"::identity", []string{"PostgresPool", "Store"}))
 	}
@@ -890,14 +943,7 @@ func (s *RustServer) RuntimeUses() []string {
 	if len(s.Databases) > 0 {
 		uses = append(uses, rustutil.UseLine(runtime+"::postgres", []string{"self", "Pool"}))
 	}
-	var stackconfig []string
-	if len(s.Clients) > 0 {
-		stackconfig = append(stackconfig, "self", "Service")
-	}
-	if len(s.Databases) > 0 {
-		stackconfig = append(stackconfig, "Database")
-	}
-	if len(stackconfig) > 0 {
+	if stackconfig := s.stackconfigUses(); len(stackconfig) > 0 {
 		uses = append(uses, rustutil.UseLine(runtime+"::stackconfig", stackconfig))
 	}
 	var root []string
@@ -920,31 +966,51 @@ func (s *RustServer) RuntimeUses() []string {
 }
 
 // backgroundUses are the use declarations of a job's or a worker's main.rs
-// from the HTTP runtime, in the order rustfmt sorts them: its log, its
-// pool and the readers of its fields, the queue and the claim loop for a
-// worker, and the Shutdown it stops on.
+// from the HTTP runtime, in the order rustfmt sorts them: its buckets', its
+// log, its pool and the readers of its fields, the queue and the claim
+// loop for a worker, and the Shutdown it stops on.
 func (s *RustServer) backgroundUses(runtime string) []string {
-	uses := []string{rustutil.UseLine(runtime+"::logging", []string{"self", "tracing"})}
+	uses := append(s.bucketUses(runtime), rustutil.UseLine(runtime+"::logging", []string{"self", "tracing"}))
 	if len(s.Databases) > 0 {
 		uses = append(uses, rustutil.UseLine(runtime+"::postgres", []string{"self", "Pool"}))
 	}
 	if s.Worker != nil {
 		uses = append(uses, rustutil.UseLine(runtime+"::queue", []string{"PostgresQueue", "QueueDefinition"}))
 	}
-	var stackconfig []string
-	if len(s.Clients) > 0 {
-		stackconfig = append(stackconfig, "self", "Service")
-	}
-	if len(s.Databases) > 0 {
-		stackconfig = append(stackconfig, "Database")
-	}
-	if len(stackconfig) > 0 {
+	if stackconfig := s.stackconfigUses(); len(stackconfig) > 0 {
 		uses = append(uses, rustutil.UseLine(runtime+"::stackconfig", stackconfig))
 	}
 	if s.Worker != nil {
 		uses = append(uses, rustutil.UseLine(runtime+"::worker", []string{"self", "Options"}))
 	}
 	return append(uses, "use "+runtime+"::Shutdown;")
+}
+
+// bucketUses are the use declarations of main.rs from the HTTP runtime for
+// its buckets (D54): the Bucket each API's Deps holds and the gcs module
+// that opens it, none without a bucket.
+func (s *RustServer) bucketUses(runtime string) []string {
+	if len(s.Buckets) == 0 {
+		return nil
+	}
+	return []string{"use " + runtime + "::bucket::Bucket;", "use " + runtime + "::gcs;"}
+}
+
+// stackconfigUses are what main.rs names from the HTTP runtime's
+// stackconfig: the module itself for a client's credential source and a
+// bucket's connection, Service for a client, and Database for a pool.
+func (s *RustServer) stackconfigUses() []string {
+	var items []string
+	if len(s.Clients) > 0 || len(s.Buckets) > 0 {
+		items = append(items, "self")
+	}
+	if len(s.Clients) > 0 {
+		items = append(items, "Service")
+	}
+	if len(s.Databases) > 0 {
+		items = append(items, "Database")
+	}
+	return items
 }
 
 // CrateUses are main.rs's use declarations of the generated crates and the
