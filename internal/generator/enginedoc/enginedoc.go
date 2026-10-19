@@ -38,7 +38,7 @@ type Document struct {
 	Namespace string `json:"namespace"`
 	// Tools are the D11 options the engine writes its tool documents and
 	// MCP tools with, as this binary registers them: the shape of the
-	// TypeScript engine's EngineOptions.tools.
+	// EngineOptions.tools of @superschematic/engine.
 	Tools Tools `json:"tools"`
 	// Behaviors are the behaviors the engine types compose, by name, each
 	// with what implements it.
