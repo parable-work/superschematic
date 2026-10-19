@@ -5,10 +5,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { afterEach, describe, test } from 'node:test';
 
-import { loadSchemaFile } from '@superschematic/schema-runtime';
-
-import { EngineError, SchemaDocumentError, type Engine } from '../dist/index.js';
-import { objectScalarIssue } from '../dist/registry/document.js';
+import { EngineError, SchemaDocumentError, canonicalJSON, type Engine } from '../dist/index.js';
 import { alice, cleanup, clone, drivers, openTestEngine, orderDocument, schemaDocument, thrown } from './helpers.ts';
 
 afterEach(cleanup);
@@ -49,12 +46,15 @@ for (const driver of drivers) {
     });
 
     test('the stored document is the loader canonical form, with its SHA-256', () => {
+      // The canonical form is the document's canonical JSON (RFC 8785),
+      // which the schema runtimes' loaders write alike
+      // (runtime/schema/testdata/schema_file_parity.json holds them to it).
       const engine = open();
       const text = JSON.stringify(orderDocument(), null, 2);
       const record = engine.schemas.define(alice, text);
-      const { canonical, document } = loadSchemaFile(text);
+      const canonical = canonicalJSON(orderDocument());
       assert.equal(record.canonical, canonical);
-      assert.deepEqual(record.document, document);
+      assert.deepEqual(record.document, orderDocument());
       assert.equal(record.hash, createHash('sha256').update(canonical).digest('hex'));
       assert.equal(engine.schemas.define(alice, orderDocument()).canonical, canonical);
     });
@@ -271,7 +271,7 @@ for (const driver of drivers) {
 
       // A draft an engine stored before the rule is refused at publish,
       // which loads it again.
-      const { canonical } = loadSchemaFile(JSON.stringify(blob('Reading')));
+      const canonical = canonicalJSON(blob('Reading'));
       engine.storage.run(
         'INSERT INTO engine_schemas (namespace, name, version, document, hash, defined_at, defined_by) VALUES (?, ?, 0, ?, ?, ?, ?)',
         ['default', 'Reading', canonical, createHash('sha256').update(canonical).digest('hex'), 1, 'alice']
@@ -307,18 +307,6 @@ for (const driver of drivers) {
         { path: '/scalars/Acme.Blob', message: 'scalar map key "Acme.Blob" does not match the definition name "Acme.Other"' },
       ]);
       assert.deepEqual(engine.schemas.list(alice), []);
-    });
-
-    test("an object scalar's refusal is the Go loader's, word for word", () => {
-      // ir/testdata/object_scalar_errors.json: the cases the Go IR's
-      // ScalarDef.ObjectJSONError tests read too.
-      const { cases } = JSON.parse(readFileSync(new URL('../../../../ir/testdata/object_scalar_errors.json', import.meta.url), 'utf8')) as {
-        cases: Array<{ case: string; scalar: { name: string } & Record<string, unknown>; error: string | null }>;
-      };
-      assert.ok(cases.length > 0);
-      for (const { case: name, scalar, error } of cases) {
-        assert.equal(objectScalarIssue(scalar.name, scalar as never), error ?? undefined, name);
-      }
     });
 
     test('an extension JSON scalar, as format --to=json writes it, is defined and published', () => {

@@ -11,16 +11,8 @@ import { afterEach, describe, test } from 'node:test';
 
 import type { Authenticator } from '@superschematic/http-runtime';
 
-import {
-  BehaviorError,
-  BehaviorVetoError,
-  CreateParamsError,
-  defineBehavior,
-  type BehaviorDeclaration,
-  type Engine,
-  type FrozenJSON,
-  type GuardRequest,
-} from '../dist/index.js';
+import { BehaviorError, BehaviorVetoError, CreateParamsError, type BehaviorDeclaration, type Engine } from '../dist/index.js';
+import { defineBehavior, type FrozenJSON, type GuardRequest } from '../dist/testing/index.js';
 import { engineApp } from '../dist/http/index.js';
 import { hold, holdDeclaration, openBehaviorEngine, publishItem, testBehaviors } from './behavior-fixtures.ts';
 import { alice, cleanup, drivers, thrown } from './helpers.ts';

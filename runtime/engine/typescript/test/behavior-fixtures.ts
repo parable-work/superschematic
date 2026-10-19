@@ -5,16 +5,9 @@
 // vetoes with codes, registers only where a test asks for it.
 import { readFileSync } from 'node:fs';
 
-import {
-  BehaviorConfigError,
-  BehaviorVetoError,
-  defineBehavior,
-  type BehaviorDeclaration,
-  type Engine,
-  type EngineOptions,
-  type GuardRequest,
-} from '../dist/index.js';
-import { alice, openTestEngine, schemaDocument, type Field } from './helpers.ts';
+import { BehaviorVetoError, type BehaviorDeclaration, type Engine } from '../dist/index.js';
+import { BehaviorConfigError, defineBehavior, type GuardRequest } from '../dist/testing/index.js';
+import { alice, openTestEngine, schemaDocument, type Field, type TestEngineOptions } from './helpers.ts';
 
 /**
  * The core meta-schema with behaviors let through: any name, any config.
@@ -384,7 +377,7 @@ export function itemDocument(behaviors: Array<{ name: string; config?: unknown }
 }
 
 /** openBehaviorEngine opens an engine with the test behaviors and the open meta-schema. */
-export function openBehaviorEngine(options: Partial<EngineOptions> = {}): Engine {
+export function openBehaviorEngine(options: Partial<TestEngineOptions> = {}): Engine {
   return openTestEngine({ metaSchema: openMetaSchema(), behaviors: testBehaviors, ...options });
 }
 

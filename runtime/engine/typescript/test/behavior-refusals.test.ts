@@ -9,15 +9,8 @@
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, test } from 'node:test';
 
-import {
-  BehaviorError,
-  BehaviorVetoError,
-  PreconditionsError,
-  defineBehavior,
-  type AnyBehaviorImplementation,
-  type BehaviorDeclaration,
-  type Engine,
-} from '../dist/index.js';
+import { BehaviorError, BehaviorVetoError, PreconditionsError, type BehaviorDeclaration, type Engine } from '../dist/index.js';
+import { defineBehavior, type AnyBehaviorImplementation } from '../dist/testing/index.js';
 import { hold, holdDeclaration, holdRequests, openMetaSchema, publishItem, testBehaviors } from './behavior-fixtures.ts';
 import { alice, cleanup, clone, drivers, openTestEngine, thrown } from './helpers.ts';
 import { testHooks } from './recorder.ts';

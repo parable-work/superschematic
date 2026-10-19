@@ -13,10 +13,10 @@ import { serve as serveNode } from '@hono/node-server';
 import type { Authenticator } from '@superschematic/http-runtime';
 import type { Hono } from 'hono';
 
-import { type AccessPolicy, type Engine, type EngineEvent, type EngineOptions } from '../dist/index.js';
+import type { AccessPolicy, Engine, EngineEvent } from '../dist/index.js';
 import { engineApp, type EngineHttpOptions } from '../dist/http/index.js';
 import { openMetaSchema, publishItem, testBehaviors } from './behavior-fixtures.ts';
-import { alice, backends, cleanup, orderDocument, schemaDocument, unlessOn } from './helpers.ts';
+import { alice, backends, cleanup, orderDocument, schemaDocument, unlessOn, type TestEngineOptions } from './helpers.ts';
 import { servedApp } from './recorder.ts';
 
 // The bearer token is the caller's subject.
@@ -209,7 +209,7 @@ async function eventually(check: () => boolean, what: string): Promise<void> {
 for (const backend of backends) {
   const typescriptOnly = (what: string) => unlessOn(backend, 'postgres', `${what} written in TypeScript: openEngineAsync takes its options as data`);
 
-  async function serve(options: EngineHttpOptions = {}, engineOptions: Partial<EngineOptions> = {}): Promise<{ engine: Engine; base: string }> {
+  async function serve(options: EngineHttpOptions = {}, engineOptions: Partial<TestEngineOptions> = {}): Promise<{ engine: Engine; base: string }> {
     const engine = await backend.open(engineOptions);
     const server = await listen(servedApp(engineApp, engine, { authenticate, ...options }));
     servers.push(server);

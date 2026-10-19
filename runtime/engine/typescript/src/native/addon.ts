@@ -15,8 +15,9 @@ runtime/engine/rust/addon over runtime/engine/rust/napi
   @superschematic/engine-<triple>, an optional dependency of this package
   at its version, of which npm installs the one for its host.
 
-The addon is loaded on first use, never when this module is imported, so
-the TypeScript engine runs without it; each file loads once.
+The addon is loaded when the first engine opens, never when this module
+is imported, so the package's types, client and helpers load without it;
+each file loads once.
 */
 
 import { existsSync } from 'node:fs';

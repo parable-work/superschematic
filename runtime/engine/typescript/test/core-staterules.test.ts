@@ -12,15 +12,8 @@
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
 
-import {
-  BehaviorVetoError,
-  InstanceValidationError,
-  SchemaDocumentError,
-  defineBehavior,
-  type Engine,
-  type FrozenJSON,
-  type Principal,
-} from '../dist/index.js';
+import { BehaviorVetoError, InstanceValidationError, SchemaDocumentError, type Engine, type Principal } from '../dist/index.js';
+import { defineBehavior, type FrozenJSON } from '../dist/testing/index.js';
 import { engineProblem } from '../dist/http/index.js';
 import { openMetaSchema } from './behavior-fixtures.ts';
 import { alice, cleanup, clone, drivers, invoicesDocument, openTestEngine, thrown } from './helpers.ts';

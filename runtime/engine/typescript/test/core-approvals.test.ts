@@ -16,11 +16,10 @@ import {
   OperationParamsError,
   SchemaDocumentError,
   type Engine,
-  type EngineOptions,
   type Principal,
   type ToolGuidance,
 } from '../dist/index.js';
-import { alice, cleanup, drivers, openTestEngine, schemaDocument, thrown } from './helpers.ts';
+import { alice, cleanup, drivers, openTestEngine, schemaDocument, thrown, type TestEngineOptions } from './helpers.ts';
 
 afterEach(cleanup);
 
@@ -70,7 +69,7 @@ type Page<T> = { items: T[]; next: string | null };
 for (const driver of drivers) {
   // published opens an engine with the Doc schema and d1, which alice
   // created, in draft.
-  function published(behaviors?: Behavior[], options: Partial<EngineOptions> = {}): Engine {
+  function published(behaviors?: Behavior[], options: Partial<TestEngineOptions> = {}): Engine {
     const engine = openTestEngine({ driver, ...options });
     engine.schemas.define(alice, docSchema(behaviors));
     engine.schemas.publish(alice, 'Doc');
