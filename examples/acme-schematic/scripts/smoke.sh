@@ -119,17 +119,25 @@
 #      the project's engine crate (engine/rust/shop-ratings), which depends
 #      on acme-behaviors and registers acme_behaviors::Rating after the
 #      core's behaviors, with its ffi member, the C ABI's archive over
-#      those behaviors that a Go server links; the crate's workspace builds
-#      and passes clippy and its tests: the library's opens the engine on
-#      SQLite and finds acme.Rating registered, and the archive's opens one
-#      through its own eng_open, as the Go binding does, and finds it too.
+#      those behaviors that a Go server links, and its napi member, the
+#      Node-API addon over them that a TypeScript server loads; the crate's
+#      workspace builds and passes clippy and its tests: the library's opens
+#      the engine on SQLite and finds acme.Rating registered, and the
+#      archive's opens one through its own eng_open, as the Go binding does,
+#      and finds it too; its resolve holds napi-derive-backend at the
+#      version that compiles; and scripts/engine-napi.sh builds the addon,
+#      on which step 20's TypeScript cases pass under Node.js and Bun, the
+#      engine opened as a TypeScript server opens it (openEngineAsync,
+#      SUPERSCHEMATIC_ENGINE_ADDON) and acme.Rating the crate's, in Rust.
 #
 # Step 16 also needs bun and installs hono and the generated types package's
 # dependencies from the npm registry. Step 20 needs bun and Node.js 24, builds
 # the schema runtime and the engine, and installs their dependencies from the
 # npm registry. Step 21 builds the Rust engine with cargo, with the toolchain
 # tools.env pins, into CARGO_TARGET_DIR or the crate's target/, from the
-# crates.io index unless cargo's cache has the engine's dependencies.
+# crates.io index unless cargo's cache has the engine's dependencies, and
+# the addon with the napi CLI step 20 installed with the engine's
+# dependencies.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -601,14 +609,27 @@ grep -qx 'name = "acme-shop-ratings-engine"' "$ENGINE_CRATE/Cargo.toml"
 grep -q '^acme-behaviors = { path = ".*/examples/acme-schematic/crates/behaviors" }$' "$ENGINE_CRATE/Cargo.toml"
 grep -qx '        .with(acme_behaviors::Rating)' "$ENGINE_CRATE/src/lib.rs"
 grep -q '"key": "confirm",' "$ENGINE_CRATE/src/lib.rs"
-grep -qx 'members = \["ffi"\]' "$ENGINE_CRATE/Cargo.toml"
+grep -qx 'members = \["ffi", "napi"\]' "$ENGINE_CRATE/Cargo.toml"
 grep -qx 'name = "acme-shop-ratings-engine-ffi"' "$ENGINE_CRATE/ffi/Cargo.toml"
 grep -q '^superschematic-engine-abi = { path = ".*/runtime/engine/rust/abi", default-features = false }$' "$ENGINE_CRATE/ffi/Cargo.toml"
 grep -qx 'superschematic_engine_abi::export_engine_c_abi!(behaviors = project::behaviors);' "$ENGINE_CRATE/ffi/src/lib.rs"
-# The workspace, library and archive, resolves acme's locked versions, to
-# which cargo adds the C ABI's library.
+grep -qx 'name = "acme-shop-ratings-engine-napi"' "$ENGINE_CRATE/napi/Cargo.toml"
+grep -q '^superschematic-engine-napi = { path = ".*/runtime/engine/rust/napi", default-features = false }$' "$ENGINE_CRATE/napi/Cargo.toml"
+grep -qx 'superschematic_engine_napi::export_engine_napi!(behaviors = project::behaviors);' "$ENGINE_CRATE/napi/src/lib.rs"
+# The workspace, library, archive and addon, resolves acme's locked
+# versions, to which cargo adds the C ABI's library and the addon's with
+# the napi crates, napi-derive-backend held at 6.1.4 by the addon library's
+# manifest.
 cp "$CRATE/Cargo.lock" "$ENGINE_CRATE/Cargo.lock"
 (cd "$ENGINE_CRATE" && CARGO_TARGET_DIR="$CARGO_TARGET" cargo clippy --quiet --workspace --all-targets -- -D warnings)
 (cd "$ENGINE_CRATE" && CARGO_TARGET_DIR="$CARGO_TARGET" cargo test --quiet --workspace)
+[ "$(grep -A1 -x 'name = "napi-derive-backend"' "$ENGINE_CRATE/Cargo.lock" | tail -n 1)" = 'version = "6.1.4"' ]
+# The addon, as a TypeScript server's build would build it (a debug build:
+# the crate's tests built the same dependencies), then step 20's cases on
+# the Rust engine through it, acme.Rating the crate's.
+ADDON="$(CARGO_TARGET_DIR="$CARGO_TARGET" "$REPO_ROOT/scripts/engine-napi.sh" --debug --crate "$ENGINE_CRATE/napi" --out "$OUT/engine-addon")"
+node -e 'const addon = require(process.argv[1]); if (addon.project() !== "acme-shop-ratings-engine-napi" || addon.bridgeCall !== undefined) { console.error(`the addon is ${addon.project()}`); process.exit(1); }' "$ADDON"
+(cd "$BEHAVIORS" && ACME_META_SCHEMA="$OUT/acme-schema-file.json" SUPERSCHEMATIC_ENGINE_ADDON="$ADDON" node --test 'test/*.test.ts')
+(cd "$BEHAVIORS" && ACME_META_SCHEMA="$OUT/acme-schema-file.json" SUPERSCHEMATIC_ENGINE_ADDON="$ADDON" bun test ./test)
 
 echo "acme smoke: ok"
