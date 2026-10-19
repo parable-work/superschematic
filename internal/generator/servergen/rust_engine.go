@@ -2,7 +2,7 @@ package servergen
 
 import (
 	"fmt"
-	"path"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -315,8 +315,11 @@ func (s *RustServer) engineDependencies(in RustInput, pathDep func(string, ...st
 // workspace and the crates outside it its manifests reach (engineCrates),
 // the project's engine crates under the output root, and the extensions'
 // crates the entrypoint's project's reaches. Empty when [paths]
-// engine_rust is unset, so no member depends on the engine.
-func engineDockerIncludes(in RustInput, s *RustServer, workspace string, rel func(string) (string, bool)) ([]string, string) {
+// engine_rust is unset, so no member depends on the engine. An entrypoint
+// that opens no engine takes in those of them on disk alone, which
+// another member may reach: a deploy's context refuses a path it takes in
+// and does not hold.
+func engineDockerIncludes(in RustInput, s *RustServer, rel func(string) (string, bool)) ([]string, string) {
 	if in.Paths.EngineRust == "" {
 		return nil, ""
 	}
@@ -324,17 +327,30 @@ func engineDockerIncludes(in RustInput, s *RustServer, workspace string, rel fun
 	// workspace beside it.
 	engineWorkspace := filepath.Dir(in.Paths.EngineRust)
 	checkout := filepath.Dir(filepath.Dir(filepath.Dir(engineWorkspace)))
-	dir, ok := rel(engineWorkspace)
-	if !ok {
-		return nil, fmt.Sprintf("the engine's Cargo workspace %s lies outside the repository root, the build context", engineWorkspace)
-	}
-	include := []string{dir, path.Join(workspace, "engine", "rust")}
-	for _, crate := range engineCrates {
-		r, ok := rel(filepath.Join(checkout, filepath.FromSlash(crate)))
+	var include []string
+	add := func(abs, what string) string {
+		if len(s.Engines) == 0 {
+			if _, err := os.Stat(abs); err != nil {
+				return ""
+			}
+		}
+		r, ok := rel(abs)
 		if !ok {
-			return nil, fmt.Sprintf("%s, which the engine's workspace reaches, lies outside the repository root, the build context", crate)
+			return fmt.Sprintf("%s lies outside the repository root, the build context", what)
 		}
 		include = append(include, r)
+		return ""
+	}
+	if why := add(engineWorkspace, "the engine's Cargo workspace "+engineWorkspace); why != "" {
+		return nil, why
+	}
+	if why := add(filepath.Join(in.OutputRoot, "engine", "rust"), "the output root's project engine crates"); why != "" {
+		return nil, why
+	}
+	for _, crate := range engineCrates {
+		if why := add(filepath.Join(checkout, filepath.FromSlash(crate)), crate+", which the engine's workspace reaches,"); why != "" {
+			return nil, why
+		}
 	}
 	if s.EngineProject != nil {
 		for _, crate := range s.EngineProject.Crates {

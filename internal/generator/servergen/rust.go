@@ -841,7 +841,7 @@ func planRustDocker(in RustInput, s *RustServer, dir string) (*RustDocker, strin
 	if path.Base(path.Dir(scalar)) == "crates" {
 		d.Include = append(d.Include, path.Dir(path.Dir(scalar))+"/"+RustManifestFile)
 	}
-	engines, why := engineDockerIncludes(in, s, d.Workspace, rel)
+	engines, why := engineDockerIncludes(in, s, rel)
 	if why != "" {
 		return nil, why, nil
 	}

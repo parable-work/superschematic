@@ -175,3 +175,83 @@ func TestRustEngineEntrypointServes(t *testing.T) {
 	runner.stop(t)
 	online.stop(t)
 }
+
+// TestTheRustEngineDockerfileBuildsAnImageThatServes: desk-rs-api's
+// Dockerfile builds from the context a deploy writes out of a repository
+// root holding the generated crates, the scaffolds, the workspace's
+// lockfile and copies of the HTTP runtime, the schema runtime,
+// superscalar's crate and the engine's Cargo workspace with the crates it
+// reaches, which the image's context takes in (D58). The image serves
+// /healthz, names the engine in /readyz with no database up, answers the
+// engine's routes 503, and stops cleanly on docker stop. It needs Docker
+// and the network, and runs only outside -short.
+func TestTheRustEngineDockerfileBuildsAnImageThatServes(t *testing.T) {
+	needDocker(t)
+	if _, err := exec.LookPath("cargo"); err != nil {
+		t.Skip("cargo not available: the stack's build writes the lockfile with it")
+	}
+	local := testpaths.Local(t)
+	repo := testpaths.RepoRoot(t)
+	repoRoot := testpaths.TempDir(t)
+	paths := rustFakePaths(repoRoot)
+	copyTree(t, local.HTTPRuntimeRust, paths.HTTPRuntimeRust)
+	copyTree(t, local.SchemaRuntimeRust, paths.SchemaRuntimeRust)
+	copyTree(t, local.ScalarRust, paths.ScalarRust)
+	workspace, err := os.ReadFile(filepath.Join(filepath.Dir(filepath.Dir(local.ScalarRust)), "Cargo.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(filepath.Dir(filepath.Dir(paths.ScalarRust)), "Cargo.toml"), workspace, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// The engine's workspace reaches the crates of superscalar beside its
+	// core, as the checkout lays them out.
+	copyTree(t, filepath.Join(repo, "third_party", "superscalar", "crates"), filepath.Join(repoRoot, "third_party", "superscalar", "crates"))
+	for _, dir := range []string{"runtime/engine/rust", "runtime/engine-workqueue/rust", "runtime/schema/rust-ir", "runtime/versiongraph/rust-engine", "runtime/versiongraph/rust"} {
+		copyTree(t, filepath.Join(repo, filepath.FromSlash(dir)), filepath.Join(repoRoot, filepath.FromSlash(dir)))
+	}
+	f := loadEngineFixture(t)
+	f.build(t, repoRoot, paths, rustEngineOrder...)
+	out := filepath.Join(repoRoot, "schemas", "dist")
+	if _, err := os.Stat(filepath.Join(out, servergen.RustLockfileName)); err != nil {
+		t.Fatalf("the stack's build wrote no lockfile: %v", err)
+	}
+	image := buildRustImage(t, repoRoot, servergen.ServerDir(out, rustEngineStack, rustEngineServer))
+
+	public, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := []string{"run", "-d", "-p", "127.0.0.1::8080",
+		"-e", "DESK_DB_DATABASE_URL=postgres://desk@127.0.0.1:9/desk_db?connect_timeout=1&sslmode=disable",
+		"-e", `DESK_RS_API_IDENTITY={"cookie": {"secure": false}}`}
+	for _, v := range opsCallersVariables(t, rustEngineServer, public, "ops-key") {
+		args = append(args, "-e", v)
+	}
+	container := docker(t, append(args, image)...)
+	t.Cleanup(func() { _ = exec.Command("docker", "rm", "-f", container).Run() })
+	s := &started{base: "http://" + firstLine(docker(t, "port", container, "8080/tcp")), out: &strings.Builder{}}
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		resp, err := http.Get(s.base + "/healthz")
+		if err == nil {
+			resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				break
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the container did not answer /healthz: %v\n%s", err, docker(t, "logs", container))
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	s.expect(t, http.MethodGet, "/readyz", http.StatusServiceUnavailable, `"desk-db engine"`)
+	s.expect(t, http.MethodGet, "/engine/desk-db/namespaces/desk-db/schemas", http.StatusServiceUnavailable, `"code":"unavailable"`)
+	docker(t, "stop", container)
+	if code := docker(t, "inspect", "-f", "{{.State.ExitCode}}", container); code != "0" {
+		t.Errorf("the container exited %s on docker stop:\n%s", code, docker(t, "logs", container))
+	}
+	if logs := docker(t, "logs", container); !strings.Contains(logs, `"msg":"stopped"`) {
+		t.Errorf("the container did not log its graceful stop:\n%s", logs)
+	}
+}
