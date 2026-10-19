@@ -145,23 +145,33 @@ not list too.
 The acme shop's `examples/acme-shop/topcoat` is a Topcoat app over
 `shop-orders`, and the docs site's
 [Pages with Topcoat](../../docs/src/content/docs/guides/topcoat.mdx)
-guide walks it. Its `app` mounts the crate:
+guide walks it. Its `app` mounts the crate, and, given the asset bundle,
+serves Topcoat's runtime, which the console's [live lists](#live-lists)
+render in place with:
 
 ```rust
 let implementations = implementations(shop, Arc::clone(&users));
 let authenticator = IdentityPageAuthenticator::of(&implementations);
-Router::builder()
+let builder = Router::builder()
     .discover()
     .app_context(users)
     .app_context(console_settings())
-    .shop_orders(implementations, authenticator)
-    .build()
+    .shop_orders(implementations, authenticator);
+match assets {
+    Some(assets) => builder.assets(assets).runtime().build(),
+    None => builder.build(),
+}
 ```
 
 `shop_orders` takes the API's `Implementations`, the same value the JSON
 API serves, and a `PageAuthenticator` when an operation needs a caller.
 `console_settings()` is the [pages](#pages)' `pages::Settings`, since
-acme's `superschematic.toml` turns shop-orders' console on.
+acme's `superschematic.toml` turns shop-orders' console on, with its lists
+live (`pages_live`). Its root layout, `#[layout("/")] document`, gives
+every page its HTML document, with the runtime's script in its head when
+the router set the runtime up; `main` loads the bundle with
+`AssetBundle::load()` and, without one, serves the pages without the
+runtime.
 The authenticator establishes a page's caller, here from the session the
 shop's users sign in with ([Users and sessions](#users-and-sessions)); an
 app whose users are its own writes one over a Topcoat session, say. The

@@ -617,7 +617,7 @@ each word, in any case, and the links of a paged search carry it:
 
 With `live: true` beside `enabled` in `outputs.topcoat.pages`, or
 `pages_live = true` beside `pages_prefix` in the table, each list with a
-filter renders through a Topcoat shard at a path of its own,
+filter, or that pages, renders through a Topcoat shard at a path of its own,
 `/console/_live/orders`. Without Topcoat's runtime in the browser nothing
 changes: the filter is a GET form and its submit loads the page. With
 it, the submit sends the form's query to the shard, which renders the
@@ -631,34 +631,52 @@ pages in place, back and forth, with or without a filter, and its size
 form sets the query as the filter does. An action's form keeps its
 POST-redirect-GET.
 
-The acme app loads no runtime, so its console's lists are not live. An
-app that does gives the document its head in a root layout of its own,
-since the console's layout renders no `<html>`, and builds its router
-with the asset bundle and the runtime:
+acme's console is live: its `superschematic.toml` sets `pages_live =
+true`. The console's layout renders no `<html>`, so the app gives every
+page its document in a root layout of its own, which loads the runtime's
+script in its head when the router set the runtime up, and `app` takes
+the asset bundle and, with one, adds the assets and the runtime after
+`shop_orders`:
 
 ```rust
+pub fn app<S: ShopImplementation>(shop: Arc<S>, users: Arc<Service>, assets: Option<AssetConfig>) -> Router {
+    let implementations = implementations(shop, Arc::clone(&users));
+    let authenticator = IdentityPageAuthenticator::of(&implementations);
+    let builder = Router::builder()
+        .discover()
+        .app_context(users)
+        .app_context(console_settings())
+        .shop_orders(implementations, authenticator);
+    match assets {
+        Some(assets) => builder.assets(assets).runtime().build(),
+        None => builder.build(),
+    }
+}
+
 #[layout("/")]
-async fn document(slot: Slot<'_>) -> topcoat::Result<impl View> {
+async fn document(cx: &Cx, slot: Slot<'_>) -> topcoat::Result<impl View> {
+    let live = try_app_context::<RuntimeSetup>(cx).is_some();
     Ok(view! {
         <!DOCTYPE html>
-        <html>
-            <head>topcoat::runtime::script()</head>
+        <html lang="en">
+            <head>
+                <meta charset="utf-8">
+                <title>"Acme shop"</title>
+                if live {
+                    topcoat::runtime::script()
+                }
+            </head>
             <body>(slot)</body>
         </html>
     })
 }
-
-Router::builder()
-    .discover()
-    .app_context(console_settings())
-    .shop_orders(implementations, authenticator)
-    .assets(AssetBundle::load()?)
-    .runtime()
-    .build()
 ```
 
-`topcoat asset bundle` writes the bundle, which holds the runtime's
-script, beside the binary.
+`main` loads `AssetBundle::load()`, the bundle that `topcoat asset bundle
+--bin acme-shop-topcoat` writes beside the binary, which holds the
+runtime's script. Without one it says so and serves the pages without the
+runtime, and the console's lists are the GET forms and links they are
+without it.
 
 ## Procedures
 
