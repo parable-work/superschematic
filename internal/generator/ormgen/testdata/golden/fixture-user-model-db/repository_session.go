@@ -42,8 +42,10 @@ var SessionQuotedFields = map[string]string{
 	"user_id":      `user_id`,
 }
 
-// buildSessionOrderByClause builds an ORDER BY clause for Session
-func buildSessionOrderByClause(orderBy []SessionOrderBy, tableName string) string {
+// buildSessionOrderByClause builds an ORDER BY clause for Session.
+// quotedTable is the table's name as the FROM clause spells it, quoted when
+// it is a keyword (a table named order is "order").
+func buildSessionOrderByClause(orderBy []SessionOrderBy, quotedTable string) string {
 	if len(orderBy) == 0 {
 		return ""
 	}
@@ -60,7 +62,7 @@ func buildSessionOrderByClause(orderBy []SessionOrderBy, tableName string) strin
 		if !ok {
 			quotedField = fieldStr // Fallback to unquoted if not found
 		}
-		clauses = append(clauses, fmt.Sprintf("%s.%s %s", tableName, quotedField, direction))
+		clauses = append(clauses, fmt.Sprintf("%s.%s %s", quotedTable, quotedField, direction))
 	}
 
 	if len(clauses) == 0 {
@@ -504,7 +506,7 @@ func (r *SessionRepository) FindOne(ctx context.Context, filter *SessionFilter, 
 	whereClause := filter.buildWhereClause(&args, 0)
 
 	// Build ORDER BY clause
-	orderByClause := buildSessionOrderByClause(opts.OrderBy, "session")
+	orderByClause := buildSessionOrderByClause(opts.OrderBy, `"session"`)
 
 	// Build query
 	query := fmt.Sprintf(`SELECT %s FROM "session"%s%s LIMIT 1`, selectFields, whereClause, orderByClause)
@@ -702,7 +704,7 @@ func (r *SessionRepository) FindMany(ctx context.Context, filter *SessionFilter,
 	whereClause := filter.buildWhereClause(&args, 0)
 
 	// Build ORDER BY clause
-	orderByClause := buildSessionOrderByClause(opts.OrderBy, "session")
+	orderByClause := buildSessionOrderByClause(opts.OrderBy, `"session"`)
 
 	// Build LIMIT/OFFSET clause
 	limitOffsetClause := buildLimitOffsetClauseTyped(opts.Limit, opts.Offset)

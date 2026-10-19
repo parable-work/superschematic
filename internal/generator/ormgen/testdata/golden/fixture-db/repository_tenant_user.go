@@ -100,8 +100,10 @@ var TenantUserQuotedFields = map[string]string{
 	"tenant_id":    `tenant_id`,
 }
 
-// buildTenantUserOrderByClause builds an ORDER BY clause for TenantUser
-func buildTenantUserOrderByClause(orderBy []TenantUserOrderBy, tableName string) string {
+// buildTenantUserOrderByClause builds an ORDER BY clause for TenantUser.
+// quotedTable is the table's name as the FROM clause spells it, quoted when
+// it is a keyword (a table named order is "order").
+func buildTenantUserOrderByClause(orderBy []TenantUserOrderBy, quotedTable string) string {
 	if len(orderBy) == 0 {
 		return ""
 	}
@@ -118,7 +120,7 @@ func buildTenantUserOrderByClause(orderBy []TenantUserOrderBy, tableName string)
 		if !ok {
 			quotedField = fieldStr // Fallback to unquoted if not found
 		}
-		clauses = append(clauses, fmt.Sprintf("%s.%s %s", tableName, quotedField, direction))
+		clauses = append(clauses, fmt.Sprintf("%s.%s %s", quotedTable, quotedField, direction))
 	}
 
 	if len(clauses) == 0 {
@@ -723,7 +725,7 @@ func (r *TenantUserRepository) FindOne(ctx context.Context, filter *TenantUserFi
 	}
 
 	// Build ORDER BY clause
-	orderByClause := buildTenantUserOrderByClause(opts.OrderBy, "tenant_user")
+	orderByClause := buildTenantUserOrderByClause(opts.OrderBy, `tenant_user`)
 
 	// Build query
 	query := fmt.Sprintf(`SELECT %s FROM tenant_user%s%s LIMIT 1`, selectFields, whereClause, orderByClause)
@@ -923,7 +925,7 @@ func (r *TenantUserRepository) FindMany(ctx context.Context, filter *TenantUserF
 	}
 
 	// Build ORDER BY clause
-	orderByClause := buildTenantUserOrderByClause(opts.OrderBy, "tenant_user")
+	orderByClause := buildTenantUserOrderByClause(opts.OrderBy, `tenant_user`)
 
 	// Build LIMIT/OFFSET clause
 	limitOffsetClause := buildLimitOffsetClauseTyped(opts.Limit, opts.Offset)

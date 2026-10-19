@@ -38,8 +38,10 @@ var BoardQuotedFields = map[string]string{
 	"scores": `scores`,
 }
 
-// buildBoardOrderByClause builds an ORDER BY clause for Board
-func buildBoardOrderByClause(orderBy []BoardOrderBy, tableName string) string {
+// buildBoardOrderByClause builds an ORDER BY clause for Board.
+// quotedTable is the table's name as the FROM clause spells it, quoted when
+// it is a keyword (a table named order is "order").
+func buildBoardOrderByClause(orderBy []BoardOrderBy, quotedTable string) string {
 	if len(orderBy) == 0 {
 		return ""
 	}
@@ -56,7 +58,7 @@ func buildBoardOrderByClause(orderBy []BoardOrderBy, tableName string) string {
 		if !ok {
 			quotedField = fieldStr // Fallback to unquoted if not found
 		}
-		clauses = append(clauses, fmt.Sprintf("%s.%s %s", tableName, quotedField, direction))
+		clauses = append(clauses, fmt.Sprintf("%s.%s %s", quotedTable, quotedField, direction))
 	}
 
 	if len(clauses) == 0 {
@@ -399,7 +401,7 @@ func (r *BoardRepository) FindOne(ctx context.Context, filter *BoardFilter, opts
 	whereClause := filter.buildWhereClause(&args, 0)
 
 	// Build ORDER BY clause
-	orderByClause := buildBoardOrderByClause(opts.OrderBy, "board")
+	orderByClause := buildBoardOrderByClause(opts.OrderBy, `board`)
 
 	// Build query
 	query := fmt.Sprintf(`SELECT %s FROM board%s%s LIMIT 1`, selectFields, whereClause, orderByClause)
@@ -570,7 +572,7 @@ func (r *BoardRepository) FindMany(ctx context.Context, filter *BoardFilter, opt
 	whereClause := filter.buildWhereClause(&args, 0)
 
 	// Build ORDER BY clause
-	orderByClause := buildBoardOrderByClause(opts.OrderBy, "board")
+	orderByClause := buildBoardOrderByClause(opts.OrderBy, `board`)
 
 	// Build LIMIT/OFFSET clause
 	limitOffsetClause := buildLimitOffsetClauseTyped(opts.Limit, opts.Offset)

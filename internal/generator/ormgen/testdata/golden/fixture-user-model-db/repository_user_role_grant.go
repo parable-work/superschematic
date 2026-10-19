@@ -36,8 +36,10 @@ var UserRoleGrantQuotedFields = map[string]string{
 	"role_id":    `role_id`,
 }
 
-// buildUserRoleGrantOrderByClause builds an ORDER BY clause for UserRoleGrant
-func buildUserRoleGrantOrderByClause(orderBy []UserRoleGrantOrderBy, tableName string) string {
+// buildUserRoleGrantOrderByClause builds an ORDER BY clause for UserRoleGrant.
+// quotedTable is the table's name as the FROM clause spells it, quoted when
+// it is a keyword (a table named order is "order").
+func buildUserRoleGrantOrderByClause(orderBy []UserRoleGrantOrderBy, quotedTable string) string {
 	if len(orderBy) == 0 {
 		return ""
 	}
@@ -54,7 +56,7 @@ func buildUserRoleGrantOrderByClause(orderBy []UserRoleGrantOrderBy, tableName s
 		if !ok {
 			quotedField = fieldStr // Fallback to unquoted if not found
 		}
-		clauses = append(clauses, fmt.Sprintf("%s.%s %s", tableName, quotedField, direction))
+		clauses = append(clauses, fmt.Sprintf("%s.%s %s", quotedTable, quotedField, direction))
 	}
 
 	if len(clauses) == 0 {
@@ -542,7 +544,7 @@ func (r *UserRoleGrantRepository) FindOne(ctx context.Context, filter *UserRoleG
 	whereClause := filter.buildWhereClause(&args, 0)
 
 	// Build ORDER BY clause
-	orderByClause := buildUserRoleGrantOrderByClause(opts.OrderBy, "user_role_grant")
+	orderByClause := buildUserRoleGrantOrderByClause(opts.OrderBy, `user_role_grant`)
 
 	// Build query
 	query := fmt.Sprintf(`SELECT %s FROM user_role_grant%s%s LIMIT 1`, selectFields, whereClause, orderByClause)
@@ -730,7 +732,7 @@ func (r *UserRoleGrantRepository) FindMany(ctx context.Context, filter *UserRole
 	whereClause := filter.buildWhereClause(&args, 0)
 
 	// Build ORDER BY clause
-	orderByClause := buildUserRoleGrantOrderByClause(opts.OrderBy, "user_role_grant")
+	orderByClause := buildUserRoleGrantOrderByClause(opts.OrderBy, `user_role_grant`)
 
 	// Build LIMIT/OFFSET clause
 	limitOffsetClause := buildLimitOffsetClauseTyped(opts.Limit, opts.Offset)

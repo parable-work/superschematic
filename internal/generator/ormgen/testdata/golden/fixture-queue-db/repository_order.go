@@ -32,8 +32,10 @@ var OrderQuotedFields = map[string]string{
 	"placed_at": `placed_at`,
 }
 
-// buildOrderOrderByClause builds an ORDER BY clause for Order
-func buildOrderOrderByClause(orderBy []OrderOrderBy, tableName string) string {
+// buildOrderOrderByClause builds an ORDER BY clause for Order.
+// quotedTable is the table's name as the FROM clause spells it, quoted when
+// it is a keyword (a table named order is "order").
+func buildOrderOrderByClause(orderBy []OrderOrderBy, quotedTable string) string {
 	if len(orderBy) == 0 {
 		return ""
 	}
@@ -50,7 +52,7 @@ func buildOrderOrderByClause(orderBy []OrderOrderBy, tableName string) string {
 		if !ok {
 			quotedField = fieldStr // Fallback to unquoted if not found
 		}
-		clauses = append(clauses, fmt.Sprintf("%s.%s %s", tableName, quotedField, direction))
+		clauses = append(clauses, fmt.Sprintf("%s.%s %s", quotedTable, quotedField, direction))
 	}
 
 	if len(clauses) == 0 {
@@ -286,7 +288,7 @@ func (r *OrderRepository) FindOne(ctx context.Context, filter *OrderFilter, opts
 	whereClause := filter.buildWhereClause(&args, 0)
 
 	// Build ORDER BY clause
-	orderByClause := buildOrderOrderByClause(opts.OrderBy, "order")
+	orderByClause := buildOrderOrderByClause(opts.OrderBy, `"order"`)
 
 	// Build query
 	query := fmt.Sprintf(`SELECT %s FROM "order"%s%s LIMIT 1`, selectFields, whereClause, orderByClause)
@@ -391,7 +393,7 @@ func (r *OrderRepository) FindMany(ctx context.Context, filter *OrderFilter, opt
 	whereClause := filter.buildWhereClause(&args, 0)
 
 	// Build ORDER BY clause
-	orderByClause := buildOrderOrderByClause(opts.OrderBy, "order")
+	orderByClause := buildOrderOrderByClause(opts.OrderBy, `"order"`)
 
 	// Build LIMIT/OFFSET clause
 	limitOffsetClause := buildLimitOffsetClauseTyped(opts.Limit, opts.Offset)
