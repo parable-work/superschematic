@@ -11,8 +11,8 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/naming"
 )
 
-// TestSetDepsRefusesAClash: a callee whose client would take the name of
-// another Deps field is refused.
+// TestSetDepsRefusesAClash: a callee whose client, or a bucket whose
+// field (D54), would take the name of another Deps field is refused.
 func TestSetDepsRefusesAClash(t *testing.T) {
 	output := generateRustAPI(t, userRoutesAPI, false, "", nil)
 	if err := output.SetDeps(DepsInfo{Calls: []DepsCall{{Service: "db", Field: DepsField("db")}}}); err == nil ||
@@ -22,6 +22,20 @@ func TestSetDepsRefusesAClash(t *testing.T) {
 	if err := output.SetDeps(DepsInfo{Calls: []DepsCall{{Service: "shop-api", Field: "shop_api"}, {Service: "shop_api", Field: "shop_api"}}}); err == nil ||
 		!strings.Contains(err.Error(), "the field of shop-api") {
 		t.Errorf("two callees with one field: %v", err)
+	}
+	if err := output.SetDeps(DepsInfo{Buckets: []DepsBucket{{Service: "span", Field: DepsField("span")}}}); err == nil ||
+		!strings.Contains(err.Error(), "lists bucket span, which would be Deps.span, the field of Deps.span") {
+		t.Errorf("a bucket named span: %v", err)
+	}
+	if err := output.SetDeps(DepsInfo{Calls: []DepsCall{{Service: "shop-media", Field: "shop_media"}}, Buckets: []DepsBucket{{Service: "shop_media", Field: "shop_media"}}}); err == nil ||
+		!strings.Contains(err.Error(), "the field of shop-media") {
+		t.Errorf("a callee and a bucket with one field: %v", err)
+	}
+	if err := output.SetDeps(DepsInfo{Buckets: []DepsBucket{{Service: "shop-media", Field: "shop_media"}}}); err != nil {
+		t.Errorf("a bucket of its own field: %v", err)
+	}
+	if uses := strings.Join(output.DepsUses(), "\n"); !strings.Contains(uses, "bucket::Bucket") {
+		t.Errorf("deps.rs with a bucket names no Bucket:\n%s", uses)
 	}
 }
 

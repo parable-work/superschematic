@@ -4,8 +4,13 @@
 // of the implementation's create and authenticate (D51; docs/stack-model.md,
 // sections 8.5 and 8.6). The server's entrypoint fills Deps from the
 // connections and clients the server shares between the APIs it serves.
+//
+// It also declares ManualRoutes, a handler per @manualRouteRegistration
+// operation of fixture-webhooks-api, and the type of the implementation's
+// createManualRoutes (D51; section 8.6).
 
 import type { Authenticator, Logger } from '@superschematic/http-runtime';
+import type { ManualRouteHandler } from '@superschematic/http-runtime/hono';
 import type { Implementations } from './interfaces';
 
 /** What the implementation of fixture-webhooks-api is built from. */
@@ -27,3 +32,22 @@ export type Constructor = (deps: Deps) => Implementations | Promise<Implementati
  * the API's Deps, as the Go entrypoint calls AuthMiddleware(deps).
  */
 export type AuthenticatorFactory = (deps: Deps) => Authenticator | Promise<Authenticator>;
+
+/**
+ * A handler per @manualRouteRegistration operation of fixture-webhooks-api.
+ * The router mounts each at its declared path behind its route controls
+ * and auth gate, then hands it the Hono context and the RequestContext,
+ * and sends the Response it returns (RouterOptions.manualRoutes).
+ */
+export interface ManualRoutes {
+  /** POST /api/webhooks/github/raw */
+  receiveRawGithubEvent: ManualRouteHandler;
+}
+
+/**
+ * The type of the implementation's createManualRoutes, which a server's
+ * entrypoint calls with the API's Deps and hands buildRouter as
+ * RouterOptions.manualRoutes. The scaffolded implementation exports
+ * createManualRoutes: ManualRoutesConstructor.
+ */
+export type ManualRoutesConstructor = (deps: Deps) => ManualRoutes | Promise<ManualRoutes>;

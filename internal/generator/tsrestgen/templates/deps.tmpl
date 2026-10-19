@@ -14,10 +14,19 @@
 // It also declares Workers, a method per worker of {{ .SchemaName }}, and the type
 // of the implementation's createWorkers (D53; section 8.8).
 {{- end }}
+{{- if .HasManualRoutes }}
+//
+// It also declares ManualRoutes, a handler per @manualRouteRegistration
+// operation of {{ .SchemaName }}, and the type of the implementation's
+// createManualRoutes (D51; section 8.6).
+{{- end }}
 {{ if .Deps.Database }}
 import type { Pool } from 'pg';
 {{- end }}
 import type { {{ if .ChecksEndUsers }}Authenticator, {{ end }}{{ if .Deps.Buckets }}Bucket, {{ end }}Logger } from '{{ .RuntimePackage }}';
+{{- if .HasManualRoutes }}
+import type { ManualRouteHandler } from '{{ .RuntimePackage }}/hono';
+{{- end }}
 {{- range .Deps.Calls }}
 import type { {{ .Client }} } from '{{ .Package }}';
 {{- end }}
@@ -65,6 +74,29 @@ export type Constructor = (deps: Deps) => Implementations | Promise<Implementati
  * the API's Deps, as the Go entrypoint calls AuthMiddleware(deps).
  */
 export type AuthenticatorFactory = (deps: Deps) => Authenticator | Promise<Authenticator>;
+{{- end }}
+{{- if .HasManualRoutes }}
+
+/**
+ * A handler per @manualRouteRegistration operation of {{ .SchemaName }}.
+ * The router mounts each at its declared path behind its route controls
+ * and auth gate, then hands it the Hono context and the RequestContext,
+ * and sends the Response it returns (RouterOptions.manualRoutes).
+ */
+export interface ManualRoutes {
+{{- range .ManualEndpoints }}
+  /** {{ .Method }} {{ .Path }} */
+  {{ .Name }}: ManualRouteHandler;
+{{- end }}
+}
+
+/**
+ * The type of the implementation's createManualRoutes, which a server's
+ * entrypoint calls with the API's Deps and hands buildRouter as
+ * RouterOptions.manualRoutes. The scaffolded implementation exports
+ * createManualRoutes: ManualRoutesConstructor.
+ */
+export type ManualRoutesConstructor = (deps: Deps) => ManualRoutes | Promise<ManualRoutes>;
 {{- end }}
 {{- if .HasJobs }}
 

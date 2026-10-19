@@ -258,10 +258,29 @@ func TestServiceAuthPublicRoutes(t *testing.T) {
 	runGoAPIModule(t, apiDir)
 }
 
-// TestAManualRouteWithAServiceClauseSaysToApplyIt: RegisterRoutes does not
-// mount a @manualRouteRegistration operation, so its handler's comment says
-// the service applies the clause on the route it adds.
-func TestAManualRouteWithAServiceClauseSaysToApplyIt(t *testing.T) {
+// TestServiceAuthManualRoutes compiles fixture-service-auth-api as a public
+// API over fixture-db with reserveStock and getReservation
+// @manualRouteRegistration, and runs
+// testdata/service_auth/manual_routes_test.go in it: RegisterRoutes mounts
+// each with the handler Config.ManualRoutes holds (D51), getReservation in
+// a protected group behind the AuthMiddleware and reserveStock behind its
+// service clause and user step, a nil handler answers 501 behind them, and
+// without Config.ManualRoutes it mounts neither.
+func TestServiceAuthManualRoutes(t *testing.T) {
+	apiDir := buildPublicAPIOver(t, sessionauth.Provider{}, serviceAuthAPI, nil, func(schema *ir.Schema) {
+		serviceAuthOperation(t, schema, "reserveStock").ManualRouteRegistration = true
+		serviceAuthOperation(t, schema, "getReservation").ManualRouteRegistration = true
+	})
+	copyServiceAuthTests(t, apiDir, "manual_routes_test.go")
+	runGoAPIModule(t, apiDir)
+}
+
+// TestAManualRouteWithAServiceClauseRunsIt: RegisterRoutes mounts a
+// @manualRouteRegistration operation with the handler Config.ManualRoutes
+// holds for it, behind its service clause as any other route (D51), and
+// its handler factory's comment says a route the service mounts itself,
+// without Config.ManualRoutes, applies the clause there.
+func TestAManualRouteWithAServiceClauseRunsIt(t *testing.T) {
 	schema, err := loader.LoadService(filepath.Join(fixturesDir, serviceAuthAPI))
 	if err != nil {
 		t.Fatalf("load %s: %v", serviceAuthAPI, err)
@@ -295,12 +314,26 @@ func TestAManualRouteWithAServiceClauseSaysToApplyIt(t *testing.T) {
 		if start < 0 || end < start {
 			t.Fatalf("routes.go has no %s", handler)
 		}
-		want := "// Apply its service clause there too: serviceauth.Authenticate(cfg.ServiceAuthenticator),\n// then serviceauth." + rule + " with the end-user step.\n"
+		want := "// A route you mount applies its service clause too: serviceauth.Authenticate(cfg.ServiceAuthenticator),\n// then serviceauth." + rule + " with the end-user step.\n"
 		if !strings.Contains(string(routes)[start:end], want) {
 			t.Errorf("%s's comment lacks %q:\n%s", handler, want, string(routes)[start:end])
 		}
 	}
-	if strings.Contains(string(routes), `Path:    "/stock/reservations",`) {
-		t.Error("a manual route was mounted")
+	start := strings.Index(string(routes), "func registerManualRoutes(")
+	end := strings.Index(string(routes), "func manualHandler(")
+	if start < 0 || end < start {
+		t.Fatalf("routes.go mounts no manual route:\n%s", routes)
+	}
+	manual := string(routes)[start:end]
+	for _, want := range []string{
+		"if cfg.ManualRoutes == nil {\n\t\treturn\n\t}",
+		"Handler: manualHandler(cfg.ManualRoutes.StockReserveStock, \"stock.reserveStock\"),",
+		"Handler: manualHandler(cfg.ManualRoutes.StockReleaseReservation, \"stock.releaseReservation\"),",
+		"serviceauth.Authenticate(cfg.ServiceAuthenticator),\n\t\t\t\tserviceauth.Require(",
+		"serviceauth.AllowOr(",
+	} {
+		if !strings.Contains(manual, want) {
+			t.Errorf("registerManualRoutes lacks %q:\n%s", want, manual)
+		}
 	}
 }

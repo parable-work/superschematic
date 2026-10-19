@@ -80,12 +80,12 @@ func TestSessionProviderAPIDependsOnGenericRuntimeOnly(t *testing.T) {
 	}
 }
 
-// TestRoutesImportTimeOnlyForMountedTimedDirectives compiles an API whose
-// mounted routes carry only @bodyLimit and whose @manualRouteRegistration
-// operation carries @rateLimit and @timeout. routes.go calls time only for
-// @rateLimit and @timeout on a route RegisterRoutes mounts, so it must not
-// import time here.
-func TestRoutesImportTimeOnlyForMountedTimedDirectives(t *testing.T) {
+// TestRoutesImportTimeForAManualRoutesTimedDirectives compiles an API whose
+// other routes carry only @bodyLimit and whose @manualRouteRegistration
+// operation carries @rateLimit and @timeout. RegisterRoutes mounts the
+// manual route behind them, from Config.ManualRoutes (D51), so routes.go
+// imports time for its middlewares alone.
+func TestRoutesImportTimeForAManualRoutesTimedDirectives(t *testing.T) {
 	buildFixtureAPI(t, sessionauth.Provider{}, moveTimedDirectivesToManualRoutes)
 }
 
@@ -125,8 +125,8 @@ func TestPublicRoutesImportTypesOnlyWhenAHandlerUsesThem(t *testing.T) {
 }
 
 // moveTimedDirectivesToManualRoutes leaves @bodyLimit as the only directive
-// on the routes RegisterRoutes mounts and gives the @manualRouteRegistration
-// operations @rateLimit and @timeout.
+// on the routes that are not @manualRouteRegistration and gives the manual
+// ones @rateLimit and @timeout.
 func moveTimedDirectivesToManualRoutes(schema *ir.Schema) {
 	untimed := func(mw *ir.MiddlewareConfig) *ir.MiddlewareConfig {
 		if mw == nil {

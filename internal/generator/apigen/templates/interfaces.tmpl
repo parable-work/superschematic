@@ -44,8 +44,9 @@ type {{ toGoName . }}Implementation interface {
 	// {{ .ShortImplName }} handles {{ .Method }} {{ .Path }}
 {{- if .ManualRouteRegistration }}
 	//
-	// This endpoint uses @manualRouteRegistration: RegisterRoutes does not
-	// register it. Wire create{{ .HandlerName }} onto the router yourself.
+	// This endpoint uses @manualRouteRegistration: RegisterRoutes mounts
+	// Config.ManualRoutes.{{ .ImplName }} at its route, not this method,
+	// or, without Config.ManualRoutes, leaves the route to you.
 {{- end }}
 {{- if .Description }}
 	//
