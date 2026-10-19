@@ -15,7 +15,8 @@ import (
 
 // TestReferencesResolveInTheLoadedFixture: fixture-refs-api's references
 // resolve to listItems, by id and labeled by ItemView's titleField, with
-// ids as the lookup, and the gift's to the members it names (D61).
+// ids as the lookup, the gift's to the members it names, and a shelf's
+// kind, an enum's value, to listKinds by code (D61).
 func TestReferencesResolveInTheLoadedFixture(t *testing.T) {
 	schema, err := LoadService(filepath.Join("tsreader", "testdata", "services", "fixture-refs-api"))
 	if err != nil {
@@ -32,6 +33,10 @@ func TestReferencesResolveInTheLoadedFixture(t *testing.T) {
 		{"BasketInput.giftSku", "listItems", "sku", "name", ""},
 		{"Catalog.listItems(ids)", "listItems", "id", "name", "ids"},
 		{"Catalog.getItem(itemId)", "listItems", "id", "name", "ids"},
+		{"ShelfEntry.itemId", "listItems", "id", "name", "ids"},
+		{"ShelfEntry.kind", "listKinds", "code", "name", ""},
+		{"Catalog.shelveItem(itemId)", "listItems", "id", "name", "ids"},
+		{"Catalog.shelveItem(kind)", "listKinds", "code", "name", ""},
 	} {
 		held, ok := byHolder[tc.holder]
 		if !ok {
@@ -51,7 +56,7 @@ func TestReferencesResolveInTheLoadedFixture(t *testing.T) {
 			t.Errorf("%s resolves to options %s, value %s, label %s, lookup %q", tc.holder, got.Options.Name, got.Value.Name, got.Label.Name, lookup)
 		}
 	}
-	if len(byHolder) != 4 {
+	if len(byHolder) != 8 {
 		t.Errorf("references = %v", byHolder)
 	}
 }
@@ -322,5 +327,40 @@ func TestARelationsKeyIsCheckedInTheTypeScriptForm(t *testing.T) {
 	}
 	if !strings.Contains(warnings.String(), "TenantUserView.tenantId reads the key of fixture-db.TenantUser.tenant and refers to nothing: TenantCard and TenantView are both @source(fixture-db.Tenant); name one with RefersTo") {
 		t.Fatalf("warnings = %q", warnings.String())
+	}
+}
+
+// TestARelatedTypeRecordsNothingInTheAPI: the TypeScript reader flattens
+// the type an @source target's relation names, Tenant for
+// TenantUser.tenant, only so the key check can read its id (D61, amended).
+// It records nothing of it in the API: its scalars (Identity.Slug,
+// Generic.JSON) are not the API's, and neither is the type or an import,
+// unless the API's own fields use them.
+func TestARelatedTypeRecordsNothingInTheAPI(t *testing.T) {
+	unsourced := []string{"@source(Tenant)\n", ""}
+	schema, err := LoadService(copyRefsKeys(t, unsourced...))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, scalar := range []string{"Identity.Slug", "Generic.JSON"} {
+		if schema.Scalars[scalar] != nil {
+			t.Errorf("the API records %s, which only the related Tenant holds", scalar)
+		}
+	}
+	if schema.Types["Tenant"] != nil || len(schema.Imports) != 0 {
+		t.Errorf("the API records the related type: Tenant %v, imports %+v", schema.Types["Tenant"] != nil, schema.Imports)
+	}
+	for _, scalar := range []string{"Identity.UUID", "Identity.Name"} {
+		if schema.Scalars[scalar] == nil {
+			t.Errorf("the API lost %s, which its own fields hold", scalar)
+		}
+	}
+
+	schema, err = LoadService(copyRefsKeys(t, append(unsourced, "name: Identity.Name;", "name: Identity.Name;\n  slug: Identity.Slug;")...))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if schema.Scalars["Identity.Slug"] == nil {
+		t.Error("the API's TenantView.slug holds Identity.Slug, but the API does not record it")
 	}
 }

@@ -170,11 +170,14 @@ use the Rust method names.
 ### `tools/schema.json`
 
 One entry per operation, with these keys in this order: `name`
-(`<namespace>.<method>`), `operationId`, `title`, `mcp` (absent without
-`@mcp`), `capability`, `lifecycle`, `visibility`, `audience`, `guidance`,
-`replay`, `description`, `namespace`, `methodName`, `httpMethod`,
-`httpPath`, `requiresAuth`, `requiredPermissions`, `isScoped`,
-`bindingStatus`, `inputSchemaDigest`, `parameters`, `returns`.
+(`<namespace>.<method>`, the TypeScript SDK's method name in every SDK's
+documents, so an operation `list_items` is `catalog.listItems`; a
+reference's `options` names its tool so), `operationId`, `title`, `mcp`
+(absent without `@mcp`), `capability`, `lifecycle`, `visibility`,
+`audience`, `guidance`, `replay`, `description`, `namespace`,
+`methodName`, `httpMethod`, `httpPath`, `requiresAuth`,
+`requiredPermissions`, `isScoped`, `bindingStatus`, `inputSchemaDigest`,
+`parameters`, `returns`.
 
 ```json
 "mcp": {
@@ -428,9 +431,15 @@ SDK language reads what they leave.
 A `Parameters` key may not be empty, repeat, or reuse `type`,
 `additionalProperties`, `properties`, `required`, the scalar key, the
 reference key or the search key, and no two of the scalar, reference and
-search keys may be the same; a hook that adds or removes tools fails the
-build, as does a hook error, which names the hook. The `ir` wire types spell the default keys: a distribution
-that renames them decodes its documents with its own types.
+search keys may be the same. None of those three may be a JSON Schema
+keyword that a property is written with: `type`, `description`, `format`,
+`pattern`, `enum`, `minLength`, `maxLength`, `minimum`, `maximum`,
+`minItems`, `maxItems`, `items`, `properties`, `required`, `oneOf`,
+`additionalProperties`, `$ref`, `allOf`, `anyOf` or `nullable`. A hook
+that adds or removes tools fails the build, as does a hook error, which
+names the hook. The `ir` wire types spell the default keys: a
+distribution that renames them decodes its documents with its own
+types.
 
 A distribution's own invocation policy is
 `Registry.RegisterToolInvocationPolicy` with a `ToolInvocationPolicy`:

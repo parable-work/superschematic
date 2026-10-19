@@ -3,7 +3,6 @@ package apigen
 import (
 	"sort"
 
-	"github.com/parable-work/superschematic/internal/generator/codegen"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -86,17 +85,18 @@ func resolveReference(schema *ir.Schema, dependencies map[string]*ir.Schema, ref
 }
 
 // endpointNames are the names the generated documents give an operation:
-// its OpenAPI operationId, the handler name operationToEndpoint gives it,
-// and its tool name, namespace.operation.
+// its OpenAPI operationId, the handler name operationToEndpoint gives it
+// (handlerName), and its tool name (ToolName), as the SDKs name it.
 func endpointNames(set *ir.OperationSet, op *ir.FieldDef) (operationID, tool string) {
 	namespace := extractNamespace(set.Name)
-	return codegen.ToPascalCase(namespace) + codegen.ToPascalCase(op.Name) + "Handler", namespace + "." + op.Name
+	return handlerName(namespace, op.Name), ToolName(namespace, op.Name)
 }
 
 // fieldReference is the reference field of holder holds, written or
 // derived (ir.FieldReference), resolved in the API schema; nil when it
 // holds none. A dependency's type is read against the API too: the API's
-// operations are the only ones its documents name.
+// operations are the only ones its documents name, and its RefersTo holds
+// only when it resolves there to a value of the field's type.
 func fieldReference(schema *ir.Schema, dependencies map[string]*ir.Schema, holder *ir.TypeDef, field *ir.FieldDef) *Reference {
 	ref, _ := ir.FieldReference(schema, dependencies, holder, field)
 	return resolveReference(schema, dependencies, ref)
@@ -110,10 +110,10 @@ func (m *typeMapper) fieldReference(holder *ir.TypeDef, field *ir.FieldDef) *Ref
 // addOpenAPIFieldReferences gives each property of the document's object
 // components whose field holds a reference the reference key, on the
 // property's own schema: on a list, the list's. A component's fields are
-// the schema's own type of its name, else a dependency's, the
-// dependencies in name order; a property the type does not declare is
+// those of the type it was built from (types, from addSchemaFromIR), the
+// schema's own or a dependency's; a property the type does not declare is
 // left alone.
-func addOpenAPIFieldReferences(components map[string]interface{}, schema *ir.Schema, dependencies map[string]*ir.Schema) {
+func addOpenAPIFieldReferences(components map[string]interface{}, types map[string]*ir.TypeDef, schema *ir.Schema, dependencies map[string]*ir.Schema) {
 	names := make([]string, 0, len(components))
 	for name := range components {
 		names = append(names, name)
@@ -128,7 +128,7 @@ func addOpenAPIFieldReferences(components map[string]interface{}, schema *ir.Sch
 		if !ok {
 			continue
 		}
-		holder := componentType(schema, dependencies, name)
+		holder := types[name]
 		if holder == nil {
 			continue
 		}
@@ -141,33 +141,37 @@ func addOpenAPIFieldReferences(components map[string]interface{}, schema *ir.Sch
 				continue
 			}
 			if ref := fieldReference(schema, dependencies, holder, field); ref != nil {
-				property[OpenAPIReferenceKey] = ref.openAPIValue()
+				openAPIExtensionTarget(property)[OpenAPIReferenceKey] = ref.openAPIValue()
 			}
 		}
 	}
 }
 
-// componentType is the object type a component of the document is named
-// after: the schema's own, else the first dependency's in name order.
-func componentType(schema *ir.Schema, dependencies map[string]*ir.Schema, name string) *ir.TypeDef {
-	if td := schema.Types[name]; td != nil {
-		return td
+// openAPIExtensionTarget is the schema object a property's vendor keys go
+// on: the property itself, unless it is a bare $ref, whose sibling keys
+// OpenAPI 3.0.3 ignores (a Reference Object). Then the $ref moves into
+// allOf, and the property, which keeps the keys beside it (a field's
+// description), takes the vendor keys beside the allOf: an enum's or an
+// object's component, referenced. A list's or a nullable value's property
+// is no $ref and takes the keys as it is.
+func openAPIExtensionTarget(property map[string]interface{}) map[string]interface{} {
+	if ref, ok := property["$ref"]; ok {
+		delete(property, "$ref")
+		property["allOf"] = []interface{}{map[string]interface{}{"$ref": ref}}
 	}
-	for _, dep := range sortedSchemaNames(dependencies) {
-		if dependencies[dep] == nil {
-			continue
-		}
-		if td := dependencies[dep].Types[name]; td != nil {
-			return td
-		}
-	}
-	return nil
+	return property
 }
 
 // openAPIParameterKeys gives a path or query parameter object, or a body
 // argument's property schema, the reference and search keys its argument
-// holds.
+// holds: on a property that is a bare $ref, beside an allOf that holds it
+// (openAPIExtensionTarget). A parameter object holds its schema under
+// "schema", and takes them as it is.
 func openAPIParameterKeys(target map[string]interface{}, param Param) {
+	if param.Reference == nil && !param.Search {
+		return
+	}
+	target = openAPIExtensionTarget(target)
 	if param.Reference != nil {
 		target[OpenAPIReferenceKey] = param.Reference.openAPIValue()
 	}

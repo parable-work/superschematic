@@ -42,7 +42,9 @@ func generateRefsAPI(t *testing.T) *apigen.APIOutput {
 // x-superschematic-reference, on a field's property (a basket line's
 // itemId, inside a list of lines; the gift's sku, every member said), on
 // a query parameter (ids, the lookup, on the list) and on a path
-// parameter (getItem's itemId); the search argument's parameter says
+// parameter (getItem's itemId); a kind's code, an enum's value, beside an
+// allOf of its $ref (a shelf entry's kind, and shelveItem's body
+// argument); the search argument's parameter says
 // x-superschematic-search. Regenerate with:
 // go test ./internal/generator/apigen -run TestRefsOpenAPIGolden -update
 func TestRefsOpenAPIGolden(t *testing.T) {
@@ -124,6 +126,77 @@ func TestRefsOpenAPIPlacesEachKey(t *testing.T) {
 	if line := property("BasketLine", "quantity"); line[apigen.OpenAPIReferenceKey] != nil {
 		t.Errorf("BasketLine.quantity refers: %v", line)
 	}
+
+	// A reference whose value is an enum's sits beside an allOf that holds
+	// the enum's $ref, on a field's property and a body argument's: OpenAPI
+	// 3.0.3 ignores the siblings of a bare $ref.
+	byCode := map[string]any{
+		"target": "#/components/schemas/KindView", "options": "CatalogListKindsHandler",
+		"value": "code", "label": "name",
+	}
+	shelve := doc["paths"].(map[string]any)["/api/items/{itemId}/shelf"].(map[string]any)["post"].(map[string]any)
+	body := shelve["requestBody"].(map[string]any)["content"].(map[string]any)["application/json"].(map[string]any)["schema"].(map[string]any)
+	wantKind := map[string]any{
+		"allOf":                    []any{map[string]any{"$ref": "#/components/schemas/ItemKind"}},
+		apigen.OpenAPIReferenceKey: byCode,
+	}
+	for where, got := range map[string]map[string]any{
+		"ShelfEntry.kind":  property("ShelfEntry", "kind"),
+		"shelveItem(kind)": body["properties"].(map[string]any)["kind"].(map[string]any),
+	} {
+		if !reflect.DeepEqual(got, wantKind) {
+			t.Errorf("%s = %v, want %v", where, got, wantKind)
+		}
+	}
+	if code := property("KindView", "code"); !reflect.DeepEqual(code, map[string]any{"$ref": "#/components/schemas/ItemKind"}) {
+		t.Errorf("KindView.code, which refers to nothing, = %v, want its bare $ref", code)
+	}
+}
+
+// TestAReferenceToAComponentSitsBesideAnAllOf: a field whose value is a
+// component's, an enum's here, gives its reference on a schema that
+// OpenAPI reads: beside an allOf that holds the $ref when the property is
+// the $ref itself, with the field's description beside it too; beside the
+// oneOf of a nullable value; and on a list, beside its items.
+func TestAReferenceToAComponentSitsBesideAnAllOf(t *testing.T) {
+	api := ir.NewSchema("shop", ir.SchemaKindAPI)
+	api.Enums["Kind"] = &ir.EnumDef{Name: "Kind", Values: []ir.EnumValueDef{{Name: "A"}, {Name: "B"}}}
+	refersToKind := func() *ir.ReferenceDef { return &ir.ReferenceDef{Type: "KindView", Value: "code", Label: "name"} }
+	api.Types["KindView"] = &ir.TypeDef{Name: "KindView", Role: ir.RoleAPIView, Fields: []*ir.FieldDef{
+		{Name: "code", TypeRef: ir.TypeRef{Name: "Kind"}, Required: true},
+		{Name: "name", TypeRef: ir.TypeRef{Name: "string"}, Required: true},
+	}}
+	api.Types["ThingView"] = &ir.TypeDef{Name: "ThingView", Role: ir.RoleAPIView, Fields: []*ir.FieldDef{
+		{Name: "id", TypeRef: ir.TypeRef{Name: "string"}, Required: true},
+		{Name: "kind", TypeRef: ir.TypeRef{Name: "Kind"}, Required: true, Description: "The thing's kind.", References: refersToKind()},
+		{Name: "maybeKind", TypeRef: ir.TypeRef{Name: "Kind"}, References: refersToKind()},
+		{Name: "kinds", TypeRef: ir.TypeRef{Name: "Kind", IsArray: true}, Required: true, References: refersToKind()},
+	}}
+	api.OperationSets = []*ir.OperationSet{{Name: "Catalog", Operations: []*ir.FieldDef{
+		{Name: "listKinds", HTTPMethod: "GET", RestPath: "kinds", TypeRef: ir.TypeRef{Name: "KindView", IsArray: true}, Required: true},
+		{Name: "listThings", HTTPMethod: "GET", RestPath: "things", TypeRef: ir.TypeRef{Name: "ThingView", IsArray: true}, Required: true},
+	}}}
+	output, err := apigen.Generate(api, apigen.Options{
+		Provider: sessionauth.Provider{}, SchemaName: "shop", ModulePath: "example.com/a", TypesModule: "example.com/b",
+		Clock: codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := decodeOpenAPI(t, output.OpenAPISpecRaw)
+	properties := doc["components"].(map[string]any)["schemas"].(map[string]any)["ThingView"].(map[string]any)["properties"].(map[string]any)
+	ref := map[string]any{"$ref": "#/components/schemas/Kind"}
+	key := map[string]any{"target": "#/components/schemas/KindView", "options": "CatalogListKindsHandler", "value": "code", "label": "name"}
+	for name, want := range map[string]map[string]any{
+		"kind": {"allOf": []any{ref}, "description": "The thing's kind.", apigen.OpenAPIReferenceKey: key},
+		"maybeKind": {"oneOf": []any{ref, map[string]any{"type": "string", "nullable": true, "enum": []any{nil}}},
+			apigen.OpenAPIReferenceKey: key},
+		"kinds": {"type": "array", "items": ref, apigen.OpenAPIReferenceKey: key},
+	} {
+		if got := properties[name]; !reflect.DeepEqual(got, any(want)) {
+			t.Errorf("ThingView.%s = %v, want %v", name, got, want)
+		}
+	}
 }
 
 // TestADerivedReferenceIsDocumentedAsAWrittenOne: a relation's key on a
@@ -167,6 +240,112 @@ func TestADerivedReferenceIsDocumentedAsAWrittenOne(t *testing.T) {
 	}
 	if got := toolReference(written); !reflect.DeepEqual(got, wantTool) {
 		t.Fatalf("the written reference the tools read is %+v, want %+v", got, wantTool)
+	}
+}
+
+// TestADependencysReferenceIsHeldToTheFieldsType: an API returns a type of
+// an API dependency (D66) whose fields say RefersTo. The reference is read
+// against the API, whose operations its documents name, so it holds only
+// when the value it resolves to there is of the field's type: shelfItemId,
+// a string, does not refer to ItemView, whose id is an Identity.UUID, in
+// the document or the tools, and itemId does.
+func TestADependencysReferenceIsHeldToTheFieldsType(t *testing.T) {
+	uuid := &ir.ScalarDef{Name: "Identity.UUID", LanguagePrimitive: ir.LanguageString, TypeMappings: map[string]string{"go": "string"}}
+	shelves := ir.NewSchema("shelves-api", ir.SchemaKindAPI)
+	shelves.Scalars["Identity.UUID"] = uuid
+	shelves.Types["ShelfLine"] = &ir.TypeDef{Name: "ShelfLine", Role: ir.RoleAPIView, Fields: []*ir.FieldDef{
+		{Name: "itemId", TypeRef: ir.TypeRef{Name: "Identity.UUID"}, Required: true, References: &ir.ReferenceDef{Type: "ItemView"}},
+		{Name: "shelfItemId", TypeRef: ir.TypeRef{Name: "string"}, Required: true, References: &ir.ReferenceDef{Type: "ItemView"}},
+	}}
+
+	api := ir.NewSchema("shop", ir.SchemaKindAPI)
+	api.Scalars["Identity.UUID"] = uuid
+	api.Imports = []ir.Import{{Package: "@schemas/shelves-api", Types: []string{"ShelfLine"}}}
+	api.Types["ItemView"] = &ir.TypeDef{Name: "ItemView", Role: ir.RoleAPIView, Fields: []*ir.FieldDef{
+		{Name: "id", TypeRef: ir.TypeRef{Name: "Identity.UUID"}, Required: true},
+	}}
+	api.OperationSets = []*ir.OperationSet{{Name: "Catalog", Operations: []*ir.FieldDef{
+		{Name: "listItems", HTTPMethod: "GET", RestPath: "items", TypeRef: ir.TypeRef{Name: "ItemView", IsArray: true}, Required: true},
+		{Name: "listShelfLines", HTTPMethod: "GET", RestPath: "lines", TypeRef: ir.TypeRef{Name: "ShelfLine", IsArray: true}, Required: true},
+	}}}
+	output, err := apigen.Generate(api, apigen.Options{
+		Provider:     sessionauth.Provider{},
+		SchemaName:   "shop",
+		ModulePath:   "example.com/schemas/api/shop",
+		TypesModule:  "example.com/schemas/types/go/shop",
+		Dependencies: map[string]*ir.Schema{"shelves-api": shelves},
+		Clock:        codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)),
+	})
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+
+	doc := decodeOpenAPI(t, output.OpenAPISpecRaw)
+	properties := doc["components"].(map[string]any)["schemas"].(map[string]any)["ShelfLine"].(map[string]any)["properties"].(map[string]any)
+	tools := map[string]*apigen.Reference{}
+	for _, field := range output.TypeFields["ShelfLine"] {
+		tools[field.Name] = field.Reference
+	}
+	for name, refers := range map[string]bool{"itemId": true, "shelfItemId": false} {
+		key := properties[name].(map[string]any)[apigen.OpenAPIReferenceKey]
+		if (key != nil) != refers || (tools[name] != nil) != refers {
+			t.Errorf("ShelfLine.%s: the document's key is %v and the tools' reference %+v; want a reference: %v", name, key, tools[name], refers)
+		}
+	}
+}
+
+// TestAComponentTwoDependenciesDeclareIsTheImportedOne: a General
+// dependency, a-types, and an API dependency, shelves-api, both declare
+// ShelfView, and the API imports it from shelves-api, whose name sorts
+// last. The component is built from the imported type on every run, the
+// type a reference to ShelfView resolves to (D61, amended; D66), and its
+// reference key reads that type's fields.
+func TestAComponentTwoDependenciesDeclareIsTheImportedOne(t *testing.T) {
+	uuid := &ir.ScalarDef{Name: "Identity.UUID", LanguagePrimitive: ir.LanguageString, TypeMappings: map[string]string{"go": "string"}}
+	general := ir.NewSchema("a-types", ir.SchemaKindGeneral)
+	general.Scalars["Identity.UUID"] = uuid
+	general.Types["ShelfView"] = &ir.TypeDef{Name: "ShelfView", Role: ir.RoleAPIView, Fields: []*ir.FieldDef{
+		{Name: "id", TypeRef: ir.TypeRef{Name: "Identity.UUID"}, Required: true},
+		{Name: "name", TypeRef: ir.TypeRef{Name: "string"}, Required: true},
+	}}
+	shelves := ir.NewSchema("shelves-api", ir.SchemaKindAPI)
+	shelves.Scalars["Identity.UUID"] = uuid
+	shelves.Types["ShelfView"] = &ir.TypeDef{Name: "ShelfView", Role: ir.RoleAPIView, Fields: []*ir.FieldDef{
+		{Name: "id", TypeRef: ir.TypeRef{Name: "Identity.UUID"}, Required: true},
+		{Name: "itemId", TypeRef: ir.TypeRef{Name: "Identity.UUID"}, Required: true, References: &ir.ReferenceDef{Type: "ItemView"}},
+	}}
+
+	api := ir.NewSchema("shop", ir.SchemaKindAPI)
+	api.Scalars["Identity.UUID"] = uuid
+	api.Imports = []ir.Import{{Package: "@schemas/shelves-api", Types: []string{"ShelfView"}}}
+	api.Types["ItemView"] = &ir.TypeDef{Name: "ItemView", Role: ir.RoleAPIView, Fields: []*ir.FieldDef{
+		{Name: "id", TypeRef: ir.TypeRef{Name: "Identity.UUID"}, Required: true},
+	}}
+	api.OperationSets = []*ir.OperationSet{{Name: "Catalog", Operations: []*ir.FieldDef{
+		{Name: "listItems", HTTPMethod: "GET", RestPath: "items", TypeRef: ir.TypeRef{Name: "ItemView", IsArray: true}, Required: true},
+		{Name: "listShelves", HTTPMethod: "GET", RestPath: "shelves", TypeRef: ir.TypeRef{Name: "ShelfView", IsArray: true}, Required: true},
+	}}}
+	for run := 0; run < 20; run++ {
+		output, err := apigen.Generate(api, apigen.Options{
+			Provider:     sessionauth.Provider{},
+			SchemaName:   "shop",
+			ModulePath:   "example.com/schemas/api/shop",
+			TypesModule:  "example.com/schemas/types/go/shop",
+			Dependencies: map[string]*ir.Schema{"a-types": general, "shelves-api": shelves},
+			Clock:        codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)),
+		})
+		if err != nil {
+			t.Fatalf("generate: %v", err)
+		}
+		doc := decodeOpenAPI(t, output.OpenAPISpecRaw)
+		properties := doc["components"].(map[string]any)["schemas"].(map[string]any)["ShelfView"].(map[string]any)["properties"].(map[string]any)
+		item, ok := properties["itemId"].(map[string]any)
+		if !ok || properties["name"] != nil {
+			t.Fatalf("run %d: ShelfView's properties are %v, want shelves-api's id and itemId", run, properties)
+		}
+		if item[apigen.OpenAPIReferenceKey] == nil {
+			t.Fatalf("run %d: ShelfView.itemId has no reference key: %v", run, item)
+		}
 	}
 }
 

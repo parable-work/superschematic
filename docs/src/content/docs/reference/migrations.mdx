@@ -263,9 +263,11 @@ whether an API exposes the column or not.
 A reader is an API or General service whose
 [`@source`](/superschematic/guides/api-routes/#responses-and-views) view reads one of the DB
 service's tables. It reads the column behind each of the view's fields: a
-relation field reads its foreign-key column, and a `@virtual` field reads
-none. A view of a type that is not a table, such as a base class, reads
-nothing.
+relation field reads its foreign-key column, and so does a relation's key,
+a field `<r>Id` that reads the key of the table's relation `r`
+([What a value refers to](/superschematic/reference/references-and-search/#what-a-value-refers-to)).
+A `@virtual` field reads none. A view of a type that is not a table, such
+as a base class, reads nothing.
 
 | Readers | Come from | Checked against |
 | --- | --- | --- |

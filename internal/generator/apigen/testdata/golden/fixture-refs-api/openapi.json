@@ -87,6 +87,14 @@
         },
         "type": "object"
       },
+      "ItemKind": {
+        "description": "The kinds of item the catalog shelves.",
+        "enum": [
+          "book",
+          "game"
+        ],
+        "type": "string"
+      },
       "ItemView": {
         "description": "An item as the catalog lists it: its title, and so the label of every\nreference to it, is its name.",
         "properties": {
@@ -117,6 +125,22 @@
         ],
         "type": "object"
       },
+      "KindView": {
+        "description": "A kind as the catalog lists it, by its code: a reference to it holds an\nenum's value, whose schema is a component.",
+        "properties": {
+          "code": {
+            "$ref": "#/components/schemas/ItemKind"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "name"
+        ],
+        "type": "object"
+      },
       "ResponseMeta": {
         "properties": {
           "requestId": {
@@ -126,6 +150,41 @@
         },
         "required": [
           "requestId"
+        ],
+        "type": "object"
+      },
+      "ShelfEntry": {
+        "description": "Where an item is shelved: under a kind, named by its code.",
+        "properties": {
+          "itemId": {
+            "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+            "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+            "type": "string",
+            "x-superschematic-reference": {
+              "label": "name",
+              "lookup": "ids",
+              "options": "CatalogListItemsHandler",
+              "target": "#/components/schemas/ItemView",
+              "value": "id"
+            }
+          },
+          "kind": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ItemKind"
+              }
+            ],
+            "x-superschematic-reference": {
+              "label": "name",
+              "options": "CatalogListKindsHandler",
+              "target": "#/components/schemas/KindView",
+              "value": "code"
+            }
+          }
+        },
+        "required": [
+          "itemId",
+          "kind"
         ],
         "type": "object"
       }
@@ -375,6 +434,163 @@
           }
         },
         "summary": "getItem",
+        "tags": [
+          "catalog"
+        ]
+      }
+    },
+    "/api/items/{itemId}/shelf": {
+      "post": {
+        "description": "Shelves an item under a kind, a body argument that names it by its\ncode.",
+        "operationId": "CatalogShelveItemHandler",
+        "parameters": [
+          {
+            "description": "itemId parameter",
+            "in": "path",
+            "name": "itemId",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            },
+            "x-superschematic-reference": {
+              "label": "name",
+              "lookup": "ids",
+              "options": "CatalogListItemsHandler",
+              "target": "#/components/schemas/ItemView",
+              "value": "id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "kind": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ItemKind"
+                      }
+                    ],
+                    "x-superschematic-reference": {
+                      "label": "name",
+                      "options": "CatalogListKindsHandler",
+                      "target": "#/components/schemas/KindView",
+                      "value": "code"
+                    }
+                  }
+                },
+                "required": [
+                  "kind"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/ShelfEntry"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "summary": "shelveItem",
+        "tags": [
+          "catalog"
+        ]
+      }
+    },
+    "/api/kinds": {
+      "get": {
+        "operationId": "CatalogListKindsHandler",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "items": {
+                        "$ref": "#/components/schemas/KindView"
+                      },
+                      "type": "array"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "summary": "listKinds",
         "tags": [
           "catalog"
         ]

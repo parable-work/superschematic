@@ -30,7 +30,7 @@ func TestOpenAPIArrayOfArraysConstraints(t *testing.T) {
 			Required: true,
 		},
 	}}
-	result := openAPITypeSchema(def, map[string]interface{}{}, schema, nil, nil, nil, buildOpenAPIScalarMap(schema, nil), map[string]bool{})
+	result := openAPITypeSchema(def, map[string]interface{}{}, schema, nil, nil, nil, buildOpenAPIScalarMap(schema, nil), newOpenAPIComponents())
 	properties := result["properties"].(map[string]interface{})
 
 	weights := properties["weights"].(map[string]interface{})
@@ -78,7 +78,7 @@ func TestOpenAPIArrayOfArraysOfObjectsReferencesComponent(t *testing.T) {
 		{Name: "polygons", TypeRef: ir.TypeRef{Name: "Point", IsArray: true, IsArrayOfArrays: true}, Required: true},
 	}}
 	schemas := map[string]interface{}{}
-	addSchemaFromIR(schemas, "Shape", schema, nil, nil, nil, buildOpenAPIScalarMap(schema, nil), map[string]bool{})
+	addSchemaFromIR(schemas, "Shape", schema, nil, nil, nil, buildOpenAPIScalarMap(schema, nil), newOpenAPIComponents())
 	polygons := schemas["Shape"].(map[string]interface{})["properties"].(map[string]interface{})["polygons"].(map[string]interface{})
 	ref := polygons["items"].(map[string]interface{})["items"].(map[string]interface{})["$ref"]
 	if ref != "#/components/schemas/Point" {

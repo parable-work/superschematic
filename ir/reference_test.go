@@ -332,6 +332,16 @@ func TestFieldReference(t *testing.T) {
 			line.Fields = append(line.Fields, &FieldDef{Name: "productId", TypeRef: TypeRef{Name: "Identity.UUID"}})
 		}, "productId", want{}},
 		{"a list key", func(api, _ *Schema) { key(api).TypeRef.IsArray = true }, "productId", want{}},
+		{"a @virtual field of another type than the related type's id", func(api, _ *Schema) {
+			// ProductView's id is a string too, so the key is held to
+			// Product's id, not to the target's.
+			key(api).TypeRef.Name, key(api).Virtual = "string", true
+			api.Types["ProductView"].Fields[0].TypeRef.Name = "string"
+		}, "productId", want{}},
+		{"a @virtual key whose related type has no id", func(api, db *Schema) {
+			key(api).Virtual = true
+			db.Types["Product"].Fields[0].Name, db.Types["Product"].Fields[0].Key = "code", false
+		}, "productId", want{&ReferenceDef{Type: "ProductView"}, true}},
 		{"a holder without @source", func(api, _ *Schema) { api.Types["OrderLineView"].Source = nil }, "productId", want{}},
 		{"a source that is not at hand", func(api, _ *Schema) { api.Types["OrderLineView"].Source.Target = "other-db.OrderLine" }, "productId", want{}},
 	} {
@@ -356,6 +366,114 @@ func TestFieldReference(t *testing.T) {
 				t.Fatalf("a derived reference was written into the field")
 			}
 		})
+	}
+}
+
+// A dependency's type the API uses is read against the API (D61, amended):
+// its written RefersTo holds only when it resolves in the API to a value of
+// the field's type. The API's own type keeps its RefersTo as written,
+// which the loader checked.
+func TestFieldReferenceOfADependencysType(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		field FieldDef
+		holds bool
+	}{
+		{"a reference that resolves in the API", FieldDef{Name: "productId", TypeRef: TypeRef{Name: "Identity.UUID"}, References: &ReferenceDef{Type: "ProductView"}}, true},
+		{"a value of another type", FieldDef{Name: "productId", TypeRef: TypeRef{Name: "string"}, References: &ReferenceDef{Type: "ProductView"}}, false},
+		{"a list of values of the field's type", FieldDef{Name: "productIds", TypeRef: TypeRef{Name: "Identity.UUID", IsArray: true}, References: &ReferenceDef{Type: "ProductView"}}, true},
+		{"a value the target does not hold as the field does", FieldDef{Name: "productName", TypeRef: TypeRef{Name: "string"}, References: &ReferenceDef{Type: "ProductView", Value: "id"}}, false},
+		{"a reference that does not resolve in the API", FieldDef{Name: "basketId", TypeRef: TypeRef{Name: "Identity.UUID"}, References: &ReferenceDef{Type: "Basket"}}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			api, deps := shopSchemas()
+			field := tc.field
+			holder := &TypeDef{Name: "BasketLine", Role: RoleAPIView, Fields: []*FieldDef{&field}}
+			dep := NewSchema("basket-api", SchemaKindAPI)
+			dep.Types["BasketLine"] = holder
+			deps["basket-api"] = dep
+			ref, derived := FieldReference(api, deps, holder, &field)
+			if derived || tc.holds != (ref != nil) || ref != nil && ref != field.References {
+				t.Fatalf("FieldReference = %+v, %v; want the RefersTo: %v", ref, derived, tc.holds)
+			}
+
+			// The API's own type of the same name keeps its RefersTo.
+			own := &TypeDef{Name: "BasketLine", Role: RoleAPIView, Fields: []*FieldDef{&field}}
+			api.Types["BasketLine"] = own
+			if ref, _ := FieldReference(api, deps, own, &field); ref != field.References {
+				t.Fatalf("the API's own type: FieldReference = %+v, want its RefersTo", ref)
+			}
+		})
+	}
+}
+
+// LookupScopes lists the schema, the dependency an import names the type
+// in, then the rest by name, each once.
+func TestLookupScopes(t *testing.T) {
+	schema := NewSchema("shop", SchemaKindAPI)
+	schema.Imports = []Import{{Package: "@schemas/shelves-api", Types: []string{"ShelfView"}}, {Package: "@schemas/shop", Types: []string{"Own"}}}
+	deps := map[string]*Schema{
+		"catalog-types": NewSchema("catalog-types", SchemaKindGeneral),
+		"shelves-api":   NewSchema("shelves-api", SchemaKindAPI),
+		"zones-api":     NewSchema("zones-api", SchemaKindAPI),
+		"empty":         nil,
+	}
+	services := func(name string) []string {
+		var out []string
+		for _, scope := range LookupScopes(schema, deps, name) {
+			out = append(out, scope.Service+"="+scope.Schema.Name)
+		}
+		return out
+	}
+	for name, want := range map[string][]string{
+		"ShelfView": {"=shop", "shelves-api=shelves-api", "catalog-types=catalog-types", "zones-api=zones-api"},
+		"Other":     {"=shop", "catalog-types=catalog-types", "shelves-api=shelves-api", "zones-api=zones-api"},
+		"Own":       {"=shop", "catalog-types=catalog-types", "shelves-api=shelves-api", "zones-api=zones-api"},
+	} {
+		if got := services(name); !reflect.DeepEqual(got, want) {
+			t.Errorf("LookupScopes(%s) = %v, want %v", name, got, want)
+		}
+	}
+	if got := LookupScopes(nil, nil, "X"); len(got) != 0 {
+		t.Errorf("LookupScopes with no schema = %v", got)
+	}
+}
+
+// RelationKeyFits holds a key to one value of the related type's id, its
+// @key field without one; with neither, or no related type, to one value.
+func TestRelationKeyFits(t *testing.T) {
+	uuid := TypeRef{Name: "Identity.UUID"}
+	byID := &TypeDef{Name: "Product", Fields: []*FieldDef{{Name: "sku", TypeRef: TypeRef{Name: "string"}, Key: true}, {Name: "id", TypeRef: uuid}}}
+	byKey := &TypeDef{Name: "Shelf", Fields: []*FieldDef{nil, {Name: "code", TypeRef: TypeRef{Name: "string"}, Key: true}}}
+	none := &TypeDef{Name: "Note", Fields: []*FieldDef{{Name: "text", TypeRef: TypeRef{Name: "string"}}}}
+	if RelatedKeyField(byID) != byID.Fields[1] || RelatedKeyField(byKey) != byKey.Fields[1] || RelatedKeyField(none) != nil || RelatedKeyField(nil) != nil {
+		t.Fatal("RelatedKeyField: want the id, else the @key field, else nil")
+	}
+	for _, tc := range []struct {
+		related *TypeDef
+		key     TypeRef
+		want    bool
+	}{
+		{byID, uuid, true},
+		{byID, TypeRef{Name: "string"}, false},
+		{byID, TypeRef{Name: "Identity.UUID", IsArray: true}, false},
+		{byID, TypeRef{Name: "Identity.UUID", IsMap: true}, false},
+		{byKey, TypeRef{Name: "string"}, true},
+		{byKey, uuid, false},
+		{none, uuid, true},
+		{nil, uuid, true},
+		{nil, TypeRef{Name: "Identity.UUID", IsArray: true}, false},
+	} {
+		name := "nil"
+		if tc.related != nil {
+			name = tc.related.Name
+		}
+		if got := RelationKeyFits(tc.related, &FieldDef{Name: "keyId", TypeRef: tc.key}); got != tc.want {
+			t.Errorf("RelationKeyFits(%s, %s) = %v, want %v", name, referenceTypeLabel(tc.key), got, tc.want)
+		}
+	}
+	if RelationKeyFits(byID, nil) {
+		t.Error("RelationKeyFits(nil field) = true")
 	}
 }
 

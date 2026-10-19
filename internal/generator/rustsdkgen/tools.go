@@ -184,7 +184,7 @@ func endpointToTool(
 	scalars map[string]apigen.ScalarJSONSchemaInfo,
 	keys apigen.ToolKeys,
 ) ToolDefinition {
-	toolName := fmt.Sprintf("%s.%s", ns.Name, endpoint.Name)
+	toolName := apigen.ToolName(ns.Name, endpoint.Name)
 	description := endpoint.Description
 	if endpoint.Docs != nil {
 		description = endpoint.Docs.Description

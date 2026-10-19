@@ -138,7 +138,10 @@ named `<r>Id`, and `T` declares no field of that name, where `T`'s field
 `r` is one `Relation<U>`, not `HasMany` and not `ManyToMany`. It reads
 `r`'s foreign key, the column `<r>_id`, so it needs no `@virtual`.
 `@virtual` still makes it a field the implementation fills. Its type is
-the type of `U`'s `id`, one value.
+the type of `U`'s `id`, one value. A `@virtual` field named `<r>Id` that
+does not hold one value of that type is no key: it refers to nothing, the
+loader refuses nothing of it, and the implementation fills it, as it fills
+any `@virtual` field.
 
 A key that writes no `RefersTo` refers to the API's one object type that
 is `@source(U)`, by its `id`. Every other member is unsaid, and
@@ -169,14 +172,15 @@ read references through these functions, not through the field's
 
 Where its `@source` checks run, the loader refuses three things:
 
-- a key whose type is not the type of `U`'s id:
+- a key, not `@virtual`, whose type is not the type of `U`'s id:
   `OrderLineView.productId reads the key of shop-db.OrderLine.product, a
   Relation to Product, whose id is Identity.UUID, not string`;
-- a key that is a list or a map;
+- a key, not `@virtual`, that is a list or a map;
 - a `RefersTo` on a key that names a type that is `@source` of another
-  table: `OrderLineView.productId: RefersTo names SupplierView, which is
-  @source(shop-db.Supplier), but the field reads the key of
-  shop-db.OrderLine.product, a Relation to Product`.
+  table, the API's own or one it imports: `OrderLineView.productId:
+  RefersTo names SupplierView, which is @source(shop-db.Supplier), but the
+  field reads the key of shop-db.OrderLine.product, a Relation to
+  Product`.
 
 The data forms skip these checks, as they skip the other `@source` checks.
 `migrate` counts a key as a read of its foreign-key column, as it counts
@@ -187,6 +191,12 @@ dependency's. That type is found through the schema's import that names
 it, else by name in each dependency, in name order. So two dependencies
 that declare types of one name resolve one reference to one type, the one
 the schema imports, in the loader and in every generator (D66).
+
+A type of an API dependency that the API's operations take or return may
+hold a `RefersTo` of its own, which names its own API's operations. In
+the consuming API, the documents and the console read it against the
+API's operations, and keep it only when it resolves there to a value of
+the field's type. Otherwise the field is a plain value.
 
 ## `SearchQuery`: a list's search text
 
@@ -284,8 +294,24 @@ In the OpenAPI document, the value that refers gives
 The key sits on the property schema of a field (of an output or an input
 type) and of a body argument, and on the parameter object of a path or
 query argument, beside its `schema`. A list carries it on the list, not on
-its items, and each item refers. The search argument's parameter object
-says `"x-superschematic-search": true`:
+its items, and each item refers. A property that would be a bare `$ref`,
+as a value of an enum is, holds the `$ref` in an `allOf` and the key beside
+it, since OpenAPI 3.0 ignores the keys beside a `$ref`:
+
+```json
+"kind": {
+  "allOf": [{"$ref": "#/components/schemas/ItemKind"}],
+  "x-superschematic-reference": {
+    "target": "#/components/schemas/KindView",
+    "options": "CatalogListKindsHandler",
+    "value": "code",
+    "label": "name"
+  }
+}
+```
+
+The search argument's parameter object says
+`"x-superschematic-search": true`:
 
 ```json
 {
@@ -295,10 +321,12 @@ says `"x-superschematic-search": true`:
 }
 ```
 
-The keys are `apigen.OpenAPIReferenceKey` and `apigen.OpenAPISearchKey`.
-An OpenAPI hook renames them, as it renames `x-superschematic-docs`. A
-standalone type schema (`apigen.TypeOpenAPISchema`) carries no reference,
-since the operation it would name is in the API's document.
+The keys are `registry.OpenAPIReferenceKey` and
+`registry.OpenAPISearchKey`. An OpenAPI hook renames them, as it renames
+`x-superschematic-docs`. The OpenAPI schema that the Go types package
+gives a strict type on its own, outside any API's document, carries no
+reference, since the operation a reference names is in the API's
+document.
 
 A tool's parameters in `tools/schema.json`, the provider lists and
 `tools/index.ts` give each argument's or field's property the same keys,

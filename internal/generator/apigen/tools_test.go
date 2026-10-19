@@ -109,6 +109,18 @@ func TestToolHookErrors(t *testing.T) {
 			tools.Keys.Parameters = []apigen.ToolKeyValue{{Key: apigen.DefaultToolSearchKey, Value: true}}
 			return nil
 		}, want: `tool parameter key "x-superschematic-search" is the search key`},
+		{name: "a scalar key that is a keyword", edit: func(_ *ir.Schema, tools *apigen.ToolSet) error {
+			tools.Keys.Scalar = "type"
+			return nil
+		}, want: `the scalar key "type" is a JSON Schema keyword a tool argument's property is written with`},
+		{name: "a reference key that is a keyword", edit: func(_ *ir.Schema, tools *apigen.ToolSet) error {
+			tools.Keys.Reference = "$ref"
+			return nil
+		}, want: `the reference key "$ref" is a JSON Schema keyword a tool argument's property is written with`},
+		{name: "a search key that is a keyword", edit: func(_ *ir.Schema, tools *apigen.ToolSet) error {
+			tools.Keys.Search = "nullable"
+			return nil
+		}, want: `the search key "nullable" is a JSON Schema keyword a tool argument's property is written with`},
 		{name: "one key for two", edit: func(_ *ir.Schema, tools *apigen.ToolSet) error {
 			tools.Keys.Reference = tools.Keys.Scalar
 			return nil
@@ -208,5 +220,21 @@ func TestInvalidToolInvocationOption(t *testing.T) {
 	})
 	if want := `apigen: invocation policy review default "b" is not one of "a"`; err == nil || err.Error() != want {
 		t.Fatalf("err = %v, want %q", err, want)
+	}
+}
+
+// ToolName names a tool by its namespace and the operation's name as the
+// TypeScript SDK names its method, root without a namespace.
+func TestToolName(t *testing.T) {
+	for _, tc := range []struct{ namespace, operation, want string }{
+		{"catalog", "listItems", "catalog.listItems"},
+		{"catalog", "list_items", "catalog.listItems"},
+		{"catalog", "ListItems", "catalog.listItems"},
+		{"order-lines", "get_line", "order-lines.getLine"},
+		{"", "ping", "root.ping"},
+	} {
+		if got := apigen.ToolName(tc.namespace, tc.operation); got != tc.want {
+			t.Errorf("ToolName(%q, %q) = %q, want %q", tc.namespace, tc.operation, got, tc.want)
+		}
 	}
 }

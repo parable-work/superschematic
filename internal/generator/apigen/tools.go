@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"slices"
 	"sort"
+	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
+	"github.com/parable-work/superschematic/internal/generator/tsutil"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -108,9 +110,34 @@ type Tool struct {
 	MCP *ir.OperationMCP
 }
 
+// ToolName is the name the SDK tool documents give an operation's tool:
+// its endpoint namespace ("root" when it has none), a dot, and the
+// operation's name as the TypeScript SDK names its method
+// ("catalog.listItems" for list_items). Every SDK's tools and every
+// reference's options (Reference.OptionsTool) are named by it, so a
+// reference names a tool that exists.
+func ToolName(namespace, operation string) string {
+	if strings.TrimSpace(namespace) == "" {
+		namespace = "root"
+	}
+	return namespace + "." + tsutil.ToCamelCase(operation)
+}
+
 // reservedToolParameterKeys are the argument-schema keys the core writes;
 // ToolKeys.Parameters cannot reuse them.
 var reservedToolParameterKeys = []string{"type", "additionalProperties", "properties", "required"}
+
+// reservedToolPropertyKeys are the JSON Schema keywords a tool argument's
+// property is written with (toolsutil.JSONSchemaProperty), and those a
+// schema's property holds elsewhere ($ref, allOf, anyOf, nullable). The
+// scalar, reference and search keys cannot be one: the property would
+// carry the keyword twice, or a vendor value where JSON Schema reads its
+// own.
+var reservedToolPropertyKeys = []string{
+	"$ref", "additionalProperties", "allOf", "anyOf", "description", "enum", "format", "items",
+	"maxItems", "maxLength", "maximum", "minItems", "minLength", "minimum", "nullable", "oneOf",
+	"pattern", "properties", "required", "type",
+}
 
 // ResolveToolKeys returns the vendor keys the tool documents are written
 // with for schema: DefaultToolKeys as hooks leave them, run over a tool set
@@ -155,6 +182,11 @@ func applyToolHooks(schema *ir.Schema, endpoints []EndpointInfo, hooks []ToolHoo
 func validateToolKeys(keys ToolKeys) error {
 	// A property's own keys: two of one name would write one key twice.
 	propertyKeys := []struct{ name, key string }{{"scalar", keys.Scalar}, {"reference", keys.Reference}, {"search", keys.Search}}
+	for _, k := range propertyKeys {
+		if slices.Contains(reservedToolPropertyKeys, k.key) {
+			return fmt.Errorf("the %s key %q is a JSON Schema keyword a tool argument's property is written with", k.name, k.key)
+		}
+	}
 	for i, a := range propertyKeys {
 		for _, b := range propertyKeys[i+1:] {
 			if a.key != "" && a.key == b.key {

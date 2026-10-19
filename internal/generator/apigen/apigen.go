@@ -910,6 +910,18 @@ func defaultMethodForSet(setName string) string {
 	return "GET"
 }
 
+// implementationName is an operation's implementation name, its namespace
+// and its name in PascalCase ("CatalogListItems").
+func implementationName(namespace, operation string) string {
+	return codegen.ToPascalCase(namespace) + codegen.ToPascalCase(operation)
+}
+
+// handlerName is an operation's handler name, its OpenAPI operationId
+// ("CatalogListItemsHandler").
+func handlerName(namespace, operation string) string {
+	return implementationName(namespace, operation) + "Handler"
+}
+
 // operationToEndpoint converts an operation FieldDef into an endpoint.
 func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *ir.OperationSet, types *typeMapper, schema *ir.Schema, provider AuthProvider, invocation ToolInvocationPolicy) (*EndpointInfo, error) {
 	if err := ir.ValidateOperationDocs(op.Docs); err != nil {
@@ -924,9 +936,8 @@ func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *
 		method = defaultMethod
 	}
 
-	namespacePascal := codegen.ToPascalCase(namespace)
 	shortImplName := codegen.ToPascalCase(op.Name)
-	implName := namespacePascal + shortImplName
+	implName := implementationName(namespace, op.Name)
 
 	embeddedParams := extractEmbeddedParams(op.RestPath)
 
@@ -1030,7 +1041,7 @@ func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *
 		Path:                         path,
 		RoutePath:                    strings.TrimPrefix(path, "/api"),
 		Method:                       method,
-		HandlerName:                  implName + "Handler",
+		HandlerName:                  handlerName(namespace, op.Name),
 		ImplName:                     implName,
 		ShortImplName:                shortImplName,
 		Namespace:                    namespace,
@@ -1313,15 +1324,12 @@ func (m *typeMapper) isInputType(ref ir.TypeRef) bool {
 	}
 }
 
+// findTypeDef finds an object type of the schema or of a dependency, in
+// the order a reference's target is found (ir.LookupScopes): the schema's
+// own, the dependency an import names it in, then the rest by name.
 func (m *typeMapper) findTypeDef(name string) (*ir.TypeDef, bool) {
-	if typeDef, ok := m.schema.Types[name]; ok {
-		return typeDef, true
-	}
-	for _, dep := range m.dependencies {
-		if dep == nil {
-			continue
-		}
-		if typeDef, ok := dep.Types[name]; ok {
+	for _, scope := range ir.LookupScopes(m.schema, m.dependencies, name) {
+		if typeDef, ok := scope.Schema.Types[name]; ok {
 			return typeDef, true
 		}
 	}
