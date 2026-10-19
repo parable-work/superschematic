@@ -34,9 +34,17 @@ are those of ir.DatabaseConnection, ir.ServiceEndpoint, ir.BucketConnection
 and ir.ServiceAuth.
 
 Each reader refuses what Go's refuses, with the same messages: the vectors
-in runtime/http/testdata/stackconfig_parity.json hold both runtimes to one
-encoding (D51). Like the service auth verifier, nothing here imports from
-node:, so it runs on Node.js, Bun and Workers.
+in runtime/http/testdata/stackconfig_parity.json hold the three runtimes to
+one encoding (D51). Like the service auth verifier, nothing here imports
+from node:, so it runs on Node.js, Bun and Workers.
+
+The members a Worker alone reads (D64) are read here, and refused by the Go
+and Rust readers: a database's D1 binding (field_D1_BINDING,
+field_D1_DATABASE), a service's binding (field_BINDING_NAME,
+field_BINDING_WORKER), and a bucket's R2 binding and credential
+(field_BINDING, field_R2_ACCOUNT, field_R2_ACCESS_KEY_ID, field_R2_TOKEN).
+The Workers entry (./workers) takes each binding from its env by the name
+these give.
 */
 
 /** An environment map: process.env, or a record a test builds. */
@@ -52,8 +60,22 @@ export interface CloudSqlConnection {
   readonly user: string;
 }
 
-/** A database connection: a connection string, or a Cloud SQL connector configuration. */
+/**
+ * A D1 database bound to a Worker (D64): the Workers entry takes the D1
+ * binding named binding from its env, a SqlDatabase (./d1).
+ */
+export interface D1Connection {
+  /** The name of the Worker's d1 binding. */
+  readonly binding: string;
+  /** The D1 database's uuid. */
+  readonly database: string;
+}
+
+/** A database connection a server opens a pool over: a connection string, or a Cloud SQL connector configuration. */
 export type Database = { readonly url: string } | { readonly cloudSql: CloudSqlConnection };
+
+/** Any database connection loadDatabase reads: a Database, or a D1 binding, which only a Worker reads (D64). */
+export type DatabaseConnection = Database | { readonly d1: D1Connection };
 
 /** The credential sources the HTTP runtimes ship (D37). */
 export const CREDENTIAL_SOURCES = ['google-id-token', 'token-file', 'signed-token'] as const;
@@ -91,24 +113,57 @@ export type ServiceCredential =
       readonly headers?: readonly string[];
     };
 
+/**
+ * A Workers service binding to the callee's Worker (D64): the caller's
+ * client sends each request through the binding named name, whose fetch
+ * reaches the Worker however url names it.
+ */
+export interface ServiceBinding {
+  /** The name of the caller's service binding. */
+  readonly name: string;
+  /** The callee's Worker. */
+  readonly worker: string;
+}
+
 /** A service endpoint: how the server reaches an API it calls. */
 export interface Service {
   /** The callee's base URL. */
   readonly url: string;
+  /** The service binding a Worker calls the callee through; absent off Workers. */
+  readonly binding?: ServiceBinding;
   /** The source of the service credential the client sends; absent for none. */
   readonly credential?: ServiceCredential;
 }
 
 /**
+ * A per-edge account token scoped to one R2 bucket's objects (D64), with
+ * which a Worker presigns S3 URLs for them (./r2).
+ */
+export interface R2Credential {
+  /** The Cloudflare account's id. */
+  readonly account: string;
+  /** The token's id: R2's S3 access key. */
+  readonly accessKeyId: string;
+  /** The token's value, a secret: the hex SHA-256 of it is R2's S3 secret key. */
+  readonly token: string;
+}
+
+/**
  * A bucket connection: how the server reaches a bucket an API it serves
- * lists in its buckets (D54). It holds no credential: on gcp the workload's
- * own account reaches the bucket, and an emulator checks none.
+ * lists in its buckets (D54). On gcp and the local target it holds no
+ * credential: the workload's own account reaches the bucket, and an
+ * emulator checks none. On Workers it names the R2 binding that reaches
+ * the bucket and the credential that signs its URLs (D64).
  */
 export interface BucketConnection {
   /** The bucket's name with its provider. */
   readonly name: string;
   /** The base URL of an emulator that serves the provider's API in its place, such as the local target's fake-gcs-server; absent reaches the provider itself. */
   readonly endpoint?: string;
+  /** The name of a Worker's r2_bucket binding to the bucket; absent off Workers. */
+  readonly binding?: string;
+  /** The credential that signs URLs for the bucket's objects on Workers. */
+  readonly r2?: R2Credential;
 }
 
 /** What an API's callers field adds to the API's name in upper snake case: SHOP_API_CALLERS is shop-api's. */
@@ -149,17 +204,36 @@ function getenv(env: StackEnv, name: string): string {
   return env[name] ?? '';
 }
 
+/** The values of the variables named, and which of them are set and which are not. */
+function partition(env: StackEnv, names: readonly string[]): { values: string[]; set: string[]; unset: string[] } {
+  const values = names.map(name => getenv(env, name));
+  return { values, set: names.filter((_, i) => values[i] !== ''), unset: names.filter((_, i) => values[i] === '') };
+}
+
 /**
- * Reads the database field named field: field_URL, or the three
- * field_CLOUD_SQL_ variables. Throws StackConfigError when neither is set,
- * both are, or only some of the three.
+ * Reads the database field named field: field_URL, the three
+ * field_CLOUD_SQL_ variables, or on Workers the two field_D1_ variables
+ * (D64). Throws StackConfigError when none is set, two are, or only some
+ * of the Cloud SQL or D1 variables.
  */
-export function loadDatabase(field: string, env: StackEnv = processEnv()): Database {
+export function loadDatabase(field: string, env: StackEnv = processEnv()): DatabaseConnection {
   const url = getenv(env, `${field}_URL`);
   const cloud = [`${field}_CLOUD_SQL_INSTANCE`, `${field}_CLOUD_SQL_DATABASE`, `${field}_CLOUD_SQL_USER`];
-  const values = cloud.map(name => getenv(env, name));
-  const set = cloud.filter((_, i) => values[i] !== '');
-  const unset = cloud.filter((_, i) => values[i] === '');
+  const { values, set, unset } = partition(env, cloud);
+  const d1 = partition(env, [`${field}_D1_BINDING`, `${field}_D1_DATABASE`]);
+  if (d1.set.length > 0) {
+    const others = [...(url !== '' ? [`${field}_URL`] : []), ...set];
+    if (others.length > 0) {
+      throw new StackConfigError([
+        `environment variables ${d1.set.join(', ')} are set beside ${others.join(', ')}; a database connection is one of a connection string, a Cloud SQL connector configuration and a D1 binding`,
+      ]);
+    }
+    if (d1.unset.length > 0) {
+      throw new StackConfigError([`environment variables ${d1.set.join(', ')} are set and ${d1.unset.join(', ')} is not; a D1 binding sets both`]);
+    }
+    const [binding, database] = d1.values as [string, string];
+    return { d1: { binding, database } };
+  }
   if (url !== '' && set.length > 0) {
     throw new StackConfigError([
       `environment variables ${field}_URL and ${set.join(', ')} are both set; a database connection is a connection string or a Cloud SQL connector configuration, not both`,
@@ -182,20 +256,43 @@ export function loadDatabase(field: string, env: StackEnv = processEnv()): Datab
 const ENDPOINT = /^https?:\/\/[^/?#]+/u;
 
 /**
- * Reads the bucket field named field: field_NAME, and field_ENDPOINT when
- * an emulator serves the bucket (D54). Throws StackConfigError without a
- * name, and for an endpoint that is no http or https URL.
+ * Reads the bucket field named field: field_NAME, field_ENDPOINT when an
+ * emulator serves the bucket (D54), and on Workers field_BINDING and the
+ * three field_R2_ variables of its credential (D64). Throws
+ * StackConfigError without a name, for an endpoint that is no http or
+ * https URL, for a binding beside an endpoint, for only some of the R2
+ * variables, and for an R2 credential without a binding.
  */
 export function loadBucket(field: string, env: StackEnv = processEnv()): BucketConnection {
   const name = getenv(env, `${field}_NAME`);
   const endpoint = getenv(env, `${field}_ENDPOINT`);
+  const binding = getenv(env, `${field}_BINDING`);
+  const r2 = partition(env, [`${field}_R2_ACCOUNT`, `${field}_R2_ACCESS_KEY_ID`, `${field}_R2_TOKEN`]);
   const problems: string[] = [];
   if (name === '') problems.push(`required environment variable ${field}_NAME is not set`);
   if (endpoint !== '' && !ENDPOINT.test(endpoint)) {
     problems.push(`environment variable ${field}_ENDPOINT is ${quote(endpoint)}; want an http or https URL`);
   }
+  if (binding !== '' && endpoint !== '') {
+    problems.push(
+      `environment variables ${field}_BINDING and ${field}_ENDPOINT are both set; a Worker's binding reaches the bucket, or an emulator serves it, not both`
+    );
+  }
+  if (r2.set.length > 0 && r2.unset.length > 0) {
+    problems.push(`environment variables ${r2.set.join(', ')} are set and ${r2.unset.join(', ')} is not; an R2 credential sets all three`);
+  } else if (r2.set.length > 0 && binding === '') {
+    problems.push(
+      `environment variables ${r2.set.join(', ')} are set and ${field}_BINDING is not; an R2 credential signs URLs for the bucket a Worker's binding reaches`
+    );
+  }
   if (problems.length > 0) throw new StackConfigError(problems);
-  return endpoint === '' ? { name } : { name, endpoint: endpoint.replace(/\/+$/u, '') };
+  const [account, accessKeyId, token] = r2.values as [string, string, string];
+  return {
+    name,
+    ...(endpoint !== '' ? { endpoint: endpoint.replace(/\/+$/u, '') } : {}),
+    ...(binding !== '' ? { binding } : {}),
+    ...(r2.set.length > 0 ? { r2: { account, accessKeyId, token } } : {}),
+  };
 }
 
 /** The credential members, in the order the messages name them. */
@@ -215,16 +312,23 @@ function isSource(value: string): value is ServiceCredentialSource {
 }
 
 /**
- * Reads the service field named field: field_URL, and the
+ * Reads the service field named field: field_URL, on Workers the two
+ * field_BINDING_ variables of its service binding (D64), and the
  * field_CREDENTIAL_ variables when field_CREDENTIAL_SOURCE is set. Throws
- * StackConfigError without a URL, for a credential member set without a
- * source, for an unknown source, for a member the source reads that is
- * unset or one it does not read that is set, and for headers that lack
- * Service-Authorization.
+ * StackConfigError without a URL, for only one of the binding's
+ * variables, for a credential member set without a source, for an unknown
+ * source, for a member the source reads that is unset or one it does not
+ * read that is set, and for headers that lack Service-Authorization.
  */
 export function loadService(field: string, env: StackEnv = processEnv()): Service {
   const url = getenv(env, `${field}_URL`);
   if (url === '') throw new StackConfigError([`required environment variable ${field}_URL is not set`]);
+  const bound = partition(env, [`${field}_BINDING_NAME`, `${field}_BINDING_WORKER`]);
+  if (bound.set.length > 0 && bound.unset.length > 0) {
+    throw new StackConfigError([`environment variables ${bound.set.join(', ')} are set and ${bound.unset.join(', ')} is not; a service binding sets both`]);
+  }
+  const [bindingName, worker] = bound.values as [string, string];
+  const binding = bound.set.length > 0 ? { binding: { name: bindingName, worker } } : {};
   const prefix = `${field}_CREDENTIAL_`;
   const members = Object.fromEntries(CREDENTIAL_MEMBERS.map(name => [name, getenv(env, prefix + name)])) as Record<CredentialMember, string>;
   const headers = getenv(env, `${prefix}HEADERS`);
@@ -238,7 +342,7 @@ export function loadService(field: string, env: StackEnv = processEnv()): Servic
     if (headers !== '') {
       throw new StackConfigError([`environment variable ${prefix}HEADERS is set and ${prefix}SOURCE is not`]);
     }
-    return { url };
+    return { url, ...binding };
   }
   if (!isSource(source)) {
     throw new StackConfigError([
@@ -286,7 +390,7 @@ export function loadService(field: string, env: StackEnv = processEnv()): Servic
       credential = { source, audience: members.AUDIENCE, issuer: members.ISSUER, key: members.KEY, ...carried };
       break;
   }
-  return { url, credential };
+  return { url, ...binding, credential };
 }
 
 /** Reads a callers field's variables and records which it read. */

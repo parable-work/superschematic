@@ -258,9 +258,9 @@ connector's value against it and refuses one that breaks it with a
 
 | Edge | Value | Members |
 | --- | --- | --- |
-| sql | `ir.DatabaseConnection` | `url`, a connection string; or `cloudSql`, a Cloud SQL connector configuration: `instance` (the instance connection name), `database` and `user` (the IAM database user) |
-| http | `ir.ServiceEndpoint` | `url`, the callee's base URL; and an optional `credential`: its `source` (`google-id-token`, `token-file` or `signed-token`, the runtimes' sources of section 9.6), the settings that source reads (`audience`, `tokenFile`, `issuer`, `key`), and the `headers` that carry it, which include `Service-Authorization`. A signed token's `key` is an Ed25519 private JWK's JSON or the PEM of its PKCS#8 encoding, and a secret member (below) |
-| bucket | `ir.BucketConnection` | `name`, the bucket's name with its provider; and an optional `endpoint`, the base URL of an emulator that serves the provider's API in its place. It holds no credential: on gcp the workload's own account reaches the bucket (D54) |
+| sql | `ir.DatabaseConnection` | `url`, a connection string; or `cloudSql`, a Cloud SQL connector configuration: `instance` (the instance connection name), `database` and `user` (the IAM database user); or, on Workers, `d1`, a D1 database bound to the Worker (D64): `binding`, the name of its `d1` binding, and `database`, the database's uuid |
+| http | `ir.ServiceEndpoint` | `url`, the callee's base URL; on Workers, an optional `binding`, the service binding the caller reaches the callee's Worker through (D64): `name`, the binding's name, and `worker`, the callee's Worker; and an optional `credential`: its `source` (`google-id-token`, `token-file` or `signed-token`, the runtimes' sources of section 9.6), the settings that source reads (`audience`, `tokenFile`, `issuer`, `key`), and the `headers` that carry it, which include `Service-Authorization`. A signed token's `key` is an Ed25519 private JWK's JSON or the PEM of its PKCS#8 encoding, and a secret member (below) |
+| bucket | `ir.BucketConnection` | `name`, the bucket's name with its provider; an optional `endpoint`, the base URL of an emulator that serves the provider's API in its place; and, on Workers, `binding`, the name of the Worker's `r2_bucket` binding, with `r2`, the credential that signs URLs for the bucket's objects (D64): `account`, `accessKeyId` and `token`, a secret member (below). `r2` needs `binding`, and `binding` excludes `endpoint`. On gcp it holds no credential: the workload's own account reaches the bucket (D54) |
 | http, for the callee's `<API>_CALLERS` | `ir.ServiceAuth` | `issuers`, each an `ir.ServiceAuthIssuer`: `issuer` and `issuerAliases`, `audience`, `algorithms`, `jwksUrl` or `keys` (each a `jwk`, a public JWK's JSON, or a `pem`, an Ed25519 public key's SubjectPublicKeyInfo PEM, D63), `subjectClaim`, `maxLifetimeSeconds`, and `callers`, each a `subject`, the `deployable` it is and the APIs it `serves`. A connector gives one issuer per edge, listing the edge's caller (`Connected.Callee`), and resolution merges the edges to the API by issuer (section 9.2) |
 | site | `ir.SiteEndpoint` | `url`, the API's public base URL, its server's `PublicAddressOf` (section 6.1) |
 | site, for the callee's `<API>_CORS` | `ir.CORSPolicy` | `origins`, the public origin of each site whose site edge reaches the API, in the order of the edges, each once: `<scheme>://<host>[:<port>]` or a reference. Resolution writes it from the sites' public addresses (D55) |
@@ -271,11 +271,18 @@ aliases, algorithms, subject claim and maximum lifetime, a whole number,
 and a caller's deployable and the APIs it serves. A member the contract
 lacks, or that the credential's source does not read, is refused.
 
+The members a Worker alone reads, a database's `d1`, a service's `binding`
+and a bucket's `binding` and `r2`, are read by the TypeScript runtime's
+readers, for its Workers entry (section 18.5). The Go and Rust readers
+refuse each of their variables, saying only a Worker reads it, and the
+parity vectors hold that refusal as a vector's `workerOnly`.
+
 In environment variables, a derived field is one variable per member:
 the field's name, an underscore and the member's path in upper snake case,
 with a list of strings joined by commas (`SHOP_DB_DATABASE_URL`,
 `SHOP_DB_DATABASE_CLOUD_SQL_INSTANCE`, `SHOP_API_SERVICE_URL`,
-`SHOP_API_SERVICE_CREDENTIAL_HEADERS`, `SHOP_MEDIA_BUCKET_NAME`). A list of
+`SHOP_API_SERVICE_CREDENTIAL_HEADERS`, `SHOP_MEDIA_BUCKET_NAME`,
+`SHOP_DB_DATABASE_D1_BINDING`, `SHOP_MEDIA_BUCKET_R2_ACCESS_KEY_ID`). A list of
 strings one of which is a reference, such as the origins of a CORS field
 whose site's address is an output, is one concatenation of them and the
 commas (`SHOP_API_CORS_ORIGINS`, D55). A list of objects, or an empty
@@ -288,7 +295,8 @@ Each variable is a plain string a platform can set from an output
 reference, or from its secret store for a member such as a signing key.
 
 A secret member is one the contract marks as holding a secret: a
-signed-token credential's `key`, today (`ir.SecretDerivedMember`). A
+signed-token credential's `key`, and an R2 credential's `token` (D64)
+(`ir.SecretDerivedMember`). A
 connector derives it as a reference to an output, never a literal, so
 `environment.json` never holds it, and resolution refuses a literal one
 (`lowering`). `ir.DerivedVariables` marks its variable `Secret`, and a
@@ -4531,7 +4539,7 @@ There is no `worker` key: resolution refuses the kind on this target.
 
 | Stack concept | cloudflare |
 | --- | --- |
-| server | A `cloudflare:index/worker:Worker` named after the deployable, in infrastructure, with Workers Logs on unless `logs: false`, workers.dev on only for an exposed server without a domain, and previews off. Each rollout makes a `workerVersion` and a `workersDeployment` sending all traffic to it. The version holds the server's bundle (`main.js`, its source map and `superscalar.wasm`, each a `contentFile` under `artifacts/<server>/{bundle-digest}/` with its pinned `contentSha256`), `mainModule: main.js`, the compatibility date the extension pins unless set, `limits.cpuMs` and `placement` from the settings, and the server's config as bindings. TypeScript only; a name over 63 characters is refused. |
+| server | A `cloudflare:index/worker:Worker` named after the deployable, in infrastructure, with Workers Logs on unless `logs: false`, workers.dev on only for an exposed server without a domain, and previews off. Each rollout makes a `workerVersion` and a `workersDeployment` sending all traffic to it. The version holds the server's bundle (`main.js`, its source map and `superscalar_wasm_bg.wasm`, each a `contentFile` under `artifacts/<server>/{bundle-digest}/` with its pinned `contentSha256`), `mainModule: main.js`, the compatibility date the extension pins unless set, `limits.cpuMs` and `placement` from the settings, and the server's config as bindings. TypeScript only; a name over 63 characters is refused. |
 | config | Each literal, parameter and derived variable is a `plain_text` binding named as the variable. A derived member flagged secret is a `secret_text` binding referencing the output that holds it. A `Secret<T>` field is a `secrets_store_secret` binding named after the field. A D1 database, an R2 bucket or a callee Worker is a binding named after the derived field, which the value's `binding` names. |
 | database | A `d1Database` per hosted DB schema, `<stack>-<db>`, with a suffix under a parameter, and `sqlite` dialect. `locationHint` and `jurisdiction` become `primaryLocationHint` and `jurisdiction`. |
 | sql edge | The value is `d1: { binding: "<FIELD>", database: <uuid output> }`. The platform writes `{type: "d1", name: <binding>, id: <database>}`, and the binding is the grant. |
@@ -4744,28 +4752,41 @@ a `--bundle <deployable>=sha256:<hex>` flag, which `stack deploy` and
   'worker', 'browser']`, which select superscalar's `workerd` build;
 - `minify`, an external `sourcemap`, and `external: ['cloudflare:*']`;
 - `external: ['*.wasm']`, with superscalar's `superscalar_wasm_bg.wasm`
-  copied beside the bundle as `superscalar.wasm`. superscalar's `workerd`
-  build imports it as a `WebAssembly.Module`, since workerd refuses to
-  compile WebAssembly from bytes. Any other WebAssembly module is refused.
+  copied beside the bundle under its own name, which the bundle imports
+  as `./superscalar_wasm_bg.wasm`. superscalar's `workerd` build imports
+  it as a `WebAssembly.Module`, since workerd refuses to compile
+  WebAssembly from bytes. Any other WebAssembly module is refused. Every
+  Worker that imports the HTTP runtime's main entry carries it, since the
+  runtime's parameter decoding parses through superscalar.
 
-The output is `main.js`, `main.js.map` and `superscalar.wasm`, the names
-the platform lists. With `--check`, it writes to a temporary directory and
-fails on a `node:` import, a Bun global or another `.wasm`.
+The output is `main.js`, `main.js.map` and `superscalar_wasm_bg.wasm`, the
+names the platform lists. With `--check`, it writes to a temporary
+directory and fails on a `node:` import, a Bun global or another `.wasm`.
+It reads the `node:` imports from the build's metafile, not the bundle's
+text: Bun's browser target replaces a `node:` module with a polyfill or
+an empty one, so `node:fs` leaves no trace in the output.
+`runtime/http/typescript/scripts/workers-check.mjs` checks the runtime's
+own entries that way.
 
 **`fetch.ts`** (generated) declares the few Workers types it uses, as
 `main.ts` declares Bun's:
 - **At module scope**, it imports `env` from `cloudflare:workers` and
   reads each API's string config through
-  `loadEnvConfig(stackEnvOf(env))`, the string members alone. A refused
+  `loadEnvConfig(stackEnvOf(env))`, the string members alone
+  (`@superschematic/http-runtime/workers`). A refused
   config throws there, so Cloudflare refuses the version's upload and the
   rollout step fails, naming each variable: the twin of a server that
   refuses to start.
 - **On the first request of an isolate**, and again after a failure, it:
-  - awaits each secret binding into the config;
-  - takes each D1, R2 and service binding by the name its value gives;
+  - awaits each secret binding into the config, with
+    `stackEnvWithSecrets(env, names)`, which reads each once per isolate
+    and again after a failed `get()`;
+  - takes each D1, R2 and service binding by the name its value gives,
+    with `binding(env, name, kind)`, which refuses a missing binding or
+    one of another kind by its name;
   - builds one SDK client per callee, with `fetch` through the service
-    binding and `serviceCredentialFor` the signed token;
-  - builds each `Bucket` over its R2 binding;
+    binding (`serviceFetch`) and `serviceCredentialFor` the signed token;
+  - builds each `Bucket` over its R2 binding (`openR2Bucket`);
   - builds `Deps` with the logger and calls `create(deps)`, and
     `authenticate(deps)` where a route needs an end user;
   - mounts each `buildRouter` on one Hono app, with `authenticateService`
@@ -4774,8 +4795,12 @@ fails on a `node:` import, a Bun global or another `.wasm`.
     `/healthz`, and `/readyz`, which pings each D1 with `SELECT 1` within
     two seconds.
 - **Every request** goes to `app.fetch(request, { requestIP })`, whose
-  `requestIP` reads `CF-Connecting-IP`, so the runtime keys rate limits by
-  the client.
+  `requestIP` reads `CF-Connecting-IP` in the shape of Bun's
+  `server.requestIP`, so the runtime keys rate limits by the client.
+
+`perIsolate(build)` is the lazy builder: it builds on the first request,
+shares the build with every request while it runs and after, and builds
+again on the next request after a build that failed.
 
 Per isolate it caches config strings, binding objects, SDK clients, the
 service authenticator with its keys, the credential sources with their
@@ -4807,10 +4832,15 @@ first dialect:
 - `sqlite` gives `SqlDatabase`, the runtime's copy of D1's interface
   (`prepare(sql).bind(…).first/all/run/raw`, `batch`, `exec`).
 
-A D1 binding provides `SqlDatabase` on Workers, and `openSqlite(path)`
-over `bun:sqlite` provides it under `stack dev`. Placeholders are `?` and
+A D1 binding provides `SqlDatabase` on Workers, and `openSqlite(path)` over
+`bun:sqlite` provides it under `stack dev`. Placeholders are `?` and
 `?N`, which both read. D1 has no interactive transaction, and `batch` is
-atomic.
+atomic. `openSqlite` keeps D1's behaviors that an implementation could
+come to rely on: foreign keys on, a boolean bound as 1 or 0, `batch` in
+one transaction, `exec` running a script one line per statement, and
+each run's `changes`, `last_row_id` and duration in its `meta`. `ping`,
+in the same `./d1` entry, answers `/readyz`, and `connectPostgres`
+refuses a D1 connection.
 
 Resolution refuses (`unrealizable`) a TypeScript server, job or worker
 whose database resolves to another dialect than its DB service's first,
@@ -4838,7 +4868,10 @@ assumption.
 ### 18.7 Buckets on R2
 
 The runtime's `./r2` entry implements D54's `Bucket`:
-- **Objects** are put, got, deleted and listed through the binding.
+- **Objects** are put, got, deleted and listed through the binding. A
+  stream is read whole before it is put, since R2 takes a stream only
+  when it knows its length, and a delete asks for the object's head
+  first, since R2's delete answers alike whether or not it was there.
 - **`signUrl`** presigns a V4 query-string URL for
   `https://<account>.r2.cloudflarestorage.com/<bucket>/<object>` with
   WebCrypto HMAC, for at most seven days. The access key is the edge's

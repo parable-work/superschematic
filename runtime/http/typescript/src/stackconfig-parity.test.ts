@@ -23,6 +23,8 @@ interface ParityVector {
   readonly edits?: Readonly<Record<string, string | null>>;
   readonly want: unknown;
   readonly refusals: readonly string[] | null;
+  /** The Go and Rust readers' refusal of a member only a Worker reads (D64), which this runtime reads as want or refusals. */
+  readonly workerOnly?: readonly string[];
 }
 
 const corpus = JSON.parse(readFileSync(CORPUS, 'utf8')) as { readonly vectors: readonly ParityVector[] };

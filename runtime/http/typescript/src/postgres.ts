@@ -1,7 +1,7 @@
 import type { Duplex } from 'node:stream';
 import pg from 'pg';
 import type { Pool, PoolConfig } from 'pg';
-import type { CloudSqlConnection, Database } from './stackconfig.js';
+import type { CloudSqlConnection, DatabaseConnection } from './stackconfig.js';
 
 /*
 The database of a generated TypeScript server (D51, section 8.6 of
@@ -163,9 +163,13 @@ async function cloudSqlPool(db: CloudSqlConnection, settings: PostgresPoolSettin
  * Opens a pool over db: pg over a connection string, or the Cloud SQL
  * connector with IAM database authentication over a Cloud SQL connector
  * configuration. Rejects for a Cloud SQL configuration when the connector
- * is not installed or cannot read the instance's settings.
+ * is not installed or cannot read the instance's settings, and for a D1
+ * binding, which only a Worker reaches (D64).
  */
-export async function connectPostgres(db: Database, options: ConnectPostgresOptions = {}): Promise<Pool> {
+export async function connectPostgres(db: DatabaseConnection, options: ConnectPostgresOptions = {}): Promise<Pool> {
+  if ('d1' in db) {
+    throw new Error(`D1 database ${db.d1.database} is no Postgres database: a Worker reaches it through its binding ${db.d1.binding} (D64)`);
+  }
   const settings = options.pool ?? {};
   const pool = 'cloudSql' in db ? await cloudSqlPool(db.cloudSql, settings, options.loadConnector ?? importConnector) : new pg.Pool({ ...settings, connectionString: db.url });
   const onIdleError = options.onIdleError ?? ((error: Error) => console.error(`postgres: an idle connection failed: ${error.message}`));

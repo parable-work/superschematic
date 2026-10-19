@@ -282,6 +282,14 @@ upper snake case.
 | `SHOP_API_SERVICE` | `SHOP_API_SERVICE_URL`; with a credential, `SHOP_API_SERVICE_CREDENTIAL_SOURCE` and the members that source reads (`_AUDIENCE`, `_TOKEN_FILE`, `_ISSUER`, `_KEY`), and `_HEADERS`, joined by commas |
 | `SHOP_MEDIA_BUCKET` | `SHOP_MEDIA_BUCKET_NAME`, and `SHOP_MEDIA_BUCKET_ENDPOINT` for a bucket an emulator serves |
 
+On Cloudflare Workers a field also names the binding a Worker reaches its
+database, callee or bucket through: `SHOP_DB_DATABASE_D1_BINDING` and
+`_D1_DATABASE` in place of a URL, `SHOP_API_SERVICE_BINDING_NAME` and
+`_BINDING_WORKER` beside the callee's URL, and `SHOP_MEDIA_BUCKET_BINDING`
+with `_R2_ACCOUNT`, `_R2_ACCESS_KEY_ID` and `_R2_TOKEN`, the credential
+that signs the bucket's URLs. Only the TypeScript runtime reads them; the
+Go and Rust readers refuse them.
+
 The names come from the naming file's
 [`[derived_fields]`](/superschematic/reference/naming/#derived_fields)
 templates, `{SERVICE}_DATABASE`, `{SERVICE}_SERVICE` and
