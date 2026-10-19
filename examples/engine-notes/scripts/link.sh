@@ -4,10 +4,11 @@
 #
 #   examples/engine-notes/scripts/link.sh
 #
-# Build the schema runtime, the HTTP runtime and the engine first (README.md,
-# "Set up"). The engine's own build links the schema runtime, the HTTP
-# runtime, the schema IR and superscalar into runtime/engine/typescript's
-# node_modules (scripts/link-local-deps.mjs there). This script links the
+# Build the HTTP runtime, the engine and its addon first (README.md, "Run
+# it"). The engine's own build links the HTTP runtime and superscalar into
+# runtime/engine/typescript's node_modules (scripts/link-local-deps.mjs
+# there), and the engine loads its addon from native/ there. This script
+# links the
 # engine and, from the engine's install, the HTTP runtime, hono,
 # @hono/node-server, the MCP client, TypeScript and the Node.js types. Each
 # link resolves to the engine's copy, so the engine, the HTTP runtime and this
@@ -21,7 +22,7 @@ ENGINE="$REPO_ROOT/runtime/engine/typescript"
 
 for required in "$ENGINE/dist/index.js" "$ENGINE/node_modules/@superschematic/http-runtime/dist/index.js" "$ENGINE/node_modules/hono"; do
   if [[ ! -e "$required" ]]; then
-    echo "link.sh: $required is missing; build the schema runtime, the HTTP runtime and the engine first (README.md)" >&2
+    echo "link.sh: $required is missing; build the HTTP runtime and the engine first (README.md)" >&2
     exit 1
   fi
 done
