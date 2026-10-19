@@ -20,7 +20,9 @@
 //! record. The pages, the search and the refusals of a forged cursor are
 //! the same over the shop in memory and over a SQLite file of shop-db's
 //! tables, where the reviews, orders and sessions outlive the app, and the
-//! console lists the orders.
+//! console lists the orders. A shopper's pages, the console's and the JSON
+//! API's list, show and cancel their own orders alone, another customer's
+//! answering 404, and staff's every customer's.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -28,7 +30,7 @@ use std::thread::sleep;
 use std::time::Duration;
 
 use acme_shop_orders_server::sqlite::SqliteShop;
-use acme_shop_orders_server::{Shop, add_shopper, users_at, users_in_memory};
+use acme_shop_orders_server::{SHOPPER_PERMISSIONS, Shop, add_shopper, add_staff, users_at, users_in_memory};
 use acme_shop_orders_topcoat::api::runtime::identity::Service;
 use acme_shop_orders_topcoat::api::runtime::{Principal, RequestContext};
 use acme_shop_orders_topcoat::api::{ProductReviewsImplementation, ProductReviewsWriteReviewArgs, types};
@@ -44,9 +46,20 @@ use topcoat::view::{View, view};
 /// fast.
 const CONFIG: &str = r#"{"cookie": {"secure": false}, "password": {"argon2": {"memoryKiB": 64, "iterations": 1, "parallelism": 1}}}"#;
 
-/// The sign-in form of the shopper `shop` adds, who holds `orders`
-/// through the shopper role.
+/// The sign-in form of the shopper `shop` adds, who holds `orders.read`
+/// and `orders.write` through the shopper role.
 const SHOPPER: &str = "login=grace%40example.com&password=grace%27s+password";
+
+/// A user's login, name and password.
+type Person = (&'static str, &'static str, &'static str);
+
+/// A second shopper, whom `each_shop` adds beside the demo's.
+const ALAN: Person = ("alan@example.com", "Alan Turing", "alan's password");
+
+/// A member of staff, whom `each_shop` adds too, who holds `orders.any`
+/// through the staff role, and lists, reads and cancels every customer's
+/// orders.
+const ADA: Person = ("ada@example.com", "Ada Lovelace", "ada's password");
 
 async fn shop() -> Router {
     let users = users_in_memory(CONFIG).unwrap();
@@ -102,6 +115,14 @@ async fn open_sqlite(path: &Path) -> (SqliteShop, Arc<Service>) {
     (shop, users)
 }
 
+/// Adds `ALAN`, a shopper, and `ADA`, staff, beside the demo's shopper.
+async fn add_alan_and_ada(users: &Service) {
+    let (login, name, password) = ALAN;
+    add_shopper(users, login, name, password).await.unwrap();
+    let (login, name, password) = ADA;
+    add_staff(users, login, name, password).await.unwrap();
+}
+
 /// Products beside the app's catalog, so that a page of one product, or
 /// of two, has a next: the catalog lists them by name, after the anvil.
 const MORE: [Product; 2] = [
@@ -127,7 +148,7 @@ fn reviewer(n: usize) -> String {
 /// first, in the order written.
 async fn write_reviews<S: ProductReviewsImplementation>(shop: &S, reviews: &[(&str, &str)]) {
     for (n, (title, body)) in reviews.iter().enumerate() {
-        let caller = RequestContext { principal: Some(Principal::new(reviewer(n), ["orders"])), ..RequestContext::default() };
+        let caller = RequestContext { principal: Some(Principal::new(reviewer(n), SHOPPER_PERMISSIONS)), ..RequestContext::default() };
         let input = types::WriteReviewInput { rating: 4.0, title: (*title).to_owned(), body: (*body).to_owned() };
         shop.write_review(caller, ProductReviewsWriteReviewArgs { product_id: product(), input }).await.unwrap();
         sleep(Duration::from_millis(3));
@@ -136,16 +157,18 @@ async fn write_reviews<S: ProductReviewsImplementation>(shop: &S, reviews: &[(&s
 
 /// The app over each kind of shop, by its name: in memory, and over a new
 /// SQLite file of shop-db's tables (`file`, as `sqlite_file` makes it).
-/// Each holds the app's catalog and `MORE`, the demo's shopper, and
-/// `reviews` of the anvil, each by a reviewer of its own.
+/// Each holds the app's catalog and `MORE`, the demo's shopper, `ALAN` and
+/// `ADA`, and `reviews` of the anvil, each by a reviewer of its own.
 async fn each_shop(file: &str, reviews: &[(&str, &str)]) -> [(&'static str, Router); 2] {
     let memory = Shop::with_products(CATALOG.iter().chain(&MORE).map(Product::view));
     write_reviews(&memory, reviews).await;
     let users = users_in_memory(CONFIG).unwrap();
     add_shopper(&users, "grace@example.com", "Grace Hopper", "grace's password").await.unwrap();
+    add_alan_and_ada(&users).await;
     let in_memory = app(Arc::new(memory), users);
 
     let (sqlite, users) = open_sqlite(&sqlite_file(file)).await;
+    add_alan_and_ada(&users).await;
     for product in &MORE {
         sqlite.add_product(&product.id(), product.sku, product.name, product.price_cents).unwrap();
     }
@@ -207,6 +230,12 @@ async fn respond(router: &Router, request: http::Request<Body>) -> Response {
 /// back.
 async fn sign_in(router: &Router) -> String {
     send(router, "POST", "/sign-in", None, Some(SHOPPER)).await.cookie.expect("the session cookie")
+}
+
+/// Signs `person` in, as `sign_in` signs the demo shopper in.
+async fn sign_in_as(router: &Router, (login, _, password): Person) -> String {
+    let form = form_urlencoded::Serializer::new(String::new()).append_pair("login", login).append_pair("password", password).finish();
+    send(router, "POST", "/sign-in", None, Some(&form)).await.cookie.expect("the session cookie")
 }
 
 /// The shipping address the place-order form posts.
@@ -535,6 +564,76 @@ async fn orders_are_filtered_by_the_get_form() {
     assert!(!page.body.contains(&placed), "{}", page.body);
     let none = send(&router, "GET", "/orders?statuses=shipped", Some(&cookie), None).await;
     assert!(none.body.contains("No orders match the filter."), "{}", none.body);
+}
+
+#[tokio::test]
+async fn a_shopper_sees_their_own_orders_and_staff_every_customers() {
+    for (shop, router) in each_shop("customers.db", &[]).await {
+        let grace = sign_in(&router).await;
+        let alan = sign_in_as(&router, ALAN).await;
+        let ada = sign_in_as(&router, ADA).await;
+        let graces = place_orders(&router, &grace, 2).await;
+        let alans = place_orders(&router, &alan, 2).await;
+        let ids = |pages: &[String]| pages.iter().map(|page| page.trim_start_matches("/orders/").to_owned()).collect::<Vec<_>>();
+
+        for (who, cookie, own, other) in [("Grace", &grace, &graces, &alans), ("Alan", &alan, &alans, &graces)] {
+            // Their orders page, a page of one at a time, and the
+            // console's, list their own orders alone, and so does the API.
+            let first = send(&router, "GET", "/orders?limit=1", Some(cookie), None).await;
+            assert_eq!(order_links(&first.body), own[..1], "{shop} {who}");
+            let next = link(&first.body, "next").expect("a next page");
+            let second = send(&router, "GET", &next, Some(cookie), None).await;
+            assert_eq!(order_links(&second.body), own[1..], "{shop} {who}");
+            assert_eq!(link(&second.body, "next"), None, "{shop} {who}");
+            let console = send(&router, "GET", "/console/orders", Some(cookie), None).await;
+            assert_eq!(console_orders(&console.body), ids(own), "{shop} {who}");
+            let api = send(&router, "GET", "/api/orders", Some(cookie), None).await;
+            assert_eq!(api.status, StatusCode::OK, "{shop} {who}: {}", api.body);
+            assert_eq!(api.body.matches(r#""shippingAddress""#).count(), 2, "{shop} {who}: {}", api.body);
+
+            // Another customer's order is the 404 of one no one placed:
+            // its page, its console page, its cancel from either and the
+            // API's get and cancel, and it stays placed.
+            let theirs = &other[0];
+            let id = theirs.trim_start_matches("/orders/");
+            let page = send(&router, "GET", theirs, Some(cookie), None).await;
+            assert_eq!(page.status, StatusCode::NOT_FOUND, "{shop} {who}: {}", page.body);
+            assert!(page.body.contains(r#"<p class="refusal">order not found</p>"#), "{shop} {who}: {}", page.body);
+            assert!(!page.body.contains("Analytical Way"), "{shop} {who}: {}", page.body);
+            let console_page = send(&router, "GET", &format!("/console{theirs}"), Some(cookie), None).await;
+            assert_eq!(console_page.status, StatusCode::NOT_FOUND, "{shop} {who}: {}", console_page.body);
+            for cancel in [format!("{theirs}/cancel"), format!("/console{theirs}/cancel")] {
+                let refused = send(&router, "POST", &cancel, Some(cookie), Some("reason=Not+mine")).await;
+                assert_eq!(refused.status, StatusCode::NOT_FOUND, "{shop} {who} {cancel}: {}", refused.body);
+            }
+            let api = send(&router, "GET", &format!("/api/orders/{id}"), Some(cookie), None).await;
+            assert_eq!(api.status, StatusCode::NOT_FOUND, "{shop} {who}: {}", api.body);
+            let api = call_api(&router, "POST", &format!("/api/orders/{id}/cancel"), cookie, r#"{"reason":"Not mine"}"#).await;
+            assert_eq!(api.status, StatusCode::NOT_FOUND, "{shop} {who}: {}", api.body);
+        }
+
+        // Staff list every customer's orders, as they were placed, on the
+        // orders page and the console's, each still placed, and cancel any.
+        let everyone: Vec<String> = graces.iter().chain(&alans).cloned().collect();
+        let orders = send(&router, "GET", "/orders?statuses=placed", Some(&ada), None).await;
+        assert_eq!(order_links(&orders.body), everyone, "{shop}");
+        let console = send(&router, "GET", "/console/orders", Some(&ada), None).await;
+        assert_eq!(console_orders(&console.body), ids(&everyone), "{shop}");
+        let page = send(&router, "GET", &graces[0], Some(&ada), None).await;
+        assert_eq!(page.status, StatusCode::OK, "{shop}: {}", page.body);
+        let cancelled = send(&router, "POST", &format!("{}/cancel", alans[0]), Some(&ada), Some("reason=Out+of+stock")).await;
+        assert_eq!((cancelled.status, cancelled.location.as_deref()), (StatusCode::SEE_OTHER, Some(alans[0].as_str())), "{shop}: {}", cancelled.body);
+        let console_cancel = format!("/console{}/cancel", graces[1]);
+        let cancelled = send(&router, "POST", &console_cancel, Some(&ada), Some("reason=Out+of+stock")).await;
+        assert_eq!(cancelled.status, StatusCode::SEE_OTHER, "{shop}: {}", cancelled.body);
+
+        // Each shopper sees their order cancelled.
+        for (cookie, order) in [(&alan, &alans[0]), (&grace, &graces[1])] {
+            let page = send(&router, "GET", order, Some(cookie), None).await;
+            assert!(page.body.contains(r#"<data value="cancelled">Cancelled</data>"#), "{shop}: {}", page.body);
+            assert!(page.body.contains("<dd>Out of stock</dd>"), "{shop}: {}", page.body);
+        }
+    }
 }
 
 #[tokio::test]

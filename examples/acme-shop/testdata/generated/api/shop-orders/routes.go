@@ -189,7 +189,8 @@ func publicAPIRoutes(cfg Config) []runtimerouting.Route {
 
 func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 	return []runtimerouting.Route{
-		// The orders, oldest first: by when each was placed, then by its id.
+		// The caller's orders, or every customer's for staff, oldest first: by
+		// when each was placed, then by its id.
 		{
 			Method:  "GET",
 			Path:    "/orders",
@@ -209,6 +210,9 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 				runtimemiddleware.Timeout(10*time.Second, LoggerFromContext),
 			},
 		},
+		// One order: the caller's own, or any customer's for staff. Another
+		// customer's order is not found, as one no one placed is, so its id
+		// tells a shopper nothing.
 		{
 			Method:  "GET",
 			Path:    "/orders/{id}",
@@ -217,7 +221,9 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 				runtimesession.RequirePermissions("orders.read"),
 			},
 		},
-		// Cancels an order that has not shipped, recording why.
+		// Cancels an order that has not shipped, recording why: the caller's
+		// own, or any customer's for staff. Another customer's order is not
+		// found, as getOrder answers.
 		{
 			Method:  "POST",
 			Path:    "/orders/{id}/cancel",
@@ -243,7 +249,8 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 
 // createOrderListOrdersHandler creates a handler for GET /api/orders
 //
-// The orders, oldest first: by when each was placed, then by its id.
+// The caller's orders, or every customer's for staff, oldest first: by
+// when each was placed, then by its id.
 func createOrderListOrdersHandler(impl OrderImplementation) gohttp.HandlerFunc {
 	// List arguments in the query string: the JSON type of each item, then
 	// its rules in the order they are checked (the scalar type's own, then
@@ -341,6 +348,10 @@ func createOrderPlaceOrderHandler(impl OrderImplementation) gohttp.HandlerFunc {
 }
 
 // createOrderGetOrderHandler creates a handler for GET /api/orders/{id}
+//
+// One order: the caller's own, or any customer's for staff. Another
+// customer's order is not found, as one no one placed is, so its id
+// tells a shopper nothing.
 func createOrderGetOrderHandler(impl OrderImplementation) gohttp.HandlerFunc {
 	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
 		// Extract path parameters, each percent-decoded once
@@ -382,7 +393,9 @@ func createOrderGetOrderHandler(impl OrderImplementation) gohttp.HandlerFunc {
 
 // createOrderCancelOrderHandler creates a handler for POST /api/orders/{id}/cancel
 //
-// Cancels an order that has not shipped, recording why.
+// Cancels an order that has not shipped, recording why: the caller's
+// own, or any customer's for staff. Another customer's order is not
+// found, as getOrder answers.
 func createOrderCancelOrderHandler(impl OrderImplementation) gohttp.HandlerFunc {
 	// Body arguments: the JSON type of each value, then its rules in the
 	// order they are checked (the scalar type's own, then the argument's).

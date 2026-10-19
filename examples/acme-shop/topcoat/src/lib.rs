@@ -5,7 +5,9 @@
 //! their email and password, writes a review (`WriteReviewInputForm`),
 //! places an order with its lines as rows (`PlaceOrderInputForm`), filters
 //! their orders (`OrderListOrdersArgsForm`, a GET form) and cancels one
-//! (`OrderCancelOrderArgsForm`). The reviews and the orders render through
+//! (`OrderCancelOrderArgsForm`). A shopper's orders are their own: the
+//! implementations list, read and cancel no other customer's, and staff,
+//! who hold `orders.any`, every customer's. The reviews and the orders render through
 //! the display components the crate builds from their types, and the orders
 //! a page at a time, with links to the next page and back to the first.
 //! An order line's product is a select of the catalog's products, and an
@@ -345,9 +347,10 @@ async fn post_review(cx: &Cx, Form(form): Form<WriteReviewInputForm>) -> topcoat
     })
 }
 
-/// The shopper's orders, which need `orders.read`, a page at a time,
-/// filtered by the GET form `OrderListOrdersArgsForm` reads from the query,
-/// its controls showing the filters in effect. The query's `cursor` and
+/// The shopper's own orders, or every customer's for staff, which need
+/// `orders.read`, a page at a time, filtered by the GET form
+/// `OrderListOrdersArgsForm` reads from the query, its controls showing the
+/// filters in effect. The query's `cursor` and
 /// `limit` ask for the page, and no control holds them, so a submitted
 /// filter starts at the first page. After the orders, "Next page" links
 /// the page after this one, while one follows, and "First page" the first,
@@ -451,7 +454,8 @@ path_param!(id: types::IdentityUUID, error = not_found);
 /// One order, as `order_view_detail` renders it, which needs `orders.read`,
 /// each line's product by its name, which `references::order_view_labels`
 /// looks up through `listProducts`, with the route's status when the call
-/// is refused (401, 403, 404). While the order is placed, the form that
+/// is refused (401, 403, 404, which another customer's order answers as
+/// one no one placed does). While the order is placed, the form that
 /// cancels it: `cancel` as sent and its errors after a refused cancel,
 /// which keeps the form, and its form-level message, on the page even when
 /// the order is no longer placed.

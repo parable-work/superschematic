@@ -5,7 +5,8 @@
 //! `sqlite::SqliteShop` keeps them in a SQLite file of shop-db's tables
 //! instead, the users' file (`users_at`). The lists of orders, reviews and
 //! products answer a page at a time (D60), and the reviews' search matches
-//! each review's title and body (D62).
+//! each review's title and body (D62). A shopper lists, reads and cancels
+//! their own orders, and staff, who hold `orders.any`, every customer's.
 
 use std::error::Error;
 use std::sync::{Arc, Mutex};
@@ -22,7 +23,7 @@ use acme_shop_orders_api::{
 };
 use async_trait::async_trait;
 use superschematic_http_runtime::page::{Cursor, Page, PageRequest};
-use superschematic_http_runtime::{search, ApiError, RequestContext};
+use superschematic_http_runtime::{covers, search, ApiError, RequestContext};
 
 #[cfg(feature = "sqlite")]
 pub mod sqlite;
@@ -68,14 +69,60 @@ fn users_over(
     Ok(Arc::new(identity::service(Arc::new(store), config)?))
 }
 
+/// The permissions of the `shopper` role: to place orders, and to read and
+/// cancel their own.
+pub const SHOPPER_PERMISSIONS: [&str; 2] = ["orders.read", "orders.write"];
+
+/// The permission of staff, who read and cancel every customer's orders.
+/// It is nested under `orders`, so a role that grants `orders` grants it
+/// too.
+pub const EVERY_ORDER: &str = "orders.any";
+
+/// The permissions of the `staff` role: a shopper's, and `EVERY_ORDER`.
+pub const STAFF_PERMISSIONS: [&str; 3] = ["orders.read", "orders.write", EVERY_ORDER];
+
 /// Adds a shopper who signs in with `login` and `password`, holding the
-/// `shopper` role, which grants `orders`, as staff would add one through
-/// shop-api's administration routes. The first shopper creates the role.
+/// `shopper` role, which grants `SHOPPER_PERMISSIONS`, as staff would add
+/// one through shop-api's administration routes. The first shopper creates
+/// the role.
 pub async fn add_shopper(
     users: &Service,
     login: &str,
     name: &str,
     password: &str,
+) -> Result<(), Box<dyn Error>> {
+    add_user(
+        users,
+        login,
+        name,
+        password,
+        "shopper",
+        &SHOPPER_PERMISSIONS,
+    )
+    .await
+}
+
+/// Adds a member of staff who signs in with `login` and `password`,
+/// holding the `staff` role, which grants `STAFF_PERMISSIONS`. The first
+/// of them creates the role.
+pub async fn add_staff(
+    users: &Service,
+    login: &str,
+    name: &str,
+    password: &str,
+) -> Result<(), Box<dyn Error>> {
+    add_user(users, login, name, password, "staff", &STAFF_PERMISSIONS).await
+}
+
+/// Adds a user who holds the role `role_name`, which grants `permissions`,
+/// creating the role unless a user added before created it.
+async fn add_user(
+    users: &Service,
+    login: &str,
+    name: &str,
+    password: &str,
+    role_name: &str,
+    permissions: &[&str],
 ) -> Result<(), Box<dyn Error>> {
     let store = users.store();
     let user = store
@@ -90,10 +137,13 @@ pub async fn add_shopper(
         .list_roles()
         .await?
         .into_iter()
-        .find(|role| role.name == "shopper")
+        .find(|role| role.name == role_name)
     {
         Some(role) => role,
-        None => store.create_role("shopper", &["orders".to_owned()]).await?,
+        None => {
+            let permissions: Vec<String> = permissions.iter().map(|&p| p.to_owned()).collect();
+            store.create_role(role_name, &permissions).await?
+        }
     };
     store
         .grant_role(&user.id, &role.id, SystemTime::now())
@@ -107,8 +157,23 @@ pub async fn add_shopper(
 #[derive(Default)]
 pub struct Shop {
     products: Vec<types::ProductView>,
-    orders: Mutex<Vec<types::OrderView>>,
+    orders: Mutex<Vec<Order>>,
     reviews: Mutex<Vec<Review>>,
+}
+
+/// An order and its customer, the caller who placed it, by the subject of
+/// their principal, which the view leaves out.
+struct Order {
+    customer: String,
+    view: types::OrderView,
+}
+
+impl Order {
+    /// Whether the caller may read and cancel the order: it is theirs, or
+    /// they are staff.
+    fn visible_to(&self, ctx: &RequestContext) -> bool {
+        sees_every_order(ctx) || self.customer == caller(ctx)
+    }
 }
 
 /// A review and what the list and the one-per-author rule read beside it.
@@ -260,28 +325,46 @@ fn caller(ctx: &RequestContext) -> String {
         .unwrap_or_default()
 }
 
+/// Whether the caller is staff: a permission of theirs covers
+/// `EVERY_ORDER`. getOrder and cancelOrder are `@requireOwnership`, which
+/// leaves the check to the implementation (D29): a shopper reads and
+/// cancels their own orders, and another customer's is the 404 of an
+/// order no one placed, so its id tells them nothing.
+fn sees_every_order(ctx: &RequestContext) -> bool {
+    ctx.principal.as_ref().is_some_and(|principal| {
+        principal
+            .permissions
+            .iter()
+            .any(|held| covers(held, EVERY_ORDER))
+    })
+}
+
 #[async_trait]
 impl OrderImplementation for Shop {
-    /// The orders, oldest first, with the given statuses, or of every
-    /// status when there are none.
+    /// The caller's orders, or every customer's for staff, oldest first,
+    /// with the given statuses, or of every status when there are none.
     async fn list_orders(
         &self,
-        _ctx: RequestContext,
+        ctx: RequestContext,
         args: OrderListOrdersArgs,
     ) -> Result<Page<types::OrderView>, ApiError> {
         let orders = self.orders.lock().unwrap();
-        let listed = orders.iter().filter(|order| {
-            args.statuses
-                .as_ref()
-                .is_none_or(|statuses| statuses.is_empty() || statuses.contains(&order.status))
-        });
+        let listed = orders
+            .iter()
+            .filter(|order| order.visible_to(&ctx))
+            .map(|order| &order.view)
+            .filter(|order| {
+                args.statuses
+                    .as_ref()
+                    .is_none_or(|statuses| statuses.is_empty() || statuses.contains(&order.status))
+            });
         let rows = rows_after(listed.cloned(), &args.page, order_key)?;
         Page::from_rows(rows, args.page.limit, order_key)
     }
 
     async fn place_order(
         &self,
-        _ctx: RequestContext,
+        ctx: RequestContext,
         args: OrderPlaceOrderArgs,
     ) -> Result<types::OrderView, ApiError> {
         let mut lines = Vec::with_capacity(args.input.lines.len());
@@ -311,32 +394,38 @@ impl OrderImplementation for Shop {
                 .sum(),
             lines,
         };
-        self.orders.lock().unwrap().push(order.clone());
+        self.orders.lock().unwrap().push(Order {
+            customer: caller(&ctx),
+            view: order.clone(),
+        });
         Ok(order)
     }
 
+    /// The caller's order, or any for staff.
     async fn get_order(
         &self,
-        _ctx: RequestContext,
+        ctx: RequestContext,
         args: OrderGetOrderArgs,
     ) -> Result<types::OrderView, ApiError> {
         let orders = self.orders.lock().unwrap();
         orders
             .iter()
-            .find(|order| order.id == args.id)
-            .cloned()
+            .find(|order| order.view.id == args.id && order.visible_to(&ctx))
+            .map(|order| order.view.clone())
             .ok_or_else(|| ApiError::not_found("order not found"))
     }
 
+    /// Cancels the caller's order, or any for staff, while it is placed.
     async fn cancel_order(
         &self,
-        _ctx: RequestContext,
+        ctx: RequestContext,
         args: OrderCancelOrderArgs,
     ) -> Result<types::OrderView, ApiError> {
         let mut orders = self.orders.lock().unwrap();
         let order = orders
             .iter_mut()
-            .find(|order| order.id == args.id)
+            .find(|order| order.view.id == args.id && order.visible_to(&ctx))
+            .map(|order| &mut order.view)
             .ok_or_else(|| ApiError::not_found("order not found"))?;
         if order.status != types::OrderStatus::Placed {
             return Err(ApiError::conflict(format!(

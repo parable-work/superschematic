@@ -44,9 +44,19 @@ particular permission. Every order route is in an `Authenticated` set and
 lists the permission it needs.
 
 A permission is a dotted name. A caller's permission covers itself and
-every permission nested under it, so `orders` covers `orders.read` and
-`orders.write`, while `orders.read` covers only itself. A route that lists
-several accepts any one of them.
+every permission nested under it, so `orders` covers `orders.read`,
+`orders.write` and `orders.any`, while `orders.read` covers only itself.
+A route that lists several accepts any one of them.
+
+`getOrder` and `cancelOrder` are `@requireOwnership` as well, which the
+server enforces as a caller and leaves the rest to the implementation. A
+shopper holds `orders.read` and `orders.write`, and `shop-orders` reads,
+cancels and lists their own orders alone: another customer's order is a
+404, as one no one placed is, so its id tells a shopper nothing. Staff
+hold `orders.any`, a permission no route lists, which the implementation
+checks to show them every customer's:
+
+<Snippet file="go/shop-orders/orders.go" symbol={['everyOrder', 'seesEveryOrder', 'callersOrder']} />
 
 The generated Go server keeps open and protected routes apart, and puts the
 permission check on each protected route:

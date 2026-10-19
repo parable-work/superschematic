@@ -4,8 +4,10 @@
 //! oldest first, filtered by status on every page; a product's reviews
 //! oldest first, searched by every word of `q` in their titles and bodies,
 //! a `%` matching itself. Each list follows `next` to its last page, whose
-//! `next` is none, and refuses a cursor it never returned with 400.
-//! scripts/check.sh runs them with `cargo test --features sqlite`.
+//! `next` is none, and refuses a cursor it never returned with 400. A
+//! shopper lists, pages, reads and cancels their own orders alone, and
+//! staff every customer's. scripts/check.sh runs them with `cargo test
+//! --features sqlite`.
 
 use std::thread::sleep;
 use std::time::Duration;
@@ -13,11 +15,12 @@ use std::time::Duration;
 use acme_shop_orders_api::runtime::page::{Cursor, Page, PageRequest};
 use acme_shop_orders_api::runtime::{ApiError, Principal, RequestContext};
 use acme_shop_orders_api::{
-    types, OrderCancelOrderArgs, OrderImplementation, OrderListOrdersArgs, OrderPlaceOrderArgs,
-    ProductCatalogGetProductArgs, ProductCatalogImplementation, ProductCatalogListProductsArgs,
-    ProductReviewsImplementation, ProductReviewsListReviewsArgs, ProductReviewsWriteReviewArgs,
+    types, OrderCancelOrderArgs, OrderGetOrderArgs, OrderImplementation, OrderListOrdersArgs,
+    OrderPlaceOrderArgs, ProductCatalogGetProductArgs, ProductCatalogImplementation,
+    ProductCatalogListProductsArgs, ProductReviewsImplementation, ProductReviewsListReviewsArgs,
+    ProductReviewsWriteReviewArgs,
 };
-use acme_shop_orders_server::Shop;
+use acme_shop_orders_server::{Shop, SHOPPER_PERMISSIONS, STAFF_PERMISSIONS};
 
 /// The catalog: its products' ids, SKUs, names and prices in cents.
 const CATALOG: [(&str, &str, &str, i64); 3] = [
@@ -74,10 +77,21 @@ fn catalog() -> Vec<types::ProductView> {
         .collect()
 }
 
-/// A request of the shopper, who holds `orders`.
+/// A member of staff, who reads and cancels every customer's orders.
+const STAFF: &str = "00000000-0000-4000-8000-0000000000f1";
+
+/// A request of the shopper, who holds the shopper role's permissions.
 fn shopper(id: &str) -> RequestContext {
     RequestContext {
-        principal: Some(Principal::new(id, ["orders"])),
+        principal: Some(Principal::new(id, SHOPPER_PERMISSIONS)),
+        ..RequestContext::default()
+    }
+}
+
+/// A request of staff, who hold the staff role's.
+fn staff() -> RequestContext {
+    RequestContext {
+        principal: Some(Principal::new(STAFF, STAFF_PERMISSIONS)),
         ..RequestContext::default()
     }
 }
@@ -183,26 +197,35 @@ async fn products_page_by_name<S: ProductCatalogImplementation>(shop: &S) {
     assert_eq!(missing.status.as_u16(), 404);
 }
 
+/// Two of the product, shipped to London.
+fn order_of(name: &str) -> OrderPlaceOrderArgs {
+    let input = types::PlaceOrderInput {
+        lines: vec![types::PlaceOrderLine {
+            product_id: product(name),
+            quantity: 2.0,
+        }],
+        shipping_address: types::ShippingAddress {
+            recipient: "Ada Lovelace".to_owned(),
+            line1: "12 St James's Square".to_owned(),
+            line2: None,
+            city: "London".to_owned(),
+            postcode: "SW1Y 4JH".to_owned(),
+            country: "GB".to_owned(),
+            phone: None,
+        },
+    };
+    OrderPlaceOrderArgs { input }
+}
+
+fn order_ids(page: &Page<types::OrderView>) -> Vec<types::IdentityUUID> {
+    page.items.iter().map(|order| order.id).collect()
+}
+
 async fn orders_page_oldest_first<S: OrderImplementation>(shop: &S) {
     let mut placed = Vec::new();
     for name in ["Anvil", "Bellows", "Chisel"] {
-        let input = types::PlaceOrderInput {
-            lines: vec![types::PlaceOrderLine {
-                product_id: product(name),
-                quantity: 2.0,
-            }],
-            shipping_address: types::ShippingAddress {
-                recipient: "Ada Lovelace".to_owned(),
-                line1: "12 St James's Square".to_owned(),
-                line2: None,
-                city: "London".to_owned(),
-                postcode: "SW1Y 4JH".to_owned(),
-                country: "GB".to_owned(),
-                phone: None,
-            },
-        };
         let order = shop
-            .place_order(shopper(SHOPPERS[0]), OrderPlaceOrderArgs { input })
+            .place_order(shopper(SHOPPERS[0]), order_of(name))
             .await
             .unwrap();
         placed.push(order.id);
@@ -213,8 +236,7 @@ async fn orders_page_oldest_first<S: OrderImplementation>(shop: &S) {
     let list = |statuses, page| {
         shop.list_orders(shopper(SHOPPERS[0]), OrderListOrdersArgs { statuses, page })
     };
-    let ids =
-        |page: &Page<types::OrderView>| page.items.iter().map(|order| order.id).collect::<Vec<_>>();
+    let ids = order_ids;
 
     let first = list(None, PageRequest::first(2)).await.unwrap();
     assert_eq!(ids(&first), placed[..2]);
@@ -251,6 +273,87 @@ async fn orders_page_oldest_first<S: OrderImplementation>(shop: &S) {
     .unwrap();
     assert_eq!(ids(&cancelled), [placed[1]]);
     assert_refused_cursor(list(None, forged()).await);
+}
+
+/// Every order `ctx` lists, a page of one at a time.
+async fn every_order<S: OrderImplementation>(
+    shop: &S,
+    ctx: impl Fn() -> RequestContext,
+) -> Vec<types::IdentityUUID> {
+    let list = |page| {
+        shop.list_orders(
+            ctx(),
+            OrderListOrdersArgs {
+                statuses: None,
+                page,
+            },
+        )
+    };
+    let mut page = list(PageRequest::first(1)).await.unwrap();
+    let mut ids = order_ids(&page);
+    while page.next.is_some() {
+        page = list(after(&page, 1)).await.unwrap();
+        ids.extend(order_ids(&page));
+    }
+    ids
+}
+
+/// Two shoppers place two orders each, in turn. Each lists, a page at a
+/// time, and reads their own alone: another customer's order is the 404 of
+/// one no one placed, to read and to cancel, and stays placed. Staff list
+/// every customer's, oldest first, and read and cancel any.
+async fn orders_are_their_customers<S: OrderImplementation>(shop: &S) {
+    let mut placed: [Vec<types::IdentityUUID>; 2] = Default::default();
+    for name in ["Anvil", "Bellows"] {
+        for (n, customer) in SHOPPERS[..2].iter().enumerate() {
+            let order = shop
+                .place_order(shopper(customer), order_of(name))
+                .await
+                .unwrap();
+            placed[n].push(order.id);
+            sleep(Duration::from_millis(3));
+        }
+    }
+    let get = |ctx, id| shop.get_order(ctx, OrderGetOrderArgs { id });
+    let cancel = |ctx, id| {
+        let reason = Some("Not mine".to_owned());
+        shop.cancel_order(ctx, OrderCancelOrderArgs { id, reason })
+    };
+    for (n, customer) in SHOPPERS[..2].iter().enumerate() {
+        assert_eq!(
+            every_order(shop, || shopper(customer)).await,
+            placed[n],
+            "{customer} lists their own orders"
+        );
+        let own = get(shopper(customer), placed[n][0]).await.unwrap();
+        assert_eq!(own.id, placed[n][0]);
+        let theirs = placed[1 - n][0];
+        for refused in [
+            get(shopper(customer), theirs).await,
+            cancel(shopper(customer), theirs).await,
+        ] {
+            let err = refused.expect_err("another customer's order");
+            assert_eq!(
+                (err.status.as_u16(), err.message.as_str()),
+                (404, "order not found")
+            );
+        }
+    }
+
+    // Staff list everyone's, as they were placed, every one still placed.
+    let everyone = vec![placed[0][0], placed[1][0], placed[0][1], placed[1][1]];
+    assert_eq!(every_order(shop, staff).await, everyone);
+    for id in &everyone {
+        let order = get(staff(), *id).await.unwrap();
+        assert_eq!(order.status, types::OrderStatus::Placed);
+    }
+    let cancelled = cancel(staff(), placed[1][0]).await.unwrap();
+    assert_eq!(
+        (cancelled.status, cancelled.cancel_reason.as_deref()),
+        (types::OrderStatus::Cancelled, Some("Not mine"))
+    );
+    let seen = get(shopper(SHOPPERS[1]), placed[1][0]).await.unwrap();
+    assert_eq!(seen.status, types::OrderStatus::Cancelled);
 }
 
 async fn reviews_page_and_search<S: ProductReviewsImplementation>(shop: &S) {
@@ -354,6 +457,11 @@ async fn the_shop_in_memory_pages_and_searches() {
     pages_and_searches(&Shop::with_products(catalog())).await;
 }
 
+#[tokio::test]
+async fn the_shop_in_memory_keeps_orders_to_their_customers() {
+    orders_are_their_customers(&Shop::with_products(catalog())).await;
+}
+
 #[cfg(feature = "sqlite")]
 mod sqlite {
     use acme_shop_orders_server::sqlite::SqliteShop;
@@ -362,7 +470,7 @@ mod sqlite {
 
     /// A SQLite shop in memory, its tables shop-db's, as the build's
     /// `sqlite/create.sql` creates them, with the catalog's products and
-    /// the shoppers as users.
+    /// the shoppers and staff as users.
     fn sqlite_shop() -> SqliteShop {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         conn.execute_batch(include_str!(
@@ -384,11 +492,18 @@ mod sqlite {
             )
             .unwrap();
         }
+        shop.add_user(&id(STAFF), "staff@example.com", "A member of staff")
+            .unwrap();
         shop
     }
 
     #[tokio::test]
     async fn the_shop_in_sqlite_pages_and_searches() {
         pages_and_searches(&sqlite_shop()).await;
+    }
+
+    #[tokio::test]
+    async fn the_shop_in_sqlite_keeps_orders_to_their_customers() {
+        orders_are_their_customers(&sqlite_shop()).await;
     }
 }

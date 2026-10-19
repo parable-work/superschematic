@@ -11,6 +11,7 @@ import {
   paginated,
   publicRoute,
   rateLimit,
+  requireOwnership,
   requirePermission,
   rest,
   source,
@@ -93,15 +94,21 @@ export abstract class WriteReviewInput {
   body: Validate<string, { maxLength: 5000 }>;
 }
 
-// Reading orders.
+// Reading orders: a shopper reads their own, and staff, who hold
+// orders.any, every customer's.
 export class OrderQueries extends Authenticated {
+  // One order: the caller's own, or any customer's for staff. Another
+  // customer's order is not found, as one no one placed is, so its id
+  // tells a shopper nothing.
   @rest(HttpMethod.GET, "orders/{id}")
   @requirePermission(["orders.read"])
+  @requireOwnership
   getOrder(id: Identity.UUID): OrderView {
     throw new Error("schema declaration only");
   }
 
-  // The orders, oldest first: by when each was placed, then by its id.
+  // The caller's orders, or every customer's for staff, oldest first: by
+  // when each was placed, then by its id.
   @rest(HttpMethod.GET, "orders")
   @requirePermission(["orders.read"])
   @paginated({ defaultLimit: 20, maxLimit: 100 })
@@ -120,9 +127,12 @@ export class OrderMutations extends Authenticated {
     throw new Error("schema declaration only");
   }
 
-  // Cancels an order that has not shipped, recording why.
+  // Cancels an order that has not shipped, recording why: the caller's
+  // own, or any customer's for staff. Another customer's order is not
+  // found, as getOrder answers.
   @rest(HttpMethod.POST, "orders/{id}/cancel")
   @requirePermission(["orders.write"])
+  @requireOwnership
   cancelOrder(id: Identity.UUID, reason: Nullable<Validate<string, { maxLength: 500 }>>): OrderView {
     throw new Error("schema declaration only");
   }

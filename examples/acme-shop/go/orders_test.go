@@ -7,7 +7,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	shoporders "example.com/acme/api/shop-orders"
 	orm "example.com/acme/orm/shop-db"
@@ -15,10 +17,12 @@ import (
 	"example.com/acme/sdk/go/shop-orders/namespaces"
 	"example.com/acme/sdk/go/shop-orders/runtime"
 	shopordersimpl "example.com/acme/shop/shop-orders"
+	db "example.com/acme/types/go/shop-db"
 	types "example.com/acme/types/go/shop-orders"
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
 	scalars "github.com/parable-work/superscalar/go"
+	"github.com/parable-work/superschematic/runtime/http/go/identity"
 	"go.uber.org/zap"
 )
 
@@ -26,6 +30,13 @@ import (
 const (
 	shopperLogin    = "grace@example.com"
 	shopperPassword = "grace's password"
+)
+
+// shopperPermissions are a shopper's: to place orders, and to read and
+// cancel their own. staffPermissions add orders.any, every customer's.
+var (
+	shopperPermissions = []string{"orders.read", "orders.write"}
+	staffPermissions   = []string{"orders.read", "orders.write", "orders.any"}
 )
 
 // ordersServer serves shop-orders in-process over the no-op database, as
@@ -38,8 +49,14 @@ func ordersServer(t *testing.T, permissions ...string) (*httptest.Server, string
 	u := newUsers(t)
 	u.add(t, shopperLogin, "Grace Hopper", shopperPassword, permissions...)
 	token := signIn(t, productsClient(t, productsServer(t, u)), shopperLogin, shopperPassword)
+	return serveOrders(t, u, orm.NewNoOpDatabase()), token
+}
 
-	deps := shoporders.Deps{DB: orm.NewNoOpDatabase(), Logger: zap.NewNop()}
+// serveOrders serves shop-orders in-process over database, its callers
+// u's users.
+func serveOrders(t *testing.T, u *users, database orm.DatabaseInterface) *httptest.Server {
+	t.Helper()
+	deps := shoporders.Deps{DB: database, Logger: zap.NewNop()}
 	implementations, err := shopordersimpl.New(deps)
 	if err != nil {
 		t.Fatal(err)
@@ -57,7 +74,7 @@ func ordersServer(t *testing.T, permissions ...string) (*httptest.Server, string
 	}
 	server := httptest.NewServer(router)
 	t.Cleanup(server.Close)
-	return server, token
+	return server
 }
 
 func ordersClient(t *testing.T, server *httptest.Server, token string) *sdk.ShopOrdersSDK {
@@ -146,10 +163,143 @@ func TestPermissions(t *testing.T) {
 	}
 }
 
+// A shopper gets and cancels their own orders alone: another customer's
+// order is the 404 of one no one placed, to get and to cancel, and stays as
+// it was. Staff, who hold orders.any, get and cancel any. The orders are
+// rows of the test's own database; the stack's test lists and pages them
+// as each caller sees them, over Postgres (TestStackDevRunsTheShop).
+func TestAShopperReadsAndCancelsOnlyTheirOwnOrders(t *testing.T) {
+	ctx := context.Background()
+	u := newUsers(t)
+	grace := u.add(t, shopperLogin, "Grace Hopper", shopperPassword, shopperPermissions...)
+	alan := u.add(t, "alan@example.com", "Alan Turing", "alan's password", shopperPermissions...)
+	u.add(t, staffLogin, "Ada Lovelace", staffPassword, staffPermissions...)
+	orders := newOrderRows(t, grace, alan)
+	server := serveOrders(t, u, orders)
+	accounts := productsServer(t, u)
+	as := func(login, password string) *sdk.ShopOrdersSDK {
+		return ordersClient(t, server, signIn(t, productsClient(t, accounts), login, password))
+	}
+	shoppers := map[string]*sdk.ShopOrdersSDK{
+		"grace": as(shopperLogin, shopperPassword),
+		"alan":  as("alan@example.com", "alan's password"),
+	}
+	staff := as(staffLogin, staffPassword)
+	notMine, outOfStock := "not mine", "out of stock"
+	notFound := func(what string, err error) {
+		t.Helper()
+		var apiErr *sdk.APIError
+		if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusNotFound {
+			t.Fatalf("%s = %v, want 404", what, err)
+		}
+	}
+
+	for who, client := range shoppers {
+		own, other := orders.of["grace"], orders.of["alan"]
+		if who == "alan" {
+			own, other = other, own
+		}
+		if got, err := client.OrderNamespace.GetOrder(ctx, own.String()); err != nil || got.Id != own {
+			t.Fatalf("%s's GetOrder of their order = %+v, %v", who, got, err)
+		}
+		_, err := client.OrderNamespace.GetOrder(ctx, other.String())
+		notFound(who+"'s GetOrder of the other's order", err)
+		_, err = client.OrderNamespace.CancelOrder(ctx, other.String(), namespaces.OrderCancelOrderInput{Reason: &notMine})
+		notFound(who+"'s CancelOrder of the other's order", err)
+	}
+	for _, id := range orders.of {
+		if status := orders.status(id); status != db.OrderStatus_Placed {
+			t.Fatalf("after the shoppers' refused cancels, order %s is %s, want placed", id, status)
+		}
+	}
+
+	for who, id := range orders.of {
+		if got, err := staff.OrderNamespace.GetOrder(ctx, id.String()); err != nil || got.Id != id {
+			t.Fatalf("staff's GetOrder of %s's order = %+v, %v", who, got, err)
+		}
+		cancelled, err := staff.OrderNamespace.CancelOrder(ctx, id.String(), namespaces.OrderCancelOrderInput{Reason: &outOfStock})
+		if err != nil || cancelled.Status != types.OrderStatus_Cancelled || cancelled.CancelReason != outOfStock {
+			t.Fatalf("staff's CancelOrder of %s's order = %+v, %v", who, cancelled, err)
+		}
+	}
+}
+
+// orderRows is the no-op database with an order of each customer's: their
+// ids are of, by the customer's first name, lowercase. GetOne reads one and
+// UpdateOne writes its status and its reason; every other call is the
+// no-op database's.
+type orderRows struct {
+	*orm.NoOpDatabase
+	repository *orderRepository
+	of         map[string]db.IdentityUUID
+}
+
+func newOrderRows(t *testing.T, customers ...identity.User) *orderRows {
+	t.Helper()
+	rows := &orderRows{
+		NoOpDatabase: orm.NewNoOpDatabase(),
+		repository:   &orderRepository{rows: map[db.IdentityUUID]db.Order{}},
+		of:           map[string]db.IdentityUUID{},
+	}
+	for _, customer := range customers {
+		customerID := mustUUID(t, customer.ID)
+		id := scalars.NewUUID()
+		rows.repository.rows[id] = db.Order{
+			Id:              &id,
+			Customer:        db.User{Id: &customerID},
+			Status:          db.OrderStatus_Placed,
+			PlacedAt:        db.TemporalDateTime(time.Now()),
+			ShippingAddress: address,
+		}
+		rows.of[strings.ToLower(strings.Fields(customer.Name)[0])] = id
+	}
+	return rows
+}
+
+func (rows *orderRows) GetOrderRepository() orm.OrderRepositoryInterface { return rows.repository }
+
+func (rows *orderRows) status(id db.IdentityUUID) db.OrderStatus {
+	order, _ := rows.repository.GetOne(context.Background(), id, nil)
+	return order.Status
+}
+
+type orderRepository struct {
+	orm.NoOpOrderRepository
+	mu   sync.Mutex
+	rows map[db.IdentityUUID]db.Order
+}
+
+func (r *orderRepository) GetOne(_ context.Context, id db.IdentityUUID, _ *orm.OrderGetOptions) (*db.Order, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	order, ok := r.rows[id]
+	if !ok {
+		return nil, orm.ErrNotFound
+	}
+	return &order, nil
+}
+
+func (r *orderRepository) UpdateOne(_ context.Context, id db.IdentityUUID, update *orm.OrderUpdate) (*db.Order, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	order, ok := r.rows[id]
+	if !ok {
+		return nil, orm.ErrNotFound
+	}
+	if update.Status != nil {
+		order.Status = *update.Status
+	}
+	if update.CancelReason != nil {
+		order.CancelReason = *update.CancelReason
+	}
+	r.rows[id] = order
+	return &order, nil
+}
+
 // Both sides check an input against the schema: the SDK before it sends,
 // the server when it receives.
 func TestValidation(t *testing.T) {
-	server, token := ordersServer(t, "orders")
+	server, token := ordersServer(t, shopperPermissions...)
 	empty := types.PlaceOrderInput{Lines: []types.PlaceOrderLine{}, ShippingAddress: address}
 
 	_, err := ordersClient(t, server, token).OrderNamespace.PlaceOrder(context.Background(), empty)
@@ -172,7 +322,7 @@ func TestValidation(t *testing.T) {
 // The no-op database holds no rows, so every page is empty and the last;
 // the stack's test pages through Postgres (TestStackDevRunsTheShop).
 func TestPagesAndSearch(t *testing.T) {
-	server, token := ordersServer(t, "orders")
+	server, token := ordersServer(t, shopperPermissions...)
 	page := func(path string) (int, string) {
 		t.Helper()
 		status, body := call(t, http.MethodGet, server.URL+path, token, "")
@@ -220,7 +370,7 @@ func TestPagesAndSearch(t *testing.T) {
 // @bodyLimit refuses a body over its size before it is read, and
 // @rateLimit refuses a caller's requests past the limit for the minute.
 func TestTrafficControls(t *testing.T) {
-	server, token := ordersServer(t, "orders")
+	server, token := ordersServer(t, shopperPermissions...)
 
 	if status := post(t, server.URL+"/api/orders", token, strings.Repeat(" ", 1<<20+1)); status != http.StatusRequestEntityTooLarge {
 		t.Fatalf("a body over 1 MB answered %d", status)

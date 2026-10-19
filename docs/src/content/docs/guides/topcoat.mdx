@@ -27,7 +27,10 @@ line's product from the catalog `shop-orders` lists, filters their orders
 at `/orders` and pages through them, and cancels one from its page,
 `/orders/{id}`, each page's input taken through a form the crate builds.
 The crate also generates a console of the shop's resources at `/console`
-([Generated pages](#generated-pages)).
+([Generated pages](#generated-pages)). The pages and the console show a
+shopper their own orders alone, since the implementations list, read
+and cancel no other customer's, and staff, who hold `orders.any`, every
+customer's.
 
 ## Build the crate
 
@@ -726,6 +729,13 @@ invalid), post a valid one, and read it back from the page and from the
 JSON API:
 
 <Snippet file="topcoat/tests/app.rs" symbol="a_review_needs_a_signed_in_shopper_and_its_rules" />
+
+Another test signs two shoppers and staff in, over the shop in memory and
+over SQLite (`a_shopper_sees_their_own_orders_and_staff_every_customers`).
+Each shopper's `/orders`, a page at a time, and `/console/orders` list
+their own orders alone; another customer's order is a 404 on its page, its
+console page, both cancels and the JSON API's routes, and stays placed;
+staff list all four orders and cancel any.
 
 The orders tests place an order through its form: a row button adds a
 line and renders the form again without placing the order, a quantity of
