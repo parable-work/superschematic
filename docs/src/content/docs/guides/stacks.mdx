@@ -32,7 +32,7 @@ balancer and DNS resources that the Pulumi provisioner applies.
 | `calls` in an API's config, and a build ordered by output | |
 | Go, TypeScript and Rust: derived config fields in `EnvConfig`, a typed `Deps`, the implementation scaffold, and each server's entrypoint and Dockerfile, which reaches Cloud SQL with IAM database authentication where an environment places its database there | OpenTelemetry export |
 | the core's `local` target and `stack dev` | restarting a server that exits; key rotation |
-| the gcp target, with `stack bootstrap`, `secrets set`, `build`, `plan`, `deploy`, `destroy` and `outputs`; image builds on Cloud Build; each migration phase as a Cloud Run job that also grants the servers their privileges | a deploy lock beyond the provisioner's and the runner's |
+| the gcp target, with `stack bootstrap`, `secrets set`, `build`, `plan`, `deploy`, `destroy`, `outputs` and `unlock`; image builds on Cloud Build; each migration phase as a Cloud Run job that also grants the servers their privileges; a deploy lock per run in the state bucket | |
 | the Pulumi provisioner and the typed bindings generator | |
 | the Cloudflare DNS platform, linked in the installed binary; bootstrap stores its API token and deploys read it | |
 | `@requireService` and `@allowService`, and the stack's check that every `calls` edge reaches an operation | the callee's half of service auth: a server whose API has a service clause does not start yet |
@@ -1269,7 +1269,7 @@ and resolution checks each node's properties against it.
 
 Each command resolves the environment as the build does, without writing
 a build. They reach Google Cloud with application default credentials,
-and all but `secrets set` and `run` run the `pulumi` CLI, which must be on `PATH`:
+and all but `secrets set`, `run` and `unlock` run the `pulumi` CLI, which must be on `PATH`:
 
 ```sh
 superschematic stack bootstrap Staging
@@ -1278,6 +1278,7 @@ superschematic stack plan Staging
 superschematic stack deploy Staging
 superschematic stack outputs Staging --out outputs.json
 superschematic stack run Staging shop-orders-ship-orders
+superschematic stack unlock Staging
 ```
 
 - **`bootstrap`** runs once per project with an owner's credentials, and
@@ -1328,7 +1329,17 @@ superschematic stack run Staging shop-orders-ship-orders
   the runner's error, which the deploy reads from the execution's logs in
   Cloud Logging, and the next deploy runs the phase again. The deploy
   records a manifest in the state bucket after every step, and refuses a
-  migration hazard no `--allow` acknowledges.
+  migration hazard no `--allow` acknowledges. It holds the run's deploy
+  lock throughout, an object of the state bucket, from before it reads
+  the manifest until it ends, whether it succeeds or fails: a second
+  deploy or a destroy of the run meanwhile fails at once and says who
+  holds the lock, on which machine, and since when. Ctrl-C stops the
+  step under way, records the failure and releases the lock.
+- **`unlock`** removes a lock a deploy left when its process was killed,
+  a CI job cancelled hard or a laptop closed mid-deploy. The lock has no
+  expiry, so nothing else removes it: check that the deploy it names no
+  longer runs, then type the run's name, or pass `--yes`. Each run has a
+  lock of its own, so `--param pr=123` names a preview member's.
 - **`run`** runs a deployed job once: an execution of its Cloud Run job
   as the last deploy left it. It refuses a job whose Cloud Run job runs
   another image than the manifest records, as during a deploy, waits for
@@ -1339,7 +1350,8 @@ superschematic stack run Staging shop-orders-ship-orders
   while the last one runs, so a job whose run may outlast its interval
   keeps its runs apart itself.
 - **`destroy`** removes a run's resources and its manifest, after you
-  type the run's name, or with `--yes`. What the stack's runs in the
+  type the run's name, or with `--yes`, holding the run's lock as a
+  deploy does. What the stack's runs in the
   project share stays: bootstrap's resources, the stack's images, its
   migration job `<stack>-migrate`, and the build contexts and job
   documents in the state bucket, until its lifecycle rule deletes them.

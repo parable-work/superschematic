@@ -740,7 +740,7 @@ It takes the flags of the commands below, `--stack`, `--naming`,
 | --- | --- | --- |
 | `--out` | `<schemas-root>/dist` | the output root the build wrote, `stack dev`'s `--out`: where `run` reads a local environment and the job's entrypoint module |
 
-## `stack bootstrap`, `secrets set`, `plan`, `build`, `deploy`, `destroy` and `outputs`
+## `stack bootstrap`, `secrets set`, `plan`, `build`, `deploy`, `destroy`, `outputs` and `unlock`
 
 The cloud half of the `stack` group bootstraps, plans, builds, deploys and
 destroys the environments a Stack service declares
@@ -750,8 +750,8 @@ drives the environment's target and provisioner. A binary deploys to a
 target only when it links the target's extension and the provisioner's
 (`gcp.Extension{}`, `pulumi.Extension{...}`). An environment on the
 `local` target runs with `stack dev`; `plan`, `build`, `deploy`,
-`bootstrap`, `destroy` and `outputs` refuse it, `secrets set` writes its
-`secrets.env`, and `stack run` runs a job against it.
+`bootstrap`, `destroy`, `outputs` and `unlock` refuse it, `secrets set`
+writes its `secrets.env`, and `stack run` runs a job against it.
 
 Each of these commands takes these flags:
 
@@ -760,7 +760,7 @@ Each of these commands takes these flags:
 | `--stack` | the working directory when it is a Stack service, else the one Stack service under `./schemas/services` | the Stack service directory |
 | `--naming` | `<stack>/../../superschematic.toml` | naming config file |
 | `--program-dir` | `<schemas-root>/dist/program/<stack>/<environment>` | where to render the provisioner's program |
-| `--param` | none | a parameter's value for one run of a parameterized environment, `<name>=<value>`; repeatable. `plan`, `build`, `deploy`, `destroy` and `outputs` take it |
+| `--param` | none | a parameter's value for one run of a parameterized environment, `<name>=<value>`; repeatable. `plan`, `build`, `deploy`, `destroy`, `outputs` and `unlock` take it |
 
 ### `stack bootstrap <environment>`
 
@@ -821,8 +821,10 @@ the manifest records or `--bundle` names, fetched from the target and
 placed beside the program. It also lists
 the secrets with no value, the servers and jobs with no image or bundle
 yet and the sites with no files yet (which a deploy builds), the migration
-phases a failed deploy left part-way, and the records to create by hand
-for a domain no DNS platform holds. It exits 1 after printing when a plan
+phases a failed deploy left part-way, the records to create by hand
+for a domain no DNS platform holds, and the run's deploy lock when a
+deploy holds it, since what the plan reads may change when that deploy
+ends. It takes no lock itself. It exits 1 after printing when a plan
 has a hazard of a `--fail-on` class that no `--allow` names.
 
 | Flag | Default | Meaning |
@@ -896,6 +898,16 @@ that connects to a database its privileges. A rollout that fails runs no
 `contract` step, and the next deploy plans from the schema between the
 phases.
 
+The deploy holds the run's deploy lock, kept by the target's state store
+(on gcp the object `superschematic/locks/<stack>/<run>.json` of the state
+bucket), from before it reads the manifest until it ends, whether it
+succeeds or fails. A second deploy or a destroy of the run meanwhile
+fails at once, naming who holds the lock, the host, the process, the CI
+run and since when. Ctrl-C stops the step under way, records the failure
+in the manifest and releases the lock; a second Ctrl-C ends the process.
+A deploy whose process was killed leaves its lock, which `stack unlock`
+removes.
+
 A binary built from a checkout names no release of the migration runner
 to build the job's image from: set `SUPERSCHEMATIC_MIGRATE_IMAGE` to an
 image of `superschematic-migrate`, by digest, in the stack's repository.
@@ -922,7 +934,28 @@ superschematic stack deploy Preview --param pr=123 --expect plan.json --allow 'd
 ### `stack destroy <environment>`
 
 Remove every resource of the run and its deploy manifest. It asks for the
-run's name at a terminal unless `--yes`, and refuses without either.
+run's name at a terminal unless `--yes`, and refuses without either. It
+holds the run's deploy lock while it runs, as a deploy does.
+
+### `stack unlock <environment>`
+
+Remove the deploy lock of a run, which a deploy or a destroy leaves when
+its process dies before it ends: a killed CI job, a closed laptop. The
+lock has no expiry. It shows who holds the lock, the host, the process
+and since when, and asks for the run's name at a terminal unless
+`--yes`, and refuses without either. Remove a lock only once the deploy
+that holds it no longer runs. It removes the lock it showed and no other,
+so a lock another deploy took meanwhile stays; a run with no lock prints
+`no deploy holds the lock of <run>`.
+
+```
+superschematic stack unlock Staging
+superschematic stack unlock Preview --param pr=123 --yes
+```
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--yes` | false | remove the lock without asking |
 
 ### `stack outputs <environment>`
 

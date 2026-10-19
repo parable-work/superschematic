@@ -3705,7 +3705,8 @@ request adds an edge and grants `run.invoker`".
 ### 11.1 Commands
 
 The core adds a `stack` command group: `init`, `bootstrap`, `secrets set`,
-`dev`, `plan`, `build`, `deploy`, `destroy`, `outputs` and `run`. Targets
+`dev`, `plan`, `build`, `deploy`, `destroy`, `outputs`, `run` and
+`unlock`. Targets
 and provisioners plug into it; they add no commands of their own. `stack
 dev` runs a local environment (section 8.3), and `stack run` runs a job
 once on demand, locally or in the cloud (section 8.7).
@@ -3771,12 +3772,13 @@ and reads the `environment.json` the build writes, it resolves the
 environment as the `stack` generator does, without a build, so `plan`
 never reads a stale one. The provisioner's program goes to
 `<schemas-root>/dist/program/<stack>/<environment>`, or `--program-dir`.
-`plan`, `build`, `deploy`, `bootstrap`, `destroy` and `outputs` refuse a
-local environment, which `stack dev` runs, `secrets set` writes its
-`secrets.env`, and `run` runs a job against it. A command
+`plan`, `build`, `deploy`, `bootstrap`, `destroy`, `outputs` and `unlock`
+refuse a local environment, which `stack dev` runs, `secrets set` writes
+its `secrets.env`, and `run` runs a job against it. A command
 that works on one run of a parameterized environment takes each
 parameter's value as `--param pr=123`. `bootstrap`, `secrets set`,
-`plan`, `build`, `deploy`, `destroy`, `outputs` and `run` are built, in
+`plan`, `build`, `deploy`, `destroy`, `outputs`, `run` and `unlock` are
+built, in
 `cli/stack_deploy.go` and `cli/stack_run.go` over `internal/stackdeploy`,
 whose public face is in `stack`; the reference page "CLI" lists their
 flags. `build` builds the images a deploy would build (section 11.2) and
@@ -3785,7 +3787,9 @@ manifest. A target plugs into them, and into the generated CI, through
 seven seams on its `TargetSpec` (D45, D46, D47, D52):
 
 - `State`, a state store: the provisioner's state backend for an
-  environment, and each run's deploy manifest;
+  environment, and each run's deploy manifest. A store that is also a
+  `StateLocker` keeps each run's deploy lock beside its manifest (section
+  11.2): on gcp an object of the state bucket;
 - `Secrets`, a secret store: set, exists and list, keyed by a secret's
   identity (section 4.2) or a credential's secret name;
 - `Bootstrap`, the bootstrap of section 7.3;
@@ -3912,6 +3916,48 @@ The manifest is the migration baseline, the record of what is running, and
 the starting point for a rollback. The manifest records where the last
 deploy got to: `deploying` while it runs, then `deployed`, or `failed` with
 the step and the error. The bucket keeps every version of it.
+
+Two deploys of one run must not overlap: each plans its migrations and
+its images from the manifest the other replaces, and each step's
+targeted update is the provisioner's to lock, not the deploy's whole
+order. So `stack deploy` and `stack destroy` take the run's deploy lock
+before they read the manifest, and release it when they end, whether
+they succeed, fail or are interrupted; Ctrl-C stops the step under way,
+records the failure and releases the lock, and a second Ctrl-C ends the
+process (D46, amended). A second deploy or destroy of the run while one
+holds it fails at once, naming the holder, the host, the process, the CI
+run when there is one, and when it took the lock:
+
+```text
+the deploy lock of Staging is held by a deploy by ana on ana-laptop (pid 4242) since 2026-10-19T09:00:00Z, 12m3s ago;
+wait for it to end, or, when it no longer runs, remove its lock with `superschematic stack unlock Staging`
+```
+
+The lock is held, not leased: it has no expiry, and only its holder's
+release or `stack unlock` removes it. A lease that expired while its
+holder was paused (a laptop asleep, a CI runner preempted, a dropped
+connection) would let a second deploy start beside the first, which
+would go on writing the provisioner's state, the migrations and the
+manifest, and none of those writes could check a fencing token. A deploy
+whose process is killed leaves its lock; `stack unlock <environment>`
+shows it and asks for the run's name, or takes `--yes`, and removes that
+lock and no other, so a lock another deploy took meanwhile stays. Each
+run has its own lock, as it has its own manifest: members of a
+parameterized environment deploy side by side. A deploy holds the lock
+by an ID of its own and releases only that ID, so one whose lock a person
+removed while it ran leaves the next deploy's lock in place, and says
+the two may have run at once. `stack plan` takes no lock, since the
+`planner` account writes nothing, and says when a deploy holds one.
+
+The lock is the target's: its state store keeps it when it is a
+`registry.StateLocker` (`Lock`, `ReadLock` and `Unlock`, each atomic in
+the store). On gcp it is the object
+`superschematic/locks/<stack>/<run>.json` in the state bucket, holding the
+lock's JSON, created with `ifGenerationMatch=0`, so Cloud Storage creates
+it for one writer only, and deleted with `ifGenerationMatch` at the
+generation that holds the deploy's ID. `deployer` writes it with the
+object admin role it holds on the bucket. A target whose store keeps no
+lock deploys without one, and the deploy says so.
 
 `stack plan <environment>` runs the provisioner's `Plan` over the program
 with the images pinned, plans each database's migration the same way, and
@@ -4197,11 +4243,14 @@ whatever the deploy decides is affected, and needs no list of its own.
    that runs `superschematic-migrate job` on Cloud SQL and owns the
    servers' privileges (section 8.4, D46), and `stackdeploy.CredentialsOf`
    reading the credentials a DNS platform resolves into
-   `dns.credentials`. So has the generated CI of section 11.3 (D47).
-   Next: a deploy lock beyond the provisioner's and the runner's.
+   `dns.credentials`. So has the generated CI of section 11.3 (D47),
+   and the deploy lock that keeps two deploys of a run apart, a
+   `StateLocker` on the target's state store, on gcp an object of the
+   state bucket (section 11.2, D46, amended).
 8. **CLI.** The `stack` command group. Landed: `stack dev` (section 8.3),
    which runs Go, TypeScript and Rust servers, and `bootstrap`, `secrets
-   set`, `plan`, `deploy`, `destroy` and `outputs` (section 11).
+   set`, `plan`, `deploy`, `destroy`, `outputs` and `unlock` (section
+   11).
 
 ## 13. Module layout
 
@@ -4349,9 +4398,9 @@ model, or retired, when it lands.
    deploys, the hazard gate and the deploy manifest. Built (D45, D46):
    each deploy plans its databases' migrations, gates their hazards,
    records the manifest, and on gcp runs each phase as the migration
-   job. Milestone 3's run applied an expand phase on Cloud SQL; no
-   contract phase has run there, and a deploy lock beyond the
-   provisioner's and the runner's is not built.
+   job, holding the run's deploy lock throughout (section 11.2).
+   Milestone 3's run applied an expand phase on Cloud SQL; no contract
+   phase has run there, nor has the lock.
 6. **CI generation and parameterized environments.** Built (D47). A
    stack's `outputs.ci` writes its GitHub Actions workflow (section
    11.3), which checks with no credentials, plans each cloud environment

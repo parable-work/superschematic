@@ -94,6 +94,12 @@ type DeployOptions struct {
 //     phases; the provisioner applies exposure;
 //  3. it writes the manifest after each step, and at the end.
 //
+// It holds the run's deploy lock throughout, from before it reads the
+// manifest until it returns, when the target's state store keeps one
+// (registry.StateLocker): a deploy or a destroy of the run that another
+// holds the lock for is refused, with who holds it and since when (D46,
+// amended).
+//
 // A step that fails stops the deploy, and the manifest records the
 // failure. A rollout that fails runs no contract step, so the servers of
 // the previous version keep the expanded schema, and the manifest records
@@ -101,7 +107,7 @@ type DeployOptions struct {
 // plan supersedes the pending contract (D27, amended). A migration phase
 // that fails is recorded as pending, and the next deploy finishes it
 // before anything else migrates, as the runner requires.
-func Deploy(ctx context.Context, o DeployOptions) (*Manifest, error) {
+func Deploy(ctx context.Context, o DeployOptions) (m *Manifest, err error) {
 	s, err := open(o.Options)
 	if err != nil {
 		return nil, err
@@ -113,6 +119,13 @@ func Deploy(ctx context.Context, o DeployOptions) (*Manifest, error) {
 	if now == nil {
 		now = time.Now
 	}
+	// The lock comes before the manifest is read: a deploy plans its
+	// migrations and its images from the manifest it then replaces.
+	release, err := s.lock(ctx, opDeploy, now)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { err = errors.Join(err, release()) }()
 	prev, err := readManifest(ctx, s.target.State, s.run)
 	if err != nil {
 		return nil, err

@@ -320,6 +320,22 @@ refuses the target's environments; with no `Sites` or `Bundles`, an
 environment with a site, or with a deployable that runs a bundle, does not
 deploy.
 
+A `StateStore` should also be a `registry.StateLocker`, which keeps a
+deploy lock per run beside its manifest (D46, amended): `Lock(ctx, run,
+lock)` writes the `DeployLock` only where none is, atomically, and
+returns a `*registry.LockHeldError` holding the lock that is there
+otherwise; `ReadLock(ctx, run)` returns the lock, or nil; and
+`Unlock(ctx, run, id)` removes the lock only while its `ID` is `id`,
+returning a `*LockHeldError` for one another took. A deploy and a
+destroy take it before they read the manifest and release it when they
+end, so two of them never run on one run at once; `stack unlock` removes
+one a killed deploy left. The lock is held, with no expiry. Without a
+`StateLocker`, a deploy runs with no lock and says so. gcp's is an
+object of the state bucket written with `ifGenerationMatch=0` and
+deleted at the generation it read; a store over S3's API can take it
+with a conditional write (`If-None-Match: *`), and check the ID it reads
+back before it deletes.
+
 A `BundlePublisher` should also be a `registry.ArtifactFetcher`,
 `Fetch(ctx, run, deployable, digest, dest)`, which writes the files it
 keeps under a digest into `dest`, each executable when it was published
