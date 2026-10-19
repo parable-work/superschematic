@@ -146,6 +146,38 @@ func (e EndpointInfo) AllowsService() bool {
 	return e.ServiceCallers != nil && e.ServiceCallers.Mode == ir.ServiceCallersAllow
 }
 
+// RateLimitExpr is the route's @rateLimit as OperationInfo.rate_limit
+// states it: Some(<requests per minute>), or None without one. The
+// router's limiter is the operation's in the RateLimits registry, which
+// reads it (D44, amended).
+func (e EndpointInfo) RateLimitExpr() string {
+	if e.RateLimit <= 0 {
+		return "None"
+	}
+	return fmt.Sprintf("Some(%d)", e.RateLimit)
+}
+
+// ServiceExpr is the operation's effective service clause as
+// OperationInfo.service states it, as its route applies it:
+// Some(ServiceClause { mode: ServiceMode::Require, from: &["shop-orders"] }),
+// or None without one. A route applies a clause only on a crate with the
+// service step, so an operation of a crate without one has none (D37,
+// amended).
+func (e EndpointInfo) ServiceExpr() string {
+	if e.ServiceCallers == nil || !e.ServiceStep {
+		return "None"
+	}
+	from := make([]string, len(e.ServiceCallers.From))
+	for i, api := range e.ServiceCallers.From {
+		from[i] = rustString(api)
+	}
+	mode := "Require"
+	if e.AllowsService() {
+		mode = "Allow"
+	}
+	return fmt.Sprintf("Some(ServiceClause { mode: ServiceMode::%s, from: &[%s] })", mode, strings.Join(from, ", "))
+}
+
 // ConstName is the operation's OperationInfo constant in the crate's
 // operations module: ORDERS_GET_ORDER.
 func (e EndpointInfo) ConstName() string {

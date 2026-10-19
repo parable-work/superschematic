@@ -3,7 +3,7 @@
 //! undeclared top-level keys refused, the body object scalar arguments are
 //! read from, and the result in the success envelope. Also what an
 //! in-process caller needs to run an operation by the route's rules: the
-//! route's facts (`OperationInfo`) and the input check.
+//! route's facts (`OperationInfo`), its admission, and the input check.
 
 use axum::response::{IntoResponse, Response};
 use axum::Json;
@@ -12,9 +12,10 @@ use serde::Serialize;
 use serde_json::{Map, Value};
 
 use crate::schema::{ParseError, UnknownFields, ValidationErrors};
+use crate::service_auth::service_step;
 use crate::{
     admit, error_response, wrap_envelope, ApiError, Authenticator, ObjectPrepare, Principal,
-    RequestContext,
+    RequestContext, ServiceCaller,
 };
 
 /// One operation as the service's router serves it. The generated crate's
@@ -44,15 +45,78 @@ pub struct OperationInfo {
     /// `@manualRouteRegistration`: the service mounts the route itself; the
     /// router does not, and the namespace trait has no method for it.
     pub manual: bool,
+    /// The route's `@rateLimit`, in requests per minute; `None` without one
+    /// (or below 1). Its limiter is the one a [`crate::RateLimits`] holds
+    /// for the operation, which every way into it that shares the registry
+    /// counts against (D44, amended).
+    pub rate_limit: Option<u32>,
+    /// The operation's effective `@requireService` or `@allowService`
+    /// clause, as its route applies it (D37); `None` without one.
+    pub service: Option<ServiceClause>,
+}
+
+/// An operation's effective `@requireService` or `@allowService` clause
+/// (D37), as its route applies it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ServiceClause {
+    pub mode: ServiceMode,
+    /// The APIs a caller must serve one of; empty lists every caller.
+    pub from: &'static [&'static str],
+}
+
+/// Which service clause an operation declares.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ServiceMode {
+    /// `@requireService`: only a listed service caller, which forwards an
+    /// end user who meets the user clause when the route has one.
+    Require,
+    /// `@allowService`: a listed service caller stands in for the end user;
+    /// any other call goes on to the end-user step.
+    Allow,
 }
 
 impl OperationInfo {
-    /// The caller the route would hand the implementation, admitted as the
-    /// route admits a request's: for an operation that needs one,
-    /// `principal` through [`admit`] (401 without one, 403 without a
-    /// permission the operation lists); for one that does not, none, as the
-    /// route establishes none.
+    /// The caller the route would hand the implementation, for a call that
+    /// names no service caller (D43), admitted as the route admits a
+    /// request without a service credential: first the service step
+    /// ([`OperationInfo::admit_service`] with none), which refuses a
+    /// `@requireService` operation, with or without a user clause, 401
+    /// `service_unauthorized` (D37, amended); then the end-user step
+    /// ([`OperationInfo::admit_end_user`]).
     pub fn admit(
+        &self,
+        authenticator: &dyn Authenticator,
+        principal: Option<Principal>,
+    ) -> Result<Option<Principal>, ApiError> {
+        self.admit_service(None)?;
+        self.admit_end_user(authenticator, principal)
+    }
+
+    /// The route's service step, by the router's own rule, for an
+    /// in-process call (D37, amended). `caller` is the service the process
+    /// acts for, as [`ServiceCaller::in_process`] names it, or none.
+    ///
+    /// `Ok(true)` says the caller alone is admitted, so the end-user step is
+    /// skipped: a caller the clause's `from` lists, of an `@allowService`
+    /// operation. `Ok(false)` says the end-user step still applies
+    /// ([`OperationInfo::admit_end_user`]): for an operation without a
+    /// clause, for any other call of an `@allowService` operation with a
+    /// user clause, and for a listed caller of a `@requireService` one. A
+    /// `@requireService` operation refuses a call without a caller 401
+    /// `service_unauthorized` and a caller its `from` does not list 403
+    /// `service_forbidden`, as its route refuses them.
+    pub fn admit_service(&self, caller: Option<&ServiceCaller>) -> Result<bool, ApiError> {
+        match self.service {
+            Some(clause) => service_step(clause.mode, clause.from, caller, self.requires_auth),
+            None => Ok(false),
+        }
+    }
+
+    /// The route's end-user step alone: for an operation that needs a
+    /// caller, `principal` through [`admit`] (401 without one, 403 without
+    /// a permission the operation lists); for one that does not, none, as
+    /// the route establishes none.
+    pub fn admit_end_user(
         &self,
         authenticator: &dyn Authenticator,
         principal: Option<Principal>,
@@ -76,6 +140,19 @@ impl OperationInfo {
         let method = Method::from_bytes(self.method.as_bytes()).unwrap_or(Method::POST);
         let mut ctx = RequestContext::new(method, self.path.to_owned());
         ctx.principal = principal;
+        ctx
+    }
+
+    /// [`OperationInfo::context`] of a call `caller` makes, with the
+    /// service caller the route would hand the implementation in
+    /// `ctx.service_caller` (D37, amended).
+    pub fn service_context(
+        &self,
+        caller: ServiceCaller,
+        principal: Option<Principal>,
+    ) -> RequestContext {
+        let mut ctx = self.context(principal);
+        ctx.service_caller = Some(caller);
         ctx
     }
 }
@@ -291,6 +368,8 @@ mod tests {
         permissions: &["orders.audit"],
         require_ownership: false,
         manual: false,
+        rate_limit: None,
+        service: None,
     };
 
     #[test]

@@ -396,6 +396,8 @@ mod tests {
             permissions: &[],
             require_ownership: false,
             manual: false,
+            rate_limit: None,
+            service: None,
         }
     }
 
