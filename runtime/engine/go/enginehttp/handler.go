@@ -265,9 +265,19 @@ func (h *handler) route(route engine.Route) http.HandlerFunc {
 			WriteProblem(w, http.StatusInternalServerError, "An unexpected error occurred", "internal_error", id, nil)
 			return
 		}
+		// The engine's headers replace what the host's middleware set under
+		// the same name (the request log's X-Request-Id): a route the
+		// timeout wraps gets them so, and a stream, which writes straight to
+		// w, must too, or it answers the header twice.
 		header := w.Header()
+		replaced := make(map[string]bool, len(response.Headers))
 		for _, pair := range response.Headers {
-			header.Add(pair[0], pair[1])
+			name := http.CanonicalHeaderKey(pair[0])
+			if !replaced[name] {
+				header.Del(name)
+				replaced[name] = true
+			}
+			header.Add(name, pair[1])
 		}
 		if response.Stream != nil {
 			h.stream(w, r, response)
