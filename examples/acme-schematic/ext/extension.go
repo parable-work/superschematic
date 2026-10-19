@@ -25,7 +25,8 @@
 //   - a behavior, acme.Rating, declared in rating.behavior.json, that a
 //     type composes with @behavior or in the data forms (behavior.go), its
 //     config typed in @acme/schema and its engine implementation in
-//     @acme/behaviors;
+//     @acme/behaviors and, for the Rust engine (D58), in the acme-behaviors
+//     crate (crates/behaviors), which the spec names;
 //   - two subcommands through cli.CommandProvider: describe (command.go) and
 //     fields, which type-checks a declaration file with the loader's
 //     compiler (fields.go).

@@ -636,7 +636,8 @@ A behavior is code that adds fields, operations, checks and storage to a
 type when an engine runs the schema. The compiler declares, carries and
 checks behaviors; `@superschematic/engine` runs them. An extension ships
 both halves: the declaration, registered with the compiler, and a
-TypeScript implementation of it, registered with an engine.
+TypeScript implementation of it, registered with an engine, with a Rust
+crate for the Rust engine beside it (D58, below).
 
 An extension declares a behavior in a JSON file beside its Go package,
 embeds it and registers it:
@@ -769,8 +770,8 @@ declaration names a field without a schema, and in Go, Rust and Python
 under the name in PascalCase (`acme.Rating` is `AcmeRating`). The DB and
 General pipelines build such a schema: on a DB type a behavior makes an
 engine type, which `sql` and `orm` leave out and the `enginedoc`
-generator writes into the engine document, with your behavior and the
-`Package` its `BehaviorSpec` names
+generator writes into the engine document, with your behavior, the
+`Package` its `BehaviorSpec` names and the crate its `Rust` names
 ([Engine types](/superschematic/guides/engine-behaviors/#engine-types)).
 An API's own type cannot compose one, and the API generators refuse an
 API that uses an engine type, naming themselves. A generator of yours
@@ -901,6 +902,92 @@ pass. acme's `packages/behaviors` is the
 whole example, and its smoke runs it. The
 [engine guide](/superschematic/guides/engine/) serves three of the core's
 behaviors in `examples/engine-notes`.
+
+### The Rust implementation
+
+The engine is becoming one Rust library every server links (D58), and
+there an extension's behavior is a Rust crate that implements the
+engine's `Behavior` trait, which the project's engine compiles in. The
+crate lives in your project, as a workspace of its own, and depends on
+`superschematic-engine` without its database features, which the
+project's engine picks:
+
+```rust
+use superschematic_engine::behaviors::{BehaviorMigration, ColumnSpec};
+use superschematic_engine::{Behavior, ConfigTarget, Hooks, Result};
+
+pub struct Rating;
+
+impl Behavior for Rating {
+    type Config = RatingConfig;
+
+    fn declaration(&self) -> &str {
+        include_str!("../declarations/acme.Rating.behavior.json")
+    }
+
+    fn parse_config(&self, raw: &serde_json::Value, _: &ConfigTarget<'_>) -> Result<RatingConfig> { /* ... */ }
+
+    fn hooks(&self) -> Hooks<Self> {
+        Hooks {
+            config_change: Some(|_, before, after, _| { /* ... */ }),
+            migrations: vec![BehaviorMigration::new(1, "rating totals")
+                .column("count", ColumnSpec::integer().not_null().default(0))
+                .column("stars", ColumnSpec::integer().not_null().default(0))],
+            operations: vec![("rate", |_, cx, params| { /* ... */ }), ("ratingSummary", |_, cx, _| { /* ... */ })],
+            fields: vec![("ratingCount", |_, view| { /* ... */ }), ("ratingAverage", |_, view| { /* ... */ })],
+            ..Hooks::default()
+        }
+    }
+}
+```
+
+The hooks are the TypeScript ones, each optional, written as functions:
+the contexts reach the behavior's columns (`cx.columns()`), its tables
+(`cx.sql()`), the instance and the call, and a refusal is an
+`EngineError` or a veto. Copy the declaration into the crate with the
+`behaviors` command, as into a package:
+
+```sh
+acme-schematic behaviors --extension acme --out crates/behaviors/declarations --check
+```
+
+Then name the crate in the behavior's registration: its Cargo package
+name, its directory relative to your project (the parent of the schemas
+root, which `[paths]` is relative to as well), and the Rust expression
+that registers it:
+
+```go
+r.RegisterBehavior(registry.BehaviorSpec{
+	Extension: Name,
+	Rust: registry.BehaviorRust{
+		Crate:    "acme-behaviors",
+		Path:     "crates/behaviors",
+		Register: "acme_behaviors::Rating",
+	},
+	Declaration: ratingDeclaration,
+})
+```
+
+For a DB or General schema whose types compose the behavior, the build's
+`projectengine` generator writes the project's engine crate,
+`engine/rust/<service>`: it depends on the engine's crates at the
+`[paths]` keys `engine_rust`, `engine_behaviors_rust` and
+`engine_workqueue_rust`, and on yours at its path, and its `behaviors()`
+registers the core's behaviors, the work queue's when the schema uses
+one, then yours; `tools()` carries your binary's invocation policy and
+vendor keys, under which an operation that names your policy's value
+registers. A Rust server links that crate; a Go server links its
+workspace's `ffi` member, the engine's C ABI over the same `behaviors()`,
+as a static archive in place of the core's
+([The project's engine crate](/superschematic/guides/engine-behaviors/#the-projects-engine-crate)).
+A behavior whose registration names no crate gets no project engine: the
+TypeScript engine runs it, and the build's log says so. acme's
+`crates/behaviors` is the example: its tests port `rating.test.ts` to
+SQLite and Postgres, and the smoke builds and tests the engine crate the
+acme binary writes for `shop-ratings`, its archive with it. Until the
+TypeScript engine gives way to the Rust one, keep the TypeScript
+implementation beside the crate: acme's `packages/behaviors` stays until
+then.
 
 ## A deploy target
 

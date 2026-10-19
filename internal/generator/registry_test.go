@@ -185,9 +185,9 @@ func TestCoreRegistryPipelinesMatchTheFormerKindSwitch(t *testing.T) {
 		return out
 	}
 	want := map[string][]string{
-		"DB":      {"sql", "orm", "types", "enginedoc"},
+		"DB":      {"sql", "orm", "types", "enginedoc", "projectengine"},
 		"API":     {"types", "api", "sdks"},
-		"General": {"types", "envConfig"},
+		"General": {"types", "envConfig", "projectengine"},
 		"Stack":   {"stack", "server", "ci"},
 	}
 	for kind, pipeline := range want {

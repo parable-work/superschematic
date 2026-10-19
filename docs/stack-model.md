@@ -2350,14 +2350,14 @@ are the jobs and workers of a Rust API (D65; sections 8.7 and 8.8).
   stack built into the output root, `server/<stack>/<deployable>`, listed
   by name since `server/*/*` holds
   the Go and TypeScript servers too, and Cargo refuses a member without a
-  `Cargo.toml`. It excludes `api`, `sdk` and `types`, so a generated crate
-  under the output root builds on its own, as before, and `impl`, so a
-  mirror is no member, whose dev-dependencies Cargo would resolve. The
-  generated crates the servers depend on and the implementations' mirrors
-  are path dependencies, not members, and its lockfile,
-  `<output-root>/Cargo.lock`, pins every crate they reach, and names no
-  path crate's directory, so it holds in any output root. The lockfile
-  lies outside
+  `Cargo.toml`. It excludes `api`, `engine`, `sdk` and `types`, so a
+  generated crate under the output root, a project's engine crate (D58)
+  among them, builds on its own, as before, and `impl`, so a mirror is no
+  member, whose dev-dependencies Cargo would resolve. The generated crates
+  the servers depend on and the implementations' mirrors are path
+  dependencies, not members, and its lockfile, `<output-root>/Cargo.lock`,
+  pins every crate they reach, and names no path crate's directory, so it
+  holds in any output root. The lockfile lies outside
   `server/<stack>`, which each build empties, and the project commits it
   as it commits `bun.lock` (D51, amended): `dist/*` and `!dist/Cargo.lock`
   take it back from an ignored output root, and the build says so in one
