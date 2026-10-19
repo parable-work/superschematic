@@ -644,7 +644,9 @@ func TestTheTypeScriptDockerfileBuildsAnImageThatServes(t *testing.T) {
 		}
 	}
 	f := loadTypeScriptFixture(t)
-	f.build(t, repoRoot, tsFakePaths(repoRoot), append(slices.Clone(tsAPIs), tsCloudStack)...)
+	// ts-db's TypeScript types export the queue ts-shop's worker claims
+	// (D53), which the workspace's install needs.
+	f.build(t, repoRoot, tsFakePaths(repoRoot), append([]string{"ts-db"}, append(slices.Clone(tsAPIs), tsCloudStack)...)...)
 	out := filepath.Join(repoRoot, "schemas", "dist")
 	install := exec.Command(bun, "install")
 	install.Dir = out
