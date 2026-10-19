@@ -358,11 +358,11 @@ request taken before the verifier ran, so its verifier can call
 `c.req.text()`.
 
 A `@manualRouteRegistration` webhook needs its provider's verifier too.
-The TypeScript router runs it before the service's handler, and so does
-the Go router, which mounts the handler `Config.ManualRoutes` holds. The
-Rust router does not mount the route, so the service wraps the route it
-adds with `webhook_verified(route, verifier)`, as a Go service does with
-the verifier from `WebhookVerifiers` when it mounts the route itself.
+Every router runs it before the service's handler: the TypeScript one,
+the Go one, which mounts the handler `Config.ManualRoutes` holds, and the
+Rust one's `build_router_with_manual_routes`. A service that mounts the
+route itself wraps it: in Go with the verifier from `WebhookVerifiers`,
+in Rust with `webhook_verified(route, verifier)`.
 
 ## OpenAPI
 

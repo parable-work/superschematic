@@ -39,8 +39,9 @@ pub struct RouterState {
 }
 
 /// Mounts every operation except those declared @manualRouteRegistration,
-/// which the service mounts itself by adding a route for each to the
-/// returned router:
+/// which `build_router_with_manual_routes` mounts with the handlers a
+/// `ManualRoutes` holds (D51), or the service mounts itself by adding a
+/// route for each to the returned router:
 ///
 /// - `POST /api/webhooks/github/raw` (webhook.receiveRawGithubEvent), @hmacVerified:
 ///   wrap its route in `webhook_verified` with the github verifier
@@ -73,6 +74,35 @@ pub fn build_router(implementations: Implementations) -> Router {
 ///
 /// As `build_router` does.
 pub fn build_router_with(implementations: Implementations, options: RouterOptions) -> Router {
+    mount(implementations, options, None)
+}
+
+/// `build_router_with` that also mounts each @manualRouteRegistration
+/// operation, with the handler `manual_routes` holds for it, behind every
+/// step its route would have as a mounted one, the request id, a webhook's
+/// verifier and its controls (D51): the router builds its `RequestContext`,
+/// the caller included, and hands it the request, whose response it sends.
+/// A stack's server mounts what the implementation's `create_manual_routes`
+/// builds.
+///
+/// # Panics
+///
+/// As `build_router` does.
+pub fn build_router_with_manual_routes(
+    implementations: Implementations,
+    options: RouterOptions,
+    manual_routes: Arc<dyn ManualRoutes>,
+) -> Router {
+    mount(implementations, options, Some(manual_routes))
+}
+
+/// The router of `build_router_with`, with the manual routes when
+/// `manual_routes` holds their handlers.
+fn mount(
+    implementations: Implementations,
+    options: RouterOptions,
+    manual_routes: Option<Arc<dyn ManualRoutes>>,
+) -> Router {
     if let Err(message) = implementations.validate_implementations() {
         panic!("{message}");
     }
@@ -99,6 +129,16 @@ pub fn build_router_with(implementations: Implementations, options: RouterOption
             Arc::clone(&state.implementations.webhook_verifiers["stripe"]),
         ),
     );
+    if let Some(manual_routes) = manual_routes {
+        let route = post(handle_webhook_receive_raw_github_event).with_state(Arc::clone(&manual_routes));
+        router = router.route(
+            "/api/webhooks/github/raw",
+            webhook_verified(
+                route,
+                Arc::clone(&state.implementations.webhook_verifiers["github"]),
+            ),
+        );
+    }
     router
         .with_state(state)
         .layer(axum::middleware::from_fn(request_ids))
@@ -304,4 +344,25 @@ async fn handle_webhook_receive_stripe_event(
         .receive_stripe_event(ctx, args)
         .await;
     operation_response(result, request_id.as_deref())
+}
+
+/// Hands a request of webhook.receiveRawGithubEvent to its handler in `ManualRoutes`,
+/// with the `RequestContext` a mounted route builds, and answers with its
+/// response, or an `Err` as its problem.
+async fn handle_webhook_receive_raw_github_event(
+    State(manual_routes): State<Arc<dyn ManualRoutes>>,
+    query: Result<Query<Vec<(String, String)>>, QueryRejection>,
+    request: Request,
+) -> Response {
+    let query = match query_values(query) {
+        Ok(query) => query,
+        Err(err) => return error_response(err),
+    };
+    let mut ctx = RequestContext::new(Method::POST, "/api/webhooks/github/raw".to_string());
+    ctx.headers = headers_to_map(request.headers());
+    ctx.query_params = query.last_values();
+    match manual_routes.webhook_receive_raw_github_event(ctx, request).await {
+        Ok(response) => response,
+        Err(err) => error_response(err),
+    }
 }

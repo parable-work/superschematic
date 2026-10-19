@@ -21,6 +21,10 @@
 //!
 //! Each worker fails every message until you implement it.
 {{- end }}
+{{- if .ManualEndpoints }}
+//!
+//! Each manual route answers 501 until you implement its handler.
+{{- end }}
 {{- $async := .Async }}
 {{ if or .WebhookProviders $async }}
 {{- if .WebhookProviders }}
@@ -32,6 +36,10 @@ use std::sync::Arc;
 {{ end }}
 {{- if $async }}
 use async_trait::async_trait;
+{{- end }}
+{{- if .ManualEndpoints }}
+use axum::extract::Request;
+use axum::response::Response;
 {{- end }}
 {{- if .ChecksEndUsers }}
 use http::request::Parts;
@@ -116,6 +124,38 @@ impl Authenticator for NoCaller {
     async fn authenticate(&self, _request: &Parts) -> Result<Option<Principal>, ApiError> {
         Ok(None)
     }
+}
+{{- end }}
+{{- if .ManualEndpoints }}
+
+/// Builds the handlers of the @manualRouteRegistration operations of
+/// {{ .SchemaName }} from its dependencies. The server's entrypoint mounts each
+/// with `build_router_with_manual_routes`, behind its route's controls,
+/// hands it the `RequestContext` the route builds and the request, and
+/// sends the response it returns.
+pub async fn create_manual_routes(
+    deps: Deps,
+) -> Result<Arc<dyn ManualRoutes>, Box<dyn std::error::Error + Send + Sync>> {
+    Ok(Arc::new({{ .ManualRoutesStruct }} {
+        deps: Arc::new(deps),
+    }))
+}
+
+/// Implements ManualRoutes.
+pub struct {{ .ManualRoutesStruct }} {
+    pub deps: Arc<Deps>,
+}
+
+#[async_trait]
+impl ManualRoutes for {{ .ManualRoutesStruct }} {
+{{- range $i, $endpoint := .ManualEndpoints }}
+{{- if $i }}
+{{ end }}
+    /// Answers {{ .Namespace }}.{{ .Name }}, `{{ toUpper .Method }} {{ .Path }}`.
+{{ $.ManualMethodSignature . }}
+{{ $.NotImplemented . }}
+    }
+{{- end }}
 }
 {{- end }}
 {{- if .HasJobs }}

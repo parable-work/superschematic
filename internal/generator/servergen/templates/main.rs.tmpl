@@ -170,6 +170,11 @@ async fn run() -> Result<(), Failure> {
 {{- end }}
         span: logging::api_span({{ rustString .Service }}),
     };
+{{- if .ManualRoutes }}
+    // The handlers of its @manualRouteRegistration operations, which its
+    // router mounts behind each one's route controls (D51).
+{{ rustLet .ManualRoutes (printf "%s::create_manual_routes(%s.clone())" .ImplAlias .Deps) ".await" (printf "map_err(|err| format!(\"manual routes of %s: {err}\"))?" .Service) }}
+{{- end }}
 {{ rustLet .Handlers (printf "%s::create(%s)" .ImplAlias .Deps) ".await" (printf "map_err(|err| format!(\"implementation of %s: {err}\"))?" .Service) }}
 {{- if .Identity }}
     // The identity runtime authenticates its callers and serves its user
@@ -192,7 +197,11 @@ async fn run() -> Result<(), Failure> {
         .validate_implementations()
         .map_err(|err| format!("implementation of {{ .Service }}: {err}"))?;
 {{- end }}
+{{- if .ManualRoutes }}
+{{ rustLetCall .Router (printf "%s::build_router_with_manual_routes" .Alias) "" .Implementations (printf "%s::RouterOptions::default()" .Alias) .ManualRoutes }}
+{{- else }}
 {{ rustLetCall .Router (printf "%s::build_router" .Alias) "" .Implementations }}
+{{- end }}
 {{- end }}
 
     let readiness = Arc::new(Readiness {

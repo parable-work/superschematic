@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -202,21 +203,47 @@ impl QuotesImplementation for Quotes {
 // which leaves nothing; with no products it does nothing, and with
 // RESTOCK_FAIL set it fails, naming its warehouse and its bucket. Its
 // worker, ReorderStock, handles each message: poison fails every time,
-// flaky fails its first time, and slow never finishes.
+// flaky fails its first time, and slow never finishes. Its manual route,
+// exportLevel, answers the level as CSV, with the warehouse its Deps'
+// config holds and the request's id, which the router hands the handler
+// in its RequestContext (D51).
 const rustStockImplementation = `use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
+use axum::body::Body;
+use axum::extract::Request;
+use axum::response::Response;
 use schemas_rs_stock_api::database_types::{self, StockLow};
 use schemas_rs_stock_api::types;
 use schemas_rs_stock_api::{
     BoxError, Deps, Handlers, Jobs, LevelsGetLevelArgs, LevelsImplementation, LevelsSetLevelArgs,
-    ReservationsImplementation, ReservationsReserveStockArgs, Workers,
+    ManualRoutes, ReservationsImplementation, ReservationsReserveStockArgs, Workers,
 };
 use superschematic_http_runtime::bucket::SignedUrlOptions;
 use superschematic_http_runtime::queue::{enqueue, QueueDefinition};
 use superschematic_http_runtime::{ApiError, RequestContext, Shutdown};
+
+pub async fn create_manual_routes(deps: Deps) -> Result<Arc<dyn ManualRoutes>, Box<dyn std::error::Error + Send + Sync>> {
+    Ok(Arc::new(StockExports { deps }))
+}
+
+pub struct StockExports {
+    deps: Deps,
+}
+
+#[async_trait]
+impl ManualRoutes for StockExports {
+    async fn levels_export_level(&self, ctx: RequestContext, _request: Request) -> Result<Response, ApiError> {
+        let sku = ctx.path_params.get("sku").cloned().unwrap_or_default();
+        Response::builder()
+            .header("content-type", "text/csv")
+            .header("x-export-request", ctx.header("x-request-id").unwrap_or_default())
+            .body(Body::from(format!("sku,warehouse\n{sku},{}\n", self.deps.config.warehouse)))
+            .map_err(|err| ApiError::internal(err.to_string()))
+    }
+}
 
 pub async fn create_jobs(deps: Deps) -> Result<Arc<dyn Jobs>, BoxError> {
     Ok(Arc::new(StockJobs { deps }))
@@ -404,11 +431,12 @@ func rustTargetDir(t *testing.T) string {
 }
 
 // buildRustFixture builds the fixture into a repository of its own with
-// this checkout's runtimes, writes the implementations, builds the stacks
-// again, which copies them into the output root's mirrors (D65), and
-// builds the workspace's servers with cargo, frozen to the lockfile the
-// stack's build wrote. It returns the repository root and the directory of
-// the binaries.
+// this checkout's runtimes, checks that rs-stock's scaffold, its manual
+// routes' handlers, jobs and workers among them, passes clippy, writes the
+// implementations, builds the stacks again, which copies them into the
+// output root's mirrors (D65), and builds the workspace's servers with
+// cargo, frozen to the lockfile the stack's build wrote. It returns the
+// repository root and the directory of the binaries.
 func buildRustFixture(t *testing.T, cargo string) (string, string) {
 	t.Helper()
 	paths := testpaths.Local(t)
@@ -419,9 +447,10 @@ func buildRustFixture(t *testing.T, cargo string) (string, string) {
 	if _, err := os.Stat(filepath.Join(out, servergen.RustLockfileName)); err != nil {
 		t.Fatalf("the stack's build wrote no lockfile: %v", err)
 	}
+	target := rustTargetDir(t)
+	cargoCommand(t, cargo, naming.Default().RustImplementationDir(repoRoot, "rs-stock"), target, "clippy", "--quiet", "--", "-D", "warnings")
 	writeRustImplementations(t, repoRoot)
 	f.build(t, repoRoot, paths, rustStack, rustMergedStack)
-	target := rustTargetDir(t)
 	cargoCommand(t, cargo, out, target, "clippy", "--locked", "--workspace", "--quiet", "--", "-D", "warnings")
 	cargoCommand(t, cargo, out, target, "build", "--locked", "--workspace", "--quiet")
 	return repoRoot, filepath.Join(target, "debug")
@@ -450,7 +479,9 @@ func writeRustImplementations(t *testing.T, repoRoot string) {
 // up, answers /healthz and reports its database in /readyz, prices a level
 // through rs-pricing, which it calls with a token signed with its edge's
 // key, reserves stock for rs-orders, whose token it verifies, and no other
-// caller, refuses its staff route without an end user, answers the site's
+// caller, answers its manual route with the handler the implementation's
+// create_manual_routes built from its Deps, behind the route's rate limit
+// (D51), refuses its staff route without an end user, answers the site's
 // CORS and the identity config's trusted origins, and on SIGTERM lets a
 // request in flight finish, then stops. Without its configuration it stops
 // at once, naming every variable missing. With Postgres
@@ -546,6 +577,10 @@ func TestRustEntrypointCompilesAndServes(t *testing.T) {
 	// field names, for which it signs a V4 URL as no account (D54).
 	stock.expect(t, http.MethodGet, "/api/levels/sheet", http.StatusOK, `"sku":"http://127.0.0.1:9/rs-media/sheets/sheet.pdf?X-Goog-Algorithm=GOOG4-RSA-SHA256`, "X-Goog-Credential=emulator%40superschematic.local")
 	stock.expect(t, http.MethodPut, "/api/levels/tea", http.StatusUnauthorized)
+	// Its manual route answers with the handler create_manual_routes built
+	// from its Deps, behind the route's rate limit of one a minute (D51).
+	exportLevel(t, stock.base+"/api/levels/tea/export")
+	stock.expect(t, http.MethodGet, "/api/levels/tea/export", http.StatusTooManyRequests, "too_many_requests")
 	reserve := "/api/reservations/tea"
 	stock.sendWith(t, http.MethodPost, reserve, "{}", map[string]string{"Service-Authorization": "Bearer " + signEdgeToken(t, ordersPrivate, "orders-1", "rs-orders", "rs-stock")}, http.StatusOK, `"sku":"tea:rs-orders"`)
 	stock.sendWith(t, http.MethodPost, reserve, "{}", map[string]string{"Service-Authorization": "Bearer " + signEdgeToken(t, ordersPrivate, "orders-1", "rs-orders", "rs-pricing")}, http.StatusUnauthorized, "service_unauthorized")
@@ -628,6 +663,77 @@ func TestRustEntrypointCompilesAndServes(t *testing.T) {
 	online.authorized(t, token, http.MethodGet, "/api/auth/me", http.StatusUnauthorized)
 	online.stop(t)
 	pricing.stop(t)
+}
+
+// exportLevel calls rs-stock's manual route at url: the router hands the
+// request to the implementation's handler, whose response it sends as it
+// is, the CSV with the warehouse rs-stock's config holds, not the JSON
+// envelope, and with the request's id, which the router's request_ids
+// layer settled and the RequestContext it handed the handler holds.
+func exportLevel(t *testing.T, url string) {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("X-Request-Id", "export-1")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK || string(body) != "sku,warehouse\ntea,north\n" || resp.Header.Get("Content-Type") != "text/csv" {
+		t.Errorf("GET %s = %d %s: %q, want 200 text/csv from the manual route's handler", url, resp.StatusCode, resp.Header.Get("Content-Type"), body)
+	}
+	if id := resp.Header.Get("X-Export-Request"); id != "export-1" {
+		t.Errorf("GET %s: the handler's RequestContext held request id %q, want the request's export-1", url, id)
+	}
+	if id := resp.Header.Get("X-Request-Id"); id != "export-1" {
+		t.Errorf("GET %s answered x-request-id %q, want export-1: the router's request_ids layer did not wrap the manual route", url, id)
+	}
+}
+
+// TestARustImplementationThatPredatesItsManualRoutesFails: rs-stock
+// declares a @manualRouteRegistration operation, exportLevel, and its
+// implementation, which exists and so is the engineer's, declares no
+// create_manual_routes, whose handlers rs-stock's main.rs mounts with
+// build_router_with_manual_routes (D51). The build writes nothing into it
+// and fails, saying what to add; with it declared, it builds.
+func TestARustImplementationThatPredatesItsManualRoutesFails(t *testing.T) {
+	repoRoot := t.TempDir()
+	f := loadRustFixture(t)
+	f.build(t, repoRoot, rustFakePaths(repoRoot), rustOrder[:len(rustOrder)-1]...)
+	dir := naming.Default().RustImplementationDir(repoRoot, "rs-stock")
+	lib := filepath.Join(dir, rustrestgen.ImplementationLib)
+	before := "// The engineer's code, from before the manual route.\npub async fn create() {}\n\npub async fn create_jobs() {}\n\npub async fn create_workers() {}\n"
+	if err := os.WriteFile(lib, []byte(before), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := generator.Run(f.schemas[rustStack], f.configs[rustStack], f.options(repoRoot, rustFakePaths(repoRoot)))
+	for _, want := range []string{
+		"stack rs-stack: rs-stock declares @manualRouteRegistration operations, and its implementation at " + dir + ", which the build no longer writes into, declares no create_manual_routes in " + rustrestgen.ImplementationLib,
+		"pub async fn create_manual_routes(deps: Deps) -> Result<Arc<dyn ManualRoutes>, Box<dyn std::error::Error + Send + Sync>>",
+		"impl ManualRoutes for ... {\n      async fn levels_export_level(&self, ctx: RequestContext, request: Request) -> Result<Response, ApiError> {\n          // answer GET /api/levels/{sku}/export",
+		"where Deps and ManualRoutes are schemas_rs_stock_api's",
+		"(docs/stack-model.md, section 8.6)",
+	} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("build = %v, want it to say %q", err, want)
+		}
+	}
+	if got, err := os.ReadFile(lib); err != nil || string(got) != before {
+		t.Errorf("a refused build wrote %s: %q, %v", lib, got, err)
+	}
+	if err := os.WriteFile(lib, []byte(before+"\npub async fn create_manual_routes() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := generator.Run(f.schemas[rustStack], f.configs[rustStack], f.options(repoRoot, rustFakePaths(repoRoot))); err != nil {
+		t.Fatalf("a build over an implementation that declares create_manual_routes = %v", err)
+	}
 }
 
 // checkRustJobRuns runs rs-stock's job, the binary at job, without a

@@ -131,6 +131,11 @@ async fn run() -> Result<(), Failure> {
         rs_media: Arc::clone(&rs_media_bucket),
         span: logging::api_span("rs-stock"),
     };
+    // The handlers of its @manualRouteRegistration operations, which its
+    // router mounts behind each one's route controls (D51).
+    let rs_stock_manual_routes = rs_stock_impl::create_manual_routes(rs_stock_deps.clone())
+        .await
+        .map_err(|err| format!("manual routes of rs-stock: {err}"))?;
     let rs_stock_handlers = rs_stock_impl::create(rs_stock_deps)
         .await
         .map_err(|err| format!("implementation of rs-stock: {err}"))?;
@@ -151,7 +156,11 @@ async fn run() -> Result<(), Failure> {
         Arc::new(IdentityAuthenticator::new(Arc::new(rs_stock_identity))),
         Arc::new(rs_stock_service_authenticator),
     );
-    let rs_stock_router = rs_stock_api::build_router(rs_stock_implementations);
+    let rs_stock_router = rs_stock_api::build_router_with_manual_routes(
+        rs_stock_implementations,
+        rs_stock_api::RouterOptions::default(),
+        rs_stock_manual_routes,
+    );
 
     let readiness = Arc::new(Readiness {
         draining: AtomicBool::new(false),

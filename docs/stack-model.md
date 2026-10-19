@@ -2269,14 +2269,16 @@ as they are, with no build step (D51). The pieces mirror Go's:
     the operation's route controls and auth gate (D51), then the
     runtime's `notFoundHandler` and `errorHandler`. A Go server mounts
     such an operation too, with the handler its implementation's
-    `NewManualRoutes(deps)` builds (sections 8.1 and 8.5). Hono merges
+    `NewManualRoutes(deps)` builds (sections 8.1 and 8.5), and so does a
+    Rust server, with the handlers its implementation's
+    `create_manual_routes(deps)` builds (below). Hono merges
     the routers' routes, so an identity API's
     router registers its CORS on each of its own routes: a request gets
     the CORS of the API that serves it alone, and a preflight that of the
     API that registers the method it asks for, as Go's dispatch does.
     The build refuses two served APIs that register one method and path,
-    a manually routed operation included, which a TypeScript router
-    mounts, as a Go one does;
+    a manually routed operation included, which every server's router
+    mounts;
   - serves `/healthz`, and `/readyz`, which answers 503 `draining` during
     shutdown and 503 `unavailable` with each database whose ping fails
     within two seconds, through `Bun.serve`, which it hands Hono as the
@@ -2362,7 +2364,16 @@ are the jobs and workers of a Rust API (D65; sections 8.7 and 8.8).
   provider-neutral `bucket::Bucket` (section 8.9), and `span`, the API's
   `tracing` span) and `Handlers`,
   which the implementation's `create(deps)` returns; the entrypoint joins
-  them with what it builds through `Implementations::new`. The scaffold
+  them with what it builds through `Implementations::new`. For an API with
+  a `@manualRouteRegistration` operation, the crate's `ManualRoutes` trait
+  has a handler per such operation, which takes the route's
+  `RequestContext` and axum's `Request` and answers a `Response` or an
+  `ApiError`, and `build_router_with_manual_routes` mounts them behind the
+  request id, the webhook verifier and the controls the route would have
+  as a mounted one; the implementation's `create_manual_routes(deps)`
+  builds them, and the scaffold's answer 501 (D51). An implementation that
+  exists and declares no `create_manual_routes` while its API declares a
+  manual route fails a stack's build, which says what to add. The scaffold
   writes the crate once, in a directory that holds no `Cargo.toml`, as
   its own workspace, so no `Cargo.toml` above it claims it. The server's
   crate depends on its mirror by the package name its `Cargo.toml` gives
@@ -2443,7 +2454,10 @@ are the jobs and workers of a Rust API (D65; sections 8.7 and 8.8).
     from its identity config field, and, for an API with a service clause,
     a `JwtServiceAuthenticator` over its callers field, which it joins with
     the handlers through `Implementations::new`. An API with webhooks has
-    its verifiers checked first, where `build_router` would panic;
+    its verifiers checked first, where `build_router` would panic. An API
+    with a `@manualRouteRegistration` operation has its handlers built by
+    the implementation's `create_manual_routes`, from a clone of its
+    `Deps`, and its router built with `build_router_with_manual_routes`;
   - serves `/healthz`, and `/readyz`, which answers 503 `draining` during
     shutdown and 503 `unavailable` with each database whose ping fails
     within two seconds, and hands every other request to the router of

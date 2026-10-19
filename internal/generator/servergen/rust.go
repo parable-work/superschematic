@@ -284,6 +284,13 @@ type RustAPI struct {
 	// the implementation's verifiers before build_router would panic.
 	Webhooks bool
 
+	// ManualRoutes is the variable of the handlers of its
+	// @manualRouteRegistration operations, which the implementation's
+	// create_manual_routes builds from Deps and
+	// build_router_with_manual_routes mounts (D51); empty when it has none,
+	// and for a job or a worker, which mounts no routes.
+	ManualRoutes string
+
 	// Database is the pool Deps.db holds, nil without one.
 	Database *RustDatabase
 
@@ -514,6 +521,9 @@ func PlanRust(in RustInput) (*RustServer, error) {
 			Router:          taken.take(stem + "_router"),
 			Webhooks:        len(o.WebhookProviders) > 0 && !background,
 			ConfigLoader:    "load_env_config",
+		}
+		if len(o.ManualEndpoints) > 0 && !background {
+			api.ManualRoutes = taken.take(stem + "_manual_routes")
 		}
 		if in.ImplementationRoot != "" {
 			if rel, err := filepath.Rel(in.ImplementationRoot, a.Implementation.Dir); err == nil {

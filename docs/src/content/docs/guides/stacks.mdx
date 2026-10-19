@@ -1100,9 +1100,12 @@ naming every variable missing, when one fails; opens one Postgres pool
 per database, which reaches Cloud SQL over the socket Cloud Run mounts, so
 a Rust server needs no connector; builds one Rust SDK client per API
 called with the credential its endpoint names; calls each implementation's
-`create(deps)`; builds an API's identity service over its database's pool
-from `<API>_IDENTITY`, and its service authenticator from `<API>_CALLERS`;
-and joins them with the handlers through `Implementations::new`. It hands
+`create(deps)`, and its `create_manual_routes(deps)` where an operation is
+`@manualRouteRegistration`, whose handlers it mounts with
+`build_router_with_manual_routes`; builds an API's identity service over
+its database's pool from `<API>_IDENTITY`, and its service authenticator
+from `<API>_CALLERS`; and joins them with the handlers through
+`Implementations::new`. It hands
 each request to the API whose operations take it, answers the site CORS
 of an API a site calls, serves `/healthz` and `/readyz`, logs JSON lines,
 and drains for ten seconds on SIGTERM.

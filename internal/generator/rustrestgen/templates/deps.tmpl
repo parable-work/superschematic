@@ -12,6 +12,18 @@
 //! ```
 //!
 //! which the entrypoint calls with the API's Deps.
+{{- if .ManualEndpoints }}
+//!
+//! For the @manualRouteRegistration operations of {{ .SchemaName }}, the crate also
+//! declares
+//!
+//! ```ignore
+//! pub async fn create_manual_routes(deps: Deps) -> Result<Arc<dyn ManualRoutes>, Box<dyn std::error::Error + Send + Sync>>
+//! ```
+//!
+//! whose handlers a server's entrypoint mounts with
+//! `build_router_with_manual_routes` (D51).
+{{- end }}
 {{- if .HasBackgroundWork }}
 //!
 //! It also declares {{ if .HasJobs }}`Jobs`, a method per job of {{ .SchemaName }}{{ if .HasWorkers }}, and {{ end }}{{ end }}{{ if .HasWorkers }}`Workers`,

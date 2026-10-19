@@ -229,6 +229,19 @@ func (o *APIOutput) WorkerSignature(worker WorkerInfo) string {
 	return rustSignature("    ", "async fn "+worker.Method, []string{"&self", "message: " + o.Deps.DatabaseTypesCrateIdent() + "::" + worker.Queue}, "Result<(), BoxError>", ";")
 }
 
+// ManualRoutesFunc is the function an implementation of an API with a
+// @manualRouteRegistration operation declares in its src/lib.rs, which a
+// server's entrypoint calls with the API's Deps and whose handlers it
+// mounts with build_router_with_manual_routes (D51).
+const ManualRoutesFunc = "create_manual_routes"
+
+// ManualSignature is the signature of the method of the manual operation
+// endpoint in the ManualRoutes trait: the operation's namespace and name,
+// as the router names its handler.
+func (o *APIOutput) ManualSignature(endpoint EndpointInfo) string {
+	return rustSignature("    ", "async fn "+endpoint.SnakeName(), []string{"&self", "ctx: RequestContext", "request: Request"}, "Result<Response, ApiError>", ";")
+}
+
 // DepsExports are the items lib.rs re-exports from deps.rs: Deps and
 // Handlers, and Jobs, Workers and BoxError for an API with either.
 func (o *APIOutput) DepsExports() string {
@@ -492,6 +505,9 @@ func (s ImplementationScaffold) APIUse() string {
 	if s.HasWorkers() {
 		names = append(names, "Workers", DatabaseTypesModule)
 	}
+	if len(s.ManualEndpoints) > 0 {
+		names = append(names, "ManualRoutes")
+	}
 	return rustutil.UseLine(s.CrateIdent(), names)
 }
 
@@ -520,11 +536,23 @@ func (s ImplementationScaffold) WorkerMethodSignature(worker WorkerInfo) string 
 	return rustFn("    ", "async fn "+worker.Method, []string{"&self", "_message: " + DatabaseTypesModule + "::" + worker.Queue}, "Result<(), BoxError>")
 }
 
+// ManualRoutesStruct is the struct the scaffold implements ManualRoutes
+// with, named after the API: ShopStockManualRoutes.
+func (s ImplementationScaffold) ManualRoutesStruct() string {
+	return rustutil.ToPascalCase(s.SchemaName) + "ManualRoutes"
+}
+
+// ManualMethodSignature is the signature of the manual operation
+// endpoint's method in the scaffold's impl of ManualRoutes.
+func (s ImplementationScaffold) ManualMethodSignature(endpoint EndpointInfo) string {
+	return rustFn("    ", "async fn "+endpoint.SnakeName(), []string{"&self", "_ctx: RequestContext", "_request: Request"}, "Result<Response, ApiError>")
+}
+
 // Async reports whether the scaffold implements a trait, whose impls are
 // #[async_trait] and hold their deps in an Arc: a namespace's, the
-// authenticator's, Jobs or Workers.
+// authenticator's, Jobs, Workers or ManualRoutes.
 func (s ImplementationScaffold) Async() bool {
-	return len(s.Namespaces) > 0 || s.ChecksEndUsers() || s.HasBackgroundWork()
+	return len(s.Namespaces) > 0 || s.ChecksEndUsers() || s.HasBackgroundWork() || len(s.ManualEndpoints) > 0
 }
 
 // RuntimeUse is the use declaration of what the implementation names from
@@ -533,10 +561,11 @@ func (s ImplementationScaffold) Async() bool {
 // user. Empty when it names none.
 func (s ImplementationScaffold) RuntimeUse() string {
 	var names []string
-	if len(s.Namespaces) > 0 || s.ChecksEndUsers() {
+	manual := len(s.ManualEndpoints) > 0
+	if len(s.Namespaces) > 0 || s.ChecksEndUsers() || manual {
 		names = append(names, "ApiError")
 	}
-	if len(s.Namespaces) > 0 {
+	if len(s.Namespaces) > 0 || manual {
 		names = append(names, "RequestContext")
 	}
 	if s.ChecksEndUsers() {

@@ -15,5 +15,5 @@ pub use schemas_fixture_api_types as types;
 pub use superschematic_http_runtime as runtime;
 
 pub use interfaces::*;
-pub use router::{build_router, build_router_with, RouterState};
+pub use router::{build_router, build_router_with, build_router_with_manual_routes, RouterState};
 pub use superschematic_http_runtime::{request_ids, RouterOptions};

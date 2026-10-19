@@ -2,11 +2,13 @@
 # authDb, rs-db, over whose User table the identity runtime authenticates
 # its end users; it calls rs-pricing, lists the bucket rs-media (D54),
 # holds one setting in its @envVars type, serves the session routes, lets
-# anyone list its stock, lets staff with stock.write set a level, and lets
-# only rs-orders' server reserve stock. rs-orders calls it through its Go
-# SDK, and the site rs-web from the browser. Its job PlaceRestockOrders
-# enqueues StockLow, a queue of rs-db, which its worker ReorderStock
-# handles (D65); its server, job and worker each open rs-media.
+# anyone list its stock and export a level through a handler of its own
+# (@manualRouteRegistration, D51), lets staff with stock.write set a
+# level, and lets only rs-orders' server reserve stock. rs-orders calls it
+# through its Go SDK, and the site rs-web from the browser. Its job
+# PlaceRestockOrders enqueues StockLow, a queue of rs-db, which its worker
+# ReorderStock handles (D65); its server, job and worker each open
+# rs-media.
 name: rs-stock
 kind: API
 authDb: rs-db

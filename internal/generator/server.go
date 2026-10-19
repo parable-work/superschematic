@@ -634,6 +634,32 @@ func (r run) checkRustFunc(stackName, api, what, fn, typ string, methods []strin
 		fmt.Sprintf(names, crate), section)
 }
 
+// checkRustManualRoutes refuses a Rust API with a @manualRouteRegistration
+// operation whose implementation exists and whose src/lib.rs declares no
+// create_manual_routes (D51): a server's main.rs builds the handlers
+// build_router_with_manual_routes mounts with it, and the build no longer
+// writes into the implementation, so one that predates the operation, or
+// the entrypoint's mounting it, fails here, saying what to add, rather
+// than when cargo builds the server's crate.
+func (r run) checkRustManualRoutes(stackName string, output *rustrestgen.APIOutput) error {
+	dir := r.Options.Naming.RustImplementationDir(r.Options.RepositoryRoot, output.SchemaName)
+	declares, err := rustrestgen.DeclaresFunc(dir, rustrestgen.ManualRoutesFunc)
+	if err != nil || declares {
+		return err
+	}
+	var methods []string
+	for _, ep := range output.ManualEndpoints {
+		methods = append(methods, fmt.Sprintf("      async fn %s(&self, ctx: RequestContext, request: Request) -> Result<Response, ApiError> {\n          // answer %s %s\n      }", ep.SnakeName(), strings.ToUpper(ep.Method), ep.Path))
+	}
+	crate := strings.ReplaceAll(r.Options.Naming.RustAPICrate(output.SchemaName), "-", "_")
+	return fmt.Errorf("stack %s: %s declares @manualRouteRegistration operations, and its implementation at %s, which the build no longer writes into, declares no %s in %s; add\n\n"+
+		"  pub async fn %s(deps: Deps) -> Result<Arc<dyn ManualRoutes>, Box<dyn std::error::Error + Send + Sync>>\n\n"+
+		"returning a value that implements ManualRoutes, with a method per operation:\n\n"+
+		"  #[async_trait]\n  impl ManualRoutes for ... {\n%s\n  }\n\n"+
+		"where Deps and ManualRoutes are %s's, RequestContext and ApiError the HTTP runtime's, and Request and Response axum's (docs/stack-model.md, section 8.6)",
+		stackName, output.SchemaName, dir, rustrestgen.ManualRoutesFunc, rustrestgen.ImplementationLib, rustrestgen.ManualRoutesFunc, strings.Join(methods, "\n"), crate)
+}
+
 // workerDatabase is the database whose queue the worker w claims: the one
 // resolution gives it, or else its API's, its authDb or its one DB
 // dependency. Empty when the API connects to none.
@@ -939,6 +965,10 @@ func (r run) planRustServer(stackName string, s *ir.ResolvedDeployable, cors map
 		}
 		if !exists {
 			scaffolds = append(scaffolds, output)
+		} else if s.Kind == ir.DeployableServer && len(output.ManualEndpoints) > 0 {
+			if err := r.checkRustManualRoutes(stackName, output); err != nil {
+				return nil, nil, err
+			}
 		}
 		impl, err := servergen.ReadRustImplementation(r.Options.Naming, ref.Name, dir)
 		if err != nil {
