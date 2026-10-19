@@ -514,9 +514,11 @@ jobs:
 
       - name: Install Rust toolchain
         # The wasm32 target builds the version-graph core the engine's
-        # Branches behavior runs, which the smoke's engine step builds.
+        # Branches behavior runs, which the smoke's engine step builds;
+        # rustfmt and clippy check acme's Rust crate and the engine crate
+        # the binary writes for it (D58).
         run: |
-          rustup toolchain install "$RUST_VERSION" --profile minimal --target wasm32-unknown-unknown
+          rustup toolchain install "$RUST_VERSION" --profile minimal --component rustfmt --component clippy --target wasm32-unknown-unknown
           rustup default "$RUST_VERSION"
 
       - name: Build the superscalar dependency

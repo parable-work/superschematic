@@ -109,12 +109,25 @@
 #      Node.js and Bun, opens an engine with acme's implementation and the
 #      acme meta-schema, defines and publishes shop-ratings' Product,
 #      creates one, rates it and reads the rating fields and events, and
-#      shows an engine without the implementation refuses the schema.
+#      shows an engine without the implementation refuses the schema;
+#  21. acme.Rating runs in the Rust engine (D58): the declaration's copy in
+#      the acme-behaviors crate (crates/behaviors) is what `acme-schematic
+#      behaviors --check` would write; the crate passes rustfmt and clippy,
+#      and its tests, the TypeScript test's cases, pass on SQLite (and on
+#      Postgres when SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL names one); the
+#      binary, building shop-ratings as a service of this project, writes
+#      the project's engine crate (engine/rust/shop-ratings), which depends
+#      on acme-behaviors and registers acme_behaviors::Rating after the
+#      core's behaviors, and that crate builds, passes clippy and passes its
+#      test, which opens the engine on SQLite and finds acme.Rating
+#      registered.
 #
 # Step 16 also needs bun and installs hono and the generated types package's
 # dependencies from the npm registry. Step 20 needs bun and Node.js 24, builds
 # the schema runtime and the engine, and installs their dependencies from the
-# npm registry.
+# npm registry. Step 21 builds the Rust engine with cargo, with the toolchain
+# tools.env pins, into CARGO_TARGET_DIR or the crate's target/, from the
+# crates.io index unless cargo's cache has the engine's dependencies.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -557,5 +570,37 @@ done
 # meta-schema that declares acme.Rating.
 (cd "$BEHAVIORS" && ACME_META_SCHEMA="$OUT/acme-schema-file.json" node --test 'test/*.test.ts')
 (cd "$BEHAVIORS" && ACME_META_SCHEMA="$OUT/acme-schema-file.json" bun test ./test)
+
+echo "==> behaviors: acme.Rating runs in the Rust engine, and the project's engine crate"
+# Every crate states tools.env's RUST_VERSION as its rust-version.
+RUSTUP_TOOLCHAIN="${RUSTUP_TOOLCHAIN:-$(grep -E '^RUST_VERSION=' "$REPO_ROOT/tools.env" | cut -d= -f2)}"
+export RUSTUP_TOOLCHAIN
+CRATE="$EXAMPLE_DIR/crates/behaviors"
+# One target directory for both crates: the engine crate takes the versions
+# acme's crate locked, so the engine builds once.
+CARGO_TARGET="${CARGO_TARGET_DIR:-$CRATE/target}"
+"$OUT/acme-schematic" behaviors --extension acme --out "$CRATE/declarations" --check
+(cd "$CRATE" && cargo fmt --check)
+(cd "$CRATE" && CARGO_TARGET_DIR="$CARGO_TARGET" cargo clippy --locked --quiet --all-targets -- -D warnings)
+(cd "$CRATE" && CARGO_TARGET_DIR="$CARGO_TARGET" ACME_META_SCHEMA="$OUT/acme-schema-file.json" cargo test --locked --quiet)
+# shop-ratings sits outside the schemas root, so a build of it reads no
+# [paths] and its project would be ext/. A copy under dist (gitignored) is a
+# service of this project: its schemas root is schemas/, whose naming file
+# names the checkout's engine crates, and acme.Rating's crate is at
+# crates/behaviors in the project, the parent of the schemas root.
+FIXTURE="$DIST/engine-fixture"
+rm -rf "$FIXTURE"
+cp -R "$RATINGS" "$FIXTURE"
+"$OUT/acme-schematic" build "$FIXTURE" --out "$OUT/engine-dist" >"$OUT/engine-build.log"
+rm -rf "$FIXTURE"
+ENGINE_CRATE="$OUT/engine-dist/engine/rust/shop-ratings"
+grep -q '^  + engine-rust written to ' "$OUT/engine-build.log"
+grep -qx 'name = "acme-shop-ratings-engine"' "$ENGINE_CRATE/Cargo.toml"
+grep -q '^acme-behaviors = { path = ".*/examples/acme-schematic/crates/behaviors" }$' "$ENGINE_CRATE/Cargo.toml"
+grep -qx '        .with(acme_behaviors::Rating)' "$ENGINE_CRATE/src/lib.rs"
+grep -q '"key": "confirm",' "$ENGINE_CRATE/src/lib.rs"
+cp "$CRATE/Cargo.lock" "$ENGINE_CRATE/Cargo.lock"
+(cd "$ENGINE_CRATE" && CARGO_TARGET_DIR="$CARGO_TARGET" cargo clippy --quiet --all-targets -- -D warnings)
+(cd "$ENGINE_CRATE" && CARGO_TARGET_DIR="$CARGO_TARGET" cargo test --quiet)
 
 echo "acme smoke: ok"

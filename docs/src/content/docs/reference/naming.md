@@ -66,7 +66,8 @@ Suffix of generated Python SDK modules.
 Default: `schemas-`
 
 Prefix of generated crates: `<prefix><name>-types`, `<prefix><name>-sdk`,
-`<prefix><name>-api`.
+`<prefix><name>-api`, and `<prefix><name>-engine`, the project's engine
+crate of a schema whose types compose an extension's behavior (D58).
 
 ### `scalar_go_module`
 
@@ -472,6 +473,19 @@ Default: unset. This repository's own file sets
 Directory of the version graph's Rust engine crate. Unset, a generated
 Rust types crate names the crate's version instead of a path.
 
+### `paths.engine_rust`
+
+Default: unset. This repository's own file sets
+`runtime/engine/rust/engine`.
+
+Directory of the behavior engine's Rust crate, `superschematic-engine`
+(D58), which a Rust server links with its `postgres` and `axum` features
+to mount the engine's routes, and the project's engine crate depends on:
+the crate the `projectengine` generator writes for a schema whose types
+compose an extension's behavior
+([The project's engine crate](/superschematic/guides/engine-behaviors/#the-projects-engine-crate)).
+Unset, that crate names the engine's version instead of a path.
+
 ### `paths.versiongraph_python`
 
 Default: unset. This repository's own file sets
@@ -481,6 +495,25 @@ Directory of the Python version-graph runtime (`pyproject.toml`). A
 generated Python types package whose schema declares a version graph
 names it as a uv path source (`[tool.uv.sources]`); unset, the dependency
 has no source and resolves from the index.
+
+### `paths.engine_behaviors_rust`
+
+Default: unset. This repository's own file sets
+`runtime/engine/rust/behaviors`.
+
+Directory of the core's behaviors for the Rust engine,
+`superschematic-engine-behaviors` (D58), which the project's engine crate
+depends on. Unset, it names the crate's version instead of a path.
+
+### `paths.engine_workqueue_rust`
+
+Default: unset. This repository's own file sets
+`runtime/engine-workqueue/rust`.
+
+Directory of the work queue's behaviors for the Rust engine,
+`superschematic-engine-workqueue` (D58), which the project's engine crate
+depends on when a type composes one of them. Unset, it names the crate's
+version instead of a path.
 
 ### `paths.http_runtime_go`
 

@@ -2208,8 +2208,9 @@ its jobs and workers stay Go's.
   members are the Rust server crates of every stack built into the output
   root, `server/<stack>/<server>`, listed by name since `server/*/*` holds
   the Go and TypeScript servers too, and Cargo refuses a member without a
-  `Cargo.toml`. It excludes `api`, `sdk` and `types`, so a generated crate
-  under the output root builds on its own, as before. The generated
+  `Cargo.toml`. It excludes `api`, `engine`, `sdk` and `types`, so a
+  generated crate under the output root, a project's engine crate (D58)
+  among them, builds on its own, as before. The generated
   crates the servers depend on and the implementations are path
   dependencies, not members, and its lockfile, `<output-root>/Cargo.lock`,
   pins every crate they reach. The lockfile lies outside

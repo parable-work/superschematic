@@ -20,7 +20,7 @@ The extension adds one of each registration surface:
 | Checks and an OpenAPI hook | policy over the core documentation decorators: acme's `@docs` audiences and `@icon` names only, and the `x-acme-docs` vendor key | `ext/docs.go` |
 | Check, a tool hook and an invocation policy on `@mcp` | every operation of `shop-api` declares `@mcp`, visible or hidden; the SDK tool documents carry acme's vendor keys and icon variant; `confirm` replaces the core's `invocationPolicy` | `ext/mcp.go`, `packages/schema/src/mcp.ts` |
 | Check on a core kind | policy over core projection views: every view in a DB schema binds `acme.shop_id` first | `ext/projection_policy.go` |
-| Behavior | `acme.Rating`, declared in a JSON file; `ext/testdata/services/shop-ratings` composes it on a General data-form type and `shop-ratings-ts` with `@behavior`, typed by acme's `BehaviorConfigs` augmentation; `@acme/behaviors` implements it for the engine, over a copy of the declaration | `ext/behavior.go`, `ext/rating.behavior.json`, `packages/schema/src/behaviors.ts`, `packages/behaviors` | |
+| Behavior | `acme.Rating`, declared in a JSON file; `ext/testdata/services/shop-ratings` composes it on a General data-form type and `shop-ratings-ts` with `@behavior`, typed by acme's `BehaviorConfigs` augmentation; `@acme/behaviors` implements it for the engine, over a copy of the declaration, and the `acme-behaviors` crate for the Rust engine, which its registration names and the project's engine crate compiles in (D58) | `ext/behavior.go`, `ext/rating.behavior.json`, `packages/schema/src/behaviors.ts`, `packages/behaviors`, `crates/behaviors` | |
 | Command | `describe` and `fields`, through `cli.CommandProvider` | `ext/command.go`, `ext/fields.go` |
 | Binary | `acme-schematic`: `cli.New(cli.Config{Name: "acme-schematic"}, ext.Extension{})` | `cmd/acme-schematic` |
 
@@ -96,6 +96,7 @@ examples/acme-schematic/
     testdata/services/returns-api  an API the tests load that declares confirm on @mcp
     testdata/services/shop-ratings  a General data-form service whose Product composes acme.Rating
     testdata/services/shop-ratings-ts  its TypeScript twin, with @behavior
+    testdata/golden/shop-ratings-engine  the project's engine crate a build writes for shop-ratings
     command.go                describe subcommand
     fields.go                 fields subcommand: a declaration file type-checked with loader.NewDeclarationProgram
     auth/                     apikey auth provider + its snippet templates
@@ -104,6 +105,10 @@ examples/acme-schematic/
     declarations/             acme.Rating.behavior.json, the copy `acme-schematic behaviors` writes
     src/rating.ts             the implementation; src/index.ts exports every behavior
     test/rating.test.ts       the engine scenario the smoke runs under Node.js and Bun
+  crates/behaviors/           acme-behaviors, acme.Rating for the Rust engine (D58), a Cargo workspace of its own
+    declarations/             acme.Rating.behavior.json, the same copy
+    src/lib.rs                Rating, behaviors() and tools()
+    tests/rating.rs           rating.test.ts's cases on SQLite and Postgres
   schemas/
     superschematic.toml       naming, auth_provider = "apikey", [package_aliases], [paths], [deps], [extension.acme]
     deps.json                 the committed copy of the dependency graph ([deps] copy)
@@ -808,6 +813,37 @@ fields and events, its tools carry acme's policy (which the test holds to
 the meta-schema's), and an engine without it refuses the schema. Nothing
 in this is a core edit: the engine runs any implementation a deployment
 registers, and names none.
+
+The Rust engine (D58) runs `crates/behaviors`, the `acme-behaviors`
+crate: `Rating` implements the engine's `Behavior` trait over its own
+copy of the declaration (`acme-schematic behaviors --extension acme --out
+crates/behaviors/declarations`), with the same migration, handlers and
+readers, and `behaviors()` and `tools()` are the package's `behaviors` and
+`tools`. It is a Cargo workspace of its own, as a crate of a project is,
+with its own lock file, and reaches the engine by path at this checkout.
+Its tests, `tests/rating.rs`, are `rating.test.ts`'s cases, on SQLite and
+on Postgres when `SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL` names one
+(`make acme-engine-rust` runs them with the acme binary's meta-schema).
+
+`ext/behavior.go` names the crate in acme.Rating's registration:
+
+```go
+registry.BehaviorRust{Crate: "acme-behaviors", Path: "crates/behaviors", Register: "acme_behaviors::Rating"}
+```
+
+so a build of a schema of this project whose types compose acme.Rating
+writes the project's engine crate, `dist/engine/rust/<service>`, named
+`acme-<service>-engine`: it depends on the engine's crates at the
+naming file's `engine_rust`, `engine_behaviors_rust` and
+`engine_workqueue_rust`, and on `acme-behaviors`, and its `behaviors()`
+is the core's behaviors and `acme_behaviors::Rating`, under acme's tool
+options (`tools()`). `ext/testdata/golden/shop-ratings-engine` holds the
+crate for `shop-ratings` (`TestRatingProjectEngine`). The smoke's step 21
+lints and tests the crate, builds `shop-ratings` as a service of this
+project (a copy under `schemas/dist`, since its own directory sits
+outside `schemas/`), and lints and tests the engine crate the binary
+writes, whose test opens the engine on SQLite and finds acme.Rating
+registered.
 
 ## A command
 

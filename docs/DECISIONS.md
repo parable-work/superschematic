@@ -5720,9 +5720,24 @@ package's own behaviors by name, held to its own `test/rust-pending.txt`:
 Bun's 455), and none fails on what the Rust engine does. The rest wait for
 milestone 7b's test-only bridge for behaviors written in TypeScript; it
 brings too raw SQL on the engine's file, `events.watch`, and `engineApp`
-and `engineMcp` over the engine's routes. Until the Rust engine passes
-the TypeScript suite, `@superschematic/engine` is the TypeScript
-implementation and nothing uses the workspace.
+and `engineMcp` over the engine's routes. An extension's behavior is a
+crate of its own (milestone 13a): acme.Rating is `acme-behaviors`
+(`examples/acme-schematic/crates/behaviors`), a workspace of its own
+beside the engine's over the plug-in API alone, whose tests run
+`rating.test.ts`'s cases on SQLite and Postgres; `registry.BehaviorSpec`
+names such a crate (`Rust`: the crate, its path in the project and the
+expression that registers it), the engine document names it beside the
+package (`crate`), and the `projectengine` generator writes the project's
+engine crate, `engine/rust/<schema>`, for a DB or General schema whose
+types compose an extension's behavior: the engine's crates at the
+`[paths]` keys `engine_rust`, `engine_behaviors_rust` and
+`engine_workqueue_rust`, each extension's crate, `behaviors()` (the
+core's, the work queue's when used, then the extensions'), `tools()`
+(the binary's D11 options) and a test that opens it on SQLite; acme's
+smoke builds and tests the one its binary writes. A schema of the core's
+behaviors alone gets none, and the release's engine runs it. Until the
+Rust engine passes the TypeScript suite, `@superschematic/engine` is the
+TypeScript implementation and nothing uses the workspace.
 
 The rule is reversible until the first release.
 
