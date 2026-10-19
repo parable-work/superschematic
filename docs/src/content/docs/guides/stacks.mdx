@@ -1409,11 +1409,12 @@ The workflow:
   `schemas/dist/Cargo.lock` is not committed or the build changed it, and
   compiles each Rust server, job and worker with `cargo check --locked`;
   every job that builds sets up the same release. For a stack with a
-  TypeScript server it then installs `schemas/dist`'s Bun workspace with
-  `bun install --frozen-lockfile`, failing when `schemas/dist/bun.lock`
-  is not committed or no longer matches the packages the build wrote, and
-  type-checks each TypeScript server and the implementation of each API
-  one serves with `tsc --noEmit`. For a stack with a
+  TypeScript server, job or worker it then installs `schemas/dist`'s Bun
+  workspace with `bun install --frozen-lockfile`, failing when
+  `schemas/dist/bun.lock` is not committed or no longer matches the
+  packages the build wrote, and type-checks each TypeScript server's,
+  job's and worker's package and the implementation each imports with
+  `tsc --noEmit`. For a stack with a
   [static site](/superschematic/guides/static-sites/) it installs the same
   workspace and builds each site with its build script, as `stack deploy`
   does, so a site that does not build fails the pull request. Every job

@@ -235,13 +235,14 @@ func (g github) header(w *yamlWriter, notes []string) {
 // check is the job that builds the stack and compiles its servers, jobs
 // and workers, with no credentials: levels 1 to 3 of section 10. Each Go
 // server, job and worker's module compiles, against the release's static
-// archives; for the TypeScript servers and the sites it installs the
-// output root's Bun workspace from the lockfile the project commits, which
-// fails when the lockfile is missing or does not match the packages the
-// build wrote, type-checks each TypeScript server and the implementation
-// of each API one serves (D51, amended), and builds each site with its
-// build script, as `stack deploy` does, so a site that does not build
-// fails the pull request (D55). For the Rust servers, jobs and workers it
+// archives; for the TypeScript servers, jobs and workers and the sites it
+// installs the output root's Bun workspace from the lockfile the project
+// commits, which fails when the lockfile is missing or does not match the
+// packages the build wrote, type-checks each TypeScript server's, job's
+// and worker's package and the implementation each imports (D51, amended;
+// D52, D53), and builds each site with its build script, as `stack
+// deploy` does, so a site that does not build fails the pull request
+// (D55). For the Rust servers, jobs and workers it
 // sets up the Rust release tools.env pins before the build, which brings
 // the output root's Cargo lockfile up to date with it, refuses a lockfile
 // git does not track or the build changed, and checks each one's crate,
@@ -250,10 +251,10 @@ func (g github) header(w *yamlWriter, notes []string) {
 func (g github) check() job {
 	st := g.req.Stack
 	goModules := g.deployables(registry.APILanguageGo)
-	tsServers := g.typeScriptServers()
+	tsPackages := g.deployables(registry.APILanguageTypeScript)
 	rustCrates := g.deployables(registry.APILanguageRust)
 	sites := slices.Sorted(maps.Keys(st.Sites))
-	workspace := len(tsServers) > 0 || len(sites) > 0
+	workspace := len(tsPackages) > 0 || len(sites) > 0
 	steps := []step{g.checkout(), g.install()}
 	if len(goModules) > 0 && g.req.Version != "" {
 		steps = append(steps, g.archives())
@@ -284,11 +285,11 @@ func (g github) check() job {
 	if workspace {
 		steps = append(steps, g.typeScriptWorkspace())
 	}
-	if len(tsServers) > 0 {
-		for _, server := range tsServers {
+	if len(tsPackages) > 0 {
+		for _, p := range tsPackages {
 			steps = append(steps, step{
-				name: "Type-check server " + server,
-				dir:  path.Join(st.OutputRoot, "server", st.Name, server),
+				name: "Type-check " + string(p.kind) + " " + p.name,
+				dir:  path.Join(st.OutputRoot, "server", st.Name, p.name),
 				run:  typeCheck,
 			})
 		}
@@ -619,14 +620,10 @@ func (g github) stackCommand(command, environment string, flags ...string) strin
 	return strings.Join(args, " ")
 }
 
-// typeScriptServers are the stack's TypeScript servers, whose entrypoint
-// packages the build writes into the output root's Bun workspace, sorted.
-func (g github) typeScriptServers() []string { return g.serversIn(registry.APILanguageTypeScript) }
-
 // deployable is a server, job or worker of the stack whose entrypoint the
 // build writes at server/<stack>/<name> under the output root: a Go
-// module, or a crate of the output root's Cargo workspace (D57, D65). It
-// is its kind and name.
+// module, a package of the output root's Bun workspace (D51, D52, D53),
+// or a crate of its Cargo workspace (D57, D65). It is its kind and name.
 type deployable struct {
 	kind ir.DeployableKind
 	name string
@@ -642,11 +639,6 @@ func (g github) deployables(language string) []deployable {
 		}
 	}
 	return out
-}
-
-// serversIn are the stack's servers in language, sorted.
-func (g github) serversIn(language string) []string {
-	return g.deployablesIn(ir.DeployableServer, language)
 }
 
 // deployablesIn are the stack's deployables of kind in language, sorted.

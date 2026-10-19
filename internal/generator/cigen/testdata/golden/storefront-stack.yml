@@ -82,6 +82,12 @@ jobs:
       - name: Type-check server storefront
         working-directory: schemas/dist/server/storefront-stack/storefront
         run: bun x --no-install tsc --noEmit -p tsconfig.json
+      - name: Type-check job shop-pricing-refresh-quotes
+        working-directory: schemas/dist/server/storefront-stack/shop-pricing-refresh-quotes
+        run: bun x --no-install tsc --noEmit -p tsconfig.json
+      - name: Type-check worker shop-storefront-remind-shoppers
+        working-directory: schemas/dist/server/storefront-stack/shop-storefront-remind-shoppers
+        run: bun x --no-install tsc --noEmit -p tsconfig.json
       - name: Type-check the implementation of shop-pricing
         working-directory: typescript/shop-pricing
         run: bun x --no-install tsc --noEmit -p tsconfig.json

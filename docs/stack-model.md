@@ -2254,7 +2254,8 @@ as they are, with no build step (D51). The pieces mirror Go's:
   port, so its Dockerfile sets no `PORT` and exposes nothing. SIGTERM or
   SIGINT aborts the signal it hands the job or the worker loop; a second
   signal exits at once, as a server's does. It ends its pools before it
-  exits.
+  exits. The generated CI's `check` type-checks its package as it does a
+  server's (section 11.3).
 - **Image.** With the naming file's `[paths]` naming the checkouts of
   superscalar's TypeScript binding and the HTTP runtime's package, which
   no registry serves yet, the Dockerfile's addon stage builds
@@ -3889,18 +3890,19 @@ The GitHub workflow:
     the pull request as a server does. It runs on a push too. A binary the
     release workflow did not build names no digests, and its archives step
     fails.
-  - For a stack with a TypeScript server, `check` then installs the
-    output root's Bun workspace from the lockfile the project commits
-    (section 8.6), `bun install --frozen-lockfile` in
+  - For a stack with a TypeScript server, job or worker, `check` then
+    installs the output root's Bun workspace from the lockfile the project
+    commits (section 8.6), `bun install --frozen-lockfile` in
     `<schemas-root>/dist`, in a step that names the lockfile. It fails
     when the lockfile is missing, where a frozen install alone would
     install without one, or no longer matches the packages the build
     wrote, and says to run `bun install` there after `build-all` and
-    commit it. Then each
-    TypeScript server's entrypoint package and the implementation of each
-    API one serves type-checks with `tsc --noEmit` (level 2), through `bun
-    x --no-install`, so the compiler is the one the package depends on and
-    the install linked, never one bunx downloads. The type-check reads the
+    commit it. Then each TypeScript server's, job's and worker's
+    entrypoint package, in that order and each named for its kind, and
+    the implementation of each API one of them imports type-checks with
+    `tsc --noEmit` (level 2), through `bun x --no-install`, so the
+    compiler is the one the package depends on and the install linked,
+    never one bunx downloads. The type-check reads the
     runtime packages as the install linked them: from the registry they
     carry their declarations, while a checkout that `[paths]` names needs
     its build output in the CI checkout, which the image builds for itself
