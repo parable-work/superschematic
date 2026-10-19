@@ -21,6 +21,8 @@ depends on a generated type.
 | `bucket` | the provider-neutral `Bucket` a generated `Deps` holds per bucket an API lists (D54): put, get, delete, list and signed URLs. No provider's client: the GCS implementation is generated into the entrypoint of a server whose APIs list a bucket (`buckets.go`) |
 | `bodyargs` | decoding the body arguments of an operation without an input type: each from its JSON value, with the list rules and the value rules, every failure at its path, and a JSON-object scalar's value first checked on its own JSON by the check the route passes in (`CheckJSON`); and a list argument of a `GET` operation from the query string (`QueryList`), with the same rules |
 | `search` | what an implementation needs to answer a `SearchQuery` argument (D62): the search text's words (`Terms`), each word's `LIKE ... ESCAPE '\'` pattern (`LikePattern`), and the case folding an in-memory match compares by (`Fold`, `Matches`), with the lowercase mappings of the TypeScript and Rust runtimes' newer Unicode in `fold_table.go`, which `go generate` writes from the Rust runtime's `fold_mappings` example |
+| `worker` | a stack worker's claim loop (D53): claims, extensions, completions, failures and releases through the `Queue` a worker's entrypoint builds from its database's ORM, and a span per message it handles |
+| `telemetry` | OpenTelemetry trace export over OTLP/HTTP for a stack's server, job and worker (D67, below): `Start`, `Handler`, `Transport` and `Job`; `telemetry/otlptest` is an OTLP receiver for tests |
 | `cmd/superschematic-identity` | the identity runner, the binary that creates a database's first administrator (below) |
 
 The generated API package keeps `Config`, `Implementations`, the route table,
@@ -31,6 +33,48 @@ that provider in its own module, alongside the provider.
 ```
 cd runtime/http/go && go test ./...
 ```
+
+## Trace export
+
+A generated server's, job's or worker's `main.go` calls `telemetry.Start`
+first, with the deployable's name, its stack and its kind, and defers the
+function it returns, which flushes the spans still buffered and stops the
+exporter (D67). Export is on only when the environment sets
+`OTEL_EXPORTER_OTLP_ENDPOINT` or `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`, and
+`OTEL_SDK_DISABLED` is not `true`. Off, `Start` installs nothing: the
+global tracer stays a no-op, and `Handler` and `Transport` return what they
+wrap. On, it exports over OTLP/HTTP in protobuf with a batch processor, and
+reads the rest of OpenTelemetry's variables:
+
+| Variable | Read as |
+| --- | --- |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | the collector's base URL, to which the exporter adds `/v1/traces` |
+| `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | the full URL of the traces, in place of the base |
+| `OTEL_EXPORTER_OTLP_HEADERS`, `OTEL_EXPORTER_OTLP_TIMEOUT`, `OTEL_EXPORTER_OTLP_COMPRESSION` and their `_TRACES_` forms | by the exporter |
+| `OTEL_EXPORTER_OTLP_PROTOCOL`, `OTEL_EXPORTER_OTLP_TRACES_PROTOCOL` | `http/protobuf` or unset; any other value stops `Start` |
+| `OTEL_SERVICE_NAME`, `OTEL_RESOURCE_ATTRIBUTES` | over the defaults: `service.name` the deployable, `service.namespace` the stack, `superschematic.deployable.kind` `server`, `job` or `worker` |
+| `OTEL_TRACES_SAMPLER`, `OTEL_TRACES_SAMPLER_ARG` | the six standard samplers, `parentbased_always_on` unless set |
+| `OTEL_PROPAGATORS` | `tracecontext`, `baggage` or `none`; `tracecontext,baggage` unless set |
+| `OTEL_SDK_DISABLED` | `true` turns export off |
+
+A value the runtime does not support stops `Start` with an error naming the
+variable. The spans:
+
+- `Handler`, which the entrypoint wraps around its whole handler, makes a
+  server span per request but `/healthz` and `/readyz`, the child of an
+  incoming `traceparent`. The generated API's `RequestLogMiddleware` names
+  it `<METHOD> <route template>`, such as `GET /api/orders/{id}`.
+- `Transport` is the transport of each `calls` edge's SDK client: a client
+  span per call, whose context the call carries in `traceparent` and
+  `tracestate`.
+- `Job` runs a job's method in a span named after its `@job` class, whose
+  status records the run's error.
+- `worker.Run` makes a consumer span per message, `process <queue>`, the
+  root of a trace of its own.
+
+`telemetry/otlptest` starts an OTLP/HTTP receiver in a test's process and
+decodes the spans each export carries; a stack's tests point the
+deployables they run at its URL.
 
 ## Service auth parity vectors
 
