@@ -61,3 +61,20 @@ func TestSecretName(t *testing.T) {
 		t.Errorf("secretName = %s", got)
 	}
 }
+
+// TestEngineRole: the role that owns the engine's schema is named after
+// its database, unique on the instance as the database's name is, and a
+// name past Postgres's 63 bytes keeps a hash of the whole name.
+func TestEngineRole(t *testing.T) {
+	if got := engineRole("shop_db_pr7"); got != "shop_db_pr7_engine" {
+		t.Errorf("engineRole = %s", got)
+	}
+	long := strings.Repeat("d", 60)
+	a, b := engineRole(long), engineRole(long[:59]+"e")
+	if len(a) != 63 || len(b) != 63 || a == b || !strings.HasSuffix(a, "_engine") || !strings.HasPrefix(a, long[:46]+"_") {
+		t.Errorf("long names: %s, %s", a, b)
+	}
+	if got := engineRole(strings.Repeat("d", 56)); got != strings.Repeat("d", 56)+"_engine" {
+		t.Errorf("a name that fits: %s", got)
+	}
+}
