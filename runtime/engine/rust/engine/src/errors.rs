@@ -874,12 +874,12 @@ impl From<superschematic_engine_storage::Error> for Error {
                     "the engine's storage is busy: another writer held its lock past the busy timeout ({message}); nothing was written, and the call may be tried again"
                 ),
             )),
-            // The connection went before the commit: the server rolled the
-            // transaction back.
+            // The connection could not open, or went before the commit:
+            // the server rolled the transaction back.
             StorageError::Connection { message } => Error::Engine(EngineError::new(
                 EngineErrorCode::Unavailable,
                 format!(
-                    "the engine lost its connection to the database ({message}); nothing was written, and the call may be tried again"
+                    "the engine's connection to the database failed ({message}); nothing was written, and the call may be tried again"
                 ),
             )),
             // The connection went while the transaction committed.
