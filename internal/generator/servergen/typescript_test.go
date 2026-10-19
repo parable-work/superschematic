@@ -668,7 +668,8 @@ func exportCart(t *testing.T, url string) {
 // Dockerfile, in ts-cloud-stack, where it depends on the Cloud SQL
 // connector, builds from the context a deploy writes
 // (stackdeploy.WriteContext) out of a repository root holding the
-// generated packages, the scaffolds, the installed workspace's lockfile
+// generated packages, ts-db's TypeScript types among them, which ts-shop's
+// package depends on, the scaffolds, the installed workspace's lockfile
 // and checkouts of superscalar and the HTTP runtime, and the image serves:
 // /healthz, an API's route, /readyz reporting its database down, and a
 // clean stop on docker stop. It needs Docker and the network, builds
@@ -697,12 +698,15 @@ func TestTheTypeScriptDockerfileBuildsAnImageThatServes(t *testing.T) {
 		}
 	}
 	f := loadTypeScriptFixture(t)
-	f.build(t, repoRoot, tsFakePaths(repoRoot), append(slices.Clone(tsAPIs), tsCloudStack)...)
+	// ts-shop's package depends on ts-db's TypeScript types, for the
+	// message its worker handles (D53), so the workspace installs only
+	// with them built.
+	f.build(t, repoRoot, tsFakePaths(repoRoot), append([]string{"ts-db"}, append(slices.Clone(tsAPIs), tsCloudStack)...)...)
 	out := filepath.Join(repoRoot, "schemas", "dist")
 	install := exec.Command(bun, "install")
 	install.Dir = out
 	if output, err := install.CombinedOutput(); err != nil {
-		t.Skipf("bun install failed at the output root (likely offline): %v\n%s", err, output)
+		testpaths.RequireOrSkipTS(t, fmt.Sprintf("bun install failed at the output root (likely offline): %v\n%s", err, output))
 	}
 
 	dockerfile := filepath.Join(servergen.ServerDir(out, tsCloudStack, "ts-shop"), servergen.DockerFile)
