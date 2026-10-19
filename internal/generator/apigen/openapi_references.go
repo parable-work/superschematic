@@ -17,6 +17,11 @@ const OpenAPIReferenceKey = "x-superschematic-reference"
 // OpenAPIHook renames it.
 const OpenAPISearchKey = "x-superschematic-search"
 
+// OpenAPISortKey is the vendor-extension key, true, that marks a paged
+// operation's sort argument (SortBy, D60 amended) on its parameter object,
+// whose schema's enum holds its values. An OpenAPIHook renames it.
+const OpenAPISortKey = "x-superschematic-sort"
+
 // Reference is the reference a parameter or a field holds (D61, amended),
 // resolved: written with RefersTo, or derived from a relation's key. The
 // OpenAPI document and the tool documents write it under their reference
@@ -163,12 +168,12 @@ func openAPIExtensionTarget(property map[string]interface{}) map[string]interfac
 }
 
 // openAPIParameterKeys gives a path or query parameter object, or a body
-// argument's property schema, the reference and search keys its argument
-// holds: on a property that is a bare $ref, beside an allOf that holds it
-// (openAPIExtensionTarget). A parameter object holds its schema under
-// "schema", and takes them as it is.
+// argument's property schema, the reference, search and sort keys its
+// argument holds: on a property that is a bare $ref, beside an allOf that
+// holds it (openAPIExtensionTarget). A parameter object holds its schema
+// under "schema", and takes them as it is.
 func openAPIParameterKeys(target map[string]interface{}, param Param) {
-	if param.Reference == nil && !param.Search {
+	if param.Reference == nil && !param.Search && param.Sort == nil {
 		return
 	}
 	target = openAPIExtensionTarget(target)
@@ -177,5 +182,8 @@ func openAPIParameterKeys(target map[string]interface{}, param Param) {
 	}
 	if param.Search {
 		target[OpenAPISearchKey] = true
+	}
+	if param.Sort != nil {
+		target[OpenAPISortKey] = true
 	}
 }

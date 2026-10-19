@@ -8,7 +8,7 @@ package {{ toPackageName .SchemaName }}
 {{- /* regexp is imported only when at least one @validatePattern produces a MatchString call. Predicates below mirror the usage sites so no orphan regexp.MustCompile declaration is emitted (Go error: "declared and not used"). */ -}}
 {{- $hasPatternValidation := false }}
 {{- range .Endpoints }}
-{{- range .QueryParams }}
+{{- range .ArgQueryParams }}
 {{- if and .ValidatePattern .IsString (not .IsArray) }}
 {{- $hasPatternValidation = true }}
 {{- end }}
@@ -561,7 +561,7 @@ func manualHandler(handler gohttp.Handler, operation string) gohttp.Handler {
 {{- end }}
 func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) gohttp.HandlerFunc {
 	{{- /* The predicates below mirror the MatchString call sites further down so we never emit an orphan regex declaration (Go error: "declared and not used"). */ -}}
-	{{- range .QueryParams }}
+	{{- range .ArgQueryParams }}
 	{{- if and .ValidatePattern .IsString (not .IsArray) }}
 	query{{ .GoName }}PatternRegex := regexp.MustCompile({{ printf "%q" .ValidatePattern }})
 	{{- end }}
@@ -673,9 +673,9 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 		{{- end }}
 		{{- end }}
 
-		{{- if .QueryParams }}
+		{{- if .ArgQueryParams }}
 		// Extract query parameters
-		{{- range .QueryParams }}
+		{{- range .ArgQueryParams }}
 		{{- if .IsArray }}
 		{{- template "queryList" . }}
 		{{- else }}
@@ -1353,7 +1353,12 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 
 		// Read the page's cursor and limit (@paginated): its own reader, whose
 		// refusal is the 400 every server answers at cursor or limit.
-		page, ok := paging.Read(w, r, paging.Spec{DefaultLimit: {{ .Page.DefaultLimit }}, MaxLimit: {{ .Page.MaxLimit }}})
+		{{- with .Page.Sort }}
+		// It also reads {{ .Param }}, the page's sort (D60, amended), after the limit,
+		// and unbinds the cursor from the sort it was returned under, so the
+		// implementation reads its own key.
+		{{- end }}
+		page, ok := paging.Read(w, r, {{ .Page.GoSpec }})
 		if !ok {
 			return
 		}
@@ -1367,13 +1372,22 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 		}
 
 		// Call implementation
-		result, err := impl.{{ .ShortImplName }}(r.Context(){{- range .PathParams }}, {{ .GoName }}{{- end }}{{- range .QueryParams }}, {{ .GoName }}{{- end }}{{- if .Filterable }}, filters{{- end }}{{- if .HasInput }}, &input{{- else if .ScalarArgs }}{{- range .ScalarArgs }}{{- if eq $endpointMethod "GET" }}, {{ .GoName }}{{- else }}, requestBody.{{ .GoName }}{{- end }}{{- end }}{{- end }}{{- if .HasFileUpload }}, files{{- end }}{{- if .Page }}, page{{- end }})
+		result, err := impl.{{ .ShortImplName }}(r.Context(){{- range .PathParams }}, {{ .GoName }}{{- end }}{{- range .ArgQueryParams }}, {{ .GoName }}{{- end }}{{- if .Filterable }}, filters{{- end }}{{- if .HasInput }}, &input{{- else if .ScalarArgs }}{{- range .ScalarArgs }}{{- if eq $endpointMethod "GET" }}, {{ .GoName }}{{- else }}, requestBody.{{ .GoName }}{{- end }}{{- end }}{{- end }}{{- if .HasFileUpload }}, files{{- end }}{{- if .Page }}, page{{- end }})
 		if err != nil {
 			// Get logger from context and use proper error handling
 			logger := LoggerFromContext(r.Context())
 			RespondAppError(w, logger, err)
 			return
 		}
+		{{- if and .Page .Page.Sort }}
+		// The next page's cursor names the sort the page was read in (D60,
+		// amended); a next no router reads back under it is the
+		// implementation's error.
+		if result, err = paging.Bind(result, page); err != nil {
+			RespondAppError(w, LoggerFromContext(r.Context()), err)
+			return
+		}
+		{{- end }}
 
 		{{- if and .OutputType .OutputIsArrayOfArrays }}
 		// An inner list is never null on the wire: a nil one is sent as [].
