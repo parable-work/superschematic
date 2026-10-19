@@ -6271,10 +6271,9 @@ the decorator would answer a list where the others answer a page (D35,
 D42). Until a generator renders the decorator it refuses an operation that
 declares it, naming itself, as generators refused behaviors (D16). Follows:
 a sort argument; a previous cursor; a page size control in the console;
-and removing `meta.totalCount` and `links`, which the Go runtime declared
-and the OpenAPI document advertised and no server wrote. The last is
-built: `meta` holds `requestId` alone in every runtime and document
-(`TestOpenAPIEnvelopeIsDataAndMeta`).
+and removing `meta.totalCount` and `links`, which the Go runtime declares
+and the OpenAPI document advertises and no server writes, a change to every
+golden of its own.
 
 The rule is reversible until the first release.
 
