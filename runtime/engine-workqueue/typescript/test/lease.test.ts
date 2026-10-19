@@ -25,7 +25,7 @@ import {
 } from '@superschematic/engine';
 
 import { gate, openMetaSchema, signal } from './fixtures.ts';
-import { Clock, alice, cleanup, drivers, fenced, jobFlow, jobsDocument, openTestEngine, publish, thrown, type BehaviorRef } from './helpers.ts';
+import { Clock, TYPESCRIPT_DRIVER, alice, cleanup, drivers, fenced, jobFlow, jobsDocument, openTestEngine, publish, thrown, type BehaviorRef } from './helpers.ts';
 import { lease } from '../dist/index.js';
 
 afterEach(cleanup);
@@ -102,7 +102,31 @@ for (const driver of drivers) {
       assert.deepEqual(leaseOf(engine), { holder: 'wren', token: 3, acquiredAt: T0 + 0, renewedAt: T0 + 30000, expiresAt: T0 + 90000, active: false, expiries: 0 });
     });
 
-    test("a heartbeat neither rewrites nor loads a large field the value store holds: the job's row keeps its ref", () => {
+    test("a heartbeat neither rewrites nor stores again a large field the value store holds: the job's row keeps its ref", () => {
+      // The engine's own driver, the value store's table in its file.
+      const clock = new Clock(T0);
+      const engine = openTestEngine({ driver, clock: clock.now, values: { thresholdBytes: 1024, cacheBytes: 0 } });
+      publish(engine, jobsDocument([{ name: 'Workflow', config: jobFlow }, { name: 'Lease' }, { name: 'Comments' }]));
+      const topic = 'build log '.repeat(200);
+      engine.instances.create(alice, 'Job', { title: 'Build', topic }, { id: 'j1' });
+      const row = () => engine.storage.get("SELECT data, value_refs FROM engine_instances WHERE id = 'j1'");
+      const payloads = () => engine.storage.all('SELECT hash FROM engine_payloads ORDER BY hash');
+      const before = row();
+      const stored = payloads();
+      assert.equal(before?.value_refs, '["/topic"]');
+      assert.equal(stored.length, 1);
+      invoke(engine, worker, 'acquire');
+      for (let beat = 1; beat <= 3; beat += 1) {
+        clock.advance(10000);
+        invoke(engine, worker, 'heartbeat', {}, 'j1', 1);
+      }
+      assert.deepEqual(row(), before);
+      assert.deepEqual(payloads(), stored);
+      assert.equal(engine.instances.get(alice, 'Job', 'j1')?.data.topic, topic);
+    });
+
+    // The Rust engine's twin: runtime/engine/rust/testkit/tests/workqueue_lease.rs, over a Rust driver that counts.
+    test("a heartbeat neither rewrites nor loads a large field a driver holds, counted by the driver", { skip: TYPESCRIPT_DRIVER }, () => {
       // A value driver that counts its reads and writes, with no cache.
       const stored = new Map<string, string>();
       const counts = { reads: 0, writes: 0 };
@@ -120,7 +144,7 @@ for (const driver of drivers) {
         },
       };
       const clock = new Clock(T0);
-      const engine = openTestEngine({ driver, clock: clock.now, values: { thresholdBytes: 1024, driver: values, cacheBytes: 0 } });
+      const engine = openTestEngine({ driver, clock: clock.now, values: { thresholdBytes: 1024, driver: values, cacheBytes: 0 } }, { record: false });
       publish(engine, jobsDocument([{ name: 'Workflow', config: jobFlow }, { name: 'Lease' }, { name: 'Comments' }]));
       const topic = 'build log '.repeat(200);
       engine.instances.create(alice, 'Job', { title: 'Build', topic }, { id: 'j1' });

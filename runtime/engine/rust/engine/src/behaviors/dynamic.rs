@@ -217,19 +217,26 @@ fn absent(hook: &str) -> Error {
 /// Erases a dynamic behavior's config type.
 pub(crate) fn erase_dynamic<D: DynamicBehavior>(behavior: D) -> Arc<dyn Erased> {
     let hooks = behavior.hooks();
-    Arc::new(Dynamic { behavior, hooks })
+    // The declaration's name, read once, as erase reads it.
+    let label = super::declaration::BehaviorDeclaration::parse(behavior.declaration())
+        .map(|declaration| declaration.name)
+        .unwrap_or_else(|_| "implementation".to_owned());
+    Arc::new(Dynamic {
+        behavior,
+        hooks,
+        label,
+    })
 }
 
 struct Dynamic<D: DynamicBehavior> {
     behavior: D,
     hooks: DynamicHooks,
+    label: String,
 }
 
 impl<D: DynamicBehavior> Dynamic<D> {
     fn label_or(&self) -> String {
-        super::declaration::BehaviorDeclaration::parse(self.behavior.declaration())
-            .map(|declaration| declaration.name)
-            .unwrap_or_else(|_| "implementation".to_owned())
+        self.label.clone()
     }
 
     fn config<'c>(&self, config: &'c ConfigBox) -> Result<&'c D::Config> {
@@ -243,7 +250,7 @@ impl<D: DynamicBehavior> Dynamic<D> {
 
     // run calls one hook, catching a panic as a defect of the behavior's.
     fn run<T>(&self, hook: &str, call: impl FnOnce() -> Result<T>) -> Result<T> {
-        super::erased::run_hook(&self.label_or(), hook, call)
+        super::erased::run_hook(&self.label, hook, call)
     }
 
     fn scope<'a>(core: &'a dyn Core, config: &'a D::Config) -> Scope<'a, D::Config> {

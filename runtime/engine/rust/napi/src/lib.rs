@@ -358,6 +358,23 @@ impl IdSource for HostIds {
             .map(str::to_owned)
             .ok_or_else(|| Failed::Internal("the id source written in TypeScript threw".to_owned()))
     }
+
+    // A behavior's own UUIDs come from the host's crypto.randomUUID, where
+    // the TypeScript engine's version graph draws them: a recorder that
+    // seeds it sees the ids it gave. Off the JavaScript thread, random ones.
+    fn next_uuid(&self) -> Option<[u8; 16]> {
+        let answer = self.0.ask("uuid", String::new())?;
+        let hex: Vec<u8> = answer.bytes().filter(|byte| *byte != b'-').collect();
+        if hex.len() != 32 {
+            return None;
+        }
+        let mut bytes = [0u8; 16];
+        for (at, pair) in hex.chunks(2).enumerate() {
+            let text = std::str::from_utf8(pair).ok()?;
+            bytes[at] = u8::from_str_radix(text, 16).ok()?;
+        }
+        Some(bytes)
+    }
 }
 
 // options_of reads the options the facade passes: the engine's, the work
@@ -478,6 +495,19 @@ fn run(
     }
 }
 
+// set_now sets a manual clock to the time a request carries, a call's or
+// an HTTP request's: the facade's clock function, read once per request
+// as the TypeScript engine reads it.
+fn set_now(engine: &Engine, now: Option<&Value>) -> std::result::Result<(), Failure> {
+    let Some(now) = now.filter(|now| !now.is_null()) else {
+        return Ok(());
+    };
+    let now = now
+        .as_i64()
+        .ok_or_else(|| Failure::usage("an engine request's now is epoch milliseconds"))?;
+    engine.clock().set(now).map_err(|error| Failure::of(&error))
+}
+
 fn call(
     engine: &Engine,
     request: &str,
@@ -505,15 +535,7 @@ fn call(
         Some(Value::Array(args)) => args,
         Some(_) => return Err(Failure::usage("an engine request's args are a list")),
     };
-    if let Some(now) = members.get("now").filter(|now| !now.is_null()) {
-        let now = now
-            .as_i64()
-            .ok_or_else(|| Failure::usage("an engine request's now is epoch milliseconds"))?;
-        engine
-            .clock()
-            .set(now)
-            .map_err(|error| Failure::of(&error))?;
-    }
+    set_now(engine, members.get("now"))?;
     let principal = match members.get("principal") {
         None | Some(Value::Null) => None,
         Some(given) => Some(
@@ -629,6 +651,7 @@ fn serve_http(
             }
             _ => None,
         };
+    set_now(engine, head.get("now"))?;
     let reply = calls::http(engine, &head, body, filter).map_err(|error| Failure::of(&error))?;
     Ok(answer_of(reply))
 }
@@ -647,6 +670,7 @@ fn serve_http_owned(
             "a tool filter written in TypeScript answers on the JavaScript thread: an engine served asynchronously takes none",
         ));
     }
+    set_now(engine, head.get("now"))?;
     calls::http(engine, &head, body, None).map_err(|error| Failure::of(&error))
 }
 
@@ -1051,8 +1075,9 @@ impl NativeEngine {
 
     /// Serves one HTTP request on the JavaScript thread (SQLite): its head
     /// as JSON (`method`, `prefix`, `path`, `query`, `headers`, `caller`,
-    /// `requestId`, the mount's `options` and whether its `toolFilter` is
-    /// the facade's), and its body's bytes. The answer's body is bytes,
+    /// `requestId`, the mount's `options`, whether its `toolFilter` is
+    /// the facade's, and the `now` a manual clock is set to first, as a
+    /// call's), and its body's bytes. The answer's body is bytes,
     /// or the id of an event stream the engine holds open, which
     /// `streamPull` pulls.
     #[napi]

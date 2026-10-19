@@ -14,7 +14,7 @@ import { Hono } from 'hono';
 import { allowAll, openEngineAsync, type AsyncNativeEngine } from '../dist/index.js';
 import { engineApp } from '../dist/http/index.js';
 import { openNativeEngine } from '../dist/native/index.js';
-import { alice, cleanup, engineImpl, freshPath, orderDocument } from './helpers.ts';
+import { alice, cleanup, engineImpl, freshPath, openTestEngine, orderDocument } from './helpers.ts';
 
 const opened: AsyncNativeEngine[] = [];
 
@@ -74,7 +74,7 @@ for (const backend of backends) {
       await engine.schemas.define(alice, orderDocument());
       await engine.schemas.publish(alice, 'Order');
       const app = new Hono();
-      app.route('/api', engineApp(engine as never, { authenticate: async () => alice, stream: { heartbeatMs: 50 } }));
+      app.route('/api', engineApp(engine, { authenticate: async () => alice, stream: { heartbeatMs: 50 } }));
       const created = await app.request('/api/namespaces/default/schemas/Order/instances', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -102,6 +102,59 @@ for (const backend of backends) {
     });
   });
 }
+
+// A clock function is the engine's time for every call, a request served
+// over HTTP included: the Rust engine's facade reads it once per request,
+// as for a call, and sets the engine's manual clock to it first.
+describe('a clock function', () => {
+  test('is read for each request engineApp serves, synchronous and asynchronous', async () => {
+    let now = 1_000_000;
+    const clock = () => now;
+    const engines: Array<{ name: string; open: () => Promise<Hono> }> = [
+      {
+        name: 'openEngine',
+        open: async () => {
+          const engine = openTestEngine({ clock });
+          engine.schemas.define(alice, orderDocument());
+          engine.schemas.publish(alice, 'Order');
+          return new Hono().route('/api', engineApp(engine, { authenticate: async () => alice }));
+        },
+      },
+    ];
+    if (engineImpl === 'rust') {
+      engines.push({
+        name: 'openEngineAsync',
+        open: async () => {
+          const engine = await openEngineAsync({ path: freshPath(), policy: allowAll, clock });
+          opened.push(engine);
+          await engine.schemas.define(alice, orderDocument());
+          await engine.schemas.publish(alice, 'Order');
+          return new Hono().route('/api', engineApp(engine, { authenticate: async () => alice }));
+        },
+      });
+    }
+    for (const { name, open: openOne } of engines) {
+      now = 1_000_000;
+      const app = await openOne();
+      now = 2_000_000;
+      const created = await app.request('/api/namespaces/default/schemas/Order/instances', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ id: 'o1', data: { title: 'Desk' } }),
+      });
+      assert.equal(created.status, 201, name);
+      now = 3_000_000;
+      const updated = await app.request('/api/namespaces/default/schemas/Order/instances/o1', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/merge-patch+json', 'if-match': '"1"' },
+        body: JSON.stringify({ title: 'Lamp' }),
+      });
+      assert.equal(updated.status, 200, name);
+      const { data } = (await updated.json()) as { data: { createdAt: number; updatedAt: number } };
+      assert.deepEqual([data.createdAt, data.updatedAt], [2_000_000, 3_000_000], name);
+    }
+  });
+});
 
 describe('a synchronous engine on Postgres', { skip: (engineImpl !== 'rust' || !postgresUrl) && 'the Rust engine on Postgres alone' }, () => {
   test('refuses a synchronous call: it would hold the JavaScript thread while it waits on the database', () => {

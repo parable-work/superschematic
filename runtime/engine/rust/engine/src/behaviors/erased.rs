@@ -192,19 +192,27 @@ pub(crate) fn run_hook<T>(label: &str, hook: &str, call: impl FnOnce() -> Result
 /// Erases a behavior's config type.
 pub(crate) fn erase<B: Behavior>(behavior: B) -> Arc<dyn Erased> {
     let hooks = behavior.hooks();
-    Arc::new(Implementation { behavior, hooks })
+    // The declaration's name, read once: every hook's run names it, and a
+    // declaration (Lease's is 20 KB) is too long to parse on each.
+    let label = super::declaration::BehaviorDeclaration::parse(behavior.declaration())
+        .map(|declaration| declaration.name)
+        .unwrap_or_else(|_| "implementation".to_owned());
+    Arc::new(Implementation {
+        behavior,
+        hooks,
+        label,
+    })
 }
 
 struct Implementation<B: Behavior> {
     behavior: B,
     hooks: Hooks<B>,
+    label: String,
 }
 
 impl<B: Behavior> Implementation<B> {
     fn label_or(&self) -> String {
-        super::declaration::BehaviorDeclaration::parse(self.behavior.declaration())
-            .map(|declaration| declaration.name)
-            .unwrap_or_else(|_| "implementation".to_owned())
+        self.label.clone()
     }
 
     fn config<'c>(&self, config: &'c ConfigBox) -> Result<&'c B::Config> {
@@ -218,7 +226,7 @@ impl<B: Behavior> Implementation<B> {
 
     // run calls one hook, catching a panic as a defect of the behavior's.
     fn run<T>(&self, hook: &str, call: impl FnOnce() -> Result<T>) -> Result<T> {
-        run_hook(&self.label_or(), hook, call)
+        run_hook(&self.label, hook, call)
     }
 
     fn scope<'a>(core: &'a dyn Core, config: &'a B::Config) -> Scope<'a, B::Config> {

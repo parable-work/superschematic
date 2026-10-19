@@ -175,11 +175,12 @@ const EVENT_QUERY: readonly ParamSpec[] = [
  * engineApp builds the Hono app that serves an engine. Mount it where the
  * deployment wants it (`app.route('/api', engineApp(engine, options))`);
  * on its own it answers unknown paths and failures with problem
- * documents.
+ * documents. It serves the Rust engine too, openEngineAsync's on Postgres
+ * included, as an adapter over the engine's own routes (D58).
  */
-export function engineApp(engine: Engine, options: EngineHttpOptions = {}): Hono {
+export function engineApp(engine: Engine | AsyncNativeEngine, options: EngineHttpOptions = {}): Hono {
   // The Rust engine serves its own routes (D58); this app is its adapter.
-  if ((engine as unknown) instanceof NativeEngine || (engine as unknown) instanceof AsyncNativeEngine) {
+  if (engine instanceof AsyncNativeEngine || (engine as unknown) instanceof NativeEngine) {
     return nativeEngineApp(engine as unknown as NativeEngine | AsyncNativeEngine, options);
   }
   const stream = checkStreamOptions(options.stream ?? {});

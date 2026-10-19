@@ -88,11 +88,12 @@ interface Caller {
  * engineMcp builds the Hono app that serves an engine's MCP endpoint.
  * Mount it where the HTTP API is mounted
  * (`app.route('/api', engineMcp(engine, options))`), with the same
- * options.
+ * options. It serves the Rust engine too, openEngineAsync's on Postgres
+ * included, as an adapter over the engine's own MCP endpoint (D58).
  */
-export function engineMcp(engine: Engine, options: EngineMcpOptions = {}): Hono {
+export function engineMcp(engine: Engine | AsyncNativeEngine, options: EngineMcpOptions = {}): Hono {
   // The Rust engine serves its own MCP endpoint (D58); this app is its adapter.
-  if ((engine as unknown) instanceof NativeEngine || (engine as unknown) instanceof AsyncNativeEngine) {
+  if (engine instanceof AsyncNativeEngine || (engine as unknown) instanceof NativeEngine) {
     return nativeEngineMcp(engine as unknown as NativeEngine | AsyncNativeEngine, options);
   }
   const deployed = options.onError;

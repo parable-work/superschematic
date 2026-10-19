@@ -218,6 +218,55 @@ fn an_id_is_checked_whoever_made_it() {
     }
 }
 
+// Uuids is a host's id source that makes a behavior's own UUIDs too: each
+// one's bytes count up from 1, then it has none, and random ones follow.
+struct Uuids {
+    next: std::sync::atomic::AtomicU8,
+}
+
+impl superschematic_engine::IdSource for Uuids {
+    fn next_id(&self) -> superschematic_engine::Result<String> {
+        Ok("u1".into())
+    }
+
+    fn next_uuid(&self) -> Option<[u8; 16]> {
+        let n = self.next.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+        (n <= 2).then_some([n; 16])
+    }
+}
+
+#[test]
+fn a_hosts_id_source_makes_a_behaviors_own_uuids_when_it_says_so() {
+    for target in targets("a_hosts_id_source_makes_uuids") {
+        let engine = with_orders(&target.fresh(), |options| {
+            options.ids = Ids::Custom(superschematic_engine::CustomIds(std::sync::Arc::new(
+                Uuids {
+                    next: std::sync::atomic::AtomicU8::new(0),
+                },
+            )));
+        });
+        let uuids = engine.uuids();
+        assert_eq!(uuids.next_bytes(), [1; 16]);
+        assert_eq!(engine.uuids().next_bytes(), [2; 16]);
+        // Then random ones, each a version 4 UUID of its own.
+        let random = uuids.next_bytes();
+        assert_eq!(random[6] >> 4, 4);
+        assert_ne!(random, uuids.next_bytes());
+    }
+    // A source that does not say draws random ones.
+    for target in targets("a_hosts_id_source_makes_no_uuids") {
+        let engine = with_orders(&target.fresh(), |options| {
+            options.ids = Ids::Custom(superschematic_engine::CustomIds(std::sync::Arc::new(
+                Counter {
+                    next: std::sync::atomic::AtomicU64::new(0),
+                    bad: false,
+                },
+            )));
+        });
+        assert_ne!(engine.uuids().next_bytes(), engine.uuids().next_bytes());
+    }
+}
+
 // Counter is a host's id source: c1, c2, ..., then a refusal past three,
 // and "not an id" when asked so.
 struct Counter {

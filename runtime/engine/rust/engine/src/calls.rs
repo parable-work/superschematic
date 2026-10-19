@@ -962,8 +962,12 @@ fn integer(value: &Value) -> Option<i64> {
 
 /// A JSON value as JavaScript's `String()` writes it: a string as itself,
 /// a number as `Number#toString`, an array's items joined with commas, an
-/// object as `[object Object]`.
+/// object as `[object Object]`, and a value a binding marked as no JSON
+/// as the binding wrote it (`NaN`, [`json::NOT_JSON_STRING`]).
 pub fn js_string(value: &Value) -> String {
+    if let Some(text) = json::not_json_string(value) {
+        return text.to_owned();
+    }
     match value {
         Value::Null => "null".to_owned(),
         Value::Bool(flag) => flag.to_string(),
@@ -993,6 +997,13 @@ mod tests {
         assert_eq!(js_string(&json!("tail")), "tail");
         assert_eq!(js_string(&json!(["a", 1, null])), "a,1,");
         assert_eq!(js_string(&json!({})), "[object Object]");
+        assert_eq!(
+            js_string(&json!({
+                json::NOT_JSON: "NaN is not a JSON number",
+                json::NOT_JSON_STRING: "NaN",
+            })),
+            "NaN"
+        );
         assert_eq!(integer(&json!(3.0)), Some(3));
         assert_eq!(integer(&json!(1.5)), None);
         assert_eq!(integer(&json!("3")), None);

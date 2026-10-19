@@ -55,7 +55,8 @@ import { NativeUnsupportedError, restoreError } from './errors.js';
 import { nativeOptions, type HostedOptions, type NativeEngineOptions } from './options.js';
 
 // Hosts answers what the options leave to TypeScript (a policy, a
-// permission matcher), which the addon asks on this thread during a
+// permission matcher, an id source and, with it, a behavior's own UUIDs
+// from crypto.randomUUID), which the addon asks on this thread during a
 // synchronous call: host(kind, json) -> json. It never throws into the
 // addon: it keeps the first error the TypeScript code threw, and the call
 // rethrows it once the addon returns, as the TypeScript engine would have
@@ -98,6 +99,11 @@ class Hosts {
           const id: unknown = this.hosted.ids?.();
           return JSON.stringify({ id: typeof id === 'string' ? id : String(id) });
         }
+        case 'uuid':
+          // A behavior's own UUIDs on an engine whose ids this source makes:
+          // crypto.randomUUID, where the TypeScript engine's version graph
+          // draws them.
+          return globalThis.crypto.randomUUID();
         case 'permissionMatcher': {
           const [held, required] = JSON.parse(payload) as [string[], string[]];
           const answer: unknown = this.hosted.permissionMatcher?.(held, required);
@@ -111,7 +117,7 @@ class Hosts {
       }
     } catch (error) {
       this.parked ??= { error };
-      return kind === 'ids' ? '{}' : 'false';
+      return kind === 'ids' ? '{}' : kind === 'uuid' ? '' : 'false';
     }
   };
 
@@ -195,7 +201,8 @@ class Calls {
     let answer: HttpAnswer;
     let thrown: { value: unknown } | undefined;
     try {
-      answer = this.addon.handleHttp(JSON.stringify({ ...head, toolFilter: filter !== undefined }), body);
+      // A clock function is read once per request, as for a call.
+      answer = this.addon.handleHttp(JSON.stringify({ ...head, toolFilter: filter !== undefined, now: this.clock?.() }), body);
       thrown = answer.status === 500 ? bridge.firstParked() : undefined;
     } catch (error) {
       const restored = restoreError(error, (token) => bridge.parkedValue(token));

@@ -28,6 +28,6 @@
 # the TypeScript engine's own workings, and a value driver in TypeScript.
 
 behavior-own-columns.test.ts             # internals (the plan of the SQL the engine runs for a filter, spied on through engine.storage.all)
-corpus.test.ts                           # internals (it records stream.test.ts again, which fails here, before it compares the corpus)
+corpus.test.ts                           # internals (it records the corpus again, here from the Rust engine, and stream.test.ts fails here)
 stream.test.ts                           # internals (two tests spy on engine.events.read for the reads the TypeScript stream makes, which the Rust engine makes within)
 values.test.ts                           # driver

@@ -334,15 +334,33 @@ pub fn pointer<S: AsRef<str>>(tokens: &[S]) -> String {
 /// meeting what JSON.stringify would have made of it.
 pub const NOT_JSON: &str = "$superschematic:notJSON";
 
-/// The problem of a value a binding marked as no JSON ([`NOT_JSON`]).
-pub fn not_json(value: &Value) -> Option<&str> {
+/// The member beside [`NOT_JSON`] that holds the value as JavaScript's
+/// `String()` writes it (`NaN`, `undefined`), which a refusal that names
+/// the value it was given names it by ([`crate::calls::js_string`]).
+pub const NOT_JSON_STRING: &str = "$superschematic:string";
+
+// marker is the members of a value a binding marked as no JSON: NOT_JSON,
+// and NOT_JSON_STRING beside it, and nothing else.
+fn marker(value: &Value) -> Option<&serde_json::Map<String, Value>> {
     let Value::Object(members) = value else {
         return None;
     };
-    if members.len() != 1 {
-        return None;
-    }
-    members.get(NOT_JSON).and_then(Value::as_str)
+    let marked = members.contains_key(NOT_JSON)
+        && members
+            .keys()
+            .all(|key| key == NOT_JSON || key == NOT_JSON_STRING);
+    marked.then_some(members)
+}
+
+/// The problem of a value a binding marked as no JSON ([`NOT_JSON`]).
+pub fn not_json(value: &Value) -> Option<&str> {
+    marker(value)?.get(NOT_JSON).and_then(Value::as_str)
+}
+
+/// A value a binding marked as no JSON as JavaScript's `String()` writes
+/// it ([`NOT_JSON_STRING`]), when the binding says.
+pub fn not_json_string(value: &Value) -> Option<&str> {
+    marker(value)?.get(NOT_JSON_STRING).and_then(Value::as_str)
 }
 
 /// The first value a binding marked as no JSON in `value`, in the order
@@ -440,7 +458,10 @@ mod tests {
         let value = json!({"title": "Desk", "lines": [{"sku": "a"}, {"sku": nan}], "2": 1});
         assert_eq!(
             first_not_json(&value),
-            Some(("lines[1].sku".to_owned(), "NaN is not a JSON number".to_owned()))
+            Some((
+                "lines[1].sku".to_owned(),
+                "NaN is not a JSON number".to_owned()
+            ))
         );
         assert_eq!(path_pointer("lines[1].sku"), "/lines/1/sku");
         assert_eq!(path_pointer("[0]"), "/0");
@@ -448,6 +469,12 @@ mod tests {
         assert_eq!(first_not_json(&json!({"a": [1, 2]})), None);
         // An object that holds more than the marker is an object.
         assert_eq!(not_json(&json!({ NOT_JSON: "x", "other": 1 })), None);
+        // The value as String() writes it rides beside the problem.
+        let marked = json!({ NOT_JSON: "NaN is not a JSON number", NOT_JSON_STRING: "NaN" });
+        assert_eq!(not_json(&marked), Some("NaN is not a JSON number"));
+        assert_eq!(not_json_string(&marked), Some("NaN"));
+        assert_eq!(not_json_string(&nan), None);
+        assert_eq!(not_json(&json!({ NOT_JSON_STRING: "NaN" })), None);
     }
 
     fn parse(text: &str) -> Value {

@@ -7,25 +7,11 @@
 # when not both (node, bun), then why.
 #
 # test/helpers.ts opens the Rust engine with this package's seven behaviors
-# by name, which the addon registers in Rust. What the files below wait for
-# is milestone 7b's, the first named on each line first:
+# by name, which the addon registers in Rust; any other behavior (a
+# fixture, a stand-in, a wrapper of one of this package's) is written in
+# TypeScript, which the test addon's bridge runs (milestone 7b). A test
+# that passes a value driver written in TypeScript (values.driver) skips
+# on the Rust engine, whose drivers are Rust ValueDrivers: the TypeScript
+# engine's alone, dropped at the cutover (D58).
 #
-#   storage    raw SQL on the engine's file (engine.storage): a test reads
-#              the behaviors' tables and columns, or makes a copy stale
-#   bridge     a behavior written in TypeScript: test/fixtures.ts's
-#              test.Gate, test.Lock, test.Signal and Budget stand-in,
-#              queue-exclusion's counting() wrappers of Queue and Budget;
-#              a value driver (values.driver) or an id source (ids)
-#   watch      events.watch over the engine's notifier, which the event
-#              stream an idle worker wakes on waits on
-#
-# No test that runs here fails on what the Rust engine does.
-
-budget.test.ts                           # storage (bhv_budget__meters and __holds)
-corpus.test.ts                           # bridge (the recorder's ids); it records the TypeScript engine's answers
-filters.test.ts                          # storage (engine.storage.transaction)
-lease.test.ts                            # bridge (test.Gate, test.Signal, values.driver); storage
-queue-exclusion.test.ts                  # storage; bridge (counting())
-queue.test.ts                            # storage; bridge (test.Gate, test.Lock, the Budget stand-in)
-retries.test.ts                          # storage
-worker.test.ts                           # watch (an idle worker wakes on the event stream)
+# Every file passes on the Rust engine: none is listed.

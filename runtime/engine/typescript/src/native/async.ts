@@ -183,7 +183,8 @@ export class AsyncNativeEngine {
   /** handleHttp serves one request off this thread (src/native/http.ts). */
   async handleHttp(head: Record<string, unknown>, body: Buffer | undefined): Promise<HttpAnswer> {
     try {
-      return await this.addon.handleHttpAsync(JSON.stringify(head), body);
+      // A clock function is read once per request, as for a call.
+      return await this.addon.handleHttpAsync(JSON.stringify({ ...head, now: this.clock?.() }), body);
     } catch (error) {
       throw restoreError(error);
     }
