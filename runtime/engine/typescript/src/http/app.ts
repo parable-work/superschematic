@@ -89,6 +89,9 @@ import type { InstanceRecord } from '../instances/store.js';
 import { isPlainObject } from '../instances/patch.js';
 import type { SchemaRecord } from '../registry/catalog.js';
 import type { ToolFilter } from '../tools/catalog.js';
+import { AsyncNativeEngine } from '../native/async.js';
+import { NativeEngine } from '../native/engine.js';
+import { nativeEngineApp } from '../native/http.js';
 import { callerAuthenticator, principalOf } from './callers.js';
 import { engineProblem } from './problems.js';
 import { checkStreamOptions, eventStream, type StreamOptions } from './stream.js';
@@ -172,9 +175,14 @@ const EVENT_QUERY: readonly ParamSpec[] = [
  * engineApp builds the Hono app that serves an engine. Mount it where the
  * deployment wants it (`app.route('/api', engineApp(engine, options))`);
  * on its own it answers unknown paths and failures with problem
- * documents.
+ * documents. It serves the Rust engine too, openEngineAsync's on Postgres
+ * included, as an adapter over the engine's own routes (D58).
  */
-export function engineApp(engine: Engine, options: EngineHttpOptions = {}): Hono {
+export function engineApp(engine: Engine | AsyncNativeEngine, options: EngineHttpOptions = {}): Hono {
+  // The Rust engine serves its own routes (D58); this app is its adapter.
+  if (engine instanceof AsyncNativeEngine || (engine as unknown) instanceof NativeEngine) {
+    return nativeEngineApp(engine as unknown as NativeEngine | AsyncNativeEngine, options);
+  }
   const stream = checkStreamOptions(options.stream ?? {});
   const deployed = options.onError;
   const { identity } = options;

@@ -5704,8 +5704,8 @@ behaviors and the work queue's, runs the cases of
 `test/behavior-*.test.ts`, the runner's, retention's and the tools',
 those of the core behaviors' `test/core-*.test.ts` and those of the
 work queue's tests against the engine, and replays the scenario and
-HTTP corpora, the core behaviors' files, the work queue's (211 of its
-213 scenarios on SQLite and 208 on Postgres, the rest `js` or writing
+HTTP corpora, the core behaviors' files, the work queue's (212 of its
+213 scenarios on SQLite and 209 on Postgres, the rest `js` or writing
 the file with SQL of their own) and the behavior catalog included, the
 HTTP corpus through the engine's routes and through its axum router,
 giving their recorded answers on SQLite and Postgres for every
@@ -5713,31 +5713,52 @@ case whose test behaviors it has, an event cursor on Postgres held to
 the recorded order rather than its number (a write a rollback undid
 leaves a gap in a Postgres identity column), but for a step it lists
 with what explains it (a change the recording does not see). CI tests
-the workspace on both databases. `superschematic-engine-napi` (milestone 7a)
-is the Rust engine as a Node-API addon, with the core's behaviors it is
-built with and the work queue's an engine's options name (`behaviors`,
-by name: a behavior object is TypeScript code, even one whose
-declaration names one the addon has), and `@superschematic/engine`'s
-`src/native` gives it the
-package's synchronous API: a call by name with JSON in and out on the
-JavaScript thread over SQLite, a promise of one off that thread (an
-`AsyncTask`, or on Postgres a future that owns the engine), the package's
-error classes rebuilt from the class, code and members the addon throws,
-a panic caught at every entry, and a policy or permission matcher
-written in TypeScript asked on the JavaScript thread during a call. With
-`ENGINE_IMPL=rust` the package's suite runs on it, each file on its own
-under Node.js and Bun, held to `test/rust-pending.txt`, the files not
-passing yet and why, which a file leaves once it passes (CI's
-`engine-napi` job): with all fifteen of the core's behaviors, 15 of the
-66 pass on both (491 of Node.js's 913 tests, 827 of Bun's 1,564), and no
-test that runs fails on what the Rust engine does. The work queue's
-suite runs so too (`--package`), its `test/helpers.ts` passing the
-package's own behaviors by name, held to its own `test/rust-pending.txt`:
-11 of its 19 files pass on both (211 of Node.js's 240 tests, 399 of
-Bun's 455), and none fails on what the Rust engine does. The rest wait for
-milestone 7b's test-only bridge for behaviors written in TypeScript; it
-brings too raw SQL on the engine's file, `events.watch`, and `engineApp`
-and `engineMcp` over the engine's routes. An extension's behavior is a
+the workspace on both databases. `superschematic-engine-napi` (milestones
+7a and 7b) is the Rust engine as a Node-API addon, with the core's
+behaviors it is built with and the work queue's an engine's options name
+(`behaviors`, by name: a behavior object is TypeScript code, even one
+whose declaration names one the addon has), and `@superschematic/engine`'s
+`src/native` gives it the package's synchronous API: a call by name with
+JSON in and out on the JavaScript thread over SQLite, the package's error
+classes rebuilt from the class, code and members the addon throws, a
+panic caught at every entry, and a policy, a permission matcher or an id
+source written in TypeScript asked on the JavaScript thread during a call
+(a behavior's own UUIDs then drawn from the host's `crypto.randomUUID`,
+as the TypeScript engine's version graph draws them). `openEngineAsync`,
+exported from the package's root for a server on Postgres, gives the
+same API with every call a promise made off that thread (an `AsyncTask`,
+or on Postgres a future on tokio's blocking pool that owns the engine),
+its options data alone. Milestone 7b adds the test addon's bridge (the
+`js-behaviors` feature, never in a shipped addon), which runs a behavior
+written in TypeScript on the JavaScript thread through the engine's
+dynamic behaviors, an engine with one called there alone and its runner
+on the event loop; `engine.storage`, raw SQL on the engine's SQLite file
+with transactions the engine's calls run inside; `events.watch` over the
+notifier; `schemas.validator`; `engineApp` and `engineMcp` as Hono
+adapters over the engine's own routes, synchronous or asynchronous, a
+clock function read for each request as for each call; and a value JSON
+cannot carry (`NaN`, a `Date`) refused where the TypeScript engine
+refuses it, in its words. A value driver written in TypeScript is not on
+the Rust engine, whose drivers are Rust `ValueDriver`s: the tests that
+pass one are the TypeScript engine's alone, dropped at the cutover. With
+`ENGINE_IMPL=rust` the package's suite runs on the test addon, each file
+on its own under Node.js and Bun, held to `test/rust-pending.txt`, the
+files not passing yet and why, which a file leaves once it passes (CI's
+`engine-napi` job): 66 of its 67 files pass on both (944 of Node.js's 945
+tests, 1,594 of Bun's 1,595), a test of the TypeScript engine's own
+workings skipping on the Rust engine with the Rust test that is its twin
+(the plan of a behavior's SQL, now read through a behavior's
+`sql.explain` on both databases in the test kit); the one left is the
+corpus check, which records the corpus again on the Rust engine and
+meets the TypeScript engine's workings in it (how often a call reads a
+clock function, the engine calls the TypeScript HTTP app makes) until
+the cutover records the corpus from the Rust engine. A test that loops
+over the suite's `backends` runs on Postgres too, through
+`openEngineAsync`, with `ENGINE_TEST_PG_URL` set (the event stream). The
+work queue's suite runs so too (`--package`), its `test/helpers.ts`
+passing the package's own behaviors by name, held to its own
+`test/rust-pending.txt`: all 19 of its files pass on both (240 and 455
+tests). An extension's behavior is a
 crate of its own (milestone 13a): acme.Rating is `acme-behaviors`
 (`examples/acme-schematic/crates/behaviors`), a workspace of its own
 beside the engine's over the plug-in API alone, whose tests run
@@ -5761,11 +5782,9 @@ its own `eng_open`; a TypeScript server's addon joins them as `napi/`
 once the Node-API addon exports `export_engine_napi!`, the twin of
 `export_engine_c_abi!`. acme's smoke builds and tests the one its binary
 writes, both members. A schema of the core's behaviors alone gets none,
-and the release's engine runs it. Until the Rust engine passes the
-TypeScript suite, `@superschematic/engine` is the TypeScript
-implementation, acme's `@acme/behaviors` implements acme.Rating for it
-until the cutover (milestone 14) removes the package, and nothing uses
-the workspace.
+and the release's engine runs it. Until the cutover (milestone 14), `@superschematic/engine`'s
+`openEngine` is the TypeScript implementation, and acme's `@acme/behaviors`
+implements acme.Rating for it until the cutover removes the package.
 
 The Go binding (milestone 15) is built. `superschematic-engine-abi`
 (`runtime/engine/rust/abi`) is the C ABI of the bindings section, as a

@@ -13,7 +13,7 @@ import { test } from 'node:test';
 
 import { END, SQLITE_TESTDATA, dumpDatabase, loadDatabase, openCorpusEngine, readCorpus, renderReads, writeCorpus, writeTestdata } from './sqlite-corpus.ts';
 
-test('the committed SQLite file and its reads are what the engine writes and reads, and the text loads into a file that reads the same', () => {
+test('the committed SQLite file and its reads are what the engine writes and reads, and the text loads into a file that reads the same', { timeout: 60_000 }, () => {
   const update = Boolean(process.env.UPDATE_ENGINE_CORPUS);
   const { sql, reads } = writeTestdata(update ? SQLITE_TESTDATA : '');
   if (update) {

@@ -128,6 +128,9 @@ pub(crate) trait Core {
     }
     fn sql_get(&self, sql: &Sql<'_>, params: &[SqlValue], tried: bool) -> Result<Option<Row>>;
     fn sql_all(&self, sql: &Sql<'_>, params: &[SqlValue], tried: bool) -> Result<Vec<Row>>;
+    fn sql_explain(&self, _sql: &Sql<'_>, _params: &[SqlValue]) -> Result<Vec<String>> {
+        Err(unreachable_here("sql.explain"))
+    }
     fn sql_run(&self, sql: &Sql<'_>, params: &[SqlValue], tried: bool) -> Result<RunResult>;
     fn sql_fulltext(&self, _query: &FullTextQuery<'_>) -> Result<FullTextMatches> {
         Err(unreachable_here("sql.fulltext"))
@@ -496,6 +499,16 @@ impl SqlReader<'_> {
 
     pub fn all<'s>(&self, sql: impl Into<Sql<'s>>, params: &[SqlValue]) -> Result<Vec<Row>> {
         self.core.sql_all(&sql.into(), params, false)
+    }
+
+    /// The plan the database makes for a statement this reader may run,
+    /// as it would run it: SQLite's `EXPLAIN QUERY PLAN` details, or the
+    /// lines of Postgres's `EXPLAIN`. It shows whether a filter on the
+    /// behavior's columns across the relation reaches the indexes its
+    /// migrations list. Nothing runs; the statement is checked, and asks
+    /// read for the relation, as it would be.
+    pub fn explain<'s>(&self, sql: impl Into<Sql<'s>>, params: &[SqlValue]) -> Result<Vec<String>> {
+        self.core.sql_explain(&sql.into(), params)
     }
 
     /// [`SqlReader::get`] in a savepoint of its own, so its failure leaves

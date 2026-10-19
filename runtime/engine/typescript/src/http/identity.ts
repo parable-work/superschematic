@@ -72,5 +72,8 @@ export function engineIdentity(engine: Engine, options: Omit<IdentityServiceOpti
  * connection, its transaction included, as the engine's own writes do.
  */
 export function engineIdentityStore(engine: Engine, descriptor: string | unknown): SqlIdentityStore {
-  return sqliteIdentityStore(engine.storage, descriptor);
+  // The Rust engine's storage (src/native) runs no transaction a statement
+  // at a time, so the store takes a connection of its own on the file.
+  const storage = engine.storage as Engine['storage'] & { connection?: () => Engine['storage'] };
+  return sqliteIdentityStore(typeof storage.connection === 'function' ? storage.connection() : storage, descriptor);
 }

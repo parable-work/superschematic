@@ -5,7 +5,11 @@
 // (recorder.ts). With ENGINE_IMPL=rust they are the Rust engine, through
 // its Node-API addon (D58; scripts/engine-napi.sh builds it, and
 // scripts/rust-ratchet.mjs runs the suite so against rust-pending.txt).
+// A test that loops over backends runs on SQLite, and with ENGINE_IMPL=rust
+// and ENGINE_TEST_PG_URL set on Postgres too, through openEngineAsync, as a
+// TypeScript server opens the engine there.
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -14,6 +18,7 @@ import {
   allowAll,
   isBun,
   openEngine as openDistEngine,
+  openEngineAsync,
   type DriverName,
   type Engine,
   type EngineOptions,
@@ -39,6 +44,15 @@ function implementation(given: string | undefined): 'typescript' | 'rust' {
   }
   throw new Error(`ENGINE_IMPL is typescript (the default) or rust, got ${given}`);
 }
+
+/**
+ * Why a test that passes a value driver written in TypeScript
+ * (values.driver) skips on the Rust engine: the TypeScript engine's alone,
+ * dropped at the cutover (D58), since the Rust engine's drivers are Rust
+ * ValueDrivers compiled into it, which its own tests hold
+ * (runtime/engine/rust/engine/tests/values.rs).
+ */
+export const TYPESCRIPT_DRIVER = engineImpl === 'rust' && 'a value driver written in TypeScript (values.driver), dropped at the cutover (D58)';
 
 const openImpl: (options: EngineOptions) => Engine = engineImpl === 'rust' ? (options) => openNativeEngine(options) as unknown as Engine : openDistEngine;
 
@@ -76,6 +90,49 @@ export function openEngine(options: EngineOptions): Engine {
 
 export function openTestEngine(options: Partial<EngineOptions> = {}): Engine {
   return track(openEngine({ path: freshPath(), policy: allowAll, ...options }));
+}
+
+/**
+ * A database a test runs on: SQLite, a file of its own as openTestEngine
+ * opens it, or with ENGINE_IMPL=rust and ENGINE_TEST_PG_URL set a schema of
+ * its own of that Postgres database, through openEngineAsync, as a
+ * TypeScript server opens the engine there (D58). The engine open returns
+ * is the API every test uses, whose every call on Postgres returns a
+ * promise: a test that loops over backends awaits each call, which on
+ * SQLite awaits a value. openEngineAsync takes its options as data, so a
+ * test that passes a function (a behavior written in TypeScript, a policy,
+ * ids) skips on Postgres, with its reason (unlessOn).
+ */
+export interface Backend {
+  readonly name: 'sqlite' | 'postgres';
+  open(options?: Partial<EngineOptions>): Promise<Engine>;
+}
+
+const postgresUrl = engineImpl === 'rust' ? process.env.ENGINE_TEST_PG_URL : undefined;
+
+/** The backends a test that loops over them runs on: SQLite, and Postgres when ENGINE_TEST_PG_URL names one on the Rust engine. */
+export const backends: Backend[] = [
+  { name: 'sqlite', open: async (options = {}) => openTestEngine(options) },
+  ...(postgresUrl
+    ? [
+        {
+          name: 'postgres' as const,
+          open: async (options: Partial<EngineOptions> = {}) =>
+            track(
+              await openEngineAsync({
+                postgres: { url: postgresUrl, schema: `engine_test_${randomUUID().replaceAll('-', '').slice(0, 16)}` },
+                policy: allowAll,
+                ...(options as object),
+              } as never)
+            ) as unknown as Engine,
+        },
+      ]
+    : []),
+];
+
+/** The skip of a test on a backend that cannot run it, with why; false where it runs. */
+export function unlessOn(backend: Backend, name: Backend['name'], why: string): string | false {
+  return backend.name === name && why;
 }
 
 /**

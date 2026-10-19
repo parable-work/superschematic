@@ -39,6 +39,9 @@ import { Hono } from 'hono';
 import type { Principal } from '../access.js';
 import type { Engine } from '../engine.js';
 import { callerAuthenticator, principalOf } from '../http/callers.js';
+import { AsyncNativeEngine } from '../native/async.js';
+import { NativeEngine } from '../native/engine.js';
+import { nativeEngineMcp } from '../native/http.js';
 import { engineProblem } from '../http/problems.js';
 import { isPlainObject } from '../instances/patch.js';
 import { UnknownToolError, type ToolFilter } from '../tools/catalog.js';
@@ -85,9 +88,14 @@ interface Caller {
  * engineMcp builds the Hono app that serves an engine's MCP endpoint.
  * Mount it where the HTTP API is mounted
  * (`app.route('/api', engineMcp(engine, options))`), with the same
- * options.
+ * options. It serves the Rust engine too, openEngineAsync's on Postgres
+ * included, as an adapter over the engine's own MCP endpoint (D58).
  */
-export function engineMcp(engine: Engine, options: EngineMcpOptions = {}): Hono {
+export function engineMcp(engine: Engine | AsyncNativeEngine, options: EngineMcpOptions = {}): Hono {
+  // The Rust engine serves its own MCP endpoint (D58); this app is its adapter.
+  if (engine instanceof AsyncNativeEngine || (engine as unknown) instanceof NativeEngine) {
+    return nativeEngineMcp(engine as unknown as NativeEngine | AsyncNativeEngine, options);
+  }
   const deployed = options.onError;
   const mapError = async (error: unknown, ctx: RequestContext): Promise<HttpProblem | Response | undefined> =>
     engineProblem(error) ?? (deployed ? await deployed(error, ctx) : undefined);

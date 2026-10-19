@@ -269,6 +269,7 @@ rust:
 engine-rust:
 	cd runtime/engine/rust && cargo fmt --all --check \
 		&& cargo clippy --workspace --all-targets --all-features -- -D warnings \
+		&& cargo clippy --workspace --all-targets -- -D warnings \
 		&& cargo clippy --workspace --all-targets --no-default-features -- -D warnings \
 		&& cargo clippy --workspace --all-targets --no-default-features --features superschematic-engine/sqlite -- -D warnings \
 		&& cargo clippy --workspace --all-targets --no-default-features --features superschematic-engine/postgres -- -D warnings \

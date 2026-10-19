@@ -22,7 +22,7 @@ import {
   type SqlValue,
 } from '../dist/index.js';
 import { openMetaSchema } from './behavior-fixtures.ts';
-import { alice, cleanup, drivers, fieldsOf, freshPath, openEngine, openTestEngine, schemaDocument, thrown, track } from './helpers.ts';
+import { alice, cleanup, drivers, engineImpl, fieldsOf, freshPath, openEngine, openTestEngine, schemaDocument, thrown, track } from './helpers.ts';
 
 afterEach(cleanup);
 
@@ -400,7 +400,7 @@ for (const driver of drivers) {
   });
 
   describe(`indexes on a behavior's columns (${driver})`, () => {
-    test("a migration's index leads with the namespace and schema, and a filter on its columns reads it", () => {
+    test("a migration's index leads with the namespace and schema, and a filter on its columns finds what it holds", () => {
       const engine = ranked();
       const indexes = engine.storage
         .all("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'engine_instances' AND name LIKE 'bhv%' ORDER BY name")
@@ -410,7 +410,17 @@ for (const driver of drivers) {
         engine.storage.all("SELECT name FROM pragma_index_info('bhv_test_queue___index_by_holder') ORDER BY seqno").map((row) => String(row.name)),
         ['namespace', 'schema', 'bhv_test_queue__holder', 'bhv_test_queue__rank']
       );
+      assert.deepEqual(select(engine, 'SELECT id FROM {instances} WHERE holder = ? AND rank > ? ORDER BY rank', ['w1', 0]), [{ id: 'i1' }]);
+      assert.deepEqual(select(engine, 'SELECT id FROM {instances} WHERE rank > ? ORDER BY id', [1]), [{ id: 'i1' }, { id: 'i3' }]);
+      assert.deepEqual(select(engine, 'SELECT a.id FROM {instances} a JOIN {instances} b ON b.rank = a.rank WHERE a.rank > ? ORDER BY a.id', [1]), [{ id: 'i1' }, { id: 'i3' }]);
+    });
 
+    // The plan of the SQL the TypeScript engine runs, read by wrapping its
+    // storage: its own workings. The Rust engine's twin reads the plan
+    // through the behavior's sql.explain on both databases (testkit's
+    // behavior_storage.rs, a_filter_on_its_columns_across_the_relation_reads_its_migrations_indexes).
+    test('a filter on its columns reads the index, the relation folded into the statement', { skip: engineImpl === 'rust' && "the TypeScript engine's own SQL, spied on through engine.storage.all; the Rust engine's plan is its testkit's" }, () => {
+      const engine = ranked();
       // The plan of the statement the engine runs for the behavior.
       const plan = (sql: string, values: SqlValue[]): string => {
         const statements: Array<[string, readonly SqlValue[]]> = [];
