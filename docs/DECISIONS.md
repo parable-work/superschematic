@@ -4612,10 +4612,11 @@ Status: built.
 No TypeScript server has run on Cloud Run.
 
 Not built:
-- passing manual-route handlers to `buildRouter`;
 - OpenTelemetry export;
 - `stack init`, which would write the amendment's ignore rule; D59
   builds it.
+
+D51's last amendment hands a manual route's handlers to `buildRouter`.
 
 The rule is reversible until the first release.
 
@@ -6751,5 +6752,33 @@ servergen's Rust fixture stack gains the bucket `rs-media`, which
 put objects, the worker read and delete them, and the server list the
 rest and sign a URL the test downloads from the emulator. No Rust
 workload has reached a bucket on Google Cloud.
+
+The rule is reversible until the first release.
+
+### D51, amended: every stack server mounts its APIs' manual routes, with handlers the implementation gives
+
+A `@manualRouteRegistration` operation is one the service routes itself
+(D20, amended; D26; D29): outside a stack the service adds the route to
+the router the generator built. A stack's server has no `main` of the
+service's, and none of the three entrypoints mounted one: TypeScript's
+answered 501, since no handler reached `buildRouter`, and Go's and
+Rust's left the route out, so it was 404.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| An API with a manual route declares what its implementation gives for them beside its `Deps`: TypeScript's `deps.ts` a `ManualRoutes` of a `ManualRouteHandler` per operation and `ManualRoutesConstructor`; Go's `routes.go` a `ManualRoutes` struct of an `http.Handler` per operation, named by namespace and operation (`OrderExportOrder`), and `deps.go` a `ManualRoutesConstructor`; Rust's `interfaces.rs` a `ManualRoutes` trait with a method per operation that takes the `RequestContext` and the request and returns the response. The implementation provides `createManualRoutes(deps)`, `NewManualRoutes(deps)` or `create_manual_routes(deps)`, which the scaffold writes with handlers that answer 501, and a stack's build refuses an implementation that exists without it, naming what to add, as it refuses one without its jobs. | The service's own `main`, which a stack's entrypoint replaces; a handler looked up by name at run time, which no compiler checks. |
+| The entrypoint builds them from the `Deps` it built and gives them to the router: `buildRouter`'s `manualRoutes`, Go's `Config.ManualRoutes`, and Rust's new `build_router_with_manual_routes`. The router mounts each behind the steps every route of the API gets: the request log and id, authentication, the webhook verifier, the rate limit, the body limit, the service step, the permission check and the timeout. Go's decryptor runs on every route, so a Go handler of an encrypted manual route gets the decrypted body. Jobs and workers mount no routes and call nothing new. | Mounting a manual route outside the API's controls, which would leave its `@rateLimit` and `@requireService` to each handler. |
+| Outside a stack nothing changes: `build_router`, `buildRouter` without `manualRoutes` and Go's `RegisterRoutes` with no `ManualRoutes` mount no manual route, and the service routes it as D20's amendment, D26 and D29 say. | |
+
+Status: built. servergen's fixtures each gain a manual route, ts-shop's
+`exportCart`, shop-orders' `exportOrder` and rs-stock's `exportLevel`,
+which `TestTypeScriptEntrypointCompilesAndServes`,
+`TestEntrypointCompilesAndServes` and `TestRustEntrypointCompilesAndServes`
+call on the running server: the scaffold's 501, then the implementation's
+answer with its `Deps` and the request id, and Go's and Rust's 429 from
+the route's rate limit. `TestServiceAuthManualRoutes` refuses a protected
+manual route without a user and a `@requireService` one without a service,
+and the three `...PredatesItsManualRoutesFails` tests the build's
+refusals.
 
 The rule is reversible until the first release.
