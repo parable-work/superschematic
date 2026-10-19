@@ -156,27 +156,21 @@ generic-schemas:
 generic-schemas-check:
 	go run ./internal/tools/providerschemas -check
 
-# The engine and the work-queue package implement the core's behaviors over
-# a copy of each declaration (internal/registry/behaviors), which the core
-# with no extension linked writes into the package that implements it
-# (--package). The Rust engine's behaviors crate and the work queue's Rust
-# crate (D58) carry a copy of their package's declarations too, which each
-# behavior embeds with include_str!. CI fails when a committed copy differs.
-ENGINE_DECLARATIONS := runtime/engine/typescript/src/behaviors/core/declarations
+# The engine's behaviors crate and the work queue's crate (D58) implement
+# the core's behaviors over a copy of each declaration
+# (internal/registry/behaviors), which the core with no extension linked
+# writes into the crate that implements it, by the npm package that ships
+# it (--package): each behavior embeds its copy with include_str!. CI fails
+# when a committed copy differs.
 ENGINE_RUST_DECLARATIONS := runtime/engine/rust/behaviors/declarations
-WORKQUEUE_DECLARATIONS := runtime/engine-workqueue/typescript/src/declarations
 WORKQUEUE_RUST_DECLARATIONS := runtime/engine-workqueue/rust/declarations
 
 behaviors:
-	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/engine --out $(ENGINE_DECLARATIONS)
 	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/engine --out $(ENGINE_RUST_DECLARATIONS)
-	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/engine-workqueue --out $(WORKQUEUE_DECLARATIONS)
 	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/engine-workqueue --out $(WORKQUEUE_RUST_DECLARATIONS)
 
 behaviors-check:
-	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/engine --out $(ENGINE_DECLARATIONS) --check
 	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/engine --out $(ENGINE_RUST_DECLARATIONS) --check
-	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/engine-workqueue --out $(WORKQUEUE_DECLARATIONS) --check
 	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/engine-workqueue --out $(WORKQUEUE_RUST_DECLARATIONS) --check
 
 ts:
