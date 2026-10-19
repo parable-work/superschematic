@@ -220,25 +220,58 @@ func (o *Orders) ListOrders(ctx context.Context, statuses []types.OrderStatus, p
 }
 
 // CancelOrder cancels the caller's order, or any order for staff, while
-// it is placed, recording why.
+// it is placed, recording why. The update is the check: it cancels the
+// order only while it is placed, as FulfilOrders fulfils it only while it
+// is, so the worker fulfilling it between a read and the write cannot be
+// undone. When it cancels nothing, the order, read as the caller may see
+// it, is the 409 of one no longer placed, or the 404 of one the caller
+// may not see or no one placed.
 func (o *Orders) CancelOrder(ctx context.Context, id types.IdentityUUID, reason string) (*types.OrderView, error) {
 	ctx = actingUser(ctx)
-	order, err := callersOrder(ctx, o.DB.GetOrderRepository(), id, nil)
+	filter, err := callersOrderFilter(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	if order.Status != db.OrderStatus_Placed {
-		return nil, api.ConflictError(fmt.Sprintf("order %s is %s", id, order.Status), nil)
-	}
+	placed := string(db.OrderStatus_Placed)
+	whilePlaced := *filter
+	whilePlaced.Status = &orm.StringFilter{Eq: &placed}
 	cancelled := db.OrderStatus_Cancelled
 	update := &orm.OrderUpdate{Status: &cancelled}
 	if reason != "" {
 		update.CancelReason = &reason
 	}
-	if _, err := o.DB.GetOrderRepository().UpdateOne(ctx, id, update); err != nil {
+	orders := o.DB.GetOrderRepository()
+	n, err := orders.UpdateMany(ctx, &whilePlaced, update)
+	if err != nil {
 		return nil, err
 	}
+	if n == 0 {
+		order, err := orders.FindOne(ctx, filter, nil)
+		if errors.Is(err, orm.ErrNotFound) {
+			return nil, api.NotFoundError("order", err)
+		}
+		if err != nil {
+			return nil, err
+		}
+		return nil, api.ConflictError(fmt.Sprintf("order %s is %s", id, order.Status), nil)
+	}
 	return o.GetOrder(ctx, id)
+}
+
+// callersOrderFilter filters the orders to the one with id when the caller
+// may see it: their own, by its customer, as the SQLite shop reads it, or
+// any order for staff. Another customer's order matches nothing, as one no
+// one placed does.
+func callersOrderFilter(ctx context.Context, id types.IdentityUUID) (*orm.OrderFilter, error) {
+	customer, err := caller(ctx)
+	if err != nil {
+		return nil, err
+	}
+	filter := &orm.OrderFilter{Id: &orm.UUIDFilter{Eq: &id}}
+	if !seesEveryOrder(ctx) {
+		filter.CustomerID = &orm.UUIDFilter{Eq: &customer}
+	}
+	return filter, nil
 }
 
 // orderView copies an order and its lines into the view a caller sees, and

@@ -22,7 +22,9 @@
 //! tables, where the reviews, orders and sessions outlive the app, and the
 //! console lists the orders. A shopper's pages, the console's and the JSON
 //! API's list, show and cancel their own orders alone, another customer's
-//! answering 404, and staff's every customer's. Every page is one HTML
+//! answering 404, and staff's every customer's, and so do they over a
+//! SQLite file made before staff held `orders.any`, once the app opens it
+//! again and brings its shopper role up to date. Every page is one HTML
 //! document, whose head loads Topcoat's runtime from a hosted catalog of its
 //! script alone, as a bundle would serve it; the console's lists render
 //! again in place through their shards, for a filter, a page and a search,
@@ -32,16 +34,16 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::thread::sleep;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use acme_shop_orders_server::sqlite::SqliteShop;
 use acme_shop_orders_server::{SHOPPER_PERMISSIONS, Shop, add_shopper, add_staff, users_at, users_in_memory};
-use acme_shop_orders_topcoat::api::runtime::identity::Service;
+use acme_shop_orders_topcoat::api::runtime::identity::{NewUser, Service, hash_password};
 use acme_shop_orders_topcoat::api::runtime::{Principal, RequestContext};
 use acme_shop_orders_topcoat::api::{ProductReviewsImplementation, ProductReviewsWriteReviewArgs, types};
 use acme_shop_orders_topcoat::procedures::{OrderListOrdersArgsRecord, call_order_list_orders};
 use acme_shop_orders_topcoat::records::OrderViewPageRecord;
-use acme_shop_topcoat::{CATALOG, PRODUCT, Product, app, product, shop_in_memory, stock_sqlite};
+use acme_shop_topcoat::{CATALOG, PRODUCT, Product, add_people, app, product, shop_in_memory, stock_sqlite};
 use topcoat::asset::{AssetConfig, Manifest};
 use topcoat::context::Cx;
 use topcoat::router::request::parts;
@@ -58,6 +60,9 @@ const SHOPPER: &str = "login=grace%40example.com&password=grace%27s+password";
 
 /// A user's login, name and password.
 type Person = (&'static str, &'static str, &'static str);
+
+/// The demo shopper, whom `SHOPPER` signs in.
+const GRACE: Person = ("grace@example.com", "Grace Hopper", "grace's password");
 
 /// A second shopper, whom `each_shop` adds beside the demo's.
 const ALAN: Person = ("alan@example.com", "Alan Turing", "alan's password");
@@ -656,6 +661,71 @@ async fn a_shopper_sees_their_own_orders_and_staff_every_customers() {
             assert!(page.body.contains("<dd>Out of stock</dd>"), "{shop}: {}", page.body);
         }
     }
+}
+
+/// Adds `person` to `users`, holding the role whose id is `role`, as a file
+/// made before an earlier version of the app holds them.
+async fn add_holding(users: &Service, role: &str, (login, name, password): Person) {
+    let store = users.store();
+    let password_hash = hash_password(password, users.config().argon2_params()).unwrap();
+    let user = store
+        .create_user(NewUser { login: login.to_owned(), name: name.to_owned(), password_hash, at: SystemTime::now() })
+        .await
+        .unwrap();
+    store.grant_role(&user.id, role, SystemTime::now()).await.unwrap();
+}
+
+#[tokio::test]
+async fn an_old_files_shopper_role_stops_showing_every_customers_orders() {
+    // A SQLite file made before staff held orders.any: its shopper role
+    // grants all of orders, which covers orders.any, so Grace, who holds
+    // it, reads Alan's order.
+    let path = sqlite_file("old-roles.db");
+    let url = format!("sqlite:{}", path.display());
+    let users = users_at(&url, CONFIG).unwrap();
+    let old = users.store().create_role("shopper", &["orders".to_owned()]).await.unwrap();
+    add_holding(&users, &old.id, GRACE).await;
+    add_holding(&users, &old.id, ALAN).await;
+    let shop = SqliteShop::open(&url).unwrap();
+    stock_sqlite(&shop).unwrap();
+    let router = app(Arc::new(shop), users, Some(runtime_assets()));
+    let alans = place_order(&router, &sign_in_as(&router, ALAN).await).await;
+    let id = alans.trim_start_matches("/orders/").to_owned();
+    let grace = sign_in(&router).await;
+    let page = send(&router, "GET", &alans, Some(&grace), None).await;
+    assert_eq!(page.status, StatusCode::OK, "{}", page.body);
+    drop(router);
+
+    // The app opens the file again, as src/main.rs does: Grace's login is
+    // there, so add_people adds only Ada, and rewrites the shopper role.
+    let shop = SqliteShop::open(&url).unwrap();
+    let users = users_at(&url, CONFIG).unwrap();
+    add_people(&users, GRACE, ADA).await.unwrap();
+    stock_sqlite(&shop).unwrap();
+    let roles = users.store().list_roles().await.unwrap();
+    let shopper = roles.iter().find(|role| role.name == "shopper").expect("the shopper role");
+    assert_eq!((shopper.id.as_str(), shopper.permissions.as_slice()), (old.id.as_str(), &SHOPPER_PERMISSIONS.map(String::from)[..]));
+    let router = app(Arc::new(shop), users, Some(runtime_assets()));
+
+    // Grace's session, from before, now reads her own orders alone: Alan's
+    // is the 404 of one no one placed, on its page and through the API,
+    // and her orders page lists none.
+    let page = send(&router, "GET", &alans, Some(&grace), None).await;
+    assert_eq!(page.status, StatusCode::NOT_FOUND, "{}", page.body);
+    let api = send(&router, "GET", &format!("/api/orders/{id}"), Some(&grace), None).await;
+    assert_eq!(api.status, StatusCode::NOT_FOUND, "{}", api.body);
+    let refused = send(&router, "POST", &format!("{alans}/cancel"), Some(&grace), Some("reason=Not+mine")).await;
+    assert_eq!(refused.status, StatusCode::NOT_FOUND, "{}", refused.body);
+    let orders = send(&router, "GET", "/orders", Some(&grace), None).await;
+    assert_eq!(orders.status, StatusCode::OK, "{}", orders.body);
+    assert_eq!(order_links(&orders.body), Vec::<&str>::new(), "{}", orders.body);
+    // She still places an order of her own, and Ada, staff, reads Alan's.
+    let graces = place_order(&router, &grace).await;
+    let orders = send(&router, "GET", "/orders", Some(&grace), None).await;
+    assert_eq!(order_links(&orders.body), [graces.as_str()], "{}", orders.body);
+    let ada = sign_in_as(&router, ADA).await;
+    let page = send(&router, "GET", &alans, Some(&ada), None).await;
+    assert_eq!(page.status, StatusCode::OK, "{}", page.body);
 }
 
 #[tokio::test]

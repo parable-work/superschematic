@@ -95,6 +95,12 @@ export interface JSONSchemaProperty {
 {{- if .Keys.Scalar}}
   '{{.Keys.Scalar}}'?: string;
 {{- end}}
+{{- if and .Keys.Reference .HasReferences}}
+  '{{.Keys.Reference}}'?: { target: string; options: string; value: string; label?: string; lookup?: string };
+{{- end}}
+{{- if and .Keys.Search .HasSearch}}
+  '{{.Keys.Search}}'?: boolean;
+{{- end}}
   additionalProperties?: boolean | JSONSchemaProperty;
   type: string | string[];
   format?: string;

@@ -473,7 +473,7 @@ export class HttpClient {
       };
 
       // Apply custom response interceptor BEFORE envelope unwrap so consumers
-      // can access meta.totalCount, links, and other envelope fields.
+      // can read the envelope itself: data, and meta.requestId.
       if (this.config.responseInterceptor) {
         apiResponse = await this.config.responseInterceptor(apiResponse);
       }

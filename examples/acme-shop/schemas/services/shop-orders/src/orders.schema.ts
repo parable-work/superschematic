@@ -95,11 +95,11 @@ export abstract class WriteReviewInput {
 }
 
 // Reading orders: a shopper reads their own, and staff, who hold
-// orders.any, every customer's.
+// orders.any beside orders.read, every customer's.
 export class OrderQueries extends Authenticated {
-  // One order: the caller's own, or any customer's for staff. Another
-  // customer's order is not found, as one no one placed is, so its id
-  // tells a shopper nothing.
+  // One order: the caller's own, or any customer's for staff.
+  // Another customer's order is not found, as one no one placed is, so
+  // its id tells a shopper nothing.
   @rest(HttpMethod.GET, "orders/{id}")
   @requirePermission(["orders.read"])
   @requireOwnership
@@ -107,8 +107,8 @@ export class OrderQueries extends Authenticated {
     throw new Error("schema declaration only");
   }
 
-  // The caller's orders, or every customer's for staff, oldest first: by
-  // when each was placed, then by its id.
+  // The caller's orders, or every customer's for staff, oldest first.
+  // They are ordered by when each was placed, then by their ids.
   @rest(HttpMethod.GET, "orders")
   @requirePermission(["orders.read"])
   @paginated({ defaultLimit: 20, maxLimit: 100 })
@@ -127,9 +127,9 @@ export class OrderMutations extends Authenticated {
     throw new Error("schema declaration only");
   }
 
-  // Cancels an order that has not shipped, recording why: the caller's
-  // own, or any customer's for staff. Another customer's order is not
-  // found, as getOrder answers.
+  // Cancels an order that has not shipped, recording why.
+  // It cancels the caller's own order, or any customer's for staff;
+  // another customer's order is not found, as getOrder answers.
   @rest(HttpMethod.POST, "orders/{id}/cancel")
   @requirePermission(["orders.write"])
   @requireOwnership

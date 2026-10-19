@@ -167,8 +167,265 @@ func TestResolveReference(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Target != dep.Types["ShelfView"] || got.Options != shelves || got.Label != dep.Types["ShelfView"].Fields[1] {
+	if got.Target != dep.Types["ShelfView"] || got.TargetService != "catalog-types" || got.Options != shelves || got.Label != dep.Types["ShelfView"].Fields[1] {
 		t.Fatalf("a dependency's type: got %+v", got)
+	}
+}
+
+// A dependency's type a reference names is found through the import that
+// names it, before the dependencies' types by name (D61, amended): a
+// General and an API dependency both declare ShelfView, and the schema
+// imports it from the API, whose name sorts last. Without that import the
+// first dependency by name declares it, as before.
+func TestResolveReferenceThroughTheImport(t *testing.T) {
+	shelf := func(service string, kind SchemaKind) *Schema {
+		dep := NewSchema(service, kind)
+		dep.Types["ShelfView"] = &TypeDef{Name: "ShelfView", Role: RoleAPIView, Fields: []*FieldDef{
+			{Name: "id", TypeRef: TypeRef{Name: "Identity.UUID"}, Required: true},
+			{Name: "name", TypeRef: TypeRef{Name: "string"}, Required: true},
+		}}
+		return dep
+	}
+	general, api := shelf("catalog-types", SchemaKindGeneral), shelf("shelves-api", SchemaKindAPI)
+	dependencies := map[string]*Schema{"catalog-types": general, "shelves-api": api}
+
+	schema := catalogSchema()
+	schema.OperationSets = append(schema.OperationSets, &OperationSet{Name: "Shelves", Operations: []*FieldDef{
+		{Name: "listShelves", HTTPMethod: "GET", RestPath: "shelves", TypeRef: TypeRef{Name: "ShelfView", IsArray: true}}}})
+	schema.Imports = []Import{
+		{Package: "@schemas/catalog-types", Types: []string{"Colourway"}},
+		{Package: "@schemas/shelves-api", Types: []string{"ShelfView"}},
+	}
+	for _, tc := range []struct {
+		name    string
+		imports []Import
+		want    *TypeDef
+		service string
+	}{
+		{"the import names the API", schema.Imports, api.Types["ShelfView"], "shelves-api"},
+		{"no import names it", nil, general.Types["ShelfView"], "catalog-types"},
+		{"the import names no dependency", []Import{{Package: "@schemas/elsewhere", Types: []string{"ShelfView"}}}, general.Types["ShelfView"], "catalog-types"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			schema.Imports = tc.imports
+			got, err := ResolveReference(schema, dependencies, &ReferenceDef{Type: "ShelfView"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Target != tc.want || got.TargetService != tc.service {
+				t.Fatalf("target = %p from %q, want %p from %q", got.Target, got.TargetService, tc.want, tc.service)
+			}
+		})
+	}
+
+	// The schema's own type comes first, whatever its imports say.
+	schema.Imports = []Import{{Package: "@schemas/shelves-api", Types: []string{"ItemView"}}}
+	api.Types["ItemView"] = &TypeDef{Name: "ItemView", Role: RoleAPIView, Fields: []*FieldDef{{Name: "id", TypeRef: TypeRef{Name: "Identity.UUID"}}}}
+	got, err := ResolveReference(schema, dependencies, &ReferenceDef{Type: "ItemView"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Target != schema.Types["ItemView"] || got.TargetService != "" {
+		t.Fatalf("own type: target from %q, want the schema's own", got.TargetService)
+	}
+}
+
+func TestServiceNameForPackage(t *testing.T) {
+	for in, want := range map[string]string{"@schemas/web-db": "web-db", "web-db": "web-db", "@a/b/c": "c", "": ""} {
+		if got := ServiceNameForPackage(in); got != want {
+			t.Errorf("ServiceNameForPackage(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// shopSchemas is an API, shop, whose OrderLineView is @source(shop-db.OrderLine)
+// and holds productId, the key of OrderLine.product, a Relation to Product;
+// its ProductView is @source(shop-db.Product) and listProducts lists it.
+// The DB dependency, shop-db, is the second value.
+func shopSchemas() (*Schema, map[string]*Schema) {
+	db := NewSchema("shop-db", SchemaKindDB)
+	db.Types["Product"] = &TypeDef{Name: "Product", Role: RoleDBTable, Fields: []*FieldDef{
+		{Name: "id", TypeRef: TypeRef{Name: "Identity.UUID"}, Required: true, Key: true},
+		{Name: "name", TypeRef: TypeRef{Name: "string"}, Required: true},
+	}}
+	db.Types["OrderLine"] = &TypeDef{Name: "OrderLine", Role: RoleDBTable, Fields: []*FieldDef{
+		{Name: "id", TypeRef: TypeRef{Name: "Identity.UUID"}, Required: true, Key: true},
+		{Name: "product", TypeRef: TypeRef{Name: "Product"}, Required: true, Relation: &RelationDef{Type: "Product"}},
+		{Name: "reviews", TypeRef: TypeRef{Name: "Review", IsArray: true}, HasMany: true},
+		{Name: "tags", TypeRef: TypeRef{Name: "Tag", IsArray: true}, ManyToMany: true},
+		{Name: "quantity", TypeRef: TypeRef{Name: "number"}, Required: true},
+	}}
+
+	api := NewSchema("shop", SchemaKindAPI)
+	api.Scalars["Identity.UUID"] = &ScalarDef{Name: "Identity.UUID", LanguagePrimitive: LanguageString}
+	api.Types["OrderLineView"] = &TypeDef{Name: "OrderLineView", Role: RoleAPIView, Source: &SourceRef{Target: "shop-db.OrderLine"}, Fields: []*FieldDef{
+		{Name: "id", TypeRef: TypeRef{Name: "Identity.UUID"}, Required: true},
+		{Name: "productId", TypeRef: TypeRef{Name: "Identity.UUID"}, Required: true},
+		{Name: "quantity", TypeRef: TypeRef{Name: "number"}, Required: true},
+	}}
+	api.Types["ProductView"] = &TypeDef{Name: "ProductView", Role: RoleAPIView, Source: &SourceRef{Target: "shop-db.Product"}, Display: &TypeDisplay{TitleField: "name"}, Fields: []*FieldDef{
+		{Name: "id", TypeRef: TypeRef{Name: "Identity.UUID"}, Required: true},
+		{Name: "name", TypeRef: TypeRef{Name: "string"}, Required: true},
+	}}
+	api.OperationSets = []*OperationSet{{Name: "Catalog", Operations: []*FieldDef{
+		{Name: "listProducts", HTTPMethod: "GET", RestPath: "products", TypeRef: TypeRef{Name: "ProductView", IsArray: true}, Required: true},
+		{Name: "listOrderLines", HTTPMethod: "GET", RestPath: "lines", TypeRef: TypeRef{Name: "OrderLineView", IsArray: true}, Required: true},
+	}}}
+	return api, map[string]*Schema{"shop-db": db}
+}
+
+// FieldReference gives a field's RefersTo as written, or, on a type with
+// @source, the reference a relation's key derives (D61, amended): the
+// API's one type whose @source is the relation's type, when an operation
+// lists it. Anything else derives nothing.
+func TestFieldReference(t *testing.T) {
+	type want struct {
+		ref     *ReferenceDef
+		derived bool
+	}
+	productCard := func(api *Schema) {
+		api.Types["ProductCard"] = &TypeDef{Name: "ProductCard", Role: RoleAPIView, Source: &SourceRef{Target: "shop-db.Product"}, Fields: []*FieldDef{
+			{Name: "id", TypeRef: TypeRef{Name: "Identity.UUID"}, Required: true},
+		}}
+		api.OperationSets[0].Operations = append(api.OperationSets[0].Operations,
+			&FieldDef{Name: "listProductCards", HTTPMethod: "GET", RestPath: "cards", TypeRef: TypeRef{Name: "ProductCard", IsArray: true}})
+	}
+	key := func(api *Schema) *FieldDef { return api.Types["OrderLineView"].Fields[1] }
+	for _, tc := range []struct {
+		name  string
+		edit  func(api *Schema, db *Schema)
+		field string
+		want  want
+	}{
+		{"a derived key", nil, "productId", want{&ReferenceDef{Type: "ProductView"}, true}},
+		{"a derived key that is @virtual", func(api, _ *Schema) { key(api).Virtual = true }, "productId", want{&ReferenceDef{Type: "ProductView"}, true}},
+		{"an unqualified @source of the API's own types", func(api, db *Schema) {
+			api.Types["OrderLine"], api.Types["Product"] = db.Types["OrderLine"], db.Types["Product"]
+			api.Types["OrderLineView"].Source.Target = "OrderLine"
+			api.Types["ProductView"].Source.Target = "shop.Product"
+		}, "productId", want{&ReferenceDef{Type: "ProductView"}, true}},
+		{"an explicit target wins, with its members as written", func(api, _ *Schema) {
+			productCard(api)
+			key(api).References = &ReferenceDef{Type: "ProductCard", Options: "listProductCards"}
+		}, "productId", want{&ReferenceDef{Type: "ProductCard", Options: "listProductCards"}, false}},
+		{"an explicit target that does not resolve stands as written", func(api, _ *Schema) {
+			key(api).References = &ReferenceDef{Type: "Basket"}
+		}, "productId", want{&ReferenceDef{Type: "Basket"}, false}},
+		{"no candidate", func(api, _ *Schema) {
+			delete(api.Types, "ProductView")
+			api.OperationSets[0].Operations = api.OperationSets[0].Operations[1:]
+		}, "productId", want{}},
+		{"a candidate sourced from another service's Product", func(api, _ *Schema) { api.Types["ProductView"].Source.Target = "catalog-db.Product" }, "productId", want{}},
+		{"two candidates", func(api, _ *Schema) { productCard(api) }, "productId", want{}},
+		{"an unlisted target", func(api, _ *Schema) { api.OperationSets[0].Operations = api.OperationSets[0].Operations[1:] }, "productId", want{}},
+		{"a target listed twice", func(api, _ *Schema) {
+			api.OperationSets[0].Operations = append(api.OperationSets[0].Operations,
+				&FieldDef{Name: "browse", HTTPMethod: "GET", RestPath: "browse", TypeRef: TypeRef{Name: "ProductView", IsArray: true}})
+		}, "productId", want{}},
+		{"a target whose id is another type", func(api, _ *Schema) { key(api).TypeRef.Name = "string" }, "productId", want{}},
+		{"a field named for the relation", func(api, _ *Schema) { key(api).Name = "product" }, "product", want{}},
+		{"a HasMany", func(api, _ *Schema) { key(api).Name = "reviewsId" }, "reviewsId", want{}},
+		{"a many-to-many", func(api, _ *Schema) { key(api).Name = "tagsId" }, "tagsId", want{}},
+		{"a source field that is no relation", func(api, _ *Schema) { key(api).Name = "quantityId" }, "quantityId", want{}},
+		{"a source that declares the key itself", func(_, db *Schema) {
+			line := db.Types["OrderLine"]
+			line.Fields = append(line.Fields, &FieldDef{Name: "productId", TypeRef: TypeRef{Name: "Identity.UUID"}})
+		}, "productId", want{}},
+		{"a list key", func(api, _ *Schema) { key(api).TypeRef.IsArray = true }, "productId", want{}},
+		{"a holder without @source", func(api, _ *Schema) { api.Types["OrderLineView"].Source = nil }, "productId", want{}},
+		{"a source that is not at hand", func(api, _ *Schema) { api.Types["OrderLineView"].Source.Target = "other-db.OrderLine" }, "productId", want{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			api, deps := shopSchemas()
+			if tc.edit != nil {
+				tc.edit(api, deps["shop-db"])
+			}
+			holder := api.Types["OrderLineView"]
+			field := typeField(holder, tc.field)
+			if field == nil {
+				t.Fatalf("OrderLineView has no field %s", tc.field)
+			}
+			ref, derived := FieldReference(api, deps, holder, field)
+			if !reflect.DeepEqual(ref, tc.want.ref) || derived != tc.want.derived {
+				t.Fatalf("FieldReference = %+v, %v; want %+v, %v", ref, derived, tc.want.ref, tc.want.derived)
+			}
+			if field.References != nil && ref != field.References {
+				t.Fatalf("a written reference came back as a copy")
+			}
+			if tc.want.derived && field.References != nil {
+				t.Fatalf("a derived reference was written into the field")
+			}
+		})
+	}
+}
+
+func TestRelationKey(t *testing.T) {
+	_, deps := shopSchemas()
+	line := deps["shop-db"].Types["OrderLine"]
+	relation, ok := RelationKey(line, &FieldDef{Name: "productId"})
+	if !ok || relation != line.Fields[1] {
+		t.Fatalf("RelationKey(productId) = %+v, %v; want OrderLine.product", relation, ok)
+	}
+	for _, name := range []string{"product", "Id", "id", "reviewsId", "tagsId", "quantityId", "productID", "customerId"} {
+		if relation, ok := RelationKey(line, &FieldDef{Name: name}); ok {
+			t.Errorf("RelationKey(%s) = %s, want none", name, relation.Name)
+		}
+	}
+	if _, ok := RelationKey(nil, &FieldDef{Name: "productId"}); ok {
+		t.Error("RelationKey with no source found a relation")
+	}
+}
+
+func TestSourcedBy(t *testing.T) {
+	api, _ := shopSchemas()
+	api.Types["ProductCard"] = &TypeDef{Name: "ProductCard", Source: &SourceRef{Target: "shop-db.Product"}}
+	api.Types["ProductTrait"] = &TypeDef{Name: "ProductTrait", IsTrait: true, Role: RoleTrait, Source: &SourceRef{Target: "shop-db.Product"}}
+	api.Types["Local"] = &TypeDef{Name: "Local", Source: &SourceRef{Target: "Draft"}}
+	names := func(types []*TypeDef) []string {
+		var out []string
+		for _, td := range types {
+			out = append(out, td.Name)
+		}
+		return out
+	}
+	for target, want := range map[string][]string{
+		"shop-db.Product":   {"ProductCard", "ProductView"},
+		"shop-db.OrderLine": {"OrderLineView"},
+		"shop-db.Review":    nil,
+		"Draft":             {"Local"},
+		"shop.Draft":        {"Local"},
+	} {
+		if got := names(SourcedBy(api, target)); !reflect.DeepEqual(got, want) {
+			t.Errorf("SourcedBy(%s) = %v, want %v", target, got, want)
+		}
+	}
+}
+
+// DerivedReferences lists the references FieldReference derives, beside
+// ReferencesOf, which lists only the written ones and stays as it was.
+func TestDerivedReferences(t *testing.T) {
+	api, deps := shopSchemas()
+	api.Types["BasketLine"] = &TypeDef{Name: "BasketLine", Role: RoleAPIInput, Fields: []*FieldDef{
+		{Name: "productId", TypeRef: TypeRef{Name: "Identity.UUID"}, References: &ReferenceDef{Type: "ProductView"}},
+	}}
+	if written := ReferencesOf(api); len(written) != 1 || written[0].Holder != "BasketLine.productId" || written[0].Derived {
+		t.Fatalf("ReferencesOf = %+v, want BasketLine.productId alone, written", written)
+	}
+	got := DerivedReferences(api, deps)
+	line := api.Types["OrderLineView"]
+	want := []HeldReference{{Holder: "OrderLineView.productId", Type: line, Field: line.Fields[1], Ref: &ReferenceDef{Type: "ProductView"}, TypeRef: line.Fields[1].TypeRef, Derived: true}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("DerivedReferences = %+v, want %+v", got, want)
+	}
+
+	line.Fields[1].References = &ReferenceDef{Type: "ProductView"}
+	if got := DerivedReferences(api, deps); len(got) != 0 {
+		t.Fatalf("a written reference was listed as derived: %+v", got)
+	}
+	api.Kind = SchemaKindGeneral
+	line.Fields[1].References = nil
+	if got := DerivedReferences(api, deps); len(got) != 0 {
+		t.Fatalf("a General schema derived %+v", got)
 	}
 }
 

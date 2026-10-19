@@ -63,6 +63,14 @@ type Param struct {
 	ValidateListMin   *int
 	ValidateListMax   *int
 	ValidatePattern   string
+
+	// Reference is the reference the argument or field holds (D61), as
+	// written or, for a field, derived from a relation's key, resolved in
+	// the API schema; nil when it refers to nothing. The OpenAPI document
+	// and the tool documents write it under their reference keys.
+	Reference *Reference
+	// Search marks the operation's search argument (SearchQuery, D62).
+	Search bool
 }
 
 // ArrayDepth is 0 for T, 1 for T[] and 2 for T[][], as ir.TypeRef.ArrayDepth.
@@ -1352,6 +1360,8 @@ func (m *typeMapper) mapArgument(arg *ir.ArgumentDef) (Param, error) {
 		ValidateListMin:   arg.ValidateListMin,
 		ValidateListMax:   arg.ValidateListMax,
 		ValidatePattern:   arg.ValidatePattern,
+		Reference:         resolveReference(m.schema, m.dependencies, arg.References),
+		Search:            arg.Search,
 	}
 	m.applyGoMapping(&param, arg.TypeRef.Name)
 	return param, nil
@@ -1431,8 +1441,8 @@ func (m *typeMapper) inputTypeFields(inputTypeName string) []Param {
 	return m.fieldsFromTypeDef(typeDef)
 }
 
-// fieldsFromTypeDef maps a type's fields to Params, with their shape and
-// Validate<> bounds.
+// fieldsFromTypeDef maps a type's fields to Params, with their shape,
+// Validate<> bounds and reference.
 func (m *typeMapper) fieldsFromTypeDef(typeDef *ir.TypeDef) []Param {
 	var fields []Param
 	for _, field := range typeDef.Fields {
@@ -1451,6 +1461,7 @@ func (m *typeMapper) fieldsFromTypeDef(typeDef *ir.TypeDef) []Param {
 			ValidateListMin:   field.ValidateListMin,
 			ValidateListMax:   field.ValidateListMax,
 			ValidatePattern:   field.ValidatePattern,
+			Reference:         m.fieldReference(typeDef, field),
 		}
 		m.applyGoMapping(&param, field.TypeRef.Name)
 		fields = append(fields, param)

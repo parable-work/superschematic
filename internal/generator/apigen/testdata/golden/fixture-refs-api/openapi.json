@@ -1,0 +1,390 @@
+{
+  "components": {
+    "schemas": {
+      "BasketInput": {
+        "properties": {
+          "giftSku": {
+            "description": "A gift named by its sku, with every member said.",
+            "maxLength": 255,
+            "minLength": 1,
+            "nullable": true,
+            "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$",
+            "type": "string",
+            "x-superschematic-reference": {
+              "label": "name",
+              "options": "CatalogListItemsHandler",
+              "target": "#/components/schemas/ItemView",
+              "value": "sku"
+            }
+          },
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/BasketLine"
+            },
+            "maxItems": 5,
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "lines"
+        ],
+        "type": "object"
+      },
+      "BasketLine": {
+        "description": "A line names its item by id, which listItems lists.",
+        "properties": {
+          "itemId": {
+            "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+            "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+            "type": "string",
+            "x-superschematic-reference": {
+              "label": "name",
+              "lookup": "ids",
+              "options": "CatalogListItemsHandler",
+              "target": "#/components/schemas/ItemView",
+              "value": "id"
+            }
+          },
+          "quantity": {
+            "format": "double",
+            "maximum": 9,
+            "minimum": 1,
+            "type": "number"
+          }
+        },
+        "required": [
+          "itemId",
+          "quantity"
+        ],
+        "type": "object"
+      },
+      "BasketView": {
+        "properties": {
+          "id": {
+            "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+            "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/BasketLine"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "lines"
+        ],
+        "type": "object"
+      },
+      "Error": {
+        "properties": {
+          "error": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ItemView": {
+        "description": "An item as the catalog lists it: its title, and so the label of every\nreference to it, is its name.",
+        "properties": {
+          "id": {
+            "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+            "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "inStock": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "sku": {
+            "description": "A URL friendly version of a string",
+            "maxLength": 255,
+            "minLength": 1,
+            "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "sku",
+          "inStock"
+        ],
+        "type": "object"
+      },
+      "ResponseMeta": {
+        "properties": {
+          "requestId": {
+            "description": "Unique identifier for the request",
+            "type": "string"
+          }
+        },
+        "required": [
+          "requestId"
+        ],
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "bearerAuth": {
+        "bearerFormat": "JWT",
+        "scheme": "bearer",
+        "type": "http"
+      }
+    }
+  },
+  "info": {
+    "description": "REST API generated from the fixture-refs-api schema",
+    "title": "Fixture-Refs-Api API",
+    "version": "__OPENAPI_VERSION__"
+  },
+  "openapi": "3.0.3",
+  "paths": {
+    "/api/baskets": {
+      "post": {
+        "operationId": "CatalogPlaceBasketHandler",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BasketInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/BasketView"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "summary": "placeBasket",
+        "tags": [
+          "catalog"
+        ]
+      }
+    },
+    "/api/items": {
+      "get": {
+        "description": "The items, narrowed by a search of their text and by ids, the lookup\na UI names the references' values through.",
+        "operationId": "CatalogListItemsHandler",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "maxLength": 50,
+              "type": "string"
+            },
+            "x-superschematic-search": true
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "ids",
+            "required": false,
+            "schema": {
+              "items": {
+                "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+                "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+                "type": "string"
+              },
+              "maxItems": 5,
+              "type": "array"
+            },
+            "style": "form",
+            "x-superschematic-reference": {
+              "label": "name",
+              "lookup": "ids",
+              "options": "CatalogListItemsHandler",
+              "target": "#/components/schemas/ItemView",
+              "value": "id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "inStock",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "items": {
+                        "$ref": "#/components/schemas/ItemView"
+                      },
+                      "type": "array"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "summary": "listItems",
+        "tags": [
+          "catalog"
+        ]
+      }
+    },
+    "/api/items/{itemId}": {
+      "get": {
+        "operationId": "CatalogGetItemHandler",
+        "parameters": [
+          {
+            "description": "itemId parameter",
+            "in": "path",
+            "name": "itemId",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            },
+            "x-superschematic-reference": {
+              "label": "name",
+              "lookup": "ids",
+              "options": "CatalogListItemsHandler",
+              "target": "#/components/schemas/ItemView",
+              "value": "id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/ItemView"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "summary": "getItem",
+        "tags": [
+          "catalog"
+        ]
+      }
+    }
+  },
+  "servers": [
+    {
+      "description": "Runtime server",
+      "url": "__OPENAPI_BASE_URL__"
+    }
+  ]
+}

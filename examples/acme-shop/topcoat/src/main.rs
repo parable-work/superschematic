@@ -24,20 +24,15 @@
 use std::sync::Arc;
 
 use acme_shop_orders_server::sqlite::SqliteShop;
-use acme_shop_orders_server::{add_shopper, add_staff, users_at, users_in_memory};
-use acme_shop_orders_topcoat::api::runtime::identity::StoreError;
-use acme_shop_topcoat::{IDENTITY_CONFIG, app, shop_in_memory, stock_sqlite};
+use acme_shop_orders_server::{users_at, users_in_memory};
+use acme_shop_topcoat::{IDENTITY_CONFIG, Person, add_people, app, shop_in_memory, stock_sqlite};
 use topcoat::asset::{AssetBundle, AssetConfig};
 
 /// The demo shopper's email, name and password.
-const LOGIN: &str = "grace@example.com";
-const NAME: &str = "Grace Hopper";
-const PASSWORD: &str = "grace's password";
+const SHOPPER: Person = ("grace@example.com", "Grace Hopper", "grace's password");
 
 /// The demo staff's, who read and cancel every customer's orders.
-const STAFF_LOGIN: &str = "ada@example.com";
-const STAFF_NAME: &str = "Ada Lovelace";
-const STAFF_PASSWORD: &str = "ada's password";
+const STAFF: Person = ("ada@example.com", "Ada Lovelace", "ada's password");
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -57,25 +52,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let users = users_at(&url, IDENTITY_CONFIG).map_err(|err| format!("DATABASE_URL: {err}"))?;
             // The demo's shopper and staff and the catalog's products,
             // which a real shop's own flows add, unless an earlier run
-            // added them.
-            match users.store().find_login(LOGIN).await {
-                Ok(_) => {}
-                Err(StoreError::NotFound) => add_shopper(&users, LOGIN, NAME, PASSWORD).await?,
-                Err(err) => return Err(err.into()),
-            }
-            match users.store().find_login(STAFF_LOGIN).await {
-                Ok(_) => {}
-                Err(StoreError::NotFound) => add_staff(&users, STAFF_LOGIN, STAFF_NAME, STAFF_PASSWORD).await?,
-                Err(err) => return Err(err.into()),
-            }
+            // added them. A file an earlier version made keeps its
+            // users, and add_people brings their roles up to date.
+            add_people(&users, SHOPPER, STAFF).await?;
             stock_sqlite(&shop)?;
             println!("the shop is in {url}");
             app(Arc::new(shop), users, assets)
         }
         Err(_) => {
             let users = users_in_memory(IDENTITY_CONFIG)?;
-            add_shopper(&users, LOGIN, NAME, PASSWORD).await?;
-            add_staff(&users, STAFF_LOGIN, STAFF_NAME, STAFF_PASSWORD).await?;
+            add_people(&users, SHOPPER, STAFF).await?;
             app(Arc::new(shop_in_memory()), users, assets)
         }
     };

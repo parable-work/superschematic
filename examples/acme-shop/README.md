@@ -14,7 +14,7 @@ kind, decorators and auth provider.
 | `schemas/services/shop-common` | General: `Price`, `Currency` and the `@strictJSON` `FeedItem`, in all four languages |
 | `schemas/services/shop-db` | DB: users and roles, with the core `User` and `UserRole` traits (D50), products, stock, a row per product with the threshold it is restocked below, restock requests, one open per product, orders and reviews, and the queues `OrderPlaced` and `StockLow`, built for Postgres and SQLite |
 | `schemas/services/shop-api` | API over `shop-db`, served in Go, with Go and TypeScript SDKs: products, and the user model's sign-in and administration routes |
-| `schemas/services/shop-orders` | API over `shop-db`, served in Go and in Rust, with SDKs in Go, TypeScript, Python and Rust; it calls `shop-stock`, which reserves each order's stock as it is placed; its worker `FulfilOrders` fulfils each order placed, from `OrderPlaced`, and its job `ShipOrders` ships the fulfilled ones. A shopper, who holds `orders.read` and `orders.write`, lists, reads and cancels their own orders, another customer's answering 404 (`@requireOwnership`), and staff, who hold `orders.any`, every customer's. Its lists of orders, of a product's reviews and of the catalog page by cursor (D60), an order's lines and the reviews' routes refer to the catalog's products (D61), and the reviews are searched by their words (D62) |
+| `schemas/services/shop-orders` | API over `shop-db`, served in Go and in Rust, with SDKs in Go, TypeScript, Python and Rust; it calls `shop-stock`, which reserves each order's stock as it is placed; its worker `FulfilOrders` fulfils each order placed, from `OrderPlaced`, and its job `ShipOrders` ships the fulfilled ones. A shopper, who holds `orders.read` and `orders.write`, lists, reads and cancels their own orders, another customer's answering 404 (`@requireOwnership`), and staff, who hold `orders.read`, `orders.write` and `orders.any` (or simply `orders`), every customer's: `orders.any` opens no route alone, and since only the implementations check it, it is missing from `permissions.json`, so `identity bootstrap --permission orders.any` warns that it is uncatalogued. Its lists of orders, of a product's reviews and of the catalog page by cursor (D60), an order's lines and the reviews' routes refer to the catalog's products (D61), and the reviews are searched by their words (D62) |
 | `schemas/services/shop-stock` | API over `shop-db`'s stock, served in Rust (D57), with Go and Rust SDKs: anyone lists the stock, staff with `stock.write` set a product's level and its threshold, and only `shop-orders`' server reserves stock (`@requireService`), for a shopper with `orders.write` it forwards; a reservation that takes a level below its threshold enqueues `StockLow`, from which its Rust worker `ReorderStock` files a restock request, and its Rust job `OrderRestocks` orders the open ones (D65) |
 | `schemas/services/shop-storefront` | API served in TypeScript, with a TypeScript SDK; uses `Price` |
 | `schemas/services/shop-web` | Site: the shop's static site, which calls `shop-api` from the browser (D55) |
@@ -133,7 +133,11 @@ cd topcoat && DATABASE_URL=sqlite:../shop.db cargo run
 ```
 
 The app adds the demo shopper and staff and the catalog's product to the
-file, unless an earlier run added them, as a shop's own flows would.
+file, unless an earlier run added them, as a shop's own flows would. Each
+run also rewrites the `shopper` and `staff` roles to the permissions they
+grant now, so a `shop.db` made before staff held `orders.any`, whose
+`shopper` role grants all of `orders` and so every customer's orders,
+needs only the app started on it again.
 
 ## Check it
 

@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use acme_shop_orders_api::runtime::identity::{
-    hash_password, Config, IdentityAuthenticator, NewUser, Rusqlite, Service,
+    hash_password, Config, IdentityAuthenticator, NewUser, Role, Rusqlite, Service,
 };
 use acme_shop_orders_api::{
     identity, types, Implementations, OrderCancelOrderArgs, OrderGetOrderArgs, OrderImplementation,
@@ -84,7 +84,8 @@ pub const STAFF_PERMISSIONS: [&str; 3] = ["orders.read", "orders.write", EVERY_O
 /// Adds a shopper who signs in with `login` and `password`, holding the
 /// `shopper` role, which grants `SHOPPER_PERMISSIONS`, as staff would add
 /// one through shop-api's administration routes. The first shopper creates
-/// the role.
+/// the role, and a `shopper` role that grants anything else is rewritten,
+/// as `update_roles` rewrites it.
 pub async fn add_shopper(
     users: &Service,
     login: &str,
@@ -104,7 +105,8 @@ pub async fn add_shopper(
 
 /// Adds a member of staff who signs in with `login` and `password`,
 /// holding the `staff` role, which grants `STAFF_PERMISSIONS`. The first
-/// of them creates the role.
+/// of them creates the role, and a `staff` role that grants anything else
+/// is rewritten.
 pub async fn add_staff(
     users: &Service,
     login: &str,
@@ -114,8 +116,20 @@ pub async fn add_staff(
     add_user(users, login, name, password, "staff", &STAFF_PERMISSIONS).await
 }
 
+/// Brings the `shopper` and `staff` roles to `SHOPPER_PERMISSIONS` and
+/// `STAFF_PERMISSIONS`, creating either one no user holds yet. A database
+/// made before staff held `EVERY_ORDER` has a `shopper` role that grants
+/// `orders`, which covers `EVERY_ORDER`: its shoppers read and cancel
+/// every customer's orders until the role is rewritten. The Topcoat app
+/// calls it each time it opens a SQLite file, its users already there.
+pub async fn update_roles(users: &Service) -> Result<(), Box<dyn Error>> {
+    role(users, "shopper", &SHOPPER_PERMISSIONS).await?;
+    role(users, "staff", &STAFF_PERMISSIONS).await?;
+    Ok(())
+}
+
 /// Adds a user who holds the role `role_name`, which grants `permissions`,
-/// creating the role unless a user added before created it.
+/// as `role` finds, rewrites or creates it.
 async fn add_user(
     users: &Service,
     login: &str,
@@ -133,22 +147,37 @@ async fn add_user(
             at: SystemTime::now(),
         })
         .await?;
-    let role = match store
-        .list_roles()
-        .await?
-        .into_iter()
-        .find(|role| role.name == role_name)
-    {
-        Some(role) => role,
-        None => {
-            let permissions: Vec<String> = permissions.iter().map(|&p| p.to_owned()).collect();
-            store.create_role(role_name, &permissions).await?
-        }
-    };
+    let role = role(users, role_name, permissions).await?;
     store
         .grant_role(&user.id, &role.id, SystemTime::now())
         .await?;
     Ok(())
+}
+
+/// The role named `name`, granting `permissions` and no others: the one a
+/// user added before created, rewritten when it grants anything else, or
+/// a new one.
+async fn role(users: &Service, name: &str, permissions: &[&str]) -> Result<Role, Box<dyn Error>> {
+    let store = users.store();
+    let wanted: Vec<String> = permissions.iter().map(|&p| p.to_owned()).collect();
+    let existing = store
+        .list_roles()
+        .await?
+        .into_iter()
+        .find(|role| role.name == name);
+    Ok(match existing {
+        Some(role) if same_permissions(&role.permissions, &wanted) => role,
+        Some(role) => store.update_role(&role.id, name, &wanted).await?,
+        None => store.create_role(name, &wanted).await?,
+    })
+}
+
+/// Whether two lists of permissions grant the same ones, in any order.
+fn same_permissions(a: &[String], b: &[String]) -> bool {
+    fn set(list: &[String]) -> std::collections::BTreeSet<&str> {
+        list.iter().map(String::as_str).collect()
+    }
+    set(a) == set(b)
 }
 
 /// The catalog's products, and the orders and reviews placed so far.
