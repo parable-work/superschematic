@@ -325,7 +325,9 @@ the types does not load it) and the Rust types as `ENGINE_DOCUMENT`:
   document that carries an extension's decorators loads; **`tools`** are
   the invocation policy and the vendor keys the binary registers (D11),
   the engine's `tools` option; **`behaviors`** names each behavior the
-  types compose and the package that implements it.
+  types compose and the package that implements it, and for an
+  extension's behavior the Rust crate its registration names
+  (`"crate"`), which the project's engine crate compiles in (below).
 
 With today's TypeScript engine:
 
@@ -383,6 +385,70 @@ in the language of the first API on the database: a Cloud Run worker pool
 on gcp, a process of its own under `stack dev`. It acts as its deployable's
 name, holding each engine type's name as a permission. A TypeScript or
 Rust server opens no engine yet.
+
+### The project's engine crate
+
+The Rust engine (D58) runs an extension's behavior from a Rust crate
+that implements the engine's `Behavior` trait, which the extension's
+`BehaviorSpec` names (`Rust`: the crate, its path in the project and
+the expression that registers it). When a DB or General schema's types
+compose such a behavior, the `projectengine` generator writes the
+project's engine crate, `engine/rust/<service>`, named
+`<rust_crate_prefix><service>-engine`:
+
+```rust
+pub fn behaviors() -> BehaviorSet {
+    superschematic_engine_behaviors::core()
+        .with(acme_behaviors::Rating)
+}
+```
+
+It depends on the engine's crates, at the `[paths]` keys `engine_rust`,
+`engine_behaviors_rust` and, when a type composes a work-queue behavior,
+`engine_workqueue_rust`, and on each extension's crate by its path. A
+Rust host links the crate and opens the engine with `behaviors()` and
+`tools()`, the binary's invocation policy and vendor keys (acme's crate
+for `shop-ratings` is `acme-shop-ratings-engine`):
+
+```rust
+let mut options = EngineOptions::postgres(url, PostgresOptions::default());
+options.policy = Some(policy);
+options.meta_schema = Some(MetaSchema::Text(meta_schema));
+options.behaviors = acme_shop_ratings_engine::behaviors();
+options.tools = acme_shop_ratings_engine::tools();
+let engine = Engine::open(options)?;
+```
+
+A Go host links the engine as a static archive through its C ABI, and
+the crate's workspace holds that archive as its member `ffi/`
+(`<crate>-ffi`), the C ABI over `behaviors()`:
+
+```rust
+use acme_shop_ratings_engine as project;
+
+superschematic_engine_abi::export_engine_c_abi!(behaviors = project::behaviors);
+```
+
+It depends on the C ABI's library at `[paths] engine_abi_rust`. Build
+it, and link it in place of the core's archive by putting its directory
+first in `CGO_LDFLAGS`; the binding's config passes the engine
+document's `tools`, without which an engine refuses an operation that
+names the extension's invocation policy value:
+
+```sh
+scripts/engine-archive.sh --crate dist/engine/rust/shop-ratings/ffi --out dist/engine/lib
+CGO_LDFLAGS="-L$PWD/dist/engine/lib ..." go build ./...
+```
+
+A TypeScript server's addon will be the workspace's next member, `napi/`,
+once the Node-API addon exports `export_engine_napi!`; until then the
+TypeScript engine runs an extension's TypeScript implementation.
+
+A schema whose types compose the core's behaviors alone gets no crate,
+since the engine's release carries them, and one that composes an
+extension's behavior without a crate gets none either: the TypeScript
+engine runs it. acme's `crates/behaviors` is the worked example
+(`examples/acme-schematic`).
 
 ## Display
 

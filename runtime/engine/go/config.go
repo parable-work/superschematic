@@ -73,6 +73,11 @@ type Postgres struct {
 	ConnectTimeoutMs int64 `json:"connectTimeoutMs,omitempty"`
 	// MigrationTimeoutMs bounds a migration's wait for another process's.
 	MigrationTimeoutMs int64 `json:"migrationTimeoutMs,omitempty"`
+	// IdleInTransactionTimeoutMs is how long the server lets a session sit
+	// idle inside a transaction before it ends it, so a process that stops
+	// mid-transaction holds its locks no longer (60000 unless set; 0 leaves
+	// the server's own setting).
+	IdleInTransactionTimeoutMs *int64 `json:"idleInTransactionTimeoutMs,omitempty"`
 }
 
 // Namespaces are the configured namespaces besides default.

@@ -25,6 +25,12 @@ doctest = false
 default = ["sqlite", "postgres"]
 sqlite = ["superschematic-engine/sqlite", "superschematic-engine-behaviors/sqlite", "superschematic-engine-workqueue/sqlite"]
 postgres = ["superschematic-engine/postgres", "superschematic-engine-behaviors/postgres", "superschematic-engine-workqueue/postgres"]
+# The test addon's bridge to behaviors written in TypeScript (src/bridge.rs,
+# D58 milestone 7b): the engine's TypeScript suite defines behaviors with
+# defineBehavior and runs them on the Rust engine through it. Never in a
+# shipped addon: scripts/engine-napi.sh builds it for tests with
+# --features js-behaviors.
+js-behaviors = ["superschematic-engine/dynamic"]
 
 [dependencies]
 # superscalar's pins (third_party/superscalar/Cargo.lock): napi 3.13.0,

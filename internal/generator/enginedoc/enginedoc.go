@@ -91,6 +91,12 @@ type Behavior struct {
 	// @superschematic/engine or @superschematic/engine-workqueue for the
 	// core's, the one the extension's registration names, else absent.
 	Package string `json:"package,omitempty"`
+	// Crate is the Rust crate that implements an extension's behavior, the
+	// one its registration's Rust names (D58), which the project's engine
+	// crate compiles in (internal/generator/projectengine); absent for the
+	// core's, which the engine's own crates implement, and when the
+	// registration names none.
+	Crate string `json:"crate,omitempty"`
 }
 
 // Options configures Build.
@@ -133,15 +139,8 @@ func Build(schema *ir.Schema, opts Options) (*Document, error) {
 	}
 	doc := &Document{Version: Version, Namespace: namespace}
 
-	policy := reg.ToolInvocationPolicy()
-	doc.Tools.InvocationPolicy = InvocationPolicy{Key: policy.Key, Values: policy.Values, Default: policy.Default}
-	keys, err := apigen.ResolveToolKeys(schema, reg.ToolHooks())
-	if err != nil {
-		return nil, fmt.Errorf("enginedoc: %w", err)
-	}
-	doc.Tools.Keys = ToolKeys{Scalar: keys.Scalar, Guidance: keys.Guidance, Parameters: []ToolParameter{}}
-	for _, kv := range keys.Parameters {
-		doc.Tools.Keys.Parameters = append(doc.Tools.Keys.Parameters, ToolParameter{Key: kv.Key, Value: kv.Value})
+	if doc.Tools, err = ToolsFor(schema, reg); err != nil {
+		return nil, err
 	}
 
 	doc.Behaviors = Behaviors(engineTypes, reg)
@@ -168,6 +167,26 @@ func Build(schema *ir.Schema, opts Options) (*Document, error) {
 		doc.MetaSchema = definition
 	}
 	return doc, nil
+}
+
+// ToolsFor returns the D11 options the engine writes a schema's tools
+// with, as the registry the build runs with registers them: its tool
+// invocation policy, and the vendor keys its tool hooks leave, run over a
+// tool set with no tools (apigen.ResolveToolKeys). The engine document
+// holds them, and so does the project's engine crate
+// (internal/generator/projectengine).
+func ToolsFor(schema *ir.Schema, reg *registry.Registry) (Tools, error) {
+	policy := reg.ToolInvocationPolicy()
+	tools := Tools{InvocationPolicy: InvocationPolicy{Key: policy.Key, Values: policy.Values, Default: policy.Default}}
+	keys, err := apigen.ResolveToolKeys(schema, reg.ToolHooks())
+	if err != nil {
+		return Tools{}, fmt.Errorf("enginedoc: %w", err)
+	}
+	tools.Keys = ToolKeys{Scalar: keys.Scalar, Guidance: keys.Guidance, Parameters: []ToolParameter{}}
+	for _, kv := range keys.Parameters {
+		tools.Keys.Parameters = append(tools.Keys.Parameters, ToolParameter{Key: kv.Key, Value: kv.Value})
+	}
+	return tools, nil
 }
 
 // Namespace returns the engine namespace of a DB service: configured, the
@@ -212,7 +231,7 @@ func Behaviors(engineTypes []*ir.TypeDef, reg *registry.Registry) []Behavior {
 			seen[ref.Name] = true
 			b := Behavior{Name: ref.Name}
 			if declared, ok := reg.Behavior(ref.Name); ok {
-				b.Extension, b.Package = declared.Extension, declared.Package
+				b.Extension, b.Package, b.Crate = declared.Extension, declared.Package, declared.Rust.Crate
 			}
 			out = append(out, b)
 		}

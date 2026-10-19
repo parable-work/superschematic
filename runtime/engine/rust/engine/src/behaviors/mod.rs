@@ -16,6 +16,8 @@ pub(crate) mod composition;
 pub(crate) mod config;
 pub(crate) mod context;
 pub(crate) mod declaration;
+#[cfg(feature = "dynamic")]
+pub(crate) mod dynamic;
 pub(crate) mod erased;
 pub(crate) mod execution;
 pub mod paging;
@@ -46,6 +48,8 @@ pub use declaration::{
     BehaviorDeclaration, FieldDeclaration, OperationDeclaration, OperationScope, VetoDeclaration,
     BEHAVIOR_NAME, BUILTIN_OPERATIONS, VETO_CODE,
 };
+#[cfg(feature = "dynamic")]
+pub use dynamic::{DynamicBehavior, DynamicHooks};
 /// Paging for a behavior's list operations (`page`, `pageRequest`).
 pub use paging::{page, page_request, Page, PageRequest};
 /// A behavior's own storage: its migrations, the column and table specs
@@ -73,6 +77,18 @@ impl Behaviors<'_> {
     pub fn register<B: Behavior>(&self, behavior: B) -> Result<()> {
         self.engine.catalog.register(
             erased::erase(behavior),
+            &self.engine.db,
+            self.engine.clock.now(),
+        )
+    }
+
+    /// Registers a behavior whose hooks are named at run time, as
+    /// [`Behaviors::register`] registers a Rust one (the `dynamic`
+    /// feature: a binding's bridge to a behavior in the host's language).
+    #[cfg(feature = "dynamic")]
+    pub fn register_dynamic<D: DynamicBehavior>(&self, behavior: D) -> Result<()> {
+        self.engine.catalog.register(
+            dynamic::erase_dynamic(behavior),
             &self.engine.db,
             self.engine.clock.now(),
         )

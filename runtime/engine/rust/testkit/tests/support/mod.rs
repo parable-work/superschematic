@@ -28,7 +28,9 @@ use superschematic_engine_testkit::open_meta_schema;
 /// Names the Postgres the tests run against.
 pub const DATABASE_VARIABLE: &str = "SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL";
 
-fn unique_name(prefix: &str) -> String {
+/// A name, after `prefix`, that no other file, schema or session of the
+/// tests has.
+pub fn unique_name(prefix: &str) -> String {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("clock")
@@ -171,6 +173,22 @@ impl Target {
     /// An engine with the core's and the work queue's behaviors.
     pub fn open_workqueue(&self) -> Engine {
         self.open_workqueue_with(|_| {})
+    }
+
+    /// The Postgres URL; `None` on SQLite.
+    pub fn url(&self) -> Option<&str> {
+        match &self.place {
+            Place::Sqlite { .. } => None,
+            Place::Postgres { url, .. } => Some(url),
+        }
+    }
+
+    /// The Postgres schema; `None` on SQLite.
+    pub fn schema(&self) -> Option<&str> {
+        match &self.place {
+            Place::Sqlite { .. } => None,
+            Place::Postgres { schema, .. } => Some(schema),
+        }
     }
 }
 

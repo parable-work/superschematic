@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"path"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"sort"
@@ -30,8 +32,47 @@ type BehaviorSpec struct {
 	// write each package's declarations into that package (--package).
 	// Optional; when set it is an npm package name.
 	Package string
+	// Rust is the Rust crate whose implementation runs an extension's
+	// behavior in the Rust engine (D58): a crate implementing the engine's
+	// Behavior trait, which the project's engine crate, the one the
+	// projectengine generator writes for a schema that composes the
+	// behavior, depends on and registers. Optional; the core's behaviors
+	// are the engine's own crates and name none.
+	Rust BehaviorRust
 	// Declaration is the behavior's JSON declaration.
 	Declaration json.RawMessage
+}
+
+// BehaviorRust names the Rust crate that implements an extension's
+// behavior (D58) and the value the project's engine registers.
+type BehaviorRust struct {
+	// Crate is the crate's Cargo package name, which the project's engine
+	// crate depends on: a letter, then letters, digits, '-' and '_', at
+	// most 64 characters.
+	Crate string
+	// Path is the crate's directory relative to the project, the parent of
+	// the schemas root, which the [paths] keys of superschematic.toml are
+	// relative to as well: slash-separated and clean, and not absolute.
+	// The project's engine crate depends on the crate by this path, as acme
+	// points at crates/behaviors.
+	Path string
+	// Register is the Rust expression of the behavior the project's engine
+	// registers (BehaviorSet::with): a path into the crate, as
+	// acme_behaviors::Rating names acme's unit struct, or a call with no
+	// arguments, as acme_behaviors::Rating::new() would be. It starts with
+	// the crate's name as Rust spells it (Ident).
+	Register string
+}
+
+// Declared reports whether the spec names a crate.
+func (r BehaviorRust) Declared() bool {
+	return r != BehaviorRust{}
+}
+
+// Ident is the crate's name as Rust source spells it: the Cargo name with
+// '-' folded to '_'.
+func (r BehaviorRust) Ident() string {
+	return strings.ReplaceAll(r.Crate, "-", "_")
 }
 
 // BehaviorDeclaration is the shape of a behavior's declaration document.
@@ -137,6 +178,9 @@ type Behavior struct {
 	// Package is the npm package that implements it; "" when its spec
 	// names none.
 	Package string
+	// Rust is the Rust crate that implements it; the zero value when its
+	// spec names none.
+	Rust BehaviorRust
 
 	config         *validator.Schema
 	configRequired bool
@@ -162,6 +206,13 @@ var (
 	behaviorVetoCode      = regexp.MustCompile(`^[a-z][a-z0-9]*(_[a-z0-9]+)*$`)
 	// npmPackageName is a lowercase npm package name, scoped or not.
 	npmPackageName = regexp.MustCompile(`^(@[a-z0-9][a-z0-9._~-]*/)?[a-z0-9][a-z0-9._~-]*$`)
+	// cargoPackageName is a Cargo package name: a letter, then letters,
+	// digits, '-' and '_', at most 64 characters.
+	cargoPackageName = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]{0,63}$`)
+	// rustRegisterExpr is a Rust path of two segments or more, optionally
+	// called with no arguments: a unit struct, a constant, or a function
+	// or constructor that takes none.
+	rustRegisterExpr = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*(::[A-Za-z_][A-Za-z0-9_]*)+(\(\))?$`)
 )
 
 const behaviorNameDescriptor = "a letter A-Z followed by letters and digits"
@@ -181,10 +232,13 @@ const behaviorNameDescriptor = "a letter A-Z followed by letters and digits"
 // identifier or repeats; a preconditionSchema that does not compile, is
 // not an object schema or does not set "additionalProperties": false; a
 // veto code that is not lowercase snake case of at most 64 characters, or
-// repeats; and a Package that is not an npm package name. Finalize checks
-// what needs the whole registry: requires and conflicts name registered
-// behaviors, and each operation's invocation policy is a value of the
-// registry's policy.
+// repeats; a Package that is not an npm package name; and a Rust crate on a
+// core behavior, or one whose crate is not a Cargo package name, whose
+// path is empty, absolute or not clean, or whose register expression is
+// not a path into the crate (checkBehaviorRust). Finalize checks what needs
+// the whole registry: requires and conflicts name registered behaviors,
+// each operation's invocation policy is a value of the registry's policy,
+// and behaviors that name one Rust crate name it at one path.
 func (r *Registry) RegisterBehavior(spec BehaviorSpec) error {
 	var decl BehaviorDeclaration
 	dec := json.NewDecoder(bytes.NewReader(spec.Declaration))
@@ -207,10 +261,13 @@ func (r *Registry) RegisterBehavior(spec BehaviorSpec) error {
 	if spec.Package != "" && (len(spec.Package) > 214 || !npmPackageName.MatchString(spec.Package)) {
 		return fmt.Errorf("registry: behavior %s package %q is not an npm package name", decl.Name, spec.Package)
 	}
+	if err := checkBehaviorRust(decl.Name, spec.Extension, spec.Rust); err != nil {
+		return err
+	}
 	if _, dup := r.behaviors[decl.Name]; dup {
 		return fmt.Errorf("registry: behavior %q is already registered", decl.Name)
 	}
-	b := Behavior{BehaviorDeclaration: decl, Extension: spec.Extension, Package: spec.Package}
+	b := Behavior{BehaviorDeclaration: decl, Extension: spec.Extension, Package: spec.Package, Rust: spec.Rust}
 	if len(decl.ConfigSchema) > 0 {
 		compiled, err := compileSchema(decl.ConfigSchema, "superschematic://behaviors/"+decl.Name+"/config.json")
 		if err != nil {
@@ -266,6 +323,37 @@ func checkBehaviorName(name, extension string) error {
 	}
 	if !behaviorBareName.MatchString(bare) {
 		return fmt.Errorf("registry: behavior name %q is malformed: after %s. comes %s", name, extension, behaviorNameDescriptor)
+	}
+	return nil
+}
+
+// checkBehaviorRust holds a behavior's Rust crate to what the project's
+// engine crate can depend on and register (D58): only an extension's
+// behavior names one, since the core's are the engine's own crates; the
+// crate is a Cargo package name; its path is relative to the project,
+// slash-separated and clean; and the register expression is a Rust path
+// into the crate, called with no arguments or not.
+func checkBehaviorRust(name, extension string, rust BehaviorRust) error {
+	if !rust.Declared() {
+		return nil
+	}
+	if extension == "" {
+		return fmt.Errorf("registry: core behavior %s names Rust crate %q: the core's behaviors are the engine's own crates", name, rust.Crate)
+	}
+	if !cargoPackageName.MatchString(rust.Crate) {
+		return fmt.Errorf("registry: behavior %s Rust crate %q is not a Cargo package name: a letter, then letters, digits, '-' and '_', at most 64 characters", name, rust.Crate)
+	}
+	switch {
+	case rust.Path == "":
+		return fmt.Errorf("registry: behavior %s Rust crate %s has no path: the crate's directory relative to the project, the parent of the schemas root", name, rust.Crate)
+	case strings.HasPrefix(rust.Path, "/") || filepath.IsAbs(rust.Path):
+		return fmt.Errorf("registry: behavior %s Rust crate %s path %q is an absolute path: it is relative to the project, the parent of the schemas root", name, rust.Crate, rust.Path)
+	case strings.Contains(rust.Path, "\\") || path.Clean(rust.Path) != rust.Path:
+		return fmt.Errorf("registry: behavior %s Rust crate %s path %q is not a clean slash-separated path (%s)", name, rust.Crate, rust.Path, path.Clean(strings.ReplaceAll(rust.Path, "\\", "/")))
+	}
+	head, _, _ := strings.Cut(rust.Register, "::")
+	if !rustRegisterExpr.MatchString(rust.Register) || head != rust.Ident() {
+		return fmt.Errorf("registry: behavior %s Rust register %q is not a path into crate %s: %s::<Name>, or a call of one with no arguments", name, rust.Register, rust.Crate, rust.Ident())
 	}
 	return nil
 }
@@ -398,11 +486,21 @@ func checkBehaviorVetoes(decl BehaviorDeclaration) error {
 
 // checkBehaviorReferences is Finalize's pass over the behaviors: requires
 // and conflicts name registered behaviors other than the declaring one, no
-// behavior both requires and conflicts with another, and every operation's
-// invocation policy is a value of the policy in force.
+// behavior both requires and conflicts with another, every operation's
+// invocation policy is a value of the policy in force, and behaviors that
+// name one Rust crate name it at one path, since the project's engine
+// crate depends on each crate once.
 func (r *Registry) checkBehaviorReferences() error {
 	policy := r.ToolInvocationPolicy()
+	crates := map[string]Behavior{}
 	for _, b := range r.Behaviors() {
+		if b.Rust.Declared() {
+			if first, seen := crates[b.Rust.Crate]; seen && first.Rust.Path != b.Rust.Path {
+				return fmt.Errorf("registry: behaviors %s and %s name Rust crate %s at two paths, %q and %q", first.Name, b.Name, b.Rust.Crate, first.Rust.Path, b.Rust.Path)
+			} else if !seen {
+				crates[b.Rust.Crate] = b
+			}
+		}
 		for _, list := range []struct {
 			key   string
 			names []string

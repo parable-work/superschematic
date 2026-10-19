@@ -4,7 +4,9 @@
 // and the result is held to test/rust-pending.txt, the files not passing
 // yet. A file that fails and is not listed fails the run; so does a listed
 // file that passes, so the list only shrinks. CI and a person run the same
-// command, after `bun run build` and scripts/engine-napi.sh:
+// command, after `bun run build` and scripts/engine-napi.sh --js-behaviors
+// (the test addon, whose bridge runs the behaviors the suite writes in
+// TypeScript):
 //
 //   node scripts/rust-ratchet.mjs                  # Node.js, then Bun
 //   node scripts/rust-ratchet.mjs --runtime bun    # one runtime
@@ -144,9 +146,14 @@ if (!existsSync(join(engineRoot, 'dist', 'native', 'index.js'))) {
 }
 try {
   const native = await import(join(engineRoot, 'dist', 'native', 'index.js'));
-  native.loadAddon();
+  // The suite defines behaviors in TypeScript, which the test addon's
+  // bridge alone runs (the js-behaviors cargo feature).
+  if (typeof native.loadAddon().bridgeCall !== 'function') {
+    console.error('the addon in native/ is the shipped one, without the bridge to behaviors written in TypeScript: build the test addon with scripts/engine-napi.sh --js-behaviors');
+    process.exit(1);
+  }
 } catch (error) {
-  console.error(`the Rust engine's addon does not load (scripts/engine-napi.sh builds it): ${error instanceof Error ? error.message : String(error)}`);
+  console.error(`the Rust engine's addon does not load (scripts/engine-napi.sh --js-behaviors builds it): ${error instanceof Error ? error.message : String(error)}`);
   process.exit(1);
 }
 
@@ -202,7 +209,7 @@ async function runAll(runtime) {
 // a hint at why it fails (src/native/errors.ts).
 function gaps(output) {
   const counts = {};
-  for (const match of output.matchAll(/is not on the Rust engine yet \((bridge|storage|http|watch);/g)) {
+  for (const match of output.matchAll(/is not on the Rust engine yet \(([a-z]+)\)/g)) {
     counts[match[1]] = (counts[match[1]] ?? 0) + 1;
   }
   return Object.entries(counts)

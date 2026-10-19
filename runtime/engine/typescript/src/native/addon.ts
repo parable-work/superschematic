@@ -25,7 +25,7 @@ export const NATIVE_BINARY_NAME = 'superschematic-engine';
  * request and error shapes of runtime/engine/rust/napi/src/lib.rs
  * (ABI_VERSION). An addon of another version is refused.
  */
-export const NATIVE_ABI_VERSION = 1;
+export const NATIVE_ABI_VERSION = 2;
 
 // `${process.platform}-${process.arch}` -> napi's platform triple: the
 // targets in package.json "napi.targets"; Linux is glibc only.
@@ -43,6 +43,38 @@ export interface AddonEngine {
   callSync(request: string): string;
   /** A call off this thread: AsyncTask on SQLite, tokio's blocking pool on Postgres. */
   call(request: string): Promise<string>;
+  /**
+   * Whether the facade answers something of the engine on this thread
+   * alone (a policy, a matcher, a behavior written in TypeScript): its
+   * asynchronous call and the runner's thread are refused.
+   */
+  readonly hosted: boolean;
+  /** Whether the addon has the bridge to behaviors written in TypeScript (the test addon). */
+  readonly bridged: boolean;
+  /** Registers a behavior written in TypeScript as the bridge describes it (src/native/bridge.ts). */
+  registerBehavior(descriptor: string): void;
+  /** Raw SQL on the engine's SQLite file: get, all, run or exec, parameters as JSON (src/native/bridge.ts's encoding); the result as JSON. */
+  storageQuery(mode: 'get' | 'all' | 'run' | 'exec', sql: string, params: string): string;
+  /** Runs callback in a transaction this thread holds: true commits, false rolls back. Returns whether it committed. */
+  storageTransaction(callback: () => boolean): boolean;
+  /** Whether this thread holds a transaction on the engine's storage. */
+  readonly storageInTransaction: boolean;
+  /** Serves one HTTP request: its head as JSON and its body's bytes (SQLite). */
+  handleHttp(head: string, body?: Buffer): HttpAnswer;
+  /** Serves one HTTP request off this thread (Postgres, or SQLite). */
+  handleHttpAsync(head: string, body?: Buffer): Promise<HttpAnswer>;
+  /** Pulls an event stream handleHttp holds open, without waiting. */
+  streamPull(id: number): StreamPull;
+  /** Pulls an event stream off this thread, waiting up to timeoutMs. */
+  streamPullAsync(id: number, timeoutMs: number): Promise<StreamPull>;
+  /** Ends an event stream handleHttp holds open. */
+  streamClose(id: number): void;
+  /** How many commits that notified the engine's notifier has counted. */
+  readonly epoch: number;
+  /** Calls back on this thread each time the notifier moves, through a weak threadsafe function; the last call follows a shutdown. */
+  watch(callback: (epoch: number) => void): void;
+  /** Ends the watch. */
+  unwatch(): void;
   /** Stops the runner and ends every event stream. */
   shutdown(): void;
   /** Shuts down and lets the engine go; its storage closes once a call in flight returns. */
@@ -56,9 +88,27 @@ export interface AddonEngine {
  */
 export type AddonHost = (kind: string, payload: string) => string;
 
+/** One HTTP answer of the addon: status, headers as pairs, and body bytes or an event stream's id. */
+export interface HttpAnswer {
+  status: number;
+  headers: string[][];
+  body?: Buffer | null;
+  stream?: number | null;
+}
+
+/** One pull of an event stream: its bytes, or its end, or neither (nothing yet). */
+export interface StreamPull {
+  data?: Buffer | null;
+  end: boolean;
+}
+
 /** What the addon exports. */
 export interface Addon {
   abiVersion(): number;
+  /** The routes the engine serves (api::routes), as JSON. */
+  engineRoutes(): string;
+  /** A behavior context's method, on the test addon alone (src/native/bridge.ts). */
+  bridgeCall?(generation: number, method: string, args: string): string;
   /** Opens an engine; host answers what the options' `hosted` lists. */
   NativeEngine: { open(options: string, host?: AddonHost): AddonEngine };
 }

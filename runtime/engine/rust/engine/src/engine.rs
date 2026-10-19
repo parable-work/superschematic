@@ -89,7 +89,47 @@ pub enum Ids {
     /// order: a replay of a recording whose test gave the engine ids of
     /// its own. Drawing from an empty queue is refused.
     Queue(IdQueue),
+    /// The ids a source of the host's makes ([`IdSource`]): one compiled
+    /// into the deployment's engine, or one a binding asks in the host's
+    /// language (the Node-API facade's `ids` function, on the JavaScript
+    /// thread alone). An id is checked as a caller's is when a create
+    /// takes it.
+    Custom(CustomIds),
 }
+
+/// What makes the id of an instance created without one, for
+/// [`Ids::Custom`].
+pub trait IdSource: Send + Sync {
+    /// The next id; an error refuses the create.
+    fn next_id(&self) -> Result<String>;
+
+    /// The next version 4 UUID's 16 bytes for a behavior's own UUIDs
+    /// ([`UuidSource`]), or `None` for a random one, which is what a source
+    /// that does not say draws. The Node-API facade answers with the
+    /// host's `crypto.randomUUID`, where the TypeScript engine's version
+    /// graph draws them, so a recorder that seeds it sees the same ids.
+    fn next_uuid(&self) -> Option<[u8; 16]> {
+        None
+    }
+}
+
+/// An [`IdSource`], as [`Ids::Custom`] holds it: equal to itself alone.
+#[derive(Clone)]
+pub struct CustomIds(pub Arc<dyn IdSource>);
+
+impl std::fmt::Debug for CustomIds {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("CustomIds")
+    }
+}
+
+impl PartialEq for CustomIds {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Eq for CustomIds {}
 
 /// The prefix of the scenario recorder's seed: its n-th id is
 /// [`seeded_uuid`]`(SCENARIO_SEED, n)`.
@@ -116,12 +156,14 @@ fn seeded_bytes(prefix: &str, n: u64) -> [u8; 16] {
 /// refs, commits and rows of Branches' version graph): the engine's seeded
 /// generator when it has one ([`Ids::Seeded`]), so a replay draws them in
 /// the sequence the scenario recorder's one generator gave the TypeScript
-/// engine's version graph, and random ones otherwise (D58). A behavior
+/// engine's version graph; a host's id source that makes them
+/// ([`IdSource::next_uuid`]); and random ones otherwise (D58). A behavior
 /// reads it from its context (`uuids()`); it is cheap to clone and lives on
 /// its own.
 #[derive(Clone, Debug, Default)]
 pub struct UuidSource {
     seeded: Option<(String, IdCounter)>,
+    custom: Option<CustomIds>,
 }
 
 impl UuidSource {
@@ -132,10 +174,13 @@ impl UuidSource {
 
     /// The next UUID's 16 bytes, its version and variant set.
     pub fn next_bytes(&self) -> [u8; 16] {
-        match &self.seeded {
-            Some((prefix, drawn)) => seeded_bytes(prefix, drawn.next()),
-            None => uuid::Uuid::new_v4().into_bytes(),
+        if let Some((prefix, drawn)) = &self.seeded {
+            return seeded_bytes(prefix, drawn.next());
         }
+        self.custom
+            .as_ref()
+            .and_then(|source| source.0.next_uuid())
+            .unwrap_or_else(|| uuid::Uuid::new_v4().into_bytes())
     }
 }
 
@@ -440,7 +485,7 @@ impl EngineClock {
 
 // The ids a create without one takes.
 #[derive(Debug)]
-struct IdSource {
+struct IdState {
     ids: Ids,
     next: AtomicU64,
 }
@@ -456,7 +501,7 @@ pub struct Engine {
     pub(crate) clock: EngineClock,
     pub(crate) catalog: Catalog,
     pub(crate) values: Arc<ValueStore>,
-    ids: IdSource,
+    ids: IdState,
     /// Set when a panic escaped the engine's own code while a transaction
     /// was held: the engine refuses every later call, so its host fails
     /// its readiness (D58).
@@ -532,7 +577,7 @@ impl Engine {
             clock,
             catalog: Catalog::new(loader, Arc::clone(&values), invocation),
             values,
-            ids: IdSource {
+            ids: IdState {
                 ids: options.ids,
                 next: AtomicU64::new(0),
             },
@@ -721,11 +766,17 @@ impl Engine {
     }
 
     /// Where a behavior's own version 4 UUIDs come from: the engine's
-    /// seeded generator, or random ones.
+    /// seeded generator, a host's id source that makes them, or random
+    /// ones.
     pub fn uuids(&self) -> UuidSource {
         match &self.ids.ids {
             Ids::Seeded { prefix, drawn } => UuidSource {
                 seeded: Some((prefix.clone(), drawn.clone())),
+                custom: None,
+            },
+            Ids::Custom(source) => UuidSource {
+                seeded: None,
+                custom: Some(source.clone()),
             },
             Ids::Uuid4 | Ids::Sequence { .. } | Ids::Queue(_) => UuidSource::random(),
         }
@@ -740,6 +791,7 @@ impl Engine {
                 format!("{prefix}{next}")
             }
             Ids::Seeded { prefix, drawn } => seeded_uuid(prefix, drawn.next()),
+            Ids::Custom(source) => source.0.next_id()?,
             Ids::Queue(queue) => queue.pop().ok_or_else(|| {
                 Error::usage(
                     "the engine's id queue is empty: queue the id a create draws (IdQueue::push)",

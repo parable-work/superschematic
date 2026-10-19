@@ -73,8 +73,9 @@ and the HTTP corpus (`testdata/http`) through the engine's calls and
 routes, and the HTTP corpus through its axum router too, all on both
 databases. `superschematic-engine-napi` (`rust/napi`) is the Rust engine
 as a Node-API addon, which this package's test suite and the work queue's
-run on with `ENGINE_IMPL=rust` ("The Rust engine through its Node-API
-addon", under Development). `superschematic-engine-abi` (`rust/abi`) is
+run on with `ENGINE_IMPL=rust`, and which `openEngineAsync` opens for a
+server on Postgres ("The Rust engine through its Node-API addon", under
+Development). `superschematic-engine-abi` (`rust/abi`) is
 the engine's C ABI as a library, and `superschematic-engine-ffi`
 (`rust/ffi`) the core's archive of it, which `go/`, the Go binding, links
 as the static archive `libsuperschematic_engine.a`, and whose HTTP mount,
@@ -446,6 +447,77 @@ own transaction with its ledger row. A file whose ledger is ahead of the
 build, or names a version differently, is refused. The tests run the
 engine's migrations from an empty file and from the file each earlier
 version left.
+
+### Several instances on one Postgres database
+
+The Rust engine (D58) runs in every instance of a server, each with a
+pool of its own on the one schema, and holds the following across them.
+The tests are `rust/testkit/tests/replicas_*.rs`, two engines on one
+schema whose sessions the database's administrator ends as a crash, a
+failover or a proxy would; `make engine-rust-soak` runs the racing writers
+long (it needs `SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL`).
+
+- **Writers.** A write takes its namespace's advisory lock and the
+  catalog's shared, so a namespace's writers take turns: racing writes
+  lose no update and repeat no seq, cursor or number, an id and a unique
+  field hold, Budget never passes a limit and Queue never claims a job
+  twice. Writers of two namespaces never wait for each other. A define, a
+  publish, a change of namespaces and a migration take the catalog's lock
+  alone, and every writer waits for them.
+- **The event log.** A reader on any instance sees every event of a
+  namespace once, in cursor order. A write that rolls back leaves a gap in
+  the identity, so cursors are ordered, not contiguous. A read from
+  `head` reads the head once the namespace's writes in flight are done
+  (it waits for them, `busy` past the busy timeout): the head is global,
+  and a write held open could hold a cursor below it. `Events::head()`
+  is the log's last cursor, not a place to read on from.
+- **Waking.** A commit notifies (`pg_notify`) and each instance's listener
+  wakes its waiters, event streams and runner. A listener whose session
+  ends reconnects at once (while it cannot, it tries again after 50 ms,
+  backing off to 5 s) and wakes them, so they read what they missed. An instance opened with `listen: false` has
+  its streams read at each heartbeat instead, and `watch` at its timeout.
+- **The runner.** One instance's runner runs at a time: the one whose
+  process holds the runner's lease, a session advisory lock on a
+  connection of its own. Another takes the lease, within its
+  `leaseRetryMs`, once the first stops or its session ends; `run_due`
+  elsewhere is `busy`. When a lease's session ends under a pass, the two
+  passes can overlap for a moment; a reaction's cursor and a schedule's
+  next run are read again under the namespace's lock, so a reaction runs
+  once per event, a schedule once per due time, and Timers fires each
+  deadline once.
+- **Opening and publishing.** Instances that start together migrate once,
+  under a lock of the session; one that starts on a storage already up to
+  date only reads its ledger and takes no lock, so it holds no running
+  instance's writes up. Publishes of one draft at once mint one version:
+  the others answer `published: false` (the draft matched the version)
+  or `not_found` (no draft left). A publish creates its behaviors' storage
+  in its transaction, so a write beside it is wholly of the old version or
+  wholly of the new; an instance whose build lacks a behavior the new
+  version composes answers that version's writes `unavailable`, writing
+  nothing.
+- **Failures.** A lock waited for past the busy timeout, a statement the
+  server's `statement_timeout` cancels, a deadlock and a serialization
+  failure are `busy`: nothing was written, and over HTTP the 503 says
+  `Retry-After: 1`. A session the server ends inside a call (a failover,
+  `pg_terminate_backend`) answers `unavailable`, nothing written, and its
+  locks are free at once. Pooled connections the server ended while idle
+  are found closed at BEGIN and replaced, so no call fails on them. A
+  connection lost while a call commits answers `unavailable` saying
+  whether it was written is unknown: read before trying again. The server
+  ends a session that sits idle inside a transaction past
+  `idle_in_transaction_session_timeout`, 60 s unless the options say
+  (`idleInTransactionTimeoutMs`, 0 for the server's own), so an instance
+  frozen mid-transaction holds its namespace no longer. Only a panic
+  inside a transaction poisons an engine, and that one alone.
+
+Not guaranteed: a connection the network cuts without a reset blocks its
+call until the operating system's TCP timeouts give up, and a listener
+cut off so wakes nothing until then (streams read at their heartbeat, the
+runner at its timer, a minute at most); a lease holder cut off so keeps
+the lease until the server drops its session, while its own runner stops
+at its next check of the lease, so for that while no runner runs; and two
+processes on one SQLite file share no notifier and no lease (one process
+writes a file).
 
 ## Schemas
 
@@ -5058,56 +5130,101 @@ was built, then the work queue's an engine's options name.
 `scripts/engine-napi.sh` (at the repository's root; `bun run build:napi`
 here) builds it for this host into `typescript/native/`, which git
 ignores, as `superschematic-engine.<triple>.node`; `--debug` builds it
-quicker and slower to run. It needs the superscalar checkout
+quicker and slower to run, and `--js-behaviors` builds the test addon,
+with the bridge to behaviors written in TypeScript (the `js-behaviors`
+cargo feature, which no shipped addon has). It needs the superscalar checkout
 (`scripts/superscalar-dep.sh --checkout`), and builds with the toolchain
 `tools.env` pins, `--locked` to `rust/Cargo.lock`. Rebuild it after a
 change to the Rust engine, or after merging one that ports more
 behaviors.
 
-`src/native/` is the TypeScript over it: `openNativeEngine(options)`
-returns an engine with this package's synchronous, principal-first API
-(`namespaces`, `schemas`, `instances`, `events`, `tools`, `values`,
-`runner`, `search`, `close`), each method a call by name with JSON in and
-out on the JavaScript thread, and each refusal this package's error class,
-its members restored. The options are this package's: `allowAll` and a
-`permissionPolicy()` without a matcher of its own become the Rust
-engine's `"allowAll"` and `"permission"`, and the Rust engine's `{ rules
-}` passes as it is; any other policy, and a `permissionMatcher`, stay
-TypeScript, which the addon asks on the JavaScript thread during a call,
-so such an engine is not called asynchronously and its runner is driven
-by `runDue` rather than `start`. A clock function sets the Rust engine's
-manual clock before each call. `behaviors` takes the name of a behavior
-the addon is built with beyond the core's, the work queue's (`Lease`,
-`Assignment`, `Queue`, `Presence`, `Blueprint`, `Budget`, `Retries`),
-which it registers in Rust after the core's, in the order given; a
-behavior object is TypeScript code to run, even one whose declaration
-names a behavior the addon has (a test's stand-in, or a wrapper of
-`@superschematic/engine-workqueue`'s own that counts its calls), so it
-needs the bridge, and a host with the work queue's objects passes their
-declarations' names (the work queue's `test/helpers.ts` maps its own by
-identity). `postgres: { url, schema? }` opens the
-engine on Postgres in place of `path`; it is called through
-`callAsync(op, principal, ...args)`, since a synchronous call there
-would hold the JavaScript thread while it waits on the database. What the
-addon does not do yet throws `NativeUnsupportedError`, naming the gap:
-a behavior or an id source written in TypeScript, `engine.storage`,
-`events.watch` and `schemas.validator` come with milestone 7b. Until then
-this package's engine is the TypeScript one.
+`src/native/` is the TypeScript over it, in two shapes:
+
+- `openNativeEngine(options)` returns an engine with this package's
+  synchronous, principal-first API (`namespaces`, `schemas`, `instances`,
+  `events`, `tools`, `values`, `runner`, `behaviors`, `search`, `storage`,
+  `close`), each method a call by name with JSON in and out on the
+  JavaScript thread, and each refusal this package's error class, its
+  members restored. It runs on SQLite.
+- `openEngineAsync(options)`, from the package's root, returns the same
+  API with every call a promise, made off the JavaScript thread (tokio's
+  blocking pool on Postgres, libuv's pool on SQLite), for a server:
+  `postgres: { url, schema?, poolMax?, listen? }` opens it on a schema of
+  a Postgres database in place of `path`, where a synchronous call is
+  refused (`sync_on_async_storage`), since it would hold the JavaScript
+  thread while it waits on the database. Its options are data: a
+  function written in TypeScript (a policy, a matcher, `ids`, a behavior)
+  is refused, a `TypeError`. `events.watch` hears every commit, another
+  process's on Postgres included.
+
+The options are this package's. `allowAll` and a `permissionPolicy()`
+without a matcher of its own become the Rust engine's `"allowAll"` and
+`"permission"`, and the Rust engine's `{ rules }` passes as it is; any
+other policy, a `permissionMatcher` and an `ids` function stay
+TypeScript, which the addon asks on the JavaScript thread during a
+synchronous call (with an `ids` function, a behavior's own UUIDs, which
+Branches draws, come from `crypto.randomUUID`, as on this package's
+engine). A clock function is read once for each call that may use the
+time, and for each request `engineApp` serves, and sets the Rust engine's
+manual clock. `behaviors` takes the name of a behavior the addon is built
+with beyond the core's, the work queue's (`Lease`, `Assignment`, `Queue`,
+`Presence`, `Blueprint`, `Budget`, `Retries`), which it registers in Rust
+after the core's, in the order given; a behavior object is TypeScript
+code to run, even one whose declaration names a behavior the addon has (a
+test's stand-in, or a wrapper of `@superschematic/engine-workqueue`'s own
+that counts its calls), and a host with the work queue's objects passes
+their declarations' names (the work queue's `test/helpers.ts` maps its
+own by identity).
+
+The test addon's bridge (milestone 7b, `src/native/bridge.ts` over
+`rust/napi/src/bridge.rs` and the engine's `dynamic` behaviors) runs a
+behavior written with `defineBehavior` on the JavaScript thread: its
+hooks, its context's methods back into the engine, its SQL through the
+engine's checker, its errors and vetoes. An engine that asks TypeScript
+anything is hosted: it is called on the JavaScript thread alone, and its
+runner runs on the event loop, woken by `events.watch`. The shipped addon
+refuses such a behavior. Beside the bridge, on either addon:
+
+- `engine.storage` is raw SQL on the engine's SQLite file, and a
+  `storage.transaction` the engine's calls run inside;
+- `schemas.validator(principal, name)` returns a validator per version,
+  holding a value to it on the Rust engine;
+- `engineApp` and `engineMcp` serve either engine as Hono adapters over
+  the engine's own routes (`api::handle`): the engine owns routing, the
+  media types, ETags and preconditions, the envelope, the problems, the
+  event stream's bytes and MCP's JSON-RPC, and the adapter keeps what the
+  host keeps (the request id, the rate limit, the timeout, the body
+  limit, authentication, the identity routes, a mount's tool filter and
+  its `onError`);
+- a value JSON cannot carry (`NaN`, a `Date`, an `undefined` list item, a
+  function) crosses the addon marked with this package's words for it,
+  and the Rust engine refuses it where this package's engine does, in
+  those words.
+
+A value driver written in TypeScript (`values.driver`) is not on the Rust
+engine, whose drivers are Rust `ValueDriver`s compiled into it: the
+tests that pass one are this package's engine's alone (`TYPESCRIPT_DRIVER`
+in `test/helpers.ts`), dropped at the cutover (D58).
 
 With `ENGINE_IMPL=rust`, `test/helpers.ts` opens the Rust engine in
 place of this package's, and `scripts/rust-ratchet.mjs` runs each test
-file so on its own, under Node.js and Bun, and holds the result to
-`test/rust-pending.txt`, the files not passing yet and why: a file that
-fails and is not listed fails the run, and so does a listed file that
-passes, so the list only shrinks. `--package` runs another package's
-suite so, held to its own `test/rust-pending.txt`: the work queue's,
-whose `test/helpers.ts` opens the Rust engine with its behaviors by name.
-CI's `engine-napi` job runs both:
+file so on its own, under Node.js and Bun, on the test addon, and holds
+the result to `test/rust-pending.txt`, the files not passing yet and why:
+a file that fails and is not listed fails the run, and so does a listed
+file that passes, so the list only shrinks. `--package` runs another
+package's suite so, held to its own `test/rust-pending.txt`: the work
+queue's, whose `test/helpers.ts` opens the Rust engine with its behaviors
+by name. A test that loops over `test/helpers.ts`'s `backends` runs on
+SQLite, and with `ENGINE_TEST_PG_URL` set on Postgres too, through
+`openEngineAsync`, every call awaited (`stream.test.ts`, the event
+stream, and `native-async.test.ts`). CI's `engine-napi` job runs both,
+with Postgres:
 
 ```
-scripts/engine-napi.sh                      # from the repository's root
+scripts/engine-napi.sh --js-behaviors       # from the repository's root
 cd runtime/engine/typescript && bun run build
 bun run test:rust                           # Node.js, then Bun
+ENGINE_TEST_PG_URL=postgres://... bun run test:rust   # and the backends on Postgres
 node scripts/rust-ratchet.mjs --runtime bun test/events.test.ts --verbose
 node scripts/rust-ratchet.mjs --update      # take off what passes, add what fails
 cd ../../engine-workqueue/typescript && bun run build

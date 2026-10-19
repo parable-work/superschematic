@@ -33,6 +33,14 @@
 //! the events a write appended, is queued with [`Tx::after_commit`]: it
 //! runs once the outermost transaction commits, and is dropped with the
 //! transaction or savepoint that queued it when that one rolls back.
+//!
+//! On Postgres the server can end a session (a restart, a failover,
+//! `pg_terminate_backend`, its own timeouts) or the network lose it. A
+//! pooled connection found closed at BEGIN is dropped and another taken,
+//! up to the pool's size, since nothing of the call ran; one lost inside a
+//! transaction fails the call as [`Error::Connection`], the server having
+//! rolled it back, and one lost at COMMIT as [`Error::CommitUnknown`]. A
+//! connection that failed so never goes back to the pool.
 
 use std::cell::{Cell, RefCell};
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -68,6 +76,9 @@ pub enum Lock<'a> {
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum TxKind<'a> {
     Read,
+    /// A read that begins once the writers a lock names have finished
+    /// ([`Db::read_settled`]).
+    Settled(Lock<'a>),
     Write(Lock<'a>),
     /// A migration: a catalog write whose locks wait up to `timeout`.
     Migrate {
@@ -89,6 +100,12 @@ pub(crate) trait Backend: Send + Sync {
     fn schemas(&self) -> &[String];
     /// The Postgres channel commits notify; `None` on SQLite.
     fn channel(&self) -> Option<&str>;
+    /// How many times a transaction whose BEGIN found its pooled
+    /// connection closed takes another: as many as the pool holds on
+    /// Postgres, whose server can end an idle session; none on SQLite.
+    fn stale_retries(&self) -> usize {
+        0
+    }
     /// Takes the lease `key` names for this process's session, or `None`
     /// when another session holds it ([`Db::try_lease`]).
     fn try_lease(&self, key: i64) -> Result<Option<Lease>>;
@@ -181,6 +198,27 @@ thread_local! {
     // their state: a second transaction on one of them would wait for the
     // first (SQLite's one connection, Postgres's writer lock) forever.
     static OPEN: RefCell<Vec<usize>> = const { RefCell::new(Vec::new()) };
+}
+
+thread_local! {
+    // The host transactions this thread holds (Db::hold), by the address
+    // of their database's state, innermost last: a transaction this thread
+    // opens on one of them runs in a savepoint of it instead.
+    static HELD: RefCell<Vec<(usize, *const ())>> = const { RefCell::new(Vec::new()) };
+}
+
+// Holds a host transaction's place in HELD until dropped.
+struct Held(usize);
+
+impl Drop for Held {
+    fn drop(&mut self) {
+        HELD.with(|held| {
+            let mut held = held.borrow_mut();
+            if let Some(at) = held.iter().rposition(|(id, _)| *id == self.0) {
+                held.remove(at);
+            }
+        });
+    }
 }
 
 // Holds a database's place in OPEN until dropped.
@@ -303,14 +341,106 @@ impl Db {
         self.transaction(TxKind::Read, f)
     }
 
+    /// Runs `f` in a write transaction this thread holds while `f` runs, a
+    /// host's (the TypeScript engine's `storage.transaction`): every
+    /// transaction this thread opens on the database inside it,
+    /// [`Db::write`]'s and [`Db::read`]'s, runs in a savepoint of it, so
+    /// the host's statements and the calls it makes commit together when
+    /// `f` returns `Ok` and roll back together when it returns `Err`. A
+    /// host transaction inside another is a savepoint of that one. It
+    /// holds the catalog's lock, so on Postgres it excludes every writer.
+    pub fn hold<'db, T, E, F>(&'db self, f: F) -> Result<T, E>
+    where
+        E: From<Error>,
+        F: FnOnce(&Tx<'db>) -> Result<T, E>,
+    {
+        let id = Arc::as_ptr(&self.inner) as usize;
+        if let Some(tx) = self.held() {
+            return tx.savepoint(|tx| {
+                HELD.with(|held| held.borrow_mut().push((id, std::ptr::from_ref(tx).cast())));
+                let _held = Held(id);
+                f(tx)
+            });
+        }
+        self.transaction(TxKind::Write(Lock::Catalog), |tx| {
+            HELD.with(|held| held.borrow_mut().push((id, std::ptr::from_ref(tx).cast())));
+            let _held = Held(id);
+            f(tx)
+        })
+    }
+
+    /// Whether this thread holds a host transaction on the database
+    /// ([`Db::hold`]).
+    pub fn holding(&self) -> bool {
+        self.held().is_some()
+    }
+
+    // held is the innermost host transaction this thread holds on the
+    // database.
+    fn held<'db>(&'db self) -> Option<&'db Tx<'db>> {
+        let id = Arc::as_ptr(&self.inner) as usize;
+        let pointer = HELD.with(|held| {
+            held.borrow()
+                .iter()
+                .rev()
+                .find(|(each, _)| *each == id)
+                .map(|(_, pointer)| *pointer)
+        })?;
+        // SAFETY: a HELD entry lives only while the Tx it points at is on
+        // this thread's stack, borrowed by the hold that pushed it (Held
+        // pops it before the Tx goes), and the Tx is of this database,
+        // whose state outlives it.
+        Some(unsafe { &*pointer.cast::<Tx<'db>>() })
+    }
+
+    /// Runs `f` in a read-only transaction that begins once the writers
+    /// `lock` names have finished: on Postgres it takes their advisory
+    /// locks shared (so it waits for a writer that holds one, and readers
+    /// do not wait for each other) and reads at READ COMMITTED, so each
+    /// statement sees what they committed; on SQLite, whose one writer
+    /// commits before the next begins, it is [`Db::read`]. A cursor of an
+    /// identity read in it is one that no write in flight in those
+    /// namespaces drew a lower value than, since a writer draws its values
+    /// under its lock: what the log's head needs on Postgres, where a
+    /// write's identity is drawn before it commits. A lock that waits past
+    /// the busy timeout is [`Error::Busy`].
+    pub fn read_settled<'db, T, E, F>(&'db self, lock: Lock<'_>, f: F) -> Result<T, E>
+    where
+        E: From<Error>,
+        F: FnOnce(&Tx<'db>) -> Result<T, E>,
+    {
+        self.transaction(TxKind::Settled(lock), f)
+    }
+
     fn transaction<'db, T, E, F>(&'db self, kind: TxKind<'_>, f: F) -> Result<T, E>
     where
         E: From<Error>,
         F: FnOnce(&Tx<'db>) -> Result<T, E>,
     {
+        if let Some(tx) = self.held() {
+            // Inside a host's transaction: a savepoint of it. A read sees
+            // what the host's transaction has written so far.
+            return tx.savepoint(f);
+        }
         let _opened = Opened::enter(Arc::as_ptr(&self.inner) as usize)?;
-        let conn = self.inner.backend.acquire(self.inner.busy_timeout)?;
-        let tx = Tx::begin(&self.inner, conn, kind).map_err(|(error, _)| error)?;
+        let mut stale = 0;
+        let tx = loop {
+            let conn = self.inner.backend.acquire(self.inner.busy_timeout)?;
+            match Tx::begin(&self.inner, conn, kind) {
+                Ok(tx) => break tx,
+                // A pooled connection the server closed while it sat idle
+                // (a restart, a failover, a session an administrator
+                // ended) fails at BEGIN, before anything of the call ran:
+                // it is dropped, and the transaction takes another.
+                Err((Error::Connection { .. }, mut conn))
+                    if stale < self.inner.backend.stale_retries() =>
+                {
+                    conn.discard();
+                    stale += 1;
+                }
+                Err((error, _)) => return Err(error.into()),
+            }
+        };
         let result = f(&tx);
         tx.finish(result).0
     }
@@ -427,13 +557,14 @@ impl<'db> Tx<'db> {
         let mut namespaces = Vec::new();
         let sql = match backend.dialect() {
             Dialect::Sqlite => match kind {
-                TxKind::Read => "BEGIN".to_owned(),
+                TxKind::Read | TxKind::Settled(_) => "BEGIN".to_owned(),
                 TxKind::Write(_) | TxKind::Migrate { .. } => "BEGIN IMMEDIATE".to_owned(),
             },
             Dialect::Postgres => {
                 let schema = backend.postgres_schema().unwrap_or_default();
                 let (timeout, locks) = match kind {
                     TxKind::Read => (inner.busy_timeout, String::new()),
+                    TxKind::Settled(lock) => (inner.busy_timeout, settled_locks(schema, lock)),
                     TxKind::Write(Lock::Catalog) => (
                         inner.busy_timeout,
                         format!("pg_advisory_xact_lock({})", catalog_lock_key(schema)),
@@ -453,6 +584,7 @@ impl<'db> Tx<'db> {
                 };
                 let isolation = match kind {
                     TxKind::Read => "REPEATABLE READ READ ONLY",
+                    TxKind::Settled(_) => "READ COMMITTED READ ONLY",
                     _ => "READ COMMITTED",
                 };
                 let mut sql = format!(
@@ -477,7 +609,7 @@ impl<'db> Tx<'db> {
         Ok(Tx {
             inner,
             conn: RefCell::new(Some(conn)),
-            read_only: matches!(kind, TxKind::Read),
+            read_only: matches!(kind, TxKind::Read | TxKind::Settled(_)),
             depth: Cell::new(0),
             changes: Cell::new(0),
             aborted: RefCell::new(None),
@@ -778,6 +910,12 @@ impl<'db> Tx<'db> {
                     }
                     Ok(value)
                 }
+                // The connection went while the server committed: it may
+                // have committed or not, and nothing here can tell.
+                Err(Error::Connection { message }) => {
+                    self.roll_back();
+                    Err(Error::CommitUnknown { message }.into())
+                }
                 Err(error) => {
                     self.roll_back();
                     Err(error.into())
@@ -867,6 +1005,30 @@ impl Drop for Savepoint<'_, '_> {
 fn lock_timeout_ms(timeout: Duration) -> u128 {
     // Postgres reads 0 as no timeout; SQLite's 0 fails at once.
     timeout.as_millis().max(1)
+}
+
+// settled_locks is what a settled read selects: the catalog's lock shared,
+// then each namespace's shared, in key order, as a writer takes them.
+fn settled_locks(schema: &str, lock: Lock<'_>) -> String {
+    let mut keys: Vec<i64> = match lock {
+        Lock::Catalog => Vec::new(),
+        Lock::Namespace(namespace) => vec![namespace_lock_key(schema, namespace)],
+        Lock::Namespaces(list) => list
+            .iter()
+            .map(|namespace| namespace_lock_key(schema, namespace))
+            .collect(),
+    };
+    keys.sort_unstable();
+    keys.dedup();
+    let mut locks = vec![format!(
+        "pg_advisory_xact_lock_shared({})",
+        catalog_lock_key(schema)
+    )];
+    locks.extend(
+        keys.iter()
+            .map(|key| format!("pg_advisory_xact_lock_shared({key})")),
+    );
+    locks.join(", ")
 }
 
 // writer_locks is what a namespace write selects: the catalog's lock

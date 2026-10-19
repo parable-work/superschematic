@@ -520,9 +520,11 @@ jobs:
 
       - name: Install Rust toolchain
         # The wasm32 target builds the version-graph core the engine's
-        # Branches behavior runs, which the smoke's engine step builds.
+        # Branches behavior runs, which the smoke's engine step builds;
+        # rustfmt and clippy check acme's Rust crate and the engine crate
+        # the binary writes for it (D58).
         run: |
-          rustup toolchain install "$RUST_VERSION" --profile minimal --target wasm32-unknown-unknown
+          rustup toolchain install "$RUST_VERSION" --profile minimal --component rustfmt --component clippy --target wasm32-unknown-unknown
           rustup default "$RUST_VERSION"
 
       - name: Build the superscalar dependency
@@ -537,9 +539,27 @@ jobs:
         # that imports it, link the core's Go binding against this archive.
         run: scripts/versiongraph-archive.sh
 
+      - name: Start Postgres
+        # The smoke's Rust step runs acme-behaviors' tests on SQLite, and on
+        # this Postgres too through SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL,
+        # each case in a schema of its own (D58). It has a port of its own,
+        # apart from the databases the acme-shop check's stack starts.
+        run: |
+          docker run --detach --name acme-engine-pg \
+            --env POSTGRES_PASSWORD=superschematic \
+            --publish 55433:5432 \
+            "postgres:${POSTGRES_VERSION}-alpine"
+          for _ in $(seq 1 60); do
+            if docker exec acme-engine-pg pg_isready --host 127.0.0.1 --username postgres >/dev/null 2>&1; then exit 0; fi
+            sleep 1
+          done
+          docker logs acme-engine-pg
+          exit 1
+
       - name: Smoke (module tests, build-all, every surface, generated API compiles, core rejects Catalog)
         env:
           GOTOOLCHAIN: go${{ env.GO_VERSION }}
+          SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:55433/postgres?sslmode=disable
         run: examples/acme-schematic/scripts/smoke.sh
 
       # The extension-model acceptance criterion: a second decorator added to
@@ -903,12 +923,15 @@ jobs:
       # the superscalar and version-graph scripts when it is parsed. Clippy
       # runs on every feature combination (each database alone, both, and
       # neither, and the axum router over one database, as a Rust server
-      # takes it), so a build that takes one database still compiles.
+      # takes it), so a build that takes one database still compiles, with
+      # the test addon's bridge (all features) and without it (the
+      # defaults, as an addon ships).
       - name: fmt / clippy (every feature combination)
         working-directory: runtime/engine/rust
         run: |
           cargo fmt --all --check
           cargo clippy --workspace --all-targets --all-features -- -D warnings
+          cargo clippy --workspace --all-targets -- -D warnings
           cargo clippy --workspace --all-targets --no-default-features -- -D warnings
           cargo clippy --workspace --all-targets --no-default-features --features superschematic-engine/sqlite -- -D warnings
           cargo clippy --workspace --all-targets --no-default-features --features superschematic-engine/postgres -- -D warnings
@@ -917,7 +940,10 @@ jobs:
       # The test kit's replay of the scenario corpus
       # (runtime/engine/testdata/scenarios) runs here too, on both
       # databases, and of the HTTP corpus through the engine's routes and
-      # its axum router; it fails when the corpus is missing.
+      # its axum router; it fails when the corpus is missing. Each replays
+      # its files on threads of their own, one per core. The tests of two
+      # engines on one database (testkit/tests/replicas_*.rs) run here too;
+      # their soaks, `make engine-rust-soak`, do not.
       - name: test (SQLite and Postgres)
         working-directory: runtime/engine/rust
         env:
@@ -932,8 +958,11 @@ jobs:
     # (scripts/rust-ratchet.mjs, the command a person runs too): a failing
     # file not on the list fails the job, and so does a listed file that
     # passes. The work queue's suite runs so too, its behaviors the addon's,
-    # held to runtime/engine-workqueue/typescript/test/rust-pending.txt. The
-    # setup is the typescript job's, which the engine's build needs.
+    # held to runtime/engine-workqueue/typescript/test/rust-pending.txt. A
+    # test that loops over test/helpers.ts's backends runs on Postgres too,
+    # through openEngineAsync (ENGINE_TEST_PG_URL), as a TypeScript server
+    # opens the engine there. The setup is the typescript job's, which the
+    # engine's build needs.
     name: engine-napi (the engine's and the work queue's TypeScript suites on the Rust engine)
     if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
@@ -991,15 +1020,38 @@ jobs:
           (cd runtime/http/typescript && bun install --frozen-lockfile && bun run build)
           (cd runtime/versiongraph/typescript && bun install --frozen-lockfile && bun run build)
 
+      - name: Start Postgres
+        # The backends' Postgres pass, each engine in a schema of its own.
+        # A role with a password: the runner's Postgres refuses a
+        # passwordless one off its loopback.
+        run: |
+          docker run --detach --name superschematic-pg \
+            --env POSTGRES_PASSWORD=superschematic \
+            --publish 5432:5432 \
+            "postgres:${POSTGRES_VERSION}-alpine"
+          for _ in $(seq 1 60); do
+            if docker exec superschematic-pg pg_isready --host 127.0.0.1 --username postgres >/dev/null 2>&1; then exit 0; fi
+            sleep 1
+          done
+          docker logs superschematic-pg
+          exit 1
+
       - name: Build the engine and its Node-API addon
+        # The addon as it ships first, which must not have the bridge to
+        # behaviors written in TypeScript, then the test addon, which the
+        # suite runs on: its tests define behaviors with defineBehavior.
         working-directory: runtime/engine/typescript
         run: |
           bun install --frozen-lockfile
           bun run build
           ../../../scripts/engine-napi.sh
+          node -e "const a = require('./native/' + require('node:fs').readdirSync('native').find((f) => f.endsWith('.node'))); if (typeof a.bridgeCall !== 'undefined') { console.error('the shipped addon has the test bridge'); process.exit(1); }"
+          ../../../scripts/engine-napi.sh --js-behaviors
 
-      - name: The engine's suite on the Rust engine against test/rust-pending.txt (Node.js and Bun)
+      - name: The engine's suite on the Rust engine against test/rust-pending.txt (Node.js and Bun), on SQLite and Postgres
         working-directory: runtime/engine/typescript
+        env:
+          ENGINE_TEST_PG_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
         run: bun run test:rust
 
       - name: The work queue's suite on the Rust engine against its test/rust-pending.txt (Node.js and Bun)

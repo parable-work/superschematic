@@ -16,7 +16,7 @@ import type { Hono } from 'hono';
 import { type AccessPolicy, type Engine, type EngineEvent, type EngineOptions } from '../dist/index.js';
 import { engineApp, type EngineHttpOptions } from '../dist/http/index.js';
 import { openMetaSchema, publishItem, testBehaviors } from './behavior-fixtures.ts';
-import { alice, cleanup, openTestEngine, orderDocument, schemaDocument } from './helpers.ts';
+import { alice, backends, cleanup, orderDocument, schemaDocument, unlessOn } from './helpers.ts';
 import { servedApp } from './recorder.ts';
 
 // The bearer token is the caller's subject.
@@ -187,16 +187,9 @@ function parse(block: string): Frame {
 
 const noteDocument = schemaDocument('Note', [{ name: 'body', typeRef: { name: 'string' }, required: true }]);
 
-async function serve(options: EngineHttpOptions = {}, engineOptions: Partial<EngineOptions> = {}): Promise<{ engine: Engine; base: string }> {
-  const engine = openTestEngine(engineOptions);
-  const server = await listen(servedApp(engineApp, engine, { authenticate, ...options }));
-  servers.push(server);
-  return { engine, base: server.url };
-}
-
-function publishOrders(engine: Engine, namespace?: string): void {
-  engine.schemas.define(alice, orderDocument(), { namespace });
-  engine.schemas.publish(alice, 'Order', { namespace });
+async function publishOrders(engine: Engine, namespace?: string): Promise<void> {
+  await engine.schemas.define(alice, orderDocument(), { namespace });
+  await engine.schemas.publish(alice, 'Order', { namespace });
 }
 
 async function eventually(check: () => boolean, what: string): Promise<void> {
@@ -209,335 +202,355 @@ async function eventually(check: () => boolean, what: string): Promise<void> {
   }
 }
 
-describe('event stream', () => {
-  test('replays from a cursor in pages, then sends events as they commit', async () => {
-    const { engine, base } = await serve({ stream: { pageSize: 2, heartbeatMs: 60_000 } });
-    publishOrders(engine);
-    for (const id of ['o1', 'o2', 'o3', 'o4', 'o5']) {
-      engine.instances.create(alice, 'Order', { title: id }, { id });
-    }
-    const reads: Array<number | undefined> = [];
-    const read = engine.events.read.bind(engine.events);
-    engine.events.read = (principal, options) => {
-      reads.push(options?.limit);
-      return read(principal, options);
-    };
+// Each backend's: SQLite, and on the Rust engine Postgres too, through
+// openEngineAsync, as a TypeScript server serves it there; each call on the
+// engine is awaited. A test that passes a function to the engine (a
+// behavior written in TypeScript, a policy) runs on SQLite alone.
+for (const backend of backends) {
+  const typescriptOnly = (what: string) => unlessOn(backend, 'postgres', `${what} written in TypeScript: openEngineAsync takes its options as data`);
 
-    const client = await open(`${base}/namespaces/default/events?after=0`);
-    assert.equal(client.response.status, 200);
-    assert.equal(client.response.headers.get('cache-control'), 'no-store');
-    await client.until((frame) => frame.event === 'ready');
-    const logged = read(alice, { limit: 50 }).events;
-    assert.equal(logged.length, 7);
-    assert.deepEqual(client.events(), logged);
-    // Each event, then the ready event, whose id and data are the cursor
-    // replay caught up at.
-    const last = logged[6].cursor;
-    assert.deepEqual(
-      client.frames.filter((frame) => frame.id !== undefined).map((frame) => [frame.event, Number(frame.id)]),
-      [...logged.map((event) => [undefined, event.cursor]), ['ready', last]]
-    );
-    assert.deepEqual(JSON.parse(client.frames.at(-1)?.data as string), { cursor: last });
-    assert.equal(client.frames[0].comment, 'open');
-    assert.ok(reads.length >= 4 && reads.every((limit) => limit === 2), `pages of 2: ${JSON.stringify(reads)}`);
+  async function serve(options: EngineHttpOptions = {}, engineOptions: Partial<EngineOptions> = {}): Promise<{ engine: Engine; base: string }> {
+    const engine = await backend.open(engineOptions);
+    const server = await listen(servedApp(engineApp, engine, { authenticate, ...options }));
+    servers.push(server);
+    return { engine, base: server.url };
+  }
 
-    // Live: a write through the API and one through the engine.
-    const created = await fetch(`${base}/namespaces/default/schemas/Order/instances`, {
-      method: 'POST',
-      headers: { authorization: 'Bearer bob', 'content-type': 'application/json' },
-      body: JSON.stringify({ id: 'o6', data: { title: 'o6' } }),
+  describe(backend.name === 'sqlite' ? 'event stream' : `event stream (${backend.name})`, () => {
+    test('replays from a cursor in pages, then sends events as they commit', async () => {
+      const { engine, base } = await serve({ stream: { pageSize: 2, heartbeatMs: 60_000 } });
+      await publishOrders(engine);
+      for (const id of ['o1', 'o2', 'o3', 'o4', 'o5']) {
+        await engine.instances.create(alice, 'Order', { title: id }, { id });
+      }
+      const client = await open(`${base}/namespaces/default/events?after=0`);
+      assert.equal(client.response.status, 200);
+      assert.equal(client.response.headers.get('cache-control'), 'no-store');
+      await client.until((frame) => frame.event === 'ready');
+      const logged = (await engine.events.read(alice, { limit: 50 })).events;
+      assert.equal(logged.length, 7);
+      assert.deepEqual(client.events(), logged);
+      // Each event, then the ready event, whose id and data are the cursor
+      // replay caught up at.
+      const last = logged[6].cursor;
+      assert.deepEqual(
+        client.frames.filter((frame) => frame.id !== undefined).map((frame) => [frame.event, Number(frame.id)]),
+        [...logged.map((event) => [undefined, event.cursor]), ['ready', last]]
+      );
+      assert.deepEqual(JSON.parse(client.frames.at(-1)?.data as string), { cursor: last });
+      assert.equal(client.frames[0].comment, 'open');
+      // Replay reads the log in pages of 2, which a filter shows: a page it
+      // drops whole (the define and the publish) sends its last cursor
+      // alone, and every page after it keeps its creates.
+      const creates = await open(`${base}/namespaces/default/events?after=0&kind=create`);
+      await creates.until((frame) => frame.event === 'ready');
+      assert.deepEqual(
+        creates.frames.filter((frame) => frame.id !== undefined).map((frame) => [frame.event ?? (frame.data === undefined ? 'id' : 'event'), Number(frame.id)]),
+        [['id', logged[1].cursor], ...logged.slice(2).map((event) => ['event', event.cursor]), ['ready', last]]
+      );
+      creates.disconnect();
+
+      // Live: a write through the API and one through the engine.
+      const created = await fetch(`${base}/namespaces/default/schemas/Order/instances`, {
+        method: 'POST',
+        headers: { authorization: 'Bearer bob', 'content-type': 'application/json' },
+        body: JSON.stringify({ id: 'o6', data: { title: 'o6' } }),
+      });
+      assert.equal(created.status, 201);
+      await engine.instances.update(alice, 'Order', 'o1', { title: 'Lamp' });
+      await client.until(() => client.events().length === 9);
+      assert.equal(client.frames.filter((frame) => frame.event === 'ready').length, 1, 'ready comes once');
+      assert.deepEqual(
+        client.events().slice(7).map((event) => [event.kind, event.instanceId, event.actor]),
+        [
+          ['create', 'o6', 'bob'],
+          ['update', 'o1', 'alice'],
+        ]
+      );
     });
-    assert.equal(created.status, 201);
-    engine.instances.update(alice, 'Order', 'o1', { title: 'Lamp' });
-    await client.until(() => client.events().length === 9);
-    assert.equal(client.frames.filter((frame) => frame.event === 'ready').length, 1, 'ready comes once');
-    assert.deepEqual(
-      client.events().slice(7).map((event) => [event.kind, event.instanceId, event.actor]),
-      [
-        ['create', 'o6', 'bob'],
-        ['update', 'o1', 'alice'],
-      ]
-    );
-    assert.ok(reads.every((limit) => limit === 2));
+
+    test('resumes after Last-Event-ID, which wins over after', async () => {
+      const { engine, base } = await serve();
+      await publishOrders(engine);
+      for (const id of ['o1', 'o2', 'o3']) {
+        await engine.instances.create(alice, 'Order', { title: id }, { id });
+      }
+      const cursors = (await engine.events.read(alice)).events.map((event) => event.cursor);
+      const first = await open(`${base}/namespaces/default/events?after=${cursors[1]}`);
+      await first.until(() => first.events().length === 3);
+      const lastId = first.frames.filter((frame) => frame.id !== undefined)[1].id as string;
+      first.disconnect();
+
+      const resumed = await open(`${base}/namespaces/default/events?after=0`, { 'last-event-id': lastId });
+      await resumed.until(() => resumed.events().length === 1);
+      assert.deepEqual(
+        resumed.events().map((event) => event.cursor),
+        [cursors[4]]
+      );
+    });
+
+    test('filters by schema and instance', async () => {
+      const { engine, base } = await serve();
+      await publishOrders(engine);
+      await engine.schemas.define(alice, noteDocument);
+      await engine.schemas.publish(alice, 'Note');
+      await engine.instances.create(alice, 'Order', { title: 'Desk' }, { id: 'o1' });
+      await engine.instances.create(alice, 'Note', { body: 'hi' }, { id: 'n1' });
+      await engine.instances.create(alice, 'Order', { title: 'Lamp' }, { id: 'o2' });
+      const client = await open(`${base}/namespaces/default/events?schema=Order&instanceId=o2`);
+      await engine.instances.update(alice, 'Order', 'o1', { title: 'Chair' });
+      await engine.instances.update(alice, 'Order', 'o2', { title: 'Stool' });
+      await client.until(() => client.events().length === 2);
+      assert.deepEqual(
+        client.events().map((event) => [event.kind, event.instanceId, event.seq]),
+        [
+          ['create', 'o2', 1],
+          ['update', 'o2', 2],
+        ]
+      );
+    });
+
+    test('carries operation events, replayed and as they commit, and no read-only operation', { skip: typescriptOnly('behaviors') }, async () => {
+      const { engine, base } = await serve({}, { metaSchema: openMetaSchema(), behaviors: testBehaviors });
+      publishItem(engine, [{ name: 'test.Counter', config: { limit: 3 } }, { name: 'test.Tally' }]);
+      await engine.instances.create(alice, 'Item', { title: 'Desk' }, { id: 'i1' });
+      await engine.instances.invoke(alice, 'Item', 'i1', 'increment');
+      const client = await open(`${base}/namespaces/default/events?schema=Item`);
+      await client.until(() => client.events().length === 4);
+      // A read-only operation appends nothing; bump's two calls run in
+      // savepoints under one operation event; tryBump's call is vetoed and
+      // rolled back alone, and its own write commits with its event.
+      await engine.instances.invoke(alice, 'Item', 'i1', 'history');
+      await engine.instances.invoke(alice, 'Item', 'i1', 'bump', { times: 2 });
+      await engine.instances.invoke(alice, 'Item', 'i1', 'tryBump');
+      await client.until(() => client.events().length === 6);
+      assert.deepEqual(
+        client.events().map((event) => [event.kind, event.seq, event.kind === 'operation' ? (event.change as { operation: string }).operation : null]),
+        [
+          ['define', null, null],
+          ['publish', null, null],
+          ['create', 1, null],
+          ['operation', 2, 'increment'],
+          ['operation', 3, 'bump'],
+          ['operation', 4, 'tryBump'],
+        ]
+      );
+      assert.deepEqual(client.events(), (await engine.events.read(alice, { schema: 'Item' })).events);
+    });
+
+    test('sends a comment every heartbeat while it waits', async () => {
+      const { engine, base } = await serve({ stream: { heartbeatMs: 30 } });
+      await publishOrders(engine);
+      const client = await open(`${base}/namespaces/default/events`);
+      await client.until(() => client.frames.filter((frame) => frame.comment === 'keepalive').length >= 2);
+      assert.equal(client.events().length, 2);
+      await engine.instances.create(alice, 'Order', { title: 'Desk' }, { id: 'o1' });
+      await client.until(() => client.events().length === 3);
+    });
+
+    test('a namespace stream carries its own events and the shared publishes, and none of another namespace', async () => {
+      const { engine, base } = await serve({}, { namespaces: { names: ['east', 'west', 'common'], shared: 'common' } });
+      await publishOrders(engine, 'west');
+      const client = await open(`${base}/namespaces/east/events`);
+      await engine.schemas.define(alice, noteDocument, { namespace: 'common' });
+      await engine.schemas.publish(alice, 'Note', { namespace: 'common' });
+      await engine.instances.create(alice, 'Order', { title: 'West' }, { id: 'w1', namespace: 'west' });
+      await engine.instances.create(alice, 'Note', { body: 'West' }, { id: 'n1', namespace: 'west' });
+      await engine.instances.create(alice, 'Note', { body: 'East' }, { id: 'n1', namespace: 'east' });
+      await client.until(() => client.events().some((event) => event.namespace === 'east'));
+      assert.deepEqual(
+        client.events().map((event) => [event.kind, event.namespace, event.schema]),
+        [
+          ['publish', 'common', 'Note'],
+          ['create', 'east', 'Note'],
+        ]
+      );
+    });
+
+    test('starts at the head with after=head: no replay, ready at once, and a reconnect resumes where it caught up', async () => {
+      const { engine, base } = await serve({ stream: { heartbeatMs: 60_000 } });
+      await publishOrders(engine);
+      await engine.instances.create(alice, 'Order', { title: 'Desk' }, { id: 'o1' });
+      const head = await engine.events.head();
+      const client = await open(`${base}/namespaces/default/events?after=head`);
+      await client.until((frame) => frame.event === 'ready');
+      assert.deepEqual(client.events(), []);
+      assert.equal(client.lastId(), String(head), "ready's id is the head, so EventSource holds it");
+
+      // An event commits while the client is away; it reconnects with the
+      // id it holds and gets that event, not a fresh head.
+      client.disconnect();
+      await engine.instances.create(alice, 'Order', { title: 'Lamp' }, { id: 'o2' });
+      const resumed = await open(`${base}/namespaces/default/events?after=head`, { 'last-event-id': String(head) });
+      await resumed.until(() => resumed.events().length === 1);
+      assert.deepEqual(
+        resumed.events().map((event) => event.instanceId),
+        ['o2']
+      );
+    });
+
+    test('filters drop what they exclude, and an id with no data carries the cursor past it, so a reconnect neither replays nor rescans it', { skip: typescriptOnly('behaviors') }, async () => {
+      const { engine, base } = await serve({ stream: { pageSize: 2, heartbeatMs: 60_000 } }, { metaSchema: openMetaSchema(), behaviors: testBehaviors });
+      publishItem(engine, [{ name: 'test.Counter' }]);
+      await engine.instances.create(alice, 'Item', { title: 'Desk' }, { id: 'i1' });
+      for (let beat = 0; beat < 5; beat += 1) {
+        await engine.instances.invoke(alice, 'Item', 'i1', 'increment');
+      }
+      const cursors = (await engine.events.read(alice)).events.map((event) => event.cursor);
+      assert.equal(cursors.length, 8);
+
+      const client = await open(`${base}/namespaces/default/events?exclude=increment`);
+      await client.until((frame) => frame.event === 'ready');
+      // Pages of 2: define and publish; the create, and an id past the
+      // increment the page dropped; an id alone for a page that kept
+      // nothing; then ready at the last cursor.
+      assert.deepEqual(
+        client.frames.filter((frame) => frame.id !== undefined).map((frame) => [frame.event ?? (frame.data === undefined ? 'id' : 'event'), Number(frame.id)]),
+        [
+          ['event', cursors[0]],
+          ['event', cursors[1]],
+          ['event', cursors[2]],
+          ['id', cursors[3]],
+          ['id', cursors[5]],
+          ['ready', cursors[7]],
+        ]
+      );
+      assert.deepEqual(
+        client.events().map((event) => event.kind),
+        ['define', 'publish', 'create']
+      );
+
+      // Live: a dropped increment writes nothing; the next kept event does.
+      await engine.instances.invoke(alice, 'Item', 'i1', 'increment');
+      await engine.instances.update(alice, 'Item', 'i1', { title: 'Lamp' });
+      await client.until(() => client.events().length === 4);
+      assert.equal(client.events()[3].kind, 'update');
+      assert.equal(client.lastId(), String(client.events()[3].cursor));
+
+      // A reconnect from the last id rescans nothing it already passed: a
+      // page of what it passed would send a cursor at or before it.
+      await engine.instances.invoke(alice, 'Item', 'i1', 'increment');
+      client.disconnect();
+      const resumed = await open(`${base}/namespaces/default/events?exclude=increment&kind=operation,update`, { 'last-event-id': client.lastId() as string });
+      await resumed.until((frame) => frame.event === 'ready');
+      assert.deepEqual(resumed.events(), []);
+      const ids = resumed.frames.filter((frame) => frame.id !== undefined).map((frame) => Number(frame.id));
+      assert.ok(ids.length > 0 && ids.every((id) => id > Number(client.lastId())), `cursors after ${String(client.lastId())}: ${JSON.stringify(ids)}`);
+      assert.equal(ids.at(-1), await engine.events.head());
+    });
+
+    test('while it waits, a heartbeat carries the cursor past events the filters dropped', { skip: typescriptOnly('behaviors') }, async () => {
+      const { engine, base } = await serve({ stream: { heartbeatMs: 30 } }, { metaSchema: openMetaSchema(), behaviors: testBehaviors });
+      publishItem(engine, [{ name: 'test.Counter' }]);
+      await engine.instances.create(alice, 'Item', { title: 'Desk' }, { id: 'i1' });
+      const client = await open(`${base}/namespaces/default/events?after=head&behavior=test.Flag`);
+      await client.until((frame) => frame.event === 'ready');
+      await engine.instances.invoke(alice, 'Item', 'i1', 'increment');
+      const cursor = String(await engine.events.head());
+      await client.until((frame) => frame.id === cursor && frame.event === undefined);
+      const carried = client.frames.find((frame) => frame.id === cursor && frame.event === undefined);
+      assert.deepEqual(carried, { id: cursor }, 'an id with no data, which EventSource records and dispatches nothing for');
+      assert.deepEqual(client.events(), []);
+      // Then plain heartbeats again: the cursor has not moved.
+      const after = client.frames.length;
+      await client.until((frame, frames) => frames.length > after && frame.comment === 'keepalive');
+    });
+
+    test('a stream checks its filters before it answers', async () => {
+      const { engine, base } = await serve();
+      await publishOrders(engine);
+      for (const query of ['kind=created', 'behavior=not-a-name', 'exclude=Heartbeat', 'after=tail']) {
+        const refused = await open(`${base}/namespaces/default/events?${query}`);
+        assert.equal(refused.response.status, 400, query);
+        assert.equal(refused.response.headers.get('content-type'), 'application/problem+json');
+        await refused.response.body?.cancel();
+      }
+      assert.equal(engine.events.watching, 0);
+    });
+
+    test('a refused stream answers a problem document instead', { skip: typescriptOnly('a policy') }, async () => {
+      const onlyOrders: AccessPolicy = ({ schema }) => schema === 'Order';
+      const { engine, base } = await serve({}, { policy: onlyOrders });
+      await publishOrders(engine);
+      const forbidden = await open(`${base}/namespaces/default/events?schema=Note`);
+      assert.equal(forbidden.response.status, 403);
+      assert.equal(forbidden.response.headers.get('content-type'), 'application/problem+json');
+      assert.equal(((await forbidden.response.json()) as { code: string }).code, 'forbidden');
+
+      const anonymous = await open(`${base}/namespaces/default/events`, { authorization: '' });
+      assert.equal(anonymous.response.status, 401);
+      await anonymous.response.body?.cancel();
+      const unknown = await open(`${base}/namespaces/nowhere/events`);
+      assert.equal(unknown.response.status, 404);
+      await unknown.response.body?.cancel();
+      assert.equal(engine.events.watching, 0);
+    });
+
+    test('a resume from before the floor is 410 cursor_expired, a stream from the start replays from the floor, and a stream retention passes ends', { skip: unlessOn(backend, 'postgres', 'two commits and a prune in one turn of the event loop, before the stream reads them: the synchronous engine alone') }, async () => {
+      const { engine, base } = await serve({ stream: { heartbeatMs: 60_000 } }, { retention: { maxEvents: 1 } });
+      await publishOrders(engine);
+      await engine.instances.create(alice, 'Order', { title: 'Desk' }, { id: 'o1' });
+      await engine.runner.prune();
+      const expired = await open(`${base}/namespaces/default/events?after=head`, { 'last-event-id': '1' });
+      assert.equal(expired.response.status, 410);
+      assert.equal(expired.response.headers.get('content-type'), 'application/problem+json');
+      const body = (await expired.response.json()) as { code: string; details: unknown };
+      assert.deepEqual([body.code, body.details], ['cursor_expired', { after: 1, floor: 2, head: 3 }]);
+
+      // A stream from the start, with no cursor, replays what the log holds,
+      // from the floor.
+      const fromStart = await open(`${base}/namespaces/default/events`);
+      await fromStart.until((frame) => frame.event === 'ready');
+      assert.deepEqual(
+        fromStart.events().map((event) => event.cursor),
+        [3]
+      );
+      fromStart.disconnect();
+
+      // From the head the stream goes on; two commits and a prune before it
+      // reads them leave its cursor behind the floor, and it ends. The
+      // three run in one turn of the event loop, where the stream cannot
+      // read between them: on SQLite's synchronous engine alone.
+      const client = await open(`${base}/namespaces/default/events?after=head`);
+      await client.until((frame) => frame.event === 'ready');
+      assert.equal(client.lastId(), '3');
+      engine.instances.create(alice, 'Order', { title: 'Lamp' }, { id: 'o2' });
+      engine.instances.create(alice, 'Order', { title: 'Chair' }, { id: 'o3' });
+      engine.runner.prune();
+      await client.ended;
+      assert.deepEqual(client.events(), []);
+      const reconnected = await open(`${base}/namespaces/default/events`, { 'last-event-id': client.lastId() as string });
+      assert.equal(reconnected.response.status, 410);
+      await reconnected.response.body?.cancel();
+      await eventually(() => engine.events.watching === 0, 'every stream to stop watching');
+    });
+
+    test('a client that disconnects stops its stream and its watcher', async () => {
+      const { engine, base } = await serve({ stream: { heartbeatMs: 60_000 } });
+      await publishOrders(engine);
+      const streams = await Promise.all([0, 1, 2].map(() => open(`${base}/namespaces/default/events`)));
+      await Promise.all(streams.map((client) => client.until(() => client.events().length === 2)));
+      // A stream on the synchronous engine watches it on this thread; one
+      // on openEngineAsync's waits for a commit in the engine, off it.
+      const watches = backend.name === 'sqlite';
+      assert.equal(engine.events.watching, watches ? 3 : 0);
+      streams[0].disconnect();
+      streams[1].disconnect();
+      if (watches) {
+        await eventually(() => engine.events.watching === 1, 'two watchers to go');
+      }
+      await engine.instances.create(alice, 'Order', { title: 'Desk' }, { id: 'o1' });
+      await streams[2].until(() => streams[2].events().length === 3);
+    });
+
+    test('closing the engine ends every stream', async () => {
+      const { engine, base } = await serve({ stream: { heartbeatMs: 60_000 } });
+      await publishOrders(engine);
+      const client = await open(`${base}/namespaces/default/events`);
+      await client.until(() => client.events().length === 2);
+      engine.close();
+      await client.ended;
+      assert.equal(engine.events.watching, 0);
+    });
   });
-
-  test('resumes after Last-Event-ID, which wins over after', async () => {
-    const { engine, base } = await serve();
-    publishOrders(engine);
-    for (const id of ['o1', 'o2', 'o3']) {
-      engine.instances.create(alice, 'Order', { title: id }, { id });
-    }
-    const cursors = engine.events.read(alice).events.map((event) => event.cursor);
-    const first = await open(`${base}/namespaces/default/events?after=${cursors[1]}`);
-    await first.until(() => first.events().length === 3);
-    const lastId = first.frames.filter((frame) => frame.id !== undefined)[1].id as string;
-    first.disconnect();
-
-    const resumed = await open(`${base}/namespaces/default/events?after=0`, { 'last-event-id': lastId });
-    await resumed.until(() => resumed.events().length === 1);
-    assert.deepEqual(
-      resumed.events().map((event) => event.cursor),
-      [cursors[4]]
-    );
-  });
-
-  test('filters by schema and instance', async () => {
-    const { engine, base } = await serve();
-    publishOrders(engine);
-    engine.schemas.define(alice, noteDocument);
-    engine.schemas.publish(alice, 'Note');
-    engine.instances.create(alice, 'Order', { title: 'Desk' }, { id: 'o1' });
-    engine.instances.create(alice, 'Note', { body: 'hi' }, { id: 'n1' });
-    engine.instances.create(alice, 'Order', { title: 'Lamp' }, { id: 'o2' });
-    const client = await open(`${base}/namespaces/default/events?schema=Order&instanceId=o2`);
-    engine.instances.update(alice, 'Order', 'o1', { title: 'Chair' });
-    engine.instances.update(alice, 'Order', 'o2', { title: 'Stool' });
-    await client.until(() => client.events().length === 2);
-    assert.deepEqual(
-      client.events().map((event) => [event.kind, event.instanceId, event.seq]),
-      [
-        ['create', 'o2', 1],
-        ['update', 'o2', 2],
-      ]
-    );
-  });
-
-  test('carries operation events, replayed and as they commit, and no read-only operation', async () => {
-    const { engine, base } = await serve({}, { metaSchema: openMetaSchema(), behaviors: testBehaviors });
-    publishItem(engine, [{ name: 'test.Counter', config: { limit: 3 } }, { name: 'test.Tally' }]);
-    engine.instances.create(alice, 'Item', { title: 'Desk' }, { id: 'i1' });
-    engine.instances.invoke(alice, 'Item', 'i1', 'increment');
-    const client = await open(`${base}/namespaces/default/events?schema=Item`);
-    await client.until(() => client.events().length === 4);
-    // A read-only operation appends nothing; bump's two calls run in
-    // savepoints under one operation event; tryBump's call is vetoed and
-    // rolled back alone, and its own write commits with its event.
-    engine.instances.invoke(alice, 'Item', 'i1', 'history');
-    engine.instances.invoke(alice, 'Item', 'i1', 'bump', { times: 2 });
-    engine.instances.invoke(alice, 'Item', 'i1', 'tryBump');
-    await client.until(() => client.events().length === 6);
-    assert.deepEqual(
-      client.events().map((event) => [event.kind, event.seq, event.kind === 'operation' ? (event.change as { operation: string }).operation : null]),
-      [
-        ['define', null, null],
-        ['publish', null, null],
-        ['create', 1, null],
-        ['operation', 2, 'increment'],
-        ['operation', 3, 'bump'],
-        ['operation', 4, 'tryBump'],
-      ]
-    );
-    assert.deepEqual(client.events(), engine.events.read(alice, { schema: 'Item' }).events);
-  });
-
-  test('sends a comment every heartbeat while it waits', async () => {
-    const { engine, base } = await serve({ stream: { heartbeatMs: 30 } });
-    publishOrders(engine);
-    const client = await open(`${base}/namespaces/default/events`);
-    await client.until(() => client.frames.filter((frame) => frame.comment === 'keepalive').length >= 2);
-    assert.equal(client.events().length, 2);
-    engine.instances.create(alice, 'Order', { title: 'Desk' }, { id: 'o1' });
-    await client.until(() => client.events().length === 3);
-  });
-
-  test('a namespace stream carries its own events and the shared publishes, and none of another namespace', async () => {
-    const { engine, base } = await serve({}, { namespaces: { names: ['east', 'west', 'common'], shared: 'common' } });
-    publishOrders(engine, 'west');
-    const client = await open(`${base}/namespaces/east/events`);
-    engine.schemas.define(alice, noteDocument, { namespace: 'common' });
-    engine.schemas.publish(alice, 'Note', { namespace: 'common' });
-    engine.instances.create(alice, 'Order', { title: 'West' }, { id: 'w1', namespace: 'west' });
-    engine.instances.create(alice, 'Note', { body: 'West' }, { id: 'n1', namespace: 'west' });
-    engine.instances.create(alice, 'Note', { body: 'East' }, { id: 'n1', namespace: 'east' });
-    await client.until(() => client.events().some((event) => event.namespace === 'east'));
-    assert.deepEqual(
-      client.events().map((event) => [event.kind, event.namespace, event.schema]),
-      [
-        ['publish', 'common', 'Note'],
-        ['create', 'east', 'Note'],
-      ]
-    );
-  });
-
-  test('starts at the head with after=head: no replay, ready at once, and a reconnect resumes where it caught up', async () => {
-    const { engine, base } = await serve({ stream: { heartbeatMs: 60_000 } });
-    publishOrders(engine);
-    engine.instances.create(alice, 'Order', { title: 'Desk' }, { id: 'o1' });
-    const head = engine.events.head();
-    const client = await open(`${base}/namespaces/default/events?after=head`);
-    await client.until((frame) => frame.event === 'ready');
-    assert.deepEqual(client.events(), []);
-    assert.equal(client.lastId(), String(head), "ready's id is the head, so EventSource holds it");
-
-    // An event commits while the client is away; it reconnects with the
-    // id it holds and gets that event, not a fresh head.
-    client.disconnect();
-    engine.instances.create(alice, 'Order', { title: 'Lamp' }, { id: 'o2' });
-    const resumed = await open(`${base}/namespaces/default/events?after=head`, { 'last-event-id': String(head) });
-    await resumed.until(() => resumed.events().length === 1);
-    assert.deepEqual(
-      resumed.events().map((event) => event.instanceId),
-      ['o2']
-    );
-  });
-
-  test('filters drop what they exclude, and an id with no data carries the cursor past it, so a reconnect neither replays nor rescans it', async () => {
-    const { engine, base } = await serve({ stream: { pageSize: 2, heartbeatMs: 60_000 } }, { metaSchema: openMetaSchema(), behaviors: testBehaviors });
-    publishItem(engine, [{ name: 'test.Counter' }]);
-    engine.instances.create(alice, 'Item', { title: 'Desk' }, { id: 'i1' });
-    for (let beat = 0; beat < 5; beat += 1) {
-      engine.instances.invoke(alice, 'Item', 'i1', 'increment');
-    }
-    const cursors = engine.events.read(alice).events.map((event) => event.cursor);
-    assert.equal(cursors.length, 8);
-
-    const client = await open(`${base}/namespaces/default/events?exclude=increment`);
-    await client.until((frame) => frame.event === 'ready');
-    // Pages of 2: define and publish; the create, and an id past the
-    // increment the page dropped; an id alone for a page that kept
-    // nothing; then ready at the last cursor.
-    assert.deepEqual(
-      client.frames.filter((frame) => frame.id !== undefined).map((frame) => [frame.event ?? (frame.data === undefined ? 'id' : 'event'), Number(frame.id)]),
-      [
-        ['event', cursors[0]],
-        ['event', cursors[1]],
-        ['event', cursors[2]],
-        ['id', cursors[3]],
-        ['id', cursors[5]],
-        ['ready', cursors[7]],
-      ]
-    );
-    assert.deepEqual(
-      client.events().map((event) => event.kind),
-      ['define', 'publish', 'create']
-    );
-
-    // Live: a dropped increment writes nothing; the next kept event does.
-    engine.instances.invoke(alice, 'Item', 'i1', 'increment');
-    engine.instances.update(alice, 'Item', 'i1', { title: 'Lamp' });
-    await client.until(() => client.events().length === 4);
-    assert.equal(client.events()[3].kind, 'update');
-    assert.equal(client.lastId(), String(client.events()[3].cursor));
-
-    // A reconnect from the last id rescans nothing it already passed.
-    engine.instances.invoke(alice, 'Item', 'i1', 'increment');
-    client.disconnect();
-    const reads: Array<number | 'head' | undefined> = [];
-    const read = engine.events.read.bind(engine.events);
-    engine.events.read = (principal, options) => {
-      reads.push(options?.after);
-      return read(principal, options);
-    };
-    const resumed = await open(`${base}/namespaces/default/events?exclude=increment&kind=operation,update`, { 'last-event-id': client.lastId() as string });
-    await resumed.until((frame) => frame.event === 'ready');
-    assert.deepEqual(resumed.events(), []);
-    assert.equal(reads[0], Number(client.lastId()));
-  });
-
-  test('while it waits, a heartbeat carries the cursor past events the filters dropped', async () => {
-    const { engine, base } = await serve({ stream: { heartbeatMs: 30 } }, { metaSchema: openMetaSchema(), behaviors: testBehaviors });
-    publishItem(engine, [{ name: 'test.Counter' }]);
-    engine.instances.create(alice, 'Item', { title: 'Desk' }, { id: 'i1' });
-    const client = await open(`${base}/namespaces/default/events?after=head&behavior=test.Flag`);
-    await client.until((frame) => frame.event === 'ready');
-    engine.instances.invoke(alice, 'Item', 'i1', 'increment');
-    const cursor = String(engine.events.head());
-    await client.until((frame) => frame.id === cursor && frame.event === undefined);
-    const carried = client.frames.find((frame) => frame.id === cursor && frame.event === undefined);
-    assert.deepEqual(carried, { id: cursor }, 'an id with no data, which EventSource records and dispatches nothing for');
-    assert.deepEqual(client.events(), []);
-    // Then plain heartbeats again: the cursor has not moved.
-    const after = client.frames.length;
-    await client.until((frame, frames) => frames.length > after && frame.comment === 'keepalive');
-  });
-
-  test('a stream checks its filters before it answers', async () => {
-    const { engine, base } = await serve();
-    publishOrders(engine);
-    for (const query of ['kind=created', 'behavior=not-a-name', 'exclude=Heartbeat', 'after=tail']) {
-      const refused = await open(`${base}/namespaces/default/events?${query}`);
-      assert.equal(refused.response.status, 400, query);
-      assert.equal(refused.response.headers.get('content-type'), 'application/problem+json');
-      await refused.response.body?.cancel();
-    }
-    assert.equal(engine.events.watching, 0);
-  });
-
-  test('a refused stream answers a problem document instead', async () => {
-    const onlyOrders: AccessPolicy = ({ schema }) => schema === 'Order';
-    const { engine, base } = await serve({}, { policy: onlyOrders });
-    publishOrders(engine);
-    const forbidden = await open(`${base}/namespaces/default/events?schema=Note`);
-    assert.equal(forbidden.response.status, 403);
-    assert.equal(forbidden.response.headers.get('content-type'), 'application/problem+json');
-    assert.equal(((await forbidden.response.json()) as { code: string }).code, 'forbidden');
-
-    const anonymous = await open(`${base}/namespaces/default/events`, { authorization: '' });
-    assert.equal(anonymous.response.status, 401);
-    await anonymous.response.body?.cancel();
-    const unknown = await open(`${base}/namespaces/nowhere/events`);
-    assert.equal(unknown.response.status, 404);
-    await unknown.response.body?.cancel();
-    assert.equal(engine.events.watching, 0);
-  });
-
-  test('a resume from before the floor is 410 cursor_expired, a stream from the start replays from the floor, and a stream retention passes ends', async () => {
-    const { engine, base } = await serve({ stream: { heartbeatMs: 60_000 } }, { retention: { maxEvents: 1 } });
-    publishOrders(engine);
-    engine.instances.create(alice, 'Order', { title: 'Desk' }, { id: 'o1' });
-    engine.runner.prune();
-    const expired = await open(`${base}/namespaces/default/events?after=head`, { 'last-event-id': '1' });
-    assert.equal(expired.response.status, 410);
-    assert.equal(expired.response.headers.get('content-type'), 'application/problem+json');
-    const body = (await expired.response.json()) as { code: string; details: unknown };
-    assert.deepEqual([body.code, body.details], ['cursor_expired', { after: 1, floor: 2, head: 3 }]);
-
-    // A stream from the start, with no cursor, replays what the log holds,
-    // from the floor.
-    const fromStart = await open(`${base}/namespaces/default/events`);
-    await fromStart.until((frame) => frame.event === 'ready');
-    assert.deepEqual(
-      fromStart.events().map((event) => event.cursor),
-      [3]
-    );
-    fromStart.disconnect();
-
-    // From the head the stream goes on; two commits and a prune before it
-    // reads them leave its cursor behind the floor, and it ends.
-    const client = await open(`${base}/namespaces/default/events?after=head`);
-    await client.until((frame) => frame.event === 'ready');
-    assert.equal(client.lastId(), '3');
-    engine.instances.create(alice, 'Order', { title: 'Lamp' }, { id: 'o2' });
-    engine.instances.create(alice, 'Order', { title: 'Chair' }, { id: 'o3' });
-    engine.runner.prune();
-    await client.ended;
-    assert.deepEqual(client.events(), []);
-    const reconnected = await open(`${base}/namespaces/default/events`, { 'last-event-id': client.lastId() as string });
-    assert.equal(reconnected.response.status, 410);
-    await reconnected.response.body?.cancel();
-    await eventually(() => engine.events.watching === 0, 'every stream to stop watching');
-  });
-
-  test('a client that disconnects stops its stream and its watcher', async () => {
-    const { engine, base } = await serve({ stream: { heartbeatMs: 60_000 } });
-    publishOrders(engine);
-    const streams = await Promise.all([0, 1, 2].map(() => open(`${base}/namespaces/default/events`)));
-    await Promise.all(streams.map((client) => client.until(() => client.events().length === 2)));
-    assert.equal(engine.events.watching, 3);
-    streams[0].disconnect();
-    streams[1].disconnect();
-    await eventually(() => engine.events.watching === 1, 'two watchers to go');
-    engine.instances.create(alice, 'Order', { title: 'Desk' }, { id: 'o1' });
-    await streams[2].until(() => streams[2].events().length === 3);
-  });
-
-  test('closing the engine ends every stream', async () => {
-    const { engine, base } = await serve({ stream: { heartbeatMs: 60_000 } });
-    publishOrders(engine);
-    const client = await open(`${base}/namespaces/default/events`);
-    await client.until(() => client.events().length === 2);
-    engine.close();
-    await client.ended;
-    assert.equal(engine.events.watching, 0);
-  });
-});
+}

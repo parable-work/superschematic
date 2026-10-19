@@ -1,0 +1,45 @@
+# acme.Rating for the Rust engine (D58): an extension's behavior is a crate
+# of the project that declares it, implementing the trait the core's
+# behaviors implement, and the project's engine compiles it in. It is a
+# workspace of its own, as a project's crates are, with its own lock file,
+# and reaches the engine by path at this checkout. ext/behavior.go names it
+# in acme.Rating's BehaviorSpec (Rust), so the engine crate the
+# `projectengine` generator writes for a schema that composes acme.Rating
+# depends on it beside the engine's crates.
+
+[workspace]
+resolver = "2"
+
+[workspace.lints.clippy]
+all = { level = "deny", priority = -1 }
+cognitive_complexity = "warn"
+
+[package]
+name = "acme-behaviors"
+description = "acme.Rating, the acme-schematic example's behavior, for the Rust engine (D58)"
+version = "0.0.0"
+edition = "2021"
+# The toolchain tools.env pins, which builds every archive a binding links.
+rust-version = "1.99.0"
+license = "Apache-2.0"
+publish = false
+
+[dependencies]
+# The engine's JSON features (D58): a number keeps its text, an object its
+# members' order.
+serde_json = { version = "1.0.149", features = ["arbitrary_precision", "preserve_order"] }
+# The plug-in API, without the databases: the engine the project builds
+# picks them (its `sqlite` and `postgres` features), and acme.Rating's SQL is
+# the same on both.
+superschematic-engine = { path = "../../../../runtime/engine/rust/engine", default-features = false }
+
+[dev-dependencies]
+# The tests open engines on SQLite, and on Postgres when
+# SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL names one.
+superschematic-engine = { path = "../../../../runtime/engine/rust/engine", features = ["sqlite", "postgres"] }
+# The core's behaviors, which an engine registers ahead of acme's, as the
+# TypeScript engine registers its own when it opens.
+superschematic-engine-behaviors = { path = "../../../../runtime/engine/rust/behaviors" }
+
+[lints]
+workspace = true

@@ -28,6 +28,13 @@ func APIDir(root, schemaName string) string {
 	return filepath.Join(root, "api", schemaName)
 }
 
+// EngineDir returns the directory of a schema's project engine crate in a
+// language (D58): engine/rust/<schema>, which the projectengine generator
+// writes when the schema's types compose an extension's behavior.
+func EngineDir(root, lang, schemaName string) string {
+	return filepath.Join(root, "engine", lang, schemaName)
+}
+
 // SDKDir returns the client SDK output directory for a language.
 func SDKDir(root, lang, schemaName string) string {
 	return filepath.Join(root, "sdk", lang, schemaName)

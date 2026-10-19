@@ -10,9 +10,9 @@
 // addon, which has this package's behaviors in Rust: an open names each
 // of this package's own objects by its declaration's name, and the addon
 // registers the Rust one; any other behavior (a fixture, a stand-in, a
-// wrapper of one of this package's) is written in TypeScript and waits
-// for the bridge (scripts/engine-napi.sh builds the addon, and the
-// engine's scripts/rust-ratchet.mjs runs this suite against
+// wrapper of one of this package's) is written in TypeScript, which the
+// test addon's bridge runs (scripts/engine-napi.sh --js-behaviors builds
+// it, and the engine's scripts/rust-ratchet.mjs runs this suite against
 // test/rust-pending.txt).
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
@@ -29,7 +29,16 @@ import { endCase, recordOpen, recordPackage, registerDirectory, type TestContext
  * The engine the tests open: the TypeScript engine, or with
  * ENGINE_IMPL=rust the Rust engine, behind the same API.
  */
-const engineImpl: 'typescript' | 'rust' = implementation(process.env.ENGINE_IMPL);
+export const engineImpl: 'typescript' | 'rust' = implementation(process.env.ENGINE_IMPL);
+
+/**
+ * Why a test that passes a value driver written in TypeScript
+ * (values.driver) skips on the Rust engine: the TypeScript engine's alone,
+ * dropped at the cutover (D58), since the Rust engine's drivers are Rust
+ * ValueDrivers compiled into it. Such a test is not recorded either, so the
+ * corpus each implementation records is the same.
+ */
+export const TYPESCRIPT_DRIVER = engineImpl === 'rust' && 'a value driver written in TypeScript (values.driver), dropped at the cutover (D58)';
 
 function implementation(given: string | undefined): 'typescript' | 'rust' {
   if (given === undefined || given === '' || given === 'typescript') {

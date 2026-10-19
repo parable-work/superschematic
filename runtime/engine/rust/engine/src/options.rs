@@ -23,7 +23,9 @@
 //! ```
 //!
 //! `path` opens a SQLite file; `postgres` (`{ url, schema?, poolMax?,
-//! listen?, connectTimeoutMs?, migrationTimeoutMs? }`) a schema of a
+//! listen?, connectTimeoutMs?, migrationTimeoutMs?,
+//! idleInTransactionTimeoutMs? }`, the last 0 for the server's own) a
+//! schema of a
 //! Postgres database, in place of `path`. `ids` is `"uuid"` (the default),
 //! `{ "sequence": prefix }` or `{ "seeded": prefix }`; `clock` is
 //! `"system"` (the default), `"strict"` or `{ "manual": ms }`. A member
@@ -191,8 +193,7 @@ fn sqlite_storage(_path: &str, _busy_timeout: Option<std::time::Duration>) -> Re
 
 #[cfg(feature = "postgres")]
 fn postgres_storage(given: &Value, busy_timeout: Option<std::time::Duration>) -> Result<Storage> {
-    const SHAPE: &str =
-        "postgres is { url, schema?, poolMax?, listen?, connectTimeoutMs?, migrationTimeoutMs? }";
+    const SHAPE: &str = "postgres is { url, schema?, poolMax?, listen?, connectTimeoutMs?, migrationTimeoutMs?, idleInTransactionTimeoutMs? }";
     let Value::Object(members) = given else {
         return Err(Error::usage(SHAPE));
     };
@@ -204,6 +205,7 @@ fn postgres_storage(given: &Value, busy_timeout: Option<std::time::Duration>) ->
             "listen",
             "connectTimeoutMs",
             "migrationTimeoutMs",
+            "idleInTransactionTimeoutMs",
         ]
         .contains(&key.as_str())
     }) {
@@ -262,6 +264,22 @@ fn postgres_storage(given: &Value, busy_timeout: Option<std::time::Duration>) ->
                     ))
                 })?;
         }
+    }
+    if let Some(given) = members
+        .get("idleInTransactionTimeoutMs")
+        .filter(|value| !value.is_null())
+    {
+        let ms = safe_integer(given)
+            .filter(|ms| *ms >= 0)
+            .and_then(|ms| u64::try_from(ms).ok())
+            .ok_or_else(|| {
+                Error::usage(format!(
+                    "postgres.idleInTransactionTimeoutMs is a non-negative integer of milliseconds (0 for the server's own), got {}",
+                    js_string(given)
+                ))
+            })?;
+        options.idle_in_transaction_timeout =
+            (ms > 0).then(|| std::time::Duration::from_millis(ms));
     }
     Ok(Storage::Postgres { url, options })
 }
@@ -456,6 +474,36 @@ mod tests {
             options.storage,
             Storage::Sqlite { ref options, .. } if options.busy_timeout == std::time::Duration::from_millis(250)
         ));
+    }
+
+    #[cfg(feature = "postgres")]
+    #[test]
+    fn postgres_options_read_from_json_with_the_idle_timeout() {
+        let read =
+            |postgres: Value| match EngineOptions::from_json(&json!({ "postgres": postgres }))
+                .map(|options| options.storage)
+            {
+                Ok(Storage::Postgres { options, .. }) => Ok(options.idle_in_transaction_timeout),
+                Ok(_) => panic!("a Postgres storage"),
+                Err(error) => Err(error.to_string()),
+            };
+        let url = "postgres://localhost/postgres";
+        assert_eq!(
+            read(json!({ "url": url })),
+            Ok(Some(std::time::Duration::from_secs(60)))
+        );
+        assert_eq!(
+            read(json!({ "url": url, "idleInTransactionTimeoutMs": 1500 })),
+            Ok(Some(std::time::Duration::from_millis(1500)))
+        );
+        assert_eq!(
+            read(json!({ "url": url, "idleInTransactionTimeoutMs": 0 })),
+            Ok(None)
+        );
+        assert_eq!(
+            read(json!({ "url": url, "idleInTransactionTimeoutMs": -1 })),
+            Err("postgres.idleInTransactionTimeoutMs is a non-negative integer of milliseconds (0 for the server's own), got -1".to_owned())
+        );
     }
 
     #[test]

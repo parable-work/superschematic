@@ -74,6 +74,13 @@ server of an API on the database mounts the engine's routes,
 `/engine/<service>` unless set; and `outputs.engine.policy` the access
 policy it opens the engine with, `permission` unless set
 ([In a generated server](/superschematic/guides/engine-behaviors/#in-a-generated-server)).
+When a type of a DB or General schema
+composes an extension's behavior whose registration names a Rust crate,
+the `projectengine` generator writes the project's engine crate,
+`engine/rust/<service>`, which compiles the core's behaviors and the
+extension's crates into the Rust engine (D58), with the C ABI's archive
+over them a Go server links as its `ffi` member
+([The project's engine crate](/superschematic/guides/engine-behaviors/#the-projects-engine-crate)).
 The build fails before its generators
 run, one line per problem, when an engine type reaches a table or another
 engine type through a field, a table references an engine type, or an

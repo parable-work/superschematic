@@ -9,14 +9,16 @@ during a synchronous call (hosted, src/native/engine.ts). A clock
 function sets a manual clock before each call. The addon registers the
 core's behaviors, then the ones behaviors names that it is built with
 (the work queue's: Lease, Assignment, Queue, Presence, Blueprint, Budget
-and Retries), in that order. A behavior passes by its name, never as an
-object: an implementation written in TypeScript, even one whose
+and Retries), in that order, then the ones written in TypeScript. A
+behavior named by a string is the Rust one the addon is built with; an
+implementation object runs its TypeScript code, even one whose
 declaration names a behavior the addon has (a test's stand-in, or a
-wrapper of @superschematic/engine-workqueue's own), runs its TypeScript
-code, so it needs the bridge milestone 7b builds, as does an id source or
-a value driver written in TypeScript. A host that has the work queue's
-objects passes their declarations' names (the work queue's
-test/helpers.ts maps its own by identity).
+wrapper of @superschematic/engine-workqueue's own): the test addon's
+bridge runs it on this thread (src/native/bridge.ts), and the shipped
+addon refuses it. A host that has the work queue's objects passes their
+declarations' names (the work queue's test/helpers.ts maps its own by
+identity). An id source or a value driver written in TypeScript is not
+on the Rust engine.
 */
 
 import { hasAnyPermission, type PermissionMatcher } from '@superschematic/http-runtime';
@@ -38,12 +40,18 @@ export interface NativePostgresOptions {
   listen?: boolean;
   connectTimeoutMs?: number;
   migrationTimeoutMs?: number;
+  /** How long the server lets a session sit idle inside a transaction before it ends it; 60000 by default, 0 for the server's own setting. */
+  idleInTransactionTimeoutMs?: number;
 }
 
 /** The TypeScript engine's options, and the Rust engine's storage on Postgres in place of path. */
 export type NativeEngineOptions = Omit<EngineOptions, 'path' | 'policy' | 'behaviors'> & {
   path?: string;
-  /** The behaviors after the core's: a name the addon is built with (the work queue's), or one written in TypeScript (the bridge). */
+  /**
+   * The behaviors after the core's: a name, one the addon is built with
+   * (in Rust: the work queue's), or an implementation written in
+   * TypeScript, which the test addon's bridge runs.
+   */
   behaviors?: readonly (string | AnyBehaviorImplementation)[];
   /** A schema of a Postgres database, in place of path; the engine is then called through callAsync. */
   postgres?: NativePostgresOptions;
@@ -55,6 +63,10 @@ export type NativeEngineOptions = Omit<EngineOptions, 'path' | 'policy' | 'behav
 export interface HostedOptions {
   policy?: AccessPolicy;
   permissionMatcher?: PermissionMatcher;
+  /** Behaviors written in TypeScript, which the test addon's bridge runs. */
+  behaviors?: readonly AnyBehaviorImplementation[];
+  /** An id source written in TypeScript, asked on this thread for each create that gives no id. */
+  ids?: () => string;
 }
 
 /** The options the addon opens with, the clock the facade sets before each call, and what it hosts. */
@@ -93,23 +105,25 @@ export function nativeOptions(options: NativeEngineOptions): ResolvedNativeOptio
         }
         break;
       case 'behaviors': {
-        const names: string[] = [];
-        for (const behavior of value as readonly unknown[]) {
-          if (typeof behavior !== 'string') {
-            throw new NativeUnsupportedError('a behavior written in TypeScript (defineBehavior)', 'bridge');
-          }
-          names.push(behavior);
-        }
+        // A name is a behavior the addon is built with, in Rust; an
+        // implementation object is TypeScript's, which the test addon's
+        // bridge runs, whatever its declaration names.
+        const names = (value as readonly unknown[]).filter((each): each is string => typeof each === 'string');
+        const objects = (value as readonly unknown[]).filter((each) => typeof each !== 'string') as AnyBehaviorImplementation[];
         if (names.length > 0) {
           json.behaviors = names;
+        }
+        if (objects.length > 0) {
+          hosted.behaviors = objects;
         }
         break;
       }
       case 'ids':
         if (typeof value === 'function') {
-          throw new NativeUnsupportedError('an id source written in TypeScript (ids)', 'bridge');
+          hosted.ids = value as () => string;
+        } else {
+          json.ids = value;
         }
-        json.ids = value;
         break;
       case 'clock':
         if (typeof value === 'function') {
@@ -122,7 +136,7 @@ export function nativeOptions(options: NativeEngineOptions): ResolvedNativeOptio
       case 'values': {
         const { driver, ...rest } = value as Record<string, unknown>;
         if (driver !== undefined) {
-          throw new NativeUnsupportedError('a value driver written in TypeScript (values.driver)', 'bridge');
+          throw new NativeUnsupportedError('a value driver written in TypeScript (values.driver)', 'driver');
         }
         json.values = rest;
         break;
@@ -131,7 +145,7 @@ export function nativeOptions(options: NativeEngineOptions): ResolvedNativeOptio
         json[key] = value;
     }
   }
-  const names = Object.keys(hosted);
+  const names = Object.keys(hosted).filter((name) => name !== 'behaviors');
   if (names.length > 0) {
     json.hosted = names;
   }
