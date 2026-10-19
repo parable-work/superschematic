@@ -548,7 +548,11 @@ link to the app's sign-in page that comes back to the page.
 A layout at the prefix puts each page in `<main>`, after a nav of the
 resources the caller may list, the current one marked with
 `aria-current`, and a breadcrumb trail from the index to the page, an
-item by its title where its type declares one. A list whose path extends
+item by its title where its type declares one. Else an item is named by
+the label of what its route's value refers to, when every operation whose
+route holds that value refers to one target by one value, so a supplier's
+products at `suppliers/{supplierId}/products` name their supplier though
+no operation reads one; else by its noun and id. A list whose path extends
 another's, `orders/archived` beside `orders/{id}`, is its own in both,
 never an order named archived. List rows link to their items through the
 `hrefs` prop each `<type>_table` takes, a row without a title by its noun
@@ -572,11 +576,23 @@ to one resource's pages, named by its path below the prefix as
 resource's choice for a field wins on its pages over the app's.
 
 A paged list's page renders the page's items, then a `<nav
-class="ss-pager">` with "Next page" while another follows and "First
-page" on a later one, each keeping the filter and the limit; a cursor or
-limit the route refuses is its 400, as the form's message. A paged list
-without a filter renders no form, and a paged section on an item's page
-its first page and a link to the next. A search argument is the filter's
+class="ss-pager">`: "First page" on a later page, "Previous page"
+(`rel="prev"`) while the page before is known, and "Next page" while
+another follows, each keeping the filter and the limit, then a "Per page"
+form of the route's page sizes. The console keeps the cursors of the
+pages before the current one in the query's `back`, oldest first, joined
+by `.`: the fourth page's link reads `?cursor=c4&back=c2.c3`. `back`
+holds at most 4096 characters, so the oldest cursors are dropped first,
+and a leading `~` says so; a `back` the console cannot read links no page
+before and is never refused. On the second page Previous and First are
+the same link, and both render, so each page offers its links in the same
+places. The size form offers the route's `defaultLimit` and `maxLimit`
+and each of 10, 20, 50, 100, 200, 500 and 1000 below `maxLimit`, 10, 20,
+50 and 100 for acme's orders, and holds the filter; it starts at the
+first page, as a filter does, and the filter keeps the size. A cursor or limit the
+route refuses is its 400, as the form's message, with only the first
+page's link. A paged list without a filter renders no filter form, and a
+paged section on an item's page its first page and a link to the next. A search argument is the filter's
 first control, in a `role="search"` form. Every form a page renders
 takes its references' options, and its tables and details their labels,
 under the app's choices, and a list's rows link to their items through a
@@ -611,7 +627,8 @@ does and calls the list through the in-process call, which admits the
 caller and checks the filter, with the route's status for a refusal. The
 runtime applies only a 200, so a refusal leaves the table as it was
 until a reload. A paged list's links set the shard's query too, so a list
-pages in place, with or without a filter. An action's form keeps its
+pages in place, back and forth, with or without a filter, and its size
+form sets the query as the filter does. An action's form keeps its
 POST-redirect-GET.
 
 The acme app loads no runtime, so its console's lists are not live. An

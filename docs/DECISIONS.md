@@ -6844,7 +6844,8 @@ in the console's URL, so the wire stays D60's `{items, next}`.
 | A reference whose target is an API dependency's type works as any other does. Its options operation is one of the API's own (D61), and it has an in-process call unless it is a webhook or checks a signature; then the reference is left out, as any is. When the target is a dependency's, the build log names it by its service: `PlaceInput.shelfId refers to fixture-shelves-api.ShelfView, whose options operation Shelves.listShelves has no in-process call: its route checks a provider's signature first (@hmacVerified)`. | Calling the dependency's own listing, which the crate has no call for: cross-service options, which come later. |
 | acme's `superschematic.toml` sets `pages_live = true`. Its app gains a root layout, `#[layout("/")] document`: the HTML document every page renders in. Its head has `topcoat::runtime::script()` when the router set the runtime up (`RuntimeSetup` is in the app context). `app(shop, users, assets)` takes an `Option<AssetConfig>`. With one, the router adds `.assets(config).runtime()` after `.shop_orders(...)`, so the pages' controls see a rerun as a GET. `main` loads `AssetBundle::load()`, which `topcoat asset bundle` writes beside the binary. Without a bundle, `main` says so and serves without the runtime, and the lists are the GET forms they are today. The tests build the app with a hosted catalog that holds only the runtime's script, so the script's tag renders without a bundle. | Requiring the bundle, so every `cargo run` and every test would need the Topcoat CLI. The runtime in the console's layout, which renders no document. |
 
-Status: designed; nothing built. The tests are these:
+Status: built in `extensions/topcoat`, every row but the last; acme's
+console running live is designed, nothing built. The tests are these:
 
 - `TestTheConsolePagesPicksAndSearches` drives `fixture-console-api`:
   - The orders are walked forward and back by their links, and each Previous lands on the page that was left.
@@ -6853,10 +6854,12 @@ Status: designed; nothing built. The tests are these:
   - A `back` that is malformed, too long, or sent beside no cursor gives no Previous link and a 200.
   - The size form offers the route's sizes with the limit selected and the filter hidden, and its submit and a filter's start at the first page.
   - The shard's links carry `back`, and its size form sets the signal.
-  - A new `suppliers/{supplierId}/products` list names its supplier in the trail through `listSuppliers`, and shows the id for a supplier past the listing's first page.
+  - A new `suppliers/{supplierId}/products` list names its supplier in the trail through `listSuppliers`, and shows the id for a supplier past the listing's first page and to a caller who may not list suppliers.
 - A copy of the fixture whose `listOrders` declares `back` has no Previous link and gives the build log's reason.
-- `TestAReferenceToAnAPIDependencysType` moves `Supplier` into an API dependency. Selects and labels come through `listSuppliers`. With the listing behind a signature, the build log names `fixture-console-suppliers-api.Supplier`.
-- `fixture-console-api`'s golden changes, and so does any other golden whose pages page.
+- A copy with a second list under a supplier, whose `supplierId` refers to a product by its sku, names the supplier by its id and gives the build log's reason; a copy whose `listSuppliers` has a rate limit applies it to a page whose trail names a supplier.
+- `TestAReferenceToAnAPIDependencysType` moves `Supplier` into an API dependency. Selects and labels come through `listSuppliers`, under cargo test too. With the listing behind a signature, the build log names `fixture-console-suppliers-api.Supplier`.
+- `TestADerivedReferenceLabelsRows`: a relation's key with no `RefersTo` (D61, amended) gives the crate the references of the written one.
+- `fixture-console-api`'s golden changes, and `fixture-pages-api`'s by two doc comments; no other golden pages.
 - acme's Topcoat tests, in memory and over SQLite:
   - Each page is one document with the runtime's script once.
   - The console's lists render between their shards' markers, and their shards answer a filter, a page and a refused caller.

@@ -729,10 +729,11 @@ and `limit` as the query sends them and renders neither:
   400, as the JSON API does; a cursor the implementation cannot read is
   its own 400 at `cursor`.
 - **`query_pairs()`** is the query the form holds: each argument's values
-  in control order, then `limit` when it was sent, never `cursor`. A page
-  links its next page with it and `cursor` set to the page's `next`, and
-  its first page with it alone, so both keep the filter and the limit,
-  and a submitted filter, which holds no cursor, starts at the first page.
+  in control order, then `limit` when it was sent, never `cursor`, and
+  never the console's `back`, which no form holds. A page links its next
+  page with it and `cursor` set to the page's `next`, and its first page
+  with it alone, so both keep the filter and the limit, and a submitted
+  filter, which holds no cursor, starts at the first page.
 
 ```rust
 #[page("/orders")]
@@ -760,7 +761,10 @@ async fn orders(cx: &Cx, Form(filter): Form<OrderListOrdersArgsForm>) -> topcoat
 ```
 
 (`query` percent-encodes the pairs, as the [pages](#what-each-page-does)
-do.) A paged list's console page shows its pager after its table.
+do.) A paged list's console page shows its pager after its table: the
+first page, the page before, which the history in its query's `back`
+gives, and the next, then a form of its page sizes ([What each page
+does](#what-each-page-does)).
 
 ### What a value refers to
 
@@ -804,6 +808,16 @@ in-process call, a signed webhook's say, is left out, its control and
 value as they were, with the reason in the build log: `PlaceOrderLine.productId
 refers to ProductView, whose options operation ProductCatalog.listProducts
 has no in-process call: ...`.
+
+A field reads its reference through `ir.FieldReference`: its `RefersTo`,
+or, on a `@source` type, the reference a relation's key derives (D61,
+amended). `OrderLineView.productId`, beside `@source(shop-db.OrderLine)`
+whose `product` is a `Relation<Product>`, refers to the one type of the
+API sourced from `shop-db.Product` with no `RefersTo`, and is offered and
+labeled as a written reference is. A target may be an API dependency's
+type (D66), imported by the API: its options operation is still one of
+the API's own, and the build log names it by its service,
+`fixture-console-suppliers-api.Supplier`.
 
 An app's own page takes them as the console's pages do:
 
@@ -908,11 +922,42 @@ pages](#route-controls-of-the-pages)).
   the query), its search box first, and the result as `<type>_table` with
   each row linked, and a link to the new page when the caller may create
   one. A paged list renders the page's items, then
-  `<nav class="ss-pager">`: "First page" (`rel="first"`) while a cursor
-  was sent and "Next page" (`rel="next"`) while one follows, each with the
-  filter and the limit. A paged list without a filter renders no form, and
-  a refusal of its page on its own, with its status. A paged section on an
-  item's page shows the first page and a link to the list's next.
+  `<nav class="ss-pager">`, each link with the filter and the limit:
+  "First page" (`rel="first"`) while a cursor was sent, "Previous page"
+  (`rel="prev"`) while the page before is known, and "Next page"
+  (`rel="next"`) while one follows. On the second page Previous is First,
+  and both render, so each page offers its links in the same places. A
+  refused cursor or limit offers the first page alone. A paged section
+  on an item's page shows the first page and a link to the list's next,
+  with no history and no size form. A paged list without a filter renders
+  no filter form, and a refusal of its page on its own, with its status.
+- **Previous** comes from the query's `back` (D44, amended): the cursors
+  of the pages before the current one, oldest first, from the second
+  page on, joined by `.`, `c2.c3` on the fourth page. Next carries the
+  current `back` with the current cursor after it; Previous carries the
+  last cursor of `back` and the rest, or no cursor on the second page.
+  `back` holds at most 4096 characters (`MAX_BACK`): while the next one
+  would be longer, its oldest cursors are dropped, and a leading `~` says
+  so, so its oldest entry's page before is unknown and has no Previous. A
+  `back` that breaks the rule (longer than the bound, an entry that is no
+  cursor by D60's rule, a `~` past the first entry), or one sent without
+  a cursor, reads as unknown: no Previous, never a 400. No operation reads
+  `back`, and the argument form ignores it. An operation that declares an
+  argument named `back` keeps no history and links no page before, and
+  the build log says why: `no previous page for orders: order.listOrders
+  declares an argument named back, the query parameter the console keeps
+  the earlier pages' cursors in`.
+- **The size form** follows the links, a GET form, `<form
+  class="ss-page-size">`: the filter's pairs as hidden inputs, without
+  `limit`, and a select named `limit`, labeled "Per page", of the route's
+  `defaultLimit` and `maxLimit`, each of 10, 20, 50, 100, 200, 500 and 1000
+  below `maxLimit`, and the limit sent when the route admits it, in order,
+  the limit sent selected, else the default: 2 and 5 for a route of
+  `{ defaultLimit: 2, maxLimit: 5 }`, 10, 20, 50 and 100 for the defaults.
+  A route of one size has no form. It sends no cursor and no `back`, so a
+  new size starts at the first page; the filter form holds the limit sent
+  as a hidden input, so a filter keeps the size, and it too starts at the
+  first page.
 - **An item's page** renders `<type>_detail`, headed by its title, links
   to its edit and delete pages, a form per action and a section per
   resource under it, each only when the caller may.
@@ -949,7 +994,21 @@ after `<nav class="ss-nav">`, a link to each resource no item holds whose
 list the caller may use (`can_<operation>`), the current one
 `aria-current`, and `<nav class="ss-trail">`, the trail from the index to
 the page: each list, each item by its title (its type's `titleField`),
-else by its noun and id, then the page. Where a collection's path extends
+else by the label of what its route's value refers to, else by its noun
+and id, then the page. An item's step is named by a reference (D44,
+amended) when every operation whose route holds the step's parameter at
+its place and declares `RefersTo` refers to one target by one value:
+the item's detail, edit, delete and actions, and every operation of each
+collection under it, matched by the parameter's place, since operations
+name it apart. The label comes through `references::<target>_target_label`,
+the target's lookup with that one value or its listing, so a supplier's
+products at `suppliers/{supplierId}/products`, whose `supplierId` refers
+to `Supplier`, name the supplier though no operation reads one. A value
+no item has, a blank label, or a call that is refused or fails leaves
+the noun and id. When the references disagree the step names nothing,
+and the build log says which refers to what: `the trail names
+products/{productId} by its id: review.listReviews(productId) refers to
+ProductView by id, and stock.getStock(productId) to StockView by id`. Where a collection's path extends
 another's, `widgets/archived` beside `widgets/{id}`, the longer is its own
 pages' collection, current in the nav and the trail, never an item named
 `archived`; under an item, a collection is read before the item's
@@ -1033,7 +1092,11 @@ it is registered at:
   filter's and its rows', an item's page its detail's, its actions' forms'
   and its sections' rows', the edit page its form's, the delete page its
   form's and the item's, and a post those of the page it renders again.
-  Not the lists its sections call, which keep to their own pages.
+  Not the lists its sections call, which keep to their own pages;
+- a page whose trail names a step by a reference meets the rate limit
+  and the timeout of that reference's options operation: the pages under
+  the step's item, and the item's own page, edit, delete and actions. A
+  shard renders no trail.
 
 The rate limit is the operation's own limiter for the pages, at its
 route's rate, which every page and shard that calls the operation shares,
@@ -1089,7 +1152,11 @@ carry the rules a browser checks before the submit runs.
 
 A paged list's links set the shard's query too, so a page renders in
 place and its query goes in the address bar; without the runtime they
-are links to the page. A list without a filter or a page has nothing to
+are links to the page. The shard reads `back` from its query as the page
+reads it from the request's, so Previous, First and Next are the page's
+links, and its size form's submit runs the filter's script over its own
+form (`data-ss-live-size`), through its own hidden input, which sets the
+same signal. A list without a filter or a page has nothing to
 update, and stays a component. An action's form, a post that changes the item, keeps its POST-redirect-GET
 without a reload of its own: a shard renders and a form posts, so posting
 through one would run the operation inside a render, and through a
