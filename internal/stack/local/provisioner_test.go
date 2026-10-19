@@ -570,6 +570,41 @@ func TestApplyFromNothing(t *testing.T) {
 	}
 }
 
+// TestGoBuildsTakeTheRequestsBuildEnv: the request's BuildEnv, stack dev's
+// CGO_LDFLAGS pointing at the release's static archives (D47, amended),
+// reaches every go build of a server, a worker and a job, over the
+// provisioner's own CGO_LDFLAGS, and no process it starts.
+func TestGoBuildsTakeTheRequestsBuildEnv(t *testing.T) {
+	t.Setenv("CGO_LDFLAGS", "-L/mine")
+	f := newFixture(t, "Dev")
+	f.runner.rules = []rule{
+		{prefix: inspectPrefix, stderr: "Error response from daemon: No such container: " + f.pgName},
+		{prefix: migrateStatus, stderr: "superschematic-migrate: service shop-db has no applied model"},
+		{prefix: "/bin/superschematic-migrate apply", out: "applied 2 steps\n"},
+	}
+	f.req.BuildEnv = map[string]string{"CGO_LDFLAGS": "-L/mine -L/cache/archives/lib"}
+	if err := f.applyAll(t); err != nil {
+		t.Fatalf("%v\n%s", err, f.out)
+	}
+	builds := 0
+	for _, cmd := range f.runner.commands {
+		if strings.HasSuffix(cmd.Path, "/go") {
+			builds++
+			if got := envValue(cmd.Env, "CGO_LDFLAGS"); got != "-L/mine -L/cache/archives/lib" {
+				t.Errorf("go build in %s with CGO_LDFLAGS=%q, want the request's", cmd.Dir, got)
+			}
+		}
+	}
+	if builds != 4 {
+		t.Errorf("%d go builds, want the two servers', the worker's and the job's", builds)
+	}
+	for _, s := range f.runner.started {
+		if got := envValue(s.cmd.Env, "CGO_LDFLAGS"); got != "" {
+			t.Errorf("%s runs with CGO_LDFLAGS=%q, which only its build takes", s.cmd.Path, got)
+		}
+	}
+}
+
 // TestApplyRunsATypeScriptServer applies Dev of the shop with its
 // TypeScript storefront: the Go servers build as before, and the
 // storefront's wave installs the output root's Bun workspace once, then

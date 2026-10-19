@@ -4562,6 +4562,44 @@ by hand.
 
 The rule is reversible until the first release.
 
+### D47, amended: `stack dev`, `stack run` and `superschematic env` fetch the release's static archives for the machine
+
+The amendments above give a project whose naming file names no
+superscalar checkout (`[paths] scalar_go`) Go modules that resolve from
+the module proxy and images that download the release's archives. Its
+Go code still did not link on an engineer's machine: `stack dev` and
+`stack run` ran `go build` with the shell's environment, and superscalar's
+binding from the proxy carries no `lib/`, so every Go server, job and
+worker failed at the link unless the engineer found the archives and set
+`CGO_LDFLAGS` by hand. A `go build` or `go test` run by hand failed the
+same way.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `stack dev` and `stack run` fetch the release's `superschematic-archives_<version>_<platform>.tar.gz` for the machine's platform, as the generated CI's `check` does for the runner's: from the release's page, or the base URL `SUPERSCHEMATIC_RELEASE` names, the variable a server's Dockerfile takes as a build argument; checked against the digest the binary names; unpacked into `superschematic/archives/<digest>` in the user's cache directory, through a directory of its own renamed into place, so a later run, or another checkout, finds it whole. They do it only when the environment has a Go server, job or worker, the naming file names no superscalar checkout and does not rename superscalar's Go module, and the binary is a release; a checkout's binary pins nothing, so its builds need the checkout's `[paths]` anyway. `internal/release` holds the fetch, `Release.FetchArchives`, beside the digests it checks. | Downloading in the provisioner, which knows neither the naming file nor the release. A cache under the project's `.superschematic`, which every checkout would fill with the same archives. Building the archives with cargo, a Rust toolchain on every machine for what the release already built. |
+| The archives reach the builds through a new field of the provision request, `BuildEnv`: variables a provisioner that builds code sets for its builds alone. The local provisioner appends it to each `go build`'s environment, and no process it starts sees it. `CGO_LDFLAGS` holds `-L` and the archives' `lib/` after any `CGO_LDFLAGS` the shell set, so a person's flags come first. A fetch that fails stops the run, saying what to set, unless `CGO_LDFLAGS` is set, which the builds then take as it is. | Setting `CGO_LDFLAGS` in the CLI's own environment, which every process the provisioner starts would inherit and every test in the process would see. A setter on the local provisioner, state shared by every run the registered provisioner serves. Replacing the shell's `CGO_LDFLAGS`, which would drop a person's flags for other libraries. |
+| A `go build` run by hand takes the flags from a new command, `superschematic env`, which fetches the archives as `stack dev` does and prints `export CGO_LDFLAGS='-L…/lib'` for a POSIX shell to evaluate, or, given `CGO_LDFLAGS`, its value alone, as `go env` does, so `go env -w` can keep it. It fails for a binary that names no archives, and says why. | A generated `.envrc`, which needs direnv, holds a path of one machine's cache in the output root, and still needs a command that downloads the archives. A `--print` flag on `stack dev`, which would build and run a stack to print a line. Writing the flags into each generated `go.mod` or a `#cgo` file, which would hold one machine's path in generated code. |
+
+Status: built. `TestFetchArchivesDownloadsChecksAndKeeps` and
+`TestFetchArchivesRefuses` run the fetch against a stand-in release page:
+the cache's directory, a second fetch that downloads nothing, a tarball
+of another digest, a page without the file, an entry outside the
+tarball's directory and a tarball without `lib/`.
+`TestGoBuildsTakeTheRequestsBuildEnv` holds every `go build` of a
+server, a worker and a job to the request's `CGO_LDFLAGS`, and the
+processes it starts to none. `TestStackDevLinksTheReleaseArchives` and
+`TestEnvPrintsCGOLinkerFlags` run the CLI's half with a stand-in release:
+when it fetches, the flags after the shell's, the cases that fetch
+nothing, a failed fetch with and without `CGO_LDFLAGS`, and `env`'s two
+forms. `TestALocalGoBuildLinksTheArchivesTheReleaseFetches` builds
+Storefront's module as a release builds it, with no superscalar
+checkout: `go build` fails at the link with no `CGO_LDFLAGS`, and links
+with the flags of the archives the release fetched from a stand-in page,
+packed from this checkout's archive. No published release has run it.
+No `CGO_CFLAGS` is set: each binding's module holds its own headers.
+
+The rule is reversible until the first release.
+
 ## D51. A TypeScript server gets a generated entrypoint on Bun, a `Deps` over a pg Pool, and an implementation in one Bun workspace with the generated packages
 
 Section 8.1 of `docs/stack-model.md` wrote an entrypoint for Go servers

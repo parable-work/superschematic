@@ -19,7 +19,13 @@ and a Go SDK. The build refuses the config without it.
   [superscalar](https://github.com/parable-work/superscalar) through cgo
   against a static archive.
 - Until superscalar publishes `go/vX.Y.Z` tags, you need that archive from
-  source. `scripts/superscalar-dep.sh` in this repository builds it.
+  source. `scripts/superscalar-dep.sh` in this repository builds it. In a
+  project whose naming file names no superscalar checkout, a release of
+  superschematic ships the archives it links instead:
+  `eval "$(superschematic env)"` fetches them for your machine and sets
+  `CGO_LDFLAGS` for a `go build` of the code it generated, and `stack dev`
+  does the same for its builds
+  ([`env`](/superschematic/reference/cli/#env-variable)).
 - A generated ORM whose schema declares a
   [version graph](/superschematic/reference/version-graphs/) also imports the
   version-graph core's Go binding (`versiongraph_go_module`), which links

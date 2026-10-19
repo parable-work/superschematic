@@ -1785,7 +1785,9 @@ one of two places (D47, amended):
   way, so each also builds on its own. A binary built from a checkout is
   no release, and one the release workflow did not build names no
   digests: neither writes a Dockerfile without `[paths] scalar_go`, and
-  the build says why.
+  the build says why. Outside an image, `stack dev`, `stack run` and
+  `superschematic env` fetch the same tarball for the machine's platform
+  (section 8.3).
 
 Either way the Go stage, on the Go release `tools.env` pins, builds the
 server with `-mod=mod`, and the binary runs on distroless `cc`, which
@@ -1901,6 +1903,31 @@ elsewhere leaves them linked to that output root until the next install
 in the usual one. Each server runs in a process group of its own, so
 Ctrl-C reaches `stack dev` first, which sends each server SIGTERM,
 callers first, and SIGKILL ten seconds later.
+
+A Go server, job or worker links superscalar's static archive, and the
+version graph's and the engine's when it reaches them, through cgo. With
+`[paths] scalar_go` naming a checkout, cgo finds each archive beside its
+binding, where `make setup` builds it. Without it, the Go modules come
+from the module proxy, which carries no archive, so a release of
+superschematic hands the local provisioner the archives it ships, as the
+generated CI's `check` does (section 11.3): before the rollout, `stack
+dev` downloads `superschematic-archives_<version>_<platform>.tar.gz` for
+the machine's platform from the release's page, or the mirror
+`SUPERSCHEMATIC_RELEASE` names, checks it against the digest the binary
+names, and unpacks it into `superschematic/archives/<digest>` in the
+user's cache directory (`os.UserCacheDir`), where later runs find it.
+The request's `BuildEnv` then carries `CGO_LDFLAGS` with `-L` and its
+`lib/`, after any `CGO_LDFLAGS` of the shell's, and every `go build` the
+provisioner runs takes it, while the processes it starts do not. `stack
+run` does the same for the job it builds. Nothing is fetched for an
+environment without Go, for a naming file that renames superscalar's Go
+module, which the release does not pin, or for a binary built from a
+checkout, which pins nothing; a fetch that fails stops the run unless
+`CGO_LDFLAGS` is set, which the builds then take as it is. A `go build`
+run by hand takes the same flags from `superschematic env`, which
+fetches the archives as `stack dev` does and prints `export
+CGO_LDFLAGS=...` for a POSIX shell to evaluate, or with the variable's
+name its value alone (D47, amended).
 
 Policy rules refuse what a local environment cannot hold: a domain
 (`local-no-domain`), parameters (`local-no-parameters`), and two listeners
@@ -3996,6 +4023,10 @@ hold its config, and on the binary, which names the release, so it needs
 no key of its own. Only servers whose build context changed
 are built and rolled (section 11.2), so the workflow builds and deploys
 whatever the deploy decides is affected, and needs no list of its own.
+
+The archives `check` installs are the ones `stack dev`, `stack run` and
+`superschematic env` fetch outside CI, for the machine's platform, into
+the user's cache, checked against the same digests (section 8.3).
 
 ## 12. Core changes
 
