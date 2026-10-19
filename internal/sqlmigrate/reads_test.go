@@ -26,7 +26,11 @@ func readsModel() *Model {
 				{Name: "id", Origin: "Order.id", Type: "UUID"},
 				{Name: "total", Origin: "Order.total", Type: "BIGINT"},
 				{Name: "customer_id", Origin: "Order.customer", Type: "UUID"},
+				// A plain field named like a relation stores no foreign key.
+				{Name: "channel", Origin: "Order.channel", Type: "TEXT"},
 				{Name: "_version", Type: "BIGINT"},
+			}, ForeignKeys: []*ForeignKey{
+				{Name: "order_customer_id_fkey", Columns: []string{"customer_id"}, RefTable: "customer", RefColumns: []string{"id"}, OnDelete: "RESTRICT"},
 			}},
 			{Name: "order_history", Kind: TableHistory, Origin: "Order", Columns: []*Column{
 				{Name: "id", Type: "UUID"},
@@ -48,6 +52,12 @@ func readsConsumer() *ir.Schema {
 			{Name: "customer"},
 			// A list relation has no column.
 			{Name: "lines"},
+			// A relation's key reads the relation's foreign-key column
+			// (D61, amended); a list relation's and a plain field's
+			// would-be keys read nothing.
+			{Name: "customerId"},
+			{Name: "linesId"},
+			{Name: "channelId"},
 			{Name: "lineCount", Virtual: true},
 			// Listed as virtual on the SourceRef, as a data-form schema
 			// whose target is only declared in its imports records it.
@@ -57,7 +67,7 @@ func readsConsumer() *ir.Schema {
 	schema.Types["OrderTotal"] = &ir.TypeDef{
 		Name:   "OrderTotal",
 		Source: &ir.SourceRef{Target: "shop-db.Order"},
-		Fields: []*ir.FieldDef{{Name: "total"}},
+		Fields: []*ir.FieldDef{{Name: "total"}, {Name: "customerId", Virtual: true}},
 	}
 	// Another database's Order, a type of shop-db that is not a table, and
 	// a local projection read nothing from shop-db.
@@ -88,6 +98,7 @@ func TestSourceReads(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []Read{
 		{Reader: "shop-api", Via: "OrderView.customer", Table: "order", Column: "customer_id"},
+		{Reader: "shop-api", Via: "OrderView.customerId", Table: "order", Column: "customer_id"},
 		{Reader: "shop-api", Via: "OrderView.id", Table: "order", Column: "id"},
 		{Reader: "shop-api", Via: "OrderTotal.total", Table: "order", Column: "total"},
 		{Reader: "shop-api", Via: "OrderView.total", Table: "order", Column: "total"},
