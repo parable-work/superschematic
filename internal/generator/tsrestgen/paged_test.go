@@ -2,6 +2,7 @@ package tsrestgen
 
 import (
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/parable-work/superschematic/internal/generator/apigen"
@@ -40,15 +41,16 @@ func TestWriteAPIGoldenPaged(t *testing.T) {
 	checkGolden(t, generateFixture(t, pagedFixture(t)), pagedAPI)
 }
 
-// TestGeneratePagedShape: a @paginated operation carries its limits, takes
-// its page as an argument even when it declares none, and answers a Page of
-// its list's elements; its cursor and limit are not query parameters of its
-// own. The operations that do not page are as before, and an API without a
-// paged operation imports nothing of the page.
+// TestGeneratePagedShape: a @paginated operation carries its limits, and
+// listItems its sort (D60, amended), takes its page as an argument even
+// when it declares none, and answers a Page of its list's elements; its
+// cursor, limit and sort are not query parameters of its own. The
+// operations that do not page are as before, and an API without a paged
+// operation imports nothing of the page.
 func TestGeneratePagedShape(t *testing.T) {
 	output := generateFixture(t, pagedFixture(t))
-	if !output.HasPages {
-		t.Error("HasPages = false for fixture-paged-api")
+	if !output.HasPages || !output.HasSortedPages {
+		t.Errorf("HasPages = %t, HasSortedPages = %t for fixture-paged-api", output.HasPages, output.HasSortedPages)
 	}
 	byName := endpointsByName(output)
 	for _, tc := range []struct {
@@ -58,7 +60,7 @@ func TestGeneratePagedShape(t *testing.T) {
 		queryParams  int
 		hasArguments bool
 	}{
-		{"listItems", &apigen.PageInfo{DefaultLimit: 2, MaxLimit: 5, Operation: "Catalog.listItems"}, "Page<ItemView>", 2, true},
+		{"listItems", &apigen.PageInfo{DefaultLimit: 2, MaxLimit: 5, Operation: "Catalog.listItems", Sort: &apigen.PageSort{Param: "sort", Fields: []string{"name", "sku"}, Default: "name"}}, "Page<ItemView>", 2, true},
 		{"listTags", &apigen.PageInfo{DefaultLimit: 20, MaxLimit: 100, Operation: "Catalog.listTags"}, "Page<string>", 0, true},
 		{"getItem", nil, "ItemView", 0, true},
 		{"placeBasket", nil, "BasketView", 0, true},
@@ -70,7 +72,7 @@ func TestGeneratePagedShape(t *testing.T) {
 		switch {
 		case tc.page == nil && ep.Page != nil:
 			t.Errorf("%s Page = %+v, want none", tc.name, *ep.Page)
-		case tc.page != nil && (ep.Page == nil || *ep.Page != *tc.page):
+		case tc.page != nil && !reflect.DeepEqual(ep.Page, tc.page):
 			t.Errorf("%s Page = %+v, want %+v", tc.name, ep.Page, *tc.page)
 		}
 		if ep.OutputType != tc.output {
@@ -83,6 +85,10 @@ func TestGeneratePagedShape(t *testing.T) {
 			t.Errorf("%s HasArgs = %t, want %t", tc.name, ep.HasArgs(), tc.hasArguments)
 		}
 	}
+	if byName["listItems"].PageSpecLiteral() != "{ defaultLimit: 2, maxLimit: 5, sort: { param: 'sort', fields: ['name', 'sku'], default: 'name' } }" ||
+		byName["listTags"].PageSpecLiteral() != "{ defaultLimit: 20, maxLimit: 100 }" {
+		t.Errorf("page specs = %s, %s", byName["listItems"].PageSpecLiteral(), byName["listTags"].PageSpecLiteral())
+	}
 	if generateFixtureAPI(t).HasPages {
 		t.Error("HasPages = true for fixture-api, which declares no @paginated operation")
 	}
@@ -93,10 +99,11 @@ func TestGeneratePagedShape(t *testing.T) {
 // beside it, so tsc holds a paged method to args.page and a Page result,
 // then serves that implementation through the generated router under bun:
 // the first page, each next to the last, whose next is null, the filters
-// on every page, a page of a primitive, a limit past the max and a forged
-// cursor refused with page_parity.json's 400s, and every reader vector of
-// the two routes' limits answered over HTTP as the runtime's reader answers
-// it.
+// on every page, the items sorted each way with each next bound to the sort
+// (D60, amended), a page of a primitive, a limit past the max, a sort not
+// offered, a cursor of another sort and a forged cursor refused with
+// page_parity.json's 400s, and every reader vector of the two routes'
+// limits and sorts answered over HTTP as the runtime's reader answers it.
 func TestGeneratedPagedRouter(t *testing.T) {
 	tree := materializeAPI(t, pagedFixture(t))
 	tree.stage(t, "paged_implementation.ts")

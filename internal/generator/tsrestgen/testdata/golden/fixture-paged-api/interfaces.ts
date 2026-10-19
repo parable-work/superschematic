@@ -32,7 +32,7 @@ export interface PlaceBasketArgs {
 export interface ListItemsArgs {
   ids?: IdentityUUID[];
   inStock?: boolean;
-  /** The page asked for (D60): the cursor of the page before, absent for the first page, and the limit, 1 to 5, 2 when the caller sends none. */
+  /** The page asked for (D60): the cursor of the page before, absent for the first page; the limit, 1 to 5, 2 when the caller sends none; and the sort (D60, amended), by name, sku, descending when desc, name when the caller sends none, ties broken by id. The cursor is the method's own key's: the router binds it to the sort and back. */
   page: PageRequest;
 }
 
@@ -56,7 +56,8 @@ export interface CatalogImplementation {
   placeBasket(args: PlaceBasketArgs, ctx: RequestContext): Promise<OperationOutcome<BasketView>>;
   /**
    * The items, two to a page unless the caller asks for up to five, by
-   * their ids or their stock.
+   * their ids or their stock, in order of their names unless the caller
+   * sorts them by name or sku, either way.
    *
    * GET /api/items
    * Paged (@paginated): answers the Page args.page asks for, whose next is null after the last page.
