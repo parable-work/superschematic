@@ -11,7 +11,8 @@ import (
 
 // TestTSWriterEmitsPaginated: the TypeScript writer emits @paginated with
 // both limits, as the loader filled them in from a YAML page that left
-// them out, and reading it back gives the same IR.
+// them out, and a sorted page's defaultSort and SortBy argument (D60,
+// amended), and reading it back gives the same IR.
 func TestTSWriterEmitsPaginated(t *testing.T) {
 	schema, err := loader.LoadService(dataFixtures + "/fixture-paged-api-yaml")
 	if err != nil {
@@ -26,8 +27,9 @@ func TestTSWriterEmitsPaginated(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		`import { HttpMethod, QueryParam, paginated, rest } from "@superschematic/api";`,
-		"  @rest(HttpMethod.GET, \"items\")\n  @paginated({ defaultLimit: 2, maxLimit: 5 })\n  listItems(",
+		`import { HttpMethod, QueryParam, SortBy, paginated, rest } from "@superschematic/api";`,
+		"  @rest(HttpMethod.GET, \"items\")\n  @paginated({ defaultLimit: 2, maxLimit: 5, defaultSort: \"name\" })\n  listItems(",
+		`sort: SortBy<ItemView, ["name", "sku"]>): ItemView[] {`,
 		"  @rest(HttpMethod.GET, \"tags\")\n  @paginated({ defaultLimit: 20, maxLimit: 100 })\n  listTags(",
 	} {
 		if !strings.Contains(string(got), want) {

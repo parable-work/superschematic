@@ -126,7 +126,7 @@ func TestResolveReference(t *testing.T) {
 	}
 	want := ResolvedReference{
 		Target: item, TargetName: "ItemView", OptionsSet: catalog, Options: catalog.Operations[0],
-		Value: item.Fields[0], Label: item.Fields[1], Lookup: catalog.Operations[0].Arguments[1],
+		Value: item.Fields[0], Label: item.Fields[1], Lookup: catalog.Operations[0].Arguments[1], Search: catalog.Operations[0].Arguments[0],
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("unsaid members: got %+v, want %+v", got, want)
@@ -681,5 +681,63 @@ func TestTextValue(t *testing.T) {
 		if got := TextValue(schema, tc.ref); got != tc.want {
 			t.Errorf("TextValue(%+v) = %v, want %v", tc.ref, got, tc.want)
 		}
+	}
+}
+
+// A page sorts by one text, number or time (D60, amended): the string
+// primitive and text scalars, the number and integer primitives and
+// number scalars, but no list, map, boolean, enum, object or JSON.
+func TestSortValue(t *testing.T) {
+	schema := catalogSchema()
+	schema.Scalars["Generic.Int64"] = &ScalarDef{Name: "Generic.Int64", LanguagePrimitive: LanguageNumber}
+	schema.Scalars["Temporal.DateTime"] = &ScalarDef{Name: "Temporal.DateTime", LanguagePrimitive: LanguageString}
+	schema.Scalars["Generic.Flag"] = &ScalarDef{Name: "Generic.Flag", LanguagePrimitive: LanguageBoolean}
+	for _, tc := range []struct {
+		ref  TypeRef
+		want bool
+	}{
+		{TypeRef{Name: "string"}, true},
+		{TypeRef{Name: "Identity.Slug"}, true},
+		{TypeRef{Name: "Temporal.DateTime"}, true},
+		{TypeRef{Name: "number"}, true},
+		{TypeRef{Name: "integer"}, true},
+		{TypeRef{Name: "Generic.Int64"}, true},
+		{TypeRef{Name: "number", IsArray: true}, false},
+		{TypeRef{Name: "Generic.Int64", IsMap: true}, false},
+		{TypeRef{Name: "boolean"}, false},
+		{TypeRef{Name: "Generic.Flag"}, false},
+		{TypeRef{Name: "Generic.JSON"}, false},
+		{TypeRef{Name: "ItemView"}, false},
+		{TypeRef{Name: "Colour"}, false},
+	} {
+		if got := SortValue(schema, tc.ref); got != tc.want {
+			t.Errorf("SortValue(%+v) = %v, want %v", tc.ref, got, tc.want)
+		}
+	}
+	if SortValue(nil, TypeRef{Name: "Generic.Int64"}) || !SortValue(nil, TypeRef{Name: "number"}) {
+		t.Error("SortValue without a schema: a scalar is unknown, a primitive is itself")
+	}
+}
+
+// ResolveReference gives the options operation's search argument, and
+// none for options that do not search (D61, amended).
+func TestResolveReferenceFindsTheSearch(t *testing.T) {
+	schema := catalogSchema()
+	listItems := schema.OperationSets[0].Operations[0]
+	got, err := ResolveReference(schema, nil, &ReferenceDef{Type: "ItemView"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Search != listItems.Arguments[0] || got.OptionsService != "" {
+		t.Fatalf("search = %+v, service %q; want listItems' q and the API's own options", got.Search, got.OptionsService)
+	}
+	schema.OperationSets[0].Operations = append(schema.OperationSets[0].Operations,
+		&FieldDef{Name: "allNotes", HTTPMethod: "GET", RestPath: "notes/all", TypeRef: TypeRef{Name: "NoteView", IsArray: true}})
+	got, err = ResolveReference(schema, nil, &ReferenceDef{Type: "NoteView"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Search != nil {
+		t.Fatalf("allNotes takes no search, got %+v", got.Search)
 	}
 }

@@ -6974,3 +6974,119 @@ and the three `...PredatesItsManualRoutesFails` tests the build's
 refusals.
 
 The rule is reversible until the first release.
+
+### D60, amended: a paged list sorts by a `SortBy` argument, its cursor names the sort, and the Go ORM reads a page
+
+D60 made a list's order the implementation's own, fixed. A caller cannot
+ask for orders by their total or products by their price, and the
+console's column headers sort nothing. The Go ORM reads no page (D62,
+amended, left a keyset reader for the sort argument), so acme's Go
+implementation writes each list's keyset query itself: a key query, `(placed_at, id) > (…)`,
+then the rows by their ids.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A type wrapper, `SortBy<Item, Fields>` from `@superschematic/api`, marks an argument of a `@paginated` operation as its order. The argument is an optional query parameter. Its value is a field that `Fields` names, ascending, or the field after a `-`, descending: `sort: SortBy<OrderView, ["placedAt", "totalCents"]>` takes `placedAt`, `-placedAt`, `totalCents` and `-totalCents`. `Item` is the operation's item type, and `Fields` are its fields by their JSON names. It writes `sort: [placedAt, totalCents]` on the `ArgumentDef`, after `search`, with `isQuery` and without `required`. IR without it is the same bytes. An operation takes one. | Several fields at once (`-placedAt,id`), which multiplies the keyset's comparisons and the console's headers. An operation decorator that lists the fields, which would choose the query parameter's name for the author. A sort on a list without `@paginated`, whose order no cursor holds: it can follow when a list needs it. |
+| `@paginated({ defaultSort })` is the order of a request that sends none. It is one of the sort argument's values. An operation with a `SortBy` argument needs it, and one without is refused it. It writes `OperationPage.DefaultSort`, JSON `defaultSort`, after `maxLimit`. | The first field ascending, a default no one wrote. A `Default<…>` on the argument, which a search argument is refused and which the router, not the implementation, applies. |
+| Ties break by the item's `id`, in the field's direction, so the order is total and a page's condition is one row comparison: `(placed_at, id) > ($1, $2)`, or `<` descending. The loader refuses each of these, in every form: `SortBy` without `@paginated`; a second `SortBy`; one that is required, has a default, or is not a query parameter; a field `Item` does not declare, a field named twice, and a field that holds a list, a map, an object, a union, an enum or a boolean, or is `Nullable` or `Secret`; an `Item` without a required `id` of one value; `defaultSort` without `SortBy`; `SortBy` without `defaultSort`; and a `defaultSort` that is not one of its values. It warns of a field that is `@virtual` on an item sourced from a table (`@source`): no column holds it, so the table cannot order by it. | Ids ascending under a descending field, which makes each page's condition an OR of two comparisons. Nulls first or last, which each store spells its own way. |
+| Each runtime reads the sort with the page, beside `cursor` and `limit`. Go's `paging.Parse`, TypeScript's `readPage` and Rust's `PageSpec::query` read the sort argument's parameter. An absent or empty one is `defaultSort`, and the first value counts. Any other value is the 400 an enum query parameter gets, at the parameter: `Invalid query parameter sort: expected one of placedAt, -placedAt, totalCents, -totalCents`. The refusals come in this order: the cursor's alphabet and length, the limit, the sort, then the cursor's sort. The implementation takes the sort in its page request: Go's `page.Sort` (`paging.Sort{Field, Desc}`), TypeScript's `args.page.sort` (`{field, desc}`), and Rust's `args.page.sort` (`Some(Sort)`). It never takes the sort as an argument of its own. An operation without a sort argument has no sort, and its request is D60's. | The sort as its own argument as well, which the router fills and binds: the implementation could read it apart from the page it asks for. |
+| A sorted operation's cursor names its sort. The cursor is the unpadded base64url of `{"sort":"-placedAt","key":K}`, exactly those bytes, where `K` is the key's compact JSON as the implementation encoded it. The router binds the page's `next` after the implementation returns it, and unbinds a sent cursor before it calls the implementation. An implementation therefore encodes and decodes its own key as D60 says, and its keys do not change. A cursor bound to another sort is the 400 `cursor is not one this sort returned`, with reason `returned under another sort`, at `cursor`. A cursor bound to no sort is D60's 400. A `next` whose bound cursor would be longer than 1024 characters is the implementation's error, a 500. The Rust in-process call (D43) unbinds and binds as the router does, so a cursor from the JSON API pages the console, and one from the console pages the JSON API. An unsorted operation's cursor is D60's. | The sort inside the implementation's key, which each implementation would check itself, or not. A fingerprint of the sort, which can only be compared, not read back. Binding the filters too, which D60 declined. |
+| `runtime/http/testdata/page_parity.json` gains `reads` with a sort, `bindings` (a key's cursor and a sort, the bound cursor, and back), `refusedBindings` (another sort, no envelope, a broken envelope) and `unbindable` (a bound cursor longer than 1024 characters). The Go runtime's test writes them, and the TypeScript and Rust runtimes read them. | A second vector file, for one reader. |
+| The OpenAPI document gives the sort argument's parameter `{"type": "string", "enum": [...], "default": "<defaultSort>"}` and the vendor key `x-superschematic-sort: true` (`registry.OpenAPISortKey`). A tool's parameters give its property the same `enum`, a sentence that names the default, and the key, which a `ToolHook` renames through `ToolKeys.Sort`. A sorted tool's page sentence asks for the same sort with each `next`. Every SDK passes the sort as the optional query argument it is: Go's `Sort *string` on the query struct, TypeScript's `params.sort`, Python's `sort=` and Rust's `sort: Option<String>`. `<operation>All` sends it with every page. | Each SDK checking the value before it sends it, a second list of the values that each SDK would carry. A generated enum type per sort, in seven generators. |
+| Each Go ORM repository gains `FindPage(ctx, filter, *<T>PageOptions) (*<T>Page, error)`. It runs one query: the filter's conditions; the soft-delete condition unless `IncludeDeleted`; the keyset comparison after `After`; `ORDER BY` the sort's column, then the primary key, both in the sort's direction; and `LIMIT Limit + 1`. It answers up to `Limit` rows and `Next`, the key of the last row kept when more rows followed. It runs no count. `<T>Sort{Field, Desc}` orders by one of the table's sortable columns, named by its field (`placedAt`). A sortable column holds one value of text, a number or a time, `createdAt` and `updatedAt` among them; it is not null, an enum, a boolean, JSON or a point. `Parse<T>Sort("-placedAt")` reads the text of a page request's sort and refuses any other. `<T>PageKey` holds the sort field's value and the primary key under their field names (`{"placedAt": …, "id": …}`). An `After` that holds another field, or no id, is `ErrPageKey`. | `After` on `FindOptions`, which would run `FindMany`'s count for every page. Offsets, which D60 declined. Importing the runtime's `paging`, which the ORM, a database package, does not (D62, amended). Taking the sort as text, which a typo would turn into SQL. |
+| acme's lists sort as follows. `listOrders` sorts by `placedAt` or `totalCents`, and `Order` gains a stored `totalCents`, written when the order is placed, so `OrderView.totalCents` reads a column and is no longer `@virtual`. `listProducts` sorts by `name` or `priceCents`, and `listReviews` by `createdAt` or `rating`. Each `defaultSort` is today's order: `placedAt`, `name` and `createdAt`. The Go implementation reads each list through `FindPage`, and `pages.go`'s key query goes. The Rust implementation sorts in memory and over SQLite. | Sorting orders by a total the implementation computes, which no keyset over the table can order by. |
+
+Status: designed; nothing built. The tests are these:
+
+- ir's `TestOperationPage_KeyPositionOmissionAndRoundTrip` (with `defaultSort`), `TestSortValue` and `TestParseSort`; the reader's `sort_by_test.go`; and `fixture-paged-api`, whose `listItems` gains `sort: SortBy<ItemView, ["name", "sku"]>` with `defaultSort: "name"`. Its TypeScript, JSON and YAML forms load to one IR and round-trip through `format`.
+- verify's `TestSortsNeedAPagedList`, one case for each message, and `TestASortByAVirtualFieldWarns`.
+- Each runtime's parity test over the new vectors, and Go's `TestBindAndUnbind`.
+- apigen's `TestPagedRoutesServePages`, tsrestgen's `TestGeneratedPagedRouter` and rustrestgen's `TestPagedListServesAPageAtATime`: a sort sent, the default, a refused sort, a cursor of another sort, and `next` bound. Also `TestPagedOpenAPIGolden` and the `fixture-paged-api` goldens of every generator.
+- The SDKs' paged tests: each stub server sees the sort on every page that `<operation>All` asks for. toolsutil's `TestPagedToolParametersReturnsAndDescription` covers the property and the sentence, and `TestToolHookRenamesTheSortKey` covers the hook.
+- ormgen's fixture-db golden; `TestGenerateFindPage`; and `TestGeneratedFindPageOnPostgres`, which pages tenants by each sortable kind in both directions, breaks ties by id, puts a filter and a search beside the keyset, hides soft-deleted rows and refuses a key of another sort.
+- acme: `TestStackDevRunsTheShop`, `rust-server/tests/shop.rs` and the four clients page sorted lists against the Go and the Rust server, and a cursor of one sort used with another is refused with the 400.
+
+Follows: several fields in one sort; a sort on an unpaged list; a typed
+sort value in the SDKs.
+
+The rule is reversible until the first release.
+
+### D61, amended: a reference whose options search is picked by a search, and its options may be another API's when one app hosts both
+
+D61 offers a reference's items as a select of the options operation's
+first page, and keeps the text control when more items follow than the
+page holds. A target with many items has no picker at all, even when
+its options operation searches (D62). The options operation must also be
+the referring API's own (D61's Status and Follows; D44, amended), so a
+type an API dependency declares and lists (D66) is offered by nothing.
+A Topcoat app cannot host two services' crates either: each one mounts
+its JSON API at `/api/{*rest}`, and Topcoat refuses the second as the
+app builds ("duplicate any-method route registered for `/api/{*rest}`").
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `ir.ResolveReference` gives `ResolvedReference.Search`, the options operation's search argument (`SearchQuery`, D62), or nil when it has none. The documents' reference value gains `"search": "<argument>"` when there is one. | A search the UI finds by an argument's name, `q`, which D62 declined. |
+| A form control whose reference's options operation searches is a picker. It has the control's select, of the items the search finds, and above it a search box and a "Find" button. The box is named `_find.<control>` and holds the text sent. The select's options are the first page of the items the text finds: the options operation's `defaultLimit` items when it pages, or its whole result when it does not. An empty text lists the first page. When more items match, a note says so. The value held is always an option, named by its label through the lookup, or through the listing when there is no lookup, as a record names it. A search control is a picker however many items there are. D61's rule, a select of the first page and none when more follow, stays for options that do not search. | A `datalist`, which filters only the options already loaded, and shows values, not labels. A separate page that picks an item and comes back. |
+| Without JavaScript, "Find" submits its form as the form sends. A GET filter sends its query, `_find.productId=anvil` among it, and the page renders the matches beside the list. A POST form posts with `_action=find:<control>`. The page renders the form again as it was sent, 200, without calling the operation, as a row button does (D44, amended). The form renders a hidden submit button ahead of every "Find", so Enter submits the form. `_find` and `finds` become names a form keeps for itself. | A GET for a POST form, which would put every field in the URL, a password say, and drop what the reader typed elsewhere in the form. |
+| With Topcoat's runtime, the picker filters as the reader types. It is a shard at `/_superschematic/<service>/_pick/<target>`, with two signals: the text, which the box's `input` event sets, and the value, which the select's `change` event sets. The runtime renders it again for each text, and Topcoat keeps the focused box's text as it does. The shard calls the options operation in-process as its caller, and meets that operation's rate limit and timeout. Without the runtime, the shard renders in place. | A procedure the page's script calls, which would need browser code of the crate's own. A shard under the console's prefix, which an app's own pages could not use. |
+| The caps stay. A form's values are named as a record's are: through the lookup, in chunks, at most `MAX_LOOKUP_CALLS` calls a target. Each distinct text is one listing call, kept for the request, and a render lists at most `MAX_LOOKUP_CALLS` texts a target. A post searches only the text of the "Find" it pressed, a filter each of its pickers' texts, and the shard its own text. The texts are pairs of the form, so `MAX_PAIRS` bounds them as it bounds every field. A text that the search argument's rules refuse shows the route's message, and no matches. The app's `Choices` win at a path they name: that control is a select of the app's options, with no picker and no call. A caller whom the options operation refuses gets the plain control and the value, as D61 says. | A cap of its own, a second number for the same calls. |
+| A reference's options operation is found among the API's own operations first. When none lists the target, and the target is an API dependency's type (D66), it is that dependency's one operation that lists it, by D61's rule, or the one `options` names there. `ResolvedReference.OptionsService` names the dependency, and is empty for the API's own. The loader reads the dependency's operations, which it already loads for the type. The documents' reference value gains `"service": "<dependency>"`; `options` then names the dependency's operationId, or its tool. | The dependency's options ahead of the API's own, which would change the options of every reference that resolves today. A reference that names a service in `options`, a second spelling for one rule. |
+| `[extension.topcoat] services` lists the services that one Topcoat app hosts. Each crate's `<service>(implementations, page_authenticator)` mounts its JSON API at `/api` as before. A new `<service>_without_api(implementations, page_authenticator)` keeps the implementations and adds the pages' and procedures' layers, but mounts no JSON API. An app that hosts several services therefore serves at most one JSON API at `/api`. A service whose config enables `outputs.topcoat` itself calls only its own API. | Each JSON API under a path of its own (`/<service>/api`), which moves every SDK's base URL for an app that hosts one service. A key that lists the services an app hosts, beside the list the table already has. |
+| When the table lists both services, a reference whose options operation is a dependency's gets an in-process call to it. The referring crate depends on the dependency's crate (`path = "../<service>"`) and calls `<crate>::operations::<operation>`, by the dependency's rules and under the dependency's setup. `registry.RustAPIOfService(c, service)` gives the extension the dependency's Rust API, as the dependency's own build makes it. The dependency's operation must have an in-process call by D44's rules, and its server must be Rust. Otherwise the reference is left out, with the reason in the build log: `PlaceInput.shelfId refers to fixture-shelves-api.ShelfView, whose options operation fixture-shelves-api's Shelves.listShelves has no in-process call: [extension.topcoat] services does not list fixture-shelves-api beside fixture-console-api, so no app hosts both`. A page that calls the dependency's operation meets that operation's rate limit and timeout, as it meets its own API's. | Calling the dependency over HTTP, a second client in one process. Copying the dependency's operation into the referring crate, which would admit callers by rules the dependency does not hold. |
+| A call reads its crate's setup with `try_app_context`. A call into a crate that the app did not set up is the 500 `the app does not host fixture-shelves-api: its router builder calls neither fixture_shelves_api nor fixture_shelves_api_without_api`. It is not a panic, so a reference whose call fails this way gives the plain control and the value. | A panic, which would turn a page that names one supplier into a broken app. |
+
+Status: designed; nothing built. The tests are these:
+
+- ir's `TestResolveReferenceFindsTheSearch`, `TestOptionsFromADependencyAPI` (the API's own operation wins, the dependency's is found, one named by `options`, two that list it, and a General dependency, which lists nothing), and the loader's `TestAReferenceListedByItsAPIDependency`.
+- The `fixture-refs-api` goldens of apigen, toolsutil, sdkgen and rustsdkgen, whose `listItems` searches, gain `search`, and `TestRefsOpenAPIPlacesEachKey` reads `service`.
+- `TestTheConsolePagesPicksAndSearches` drives `fixture-console-api`, whose `listProducts` searches:
+  - The order form's lines, its gift and the orders' product filter are pickers.
+  - A filter's "Find" lists the matches by GET.
+  - A post's "Find" renders the form again, 200, with its values and no call.
+  - Enter submits the form.
+  - The value held is named past the first page.
+  - A refused search shows its message.
+  - The app's choices win.
+  - The shard renders the matches for a text and keeps the value.
+  - The listings and lookups are counted against the caps.
+- `TestAReferenceToAnotherAPIsOptions` moves `listSuppliers` into `fixture-console-suppliers-api`. With both listed, the products' supplier is a select through the dependency's crate, under cargo too, and a page meets its rate limit. With one listed, the build log gives the reason. With the dependency not set up, the 500 leaves the plain control.
+- `TestTwoServicesInOneApp` mounts both crates, one `_without_api`, and builds.
+
+acme changes only by the picker, if the user takes decision 3 of the
+memo: its `listProducts` would search the products' names, and the
+new-order page and the console's order lines would pick products by it.
+acme hosts one service, so it has no options from another API.
+
+Follows: an app that serves several services' JSON APIs; a picker that
+pages through its matches.
+
+The rule is reversible until the first release.
+
+### D44, amended: the console sorts a list by its columns' headers
+
+A sorted list (D60, amended) has no control in the console: a reader
+sorts only by editing the URL. The console's table headers are labels.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A sorted list's table gives each column that is a sort field a header link. The column the rows are in order of, the sort sent or `defaultSort`, has `aria-sort="ascending"` or `"descending"`, and its link reverses the order. Any other sortable column's link sorts by it ascending. A header holds `<a href=… data-ss-sort="placedAt">`. A column that is no sort field, and every column of a table that is not sorted, keeps its label. A sort field that the table shows no column of is sorted only by the URL, and the build log names it: `topcoat: orders sorts by totalCents, which its table shows no column of`. | `aria-sort="none"` on every other sortable header, which ARIA asks authors not to repeat. A "Sort by" select in the filter form, which a list without a filter does not render. |
+| The argument form holds the sort as it holds `cursor` and `limit`: as `Option<String>` under the argument's name, read by `page()` and rendered as no control. `query_pairs()` holds it after the controls and before `limit`, so the pager's links, the size form's hidden inputs and the filter form, which holds it as a hidden input, keep the order. A sort that the route refuses is its 400, as a refused limit is, and the links drop it. | A control for the sort in the filter, a second place to change one order. |
+| A header's link has the query's pairs, with the new sort, and no `cursor` and no `back`. Changing the order therefore starts at the first page with no history. | Keeping the cursor, which points to a position in another order and is refused. |
+| A live list's header links set the shard's query as its pager's links do, and put the query in the address bar. The shard reads the sort from its signal, so the headers and their `aria-sort` follow it. | A signal for the sort beside the query, which a reload would lose. |
+| A section on its parent's page shows its first page in `defaultSort`, and its table has no header links. | Sorting a section in place, which would give an item's page a query of its own per section. |
+
+Status: designed; nothing built. The tests are these:
+
+- `TestTheConsolePagesPicksAndSearches`, over `fixture-console-api`, whose `listProducts` sorts by `name` or `sku`, `listReviews` by `rating` or `title`, and `listOrders` by `number`:
+  - The headers have the links and `aria-sort`, the default included, and a link reverses the order.
+  - A link starts at the first page without `back`.
+  - The filter, the size form and the pager keep the sort.
+  - A refused sort is the route's 400 as the form's message.
+  - A cursor of another sort is 400.
+  - The shard's header links set its signal.
+  - A section has no links.
+- `TestASortFieldWithoutAColumnIsLogged` covers the build log.
+- `fixture-console-api`'s golden changes, and so does every golden whose table is sorted.
+- acme's Topcoat tests, in memory and over SQLite: the console's orders sort by their total and back, its products by price, and its reviews by rating, each through the headers and through the live shard.
+
+The rule is reversible until the first release.

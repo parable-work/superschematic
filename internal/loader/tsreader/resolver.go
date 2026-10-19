@@ -57,6 +57,12 @@ type typeInfo struct {
 	// search is set by SearchQuery<T> (D62).
 	search bool
 
+	// sortBy is set by SortBy<Item, Fields> (D60, amended): Fields' names,
+	// non-nil even when the tuple is empty, which the loader refuses.
+	// sortItem is Item's ref name, which the operation's result must list.
+	sortBy   []string
+	sortItem string
+
 	// Classification of the base reference.
 	isScalar    bool
 	isEnum      bool
@@ -82,7 +88,7 @@ var wrapperNames = map[string]bool{
 	"Default": true, "PlatformDefault": true, "Nullable": true, "Validate": true, "Secret": true,
 	"Relation": true, "HasMany": true, "ManyToMany": true, "AutoGenerate": true,
 	"JsonField": true, "QueryParam": true, "EncryptedField": true,
-	"RefersTo": true, "SearchQuery": true,
+	"RefersTo": true, "SearchQuery": true, "SortBy": true,
 }
 
 // resolveTypeNode resolves a type expression into a typeInfo. It works
@@ -335,6 +341,14 @@ func (w *walker) resolveWrapper(node *astNode, id symbolIdentity) (*typeInfo, *S
 		// SearchQuery<T extends string = string>: a bare SearchQuery is text.
 		return &typeInfo{ref: ir.TypeRef{Name: "string"}, isPrimitive: true, queryParam: true, nullable: true, search: true}, nil
 	}
+	if id.name == "SortBy" {
+		// SortBy<Item, Fields>: args[0] is the item type, not the value's.
+		var nodes []*astNode
+		if args != nil {
+			nodes = args.Nodes
+		}
+		return w.sortByFromTypeArgs(node, nodes)
+	}
 	if args == nil || len(args.Nodes) == 0 {
 		return nil, errorAtNode(node, "%s requires a type argument", id.name)
 	}
@@ -435,6 +449,50 @@ func (w *walker) resolveWrapper(node *astNode, id symbolIdentity) (*typeInfo, *S
 	}
 
 	return info, nil
+}
+
+// sortByUsage is how SortBy is written, for its errors.
+const sortByUsage = `SortBy<Item, Fields> needs the item type and a tuple of its field names: SortBy<OrderView, ["placedAt"]>`
+
+// sortByFromTypeArgs reads SortBy<Item, Fields> (D60, amended): Item names
+// an object type, the operation's item, and Fields is a tuple of string
+// literals, the item's fields by their JSON names. The value is text, an
+// optional query parameter; the loader holds the fields to the item.
+func (w *walker) sortByFromTypeArgs(node *astNode, args []*astNode) (*typeInfo, *SchemaError) {
+	if len(args) != 2 {
+		return nil, errorAtNode(node, "%s", sortByUsage)
+	}
+	item, serr := w.resolveTypeNode(args[0])
+	if serr != nil {
+		return nil, serr
+	}
+	if !item.isObject || item.ref.IsArray || item.ref.IsMap || item.nullable {
+		return nil, errorAtNode(args[0], "%s", sortByUsage)
+	}
+	w.recordReference(item)
+	tuple := args[1]
+	for tuple.Kind == kindTypeOperator || tuple.Kind == kindParenthesizedType {
+		if tuple.Kind == kindTypeOperator {
+			tuple = tuple.AsTypeOperatorNode().Type
+		} else {
+			tuple = tuple.AsParenthesizedTypeNode().Type
+		}
+	}
+	if tuple.Kind != kindTupleType {
+		return nil, errorAtNode(args[1], "%s", sortByUsage)
+	}
+	fields := []string{}
+	for _, element := range tuple.Elements() {
+		name, ok := stringLiteralType(element)
+		if !ok || name == "" {
+			return nil, errorAtNode(element, "SortBy's fields are string literals, each a field of %s", item.ref.Name)
+		}
+		fields = append(fields, name)
+	}
+	return &typeInfo{
+		ref: ir.TypeRef{Name: "string"}, isPrimitive: true, queryParam: true, nullable: true,
+		sortBy: fields, sortItem: item.ref.Name,
+	}, nil
 }
 
 // referenceFromTypeArgs reads RefersTo<T, Target, C> (D61): Target names a

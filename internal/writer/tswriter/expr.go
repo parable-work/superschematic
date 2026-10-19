@@ -198,8 +198,13 @@ func (e *emitter) fieldTypeExpr(fd *ir.FieldDef, owner string, kind fieldKind) s
 	return expr
 }
 
-// argumentTypeExpr renders an operation argument's type expression.
-func (e *emitter) argumentTypeExpr(arg *ir.ArgumentDef, owner string) string {
+// argumentTypeExpr renders an operation argument's type expression. item
+// is the operation's item type, as the TypeScript form names it, which a
+// sort argument names as SortBy's Item.
+func (e *emitter) argumentTypeExpr(arg *ir.ArgumentDef, item, owner string) string {
+	if arg.Sort != nil {
+		return e.sortByExpr(arg, item, owner)
+	}
 	if arg.TypeRef.IsMap {
 		e.failf("%s: map-typed arguments have no TypeScript authoring form", owner)
 		return "never"
@@ -235,6 +240,27 @@ func (e *emitter) argumentTypeExpr(arg *ir.ArgumentDef, owner string) string {
 		expr = fmt.Sprintf("%s<%s>", e.use("QueryParam"), expr)
 	}
 	return expr
+}
+
+// sortByExpr renders a sort argument as SortBy<Item, ["placedAt", ...]>
+// (D60, amended). SortBy is QueryParam<Nullable<string>> that names its
+// fields, so a sort that is not an optional text query parameter, or one
+// with anything else the form cannot write on it, has no TypeScript
+// authoring form.
+func (e *emitter) sortByExpr(arg *ir.ArgumentDef, item, owner string) string {
+	if !arg.IsQuery || arg.Required || arg.Encrypted {
+		e.failf("%s: a sort argument that is not an optional query parameter has no TypeScript authoring form", owner)
+	}
+	if arg.TypeRef != (ir.TypeRef{Name: "string"}) || arg.Default != nil || arg.References != nil || arg.Search ||
+		arg.ValidateMin != nil || arg.ValidateMax != nil || arg.ValidateMinLength != nil || arg.ValidateMaxLength != nil ||
+		arg.ValidateListMin != nil || arg.ValidateListMax != nil || arg.ValidatePattern != "" {
+		e.failf("%s: a sort argument is SortBy's text alone; one of another type, or with a default, a reference, a search or a rule, has no TypeScript authoring form", owner)
+	}
+	fields := make([]string, len(arg.Sort))
+	for i, field := range arg.Sort {
+		fields[i] = quote(field)
+	}
+	return fmt.Sprintf("%s<%s, [%s]>", e.use("SortBy"), item, strings.Join(fields, ", "))
 }
 
 // refersTo wraps a value's base type in RefersTo<T, Target, C> (D61), with

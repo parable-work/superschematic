@@ -45,6 +45,7 @@ export interface ArgumentDef {
   references?: ReferenceDef;
   required?: boolean;
   search?: boolean;
+  sort?: string[];
   typeRef: TypeRef;
   validateListMax?: number;
   validateListMin?: number;
@@ -340,6 +341,7 @@ export interface OperationMCP {
  */
 export interface OperationPage {
   defaultLimit?: number;
+  defaultSort?: string;
   maxLimit?: number;
 }
 

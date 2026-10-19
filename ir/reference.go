@@ -49,6 +49,12 @@ type ResolvedReference struct {
 	// OptionsSet is the operation set that holds Options.
 	OptionsSet *OperationSet
 
+	// OptionsService is the API dependency whose operation Options is, by
+	// its service name, when the schema's own operations list no Target
+	// and that dependency's do (D61, amended); empty when Options is the
+	// schema's own.
+	OptionsService string
+
 	// Options is the operation that lists the target: a GET returning
 	// Target[] that takes no path argument and no required one.
 	Options *FieldDef
@@ -65,6 +71,11 @@ type ResolvedReference struct {
 	// that refers to the same target by the same value. Nil when the
 	// options operation has none.
 	Lookup *ArgumentDef
+
+	// Search is the options operation's search argument (SearchQuery,
+	// D62), which a UI fills with the text a reader types to pick an item
+	// (D61, amended). Nil when the options operation has none.
+	Search *ArgumentDef
 }
 
 // ResolveReference derives what ref leaves unsaid, in the API schema that
@@ -87,7 +98,9 @@ type ResolvedReference struct {
 //     secret nor @uiHidden (the rule of @display's titleField, D48);
 //     unsaid, it is the target's titleField, or none;
 //   - the lookup is the options operation's optional list query argument
-//     that refers to the same target by the same value; it has at most one.
+//     that refers to the same target by the same value; it has at most one;
+//   - the search is the options operation's search argument, when it has
+//     one.
 //
 // That the value's type is the type of the field or argument that holds
 // the reference is the loader's check, which knows the holder.
@@ -158,6 +171,12 @@ func ResolveReference(schema *Schema, dependencies map[string]*Schema, ref *Refe
 			return out, fmt.Errorf("options %s has two lookups, %s and %s", operationName(set, options), out.Lookup.Name, arg.Name)
 		}
 		out.Lookup = arg
+	}
+	for _, arg := range options.Arguments {
+		if arg != nil && arg.Search {
+			out.Search = arg
+			break
+		}
 	}
 	return out, nil
 }
@@ -422,6 +441,29 @@ func TextValue(schema *Schema, ref TypeRef) bool {
 	}
 	scalar := schema.Scalars[ref.Name]
 	return scalar != nil && scalar.LanguagePrimitive == LanguageString && !scalar.IsAnyJSON() && scalar.StructuredJSONType() == ""
+}
+
+// SortValue reports whether ref, read in schema, is a value a page may be
+// sorted by (D60, amended): one value, not a list or a map, that is text
+// ([TextValue], times among it), the number or integer primitive, or a
+// scalar whose values are numbers. An enum, a boolean and an object are
+// not.
+func SortValue(schema *Schema, ref TypeRef) bool {
+	if ref.IsArray || ref.IsMap {
+		return false
+	}
+	if TextValue(schema, ref) {
+		return true
+	}
+	switch ref.Name {
+	case "number", "integer":
+		return true
+	}
+	if schema == nil {
+		return false
+	}
+	scalar := schema.Scalars[ref.Name]
+	return scalar != nil && scalar.LanguagePrimitive == LanguageNumber
 }
 
 // ReferencesOf lists every reference the schema's fields and operation
