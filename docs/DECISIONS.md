@@ -6996,7 +6996,17 @@ then the rows by their ids.
 | Each Go ORM repository gains `FindPage(ctx, filter, *<T>PageOptions) (*<T>Page, error)`. It runs one query: the filter's conditions; the soft-delete condition unless `IncludeDeleted`; the keyset comparison after `After`; `ORDER BY` the sort's column, then the primary key, both in the sort's direction; and `LIMIT Limit + 1`. It answers up to `Limit` rows and `Next`, the key of the last row kept when more rows followed. It runs no count. `<T>Sort{Field, Desc}` orders by one of the table's sortable columns, named by its field (`placedAt`). A sortable column holds one value of text, a number or a time, `createdAt` and `updatedAt` among them; it is not null, an enum, a boolean, JSON or a point. `Parse<T>Sort("-placedAt")` reads the text of a page request's sort and refuses any other. `<T>PageKey` holds the sort field's value and the primary key under their field names (`{"placedAt": …, "id": …}`). An `After` that holds another field, or no id, is `ErrPageKey`. | `After` on `FindOptions`, which would run `FindMany`'s count for every page. Offsets, which D60 declined. Importing the runtime's `paging`, which the ORM, a database package, does not (D62, amended). Taking the sort as text, which a typo would turn into SQL. |
 | acme's lists sort as follows. `listOrders` sorts by `placedAt` or `totalCents`, and `Order` gains a stored `totalCents`, written when the order is placed, so `OrderView.totalCents` reads a column and is no longer `@virtual`. `listProducts` sorts by `name` or `priceCents`, and `listReviews` by `createdAt` or `rating`. Each `defaultSort` is today's order: `placedAt`, `name` and `createdAt`. The Go implementation reads each list through `FindPage`, and `pages.go`'s key query goes. The Rust implementation sorts in memory and over SQLite. | Sorting orders by a total the implementation computes, which no keyset over the table can order by. |
 
-Status: designed; nothing built. The tests are these:
+Status: the core is built. `SortBy` and `defaultSort` read and write in
+all three forms, and the loader refuses each case above, in every form,
+with its own message, and warns of a `@virtual` field. The tests are
+ir's `TestSortValues`, `TestParseSort`, `TestSortArgument` and
+`TestSortValue`, the reader's `TestSortByLoads` and `TestSortByRefusals`,
+verify's `TestSortsNeedAPagedList`, `TestASortByAVirtualFieldWarns` and
+`TestASortOfADependencysItem`, the loader's
+`TestSortsAreCheckedInTheDataForms`, and the writer's
+`TestTSWriterEmitsPaginated`. The runtimes, the servers, the documents,
+the SDKs, the ORM and acme are designed and not yet built. The tests are
+these:
 
 - ir's `TestOperationPage_KeyPositionOmissionAndRoundTrip` (with `defaultSort`), `TestSortValue` and `TestParseSort`; the reader's `sort_by_test.go`; and `fixture-paged-api`, whose `listItems` gains `sort: SortBy<ItemView, ["name", "sku"]>` with `defaultSort: "name"`. Its TypeScript, JSON and YAML forms load to one IR and round-trip through `format`.
 - verify's `TestSortsNeedAPagedList`, one case for each message, and `TestASortByAVirtualFieldWarns`.
@@ -7035,7 +7045,14 @@ app builds ("duplicate any-method route registered for `/api/{*rest}`").
 | When the table lists both services, a reference whose options operation is a dependency's gets an in-process call to it. The referring crate depends on the dependency's crate (`path = "../<service>"`) and calls `<crate>::operations::<operation>`, by the dependency's rules and under the dependency's setup. `registry.RustAPIOfService(c, service)` gives the extension the dependency's Rust API, as the dependency's own build makes it. The dependency's operation must have an in-process call by D44's rules, and its server must be Rust. Otherwise the reference is left out, with the reason in the build log: `PlaceInput.shelfId refers to fixture-shelves-api.ShelfView, whose options operation fixture-shelves-api's Shelves.listShelves has no in-process call: [extension.topcoat] services does not list fixture-shelves-api beside fixture-console-api, so no app hosts both`. A page that calls the dependency's operation meets that operation's rate limit and timeout, as it meets its own API's. | Calling the dependency over HTTP, a second client in one process. Copying the dependency's operation into the referring crate, which would admit callers by rules the dependency does not hold. |
 | A call reads its crate's setup with `try_app_context`. A call into a crate that the app did not set up is the 500 `the app does not host fixture-shelves-api: its router builder calls neither fixture_shelves_api nor fixture_shelves_api_without_api`. It is not a panic, so a reference whose call fails this way gives the plain control and the value. | A panic, which would turn a page that names one supplier into a broken app. |
 
-Status: designed; nothing built. The tests are these:
+Status: the core is built. `ir.ResolveReference` gives the options
+operation's search in `ResolvedReference.Search`. When the API lists no
+target, it takes an API dependency's options and names the dependency in
+`ResolvedReference.OptionsService`. ir's
+`TestResolveReferenceFindsTheSearch` and `TestOptionsFromADependencyAPI`
+cover it, with the loader's `TestAReferenceListedByItsAPIDependency`. The
+documents and Topcoat are designed and not yet built. The tests are
+these:
 
 - ir's `TestResolveReferenceFindsTheSearch`, `TestOptionsFromADependencyAPI` (the API's own operation wins, the dependency's is found, one named by `options`, two that list it, and a General dependency, which lists nothing), and the loader's `TestAReferenceListedByItsAPIDependency`.
 - The `fixture-refs-api` goldens of apigen, toolsutil, sdkgen and rustsdkgen, whose `listItems` searches, gain `search`, and `TestRefsOpenAPIPlacesEachKey` reads `service`.
