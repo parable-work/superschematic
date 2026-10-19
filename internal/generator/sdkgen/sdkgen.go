@@ -52,6 +52,7 @@ type NamespaceInfo struct {
 // EndpointInfo represents a single API endpoint for the SDK
 type EndpointInfo struct {
 	Name           string            // Method name (e.g., "sendMagicLink")
+	ToolName       string            // Tool name (apigen.ToolName, e.g., "auth.sendMagicLink")
 	OperationID    string            // OpenAPI operation id (the handler name)
 	Title          string            // @docs title; "" without it
 	Docs           *ir.OperationDocs // @docs record; nil without it
@@ -474,6 +475,7 @@ func convertEndpoint(ep apigen.EndpointInfo, parseableTypes map[string]bool) End
 
 	return EndpointInfo{
 		Name:             tsutil.ToCamelCase(ep.Name),
+		ToolName:         apigen.ToolName(ep.Namespace, ep.Name),
 		OperationID:      ep.HandlerName,
 		Title:            ep.Title,
 		Docs:             ep.Docs,

@@ -3,7 +3,6 @@ package apigen
 import (
 	"sort"
 
-	"github.com/parable-work/superschematic/internal/generator/codegen"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -86,11 +85,11 @@ func resolveReference(schema *ir.Schema, dependencies map[string]*ir.Schema, ref
 }
 
 // endpointNames are the names the generated documents give an operation:
-// its OpenAPI operationId, the handler name operationToEndpoint gives it,
-// and its tool name, namespace.operation.
+// its OpenAPI operationId, the handler name operationToEndpoint gives it
+// (handlerName), and its tool name (ToolName), as the SDKs name it.
 func endpointNames(set *ir.OperationSet, op *ir.FieldDef) (operationID, tool string) {
 	namespace := extractNamespace(set.Name)
-	return codegen.ToPascalCase(namespace) + codegen.ToPascalCase(op.Name) + "Handler", namespace + "." + op.Name
+	return handlerName(namespace, op.Name), ToolName(namespace, op.Name)
 }
 
 // fieldReference is the reference field of holder holds, written or

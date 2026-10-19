@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"slices"
 	"sort"
+	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
+	"github.com/parable-work/superschematic/internal/generator/tsutil"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -106,6 +108,19 @@ type Tool struct {
 	// replace; nil when the operation has no @mcp. The SDK generators
 	// publish the record the hooks leave.
 	MCP *ir.OperationMCP
+}
+
+// ToolName is the name the SDK tool documents give an operation's tool:
+// its endpoint namespace ("root" when it has none), a dot, and the
+// operation's name as the TypeScript SDK names its method
+// ("catalog.listItems" for list_items). Every SDK's tools and every
+// reference's options (Reference.OptionsTool) are named by it, so a
+// reference names a tool that exists.
+func ToolName(namespace, operation string) string {
+	if strings.TrimSpace(namespace) == "" {
+		namespace = "root"
+	}
+	return namespace + "." + tsutil.ToCamelCase(operation)
 }
 
 // reservedToolParameterKeys are the argument-schema keys the core writes;

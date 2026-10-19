@@ -170,11 +170,14 @@ use the Rust method names.
 ### `tools/schema.json`
 
 One entry per operation, with these keys in this order: `name`
-(`<namespace>.<method>`), `operationId`, `title`, `mcp` (absent without
-`@mcp`), `capability`, `lifecycle`, `visibility`, `audience`, `guidance`,
-`replay`, `description`, `namespace`, `methodName`, `httpMethod`,
-`httpPath`, `requiresAuth`, `requiredPermissions`, `isScoped`,
-`bindingStatus`, `inputSchemaDigest`, `parameters`, `returns`.
+(`<namespace>.<method>`, the TypeScript SDK's method name in every SDK's
+documents, so an operation `list_items` is `catalog.listItems`; a
+reference's `options` names its tool so), `operationId`, `title`, `mcp`
+(absent without `@mcp`), `capability`, `lifecycle`, `visibility`,
+`audience`, `guidance`, `replay`, `description`, `namespace`,
+`methodName`, `httpMethod`, `httpPath`, `requiresAuth`,
+`requiredPermissions`, `isScoped`, `bindingStatus`, `inputSchemaDigest`,
+`parameters`, `returns`.
 
 ```json
 "mcp": {

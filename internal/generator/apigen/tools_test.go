@@ -210,3 +210,19 @@ func TestInvalidToolInvocationOption(t *testing.T) {
 		t.Fatalf("err = %v, want %q", err, want)
 	}
 }
+
+// ToolName names a tool by its namespace and the operation's name as the
+// TypeScript SDK names its method, root without a namespace.
+func TestToolName(t *testing.T) {
+	for _, tc := range []struct{ namespace, operation, want string }{
+		{"catalog", "listItems", "catalog.listItems"},
+		{"catalog", "list_items", "catalog.listItems"},
+		{"catalog", "ListItems", "catalog.listItems"},
+		{"order-lines", "get_line", "order-lines.getLine"},
+		{"", "ping", "root.ping"},
+	} {
+		if got := apigen.ToolName(tc.namespace, tc.operation); got != tc.want {
+			t.Errorf("ToolName(%q, %q) = %q, want %q", tc.namespace, tc.operation, got, tc.want)
+		}
+	}
+}
