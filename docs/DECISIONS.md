@@ -6836,7 +6836,10 @@ it on `listItems(q)`, and sdkgen's
 conditions last among the filter's, the column qualified as the ORM names
 the table, quoted only where SQL needs it (`review.search_text`). Every
 filter's conditions are an unexported `conditions` method, which
-`buildWhereClause` joins as before and `<Type>FilterConditions` returns.
+`buildWhereClause` joins as before and `<Type>FilterConditions` returns;
+the soft-delete condition, which `FindMany` adds after them unless its
+options include deleted rows, is not among them, so acme's key query adds
+`deleted_at IS NULL` itself.
 `search.go` comes from `templates/search.tmpl`, and a build of a schema
 without search fields removes one an earlier build wrote. The loader's
 check is `verify.checkSearchColumns`; verify names the column with a

@@ -918,7 +918,10 @@ func (u *TenantUserUpdate) ApplyTo(row *types.TenantUser) {
 // TenantUserFilterConditions are the filter's conditions for a query of
 // the caller's own, each column qualified by its table: each value is
 // appended to args, its placeholder numbered after those already there.
-// FindMany's WHERE is them joined by AND. A nil filter has none.
+// FindMany's WHERE is them joined by AND, then deleted_at IS NULL unless
+// its options include deleted rows. That soft-delete condition is not
+// among them: a query that leaves deleted rows out adds it itself. A nil
+// filter has none.
 func TenantUserFilterConditions(filter *TenantUserFilter, args *[]any) []string {
 	return filter.conditions(args, len(*args))
 }

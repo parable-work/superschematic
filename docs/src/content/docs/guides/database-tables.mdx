@@ -128,7 +128,10 @@ they match themselves. A blank text has no words and keeps every row.
 `ReviewFilterConditions(filter, &args)` gives a filter's conditions for a
 query of your own, each column qualified by its table and each value's
 placeholder numbered after the values `args` already holds; `FindMany`
-joins the same conditions with `AND`. A field whose column would be
+joins the same conditions with `AND`. The soft-delete condition is not
+among them: `FindMany` adds `deleted_at IS NULL` itself unless its options
+include deleted rows ([Soft delete](#soft-delete)), so a query of your own
+that leaves deleted rows out adds it too. A field whose column would be
 `search_text` beside search fields fails the build, since the generated
 column takes that name.
 

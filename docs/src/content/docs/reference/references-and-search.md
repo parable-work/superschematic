@@ -242,7 +242,8 @@ filter's conditions, each column qualified by its table, numbered after
 the values `args` already holds, to a query of the implementation's own:
 acme's `listReviews` puts its product, rating and search conditions into
 its keyset page's key query this way, and adds the cursor's comparison
-itself. The loader refuses a field whose column would be `search_text` on
+itself, and `deleted_at IS NULL`, which `FindMany` adds on its own and no
+filter's conditions hold. The loader refuses a field whose column would be `search_text` on
 a table with search fields:
 `Review.searchText: its column is search_text, the column @searchField generates`.
 
