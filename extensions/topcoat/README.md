@@ -1020,8 +1020,9 @@ no item has, a blank label, or a call that is refused or fails leaves
 the noun and id. When the references disagree the step names nothing,
 and the build log says which refers to what: `the trail names
 products/{productId} by its id: review.listReviews(productId) refers to
-ProductView by id, and stock.getStock(productId) to StockView by id`. Where a collection's path extends
-another's, `widgets/archived` beside `widgets/{id}`, the longer is its own
+ProductView by id, and stock.getStock(productId) to StockView by id`.
+Where a collection's path extends another's, `widgets/archived` beside
+`widgets/{id}`, the longer is its own
 pages' collection, current in the nav and the trail, never an item named
 `archived`; under an item, a collection is read before the item's
 actions. The item's detail, which the
@@ -1168,8 +1169,9 @@ are links to the page. The shard reads `back` from its query as the page
 reads it from the request's, so Previous, First and Next are the page's
 links, and its size form's submit runs the filter's script over its own
 form (`data-ss-live-size`), through its own hidden input, which sets the
-same signal. A list without a filter or a page has nothing to
-update, and stays a component. An action's form, a post that changes the item, keeps its POST-redirect-GET
+same signal. A list without a filter or a page has nothing to update,
+and stays a component. An action's form, a post that changes the item,
+keeps its POST-redirect-GET
 without a reload of its own: a shard renders and a form posts, so posting
 through one would run the operation inside a render, and through a
 procedure would need the form's fields as a record the browser builds.

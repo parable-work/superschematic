@@ -423,8 +423,8 @@ SDK language reads what they leave.
 | `ToolKeys` field | Default | Written as |
 | --- | --- | --- |
 | `Scalar` | `x-superschematic-scalar` | the key of a property's scalar name; empty leaves it out |
-| `Reference` | `x-superschematic-reference` | the key of a property's resolved reference (D61), after the scalar key; empty leaves it out |
-| `Search` | `x-superschematic-search` | the key, `true`, of the search argument's property (D62), after the reference key; empty leaves it out |
+| `Reference` | `x-superschematic-reference` | the key of a property's resolved reference (D61), after the scalar key in the digest input; empty leaves it out |
+| `Search` | `x-superschematic-search` | the key, `true`, of the search argument's property (D62), after the reference key in the digest input; empty leaves it out |
 | `Guidance` | `superschematic/operation-guidance` | the `_meta` key of a visible tool's guidance; empty leaves it out |
 | `Parameters` | none | key/value pairs at the root of every argument schema: first in the digest input, after `additionalProperties` in the documents, and as literal types in `tools/index.ts` |
 

@@ -589,12 +589,14 @@ the same link, and both render, so each page offers its links in the same
 places. The size form offers the route's `defaultLimit` and `maxLimit`
 and each of 10, 20, 50, 100, 200, 500 and 1000 below `maxLimit`, 10, 20,
 50 and 100 for acme's orders, and holds the filter; it starts at the
-first page, as a filter does, and the filter keeps the size. A cursor or limit the
-route refuses is its 400, as the form's message. A refused cursor offers
-only the first page's link, and a refused limit is kept by no link and
-no form, so that link and the filter start again at the route's default. A paged list without a filter renders no filter form, and a
-paged section on an item's page its first page and a link to the next. A search argument is the filter's
-first control, in a `role="search"` form. Every form a page renders
+first page, as a filter does, and the filter keeps the size. A cursor or
+limit the route refuses is its 400, as the form's message. A refused
+cursor offers only the first page's link, and a refused limit is kept by
+no link and no form, so that link and the filter start again at the
+route's default. A paged list without a filter renders no filter form,
+and a paged section on an item's page its first page and a link to the
+next. A search argument is the filter's first control, in a
+`role="search"` form. Every form a page renders
 takes its references' options, and its tables and details their labels,
 under the app's choices, and a list's rows link to their items through a
 detail whose path parameter refers to its own type, `products/{productId}`.

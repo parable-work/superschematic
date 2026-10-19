@@ -183,8 +183,8 @@ Where its `@source` checks run, the loader refuses three things:
   Product`.
 
 The data forms skip these checks, as they skip the other `@source` checks.
-`migrate` counts a key as a read of its foreign-key column, as it counts
-the relation field.
+`migrate` counts a key that is not `@virtual` as a read of its
+foreign-key column, as it counts the relation field.
 
 A reference's target need not be the API's own type. It may be a
 dependency's. That type is found through the schema's import that names
@@ -253,8 +253,8 @@ the values `args` already holds, to a query of the implementation's own:
 acme's `listReviews` puts its product, rating and search conditions into
 its keyset page's key query this way, and adds the cursor's comparison
 itself, and `deleted_at IS NULL`, which `FindMany` adds on its own and no
-filter's conditions hold. The loader refuses a field whose column would be `search_text` on
-a table with search fields:
+filter's conditions hold. The loader refuses a field whose column would
+be `search_text` on a table with search fields:
 `Review.searchText: its column is search_text, the column @searchField generates`.
 
 A Topcoat crate renders the search argument as its argument form's first
@@ -330,7 +330,7 @@ document.
 
 A tool's parameters in `tools/schema.json`, the provider lists and
 `tools/index.ts` give each argument's or field's property the same keys,
-after `x-superschematic-scalar`. There `target` is the type's name and
+beside `x-superschematic-scalar`. There `target` is the type's name and
 `options` the tool name of the options operation (`catalog.listProducts`).
 A tool hook renames the keys through `ToolKeys.Reference` and
 `ToolKeys.Search`

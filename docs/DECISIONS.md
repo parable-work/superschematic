@@ -6832,7 +6832,7 @@ text into words nor escapes `%` and `_`.
 | The loader refuses a field whose column would be `search_text` on a table with search fields: `Review.searchText: its column is search_text, the column @searchField generates`. | |
 
 Status: built. The OpenAPI document gives the search argument's
-parameter `x-superschematic-search: true` (`apigen.OpenAPISearchKey`), and
+parameter `x-superschematic-search: true` (`registry.OpenAPISearchKey`), and
 the tool documents its property, under `ToolKeys.Search`. The goldens of
 `fixture-refs-api` (apigen's, toolsutil's, sdkgen's and rustsdkgen's) hold
 it on `listItems(q)`, and sdkgen's
