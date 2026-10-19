@@ -14,6 +14,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/goutil"
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/generator/ormgen"
+	"github.com/parable-work/superschematic/internal/generator/projectengine"
 	"github.com/parable-work/superschematic/internal/generator/pygen"
 	"github.com/parable-work/superschematic/internal/generator/pysdkgen"
 	"github.com/parable-work/superschematic/internal/generator/rustgen"
@@ -1191,7 +1192,7 @@ func (r run) rustAPI() (*rustrestgen.APIOutput, *envgen.ConfigOutput, error) {
 	if output == nil {
 		return nil, nil, nil
 	}
-	rustDeps, err := r.rustDeps()
+	rustDeps, err := r.rustDeps(deps)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1222,7 +1223,7 @@ func (r run) rustAPI() (*rustrestgen.APIOutput, *envgen.ConfigOutput, error) {
 // the pool is the runtime's, unless the API declares workers, whose
 // messages are the database's Rust types (rustQueueTypes, D65). A Rust
 // server builds no bucket, so an API that lists one is refused.
-func (r run) rustDeps() (rustrestgen.DepsInfo, error) {
+func (r run) rustDeps(schemas map[string]*ir.Schema) (rustrestgen.DepsInfo, error) {
 	var deps rustrestgen.DepsInfo
 	if len(r.Schema.Buckets) > 0 {
 		var buckets []string
@@ -1239,6 +1240,20 @@ func (r run) rustDeps() (rustrestgen.DepsInfo, error) {
 		}
 	} else if len(r.Schema.Workers) > 0 {
 		return deps, fmt.Errorf("generator: %s declares workers, and connects to no database, which holds their queues; set its authDb to the DB service that declares them (D53)", r.Config.Name)
+	}
+	engine, err := r.engineDatabase(schemas)
+	if err != nil {
+		return deps, err
+	}
+	if engine != nil {
+		if r.Options.Paths.EngineRust == "" {
+			return deps, fmt.Errorf("generator: the Rust server of %s holds the engine of %s, its engine database, in its Deps (D58), whose crate the naming file's [paths] engine_rust names, and it is unset; set it to a checkout's runtime/engine/rust/engine", r.Config.Name, engine.Database)
+		}
+		path, err := naming.RelPath(apiDir, r.Options.Paths.EngineRust)
+		if err != nil {
+			return deps, fmt.Errorf("generator: the engine's crate from %s: %w", r.Config.Name, err)
+		}
+		deps.Engine = &rustrestgen.DepsEngine{Database: engine.Database, Namespace: engine.Namespace, Crate: projectengine.EngineCrate, Path: path}
 	}
 	for _, call := range r.Schema.Calls {
 		if r.Options.DependencyConfig != nil {

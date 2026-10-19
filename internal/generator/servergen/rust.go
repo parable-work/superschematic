@@ -151,6 +151,16 @@ type RustInput struct {
 	// Worker, when set, plans the entrypoint of a worker of the one API in
 	// APIs (D65): Server is then the worker's deployable.
 	Worker *WorkerInput
+
+	// EngineTypes are the directories of the Rust types crate of each
+	// engine database an API connects to, which holds its engine document
+	// (D58), by service.
+	EngineTypes map[string]string
+
+	// EngineProject is the project's engine crate the entrypoint's engine
+	// runs the behaviors of, nil when the core's behaviors are every
+	// behavior its engine databases compose (D58).
+	EngineProject *EngineProject
 }
 
 // RustServer is a planned Rust entrypoint, what the templates read: a
@@ -159,7 +169,7 @@ type RustServer struct {
 	Stack string
 	Name  string
 
-	// Kind is "server", "job" or "worker".
+	// Kind is "server", "job", "worker" or "runner".
 	Kind string
 
 	// Job is what a job's entrypoint runs, nil for a server and a worker
@@ -169,6 +179,16 @@ type RustServer struct {
 	// Worker is what a worker's entrypoint runs, nil for a server and a
 	// job (D65).
 	Worker *RustWorker
+
+	// Runner is what an engine's runner's entrypoint runs, nil for every
+	// other (D58).
+	Runner *RustRunner
+
+	// Engines are the engines the entrypoint opens, one per engine
+	// database it connects to (D58), and EngineProject the project's engine
+	// crate they run the behaviors of, nil for the core's.
+	Engines       []*RustEngine
+	EngineProject *EngineProject
 
 	// Package is the crate's name, and Binary the name of its one binary,
 	// the server's: the local target runs it from the Cargo target
@@ -260,9 +280,12 @@ type RustAPI struct {
 	// Identity is the variable of its identity service when it
 	// authenticates with the identity runtime over the user model (D50),
 	// empty otherwise, and IdentityField the EnvConfig field its config
-	// is.
+	// is. Authenticator is the variable of the identity runtime's
+	// authenticator over it when the API mounts its engine's routes, which
+	// share the service (D58).
 	Identity      string
 	IdentityField string
+	Authenticator string
 
 	// ServiceAuthenticator is the variable of its service authenticator,
 	// and Callers the EnvConfig field it verifies callers against, when an
@@ -281,8 +304,19 @@ type RustAPI struct {
 	// Database is the pool Deps.db holds, nil without one.
 	Database *RustDatabase
 
+	// Engine is the engine Deps.engine holds, of the API's engine database
+	// (D58), nil without one.
+	Engine *RustEngine
+
 	// Calls are Deps' clients.
 	Calls []RustCall
+}
+
+// MountsEngine reports whether the API's server mounts the routes of its
+// engine (D58): it shares its identity service and its service
+// authenticator with them.
+func (a *RustAPI) MountsEngine() bool {
+	return a.Engine != nil && a.Engine.API == a
 }
 
 // RustCall is a client in an API's Deps.
@@ -402,6 +436,9 @@ func PlanRust(in RustInput) (*RustServer, error) {
 		Binary:      in.Server,
 		Naming:      n,
 		RustVersion: RustVersion,
+		// The engine's behaviors are the project's when its crate holds
+		// them (D58).
+		EngineProject: in.EngineProject,
 	}
 	switch {
 	case in.Job != nil:
@@ -586,6 +623,9 @@ func PlanRust(in RustInput) (*RustServer, error) {
 		}
 		s.APIs = append(s.APIs, api)
 	}
+	if err := s.planRustEngines(in, taken); err != nil {
+		return nil, err
+	}
 	for _, a := range in.APIs {
 		if a.Implementation.Dir == "" {
 			continue
@@ -628,6 +668,10 @@ func (s *RustServer) planManifest(in RustInput, dir string) error {
 	}
 	if s.Background() {
 		registry = []CargoDependency{{"tokio", fmt.Sprintf(`{ version = %s, features = ["macros", "rt-multi-thread"] }`, quoteToml(rustTokioVersion))}}
+		if len(s.Engines) > 0 {
+			// engine.rs reads the engine document's JSON.
+			registry = append([]CargoDependency{{"serde_json", quoteToml(rustSerdeJSONVersion)}}, registry...)
+		}
 	}
 	if len(s.APIs) > 1 {
 		registry = append(registry, CargoDependency{"tower", fmt.Sprintf(`{ version = %s, features = ["util"] }`, quoteToml(rustTowerVersion))})
@@ -673,6 +717,13 @@ func (s *RustServer) planManifest(in RustInput, dir string) error {
 		return err
 	}
 	local := map[string]string{s.Naming.HTTPRuntimeRustCrate: runtime}
+	engines, err := s.engineDependencies(in, pathDep)
+	if err != nil {
+		return err
+	}
+	for crate, spec := range engines {
+		local[crate] = spec
+	}
 	for _, a := range in.APIs {
 		if local[a.Output.CrateName], err = pathDep(a.Dir); err != nil {
 			return err
@@ -790,6 +841,11 @@ func planRustDocker(in RustInput, s *RustServer, dir string) (*RustDocker, strin
 	if path.Base(path.Dir(scalar)) == "crates" {
 		d.Include = append(d.Include, path.Dir(path.Dir(scalar))+"/"+RustManifestFile)
 	}
+	engines, why := engineDockerIncludes(in, s, d.Workspace, rel)
+	if why != "" {
+		return nil, why, nil
+	}
+	d.Include = append(d.Include, engines...)
 	slices.Sort(d.Include)
 	d.Include = slices.Compact(d.Include)
 	return d, "", nil
@@ -833,11 +889,11 @@ func ReadRustImplementation(n naming.Naming, service, dir string) (RustImplement
 	return impl, nil
 }
 
-// Background reports whether the entrypoint is a job's or a worker's,
-// which serves no request: it mounts no routes, listens on no port, and
-// verifies no end user or caller.
+// Background reports whether the entrypoint is a job's, a worker's or an
+// engine runner's, which serves no request: it mounts no routes, listens on
+// no port, and verifies no end user or caller.
 func (s *RustServer) Background() bool {
-	return s.Job != nil || s.Worker != nil
+	return s.Job != nil || s.Worker != nil || s.Runner != nil
 }
 
 // Sections are the sections of docs/stack-model.md the entrypoint's
@@ -848,6 +904,8 @@ func (s *RustServer) Sections() string {
 		return "sections 8.6 and 8.7"
 	case s.Worker != nil:
 		return "sections 8.6 and 8.8"
+	case s.Runner != nil:
+		return "sections 3.1 and 8.6"
 	}
 	return "sections 8.1 and 8.6"
 }
@@ -957,6 +1015,9 @@ func (s *RustServer) CrateUses() []string {
 	for _, c := range s.Clients {
 		uses = append(uses, "use "+crateIdent(c.Crate)+" as "+c.Alias+";")
 	}
+	for _, e := range s.Engines {
+		uses = append(uses, "use "+crateIdent(e.TypesCrate)+" as "+e.TypesAlias+";")
+	}
 	slices.Sort(uses)
 	return slices.Compact(uses)
 }
@@ -967,11 +1028,21 @@ func (s *RustServer) CrateUses() []string {
 // authenticator.
 func (a *RustAPI) ImplementationsArgs() []string {
 	args := []string{a.Handlers}
-	if a.Identity != "" {
+	// An API that mounts its engine's routes holds its identity service
+	// and its service authenticator in an Arc, which the routes' callers
+	// share (D58).
+	switch {
+	case a.Authenticator != "":
+		args = append(args, "Arc::new("+a.Authenticator+")")
+	case a.Identity != "":
 		args = append(args, "Arc::new(IdentityAuthenticator::new(Arc::new("+a.Identity+")))")
 	}
 	if a.ServiceAuthenticator != "" {
-		args = append(args, "Arc::new("+a.ServiceAuthenticator+")")
+		authenticator := "Arc::new(" + a.ServiceAuthenticator + ")"
+		if a.MountsEngine() {
+			authenticator = "Arc::clone(&" + a.ServiceAuthenticator + ") as _"
+		}
+		args = append(args, authenticator)
 	}
 	return args
 }
@@ -1001,10 +1072,15 @@ func WriteRust(s *RustServer, dir string) error {
 		main = "job.rs.tmpl"
 	case s.Worker != nil:
 		main = "worker.rs.tmpl"
+	case s.Runner != nil:
+		main = "runner.rs.tmpl"
 	}
 	files := []struct{ template, name string }{
 		{main, RustMainFile},
 		{"Cargo.toml.tmpl", RustManifestFile},
+	}
+	if len(s.Engines) > 0 {
+		files = append(files, struct{ template, name string }{"engine.rs.tmpl", RustEngineFile})
 	}
 	if s.Docker != nil {
 		files = append(files, struct{ template, name string }{"Dockerfile.rs.tmpl", DockerFile}, struct{ template, name string }{"dockerignore.rs.tmpl", DockerIgnoreFile})
@@ -1131,6 +1207,14 @@ func (s *RustServer) SiteCORS() string {
 		}
 		args = append(args, [2]string{"&" + a.Config + "." + a.CORS, a.Alias + "::operations::ALL"})
 		apis = append(apis, "cors::Api::new("+args[len(args)-1][0]+", "+args[len(args)-1][1]+")")
+	}
+	// The engine's routes an API mounts answer its site's CORS too (D58).
+	for _, a := range s.APIs {
+		if a.CORS == "" || !a.MountsEngine() {
+			continue
+		}
+		args = append(args, [2]string{"&" + a.Config + "." + a.CORS, rustString(a.Engine.Mount)})
+		apis = append(apis, "engine::site_cors("+args[len(args)-1][0]+", "+args[len(args)-1][1]+")")
 	}
 	const open, close = "    let app = app.layer(cors::SiteCorsLayer::new(vec![", "]));"
 	if line := open + strings.Join(apis, ", ") + close; len(line) <= rustWidth {

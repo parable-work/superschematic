@@ -9,8 +9,9 @@
 //! @envVars settings and the fields its edges derive, one variable per
 //! member (section 3.4). It listens on $PORT, 8080 when unset, answers
 //! `GET /healthz` while the process runs and `GET /readyz` while its
-//! databases answer, and on SIGTERM or SIGINT stops taking requests and
-//! lets those in flight finish. It logs one JSON object per line on stdout.
+//! databases answer{{ if .Engines }} and its engines are open (D58){{ end }}, and on SIGTERM or SIGINT
+//! stops taking requests and lets those in flight finish. It logs one JSON
+//! object per line on stdout.
 //!
 //! Each API's implementation is the crate at the naming file's
 //! `[implementation_paths] rust` template, which the build scaffolded once
@@ -25,6 +26,14 @@
 //! An API whose authDb has a User table authenticates its end users with
 //! the identity runtime over that database (D50), with the identity config
 //! its identity config field holds.
+{{- end }}
+{{- if .Engines }}
+//!
+//! An API whose database is an engine database holds the engine (D58) in
+//! its Deps, which `engine.rs` opens in the background; the first API on
+//! the database mounts the engine's routes beside its own.
+
+mod engine;
 {{- end }}
 
 use std::net::SocketAddr;
@@ -43,10 +52,16 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
 use serde_json::json;
+{{- if .Engines }}
+use superschematic_engine::background::Background;
+{{- end }}
 {{- range .RuntimeUses }}
 {{ . }}
 {{- end }}
 use tokio::signal::unix::{signal, Signal, SignalKind};
+{{- if .MountsEngines }}
+use tokio::sync::watch;
+{{- end }}
 {{- if .Dispatches }}
 use tower::ServiceExt;
 {{- end }}
@@ -70,11 +85,14 @@ const READINESS_TIMEOUT: Duration = Duration::from_secs(2);
 type Failure = Box<dyn std::error::Error + Send + Sync>;
 
 /// What /readyz reads: whether the server is draining{{ if .Databases }}, and the databases
-/// it pings{{ end }}.
+/// it pings{{ end }}{{ if .Engines }}, and the engines it checks{{ end }}.
 struct Readiness {
     draining: AtomicBool,
 {{- if .Databases }}
     dependencies: Vec<Dependency>,
+{{- end }}
+{{- if .Engines }}
+    engines: Vec<EngineDependency>,
 {{- end }}
 }
 {{- if .Databases }}
@@ -83,6 +101,14 @@ struct Readiness {
 struct Dependency {
     name: &'static str,
     pool: Pool,
+}
+{{- end }}
+{{- if .Engines }}
+
+/// An engine /readyz checks: open, not poisoned, its database answering.
+struct EngineDependency {
+    name: &'static str,
+    engine: Background,
 }
 {{- end }}
 
@@ -130,6 +156,20 @@ async fn run() -> Result<(), Failure> {
 {{- end }}
 {{- end }}
 {{- end }}
+{{- range .Engines }}
+
+    // The engine of {{ .Service }}, an engine database (D58), opened on the
+    // same database in the background, as the pool connects when first
+    // used, so /readyz reports it until it opens and deploys the database's
+    // engine document.
+{{ $.OpenLet . }}
+{{- end }}
+{{- if .MountsEngines }}
+
+    // Moved to true as the server shuts down, which ends every event
+    // stream of the engines' routes, so the shutdown waits for none.
+    let (stop_streams, streams) = watch::channel(false);
+{{- end }}
 {{- if .Clients }}
 
     // One client per API called, shared by every API that calls it.
@@ -147,6 +187,9 @@ async fn run() -> Result<(), Failure> {
 {{- if .Database }}
         db: {{ .Database.Var }}.clone(),
 {{- end }}
+{{- with .Engine }}
+        engine: {{ .Var }}.clone(),
+{{- end }}
 {{- range .Calls }}
         {{ .Field }}: {{ .Client.Var }}.clone(),
 {{- end }}
@@ -161,11 +204,18 @@ async fn run() -> Result<(), Failure> {
         {{ .Config }}.{{ .IdentityField }}.clone(),
     )
     .map_err(|err| format!("identity of {{ .Service }}: {err}"))?;
+{{- if .MountsEngine }}
+    let {{ .Identity }} = Arc::new({{ .Identity }});
+{{ rustLetCall .Authenticator "IdentityAuthenticator::new" "" (printf "Arc::clone(&%s)" .Identity) }}
+{{- end }}
 {{- end }}
 {{- if .ServiceAuthenticator }}
     // It verifies a calling service's credential against its callers
     // field (section 9.2).
 {{ rustLet .ServiceAuthenticator (printf "JwtServiceAuthenticator::new(%s.%s.clone())" .Config .Callers) (printf "map_err(|err| format!(\"service authenticator of %s: {err}\"))?" .Service) }}
+{{- if .MountsEngine }}
+    let {{ .ServiceAuthenticator }} = Arc::new({{ .ServiceAuthenticator }});
+{{- end }}
 {{- end }}
 {{ .ImplementationsLet }}
 {{- if .Webhooks }}
@@ -175,6 +225,15 @@ async fn run() -> Result<(), Failure> {
         .map_err(|err| format!("implementation of {{ .Service }}: {err}"))?;
 {{- end }}
 {{ rustLetCall .Router (printf "%s::build_router" .Alias) "" .Implementations }}
+{{- end }}
+{{- range .Engines }}
+{{- if .API }}
+
+    // The engine's routes, its event stream and its MCP endpoint (D58),
+    // behind the callers {{ .API.Service }}'s own routes admit{{ if .API.Identity }}, answering its
+    // identity config's trusted origins{{ end }}.
+{{ $.RoutesLet . }}
+{{- end }}
 {{- end }}
 
     let readiness = Arc::new(Readiness {
@@ -196,11 +255,33 @@ async fn run() -> Result<(), Failure> {
 {{- end }}
         ],
 {{- end }}
+{{- if eq (len .Engines) 1 }}
+{{- range .Engines }}
+        engines: vec![EngineDependency {
+            name: {{ rustString .ReadinessName }},
+            engine: {{ .Var }}.clone(),
+        }],
+{{- end }}
+{{- else if .Engines }}
+        engines: vec![
+{{- range .Engines }}
+            EngineDependency {
+                name: {{ rustString .ReadinessName }},
+                engine: {{ .Var }}.clone(),
+            },
+{{- end }}
+        ],
+{{- end }}
     });
     let app = Router::new()
         .route("/healthz", get(healthz))
         .route("/readyz", get(readyz))
         .with_state(Arc::clone(&readiness))
+{{- range .Engines }}
+{{- if .API }}
+        .merge({{ .Routes }})
+{{- end }}
+{{- end }}
 {{- if .Dispatches }}
         .fallback_service(dispatch(vec![
 {{- range .APIs }}
@@ -220,7 +301,17 @@ async fn run() -> Result<(), Failure> {
     // inside it.
 {{ .SiteCORS }}
 {{- end }}
+{{- if .Engines }}
+    let served = serve(port, app, readiness{{ if .MountsEngines }}, stop_streams{{ end }}).await;
+    // Each engine closes after the requests in flight finish: its runner
+    // and streams stop, and it lets go of its database off the runtime.
+{{- range .Engines }}
+    {{ .Var }}.shutdown().await;
+{{- end }}
+    served
+{{- else }}
     serve(port, app, readiness).await
+{{- end }}
 }
 
 /// The port $PORT names, or DEFAULT_PORT when it is unset.
@@ -276,7 +367,7 @@ async fn healthz() -> Json<serde_json::Value> {
 }
 
 /// Answers 503 while the server drains{{ if .Databases }} or a database does not answer a ping
-/// within READINESS_TIMEOUT{{ end }}, and 200 otherwise.
+/// within READINESS_TIMEOUT{{ end }}{{ if .Engines }}, or an engine is not open or ready within it{{ end }}, and 200 otherwise.
 async fn readyz(State(readiness): State<Arc<Readiness>>) -> Response {
     if readiness.draining.load(Ordering::SeqCst) {
         return (
@@ -297,6 +388,18 @@ async fn readyz(State(readiness): State<Arc<Readiness>>) -> Response {
         tracing::warn!(dependency = dependency.name, error = %failure, "not ready");
         unavailable.push(dependency.name);
     }
+{{- if .Engines }}
+    for dependency in &readiness.engines {
+        let ready = tokio::time::timeout(READINESS_TIMEOUT, dependency.engine.ready());
+        let failure = match ready.await {
+            Ok(Ok(())) => continue,
+            Ok(Err(err)) => err,
+            Err(_) => format!("no answer within {} s", READINESS_TIMEOUT.as_secs()),
+        };
+        tracing::warn!(dependency = dependency.name, error = %failure, "not ready");
+        unavailable.push(dependency.name);
+    }
+{{- end }}
     if !unavailable.is_empty() {
         let body = json!({ "status": "unavailable", "unavailable": unavailable });
         return (StatusCode::SERVICE_UNAVAILABLE, Json(body)).into_response();
@@ -329,10 +432,26 @@ impl Signals {
     }
 }
 
+{{- if .MountsEngines }}
+/// Serves `app` on `port` until SIGTERM or SIGINT. Then it answers /readyz
+/// 503, ends every event stream of the engines' routes (`stop_streams`),
+/// stops taking connections and gives the requests in flight
+/// SHUTDOWN_TIMEOUT to finish. A second signal ends the process at once.
+{{- else }}
 /// Serves `app` on `port` until SIGTERM or SIGINT. Then it answers /readyz
 /// 503, stops taking connections and gives the requests in flight
 /// SHUTDOWN_TIMEOUT to finish. A second signal ends the process at once.
+{{- end }}
+{{- if .MountsEngines }}
+async fn serve(
+    port: u16,
+    app: Router,
+    readiness: Arc<Readiness>,
+    stop_streams: watch::Sender<bool>,
+) -> Result<(), Failure> {
+{{- else }}
 async fn serve(port: u16, app: Router, readiness: Arc<Readiness>) -> Result<(), Failure> {
+{{- end }}
     let mut signals = Signals::new()?;
     let listener = tokio::net::TcpListener::bind(SocketAddr::from(([0, 0, 0, 0], port)))
         .await
@@ -356,6 +475,9 @@ async fn serve(port: u16, app: Router, readiness: Arc<Readiness>) -> Result<(), 
     };
     readiness.draining.store(true, Ordering::SeqCst);
     tracing::info!(signal = name, "shutting down");
+{{- if .MountsEngines }}
+    stop_streams.send_replace(true);
+{{- end }}
     let _ = stop.send(());
     tokio::select! {
         served = &mut server => {

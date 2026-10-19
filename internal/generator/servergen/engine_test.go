@@ -65,6 +65,20 @@ const engineCloudStack = "desk-cloud-stack"
 // queue-api on the local target beside queue-db's runner (D58).
 var queueOrder = []string{"queue-db", "queue-api", queueStack}
 
+// rustEngineOrder is the order a build-all builds the Rust engine fixture
+// in: desk-db, desk-rs-api, desk-api's twin in Rust, and desk-rs-stack,
+// which serves desk-rs-api on the local target beside desk-db's runner,
+// in Rust (D58).
+var rustEngineOrder = []string{"desk-db", "desk-rs-api", rustEngineStack}
+
+// rustEngineStack is the Rust engine fixture's stack, rustEngineServer its
+// server and rustEngineJob desk-rs-api's job; its runner is engineRunner.
+const (
+	rustEngineStack  = "desk-rs-stack"
+	rustEngineServer = "desk-rs-api"
+	rustEngineJob    = "desk-rs-api-close-stale-tickets"
+)
+
 // queueStack is the queue fixture's stack, queueServer its server and
 // queueRunner the engine's runner of queue-db.
 const (
@@ -84,7 +98,7 @@ func loadEngineFixture(t *testing.T) fixture {
 		t.Fatal(err)
 	}
 	f := fixture{reg: reg, schemas: map[string]*ir.Schema{}, configs: map[string]*schemaconfig.SchemaConfig{}}
-	for _, name := range append(append(slices.Clone(engineOrder), engineCloudStack), queueOrder...) {
+	for _, name := range append(append(append(slices.Clone(engineOrder), engineCloudStack), queueOrder...), "desk-rs-api", rustEngineStack) {
 		schema, cfg, err := loader.LoadServiceWithConfig(filepath.Join(engineRoot, name), loader.WithRegistry(reg))
 		if err != nil {
 			t.Fatalf("load %s: %v", name, err)

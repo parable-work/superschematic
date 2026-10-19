@@ -19,6 +19,13 @@
 //! `[implementation_paths] rust` template, which each build copies into the
 //! output root's `impl/<service>`, the mirror this crate builds against
 //! (section 8.6): {{ $api.ImplCrate }}{{ if $api.ImplDir }}, at {{ $api.ImplDir }}{{ end }}
+{{- if .Engines }}
+//!
+//! Its API's database is an engine database, whose engine (D58) its Deps
+//! holds, which `engine.rs` opens in the background.
+
+mod engine;
+{{- end }}
 
 use std::process::ExitCode;
 use std::time::Instant;
@@ -65,6 +72,15 @@ async fn run() -> Result<(), Failure> {
 {{- template "rs-background-deps" . }}
 {{ rustLetChain "jobs" (printf "%s::create_jobs(%s)" $api.ImplAlias $api.Deps) "await" (printf "map_err(|err| format!(\"jobs of %s: {err}\"))?" $api.Service) }}
 {{ rustMacro "tracing::info" (printf "api = %s" (rustString $api.Service)) (printf "class = %s" (rustString .Job.Name)) (rustString "job started") }}
+{{- if .Engines }}
+    let ran = jobs.{{ .Job.Method }}(shutdown).await;
+    // The engine closes once the job ends, off the runtime.
+{{- range .Engines }}
+    {{ .Var }}.shutdown().await;
+{{- end }}
+    ran
+{{- else }}
     jobs.{{ .Job.Method }}(shutdown).await
+{{- end }}
 }
 {{ template "rs-functions" . }}

@@ -26,6 +26,13 @@
 //! `[implementation_paths] rust` template, which each build copies into the
 //! output root's `impl/<service>`, the mirror this crate builds against
 //! (section 8.6): {{ $api.ImplCrate }}{{ if $api.ImplDir }}, at {{ $api.ImplDir }}{{ end }}
+{{- if .Engines }}
+//!
+//! Its API's database is an engine database, whose engine (D58) its Deps
+//! holds, which `engine.rs` opens in the background.
+
+mod engine;
+{{- end }}
 
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -93,7 +100,16 @@ async fn run() -> Result<(), Failure> {
         let workers = Arc::clone(&workers);
         async move { workers.{{ .Worker.Method }}(message).await }
     };
+{{- if .Engines }}
+    let worked = worker::run_worker(queue, handle, options, shutdown).await;
+    // The engine closes once the worker stops, off the runtime.
+{{- range .Engines }}
+    {{ .Var }}.shutdown().await;
+{{- end }}
+    worked?;
+{{- else }}
     worker::run_worker(queue, handle, options, shutdown).await?;
+{{- end }}
     Ok(())
 }
 {{ template "rs-functions" . }}

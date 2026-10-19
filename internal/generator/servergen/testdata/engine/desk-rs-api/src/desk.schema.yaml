@@ -1,0 +1,31 @@
+name: desk-rs-api
+kind: API
+types:
+  Summary:
+    name: Summary
+    role: APIView
+    fields:
+      - name: desk
+        typeRef: { name: string }
+        required: true
+operationSets:
+  - name: Account
+    userSessions: { register: true }
+    operations: []
+  - name: DeskQueries
+    operations:
+      # A route of the API's own, which a member or a service standing in
+      # for one may call: the API's operations have a service clause, so
+      # its server builds a service authenticator, which the engine's
+      # routes verify a caller with too.
+      - name: summary
+        typeRef: { name: Summary }
+        required: true
+        auth: true
+        httpMethod: GET
+        restPath: summary
+        serviceCallers: { mode: allow }
+# A job of the API, a deployable of its own with the API's Deps (D52),
+# which hold the engine of desk-db: the job opens it, and deploys nothing.
+jobs:
+  - name: CloseStaleTickets
