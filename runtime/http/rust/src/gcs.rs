@@ -16,7 +16,10 @@
 //! (`GET http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token`
 //! with `Metadata-Flavor: Google`, the host from `GCE_METADATA_HOST` when it
 //! is set) and keeps until 3 minutes 45 seconds before it expires. The gcp
-//! target grants the account `roles/storage.objectUser` on the bucket.
+//! target grants the account `roles/storage.objectUser` on the bucket. It
+//! reads no application default credentials file, so a process off Google
+//! Cloud reaches a bucket through an emulator alone, or through a
+//! metadata server `GCE_METADATA_HOST` names.
 //!
 //! **A signed URL** is a V4 one, signed as the Go and TypeScript clients
 //! sign it: on GCS, by IAM's `signBlob` as the workload's account, whose
@@ -775,10 +778,12 @@ impl Shared {
     /// access token.
     async fn sign_blob(&self, account: &str, blob: &[u8]) -> Result<Vec<u8>, String> {
         let token = self.access_token().await?;
+        // The account's `@` stays as it is, as Google's clients expand
+        // the resource name into the path.
         let url = format!(
             "{}/v1/projects/-/serviceAccounts/{}:signBlob",
             self.iam_url,
-            encode(account, false)
+            encode(account, false).replace("%40", "@")
         );
         let payload = base64::engine::general_purpose::STANDARD.encode(blob);
         let sent = self

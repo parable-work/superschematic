@@ -208,7 +208,8 @@ TypeScript runtimes' (D51):
   honoured), kept until 3 min 45 s before it expires, and signs a URL by
   IAM's `signBlob` as the account the metadata server names, which needs
   `roles/iam.serviceAccountTokenCreator` on itself, as the gcp target
-  grants. A connection with an endpoint, or `STORAGE_EMULATOR_HOST`,
+  grants. It reads no credentials file, so off Google Cloud it reaches a
+  bucket through an emulator. A connection with an endpoint, or `STORAGE_EMULATOR_HOST`,
   reaches an emulator with no credential, and signs its URLs for the
   emulator's host with a key the process makes, which fake-gcs-server takes
   without checking. `put` is one multipart upload, streamed for a stream;
