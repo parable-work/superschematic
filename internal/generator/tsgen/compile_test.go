@@ -239,3 +239,26 @@ func TestNullableObjectMapParserCompiles(t *testing.T) {
 		t.Fatalf("generated nullable object map parser does not type-check: %v\n%s", err, out)
 	}
 }
+
+// TestDocTextCannotCloseComment type-checks a package whose type, field,
+// enum, enum value and union docs contain "*/". Unescaped, the text closes
+// the JSDoc comment and tsc reads the rest of the doc as TypeScript.
+func TestDocTextCannotCloseComment(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping compile check in -short mode")
+	}
+	const doc = "Closes */ early.\nLast line ends the comment. */"
+	schema := ir.NewSchema("doc-escape", ir.SchemaKindGeneral)
+	schema.Enums["DocKind"] = &ir.EnumDef{
+		Name: "DocKind", Comment: doc,
+		Values: []ir.EnumValueDef{{Name: "FIRST", Comment: doc}},
+	}
+	for _, name := range []string{"DocRecord", "DocOther"} {
+		schema.Types[name] = &ir.TypeDef{
+			Name: name, Role: ir.RoleEmbeddedStruct, Comment: doc,
+			Fields: []*ir.FieldDef{{Name: "value", TypeRef: ir.TypeRef{Name: "string"}, Required: true, Comment: doc}},
+		}
+	}
+	schema.Unions["DocItem"] = &ir.UnionDef{Name: "DocItem", Types: []string{"DocRecord", "DocOther"}, Comment: doc}
+	buildTSPackages(t, []tsPackageCase{{name: "doc-escape", schema: schema}})
+}
