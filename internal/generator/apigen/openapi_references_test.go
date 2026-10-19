@@ -221,6 +221,61 @@ func TestADependencysReferenceIsHeldToTheFieldsType(t *testing.T) {
 	}
 }
 
+// TestAComponentTwoDependenciesDeclareIsTheImportedOne: a General
+// dependency, a-types, and an API dependency, shelves-api, both declare
+// ShelfView, and the API imports it from shelves-api, whose name sorts
+// last. The component is built from the imported type on every run, the
+// type a reference to ShelfView resolves to (D61, amended; D66), and its
+// reference key reads that type's fields.
+func TestAComponentTwoDependenciesDeclareIsTheImportedOne(t *testing.T) {
+	uuid := &ir.ScalarDef{Name: "Identity.UUID", LanguagePrimitive: ir.LanguageString, TypeMappings: map[string]string{"go": "string"}}
+	general := ir.NewSchema("a-types", ir.SchemaKindGeneral)
+	general.Scalars["Identity.UUID"] = uuid
+	general.Types["ShelfView"] = &ir.TypeDef{Name: "ShelfView", Role: ir.RoleAPIView, Fields: []*ir.FieldDef{
+		{Name: "id", TypeRef: ir.TypeRef{Name: "Identity.UUID"}, Required: true},
+		{Name: "name", TypeRef: ir.TypeRef{Name: "string"}, Required: true},
+	}}
+	shelves := ir.NewSchema("shelves-api", ir.SchemaKindAPI)
+	shelves.Scalars["Identity.UUID"] = uuid
+	shelves.Types["ShelfView"] = &ir.TypeDef{Name: "ShelfView", Role: ir.RoleAPIView, Fields: []*ir.FieldDef{
+		{Name: "id", TypeRef: ir.TypeRef{Name: "Identity.UUID"}, Required: true},
+		{Name: "itemId", TypeRef: ir.TypeRef{Name: "Identity.UUID"}, Required: true, References: &ir.ReferenceDef{Type: "ItemView"}},
+	}}
+
+	api := ir.NewSchema("shop", ir.SchemaKindAPI)
+	api.Scalars["Identity.UUID"] = uuid
+	api.Imports = []ir.Import{{Package: "@schemas/shelves-api", Types: []string{"ShelfView"}}}
+	api.Types["ItemView"] = &ir.TypeDef{Name: "ItemView", Role: ir.RoleAPIView, Fields: []*ir.FieldDef{
+		{Name: "id", TypeRef: ir.TypeRef{Name: "Identity.UUID"}, Required: true},
+	}}
+	api.OperationSets = []*ir.OperationSet{{Name: "Catalog", Operations: []*ir.FieldDef{
+		{Name: "listItems", HTTPMethod: "GET", RestPath: "items", TypeRef: ir.TypeRef{Name: "ItemView", IsArray: true}, Required: true},
+		{Name: "listShelves", HTTPMethod: "GET", RestPath: "shelves", TypeRef: ir.TypeRef{Name: "ShelfView", IsArray: true}, Required: true},
+	}}}
+	for run := 0; run < 20; run++ {
+		output, err := apigen.Generate(api, apigen.Options{
+			Provider:     sessionauth.Provider{},
+			SchemaName:   "shop",
+			ModulePath:   "example.com/schemas/api/shop",
+			TypesModule:  "example.com/schemas/types/go/shop",
+			Dependencies: map[string]*ir.Schema{"a-types": general, "shelves-api": shelves},
+			Clock:        codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)),
+		})
+		if err != nil {
+			t.Fatalf("generate: %v", err)
+		}
+		doc := decodeOpenAPI(t, output.OpenAPISpecRaw)
+		properties := doc["components"].(map[string]any)["schemas"].(map[string]any)["ShelfView"].(map[string]any)["properties"].(map[string]any)
+		item, ok := properties["itemId"].(map[string]any)
+		if !ok || properties["name"] != nil {
+			t.Fatalf("run %d: ShelfView's properties are %v, want shelves-api's id and itemId", run, properties)
+		}
+		if item[apigen.OpenAPIReferenceKey] == nil {
+			t.Fatalf("run %d: ShelfView.itemId has no reference key: %v", run, item)
+		}
+	}
+}
+
 // generateShop is the API output of a shop whose order line, sourced from
 // shop-db's OrderLine, holds the key of its product relation, productId,
 // with ref as its RefersTo (nil for none). ProductView is sourced from

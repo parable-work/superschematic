@@ -111,10 +111,10 @@ func (m *typeMapper) fieldReference(holder *ir.TypeDef, field *ir.FieldDef) *Ref
 // addOpenAPIFieldReferences gives each property of the document's object
 // components whose field holds a reference the reference key, on the
 // property's own schema: on a list, the list's. A component's fields are
-// the schema's own type of its name, else a dependency's, the
-// dependencies in name order; a property the type does not declare is
+// those of the type it was built from (types, from addSchemaFromIR), the
+// schema's own or a dependency's; a property the type does not declare is
 // left alone.
-func addOpenAPIFieldReferences(components map[string]interface{}, schema *ir.Schema, dependencies map[string]*ir.Schema) {
+func addOpenAPIFieldReferences(components map[string]interface{}, types map[string]*ir.TypeDef, schema *ir.Schema, dependencies map[string]*ir.Schema) {
 	names := make([]string, 0, len(components))
 	for name := range components {
 		names = append(names, name)
@@ -129,7 +129,7 @@ func addOpenAPIFieldReferences(components map[string]interface{}, schema *ir.Sch
 		if !ok {
 			continue
 		}
-		holder := componentType(schema, dependencies, name)
+		holder := types[name]
 		if holder == nil {
 			continue
 		}
@@ -146,23 +146,6 @@ func addOpenAPIFieldReferences(components map[string]interface{}, schema *ir.Sch
 			}
 		}
 	}
-}
-
-// componentType is the object type a component of the document is named
-// after: the schema's own, else the first dependency's in name order.
-func componentType(schema *ir.Schema, dependencies map[string]*ir.Schema, name string) *ir.TypeDef {
-	if td := schema.Types[name]; td != nil {
-		return td
-	}
-	for _, dep := range sortedSchemaNames(dependencies) {
-		if dependencies[dep] == nil {
-			continue
-		}
-		if td := dependencies[dep].Types[name]; td != nil {
-			return td
-		}
-	}
-	return nil
 }
 
 // openAPIParameterKeys gives a path or query parameter object, or a body

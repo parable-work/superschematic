@@ -1313,15 +1313,12 @@ func (m *typeMapper) isInputType(ref ir.TypeRef) bool {
 	}
 }
 
+// findTypeDef finds an object type of the schema or of a dependency, in
+// the order a reference's target is found (ir.LookupScopes): the schema's
+// own, the dependency an import names it in, then the rest by name.
 func (m *typeMapper) findTypeDef(name string) (*ir.TypeDef, bool) {
-	if typeDef, ok := m.schema.Types[name]; ok {
-		return typeDef, true
-	}
-	for _, dep := range m.dependencies {
-		if dep == nil {
-			continue
-		}
-		if typeDef, ok := dep.Types[name]; ok {
+	for _, scope := range ir.LookupScopes(m.schema, m.dependencies, name) {
+		if typeDef, ok := scope.Schema.Types[name]; ok {
 			return typeDef, true
 		}
 	}
