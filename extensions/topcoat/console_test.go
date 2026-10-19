@@ -401,6 +401,94 @@ func TestAnArgumentNamedBackHasNoPreviousPage(t *testing.T) {
 	}
 }
 
+// TestADerivedReferenceLabelsRows builds fixture-console-api with its order
+// lines and products sourced from a database's lines and items, @source,
+// a line's product a Relation to Item, and with OrderLine.productId saying no
+// RefersTo: the key derives its reference to Product, the one type sourced
+// from the related table (D61, amended), so the crate's references are
+// those of the written reference, its order lines' products labeled
+// through the same lookup.
+func TestADerivedReferenceLabelsRows(t *testing.T) {
+	dir := consoleCopy(t, func(schema string) string {
+		schema = strings.Replace(schema, "kind: API\n", "kind: API\nimports:\n  - package: \"@schemas/fixture-console-db\"\n    types: [Item, Line]\n", 1)
+		schema = strings.Replace(schema, "  Product:\n    name: Product\n    role: APIView\n", "  Product:\n    name: Product\n    role: APIView\n    source: { target: fixture-console-db.Item }\n", 1)
+		return strings.Replace(schema, "  OrderLine:\n    name: OrderLine\n    role: APIView\n    display:\n      noun: Line\n    fields:\n      - name: productId\n        title: Product\n        typeRef: { name: Identity.UUID }\n        required: true\n        references: { type: Product }\n",
+			"  OrderLine:\n    name: OrderLine\n    role: APIView\n    source: { target: fixture-console-db.Line }\n    display:\n      noun: Line\n    fields:\n      - name: productId\n        title: Product\n        typeRef: { name: Identity.UUID }\n        required: true\n", 1)
+	})
+	config := filepath.Join(dir, "schema.config.yaml")
+	data, err := os.ReadFile(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, config, string(data)+"dependencies:\n  - name: fixture-console-db\n    kind: DB\n")
+	db := filepath.Join(filepath.Dir(dir), "fixture-console-db")
+	writeFile(t, filepath.Join(db, "schema.config.yaml"), "name: fixture-console-db\nkind: DB\noutputs: {}\n")
+	writeFile(t, filepath.Join(db, "src", "shop.schema.yaml"), `name: fixture-console-db
+kind: DB
+scalars:
+  Identity.UUID:
+    name: Identity.UUID
+    languagePrimitive: string
+types:
+  Item:
+    name: Item
+    role: DBTable
+    fields:
+      - name: id
+        typeRef: { name: Identity.UUID }
+        required: true
+        key: true
+      - name: name
+        typeRef: { name: string }
+        required: true
+  Line:
+    name: Line
+    role: DBTable
+    fields:
+      - name: id
+        typeRef: { name: Identity.UUID }
+        required: true
+        key: true
+      - name: product
+        typeRef: { name: Item }
+        required: true
+        relation: { type: Item }
+      - name: quantity
+        typeRef: { name: number }
+        required: true
+`)
+	root := testpaths.TempDir(t)
+	var log strings.Builder
+	if _, err := buildDir(t, registry.DefaultNaming(), dir, root, livePagesOutputs(), &log); err != nil {
+		t.Fatalf("build: %v\n%s", err, log.String())
+	}
+	got, err := os.ReadFile(filepath.Join(topcoat.Dir(root, consoleService), "src", "references.rs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := os.ReadFile(filepath.Join("testdata", "golden", consoleService, "src", "references.rs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(want) {
+		t.Errorf("references.rs with the derived reference differs from the written one's:\n%s", got)
+	}
+	if !strings.Contains(string(got), `let sites = unnamed(&choices, &[("lines.productId", &["lines", "productId"])]);`) {
+		t.Error("the order's lines do not name their products")
+	}
+}
+
+// writeFile writes text to path, making its directory.
+func writeFile(t *testing.T, path, text string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // consoleCopy is a copy of fixture-console-api whose schema edit changes.
 func consoleCopy(t *testing.T, edit func(schema string) string) string {
 	t.Helper()

@@ -386,10 +386,14 @@ func (b *refBuilder) structSites(st *formStruct, prefix []string, open map[*form
 		switch f.Kind {
 		case kindValue, kindValueRows:
 			field := fieldNamed(typeDef, f.JSONName)
-			if field == nil || field.References == nil || !f.Choosable {
+			if field == nil || !f.Choosable {
 				continue
 			}
-			if source := b.source(st.TypeName+"."+field.Name, field.References); source != nil {
+			ref := b.fieldReference(typeDef, field)
+			if ref == nil {
+				continue
+			}
+			if source := b.source(st.TypeName+"."+field.Name, ref); source != nil {
 				sites = append(sites, refSite{Path: strings.Join(keys, "."), Keys: keys, Source: source})
 			}
 		case kindObject, kindObjectRows:
@@ -432,14 +436,24 @@ func (b *refBuilder) recordSites(typeName string, prefix []string, open map[stri
 			delete(open, ref.Name)
 			continue
 		}
-		if field.References == nil || !b.labelled(ref.Name) {
+		held := b.fieldReference(typeDef, field)
+		if held == nil || !b.labelled(ref.Name) {
 			continue
 		}
-		if source := b.source(typeName+"."+field.Name, field.References); source != nil {
+		if source := b.source(typeName+"."+field.Name, held); source != nil {
 			sites = append(sites, refSite{Path: strings.Join(keys, "."), Keys: keys, Source: source})
 		}
 	}
 	return sites
+}
+
+// fieldReference is the reference a field of holder holds (D61, amended):
+// its RefersTo, or, without one, the reference a relation's key derives
+// from holder's @source, so a key that reads a relation's foreign key is
+// offered and labeled as a written one is. Nil when it refers to nothing.
+func (b *refBuilder) fieldReference(holder *ir.TypeDef, field *ir.FieldDef) *ir.ReferenceDef {
+	ref, _ := ir.FieldReference(b.schemas[0], b.dependencies, holder, field)
+	return ref
 }
 
 // labelled reports whether a display component shows a value of the named

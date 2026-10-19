@@ -114,9 +114,20 @@ func buildDir(t *testing.T, names registry.Naming, service, outputRoot string, o
 		Registry:    reg,
 		Log:         log,
 		LoadDependency: func(name string) (*ir.Schema, error) {
-			return loader.LoadService(filepath.Join(fixtures, name), loader.WithRegistry(reg))
+			return loader.LoadService(dependencyDir(service, name), loader.WithRegistry(reg))
 		},
 	})
+}
+
+// dependencyDir is the directory of a dependency of the service in dir:
+// beside it, where a test writes its own, else a fixture's, the
+// extension's own or the loader's, so the extension's fixtures may depend
+// on one another.
+func dependencyDir(service, name string) string {
+	if beside := filepath.Join(filepath.Dir(service), name); isDir(beside) {
+		return beside
+	}
+	return serviceDir(name)
 }
 
 // TestTheCrateIsWrittenOnlyBesideARustServer builds fixture-api with
