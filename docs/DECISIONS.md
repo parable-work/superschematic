@@ -5779,8 +5779,8 @@ build-archives job on all four platforms, whose tarballs now carry the
 engine's archive and header. The config reader and the error mapping in
 the ffi crate have the shape of the Node-API addon's
 `EngineOptions::from_json` and `Error::thrown`, which replace them once
-they are on main. No generated server mounts the engine yet (milestone
-18).
+they are on main. A generated Go server mounts the engine (milestone 18,
+the amendment below); the TypeScript and Rust servers do not yet.
 
 The rule is reversible until the first release.
 
@@ -5797,6 +5797,32 @@ runner as a deployable.
 | The engine's runner is a deployable of kind `runner`, one per engine database an API of the stack connects to, named `<db>-engine-runner`. It is written in the language of the first API, by name, that connects to the database, runs that API's engine archive, and has one edge, a sql edge to its database, whose derived field is its whole config: it reads no API's config. It runs one instance, which runs the runner while it holds the runner's lock, so a second would only wait. gcp runs it as a Cloud Run worker pool of one instance, manually scaled; `local` as a process of its own with no port, as a worker, which takes the lock on the environment's Postgres as it would on Cloud SQL; the fake target as a pool. A database the environment places on another dialect is refused: SQLite is a file one process writes, whose engine that process runs. No settings element names a runner yet. | A runner thread in every server instance, idle on Cloud Run between requests; the server running it on `local` alone, which would leave `local` unlike gcp; a worker of the API, whose kind means a queue's messages |
 | A server reaches Cloud SQL as its pools do, and hands the engine a URL. Go: the Cloud SQL Go connector, with IAM authentication, behind a unix socket in a directory of the process's own, each connection to it carried over a connection the connector dials; the engine's URL names the socket's directory as its host, the IAM user and the database, with no password and no TLS of its own, as `cloudSQLConfig` builds a pool's. TypeScript (milestone 19): the Node connector's local proxy (`startLocalProxy` over a unix socket, IAM authentication), the engine's URL naming the socket the same way. Rust (milestone 19): the socket Cloud Run mounts at `/cloudsql/<instance>`, as D57's pool reaches it, and an IAM access token as the password, which the engine's `PostgresOptions` read from a password provider the host refreshes for each new connection. | A password in the environment, which IAM authentication does away with; the Cloud SQL Auth Proxy as a sidecar, a second container in every service and pool |
 | `[paths] engine_go` names the Go binding's module, which a Go server whose API has an engine database requires and replaces, as `versiongraph_go` names the version graph's, and the release pins when it is unset (`engine_go_module` names the module). A checkout's Dockerfile builds the engine's archive from the Cargo workspace beside it (`../rust`). Milestone 19 adds the Rust servers' and the TypeScript servers' keys beside `engine_rust`: the behaviors crate, the work queue's crate and the Node-API addon's package. | |
+| A Go server opens the engine in the background (`engine.OpenInBackground`), retrying until its database answers, so it starts while the database is down, as its pools do; it deploys the engine document before it reports the engine ready, and `/readyz` names `<db> engine` until then. Its routes answer 503 `unavailable` until the engine opens (`enginehttp.Background`), so the router and CORS see them from the start. The API's `Deps` holds the `*engine.Background`, whose `Wait` returns the engine. At shutdown the server ends every event stream as it stops taking requests (`enginehttp.Options.Done`), then closes the engine after the requests in flight. A job and a worker open the engine for their `Deps` and deploy nothing; the runner deploys nothing either. | Opening before the server listens, which fails a server whose database is not up yet, or holds Cloud Run's startup on it; an `*engine.Engine` in `Deps`, which an engine that opens later cannot fill |
+| The engine's end user is the identity runtime's (D50), with the claims the TypeScript identity authenticator gives (`sessionId`, `login`, `name`, `transport`, `roles`): a request with no session has none, so a verified service stands in (D37), and any other refusal of the session is the identity runtime's 401 `unauthorized` or 403 `cross_origin`. A service credential the API's service authenticator refuses is its 401 or 403 in the engine's place. An API that authenticates with an auth middleware of its own gives the engine no end user, and the build says so. | Running the API's auth middleware in front of the engine, which would refuse a service standing in |
+
+Status: milestone 18's plumbing and the Go servers are built. An API's
+engine database, its permission catalog's engine permissions, the runner
+deployable on gcp, `local` and the fake target, `[paths] engine_go`, and the
+Go entrypoints: a server opens, deploys and mounts the engine
+(`engine.go`), a job and a worker open it for their `Deps`, and the runner
+runs it; the checkout's Dockerfile builds the engine's archive in a stage
+of its own, and a release's image takes it from the archives tarball.
+`TestEngineEntrypointServes` builds desk-api's server and desk-db's runner
+over `servergen/testdata/engine` and runs them offline (`/readyz` names the
+engine, its routes are 503, a trusted origin's preflight gets the identity
+runtime's CORS) and on Postgres: a member refused a write their roles lack,
+then granted Account and Ticket, creates an account and reads it back and
+opens a ticket; a service stands in and is refused by the permission
+policy; a forged service credential is 401 `service_unauthorized`; and the
+runner fires the ticket's Timers deadline, which escalates it as the
+runner. `TestTheEngineReachesCloudSQLThroughASocket` carries a client
+through the Cloud SQL socket to a fake Postgres. Not built: the TypeScript
+and Rust servers (milestone 19); a project's engine archive in a Go server
+and in the generated CI's archive step, which wait for the project engine
+crate (13a); the gcp migration job's privileges on the engine's schema for
+the runner's and each server's own database user; the runner's settings
+element (`platform`, `enabled`) and a retention policy; no Go server has
+run on Cloud Run.
 
 ### D52, amended: a TypeScript API's jobs run on Bun from packages of their own, with a signal for Go's context
 

@@ -103,6 +103,19 @@ err = e.Runner().Start(ctx)
   (`Status`), the message, and `Details`, the class's other members as
   JSON.
 
+`OpenInBackground(cfg, BackgroundOptions{...})` is how a server opens one
+(D58): it starts while its database is not up yet, as its connection pools
+do, and the engine opens on a goroutine of its own, trying again after each
+failure, a second apart and doubling to thirty seconds unless the options
+say otherwise. `Setup` runs on the engine once it opens, before it is
+handed out (a server's `Deploy`, a runner's `Runner().Start`), and a
+failing setup closes it for the next attempt; `OnError` and `OnOpen` are
+told of each failure and of the open engine. `Background.Engine()` is the
+engine, or an error wrapping `ErrNotOpen` with the last failure;
+`Wait(ctx)` waits for it; `Ready` is what `/readyz` checks; `Close` stops
+the attempts and closes the engine, without waiting for an attempt in
+flight, whose open the archive bounds by its connect timeout.
+
 Every call is a blocking call into the archive, on an OS thread of its own
 while it runs. The engine makes at most `Config.Concurrency` at once (the
 Postgres pool's size unless set, since a call past it would wait in the
@@ -141,6 +154,13 @@ the event stream's frames, and MCP's JSON-RPC.
 | `BodyLimitBytes` | The most a route that takes a body accepts, 1 MiB unless set (413 `payload_too_large`). |
 | `Stream`, `MCP` | The event stream's page size and heartbeat; the MCP endpoint's server info and instructions. |
 | `Serve` | `ServeAll` (the default), `ServeAPI` or `ServeMCP`. |
+| `Done` | Closed when the host stops serving: every event stream ends then, so a server's shutdown waits for none (`http.Server.RegisterOnShutdown`). |
+
+`enginehttp.Background(b, options)` serves the routes of a `Background`
+engine: every request under the prefix is 503 `unavailable` ("The engine
+is not available") until it opens, then the routes `Handler` serves with
+the options. A generated Go server mounts it on the router of the API that
+serves the engine (`docs/stack-model.md`, section 8.1).
 
 An event stream lifts the connection's write deadline, writes each frame
 and flushes it (`http.ResponseController`). It polls the engine without

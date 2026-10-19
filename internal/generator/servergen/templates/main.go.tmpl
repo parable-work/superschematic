@@ -7,8 +7,9 @@
 // It reads its whole configuration from the environment: each API's @envVars
 // settings and the fields its edges derive, one variable per member (section
 // 3.4). It listens on $PORT, 8080 when unset, answers GET /healthz while the
-// process runs and GET /readyz while its databases answer, and on SIGTERM or
-// SIGINT stops taking requests and lets those in flight finish.
+// process runs and GET /readyz while its databases answer{{ if .Engines }} and its engines are
+// open (D58){{ end }}, and on SIGTERM or SIGINT stops taking requests and lets those in
+// flight finish.
 //
 // Each API's implementation is the package at the naming file's
 // [implementation_paths] go template, which the build scaffolded once when
@@ -78,6 +79,12 @@ func run(logger *zap.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
 {{- template "connections" . }}
+{{- if .Engines }}
+
+	// Closed as the server shuts down, which ends every event stream of the
+	// engines' routes, so the shutdown waits for none.
+	engineStreams := make(chan struct{})
+{{- end }}
 {{- range .APIs }}
 
 	// {{ .Service }}: its implementation, built from its Deps, and its routes.
@@ -141,6 +148,11 @@ func run(logger *zap.Logger) error {
 	if err != nil {
 		return fmt.Errorf("routes of {{ .Service }}: %w", err)
 	}
+{{- if .MountsEngine }}
+	// The engine's routes, its event stream and its MCP endpoint (D58),
+	// behind the API's middleware and the callers its own routes admit.
+	mountEngine({{ .Var }}Router, {{ .Engine.Var }}.Background, {{ quote .Engine.Mount }}, engineCaller({{ if .Identity }}{{ .Var }}Identity{{ else }}nil{{ end }}, {{ if .ServiceAuth }}{{ .Var }}ServiceAuthenticator{{ else }}nil{{ end }}), {{ .Package }}.LoggerFromContext, engineStreams)
+{{- end }}
 {{- if .CORS }}
 	{{ .Var }}CORS, err := corsPolicy({{ quote .Service }})
 	if err != nil {
@@ -157,6 +169,9 @@ func run(logger *zap.Logger) error {
 	}, []dependency{
 {{- range .Databases }}
 		{ {{- quote .Service }}, {{ .Var }}.Ping},
+{{- end }}
+{{- range .Engines }}
+		{ {{- quote .ReadinessName }}, {{ .Var }}.Ready},
 {{- end }}
 	})
 {{- if .Clients }}
@@ -177,7 +192,7 @@ func run(logger *zap.Logger) error {
 {{- end }}
 	})
 {{- end }}
-	return serve(ctx, stop, logger, &draining, handler)
+	return serve(ctx, stop, logger, &draining, handler{{ if .Engines }}, engineStreams{{ end }})
 }
 
 // served is an API and the router its routes are registered on.
@@ -186,7 +201,8 @@ type served struct {
 	router *chi.Mux
 }
 
-// dependency is what /readyz checks: a database, by a ping.
+// dependency is what /readyz checks: a database, by a ping{{ if .Engines }}, and an engine,
+// open and its database answering{{ end }}.
 type dependency struct {
 	name  string
 	check func(context.Context) error
@@ -263,8 +279,9 @@ func dispatch(apis []served) http.Handler {
 
 // serve listens on $PORT until ctx ends. Then it lets a second signal end
 // the process, answers /readyz 503, and gives the requests in flight
-// shutdownTimeout to finish.
-func serve(ctx context.Context, stop context.CancelFunc, logger *zap.Logger, draining *atomic.Bool, handler http.Handler) error {
+// shutdownTimeout to finish{{ if .Engines }}, closing streams as it starts, which ends every
+// event stream of the engines' routes{{ end }}.
+func serve(ctx context.Context, stop context.CancelFunc, logger *zap.Logger, draining *atomic.Bool, handler http.Handler{{ if .Engines }}, streams chan struct{}{{ end }}) error {
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = defaultPort
@@ -274,6 +291,9 @@ func serve(ctx context.Context, stop context.CancelFunc, logger *zap.Logger, dra
 		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
+{{- if .Engines }}
+	server.RegisterOnShutdown(func() { close(streams) })
+{{- end }}
 	errc := make(chan error, 1)
 	go func() {
 		logger.Info("listening", zap.String("addr", server.Addr))

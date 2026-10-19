@@ -234,20 +234,29 @@ func SetReplacePaths(output *APIOutput, paths naming.LocalPaths, outputDir strin
 			return fmt.Errorf("version-graph binding replace path: %w", err)
 		}
 	}
+	if output.HasEngine() {
+		if output.EngineReplacePath, err = naming.RelPath(outputDir, paths.EngineGo); err != nil {
+			return fmt.Errorf("engine binding replace path: %w", err)
+		}
+	}
 	return nil
 }
 
 // SetReleasePins keeps the pins (naming.Naming.ReleasePins) of the runtime
 // modules the API module reaches: the HTTP runtime, the schema runtime it
 // builds on, the schema IR, the scalar library and, when the API reads a
-// version graph, the version-graph binding. go.mod requires those it
-// requires at their pins and replaces every version of each pinned module
-// with its pin.
+// version graph, the version-graph binding, and, when it has an engine
+// database, the engine's binding (D58). go.mod requires those it requires
+// at their pins and replaces every version of each pinned module with its
+// pin.
 func SetReleasePins(output *APIOutput, pins naming.Pins) {
 	n := output.Naming
 	modules := []string{n.HTTPRuntimeGoModule, n.SchemaRuntimeGoModule, n.SchemaIRGoModule, n.ScalarGoModule}
 	if (output.IsPublic && output.UpstreamVersionGraph) || output.Deps.VersionGraph {
 		modules = append(modules, n.VersionGraphGoModule)
+	}
+	if output.HasEngine() {
+		modules = append(modules, n.EngineGoModule)
 	}
 	output.Pins = pins.Of(modules...)
 }

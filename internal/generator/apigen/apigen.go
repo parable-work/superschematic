@@ -385,6 +385,9 @@ type APIOutput struct {
 	SchemaRuntimeReplacePath string
 	PtrReplacePath           string
 	VersionGraphReplacePath  string
+	// EngineReplacePath replaces the engine's Go binding, which Deps holds
+	// an engine of when the API has an engine database (D58).
+	EngineReplacePath string
 
 	// Pins are the runtime modules go.mod takes from the module proxy, at
 	// the release that generates it (SetReleasePins).

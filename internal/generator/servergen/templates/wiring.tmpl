@@ -30,7 +30,7 @@ exactly as a server does.
 {{- end }}
 {{- range .Databases }}
 	{{ .Package }} "{{ .Module }}"
-{{- if .Identity }}
+{{- if .TypesModule }}
 	{{ .Types }} "{{ .TypesModule }}"
 {{- end }}
 {{- end }}
@@ -77,6 +77,21 @@ exactly as a server does.
 		return fmt.Errorf("identity store of {{ .Service }}: %w", err)
 	}
 {{- end }}
+{{- if .Engine }}
+	// The engine of {{ .Service }}, an engine database (D58), opened on the same
+	// database in the background, as the pool connects when first used
+{{- if $.Background }}: the
+	// {{ $.Kind }} deploys nothing, which the servers do.
+{{- else }}, so
+	// /readyz reports it until it opens and deploys the database's engine
+	// document.
+{{- end }}
+	{{ .Engine.Var }}, err := openEngine(ctx, logger, {{ quote .Service }}, {{ quote .Field }}, {{ .From }}, {{ .Types }}.EngineDocument, {{ .Engine.PolicyLiteral }}, nil, {{ if $.Background }}nil{{ else }}deployEngine{{ end }})
+	if err != nil {
+		return fmt.Errorf("engine of {{ .Service }}: %w", err)
+	}
+	defer {{ .Engine.Var }}.Close()
+{{- end }}
 {{- end }}
 {{- end }}
 {{- if .Clients }}
@@ -116,6 +131,9 @@ exactly as a server does.
 {{- end }}
 {{- range .Buckets }}
 		{{ .Field }}: {{ .Bucket.Var }},
+{{- end }}
+{{- if .Engine }}
+		Engine: {{ .Engine.Var }}.Background,
 {{- end }}
 		Logger: {{ .Var }}Logger,
 	}

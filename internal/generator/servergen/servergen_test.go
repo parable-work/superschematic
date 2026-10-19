@@ -171,6 +171,7 @@ func fakePaths(repoRoot string) naming.LocalPaths {
 		SchemaRuntimeGo: filepath.Join(repoRoot, "runtime", "schema", "go"),
 		HTTPRuntimeGo:   filepath.Join(repoRoot, "runtime", "http", "go"),
 		VersionGraphGo:  filepath.Join(repoRoot, "runtime", "versiongraph", "go"),
+		EngineGo:        filepath.Join(repoRoot, "runtime", "engine", "go"),
 	}
 }
 

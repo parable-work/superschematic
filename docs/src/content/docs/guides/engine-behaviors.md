@@ -344,8 +344,45 @@ for (const schema of engineDocument.schemas) engine.schemas.publish(system, sche
 ```
 
 Every document is defined before any is published, since a link may name
-a type the document defines after it. A generated server will do this
-itself before it reports ready, once the servers open the engine.
+a type the document defines after it.
+
+### In a generated server
+
+A generated Go server whose API's database is an engine database does
+this itself (D58): it opens the engine on the database in the background,
+deploys the document before `/readyz` reports the engine ready, and mounts
+the engine's routes, its event stream and its MCP endpoint at
+`/engine/<db>`, behind the API's identity and service callers. Two more
+keys of the database's `outputs.engine` say how:
+
+```json
+{
+  "outputs": {
+    "engine": {
+      "namespace": "support",
+      "mount": "/engine/support",
+      "policy": "permission"
+    }
+  }
+}
+```
+
+- **`mount`** is where the servers of the APIs on the database mount the
+  engine's routes: one or more path segments, `/engine/<service>` unless
+  set, never under `/api` or at `/healthz` or `/readyz`.
+- **`policy`** is the access policy they open the engine with:
+  `"permission"` unless set, which allows an action on a type to a caller
+  holding `<Type>.<action>` (`Ticket.read`, `Ticket.write`,
+  `Ticket.define`, `Ticket.publish`), the permissions the API's
+  `permissions.json` then lists; `"allowAll"`, for tests and local use; or
+  `{ "rules": [...] }`, the engine's ordered rules.
+
+The engine's runner, which runs reactions, schedules and Timers'
+deadlines, is a deployable of its own, `<db>-engine-runner`, one instance
+in the language of the first API on the database: a Cloud Run worker pool
+on gcp, a process of its own under `stack dev`. It acts as its deployable's
+name, holding each engine type's name as a permission. A TypeScript or
+Rust server opens no engine yet.
 
 ## Display
 

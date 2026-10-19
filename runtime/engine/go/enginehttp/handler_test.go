@@ -271,3 +271,67 @@ func TestAClosedEngineIs503(t *testing.T) {
 		t.Fatalf("closed: %d %s", response.StatusCode, body)
 	}
 }
+
+// TestABackgroundEnginesRoutes: until a Background engine opens, every
+// route under the prefix is 503 unavailable; once it opens, the engine's
+// routes answer; and closing Done ends an event stream in flight, as a
+// server's shutdown does.
+func TestABackgroundEnginesRoutes(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "engine.db")
+	release := make(chan struct{})
+	b := engine.OpenInBackground(engine.Config{Path: path, Policy: engine.AllowAll()}, engine.BackgroundOptions{
+		Setup: func(ctx context.Context, e *engine.Engine) error {
+			<-release
+			_, err := e.Deploy(ctx, []json.RawMessage{noteSchema}, engine.DeployOptions{})
+			return err
+		},
+	})
+	defer b.Close()
+	done := make(chan struct{})
+	router := chi.NewRouter()
+	router.Mount("/engine/notes", enginehttp.Background(b, enginehttp.Options{Prefix: "/engine/notes", Caller: bearer, Done: done}))
+	server := httptest.NewServer(router)
+	defer server.Close()
+	base := server.URL + "/engine/notes/namespaces/default/schemas/Note/instances"
+
+	response, body := send(t, "GET", base, "", "Authorization", "Bearer alice", "X-Request-Id", "r1")
+	if response.StatusCode != 503 || !strings.Contains(body, `"code":"unavailable"`) || !strings.Contains(body, `"requestId":"r1"`) {
+		t.Fatalf("before the engine opens: %d %s", response.StatusCode, body)
+	}
+	close(release)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if _, err := b.Wait(ctx); err != nil {
+		t.Fatal(err)
+	}
+	response, body = send(t, "POST", base, `{"id": "n1", "data": {"body": "hello"}}`, "Authorization", "Bearer alice", "Content-Type", "application/json")
+	if response.StatusCode != 201 {
+		t.Fatalf("once it opens: %d %s", response.StatusCode, body)
+	}
+
+	req, err := http.NewRequest("GET", server.URL+"/engine/notes/namespaces/default/events?after=head", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer alice")
+	req.Header.Set("Accept", "text/event-stream")
+	stream, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Body.Close()
+	if stream.StatusCode != 200 {
+		t.Fatalf("the stream answered %d", stream.StatusCode)
+	}
+	ended := make(chan error, 1)
+	go func() {
+		_, err := io.Copy(io.Discard, stream.Body)
+		ended <- err
+	}()
+	close(done)
+	select {
+	case <-ended:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the stream did not end once Done closed")
+	}
+}

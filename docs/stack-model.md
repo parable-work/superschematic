@@ -1413,6 +1413,7 @@ Bootstrap reads the GitHub repository from the git remote.
 | schedule | for a job whose environment runs a schedule, a Cloud Scheduler job named as the job is, in the environment's region, on the job's cron in its time zone, which POSTs to the Cloud Run Admin API's `jobs/<job>:run` with an OAuth token for the job's own account; that account holds `roles/run.invoker` on that job alone, which grants it `run.jobs.run`. A job whose schedule is off has neither, and runs only on demand |
 | bucket | a Cloud Storage bucket (`gcp.storage`, D54) named `<project>-<stack>-<bucket>`, since a bucket's name is global, in the environment's region, with uniform bucket-level access, so IAM alone admits a reader, and public access prevention enforced; versioned when the settings say so (section 7.5). Only a member of a parameterized environment sets `forceDestroy`: its bucket is its own, which its destroy empties, where any other bucket keeps its objects and a destroy fails on it |
 | worker | a Cloud Run worker pool (`gcp.cloudrunworker`) named after the deployable, for a worker in Go, TypeScript or Rust (D65), with its own service account, which holds the Cloud Trace agent role, and the config, secrets, Cloud SQL volume and VPC egress a server of its API takes; no port, no URL and no IAM of its own, since nothing calls it; manual scaling to the worker's instances, zero when the environment turns it off, so the pool and its pinned image stay; `WORKER_CONCURRENCY` set to its concurrency; `cpu`, one or more, and `memory` (D53). A worker whose grace is ten seconds or more is refused, since Cloud Run kills an instance ten seconds after SIGTERM |
+| runner | a Cloud Run worker pool (`gcp.cloudrunrunner`) named after the deployable, an engine database's runner (D58), in its API's language, with its own service account and its database's Cloud SQL connection as its one config; one instance under manual scaling, which runs the engine's runner while it holds the runner's lock, since a Cloud Run service's instance has CPU only while it serves. Its database user is its own, so the migration job's privileges on the engine's schema, `engine`, are not built yet (D58) |
 | sql edge | `roles/cloudsql.client` and `roles/cloudsql.instanceUser` for the server's, the job's or the worker's account, held to the edge's instance by an IAM condition; an IAM database user, which the migration job gives read and write privileges; the Cloud SQL connection, which the connector derives (instance connection name, database, IAM user) and the service, the job or the worker pool mounts at `/cloudsql`. The same for a Rust server, job or worker, which dials the mount's socket as the IAM user (section 7.4, D57, D65) |
 | http edge | `roles/run.invoker` on the callee for the caller's account; the callee's `run.app` URL in the caller's config, with a Google ID token for the callee's custom audience, its full resource name `//run.googleapis.com/projects/<project>/locations/<region>/services/<service>`, as the service credential, since the service's own callers field cannot reference its URL; every service lists its resource name in `customAudiences`. The callee's callers field gets Google's issuer and keys, and the caller's service account by its email (section 9.2): a job's, as a caller that serves its API |
 | bucket edge | `roles/storage.objectUser` on the bucket alone for the server's, the job's or the worker's account, which reads, writes, lists and deletes its objects and changes nothing of the bucket, and `roles/iam.serviceAccountTokenCreator` for that account on itself, which IAM's `signBlob` asks of an account that signs a URL as itself; the bucket's name, which the connector derives, with no credential, since the client takes the workload's own from the metadata server. A Rust server's, job's or worker's bucket edge is refused: its runtime has no `Bucket`, and buckets from a Rust server are not built (D57) |
@@ -1708,6 +1709,54 @@ on included (section 8.10). OpenTelemetry export
 is not set up: the runtime records spans through the global tracer, and an
 exporter would add the OTLP client's dependencies to every server.
 
+An API whose database is an engine database, a DB service whose types
+compose behaviors (D58), gets the engine. `engine.go`, beside `main.go`,
+opens it on the database, through the engine's Go binding, once per
+database: in the background, as the pool connects when first used, so the
+server starts while the database is not up, retrying a second apart and
+doubling to thirty seconds. Once it opens, it defines and publishes the
+database's engine document (`EngineDocument` of its Go types) in the
+document's namespace, under the engine's lock, writing nothing when the
+live versions have its hash. `/readyz` names `<db> engine` until it has.
+The access policy is `outputs.engine.policy` of the database's config,
+`permission` unless set. The first API on the database, by name, mounts
+the engine's routes, its event stream and its MCP endpoint at
+`outputs.engine.mount`, `/engine/<db>` unless set, on its router, after
+its own routes and behind its middleware: the request log, and the
+identity runtime's CORS for the trusted origins. `engineCaller`
+establishes each request's caller as the API's own routes do: the service
+the API's service authenticator verifies, a refusal of its credential
+answered in the engine's place, and the end user whose session the
+identity runtime authenticates, with their roles' permissions; a request
+with no session lets a verified service stand in (D37). An API that
+authenticates with an auth middleware of its own gives the engine no end
+user, and the build says so. A route takes a 30-second timeout but the
+event stream's and MCP's, which answer 503 `unavailable` until the engine
+opens. Every API on the database holds the engine in its `Deps`, an
+`*engine.Background`, whose `Wait(ctx)` returns the engine once it opens.
+At shutdown the server ends every event stream as it stops taking
+requests, and closes the engine after the requests in flight finish. The
+server links the core's engine archive, so the build refuses an engine
+database that composes the work queue's behaviors or an extension's,
+which a project's engine archive runs. A TypeScript or a Rust server opens
+no engine yet, and the build says so.
+
+An engine database's runner is an entrypoint of its own,
+`<db>-engine-runner` (section 3.1), in the language of the first API on
+it: a Go one's `main.go` reads the database's connection field alone,
+opens the engine on it as a server does, deploying nothing, starts the
+engine's runner as the deployable's name, holding each engine type's name
+as a permission, and runs until SIGTERM. On Postgres it runs while it
+holds the runner's lock. A job's and a worker's entrypoint open the engine
+for their API's `Deps` too, deploying nothing.
+
+A server on an engine database some environment places on Cloud SQL
+serves the engine, whose Postgres client takes a URL, a unix socket in a
+directory of its own: `cloudsql.go` carries each connection to the socket
+over one the connector dials, with IAM authentication, and the engine's
+URL names the directory as its host, the IAM user and the database, with
+no password and no TLS of its own.
+
 The engineer writes the implementation of each served API, and nothing else
 (section 8.5). The entrypoint calls each implementation's constructor with
 its `Deps`. A mismatch between the code and the generated signature fails
@@ -1766,8 +1815,15 @@ one of two places (D47, amended):
   superscalar checkout, a Rust stage builds superscalar's archive for the
   image's platform from it, with `tools.env`'s Rust release, the one the
   host's archives are built with, and a second stage builds the version
-  graph's from the crate beside `[paths] versiongraph_go`. A Go stage puts
-  each archive where its binding's cgo flags look.
+  graph's from the crate beside `[paths] versiongraph_go`. An entrypoint
+  that opens the engine (D58) gets a third, which builds the core's engine
+  archive (`superschematic-engine-ffi`) from the Cargo workspace beside
+  `[paths] engine_go`, with the crates it reaches by path at their places
+  in the checkout: the work queue's crate, the schema IR's and the schema
+  runtime's, the version graph's engine and core, and superscalar's core.
+  Without `[paths] engine_go` such an entrypoint gets no Dockerfile from a
+  checkout, and the build says why. A Go stage puts each archive where its
+  binding's cgo flags look.
 - **The release.** Without `[paths] scalar_go`, as in a project that
   takes the runtime modules from the module proxy, the image takes the
   archives the release of superschematic that wrote the Dockerfile ships:
@@ -1840,6 +1896,7 @@ runs an environment on the `local` target (`internal/stack/local`):
 | server | a Go process built with `go build` (with `-mod=mod`) from its entrypoint module at `<output-root>/server/<stack>/<server>` (section 8.1); a TypeScript one, `bun main.ts` in its entrypoint package at the same place, after one `bun install` at the output root, the root of the Bun workspace (section 8.6); or a Rust one, built with `cargo build --release --locked` in its crate at the same place and run from `target/release/<binary>`, the binary its `Cargo.toml` names (D57). Its environment is its bindings, a derived field as one variable per member (section 3.4), and `PORT`, with nothing of the shell's but `PATH`, `HOME` and a few like them. It is ready once it answers `/readyz`, and each of its lines is printed with its name in front |
 | job | a process built and run as a server in its language is, from its entrypoint at `<output-root>/server/<stack>/<job>`: a Go binary, `bun main.ts` for TypeScript, or for Rust the binary its crate's `Cargo.toml` names, built with `cargo build --release --locked` into the target directory the environment's Rust servers share (D65). It has a server's environment and no `PORT`. It runs on its schedule, in its time zone, while `stack dev` waits, and once with `superschematic stack run <environment> <job>`, each line of a run's output with its name in front. `jobs/<job>.lock` in the environment's state directory keeps a schedule's runs and `stack run`'s apart (section 8.7) |
 | worker | a process built and run as a server in its language is, Go, TypeScript or Rust (D65), from its entrypoint at `<output-root>/server/<stack>/<worker>`, started in its rollout wave with the servers: the same `local:process/process:Process` node with no port, `kind: worker` and a readiness of `started`, so it is ready once it runs. Its environment is a server's with no `PORT` and with `WORKER_CONCURRENCY`, the concurrency the environment gives it. One process runs whatever its `instances`, none when the environment turns it off; each line is printed with its name in front, and its exit stops the environment, as a server's does (section 8.8) |
+| runner | an engine database's runner (D58), a process built and run as a worker is, from its entrypoint at `<output-root>/server/<stack>/<db>-engine-runner`: the same node with no port, `kind: runner` and a readiness of `started`, its environment its database's connection string alone. It takes the runner's lock on the environment's Postgres as it does on Cloud SQL, so the servers run no runner of their own here either |
 | site | built once, `bun run <build>` in its package at the naming file's `[implementation_paths] site` template after the workspace's install, then served from a file server of the provisioner's own on `http://127.0.0.1:<port>`: each file of its output, its config at `/__superschematic/config.json` with each API it calls at its loopback URL, and its fallback for a path that names no file. HTML files and the config are served `no-cache` and `no-store`, so a reload sees a rebuilt site (D55) |
 | sql edge | `postgres://postgres@127.0.0.1:<port>/<database>?sslmode=disable` |
 | bucket edge | the bucket's name and the emulator's `http://127.0.0.1:<port>` as its endpoint, with no credential. A Rust server's, job's or worker's is refused, as on gcp: buckets from a Rust server are not built (D57) |

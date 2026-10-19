@@ -192,9 +192,18 @@ type Input struct {
 	// connects to.
 	CloudSQL []string
 
+	// EngineGo is the directory of the engine's Go binding, when a database
+	// the server connects to is an engine database (D58). A checkout's
+	// Dockerfile builds the engine's static archive from the Cargo
+	// workspace beside it.
+	EngineGo string
+
 	// manualRoutes counts a manually registered operation among an API's
 	// routes, as a router that mounts it does: a TypeScript one.
 	manualRoutes bool
+	// opensEngine is true when the entrypoint opens an engine (D58), whose
+	// archive its image must link.
+	opensEngine bool
 	// Job, when set, plans the entrypoint of a job of the one API in APIs
 	// rather than a server's (D52): Server is then the job's deployable.
 	Job *JobInput
@@ -255,6 +264,15 @@ type Server struct {
 	// job (D53).
 	Worker *Worker
 
+	// Runner is what an engine's runner's entrypoint runs, nil for every
+	// other (D58).
+	Runner *Runner
+
+	// Engines are the engines the entrypoint opens, one per engine
+	// database it connects to (D58). With one, engine.go opens each, and
+	// go.mod requires the engine's Go binding.
+	Engines []*Engine
+
 	// GoVersion and RustVersion are the toolchain pins.
 	GoVersion   string
 	RustVersion string
@@ -314,11 +332,11 @@ type Worker struct {
 	GraceSeconds int
 }
 
-// Background reports whether the entrypoint is a job's or a worker's,
-// which serves no request: it mounts no routes, listens on no port,
-// verifies no end user or caller, and decrypts no payload.
+// Background reports whether the entrypoint is a job's, a worker's or an
+// engine's runner's, which serves no request: it mounts no routes, listens
+// on no port, verifies no end user or caller, and decrypts no payload.
 func (s *Server) Background() bool {
-	return s.Job != nil || s.Worker != nil
+	return s.Job != nil || s.Worker != nil || s.Runner != nil
 }
 
 // Require is a go.mod require line.
@@ -374,6 +392,12 @@ type API struct {
 
 	// Buckets are Deps' buckets (D54).
 	Buckets []BucketUse
+
+	// Engine is the engine Deps holds, of the API's engine database (D58),
+	// nil without one; MountsEngine is true for the API whose router
+	// mounts its routes, the first on the database, on a server.
+	Engine       *Engine
+	MountsEngine bool
 }
 
 // Call is a client in an API's Deps.
@@ -411,10 +435,15 @@ type Database struct {
 	// Identity is true when an API on the database authenticates with
 	// the identity runtime: the server builds one identity store over
 	// the database's pool, from the descriptor constant of its Go types,
-	// whose import name and module are Types and TypesModule.
+	// whose import name and module are Types and TypesModule, which the
+	// entrypoint imports too for an engine database's EngineDocument.
 	Identity    bool
 	Types       string
 	TypesModule string
+
+	// Engine is the engine the entrypoint opens on the database, an
+	// engine database (D58); nil for every other.
+	Engine *Engine
 
 	// Field is the derived config field the connection is read from, and
 	// From the expression that reads it from the first API's config.
@@ -453,6 +482,11 @@ type Docker struct {
 	// VersionGraphCrate its crate, empty when no database declares one.
 	VersionGraphGo    string
 	VersionGraphCrate string
+
+	// Engine is where the engine stage builds the engine's archive from,
+	// nil when the entrypoint opens no engine or downloads the release's
+	// archives (D58).
+	Engine *engineDocker
 
 	// Archives, when set, are the static archives of the release the
 	// build stage downloads, in place of the stages that build them from
@@ -501,6 +535,10 @@ var reserved = []string{
 	"emulatorSigning", "emulatorKey", "objectOf", "bucket", "storage", "iterator", "option", "io", "rand", "rsa",
 	"x509", "pem", "strings", "sync", "url",
 	"workers", "worker", "queue", "concurrency",
+	"engine", "enginehttp", "openEngine", "engineURL", "mountEngine", "engineCaller", "engineStreams", "engineDocument",
+	"engineSetup", "deployEngine", "startRunner", "engineTimeout", "cloudSQLEngineURL", "cloudSQLProxy", "cloudSQLDialerOf",
+	"runner", "runtimemiddleware", "identity", "serviceauth", "streams", "filepath", "slog",
+	"openedEngine", "cloudSQLEngineSocket", "keywordValue", "apperror", "principal", "stop",
 }
 
 // names hands out identifiers no other declaration of main.go takes.
@@ -724,6 +762,9 @@ func Plan(in Input) (*Server, error) {
 			api.Buckets = append(api.Buckets, BucketUse{Field: b.Field, Bucket: h})
 		}
 	}
+	if err := s.planEngines(in, apis, taken); err != nil {
+		return nil, err
+	}
 	s.APIs = apis
 	if s.Worker != nil {
 		s.Worker.Database = apis[0].Database
@@ -736,6 +777,7 @@ func Plan(in Input) (*Server, error) {
 	if err := s.planModule(in, dir); err != nil {
 		return nil, err
 	}
+	in.opensEngine = len(s.Engines) > 0
 	s.Docker, s.NoDocker, err = planDocker(in, dir)
 	if err != nil {
 		return nil, err
@@ -838,6 +880,8 @@ func planDocker(in Input, dir string) (*Docker, string, error) {
 	d.Dockerfile = path.Join(d.Context, DockerFile)
 	include := []string{d.Context}
 	if archives != nil {
+		// The release's archives hold the engine's beside superscalar's and
+		// the version graph's (D58).
 		d.Archives = archives
 		if in.VersionGraphGo != "" {
 			if d.VersionGraphGo, ok = rel(in.VersionGraphGo); !ok {
@@ -857,6 +901,18 @@ func planDocker(in Input, dir string) (*Docker, string, error) {
 		}
 		d.VersionGraphCrate = path.Join(path.Dir(d.VersionGraphGo), "rust")
 		include = append(include, d.VersionGraphGo, d.VersionGraphCrate+"/Cargo.toml", d.VersionGraphCrate+"/Cargo.lock", d.VersionGraphCrate+"/src")
+	}
+	if in.opensEngine && in.EngineGo == "" {
+		return nil, "the entrypoint opens the engine (D58), and the naming file's [paths] engine_go, the engine's Go binding, whose Cargo workspace the image builds the engine's archive from, is unset while [paths] scalar_go names a checkout to build superscalar's from; set engine_go to the same checkout's runtime/engine/go", nil
+	}
+	if in.EngineGo != "" {
+		engine, why := planEngineDocker(in.EngineGo, root, rel)
+		if engine == nil {
+			return nil, why, nil
+		}
+		d.Engine = engine
+		include = append(include, engine.Go, engine.Workspace)
+		include = append(include, engine.Crates...)
 	}
 	return finish(d, in, root, include, rel)
 }
@@ -958,6 +1014,8 @@ func Write(s *Server, dir string) error {
 		main = "job.go.tmpl"
 	case s.Worker != nil:
 		main = "worker.go.tmpl"
+	case s.Runner != nil:
+		main = runnerTemplate
 	}
 	files := []struct{ template, name string }{
 		{main, MainFile},
@@ -981,6 +1039,9 @@ func Write(s *Server, dir string) error {
 		return err
 	}
 	if err := writeIdentity(s, dir); err != nil {
+		return err
+	}
+	if err := writeEngine(s, dir); err != nil {
 		return err
 	}
 	return writeCORS(s, dir)
@@ -1154,6 +1215,9 @@ func templateFuncs() template.FuncMap {
 		},
 		"anyCORS": func(apis []*API) bool {
 			return slices.ContainsFunc(apis, func(a *API) bool { return a.CORS })
+		},
+		"anyMountsEngine": func(apis []*API) bool {
+			return slices.ContainsFunc(apis, func(a *API) bool { return a.MountsEngine })
 		},
 		"tsQuote": func(s string) string {
 			return "'" + strings.NewReplacer(`\`, `\\`, `'`, `\'`, "\n", `\n`).Replace(s) + "'"
