@@ -72,6 +72,7 @@ use futures_util::{Stream, StreamExt};
 use tokio::sync::watch;
 
 use crate::api::{self, ApiOptions, Body, Caller, EventStream, Problem, Pull, Route};
+pub use crate::background::Background;
 use crate::storage::Notifier;
 use crate::Engine;
 
@@ -275,39 +276,99 @@ pub fn router(engine: Arc<Engine>, options: Options) -> Result<Router, InvalidOp
     let engine = Held(Some(engine));
     let prefix = prefix_of(&options.prefix)?;
     let (_, heartbeat) = options.api.stream.check().map_err(InvalidOptions)?;
-    if engine.handle().is_none() {
-        return Err(InvalidOptions(
-            "the engine must be shared (Engine::shared or Engine::open_shared): an event stream outlives the request that opened it".to_owned(),
-        ));
+    let mount = Arc::new(Mount::of(engine, options, prefix, heartbeat)?);
+    let mut router = Router::new();
+    for path in paths(mount.serves) {
+        router = router.route(&format!("{}{path}", mount.prefix), any(handler(&mount)));
     }
-    let mount = Arc::new(Mount {
-        wakes: Arc::new(Wakes::new(&engine)),
-        engine,
-        api: options.api,
+    Ok(router)
+}
+
+/// The engine's routes for an engine a server opens in the background
+/// ([`Background`], D58), under `options.prefix`: until it opens, every
+/// request one of them takes is 503 `unavailable` ("The engine is not
+/// available"), as the Go binding's `enginehttp.Background` answers it, and
+/// once it opens, the routes [`router`] serves with `options`. Its paths
+/// are registered from the start, so a host's own routing and CORS see
+/// them while the engine opens.
+pub fn background_router(
+    background: Background,
+    options: Options,
+) -> Result<Router, InvalidOptions> {
+    let prefix = prefix_of(&options.prefix)?;
+    let (_, heartbeat) = options.api.stream.check().map_err(InvalidOptions)?;
+    let serves = options.serves;
+    let pending = Arc::new(Pending {
+        background,
+        options,
         prefix,
-        callers: options.callers,
-        serves: options.serves,
-        body_limit: options.body_limit,
         heartbeat,
+        mount: std::sync::OnceLock::new(),
     });
-    // Each path the routes it serves have, with every method: the engine
-    // routes the method itself, answering one no route on the path takes
-    // 404, as its own routing does, where a method router would answer 405
-    // with an Allow header.
+    let mut router = Router::new();
+    for path in paths(serves) {
+        let pending = Arc::clone(&pending);
+        router = router.route(
+            &format!("{}{path}", pending.prefix),
+            any(move |request: AxumRequest| serve_pending(Arc::clone(&pending), request)),
+        );
+    }
+    Ok(router)
+}
+
+// paths are the paths of the routes a router serves, each once: the engine
+// routes the method itself, answering one no route on the path takes 404,
+// as its own routing does, where a method router would answer 405 with an
+// Allow header.
+fn paths(serves: Serves) -> Vec<&'static str> {
     let mut paths: Vec<&'static str> = Vec::new();
-    for route in api::ROUTES
-        .iter()
-        .filter(|route| mount.serves.includes(route))
-    {
+    for route in api::ROUTES.iter().filter(|route| serves.includes(route)) {
         if !paths.contains(&route.path) {
             paths.push(route.path);
         }
     }
-    let mut router = Router::new();
-    for path in paths {
-        router = router.route(&format!("{}{path}", mount.prefix), any(handler(&mount)));
-    }
-    Ok(router)
+    paths
+}
+
+/// The routes of an engine that opens in the background: its mount, made
+/// once the engine opens.
+struct Pending {
+    background: Background,
+    options: Options,
+    prefix: String,
+    heartbeat: Duration,
+    mount: std::sync::OnceLock<Arc<Mount>>,
+}
+
+// serve_pending answers 503 until the engine opens, then serves the
+// request as the router of the open engine does.
+async fn serve_pending(pending: Arc<Pending>, request: AxumRequest) -> AxumResponse {
+    let Ok(engine) = pending.background.engine() else {
+        let request_id = request_id_of(request.headers());
+        return respond(
+            Problem::new(503, "The engine is not available", "unavailable").response(&request_id),
+            AxumBody::empty(),
+        );
+    };
+    let mount = match pending.mount.get() {
+        Some(mount) => Arc::clone(mount),
+        None => {
+            let made = Mount::of(
+                Held(Some(engine)),
+                pending.options.clone(),
+                pending.prefix.clone(),
+                pending.heartbeat,
+            );
+            match made {
+                Ok(made) => Arc::clone(pending.mount.get_or_init(|| Arc::new(made))),
+                Err(_) => {
+                    let request_id = request_id_of(request.headers());
+                    return respond(Problem::internal().response(&request_id), AxumBody::empty());
+                }
+            }
+        }
+    };
+    serve(mount, request).await
 }
 
 /// The engine route a request to a router under `prefix` is for, by its
@@ -338,6 +399,32 @@ fn prefix_of(prefix: &str) -> Result<String, InvalidOptions> {
         )));
     }
     Ok(trimmed.to_owned())
+}
+
+impl Mount {
+    // of is the mount of a shared engine, or the refusal of one that is not.
+    fn of(
+        engine: Held,
+        options: Options,
+        prefix: String,
+        heartbeat: Duration,
+    ) -> Result<Mount, InvalidOptions> {
+        if engine.handle().is_none() {
+            return Err(InvalidOptions(
+                "the engine must be shared (Engine::shared or Engine::open_shared): an event stream outlives the request that opened it".to_owned(),
+            ));
+        }
+        Ok(Mount {
+            wakes: Arc::new(Wakes::new(&engine)),
+            engine,
+            api: options.api,
+            prefix,
+            callers: options.callers,
+            serves: options.serves,
+            body_limit: options.body_limit,
+            heartbeat,
+        })
+    }
 }
 
 /// What a router's handlers share.
@@ -540,11 +627,21 @@ fn unreadable(request_id: &str) -> api::Response {
 }
 
 // answer is the engine's response as axum's: a stream's body pulls it.
-fn answer(response: api::Response, mount: &Mount) -> AxumResponse {
-    let body = match response.body {
+fn answer(mut response: api::Response, mount: &Mount) -> AxumResponse {
+    let body = match std::mem::replace(&mut response.body, Body::Empty) {
         Body::Empty => AxumBody::empty(),
         Body::Bytes(bytes) => AxumBody::from(bytes),
         Body::Stream(stream) => AxumBody::from_stream(frames(stream, mount)),
+    };
+    respond(response, body)
+}
+
+// respond is the response's status and headers with body, or with the
+// response's own bytes when body is empty and the response has them.
+fn respond(response: api::Response, body: AxumBody) -> AxumResponse {
+    let body = match response.body {
+        Body::Bytes(bytes) => AxumBody::from(bytes),
+        _ => body,
     };
     let mut answered = AxumResponse::new(body);
     *answered.status_mut() =
