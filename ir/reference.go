@@ -93,12 +93,19 @@ type ResolvedReference struct {
 //     takes no path argument and no required one, is not
 //     @manualRouteRegistration or a @webhook, and admits an end user (its
 //     service clause is not @requireService);
+//   - when the schema has no such operation (none lists the target, or
+//     none has the name options gives) and the target is an API
+//     dependency's type (D66), the options are that dependency's
+//     operation by the same rule, comparing its result with the target's
+//     name as the dependency declares it, and OptionsService names the
+//     dependency (D61, amended);
 //   - value names a field of the target holding one value, "id" unsaid;
 //   - label names a field of the target holding one text value, neither
 //     secret nor @uiHidden (the rule of @display's titleField, D48);
 //     unsaid, it is the target's titleField, or none;
 //   - the lookup is the options operation's optional list query argument
-//     that refers to the same target by the same value; it has at most one;
+//     that refers to the same target, the same type however it is spelled,
+//     by the same value; it has at most one;
 //   - the search is the options operation's search argument, when it has
 //     one.
 //
@@ -149,15 +156,18 @@ func ResolveReference(schema *Schema, dependencies map[string]*Schema, ref *Refe
 		out.Label = typeField(target, target.Display.TitleField)
 	}
 
-	set, options, err := referenceOptions(schema, ref)
+	set, options, optionsSchema, err := referenceOptions(schema, dependencies, ref, target, service)
 	if err != nil {
 		return out, err
 	}
 	out.OptionsSet, out.Options = set, options
+	if optionsSchema != schema {
+		out.OptionsService = service
+	}
 
 	for _, arg := range options.Arguments {
 		if arg == nil || !arg.IsQuery || arg.Required || !arg.TypeRef.IsArray || arg.TypeRef.IsArrayOfArrays || arg.TypeRef.IsMap ||
-			arg.References == nil || arg.References.Type != ref.Type {
+			arg.References == nil || !refersToTarget(optionsSchema, dependencies, arg.References.Type, target) {
 			continue
 		}
 		argValue := arg.References.Value
@@ -278,35 +288,94 @@ func checkLabelField(owner, schema *Schema, target string, label *FieldDef) erro
 }
 
 // referenceOptions finds the operation a reference's options names, or,
-// unsaid, the schema's one operation that lists the target.
-func referenceOptions(schema *Schema, ref *ReferenceDef) (*OperationSet, *FieldDef, error) {
+// unsaid, the schema's one operation that lists the target: the schema's
+// own first, then, when it has none and the target is the type of service,
+// an API dependency, that dependency's (D61, amended). It returns the
+// schema whose operation it is.
+func referenceOptions(schema *Schema, dependencies map[string]*Schema, ref *ReferenceDef, target *TypeDef, service string) (*OperationSet, *FieldDef, *Schema, error) {
+	var dep *Schema
+	if service != "" && service != schema.Name && dependencies[service] != nil && dependencies[service].Kind == SchemaKindAPI {
+		dep = dependencies[service]
+	}
 	if ref.Options == "" {
-		var eligible []setOperation
-		for _, set := range schema.OperationSets {
-			if set == nil {
-				continue
-			}
-			for _, op := range set.Operations {
-				if op != nil && listsTarget(op, ref.Type) && optionsRefusal(set, op) == "" {
-					eligible = append(eligible, setOperation{set, op})
-				}
-			}
+		eligible, in := eligibleOptions(schema, ref.Type), schema
+		if len(eligible) == 0 && dep != nil {
+			eligible, in = eligibleOptions(dep, target.Name), dep
 		}
 		switch len(eligible) {
 		case 0:
-			return nil, nil, fmt.Errorf("no operation of %s lists %s (a GET returning %s[] with no path argument and no required one, that an end user may call); declare one or name it with options", schema.Name, ref.Type, ref.Type)
+			if dep != nil {
+				return nil, nil, nil, fmt.Errorf("no operation of %s, nor of %s, which declares %s, lists it (a GET returning %s[] with no path argument and no required one, that an end user may call); declare one or name it with options", schema.Name, dep.Name, ref.Type, ref.Type)
+			}
+			return nil, nil, nil, fmt.Errorf("no operation of %s lists %s (a GET returning %s[] with no path argument and no required one, that an end user may call); declare one or name it with options", schema.Name, ref.Type, ref.Type)
 		case 1:
-			return eligible[0].set, eligible[0].op, nil
+			return eligible[0].set, eligible[0].op, in, nil
 		}
-		return nil, nil, fmt.Errorf("%s is listed by %s and %s; name one with options", ref.Type,
+		if in != schema {
+			return nil, nil, nil, fmt.Errorf("%s is listed by %s's %s and %s; name one with options", ref.Type, in.Name,
+				operationName(eligible[0].set, eligible[0].op), operationName(eligible[1].set, eligible[1].op))
+		}
+		return nil, nil, nil, fmt.Errorf("%s is listed by %s and %s; name one with options", ref.Type,
 			operationName(eligible[0].set, eligible[0].op), operationName(eligible[1].set, eligible[1].op))
 	}
 
-	var found []setOperation
 	setName, opName, qualified := strings.Cut(ref.Options, ".")
 	if !qualified {
 		setName, opName = "", ref.Options
 	}
+	found := namedOptions(schema, setName, opName, qualified)
+	in, listed := schema, ref.Type
+	if len(found) == 0 && dep != nil {
+		in, listed = dep, target.Name
+		found = namedOptions(dep, setName, opName, qualified)
+	}
+	switch {
+	case len(found) == 0 && dep != nil:
+		return nil, nil, nil, fmt.Errorf("options %s is not an operation of %s, nor of %s, which declares %s", ref.Options, schema.Name, dep.Name, ref.Type)
+	case len(found) == 0:
+		return nil, nil, nil, fmt.Errorf("options %s is not an operation of %s", ref.Options, schema.Name)
+	case len(found) > 1:
+		return nil, nil, nil, fmt.Errorf("options %s names an operation of %s and of %s; name one as %s", ref.Options,
+			found[0].set.Name, found[1].set.Name, found[0].set.Name+"."+opName)
+	}
+	set, op := found[0].set, found[0].op
+	if !listsTarget(op, listed) {
+		method, path := op.HTTPMethod, op.RestPath
+		if method == "" {
+			method = "an operation with no method"
+		}
+		if path == "" {
+			path = "(no path)"
+		}
+		return nil, nil, nil, fmt.Errorf("options %s does not list %s: it is %s %s returning %s", ref.Options, ref.Type, method, path, referenceTypeLabel(op.TypeRef))
+	}
+	if refusal := optionsRefusal(set, op); refusal != "" {
+		return nil, nil, nil, fmt.Errorf("options %s %s", ref.Options, refusal)
+	}
+	return set, op, in, nil
+}
+
+// eligibleOptions lists the operations of schema that list target and
+// that a UI may call, in declaration order.
+func eligibleOptions(schema *Schema, target string) []setOperation {
+	var eligible []setOperation
+	for _, set := range schema.OperationSets {
+		if set == nil {
+			continue
+		}
+		for _, op := range set.Operations {
+			if op != nil && listsTarget(op, target) && optionsRefusal(set, op) == "" {
+				eligible = append(eligible, setOperation{set, op})
+			}
+		}
+	}
+	return eligible
+}
+
+// namedOptions lists the operations of schema named opName, in the set
+// setName when qualified.
+func namedOptions(schema *Schema, setName, opName string, qualified bool) []setOperation {
+	var found []setOperation
 	for _, set := range schema.OperationSets {
 		if set == nil || qualified && set.Name != setName {
 			continue
@@ -317,28 +386,19 @@ func referenceOptions(schema *Schema, ref *ReferenceDef) (*OperationSet, *FieldD
 			}
 		}
 	}
-	switch {
-	case len(found) == 0:
-		return nil, nil, fmt.Errorf("options %s is not an operation of %s", ref.Options, schema.Name)
-	case len(found) > 1:
-		return nil, nil, fmt.Errorf("options %s names an operation of %s and of %s; name one as %s", ref.Options,
-			found[0].set.Name, found[1].set.Name, found[0].set.Name+"."+opName)
-	}
-	set, op := found[0].set, found[0].op
-	if !listsTarget(op, ref.Type) {
-		method, path := op.HTTPMethod, op.RestPath
-		if method == "" {
-			method = "an operation with no method"
+	return found
+}
+
+// refersToTarget reports whether name, as a reference held in schema
+// spells it, is target: the type [LookupScopes] finds first for it, so a
+// lookup is matched by the type it names, not by how it is spelled.
+func refersToTarget(schema *Schema, dependencies map[string]*Schema, name string, target *TypeDef) bool {
+	for _, c := range LookupScopes(schema, dependencies, name) {
+		if td := c.Schema.Types[name]; td != nil {
+			return td == target
 		}
-		if path == "" {
-			path = "(no path)"
-		}
-		return nil, nil, fmt.Errorf("options %s does not list %s: it is %s %s returning %s", ref.Options, ref.Type, method, path, referenceTypeLabel(op.TypeRef))
 	}
-	if refusal := optionsRefusal(set, op); refusal != "" {
-		return nil, nil, fmt.Errorf("options %s %s", ref.Options, refusal)
-	}
-	return set, op, nil
+	return false
 }
 
 // setOperation is one operation and the set that holds it.
@@ -550,10 +610,11 @@ type HeldReference struct {
 //
 // A holder that is not one of the schema's own types, a dependency's type
 // the API's operations take or return, is read against the schema too:
-// the API's operations are the only ones a reference of the API names.
-// So its written RefersTo holds only when [ResolveReference] resolves it
-// in the schema to a value of the field's type; the loader checked it
-// against the dependency's own operations, not the schema's.
+// a reference of the API names the API's operations, or, when they list
+// no target, an API dependency's that declares it (D61, amended). So its
+// written RefersTo holds only when [ResolveReference] resolves it in the
+// schema to a value of the field's type; the loader checked it against
+// the dependency's own operations, not the schema's.
 //
 // The derived reference names the one object type W of the schema whose
 // @source is the relation's type U, by its id, with every other member

@@ -11,7 +11,8 @@ import (
 
 // @paginated from @superschematic/api, on an operation of an API schema:
 // its argument is optional, Args holds its shape, and Apply writes
-// FieldDef.Page with both limits filled in, once per operation.
+// FieldDef.Page with both limits filled in, and defaultSort as written
+// (D60, amended), once per operation.
 func TestPaginatedDecorator(t *testing.T) {
 	reg := New(naming.Naming{})
 	spec, ok := reg.Decorator("paginated", TargetOperation)
@@ -29,6 +30,8 @@ func TestPaginatedDecorator(t *testing.T) {
 		{`{"defaultLimit": 50}`, ir.OperationPage{DefaultLimit: 50, MaxLimit: 100}},
 		{`{"defaultLimit": 2, "maxLimit": 5}`, ir.OperationPage{DefaultLimit: 2, MaxLimit: 5}},
 		{`{"defaultLimit": 1000, "maxLimit": 1000}`, ir.OperationPage{DefaultLimit: 1000, MaxLimit: 1000}},
+		{`{"defaultSort": "name"}`, ir.OperationPage{DefaultLimit: 20, MaxLimit: 100, DefaultSort: "name"}},
+		{`{"defaultLimit": 2, "maxLimit": 5, "defaultSort": "-placedAt"}`, ir.OperationPage{DefaultLimit: 2, MaxLimit: 5, DefaultSort: "-placedAt"}},
 	} {
 		var args []any
 		if tc.arg != "" {
@@ -71,6 +74,11 @@ func TestPaginatedDecorator(t *testing.T) {
 		`{"defaultLimit": 2.5}`,
 		`{"maxLimit": "10"}`,
 		`{"pageSize": 10}`,
+		`{"defaultSort": ""}`,
+		`{"defaultSort": "--name"}`,
+		`{"defaultSort": "+name"}`,
+		`{"defaultSort": "name,id"}`,
+		`{"defaultSort": 1}`,
 		`null`,
 		`10`,
 	} {
