@@ -2131,16 +2131,24 @@ as they are, with no build step (D51). The pieces mirror Go's:
   Promise<Implementations>`, in `deps.ts`, and, for an API with a route
   that needs an end user, `AuthenticatorFactory`, the type of the
   implementation's `authenticate`, which builds the router's
-  `Authenticator` from `Deps` as Go's `AuthMiddleware(deps)` does. `Deps`
-  holds `config`, `db`, a client per callee in a member named after it
-  (`shopApi`), and `logger`, each left out by Go's rule. The scaffold
-  writes the package once, as Go's does (section 8.5), in a directory
-  that holds no `.ts` file: `package.json`
+  `Authenticator` from `Deps` as Go's `AuthMiddleware(deps)` does. For an
+  API with a `@manualRouteRegistration` operation it writes
+  `ManualRoutes`, a `ManualRouteHandler` per such operation, and
+  `ManualRoutesConstructor`, the type of the implementation's
+  `createManualRoutes`, which builds them from `Deps` for the router's
+  `manualRoutes` (D51). `Deps` holds `config`, `db`, a client per callee
+  in a member named after it (`shopApi`), and `logger`, each left out by
+  Go's rule. The scaffold writes the package once, as Go's does (section
+  8.5), in a directory that holds no `.ts` file: `package.json`
   (`<npm_scope>/<service>-implementation`), `tsconfig.json`, and an
   `index.ts` whose `create` is a `Constructor` and whose methods throw the
   runtime's `notImplemented()`, with an `authenticate` that establishes no
-  end user and a verifier per `@hmacVerified` provider that refuses every
-  request. `deps.db` is a `pg` Pool that the runtime's `connectPostgres`
+  end user, a `createManualRoutes` whose handlers throw it too, and a
+  verifier per `@hmacVerified` provider that refuses every request. An
+  implementation that exists and exports no `createManualRoutes` while its
+  API declares a manual route fails a stack's build, which says what to
+  add, as one without its `createJobs` does (section 8.7). `deps.db` is a
+  `pg` Pool that the runtime's `connectPostgres`
   (`@superschematic/http-runtime/postgres`) opens from the derived
   connection; a TypeScript ORM, when one exists, adds a typed client on
   the same pool. The Node Cloud SQL connector reads the instance's
@@ -2225,8 +2233,13 @@ as they are, with no build step (D51). The pieces mirror Go's:
     captures it as Go's `CaptureAuthorization` does;
   - mounts each API's `buildRouter` on one Hono app, with
     `authenticateService: serviceAuthenticator(config.<API>_CALLERS)` for
-    an API with a service clause, then the runtime's `notFoundHandler` and
-    `errorHandler`. Hono merges the routers' routes, so an identity API's
+    an API with a service clause, and `manualRoutes`, the handlers the
+    implementation's `createManualRoutes(deps)` builds, for an API with a
+    `@manualRouteRegistration` operation, which the router mounts behind
+    the operation's route controls and auth gate (D51), then the
+    runtime's `notFoundHandler` and `errorHandler`. A Go server's
+    `RegisterRoutes` leaves such an operation out, and its `main` mounts
+    none. Hono merges the routers' routes, so an identity API's
     router registers its CORS on each of its own routes: a request gets
     the CORS of the API that serves it alone, and a preflight that of the
     API that registers the method it asks for, as Go's dispatch does.
@@ -2254,7 +2267,8 @@ as they are, with no build step (D51). The pieces mirror Go's:
   port, so its Dockerfile sets no `PORT` and exposes nothing. SIGTERM or
   SIGINT aborts the signal it hands the job or the worker loop; a second
   signal exits at once, as a server's does. It ends its pools before it
-  exits.
+  exits. The generated CI's `check` type-checks its package as it does a
+  server's (section 11.3).
 - **Image.** With the naming file's `[paths]` naming the checkouts of
   superscalar's TypeScript binding and the HTTP runtime's package, which
   no registry serves yet, the Dockerfile's addon stage builds
@@ -3883,21 +3897,25 @@ The GitHub workflow:
     the root's lockfile (`bun install --frozen-lockfile` or `npm ci`),
     runs `build-all` over the services root, which resolves every
     environment and checks its graph (levels 1 and 3), and compiles each
-    Go server's entrypoint module with `go build -mod=mod` (level 2). It
-    runs on a push too. A binary the release workflow did not build names
-    no digests, and its archives step fails.
-  - For a stack with a TypeScript server, `check` then installs the
-    output root's Bun workspace from the lockfile the project commits
-    (section 8.6), `bun install --frozen-lockfile` in
+    Go server's, job's and worker's entrypoint module with `go build
+    -mod=mod` (level 2), in that order and each named for its kind, so a
+    job or a worker that no longer builds against its implementation fails
+    the pull request as a server does. It runs on a push too. A binary the
+    release workflow did not build names no digests, and its archives step
+    fails.
+  - For a stack with a TypeScript server, job or worker, `check` then
+    installs the output root's Bun workspace from the lockfile the project
+    commits (section 8.6), `bun install --frozen-lockfile` in
     `<schemas-root>/dist`, in a step that names the lockfile. It fails
     when the lockfile is missing, where a frozen install alone would
     install without one, or no longer matches the packages the build
     wrote, and says to run `bun install` there after `build-all` and
-    commit it. Then each
-    TypeScript server's entrypoint package and the implementation of each
-    API one serves type-checks with `tsc --noEmit` (level 2), through `bun
-    x --no-install`, so the compiler is the one the package depends on and
-    the install linked, never one bunx downloads. The type-check reads the
+    commit it. Then each TypeScript server's, job's and worker's
+    entrypoint package, in that order and each named for its kind, and
+    the implementation of each API one of them imports type-checks with
+    `tsc --noEmit` (level 2), through `bun x --no-install`, so the
+    compiler is the one the package depends on and the install linked,
+    never one bunx downloads. The type-check reads the
     runtime packages as the install linked them: from the registry they
     carry their declarations, while a checkout that `[paths]` names needs
     its build output in the CI checkout, which the image builds for itself
@@ -3967,7 +3985,10 @@ credentials file gives superschematic and Pulumi application default
 credentials. The cloud jobs install the provisioner's tools: the Pulumi
 provisioner declares the `pulumi` CLI at the release of the Pulumi SDK it
 is built with. A job that installs Bun installs `tools.env`'s release, the
-one a TypeScript server's image runs on.
+one a TypeScript server's image runs on, and a job that installs an npm
+project's packages sets up Node.js at `tools.env`'s `NODE_VERSION`
+(`cigen.NodeVersion`), the release this repository's CI runs Node on,
+rather than whichever release is the current LTS.
 
 The workflow installs the release of superschematic that generated it,
 the version of the root module in the binary's build information, from

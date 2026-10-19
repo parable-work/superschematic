@@ -259,6 +259,13 @@ type TypeScriptAPI struct {
 	Implementations string
 	Authenticate    string
 
+	// ManualRoutes is the variable of the handlers of its
+	// @manualRouteRegistration operations, which the implementation's
+	// createManualRoutes builds from Deps and the router mounts behind
+	// each one's auth gate (D51); empty when it has none, and for a job or
+	// a worker, which mounts no routes.
+	ManualRoutes string
+
 	// Identity is the variable of its identity service when it
 	// authenticates with the identity runtime over the user model (D50),
 	// empty otherwise, and IdentityField the identity config field the
@@ -516,6 +523,9 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 		if o.ChecksEndUsers() && !background {
 			api.Authenticate = taken.take(stem + "Authenticate")
 		}
+		if o.HasManualRoutes() && !background {
+			api.ManualRoutes = taken.take(stem + "ManualRoutes")
+		}
 		if o.Identity != nil && !background {
 			api.Identity = taken.take(stem + "Identity")
 			api.IdentityField = ir.IdentityConfigField(o.SchemaName)
@@ -618,8 +628,9 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 }
 
 // RouterOptions are the members of the options main.ts builds the API's
-// router with: its authenticator or its identity service, and the service
-// authenticator over its callers field.
+// router with: its authenticator or its identity service, the service
+// authenticator over its callers field, and the handlers of its manually
+// registered operations, which the router mounts behind their auth gates.
 func (a *TypeScriptAPI) RouterOptions() []string {
 	var out []string
 	if a.Authenticate != "" {
@@ -630,6 +641,9 @@ func (a *TypeScriptAPI) RouterOptions() []string {
 	}
 	if a.Callers != "" {
 		out = append(out, "authenticateService: serviceAuthenticator("+a.Config+"."+a.Callers+")")
+	}
+	if a.ManualRoutes != "" {
+		out = append(out, "manualRoutes: "+a.ManualRoutes)
 	}
 	return out
 }

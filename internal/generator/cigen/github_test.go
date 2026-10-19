@@ -27,6 +27,31 @@ func TestActionsArePinnedAsCIPinsThem(t *testing.T) {
 	}
 }
 
+// TestNodeIsPinnedAsToolsEnvPinsIt holds the Node.js release the workflow
+// sets up to tools.env's NODE_VERSION, the one source of the toolchain
+// pins, as servergen's tests hold Go's, Rust's and Bun's.
+func TestNodeIsPinnedAsToolsEnvPinsIt(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "..", "tools.env"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pinned string
+	for _, line := range strings.Split(string(data), "\n") {
+		if value, ok := strings.CutPrefix(line, "NODE_VERSION="); ok {
+			pinned = value
+		}
+	}
+	if pinned == "" {
+		t.Fatal("tools.env pins no NODE_VERSION")
+	}
+	if pinned != NodeVersion {
+		t.Errorf("tools.env pins Node %s; cigen.NodeVersion is %s", pinned, NodeVersion)
+	}
+	if s := setupNode(); len(s.with) != 1 || s.with[0] != [2]string{"node-version", pinned} || s.uses != &actionSetupNode {
+		t.Errorf("setupNode() = %+v, want actions/setup-node at node-version %s", s, pinned)
+	}
+}
+
 // TestScalar: a value a plain scalar would read back as something else is
 // quoted.
 func TestScalar(t *testing.T) {
