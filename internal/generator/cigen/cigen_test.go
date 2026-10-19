@@ -859,7 +859,8 @@ func TestCheckFindsTheTypeScriptImplementations(t *testing.T) {
 // release tools.env pins, installs the output root's workspace and builds
 // the site; each deploy and preview job sets up Bun and installs the
 // workspace after the build; a plan job, which builds no site, does
-// neither. A stack whose environment deploys a site it does not locate is
+// neither. Every job sets up Node.js at the release tools.env pins for
+// npm ci. A stack whose environment deploys a site it does not locate is
 // refused.
 func TestSitesInTheWorkflow(t *testing.T) {
 	identity := &publicregistry.CIIdentity{Kind: stacktest.WorkloadIdentity, Fields: map[string]string{"provider": "projects/1/p", "account": "a@b"}}
@@ -915,6 +916,16 @@ func TestSitesInTheWorkflow(t *testing.T) {
 		if s := w.jobs[id].step("Set up Bun"); s == nil || s.With["bun-version"] != servergen.BunVersion {
 			t.Errorf("%s sets up Bun with %+v, want tools.env's %s", id, s, servergen.BunVersion)
 		}
+	}
+	// The npm project's packages install on tools.env's Node in every job,
+	// the plan's included, never on whichever release is the current LTS.
+	for _, id := range w.order {
+		if s := w.jobs[id].step("Set up Node.js"); s == nil || s.With["node-version"] != cigen.NodeVersion {
+			t.Errorf("%s sets up Node.js with %+v, want tools.env's %s", id, s, cigen.NodeVersion)
+		}
+	}
+	if !bytes.Contains(files[0].Data, []byte(`node-version: "`+cigen.NodeVersion+`"`)) {
+		t.Errorf("the workflow does not quote Node's release %s, which YAML would read as a number:\n%s", cigen.NodeVersion, files[0].Data)
 	}
 	preview := w.jobs["preview-preview"]
 	if s := preview.step(install); s == nil || s.If != "github.event.action != 'closed'" {

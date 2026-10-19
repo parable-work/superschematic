@@ -3972,7 +3972,10 @@ credentials file gives superschematic and Pulumi application default
 credentials. The cloud jobs install the provisioner's tools: the Pulumi
 provisioner declares the `pulumi` CLI at the release of the Pulumi SDK it
 is built with. A job that installs Bun installs `tools.env`'s release, the
-one a TypeScript server's image runs on.
+one a TypeScript server's image runs on, and a job that installs an npm
+project's packages sets up Node.js at `tools.env`'s `NODE_VERSION`
+(`cigen.NodeVersion`), the release this repository's CI runs Node on,
+rather than whichever release is the current LTS.
 
 The workflow installs the release of superschematic that generated it,
 the version of the root module in the binary's build information, from

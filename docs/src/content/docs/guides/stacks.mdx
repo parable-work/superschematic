@@ -1419,7 +1419,9 @@ The workflow:
   workspace and builds each site with its build script, as `stack deploy`
   does, so a site that does not build fails the pull request. Every job
   that sets up Bun installs the release a TypeScript server's image runs
-  on.
+  on, and every job of a project that installs with npm sets up the
+  Node.js release superschematic's own CI runs on, so `npm ci` runs on
+  the same release from run to run.
 - After it, `plan-<environment>` runs `stack plan` for each cloud
   environment without parameters, as the environment's `planner`
   account, and `preview-<environment>` runs `stack deploy <environment>

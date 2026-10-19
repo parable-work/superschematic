@@ -568,7 +568,7 @@ func (g github) packages() []step {
 		}
 	case registry.PackageManagerNPM:
 		return []step{
-			{name: "Set up Node.js", uses: &actionSetupNode, with: [][2]string{{"node-version", "lts/*"}}},
+			setupNode(),
 			{name: "Install the schemas root's packages", dir: root, run: "npm ci"},
 		}
 	}
@@ -579,6 +579,20 @@ func (g github) packages() []step {
 // TypeScript server's image runs on.
 func setupBun() step {
 	return step{name: "Set up Bun", uses: &actionSetupBun, with: [][2]string{{"bun-version", servergen.BunVersion}}}
+}
+
+// NodeVersion is the Node.js release a job sets up for a project whose
+// schemas root installs with npm: tools.env's NODE_VERSION, the release
+// this repository's own CI runs Node on, which a test holds it to. A
+// major release, as tools.env names it, which actions/setup-node resolves
+// to its latest patch.
+const NodeVersion = "24"
+
+// setupNode installs Node.js at the release tools.env pins, so a job's
+// npm ci runs on one release from run to run rather than whichever the
+// current LTS is.
+func setupNode() step {
+	return step{name: "Set up Node.js", uses: &actionSetupNode, with: [][2]string{{"node-version", NodeVersion}}}
 }
 
 // hasSite reports whether env deploys a static site, which `stack deploy`
