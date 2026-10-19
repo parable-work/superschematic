@@ -894,8 +894,10 @@ impl From<BehaviorError> for Error {
 }
 
 /// A storage failure: the busy error is the refusal `busy`, on both
-/// databases; an error of the engine's own that the storage carried back
-/// (from a migration or a callback) is that error again; anything else is
+/// databases; a lost connection to the database (Postgres) is
+/// `unavailable`, saying whether the write is known not to have happened;
+/// an error of the engine's own that the storage carried back (from a
+/// migration or a callback) is that error again; anything else is
 /// [`Error::Storage`].
 impl From<superschematic_engine_storage::Error> for Error {
     fn from(error: superschematic_engine_storage::Error) -> Self {
@@ -905,6 +907,21 @@ impl From<superschematic_engine_storage::Error> for Error {
                 EngineErrorCode::Busy,
                 format!(
                     "the engine's storage is busy: another writer held its lock past the busy timeout ({message}); nothing was written, and the call may be tried again"
+                ),
+            )),
+            // The connection could not open, or went before the commit:
+            // the server rolled the transaction back.
+            StorageError::Connection { message } => Error::Engine(EngineError::new(
+                EngineErrorCode::Unavailable,
+                format!(
+                    "the engine's connection to the database failed ({message}); nothing was written, and the call may be tried again"
+                ),
+            )),
+            // The connection went while the transaction committed.
+            StorageError::CommitUnknown { message } => Error::Engine(EngineError::new(
+                EngineErrorCode::Unavailable,
+                format!(
+                    "the engine lost its connection to the database while the call committed ({message}); whether it was written is unknown, so read before trying it again"
                 ),
             )),
             // A behavior's SQL the checker refused, or a use of its

@@ -16,7 +16,11 @@
 //! namespace's publish events, which other namespaces read, are written
 //! under the catalog's lock, which excludes every writer (D58). So within
 //! what one read can see, cursors commit in order, and a reader that goes
-//! on from a page's `next` sees every later event exactly once.
+//! on from a page's `next` sees every later event exactly once. The log's
+//! head is global, past cursors other namespaces committed, so a read from
+//! `head` reads it once the namespace's writers in flight are done
+//! ([`superschematic_engine_storage::Db::read_settled`]): a write still
+//! open could hold a cursor below it.
 //!
 //! A commit that appended an event wakes the waiters on the storage's
 //! notifier ([`Events::wait`], [`Events::watch`]), in every process on
@@ -34,7 +38,7 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 use serde_json::Value;
 
-use superschematic_engine_storage::{Row, Sql, SqlValue, Tx};
+use superschematic_engine_storage::{Lock, Row, Sql, SqlValue, Tx};
 
 use crate::access::SchemaAction;
 use crate::behaviors::declaration::is_behavior_name;
@@ -570,6 +574,13 @@ impl EventFilter {
     }
 }
 
+// What a read found: a page, or a read from the head, whose cursor is read
+// after.
+enum Read {
+    Page(EventPage),
+    Head(String),
+}
+
 /// The event log (`engine.events`).
 pub struct Events<'e> {
     pub(crate) engine: &'e Engine,
@@ -578,14 +589,17 @@ pub struct Events<'e> {
 impl Events<'_> {
     /// The page of events after a cursor that the principal may read and
     /// the filters keep. From `head` it returns no events, and the log's
-    /// last cursor as next. With no cursor, or 0, it starts at the
+    /// last cursor as next, read once the namespace's writes in flight
+    /// have ended, so a reader that goes on from it misses none of theirs
+    /// (on Postgres it waits for them, up to the busy timeout, and is
+    /// `busy` past it). With no cursor, or 0, it starts at the
     /// namespace's floor; from a cursor before the floor it is
     /// `cursor_expired`. A page scans at most its limit, kept or not, and
     /// its next is past every event it scanned.
     pub fn read(&self, principal: &Principal, options: &ReadEvents<'_>) -> Result<EventPage> {
         check_principal(principal)?;
         let engine = self.engine;
-        engine.db.read(|tx| {
+        let read = engine.db.read(|tx| -> Result<Read> {
             let view = NamespaceView::load(&engine.namespaces, tx)?;
             let namespace = view.resolve(options.namespace)?;
             let (from_head, after) = match options.after {
@@ -611,11 +625,7 @@ impl Events<'_> {
                 .into());
             }
             if from_head {
-                return Ok(EventPage {
-                    events: Vec::new(),
-                    next: log_head(tx)?,
-                    more: false,
-                });
+                return Ok(Read::Head(namespace));
             }
             // A read from the start starts at the floor; one from a cursor
             // before it would miss what retention pruned. One instance's
@@ -675,16 +685,34 @@ impl Events<'_> {
                 Some(last) => last.i64("cursor")?,
                 None => from,
             };
-            Ok(EventPage {
+            Ok(Read::Page(EventPage {
                 events,
                 next,
                 more: rows.len() > limit,
-            })
-        })
+            }))
+        })?;
+        match read {
+            Read::Page(page) => Ok(page),
+            // The head is read once the namespace's writers in flight have
+            // committed or rolled back: on Postgres a write draws its
+            // cursors before it commits, so a head read beside one could be
+            // past a cursor it drew and commits later, which a reader going
+            // on from the head would never see (D58). Every later write of
+            // the namespace draws past the head.
+            Read::Head(namespace) => Ok(EventPage {
+                events: Vec::new(),
+                next: engine
+                    .db
+                    .read_settled(Lock::Namespace(&namespace), |tx| log_head(tx))?,
+                more: false,
+            }),
+        }
     }
 
     /// The cursor of the log's last event, 0 for a log that never held one.
-    /// Retention never moves it back.
+    /// Retention never moves it back. On Postgres a write in flight may
+    /// have drawn a cursor below it that commits later, so a reader starts
+    /// from a read from `head` ([`Events::read`]) rather than from this.
     pub fn head(&self) -> Result<i64> {
         self.engine.db.read(log_head)
     }

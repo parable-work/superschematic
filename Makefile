@@ -53,7 +53,7 @@ GO_BUILD_FLAGS := -trimpath -buildvcs=false
 .PHONY: all setup build test lint fmt vet go-build go-test go-vet go-fmt-check go-lint \
         go-goldens catalog-check schema-file-types schema-file-types-check behaviors behaviors-check \
         gcp-schemas gcp-schemas-check cloudflare-schemas cloudflare-schemas-check generic-schemas generic-schemas-check ts python rust engine-rust acme-engine-rust \
-        engine-archive engine-go engine-link-check \
+        engine-rust-soak engine-archive engine-go engine-link-check \
         versiongraph versiongraph-scenarios versiongraph-scenarios-ts versiongraph-scenarios-rust \
         versiongraph-scenarios-python docs cli-smoke example-migrations scrub versions clean
 
@@ -315,6 +315,22 @@ acme-engine-rust:
 	cd $(ACME_CRATE) && cargo fmt --check \
 		&& cargo clippy --locked --all-targets -- -D warnings \
 		&& ACME_META_SCHEMA=/tmp/superschematic-acme-engine/acme-schema-file.json cargo test --locked
+
+# The Rust engine's soaks on Postgres (D58), which CI does not run: two
+# engines on one database racing long, with more threads than either pool
+# has connections, then the invariants the CI tests check (no lost update,
+# no repeated seq, cursor or number, no over-committed budget, no job
+# claimed twice); event streams that see every event once while their
+# listener's session is ended every 200 ms; and reactions handled once
+# each while the runner's lease is taken from its holder every 300 ms
+# (testkit/tests/replicas_*.rs). They need
+# SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL; ENGINE_SOAK_CALLS sets the calls
+# each thread makes, and the orders the handover soak creates (200 unless
+# set).
+engine-rust-soak:
+	@test -n "$$SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL" || \
+		{ echo "set SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL to the Postgres the soaks run against" >&2; exit 1; }
+	cd runtime/engine/rust && cargo test -p superschematic-engine-testkit --all-features --test 'replicas_*' -- --ignored --nocapture
 
 # The version-graph core's static archive, staged where the Go binding links
 # it (runtime/versiongraph/go/lib/<goos>_<goarch>).

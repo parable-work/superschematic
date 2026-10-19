@@ -5829,6 +5829,55 @@ hands the rest to `EngineOptions::from_json`, and writes an error as
 take one config and throw one error. No generated server mounts the
 engine yet (milestone 18).
 
+Several instances of a server on one Postgres database (milestone 13b)
+are tested as two engines, each with a pool of its own, on one schema
+(`testkit/tests/replicas_*.rs`, with the database's administrator ending
+sessions as a crash or a failover would; `make engine-rust-soak` runs the
+writers long). What holds across them: a namespace's writers take turns,
+so racing writes lose no update and repeat no seq, cursor or number, hold
+an id and a unique field, never pass a Budget limit nor claim a Queue job
+twice, and writers of two namespaces never wait for each other; a reader
+on any instance sees every event of a namespace once, in cursor order (a
+rolled-back write leaves a gap in the identity, nothing more), and a read
+from `head` waits for the namespace's writes in flight, since the head is
+global and a write held open could hold a cursor below it; a commit wakes
+every instance's waiters, streams and runner through its listener, which
+reconnects when its session ends and wakes them to read what they missed,
+and without one a stream reads at each heartbeat; one runner runs at a
+time, another takes the lease when it stops or its session ends, and
+when two passes overlap for a moment under a lease that just went, a
+reaction runs once per event and a schedule once per due time (each read
+again under the namespace's lock), Timers firing each deadline once;
+engines that start together migrate once, and one that starts on a
+storage already up to date only reads its ledger, so it holds no
+running instance's writes up; publishes of one draft at once mint one
+version, the others answered `published: false` or `not_found`; a
+publish that adds a behavior (Search, Branches, Lease) beside another
+instance's writes leaves each write wholly of one version, and an
+instance whose build lacks the behavior answers that version's writes
+`unavailable`. On failure: a lock past the busy timeout, a statement the
+server's `statement_timeout` cancels, a deadlock and a serialization
+failure are `busy` (503 with `Retry-After`), nothing written; a session
+the server ends inside a call is `unavailable`, nothing written, its
+locks freed at once; idle pooled connections the server ended are
+replaced at BEGIN, so no call fails on them; a connection lost while a
+call commits is `unavailable`, saying whether it was written is unknown;
+a session idle inside a transaction past
+`idle_in_transaction_session_timeout` (60 s unless configured,
+`idleInTransactionTimeoutMs`) is ended by the server, so an instance
+frozen mid-transaction holds its namespace no longer; and only a panic
+inside a transaction poisons an engine, that one alone. Not guaranteed:
+a connection the network cuts without a reset blocks its call until the
+operating system's TCP timeouts give up, and a listener cut off so wakes
+nothing meanwhile (streams read at their heartbeat, the runner at its
+timer); a lease holder cut off so keeps its lease until the server drops
+the session, while its own runner stops at its next check of the lease;
+a commit whose outcome is unknown is the caller's to read before trying
+again; cursors on Postgres are ordered, not contiguous; and two
+processes on one SQLite file share no notifier and no lease. The whole workspace's tests run on both databases in the
+engine-rust CI job, the scenario and HTTP corpora replaying their files
+on parallel threads.
+
 The rule is reversible until the first release.
 
 ### D52, amended: a TypeScript API's jobs run on Bun from packages of their own, with a signal for Go's context

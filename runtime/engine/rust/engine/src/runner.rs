@@ -44,7 +44,13 @@
 //! lease, a session advisory lock ([`superschematic_engine_storage::Lease`]):
 //! a second process's started runner stays idle, and takes the lease once
 //! the first lets go of it; `run_due` there is refused (`busy`) while
-//! another process holds it.
+//! another process holds it. A runner looks at its lease before each pass,
+//! so when the lease's session ends under a pass (a crash, a lost
+//! connection) another process's runner can take it while that pass
+//! finishes, and two passes overlap for a moment; each reads a
+//! subscription's cursor and a schedule's next run again under the
+//! namespace's lock before it acts, so a reaction still runs once per event
+//! and a schedule once per due time.
 //!
 //! With the engine's retention ([`crate::RetentionOptions`]), the runner
 //! also prunes the event log: at its first pass, then every `every_ms`, a
@@ -1347,10 +1353,6 @@ impl<'e> Runner<'e> {
             Some(row) => row.i64("cursor")?,
             None => reaction.start,
         };
-        let attempts = match &current {
-            Some(row) => row.i64("attempts")?,
-            None => 0,
-        };
         // Retention pruned past where it is: it halts, rather than skip
         // what it never handled.
         if cursor < floor {
@@ -1379,7 +1381,9 @@ impl<'e> Runner<'e> {
             Ok(watched) => watched,
             Err(error) => {
                 engine.write(Lock::Namespace(&unit.namespace), |tx| {
-                    ensure_subscription(tx, reaction)?;
+                    // The attempts as the row holds them under the lock,
+                    // which another process's runner may have counted.
+                    let attempts = ensure_subscription(tx, reaction)?.i64("attempts")?;
                     self.fail(tx, unit, None, attempts + 1, now, &error)
                 })?;
                 totals.failed += 1;
@@ -1618,14 +1622,26 @@ impl<'e> Runner<'e> {
             self.core().due_at(next_run_at);
             return Ok(());
         }
-        let previous = row.opt_i64("last_run_at")?;
-        let failures = row.i64("failures")?;
         let principal = self
             .core()
             .principal
             .as_ref()
             .ok_or_else(|| Error::internal("the runner has no principal"))?;
         engine.write(Lock::Namespace(&unit.namespace), |tx| {
+            // Read again under the namespace's lock: another process's
+            // runner may have run it for this due time since the read
+            // above, as two can for a moment when a lease's session ends
+            // under a pass (D58). Then it is not due, and runs once.
+            let Some(row) = schedule_row(tx, unit, &schedule.name)? else {
+                return Ok(());
+            };
+            let next_run_at = row.i64("next_run_at")?;
+            if next_run_at > now {
+                self.core().due_at(next_run_at);
+                return Ok(());
+            }
+            let previous = row.opt_i64("last_run_at")?;
+            let failures = row.i64("failures")?;
             let ran = tx.savepoint(|tx| {
                 let view = NamespaceView::load(&engine.namespaces, tx)?;
                 let chain = Chain::caused(
@@ -1708,13 +1724,19 @@ impl<'e> Runner<'e> {
                 return Ok(());
             }
         }
-        let failures = match row {
-            Some(row) => row.i64("failures")? + 1,
-            None => 1,
-        };
-        let next = now + self.backoff(failures);
         let unit = &schedule.unit;
-        self.engine.write(Lock::Namespace(&unit.namespace), |tx| {
+        let recorded = self.engine.write(Lock::Namespace(&unit.namespace), |tx| {
+            // Read again under the namespace's lock, as a run does: a
+            // failure another process's runner recorded for this due time
+            // is not recorded twice.
+            let failures = match schedule_row(tx, unit, &schedule.name)? {
+                Some(row) if row.i64("next_run_at")? > now => {
+                    return Ok(Err(row.i64("next_run_at")?));
+                }
+                Some(row) => row.i64("failures")? + 1,
+                None => 1,
+            };
+            let next = now + self.backoff(failures);
             tx.run(
                 "INSERT INTO engine_schedules (behavior, schedule, namespace, schema, next_run_at, failures, error) VALUES (?, ?, ?, ?, ?, ?, ?)
                  ON CONFLICT (behavior, schedule, namespace, schema) DO UPDATE SET next_run_at = excluded.next_run_at, failures = excluded.failures, error = excluded.error",
@@ -1728,10 +1750,15 @@ impl<'e> Runner<'e> {
                     SqlValue::from(error),
                 ],
             )?;
-            Ok(())
+            Ok(Ok(next))
         })?;
-        self.core().due_at(next);
-        totals.failed += 1;
+        match recorded {
+            Ok(next) => {
+                self.core().due_at(next);
+                totals.failed += 1;
+            }
+            Err(next) => self.core().due_at(next),
+        }
         Ok(())
     }
 

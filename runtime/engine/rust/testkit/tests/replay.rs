@@ -8,8 +8,16 @@
 //! The corpus is `runtime/engine/testdata/scenarios`, in the tree;
 //! `ENGINE_CORPUS_DIR` names another directory. A directory that is not
 //! there fails the test, so the replay cannot pass by running nothing.
+//!
+//! The files replay on threads of their own, every file on every database
+//! one job, since each scenario opens engines on a file or a schema of its
+//! own: as many threads as the machine has cores, at most eight
+//! (`ENGINE_REPLAY_THREADS` sets another number, 1 to replay one file at a
+//! time). The reports print and are checked in the files' order.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Mutex, PoisonError};
 
 use superschematic_engine::storage::Dialect;
 use superschematic_engine_testkit::{load, replay_file, Database, FileReport, ENGINE_FILES};
@@ -40,6 +48,48 @@ fn corpus() -> PathBuf {
     }
 }
 
+const THREADS_VARIABLE: &str = "ENGINE_REPLAY_THREADS";
+
+// threads is how many files replay at once.
+fn threads() -> usize {
+    std::env::var(THREADS_VARIABLE)
+        .ok()
+        .and_then(|threads| threads.parse::<usize>().ok())
+        .filter(|threads| *threads > 0)
+        .unwrap_or_else(|| {
+            std::thread::available_parallelism()
+                .map_or(4, std::num::NonZeroUsize::get)
+                .min(8)
+        })
+}
+
+// replay_all replays each (database, file) job on the threads, and returns
+// the reports in the jobs' order.
+fn replay_all(dir: &Path, jobs: &[(&Database, &str)]) -> Vec<FileReport> {
+    let next = AtomicUsize::new(0);
+    let reports: Mutex<Vec<Option<FileReport>>> = Mutex::new(jobs.iter().map(|_| None).collect());
+    std::thread::scope(|scope| {
+        for _ in 0..threads().min(jobs.len()) {
+            scope.spawn(|| loop {
+                let index = next.fetch_add(1, Ordering::SeqCst);
+                let Some((database, name)) = jobs.get(index) else {
+                    return;
+                };
+                let path = dir.join(format!("{name}.json"));
+                let file = load(&path).unwrap_or_else(|error| panic!("{error}"));
+                let report = replay_file(&file, database, &repository());
+                reports.lock().unwrap_or_else(PoisonError::into_inner)[index] = Some(report);
+            });
+        }
+    });
+    reports
+        .into_inner()
+        .unwrap_or_else(PoisonError::into_inner)
+        .into_iter()
+        .map(|report| report.expect("every job replayed"))
+        .collect()
+}
+
 fn databases() -> Vec<Database> {
     let mut databases = Vec::new();
     if cfg!(feature = "sqlite") {
@@ -63,13 +113,14 @@ fn the_rust_engine_gives_the_recorded_answers() {
         dir.display()
     );
     let mut failures = Vec::new();
-    for database in databases() {
-        let mut reports: Vec<FileReport> = Vec::new();
-        for name in ENGINE_FILES {
-            let path = dir.join(format!("{name}.json"));
-            let file = load(&path).unwrap_or_else(|error| panic!("{error}"));
-            reports.push(replay_file(&file, &database, &repository()));
-        }
+    let databases = databases();
+    let jobs: Vec<(&Database, &str)> = databases
+        .iter()
+        .flat_map(|database| ENGINE_FILES.iter().map(move |name| (database, *name)))
+        .collect();
+    let mut all = replay_all(&dir, &jobs).into_iter();
+    for database in &databases {
+        let reports: Vec<FileReport> = all.by_ref().take(ENGINE_FILES.len()).collect();
         eprintln!("\nreplay on {:?}:", database.dialect());
         for report in &reports {
             eprintln!("  {}", report.summary());

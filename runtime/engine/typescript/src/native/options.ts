@@ -40,6 +40,8 @@ export interface NativePostgresOptions {
   listen?: boolean;
   connectTimeoutMs?: number;
   migrationTimeoutMs?: number;
+  /** How long the server lets a session sit idle inside a transaction before it ends it; 60000 by default, 0 for the server's own setting. */
+  idleInTransactionTimeoutMs?: number;
 }
 
 /** The TypeScript engine's options, and the Rust engine's storage on Postgres in place of path. */

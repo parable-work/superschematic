@@ -940,7 +940,10 @@ jobs:
       # The test kit's replay of the scenario corpus
       # (runtime/engine/testdata/scenarios) runs here too, on both
       # databases, and of the HTTP corpus through the engine's routes and
-      # its axum router; it fails when the corpus is missing.
+      # its axum router; it fails when the corpus is missing. Each replays
+      # its files on threads of their own, one per core. The tests of two
+      # engines on one database (testkit/tests/replicas_*.rs) run here too;
+      # their soaks, `make engine-rust-soak`, do not.
       - name: test (SQLite and Postgres)
         working-directory: runtime/engine/rust
         env:

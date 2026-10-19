@@ -448,6 +448,77 @@ build, or names a version differently, is refused. The tests run the
 engine's migrations from an empty file and from the file each earlier
 version left.
 
+### Several instances on one Postgres database
+
+The Rust engine (D58) runs in every instance of a server, each with a
+pool of its own on the one schema, and holds the following across them.
+The tests are `rust/testkit/tests/replicas_*.rs`, two engines on one
+schema whose sessions the database's administrator ends as a crash, a
+failover or a proxy would; `make engine-rust-soak` runs the racing writers
+long (it needs `SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL`).
+
+- **Writers.** A write takes its namespace's advisory lock and the
+  catalog's shared, so a namespace's writers take turns: racing writes
+  lose no update and repeat no seq, cursor or number, an id and a unique
+  field hold, Budget never passes a limit and Queue never claims a job
+  twice. Writers of two namespaces never wait for each other. A define, a
+  publish, a change of namespaces and a migration take the catalog's lock
+  alone, and every writer waits for them.
+- **The event log.** A reader on any instance sees every event of a
+  namespace once, in cursor order. A write that rolls back leaves a gap in
+  the identity, so cursors are ordered, not contiguous. A read from
+  `head` reads the head once the namespace's writes in flight are done
+  (it waits for them, `busy` past the busy timeout): the head is global,
+  and a write held open could hold a cursor below it. `Events::head()`
+  is the log's last cursor, not a place to read on from.
+- **Waking.** A commit notifies (`pg_notify`) and each instance's listener
+  wakes its waiters, event streams and runner. A listener whose session
+  ends reconnects at once (while it cannot, it tries again after 50 ms,
+  backing off to 5 s) and wakes them, so they read what they missed. An instance opened with `listen: false` has
+  its streams read at each heartbeat instead, and `watch` at its timeout.
+- **The runner.** One instance's runner runs at a time: the one whose
+  process holds the runner's lease, a session advisory lock on a
+  connection of its own. Another takes the lease, within its
+  `leaseRetryMs`, once the first stops or its session ends; `run_due`
+  elsewhere is `busy`. When a lease's session ends under a pass, the two
+  passes can overlap for a moment; a reaction's cursor and a schedule's
+  next run are read again under the namespace's lock, so a reaction runs
+  once per event, a schedule once per due time, and Timers fires each
+  deadline once.
+- **Opening and publishing.** Instances that start together migrate once,
+  under a lock of the session; one that starts on a storage already up to
+  date only reads its ledger and takes no lock, so it holds no running
+  instance's writes up. Publishes of one draft at once mint one version:
+  the others answer `published: false` (the draft matched the version)
+  or `not_found` (no draft left). A publish creates its behaviors' storage
+  in its transaction, so a write beside it is wholly of the old version or
+  wholly of the new; an instance whose build lacks a behavior the new
+  version composes answers that version's writes `unavailable`, writing
+  nothing.
+- **Failures.** A lock waited for past the busy timeout, a statement the
+  server's `statement_timeout` cancels, a deadlock and a serialization
+  failure are `busy`: nothing was written, and over HTTP the 503 says
+  `Retry-After: 1`. A session the server ends inside a call (a failover,
+  `pg_terminate_backend`) answers `unavailable`, nothing written, and its
+  locks are free at once. Pooled connections the server ended while idle
+  are found closed at BEGIN and replaced, so no call fails on them. A
+  connection lost while a call commits answers `unavailable` saying
+  whether it was written is unknown: read before trying again. The server
+  ends a session that sits idle inside a transaction past
+  `idle_in_transaction_session_timeout`, 60 s unless the options say
+  (`idleInTransactionTimeoutMs`, 0 for the server's own), so an instance
+  frozen mid-transaction holds its namespace no longer. Only a panic
+  inside a transaction poisons an engine, and that one alone.
+
+Not guaranteed: a connection the network cuts without a reset blocks its
+call until the operating system's TCP timeouts give up, and a listener
+cut off so wakes nothing until then (streams read at their heartbeat, the
+runner at its timer, a minute at most); a lease holder cut off so keeps
+the lease until the server drops its session, while its own runner stops
+at its next check of the lease, so for that while no runner runs; and two
+processes on one SQLite file share no notifier and no lease (one process
+writes a file).
+
 ## Schemas
 
 A schema is one JSON schema-file document, the form `superschematic
