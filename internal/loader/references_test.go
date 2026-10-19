@@ -324,3 +324,38 @@ func TestARelationsKeyIsCheckedInTheTypeScriptForm(t *testing.T) {
 		t.Fatalf("warnings = %q", warnings.String())
 	}
 }
+
+// TestARelatedTypeRecordsNothingInTheAPI: the TypeScript reader flattens
+// the type an @source target's relation names, Tenant for
+// TenantUser.tenant, only so the key check can read its id (D61, amended).
+// It records nothing of it in the API: its scalars (Identity.Slug,
+// Generic.JSON) are not the API's, and neither is the type or an import,
+// unless the API's own fields use them.
+func TestARelatedTypeRecordsNothingInTheAPI(t *testing.T) {
+	unsourced := []string{"@source(Tenant)\n", ""}
+	schema, err := LoadService(copyRefsKeys(t, unsourced...))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, scalar := range []string{"Identity.Slug", "Generic.JSON"} {
+		if schema.Scalars[scalar] != nil {
+			t.Errorf("the API records %s, which only the related Tenant holds", scalar)
+		}
+	}
+	if schema.Types["Tenant"] != nil || len(schema.Imports) != 0 {
+		t.Errorf("the API records the related type: Tenant %v, imports %+v", schema.Types["Tenant"] != nil, schema.Imports)
+	}
+	for _, scalar := range []string{"Identity.UUID", "Identity.Name"} {
+		if schema.Scalars[scalar] == nil {
+			t.Errorf("the API lost %s, which its own fields hold", scalar)
+		}
+	}
+
+	schema, err = LoadService(copyRefsKeys(t, append(unsourced, "name: Identity.Name;", "name: Identity.Name;\n  slug: Identity.Slug;")...))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if schema.Scalars["Identity.Slug"] == nil {
+		t.Error("the API's TenantView.slug holds Identity.Slug, but the API does not record it")
+	}
+}
