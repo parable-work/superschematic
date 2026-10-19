@@ -1276,6 +1276,36 @@ func TestToolchainPinsMatchToolsEnv(t *testing.T) {
 	}
 }
 
+// TestTelemetryPackagesMatchTheRuntime: a Bun server, job and worker depend
+// on the OpenTelemetry packages the HTTP runtime's ./telemetry entry imports
+// at the versions the runtime pins as its optional peer dependencies and
+// tests with (D67), and on no other.
+func TestTelemetryPackagesMatchTheRuntime(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(testpaths.RepoRoot(t), "runtime", "http", "typescript", "package.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pkg struct {
+		PeerDependencies map[string]string `json:"peerDependencies"`
+		DevDependencies  map[string]string `json:"devDependencies"`
+	}
+	if err := json.Unmarshal(data, &pkg); err != nil {
+		t.Fatal(err)
+	}
+	peers := map[string]string{}
+	for name, version := range pkg.PeerDependencies {
+		if strings.HasPrefix(name, "@opentelemetry/") {
+			peers[name] = version
+			if pkg.DevDependencies[name] != version {
+				t.Errorf("the runtime pins %s %s as a peer and tests with %s", name, version, pkg.DevDependencies[name])
+			}
+		}
+	}
+	if !maps.Equal(peers, servergen.TelemetryPackages) {
+		t.Errorf("the runtime's OpenTelemetry peers are %v; servergen.TelemetryPackages is %v", peers, servergen.TelemetryPackages)
+	}
+}
+
 // copyTree copies the directory src to dst, leaving out build products:
 // target and node_modules directories, and skip, a directory under src.
 func copyTree(t *testing.T, src, dst string, skip ...string) {

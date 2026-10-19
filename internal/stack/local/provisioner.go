@@ -41,6 +41,16 @@ var inheritedVariables = []string{
 	"SSL_CERT_FILE", "SSL_CERT_DIR", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY",
 }
 
+// otelPrefix begins the names of OpenTelemetry's variables, which a server,
+// job or worker process inherits too (D67): trace export is off unless the
+// developer's shell names an OTLP endpoint, and then every deployable sends
+// its spans there. OTEL_SERVICE_NAME is left out, since one value would name
+// every deployable alike over the name its entrypoint gives it.
+const otelPrefix = "OTEL_"
+
+// otelServiceName is the one OpenTelemetry variable no process inherits.
+const otelServiceName = "OTEL_SERVICE_NAME"
+
 // Provisioner is the local provisioner (docs/stack-model.md, section 8.3).
 // It applies a local environment's graph to the machine, a step of the
 // deploy order at a time:
@@ -1369,9 +1379,9 @@ func serverEnv(s *Server, secrets, params map[string]string, outputs map[string]
 }
 
 // processEnviron is the environment of a server or a job process before
-// any variable the platform sets itself: the variables it inherits, and
-// each of its env entries, a secret read from secrets and a value with its
-// references resolved.
+// any variable the platform sets itself: the variables it inherits,
+// OpenTelemetry's among them, and each of its env entries, a secret read
+// from secrets and a value with its references resolved.
 func processEnviron(entries []EnvVar, secrets, params map[string]string, outputs map[string]map[string]any) ([]string, error) {
 	var env []string
 	for _, name := range inheritedVariables {
@@ -1379,6 +1389,14 @@ func processEnviron(entries []EnvVar, secrets, params map[string]string, outputs
 			env = append(env, name+"="+value)
 		}
 	}
+	var otel []string
+	for _, kv := range os.Environ() {
+		if name, _, _ := strings.Cut(kv, "="); strings.HasPrefix(name, otelPrefix) && name != otelServiceName {
+			otel = append(otel, kv)
+		}
+	}
+	slices.Sort(otel)
+	env = append(env, otel...)
 	for _, v := range entries {
 		if v.Secret != "" {
 			env = append(env, v.Name+"="+secrets[v.Secret])

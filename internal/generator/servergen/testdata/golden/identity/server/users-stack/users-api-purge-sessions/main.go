@@ -10,7 +10,9 @@
 // does, calls the implementation's NewJobs, and runs the job's method once,
 // with a context that SIGTERM or SIGINT cancels. It logs the run's end and,
 // when the job fails, exits 1, so the platform records the run as failed and
-// runs it again if the job's retries allow.
+// runs it again if the job's retries allow. When the environment names an
+// OTLP endpoint (OTEL_EXPORTER_OTLP_ENDPOINT), it exports a span of the run,
+// flushed before it exits (D67).
 //
 // The API's implementation is the package at the naming file's
 // [implementation_paths] go template (section 8.5): example.com/schemas/implementation/users-api
@@ -26,6 +28,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/parable-work/superschematic/runtime/http/go/stackconfig"
+	"github.com/parable-work/superschematic/runtime/http/go/telemetry"
 	"go.uber.org/zap"
 
 	usersapi "example.com/schemas/api/users-api"
@@ -59,6 +62,13 @@ func run(logger *zap.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
 
+	// Trace export, on when the environment names an OTLP endpoint (D67).
+	stopTelemetry, err := telemetry.Start(ctx, telemetry.Defaults{Service: "users-api-purge-sessions", Stack: "users-stack", Kind: "job", Logger: logger})
+	if err != nil {
+		return fmt.Errorf("telemetry: %w", err)
+	}
+	defer stopTelemetry()
+
 	usersApiConfig, err := usersapi.LoadEnvConfig()
 	if err != nil {
 		return fmt.Errorf("configuration of users-api: %w", err)
@@ -88,7 +98,7 @@ func run(logger *zap.Logger) error {
 		return fmt.Errorf("jobs of users-api: %w", err)
 	}
 	logger.Info("job started", zap.String("api", "users-api"), zap.String("class", "PurgeSessions"))
-	return jobs.PurgeSessions(ctx)
+	return telemetry.Job(ctx, "PurgeSessions", jobs.PurgeSessions)
 }
 
 // connect builds the pool of the database field named field, which the

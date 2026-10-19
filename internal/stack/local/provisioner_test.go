@@ -390,6 +390,11 @@ func (f *fixture) listContainers() string {
 // with its resolved environment, callees first, and waits until each is
 // ready. Destroy stops the callers first, then the containers.
 func TestApplyFromNothing(t *testing.T) {
+	// The developer's shell turns trace export on for every process, and
+	// names no deployable alike (D67).
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://127.0.0.1:4318")
+	t.Setenv("OTEL_RESOURCE_ATTRIBUTES", "deployment.environment.name=Dev")
+	t.Setenv("OTEL_SERVICE_NAME", "everything")
 	f := newFixture(t, "Dev")
 	f.runner.notReady = 1
 	f.runner.rules = []rule{
@@ -464,6 +469,14 @@ func TestApplyFromNothing(t *testing.T) {
 		t.Fatalf("started %d processes, want 3", len(f.runner.started))
 	}
 	api, orders, worker := f.runner.started[0].cmd.Env, f.runner.started[1].cmd.Env, f.runner.started[2].cmd.Env
+	for _, env := range [][]string{api, orders, worker} {
+		if envValue(env, "OTEL_EXPORTER_OTLP_ENDPOINT") != "http://127.0.0.1:4318" || envValue(env, "OTEL_RESOURCE_ATTRIBUTES") != "deployment.environment.name=Dev" {
+			t.Errorf("a process does not inherit the shell's OpenTelemetry variables: %v", env)
+		}
+		if slices.ContainsFunc(env, func(kv string) bool { return strings.HasPrefix(kv, "OTEL_SERVICE_NAME=") }) {
+			t.Errorf("a process inherits OTEL_SERVICE_NAME, which would name every deployable alike: %v", env)
+		}
+	}
 	// The worker takes its API's config and its own edges, and the
 	// concurrency its platform sets, and listens on no port (D53).
 	for name, want := range map[string]string{

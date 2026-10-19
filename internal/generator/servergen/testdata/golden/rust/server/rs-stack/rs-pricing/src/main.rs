@@ -10,7 +10,10 @@
 //! member (section 3.4). It listens on $PORT, 8080 when unset, answers
 //! `GET /healthz` while the process runs and `GET /readyz` while its
 //! databases answer, and on SIGTERM or SIGINT stops taking requests and
-//! lets those in flight finish. It logs one JSON object per line on stdout.
+//! lets those in flight finish. It logs one JSON object per line on stdout,
+//! and when the environment names an OTLP endpoint
+//! (`OTEL_EXPORTER_OTLP_ENDPOINT`) it exports a span per request and per call
+//! to another API (D67).
 //!
 //! Each API's implementation is the crate at the naming file's
 //! `[implementation_paths] rust` template, which the build scaffolded once
@@ -32,6 +35,7 @@ use axum::routing::get;
 use axum::{Json, Router};
 use serde_json::json;
 use superschematic_http_runtime::logging::{self, tracing};
+use superschematic_http_runtime::telemetry::{self, Defaults};
 use superschematic_http_runtime::JwtServiceAuthenticator;
 use tokio::signal::unix::{signal, Signal, SignalKind};
 
@@ -55,10 +59,20 @@ struct Readiness {
 
 #[tokio::main]
 async fn main() -> ExitCode {
-    if let Err(err) = logging::init_json("rs-stack", "rs-pricing") {
-        eprintln!("rs-pricing: install the logger: {err}");
-        return ExitCode::FAILURE;
-    }
+    // The log and, when the environment names an OTLP endpoint, trace export
+    // (D67), which flushes the spans still buffered as main returns.
+    let installed = telemetry::start(Defaults {
+        stack: "rs-stack",
+        kind: logging::SERVER,
+        name: "rs-pricing",
+    });
+    let _telemetry = match installed {
+        Ok(telemetry) => telemetry,
+        Err(err) => {
+            eprintln!("rs-pricing: install the logger: {err}");
+            return ExitCode::FAILURE;
+        }
+    };
     match run().await {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
@@ -101,6 +115,11 @@ async fn run() -> Result<(), Failure> {
         .route("/readyz", get(readyz))
         .with_state(Arc::clone(&readiness))
         .fallback_service(rs_pricing_router);
+    // With trace export on, each request but the probes is a server span,
+    // named by the route of the operation that takes it.
+    let app = app.layer(telemetry::ServerLayer::new(&[
+        rs_pricing_api::operations::ALL,
+    ]));
     serve(port, app, readiness).await
 }
 

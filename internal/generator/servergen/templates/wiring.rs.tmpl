@@ -35,6 +35,8 @@ fn connect(service: &str, field: &str, database: &Database) -> Result<Pool, Fail
 /// `RequestOptions::forward(ctx.bearer_token())` with each call it makes
 /// for a request.
 {{- end }}
+/// With trace export on, each call is a client span that carries its trace
+/// context (D67).
 fn {{ .Constructor }}(endpoint: &Service) -> Result<{{ .Alias }}::{{ .Client }}, Failure> {
     let service_credential = match &endpoint.credential {
         Some(credential) => Some({{ .Alias }}::ServiceCredential {
@@ -47,6 +49,7 @@ fn {{ .Constructor }}(endpoint: &Service) -> Result<{{ .Alias }}::{{ .Client }},
     {{ .Alias }}::{{ .Client }}::new({{ .Alias }}::ClientConfig {
         base_url: endpoint.url.clone(),
         service_credential,
+        transport: telemetry::transport(),
         ..Default::default()
     })
     .map_err(|err| format!("client of {{ .Service }}: {err}").into())

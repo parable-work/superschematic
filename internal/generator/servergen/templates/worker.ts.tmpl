@@ -16,7 +16,9 @@
 // while the method runs, completes the message when the method resolves,
 // fails it when the method rejects, and logs each outcome. On SIGTERM or
 // SIGINT it claims no more, lets the running methods finish for {{ .Worker.GraceSeconds }}s, aborts
-// the rest and gives their messages back, and exits 0.
+// the rest and gives their messages back, and exits 0. When the environment
+// names an OTLP endpoint (OTEL_EXPORTER_OTLP_ENDPOINT), it exports a span per
+// message (D67).
 //
 // The API's implementation is the package at the naming file's
 // [implementation_paths] typescript template (section 8.6):
@@ -25,6 +27,7 @@
 import { {{ join .RuntimeImports ", " }} } from '{{ .Naming.HTTPRuntimeNpmPackage }}';
 import { connectPostgres, postgresQueue } from '{{ .Naming.HTTPRuntimeNpmPackage }}/postgres';
 import { runWorker, workerConcurrency } from '{{ .Naming.HTTPRuntimeNpmPackage }}/worker';
+import { startTelemetry{{ if .Clients }}, type Telemetry{{ end }} } from '{{ .Naming.HTTPRuntimeNpmPackage }}/telemetry';
 import type { Pool } from 'pg';
 {{- if .Buckets }}
 import { openBucket } from '{{ .Naming.HTTPRuntimeNpmPackage }}/gcs';
@@ -44,7 +47,8 @@ const logger = createLogger({ stack: {{ tsQuote .Stack }}, worker: {{ tsQuote .N
 /**
  * Builds the worker from the environment and claims and handles messages
  * until signal aborts, when SIGTERM or SIGINT arrives, then stops within
- * the grace. Each pool it opens goes in pools, which main ends.
+ * the grace. Each pool it opens goes in pools, which main ends, and so does
+ * its telemetry, which main flushes.
  */
 async function run(signal: AbortSignal, pools: { end(): Promise<void> }[]): Promise<void> {
 {{- template "ts-background-connections" . }}
@@ -64,7 +68,7 @@ async function run(signal: AbortSignal, pools: { end(): Promise<void> }[]): Prom
           id: claim.id,
           token: claim.token,
           attempt: claim.attempt,
-          handle: (handlerSignal: AbortSignal) => workers.{{ .Worker.Method }}(claim.message, handlerSignal),
+          handle: (handlerSignal: AbortSignal) => telemetry.message(queue.name, claim, () => workers.{{ .Worker.Method }}(claim.message, handlerSignal)),
         })),
       extend: (id, token, leaseSeconds) => queue.extend(id, token, leaseSeconds),
       complete: (id, token) => queue.complete(id, token),

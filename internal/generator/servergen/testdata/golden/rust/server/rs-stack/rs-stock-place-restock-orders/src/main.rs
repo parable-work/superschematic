@@ -12,7 +12,9 @@
 //! method once, with a `Shutdown` that SIGTERM or SIGINT cancels. It logs the
 //! run's end and, when the job fails, exits 1, so the platform records the
 //! run as failed and runs it again if the job's retries allow. It serves no
-//! port, and builds no identity service and no router (D52, D65).
+//! port, and builds no identity service and no router (D52, D65). When the
+//! environment names an OTLP endpoint (`OTEL_EXPORTER_OTLP_ENDPOINT`), it
+//! exports a span of the run, flushed before it exits (D67).
 //!
 //! The API's implementation is the crate at the naming file's
 //! `[implementation_paths] rust` template, which each build copies into the
@@ -25,6 +27,7 @@ use std::time::Instant;
 use superschematic_http_runtime::logging::{self, tracing};
 use superschematic_http_runtime::postgres::{self, Pool};
 use superschematic_http_runtime::stackconfig::{self, Database, Service};
+use superschematic_http_runtime::telemetry::{self, Defaults};
 use superschematic_http_runtime::Shutdown;
 
 use schemas_rs_pricing_sdk as rs_pricing_sdk;
@@ -42,10 +45,20 @@ type Failure = Box<dyn std::error::Error + Send + Sync>;
 
 #[tokio::main]
 async fn main() -> ExitCode {
-    if let Err(err) = logging::init_json_as(STACK, logging::JOB, NAME) {
-        eprintln!("{NAME}: install the logger: {err}");
-        return ExitCode::FAILURE;
-    }
+    // The log and, when the environment names an OTLP endpoint, trace export
+    // (D67), which flushes the spans still buffered as main returns.
+    let installed = telemetry::start(Defaults {
+        stack: STACK,
+        kind: logging::JOB,
+        name: NAME,
+    });
+    let _telemetry = match installed {
+        Ok(telemetry) => telemetry,
+        Err(err) => {
+            eprintln!("{NAME}: install the logger: {err}");
+            return ExitCode::FAILURE;
+        }
+    };
     let started = Instant::now();
     match run().await {
         Ok(()) => {
@@ -90,7 +103,7 @@ async fn run() -> Result<(), Failure> {
         class = "PlaceRestockOrders",
         "job started"
     );
-    jobs.place_restock_orders(shutdown).await
+    telemetry::job("PlaceRestockOrders", jobs.place_restock_orders(shutdown)).await
 }
 
 /// An API's configuration, or a failure naming the API and each variable
@@ -113,6 +126,8 @@ fn connect(service: &str, field: &str, database: &Database) -> Result<Pool, Fail
 /// field its edge derives, and the client sends the service credential the
 /// edge's connector chose (docs/stack-model.md, section 9.6), and no end
 /// user: a job serves none.
+/// With trace export on, each call is a client span that carries its trace
+/// context (D67).
 fn new_rs_pricing_client(endpoint: &Service) -> Result<rs_pricing_sdk::RsPricingSdk, Failure> {
     let service_credential = match &endpoint.credential {
         Some(credential) => Some(rs_pricing_sdk::ServiceCredential {
@@ -125,6 +140,7 @@ fn new_rs_pricing_client(endpoint: &Service) -> Result<rs_pricing_sdk::RsPricing
     rs_pricing_sdk::RsPricingSdk::new(rs_pricing_sdk::ClientConfig {
         base_url: endpoint.url.clone(),
         service_credential,
+        transport: telemetry::transport(),
         ..Default::default()
     })
     .map_err(|err| format!("client of rs-pricing: {err}").into())
