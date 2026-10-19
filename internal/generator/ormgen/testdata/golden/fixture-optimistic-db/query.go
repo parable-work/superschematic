@@ -424,10 +424,32 @@ func (u *ShelfUpdate) ApplyTo(row *types.Shelf) {
 	}
 }
 
-// buildWhereClause builds a WHERE clause from a ShelfFilter
+// ShelfFilterConditions are the filter's conditions for a query of
+// the caller's own, each column qualified by its table: each value is
+// appended to args, its placeholder numbered after those already there.
+// FindMany's WHERE is them joined by AND, then deleted_at IS NULL unless
+// its options include deleted rows. That soft-delete condition is not
+// among them: a query that leaves deleted rows out adds it itself. A nil
+// filter has none.
+func ShelfFilterConditions(filter *ShelfFilter, args *[]any) []string {
+	return filter.conditions(args, len(*args))
+}
+
+// buildWhereClause builds a WHERE clause from a ShelfFilter: its
+// conditions joined by AND, or nothing when it has none.
 func (f *ShelfFilter) buildWhereClause(args *[]interface{}, paramOffset int) string {
-	if f == nil {
+	conditions := f.conditions(args, paramOffset)
+	if len(conditions) == 0 {
 		return ""
+	}
+	return " WHERE " + strings.Join(conditions, " AND ")
+}
+
+// conditions are the filter's conditions, each value appended to args, its
+// placeholder numbered from paramOffset+1.
+func (f *ShelfFilter) conditions(args *[]interface{}, paramOffset int) []string {
+	if f == nil {
+		return nil
 	}
 
 	var conditions []string
@@ -604,11 +626,7 @@ func (f *ShelfFilter) buildWhereClause(args *[]interface{}, paramOffset int) str
 		}
 	}
 
-	if len(conditions) == 0 {
-		return ""
-	}
-
-	return " WHERE " + strings.Join(conditions, " AND ")
+	return conditions
 }
 
 // StockFilter provides filtering for Stock queries
@@ -661,10 +679,29 @@ func (u *StockUpdate) ApplyTo(row *types.Stock) {
 	}
 }
 
-// buildWhereClause builds a WHERE clause from a StockFilter
+// StockFilterConditions are the filter's conditions for a query of
+// the caller's own, each column qualified by its table: each value is
+// appended to args, its placeholder numbered after those already there.
+// FindMany's WHERE is them joined by AND. A nil filter has none.
+func StockFilterConditions(filter *StockFilter, args *[]any) []string {
+	return filter.conditions(args, len(*args))
+}
+
+// buildWhereClause builds a WHERE clause from a StockFilter: its
+// conditions joined by AND, or nothing when it has none.
 func (f *StockFilter) buildWhereClause(args *[]interface{}, paramOffset int) string {
-	if f == nil {
+	conditions := f.conditions(args, paramOffset)
+	if len(conditions) == 0 {
 		return ""
+	}
+	return " WHERE " + strings.Join(conditions, " AND ")
+}
+
+// conditions are the filter's conditions, each value appended to args, its
+// placeholder numbered from paramOffset+1.
+func (f *StockFilter) conditions(args *[]interface{}, paramOffset int) []string {
+	if f == nil {
+		return nil
 	}
 
 	var conditions []string
@@ -807,9 +844,5 @@ func (f *StockFilter) buildWhereClause(args *[]interface{}, paramOffset int) str
 		}
 	}
 
-	if len(conditions) == 0 {
-		return ""
-	}
-
-	return " WHERE " + strings.Join(conditions, " AND ")
+	return conditions
 }

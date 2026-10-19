@@ -263,10 +263,29 @@ func (u *OrderUpdate) ApplyTo(row *types.Order) {
 	}
 }
 
-// buildWhereClause builds a WHERE clause from a OrderFilter
+// OrderFilterConditions are the filter's conditions for a query of
+// the caller's own, each column qualified by its table: each value is
+// appended to args, its placeholder numbered after those already there.
+// FindMany's WHERE is them joined by AND. A nil filter has none.
+func OrderFilterConditions(filter *OrderFilter, args *[]any) []string {
+	return filter.conditions(args, len(*args))
+}
+
+// buildWhereClause builds a WHERE clause from a OrderFilter: its
+// conditions joined by AND, or nothing when it has none.
 func (f *OrderFilter) buildWhereClause(args *[]interface{}, paramOffset int) string {
-	if f == nil {
+	conditions := f.conditions(args, paramOffset)
+	if len(conditions) == 0 {
 		return ""
+	}
+	return " WHERE " + strings.Join(conditions, " AND ")
+}
+
+// conditions are the filter's conditions, each value appended to args, its
+// placeholder numbered from paramOffset+1.
+func (f *OrderFilter) conditions(args *[]interface{}, paramOffset int) []string {
+	if f == nil {
+		return nil
 	}
 
 	var conditions []string
@@ -337,9 +356,5 @@ func (f *OrderFilter) buildWhereClause(args *[]interface{}, paramOffset int) str
 		}
 	}
 
-	if len(conditions) == 0 {
-		return ""
-	}
-
-	return " WHERE " + strings.Join(conditions, " AND ")
+	return conditions
 }

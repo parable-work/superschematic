@@ -1,0 +1,20 @@
+# The suppliers of a shop, as an API declares them, which another API
+# imports and lists: a supplier, named by its name.
+name: fixture-console-suppliers-api
+kind: API
+types:
+  # Who supplies the shop's products.
+  Supplier:
+    name: Supplier
+    role: APIView
+    display:
+      noun: Supplier
+      plural: Suppliers
+      titleField: name
+    fields:
+      - name: id
+        typeRef: { name: string }
+        required: true
+      - name: name
+        typeRef: { name: string }
+        required: true

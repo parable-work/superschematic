@@ -30,18 +30,24 @@ func writeMCPTools(t *testing.T, hooks ...apigen.ToolHook) string {
 // loaded schema's records rewritten first when rewrite is set.
 func writeMCPToolsWith(t *testing.T, invocation apigen.ToolInvocationPolicy, rewrite func(*testing.T, *ir.Schema), hooks ...apigen.ToolHook) string {
 	t.Helper()
-	schema, err := loader.LoadService(filepath.Join(fixturesDir, "fixture-mcp"))
+	return writeToolsOf(t, "fixture-mcp", invocation, rewrite, hooks...)
+}
+
+// writeToolsOf writes the Rust SDK of fixture, with its tool documents.
+func writeToolsOf(t *testing.T, fixture string, invocation apigen.ToolInvocationPolicy, rewrite func(*testing.T, *ir.Schema), hooks ...apigen.ToolHook) string {
+	t.Helper()
+	schema, err := loader.LoadService(filepath.Join(fixturesDir, fixture))
 	if err != nil {
-		t.Fatalf("load fixture-mcp: %v", err)
+		t.Fatalf("load %s: %v", fixture, err)
 	}
 	if rewrite != nil {
 		rewrite(t, schema)
 	}
 	apiOutput, err := apigen.Generate(schema, apigen.Options{
 		Provider:       sessionauth.Provider{},
-		SchemaName:     "fixture-mcp",
-		ModulePath:     "example.com/schemas/api/fixture-mcp",
-		TypesModule:    "example.com/schemas/types/go/fixture-mcp",
+		SchemaName:     fixture,
+		ModulePath:     "example.com/schemas/api/" + fixture,
+		TypesModule:    "example.com/schemas/types/go/" + fixture,
 		ToolHooks:      hooks,
 		ToolInvocation: invocation,
 	})
@@ -49,7 +55,7 @@ func writeMCPToolsWith(t *testing.T, invocation apigen.ToolInvocationPolicy, rew
 		t.Fatalf("apigen.Generate: %v", err)
 	}
 	clock := codegen.FixedClock(time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC))
-	sdkOutput, err := Generate(apiOutput, "schemas-fixture-mcp-sdk", naming.Default().RustTypesCrate("fixture-mcp"), clock)
+	sdkOutput, err := Generate(apiOutput, "schemas-"+fixture+"-sdk", naming.Default().RustTypesCrate(fixture), clock)
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
@@ -64,18 +70,44 @@ func writeMCPToolsWith(t *testing.T, invocation apigen.ToolInvocationPolicy, rew
 // fixture-mcp. Regenerate with:
 // go test ./internal/generator/rustsdkgen -run TestWriteToolsGoldenMCP -update
 func TestWriteToolsGoldenMCP(t *testing.T) {
-	outDir := writeMCPTools(t)
-	for _, name := range []string{
-		"tools/schema.json",
-		"tools/mcp-audit.json",
-		"tools/openai.json",
-		"tools/anthropic.json",
+	compareToolsGolden(t, writeMCPTools(t), "fixture-mcp",
+		"tools/schema.json", "tools/mcp-audit.json", "tools/openai.json", "tools/anthropic.json")
+}
+
+// TestWriteToolsGoldenRefs pins the Rust SDK's tools/schema.json of
+// fixture-refs-api: each value that refers to an item gives its reference
+// under x-superschematic-reference (D61), and the search argument says
+// x-superschematic-search (D62), as in the TypeScript SDK's. Regenerate
+// with:
+// go test ./internal/generator/rustsdkgen -run TestWriteToolsGoldenRefs -update
+func TestWriteToolsGoldenRefs(t *testing.T) {
+	outDir := writeToolsOf(t, "fixture-refs-api", apigen.ToolInvocationPolicy{}, nil)
+	schema, err := os.ReadFile(filepath.Join(outDir, "tools", "schema.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`"x-superschematic-reference":{"label":"name","lookup":"ids","options":"catalog.listItems","target":"ItemView","value":"id"}`,
+		`"x-superschematic-reference":{"label":"name","options":"catalog.listItems","target":"ItemView","value":"sku"}`,
+		`"x-superschematic-search":true`,
 	} {
+		if !strings.Contains(string(schema), want) {
+			t.Errorf("tools/schema.json lacks %s", want)
+		}
+	}
+	compareToolsGolden(t, outDir, "fixture-refs-api", "tools/schema.json")
+}
+
+// compareToolsGolden compares each named document of outDir with the
+// fixture's golden, or rewrites the goldens with -update.
+func compareToolsGolden(t *testing.T, outDir, fixture string, names ...string) {
+	t.Helper()
+	for _, name := range names {
 		got, err := os.ReadFile(filepath.Join(outDir, name))
 		if err != nil {
 			t.Fatalf("read generated %s: %v", name, err)
 		}
-		goldenPath := filepath.Join("testdata", "golden", "fixture-mcp", name)
+		goldenPath := filepath.Join("testdata", "golden", fixture, name)
 		if *update {
 			if err := os.MkdirAll(filepath.Dir(goldenPath), 0o755); err != nil {
 				t.Fatal(err)

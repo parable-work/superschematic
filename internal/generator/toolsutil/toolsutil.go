@@ -46,8 +46,17 @@ type JSONSchemaProperty struct {
 	Nullable   bool   `json:"-"`
 	// CanonicalScalar is the scalar's schema name; it is written under
 	// ScalarKey, first, when both are set.
-	CanonicalScalar      string                          `json:"-"`
-	ScalarKey            string                          `json:"-"`
+	CanonicalScalar string `json:"-"`
+	ScalarKey       string `json:"-"`
+	// Reference is the reference the value holds (D61), written under
+	// ReferenceKey after the scalar key when both are set; on a list, the
+	// list's, and each item refers.
+	Reference    *ir.ToolSchemaReference `json:"-"`
+	ReferenceKey string                  `json:"-"`
+	// Search marks an operation's search argument (D62), written as true
+	// under SearchKey after the reference key when both are set.
+	Search               bool                            `json:"-"`
+	SearchKey            string                          `json:"-"`
 	AdditionalProperties *JSONSchemaAdditionalProperties `json:"additionalProperties,omitempty"`
 	Type                 string                          `json:"type"`
 	Format               string                          `json:"format,omitempty"`
@@ -92,11 +101,23 @@ func (additional JSONSchemaAdditionalProperties) MarshalJSON() ([]byte, error) {
 var jsonValueTypes = []string{"object", "array", "string", "number", "boolean"}
 
 // MarshalJSON preserves body-field nullability independently from whether the
-// containing object requires the field. Array items retain their own contract.
+// containing object requires the field. Array items retain their own
+// contract. The vendor keys come first: the scalar's, the reference's,
+// then the search's, each when set.
 func (property JSONSchemaProperty) MarshalJSON() ([]byte, error) {
 	encoded, err := property.marshalShape()
 	if err != nil {
 		return nil, err
+	}
+	if property.SearchKey != "" && property.Search {
+		if encoded, err = prependKey(encoded, property.SearchKey, true); err != nil {
+			return nil, err
+		}
+	}
+	if property.ReferenceKey != "" && property.Reference != nil {
+		if encoded, err = prependKey(encoded, property.ReferenceKey, property.Reference); err != nil {
+			return nil, err
+		}
 	}
 	if property.ScalarKey != "" && property.CanonicalScalar != "" {
 		return prependKey(encoded, property.ScalarKey, property.CanonicalScalar)
@@ -160,32 +181,77 @@ func prependKey(object []byte, key string, value any) ([]byte, error) {
 	return out.Bytes(), nil
 }
 
-// withScalarKey sets key on the property and every property nested in it.
-func (property JSONSchemaProperty) withScalarKey(key string) JSONSchemaProperty {
-	property.ScalarKey = key
+// withVendorKeys sets the property keys of keys (the scalar's, the
+// reference's and the search's) on the property and every property nested
+// in it.
+func (property JSONSchemaProperty) withVendorKeys(keys apigen.ToolKeys) JSONSchemaProperty {
+	property.ScalarKey, property.ReferenceKey, property.SearchKey = keys.Scalar, keys.Reference, keys.Search
 	if property.Items != nil {
-		items := property.Items.withScalarKey(key)
+		items := property.Items.withVendorKeys(keys)
 		property.Items = &items
 	}
 	if property.AdditionalProperties != nil && property.AdditionalProperties.Schema != nil {
-		values := property.AdditionalProperties.Schema.withScalarKey(key)
+		values := property.AdditionalProperties.Schema.withVendorKeys(keys)
 		property.AdditionalProperties = &JSONSchemaAdditionalProperties{Schema: &values}
 	}
 	if len(property.Properties) > 0 {
 		nested := make(map[string]JSONSchemaProperty, len(property.Properties))
 		for name, child := range property.Properties {
-			nested[name] = child.withScalarKey(key)
+			nested[name] = child.withVendorKeys(keys)
 		}
 		property.Properties = nested
 	}
 	if len(property.OneOf) > 0 {
 		members := make([]JSONSchemaProperty, len(property.OneOf))
 		for i, member := range property.OneOf {
-			members[i] = member.withScalarKey(key)
+			members[i] = member.withVendorKeys(keys)
 		}
 		property.OneOf = members
 	}
 	return property
+}
+
+// holds reports whether the property, or a property nested in it, holds a
+// reference and a search.
+func (property JSONSchemaProperty) holds() (reference, search bool) {
+	reference, search = property.Reference != nil, property.Search
+	visit := func(child JSONSchemaProperty) {
+		r, s := child.holds()
+		reference, search = reference || r, search || s
+	}
+	if property.Items != nil {
+		visit(*property.Items)
+	}
+	if property.AdditionalProperties != nil && property.AdditionalProperties.Schema != nil {
+		visit(*property.AdditionalProperties.Schema)
+	}
+	for _, child := range property.Properties {
+		visit(child)
+	}
+	for _, member := range property.OneOf {
+		visit(member)
+	}
+	return reference, search
+}
+
+// Holds reports whether a property of the schema, at any depth, holds a
+// reference (D61) and whether one is a search argument (D62).
+func (object JSONSchemaObject) Holds() (reference, search bool) {
+	for _, property := range object.Properties {
+		r, s := property.holds()
+		reference, search = reference || r, search || s
+	}
+	return reference, search
+}
+
+// ToolReference is a resolved reference as the tool documents write it:
+// target the type's name and options the options operation's tool name.
+// Nil for nil.
+func ToolReference(ref *apigen.Reference) *ir.ToolSchemaReference {
+	if ref == nil {
+		return nil
+	}
+	return &ir.ToolSchemaReference{Target: ref.Target, Options: ref.OptionsTool, Value: ref.Value, Label: ref.Label, Lookup: ref.Lookup}
 }
 
 // JSONSchemaReturn represents the return type schema. Properties and
@@ -200,16 +266,19 @@ type JSONSchemaReturn struct {
 }
 
 // ToolPathParam represents a path parameter for tool invocation helpers.
+// Reference is the reference it holds (D61), nil when none.
 type ToolPathParam struct {
-	Name   string
-	TSName string
-	Type   string
+	Name      string
+	TSName    string
+	Type      string
+	Reference *apigen.Reference
 }
 
 // ToolScalarArg is one body argument of an operation without an input
 // type, for tool invocation helpers. IsArray, IsArrayOfArrays and IsMap
 // carry its shape (apigen.Param): the argument schema is T, T[] or T[][],
-// or a map of T or T[].
+// or a map of T or T[]. Reference and Search are apigen.Param's: on a GET
+// a scalar argument is a query value, and may be the search.
 type ToolScalarArg struct {
 	Name            string
 	TSName          string
@@ -218,12 +287,14 @@ type ToolScalarArg struct {
 	IsArray         bool
 	IsArrayOfArrays bool
 	IsMap           bool
+	Reference       *apigen.Reference
+	Search          bool
 }
 
 // ToolQueryArg is one query parameter as a tool argument: its type,
-// collection shape, requiredness and Validate<> bounds. Tool arguments are
-// one flat object, so query values appear in the same JSON Schema as path
-// and body values.
+// collection shape, requiredness, Validate<> bounds, reference and search
+// mark. Tool arguments are one flat object, so query values appear in the
+// same JSON Schema as path and body values.
 type ToolQueryArg struct {
 	Name              string
 	TSName            string
@@ -238,6 +309,8 @@ type ToolQueryArg struct {
 	ValidateListMin   *int
 	ValidateListMax   *int
 	ValidatePattern   string
+	Reference         *apigen.Reference
+	Search            bool
 }
 
 // ParamKeyFn chooses the JSON object key for a parameter.
@@ -267,8 +340,10 @@ func BuildInputTypeFieldsMap(apiOutput *apigen.APIOutput) map[string][]apigen.Pa
 // parameters, query parameters, the input type's fields (nested objects
 // expanded, unions as oneOf, enums with their values) or the scalar
 // arguments, the encryption key of an encrypted endpoint, and a paged
-// endpoint's cursor and limit (D60), both optional. keys supplies the
-// vendor keys; page is nil for an endpoint that does not page.
+// endpoint's cursor and limit (D60), both optional. A value that refers to
+// an item gives its reference (D61), and the search argument its mark
+// (D62), under the keys' names. keys supplies the vendor keys; page is nil
+// for an endpoint that does not page.
 func BuildParametersSchema(
 	pathParams []ToolPathParam,
 	queryArgs []ToolQueryArg,
@@ -294,6 +369,7 @@ func BuildParametersSchema(
 	for _, param := range pathParams {
 		prop := typeToJSONSchemaProperty(param.Type, scalars, inputTypeEnums)
 		prop.Description = fmt.Sprintf("%s parameter", param.Name)
+		prop.Reference = ToolReference(param.Reference)
 		key := paramKeyFn(param.Name, param.TSName)
 		schema.Properties[key] = prop
 		schema.Required = append(schema.Required, key)
@@ -307,6 +383,7 @@ func BuildParametersSchema(
 			ValidateMinLength: arg.ValidateMinLength, ValidateMaxLength: arg.ValidateMaxLength,
 			ValidateListMin: arg.ValidateListMin, ValidateListMax: arg.ValidateListMax,
 			ValidatePattern: arg.ValidatePattern,
+			Reference:       arg.Reference, Search: arg.Search,
 		}, scalars, inputTypeFields, inputTypeUnions, inputTypeEnums, nil)
 		key := paramKeyFn(arg.Name, arg.TSName)
 		schema.Properties[key] = prop
@@ -332,6 +409,7 @@ func BuildParametersSchema(
 		prop := FieldToJSONSchemaProperty(apigen.Param{
 			Name: arg.Name, Type: arg.Type, Required: arg.Required,
 			IsArray: arg.IsArray, IsArrayOfArrays: arg.IsArrayOfArrays, IsMap: arg.IsMap,
+			Reference: arg.Reference, Search: arg.Search,
 		}, scalars, inputTypeFields, inputTypeUnions, inputTypeEnums, nil)
 		key := paramKeyFn(arg.Name, arg.TSName)
 		schema.Properties[key] = prop
@@ -369,10 +447,8 @@ func BuildParametersSchema(
 		}
 	}
 
-	if keys.Scalar != "" {
-		for name, prop := range schema.Properties {
-			schema.Properties[name] = prop.withScalarKey(keys.Scalar)
-		}
+	for name, prop := range schema.Properties {
+		schema.Properties[name] = prop.withVendorKeys(keys)
 	}
 	sort.Strings(schema.Required)
 	return schema
@@ -426,7 +502,8 @@ func typeToJSONSchemaProperty(
 // constraints go on the innermost items and its list bounds on the outer
 // array. A type already on the expansion stack stays a plain reference, so
 // recursive types end. A field that is not required is nullable; the inner
-// lists of an array of arrays never are.
+// lists of an array of arrays never are. A field's reference and search
+// mark sit on its outer schema, a list's on the list.
 func FieldToJSONSchemaProperty(
 	field apigen.Param,
 	scalars map[string]apigen.ScalarJSONSchemaInfo,
@@ -503,6 +580,8 @@ func FieldToJSONSchemaProperty(
 		}
 	}
 	value.Nullable = !field.Required
+	value.Reference = ToolReference(field.Reference)
+	value.Search = field.Search
 	return value
 }
 

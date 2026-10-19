@@ -70,7 +70,7 @@ func TestOpenAPIIncludesImportedDiscriminatedUnionMembers(t *testing.T) {
 		Types: memberNames,
 	}
 
-	schemas := buildOpenAPISchemas(
+	schemas, _ := buildOpenAPISchemas(
 		[]EndpointInfo{{OutputType: "AcmePrimaryView"}},
 		map[string]string{},
 		map[string]string{},
@@ -180,7 +180,7 @@ func assertNullableRef(t *testing.T, field string, got map[string]interface{}, w
 // the flag itself.
 func TestBuildOpenAPISchemasMarksNullableFields(t *testing.T) {
 	schema, dependencies := nullableFixture()
-	schemas := buildOpenAPISchemas(
+	schemas, _ := buildOpenAPISchemas(
 		[]EndpointInfo{{OutputType: "TapInfo"}},
 		nil,
 		nil,
@@ -268,7 +268,7 @@ func openAPI30ToJSONSchema(node interface{}) interface{} {
 // null once the rules are applied.
 func TestOpenAPINullableEncodingValidatesUnder30Rules(t *testing.T) {
 	schema, dependencies := nullableFixture()
-	schemas := buildOpenAPISchemas(
+	schemas, _ := buildOpenAPISchemas(
 		[]EndpointInfo{{OutputType: "TapInfo"}},
 		nil,
 		nil,
@@ -399,7 +399,7 @@ func TestBuildOpenAPISchemasIncludesDependencyEnums(t *testing.T) {
 		},
 	}
 
-	schemas := buildOpenAPISchemas(
+	schemas, _ := buildOpenAPISchemas(
 		[]EndpointInfo{{InputType: "OAuthLoginInput", HasInput: true}},
 		nil,
 		nil,
@@ -459,7 +459,7 @@ func TestBuildOpenAPISchemasIncludesDependencyTypes(t *testing.T) {
 		},
 	}
 
-	schemas := buildOpenAPISchemas(
+	schemas, _ := buildOpenAPISchemas(
 		[]EndpointInfo{{
 			OutputType: "Connector",
 			ScalarArgs: []Param{{

@@ -39,9 +39,9 @@ export abstract class OrderLineView {
   quantity: Generic.Int64;
   unitPriceCents: Generic.Int64;
 
-  // The product this line is for.
-  @virtual
-  productId: RefersTo<Identity.UUID, ProductView>;
+  // The product this line is for: the key of OrderLine.product, which
+  // refers to ProductView, the view of its table (D61, amended).
+  productId: Identity.UUID;
 }
 
 // An order as a caller sees it.

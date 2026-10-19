@@ -63,7 +63,7 @@ func buildToolSchemas(t *testing.T, output *apigen.APIOutput) []toolSchema {
 	for _, endpoint := range output.Endpoints {
 		var pathParams []toolsutil.ToolPathParam
 		for _, param := range endpoint.PathParams {
-			pathParams = append(pathParams, toolsutil.ToolPathParam{Name: param.Name, TSName: tsutil.ToCamelCase(param.Name), Type: param.Type})
+			pathParams = append(pathParams, toolsutil.ToolPathParam{Name: param.Name, TSName: tsutil.ToCamelCase(param.Name), Type: param.Type, Reference: param.Reference})
 		}
 		var queryArgs []toolsutil.ToolQueryArg
 		for _, param := range endpoint.QueryParams {
@@ -74,6 +74,7 @@ func buildToolSchemas(t *testing.T, output *apigen.APIOutput) []toolSchema {
 				ValidateMinLength: param.ValidateMinLength, ValidateMaxLength: param.ValidateMaxLength,
 				ValidateListMin: param.ValidateListMin, ValidateListMax: param.ValidateListMax,
 				ValidatePattern: param.ValidatePattern,
+				Reference:       param.Reference, Search: param.Search,
 			})
 		}
 		var scalarArgs []toolsutil.ToolScalarArg
@@ -81,6 +82,7 @@ func buildToolSchemas(t *testing.T, output *apigen.APIOutput) []toolSchema {
 			scalarArgs = append(scalarArgs, toolsutil.ToolScalarArg{
 				Name: arg.Name, TSName: tsutil.ToCamelCase(arg.Name), Type: arg.Type, Required: arg.Required,
 				IsArray: arg.IsArray, IsArrayOfArrays: arg.IsArrayOfArrays,
+				Reference: arg.Reference, Search: arg.Search,
 			})
 		}
 		parameters := toolsutil.BuildParametersSchema(

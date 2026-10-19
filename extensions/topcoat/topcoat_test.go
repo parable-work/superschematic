@@ -92,7 +92,10 @@ func buildDir(t *testing.T, names registry.Naming, service, outputRoot string, o
 	if err != nil {
 		t.Fatalf("Assemble: %v", err)
 	}
-	schema, cfg, err := loader.LoadServiceWithConfig(service, loader.WithRegistry(reg))
+	load := func(name string) (*ir.Schema, error) {
+		return loader.LoadService(dependencyDir(service, name), loader.WithRegistry(reg))
+	}
+	schema, cfg, err := loader.LoadServiceWithConfig(service, loader.WithRegistry(reg), loader.WithDependencyLoader(load))
 	if err != nil {
 		t.Fatalf("LoadServiceWithConfig: %v", err)
 	}
@@ -107,16 +110,25 @@ func buildDir(t *testing.T, names registry.Naming, service, outputRoot string, o
 	}
 	cfg.Outputs = outputs
 	return registry.Generate(schema, cfg, registry.Options{
-		OutputRoot:  outputRoot,
-		ServicePath: service,
-		Paths:       testpaths.Local(t),
-		Naming:      names,
-		Registry:    reg,
-		Log:         log,
-		LoadDependency: func(name string) (*ir.Schema, error) {
-			return loader.LoadService(filepath.Join(fixtures, name), loader.WithRegistry(reg))
-		},
+		OutputRoot:     outputRoot,
+		ServicePath:    service,
+		Paths:          testpaths.Local(t),
+		Naming:         names,
+		Registry:       reg,
+		Log:            log,
+		LoadDependency: load,
 	})
+}
+
+// dependencyDir is the directory of a dependency of the service in dir:
+// beside it, where a test writes its own, else a fixture's, the
+// extension's own or the loader's, so the extension's fixtures may depend
+// on one another.
+func dependencyDir(service, name string) string {
+	if beside := filepath.Join(filepath.Dir(service), name); isDir(beside) {
+		return beside
+	}
+	return serviceDir(name)
 }
 
 // TestTheCrateIsWrittenOnlyBesideARustServer builds fixture-api with
@@ -574,13 +586,18 @@ func cargoTestCrate(t *testing.T, service, test string, devDeps ...string) {
 
 // crateOptions are what a test of the Topcoat crate adds to its build: the
 // crate's features, which clippy and cargo test turn on, lines of the
-// manifest's [dev-dependencies], files of tests/ beside app.rs, and the
-// config's outputs when they are not outputsOf the service's.
+// manifest's [dev-dependencies], files of tests/ beside app.rs, the
+// config's outputs when they are not outputsOf the service's, the
+// service's directory when it is a test's own copy of the fixture, and the
+// dependencies whose Rust types crates its crates build against, each
+// built into the same output root first, as build --with-deps builds them.
 type crateOptions struct {
 	features        []string
 	devDependencies string
 	files           map[string]string
 	outputs         map[string]any
+	dir             string
+	dependencies    []string
 }
 
 // outputsOf are a fixture's outputs in the tests that build every fixture
@@ -609,7 +626,17 @@ func cargoTestCrateWith(t *testing.T, service, test string, options crateOptions
 	if outputs == nil {
 		outputs = outputsOf(service)
 	}
-	if _, err := buildService(t, service, root, outputs); err != nil {
+	source := options.dir
+	if source == "" {
+		source = serviceDir(service)
+	}
+	for _, dep := range options.dependencies {
+		types := map[string]any{"types": map[string]any{"rust": map[string]any{"enabled": true}}}
+		if _, err := buildDir(t, registry.DefaultNaming(), dependencyDir(source, dep), root, types, nil); err != nil {
+			t.Fatalf("build %s, a dependency of %s: %v", dep, service, err)
+		}
+	}
+	if _, err := buildDir(t, registry.DefaultNaming(), source, root, outputs, nil); err != nil {
 		t.Fatalf("build %s: %v", service, err)
 	}
 	dir := topcoat.Dir(root, service)

@@ -37,37 +37,11 @@ const openAPISpec = `{
         },
         "type": "object"
       },
-      "ResponseLinks": {
-        "properties": {
-          "first": {
-            "nullable": true,
-            "type": "string"
-          },
-          "last": {
-            "nullable": true,
-            "type": "string"
-          },
-          "next": {
-            "nullable": true,
-            "type": "string"
-          },
-          "prev": {
-            "nullable": true,
-            "type": "string"
-          }
-        },
-        "type": "object"
-      },
       "ResponseMeta": {
         "properties": {
           "requestId": {
             "description": "Unique identifier for the request",
             "type": "string"
-          },
-          "totalCount": {
-            "description": "Total count of items for paginated responses",
-            "nullable": true,
-            "type": "integer"
           }
         },
         "required": [
@@ -154,9 +128,6 @@ const openAPISpec = `{
                     "data": {
                       "$ref": "#/components/schemas/TenantView"
                     },
-                    "links": {
-                      "$ref": "#/components/schemas/ResponseLinks"
-                    },
                     "meta": {
                       "$ref": "#/components/schemas/ResponseMeta"
                     }
@@ -227,9 +198,6 @@ const openAPISpec = `{
                   "properties": {
                     "data": {
                       "$ref": "#/components/schemas/TenantView"
-                    },
-                    "links": {
-                      "$ref": "#/components/schemas/ResponseLinks"
                     },
                     "meta": {
                       "$ref": "#/components/schemas/ResponseMeta"
@@ -333,9 +301,6 @@ const openAPISpec = `{
                       },
                       "type": "array"
                     },
-                    "links": {
-                      "$ref": "#/components/schemas/ResponseLinks"
-                    },
                     "meta": {
                       "$ref": "#/components/schemas/ResponseMeta"
                     }
@@ -414,9 +379,6 @@ const openAPISpec = `{
                   "properties": {
                     "data": {
                       "$ref": "#/components/schemas/TenantView"
-                    },
-                    "links": {
-                      "$ref": "#/components/schemas/ResponseLinks"
                     },
                     "meta": {
                       "$ref": "#/components/schemas/ResponseMeta"
@@ -507,9 +469,6 @@ const openAPISpec = `{
                   "properties": {
                     "data": {
                       "$ref": "#/components/schemas/TenantView"
-                    },
-                    "links": {
-                      "$ref": "#/components/schemas/ResponseLinks"
                     },
                     "meta": {
                       "$ref": "#/components/schemas/ResponseMeta"
@@ -607,9 +566,6 @@ const openAPISpec = `{
                   "properties": {
                     "data": {
                       "$ref": "#/components/schemas/TenantView"
-                    },
-                    "links": {
-                      "$ref": "#/components/schemas/ResponseLinks"
                     },
                     "meta": {
                       "$ref": "#/components/schemas/ResponseMeta"

@@ -13,12 +13,21 @@
 //! database, such as a Postgres one left in the shell, stops the app, and
 //! the error names its scheme alone, since the URL may hold a password.
 //! Without it both are in memory.
+//!
+//! The console's lists are live: with Topcoat's runtime in the browser, a
+//! filter, a page's links and its size render the list again in place. The
+//! runtime's script is a file of the asset bundle, which `topcoat asset
+//! bundle --bin acme-shop-topcoat` (Topcoat's CLI) writes beside the built
+//! binary, in `assets/`. Without a bundle there the app says so and serves
+//! the pages without the runtime: a filter, a page's links and its size
+//! load the page.
 
 use std::sync::Arc;
 
 use acme_shop_orders_server::sqlite::SqliteShop;
 use acme_shop_orders_server::{users_at, users_in_memory};
 use acme_shop_topcoat::{IDENTITY_CONFIG, Person, add_people, app, shop_in_memory, stock_sqlite};
+use topcoat::asset::{AssetBundle, AssetConfig};
 
 /// The demo shopper's email, name and password.
 const SHOPPER: Person = ("grace@example.com", "Grace Hopper", "grace's password");
@@ -28,6 +37,16 @@ const STAFF: Person = ("ada@example.com", "Ada Lovelace", "ada's password");
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let assets = match AssetBundle::load() {
+        Ok(bundle) => Some(AssetConfig::from(bundle)),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            println!(
+                "no asset bundle beside the binary (`topcoat asset bundle --bin acme-shop-topcoat` writes one): the console's lists load the page for each filter"
+            );
+            None
+        }
+        Err(err) => return Err(err.into()),
+    };
     let router = match std::env::var("DATABASE_URL") {
         Ok(url) => {
             let shop = SqliteShop::open(&url).map_err(|err| format!("DATABASE_URL: {err}"))?;
@@ -39,12 +58,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             add_people(&users, SHOPPER, STAFF).await?;
             stock_sqlite(&shop)?;
             println!("the shop is in {url}");
-            app(Arc::new(shop), users)
+            app(Arc::new(shop), users, assets)
         }
         Err(_) => {
             let users = users_in_memory(IDENTITY_CONFIG)?;
             add_people(&users, SHOPPER, STAFF).await?;
-            app(Arc::new(shop_in_memory()), users)
+            app(Arc::new(shop_in_memory()), users, assets)
         }
     };
     let listener = tokio::net::TcpListener::bind("127.0.0.1:3000").await?;

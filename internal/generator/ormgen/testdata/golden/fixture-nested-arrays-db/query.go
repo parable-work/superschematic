@@ -309,10 +309,29 @@ func (u *BoardUpdate) ApplyTo(row *types.Board) {
 	}
 }
 
-// buildWhereClause builds a WHERE clause from a BoardFilter
+// BoardFilterConditions are the filter's conditions for a query of
+// the caller's own, each column qualified by its table: each value is
+// appended to args, its placeholder numbered after those already there.
+// FindMany's WHERE is them joined by AND. A nil filter has none.
+func BoardFilterConditions(filter *BoardFilter, args *[]any) []string {
+	return filter.conditions(args, len(*args))
+}
+
+// buildWhereClause builds a WHERE clause from a BoardFilter: its
+// conditions joined by AND, or nothing when it has none.
 func (f *BoardFilter) buildWhereClause(args *[]interface{}, paramOffset int) string {
-	if f == nil {
+	conditions := f.conditions(args, paramOffset)
+	if len(conditions) == 0 {
 		return ""
+	}
+	return " WHERE " + strings.Join(conditions, " AND ")
+}
+
+// conditions are the filter's conditions, each value appended to args, its
+// placeholder numbered from paramOffset+1.
+func (f *BoardFilter) conditions(args *[]interface{}, paramOffset int) []string {
+	if f == nil {
+		return nil
 	}
 
 	var conditions []string
@@ -341,9 +360,5 @@ func (f *BoardFilter) buildWhereClause(args *[]interface{}, paramOffset int) str
 		}
 	}
 
-	if len(conditions) == 0 {
-		return ""
-	}
-
-	return " WHERE " + strings.Join(conditions, " AND ")
+	return conditions
 }
