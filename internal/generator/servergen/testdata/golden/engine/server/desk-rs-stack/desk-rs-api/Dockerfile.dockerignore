@@ -3,16 +3,13 @@
 # The build context of the Dockerfile beside this file, which BuildKit reads
 # from here: the repository root, cut down to what the image builds from.
 *
+!runtime/engine-workqueue/rust
 !runtime/engine/rust
 !runtime/http/rust
-!runtime/runtime/engine-workqueue/rust
-!runtime/runtime/schema/rust
-!runtime/runtime/schema/rust-ir
-!runtime/runtime/versiongraph/rust
-!runtime/runtime/versiongraph/rust-engine
 !runtime/schema/rust
-!runtime/third_party/superscalar/Cargo.toml
-!runtime/third_party/superscalar/crates
+!runtime/schema/rust-ir
+!runtime/versiongraph/rust
+!runtime/versiongraph/rust-engine
 !schemas/dist/Cargo.lock*
 !schemas/dist/Cargo.toml
 !schemas/dist/api/*/Cargo.toml
@@ -26,6 +23,7 @@
 !schemas/dist/server/desk-rs-stack/desk-rs-api
 !schemas/dist/types/rust
 !third_party/superscalar/Cargo.toml
+!third_party/superscalar/crates
 !third_party/superscalar/crates/core
 **/node_modules
 **/target

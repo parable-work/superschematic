@@ -320,8 +320,10 @@ func engineDockerIncludes(in RustInput, s *RustServer, workspace string, rel fun
 	if in.Paths.EngineRust == "" {
 		return nil, ""
 	}
+	// The engine's crate is <checkout>/runtime/engine/rust/engine, in the
+	// workspace beside it.
 	engineWorkspace := filepath.Dir(in.Paths.EngineRust)
-	checkout := filepath.Dir(filepath.Dir(engineWorkspace))
+	checkout := filepath.Dir(filepath.Dir(filepath.Dir(engineWorkspace)))
 	dir, ok := rel(engineWorkspace)
 	if !ok {
 		return nil, fmt.Sprintf("the engine's Cargo workspace %s lies outside the repository root, the build context", engineWorkspace)

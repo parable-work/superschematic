@@ -9,9 +9,9 @@
 //! @envVars settings and the fields its edges derive, one variable per
 //! member (section 3.4). It listens on $PORT, 8080 when unset, answers
 //! `GET /healthz` while the process runs and `GET /readyz` while its
-//! databases answer and its engines are open (D58), and on SIGTERM or SIGINT
-//! stops taking requests and lets those in flight finish. It logs one JSON
-//! object per line on stdout.
+//! databases answer and its engines are open (D58), and on SIGTERM or
+//! SIGINT stops taking requests and lets those in flight finish. It logs
+//! one JSON object per line on stdout.
 //!
 //! Each API's implementation is the crate at the naming file's
 //! `[implementation_paths] rust` template, which the build scaffolded once
@@ -303,6 +303,7 @@ impl Signals {
         }
     }
 }
+
 /// Serves `app` on `port` until SIGTERM or SIGINT. Then it answers /readyz
 /// 503, ends every event stream of the engines' routes (`stop_streams`),
 /// stops taking connections and gives the requests in flight
