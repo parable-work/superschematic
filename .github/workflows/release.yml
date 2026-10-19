@@ -565,14 +565,11 @@ jobs:
         # optional dependency at the release's version, of which npm
         # installs the one whose os, cpu and libc match the host, and its
         # loader requires it.
-        # The engine builds after the schema and http runtimes and the
-        # version graph, whose dist/ its link script copies, and the
-        # work-queue package after the engine, which its link script links.
-        # The engine depends on @superschematic/versiongraph through a file:
-        # path into the checkout, which an install from the tarball cannot
-        # follow, so once it is built its spec becomes the release's
-        # version, the version the version graph is published at beside it;
-        # no tarball may carry a file:, link: or workspace: spec. npm pack
+        # The engine builds after the http runtime, whose dist/ its link
+        # script copies, and the work-queue package after the engine, which
+        # its link script links. The engine is the Rust engine's addon (D58)
+        # and depends on no other package of the release at install time; no
+        # tarball may carry a file:, link: or workspace: spec. npm pack
         # writes superschematic-<name>-<version>.tgz for a scoped
         # @superschematic/<name>.
         env:
@@ -596,7 +593,7 @@ jobs:
           (cd runtime/http/typescript && bun install --frozen-lockfile && bun run build && npm pack --pack-destination "$GITHUB_WORKSPACE/release-assets/npm" >/dev/null)
           (cd runtime/versiongraph/typescript && bun install --frozen-lockfile && bun run build && npm pack --pack-destination "$GITHUB_WORKSPACE/release-assets/npm" >/dev/null)
           (cd runtime/engine/typescript && bun install --frozen-lockfile && bun run build \
-            && npm pkg set "dependencies.@superschematic/versiongraph=$VERSION" "${optional[@]}" \
+            && npm pkg set "${optional[@]}" \
             && npm pack --pack-destination "$GITHUB_WORKSPACE/release-assets/npm" >/dev/null)
           (cd runtime/engine-workqueue/typescript && bun install --frozen-lockfile && bun run build && npm pack --pack-destination "$GITHUB_WORKSPACE/release-assets/npm" >/dev/null)
           ls -l release-assets/npm
@@ -763,9 +760,8 @@ jobs:
         # name it in their docs, @superschematic/stack after it and
         # @superschematic/schema-config, its peers, @superschematic/schema-ir
         # before the schema runtime, which a consumer installs next to it,
-        # the engine after both, which it needs next to it, after the
-        # version graph, which it depends on at the release's version, and
-        # after its four addon packages, its optional dependencies at that
+        # the engine after both, which it needs next to it, and after its
+        # four addon packages, its optional dependencies at the release's
         # version, which an install that finds none skips, and the engine's
         # work-queue package last, after the engine, its peer; no other
         # package of the fifteen depends on another at install time.
