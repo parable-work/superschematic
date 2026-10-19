@@ -375,7 +375,23 @@ var parityInputs = []struct{ name, registry, input string }{
 	{"a display state that is no state name", "core", `{"name": "Ticket", "role": "EmbeddedStruct", "display": {"states": {"to do": {"label": "To do"}}}}`},
 	{"a display transition to no state name", "core", `{"name": "Ticket", "role": "EmbeddedStruct", "display": {"transitions": {"todo": {"in progress": "Start"}}}}`},
 	{"a display transition from a state that labels none", "core", `{"name": "Ticket", "role": "EmbeddedStruct", "display": {"transitions": {"todo": {}}}}`},
-	{"a display key the schema lacks", "core", `{"name": "Ticket", "role": "EmbeddedStruct", "display": {"icon": "ticket"}}`},
+	{"a display key the schema lacks", "core", `{"name": "Ticket", "role": "EmbeddedStruct", "display": {"colour": "red"}}`},
+	// A type's icon, a field's display and an enum member's title (D48,
+	// amended).
+	{"a display icon alone", "core", `{"name": "Ticket", "role": "EmbeddedStruct", "display": {"icon": "ticket"}}`},
+	{"a blank display icon", "core", `{"name": "Ticket", "role": "EmbeddedStruct", "display": {"icon": " "}}`},
+	{"a padded display icon", "core", `{"name": "Ticket", "role": "EmbeddedStruct", "display": {"icon": "ticket "}}`},
+	{"a field display", "core", `{"name": "Note", "role": "APIInput", "fields": [
+		{"name": "text", "typeRef": {"name": "String"}, "display": {"multiline": true}},
+		{"name": "code", "typeRef": {"name": "String"}, "display": {"multiline": false}}]}`},
+	{"a field display that declares nothing", "core", `{"name": "Note", "role": "APIInput", "fields": [{"name": "text", "typeRef": {"name": "String"}, "display": {}}]}`},
+	{"a field display multiline that is not a boolean", "core", `{"name": "Note", "role": "APIInput", "fields": [{"name": "text", "typeRef": {"name": "String"}, "display": {"multiline": "yes"}}]}`},
+	{"a field display key the schema lacks", "core", `{"name": "Note", "role": "APIInput", "fields": [{"name": "text", "typeRef": {"name": "String"}, "display": {"rows": 6}}]}`},
+	{"enum member titles in an enum file", "core", `{"kind": "Enum", "name": "OrderStatus", "values": [
+		{"name": "Placed", "serializedAs": "placed"}, {"name": "OnHold", "title": "Held for a stock check", "serializedAs": "on_hold"}]}`},
+	{"enum member titles in a document", "core", `{"kind": "DB", "name": "orders", "enums": {"OrderStatus": {"name": "OrderStatus", "values": [
+		{"name": "Fulfilled", "title": "Picked and packed", "comment": "Ready to ship."}, {"name": "Shipped"}]}}}`},
+	{"an enum member title that is not a string", "core", `{"kind": "Enum", "name": "OrderStatus", "values": [{"name": "OnHold", "title": 1}]}`},
 }
 
 // parityFiles are data-form files the JSON writer wrote for the loader's

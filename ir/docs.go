@@ -289,7 +289,9 @@ func checkOptionalText(name, value string) error {
 // validateDocs checks the documentation metadata of every field and
 // operation: each operation's @docs, @mcp and @icon, that @docs and @mcp
 // records sit on operations only, that a visible @mcp tool also has @docs,
-// and that a field's title, purpose and icon are not blank. It runs for
+// that a field's title, purpose and icon are not blank, and that a field
+// display declares something and sits on a field, not an operation (D48,
+// amended). An argument (ArgumentDef) has no display to carry. It runs for
 // every authoring form, so a data-form file is held to what the TypeScript
 // decorators enforce.
 func (s *Schema) validateDocs() []error {
@@ -313,6 +315,9 @@ func (s *Schema) validateDocs() []error {
 				if text.value != "" && strings.TrimSpace(text.value) == "" {
 					errs = append(errs, fmt.Errorf("%s.%s %s must be non-empty when provided", owner, f.Name, text.name))
 				}
+			}
+			if err := ValidateFieldDisplay(f.Display); err != nil {
+				errs = append(errs, fmt.Errorf("%s.%s has an invalid @display: %w", owner, f.Name, err))
 			}
 		}
 	}
@@ -342,6 +347,9 @@ func (s *Schema) validateDocs() []error {
 			}
 			if err := ValidateOperationMCP(op.MCP); err != nil {
 				errs = append(errs, fmt.Errorf("%s.%s has an invalid @mcp: %w", set.Name, op.Name, err))
+			}
+			if op.Display != nil {
+				errs = append(errs, fmt.Errorf("%s.%s carries a field display; only a field takes @display", set.Name, op.Name))
 			}
 			if op.MCP != nil && !op.MCP.Hidden && op.Docs == nil {
 				errs = append(errs, fmt.Errorf("%s.%s is a visible @mcp tool and must also declare @docs", set.Name, op.Name))

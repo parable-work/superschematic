@@ -58,7 +58,7 @@ func TestDisplayThroughTheCommands(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal([]byte(schemaOut), &def))
 	assert.Equal(t, 1, def.Defs.TypeDisplay.MinProperties)
-	assert.Len(t, def.Defs.TypeDisplay.Properties, 7)
+	assert.Len(t, def.Defs.TypeDisplay.Properties, 8)
 	assert.Equal(t, []string{"muted", "active", "success", "warning", "danger"}, def.Defs.DisplayState.Properties.Tone.Enum)
 
 	// A state the type's Workflow does not list fails the load.
