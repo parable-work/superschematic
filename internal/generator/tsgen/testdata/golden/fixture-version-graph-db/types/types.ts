@@ -253,7 +253,7 @@ export function makeStep(overrides?: Partial<Step>): Step {
 
 /**
  * Tasting - A tasting of the recipe. Its columns hold a value of every class a
-descriptor names.
+ * descriptor names.
  */
 export interface Tasting {
   id?: IdentityUUID | null;
@@ -299,7 +299,7 @@ export function makeTasting(overrides?: Partial<Tasting>): Tasting {
 
 /**
  * Utensil - A utensil the recipe needs, keyed by a plain UUID rather than an
-AutoGenerate one.
+ * AutoGenerate one.
  */
 export interface Utensil {
   id: IdentityUUID;

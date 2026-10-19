@@ -116,7 +116,7 @@ export class {{.Namespace.ClassName}} {
   {{- /* File upload endpoint: generate convenience method with File objects */}}
 
   /**
-   * {{if .Description}}{{.Description}}{{else}}{{.Name}} endpoint{{end}}
+   * {{if .Description}}{{jsdoc .Description "   * "}}{{else}}{{.Name}} endpoint{{end}}
    *
    * This is a convenience method that accepts File objects for file uploads.
    * The SDK automatically constructs the multipart/form-data request.
@@ -194,7 +194,7 @@ export class {{.Namespace.ClassName}} {
   }
 
   /**
-   * {{if .Description}}{{.Description}}{{else}}{{.Name}} endpoint{{end}}
+   * {{if .Description}}{{jsdoc .Description "   * "}}{{else}}{{.Name}} endpoint{{end}}
    *
    * Raw method for advanced use cases. You construct the FormData yourself.
    * The FormData should contain:
@@ -254,7 +254,7 @@ export class {{.Namespace.ClassName}} {
   {{- /* Standard endpoint (no file upload) */}}
 
   /**
-   * {{if .Description}}{{.Description}}{{else}}{{.Name}} endpoint{{end}}
+   * {{if .Description}}{{jsdoc .Description "   * "}}{{else}}{{.Name}} endpoint{{end}}
    {{- if .RequiresAuth}}
    * @requires Authentication
    {{- end}}
@@ -280,14 +280,14 @@ export class {{.Namespace.ClassName}} {
    {{- if .Filterable}}
    * @param filters - Optional bracket-notation filters (filter[field]=value)
    {{- end}}
-  {{- if has_encrypted_body .Method .Encrypted}}
-  * @param options - Optional encrypted request options
-  * @param options.publicEncryptionKey - Optional per-request public encryption key override
-  * @param options.signal - Optional AbortSignal for request cancellation
-  * @param options.forward - Optional end user to forward, such as a server's RequestContext
-  {{- else}}
-  * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
-  {{- end}}
+   {{- if has_encrypted_body .Method .Encrypted}}
+   * @param options - Optional encrypted request options
+   * @param options.publicEncryptionKey - Optional per-request public encryption key override
+   * @param options.signal - Optional AbortSignal for request cancellation
+   * @param options.forward - Optional end user to forward, such as a server's RequestContext
+   {{- else}}
+   * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
+   {{- end}}
    {{- if .Page}}
    * @returns One page of {{type_ref .OutputType}}: its items and next, null after the last page; {{.AllName}} yields every item
    {{- else}}

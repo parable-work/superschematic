@@ -6,7 +6,7 @@ import type {
 
 /**
  * Drawing - A drawing made of lists of lists: grid rows of cells, polygons as lists
-of points and batches of sample vectors.
+ * of points and batches of sample vectors.
  */
 export interface Drawing {
   /** Cell labels, one inner list per grid row. */

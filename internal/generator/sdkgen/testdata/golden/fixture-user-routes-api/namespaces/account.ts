@@ -33,7 +33,7 @@ export class AccountNamespace {
   /**
    * For each operation of the API an end user may call, keyed by its OpenAPI operation id, whether its route admits the caller.
    * @requires Authentication
-  * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
+   * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
    * @returns Capabilities
    * @throws {ValidationError} if input validation fails
    * @throws {ApiError} if the API request fails
@@ -53,7 +53,7 @@ export class AccountNamespace {
   /**
    * Signs a user in with their login and password and starts a session. A bearer session answers its token; a cookie session sets the session cookie and answers none.
    * @param input - Request payload
-  * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
+   * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
    * @returns LoginResult
    * @throws {ValidationError} if input validation fails
    * @throws {ApiError} if the API request fails
@@ -83,7 +83,7 @@ export class AccountNamespace {
   /**
    * Ends the caller's session and clears the session cookie. It answers true.
    * @requires Authentication
-  * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
+   * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
    * @returns boolean
    * @throws {ValidationError} if input validation fails
    * @throws {ApiError} if the API request fails
@@ -104,7 +104,7 @@ export class AccountNamespace {
   /**
    * The caller's user, the roles they hold and the permissions those roles grant.
    * @requires Authentication
-  * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
+   * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
    * @returns CurrentUser
    * @throws {ValidationError} if input validation fails
    * @throws {ApiError} if the API request fails
@@ -125,7 +125,7 @@ export class AccountNamespace {
    * Changes the caller's password, given their current one, and ends their other sessions. It answers true.
    * @requires Authentication
    * @param input - Request payload
-  * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
+   * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
    * @returns boolean
    * @throws {ValidationError} if input validation fails
    * @throws {ApiError} if the API request fails
@@ -155,7 +155,7 @@ export class AccountNamespace {
   /**
    * Creates a user with the login, name and password given and signs them in, as login does.
    * @param input - Request payload
-  * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
+   * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
    * @returns LoginResult
    * @throws {ValidationError} if input validation fails
    * @throws {ApiError} if the API request fails

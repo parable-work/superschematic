@@ -1099,6 +1099,6 @@ func templateFuncs() template.FuncMap {
 		"sub":          func(a, b int) int { return a - b },
 		// jsdoc keeps text from ending the JSDoc comment it goes in: a
 		// schedule such as */15 would.
-		"jsdoc": func(s string) string { return strings.ReplaceAll(s, "*/", "*\\/") },
+		"jsdoc": codegen.JSDocEscape,
 	}
 }

@@ -22,7 +22,7 @@ export class SessionNamespace {
   /**
    * currentTenant endpoint
    * @requires Authentication
-  * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
+   * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
    * @returns TenantView
    * @throws {ValidationError} if input validation fails
    * @throws {ApiError} if the API request fails

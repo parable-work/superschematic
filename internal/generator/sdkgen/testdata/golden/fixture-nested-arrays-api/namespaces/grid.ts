@@ -27,7 +27,7 @@ export class GridNamespace {
   /**
    * Store a grid from a request body.
    * @param input - Request payload
-  * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
+   * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
    * @returns GridView
    * @throws {ValidationError} if input validation fails
    * @throws {ApiError} if the API request fails
@@ -57,7 +57,7 @@ export class GridNamespace {
   /**
    * getGrid endpoint
    * @param id - id parameter
-  * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
+   * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
    * @returns GridView
    * @throws {ValidationError} if input validation fails
    * @throws {ApiError} if the API request fails
@@ -79,7 +79,7 @@ export class GridNamespace {
    * One grid's labels as a bare list of lists, at most `limit` rows.
    * @param id - id parameter
    * @param params - Optional query parameters
-  * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
+   * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
    * @returns Array of arrays of string
    * @throws {ValidationError} if input validation fails
    * @throws {ApiError} if the API request fails
@@ -102,7 +102,7 @@ export class GridNamespace {
    * Replace a grid's labels; the body argument is a list of lists.
    * @param id - id parameter
    * @param labels - labels argument
-  * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
+   * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
    * @returns GridView
    * @throws {ValidationError} if input validation fails
    * @throws {ApiError} if the API request fails
