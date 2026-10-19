@@ -111,6 +111,7 @@ func project(t *testing.T, reg *registry.Registry, withPaths bool) (string, proj
 			EngineBehaviorsRust: filepath.Join(root, "runtime", "engine", "rust", "behaviors"),
 			EngineWorkQueueRust: filepath.Join(root, "runtime", "engine-workqueue", "rust"),
 			EngineABIRust:       filepath.Join(root, "runtime", "engine", "rust", "abi"),
+			EngineNapiRust:      filepath.Join(root, "runtime", "engine", "rust", "napi"),
 		}
 	}
 	return root, opts
@@ -167,7 +168,8 @@ func checkGoldens(t *testing.T, name string, crate *projectengine.Crate) map[str
 // composed extension behavior by its expression, by name, after the core's
 // and the work queue's, under the binary's tool options; its ffi member,
 // a member of the crate's workspace, exports the C ABI over behaviors(),
-// with the C ABI's library at its [paths] checkout. Point, which composes
+// with the C ABI's library at its [paths] checkout, and its napi member
+// the Node-API addon, with the addon's library at its own. Point, which composes
 // none, adds nothing; acme.Pin, which no type composes, needs no crate.
 func TestBuildAssemblesTheCoreTheWorkQueueAndTheExtensionsCrates(t *testing.T) {
 	reg := extensions(t)
@@ -185,7 +187,7 @@ func TestBuildAssemblesTheCoreTheWorkQueueAndTheExtensionsCrates(t *testing.T) {
 		`superschematic-engine-workqueue = { path = "../../../../../runtime/engine-workqueue/rust", default-features = false }`,
 		`acme-behaviors = { path = "../../../../../crates/behaviors" }`,
 		`desk-triage = { path = "../../../../../vendor/desk" }`,
-		"[workspace]\nresolver = \"2\"\nmembers = [\"ffi\"]",
+		"[workspace]\nresolver = \"2\"\nmembers = [\"ffi\", \"napi\"]",
 	} {
 		if !strings.Contains(string(files[projectengine.ManifestFile]), want+"\n") {
 			t.Errorf("Cargo.toml lacks %s", want)
@@ -204,8 +206,26 @@ func TestBuildAssemblesTheCoreTheWorkQueueAndTheExtensionsCrates(t *testing.T) {
 	if want := "\nuse schemas_shop_engine as project;\n\nsuperschematic_engine_abi::export_engine_c_abi!(behaviors = project::behaviors);\n"; !strings.Contains(string(files[projectengine.FFILibFile]), want) {
 		t.Errorf("ffi/src/lib.rs exports no C ABI over the crate's behaviors:\n%s", files[projectengine.FFILibFile])
 	}
-	rustfmtCheck(t, files[projectengine.LibFile])
-	rustfmtCheck(t, files[projectengine.FFILibFile])
+	for _, want := range []string{
+		`name = "schemas-shop-engine-napi"`,
+		`crate-type = ["cdylib"]`,
+		`schemas-shop-engine = { path = "..", default-features = false }`,
+		`superschematic-engine-napi = { path = "../../../../../../runtime/engine/rust/napi", default-features = false }`,
+		`napi-build = "=2.5.0"`,
+	} {
+		if !strings.Contains(string(files[projectengine.NapiManifestFile]), want+"\n") {
+			t.Errorf("napi/Cargo.toml lacks %s", want)
+		}
+	}
+	if want := "\nuse schemas_shop_engine as project;\n\nsuperschematic_engine_napi::export_engine_napi!(behaviors = project::behaviors);\n"; !strings.Contains(string(files[projectengine.NapiLibFile]), want) {
+		t.Errorf("napi/src/lib.rs exports no addon over the crate's behaviors:\n%s", files[projectengine.NapiLibFile])
+	}
+	if !strings.Contains(string(files[projectengine.NapiBuildFile]), "\n    napi_build::setup();\n") {
+		t.Errorf("napi/build.rs runs no napi_build::setup():\n%s", files[projectengine.NapiBuildFile])
+	}
+	for _, file := range []string{projectengine.LibFile, projectengine.FFILibFile, projectengine.NapiLibFile, projectengine.NapiBuildFile} {
+		rustfmtCheck(t, files[file])
+	}
 }
 
 // A General schema the engine runs as it is written composes acme.Rating
@@ -225,8 +245,12 @@ func TestBuildOfAGeneralSchemaNamesTheEnginesVersionWithoutPaths(t *testing.T) {
 	if !strings.Contains(string(files[projectengine.FFIManifestFile]), "\nsuperschematic-engine-abi = { version = \"0.0.0\", default-features = false }\n") {
 		t.Errorf("ffi/Cargo.toml names no C ABI version:\n%s", files[projectengine.FFIManifestFile])
 	}
-	rustfmtCheck(t, files[projectengine.LibFile])
-	rustfmtCheck(t, files[projectengine.FFILibFile])
+	if !strings.Contains(string(files[projectengine.NapiManifestFile]), "\nsuperschematic-engine-napi = { version = \"0.0.0\", default-features = false }\n") {
+		t.Errorf("napi/Cargo.toml names no addon version:\n%s", files[projectengine.NapiManifestFile])
+	}
+	for _, file := range []string{projectengine.LibFile, projectengine.FFILibFile, projectengine.NapiLibFile, projectengine.NapiBuildFile} {
+		rustfmtCheck(t, files[file])
+	}
 }
 
 // No crate when the schema composes the core's behaviors alone, which the
@@ -270,9 +294,9 @@ func TestBuildWritesNoCrateItDoesNotNeedOrCannotWrite(t *testing.T) {
 	}
 }
 
-// Write puts the crate and its ffi member in its directory, replacing the
-// sources an earlier build wrote; RemoveStale takes away a crate a build
-// wrote, its member with it, and the directories
+// Write puts the crate and its ffi and napi members in its directory,
+// replacing the sources an earlier build wrote; RemoveStale takes away a
+// crate a build wrote, its members with it, and the directories
 // it leaves empty up to the output root, and leaves a directory whose
 // Cargo.toml a build did not write.
 func TestWriteAndRemoveStale(t *testing.T) {
@@ -280,7 +304,7 @@ func TestWriteAndRemoveStale(t *testing.T) {
 	root, opts := project(t, reg, true)
 	crate := build(t, schema(ir.SchemaKindGeneral, []string{"acme.Rating"}, nil), opts)
 	var stale []string
-	for _, src := range []string{"src", "ffi/src"} {
+	for _, src := range []string{"src", "ffi/src", "napi/src"} {
 		path := filepath.Join(opts.Dir, filepath.FromSlash(src), "stale.rs")
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			t.Fatal(err)
@@ -298,7 +322,7 @@ func TestWriteAndRemoveStale(t *testing.T) {
 			t.Errorf("Write left %s: %v", path, err)
 		}
 	}
-	for _, file := range []string{projectengine.ManifestFile, projectengine.LibFile, projectengine.FFIManifestFile, projectengine.FFILibFile} {
+	for _, file := range []string{projectengine.ManifestFile, projectengine.LibFile, projectengine.FFIManifestFile, projectengine.FFILibFile, projectengine.NapiManifestFile, projectengine.NapiLibFile, projectengine.NapiBuildFile} {
 		if _, err := os.Stat(filepath.Join(opts.Dir, filepath.FromSlash(file))); err != nil {
 			t.Error(err)
 		}

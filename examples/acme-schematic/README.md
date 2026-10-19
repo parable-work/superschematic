@@ -841,24 +841,32 @@ options (`tools()`): the library a Rust server links. Its workspace's
 member `ffi/`, `acme-<service>-engine-ffi`, is the engine's C ABI over
 those behaviors, the archive a Go server links in place of the core's
 (`scripts/engine-archive.sh --crate dist/engine/rust/<service>/ffi --out
-<dir>`, at the checkout's root), at the naming file's `engine_abi_rust`.
+<dir>`, at the checkout's root), at the naming file's `engine_abi_rust`,
+and its member `napi/`, `acme-<service>-engine-napi`, the engine's
+Node-API addon over them, which a TypeScript server loads in place of the
+core's (`scripts/engine-napi.sh --crate dist/engine/rust/<service>/napi
+--out <dir>`, then `SUPERSCHEMATIC_ENGINE_ADDON` or the engine option
+`addon` names the file it prints), at the naming file's
+`engine_napi_rust`.
 `ext/testdata/golden/shop-ratings-engine` holds the crate for
 `shop-ratings` (`TestRatingProjectEngine`). The smoke's step 21 lints and
 tests the crate, builds `shop-ratings` as a service of this project (a
 copy under `schemas/dist`, since its own directory sits outside
 `schemas/`), and lints and tests the engine crate the binary writes,
-both members: the library's test opens the engine on SQLite and finds
-acme.Rating registered, and the archive's opens one through its own
-`eng_open`, as the Go binding does, and finds it too. CI's acme job runs
-the crate's tests on Postgres as well.
+its members with it: the library's test opens the engine on SQLite and
+finds acme.Rating registered, and the archive's opens one through its own
+`eng_open`, as the Go binding does, and finds it too. It then builds the
+addon and runs `packages/behaviors`' TypeScript cases on it under Node.js
+and Bun, through `openEngineAsync`, as a TypeScript server opens the
+engine: acme.Rating runs in Rust. CI's acme job runs the crate's tests on
+Postgres as well.
 
 `packages/behaviors` stays beside the crate while `@superschematic/engine`
 is the TypeScript implementation: the TypeScript engine runs acme.Rating
 from it, and the smoke's step 20 tests it. The cutover to the Rust engine
 (D58, milestone 14) removes the package, its declaration copy and step
 20; a TypeScript server then loads the project's own Node-API addon, the
-engine crate's `napi/` member, once the addon exports
-`export_engine_napi!`.
+engine crate's `napi/` member, as step 21 does.
 
 ## A command
 

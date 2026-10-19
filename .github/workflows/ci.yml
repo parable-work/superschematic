@@ -951,9 +951,10 @@ jobs:
         run: cargo test --workspace --all-features
 
   engine-napi:
-    # The engine's TypeScript suite on the Rust engine (D58): the Node-API
-    # addon (runtime/engine/rust/napi) built as scripts/engine-napi.sh builds
-    # it, then every test file run on its own with ENGINE_IMPL=rust under
+    # The engine's TypeScript suite on the Rust engine (D58): the core's
+    # Node-API addon (runtime/engine/rust/addon, export_engine_napi! from
+    # runtime/engine/rust/napi) built as scripts/engine-napi.sh builds it,
+    # then every test file run on its own with ENGINE_IMPL=rust under
     # Node.js and Bun and held to runtime/engine/typescript/test/rust-pending.txt
     # (scripts/rust-ratchet.mjs, the command a person runs too): a failing
     # file not on the list fails the job, and so does a listed file that

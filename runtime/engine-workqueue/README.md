@@ -117,8 +117,8 @@ case runs. The test kit's replay holds them to this suite's recording,
 Postgres (three more write the file with SQL of their own), each giving
 the recorded answers.
 
-The engine's Node-API addon (`runtime/engine/rust/napi`) is built with
-this crate: an engine opened through it registers, after the core's, the
+The engine's core Node-API addon (`runtime/engine/rust/addon`, over
+`runtime/engine/rust/napi`) is built with this crate: an engine opened through it registers, after the core's, the
 ones its options' `behaviors` name. With `ENGINE_IMPL=rust`,
 `typescript/test/helpers.ts` opens the Rust engine in place of the
 TypeScript one, passing each of this package's own objects by its

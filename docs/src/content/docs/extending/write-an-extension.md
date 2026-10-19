@@ -978,13 +978,16 @@ one, then yours; `tools()` carries your binary's invocation policy and
 vendor keys, under which an operation that names your policy's value
 registers. A Rust server links that crate; a Go server links its
 workspace's `ffi` member, the engine's C ABI over the same `behaviors()`,
-as a static archive in place of the core's
+as a static archive in place of the core's, and a TypeScript server loads
+its `napi` member, the engine's Node-API addon over them, in place of the
+core's addon
 ([The project's engine crate](/superschematic/guides/engine-behaviors/#the-projects-engine-crate)).
 A behavior whose registration names no crate gets no project engine: the
 TypeScript engine runs it, and the build's log says so. acme's
 `crates/behaviors` is the example: its tests port `rating.test.ts` to
 SQLite and Postgres, and the smoke builds and tests the engine crate the
-acme binary writes for `shop-ratings`, its archive with it. Until the
+acme binary writes for `shop-ratings`, its archive with it, and runs the
+TypeScript rating cases on its addon. Until the
 TypeScript engine gives way to the Rust one, keep the TypeScript
 implementation beside the crate: acme's `packages/behaviors` stays until
 then.

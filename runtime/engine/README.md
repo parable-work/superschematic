@@ -71,11 +71,15 @@ and of the work queue's tests against the Rust engine, and replays the
 scenario corpus (`testdata/scenarios`, the work queue's files included)
 and the HTTP corpus (`testdata/http`) through the engine's calls and
 routes, and the HTTP corpus through its axum router too, all on both
-databases. `superschematic-engine-napi` (`rust/napi`) is the Rust engine
-as a Node-API addon, which this package's test suite and the work queue's
-run on with `ENGINE_IMPL=rust`, and which `openEngineAsync` opens for a
-server on Postgres ("The Rust engine through its Node-API addon", under
-Development). `superschematic-engine-abi` (`rust/abi`) is
+databases. `superschematic-engine-napi` (`rust/napi`) is the Rust engine's
+Node-API addon as a library, with `export_engine_napi!`, which an addon
+crate expands over its behaviors, and `superschematic-engine-addon`
+(`rust/addon`) the core's addon, over the core's behaviors and the work
+queue's, which this package's test suite and the work queue's run on with
+`ENGINE_IMPL=rust`, which `openEngineAsync` opens for a server on
+Postgres, and which a release ships prebuilt as
+`@superschematic/engine-<target>` ("The Rust engine through its Node-API
+addon", under Development). `superschematic-engine-abi` (`rust/abi`) is
 the engine's C ABI as a library, and `superschematic-engine-ffi`
 (`rust/ffi`) the core's archive of it, which `go/`, the Go binding, links
 as the static archive `libsuperschematic_engine.a`, and whose HTTP mount,
@@ -5124,19 +5128,77 @@ binary.
 
 ### The Rust engine through its Node-API addon
 
-`rust/napi` builds the Rust engine as a Node-API addon, which Node.js and
-Bun load. It registers the core's behaviors that `core()` returned when it
-was built, then the work queue's an engine's options name.
+`rust/napi` (`superschematic-engine-napi`) is the Rust engine's Node-API
+addon as a library: what an addon does, and `export_engine_napi!`, which
+a cdylib crate expands once over the behaviors it is built with into the
+exports Node.js and Bun load, the twin of the C ABI's
+`export_engine_c_abi!`:
+
+```rust
+fn behaviors() -> superschematic_engine_napi::BehaviorSet {
+    superschematic_engine_behaviors::core().with(acme_behaviors::Rating)
+}
+superschematic_engine_napi::export_engine_napi!(behaviors = behaviors);
+```
+
+An engine registers the core's of those behaviors when it opens, then
+each other one its options' `behaviors` name, in their order; a name the
+addon is not built with is refused, naming the ones it has. The library
+exports nothing itself, so a crate that expands the macro depends on no
+other addon crate. `rust/addon` (`superschematic-engine-addon`) is the
+core's addon, over the core's behaviors and the work queue's. A project
+whose schemas compose an extension's behaviors builds its own from the
+`napi/` member of the engine crate the `projectengine` generator writes
+(`engine/rust/<schema>/napi`, over that crate's `behaviors()`), and an
+engine opens on it when the host names its file: the engine option
+`addon` (`openEngineAsync({ ..., addon })`), or
+`SUPERSCHEMATIC_ENGINE_ADDON` for every engine the process opens that
+names none. A named file that does not load is refused; no other addon is
+tried in its place. Otherwise the loader (`src/native/addon.ts`) takes the
+checkout's `typescript/native/`, then the platform package.
+
 `scripts/engine-napi.sh` (at the repository's root; `bun run build:napi`
-here) builds it for this host into `typescript/native/`, which git
-ignores, as `superschematic-engine.<triple>.node`; `--debug` builds it
-quicker and slower to run, and `--js-behaviors` builds the test addon,
+here) builds the core's addon for this host into `typescript/native/`,
+which git ignores, as `superschematic-engine.<triple>.node`, and prints
+the file's path; `--debug` builds it quicker and slower to run, `--dist`
+with the release's profile, and `--js-behaviors` builds the test addon,
 with the bridge to behaviors written in TypeScript (the `js-behaviors`
-cargo feature, which no shipped addon has). It needs the superscalar checkout
-(`scripts/superscalar-dep.sh --checkout`), and builds with the toolchain
-`tools.env` pins, `--locked` to `rust/Cargo.lock`. Rebuild it after a
-change to the Rust engine, or after merging one that ports more
-behaviors.
+cargo feature, which no shipped addon has: only the test addon exports
+`bridgeCall`). `--crate <dir> [--out <dir>]` builds a project's addon
+crate instead, into `--out` (the crate's `native/` unless given), never
+this package's `native/`:
+
+```
+export SUPERSCHEMATIC_ENGINE_ADDON="$(scripts/engine-napi.sh --crate dist/engine/rust/shop-ratings/napi --out /tmp/shop-addon)"
+```
+
+It needs the superscalar checkout (`scripts/superscalar-dep.sh
+--checkout`), and builds with the toolchain `tools.env` pins: a crate of
+this workspace `--locked` to `rust/Cargo.lock`, a project's crate against
+the lock file its workspace resolves (the generated crate commits none).
+napi 3.13.0, napi-derive 3.6.9 and napi-build 2.5.0 are pinned exactly,
+as superscalar pins them, and napi-derive-backend at 6.1.4, which a fresh
+resolve would move past to a release napi-derive 3.6.9 does not compile
+with: `rust/napi/Cargo.toml` holds it as a build-dependency with no build
+script, so every workspace that builds an addon over the library resolves
+it so. Rebuild the addon after a change to the Rust engine, or after
+merging one that ports more behaviors.
+
+A release ships the core's addon prebuilt, one npm package per target,
+napi-rs's per-platform layout: `@superschematic/engine-darwin-arm64`,
+`-darwin-x64`, `-linux-x64-gnu` and `-linux-arm64-gnu`
+(`typescript/npm/<target>/package.json`, with the `os`, `cpu` and, on
+Linux, `libc` npm installs it by, and the `.node`), which
+`@superschematic/engine` names as optional dependencies at the release's
+version, so an install gets the one for its host. The release's
+`build-archives` job builds each on its platform's runner with
+`scripts/release-engine-addon.sh`, which builds it with the `dist`
+profile (`rust/Cargo.toml`: fat LTO, one codegen unit, symbols stripped),
+loads it, checks it is the core's, speaks this facade's contract, has no
+bridge and opens an engine on SQLite, and packs it; on Linux it logs the
+newest glibc symbol version the addon needs, which the runner's glibc
+sets. A Docker image builds the addon from source, as a project's is.
+`scripts/bump_version.py` keeps the packages' versions with the rest.
 
 `src/native/` is the TypeScript over it, in two shapes:
 
@@ -5167,9 +5229,10 @@ Branches draws, come from `crypto.randomUUID`, as on this package's
 engine). A clock function is read once for each call that may use the
 time, and for each request `engineApp` serves, and sets the Rust engine's
 manual clock. `behaviors` takes the name of a behavior the addon is built
-with beyond the core's, the work queue's (`Lease`, `Assignment`, `Queue`,
-`Presence`, `Blueprint`, `Budget`, `Retries`), which it registers in Rust
-after the core's, in the order given; a behavior object is TypeScript
+with beyond the core's, the core addon's the work queue's (`Lease`,
+`Assignment`, `Queue`, `Presence`, `Blueprint`, `Budget`, `Retries`) and
+a project's its extensions' too, which it registers in Rust after the
+core's, in the order given; a behavior object is TypeScript
 code to run, even one whose declaration names a behavior the addon has (a
 test's stand-in, or a wrapper of `@superschematic/engine-workqueue`'s own
 that counts its calls), and a host with the work queue's objects passes
@@ -5183,7 +5246,7 @@ hooks, its context's methods back into the engine, its SQL through the
 engine's checker, its errors and vetoes. An engine that asks TypeScript
 anything is hosted: it is called on the JavaScript thread alone, and its
 runner runs on the event loop, woken by `events.watch`. The shipped addon
-refuses such a behavior. Beside the bridge, on either addon:
+refuses such a behavior. Beside the bridge, on any addon:
 
 - `engine.storage` is raw SQL on the engine's SQLite file, and a
   `storage.transaction` the engine's calls run inside;

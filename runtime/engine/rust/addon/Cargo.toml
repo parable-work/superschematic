@@ -1,0 +1,47 @@
+[package]
+name = "superschematic-engine-addon"
+description = "The core's Node-API addon (D58): export_engine_napi! over the core's behaviors and the work queue's, which @superschematic/engine loads and the release ships as @superschematic/engine-<target>"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lib]
+name = "superschematic_engine_addon"
+# The addon `napi build` writes into runtime/engine/typescript/native
+# (scripts/engine-napi.sh). Its Node-API symbols resolve only when Node.js
+# or Bun loads it, so it has no Rust tests: a test binary would not link.
+# The TypeScript suite tests it (ENGINE_IMPL=rust).
+crate-type = ["cdylib"]
+path = "src/lib.rs"
+test = false
+doctest = false
+
+[features]
+# Both databases by default, as the engine has them.
+default = ["sqlite", "postgres"]
+sqlite = ["superschematic-engine-napi/sqlite", "superschematic-engine-behaviors/sqlite", "superschematic-engine-workqueue/sqlite"]
+postgres = ["superschematic-engine-napi/postgres", "superschematic-engine-behaviors/postgres", "superschematic-engine-workqueue/postgres"]
+# The test addon's bridge to behaviors written in TypeScript
+# (superschematic-engine-napi's feature): scripts/engine-napi.sh
+# --js-behaviors. Never in a shipped addon.
+js-behaviors = ["superschematic-engine-napi/js-behaviors"]
+
+[dependencies]
+# The addon's implementation and export_engine_napi!, which this crate
+# expands once.
+superschematic-engine-napi = { path = "../napi", default-features = false }
+# The core's behaviors, which an engine registers when it opens.
+superschematic-engine-behaviors = { path = "../behaviors", default-features = false }
+# The work queue's behaviors, which an engine registers after the core's
+# when its options name them (behaviors), as a deployment registers
+# @superschematic/engine-workqueue's.
+superschematic-engine-workqueue = { path = "../../../engine-workqueue/rust", default-features = false }
+
+[build-dependencies]
+napi-build = "=2.5.0"
+
+[lints]
+workspace = true

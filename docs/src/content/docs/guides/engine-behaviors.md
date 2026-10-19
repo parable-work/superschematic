@@ -403,9 +403,33 @@ scripts/engine-archive.sh --crate dist/engine/rust/shop-ratings/ffi --out dist/e
 CGO_LDFLAGS="-L$PWD/dist/engine/lib ..." go build ./...
 ```
 
-A TypeScript server's addon will be the workspace's next member, `napi/`,
-once the Node-API addon exports `export_engine_napi!`; until then the
-TypeScript engine runs an extension's TypeScript implementation.
+A TypeScript host loads the engine as a Node-API addon, and the crate's
+workspace holds one as its member `napi/` (`<crate>-napi`), the addon
+over `behaviors()`:
+
+```rust
+use acme_shop_ratings_engine as project;
+
+superschematic_engine_napi::export_engine_napi!(behaviors = project::behaviors);
+```
+
+It depends on the addon's library at `[paths] engine_napi_rust`. Build
+it, and name the file it prints when the engine opens, with the engine
+option `addon` or, for every engine the process opens,
+`SUPERSCHEMATIC_ENGINE_ADDON`; the engine's `behaviors` name the
+extension's, which it registers after the core's, and `tools` passes the
+engine document's:
+
+```sh
+export SUPERSCHEMATIC_ENGINE_ADDON="$(scripts/engine-napi.sh --crate dist/engine/rust/shop-ratings/napi --out dist/engine/addon)"
+```
+
+```ts
+const engine = await openEngineAsync({ postgres: { url }, policy: 'permission', behaviors: ['acme.Rating'], tools, metaSchema });
+```
+
+Until the cutover (D58, milestone 14), `openEngine` is still the
+TypeScript engine, which runs an extension's TypeScript implementation.
 
 A schema whose types compose the core's behaviors alone gets no crate,
 since the engine's release carries them, and one that composes an

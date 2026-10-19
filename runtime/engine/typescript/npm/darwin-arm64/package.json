@@ -1,0 +1,24 @@
+{
+  "name": "@superschematic/engine-darwin-arm64",
+  "version": "0.0.0",
+  "description": "The Rust engine's Node-API addon for aarch64-apple-darwin (D58), which @superschematic/engine loads on this platform: the engine with the core's behaviors and the work queue's, built by the release from runtime/engine/rust/addon. Install @superschematic/engine, whose optional dependencies name it.",
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "main": "superschematic-engine.darwin-arm64.node",
+  "files": [
+    "superschematic-engine.darwin-arm64.node"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/parable-work/superschematic",
+    "directory": "runtime/engine/typescript/npm/darwin-arm64"
+  }
+}

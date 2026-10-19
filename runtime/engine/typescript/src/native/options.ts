@@ -8,10 +8,11 @@ than hasAnyPermission, stays TypeScript: the addon asks it on this thread
 during a synchronous call (hosted, src/native/engine.ts). A clock
 function sets a manual clock before each call. The addon registers the
 core's behaviors, then the ones behaviors names that it is built with
-(the work queue's: Lease, Assignment, Queue, Presence, Blueprint, Budget
-and Retries), in that order, then the ones written in TypeScript. A
-behavior named by a string is the Rust one the addon is built with; an
-implementation object runs its TypeScript code, even one whose
+(the core's addon: the work queue's, Lease, Assignment, Queue, Presence,
+Blueprint, Budget and Retries; a project's addon, which the option addon
+names: its extensions' too), in that order, then the ones written in
+TypeScript. A behavior named by a string is the Rust one the addon is
+built with; an implementation object runs its TypeScript code, even one whose
 declaration names a behavior the addon has (a test's stand-in, or a
 wrapper of @superschematic/engine-workqueue's own): the test addon's
 bridge runs it on this thread (src/native/bridge.ts), and the shipped
@@ -55,6 +56,13 @@ export type NativeEngineOptions = Omit<EngineOptions, 'path' | 'policy' | 'behav
   behaviors?: readonly (string | AnyBehaviorImplementation)[];
   /** A schema of a Postgres database, in place of path; the engine is then called through callAsync. */
   postgres?: NativePostgresOptions;
+  /**
+   * The addon to open the engine on, a .node file, in place of the core's:
+   * a project's, built over its own behaviors by its engine crate's napi/
+   * member (scripts/engine-napi.sh --crate). SUPERSCHEMATIC_ENGINE_ADDON
+   * names one for every engine that names none.
+   */
+  addon?: string;
   /** The TypeScript engine's policies, or the Rust engine's own: "allowAll", "permission", { rules }. */
   policy: EngineOptions['policy'] | 'allowAll' | 'permission' | { rules: unknown[] };
 };
@@ -88,6 +96,12 @@ export function nativeOptions(options: NativeEngineOptions): ResolvedNativeOptio
     switch (key) {
       case 'driver':
         // The Rust engine has one SQLite of its own.
+        break;
+      case 'addon':
+        // Which addon opens the engine (src/native/addon.ts), not an option of its.
+        if (typeof value !== 'string' || value === '') {
+          throw new TypeError('addon is the path of a Node-API addon (.node)');
+        }
         break;
       case 'policy':
         if (typeof value === 'function' && value !== allowAll && !isEnginePermissionPolicy(value as AccessPolicy)) {
