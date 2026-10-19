@@ -4418,10 +4418,11 @@ the release's Dockerfile and pins, whose golden is
 release page and runs the image. A clean `golang` container, with a
 project of no `[paths]`, built both servers with the archives step's
 commands, the runtime modules coming from the module proxy at a commit.
-Not built: `stack dev`, and a local `go build` in such a project, still
-need `CGO_LDFLAGS` set by hand. D47's next amendment pins the other Go
-generators' modules, which required the runtime modules at the zero
-pseudo-version.
+D47's next amendment pins the other Go generators' modules, which
+required the runtime modules at the zero pseudo-version, and a later one
+has `stack dev`, `stack run` and `superschematic env` fetch the archives
+for the machine, so a local build no longer needs `CGO_LDFLAGS` set by
+hand.
 
 ### D30, amended: a project names its build context when its runtime modules lie above it
 
@@ -4565,9 +4566,10 @@ commit on `main`, the nine modules of `fixture-db`, `fixture-api`,
 `fixture-version-graph-db` and `fixture-env-go` each built on their own
 with `go build -mod=mod ./...`, from `proxy.golang.org` alone, with no
 checkout and no `CGO_LDFLAGS`. The same types module with the old
-requires failed at superscalar's `v1.0.0`. Not built: linking a binary or
-a test in such a project, and `stack dev`, still need `CGO_LDFLAGS` set
-by hand.
+requires failed at superscalar's `v1.0.0`. Linking a binary or a test in
+such a project, and `stack dev`, needed `CGO_LDFLAGS` set by hand until
+the amendment below, which fetches the release's archives for the
+machine.
 
 The rule is reversible until the first release.
 
@@ -5885,10 +5887,11 @@ latter against Postgres when
 `SUPERSCHEMATIC_HTTP_RUNTIME_TEST_DATABASE_URL` names one. No TypeScript
 worker has run on Cloud Run.
 
-Not built:
-- a `POINT` or `INTERVAL` column in a TypeScript queue's message;
-- a `POINT` or `INTERVAL` column in a Rust worker's message (D65 builds
-  Rust workers).
+A later D53 amendment holds a `POINT` and an `INTERVAL` column in a
+TypeScript, Rust and Go queue's message alike.
+
+Not built: a list of locations or durations, a `POINT[]` or `INTERVAL[]`
+column, in a queue's message.
 
 The rule is reversible until the first release.
 
