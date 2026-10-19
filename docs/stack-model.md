@@ -1820,7 +1820,9 @@ one of two places (D47, amended):
   archive (`superschematic-engine-ffi`) from the Cargo workspace beside
   `[paths] engine_go`, with the crates it reaches by path at their places
   in the checkout: the work queue's crate, the schema IR's and the schema
-  runtime's, the version graph's engine and core, and superscalar's core.
+  runtime's, the version graph's engine and core, and superscalar's
+  crates with their workspace's manifest, which its core takes its lints
+  from.
   Without `[paths] engine_go` such an entrypoint gets no Dockerfile from a
   checkout, and the build says why. A Go stage puts each archive where its
   binding's cgo flags look.
