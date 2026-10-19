@@ -584,6 +584,29 @@ func (r run) checkTypeScriptManualRoutes(stackName string, output *tsrestgen.API
 	return r.checkTypeScriptExport(stackName, output.SchemaName, "@manualRouteRegistration operations", tsrestgen.ManualRoutesFunc, "ManualRoutesConstructor", handlers, "8.6")
 }
 
+// checkGoManualRoutes refuses a Go API with a @manualRouteRegistration
+// operation whose implementation, at dir, exists and declares no
+// NewManualRoutes (D51): a server's main.go builds the handlers
+// RegisterRoutes mounts with it, and the build no longer writes into the
+// implementation, so one that predates the operation, or the entrypoint's
+// mounting it, fails here, saying what to add, rather than when go builds
+// main.go.
+func (r run) checkGoManualRoutes(stackName string, output *apigen.APIOutput, dir string) error {
+	declares, err := apigen.DeclaresFunc(dir, apigen.ManualRoutesFunc)
+	if err != nil || declares {
+		return err
+	}
+	var handlers []string
+	for _, ep := range output.ManualEndpoints() {
+		handlers = append(handlers, fmt.Sprintf("\t%s: http.HandlerFunc(...), // answers %s %s", ep.ImplName, ep.Method, ep.Path))
+	}
+	return fmt.Errorf("stack %s: %s declares @manualRouteRegistration operations, and its implementation at %s, which the build no longer writes into, declares no %s; add\n\n"+
+		"\tfunc %s(deps api.Deps) (api.ManualRoutes, error)\n\n"+
+		"returning an api.ManualRoutes with an http.Handler per operation:\n\n%s\n\n"+
+		"where api is %s, whose api.ManualRoutesConstructor is %s's signature (docs/stack-model.md, section 8.5)",
+		stackName, output.SchemaName, dir, apigen.ManualRoutesFunc, apigen.ManualRoutesFunc, strings.Join(handlers, "\n"), output.ModulePath, apigen.ManualRoutesFunc)
+}
+
 // checkRustFunc refuses a Rust API whose implementation exists and whose
 // src/lib.rs declares no fn, which returns the API crate's trait typ,
 // while the API declares what, its jobs or its workers, each a method of
@@ -753,6 +776,10 @@ func (r run) planEntrypoint(stackName string, s *ir.ResolvedDeployable, cloudSQL
 		}
 		if !exists {
 			scaffolds = append(scaffolds, scaffold{output: output, impl: impl, newModule: newModule, modules: apiModules})
+		} else if s.Kind == ir.DeployableServer && output.HasManualRoutes() {
+			if err := r.checkGoManualRoutes(stackName, output, impl.Dir); err != nil {
+				return nil, nil, err
+			}
 		}
 		if (output.IsPublic && output.UpstreamVersionGraph) || output.Deps.VersionGraph {
 			versionGraph = true

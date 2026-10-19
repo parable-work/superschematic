@@ -1669,14 +1669,16 @@ only what the last build wrote.
   (section 9.6), and forwards the end user of the request on each call's
   context (section 9.4);
 - calls each implementation's constructor with its `Deps`, and its
-  `AuthMiddleware` and `PayloadDecryptor` where the API's generated
-  `Config` takes them (section 8.5);
-- registers each API's routes on a router of its own, and hands each
-  request to the API whose router registers its method and path. The
-  build refuses two served APIs that register one method and path, path
-  parameters matched whatever their names. The routes every API
-  registers, its index, OpenAPI document and docs, answer for the first
-  API by name;
+  `AuthMiddleware`, `PayloadDecryptor` and `NewManualRoutes` where the
+  API's generated `Config` takes them (section 8.5);
+- registers each API's routes on a router of its own, a
+  `@manualRouteRegistration` operation's among them, with the handler
+  `NewManualRoutes` built behind the middlewares its route would have as
+  any other (D51), and hands each request to the API whose router
+  registers its method and path. The build refuses two served APIs that
+  register one method and path, path parameters matched whatever their
+  names, a manual route included. The routes every API registers, its
+  index, OpenAPI document and docs, answer for the first API by name;
 - answers `GET /healthz` while the process runs, and `GET /readyz` while
   every database answers a ping and the server is not shutting down;
 - listens on `$PORT`, 8080 when unset, logs JSON through zap, and on
@@ -2016,14 +2018,17 @@ found with no declaration:
   `Config` takes them, it also writes `AuthMiddleware(deps)`, which
   refuses every request with 401 until it verifies the end user, and
   `PayloadDecryptor(deps)`, which refuses every encrypted payload. For an
-  API with jobs it writes `NewJobs`, whose value has a method per job that
-  returns the not-implemented error (D52), and for an API with workers
-  `NewWorkers`, whose value has a method per worker that does (D53). It
-  never writes into a directory that holds a Go file, so the package is
-  the engineer's from then on: a stack's build fails on an API whose
-  package declares no `NewJobs` while the API declares jobs, or no
-  `NewWorkers` while it declares workers, an implementation that predates
-  them, and says what to add. A stack's build scaffolds each API its servers
+  API with a `@manualRouteRegistration` operation it writes
+  `NewManualRoutes`, whose `ManualRoutes` holds a handler per such
+  operation that answers 501 (D51). For an API with jobs it writes
+  `NewJobs`, whose value has a method per job that returns the
+  not-implemented error (D52), and for an API with workers `NewWorkers`,
+  whose value has a method per worker that does (D53). It never writes
+  into a directory that holds a Go file, so the package is the engineer's
+  from then on: a stack's build fails on an API whose package declares no
+  `NewManualRoutes` while the API declares a manual route, no `NewJobs`
+  while it declares jobs, or no `NewWorkers` while it declares workers,
+  an implementation that predates them, and says what to add. A stack's build scaffolds each API its servers
   serve; `build --scaffold` and `build-all --scaffold` scaffold each Go
   API built, outside a stack. A service the cache would restore builds
   again when its implementation is missing, and so does a stack that
@@ -2055,8 +2060,33 @@ found with no declaration:
   generated `Config`'s is, so the entrypoint passes one logger to both. A
   dependency must generate what `Deps` imports, its Go types (and so its
   ORM) for the database and its Go SDK for a callee, and the build refuses
-  one whose config does not. The generated `Config` and `RegisterRoutes`
-  do not change.
+  one whose config does not. `Deps` changes neither the generated
+  `Config` nor `RegisterRoutes`.
+
+  For an API with a `@manualRouteRegistration` operation, `routes.go`
+  declares `ManualRoutes`, an `http.Handler` per such operation, named by
+  its namespace and operation, and `Config.ManualRoutes`, and `deps.go`
+  declares `ManualRoutesConstructor`, which the scaffold asserts with
+  `var _ api.ManualRoutesConstructor = NewManualRoutes` (D51). The
+  entrypoint passes the handlers `NewManualRoutes(deps)` builds as
+  `Config.ManualRoutes`, and `RegisterRoutes` mounts each at its
+  operation's route behind the middlewares the route would have as any
+  other: the request log, the auth middleware of a route that needs a
+  caller, the webhook verifier, the rate limit, the body limit, the
+  service step, the permission check, the payload decryptor and the
+  timeout. A nil handler answers 501. Without `Config.ManualRoutes`,
+  outside a stack, `RegisterRoutes` mounts none, and the service mounts
+  each route itself. The namespace's interface keeps a method for the
+  operation, which a route mounted this way does not call:
+
+  ```go
+  type ManualRoutes struct {
+      // OrderExportOrder answers GET /api/orders/{id}/export.
+      OrderExportOrder http.Handler
+  }
+
+  type ManualRoutesConstructor func(deps Deps) (ManualRoutes, error)
+  ```
 
   For an API with jobs, `deps.go` also declares `Jobs`, a method per job
   sorted by name, and `JobsConstructor`, which the scaffold asserts with
@@ -2237,15 +2267,16 @@ as they are, with no build step (D51). The pieces mirror Go's:
     implementation's `createManualRoutes(deps)` builds, for an API with a
     `@manualRouteRegistration` operation, which the router mounts behind
     the operation's route controls and auth gate (D51), then the
-    runtime's `notFoundHandler` and `errorHandler`. A Go server's
-    `RegisterRoutes` leaves such an operation out, and its `main` mounts
-    none. Hono merges the routers' routes, so an identity API's
+    runtime's `notFoundHandler` and `errorHandler`. A Go server mounts
+    such an operation too, with the handler its implementation's
+    `NewManualRoutes(deps)` builds (sections 8.1 and 8.5). Hono merges
+    the routers' routes, so an identity API's
     router registers its CORS on each of its own routes: a request gets
     the CORS of the API that serves it alone, and a preflight that of the
     API that registers the method it asks for, as Go's dispatch does.
     The build refuses two served APIs that register one method and path,
     a manually routed operation included, which a TypeScript router
-    mounts;
+    mounts, as a Go one does;
   - serves `/healthz`, and `/readyz`, which answers 503 `draining` during
     shutdown and 503 `unavailable` with each database whose ping fails
     within two seconds, through `Bun.serve`, which it hands Hono as the

@@ -212,9 +212,12 @@ type EndpointInfo struct {
 	// Page, and wraps the response, still OutputIsArray, in the page.
 	Page *PageInfo
 
-	// ManualRouteRegistration marks operations excluded from generated route
-	// registration. The handler factory and interface method are still
-	// generated so services can register the route themselves.
+	// ManualRouteRegistration marks an operation whose handler is the
+	// service's (@manualRouteRegistration): RegisterRoutes mounts the one
+	// Config.ManualRoutes holds for it, behind the steps its route would
+	// have, or, without Config.ManualRoutes, leaves the route to the
+	// service (D51). Its interface method and handler factory are still
+	// generated.
 	ManualRouteRegistration bool
 
 	// IdentityOperation names the user model's operation (D50) the endpoint
@@ -303,7 +306,8 @@ type APIOutput struct {
 	HasServiceCallers bool
 
 	// RoutesNeedTime gates the time import in routes.go: only @rateLimit and
-	// @timeout render a time call, and only on routes RegisterRoutes mounts.
+	// @timeout render a time call, on the routes RegisterRoutes mounts, a
+	// manual one's included.
 	RoutesNeedTime bool
 
 	// RawBodyCheckImports are the packages routes.go imports for the
@@ -414,6 +418,60 @@ func (o *APIOutput) RoutedEndpoints() []EndpointInfo {
 		return routed[i].Method < routed[j].Method
 	})
 	return routed
+}
+
+// ManualEndpoints are the @manualRouteRegistration endpoints among
+// RoutedEndpoints, in their order: the ManualRoutes struct routes.go
+// declares holds a handler for each, which RegisterRoutes mounts when
+// Config.ManualRoutes is set (D51).
+func (o *APIOutput) ManualEndpoints() []EndpointInfo {
+	var manual []EndpointInfo
+	for _, ep := range o.RoutedEndpoints() {
+		if ep.ManualRouteRegistration {
+			manual = append(manual, ep)
+		}
+	}
+	return manual
+}
+
+// HasManualRoutes reports whether an endpoint is @manualRouteRegistration:
+// routes.go then declares ManualRoutes and Config.ManualRoutes, deps.go
+// ManualRoutesConstructor, and the scaffold NewManualRoutes.
+func (o *APIOutput) HasManualRoutes() bool {
+	return len(o.ManualEndpoints()) > 0
+}
+
+// GroupedManualEndpoints are the manual endpoints RegisterRoutes mounts in
+// the protected group, behind Config.AuthMiddleware, as it mounts the
+// protected routes: those that need a caller and have no service clause,
+// on an API whose Config takes an auth middleware. UngroupedManualEndpoints
+// are the others, which it mounts beside the public and the service routes.
+func (o *APIOutput) GroupedManualEndpoints() []EndpointInfo {
+	var grouped []EndpointInfo
+	for _, ep := range o.ManualEndpoints() {
+		if o.inProtectedGroup(ep) {
+			grouped = append(grouped, ep)
+		}
+	}
+	return grouped
+}
+
+// UngroupedManualEndpoints are the manual endpoints outside the protected
+// group (GroupedManualEndpoints).
+func (o *APIOutput) UngroupedManualEndpoints() []EndpointInfo {
+	var ungrouped []EndpointInfo
+	for _, ep := range o.ManualEndpoints() {
+		if !o.inProtectedGroup(ep) {
+			ungrouped = append(ungrouped, ep)
+		}
+	}
+	return ungrouped
+}
+
+// inProtectedGroup reports whether RegisterRoutes mounts ep's route in the
+// group that runs Config.AuthMiddleware first.
+func (o *APIOutput) inProtectedGroup(ep EndpointInfo) bool {
+	return o.AuthWired() && ep.RequiresAuth && ep.ServiceCallers == nil
 }
 
 // AuthWired reports whether the Go server's Config takes an auth
@@ -866,7 +924,7 @@ func (o *APIOutput) summarizeRoute(endpoint EndpointInfo) {
 	if endpoint.RequiresAuth {
 		o.HasAuth = true
 	}
-	if !endpoint.ManualRouteRegistration && (endpoint.RateLimit != nil || endpoint.Timeout != nil) {
+	if endpoint.RateLimit != nil || endpoint.Timeout != nil {
 		o.RoutesNeedTime = true
 	}
 	if len(endpoint.RequiredPerms) > 0 {
@@ -1220,8 +1278,10 @@ func resolveUUIDTypeExpr(schema *ir.Schema) string {
 	return fallback
 }
 
-// validateRouteCollisions checks that no two auto-registered endpoints claim
-// the same (path, method) pair. Chi silently replaces handlers on collision.
+// validateRouteCollisions checks that no two endpoints claim the same
+// (path, method) pair, a manual one included, which RegisterRoutes mounts
+// with its handler from Config.ManualRoutes. Chi silently replaces handlers
+// on collision.
 func validateRouteCollisions(endpoints []EndpointInfo) error {
 	type routeKey struct {
 		path   string
@@ -1230,9 +1290,6 @@ func validateRouteCollisions(endpoints []EndpointInfo) error {
 
 	registered := make(map[routeKey]string)
 	for _, ep := range endpoints {
-		if ep.ManualRouteRegistration {
-			continue
-		}
 		key := routeKey{path: ep.Path, method: ep.Method}
 		if existing, ok := registered[key]; ok && existing != ep.Name {
 			return fmt.Errorf("apigen: route collision: %s %s is claimed by both %q and %q", ep.Method, ep.Path, existing, ep.Name)

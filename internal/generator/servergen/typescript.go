@@ -465,7 +465,7 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 	default:
 		// A TypeScript router mounts every operation, a manually routed one
 		// included, whose handler the implementation hands it.
-		routes := Input{Stack: in.Stack, Server: in.Server, manualRoutes: true}
+		routes := Input{Stack: in.Stack, Server: in.Server}
 		for _, a := range in.APIs {
 			routes.APIs = append(routes.APIs, APIInput{Output: a.Routes})
 		}
