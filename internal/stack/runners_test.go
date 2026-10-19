@@ -213,6 +213,12 @@ func TestRunnerRefusals(t *testing.T) {
 		_, errs := resolve(t, reg, s, services, "Staging")
 		mustFail(t, errs, stack.CodeInvalidSettings, "sets a schedule or a time zone on runner shop-db-engine-runner, which runs until it is stopped")
 	})
+	t.Run("env on a runner", func(t *testing.T) {
+		s, services := runnerShop()
+		settingsFor(s.Environment("Staging"), stacktest.RunnerOf(stacktest.ShopDB)).Env = map[string]ir.EnvValue{"LOG_LEVEL": {Value: "warn"}}
+		_, errs := resolve(t, reg, s, services, "Staging")
+		mustFail(t, errs, stack.CodeUnknownEnvKey, "sets env LOG_LEVEL on runner shop-db-engine-runner")
+	})
 	t.Run("enabled on a database", func(t *testing.T) {
 		s, services := runnerShop()
 		settingsFor(s.Environment("Staging"), stacktest.Of(stacktest.ShopDB)).Enabled = new(bool)
