@@ -19,8 +19,9 @@ var update = flag.Bool("update", false, "rewrite the goldens in testdata/golden"
 // engine/rust/shop-ratings, which depends on the engine's crates and on
 // acme-behaviors at crates/behaviors and registers acme_behaviors::Rating
 // after the core's behaviors, under acme's invocation policy and vendor
-// keys, and its ffi member, the C ABI's archive over those behaviors that
-// a Go server links. The crate is held to
+// keys, its ffi member, the C ABI's archive over those behaviors that a Go
+// server links, and its napi member, the Node-API addon over them that a
+// TypeScript server loads. The crate is held to
 // testdata/golden/shop-ratings-engine, the checkout's path as <checkout>;
 // rewrite the goldens with:
 //
@@ -56,12 +57,17 @@ func TestRatingProjectEngine(t *testing.T) {
 	if result.Outputs["engine-rust"] != dir {
 		t.Fatalf("Outputs[engine-rust] = %q, want %q (outputs %v)", result.Outputs["engine-rust"], dir, result.Outputs)
 	}
-	// Each crate's paths are relative to its own directory: the ffi
-	// member's to ffi/.
-	for _, file := range []string{"Cargo.toml", filepath.Join("src", "lib.rs"), filepath.Join("ffi", "Cargo.toml"), filepath.Join("ffi", "src", "lib.rs")} {
+	// Each crate's paths are relative to its own directory: a member's to
+	// its own, ffi/ or napi/.
+	files := []string{"Cargo.toml", filepath.Join("src", "lib.rs")}
+	for _, member := range []string{"ffi", "napi"} {
+		files = append(files, filepath.Join(member, "Cargo.toml"), filepath.Join(member, "src", "lib.rs"))
+	}
+	files = append(files, filepath.Join("napi", "build.rs"))
+	for _, file := range files {
 		crate := dir
-		if strings.HasPrefix(file, "ffi"+string(filepath.Separator)) {
-			crate = filepath.Join(dir, "ffi")
+		if member, _, ok := strings.Cut(file, string(filepath.Separator)); ok && member != "src" {
+			crate = filepath.Join(dir, member)
 		}
 		checkout, err := filepath.Rel(crate, filepath.Join(project, "..", ".."))
 		if err != nil {

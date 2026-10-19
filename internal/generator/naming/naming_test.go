@@ -139,7 +139,7 @@ func TestParseRejectsUnknownTopLevelKeyNextToExtensionTable(t *testing.T) {
 }
 
 func TestParseReadsPathsTable(t *testing.T) {
-	n, err := Parse([]byte("[paths]\nscalar_go = \"vendor/scalars/go\"\nhttp_runtime_rust = \"runtime/http/rust\"\nschema_runtime_rust = \"runtime/schema/rust\"\nengine_rust = \"runtime/engine/rust/engine\"\nengine_behaviors_rust = \"runtime/engine/rust/behaviors\"\nengine_workqueue_rust = \"runtime/engine-workqueue/rust\"\nengine_abi_rust = \"runtime/engine/rust/abi\"\n"), "test")
+	n, err := Parse([]byte("[paths]\nscalar_go = \"vendor/scalars/go\"\nhttp_runtime_rust = \"runtime/http/rust\"\nschema_runtime_rust = \"runtime/schema/rust\"\nengine_rust = \"runtime/engine/rust/engine\"\nengine_behaviors_rust = \"runtime/engine/rust/behaviors\"\nengine_workqueue_rust = \"runtime/engine-workqueue/rust\"\nengine_abi_rust = \"runtime/engine/rust/abi\"\nengine_napi_rust = \"runtime/engine/rust/napi\"\n"), "test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,6 +167,9 @@ func TestParseReadsPathsTable(t *testing.T) {
 	}
 	if want := filepath.Join("/repo", "runtime", "engine", "rust", "abi"); local.EngineABIRust != want {
 		t.Fatalf("LocalPaths.EngineABIRust = %q, want %q", local.EngineABIRust, want)
+	}
+	if want := filepath.Join("/repo", "runtime", "engine", "rust", "napi"); local.EngineNapiRust != want {
+		t.Fatalf("LocalPaths.EngineNapiRust = %q, want %q", local.EngineNapiRust, want)
 	}
 	if local.SchemaIR != "" {
 		t.Fatalf("unset key must resolve to empty, got %q", local.SchemaIR)
