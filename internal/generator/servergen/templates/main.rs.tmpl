@@ -11,6 +11,12 @@
 //! `GET /healthz` while the process runs and `GET /readyz` while its
 //! databases answer, and on SIGTERM or SIGINT stops taking requests and
 //! lets those in flight finish. It logs one JSON object per line on stdout.
+{{- if .Buckets }}
+//!
+//! It opens each bucket its APIs list once, on GCS as the workload's
+//! account or on the emulator the bucket's connection names, through the
+//! HTTP runtime's `gcs` (D54; section 8.9).
+{{- end }}
 //!
 //! Each API's implementation is the crate at the naming file's
 //! `[implementation_paths] rust` template, which the build scaffolded once
@@ -137,6 +143,15 @@ async fn run() -> Result<(), Failure> {
 {{ rustLetCall .Var .Constructor "?" (printf "&%s" .From) }}
 {{- end }}
 {{- end }}
+{{- if .Buckets }}
+
+    // One bucket per Bucket service, shared by every API that lists it, on
+    // GCS or on the emulator its connection names (D54). Opening makes no
+    // request.
+{{- range .Buckets }}
+{{ rustLetCall .Var "open_bucket" "?" (rustString .Service) (rustString .Field) (printf "&%s" .From) }}
+{{- end }}
+{{- end }}
 {{- range .APIs }}
 
     // {{ .Service }}: its implementation, built from its Deps, and its routes.
@@ -149,6 +164,9 @@ async fn run() -> Result<(), Failure> {
 {{- end }}
 {{- range .Calls }}
         {{ .Field }}: {{ .Client.Var }}.clone(),
+{{- end }}
+{{- range .Buckets }}
+        {{ .Field }}: Arc::clone(&{{ .Bucket.Var }}),
 {{- end }}
         span: logging::api_span({{ rustString .Service }}),
     };

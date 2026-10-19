@@ -31,8 +31,8 @@ import (
 const TracingVersion = "0.1.41"
 
 // DepsInfo is what Deps holds beside the config and the span: a pool of
-// the API's database and a Rust SDK client per API it calls. A bucket is
-// not built for a Rust server (D57).
+// the API's database, a Rust SDK client per API it calls, and the HTTP
+// runtime's Bucket per bucket it lists (D54).
 type DepsInfo struct {
 	// Database is the DB service whose pool Deps.db is: the API's authDb,
 	// or its one DB-kind dependency. Empty when the API has neither.
@@ -40,6 +40,9 @@ type DepsInfo struct {
 
 	// Calls are the API's calls entries, in order.
 	Calls []DepsCall
+
+	// Buckets are the API's buckets entries, in order (D54).
+	Buckets []DepsBucket
 
 	// DatabaseTypesCrate is the Rust types crate of Database when the API
 	// declares a worker (D65): it declares the queues' messages, which the
@@ -79,6 +82,17 @@ type DepsCall struct {
 	// Client is the SDK's struct, which its new builds from a
 	// ClientConfig.
 	Client string
+}
+
+// DepsBucket is a bucket in Deps: an Arc of the HTTP runtime's
+// provider-neutral bucket::Bucket, which the entrypoint opens on the
+// bucket's provider (D54), GCS's through the runtime's gcs feature.
+type DepsBucket struct {
+	// Service is the Bucket service.
+	Service string
+
+	// Field is the Deps field that holds the bucket.
+	Field string
 }
 
 // CrateIdent is the SDK crate as Rust source spells it.
@@ -247,7 +261,8 @@ func (o *APIOutput) DatabaseTypesDependency() *DependencyCrate {
 }
 
 // SetDeps sets what Deps holds, so the crate writes src/deps.rs, refusing
-// a client whose field would take the name of another of its fields.
+// a client or a bucket whose field would take the name of another of its
+// fields.
 func (o *APIOutput) SetDeps(deps DepsInfo) error {
 	seen := map[string]string{}
 	for _, name := range depsFields {
@@ -259,6 +274,12 @@ func (o *APIOutput) SetDeps(deps DepsInfo) error {
 		}
 		seen[call.Field] = call.Service
 	}
+	for _, b := range deps.Buckets {
+		if prev, clash := seen[b.Field]; clash {
+			return fmt.Errorf("rustrestgen: %s lists bucket %s, which would be Deps.%s, the field of %s", o.SchemaName, b.Service, b.Field, prev)
+		}
+		seen[b.Field] = b.Service
+	}
 	if len(o.Workers) > 0 && deps.DatabaseTypesCrate == "" {
 		return fmt.Errorf("rustrestgen: %s declares workers, whose messages are its database's Rust types, and its Deps names none", o.SchemaName)
 	}
@@ -267,7 +288,8 @@ func (o *APIOutput) SetDeps(deps DepsInfo) error {
 }
 
 // DepsField is the Deps field of the client of the API service named
-// service: its name in snake_case (shop-api is shop_api).
+// service, or of the bucket of the Bucket service named service: its name
+// in snake_case (shop-api is shop_api).
 func DepsField(service string) string {
 	return rustutil.ToSnakeCase(service)
 }
@@ -300,7 +322,8 @@ func (o *APIOutput) HandlersFields() []string {
 // DepsUses are the use declarations of src/deps.rs beside std's: the
 // config, what it names from the interfaces module (each namespace's trait,
 // Implementations and the webhook verifier's trait), async_trait for Jobs
-// and Workers, and the runtime's pool, authenticators and Shutdown.
+// and Workers, and the runtime's Bucket, pool, authenticators and
+// Shutdown.
 func (o *APIOutput) DepsUses() []string {
 	var uses []string
 	if o.HasEnvConfig {
@@ -320,6 +343,9 @@ func (o *APIOutput) DepsUses() []string {
 		uses = append(uses, "use async_trait::async_trait;")
 	}
 	var runtime []string
+	if o.Deps != nil && len(o.Deps.Buckets) > 0 {
+		runtime = append(runtime, "bucket::Bucket")
+	}
 	if o.Deps != nil && o.Deps.Database != "" {
 		runtime = append(runtime, "postgres::Pool")
 	}

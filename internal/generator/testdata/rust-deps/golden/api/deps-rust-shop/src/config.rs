@@ -7,7 +7,7 @@
 
 use std::{env, error::Error, fmt};
 
-use crate::runtime::stackconfig::{self, Cors, Database, Service};
+use crate::runtime::stackconfig::{self, Bucket, Cors, Database, Service};
 use crate::runtime::{identity, ServiceAuthConfig};
 
 /// ShopConfig holds environment-backed runtime configuration.
@@ -76,6 +76,9 @@ pub struct EnvConfig {
     /// The endpoint of deps-rust-pricing, which the API calls. It is read from
     /// DEPS_RUST_PRICING_SERVICE_*.
     pub deps_rust_pricing_service: Service,
+    /// How the server reaches deps-media, a bucket the API lists. It is read
+    /// from DEPS_MEDIA_BUCKET_*.
+    pub deps_media_bucket: Bucket,
     /// What the server verifies a calling service's credential against: the
     /// API's callers field, for its service clauses. No issuers means no server
     /// calls the API. It is read from DEPS_RUST_SHOP_CALLERS_*.
@@ -108,6 +111,10 @@ pub fn load_env_config() -> Result<EnvConfig, ConfigError> {
         &mut problems,
         stackconfig::load_service("DEPS_RUST_PRICING_SERVICE").map_err(problems_of),
     );
+    let deps_media_bucket = keep(
+        &mut problems,
+        stackconfig::load_bucket("DEPS_MEDIA_BUCKET").map_err(problems_of),
+    );
     let deps_rust_shop_callers = keep(
         &mut problems,
         stackconfig::load_callers("DEPS_RUST_SHOP_CALLERS").map_err(problems_of),
@@ -121,6 +128,7 @@ pub fn load_env_config() -> Result<EnvConfig, ConfigError> {
         settings,
         deps_users_db_database,
         deps_rust_pricing_service,
+        deps_media_bucket,
         deps_rust_shop_callers,
         deps_rust_shop_cors,
         deps_rust_shop_identity,
@@ -129,6 +137,7 @@ pub fn load_env_config() -> Result<EnvConfig, ConfigError> {
             Some(settings),
             Some(deps_users_db_database),
             Some(deps_rust_pricing_service),
+            Some(deps_media_bucket),
             Some(deps_rust_shop_callers),
             Some(deps_rust_shop_cors),
             Some(deps_rust_shop_identity),
@@ -136,6 +145,7 @@ pub fn load_env_config() -> Result<EnvConfig, ConfigError> {
             storefront_region: settings.storefront_region,
             deps_users_db_database,
             deps_rust_pricing_service,
+            deps_media_bucket,
             deps_rust_shop_callers,
             deps_rust_shop_cors,
             deps_rust_shop_identity,

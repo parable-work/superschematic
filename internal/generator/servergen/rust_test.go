@@ -35,12 +35,12 @@ import (
 
 const (
 	// rustServicesRoot holds the Rust fixture (D57): rs-stack, whose Rust
-	// server rs-stock, on rs-db, its authDb, calls rs-pricing's Rust
-	// server, which admits only calling services; rs-orders' Go server
-	// calls rs-stock, whose reservations only it may make; and the site
-	// rs-web calls rs-stock. Its one environment is local. Beside it,
-	// rs-merged-stack's declared Rust server Warehouse serves rs-catalog
-	// and rs-pricing.
+	// server rs-stock, on rs-db, its authDb, with the bucket rs-media
+	// (D54), calls rs-pricing's Rust server, which admits only calling
+	// services; rs-orders' Go server calls rs-stock, whose reservations
+	// only it may make; and the site rs-web calls rs-stock. Its one
+	// environment is local. Beside it, rs-merged-stack's declared Rust
+	// server Warehouse serves rs-catalog and rs-pricing.
 	rustServicesRoot = "testdata/rust/services"
 
 	// rustStack is the fixture's stack, and rustMergedStack the second,
@@ -62,8 +62,17 @@ const (
 
 // rustOrder is the order a build-all builds the Rust fixture in: rs-stock
 // calls rs-pricing, so it builds after rs-pricing's SDK, and rs-orders
-// calls rs-stock. rs-web, the site, is loaded, not built.
-var rustOrder = []string{"rs-db", "rs-pricing", "rs-catalog", "rs-stock", "rs-orders", rustStack, rustMergedStack}
+// calls rs-stock. rs-media, the bucket rs-stock lists, builds nothing
+// (D54). rs-web, the site, is loaded, not built.
+var rustOrder = []string{"rs-db", "rs-media", "rs-pricing", "rs-catalog", "rs-stock", "rs-orders", rustStack, rustMergedStack}
+
+// rustMediaVariables are the variables of rs-stock's bucket field holding
+// rs-media on an emulator at port 9, which discards: opening the bucket
+// makes no request, and signing a URL for it none either (D54).
+func rustMediaVariables(t *testing.T) []string {
+	t.Helper()
+	return variables(t, "RS_MEDIA_BUCKET", ir.BucketConnection{Name: "rs-media", Endpoint: "http://127.0.0.1:9"})
+}
 
 // loadRustFixture loads every Rust fixture service, as loadFixture loads
 // the Go one.
@@ -116,7 +125,9 @@ func rustGenerated(repoRoot string) map[string]string {
 // server, a member of the output root's Cargo workspace, whose root it
 // writes too: rs-stock's opens a pool on rs-db, builds the identity store
 // over it and its identity service from its identity config field, a
-// client of rs-pricing that sends the edge's credential, its service
+// client of rs-pricing that sends the edge's credential, rs-media on GCS
+// or its emulator with the runtime's gcs feature, as its job's and its
+// worker's do too (D54), its service
 // authenticator from its callers field, and answers the site's CORS;
 // rs-pricing's verifies its callers. rs-merged-stack's Warehouse, built
 // into the same output root, joins the workspace, and hands each request
@@ -182,14 +193,16 @@ impl QuotesImplementation for Quotes {
 
 // rustStockImplementation is rs-stock's implementation: a level in the
 // warehouse its setting names, priced by rs-pricing, which it calls with
-// its edge's credential; a slow level, which answers after a second; and a
-// reservation for the service that asks for it. Its job, PlaceRestockOrders,
+// its edge's credential; a slow level, which answers after a second; a
+// level whose sku is a URL to download its sheet from rs-media, which
+// signing makes no request for (D54); and a reservation for the service
+// that asks for it. Its job, PlaceRestockOrders,
 // enqueues a StockLow message per product RESTOCK_SKUS names, in a
 // transaction that commits, after one in a transaction that rolls back,
 // which leaves nothing; with no products it does nothing, and with
-// RESTOCK_FAIL set it fails, naming its warehouse. Its worker, ReorderStock,
-// handles each message: poison fails every time, flaky fails its first
-// time, and slow never finishes.
+// RESTOCK_FAIL set it fails, naming its warehouse and its bucket. Its
+// worker, ReorderStock, handles each message: poison fails every time,
+// flaky fails its first time, and slow never finishes.
 const rustStockImplementation = `use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -201,6 +214,7 @@ use schemas_rs_stock_api::{
     BoxError, Deps, Handlers, Jobs, LevelsGetLevelArgs, LevelsImplementation, LevelsSetLevelArgs,
     ReservationsImplementation, ReservationsReserveStockArgs, Workers,
 };
+use superschematic_http_runtime::bucket::SignedUrlOptions;
 use superschematic_http_runtime::queue::{enqueue, QueueDefinition};
 use superschematic_http_runtime::{ApiError, RequestContext, Shutdown};
 
@@ -216,7 +230,7 @@ pub struct StockJobs {
 impl Jobs for StockJobs {
     async fn place_restock_orders(&self, _shutdown: Shutdown) -> Result<(), BoxError> {
         if std::env::var_os("RESTOCK_FAIL").is_some() {
-            return Err(format!("the restock of {} failed", self.deps.config.warehouse).into());
+            return Err(format!("the restock of {} into {} failed", self.deps.config.warehouse, self.deps.rs_media.name()).into());
         }
         let skus = std::env::var("RESTOCK_SKUS").unwrap_or_default();
         if skus.is_empty() {
@@ -292,6 +306,15 @@ impl LevelsImplementation for Levels {
         if args.sku == "slow" {
             std::thread::sleep(Duration::from_secs(1));
             return Ok(level(&self.deps, args.sku, 0.0));
+        }
+        if args.sku == "sheet" {
+            let url = self
+                .deps
+                .rs_media
+                .signed_url("sheets/sheet.pdf", SignedUrlOptions::get(Duration::from_secs(60)))
+                .await
+                .map_err(|err| ApiError::internal(err.to_string()))?;
+            return Ok(level(&self.deps, url, 0.0));
         }
         let quote = self
             .deps
@@ -510,7 +533,7 @@ func TestRustEntrypointCompilesAndServes(t *testing.T) {
 		Source: ir.CredentialSignedToken, Audience: "rs-pricing", Issuer: "rs-stock", Key: private,
 	}})
 	const siteOrigin = "https://rs-web.acme.dev"
-	env := append(append([]string{"RS_STOCK_CORS_ORIGINS=" + siteOrigin, "RS_STOCK_IDENTITY=" + rustIdentityConfig, "WAREHOUSE=north"}, edge...), callers...)
+	env := append(append(append([]string{"RS_STOCK_CORS_ORIGINS=" + siteOrigin, "RS_STOCK_IDENTITY=" + rustIdentityConfig, "WAREHOUSE=north"}, edge...), callers...), rustMediaVariables(t)...)
 
 	// Port 9 discards; nothing answers a database there.
 	unreachable := "RS_DB_DATABASE_URL=postgres://stock@127.0.0.1:9/rs_db?connect_timeout=1&sslmode=disable"
@@ -519,6 +542,9 @@ func TestRustEntrypointCompilesAndServes(t *testing.T) {
 	stock.expect(t, http.MethodGet, "/readyz", http.StatusServiceUnavailable, `"unavailable":["rs-db"]`)
 	stock.expect(t, http.MethodGet, "/api/levels", http.StatusOK, `"warehouse":"north"`)
 	stock.expect(t, http.MethodGet, "/api/levels/tea", http.StatusOK, `"sku":"tea:rs-stock"`, `"cents":250`)
+	// rs-stock's Deps hold rs-media, opened on the emulator its bucket
+	// field names, for which it signs a V4 URL as no account (D54).
+	stock.expect(t, http.MethodGet, "/api/levels/sheet", http.StatusOK, `"sku":"http://127.0.0.1:9/rs-media/sheets/sheet.pdf?X-Goog-Algorithm=GOOG4-RSA-SHA256`, "X-Goog-Credential=emulator%40superschematic.local")
 	stock.expect(t, http.MethodPut, "/api/levels/tea", http.StatusUnauthorized)
 	reserve := "/api/reservations/tea"
 	stock.sendWith(t, http.MethodPost, reserve, "{}", map[string]string{"Service-Authorization": "Bearer " + signEdgeToken(t, ordersPrivate, "orders-1", "rs-orders", "rs-stock")}, http.StatusOK, `"sku":"tea:rs-orders"`)
@@ -571,7 +597,7 @@ func TestRustEntrypointCompilesAndServes(t *testing.T) {
 	if err == nil {
 		t.Errorf("rs-stock started without its configuration:\n%s", refused)
 	}
-	for _, want := range []string{`"msg":"server stopped"`, "configuration of rs-stock: ", "RS_DB_DATABASE_URL", "RS_PRICING_SERVICE_URL", "RS_STOCK_CALLERS_ISSUERS"} {
+	for _, want := range []string{`"msg":"server stopped"`, "configuration of rs-stock: ", "RS_DB_DATABASE_URL", "RS_PRICING_SERVICE_URL", "RS_MEDIA_BUCKET_NAME", "RS_STOCK_CALLERS_ISSUERS"} {
 		if !strings.Contains(string(refused), want) {
 			t.Errorf("rs-stock stopped without saying %q:\n%s", want, refused)
 		}
@@ -579,7 +605,7 @@ func TestRustEntrypointCompilesAndServes(t *testing.T) {
 	// An identity config the runtime refuses stops it too, naming the
 	// field.
 	cmd = exec.Command(filepath.Join(bin, "rs-stock"))
-	cmd.Env = append(append(os.Environ(), "PORT="+freePort(t), unreachable), append(edge, append(callers, `RS_STOCK_IDENTITY={"cookie": {"sameSite": "Loose"}}`)...)...)
+	cmd.Env = append(append(append(os.Environ(), "PORT="+freePort(t), unreachable), append(edge, append(callers, `RS_STOCK_IDENTITY={"cookie": {"sameSite": "Loose"}}`)...)...), rustMediaVariables(t)...)
 	if refused, err := cmd.CombinedOutput(); err == nil || !strings.Contains(string(refused), "RS_STOCK_IDENTITY") {
 		t.Errorf("rs-stock on a refused identity config = %v:\n%s", err, refused)
 	}
@@ -605,17 +631,18 @@ func TestRustEntrypointCompilesAndServes(t *testing.T) {
 }
 
 // checkRustJobRuns runs rs-stock's job, the binary at job, without a
-// database or a callee that answers (D65). It reads rs-stock's
+// database, a callee or a bucket that answers (D65). It reads rs-stock's
 // configuration without the callers field, which no job is given, builds
-// its Deps and runs its method once: with no products to restock, the
-// method touches nothing, and the job logs job started and job done, its
-// lines naming the job, and exits 0. Told to fail, it logs job failed
-// with the error and exits 1, and without its configuration it fails at
-// once, naming each variable missing.
+// its Deps, rs-media among them (D54), and runs its method once: with no
+// products to restock, the method touches nothing, and the job logs job
+// started and job done, its lines naming the job, and exits 0. Told to
+// fail, it logs job failed with the error, which names its bucket, and
+// exits 1, and without its configuration it fails at once, naming each
+// variable missing.
 func checkRustJobRuns(t *testing.T, job string) {
 	t.Helper()
-	env := append([]string{"RS_DB_DATABASE_URL=postgres://stock@127.0.0.1:9/rs_db?connect_timeout=1&sslmode=disable", "WAREHOUSE=north"},
-		variables(t, "RS_PRICING_SERVICE", ir.ServiceEndpoint{URL: "http://127.0.0.1:9"})...)
+	env := append(append([]string{"RS_DB_DATABASE_URL=postgres://stock@127.0.0.1:9/rs_db?connect_timeout=1&sslmode=disable", "WAREHOUSE=north"},
+		variables(t, "RS_PRICING_SERVICE", ir.ServiceEndpoint{URL: "http://127.0.0.1:9"})...), rustMediaVariables(t)...)
 	run := func(extra ...string) (string, int) {
 		t.Helper()
 		cmd := exec.Command(job)
@@ -644,7 +671,7 @@ func checkRustJobRuns(t *testing.T, job string) {
 		t.Errorf("the job's lines name a server:\n%s", output)
 	}
 	output, code = run("RESTOCK_FAIL=1")
-	if code != 1 || !strings.Contains(output, `"msg":"job failed"`) || !strings.Contains(output, `"error":"the restock of north failed"`) {
+	if code != 1 || !strings.Contains(output, `"msg":"job failed"`) || !strings.Contains(output, `"error":"the restock of north into rs-media failed"`) {
 		t.Errorf("a failing job exited %d, want 1 with job failed and its error:\n%s", code, output)
 	}
 	cmd := exec.Command(job)
@@ -653,7 +680,7 @@ func checkRustJobRuns(t *testing.T, job string) {
 	if err == nil {
 		t.Errorf("the job ran without its configuration:\n%s", refused)
 	}
-	for _, want := range []string{`"msg":"job failed"`, "configuration of rs-stock: ", "RS_DB_DATABASE_URL", "RS_PRICING_SERVICE_URL"} {
+	for _, want := range []string{`"msg":"job failed"`, "configuration of rs-stock: ", "RS_DB_DATABASE_URL", "RS_PRICING_SERVICE_URL", "RS_MEDIA_BUCKET_NAME"} {
 		if !strings.Contains(string(refused), want) {
 			t.Errorf("the job failed without saying %q:\n%s", want, refused)
 		}
@@ -783,7 +810,7 @@ func TestTheRustDockerfileBuildsAnImageThatServes(t *testing.T) {
 	args := []string{"run", "-d", "-p", "127.0.0.1::8080",
 		"-e", "RS_DB_DATABASE_URL=postgres://stock@127.0.0.1:9/rs_db?connect_timeout=1",
 		"-e", ir.CallersField("rs-stock") + "_ISSUERS=0"}
-	for _, v := range variables(t, "RS_PRICING_SERVICE", ir.ServiceEndpoint{URL: "http://127.0.0.1:9"}) {
+	for _, v := range append(variables(t, "RS_PRICING_SERVICE", ir.ServiceEndpoint{URL: "http://127.0.0.1:9"}), rustMediaVariables(t)...) {
 		args = append(args, "-e", v)
 	}
 	container := docker(t, append(args, image)...)
@@ -817,8 +844,8 @@ func TestTheRustDockerfileBuildsAnImageThatServes(t *testing.T) {
 // TestTheRustJobAndWorkerDockerfilesBuildImagesThatRun: rs-stock's job's
 // and worker's Dockerfiles build from a deploy's context as a server's do
 // (D65), each image running its binary as a non-root user, with no port.
-// Given only the variables of rs-stock's edges, its database's and its
-// callee's, and none of the callers, identity or CORS fields only its
+// Given only the variables of rs-stock's edges, its database's, its
+// callee's and its bucket's, and none of the callers, identity or CORS fields only its
 // server is given, the job runs its scaffold's method, which fails, and
 // exits 1, logging job failed with the error; the worker starts, claims
 // from a database that does not answer, and on docker stop exits 0. It
@@ -830,7 +857,7 @@ func TestTheRustJobAndWorkerDockerfilesBuildImagesThatRun(t *testing.T) {
 	}
 	repoRoot, out := rustDockerFixture(t)
 	args := []string{"-e", "RS_DB_DATABASE_URL=postgres://stock@127.0.0.1:9/rs_db?connect_timeout=1"}
-	for _, v := range variables(t, "RS_PRICING_SERVICE", ir.ServiceEndpoint{URL: "http://127.0.0.1:9"}) {
+	for _, v := range append(variables(t, "RS_PRICING_SERVICE", ir.ServiceEndpoint{URL: "http://127.0.0.1:9"}), rustMediaVariables(t)...) {
 		args = append(args, "-e", v)
 	}
 	noPort := func(image string) {
