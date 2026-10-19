@@ -160,6 +160,17 @@ A response outside 2xx raises `APIError`, whose message is the problem's
 retries a 429 up to 3 times after `Retry-After`
 (`max_rate_limit_retries`).
 
+With the types package installed, a response is read as its type, at each
+list level and in each item of a page. A model is read with
+`from_dict_non_strict`. A union is read as the member its alias picks: by
+the discriminator when every member marks the same field
+`@internalMetadata`, and otherwise the member the payload fits best, by
+pydantic's smart union matching. A union field of a model is read the
+same way. An enum stays the string the API sent. A value its type cannot
+read, or data that is not the list the operation returns, raises
+`SDKError` naming where it is in the response (`data[1]`,
+`data.items[0]`), with pydantic's error as its cause.
+
 An operation without an input type sends its arguments where the route
 reads them: on a `GET` in the query string, and on any other method, a
 `DELETE` among them, as the fields of the JSON body. A `QueryParam<T>`
