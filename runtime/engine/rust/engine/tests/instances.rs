@@ -238,7 +238,7 @@ impl superschematic_engine::IdSource for Uuids {
 #[test]
 fn a_hosts_id_source_makes_a_behaviors_own_uuids_when_it_says_so() {
     for target in targets("a_hosts_id_source_makes_uuids") {
-        let engine = with_orders(&target.fresh(), |options| {
+        let engine = with_orders(&target, |options| {
             options.ids = Ids::Custom(superschematic_engine::CustomIds(std::sync::Arc::new(
                 Uuids {
                     next: std::sync::atomic::AtomicU8::new(0),
@@ -255,7 +255,7 @@ fn a_hosts_id_source_makes_a_behaviors_own_uuids_when_it_says_so() {
     }
     // A source that does not say draws random ones.
     for target in targets("a_hosts_id_source_makes_no_uuids") {
-        let engine = with_orders(&target.fresh(), |options| {
+        let engine = with_orders(&target, |options| {
             options.ids = Ids::Custom(superschematic_engine::CustomIds(std::sync::Arc::new(
                 Counter {
                     next: std::sync::atomic::AtomicU64::new(0),
@@ -293,7 +293,10 @@ impl superschematic_engine::IdSource for Counter {
 fn a_hosts_id_source_makes_the_ids_and_its_ids_are_checked() {
     for target in targets("a_hosts_id_source_makes_the_ids") {
         for bad in [false, true] {
-            let engine = with_orders(&target.fresh(), |options| {
+            // Its own place for each engine, held while the engine is: a
+            // Target drops its schema when it goes.
+            let place = target.fresh();
+            let engine = with_orders(&place, |options| {
                 options.ids = Ids::Custom(superschematic_engine::CustomIds(std::sync::Arc::new(
                     Counter {
                         next: std::sync::atomic::AtomicU64::new(0),
