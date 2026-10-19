@@ -369,6 +369,44 @@ func TestFieldReference(t *testing.T) {
 	}
 }
 
+// A dependency's type the API uses is read against the API (D61, amended):
+// its written RefersTo holds only when it resolves in the API to a value of
+// the field's type. The API's own type keeps its RefersTo as written,
+// which the loader checked.
+func TestFieldReferenceOfADependencysType(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		field FieldDef
+		holds bool
+	}{
+		{"a reference that resolves in the API", FieldDef{Name: "productId", TypeRef: TypeRef{Name: "Identity.UUID"}, References: &ReferenceDef{Type: "ProductView"}}, true},
+		{"a value of another type", FieldDef{Name: "productId", TypeRef: TypeRef{Name: "string"}, References: &ReferenceDef{Type: "ProductView"}}, false},
+		{"a list of values of the field's type", FieldDef{Name: "productIds", TypeRef: TypeRef{Name: "Identity.UUID", IsArray: true}, References: &ReferenceDef{Type: "ProductView"}}, true},
+		{"a value the target does not hold as the field does", FieldDef{Name: "productName", TypeRef: TypeRef{Name: "string"}, References: &ReferenceDef{Type: "ProductView", Value: "id"}}, false},
+		{"a reference that does not resolve in the API", FieldDef{Name: "basketId", TypeRef: TypeRef{Name: "Identity.UUID"}, References: &ReferenceDef{Type: "Basket"}}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			api, deps := shopSchemas()
+			field := tc.field
+			holder := &TypeDef{Name: "BasketLine", Role: RoleAPIView, Fields: []*FieldDef{&field}}
+			dep := NewSchema("basket-api", SchemaKindAPI)
+			dep.Types["BasketLine"] = holder
+			deps["basket-api"] = dep
+			ref, derived := FieldReference(api, deps, holder, &field)
+			if derived || tc.holds != (ref != nil) || ref != nil && ref != field.References {
+				t.Fatalf("FieldReference = %+v, %v; want the RefersTo: %v", ref, derived, tc.holds)
+			}
+
+			// The API's own type of the same name keeps its RefersTo.
+			own := &TypeDef{Name: "BasketLine", Role: RoleAPIView, Fields: []*FieldDef{&field}}
+			api.Types["BasketLine"] = own
+			if ref, _ := FieldReference(api, deps, own, &field); ref != field.References {
+				t.Fatalf("the API's own type: FieldReference = %+v, want its RefersTo", ref)
+			}
+		})
+	}
+}
+
 // LookupScopes lists the schema, the dependency an import names the type
 // in, then the rest by name, each once.
 func TestLookupScopes(t *testing.T) {

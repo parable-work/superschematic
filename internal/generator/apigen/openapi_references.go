@@ -96,7 +96,8 @@ func endpointNames(set *ir.OperationSet, op *ir.FieldDef) (operationID, tool str
 // fieldReference is the reference field of holder holds, written or
 // derived (ir.FieldReference), resolved in the API schema; nil when it
 // holds none. A dependency's type is read against the API too: the API's
-// operations are the only ones its documents name.
+// operations are the only ones its documents name, and its RefersTo holds
+// only when it resolves there to a value of the field's type.
 func fieldReference(schema *ir.Schema, dependencies map[string]*ir.Schema, holder *ir.TypeDef, field *ir.FieldDef) *Reference {
 	ref, _ := ir.FieldReference(schema, dependencies, holder, field)
 	return resolveReference(schema, dependencies, ref)

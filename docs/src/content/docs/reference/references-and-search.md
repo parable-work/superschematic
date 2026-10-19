@@ -192,6 +192,12 @@ it, else by name in each dependency, in name order. So two dependencies
 that declare types of one name resolve one reference to one type, the one
 the schema imports, in the loader and in every generator (D66).
 
+A type of an API dependency that the API's operations take or return may
+hold a `RefersTo` of its own, which names its own API's operations. In
+the consuming API, the documents and the console read it against the
+API's operations, and keep it only when it resolves there to a value of
+the field's type. Otherwise the field is a plain value.
+
 ## `SearchQuery`: a list's search text
 
 `SearchQuery<T>` marks an argument as its operation's search text (D62).

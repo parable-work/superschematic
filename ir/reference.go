@@ -506,6 +506,13 @@ type HeldReference struct {
 // the derived reference resolves. derived reports the second. It is nil
 // when the field refers to nothing.
 //
+// A holder that is not one of the schema's own types, a dependency's type
+// the API's operations take or return, is read against the schema too:
+// the API's operations are the only ones a reference of the API names.
+// So its written RefersTo holds only when [ResolveReference] resolves it
+// in the schema to a value of the field's type; the loader checked it
+// against the dependency's own operations, not the schema's.
+//
 // The derived reference names the one object type W of the schema whose
 // @source is the relation's type U, by its id, with every other member
 // unsaid: { type: W }. With no such type, or two or more, or when
@@ -522,6 +529,12 @@ func FieldReference(schema *Schema, dependencies map[string]*Schema, holder *Typ
 		return nil, false
 	}
 	if field.References != nil {
+		if holder != nil && schema != nil && schema.Types[holder.Name] != holder {
+			resolved, err := ResolveReference(schema, dependencies, field.References)
+			if err != nil || resolved.Value.TypeRef.Name != field.TypeRef.Name {
+				return nil, false
+			}
+		}
 		return field.References, false
 	}
 	if schema == nil || schema.Kind != SchemaKindAPI || holder == nil || holder.Source == nil ||
