@@ -15,6 +15,10 @@
 //! (`OTEL_EXPORTER_OTLP_ENDPOINT`) it exports a span per request and per call
 //! to another API (D67).
 //!
+//! It opens each bucket its APIs list once, on GCS as the workload's
+//! account or on the emulator the bucket's connection names, through the
+//! HTTP runtime's `gcs` (D54; section 8.9).
+//!
 //! Each API's implementation is the crate at the naming file's
 //! `[implementation_paths] rust` template, which the build scaffolded once
 //! when it was missing, and which each build copies into the output root's
@@ -38,6 +42,8 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
 use serde_json::json;
+use superschematic_http_runtime::bucket::Bucket;
+use superschematic_http_runtime::gcs;
 use superschematic_http_runtime::identity::{PostgresPool, Store};
 use superschematic_http_runtime::logging::{self, tracing};
 use superschematic_http_runtime::postgres::{self, Pool};
@@ -122,13 +128,28 @@ async fn run() -> Result<(), Failure> {
     // One client per API called, shared by every API that calls it.
     let rs_pricing_client = new_rs_pricing_client(&rs_stock_config.rs_pricing_service)?;
 
+    // One bucket per Bucket service, shared by every API that lists it, on
+    // GCS or on the emulator its connection names (D54). Opening makes no
+    // request.
+    let rs_media_bucket = open_bucket(
+        "rs-media",
+        "RS_MEDIA_BUCKET",
+        &rs_stock_config.rs_media_bucket,
+    )?;
+
     // rs-stock: its implementation, built from its Deps, and its routes.
     let rs_stock_deps = rs_stock_api::Deps {
         config: rs_stock_config.clone(),
         db: rs_db_pool.clone(),
         rs_pricing: rs_pricing_client.clone(),
+        rs_media: Arc::clone(&rs_media_bucket),
         span: logging::api_span("rs-stock"),
     };
+    // The handlers of its @manualRouteRegistration operations, which its
+    // router mounts behind each one's route controls (D51).
+    let rs_stock_manual_routes = rs_stock_impl::create_manual_routes(rs_stock_deps.clone())
+        .await
+        .map_err(|err| format!("manual routes of rs-stock: {err}"))?;
     let rs_stock_handlers = rs_stock_impl::create(rs_stock_deps)
         .await
         .map_err(|err| format!("implementation of rs-stock: {err}"))?;
@@ -149,7 +170,11 @@ async fn run() -> Result<(), Failure> {
         Arc::new(IdentityAuthenticator::new(Arc::new(rs_stock_identity))),
         Arc::new(rs_stock_service_authenticator),
     );
-    let rs_stock_router = rs_stock_api::build_router(rs_stock_implementations);
+    let rs_stock_router = rs_stock_api::build_router_with_manual_routes(
+        rs_stock_implementations,
+        rs_stock_api::RouterOptions::default(),
+        rs_stock_manual_routes,
+    );
 
     let readiness = Arc::new(Readiness {
         draining: AtomicBool::new(false),
@@ -205,6 +230,22 @@ fn configure<T, E: std::fmt::Display>(api: &str, loaded: Result<T, E>) -> Result
 fn connect(service: &str, field: &str, database: &Database) -> Result<Pool, Failure> {
     postgres::connect(database)
         .map_err(|err| format!("database {service}, from {field}: {err}").into())
+}
+
+/// Opens the bucket of the bucket field named `field`, which the
+/// environment sets as `<field>_NAME`, and as `<field>_ENDPOINT` when an
+/// emulator serves the bucket in GCS's place, such as the local target's
+/// (the HTTP runtime's `gcs`, D54). Opening makes no request; the first
+/// operation does.
+fn open_bucket(
+    service: &str,
+    field: &str,
+    connection: &stackconfig::Bucket,
+) -> Result<Arc<dyn Bucket>, Failure> {
+    match gcs::open_bucket(connection) {
+        Ok(bucket) => Ok(Arc::new(bucket)),
+        Err(err) => Err(format!("bucket {service}, from {field}: {err}").into()),
+    }
 }
 
 /// Builds the client of rs-pricing. The server calls it at `endpoint`, the

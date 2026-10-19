@@ -112,6 +112,14 @@ func run(logger *zap.Logger) error {
 		return fmt.Errorf("payload decryptor of {{ .Service }}: %w", err)
 	}
 {{- end }}
+{{- if .ManualRoutes }}
+	// The handlers of its @manualRouteRegistration operations, which
+	// RegisterRoutes mounts behind each one's route steps (D51).
+	{{ .Var }}ManualRoutes, err := {{ .Impl }}.NewManualRoutes({{ .Var }}Deps)
+	if err != nil {
+		return fmt.Errorf("manual routes of {{ .Service }}: %w", err)
+	}
+{{- end }}
 {{- if .ServiceAuth }}
 	{{ .Var }}ServiceAuthenticator, err := serviceAuthenticator({{ quote .Service }})
 	if err != nil {
@@ -137,6 +145,9 @@ func run(logger *zap.Logger) error {
 {{- end }}
 {{- if .Encrypted }}
 		PayloadDecryptor: {{ .Var }}Decryptor,
+{{- end }}
+{{- if .ManualRoutes }}
+		ManualRoutes: &{{ .Var }}ManualRoutes,
 {{- end }}
 		Logger:          {{ .Var }}Logger,
 		Implementations: {{ .Var }}Implementations,

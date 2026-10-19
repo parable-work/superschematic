@@ -1,7 +1,8 @@
 # Three servers, each the default one of its API: rs-stock, a Rust server
-# on rs-db, calls rs-pricing, another Rust server, and rs-orders, a Go
-# server, calls rs-stock; the site rs-web calls rs-stock, which answers
-# CORS for it. Its one environment, Local, runs on the local target.
+# on rs-db with the bucket rs-media, calls rs-pricing, another Rust server,
+# and rs-orders, a Go server, calls rs-stock; the site rs-web calls
+# rs-stock, which answers CORS for it. Its one environment, Local, runs on
+# the local target.
 kind: Stack
 types:
   Stock:

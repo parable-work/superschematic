@@ -32,6 +32,20 @@ operationSets:
           - name: id
             typeRef: { name: string }
             required: true
+      # The router mounts it behind its rate limit and hands it to the
+      # handler the implementation's NewManualRoutes builds, which answers
+      # a CSV no JSON envelope holds (D51).
+      - name: exportOrder
+        typeRef: { name: OrderView }
+        required: true
+        httpMethod: GET
+        restPath: orders/{id}/export
+        manualRouteRegistration: true
+        middleware: { rateLimit: 1 }
+        arguments:
+          - name: id
+            typeRef: { name: string }
+            required: true
   - name: OrderMutations
     operations:
       # Encrypted: the server's Config takes the implementation's

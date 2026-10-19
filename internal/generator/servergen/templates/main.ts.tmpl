@@ -186,6 +186,11 @@ async function main(): Promise<void> {
     {{ .Module }}.identityService({ store: {{ .Database.Store }}, config: identityConfig({{ tsQuote .IdentityField }}) })
   );
 {{- end }}
+{{- if .ManualRoutes }}
+  // The handlers of its @manualRouteRegistration operations, which its
+  // router mounts behind each one's auth gate (D51).
+  const {{ .ManualRoutes }} = await construct({{ tsQuote .Service }}, 'manual routes', () => {{ .Impl }}.createManualRoutes({{ .Deps }}));
+{{- end }}
   app.route('/', {{ .Module }}.buildRouter({{ .Implementations }}{{ if .RouterOptions }}, { {{ join .RouterOptions ", " }} }{{ end }}));
 {{- end }}
   app.notFound(notFoundHandler());

@@ -17,6 +17,13 @@ repository = "https://github.com/parable-work/superschematic"
 async-trait = "0.1.89"
 axum = { version = "0.8.9", features = ["json"] }
 base64 = "0.22.1"
+# A bucket's chunks (D54), and with the postgres feature the buffer a
+# queue's text parameter writes into (D65), tokio-postgres's. Already in
+# axum's tree.
+bytes = "1.12.1"
+# The Stream a bucket's object reads and writes through (D54). Already in
+# axum's tree.
+futures-core = "0.3.34"
 http = "1"
 http-body-util = "0.1.3"
 # Service credentials (D37): RS256, ES256 and Ed25519 signature checks, the
@@ -58,9 +65,10 @@ rusqlite = { version = "0.40.2", features = ["bundled"], optional = true }
 # TLS of the http-client feature (native-tls) for a connection string.
 deadpool-postgres = { version = "0.14.2", default-features = false, features = ["rt_tokio_1"], optional = true }
 native-tls = { version = "0.2.18", optional = true }
-# The buffer a queue's text parameter writes into (D65), tokio-postgres's.
-bytes = { version = "1.12.1", optional = true }
 postgres-native-tls = { version = "0.5.3", optional = true }
+# The gcs feature's upload body, a stream of http-body frames over
+# reqwest. Already in reqwest's tree.
+http-body = { version = "1.0.1", optional = true }
 # The logging feature's subscriber (D57): its registry alone, since the
 # runtime writes the JSON lines itself, in the TypeScript logger's shape.
 tracing-subscriber = { version = "0.3.23", default-features = false, features = ["registry", "std"], optional = true }
@@ -98,7 +106,15 @@ identity-sqlite = ["identity", "dep:rusqlite"]
 # With it, the queue client and the worker loop (D65): enqueue in a
 # caller's transaction, the claims of a queue its descriptor describes, and
 # the loop that claims and handles a worker's messages.
-postgres = ["http-client", "dep:deadpool-postgres", "dep:tokio-postgres", "dep:native-tls", "dep:postgres-native-tls", "dep:bytes", "tokio/rt", "tokio-util/rt"]
+postgres = ["http-client", "dep:deadpool-postgres", "dep:tokio-postgres", "dep:native-tls", "dep:postgres-native-tls", "tokio/rt", "tokio-util/rt"]
+# A bucket on Google Cloud Storage (D54): GcsBucket, the Bucket a stack
+# server, job or worker opens for each bucket its APIs list, over Cloud
+# Storage's JSON API through the http-client feature's client, as the
+# workload's account with an access token from the metadata server, or on
+# an emulator with none, and signing its URLs through IAM's signBlob. No
+# Google library: the bucket module, the provider-neutral interface, needs
+# no feature.
+gcs = ["http-client", "dep:http-body"]
 # A stack server's log (D57): one JSON object per line on stdout, in the
 # TypeScript logger's shape, as a layer over tracing-subscriber's registry.
 logging = ["dep:tracing-subscriber"]
@@ -108,7 +124,7 @@ logging = ["dep:tracing-subscriber"]
 # server and client spans, and a worker's loop a span per message. The
 # exporter sends through the http-client feature's reqwest, on a runtime of
 # its own.
-otel = ["logging", "http-client", "dep:opentelemetry", "dep:opentelemetry_sdk", "dep:opentelemetry-otlp", "dep:opentelemetry-http", "dep:tracing-opentelemetry", "dep:bytes"]
+otel = ["logging", "http-client", "dep:opentelemetry", "dep:opentelemetry_sdk", "dep:opentelemetry-otlp", "dep:opentelemetry-http", "dep:tracing-opentelemetry"]
 
 [dev-dependencies]
 tokio = { version = "1.52.2", features = ["macros", "rt-multi-thread", "time", "test-util"] }
@@ -154,6 +170,12 @@ required-features = ["postgres", "logging"]
 [[test]]
 name = "telemetry"
 required-features = ["otel"]
+
+# A bucket on GCS against a fake Cloud Storage, metadata server and IAM,
+# and on the fake-gcs-server SUPERSCHEMATIC_TEST_GCS_EMULATOR names.
+[[test]]
+name = "gcs"
+required-features = ["gcs"]
 
 [lints.clippy]
 all = { level = "deny", priority = -1 }

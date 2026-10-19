@@ -23,6 +23,9 @@
 //! (section 8.6): {{ $api.ImplCrate }}{{ if $api.ImplDir }}, at {{ $api.ImplDir }}{{ end }}
 
 use std::process::ExitCode;
+{{- if .Buckets }}
+use std::sync::Arc;
+{{- end }}
 use std::time::Instant;
 {{ range .RuntimeUses }}
 {{ . }}

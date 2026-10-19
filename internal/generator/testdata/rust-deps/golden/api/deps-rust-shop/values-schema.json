@@ -5,6 +5,14 @@
   "type": "object",
   "additionalProperties": false,
   "properties": {
+    "DEPS_MEDIA_BUCKET_ENDPOINT": {
+      "type": "string",
+      "description": "Derived: a member of DEPS_MEDIA_BUCKET, the bucket connection of deps-media, which the platform sets."
+    },
+    "DEPS_MEDIA_BUCKET_NAME": {
+      "type": "string",
+      "description": "Derived: a member of DEPS_MEDIA_BUCKET, the bucket connection of deps-media, which the platform sets."
+    },
     "DEPS_RUST_PRICING_SERVICE_CREDENTIAL_AUDIENCE": {
       "type": "string",
       "description": "Derived: a member of DEPS_RUST_PRICING_SERVICE, the service endpoint of deps-rust-pricing, which the platform sets."
@@ -58,6 +66,20 @@
     "schemaName": "deps-rust-shop",
     "typeName": "ShopConfig",
     "envVars": [
+      {
+        "name": "DEPS_MEDIA_BUCKET",
+        "irType": "BucketConnection",
+        "primitive": "object",
+        "required": true,
+        "hasDefault": false,
+        "description": "The bucket connection of deps-media (buckets), one variable per member.",
+        "derived": "bucket",
+        "service": "deps-media",
+        "variables": [
+          "DEPS_MEDIA_BUCKET_NAME",
+          "DEPS_MEDIA_BUCKET_ENDPOINT"
+        ]
+      },
       {
         "name": "DEPS_RUST_PRICING_SERVICE",
         "irType": "ServiceEndpoint",

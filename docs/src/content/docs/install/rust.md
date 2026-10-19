@@ -233,10 +233,33 @@ the Topcoat extension writes
 ([Pages with Topcoat](/superschematic/guides/topcoat/)).
 
 `build_router` mounts every operation except those declared
-`@manualRouteRegistration`, as the Go server's `RegisterRoutes` leaves
-them out. Such an operation has no method on its namespace's trait and no
-scaffold. `build_router`'s doc lists each one's method and path, and the
-service adds its route to the router `build_router` returns:
+`@manualRouteRegistration`, whose handler you write, for a response the
+JSON envelope cannot hold, such as a file or a stream. Such an operation
+has no method on its namespace's trait. The crate's `ManualRoutes` trait
+has its handler instead, a method named by its namespace and operation
+that takes the `RequestContext` the route builds and axum's `Request`,
+and answers axum's `Response` or an `ApiError`:
+
+```rust
+#[async_trait]
+impl ManualRoutes for Exports {
+    async fn levels_export_level(&self, ctx: RequestContext, _request: Request) -> Result<Response, ApiError> {
+        let sku = ctx.path_params.get("sku").cloned().unwrap_or_default();
+        Response::builder()
+            .header("content-type", "text/csv")
+            .body(Body::from(format!("sku\n{sku}\n")))
+            .map_err(|err| ApiError::internal(err.to_string()))
+    }
+}
+```
+
+`build_router_with_manual_routes(implementations, options, manual_routes)`
+mounts each handler at its operation's route behind every step the route
+would have as a mounted one: the request id, a webhook's verifier and its
+controls, the caller the authenticator establishes included, which the
+handler finds on `ctx.principal` (D51). Without it, `build_router`'s doc
+lists each manual operation's method and path, and the service adds its
+route to the router `build_router` returns:
 
 ```rust
 let router = build_router(implementations)
@@ -332,8 +355,9 @@ impl WebhookVerifier for GitHubVerifier {
 }
 ```
 
-`build_router` does not mount a `@manualRouteRegistration` webhook, so
-wrap the route you add in `webhook_verified`:
+`build_router_with_manual_routes` runs the verifier before a
+`@manualRouteRegistration` webhook's handler. `build_router` does not
+mount one, so wrap the route you add in `webhook_verified`:
 
 ```rust
 let router = build_router(implementations)
@@ -420,10 +444,11 @@ problem's `requestId` are the same id, and no response is cached
 `Content-Type`, an empty body as none (a 400 when the input or an argument
 is required), and a body that is not JSON as a 400 problem.
 
-`build_router` applies none of this to a `@manualRouteRegistration`
-operation, since it does not mount one. Its doc lists each such
-operation's controls. Apply them to the route you add with
-`RouteControls`, with a clone of the authenticator:
+`build_router_with_manual_routes` applies all of this to a
+`@manualRouteRegistration` operation's route. `build_router` applies none
+of it, since it does not mount one. Its doc lists each such operation's
+controls. Apply them to the route you add with `RouteControls`, with a
+clone of the authenticator:
 
 ```rust
 let authenticator: Arc<dyn Authenticator> = Arc::new(Tokens { keys });
@@ -472,6 +497,7 @@ one line each.
 | --- | --- | --- |
 | `<db>_database` | `stackconfig::Database` | the API's database, its `authDb` or its one DB dependency |
 | `<api>_service` | `stackconfig::Service` | each API it `calls` |
+| `<bucket>_bucket` | `stackconfig::Bucket` | each bucket it lists in `buckets` (D54) |
 | `<api>_callers` | `ServiceAuthConfig` | an API with `@requireService` or `@allowService` |
 | `<api>_cors` | `stackconfig::Cors` | every API: the origins of the sites that call it, none where no site does |
 | `<api>_identity` | `identity::Config` | an API over the user model, parsed from `<API>_IDENTITY`'s JSON, the runtime's defaults when it is unset |
@@ -487,6 +513,8 @@ pub struct Deps {
     pub db: Pool,
     // a Rust SDK client per calls entry, here of shop-api
     pub shop_api: schemas_shop_api_sdk::ShopApiSdk,
+    // runtime::bucket::Bucket per buckets entry, here of shop-media
+    pub shop_media: Arc<dyn Bucket>,
     pub span: tracing::Span,
 }
 
@@ -504,9 +532,14 @@ the `authenticator` of an API whose operations need a caller and whose
 server builds: the `Arc<IdentityAuthenticator>` of an API over the user
 model, and the service authenticator of an API with a service clause,
 each a typed argument, so none is forgotten. A callee needs
-`outputs.sdk` for Rust, which the crate depends on by path, and an API
-that lists a bucket is refused, since buckets from a Rust server are not
-built. The crate turns on the runtime's `postgres` feature for a
+`outputs.sdk` for Rust, which the crate depends on by path. A bucket is
+the runtime's provider-neutral `bucket::Bucket`, which puts, gets,
+deletes and lists objects and signs URLs for them
+([Buckets](/superschematic/guides/buckets/)); the server, job or worker
+opens it on GCS, or on the emulator `stack dev` runs, with the runtime's
+`gcs` feature, which the entrypoint's crate turns on and the API crate
+does not. The crate turns on the
+runtime's `postgres` feature for a
 database, `identity-postgres` beside the user model, so the identity
 store runs over `Deps.db` (`runtime::identity::PostgresPool`), and
 `http-client` for a callee.
@@ -536,6 +569,19 @@ let handlers = schemas_catalog_implementation::create(deps).await?;
 let router = build_router(Implementations::new(handlers, authenticator, service_authenticator));
 ```
 
+For an API with a `@manualRouteRegistration` operation, the scaffold also
+writes `create_manual_routes`, whose `ManualRoutes` has a handler per
+such operation that answers 501, and a dependency on axum, whose
+`Request` and `Response` the handlers take and answer:
+
+```rust
+pub async fn create_manual_routes(
+    deps: Deps,
+) -> Result<Arc<dyn ManualRoutes>, Box<dyn std::error::Error + Send + Sync>> {
+    Ok(Arc::new(ShopStockManualRoutes { deps: Arc::new(deps) }))
+}
+```
+
 With `scaffoldsOutputDir` set, the build writes starter implementations
 once, never overwriting them: a `mod.rs` with one module per namespace,
 and in each namespace's directory a `mod.rs`, `implementation.rs` with the
@@ -562,11 +608,16 @@ lacks; the compiler names it, and you add it with its file.
 In a [stack](/superschematic/guides/stacks/#rust-servers), a server that
 serves Rust APIs needs no `main` of yours: the stack's build writes its
 crate, `schemas/dist/server/<stack>/<server>/`, whose `src/main.rs`
-loads each API's `EnvConfig`, opens a Postgres pool per database, builds
-each `Deps` with its SDK clients and calls the implementation's `create`,
-builds the identity and service authenticators and passes them to
-`Implementations::new`, and serves the routers with `/healthz`,
-`/readyz`, JSON logs and a drain on SIGTERM. The build scaffolds a
+loads each API's `EnvConfig`, opens a Postgres pool per database and each
+bucket its APIs list, builds each `Deps` with its SDK clients and buckets
+and calls the implementation's `create`, and its `create_manual_routes`
+for an API with a `@manualRouteRegistration` operation, builds the
+identity and service authenticators and passes them to
+`Implementations::new`, mounts the manual routes' handlers with
+`build_router_with_manual_routes`, and serves the routers with
+`/healthz`, `/readyz`, JSON logs and a drain on SIGTERM. A stack's build
+refuses an implementation that declares no `create_manual_routes` while
+its API declares a manual route, and says what to add. The build scaffolds a
 missing implementation crate at the `rust` template, and the server's
 `Cargo.toml` depends on it by the package name its `Cargo.toml` gives it,
 so you may rename it. Each build of the stack copies the crate into the
@@ -635,7 +686,7 @@ In a stack, each job and each worker gets a crate of its own beside the
 server's, `schemas/dist/server/<stack>/<job>/`, a member of the same
 workspace, named `schemas-<stack>-<job>-job` or `-worker`, whose binary is
 the deployable's name. Its `src/main.rs` loads the API's `EnvConfig`,
-opens the pool and the SDK clients, builds `Deps` and calls your
+opens the pool, the SDK clients and the buckets, builds `Deps` and calls your
 `create_jobs` or `create_workers`. A job then runs its method once with
 `Shutdown::on_signals()`, logs `job started` and `job done` or `job
 failed`, and exits 1 on a failure; a worker runs the runtime's

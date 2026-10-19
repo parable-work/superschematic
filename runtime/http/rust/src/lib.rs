@@ -7,13 +7,18 @@ pub use superschematic_schema_runtime as schema;
 
 mod auth;
 mod body;
-#[cfg(any(feature = "logging", feature = "postgres"))]
+// The provider-neutral interface of a bucket an API lists (D54).
+pub mod bucket;
+#[cfg(any(feature = "logging", feature = "postgres", feature = "gcs"))]
 mod civil;
 mod context;
 mod controls;
 // A site's CORS (D55), which a stack server answers for the APIs it serves.
 pub mod cors;
 mod error;
+// A bucket on Google Cloud Storage (D54), with the `gcs` feature.
+#[cfg(feature = "gcs")]
+pub mod gcs;
 #[cfg(feature = "http-client")]
 mod http_client;
 /// The user model's runtime (D50), with the `identity` feature.
