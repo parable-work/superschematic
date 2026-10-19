@@ -1,0 +1,37 @@
+{
+  "token": "cloudflare:index/workersCustomDomain:WorkersCustomDomain",
+  "terraform": {
+    "type": "cloudflare_workers_custom_domain",
+    "renames": {
+      "accountId": "account_id",
+      "zoneId": "zone_id",
+      "zoneName": "zone_name"
+    }
+  },
+  "inputProperties": {
+    "accountId": {
+      "type": "string"
+    },
+    "environment": {
+      "type": "string",
+      "deprecationMessage": "This attribute is deprecated."
+    },
+    "hostname": {
+      "type": "string"
+    },
+    "service": {
+      "type": "string"
+    },
+    "zoneId": {
+      "type": "string"
+    },
+    "zoneName": {
+      "type": "string"
+    }
+  },
+  "requiredInputs": [
+    "accountId",
+    "hostname",
+    "service"
+  ]
+}

@@ -18,24 +18,27 @@ import (
 
 // TestTarget: the extension registers the target beside its DNS platform,
 // which is the target's default, with the pulumi provisioner, the pinned
-// account token type and every deploy seam this part builds; it places
-// no deployable yet.
+// account token type and every deploy seam built so far; it places a
+// server on Workers.
 func TestTarget(t *testing.T) {
 	target := newFixture(t).target(t)
 	if target.DNS != cloudflare.DNS || target.Provisioner != "pulumi" {
 		t.Errorf("target DNS %q, provisioner %q", target.DNS, target.Provisioner)
 	}
-	if len(target.Platforms) != 0 {
-		t.Errorf("the target places %v before its platforms are built", target.Platforms)
+	if want := map[ir.DeployableKind]string{ir.DeployableServer: cloudflare.Workers}; !reflect.DeepEqual(target.Platforms, want) {
+		t.Errorf("the target places %v, want %v", target.Platforms, want)
 	}
-	if target.State == nil || target.Secrets == nil || target.Bootstrap == nil || target.CI == nil {
+	if target.State == nil || target.Secrets == nil || target.Bootstrap == nil || target.CI == nil || target.Bundles == nil {
 		t.Errorf("the target lacks a seam: %+v", target)
+	}
+	if _, ok := target.Bundles.(registry.ArtifactFetcher); !ok {
+		t.Error("the bundle store fetches nothing back")
 	}
 	var rules []string
 	for _, rule := range target.Policies {
 		rules = append(rules, rule.Name)
 	}
-	if !reflect.DeepEqual(rules, []string{cloudflare.PolicyDomainOnCloudflare}) {
+	if !reflect.DeepEqual(rules, []string{cloudflare.PolicyDomainOnCloudflare, cloudflare.PolicyNothingPublic}) {
 		t.Errorf("policies = %v", rules)
 	}
 	reg := newFixture(t).reg

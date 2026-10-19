@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/parable-work/superschematic/extensions/cloudflare"
 	"github.com/parable-work/superschematic/extensions/gcp"
 	"github.com/parable-work/superschematic/extensions/pulumi"
 	ir "github.com/parable-work/superschematic/ir"
@@ -64,6 +65,11 @@ func TestRenderGoldens(t *testing.T) {
 		// the tls provider pinned as the binary pins it.
 		{name: "gcp-mixedshop-staging", env: func(t *testing.T) *ir.ResolvedEnvironment { return gcpGolden(t, "MixedShop", "Staging") },
 			versions: map[string]string{"gcp": gcp.ProviderVersion, stack.GenericKeyPackage: stack.GenericKeyProviderVersion}},
+		// acme-shop's storefront on Workers, its bundle pinned as a deploy
+		// pins it, with the cloudflare provider pinned as the binary pins it
+		// (D64).
+		{name: "cloudflare-storefront-staging", env: storefrontEnvironment,
+			versions: map[string]string{cloudflare.Package: cloudflare.ProviderVersion}},
 		{name: "demo-shared", env: func(*testing.T) *ir.ResolvedEnvironment { return sharedEnvironment() },
 			versions: map[string]string{"random": randomVersion}},
 		{name: "demo-preview", env: func(*testing.T) *ir.ResolvedEnvironment { return previewEnvironment(8, true) },

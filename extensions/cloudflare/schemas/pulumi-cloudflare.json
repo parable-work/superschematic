@@ -15,6 +15,10 @@
   ],
   "types": [
     "cloudflare:index/accountToken:AccountToken",
-    "cloudflare:index/dnsRecord:DnsRecord"
+    "cloudflare:index/dnsRecord:DnsRecord",
+    "cloudflare:index/worker:Worker",
+    "cloudflare:index/workerVersion:WorkerVersion",
+    "cloudflare:index/workersCustomDomain:WorkersCustomDomain",
+    "cloudflare:index/workersDeployment:WorkersDeployment"
   ]
 }

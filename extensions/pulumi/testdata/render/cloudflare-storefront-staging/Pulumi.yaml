@@ -1,0 +1,71 @@
+# Rendered by superschematic from the resource graph of environment Staging of
+# stack storefront-stack. Do not edit: change the stack and render it again.
+
+name: storefront-stack
+runtime: yaml
+description: Environment Staging of stack storefront-stack
+resources:
+  # phase rollout; owners shop-storefront
+  shop-storefront-deployment:
+    name: shop-storefront.deployment
+    type: cloudflare:index/workersDeployment:WorkersDeployment
+    properties:
+      accountId: 0123456789abcdef0123456789abcdef
+      scriptName: ${shop-storefront-worker.name}
+      strategy: percentage
+      versions:
+        - percentage: 100
+          versionId: ${shop-storefront-version.id}
+    options:
+      dependsOn:
+        - ${shop-storefront-version}
+        - ${shop-storefront-worker}
+      version: 6.22.0
+  # phase rollout; owners shop-storefront
+  shop-storefront-version:
+    name: shop-storefront.version
+    type: cloudflare:index/workerVersion:WorkerVersion
+    properties:
+      accountId: 0123456789abcdef0123456789abcdef
+      compatibilityDate: "2026-09-15"
+      mainModule: main.js
+      modules:
+        - contentFile: artifacts/shop-storefront/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef/main.js
+          contentSha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          contentType: application/javascript+module
+          name: main.js
+        - contentFile: artifacts/shop-storefront/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef/main.js.map
+          contentSha256: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+          contentType: application/source-map
+          name: main.js.map
+        - contentFile: artifacts/shop-storefront/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef/superscalar.wasm
+          contentSha256: cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+          contentType: application/wasm
+          name: superscalar.wasm
+      workerId: ${shop-storefront-worker.id}
+    options:
+      dependsOn:
+        - ${shop-storefront-worker}
+      version: 6.22.0
+  # phase infrastructure; owners shop-storefront
+  shop-storefront-worker:
+    name: shop-storefront.worker
+    type: cloudflare:index/worker:Worker
+    properties:
+      accountId: 0123456789abcdef0123456789abcdef
+      name: shop-storefront
+      observability:
+        enabled: true
+        logs:
+          enabled: true
+          invocationLogs: true
+      subdomain:
+        enabled: true
+        previewsEnabled: false
+    options:
+      version: 6.22.0
+outputs:
+  shop-storefront.deployment.id: ${shop-storefront-deployment.id}
+  shop-storefront.version.id: ${shop-storefront-version.id}
+  shop-storefront.worker.id: ${shop-storefront-worker.id}
+  shop-storefront.worker.name: ${shop-storefront-worker.name}

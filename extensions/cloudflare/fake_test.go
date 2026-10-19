@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"slices"
 	"sort"
 	"strings"
@@ -42,7 +43,8 @@ type fakeCloud struct {
 	stores    []cloudflare.SecretsStore
 	secrets   map[string]map[string]*fakeSecret // store, then name
 	buckets   map[string]bool
-	objects   map[string][]byte // bucket/key
+	objects   map[string][]byte            // bucket/key
+	meta      map[string]map[string]string // bucket/key
 	nextID    int
 }
 
@@ -93,6 +95,7 @@ func newFakeCloud() *fakeCloud {
 		secrets:   map[string]map[string]*fakeSecret{},
 		buckets:   map[string]bool{},
 		objects:   map[string][]byte{},
+		meta:      map[string]map[string]string{},
 	}
 }
 
@@ -214,16 +217,17 @@ func (c *fakeCloud) GetObject(_ context.Context, account, bucket, key string) ([
 	if !ok {
 		return nil, nil, fmt.Errorf("fake: %s/%s: %w", bucket, key, fs.ErrNotExist)
 	}
-	return slices.Clone(data), nil, c.checkAccount(account)
+	return slices.Clone(data), maps.Clone(c.meta[bucket+"/"+key]), c.checkAccount(account)
 }
 
-func (c *fakeCloud) PutObject(_ context.Context, account, bucket, key string, data []byte, _ map[string]string) error {
+func (c *fakeCloud) PutObject(_ context.Context, account, bucket, key string, data []byte, metadata map[string]string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if !c.buckets[bucket] {
 		return fmt.Errorf("fake: no bucket %s", bucket)
 	}
 	c.objects[bucket+"/"+key] = slices.Clone(data)
+	c.meta[bucket+"/"+key] = maps.Clone(metadata)
 	c.record("put %s/%s", bucket, key)
 	return c.checkAccount(account)
 }
@@ -233,6 +237,7 @@ func (c *fakeCloud) DeleteObject(_ context.Context, account, bucket, key string)
 	defer c.mu.Unlock()
 	if _, ok := c.objects[bucket+"/"+key]; ok {
 		delete(c.objects, bucket+"/"+key)
+		delete(c.meta, bucket+"/"+key)
 		c.record("delete %s/%s", bucket, key)
 	}
 	return c.checkAccount(account)

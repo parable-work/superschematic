@@ -4,9 +4,10 @@
 // a Cloudflare zone beside whatever target runs its compute, and the target
 // `cloudflare`, which runs an environment on one Cloudflare account: its
 // state in an R2 bucket, its secrets in the account's Secrets Store, a
-// bootstrap that makes both and the CI's account tokens, and the generated
-// CI's sign-in with those tokens. Its Workers, D1, R2, site and cron
-// platforms come next, in this module.
+// bootstrap that makes both and the CI's account tokens, the generated
+// CI's sign-in with those tokens, TypeScript servers as Workers, and the
+// R2 store of the bundles they run. Its D1, R2, site and cron platforms
+// come next, in this module.
 //
 // It registers through the public registry package alone, as any
 // extension does (D10), in a Go module of its own (D1). Its platforms are
@@ -55,6 +56,11 @@ const (
 	// on the cloudflare DNS platform: Cloudflare writes a custom domain's
 	// record and certificate only in a zone of the account (section 18.11).
 	PolicyDomainOnCloudflare = "domain-on-cloudflare"
+
+	// PolicyNothingPublic refuses a Worker reached from the internet, at
+	// workers.dev, a custom domain or a route, on behalf of a deployable
+	// that is not exposed (section 18.14).
+	PolicyNothingPublic = "nothing-public-unless-exposed"
 )
 
 // Package is the Pulumi package the extension's resource types belong to,
@@ -94,8 +100,9 @@ func (Extension) Name() string { return Name }
 
 // Register adds the Cloudflare DNS platform and the cloudflare target,
 // with the pinned schema of every type they and bootstrap emit, and the
-// target's deploy seams: the state in R2, the Secrets Store, bootstrap and
-// the generated CI's sign-in with an account token (D64).
+// target's deploy seams: the state in R2, the Secrets Store, bootstrap,
+// the bundles in R2, and the generated CI's sign-in with an account token
+// (D64).
 func (e Extension) Register(r *registry.Registry) error {
 	types, err := schemas.ResourceTypes(ProviderVersion)
 	if err != nil {
@@ -130,20 +137,22 @@ func (e Extension) Register(r *registry.Registry) error {
 		ResourceTypes: types,
 		Policies: []registry.PolicyRule{
 			{Name: PolicyDomainOnCloudflare, Check: checkDomainOnCloudflare},
+			{Name: PolicyNothingPublic, Check: checkNothingPublic},
 		},
 		State:     stateStore{ext: e},
 		Secrets:   secretStore{ext: e},
 		Bootstrap: bootstrapper{ext: e},
+		Bundles:   bundleStore{ext: e},
 		CI:        ciIdentities{},
 	})
 }
 
 // platforms are the target's platforms, one per deployable kind it
 // places; the target names each for its kind. Each gets the extension
-// and the provider when it registers. None yet: Workers, Cron, D1, R2
-// and sites come next (section 18.2).
+// and the provider when it registers: Workers for servers (workers.go);
+// Cron, D1, R2 and sites come next (section 18.2).
 func (e Extension) platforms() []registry.PlatformSpec {
-	return nil
+	return []registry.PlatformSpec{workersPlatform()}
 }
 
 // getenv reads the shell's environment.
