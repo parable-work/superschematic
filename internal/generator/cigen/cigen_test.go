@@ -279,10 +279,23 @@ func TestGoldenWorkflow(t *testing.T) {
 		t.Errorf("preview-review's destroy = %+v", s)
 	}
 	check := w.jobs["check"]
-	for _, server := range []string{"Orders", "shop-api"} {
-		s := check.step("Compile server " + server)
-		if s == nil || s.Run != "go build -mod=mod -o /dev/null ." || s.WorkingDirectory != "schemas/dist/server/shop-stack/"+server {
-			t.Errorf("check compiles server %s with %+v", server, s)
+	// check compiles the module of each Go server, then of each Go job and
+	// worker, shop-orders' ShipOrders and FulfilOrders, which link the same
+	// archives and import the same implementation.
+	compiles := []struct{ kind, name string }{
+		{"server", "Orders"}, {"server", "shop-api"}, {"job", "shop-orders-ship-orders"}, {"worker", "shop-orders-fulfil-orders"},
+	}
+	previous := check.index("Build the services")
+	for _, c := range compiles {
+		name := "Compile " + c.kind + " " + c.name
+		s := check.step(name)
+		if s == nil || s.Run != "go build -mod=mod -o /dev/null ." || s.WorkingDirectory != "schemas/dist/server/shop-stack/"+c.name {
+			t.Errorf("check compiles %s %s with %+v", c.kind, c.name, s)
+		}
+		if i := check.index(name); i != previous+1 {
+			t.Errorf("check compiles %s %s at step %d, want %d, after the step before it", c.kind, c.name, i, previous+1)
+		} else {
+			previous = i
 		}
 	}
 	if s := check.step("Build the services"); s == nil || s.Run != "superschematic build-all schemas/services" {
@@ -550,6 +563,40 @@ func TestRendererNamesEnvironmentsWithNoJob(t *testing.T) {
 		Tools: []publicregistry.CLITool{{Name: "terraform", Version: "1.9.0"}}}}
 	if _, err := cigen.GitHub().Render(tool); err == nil || !strings.Contains(err.Error(), "has no step that installs tool terraform") {
 		t.Errorf("an unknown tool: %v", err)
+	}
+}
+
+// TestGoJobsAndWorkersInCheck: a stack whose Go deployables are a job and
+// a worker alone, with no Go server, still gets the release's archives and
+// Go in check, which compiles the job's module, then the worker's.
+func TestGoJobsAndWorkersInCheck(t *testing.T) {
+	req := storefrontRequest()
+	env := *req.Environments[0].Environment
+	env.Deployables = []*ir.ResolvedDeployable{
+		{Name: "shop-orders-fulfil-orders", Kind: ir.DeployableWorker, Language: publicregistry.APILanguageGo, Services: []ir.ServiceRef{{Name: "shop-orders", Kind: ir.SchemaKindAPI}}},
+		{Name: "shop-orders-ship-orders", Kind: ir.DeployableJob, Language: publicregistry.APILanguageGo, Services: []ir.ServiceRef{{Name: "shop-orders", Kind: ir.SchemaKindAPI}}},
+	}
+	req.Environments[0].Environment = &env
+	req.Stack.TypeScriptImplementations = nil
+	files, err := cigen.GitHub().Render(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "storefront-stack.yml")
+	if err := os.WriteFile(path, files[0].Data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	lint(t, path)
+	var names []string
+	for _, s := range parseWorkflow(t, files[0].Data).jobs["check"].Steps {
+		names = append(names, s.Name)
+	}
+	want := []string{
+		"Check out", "Install superschematic " + version, "Install the static archives", "Set up Go", "Build the services",
+		"Compile job shop-orders-ship-orders", "Compile worker shop-orders-fulfil-orders",
+	}
+	if !slices.Equal(names, want) {
+		t.Errorf("check's steps:\n%q\nwant:\n%q", names, want)
 	}
 }
 

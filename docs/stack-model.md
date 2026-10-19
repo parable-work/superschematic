@@ -3883,9 +3883,12 @@ The GitHub workflow:
     the root's lockfile (`bun install --frozen-lockfile` or `npm ci`),
     runs `build-all` over the services root, which resolves every
     environment and checks its graph (levels 1 and 3), and compiles each
-    Go server's entrypoint module with `go build -mod=mod` (level 2). It
-    runs on a push too. A binary the release workflow did not build names
-    no digests, and its archives step fails.
+    Go server's, job's and worker's entrypoint module with `go build
+    -mod=mod` (level 2), in that order and each named for its kind, so a
+    job or a worker that no longer builds against its implementation fails
+    the pull request as a server does. It runs on a push too. A binary the
+    release workflow did not build names no digests, and its archives step
+    fails.
   - For a stack with a TypeScript server, `check` then installs the
     output root's Bun workspace from the lockfile the project commits
     (section 8.6), `bun install --frozen-lockfile` in

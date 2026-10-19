@@ -1402,13 +1402,13 @@ The workflow:
   links, and the schemas root's packages (`bun install --frozen-lockfile`
   for a `bun.lock`, `npm ci` for a `package-lock.json`), runs `build-all`,
   which resolves every environment and checks its graph, and compiles
-  each Go server's entrypoint module with `go build -mod=mod`. It needs no
-  credentials, and no Rust or superscalar checkout for a stack with no
-  Rust server. For a stack with a Rust server it sets up the Rust release
-  `tools.env` pins before the build, fails when `schemas/dist/Cargo.lock`
-  is not committed or the build changed it, and compiles each Rust server
-  with `cargo check --locked`; every job that builds sets up the same
-  release. For a stack with a
+  each Go server's, job's and worker's entrypoint module with `go build
+  -mod=mod`. It needs no credentials, and no Rust or superscalar checkout
+  for a stack with no Rust server, job or worker. For a stack with one it
+  sets up the Rust release `tools.env` pins before the build, fails when
+  `schemas/dist/Cargo.lock` is not committed or the build changed it, and
+  compiles each Rust server, job and worker with `cargo check --locked`;
+  every job that builds sets up the same release. For a stack with a
   TypeScript server it then installs `schemas/dist`'s Bun workspace with
   `bun install --frozen-lockfile`, failing when `schemas/dist/bun.lock`
   is not committed or no longer matches the packages the build wrote, and
