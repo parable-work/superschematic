@@ -124,3 +124,71 @@ func TestTypeScriptWorkersRefusals(t *testing.T) {
 		})
 	}
 }
+
+// TestTypeScriptWorkersEntrypointWiring plans a server on Workers whose
+// API a site calls, whose operations need an end user and a calling
+// service, which registers a route by hand and calls another API: its
+// fetch.ts reads the API's config and CORS field from the bindings it
+// awaits per isolate, builds the callee's client with fetch through the
+// service binding its endpoint names, mounts the router with its
+// authenticator, its service authenticator and its manual routes, and
+// answers CORS before the app, with the client's address (D64).
+func TestTypeScriptWorkersEntrypointWiring(t *testing.T) {
+	in := servergen.TypeScriptInput{
+		Stack:   "edge-stack",
+		Server:  "shop-api",
+		Dir:     t.TempDir(),
+		Workers: true,
+		APIs: []servergen.TypeScriptAPIInput{{
+			Output: &tsrestgen.APIOutput{
+				SchemaName:        "shop-api",
+				PackageName:       "@schemas/shop-api-api",
+				HasEnvConfig:      true,
+				HasServiceCallers: true,
+				Endpoints:         []tsrestgen.EndpointInfo{{Name: "getCart", RequiresAuth: true}},
+				ManualEndpoints:   []tsrestgen.EndpointInfo{{Name: "exportCart"}},
+				Deps: tsrestgen.DepsInfo{Calls: []tsrestgen.DepsCall{{
+					Service: "shop-pricing", Field: "pricing", Package: "@schemas/shop-pricing-sdk", Client: "ShopPricingSDK",
+				}}},
+			},
+			Routes: &apigen.APIOutput{SchemaName: "shop-api"},
+			Config: &envgen.ConfigOutput{
+				SchemaName:   "shop-api",
+				CallersField: ir.CallersField("shop-api"),
+				Derived:      []envgen.DerivedField{{Key: "SHOP_PRICING_SERVICE", Kind: ir.EdgeHTTP, Service: "shop-pricing"}},
+			},
+			Implementation: servergen.TypeScriptImplementation{Package: "@schemas/shop-api-implementation"},
+			CORS:           true,
+		}},
+	}
+	s, err := servergen.PlanTypeScript(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := servergen.WriteTypeScript(s, in.Dir); err != nil {
+		t.Fatal(err)
+	}
+	fetch, err := os.ReadFile(filepath.Join(in.Dir, servergen.TypeScriptFetchFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"import { awaitSecrets, isolate, requestIP, serviceFetch, stackEnvOf } from '@superschematic/http-runtime/workers';",
+		"configure('shop-api', () => shopApiApi.loadEnvConfig(stackEnvOf(env)));",
+		"const values = await awaitSecrets(env);",
+		"const shopApiConfig = configure('shop-api', () => shopApiApi.loadEnvConfig(values));",
+		"const shopApiOrigins = configure('shop-api', () => loadCors('SHOP_API_CORS', values));",
+		"const shopPricingClient = newShopPricingClient(shopApiConfig.SHOP_PRICING_SERVICE);",
+		"fetch: serviceFetch(env, endpoint),",
+		"const shopApiAuthenticate = await construct('shop-api', 'authenticator', () => shopApiImpl.authenticate(shopApiDeps));",
+		"const shopApiManualRoutes = await construct('shop-api', 'manual routes', () => shopApiImpl.createManualRoutes(shopApiDeps));",
+		"authenticate: shopApiAuthenticate, authenticateService: serviceAuthenticator(shopApiConfig.SHOP_API_CALLERS), manualRoutes: shopApiManualRoutes",
+		"(request: Request) => app.fetch(request, bindings)",
+		"return handle;",
+		"const bindings = { requestIP };",
+	} {
+		if !strings.Contains(string(fetch), want) {
+			t.Errorf("fetch.ts does not hold %q:\n%s", want, fetch)
+		}
+	}
+}

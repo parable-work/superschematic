@@ -57,7 +57,7 @@ configure({{ tsQuote .Service }}, () => {{ .Module }}.{{ .ConfigLoader }}(stackE
 
 /** Builds the server from the Worker's bindings, once per isolate. */
 async function build(): Promise<Handle> {
-{{- if .APIsWithConfig }}
+{{- if .ReadsBindings }}
   // The string bindings with each secret binding's value, awaited once.
   const values = await awaitSecrets(env);
 {{- range .APIs }}
@@ -78,7 +78,8 @@ async function build(): Promise<Handle> {
   const {{ .Var }} = {{ .Constructor }}({{ .From }});
 {{- end }}
 {{- end }}
-
+{{- if or .ReadsBindings .Clients }}
+{{ end }}
   const app = new Hono();
   app.get('/healthz', c => c.json({ status: 'ok' }));
   app.get('/readyz', c => c.json({ status: 'ready' }));
@@ -123,7 +124,7 @@ async function build(): Promise<Handle> {
     ],
     (request: Request) => app.fetch(request, bindings)
   );
-  return request => handle(request, bindings);
+  return handle;
 {{- else }}
   return request => app.fetch(request, bindings);
 {{- end }}

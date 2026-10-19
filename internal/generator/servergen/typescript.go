@@ -735,6 +735,11 @@ func (s *TypeScriptServer) APIsWithConfig() bool {
 	return slices.ContainsFunc(s.APIs, func(a *TypeScriptAPI) bool { return a.Config != "" })
 }
 
+// ReadsBindings reports whether fetch.ts reads the Worker's string and
+// secret bindings when it builds the server: for an API's config, or the
+// origins its CORS field lists.
+func (s *TypeScriptServer) ReadsBindings() bool { return s.APIsWithConfig() || s.AnyCORS() }
+
 // WorkersImports are the names fetch.ts imports from the HTTP runtime's
 // ./workers entry (D64): the per-isolate builder and the client's address
 // always; the readers of the bindings' strings and secrets when an API has
@@ -742,7 +747,7 @@ func (s *TypeScriptServer) APIsWithConfig() bool {
 // calls another API.
 func (s *TypeScriptServer) WorkersImports() []string {
 	var out []string
-	if s.APIsWithConfig() {
+	if s.ReadsBindings() {
 		out = append(out, "awaitSecrets")
 	}
 	out = append(out, "isolate", "requestIP")
