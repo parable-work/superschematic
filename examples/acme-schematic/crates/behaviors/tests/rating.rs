@@ -1,6 +1,5 @@
-//! acme.Rating in the Rust engine, the port of
-//! `packages/behaviors/test/rating.test.ts` (the smoke's step 20): an
-//! engine with the core's behaviors and acme's defines and publishes
+//! acme.Rating in the engine (the smoke's step 20 runs these): an engine
+//! with the core's behaviors and acme's defines and publishes
 //! shop-ratings' Product, creates one, rates it and reads the rating fields
 //! and events; its tools carry acme's invocation policy; a new version may
 //! raise maxStars and not lower it; an engine without acme's behaviors
@@ -58,9 +57,9 @@ impl Target {
         }
     }
 
-    /// An engine as the TypeScript test's `open` opens one: every write
-    /// allowed, acme's meta-schema and tool options, and the core's
-    /// behaviors, with acme's when `with_acme`.
+    /// An engine as a deployment of acme's opens one: every write allowed,
+    /// acme's meta-schema and tool options, and the core's behaviors, with
+    /// acme's when `with_acme`.
     fn open(&self, with_acme: bool) -> Engine {
         let mut options = EngineOptions::new(self.storage());
         options.policy = Some(Policy::allow_all());
