@@ -66,7 +66,10 @@ func TestToolHooksEditKeysAndRecords(t *testing.T) {
 	if !reflect.DeepEqual(order, []string{"first", "second"}) {
 		t.Fatalf("hook order = %v", order)
 	}
-	want := apigen.ToolKeys{Scalar: "x-vendor-scalar", Guidance: apigen.DefaultToolGuidanceKey, Parameters: []apigen.ToolKeyValue{{Key: "x-vendor-version", Value: 1}}}
+	want := apigen.ToolKeys{
+		Scalar: "x-vendor-scalar", Reference: apigen.DefaultToolReferenceKey, Search: apigen.DefaultToolSearchKey,
+		Guidance: apigen.DefaultToolGuidanceKey, Parameters: []apigen.ToolKeyValue{{Key: "x-vendor-version", Value: 1}},
+	}
 	if !reflect.DeepEqual(output.ToolKeys, want) {
 		t.Fatalf("ToolKeys = %+v, want %+v", output.ToolKeys, want)
 	}
@@ -98,6 +101,18 @@ func TestToolHookErrors(t *testing.T) {
 			tools.Keys.Parameters = []apigen.ToolKeyValue{{Key: "properties", Value: 1}}
 			return nil
 		}, want: `tool parameter key "properties" is written by the core`},
+		{name: "reference key", edit: func(_ *ir.Schema, tools *apigen.ToolSet) error {
+			tools.Keys.Parameters = []apigen.ToolKeyValue{{Key: apigen.DefaultToolReferenceKey, Value: 1}}
+			return nil
+		}, want: `tool parameter key "x-superschematic-reference" is the reference key`},
+		{name: "search key", edit: func(_ *ir.Schema, tools *apigen.ToolSet) error {
+			tools.Keys.Parameters = []apigen.ToolKeyValue{{Key: apigen.DefaultToolSearchKey, Value: true}}
+			return nil
+		}, want: `tool parameter key "x-superschematic-search" is the search key`},
+		{name: "one key for two", edit: func(_ *ir.Schema, tools *apigen.ToolSet) error {
+			tools.Keys.Reference = tools.Keys.Scalar
+			return nil
+		}, want: `the scalar key and the reference key are both "x-superschematic-scalar"`},
 		{name: "duplicate key", edit: func(_ *ir.Schema, tools *apigen.ToolSet) error {
 			tools.Keys.Parameters = []apigen.ToolKeyValue{{Key: "x-v", Value: 1}, {Key: "x-v", Value: 2}}
 			return nil

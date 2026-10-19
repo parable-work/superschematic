@@ -19,6 +19,9 @@ func generateOpenAPISpec(output *APIOutput, schema *ir.Schema, dependencies map[
 	scalarMap := buildOpenAPIScalarMap(schema, dependencies)
 	scalarExamples, scalarDescriptions := collectOpenAPIScalarMetadata(schema, dependencies)
 
+	components := buildOpenAPISchemas(output.Endpoints, scalarExamples, scalarDescriptions, scalarMap, schema, dependencies)
+	addOpenAPIFieldReferences(components, schema, dependencies)
+
 	// info.version and servers are placeholders: the generated server
 	// replaces both at startup (injectOpenAPIRuntimeValues in routes.tmpl).
 	spec := map[string]interface{}{
@@ -36,7 +39,7 @@ func generateOpenAPISpec(output *APIOutput, schema *ir.Schema, dependencies map[
 		},
 		"paths": buildOpenAPIPaths(output, scalarExamples, scalarDescriptions, scalarMap, schema, dependencies),
 		"components": map[string]interface{}{
-			"schemas": buildOpenAPISchemas(output.Endpoints, scalarExamples, scalarDescriptions, scalarMap, schema, dependencies),
+			"schemas": components,
 			"securitySchemes": map[string]interface{}{
 				"bearerAuth": map[string]interface{}{
 					"type":         "http",
@@ -71,6 +74,8 @@ func generateOpenAPISpec(output *APIOutput, schema *ir.Schema, dependencies map[
 // it references under definitions, so it can be handed to a consumer
 // without the surrounding API document. References to the type itself
 // become "#" and references to other components "#/definitions/<Name>".
+// Its fields carry no reference key (OpenAPIReferenceKey): the options
+// operation a reference names is an operation of the API's document.
 func TypeOpenAPISchema(typeName string, schema *ir.Schema, dependencies map[string]*ir.Schema) (map[string]interface{}, error) {
 	if schema == nil || schema.Types[typeName] == nil {
 		return nil, fmt.Errorf("build OpenAPI schema for unknown type %q", typeName)
@@ -218,6 +223,8 @@ func buildCommonHeaderParameters(output *APIOutput) []map[string]interface{} {
 // present or absent, never null, so the schema is never nullable;
 // "required" says whether it may be absent. A list uses style=form and
 // explode=false, the ?name=a,b encoding the generated servers and SDKs use.
+// A parameter that refers to an item gives its reference, and the search
+// argument says so, on the parameter object (D61, D62).
 func buildQueryParams(params []Param, scalarExamples, scalarDescriptions, scalarMap map[string]string, schema *ir.Schema, dependencies map[string]*ir.Schema) []map[string]interface{} {
 	var result []map[string]interface{}
 	for _, param := range params {
@@ -237,6 +244,7 @@ func buildQueryParams(params []Param, scalarExamples, scalarDescriptions, scalar
 			definition["style"] = "form"
 			definition["explode"] = false
 		}
+		openAPIParameterKeys(definition, param)
 		result = append(result, definition)
 	}
 	return result
@@ -308,13 +316,15 @@ func buildOpenAPIPaths(output *APIOutput, scalarExamples, scalarDescriptions, sc
 		parameters := buildCommonHeaderParameters(output)
 		for _, param := range endpoint.PathParams {
 			paramSchema := typeToOpenAPISchema(param.Type, scalarExamples, scalarDescriptions, scalarMap)
-			parameters = append(parameters, map[string]interface{}{
+			definition := map[string]interface{}{
 				"name":        param.Name,
 				"in":          "path",
 				"required":    true, // OpenAPI 3.0 spec: path parameters MUST be required
 				"description": fmt.Sprintf("%s parameter", param.Name),
 				"schema":      paramSchema,
-			})
+			}
+			openAPIParameterKeys(definition, param)
+			parameters = append(parameters, definition)
 		}
 
 		// GET endpoints carry scalar args in the query string instead of a body.
@@ -406,12 +416,14 @@ func buildOpenAPIPaths(output *APIOutput, scalarExamples, scalarDescriptions, sc
 				if arg.Required {
 					required = append(required, arg.Name)
 				}
-				properties[arg.Name] = openAPIFieldSchema(typeRef, arg.Required, openAPIBounds{
+				property := openAPIFieldSchema(typeRef, arg.Required, openAPIBounds{
 					min: arg.ValidateMin, max: arg.ValidateMax,
 					minLength: arg.ValidateMinLength, maxLength: arg.ValidateMaxLength,
 					pattern: arg.ValidatePattern,
 					listMin: arg.ValidateListMin, listMax: arg.ValidateListMax,
 				}, scalarExamples, scalarDescriptions, scalarMap, schema, dependencies)
+				openAPIParameterKeys(property, arg)
+				properties[arg.Name] = property
 			}
 
 			schemaObj := map[string]interface{}{

@@ -1,0 +1,148 @@
+[
+  {
+    "name": "catalog.placeBasket",
+    "inputSchemaDigest": "sha256:2540aa1e84acf1bd302fecdf783b7116096d960358b6deb45939c5ee5b14c4b3",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "giftSku": {
+          "x-superschematic-scalar": "Identity.Slug",
+          "x-superschematic-reference": {
+            "target": "ItemView",
+            "options": "catalog.listItems",
+            "value": "sku",
+            "label": "name"
+          },
+          "description": "A URL friendly version of a string",
+          "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$",
+          "minLength": 1,
+          "maxLength": 255,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "lines": {
+          "type": "array",
+          "description": "Array of BasketLine values",
+          "minItems": 1,
+          "maxItems": 5,
+          "items": {
+            "additionalProperties": false,
+            "type": "object",
+            "description": "BasketLine object",
+            "properties": {
+              "itemId": {
+                "x-superschematic-scalar": "Identity.UUID",
+                "x-superschematic-reference": {
+                  "target": "ItemView",
+                  "options": "catalog.listItems",
+                  "value": "id",
+                  "label": "name",
+                  "lookup": "ids"
+                },
+                "type": "string",
+                "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+                "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
+              },
+              "quantity": {
+                "type": "number",
+                "description": "A numeric value",
+                "minimum": 1,
+                "maximum": 9
+              }
+            },
+            "required": [
+              "itemId",
+              "quantity"
+            ]
+          }
+        }
+      },
+      "required": [
+        "lines"
+      ]
+    },
+    "returns": {
+      "type": "object",
+      "description": "BasketView object"
+    }
+  },
+  {
+    "name": "catalog.listItems",
+    "inputSchemaDigest": "sha256:e73c2af0cb458b02d869c72d0c61b09ebe595f4c5a54ba3b965de64c80bd8e48",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "ids": {
+          "x-superschematic-reference": {
+            "target": "ItemView",
+            "options": "catalog.listItems",
+            "value": "id",
+            "label": "name",
+            "lookup": "ids"
+          },
+          "type": "array",
+          "description": "Array of Identity.UUID values",
+          "maxItems": 5,
+          "items": {
+            "x-superschematic-scalar": "Identity.UUID",
+            "type": "string",
+            "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+            "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
+          }
+        },
+        "inStock": {
+          "type": "boolean",
+          "description": "A boolean value (true or false)"
+        },
+        "q": {
+          "x-superschematic-search": true,
+          "type": "string",
+          "description": "A string value",
+          "maxLength": 50
+        }
+      }
+    },
+    "returns": {
+      "type": "array",
+      "description": "Array of ItemView",
+      "items": {
+        "type": "object",
+        "description": "ItemView object"
+      }
+    }
+  },
+  {
+    "name": "catalog.getItem",
+    "inputSchemaDigest": "sha256:ee3e7d9c79fc7548033793c8a3c2607cd9e42cf21785a3deeb9785e5951ad939",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "itemId": {
+          "x-superschematic-scalar": "Identity.UUID",
+          "x-superschematic-reference": {
+            "target": "ItemView",
+            "options": "catalog.listItems",
+            "value": "id",
+            "label": "name",
+            "lookup": "ids"
+          },
+          "type": "string",
+          "description": "itemId parameter",
+          "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
+        }
+      },
+      "required": [
+        "itemId"
+      ]
+    },
+    "returns": {
+      "type": "object",
+      "description": "ItemView object"
+    }
+  }
+]

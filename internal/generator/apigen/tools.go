@@ -16,6 +16,13 @@ const (
 	// DefaultToolScalarKey is the key a tool argument property carries its
 	// canonical scalar name under ("Identity.UUID").
 	DefaultToolScalarKey = "x-superschematic-scalar"
+	// DefaultToolReferenceKey is the key a tool argument property that
+	// refers to an item carries its resolved reference under (D61), the
+	// OpenAPI document's key.
+	DefaultToolReferenceKey = OpenAPIReferenceKey
+	// DefaultToolSearchKey is the key, true, that marks the property of an
+	// operation's search argument (D62), the OpenAPI document's key.
+	DefaultToolSearchKey = OpenAPISearchKey
 	// DefaultToolGuidanceKey is the MCP _meta key a visible tool carries its
 	// @docs guidance (useWhen, doNotUseWhen, success, errors) under.
 	DefaultToolGuidanceKey = "superschematic/operation-guidance"
@@ -28,6 +35,14 @@ type ToolKeys struct {
 	// Scalar is the key a tool argument property carries its canonical
 	// scalar name under. Empty leaves the name out.
 	Scalar string
+	// Reference is the key a tool argument property that refers to an
+	// item (D61) carries its resolved reference under: { target, options,
+	// value, label, lookup }, target the type's name and options the
+	// options operation's tool name. Empty leaves references out.
+	Reference string
+	// Search is the key, true, that marks the property of an operation's
+	// search argument (D62). Empty leaves the mark out.
+	Search string
 	// Guidance is the MCP _meta key a visible tool carries its @docs
 	// guidance under. Empty leaves the guidance out of _meta; the tool
 	// documents' own guidance member is written either way.
@@ -49,7 +64,10 @@ type ToolKeyValue struct {
 
 // DefaultToolKeys returns the keys the core writes.
 func DefaultToolKeys() ToolKeys {
-	return ToolKeys{Scalar: DefaultToolScalarKey, Guidance: DefaultToolGuidanceKey}
+	return ToolKeys{
+		Scalar: DefaultToolScalarKey, Reference: DefaultToolReferenceKey, Search: DefaultToolSearchKey,
+		Guidance: DefaultToolGuidanceKey,
+	}
 }
 
 // ToolHook edits what the SDK generators publish about an API's MCP tools:
@@ -135,6 +153,15 @@ func applyToolHooks(schema *ir.Schema, endpoints []EndpointInfo, hooks []ToolHoo
 }
 
 func validateToolKeys(keys ToolKeys) error {
+	// A property's own keys: two of one name would write one key twice.
+	propertyKeys := []struct{ name, key string }{{"scalar", keys.Scalar}, {"reference", keys.Reference}, {"search", keys.Search}}
+	for i, a := range propertyKeys {
+		for _, b := range propertyKeys[i+1:] {
+			if a.key != "" && a.key == b.key {
+				return fmt.Errorf("the %s key and the %s key are both %q", a.name, b.name, a.key)
+			}
+		}
+	}
 	seen := make(map[string]bool, len(keys.Parameters))
 	for _, kv := range keys.Parameters {
 		switch {
@@ -144,6 +171,10 @@ func validateToolKeys(keys ToolKeys) error {
 			return fmt.Errorf("tool parameter key %q is written by the core", kv.Key)
 		case kv.Key == keys.Scalar:
 			return fmt.Errorf("tool parameter key %q is the scalar key", kv.Key)
+		case kv.Key == keys.Reference:
+			return fmt.Errorf("tool parameter key %q is the reference key", kv.Key)
+		case kv.Key == keys.Search:
+			return fmt.Errorf("tool parameter key %q is the search key", kv.Key)
 		case seen[kv.Key]:
 			return fmt.Errorf("tool parameter key %q is listed twice", kv.Key)
 		}

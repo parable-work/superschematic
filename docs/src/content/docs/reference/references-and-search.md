@@ -6,8 +6,9 @@ sidebar:
 ---
 
 Two type wrappers from `@superschematic/api` describe an API for the UIs
-that read it. Neither changes a server, an SDK or an OpenAPI document: the
-argument or field keeps its own type and its own rules.
+that read it. Neither changes a server or an SDK: the argument or field
+keeps its own type and its own rules. The OpenAPI document and the tool
+documents describe both ([In the documents](#in-the-documents)).
 
 ## `RefersTo`: a value that names an item
 
@@ -233,3 +234,64 @@ A Topcoat crate renders the search argument as its argument form's first
 control, an `<input type="search">` labeled Search, and the console's
 filter form that holds it as a search form
 ([A paged list and a search box](/superschematic/guides/topcoat/#a-paged-list-and-a-search-box)).
+
+## In the documents
+
+The OpenAPI document and the SDKs' tool documents describe each reference
+and the search with vendor keys, which a client reads as rules (D61 and
+D62, amended). A reference is written resolved, every member derived,
+whether `RefersTo` writes it or a relation's key derives it. A derived
+reference that does not resolve is no reference and is not written.
+
+In the OpenAPI document, the value that refers gives
+`x-superschematic-reference`:
+
+```json
+"x-superschematic-reference": {
+  "target": "#/components/schemas/ProductView",
+  "options": "CatalogListProductsHandler",
+  "value": "id",
+  "label": "name",
+  "lookup": "ids"
+}
+```
+
+| Member | What it holds |
+| --- | --- |
+| `target` | the target's component |
+| `options` | the `operationId` of the operation that lists the target |
+| `value` | the target's key the value holds |
+| `label` | the target's key that names an item; absent when it has none |
+| `lookup` | the options operation's argument that narrows its list to the values given; absent when it has none |
+
+The key sits on the property schema of a field (of an output or an input
+type) and of a body argument, and on the parameter object of a path or
+query argument, beside its `schema`. A list carries it on the list, not on
+its items, and each item refers. The search argument's parameter object
+says `"x-superschematic-search": true`:
+
+```json
+{
+  "name": "q", "in": "query", "required": false,
+  "schema": {"type": "string", "maxLength": 100},
+  "x-superschematic-search": true
+}
+```
+
+The keys are `apigen.OpenAPIReferenceKey` and `apigen.OpenAPISearchKey`.
+An OpenAPI hook renames them, as it renames `x-superschematic-docs`. A
+standalone type schema (`apigen.TypeOpenAPISchema`) carries no reference,
+since the operation it would name is in the API's document.
+
+A tool's parameters in `tools/schema.json`, the provider lists and
+`tools/index.ts` give each argument's or field's property the same keys,
+after `x-superschematic-scalar`. There `target` is the type's name and
+`options` the tool name of the options operation (`catalog.listProducts`).
+A tool hook renames the keys through `ToolKeys.Reference` and
+`ToolKeys.Search`
+([MCP tools](/superschematic/reference/mcp-tools/#toolsschemajson)). In
+Go, `ir.ToolSchemaProperty` decodes them as `Reference`, an
+`ir.ToolSchemaReference`, and `Search`.
+
+Neither key changes what a server accepts. A reference is not checked at
+run time, and a search keeps its rule.

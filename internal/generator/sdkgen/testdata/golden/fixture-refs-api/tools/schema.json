@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "FixtureRefsApiSDK Tool Definitions",
+  "description": "LLM tool calling bindings for fixture-refs-api API",
+  "tools": [
+    {
+      "name": "catalog.placeBasket",
+      "operationId": "CatalogPlaceBasketHandler",
+      "title": "",
+      "capability": "",
+      "lifecycle": "",
+      "visibility": "",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "placeBasket endpoint",
+      "namespace": "catalog",
+      "methodName": "placeBasket",
+      "httpMethod": "POST",
+      "httpPath": "/api/baskets",
+      "requiresAuth": false,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:2540aa1e84acf1bd302fecdf783b7116096d960358b6deb45939c5ee5b14c4b3",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "giftSku": {"description":"A URL friendly version of a string","maxLength":255,"minLength":1,"pattern":"^[a-z0-9]+(?:[-_][a-z0-9]+)*$","type":["string","null"],"x-superschematic-reference":{"label":"name","options":"catalog.listItems","target":"ItemView","value":"sku"},"x-superschematic-scalar":"Identity.Slug"},
+          "lines": {"description":"Array of BasketLine values","items":{"additionalProperties":false,"description":"BasketLine object","properties":{"itemId":{"description":"UUID v4 with automatic base62 encoding for client-facing APIs","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-reference":{"label":"name","lookup":"ids","options":"catalog.listItems","target":"ItemView","value":"id"},"x-superschematic-scalar":"Identity.UUID"},"quantity":{"description":"A numeric value","maximum":9,"minimum":1,"type":"number"}},"required":["itemId","quantity"],"type":"object"},"maxItems":5,"minItems":1,"type":"array"}
+        },
+        "required": ["lines"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "BasketView object"
+      }
+    },
+    {
+      "name": "catalog.listItems",
+      "operationId": "CatalogListItemsHandler",
+      "title": "",
+      "capability": "",
+      "lifecycle": "",
+      "visibility": "",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "The items, narrowed by a search of their text and by ids, the lookup\na UI names the references' values through.",
+      "namespace": "catalog",
+      "methodName": "listItems",
+      "httpMethod": "GET",
+      "httpPath": "/api/items",
+      "requiresAuth": false,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:e73c2af0cb458b02d869c72d0c61b09ebe595f4c5a54ba3b965de64c80bd8e48",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "ids": {"description":"Array of Identity.UUID values","items":{"description":"UUID v4 with automatic base62 encoding for client-facing APIs","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},"maxItems":5,"type":"array","x-superschematic-reference":{"label":"name","lookup":"ids","options":"catalog.listItems","target":"ItemView","value":"id"}},
+          "inStock": {"description":"A boolean value (true or false)","type":"boolean"},
+          "q": {"description":"A string value","maxLength":50,"type":"string","x-superschematic-search":true}
+        }
+      },
+      "returns": {
+        "type": "array",
+        "description": "Array of ItemView",
+        "items": {
+          "type": "object",
+          "description": "ItemView object"
+        }
+      }
+    },
+    {
+      "name": "catalog.getItem",
+      "operationId": "CatalogGetItemHandler",
+      "title": "",
+      "capability": "",
+      "lifecycle": "",
+      "visibility": "",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "getItem endpoint",
+      "namespace": "catalog",
+      "methodName": "getItem",
+      "httpMethod": "GET",
+      "httpPath": "/api/items/{itemId}",
+      "requiresAuth": false,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:ee3e7d9c79fc7548033793c8a3c2607cd9e42cf21785a3deeb9785e5951ad939",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "itemId": {"description":"itemId parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-reference":{"label":"name","lookup":"ids","options":"catalog.listItems","target":"ItemView","value":"id"},"x-superschematic-scalar":"Identity.UUID"}
+        },
+        "required": ["itemId"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "ItemView object"
+      }
+    }
+  ]
+}
