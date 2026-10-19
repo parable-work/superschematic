@@ -153,6 +153,12 @@ func (o *ORMOutput) QueuesImportPgtype() bool {
 	return queuesNeed(o.Queues, func(f Field) bool { return f.QueueScanTemp() == "pgtype.Date" || f.IsGeoPoint })
 }
 
+// HasInterval reports whether a field of the queue is a duration, which
+// crosses as its microseconds rather than as a table's field does.
+func (q Queue) HasInterval() bool {
+	return q.needs(func(f Field) bool { return f.IsInterval })
+}
+
 // needs reports whether a field of the queue matches.
 func (q Queue) needs(match func(Field) bool) bool {
 	for _, f := range q.Fields {

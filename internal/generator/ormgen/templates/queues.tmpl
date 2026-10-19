@@ -171,8 +171,10 @@ const {{ .Name }}Lease = {{ .LeaseSeconds }} * time.Second
 
 // Enqueue{{ .Name }} writes msg into the queue {{ .Name }} in tx, the caller's
 // transaction: the message is due once tx commits, and never if it rolls
-// back. A field writes its column as a table's field does, but a duration,
-// which writes its microseconds.
+// back. A field writes its column as a table's field does
+{{- if .HasInterval }}, but a duration,
+// which writes its microseconds
+{{- end }}.
 func Enqueue{{ .Name }}(ctx context.Context, tx TxInterface, msg *types.{{ .Name }}) error {
 	var columns []string
 	var values []any
@@ -275,8 +277,10 @@ type {{ .Name }}Claim struct {
 }
 
 // Claim claims up to n due messages for lease. Each field reads its column
-// as a table's field does, but a duration, which reads the interval's
-// microseconds, a day as 24 hours and a month as 30 days.
+// as a table's field does
+{{- if .HasInterval }}, but a duration, which reads the interval's
+// microseconds, a day as 24 hours and a month as 30 days
+{{- end }}.
 func (q *{{ .Name }}Queue) Claim(ctx context.Context, n int, lease time.Duration) ([]{{ .Name }}Claim, error) {
 	var claims []{{ .Name }}Claim
 	err := {{ lowerFirst .Name }}Queue.claim(ctx, q.pool, n, lease, func(rows pgx.Rows) error {
