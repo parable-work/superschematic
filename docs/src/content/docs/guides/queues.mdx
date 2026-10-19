@@ -21,11 +21,12 @@ schema's instances into claimable work, are another thing.
 
 | Built | Not built yet |
 | --- | --- |
-| `@queue` on a DB service's message class; its table in every dialect the service lists, which the migration plan carries | removing done messages; a command to read and retry dead ones |
+| `@queue` on a DB service's message class; its table in every dialect the service lists, which the migration plan carries | removing done messages |
 | the Go ORM's `Enqueue<Queue>` in your transaction, and its claims on Postgres | claims on SQLite and D1 |
 | the TypeScript types' `./queues` entry and the HTTP runtime's `enqueue` and `postgresQueue`, which run the Go ORM's statements; the Rust types' `queues` module and the Rust HTTP runtime's `queue::enqueue` and `PostgresQueue`, which run them too | a `POINT` or `INTERVAL` column in a TypeScript or Rust queue's message |
 | `@worker` on an API, Go's `Workers` and `NewWorkers`, TypeScript's `Workers` and `createWorkers`, Rust's `Workers` and `create_workers`, the `worker` deployable, its entrypoint and image | |
 | `stack dev`'s worker processes; on gcp a Cloud Run worker pool | scaling a worker with its queue's depth |
+| `stack queue dead`, `retry` and `drop` on a local environment's queues | the same on a cloud environment's |
 
 D53 in `docs/DECISIONS.md` records the decisions, and section 8.8 of
 [docs/stack-model.md](https://github.com/parable-work/superschematic/blob/main/docs/stack-model.md)
@@ -275,6 +276,62 @@ does:
 [shop-orders-fulfil-orders] {"level":"info",...,"msg":"fulfilled the order",...}
 [shop-orders-fulfil-orders] {"level":"info",...,"msg":"message handled","queue":"OrderPlaced","attempt":1,...}
 ```
+
+## Dead messages
+
+A message is dead once its handler has failed on every try its queue's
+`retries` allow, or once its last attempt's claim expired, as when the
+message kills its worker every time. It stays in the queue's table with
+its last error, and no worker claims it again. `stack queue` reads and
+repairs a queue's dead messages; it names a queue by its DB service and
+its class, `shop-db.OrderPlaced`.
+
+`stack queue dead` lists them, the oldest death first, up to `--limit`
+(a hundred unless set), and says how many there are in all. The message
+shows as its columns:
+
+```text
+$ superschematic stack queue dead Dev shop-db.OrderPlaced
+Queue shop-db.OrderPlaced of Dev: 2 dead messages, the oldest death first.
+
+3f2c8a10-5b1e-4c7a-9d2e-8f6b4a1c0e93
+  attempts:   6
+  died at:    2026-10-19T12:04:31Z
+  last error: the payment provider refused the card
+  message:    {"order_id":"9d0f6c2e-3a41-4b7e-8c55-1e2f3a4b5c6d"}
+
+8a41c6e2-7d3b-4f19-a0c5-2b9e6d4f1a37
+  attempts:   1
+  died at:    2026-10-19T12:20:07Z
+  last error: the claim of its last attempt expired before its handler finished
+  message:    {"order_id":"c7e3b1a9-0f2d-4e86-9b14-6a5d8c2f3e01"}
+```
+
+Once the cause is fixed, `stack queue retry` makes the messages it names
+ready again, or every dead one with `--all`: each is due at once with no
+attempts, so its retries start over, and a worker claims it as it claims
+a new message. Its last error stays until its next failure replaces it.
+`stack queue drop` deletes the messages it names, or every dead one with
+`--all --yes`:
+
+```sh
+superschematic stack queue retry Dev shop-db.OrderPlaced 3f2c8a10-5b1e-4c7a-9d2e-8f6b4a1c0e93
+superschematic stack queue retry Dev shop-db.OrderPlaced --all
+superschematic stack queue drop Dev shop-db.OrderPlaced 8a41c6e2-7d3b-4f19-a0c5-2b9e6d4f1a37
+```
+
+A retry or a drop that names a message that is not dead, one a worker
+already took again or one that is not in the queue, changes none of the
+messages it names and says what each such one is. `--format json` prints
+the result as JSON.
+
+Each command resolves the environment from your schemas and runs the
+operation with the migration runner, `superschematic-migrate`, which holds
+the database drivers, as `stack dev`'s migrations do. On the `local`
+target it reaches the Postgres container `stack dev` runs, so run it from
+another terminal while the environment runs. It runs on Postgres alone,
+as the claims do, and it does not reach a cloud environment's database
+yet: an environment on gcp is refused.
 
 ## Change it per environment
 

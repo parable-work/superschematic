@@ -740,6 +740,54 @@ It takes the flags of the commands below, `--stack`, `--naming`,
 | --- | --- | --- |
 | `--out` | `<schemas-root>/dist` | the output root the build wrote, `stack dev`'s `--out`: where `run` reads a local environment and the job's entrypoint module |
 
+## `stack queue dead|retry|drop <environment> <queue>`
+
+List, retry and drop the dead messages of a queue a DB service declares
+([Dead messages](/superschematic/guides/queues/#dead-messages)). `<queue>`
+is the DB service and its `@queue` class, `shop-db.OrderPlaced`. The design
+is section 8.8 of
+[docs/stack-model.md](https://github.com/parable-work/superschematic/blob/main/docs/stack-model.md).
+
+```
+superschematic stack queue dead Dev shop-db.OrderPlaced [--limit 100]
+superschematic stack queue retry Dev shop-db.OrderPlaced <id>... | --all
+superschematic stack queue drop Dev shop-db.OrderPlaced <id>... | --all --yes
+```
+
+- `dead` lists the dead messages, the oldest death first, up to
+  `--limit`, and their total: each one's ID, attempts, time of death, last
+  error and columns as JSON.
+- `retry` makes the dead messages named, or every one with `--all`,
+  ready again: due now, with no attempts and no claim, the last error
+  kept until the next failure replaces it.
+- `drop` deletes the dead messages named, or every one with `--all`,
+  which takes `--yes`.
+
+An ID is a message's UUID, in either case. A `retry` or a `drop` that
+names a message that is not dead changes none of them, and says what each
+such ID is: `ready`, `claimed`, `done`, or not in the queue.
+
+Each resolves the environment from the schemas, as `stack plan` does,
+without a build, and runs the operation with the migration runner, from
+`$SUPERSCHEMATIC_MIGRATE`, else `superschematic-migrate` on `PATH`
+(`superschematic-migrate queue`, [The runner](/superschematic/reference/migrations/#the-runner)).
+On the `local` target it reaches the database at the URL the environment
+resolves, on the Postgres container `stack dev` runs; run it from another
+terminal, and when the database does not answer it says to start `stack
+dev`. It refuses a queue no DB service of the stack declares, a queue
+whose database the environment places on another dialect than Postgres,
+on which no queue is claimed, and an environment on any target but
+`local`, whose databases it does not reach yet.
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--stack` | the working directory when it is a Stack service, else the one Stack service under `./schemas/services` | the Stack service directory |
+| `--naming` | `<stack>/../../superschematic.toml` | naming config file |
+| `--format` | `text` | `text`, or `json` for the runner's result: the operation, and the `total` and `messages` it listed or the `ids` it changed |
+| `--limit` | `100` | `dead`: list at most this many |
+| `--all` | off | `retry` and `drop`: every dead message, in place of IDs |
+| `--yes` | off | `drop`: confirm `--all` |
+
 ## `stack bootstrap`, `secrets set`, `plan`, `build`, `deploy`, `destroy` and `outputs`
 
 The cloud half of the `stack` group bootstraps, plans, builds, deploys and
