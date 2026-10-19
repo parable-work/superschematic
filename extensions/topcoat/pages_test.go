@@ -34,24 +34,56 @@ func livePagesOutputs() map[string]any {
 // TestPagesServeATopcoatApp builds fixture-pages-api's crates with the
 // pages on and runs cargo clippy, then cargo test, with pagesAppTest: an
 // app discovers the pages; the index and the nav list what the caller may
-// list, and the trail names an item by its title; a list filters, links
-// its rows to their items, names their owners by the app's choices and
-// offers its new page to a writer; an item's page shows its detail, its
-// edit and delete links, its action's form and its tasks' section; the
-// new, edit, delete and action pages post, redirect (303) and refuse with
-// the Refusal's status, 422 at the control, the new page's owner a select
-// of the choices, the edit form filled from the item and a conflict (409)
-// the form's message; a nested resource's pages live under its parent's
-// item, and one under a collection without pages has no place in the nav;
-// a refused caller keeps the route's status: 401 with a sign-in link that
-// comes back, 403 and 404, a route's value that does not decode 404; an
-// untitled document's row links its noun and id; the drafts' list at
-// documents/drafts is its own in the nav and the trail, never a document;
-// a document's comments are a collection under it, which no PUT or DELETE
-// of theirs, nor the DELETE of its cover, turns into a form; and a
-// document starts from an optional input that its edit page requires.
+// list, the projects' links after their type's icon and the others
+// without one, and the trail names an item by its title; a list filters,
+// links its rows to their items, names their owners by the app's choices
+// and offers its new page to a writer; an item's page shows its detail,
+// its edit and delete links, its action's form and its tasks' section;
+// the new, edit, delete and action pages post, redirect (303) and refuse
+// with the Refusal's status, 422 at the control, the new page's owner a
+// select of the choices, the edit form filled from the item and a
+// conflict (409) the form's message; a nested resource's pages live under
+// its parent's item, and one under a collection without pages has no
+// place in the nav; a refused caller keeps the route's status: 401 with a
+// sign-in link that comes back, 403 and 404, a route's value that does
+// not decode 404; an untitled document's row links its noun and id; the
+// drafts' list at documents/drafts is its own in the nav and the trail,
+// never a document; a document's comments are a collection under it,
+// which no PUT or DELETE of theirs, nor the DELETE of its cover, turns
+// into a form; and a document starts from an optional input that its
+// edit page requires.
 func TestPagesServeATopcoatApp(t *testing.T) {
 	cargoTestCrate(t, pagesService, pagesAppTest)
+}
+
+// TestTheNavShowsATypesIcon builds fixture-pages-api, whose Project
+// declares an icon, and fixture-console-api, whose types declare none
+// (D44, amended): the projects' links, the list's and the archived
+// list's, whose rows are projects, carry it for the nav and the index,
+// which render it before the label; the other links carry none; and a
+// crate whose resources declare no icon has no icon in its links.
+func TestTheNavShowsATypesIcon(t *testing.T) {
+	files, _ := readCrate(t, registry.DefaultNaming(), pagesService, pagesOutputs())
+	pages := files["pages.rs"]
+	for _, want := range []string{
+		`let link = Link { href: "/console/projects", label: "Projects", icon: Some("folder") };`,
+		`let link = Link { href: "/console/projects/archived", label: "Archived", icon: Some("folder") };`,
+		`let link = Link { href: "/console/members", label: "Members", icon: None };`,
+		`<span class="ss-icon" data-icon=(icon) aria-hidden="true"></span>`,
+	} {
+		if !strings.Contains(pages, want) {
+			t.Errorf("fixture-pages-api's pages.rs lacks %s", want)
+		}
+	}
+	if n := strings.Count(pages, `data-icon=(icon)`); n != 2 {
+		t.Errorf("fixture-pages-api's pages.rs renders an icon %d times, want the nav's and the index's", n)
+	}
+	files, _ = readCrate(t, registry.DefaultNaming(), consoleService, livePagesOutputs())
+	for _, unwanted := range []string{"data-icon", "icon:"} {
+		if strings.Contains(files["pages.rs"], unwanted) {
+			t.Errorf("fixture-console-api's pages.rs, whose types declare no icon, has %s", unwanted)
+		}
+	}
 }
 
 // TestPagesServeAnAPIWithoutCallers does the same for fixture-args-api with
@@ -737,12 +769,16 @@ async fn the_index_and_the_nav_show_what_the_caller_may_list() {
     let index = get(&app, "/console", "reader").await;
     assert_eq!(index.status, StatusCode::OK, "{}", index.html);
     assert!(index.html.contains(r#"<header class="ss-header"><a href="/console">Projects console</a></header>"#), "{}", index.html);
-    assert!(index.html.contains(r#"<ul class="ss-index"><li><a href="/console/projects">Projects</a></li></ul>"#), "{}", index.html);
+    // The projects' link starts with their type's icon, which the app's
+    // stylesheet draws.
+    assert!(index.html.contains(r#"<ul class="ss-index"><li><a href="/console/projects"><span class="ss-icon" data-icon="folder" aria-hidden="true"></span>Projects</a></li></ul>"#), "{}", index.html);
     assert!(!index.html.contains("/console/members"), "a reader of projects sees members: {}", index.html);
     assert!(index.html.contains(r#"<li><span aria-current="page">Projects console</span></li>"#), "{}", index.html);
 
     let index = get(&app, "/console", "members").await;
+    // A link whose type declares no icon has no span.
     assert!(index.html.contains(r#"<li><a href="/console/members">Members</a></li>"#), "{}", index.html);
+    assert!(!index.html.contains("ss-icon"), "{}", index.html);
     assert!(!index.html.contains("/console/projects"), "a reader of members sees projects: {}", index.html);
 
     // Signed out, the index lists nothing and offers to sign in.
@@ -754,9 +790,11 @@ async fn the_index_and_the_nav_show_what_the_caller_may_list() {
     // The nav marks the current resource: its list as the page, an item's
     // page as under it.
     let list = get(&app, "/console/projects", "reader").await;
-    assert!(list.html.contains(r#"<nav class="ss-nav" aria-label="Resources"><ul><li><a href="/console/projects" aria-current="page">Projects</a></li></ul></nav>"#), "{}", list.html);
+    assert!(list.html.contains(r#"<nav class="ss-nav" aria-label="Resources"><ul><li><a href="/console/projects" aria-current="page"><span class="ss-icon" data-icon="folder" aria-hidden="true"></span>Projects</a></li></ul></nav>"#), "{}", list.html);
     let item = get(&app, &format!("/console/projects/{APOLLO}"), "reader").await;
-    assert!(item.html.contains(r#"<li><a href="/console/projects" aria-current="true">Projects</a></li>"#), "{}", item.html);
+    assert!(item.html.contains(r#"<li><a href="/console/projects" aria-current="true"><span class="ss-icon" data-icon="folder" aria-hidden="true"></span>Projects</a></li>"#), "{}", item.html);
+    // The trail shows no icon.
+    assert!(item.html.contains(r#"<li><a href="/console/projects">Projects</a></li>"#), "{}", item.html);
 }
 
 #[tokio::test]
@@ -1320,8 +1358,9 @@ async fn names_come_from_the_type_and_the_path_never_a_guessed_singular() {
     let archived = get(&app, "/console/projects/archived", "auditor").await;
     assert_eq!(archived.status, StatusCode::OK, "{}", archived.html);
     assert!(archived.html.contains("<h1>Archived</h1>"), "{}", archived.html);
-    assert!(archived.html.contains(r#"<li><a href="/console/projects/archived" aria-current="page">Archived</a></li>"#), "{}", archived.html);
-    assert!(archived.html.contains(r#"<li><a href="/console/projects">Projects</a></li>"#), "{}", archived.html);
+    // Their rows are projects, so their link has the projects' icon too.
+    assert!(archived.html.contains(r#"<li><a href="/console/projects/archived" aria-current="page"><span class="ss-icon" data-icon="folder" aria-hidden="true"></span>Archived</a></li>"#), "{}", archived.html);
+    assert!(archived.html.contains(r#"<li><a href="/console/projects"><span class="ss-icon" data-icon="folder" aria-hidden="true"></span>Projects</a></li>"#), "{}", archived.html);
     let reader = get(&app, "/console/projects", "reader").await;
     assert!(!reader.html.contains("/console/projects/archived"), "{}", reader.html);
 }

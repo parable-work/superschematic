@@ -272,7 +272,10 @@ name, beside its input's fields. It is labeled by the field's `@docs`
 title, else by its name in words, in which a number that ends a word is
 a word of its own (`line1` is "Line 1", `addressLine2` "Address line 2")
 unless an acronym or a single letter holds it (`awsS3Bucket` is "Aws S3
-bucket").
+bucket"). An enum's member, a select's option or a checkbox's label, is
+labeled by its title (`/** @title Held for a stock check */` in
+TypeScript, `title` in the data forms, [D48](../../docs/DECISIONS.md)),
+else by its name in words: `OnHold` is "On hold".
 
 ### Input forms
 
@@ -436,12 +439,20 @@ attributes its rules give it:
   (`step="any"`), so a held value with seconds is not refused;
 - `type="password"` for a `@secret` field, never rendered with its value:
   a form holds what a reader types, though a record leaves the field out;
-- a `<textarea>` for long text, a text field or argument whose
+- a `<textarea rows="6">` for long text, a text field or argument whose
   `maxLength`, its own or its scalar's, is **500** or more: a reason, a
-  review's body, not a name or a title. It takes `minlength` and
-  `maxlength`, but no `pattern`, which `parse` checks, and a newline after
-  its start tag, which a browser drops, so a value that starts with one
-  renders as sent;
+  review's body, not a name or a title. A field's multiline hint,
+  `@display({ multiline })` ([D48](../../docs/DECISIONS.md)), overrides
+  that rule either way: `true` makes text a textarea without a bound or
+  under 500, a note, and `false` keeps it one line at any bound, a code.
+  The hint applies where the control would be text: an email, URL,
+  phone, date or time control keeps its type, and the build log says so
+  (`topcoat: Account.email: @display multiline is ignored: its control is
+  an email input`). An argument takes no decorator, so it keeps the 500
+  rule; an argument form's input fields follow their own hints. A
+  textarea takes `minlength` and `maxlength`, but no `pattern`, which
+  `parse` checks, and a newline after its start tag, which a browser
+  drops, so a value that starts with one renders as sent;
 - a `<textarea>` of JSON text, "(JSON)" in its label, for a value no
   control holds: a union, any JSON value, a map, a list of lists, an
   argument's object or list of booleans, or a type that nests the type
@@ -657,7 +668,7 @@ in words. A value renders by its field's type:
 | The type's field | Renders as |
 | --- | --- |
 | A string, a UUID, a number | its text, or the label the app's `choices` give it |
-| An enum | `<data value="on_hold">On hold</data>`: the member's name in words, which `<enum>_label` gives |
+| An enum | `<data value="on_hold">On hold</data>`: the member's title, else its name in words, which `<enum>_label` gives |
 | `Temporal.DateTime` | `<time datetime="2026-10-09T15:30:00+01:00">9 Oct 2026, 14:30 UTC</time>`: in UTC, to the minute |
 | `Temporal.Date` | `<time datetime="2026-10-09">9 Oct 2026</time>` |
 | `Temporal.Time` | `<time datetime="14:30:15">14:30</time>`: to the minute |
@@ -1033,6 +1044,27 @@ request asks the `PageAuthenticator` for its caller once
 calls ask: the nav's guards are permission checks of one caller. The
 index at the prefix lists the same resources. The markup is semantic HTML
 with `ss-` classes and ships no styles.
+
+A link of the nav and the index starts with its resource's icon when the
+list's element type, else the detail's, declares one with
+`@display({ icon })` ([D48](../../docs/DECISIONS.md)): an empty span the
+app's stylesheet draws, before the label.
+
+```html
+<li><a href="/console/orders"><span class="ss-icon" data-icon="receipt" aria-hidden="true"></span>Orders</a></li>
+```
+
+The crate ships no icon set: the name is the app's to draw, with a mask
+per name, say.
+
+```css
+.ss-icon { display: inline-block; width: 1em; height: 1em; background: currentColor;
+           mask: center / contain no-repeat; }
+.ss-icon[data-icon="receipt"] { mask-image: url(/icons/receipt.svg); }
+```
+
+A link whose type declares no icon has no span, and a crate whose
+resources declare none renders the nav as it did before icons.
 
 ### Mounting them
 

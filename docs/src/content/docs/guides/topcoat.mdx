@@ -155,7 +155,10 @@ the input type's rules give them: `required`, `min` and `max` on the
 rating, `maxlength` on the title. A browser checks them before it sends the
 form, and `parse()` checks every rule again. A field is labeled by its
 `@docs` title, else by its name in words, a number at the end of a word
-a word of its own: the shipping address's `line1` reads "Line 1".
+a word of its own: the shipping address's `line1` reads "Line 1". An
+enum's member, a select's option or a checkbox's label, is labeled by its
+title, a JSDoc `@title` on the member, else by its name in words: `OnHold`
+reads "On hold".
 
 ### Nested objects and lists
 
@@ -316,12 +319,19 @@ UTC and its label says so, and a value held with an offset renders in
 UTC. Long text, a text field or argument whose `maxLength` is 500 or
 more, such as a cancel's reason or a review's body, is a `<textarea>`
 with the same `minlength` and `maxlength`; its pattern, which a textarea
-does not take, is checked by `parse()`. A number field holding a whole
-number reads any a browser sends, `1e1` and `2.0` too. A `@secret` field
-is `type="password"` and is never rendered with its value, so a refused
-form asks for it again. A record leaves the field out, but a form holds
-what a reader types. A value no control holds, a union, any JSON value
-or a map, is a `<textarea>` of its JSON text.
+does not take, is checked by `parse()`. A field's multiline hint
+overrides the 500 rule either way: `@display({ multiline: true })` makes
+its text a textarea whatever its `maxLength`, a note without a bound,
+and `@display({ multiline: false })` keeps it one line at any bound. The
+hint applies only where the control would be text: an email, URL, phone,
+date or time keeps its control, and the build log says it ignored the
+hint. An argument takes no decorator, so it keeps the 500 rule. A number
+field holding a whole number reads any a browser sends, `1e1` and `2.0`
+too. A `@secret` field is `type="password"` and is never rendered with
+its value, so a refused form asks for it again. A record leaves the
+field out, but a form holds what a reader types. A value no control
+holds, a union, any JSON value or a map, is a `<textarea>` of its JSON
+text.
 
 ### Errors
 
@@ -410,8 +420,9 @@ links, so the page lists a link to each order's page after it:
 A field is labeled as its form field is: its `@docs` title, else its name
 in words. A value renders by its type:
 
-- an enum's value is its member's name in words, in a `<data>` element
-  whose `value` is the one the API sends;
+- an enum's value is its member's title, else its name in words, in a
+  `<data>` element whose `value` is the one the API sends;
+  `<enum>_label` gives the same label for a page's own markup;
 - a date, a time or a date-time is a `<time>` element whose `datetime`
   is the value the API sends and whose text a reader reads, the same for
   every reader: "9 Oct 2026", "14:30", and a date-time in UTC to the
@@ -547,7 +558,10 @@ link to the app's sign-in page that comes back to the page.
 
 A layout at the prefix puts each page in `<main>`, after a nav of the
 resources the caller may list, the current one marked with
-`aria-current`, and a breadcrumb trail from the index to the page, an
+`aria-current`, each after its type's icon when its `@display` names one
+(`<span class="ss-icon" data-icon="receipt" aria-hidden="true">`, which
+the app's stylesheet draws, since the crate ships no icon set), and a
+breadcrumb trail from the index to the page, an
 item by its title where its type declares one. Else an item is named by
 the label of what its route's value refers to, when every operation whose
 route holds that value refers to one target by one value, so a supplier's

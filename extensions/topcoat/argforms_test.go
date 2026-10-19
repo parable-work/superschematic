@@ -25,12 +25,13 @@ const argsService = "fixture-args-api"
 // argument and the operation's refusal re-render the form with 422 and
 // each error at its control or the form's; a GET filter reads repeated
 // enum values, a comma-separated list, a limit, a page and flags from the
-// query and renders them as sent, a blank flag its default, and a limit
-// out of range at its control; an action's checkbox is false when not
-// checked, whatever its default; an optional input is absent when none of
-// its fields is sent; a form that embeds its input's form parses both; a
-// map argument is JSON text; the app's choices make an argument a select;
-// and a query of more pairs than a form reads is refused.
+// query and renders them as sent, each status by its member's title else
+// its name in words, a blank flag its default, and a limit out of range
+// at its control; an action's checkbox is false when not checked,
+// whatever its default; an optional input is absent when none of its
+// fields is sent; a form that embeds its input's form parses both; a map
+// argument is JSON text; the app's choices make an argument a select; and
+// a query of more pairs than a form reads is refused.
 func TestArgumentFormsServeATopcoatApp(t *testing.T) {
 	cargoTestCrate(t, argsService, argsAppTest)
 }
@@ -458,8 +459,10 @@ async fn a_filter_reads_the_query_and_renders_it_as_sent() {
     assert_eq!(status, StatusCode::OK, "{html}");
     for want in [
         r#"<form method="get">"#,
-        r#"value="placed" checked="""#,
-        r#"value="shipped" checked="""#,
+        r#"value="placed" checked="">Placed</label>"#,
+        r#"value="shipped" checked="">Shipped</label>"#,
+        // A member is labeled by its title.
+        r#"<input type="checkbox" name="statuses" value="on_hold">Held for a stock check</label>"#,
         r#"<label for="order-list-orders-tags-0">Tags 1</label><input id="order-list-orders-tags-0" name="tags" type="text" maxlength="20" value="fragile">"#,
         r#"<input id="order-list-orders-tags-1" name="tags" type="text" maxlength="20" value="heavy">"#,
         // A blank input for another tag.

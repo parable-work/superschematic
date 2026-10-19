@@ -1664,7 +1664,7 @@ pub async fn note_input_fields(
             <label for="note-input-text">"Text"</label>
             match choices.of("text", "text") {
                 Some(options) => choice_select(id: "note-input-text", name: "text", required: true, invalid: errors.invalid("text"), options: choice_options(options, form.text.as_deref())),
-                None => <input id="note-input-text" name="text" type="text" required=(true) value=(form.text.clone()) aria-invalid=(errors.invalid("text"))>,
+                None => <textarea id="note-input-text" name="text" rows="6" required=(true) aria-invalid=(errors.invalid("text"))>"\n"(form.text.clone())</textarea>,
             }
             for message in errors.of("text") {
                 <p class="field-error">(message)</p>
@@ -1921,7 +1921,7 @@ pub async fn account_annotate_args_fields(
             <label for="account-annotate-text">"Text"</label>
             match choices.of("text", "text") {
                 Some(options) => choice_select(id: "account-annotate-text", name: "text", required: true, invalid: errors.invalid("text"), options: choice_options(options, form.input.text.as_deref())),
-                None => <input id="account-annotate-text" name="text" type="text" required=(true) value=(form.input.text.clone()) aria-invalid=(errors.invalid("text"))>,
+                None => <textarea id="account-annotate-text" name="text" rows="6" required=(true) aria-invalid=(errors.invalid("text"))>"\n"(form.input.text.clone())</textarea>,
             }
             for message in errors.of("text") {
                 <p class="field-error">(message)</p>
@@ -2084,7 +2084,7 @@ pub async fn account_draft_note_args_fields(
             <label for="account-draft-note-text">"Text"</label>
             match choices.of("text", "text") {
                 Some(options) => choice_select(id: "account-draft-note-text", name: "text", required: true, invalid: errors.invalid("text"), options: choice_options(options, form.input.text.as_deref())),
-                None => <input id="account-draft-note-text" name="text" type="text" required=(true) value=(form.input.text.clone()) aria-invalid=(errors.invalid("text"))>,
+                None => <textarea id="account-draft-note-text" name="text" rows="6" required=(true) aria-invalid=(errors.invalid("text"))>"\n"(form.input.text.clone())</textarea>,
             }
             for message in errors.of("text") {
                 <p class="field-error">(message)</p>

@@ -621,10 +621,14 @@ fn heading(status: StatusCode) -> &'static str {
     }
 }
 
-/// A link of the nav and the index: a resource's list.
+/// A link of the nav and the index: a resource's list{{ if .Pages.Uses "icons" }}, and the icon its
+/// type's display names, which the app's stylesheet draws{{ end }}.
 struct Link {
     href: &'static str,
     label: &'static str,
+{{- if .Pages.Uses "icons" }}
+    icon: Option<&'static str>,
+{{- end }}
 }
 
 /// The resources no item holds whose list the caller may use (`can_*`),
@@ -637,7 +641,7 @@ async fn listed(cx: &Cx) -> (Vec<Link>, bool) {
     let mut links = Vec::new();
     let mut signed_out = false;
 {{- range .Pages.Top }}
-    let link = Link { href: {{ rustString .Path }}, label: {{ rustString .Plural }} };
+    let link = Link { href: {{ rustString .Path }}, label: {{ rustString .Plural }}{{ if $.Pages.Uses "icons" }}, icon: {{ if .Icon }}Some({{ rustString .Icon }}){{ else }}None{{ end }}{{ end }} };
     admit(operations::can_{{ .List.Snake }}(cx).await.map_err(|err| err.status), link, &mut links, &mut signed_out);
 {{- end }}
     (links, signed_out)
@@ -835,7 +839,11 @@ pub async fn pages_layout(cx: &Cx, slot: Slot<'_>) -> topcoat::Result<impl View>
     // current one on its own pages.
     let at = |href: &str| path.strip_prefix(href).is_some_and(|rest| rest.is_empty() || rest.starts_with('/'));
     let under = links.iter().map(|link| link.href).filter(|href| at(href)).max_by_key(|href| href.len());
+{{- if .Pages.Uses "icons" }}
+    let nav: Vec<(&'static str, &'static str, Option<&'static str>, Option<&'static str>)> = links
+{{- else }}
     let nav: Vec<(&'static str, &'static str, Option<&'static str>)> = links
+{{- end }}
         .iter()
         .map(|link| {
             let current = match under {
@@ -843,7 +851,7 @@ pub async fn pages_layout(cx: &Cx, slot: Slot<'_>) -> topcoat::Result<impl View>
                 Some(href) if href == link.href => Some("true"),
                 _ => None,
             };
-            (link.href, link.label, current)
+            (link.href, link.label{{ if .Pages.Uses "icons" }}, link.icon{{ end }}, current)
         })
         .collect();
 {{- if and (.Pages.Uses "itemTitle") (.Pages.Uses "trailReference") }}
@@ -894,9 +902,20 @@ pub async fn pages_layout(cx: &Cx, slot: Slot<'_>) -> topcoat::Result<impl View>
             if !nav.is_empty() {
                 <nav class="ss-nav" aria-label="Resources">
                     <ul>
+{{- if .Pages.Uses "icons" }}
+                        for (href, label, icon, current) in nav {
+                            <li><a href=(href) aria-current=(current)>
+                                if let Some(icon) = icon {
+                                    <span class="ss-icon" data-icon=(icon) aria-hidden="true"></span>
+                                }
+                                (label)
+                            </a></li>
+                        }
+{{- else }}
                         for (href, label, current) in nav {
                             <li><a href=(href) aria-current=(current)>(label)</a></li>
                         }
+{{- end }}
                     </ul>
                 </nav>
             }
@@ -932,7 +951,16 @@ pub async fn pages_index_page(cx: &Cx) -> topcoat::Result<impl View> {
         } else {
             <ul class="ss-index">
                 for link in links {
+{{- if .Pages.Uses "icons" }}
+                    <li><a href=(link.href)>
+                        if let Some(icon) = link.icon {
+                            <span class="ss-icon" data-icon=(icon) aria-hidden="true"></span>
+                        }
+                        (link.label)
+                    </a></li>
+{{- else }}
                     <li><a href=(link.href)>(link.label)</a></li>
+{{- end }}
                 }
             </ul>
         }

@@ -4,7 +4,7 @@
 # field.
 # Its @display names its title, its summary fields, its noun and plural; an
 # address's names its title, and a line's price has none. A comment's
-# replies are comments.
+# replies are comments. A status on hold is labeled by its member's title.
 name: fixture-views-api
 kind: API
 scalars:
@@ -31,6 +31,7 @@ enums:
       - name: Pending
         serializedAs: pending
       - name: OnHold
+        title: Held for a stock check
         serializedAs: on_hold
       - name: Shipped
         serializedAs: shipped

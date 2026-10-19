@@ -1,6 +1,7 @@
 package topcoat
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -108,9 +109,12 @@ func TestControlNames(t *testing.T) {
 // TestHowAFormHoldsAField gives each kind of field its kind: a nested
 // object, rows of objects and of values, a group, typed controls, and JSON
 // text for a map, a list of lists, a union and a type that nests the type
-// holding it.
+// holding it. A multiline hint makes text long or short whatever its
+// maxLength, and the build log says when a control that is not text
+// ignores it.
 func TestHowAFormHoldsAField(t *testing.T) {
-	min, max := 2, 4
+	min, max, long, short := 2, 4, 5000, 500
+	yes, no := true, false
 	str := func(name string) *ir.FieldDef {
 		return &ir.FieldDef{Name: name, TypeRef: ir.TypeRef{Name: "string"}, Required: true}
 	}
@@ -119,6 +123,7 @@ func TestHowAFormHoldsAField(t *testing.T) {
 			"Temporal.Date":     {Name: "Temporal.Date", LanguagePrimitive: ir.LanguageString},
 			"Temporal.DateTime": {Name: "Temporal.DateTime", LanguagePrimitive: ir.LanguageString},
 			"Stamp":             {Name: "Stamp", LanguagePrimitive: ir.LanguageString, Format: "time"},
+			"Contact.Email":     {Name: "Contact.Email", LanguagePrimitive: ir.LanguageString},
 		},
 		Enums: map[string]*ir.EnumDef{
 			"Color": {Name: "Color", Values: []ir.EnumValueDef{{Name: "Red", SerializedAs: "red"}, {Name: "DeepBlue"}}},
@@ -146,10 +151,19 @@ func TestHowAFormHoldsAField(t *testing.T) {
 				{Name: "either", TypeRef: ir.TypeRef{Name: "Shape"}},
 				{Name: "ping", TypeRef: ir.TypeRef{Name: "Ping"}},
 				{Name: "flag", TypeRef: ir.TypeRef{Name: "boolean"}, Default: ptr("true")},
+				{Name: "story", TypeRef: ir.TypeRef{Name: "string"}, Display: &ir.FieldDisplay{Multiline: &yes}},
+				{Name: "code", TypeRef: ir.TypeRef{Name: "string"}, ValidateMaxLength: &long, Display: &ir.FieldDisplay{Multiline: &no}},
+				{Name: "reason", TypeRef: ir.TypeRef{Name: "string"}, ValidateMaxLength: &short},
+				{Name: "email", TypeRef: ir.TypeRef{Name: "Contact.Email"}, Display: &ir.FieldDisplay{Multiline: &yes}},
+				{Name: "paragraphs", TypeRef: ir.TypeRef{Name: "string", IsArray: true}, Display: &ir.FieldDisplay{Multiline: &yes}},
+				{Name: "due", TypeRef: ir.TypeRef{Name: "Temporal.Date"}, Display: &ir.FieldDisplay{Multiline: &no}},
 			}},
 		},
 	}
-	b := &formBuilder{schemaSet: schemaSet{schema}, structs: map[string]*formStruct{}}
+	var log strings.Builder
+	b := &formBuilder{schemaSet: schemaSet{schema}, structs: map[string]*formStruct{}, log: func(format string, args ...any) {
+		fmt.Fprintf(&log, format, args...)
+	}}
 	st, err := b.structOf(schema.Types["Input"])
 	if err != nil {
 		t.Fatal(err)
@@ -169,6 +183,11 @@ func TestHowAFormHoldsAField(t *testing.T) {
 	for name, want := range map[string]string{
 		"color": "select", "on": "date", "at": "datetime-local", "stamp": "time", "pin": "password",
 		"labels": "textarea", "grid": "textarea", "either": "textarea", "flag": "checkbox",
+		// Multiline text is long without a bound, and a hint of one line
+		// keeps a bound of 5000 one line; without a hint, 500 is long.
+		"story": "longtext", "code": "text", "reason": "longtext",
+		// An email keeps its input, and each row of a list of text is long.
+		"email": "email", "paragraphs": "longtext", "due": "date",
 	} {
 		if got := fields[name].Control; got != want {
 			t.Errorf("%s: control %s, want %s", name, got, want)
@@ -202,9 +221,55 @@ func TestHowAFormHoldsAField(t *testing.T) {
 	if !st.rows() {
 		t.Error("Input holds rows")
 	}
+	if got, want := log.String(), "  - topcoat: Input.email: @display multiline is ignored: its control is an email input\n"; got != want {
+		t.Errorf("the build log is %q, want %q: one line, for the email, and none for a date that asks for one line", got, want)
+	}
 }
 
 func ptr(text string) *string { return &text }
+
+// TestAMemberIsLabeledByItsTitle labels an enum's member by its title,
+// else by its name in words, and keeps its serialized value: one rule for
+// a select's options, a checkbox group's, a filter's and <enum>_label.
+func TestAMemberIsLabeledByItsTitle(t *testing.T) {
+	enum := &ir.EnumDef{Name: "OrderStatus", Values: []ir.EnumValueDef{
+		{Name: "Placed", SerializedAs: "placed"},
+		{Name: "OnHold", Title: "Held for a stock check", SerializedAs: "on_hold"},
+		{Name: "InTransit", Title: "On its way"},
+		{Name: "LostInPost"},
+	}}
+	want := []formOption{
+		{Value: "placed", Label: "Placed"},
+		{Value: "on_hold", Label: "Held for a stock check"},
+		{Value: "InTransit", Label: "On its way"},
+		{Value: "LostInPost", Label: "Lost in post"},
+	}
+	got := enumOptions(enum)
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("enumOptions = %v, want %v", got, want)
+	}
+	// A form field and a group take the same labels.
+	schema := &ir.Schema{
+		Enums: map[string]*ir.EnumDef{"OrderStatus": enum},
+		Types: map[string]*ir.TypeDef{"Input": {Name: "Input", Fields: []*ir.FieldDef{
+			{Name: "status", TypeRef: ir.TypeRef{Name: "OrderStatus"}, Default: ptr("OnHold")},
+			{Name: "statuses", TypeRef: ir.TypeRef{Name: "OrderStatus", IsArray: true}},
+		}}},
+	}
+	b := &formBuilder{schemaSet: schemaSet{schema}, structs: map[string]*formStruct{}}
+	st, err := b.structOf(schema.Types["Input"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range st.Fields {
+		if fmt.Sprint(f.Options) != fmt.Sprint(want) {
+			t.Errorf("%s: options %v, want %v", f.JSONName, f.Options, want)
+		}
+	}
+	if got := st.Fields[0].New(); got != `Some("on_hold".to_owned())` {
+		t.Errorf("a titled default is its serialized value: %s", got)
+	}
+}
 
 // TestAFormHoldsBoundedRows bounds every list a form holds: by its
 // listMax, or by MAX_ROWS for a list without one or with one above it. A

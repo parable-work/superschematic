@@ -341,9 +341,10 @@ func TestACrateWithoutCallersBuilds(t *testing.T) {
 // valid post books with the input's JSON; a refused field, nested or in a
 // row, renders at its control with the values as sent and the secret
 // blank; row buttons add and remove rows within the list's bounds without
-// calling the operation; and the app's choices render a select. Its
-// AccountKey, whose fields are a secret one and a @uiHidden one, is an
-// empty record that clippy passes with warnings denied.
+// calling the operation; and the app's choices render a select. A note's
+// unbounded text is a textarea by its multiline hint. Its AccountKey,
+// whose fields are a secret one and a @uiHidden one, is an empty record
+// that clippy passes with warnings denied.
 func TestFormsServeATopcoatApp(t *testing.T) {
 	cargoTestCrate(t, formsService, formsAppTest)
 }
@@ -398,9 +399,9 @@ func TestEveryInputHasAForm(t *testing.T) {
 
 // TestViewsRenderRecords does the same for fixture-views-api with
 // viewsAppTest: pages render an order's detail and a table of orders, each
-// kind of field as its rules say, values escaped, the type's @display
-// naming the detail, captioning the table and choosing its columns, and a
-// comment thread that nests itself.
+// kind of field as its rules say, values escaped, an enum's member by its
+// title, the type's @display naming the detail, captioning the table and
+// choosing its columns, and a comment thread that nests itself.
 func TestViewsRenderRecords(t *testing.T) {
 	cargoTestCrate(t, viewsService, viewsAppTest)
 }
@@ -411,8 +412,9 @@ func TestViewsRenderRecords(t *testing.T) {
 // (hrefs) on it, its noun and id the link's text when the title is blank,
 // and naming the detail with the noun as fallback; a nested
 // Address shows its title in a
-// cell, and Money, which declares no title, its detail; Comment, which
-// nests itself, boxes its views.
+// cell, and Money, which declares no title, its detail; a status is
+// labeled by its member's title, else by its name in words; Comment,
+// which nests itself, boxes its views.
 func TestDisplayShapesTheComponents(t *testing.T) {
 	root := testpaths.TempDir(t)
 	if _, err := buildService(t, viewsService, root, rustOutputs()); err != nil {
@@ -445,7 +447,9 @@ func TestDisplayShapesTheComponents(t *testing.T) {
 		`<td data-field="shipTo">(text_of(&choices, "shipTo.recipient", &row.ship_to.recipient))</td>`,
 		`<td data-field="price">money_detail(record: row.price, choices: choices.under("price"))</td>`,
 		`<dt>"Ship to"</dt>`,
-		`"on_hold" => "On hold",`,
+		// A member is labeled by its title, else by its name in words.
+		`"on_hold" => "Held for a stock check",`,
+		`"pending" => "Pending",`,
 	} {
 		if !strings.Contains(views, want) {
 			t.Errorf("views.rs lacks %s", want)
@@ -1077,7 +1081,8 @@ use schemas_fixture_forms_api_topcoat::api::{
     Implementations,
 };
 use schemas_fixture_forms_api_topcoat::forms::{
-    booking_input_fields, signup_input_fields, BookingInputForm, Choices, FormErrors, NoteInputForm, RoomRequestForm, SignupInputForm,
+    account_annotate_args_fields, account_draft_note_args_fields, booking_input_fields, signup_input_fields, AccountAnnotateArgsForm,
+    AccountDraftNoteArgsForm, BookingInputForm, Choices, FormErrors, NoteInputForm, RoomRequestForm, SignupInputForm,
 };
 use schemas_fixture_forms_api_topcoat::records::AccountKeyRecord;
 use schemas_fixture_forms_api_topcoat::{operations, RouterBuilderFixtureFormsApiExt};
@@ -1091,6 +1096,7 @@ use topcoat::view::{view, View};
 const GARDEN: &str = "8d1f6c9e-0000-4000-8000-000000000001";
 const ATTIC: &str = "8d1f6c9e-0000-4000-8000-000000000002";
 const BOOKED: &str = "8d1f6c9e-0000-4000-8000-000000000003";
+const ACCOUNT: &str = "8d1f6c9e-0000-4000-8000-000000000004";
 
 struct Accounts;
 
@@ -1207,6 +1213,49 @@ async fn book(cx: &Cx, Form(form): Form<BookingInputForm>) -> topcoat::Result<im
     })
 }
 
+/// The annotate form, its input's fields beside the account's id: the
+/// note's text, a textarea by its multiline hint, and its tags, rows.
+#[page("/annotate")]
+async fn annotate_form() -> topcoat::Result<impl View> {
+    let form = AccountAnnotateArgsForm::new(ACCOUNT);
+    Ok(view! { <form method="post">account_annotate_args_fields(form: form)<button type="submit">"Save the note"</button></form> })
+}
+
+/// A row button renders the annotate form again with its rows; any other
+/// post annotates, which the account refuses, and renders it again with the
+/// refusal's status.
+#[page(POST "/annotate")]
+async fn annotate(cx: &Cx, Form(form): Form<AccountAnnotateArgsForm>) -> topcoat::Result<impl View> {
+    let mut form = form;
+    let (status, errors) = if form.apply_action() {
+        (StatusCode::OK, FormErrors::default())
+    } else {
+        match form.submit(cx).await {
+            Ok(_) => return Err(see_other("/annotated").into()),
+            Err(refused) => (refused.status, refused.errors),
+        }
+    };
+    Ok(view! {
+        (status)
+        <form method="post">account_annotate_args_fields(form: form, errors: errors)<button type="submit">"Save the note"</button></form>
+    })
+}
+
+/// The draft form, whose input is optional, with its tag rows; a row
+/// button renders it again.
+#[page("/draft")]
+async fn draft_form() -> topcoat::Result<impl View> {
+    let form = AccountDraftNoteArgsForm::new(ACCOUNT);
+    Ok(view! { <form method="post">account_draft_note_args_fields(form: form)<button type="submit">"Save the draft"</button></form> })
+}
+
+#[page(POST "/draft")]
+async fn draft(Form(form): Form<AccountDraftNoteArgsForm>) -> topcoat::Result<impl View> {
+    let mut form = form;
+    form.apply_action();
+    Ok(view! { <form method="post">account_draft_note_args_fields(form: form)<button type="submit">"Save the draft"</button></form> })
+}
+
 fn app(bookings: Bookings) -> Router {
     Router::builder()
         .page(signup_form)
@@ -1214,6 +1263,10 @@ fn app(bookings: Bookings) -> Router {
         .page(booking_form)
         .page(booking_form_with_choices)
         .page(book)
+        .page(annotate_form)
+        .page(annotate)
+        .page(draft_form)
+        .page(draft)
         .fixture_forms_api(Implementations { account: Arc::new(Accounts), booking: Arc::new(bookings) })
         .build()
 }
@@ -1227,6 +1280,10 @@ async fn send_to(router: &Router, request: http::Request<Body>) -> (StatusCode, 
 
 async fn send(request: http::Request<Body>) -> (StatusCode, http::HeaderMap, String) {
     send_to(&app(Bookings::default()), request).await
+}
+
+async fn get(uri: &str) -> (StatusCode, http::HeaderMap, String) {
+    send(http::Request::builder().uri(uri).body(Body::empty()).unwrap()).await
 }
 
 fn post_request(path: &str, body: &str) -> http::Request<Body> {
@@ -1790,6 +1847,24 @@ async fn a_list_of_secrets_books_and_is_never_rendered_back() {
     assert!(!html.contains("1111-2222"), "{html}");
 }
 
+#[tokio::test]
+async fn multiline_text_is_a_textarea_whatever_its_bound() {
+    // A note's text has no maxLength; its multiline hint makes it a
+    // textarea, in the input's form and in each argument form that embeds
+    // it.
+    let (status, _, html) = get("/annotate").await;
+    assert_eq!(status, StatusCode::OK, "{html}");
+    let text = control(&html, "text");
+    assert!(text.contains("<textarea id=\"account-annotate-text\" name=\"text\" rows=\"6\" required=\"\">\n</textarea>"), "{text}");
+    let (_, _, html) = get("/draft").await;
+    assert!(control(&html, "text").contains(r#"<textarea id="account-draft-note-text" name="text" rows="6" required="">"#), "{html}");
+    // Its lines render again as sent.
+    let (status, _, html) = send(post_request("/annotate", &encode(&[("id", ACCOUNT), ("text", "Two\nlines"), ("_action", "add:tags")]))).await;
+    assert_eq!(status, StatusCode::OK, "{html}");
+    assert!(control(&html, "text").contains("required=\"\">\nTwo\nlines</textarea>"), "{html}");
+    assert!(html.contains(r#"name="tags[0]""#), "{html}");
+}
+
 #[test]
 fn a_record_whose_fields_are_all_left_out_is_empty() {
     let key = types::AccountKey { key: "sk_123".to_string(), hint: Some("sk_".to_string()) };
@@ -1927,7 +2002,8 @@ async fn a_detail_renders_each_kind_of_field() {
     assert_has(&html, &[
         r#"<div class="ss-detail" data-type="OrderView" role="group" aria-label="A-1001"><dl>"#,
         r#"<div data-field="id"><dt>Id</dt><dd>8d1f6c9e-0000-4000-8000-000000000001</dd></div>"#,
-        r#"<div data-field="status"><dt>Status</dt><dd><data value="on_hold">On hold</data></dd></div>"#,
+        // A member is labeled by its title.
+        r#"<div data-field="status"><dt>Status</dt><dd><data value="on_hold">Held for a stock check</data></dd></div>"#,
         // A date, a date-time and a time read as text a reader reads, the
         // value as sent in datetime.
         r#"<div data-field="placedAt"><dt>Placed at</dt><dd><time datetime="2026-10-09T08:30:00Z">9 Oct 2026, 08:30 UTC</time></dd></div>"#,
@@ -1964,7 +2040,7 @@ async fn a_table_shows_the_summary_fields_under_its_caption() {
     let html = render("/orders").await;
     assert_has(&html, &[
         r#"<table class="ss-table" data-type="OrderView"><caption>Orders</caption><thead><tr><th scope="col" data-field="reference">Reference</th><th scope="col" data-field="status">Status</th><th scope="col" data-field="placedAt">Placed at</th><th scope="col" data-field="shipTo">Ship to</th></tr></thead><tbody>"#,
-        r#"<tr><th scope="row" data-field="reference">A-1001</th><td data-field="status"><data value="on_hold">On hold</data></td><td data-field="placedAt"><time datetime="2026-10-09T08:30:00Z">9 Oct 2026, 08:30 UTC</time></td><td data-field="shipTo">Ada Lovelace</td></tr>"#,
+        r#"<tr><th scope="row" data-field="reference">A-1001</th><td data-field="status"><data value="on_hold">Held for a stock check</data></td><td data-field="placedAt"><time datetime="2026-10-09T08:30:00Z">9 Oct 2026, 08:30 UTC</time></td><td data-field="shipTo">Ada Lovelace</td></tr>"#,
         // A value the enum does not declare is its own label, escaped in
         // the attribute and the text.
         r#"<td data-field="status"><data value="x&quot; onclick=&quot;steal()">x" onclick="steal()</data></td>"#,
@@ -1983,8 +2059,9 @@ async fn a_record_that_nests_itself_renders_each_level() {
 }
 
 #[test]
-fn an_enum_value_is_labeled_by_its_member() {
-    assert_eq!(order_status_label("on_hold"), "On hold");
+fn an_enum_value_is_labeled_by_its_members_title_else_its_name() {
+    assert_eq!(order_status_label("on_hold"), "Held for a stock check");
+    assert_eq!(order_status_label("pending"), "Pending");
     assert_eq!(order_status_label("lost"), "lost");
 }
 
