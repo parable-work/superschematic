@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/parable-work/superschematic/internal/loader"
+	"github.com/parable-work/superschematic/internal/loader/schemafile"
+	ir "github.com/parable-work/superschematic/ir"
 )
 
 // TestTSWriterEmitsPaginated: the TypeScript writer emits @paginated with
@@ -41,5 +43,36 @@ func TestTSWriterEmitsPaginated(t *testing.T) {
 	}
 	if got, want := normalizeIR(t, writeAndReload(t, schema, FormatTS)), normalizeIR(t, schema); got != want {
 		t.Fatalf("IR changed after a YAML -> TS round trip\nwant:\n%s\ngot:\n%s", want, got)
+	}
+}
+
+// TestTSWriterRefusesASortSortByCannotWrite: SortBy is an optional text
+// query parameter that names its fields alone, so a sort argument that is
+// not one, or that carries a default or a rule, has no TypeScript form.
+func TestTSWriterRefusesASortSortByCannotWrite(t *testing.T) {
+	name := "name"
+	maxLength := 5
+	for _, tc := range []struct {
+		arg  *ir.ArgumentDef
+		want string
+	}{
+		{&ir.ArgumentDef{Name: "sort", TypeRef: ir.TypeRef{Name: "string"}, Sort: []string{"name"}},
+			"Catalog.listItems(sort): a sort argument that is not an optional query parameter has no TypeScript authoring form"},
+		{&ir.ArgumentDef{Name: "sort", TypeRef: ir.TypeRef{Name: "string"}, IsQuery: true, Required: true, Sort: []string{"name"}},
+			"Catalog.listItems(sort): a sort argument that is not an optional query parameter has no TypeScript authoring form"},
+		{&ir.ArgumentDef{Name: "sort", TypeRef: ir.TypeRef{Name: "string"}, IsQuery: true, Default: &name, Sort: []string{"name"}},
+			"Catalog.listItems(sort): a sort argument is SortBy's text alone"},
+		{&ir.ArgumentDef{Name: "sort", TypeRef: ir.TypeRef{Name: "number"}, IsQuery: true, Sort: []string{"name"}},
+			"Catalog.listItems(sort): a sort argument is SortBy's text alone"},
+		{&ir.ArgumentDef{Name: "sort", TypeRef: ir.TypeRef{Name: "string"}, IsQuery: true, ValidateMaxLength: &maxLength, Sort: []string{"name"}},
+			"Catalog.listItems(sort): a sort argument is SortBy's text alone"},
+	} {
+		doc := &schemafile.Document{Name: "catalog", Kind: ir.SchemaKindAPI, OperationSets: []*ir.OperationSet{{Name: "Catalog", Operations: []*ir.FieldDef{
+			{Name: "listItems", HTTPMethod: "GET", RestPath: "items", TypeRef: ir.TypeRef{Name: "ItemView", IsArray: true}, Required: true,
+				Arguments: []*ir.ArgumentDef{tc.arg}, Page: &ir.OperationPage{DefaultLimit: 20, MaxLimit: 100, DefaultSort: "name"}},
+		}}}}
+		if _, err := Write(doc, FormatTS); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("Write(ts) of %+v = %v, want %q", tc.arg, err, tc.want)
+		}
 	}
 }

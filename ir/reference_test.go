@@ -741,3 +741,112 @@ func TestResolveReferenceFindsTheSearch(t *testing.T) {
 		t.Fatalf("allNotes takes no search, got %+v", got.Search)
 	}
 }
+
+// A reference's options are the API's own operation first, then, when it
+// has none and the target is an API dependency's type (D66), that
+// dependency's (D61, amended): its lookup and its search are the
+// dependency's operation's arguments, the lookup matched by the type it
+// names. A General dependency lists nothing.
+func TestOptionsFromADependencyAPI(t *testing.T) {
+	shelves := func() (*Schema, *FieldDef) {
+		dep := NewSchema("shelves-api", SchemaKindAPI)
+		dep.Types["ShelfView"] = &TypeDef{Name: "ShelfView", Role: RoleAPIView, Fields: []*FieldDef{
+			{Name: "id", TypeRef: TypeRef{Name: "Identity.UUID"}, Required: true},
+			{Name: "name", TypeRef: TypeRef{Name: "string"}, Required: true},
+		}}
+		list := &FieldDef{Name: "listShelves", HTTPMethod: "GET", RestPath: "shelves", TypeRef: TypeRef{Name: "ShelfView", IsArray: true}, Required: true, Arguments: []*ArgumentDef{
+			{Name: "q", TypeRef: TypeRef{Name: "string"}, IsQuery: true, Search: true},
+			{Name: "ids", TypeRef: TypeRef{Name: "Identity.UUID", IsArray: true}, IsQuery: true, References: &ReferenceDef{Type: "ShelfView"}},
+		}}
+		dep.OperationSets = []*OperationSet{{Name: "Shelves", Operations: []*FieldDef{
+			list,
+			{Name: "getShelf", HTTPMethod: "GET", RestPath: "shelves/{id}", TypeRef: TypeRef{Name: "ShelfView"}, Arguments: []*ArgumentDef{{Name: "id", TypeRef: TypeRef{Name: "Identity.UUID"}, Required: true}}},
+		}}}
+		return dep, list
+	}
+	api := func(dep *Schema) (*Schema, map[string]*Schema) {
+		schema := catalogSchema()
+		schema.Imports = []Import{{Package: "@schemas/" + dep.Name, Types: []string{"ShelfView"}}}
+		return schema, map[string]*Schema{dep.Name: dep}
+	}
+
+	t.Run("the API's own operation wins", func(t *testing.T) {
+		dep, _ := shelves()
+		schema, deps := api(dep)
+		own := &FieldDef{Name: "listShelves", HTTPMethod: "GET", RestPath: "shelves", TypeRef: TypeRef{Name: "ShelfView", IsArray: true}}
+		schema.OperationSets = append(schema.OperationSets, &OperationSet{Name: "Shelves", Operations: []*FieldDef{own}})
+		got, err := ResolveReference(schema, deps, &ReferenceDef{Type: "ShelfView"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Options != own || got.OptionsService != "" || got.TargetService != "shelves-api" || got.Search != nil || got.Lookup != nil {
+			t.Fatalf("got options %s from %q, search %v, lookup %v; want the API's own listShelves", got.Options.Name, got.OptionsService, got.Search, got.Lookup)
+		}
+	})
+
+	t.Run("the dependency's is found", func(t *testing.T) {
+		dep, list := shelves()
+		schema, deps := api(dep)
+		got, err := ResolveReference(schema, deps, &ReferenceDef{Type: "ShelfView"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Options != list || got.OptionsSet != dep.OperationSets[0] || got.OptionsService != "shelves-api" ||
+			got.Search != list.Arguments[0] || got.Lookup != list.Arguments[1] || got.Label != nil {
+			t.Fatalf("got %+v; want shelves-api's listShelves with its q and ids", got)
+		}
+	})
+
+	t.Run("one named by options there", func(t *testing.T) {
+		dep, _ := shelves()
+		all := &FieldDef{Name: "allShelves", HTTPMethod: "GET", RestPath: "shelves/all", TypeRef: TypeRef{Name: "ShelfView", IsArray: true}}
+		dep.OperationSets[0].Operations = append(dep.OperationSets[0].Operations, all)
+		schema, deps := api(dep)
+		got, err := ResolveReference(schema, deps, &ReferenceDef{Type: "ShelfView", Options: "Shelves.allShelves"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Options != all || got.OptionsService != "shelves-api" {
+			t.Fatalf("got %s from %q, want shelves-api's allShelves", got.Options.Name, got.OptionsService)
+		}
+		for _, tc := range []struct{ options, want string }{
+			{"Shelves.getShelf", "options Shelves.getShelf does not list ShelfView: it is GET shelves/{id} returning ShelfView"},
+			{"listNothing", "options listNothing is not an operation of catalog, nor of shelves-api, which declares ShelfView"},
+		} {
+			if _, err := ResolveReference(schema, deps, &ReferenceDef{Type: "ShelfView", Options: tc.options}); err == nil || err.Error() != tc.want {
+				t.Errorf("options %s = %v, want %s", tc.options, err, tc.want)
+			}
+		}
+	})
+
+	t.Run("two that list it", func(t *testing.T) {
+		dep, _ := shelves()
+		dep.OperationSets[0].Operations = append(dep.OperationSets[0].Operations,
+			&FieldDef{Name: "allShelves", HTTPMethod: "GET", RestPath: "shelves/all", TypeRef: TypeRef{Name: "ShelfView", IsArray: true}})
+		schema, deps := api(dep)
+		_, err := ResolveReference(schema, deps, &ReferenceDef{Type: "ShelfView"})
+		if want := "ShelfView is listed by shelves-api's Shelves.listShelves and Shelves.allShelves; name one with options"; err == nil || err.Error() != want {
+			t.Fatalf("got %v, want %s", err, want)
+		}
+	})
+
+	t.Run("none lists it", func(t *testing.T) {
+		dep, _ := shelves()
+		dep.OperationSets[0].Operations = dep.OperationSets[0].Operations[1:]
+		schema, deps := api(dep)
+		_, err := ResolveReference(schema, deps, &ReferenceDef{Type: "ShelfView"})
+		if want := "no operation of catalog, nor of shelves-api, which declares ShelfView, lists it (a GET returning ShelfView[] with no path argument and no required one, that an end user may call); declare one or name it with options"; err == nil || err.Error() != want {
+			t.Fatalf("got %v, want %s", err, want)
+		}
+	})
+
+	t.Run("a General dependency, which lists nothing", func(t *testing.T) {
+		dep, _ := shelves()
+		dep.Name, dep.Kind = "catalog-types", SchemaKindGeneral
+		schema, deps := api(dep)
+		_, err := ResolveReference(schema, deps, &ReferenceDef{Type: "ShelfView"})
+		if want := "no operation of catalog lists ShelfView (a GET returning ShelfView[] with no path argument and no required one, that an end user may call); declare one or name it with options"; err == nil || err.Error() != want {
+			t.Fatalf("got %v, want %s", err, want)
+		}
+	})
+}

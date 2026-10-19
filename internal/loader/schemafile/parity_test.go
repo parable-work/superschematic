@@ -160,6 +160,17 @@ var parityInputs = []struct{ name, registry, input string }{
 		{"name": "listItems", "typeRef": {"name": "Item", "isArray": true}, "page": {"defaultLimit": 1001}}]}`},
 	{"an unknown key on a page", "core", `{"kind": "OperationSet", "name": "Catalog", "operations": [
 		{"name": "listItems", "typeRef": {"name": "Item", "isArray": true}, "page": {"pageSize": 10}}]}`},
+	// A sort argument and its page's defaultSort (D60, amended): the
+	// fields as written, in order, and a defaultSort written as a sort.
+	{"a sort argument and its page's defaultSort", "core", `{"kind": "OperationSet", "name": "Catalog", "operations": [
+		{"name": "listItems", "typeRef": {"name": "Item", "isArray": true}, "httpMethod": "GET", "arguments": [
+			{"name": "sort", "typeRef": {"name": "string"}, "isQuery": true, "sort": ["sku", "name"]}], "page": {"defaultLimit": 2, "maxLimit": 5, "defaultSort": "-sku"}}]}`},
+	{"a sort of numbers", "core", `{"kind": "OperationSet", "name": "Catalog", "operations": [
+		{"name": "listItems", "typeRef": {"name": "Item", "isArray": true}, "arguments": [{"name": "sort", "typeRef": {"name": "string"}, "isQuery": true, "sort": [1]}]}]}`},
+	{"a defaultSort that is no sort", "core", `{"kind": "OperationSet", "name": "Catalog", "operations": [
+		{"name": "listItems", "typeRef": {"name": "Item", "isArray": true}, "page": {"defaultSort": "--sku"}}]}`},
+	{"a defaultSort of two fields", "core", `{"kind": "OperationSet", "name": "Catalog", "operations": [
+		{"name": "listItems", "typeRef": {"name": "Item", "isArray": true}, "page": {"defaultSort": "sku,id"}}]}`},
 	// The user model's traits (D50): User's config and UserRole's empty
 	// object, which a pointer keeps.
 	{"the user model's traits", "core", `{"kind": "DB", "name": "accounts", "types": {
