@@ -428,23 +428,149 @@ fn cloud_sql_manager(
     options: &ConnectOptions,
 ) -> Result<deadpool_postgres::Manager, PostgresError> {
     let config = cloud_sql_config(cloud_sql, options)?;
+    Ok(deadpool_postgres::Manager::from_connect(
+        config,
+        cloud_sql_connect(cloud_sql, options),
+        manager_config(),
+    ))
+}
+
+/// What opens each connection of a Cloud SQL instance: its access tokens
+/// from the metadata server.
+fn cloud_sql_connect(cloud_sql: &CloudSql, options: &ConnectOptions) -> CloudSqlConnect {
     let host = options
         .metadata_host
         .clone()
         .unwrap_or_else(crate::token_source::metadata_host);
-    let connect = CloudSqlConnect {
+    CloudSqlConnect {
         instance: cloud_sql.instance.clone(),
         token_url: format!("http://{host}{ACCESS_TOKEN_PATH}"),
         getter: options
             .getter
             .clone()
             .unwrap_or_else(|| Arc::new(crate::HttpFetcher::new())),
-    };
-    Ok(deadpool_postgres::Manager::from_connect(
-        config,
-        connect,
-        manager_config(),
-    ))
+    }
+}
+
+/// The connection a synchronous client opens on a database for itself,
+/// the engine's (D58), which takes a URL and asks for each new
+/// connection's password: a connection string as it is, with no password
+/// to ask for; or, for a Cloud SQL instance, a libpq key-value string that
+/// names the socket Cloud Run mounts for it, the IAM user and the
+/// database, with no TLS of its own, and an access token from the metadata
+/// server as each connection's password, as the pool's connections have.
+pub struct SyncConnection {
+    /// What the client opens: the connection string, or the key-value
+    /// string of the instance's socket.
+    pub url: String,
+    token: Option<SyncToken>,
+}
+
+/// The access tokens of a [`SyncConnection`]: fetched on the tokio runtime
+/// the connection was made on, from the thread that asks.
+struct SyncToken {
+    connect: Arc<CloudSqlConnect>,
+    runtime: tokio::runtime::Handle,
+}
+
+impl fmt::Debug for SyncConnection {
+    // The URL may hold a password; only whether a token is asked for.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SyncConnection")
+            .field("token", &self.token.is_some())
+            .finish_non_exhaustive()
+    }
+}
+
+impl SyncConnection {
+    /// Whether each connection asks [`SyncConnection::password`] for its
+    /// password: a Cloud SQL instance's does.
+    pub fn asks_password(&self) -> bool {
+        self.token.is_some()
+    }
+
+    /// The password of a connection about to open: a fresh access token
+    /// for a Cloud SQL instance, `None` for a connection string. It blocks
+    /// on the runtime the connection was made on, so it runs on a thread of
+    /// the client's own, never one of the runtime's.
+    pub fn password(&self) -> Option<Result<String, String>> {
+        let token = self.token.as_ref()?;
+        Some(
+            token
+                .runtime
+                .block_on(token.connect.access_token())
+                .map_err(|err| {
+                    format!(
+                        "Cloud SQL instance {}: an access token from the metadata server: {err}",
+                        token.connect.instance
+                    )
+                }),
+        )
+    }
+}
+
+/// The [`SyncConnection`] of `db` with the default options. It must be
+/// made on a tokio runtime, which a Cloud SQL token is fetched on.
+pub fn sync_connection(db: &Database) -> Result<SyncConnection, PostgresError> {
+    sync_connection_with(db, ConnectOptions::default())
+}
+
+/// [`sync_connection`] with `options`: the socket directory, the metadata
+/// server and its client.
+pub fn sync_connection_with(
+    db: &Database,
+    options: ConnectOptions,
+) -> Result<SyncConnection, PostgresError> {
+    match db {
+        Database::Url(url) => Ok(SyncConnection {
+            url: url.clone(),
+            token: None,
+        }),
+        Database::CloudSql(cloud_sql) => {
+            let dir = options
+                .socket_dir
+                .clone()
+                .unwrap_or_else(|| PathBuf::from(CLOUD_SQL_SOCKET_DIR))
+                .join(&cloud_sql.instance);
+            let Some(dir) = dir.to_str().map(str::to_owned) else {
+                return Err(PostgresError::new(format!(
+                    "Cloud SQL instance {}: its socket directory is not UTF-8",
+                    cloud_sql.instance
+                )));
+            };
+            let runtime = tokio::runtime::Handle::try_current().map_err(|_| {
+                PostgresError::new(
+                    "a Cloud SQL connection of a synchronous client is made on a tokio runtime, which fetches its tokens",
+                )
+            })?;
+            let url = format!(
+                "host={} user={} dbname={} sslmode=disable",
+                key_value(&dir),
+                key_value(&cloud_sql.user),
+                key_value(&cloud_sql.database)
+            );
+            Ok(SyncConnection {
+                url,
+                token: Some(SyncToken {
+                    connect: Arc::new(cloud_sql_connect(cloud_sql, &options)),
+                    runtime,
+                }),
+            })
+        }
+    }
+}
+
+/// A libpq key-value string's value: quoted, its quotes and backslashes
+/// escaped, unless it is plain.
+fn key_value(value: &str) -> String {
+    if !value.is_empty()
+        && value
+            .chars()
+            .all(|c| !c.is_whitespace() && c != '\'' && c != '\\')
+    {
+        return value.to_string();
+    }
+    format!("'{}'", value.replace('\\', "\\\\").replace('\'', "\\'"))
 }
 
 /// Opens each connection of a Cloud SQL pool: an access token as the
@@ -748,6 +874,65 @@ mod tests {
             "error communicating with the server: Cloud SQL instance p:r:i: an access token \
              from the metadata server: GET http://metadata.test: 500"
         );
+    }
+
+    #[test]
+    fn a_synchronous_clients_cloud_sql_connection_is_its_socket_with_a_fresh_token_each() {
+        let requests = Requests::default();
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .unwrap();
+        let cloud_sql = Database::CloudSql(CloudSql {
+            instance: "acme:us-central1:shop".to_string(),
+            database: "shop db".to_string(),
+            user: "shop-api@acme.iam".to_string(),
+        });
+        let options = ConnectOptions::new()
+            .with_metadata_host("metadata.test")
+            .with_getter(Arc::new(Metadata {
+                answer: Ok(r#"{"access_token":"ya29.token"}"#.to_string()),
+                requests: Arc::clone(&requests),
+            }));
+        let connection = runtime
+            .block_on(async { sync_connection_with(&cloud_sql, options) })
+            .unwrap();
+        assert_eq!(
+            connection.url,
+            "host=/cloudsql/acme:us-central1:shop user=shop-api@acme.iam dbname='shop db' sslmode=disable"
+        );
+        assert!(connection.asks_password());
+        let config: tokio_postgres::Config = connection.url.parse().unwrap();
+        assert_eq!(
+            config.get_hosts(),
+            [tokio_postgres::config::Host::Unix(PathBuf::from(
+                "/cloudsql/acme:us-central1:shop"
+            ))]
+        );
+        assert_eq!(config.get_dbname(), Some("shop db"));
+        assert_eq!(config.get_password(), None);
+        // The client asks from a thread of its own, once per connection.
+        let connection = Arc::new(connection);
+        for _ in 0..2 {
+            let asking = Arc::clone(&connection);
+            let password = std::thread::spawn(move || asking.password())
+                .join()
+                .unwrap();
+            assert_eq!(password, Some(Ok("ya29.token".to_string())));
+        }
+        assert_eq!(requests.lock().unwrap().len(), 2);
+        assert!(!format!("{connection:?}").contains("ya29"));
+
+        let url = Database::Url("postgres://u:p@h/d?sslmode=disable".to_string());
+        let plain = sync_connection(&url).unwrap();
+        assert_eq!(plain.url, "postgres://u:p@h/d?sslmode=disable");
+        assert_eq!(plain.password(), None);
+        assert!(
+            sync_connection(&cloud_sql).is_err(),
+            "a Cloud SQL connection outside a runtime has no runtime to fetch tokens on"
+        );
+        assert_eq!(key_value("a'b\\c"), "'a\\'b\\\\c'");
     }
 
     #[tokio::test]

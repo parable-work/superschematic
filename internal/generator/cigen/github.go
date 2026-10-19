@@ -688,11 +688,11 @@ type rustCrate struct {
 }
 
 // rustCrates are the crates of the stack's Rust servers, then its Rust
-// jobs, then its Rust workers, each sorted by name. A Rust engine runner
-// has no crate yet (D58).
+// jobs, then its Rust workers, then its Rust engine runners (D58), each
+// sorted by name.
 func (g github) rustCrates() []rustCrate {
 	var crates []rustCrate
-	for _, kind := range []ir.DeployableKind{ir.DeployableServer, ir.DeployableJob, ir.DeployableWorker} {
+	for _, kind := range []ir.DeployableKind{ir.DeployableServer, ir.DeployableJob, ir.DeployableWorker, ir.DeployableRunner} {
 		for _, name := range g.deployablesIn(kind, registry.APILanguageRust) {
 			crates = append(crates, rustCrate{kind, name})
 		}

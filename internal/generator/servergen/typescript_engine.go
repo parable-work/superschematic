@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/apigen"
+	"github.com/parable-work/superschematic/internal/registry"
 )
 
 // The engine in a TypeScript entrypoint (D58), the twin of a Go
@@ -46,6 +47,11 @@ type TypeScriptEngine struct {
 	// holds as its permissions.
 	Types []string
 
+	// Behaviors are the work queue's behaviors the engine types compose,
+	// sorted, which the engine registers by name after the core's: the
+	// engine's addon carries them.
+	Behaviors []string
+
 	// Database is the pool's database, whose field the engine opens on.
 	Database *TypeScriptDatabase
 
@@ -73,6 +79,24 @@ func (e *TypeScriptEngine) PolicyLiteral() string {
 		return tsQuote(shorthand)
 	}
 	return e.Policy
+}
+
+// OpenOptions are the options main.ts opens the engine with beside its
+// document and policy, members (setup, runner) and the work queue's
+// behaviors it composes, as the call's last argument with its comma; empty
+// when there are none.
+func (e *TypeScriptEngine) OpenOptions(members ...string) string {
+	if len(e.Behaviors) > 0 {
+		quoted := make([]string, len(e.Behaviors))
+		for i, b := range e.Behaviors {
+			quoted[i] = tsQuote(b)
+		}
+		members = append([]string{"behaviors: [" + strings.Join(quoted, ", ") + "]"}, members...)
+	}
+	if len(members) == 0 {
+		return ""
+	}
+	return ", { " + strings.Join(members, ", ") + " }"
 }
 
 // TypeScriptRunner is what a TypeScript engine's runner's entrypoint runs
@@ -147,6 +171,11 @@ func (s *TypeScriptServer) newTypeScriptEngine(d *TypeScriptDatabase, info *apig
 		Policy:          string(info.Policy),
 		Types:           slices.Clone(info.Types),
 		Database:        d,
+	}
+	for _, b := range info.Behaviors {
+		if b.Extension == "" && b.Package == registry.WorkQueuePackage {
+			e.Behaviors = append(e.Behaviors, b.Name)
+		}
 	}
 	s.Engines = append(s.Engines, e)
 	return e

@@ -603,7 +603,7 @@ line that holds it.
   ```ts
   declare module "@superschematic/stack" {
     interface Targets {
-      gcp: { values: GcpValues; server: CloudRunSettings; database: CloudSqlSettings; job: CloudRunJobSettings; worker: WorkerPoolSettings };
+      gcp: { values: GcpValues; server: CloudRunSettings; database: CloudSqlSettings; job: CloudRunJobSettings; worker: WorkerPoolSettings; runner: WorkerPoolSettings };
     }
   }
   ```
@@ -624,6 +624,13 @@ line that holds it.
     `concurrency` and `enabled`, and an `env` typed from the handle's
     config type (D53);
   - a DB handle takes the target's `database` settings and no `env`;
+  - a DB handle beside `runner: true` names the engine's runner of the
+    database, which must be an engine database an API connects to, and
+    takes the target's `runner` settings and `enabled`, and no `env`
+    (D58). A runner that is off runs no instance: no reaction, schedule,
+    Timers deadline or event-log retention runs until it is on again,
+    when each reaction reads on from its cursor, a schedule that came due
+    runs once and every overdue deadline fires;
   - a Bucket handle takes the target's `bucket` settings and no `env`
     (D54);
   - an `@server` or `@database` class takes either kind's settings and an
@@ -1413,7 +1420,7 @@ Bootstrap reads the GitHub repository from the git remote.
 | schedule | for a job whose environment runs a schedule, a Cloud Scheduler job named as the job is, in the environment's region, on the job's cron in its time zone, which POSTs to the Cloud Run Admin API's `jobs/<job>:run` with an OAuth token for the job's own account; that account holds `roles/run.invoker` on that job alone, which grants it `run.jobs.run`. A job whose schedule is off has neither, and runs only on demand |
 | bucket | a Cloud Storage bucket (`gcp.storage`, D54) named `<project>-<stack>-<bucket>`, since a bucket's name is global, in the environment's region, with uniform bucket-level access, so IAM alone admits a reader, and public access prevention enforced; versioned when the settings say so (section 7.5). Only a member of a parameterized environment sets `forceDestroy`: its bucket is its own, which its destroy empties, where any other bucket keeps its objects and a destroy fails on it |
 | worker | a Cloud Run worker pool (`gcp.cloudrunworker`) named after the deployable, for a worker in Go, TypeScript or Rust (D65), with its own service account, which holds the Cloud Trace agent role, and the config, secrets, Cloud SQL volume and VPC egress a server of its API takes; no port, no URL and no IAM of its own, since nothing calls it; manual scaling to the worker's instances, zero when the environment turns it off, so the pool and its pinned image stay; `WORKER_CONCURRENCY` set to its concurrency; `cpu`, one or more, and `memory` (D53). A worker whose grace is ten seconds or more is refused, since Cloud Run kills an instance ten seconds after SIGTERM |
-| runner | a Cloud Run worker pool (`gcp.cloudrunrunner`) named after the deployable, an engine database's runner (D58), in its API's language, with its own service account and its database's Cloud SQL connection as its one config; one instance under manual scaling, which runs the engine's runner while it holds the runner's lock, since a Cloud Run service's instance has CPU only while it serves. Its database user is its own, so the migration job's privileges on the engine's schema, `engine`, are not built yet (D58) |
+| runner | a Cloud Run worker pool (`gcp.cloudrunrunner`) named after the deployable, an engine database's runner (D58), in its API's language, with its own service account and its database's Cloud SQL connection as its one config; one instance under manual scaling, which runs the engine's runner while it holds the runner's lock, since a Cloud Run service's instance has CPU only while it serves. Its database user is its own, a member of the role that owns the engine's schema, as each server's, job's and worker's on the database is (section 8.4, D58). A settings element that turns it off (`{ of: ShopDb, runner: true, enabled: false }`) leaves the pool no instance |
 | sql edge | `roles/cloudsql.client` and `roles/cloudsql.instanceUser` for the server's, the job's or the worker's account, held to the edge's instance by an IAM condition; an IAM database user, which the migration job gives read and write privileges; the Cloud SQL connection, which the connector derives (instance connection name, database, IAM user) and the service, the job or the worker pool mounts at `/cloudsql`. The same for a Rust server, job or worker, which dials the mount's socket as the IAM user (section 7.4, D57, D65) |
 | http edge | `roles/run.invoker` on the callee for the caller's account; the callee's `run.app` URL in the caller's config, with a Google ID token for the callee's custom audience, its full resource name `//run.googleapis.com/projects/<project>/locations/<region>/services/<service>`, as the service credential, since the service's own callers field cannot reference its URL; every service lists its resource name in `customAudiences`. The callee's callers field gets Google's issuer and keys, and the caller's service account by its email (section 9.2): a job's, as a caller that serves its API |
 | bucket edge | `roles/storage.objectUser` on the bucket alone for the server's, the job's or the worker's account, which reads, writes, lists and deletes its objects and changes nothing of the bucket, and `roles/iam.serviceAccountTokenCreator` for that account on itself, which IAM's `signBlob` asks of an account that signs a URL as itself; the bucket's name, which the connector derives, with no credential, since the client takes the workload's own from the metadata server. A Rust server's, job's or worker's bucket edge is refused: its runtime has no `Bucket`, and buckets from a Rust server are not built (D57) |
@@ -1736,21 +1743,29 @@ opens. Every API on the database holds the engine in its `Deps`, an
 `*engine.Background`, whose `Wait(ctx)` returns the engine once it opens.
 At shutdown the server ends every event stream as it stops taking
 requests, and closes the engine after the requests in flight finish. The
-server links the core's engine archive, so the build refuses an engine
-database that composes the work queue's behaviors or an extension's,
-which a project's engine archive runs. A TypeScript server opens and
-mounts the engine too, through the engine's Node-API addon (section 8.6);
-a Rust server opens no engine yet, and the build says so.
+server links the core's engine archive, unless its engine database
+composes a behavior the core's archive leaves out, the work queue's or an
+extension's: then it links the archive of the project's engine crate,
+`<out>/engine/rust/<db>`, which the database's build writes with its
+`ffi` member, and the checkout's Dockerfile builds that archive in the
+engine stage, the crate's lock file seeded from the engine workspace's.
+The build refuses an engine database that composes an extension's
+behavior no Rust crate implements, and a server whose engine databases
+would each need a project archive of its own, since a binary links one.
+A release's image, which downloads the core's archive, cannot take a
+project's, so it gets no Dockerfile. A Rust server opens the engine as
+section 8.6 says, and so does a TypeScript server, through the engine's
+Node-API addon.
 
 An engine database's runner is an entrypoint of its own,
 `<db>-engine-runner` (section 3.1), in the language of the first API on
-it: a Go one's `main.go`, and a TypeScript one's `main.ts`, reads the
-database's connection field alone, opens the engine on it as a server
-does, deploying nothing, starts the engine's runner as the deployable's
-name, holding each engine type's name as a permission, and runs until
-SIGTERM. On Postgres it runs while it holds the runner's lock. A job's and
-a worker's entrypoint open the engine for their API's `Deps` too,
-deploying nothing.
+it: a Go one's `main.go`, a TypeScript one's `main.ts` or a Rust one's
+(section 8.6) reads the database's connection field alone, opens the
+engine on it as a server does, deploying nothing, starts the engine's
+runner as the deployable's name, holding each engine type's name as a
+permission, and runs until SIGTERM. On Postgres it runs while it holds the
+runner's lock. A job's and a worker's entrypoint open the engine for their
+API's `Deps` too, deploying nothing.
 
 A server on an engine database some environment places on Cloud SQL
 serves the engine, whose Postgres client takes a URL, a unix socket in a
@@ -2045,6 +2060,32 @@ changed even when its plan has no steps, before the new server rolls out
 and before a removed server's user goes. Since Postgres drops no role that
 holds privileges, an IAM database user's node abandons the user when it
 goes.
+
+On an engine database (D58) every server, job, worker and the runner
+that connects opens the engine, each as its own IAM database user, and
+the first to open it runs the engine's migrations, which create its
+tables in the schema `engine`; a later engine release, or a publish that
+adds a behavior's storage, changes them from whichever opens it. So the
+job document's privileges gain `engine`, and after the read and write
+grants the job readies the schema for them all. It creates a role of the
+database's own, `<database>_engine` (a hash in its name past Postgres's
+63 bytes), which cannot log in, as `cloudsqlsuperuser`, which may create
+roles where the migrator's IAM user, which inherits no attribute, may
+not; makes the migrator a member that may act as it; creates `engine`
+owned by the role; and grants the role to each connecting deployable's
+IAM database user, taking it back from one that no longer connects, as
+it does the table grants. The engine acts as its schema's owner: when
+another role owns it, one the session's user is a member of, every
+connection takes that role (`SET ROLE`), so every table, index and text
+search configuration any of them creates is the role's, and each may
+change it later. It looks the schema up before it creates one, since
+Postgres checks CREATE on the database first and the IAM users hold none.
+The job also creates the `unaccent` extension the engine's Search needs
+on Postgres in `superschematic_extensions`, which only a
+`cloudsqlsuperuser` member may on Cloud SQL, and gives the role USAGE on
+it; a database that refuses it is reported and the job goes on. The read
+and write grants leave both schemas out. The local target needs none of
+this: every process connects as the container's one superuser.
 
 The runner's image is built once per release, with Cloud Build, from a
 generated Dockerfile that installs the runner with `go install` from its
@@ -2365,9 +2406,10 @@ as they are, with no build step (D51). The pieces mirror Go's:
   connection field alone, starting the engine's runner as the
   deployable's name, and holding the process open until SIGTERM, when it
   stops the runner and closes the engine. The addon runs the core's
-  behaviors, so the build refuses an engine database that composes the
-  work queue's or an extension's, which the project's engine crate's addon
-  will run.
+  behaviors and the work queue's, which `main.ts` names when it opens the
+  engine (`behaviors: [...]`), so the build refuses only an engine
+  database that composes an extension's, which the project's engine
+  crate's addon will run.
 - **Image.** With the naming file's `[paths]` naming the checkouts of
   superscalar's TypeScript binding and the HTTP runtime's package, which
   no registry serves yet, the Dockerfile's addon stage builds
@@ -2526,6 +2568,26 @@ are the jobs and workers of a Rust API (D65; sections 8.7 and 8.8).
     rate limits, and on SIGTERM or SIGINT answers `/readyz` 503, stops
     taking connections and gives those in flight ten seconds; a second
     signal exits at once.
+- **Engine.** An API whose database is an engine database (D58) holds the
+  engine in its `Deps` (`engine`, a `superschematic_engine::background::Background`),
+  which `src/engine.rs`, beside `main.rs`, opens through the engine's
+  crate, linked in with the core's behaviors or the project's engine
+  crate's: in the background on a task of the server's runtime, each
+  attempt on the blocking pool, retrying a second apart and doubling to
+  thirty, over the database's connection field, a URL or, for Cloud SQL,
+  the socket Cloud Run mounts with an IAM access token as each new
+  connection's password (`postgres::sync_connection`). The server deploys
+  the `ENGINE_DOCUMENT` of the database's Rust types before `/readyz`,
+  which names `<db> engine`, reports it ready, and merges the engine's
+  routes (`axum::background_router`, 503 `unavailable` until it opens) at
+  `outputs.engine.mount` before the API router's fallback, behind the
+  API's identity session and service caller, with the identity config's
+  trusted origins' CORS and a calling site's. At SIGTERM it ends every
+  event stream as it stops taking connections, then shuts the engine down
+  off the runtime. A job and a worker open the engine for their `Deps`
+  and deploy nothing; the database's runner, when the first API on it is
+  Rust, is a crate of its own whose `main.rs` reads the database's field
+  alone and runs the engine's runner as its deployable.
 - **Image.** The Dockerfile's build stage, on `rust` at the release
   `tools.env` pins, builds the crate in the workspace with `cargo build
   --release --locked`, which fails on a lockfile that does not match the
@@ -2544,9 +2606,12 @@ are the jobs and workers of a Rust API (D65; sections 8.7 and 8.8).
   and every implementation's mirror under `impl/` whole, then the
   checkouts of the HTTP runtime, the schema runtime and superscalar's
   crate with its workspace's root manifest, whose lints the crate
-  inherits. No implementation's own directory goes in. Without `[paths]
-  scalar_rust` or `schema_runtime_rust`, or with a checkout outside the
-  build context, no Dockerfile is written, and the build says why.
+  inherits, and, with `[paths] engine_rust` set, the engine's Cargo
+  workspace with the crates it reaches and the project engine crates under
+  the output root (D58). No implementation's own directory goes in.
+  Without `[paths] scalar_rust` or `schema_runtime_rust`, or with a
+  checkout outside the build context, no Dockerfile is written, and the
+  build says why.
 - **Local.** `stack dev` builds each Rust server's, job's and worker's
   crate with `cargo build --release --locked` into the program directory's
   Cargo target directory and runs its binary (section 8.3). Its build of the stack has
@@ -2560,6 +2625,9 @@ are the jobs and workers of a Rust API (D65; sections 8.7 and 8.8).
 
 `TestStackDevRunsARustServer` runs a Rust server over Postgres that calls
 another, and signs an end user in with the identity runtime.
+`TestRustEngineEntrypointServes` builds a Rust server, its job and the
+Rust runner of its engine database, and runs them offline and on Postgres
+(D58).
 `TestStackDevRunsRustJobsAndWorkers` runs a Rust API's server and worker,
 and its job through `stack run` (sections 8.7 and 8.8).
 acme-shop's `TestStackDevRunsTheShop` runs `shop-stock`, a Rust server

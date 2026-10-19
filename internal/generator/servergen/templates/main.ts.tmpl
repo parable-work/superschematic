@@ -154,7 +154,7 @@ async function main(): Promise<void> {
   // database in the background, as the pool connects when first used, so
   // /readyz reports it until it opens and deploys the database's engine
   // document.
-  const {{ .Var }} = await openEngine({{ tsQuote .Service }}, {{ tsQuote .Database.Field }}, {{ .Database.From }}, {{ .Document }}, {{ .PolicyLiteral }}, { setup: deployEngine });
+  const {{ .Var }} = await openEngine({{ tsQuote .Service }}, {{ tsQuote .Database.Field }}, {{ .Database.From }}, {{ .Document }}, {{ .PolicyLiteral }}{{ .OpenOptions "setup: deployEngine" }});
 {{- end }}
 {{- if .Engines }}
   const engines: readonly OpenedEngine[] = [{{ range $i, $e := .Engines }}{{ if $i }}, {{ end }}{{ $e.Var }}{{ end }}];

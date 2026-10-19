@@ -65,6 +65,10 @@ type crate struct {
 	// Pages are the pages of each resource the operations describe, nil
 	// unless outputs.topcoat.pages turns them on (pages.go).
 	Pages *pagesModel
+	// Engine is the engine of the API's engine database, which the crate
+	// opens in-process on SQLite and mounts at /engine (D58), nil when its
+	// database is none (engine.go).
+	Engine *engineModel
 	// noCalls is why each operation without an in-process call has none.
 	noCalls map[*ir.FieldDef]string
 }
@@ -261,6 +265,9 @@ func newCrate(c registry.GenerateContext, api *registry.RustAPI, cfg Config) (*c
 		}
 	}
 	if out.References, err = referencesOf(out, schemas, inProcess, c.Logf); err != nil {
+		return nil, err
+	}
+	if out.Engine, err = engineOf(c, api, Dir(c.Options.OutputRoot, service)); err != nil {
 		return nil, err
 	}
 	if cfg.WritesPages() {
@@ -522,7 +529,11 @@ func (c *crate) write(dir string) error {
 	if c.Pages != nil {
 		files = append(files, struct{ template, path string }{"pages.tmpl", filepath.Join("src", "pages.rs")})
 	}
+	if c.Engine != nil {
+		files = append(files, struct{ template, path string }{"engine.tmpl", filepath.Join("src", "engine.rs")})
+	}
 	funcs := template.FuncMap{
+		"engineMount":  func() string { return EngineMount },
 		"rustString":   rustString,
 		"escapeBraces": escapeBraces,
 		"join":         strings.Join,
@@ -538,7 +549,7 @@ func (c *crate) write(dir string) error {
 	}
 	// A crate written before with records or forms keeps no stale module,
 	// arg_forms.rs among them, which argument forms were once written to.
-	for _, stale := range []string{"records.rs", "wire.rs", "choices.rs", "forms.rs", "arg_forms.rs", "procedures.rs", "views.rs", "references.rs", "pages.rs"} {
+	for _, stale := range []string{"records.rs", "wire.rs", "choices.rs", "forms.rs", "arg_forms.rs", "procedures.rs", "views.rs", "references.rs", "pages.rs", "engine.rs"} {
 		if err := os.Remove(filepath.Join(dir, "src", stale)); err != nil && !os.IsNotExist(err) {
 			return err
 		}

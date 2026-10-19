@@ -66,6 +66,12 @@ fn {{ .Constructor }}(endpoint: &Service) -> Result<{{ .Alias }}::{{ .Client }},
 {{ rustLetCall .Var "connect" "?" (rustString .Service) (rustString .Field) (printf "&%s" .From) }}
 {{- end }}
 {{- end }}
+{{- range .Engines }}
+
+    // The engine of {{ .Service }}, an engine database (D58), opened in the
+    // background for the API's Deps; the servers deploy its document.
+{{ $.OpenLet . }}
+{{- end }}
 {{- if .Clients }}
 
     // One client per API called.
@@ -81,6 +87,9 @@ fn {{ .Constructor }}(endpoint: &Service) -> Result<{{ .Alias }}::{{ .Client }},
 {{- end }}
 {{- if $api.Database }}
         db: {{ $api.Database.Var }}{{ if .Worker }}.clone(){{ end }},
+{{- end }}
+{{- with $api.Engine }}
+        engine: {{ .Var }}.clone(),
 {{- end }}
 {{- range $api.Calls }}
         {{ .Field }}: {{ .Client.Var }},

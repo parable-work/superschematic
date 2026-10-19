@@ -80,6 +80,10 @@ pub const JOB: &str = "job";
 /// The field that names a worker on every line of its log.
 pub const WORKER: &str = "worker";
 
+/// The field that names an engine's runner on every line of its log (D58),
+/// as Go's runner logger names it.
+pub const RUNNER: &str = "runner";
+
 /// The span of one API of the server: each line written in it carries
 /// `"api": api`. The generated `Deps` holds one, and the entrypoint runs the
 /// API's work in it (`span.in_scope`, or `tracing::Instrument::instrument`

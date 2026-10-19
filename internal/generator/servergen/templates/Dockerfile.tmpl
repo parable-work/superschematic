@@ -36,10 +36,22 @@
 # which a database the {{ .Kind }} connects to links.
 {{- end }}
 {{- if .Docker.Engine }}
+{{- if .Docker.Engine.Project }}
+# The engine stage does the same for the engine's archive (D58), which the
+# {{ .Kind }} links to open the engine on an engine database whose types compose
+# behaviors the core's archive leaves out: the archive of the project's
+# engine crate, which compiles them in, built from its ffi member beside the
+# engine's crates and the extensions' at their places in the checkout, its
+# lock file seeded from the engine workspace's:
+#
+#   {{ .Docker.Engine.Project }}
+#
+{{- else }}
 # The engine stage does the same for the engine's archive (D58), which the
 # {{ .Kind }} links to open the engine on an engine database: the core's, from the
 # Cargo workspace beside the engine's Go binding, with the crates it reaches
 # by path at their places in the checkout.
+{{- end }}
 {{- end }}
 {{- end }}
 # The build stage links the binary against Debian's glibc, and the image runs
@@ -94,9 +106,20 @@ COPY {{ .Docker.Engine.Workspace }} {{ .Docker.Engine.Workspace }}
 {{- range .Docker.Engine.Crates }}
 COPY {{ . }} {{ . }}
 {{- end }}
+{{- if .Docker.Engine.Project }}
+COPY {{ .Docker.Engine.Project }} {{ .Docker.Engine.Project }}
+{{- range .Docker.Engine.ProjectCrates }}
+COPY {{ . }} {{ . }}
+{{- end }}
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    { test -f {{ .Docker.Engine.Project }}/Cargo.lock || cp {{ .Docker.Engine.Workspace }}/Cargo.lock {{ .Docker.Engine.Project }}/Cargo.lock; } \
+    && cargo build --release --manifest-path {{ .Docker.Engine.Project }}/ffi/Cargo.toml \
+    && cp {{ .Docker.Engine.Project }}/target/release/{{ .Docker.Engine.ProjectArchive }} /libsuperschematic_engine.a
+{{- else }}
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo build --locked --release --manifest-path {{ .Docker.Engine.Workspace }}/Cargo.toml -p superschematic-engine-ffi \
     && cp {{ .Docker.Engine.Workspace }}/target/release/libsuperschematic_engine_ffi.a /libsuperschematic_engine.a
+{{- end }}
 {{- end }}
 
 FROM golang:${GO_VERSION}-trixie AS build

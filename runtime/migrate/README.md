@@ -300,7 +300,7 @@ A database:
 | `database` | string | With `cloudSql`: the database's name on the instance. |
 | `databaseUrl` | string | Without `cloudSql`: the database's URL, as `--database-url` takes it. |
 | `plan` | string | Optional. The plan whose phase to run: a path or a `gs://` URL, read relative to the job document's. |
-| `privileges` | object | Optional. `readWrite`, the roles that read and write the DB service's tables. |
+| `privileges` | object | Optional. `readWrite`, the roles that read and write the DB service's tables, and `engine`, optional, the engine's schema for the deployables that open the engine (D58): `schema`, the engine's schema (`engine`), `role`, the role that owns it, and `members`, the roles that open the engine. |
 
 With `cloudSql`, the runner reaches each database through the Cloud SQL Go
 connector, which dials the instance by its connection name over TLS with
@@ -321,6 +321,26 @@ roles that hold them. A role the user is granted, such as
 `cloudsqlsuperuser` on Cloud SQL, keeps what it holds.
 An empty `readWrite` takes every such grant back. Only the Postgres
 driver gives privileges.
+
+Then `engine` readies the engine's schema for the deployables that open
+the engine, each as a database user of its own, in one transaction. It
+creates `role`, which cannot log in, when it is missing: as the job's
+user when the user may create roles, else as the first role the user is
+granted that may (on Cloud SQL, `cloudsqlsuperuser`, whose `CREATEROLE`
+its members do not inherit). It makes the user a member that may act as
+the role, which Postgres 16 does not make a role's creator, creates
+`schema` owned by the role, or gives an existing schema to it, and grants
+the role to each of `members`, taking it back from any other role that
+holds it but the user's own. The engine acts as its schema's owner
+(`runtime/engine/README.md`, "Several instances on one Postgres
+database"), so whatever any member creates there, at the engine's own
+migrations or a publish, is the role's, and every member may change it
+later; `readWrite`'s grants leave the schema out. In a transaction of its
+own, it creates the `unaccent` extension, which the engine's Search needs
+on Postgres, in `superschematic_extensions` when the database has none,
+and gives the role USAGE on the schema it lives in; when the database
+refuses it, the job says so and goes on, since only a publish of Search
+needs it.
 
 Exit codes: 0 done, 1 refused or failed, 2 usage. A job that fails writes
 its error to stderr on a line that begins `superschematic-migrate: `,

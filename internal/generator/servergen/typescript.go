@@ -925,7 +925,7 @@ func planTypeScriptDocker(in TypeScriptInput, s *TypeScriptServer, dir string) (
 		if in.Paths.EngineTypeScript == "" {
 			return nil, fmt.Sprintf("the %s opens the engine (D58), and the naming file's [paths] engine_typescript, the engine's npm package, whose Cargo workspace the image builds the engine's Node-API addon from, is unset; set it to a superschematic checkout's runtime/engine/typescript", s.Kind), nil
 		}
-		engine, why := planEngineDocker(in.Paths.EngineTypeScript, root, rel, "the engine's npm package")
+		engine, why := planEngineDocker(in.Paths.EngineTypeScript, nil, root, rel, "the engine's npm package")
 		if engine == nil {
 			return nil, why, nil
 		}

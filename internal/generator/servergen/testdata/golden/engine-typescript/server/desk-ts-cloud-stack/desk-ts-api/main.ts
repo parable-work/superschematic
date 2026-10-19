@@ -285,10 +285,12 @@ interface OpenedEngine {
 /**
  * Opens, in the background, the engine of the engine database service on
  * the database the field named field holds, db, with document, its engine
- * document, and the access policy policy. runner, for an engine's runner,
- * is the principal its reactions and schedules act as. setup runs on the
- * engine once it opens; none sets nothing up. Each attempt that fails is
- * logged with the wait before the next.
+ * document, and the access policy policy. behaviors are the work queue's
+ * the engine types compose, which the engine's addon carries and registers
+ * by name after the core's. runner, for an engine's runner, is the
+ * principal its reactions and schedules act as. setup runs on the engine
+ * once it opens; none sets nothing up. Each attempt that fails is logged
+ * with the wait before the next.
  */
 async function openEngine(
   service: string,
@@ -296,7 +298,7 @@ async function openEngine(
   db: Database,
   document: EngineDocumentOf,
   policy: NativeEngineOptions['policy'],
-  options: { readonly runner?: Principal; readonly setup?: EngineSetup } = {}
+  options: { readonly behaviors?: readonly string[]; readonly runner?: Principal; readonly setup?: EngineSetup } = {}
 ): Promise<OpenedEngine> {
   const { url, release } = await engineURL(field, db);
   const log = logger.child({ engine: service, namespace: document.namespace });
@@ -308,6 +310,7 @@ async function openEngine(
       namespaces: { names: [document.namespace] },
       metaSchema: document.metaSchema,
       tools: document.tools,
+      ...(options.behaviors !== undefined ? { behaviors: options.behaviors } : {}),
       ...(options.runner !== undefined ? { runner: { principal: options.runner } } : {}),
     },
     {

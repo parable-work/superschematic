@@ -18,7 +18,11 @@ postgres = ["superschematic-engine-storage/postgres"]
 # The engine's routes as an axum router (`superschematic_engine::axum`),
 # which a Rust server mounts (D58). Off by default, so the bindings' builds
 # (the C archive, the Node-API addon) leave axum and its runtime out.
-axum = ["dep:axum", "dep:futures-util", "dep:tokio"]
+axum = ["background", "dep:axum", "dep:futures-util"]
+# An engine a server opens while it serves (`superschematic_engine::background`),
+# on a task of the host's tokio runtime, each attempt on its blocking pool:
+# what a Rust server's Deps holds and its readiness reads (D58).
+background = ["dep:tokio"]
 # Behaviors whose hooks are named at run time (behaviors::DynamicBehavior):
 # what a binding's test bridge registers for a behavior written in the
 # host's language. No production build turns it on (D58).
@@ -50,8 +54,9 @@ superschematic-schema-ir = { path = "../../../schema/rust-ir", features = ["sche
 superschematic-engine-storage = { path = "../storage", default-features = false }
 # The axum feature's blocking pool, which runs every engine call and event
 # stream pull off the server's async threads, and the channel that wakes
-# the streams a commit moves on.
-tokio = { version = "1.52.2", default-features = false, features = ["rt", "sync", "time"], optional = true }
+# the streams a commit moves on; the background feature's task, which
+# opens the engine and waits between attempts.
+tokio = { version = "1.52.2", default-features = false, features = ["macros", "rt", "sync", "time"], optional = true }
 # Random version 4 ids, as the TypeScript engine's randomUUID makes them.
 uuid = { version = "1.28.0", features = ["v4"] }
 

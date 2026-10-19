@@ -59,6 +59,15 @@ pub struct Deps {
     /// server's service credential.
     pub {{ .Field }}: {{ .CrateIdent }}::{{ .Client }},
 {{- end }}
+{{- with .Engine }}
+    /// The engine of {{ .Database }}, the API's engine database (D58), which the
+    /// entrypoint opens in the background, so it starts while the database
+    /// is not up yet: `engine.wait().await` returns it once it opens, and
+    /// `engine.engine()` at once, or why it is not open. Its types'
+    /// instances are the engine's, in namespace {{ .Namespace }}. The engine is
+    /// synchronous: call it off the async threads (`spawn_blocking`).
+    pub engine: {{ .CrateIdent }}::background::Background,
+{{- end }}
 {{- end }}
     /// The API's span: the implementation logs inside it, so each event
     /// names the API.

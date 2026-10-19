@@ -58,6 +58,35 @@ var engineOrder = []string{"desk-db", "desk-api", engineStack}
 
 const engineCloudStack = "desk-cloud-stack"
 
+// queueOrder is the order a build-all builds the queue fixture in: queue-db,
+// an engine database whose Job composes the work queue's behaviors, which
+// the core's engine archive leaves out; queue-api, a Go API over it whose
+// operations only a calling service may call; and queue-stack, which serves
+// queue-api on the local target beside queue-db's runner (D58).
+var queueOrder = []string{"queue-db", "queue-api", queueStack}
+
+// rustEngineOrder is the order a build-all builds the Rust engine fixture
+// in: desk-db, desk-rs-api, desk-api's twin in Rust, and desk-rs-stack,
+// which serves desk-rs-api on the local target beside desk-db's runner,
+// in Rust (D58).
+var rustEngineOrder = []string{"desk-db", "desk-rs-api", rustEngineStack}
+
+// rustEngineStack is the Rust engine fixture's stack, rustEngineServer its
+// server and rustEngineJob desk-rs-api's job; its runner is engineRunner.
+const (
+	rustEngineStack  = "desk-rs-stack"
+	rustEngineServer = "desk-rs-api"
+	rustEngineJob    = "desk-rs-api-close-stale-tickets"
+)
+
+// queueStack is the queue fixture's stack, queueServer its server and
+// queueRunner the engine's runner of queue-db.
+const (
+	queueStack  = "queue-stack"
+	queueServer = "queue-api"
+	queueRunner = "queue-db-engine-runner"
+)
+
 // loadEngineFixture loads the engine fixture with the core registry, whose
 // local target the stacks' environments run on, and stacktest's fake
 // target, whose sql connector derives a Cloud SQL connector configuration
@@ -69,7 +98,7 @@ func loadEngineFixture(t *testing.T) fixture {
 		t.Fatal(err)
 	}
 	f := fixture{reg: reg, schemas: map[string]*ir.Schema{}, configs: map[string]*schemaconfig.SchemaConfig{}}
-	for _, name := range append(slices.Clone(engineOrder), engineCloudStack) {
+	for _, name := range append(append(append(slices.Clone(engineOrder), engineCloudStack), queueOrder...), "desk-rs-api", rustEngineStack) {
 		schema, cfg, err := loader.LoadServiceWithConfig(filepath.Join(engineRoot, name), loader.WithRegistry(reg))
 		if err != nil {
 			t.Fatalf("load %s: %v", name, err)
@@ -222,7 +251,7 @@ func TestEngineEntrypointServes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	env := append([]string{"DESK_API_IDENTITY=" + identityConfig}, deskCallersVariables(t, "desk-api", public, "ops-key")...)
+	env := append([]string{"DESK_API_IDENTITY=" + identityConfig}, deskCallersVariables(t, public, "ops-key")...)
 
 	offline := start(t, binary, append([]string{"DESK_DB_DATABASE_URL=postgres://desk@127.0.0.1:9/desk_db?connect_timeout=1&sslmode=disable"}, env...)...)
 	offline.expect(t, http.MethodGet, "/readyz", http.StatusServiceUnavailable, `"desk-db engine"`)
@@ -287,17 +316,17 @@ func TestEngineEntrypointServes(t *testing.T) {
 	online.stop(t)
 }
 
-// deskCallersVariables are the callers field of api, desk-api or
-// desk-ts-api, as an environment sets it, ops an issuer of its own with an
-// Ed25519 key: a caller that serves ops-api.
-func deskCallersVariables(t *testing.T, api string, public ed25519.PublicKey, kid string) []string {
+// deskCallersVariables are desk-api's callers field as an environment sets
+// it, ops an issuer of its own with an Ed25519 key: a caller that serves
+// ops-api.
+func deskCallersVariables(t *testing.T, public ed25519.PublicKey, kid string) []string {
 	t.Helper()
 	jwk, err := json.Marshal(map[string]string{"kty": "OKP", "crv": "Ed25519", "kid": kid, "x": base64.RawURLEncoding.EncodeToString(public)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	vars, err := ir.DerivedVariables(ir.CallersField(api), ir.ServiceAuth{Issuers: []*ir.ServiceAuthIssuer{{
-		Issuer: "ops", Audience: api, Algorithms: []string{ir.AlgorithmEdDSA},
+	vars, err := ir.DerivedVariables(ir.CallersField("desk-api"), ir.ServiceAuth{Issuers: []*ir.ServiceAuthIssuer{{
+		Issuer: "ops", Audience: "desk-api", Algorithms: []string{ir.AlgorithmEdDSA},
 		Keys:               []ir.ServiceAuthKey{{JWK: string(jwk)}},
 		MaxLifetimeSeconds: 300,
 		Callers:            []ir.ServiceAuthCaller{{Subject: "ops", Deployable: "ops", Serves: []string{"ops-api"}}},
@@ -405,7 +434,7 @@ func startBackground(t *testing.T, binary string, env ...string) *started {
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	s := &started{cmd: cmd, out: &out.Builder}
+	s := &started{cmd: cmd, out: out}
 	t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
 	deadline := time.Now().Add(20 * time.Second)
 	for !strings.Contains(out.String(), `"msg":"runner started"`) {

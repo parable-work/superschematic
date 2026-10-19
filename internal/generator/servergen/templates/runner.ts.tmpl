@@ -56,7 +56,7 @@ async function main(): Promise<void> {
   // The runner acts as itself, holding each engine type's name, which
   // covers every action on it under the permission policy.
   const principal: Principal = { subject: {{ tsQuote .RunnerSubject }}, permissions: [{{ range $i, $t := $engine.Types }}{{ if $i }}, {{ end }}{{ tsQuote $t }}{{ end }}] };
-  const {{ $engine.Var }} = await openEngine({{ tsQuote $db.Service }}, {{ tsQuote $db.Field }}, {{ $db.Var }}, {{ $engine.Document }}, {{ $engine.PolicyLiteral }}, { runner: principal, setup: startRunner });
+  const {{ $engine.Var }} = await openEngine({{ tsQuote $db.Service }}, {{ tsQuote $db.Field }}, {{ $db.Var }}, {{ $engine.Document }}, {{ $engine.PolicyLiteral }}{{ $engine.OpenOptions "runner: principal" "setup: startRunner" }});
 
   const signal = await stopped;
   logger.info('stopping', { signal });

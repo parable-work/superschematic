@@ -114,7 +114,7 @@ func buildDir(t *testing.T, names registry.Naming, service, outputRoot string, o
 		Registry:    reg,
 		Log:         log,
 		LoadDependency: func(name string) (*ir.Schema, error) {
-			return loader.LoadService(filepath.Join(fixtures, name), loader.WithRegistry(reg))
+			return loader.LoadService(serviceDir(name), loader.WithRegistry(reg))
 		},
 	})
 }
@@ -581,6 +581,9 @@ type crateOptions struct {
 	devDependencies string
 	files           map[string]string
 	outputs         map[string]any
+	// before are services built into the root first, each with its
+	// outputs: a database whose Rust types the crate depends on.
+	before map[string]map[string]any
 }
 
 // outputsOf are a fixture's outputs in the tests that build every fixture
@@ -608,6 +611,11 @@ func cargoTestCrateWith(t *testing.T, service, test string, options crateOptions
 	outputs := options.outputs
 	if outputs == nil {
 		outputs = outputsOf(service)
+	}
+	for dep, depOutputs := range options.before {
+		if _, err := buildService(t, dep, root, depOutputs); err != nil {
+			t.Fatalf("build %s: %v", dep, err)
+		}
 	}
 	if _, err := buildService(t, service, root, outputs); err != nil {
 		t.Fatalf("build %s: %v", service, err)

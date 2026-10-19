@@ -568,17 +568,14 @@ pub fn call_with(
     Ok(Some(result?))
 }
 
-/// Defines and publishes a server's schema documents, `[documents, {
-/// namespace? }]`, in order, as the engine's own principal
-/// ([`Principal::system`]), which no request can be: a document whose live
-/// version has its hash is left as it is, so a restart with the same
-/// documents writes nothing, and a changed one becomes its next version if
-/// the compatibility rule allows it. A document is a schema-file document,
-/// or its text. It returns, per document, its `name`, the `namespace` and
-/// live `version` after the deploy, whether it was `defined` (false when
-/// the live version had its hash) and whether a version was `published`.
-/// Arguments of another shape are a usage error (`TypeError`), as a host's
-/// misuse is, and a document the engine refuses its refusal.
+/// [`Engine::deploy`] by its JSON arguments, `[documents, { namespace? }]`:
+/// each schema document, or its text, defined and published as the
+/// engine's own principal, which no request can be, one whose live version
+/// has its hash left as it is. It returns, per document, its `name`, the
+/// `namespace` and live `version` after the deploy, whether it was
+/// `defined` and whether a version was `published`. Arguments of another
+/// shape are a usage error (`TypeError`), as a host's misuse is, and a
+/// document the engine refuses its refusal.
 pub fn deploy(engine: &Engine, args: &[Value]) -> Result<Value> {
     let Some(Value::Array(documents)) = args.first() else {
         return Err(Error::usage(
@@ -591,59 +588,10 @@ pub fn deploy(engine: &Engine, args: &[Value]) -> Result<Value> {
         .and_then(|options| options.get("namespace"))
         .filter(|namespace| !namespace.is_null())
         .map(js_string);
-    let target = || SchemaTarget {
-        namespace: namespace.as_deref(),
-    };
-    let system = Principal::system();
-    let mut deployed = Vec::new();
-    for given in documents {
-        let document: Cow<'_, Value> = match given {
-            Value::String(text) => Cow::Owned(serde_json::from_str(text).map_err(|error| {
-                Error::usage(format!("deploy: a schema document's text is JSON: {error}"))
-            })?),
-            other => Cow::Borrowed(other),
-        };
-        let name = document
-            .get("name")
-            .and_then(Value::as_str)
-            .ok_or_else(|| Error::usage("deploy: a schema document names its schema (name)"))?
-            .to_owned();
-        let hash = json::canonical_json(&document)
-            .map(|canonical| json::sha256_hex(&canonical))
-            .ok();
-        let live = engine.schemas().live(&system, &name, target())?;
-        let mut out = Map::new();
-        out.insert("name".into(), Value::from(name.as_str()));
-        match live {
-            Some(live) if hash.as_deref() == Some(live.hash.as_str()) => {
-                out.insert("namespace".into(), Value::from(live.namespace));
-                out.insert("version".into(), Value::from(live.version));
-                out.insert("defined".into(), Value::Bool(false));
-                out.insert("published".into(), Value::Bool(false));
-            }
-            _ => {
-                let input = match given {
-                    Value::String(text) => SchemaInput::Text(Cow::Borrowed(text)),
-                    other => SchemaInput::Document(Cow::Borrowed(other)),
-                };
-                engine.schemas().define(
-                    &system,
-                    input,
-                    DefineOptions {
-                        namespace: namespace.as_deref(),
-                        source: None,
-                    },
-                )?;
-                let published = engine.schemas().publish(&system, &name, target())?;
-                out.insert("namespace".into(), Value::from(published.namespace));
-                out.insert("version".into(), Value::from(published.version));
-                out.insert("defined".into(), Value::Bool(true));
-                out.insert("published".into(), Value::Bool(published.published));
-            }
-        }
-        deployed.push(Value::Object(out));
-    }
-    Ok(Value::Array(deployed))
+    let deployed = engine.deploy(documents, namespace.as_deref())?;
+    Ok(Value::Array(
+        deployed.iter().map(crate::Deployed::to_json).collect(),
+    ))
 }
 
 /// What a server's readiness reads of the engine: `ready`, false once the

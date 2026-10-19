@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/json"
 	"fmt"
 	"io"
 	"maps"
@@ -112,20 +113,42 @@ func TestTypeScriptEngineEntrypointGolden(t *testing.T) {
 	compareGoldens(t, filepath.Join(goldenRoot, "engine-typescript"), files)
 }
 
-// TestATypeScriptEntrypointRefusesAnEngineItsAddonDoesNotRun: the engine's
-// Node-API addon runs the core's behaviors alone, so a stack's build
-// refuses a TypeScript server, and the runner, on an engine database that
-// composes the work queue's Lease, naming the behavior and the project
-// engine crate's addon it waits for (D58).
-func TestATypeScriptEntrypointRefusesAnEngineItsAddonDoesNotRun(t *testing.T) {
+// TestATypeScriptEntrypointOpensTheWorkQueuesBehaviorsByName: the engine's
+// Node-API addon carries the work queue's behaviors, so when desk-db's
+// Account composes Lease, desk-ts-api's server, its job and desk-db's
+// runner open the engine naming it among its behaviors, which the addon
+// registers after the core's (D58).
+func TestATypeScriptEntrypointOpensTheWorkQueuesBehaviorsByName(t *testing.T) {
 	repoRoot := t.TempDir()
 	f := loadTypeScriptEngineFixture(t)
-	db := *f.schemas["desk-db"]
-	db.Types = maps.Clone(db.Types)
-	account := *db.Types["Account"]
-	account.Behaviors = append(slices.Clone(account.Behaviors), ir.BehaviorRef{Name: "Lease"})
-	db.Types["Account"] = &account
-	f.schemas["desk-db"] = &db
+	composeOnAccount(f, ir.BehaviorRef{Name: "Lease"})
+	f.build(t, repoRoot, tsEngineFakePaths(repoRoot), engineTSOrder...)
+	out := filepath.Join(repoRoot, "schemas", "dist")
+	for _, d := range []string{engineTSServer, engineTSJob, engineRunner} {
+		data, err := os.ReadFile(filepath.Join(servergen.ServerDir(out, engineTSStack, d), servergen.TypeScriptMainFile))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(data), `deskDbEngineDocument, 'permission', { behaviors: ['Lease']`) {
+			t.Errorf("%s opens the engine without Lease:\n%s", d, data)
+		}
+	}
+}
+
+// TestATypeScriptEntrypointRefusesAnExtensionsBehavior: the engine's
+// Node-API addon runs the core's behaviors and the work queue's, so a
+// stack's build refuses a TypeScript server on an engine database that
+// composes an extension's, naming it and the project engine crate's addon
+// it waits for (D58).
+func TestATypeScriptEntrypointRefusesAnExtensionsBehavior(t *testing.T) {
+	reg, err := publicregistry.Assemble(publicregistry.DefaultNaming(), &stacktest.Extension{}, ratingWithoutACrate{repo: testpaths.RepoRoot(t)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	repoRoot := t.TempDir()
+	f := loadTypeScriptEngineFixture(t)
+	f.reg = reg
+	composeOnAccount(f, ir.BehaviorRef{Name: "acme.Rating", Config: json.RawMessage(`{"maxStars":5}`)})
 	options := f.options(repoRoot, tsEngineFakePaths(repoRoot))
 	for _, name := range engineTSOrder {
 		_, err := generator.Run(f.schemas[name], f.configs[name], options)
@@ -135,10 +158,20 @@ func TestATypeScriptEntrypointRefusesAnEngineItsAddonDoesNotRun(t *testing.T) {
 			}
 			continue
 		}
-		if want := "composes Lease, which the engine's Node-API addon does not run"; err == nil || !strings.Contains(err.Error(), want) {
+		if want := "composes acme.Rating, an extension's, which the engine's Node-API addon does not run"; err == nil || !strings.Contains(err.Error(), want) {
 			t.Fatalf("build %s = %v, want it refused saying %q", name, err, want)
 		}
 	}
+}
+
+// composeOnAccount has desk-db's Account compose behavior beside its own.
+func composeOnAccount(f fixture, behavior ir.BehaviorRef) {
+	db := *f.schemas["desk-db"]
+	db.Types = maps.Clone(db.Types)
+	account := *db.Types["Account"]
+	account.Behaviors = append(slices.Clone(account.Behaviors), behavior)
+	db.Types["Account"] = &account
+	f.schemas["desk-db"] = &db
 }
 
 // requireEngineTypeScript skips unless the engine's npm package at dir is
@@ -211,7 +244,7 @@ func TestTypeScriptEngineEntrypointServes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	env := append([]string{identityConfig}, deskCallersVariables(t, engineTSServer, public, "ops-key")...)
+	env := append([]string{identityConfig}, opsCallersVariables(t, engineTSServer, public, "ops-key")...)
 
 	offline := bunServer(t, bun, dir, append([]string{"DESK_DB_DATABASE_URL=postgres://desk@127.0.0.1:9/desk_db?connect_timeout=1&sslmode=disable"}, env...)...)
 	offline.expect(t, http.MethodGet, "/readyz", http.StatusServiceUnavailable, `"desk-db engine"`)
@@ -232,6 +265,9 @@ func TestTypeScriptEngineEntrypointServes(t *testing.T) {
 	databaseURL := tool.create(t, postgres, filepath.Join(generator.SQLDir(out, "desk-db"), "create.sql"))
 	online := bunServer(t, bun, dir, append([]string{"DESK_DB_DATABASE_URL=" + databaseURL}, env...)...)
 	online.waitReady(t)
+	if !strings.Contains(online.out.String(), `"msg":"engine schema deployed"`) {
+		t.Errorf("the server did not log its deploy:\n%s", online.out.String())
+	}
 	online.send(t, http.MethodPost, "/api/auth/register", `{"login": "ada@example.com", "name": "Ada", "password": "ada's password"}`, http.StatusOK, `"token"`)
 	token := online.login(t, "ada@example.com", "ada's password")
 	const accounts = "/engine/desk-db/namespaces/desk-db/schemas/Account/instances"
@@ -351,7 +387,7 @@ func bunBackground(t *testing.T, bun, dir string, env ...string) *started {
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	s := &started{cmd: cmd, out: &out.Builder}
+	s := &started{cmd: cmd, out: out}
 	t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
 	deadline := time.Now().Add(30 * time.Second)
 	for !strings.Contains(out.String(), `"msg":"runner started"`) {
