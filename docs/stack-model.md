@@ -1738,24 +1738,27 @@ At shutdown the server ends every event stream as it stops taking
 requests, and closes the engine after the requests in flight finish. The
 server links the core's engine archive, so the build refuses an engine
 database that composes the work queue's behaviors or an extension's,
-which a project's engine archive runs. A TypeScript or a Rust server opens
-no engine yet, and the build says so.
+which a project's engine archive runs. A TypeScript server opens and
+mounts the engine too, through the engine's Node-API addon (section 8.6);
+a Rust server opens no engine yet, and the build says so.
 
 An engine database's runner is an entrypoint of its own,
 `<db>-engine-runner` (section 3.1), in the language of the first API on
-it: a Go one's `main.go` reads the database's connection field alone,
-opens the engine on it as a server does, deploying nothing, starts the
-engine's runner as the deployable's name, holding each engine type's name
-as a permission, and runs until SIGTERM. On Postgres it runs while it
-holds the runner's lock. A job's and a worker's entrypoint open the engine
-for their API's `Deps` too, deploying nothing.
+it: a Go one's `main.go`, and a TypeScript one's `main.ts`, reads the
+database's connection field alone, opens the engine on it as a server
+does, deploying nothing, starts the engine's runner as the deployable's
+name, holding each engine type's name as a permission, and runs until
+SIGTERM. On Postgres it runs while it holds the runner's lock. A job's and
+a worker's entrypoint open the engine for their API's `Deps` too,
+deploying nothing.
 
 A server on an engine database some environment places on Cloud SQL
 serves the engine, whose Postgres client takes a URL, a unix socket in a
 directory of its own: `cloudsql.go` carries each connection to the socket
 over one the connector dials, with IAM authentication, and the engine's
 URL names the directory as its host, the IAM user and the database, with
-no password and no TLS of its own.
+no password and no TLS of its own. A TypeScript one serves it through the
+Cloud SQL Node connector's local proxy on such a socket (section 8.6).
 
 The engineer writes the implementation of each served API, and nothing else
 (section 8.5). The entrypoint calls each implementation's constructor with
@@ -2216,10 +2219,14 @@ as they are, with no build step (D51). The pieces mirror Go's:
   `api/*` and `server/*/*`, and the implementations through a `../`
   pattern from the implementation template, which Bun 1.4 accepts. Where
   `[paths]` names a checkout of superscalar, the HTTP runtime or the
-  version-graph runtime, the root's `overrides` point every dependency on
-  it at the checkout with a `file:` path from the root; a member's own
-  `file:` path is read wrongly by Bun once members sit at different
-  depths. The root depends on superscalar itself, which the runtime and
+  version-graph runtime, or the behavior engine (D58), the root's
+  `overrides` point every dependency on it at the checkout with a `file:`
+  path from the root; a member's own `file:` path is read wrongly by Bun
+  once members sit at different depths. The engine's package depends on
+  the version graph's by a path in its checkout, which an install of the
+  engine from that checkout resolves against the root, so with `[paths]
+  engine_typescript` the root names the version graph's checkout beside
+  it unless `[paths] versiongraph_typescript` names another. The root depends on superscalar itself, which the runtime and
   the API packages import without naming. `bun install` runs in the output
   root, or in a generated package under it; an install inside an
   implementation does not find the root, and the lockfile lives in the
@@ -2317,6 +2324,50 @@ as they are, with no build step (D51). The pieces mirror Go's:
   SIGINT aborts the signal it hands the job or the worker loop; a second
   signal exits at once, as a server's does. It ends its pools before it
   exits.
+- **Engine.** An API whose database is an engine database (D58; section
+  8.1) holds the engine in its `Deps`, `engine`, an `EngineBackground` of
+  the engine's `./server` entry (`@superschematic/engine/server`), which
+  loads the engine's Node-API addon and the HTTP runtime alone, none of
+  the TypeScript engine; the API package peers on the engine's package.
+  `engine.wait()` resolves with the engine once it opens, its calls the
+  synchronous engine's, each returning a promise. `main.ts` opens it once
+  per database with `openEngineInBackground`: off the JavaScript thread,
+  as the addon's `openAsync` opens it, so the server starts while the
+  database is down and a Cloud SQL socket the thread carries does not
+  stall, retrying a second apart and doubling to thirty seconds, each
+  failure logged as `engine not open`. Its options are the database's
+  `engineDocument` (the TypeScript types' `./engine` entry): its
+  namespace, meta-schema and tool options, beside the access policy of
+  `outputs.engine.policy`. A server deploys the document's schemas with
+  `engine.deploy()` before it hands the engine out, as the engine's own
+  principal, writing nothing when the live versions have its hash, and
+  `/readyz` names `<db> engine` until then and while the engine's
+  `health()` is not ready. The first API on the database, by name, mounts
+  `engineApp` and `engineMcp` at `outputs.engine.mount` after its own
+  routes: they answer 503 `unavailable` until the engine opens, before
+  any authentication and after the identity service's CORS, take the
+  API's identity service, which authenticates the end user with the
+  claims Go's caller gives and answers the trusted origins' CORS, with
+  `identityRoutes: { sessions: false }`, since the API serves the user
+  model's routes, and its service authenticator, the one its router
+  verifies with, whose verified service stands in for an end user, a
+  refused credential answered in the engine's place. A route takes a
+  30-second timeout but the event stream's and MCP's. A site's CORS for
+  the API matches the engine's routes too (`engineRouteSpecs`). At
+  shutdown the server aborts the mount's `done` signal, which ends every
+  event stream, drains the requests in flight, closes the engine, then
+  ends the pools. On Cloud SQL the engine's URL names the directory of a
+  unix socket the HTTP runtime's `cloudSqlSocket` serves over the Node
+  connector's local proxy, with IAM authentication, as Go's `cloudsql.go`
+  does. A job and a worker open the engine for `Deps` and close it before
+  they exit, deploying nothing; an engine database's runner in TypeScript
+  (section 8.1) is a package of its own, `main.ts` reading the database's
+  connection field alone, starting the engine's runner as the
+  deployable's name, and holding the process open until SIGTERM, when it
+  stops the runner and closes the engine. The addon runs the core's
+  behaviors, so the build refuses an engine database that composes the
+  work queue's or an extension's, which the project's engine crate's addon
+  will run.
 - **Image.** With the naming file's `[paths]` naming the checkouts of
   superscalar's TypeScript binding and the HTTP runtime's package, which
   no registry serves yet, the Dockerfile's addon stage builds
@@ -2340,8 +2391,17 @@ as they are, with no build step (D51). The pieces mirror Go's:
   the stack, every types package, each package the server depends on
   whole, the two checkouts without their build output, and the
   superscalar crates. Without either `[paths]` key no Dockerfile is
-  written, and the build says why. The deploy builds it as it builds Go's,
-  from the Dockerfile at the server's path.
+  written, and the build says why. An entrypoint that opens the engine
+  gets an engine stage, which builds the core's addon
+  (`superschematic-engine-napi`) from the Cargo workspace beside `[paths]
+  engine_typescript`, with the crates it reaches by path at their places
+  in the checkout, as a Go server's engine stage does; the build stage
+  puts it in the engine package's `native/` and emits the package's
+  `./server` entry (`tsconfig.server.json`, which emits without checking
+  types, so it needs none of the TypeScript engine's dependencies) before
+  the workspace's install copies the package. Without `[paths]
+  engine_typescript` such an entrypoint gets no Dockerfile. The deploy
+  builds it as it builds Go's, from the Dockerfile at the server's path.
 
 `stack dev` runs a TypeScript server on Bun beside the Go servers (section
 8.3). acme-shop's storefront is the proof: its implementation is the

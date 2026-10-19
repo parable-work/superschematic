@@ -350,12 +350,16 @@ a type the document defines after it.
 
 ### In a generated server
 
-A generated Go server whose API's database is an engine database does
-this itself (D58): it opens the engine on the database in the background,
-deploys the document before `/readyz` reports the engine ready, and mounts
-the engine's routes, its event stream and its MCP endpoint at
-`/engine/<db>`, behind the API's identity and service callers. Two more
-keys of the database's `outputs.engine` say how:
+A generated Go or TypeScript server whose API's database is an engine
+database does this itself (D58): it opens the engine on the database in
+the background, deploys the document before `/readyz` reports the engine
+ready, and mounts the engine's routes, its event stream and its MCP
+endpoint at `/engine/<db>`, behind the API's identity and service
+callers. A Go server links the engine through its Go binding; a
+TypeScript one opens it through the engine's Node-API addon, with
+`@superschematic/engine/server`'s `openEngineInBackground`, and mounts
+`engineApp` and `engineMcp` on its Hono app; either holds it in the API's
+`Deps`. Two more keys of the database's `outputs.engine` say how:
 
 ```json
 {
@@ -383,8 +387,8 @@ The engine's runner, which runs reactions, schedules and Timers'
 deadlines, is a deployable of its own, `<db>-engine-runner`, one instance
 in the language of the first API on the database: a Cloud Run worker pool
 on gcp, a process of its own under `stack dev`. It acts as its deployable's
-name, holding each engine type's name as a permission. A TypeScript or
-Rust server opens no engine yet.
+name, holding each engine type's name as a permission. A Rust server
+opens no engine yet.
 
 ### The project's engine crate
 
@@ -441,7 +445,9 @@ CGO_LDFLAGS="-L$PWD/dist/engine/lib ..." go build ./...
 ```
 
 A TypeScript server's addon will be the workspace's next member, `napi/`,
-once the Node-API addon exports `export_engine_napi!`; until then the
+once the Node-API addon exports `export_engine_napi!`; until then a
+generated TypeScript server runs the core's addon, so its build refuses
+an engine database that composes an extension's behavior, and the
 TypeScript engine runs an extension's TypeScript implementation.
 
 A schema whose types compose the core's behaviors alone gets no crate,
