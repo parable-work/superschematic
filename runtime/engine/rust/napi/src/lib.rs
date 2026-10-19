@@ -327,26 +327,41 @@ impl PermissionMatcher for HostMatcher {
 // addon is built with beside the core's.
 fn behaviors_of(project: &Project, named: &[Value]) -> std::result::Result<BehaviorSet, Failure> {
     let built = (project.behaviors)();
-    let core = |name: &str| superschematic_engine_behaviors::NAMES.contains(&name);
-    let mut behaviors = built.select(core);
+    let mut behaviors = built.select(is_core);
     for name in named {
         let picked = name
             .as_str()
-            .filter(|name| !core(name))
+            .filter(|name| !is_core(name))
             .map(|name| built.select(|each| each == name))
             .filter(|picked| !picked.is_empty())
-            .ok_or_else(|| {
-                let beside: Vec<String> = built.names().into_iter().filter(|each| !core(each)).collect();
-                let beside = if beside.is_empty() { "none".to_owned() } else { beside.join(", ") };
-                Failure::usage(format!(
-                    "behaviors names the behaviors {} is built with beside the core's ({beside}); a behavior written in TypeScript needs the bridge, not {}",
-                    project.name,
-                    json::stringify(name)
-                ))
-            })?;
+            .ok_or_else(|| not_built(project, &built, name))?;
         behaviors = behaviors.extend(picked);
     }
     Ok(behaviors)
+}
+
+fn is_core(name: &str) -> bool {
+    superschematic_engine_behaviors::NAMES.contains(&name)
+}
+
+// not_built refuses a name the addon is not built with, naming the ones it
+// is beside the core's.
+fn not_built(project: &Project, built: &BehaviorSet, name: &Value) -> Failure {
+    let beside: Vec<String> = built
+        .names()
+        .into_iter()
+        .filter(|each| !is_core(each))
+        .collect();
+    let beside = if beside.is_empty() {
+        "none".to_owned()
+    } else {
+        beside.join(", ")
+    };
+    Failure::usage(format!(
+        "behaviors names the behaviors {} is built with beside the core's ({beside}); a behavior written in TypeScript needs the bridge, not {}",
+        project.name,
+        json::stringify(name)
+    ))
 }
 
 // What the options open: the engine's, whether the facade answers
