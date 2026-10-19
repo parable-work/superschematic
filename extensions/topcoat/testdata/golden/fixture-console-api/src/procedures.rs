@@ -418,3 +418,34 @@ pub async fn call_supplier_list_suppliers(cx: &Cx, args: SupplierListSuppliersAr
     let json = serde_json::to_value(&value).unwrap_or_default();
     Ok(SupplierPageRecord::from_wire(&json))
 }
+
+/// The arguments of supplier.listSupplierProducts, as browser code builds them.
+#[record]
+#[derive(Debug, Clone, PartialEq)]
+pub struct SupplierListSupplierProductsArgsRecord {
+    pub supplier_id: String,
+}
+
+impl SupplierListSupplierProductsArgsRecord {
+    /// The operation's arguments: each field's JSON, as a request carries
+    /// it, decoded into its Rust type.
+    pub fn to_args(&self) -> Result<crate::api::SupplierListSupplierProductsArgs, ProblemRecord> {
+        Ok(crate::api::SupplierListSupplierProductsArgs {
+            supplier_id: decode("supplierId", wire::put_string(&self.supplier_id))?,
+        })
+    }
+}
+
+/// supplier.listSupplierProducts, called from the browser.
+#[procedure("/_superschematic/fixture-console-api/supplier/list-supplier-products")]
+pub async fn supplier_list_supplier_products(cx: &Cx, args: SupplierListSupplierProductsArgsRecord) -> topcoat::Result<Result<Vec<ProductRecord>, ProblemRecord>> {
+    Ok(call_supplier_list_supplier_products(cx, args).await)
+}
+
+/// The body of the supplier_list_supplier_products procedure.
+pub async fn call_supplier_list_supplier_products(cx: &Cx, args: SupplierListSupplierProductsArgsRecord) -> Result<Vec<ProductRecord>, ProblemRecord> {
+    let args = args.to_args()?;
+    let value = operations::supplier_list_supplier_products(cx, args).await?;
+    let json = serde_json::to_value(&value).unwrap_or_default();
+    Ok(wire::list(&json, ProductRecord::from_wire))
+}

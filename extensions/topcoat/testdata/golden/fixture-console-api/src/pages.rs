@@ -60,6 +60,8 @@ path_param!(pub order_id);
 
 path_param!(pub product_id);
 
+path_param!(pub supplier_id);
+
 /// The resources of the pages, each by its path below the prefix, which
 /// names it in `Settings::choices_for`.
 pub const RESOURCES: &[&str] = &[
@@ -68,6 +70,7 @@ pub const RESOURCES: &[&str] = &[
     "products",
     "products/{product_id}/reviews",
     "suppliers",
+    "suppliers/{supplier_id}/products",
 ];
 
 /// What the app tells the pages, in its app context
@@ -528,11 +531,13 @@ fn admit<T>(admitted: Result<T, StatusCode>, link: Link, links: &mut Vec<Link>, 
 }
 
 /// A collection in the trail: its key, its words in a path, its labels,
-/// which of its pages exist, whether an item has a title, and the
-/// collections under its items.
+/// which of its pages exist, whether an item has a title, whether a
+/// reference names an item by its route's value, and the collections under
+/// its items.
 struct Node {
     key: &'static str,
     titled: bool,
+    reference: Option<&'static str>,
     words: &'static [&'static str],
     plural: &'static str,
     noun: &'static str,
@@ -550,6 +555,7 @@ const TREE: &[Node] = &[
     Node {
         key: "orders",
         titled: true,
+        reference: None,
         words: &["orders"],
         plural: "Orders",
         noun: "Order",
@@ -564,6 +570,7 @@ const TREE: &[Node] = &[
     Node {
         key: "page",
         titled: false,
+        reference: None,
         words: &["page"],
         plural: "Pages",
         noun: "Page",
@@ -578,6 +585,7 @@ const TREE: &[Node] = &[
     Node {
         key: "products",
         titled: true,
+        reference: Some("products"),
         words: &["products"],
         plural: "Products",
         noun: "Product",
@@ -591,6 +599,7 @@ const TREE: &[Node] = &[
             Node {
                 key: "products/{}/reviews",
                 titled: false,
+                reference: None,
                 words: &["reviews"],
                 plural: "Reviews",
                 noun: "Review",
@@ -607,6 +616,7 @@ const TREE: &[Node] = &[
     Node {
         key: "suppliers",
         titled: false,
+        reference: Some("suppliers"),
         words: &["suppliers"],
         plural: "Suppliers",
         noun: "Supplier",
@@ -616,19 +626,37 @@ const TREE: &[Node] = &[
         edit: false,
         delete: false,
         actions: &[],
-        children: &[],
+        children: &[
+            Node {
+                key: "suppliers/{}/products",
+                titled: false,
+                reference: None,
+                words: &["products"],
+                plural: "Products",
+                noun: "Product",
+                list: true,
+                detail: false,
+                create: None,
+                edit: false,
+                delete: false,
+                actions: &[],
+                children: &[],
+            },
+        ],
     },
 ];
 
 /// A step of the trail: its label, its link (none for a page that does not
-/// exist and for the page itself), whether it is the page itself, and for
-/// an item whose type has a title the collection's key and the route's
-/// values to read it with.
+/// exist and for the page itself), whether it is the page itself, for an
+/// item whose type has a title the collection's key and the route's values
+/// to read it with, and for an item a reference names the collection's key
+/// and the route's value.
 struct Crumb {
     label: String,
     href: Option<String>,
     current: bool,
     item: Option<(&'static str, Vec<String>)>,
+    reference: Option<(&'static str, String)>,
 }
 
 /// The trail from the index to the page at `path`: the index, then each
@@ -638,7 +666,7 @@ struct Crumb {
 /// is its collection (`widgets/archived`, not an item of `widgets`), and a
 /// collection under an item is read before the item's own pages.
 fn trail(path: &str, title: &str) -> Vec<Crumb> {
-    let crumb = |label: String, href: Option<String>| Crumb { label, href, current: false, item: None };
+    let crumb = |label: String, href: Option<String>| Crumb { label, href, current: false, item: None, reference: None };
     let mut crumbs = vec![crumb(title.to_owned(), Some(PREFIX.to_owned()))];
     let segments: Vec<&str> =
         path.strip_prefix(PREFIX).unwrap_or_default().split('/').filter(|segment| !segment.is_empty()).collect();
@@ -667,6 +695,7 @@ fn trail(path: &str, title: &str) -> Vec<Crumb> {
         ids.push(decode(item));
         crumbs.push(Crumb {
             item: node.titled.then(|| (node.key, ids.clone())),
+            reference: node.reference.map(|key| (key, decode(item))),
             ..crumb(item_label(node.noun, decode(item)), node.detail.then(|| base.clone()))
         });
         at += 1;
@@ -719,6 +748,19 @@ async fn item_title(cx: &Cx, key: &str, ids: &[String]) -> Option<String> {
     .filter(|title| !title.trim().is_empty())
 }
 
+/// The label of the item that the route's `value` at a step of the trail,
+/// the collection `key`'s, refers to (D61), when its title does not name it:
+/// the label of the target every operation's parameter there refers to
+/// (D44, amended). None when no item has the value, its label is blank, or
+/// the call is refused or fails.
+async fn item_reference(cx: &Cx, key: &str, value: &str) -> Option<String> {
+    match key {
+        "products" => references::product_target_label(cx, value).await,
+        "suppliers" => references::supplier_target_label(cx, value).await,
+        _ => None,
+    }
+}
+
 /// Every page under `/console`: the site's title, a nav of each resource the
 /// caller may list, the current one marked (`aria-current`), the one whose
 /// path is the longest the page's begins with, the trail from the index to
@@ -744,12 +786,20 @@ pub async fn pages_layout(cx: &Cx, slot: Slot<'_>) -> topcoat::Result<impl View>
             (link.href, link.label, current)
         })
         .collect();
+    // An item's step is named by its title, else by what its route's value
+    // refers to, else by its noun and id.
     let mut crumbs = trail(&path, &title);
     for crumb in &mut crumbs {
-        if let Some((key, ids)) = &crumb.item
-            && let Some(title) = item_title(cx, key, ids).await
-        {
+        let titled = match &crumb.item {
+            Some((key, ids)) => item_title(cx, key, ids).await,
+            None => None,
+        };
+        if let Some(title) = titled {
             crumb.label = title;
+        } else if let Some((key, value)) = &crumb.reference
+            && let Some(label) = item_reference(cx, key, value).await
+        {
+            crumb.label = label;
         }
     }
     let crumbs: Vec<(String, Option<String>, bool)> =
@@ -834,6 +884,15 @@ async fn call_product_get_product(cx: &Cx, product_id: &str) -> Result<types::Pr
 /// default; a refusal of a route's value is no such page.
 async fn call_review_list_reviews(cx: &Cx, product_id: &str) -> Result<runtime::page::Page<types::Review>, Refusal> {
     ReviewListReviewsArgsForm::new(product_id).submit(cx).await.map_err(|refusal| page_refusal(refusal, &["productId"]))
+}
+
+/// Calls supplier_list_supplier_products with the route's values; a refusal of
+/// a route's value is no such page.
+async fn call_supplier_list_supplier_products(cx: &Cx, supplier_id: &str) -> Result<Vec<types::Product>, Refusal> {
+    let args = crate::api::SupplierListSupplierProductsArgs {
+        supplier_id: route_value(supplier_id, as_text).ok_or_else(no_such_page)?,
+    };
+    operations::supplier_list_supplier_products(cx, args).await.map_err(|err| page_refusal(Refusal::from_api(&err), &["supplierId"]))
 }
 
 /// The path of the orders: `/console/orders`.
@@ -1786,6 +1845,48 @@ async fn suppliers_rows(cx: &Cx, items: Vec<types::Supplier>) -> topcoat::Result
             <p class="ss-empty">"There are no suppliers."</p>
         } else {
             supplier_table(rows: rows, choices: choices)
+        }
+    })
+}
+
+/// The list of products, when the caller may list them.
+#[page("/console/suppliers/{supplier_id}/products")]
+pub async fn suppliers_products_list_page(cx: &Cx) -> topcoat::Result<impl View> {
+    let supplier_id = path_param::<SupplierId>(cx).to_owned();
+    let next = current(cx);
+    let admitted = operations::can_supplier_list_supplier_products(cx).await;
+    Ok(view! {
+        match admitted {
+            Err(err) => refused(refusal: Refusal::from_api(&err), next: next),
+            Ok(_) => suppliers_products_list(supplier_id: supplier_id, next: next),
+        }
+    })
+}
+
+/// The products.
+#[component]
+async fn suppliers_products_list(cx: &Cx, supplier_id: String, next: String) -> topcoat::Result<impl View> {
+    let listed = call_supplier_list_supplier_products(cx, &supplier_id).await;
+    Ok(view! {
+        <h1>"Products"</h1>
+        match listed {
+            Ok(items) => suppliers_products_rows(items: items),
+            Err(refusal) => refused(refusal: refusal, next: next),
+        }
+    })
+}
+
+/// Products as `product_table` renders them, the app's choices naming their
+/// values, over the labels of what they refer to.
+#[component]
+async fn suppliers_products_rows(cx: &Cx, items: Vec<types::Product>) -> topcoat::Result<impl View> {
+    let rows: Vec<ProductRecord> = items.iter().map(ProductRecord::from).collect();
+    let choices = references::product_labels(cx, &rows, choices_of(cx, "suppliers/{supplier_id}/products")).await;
+    Ok(view! {
+        if rows.is_empty() {
+            <p class="ss-empty">"There are no products."</p>
+        } else {
+            product_table(rows: rows, choices: choices)
         }
     })
 }

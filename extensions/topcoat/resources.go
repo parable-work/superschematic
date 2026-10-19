@@ -648,3 +648,89 @@ func (s schemaSet) typeDisplay(name string) ir.TypeDisplay {
 	}
 	return ir.TypeDisplay{}
 }
+
+// trailStep is an item's step of the console's trail (D44, amended): its
+// collection, and the argument at the step's place of each operation whose
+// route holds the step's parameter there and declares RefersTo.
+type trailStep struct {
+	node    *resourceNode
+	holders []trailHolder
+}
+
+// trailHolder is an operation's argument at a step of the trail, and the
+// path to the step's item as the operation spells it: suppliers/{supplierId}.
+type trailHolder struct {
+	c    *classified
+	arg  *ir.ArgumentDef
+	item string
+}
+
+// name is the argument as the build log names it: the operation, then the
+// argument in parentheses.
+func (h trailHolder) name() string { return h.c.name() + "(" + h.arg.Name + ")" }
+
+// trailSteps are the steps of the trail whose route's parameter an
+// operation declares RefersTo at its place: for each collection, its
+// item's detail, edit, delete and actions, and every operation of each
+// collection under its items, at any depth. A parameter is matched by its
+// place in the operation's path, not by its name, which differs from one
+// operation to another.
+func trailSteps(roots []*resourceNode) []trailStep {
+	var steps []trailStep
+	var walk func(nodes []*resourceNode)
+	walk = func(nodes []*resourceNode) {
+		for _, node := range nodes {
+			place := len(node.chain()) - 1
+			ops := append([]*classified{node.detail, node.update, node.del}, node.actions...)
+			step := trailStep{node: node}
+			for _, c := range append(ops, operationsUnder(node.children)...) {
+				if h, ok := c.holderAt(place); ok {
+					step.holders = append(step.holders, h)
+				}
+			}
+			if len(step.holders) > 0 {
+				steps = append(steps, step)
+			}
+			walk(node.children)
+		}
+	}
+	walk(roots)
+	return steps
+}
+
+// operationsUnder are the operations of nodes and of the collections
+// under their items, at any depth.
+func operationsUnder(nodes []*resourceNode) []*classified {
+	var out []*classified
+	for _, node := range nodes {
+		out = append(out, node.list, node.detail, node.create, node.update, node.del)
+		out = append(out, node.actions...)
+		out = append(out, operationsUnder(node.children)...)
+	}
+	return out
+}
+
+// holderAt is the operation's argument at the place-th parameter of its
+// path, when the argument declares RefersTo.
+func (c *classified) holderAt(place int) (trailHolder, bool) {
+	if c == nil || c.d.op == nil {
+		return trailHolder{}, false
+	}
+	at := 0
+	for i, seg := range c.segs {
+		if seg.param == "" {
+			continue
+		}
+		if at < place {
+			at++
+			continue
+		}
+		for _, arg := range c.d.op.Arguments {
+			if arg.Name == seg.param && arg.References != nil {
+				return trailHolder{c: c, arg: arg, item: spell(c.segs[:i+1])}, true
+			}
+		}
+		break
+	}
+	return trailHolder{}, false
+}

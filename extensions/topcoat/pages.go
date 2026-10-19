@@ -78,8 +78,12 @@ type pagesModel struct {
 	// meets one, by its method and path, with their places in Controls.
 	Controls   []routeControls
 	Controlled []controlledPage
-	uses       map[string]bool
-	imports    map[string]map[string]bool
+	// Trails are the steps of the trail a reference names, an item's by
+	// what its route's value refers to when its title does not name it
+	// (D44, amended).
+	Trails  []*refTrail
+	uses    map[string]bool
+	imports map[string]map[string]bool
 }
 
 // controlledPage is a page whose request meets route controls: its
@@ -419,10 +423,19 @@ type prefill struct {
 	Lines    []string
 }
 
-// pagesOf builds the pages of the resources the operations of inProcess
-// describe, under cfg's prefix, from the crate's records, views and forms.
-// It logs each operation left out, and is nil when no resource has a page.
-func pagesOf(c *crate, schemas schemaSet, inProcess []declared, prefix, title string, live bool, logf func(format string, args ...any)) (*pagesModel, error) {
+// pageSite is the resources the operations a page calls describe, which
+// the pages and the trail's references read: the forms the pages submit
+// through, the collections no item holds, with their children, and the
+// operations left out, with why.
+type pageSite struct {
+	forms pageForms
+	roots []*resourceNode
+	out   []leftOut
+}
+
+// siteOf classifies the operations of inProcess into the crate's
+// resources, through its forms.
+func siteOf(c *crate, schemas schemaSet, inProcess []declared) *pageSite {
 	forms := pageForms{args: map[string]*argForm{}, inputs: map[string]*form{}}
 	for i := range c.ArgForms {
 		forms.args[c.ArgForms[i].ArgsName] = &c.ArgForms[i]
@@ -431,6 +444,14 @@ func pagesOf(c *crate, schemas schemaSet, inProcess []declared, prefix, title st
 		forms.inputs[c.Forms[i].TypeName] = &c.Forms[i]
 	}
 	roots, out := classify(schemas, inProcess, forms)
+	return &pageSite{forms: forms, roots: roots, out: out}
+}
+
+// pagesOf builds the pages of the site's resources, under cfg's prefix,
+// from the crate's records, views and forms. It logs each operation left
+// out, and is nil when no resource has a page.
+func pagesOf(c *crate, schemas schemaSet, site *pageSite, prefix, title string, live bool, logf func(format string, args ...any)) (*pagesModel, error) {
+	forms, roots, out := site.forms, site.roots, site.out
 	m := &pagesModel{
 		Prefix:  prefix,
 		Title:   title,
@@ -440,6 +461,10 @@ func pagesOf(c *crate, schemas schemaSet, inProcess []declared, prefix, title st
 	}
 	for _, left := range out {
 		logf("  - topcoat: no page for %s: %s\n", left.Operation, left.Reason)
+	}
+	if c.References != nil && len(c.References.Trails) > 0 {
+		m.Trails = c.References.Trails
+		m.use("trailReference", "references")
 	}
 	b := &pageBuilder{
 		m:        m,
@@ -554,6 +579,11 @@ func (b *pageBuilder) controls() {
 		return o.ChoicesFn
 	}
 	for _, r := range m.Resources {
+		// The trail of a page under the collection names its ancestors'
+		// items by reference, and one under an item the item too (D44,
+		// amended); a shard renders no trail.
+		chain := r.node.chain()
+		above, through := b.trailLabels(chain[:len(chain)-1]), b.trailLabels(chain)
 		list := []string{choices(r.List), r.RowLabels}
 		item := []string{r.DetailLabels}
 		for _, o := range r.Actions {
@@ -563,33 +593,45 @@ func (b *pageBuilder) controls() {
 			item = append(item, s.RowLabels)
 		}
 		if r.List != nil {
-			add("GET", r.Path, r.List, list...)
+			add("GET", r.Path, r.List, slices.Concat(list, above)...)
 			if r.Live {
 				add("POST", r.LivePath, r.List, list...)
 			}
 		}
 		if r.Detail != nil {
-			add("GET", r.ItemPath, r.Detail, item...)
+			add("GET", r.ItemPath, r.Detail, slices.Concat(item, through)...)
 		}
 		if r.Create != nil {
-			add("GET", r.Path+"/new", nil, r.Create.ChoicesFn)
-			add("POST", r.Path+"/new", r.Create, r.Create.ChoicesFn)
+			add("GET", r.Path+"/new", nil, slices.Concat([]string{r.Create.ChoicesFn}, above)...)
+			add("POST", r.Path+"/new", r.Create, slices.Concat([]string{r.Create.ChoicesFn}, above)...)
 		}
 		if r.Update != nil {
-			add("GET", r.ItemPath+"/edit", r.Detail, r.Update.ChoicesFn)
-			add("POST", r.ItemPath+"/edit", r.Update, r.Update.ChoicesFn)
+			add("GET", r.ItemPath+"/edit", r.Detail, slices.Concat([]string{r.Update.ChoicesFn}, through)...)
+			add("POST", r.ItemPath+"/edit", r.Update, slices.Concat([]string{r.Update.ChoicesFn}, through)...)
 		}
 		if r.Delete != nil {
-			add("GET", r.ItemPath+"/delete", r.Detail, r.DetailLabels, r.Delete.ChoicesFn)
-			add("POST", r.ItemPath+"/delete", r.Delete, r.DetailLabels, r.Delete.ChoicesFn)
+			add("GET", r.ItemPath+"/delete", r.Detail, slices.Concat([]string{r.DetailLabels, r.Delete.ChoicesFn}, through)...)
+			add("POST", r.ItemPath+"/delete", r.Delete, slices.Concat([]string{r.DetailLabels, r.Delete.ChoicesFn}, through)...)
 		}
 		for _, o := range r.Actions {
-			add("POST", r.ItemPath+"/"+o.Verb, o, item...)
+			add("POST", r.ItemPath+"/"+o.Verb, o, slices.Concat(item, through)...)
 		}
 	}
 	if len(m.Controlled) > 0 {
 		m.use("controls")
 	}
+}
+
+// trailLabels are the label functions that name the items of nodes in
+// the trail, each collection's whose item a reference names.
+func (b *pageBuilder) trailLabels(nodes []*resourceNode) []string {
+	var fns []string
+	for _, node := range nodes {
+		if fn := b.refs.TrailLabel(node.key); fn != "" {
+			fns = append(fns, fn)
+		}
+	}
+	return fns
 }
 
 // pagerIdent is the ident no resource takes: its <ident>_href would be
@@ -1262,11 +1304,19 @@ func (b *pageBuilder) tree(nodes []*resourceNode, level int) string {
 			}
 		}
 		lines = append(lines, pad+"Node {")
-		// An item's title is read only where a type declares one.
+		// An item's title is read only where a type declares one, and what
+		// its route's value refers to only where a reference names it.
 		if b.m.uses["itemTitle"] {
 			lines = append(lines,
 				pad+"    key: "+rustString(node.key)+",",
 				pad+fmt.Sprintf("    titled: %t,", r != nil && r.TitleExpr != ""))
+		}
+		if b.m.uses["trailReference"] {
+			reference := "None"
+			if b.refs.TrailLabel(node.key) != "" {
+				reference = "Some(" + rustString(node.key) + ")"
+			}
+			lines = append(lines, pad+"    reference: "+reference+",")
 		}
 		lines = append(lines,
 			pad+"    words: &["+strings.Join(words, ", ")+"],",

@@ -134,6 +134,18 @@ pub async fn supplier_list_suppliers(cx: &Cx, args: crate::api::SupplierListSupp
         .await
 }
 
+/// supplier.listSupplierProducts (`GET /api/suppliers/{supplierId}/products`): A supplier's products, by name, all on one page: a list under a
+pub async fn supplier_list_supplier_products(cx: &Cx, args: crate::api::SupplierListSupplierProductsArgs) -> Result<Vec<types::Product>, ApiError> {
+    let caller = can_supplier_list_supplier_products(cx).await?;
+    args.check()?;
+    let setup: &Setup = app_context(cx);
+    setup
+        .implementations
+        .supplier
+        .list_supplier_products(operations::SUPPLIER_LIST_SUPPLIER_PRODUCTS.context(caller), args)
+        .await
+}
+
 /// Admits the caller of order.listOrders as its route does: 401 without one, 403
 /// without one of orders.read. The caller, for the implementation.
 pub async fn can_order_list_orders(cx: &Cx) -> Result<Option<Principal>, ApiError> {
@@ -186,4 +198,10 @@ pub async fn can_site_list_pages(cx: &Cx) -> Result<Option<Principal>, ApiError>
 /// without one of products.read. The caller, for the implementation.
 pub async fn can_supplier_list_suppliers(cx: &Cx) -> Result<Option<Principal>, ApiError> {
     crate::admit(cx, &operations::SUPPLIER_LIST_SUPPLIERS).await
+}
+
+/// Admits the caller of supplier.listSupplierProducts as its route does: 401 without one, 403
+/// without one of orders.read. The caller, for the implementation.
+pub async fn can_supplier_list_supplier_products(cx: &Cx) -> Result<Option<Principal>, ApiError> {
+    crate::admit(cx, &operations::SUPPLIER_LIST_SUPPLIER_PRODUCTS).await
 }

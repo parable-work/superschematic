@@ -642,12 +642,16 @@ fn admit<T>(admitted: Result<T, StatusCode>, link: Link, links: &mut Vec<Link>, 
 {{- end }}
 
 /// A collection in the trail: its key, its words in a path, its labels,
-/// which of its pages exist, whether an item has a title, and the
-/// collections under its items.
+/// which of its pages exist, whether an item has a title, whether a
+/// reference names an item by its route's value, and the collections under
+/// its items.
 struct Node {
 {{- if .Pages.Uses "itemTitle" }}
     key: &'static str,
     titled: bool,
+{{- end }}
+{{- if .Pages.Uses "trailReference" }}
+    reference: Option<&'static str>,
 {{- end }}
     words: &'static [&'static str],
     plural: &'static str,
@@ -665,15 +669,19 @@ struct Node {
 const TREE: &[Node] = {{ .Pages.Tree }};
 
 /// A step of the trail: its label, its link (none for a page that does not
-/// exist and for the page itself), whether it is the page itself, and for
-/// an item whose type has a title the collection's key and the route's
-/// values to read it with.
+/// exist and for the page itself), whether it is the page itself, for an
+/// item whose type has a title the collection's key and the route's values
+/// to read it with, and for an item a reference names the collection's key
+/// and the route's value.
 struct Crumb {
     label: String,
     href: Option<String>,
     current: bool,
 {{- if .Pages.Uses "itemTitle" }}
     item: Option<(&'static str, Vec<String>)>,
+{{- end }}
+{{- if .Pages.Uses "trailReference" }}
+    reference: Option<(&'static str, String)>,
 {{- end }}
 }
 
@@ -684,7 +692,7 @@ struct Crumb {
 /// is its collection (`widgets/archived`, not an item of `widgets`), and a
 /// collection under an item is read before the item's own pages.
 fn trail(path: &str, title: &str) -> Vec<Crumb> {
-    let crumb = |label: String, href: Option<String>| Crumb { label, href, current: false{{ if .Pages.Uses "itemTitle" }}, item: None{{ end }} };
+    let crumb = |label: String, href: Option<String>| Crumb { label, href, current: false{{ if .Pages.Uses "itemTitle" }}, item: None{{ end }}{{ if .Pages.Uses "trailReference" }}, reference: None{{ end }} };
     let mut crumbs = vec![crumb(title.to_owned(), Some(PREFIX.to_owned()))];
     let segments: Vec<&str> =
         path.strip_prefix(PREFIX).unwrap_or_default().split('/').filter(|segment| !segment.is_empty()).collect();
@@ -714,8 +722,15 @@ fn trail(path: &str, title: &str) -> Vec<Crumb> {
         base.push_str(item);
 {{- if .Pages.Uses "itemTitle" }}
         ids.push(decode(item));
+{{- end }}
+{{- if or (.Pages.Uses "itemTitle") (.Pages.Uses "trailReference") }}
         crumbs.push(Crumb {
+{{- if .Pages.Uses "itemTitle" }}
             item: node.titled.then(|| (node.key, ids.clone())),
+{{- end }}
+{{- if .Pages.Uses "trailReference" }}
+            reference: node.reference.map(|key| (key, decode(item))),
+{{- end }}
             ..crumb(item_label(node.noun, decode(item)), node.detail.then(|| base.clone()))
         });
 {{- else }}
@@ -772,6 +787,22 @@ async fn item_title(cx: &Cx, key: &str, ids: &[String]) -> Option<String> {
     .filter(|title| !title.trim().is_empty())
 }
 {{- end }}
+{{- if .Pages.Uses "trailReference" }}
+
+/// The label of the item that the route's `value` at a step of the trail,
+/// the collection `key`'s, refers to (D61), when its title does not name it:
+/// the label of the target every operation's parameter there refers to
+/// (D44, amended). None when no item has the value, its label is blank, or
+/// the call is refused or fails.
+async fn item_reference(cx: &Cx, key: &str, value: &str) -> Option<String> {
+    match key {
+{{- range .Pages.Trails }}
+        {{ rustString .Key }} => references::{{ .Fn }}(cx, value).await,
+{{- end }}
+        _ => None,
+    }
+}
+{{- end }}
 
 /// Every page under `{{ .Pages.Prefix }}`: the site's title, a nav of each resource the
 /// caller may list, the current one marked (`aria-current`), the one whose
@@ -798,13 +829,41 @@ pub async fn pages_layout(cx: &Cx, slot: Slot<'_>) -> topcoat::Result<impl View>
             (link.href, link.label, current)
         })
         .collect();
-{{- if .Pages.Uses "itemTitle" }}
+{{- if and (.Pages.Uses "itemTitle") (.Pages.Uses "trailReference") }}
+    // An item's step is named by its title, else by what its route's value
+    // refers to, else by its noun and id.
+    let mut crumbs = trail(&path, &title);
+    for crumb in &mut crumbs {
+        let titled = match &crumb.item {
+            Some((key, ids)) => item_title(cx, key, ids).await,
+            None => None,
+        };
+        if let Some(title) = titled {
+            crumb.label = title;
+        } else if let Some((key, value)) = &crumb.reference
+            && let Some(label) = item_reference(cx, key, value).await
+        {
+            crumb.label = label;
+        }
+    }
+{{- else if .Pages.Uses "itemTitle" }}
     let mut crumbs = trail(&path, &title);
     for crumb in &mut crumbs {
         if let Some((key, ids)) = &crumb.item
             && let Some(title) = item_title(cx, key, ids).await
         {
             crumb.label = title;
+        }
+    }
+{{- else if .Pages.Uses "trailReference" }}
+    // An item's step is named by what its route's value refers to, else by
+    // its noun and id.
+    let mut crumbs = trail(&path, &title);
+    for crumb in &mut crumbs {
+        if let Some((key, value)) = &crumb.reference
+            && let Some(label) = item_reference(cx, key, value).await
+        {
+            crumb.label = label;
         }
     }
 {{- else }}

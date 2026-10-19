@@ -23,9 +23,11 @@ type referencesModel struct {
 	Sources []*refSource
 	// Forms are the forms that hold a reference, with the choices function
 	// a page calls for each; Records the records that show one, with the
-	// labels function.
+	// labels function; Trails the steps of the console's trail that one
+	// names, with the label function (D44, amended).
 	Forms   []*refForm
 	Records []*refRecord
+	Trails  []*refTrail
 }
 
 // refOptions is an operation that lists a reference's target: one call per
@@ -128,6 +130,18 @@ type refRecord struct {
 	Groups []refGroup
 }
 
+// refTrail is a step of the console's trail whose route's parameter refers
+// to an item (D44, amended): the collection's key, by which the trail
+// names it, and the source whose label names the step.
+type refTrail struct {
+	Key    string
+	Source *refSource
+}
+
+// Fn is the function a page's trail names the step with:
+// <Base>_target_label, the label of one value.
+func (t *refTrail) Fn() string { return t.Source.Base + "_target_label" }
+
 // refGroup is the sites of one source in a record.
 type refGroup struct {
 	Source *refSource
@@ -206,6 +220,18 @@ func (m *referencesModel) UsesLabels(s *refSource) bool {
 			}
 		}
 	}
+	return m.UsesTrail(s)
+}
+
+// UsesTrail reports whether a step of the console's trail is named by a
+// source's label, so references.rs writes <Base>_target_label, which
+// reads its labels.
+func (m *referencesModel) UsesTrail(s *refSource) bool {
+	for _, t := range m.Trails {
+		if t.Source == s {
+			return true
+		}
+	}
 	return false
 }
 
@@ -254,11 +280,14 @@ func (m *referencesModel) UsesLookup(l *refLookup) bool {
 
 // referencesOf builds the references of the crate's forms and records:
 // each control of a form, and each value of a record, whose field or
-// argument declares RefersTo and whose options operation has an in-process
-// call. A reference whose options operation has none is left out, with the
-// reason in the build log, and its control and value are as they were.
-// It is nil when nothing the crate holds refers to an item.
-func referencesOf(c *crate, schemas schemaSet, inProcess []declared, logf func(format string, args ...any)) (*referencesModel, error) {
+// argument declares RefersTo, or whose field derives one (D61, amended),
+// and whose options operation has an in-process call; and the steps of the
+// console's trail, trails, whose operations' parameter refers to one
+// target by one value. A reference whose options operation has none is
+// left out, with the reason in the build log, and its control, its value
+// and its step are as they were. It is nil when nothing the crate holds
+// refers to an item.
+func referencesOf(c *crate, schemas schemaSet, inProcess []declared, trails []trailStep, logf func(format string, args ...any)) (*referencesModel, error) {
 	b := &refBuilder{
 		schemas: schemas,
 		calls:   map[*ir.FieldDef]declared{},
@@ -337,11 +366,60 @@ func referencesOf(c *crate, schemas schemaSet, inProcess []declared, logf func(f
 			b.m.Records = append(b.m.Records, r)
 		}
 	}
-	if len(b.m.Forms) == 0 && len(b.m.Records) == 0 {
+	for _, step := range trails {
+		if source := b.trail(step); source != nil {
+			b.m.Trails = append(b.m.Trails, &refTrail{Key: step.node.key, Source: source})
+		}
+	}
+	if len(b.m.Forms) == 0 && len(b.m.Records) == 0 && len(b.m.Trails) == 0 {
 		return nil, nil
 	}
 	b.finish()
 	return b.m, nil
+}
+
+// trail is the source that names a step of the console's trail (D44,
+// amended): the one target, by one value, that each operation's argument
+// at the step refers to, resolved by the core's rule. When they disagree
+// it is nil, and the build log names each; when its options operation has
+// no in-process call, nil with that reason.
+func (b *refBuilder) trail(step trailStep) *refSource {
+	var first *trailHolder
+	var target *ir.TypeDef
+	value := ""
+	agree := true
+	var said []string
+	for i := range step.holders {
+		h := &step.holders[i]
+		resolved, err := ir.ResolveReference(b.schemas[0], b.dependencies, h.arg.References)
+		if err != nil {
+			continue
+		}
+		verb := "to"
+		if first == nil {
+			first, target, value, verb = h, resolved.Target, resolved.Value.Name, "refers to"
+		} else if resolved.Target != target || resolved.Value.Name != value {
+			agree = false
+		}
+		said = append(said, fmt.Sprintf("%s %s %s by %s", h.name(), verb, targetName(resolved), resolved.Value.Name))
+	}
+	switch {
+	case first == nil:
+		return nil
+	case !agree:
+		b.log("  - topcoat: the trail names %s by its id: %s, and %s\n", first.item, strings.Join(said[:len(said)-1], ", "), said[len(said)-1])
+		return nil
+	}
+	return b.source(first.name(), first.arg.References)
+}
+
+// targetName is a reference's target as the build log names it: by its
+// name, after its service's when a dependency declares it (D66).
+func targetName(resolved ir.ResolvedReference) string {
+	if resolved.TargetService != "" {
+		return resolved.TargetService + "." + resolved.TargetName
+	}
+	return resolved.TargetName
 }
 
 // refBuilder resolves each reference once, by its target and members.
@@ -486,7 +564,7 @@ func (b *refBuilder) source(holder string, ref *ir.ReferenceDef) *refSource {
 		if reason == "" {
 			reason = "it is not among the crate's operations"
 		}
-		b.log("  - topcoat: %s refers to %s, whose options operation %s has no in-process call: %s\n", holder, resolved.TargetName, options, reason)
+		b.log("  - topcoat: %s refers to %s, whose options operation %s has no in-process call: %s\n", holder, targetName(resolved), options, reason)
 		return nil
 	}
 	label := ""
@@ -497,7 +575,7 @@ func (b *refBuilder) source(holder string, ref *ir.ReferenceDef) *refSource {
 	if resolved.Lookup != nil {
 		lookup = resolved.Lookup.Name
 	}
-	key := strings.Join([]string{resolved.TargetName, resolved.Value.Name, label, options, lookup}, "|")
+	key := strings.Join([]string{resolved.TargetService, resolved.TargetName, resolved.Value.Name, label, options, lookup}, "|")
 	if s := b.sources[key]; s != nil {
 		return s
 	}
@@ -597,7 +675,7 @@ func (b *refBuilder) finish() {
 	}
 	taken := map[string]bool{}
 	clashes := func(name string) bool {
-		return taken[name] || module[name+"_target_choices"] || module[name+"_target_labels"]
+		return taken[name] || module[name+"_target_choices"] || module[name+"_target_labels"] || module[name+"_target_label"]
 	}
 	for _, key := range sortedKeys(b.sources) {
 		s := b.sources[key]
@@ -637,6 +715,7 @@ func (b *refBuilder) finish() {
 	sort.Slice(b.m.Lookups, func(i, j int) bool { return b.m.Lookups[i].Fn < b.m.Lookups[j].Fn })
 	sort.Slice(b.m.Forms, func(i, j int) bool { return b.m.Forms[i].Fn < b.m.Forms[j].Fn })
 	sort.Slice(b.m.Records, func(i, j int) bool { return b.m.Records[i].Fn < b.m.Records[j].Fn })
+	sort.Slice(b.m.Trails, func(i, j int) bool { return b.m.Trails[i].Key < b.m.Trails[j].Key })
 }
 
 // FormChoices is the choices function of the form named form, or empty
@@ -653,9 +732,10 @@ func (m *referencesModel) FormChoices(form string) string {
 	return ""
 }
 
-// OptionsCalledBy are the options operations a form's choices function or
-// a record's labels function, fn, calls, listing their targets or looking
-// them up, once each in the order of its sites; none for an empty fn.
+// OptionsCalledBy are the options operations a form's choices function, a
+// record's labels function or a trail's label function, fn, calls, listing
+// their targets or looking them up, once each in the order of its sites;
+// none for an empty fn.
 func (m *referencesModel) OptionsCalledBy(fn string) []*refOptions {
 	if m == nil || fn == "" {
 		return nil
@@ -673,6 +753,11 @@ func (m *referencesModel) OptionsCalledBy(fn string) []*refOptions {
 			for _, g := range r.Groups {
 				sources = append(sources, g.Source)
 			}
+		}
+	}
+	for _, t := range m.Trails {
+		if t.Fn() == fn {
+			sources = append(sources, t.Source)
 		}
 	}
 	var called []*refOptions
@@ -695,6 +780,20 @@ func (m *referencesModel) RecordLabels(record string) string {
 	for _, r := range m.Records {
 		if r.Record == record {
 			return r.Fn
+		}
+	}
+	return ""
+}
+
+// TrailLabel is the label function that names an item's step of the
+// collection key in the console's trail, or empty when none does.
+func (m *referencesModel) TrailLabel(key string) string {
+	if m == nil {
+		return ""
+	}
+	for _, t := range m.Trails {
+		if t.Key == key {
+			return t.Fn()
 		}
 	}
 	return ""

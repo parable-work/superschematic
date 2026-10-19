@@ -1,6 +1,7 @@
 package topcoat_test
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -46,7 +47,11 @@ const consoleService = "fixture-console-api"
 // and a link to the next. The live list's shard pages in place, back by
 // the history in its signal's query too, and its size form sets the
 // signal; a procedure answers a page record, and the site's pages, a paged
-// list at the path page, link their next and first pages.
+// list at the path page, link their next and first pages. A supplier's
+// products, a list under a supplier that no operation reads, name the
+// supplier in the trail through what their route's supplierId refers to,
+// or by its id past listSuppliers' first page or to a caller who may not
+// list suppliers.
 func TestTheConsolePagesPicksAndSearches(t *testing.T) {
 	cargoTestCrate(t, consoleService, consoleAppTest)
 }
@@ -401,6 +406,109 @@ func TestAnArgumentNamedBackHasNoPreviousPage(t *testing.T) {
 	}
 }
 
+// TestATrailStepIsNamedByItsReference reads fixture-console-api's crate: a
+// supplier's step in the trail, which no detail titles, is named through
+// the reference of listSupplierProducts' supplierId, and a product's,
+// whose detail titles it, by the reference getProduct and listReviews
+// agree on when its title does not.
+func TestATrailStepIsNamedByItsReference(t *testing.T) {
+	files, _ := readCrate(t, registry.DefaultNaming(), consoleService, livePagesOutputs())
+	for file, wants := range map[string][]string{
+		"pages.rs": {
+			"        key: \"suppliers\",\n        titled: false,\n        reference: Some(\"suppliers\"),",
+			"        key: \"products\",\n        titled: true,\n        reference: Some(\"products\"),",
+			`"suppliers" => references::supplier_target_label(cx, value).await,`,
+			`"products" => references::product_target_label(cx, value).await,`,
+			"reference: node.reference.map(|key| (key, decode(item))),",
+			"} else if let Some((key, value)) = &crumb.reference",
+		},
+		"references.rs": {
+			"pub(crate) async fn supplier_target_label(cx: &Cx, value: &str) -> Option<String> {",
+			"pub(crate) async fn product_target_label(cx: &Cx, value: &str) -> Option<String> {",
+		},
+	} {
+		for _, want := range wants {
+			if !strings.Contains(files[file], want) {
+				t.Errorf("%s lacks %q", file, want)
+			}
+		}
+	}
+}
+
+// TestAStepWhoseReferencesDisagreeIsNamedByItsID builds fixture-console-api
+// with a second list under a supplier whose supplierId refers to a product
+// by its sku: the supplier's step is named by nothing but its id, and the
+// build log names each reference.
+func TestAStepWhoseReferencesDisagreeIsNamedByItsID(t *testing.T) {
+	dir := consoleCopy(t, func(schema string) string {
+		return strings.Replace(schema, "  - name: SiteQueries\n", `      - name: listSupplierOrders
+        typeRef: { name: Order, isArray: true }
+        required: true
+        httpMethod: GET
+        restPath: "suppliers/{supplierId}/orders"
+        permissions: [orders.read]
+        arguments:
+          - name: supplierId
+            typeRef: { name: string }
+            required: true
+            references: { type: Product, value: sku }
+  - name: SiteQueries
+`, 1)
+	})
+	root := testpaths.TempDir(t)
+	var log strings.Builder
+	if _, err := buildDir(t, registry.DefaultNaming(), dir, root, livePagesOutputs(), &log); err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	want := "  - topcoat: the trail names suppliers/{supplierId} by its id: supplier.listSupplierOrders(supplierId) refers to Product by sku, and supplier.listSupplierProducts(supplierId) to Supplier by id\n"
+	if !strings.Contains(log.String(), want) {
+		t.Errorf("the build log lacks %q:\n%s", want, log.String())
+	}
+	data, err := os.ReadFile(filepath.Join(topcoat.Dir(root, consoleService), "src", "pages.rs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pages := string(data)
+	if !strings.Contains(pages, "        key: \"suppliers\",\n        titled: false,\n        reference: None,") || strings.Contains(pages, `"suppliers" => references::`) {
+		t.Error("the supplier's step is named by a reference its operations disagree on")
+	}
+	if !strings.Contains(pages, `"products" => references::product_target_label(cx, value).await,`) {
+		t.Error("the product's step lost its reference")
+	}
+}
+
+// TestATrailStepMeetsItsOptionsControls builds fixture-console-api with a
+// rate limit on listSuppliers and a list of pages under a supplier, whose
+// rows refer to nothing: the list's page meets the limit, since its trail
+// names the supplier through listSuppliers.
+func TestATrailStepMeetsItsOptionsControls(t *testing.T) {
+	dir := consoleCopy(t, func(schema string) string {
+		schema = strings.Replace(schema, "        typeRef: { name: Product, isArray: true }\n        required: true\n        httpMethod: GET\n        restPath: \"suppliers/{supplierId}/products\"\n",
+			"        typeRef: { name: SitePage, isArray: true }\n        required: true\n        httpMethod: GET\n        restPath: \"suppliers/{supplierId}/pages\"\n", 1)
+		return strings.Replace(schema, "        restPath: suppliers\n        permissions: [products.read]\n", "        restPath: suppliers\n        permissions: [products.read]\n        middleware: { rateLimit: 30 }\n", 1)
+	})
+	root := testpaths.TempDir(t)
+	if _, err := buildDir(t, registry.DefaultNaming(), dir, root, livePagesOutputs(), nil); err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(topcoat.Dir(root, consoleService), "src", "pages.rs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pages := string(data)
+	controls := pages[strings.Index(pages, "        controls: vec![\n"):]
+	controls = controls[:strings.Index(controls, "        ],\n    })")]
+	limiter := strings.Count(controls[:strings.Index(controls, "Controls::default().rate_limit(30)")], "Controls::default()")
+	for _, want := range []string{
+		fmt.Sprintf(`(Method::GET, "/console/suppliers/{supplier_id}/pages", None, &[%d]),`, limiter),
+		fmt.Sprintf(`(Method::GET, "/console/suppliers", Some(%d), &[]),`, limiter),
+	} {
+		if !strings.Contains(pages, want) {
+			t.Errorf("pages.rs lacks %q:\n%s", want, controls)
+		}
+	}
+}
+
 // TestADerivedReferenceLabelsRows builds fixture-console-api with its order
 // lines and products sourced from a database's lines and items, @source,
 // a line's product a Relation to Item, and with OrderLine.productId saying no
@@ -528,7 +636,7 @@ use schemas_fixture_console_api_topcoat::api::runtime::{ApiError, Authenticator,
 use schemas_fixture_console_api_topcoat::api::{
     types, Implementations, OrderAddLineArgs, OrderGetOrderArgs, OrderImplementation, OrderListOrdersArgs, OrderPlaceOrderArgs,
     ProductGetProductArgs, ProductImplementation, ProductListProductsArgs, ReviewImplementation, ReviewListReviewsArgs,
-    SiteImplementation, SiteListPagesArgs, SupplierImplementation, SupplierListSuppliersArgs,
+    SiteImplementation, SiteListPagesArgs, SupplierImplementation, SupplierListSupplierProductsArgs, SupplierListSuppliersArgs,
 };
 use schemas_fixture_console_api_topcoat::choices::Choices;
 use schemas_fixture_console_api_topcoat::forms::{order_input_fields, FormErrors, OrderInputForm};
@@ -687,6 +795,10 @@ impl SupplierImplementation for Shop {
     async fn list_suppliers(&self, _ctx: RequestContext, args: SupplierListSuppliersArgs) -> Result<Page<types::Supplier>, ApiError> {
         let rows = ["Acme", "Bolt", "Cog"].map(|name| types::Supplier { id: name.to_lowercase(), name: name.to_owned() });
         page_of(rows.to_vec(), &args.page, |supplier| supplier.name.clone())
+    }
+    async fn list_supplier_products(&self, _ctx: RequestContext, args: SupplierListSupplierProductsArgs) -> Result<Vec<types::Product>, ApiError> {
+        let products = self.0.products.lock().unwrap();
+        Ok(products.iter().filter(|product| product.supplier_id == args.supplier_id).cloned().collect())
     }
 }
 
@@ -1351,6 +1463,48 @@ async fn a_live_list_goes_back_and_sets_its_size_in_place() {
     assert_eq!(numbers(&html), ["A-1", "A-2", "A-3", "A-4", "A-5"], "{html}");
     assert!(link(&html, "first").is_none() && link(&html, "prev").is_none(), "{html}");
     assert!(size_form(&html).contains(r#"<option value="5" selected="">5</option>"#), "{html}");
+}
+
+// The trail of a page, each step's label, as the layout renders it.
+fn trail(html: &str) -> Vec<String> {
+    between(html, r#"<nav class="ss-trail" aria-label="Breadcrumb"><ol>"#, "</ol>")
+        .split("<li>")
+        .skip(1)
+        .map(|step| {
+            let step = step.trim_end_matches("</li>");
+            let text = step.split_once('>').map_or(step, |(_, rest)| rest);
+            text.split('<').next().unwrap_or_default().to_owned()
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn a_trail_names_a_supplier_by_what_its_route_refers_to() {
+    let app = app(&Store::new());
+    // No operation reads a supplier, so its step has no title: the supplier
+    // products' supplierId refers to Supplier, and listSuppliers names it.
+    let acme = get(&app, "/console/suppliers/acme/products", "clerk").await;
+    assert_eq!(acme.status, StatusCode::OK, "{}", acme.html);
+    assert_eq!(trail(&acme.html), ["Shop console", "Suppliers", "Acme", "Products"], "{}", acme.html);
+    assert!(acme.html.contains(">Anvil</th>") && !acme.html.contains(">Crate</th>"), "{}", acme.html);
+    let bolt = get(&app, "/console/suppliers/bolt/products", "clerk").await;
+    assert_eq!(trail(&bolt.html), ["Shop console", "Suppliers", "Bolt", "Products"], "{}", bolt.html);
+    // Cog is past the first page of listSuppliers, which has no lookup, so
+    // its step is its noun and id; so is a supplier no item has.
+    let cog = get(&app, "/console/suppliers/cog/products", "clerk").await;
+    assert_eq!(cog.status, StatusCode::OK, "{}", cog.html);
+    assert_eq!(trail(&cog.html), ["Shop console", "Suppliers", "Supplier cog", "Products"], "{}", cog.html);
+    let none = get(&app, "/console/suppliers/nobody/products", "clerk").await;
+    assert_eq!(trail(&none.html), ["Shop console", "Suppliers", "Supplier nobody", "Products"], "{}", none.html);
+    // An order taker may list a supplier's products but not the suppliers:
+    // the step is the supplier's id.
+    let taker = get(&app, "/console/suppliers/acme/products", "taker").await;
+    assert_eq!(taker.status, StatusCode::OK, "{}", taker.html);
+    assert_eq!(trail(&taker.html), ["Shop console", "Suppliers", "Supplier acme", "Products"], "{}", taker.html);
+    // A product's step keeps its title, which its detail gives.
+    let anvil = wire(&uuid(ANVIL));
+    let reviews = get(&app, &format!("/console/products/{anvil}/reviews"), "clerk").await;
+    assert_eq!(trail(&reviews.html), ["Shop console", "Products", "Anvil", "Reviews"], "{}", reviews.html);
 }
 
 #[tokio::test]
