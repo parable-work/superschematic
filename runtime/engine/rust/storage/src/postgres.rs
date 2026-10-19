@@ -73,6 +73,16 @@ pub struct PostgresOptions {
     /// while it migrates (another process migrating first) and for the
     /// tables it changes (an open read).
     pub migration_timeout: Duration,
+    /// How long the server lets one of the pool's sessions sit idle inside
+    /// a transaction before it ends the session
+    /// (`idle_in_transaction_session_timeout`), so a process that stops
+    /// mid-transaction (frozen, paused, cut off without the network
+    /// telling) holds its namespace's lock no longer than this; `None`
+    /// leaves the server's own setting. The engine's transactions are
+    /// busy with statements, so only code that waits between two of them
+    /// (a behavior's, a host's policy) meets it, and its call fails as a
+    /// lost connection.
+    pub idle_in_transaction_timeout: Option<Duration>,
 }
 
 /// The schema the engine's tables live in unless configured.
@@ -80,6 +90,9 @@ pub const DEFAULT_SCHEMA: &str = "engine";
 
 /// The most connections a Postgres storage opens unless configured.
 pub const DEFAULT_POOL_MAX: usize = 4;
+
+/// How long a session may sit idle inside a transaction unless configured.
+pub const DEFAULT_IDLE_IN_TRANSACTION_TIMEOUT: Duration = Duration::from_secs(60);
 
 impl Default for PostgresOptions {
     fn default() -> Self {
@@ -90,6 +103,7 @@ impl Default for PostgresOptions {
             listen: true,
             connect_timeout: Duration::from_secs(10),
             migration_timeout: Duration::from_secs(60),
+            idle_in_transaction_timeout: Some(DEFAULT_IDLE_IN_TRANSACTION_TIMEOUT),
         }
     }
 }
@@ -132,7 +146,14 @@ impl Db {
         // plan, which Postgres switches a prepared statement to after five
         // runs, can scan the whole table in position order instead. A
         // statement is still parsed once (Postgres 12 and later).
-        let session = format!("-c search_path={schema} -c plan_cache_mode=force_custom_plan");
+        let mut session = format!("-c search_path={schema} -c plan_cache_mode=force_custom_plan");
+        if let Some(idle) = options.idle_in_transaction_timeout {
+            let _ = write!(
+                session,
+                " -c idle_in_transaction_session_timeout={}",
+                idle.as_millis().max(1)
+            );
+        }
         let options_text = match config.get_options() {
             Some(existing) => format!("{existing} {session}"),
             None => session,

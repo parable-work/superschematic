@@ -9,6 +9,10 @@
 //!   closed at BEGIN and takes another, so no call fails.
 //! - A connection lost while the transaction commits: `unavailable`,
 //!   saying the outcome is unknown.
+//! - A replica frozen inside a transaction (paused, cut off without the
+//!   network telling): the server ends its session once it has sat idle
+//!   there past `idle_in_transaction_session_timeout` (60 s unless
+//!   configured), and its lock goes with it.
 //! - A statement the server's `statement_timeout` cancels, a lock wait past
 //!   `lock_timeout`, a deadlock and a serialization failure: `busy`, with
 //!   nothing written and, over HTTP, `Retry-After`.
@@ -133,6 +137,65 @@ fn a_session_lost_inside_a_call_fails_it_as_unavailable_frees_its_lock_and_the_p
             create(&holder, &format!("after{n}")).expect("a call after the loss");
         }
         assert!(!holder.poisoned() && !other.poisoned());
+    }
+}
+
+#[test]
+fn a_replica_frozen_inside_a_transaction_loses_its_session_and_lock_after_the_idle_timeout() {
+    for target in targets("frozen_inside_a_transaction") {
+        if target.dialect != Dialect::Postgres {
+            continue;
+        }
+        let paused = Pause::default();
+        let hold = paused.hold();
+        let behaviors = || BehaviorSet::new().with(paused.clone());
+        // The holder's sessions may sit idle in a transaction 500 ms; its
+        // held call waits there far longer, as a frozen process would.
+        let mut options = target.options(behaviors());
+        as_replica(&mut options, &replica_name("frozen"), false);
+        if let Storage::Postgres { options, .. } = &mut options.storage {
+            options.idle_in_transaction_timeout = Some(Duration::from_millis(500));
+        }
+        let frozen = Engine::open(options).expect("the frozen replica");
+        let mut options = target.options(behaviors());
+        as_replica(&mut options, &replica_name("waiting"), false);
+        set_busy_timeout(&mut options, Duration::from_secs(20));
+        let waiting = Engine::open(options).expect("the waiting replica");
+        publish(
+            &waiting,
+            &item_document(json!([{"name": "test.Pause"}])),
+            None,
+        );
+        create(&waiting, "i1").expect("create");
+        thread::scope(|scope| {
+            let held = scope.spawn(|| pause(&frozen, &alice(), None, "Item", "i1", "held"));
+            assert_eq!(hold.entered(), "held");
+            // The waiting replica's write in the namespace waits for the
+            // frozen one's lock, which the server lets go of once it ends
+            // the idle session.
+            let started = std::time::Instant::now();
+            create(&waiting, "after").expect("a write once the server ends the frozen session");
+            assert!(
+                started.elapsed() < Duration::from_secs(15),
+                "waited {:?}",
+                started.elapsed()
+            );
+            hold.release();
+            let refused = refusal(held.join().expect("the held call"));
+            assert_eq!(refused.code(), EngineErrorCode::Unavailable, "{refused}");
+        });
+        assert_eq!(
+            frozen
+                .instances()
+                .get(&alice(), "Item", "i1", GetOptions::default())
+                .expect("get")
+                .expect("i1")
+                .seq,
+            1,
+            "the frozen call wrote nothing"
+        );
+        create(&frozen, "thawed").expect("the frozen replica's next call");
+        assert!(!frozen.poisoned() && !waiting.poisoned());
     }
 }
 

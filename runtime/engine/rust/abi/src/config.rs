@@ -20,8 +20,9 @@
 //! Every member but `project` is the engine's own options, which
 //! [`EngineOptions::from_json`] reads, as the Node-API addon's are read:
 //! `path` opens a SQLite file; `postgres` (`{ url, schema?, poolMax?,
-//! listen?, connectTimeoutMs?, migrationTimeoutMs? }`) a schema of a
-//! Postgres database, in place of `path`; `ids` is `"uuid"` (the default),
+//! listen?, connectTimeoutMs?, migrationTimeoutMs?,
+//! idleInTransactionTimeoutMs? }`) a schema of a Postgres database, in
+//! place of `path`; `ids` is `"uuid"` (the default),
 //! `{ "sequence": prefix }` or `{ "seeded": prefix }`; `clock` is
 //! `"system"` (the default), `"strict"` or `{ "manual": ms }`. `project`
 //! is the project's own config, which the archive's project hook reads

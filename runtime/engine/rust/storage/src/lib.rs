@@ -73,7 +73,9 @@ pub use migrations::{
 };
 pub use notifier::Notifier;
 #[cfg(feature = "postgres")]
-pub use postgres::{PostgresOptions, DEFAULT_POOL_MAX, DEFAULT_SCHEMA};
+pub use postgres::{
+    PostgresOptions, DEFAULT_IDLE_IN_TRANSACTION_TIMEOUT, DEFAULT_POOL_MAX, DEFAULT_SCHEMA,
+};
 #[cfg(feature = "sqlite")]
 pub use sqlite::SqliteOptions;
 pub use tokens::postgres_placeholders;
