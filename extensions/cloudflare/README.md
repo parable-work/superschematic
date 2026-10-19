@@ -6,9 +6,10 @@ D64). It registers the DNS platform `cloudflare`, which writes an
 environment's domain records into a Cloudflare zone, whatever target runs
 the environment's servers, and the target `cloudflare`, which runs an
 environment on one Cloudflare account. The target's values, its state in
-R2, its secrets in the Secrets Store, its bootstrap and its CI identity
-are built; its Workers, Cron, D1, R2 and site platforms come next, in this
-module.
+R2, its secrets in the Secrets Store, its bootstrap, its CI identity, and
+its Workers platform, which runs TypeScript servers as Workers from the
+bundles it keeps in R2, are built; its Cron, D1, R2 and site platforms
+come next, in this module.
 
 It is a Go module of its own, as `extensions/gcp` and `extensions/pulumi`
 are, and registers through the public `registry` package alone (D10).
@@ -112,11 +113,56 @@ export abstract class Staging {}
 | `secrets.go` | the secret store over the Secrets Store, `<Stack>-<Environment>-<Type>-<FIELD>` |
 | `bootstrap.go`, `github.go` | bootstrap: the state bucket, the passphrase and its check, the Secrets Store, the deployer and planner account tokens, and `--github` through `gh` |
 | `ci.go` | the CI identity, `cloudflare-api-token`, naming the GitHub secrets each job reads |
-| `policy.go` | `domain-on-cloudflare` |
+| `workers.go`, `names.go` | the `cloudflare.workers` platform: a TypeScript server as a Worker, its version and its deployment, its config as bindings, its custom domain; names suffixed per member and refused over 63 characters |
+| `bundles.go` | the bundle store: each bundle's files in the state bucket under their digest, and back |
+| `policy.go` | `domain-on-cloudflare` and `nothing-public-unless-exposed` |
 
 Every command reads the token from `CLOUDFLARE_API_TOKEN` and the state's
 passphrase from `PULUMI_CONFIG_PASSPHRASE`. On the cloudflare target the
 DNS platform names no credential: the run's token carries the zone.
+
+## Servers on Workers
+
+`cloudflare.workers` places a TypeScript server, its artifact a bundle
+(D64, section 18.5 of the design). It lowers a server to:
+
+- `<server>.worker`, a `cloudflare:index/worker:Worker` in infrastructure
+  named after the deployable, with Workers Logs on unless `logs: false`,
+  workers.dev on only for an exposed server without a domain, previews off;
+- `<server>.version`, a `workerVersion` per rollout: `main.js`,
+  `main.js.map` and `superscalar.wasm`, each a `contentFile` under the
+  program's `artifacts/<server>/{bundle-digest}/` with its
+  `{bundle-sha256:<file>}`, which the deploy pins; `mainModule: main.js`;
+  `CompatibilityDate` unless `compatibilityDate` is set; `cpuMs` and
+  `placement` from the settings; and the config as bindings;
+- `<server>.deployment`, a `workersDeployment` sending 100% to the version;
+- for an exposed server under a domain, `<server>.domain`, a
+  `workersCustomDomain` for `<server>.<domain>` in the exposure step.
+
+| Setting | Type | |
+| --- | --- | --- |
+| `logs` | boolean | Workers Logs, on by default |
+| `compatibilityDate` | `YYYY-MM-DD` | the runtime's compatibility date, `CompatibilityDate` by default |
+| `cpuMs` | integer, 1 to 300000 | `limits.cpuMs` |
+| `placement` | `"smart"` | Smart Placement |
+
+Config is bindings: `plain_text` for a literal, a parameter and each
+derived variable; `secret_text`, its text a reference to the output, for a
+secret member such as an edge's signing key; `secrets_store_secret` for a
+`Secret<T>` field, naming `secretsStoreId` and `SecretName`; and the `d1`,
+`service` or `r2_bucket` binding a derived value names
+(`d1: {binding, database}`, `binding: {name, worker}`, or a bucket's
+`binding`). The platform refuses, as unrealizable, a server in another
+language, a Worker name over 63 characters, and an API over the user model,
+whose identity runtime needs `node:crypto` (`NoIdentity`); and it refuses
+an exposed server without a domain while the environment records no
+`workersSubdomain`, or a secret while it records no `secretsStoreId`,
+saying to run bootstrap.
+
+The bundle store keeps a bundle's files in `superschematic-state` under
+`superschematic/bundles/<stack>/<deployable>/<hex>/`, each with its
+SHA-256 and mode as metadata and a marker written last, and fetches them
+back, checked, for a plan, a `--bundle` rollback or a `--no-build` deploy.
 
 ## Linking it
 
@@ -140,7 +186,9 @@ cli.New(cli.Config{Name: "superschematic"},
 
 `schemas/pulumi-cloudflare.json` pins pulumi-cloudflare 6.22.0: the
 digest of each upstream file and the types the DNS platform and the
-target emit: the DNS record, and the account token of bootstrap's graph.
+target emit: the DNS record, the account token of bootstrap's graph, and
+a Worker's `worker`, `workerVersion`, `workersDeployment` and
+`workersCustomDomain`.
 `schemas/` holds one file per type, with its Terraform name and renames
 (section 6.4), and the DNS platform and the target register each as the
 JSON Schema of its type's properties, so resolution checks every node
@@ -161,7 +209,10 @@ a pin at another version.
 
 `go test ./...` resolves the `stack/stacktest` shop stack with its domains
 on Cloudflare, DNS-only in Staging and Preview and proxied in Production,
-against the golden files under `testdata/golden/stack`, and checks the
+the Workers fixture `workers-stack` in Staging, Production and Preview, and
+acme-shop's `storefront-stack`, against the golden files under
+`testdata/golden/stack`, each node checked against its pinned type; deploys
+the storefront with the bundle store over the fake `Cloud`; and checks the
 bootstrap graph (`testdata/golden/bootstrap`) and a cloudflare
 environment's workflow (`testdata/golden/ci`, through actionlint when it is
 installed). Bootstrap, the stores and the CI identity run against a fake

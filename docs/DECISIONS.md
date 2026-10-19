@@ -6667,6 +6667,41 @@ state store's backend reaching the CLI, which signs its first request to a
 local S3 stand-in path-style with the token's id in region `auto`. No call
 has reached Cloudflare or GitHub.
 
+### D64, amended: a platform refuses what it cannot realize, workers.dev needs bootstrap's subdomain, and a bundle's digest does not depend on where it was written
+
+Building the Workers platform, the bundle store, `fetch.ts` and
+`bundle.ts`, and acme-shop's `storefront-stack` met questions section 18
+left open: how a platform refuses a deployable as unrealizable, which only
+the core could do; how resolution knows an API runs the identity runtime
+when the platform's `Lower` does not; what happens to an exposed Worker
+with no domain before bootstrap; why the same code got a new bundle on
+every deploy; and how an example with two stacks runs `stack dev`.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A platform's `Lower` refuses a deployable it cannot realize with `registry.Unrealizable`, which resolution reports with code `unrealizable`, as it reports a language the platform does not run. The Workers platform refuses a Worker name over 63 characters this way, or under a parameter 63 before the value. | A refusal as a failed lowering, the code a platform's bug gets. A length check in the core, which knows no provider's limits. |
+| `PlatformSpec.NoIdentity` says why a server platform runs no identity runtime, and resolution refuses a server of an API over the user model on it as unrealizable, with the reason. `cloudflare.workers` sets it: the TypeScript identity runtime hashes with `node:crypto`'s argon2. The server generator refuses the same server, for a binary whose platforms do not. | Setting `IdentityConfig` so that `Lower` sees a binding, which reuses a seam for what it does not mean. A refusal in the generator alone, after the environment resolved. |
+| An environment that exposes a Worker without a domain needs `workersSubdomain`, which bootstrap records: resolution refuses it, saying to run bootstrap, since the public address, which a site's config and a CORS field hold, is composed from names. A secret binding needs `secretsStoreId` the same way. An internal Worker needs neither. | The worker's `subdomain.url` output as the address, which the graph knows only after the apply and which a site's config, composed from names, cannot hold. A deploy-time refusal, after a build that wrote an address with no host. |
+| The platform renders the binding a derived value names by the value's shape: `d1: {binding, database}` a `d1` binding, `binding: {name, worker}` a `service` binding, and a bucket's `binding`, a name, an `r2_bucket` binding of the bucket its `name` names. The D1, Workers-to-Workers and R2 connectors derive them. | A binding list the connectors return beside the value, which no connector of another target needs. |
+| `bundle.ts` rewrites the source map's `sources` relative to the server's package. Bun writes them relative to the output directory, which a deploy makes anew, so the same code had a new digest, and a new upload and version, on every deploy. | Building into a fixed directory under the package, which two deploys at once would share. Leaving the source map out of the bundle, which loses Workers' mapped stack traces. |
+| The source map is `linked`, with its `sourceMappingURL` comment, and the bundle keeps WebAssembly modules out through a Bun plugin rather than `external: ['*.wasm']`: the plugin names superscalar's `./superscalar.wasm`, records where it found it to copy it, and refuses any other. The refusals of a `node:` or `bun:` import, Bun's global (found through `define`, a `typeof` test allowed) and another WebAssembly module apply to every bundle, not to `--check` alone. | Refusing them only under `--check`, which lets a deploy upload what workerd refuses. |
+| `fetch.ts` imports `cloudflare:workers`, whose `env` the generated `workers.d.ts` declares: TypeScript allows an ambient module only in a file with no import. A build that fails answers the request 503 and builds again on the next. | Types from a Workers types package, a dependency for one declaration. |
+| The bundle store's marker is `__superschematic/files` under each digest's prefix, and each file carries its SHA-256 beside its mode, so a fetch checks each file before the core checks the whole. | Checking the whole digest alone, which names no file that differs. |
+| The compatibility date the extension pins is 2026-09-15, older than the workerd its tests run on, which refuses a date after its own. | Today's date, which a workerd pinned two weeks back refuses. |
+| acme-shop's `storefront-stack` sits beside `shop-stack`, so a `stack` command run from the example names its stack (`stack dev schemas/services/shop-stack`), and its check builds with the installed binary, which links the cloudflare target, where it built with the core alone. | Another services root for the storefront's stack, which would build its services twice. Teaching the core to skip an environment whose target it does not link, which hides a misspelt target. |
+
+Status: built, proven offline. `extensions/cloudflare` resolves a Workers
+fixture in Staging, Production and Preview and acme-shop's
+`storefront-stack` against golden files, each node checked against its
+pinned type, refuses a Go server, a long name, an API over the user
+model, a missing subdomain and a missing Secrets Store, checks
+`nothing-public-unless-exposed`, publishes and fetches a bundle over a
+fake `Cloud`, and deploys the storefront with the core's bundle build and
+placement; `extensions/pulumi` renders the storefront's program with its
+bundle pinned. servergen writes `fetch.ts`, `bundle.ts` and
+`workers.d.ts` for a server on the fake bundle platform against golden
+files, and cigen bundles it in `check`. No call has reached Cloudflare.
+
 ## D65. A Rust API runs jobs and workers, its workers claim queues through a descriptor its types carry, and each output root builds against a mirror of its implementations
 
 D57 gave a Rust API a server and left out its jobs and workers: the

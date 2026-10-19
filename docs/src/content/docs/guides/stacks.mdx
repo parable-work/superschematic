@@ -35,7 +35,7 @@ balancer and DNS resources that the Pulumi provisioner applies.
 | the gcp target, with `stack bootstrap`, `secrets set`, `build`, `plan`, `deploy`, `destroy` and `outputs`; image builds on Cloud Build; each migration phase as a Cloud Run job that also grants the servers their privileges | a deploy lock beyond the provisioner's and the runner's |
 | the Pulumi provisioner and the typed bindings generator | |
 | the Cloudflare DNS platform, linked in the installed binary; bootstrap stores its API token and deploys read it | |
-| [the cloudflare target](#deploy-to-cloudflare)'s groundwork: its values, its state in R2, its secrets in the Secrets Store, `stack bootstrap` with the CI's account tokens and `--github`, and the generated CI's sign-in | its Workers, Cron, D1, R2 and site platforms, so no environment on it resolves a deployable yet |
+| [the cloudflare target](#deploy-to-cloudflare): its values, its state in R2, its secrets in the Secrets Store, `stack bootstrap` with the CI's account tokens and `--github`, the generated CI's sign-in, and [TypeScript servers on Workers](#servers-on-workers), with their bundles in R2 and the CI's bundle check | its Cron, D1, R2 and site platforms; a deploy that has reached Cloudflare |
 | `@requireService` and `@allowService`, and the stack's check that every `calls` edge reaches an operation | the callee's half of service auth: a server whose API has a service clause does not start yet |
 | [generated CI](#generated-ci): `outputs.ci` writes a GitHub Actions workflow that checks, plans, previews and deploys the stack, signing in to gcp through Workload Identity Federation | other CI systems; a check that the committed workflow is current |
 | [buckets](/superschematic/guides/buckets/): the `Bucket` kind, `buckets` in an API's config, the `bucket` deployable and edge, a provider-neutral bucket in `Deps` over GCS with signed URLs, in Go, TypeScript and Rust, fake-gcs-server under `stack dev`, and on gcp a private Cloud Storage bucket | a bucket on another provider |
@@ -824,7 +824,10 @@ which handles `shop-db`'s queue `OrderPlaced`, and `shop-stock`'s
 `ReorderStock`, in Rust, which handles its queue `StockLow`, as workers;
 `shop-orders`' `ShipOrders` and `shop-stock`'s `OrderRestocks`, in
 Rust, as jobs; and `shop-web`, a static site whose browser code calls
-`shop-api`, as a site. `shop-orders` calls
+`shop-api`, as a site. A second stack, `storefront-stack`, deploys the
+storefront alone, on Bun in its `Dev` and on Cloudflare Workers in its
+`Staging` ([Servers on Workers](#servers-on-workers)), so each `stack`
+command run from the example names its stack. `shop-orders` calls
 `shop-stock`, whose reservations admit only `shop-orders`' server
 ([Service callers](#service-callers)), so its edge carries a service
 credential. Its one environment, `Dev`, is on the core's `local` target,
@@ -851,7 +854,8 @@ call its `create_workers(deps)` and `create_jobs(deps)`.
 [Serve and call it from TypeScript](/superschematic/first-project/typescript-api/)
 the storefront's.
 
-From `examples/acme-shop`, `superschematic stack dev` runs `Dev`: Postgres
+From `examples/acme-shop`, `superschematic stack dev
+schemas/services/shop-stack` runs `Dev`: Postgres
 in a container with `shop-db` migrated, fake-gcs-server in another with
 `shop-media`, both Go servers on their generated entrypoints, `shop-stock`'s
 on its generated crate, which cargo builds, the storefront's on Bun, each
@@ -1407,9 +1411,11 @@ any other. On this target the DNS platform names no credential, since the
 run's own token reaches the zone. `stack init --cloudflare-account <id>`
 writes the environment and `src/cloudflare-target.ts`.
 
-The target's Workers, Cron, D1, R2 and site platforms are not built yet,
-so an environment on it resolves no deployable. What is built is what
-they deploy through:
+The target places TypeScript servers on Workers
+([Servers on Workers](#servers-on-workers)); its Cron, D1, R2 and site
+platforms are not built yet, so an environment on it that holds a job, a
+database, a bucket or a site does not resolve. What every deploy goes
+through:
 
 - **The token and the passphrase.** Every `stack` command reads the API
   token from `CLOUDFLARE_API_TOKEN` and the state's passphrase from
@@ -1460,6 +1466,59 @@ and creates or reads the Secrets Store. It is safe to run again:
 7. it records `secretsStoreId` and `workersSubdomain` beside `accountId`.
    An account with no workers.dev subdomain yet is told to choose one in
    the dashboard.
+
+### Servers on Workers
+
+A TypeScript server on the cloudflare target is a Worker of
+`cloudflare.workers`, named after the deployable, with a suffix per
+parameter in a member of a parameterized environment. Its artifact is a
+bundle, not an image: a deploy runs `bun bundle.ts <dir>` in the server's
+package after the workspace's frozen install, and keeps the files in the
+state bucket under `superschematic/bundles/<stack>/<deployable>/<hex>/`
+when their digest is new. The Worker is three nodes: the `worker`, in
+infrastructure; a `workerVersion` per rollout, which uploads `main.js`,
+`main.js.map` and `superscalar.wasm` from beside the program, each with
+its pinned SHA-256; and a `workersDeployment` that sends it all traffic.
+`--bundle shop-storefront=sha256:...` rolls the server back to an earlier
+bundle with no build.
+
+Its settings:
+
+| Setting | Default | |
+| --- | --- | --- |
+| `logs` | `true` | Workers Logs |
+| `compatibilityDate` | the extension's, `2026-09-15` | the Workers runtime's compatibility date |
+| `cpuMs` | Cloudflare's | the CPU time a request may take, in milliseconds |
+| `placement` | none | `"smart"` for Smart Placement |
+
+The server's config reaches it as bindings: each setting and derived
+variable as plain text, a `Secret<T>` field as a binding to its Secrets
+Store secret, a signing key as a secret text binding from the deploy's
+state. An exposed server under a domain gets a custom domain,
+`<server>.<domain>`, whose record and certificate Cloudflare writes; one
+without a domain is at `https://<server>.<workersSubdomain>.workers.dev`,
+which needs bootstrap's `workersSubdomain`. An internal server has no
+route at all. The rule `nothing-public-unless-exposed` refuses workers.dev,
+a custom domain or a route for a server that is not exposed.
+
+The stack's build writes `fetch.ts`, the Worker's entrypoint, `bundle.ts`
+and `workers.d.ts` beside the server's `main.ts`, which `stack dev` still
+runs on Bun. `fetch.ts` reads each API's config from the bindings when
+Cloudflare loads the version, so a config the API refuses fails the
+upload; builds the APIs on an isolate's first request, and again after a
+failure; and gives the runtime the client's address from
+`CF-Connecting-IP`. An isolate's memory is its own, and Cloudflare runs
+many: the storefront's carts live per isolate. `bundle.ts` bundles for
+workerd with Bun, and fails on a `node:` import, Bun's global, or a
+WebAssembly module other than superscalar's; `bun bundle.ts --check`,
+which the generated CI's `check` runs, bundles into a temporary
+directory. Resolution refuses a Go or Rust server, a name over 63
+characters and an API over the user model on Workers, whose runtime has
+no argon2.
+
+`examples/acme-shop`'s `storefront-stack` runs the storefront this way:
+
+<Snippet file="schemas/services/storefront-stack/src/stack.schema.ts" />
 
 ## Generated CI
 

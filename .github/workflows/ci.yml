@@ -561,7 +561,8 @@ jobs:
             examples/acme-shop/topcoat
 
       # The docs site's start-here, first-project and guide pages quote
-      # examples/acme-shop. This builds it with the core alone, compiles and
+      # examples/acme-shop. This builds it with the installed binary, since
+      # its storefront-stack names the cloudflare target, compiles and
       # tests the Go, TypeScript, Python and Rust code the pages show, runs
       # every SDK's client against shop-orders served in Go and in Rust,
       # tests the Topcoat app over shop-orders (built with the binary that

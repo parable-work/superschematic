@@ -158,10 +158,11 @@ that runs it ([Start a stack](/superschematic/guides/stacks/#start-a-stack)).
 With Docker running, Bun and cargo installed for the storefront's and
 `shop-stock`'s servers, and the migration runner, `superschematic-migrate`,
 on your `PATH` (see [the runner](/superschematic/reference/migrations/#the-runner)),
-run it from `examples/acme-shop`:
+run it from `examples/acme-shop`, naming the stack, since the example
+holds a second one, `storefront-stack`:
 
 ```sh
-superschematic stack dev
+superschematic stack dev schemas/services/shop-stack
 ```
 
 `stack dev` builds the stack and each service it deploys, with their

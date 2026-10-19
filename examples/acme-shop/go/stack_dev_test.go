@@ -107,9 +107,9 @@ func TestStackDevRunsTheShop(t *testing.T) {
 	// implementation the build writes under schemas/dist/impl (D65), and
 	// reuses the crates an earlier run compiled there.
 	outputRoot := filepath.Join("..", "schemas", "dist")
-	dev := startStackDev(t, binary)
+	dev := startStackDev(t, binary, shopStack)
 	output := dev.output
-	env := dev.waitUntilRunning(t, outputRoot)
+	env := dev.waitUntilRunning(t, outputRoot, "shop-stack", "shop-api", "shop-orders", "shop-stock", "shop-storefront")
 
 	// Staff, who hold products, orders and stock, add and stock the
 	// products, and order them too.
@@ -612,8 +612,8 @@ func TestStackDevRunsTheShop(t *testing.T) {
 	// run built, and its Cargo target directory is the first run's, so
 	// cargo compiles the crates the root generates and reuses every other.
 	otherRoot := otherOutputRoot(t, outputRoot)
-	again := startStackDev(t, binary, "--out", otherRoot)
-	againEnv := again.waitUntilRunning(t, otherRoot)
+	again := startStackDev(t, binary, shopStack, "--out", otherRoot)
+	againEnv := again.waitUntilRunning(t, otherRoot, "shop-stack", "shop-api", "shop-orders", "shop-stock", "shop-storefront")
 	mirrored, err := os.ReadFile(filepath.Join(otherRoot, "impl", "shop-stock", "src", "lib.rs"))
 	if err != nil {
 		t.Fatal(err)
@@ -649,6 +649,11 @@ const (
 	orderRestocks = "shop-stock-order-restocks"
 )
 
+// shopStack is shop-stack's service directory, relative to the example's.
+// The example holds two stacks, shop-stack and storefront-stack, so each
+// stack command names its stack.
+const shopStack = "schemas/services/shop-stack"
+
 // stackDev is a run of `superschematic stack dev --remove-data` from the
 // example's directory, as a person would start it, and what it prints.
 type stackDev struct {
@@ -662,10 +667,10 @@ type stackDev struct {
 // startStackDev starts stack dev with flags. On a failure, the test's
 // cleanup stops it as Ctrl-C does, removes the containers whatever it
 // left, and logs what it printed.
-func startStackDev(t *testing.T, binary string, flags ...string) *stackDev {
+func startStackDev(t *testing.T, binary, stack string, flags ...string) *stackDev {
 	t.Helper()
 	dev := &stackDev{output: &lockedBuffer{}, exited: make(chan error, 1)}
-	dev.cmd = exec.Command(binary, append([]string{"stack", "dev", "--remove-data"}, flags...)...)
+	dev.cmd = exec.Command(binary, append([]string{"stack", "dev", stack, "--remove-data"}, flags...)...)
 	dev.cmd.Dir = ".."
 	dev.cmd.Stdout, dev.cmd.Stderr = dev.output, dev.output
 	if err := dev.cmd.Start(); err != nil {
@@ -697,7 +702,7 @@ func startStackDev(t *testing.T, binary string, flags ...string) *stackDev {
 // in an output root compiles every crate shop-stock's server, worker and
 // job build with; later runs reuse them from the environment's Cargo
 // target directory there, until the output root is emptied.
-func (dev *stackDev) waitUntilRunning(t *testing.T, outputRoot string) environment {
+func (dev *stackDev) waitUntilRunning(t *testing.T, outputRoot, stack string, servers ...string) environment {
 	t.Helper()
 	started := time.Now()
 	deadline := started.Add(10 * time.Minute)
@@ -714,9 +719,9 @@ func (dev *stackDev) waitUntilRunning(t *testing.T, outputRoot string) environme
 		time.Sleep(200 * time.Millisecond)
 	}
 	t.Logf("%s ran the stack in %s", strings.Join(dev.cmd.Args[1:], " "), time.Since(started).Round(time.Second))
-	env := readEnvironment(t, filepath.Join(outputRoot, "stack", "shop-stack", "Dev", "environment.json"))
+	env := readEnvironment(t, filepath.Join(outputRoot, "stack", stack, "Dev", "environment.json"))
 	dev.containers = env.containers
-	for _, server := range []string{"shop-api", "shop-orders", "shop-stock", "shop-storefront"} {
+	for _, server := range servers {
 		if env.servers[server] == "" {
 			t.Fatalf("environment Dev has no server %s: %v", server, env.servers)
 		}
@@ -880,7 +885,7 @@ func waitForStatus(ctx context.Context, t *testing.T, orders *orderssdk.ShopOrde
 func runJob(t *testing.T, binary, job string, flags ...string) string {
 	t.Helper()
 	for try := 1; ; try++ {
-		cmd := exec.Command(binary, append(append([]string{"stack", "run"}, flags...), "Dev", job)...)
+		cmd := exec.Command(binary, append(append([]string{"stack", "run", "--stack", shopStack}, flags...), "Dev", job)...)
 		cmd.Dir = ".."
 		out, err := cmd.CombinedOutput()
 		if err == nil {
