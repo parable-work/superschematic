@@ -682,3 +682,70 @@ func TestDatabaseName(t *testing.T) {
 		}
 	}
 }
+
+// TestRunnerProcess: an engine database's runner (D58) is a process of its
+// own, as a worker is: the entrypoint module the build writes at
+// server/<stack>/<runner>, in shop-api's language, no port, ready once it
+// starts, its environment its database's connection string alone; and the
+// provisioner's program reads it as a runner's process.
+func TestRunnerProcess(t *testing.T) {
+	services := stacktest.AcmeShop()
+	for i := range services {
+		if services[i].Name == "shop-db" {
+			services[i].Engine = true
+		}
+	}
+	env := resolve(t, assemble(t), shop(), services, "Dev")
+	const runner = "shop-db-engine-runner"
+	d := env.Deployable(runner)
+	if d == nil || d.Kind != ir.DeployableRunner || d.Platform != local.RunnerPlatform || d.Language != registry.APILanguageGo {
+		t.Fatalf("the runner is %+v", d)
+	}
+	process := env.Resources.Resource(runner + ".process")
+	if process == nil {
+		t.Fatalf("no process for %s", runner)
+	}
+	want := map[string]any{
+		"name":      runner,
+		"module":    local.ModulePath("shop-stack", runner),
+		"language":  "go",
+		"kind":      "runner",
+		"readiness": local.ReadinessStarted,
+		"env":       []any{map[string]any{"name": "SHOP_DB_DATABASE_URL", "value": serverVariable(t, env, "shop-api", "SHOP_DB_DATABASE_URL")}},
+	}
+	if !equalJSON(t, process.Properties, want) {
+		t.Errorf("the runner's process = %v\nwant %v", process.Properties, want)
+	}
+	prog, err := local.ProgramOf(env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, s := range prog.Servers {
+		if s.Deployable == runner {
+			found = true
+			if s.Kind != "runner" || s.Port != 0 || s.Readiness != local.ReadinessStarted || s.Binary == "" {
+				t.Errorf("the runner's process = %+v", s)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("the program runs no %s: %+v", runner, prog.Servers)
+	}
+}
+
+// serverVariable is the value of variable name in the process of server.
+func serverVariable(t *testing.T, env *ir.ResolvedEnvironment, server, name string) any {
+	t.Helper()
+	process := env.Resources.Resource(server + ".process")
+	if process == nil {
+		t.Fatalf("no process for %s", server)
+	}
+	for _, v := range process.Properties["env"].([]any) {
+		if v := v.(map[string]any); v["name"] == name {
+			return v["value"]
+		}
+	}
+	t.Fatalf("the process of %s sets no %s", server, name)
+	return nil
+}

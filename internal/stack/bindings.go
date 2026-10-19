@@ -66,12 +66,19 @@ func (r *resolver) databaseOf(svc *Service) (string, bool) {
 // database of each API it serves, an http edge from each server to the
 // server of each API it calls, and a bucket edge from each server to each
 // bucket an API it serves lists (D54). A job takes its API's edges, from
-// itself (D52). Each finds the connector between the two platforms.
+// itself (D52). An engine's runner has one, a sql edge to its engine
+// database (D58). Each finds the connector between the two platforms.
 func (r *resolver) deriveEdges() {
 	for _, name := range sortedKeys(r.deployables) {
 		d := r.deployables[name]
 		if d.res.Kind == ir.DeployableSite {
 			r.deriveSiteEdges(d)
+			continue
+		}
+		if d.res.Kind == ir.DeployableRunner {
+			if d.res.Runner != nil {
+				r.addEdge(ir.EdgeSQL, d, d.res.Runner.Database)
+			}
 			continue
 		}
 		if !d.res.Kind.RunsCode() {

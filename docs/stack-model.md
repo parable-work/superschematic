@@ -75,6 +75,7 @@ environments   a target (gcp, local, ...) and the values only a person can decid
 | worker | one `@worker` of an API schema | a loop that handles a queue's messages until stopped | its API's needs; its queue lives in one of the API's databases (D53) |
 | bucket | one Bucket schema | object storage, private, with signed URLs | nothing (D54) |
 | site | one Site schema | static files over HTTPS, with a config per environment | the public address of each API it calls (D55) |
+| runner | one engine database: a DB schema whose types compose behaviors | the engine's runner, which runs reactions, schedules, Timers' deadlines and retention, one process at a time under the runner's lock | a connection to its database (D58) |
 
 A queue is not a deployable: it lives in the database of the DB schema
 that declares it (section 8.8). A second target, and the generic
@@ -86,8 +87,10 @@ realizes it (section 6.1), and the edges it takes part in.
 
 With nothing declared, each API service in a stack is one server, each
 `@job` of an API service is one job, each `@worker` of an API service is
-one worker, and each DB service is one database. A deployable is declared
-only to change that:
+one worker, and each DB service is one database. Each engine database an
+API connects to is one runner, `<db>-engine-runner`, written in the
+language of the first API, by name, that connects to it (D58). A
+deployable is declared only to change that:
 
 - to run several APIs in one process;
 - to host several DB schemas on one database.

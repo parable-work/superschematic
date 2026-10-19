@@ -200,6 +200,16 @@ Python import name of the Python version-graph runtime. A generated
 facade (`<module>/versiongraph_<name>.py`) imports the facade base from
 its `facade` module.
 
+### `engine_go_module`
+
+Default: `github.com/parable-work/superschematic/runtime/engine/go`
+
+Go module path of the behavior engine's Go binding (D58). The entrypoint
+of a Go server whose API's database holds engine types imports it to
+open the engine, deploy the database's engine document and mount the
+engine's routes, and its `enginehttp` package. The binding links the
+engine's static archive through cgo.
+
 ### `engine_npm_package`
 
 Default: `@superschematic/engine`
@@ -481,6 +491,19 @@ Directory of the behavior engine's Rust crate, `superschematic-engine`
 (D58), which a Rust server links with its `postgres` and `axum` features
 to mount the engine's routes. No generated manifest names it yet: the
 Rust servers that mount the engine are still to come.
+
+### `paths.engine_go`
+
+Default: unset. This repository's own file sets `runtime/engine/go`.
+
+Directory of the behavior engine's Go binding module (D58). The
+entrypoint of a Go server whose API's database holds engine types
+requires it, and its `go.mod` replaces it with this directory; unset, the
+module comes from the module proxy at the release's tag. The server's
+Dockerfile builds the engine's static archive from the Cargo workspace
+beside it (`../rust`), which reaches the work queue's crate, the schema
+IR's and the version graph's engine at their places in the same checkout;
+unset, the image downloads it with the release's other archives.
 
 ### `paths.versiongraph_python`
 

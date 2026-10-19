@@ -129,7 +129,25 @@ export type EngineOutputConfig = {
    * The engine namespace the schema's engine types are defined, published and instantiated in: lowercase letters, digits and hyphens, starting with a letter, at most 63 characters. Unset is the service's name.
    */
   readonly namespace?: string;
+  /**
+   * The path a server of an API on this database mounts the engine's routes at, its event stream and its MCP endpoint under it: one or more segments, each of letters, digits and . _ ~ -. Unset is /engine/<service>.
+   */
+  readonly mount?: string;
+  /**
+   * The access policy the servers open the engine with: "permission", which allows an action on a type to a caller holding <Type>.<action> (Ticket.read, Ticket.write, Ticket.define, Ticket.publish); "allowAll", for tests and local use; or ordered rules, the first that matches a question deciding it. Unset is "permission".
+   */
+  readonly policy?: EnginePolicy;
 };
+
+/**
+ * An engine's access policy (D58): a shorthand, or ordered rules, each matching on the question's action, operation, schema and namespace and the caller's subject and service, and either naming a permission the principal must hold or allowing or refusing outright. The engine checks the rules when a server opens it.
+ */
+export type EnginePolicy = "permission" | "allowAll" | { readonly rules: readonly EngineAccessRule[] };
+
+/**
+ * One rule of an engine's access policy, as the engine reads it.
+ */
+export type EngineAccessRule = { readonly [member: string]: unknown };
 
 /**
  * One CI renderer's options for a Stack service's generated workflow.

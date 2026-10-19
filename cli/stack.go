@@ -521,6 +521,8 @@ func printLocalSummary(w io.Writer, env *ir.ResolvedEnvironment, stateDir string
 			lines = append(lines, fmt.Sprintf("  worker   %-24s off: queue %s waits", d.Name, d.Worker.Queue))
 		case d.Kind == ir.DeployableWorker && d.Worker != nil:
 			lines = append(lines, fmt.Sprintf("  worker   %-24s handles %s of %s, %d at a time", d.Name, d.Worker.Queue, d.Worker.Database, d.Worker.Concurrency))
+		case d.Kind == ir.DeployableRunner && d.Runner != nil && d.Runner.Instances > 0:
+			lines = append(lines, fmt.Sprintf("  runner   %-24s runs the engine's reactions, schedules and deadlines of %s", d.Name, d.Runner.Database))
 		}
 	}
 	for _, res := range env.Resources.Resources {

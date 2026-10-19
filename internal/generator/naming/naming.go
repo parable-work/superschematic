@@ -98,6 +98,12 @@ type Naming struct {
 	// graph. It links the core's static archive through cgo.
 	VersionGraphGoModule string `toml:"versiongraph_go_module"`
 
+	// EngineGoModule is the Go binding of the behavior engine (D58), which
+	// the entrypoint of a Go server whose API's database holds engine
+	// types imports to open the engine and mount its routes. It links the
+	// engine's static archive through cgo.
+	EngineGoModule string `toml:"engine_go_module"`
+
 	// VersionGraphRustCrate is the Rust engine of the version graph (D19),
 	// which a generated Rust types crate depends on when its schema
 	// declares a graph: its typed facade runs on the engine.
@@ -424,6 +430,13 @@ type PathsConfig struct {
 	// postgres and axum features, to mount the engine's routes. No
 	// generated manifest names it yet.
 	EngineRust string `toml:"engine_rust"`
+	// EngineGo holds the behavior engine's Go binding module (D58), which
+	// a Go server whose API's database holds engine types requires. A
+	// server's checkout Dockerfile builds the engine's static archive from
+	// the Cargo workspace beside it (the binding's ../rust), which reaches
+	// the work queue's crate, the schema IR's and the version graph's
+	// engine at their places in the same checkout.
+	EngineGo string `toml:"engine_go"`
 	// VersionGraphPython holds the version graph's Python package.
 	VersionGraphPython string `toml:"versiongraph_python"`
 	// HTTPRuntimeGo holds the http runtime Go module.
@@ -459,6 +472,7 @@ type LocalPaths struct {
 	VersionGraphTypeScript string
 	VersionGraphRust       string
 	EngineRust             string
+	EngineGo               string
 	VersionGraphPython     string
 	HTTPRuntimeGo          string
 	HTTPRuntimeRust        string
@@ -486,6 +500,7 @@ func (n Naming) LocalPaths(repoRoot string) LocalPaths {
 		VersionGraphTypeScript: resolve(n.Paths.VersionGraphTypeScript),
 		VersionGraphRust:       resolve(n.Paths.VersionGraphRust),
 		EngineRust:             resolve(n.Paths.EngineRust),
+		EngineGo:               resolve(n.Paths.EngineGo),
 		VersionGraphPython:     resolve(n.Paths.VersionGraphPython),
 		HTTPRuntimeGo:          resolve(n.Paths.HTTPRuntimeGo),
 		HTTPRuntimeRust:        resolve(n.Paths.HTTPRuntimeRust),
@@ -519,6 +534,7 @@ func (p PathsConfig) checkRelative() error {
 		{"versiongraph_typescript", p.VersionGraphTypeScript},
 		{"versiongraph_rust", p.VersionGraphRust},
 		{"engine_rust", p.EngineRust},
+		{"engine_go", p.EngineGo},
 		{"versiongraph_python", p.VersionGraphPython},
 		{"http_runtime_go", p.HTTPRuntimeGo},
 		{"http_runtime_rust", p.HTTPRuntimeRust},
@@ -679,6 +695,7 @@ func Default() Naming {
 		SchemaRuntimeRustCrate:   "superschematic-schema-runtime",
 		VersionGraphGoModule:     "github.com/parable-work/superschematic/runtime/versiongraph/go",
 		VersionGraphRustCrate:    "superschematic-versiongraph-engine",
+		EngineGoModule:           "github.com/parable-work/superschematic/runtime/engine/go",
 		HTTPRuntimeGoModule:      "github.com/parable-work/superschematic/runtime/http/go",
 		HTTPRuntimeRustCrate:     "superschematic-http-runtime",
 		PtrGoModule:              "github.com/parable-work/superschematic/runtime/schema/go/ptr",
@@ -741,6 +758,7 @@ func (n Naming) OrDefault() Naming {
 	fill(&n.SchemaRuntimeRustCrate, d.SchemaRuntimeRustCrate)
 	fill(&n.VersionGraphGoModule, d.VersionGraphGoModule)
 	fill(&n.VersionGraphRustCrate, d.VersionGraphRustCrate)
+	fill(&n.EngineGoModule, d.EngineGoModule)
 	fill(&n.HTTPRuntimeGoModule, d.HTTPRuntimeGoModule)
 	fill(&n.HTTPRuntimeRustCrate, d.HTTPRuntimeRustCrate)
 	fill(&n.PtrGoModule, d.PtrGoModule)

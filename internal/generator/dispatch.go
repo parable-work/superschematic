@@ -868,6 +868,10 @@ func (m *runMemo) buildAPIOutput() (*apigen.APIOutput, error) {
 	if err != nil {
 		return nil, err
 	}
+	engine, err := r.engineDatabase(deps)
+	if err != nil {
+		return nil, err
+	}
 
 	output, err := apigen.Generate(r.Schema, apigen.Options{
 		SchemaName:         r.Config.Name,
@@ -885,6 +889,7 @@ func (m *runMemo) buildAPIOutput() (*apigen.APIOutput, error) {
 		ToolHooks:          r.Registry.ToolHooks(),
 		ToolInvocation:     r.Registry.ToolInvocationPolicy(),
 		RawBodyChecks:      r.Registry.RawBodyChecks(),
+		Engine:             engine,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("generator: api for %s: %w", r.Config.Name, err)

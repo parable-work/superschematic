@@ -93,7 +93,7 @@ func TestRegisterPlatformRejects(t *testing.T) {
 	t.Run("database with an artifact", func(t *testing.T) {
 		spec := sqlPlatform("fake.sql")
 		spec.Artifact = ir.ArtifactBundle
-		if err := New(naming.Default()).RegisterPlatform(spec); err == nil || !strings.Contains(err.Error(), "only a server, job or worker platform builds one") {
+		if err := New(naming.Default()).RegisterPlatform(spec); err == nil || !strings.Contains(err.Error(), "only a server, job, worker or runner platform builds one") {
 			t.Fatalf("RegisterPlatform = %v", err)
 		}
 	})

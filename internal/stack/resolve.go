@@ -229,6 +229,7 @@ func (r *resolver) resolve() *ir.ResolvedEnvironment {
 	r.declareDeployables()
 	r.defaultDeployables()
 	r.defaultWorkers()
+	r.defaultRunners()
 	r.applySettings()
 	r.place()
 	r.expose()
@@ -237,6 +238,7 @@ func (r *resolver) resolve() *ir.ResolvedEnvironment {
 	r.checkCalls()
 	r.scheduleJobs()
 	r.runWorkers()
+	r.runRunners()
 	if r.failed() {
 		return nil
 	}
@@ -888,6 +890,8 @@ func (r *resolver) place() {
 		switch res.Kind {
 		case ir.DeployableServer, ir.DeployableJob, ir.DeployableWorker:
 			r.placeServer(d)
+		case ir.DeployableRunner:
+			r.placeRunner(d)
 		case ir.DeployableDatabase:
 			r.placeDatabase(d)
 		case ir.DeployableSite:
@@ -1203,6 +1207,10 @@ func cloneDeployable(d *ir.ResolvedDeployable) ir.ResolvedDeployable {
 	if d.Worker != nil {
 		worker := *d.Worker
 		c.Worker = &worker
+	}
+	if d.Runner != nil {
+		runner := *d.Runner
+		c.Runner = &runner
 	}
 	if d.Bindings != nil {
 		c.Bindings = make([]*ir.Binding, len(d.Bindings))

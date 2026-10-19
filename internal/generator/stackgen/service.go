@@ -3,6 +3,7 @@ package stackgen
 import (
 	"fmt"
 
+	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/envgen"
 	"github.com/parable-work/superschematic/internal/registry"
 	"github.com/parable-work/superschematic/internal/stack"
@@ -23,7 +24,9 @@ import (
 //     (envgen), with each field's Secret, Default and InheritedFrom;
 //   - an API's jobs, each a deployable of the stack (D52);
 //   - an API's workers, each a deployable of the stack, and a DB's
-//     queues, which a worker's queue is one of (D53).
+//     queues, which a worker's queue is one of (D53);
+//   - whether a DB is an engine database, a type of it composing a
+//     behavior, whose engine's runner is a deployable of the stack (D58).
 //
 // dependencies are the schemas the service imports types from, by service
 // name, so that the default of an imported enum field reads as its value.
@@ -68,6 +71,7 @@ func Service(schema *ir.Schema, outputs *registry.Outputs, dependencies map[stri
 		for _, td := range schema.Queues() {
 			svc.Queues = append(svc.Queues, td.Name)
 		}
+		svc.Engine = len(codegen.EngineTypes(schema)) > 0
 	case ir.SchemaKindSite:
 		// Its calls are the APIs its code calls from the browser; where its
 		// code is, the stack's build reads with SiteOf (D55).
