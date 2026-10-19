@@ -73,7 +73,8 @@ By making a contribution to this project, I certify that:
 | Bun           | 1.4.2   | `tools.env` (`BUN_VERSION`)                        |
 | Python        | 3.9 or newer | floor in `runtime/schema/python/pyproject.toml` and `runtime/versiongraph/python/pyproject.toml`; CI tests on `tools.env` (`PYTHON_VERSION`), and the version-graph binding on 3.9 too |
 | uv            | 0.12.9  | `tools.env` (`UV_VERSION`)                         |
-| Rust          | 1.99.0  | `tools.env` (`RUST_VERSION`); builds the superscalar archive, `runtime/http/rust`, `runtime/versiongraph/rust` (with the `wasm32-unknown-unknown` target, for `runtime/versiongraph/typescript`) and its Python binding `runtime/versiongraph/python` |
+| wasm-pack     | 0.15.0  | `tools.env` (`WASM_PACK_VERSION`); builds superscalar's WebAssembly core for its browser and workerd builds, which a site's bundle and a Worker's take |
+| Rust          | 1.99.0  | `tools.env` (`RUST_VERSION`); builds the superscalar archive, `runtime/http/rust`, `runtime/versiongraph/rust` (with the `wasm32-unknown-unknown` target, for `runtime/versiongraph/typescript` and superscalar's WebAssembly core) and its Python binding `runtime/versiongraph/python` |
 | Postgres      | 16      | `tools.env` (`POSTGRES_VERSION`); CI's database tests run against it |
 | superscalar   | commit  | `superscalar.pin`; `go.mod` carries the same commit as a pseudo-version |
 
@@ -85,9 +86,11 @@ rustup toolchain install 1.99.0 --target wasm32-unknown-unknown
 make setup
 ```
 
-`make setup` runs `scripts/superscalar-dep.sh`, which clones superscalar at
-the pinned commit under `third_party/superscalar` (gitignored), builds its Go
-static archive and TypeScript binding, and prints the `CGO_LDFLAGS` value.
+`make setup` installs wasm-pack when it is missing, then runs
+`scripts/superscalar-dep.sh`, which clones superscalar at the pinned commit
+under `third_party/superscalar` (gitignored), builds its Go static archive
+and TypeScript binding, with the binding's browser and workerd builds over
+the WebAssembly core, and prints the `CGO_LDFLAGS` value.
 It then runs `scripts/versiongraph-archive.sh`, which builds the
 version-graph core's static archive and stages it under
 `runtime/versiongraph/go/lib`, where that binding links it. Both scripts

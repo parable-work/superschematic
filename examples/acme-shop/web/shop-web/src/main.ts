@@ -5,28 +5,21 @@
 // answers CORS for this site's origin, which its CORS field lists. The
 // browser carries the shopper's session token itself.
 //
-// It calls shop-api with fetch rather than the generated SDK: a browser
-// bundle of the SDK takes superscalar's Node backend today (D55, amended).
-import { loadApis, type ApiEndpoint } from '../config.generated';
-
-interface ProductView {
-  readonly id: string;
-  readonly name: string;
-  readonly priceCents: number;
-}
+// It calls shop-api through the generated TypeScript SDK, which the config
+// hands out at shop-api's address. The SDK checks each product's fields
+// through superscalar, whose browser build the bundle carries (D55,
+// amended), so the page's Content-Security-Policy, where one is set, must
+// allow 'wasm-unsafe-eval'.
+import type { ProductView } from '@acme/shop-api-types';
+import { loadApis, type Apis } from '../config.generated';
 
 const form = document.getElementById('sign-in') as HTMLFormElement | null;
 const list = document.getElementById('products');
 const status = document.getElementById('status');
 
 /** Lists the products in stock, as the shopper whose session token is token. */
-async function listProducts(api: ApiEndpoint, token: string): Promise<ProductView[]> {
-  const response = await fetch(`${api.baseUrl}/api/products?inStock=true`, {
-    headers: { Accept: 'application/json', Authorization: `Bearer ${token}` },
-  });
-  if (!response.ok) throw new Error(`shop-api answered ${response.status}`);
-  const body = (await response.json()) as { data: ProductView[] };
-  return body.data;
+function listProducts(api: Apis['shopApi'], token: string): Promise<ProductView[]> {
+  return api.client({ auth: { token } }).product.listProducts({ inStock: true });
 }
 
 function show(products: readonly ProductView[]): void {

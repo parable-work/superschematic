@@ -3054,13 +3054,18 @@ config may leave `outputs` out.
   calls. The build writes a typed browser config there,
   `config.generated.ts`, on every build: `loadApis()` returns each API the
   site calls, by the camel case of its name, with its public `baseUrl` and
-  `client(create)`, which builds a client of the API from a factory the
-  site hands it, its SDK's constructor or any other. It imports no SDK:
-  a browser bundle of a generated SDK takes superscalar's Node backend
-  until superscalar's browser build bundles (D55, amended). When the
-  package is missing, the build scaffolds a minimal site there once: an
-  `index.html`, a script that loads the config, and a `build` script that
-  bundles them with `bun build`.
+  `client(options)`, which builds the API's generated TypeScript SDK at
+  that address with the SDK's other options, `auth` among them. The
+  config imports each SDK, which validates through superscalar: `bun
+  build --target=browser` takes superscalar's browser build through its
+  `browser` export condition, with the WebAssembly module inlined and no
+  plugin, so a page's Content-Security-Policy must allow
+  `'wasm-unsafe-eval'` (D55, amended twice). An API whose config
+  generates no TypeScript SDK has its `baseUrl` alone. When the package
+  is missing, the build scaffolds a minimal site there once: an
+  `index.html`, a script that loads the config, and a `package.json`
+  that depends on each SDK and whose `build` script bundles them with
+  `bun build`.
 - **Build.** The deploy runs the site's `build` script after a frozen
   install of the workspace. It digests the output as it digests a server's
   build context (D46): every file in path order, at the epoch, owned by

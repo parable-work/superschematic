@@ -5209,8 +5209,9 @@ the deploy and preview jobs of an environment with a site. #349 reads
 the CORS field on a Rust server (D57), and #344 lets the identity runtime
 answer its trusted origins on an API a site calls (the amendment below).
 
-Not built: a site's SDK clients in the browser, which wait on
-superscalar's browser build (the first amendment below).
+A site's SDK clients in the browser waited on superscalar's browser
+build (the first amendment below), and came with it (the last D55
+amendment, below D66).
 
 The rule is reversible until the first release.
 
@@ -5242,7 +5243,8 @@ from superscalar, at the commit `superscalar.pin` names:
 | What superscalar needs, in its own repository: a `browser` condition on `.` and `./scalars` that takes a build importing the browser backend (or a package `browser` map from `./dist/esm/backend.js` to `./dist/esm/backend.browser.mjs`); and a browser backend that instantiates its module without a bundler's integration, such as wasm-pack's `web` target initialized with top-level `await`, or the bytes inlined and `initSync`. superschematic then builds that target in `scripts/superscalar-dep.sh` and pins the commit. | |
 
 Status: built with the rest of D55's first half. The acme shop's
-`web/shop-web` calls shop-api with `fetch` through `loadApis()`.
+`web/shop-web` called shop-api with `fetch` through `loadApis()`. The last
+D55 amendment, below D66, lifts this one.
 
 The rule is reversible until the first release.
 
@@ -6806,5 +6808,49 @@ the route's rate limit. `TestServiceAuthManualRoutes` refuses a protected
 manual route without a user and a `@requireService` one without a service,
 and the three `...PredatesItsManualRoutesFails` tests the build's
 refusals.
+
+The rule is reversible until the first release.
+
+### D55, amended: a site's typed browser config hands out a client of each API's SDK, since superscalar bundles for the browser
+
+The first D55 amendment kept every SDK out of a site's typed browser
+config until superscalar bundled for the browser, and said what
+superscalar needed. superscalar's #72 built it, and `superscalar.pin` now
+names that commit (`bab3060b`):
+
+- `.`, `./scalars`, `./validation`, `./backend` and `./wasm` carry
+  `browser` and `workerd` export conditions. Each resolves into a build
+  whose backend is the WebAssembly core's, so no relative `./backend`
+  import reaches the Node backend.
+- The browser build inlines the module as base64 and instantiates it
+  synchronously when it is imported, so a bundler needs no WebAssembly
+  support. The workerd build imports the module as a `WebAssembly.Module`,
+  as a Worker's upload gives it (D64).
+- `scripts/superscalar-dep.sh` builds both: wasm-pack's `web` target with
+  the size-tuned profile into `wasm-web/`, then the two tsc passes and
+  `build-web.mjs`. `tools.env` pins wasm-pack (`WASM_PACK_VERSION`), and
+  every CI job and `make setup` that runs the script in full installs it,
+  with the `wasm32-unknown-unknown` target.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `config.generated.ts` imports the SDK of each API the site calls. `loadApis()` returns each API with its `service`, its public `baseUrl` and `client(options)`, which builds the SDK's root class at the base URL with the SDK's other options (`auth`, `credentials`, `fetch`, a timeout). An API whose config generates no TypeScript SDK keeps its address alone (`ApiAddress`), and the config's comment says to enable `outputs.sdk.typescript`. The scaffold's `package.json` depends on each SDK with `workspace:*`. | `client(create)` kept, a factory every site writes for the same constructor. Refusing a site that calls an API with no TypeScript SDK, which would break a site that calls it with `fetch`. |
+| `bun build --target=browser` takes superscalar's browser build through the `browser` condition, with no plugin. The bundle carries the module inlined: acme's page is 3.0 MB, 1.0 MB gzipped. | A Bun build plugin, which the first amendment refused. The module as a file the page fetches before its first call, which every SDK call would await. |
+| A page's Content-Security-Policy must allow `'wasm-unsafe-eval'` in `script-src`, since the browser build compiles its module. superschematic serves no Content-Security-Policy of its own; the static sites guide says so. | |
+| The SDK's client encodes and decodes base64 with `btoa` and `atob`, which browsers, Workers, Bun and Node.js all have, not with Node's `Buffer`, so a site whose tsconfig names no Node types type-checks it. | `@types/node` in every site, for one fallback no browser takes. |
+
+Status: built.
+- `TestASiteBundlesItsAPIsSDKForTheBrowser` builds the TypeScript
+  fixture's site, whose config hands out ts-shop's SDK and whose scaffold
+  depends on it. It type-checks the site with no Node types, builds the
+  scaffold, and bundles a script with `bun build --target=browser`. The
+  bundle imports nothing from `node:` and carries superscalar's module.
+  Node runs the bundle as a browser would: the script reads the site's
+  config, calls ts-shop through the client at the address the config
+  names, and parses an address through superscalar.
+- acme's `web/shop-web` lists shop-api's products through
+  `shopApi.client({ auth: { token } }).product.listProducts`.
+  `scripts/check.sh` type-checks and builds it, and checks its bundle
+  imports nothing from `node:` and carries the module.
 
 The rule is reversible until the first release.

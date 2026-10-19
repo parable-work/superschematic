@@ -25,7 +25,7 @@ and D55 in `docs/DECISIONS.md` records the decisions.
 
 | Built | Not built yet |
 | --- | --- |
-| the `Site` kind, its config and its sentinel; the typed browser config and the scaffold | a site's typed SDK clients in the browser, which wait on superscalar's browser build |
+| the `Site` kind, its config and its sentinel; the typed browser config, with a client of each API's SDK, and the scaffold | |
 | the `site` deployable and edge, `publicAddress` on platforms, the CORS field and the Go and TypeScript runtimes' CORS | |
 | `stack dev`: each site built once and served with its config and its fallback | rebuilding a site while `stack dev` runs |
 | the deploy: a build after a frozen install, the files' digest, a publish through the target's `Sites` seam, the digest pinned and recorded, `--site` to serve earlier files | |
@@ -72,28 +72,37 @@ your framework's project.
 Every build writes the site's typed browser config into the package,
 `config.generated.ts`. Its `loadApis()` fetches the config the
 environment serves at `/__superschematic/config.json`, uncached, and
-returns each API the site calls, by the camel case of its name:
+returns each API the site calls, by the camel case of its name, with its
+public `baseUrl` and `client(options)`, which builds the API's generated
+TypeScript SDK at that address:
 
 ```ts
 import { loadApis } from "../config.generated";
 
 const { shopApi } = await loadApis();
-const response = await fetch(`${shopApi.baseUrl}/api/products?inStock=true`, {
-  headers: { Authorization: `Bearer ${token}` },
-});
+const products = await shopApi.client({ auth: { token } }).product.listProducts({ inStock: true });
 ```
 
-Each API has its public `baseUrl` and `client(create)`, which hands the
-base URL to a constructor of your choice:
+`client` takes the SDK's options but `baseUrl`: `auth`, `credentials` for
+a cookie session, `fetch`, a timeout. The scaffold's `package.json`
+depends on each SDK with `workspace:*`. An API whose config generates no
+TypeScript SDK has its `baseUrl` alone; enable `outputs.sdk.typescript`
+in its config for a client, or call it with `fetch`.
 
-```ts
-const sdk = shopApi.client(options => new ShopApiSDK({ ...options, auth: { token } }));
+The SDK checks each value through superscalar, whose browser build a
+bundler takes through the `browser` export condition: `bun build
+--target=browser`, or an HTML entry point, bundles it with no plugin. That
+build carries superscalar's WebAssembly module inlined, about 2.9 MB of a
+page's script, or 1 MB gzipped, and compiles it when the page loads. A
+page served with a Content-Security-Policy must allow it in `script-src`:
+
+```
+Content-Security-Policy: script-src 'self' 'wasm-unsafe-eval'
 ```
 
-A browser bundle of a generated SDK does not build yet: the SDK validates
-through superscalar, whose browser build a bundler cannot take today. Call
-an API with `fetch` until it does; the config does not change when it
-does.
+Without `'wasm-unsafe-eval'` the import of the SDK throws, naming the
+policy. superschematic serves no Content-Security-Policy of its own, in
+`stack dev` or on a target; set one where you set your other headers.
 
 ## Deploy it in a stack
 

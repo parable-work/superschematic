@@ -60,8 +60,12 @@ GO_BUILD_FLAGS := -trimpath -buildvcs=false
 all: build test lint
 
 # Check out and build the superscalar dependency (Go static archive and
-# TypeScript binding). Needs git, a Rust toolchain, bun and node.
+# TypeScript binding, with its browser and workerd builds over the
+# WebAssembly core). Needs git, a Rust toolchain, bun and node; it adds the
+# wasm32 target and installs wasm-pack at WASM_PACK_VERSION when missing.
 setup:
+	rustup target add wasm32-unknown-unknown --toolchain $(RUST_VERSION)
+	@wasm-pack --version 2>/dev/null | grep -qx 'wasm-pack $(WASM_PACK_VERSION)' || cargo install wasm-pack --version $(WASM_PACK_VERSION) --locked
 	scripts/superscalar-dep.sh
 	scripts/versiongraph-archive.sh
 	cd packages && bun install
