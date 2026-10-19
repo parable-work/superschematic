@@ -43,8 +43,12 @@ rust = "rust-impl/{service}"
 # The Topcoat extension's table, read only by a binary that links it
 # (extensions/topcoat's superschematic-topcoat): shop-orders gets the crate
 # the Topcoat app in topcoat/ depends on, when its server is built in Rust,
-# with a page per resource its operations describe under /console. The core
-# binary never reads this table, so the configs stay its own.
+# with a page per resource its operations describe under /console, whose
+# lists are live: with Topcoat's runtime in the browser, which the app loads
+# when its asset bundle is beside it, a filter or a page renders the list
+# again in place. The core binary never reads this table, so the configs
+# stay its own.
 [extension.topcoat]
 services = ["shop-orders"]
 pages_prefix = "/console"
+pages_live = true

@@ -22,7 +22,12 @@
 //! tables, where the reviews, orders and sessions outlive the app, and the
 //! console lists the orders. A shopper's pages, the console's and the JSON
 //! API's list, show and cancel their own orders alone, another customer's
-//! answering 404, and staff's every customer's.
+//! answering 404, and staff's every customer's. Every page is one HTML
+//! document, whose head loads Topcoat's runtime from a hosted catalog of its
+//! script alone, as a bundle would serve it; the console's lists render
+//! again in place through their shards, for a filter, a page and a search,
+//! the runtime renders a page again as its GET, and without the runtime the
+//! pages load no script and the lists are GET forms.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -37,6 +42,7 @@ use acme_shop_orders_topcoat::api::{ProductReviewsImplementation, ProductReviews
 use acme_shop_orders_topcoat::procedures::{OrderListOrdersArgsRecord, call_order_list_orders};
 use acme_shop_orders_topcoat::records::OrderViewPageRecord;
 use acme_shop_topcoat::{CATALOG, PRODUCT, Product, app, product, shop_in_memory, stock_sqlite};
+use topcoat::asset::{AssetConfig, Manifest};
 use topcoat::context::Cx;
 use topcoat::router::request::parts;
 use topcoat::router::{Body, Router, StatusCode, header, page, to_bytes};
@@ -61,10 +67,26 @@ const ALAN: Person = ("alan@example.com", "Alan Turing", "alan's password");
 /// orders.
 const ADA: Person = ("ada@example.com", "Ada Lovelace", "ada's password");
 
+/// The asset catalog the tests serve Topcoat's runtime with: its script
+/// alone, hosted at `/_topcoat/assets`, as the bundle `topcoat asset bundle`
+/// writes would serve it, so the pages render the script's tag without a
+/// bundle beside the test binary.
+fn runtime_assets() -> AssetConfig {
+    let toml = format!(
+        "version = 1\n\n[[assets]]\nid = {}\nfile = \"topcoat.js\"\nhash = \"0\"\ncontent_type = \"text/javascript\"\n",
+        topcoat::runtime::SCRIPT.id().as_u64()
+    );
+    AssetConfig::hosted_at("/_topcoat/assets", Manifest::parse(&toml).expect("a manifest"))
+}
+
+/// The runtime's script tag, as the root layout renders it with
+/// `runtime_assets`.
+const SCRIPT: &str = r#"<script type="module" src="/_topcoat/assets/topcoat.js""#;
+
 async fn shop() -> Router {
     let users = users_in_memory(CONFIG).unwrap();
     add_shopper(&users, "grace@example.com", "Grace Hopper", "grace's password").await.unwrap();
-    app(Arc::new(shop_in_memory()), users)
+    app(Arc::new(shop_in_memory()), users, Some(runtime_assets()))
 }
 
 /// A new SQLite file of shop-db's tables at `name`: a copy of the file
@@ -98,7 +120,7 @@ fn temp_path(name: &str) -> PathBuf {
 /// The app over the SQLite shop at `path`, as src/main.rs opens it.
 async fn sqlite_shop(path: &Path) -> Router {
     let (shop, users) = open_sqlite(path).await;
-    app(Arc::new(shop), users)
+    app(Arc::new(shop), users, Some(runtime_assets()))
 }
 
 /// The SQLite shop at `path` and its users, the file's, with the demo's
@@ -165,7 +187,7 @@ async fn each_shop(file: &str, reviews: &[(&str, &str)]) -> [(&'static str, Rout
     let users = users_in_memory(CONFIG).unwrap();
     add_shopper(&users, "grace@example.com", "Grace Hopper", "grace's password").await.unwrap();
     add_alan_and_ada(&users).await;
-    let in_memory = app(Arc::new(memory), users);
+    let in_memory = app(Arc::new(memory), users, Some(runtime_assets()));
 
     let (sqlite, users) = open_sqlite(&sqlite_file(file)).await;
     add_alan_and_ada(&users).await;
@@ -177,7 +199,7 @@ async fn each_shop(file: &str, reviews: &[(&str, &str)]) -> [(&'static str, Rout
         sqlite.add_user(&id, &format!("reviewer{n}@example.com"), "A reviewer").unwrap();
     }
     write_reviews(&sqlite, reviews).await;
-    [("in memory", in_memory), ("over SQLite", app(Arc::new(sqlite), users))]
+    [("in memory", in_memory), ("over SQLite", app(Arc::new(sqlite), users, Some(runtime_assets())))]
 }
 
 struct Response {
@@ -991,10 +1013,13 @@ async fn the_console_searches_a_products_reviews() {
             }
         };
 
-        // The search box comes first, in a form that is a search.
+        // The search box comes first, in a form that is a search, which
+        // the runtime submits in place (pages_live).
         let all = send(&router, "GET", &reviews, None, None).await;
-        let search = r#"<form method="get" class="ss-filter" role="search"><div class="field"><label for="product-reviews-list-reviews-q">Search</label><input id="product-reviews-list-reviews-q" name="q" type="search" maxlength="100"></div>"#;
-        assert!(all.body.contains(search), "{shop}: {}", all.body);
+        let form = r#"<form method="get" class="ss-filter" role="search" data-ss-live="products_reviews""#;
+        let search = r#"<div class="field"><label for="product-reviews-list-reviews-q">Search</label><input id="product-reviews-list-reviews-q" name="q" type="search" maxlength="100"></div>"#;
+        let first_field = all.body.split_once(form).and_then(|(_, rest)| rest.find(r#"<div class="field">"#).map(|at| &rest[at..]));
+        assert!(first_field.is_some_and(|field| field.starts_with(search)), "{shop}: {}", all.body);
         assert_eq!(review_titles(&all.body), ["Sturdy and heavy", "Too heavy", "Rings true"], "{shop}");
 
         // Every word, in any case, in the title or the body; the box holds
@@ -1020,6 +1045,161 @@ async fn the_console_searches_a_products_reviews() {
         assert_eq!(seen, "Sturdy and heavy | Too heavy | Rings true", "{shop}");
         assert_eq!(link(&page.body, "first"), Some(format!("{reviews}?q=heavy&limit=1")), "{shop}");
     }
+}
+
+/// A shard's request, as Topcoat's runtime sends one when a live list
+/// renders again: its arguments in JSON, as the shopper whose session
+/// `cookie` holds, if any. No argument here needs escaping.
+async fn shard(router: &Router, uri: &str, cookie: Option<&str>, args: &[&str]) -> Response {
+    let args: Vec<String> = args
+        .iter()
+        .map(|arg| {
+            assert!(!arg.contains(['"', '\\']), "{arg}");
+            format!("\"{arg}\"")
+        })
+        .collect();
+    let mut request = http::Request::builder().method("POST").uri(uri).header(header::CONTENT_TYPE, "application/json");
+    if let Some(cookie) = cookie {
+        request = request.header(header::COOKIE, cookie);
+    }
+    respond(router, request.body(Body::from(format!(r#"{{"args": [{}]}}"#, args.join(", ")))).unwrap()).await
+}
+
+/// A page rendered again, as Topcoat's runtime asks for it: a POST to the
+/// page's URL with the runtime's header and the document's signals, which
+/// the runtime's layer turns into the page's GET.
+async fn rerun(router: &Router, uri: &str, cookie: &str) -> Response {
+    let request = http::Request::builder()
+        .method("POST")
+        .uri(uri)
+        .header(header::COOKIE, cookie)
+        .header(header::CONTENT_TYPE, "application/json")
+        .header("x-topcoat-runtime", "true")
+        .body(Body::from(r#"{"signals": {}}"#))
+        .unwrap();
+    respond(router, request).await
+}
+
+/// The ids of the orders at `pages`, the orders' pages of the shop.
+fn order_ids(pages: &[String]) -> Vec<&str> {
+    pages.iter().map(|page| page.trim_start_matches("/orders/")).collect()
+}
+
+#[tokio::test]
+async fn every_page_is_one_document_with_the_runtime() {
+    let router = shop().await;
+    let cookie = sign_in(&router).await;
+    for path in ["/reviews", "/orders", "/orders/new", "/sign-in", "/console", "/console/orders", "/console/products"] {
+        let page = send(&router, "GET", path, Some(&cookie), None).await;
+        assert_eq!(page.status, StatusCode::OK, "{path}: {}", page.body);
+        assert!(page.body.starts_with("<!DOCTYPE html>"), "{path}: {}", page.body);
+        assert_eq!(page.body.matches("<html").count(), 1, "{path}: {}", page.body);
+        // The runtime's script once, in the head, and no other.
+        let (head, body) = page.body.split_once("<body>").expect("a body");
+        assert_eq!(head.matches(SCRIPT).count(), 1, "{path}: {}", page.body);
+        assert_eq!(page.body.matches("<script").count(), 1, "{path}: {}", page.body);
+        assert!(body.ends_with("</body></html>"), "{path}: {}", page.body);
+    }
+    // The console's layout sits inside the document's body.
+    let console = send(&router, "GET", "/console/orders", Some(&cookie), None).await;
+    let (_, body) = console.body.split_once("<body>").expect("a body");
+    assert!(body.starts_with(r#"<div class="ss-pages">"#), "{}", console.body);
+}
+
+#[tokio::test]
+async fn the_consoles_lists_are_live() {
+    for (shop, router) in each_shop("live-orders.db", &[]).await {
+        let cookie = sign_in(&router).await;
+        let placed = place_orders(&router, &cookie, 3).await;
+        let ids = order_ids(&placed);
+        let cancelled = send(&router, "POST", &format!("{}/cancel", placed[1]), Some(&cookie), Some("reason=")).await;
+        assert_eq!(cancelled.status, StatusCode::SEE_OTHER, "{shop}: {}", cancelled.body);
+
+        // The list renders through its shard, its filter a form the
+        // runtime submits in place.
+        let list = send(&router, "GET", "/console/orders", Some(&cookie), None).await;
+        assert_eq!(list.status, StatusCode::OK, "{shop}: {}", list.body);
+        assert!(list.body.contains(r#"::topcoat::shard::start("/console/_live/orders""#), "{shop}: {}", list.body);
+        assert!(list.body.contains(r#"data-ss-live="orders""#), "{shop}: {}", list.body);
+
+        // The shard renders the orders a filter finds, without the layout
+        // or the document.
+        let placed_only = shard(&router, "/console/_live/orders", Some(&cookie), &["statuses=placed", "/console/orders"]).await;
+        assert_eq!(placed_only.status, StatusCode::OK, "{shop}: {}", placed_only.body);
+        assert_eq!(console_orders(&placed_only.body), [ids[0], ids[2]], "{shop}");
+        assert!(!placed_only.body.contains("ss-nav") && !placed_only.body.contains("<html"), "{shop}: {}", placed_only.body);
+        assert!(placed_only.body.contains(r#"<input type="checkbox" name="statuses" value="placed" checked="">"#), "{shop}: {}", placed_only.body);
+
+        // And a page, whose links' queries it renders in turn.
+        let first = shard(&router, "/console/_live/orders", Some(&cookie), &["limit=1", "/console/orders"]).await;
+        assert_eq!(console_orders(&first.body), ids[..1], "{shop}");
+        let next = link(&first.body, "next").expect("a next page");
+        let query = next.strip_prefix("/console/orders?").expect("the list's query");
+        let second = shard(&router, "/console/_live/orders", Some(&cookie), &[query, "/console/orders"]).await;
+        assert_eq!(second.status, StatusCode::OK, "{shop}: {}", second.body);
+        assert_eq!(console_orders(&second.body), ids[1..2], "{shop}");
+        assert_eq!(link(&second.body, "first").as_deref(), Some("/console/orders?limit=1"), "{shop}");
+
+        // A signed-out shard is refused as the list is.
+        let signed_out = shard(&router, "/console/_live/orders", None, &["", "/console/orders"]).await;
+        assert_eq!(signed_out.status, StatusCode::UNAUTHORIZED, "{shop}: {}", signed_out.body);
+
+        // The runtime renders the page again: its layer makes the POST the
+        // page's GET, which the console's controls, registered before it,
+        // meet as one.
+        let again = rerun(&router, "/console/orders?statuses=placed", &cookie).await;
+        assert_eq!(again.status, StatusCode::OK, "{shop}: {}", again.body);
+        assert!(again.body.starts_with("<!DOCTYPE html>"), "{shop}: {}", again.body);
+        assert_eq!(console_orders(&again.body), [ids[0], ids[2]], "{shop}");
+    }
+}
+
+#[tokio::test]
+async fn the_reviews_shard_is_live() {
+    for (shop, router) in each_shop("live-reviews.db", &REVIEWS).await {
+        let reviews = format!("/console/products/{PRODUCT}/reviews");
+        let list = send(&router, "GET", &reviews, None, None).await;
+        assert_eq!(list.status, StatusCode::OK, "{shop}: {}", list.body);
+        assert!(list.body.contains(r#"::topcoat::shard::start("/console/_live/products_reviews""#), "{shop}: {}", list.body);
+
+        // The nested list's shard takes the product from its arguments, as
+        // the page takes it from its route, and carries the search.
+        let live = "/console/_live/products_reviews";
+        let sturdy = shard(&router, live, None, &[PRODUCT, "q=sturdy", &reviews]).await;
+        assert_eq!(sturdy.status, StatusCode::OK, "{shop}: {}", sturdy.body);
+        assert_eq!(review_titles(&sturdy.body), ["Sturdy and heavy", "Rings true"], "{shop}");
+        assert!(sturdy.body.contains(r#"name="q" type="search" maxlength="100" value="sturdy">"#), "{shop}: {}", sturdy.body);
+        let paged = shard(&router, live, None, &[PRODUCT, "q=heavy&limit=1", &reviews]).await;
+        assert_eq!(review_titles(&paged.body), ["Sturdy and heavy"], "{shop}");
+        let next = link(&paged.body, "next").expect("a next page");
+        assert!(next.starts_with(&format!("{reviews}?q=heavy&limit=1&cursor=")), "{shop}: {next}");
+        let query = next.strip_prefix(&format!("{reviews}?")).expect("the list's query");
+        let second = shard(&router, live, None, &[PRODUCT, query, &reviews]).await;
+        assert_eq!(review_titles(&second.body), ["Too heavy"], "{shop}");
+    }
+}
+
+#[tokio::test]
+async fn without_the_runtime_the_pages_have_no_script() {
+    let users = users_in_memory(CONFIG).unwrap();
+    add_shopper(&users, "grace@example.com", "Grace Hopper", "grace's password").await.unwrap();
+    let router = app(Arc::new(shop_in_memory()), users, None);
+    let cookie = sign_in(&router).await;
+    place_order(&router, &cookie).await;
+    for path in ["/reviews", "/orders", "/console/orders", &format!("/console/products/{PRODUCT}/reviews")] {
+        let page = send(&router, "GET", path, Some(&cookie), None).await;
+        assert_eq!(page.status, StatusCode::OK, "{path}: {}", page.body);
+        assert!(page.body.starts_with("<!DOCTYPE html>"), "{path}: {}", page.body);
+        assert!(!page.body.contains("<script"), "{path}: {}", page.body);
+    }
+    // The console's lists are the GET forms and links they are without the
+    // runtime, and a filter loads the page.
+    let filtered = send(&router, "GET", "/console/orders?statuses=placed", Some(&cookie), None).await;
+    assert!(filtered.body.contains(r#"<form method="get" class="ss-filter" data-ss-live="orders""#), "{}", filtered.body);
+    assert_eq!(console_orders(&filtered.body).len(), 1, "{}", filtered.body);
+    // No layer renders a page again: the POST is no page's.
+    let again = rerun(&router, "/console/orders", &cookie).await;
+    assert_eq!(again.status, StatusCode::METHOD_NOT_ALLOWED, "{}", again.body);
 }
 
 /// The orders' procedure, called from a page the test adds, which the app's

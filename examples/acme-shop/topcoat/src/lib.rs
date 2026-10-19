@@ -17,7 +17,11 @@
 //! is mounted at `/api` beside the pages, on the same implementations,
 //! which keep the shop in memory or in a SQLite file of shop-db's tables,
 //! and the shop's users are the core user model's (D50): one session
-//! cookie signs the shopper in on both.
+//! cookie signs the shopper in on both. Every page renders in one HTML
+//! document, the app's root layout, whose head loads Topcoat's runtime
+//! when the router serves it, so the console's lists, which are live
+//! (`pages_live`), render a filter's or a page's results in place; without
+//! it they are GET forms and links that load the page (D44, amended).
 
 use std::sync::Arc;
 
@@ -37,14 +41,15 @@ use acme_shop_orders_topcoat::records::{OrderViewRecord, ReviewViewRecord};
 use acme_shop_orders_topcoat::views::{order_view_detail, order_view_table, review_view_detail};
 use acme_shop_orders_topcoat::{IdentityPageAuthenticator, RouterBuilderShopOrdersExt, operations, pages, references};
 use serde::Deserialize;
-use topcoat::context::{Cx, app_context};
+use topcoat::asset::{AssetConfig, RouterBuilderAssetExt};
+use topcoat::context::{Cx, app_context, try_app_context};
 use topcoat::router::content::Form;
 use topcoat::router::error::see_other;
 use topcoat::router::header::SET_COOKIE;
 use topcoat::router::request::parts;
 use topcoat::router::response::response_headers;
-use topcoat::router::{HeaderValue, Router, RouterBuilderDiscoverExt, StatusCode, page, path_param};
-use topcoat::runtime::shard;
+use topcoat::router::{HeaderValue, Router, RouterBuilderDiscoverExt, Slot, StatusCode, layout, page, path_param};
+use topcoat::runtime::{RouterBuilderRuntimeExt, RuntimeSetup, shard};
 use topcoat::view::{Child, View, component, view};
 
 /// The one product the shop sells, at 19.99.
@@ -113,16 +118,51 @@ pub const IDENTITY_CONFIG: &str = r#"{"cookie": {"secure": false}}"#;
 /// trusts must be one the router's `OriginPolicy` trusts too; this app
 /// trusts none. `.discover()` registers the console the crate generates
 /// under `/console`, whose `pages::Settings` name its title and the sign-in
-/// page a refused shopper comes back from.
-pub fn app<S: ShopImplementation>(shop: Arc<S>, users: Arc<Service>) -> Router {
+/// page a refused shopper comes back from, and the root layout, `document`.
+///
+/// With `assets`, the asset bundle `topcoat asset bundle` writes beside the
+/// binary (`AssetBundle::load()`), or a catalog hosted elsewhere, the
+/// router serves Topcoat's runtime: its layer and the script `document`
+/// loads. The runtime's layer comes after `.shop_orders(...)`, which
+/// registers the console's `PageControls`, so a page the runtime renders
+/// again meets its controls as the GET it becomes. Without `assets` the
+/// pages load no script, and the console's live lists are the GET forms and
+/// links they are without the runtime.
+pub fn app<S: ShopImplementation>(shop: Arc<S>, users: Arc<Service>, assets: Option<AssetConfig>) -> Router {
     let implementations = implementations(shop, Arc::clone(&users));
     let authenticator = IdentityPageAuthenticator::of(&implementations);
-    Router::builder()
+    let builder = Router::builder()
         .discover()
         .app_context(users)
         .app_context(console_settings())
-        .shop_orders(implementations, authenticator)
-        .build()
+        .shop_orders(implementations, authenticator);
+    match assets {
+        Some(assets) => builder.assets(assets).runtime().build(),
+        None => builder.build(),
+    }
+}
+
+/// The document every page renders in, around the console's layout and the
+/// shop's pages: the runtime's script in its head when the router set the
+/// runtime up (`RuntimeSetup`), which a live list of the console
+/// (`pages_live`) needs to render again in place. Without it, a filter and
+/// a page's links load the page.
+#[layout("/")]
+async fn document(cx: &Cx, slot: Slot<'_>) -> topcoat::Result<impl View> {
+    let live = try_app_context::<RuntimeSetup>(cx).is_some();
+    Ok(view! {
+        <!DOCTYPE html>
+        <html lang="en">
+            <head>
+                <meta charset="utf-8">
+                <title>"Acme shop"</title>
+                if live {
+                    topcoat::runtime::script()
+                }
+            </head>
+            <body>(slot)</body>
+        </html>
+    })
 }
 
 /// The console's settings: its title, and the sign-in page, which comes
