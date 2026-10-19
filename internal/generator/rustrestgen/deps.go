@@ -65,6 +65,23 @@ type DepsEngine struct {
 	Namespace string
 	Crate     string
 	Path      string
+
+	// Policy is the access policy's JSON (outputs.engine.policy of the
+	// database's config, "permission" unless set), and Project the
+	// project's engine crate whose behaviors the engine runs, nil for the
+	// core's: what a host that opens the engine itself reads, as the
+	// Topcoat extension's crate does.
+	Policy  string
+	Project *DepsProject
+}
+
+// DepsProject is the project's engine crate of the engine database (D58;
+// projectengine): its package name, its name in Rust source, and its
+// directory relative to the API crate's.
+type DepsProject struct {
+	Crate string
+	Ident string
+	Path  string
 }
 
 // CrateIdent is Crate as Rust source spells it.

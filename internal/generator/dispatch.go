@@ -1253,7 +1253,16 @@ func (r run) rustDeps(schemas map[string]*ir.Schema) (rustrestgen.DepsInfo, erro
 		if err != nil {
 			return deps, fmt.Errorf("generator: the engine's crate from %s: %w", r.Config.Name, err)
 		}
-		deps.Engine = &rustrestgen.DepsEngine{Database: engine.Database, Namespace: engine.Namespace, Crate: projectengine.EngineCrate, Path: path}
+		deps.Engine = &rustrestgen.DepsEngine{Database: engine.Database, Namespace: engine.Namespace, Crate: projectengine.EngineCrate, Path: path, Policy: string(engine.Policy)}
+		// A database no Rust engine runs is the server's to refuse, not
+		// the API crate's.
+		if project, err := r.projectEngine(r.Config.Name, engine.Database); err == nil && project != nil {
+			rel, err := naming.RelPath(apiDir, project.Dir)
+			if err != nil {
+				return deps, fmt.Errorf("generator: the project's engine crate of %s from %s: %w", engine.Database, r.Config.Name, err)
+			}
+			deps.Engine.Project = &rustrestgen.DepsProject{Crate: project.Crate, Ident: project.Ident, Path: rel}
+		}
 	}
 	for _, call := range r.Schema.Calls {
 		if r.Options.DependencyConfig != nil {

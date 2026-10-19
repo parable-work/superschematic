@@ -1,0 +1,19 @@
+name: fixture-engine-api
+kind: API
+types:
+  NoteCount:
+    name: NoteCount
+    role: APIView
+    fields:
+      - name: count
+        typeRef: { name: number }
+        required: true
+operationSets:
+  - name: Notes
+    operations:
+      - name: noteCount
+        typeRef: { name: NoteCount }
+        required: true
+        auth: true
+        httpMethod: GET
+        restPath: notes/count
