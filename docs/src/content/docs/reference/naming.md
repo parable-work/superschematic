@@ -67,7 +67,9 @@ Default: `schemas-`
 
 Prefix of generated crates: `<prefix><name>-types`, `<prefix><name>-sdk`,
 `<prefix><name>-api`, and `<prefix><name>-engine`, the project's engine
-crate of a schema whose types compose an extension's behavior (D58).
+crate of a schema whose types compose an extension's behavior (D58), with
+its member `<prefix><name>-engine-ffi`, the engine archive a Go server
+links.
 
 ### `scalar_go_module`
 
@@ -504,6 +506,16 @@ Directory of the work queue's behaviors for the Rust engine,
 `superschematic-engine-workqueue` (D58), which the project's engine crate
 depends on when a type composes one of them. Unset, it names the crate's
 version instead of a path.
+
+### `paths.engine_abi_rust`
+
+Default: unset. This repository's own file sets
+`runtime/engine/rust/abi`.
+
+Directory of the engine's C ABI as a library, `superschematic-engine-abi`
+(D58), whose `export_engine_c_abi!` the project's engine crate's `ffi`
+member expands into the archive a Go server links. Unset, it names the
+crate's version instead of a path.
 
 ### `paths.versiongraph_python`
 

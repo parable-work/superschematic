@@ -96,12 +96,12 @@ examples/acme-schematic/
     testdata/services/returns-api  an API the tests load that declares confirm on @mcp
     testdata/services/shop-ratings  a General data-form service whose Product composes acme.Rating
     testdata/services/shop-ratings-ts  its TypeScript twin, with @behavior
-    testdata/golden/shop-ratings-engine  the project's engine crate a build writes for shop-ratings
+    testdata/golden/shop-ratings-engine  the project's engine crate a build writes for shop-ratings, with its ffi member
     command.go                describe subcommand
     fields.go                 fields subcommand: a declaration file type-checked with loader.NewDeclarationProgram
     auth/                     apikey auth provider + its snippet templates
   packages/schema/            @acme/schema, the authoring package @shelf, @feedKey, @crossSell and the Acme.Photo brand are imported from, the confirm key's type and acme.Rating's config type
-  packages/behaviors/         @acme/behaviors, acme.Rating's implementation for @superschematic/engine
+  packages/behaviors/         @acme/behaviors, acme.Rating's implementation for @superschematic/engine, until the Rust engine's cutover removes it
     declarations/             acme.Rating.behavior.json, the copy `acme-schematic behaviors` writes
     src/rating.ts             the implementation; src/index.ts exports every behavior
     test/rating.test.ts       the engine scenario the smoke runs under Node.js and Bun
@@ -837,13 +837,28 @@ writes the project's engine crate, `dist/engine/rust/<service>`, named
 naming file's `engine_rust`, `engine_behaviors_rust` and
 `engine_workqueue_rust`, and on `acme-behaviors`, and its `behaviors()`
 is the core's behaviors and `acme_behaviors::Rating`, under acme's tool
-options (`tools()`). `ext/testdata/golden/shop-ratings-engine` holds the
-crate for `shop-ratings` (`TestRatingProjectEngine`). The smoke's step 21
-lints and tests the crate, builds `shop-ratings` as a service of this
-project (a copy under `schemas/dist`, since its own directory sits
-outside `schemas/`), and lints and tests the engine crate the binary
-writes, whose test opens the engine on SQLite and finds acme.Rating
-registered.
+options (`tools()`): the library a Rust server links. Its workspace's
+member `ffi/`, `acme-<service>-engine-ffi`, is the engine's C ABI over
+those behaviors, the archive a Go server links in place of the core's
+(`scripts/engine-archive.sh --crate dist/engine/rust/<service>/ffi --out
+<dir>`, at the checkout's root), at the naming file's `engine_abi_rust`.
+`ext/testdata/golden/shop-ratings-engine` holds the crate for
+`shop-ratings` (`TestRatingProjectEngine`). The smoke's step 21 lints and
+tests the crate, builds `shop-ratings` as a service of this project (a
+copy under `schemas/dist`, since its own directory sits outside
+`schemas/`), and lints and tests the engine crate the binary writes,
+both members: the library's test opens the engine on SQLite and finds
+acme.Rating registered, and the archive's opens one through its own
+`eng_open`, as the Go binding does, and finds it too. CI's acme job runs
+the crate's tests on Postgres as well.
+
+`packages/behaviors` stays beside the crate while `@superschematic/engine`
+is the TypeScript implementation: the TypeScript engine runs acme.Rating
+from it, and the smoke's step 20 tests it. The cutover to the Rust engine
+(D58, milestone 14) removes the package, its declaration copy and step
+20; a TypeScript server then loads the project's own Node-API addon, the
+engine crate's `napi/` member, once the addon exports
+`export_engine_napi!`.
 
 ## A command
 

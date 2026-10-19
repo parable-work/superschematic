@@ -847,7 +847,17 @@ queue's and each composed extension behavior, by `Register`; `tools()` is
 the D11 options the binary registers, under which an operation that names
 a value of the extension's invocation policy registers; and `COMPOSED`
 lists the behaviors the schema's types compose, which its test finds
-registered in an engine opened on SQLite. A schema that composes the
+registered in an engine opened on SQLite. That library is what a Rust
+server links. A host of another language links a binding of the engine
+over `behaviors()`, a member of the workspace the crate's `Cargo.toml`
+roots, so they build from one lock file:
+
+| Member | Package | What it is |
+| --- | --- | --- |
+| `ffi/` | `<crate>-ffi` | The engine's C ABI over `behaviors()` (`superschematic_engine_abi::export_engine_c_abi!(behaviors = project::behaviors)`, the C ABI's library at `[paths] engine_abi_rust`), the static archive a Go server links in place of the core's: `scripts/engine-archive.sh --crate <crate>/ffi --out <dir>`, then `-L<dir>` first in `CGO_LDFLAGS`. Its config takes the engine document's `tools`, without which an engine refuses an operation that names the extension's policy value. Its test opens an engine through its own `eng_open` and finds every composed behavior registered |
+| `napi/` (to come) | `<crate>-napi` | A TypeScript server's Node-API addon over `behaviors()`, once the addon crate exports `export_engine_napi!`, the twin of `export_engine_c_abi!` |
+
+A schema that composes the
 core's behaviors alone gets no crate: the release's engine runs them. An
 extension behavior that names no crate, or one the project does not hold,
 leaves the schema to the TypeScript engine, and the build's log says why.

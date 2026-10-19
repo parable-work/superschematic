@@ -539,9 +539,27 @@ jobs:
         # that imports it, link the core's Go binding against this archive.
         run: scripts/versiongraph-archive.sh
 
+      - name: Start Postgres
+        # The smoke's Rust step runs acme-behaviors' tests on SQLite, and on
+        # this Postgres too through SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL,
+        # each case in a schema of its own (D58). It has a port of its own,
+        # apart from the databases the acme-shop check's stack starts.
+        run: |
+          docker run --detach --name acme-engine-pg \
+            --env POSTGRES_PASSWORD=superschematic \
+            --publish 55433:5432 \
+            "postgres:${POSTGRES_VERSION}-alpine"
+          for _ in $(seq 1 60); do
+            if docker exec acme-engine-pg pg_isready --host 127.0.0.1 --username postgres >/dev/null 2>&1; then exit 0; fi
+            sleep 1
+          done
+          docker logs acme-engine-pg
+          exit 1
+
       - name: Smoke (module tests, build-all, every surface, generated API compiles, core rejects Catalog)
         env:
           GOTOOLCHAIN: go${{ env.GO_VERSION }}
+          SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:55433/postgres?sslmode=disable
         run: examples/acme-schematic/scripts/smoke.sh
 
       # The extension-model acceptance criterion: a second decorator added to

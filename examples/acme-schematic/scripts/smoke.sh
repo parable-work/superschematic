@@ -118,9 +118,11 @@
 #      binary, building shop-ratings as a service of this project, writes
 #      the project's engine crate (engine/rust/shop-ratings), which depends
 #      on acme-behaviors and registers acme_behaviors::Rating after the
-#      core's behaviors, and that crate builds, passes clippy and passes its
-#      test, which opens the engine on SQLite and finds acme.Rating
-#      registered.
+#      core's behaviors, with its ffi member, the C ABI's archive over
+#      those behaviors that a Go server links; the crate's workspace builds
+#      and passes clippy and its tests: the library's opens the engine on
+#      SQLite and finds acme.Rating registered, and the archive's opens one
+#      through its own eng_open, as the Go binding does, and finds it too.
 #
 # Step 16 also needs bun and installs hono and the generated types package's
 # dependencies from the npm registry. Step 20 needs bun and Node.js 24, builds
@@ -599,8 +601,14 @@ grep -qx 'name = "acme-shop-ratings-engine"' "$ENGINE_CRATE/Cargo.toml"
 grep -q '^acme-behaviors = { path = ".*/examples/acme-schematic/crates/behaviors" }$' "$ENGINE_CRATE/Cargo.toml"
 grep -qx '        .with(acme_behaviors::Rating)' "$ENGINE_CRATE/src/lib.rs"
 grep -q '"key": "confirm",' "$ENGINE_CRATE/src/lib.rs"
+grep -qx 'members = \["ffi"\]' "$ENGINE_CRATE/Cargo.toml"
+grep -qx 'name = "acme-shop-ratings-engine-ffi"' "$ENGINE_CRATE/ffi/Cargo.toml"
+grep -q '^superschematic-engine-abi = { path = ".*/runtime/engine/rust/abi", default-features = false }$' "$ENGINE_CRATE/ffi/Cargo.toml"
+grep -qx 'superschematic_engine_abi::export_engine_c_abi!(behaviors = project::behaviors);' "$ENGINE_CRATE/ffi/src/lib.rs"
+# The workspace, library and archive, resolves acme's locked versions, to
+# which cargo adds the C ABI's library.
 cp "$CRATE/Cargo.lock" "$ENGINE_CRATE/Cargo.lock"
-(cd "$ENGINE_CRATE" && CARGO_TARGET_DIR="$CARGO_TARGET" cargo clippy --quiet --all-targets -- -D warnings)
-(cd "$ENGINE_CRATE" && CARGO_TARGET_DIR="$CARGO_TARGET" cargo test --quiet)
+(cd "$ENGINE_CRATE" && CARGO_TARGET_DIR="$CARGO_TARGET" cargo clippy --quiet --workspace --all-targets -- -D warnings)
+(cd "$ENGINE_CRATE" && CARGO_TARGET_DIR="$CARGO_TARGET" cargo test --quiet --workspace)
 
 echo "acme smoke: ok"

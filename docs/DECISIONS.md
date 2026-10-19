@@ -5750,11 +5750,22 @@ types compose an extension's behavior: the engine's crates at the
 `[paths]` keys `engine_rust`, `engine_behaviors_rust` and
 `engine_workqueue_rust`, each extension's crate, `behaviors()` (the
 core's, the work queue's when used, then the extensions'), `tools()`
-(the binary's D11 options) and a test that opens it on SQLite; acme's
-smoke builds and tests the one its binary writes. A schema of the core's
-behaviors alone gets none, and the release's engine runs it. Until the
-Rust engine passes the TypeScript suite, `@superschematic/engine` is the
-TypeScript implementation and nothing uses the workspace.
+(the binary's D11 options) and a test that opens it on SQLite, the
+library a Rust server links. The crate roots a workspace whose members
+are the bindings of the engine over `behaviors()` that a host of another
+language links: `ffi/`, `<crate>-ffi`, expands `export_engine_c_abi!`
+from `superschematic-engine-abi` (`[paths] engine_abi_rust`) into the
+archive a Go server links in the core's place (`scripts/engine-archive.sh
+--crate <crate>/ffi --out <dir>`), its test opening an engine through
+its own `eng_open`; a TypeScript server's addon joins them as `napi/`
+once the Node-API addon exports `export_engine_napi!`, the twin of
+`export_engine_c_abi!`. acme's smoke builds and tests the one its binary
+writes, both members. A schema of the core's behaviors alone gets none,
+and the release's engine runs it. Until the Rust engine passes the
+TypeScript suite, `@superschematic/engine` is the TypeScript
+implementation, acme's `@acme/behaviors` implements acme.Rating for it
+until the cutover (milestone 14) removes the package, and nothing uses
+the workspace.
 
 The Go binding (milestone 15) is built. `superschematic-engine-abi`
 (`runtime/engine/rust/abi`) is the C ABI of the bindings section, as a
@@ -5772,7 +5783,9 @@ the class's members), `ENG_BAD_ARGUMENTS` and `ENG_CLOSED`.
 `superschematic-engine-ffi` (`runtime/engine/rust/ffi`), the core's
 archive, exports it over `core()`; a project's engine crate exports it
 over its own behaviors or configure with `export_engine_c_abi!`, as
-`runtime/engine/rust/testkit-ffi` does for the replays. The library
+`runtime/engine/rust/testkit-ffi` does for the replays and the `ffi`
+member of the crate `projectengine` writes does over its `behaviors()`.
+The library
 exports nothing itself, so archive crates in one Cargo workspace, whose
 features Cargo unifies, never define a symbol twice.
 `scripts/engine-archive.sh` builds `libsuperschematic_engine.a` (`--crate`

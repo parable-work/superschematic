@@ -369,17 +369,43 @@ pub fn behaviors() -> BehaviorSet {
 It depends on the engine's crates, at the `[paths]` keys `engine_rust`,
 `engine_behaviors_rust` and, when a type composes a work-queue behavior,
 `engine_workqueue_rust`, and on each extension's crate by its path. A
-host opens the engine with `behaviors()` and `tools()`, the binary's
-invocation policy and vendor keys:
+Rust host links the crate and opens the engine with `behaviors()` and
+`tools()`, the binary's invocation policy and vendor keys (acme's crate
+for `shop-ratings` is `acme-shop-ratings-engine`):
 
 ```rust
 let mut options = EngineOptions::postgres(url, PostgresOptions::default());
 options.policy = Some(policy);
 options.meta_schema = Some(MetaSchema::Text(meta_schema));
-options.behaviors = shop_ratings_engine::behaviors();
-options.tools = shop_ratings_engine::tools();
+options.behaviors = acme_shop_ratings_engine::behaviors();
+options.tools = acme_shop_ratings_engine::tools();
 let engine = Engine::open(options)?;
 ```
+
+A Go host links the engine as a static archive through its C ABI, and
+the crate's workspace holds that archive as its member `ffi/`
+(`<crate>-ffi`), the C ABI over `behaviors()`:
+
+```rust
+use acme_shop_ratings_engine as project;
+
+superschematic_engine_abi::export_engine_c_abi!(behaviors = project::behaviors);
+```
+
+It depends on the C ABI's library at `[paths] engine_abi_rust`. Build
+it, and link it in place of the core's archive by putting its directory
+first in `CGO_LDFLAGS`; the binding's config passes the engine
+document's `tools`, without which an engine refuses an operation that
+names the extension's invocation policy value:
+
+```sh
+scripts/engine-archive.sh --crate dist/engine/rust/shop-ratings/ffi --out dist/engine/lib
+CGO_LDFLAGS="-L$PWD/dist/engine/lib ..." go build ./...
+```
+
+A TypeScript server's addon will be the workspace's next member, `napi/`,
+once the Node-API addon exports `export_engine_napi!`; until then the
+TypeScript engine runs an extension's TypeScript implementation.
 
 A schema whose types compose the core's behaviors alone gets no crate,
 since the engine's release carries them, and one that composes an
