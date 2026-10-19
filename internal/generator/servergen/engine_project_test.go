@@ -107,16 +107,16 @@ func TestAnEngineNoRustEngineRunsIsRefused(t *testing.T) {
 	}
 }
 
-// queueCallersVariables are queue-api's callers field as an environment
-// sets it, ops an issuer of its own with an Ed25519 key.
-func queueCallersVariables(t *testing.T, public ed25519.PublicKey, kid string) []string {
+// opsCallersVariables are api's callers field as an environment sets it, ops
+// an issuer of its own with an Ed25519 key: a caller that serves ops-api.
+func opsCallersVariables(t *testing.T, api string, public ed25519.PublicKey, kid string) []string {
 	t.Helper()
 	jwk, err := json.Marshal(map[string]string{"kty": "OKP", "crv": "Ed25519", "kid": kid, "x": base64.RawURLEncoding.EncodeToString(public)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	vars, err := ir.DerivedVariables(ir.CallersField(queueServer), ir.ServiceAuth{Issuers: []*ir.ServiceAuthIssuer{{
-		Issuer: "ops", Audience: queueServer, Algorithms: []string{ir.AlgorithmEdDSA},
+	vars, err := ir.DerivedVariables(ir.CallersField(api), ir.ServiceAuth{Issuers: []*ir.ServiceAuthIssuer{{
+		Issuer: "ops", Audience: api, Algorithms: []string{ir.AlgorithmEdDSA},
 		Keys:               []ir.ServiceAuthKey{{JWK: string(jwk)}},
 		MaxLifetimeSeconds: 300,
 		Callers:            []ir.ServiceAuthCaller{{Subject: "ops", Deployable: "ops", Serves: []string{"ops-api"}}},
@@ -198,7 +198,7 @@ func TestEngineProjectArchiveServes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	env := queueCallersVariables(t, public, "ops-key")
+	env := opsCallersVariables(t, queueServer, public, "ops-key")
 	offline := start(t, binary, append([]string{"QUEUE_DB_DATABASE_URL=postgres://queue@127.0.0.1:9/queue_db?connect_timeout=1&sslmode=disable"}, env...)...)
 	offline.expect(t, http.MethodGet, "/readyz", http.StatusServiceUnavailable, `"queue-db engine"`)
 	offline.expect(t, http.MethodGet, "/engine/queue-db/namespaces/queue-db/schemas", http.StatusServiceUnavailable, `"code":"unavailable"`)

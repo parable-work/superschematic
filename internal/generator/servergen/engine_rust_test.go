@@ -1,11 +1,19 @@
 package servergen_test
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
+	"net/http"
+	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/parable-work/superschematic/internal/generator"
 	"github.com/parable-work/superschematic/internal/generator/servergen"
+	"github.com/parable-work/superschematic/internal/testpaths"
 )
 
 // TestRustEngineEntrypointGolden: desk-rs-api's Rust server opens the
@@ -42,4 +50,128 @@ func TestRustEngineEntrypointGolden(t *testing.T) {
 		files[filepath.Join("api", "desk-rs-api", filepath.FromSlash(file))] = filepath.Join(generator.APIDir(out, "desk-rs-api"), filepath.FromSlash(file))
 	}
 	compareGoldens(t, filepath.Join(goldenRoot, "engine"), files)
+}
+
+// TestRustEngineEntrypointServes: desk-rs-api's Rust server, its job and
+// desk-db's Rust runner build in the output root's workspace, frozen to
+// the lockfile the stack's build wrote, with the engine's crate linked in,
+// pass clippy, and are laid out as rustfmt lays them out (D58). The server
+// starts with no database up and answers what needs none: /readyz names
+// the engine, its routes under /engine/desk-db answer 503 unavailable
+// until it opens, and a trusted origin's preflight of one gets the
+// identity runtime's CORS. With the Postgres engineDatabaseEnv names, it
+// opens the engine on desk-db's database and deploys its document, and
+// answers as desk-api's Go server does (TestEngineEntrypointServes): a
+// member refused a write their roles lack, then granted Account and
+// Ticket, creates an account, reads it back and opens a ticket; a service
+// standing in is refused by the permission policy, and a forged service
+// credential is 401 service_unauthorized. The runner, started beside it,
+// fires the ticket's deadline, which escalates it as the runner. Both stop
+// cleanly on SIGTERM.
+func TestRustEngineEntrypointServes(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping cargo build in -short mode")
+	}
+	cargo, err := exec.LookPath("cargo")
+	if err != nil {
+		t.Skip("cargo not available; skipping the Rust build")
+	}
+	paths := testpaths.Local(t)
+	repoRoot := testpaths.TempDir(t)
+	f := loadEngineFixture(t)
+	f.build(t, repoRoot, paths, rustEngineOrder...)
+	out := filepath.Join(repoRoot, "schemas", "dist")
+	if _, err := os.Stat(filepath.Join(out, servergen.RustLockfileName)); err != nil {
+		t.Fatalf("the stack's build wrote no lockfile: %v", err)
+	}
+	target := rustTargetDir(t)
+	cargoCommand(t, cargo, out, target, "clippy", "--locked", "--workspace", "--quiet", "--", "-D", "warnings")
+	cargoCommand(t, cargo, out, target, "build", "--locked", "--workspace", "--quiet")
+	bin := filepath.Join(target, "debug")
+	if rustfmt, err := exec.LookPath("rustfmt"); err == nil {
+		for _, d := range []string{rustEngineServer, engineRunner, rustEngineJob} {
+			for _, file := range []string{servergen.RustMainFile, servergen.RustEngineFile} {
+				source := filepath.Join(servergen.ServerDir(out, rustEngineStack, d), filepath.FromSlash(file))
+				if diff, err := exec.Command(rustfmt, "--edition", "2021", "--check", source).CombinedOutput(); err != nil {
+					t.Errorf("rustfmt lays out %s's %s otherwise: %v\n%s", d, file, err, diff)
+				}
+			}
+		}
+	}
+
+	identityConfig := `{"trustedOrigins": ["https://app.example.com"], "cookie": {"secure": false}, "password": {"argon2": {"memoryKiB": 64, "iterations": 1, "parallelism": 1}}}`
+	public, key, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := append([]string{"DESK_RS_API_IDENTITY=" + identityConfig}, opsCallersVariables(t, rustEngineServer, public, "ops-key")...)
+	server := filepath.Join(bin, rustEngineServer)
+
+	offline := start(t, server, append([]string{"DESK_DB_DATABASE_URL=postgres://desk@127.0.0.1:9/desk_db?connect_timeout=1&sslmode=disable"}, env...)...)
+	offline.expect(t, http.MethodGet, "/readyz", http.StatusServiceUnavailable, `"desk-db engine"`)
+	offline.expect(t, http.MethodGet, "/engine/desk-db/namespaces/desk-db/schemas", http.StatusServiceUnavailable, `"code":"unavailable"`, "The engine is not available")
+	offline.expectPreflight(t, "/engine/desk-db/namespaces/desk-db/schemas/Ticket/instances", http.MethodPost)
+	offline.expect(t, http.MethodGet, "/api/summary", http.StatusUnauthorized)
+	// Each attempt to open the engine runs on the blocking pool, and the
+	// first one's failure is logged once it gives up on the database.
+	for wait := time.Now().Add(10 * time.Second); !strings.Contains(offline.out.String(), `"msg":"engine not open"`); {
+		if time.Now().After(wait) {
+			t.Errorf("the server did not log the engine's failed opens:\n%s", offline.out.String())
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	offline.stop(t)
+
+	postgres := os.Getenv(engineDatabaseEnv)
+	if postgres == "" {
+		t.Logf("%s is unset: the entrypoint serves no database", engineDatabaseEnv)
+		return
+	}
+	tool := engineDatabaseTool(t, pgxModule(t))
+	databaseURL := tool.create(t, postgres, filepath.Join(generator.SQLDir(out, "desk-db"), "create.sql"))
+	online := start(t, server, append([]string{"DESK_DB_DATABASE_URL=" + databaseURL}, env...)...)
+	online.waitReady(t)
+	if !strings.Contains(online.out.String(), `"msg":"engine schema deployed"`) {
+		t.Errorf("the server did not log its deploy:\n%s", online.out.String())
+	}
+	online.send(t, http.MethodPost, "/api/auth/register", `{"login": "ada@example.com", "name": "Ada", "password": "ada's password"}`, http.StatusOK, `"token"`)
+	token := online.login(t, "ada@example.com", "ada's password")
+	const accounts = "/engine/desk-db/namespaces/desk-db/schemas/Account/instances"
+	const tickets = "/engine/desk-db/namespaces/desk-db/schemas/Ticket/instances"
+	online.engine(t, token, http.MethodPost, accounts, `{"data": {"name": "Acme"}}`, http.StatusForbidden, `"code":"forbidden"`)
+	tool.grant(t, databaseURL, "ada@example.com", "desk", "Account", "Ticket")
+	account := online.engine(t, token, http.MethodPost, accounts, `{"id": "acme", "data": {"name": "Acme"}}`, http.StatusCreated, `"id":"acme"`)
+	if !strings.Contains(account, `"createdBy":"`) || strings.Contains(account, `"createdBy":"`+engineRunner+`"`) {
+		t.Errorf("the account was created as %s", account)
+	}
+	online.engine(t, token, http.MethodGet, accounts+"/acme", "", http.StatusOK, `"name":"Acme"`, `"Comments":{"commentCount":0}`)
+	online.engine(t, token, http.MethodPost, tickets, `{"id": "t1", "data": {"title": "The printer is out of toner", "contact": {"email": "bob@example.com"}}, "behaviors": {"Links": {"account": "acme"}}}`,
+		http.StatusCreated, `"status":"open"`, `"respond":{"dueAt":`)
+	online.service(t, signEdgeToken(t, key, "ops-key", "ops", rustEngineServer), http.MethodGet, accounts+"/acme", http.StatusForbidden, `"code":"forbidden"`, "service:ops")
+	_, other, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	online.service(t, signEdgeToken(t, other, "ops-key", "ops", rustEngineServer), http.MethodGet, accounts+"/acme", http.StatusUnauthorized, `"code":"service_unauthorized"`)
+
+	runner := startBackground(t, filepath.Join(bin, engineRunner), "DESK_DB_DATABASE_URL="+databaseURL)
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		ticket := online.engine(t, token, http.MethodGet, tickets+"/t1", "", http.StatusOK)
+		if strings.Contains(ticket, `"status":"escalated"`) {
+			for _, want := range []string{`"fired":true`, `"outcome":"moved"`, `"updatedBy":"` + engineRunner + `"`} {
+				if !strings.Contains(ticket, want) {
+					t.Errorf("the escalated ticket lacks %s: %s", want, ticket)
+				}
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the runner did not fire the ticket's deadline: %s\n%s", ticket, runner.out.String())
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	runner.stop(t)
+	online.stop(t)
 }

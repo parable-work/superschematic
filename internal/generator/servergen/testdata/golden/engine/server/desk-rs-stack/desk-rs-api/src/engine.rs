@@ -39,7 +39,8 @@ use crate::Failure;
 
 /// What an engine database's ENGINE_DOCUMENT holds: the namespace its
 /// engine types live in, the tool options and the meta-schema the engine
-/// reads them with, and one schema-file document per engine type.
+/// reads them with, and one schema-file document per engine type,
+/// which the server deploys.
 struct Document {
     namespace: String,
     tools: Value,

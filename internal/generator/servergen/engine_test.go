@@ -434,7 +434,7 @@ func startBackground(t *testing.T, binary string, env ...string) *started {
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	s := &started{cmd: cmd, out: &out.Builder}
+	s := &started{cmd: cmd, out: out}
 	t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
 	deadline := time.Now().Add(20 * time.Second)
 	for !strings.Contains(out.String(), `"msg":"runner started"`) {

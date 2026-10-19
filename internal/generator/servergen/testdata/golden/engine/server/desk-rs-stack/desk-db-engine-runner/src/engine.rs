@@ -37,11 +37,10 @@ const PERMISSIONS: &[&str] = &["Account", "Ticket"];
 
 /// What an engine database's ENGINE_DOCUMENT holds: the namespace its
 /// engine types live in, the tool options and the meta-schema the engine
-/// reads them with, and one schema-file document per engine type.
+/// reads them with.
 struct Document {
     namespace: String,
     tools: Value,
-    schemas: Vec<Value>,
     meta_schema: Value,
 }
 
@@ -53,13 +52,9 @@ impl Document {
         let Value::String(namespace) = take("namespace") else {
             return Err(format!("the engine document of {service} names no namespace").into());
         };
-        let Value::Array(schemas) = take("schemas") else {
-            return Err(format!("the engine document of {service} lists no schemas").into());
-        };
         Ok(Document {
             namespace,
             tools: take("tools"),
-            schemas,
             meta_schema: take("metaSchema"),
         })
     }
