@@ -3949,10 +3949,11 @@ and cargo, and output for a schema without the decorators is unchanged
 byte for byte. `from` declares its handles identities
 (`DecoratorSpec.Identities`, D41): naming a caller adds no reference, so
 two APIs may list each other, and the callee's cache key follows only the
-caller's sentinel file, not its schema. The stack-model pieces that do
-not exist yet are not built: connectors writing the callee config, the
-generated entrypoint, key rotation in the resource graph, and
-`stack dev`'s keys.
+caller's sentinel file, not its schema. Of the stack-model pieces, the
+connectors writing the callee config and the generated entrypoint are
+built since (D37's amendment on the callers field, below), and so are
+`stack dev`'s keys (D30's amendment on the local target, below); key
+rotation in the resource graph is not built.
 
 D43's `OperationInfo` carries no service clause, so `OperationInfo::admit`
 applies only the end-user step: an in-process caller is the service's own
@@ -3999,8 +4000,8 @@ Status: built. `extensions/cloudflare` pins pulumi-cloudflare 6.22.0, whose
 record type is `cloudflare:index/dnsRecord:DnsRecord` (the 6.0 release
 renamed `cloudflare:index/record:Record`), and its goldens resolve the
 `stack/stacktest` shop stack with its domains on Cloudflare, DNS-only and
-proxied. The target's bootstrap and the deploy that read
-`dns.credentials` are not built.
+proxied. D45, amended, builds the target's bootstrap and the deploy that
+read `dns.credentials` (`TestBootstrapAndDeployReadTheToken`).
 
 ### D30, amended: the core registers the local target, with a resource vocabulary of its own
 
@@ -4061,12 +4062,11 @@ carries no deploy seam: `stack dev` runs it, the cloud commands refuse a
 local environment and point to it, and `secrets set` writes a local
 environment's `secrets.env` through a store the CLI hands the operation,
 since the file sits under the schemas root, which a registry does not
-know. Not built: the
-gcp migration runner, a Cloud Run job running `superschematic-migrate`, so
-a gcp deploy with a migration to run is refused; `CredentialsOf` returns
-none until the Cloudflare DNS platform resolves its credentials into
-`environment.json`; image builds; and a lock that keeps two deploys of one
-run apart beyond the provisioner's and the runner's own.
+know. D46 builds the gcp migration runner, a Cloud Run job running
+`superschematic-migrate`, and image builds, and D45, amended, has
+`CredentialsOf` return the credentials the Cloudflare DNS platform
+resolves into `environment.json`. Not built: a lock that keeps two
+deploys of one run apart beyond the provisioner's and the runner's own.
 ### D30, amended: the server entrypoint, its Dockerfile and the scaffold a stack writes
 
 D30 said superschematic generates each server's entrypoint and Dockerfile,
@@ -4082,8 +4082,9 @@ and its amendment on `Deps` left both to the build. Building them for Go
 | Each client of a `calls` edge sends the D37 credential its `ServiceEndpoint` names and forwards the request's end user. The service authenticator waits for the service-auth field: until a connector derives it, a server whose API has a service clause refuses to start. | A service-auth configuration in one JSON variable, the encoding section 3.4 refused for derived fields. Starting with no authenticator, whose routes would answer every service caller 401. |
 | The Dockerfile's context is the repository root, cut down by `Dockerfile.dockerignore`. A Rust stage builds superscalar's static archive (and the version graph's, when a database declares one) with `tools.env`'s Rust release, the Go stage links it on Debian's glibc, and the binary runs on distroless `cc` as a non-root user. | A `CGO_ENABLED=0` binary on a static base, which cgo against the archive rules out (D3). An archive from the host's checkout, whose platform is the host's. |
 
-OpenTelemetry export, the Cloud SQL connector and the entrypoints of
-TypeScript and Rust servers are not built. `examples/acme-shop` keeps its
+OpenTelemetry export is not built. The Cloud SQL connector (D30's
+amendment on Cloud SQL, below) and the entrypoints of TypeScript and Rust
+servers (D51, D57) are built since. `examples/acme-shop` keeps its
 implementations at `go/{service}`, which the entrypoints of its
 `shop-stack` import, and `stack dev` runs it (`docs/stack-model.md`,
 section 14, milestone 1).
@@ -4248,7 +4249,7 @@ no privileges. Building both settled the rest.
 |----------|------------------------|
 | Image builds are a fifth seam on `TargetSpec`, `Builder` (`registry.ImageBuilder`). A `BuildRequest` is a run, a server, its Dockerfile's path in the context and the context itself, which the deploy writes; the result is the image by digest, which the deploy pins as it pins `--image`. `RegisterTarget` refuses a `Builder` without a provisioner or without `State`, which records each build. `stack build <environment>` runs the same builds without deploying, prints `--image` flags and writes no manifest. | Builds inside the provisioner's program, as a Docker image resource, which would put the context's digest, not a function of the schemas, into the graph; a build command per target, which section 11.1 rules out |
 | The core writes the context: the repository root as the Dockerfile's ignore file (`Dockerfile.dockerignore`, else the root's `.dockerignore`) cuts it down, by BuildKit's matching rules, as a gzipped tarball in path order whose entries are at the epoch, owned by root, with mode 0644, or 0755 for a directory or an executable file. The Dockerfile and its ignore file are always in it, as Docker's client sends them. | Each target walking the context with its own ignore rules, two matchers that would drift; the context as a directory the target archives, so the digest the deploy compares would not be the archive the target uploads |
-| A server is built again only when its context changed: the digest of the context's tar stream, before compression, is recorded in the manifest beside the image a deploy built (`Contexts`), and a deploy whose context has the same digest keeps that image. `--image` overrides, and drops the context; `--no-build` builds nothing; a server with no Dockerfile, such as a TypeScript or Rust server for now, keeps the manifest's image. Builds run before any step, after the plans and the gate, so a failed build changes nothing. | A digest over the server's module and its implementation sources only, which misses the generated and runtime modules and the superscalar checkout the image also builds from; always building, which rebuilds the Rust archive on every deploy; the IR digests, which do not cover the implementations |
+| A server is built again only when its context changed: the digest of the context's tar stream, before compression, is recorded in the manifest beside the image a deploy built (`Contexts`), and a deploy whose context has the same digest keeps that image. `--image` overrides, and drops the context; `--no-build` builds nothing; a server with no Dockerfile, one the build has not written, keeps the manifest's image. Builds run before any step, after the plans and the gate, so a failed build changes nothing. | A digest over the server's module and its implementation sources only, which misses the generated and runtime modules and the superscalar checkout the image also builds from; always building, which rebuilds the Rust archive on every deploy; the IR digests, which do not cover the implementations |
 | gcp builds with Cloud Build: the builder uploads the archive to the state bucket under `superschematic/builds/` and runs the Dockerfile with BuildKit (`gcr.io/cloud-builders/docker`, `DOCKER_BUILDKIT=1`) on an `E2_HIGHCPU_8` machine, as a `builder` account bootstrap creates, which pushes to the stack's repository with the tag `context-<digest>` and reads only its prefix of the bucket. A tag that exists is not built again, so a `stack build`, or a deploy that failed after its builds, saves the next one the build. | Building as `deployer`, whose credentials a build's own steps could reach through the metadata server; a `gcloud builds submit` the deploy shells out to, a tool it cannot fake |
 | gcp's migration runner, the default of `gcp.Extension{Migrations}`, runs each phase on a database as one execution of the stack's Cloud Run job, `<stack>-migrate`, with one task and no retry, as a `migrator` account bootstrap creates. It writes each plan with steps and a job document into the state bucket under `superschematic/migrations/<stack>/<run>/`, creates or updates the job, and runs it with the document's `gs://` URL; a failed execution fails the step with its name and logs, and the deploy records the phase as pending (D45). The job is not a node of the graph: it changes with the runner's release, not the schemas, and one serves every run of the stack in the project. | The job as a graph node, whose image the graph would then depend on; a job per run or per phase, which a member's destroy would leave behind; executions passing plans in arguments or variables, which Cloud Run limits in size, while a plan carries its models |
 | The runner gains `superschematic-migrate job --job <path or gs:// URL>`, which runs a job document (runtime/migrate/README.md, "Jobs"): the phase of each DB service's plan on its database, then its privileges. Its databases sit on one Cloud SQL instance, reached through the Cloud SQL Go connector (`cloud.google.com/go/cloudsqlconn`, in `runtime/migrate/go`, beside the drivers, D27) with IAM database authentication, or each at a URL. `gs://` documents are read through Cloud Storage's JSON API with application default credentials. gcp writes the document without importing the runner, and the runner's tests read gcp's golden document. | One `apply` invocation per plan, which a distroless image has no shell to chain and which leaves the privileges to another tool; the Cloud SQL mount Cloud Run provides, which carries no IAM authentication; a Cloud Storage FUSE volume, whose directory lookups need options a test cannot check offline |
@@ -4267,9 +4268,13 @@ its tests fake; its golden job document is
 `extensions/gcp/testdata/golden/migrations/Staging-expand.json`. The
 runner's `job` command, its Cloud SQL dialer and its grants run in its
 tests against Postgres, the dialer replaced by one of a local server and
-Cloud Storage by a fake of its API. None of it has run against Google
-Cloud. Bootstrap gives the state bucket a lifecycle rule, on a bucket
-that exists already too, that deletes the build contexts under
+Cloud Storage by a fake of its API. The live run of 2026-10-07
+(`docs/stack-model.md`, section 14, milestone 3) built the images with
+Cloud Build and ran the expand phase as the job, its runner image from
+`scripts/migrate-dev-image.sh`, since no release exists. What follows
+came after that run and has not run against Google Cloud. Bootstrap
+gives the state bucket a lifecycle rule, on a bucket that exists already
+too, that deletes the build contexts under
 `superschematic/builds/` and the job documents and plans under
 `superschematic/migrations/` after 30 days, live and noncurrent versions
 alike, and keeps the bucket's other rules (`EnsureLifecycleRule`). A
@@ -4322,12 +4327,12 @@ with no credential, from a server with no edge, or for another audience is
 403 `service_forbidden`. The stack has no database, so the run needs no
 Docker. The parity vectors are unchanged.
 
-Not built: the TypeScript and Rust entrypoints, which will read the same
-field; the generic connector; key rotation; and the field outside a
-stack, where `values-schema.json` does not list it. A call between two
-APIs one server serves carries no credential, so a `@requireService`
-operation refuses it though section 9.3's check counts it, which section
-9.9 of `docs/stack-model.md` leaves open.
+The TypeScript and Rust entrypoints read the same field (D51, D57), and
+D63 builds the generic connector. Not built: key rotation, and the field
+outside a stack, where `values-schema.json` does not list it. A call
+between two APIs one server serves carries no credential, so a
+`@requireService` operation refuses it though section 9.3's check counts
+it, which section 9.9 of `docs/stack-model.md` leaves open.
 
 The rule is reversible until the first release.
 
@@ -4371,11 +4376,14 @@ rest as graph resources. No generated workflow has run on GitHub
 Actions: a run needs a release, a project bootstrapped with a GitHub
 remote, and a repository that turns the workflow on.
 
-Not built:
-- a check that the committed workflow is current;
-- pinned Bun and Node releases in the workflow;
-- installing the TypeScript workspace and type-checking TypeScript
-  servers in `check` (D51).
+D51, amended, builds a pinned Bun in the workflow, and installing the
+TypeScript workspace and type-checking TypeScript servers in `check`.
+`check` also compiles each Go job and worker and type-checks each
+TypeScript job and worker (`TestGoJobsAndWorkersInCheck`), and the
+workflow pins Node to the release `tools.env` names (`cigen.NodeVersion`,
+held to it by `TestNodeIsPinnedAsToolsEnvPinsIt`).
+
+Not built: a check that the committed workflow is current.
 
 The rule is reversible until the first release.
 
@@ -4411,8 +4419,9 @@ release page and runs the image. A clean `golang` container, with a
 project of no `[paths]`, built both servers with the archives step's
 commands, the runtime modules coming from the module proxy at a commit.
 Not built: `stack dev`, and a local `go build` in such a project, still
-need `CGO_LDFLAGS` set by hand, and the other Go generators' modules
-still require the runtime modules at the zero pseudo-version.
+need `CGO_LDFLAGS` set by hand. D47's next amendment pins the other Go
+generators' modules, which required the runtime modules at the zero
+pseudo-version.
 
 ### D30, amended: a project names its build context when its runtime modules lie above it
 
@@ -4603,10 +4612,11 @@ Status: built.
 No TypeScript server has run on Cloud Run.
 
 Not built:
-- passing manual-route handlers to `buildRouter`;
 - OpenTelemetry export;
 - `stack init`, which would write the amendment's ignore rule; D59
   builds it.
+
+D51's last amendment hands a manual route's handlers to `buildRouter`.
 
 The rule is reversible until the first release.
 
@@ -4864,9 +4874,9 @@ module whose route takes `Geo.Location` in every body-argument shape, and
 `TestCheckJSONChecksAValuesOwnJSONBeforeItIsDecoded` pins where
 `bodyargs` runs the check.
 
-Not built: the ORM does not read or write a list of locations (`POINT[]`),
-and a `POINT` column's generated filter is the string filter, whose
-equality Postgres cannot evaluate for a point.
+The amendment below has the ORM read and write a list of locations
+(`POINT[]`), and gives a `POINT` column a filter of its own in place of
+the string filter, whose equality Postgres cannot evaluate for a point.
 
 The rule is reversible until the first release.
 
@@ -5067,10 +5077,9 @@ its refusals.
 No worker has run on Google Cloud.
 
 #348 adds TypeScript workers, which claim through the HTTP runtime with
-the Go ORM's statements (the amendment below).
+the Go ORM's statements (the amendment below), and D65 Rust workers.
 
 Not built:
-- Rust workers;
 - claims on SQLite and D1, in a write transaction (the amendment below);
 - removing `done` messages, and an operator's command to read and retry
   dead ones;
@@ -5136,10 +5145,9 @@ bucket's IAM policy carries the project's convenience bindings, through
 which `planner`'s `roles/viewer` would read its objects. A project bootstrapped before #338 needs `stack
 bootstrap` again for `deployer`'s new role.
 
-Not built:
-- a `Bucket` in the Rust runtime, so gcp's connectors refuse a bucket
-  edge from a Rust server or job;
-- buckets on another provider.
+Its second amendment, below, builds a `Bucket` in the Rust runtime.
+
+Not built: buckets on another provider.
 
 The rule is reversible until the first release.
 
@@ -5533,9 +5541,9 @@ D65 builds what this left out of a stack: Rust jobs and workers, and an
 output root that builds against a mirror of each implementation crate,
 so `stack dev --out` elsewhere no longer collides in Cargo's lockfile.
 
-Not built:
-- buckets from a Rust server;
-- OpenTelemetry export.
+D54's second amendment builds buckets from a Rust server.
+
+Not built: OpenTelemetry export.
 
 The rule is reversible until the first release.
 
@@ -5614,7 +5622,8 @@ engine over the behavior's transaction in place of the TypeScript
 `SyncEngine`; and D47's archives. D57 gives a Rust server the entrypoint
 the engine mounts in.
 
-Status: not built. `runtime/engine/rust` holds the workspace;
+Status: partly built: milestones 1 to 12 (but 7b), 15 and 16; the rest
+are pending, as below. `runtime/engine/rust` holds the workspace;
 `superschematic-engine-storage`: both databases' transactions, savepoints
 and writer locks, the write counter, the migration ledger with the
 engine's migrations for each, a behavior's storage and SQL checker, and
@@ -5840,9 +5849,8 @@ worker has run on Cloud Run.
 
 Not built:
 - a `POINT` or `INTERVAL` column in a TypeScript queue's message;
-- type-checking a TypeScript job's or worker's package in the generated
-  CI, which checks the servers';
-- a Rust worker.
+- a `POINT` or `INTERVAL` column in a Rust worker's message (D65 builds
+  Rust workers).
 
 The rule is reversible until the first release.
 
@@ -6152,12 +6160,12 @@ and `offset` arguments it finds by name (`<method>_all`).
 | A paged list's console page reads `cursor` and `limit` from its query beside its filters, renders the page's items in its table and, after it, a `<nav class="ss-pager">` with "Next page" (`rel="next"`), the same filters and limit with `cursor` set to `next`, while `next` is not null, and "First page", without the cursor, while one was given. The filter form holds neither as a control, so a submitted filter starts at the first page, and a cursor or limit the route refuses is the form's own message with the route's 400. | A previous link, which needs every cursor before it in the URL; numbered pages, which a cursor cannot give; a "more" button, which needs script |
 | `runtime/http/testdata/page_parity.json`, written by the Go runtime's test, holds the reader's answers (absent values, each bound, a limit that is no whole number, a cursor with padding, with a character outside the alphabet and of 1025 characters), cursors encoded and read back, and `from_rows`. The TypeScript and Rust runtimes read it. | |
 
-Status: designed; the core, the servers, the SDKs and the Topcoat console
-built. This batch builds all of it: the IR, the decorator, the readers, the JSON Schema and
+Status: built: the core, the servers, the SDKs and the Topcoat console.
+This batch builds all of it: the IR, the decorator, the readers, the JSON Schema and
 `format`; the OpenAPI document and the tool documents; the Go, TypeScript
 and Rust servers and the in-process call; the four SDKs and the vectors;
 and the Topcoat records, procedures and pager. acme's `listOrders`,
-`listReviews` and a new `listProducts` page. Built so far, the core:
+`listReviews` and a new `listProducts` page. Built in the core:
 `ir.OperationPage` on `FieldDef.Page`, with `ir.ValidateOperationPage`;
 `@paginated` and its argument schema, which the schema-file JSON Schema
 takes; the merge that fills a data form's unsaid limits, so TypeScript,
@@ -6693,8 +6701,8 @@ Status: built.
 
 No Rust job or worker has run on Cloud Run.
 
-Not built, and out of this entry: buckets from a Rust server, job or
-worker; and OpenTelemetry export. A TypeScript build into another output
+Not built, and out of this entry: OpenTelemetry export (D54's second
+amendment builds buckets from a Rust server, job or worker). A TypeScript build into another output
 root relinks the project's own `node_modules` there, as a Rust build did
 before the mirror.
 
@@ -6718,5 +6726,58 @@ Status: built. `TestCrossKindReferenceRules` admits API from API;
 `TestReferenceToADependencysType` resolves a reference to a General and to
 an API dependency's type; `TestAPIsReferringToEachOtherAreRefused` refuses
 two APIs that refer to each other as a cycle.
+
+The rule is reversible until the first release.
+
+### D54, amended: a Rust server, job or worker reaches its buckets through the Rust runtime's `Bucket`
+
+D54 gave Go and TypeScript a `Bucket` and left Rust out: the Rust runtime
+read a bucket connection (`stackconfig::Bucket`, `load_bucket`) and had
+nothing to open it with, so gcp's and the local target's connectors
+refused a bucket edge from a Rust server, job or worker (D57, D65).
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The Rust HTTP runtime's `bucket` module, with no feature, is the twin of Go's `bucket` package and TypeScript's main entry: an async `Bucket` trait (`name`, `put`, `get`, `delete`, `list`, `signed_url`) a `Deps` holds as `Arc<dyn Bucket>`, a `Body` of bytes, text or a stream, a `Reader` that carries the `Object` and streams its chunks, `ListOptions` whose page is 1000 by default and refuses 0, and `SignedUrlOptions` for a GET or a PUT, up to seven days in whole seconds. `BucketError::NotFound` is Go's `ErrNotFound` and TypeScript's `ObjectNotFoundError`, and a name, an expiry or a content type the others refuse is refused with their messages before any request. | A Rust interface of its own shape, which an implementation moved between languages would relearn. |
+| Its GCS implementation, behind the `gcs` feature, calls Cloud Storage's JSON API over the runtime's HTTP client, as D57's pool reaches Cloud SQL, with no Google library: each request carries the workload's access token from the metadata server, cached until shortly before it expires; `put` is one multipart upload, streamed for a stream; `get` reads the metadata, then that generation's bytes; a read that fails with 408, 429, a 5xx or no answer is tried twice more. A signed URL is V4, signed by IAM `signBlob` as the account the metadata server names, which the grant gcp gives every workload with a bucket already allows; its canonical request is `@google-cloud/storage`'s, byte for byte. Against the emulator (the connection's endpoint or `STORAGE_EMULATOR_HOST`) it sends no credential and signs with a key the process makes, as the other runtimes do. It reads no credentials file, so off Google Cloud it reaches a bucket through an emulator alone. | Google's Rust client, a large dependency for six calls and a second way to authenticate beside Cloud SQL's. |
+| A Rust API that lists a bucket gets a `Deps` field per bucket, its service's name in snake case, and its `EnvConfig` reads `{SERVICE}_BUCKET`. A Rust server's, job's and worker's `main.rs` opens each bucket once and hands it to every API that lists it, and only an entrypoint with a bucket turns on `gcs`. The local target derives the bucket's name and the emulator's endpoint for a Rust workload, and gcp grants it `roles/storage.objectUser` and signing as itself, as it does a Go one. | |
+
+Status: built. The runtime's tests run the trait and the GCS client
+against a fake GCS server and metadata server, and against
+fake-gcs-server, and hold its signatures to vectors from
+`@google-cloud/storage`; CI and `make rust` run its `gcs` feature.
+servergen's Rust fixture stack gains the bucket `rs-media`, which
+`rs-stock` lists, and `TestStackDevRunsRustJobsAndWorkers` has the job
+put objects, the worker read and delete them, and the server list the
+rest and sign a URL the test downloads from the emulator. No Rust
+workload has reached a bucket on Google Cloud.
+
+The rule is reversible until the first release.
+
+### D51, amended: every stack server mounts its APIs' manual routes, with handlers the implementation gives
+
+A `@manualRouteRegistration` operation is one the service routes itself
+(D20, amended; D26; D29): outside a stack the service adds the route to
+the router the generator built. A stack's server has no `main` of the
+service's, and none of the three entrypoints mounted one: TypeScript's
+answered 501, since no handler reached `buildRouter`, and Go's and
+Rust's left the route out, so it was 404.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| An API with a manual route declares what its implementation gives for them beside its `Deps`: TypeScript's `deps.ts` a `ManualRoutes` of a `ManualRouteHandler` per operation and `ManualRoutesConstructor`; Go's `routes.go` a `ManualRoutes` struct of an `http.Handler` per operation, named by namespace and operation (`OrderExportOrder`), and `deps.go` a `ManualRoutesConstructor`; Rust's `interfaces.rs` a `ManualRoutes` trait with a method per operation that takes the `RequestContext` and the request and returns the response. The implementation provides `createManualRoutes(deps)`, `NewManualRoutes(deps)` or `create_manual_routes(deps)`, which the scaffold writes with handlers that answer 501, and a stack's build refuses an implementation that exists without it, naming what to add, as it refuses one without its jobs. | The service's own `main`, which a stack's entrypoint replaces; a handler looked up by name at run time, which no compiler checks. |
+| The entrypoint builds them from the `Deps` it built and gives them to the router: `buildRouter`'s `manualRoutes`, Go's `Config.ManualRoutes`, and Rust's new `build_router_with_manual_routes`. The router mounts each behind the steps every route of the API gets: the request log and id, authentication, the webhook verifier, the rate limit, the body limit, the service step, the permission check and the timeout. Go's decryptor runs on every route, so a Go handler of an encrypted manual route gets the decrypted body. Jobs and workers mount no routes and call nothing new. | Mounting a manual route outside the API's controls, which would leave its `@rateLimit` and `@requireService` to each handler. |
+| Outside a stack nothing changes: `build_router`, `buildRouter` without `manualRoutes` and Go's `RegisterRoutes` with no `ManualRoutes` mount no manual route, and the service routes it as D20's amendment, D26 and D29 say. | |
+
+Status: built. servergen's fixtures each gain a manual route, ts-shop's
+`exportCart`, shop-orders' `exportOrder` and rs-stock's `exportLevel`,
+which `TestTypeScriptEntrypointCompilesAndServes`,
+`TestEntrypointCompilesAndServes` and `TestRustEntrypointCompilesAndServes`
+call on the running server: the scaffold's 501, then the implementation's
+answer with its `Deps` and the request id, and Go's and Rust's 429 from
+the route's rate limit. `TestServiceAuthManualRoutes` refuses a protected
+manual route without a user and a `@requireService` one without a service,
+and the three `...PredatesItsManualRoutesFails` tests the build's
+refusals.
 
 The rule is reversible until the first release.

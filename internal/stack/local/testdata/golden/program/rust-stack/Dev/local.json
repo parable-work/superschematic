@@ -33,6 +33,38 @@
           "--quiet"
         ]
       }
+    },
+    {
+      "id": "storage.container",
+      "name": "superschematic-rust-stack-dev-c5b02a-storage",
+      "image": "fsouza/fake-gcs-server:1.56.1",
+      "host": "127.0.0.1",
+      "hostPort": 24355,
+      "containerPort": 4443,
+      "args": [
+        "-scheme",
+        "http",
+        "-host",
+        "0.0.0.0",
+        "-port",
+        "4443",
+        "-backend",
+        "filesystem",
+        "-filesystem-root",
+        "/storage",
+        "-public-host",
+        "127.0.0.1:24355",
+        "-external-url",
+        "http://127.0.0.1:24355"
+      ],
+      "labels": {
+        "superschematic.checkout": "c5b02a",
+        "superschematic.environment": "Dev",
+        "superschematic.stack": "rust-stack"
+      },
+      "readiness": {
+        "http": "/storage/v1/b"
+      }
     }
   ],
   "databases": [
@@ -42,6 +74,15 @@
       "service": "shop-db",
       "container": "postgres.container",
       "url": "postgres://postgres@127.0.0.1:31355/shop_db?sslmode=disable"
+    }
+  ],
+  "buckets": [
+    {
+      "id": "shop-media.bucket",
+      "name": "shop-media",
+      "service": "shop-media",
+      "container": "storage.container",
+      "endpoint": "http://127.0.0.1:24355"
     }
   ],
   "keyPairs": [
@@ -90,6 +131,14 @@
         {
           "name": "SHOP_DB_DATABASE_URL",
           "value": "postgres://postgres@127.0.0.1:31355/shop_db?sslmode=disable"
+        },
+        {
+          "name": "SHOP_MEDIA_BUCKET_ENDPOINT",
+          "value": "http://127.0.0.1:24355"
+        },
+        {
+          "name": "SHOP_MEDIA_BUCKET_NAME",
+          "value": "shop-media"
         },
         {
           "name": "STRIPE_KEY",

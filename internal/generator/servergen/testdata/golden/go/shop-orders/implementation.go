@@ -4,12 +4,14 @@
 // missing. It never writes it again: the package is yours. Each method
 // answers 501 Not Implemented until you implement it. Each job fails
 // until you implement it. Each worker fails
-// every message until you implement it.
+// every message until you implement it. Each manual
+// route answers 501 until you implement its handler.
 package shoporders
 
 import (
 	"context"
 	"errors"
+	"net/http"
 
 	runtimemiddleware "github.com/parable-work/superschematic/runtime/http/go/middleware"
 
@@ -27,6 +29,28 @@ func New(deps api.Deps) (api.Implementations, error) {
 }
 
 var _ api.Constructor = New
+
+// NewManualRoutes builds the handlers of the @manualRouteRegistration
+// operations of shop-orders from the API's dependencies. Its signature is the
+// generated one, api.ManualRoutesConstructor. The server's entrypoint
+// passes them to the generated Config.ManualRoutes, and RegisterRoutes
+// mounts each behind its route's auth, traffic controls and request log,
+// then hands it the request to answer as it will.
+func NewManualRoutes(deps api.Deps) (api.ManualRoutes, error) {
+	return api.ManualRoutes{
+		// GET /api/orders/{id}/export
+		OrderExportOrder: notImplemented("Order.ExportOrder"),
+	}, nil
+}
+
+var _ api.ManualRoutesConstructor = NewManualRoutes
+
+// notImplemented answers 501 Not Implemented, naming the operation.
+func notImplemented(operation string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		api.RespondAppError(w, api.LoggerFromContext(r.Context()), api.NotImplementedError(operation))
+	})
+}
 
 // NewJobs builds the jobs of shop-orders from the API's dependencies. Its
 // signature is the generated one, api.JobsConstructor.
@@ -92,4 +116,11 @@ func (impl *Order) PlaceOrder(ctx context.Context, sku string) (*types.OrderView
 // GetOrder handles GET /api/orders/{id}.
 func (impl *Order) GetOrder(ctx context.Context, id string) (*types.OrderView, error) {
 	return nil, api.NotImplementedError("Order.GetOrder")
+}
+
+// ExportOrder handles GET /api/orders/{id}/export. It is
+// @manualRouteRegistration: the server mounts the handler NewManualRoutes
+// builds at its route, not this method.
+func (impl *Order) ExportOrder(ctx context.Context, id string) (*types.OrderView, error) {
+	return nil, api.NotImplementedError("Order.ExportOrder")
 }

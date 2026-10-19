@@ -44,6 +44,19 @@ operationSets:
         httpMethod: GET
         restPath: me/cart
         auth: true
+      # The router mounts it behind its auth gate and hands it to the
+      # handler the implementation's createManualRoutes builds, which
+      # answers a CSV no JSON envelope holds (D51).
+      - name: exportCart
+        typeRef: { name: CartView }
+        required: true
+        httpMethod: GET
+        restPath: carts/{id}/export
+        manualRouteRegistration: true
+        arguments:
+          - name: id
+            typeRef: { name: string }
+            required: true
 # A job is a deployable of its own, with ts-shop's Deps: its database, its
 # client of ts-pricing and its bucket (D52). Its schedule's */15 stays in
 # the generated JSDoc.

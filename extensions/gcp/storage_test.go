@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	ir "github.com/parable-work/superschematic/ir"
+	"github.com/parable-work/superschematic/registry"
 	"github.com/parable-work/superschematic/stack"
 	"github.com/parable-work/superschematic/stack/stacktest"
 
@@ -201,17 +202,32 @@ func TestBucketConnectorFromAJob(t *testing.T) {
 		`{"name":{"$output":{"resource":"shop-media.bucket","name":"name"}}}`)
 }
 
-// TestBucketConnectorRefusesRust checks that a Rust server's bucket edge
-// fails to lower, though its sql edge lowers: the Rust runtime has no
-// Bucket, and D57 leaves buckets from a Rust server out.
-func TestBucketConnectorRefusesRust(t *testing.T) {
-	services := stacktest.InRust(stacktest.AcmeShop(), "shop-api")
-	_, err := stack.Resolve(assemble(t), stack.Input{Stack: shop(), Services: services, Environment: "Staging"})
-	var errs *stack.Errors
-	if !errors.As(err, &errs) || len(errs.List) != 1 || errs.List[0].Code != stack.CodeLowering ||
-		!strings.Contains(errs.List[0].Message, "server shop-api is a RUST server, which has no Bucket in its runtime to reach bucket shop-media with: buckets from a Rust server are not built (D57)") {
-		t.Fatalf("err = %v, want the one lowering error of the Rust server's bucket edge", err)
+// TestBucketConnectorServesRust checks that a Rust server's bucket edge
+// lowers as a Go server's does (D54): the object user role on the bucket
+// and the right to sign as its own account, which the Rust runtime's gcs
+// signs a URL through IAM's signBlob with, and the bucket's name alone,
+// which it reaches as the account the metadata server's token is for.
+func TestBucketConnectorServesRust(t *testing.T) {
+	reg := assemble(t)
+	goEnv := resolve(t, reg, shop(), stacktest.AcmeShop(), "Staging")
+	env := resolve(t, reg, shop(), stacktest.InRust(stacktest.AcmeShop(), "shop-api"), "Staging")
+	if got := env.Deployable("shop-api").Language; got != registry.APILanguageRust {
+		t.Fatalf("shop-api's server is %s, want %s", got, registry.APILanguageRust)
 	}
+	edge := "bucket:shop-api->shop-media"
+	ids, goIDs := ownedBy(env, edge), ownedBy(goEnv, edge)
+	if got, want := strings.Join(ids, ", "), "shop-api.sign-as-self, shop-api.storage.shop-media"; got != want || !slices.Equal(ids, goIDs) {
+		t.Fatalf("%s produces %s, want %s, as a Go server's produces %v", edge, got, want, goIDs)
+	}
+	for _, id := range ids {
+		res, goRes := node(t, env, id), node(t, goEnv, id)
+		if res.Type != goRes.Type {
+			t.Errorf("%s is a %s, and a %s for a Go server", id, res.Type, goRes.Type)
+		}
+		wantJSON(t, id, res.Properties, mustJSON(t, goRes.Properties))
+	}
+	wantJSON(t, "the derived bucket connection", binding(t, env, "shop-api", "SHOP_MEDIA_BUCKET").Value,
+		`{"name":{"$output":{"resource":"shop-media.bucket","name":"name"}}}`)
 }
 
 // TestPolicyPrivateBuckets runs buckets-never-public over a resolved

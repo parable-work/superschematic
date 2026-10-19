@@ -221,7 +221,7 @@ func (g github) header(w *yamlWriter, notes []string) {
 	w.line(0, "#")
 	w.comment(0, fmt.Sprintf("The stack's service is %s. Change it and build it again with superschematic build, which writes this file.", st.Dir))
 	w.line(0, "#")
-	w.comment(0, fmt.Sprintf("On a pull request to %[1]s, check builds the stack and compiles its servers with no credentials; each plan job plans a cloud environment as its planner account, and each preview job deploys a member of an environment with one parameter for the pull request, and destroys it when the pull request closes. A pull request from a fork runs check alone. On a push to %[1]s, each deploy job deploys a cloud environment in the order the stack declares them, in the GitHub environment of its name, whose required reviewers approve it.", g.branch))
+	w.comment(0, fmt.Sprintf("On a pull request to %[1]s, check builds the stack and compiles its servers, jobs and workers with no credentials; each plan job plans a cloud environment as its planner account, and each preview job deploys a member of an environment with one parameter for the pull request, and destroys it when the pull request closes. A pull request from a fork runs check alone. On a push to %[1]s, each deploy job deploys a cloud environment in the order the stack declares them, in the GitHub environment of its name, whose required reviewers approve it.", g.branch))
 	if len(notes) > 0 {
 		w.line(0, "#")
 		w.line(0, "# Environments with no job:")
@@ -232,31 +232,34 @@ func (g github) header(w *yamlWriter, notes []string) {
 	w.blank()
 }
 
-// check is the job that builds the stack and compiles its servers, with
-// no credentials: levels 1 to 3 of section 10. A Go server compiles; for
-// the TypeScript servers and the sites it installs the output root's Bun
-// workspace from the lockfile the project commits, which fails when the
-// lockfile is missing or does not match the packages the build wrote,
-// type-checks each TypeScript server and the implementation of each API
-// one serves (D51, amended), and builds each site with its build script,
-// as `stack deploy` does, so a site that does not build fails the pull
-// request (D55). For the Rust servers, jobs and workers it sets up the
-// Rust release tools.env pins before the build, which brings the output
-// root's Cargo lockfile up to date with it, refuses a lockfile git does not
-// track or the build changed, and checks each one's crate, with the
-// implementation it depends on, frozen to the lockfile (D57, D65).
+// check is the job that builds the stack and compiles its servers, jobs
+// and workers, with no credentials: levels 1 to 3 of section 10. Each Go
+// server, job and worker's module compiles, against the release's static
+// archives; for the TypeScript servers, jobs and workers and the sites it
+// installs the output root's Bun workspace from the lockfile the project
+// commits, which fails when the lockfile is missing or does not match the
+// packages the build wrote, type-checks each TypeScript server's, job's
+// and worker's package and the implementation each imports (D51, amended;
+// D52, D53), and builds each site with its build script, as `stack
+// deploy` does, so a site that does not build fails the pull request
+// (D55). For the Rust servers, jobs and workers it
+// sets up the Rust release tools.env pins before the build, which brings
+// the output root's Cargo lockfile up to date with it, refuses a lockfile
+// git does not track or the build changed, and checks each one's crate,
+// with the implementation it depends on, frozen to the lockfile (D57,
+// D65).
 func (g github) check() job {
 	st := g.req.Stack
-	servers := g.servers()
-	tsServers := g.typeScriptServers()
-	rustCrates := g.rustCrates()
+	goModules := g.deployables(registry.APILanguageGo)
+	tsPackages := g.deployables(registry.APILanguageTypeScript)
+	rustCrates := g.deployables(registry.APILanguageRust)
 	sites := slices.Sorted(maps.Keys(st.Sites))
-	workspace := len(tsServers) > 0 || len(sites) > 0
+	workspace := len(tsPackages) > 0 || len(sites) > 0
 	steps := []step{g.checkout(), g.install()}
-	if len(servers) > 0 && g.req.Version != "" {
+	if len(goModules) > 0 && g.req.Version != "" {
 		steps = append(steps, g.archives())
 	}
-	if len(servers) > 0 {
+	if len(goModules) > 0 {
 		steps = append(steps, step{
 			name: "Set up Go",
 			uses: &actionSetupGo,
@@ -272,21 +275,21 @@ func (g github) check() job {
 	}
 	steps = append(steps, packages...)
 	steps = append(steps, g.build())
-	for _, server := range servers {
+	for _, m := range goModules {
 		steps = append(steps, step{
-			name: "Compile server " + server,
-			dir:  path.Join(st.OutputRoot, "server", st.Name, server),
-			run:  "go build -mod=mod -o /dev/null .",
+			name: "Compile " + string(m.kind) + " " + m.name,
+			dir:  path.Join(st.OutputRoot, "server", st.Name, m.name),
+			run:  goBuild,
 		})
 	}
 	if workspace {
 		steps = append(steps, g.typeScriptWorkspace())
 	}
-	if len(tsServers) > 0 {
-		for _, server := range tsServers {
+	if len(tsPackages) > 0 {
+		for _, p := range tsPackages {
 			steps = append(steps, step{
-				name: "Type-check server " + server,
-				dir:  path.Join(st.OutputRoot, "server", st.Name, server),
+				name: "Type-check " + string(p.kind) + " " + p.name,
+				dir:  path.Join(st.OutputRoot, "server", st.Name, p.name),
 				run:  typeCheck,
 			})
 		}
@@ -317,6 +320,11 @@ func (g github) check() job {
 	}
 	return job{id: "check", name: "check", cond: notClosed, steps: steps}
 }
+
+// goBuild compiles the entrypoint module of a Go server, job or worker,
+// with the implementation it imports, and writes no binary: the deploy
+// builds the image.
+const goBuild = "go build -mod=mod -o /dev/null ."
 
 // rustCheck compiles the crate of a Rust server, job or worker and every
 // crate it depends on, the implementations among them, frozen to the
@@ -560,7 +568,7 @@ func (g github) packages() []step {
 		}
 	case registry.PackageManagerNPM:
 		return []step{
-			{name: "Set up Node.js", uses: &actionSetupNode, with: [][2]string{{"node-version", "lts/*"}}},
+			setupNode(),
 			{name: "Install the schemas root's packages", dir: root, run: "npm ci"},
 		}
 	}
@@ -571,6 +579,20 @@ func (g github) packages() []step {
 // TypeScript server's image runs on.
 func setupBun() step {
 	return step{name: "Set up Bun", uses: &actionSetupBun, with: [][2]string{{"bun-version", servergen.BunVersion}}}
+}
+
+// NodeVersion is the Node.js release a job sets up for a project whose
+// schemas root installs with npm: tools.env's NODE_VERSION, the release
+// this repository's own CI runs Node on, which a test holds it to. A
+// major release, as tools.env names it, which actions/setup-node resolves
+// to its latest patch.
+const NodeVersion = "24"
+
+// setupNode installs Node.js at the release tools.env pins, so a job's
+// npm ci runs on one release from run to run rather than whichever the
+// current LTS is.
+func setupNode() step {
+	return step{name: "Set up Node.js", uses: &actionSetupNode, with: [][2]string{{"node-version", NodeVersion}}}
 }
 
 // hasSite reports whether env deploys a static site, which `stack deploy`
@@ -599,7 +621,7 @@ func (g github) build() step {
 // check accepted as it is (D57). The runner's own cargo may be another
 // release.
 func (g github) buildSteps() []step {
-	if len(g.rustCrates()) == 0 {
+	if len(g.deployables(registry.APILanguageRust)) == 0 {
 		return []step{g.build()}
 	}
 	return []step{setupRust(), g.build()}
@@ -612,37 +634,25 @@ func (g github) stackCommand(command, environment string, flags ...string) strin
 	return strings.Join(args, " ")
 }
 
-// servers are the stack's Go servers, whose entrypoint modules the build
-// writes, sorted. No environment changes the servers.
-func (g github) servers() []string { return g.serversIn(registry.APILanguageGo) }
-
-// typeScriptServers are the stack's TypeScript servers, whose entrypoint
-// packages the build writes into the output root's Bun workspace, sorted.
-func (g github) typeScriptServers() []string { return g.serversIn(registry.APILanguageTypeScript) }
-
-// rustCrate is the crate of a Rust server, job or worker of the stack,
-// which the build writes into the output root's Cargo workspace (D57,
-// D65): its deployable's kind and name.
-type rustCrate struct {
+// deployable is a server, job or worker of the stack whose entrypoint the
+// build writes at server/<stack>/<name> under the output root: a Go
+// module, a package of the output root's Bun workspace (D51, D52, D53),
+// or a crate of its Cargo workspace (D57, D65). It is its kind and name.
+type deployable struct {
 	kind ir.DeployableKind
 	name string
 }
 
-// rustCrates are the crates of the stack's Rust servers, then its Rust
-// jobs, then its Rust workers, each sorted by name.
-func (g github) rustCrates() []rustCrate {
-	var crates []rustCrate
+// deployables are the stack's servers in language, then its jobs, then
+// its workers, each sorted by name. No environment changes them.
+func (g github) deployables(language string) []deployable {
+	var out []deployable
 	for _, kind := range []ir.DeployableKind{ir.DeployableServer, ir.DeployableJob, ir.DeployableWorker} {
-		for _, name := range g.deployablesIn(kind, registry.APILanguageRust) {
-			crates = append(crates, rustCrate{kind, name})
+		for _, name := range g.deployablesIn(kind, language) {
+			out = append(out, deployable{kind, name})
 		}
 	}
-	return crates
-}
-
-// serversIn are the stack's servers in language, sorted.
-func (g github) serversIn(language string) []string {
-	return g.deployablesIn(ir.DeployableServer, language)
+	return out
 }
 
 // deployablesIn are the stack's deployables of kind in language, sorted.

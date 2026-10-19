@@ -15,6 +15,9 @@ publish = false
 # The generated API crate, and the HTTP runtime it is built on.
 [dependencies]
 async-trait = "0.1.89"
+{{- if .ManualEndpoints }}
+axum = "0.8.9"
+{{- end }}
 {{- if .ChecksEndUsers }}
 http = "1"
 {{- end }}

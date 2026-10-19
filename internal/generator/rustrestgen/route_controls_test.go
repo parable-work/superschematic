@@ -91,8 +91,9 @@ func TestDirectivesBelowOneAreNone(t *testing.T) {
 // replaces the matching rule, @requireOwnership leaves ownership to the
 // implementation, @rateLimit answers 429 with Retry-After per client,
 // @bodyLimit answers 413, @timeout answers 504, the cheap refusals come
-// before the permission check, and the service applies a manual route's
-// controls with RouteControls.
+// before the permission check, the service applies a manual route's
+// controls with RouteControls, and build_router_with_manual_routes mounts
+// the manual route's handler behind them (D51).
 func TestRouteControlsAPICrateBuildsAndRoutes(t *testing.T) {
 	schema, err := loader.LoadService(filepath.Join(fixturesDir, "fixture-api"))
 	if err != nil {
@@ -111,8 +112,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use API_CRATE::{
-    build_router, types, Implementations, SessionImplementation, TenantCreateTenantArgs, TenantGetTenantArgs,
-    TenantImplementation, TenantListTenantsArgs, TenantUpdateSecretArgs,
+    build_router, build_router_with_manual_routes, types, Implementations, ManualRoutes, RouterOptions,
+    SessionImplementation, TenantCreateTenantArgs, TenantGetTenantArgs, TenantImplementation, TenantListTenantsArgs,
+    TenantUpdateSecretArgs,
 };
 use RUNTIME_CRATE::{
     bearer_token, has_any_permission, ApiError, Authenticator, ClientIp, Principal, RequestContext, RouteControls,
@@ -419,5 +421,44 @@ fn send_custom(router: Router, authenticator: Arc<dyn Authenticator>) -> Router 
 
 async fn post_custom(router: Router, token: Option<&str>) -> StatusCode {
     send(&router, "POST", "/api/tenant/custom-handler", token, Body::empty(), None).await.status
+}
+
+// The handler of tenant.customHandler: it answers the caller the route's
+// permission check established, and the request's id.
+struct Custom;
+
+#[async_trait]
+impl ManualRoutes for Custom {
+    async fn tenant_custom_handler(&self, ctx: RequestContext, _request: axum::extract::Request) -> Result<axum::response::Response, ApiError> {
+        let id = ctx.header("x-request-id").unwrap_or_default().to_string();
+        Ok(axum::response::Response::new(Body::from(format!("{} {id}", caller(&ctx)))))
+    }
+}
+
+// build_router_with_manual_routes mounts tenant.customHandler with the
+// handler ManualRoutes holds, behind the permission check and the request
+// ids a mounted route has, and hands it the RequestContext with the caller.
+#[tokio::test]
+async fn build_router_with_manual_routes_mounts_the_handler_behind_its_controls() {
+    let log = Log::default();
+    let router = build_router_with_manual_routes(implementations(&log), RouterOptions::default(), Arc::new(Custom));
+    let sent = send(&router, "POST", "/api/tenant/custom-handler", None, Body::empty(), None).await;
+    assert_eq!(sent.status, StatusCode::UNAUTHORIZED);
+    assert_problem(&sent.body, "unauthorized", "Authentication required");
+    assert_eq!(post_custom(router.clone(), Some("ana:tenants.write")).await, StatusCode::FORBIDDEN);
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/api/tenant/custom-handler")
+        .header("authorization", "Bearer ana:tenants")
+        .header("x-request-id", "custom-1")
+        .body(Body::empty())
+        .unwrap();
+    let response = router.clone().oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["x-request-id"], "custom-1");
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    assert_eq!(&bytes[..], b"ana custom-1");
+    // The other routes are as build_router mounts them.
+    assert_eq!(get(&router, "/api/auth/me", Some("ana")).await.status, StatusCode::OK);
 }
 `

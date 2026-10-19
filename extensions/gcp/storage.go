@@ -97,15 +97,11 @@ const publicAccessEnforced = "enforced"
 //
 // The derived value is the bucket's name alone. The client reaches Cloud
 // Storage with the workload's own credentials from the metadata server, so
-// there is no credential to derive.
-//
-// A Rust server has no Bucket in its runtime, and D57 leaves it out, so
-// the edge is refused.
+// there is no credential to derive. A Go, TypeScript or Rust workload's
+// edge lowers alike: each runtime asks the metadata server for the token
+// and signs through signBlob (D54).
 func connectBucket(ctx registry.ConnectorContext) (registry.Connected, error) {
 	from, to := ctx.From, ctx.To
-	if from.Language == registry.APILanguageRust {
-		return registry.Connected{}, fmt.Errorf("%s %s is a %s %s, which has no Bucket in its runtime to reach bucket %s with: buckets from a Rust server are not built (D57)", from.Kind, from.Name, from.Language, from.Kind, to.Name)
-	}
 	account := from.Name + ".account"
 	member := ir.Output{Resource: account, Name: "member"}
 	return registry.Connected{
