@@ -5935,12 +5935,14 @@ and on Postgres, the runner firing the Timers deadline as itself;
 `tests/password.rs` and the HTTP runtime's `sync_connection` test hold
 the Cloud SQL password provider, `tests/background.rs` the background
 open and its router, and a Topcoat app mounts the engine on SQLite
-(`TestTheEngineServesInATopcoatApp`). Not built: the TypeScript servers
+(`TestTheEngineServesInATopcoatApp`). `TestTheRustEngineDockerfileBuildsAnImageThatServes`
+and `TestTheEngineProjectDockerfileBuildsAnImageThatServes` build
+desk-rs-api's image and queue-api's, whose engine stage builds the
+project crate's archive, and run them with no database up. Not built: the TypeScript servers
 (milestone 19); a project's archive for the local target, which builds a
 Go server with the environment's `CGO_LDFLAGS`, and for a release's
 image, which gets no Dockerfile; a timeout on a Rust server's engine
-routes, which the Go server's have; no Rust server's image with the
-engine has been built; the gcp migration job's privileges on the engine's schema for
+routes, which the Go server's have; the gcp migration job's privileges on the engine's schema for
 the runner's and each server's own database user; the runner's settings
 element (`platform`, `enabled`) and a retention policy; no Go server has
 run on Cloud Run.
