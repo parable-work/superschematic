@@ -6152,8 +6152,9 @@ Status: built in #336.
 D53's TypeScript amendment left a queue whose message holds a `POINT` or
 an `INTERVAL` column out of `queues.ts`, and D65 left it out of
 `queues.rs`, so a TypeScript or Rust worker of it was refused. The Go
-ORM's queue did not hold them either: it passed a `Geo.Location` struct
-to pgx, which has no encoding for it, and `Temporal.Duration` crossed
+ORM's queue did not hold them either: it passed a `Geo.Location` to pgx,
+which sends its JSON, which Postgres refuses as a point, and cannot scan
+a point back into it, and `Temporal.Duration` crossed
 through its `Valuer` and `Scanner`, which write `-1h2m` for a duration
 Postgres reads as minus one hour plus two minutes, write `250µs`, which
 Postgres refuses, and read back `01:30:00`, which `time.ParseDuration`
