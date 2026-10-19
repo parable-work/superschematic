@@ -64,6 +64,16 @@ postgres-native-tls = { version = "0.5.3", optional = true }
 # The logging feature's subscriber (D57): its registry alone, since the
 # runtime writes the JSON lines itself, in the TypeScript logger's shape.
 tracing-subscriber = { version = "0.3.23", default-features = false, features = ["registry", "std"], optional = true }
+# The otel feature's trace export (D67): the API and SDK with traces alone,
+# the OTLP exporter over HTTP in protobuf with no HTTP client of its own,
+# since it sends through the http-client feature's reqwest, and the layer
+# that makes a tracing span an OpenTelemetry one. No tonic, and no metrics
+# or logs SDK.
+opentelemetry = { version = "0.33.1", default-features = false, features = ["trace"], optional = true }
+opentelemetry_sdk = { version = "0.33.1", default-features = false, features = ["trace"], optional = true }
+opentelemetry-otlp = { version = "0.33.1", default-features = false, features = ["http-proto", "trace"], optional = true }
+opentelemetry-http = { version = "0.33.1", default-features = false, optional = true }
+tracing-opentelemetry = { version = "0.34.0", default-features = false, optional = true }
 
 [features]
 # HttpFetcher: the default JWKS fetcher of JwtServiceAuthenticator and the
@@ -92,10 +102,21 @@ postgres = ["http-client", "dep:deadpool-postgres", "dep:tokio-postgres", "dep:n
 # A stack server's log (D57): one JSON object per line on stdout, in the
 # TypeScript logger's shape, as a layer over tracing-subscriber's registry.
 logging = ["dep:tracing-subscriber"]
+# A stack deployable's trace export (D67): telemetry::start installs the
+# log with an OpenTelemetry layer beside it when the environment names an
+# OTLP endpoint, the server layer and the calls clients' transport make
+# server and client spans, and a worker's loop a span per message. The
+# exporter sends through the http-client feature's reqwest, on a runtime of
+# its own.
+otel = ["logging", "http-client", "dep:opentelemetry", "dep:opentelemetry_sdk", "dep:opentelemetry-otlp", "dep:opentelemetry-http", "dep:tracing-opentelemetry", "dep:bytes"]
 
 [dev-dependencies]
 tokio = { version = "1.52.2", features = ["macros", "rt-multi-thread", "time", "test-util"] }
 tower = { version = "0.5", features = ["util"] }
+# The telemetry test's OTLP receiver decodes the export requests with the
+# exporter's own message types.
+opentelemetry-proto = { version = "0.33.1", default-features = false, features = ["gen-tonic-messages", "trace"] }
+prost = { version = "0.14.1", default-features = false, features = ["std"] }
 
 # The identity vectors, and the store and route tests over the SQLite
 # client; the store tests also run on Postgres with identity-postgres and a
@@ -128,6 +149,11 @@ required-features = ["postgres"]
 [[test]]
 name = "worker_log"
 required-features = ["postgres", "logging"]
+
+# Trace export against an OTLP receiver in the test's process (D67).
+[[test]]
+name = "telemetry"
+required-features = ["otel"]
 
 [lints.clippy]
 all = { level = "deny", priority = -1 }

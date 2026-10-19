@@ -182,7 +182,41 @@ runtimes' (D51):
   releases their messages. It logs Go's and TypeScript's messages and
   fields (`queue`, `message`, `attempt`, `took`, `error`, `retryIn`) through
   `tracing`. It claims through the `WorkerQueue` trait, which
-  `PostgresQueue` implements.
+  `PostgresQueue` implements. With the `otel` feature and export on, each
+  message's handling is a consumer span, `process <queue>`.
+- The `otel` feature's `telemetry` module (D67), OpenTelemetry trace
+  export over OTLP/HTTP in protobuf. `telemetry::start(Defaults { stack,
+  kind, name })` is what a generated server's, job's or worker's `main`
+  calls in place of `logging::init_json_as`: it installs the same log and,
+  when the environment sets `OTEL_EXPORTER_OTLP_ENDPOINT` or
+  `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` and `OTEL_SDK_DISABLED` is not
+  `true`, `tracing-opentelemetry`'s layer beside it, which takes spans but
+  not events, and not the spans that live as long as the process (an
+  `api_span`, the worker loop's). It reads OpenTelemetry's variables as
+  Go's and TypeScript's runtimes do: `OTEL_SERVICE_NAME` and
+  `OTEL_RESOURCE_ATTRIBUTES` over the defaults (`service.name` the
+  deployable, `service.namespace` the stack,
+  `superschematic.deployable.kind`), the six standard samplers,
+  `tracecontext`, `baggage` or `none` for `OTEL_PROPAGATORS`, and
+  `http/protobuf` alone for the protocol; a value it does not support is a
+  `TelemetryError` naming the variable. The `Telemetry` it returns flushes
+  the spans still buffered, within five seconds, when it drops. The
+  exporter sends through the `http-client` feature's `reqwest`, on a
+  current-thread runtime of its own from the batch processor's thread, so
+  export runs whatever runtime the process runs on. `ServerLayer::new(&[
+  operations::ALL, ...])` is the layer of a server's app: a server span per
+  request but `/healthz` and `/readyz`, the child of an incoming
+  `traceparent`, named `<METHOD> <path template>` by the most literal
+  operation whose route takes it. `transport()` is the `transport` of a
+  `calls` edge's SDK client, `None` with export off: a client span per
+  call, whose context the call carries in `traceparent` and `tracestate`.
+  `job(name, run)` runs a job's method in a span named after its `@job`
+  class. The runtime's spans carry their OpenTelemetry attributes beside
+  `tracing`'s fields, and the log leaves out a span's `otel.` fields, so
+  its lines are the same with export on or off. `telemetry::dispatch`
+  builds the subscriber without installing it, for a test.
+  `tests/telemetry.rs` runs each against an OTLP/HTTP receiver in the
+  test's process.
 
 The Postgres tests run on the database
 `SUPERSCHEMATIC_POSTGRES_TEST_DATABASE_URL` names, and skip without one;
@@ -194,7 +228,7 @@ the descriptors tsgen's golden `queues.ts` holds for them, as JSON. The
 loop's timing runs on tokio's paused clock with no database:
 
 ```
-cargo test --features postgres,identity-postgres,identity-sqlite,logging
+cargo test --features postgres,identity-postgres,identity-sqlite,logging,otel
 ```
 
 ## Identity (D50)
