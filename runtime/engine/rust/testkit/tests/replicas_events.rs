@@ -546,3 +546,145 @@ fn without_a_listener_a_stream_catches_up_by_reading_at_each_heartbeat() {
         reader.shutdown();
     }
 }
+
+/// Calls each soak thread makes: `ENGINE_SOAK_CALLS`, 200 unless set.
+fn soak_calls() -> usize {
+    std::env::var("ENGINE_SOAK_CALLS")
+        .ok()
+        .and_then(|calls| calls.parse().ok())
+        .unwrap_or(200)
+}
+
+/// Long, on Postgres: sixteen writers on two engines through four
+/// namespaces, a stream per namespace on a third engine, and its listener's
+/// session ended every 200 ms; each stream sees its namespace's log, every
+/// event once and in order. `make engine-rust-soak` runs it.
+#[test]
+#[ignore = "a soak; make engine-rust-soak runs it"]
+fn soak_streams_through_racing_writers_and_dropped_listeners() {
+    const NAMESPACES: [&str; 4] = ["a", "b", "c", "d"];
+    for target in targets("soak_streams") {
+        if target.dialect != Dialect::Postgres {
+            continue;
+        }
+        let started = Instant::now();
+        let admin = Admin::new(&target).expect("the administrator");
+        let writers = [0, 1].map(|n| {
+            open(
+                &target,
+                fixtures(),
+                &replica_name(&format!("writer{n}")),
+                false,
+            )
+        });
+        let name = replica_name("listener");
+        let listener = open(&target, fixtures(), &name, true).shared();
+        let document = item_document(json!([{"name": "test.Counter"}]));
+        for namespace in NAMESPACES {
+            writers[0]
+                .namespaces()
+                .create(&alice(), namespace)
+                .expect("namespace");
+            publish(&writers[0], &document, Some(namespace));
+            create_in(&writers[0], Some(namespace), "i1");
+        }
+        let done = AtomicBool::new(false);
+        let calls = soak_calls();
+        let seen: Vec<Vec<i64>> = thread::scope(|scope| {
+            let done = &done;
+            let streams: Vec<_> = NAMESPACES
+                .iter()
+                .map(|namespace| {
+                    let listener = &listener;
+                    scope.spawn(move || {
+                        let mut stream = start_stream(
+                            listener,
+                            &StreamOptions {
+                                page_size: Some(25),
+                                heartbeat_ms: Some(1_000),
+                            },
+                            &alice(),
+                            &ReadEvents {
+                                namespace: Some(namespace),
+                                ..ReadEvents::default()
+                            },
+                        )
+                        .expect("a stream");
+                        let mut cursors = Vec::new();
+                        let mut idle = 0;
+                        loop {
+                            match stream.next(Duration::from_millis(500)) {
+                                Pull::Data(bytes) => {
+                                    let text = String::from_utf8(bytes).expect("UTF-8");
+                                    let events = frame_events(&text);
+                                    idle = if events.is_empty() { idle + 1 } else { 0 };
+                                    cursors.extend(events.into_iter().map(|(cursor, _)| cursor));
+                                }
+                                Pull::Pending => idle += 1,
+                                Pull::End => panic!("the stream ended"),
+                            }
+                            if done.load(Ordering::SeqCst) && idle >= 3 {
+                                return cursors;
+                            }
+                        }
+                    })
+                })
+                .collect();
+            let killer = scope.spawn(|| {
+                let mut ended = 0;
+                while !done.load(Ordering::SeqCst) {
+                    ended += admin.terminate_listener(&name);
+                    thread::sleep(Duration::from_millis(200));
+                }
+                ended
+            });
+            let threads: Vec<_> = (0..16)
+                .map(|thread| {
+                    let engine = &writers[thread % 2];
+                    scope.spawn(move || {
+                        for n in 0..calls {
+                            let namespace = NAMESPACES[(thread + n) % NAMESPACES.len()];
+                            retrying(TRIES, || {
+                                engine.instances().invoke(
+                                    &alice(),
+                                    "Item",
+                                    "i1",
+                                    "increment",
+                                    &json!({}),
+                                    WriteOptions {
+                                        namespace: Some(namespace),
+                                        ..Default::default()
+                                    },
+                                )
+                            })
+                            .0
+                            .expect("increment");
+                        }
+                    })
+                })
+                .collect();
+            for thread in threads {
+                thread.join().expect("a writer");
+            }
+            done.store(true, Ordering::SeqCst);
+            let ended = killer.join().expect("the killer");
+            assert!(ended > 0, "the listener's session ended");
+            streams
+                .into_iter()
+                .map(|stream| stream.join().expect("a stream"))
+                .collect()
+        });
+        for (namespace, cursors) in NAMESPACES.iter().zip(&seen) {
+            let log: Vec<i64> = all_events(&writers[0], Some(namespace))
+                .iter()
+                .map(|event| event.cursor)
+                .collect();
+            assert_eq!(cursors, &log, "namespace {namespace}");
+        }
+        listener.shutdown();
+        eprintln!(
+            "soak streams, 16 threads x {calls} calls: {:?}",
+            started.elapsed()
+        );
+    }
+}

@@ -457,3 +457,87 @@ fn timers_fires_each_deadline_once_across_a_handover_and_overlapping_passes() {
         assert!(fired.values().all(|&count| count == 1), "{fired:?}");
     }
 }
+
+/// Long, on Postgres: a writer creates orders through two namespaces while
+/// the lease holder's session is ended every 300 ms, the lease passing back
+/// and forth; every create is handled once. `ENGINE_SOAK_CALLS` orders
+/// (200 unless set). `make engine-rust-soak` runs it.
+#[test]
+#[ignore = "a soak; make engine-rust-soak runs it"]
+fn soak_reactions_through_lease_handovers() {
+    for target in targets("soak_handovers") {
+        if target.dialect != Dialect::Postgres {
+            continue;
+        }
+        let started = std::time::Instant::now();
+        let admin = Admin::new(&target).expect("the administrator");
+        let key = lease_key(&target);
+        let handled = Handled::default();
+        let names = [replica_name("first"), replica_name("second")];
+        let engines = [0, 1].map(|n| {
+            let label = ["first", "second"][n];
+            let behaviors = BehaviorSet::new().with(handled.ledger(label));
+            Engine::open(replica_options(&target, behaviors, &names[n]))
+                .expect("open a replica")
+                .shared()
+        });
+        for namespace in ["a", "b"] {
+            engines[0]
+                .namespaces()
+                .create(&alice(), namespace)
+                .expect("namespace");
+            publish(&engines[0], &ledger_document("Order"), Some(namespace));
+        }
+        for engine in &engines {
+            engine.runner().start().expect("start");
+        }
+        let orders: usize = std::env::var("ENGINE_SOAK_CALLS")
+            .ok()
+            .and_then(|calls| calls.parse().ok())
+            .unwrap_or(200);
+        let namespace_of = |n: usize| if n.is_multiple_of(2) { "a" } else { "b" };
+        let writing = std::sync::atomic::AtomicBool::new(true);
+        let handovers = thread::scope(|scope| {
+            let killer = scope.spawn(|| {
+                let mut handovers = 0;
+                while writing.load(Ordering::SeqCst) {
+                    handovers += usize::from(admin.terminate_lock_holder(key));
+                    thread::sleep(Duration::from_millis(300));
+                }
+                handovers
+            });
+            for n in 0..orders {
+                create_in(
+                    &engines[n % 2],
+                    "Order",
+                    Some(namespace_of(n)),
+                    &format!("o{n}"),
+                );
+            }
+            wait_for("every order handled", || {
+                handled
+                    .by
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .len()
+                    >= orders
+            });
+            writing.store(false, Ordering::SeqCst);
+            killer.join().expect("the killer")
+        });
+        // A moment for a pass that would handle one twice.
+        thread::sleep(Duration::from_millis(500));
+        for n in 0..orders {
+            let id = format!("o{n}");
+            assert_eq!(handled.of(&id).len(), 1, "{id}: {:?}", handled.of(&id));
+            assert_eq!(note_count(&engines[0], namespace_of(n), &id), 1, "{id}");
+        }
+        for engine in &engines {
+            engine.shutdown();
+        }
+        eprintln!(
+            "soak handovers, {orders} orders, {handovers} handovers: {:?}",
+            started.elapsed()
+        );
+    }
+}

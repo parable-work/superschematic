@@ -304,8 +304,13 @@ engine-link-check:
 # engines on one database racing long, with more threads than either pool
 # has connections, then the invariants the CI tests check (no lost update,
 # no repeated seq, cursor or number, no over-committed budget, no job
-# claimed twice). They need SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL;
-# ENGINE_SOAK_CALLS sets the calls each thread makes (200 unless set).
+# claimed twice); event streams that see every event once while their
+# listener's session is ended every 200 ms; and reactions handled once
+# each while the runner's lease is taken from its holder every 300 ms
+# (testkit/tests/replicas_*.rs). They need
+# SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL; ENGINE_SOAK_CALLS sets the calls
+# each thread makes, and the orders the handover soak creates (200 unless
+# set).
 engine-rust-soak:
 	@test -n "$$SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL" || \
 		{ echo "set SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL to the Postgres the soaks run against" >&2; exit 1; }
