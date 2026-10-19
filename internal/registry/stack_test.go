@@ -65,6 +65,10 @@ func TestRegisterPlatformRejects(t *testing.T) {
 		{"bad settings schema", func(s *PlatformSpec) { s.Settings = json.RawMessage(`{"type": 7}`) }, "Settings"},
 		{"identity config not an object", func(s *PlatformSpec) { s.IdentityConfig = `["cookie"]` }, "IdentityConfig is not a JSON object"},
 		{"unknown artifact", func(s *PlatformSpec) { s.Artifact = "tarball" }, `declares artifact "tarball" (want image or bundle)`},
+		{"no identity beside an identity config", func(s *PlatformSpec) {
+			s.NoIdentity = "its isolates hash no passwords"
+			s.IdentityConfig = `{"cookie": {"secure": false}}`
+		}, "declares an identity config and says it runs no identity runtime"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -87,6 +91,13 @@ func TestRegisterPlatformRejects(t *testing.T) {
 		spec := sqlPlatform("fake.sql")
 		spec.IdentityConfig = `{"cookie": {"secure": false}}`
 		if err := New(naming.Default()).RegisterPlatform(spec); err == nil || !strings.Contains(err.Error(), "only a server platform does") {
+			t.Fatalf("RegisterPlatform = %v", err)
+		}
+	})
+	t.Run("database that runs no identity runtime", func(t *testing.T) {
+		spec := sqlPlatform("fake.sql")
+		spec.NoIdentity = "it serves no API"
+		if err := New(naming.Default()).RegisterPlatform(spec); err == nil || !strings.Contains(err.Error(), "only a server platform serves an API over the user model") {
 			t.Fatalf("RegisterPlatform = %v", err)
 		}
 	})

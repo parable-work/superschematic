@@ -79,6 +79,24 @@ type Lowered struct {
 	Records []*ir.DNSRecord
 }
 
+// UnrealizableError is a platform's refusal of a deployable it cannot
+// realize, such as a name its provider refuses (D64). A Lower that returns
+// one, made with Unrealizable, has resolution report the deployable as
+// unrealizable, as it reports a language its platform does not run, rather
+// than as a failed lowering.
+type UnrealizableError struct {
+	// Reason says what the platform cannot realize, and what to change.
+	Reason string
+}
+
+func (e *UnrealizableError) Error() string { return e.Reason }
+
+// Unrealizable returns an UnrealizableError whose reason is the format
+// applied to args.
+func Unrealizable(format string, args ...any) error {
+	return &UnrealizableError{Reason: fmt.Sprintf(format, args...)}
+}
+
 // PlatformSpec realizes one deployable kind on one runtime: Cloud Run
 // servers, Cloud SQL databases, local processes (section 6.1).
 type PlatformSpec struct {
@@ -133,6 +151,15 @@ type PlatformSpec struct {
 	// server runs with the identity runtime's defaults. Only a server
 	// platform declares one: a job builds no identity service.
 	IdentityConfig string
+
+	// NoIdentity, when set, says why a server on this platform cannot
+	// serve an API over the user model, which authenticates with the
+	// identity runtime (D50): resolution refuses such a server as
+	// unrealizable, giving the reason. The cloudflare.workers platform sets
+	// it, since the TypeScript identity runtime hashes passwords with
+	// node:crypto's argon2, which Workers lacks (D64). Only a server
+	// platform sets it, and not beside IdentityConfig.
+	NoIdentity string
 
 	// NameOf returns the deployable's name in the environment, a string or
 	// a value that references the environment's parameters.
@@ -665,6 +692,14 @@ func (r *Registry) RegisterPlatform(spec PlatformSpec) error {
 		}
 		if err := json.Unmarshal([]byte(spec.IdentityConfig), &object); err != nil || object == nil {
 			return fmt.Errorf("registry: platform %q IdentityConfig is not a JSON object: %v", spec.Name, err)
+		}
+	}
+	if spec.NoIdentity != "" {
+		if spec.Kind != ir.DeployableServer {
+			return fmt.Errorf("registry: %s platform %q says why it runs no identity runtime; only a server platform serves an API over the user model", spec.Kind, spec.Name)
+		}
+		if spec.IdentityConfig != "" {
+			return fmt.Errorf("registry: platform %q declares an identity config and says it runs no identity runtime", spec.Name)
 		}
 	}
 	if len(spec.Settings) > 0 {

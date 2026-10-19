@@ -5,6 +5,7 @@ import (
 
 	"github.com/parable-work/superschematic/internal/stack"
 	ir "github.com/parable-work/superschematic/ir"
+	"github.com/parable-work/superschematic/registry"
 	"github.com/parable-work/superschematic/stack/stacktest"
 )
 
@@ -60,4 +61,46 @@ func TestIdentityConfigFieldCollisions(t *testing.T) {
 	api.Config.Fields = append(api.Config.Fields, stack.ConfigField{Name: "SHOP_API_IDENTITY_TTL"})
 	_, errs := resolve(t, assemble(t), stacktest.Shop(), services, "Staging")
 	mustFail(t, errs, stack.CodeFieldCollision, "server shop-api: config field SHOP_API_IDENTITY_TTL of ShopApiConfig collides with SHOP_API_IDENTITY, the identity config field of shop-api")
+}
+
+// noIdentityTarget places servers on a platform that runs no identity
+// runtime, as cloudflare.workers runs none (D64).
+type noIdentityTarget struct{}
+
+func (noIdentityTarget) Name() string { return "noidentity" }
+
+func (noIdentityTarget) Register(r *registry.Registry) error {
+	if err := r.RegisterPlatform(registry.PlatformSpec{
+		Name: "noidentity.run", Provider: "noidentity", Kind: ir.DeployableServer,
+		Languages:  []string{registry.APILanguageTypeScript},
+		NoIdentity: "its isolates hash no passwords",
+		NameOf:     func(ctx registry.PlatformContext) any { return ctx.Deployable.Name },
+		AddressOf:  func(ctx registry.PlatformContext) any { return "https://" + ctx.Deployable.Name },
+		Lower:      func(registry.PlatformContext) (registry.Lowered, error) { return registry.Lowered{}, nil },
+	}); err != nil {
+		return err
+	}
+	return r.RegisterTarget(registry.TargetSpec{
+		Name:      "noidentity",
+		Platforms: map[ir.DeployableKind]string{ir.DeployableServer: "noidentity.run"},
+	})
+}
+
+// TestAPlatformThatRunsNoIdentityRuntime: a server of an API over the user
+// model, on a platform that says it runs no identity runtime, is refused
+// as unrealizable with the platform's reason; the same server of an API
+// without one resolves.
+func TestAPlatformThatRunsNoIdentityRuntime(t *testing.T) {
+	s := &ir.Stack{
+		Name:         "edge-stack",
+		Deploy:       []ir.ServiceRef{stacktest.ShopStorefront},
+		Environments: []*ir.Environment{{Name: "Edge", Target: "noidentity"}},
+	}
+	reg := assemble(t, noIdentityTarget{})
+	mustResolve(t, reg, s, stacktest.AcmeShop(), "Edge")
+
+	services := stacktest.AcmeShop()
+	service(services, "shop-storefront").Identity = true
+	_, errs := resolve(t, reg, s, services, "Edge")
+	mustFail(t, errs, stack.CodeUnrealizable, "server shop-storefront serves shop-storefront, an API over the user model, which authenticates with the identity runtime (D50), and platform noidentity.run runs none: its isolates hash no passwords")
 }
