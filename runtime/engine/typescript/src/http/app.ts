@@ -92,6 +92,7 @@ import type { ToolFilter } from '../tools/catalog.js';
 import { AsyncNativeEngine } from '../native/async.js';
 import { NativeEngine } from '../native/engine.js';
 import { nativeEngineApp } from '../native/http.js';
+import { EngineBackground } from '../server/background.js';
 import { callerAuthenticator, principalOf } from './callers.js';
 import { engineProblem } from './problems.js';
 import { checkStreamOptions, eventStream, type StreamOptions } from './stream.js';
@@ -117,9 +118,18 @@ export interface EngineHttpOptions extends RouterRuntimeOptions {
    * Which of the user model's routes the app serves beside login, logout,
    * me, capabilities and changePassword: register (off by default), and
    * the administration routes under /auth/admin (on when the store has
-   * roles).
+   * roles). sessions false serves none of them: the server that mounts
+   * the app serves the user model's routes itself (an API's, D58), and
+   * the identity service authenticates the app's routes and answers their
+   * CORS alone.
    */
-  identityRoutes?: { register?: boolean; administration?: boolean };
+  identityRoutes?: { register?: boolean; administration?: boolean; sessions?: boolean };
+  /**
+   * Aborted when the host stops serving: every event stream ends then, as
+   * when its client goes away, so a server's shutdown waits for none. On
+   * the Rust engine.
+   */
+  done?: AbortSignal;
   /**
    * Narrows the tools document each caller gets, as the MCP endpoint's
    * `tools` option does (EngineMcpOptions.tools): a tool it leaves out is
@@ -178,10 +188,10 @@ const EVENT_QUERY: readonly ParamSpec[] = [
  * documents. It serves the Rust engine too, openEngineAsync's on Postgres
  * included, as an adapter over the engine's own routes (D58).
  */
-export function engineApp(engine: Engine | AsyncNativeEngine, options: EngineHttpOptions = {}): Hono {
+export function engineApp(engine: Engine | AsyncNativeEngine | EngineBackground, options: EngineHttpOptions = {}): Hono {
   // The Rust engine serves its own routes (D58); this app is its adapter.
-  if (engine instanceof AsyncNativeEngine || (engine as unknown) instanceof NativeEngine) {
-    return nativeEngineApp(engine as unknown as NativeEngine | AsyncNativeEngine, options);
+  if (engine instanceof AsyncNativeEngine || engine instanceof EngineBackground || (engine as unknown) instanceof NativeEngine) {
+    return nativeEngineApp(engine as unknown as NativeEngine | AsyncNativeEngine | EngineBackground, options);
   }
   const stream = checkStreamOptions(options.stream ?? {});
   const deployed = options.onError;
@@ -443,7 +453,7 @@ export function engineApp(engine: Engine | AsyncNativeEngine, options: EngineHtt
 
   // The user model's session routes, through the runtime like every route,
   // with the contract's rate limits on login, register and changePassword.
-  if (identity) {
+  if (identity && options.identityRoutes?.sessions !== false) {
     const administration = options.identityRoutes?.administration ?? identity.store.hasRoles();
     const sets = {
       sessions: { register: options.identityRoutes?.register === true },

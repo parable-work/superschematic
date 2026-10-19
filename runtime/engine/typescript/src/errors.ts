@@ -288,6 +288,17 @@ export class CreateParamsError extends EngineError {
   }
 }
 
+/** A tool call named a handle the namespace has no tool for, as the caller sees it. */
+export class UnknownToolError extends EngineError {
+  readonly tool: string;
+
+  constructor(tool: string, namespace: string) {
+    super('not_found', `namespace ${namespace} has no tool ${JSON.stringify(tool)}`);
+    this.name = 'UnknownToolError';
+    this.tool = tool;
+  }
+}
+
 /**
  * A defect in a behavior's code rather than a refused request: a result its
  * resultSchema refuses, a field value that is not JSON, SQL outside its own
