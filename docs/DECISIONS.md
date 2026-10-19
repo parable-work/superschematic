@@ -4378,10 +4378,12 @@ remote, and a repository that turns the workflow on.
 
 D51, amended, builds a pinned Bun in the workflow, and installing the
 TypeScript workspace and type-checking TypeScript servers in `check`.
+`check` also compiles each Go job and worker and type-checks each
+TypeScript job and worker (`TestGoJobsAndWorkersInCheck`), and the
+workflow pins Node to the release `tools.env` names (`cigen.NodeVersion`,
+held to it by `TestNodeIsPinnedAsToolsEnvPinsIt`).
 
-Not built:
-- a check that the committed workflow is current;
-- a pinned Node release in the workflow.
+Not built: a check that the committed workflow is current.
 
 The rule is reversible until the first release.
 
@@ -5142,10 +5144,9 @@ bucket's IAM policy carries the project's convenience bindings, through
 which `planner`'s `roles/viewer` would read its objects. A project bootstrapped before #338 needs `stack
 bootstrap` again for `deployer`'s new role.
 
-Not built:
-- a `Bucket` in the Rust runtime, so gcp's connectors refuse a bucket
-  edge from a Rust server or job;
-- buckets on another provider.
+Its second amendment, below, builds a `Bucket` in the Rust runtime.
+
+Not built: buckets on another provider.
 
 The rule is reversible until the first release.
 
@@ -5539,9 +5540,9 @@ D65 builds what this left out of a stack: Rust jobs and workers, and an
 output root that builds against a mirror of each implementation crate,
 so `stack dev --out` elsewhere no longer collides in Cargo's lockfile.
 
-Not built:
-- buckets from a Rust server;
-- OpenTelemetry export.
+D54's second amendment builds buckets from a Rust server.
+
+Not built: OpenTelemetry export.
 
 The rule is reversible until the first release.
 
@@ -5847,8 +5848,6 @@ worker has run on Cloud Run.
 
 Not built:
 - a `POINT` or `INTERVAL` column in a TypeScript queue's message;
-- type-checking a TypeScript job's or worker's package in the generated
-  CI, which checks the servers';
 - a `POINT` or `INTERVAL` column in a Rust worker's message (D65 builds
   Rust workers).
 
@@ -6271,9 +6270,10 @@ the decorator would answer a list where the others answer a page (D35,
 D42). Until a generator renders the decorator it refuses an operation that
 declares it, naming itself, as generators refused behaviors (D16). Follows:
 a sort argument; a previous cursor; a page size control in the console;
-and removing `meta.totalCount` and `links`, which the Go runtime declares
-and the OpenAPI document advertises and no server writes, a change to every
-golden of its own.
+and removing `meta.totalCount` and `links`, which the Go runtime declared
+and the OpenAPI document advertised and no server wrote. The last is
+built: `meta` holds `requestId` alone in every runtime and document
+(`TestOpenAPIEnvelopeIsDataAndMeta`).
 
 The rule is reversible until the first release.
 
@@ -6701,8 +6701,8 @@ Status: built.
 
 No Rust job or worker has run on Cloud Run.
 
-Not built, and out of this entry: buckets from a Rust server, job or
-worker; and OpenTelemetry export. A TypeScript build into another output
+Not built, and out of this entry: OpenTelemetry export (D54's second
+amendment builds buckets from a Rust server, job or worker). A TypeScript build into another output
 root relinks the project's own `node_modules` there, as a Rust build did
 before the mirror.
 
@@ -6726,5 +6726,30 @@ Status: built. `TestCrossKindReferenceRules` admits API from API;
 `TestReferenceToADependencysType` resolves a reference to a General and to
 an API dependency's type; `TestAPIsReferringToEachOtherAreRefused` refuses
 two APIs that refer to each other as a cycle.
+
+The rule is reversible until the first release.
+
+### D54, amended: a Rust server, job or worker reaches its buckets through the Rust runtime's `Bucket`
+
+D54 gave Go and TypeScript a `Bucket` and left Rust out: the Rust runtime
+read a bucket connection (`stackconfig::Bucket`, `load_bucket`) and had
+nothing to open it with, so gcp's and the local target's connectors
+refused a bucket edge from a Rust server, job or worker (D57, D65).
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The Rust HTTP runtime's `bucket` module, with no feature, is the twin of Go's `bucket` package and TypeScript's main entry: an async `Bucket` trait (`name`, `put`, `get`, `delete`, `list`, `signed_url`) a `Deps` holds as `Arc<dyn Bucket>`, a `Body` of bytes, text or a stream, a `Reader` that carries the `Object` and streams its chunks, `ListOptions` whose page is 1000 by default and refuses 0, and `SignedUrlOptions` for a GET or a PUT, up to seven days in whole seconds. `BucketError::NotFound` is Go's `ErrNotFound` and TypeScript's `ObjectNotFoundError`, and a name, an expiry or a content type the others refuse is refused with their messages before any request. | A Rust interface of its own shape, which an implementation moved between languages would relearn. |
+| Its GCS implementation, behind the `gcs` feature, calls Cloud Storage's JSON API over the runtime's HTTP client, as D57's pool reaches Cloud SQL, with no Google library: each request carries the workload's access token from the metadata server, cached until shortly before it expires; `put` is one multipart upload, streamed for a stream; `get` reads the metadata, then that generation's bytes; a read that fails with 408, 429, a 5xx or no answer is tried twice more. A signed URL is V4, signed by IAM `signBlob` as the account the metadata server names, which the grant gcp gives every workload with a bucket already allows; its canonical request is `@google-cloud/storage`'s, byte for byte. Against the emulator (the connection's endpoint or `STORAGE_EMULATOR_HOST`) it sends no credential and signs with a key the process makes, as the other runtimes do. It reads no credentials file, so off Google Cloud it reaches a bucket through an emulator alone. | Google's Rust client, a large dependency for six calls and a second way to authenticate beside Cloud SQL's. |
+| A Rust API that lists a bucket gets a `Deps` field per bucket, its service's name in snake case, and its `EnvConfig` reads `{SERVICE}_BUCKET`. A Rust server's, job's and worker's `main.rs` opens each bucket once and hands it to every API that lists it, and only an entrypoint with a bucket turns on `gcs`. The local target derives the bucket's name and the emulator's endpoint for a Rust workload, and gcp grants it `roles/storage.objectUser` and signing as itself, as it does a Go one. | |
+
+Status: built. The runtime's tests run the trait and the GCS client
+against a fake GCS server and metadata server, and against
+fake-gcs-server, and hold its signatures to vectors from
+`@google-cloud/storage`; CI and `make rust` run its `gcs` feature.
+servergen's Rust fixture stack gains the bucket `rs-media`, which
+`rs-stock` lists, and `TestStackDevRunsRustJobsAndWorkers` has the job
+put objects, the worker read and delete them, and the server list the
+rest and sign a URL the test downloads from the emulator. No Rust
+workload has reached a bucket on Google Cloud.
 
 The rule is reversible until the first release.
