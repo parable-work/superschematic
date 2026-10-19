@@ -20,11 +20,18 @@ const consoleService = "fixture-console-api"
 // with the pages on, their lists live, and runs cargo clippy, then cargo
 // test, with consoleAppTest. Through Router::handle: a paged list shows a
 // page of its rows, a "Next page" link carrying the next cursor and the
-// filter and the limit, and on a later page a "First page" link; the
-// filter holds neither; a limit or cursor the route refuses, and a cursor
+// filter and the limit, and on a later page a "First page" link and a
+// "Previous page" link, which the history in the query's back gives (D44,
+// amended): walked forward and back, each Previous lands on the page left,
+// a history past its bound drops its oldest cursor with the mark first,
+// and one that breaks its rule, or comes without a cursor, links no page
+// before and is never refused. After the links a size form offers the
+// route's sizes, the limit sent selected, holding the filter, and starts
+// at the first page; the filter holds the limit sent, and neither form a
+// cursor or a history. A limit or cursor the route refuses, and a cursor
 // the implementation cannot read, is the route's 400 as the form's own
-// message, and a paged list without a filter renders no form and its
-// refusal alone. The search box is the filter's first control, a search
+// message, and a paged list without a filter renders no filter form and
+// its refusal alone. The search box is the filter's first control, a search
 // form's, labeled Search, and filters by each word in any case, its pages
 // carrying it. A reference is a select of the options operation's items
 // on the new page, the app's own page and an action's form, from one
@@ -36,9 +43,10 @@ const consoleService = "fixture-console-api"
 // their rows through the reference of getProduct's productId, name their
 // suppliers, a target's own reference, beside the reviews and lines that
 // name products, and a product's page shows the first page of its reviews
-// and a link to the next. The live list's shard pages in place, a
-// procedure answers a page record, and the site's pages, a paged list at
-// the path page, link their next and first pages.
+// and a link to the next. The live list's shard pages in place, back by
+// the history in its signal's query too, and its size form sets the
+// signal; a procedure answers a page record, and the site's pages, a paged
+// list at the path page, link their next and first pages.
 func TestTheConsolePagesPicksAndSearches(t *testing.T) {
 	cargoTestCrate(t, consoleService, consoleAppTest)
 }
@@ -105,7 +113,7 @@ func TestAPagedOperationIsItsPageEverywhere(t *testing.T) {
 		},
 		"pages.rs": {
 			`<form method="get" class="ss-filter" role="search" data-ss-live="orders"`,
-			"pager(base: href.clone(), first: None, next: next_page)",
+			"pager(base: href.clone(), first: None, prev: None, next: next_page)",
 			"Ok(items) => suppliers_rows(items: items),\n            Err(refusal) => refused(refusal: page_refusal(refusal, &[]), next: next),",
 		},
 	} {
@@ -309,6 +317,87 @@ func TestAPageRecordNamedLikeATypeIsRefused(t *testing.T) {
 	_, err := buildDir(t, registry.DefaultNaming(), dir, testpaths.TempDir(t), rustOutputs(), nil)
 	if err == nil || !strings.Contains(err.Error(), "the page order.listOrders returns is the record OrderPageRecord, and so is the record of the type OrderPage; rename the type") {
 		t.Fatalf("build: %v, want the page record's name refused", err)
+	}
+}
+
+// TestThePagerGoesBackAndSetsItsSize reads fixture-console-api's pages: a
+// paged list keeps the cursors of the pages before it in the query's back,
+// at most MAX_BACK characters, links the page before with rel="prev", and
+// renders a size form of the route's sizes, which a live list submits in
+// place.
+func TestThePagerGoesBackAndSetsItsSize(t *testing.T) {
+	files, _ := readCrate(t, registry.DefaultNaming(), consoleService, livePagesOutputs())
+	pages := files["pages.rs"]
+	for _, want := range []string{
+		"const MAX_BACK: usize = 4096;",
+		`<a rel="prev" href=(href.clone())`,
+		`<form method="get" class="ss-page-size" data-ss-live-size="orders"`,
+		`document.querySelector('form[data-ss-live-size=\"orders\"]')`,
+		"const ORDERS_PAGE_SIZES: &[i64] = &[2, 5];",
+		"const SUPPLIERS_PAGE_SIZES: &[i64] = &[1, 2];",
+		"let back = Back::read(&sent, cursor.is_some());",
+		`<input type="hidden" name="limit" value=(limit)>`,
+	} {
+		if !strings.Contains(pages, want) {
+			t.Errorf("pages.rs lacks %q", want)
+		}
+	}
+	// A section's pager has no history and no size form.
+	if !strings.Contains(pages, "pager(base: href.clone(), first: None, prev: None, next: next_page)") {
+		t.Error("the reviews' section pages with more than its next page")
+	}
+	// Without the shards, the pager component renders them.
+	static, _ := readCrate(t, registry.DefaultNaming(), consoleService, pagesOutputs())
+	for _, want := range []string{
+		`<a rel="prev" href=(pager_href(&base, &earlier))>"Previous page"</a>`,
+		`<form method="get" class="ss-page-size">`,
+		"pager(base: base, first: first_page, prev: prev_page, next: next_page, sizes: sizes, hidden: hidden)",
+		"let back = Back::read(uri(cx).query().unwrap_or_default(), cursor.is_some());",
+	} {
+		if !strings.Contains(static["pages.rs"], want) {
+			t.Errorf("pages.rs without live lists lacks %q", want)
+		}
+	}
+	if strings.Contains(static["pages.rs"], "data-ss-live-size") {
+		t.Error("pages.rs without live lists submits a size form in place")
+	}
+}
+
+// TestAnArgumentNamedBackHasNoPreviousPage builds fixture-console-api with
+// a back argument on listOrders: the orders' list links no page before its
+// own and keeps no history, the build log says why, and the other lists go
+// back as before.
+func TestAnArgumentNamedBackHasNoPreviousPage(t *testing.T) {
+	dir := consoleCopy(t, func(schema string) string {
+		return strings.Replace(schema, "          - name: statuses\n", "          - name: back\n            typeRef: { name: string }\n            isQuery: true\n          - name: statuses\n", 1)
+	})
+	root := testpaths.TempDir(t)
+	var log strings.Builder
+	if _, err := buildDir(t, registry.DefaultNaming(), dir, root, livePagesOutputs(), &log); err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	want := "  - topcoat: no previous page for orders: order.listOrders declares an argument named back, the query parameter the console keeps the earlier pages' cursors in\n"
+	if !strings.Contains(log.String(), want) {
+		t.Errorf("the build log lacks %q:\n%s", want, log.String())
+	}
+	data, err := os.ReadFile(filepath.Join(topcoat.Dir(root, consoleService), "src", "pages.rs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pages := string(data)
+	orders := pages[strings.Index(pages, "async fn orders_list("):]
+	orders = orders[:strings.Index(orders, "\n}\n")]
+	for _, banned := range []string{`rel="prev"`, "Back::read", "back.push"} {
+		if strings.Contains(orders, banned) {
+			t.Errorf("the orders' list holds %q:\n%s", banned, orders)
+		}
+	}
+	if !strings.Contains(orders, "pager_query(&pairs, Some(next.as_str()), None)") || !strings.Contains(orders, `class="ss-page-size"`) {
+		t.Errorf("the orders' list lost its Next page or its size form:\n%s", orders)
+	}
+	products := pages[strings.Index(pages, "async fn products_list("):]
+	if !strings.Contains(products[:strings.Index(products, "\n}\n")], `rel="prev"`) {
+		t.Error("the products' list has no page before")
 	}
 }
 
@@ -699,9 +788,10 @@ async fn a_paged_list_links_its_next_and_its_first_page_with_its_filter() {
     assert_eq!(numbers(&first.html), ["A-1", "A-2"], "{}", first.html);
     assert!(first.html.contains(r#"<nav class="ss-pager" aria-label="Pages">"#), "{}", first.html);
     assert!(link(&first.html, "first").is_none(), "{}", first.html);
-    // The filter holds neither the cursor nor the limit, so a submitted
-    // filter starts at the first page.
-    assert!(!first.html.contains(r#"name="cursor""#) && !first.html.contains(r#"name="limit""#), "{}", first.html);
+    // The filter holds neither a cursor nor a limit the query did not send,
+    // so a submitted filter starts at the first page.
+    let filter = between(&first.html, r#"<form method="get" class="ss-filter""#, "</form>");
+    assert!(!filter.contains(r#"name="cursor""#) && !filter.contains(r#"name="limit""#), "{filter}");
 
     let next = link(&first.html, "next").unwrap();
     assert!(next.starts_with("/console/orders?cursor="), "{next}");
@@ -954,7 +1044,10 @@ async fn a_paged_list_without_a_filter_renders_no_form_and_its_refusal_alone() {
     let app = app(&Store::new());
     let first = get(&app, "/console/suppliers", "clerk").await;
     assert_eq!(first.status, StatusCode::OK, "{}", first.html);
-    assert!(!first.html.contains("<form"), "{}", first.html);
+    // Its one form is the pager's size form.
+    assert!(!first.html.contains("ss-filter"), "{}", first.html);
+    assert_eq!(first.html.matches("<form").count(), 1, "{}", first.html);
+    assert!(first.html.contains(r#"<form method="get" class="ss-page-size""#), "{}", first.html);
     assert!(first.html.contains(">Acme</th>") && !first.html.contains(">Bolt</th>"), "{}", first.html);
     let next = link(&first.html, "next").unwrap();
     assert!(next.starts_with("/console/suppliers?cursor="), "{next}");
@@ -967,6 +1060,209 @@ async fn a_paged_list_without_a_filter_renders_no_form_and_its_refusal_alone() {
     assert_eq!(refused.status, StatusCode::BAD_REQUEST, "{}", refused.html);
     assert!(refused.html.contains(r#"<section class="ss-refusal" data-status="400">"#), "{}", refused.html);
     assert!(refused.html.contains("<p>limit: must be at most 2</p>"), "{}", refused.html);
+}
+
+// The value of a query parameter of href, as it is written, or none.
+fn param<'a>(href: &'a str, name: &str) -> Option<&'a str> {
+    href.split_once('?')?.1.split('&').find_map(|pair| pair.strip_prefix(name)?.strip_prefix('='))
+}
+
+// The text of a page's size form, which its pager holds after its links.
+fn size_form(html: &str) -> &str {
+    between(html, r#"<form method="get" class="ss-page-size""#, "</form>")
+}
+
+// Seven orders, so the orders' pages of two are four.
+fn seven_orders() -> Arc<Store> {
+    let store = Store::new();
+    store.orders.lock().unwrap().extend([
+        order(6, types::OrderStatus::Placed, None, None, vec![line(ANVIL, 1.0)]),
+        order(7, types::OrderStatus::Shipped, None, None, vec![line(BUCKET, 1.0)]),
+    ]);
+    store
+}
+
+#[tokio::test]
+async fn the_pager_goes_back_a_page_by_its_history() {
+    let app = app(&seven_orders());
+    // Next three times: each page's href and rows. Each Next carries the
+    // history of the pages before it, which grows by the cursor of the page
+    // it leaves, the first page's none.
+    let mut pages = vec![("/console/orders".to_owned(), get(&app, "/console/orders", "clerk").await)];
+    for _ in 0..3 {
+        let next = link(&pages.last().unwrap().1.html, "next").unwrap();
+        let page = get(&app, &next, "clerk").await;
+        assert_eq!(page.status, StatusCode::OK, "{}", page.html);
+        pages.push((next, page));
+    }
+    let rows: Vec<Vec<String>> = pages.iter().map(|(_, page)| numbers(&page.html)).collect();
+    assert_eq!(rows, [vec!["A-1", "A-2"], vec!["A-3", "A-4"], vec!["A-5", "A-6"], vec!["A-7"]]);
+    let cursors: Vec<&str> = pages[1..].iter().map(|(href, _)| param(href, "cursor").unwrap()).collect();
+    assert_eq!(param(&pages[1].0, "back"), None, "{}", pages[1].0);
+    assert_eq!(param(&pages[2].0, "back"), Some(cursors[0]), "{}", pages[2].0);
+    assert_eq!(param(&pages[3].0, "back"), Some(format!("{}.{}", cursors[0], cursors[1]).as_str()), "{}", pages[3].0);
+
+    // The first page has no Previous; each later page's is the page it was
+    // reached from, and following it lands on the rows that page showed.
+    assert!(link(&pages[0].1.html, "prev").is_none(), "{}", pages[0].1.html);
+    for at in 1..pages.len() {
+        let prev = link(&pages[at].1.html, "prev").unwrap();
+        assert_eq!(prev, pages[at - 1].0, "page {}: {}", at + 1, pages[at].1.html);
+        assert_eq!(numbers(&get(&app, &prev, "clerk").await.html), rows[at - 1], "page {}", at + 1);
+    }
+    // The order is First, Previous, Next, then the size form, and on the
+    // second page Previous is First, both rendered.
+    let second = &pages[1].1.html;
+    assert_eq!(link(second, "prev"), link(second, "first"), "{second}");
+    let pager = between(second, r#"<nav class="ss-pager" aria-label="Pages">"#, "</nav>");
+    let places: Vec<usize> = [r#"rel="first""#, r#"rel="prev""#, r#"rel="next""#, "ss-page-size"].iter().map(|at| pager.find(at).unwrap()).collect();
+    assert!(places.is_sorted(), "{pager}");
+}
+
+#[tokio::test]
+async fn a_history_past_its_bound_or_its_rule_has_no_previous_page() {
+    let app = app(&seven_orders());
+    // A cursor of 1024 characters, the most a route reads, after A-1, and
+    // entries of 1024 characters, which are cursors by the rule though no
+    // page returned them.
+    let long = Cursor::encode(&format!("A-1{}", "x".repeat(763))).unwrap();
+    assert_eq!(long.as_str().len(), 1024);
+    let long = long.as_str().to_owned();
+    let entry = "A".repeat(1024);
+
+    // Three entries are 3074 characters: the page goes back to the last,
+    // with the rest; its Next carries them with its cursor, past the bound,
+    // so the oldest is dropped, and the mark comes first.
+    let three = [entry.as_str(); 3].join(".");
+    let page = get(&app, &format!("/console/orders?cursor={long}&back={three}"), "clerk").await;
+    assert_eq!(page.status, StatusCode::OK, "{}", page.html);
+    assert_eq!(numbers(&page.html), ["A-2", "A-3"], "{}", page.html);
+    let prev = link(&page.html, "prev").unwrap();
+    assert_eq!(param(&prev, "cursor"), Some(entry.as_str()), "{prev}");
+    assert_eq!(param(&prev, "back"), Some([entry.as_str(); 2].join(".").as_str()), "{prev}");
+    let next = link(&page.html, "next").unwrap();
+    let pushed = param(&next, "back").unwrap();
+    assert_eq!(pushed, format!("~.{entry}.{entry}.{long}"), "{next}");
+    assert!(pushed.len() - 2 <= 4096, "{}", pushed.len());
+    // That page's history reads as sent: its Previous goes back to the long
+    // cursor, whose own history keeps the mark; one entry after the mark
+    // goes back to it, and the mark alone knows no page before.
+    let later = get(&app, &next, "clerk").await;
+    let back = link(&later.html, "prev").unwrap();
+    assert_eq!(param(&back, "cursor"), Some(long.as_str()), "{back}");
+    assert_eq!(param(&back, "back"), Some(format!("~.{entry}.{entry}").as_str()), "{back}");
+    let marked = get(&app, &format!("/console/orders?cursor={long}&back=~.{entry}"), "clerk").await;
+    assert_eq!(link(&marked.html, "prev").as_deref().and_then(|href| param(href, "back")), Some("~"), "{}", marked.html);
+    let mark = get(&app, &format!("/console/orders?cursor={long}&back=~"), "clerk").await;
+    assert!(link(&mark.html, "prev").is_none(), "{}", mark.html);
+
+    // Four entries are 4099 characters, past the bound, as is a malformed
+    // history: no Previous, the first page still offered, a 200, never the
+    // route's 400, and a Next whose history begins again at the mark.
+    let four = [entry.as_str(); 4].join(".");
+    let long_entry = "A".repeat(1025);
+    for back in [four.as_str(), "a..b", "~~", "%24", "a.~", ".", long_entry.as_str()] {
+        let page = get(&app, &format!("/console/orders?cursor={long}&back={back}"), "clerk").await;
+        assert_eq!(page.status, StatusCode::OK, "back={back}: {}", page.html);
+        assert!(link(&page.html, "prev").is_none(), "back={back}: {}", page.html);
+        assert_eq!(link(&page.html, "first").as_deref(), Some("/console/orders"), "back={back}");
+        assert_eq!(link(&page.html, "next").as_deref().and_then(|href| param(href, "back")), Some(format!("~.{long}").as_str()), "back={back}");
+    }
+    // Without a cursor the page is the first, whatever back says.
+    let first = get(&app, &format!("/console/orders?back={three}"), "clerk").await;
+    assert_eq!(first.status, StatusCode::OK, "{}", first.html);
+    assert_eq!(numbers(&first.html), ["A-1", "A-2"], "{}", first.html);
+    assert!(link(&first.html, "prev").is_none() && link(&first.html, "first").is_none(), "{}", first.html);
+    assert_eq!(link(&first.html, "next").as_deref().and_then(|href| param(href, "back")), None, "{}", first.html);
+}
+
+#[tokio::test]
+async fn the_size_form_sets_the_page_size_and_keeps_the_filter() {
+    let app = app(&seven_orders());
+    // The route's sizes, 2 and 5, the default selected, then the limit sent.
+    let first = get(&app, "/console/orders", "clerk").await;
+    assert!(size_form(&first.html).contains(r#"<label>Per page <select name="limit"><option value="2" selected="">2</option><option value="5">5</option></select></label>"#), "{}", first.html);
+    let five = get(&app, "/console/orders?limit=5", "clerk").await;
+    assert_eq!(numbers(&five.html), ["A-1", "A-2", "A-3", "A-4", "A-5"], "{}", five.html);
+    assert!(size_form(&five.html).contains(r#"<option value="2">2</option><option value="5" selected="">5</option>"#), "{}", five.html);
+    // The filter keeps the limit sent, and neither a cursor nor a history.
+    let filter = between(&five.html, r#"<form method="get" class="ss-filter""#, "</form>");
+    assert!(filter.contains(r#"<input type="hidden" name="limit" value="5">"#), "{filter}");
+
+    // A later page of a search: the size form holds the filter and the
+    // search, with the limit sent among the sizes, and never its cursor,
+    // its history or a second limit.
+    let searched = get(&app, "/console/orders?q=rush&statuses=placed&limit=1", "clerk").await;
+    let later = get(&app, &link(&searched.html, "next").unwrap(), "clerk").await;
+    assert_eq!(numbers(&later.html), ["A-3"], "{}", later.html);
+    let form = size_form(&later.html);
+    for want in [
+        r#"<input type="hidden" name="q" value="rush">"#,
+        r#"<input type="hidden" name="statuses" value="placed">"#,
+        r#"<option value="1" selected="">1</option><option value="2">2</option><option value="5">5</option>"#,
+        r#"<button type="submit">Show</button>"#,
+    ] {
+        assert!(form.contains(want), "the size form lacks {want}: {form}");
+    }
+    assert!(!form.contains(r#"name="cursor""#) && !form.contains(r#"name="back""#), "{form}");
+    assert_eq!(form.matches(r#"name="limit""#).count(), 1, "{form}");
+    let filter = between(&later.html, r#"<form method="get" class="ss-filter""#, "</form>");
+    assert!(!filter.contains(r#"name="cursor""#) && !filter.contains(r#"name="back""#), "{filter}");
+
+    // Its GET, as a browser sends it, is the first page at the new size.
+    let resized = get(&app, "/console/orders?q=rush&statuses=placed&limit=5", "clerk").await;
+    assert_eq!(numbers(&resized.html), ["A-1", "A-3"], "{}", resized.html);
+    assert!(link(&resized.html, "first").is_none() && link(&resized.html, "prev").is_none(), "{}", resized.html);
+
+    // A refused limit is the route's 400 with the first page alone: no size
+    // form, nor a link to another page.
+    let refused = get(&app, "/console/orders?limit=6", "clerk").await;
+    assert_eq!(refused.status, StatusCode::BAD_REQUEST, "{}", refused.html);
+    assert!(!refused.html.contains("ss-page-size"), "{}", refused.html);
+
+    // The suppliers' route pages one at a time, up to two; the products'
+    // section shows no size form.
+    let suppliers = get(&app, "/console/suppliers", "clerk").await;
+    assert!(size_form(&suppliers.html).contains(r#"<option value="1" selected="">1</option><option value="2">2</option>"#), "{}", suppliers.html);
+    let item = get(&app, &format!("/console/products/{}", wire(&uuid(ANVIL))), "clerk").await;
+    let section = between(&item.html, r#"<section class="ss-section" data-resource="reviews">"#, "</section>");
+    assert!(!section.contains("ss-page-size") && !section.contains(r#"rel="prev""#), "{section}");
+}
+
+#[tokio::test]
+async fn a_live_list_goes_back_and_sets_its_size_in_place() {
+    let app = app(&seven_orders());
+    let first = get(&app, "/console/orders", "clerk").await;
+    let second = get(&app, &link(&first.html, "next").unwrap(), "clerk").await;
+    let third = link(&second.html, "next").unwrap();
+    let query = third.strip_prefix("/console/orders?").unwrap().to_owned();
+    let c2 = param(&third, "back").unwrap().to_owned();
+    // The shard reads its query's history as the page reads it: its
+    // Previous is the page before, and sets the shard's query in place.
+    let live = shard(&app, "/console/_live/orders", "clerk", serde_json::json!({"args": [query, "/console/orders"]})).await;
+    assert_eq!(live.status, StatusCode::OK, "{}", live.html);
+    assert_eq!(numbers(&live.html), ["A-5", "A-6"], "{}", live.html);
+    assert_eq!(link(&live.html, "prev"), Some(format!("/console/orders?cursor={c2}")), "{}", live.html);
+    let prev = between(&live.html, r#"<a rel="prev""#, "</a>");
+    assert!(prev.contains("data-topcoat-on:click="), "{prev}");
+    // The size form's submit runs the filter's script over its own form,
+    // through its own hidden input, which sets the same signal.
+    let form = size_form(&live.html);
+    assert!(form.contains(r#"data-ss-live-size="orders""#) && form.contains("data-topcoat-on:submit="), "{form}");
+    assert!(form.contains("data-ss-query"), "{form}");
+    // A signal from the size form's query renders the first page at its
+    // size, under the shard's identity.
+    let identity = between(&first.html, r#"::topcoat::shard::start("/console/_live/orders", ""#, "\"");
+    let signal = between(&first.html, "::topcoat::signal({&quot;t&quot;:&quot;signal&quot;,&quot;id&quot;:&quot;", "&quot;");
+    let body = serde_json::json!({"args": ["", "/console/orders"], "signals": {signal: "limit=5"}});
+    let mut request = http::Request::builder().method("POST").uri("/console/_live/orders").header("x-caller", "clerk");
+    request = request.header(header::CONTENT_TYPE, "application/json").header("x-topcoat-identity", identity);
+    let response = app.handle(request.body(Body::from(body.to_string())).unwrap()).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let html = String::from_utf8(to_bytes(response.into_body(), usize::MAX).await.unwrap().to_vec()).unwrap();
+    assert_eq!(numbers(&html), ["A-1", "A-2", "A-3", "A-4", "A-5"], "{html}");
+    assert!(link(&html, "first").is_none() && link(&html, "prev").is_none(), "{html}");
+    assert!(size_form(&html).contains(r#"<option value="5" selected="">5</option>"#), "{html}");
 }
 
 #[tokio::test]

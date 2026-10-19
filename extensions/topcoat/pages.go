@@ -2,6 +2,7 @@ package topcoat
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"unicode"
 
@@ -182,8 +183,18 @@ type pageResource struct {
 	LivePath string
 	// LiveSubmit is the script the filter's submit runs: it sends the
 	// form's query to the shard, through the hidden input whose input
-	// event sets the shard's signal, and puts it in the address bar.
-	LiveSubmit string
+	// event sets the shard's signal, and puts it in the address bar;
+	// LiveSizeSubmit the size form's, which does the same with its own.
+	LiveSubmit     string
+	LiveSizeSubmit string
+	// Prev reports whether a paged list links the page before its own,
+	// through the cursors its query's `back` keeps (D44, amended): not when
+	// its operation declares an argument named back. Sizes are the page
+	// sizes its size form offers whatever the query sends, SizesConst the
+	// constant that holds them.
+	Prev       bool
+	Sizes      []int
+	SizesConst string
 	// ColParams are the route parameters of the collection, its
 	// ancestors' items'; ItemParams those and Item, an item's.
 	ColParams  []string
@@ -692,12 +703,14 @@ func stepTitle(node *resourceNode) string {
 // <prefix>/_live/<resource>.
 const liveSegment = "_live"
 
-// liveList makes a list with a filter render through a shard, when the
-// pages' lists are live: the shard's path, under the prefix, is its own,
-// unless a page serves it, which leaves the list as it is, with the reason
-// in the build log.
+// liveList makes a list with a filter, or one that pages, render through a
+// shard, when the pages' lists are live: the shard's path, under the
+// prefix, is its own, unless a page serves it, which leaves the list as it
+// is, with the reason in the build log. A list whose argument form holds
+// its route's values alone, and does not page, has nothing that would set
+// the shard's query.
 func (b *pageBuilder) liveList(r *pageResource) {
-	if !b.live || r.List == nil || r.List.ArgForm == nil {
+	if !b.live || r.List == nil || r.List.ArgForm == nil || !r.Filters() && !r.List.Paged {
 		return
 	}
 	route := "POST " + liveSegment + "/" + r.Ident
@@ -707,19 +720,88 @@ func (b *pageBuilder) liveList(r *pageResource) {
 	}
 	b.routes[route] = true
 	r.Live, r.LivePath = true, b.m.Prefix+"/"+liveSegment+"/"+r.Ident
-	r.LiveSubmit = liveSubmit(r.Ident)
+	r.LiveSubmit = liveSubmit(`form[data-ss-live="` + r.Ident + `"]`)
+	if r.List.Paged {
+		r.LiveSizeSubmit = liveSubmit(`form[data-ss-live-size="` + r.Ident + `"]`)
+	}
 }
 
-// liveSubmit is the script a live list's filter runs on submit, after
-// Topcoat's handler stops the browser's own: the form's query, as the
-// browser would send it, written to the form's hidden input, whose input
-// event sets the shard's signal, which renders the list again, and put in
-// the address bar, so a reload or a link keeps the filter.
-func liveSubmit(ident string) string {
-	return `(() => { const form = document.querySelector('form[data-ss-live="` + ident + `"]'); ` +
+// liveSubmit is the script a live list's form runs on submit, after
+// Topcoat's handler stops the browser's own, for the form selector finds:
+// the filter (data-ss-live) or a paged list's size form (data-ss-live-size).
+// The form's query, as the browser would send it, is written to the form's
+// hidden input, whose input event sets the shard's signal, which renders
+// the list again, and put in the address bar, so a reload or a link keeps
+// the filter and the size.
+func liveSubmit(selector string) string {
+	return `(() => { const form = document.querySelector('` + selector + `'); ` +
 		`const query = new URLSearchParams(new FormData(form)).toString(); ` +
 		`history.replaceState(history.state, '', query === '' ? location.pathname : '?' + query); ` +
 		`const sent = form.querySelector('input[data-ss-query]'); sent.value = query; sent.dispatchEvent(new Event('input')); })()`
+}
+
+// backParam is the query parameter in which a paged list's page keeps the
+// cursors of the pages before it (D44, amended).
+const backParam = "back"
+
+// pageSizeSteps are the page sizes a size form offers below a route's
+// maxLimit, beside its defaultLimit and maxLimit (D44, amended).
+var pageSizeSteps = []int{10, 20, 50, 100, 200, 500, 1000}
+
+// pager sets how a paged list's pages link one another: the page before
+// its own unless its operation declares an argument named back, which the
+// build log says, and the sizes its size form offers.
+func (b *pageBuilder) pager(r *pageResource) {
+	e := r.List.c.d.endpoint
+	r.Prev = true
+	for _, arg := range r.List.c.d.op.Arguments {
+		if arg.Name == backParam {
+			r.Prev = false
+			b.logf("  - topcoat: no previous page for %s: %s declares an argument named %s, the query parameter the console keeps the earlier pages' cursors in\n", r.node.key, r.List.c.name(), backParam)
+		}
+	}
+	r.Sizes = pageSizes(e.Page.DefaultLimit, e.Page.MaxLimit)
+	r.SizesConst = strings.ToUpper(r.Ident) + "_PAGE_SIZES"
+	b.m.use("pageSizes")
+	if r.Prev {
+		b.m.use("back")
+	}
+}
+
+// pageSizes are the sizes a paged list's size form offers whatever the
+// query sends, in order and each once: the route's defaultLimit and
+// maxLimit, and each of pageSizeSteps below maxLimit. The page adds the
+// limit sent when the route admits it.
+func pageSizes(defaultLimit, maxLimit int) []int {
+	sizes := []int{defaultLimit, maxLimit}
+	for _, size := range pageSizeSteps {
+		if size < maxLimit {
+			sizes = append(sizes, size)
+		}
+	}
+	slices.Sort(sizes)
+	return slices.Compact(sizes)
+}
+
+// SizesExpr is the Rust slice of the list's page sizes.
+func (r *pageResource) SizesExpr() string {
+	sizes := make([]string, len(r.Sizes))
+	for i, size := range r.Sizes {
+		sizes[i] = fmt.Sprintf("%d", size)
+	}
+	return "&[" + strings.Join(sizes, ", ") + "]"
+}
+
+// SizesText names the list's page sizes for a doc: 2 and 5.
+func (r *pageResource) SizesText() string {
+	sizes := make([]string, len(r.Sizes))
+	for i, size := range r.Sizes {
+		sizes[i] = fmt.Sprintf("%d", size)
+	}
+	if len(sizes) < 2 {
+		return strings.Join(sizes, "")
+	}
+	return strings.Join(sizes[:len(sizes)-1], ", ") + " and " + sizes[len(sizes)-1]
 }
 
 // collectionWords are the words of each collection on the path to node.
@@ -825,6 +907,7 @@ func (b *pageBuilder) fill(r *pageResource) error {
 		r.RowLabels = b.refs.RecordLabels(rec.Name)
 		if r.List.Paged {
 			r.BaseExpr = r.Ident + "_href(" + pass(r.ColParams, "&") + ").unwrap_or_default()"
+			b.pager(r)
 		}
 	}
 	if r.Detail != nil {
@@ -1269,6 +1352,14 @@ func (b *pageBuilder) finish() {
 	}
 	if m.uses["pageRefusal"] || m.uses["formErrors"] {
 		m.importName("forms", "FormErrors")
+	}
+	// A size form's sizes read the route's page, and a page's history its
+	// cursors by the route's rule and its query as a form reads one.
+	if m.uses["pageSizes"] {
+		m.use("runtime")
+	}
+	if m.uses["back"] {
+		m.use("runtime", "form")
 	}
 }
 
