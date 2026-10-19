@@ -6,8 +6,10 @@
 //! a `%` matching itself. Each list follows `next` to its last page, whose
 //! `next` is none, and refuses a cursor it never returned with 400. A
 //! shopper lists, pages, reads and cancels their own orders alone, and
-//! staff every customer's. scripts/check.sh runs them with `cargo test
-//! --features sqlite`.
+//! staff every customer's. Adding a shopper or staff, or `update_roles`,
+//! rewrites a `shopper` or `staff` role that grants other permissions, as
+//! one an earlier version made does. scripts/check.sh runs them with
+//! `cargo test --features sqlite`.
 
 use std::thread::sleep;
 use std::time::Duration;
@@ -20,7 +22,10 @@ use acme_shop_orders_api::{
     ProductCatalogListProductsArgs, ProductReviewsImplementation, ProductReviewsListReviewsArgs,
     ProductReviewsWriteReviewArgs,
 };
-use acme_shop_orders_server::{Shop, SHOPPER_PERMISSIONS, STAFF_PERMISSIONS};
+use acme_shop_orders_server::{
+    add_shopper, add_staff, update_roles, users_in_memory, Shop, SHOPPER_PERMISSIONS,
+    STAFF_PERMISSIONS,
+};
 
 /// The catalog: its products' ids, SKUs, names and prices in cents.
 const CATALOG: [(&str, &str, &str, i64); 3] = [
@@ -460,6 +465,84 @@ async fn the_shop_in_memory_pages_and_searches() {
 #[tokio::test]
 async fn the_shop_in_memory_keeps_orders_to_their_customers() {
     orders_are_their_customers(&Shop::with_products(catalog())).await;
+}
+
+/// The users' identity config at a low password cost, so a test hashes
+/// fast.
+const CONFIG: &str =
+    r#"{"password": {"argon2": {"memoryKiB": 64, "iterations": 1, "parallelism": 1}}}"#;
+
+/// The permissions of the role named `name` in `users`, sorted.
+async fn role_permissions(
+    users: &acme_shop_orders_api::runtime::identity::Service,
+    name: &str,
+) -> Vec<String> {
+    let roles = users.store().list_roles().await.unwrap();
+    let role = roles
+        .into_iter()
+        .find(|role| role.name == name)
+        .expect("the role");
+    let mut permissions = role.permissions;
+    permissions.sort();
+    permissions
+}
+
+fn sorted(permissions: &[&str]) -> Vec<String> {
+    let mut permissions: Vec<String> = permissions.iter().map(|&p| p.to_owned()).collect();
+    permissions.sort();
+    permissions
+}
+
+#[tokio::test]
+async fn a_role_that_grants_other_permissions_is_rewritten() {
+    // The shopper role an earlier version made, which grants all of
+    // orders, orders.any among them, and a staff role short of orders.any.
+    let users = users_in_memory(CONFIG).unwrap();
+    let store = users.store();
+    store
+        .create_role("shopper", &["orders".to_owned()])
+        .await
+        .unwrap();
+    store
+        .create_role("staff", &["orders.read".to_owned()])
+        .await
+        .unwrap();
+    update_roles(&users).await.unwrap();
+    assert_eq!(
+        role_permissions(&users, "shopper").await,
+        sorted(&SHOPPER_PERMISSIONS)
+    );
+    assert_eq!(
+        role_permissions(&users, "staff").await,
+        sorted(&STAFF_PERMISSIONS)
+    );
+
+    // Adding a shopper or staff rewrites the role it grants as well.
+    let users = users_in_memory(CONFIG).unwrap();
+    let store = users.store();
+    store
+        .create_role("shopper", &["orders".to_owned()])
+        .await
+        .unwrap();
+    store
+        .create_role("staff", &["orders.any".to_owned()])
+        .await
+        .unwrap();
+    add_shopper(&users, "grace@example.com", "Grace Hopper", "a password")
+        .await
+        .unwrap();
+    add_staff(&users, "ada@example.com", "Ada Lovelace", "a password")
+        .await
+        .unwrap();
+    assert_eq!(
+        role_permissions(&users, "shopper").await,
+        sorted(&SHOPPER_PERMISSIONS)
+    );
+    assert_eq!(
+        role_permissions(&users, "staff").await,
+        sorted(&STAFF_PERMISSIONS)
+    );
+    assert_eq!(store.list_roles().await.unwrap().len(), 2);
 }
 
 #[cfg(feature = "sqlite")]

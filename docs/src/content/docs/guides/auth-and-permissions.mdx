@@ -53,10 +53,20 @@ server enforces as a caller and leaves the rest to the implementation. A
 shopper holds `orders.read` and `orders.write`, and `shop-orders` reads,
 cancels and lists their own orders alone: another customer's order is a
 404, as one no one placed is, so its id tells a shopper nothing. Staff
-hold `orders.any`, a permission no route lists, which the implementation
-checks to show them every customer's:
+hold `orders.read`, `orders.write` and `orders.any`, or simply `orders`,
+which covers all three. `orders.any` is a permission no route lists,
+which the implementation checks to show them every customer's; it opens
+no route alone, since every order route still needs `orders.read` or
+`orders.write`:
 
 <Snippet file="go/shop-orders/orders.go" symbol={['everyOrder', 'seesEveryOrder', 'callersOrder']} />
+
+Because no operation names it, `orders.any` is not in `shop-orders`'
+`permissions.json`, the catalog of the permissions its operations check
+([Users and sessions](/superschematic/guides/users-and-sessions/)), so
+`identity bootstrap --permission orders.any` warns that it is
+uncatalogued, and grants it all the same; `--permission orders` covers it
+without the warning.
 
 The generated Go server keeps open and protected routes apart, and puts the
 permission check on each protected route:
