@@ -15,6 +15,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/parable-work/superschematic/internal/generator"
 	"github.com/parable-work/superschematic/internal/generator/projectengine"
@@ -257,4 +258,66 @@ func (s *started) serviceSend(t *testing.T, credential, method, path, body strin
 		}
 	}
 	return string(answer)
+}
+
+// TestTheEngineProjectDockerfileBuildsAnImageThatServes: queue-api's
+// Dockerfile builds from a repository root holding the generated modules,
+// the project's engine crate of queue-db that its build wrote, the runtime
+// modules, the engine's Go binding and the Cargo workspace beside it with
+// the crates it reaches, and a superscalar checkout: its engine stage
+// builds the archive of the project crate's ffi member, its lock file
+// seeded from the engine workspace's, which the server links (D58). The
+// image serves /healthz, names the engine in /readyz with no database up,
+// answers the engine's routes 503, and stops cleanly on docker stop. It
+// needs Docker and builds the engine in a Rust stage, so it runs only
+// outside -short.
+func TestTheEngineProjectDockerfileBuildsAnImageThatServes(t *testing.T) {
+	needDocker(t)
+	repoRoot := dockerRepo(t)
+	repo := testpaths.RepoRoot(t)
+	copyTree(t, filepath.Join(repo, "runtime", "engine", "go"), filepath.Join(repoRoot, "runtime", "engine", "go"), "lib")
+	for _, dir := range []string{"runtime/engine/rust", "runtime/engine-workqueue/rust", "runtime/schema/rust-ir", "runtime/schema/rust", "runtime/versiongraph/rust-engine", "runtime/versiongraph/rust"} {
+		copyTree(t, filepath.Join(repo, filepath.FromSlash(dir)), filepath.Join(repoRoot, filepath.FromSlash(dir)))
+	}
+	f := loadEngineFixture(t)
+	f.build(t, repoRoot, fakePaths(repoRoot), queueOrder...)
+
+	image := fmt.Sprintf("superschematic-servergen-test:%d-engine-project", time.Now().UnixNano())
+	dockerBuild(t, repoRoot, image, "-f", "schemas/dist/server/"+queueStack+"/"+queueServer+"/Dockerfile")
+	public, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := []string{"run", "-d", "-p", "127.0.0.1::8080",
+		"-e", "QUEUE_DB_DATABASE_URL=postgres://queue@127.0.0.1:9/queue_db?connect_timeout=1&sslmode=disable"}
+	for _, v := range opsCallersVariables(t, queueServer, public, "ops-key") {
+		args = append(args, "-e", v)
+	}
+	container := docker(t, append(args, image)...)
+	t.Cleanup(func() { _ = exec.Command("docker", "rm", "-f", container).Run() })
+	address := docker(t, "port", container, "8080/tcp")
+	if i := strings.LastIndex(address, "\n"); i >= 0 {
+		address = address[:i]
+	}
+	s := &started{base: "http://" + address, out: &strings.Builder{}}
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		resp, err := http.Get(s.base + "/healthz")
+		if err == nil {
+			resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				break
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the container did not answer /healthz: %v\n%s", err, docker(t, "logs", container))
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	s.expect(t, http.MethodGet, "/readyz", http.StatusServiceUnavailable, `"queue-db engine"`)
+	s.expect(t, http.MethodGet, "/engine/queue-db/namespaces/queue-db/schemas", http.StatusServiceUnavailable, `"code":"unavailable"`)
+	docker(t, "stop", container)
+	if code := docker(t, "inspect", "-f", "{{.State.ExitCode}}", container); code != "0" {
+		t.Errorf("the container exited %s on docker stop:\n%s", code, docker(t, "logs", container))
+	}
 }

@@ -16,7 +16,6 @@
 !schemas/dist/api/*/openapi.json
 !schemas/dist/api/*/src
 !schemas/dist/impl
-!schemas/dist/sdk/rust
 !schemas/dist/server/*/*/Cargo.toml
 !schemas/dist/server/*/*/src
 !schemas/dist/server/desk-rs-stack/desk-rs-api

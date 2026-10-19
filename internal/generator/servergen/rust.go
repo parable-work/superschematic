@@ -816,9 +816,14 @@ func planRustDocker(in RustInput, s *RustServer, dir string) (*RustDocker, strin
 		d.Workspace + "/api/*/src",
 		d.Workspace + "/api/*/openapi.json",
 		d.Workspace + "/" + RustMirrorRoot,
-		d.Workspace + "/sdk/rust",
 		d.Workspace + "/types/rust",
 		d.Context,
+	}
+	// The Rust SDKs, when an API's build wrote one: a stack whose APIs
+	// call none has none, and a deploy's context refuses a path its
+	// ignore file takes in and does not hold.
+	if _, err := os.Stat(filepath.Join(in.OutputRoot, "sdk", "rust")); err == nil {
+		d.Include = append(d.Include, d.Workspace+"/sdk/rust")
 	}
 	for _, p := range []struct{ what, dir string }{
 		{"the HTTP runtime's Rust crate", in.Paths.HTTPRuntimeRust},
