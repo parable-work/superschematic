@@ -91,34 +91,48 @@ describe('behavior registration refuses', () => {
     assert.match(refusal({ ...counter, fields: undefined }), /names fields it does not implement: count/);
   });
 
-  test('a declaration the engine cannot take', () => {
-    const cases: Array<[(declaration: Record<string, unknown>) => void, RegExp]> = [
-      [(d) => (d.name = 'acme.shop.Counter'), /name "acme\.shop\.Counter" must match/],
-      [(d) => (d.name = 'test.counter'), /name "test\.counter" must match/],
-      [(d) => (d.colour = 'red'), /the declaration has the unknown key "colour"/],
+  // One test per case: each opens a fresh engine, and as one synchronous
+  // loop they passed bun's 5 s default on CI runners.
+  describe('a declaration the engine cannot take', () => {
+    const cases: Array<[string, (declaration: Record<string, unknown>) => void, RegExp]> = [
+      ['a name with a namespace of more than one part', (d) => (d.name = 'acme.shop.Counter'), /name "acme\.shop\.Counter" must match/],
+      ['a name that is not PascalCase', (d) => (d.name = 'test.counter'), /name "test\.counter" must match/],
+      ['an unknown key', (d) => (d.colour = 'red'), /the declaration has the unknown key "colour"/],
       [
+        'an operation with the name of one the engine serves',
         (d) => ((d.operations as Array<Record<string, unknown>>)[0].name = 'create'),
         /operation create has the name of an operation the engine serves on a schema \(create, get, list, update, delete, lookup\)/,
       ],
-      [(d) => ((d.operations as Array<Record<string, unknown>>)[1].name = 'increment'), /operation increment is declared twice/],
-      [(d) => ((d.operations as Array<Record<string, unknown>>)[0].name = 'Increment'), /"Increment" is not camelCase/],
+      ['an operation declared twice', (d) => ((d.operations as Array<Record<string, unknown>>)[1].name = 'increment'), /operation increment is declared twice/],
+      ['an operation name that is not camelCase', (d) => ((d.operations as Array<Record<string, unknown>>)[0].name = 'Increment'), /"Increment" is not camelCase/],
       [
+        'params that allow additional properties',
         (d) => delete ((d.operations as Array<Record<string, unknown>>)[0].paramsSchema as Record<string, unknown>).additionalProperties,
         /operation increment paramsSchema must set "additionalProperties": false/,
       ],
-      [(d) => ((d.operations as Array<Record<string, unknown>>)[0].paramsSchema = { type: 'array' }), /paramsSchema must be an object schema/],
-      [(d) => delete (d.operations as Array<Record<string, unknown>>)[0].resultSchema, /operation increment has no resultSchema/],
-      [(d) => ((d.operations as Array<Record<string, unknown>>)[0].writes = 'yes'), /operation increment writes is a boolean/],
-      [(d) => ((d.operations as Array<Record<string, unknown>>)[0].scope = 'type'), /operation increment scope "type" is not "instance" or "schema"/],
-      [(d) => ((d.fields as Array<Record<string, unknown>>)[0].name = 'the count'), /fields\[0\]\.name "the count" is not an identifier/],
-      [(d) => (d.fields = [{ name: 'count' }, { name: 'count' }]), /field count is declared twice/],
-      [(d) => ((d.fields as Array<Record<string, unknown>>)[0].volatile = 'yes'), /fields\[0\]\.volatile is a boolean/],
-      [(d) => (d.requires = ['test.Counter']), /requires names the behavior itself/],
-      [(d) => ((d.requires = ['test.Flag']), (d.conflicts = ['test.Flag'])), /it both requires and conflicts with test\.Flag/],
-      [(d) => (d.configSchema = { type: 'object', properties: { start: { type: 'nonsense' } } }), /configSchema does not compile/],
+      ['params that are not an object schema', (d) => ((d.operations as Array<Record<string, unknown>>)[0].paramsSchema = { type: 'array' }), /paramsSchema must be an object schema/],
+      ['an operation with no resultSchema', (d) => delete (d.operations as Array<Record<string, unknown>>)[0].resultSchema, /operation increment has no resultSchema/],
+      ['writes that is not a boolean', (d) => ((d.operations as Array<Record<string, unknown>>)[0].writes = 'yes'), /operation increment writes is a boolean/],
+      [
+        'a scope that is not instance or schema',
+        (d) => ((d.operations as Array<Record<string, unknown>>)[0].scope = 'type'),
+        /operation increment scope "type" is not "instance" or "schema"/,
+      ],
+      ['a field name that is not an identifier', (d) => ((d.fields as Array<Record<string, unknown>>)[0].name = 'the count'), /fields\[0\]\.name "the count" is not an identifier/],
+      ['a field declared twice', (d) => (d.fields = [{ name: 'count' }, { name: 'count' }]), /field count is declared twice/],
+      ['volatile that is not a boolean', (d) => ((d.fields as Array<Record<string, unknown>>)[0].volatile = 'yes'), /fields\[0\]\.volatile is a boolean/],
+      ['requiring itself', (d) => (d.requires = ['test.Counter']), /requires names the behavior itself/],
+      ['requiring and conflicting with one behavior', (d) => ((d.requires = ['test.Flag']), (d.conflicts = ['test.Flag'])), /it both requires and conflicts with test\.Flag/],
+      [
+        'a configSchema that does not compile',
+        (d) => (d.configSchema = { type: 'object', properties: { start: { type: 'nonsense' } } }),
+        /configSchema does not compile/,
+      ],
     ];
-    for (const [change, expected] of cases) {
-      assert.match(refusal(withDeclaration(change)), expected);
+    for (const [name, change, expected] of cases) {
+      test(name, () => {
+        assert.match(refusal(withDeclaration(change)), expected);
+      });
     }
   });
 
