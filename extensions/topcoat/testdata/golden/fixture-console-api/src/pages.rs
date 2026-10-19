@@ -347,12 +347,29 @@ fn is_cursor(text: &str) -> bool {
     runtime::page::Cursor::parse(text).is_ok()
 }
 
+/// The limit sent, as the query sent it, when the route admits it, as its
+/// router reads a limit (`PageSpec::query`); none for one it refuses, or an
+/// empty one, its default. A link and a form keep only an admitted limit,
+/// since a refused one would refuse each page they lead to.
+fn admitted_limit<'a>(sent: Option<&'a str>, page: &runtime::page::PageSpec) -> Option<&'a str> {
+    let limit = sent.filter(|limit| !limit.is_empty())?;
+    let query = runtime::QueryValues::new(vec![("limit".to_owned(), limit.to_owned())]);
+    page.query(&query).is_ok().then_some(limit)
+}
+
+/// A paged list's query pairs without a limit the route refuses, which a
+/// page's links carry: a refused page's First link starts again at the
+/// route's default.
+fn admitted_pairs(pairs: Vec<(String, String)>, page: &runtime::page::PageSpec) -> Vec<(String, String)> {
+    pairs.into_iter().filter(|(name, value)| name != "limit" || admitted_limit(Some(value), page).is_some()).collect()
+}
+
 /// The sizes of a paged list's size form (D44, amended): its own, `own`,
 /// then the limit sent when the route admits it, in order and each once,
 /// each marked when it is the page's own, the limit sent, else the route's
 /// default. None when there is one size, which needs no form.
 fn page_sizes(own: &[i64], page: &runtime::page::PageSpec, sent: Option<&str>) -> Vec<(i64, bool)> {
-    let sent = sent.and_then(|limit| limit.parse::<i64>().ok()).filter(|limit| (1..=page.max_limit()).contains(limit));
+    let sent = admitted_limit(sent, page).and_then(|limit| limit.parse::<i64>().ok());
     let mut sizes: Vec<i64> = own.iter().copied().chain(sent).collect();
     sizes.sort_unstable();
     sizes.dedup();
@@ -946,14 +963,14 @@ async fn orders_list(cx: &Cx, query: String, next: String) -> topcoat::Result<im
         _ => FormErrors::default(),
     };
     let choices = references::order_list_orders_args_form_choices(cx, choices_of(cx, "orders")).await;
-    // The links of the page, each with the query's filter and limit: the
-    // first page's while a cursor was sent, the page before's while `back`
-    // knows it, and the next page's while one follows, its `back` this
-    // one's with the current cursor after it. Then, on a page that
-    // rendered, the size form, which keeps the rest of the query and starts
-    // again at the first page.
+    // The links of the page: the first page's while a cursor was sent,
+    // the page before's while `back` knows it, and the next page's while
+    // one follows, its `back` this one's with the current cursor after it,
+    // each with the query's filter and limit, a refused limit dropped.
+    // Then, on a page that rendered, the size form, which keeps the rest of
+    // the query and starts again at the first page.
     let base = orders_href().unwrap_or_default();
-    let pairs = filter.query_pairs();
+    let pairs = admitted_pairs(filter.query_pairs(), &crate::api::OrderListOrdersArgs::PAGE);
     let first_page = filter.cursor.is_some().then(|| pager_query(&pairs, None, None));
     let cursor = filter.cursor.as_deref().filter(|cursor| !cursor.is_empty());
     let back = Back::read(&sent, cursor.is_some());
@@ -967,7 +984,8 @@ async fn orders_list(cx: &Cx, query: String, next: String) -> topcoat::Result<im
         Err(refusal) => (Err(refusal), None, None, Vec::new()),
     };
     let hidden = size_pairs(&pairs);
-    let limit = filter.limit.clone();
+    // The filter keeps the limit sent, unless the route refused it.
+    let limit = admitted_limit(filter.limit.as_deref(), &crate::api::OrderListOrdersArgs::PAGE).map(str::to_owned);
     let creates = operations::can_order_place_order(cx).await.is_ok();
     let new_href = format!("{}/new", orders_href().unwrap_or_default());
     Ok(view! {
@@ -1237,14 +1255,14 @@ async fn page_list(cx: &Cx, query: String, next: String) -> topcoat::Result<impl
     let sent = query.get();
     let filter = Form::<SiteListPagesArgsForm>::from_bytes(sent.as_bytes())?.0;
     let listed = filter.submit(cx).await;
-    // The links of the page, each with the query's limit: the
-    // first page's while a cursor was sent, the page before's while `back`
-    // knows it, and the next page's while one follows, its `back` this
-    // one's with the current cursor after it. Then, on a page that
-    // rendered, the size form, which keeps the rest of the query and starts
-    // again at the first page.
+    // The links of the page: the first page's while a cursor was sent,
+    // the page before's while `back` knows it, and the next page's while
+    // one follows, its `back` this one's with the current cursor after it,
+    // each with the query's limit, a refused limit dropped.
+    // Then, on a page that rendered, the size form, which keeps the rest of
+    // the query and starts again at the first page.
     let base = page_href().unwrap_or_default();
-    let pairs = filter.query_pairs();
+    let pairs = admitted_pairs(filter.query_pairs(), &crate::api::SiteListPagesArgs::PAGE);
     let first_page = filter.cursor.is_some().then(|| pager_query(&pairs, None, None));
     let cursor = filter.cursor.as_deref().filter(|cursor| !cursor.is_empty());
     let back = Back::read(&sent, cursor.is_some());
@@ -1381,14 +1399,14 @@ async fn products_list(cx: &Cx, query: String, next: String) -> topcoat::Result<
         _ => FormErrors::default(),
     };
     let choices = references::product_list_products_args_form_choices(cx, choices_of(cx, "products")).await;
-    // The links of the page, each with the query's filter and limit: the
-    // first page's while a cursor was sent, the page before's while `back`
-    // knows it, and the next page's while one follows, its `back` this
-    // one's with the current cursor after it. Then, on a page that
-    // rendered, the size form, which keeps the rest of the query and starts
-    // again at the first page.
+    // The links of the page: the first page's while a cursor was sent,
+    // the page before's while `back` knows it, and the next page's while
+    // one follows, its `back` this one's with the current cursor after it,
+    // each with the query's filter and limit, a refused limit dropped.
+    // Then, on a page that rendered, the size form, which keeps the rest of
+    // the query and starts again at the first page.
     let base = products_href().unwrap_or_default();
-    let pairs = filter.query_pairs();
+    let pairs = admitted_pairs(filter.query_pairs(), &crate::api::ProductListProductsArgs::PAGE);
     let first_page = filter.cursor.is_some().then(|| pager_query(&pairs, None, None));
     let cursor = filter.cursor.as_deref().filter(|cursor| !cursor.is_empty());
     let back = Back::read(&sent, cursor.is_some());
@@ -1402,7 +1420,8 @@ async fn products_list(cx: &Cx, query: String, next: String) -> topcoat::Result<
         Err(refusal) => (Err(refusal), None, None, Vec::new()),
     };
     let hidden = size_pairs(&pairs);
-    let limit = filter.limit.clone();
+    // The filter keeps the limit sent, unless the route refused it.
+    let limit = admitted_limit(filter.limit.as_deref(), &crate::api::ProductListProductsArgs::PAGE).map(str::to_owned);
     Ok(view! {
         <h1>"Products"</h1>
         <form method="get" class="ss-filter" role="search" data-ss-live="products" @submit=$(|e: Event| {
@@ -1581,14 +1600,14 @@ async fn products_reviews_list(cx: &Cx, product_id: String, query: String, next:
         _ => FormErrors::default(),
     };
     let choices = choices_of(cx, "products/{product_id}/reviews");
-    // The links of the page, each with the query's filter and limit: the
-    // first page's while a cursor was sent, the page before's while `back`
-    // knows it, and the next page's while one follows, its `back` this
-    // one's with the current cursor after it. Then, on a page that
-    // rendered, the size form, which keeps the rest of the query and starts
-    // again at the first page.
+    // The links of the page: the first page's while a cursor was sent,
+    // the page before's while `back` knows it, and the next page's while
+    // one follows, its `back` this one's with the current cursor after it,
+    // each with the query's filter and limit, a refused limit dropped.
+    // Then, on a page that rendered, the size form, which keeps the rest of
+    // the query and starts again at the first page.
     let base = products_reviews_href(&product_id).unwrap_or_default();
-    let pairs = filter.query_pairs();
+    let pairs = admitted_pairs(filter.query_pairs(), &crate::api::ReviewListReviewsArgs::PAGE);
     let first_page = filter.cursor.is_some().then(|| pager_query(&pairs, None, None));
     let cursor = filter.cursor.as_deref().filter(|cursor| !cursor.is_empty());
     let back = Back::read(&sent, cursor.is_some());
@@ -1602,7 +1621,8 @@ async fn products_reviews_list(cx: &Cx, product_id: String, query: String, next:
         Err(refusal) => (Err(refusal), None, None, Vec::new()),
     };
     let hidden = size_pairs(&pairs);
-    let limit = filter.limit.clone();
+    // The filter keeps the limit sent, unless the route refused it.
+    let limit = admitted_limit(filter.limit.as_deref(), &crate::api::ReviewListReviewsArgs::PAGE).map(str::to_owned);
     Ok(view! {
         <h1>"Reviews"</h1>
         <form method="get" class="ss-filter" role="search" data-ss-live="products_reviews" @submit=$(|e: Event| {
@@ -1755,14 +1775,14 @@ async fn suppliers_list(cx: &Cx, query: String, next: String) -> topcoat::Result
     let sent = query.get();
     let filter = Form::<SupplierListSuppliersArgsForm>::from_bytes(sent.as_bytes())?.0;
     let listed = filter.submit(cx).await;
-    // The links of the page, each with the query's limit: the
-    // first page's while a cursor was sent, the page before's while `back`
-    // knows it, and the next page's while one follows, its `back` this
-    // one's with the current cursor after it. Then, on a page that
-    // rendered, the size form, which keeps the rest of the query and starts
-    // again at the first page.
+    // The links of the page: the first page's while a cursor was sent,
+    // the page before's while `back` knows it, and the next page's while
+    // one follows, its `back` this one's with the current cursor after it,
+    // each with the query's limit, a refused limit dropped.
+    // Then, on a page that rendered, the size form, which keeps the rest of
+    // the query and starts again at the first page.
     let base = suppliers_href().unwrap_or_default();
-    let pairs = filter.query_pairs();
+    let pairs = admitted_pairs(filter.query_pairs(), &crate::api::SupplierListSuppliersArgs::PAGE);
     let first_page = filter.cursor.is_some().then(|| pager_query(&pairs, None, None));
     let cursor = filter.cursor.as_deref().filter(|cursor| !cursor.is_empty());
     let back = Back::read(&sent, cursor.is_some());

@@ -29,7 +29,8 @@ const consoleService = "fixture-console-api"
 // before and is never refused. After the links a size form offers the
 // route's sizes, the limit sent selected, holding the filter, and starts
 // at the first page; the filter holds the limit sent, and neither form a
-// cursor or a history. A limit or cursor the route refuses, and a cursor
+// cursor or a history. A limit the route refuses is kept by no link and no
+// form, so the 400's filter and First link start again at its default. A limit or cursor the route refuses, and a cursor
 // the implementation cannot read, is the route's 400 as the form's own
 // message, and a paged list without a filter renders no filter form and
 // its refusal alone. The search box is the filter's first control, a search
@@ -342,6 +343,10 @@ func TestThePagerGoesBackAndSetsItsSize(t *testing.T) {
 		"const SUPPLIERS_PAGE_SIZES: &[i64] = &[1, 2];",
 		"let back = Back::read(&sent, cursor.is_some());",
 		`<input type="hidden" name="limit" value=(limit)>`,
+		// A link and the filter keep only a limit the route admits.
+		"let pairs = admitted_pairs(filter.query_pairs(), &crate::api::OrderListOrdersArgs::PAGE);",
+		"let limit = admitted_limit(filter.limit.as_deref(), &crate::api::OrderListOrdersArgs::PAGE).map(str::to_owned);",
+		"let sent = admitted_limit(sent, page).and_then(|limit| limit.parse::<i64>().ok());",
 	} {
 		if !strings.Contains(pages, want) {
 			t.Errorf("pages.rs lacks %q", want)
@@ -1524,8 +1529,8 @@ async fn the_size_form_sets_the_page_size_and_keeps_the_filter() {
     assert_eq!(numbers(&resized.html), ["A-1", "A-3"], "{}", resized.html);
     assert!(link(&resized.html, "first").is_none() && link(&resized.html, "prev").is_none(), "{}", resized.html);
 
-    // A refused limit is the route's 400 with the first page alone: no size
-    // form, nor a link to another page.
+    // A refused limit is the route's 400, with no cursor sent: no size form,
+    // nor a link to another page.
     let refused = get(&app, "/console/orders?limit=6", "clerk").await;
     assert_eq!(refused.status, StatusCode::BAD_REQUEST, "{}", refused.html);
     assert!(!refused.html.contains("ss-page-size"), "{}", refused.html);
@@ -1537,6 +1542,37 @@ async fn the_size_form_sets_the_page_size_and_keeps_the_filter() {
     let item = get(&app, &format!("/console/products/{}", wire(&uuid(ANVIL))), "clerk").await;
     let section = between(&item.html, r#"<section class="ss-section" data-resource="reviews">"#, "</section>");
     assert!(!section.contains("ss-page-size") && !section.contains(r#"rel="prev""#), "{section}");
+}
+
+#[tokio::test]
+async fn a_refused_limit_is_kept_by_no_link_or_form() {
+    let app = app(&seven_orders());
+    let next = link(&get(&app, "/console/orders?statuses=placed", "clerk").await.html, "next").unwrap();
+    let cursor = param(&next, "cursor").unwrap().to_owned();
+    for limit in ["6", "0", "two"] {
+        // The route's 400, whose filter holds no limit, so its submit starts
+        // at the route's default, not at the 400 again.
+        let refused = get(&app, &format!("/console/orders?statuses=placed&limit={limit}"), "clerk").await;
+        assert_eq!(refused.status, StatusCode::BAD_REQUEST, "limit={limit}: {}", refused.html);
+        let filter = between(&refused.html, r#"<form method="get" class="ss-filter""#, "</form>");
+        assert!(!filter.contains(r#"name="limit""#), "limit={limit}: {filter}");
+        assert!(link(&refused.html, "first").is_none(), "limit={limit}: {}", refused.html);
+        // With a cursor, the First link keeps the filter and drops the
+        // limit, so it is a page and not the 400.
+        let later = get(&app, &format!("/console/orders?statuses=placed&limit={limit}&cursor={cursor}"), "clerk").await;
+        assert_eq!(later.status, StatusCode::BAD_REQUEST, "limit={limit}: {}", later.html);
+        let first = link(&later.html, "first").unwrap();
+        assert_eq!(first, "/console/orders?statuses=placed", "limit={limit}");
+        let filter = between(&later.html, r#"<form method="get" class="ss-filter""#, "</form>");
+        assert!(!filter.contains(r#"name="limit""#), "limit={limit}: {filter}");
+        assert_eq!(get(&app, &first, "clerk").await.status, StatusCode::OK, "limit={limit}");
+    }
+    // A limit the route admits stays, in the First link and the filter.
+    let kept = get(&app, &format!("/console/orders?statuses=placed&limit=5&cursor={cursor}"), "clerk").await;
+    assert_eq!(kept.status, StatusCode::OK, "{}", kept.html);
+    assert_eq!(link(&kept.html, "first").as_deref(), Some("/console/orders?statuses=placed&limit=5"), "{}", kept.html);
+    let filter = between(&kept.html, r#"<form method="get" class="ss-filter""#, "</form>");
+    assert!(filter.contains(r#"<input type="hidden" name="limit" value="5">"#), "{filter}");
 }
 
 #[tokio::test]
