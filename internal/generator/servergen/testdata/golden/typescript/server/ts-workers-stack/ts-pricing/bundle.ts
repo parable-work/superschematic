@@ -19,7 +19,7 @@
 // import of a node: or bun: module, a use of Bun's global, or a WebAssembly
 // module other than superscalar's.
 
-import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 
@@ -96,6 +96,13 @@ if (!result.success) {
   for (const log of result.logs) console.error(log);
   fail('Bun.build failed');
 }
+// Bun names each source relative to the output directory, which a deploy
+// makes anew each time; relative to this package instead, the source map,
+// and so the bundle's digest, is the same for the same code wherever it is
+// written.
+const sourceMap = JSON.parse(readFileSync(join(out, SOURCE_MAP), 'utf8')) as { sources?: string[] };
+sourceMap.sources = sourceMap.sources?.map(source => relative(import.meta.dir, resolve(out, source)));
+writeFileSync(join(out, SOURCE_MAP), JSON.stringify(sourceMap));
 const main = readFileSync(join(out, MAIN), 'utf8');
 if (main.replace(new RegExp(`typeof\\s+${BUN_GLOBAL}`, 'g'), '').includes(BUN_GLOBAL)) {
   problems.push(`${MAIN} uses Bun's global, which a Worker does not have`);
