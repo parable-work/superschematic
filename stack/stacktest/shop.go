@@ -330,6 +330,11 @@ func WorkerOf(ref ir.ServiceRef, worker string) ir.DeployableRef {
 	return ir.DeployableRef{Service: &ref, Worker: worker}
 }
 
+// RunnerOf names the engine's runner of a DB service (D58).
+func RunnerOf(ref ir.ServiceRef) ir.DeployableRef {
+	return ir.DeployableRef{Service: &ref, Runner: true}
+}
+
 // Shop returns the stack of docs/stack-model.md, section 4.1, on the fake
 // target, named after the service that declares it, shop-stack: shop-api
 // and shop-orders are deployed and shop-api is exposed;

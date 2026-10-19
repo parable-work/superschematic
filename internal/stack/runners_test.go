@@ -107,6 +107,50 @@ func TestRunnersOfTheStack(t *testing.T) {
 	}
 }
 
+// TestRunnerSettings: a settings element names the runner beside its
+// database's handle (`{of: ShopDb, runner: true}`). One that turns it off
+// in Staging runs no instance there, nor in Preview, which extends
+// Staging, while Production runs its one; a later environment turns it on
+// again. A settings platform places it, here on a target with no runner
+// platform.
+func TestRunnerSettings(t *testing.T) {
+	reg := assemble(t)
+	instances := func(s *ir.Stack, services []stack.Service, environment string) int {
+		t.Helper()
+		env := mustResolve(t, reg, s, services, environment)
+		pool := env.Resources.Resource(shopRunner + ".pool")
+		if pool == nil || pool.Properties["instances"] != float64(env.Deployable(shopRunner).Runner.Instances) {
+			t.Fatalf("%s: pool %+v, runner %+v", environment, pool, env.Deployable(shopRunner).Runner)
+		}
+		return env.Deployable(shopRunner).Runner.Instances
+	}
+	off, on := false, true
+	s, services := runnerShop()
+	settingsFor(s.Environment("Staging"), stacktest.RunnerOf(stacktest.ShopDB)).Enabled = &off
+	for environment, want := range map[string]int{"Staging": 0, "Preview": 0, "Production": 1} {
+		if got := instances(s, services, environment); got != want {
+			t.Errorf("%s runs %d instances of the runner, want %d", environment, got, want)
+		}
+	}
+	settingsFor(s.Environment("Preview"), stacktest.RunnerOf(stacktest.ShopDB)).Enabled = &on
+	if got := instances(s, services, "Preview"); got != 1 {
+		t.Errorf("Preview, turned on again, runs %d instances, want one", got)
+	}
+
+	s, services = runnerShop()
+	for _, env := range s.Environments {
+		if env.Target != "" {
+			env.Target = "no-dns"
+			env.DNS = nil
+		}
+	}
+	settingsFor(s.Environment("Staging"), stacktest.RunnerOf(stacktest.ShopDB)).Platform = stacktest.RunnerPlatform
+	env := mustResolve(t, assemble(t, &noDNS{}), s, services, "Staging")
+	if runner := env.Deployable(shopRunner); runner == nil || runner.Platform != stacktest.RunnerPlatform || runner.Runner.Instances != 1 {
+		t.Errorf("the runner placed by its settings: %+v", runner)
+	}
+}
+
 // TestRunnerRefusals: what resolution refuses of runners.
 func TestRunnerRefusals(t *testing.T) {
 	reg := assemble(t)
@@ -133,5 +177,46 @@ func TestRunnerRefusals(t *testing.T) {
 		}
 		_, errs := resolve(t, assemble(t, &noDNS{}), s, services, "Staging")
 		mustFail(t, errs, stack.CodeUnrealizable, "runner shop-db-engine-runner: target no-dns has no platform for a runner; place it with a settings platform")
+	})
+	t.Run("the runner of a database that is no engine's", func(t *testing.T) {
+		s, services := shop()
+		settingsFor(s.Environment("Staging"), stacktest.RunnerOf(stacktest.ShopDB)).Enabled = new(bool)
+		_, errs := resolve(t, reg, s, services, "Staging")
+		mustFail(t, errs, stack.CodeUnknownDeployable, "names the engine's runner of shop-db, which has none: none of its types composes a behavior, so it is no engine database")
+	})
+	t.Run("the runner of an engine database no API connects to", func(t *testing.T) {
+		s, services := runnerShop()
+		for _, name := range []string{"shop-api", "shop-orders"} {
+			svc := service(services, name)
+			svc.AuthDB, svc.Dependencies = nil, nil
+		}
+		s.Deploy = append(s.Deploy, stacktest.ShopDB)
+		settingsFor(s.Environment("Staging"), stacktest.RunnerOf(stacktest.ShopDB)).Enabled = new(bool)
+		_, errs := resolve(t, reg, s, services, "Staging")
+		mustFail(t, errs, stack.CodeUnknownDeployable, "names the engine's runner of shop-db, which has none: no API of the stack connects to it")
+	})
+	t.Run("a runner beside an API's handle", func(t *testing.T) {
+		s, services := runnerShop()
+		settingsFor(s.Environment("Staging"), stacktest.RunnerOf(stacktest.ShopAPI)).Enabled = new(bool)
+		_, errs := resolve(t, reg, s, services, "Staging")
+		mustFail(t, errs, stack.CodeKindMismatch, "names shop-api, a API service; it takes DB")
+	})
+	t.Run("instances on a runner", func(t *testing.T) {
+		s, services := runnerShop()
+		settingsFor(s.Environment("Staging"), stacktest.RunnerOf(stacktest.ShopDB)).Instances = intp(2)
+		_, errs := resolve(t, reg, s, services, "Staging")
+		mustFail(t, errs, stack.CodeInvalidSettings, "sets instances or concurrency on runner shop-db-engine-runner; only a worker takes them")
+	})
+	t.Run("a schedule on a runner", func(t *testing.T) {
+		s, services := runnerShop()
+		settingsFor(s.Environment("Staging"), stacktest.RunnerOf(stacktest.ShopDB)).Schedule = "0 * * * *"
+		_, errs := resolve(t, reg, s, services, "Staging")
+		mustFail(t, errs, stack.CodeInvalidSettings, "sets a schedule or a time zone on runner shop-db-engine-runner, which runs until it is stopped")
+	})
+	t.Run("enabled on a database", func(t *testing.T) {
+		s, services := runnerShop()
+		settingsFor(s.Environment("Staging"), stacktest.Of(stacktest.ShopDB)).Enabled = new(bool)
+		_, errs := resolve(t, reg, s, services, "Staging")
+		mustFail(t, errs, stack.CodeInvalidSettings, "sets a schedule, a time zone or enabled on database shop-db")
 	})
 }

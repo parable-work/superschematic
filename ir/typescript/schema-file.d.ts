@@ -81,6 +81,7 @@ export interface DatabaseDecl {
 export interface DeployableRef {
   deployable?: string;
   job?: string;
+  runner?: boolean;
   service?: ServiceRef;
   worker?: string;
 }
