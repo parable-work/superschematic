@@ -64,9 +64,13 @@ func decodeTastingHistoryData(raw []byte) (*types.Tasting, error) {
 		}
 	}
 	if rawValue, ok := values["rested"]; ok && len(rawValue) > 0 && string(rawValue) != "null" {
-		if err := json.Unmarshal(rawValue, &result.Rested); err != nil {
+		// to_jsonb writes an INTERVAL as its text, "1 mon 2 days 03:04:05",
+		// and a version graph's row holds the duration's text, "1h30m0s".
+		duration, err := unmarshalHistoryInterval(rawValue)
+		if err != nil {
 			return nil, fmt.Errorf("failed to decode history field rested: %w", err)
 		}
+		result.Rested = types.TemporalDuration(duration)
 	}
 	if rawValue, ok := values["verdict"]; ok && len(rawValue) > 0 && string(rawValue) != "null" {
 		if err := json.Unmarshal(rawValue, &result.Verdict); err != nil {
@@ -721,7 +725,9 @@ func (r *TastingRepository) GetOne(ctx context.Context, id types.IdentityUUID, o
 			case "served_at":
 				scanDest[i] = &result.ServedAt
 			case "rested":
-				scanDest[i] = &result.Rested
+				// An INTERVAL reads as a time.Duration: its microseconds, a day 24 hours
+				// and a month 30 days.
+				scanDest[i] = (*time.Duration)(&result.Rested)
 			case "verdict":
 				scanDest[i] = &result.Verdict
 			case "remarks":
@@ -802,7 +808,7 @@ func (r *TastingRepository) GetOne(ctx context.Context, id types.IdentityUUID, o
 
 			&result.ServedAt,
 
-			&result.Rested,
+			(*time.Duration)(&result.Rested),
 
 			&result.Verdict,
 
@@ -994,7 +1000,7 @@ func (r *TastingRepository) GetManyByIDs(ctx context.Context, ids []types.Identi
 
 			&entity.ServedAt,
 
-			&entity.Rested,
+			(*time.Duration)(&entity.Rested),
 
 			&entity.Verdict,
 
@@ -1203,7 +1209,9 @@ func (r *TastingRepository) FindOne(ctx context.Context, filter *TastingFilter, 
 			case "served_at":
 				scanDest[i] = &result.ServedAt
 			case "rested":
-				scanDest[i] = &result.Rested
+				// An INTERVAL reads as a time.Duration: its microseconds, a day 24 hours
+				// and a month 30 days.
+				scanDest[i] = (*time.Duration)(&result.Rested)
 			case "verdict":
 				scanDest[i] = &result.Verdict
 			case "remarks":
@@ -1289,7 +1297,7 @@ func (r *TastingRepository) FindOne(ctx context.Context, filter *TastingFilter, 
 
 			&result.ServedAt,
 
-			&result.Rested,
+			(*time.Duration)(&result.Rested),
 
 			&result.Verdict,
 
@@ -1564,7 +1572,9 @@ func (r *TastingRepository) FindMany(ctx context.Context, filter *TastingFilter,
 			case "served_at":
 				scanDest[i] = &result.ServedAt
 			case "rested":
-				scanDest[i] = &result.Rested
+				// An INTERVAL reads as a time.Duration: its microseconds, a day 24 hours
+				// and a month 30 days.
+				scanDest[i] = (*time.Duration)(&result.Rested)
 			case "verdict":
 				scanDest[i] = &result.Verdict
 			case "remarks":
@@ -1779,7 +1789,9 @@ func (r *TastingRepository) CreateOne(ctx context.Context, input *types.Tasting)
 	fields = append(fields, `rested`)
 	paramNum++
 	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
-	values = append(values, input.Rested)
+	// An INTERVAL goes as its microseconds, which pgx encodes from a
+	// time.Duration, sign and all.
+	values = append(values, time.Duration(input.Rested))
 	// Required field: verdict
 	fields = append(fields, `verdict`)
 	paramNum++
@@ -1902,7 +1914,7 @@ func (r *TastingRepository) CreateOne(ctx context.Context, input *types.Tasting)
 
 		&result.ServedAt,
 
-		&result.Rested,
+		(*time.Duration)(&result.Rested),
 
 		&result.Verdict,
 
@@ -2028,7 +2040,9 @@ func (r *TastingRepository) CreateMany(ctx context.Context, inputs []*types.Tast
 		// Required field: rested
 		{
 			cell := batchInsertCell{column: `rested`, set: true}
-			cell.value = input.Rested
+			// An INTERVAL goes as its microseconds, which pgx encodes from a
+			// time.Duration, sign and all.
+			cell.value = time.Duration(input.Rested)
 			row = append(row, cell)
 		}
 		// Required field: verdict
@@ -2167,7 +2181,7 @@ func (r *TastingRepository) CreateMany(ctx context.Context, inputs []*types.Tast
 
 			&result.ServedAt,
 
-			&result.Rested,
+			(*time.Duration)(&result.Rested),
 
 			&result.Verdict,
 
@@ -2307,7 +2321,9 @@ func (r *TastingRepository) updateOne(ctx context.Context, id types.IdentityUUID
 	if update.Rested != nil {
 		paramNum++
 		setClauses = append(setClauses, fmt.Sprintf(`rested = $%d`, paramNum))
-		values = append(values, *update.Rested)
+		// An INTERVAL goes as its microseconds, which pgx encodes from a
+		// time.Duration, sign and all.
+		values = append(values, time.Duration(*update.Rested))
 	}
 	if update.Verdict != nil {
 		paramNum++
@@ -2433,7 +2449,7 @@ func (r *TastingRepository) updateOne(ctx context.Context, id types.IdentityUUID
 
 		&result.ServedAt,
 
-		&result.Rested,
+		(*time.Duration)(&result.Rested),
 
 		&result.Verdict,
 
@@ -2539,7 +2555,9 @@ func (r *TastingRepository) UpdateMany(ctx context.Context, filter *TastingFilte
 	if update.Rested != nil {
 		paramNum++
 		setClauses = append(setClauses, fmt.Sprintf(`rested = $%d`, paramNum))
-		values = append(values, *update.Rested)
+		// An INTERVAL goes as its microseconds, which pgx encodes from a
+		// time.Duration, sign and all.
+		values = append(values, time.Duration(*update.Rested))
 	}
 	if update.Verdict != nil {
 		paramNum++

@@ -13,6 +13,9 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 // Relation hydration is recursive, and the guard below is what stops it running
@@ -394,6 +397,36 @@ func copyListElements[T any](field string, values []*T, dst *[]T) error {
 	}
 	*dst = list
 	return nil
+}
+
+// parseHistoryInterval reads a duration of a row the history decoder reads.
+// A version graph's canonical row holds the duration's own text ("1h30m0s",
+// "250us"). A history row holds the INTERVAL's text, as to_jsonb writes it
+// ("1 mon 2 days 03:04:05", "-00:01:30.25"), which has a space or a colon
+// where a duration's text has neither, and which reads as pgx reads an
+// interval into a time.Duration: its microseconds, a day 24 hours and a
+// month 30 days.
+func parseHistoryInterval(text string) (time.Duration, error) {
+	if duration, err := time.ParseDuration(text); err == nil {
+		return duration, nil
+	}
+	var interval pgtype.Interval
+	if err := interval.Scan(text); err != nil {
+		return 0, err
+	}
+	const day = 24 * time.Hour
+	return time.Duration(interval.Months)*30*day + time.Duration(interval.Days)*day + time.Duration(interval.Microseconds)*time.Microsecond, nil
+}
+
+// unmarshalHistoryInterval decodes an INTERVAL column of a history row,
+// which to_jsonb writes as its text, or of a version graph's canonical row
+// (parseHistoryInterval).
+func unmarshalHistoryInterval(raw []byte) (time.Duration, error) {
+	var text string
+	if err := json.Unmarshal(raw, &text); err != nil {
+		return 0, err
+	}
+	return parseHistoryInterval(text)
 }
 
 // unmarshalGenericJSONFieldValue stores a Generic.JSON column value and keeps
