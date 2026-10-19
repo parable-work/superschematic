@@ -5817,9 +5817,13 @@ policy; a forged service credential is 401 `service_unauthorized`; and the
 runner fires the ticket's Timers deadline, which escalates it as the
 runner. `TestTheEngineReachesCloudSQLThroughASocket` carries a client
 through the Cloud SQL socket to a fake Postgres. Not built: the TypeScript
-and Rust servers (milestone 19); a project's engine archive in a Go server
-and in the generated CI's archive step, which wait for the project engine
-crate (13a); the gcp migration job's privileges on the engine's schema for
+and Rust servers (milestone 19); a project's engine archive in a Go
+server and its image, which wait for the project engine crate (13a): the
+build refuses an engine database that composes the work queue's
+behaviors or an extension's, though the generated CI's `check` already
+builds such a database's archive from `<out>/engine/rust/<db>/ffi`, the
+layout the project engine crate takes, and compiles the server against
+it; the gcp migration job's privileges on the engine's schema for
 the runner's and each server's own database user; the runner's settings
 element (`platform`, `enabled`) and a retention policy; no Go server has
 run on Cloud Run.

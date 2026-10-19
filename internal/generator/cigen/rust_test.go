@@ -169,3 +169,74 @@ func TestTheRustLockfileStepRefusesAMissingOrStaleLockfile(t *testing.T) {
 		t.Errorf("a lockfile the build changed: %v\n%s", err, output)
 	}
 }
+
+// engineGolden is the workflow of a stack whose Go server opens an engine
+// whose types compose an extension's behavior, which
+// TestAProjectEngineArchiveInCheck renders.
+const engineGolden = "testdata/golden/desk-stack.yml"
+
+// TestAProjectEngineArchiveInCheck: a Go server on an engine database
+// whose engine composes a behavior the core's archive does not run links
+// the archive of the project's engine crate, which the build writes under
+// the output root (D58). check sets up the Rust release tools.env pins,
+// builds the archive from the crate's ffi member after the build, staging
+// it as libsuperschematic_engine.a, and compiles the server with it
+// searched before the release's; a server on another database compiles as
+// before. The golden, which -update rewrites, shows the job.
+func TestAProjectEngineArchiveInCheck(t *testing.T) {
+	req := storefrontRequest()
+	req.Stack.Name, req.Stack.Dir = "desk-stack", "schemas/services/desk-stack"
+	req.Stack.TypeScriptImplementations = nil
+	req.Stack.EngineArchives = map[string]string{"desk-db": "schemas/dist/engine/rust/desk-db/ffi"}
+	env := *req.Environments[0].Environment
+	env.Stack = "desk-stack"
+	env.Deployables = []*ir.ResolvedDeployable{
+		{Name: "desk-api", Kind: ir.DeployableServer, Language: publicregistry.APILanguageGo, Services: []ir.ServiceRef{{Name: "desk-api", Kind: ir.SchemaKindAPI}}},
+		{Name: "Orders", Kind: ir.DeployableServer, Language: publicregistry.APILanguageGo, Services: []ir.ServiceRef{{Name: "shop-orders", Kind: ir.SchemaKindAPI}}},
+		{Name: "desk-db-engine-runner", Kind: ir.DeployableRunner, Language: publicregistry.APILanguageGo, Services: []ir.ServiceRef{{Name: "desk-db", Kind: ir.SchemaKindDB}},
+			Runner: &ir.ResolvedRunner{Database: "desk-db", API: "desk-api", Instances: 1}},
+	}
+	env.Edges = []*ir.Edge{
+		{ID: "sql:desk-api->desk-db", Kind: ir.EdgeSQL, From: "desk-api", To: "desk-db", Service: ir.ServiceRef{Name: "desk-db", Kind: ir.SchemaKindDB}},
+		{ID: "sql:desk-db-engine-runner->desk-db", Kind: ir.EdgeSQL, From: "desk-db-engine-runner", To: "desk-db", Service: ir.ServiceRef{Name: "desk-db", Kind: ir.SchemaKindDB}},
+		{ID: "sql:Orders->shop-db", Kind: ir.EdgeSQL, From: "Orders", To: "shop-db", Service: ir.ServiceRef{Name: "shop-db", Kind: ir.SchemaKindDB}},
+	}
+	req.Environments[0].Environment = &env
+	files, err := cigen.GitHub().Render(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := files[0].Data
+	if *update {
+		if err := os.WriteFile(engineGolden, got, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if want := readFile(t, engineGolden); !bytes.Equal(got, want) {
+		t.Errorf("the workflow differs from %s; run with -update and review the diff", engineGolden)
+	}
+	lint(t, engineGolden)
+
+	check := parseWorkflow(t, got).jobs["check"]
+	var names []string
+	for _, s := range check.Steps {
+		names = append(names, s.Name)
+	}
+	want := []string{
+		"Check out", "Install superschematic " + version, "Install the static archives", "Set up Go", "Set up Rust",
+		"Build the services", "Build the engine archive of desk-db", "Compile server Orders", "Compile server desk-api",
+	}
+	if !slices.Equal(names, want) {
+		t.Fatalf("check's steps:\n%q\nwant:\n%q", names, want)
+	}
+	if s := check.step("Build the engine archive of desk-db"); s.WorkingDirectory != "schemas/dist/engine/rust/desk-db/ffi" ||
+		!strings.Contains(s.Run, "cargo build --release") || !strings.Contains(s.Run, `"$dir/libsuperschematic_engine.a"`) {
+		t.Errorf("the archive step: %+v", s)
+	}
+	if s := check.step("Compile server desk-api"); !strings.HasPrefix(s.Run, `CGO_LDFLAGS="-L$RUNNER_TEMP/superschematic-engine/desk-db $CGO_LDFLAGS" go build`) {
+		t.Errorf("desk-api compiles with %q, not against the project's archive", s.Run)
+	}
+	if s := check.step("Compile server Orders"); s.Run != "go build -mod=mod -o /dev/null ." {
+		t.Errorf("Orders, on another database, compiles with %q", s.Run)
+	}
+}

@@ -3948,6 +3948,13 @@ The GitHub workflow:
     Go server's entrypoint module with `go build -mod=mod` (level 2). It
     runs on a push too. A binary the release workflow did not build names
     no digests, and its archives step fails.
+  - For a Go server on an engine database whose engine composes a
+    behavior the core's engine archive does not run, the work queue's or
+    an extension's (D58), `check` sets up the Rust release `tools.env`
+    pins, builds the archive of the project's engine crate after the
+    build, from its `ffi` member at `<schemas-root>/dist/engine/rust/<db>/ffi`,
+    staging it as `libsuperschematic_engine.a`, and compiles the server
+    with it searched before the release's.
   - For a stack with a TypeScript server, `check` then installs the
     output root's Bun workspace from the lockfile the project commits
     (section 8.6), `bun install --frozen-lockfile` in

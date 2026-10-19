@@ -263,7 +263,8 @@ func (g github) check() job {
 			with: [][2]string{{"go-version", servergen.GoVersion}, {"cache", "false"}},
 		})
 	}
-	if len(rustCrates) > 0 {
+	engines := g.serverEngines()
+	if len(rustCrates) > 0 || len(engines) > 0 {
 		steps = append(steps, setupRust())
 	}
 	packages := g.packages()
@@ -272,11 +273,22 @@ func (g github) check() job {
 	}
 	steps = append(steps, packages...)
 	steps = append(steps, g.build())
+	for _, db := range slices.Sorted(maps.Keys(st.EngineArchives)) {
+		if slices.Contains(slices.Collect(maps.Values(engines)), db) {
+			steps = append(steps, engineArchive(db, st.EngineArchives[db]))
+		}
+	}
 	for _, server := range servers {
+		compile := "go build -mod=mod -o /dev/null ."
+		if db, ok := engines[server]; ok {
+			// The project's engine archive, searched before the release's,
+			// which holds the core's under the same name (D58).
+			compile = fmt.Sprintf(`CGO_LDFLAGS="-L%s $CGO_LDFLAGS" %s`, engineArchiveDir(db), compile)
+		}
 		steps = append(steps, step{
 			name: "Compile server " + server,
 			dir:  path.Join(st.OutputRoot, "server", st.Name, server),
-			run:  "go build -mod=mod -o /dev/null .",
+			run:  compile,
 		})
 	}
 	if workspace {
@@ -316,6 +328,53 @@ func (g github) check() job {
 		})
 	}
 	return job{id: "check", name: "check", cond: notClosed, steps: steps}
+}
+
+// serverEngines are the Go servers of the stack whose engine database's
+// servers link a project's engine archive (registry.CIStack.EngineArchives),
+// each with its database: a server's sql edge to it says it connects to
+// it.
+func (g github) serverEngines() map[string]string {
+	out := map[string]string{}
+	if len(g.req.Stack.EngineArchives) == 0 {
+		return out
+	}
+	servers := g.servers()
+	for _, env := range g.req.Environments {
+		for _, e := range env.Environment.Edges {
+			if _, ok := g.req.Stack.EngineArchives[e.Service.Name]; ok && e.Kind == ir.EdgeSQL && slices.Contains(servers, e.From) {
+				out[e.From] = e.Service.Name
+			}
+		}
+	}
+	return out
+}
+
+// engineArchiveDir is where a check job stages the project's engine
+// archive of the engine database db.
+func engineArchiveDir(db string) string {
+	return "$RUNNER_TEMP/superschematic-engine/" + db
+}
+
+// engineArchive builds the project's engine archive of the engine database
+// db from the ffi member of its engine crate at crate, which the build
+// wrote, and stages it as libsuperschematic_engine.a, the name the engine's
+// Go binding links (D58): the static library cargo reports it built for
+// the crate, on the Rust release tools.env pins, which built the release's
+// other archives.
+func engineArchive(db, crate string) step {
+	return step{
+		name: "Build the engine archive of " + db,
+		dir:  crate,
+		run: strings.Join([]string{
+			"set -euo pipefail",
+			fmt.Sprintf(`dir="%s"`, engineArchiveDir(db)),
+			`mkdir -p "$dir"`,
+			`archive="$(cargo build --release --message-format=json-render-diagnostics | jq -r 'select(.reason == "compiler-artifact" and (.target.kind | index("staticlib"))) | .filenames[] | select(endswith(".a"))' | tail -n 1)"`,
+			`test -n "$archive"`,
+			`cp "$archive" "$dir/libsuperschematic_engine.a"`,
+		}, "\n"),
+	}
 }
 
 // rustCheck compiles the crate of a Rust server, job or worker and every
@@ -629,11 +688,11 @@ type rustCrate struct {
 }
 
 // rustCrates are the crates of the stack's Rust servers, then its Rust
-// jobs, then its Rust workers, then its Rust engine runners (D58), each
-// sorted by name.
+// jobs, then its Rust workers, each sorted by name. A Rust engine runner
+// has no crate yet (D58).
 func (g github) rustCrates() []rustCrate {
 	var crates []rustCrate
-	for _, kind := range []ir.DeployableKind{ir.DeployableServer, ir.DeployableJob, ir.DeployableWorker, ir.DeployableRunner} {
+	for _, kind := range []ir.DeployableKind{ir.DeployableServer, ir.DeployableJob, ir.DeployableWorker} {
 		for _, name := range g.deployablesIn(kind, registry.APILanguageRust) {
 			crates = append(crates, rustCrate{kind, name})
 		}

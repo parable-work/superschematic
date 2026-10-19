@@ -91,6 +91,16 @@ type CIStack struct {
 	// so a job that deploys a site sets up Bun and installs the workspace,
 	// and a check job builds each site.
 	Sites map[string]CISite
+
+	// EngineArchives are the project engine crates of the stack's engine
+	// databases whose types compose a behavior the core's engine archive
+	// does not run, the work queue's or an extension's (D58), by database:
+	// the directory of the crate's ffi member, which exports the engine's
+	// C ABI over the project's behaviors, under the output root at
+	// engine/rust/<db>/ffi, where the build writes it. A check job builds
+	// each one's archive after the build and compiles each Go server on
+	// the database against it, in place of the core's the release ships.
+	EngineArchives map[string]string
 }
 
 // CISite is a static site a CI job builds: its package's directory,
