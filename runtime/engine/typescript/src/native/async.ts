@@ -22,7 +22,7 @@ import type { EventWatcher } from '../events/notifier.js';
 import { DEFAULT_NAMESPACE } from '../namespaces.js';
 import { EngineError } from '../errors.js';
 import { resolveToolOptions, type ResolvedToolOptions } from '../tools/options.js';
-import { loadAddon, type AddonEngine, type HttpAnswer, type StreamPull } from './addon.js';
+import { loadAddon, type Addon, type AddonEngine, type HttpAnswer, type StreamPull } from './addon.js';
 import type { EngineRoute } from './engine.js';
 import { carry } from './carry.js';
 import { restoreError } from './errors.js';
@@ -57,6 +57,8 @@ export class AsyncNativeEngine {
   private closed = false;
 
   private constructor(
+    // The addon module that opened it, whose routes it serves.
+    private readonly module: Addon,
     private readonly addon: AddonEngine,
     private readonly clock: (() => number) | undefined,
     toolOptions: ResolvedToolOptions
@@ -161,13 +163,14 @@ export class AsyncNativeEngine {
       );
     }
     const tools = resolveToolOptions(options.tools);
+    const loaded = loadAddon(options.addon);
     let addon: AddonEngine;
     try {
-      addon = loadAddon().NativeEngine.open(JSON.stringify(json));
+      addon = loaded.NativeEngine.open(JSON.stringify(json));
     } catch (error) {
       throw restoreError(error);
     }
-    return new AsyncNativeEngine(addon, clock, tools);
+    return new AsyncNativeEngine(loaded, addon, clock, tools);
   }
 
   /** search searches every schema the namespace reaches that composes Search. */
@@ -177,7 +180,7 @@ export class AsyncNativeEngine {
 
   /** The routes the engine serves, which engineApp and engineMcp mount. */
   routes(): EngineRoute[] {
-    return JSON.parse(loadAddon().engineRoutes()) as EngineRoute[];
+    return JSON.parse(this.module.engineRoutes()) as EngineRoute[];
   }
 
   /** handleHttp serves one request off this thread (src/native/http.ts). */

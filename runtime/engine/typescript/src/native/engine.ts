@@ -46,7 +46,7 @@ import type { StoredValue } from '../values/store.js';
 import type { ValueTarget } from '../values/values.js';
 import type { AnyBehaviorImplementation } from '../behaviors/behavior.js';
 import { deepFreeze } from '../behaviors/json.js';
-import { loadAddon, type AddonEngine, type HttpAnswer, type StreamPull } from './addon.js';
+import { loadAddon, type Addon, type AddonEngine, type HttpAnswer, type StreamPull } from './addon.js';
 import { Bridge, rowOf, sqlParams } from './bridge.js';
 import { carry } from './carry.js';
 import type { Row, RunResult, SqlValue } from '../storage/driver.js';
@@ -976,11 +976,14 @@ export class NativeEngine {
   /** `sqlite`, or `postgres`, whose engine is called through callAsync. */
   readonly dialect: 'sqlite' | 'postgres';
   private readonly addon: AddonEngine;
+  // The addon module that opened it, whose routes it serves.
+  private readonly module: Addon;
   private readonly calls: Calls;
   private readonly watchers: Watchers;
   private readonly nativeStorage: NativeStorage | undefined;
 
   private constructor(
+    module: Addon,
     addon: AddonEngine,
     clock: (() => number) | undefined,
     hosts: Hosts,
@@ -989,6 +992,7 @@ export class NativeEngine {
     runner: { principal?: unknown; retryInitialMs?: number } | undefined,
     path: string | undefined
   ) {
+    this.module = module;
     this.addon = addon;
     this.dialect = addon.dialect;
     this.permissionMatcher = permissionMatcher;
@@ -1020,7 +1024,7 @@ export class NativeEngine {
     const tools = resolveToolOptions(options.tools);
     const bridge = new Bridge();
     const hosts = new Hosts(hosted, bridge);
-    const loaded = loadAddon();
+    const loaded = loadAddon(options.addon);
     if (loaded.bridgeCall !== undefined) {
       bridge.connect(loaded.bridgeCall);
     }
@@ -1047,7 +1051,7 @@ export class NativeEngine {
       addon.close();
       throw error;
     }
-    return new NativeEngine(addon, clock, hosts, options.permissionMatcher ?? hasAnyPermission, tools, options.runner, options.path);
+    return new NativeEngine(loaded, addon, clock, hosts, options.permissionMatcher ?? hasAnyPermission, tools, options.runner, options.path);
   }
 
   /** The engine's SQLite file (NativeStorage); an engine on Postgres has none. */
@@ -1060,7 +1064,7 @@ export class NativeEngine {
 
   /** The routes the engine serves (api::routes): what engineApp and engineMcp mount. */
   routes(): EngineRoute[] {
-    return JSON.parse(loadAddon().engineRoutes()) as EngineRoute[];
+    return JSON.parse(this.module.engineRoutes()) as EngineRoute[];
   }
 
   /** handleHttp serves one request through the engine's own routes (src/native/http.ts). */

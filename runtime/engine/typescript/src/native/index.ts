@@ -6,7 +6,7 @@ package's engine until the Rust engine passes its suite; the suite runs
 against this one with ENGINE_IMPL=rust (test/rust-pending.txt).
 */
 
-export { NATIVE_ABI_VERSION, NATIVE_BINARY_NAME, loadAddon, nativePackageName, nativeTriple } from './addon.js';
+export { NATIVE_ABI_VERSION, NATIVE_ADDON_ENV, NATIVE_BINARY_NAME, loadAddon, nativePackageName, nativeTriple } from './addon.js';
 export type { Addon, AddonEngine, AddonHost } from './addon.js';
 export { AsyncNativeEngine, openEngineAsync } from './async.js';
 export { NativeEngine, NativeSchemaValidator, NativeStorage, openNativeEngine } from './engine.js';
