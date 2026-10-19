@@ -1,5 +1,5 @@
 import { Nullable } from "@superschematic/schema";
-import { HttpMethod, paginated, QueryParam, rest } from "@superschematic/api";
+import { HttpMethod, paginated, QueryParam, rest, SortBy } from "@superschematic/api";
 
 export abstract class Item {
   name: string;
@@ -30,6 +30,19 @@ export class Catalog {
   @rest(HttpMethod.GET, "items/first")
   @paginated()
   firstItem(): Item {
+    throw new Error("schema declaration only");
+  }
+
+  // A sort of a list that does not page, of items without an id.
+  @rest(HttpMethod.GET, "items/sorted")
+  sortedItems(sort: SortBy<Item, ["name"]>): Item[] {
+    throw new Error("schema declaration only");
+  }
+
+  // An order for a page that sorts by nothing.
+  @rest(HttpMethod.GET, "items/ordered")
+  @paginated({ defaultSort: "name" })
+  orderedItems(): Item[] {
     throw new Error("schema declaration only");
   }
 }

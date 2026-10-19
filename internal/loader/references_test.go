@@ -103,6 +103,78 @@ func TestReferenceToADependencysType(t *testing.T) {
 	}
 }
 
+// TestAReferenceListedByItsAPIDependency: a reference to an API
+// dependency's type that the API itself lists by no operation takes its
+// options from the dependency's (D61, amended): the loader reads the
+// dependency, the check resolves the reference there, and the dependency's
+// search and lookup come with it. A dependency that lists it by none is
+// named in the refusal, and a General one, which has no operations, is
+// not.
+func TestAReferenceListedByItsAPIDependency(t *testing.T) {
+	root := t.TempDir()
+	write := func(rel, contents string) {
+		t.Helper()
+		path := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	shelves := func(kind, operations string) {
+		write("shelves-api/schema.config.json", `{"name": "shelves-api", "kind": "`+kind+`", "outputs": {}}`)
+		write("shelves-api/src/shelves.schema.json", `{"types": {"ShelfView": {"name": "ShelfView", "role": "EmbeddedStruct",
+			"display": {"titleField": "title"},
+			"fields": [{"name": "id", "typeRef": {"name": "string"}, "required": true}, {"name": "title", "typeRef": {"name": "string"}, "required": true}]}}`+operations+`}`)
+	}
+	listShelves := `, "operationSets": [{"name": "Shelves", "operations": [
+		{"name": "listShelves", "httpMethod": "GET", "restPath": "shelves", "typeRef": {"name": "ShelfView", "isArray": true}, "required": true, "arguments": [
+			{"name": "q", "typeRef": {"name": "string"}, "isQuery": true, "search": true},
+			{"name": "ids", "typeRef": {"name": "string", "isArray": true}, "isQuery": true, "references": {"type": "ShelfView"}}]}]}]`
+	shop := func(kind string) {
+		write("shop-api/schema.config.json", `{"name": "shop-api", "kind": "API", "dependencies": [{"name": "shelves-api", "kind": "`+kind+`"}], "outputs": {}}`)
+		write("shop-api/src/shop.schema.json", `{"imports": [{"package": "@schemas/shelves-api", "types": ["ShelfView"]}],
+			"types": {"PlaceInput": {"name": "PlaceInput", "role": "APIInput", "fields": [
+				{"name": "shelfId", "typeRef": {"name": "string"}, "required": true, "references": {"type": "ShelfView"}}]}},
+			"operationSets": [{"name": "Places", "operations": [
+				{"name": "place", "httpMethod": "POST", "restPath": "places", "typeRef": {"name": "string"}, "required": true,
+				 "arguments": [{"name": "input", "typeRef": {"name": "PlaceInput"}, "required": true}]}]}]}`)
+	}
+
+	shelves("API", listShelves)
+	shop("API")
+	schema, err := LoadService(filepath.Join(root, "shop-api"))
+	if err != nil {
+		t.Fatalf("LoadService: %v", err)
+	}
+	dep, err := LoadService(filepath.Join(root, "shelves-api"))
+	if err != nil {
+		t.Fatalf("LoadService(shelves-api): %v", err)
+	}
+	got, err := ir.ResolveReference(schema, map[string]*ir.Schema{"shelves-api": dep}, schema.Types["PlaceInput"].Fields[0].References)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.OptionsService != "shelves-api" || got.TargetService != "shelves-api" || got.OptionsSet.Name != "Shelves" || got.Options.Name != "listShelves" ||
+		got.Search == nil || got.Search.Name != "q" || got.Lookup == nil || got.Lookup.Name != "ids" || got.Label == nil || got.Label.Name != "title" {
+		t.Fatalf("resolved = %+v; want shelves-api's Shelves.listShelves, its search q and lookup ids, labeled by title", got)
+	}
+
+	shelves("API", "")
+	_, err = LoadService(filepath.Join(root, "shop-api"))
+	if want := "PlaceInput.shelfId: no operation of shop-api, nor of shelves-api, which declares ShelfView, lists it"; err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("a dependency that lists it by none: %v, want %s", err, want)
+	}
+
+	shelves("General", "")
+	shop("General")
+	_, err = LoadService(filepath.Join(root, "shop-api"))
+	if want := "PlaceInput.shelfId: no operation of shop-api lists ShelfView"; err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("a General dependency: %v, want %s", err, want)
+	}
+}
+
 // TestAPIsReferringToEachOtherAreRefused: two APIs whose references name
 // each other's types, which the loader reads (D66), are refused as a
 // cycle, not read without end (D61).

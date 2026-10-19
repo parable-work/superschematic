@@ -368,26 +368,28 @@ func (o *loadOptions) authDBFor(servicePath string, schema *ir.Schema, reg *regi
 }
 
 // referenceDependenciesFor reads the dependencies whose types the API's
-// references name (D61): a RefersTo whose target the schema does not
-// declare and one of its imports lists, from the service that import
-// names, through the dependency loader (WithDependencyLoader) or as the
-// service of that name beside this one. It reads nothing for any other
-// schema, and no service the config does not declare as a dependency of
-// a kind the API may reference types from (an API's, say): the
-// verification pass refuses that import, and ResolveReference a target
-// found in neither. A service already being read for this load's chain of
-// references is refused, so a cycle of them is an error, not an endless
-// read.
+// references name (D61), and whose types its sorted operations list (D60,
+// amended): a RefersTo whose target, or a SortBy operation whose item,
+// the schema does not declare and one of its imports lists, from the
+// service that import names, through the dependency loader
+// (WithDependencyLoader) or as the service of that name beside this one.
+// It reads nothing for any other schema, and no service the config does
+// not declare as a dependency of a kind the API may reference types from
+// (an API's, say): the verification pass refuses that import, and
+// ResolveReference a target found in neither. A service already being
+// read for this load's chain of references is refused, so a cycle of them
+// is an error, not an endless read.
 func (o *loadOptions) referenceDependenciesFor(servicePath string, schema *ir.Schema, dependencies map[string]ir.SchemaKind, reg *registry.Registry) (map[string]*ir.Schema, error) {
 	if schema.Kind != ir.SchemaKindAPI {
 		return nil, nil
 	}
 	kind, _ := reg.Kind(string(schema.Kind))
 	var names []string
-	for _, held := range ir.ReferencesOf(schema) {
-		target := held.Ref.Type
+	// why says what each service is read for, by the first type that names it.
+	why := map[string]string{}
+	need := func(target, reason string) {
 		if schema.Types[target] != nil || schema.Enums[target] != nil || schema.Unions[target] != nil || schema.Scalars[target] != nil {
-			continue
+			return
 		}
 		for _, imp := range schema.Imports {
 			if !slices.Contains(imp.Types, target) {
@@ -402,6 +404,20 @@ func (o *loadOptions) referenceDependenciesFor(servicePath string, schema *ir.Sc
 				continue
 			}
 			names = append(names, name)
+			why[name] = reason
+		}
+	}
+	for _, held := range ir.ReferencesOf(schema) {
+		need(held.Ref.Type, "whose type a RefersTo names")
+	}
+	for _, set := range schema.OperationSets {
+		if set == nil {
+			continue
+		}
+		for _, op := range set.Operations {
+			if ir.SortArgument(op) != nil {
+				need(op.TypeRef.Name, "whose type a SortBy sorts")
+			}
 		}
 	}
 	if len(names) == 0 {
@@ -424,11 +440,11 @@ func (o *loadOptions) referenceDependenciesFor(servicePath string, schema *ir.Sc
 	deps := make(map[string]*ir.Schema, len(names))
 	for _, name := range names {
 		if slices.Contains(reading, name) {
-			return nil, fmt.Errorf("%s: reading the dependency %s, whose type a RefersTo names: %s is already being read for its references (%s), a cycle", schema.Name, name, name, strings.Join(append(reading, name), " -> "))
+			return nil, fmt.Errorf("%s: reading the dependency %s, %s: %s is already being read for its references (%s), a cycle", schema.Name, name, why[name], name, strings.Join(append(reading, name), " -> "))
 		}
 		dep, err := load(name)
 		if err != nil {
-			return nil, fmt.Errorf("%s: reading the dependency %s, whose type a RefersTo names: %w", schema.Name, name, err)
+			return nil, fmt.Errorf("%s: reading the dependency %s, %s: %w", schema.Name, name, why[name], err)
 		}
 		deps[name] = dep
 	}

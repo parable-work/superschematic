@@ -60,13 +60,16 @@ Each member left out is derived, by `ir.ResolveReference` in the public
 
 | Member | Unsaid |
 | --- | --- |
-| `options` | the API's one operation that lists the target: a `GET` returning `Target[]`, one level, with no path argument and no required one, that an end user may call (not `@requireService`, `@manualRouteRegistration` or `@webhook`). Named, it is `listProducts`, or `Catalog.listProducts` when the name alone is not unique, and must meet the same rules |
+| `options` | the API's one operation that lists the target: a `GET` returning `Target[]`, one level, with no path argument and no required one, that an end user may call (not `@requireService`, `@manualRouteRegistration` or `@webhook`). Named, it is `listProducts`, or `Catalog.listProducts` when the name alone is not unique, and must meet the same rules. When the API has none and the target is an API dependency's type, it is the dependency's ([Options from an API dependency](#options-from-an-api-dependency)) |
 | `value` | `id`: the target's field the value holds, one value of the reference's own type |
 | `label` | the target's `@display` `titleField`, else none, and a UI shows the value. Named, it follows `titleField`'s rule: one text value, not secret, not `@uiHidden` |
 
 The options operation's lookup is its optional list query argument that
 refers to the same target by the same value (`ids` above); a UI calls it
-with the values it must name. An operation has at most one.
+with the values it must name. An operation has at most one. Its search,
+when it has one, is its `SearchQuery` argument, which a UI fills with the
+text a reader types to pick an item
+([`SearchQuery`](#searchquery-a-lists-search-text)).
 
 The JSON and YAML forms carry `references` on the field or argument, the
 members as written:
@@ -91,7 +94,9 @@ argument (`Set.operation(argument)`) named first:
 - no operation that lists the target, or two (`name one with options`),
   and an `options` that is no operation of the API, does not list the
   target, or has a path or required argument, admits only services, or is
-  manual or a webhook;
+  manual or a webhook. For an API dependency's target, the refusal names
+  the dependency too: `no operation of shop-api, nor of shelves-api, which
+  declares ShelfView, lists it`;
 - a `value` that is not a field of the target holding one value of the
   reference's type (`is Identity.UUID, but ProductView.sku, its value, is
   Identity.Slug`), and a `label` that is not one text field;
@@ -195,8 +200,38 @@ the schema imports, in the loader and in every generator (D66).
 A type of an API dependency that the API's operations take or return may
 hold a `RefersTo` of its own, which names its own API's operations. In
 the consuming API, the documents and the console read it against the
-API's operations, and keep it only when it resolves there to a value of
-the field's type. Otherwise the field is a plain value.
+consuming API, by the rule below, and keep it only when it resolves there
+to a value of the field's type. Otherwise the field is a plain value.
+
+### Options from an API dependency
+
+A reference's options are the API's own operation first. When the API
+has no operation that lists the target, and the target is a type of an
+API dependency, the options are that dependency's one operation that
+lists it, by the same rule, or the one `options` names there (D61,
+amended):
+
+```ts
+import { Identity } from "superscalar";
+import { RefersTo } from "@superschematic/api";
+// shelves-api, an API dependency, declares ShelfView and lists it in
+// Shelves.listShelves; this API declares no list of shelves.
+import { ShelfView } from "@acme/shelves-api";
+
+export abstract class PlaceInput {
+  shelfId: RefersTo<Identity.UUID, ShelfView>;
+}
+```
+
+The dependency's operation is compared with the target's name as the
+dependency declares it. Its lookup and its search are that operation's
+arguments, matched by the type they name, however it is spelled.
+`ir.ResolveReference` names the dependency in `ResolvedReference.OptionsService`,
+which is empty for the API's own operation. A General dependency has no
+operations, so a reference to its type needs the API's own. The loader
+reads the dependency's whole schema, its operations among it, as it does
+for its type. Adding a list of the target to the API itself moves the
+reference's options back to the API.
 
 ## `SearchQuery`: a list's search text
 
@@ -219,6 +254,12 @@ A bare `SearchQuery` is `SearchQuery<string>`. The data forms write
 a search argument that is required, has a default, is not text or is a
 list, sits on an operation that is not a `GET`, or is the operation's
 second.
+
+A reference whose options operation has a search argument resolves with
+it: `ir.ResolveReference` gives it in `ResolvedReference.Search`, nil when
+the options do not search (D61, amended). A UI that picks the
+reference's item sends the text a reader types in it, and offers the
+items the search finds, so a target with many items can still be picked.
 
 A search keeps the items whose searchable text contains each of its words,
 case-insensitively, and does not rank them. A word is a run of characters
