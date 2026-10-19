@@ -11,13 +11,12 @@
 # thread, the runner on the event loop for an engine that has one,
 # events.watch over the engine's notifier, engine.storage, raw SQL on the
 # engine's file and transactions the engine's calls run inside, an id
-# source written in TypeScript (ids), schemas.validator, and engineApp and
+# source written in TypeScript (ids), schemas.validator, engineApp and
 # engineMcp as Hono adapters over the engine's own routes, with a mount's
-# tool filter. What the files below wait for, the first named on each line
-# first:
+# tool filter, openEngineAsync, and a value JSON cannot carry (NaN, a Date)
+# refused where the TypeScript engine refuses it. What the files below wait
+# for:
 #
-#   json       a value JSON cannot carry (NaN, a Date) reaches the Rust engine
-#              as another
 #   driver     a value driver written in TypeScript (values.driver), which the
 #              Rust engine takes as config (D58)
 #   internals  a test of the TypeScript engine's own workings, which no
@@ -25,13 +24,10 @@
 #              engine.storage, and the reads its event stream makes, spied
 #              on through engine.events.read
 #
-# No test that runs here fails on what the Rust engine does.
+# No test that runs here fails on what the Rust engine does: what is left is
+# the TypeScript engine's own workings, and a value driver in TypeScript.
 
-behavior-create-params.test.ts           # json (NaN in a create's parameters)
-behavior-instances.test.ts               # json (a Date in an operation's parameters)
 behavior-own-columns.test.ts             # internals (the plan of the SQL the engine runs for a filter, spied on through engine.storage.all)
-core-search-vectors.test.ts              # json (NaN in a vector to settle)
-corpus.test.ts                           # internals and json (it records stream, registry and core-search-vectors again, which fail here)
-registry.test.ts                         # json (NaN and a Date in validate)
+corpus.test.ts                           # internals (it records stream.test.ts again, which fails here, before it compares the corpus)
 stream.test.ts                           # internals (two tests spy on engine.events.read for the reads the TypeScript stream makes, which the Rust engine makes within)
 values.test.ts                           # driver
