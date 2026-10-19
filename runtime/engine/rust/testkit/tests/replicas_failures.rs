@@ -21,7 +21,10 @@
 //!   whose locks go with its rolled-back transaction.
 //!
 //! Each case runs on Postgres when `SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL`
-//! names one, in a schema of its own; the poisoning case on SQLite too.
+//! names one, in a schema of its own; the poisoning case on SQLite too. A
+//! build without Postgres builds none of them.
+
+#![cfg(feature = "postgres")]
 
 mod replicas_support;
 mod support;

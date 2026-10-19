@@ -31,8 +31,7 @@ use serde_json::{json, Value};
 use replicas_support::{as_replica, pause, replica_name, set_busy_timeout, wait_for, Admin, Pause};
 use superschematic_engine::storage::Dialect;
 use superschematic_engine::{
-    CreateOptions, DefineOptions, Engine, EngineErrorCode, EngineOptions, Error, Policy,
-    PublishResult, SchemaTarget, Storage,
+    CreateOptions, DefineOptions, Engine, EngineErrorCode, Error, PublishResult, SchemaTarget,
 };
 use support::{alice, count, fixtures, publish, schema_document, targets};
 
@@ -303,117 +302,123 @@ fn publishes_of_one_draft_at_once_mint_one_version() {
     }
 }
 
-// A database of the test's own on the Postgres the variable names, dropped
-// when it goes out of scope.
-struct OwnDatabase {
-    admin_url: String,
-    name: String,
-    url: String,
-}
+// The database-wide case, on Postgres alone: a database of its own.
+#[cfg(feature = "postgres")]
+mod fresh_database {
+    use super::*;
 
-impl OwnDatabase {
-    fn create(url: &str, name: &str) -> OwnDatabase {
-        let mut client = postgres::Client::connect(url, postgres::NoTls).expect("connect");
-        client
-            .batch_execute(&format!("CREATE DATABASE {name}"))
-            .expect("create the database");
-        // The URL's database is the path after the host, before any query.
-        let (base, query) = url.split_once('?').unwrap_or((url, ""));
-        let host = &base[..base.rfind('/').expect("a database in the URL")];
-        let url = if query.is_empty() {
-            format!("{host}/{name}")
-        } else {
-            format!("{host}/{name}?{query}")
-        };
-        OwnDatabase {
-            admin_url: url_of(base, query),
-            name: name.to_owned(),
-            url,
-        }
+    // A database of the test's own on the Postgres the variable names, dropped
+    // when it goes out of scope.
+    struct OwnDatabase {
+        admin_url: String,
+        name: String,
+        url: String,
     }
-}
 
-fn url_of(base: &str, query: &str) -> String {
-    if query.is_empty() {
-        base.to_owned()
-    } else {
-        format!("{base}?{query}")
-    }
-}
-
-impl Drop for OwnDatabase {
-    fn drop(&mut self) {
-        if let Ok(mut client) = postgres::Client::connect(&self.admin_url, postgres::NoTls) {
-            let _ = client.batch_execute(&format!(
-                "DROP DATABASE IF EXISTS {} WITH (FORCE)",
-                self.name
-            ));
-        }
-    }
-}
-
-#[test]
-fn two_schemas_of_a_fresh_database_create_its_full_text_search_at_once() {
-    for target in targets("fresh_database_search") {
-        if target.dialect != Dialect::Postgres {
-            continue;
-        }
-        let database = OwnDatabase::create(
-            target.url().expect("a URL"),
-            &support::unique_name("engine_fresh"),
-        );
-        let start = Barrier::new(2);
-        let notes = |name: &str| {
-            let mut document = schema_document(
-                name,
-                json!([{"name": "title", "typeRef": {"name": "string"}, "required": true}]),
-                json!({}),
-            );
-            document["types"][name]["behaviors"] =
-                json!([{"name": "Search", "config": {"fields": ["title"]}}]);
-            document
-        };
-        thread::scope(|scope| {
-            let handles: Vec<_> = ["one", "two"]
-                .into_iter()
-                .map(|schema| {
-                    let (database, start, notes) = (&database, &start, &notes);
-                    scope.spawn(move || {
-                        let mut options = EngineOptions::new(Storage::Postgres {
-                            url: database.url.clone(),
-                            options: superschematic_engine::storage::PostgresOptions {
-                                schema: schema.to_owned(),
-                                listen: false,
-                                ..Default::default()
-                            },
-                        });
-                        options.policy = Some(Policy::allow_all());
-                        options.behaviors = superschematic_engine_behaviors::core();
-                        let engine = Engine::open(options).expect("open");
-                        start.wait();
-                        publish(&engine, &notes("Note"), None);
-                        engine
-                            .instances()
-                            .create(
-                                &alice(),
-                                "Note",
-                                &json!({"title": format!("walnut {schema}")}),
-                                CreateOptions::default(),
-                            )
-                            .expect("create");
-                        let found = engine
-                            .instances()
-                            .invoke_schema(&alice(), "Note", "search", &json!({"query": "walnut"}), None)
-                            .expect("search");
-                        assert_eq!(found["items"].as_array().map(Vec::len), Some(1), "{schema}");
-                        count(&engine, "SELECT COUNT(*) FROM pg_catalog.pg_extension WHERE extname = 'unaccent'")
-                    })
-                })
-                .collect();
-            for handle in handles {
-                assert_eq!(handle.join().expect("an engine"), 1);
+    impl OwnDatabase {
+        fn create(url: &str, name: &str) -> OwnDatabase {
+            let mut client = postgres::Client::connect(url, postgres::NoTls).expect("connect");
+            client
+                .batch_execute(&format!("CREATE DATABASE {name}"))
+                .expect("create the database");
+            // The URL's database is the path after the host, before any query.
+            let (base, query) = url.split_once('?').unwrap_or((url, ""));
+            let host = &base[..base.rfind('/').expect("a database in the URL")];
+            let url = if query.is_empty() {
+                format!("{host}/{name}")
+            } else {
+                format!("{host}/{name}?{query}")
+            };
+            OwnDatabase {
+                admin_url: url_of(base, query),
+                name: name.to_owned(),
+                url,
             }
-        });
-        drop(database);
+        }
+    }
+
+    fn url_of(base: &str, query: &str) -> String {
+        if query.is_empty() {
+            base.to_owned()
+        } else {
+            format!("{base}?{query}")
+        }
+    }
+
+    impl Drop for OwnDatabase {
+        fn drop(&mut self) {
+            if let Ok(mut client) = postgres::Client::connect(&self.admin_url, postgres::NoTls) {
+                let _ = client.batch_execute(&format!(
+                    "DROP DATABASE IF EXISTS {} WITH (FORCE)",
+                    self.name
+                ));
+            }
+        }
+    }
+
+    #[test]
+    fn two_schemas_of_a_fresh_database_create_its_full_text_search_at_once() {
+        for target in targets("fresh_database_search") {
+            if target.dialect != Dialect::Postgres {
+                continue;
+            }
+            let database = OwnDatabase::create(
+                target.url().expect("a URL"),
+                &support::unique_name("engine_fresh"),
+            );
+            let start = Barrier::new(2);
+            let notes = |name: &str| {
+                let mut document = schema_document(
+                    name,
+                    json!([{"name": "title", "typeRef": {"name": "string"}, "required": true}]),
+                    json!({}),
+                );
+                document["types"][name]["behaviors"] =
+                    json!([{"name": "Search", "config": {"fields": ["title"]}}]);
+                document
+            };
+            thread::scope(|scope| {
+                let handles: Vec<_> = ["one", "two"]
+                    .into_iter()
+                    .map(|schema| {
+                        let (database, start, notes) = (&database, &start, &notes);
+                        scope.spawn(move || {
+                            let mut options = superschematic_engine::EngineOptions::new(superschematic_engine::Storage::Postgres {
+                                url: database.url.clone(),
+                                options: superschematic_engine::storage::PostgresOptions {
+                                    schema: schema.to_owned(),
+                                    listen: false,
+                                    ..Default::default()
+                                },
+                            });
+                            options.policy = Some(superschematic_engine::Policy::allow_all());
+                            options.behaviors = superschematic_engine_behaviors::core();
+                            let engine = Engine::open(options).expect("open");
+                            start.wait();
+                            publish(&engine, &notes("Note"), None);
+                            engine
+                                .instances()
+                                .create(
+                                    &alice(),
+                                    "Note",
+                                    &json!({"title": format!("walnut {schema}")}),
+                                    CreateOptions::default(),
+                                )
+                                .expect("create");
+                            let found = engine
+                                .instances()
+                                .invoke_schema(&alice(), "Note", "search", &json!({"query": "walnut"}), None)
+                                .expect("search");
+                            assert_eq!(found["items"].as_array().map(Vec::len), Some(1), "{schema}");
+                            count(&engine, "SELECT COUNT(*) FROM pg_catalog.pg_extension WHERE extname = 'unaccent'")
+                        })
+                    })
+                    .collect();
+                for handle in handles {
+                    assert_eq!(handle.join().expect("an engine"), 1);
+                }
+            });
+            drop(database);
+        }
     }
 }

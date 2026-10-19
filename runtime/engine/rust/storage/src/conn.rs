@@ -145,6 +145,7 @@ impl<C: Send> Pool<C> {
     }
 
     /// The most connections the pool opens.
+    #[cfg_attr(not(feature = "postgres"), allow(dead_code))]
     pub fn max(&self) -> usize {
         self.max
     }
