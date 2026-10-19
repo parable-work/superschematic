@@ -325,7 +325,9 @@ the types does not load it) and the Rust types as `ENGINE_DOCUMENT`:
   document that carries an extension's decorators loads; **`tools`** are
   the invocation policy and the vendor keys the binary registers (D11),
   the engine's `tools` option; **`behaviors`** names each behavior the
-  types compose and the package that implements it.
+  types compose and the package that implements it, and for an
+  extension's behavior the Rust crate its registration names
+  (`"crate"`), which the project's engine crate compiles in (below).
 
 With today's TypeScript engine:
 
@@ -346,6 +348,44 @@ for (const schema of engineDocument.schemas) engine.schemas.publish(system, sche
 Every document is defined before any is published, since a link may name
 a type the document defines after it. A generated server will do this
 itself before it reports ready, once the servers open the engine.
+
+### The project's engine crate
+
+The Rust engine (D58) runs an extension's behavior from a Rust crate
+that implements the engine's `Behavior` trait, which the extension's
+`BehaviorSpec` names (`Rust`: the crate, its path in the project and
+the expression that registers it). When a DB or General schema's types
+compose such a behavior, the `projectengine` generator writes the
+project's engine crate, `engine/rust/<service>`, named
+`<rust_crate_prefix><service>-engine`:
+
+```rust
+pub fn behaviors() -> BehaviorSet {
+    superschematic_engine_behaviors::core()
+        .with(acme_behaviors::Rating)
+}
+```
+
+It depends on the engine's crates, at the `[paths]` keys `engine_rust`,
+`engine_behaviors_rust` and, when a type composes a work-queue behavior,
+`engine_workqueue_rust`, and on each extension's crate by its path. A
+host opens the engine with `behaviors()` and `tools()`, the binary's
+invocation policy and vendor keys:
+
+```rust
+let mut options = EngineOptions::postgres(url, PostgresOptions::default());
+options.policy = Some(policy);
+options.meta_schema = Some(MetaSchema::Text(meta_schema));
+options.behaviors = shop_ratings_engine::behaviors();
+options.tools = shop_ratings_engine::tools();
+let engine = Engine::open(options)?;
+```
+
+A schema whose types compose the core's behaviors alone gets no crate,
+since the engine's release carries them, and one that composes an
+extension's behavior without a crate gets none either: the TypeScript
+engine runs it. acme's `crates/behaviors` is the worked example
+(`examples/acme-schematic`).
 
 ## Display
 

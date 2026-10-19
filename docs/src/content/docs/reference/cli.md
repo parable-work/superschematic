@@ -69,7 +69,12 @@ the `enginedoc` generator writes the schema's engine document,
 constant too
 ([Engine types](/superschematic/guides/engine-behaviors/#engine-types)).
 `outputs.engine.namespace` names the engine namespace its documents live
-in, the service's name unless set. The build fails before its generators
+in, the service's name unless set. When a type of a DB or General schema
+composes an extension's behavior whose registration names a Rust crate,
+the `projectengine` generator writes the project's engine crate,
+`engine/rust/<service>`, which compiles the core's behaviors and the
+extension's crates into the Rust engine (D58)
+([The project's engine crate](/superschematic/guides/engine-behaviors/#the-projects-engine-crate)). The build fails before its generators
 run, one line per problem, when an engine type reaches a table or another
 engine type through a field, a table references an engine type, or an
 engine type declares what only a table has:
