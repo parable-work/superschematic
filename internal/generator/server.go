@@ -148,6 +148,7 @@ func (r run) generateServers() error {
 			}
 			plans = append(plans, planned{server: job})
 		case APILanguageTypeScript:
+			withJobRun(j, services)
 			job, _, err := r.planTypeScriptServer(st.Name, j, cloudSQL[j.Name], nil, facts.bundles[j.Name])
 			if err != nil {
 				return err
@@ -664,6 +665,32 @@ func (r run) checkRustManualRoutes(stackName string, output *rustrestgen.APIOutp
 		stackName, output.SchemaName, dir, rustrestgen.ManualRoutesFunc, rustrestgen.ImplementationLib, rustrestgen.ManualRoutesFunc, strings.Join(methods, "\n"), crate)
 }
 
+// withJobRun fills in the timeout and the retries of job j, which its @job
+// gives in every environment, where stack.Jobs, which resolves no
+// environment, leaves them unset: a TypeScript job's scheduled.ts runs its
+// tries itself, on Cron Triggers (D64).
+func withJobRun(j *ir.ResolvedDeployable, services []stack.Service) {
+	if j.Job == nil {
+		return
+	}
+	for _, svc := range services {
+		if svc.Name != j.Job.API {
+			continue
+		}
+		for _, job := range svc.Jobs {
+			if job.Name != j.Job.Name {
+				continue
+			}
+			j.Job.TimeoutSeconds = ir.DefaultJobTimeoutSeconds
+			if job.Timeout != "" {
+				// CheckJob refused a timeout that is no whole number of seconds.
+				j.Job.TimeoutSeconds, _ = registry.TimeoutSeconds(job.Timeout)
+			}
+			j.Job.Retries = job.Retries
+		}
+	}
+}
+
 // workerDatabase is the database whose queue the worker w claims: the one
 // resolution gives it, or else its API's, its authDb or its one DB
 // dependency. Empty when the API connects to none.
@@ -854,7 +881,9 @@ func (r run) planTypeScriptServer(stackName string, s *ir.ResolvedDeployable, cl
 		Workers:            bundle,
 	}
 	if s.Job != nil {
-		in.Job = &servergen.JobInput{Name: s.Job.Name}
+		// A job's timeout and retries are its @job's in every environment;
+		// scheduled.ts runs its tries itself (D64).
+		in.Job = &servergen.JobInput{Name: s.Job.Name, TimeoutSeconds: s.Job.TimeoutSeconds, Retries: s.Job.Retries}
 	}
 	if s.Worker != nil {
 		in.Worker = &servergen.WorkerInput{Name: s.Worker.Name, GraceSeconds: s.Worker.GraceSeconds}

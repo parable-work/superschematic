@@ -1,0 +1,232 @@
+# Rendered by superschematic from the resource graph of environment Staging of
+# stack web-stack. Do not edit: change the stack and render it again.
+
+name: web-stack
+runtime: yaml
+description: Environment Staging of stack web-stack
+resources:
+  # phase rollout; owners shop-storefront-sweep-carts
+  shop-storefront-sweep-carts-deployment:
+    name: shop-storefront-sweep-carts.deployment
+    type: cloudflare:index/workersDeployment:WorkersDeployment
+    properties:
+      accountId: 0123456789abcdef0123456789abcdef
+      scriptName: ${shop-storefront-sweep-carts-worker.name}
+      strategy: percentage
+      versions:
+        - percentage: 100
+          versionId: ${shop-storefront-sweep-carts-version.id}
+    options:
+      dependsOn:
+        - ${shop-storefront-sweep-carts-version}
+        - ${shop-storefront-sweep-carts-worker}
+      version: 6.22.0
+  # phase rollout; owners shop-storefront-sweep-carts
+  shop-storefront-sweep-carts-schedule:
+    name: shop-storefront-sweep-carts.schedule
+    type: cloudflare:index/workersCronTrigger:WorkersCronTrigger
+    properties:
+      accountId: 0123456789abcdef0123456789abcdef
+      schedules:
+        - cron: 0 3 * * *
+      scriptName: ${shop-storefront-sweep-carts-worker.name}
+    options:
+      dependsOn:
+        - ${shop-storefront-sweep-carts-deployment}
+        - ${shop-storefront-sweep-carts-worker}
+      version: 6.22.0
+  # phase rollout; owners shop-storefront-sweep-carts
+  shop-storefront-sweep-carts-version:
+    name: shop-storefront-sweep-carts.version
+    type: cloudflare:index/workerVersion:WorkerVersion
+    properties:
+      accountId: 0123456789abcdef0123456789abcdef
+      bindings:
+        - name: CART_TTL_DAYS
+          text: "30"
+          type: plain_text
+      compatibilityDate: "2026-09-15"
+      limits:
+        cpuMs: 30000
+      mainModule: main.js
+      modules:
+        - contentFile: artifacts/shop-storefront-sweep-carts/2222222222222222222222222222222222222222222222222222222222222222/main.js
+          contentSha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          contentType: application/javascript+module
+          name: main.js
+        - contentFile: artifacts/shop-storefront-sweep-carts/2222222222222222222222222222222222222222222222222222222222222222/main.js.map
+          contentSha256: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+          contentType: application/source-map
+          name: main.js.map
+        - contentFile: artifacts/shop-storefront-sweep-carts/2222222222222222222222222222222222222222222222222222222222222222/superscalar_wasm_bg.wasm
+          contentSha256: cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+          contentType: application/wasm
+          name: superscalar_wasm_bg.wasm
+      workerId: ${shop-storefront-sweep-carts-worker.id}
+    options:
+      dependsOn:
+        - ${shop-storefront-sweep-carts-worker}
+      version: 6.22.0
+  # phase infrastructure; owners shop-storefront-sweep-carts
+  shop-storefront-sweep-carts-worker:
+    name: shop-storefront-sweep-carts.worker
+    type: cloudflare:index/worker:Worker
+    properties:
+      accountId: 0123456789abcdef0123456789abcdef
+      name: shop-storefront-sweep-carts
+      observability:
+        enabled: true
+        logs:
+          enabled: true
+          invocationLogs: true
+      subdomain:
+        enabled: false
+        previewsEnabled: false
+    options:
+      version: 6.22.0
+  # phase rollout; owners shop-storefront
+  shop-storefront-deployment:
+    name: shop-storefront.deployment
+    type: cloudflare:index/workersDeployment:WorkersDeployment
+    properties:
+      accountId: 0123456789abcdef0123456789abcdef
+      scriptName: ${shop-storefront-worker.name}
+      strategy: percentage
+      versions:
+        - percentage: 100
+          versionId: ${shop-storefront-version.id}
+    options:
+      dependsOn:
+        - ${shop-storefront-version}
+        - ${shop-storefront-worker}
+      version: 6.22.0
+  # phase rollout; owners shop-storefront
+  shop-storefront-version:
+    name: shop-storefront.version
+    type: cloudflare:index/workerVersion:WorkerVersion
+    properties:
+      accountId: 0123456789abcdef0123456789abcdef
+      bindings:
+        - name: CART_TTL_DAYS
+          text: "30"
+          type: plain_text
+        - name: SHOP_STOREFRONT_CORS_ORIGINS
+          text: https://storefront-web.acme.workers.dev
+          type: plain_text
+      compatibilityDate: "2026-09-15"
+      mainModule: main.js
+      modules:
+        - contentFile: artifacts/shop-storefront/1111111111111111111111111111111111111111111111111111111111111111/main.js
+          contentSha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          contentType: application/javascript+module
+          name: main.js
+        - contentFile: artifacts/shop-storefront/1111111111111111111111111111111111111111111111111111111111111111/main.js.map
+          contentSha256: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+          contentType: application/source-map
+          name: main.js.map
+        - contentFile: artifacts/shop-storefront/1111111111111111111111111111111111111111111111111111111111111111/superscalar_wasm_bg.wasm
+          contentSha256: cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+          contentType: application/wasm
+          name: superscalar_wasm_bg.wasm
+      workerId: ${shop-storefront-worker.id}
+    options:
+      dependsOn:
+        - ${shop-storefront-worker}
+      version: 6.22.0
+  # phase infrastructure; owners shop-storefront
+  shop-storefront-worker:
+    name: shop-storefront.worker
+    type: cloudflare:index/worker:Worker
+    properties:
+      accountId: 0123456789abcdef0123456789abcdef
+      name: shop-storefront
+      observability:
+        enabled: true
+        logs:
+          enabled: true
+          invocationLogs: true
+      subdomain:
+        enabled: true
+        previewsEnabled: false
+    options:
+      version: 6.22.0
+  # phase rollout; owners storefront-web
+  storefront-web-deployment:
+    name: storefront-web.deployment
+    type: cloudflare:index/workersDeployment:WorkersDeployment
+    properties:
+      accountId: 0123456789abcdef0123456789abcdef
+      scriptName: ${storefront-web-worker.name}
+      strategy: percentage
+      versions:
+        - percentage: 100
+          versionId: ${storefront-web-version.id}
+    options:
+      dependsOn:
+        - ${storefront-web-version}
+        - ${storefront-web-worker}
+      version: 6.22.0
+  # phase rollout; owners storefront-web
+  storefront-web-version:
+    name: storefront-web.version
+    type: cloudflare:index/workerVersion:WorkerVersion
+    properties:
+      accountId: 0123456789abcdef0123456789abcdef
+      assets:
+        config:
+          htmlHandling: none
+          notFoundHandling: none
+          runWorkerFirst:
+            - /__superschematic/*
+        directory: artifacts/storefront-web/5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e
+      bindings:
+        - name: ASSETS
+          type: assets
+        - name: SITE_CONFIG
+          text: '{"apis":{"shop-storefront":{"url":"https://shop-storefront.acme.workers.dev"}}}'
+          type: plain_text
+        - name: SITE_FALLBACK
+          text: index.html
+          type: plain_text
+      compatibilityDate: "2026-09-15"
+      mainModule: site.js
+      modules:
+        - contentBase64: Ly8gVGhlIHNjcmlwdCBvZiBhIHN0YXRpYyBzaXRlJ3MgV29ya2VyIG9uIENsb3VkZmxhcmUgKGRvY3Mvc3RhY2stbW9kZWwubWQsCi8vIHNlY3Rpb24gMTguOCwgRDY0KS4gVGhlIGNsb3VkZmxhcmUgZXh0ZW5zaW9uIGVtYmVkcyBpdCwgc28gZXZlcnkgc2l0ZSdzCi8vIFdvcmtlciBydW5zIHRoZXNlIGJ5dGVzLCBpbiBldmVyeSByZWxlYXNlLiBDbG91ZGZsYXJlIHNlcnZlcyBhIGZpbGUgb2YgdGhlCi8vIHNpdGUncyBidWlsZCBhcyBhIHN0YXRpYyBhc3NldCB3aXRob3V0IHJ1bm5pbmcgaXQ7IGl0IHJ1bnMgZm9yIGEgcGF0aAovLyB0aGF0IG5hbWVzIG5vIGZpbGUsIGFuZCBmaXJzdCBmb3IgZXZlcnkgcGF0aCB1bmRlciAvX19zdXBlcnNjaGVtYXRpYy8uCi8vCi8vIEl0IGFuc3dlcnMgYSBHRVQgb3IgYSBIRUFEIG9mOgovLyAgIC0gL19fc3VwZXJzY2hlbWF0aWMvY29uZmlnLmpzb24gd2l0aCBTSVRFX0NPTkZJRywgdGhlIHNpdGUncyBjb25maWcgZm9yCi8vICAgICBpdHMgZW52aXJvbm1lbnQsIHdoaWNoIG5hbWVzIGVhY2ggQVBJIGl0IGNhbGxzIHdpdGggaXRzIHB1YmxpYwovLyAgICAgYWRkcmVzcywgbmV2ZXIgY2FjaGVkOwovLyAgIC0gYSBkaXJlY3Rvcnkgb2YgdGhlIGJ1aWxkIHdpdGggaXRzIGluZGV4Lmh0bWwsIGFzIHN0YWNrIGRldidzIGZpbGUKLy8gICAgIHNlcnZlciBkb2VzLCBzaW5jZSB0aGUgYXNzZXRzIG1hdGNoIGEgcGF0aCB0byBhIGZpbGUgZXhhY3RseQovLyAgICAgKGh0bWxIYW5kbGluZzogbm9uZSk7Ci8vICAgLSBhbnkgb3RoZXIgcGF0aCB3aXRoIFNJVEVfRkFMTEJBQ0ssIHRoZSBidWlsZCdzIHNpbmdsZS1wYWdlIGZhbGxiYWNrLAovLyAgICAgYXQgMjAwLCBvciA0MDQgd2hlbiB0aGUgc2l0ZSBoYXMgbm9uZS4KLy8gQW55IG90aGVyIG1ldGhvZCBnZXRzIDQwNS4KCmNvbnN0IENPTkZJR19QQVRIID0gJy9fX3N1cGVyc2NoZW1hdGljL2NvbmZpZy5qc29uJzsKCmV4cG9ydCBkZWZhdWx0IHsKICBhc3luYyBmZXRjaChyZXF1ZXN0LCBlbnYpIHsKICAgIGlmIChyZXF1ZXN0Lm1ldGhvZCAhPT0gJ0dFVCcgJiYgcmVxdWVzdC5tZXRob2QgIT09ICdIRUFEJykgewogICAgICByZXR1cm4gdGV4dCg0MDUsICdtZXRob2Qgbm90IGFsbG93ZWQnLCB7IGFsbG93OiAnR0VULCBIRUFEJyB9KTsKICAgIH0KICAgIGNvbnN0IHVybCA9IG5ldyBVUkwocmVxdWVzdC51cmwpOwogICAgaWYgKHVybC5wYXRobmFtZSA9PT0gQ09ORklHX1BBVEgpIHsKICAgICAgcmV0dXJuIG5ldyBSZXNwb25zZShyZXF1ZXN0Lm1ldGhvZCA9PT0gJ0hFQUQnID8gbnVsbCA6IGVudi5TSVRFX0NPTkZJRywgewogICAgICAgIGhlYWRlcnM6IHsgJ2NvbnRlbnQtdHlwZSc6ICdhcHBsaWNhdGlvbi9qc29uJywgJ2NhY2hlLWNvbnRyb2wnOiAnbm8tc3RvcmUnIH0sCiAgICAgIH0pOwogICAgfQogICAgY29uc3QgaW5kZXggPSBhd2FpdCBhc3NldChlbnYsIHJlcXVlc3QsIHVybC5wYXRobmFtZS5yZXBsYWNlKC9cLz8kL3UsICcvaW5kZXguaHRtbCcpKTsKICAgIGlmIChpbmRleCkgcmV0dXJuIGluZGV4OwogICAgaWYgKGVudi5TSVRFX0ZBTExCQUNLKSB7CiAgICAgIGNvbnN0IGZhbGxiYWNrID0gYXdhaXQgYXNzZXQoZW52LCByZXF1ZXN0LCBgLyR7ZW52LlNJVEVfRkFMTEJBQ0t9YCk7CiAgICAgIGlmIChmYWxsYmFjaykgcmV0dXJuIGZhbGxiYWNrOwogICAgfQogICAgcmV0dXJuIHRleHQoNDA0LCAnbm90IGZvdW5kJyk7CiAgfSwKfTsKCi8qKiBUaGUgc2l0ZSdzIGZpbGUgYXQgcGF0aCwgYXMgdGhlIGFzc2V0cyBzZXJ2ZSBpdCwgb3IgdW5kZWZpbmVkIHdoZW4gdGhlcmUgaXMgbm9uZS4gKi8KYXN5bmMgZnVuY3Rpb24gYXNzZXQoZW52LCByZXF1ZXN0LCBwYXRoKSB7CiAgY29uc3QgdXJsID0gbmV3IFVSTChyZXF1ZXN0LnVybCk7CiAgdXJsLnBhdGhuYW1lID0gcGF0aDsKICB1cmwuc2VhcmNoID0gJyc7CiAgY29uc3QgcmVzcG9uc2UgPSBhd2FpdCBlbnYuQVNTRVRTLmZldGNoKG5ldyBSZXF1ZXN0KHVybCwgeyBtZXRob2Q6IHJlcXVlc3QubWV0aG9kLCBoZWFkZXJzOiByZXF1ZXN0LmhlYWRlcnMgfSkpOwogIHJldHVybiByZXNwb25zZS5zdGF0dXMgPT09IDQwNCA/IHVuZGVmaW5lZCA6IHJlc3BvbnNlOwp9CgovKiogQSBwbGFpbi10ZXh0IGFuc3dlci4gKi8KZnVuY3Rpb24gdGV4dChzdGF0dXMsIGJvZHksIGhlYWRlcnMgPSB7fSkgewogIHJldHVybiBuZXcgUmVzcG9uc2UoYCR7Ym9keX1cbmAsIHsgc3RhdHVzLCBoZWFkZXJzOiB7ICdjb250ZW50LXR5cGUnOiAndGV4dC9wbGFpbjsgY2hhcnNldD11dGYtOCcsIC4uLmhlYWRlcnMgfSB9KTsKfQo=
+          contentType: application/javascript+module
+          name: site.js
+      workerId: ${storefront-web-worker.id}
+    options:
+      dependsOn:
+        - ${storefront-web-worker}
+      version: 6.22.0
+  # phase infrastructure; owners storefront-web
+  storefront-web-worker:
+    name: storefront-web.worker
+    type: cloudflare:index/worker:Worker
+    properties:
+      accountId: 0123456789abcdef0123456789abcdef
+      name: storefront-web
+      observability:
+        enabled: true
+        logs:
+          enabled: true
+          invocationLogs: true
+      subdomain:
+        enabled: true
+        previewsEnabled: false
+    options:
+      version: 6.22.0
+outputs:
+  shop-storefront-sweep-carts.deployment.id: ${shop-storefront-sweep-carts-deployment.id}
+  shop-storefront-sweep-carts.schedule.id: ${shop-storefront-sweep-carts-schedule.id}
+  shop-storefront-sweep-carts.version.id: ${shop-storefront-sweep-carts-version.id}
+  shop-storefront-sweep-carts.worker.id: ${shop-storefront-sweep-carts-worker.id}
+  shop-storefront-sweep-carts.worker.name: ${shop-storefront-sweep-carts-worker.name}
+  shop-storefront.deployment.id: ${shop-storefront-deployment.id}
+  shop-storefront.version.id: ${shop-storefront-version.id}
+  shop-storefront.worker.id: ${shop-storefront-worker.id}
+  shop-storefront.worker.name: ${shop-storefront-worker.name}
+  storefront-web.deployment.id: ${storefront-web-deployment.id}
+  storefront-web.version.id: ${storefront-web-version.id}
+  storefront-web.worker.id: ${storefront-web-worker.id}
+  storefront-web.worker.name: ${storefront-web-worker.name}

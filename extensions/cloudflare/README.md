@@ -9,8 +9,10 @@ environment on one Cloudflare account. The target's values, its state in
 R2, its secrets in the Secrets Store, its bootstrap, its CI identity, its
 Workers platform, which runs TypeScript servers as Workers from the
 bundles it keeps in R2 and joins them through service bindings, its R2
-platform for buckets, and its D1 platform and D1 migrations are built;
-its Cron and site platforms come next, in this module.
+platform for buckets, its D1 platform and D1 migrations, its Cron
+platform, which runs TypeScript jobs as Workers under Cron Triggers, and
+its site platform, which serves sites as Workers with static assets kept
+in R2, are built.
 
 It is a Go module of its own, as `extensions/gcp` and `extensions/pulumi`
 are, and registers through the public `registry` package alone (D10).
@@ -120,6 +122,8 @@ export abstract class Staging {}
 | `r2.go` | the `cloudflare.r2` platform, `cloudflare.workers-r2`, the connector of a bucket edge, `buckets-never-public`, and `PreDestroy`, which empties a member's buckets |
 | `d1.go` | the `cloudflare.d1` platform: a `d1Database` per hosted DB schema, `<stack>-<db>` with a suffix per parameter, in `sqlite`, with `locationHint` or `jurisdiction`; and `cloudflare.workers-d1`, the connector of a sql edge, a d1 binding |
 | `migrations.go` | the migration runner: `superschematic-migrate job` on the deploying machine, against `d1://<accountId>/<uuid>`, each uuid looked up by name |
+| `cron.go` | the `cloudflare.cron` platform: a TypeScript job as a Worker and its Cron Trigger, in UTC, within Cloudflare's 15 minutes for a scheduled run; and `cloudflare.cron-workers`, `cloudflare.cron-r2` and `cloudflare.cron-d1`, a job's edges through the server's connectors |
+| `sites.go`, `site.js` | the `cloudflare.sites` platform: a site as a Worker with static assets and the script it embeds; the `cloudflare.site-workers` connector; and the site store, each build's files in the state bucket under their digest, and back |
 | `policy.go` | `domain-on-cloudflare` and `nothing-public-unless-exposed` |
 
 Every command reads the token from `CLOUDFLARE_API_TOKEN` and the state's
@@ -220,6 +224,56 @@ value a `secret_text` binding. `buckets-never-public` refuses an
 The target's `PreDestroy` empties each bucket of a member of a
 parameterized environment through `Cloud`'s S3 calls before its destroy.
 
+## Jobs on Cron Triggers
+
+`cloudflare.cron` places a TypeScript job, its artifact a bundle built
+from the generated `scheduled.ts` (section 18.9 of the design). It lowers
+a job to its Worker's three nodes, as a server's, with workers.dev off,
+and for a schedule the environment runs:
+
+- `<job>.schedule`, a `cloudflare:index/workersCronTrigger:WorkersCronTrigger`
+  on the Worker's name with the job's schedule, after the deployment.
+
+A job's edges are its API's: `cloudflare.cron-workers`,
+`cloudflare.cron-r2` and `cloudflare.cron-d1` derive them with the
+server's connect functions, so the job gets a service binding and a key
+of its own per callee, an `r2_bucket` binding and a token of its own per
+bucket, and a d1 binding; its `worker` node depends on each Worker it
+binds (`bindingDependencies`).
+
+| Setting | Type | |
+| --- | --- | --- |
+| `logs` | boolean | Workers Logs, on by default |
+| `cpuMs` | integer, 1 to 300000 | `limits.cpuMs` |
+
+It refuses, as unrealizable, a job in another language, a Worker name
+over 63 characters, a schedule in a time zone other than UTC, and a
+timeout times tries over `MaxScheduledRunSeconds`, 15 minutes, since
+`scheduled.ts` runs every try of a firing within one run. The target has
+no `Jobs` seam, so `stack run` refuses it.
+
+## Sites on Workers
+
+`cloudflare.sites` places a site (section 18.8 of the design). It lowers
+a site to its Worker's three nodes, workers.dev on without a domain,
+whose version holds:
+
+- `assets`, the directory `artifacts/<site>/{site-digest}`, which the
+  deploy pins and fills, with `htmlHandling` and `notFoundHandling`
+  `none` and the script first under `/__superschematic/`;
+- `site.js` as its one module, inline: `SiteScript`, the bytes the
+  extension embeds;
+- the bindings `ASSETS`, `SITE_CONFIG`, the JSON of section 8.10 with each
+  API's public address, a string or a concatenation with the
+  environment's parameters, and `SITE_FALLBACK` when the site has one;
+
+and under a domain `<site>.domain`, a `workersCustomDomain` for
+`<site>.<domain>`. `cloudflare.site-workers` gives a site edge to a
+server on Workers the server's public address. The site store keeps a
+build's files under `superschematic/sites/<stack>/<site>/<hex>/` as the
+bundle store keeps a bundle's, writes no config, and fetches them back
+for the deploy to place.
+
 ## Linking it
 
 A distribution links the extension beside its target and the pulumi
@@ -244,9 +298,10 @@ cli.New(cli.Config{Name: "superschematic"},
 digest of each upstream file and the types the DNS platform and the
 target emit: the DNS record, the account token of bootstrap's graph and
 of a bucket edge, a Worker's `worker`, `workerVersion`,
-`workersDeployment` and `workersCustomDomain`, a bucket's `r2Bucket`
-and `r2BucketLifecycle`, and the D1 database, `d1Database`. A call's key
-node is the core's `tls` type, which the generic connector pins.
+`workersDeployment`, `workersCustomDomain` and `workersCronTrigger`, a
+bucket's `r2Bucket` and `r2BucketLifecycle`, and the D1 database,
+`d1Database`. A call's key node is the core's `tls` type, which the
+generic connector pins.
 `schemas/` holds one file per type, with its Terraform name and renames
 (section 6.4), and the DNS platform and the target register each as the
 JSON Schema of its type's properties, so resolution checks every node
@@ -279,8 +334,16 @@ bootstrap graph (`testdata/golden/bootstrap`) and a cloudflare
 environment's workflow (`testdata/golden/ci`, through actionlint when it is
 installed). It resolves `reviews-stack`, whose databases are on D1, in
 Staging, Preview and Production, and checks its workflow, whose deploy
-jobs install `superschematic-migrate`. Bootstrap, the stores, the CI
-identity and the migration runner run against a fake `Cloud`, `gh` and
-provisioner, the runner with a stand-in for `superschematic-migrate`, and
-`Cloud` itself against a local stand-in for the REST and S3 APIs. Run it with `-update` to rewrite the golden
+jobs install `superschematic-migrate`. It resolves the web fixture
+`web-stack`, a server, its job and a site, in the same three
+environments, deploys its site with the site store, checks its workflow,
+and gives a job of the calls and D1 fixtures their edges.
+`TestSiteScriptUnderWorkerd` runs `site.js` under the HTTP runtime's
+pinned workerd (`testdata/workerd/site`), which
+`bun install --frozen-lockfile` in `runtime/http/typescript/test/workerd`
+installs; it skips without it, unless `SUPERSCHEMATIC_REQUIRE_TS_CHECKS`
+is set. Bootstrap, the stores, the CI identity and the migration runner
+run against a fake `Cloud`, `gh` and provisioner, the runner with a
+stand-in for `superschematic-migrate`, and `Cloud` itself against a local
+stand-in for the REST and S3 APIs. Run it with `-update` to rewrite the golden
 files, and review the diff. No test calls Cloudflare.

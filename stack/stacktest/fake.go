@@ -83,6 +83,11 @@ const (
 	// No connector reaches it.
 	BundlePlatform = "fake.bundle"
 
+	// CronPlatform runs TypeScript jobs whose artifact is a bundle, as
+	// Cloudflare's Cron Triggers run a job's Worker (D64): the same script
+	// as BundlePlatform's, for a job. CronD1Connector reaches from it.
+	CronPlatform = "fake.cron"
+
 	// WorkerSQLConnector, WorkerHTTPConnector and WorkerBucketConnector
 	// connect a worker, whose edges are its API's, as a job's connectors
 	// do.
@@ -94,9 +99,11 @@ const (
 	// LitePlatform as a Worker reaches D1 (D64): through a binding named
 	// after the field, of the database's id. JobLiteConnector connects a job
 	// to one with a sqlite: URL, as the local target derives one for a
-	// SQLite file.
+	// SQLite file. CronD1Connector connects a job on CronPlatform as
+	// BundleD1Connector connects a server, as a job's Worker reaches D1.
 	BundleD1Connector = "fake.bundle-lite"
 	JobLiteConnector  = "fake.job-lite"
+	CronD1Connector   = "fake.cron-lite"
 
 	// FakeIssuer is the issuer of the fake target's service credentials,
 	// which a callee's callers field names.
@@ -251,6 +258,16 @@ func (e *Extension) Register(r *registry.Registry) error {
 			},
 			Lower: lowerBundle,
 		},
+		{
+			Name:      CronPlatform,
+			Extension: Name,
+			Kind:      ir.DeployableJob,
+			Languages: []string{registry.APILanguageTypeScript},
+			Artifact:  ir.ArtifactBundle,
+			NameOf:    serverName,
+			AddressOf: func(registry.PlatformContext) any { return nil },
+			Lower:     lowerBundle,
+		},
 		database(SQLPlatform, registry.SQLDialectPostgres),
 		database(LitePlatform, registry.SQLDialectSQLite),
 		{
@@ -314,6 +331,7 @@ func (e *Extension) Register(r *registry.Registry) error {
 		{Name: WorkerBucketConnector, Extension: Name, Edge: ir.EdgeBucket, From: WorkerPlatform, To: BucketPlatform, Connect: connectBucket},
 		{Name: BundleD1Connector, Extension: Name, Edge: ir.EdgeSQL, From: BundlePlatform, To: LitePlatform, Connect: connectD1},
 		{Name: JobLiteConnector, Extension: Name, Edge: ir.EdgeSQL, From: JobPlatform, To: LitePlatform, Connect: connectLite},
+		{Name: CronD1Connector, Extension: Name, Edge: ir.EdgeSQL, From: CronPlatform, To: LitePlatform, Connect: connectD1},
 	} {
 		if err := r.RegisterConnector(spec); err != nil {
 			return err
@@ -556,11 +574,11 @@ func lowerServer(ctx registry.PlatformContext) (registry.Lowered, error) {
 	return out, nil
 }
 
-// lowerBundle lowers a server on the bundle platform (D64) to an account
-// and the secrets it reads, as a server's, and a script that runs its
-// bundle: each file BundleFiles names, read from the program's artifacts
-// under the bundle's digest with its SHA-256, which the deploy pins, and
-// the server's environment.
+// lowerBundle lowers a server on the bundle platform, or a job on the cron
+// platform (D64), to an account and the secrets it reads, as a server's,
+// and a script that runs its bundle: each file BundleFiles names, read
+// from the program's artifacts under the bundle's digest with its
+// SHA-256, which the deploy pins, and the deployable's environment.
 func lowerBundle(ctx registry.PlatformContext) (registry.Lowered, error) {
 	d := ctx.Deployable
 	out, member, env, err := lowerAccount(ctx)
@@ -806,8 +824,8 @@ func lowerDatabase(ctx registry.PlatformContext) (registry.Lowered, error) {
 	return out, nil
 }
 
-// connectD1 derives the binding a server on the bundle platform reaches
-// its SQLite database through, as a Worker reaches D1 (D64): the binding
+// connectD1 derives the binding a server on the bundle platform, or a job
+// on the cron platform, reaches its SQLite database through, as a Worker reaches D1 (D64): the binding
 // named after the field, of the schema's database's id. The binding is the
 // grant, so the edge has no resource.
 func connectD1(ctx registry.ConnectorContext) (registry.Connected, error) {

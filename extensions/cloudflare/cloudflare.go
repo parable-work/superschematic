@@ -7,9 +7,9 @@
 // bootstrap that makes both and the CI's account tokens, the generated
 // CI's sign-in with those tokens, TypeScript servers as Workers that call
 // each other through service bindings, the R2 store of the bundles they
-// run, buckets on R2, and databases on D1 with their migrations from the
-// deploying machine. Its site and cron platforms come next, in this
-// module.
+// run, buckets on R2, databases on D1 with their migrations from the
+// deploying machine, TypeScript jobs as Workers under Cron Triggers, and
+// sites as Workers with static assets, whose files it keeps in R2.
 //
 // It registers through the public registry package alone, as any
 // extension does (D10), in a Go module of its own (D1). Its platforms are
@@ -159,6 +159,7 @@ func (e Extension) Register(r *registry.Registry) error {
 		Secrets:    secretStore{ext: e},
 		Bootstrap:  bootstrapper{ext: e},
 		Bundles:    bundleStore{ext: e},
+		Sites:      siteStore{ext: e},
 		PreDestroy: destroyPreparer{ext: e},
 		Migrations: migrationRunner{ext: e},
 		CI:         ciIdentities{},
@@ -168,21 +169,27 @@ func (e Extension) Register(r *registry.Registry) error {
 // platforms are the target's platforms, one per deployable kind it
 // places; the target names each for its kind. Each gets the extension
 // and the provider when it registers: Workers for servers (workers.go),
-// R2 for buckets (r2.go), D1 for databases (d1.go); Cron and sites come
-// next (section 18.2).
+// R2 for buckets (r2.go), D1 for databases (d1.go), Cron for jobs
+// (cron.go) and sites (sites.go) (section 18.2).
 func (e Extension) platforms() []registry.PlatformSpec {
-	return []registry.PlatformSpec{workersPlatform(), r2Platform(), d1Platform()}
+	return []registry.PlatformSpec{workersPlatform(), r2Platform(), d1Platform(), cronPlatform(), sitesPlatform()}
 }
 
 // connectors are the target's connectors, each between two of its
 // platforms; each gets the extension when it registers: a Worker's calls
 // to another Worker (calls.go), its edges to a bucket (r2.go) and its sql
-// edges to a D1 database (d1.go).
+// edges to a D1 database (d1.go), a job's the same from Cron, whose
+// connectors read nothing of the caller's platform (cron.go), and a site's
+// edge to a server on Workers (sites.go).
 func connectors() []registry.ConnectorSpec {
 	return []registry.ConnectorSpec{
 		{Name: WorkersHTTPConnector, Edge: ir.EdgeHTTP, From: Workers, To: Workers, Connect: connectWorkers},
 		{Name: WorkersR2Connector, Edge: ir.EdgeBucket, From: Workers, To: R2, Connect: connectR2},
 		{Name: D1Connector, Edge: ir.EdgeSQL, From: Workers, To: D1Platform, Connect: connectD1},
+		{Name: CronHTTPConnector, Edge: ir.EdgeHTTP, From: Cron, To: Workers, Connect: connectWorkers},
+		{Name: CronR2Connector, Edge: ir.EdgeBucket, From: Cron, To: R2, Connect: connectR2},
+		{Name: CronD1Connector, Edge: ir.EdgeSQL, From: Cron, To: D1Platform, Connect: connectD1},
+		{Name: SiteConnector, Edge: ir.EdgeSite, From: Sites, To: Workers, Connect: connectSite},
 	}
 }
 

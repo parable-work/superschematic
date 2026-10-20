@@ -61,6 +61,12 @@ const (
 	TypeScriptWorkersTypesFile = "workers.d.ts"
 )
 
+// TypeScriptScheduledFile is the Workers entrypoint of a TypeScript job some
+// environment places on Cloudflare's Cron Triggers, which its package holds
+// beside main.ts in place of fetch.ts, and which its bundle.ts bundles
+// (docs/stack-model.md, section 18.9, D64).
+const TypeScriptScheduledFile = "scheduled.ts"
+
 // The versions of the third-party packages main.ts imports beside Hono,
 // which the API packages pin: pg, within the HTTP runtime's and the API
 // packages' peer range, and the Cloud SQL Node connector the runtime's
@@ -169,7 +175,8 @@ type TypeScriptInput struct {
 	// Workers is true when some environment of the stack places the server
 	// on a platform whose artifact is a bundle, Cloudflare Workers (D64):
 	// its package gets fetch.ts and bundle.ts beside main.ts, which stack
-	// dev still runs on Bun.
+	// dev still runs on Bun; a job's gets scheduled.ts in place of
+	// fetch.ts, for Cron Triggers.
 	Workers bool
 }
 
@@ -193,8 +200,9 @@ type TypeScriptServer struct {
 	Worker *TypeScriptWorker
 
 	// Workers is true for a server some environment places on Cloudflare
-	// Workers, whose package holds fetch.ts and bundle.ts beside main.ts
-	// (D64).
+	// Workers, whose package holds fetch.ts and bundle.ts beside main.ts,
+	// and for a job some environment places on Cron Triggers, whose
+	// package holds scheduled.ts and bundle.ts (D64).
 	Workers bool
 
 	// RustVersion and BunVersion are the toolchain pins.
@@ -446,6 +454,9 @@ var tsReserved = []string{
 	// fetch.ts's, the Workers entrypoint's (D64).
 	"env", "build", "perIsolate", "requestIP", "stackEnvOf", "stackEnvWithSecrets", "binding", "serviceFetch",
 	"openR2Bucket", "bindingName", "values", "bindings", "Handle",
+	// scheduled.ts's, a job's on Cron Triggers (D64).
+	"ScheduledController", "TIMEOUT_MS", "TRIES", "tryOnce", "untilAborted", "controller", "attempt", "last",
+	"timer", "deadline", "failure",
 }
 
 // PlanTypeScript plans the entrypoint of one TypeScript server. It refuses
@@ -476,7 +487,10 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 			return nil, fmt.Errorf("stack %s: job %s runs %s of %s, which declares no such job", in.Stack, in.Server, in.Job.Name, o.SchemaName)
 		}
 		s.Kind = "job"
-		s.Job = &Job{Name: o.Jobs[i].Name, Method: o.Jobs[i].Method}
+		s.Job = &Job{Name: o.Jobs[i].Name, Method: o.Jobs[i].Method, TimeoutSeconds: in.Job.TimeoutSeconds, Tries: in.Job.Retries + 1}
+		if s.Job.TimeoutSeconds <= 0 {
+			s.Job.TimeoutSeconds = ir.DefaultJobTimeoutSeconds
+		}
 	case in.Worker != nil:
 		if len(in.APIs) != 1 {
 			return nil, fmt.Errorf("stack %s: worker %s runs a worker of %d APIs; a worker belongs to one", in.Stack, in.Server, len(in.APIs))
@@ -523,10 +537,11 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 	}
 	background := s.Background()
 	if in.Workers {
-		// The cron platform's scheduled.ts is a job's Workers entrypoint;
-		// a worker claims on Postgres, which no Worker reaches (D53, D64).
-		if background {
-			return nil, fmt.Errorf("stack %s: %s %s runs on a platform whose artifact is a bundle, and a Workers entrypoint is built for a server alone (D64)", in.Stack, s.Kind, in.Server)
+		// A server's Workers entrypoint is fetch.ts and a job's
+		// scheduled.ts; a worker claims on Postgres, which no Worker
+		// reaches (D53, D64).
+		if s.Worker != nil {
+			return nil, fmt.Errorf("stack %s: %s %s runs on a platform whose artifact is a bundle, and a Workers entrypoint is built for a server or a job alone (D64)", in.Stack, s.Kind, in.Server)
 		}
 		s.Workers = true
 	}
@@ -599,6 +614,9 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 		if o.HasServiceCallers && !background && (api.Callers == "" || api.Config == "") {
 			return nil, fmt.Errorf("stack %s: server %s serves %s, whose operations have a service clause, and whose config has no callers field", in.Stack, in.Server, o.SchemaName)
 		}
+		if db := o.Deps.Database; db != "" && s.Workers && !o.DepsSQLite() && s.Job != nil {
+			return nil, fmt.Errorf("stack %s: job %s of %s, whose database %s lists postgres first, runs on Cloudflare's Cron Triggers in an environment, which reaches a database through a D1 binding alone; list sqlite first in %s's outputs.sql.dialects, so Deps.db is a SqlDatabase (D64)", in.Stack, in.Server, o.SchemaName, db, db)
+		}
 		if db := o.Deps.Database; db != "" && s.Workers && !o.DepsSQLite() {
 			return nil, fmt.Errorf("stack %s: server %s serves %s, whose database %s lists postgres first, and an environment places the server on Cloudflare Workers, which reaches a database through a D1 binding alone; list sqlite first in %s's outputs.sql.dialects, so Deps.db is a SqlDatabase (D64)", in.Stack, in.Server, o.SchemaName, db, db)
 		}
@@ -663,7 +681,9 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 				callee := varStem(call.Service)
 				served := slices.ContainsFunc(in.APIs, func(a TypeScriptAPIInput) bool { return a.Output.SchemaName == call.Service })
 				c = &TypeScriptClient{
-					InProcess:   s.Workers && served,
+					// A job has no app of its own, so it calls through a
+					// service binding even an API it serves.
+					InProcess:   s.Workers && served && !background,
 					Service:     call.Service,
 					Var:         taken.take(callee + "Client"),
 					Constructor: taken.take("new" + strings.ToUpper(callee[:1]) + callee[1:] + "Client"),
@@ -794,8 +814,13 @@ func (s *TypeScriptServer) SQLiteDatabases() []*TypeScriptDatabase {
 }
 
 // BundleEntry is the module a Workers server's bundle.ts bundles: its
-// fetch.ts (D64).
-func (s *TypeScriptServer) BundleEntry() string { return TypeScriptFetchFile }
+// fetch.ts, or a job's scheduled.ts (D64).
+func (s *TypeScriptServer) BundleEntry() string {
+	if s.Job != nil {
+		return TypeScriptScheduledFile
+	}
+	return TypeScriptFetchFile
+}
 
 // APIsWithConfig reports whether an API of the server has an EnvConfig,
 // which fetch.ts reads from the Worker's bindings (D64).
@@ -845,7 +870,10 @@ func (s *TypeScriptServer) WorkersImports() []string {
 	if s.BindsServices() || len(s.Buckets) > 0 || len(s.SQLiteDatabases()) > 0 {
 		out = append(out, "binding")
 	}
-	out = append(out, "perIsolate", "requestIP")
+	if s.Job == nil {
+		// A job's scheduled.ts builds per run and serves no request.
+		out = append(out, "perIsolate", "requestIP")
+	}
 	if s.BindsServices() {
 		out = append(out, "serviceFetch")
 	}
@@ -1062,7 +1090,9 @@ func ImplementationPackage(n naming.Naming, service, dir string) (string, error)
 // main.ts template takes the wiring they share from wiring.ts.tmpl. A
 // server some environment places on Workers also gets fetch.ts, its
 // Workers entrypoint, bundle.ts, which bundles it, and workers.d.ts,
-// which declares the cloudflare:workers module fetch.ts imports (D64).
+// which declares the cloudflare:workers module fetch.ts imports; a job
+// some environment places on Cron Triggers gets scheduled.ts in place of
+// fetch.ts (D64).
 func WriteTypeScript(s *TypeScriptServer, dir string) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("servergen: %w", err)
@@ -1082,7 +1112,14 @@ func WriteTypeScript(s *TypeScriptServer, dir string) error {
 	if s.Docker != nil {
 		files = append(files, struct{ template, name string }{"Dockerfile.ts.tmpl", DockerFile}, struct{ template, name string }{"dockerignore.ts.tmpl", DockerIgnoreFile})
 	}
-	if s.Workers {
+	if s.Workers && s.Job != nil {
+		// A job's Workers entrypoint runs on its Cron Trigger (D64).
+		files = append(files,
+			struct{ template, name string }{"scheduled.ts.tmpl", TypeScriptScheduledFile},
+			struct{ template, name string }{"bundle.ts.tmpl", TypeScriptBundleFile},
+			struct{ template, name string }{"workers.d.ts.tmpl", TypeScriptWorkersTypesFile},
+		)
+	} else if s.Workers {
 		files = append(files,
 			struct{ template, name string }{"fetch.ts.tmpl", TypeScriptFetchFile},
 			struct{ template, name string }{"bundle.ts.tmpl", TypeScriptBundleFile},

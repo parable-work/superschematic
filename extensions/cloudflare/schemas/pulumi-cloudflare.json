@@ -21,6 +21,7 @@
     "cloudflare:index/r2BucketLifecycle:R2BucketLifecycle",
     "cloudflare:index/worker:Worker",
     "cloudflare:index/workerVersion:WorkerVersion",
+    "cloudflare:index/workersCronTrigger:WorkersCronTrigger",
     "cloudflare:index/workersCustomDomain:WorkersCustomDomain",
     "cloudflare:index/workersDeployment:WorkersDeployment"
   ]

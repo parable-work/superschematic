@@ -19,7 +19,8 @@ import (
 // TestTarget: the extension registers the target beside its DNS platform,
 // which is the target's default, with the pulumi provisioner, the pinned
 // account token type and every deploy seam built so far; it places a
-// server on Workers, a bucket on R2 and a database on D1.
+// server on Workers, a bucket on R2, a database on D1, a job on Cron and a
+// site on Workers' static assets, and runs no job on demand.
 func TestTarget(t *testing.T) {
 	target := newFixture(t).target(t)
 	if target.DNS != cloudflare.DNS || target.Provisioner != "pulumi" {
@@ -29,15 +30,23 @@ func TestTarget(t *testing.T) {
 		ir.DeployableServer:   cloudflare.Workers,
 		ir.DeployableBucket:   cloudflare.R2,
 		ir.DeployableDatabase: cloudflare.D1Platform,
+		ir.DeployableJob:      cloudflare.Cron,
+		ir.DeployableSite:     cloudflare.Sites,
 	}; !reflect.DeepEqual(target.Platforms, want) {
 		t.Errorf("the target places %v, want %v", target.Platforms, want)
 	}
 	if target.State == nil || target.Secrets == nil || target.Bootstrap == nil || target.CI == nil || target.Bundles == nil ||
-		target.PreDestroy == nil || target.Migrations == nil {
+		target.PreDestroy == nil || target.Migrations == nil || target.Sites == nil {
 		t.Errorf("the target lacks a seam: %+v", target)
 	}
 	if _, ok := target.Bundles.(registry.ArtifactFetcher); !ok {
 		t.Error("the bundle store fetches nothing back")
+	}
+	if _, ok := target.Sites.(registry.ArtifactFetcher); !ok {
+		t.Error("the site store fetches nothing back")
+	}
+	if target.Jobs != nil {
+		t.Error("the target runs a job on demand, which stack run would take")
 	}
 	var rules []string
 	for _, rule := range target.Policies {

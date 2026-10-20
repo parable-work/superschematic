@@ -663,7 +663,9 @@ schedule skips the job's runs, and while a scheduled run goes on, it
 refuses to start. On a cloud environment it runs the deployed job, with
 the image the last deploy rolled out, through the target: on gcp, an
 execution of the job's Cloud Run job ([Deploy to Google
-Cloud](#deploy-to-google-cloud)).
+Cloud](#deploy-to-google-cloud)). The cloudflare target runs a job only
+on its Cron Trigger, and `stack run` refuses it ([Jobs on Cron
+Triggers](#jobs-on-cron-triggers)).
 
 ## Queues and workers
 
@@ -1427,10 +1429,11 @@ writes the environment and `src/cloudflare-target.ts`.
 The target places TypeScript servers on Workers
 ([Servers on Workers](#servers-on-workers)), which call each other
 through service bindings ([Calls between Workers](#calls-between-workers)),
-buckets on R2 ([Buckets on R2](#buckets-on-r2)) and databases on D1
-([Databases on D1](#databases-on-d1)); its Cron and site platforms are
-not built yet, so an environment on it that holds a job or a site does
-not resolve. What every deploy goes through:
+buckets on R2 ([Buckets on R2](#buckets-on-r2)), databases on D1
+([Databases on D1](#databases-on-d1)), TypeScript jobs on Cron Triggers
+([Jobs on Cron Triggers](#jobs-on-cron-triggers)) and sites on Workers'
+static assets ([Sites on Workers](#sites-on-workers)). What every deploy
+goes through:
 
 - **The token and the passphrase.** Every `stack` command reads the API
   token from `CLOUDFLARE_API_TOKEN` and the state's passphrase from
@@ -1669,6 +1672,75 @@ workerd runs no D1. `testdata/wishlist-v2` is the wishlist's second
 version, whose plan adds a column in expand and drops one in contract;
 the example's README walks through deploying both versions to an account
 of your own, and rolling back.
+
+### Jobs on Cron Triggers
+
+A TypeScript job on the cloudflare target is a Worker of its own on
+`cloudflare.cron`, named after the deployable, `shop-storefront-sweep-carts`,
+never exposed. Its bundle is built and kept as a server's is, from
+`scheduled.ts`, which the stack's build writes in the job's package with
+`bundle.ts` and `workers.d.ts`, beside the `main.ts` that `stack dev`
+still runs. A schedule the environment runs is a Cron Trigger on the
+Worker, `<job>.schedule`; a job with no schedule, or one its environment
+turns off, has the Worker and no trigger.
+
+| Setting | Default | |
+| --- | --- | --- |
+| `logs` | `true` | Workers Logs |
+| `cpuMs` | Cloudflare's, 30 seconds | the CPU time a run may take, in milliseconds, up to 300000 |
+
+A job's edges are its API's, as a server's are on Workers: it calls
+another server through a service binding with a key of its own, which
+the callee's callers field admits, even an API the server of its own API
+serves, since a job has no app to call in process; it reaches a bucket
+through an `r2_bucket` binding and a token of its own; and its database,
+on D1, through its d1 binding.
+
+At each firing, the Worker's `scheduled` handler runs the job's tries one
+after the other, as `stack dev` does: each builds the API's `Deps` from
+the Worker's bindings, as a server's `fetch.ts` does, calls your
+`createJobs`, and runs the job's method with a signal that aborts at the
+job's timeout. It logs `job started`, then `job done` or `job failed`
+with how long the try took, and throws after the last failure, so
+Cloudflare records the run as failed.
+
+Cloudflare reads every schedule in UTC and stops a Cron Trigger's run
+after 15 minutes. So resolution refuses a job whose schedule runs in
+another time zone, and one whose timeout times its tries is over 15
+minutes: give such a job a shorter timeout or fewer retries, since the
+default timeout, ten minutes, leaves no room for a retry. The target runs
+no job on demand, so `stack run` refuses it.
+
+### Sites on Workers
+
+A site on the cloudflare target is a Worker of `cloudflare.sites`, named
+after the deployable, that serves the site's build as static assets. A
+deploy builds the site after the workspace's frozen install, keeps its
+files in the state bucket under
+`superschematic/sites/<stack>/<site>/<hex>/` when their digest is new,
+and places them beside the program, from which the Worker's version
+uploads them; `--site shop-web=sha256:...` serves an earlier build with
+no build, its files fetched back from R2. The version also holds:
+
+- `SITE_CONFIG`, the site's config for the environment: each API it calls
+  with its public address, which the target composes from names, so the
+  graph holds it and no step writes it;
+- `SITE_FALLBACK`, the site's `fallback`, when it has one;
+- a script the extension embeds, the same in every release, which
+  Cloudflare runs for a path that names no file.
+
+The script answers `/__superschematic/config.json` with the config,
+`no-store`, even when the build holds a file there; a directory, `/`
+among them, with its `index.html`; and any other path with the fallback
+at 200, or 404 without one. Files are served with Cloudflare's asset
+caching, which revalidates each by its ETag.
+
+A site is always exposed: under a domain at `https://<site>.<domain>`, a
+custom domain whose record and certificate Cloudflare writes, and
+without one at `https://<site>.<workersSubdomain>.workers.dev`, which
+needs bootstrap's `workersSubdomain`. That address is the site's origin
+in the CORS field of each API it calls, each of which must be a server on
+Workers, exposed.
 
 ## Generated CI
 

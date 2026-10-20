@@ -1,0 +1,44 @@
+name: ts-reports
+kind: API
+types:
+  ReportsConfig:
+    name: ReportsConfig
+    role: EmbeddedStruct
+    envVars: true
+    fields:
+      # How many tries of CompileReports fail before one succeeds, which
+      # the workerd run of its scheduled.ts sets per Worker.
+      - name: REPORT_FAILURES
+        typeRef: { name: string }
+        required: true
+        default: "0"
+      - name: REPORT_TOKEN
+        typeRef: { name: string }
+        required: true
+        secret: true
+  Report:
+    name: Report
+    role: APIView
+    fields:
+      - name: id
+        typeRef: { name: string }
+        required: true
+operationSets:
+  - name: Reports
+    operations:
+      - name: getReport
+        typeRef: { name: Report }
+        required: true
+        httpMethod: GET
+        restPath: reports/{id}
+        arguments:
+          - name: id
+            typeRef: { name: string }
+            required: true
+# A job is a deployable of its own, with ts-reports' Deps (D52). On Cron
+# Triggers its scheduled.ts runs its two tries itself, two seconds each.
+jobs:
+  - name: CompileReports
+    schedule: "0 4 * * *"
+    timeout: 2s
+    retries: 1

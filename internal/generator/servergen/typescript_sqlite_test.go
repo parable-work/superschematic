@@ -52,7 +52,8 @@ func loadTypeScriptSQLiteFixture(t *testing.T) fixture {
 // tsLiteGenerated lists the files of the sqlite-first fixture the
 // goldens hold, by their path under tsGoldenRoot: ts-notes' deps.ts,
 // config.ts and package.json, the server's and the job's main.ts and
-// package.json, and the server's fetch.ts, its Workers entrypoint (D64).
+// package.json, the server's fetch.ts, its Workers entrypoint, and the
+// job's scheduled.ts, its entrypoint on Cron Triggers (D64).
 func tsLiteGenerated(repoRoot string) map[string]string {
 	out := filepath.Join(repoRoot, "schemas", "dist")
 	files := map[string]string{}
@@ -65,6 +66,7 @@ func tsLiteGenerated(repoRoot string) map[string]string {
 		}
 	}
 	files[filepath.Join("server", "ts-lite-stack", "ts-notes", servergen.TypeScriptFetchFile)] = filepath.Join(servergen.ServerDir(out, "ts-lite-stack", "ts-notes"), servergen.TypeScriptFetchFile)
+	files[filepath.Join("server", "ts-lite-stack", tsPruneNotes, servergen.TypeScriptScheduledFile)] = filepath.Join(servergen.ServerDir(out, "ts-lite-stack", tsPruneNotes), servergen.TypeScriptScheduledFile)
 	return files
 }
 
@@ -74,9 +76,11 @@ func tsLiteGenerated(repoRoot string) map[string]string {
 // pg. The server's main.ts opens the SQLite file its sqlite: URL names
 // with openSqlite, /readyz pings it with ./d1's ping, the shutdown closes
 // it, and its package depends on no pg; the job's main.ts opens it too.
-// Edge places the server on the fake bundle platform and the database on
-// the fake SQLite one, so its fetch.ts takes Deps.db from the d1 binding
-// its connection names and /readyz pings it (D64).
+// Edge places the server on the fake bundle platform, its job on the fake
+// cron platform and the database on the fake SQLite one, so its fetch.ts
+// takes Deps.db from the d1 binding its connection names and /readyz
+// pings it, and the job's scheduled.ts takes it from the same binding
+// (D64).
 // Regenerate with:
 //
 //	go test ./internal/generator/servergen -run TestTypeScriptSQLiteEntrypointGolden -update
@@ -171,7 +175,9 @@ export const createJobs: JobsConstructor = deps => ({
 
 // TestTypeScriptSQLiteEntrypointCompilesAndServes: the sqlite-first
 // server's and job's packages install in the workspace and type-check with
-// the implementation, and the server runs under Bun on a sqlite: URL: it
+// the implementation, fetch.ts and scheduled.ts among them, and both
+// bundle for workerd, the job's bundle running under workerd over a D1
+// stand-in. The server runs under Bun on a sqlite: URL: it
 // opens the file, answers /readyz, keeps a note in it and reads it back,
 // and stops cleanly. The job runs once on the same file and prunes the
 // empty note. On a postgres:// URL, or a D1 binding, which only a Worker
@@ -217,17 +223,21 @@ func TestTypeScriptSQLiteEntrypointCompilesAndServes(t *testing.T) {
 	}
 	serverDir := servergen.ServerDir(out, "ts-lite-stack", "ts-notes")
 	jobDir := servergen.ServerDir(out, "ts-lite-stack", tsPruneNotes)
-	// The server's tsconfig.json takes fetch.ts in too: Edge places it on
-	// the fake bundle platform, as Workers (D64).
+	// The server's tsconfig.json takes fetch.ts in too, and the job's
+	// scheduled.ts: Edge places them on the fake bundle and cron
+	// platforms, as Workers and Cron Triggers (D64).
 	for _, dir := range []string{impl, serverDir, jobDir} {
 		check(dir)
 	}
 	if _, err := os.Stat(filepath.Join(paths.ScalarTypeScript, "dist", "workerd", "superscalar_wasm_bg.wasm")); err == nil {
-		bundle := exec.Command(bun, "bundle.ts", "--check")
-		bundle.Dir = serverDir
-		if output, err := bundle.CombinedOutput(); err != nil || !strings.Contains(string(output), "bundle (checked): main.js") {
-			t.Errorf("bun bundle.ts --check of ts-notes, whose Deps.db is a D1 binding on Workers = %v:\n%s", err, output)
+		for _, dir := range []string{serverDir, jobDir} {
+			bundle := exec.Command(bun, "bundle.ts", "--check")
+			bundle.Dir = dir
+			if output, err := bundle.CombinedOutput(); err != nil || !strings.Contains(string(output), "bundle (checked): main.js") {
+				t.Errorf("bun bundle.ts --check in %s, whose Deps.db is a D1 binding on Workers = %v:\n%s", filepath.Base(dir), err, output)
+			}
 		}
+		runPruneNotesUnderWorkerd(t, bun, paths, jobDir)
 	} else {
 		testpaths.RequireOrSkipTS(t, fmt.Sprintf("superscalar's workerd build is not built (scripts/superscalar-dep.sh builds it): %v", err))
 	}
@@ -275,5 +285,58 @@ func TestTypeScriptSQLiteEntrypointCompilesAndServes(t *testing.T) {
 		if strings.Contains(string(refused), "secret") {
 			t.Errorf("ts-notes printed the database URL's password:\n%s", refused)
 		}
+	}
+}
+
+// runPruneNotesUnderWorkerd bundles PruneNotes' scheduled.ts and runs it
+// under the runtime's pinned workerd (testdata/workerd/cron-d1), with the
+// bindings cloudflare.cron gives a job whose database is on D1 and a
+// stand-in for the d1 binding: the tester fires the scheduled handler
+// twice, the first run prunes two empty notes through the binding and the
+// second none, each logged done (D64).
+func runPruneNotesUnderWorkerd(t *testing.T, bun string, paths naming.LocalPaths, jobDir string) {
+	t.Helper()
+	workerd := filepath.Join(paths.HTTPRuntimeTypeScript, "test", "workerd", "node_modules", ".bin", "workerd")
+	if _, err := os.Stat(workerd); err != nil {
+		testpaths.RequireOrSkipTS(t, "workerd is not installed: run bun install --frozen-lockfile in runtime/http/typescript/test/workerd")
+		return
+	}
+	dir := t.TempDir()
+	bundle := exec.Command(bun, "bundle.ts", dir)
+	bundle.Dir = jobDir
+	if output, err := bundle.CombinedOutput(); err != nil {
+		t.Fatalf("bun bundle.ts in %s: %v\n%s", filepath.Base(jobDir), err, output)
+	}
+	for _, file := range []string{"cron-d1.capnp", "d1.js", "tester.js"} {
+		data, err := os.ReadFile(filepath.Join("testdata", "workerd", "cron-d1", file))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, file), data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cmd := exec.Command(workerd, "test", "cron-d1.capnp")
+	cmd.Dir = dir
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("workerd test cron-d1.capnp: %v\n%s", err, output)
+	}
+	if testing.Verbose() {
+		t.Logf("workerd test cron-d1.capnp:\n%s", output)
+	}
+	for _, want := range []string{
+		"the D1 job under workerd: two runs done",
+		`"msg":"job started","stack":"ts-lite-stack","job":"ts-notes-prune-notes","api":"ts-notes","class":"PruneNotes","cron":"0 3 * * *","try":1,"tries":1}`,
+		`"msg":"pruned","stack":"ts-lite-stack","job":"ts-notes-prune-notes","api":"ts-notes","notes":2}`,
+		`"msg":"pruned","stack":"ts-lite-stack","job":"ts-notes-prune-notes","api":"ts-notes","notes":0}`,
+		`"msg":"job done"`,
+	} {
+		if !strings.Contains(string(output), want) {
+			t.Errorf("workerd's output does not hold %s:\n%s", want, output)
+		}
+	}
+	if strings.Contains(string(output), `"msg":"job failed"`) {
+		t.Errorf("a run of PruneNotes failed under workerd:\n%s", output)
 	}
 }
