@@ -4,9 +4,10 @@
 // a Cloudflare zone beside whatever target runs its compute, and the target
 // `cloudflare`, which runs an environment on one Cloudflare account: its
 // state in an R2 bucket, its secrets in the account's Secrets Store, a
-// bootstrap that makes both and the CI's account tokens, and the generated
-// CI's sign-in with those tokens. Its Workers, D1, R2, site and cron
-// platforms come next, in this module.
+// bootstrap that makes both and the CI's account tokens, the generated
+// CI's sign-in with those tokens, databases on D1 and their migrations
+// from the deploying machine. Its Workers, R2, site and cron platforms
+// come next, in this module.
 //
 // It registers through the public registry package alone, as any
 // extension does (D10), in a Go module of its own (D1). Its platforms are

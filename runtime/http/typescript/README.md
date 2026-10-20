@@ -91,7 +91,8 @@ Its entry points:
   D1's interface, which `Deps.db` is for a database whose DB service lists
   `sqlite` first, and `ping`.
 - `@superschematic/http-runtime/sqlite`, `openSqlite(path)`, a
-  `SqlDatabase` over `bun:sqlite` for `stack dev`. It runs under Bun alone.
+  `SqlDatabase` over `bun:sqlite` for `stack dev`, and `sqliteFile(url)`,
+  the path a `sqlite:` URL names. It runs under Bun alone.
 - `@superschematic/http-runtime/r2`, a `Bucket` over a Worker's R2
   binding, which presigns S3 URLs with WebCrypto.
 
@@ -428,7 +429,13 @@ runs a script one line per statement. Placeholders are `?` and `?N`.
 gives one over `bun:sqlite` for `stack dev`, with foreign keys on, a
 boolean bound as 1 or 0, `batch` in one transaction and each run's
 `changes`, `last_row_id` and duration in its `meta`, as D1 reports them.
-`connectPostgres` refuses a D1 connection.
+`connectPostgres` refuses a D1 connection. Under `stack dev` the local
+target derives a sqlite-first database's connection as a `sqlite:` URL to
+a file under the environment's state directory: `sqliteFile(url)` reads
+`sqlite:PATH` and `sqlite://PATH` as `PATH`, as the migration runner
+does, and refuses any other URL by its scheme alone, since a connection
+string may hold a password. The generated `main.ts` opens the database
+with `openSqlite(sqliteFile(url))`.
 
 `openR2Bucket(binding, connection)`, from `./r2`, is the `Bucket` over an
 R2 binding: `put` (a stream read whole first, since R2 takes a stream

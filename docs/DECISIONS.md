@@ -6669,6 +6669,34 @@ state store's backend reaching the CLI, which signs its first request to a
 local S3 stand-in path-style with the token's id in region `auto`. No call
 has reached Cloudflare or GitHub.
 
+### D64, amended: a target names a database platform per dialect, a sqlite-first database is a SQLite file under stack dev, and D1 migrates from the deploying machine
+
+Building D1 met questions section 18 left open: how a local environment
+places a sqlite-first database when its target names one database
+platform, what URL the local target derives for a SQLite file and where
+the file lives, what a Go or Rust API does on one, how D1 names a
+database per hosted schema and per member, and how a CI job that deploys
+D1 finds the runner.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A target may name a database platform per SQL dialect, `TargetSpec.DatabasePlatforms`. A database that no settings platform places, and whose hosted DB services all list one dialect first, goes on that dialect's platform; any other on the kind's. `RegisterTarget` refuses an unknown dialect, `Finalize` a platform that does not run the dialect it is named for. The local target names `local.sqlite` for `sqlite`. | `local.postgres` running both dialects, with resolution preferring the services' first dialect over the platform's order: a sqlite database on a platform named for Postgres, and a rule that changes what "in order of preference" means for every platform. A settings `platform` in every local environment, which every sqlite-first stack would repeat. |
+| `local.sqlite` lowers a hosted DB schema to `databases/<database>.sqlite` under the environment's state directory, beside its secrets and keys, and derives `url` as a reference to the node's `url` output, `sqlite:<absolute path>`, which the provisioner resolves. The runner and the runtime's `sqliteFile` read the same form. The file is created readable by its owner alone; Destroy keeps it and Purge removes it. | The path in `environment.json`, which would hold one machine's state directory. The output root, which a build empties. `file:` URIs, which `bun:sqlite` does not read and a query would make ambiguous. |
+| Resolution refuses a Go or Rust server, job or worker whose database resolves to `sqlite`, beside the TypeScript rule: the Go ORM and the Rust pool reach Postgres alone. A TypeScript API over the user model is refused on a sqlite-first database wherever it runs. | Letting a Go server start on a `sqlite:` URL and fail. |
+| The generator types the TypeScript database field as `DatabaseConnection` for a sqlite-first database and keeps `Database` otherwise; `main.ts` and a job's open the file with `openSqlite(sqliteFile(url))`, refusing a D1 binding and a Cloud SQL configuration by the variable's name, and a Postgres-only server's output stays as it was. | `DatabaseConnection` for every database, which would change every Postgres API's config and entrypoint for a case only Workers read. |
+| A D1 database is `<stack>-<db>` per hosted DB schema, with each parameter's name and value appended, the node `<database>.d1.<db>`. `jurisdiction` takes `eu`, `fedramp` and `us`, as the provider documents, and a database that sets it with `locationHint` is refused, since D1 ignores the hint under a jurisdiction. | One D1 database per deployable, which two DB schemas could not share. Accepting both settings and letting Cloudflare drop one. |
+| The runner writes its job document and plans to a temporary directory on the deploying machine and removes it, looks each uuid up by name (`GET /accounts/{id}/d1/database?name=`, matched exactly), and runs no job for a phase without steps. `PrepareMigrations` refuses a run without the runner or a token before the deploy changes anything. | Recording each uuid in the schema, as bootstrap records values, which a parameterized member's database could not hold. Keeping the job document in R2, which no one reads after the run. |
+| A `MigrationRunner` that runs on the deploying machine is a `registry.DeployingMachineMigrations`; `CIEnvironment.Migrate` is set for an environment on such a target that holds a database, and the github renderer installs `superschematic-migrate` from the release, its own tarball, checked against `SHA256SUMS`, in each deploy and preview job. | Putting the runner in the CLI's tarball, which would ship the database drivers to every user of the CLI (D27). |
+
+Status: built and proven offline: the resolution rules in `internal/stack`;
+`local.sqlite` against a fake machine and, with Bun and the runner built
+from the checkout, for real; the generator's goldens and, with the
+TypeScript checks, a sqlite-first server and job that type-check and keep
+notes in a SQLite file; `cloudflare.d1`'s goldens against the pin; the
+runner against a fake account and a stand-in runner; the CI's install in a
+golden workflow; and a job document of the runner's form against the fake
+D1. No call has reached Cloudflare, and `TestRealD1` has not run.
+
 ## D65. A Rust API runs jobs and workers, its workers claim queues through a descriptor its types carry, and each output root builds against a mirror of its implementations
 
 D57 gave a Rust API a server and left out its jobs and workers: the

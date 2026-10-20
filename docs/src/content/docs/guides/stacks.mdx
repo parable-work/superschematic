@@ -35,7 +35,7 @@ balancer and DNS resources that the Pulumi provisioner applies.
 | the gcp target, with `stack bootstrap`, `secrets set`, `build`, `plan`, `deploy`, `destroy` and `outputs`; image builds on Cloud Build; each migration phase as a Cloud Run job that also grants the servers their privileges | a deploy lock beyond the provisioner's and the runner's |
 | the Pulumi provisioner and the typed bindings generator | |
 | the Cloudflare DNS platform, linked in the installed binary; bootstrap stores its API token and deploys read it | |
-| [the cloudflare target](#deploy-to-cloudflare)'s groundwork: its values, its state in R2, its secrets in the Secrets Store, `stack bootstrap` with the CI's account tokens and `--github`, and the generated CI's sign-in | its Workers, Cron, D1, R2 and site platforms, so no environment on it resolves a deployable yet |
+| [the cloudflare target](#deploy-to-cloudflare)'s groundwork: its values, its state in R2, its secrets in the Secrets Store, `stack bootstrap` with the CI's account tokens and `--github`, and the generated CI's sign-in; [databases on D1](#databases-on-d1), migrated from the deploying machine, and sqlite-first databases as SQLite files under `stack dev` | its Workers, Cron, R2 and site platforms; a D1 run that has reached Cloudflare |
 | `@requireService` and `@allowService`, and the stack's check that every `calls` edge reaches an operation | the callee's half of service auth: a server whose API has a service clause does not start yet |
 | [generated CI](#generated-ci): `outputs.ci` writes a GitHub Actions workflow that checks, plans, previews and deploys the stack, signing in to gcp through Workload Identity Federation | other CI systems; a check that the committed workflow is current |
 | [buckets](/superschematic/guides/buckets/): the `Bucket` kind, `buckets` in an API's config, the `bucket` deployable and edge, a provider-neutral bucket in `Deps` over GCS with signed URLs, in Go, TypeScript and Rust, fake-gcs-server under `stack dev`, and on gcp a private Cloud Storage bucket | a bucket on another provider |
@@ -929,7 +929,9 @@ says how to install it). It then:
 2. starts one Postgres container for the environment, published on
    127.0.0.1 only, and creates a database per DB schema; and, when the
    stack has a bucket, one fake-gcs-server container, with a bucket per
-   Bucket service;
+   Bucket service. A DB schema that lists `sqlite` first is instead a
+   SQLite file under the environment's state directory, which needs no
+   Docker ([Databases on D1](#databases-on-d1));
 3. migrates each database from the model it recorded to its schema's,
    expand and contract back to back;
 4. builds each Go server's entrypoint module with `go build`, runs `bun
@@ -949,7 +951,8 @@ says how to install it). It then:
    Ctrl-C ([Run a job](#run-a-job)).
 
 Ctrl-C stops the servers, callers first, and the containers, which keep
-their data for the next run; `--remove-data` removes them instead.
+their data for the next run, as the SQLite files stay; `--remove-data`
+removes them and the SQLite files instead.
 
 Each checkout of the repository runs an environment with containers and
 ports of its own, so two worktrees run `stack dev` on one stack at once.
@@ -969,10 +972,10 @@ leaves it and its data, and prints the `docker rm` that removes it.
 | server | a Go process, built from its entrypoint module, a TypeScript one, whose `main.ts` Bun runs, or a Rust one, built from its crate with cargo |
 | job | a Go process per run, built from its entrypoint module, or a TypeScript one, whose `main.ts` Bun runs, with its API's config and no `PORT`; on its schedule while `stack dev` runs, and once with `stack run` |
 | worker | a Go process, built from its entrypoint module, or a TypeScript one, whose `main.ts` Bun runs, with its API's config, no `PORT` and `WORKER_CONCURRENCY`; one whatever its `instances`, none when it is off. Its exit stops the environment, as a server's does |
-| database | a database on the checkout's one Postgres container for the environment, `postgres:16-alpine` unless `postgresImage` names another |
+| database | a database on the checkout's one Postgres container for the environment, `postgres:16-alpine` unless `postgresImage` names another; for a DB schema that lists `sqlite` first, a SQLite file, `<schemas-root>/.superschematic/local/<stack>/<environment>/databases/<database>.sqlite` |
 | bucket | a bucket on the checkout's one fake-gcs-server container for the environment, `fsouza/fake-gcs-server:1.56.1` unless `storageImage` names another |
 | bucket edge | `SHOP_MEDIA_BUCKET_NAME=shop-media` and `SHOP_MEDIA_BUCKET_ENDPOINT=http://127.0.0.1:<port>`, the emulator's address |
-| sql edge | `SHOP_DB_DATABASE_URL=postgres://postgres@127.0.0.1:<port>/shop_db?sslmode=disable` |
+| sql edge | `SHOP_DB_DATABASE_URL=postgres://postgres@127.0.0.1:<port>/shop_db?sslmode=disable`, or for a SQLite file `REVIEWS_DB_DATABASE_URL=sqlite:<state directory>/databases/reviews_db.sqlite` |
 | http edge | the callee's `http://127.0.0.1:<port>`, with a `signed-token` credential signed by an Ed25519 key pair per calling and called server |
 | secret | a line in `<schemas-root>/.superschematic/local/<stack>/<environment>/secrets.env`: `PaymentsSecrets.STRIPE_KEY=sk_test_...` |
 | port | a server's `port` setting and the `postgresPort` and `storagePort` values, the same in every checkout; otherwise a hash of the stack, the environment and the server, which the checkout shifts, the same on every run |
@@ -1066,7 +1069,9 @@ calling server's credential against the API's callers field,
 
 A TypeScript server's package, beside the Go servers' modules, holds a
 `main.ts` that does the same on [Bun](https://bun.sh): it loads each API's
-config with `loadEnvConfig()`, opens one `pg` Pool per database, builds
+config with `loadEnvConfig()`, opens one `pg` Pool per database, or for
+a database whose DB service lists `sqlite` first the SQLite file its
+`sqlite:` URL names ([Databases on D1](#databases-on-d1)), builds
 one TypeScript SDK client per API called with the credential its endpoint
 names, calls each implementation's `create(deps)`, its
 `authenticate(deps)` where a route needs an end user, and its
@@ -1415,9 +1420,10 @@ any other. On this target the DNS platform names no credential, since the
 run's own token reaches the zone. `stack init --cloudflare-account <id>`
 writes the environment and `src/cloudflare-target.ts`.
 
-The target's Workers, Cron, D1, R2 and site platforms are not built yet,
-so an environment on it resolves no deployable. What is built is what
-they deploy through:
+The target places databases on D1 ([Databases on D1](#databases-on-d1));
+its Workers, Cron, R2 and site platforms are not built yet, so an
+environment on it that holds a server, a job, a bucket or a site does not
+resolve. What every deploy goes through:
 
 - **The token and the passphrase.** Every `stack` command reads the API
   token from `CLOUDFLARE_API_TOKEN` and the state's passphrase from
@@ -1468,6 +1474,62 @@ and creates or reads the Secrets Store. It is safe to run again:
 7. it records `secretsStoreId` and `workersSubdomain` beside `accountId`.
    An account with no workers.dev subdomain yet is told to choose one in
    the dashboard.
+
+### Databases on D1
+
+A database on the cloudflare target is on `cloudflare.d1`, in SQLite: a
+D1 database per DB service it hosts, named `<stack>-<db>`, with each
+parameter's name and value after it in a member of a parameterized
+environment, so each preview migrates databases of its own. A DB service
+that does not list `sqlite` is refused there. Its settings:
+
+| Setting | |
+| --- | --- |
+| `locationHint` | where the primary lives: `wnam`, `enam`, `weur`, `eeur`, `apac` or `oc` |
+| `jurisdiction` | where the data stays: `eu`, `fedramp` or `us`. D1 ignores the location hint under a jurisdiction, so setting both is refused |
+
+List `sqlite` first for a DB service a TypeScript API on Workers uses:
+
+```ts
+// schemas/services/reviews-db/schema.config.ts
+export default defineConfig({
+  name: "reviews-db",
+  kind: SchemaKind.DB,
+  outputs: {
+    types: { [TargetLanguage.TypeScript]: { enabled: true } },
+    sql: { dialects: ["sqlite", "postgres"] }
+  }
+});
+```
+
+The API's `Deps.db` is then the HTTP runtime's `SqlDatabase`, D1's
+interface: `prepare(sql).bind(...).first()`, `all()`, `run()` and
+`raw()`, `batch([...])`, which runs its statements in one transaction,
+and `exec(script)`. Placeholders are `?` and `?N`. D1 has no interactive
+transaction, so write what must be atomic as one `batch`. The same code
+runs under `stack dev`, where the database is a SQLite file under the
+environment's state directory, `databases/<database>.sqlite`, and the
+server opens the `sqlite:` URL its edge derives with the runtime's
+`openSqlite`. Resolution refuses a TypeScript API whose database runs in
+another dialect than its first, a Go or Rust API on a SQLite database,
+and a TypeScript API over the user model on a sqlite-first one.
+
+A deploy migrates each D1 database from your machine, or the CI job's,
+between its steps: it finds `superschematic-migrate` on `PATH`, or where
+`SUPERSCHEMATIC_MIGRATE` says, looks up the database's uuid by its name,
+and runs the runner's job at `d1://<accountId>/<uuid>` with the run's
+`CLOUDFLARE_API_TOKEN`. The expand phase runs before the rollout and the
+contract phase after it, as on gcp. D1 has no roles, so every Worker
+bound to a database reads and writes all of it; the runner gives no
+privileges, and the D1 driver's lease keeps two deploys apart. The
+generated CI's deploy and preview jobs install `superschematic-migrate`
+from the release, checked against `SHA256SUMS`.
+
+The D1 driver has run against a fake of D1's REST API, not yet against
+D1. To check it against a real database, make a scratch one and run
+`go test -run TestRealD1 -v .` in `runtime/migrate/go` with
+`SUPERSCHEMATIC_MIGRATE_TEST_D1_URL=d1://<account id>/<database uuid>` and
+a `CLOUDFLARE_API_TOKEN` that may edit D1.
 
 ## Generated CI
 

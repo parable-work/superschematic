@@ -897,6 +897,11 @@ A target is a named bundle, registered as a `TargetSpec`, of:
   only on a target with a job platform, or with each job placed on one by
   a settings `platform`, and one whose APIs declare workers likewise needs
   a worker platform;
+- optionally, a database platform per SQL dialect
+  (`DatabasePlatforms`): a database whose DB services all list that
+  dialect first goes on it, unless a settings `platform` places it. The
+  local target keeps a sqlite-first database in a SQLite file this way
+  (section 18.13, D64);
 - the schema of its environment values (`project` and `region` for
   `gcp`);
 - its default DNS platform (section 6.9);
@@ -1194,7 +1199,8 @@ the core registers the local target), and one CI renderer, `github`
   generic connector (D63) names no platform, serves an http or a site
   edge, and is the only one of its edge kind.
 - `RegisterTarget(TargetSpec)` refuses a malformed or repeated name, an
-  unknown deployable kind, a values or resource type schema that does not
+  unknown deployable kind, a database platform named for an unknown
+  dialect or empty, a values or resource type schema that does not
   compile, a resource type another target or a DNS platform registered
   with a different schema, and a policy rule without a name or a check, or
   with a repeated name, and a deploy seam it cannot use (section 11.1):
@@ -1219,7 +1225,8 @@ the core registers the local target), and one CI renderer, `github`
 A name is lowercase words joined by dots or hyphens (`gcp.cloudrun`).
 `Finalize` checks that each connector but a generic one joins registered
 platforms of the kinds its edge joins. It checks that each platform a target names is
-registered and of the kind it places, and that a DNS platform or
+registered and of the kind it places, that each database platform it
+names for a dialect runs that dialect, and that a DNS platform or
 provisioner the target names is registered; a target may name neither.
 
 The acceptance test is D10's. `stack/stacktest` imports only the public
@@ -1842,14 +1849,14 @@ runs an environment on the `local` target (`internal/stack/local`):
 
 | Stack concept | local |
 | --- | --- |
-| database | one Postgres container per environment and checkout, `superschematic-<stack>-<environment>-<checkout>-postgres`, from `postgres:16-alpine` unless the `postgresImage` value names another; it publishes its port on 127.0.0.1 only and trusts every connection. A database per hosted DB schema, named after it in snake case (`shop_db`) |
+| database | one Postgres container per environment and checkout, `superschematic-<stack>-<environment>-<checkout>-postgres`, from `postgres:16-alpine` unless the `postgresImage` value names another; it publishes its port on 127.0.0.1 only and trusts every connection. A database per hosted DB schema, named after it in snake case (`shop_db`). A database whose DB services list sqlite first is instead a SQLite file per hosted DB schema, `databases/<database>.sqlite` under the environment's state directory, on `local.sqlite`, with no container (section 18.13, D64) |
 | bucket | one fake-gcs-server container per environment and checkout beside Postgres's, `superschematic-<stack>-<environment>-<checkout>-storage`, from `fsouza/fake-gcs-server:1.56.1` unless the `storageImage` value names another, on plain HTTP and publishing its port on 127.0.0.1 only. It keeps its objects in the container's filesystem. A bucket per Bucket service, named after it (`shop-media`), which the provisioner creates through the emulator's JSON API (D54) |
 | migration | each run plans with `sqlmigrate` from the model the database recorded (`superschematic-migrate status --model`) to the schema's model, and applies the plan with `superschematic-migrate`, expand and contract back to back, since no server of the previous version runs. The runner is on `PATH`, or where `SUPERSCHEMATIC_MIGRATE` says |
 | server | a Go process built with `go build` (with `-mod=mod`) from its entrypoint module at `<output-root>/server/<stack>/<server>` (section 8.1); a TypeScript one, `bun main.ts` in its entrypoint package at the same place, after one `bun install` at the output root, the root of the Bun workspace (section 8.6); or a Rust one, built with `cargo build --release --locked` in its crate at the same place and run from `target/release/<binary>`, the binary its `Cargo.toml` names (D57). Its environment is its bindings, a derived field as one variable per member (section 3.4), and `PORT`, with nothing of the shell's but `PATH`, `HOME` and a few like them. It is ready once it answers `/readyz`, and each of its lines is printed with its name in front |
 | job | a process built and run as a server in its language is, from its entrypoint at `<output-root>/server/<stack>/<job>`: a Go binary, `bun main.ts` for TypeScript, or for Rust the binary its crate's `Cargo.toml` names, built with `cargo build --release --locked` into the target directory the environment's Rust servers share (D65). It has a server's environment and no `PORT`. It runs on its schedule, in its time zone, while `stack dev` waits, and once with `superschematic stack run <environment> <job>`, each line of a run's output with its name in front. `jobs/<job>.lock` in the environment's state directory keeps a schedule's runs and `stack run`'s apart (section 8.7) |
 | worker | a process built and run as a server in its language is, Go, TypeScript or Rust (D65), from its entrypoint at `<output-root>/server/<stack>/<worker>`, started in its rollout wave with the servers: the same `local:process/process:Process` node with no port, `kind: worker` and a readiness of `started`, so it is ready once it runs. Its environment is a server's with no `PORT` and with `WORKER_CONCURRENCY`, the concurrency the environment gives it. One process runs whatever its `instances`, none when the environment turns it off; each line is printed with its name in front, and its exit stops the environment, as a server's does (section 8.8) |
 | site | built once, `bun run <build>` in its package at the naming file's `[implementation_paths] site` template after the workspace's install, then served from a file server of the provisioner's own on `http://127.0.0.1:<port>`: each file of its output, its config at `/__superschematic/config.json` with each API it calls at its loopback URL, and its fallback for a path that names no file. HTML files and the config are served `no-cache` and `no-store`, so a reload sees a rebuilt site (D55) |
-| sql edge | `postgres://postgres@127.0.0.1:<port>/<database>?sslmode=disable` |
+| sql edge | `postgres://postgres@127.0.0.1:<port>/<database>?sslmode=disable`, or for a SQLite file `sqlite:<absolute path>`, a reference to the file's node's `url` output, which the provisioner resolves from the state directory |
 | bucket edge | the bucket's name and the emulator's `http://127.0.0.1:<port>` as its endpoint, with no credential, which the Go, TypeScript and Rust runtimes' GCS implementations reach alike |
 | http edge | the callee's `http://127.0.0.1:<port>`, with a `signed-token` credential (D37): `iss` and `sub` the caller's deployable, `aud` the callee's, signed with an Ed25519 key pair per calling and called server. A call between two APIs one server serves stays on loopback with no credential |
 | site edge | the server's public address, its loopback URL, which is also its address. The server's CORS field lists the site's origin, `http://127.0.0.1:<port>` (D55) |
@@ -2193,6 +2200,8 @@ as they are, with no build step (D51). The pieces mirror Go's:
   the same pool. The Node Cloud SQL connector reads the instance's
   settings from the Admin API when the pool opens, where Go's dialer waits
   for the first dial; both pools connect to the database on first use.
+  For a database whose DB service lists sqlite first, `deps.db` is a
+  `SqlDatabase`, D1's interface, instead (section 18.6, D64).
 - **Packages.** One Bun workspace spans the generated TypeScript packages,
   the servers and the implementations, so every import resolves with
   `workspace:*` or by name. Its root is the output root's `package.json`,
@@ -2256,7 +2265,10 @@ as they are, with no build step (D51). The pieces mirror Go's:
     database with `connectPostgres`, shared by every API on it. Only a
     server some environment places on Cloud SQL depends on the Cloud SQL
     Node connector; any other refuses a Cloud SQL configuration at
-    startup and says to build the stack again, as Go's does;
+    startup and says to build the stack again, as Go's does. A database
+    whose DB service lists sqlite first is the SQLite file its `sqlite:`
+    URL names, opened with `openSqlite` (section 18.6), and the package
+    then depends on no `pg` for it;
   - builds one SDK client per API called, with the endpoint's URL and
     `serviceCredentialFor` its credential, and calls each implementation's
     `create(deps)`, and its `authenticate(deps)` where a route needs an end
@@ -4524,7 +4536,7 @@ declare module "@superschematic/stack" {
     cloudflare: {
       values: { accountId: string; workersSubdomain?: string; secretsStoreId?: string };
       server: { cpuMs?: number; placement?: "smart"; logs?: boolean; compatibilityDate?: string; compatibilityFlags?: string[] };
-      database: { locationHint?: "wnam" | "enam" | "weur" | "eeur" | "apac" | "oc"; jurisdiction?: "eu" | "fedramp" };
+      database: { locationHint?: "wnam" | "enam" | "weur" | "eeur" | "apac" | "oc"; jurisdiction?: "eu" | "fedramp" | "us" };
       job: { cpuMs?: number; logs?: boolean };
       site: {};
       bucket: { locationHint?: string; jurisdiction?: string; storageClass?: "Standard" | "InfrequentAccess"; deleteAfterDays?: number };
@@ -4541,9 +4553,9 @@ There is no `worker` key: resolution refuses the kind on this target.
 | --- | --- |
 | server | A `cloudflare:index/worker:Worker` named after the deployable, in infrastructure, with Workers Logs on unless `logs: false`, workers.dev on only for an exposed server without a domain, and previews off. Each rollout makes a `workerVersion` and a `workersDeployment` sending all traffic to it. The version holds the server's bundle (`main.js`, its source map and `superscalar_wasm_bg.wasm`, each a `contentFile` under `artifacts/<server>/{bundle-digest}/` with its pinned `contentSha256`), `mainModule: main.js`, the compatibility date the extension pins unless set, `limits.cpuMs` and `placement` from the settings, and the server's config as bindings. TypeScript only; a name over 63 characters is refused. |
 | config | Each literal, parameter and derived variable is a `plain_text` binding named as the variable. A derived member flagged secret is a `secret_text` binding referencing the output that holds it. A `Secret<T>` field is a `secrets_store_secret` binding named after the field. A D1 database, an R2 bucket or a callee Worker is a binding named after the derived field, which the value's `binding` names. |
-| database | A `d1Database` per hosted DB schema, `<stack>-<db>`, with a suffix under a parameter, and `sqlite` dialect. `locationHint` and `jurisdiction` become `primaryLocationHint` and `jurisdiction`. |
+| database | A `d1Database` per hosted DB schema, `<stack>-<db>`, with a suffix under a parameter, and `sqlite` dialect: the node `<database>.d1.<db>`, in infrastructure. `locationHint` and `jurisdiction` become `primaryLocationHint` and `jurisdiction`; D1 ignores the hint under a jurisdiction, so both together are refused. |
 | sql edge | The value is `d1: { binding: "<FIELD>", database: <uuid output> }`. The platform writes `{type: "d1", name: <binding>, id: <database>}`, and the binding is the grant. |
-| migration | The runner on the deploying machine, against `d1://<accountId>/<uuid>`, with the run's token (section 18.6). |
+| migration | The runner on the deploying machine, against `d1://<accountId>/<uuid>`, each uuid looked up by its database's name, with the run's token and no privileges (section 18.6). |
 | http edge | A service binding `{type: "service", name: <binding>, service: <callee's Worker>}`, and D37's signed token with the edge's key. The value is `{url: "https://<callee's Worker>", binding: {name, worker}, credential: {source: signed-token, issuer, audience, key}}`, and the callee's callers field gets the edge's issuer. |
 | internal server | No workers.dev, no custom domain and no route: only a service binding reaches it. |
 | bucket | An `r2Bucket`, `<stack>-<bucket>`, with a suffix under a parameter. `deleteAfterDays` becomes an `r2BucketLifecycle`. |
@@ -4672,7 +4684,10 @@ no action and no `id-token: write`; it refuses a field that is no
 secret's name. Deploy and preview jobs of an environment
 with a Workers server or job set up Bun and install the workspace, as a
 site's do. With a D1 database, they also install `superschematic-migrate`
-from the release, checked against `SHA256SUMS`. `check` runs
+from the release, its own tarball beside the CLI's, checked against
+`SHA256SUMS`: the target's runner is a
+`registry.DeployingMachineMigrations`, so `CIEnvironment.Migrate` is set
+for an environment that holds a database. `check` runs
 `bun bundle.ts --check` in each Workers server's and job's package
 (level 2). A plan job's credentials decrypt the state, and so the edges'
 private keys in it, as `planner` does on gcp through the KMS key, so they
@@ -4827,13 +4842,26 @@ number or URL costs about 80 ms once. The deploy logs each version's
 ### 18.6 Databases on D1, and migrations
 
 A TypeScript API's `Deps.db` is typed by its database's DB service's
-first dialect:
+first dialect, which the generator reads from that service's config
+(postgres when the build has none):
 - `postgres` gives the `pg` Pool, as today;
 - `sqlite` gives `SqlDatabase`, the runtime's copy of D1's interface
-  (`prepare(sql).bind(…).first/all/run/raw`, `batch`, `exec`).
+  (`prepare(sql).bind(…).first/all/run/raw`, `batch`, `exec`), from the
+  runtime's `./d1` entry. The API's package then peers on no `pg`.
+
+The API's database field in `config.ts` is a `DatabaseConnection` for a
+sqlite-first database, since a Worker reads it as a D1 binding, and
+`Database` otherwise.
 
 A D1 binding provides `SqlDatabase` on Workers, and `openSqlite(path)` over
-`bun:sqlite` provides it under `stack dev`. Placeholders are `?` and
+`bun:sqlite` provides it under `stack dev`. The generated `main.ts`, and a
+job's, open a sqlite-first database with `openDatabase`: it reads the
+field's `url`, a `sqlite:` URL, takes the file's path from it with
+`sqliteFile` (`./sqlite`), and opens it at once. It refuses a D1 binding,
+which only a Worker reaches, a Cloud SQL configuration and any other
+scheme, naming the variable and never the URL. `/readyz` pings the
+database with `./d1`'s `ping`, the shutdown closes it, and the server's
+package depends on `pg` only for a Postgres database. Placeholders are `?` and
 `?N`, which both read. D1 has no interactive transaction, and `batch` is
 atomic. `openSqlite` keeps D1's behaviors that an implementation could
 come to rely on: foreign keys on, a boolean bound as 1 or 0, `batch` in
@@ -4842,28 +4870,72 @@ each run's `changes`, `last_row_id` and duration in its `meta`. `ping`,
 in the same `./d1` entry, answers `/readyz`, and `connectPostgres`
 refuses a D1 connection.
 
-Resolution refuses (`unrealizable`) a TypeScript server, job or worker
-whose database resolves to another dialect than its DB service's first,
-since its `Deps.db` would be the wrong client. acme-shop's `shop-db` lists
-`postgres` first, so nothing of it changes. An identity store over SQLite
-is not built, so a sqlite-first database with the user model is refused
-for a TypeScript API.
+Resolution refuses (`unrealizable`), on each sql edge:
+- a TypeScript server, job or worker whose database resolves to another
+  dialect than its DB service's first, since its `Deps.db` would be the
+  wrong client;
+- a Go or Rust one whose database resolves to `sqlite`, since the Go ORM
+  and the Rust pool reach Postgres alone.
 
-The target's migration runner works on the deploying machine:
-- it finds `superschematic-migrate` on `PATH` or at
-  `SUPERSCHEMATIC_MIGRATE`, as the local target does;
-- it looks up each database's uuid by its name through the API;
-- it writes a job document whose databases have
+acme-shop's `shop-db` lists `postgres` first, so nothing of it changes. An
+identity store over SQLite is not built, so a TypeScript API over the user
+model whose database lists sqlite first is refused wherever it runs (D50),
+and a worker's queue on SQLite is refused already (section 8.8). The
+generator refuses both as well, for a build that resolves no environment.
+
+A target may name a database platform per dialect,
+`TargetSpec.DatabasePlatforms`. A database that no settings platform
+places, and whose DB services all list one dialect first, goes on that
+dialect's platform; any other goes on the target's database platform.
+`local` names `local.sqlite` for `sqlite` (section 18.13). `cloudflare`
+places every database on `cloudflare.d1`, whose one dialect is `sqlite`,
+so a database whose DB service lists no sqlite is refused there.
+`Finalize` checks that each platform named for a dialect runs it.
+
+On D1 each hosted DB schema is a `d1Database` node, `<database>.d1.<db>`,
+named `<stack>-<db>` in kebab case (`cloudflare.D1Name`), with each
+parameter's name and value after it in a member of a parameterized
+environment, so each member migrates databases of its own.
+
+The target's migration runner (`TargetSpec.Migrations`) works on the
+deploying machine:
+- it finds `superschematic-migrate` at `SUPERSCHEMATIC_MIGRATE`, else on
+  `PATH`, as the local target does. `PrepareMigrations` refuses a run
+  without it, or without `CLOUDFLARE_API_TOKEN`, before the deploy
+  changes anything;
+- it looks up each database's uuid by its name, with the run's parameter
+  values in place, through the API (`Cloud.D1Database`: `GET
+  /accounts/{id}/d1/database?name=`, matched exactly, since the filter
+  also lists longer names);
+- it writes a job document in a temporary directory, whose databases have
   `databaseUrl: d1://<accountId>/<uuid>` and no privileges, writes the
   plans beside it, and runs `superschematic-migrate job --job <path>` with
-  the run's `CLOUDFLARE_API_TOKEN`.
+  the run's `CLOUDFLARE_API_TOKEN`. The runner's output reaches the
+  deploy's log, and the directory goes when the phase ends.
 
 D1 has no roles: every Worker bound to a database reads and writes all of
-it, the runner's state tables included. A phase with no steps whose
-servers changed does nothing. The D1 driver's lease (D27, amended) keeps
-two deploys apart. Before the first D1 deploy, `TestRealD1` must pass
-against a real database, which also verifies D27 amended's REST batch
-assumption.
+it, the runner's state tables included. So a job gives no privileges, and
+a phase whose plans have no steps, which the deploy hands the runner only
+because a database's servers changed, does nothing. The D1 driver's lease
+(D27, amended) keeps two deploys apart. Before the first D1 deploy,
+`TestRealD1` must pass against a real database, which also verifies D27
+amended's REST batch assumption.
+
+**What a real D1 run needs.** No test calls Cloudflare. `TestRealD1`
+(`runtime/migrate/go`) runs against a scratch D1 database, whose tables
+it drops first:
+- `SUPERSCHEMATIC_MIGRATE_TEST_D1_URL=d1://<account id>/<database uuid>`,
+  a database made for it (`wrangler d1 create` or the dashboard);
+- `CLOUDFLARE_API_TOKEN`, a token with `D1 Write` (Account, D1, Edit) on
+  that account;
+- `cd runtime/migrate/go && go test -run TestRealD1 -v .`.
+
+A deploy to a real account needs, in the deploying shell, the account's
+id in the environment's values, the token and passphrase of section 18.3
+(the bootstrap's `deployer`, or an engineer's token with `Workers Scripts
+Write`, `D1 Write`, `Workers R2 Storage Write`, `Secrets Store Write` and
+`Account API Tokens Write`), `superschematic-migrate` on `PATH` or at
+`SUPERSCHEMATIC_MIGRATE`, the Pulumi CLI the provisioner pins, and Bun.
 
 ### 18.7 Buckets on R2
 
@@ -4974,7 +5046,22 @@ A stack with a cloudflare environment keeps a `Dev` on the `local` target:
 - servers run on Bun from `main.ts`;
 - a sqlite-first database is a file under the environment's state
   directory, which the runner migrates from the same SQLite plan and the
-  server opens with `openSqlite`;
+  server opens with `openSqlite`. The target places it on `local.sqlite`
+  (`TargetSpec.DatabasePlatforms`), whose lowering is a
+  `local:sqlite/database:Database` node per hosted DB schema,
+  `databases/<database>.sqlite` under the state directory, and no
+  container. `local.process-sqlite` and `local.job-sqlite` derive the
+  edge's `url` as a reference to the node's `url` output,
+  `sqlite:<absolute path>`, which only the provisioner knows, since the
+  state directory is the machine's; the migration runner and the
+  runtime's `sqliteFile` both read it as the path. The provisioner creates
+  the file empty, readable by its owner alone, with no Docker; plans its
+  migration from the model the runner reports at that URL to the SQLite
+  model `stack dev` writes, and applies it, expand and contract back to
+  back; and resolves the URL into each server's and job's environment.
+  `stack dev`'s summary names the file's URL. Destroy keeps the file, as
+  it keeps the containers' data, and `--remove-data` removes it with its
+  journal files. A Go or Rust API is refused on it (section 18.6);
 - buckets stay on the storage emulator through the same `Bucket`
   interface;
 - calls travel over loopback with signed tokens.
@@ -4996,7 +5083,11 @@ runtime tests run fixture bundles under the `workerd` binary.
 - `stack run` on this target.
 - Queue workers, since D53 amended keeps claims on Postgres.
 - Hyperdrive to Cloud SQL, and any mixing of targets in one environment.
-- An identity API on Workers, whose argon2 is `node:crypto`'s (D50).
+- An identity API on Workers, whose argon2 is `node:crypto`'s (D50), and
+  an identity store over SQLite for a TypeScript API.
+- A D1 deploy that has reached Cloudflare: the platform, the runner and
+  the D1 driver are proven against the pins, a fake account and the fake
+  D1, and `TestRealD1` has not run yet.
 - Engine types on Workers, whose binding is a Node-API addon (D58).
 - Rate limits shared across isolates; Workers' `ratelimit` binding is a
   candidate store.

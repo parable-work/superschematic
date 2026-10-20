@@ -6,9 +6,9 @@ D64). It registers the DNS platform `cloudflare`, which writes an
 environment's domain records into a Cloudflare zone, whatever target runs
 the environment's servers, and the target `cloudflare`, which runs an
 environment on one Cloudflare account. The target's values, its state in
-R2, its secrets in the Secrets Store, its bootstrap and its CI identity
-are built; its Workers, Cron, D1, R2 and site platforms come next, in this
-module.
+R2, its secrets in the Secrets Store, its bootstrap, its CI identity, its
+D1 platform and its D1 migrations are built; its Workers, Cron, R2 and
+site platforms come next, in this module.
 
 It is a Go module of its own, as `extensions/gcp` and `extensions/pulumi`
 are, and registers through the public `registry` package alone (D10).
@@ -112,6 +112,8 @@ export abstract class Staging {}
 | `secrets.go` | the secret store over the Secrets Store, `<Stack>-<Environment>-<Type>-<FIELD>` |
 | `bootstrap.go`, `github.go` | bootstrap: the state bucket, the passphrase and its check, the Secrets Store, the deployer and planner account tokens, and `--github` through `gh` |
 | `ci.go` | the CI identity, `cloudflare-api-token`, naming the GitHub secrets each job reads |
+| `d1.go` | the `cloudflare.d1` platform: a `d1Database` per hosted DB schema, `<stack>-<db>` with a suffix per parameter, in `sqlite`, with `locationHint` or `jurisdiction` |
+| `migrations.go` | the migration runner: `superschematic-migrate job` on the deploying machine, against `d1://<accountId>/<uuid>`, each uuid looked up by name |
 | `policy.go` | `domain-on-cloudflare` |
 
 Every command reads the token from `CLOUDFLARE_API_TOKEN` and the state's
@@ -140,7 +142,8 @@ cli.New(cli.Config{Name: "superschematic"},
 
 `schemas/pulumi-cloudflare.json` pins pulumi-cloudflare 6.22.0: the
 digest of each upstream file and the types the DNS platform and the
-target emit: the DNS record, and the account token of bootstrap's graph.
+target emit: the DNS record, the account token of bootstrap's graph,
+and the D1 database.
 `schemas/` holds one file per type, with its Terraform name and renames
 (section 6.4), and the DNS platform and the target register each as the
 JSON Schema of its type's properties, so resolution checks every node
@@ -164,7 +167,10 @@ on Cloudflare, DNS-only in Staging and Preview and proxied in Production,
 against the golden files under `testdata/golden/stack`, and checks the
 bootstrap graph (`testdata/golden/bootstrap`) and a cloudflare
 environment's workflow (`testdata/golden/ci`, through actionlint when it is
-installed). Bootstrap, the stores and the CI identity run against a fake
-`Cloud`, `gh` and provisioner, and `Cloud` itself against a local stand-in
-for the REST and S3 APIs. Run it with `-update` to rewrite the golden
+installed). It resolves `reviews-stack`, whose databases are on D1, in
+Staging, Preview and Production, and checks its workflow, whose deploy
+jobs install `superschematic-migrate`. Bootstrap, the stores, the CI
+identity and the migration runner run against a fake `Cloud`, `gh` and
+provisioner, the runner with a stand-in for `superschematic-migrate`, and
+`Cloud` itself against a local stand-in for the REST and S3 APIs. Run it with `-update` to rewrite the golden
 files, and review the diff. No test calls Cloudflare.
