@@ -413,6 +413,311 @@ mod tests {
         );
     }
 
+    /// Reads `Authorization: Bearer <subject>:<permission>,...`.
+    struct Users;
+
+    #[async_trait::async_trait]
+    impl Authenticator for Users {
+        async fn authenticate(
+            &self,
+            request: &http::request::Parts,
+        ) -> Result<Option<Principal>, ApiError> {
+            Ok(crate::bearer_token(&request.headers).map(principal_of))
+        }
+    }
+
+    /// Reads `Service-Authorization: Bearer <deployable>:<api>,...`.
+    struct Services;
+
+    #[async_trait::async_trait]
+    impl crate::ServiceAuthenticator for Services {
+        async fn authenticate(
+            &self,
+            request: &http::request::Parts,
+        ) -> Result<Option<ServiceCaller>, ApiError> {
+            Ok(request
+                .headers
+                .get(crate::SERVICE_AUTHORIZATION)
+                .and_then(|value| crate::auth::parse_bearer(value.to_str().ok()?))
+                .map(caller_of))
+        }
+    }
+
+    fn principal_of(token: &str) -> Principal {
+        let (subject, permissions) = token.split_once(':').unwrap_or((token, ""));
+        Principal::new(subject, permissions.split(',').filter(|p| !p.is_empty()))
+    }
+
+    fn caller_of(token: &str) -> ServiceCaller {
+        let (deployable, serves) = token.split_once(':').unwrap_or((token, ""));
+        ServiceCaller::in_process(deployable, serves.split(',').filter(|api| !api.is_empty()))
+    }
+
+    fn refusal<T: std::fmt::Debug>(result: Result<T, ApiError>) -> (StatusCode, String, String) {
+        let err = result.unwrap_err();
+        (err.status, err.code, err.message)
+    }
+
+    fn refused(status: StatusCode, code: &str, message: &str) -> (StatusCode, String, String) {
+        (status, code.to_owned(), message.to_owned())
+    }
+
+    /// A `@requireService({ from: [shop-orders] })` operation with a user
+    /// clause.
+    const RESERVE: OperationInfo = OperationInfo {
+        namespace: "stock",
+        name: "reserveStock",
+        method: "POST",
+        path: "/api/stock/{id}/reserve",
+        requires_auth: true,
+        permissions: &["stock.write"],
+        require_ownership: false,
+        manual: false,
+        rate_limit: None,
+        service: Some(ServiceClause {
+            mode: ServiceMode::Require,
+            from: &["shop-orders"],
+        }),
+    };
+
+    /// `RESERVE` as `@allowService`.
+    const RELEASE: OperationInfo = OperationInfo {
+        name: "releaseReservation",
+        service: Some(ServiceClause {
+            mode: ServiceMode::Allow,
+            from: &["shop-orders"],
+        }),
+        ..RESERVE
+    };
+
+    fn ana() -> Option<Principal> {
+        Some(Principal::new("ana", ["stock.write"]))
+    }
+
+    #[test]
+    fn an_operation_only_services_call_refuses_a_call_without_one() {
+        let without_a_user_clause = OperationInfo {
+            requires_auth: false,
+            permissions: &[],
+            ..RESERVE
+        };
+        for operation in [RESERVE, without_a_user_clause] {
+            let want = refused(
+                StatusCode::UNAUTHORIZED,
+                "service_unauthorized",
+                "Service credential required",
+            );
+            assert_eq!(refusal(operation.admit(&Users, ana())), want);
+            assert_eq!(refusal(operation.admit(&Users, None)), want);
+            assert_eq!(refusal(operation.admit_service(None)), want);
+        }
+    }
+
+    #[test]
+    fn a_service_caller_is_held_to_from() {
+        let listed = ServiceCaller::in_process("app", ["shop-orders"]);
+        let unlisted = ServiceCaller::in_process("billing", ["shop-billing"]);
+        assert!(!RESERVE.admit_service(Some(&listed)).unwrap());
+        assert_eq!(
+            refusal(RESERVE.admit_service(Some(&unlisted))),
+            refused(
+                StatusCode::FORBIDDEN,
+                "service_forbidden",
+                "Service not permitted"
+            )
+        );
+        let any = OperationInfo {
+            service: Some(ServiceClause {
+                mode: ServiceMode::Require,
+                from: &[],
+            }),
+            ..RESERVE
+        };
+        assert!(!any.admit_service(Some(&unlisted)).unwrap());
+        // A listed caller still forwards an end user who meets the clause.
+        assert_eq!(
+            refusal(RESERVE.admit_end_user(&Users, None)),
+            refused(
+                StatusCode::UNAUTHORIZED,
+                "unauthorized",
+                "Authentication required"
+            )
+        );
+        let caller = RESERVE.admit_end_user(&Users, ana()).unwrap();
+        assert_eq!(caller.map(|caller| caller.subject), Some("ana".to_owned()));
+    }
+
+    #[test]
+    fn a_listed_caller_of_an_allow_service_operation_stands_in_for_the_end_user() {
+        let listed = ServiceCaller::in_process("app", ["shop-orders"]);
+        let unlisted = ServiceCaller::in_process("billing", ["shop-billing"]);
+        assert!(RELEASE.admit_service(Some(&listed)).unwrap());
+        // Anyone else goes on to the end-user step.
+        assert!(!RELEASE.admit_service(Some(&unlisted)).unwrap());
+        assert!(!RELEASE.admit_service(None).unwrap());
+        assert_eq!(
+            refusal(RELEASE.admit_end_user(&Users, None)),
+            refused(
+                StatusCode::UNAUTHORIZED,
+                "unauthorized",
+                "Authentication required"
+            )
+        );
+        // admit, which names no service caller, is that step.
+        let caller = RELEASE.admit(&Users, ana()).unwrap();
+        assert_eq!(caller.map(|caller| caller.subject), Some("ana".to_owned()));
+        // An operation without a clause has no service step.
+        let open = OperationInfo {
+            service: None,
+            ..RESERVE
+        };
+        assert!(!open.admit_service(Some(&unlisted)).unwrap());
+        assert!(!open.admit_service(None).unwrap());
+    }
+
+    #[test]
+    fn a_service_callers_context_names_it() {
+        let caller = ServiceCaller::in_process("app", ["shop-orders"]);
+        let ctx = RESERVE.service_context(caller.clone(), ana());
+        assert_eq!(ctx.service_caller, Some(caller));
+        assert_eq!(
+            ctx.principal.map(|principal| principal.subject),
+            Some("ana".to_owned())
+        );
+        assert_eq!(
+            (ctx.method, ctx.route.as_str()),
+            (Method::POST, "/api/stock/{id}/reserve")
+        );
+        assert_eq!(RESERVE.context(None).service_caller, None);
+    }
+
+    /// What an in-process call gets: the service step, then, unless the
+    /// caller alone is admitted, the end-user step.
+    fn in_process(
+        operation: &OperationInfo,
+        caller: Option<&str>,
+        user: Option<&str>,
+    ) -> (StatusCode, String) {
+        let caller = caller.map(caller_of);
+        let admitted = operation
+            .admit_service(caller.as_ref())
+            .and_then(|alone| match alone {
+                true => Ok(()),
+                false => operation
+                    .admit_end_user(&Users, user.map(principal_of))
+                    .map(drop),
+            });
+        match admitted {
+            Ok(()) => (StatusCode::OK, String::new()),
+            Err(err) => (err.status, err.code),
+        }
+    }
+
+    /// What a request to the route gets.
+    async fn routed(
+        router: &axum::Router,
+        caller: Option<&str>,
+        user: Option<&str>,
+    ) -> (StatusCode, String) {
+        use tower::ServiceExt;
+
+        let mut request = http::Request::post("/op");
+        if let Some(token) = caller {
+            request = request.header(crate::SERVICE_AUTHORIZATION, format!("Bearer {token}"));
+        }
+        if let Some(token) = user {
+            request = request.header("authorization", format!("Bearer {token}"));
+        }
+        let response = router
+            .clone()
+            .oneshot(request.body(axum::body::Body::empty()).unwrap())
+            .await
+            .unwrap();
+        let status = response.status();
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let code = serde_json::from_slice::<Value>(&bytes)
+            .ok()
+            .and_then(|body| body["code"].as_str().map(str::to_owned))
+            .unwrap_or_default();
+        (status, code)
+    }
+
+    // admit_service and the router apply one rule: over each mode, from,
+    // caller (none, listed, not listed), user clause and end user (none,
+    // with the permission, without it), an in-process call gets the
+    // status and code a request to a RouteControls route gets.
+    #[tokio::test]
+    async fn the_in_process_service_step_is_the_routes() {
+        use crate::RouteControls;
+        use std::sync::Arc;
+
+        let froms: [&'static [&'static str]; 2] = [&[], &["shop-orders"]];
+        let callers = [
+            None,
+            Some("orders:shop-orders"),
+            Some("billing:shop-billing"),
+        ];
+        let users = [None, Some("ana:stock.write"), Some("bob:stock.read")];
+        let mut checked = 0;
+        let mut answers = std::collections::BTreeSet::new();
+        for mode in [ServiceMode::Require, ServiceMode::Allow] {
+            for from in froms {
+                for user_clause in [false, true] {
+                    let operation = OperationInfo {
+                        requires_auth: user_clause,
+                        permissions: if user_clause { &["stock.write"] } else { &[] },
+                        service: Some(ServiceClause { mode, from }),
+                        ..RESERVE
+                    };
+                    let controls = match mode {
+                        ServiceMode::Require => {
+                            RouteControls::new().require_service(Arc::new(Services), from)
+                        }
+                        ServiceMode::Allow => {
+                            RouteControls::new().allow_service(Arc::new(Services), from)
+                        }
+                    };
+                    let controls = match user_clause {
+                        true => controls.authorize(Arc::new(Users), operation.permissions),
+                        false => controls,
+                    };
+                    let router = axum::Router::new()
+                        .route("/op", controls.apply(axum::routing::post(|| async { "" })));
+                    for caller in callers {
+                        for user in users {
+                            let answer = in_process(&operation, caller, user);
+                            answers.insert((answer.0.as_u16(), answer.1.clone()));
+                            assert_eq!(
+                                answer,
+                                routed(&router, caller, user).await,
+                                "{mode:?} from {from:?}, user clause {user_clause}, \
+                                 caller {caller:?}, end user {user:?}"
+                            );
+                            checked += 1;
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!(checked, 72);
+        let answers: Vec<(u16, &str)> = answers
+            .iter()
+            .map(|(status, code)| (*status, code.as_str()))
+            .collect();
+        assert_eq!(
+            answers,
+            [
+                (200, ""),
+                (401, "service_unauthorized"),
+                (401, "unauthorized"),
+                (403, "forbidden"),
+                (403, "service_forbidden"),
+            ]
+        );
+    }
+
     #[test]
     fn scalar_arguments_need_an_object_body() {
         assert_eq!(body_fields(None, false).unwrap(), None);
