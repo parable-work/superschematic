@@ -1525,7 +1525,9 @@ async fn an_action_without_callers_posts_and_refuses_by_its_status() {
 // body limit and timeout with 429, 413 and 504. The shipments' page, whose
 // list has no control, names each warehouse through listWarehouses, and
 // meets its rate limit, which the warehouses' own page shares, and its
-// timeout.
+// timeout. The list's route, its procedure and its page take from one
+// limiter (D44, amended): a client's request through the JSON API and one
+// through the procedure leave its page 429, and another client's 200.
 func TestPagesKeepTheirRoutesControls(t *testing.T) {
 	cargoTestCrateWith(t, controlsService, controlsPagesAppTest, crateOptions{
 		outputs:         livePagesOutputs(),
@@ -1536,6 +1538,7 @@ func TestPagesKeepTheirRoutesControls(t *testing.T) {
 // controlsPagesAppTest is tests/app.rs of fixture-controls-api's Topcoat
 // crate with the pages on.
 const controlsPagesAppTest = `use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -1549,11 +1552,12 @@ use schemas_fixture_controls_api_topcoat::api::runtime::{
 };
 use schemas_fixture_controls_api_topcoat::api::{
     types, HookImplementation, HookReceivePaymentArgs, Implementations, OrderGetOrderArgs, OrderHoldOrderArgs,
-    OrderImplementation, OrderListOrdersArgs, StockImplementation, StockReleaseReservationArgs, WebhookVerifier,
+    OrderImplementation, OrderListOrdersArgs, StockImplementation, StockReleaseReservationArgs, StockReserveStockArgs,
+    WebhookVerifier,
 };
 use schemas_fixture_controls_api_topcoat::{PageAuthenticator, RouterBuilderFixtureControlsApiExt};
 use topcoat::context::Cx;
-use topcoat::router::{header, to_bytes, Body, Router, RouterBuilderDiscoverExt, StatusCode};
+use topcoat::router::{header, to_bytes, Body, RemoteAddr, Router, RouterBuilderDiscoverExt, StatusCode};
 
 #[path = "support/enter.rs"]
 mod enter;
@@ -1611,6 +1615,9 @@ impl HookImplementation for Shop {
 impl StockImplementation for Shop {
     async fn reindex_stock(&self, _ctx: RequestContext) -> Result<types::StockRun, ApiError> {
         Ok(types::StockRun { done: true })
+    }
+    async fn reserve_stock(&self, _ctx: RequestContext, args: StockReserveStockArgs) -> Result<types::Reservation, ApiError> {
+        Ok(types::Reservation { id: args.id, held: true })
     }
     async fn release_reservation(&self, _ctx: RequestContext, args: StockReleaseReservationArgs) -> Result<types::Reservation, ApiError> {
         Ok(types::Reservation { id: args.id, held: false })
@@ -1683,6 +1690,25 @@ async fn get(router: &Router, uri: &str) -> Answer {
     send(router, "GET", uri, "text/plain", String::new(), None).await
 }
 
+// A request from a client at ip, as Topcoat's server records the
+// connection's address.
+async fn send_from(router: &Router, method: &str, uri: &str, ip: [u8; 4]) -> Answer {
+    let request = http::Request::builder()
+        .method(method)
+        .uri(uri)
+        .header(header::CONTENT_TYPE, "application/json")
+        .extension(RemoteAddr(SocketAddr::from((ip, 40000))));
+    let response = router.handle(request.body(Body::from("[]")).unwrap()).await;
+    let status = response.status();
+    let headers = response.headers().clone();
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let html = String::from_utf8(bytes.to_vec()).unwrap();
+    // The JSON API's and the procedure's answers are not pages: only a
+    // text/html answer is held to the rule.
+    enter::check_page(uri, &headers, &html);
+    Answer { status, headers, html }
+}
+
 async fn hold(router: &Router, body: String, length: Option<usize>) -> Answer {
     send(router, "POST", "/console/orders/1/hold", "application/x-www-form-urlencoded", body, length).await
 }
@@ -1726,6 +1752,30 @@ async fn a_list_and_its_shard_meet_the_lists_rate_limit() {
         assert_eq!(shard.status, StatusCode::OK, "{}", shard.html);
     }
     refusal(&get(&app, "/console/orders").await, 429, "Too many requests", "Too Many Requests");
+}
+
+#[tokio::test]
+async fn a_route_its_procedure_and_its_pages_share_one_budget() {
+    // The orders' list allows a client two a minute, however it lists
+    // them: one through the JSON API and one through the list's procedure,
+    // whose limiter counts it before it reads its arguments, leave the
+    // console's list none (D44, amended).
+    let app = app(false);
+    let (ada, bob) = ([10, 0, 0, 1], [10, 0, 0, 2]);
+    let api = send_from(&app, "GET", "/api/orders", ada).await;
+    assert_eq!(api.status, StatusCode::OK, "{}", api.html);
+    let procedure = send_from(&app, "POST", "/_superschematic/fixture-controls-api/order/list-orders", ada).await;
+    assert!(!procedure.html.contains("too_many_requests"), "{}", procedure.html);
+    let limited = send_from(&app, "GET", "/console/orders", ada).await;
+    refusal(&limited, 429, "Too many requests", "Too Many Requests");
+    assert!(limited.headers.contains_key(header::RETRY_AFTER), "{:?}", limited.headers);
+    // The list's route and its procedure meet the same bucket.
+    assert_eq!(send_from(&app, "GET", "/api/orders", ada).await.status, StatusCode::TOO_MANY_REQUESTS);
+    let procedure = send_from(&app, "POST", "/_superschematic/fixture-controls-api/order/list-orders", ada).await;
+    assert!(procedure.html.contains("too_many_requests"), "{}", procedure.html);
+    // Another client's budget is its own.
+    let other = send_from(&app, "GET", "/console/orders", bob).await;
+    assert_eq!(other.status, StatusCode::OK, "{}", other.html);
 }
 
 #[tokio::test]

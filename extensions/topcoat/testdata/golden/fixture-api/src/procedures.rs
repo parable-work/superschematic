@@ -18,21 +18,25 @@
 //! @timeout) as the route's request does, each refusal answered as a
 //! `ProblemRecord`: `ProcedureControls`, a layer on the procedure's path,
 //! which `fixture_api` adds.
+//! A rate limit is the operation's one limiter in the app's registry
+//! (`Setup.rate_limits`, D44, amended), so a client has one budget through
+//! the JSON API's route, the procedure and the pages.
 
 #![allow(unused_imports)]
 
 use crate::api::runtime::ApiError;
-use crate::api::runtime::RateLimiter;
+use crate::api::runtime::{RateLimiter, RateLimits};
 use crate::operations;
 use crate::records::*;
 use crate::wire;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
+use std::sync::Arc;
 use std::time::Duration;
 use topcoat::context::Cx;
 use topcoat::router::content::Json;
 use topcoat::router::error::ContentTooLargeError;
-use topcoat::router::request::{client_ip, headers};
+use topcoat::router::request::headers;
 use topcoat::router::response::{IntoResponse, Response};
 use topcoat::router::{Body, BodyLimit, Layer, LayerFuture, Next, Path, RouterBuilder, header, to_bytes};
 use topcoat::runtime::Surrogated;
@@ -114,17 +118,19 @@ fn decode<T: DeserializeOwned>(argument: &str, value: Value) -> Result<T, Proble
 }
 
 /// Adds a `ProcedureControls` layer on the path of each procedure whose
-/// route has a traffic control. `fixture_api` calls it.
-pub(crate) fn route_controls(router: RouterBuilder) -> RouterBuilder {
+/// route has a traffic control, a rate limit taken from `limits`, the app's
+/// registry, which the JSON API's routes and the pages take from too.
+/// `fixture_api` calls it.
+pub(crate) fn route_controls(router: RouterBuilder, limits: &RateLimits) -> RouterBuilder {
     router
         .layer(
             ProcedureControls::new("/_superschematic/fixture-api/tenant/list-tenants", refusal::<Vec<TenantViewRecord>>)
-                .rate_limit(60)
+                .rate_limiter(limits.of(&crate::api::operations::TENANT_LIST_TENANTS))
                 .body_limit_megabytes(1),
         )
         .layer(
             ProcedureControls::new("/_superschematic/fixture-api/tenant/get-tenant", refusal::<TenantViewRecord>)
-                .rate_limit(60)
+                .rate_limiter(limits.of(&crate::api::operations::TENANT_GET_TENANT))
                 .body_limit_megabytes(1)
                 .timeout_seconds(5),
         )
@@ -139,11 +145,12 @@ pub(crate) fn route_controls(router: RouterBuilder) -> RouterBuilder {
 struct ProcedureControls {
     path: &'static Path,
     answer: Refusal,
-    /// The procedure's own limiter, at its route's rate, which counts each
-    /// client by its IP address as Topcoat reads it (`client_ip`: the
-    /// peer's, or the client's a trusted proxy names). The JSON API's route
-    /// keeps its own: like two replicas, the two share no budget.
-    rate_limit: Option<RateLimiter>,
+    /// The operation's limiter, at its route's rate, from the app's
+    /// registry: the one the JSON API's route and the pages take from, so
+    /// the three share each client's budget. It counts each client by its
+    /// IP address as Topcoat reads it (`client_key`: the peer's, or the
+    /// client's a trusted proxy names), the key the route reads too.
+    rate_limit: Option<Arc<RateLimiter>>,
     /// The limit in bytes, and the Topcoat layer that lets the procedure
     /// read its arguments up to it.
     body_limit: Option<(usize, BodyLimit)>,
@@ -158,9 +165,10 @@ impl ProcedureControls {
         Self { path: Path::new(path), answer, rate_limit: None, body_limit: None, timeout: None }
     }
 
-    /// `@rateLimit({ requestsPerMinute })`.
-    fn rate_limit(mut self, requests_per_minute: u32) -> Self {
-        self.rate_limit = Some(RateLimiter::per_minute(requests_per_minute));
+    /// `@rateLimit({ requestsPerMinute })`, as the operation's limiter in
+    /// the app's registry (`RateLimits::of`).
+    fn rate_limiter(mut self, limiter: Option<Arc<RateLimiter>>) -> Self {
+        self.rate_limit = limiter;
         self
     }
 
@@ -190,13 +198,12 @@ impl Layer for ProcedureControls {
 
     fn handle<'a>(&'a self, cx: &'a Cx, body: Body, next: Next<'a>) -> LayerFuture<'a> {
         Box::pin(async move {
-            if let Some(limiter) = &self.rate_limit {
-                let client = client_ip(cx).map_or_else(|| "unknown".to_owned(), |ip| ip.to_string());
-                if let Err(retry_after) = limiter.take(&client) {
-                    let mut response = self.refuse(cx, ApiError::too_many_requests("Too Many Requests"))?;
-                    response.headers_mut().insert(header::RETRY_AFTER, retry_after.into());
-                    return Ok(response);
-                }
+            if let Some(limiter) = &self.rate_limit
+                && let Err(retry_after) = limiter.take(&crate::client_key(cx))
+            {
+                let mut response = self.refuse(cx, ApiError::too_many_requests("Too Many Requests"))?;
+                response.headers_mut().insert(header::RETRY_AFTER, retry_after.into());
+                return Ok(response);
             }
             // The body is read up to the limit before the procedure decodes
             // it: one that declares more, or sends more, is refused.

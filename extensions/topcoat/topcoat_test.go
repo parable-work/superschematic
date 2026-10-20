@@ -495,10 +495,12 @@ func TestViewsOff(t *testing.T) {
 // has a guard and neither an in-process call nor a procedure, its input
 // no form, and its result, which no other
 // operation returns, no record and so no display components. Its
-// @requireService operation keeps its in-process call, whose doc says it
-// applies the end-user step alone, and has no procedure; its result keeps
-// its record and components. Its @allowService one has both. A procedure
-// whose route has traffic controls gets a layer with them, and the build
+// @requireService operations have no end-user call and no procedure: each
+// is called as a service, whose call's doc says why it has no procedure,
+// and its guard's doc says it refuses an end user; their results keep
+// their records and components. Its @allowService one has both. A
+// procedure whose route has traffic controls gets a layer with them, its
+// rate limit the operation's limiter in the app's registry, and the build
 // log says why each item is left out.
 func TestWhatHasNoProcedure(t *testing.T) {
 	root := testpaths.TempDir(t)
@@ -517,10 +519,10 @@ func TestWhatHasNoProcedure(t *testing.T) {
 	for _, want := range []string{
 		"pub async fn can_hook_receive_payment(",
 		"/// It has no in-process call: a third party calls it (@webhook), and its route\n/// checks the third party's signature first (@hmacVerified).",
-		"pub async fn stock_reindex_stock(",
-		"/// It has no procedure: a browser holds no service credential\n/// (@requireService).",
-		"This call applies\n/// the end-user step alone",
-		"pub async fn stock_release_reservation(",
+		"    pub async fn stock_reindex_stock(&self, cx: &Cx)",
+		"    /// It has no procedure: a browser holds no service credential\n    /// (@requireService).\n    pub async fn stock_reindex_stock(",
+		"/// (@requireService), so an end user is refused 401 `service_unauthorized`,\n/// signed in or not. `as_service(caller).can_stock_reindex_stock(cx)` admits a\n/// service caller (D37, amended).\npub async fn can_stock_reindex_stock(",
+		"pub async fn stock_release_reservation(cx: &Cx",
 	} {
 		if !strings.Contains(operations, want) {
 			t.Errorf("operations.rs lacks %q", want)
@@ -529,17 +531,19 @@ func TestWhatHasNoProcedure(t *testing.T) {
 	if strings.Contains(operations, "pub async fn hook_receive_payment(") {
 		t.Error("operations.rs has an in-process call for the webhook")
 	}
-	for _, path := range []string{"hook/receive-payment", "stock/reindex-stock"} {
+	for _, path := range []string{"hook/receive-payment", "stock/reindex-stock", "stock/reserve-stock"} {
 		if strings.Contains(procedures, path) {
 			t.Errorf("procedures.rs has a procedure on %s", path)
 		}
 	}
 	for _, want := range []string{
 		`#[procedure("/_superschematic/fixture-controls-api/stock/release-reservation")]`,
+		`pub(crate) fn route_controls(router: RouterBuilder, limits: &RateLimits) -> RouterBuilder {`,
 		`ProcedureControls::new("/_superschematic/fixture-controls-api/order/place-order", refusal::<OrderViewRecord>)
-                .rate_limit(2)
+                .rate_limiter(limits.of(&crate::api::operations::ORDER_PLACE_ORDER))
                 .body_limit_megabytes(3)
                 .timeout_seconds(1),`,
+		"limiter.take(&crate::client_key(cx))",
 	} {
 		if !strings.Contains(procedures, want) {
 			t.Errorf("procedures.rs lacks %q", want)
@@ -555,14 +559,125 @@ func TestWhatHasNoProcedure(t *testing.T) {
 		t.Error("views.rs renders the webhook's result, which has no record")
 	}
 	if !strings.Contains(views, "pub async fn stock_run_detail(") {
-		t.Error("views.rs lacks stock_run_detail, the @requireService operation's result, which a page calls")
+		t.Error("views.rs lacks stock_run_detail, the @requireService operation's result, which a page calls as a service")
 	}
 	for _, want := range []string{
 		"no in-process call for hook.receivePayment: a third party calls it (@webhook)",
+		"no end-user call for stock.reindexStock: its route admits only a service caller (@requireService); operations::as_service calls it",
 		"no procedure for stock.reindexStock: a browser holds no service credential (@requireService)",
+		"no procedure for stock.reserveStock: a browser holds no service credential (@requireService)",
 	} {
 		if !strings.Contains(log.String(), want) {
 			t.Errorf("the build log lacks %q:\n%s", want, log.String())
+		}
+	}
+}
+
+// TestAServiceOnlyOperationIsCalledAsAService builds fixture-controls-api.
+// A @requireService operation, with or without a user clause, has no
+// end-user call in operations.rs, so a page cannot call it for an end user
+// (D37, amended); its guard stays. AsService has a call and a guard for
+// each operation with a service clause, the @allowService one among them,
+// which keeps its end-user call too. The reservation's argument form
+// submits as a service (submit_as) and has no submit; every other form
+// keeps its submit.
+func TestAServiceOnlyOperationIsCalledAsAService(t *testing.T) {
+	root := testpaths.TempDir(t)
+	if _, err := buildService(t, controlsService, root, rustOutputs()); err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	read := func(file string) string {
+		data, err := os.ReadFile(filepath.Join(topcoat.Dir(root, controlsService), "src", file))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(data)
+	}
+	operations, forms := read("operations.rs"), read("forms.rs")
+	for _, absent := range []string{"pub async fn stock_reindex_stock(cx", "pub async fn stock_reserve_stock(cx"} {
+		if strings.Contains(operations, absent) {
+			t.Errorf("operations.rs has an end user's call of a @requireService operation, %q", absent)
+		}
+	}
+	at := strings.Index(operations, "impl AsService<'_> {")
+	if at < 0 {
+		t.Fatalf("operations.rs lacks impl AsService:\n%s", operations)
+	}
+	asService := operations[at:]
+	for _, want := range []string{
+		"pub async fn stock_reindex_stock(&self, cx: &Cx) -> Result<types::StockRun, ApiError> {",
+		"pub async fn can_stock_reindex_stock(&self, cx: &Cx) -> Result<Option<Principal>, ApiError> {",
+		"pub async fn stock_reserve_stock(&self, cx: &Cx, args: crate::api::StockReserveStockArgs) -> Result<types::Reservation, ApiError> {",
+		"pub async fn can_stock_reserve_stock(&self, cx: &Cx) -> Result<Option<Principal>, ApiError> {",
+		"pub async fn stock_release_reservation(&self, cx: &Cx, args: crate::api::StockReleaseReservationArgs) -> Result<types::Reservation, ApiError> {",
+		"pub async fn can_stock_release_reservation(&self, cx: &Cx) -> Result<Option<Principal>, ApiError> {",
+		".reserve_stock(operations::STOCK_RESERVE_STOCK.service_context(self.caller.clone(), caller), args)",
+		"crate::admit_as(cx, &operations::STOCK_RESERVE_STOCK, self.caller).await",
+	} {
+		if !strings.Contains(asService, want) {
+			t.Errorf("impl AsService lacks %q", want)
+		}
+	}
+	for _, guard := range []string{"pub async fn can_stock_reindex_stock(cx: &Cx)", "pub async fn can_stock_reserve_stock(cx: &Cx)", "pub async fn stock_release_reservation(cx: &Cx"} {
+		if !strings.Contains(operations[:at], guard) {
+			t.Errorf("operations.rs lacks %q, which an end user's page calls", guard)
+		}
+	}
+	if strings.Contains(asService, "list_orders") {
+		t.Error("impl AsService calls an operation without a service clause")
+	}
+	block := func(form string) string {
+		start := strings.Index(forms, "impl "+form+" {")
+		if start < 0 {
+			t.Fatalf("forms.rs lacks impl %s", form)
+		}
+		end := strings.Index(forms[start:], "\n}\n")
+		return forms[start : start+end]
+	}
+	reserve := block("StockReserveStockArgsForm")
+	if !strings.Contains(reserve, "pub async fn submit_as(&self, cx: &Cx, service: &crate::api::runtime::ServiceCaller) -> Result<types::Reservation, Refusal> {") ||
+		!strings.Contains(reserve, "operations::as_service(service).stock_reserve_stock(cx, args)") {
+		t.Errorf("StockReserveStockArgsForm lacks submit_as:\n%s", reserve)
+	}
+	if strings.Contains(reserve, "pub async fn submit(") {
+		t.Errorf("StockReserveStockArgsForm has a submit, which would call the operation for the end user:\n%s", reserve)
+	}
+	if release := block("StockReleaseReservationArgsForm"); !strings.Contains(release, "pub async fn submit(&self, cx: &Cx)") || strings.Contains(release, "submit_as") {
+		t.Errorf("StockReleaseReservationArgsForm, an @allowService operation's, does not keep its submit alone:\n%s", release)
+	}
+}
+
+// TestTheSetupSharesOneRegistry reads every golden crate: its setup makes
+// one registry of the operations' rate limiters, which the JSON API's
+// routes, the procedures and the pages take from, so none of them makes a
+// limiter of its own (D44, amended).
+func TestTheSetupSharesOneRegistry(t *testing.T) {
+	dirs, err := filepath.Glob(filepath.Join("testdata", "golden", "*", "src"))
+	if err != nil || len(dirs) == 0 {
+		t.Fatalf("no goldens: %v", err)
+	}
+	for _, dir := range dirs {
+		lib, err := os.ReadFile(filepath.Join(dir, "lib.rs"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n := strings.Count(string(lib), "RateLimits::new()"); n != 1 {
+			t.Errorf("%s/lib.rs makes %d registries, not 1", dir, n)
+		}
+		if !strings.Contains(string(lib), "RouterOptions { rate_limits: rate_limits.clone(), ..RouterOptions::default() }") {
+			t.Errorf("%s/lib.rs does not mount the JSON API with the registry", dir)
+		}
+		for _, file := range []string{"procedures.rs", "pages.rs"} {
+			data, err := os.ReadFile(filepath.Join(dir, file))
+			if os.IsNotExist(err) {
+				continue
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(data), "RateLimiter::per_minute") {
+				t.Errorf("%s/%s makes a limiter of its own", dir, file)
+			}
 		}
 	}
 }
@@ -572,7 +687,13 @@ func TestWhatHasNoProcedure(t *testing.T) {
 // @requireService operation have no procedure path, the @allowService one
 // has, a procedure answers its route's rate limit, body limit and timeout
 // as a ProblemRecord, and the procedure's rate limit and the mounted JSON
-// API's each count each client by the address Topcoat records for it.
+// API's each count each client by the address Topcoat records for it. A
+// page calls the @requireService operations as a service (D37, amended):
+// their guards refuse an end user 401 service_unauthorized; a caller the
+// reservation's from lists reserves for the signed-in reader, whom the
+// implementation sees beside it, one it does not list is refused 403, and
+// a signed-out page 401; a service stands in for the reader of the
+// @allowService release; and the reservation's form submits as a service.
 func TestProceduresKeepTheirRoutesRules(t *testing.T) {
 	cargoTestCrate(t, controlsService, controlsAppTest, `axum = "0.8.9"`)
 }
@@ -2260,10 +2381,14 @@ use schemas_fixture_controls_api_topcoat::api::runtime::{
 };
 use schemas_fixture_controls_api_topcoat::api::{
     types, HookImplementation, HookReceivePaymentArgs, Implementations, OrderGetOrderArgs, OrderHoldOrderArgs,
-    OrderImplementation, OrderListOrdersArgs, StockImplementation, StockReleaseReservationArgs, WebhookVerifier,
+    OrderImplementation, OrderListOrdersArgs, StockImplementation, StockReleaseReservationArgs, StockReserveStockArgs,
+    WebhookVerifier,
 };
+use schemas_fixture_controls_api_topcoat::forms::StockReserveStockArgsForm;
 use schemas_fixture_controls_api_topcoat::{operations, PageAuthenticator, RouterBuilderFixtureControlsApiExt};
 use topcoat::context::Cx;
+use topcoat::router::content::Form;
+use topcoat::router::request::headers;
 use topcoat::router::{header, page, to_bytes, Body, RemoteAddr, Router, RouterBuilderDiscoverExt, StatusCode};
 use topcoat::view::{view, View};
 
@@ -2298,11 +2423,16 @@ impl WebhookVerifier for Unsigned {
     }
 }
 
+// Ada, who may write stock, signs in to every page but one whose request
+// says it is signed out.
 struct Caller;
 
 #[async_trait]
 impl PageAuthenticator for Caller {
-    async fn principal(&self, _cx: &Cx) -> Result<Option<Principal>, ApiError> {
+    async fn principal(&self, cx: &Cx) -> Result<Option<Principal>, ApiError> {
+        if headers(cx).contains_key("x-signed-out") {
+            return Ok(None);
+        }
         Ok(Some(Principal::new("ada", ["stock"])))
     }
 }
@@ -2319,13 +2449,25 @@ impl HookImplementation for Shop {
     }
 }
 
+// Who a call came from, as the implementation reads it: the end user and
+// the service, each "-" when the context names none.
+fn who(ctx: &RequestContext) -> String {
+    let user = ctx.principal.as_ref().map_or("-", |principal| principal.subject.as_str());
+    let service = ctx.service_caller.as_ref().map_or("-", |caller| caller.deployable.as_str());
+    format!("for {user} by {service}")
+}
+
 #[async_trait]
 impl StockImplementation for Shop {
-    async fn reindex_stock(&self, _ctx: RequestContext) -> Result<types::StockRun, ApiError> {
+    async fn reindex_stock(&self, ctx: RequestContext) -> Result<types::StockRun, ApiError> {
+        assert!(ctx.service_caller.is_some(), "an end user reindexed the stock");
         Ok(types::StockRun { done: true })
     }
-    async fn release_reservation(&self, _ctx: RequestContext, args: StockReleaseReservationArgs) -> Result<types::Reservation, ApiError> {
-        Ok(types::Reservation { id: args.id, held: false })
+    async fn reserve_stock(&self, ctx: RequestContext, args: StockReserveStockArgs) -> Result<types::Reservation, ApiError> {
+        Ok(types::Reservation { id: format!("{} x{} {}", args.id, args.quantity, who(&ctx)), held: true })
+    }
+    async fn release_reservation(&self, ctx: RequestContext, args: StockReleaseReservationArgs) -> Result<types::Reservation, ApiError> {
+        Ok(types::Reservation { id: format!("{} {}", args.id, who(&ctx)), held: false })
     }
     async fn list_warehouses(&self, _ctx: RequestContext) -> Result<Vec<types::Warehouse>, ApiError> {
         Ok(vec![types::Warehouse { id: "n".to_string(), name: "North".to_string() }])
@@ -2396,14 +2538,96 @@ async fn post_as(
     (status, headers, body)
 }
 
-// The webhook keeps its guard, and the @requireService operation its
-// in-process call, which applies the end-user step alone (D37, amended).
+// The service the app acts for, which fixture-api's server is, and one the
+// reservation's from does not list.
+fn listed() -> ServiceCaller {
+    ServiceCaller::in_process("app", ["fixture-api"])
+}
+
+fn unlisted() -> ServiceCaller {
+    ServiceCaller::in_process("app", ["fixture-views-api"])
+}
+
+// What a call answered: what its implementation saw, or the refusal's
+// status and code.
+fn answered<T>(result: Result<T, ApiError>, seen: impl FnOnce(T) -> String) -> String {
+    match result {
+        Ok(value) => seen(value),
+        Err(err) => format!("{} {}", err.status.as_u16(), err.code),
+    }
+}
+
+fn reservation() -> StockReserveStockArgs {
+    StockReserveStockArgs { id: "sku-1".to_owned(), quantity: 2.0 }
+}
+
+// The webhook keeps its guard, and the @requireService operation, which has
+// no end-user call, is called as a service (D37, amended).
 #[page("/guards")]
 async fn guards(cx: &Cx) -> topcoat::Result<impl View> {
     let hook = operations::can_hook_receive_payment(cx).await.is_ok();
-    let run = operations::stock_reindex_stock(cx).await?;
+    let run = operations::as_service(&listed()).stock_reindex_stock(cx).await?;
     let said = format!("webhook guard {hook}, reindexed {}", run.done);
     Ok(view! { <p>(said)</p> })
+}
+
+// The guards of the @requireService operations, which refuse an end user
+// whether or not the route also asks for one.
+#[page("/stock/end-user")]
+async fn end_user_page(cx: &Cx) -> topcoat::Result<impl View> {
+    let reindex = answered(operations::can_stock_reindex_stock(cx).await, |_| "admitted".to_owned());
+    let reserve = answered(operations::can_stock_reserve_stock(cx).await, |_| "admitted".to_owned());
+    let said = format!("reindex {reindex}, reserve {reserve}");
+    Ok(view! { <p>(said)</p> })
+}
+
+// A reservation as the listed service, then as the unlisted one.
+#[page("/stock/reserve")]
+async fn reserve_page(cx: &Cx) -> topcoat::Result<impl View> {
+    let listed = answered(operations::as_service(&listed()).stock_reserve_stock(cx, reservation()).await, |r| r.id);
+    let unlisted = answered(operations::as_service(&unlisted()).stock_reserve_stock(cx, reservation()).await, |r| r.id);
+    let said = format!("listed {listed}, unlisted {unlisted}");
+    Ok(view! { <p>(said)</p> })
+}
+
+// A release as a service, which the route's empty from lists whatever it
+// serves, then as the end user.
+#[page("/stock/release")]
+async fn release_page(cx: &Cx) -> topcoat::Result<impl View> {
+    let args = || StockReleaseReservationArgs { id: "r-1".to_owned() };
+    let listed = answered(operations::as_service(&listed()).stock_release_reservation(cx, args()).await, |r| r.id);
+    let other = answered(operations::as_service(&unlisted()).stock_release_reservation(cx, args()).await, |r| r.id);
+    let user = answered(operations::stock_release_reservation(cx, args()).await, |r| r.id);
+    let said = format!("service {listed}, another {other}, end user {user}");
+    Ok(view! { <p>(said)</p> })
+}
+
+// The reservation's argument form, which submits as the listed service.
+#[page(POST "/stock/reserve")]
+async fn reserve_form_page(cx: &Cx, Form(form): Form<StockReserveStockArgsForm>) -> topcoat::Result<impl View> {
+    let said = match form.submit_as(cx, &listed()).await {
+        Ok(reservation) => reservation.id,
+        Err(refused) => format!("refused {}", refused.status.as_u16()),
+    };
+    Ok(view! { <p>(said)</p> })
+}
+
+// A page's status and body, signed in as ada unless signed_out, with form
+// as its urlencoded body.
+async fn page_answer(router: &Router, method: &str, uri: &str, form: &str, signed_out: bool) -> (StatusCode, String) {
+    let mut request = http::Request::builder()
+        .method(method)
+        .uri(uri)
+        .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded");
+    if signed_out {
+        request = request.header("x-signed-out", "1");
+    }
+    let response = router.handle(request.body(Body::from(form.to_owned())).unwrap()).await;
+    let (status, headers) = (response.status(), response.headers().clone());
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let html = String::from_utf8(bytes.to_vec()).unwrap();
+    enter::check_page(uri, &headers, &html);
+    (status, html)
 }
 
 const PLACE_ORDER: &str = "/_superschematic/fixture-controls-api/order/place-order";
@@ -2423,8 +2647,10 @@ async fn a_webhook_has_no_procedure_and_its_route_checks_the_signature() {
     assert_eq!(body, "unsigned");
     let request = http::Request::builder().uri("/guards").body(Body::empty()).unwrap();
     let response = router.handle(request).await;
+    let headers = response.headers().clone();
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let body = String::from_utf8(bytes.to_vec()).unwrap();
+    enter::check_page("/guards", &headers, &body);
     assert!(body.contains("webhook guard true, reindexed true"), "{body}");
 }
 
@@ -2437,6 +2663,58 @@ async fn an_operation_only_services_call_has_no_procedure() {
     // refuses a body that is not its JSON rather than answering 404.
     let (status, _, _) = post(&router, "/_superschematic/fixture-controls-api/stock/release-reservation", "{".to_string(), None).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn an_end_user_is_refused_an_operation_only_services_call() {
+    let router = app(false);
+    let (status, body) = page_answer(&router, "GET", "/stock/end-user", "", false).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body.contains("reindex 401 service_unauthorized, reserve 401 service_unauthorized"), "{body}");
+    let (_, body) = page_answer(&router, "GET", "/stock/end-user", "", true).await;
+    assert!(body.contains("reindex 401 service_unauthorized, reserve 401 service_unauthorized"), "{body}");
+}
+
+#[tokio::test]
+async fn a_listed_caller_reserves_for_the_signed_in_reader() {
+    let (status, body) = page_answer(&app(false), "GET", "/stock/reserve", "", false).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body.contains("listed sku-1 x2 for ada by app,"), "{body}");
+}
+
+#[tokio::test]
+async fn a_caller_from_does_not_list_is_forbidden() {
+    let (_, body) = page_answer(&app(false), "GET", "/stock/reserve", "", false).await;
+    assert!(body.contains("unlisted 403 service_forbidden"), "{body}");
+}
+
+#[tokio::test]
+async fn a_reservation_needs_an_end_user_to_forward() {
+    let (_, body) = page_answer(&app(false), "GET", "/stock/reserve", "", true).await;
+    assert!(body.contains("listed 401 unauthorized, unlisted 403 service_forbidden"), "{body}");
+}
+
+#[tokio::test]
+async fn an_allow_service_caller_stands_in_for_the_reader() {
+    // Signed out or in, a service the route lists (its from is empty, so
+    // any) is admitted alone, the implementation seeing no end user, while
+    // the end user's call meets the end-user step.
+    let (_, body) = page_answer(&app(false), "GET", "/stock/release", "", true).await;
+    assert!(body.contains("service r-1 for - by app, another r-1 for - by app, end user 401 unauthorized"), "{body}");
+    let (_, body) = page_answer(&app(false), "GET", "/stock/release", "", false).await;
+    assert!(body.contains("service r-1 for - by app, another r-1 for - by app, end user r-1 for ada by -"), "{body}");
+}
+
+#[tokio::test]
+async fn a_service_only_form_submits_as_a_service() {
+    let router = app(false);
+    let (status, body) = page_answer(&router, "POST", "/stock/reserve", "id=sku-1&quantity=3", false).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body.contains("sku-1 x3 for ada by app"), "{body}");
+    let (_, body) = page_answer(&router, "POST", "/stock/reserve", "id=sku-1&quantity=lots", false).await;
+    assert!(body.contains("refused 422"), "{body}");
+    let (_, body) = page_answer(&router, "POST", "/stock/reserve", "id=sku-1&quantity=3", true).await;
+    assert!(body.contains("refused 401"), "{body}");
 }
 
 #[tokio::test]

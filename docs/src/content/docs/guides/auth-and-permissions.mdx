@@ -282,6 +282,21 @@ end user's agent could call it. The OpenAPI document adds a `serviceAuth`
 scheme on the `Service-Authorization` header and writes each rule into the
 operation's security list.
 
+A call within one process meets the same rule. Go and TypeScript have no
+in-process call surface, so only their routers apply a clause. In Rust,
+each operation's `OperationInfo` carries its clause, and `admit`, which
+names no service caller, refuses a `@requireService` operation 401
+`service_unauthorized`, as the route refuses a request without a service
+credential. The process names the service it acts for with
+`ServiceCaller::in_process(deployable, serves)`, and `admit_service` holds
+that caller to `from` as the router does
+([Calling an operation in-process](/superschematic/install/rust/#calling-an-operation-in-process)).
+A Topcoat page has no end-user call of a `@requireService` operation, and
+calls one through `operations::as_service(&caller)`
+([Topcoat](/superschematic/guides/topcoat/)). Such a caller presents no
+credential. The process trusts its own code, so the rule makes the call
+deliberate; it does not prove who makes it.
+
 ### Say who the calling service is
 
 A server whose schema has a service clause has a service authenticator

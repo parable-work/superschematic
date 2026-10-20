@@ -8,7 +8,9 @@ beside the API crate, at `<out>/topcoat/<service>`, and is named
 
 - mounts the service's JSON API in the app's router, at `/api/{*rest}`,
   giving its routes the client's address as Topcoat reads it, by which
-  their rate limits count clients;
+  their rate limits count clients, and their limiters from the app's one
+  registry, which the procedures and the pages share, so a client has one
+  budget per operation however it calls it ([Route controls](#route-controls));
 - calls each operation in-process, from a page, a shard or a procedure, by
   its route's rules: the caller admitted as the route admits it (401, 403),
   the arguments checked as the router checks them (the same 400), then the
@@ -16,7 +18,10 @@ beside the API crate, at `<out>/topcoat/<service>`, and is named
   route does something first that a call cannot has no call: a webhook
   (`@webhook`, `@hmacVerified`), which a third party calls and whose route
   checks its signature, and an operation the service mounts itself
-  (`@manualRouteRegistration`);
+  (`@manualRouteRegistration`). An operation only a service may call
+  (`@requireService`) has no end user's call: `operations::as_service`
+  calls it, and every operation with a service clause, as a service the
+  app names ([Calling as a service](#calling-as-a-service));
 - offers a guard per operation, `can_<operation>`, which admits the caller
   alone, and whose doc says why an operation has no call;
 - mirrors each type an operation a page calls returns, and the types it
@@ -165,6 +170,13 @@ match assets {
 
 `shop_orders` takes the API's `Implementations`, the same value the JSON
 API serves, and a `PageAuthenticator` when an operation needs a caller.
+It makes one registry of the operations' rate limiters, which the JSON
+API's routes, the procedures and the pages take theirs from, and keeps it
+in the app context as `Setup.rate_limits`: an app that mounts the API's
+router again (`RouterOptions { rate_limits: setup.rate_limits.clone(), ..
+}`), or a page of another crate that calls an operation
+(`setup.rate_limits.of(&api::operations::ORDER_PLACE_ORDER)`), shares the
+operation's budget by taking from it too.
 `console_settings()` is the [pages](#pages)' `pages::Settings`, since
 acme's `superschematic.toml` turns shop-orders' console on, with its lists
 live (`pages_live`). Its root layout, `#[layout("/")] document`, gives
@@ -622,9 +634,8 @@ so it exists only where a browser's request can meet the route's rules:
   not, and an operation the service mounts itself.
 - An operation whose route admits only a service caller
   (`@requireService`, [D37](../../docs/DECISIONS.md)) has none, since a
-  browser holds no service credential. Its in-process call stays and
-  applies the end-user step alone; whether it should refuse is still
-  open.
+  browser holds no service credential. Nor has it an end user's call:
+  only a service's ([Calling as a service](#calling-as-a-service)).
   An `@allowService` operation keeps its procedure, since its route
   admits an end user too.
 
@@ -632,6 +643,60 @@ The doc of the operation's call, or of its guard, says why, and so does
 the build log. The result of an operation without a call gets no record,
 and its input no form. A type that only a left-out procedure's arguments
 name gets no record either.
+
+### Calling as a service
+
+An operation with a service clause, `@requireService` or `@allowService`
+([D37](../../docs/DECISIONS.md)), is called as a service through
+`operations::as_service(&caller)`. The caller is the runtime's
+`ServiceCaller`, the record the route hands an implementation for a
+verified credential, which the app names itself:
+`ServiceCaller::in_process(deployable, serves)`, `serves` the APIs it acts
+for. Nothing in one process presents or verifies a credential, and the
+process's own code is trusted, so the rule makes the call deliberate; it
+does not stop an attack.
+
+- **`as_service(&caller).<ns>_<op>(cx, args)`** runs the route's service
+  step: 403 `service_forbidden` when the route's `from` lists none of the
+  APIs the caller serves. Where the route still asks for an end user, it
+  takes the page's caller, from the `PageAuthenticator`, as the end user
+  the service forwards (401, 403). A listed caller of an `@allowService`
+  operation stands in for the end user. Then `Args::check` and the
+  implementation run, the caller in `ctx.service_caller` as the route
+  hands it.
+- **`as_service(&caller).can_<ns>_<op>(cx)`** admits the caller alone.
+- A `@requireService` operation has **no end user's call**, so a page
+  cannot call it for a reader, by accident or not, and the compiler says
+  so. Its guard, `can_<ns>_<op>(cx)`, answers 401 `service_unauthorized`,
+  as the route refuses a request without a service credential. Its
+  argument form has **`submit_as(cx, &caller)`** in place of `submit(cx)`.
+  An `@allowService` operation keeps its end user's call, its procedure
+  and its pages, which call it as the end user, never as a service.
+
+An app that hosts a stock API's crate, whose `reserveStock` admits only
+`@requireService({ from: [shop-orders] })`, reserves as the orders service
+it acts for, forwarding the signed-in reader:
+
+```rust
+#[page(POST "/stock/{id}/reserve")]
+async fn reserve(cx: &Cx, Form(form): Form<StockReserveStockArgsForm>) -> topcoat::Result<impl View> {
+    let orders = ServiceCaller::in_process("shop-app", ["shop-orders"]);
+    let form = StockReserveStockArgsForm { id: Some(path_param::<Id>(cx)?.to_string()), ..form };
+    let refused = match form.submit_as(cx, &orders).await {
+        Ok(_) => return Err(see_other("/stock").into()),
+        Err(refused) => refused,
+    };
+    Ok(view! {
+        (refused.status)
+        <p>"Not reserved"</p>
+    })
+}
+```
+
+Call one only where the page acts as that service: the call carries the
+service's authority, not the reader's. The console and the procedures
+never call as a service, and a call as a service applies no traffic
+controls, as no in-process call does.
 
 ### Route controls
 
@@ -642,12 +707,17 @@ refusal as the route does, as a `ProblemRecord`: 429 `too_many_requests`
 `<service>(...)` puts a `ProcedureControls` layer on the path of each
 such procedure:
 
-- **Rate limit.** The procedure has its own limiter at the route's rate,
-  which counts each client by its IP address as Topcoat reads it
-  (`client_ip`: the peer's, or the one a trusted proxy names). The JSON
-  API's route keeps its own, so a client gets the rate on each, as it
-  would on two replicas; `<service>(...)` gives the JSON API's routes the
-  same address, so both count the same clients.
+- **Rate limit.** The procedure takes the operation's limiter from the
+  app's registry, `Setup.rate_limits`, the one the JSON API's route and
+  the [pages](#route-controls-of-the-pages) take too
+  ([D44](../../docs/DECISIONS.md)). It counts each client by its IP
+  address as Topcoat reads it (`client_ip`: the peer's, or the one a
+  trusted proxy names), and `<service>(...)` gives the JSON API's routes
+  the same address, so a client has one budget per operation through all
+  three, and the clients without an address share one. Another process
+  that serves the API, such as a stack's server beside the app, keeps a
+  registry of its own: a limiter lives in process memory, so replicas
+  share no budget.
 - **Body limit.** The procedure's request body is read up to the limit
   before its arguments are decoded, and Topcoat's own limit is raised to
   it for that procedure.
@@ -1170,11 +1240,14 @@ it is registered at:
   the step's item, and the item's own page, edit, delete and actions. A
   shard renders no trail.
 
-The rate limit is the operation's own limiter for the pages, at its
-route's rate, which every page and shard that calls the operation shares,
-and counts each client by its IP address as Topcoat reads it
-(`client_ip`), as a procedure's does; the JSON API's route and the
-procedure keep theirs, as replicas would. A page that meets several
+The rate limit is the operation's limiter in the app's registry,
+`Setup.rate_limits`, which every page and shard that calls the operation
+takes from, and so do its JSON API route and its procedure: a client has
+one budget per operation through all of them, counted by its IP address
+as Topcoat reads it (`client_ip`). A reference's options operation is
+counted with its route too, so a client who reloads a page holding a
+reference spends that listing's API budget, and a busy console can leave
+the client none for the JSON API's listing. A page that meets several
 operations' controls is counted by each limiter, its own operation's
 first, and the tightest timeout covers it; the body limit is its own
 operation's, since no other call carries the body. The body is read up
