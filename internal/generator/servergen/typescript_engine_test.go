@@ -407,6 +407,116 @@ func TestTypeScriptEngineEntrypointServes(t *testing.T) {
 	stream.Close()
 }
 
+// TestTypeScriptEngineProjectAddonServes: when desk-db's Account composes
+// acme.Rating, an extension's behavior in Rust (acme-schematic's
+// crates/behaviors, at its place in the project), desk-db's build writes
+// its engine crate, whose napi member the checkout's script builds into
+// the project's engine addon, and desk-ts-api's server opens the engine on
+// it, which SUPERSCHEMATIC_ENGINE_ADDON names, in the core's addon's place
+// (D58). Offline the server names the engine in /readyz and answers its
+// routes 503, so the addon loads and mounts. With the Postgres
+// engineDatabaseEnv names, it deploys desk-db's document, which only an
+// addon built with acme.Rating accepts, and a member granted Account
+// creates an account, which reads back with acme.Rating's fields, and
+// rates it.
+func TestTypeScriptEngineProjectAddonServes(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping the addon's build in -short mode")
+	}
+	bun, err := exec.LookPath("bun")
+	if err != nil {
+		testpaths.RequireOrSkipTS(t, fmt.Sprintf("bun not available: %v", err))
+	}
+	if _, err := exec.LookPath("cargo"); err != nil {
+		skipEngineServers(t, "cargo not available; skipping the project's engine addon's build")
+	}
+	paths := testpaths.Local(t)
+	requireEngineTypeScript(t, paths.EngineTypeScript)
+	installTypeScriptRuntime(t, bun, paths)
+	repo := testpaths.RepoRoot(t)
+	reg, err := publicregistry.Assemble(publicregistry.DefaultNaming(), &stacktest.Extension{}, ratingWithACrate{repo: repo})
+	if err != nil {
+		t.Fatal(err)
+	}
+	repoRoot, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// acme's crate at crates/behaviors in this project, on the checkout's
+	// engine crates by their absolute paths.
+	crate := filepath.Join(repoRoot, "crates", "behaviors")
+	copyTree(t, filepath.Join(repo, "examples", "acme-schematic", "crates", "behaviors"), crate, "target")
+	manifest, err := os.ReadFile(filepath.Join(crate, "Cargo.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(crate, "Cargo.toml"), []byte(strings.ReplaceAll(string(manifest), `"../../../../runtime/`, `"`+filepath.ToSlash(repo)+`/runtime/`)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := loadTypeScriptEngineFixture(t)
+	f.reg = reg
+	composeOnAccount(f, ir.BehaviorRef{Name: "acme.Rating", Config: json.RawMessage(`{"maxStars":5}`)})
+	f.build(t, repoRoot, paths, engineTSOrder...)
+	out := filepath.Join(repoRoot, "schemas", "dist")
+	engineCrate := filepath.Join(out, "engine", "rust", "desk-db")
+	// Its lock file seeded from the engine workspace's, as an image's
+	// engine stage seeds it.
+	lock, err := os.ReadFile(filepath.Join(repo, "runtime", "engine", "rust", "Cargo.lock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(engineCrate, "Cargo.lock"), lock, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	build := exec.Command(filepath.Join(repo, "scripts", "engine-napi.sh"), "--crate", filepath.Join(engineCrate, "napi"), "--out", filepath.Join(t.TempDir(), "addon"))
+	var stderr strings.Builder
+	build.Stderr = &stderr
+	built, err := build.Output()
+	if err != nil {
+		t.Fatalf("scripts/engine-napi.sh --crate %s/napi: %v\n%s", engineCrate, err, stderr.String())
+	}
+	addon := "SUPERSCHEMATIC_ENGINE_ADDON=" + strings.TrimSpace(string(built))
+	install := exec.Command(bun, "install")
+	install.Dir = out
+	if output, err := install.CombinedOutput(); err != nil {
+		testpaths.RequireOrSkipTS(t, fmt.Sprintf("bun install failed at the output root (likely offline): %v\n%s", err, output))
+	}
+	dir := servergen.ServerDir(out, engineTSStack, engineTSServer)
+	identityConfig := ir.IdentityConfigField(engineTSServer) + `={"trustedOrigins": ["https://app.example.com"], "cookie": {"secure": false}, "password": {"argon2": {"memoryKiB": 64, "iterations": 1, "parallelism": 1}}}`
+	public, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := append([]string{identityConfig, addon}, opsCallersVariables(t, engineTSServer, public, "ops-key")...)
+
+	offline := bunServer(t, bun, dir, append([]string{"DESK_DB_DATABASE_URL=postgres://desk@127.0.0.1:9/desk_db?connect_timeout=1&sslmode=disable"}, env...)...)
+	offline.expect(t, http.MethodGet, "/readyz", http.StatusServiceUnavailable, `"desk-db engine"`)
+	offline.expect(t, http.MethodGet, "/engine/desk-db/namespaces/desk-db/schemas", http.StatusServiceUnavailable, `"code":"unavailable"`)
+	offline.stop(t)
+
+	postgres := engineDatabase(t)
+	if postgres == "" {
+		t.Logf("%s is unset: the entrypoint serves no database", engineDatabaseEnv)
+		return
+	}
+	tool := engineDatabaseToolTS(t, bun, dir)
+	databaseURL := tool.create(t, postgres, filepath.Join(generator.SQLDir(out, "desk-db"), "create.sql"))
+	online := bunServer(t, bun, dir, append([]string{"DESK_DB_DATABASE_URL=" + databaseURL}, env...)...)
+	online.waitReady(t)
+	if !strings.Contains(online.out.String(), `"msg":"engine schema deployed"`) {
+		t.Errorf("the server did not log its deploy:\n%s", online.out.String())
+	}
+	online.send(t, http.MethodPost, "/api/auth/register", `{"login": "ada@example.com", "name": "Ada", "password": "ada's password"}`, http.StatusOK, `"token"`)
+	token := online.login(t, "ada@example.com", "ada's password")
+	tool.grant(t, databaseURL, "ada@example.com", "desk", "Account", "Ticket")
+	const accounts = "/engine/desk-db/namespaces/desk-db/schemas/Account/instances"
+	online.engine(t, token, http.MethodPost, accounts, `{"id": "acme", "data": {"name": "Acme"}}`, http.StatusCreated, `"id":"acme"`)
+	online.engine(t, token, http.MethodGet, accounts+"/acme", "", http.StatusOK, `"acme.Rating":{`, `"ratingCount":0`)
+	online.engine(t, token, http.MethodPost, accounts+"/acme/operations/rate", `{"stars": 4}`, http.StatusOK)
+	online.engine(t, token, http.MethodGet, accounts+"/acme", "", http.StatusOK, `"ratingCount":1`, `"ratingAverage":4`)
+	online.stop(t)
+}
+
 // mcp posts a JSON-RPC request to the MCP endpoint at path with the bearer
 // token and checks that the answer holds each of contains.
 func (s *started) mcp(t *testing.T, token, path, body string, contains ...string) {

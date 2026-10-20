@@ -6043,7 +6043,12 @@ and `done` on SQLite and Postgres.
 `TestATypeScriptEntrypointLoadsTheProjectsEngineAddon` composes
 acme.Rating on desk-db: the server, the job and the runner name it among
 the engine's behaviors, and each image builds the project crate's `napi`
-member and names it; `TestATypeScriptEntrypointRefusesAnExtensionsBehaviorNoEngineRuns`
+member and names it; `TestTypeScriptEngineProjectAddonServes` builds the
+crate's addon with `scripts/engine-napi.sh --crate`, and desk-ts-api's
+server, opening the engine on it through `SUPERSCHEMATIC_ENGINE_ADDON`,
+serves offline and on Postgres deploys the document, which only an addon
+built with acme.Rating accepts, and creates and rates an account;
+`TestATypeScriptEntrypointRefusesAnExtensionsBehaviorNoEngineRuns`
 refuses one whose registration names no crate.
 
 The end-to-end proof is built (milestone 20).

@@ -1113,9 +1113,10 @@ jobs:
   engine-servers:
     # Generated servers mount the engine (D58), end to end, in the full tier
     # alone: servergen's engine entrypoint tests build desk-db's Go, Rust and
-    # TypeScript servers, their jobs and runners, and queue-db's server over
-    # the project's engine archive (internal/generator/servergen/testdata/engine),
-    # and run each offline and on the Postgres below; and
+    # TypeScript servers, their jobs and runners, queue-db's server over
+    # the project's engine archive and desk-ts-api's over the project's
+    # engine addon (internal/generator/servergen/testdata/engine), and run
+    # each offline and on the Postgres below; and
     # TestEngineServersAnswerOneScriptAlike builds desk-trio-stack's three
     # servers over one engine database, runs one script against each and
     # requires their transcripts to be identical, each step the HTTP corpus
@@ -1217,7 +1218,7 @@ jobs:
         run: |
           export CGO_LDFLAGS="$(scripts/superscalar-dep.sh --print) $(scripts/versiongraph-archive.sh --print) $(scripts/engine-archive.sh --print)"
           go test -count=1 -timeout 80m -v \
-            -run '^(TestEngineEntrypointServes|TestTheEngineReachesCloudSQLThroughASocket|TestEngineProjectArchiveServes|TestRustEngineEntrypointServes|TestTypeScriptEngineEntrypointServes|TestEngineServersAnswerOneScriptAlike)$' \
+            -run '^(TestEngineEntrypointServes|TestTheEngineReachesCloudSQLThroughASocket|TestEngineProjectArchiveServes|TestRustEngineEntrypointServes|TestTypeScriptEngineEntrypointServes|TestTypeScriptEngineProjectAddonServes|TestEngineServersAnswerOneScriptAlike)$' \
             ./internal/generator/servergen/
 
   versiongraph:
