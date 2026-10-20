@@ -10,13 +10,16 @@
 // does, calls the implementation's createJobs, and runs the job's method
 // once, with a signal that SIGTERM or SIGINT aborts. It logs the run's end
 // and, when the job fails, exits 1, so the platform records the run as
-// failed and runs it again if the job's retries allow.
+// failed and runs it again if the job's retries allow. When the environment
+// names an OTLP endpoint (OTEL_EXPORTER_OTLP_ENDPOINT), it exports a span of
+// the run, flushed before it exits (D67).
 //
 // The API's implementation is the package at the naming file's
 // [implementation_paths] typescript template (section 8.6):
 // @schemas/ts-notes-implementation, at typescript/ts-notes
 
 import { createLogger, type DatabaseConnection } from '@superschematic/http-runtime';
+import { startTelemetry } from '@superschematic/http-runtime/telemetry';
 import { openSqlite, sqliteFile, type SqliteDatabase } from '@superschematic/http-runtime/sqlite';
 import * as tsNotesApi from '@schemas/ts-notes-api';
 import * as tsNotesImpl from '@schemas/ts-notes-implementation';
@@ -26,9 +29,14 @@ const logger = createLogger({ stack: 'ts-lite-stack', job: 'ts-notes-prune-notes
 /**
  * Builds the job from the environment and runs it once, until its method
  * settles; signal aborts when SIGTERM or SIGINT arrives. Each pool it opens
- * goes in pools, which main ends.
+ * goes in pools, which main ends, and so does its telemetry, which main
+ * flushes.
  */
 async function run(signal: AbortSignal, pools: { end(): Promise<void> }[]): Promise<void> {
+  // Trace export, on when the environment names an OTLP endpoint (D67); main
+  // flushes the spans as it ends the pools.
+  const telemetry = startTelemetry({ service: 'ts-notes-prune-notes', stack: 'ts-lite-stack', kind: 'job', logger });
+  pools.push({ end: () => telemetry.shutdown() });
   const tsNotesConfig = configure('ts-notes', () => tsNotesApi.loadEnvConfig());
 
   // One SQLite file per database, the file its URL names: its DB service
@@ -44,7 +52,7 @@ async function run(signal: AbortSignal, pools: { end(): Promise<void> }[]): Prom
   };
   const jobs = await construct('ts-notes', 'jobs', () => tsNotesImpl.createJobs(tsNotesDeps));
   logger.info('job started', { api: 'ts-notes', class: 'PruneNotes' });
-  await jobs.pruneNotes(signal);
+  await telemetry.job('PruneNotes', () => jobs.pruneNotes(signal));
 }
 
 /** The exit status of a process a signal ends at once: 128 and its number. */

@@ -10,13 +10,16 @@
 // does, calls the implementation's createJobs, and runs the job's method
 // once, with a signal that SIGTERM or SIGINT aborts. It logs the run's end
 // and, when the job fails, exits 1, so the platform records the run as
-// failed and runs it again if the job's retries allow.
+// failed and runs it again if the job's retries allow. When the environment
+// names an OTLP endpoint (OTEL_EXPORTER_OTLP_ENDPOINT), it exports a span of
+// the run, flushed before it exits (D67).
 //
 // The API's implementation is the package at the naming file's
 // [implementation_paths] typescript template (section 8.6):
 // @schemas/ts-reports-implementation, at typescript/ts-reports
 
 import { createLogger } from '@superschematic/http-runtime';
+import { startTelemetry } from '@superschematic/http-runtime/telemetry';
 import * as tsReportsApi from '@schemas/ts-reports-api';
 import * as tsReportsImpl from '@schemas/ts-reports-implementation';
 
@@ -25,9 +28,14 @@ const logger = createLogger({ stack: 'ts-cron-stack', job: 'ts-reports-compile-r
 /**
  * Builds the job from the environment and runs it once, until its method
  * settles; signal aborts when SIGTERM or SIGINT arrives. Each pool it opens
- * goes in pools, which main ends.
+ * goes in pools, which main ends, and so does its telemetry, which main
+ * flushes.
  */
 async function run(signal: AbortSignal, pools: { end(): Promise<void> }[]): Promise<void> {
+  // Trace export, on when the environment names an OTLP endpoint (D67); main
+  // flushes the spans as it ends the pools.
+  const telemetry = startTelemetry({ service: 'ts-reports-compile-reports', stack: 'ts-cron-stack', kind: 'job', logger });
+  pools.push({ end: () => telemetry.shutdown() });
   const tsReportsConfig = configure('ts-reports', () => tsReportsApi.loadEnvConfig());
 
   // ts-reports: its jobs, built from its Deps.
@@ -37,7 +45,7 @@ async function run(signal: AbortSignal, pools: { end(): Promise<void> }[]): Prom
   };
   const jobs = await construct('ts-reports', 'jobs', () => tsReportsImpl.createJobs(tsReportsDeps));
   logger.info('job started', { api: 'ts-reports', class: 'CompileReports' });
-  await jobs.compileReports(signal);
+  await telemetry.job('CompileReports', () => jobs.compileReports(signal));
 }
 
 /** The exit status of a process a signal ends at once: 128 and its number. */

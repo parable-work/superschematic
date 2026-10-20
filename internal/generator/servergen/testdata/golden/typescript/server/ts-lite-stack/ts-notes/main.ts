@@ -9,7 +9,9 @@
 // member (section 3.4). It listens on $PORT, 8080 when unset, answers
 // GET /healthz while the process runs and GET /readyz while its databases
 // answer, and on SIGTERM or SIGINT stops taking requests and lets those in
-// flight finish.
+// flight finish. When the environment names an OTLP endpoint
+// (OTEL_EXPORTER_OTLP_ENDPOINT), it exports a span per request and per call
+// to another API (D67).
 //
 // Each API's implementation is the package at the naming file's
 // [implementation_paths] typescript template, which the build scaffolded
@@ -20,6 +22,7 @@
 import { Hono } from 'hono';
 import { createLogger, type DatabaseConnection } from '@superschematic/http-runtime';
 import { errorHandler, notFoundHandler } from '@superschematic/http-runtime/hono';
+import { startTelemetry } from '@superschematic/http-runtime/telemetry';
 import { ping as pingSqlDatabase } from '@superschematic/http-runtime/d1';
 import { openSqlite, sqliteFile, type SqliteDatabase } from '@superschematic/http-runtime/sqlite';
 import * as tsNotesApi from '@schemas/ts-notes-api';
@@ -65,6 +68,8 @@ const exitCodes: Readonly<Record<string, number>> = { SIGINT: 130, SIGTERM: 143 
 
 /** Builds the server from the environment and serves until SIGTERM or SIGINT. */
 async function main(): Promise<void> {
+  // Trace export, on when the environment names an OTLP endpoint (D67).
+  const telemetry = startTelemetry({ service: 'ts-notes', stack: 'ts-lite-stack', kind: 'server', logger });
   const port = listenPort();
   const tsNotesConfig = configure('ts-notes', () => tsNotesApi.loadEnvConfig());
 
@@ -76,6 +81,8 @@ async function main(): Promise<void> {
   ];
 
   const app = new Hono();
+  // With trace export on, each request but the probes is a server span.
+  app.use(telemetry.middleware());
   let draining = false;
   app.get('/healthz', c => c.json({ status: 'ok' }));
   app.get('/readyz', async c => {
@@ -127,16 +134,19 @@ async function main(): Promise<void> {
     stopping = true;
     draining = true;
     logger.info('shutting down', { signal });
-    drain(server, dependencies).then(
-      () => {
-        logger.info('stopped');
-        process.exit(0);
-      },
-      (error: unknown) => {
-        logger.error('server stopped', { error });
-        process.exit(1);
-      }
-    );
+    // The spans still buffered are flushed once the requests are done.
+    drain(server, dependencies)
+      .finally(() => telemetry.shutdown())
+      .then(
+        () => {
+          logger.info('stopped');
+          process.exit(0);
+        },
+        (error: unknown) => {
+          logger.error('server stopped', { error });
+          process.exit(1);
+        }
+      );
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));
   process.on('SIGINT', () => shutdown('SIGINT'));
