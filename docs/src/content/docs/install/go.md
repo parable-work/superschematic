@@ -390,7 +390,10 @@ required map is `required`, a nil list value is `required` at
 
 A response outside 2xx returns an `*APIError`, or a type that embeds one:
 `*AuthenticationError` for 401, `*AuthorizationError` for 403 and
-`*RateLimitError` for 429. `Message` is the problem's `detail` (or an
+`*RateLimitError` for 429. Each of the three unwraps to its
+`*APIError`, so `errors.As(err, &apiErr)` finds every HTTP answer. A
+`*NetworkError` does not unwrap: `errors.As` finds no `*APIError` behind a
+request that never reached the server. `Message` is the problem's `detail` (or an
 older body's `error` or `message`), `Code` is its `code` and
 `StatusCode` the HTTP status. `Error()` joins them:
 `order 7 has already shipped (code: ORDER_SHIPPED, status: 409)`, or
