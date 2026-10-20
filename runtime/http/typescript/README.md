@@ -431,7 +431,9 @@ runs a script one line per statement. Placeholders are `?` and `?N`.
 `ping(db)` resolves when `SELECT 1` answers within two seconds, as
 `/readyz` asks. A D1 binding is one; `openSqlite(path)`, from `./sqlite`,
 gives one over `bun:sqlite` for `stack dev`, with foreign keys on, a
-boolean bound as 1 or 0, `batch` in one transaction and each run's
+boolean bound as 1 or 0, `bind` throwing D1's `D1_TYPE_ERROR` for
+`undefined` (bind an optional field as `value ?? null`), a BLOB read back
+as an `Array` of its bytes, `batch` in one transaction and each run's
 `changes`, `last_row_id` and duration in its `meta`, as D1 reports them.
 `connectPostgres` refuses a D1 connection. Under `stack dev` the local
 target derives a sqlite-first database's connection as a `sqlite:` URL to

@@ -62,8 +62,48 @@ describe('openSqlite', () => {
     const row = await db.prepare('SELECT name, in_stock FROM product WHERE sku = ?2 AND id = ?1 AND ?1 = 1').bind(1, 'tea').first();
     expect(row).toEqual({ name: 'Tea', in_stock: 1 });
     expect(await db.prepare('SELECT name FROM product WHERE in_stock = ?').bind(false).first<string>('name')).toBe('Cocoa');
-    const image = await db.prepare('SELECT image FROM product WHERE sku = ?').bind('tea').first<Uint8Array>('image');
-    expect(Array.from(image!)).toEqual([1, 2]);
+  });
+
+  test('reads a BLOB back as an Array of its bytes, as D1 does', async () => {
+    const db = await shop();
+    const insert = db.prepare('INSERT INTO product (sku, name, in_stock, image) VALUES (?, ?, 1, ?)');
+    await insert.bind('tea', 'Tea', new Uint8Array([1, 2])).run();
+    await insert.bind('cocoa', 'Cocoa', new Uint8Array([0, 3, 255]).buffer).run();
+    await insert.bind('coffee', 'Coffee', new Uint16Array([0x0201])).run();
+    const select = db.prepare('SELECT image FROM product WHERE sku = ?');
+    const image = await select.bind('tea').first<number[]>('image');
+    expect(Array.isArray(image)).toBe(true);
+    expect(image).toEqual([1, 2]);
+    const row = await select.bind('cocoa').first<{ image: number[] }>();
+    expect(Array.isArray(row!.image)).toBe(true);
+    expect(row!.image).toEqual([0, 3, 255]);
+    const all = await db.prepare('SELECT sku, image FROM product ORDER BY sku').all<{ sku: string; image: number[] }>();
+    expect(all.results.every(r => Array.isArray(r.image))).toBe(true);
+    expect(all.results.map(r => r.image.length)).toEqual([3, 2, 2]);
+    const returned = await db.prepare('UPDATE product SET image = ? WHERE sku = ? RETURNING image').bind(new Uint8Array([9]), 'tea').run<{ image: number[] }>();
+    expect(Array.isArray(returned.results[0]!.image)).toBe(true);
+    expect(returned.results[0]!.image).toEqual([9]);
+    const [raw] = await select.bind('tea').raw<[number[]]>();
+    expect(Array.isArray(raw![0])).toBe(true);
+    expect(raw![0]).toEqual([9]);
+    const [names, first] = await select.bind('cocoa').raw<[number[]]>({ columnNames: true });
+    expect(names).toEqual(['image']);
+    expect(Array.isArray(first![0])).toBe(true);
+    // A row without bytes reads NULL as null.
+    await db.prepare('INSERT INTO product (sku, name, in_stock) VALUES (?, ?, 0)').bind('milk', 'Milk').run();
+    expect(await select.bind('milk').first('image')).toBeNull();
+  });
+
+  test('refuses undefined and other values D1 refuses, at bind, as D1 does', async () => {
+    const db = await shop();
+    const insert = db.prepare('INSERT INTO product (sku, name, in_stock, image) VALUES (?, ?, 1, ?)');
+    expect(() => insert.bind('tea', 'Tea', undefined as never)).toThrow("D1_TYPE_ERROR: Type 'undefined' not supported for value 'undefined'");
+    expect(() => insert.bind('tea', 'Tea', 1n as never)).toThrow("D1_TYPE_ERROR: Type 'bigint' not supported for value '1'");
+    expect(() => insert.bind('tea', 'Tea', { bytes: 1 } as never)).toThrow("D1_TYPE_ERROR: Type 'object' not supported");
+    // Nothing was written, and null binds as NULL.
+    expect(await db.prepare('SELECT count(*) AS n FROM product').first('n')).toBe(0);
+    await insert.bind('tea', 'Tea', null).run();
+    expect(await db.prepare('SELECT image FROM product').first('image')).toBeNull();
   });
 
   test('first, all, run and raw answer as D1 does', async () => {

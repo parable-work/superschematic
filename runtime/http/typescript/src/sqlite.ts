@@ -10,10 +10,12 @@ D1 binding gives it on Workers. This is the package's ./sqlite entry; it
 runs under Bun alone.
 
 It keeps D1's behaviors that an implementation could come to rely on:
-placeholders ? and ?N, booleans bound as 1 and 0, foreign keys enforced,
-batch in one transaction that rolls back when a statement fails, and exec
-running a script one line per statement. Each run reports changes, the
-last row id and its duration, as D1's meta does.
+placeholders ? and ?N, booleans bound as 1 and 0, bind refusing undefined
+and any other value D1 refuses with D1's D1_TYPE_ERROR, a BLOB read back as
+an Array of its bytes rather than bun:sqlite's Uint8Array, foreign keys
+enforced, batch in one transaction that rolls back when a statement fails,
+and exec running a script one line per statement. Each run reports changes,
+the last row id and its duration, as D1's meta does.
 */
 
 /** A SqlDatabase over an open SQLite file, which close closes. */
@@ -30,22 +32,51 @@ export interface OpenSqliteOptions {
   readonly busyTimeoutMs?: number;
 }
 
-/** A value as bun:sqlite binds it: a boolean as 1 or 0, an ArrayBuffer as its bytes. */
-function bindable(value: SqlValue): unknown {
-  if (typeof value === 'boolean') return value ? 1 : 0;
-  if (value instanceof ArrayBuffer) return new Uint8Array(value);
-  return value;
+/**
+ * A value as bun:sqlite binds it, converted as D1's bind converts it: a
+ * boolean as 1 or 0, an ArrayBuffer, a view of one or an Array of bytes as
+ * those bytes. Throws D1's D1_TYPE_ERROR for any other value, undefined
+ * among them, which bun:sqlite would bind as NULL and D1 refuses.
+ */
+function bindable(value: unknown): unknown {
+  switch (typeof value) {
+    case 'number':
+    case 'string':
+      return value;
+    case 'boolean':
+      return value ? 1 : 0;
+    case 'object':
+      if (value === null) return null;
+      if (value instanceof ArrayBuffer) return new Uint8Array(value);
+      if (ArrayBuffer.isView(value)) return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+      if (Array.isArray(value) && value.every(b => typeof b === 'number' && Number.isInteger(b) && b >= 0 && b < 256)) return new Uint8Array(value);
+  }
+  throw new Error(`D1_TYPE_ERROR: Type '${typeof value}' not supported for value '${String(value)}'`);
+}
+
+/** A column's value as D1 answers it: a BLOB, which bun:sqlite reads as a Uint8Array, as an Array of its bytes. */
+function readable(value: unknown): unknown {
+  return value instanceof Uint8Array ? Array.from(value) : value;
+}
+
+/** A row's columns as D1 answers them. */
+function readableRow(row: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [column, value] of Object.entries(row)) out[column] = readable(value);
+  return out;
 }
 
 class SqliteStatement implements SqlPreparedStatement {
   constructor(
     readonly owner: SqliteConnection,
     readonly sql: string,
-    readonly values: readonly SqlValue[] = []
+    /** The values bound, as bun:sqlite binds them. */
+    readonly values: readonly unknown[] = []
   ) {}
 
+  /** Throws, as D1's bind does, for a value D1 refuses. */
   bind(...values: SqlValue[]): SqlPreparedStatement {
-    return new SqliteStatement(this.owner, this.sql, values);
+    return new SqliteStatement(this.owner, this.sql, values.map(bindable));
   }
 
   first<T = Record<string, unknown>>(): Promise<T | null>;
@@ -53,11 +84,11 @@ class SqliteStatement implements SqlPreparedStatement {
   async first<T>(column?: string): Promise<T | null> {
     const row = this.owner.statement(this.sql).get(...this.params()) as Record<string, unknown> | null | undefined;
     if (row === null || row === undefined) return null;
-    if (column === undefined) return { ...row } as T;
+    if (column === undefined) return readableRow(row) as T;
     if (!(column in row)) {
       throw new Error(`the row of ${JSON.stringify(this.sql)} has no column ${column}; it has ${Object.keys(row).join(', ')}`);
     }
-    return row[column] as T;
+    return readable(row[column]) as T;
   }
 
   async all<T = Record<string, unknown>>(): Promise<SqlResult<T>> {
@@ -72,12 +103,12 @@ class SqliteStatement implements SqlPreparedStatement {
   raw<T = unknown[]>(options: { readonly columnNames: true }): Promise<[string[], ...T[]]>;
   async raw<T = unknown[]>(options?: { readonly columnNames?: boolean }): Promise<T[] | [string[], ...T[]]> {
     const statement = this.owner.statement(this.sql);
-    const rows = statement.values(...this.params()) as T[];
+    const rows = statement.values(...this.params()).map(row => row.map(readable)) as T[];
     return options?.columnNames ? [[...statement.columnNames], ...rows] : rows;
   }
 
   params(): unknown[] {
-    return this.values.map(bindable);
+    return [...this.values];
   }
 }
 
@@ -113,7 +144,7 @@ class SqliteConnection implements SqliteDatabase {
     const prepared = this.statement(statement.sql);
     let results: T[] = [];
     if (prepared.columnNames.length > 0) {
-      results = prepared.all(...statement.params()).map(row => ({ ...(row as object) }) as T);
+      results = prepared.all(...statement.params()).map(row => readableRow(row as Record<string, unknown>) as T);
     } else {
       prepared.run(...statement.params());
     }

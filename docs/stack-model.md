@@ -5045,7 +5045,10 @@ database with `./d1`'s `ping`, the shutdown closes it, and the server's
 package depends on `pg` only for a Postgres database. Placeholders are `?` and
 `?N`, which both read. D1 has no interactive transaction, and `batch` is
 atomic. `openSqlite` keeps D1's behaviors that an implementation could
-come to rely on: foreign keys on, a boolean bound as 1 or 0, `batch` in
+come to rely on: foreign keys on, a boolean bound as 1 or 0, `bind`
+throwing D1's `D1_TYPE_ERROR` for `undefined` (which `bun:sqlite` would
+bind as NULL) or any other value D1 refuses, a BLOB read back as an
+`Array` of its bytes rather than `bun:sqlite`'s `Uint8Array`, `batch` in
 one transaction, `exec` running a script one line per statement, and
 each run's `changes`, `last_row_id` and duration in its `meta`. `ping`,
 in the same `./d1` entry, answers `/readyz`, and `connectPostgres`
