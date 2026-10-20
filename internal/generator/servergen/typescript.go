@@ -380,6 +380,12 @@ type TypeScriptClient struct {
 	// first calling API's config, and Field the config field it reads.
 	From  string
 	Field string
+
+	// InProcess is set on a server on Workers for a callee the server
+	// serves itself: fetch.ts hands the client's requests to its own app,
+	// since the call stays in process and its endpoint names no binding
+	// (D64, section 18.2).
+	InProcess bool
 }
 
 // TypeScriptDocker is a TypeScript server's Dockerfile plan. Paths are
@@ -634,7 +640,9 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 					return nil, fmt.Errorf("stack %s: %s %s serves %s, whose config has no field for %s, which it calls", in.Stack, s.Kind, in.Server, o.SchemaName, call.Service)
 				}
 				callee := varStem(call.Service)
+				served := slices.ContainsFunc(in.APIs, func(a TypeScriptAPIInput) bool { return a.Output.SchemaName == call.Service })
 				c = &TypeScriptClient{
+					InProcess:   s.Workers && served,
 					Service:     call.Service,
 					Var:         taken.take(callee + "Client"),
 					Constructor: taken.take("new" + strings.ToUpper(callee[:1]) + callee[1:] + "Client"),
@@ -764,19 +772,32 @@ func (s *TypeScriptServer) SecretBindings() []string {
 	return slices.Compact(out)
 }
 
+// BindsServices reports whether a client of a server on Workers reaches
+// its callee through a service binding: the callee is another server's.
+func (s *TypeScriptServer) BindsServices() bool {
+	return slices.ContainsFunc(s.Clients, func(c *TypeScriptClient) bool { return !c.InProcess })
+}
+
+// CallsInProcess reports whether a client of a server on Workers calls an
+// API the server serves itself, which fetch.ts hands to its own app (D64,
+// section 18.2).
+func (s *TypeScriptServer) CallsInProcess() bool {
+	return slices.ContainsFunc(s.Clients, func(c *TypeScriptClient) bool { return c.InProcess })
+}
+
 // WorkersImports are the names fetch.ts imports from the HTTP runtime's
 // ./workers entry (D64): the per-isolate builder and the client's address
 // always; the readers of the string bindings, and of the secret ones when
 // a config has a Secret<T> field, when it reads a config; and the binding
 // lookup, with the transport through a service binding, when the server
-// calls another API or lists a bucket.
+// calls an API another server serves or lists a bucket.
 func (s *TypeScriptServer) WorkersImports() []string {
 	var out []string
-	if len(s.Clients) > 0 || len(s.Buckets) > 0 {
+	if s.BindsServices() || len(s.Buckets) > 0 {
 		out = append(out, "binding")
 	}
 	out = append(out, "perIsolate", "requestIP")
-	if len(s.Clients) > 0 {
+	if s.BindsServices() {
 		out = append(out, "serviceFetch")
 	}
 	if s.ReadsBindings() {

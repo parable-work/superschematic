@@ -299,3 +299,78 @@ func TestTypeScriptWorkersEntrypointCompilesAndBundles(t *testing.T) {
 		}
 	}
 }
+
+// TestTypeScriptWorkersEntrypointCallsInProcess plans a server on Workers
+// that serves shop-api and shop-pricing, with shop-api calling both
+// shop-pricing and shop-quotes, another server's: the call to shop-pricing
+// stays in process, its client's fetch handing each request to the
+// server's own app, which the build sets once it has mounted every router;
+// the call to shop-quotes goes through the service binding its endpoint
+// names (D64, section 18.2). A server whose every call stays in process
+// imports neither the binding lookup nor the service binding's transport.
+func TestTypeScriptWorkersEntrypointCallsInProcess(t *testing.T) {
+	plan := func(callees ...string) string {
+		t.Helper()
+		var calls []tsrestgen.DepsCall
+		var derived []envgen.DerivedField
+		for _, callee := range callees {
+			calls = append(calls, tsrestgen.DepsCall{Service: callee, Field: strings.TrimPrefix(callee, "shop-"), Package: "@schemas/" + callee + "-sdk", Client: "SDK"})
+			derived = append(derived, envgen.DerivedField{Key: strings.ToUpper(strings.ReplaceAll(callee, "-", "_")) + "_SERVICE", Kind: ir.EdgeHTTP, Service: callee})
+		}
+		api := func(name string, calls []tsrestgen.DepsCall, derived []envgen.DerivedField) servergen.TypeScriptAPIInput {
+			return servergen.TypeScriptAPIInput{
+				Output: &tsrestgen.APIOutput{
+					SchemaName: name, PackageName: "@schemas/" + name + "-api", HasEnvConfig: len(calls) > 0,
+					Deps: tsrestgen.DepsInfo{Calls: calls},
+				},
+				Routes:         &apigen.APIOutput{SchemaName: name},
+				Config:         &envgen.ConfigOutput{SchemaName: name, Derived: derived},
+				Implementation: servergen.TypeScriptImplementation{Package: "@schemas/" + name + "-implementation"},
+			}
+		}
+		in := servergen.TypeScriptInput{
+			Stack: "edge-stack", Server: "edge", Dir: t.TempDir(), Workers: true,
+			APIs: []servergen.TypeScriptAPIInput{api("shop-api", calls, derived), api("shop-pricing", nil, nil)},
+		}
+		s, err := servergen.PlanTypeScript(in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := servergen.WriteTypeScript(s, in.Dir); err != nil {
+			t.Fatal(err)
+		}
+		fetch, err := os.ReadFile(filepath.Join(in.Dir, servergen.TypeScriptFetchFile))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(fetch)
+	}
+
+	fetch := plan("shop-pricing", "shop-quotes")
+	for _, want := range []string{
+		"import { binding, perIsolate, requestIP, serviceFetch, stackEnvOf } from '@superschematic/http-runtime/workers';",
+		"let self: Handle | undefined;",
+		"  app.onError(errorHandler());\n  self = request => app.fetch(request, { requestIP });\n",
+		"const inProcess = (async (input: RequestInfo | URL, init?: RequestInit) => {",
+		"    baseUrl: endpoint.url,\n    fetch: inProcess,\n",
+		"    fetch: serviceFetch(binding(env, bindingName('SHOP_QUOTES_SERVICE', endpoint.binding?.name), 'service')),",
+		"function bindingName(field: string, name: string | undefined): string {",
+	} {
+		if !strings.Contains(fetch, want) {
+			t.Errorf("fetch.ts does not hold %q:\n%s", want, fetch)
+		}
+	}
+	if strings.Contains(fetch, "bindingName('SHOP_PRICING_SERVICE'") {
+		t.Errorf("fetch.ts reaches shop-pricing, which it serves, through a binding:\n%s", fetch)
+	}
+
+	alone := plan("shop-pricing")
+	for _, unwanted := range []string{"serviceFetch", "binding,", "function bindingName"} {
+		if strings.Contains(alone, unwanted) {
+			t.Errorf("fetch.ts whose every call stays in process holds %q:\n%s", unwanted, alone)
+		}
+	}
+	if !strings.Contains(alone, "fetch: inProcess,") {
+		t.Errorf("fetch.ts does not call shop-pricing in process:\n%s", alone)
+	}
+}
