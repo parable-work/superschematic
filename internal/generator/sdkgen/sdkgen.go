@@ -142,6 +142,11 @@ type QueryParam struct {
 
 	Reference *apigen.Reference // the reference it holds (D61), for the tool documents; nil when none
 	Search    bool              // the operation's search argument (D62)
+	// Sort is the paged operation's sort argument (D60, amended), for the
+	// tool documents, which list its values; nil for every other. The
+	// method sends it as the optional string it is, and the route refuses
+	// a value it does not offer.
+	Sort *apigen.SortParam
 }
 
 // ChecksItems reports whether the SDK checks each item of a list parameter
@@ -201,6 +206,7 @@ type SDKOutput struct {
 	HasAuth                bool            // Whether any endpoint requires auth
 	HasFilterableEndpoints bool            // Whether any endpoint is @filterable (gates FilterParam in types.ts)
 	HasPagedEndpoints      bool            // Whether any endpoint is @paginated (gates Page and pageItems, D60)
+	HasSortedEndpoints     bool            // Whether a paged endpoint takes a sort (SortBy, D60 amended), which the README's paged lists then name
 	Timestamp              string          // Generation timestamp
 	Version                string          // Package version
 
@@ -368,6 +374,7 @@ func Generate(apiOutput *apigen.APIOutput, parseableTypes map[string]bool, clock
 		if sdkEndpoint.Page != nil {
 			namespaceMap[ns].HasPagedEndpoints = true
 			output.HasPagedEndpoints = true
+			output.HasSortedEndpoints = output.HasSortedEndpoints || sdkEndpoint.Page.Sort != nil
 		}
 	}
 
@@ -451,6 +458,7 @@ func convertEndpoint(ep apigen.EndpointInfo, parseableTypes map[string]bool) End
 
 			Reference: param.Reference,
 			Search:    param.Search,
+			Sort:      param.Sort,
 		}
 	}
 

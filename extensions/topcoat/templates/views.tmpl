@@ -18,13 +18,60 @@
 //! value leaves its `<dd>` or `<td>` empty. Every value is text the view
 //! escapes. The markup has `ss-` classes and `data-field` attributes, the
 //! field's JSON key, for a stylesheet or a test, and no style of its own.
+{{- if .SortedTables }}
+//!
+//! A table a sorted list's page shows (D44, amended) takes `Sorted`: the
+//! header of each column that is a sort field links the list in its order,
+//! and the column the rows are in order of says so in `aria-sort`.
+{{- end }}
 
 use crate::choices::Choices;
 use crate::records::{ {{- .ViewRecords -}} };
+{{- if and .SortedTables .Pages.Live }}
+use topcoat::runtime::{Event, Signal};
+{{- end }}
 {{- if .ViewsBoxed }}
 use topcoat::view::{View, ViewExt, component, view};
 {{- else }}
 use topcoat::view::{View, component, view};
+{{- end }}
+{{- if .SortedTables }}
+
+/// A table's sortable headers (D44, amended): the column its rows are in
+/// order of, and each sortable column's link and the query it sets. The
+/// default has no order and no link, as a section's table has none.
+#[derive(Clone, Debug, Default)]
+pub struct Sorted {
+    /// The field the rows are in order of, by its JSON name, and whether
+    /// they descend.
+    pub by: Option<(String, bool)>,
+    /// Each sortable column's field, the link that sorts the list by it, its
+    /// own order reversed and any other's ascending, and the link's query.
+    pub links: Vec<(String, String, String)>,
+{{- if .Pages.Live }}
+    /// A live list's query, which a header's link sets in place of loading
+    /// the page (D44, amended); none for a list that loads it.
+    pub live: Option<Signal<String>>,
+{{- end }}
+}
+
+impl Sorted {
+    /// The `aria-sort` of the column of `field`: `ascending` or
+    /// `descending` on the column the rows are in order of, and none on any
+    /// other, which ARIA asks authors not to repeat.
+    pub fn aria(&self, field: &str) -> Option<&'static str> {
+        match &self.by {
+            Some((by, desc)) if by == field => Some(if *desc { "descending" } else { "ascending" }),
+            _ => None,
+        }
+    }
+
+    /// The link of the column of `field` and its query; none for a column
+    /// the list does not sort by.
+    pub fn link(&self, field: &str) -> Option<(String, String)> {
+        self.links.iter().find(|(at, _, _)| at == field).map(|(_, href, query)| (href.clone(), query.clone()))
+    }
+}
 {{- end }}
 {{- if .ViewsLabel }}
 
@@ -61,8 +108,8 @@ fn number_of<'a, T: ToString>(choices: &'a Choices, field: &str, value: T) -> (O
 {{- template "viewsTime" . }}
 {{- range .EnumLabels }}
 
-/// Labels a value of `{{ .Name }}`: its member's name in words. A value the
-/// enum does not declare is its own label.
+/// Labels a value of `{{ .Name }}`: its member's title, else its name in
+/// words. A value the enum does not declare is its own label.
 pub fn {{ .Func }}(value: &str) -> &str {
     match value {
 {{- range .Options }}
@@ -72,7 +119,9 @@ pub fn {{ .Func }}(value: &str) -> &str {
     }
 }
 {{- end }}
+{{- $crate := . }}
 {{- range .Views }}
+{{- $view := . }}
 
 /// `{{ .Record }}` as a description list: each field's label and value.
 /// `choices` labels the values they name.
@@ -104,11 +153,18 @@ pub async fn {{ .Detail }}(record: {{ .Record }}, #[default] choices: Choices) -
 /// page: the i-th, unless it is empty, row i's {{ if .LinksTitle }}title{{ else }}first{{ end }} cell; a row past
 /// its end links nowhere.{{ if .UntitledLet }} A linked cell without text
 /// links the type's noun in its place, with the row's id when it has one.{{ end }}
+{{- if .Sorted }}
+/// `sorted` links the header of each column a sorted list sorts by, and
+/// marks the one its rows are in order of (D44, amended).
+{{- end }}
 #[component]
 pub async fn {{ .Table }}(
     rows: Vec<{{ .Record }}>,
     #[default] choices: Choices,
     #[default] hrefs: Vec<String>,
+{{- if .Sorted }}
+    #[default] sorted: Sorted,
+{{- end }}
 ) -> topcoat::Result<impl View> {
 {{- if not .TableChoices }}
     let _ = choices;
@@ -124,7 +180,27 @@ pub async fn {{ .Table }}(
             <thead>
                 <tr>
 {{- range .Columns }}
+{{- if $view.Sorts .JSONName }}
+                    <th scope="col" data-field={{ rustString .JSONName }} aria-sort=(sorted.aria({{ rustString .JSONName }}))>
+                        match sorted.link({{ rustString .JSONName }}) {
+{{- if $crate.Pages.Live }}
+                            Some((href, query)) => match sorted.live.clone() {
+                                Some(live) => <a href=(href.clone()) data-ss-sort={{ rustString .JSONName }} @click=$(|e: Event| {
+                                    e.prevent_default();
+                                    raw!("history.replaceState(history.state, '', ${href});", ());
+                                    live.set(query.to_owned())
+                                })>{{ rustString .Label }}</a>,
+                                None => <a href=(href) data-ss-sort={{ rustString .JSONName }}>{{ rustString .Label }}</a>,
+                            },
+{{- else }}
+                            Some((href, _)) => <a href=(href) data-ss-sort={{ rustString .JSONName }}>{{ rustString .Label }}</a>,
+{{- end }}
+                            None => {{ rustString .Label }},
+                        }
+                    </th>
+{{- else }}
                     <th scope="col" data-field={{ rustString .JSONName }}>{{ rustString .Label }}</th>
+{{- end }}
 {{- end }}
                 </tr>
             </thead>

@@ -25,8 +25,10 @@ type procedure struct {
 	Args       []procedureArg
 	// Paged marks a @paginated operation (D60): its arguments record takes
 	// the page asked for, `cursor` and `limit`, and its result is its page
-	// record.
+	// record. Sort is the record's field of a sorted one's sort (D60,
+	// amended), named as its argument, empty for an unsorted one.
 	Paged bool
+	Sort  string
 	// Output is the result's record type, "()" without a result, and
 	// ReadOutput the expression that reads it from the result's JSON
 	// (`json`).
@@ -38,15 +40,33 @@ type procedure struct {
 }
 
 // routeControls are an operation's route's @rateLimit requests per minute,
-// @bodyLimit megabytes and @timeout seconds, 0 without the directive.
+// @bodyLimit megabytes and @timeout seconds, 0 without the directive, and
+// Const, the API crate's OperationInfo constant of the operation, whose
+// limiter the app's registry holds (D44, amended). Crate is the Topcoat
+// crate of the API dependency whose operation it is (D61, amended), empty
+// for the service's own: its limiter is in that crate's registry, which
+// its setup keeps in the app context.
 type routeControls struct {
 	RateLimit int
 	BodyLimit int
 	Timeout   int
+	Const     string
+	Crate     string
+}
+
+// key names the operation the controls are of, apart from a dependency's
+// of the same name.
+func (p routeControls) key() string { return p.Crate + "::" + p.Const }
+
+// LimiterFrom is the Rust of the function that takes a dependency's
+// operation's limiter from its crate's setup, at a request (D61, amended),
+// none when the app does not set the crate up.
+func (p routeControls) LimiterFrom() string {
+	return "|cx: &Cx| try_app_context::<" + p.Crate + "::Setup>(cx)?.rate_limits.of(&" + p.Crate + "::api::operations::" + p.Const + ")"
 }
 
 func controlsOf(e registry.RustEndpoint) routeControls {
-	return routeControls{RateLimit: e.RateLimit, BodyLimit: e.BodyLimit, Timeout: e.Timeout}
+	return routeControls{RateLimit: e.RateLimit, BodyLimit: e.BodyLimit, Timeout: e.Timeout, Const: e.ConstName()}
 }
 
 // HasControls reports whether the route has a traffic control, so a layer
@@ -56,12 +76,17 @@ func (p routeControls) HasControls() bool {
 }
 
 // ControlCalls are the builder calls of the route's controls, in the
-// order a request meets them on the route: the rate limit, the body limit,
-// then the timeout.
+// order a request meets them on the route: the rate limit, the
+// operation's limiter in the app's registry (`limits`), which its route
+// and every procedure and page that calls it share; the body limit; then
+// the timeout.
 func (p routeControls) ControlCalls() []string {
 	var calls []string
-	if p.RateLimit > 0 {
-		calls = append(calls, fmt.Sprintf(".rate_limit(%d)", p.RateLimit))
+	switch {
+	case p.RateLimit > 0 && p.Crate != "":
+		calls = append(calls, ".rate_limiter_from("+p.LimiterFrom()+")")
+	case p.RateLimit > 0:
+		calls = append(calls, fmt.Sprintf(".rate_limiter(limits.of(&crate::api::operations::%s))", p.Const))
 	}
 	if p.BodyLimit > 0 {
 		calls = append(calls, fmt.Sprintf(".body_limit_megabytes(%d)", p.BodyLimit))
@@ -123,6 +148,9 @@ func proceduresOf(records *recordBuilder, ops []declared, service string) ([]pro
 			}
 			p.Paged = true
 			p.Output, p.ReadOutput = page.Name, page.Name+"::from_wire(&json)"
+			if sort := endpoint.Page.Sort; sort != nil {
+				p.Sort = recordFieldName(registry.RustIdentifier(sort.Param, "sort"))
+			}
 		case endpoint.OutputRustType != "()":
 			s, err := records.fieldShape(op.TypeRef, false)
 			if err != nil {
@@ -150,10 +178,7 @@ func (b *recordBuilder) procedureArgs(endpoint registry.RustEndpoint, op *ir.Fie
 		if err != nil {
 			return err
 		}
-		recordField := field
-		if reservedFields[strings.TrimPrefix(field, "r#")] {
-			recordField = strings.TrimPrefix(field, "r#") + "_"
-		}
+		recordField := recordFieldName(field)
 		out = append(out, procedureArg{Field: field, RecordField: recordField, Name: name, Type: s.rustType, Optional: optional, Put: s.put})
 		return nil
 	}
@@ -174,6 +199,15 @@ func (b *recordBuilder) procedureArgs(endpoint registry.RustEndpoint, op *ir.Fie
 		}
 	}
 	return out, nil
+}
+
+// recordFieldName is a record's field for the Args field field: the same,
+// unless a record reserves the name, which takes a trailing underscore.
+func recordFieldName(field string) string {
+	if reservedFields[strings.TrimPrefix(field, "r#")] {
+		return strings.TrimPrefix(field, "r#") + "_"
+	}
+	return field
 }
 
 // operation is the service's operation endpoint serves: the one of its

@@ -331,6 +331,12 @@ type FieldDef struct {
 	// extension's check. Empty means none.
 	Icon string `json:"icon,omitempty" yaml:"icon,omitempty"`
 
+	// Display is how a UI renders the field's control, declared with
+	// @display on the field (D48, amended): whether its text takes one line
+	// or several. Nil on operations, on arguments and on fields without
+	// one. See [FieldDisplay].
+	Display *FieldDisplay `json:"display,omitempty" yaml:"display,omitempty"`
+
 	// TypeRef references the field's type (scalar, enum, object, etc.).
 	TypeRef TypeRef `json:"typeRef" yaml:"typeRef"`
 

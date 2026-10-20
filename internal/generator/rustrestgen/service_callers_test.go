@@ -107,7 +107,7 @@ func TestASchemaWithoutAServiceClauseHasNoServiceStep(t *testing.T) {
 		if endpoint.ServiceStep || endpoint.ServiceCallers != nil {
 			t.Errorf("%s.%s has a service step", endpoint.Namespace, endpoint.Name)
 		}
-		for _, call := range endpoint.ControlCalls("authenticator", "service_authenticator") {
+		for _, call := range endpoint.ControlCalls("limits", "authenticator", "service_authenticator") {
 			if strings.Contains(call, "service") {
 				t.Errorf("%s.%s calls %s", endpoint.Namespace, endpoint.Name, call)
 			}
@@ -182,8 +182,10 @@ func withServiceAuthEdits(schema *ir.Schema) {
 // request to the end-user step; a route without a clause reports a caller
 // and refuses a credential that does not verify; the webhook verifier, the
 // rate limit and the body limit run before the service step, which runs
-// before the end-user step; and the caller reaches the implementation in
-// ctx.service_caller.
+// before the end-user step; the caller reaches the implementation in
+// ctx.service_caller; and an in-process call admits by the route's rule,
+// refusing a @requireService operation without a service caller and
+// handing the implementation the one it names (D37, amended).
 func TestServiceAuthAPICrateBuildsAndRoutes(t *testing.T) {
 	schema, err := loader.LoadService(filepath.Join(fixturesDir, serviceAuthAPI))
 	if err != nil {
@@ -203,8 +205,8 @@ const serviceAuthRouterTest = `use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use API_CRATE::{
-    build_router, types, Implementations, LedgerImplementation, StockGetReservationArgs, StockImplementation,
-    StockReleaseReservationArgs, StockReserveStockArgs, SyncImplementation, WebhookVerifier,
+    build_router, operations, types, Implementations, LedgerImplementation, StockGetReservationArgs,
+    StockImplementation, StockReleaseReservationArgs, StockReserveStockArgs, SyncImplementation, WebhookVerifier,
 };
 use RUNTIME_CRATE::{
     bearer_token, error_response, ApiError, Authenticator, Principal, RequestContext, ServiceAuthenticator,
@@ -533,5 +535,62 @@ async fn the_rate_limit_and_the_body_limit_run_before_the_service_step() {
     assert_eq!(sent.status, StatusCode::PAYLOAD_TOO_LARGE);
     assert_eq!(sent.body["code"], "payload_too_large");
     assert!(logged(&log).is_empty(), "neither refusal ran the service step");
+}
+
+fn refused(result: Result<impl std::fmt::Debug, ApiError>, status: StatusCode, code: &str) {
+    let err = result.expect_err("refused");
+    assert_eq!((err.status, err.code.as_str()), (status, code), "{}", err.message);
+}
+
+// An in-process call admits by its route's rule (D37, amended). admit
+// names no service caller, so a @requireService operation refuses it, with
+// a user clause (reserveStock) or without (reindexStock), as its route
+// refuses a request without a service credential. admit_service holds a
+// caller the process names to from, and the implementation reads it in
+// ctx.service_caller.
+#[tokio::test]
+async fn an_in_process_call_needs_its_service_caller() {
+    let log = Log::default();
+    let users = Users { log: log.clone() };
+    let stock = Stock { log: log.clone() };
+    let ana = || Some(Principal::new("ana", ["stock.reserve"]));
+    for operation in [operations::STOCK_RESERVE_STOCK, operations::STOCK_REINDEX_STOCK, operations::SYNC_SYNC_STOCK] {
+        refused(operation.admit(&users, ana()), StatusCode::UNAUTHORIZED, "service_unauthorized");
+        refused(operation.admit_service(None), StatusCode::UNAUTHORIZED, "service_unauthorized");
+    }
+
+    // A listed caller goes on to the end-user step, which reserveStock's
+    // user clause applies to the end user it forwards.
+    let caller = ServiceCaller::in_process("app", [CALLER_API]);
+    let reserve = operations::STOCK_RESERVE_STOCK;
+    assert!(!reserve.admit_service(Some(&caller)).unwrap());
+    refused(reserve.admit_end_user(&users, None), StatusCode::UNAUTHORIZED, "unauthorized");
+    let principal = reserve.admit_end_user(&users, ana()).unwrap();
+    let args = StockReserveStockArgs { sku: "s1".to_string() };
+    args.check().unwrap();
+    let held = stock.reserve_stock(reserve.service_context(caller.clone(), principal), args).await.unwrap();
+    assert_eq!(serde_json::to_value(&held).unwrap()["id"], "app/ana");
+
+    // A caller from does not list is refused.
+    let stranger = ServiceCaller::in_process("billing", ["shop-billing"]);
+    refused(reserve.admit_service(Some(&stranger)), StatusCode::FORBIDDEN, "service_forbidden");
+    // reindexStock lists every caller.
+    assert!(!operations::STOCK_REINDEX_STOCK.admit_service(Some(&stranger)).unwrap());
+
+    // A listed caller of an @allowService operation stands in for the end
+    // user; admit, naming none, sends the call to the end-user step.
+    let release = operations::STOCK_RELEASE_RESERVATION;
+    assert!(release.admit_service(Some(&caller)).unwrap());
+    let args = StockReleaseReservationArgs { id: "r1".to_string() };
+    let released = stock.release_reservation(release.service_context(caller, None), args).await.unwrap();
+    assert_eq!(serde_json::to_value(&released).unwrap()["id"], "app/-");
+    assert!(!release.admit_service(Some(&stranger)).unwrap());
+    refused(release.admit(&users, None), StatusCode::UNAUTHORIZED, "unauthorized");
+    assert!(release.admit(&users, Some(Principal::new("ana", ["stock.write"]))).unwrap().is_some());
+
+    // An operation without a clause admits as before.
+    assert_eq!(operations::STOCK_GET_RESERVATION.service, None);
+    assert!(!operations::STOCK_GET_RESERVATION.admit_service(Some(&stranger)).unwrap());
+    assert!(log.lock().unwrap().iter().all(|entry| entry == "handler"), "no authenticator ran: {:?}", log.lock().unwrap());
 }
 `

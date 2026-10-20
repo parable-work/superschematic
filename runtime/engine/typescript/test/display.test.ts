@@ -39,6 +39,7 @@ describe('the describe document', () => {
       plural: 'Tickets',
       titleField: 'title',
       createLabel: 'New ticket',
+      icon: 'ticket',
       summaryFields: ['Workflow.status', 'assignee'],
       states: {
         done: { label: 'Done', tone: 'success' },

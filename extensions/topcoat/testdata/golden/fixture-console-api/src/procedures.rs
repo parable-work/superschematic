@@ -102,7 +102,8 @@ fn decode<T: DeserializeOwned>(argument: &str, value: Value) -> Result<T, Proble
 
 /// The arguments of order.listOrders, as browser code builds them.
 /// The page asked for is `cursor`, a page's `next`, none for the first,
-/// and `limit`, none for the route's default (D60).
+/// and `limit`, none for the route's default (D60), and `sort`, the
+/// order, none for the route's defaultSort (D60, amended).
 #[record]
 #[derive(Debug, Clone, PartialEq)]
 pub struct OrderListOrdersArgsRecord {
@@ -111,18 +112,22 @@ pub struct OrderListOrdersArgsRecord {
     pub q: Option<String>,
     pub cursor: Option<String>,
     pub limit: Option<i64>,
+    pub sort: Option<String>,
 }
 
 impl OrderListOrdersArgsRecord {
     /// The operation's arguments: each field's JSON, as a request carries
     /// it, decoded into its Rust type, and the page asked for,
-    /// held to the route's limits as the router reads `cursor` and `limit`.
+    /// held to the route's limits as the router reads `cursor` and `limit`
+    /// and the sort.
     pub fn to_args(&self) -> Result<crate::api::OrderListOrdersArgs, ProblemRecord> {
         Ok(crate::api::OrderListOrdersArgs {
             statuses: decode("statuses", self.statuses.as_ref().map_or(Value::Null, |v| wire::put_list(v, wire::put_string)))?,
             product_id: decode("productId", self.product_id.as_ref().map_or(Value::Null, wire::put_string))?,
             q: decode("q", self.q.as_ref().map_or(Value::Null, wire::put_string))?,
-            page: crate::api::OrderListOrdersArgs::PAGE.request(self.cursor.as_deref(), self.limit).map_err(ProblemRecord::from)?,
+            page: crate::api::OrderListOrdersArgs::PAGE
+                .sorted_request(self.cursor.as_deref(), self.limit, self.sort.as_deref())
+                .map_err(ProblemRecord::from)?,
         })
     }
 }
@@ -240,7 +245,8 @@ pub async fn call_order_add_line(cx: &Cx, args: OrderAddLineArgsRecord) -> Resul
 
 /// The arguments of product.listProducts, as browser code builds them.
 /// The page asked for is `cursor`, a page's `next`, none for the first,
-/// and `limit`, none for the route's default (D60).
+/// and `limit`, none for the route's default (D60), and `sort`, the
+/// order, none for the route's defaultSort (D60, amended).
 #[record]
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProductListProductsArgsRecord {
@@ -248,17 +254,21 @@ pub struct ProductListProductsArgsRecord {
     pub ids: Option<Vec<String>>,
     pub cursor: Option<String>,
     pub limit: Option<i64>,
+    pub sort: Option<String>,
 }
 
 impl ProductListProductsArgsRecord {
     /// The operation's arguments: each field's JSON, as a request carries
     /// it, decoded into its Rust type, and the page asked for,
-    /// held to the route's limits as the router reads `cursor` and `limit`.
+    /// held to the route's limits as the router reads `cursor` and `limit`
+    /// and the sort.
     pub fn to_args(&self) -> Result<crate::api::ProductListProductsArgs, ProblemRecord> {
         Ok(crate::api::ProductListProductsArgs {
             q: decode("q", self.q.as_ref().map_or(Value::Null, wire::put_string))?,
             ids: decode("ids", self.ids.as_ref().map_or(Value::Null, |v| wire::put_list(v, wire::put_string)))?,
-            page: crate::api::ProductListProductsArgs::PAGE.request(self.cursor.as_deref(), self.limit).map_err(ProblemRecord::from)?,
+            page: crate::api::ProductListProductsArgs::PAGE
+                .sorted_request(self.cursor.as_deref(), self.limit, self.sort.as_deref())
+                .map_err(ProblemRecord::from)?,
         })
     }
 }
@@ -310,7 +320,8 @@ pub async fn call_product_get_product(cx: &Cx, args: ProductGetProductArgsRecord
 
 /// The arguments of review.listReviews, as browser code builds them.
 /// The page asked for is `cursor`, a page's `next`, none for the first,
-/// and `limit`, none for the route's default (D60).
+/// and `limit`, none for the route's default (D60), and `sort`, the
+/// order, none for the route's defaultSort (D60, amended).
 #[record]
 #[derive(Debug, Clone, PartialEq)]
 pub struct ReviewListReviewsArgsRecord {
@@ -319,18 +330,22 @@ pub struct ReviewListReviewsArgsRecord {
     pub min_rating: Option<f64>,
     pub cursor: Option<String>,
     pub limit: Option<i64>,
+    pub sort: Option<String>,
 }
 
 impl ReviewListReviewsArgsRecord {
     /// The operation's arguments: each field's JSON, as a request carries
     /// it, decoded into its Rust type, and the page asked for,
-    /// held to the route's limits as the router reads `cursor` and `limit`.
+    /// held to the route's limits as the router reads `cursor` and `limit`
+    /// and the sort.
     pub fn to_args(&self) -> Result<crate::api::ReviewListReviewsArgs, ProblemRecord> {
         Ok(crate::api::ReviewListReviewsArgs {
             product_id: decode("productId", wire::put_string(&self.product_id))?,
             q: decode("q", self.q.as_ref().map_or(Value::Null, wire::put_string))?,
             min_rating: decode("minRating", self.min_rating.as_ref().map_or(Value::Null, wire::put_number))?,
-            page: crate::api::ReviewListReviewsArgs::PAGE.request(self.cursor.as_deref(), self.limit).map_err(ProblemRecord::from)?,
+            page: crate::api::ReviewListReviewsArgs::PAGE
+                .sorted_request(self.cursor.as_deref(), self.limit, self.sort.as_deref())
+                .map_err(ProblemRecord::from)?,
         })
     }
 }

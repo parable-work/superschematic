@@ -68,7 +68,8 @@ func TestToolHooksEditKeysAndRecords(t *testing.T) {
 	}
 	want := apigen.ToolKeys{
 		Scalar: "x-vendor-scalar", Reference: apigen.DefaultToolReferenceKey, Search: apigen.DefaultToolSearchKey,
-		Guidance: apigen.DefaultToolGuidanceKey, Parameters: []apigen.ToolKeyValue{{Key: "x-vendor-version", Value: 1}},
+		Sort: apigen.DefaultToolSortKey, Guidance: apigen.DefaultToolGuidanceKey,
+		Parameters: []apigen.ToolKeyValue{{Key: "x-vendor-version", Value: 1}},
 	}
 	if !reflect.DeepEqual(output.ToolKeys, want) {
 		t.Fatalf("ToolKeys = %+v, want %+v", output.ToolKeys, want)
@@ -109,6 +110,10 @@ func TestToolHookErrors(t *testing.T) {
 			tools.Keys.Parameters = []apigen.ToolKeyValue{{Key: apigen.DefaultToolSearchKey, Value: true}}
 			return nil
 		}, want: `tool parameter key "x-superschematic-search" is the search key`},
+		{name: "sort key", edit: func(_ *ir.Schema, tools *apigen.ToolSet) error {
+			tools.Keys.Parameters = []apigen.ToolKeyValue{{Key: apigen.DefaultToolSortKey, Value: true}}
+			return nil
+		}, want: `tool parameter key "x-superschematic-sort" is the sort key`},
 		{name: "a scalar key that is a keyword", edit: func(_ *ir.Schema, tools *apigen.ToolSet) error {
 			tools.Keys.Scalar = "type"
 			return nil
@@ -121,10 +126,18 @@ func TestToolHookErrors(t *testing.T) {
 			tools.Keys.Search = "nullable"
 			return nil
 		}, want: `the search key "nullable" is a JSON Schema keyword a tool argument's property is written with`},
+		{name: "a sort key that is a keyword", edit: func(_ *ir.Schema, tools *apigen.ToolSet) error {
+			tools.Keys.Sort = "enum"
+			return nil
+		}, want: `the sort key "enum" is a JSON Schema keyword a tool argument's property is written with`},
 		{name: "one key for two", edit: func(_ *ir.Schema, tools *apigen.ToolSet) error {
 			tools.Keys.Reference = tools.Keys.Scalar
 			return nil
 		}, want: `the scalar key and the reference key are both "x-superschematic-scalar"`},
+		{name: "the sort key as the search key", edit: func(_ *ir.Schema, tools *apigen.ToolSet) error {
+			tools.Keys.Sort = tools.Keys.Search
+			return nil
+		}, want: `the search key and the sort key are both "x-superschematic-search"`},
 		{name: "duplicate key", edit: func(_ *ir.Schema, tools *apigen.ToolSet) error {
 			tools.Keys.Parameters = []apigen.ToolKeyValue{{Key: "x-v", Value: 1}, {Key: "x-v", Value: 2}}
 			return nil

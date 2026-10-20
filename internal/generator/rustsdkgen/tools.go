@@ -232,7 +232,7 @@ func endpointToTool(
 			ValidateMinLength: arg.ValidateMinLength, ValidateMaxLength: arg.ValidateMaxLength,
 			ValidateListMin: arg.ValidateListMin, ValidateListMax: arg.ValidateListMax,
 			ValidatePattern: arg.ValidatePattern,
-			Reference:       arg.Reference, Search: arg.Search,
+			Reference:       arg.Reference, Search: arg.Search, Sort: arg.Sort,
 		}
 	}
 

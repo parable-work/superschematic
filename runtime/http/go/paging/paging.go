@@ -1,12 +1,16 @@
 // Package paging reads and builds the page of a @paginated operation
-// (D60): the generated router reads the request's cursor and limit with
-// Read, the implementation takes the Request beside its arguments and
+// (D60): the generated router reads the request's cursor, limit and sort
+// with Read, the implementation takes the Request beside its arguments and
 // returns a Page, {items, next}, which the router writes as the
 // envelope's data. A cursor is opaque to the caller: the unpadded
 // base64url of the compact JSON of the implementation's key, the position
-// of the last item of a page in the operation's order. The TypeScript
-// runtime's readPage and the Rust runtime's page module read and build the
-// same, held to runtime/http/testdata/page_parity.json.
+// of the last item of a page in the operation's order. A sorted
+// operation's cursor also names its sort (D60, amended): the router binds
+// the page's next to the request's sort (Bind) and unbinds a sent cursor
+// before the implementation reads it (Parse), so the implementation's
+// keys are the same with a sort as without. The TypeScript runtime's
+// page.ts and the Rust runtime's page module read and build the same, held
+// to runtime/http/testdata/page_parity.json.
 package paging
 
 import (
@@ -20,6 +24,7 @@ import (
 	"net/url"
 	"reflect"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -59,17 +64,86 @@ const (
 	RefusedCursorReason = "not a cursor this operation returned"
 )
 
-// Spec is an operation's @paginated limits, as the router carries them.
+// SortedCursorDetail and SortedCursorReason are the 400 of a cursor
+// returned under another sort (D60, amended).
+const (
+	SortedCursorDetail = "cursor is not one this sort returned"
+	SortedCursorReason = "returned under another sort"
+)
+
+// Spec is an operation's @paginated limits, and its SortBy argument, as
+// the router carries them.
 type Spec struct {
 	DefaultLimit int
 	MaxLimit     int
+	// Sort is the operation's SortBy argument (D60, amended); nil for an
+	// operation without one.
+	Sort *SortSpec
 }
 
 // Request is the page a caller asks for: the cursor of the page before,
-// "" for the first page, and the limit, its default filled in.
+// "" for the first page, the limit, its default filled in, and the sort.
 type Request struct {
+	// Cursor is the implementation's own cursor, its key's, as
+	// EncodeCursor wrote it: a sorted operation's router has unbound it
+	// from the sort it was returned under.
 	Cursor string
 	Limit  int
+	// Sort is the order the page is read in: the one sent, or the spec's
+	// default when the request sends none. Zero for an operation without
+	// a sort.
+	Sort Sort
+}
+
+// Sort is the order a page is read in (D60, amended): a field of the item
+// type, by its JSON name, ascending, or descending when Desc; ties break
+// by the item's id in the same direction. Zero for an operation without a
+// SortBy argument.
+type Sort struct {
+	Field string
+	Desc  bool
+}
+
+// String is the sort as a query writes it: "placedAt", "-placedAt"; "" for
+// the zero Sort.
+func (s Sort) String() string {
+	if s.Desc {
+		return "-" + s.Field
+	}
+	return s.Field
+}
+
+// ParseSort reads a sort as a query writes it, "placedAt" or "-placedAt":
+// ok is false for any other text, a field's name being a letter or _, then
+// letters, digits and _.
+func ParseSort(text string) (sort Sort, ok bool) {
+	if !sortPattern.MatchString(text) {
+		return Sort{}, false
+	}
+	field, desc := strings.CutPrefix(text, "-")
+	return Sort{Field: field, Desc: desc}, true
+}
+
+// sortPattern is a sort's text: a field's name, after a "-" descending.
+var sortPattern = regexp.MustCompile(`^-?[A-Za-z_][A-Za-z0-9_]*$`)
+
+// SortSpec is an operation's SortBy argument as the router carries it: its
+// query parameter, its fields by their JSON names, and @paginated's
+// defaultSort, the order of a request that sends none.
+type SortSpec struct {
+	Param   string
+	Fields  []string
+	Default Sort
+}
+
+// Values are the values the parameter takes: each field, then the field
+// after "-" (placedAt, -placedAt, totalCents, -totalCents).
+func (s SortSpec) Values() []string {
+	values := make([]string, 0, 2*len(s.Fields))
+	for _, field := range s.Fields {
+		values = append(values, field, "-"+field)
+	}
+	return values
 }
 
 // Page is what a paged operation returns: the page's items, which may be
@@ -281,13 +355,18 @@ func refuse(parameter, reason, validator string) *apperror.AppError {
 	return badRequest(fmt.Sprintf("Invalid query parameter %s: %s", parameter, reason), details)
 }
 
-// Parse reads a page request from a query: the first value of cursor and
-// of limit, an empty one as absent. A cursor is 1 to CursorMaxLength
-// characters of the unpadded base64url alphabet, the alphabet checked
-// first, on bytes, so a cursor outside ASCII is refused for its pattern
-// however long it is; a limit a whole number from 1 to the spec's
-// MaxLimit, its DefaultLimit when absent. A refusal is the 400
-// *apperror.AppError at the parameter, the cursor's first.
+// Parse reads a page request from a query, the router's whole read: the
+// first value of cursor, of limit and of the spec's sort parameter, an
+// empty one as absent. A cursor is 1 to CursorMaxLength characters of the
+// unpadded base64url alphabet, the alphabet checked first, on bytes, so a
+// cursor outside ASCII is refused for its pattern however long it is; a
+// limit a whole number from 1 to the spec's MaxLimit, its DefaultLimit
+// when absent; a sort one of the spec's Values, its Default when absent.
+// Last, a sorted operation's cursor is unbound from the sort it was
+// returned under (UnbindCursor), so Request.Cursor is the
+// implementation's own. A refusal is the 400 *apperror.AppError at the
+// parameter, in this order: the cursor's text, the limit, the sort, then
+// the cursor's sort.
 func Parse(query url.Values, spec Spec) (Request, *apperror.AppError) {
 	request := Request{Limit: spec.DefaultLimit}
 	if cursor := query.Get(CursorParam); cursor != "" {
@@ -315,7 +394,118 @@ func Parse(query url.Values, spec Spec) (Request, *apperror.AppError) {
 		}
 		request.Limit = int(limit)
 	}
+	if spec.Sort == nil {
+		return request, nil
+	}
+	request.Sort = spec.Sort.Default
+	if text := query.Get(spec.Sort.Param); text != "" {
+		values := spec.Sort.Values()
+		if !slices.Contains(values, text) {
+			return Request{}, refuse(spec.Sort.Param, "expected one of "+strings.Join(values, ", "), "")
+		}
+		request.Sort, _ = ParseSort(text)
+	}
+	if request.Cursor != "" {
+		cursor, refusal := UnbindCursor(request.Cursor, request.Sort)
+		if refusal != nil {
+			return Request{}, refusal
+		}
+		request.Cursor = cursor
+	}
 	return request, nil
+}
+
+// The bytes a bound cursor's JSON starts with, follows its sort with, and
+// ends with: {"sort":"-placedAt","key":K}.
+const (
+	boundPrefix = `{"sort":"`
+	boundKey    = `","key":`
+	boundSuffix = `}`
+)
+
+// BindCursor is the cursor of the implementation's cursor under sort
+// (D60, amended): the unpadded base64url of exactly the bytes
+// {"sort":"-placedAt","key":K}, K the key's JSON as the implementation's
+// cursor holds it, byte for byte. A cursor DecodeCursor would refuse, a
+// sort that is no sort's text, and a bound cursor past CursorMaxLength
+// characters are errors, the implementation's.
+func BindCursor(cursor string, sort Sort) (string, error) {
+	var value json.RawMessage
+	if err := DecodeCursor(cursor, &value); err != nil {
+		return "", fmt.Errorf("paging: bind a cursor: %q is not a cursor EncodeCursor writes", cursor)
+	}
+	// The key's bytes as the cursor holds them, which DecodeCursor read.
+	key, _ := base64.RawURLEncoding.Strict().DecodeString(cursor)
+	text := sort.String()
+	if !sortPattern.MatchString(text) {
+		return "", fmt.Errorf("paging: bind a cursor: the sort %q is not a field, or - and a field", text)
+	}
+	data := make([]byte, 0, len(boundPrefix)+len(text)+len(boundKey)+len(key)+len(boundSuffix))
+	data = append(append(append(append(append(data, boundPrefix...), text...), boundKey...), key...), boundSuffix...)
+	bound := base64.RawURLEncoding.EncodeToString(data)
+	if len(bound) > CursorMaxLength {
+		return "", fmt.Errorf("paging: bind a cursor: its cursor under %s is %d characters, past the %d a router reads", text, len(bound), CursorMaxLength)
+	}
+	return bound, nil
+}
+
+// UnbindCursor is the implementation's cursor of one bound under sort
+// (D60, amended): the key's JSON of {"sort":"-placedAt","key":K}, read by
+// its bytes, encoded again as EncodeCursor would. A cursor bound under
+// another sort is the 400 SortedCursorDetail at cursor; one that is not of
+// the alphabet, not canonical unpadded base64url, or not those bytes
+// around a key, names no sort and is RefusedCursor. The key itself is the
+// implementation's DecodeCursor's to read.
+func UnbindCursor(cursor string, sort Sort) (string, *apperror.AppError) {
+	if cursor == "" || len(cursor) > CursorMaxLength || !cursorPattern.MatchString(cursor) {
+		return "", RefusedCursor()
+	}
+	data, err := base64.RawURLEncoding.Strict().DecodeString(cursor)
+	if err != nil {
+		return "", RefusedCursor()
+	}
+	rest, ok := bytes.CutPrefix(data, []byte(boundPrefix))
+	if !ok {
+		return "", RefusedCursor()
+	}
+	end := bytes.IndexByte(rest, '"')
+	if end < 0 || !sortPattern.Match(rest[:end]) {
+		return "", RefusedCursor()
+	}
+	text := string(rest[:end])
+	rest, ok = bytes.CutPrefix(rest[end:], []byte(boundKey))
+	if !ok {
+		return "", RefusedCursor()
+	}
+	key, ok := bytes.CutSuffix(rest, []byte(boundSuffix))
+	if !ok || len(key) == 0 {
+		return "", RefusedCursor()
+	}
+	if text != sort.String() {
+		return "", SortedCursor()
+	}
+	return base64.RawURLEncoding.EncodeToString(key), nil
+}
+
+// SortedCursor is the 400 of a cursor returned under another sort.
+func SortedCursor() *apperror.AppError {
+	return badRequest(SortedCursorDetail, Details{Location: "query", Parameter: CursorParam, Reason: SortedCursorReason})
+}
+
+// Bind is the page an implementation returned with its next cursor bound
+// to the request's sort (BindCursor), which the router answers; the page
+// as it is when the request has no sort or the page no next. Its error is
+// BindCursor's, the implementation's.
+func Bind[T any](page Page[T], request Request) (Page[T], error) {
+	if page.Next == nil || request.Sort == (Sort{}) {
+		return page, nil
+	}
+	bound, err := BindCursor(*page.Next, request.Sort)
+	if err != nil {
+		return Page[T]{}, err
+	}
+	page.Next = &bound
+	return page, nil
 }
 
 // Read reads the request's page (Parse) from its raw query, read as

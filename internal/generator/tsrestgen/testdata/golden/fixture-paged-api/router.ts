@@ -9,9 +9,13 @@
 // the request's cursor and limit with readPage after the query parameters,
 // answering their 400 as the Go and Rust routers do, and sends the Page the
 // implementation returns as data.
+// A sorted page's spec carries its sort too (D60, amended): readPage reads
+// it after the limit into args.page.sort and unbinds the cursor from the
+// sort it was returned under, and bindPage binds the next the
+// implementation returns to it.
 
 import { Hono, type Env } from 'hono';
-import { readPage, type OperationSpec, type PageSpec } from '@superschematic/http-runtime';
+import { bindPage, readPage, type OperationSpec, type PageSpec } from '@superschematic/http-runtime';
 import {
   mountOperation,
   type RouterRuntimeOptions,
@@ -56,7 +60,7 @@ export const operationSpecs = {
     pathParams: [],
     queryParams: [{ name: 'ids', kind: 'uuid', required: false, isArray: true, listMax: 5 }, { name: 'inStock', kind: 'boolean', required: false }],
     bodyParams: [],
-    page: { defaultLimit: 2, maxLimit: 5 },
+    page: { defaultLimit: 2, maxLimit: 5, sort: { param: 'sort', fields: ['name', 'sku'], default: 'name' } },
     auth: { public: false, required: false, permissions: [] },
     manual: false,
   },
@@ -117,15 +121,21 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
   mountOperation(
     router,
     operationSpecs.listItems,
-    (ctx, request) =>
-      implementations.catalog.listItems(
-        {
-          ids: request.query['ids'] as IdentityUUID[] | undefined,
-          inStock: request.query['inStock'] as boolean | undefined,
-          page: readPage(ctx.query, operationSpecs.listItems.page),
-        },
-        ctx
-      ),
+    (ctx, request) => {
+      // The page names the sort it was read in (D60, amended): readPage
+      // unbinds the cursor, and bindPage binds the next.
+      const page = readPage(ctx.query, operationSpecs.listItems.page);
+      return implementations.catalog
+        .listItems(
+          {
+            ids: request.query['ids'] as IdentityUUID[] | undefined,
+            inStock: request.query['inStock'] as boolean | undefined,
+            page,
+          },
+          ctx
+        )
+        .then(outcome => bindPage(outcome, page));
+    },
     options,
     {
       bodyLimitBytes: options.bodyLimits?.listItems,

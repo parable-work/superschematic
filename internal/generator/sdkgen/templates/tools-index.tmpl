@@ -96,10 +96,13 @@ export interface JSONSchemaProperty {
   '{{.Keys.Scalar}}'?: string;
 {{- end}}
 {{- if and .Keys.Reference .HasReferences}}
-  '{{.Keys.Reference}}'?: { target: string; options: string; value: string; label?: string; lookup?: string };
+  '{{.Keys.Reference}}'?: { target: string; options: string; value: string; label?: string; lookup?: string; search?: string; service?: string };
 {{- end}}
 {{- if and .Keys.Search .HasSearch}}
   '{{.Keys.Search}}'?: boolean;
+{{- end}}
+{{- if and .Keys.Sort .HasSort}}
+  '{{.Keys.Sort}}'?: boolean;
 {{- end}}
   additionalProperties?: boolean | JSONSchemaProperty;
   type: string | string[];

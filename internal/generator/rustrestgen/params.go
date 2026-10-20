@@ -161,7 +161,9 @@ func (b *builder) params(ep apigen.EndpointInfo, info *EndpointInfo) error {
 		}
 		info.PathArgs = append(info.PathArgs, param)
 	}
-	for _, p := range ep.QueryParams {
+	// The sort argument reaches the implementation in its page (D60,
+	// amended).
+	for _, p := range ep.ArgQueryParams() {
 		param, err := add(p, inQuery)
 		if err != nil {
 			return err
@@ -215,7 +217,7 @@ func (b *builder) page(ep apigen.EndpointInfo, info *EndpointInfo) error {
 	if err != nil {
 		return fmt.Errorf("rustrestgen: operation %s.%s: %w", ep.Namespace, ep.Name, err)
 	}
-	info.Page = &PageInfo{DefaultLimit: ep.Page.DefaultLimit, MaxLimit: ep.Page.MaxLimit, ItemRustType: item}
+	info.Page = &PageInfo{DefaultLimit: ep.Page.DefaultLimit, MaxLimit: ep.Page.MaxLimit, ItemRustType: item, Sort: ep.Page.Sort}
 	info.OutputRustType = "runtime::page::Page<" + item + ">"
 	return nil
 }

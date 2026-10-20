@@ -474,13 +474,17 @@ func closeBehaviors(defs map[string]any, reg *registry.Registry) error {
 
 // replaceDisplayDefs replaces the reflected $defs/TypeDisplay and
 // $defs/DisplayState with the $defs of the registered @display spec's Args
-// (D48): a type's display is the decorator's argument, so the data forms
+// (D48), and $defs/FieldDisplay with the field @display spec's (D48,
+// amended): a type's display is the decorator's argument, so the data forms
 // are held to the schema the TypeScript frontend holds the argument to,
 // which says what the reflection cannot (at least one member, the state
 // names, the transition keys, the closed tones). Each replacement must
 // name the members the IR struct does, so the two cannot drift apart.
 func replaceDisplayDefs(defs map[string]any, reg *registry.Registry) error {
-	return replaceDefsWithArgs(defs, reg, "display", registry.TargetType, "TypeDisplay", "DisplayState")
+	if err := replaceDefsWithArgs(defs, reg, "display", registry.TargetType, "TypeDisplay", "DisplayState"); err != nil {
+		return err
+	}
+	return replaceDefsWithArgs(defs, reg, "display", registry.TargetField, "FieldDisplay")
 }
 
 // replacePageDefs replaces the reflected $defs/OperationPage with the

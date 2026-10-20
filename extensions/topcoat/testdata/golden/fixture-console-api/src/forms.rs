@@ -19,6 +19,15 @@
 //! `remove:rooms[1]`), which `apply_action` applies without JavaScript.
 //! A form reads at most `MAX_PAIRS` pairs and one row past a list's
 //! limit, so what a post costs is bounded by the form, not by the post.
+//!
+//! A control whose reference's options operation searches is a search
+//! picker (D61, amended): a search box named `_find.<control>`, a "Find"
+//! button and a select of what the box's text finds, its pick, which the
+//! form's choices give it (`references`). The form holds every box's text
+//! in `finds`. A post's "Find" is a row button, `_action=find:<control>`,
+//! which `apply_action` records as pressed, so the page renders the form
+//! again with what that text finds; a filter's sends its query. Ahead of
+//! every "Find" a hidden submit button is what Enter presses.
 
 use std::collections::BTreeMap;
 use std::ops::Bound;
@@ -34,6 +43,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer};
 use serde_json::Map;
 use serde_json::Value;
+use crate::references::{product_by_sku_pick, product_pick};
 use topcoat::context::Cx;
 use topcoat::router::content::Form;
 use topcoat::router::request::uri;
@@ -43,6 +53,7 @@ use topcoat::view::{View, component, view};
 /// The values the app names for a field, which a text or number control
 /// they name offers as a `<select>`; `crate::choices`, also here.
 pub use crate::choices::{Choice, Choices};
+use crate::choices::PickControl;
 
 /// Why a form was refused: each control's messages, and the form's own.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -270,6 +281,68 @@ async fn choice_select(
             }
         </select>
     })
+}
+
+/// The texts of a form's search pickers (D61, amended): each picker's box,
+/// `_find.<control>`, by its control's name, as sent, and the picker whose
+/// "Find" a post pressed (`find:<control>`), which `apply_action` records.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Finds {
+    pub texts: BTreeMap<String, String>,
+    pub pressed: Option<String>,
+}
+
+impl Finds {
+    /// The text of the box of the picker named `name`, as sent, or empty.
+    pub fn text(&self, name: &str) -> &str {
+        self.texts.get(name).map_or("", String::as_str)
+    }
+
+    /// Whether a post's "Find" was the one of the picker named `name`, so
+    /// it searches its text.
+    pub fn pressed(&self, name: &str) -> bool {
+        self.pressed.as_deref() == Some(name)
+    }
+
+    /// The texts posted under `_find`, `posted`, each by the name of its
+    /// control, which the tree's steps spell.
+    fn from_posted(posted: &Posted) -> Self {
+        let mut texts = BTreeMap::new();
+        texts_under(posted, String::new(), &mut texts);
+        Self { texts, pressed: None }
+    }
+}
+
+/// The last text posted at each name under `posted`, `at` the name so far.
+fn texts_under(posted: &Posted, at: String, out: &mut BTreeMap<String, String>) {
+    if let Some(text) = posted.values.last()
+        && !at.is_empty()
+    {
+        out.insert(at.clone(), text.clone());
+    }
+    for (key, under) in &posted.keys {
+        let name = if at.is_empty() { key.clone() } else { format!("{at}.{key}") };
+        texts_under(under, name, out);
+    }
+    for (index, under) in &posted.rows {
+        if !at.is_empty() {
+            texts_under(under, format!("{at}[{index}]"), out);
+        }
+    }
+}
+
+/// A picker's control as its form renders it, for its shard: the select's
+/// name and id, whether it requires a value and has an error, the value it
+/// holds, and whether its "Find" posts the form.
+fn pick_control(name: &str, id: &str, required: bool, invalid: Option<&str>, value: Option<&str>, post: bool) -> PickControl {
+    PickControl {
+        name: name.to_owned(),
+        id: id.to_owned(),
+        required,
+        invalid: invalid.is_some(),
+        value: value.unwrap_or_default().to_owned(),
+        post,
+    }
 }
 
 /// A step of a control's name: a field's key, or a row's index.
@@ -569,9 +642,11 @@ pub struct OrderInputForm {
     pub lines: Vec<OrderLineInputForm>,
     pub gift_sku: Option<String>,
     pub note: Option<String>,
-    /// The row button that submitted the form (`_action`), which
+    /// The row button or the picker's "Find" that submitted the form (`_action`), which
     /// `apply_action` applies.
     pub row_action: Option<String>,
+    /// The texts of its search pickers (D61, amended).
+    pub finds: Finds,
     /// The post sent more than `MAX_PAIRS` pairs, past which the form read
     /// none: `parse` refuses it with the form's error.
     pub overflow: bool,
@@ -587,6 +662,7 @@ impl OrderInputForm {
             gift_sku: None,
             note: None,
             row_action: None,
+            finds: Finds::default(),
             overflow: false,
         }
     }
@@ -598,11 +674,12 @@ impl OrderInputForm {
         Self::from_post(&Posted::from_pairs(pairs))
     }
 
-    /// The form as posted: its fields, the row button pressed
+    /// The form as posted: its fields, the button pressed, its pickers' texts
     /// and whether the post sent more than the form reads.
     fn from_post(posted: &Posted) -> Self {
         Self {
             row_action: posted.get("_action").text(),
+            finds: Finds::from_posted(posted.get("_find")),
             overflow: posted.overflow,
             ..Self::from_posted(posted)
         }
@@ -623,17 +700,22 @@ impl OrderInputForm {
         types::validators::parse_order_input(Value::Object(json), UnknownFields::Refuse).map_err(FormErrors::from)
     }
 
-    /// Applies the row button that submitted the form, `row_action`: `add:`
-    /// and a list's name adds a row to it unless it holds its listMax, and
+    /// Applies the button that submitted the form, `row_action`: `add:` and
+    /// a list's name adds a row to it unless it holds its listMax, and
     /// `remove:` and a row's name removes the row unless its list holds no
     /// more than its listMin; the other rows keep their values, numbered
-    /// again. True when a row button submitted the form, whether or not
-    /// the list's bounds let it act: the page renders the form again and
-    /// does not call the operation.
+    /// again. `find:` and a picker's name records its "Find" as pressed (D61,
+    /// amended). True when a row button or a "Find" submitted the form,
+    /// whether or not the list's bounds let it act: the page renders the
+    /// form again and does not call the operation.
     pub fn apply_action(&mut self) -> bool {
         let Some(action) = self.row_action.take() else {
             return false;
         };
+        if let Some(name) = action.strip_prefix("find:") {
+            self.finds.pressed = Some(name.to_owned());
+            return true;
+        }
         let (add, name) = match action.split_once(':') {
             Some(("add", name)) => (true, name),
             Some(("remove", name)) => (false, name),
@@ -652,6 +734,7 @@ impl OrderInputForm {
             gift_sku: posted.get("giftSku").text(),
             note: posted.get("note").text(),
             row_action: None,
+            finds: Finds::default(),
             overflow: false,
         }
     }
@@ -772,7 +855,7 @@ pub async fn order_input_fields(
 ) -> topcoat::Result<impl View> {
     let form_errors = errors.unshown(OrderInputForm::shows);
     Ok(view! {
-        // The button Enter presses, ahead of every row button: it submits
+        // The button Enter presses, ahead of every row button and "Find": it submits
         // the form without an `_action`.
         <button type="submit" class="ss-submit" hidden=(true)></button>
         for message in form_errors {
@@ -799,7 +882,10 @@ pub async fn order_input_fields(
                         <label for=(&id)>"Product"</label>
                         match choices.of(&name, "lines.productId") {
                             Some(options) => choice_select(id: &id, name: &name, required: true, invalid: errors.invalid(&name), options: choice_options(options, row0.product_id.as_deref())),
-                            None => <input id=(&id) name=(&name) type="text" required=(true) pattern="^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$" value=(row0.product_id.clone()) aria-invalid=(errors.invalid(&name))>,
+                            None => match choices.pick(&name) {
+                                Some(pick) => product_pick(control: pick_control(&name, &id, true, errors.invalid(&name), row0.product_id.as_deref(), true), pick: pick.clone()),
+                                None => <input id=(&id) name=(&name) type="text" required=(true) pattern="^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$" value=(row0.product_id.clone()) aria-invalid=(errors.invalid(&name))>,
+                            },
                         }
                         for message in errors.of(&name) {
                             <p class="field-error">(message)</p>
@@ -830,7 +916,10 @@ pub async fn order_input_fields(
             <label for="order-input-gift-sku">"Gift"</label>
             match choices.of("giftSku", "giftSku") {
                 Some(options) => choice_select(id: "order-input-gift-sku", name: "giftSku", required: false, invalid: errors.invalid("giftSku"), options: choice_options(options, form.gift_sku.as_deref())),
-                None => <input id="order-input-gift-sku" name="giftSku" type="text" value=(form.gift_sku.clone()) aria-invalid=(errors.invalid("giftSku"))>,
+                None => match choices.pick("giftSku") {
+                    Some(pick) => product_by_sku_pick(control: pick_control("giftSku", "order-input-gift-sku", false, errors.invalid("giftSku"), form.gift_sku.as_deref(), true), pick: pick.clone()),
+                    None => <input id="order-input-gift-sku" name="giftSku" type="text" value=(form.gift_sku.clone()) aria-invalid=(errors.invalid("giftSku"))>,
+                },
             }
             for message in errors.of("giftSku") {
                 <p class="field-error">(message)</p>
@@ -855,6 +944,11 @@ pub struct OrderAddLineArgsForm {
     pub id: Option<String>,
     pub product_id: Option<String>,
     pub quantity: Option<String>,
+    /// The texts of its search pickers (D61, amended).
+    pub finds: Finds,
+    /// The picker's "Find" that submitted the form (`_action`), which
+    /// `apply_action` applies.
+    pub row_action: Option<String>,
     /// The browser sent more than `MAX_PAIRS` pairs, past which the form
     /// read none: `parse` refuses it with the form's error.
     pub overflow: bool,
@@ -871,6 +965,8 @@ impl OrderAddLineArgsForm {
             id: Some(id.to_string()),
             product_id: None,
             quantity: None,
+            finds: Finds::default(),
+            row_action: None,
             overflow: false,
         }
     }
@@ -884,6 +980,8 @@ impl OrderAddLineArgsForm {
             id: posted.get("id").first(),
             product_id: posted.get("productId").first(),
             quantity: posted.get("quantity").first(),
+            finds: Finds::from_posted(posted.get("_find")),
+            row_action: posted.get("_action").text(),
             overflow: posted.overflow,
         }
     }
@@ -929,6 +1027,20 @@ impl OrderAddLineArgsForm {
         operations::order_add_line(cx, args).await.map_err(|err| Refusal::from_api(&err))
     }
 
+    /// Applies the picker's "Find" that submitted the form, `row_action`,
+    /// `find:` and its name, which it records as pressed (D61, amended):
+    /// true when one did, and the page renders the form again with what its
+    /// text finds, without calling the operation.
+    pub fn apply_action(&mut self) -> bool {
+        let Some(action) = self.row_action.take() else {
+            return false;
+        };
+        if let Some(name) = action.strip_prefix("find:") {
+            self.finds.pressed = Some(name.to_owned());
+        }
+        true
+    }
+
     /// Whether the component shows the errors at `path`: at an argument's
     /// control. A path argument's are the form's own.
     fn shows(path: &[Segment]) -> bool {
@@ -963,6 +1075,9 @@ pub async fn order_add_line_args_fields(
 ) -> topcoat::Result<impl View> {
     let form_errors = errors.unshown(OrderAddLineArgsForm::shows);
     Ok(view! {
+        // The button Enter presses, ahead of every "Find": it submits
+        // the form without an `_action`.
+        <button type="submit" class="ss-submit" hidden=(true)></button>
         for message in form_errors {
             <p class="form-error">(message)</p>
         }
@@ -971,7 +1086,10 @@ pub async fn order_add_line_args_fields(
             <label for="order-add-line-product-id">"Product id"</label>
             match choices.of("productId", "productId") {
                 Some(options) => choice_select(id: "order-add-line-product-id", name: "productId", required: true, invalid: errors.invalid("productId"), options: choice_options(options, form.product_id.as_deref())),
-                None => <input id="order-add-line-product-id" name="productId" type="text" required=(true) pattern="^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$" value=(form.product_id.clone()) aria-invalid=(errors.invalid("productId"))>,
+                None => match choices.pick("productId") {
+                    Some(pick) => product_pick(control: pick_control("productId", "order-add-line-product-id", true, errors.invalid("productId"), form.product_id.as_deref(), true), pick: pick.clone()),
+                    None => <input id="order-add-line-product-id" name="productId" type="text" required=(true) pattern="^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$" value=(form.product_id.clone()) aria-invalid=(errors.invalid("productId"))>,
+                },
             }
             for message in errors.of("productId") {
                 <p class="field-error">(message)</p>
@@ -1002,6 +1120,13 @@ pub struct OrderListOrdersArgsForm {
     /// them, and `page` reads them by the route's rules.
     pub cursor: Option<String>,
     pub limit: Option<String>,
+    /// The order the page is asked for in (D60, amended), the `sort` query
+    /// parameter as sent, which `page` reads by the route's rules: none for
+    /// its defaultSort. No control renders it; a sorted list's headers set
+    /// it.
+    pub sort: Option<String>,
+    /// The texts of its search pickers (D61, amended).
+    pub finds: Finds,
     /// The browser sent more than `MAX_PAIRS` pairs, past which the form
     /// read none: `parse` refuses it with the form's error.
     pub overflow: bool,
@@ -1019,6 +1144,8 @@ impl OrderListOrdersArgsForm {
             product_id: None,
             cursor: None,
             limit: None,
+            sort: None,
+            finds: Finds::default(),
             overflow: false,
         }
     }
@@ -1034,6 +1161,8 @@ impl OrderListOrdersArgsForm {
             product_id: posted.get("productId").first(),
             cursor: posted.get("cursor").first(),
             limit: posted.get("limit").first(),
+            sort: posted.get("sort").first(),
+            finds: Finds::from_posted(posted.get("_find")),
             overflow: posted.overflow,
         }
     }
@@ -1087,12 +1216,14 @@ impl OrderListOrdersArgsForm {
         Ok(args)
     }
 
-    /// The page the form asks for, its `cursor` and `limit` read by the
-    /// route's rules (`PageSpec::query`, D60): an absent cursor is the first
-    /// page and an absent limit the route's default, and a refusal is the
-    /// router's 400 at either.
+    /// The page the form asks for, its `cursor`, `limit` and `sort` read by
+    /// the route's rules (`PageSpec::query`, D60, amended): an absent cursor
+    /// is the first page, an absent limit the route's default and an absent
+    /// sort its defaultSort, which the call fills in, and a refusal is the
+    /// router's 400 at the first it refuses. The cursor is still bound to
+    /// its sort; the in-process call unbinds it.
     pub fn page(&self) -> Result<runtime::page::PageRequest, ApiError> {
-        let pairs = [("cursor", &self.cursor), ("limit", &self.limit)]
+        let pairs = [("cursor", &self.cursor), ("limit", &self.limit), ("sort", &self.sort)]
             .into_iter()
             .filter_map(|(name, value)| value.clone().map(|value| (name.to_owned(), value)))
             .collect();
@@ -1100,9 +1231,9 @@ impl OrderListOrdersArgsForm {
     }
 
     /// The pairs the form holds as a query sends them, in control order:
-    /// each argument's values as sent, then `limit` when sent, never
-    /// `cursor`. A page links the next page and the first with them, so each
-    /// keeps the filter and the limit.
+    /// each argument's values as sent, then the sort and `limit` when sent,
+    /// never `cursor`. A page links the next page and the first with them,
+    /// so each keeps the filter, the order and the limit.
     pub fn query_pairs(&self) -> Vec<(String, String)> {
         let mut pairs = Vec::new();
         if let Some(value) = &self.q {
@@ -1111,6 +1242,9 @@ impl OrderListOrdersArgsForm {
         pairs.extend(self.statuses.iter().map(|value| ("statuses".to_owned(), value.clone())));
         if let Some(value) = &self.product_id {
             pairs.push(("productId".to_owned(), value.clone()));
+        }
+        if let Some(sort) = &self.sort {
+            pairs.push(("sort".to_owned(), sort.clone()));
         }
         if let Some(limit) = &self.limit {
             pairs.push(("limit".to_owned(), limit.clone()));
@@ -1166,6 +1300,9 @@ pub async fn order_list_orders_args_fields(
 ) -> topcoat::Result<impl View> {
     let form_errors = errors.unshown(OrderListOrdersArgsForm::shows);
     Ok(view! {
+        // The button Enter presses, ahead of every "Find": it submits
+        // the form.
+        <button type="submit" class="ss-submit" hidden=(true)></button>
         for message in form_errors {
             <p class="form-error">(message)</p>
         }
@@ -1189,7 +1326,10 @@ pub async fn order_list_orders_args_fields(
             <label for="order-list-orders-product-id">"Product id"</label>
             match choices.of("productId", "productId") {
                 Some(options) => choice_select(id: "order-list-orders-product-id", name: "productId", required: false, invalid: errors.invalid("productId"), options: choice_options(options, form.product_id.as_deref())),
-                None => <input id="order-list-orders-product-id" name="productId" type="text" pattern="^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$" value=(form.product_id.clone()) aria-invalid=(errors.invalid("productId"))>,
+                None => match choices.pick("productId") {
+                    Some(pick) => product_pick(control: pick_control("productId", "order-list-orders-product-id", false, errors.invalid("productId"), form.product_id.as_deref(), false), pick: pick.clone()),
+                    None => <input id="order-list-orders-product-id" name="productId" type="text" pattern="^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$" value=(form.product_id.clone()) aria-invalid=(errors.invalid("productId"))>,
+                },
             }
             for message in errors.of("productId") {
                 <p class="field-error">(message)</p>
@@ -1209,6 +1349,11 @@ pub struct ProductListProductsArgsForm {
     /// them, and `page` reads them by the route's rules.
     pub cursor: Option<String>,
     pub limit: Option<String>,
+    /// The order the page is asked for in (D60, amended), the `sort` query
+    /// parameter as sent, which `page` reads by the route's rules: none for
+    /// its defaultSort. No control renders it; a sorted list's headers set
+    /// it.
+    pub sort: Option<String>,
     /// The browser sent more than `MAX_PAIRS` pairs, past which the form
     /// read none: `parse` refuses it with the form's error.
     pub overflow: bool,
@@ -1225,6 +1370,7 @@ impl ProductListProductsArgsForm {
             ids: Vec::new(),
             cursor: None,
             limit: None,
+            sort: None,
             overflow: false,
         }
     }
@@ -1239,6 +1385,7 @@ impl ProductListProductsArgsForm {
             ids: posted.get("ids").values(true),
             cursor: posted.get("cursor").first(),
             limit: posted.get("limit").first(),
+            sort: posted.get("sort").first(),
             overflow: posted.overflow,
         }
     }
@@ -1287,12 +1434,14 @@ impl ProductListProductsArgsForm {
         Ok(args)
     }
 
-    /// The page the form asks for, its `cursor` and `limit` read by the
-    /// route's rules (`PageSpec::query`, D60): an absent cursor is the first
-    /// page and an absent limit the route's default, and a refusal is the
-    /// router's 400 at either.
+    /// The page the form asks for, its `cursor`, `limit` and `sort` read by
+    /// the route's rules (`PageSpec::query`, D60, amended): an absent cursor
+    /// is the first page, an absent limit the route's default and an absent
+    /// sort its defaultSort, which the call fills in, and a refusal is the
+    /// router's 400 at the first it refuses. The cursor is still bound to
+    /// its sort; the in-process call unbinds it.
     pub fn page(&self) -> Result<runtime::page::PageRequest, ApiError> {
-        let pairs = [("cursor", &self.cursor), ("limit", &self.limit)]
+        let pairs = [("cursor", &self.cursor), ("limit", &self.limit), ("sort", &self.sort)]
             .into_iter()
             .filter_map(|(name, value)| value.clone().map(|value| (name.to_owned(), value)))
             .collect();
@@ -1300,15 +1449,18 @@ impl ProductListProductsArgsForm {
     }
 
     /// The pairs the form holds as a query sends them, in control order:
-    /// each argument's values as sent, then `limit` when sent, never
-    /// `cursor`. A page links the next page and the first with them, so each
-    /// keeps the filter and the limit.
+    /// each argument's values as sent, then the sort and `limit` when sent,
+    /// never `cursor`. A page links the next page and the first with them,
+    /// so each keeps the filter, the order and the limit.
     pub fn query_pairs(&self) -> Vec<(String, String)> {
         let mut pairs = Vec::new();
         if let Some(value) = &self.q {
             pairs.push(("q".to_owned(), value.clone()));
         }
         pairs.extend(self.ids.iter().map(|value| ("ids".to_owned(), value.clone())));
+        if let Some(sort) = &self.sort {
+            pairs.push(("sort".to_owned(), sort.clone()));
+        }
         if let Some(limit) = &self.limit {
             pairs.push(("limit".to_owned(), limit.clone()));
         }
@@ -1405,6 +1557,11 @@ pub struct ReviewListReviewsArgsForm {
     /// them, and `page` reads them by the route's rules.
     pub cursor: Option<String>,
     pub limit: Option<String>,
+    /// The order the page is asked for in (D60, amended), the `sort` query
+    /// parameter as sent, which `page` reads by the route's rules: none for
+    /// its defaultSort. No control renders it; a sorted list's headers set
+    /// it.
+    pub sort: Option<String>,
     /// The browser sent more than `MAX_PAIRS` pairs, past which the form
     /// read none: `parse` refuses it with the form's error.
     pub overflow: bool,
@@ -1423,6 +1580,7 @@ impl ReviewListReviewsArgsForm {
             min_rating: None,
             cursor: None,
             limit: None,
+            sort: None,
             overflow: false,
         }
     }
@@ -1438,6 +1596,7 @@ impl ReviewListReviewsArgsForm {
             min_rating: posted.get("minRating").first(),
             cursor: posted.get("cursor").first(),
             limit: posted.get("limit").first(),
+            sort: posted.get("sort").first(),
             overflow: posted.overflow,
         }
     }
@@ -1491,12 +1650,14 @@ impl ReviewListReviewsArgsForm {
         Ok(args)
     }
 
-    /// The page the form asks for, its `cursor` and `limit` read by the
-    /// route's rules (`PageSpec::query`, D60): an absent cursor is the first
-    /// page and an absent limit the route's default, and a refusal is the
-    /// router's 400 at either.
+    /// The page the form asks for, its `cursor`, `limit` and `sort` read by
+    /// the route's rules (`PageSpec::query`, D60, amended): an absent cursor
+    /// is the first page, an absent limit the route's default and an absent
+    /// sort its defaultSort, which the call fills in, and a refusal is the
+    /// router's 400 at the first it refuses. The cursor is still bound to
+    /// its sort; the in-process call unbinds it.
     pub fn page(&self) -> Result<runtime::page::PageRequest, ApiError> {
-        let pairs = [("cursor", &self.cursor), ("limit", &self.limit)]
+        let pairs = [("cursor", &self.cursor), ("limit", &self.limit), ("sort", &self.sort)]
             .into_iter()
             .filter_map(|(name, value)| value.clone().map(|value| (name.to_owned(), value)))
             .collect();
@@ -1504,9 +1665,9 @@ impl ReviewListReviewsArgsForm {
     }
 
     /// The pairs the form holds as a query sends them, in control order:
-    /// each argument's values as sent, then `limit` when sent, never
-    /// `cursor`. A page links the next page and the first with them, so each
-    /// keeps the filter and the limit.
+    /// each argument's values as sent, then the sort and `limit` when sent,
+    /// never `cursor`. A page links the next page and the first with them,
+    /// so each keeps the filter, the order and the limit.
     pub fn query_pairs(&self) -> Vec<(String, String)> {
         let mut pairs = Vec::new();
         if let Some(value) = &self.q {
@@ -1514,6 +1675,9 @@ impl ReviewListReviewsArgsForm {
         }
         if let Some(value) = &self.min_rating {
             pairs.push(("minRating".to_owned(), value.clone()));
+        }
+        if let Some(sort) = &self.sort {
+            pairs.push(("sort".to_owned(), sort.clone()));
         }
         if let Some(limit) = &self.limit {
             pairs.push(("limit".to_owned(), limit.clone()));

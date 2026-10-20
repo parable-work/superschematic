@@ -35,13 +35,20 @@ const consoleService = "fixture-console-api"
 // message, and a paged list without a filter renders no filter form and
 // its refusal alone. The search box is the filter's first control, a search
 // form's, labeled Search, and filters by each word in any case, its pages
-// carrying it. A reference is a select of the options operation's items
-// on the new page, the app's own page and an action's form, from one
-// listing a render, and a value is named by its item's label through the
-// lookup, one call a render, in chunks of its listMax when more, or from
-// the listing for a reference by sku; a caller who may not list the items
-// gets the plain control and the value, the app's choices win and spare
-// the call, and more items than a page keeps the control. Products link
+// carrying it. A reference to Product, whose listProducts searches, is a
+// picker (D61, amended) on the new page, the app's own page, an action's
+// form and the orders' filter: a search box, a Find after the hidden
+// submit and a select of the first page of the matches, from one listing
+// a distinct text a render, the value held among them named through the
+// lookup. A filter's Find searches by GET, a post's renders the form again
+// as sent, 200, searching only the text it pressed, Enter still submits,
+// a text past the search's maxLength shows the route's message, and the
+// shard renders what a typed text finds with the value kept. A record's
+// value is named by its item's label through the lookup, one call a
+// render, in chunks of its listMax when more, or from the listing for a
+// reference by sku; a caller who may not list the items gets the plain
+// control and the value, and the app's choices win and spare the call.
+// Products link
 // their rows through the reference of getProduct's productId, name their
 // suppliers, a target's own reference, beside the reviews and lines that
 // name products, and a product's page shows the first page of its reviews
@@ -52,7 +59,13 @@ const consoleService = "fixture-console-api"
 // products, a list under a supplier that no operation reads, name the
 // supplier in the trail through what their route's supplierId refers to,
 // or by its id past listSuppliers' first page or to a caller who may not
-// list suppliers.
+// list suppliers. A sorted list's headers (D44, amended) link each sort
+// field's column, its own order reversed and any other's ascending, mark
+// the column of the order with aria-sort, start again at the first page
+// without a history, and set a live list's shard's query; the filter, the
+// size form, the pager and a procedure keep the sort, a refused sort and
+// a cursor of another sort are the route's 400, and a section's table has
+// no header links.
 func TestTheConsolePagesPicksAndSearches(t *testing.T) {
 	cargoTestCrate(t, consoleService, consoleAppTest)
 }
@@ -85,26 +98,32 @@ func TestReferencesBuildWithFormsOrViewsAlone(t *testing.T) {
 }
 
 // TestAPagedOperationIsItsPageEverywhere reads the crate of
-// fixture-console-api: a paged operation's call names the runtime, its
-// page is a page record, its procedure takes cursor and limit, its
-// argument form holds the page, even for a list without a filter, reads
-// it by the route's rules and links its pages by its query pairs, the
-// search argument first; and the core's fixture-paged-api, whose tags are
-// a page of strings.
+// fixture-console-api: a paged operation's call names the runtime, a
+// sorted one's unbinds its cursor and binds its next (D60, amended), its
+// page is a page record, its procedure takes cursor and limit, and a
+// sorted one's its sort, its argument form holds the page, the sort among
+// it, even for a list without a filter, reads it by the route's rules and
+// links its pages by its query pairs, the search argument first; and the
+// core's fixture-paged-api, whose tags are a page of strings and whose
+// items sort.
 func TestAPagedOperationIsItsPageEverywhere(t *testing.T) {
 	files, _ := readCrate(t, registry.DefaultNaming(), consoleService, livePagesOutputs())
 	for file, wants := range map[string][]string{
 		"operations.rs": {
 			"use crate::api::runtime;",
-			"pub async fn order_list_orders(cx: &Cx, args: crate::api::OrderListOrdersArgs) -> Result<runtime::page::Page<types::Order>, ApiError> {",
+			"pub async fn order_list_orders(cx: &Cx, mut args: crate::api::OrderListOrdersArgs) -> Result<runtime::page::Page<types::Order>, ApiError> {",
+			"    args.check()?;\n    // The cursor names the sort it was returned under (D60, amended).\n    args.page = crate::api::OrderListOrdersArgs::PAGE.unbind(args.page)?;\n    let request = args.page.clone();\n",
+			"        .await?\n        .bind(&request)\n}",
+			"pub async fn supplier_list_suppliers(cx: &Cx, args: crate::api::SupplierListSuppliersArgs) -> Result<runtime::page::Page<types::Supplier>, ApiError> {",
 		},
 		"records.rs": {
 			"pub struct OrderPageRecord {\n    pub items: Vec<OrderRecord>,\n    pub next: Option<String>,\n}",
 			"impl From<&runtime::page::Page<types::Order>> for OrderPageRecord {",
 		},
 		"procedures.rs": {
-			"    pub cursor: Option<String>,\n    pub limit: Option<i64>,\n}",
-			"page: crate::api::OrderListOrdersArgs::PAGE.request(self.cursor.as_deref(), self.limit).map_err(ProblemRecord::from)?,",
+			"    pub cursor: Option<String>,\n    pub limit: Option<i64>,\n    pub sort: Option<String>,\n}",
+			".sorted_request(self.cursor.as_deref(), self.limit, self.sort.as_deref())",
+			"page: crate::api::SupplierListSuppliersArgs::PAGE.request(self.cursor.as_deref(), self.limit).map_err(ProblemRecord::from)?,",
 			"-> topcoat::Result<Result<OrderPageRecord, ProblemRecord>> {",
 			"pub struct SupplierListSuppliersArgsRecord {\n    pub cursor: Option<String>,\n    pub limit: Option<i64>,\n}",
 		},
@@ -112,6 +131,9 @@ func TestAPagedOperationIsItsPageEverywhere(t *testing.T) {
 			"pub struct OrderListOrdersArgsForm {\n    pub q: Option<String>,\n    pub statuses: Vec<String>,\n    pub product_id: Option<String>,\n",
 			"pub struct SupplierListSuppliersArgsForm {\n    /// The page asked for (D60)",
 			"crate::api::OrderListOrdersArgs::PAGE.query(&QueryValues::new(pairs))",
+			`let pairs = [("cursor", &self.cursor), ("limit", &self.limit), ("sort", &self.sort)]`,
+			"            sort: posted.get(\"sort\").first(),\n",
+			"        if let Some(sort) = &self.sort {\n            pairs.push((\"sort\".to_owned(), sort.clone()));\n        }\n        if let Some(limit) = &self.limit {",
 			"pub fn query_pairs(&self) -> Vec<(String, String)> {",
 			"self.page().map_err(|err| Refusal::from_api(&err))?;",
 			`<label for="order-list-orders-q">"Search"</label>`,
@@ -145,17 +167,89 @@ func TestAPagedOperationIsItsPageEverywhere(t *testing.T) {
 	if !strings.Contains(paged["forms.rs"], "pub struct CatalogListTagsArgsForm {") {
 		t.Error("fixture-paged-api's tags, a page with no other argument, have no argument form")
 	}
+	if !strings.Contains(paged["operations.rs"], "args.page = crate::api::CatalogListItemsArgs::PAGE.unbind(args.page)?;") {
+		t.Error("fixture-paged-api's sorted items' call does not unbind its cursor")
+	}
+}
+
+// TestTheHeadersSortAList reads fixture-console-api's crate: a sorted
+// list's table takes Sorted, whose header links set aria-sort on the
+// column the rows are in order of and data-ss-sort on each link, and a
+// live list's links set its shard's query; the list computes them from
+// its query pairs, the filter keeps the sort as a hidden input, and a
+// section's rows take none (D44, amended).
+func TestTheHeadersSortAList(t *testing.T) {
+	files, _ := readCrate(t, registry.DefaultNaming(), consoleService, livePagesOutputs())
+	for file, wants := range map[string][]string{
+		"views.rs": {
+			"pub struct Sorted {",
+			"pub live: Option<Signal<String>>,",
+			`<th scope="col" data-field="number" aria-sort=(sorted.aria("number"))>`,
+			`Some(live) => <a href=(href.clone()) data-ss-sort="number" @click=$(|e: Event| {`,
+			`None => <a href=(href) data-ss-sort="number">"Number"</a>,`,
+			`<th scope="col" data-field="status">"Status"</th>`,
+			"    #[default] sorted: Sorted,\n) -> topcoat::Result<impl View> {",
+		},
+		"pages.rs": {
+			"fn sort_query(pairs: &[(String, String)], param: &str, value: &str) -> String {",
+			`let sorted = sorting(&pairs, &crate::api::ProductListProductsArgs::PAGE, filter.sort.as_deref(), &["name", "sku"], &base, Some(query.clone()));`,
+			`<input type="hidden" name="sort" value=(sort)>`,
+			"Ok(items) => products_rows(items: items, sorted: sorted),",
+			"items: Vec<types::Product>, #[default] sorted: Sorted) -> topcoat::Result<impl View> {",
+			"Some(Ok(items)) => products_reviews_rows(items: items),",
+		},
+	} {
+		for _, want := range wants {
+			if !strings.Contains(files[file], want) {
+				t.Errorf("%s lacks %q", file, want)
+			}
+		}
+	}
+	if strings.Contains(files["views.rs"], `data-field="supplier"`) || strings.Contains(files["views.rs"], `data-ss-sort="supplierId"`) {
+		t.Error("views.rs sorts by a column no list sorts by")
+	}
+	// Without live lists, a header's link loads the page.
+	static, _ := readCrate(t, registry.DefaultNaming(), consoleService, pagesOutputs())
+	if !strings.Contains(static["views.rs"], `Some((href, _)) => <a href=(href) data-ss-sort="number">"Number"</a>,`) || strings.Contains(static["views.rs"], "Signal") {
+		t.Error("views.rs without live lists sets a signal from its headers")
+	}
+}
+
+// TestASortFieldWithoutAColumnIsLogged builds fixture-console-api with
+// listOrders sorted by id too, which its table shows no column of: the
+// build log names it, and its headers sort by number alone (D44,
+// amended).
+func TestASortFieldWithoutAColumnIsLogged(t *testing.T) {
+	dir := consoleCopy(t, func(schema string) string {
+		return strings.Replace(schema, "            sort: [number]\n", "            sort: [number, id]\n", 1)
+	})
+	root := testpaths.TempDir(t)
+	var log strings.Builder
+	if _, err := buildDir(t, registry.DefaultNaming(), dir, root, livePagesOutputs(), &log); err != nil {
+		t.Fatalf("build: %v\n%s", err, log.String())
+	}
+	if want := "  - topcoat: orders sorts by id, which its table shows no column of\n"; !strings.Contains(log.String(), want) {
+		t.Errorf("the build log lacks %q:\n%s", want, log.String())
+	}
+	data, err := os.ReadFile(filepath.Join(topcoat.Dir(root, consoleService), "src", "pages.rs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `filter.sort.as_deref(), &["number"], &base`) {
+		t.Error("the orders' headers sort by a field their table does not show")
+	}
 }
 
 // TestReferencesResolveByTheCoreRule reads the references of
 // fixture-console-api's crate: a source per target and value, its options
-// from the one operation that lists the target, its labels through the
-// lookup in chunks of its listMax, or from the listing for a reference by
-// sku, which no lookup refers by; a choices function per form and a labels
-// function per record that holds a reference, Product's among them, since
-// a product names its supplier, beside the private functions of Product as
-// a target; the pages calling them; and products' rows linked through
-// getProduct's reference.
+// from the one operation that lists the target, its search from that
+// operation's search argument, its labels through the lookup in chunks of
+// its listMax, or from the listing for a reference by sku, which no lookup
+// refers by; a choices function per form, which takes the form, and a
+// labels function per record that holds a reference, Product's among
+// them, since a product names its supplier, beside the private functions
+// of Product as a target; the pages calling them; and products' rows
+// linked through getProduct's reference.
 func TestReferencesResolveByTheCoreRule(t *testing.T) {
 	files, _ := readCrate(t, registry.DefaultNaming(), consoleService, livePagesOutputs())
 	references := files["references.rs"]
@@ -164,16 +258,17 @@ func TestReferencesResolveByTheCoreRule(t *testing.T) {
 		"page: PageRequest::first(crate::api::ProductListProductsArgs::PAGE.max_limit()),",
 		"async fn product_list_products_by_ids(cx: &Cx, values: &[String]) -> Option<Vec<Value>> {",
 		`(!listed.more).then(|| choices_of(&listed.items, "id", Some("name")))`,
-		`(!listed.more).then(|| choices_of(&listed.items, "sku", Some("name")))`,
+		"async fn product_list_products_search(cx: &Cx, text: &str) -> Option<Result<Listed, String>> {",
+		`Some(Ok(listed)) => Some((choices_of(&listed.items, "sku", Some("name")), listed.more, capped.then(|| TOO_MANY_SEARCHES.to_owned()))),`,
 		"for chunk in values.chunks(5).take(MAX_LOOKUP_CALLS) {",
 		"async fn product_by_sku_target_labels(cx: &Cx, values: &BTreeSet<String>) -> Vec<Choice> {",
 		"async fn product_target_labels(cx: &Cx, values: &BTreeSet<String>) -> Vec<Choice> {",
 		"async fn product_target_choices(cx: &Cx) -> Option<Vec<Choice>> {",
 		"pub async fn product_labels(cx: &Cx, records: &[ProductRecord], choices: Choices) -> Choices {",
 		"let labels = supplier_target_labels(cx, &values_at(&json, &sites)).await;",
-		"pub async fn order_input_form_choices(cx: &Cx, choices: Choices) -> Choices {",
-		"pub async fn order_list_orders_args_form_choices(cx: &Cx, choices: Choices) -> Choices {",
-		"pub async fn order_add_line_args_form_choices(cx: &Cx, choices: Choices) -> Choices {",
+		"pub async fn order_input_form_choices(cx: &Cx, form: &OrderInputForm, choices: Choices) -> Choices {",
+		"pub async fn order_list_orders_args_form_choices(cx: &Cx, form: &OrderListOrdersArgsForm, choices: Choices) -> Choices {",
+		"pub async fn order_add_line_args_form_choices(cx: &Cx, form: &OrderAddLineArgsForm, choices: Choices) -> Choices {",
 		"pub async fn order_labels(cx: &Cx, records: &[OrderRecord], choices: Choices) -> Choices {",
 		"pub async fn review_labels(cx: &Cx, records: &[ReviewRecord], choices: Choices) -> Choices {",
 		`let sites = unnamed(&choices, &[("lines.productId", &["lines", "productId"])]);`,
@@ -185,7 +280,9 @@ func TestReferencesResolveByTheCoreRule(t *testing.T) {
 	for _, want := range []string{
 		"use crate::references;",
 		`let choices = references::order_labels(cx, &rows, choices_of(cx, "orders")).await;`,
-		`let choices = references::order_input_form_choices(cx, choices_of(cx, "orders")).await;`,
+		`let choices = references::order_input_form_choices(cx, &form, choices_of(cx, "orders")).await;`,
+		`let choices = references::order_list_orders_args_form_choices(cx, &filter, choices_of(cx, "orders")).await;`,
+		"Some((form, _)) => references::order_add_line_args_form_choices(cx, form, choices.clone()).await,",
 		"let add_line_form_choices = match &add_line_form {",
 		"let labels = match &found {",
 		"products_item_href(&row.id).unwrap_or_default()",
@@ -234,6 +331,113 @@ func TestReferenceFunctionsAreNamedApart(t *testing.T) {
 	if n := strings.Count(references, "fn product_target_labels("); n != 1 {
 		t.Errorf("references.rs has %d functions product_target_labels, want 1", n)
 	}
+}
+
+// TestPickersAreWrittenForSearchingOptions reads fixture-console-api's
+// crate, whose listProducts searches (D61, amended): each reference to
+// Product is a picker, its source's picks and its shard at
+// /_superschematic/<service>/_pick/<target>; its form holds the pickers'
+// texts and a post's Find acts on it after the hidden submit; a filter's
+// Find sends its query; and the ids argument, a query list whose controls
+// share a name, stays a select of the options.
+func TestPickersAreWrittenForSearchingOptions(t *testing.T) {
+	files, _ := readCrate(t, registry.DefaultNaming(), consoleService, livePagesOutputs())
+	for file, wants := range map[string][]string{
+		"references.rs": {
+			`#[shard("/_superschematic/fixture-console-api/_pick/product")]`,
+			"pub async fn product_pick(cx: &Cx, control: PickControl, pick: Pick) -> topcoat::Result<impl View> {",
+			`#[shard("/_superschematic/fixture-console-api/_pick/product-by-sku")]`,
+			"async fn product_target_picks(cx: &Cx, wanted: &[(String, String, bool)]) -> Vec<Option<Pick>> {",
+			"let labels = product_target_labels(cx, &missing).await;",
+			`aria-label="Search Products" aria-controls=(control.id.clone()) maxlength="50" @input=$(|e: Event| {`,
+			"            for (i0, row0) in form.lines.iter().enumerate() {\n                let name = format!(\"lines[{i0}].productId\");",
+			`controls.push(("giftSku".to_owned(), form.gift_sku.clone()));`,
+			"form.finds.text(name).to_owned(), form.finds.pressed(name))",
+			"form.finds.text(name).to_owned(), true)",
+			`found = found.with("ids", pairs(&options));`,
+		},
+		"choices.rs": {
+			"pub struct Pick {",
+			"pub fn with_pick(mut self, name: impl Into<String>, pick: Pick) -> Self {",
+			"picks: Arc<Vec<(String, Pick)>>,",
+		},
+		"forms.rs": {
+			"pub struct Finds {",
+			"use crate::references::{product_by_sku_pick, product_pick};",
+			"    pub finds: Finds,\n",
+			`finds: Finds::from_posted(posted.get("_find")),`,
+			"        if let Some(name) = action.strip_prefix(\"find:\") {\n            self.finds.pressed = Some(name.to_owned());",
+			`Some(pick) => product_pick(control: pick_control(&name, &id, true, errors.invalid(&name), row0.product_id.as_deref(), true), pick: pick.clone()),`,
+			`Some(pick) => product_pick(control: pick_control("productId", "order-list-orders-product-id", false, errors.invalid("productId"), form.product_id.as_deref(), false), pick: pick.clone()),`,
+		},
+		"pages.rs": {
+			"let sent = if form.apply_action() {\n        rows_again()",
+		},
+	} {
+		for _, want := range wants {
+			if !strings.Contains(files[file], want) {
+				t.Errorf("%s lacks %q", file, want)
+			}
+		}
+	}
+	// The products' filter's ids keep their select, and need no hidden
+	// submit, nor its form a finds.
+	forms := files["forms.rs"]
+	products := forms[strings.Index(forms, "pub struct ProductListProductsArgsForm {"):]
+	products = products[:strings.Index(products, "\n}\n")]
+	if strings.Contains(products, "finds") {
+		t.Errorf("the products' filter holds finds:\n%s", products)
+	}
+}
+
+// TestAPickerNameIsReserved builds fixture-console-api with an order input
+// field named finds, which a form with a picker keeps for its pickers'
+// texts (D61, amended): the build is refused.
+func TestAPickerNameIsReserved(t *testing.T) {
+	dir := consoleCopy(t, func(schema string) string {
+		return strings.Replace(schema, "      - name: note\n        typeRef: { name: string }\n        validateMaxLength: 200\n", "      - name: note\n        typeRef: { name: string }\n        validateMaxLength: 200\n      - name: finds\n        typeRef: { name: string }\n", 1)
+	})
+	_, err := buildDir(t, registry.DefaultNaming(), dir, testpaths.TempDir(t), rustOutputs(), nil)
+	if err == nil || !strings.Contains(err.Error(), "topcoat: form OrderInputForm: field finds is the form's finds, its pickers' texts (D61, amended)") {
+		t.Fatalf("build: %v, want the field named finds refused", err)
+	}
+}
+
+// TestAPickerMeetsItsOptionsControls builds fixture-console-api with a rate
+// limit and a timeout on listProducts: each picker's shard meets them
+// through a layer on its path, its limiter the operation's in the app's
+// registry, which the setup adds after the pages' (D61, amended).
+func TestAPickerMeetsItsOptionsControls(t *testing.T) {
+	dir := consoleCopy(t, func(schema string) string {
+		return strings.Replace(schema, "        restPath: products\n        permissions: [products.read]\n", "        restPath: products\n        permissions: [products.read]\n        middleware: { rateLimit: 30, timeout: 5 }\n", 1)
+	})
+	root := testpaths.TempDir(t)
+	if _, err := buildDir(t, registry.DefaultNaming(), dir, root, livePagesOutputs(), nil); err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	src := filepath.Join(topcoat.Dir(root, consoleService), "src")
+	read := func(name string) string {
+		data, err := os.ReadFile(filepath.Join(src, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(data)
+	}
+	references, lib := read("references.rs"), read("lib.rs")
+	for _, want := range []string{
+		"pub(crate) fn route_controls(router: RouterBuilder, limits: &RateLimits) -> RouterBuilder {",
+		`path: Path::new("/_superschematic/fixture-console-api/_pick/product"),`,
+		"rate_limit: limits.of(&crate::api::operations::PRODUCT_LIST_PRODUCTS),",
+		"timeout: Some(Duration::from_secs(5)),",
+	} {
+		if !strings.Contains(references, want) {
+			t.Errorf("references.rs lacks %q", want)
+		}
+	}
+	if !strings.Contains(lib, "references::route_controls(pages::route_controls(procedures::route_controls(router, &rate_limits), &rate_limits), &rate_limits)") {
+		t.Errorf("lib.rs adds no picker's controls:\n%s", lib)
+	}
+	cargoTestCrateWith(t, consoleService, "#[test]\nfn builds() {}\n", crateOptions{outputs: livePagesOutputs(), dir: dir})
 }
 
 // TestACollectionAtPagerIsNamedApart reads fixture-console-api's pages,
@@ -503,7 +707,7 @@ func TestATrailStepMeetsItsOptionsControls(t *testing.T) {
 	pages := string(data)
 	controls := pages[strings.Index(pages, "        controls: vec![\n"):]
 	controls = controls[:strings.Index(controls, "        ],\n    })")]
-	limiter := strings.Count(controls[:strings.Index(controls, "Controls::default().rate_limit(30)")], "Controls::default()")
+	limiter := strings.Count(controls[:strings.Index(controls, "Controls::default().rate_limiter(limits.of(&crate::api::operations::SUPPLIER_LIST_SUPPLIERS))")], "Controls::default()")
 	for _, want := range []string{
 		fmt.Sprintf(`(Method::GET, "/console/suppliers/{supplier_id}/pages", None, &[%d]),`, limiter),
 		fmt.Sprintf(`(Method::GET, "/console/suppliers", Some(%d), &[]),`, limiter),
@@ -547,41 +751,7 @@ func suppliersCopy(t *testing.T, edit func(schema string) string) string {
 // listSuppliers behind a provider's signature, the build log names the
 // target by its service.
 func TestAReferenceToAnAPIDependencysType(t *testing.T) {
-	withForm := func(schema string) string {
-		schema = strings.Replace(schema, "  OrderLineInput:\n", `  # A new product, whose supplier is one of the suppliers.
-  ProductInput:
-    name: ProductInput
-    role: APIInput
-    fields:
-      - name: name
-        typeRef: { name: string }
-        required: true
-      - name: sku
-        typeRef: { name: string }
-        required: true
-      - name: supplierId
-        title: Supplier
-        typeRef: { name: string }
-        required: true
-        references: { type: Supplier }
-  OrderLineInput:
-`, 1)
-		return strings.Replace(schema, "  - name: SupplierQueries\n", `  - name: ProductMutations
-    operations:
-      # Adds a product.
-      - name: createProduct
-        typeRef: { name: Product }
-        required: true
-        httpMethod: POST
-        restPath: products
-        permissions: [products.read]
-        arguments:
-          - name: input
-            typeRef: { name: ProductInput }
-            required: true
-  - name: SupplierQueries
-`, 1)
-	}
+	withForm := productForm
 	dir := suppliersCopy(t, withForm)
 	root := testpaths.TempDir(t)
 	var log strings.Builder
@@ -599,7 +769,7 @@ func TestAReferenceToAnAPIDependencysType(t *testing.T) {
 		"pub async fn product_labels(cx: &Cx, records: &[ProductRecord], choices: Choices) -> Choices {",
 		`let sites = unnamed(&choices, &[("supplierId", &["supplierId"])]);`,
 		"let labels = supplier_target_labels(cx, &values_at(&json, &sites)).await;",
-		"pub async fn product_input_form_choices(cx: &Cx, choices: Choices) -> Choices {",
+		"pub async fn product_input_form_choices(cx: &Cx, form: &ProductInputForm, choices: Choices) -> Choices {",
 	} {
 		if !strings.Contains(references, want) {
 			t.Errorf("references.rs lacks %q", want)
@@ -622,6 +792,194 @@ func TestAReferenceToAnAPIDependencysType(t *testing.T) {
 			t.Errorf("the build log lacks %q:\n%s", want, log.String())
 		}
 	}
+}
+
+// productForm adds to fixture-console-api's schema a new product's form,
+// whose supplier refers to Supplier, and the operation that takes it.
+func productForm(schema string) string {
+	schema = strings.Replace(schema, "  OrderLineInput:\n", `  # A new product, whose supplier is one of the suppliers.
+  ProductInput:
+    name: ProductInput
+    role: APIInput
+    fields:
+      - name: name
+        typeRef: { name: string }
+        required: true
+      - name: sku
+        typeRef: { name: string }
+        required: true
+      - name: supplierId
+        title: Supplier
+        typeRef: { name: string }
+        required: true
+        references: { type: Supplier }
+  OrderLineInput:
+`, 1)
+	return strings.Replace(schema, "  - name: SupplierQueries\n", `  - name: ProductMutations
+    operations:
+      # Adds a product.
+      - name: createProduct
+        typeRef: { name: Product }
+        required: true
+        httpMethod: POST
+        restPath: products
+        permissions: [products.read]
+        arguments:
+          - name: input
+            typeRef: { name: ProductInput }
+            required: true
+  - name: SupplierQueries
+`, 1)
+}
+
+// hostedCopy is a copy of fixture-console-api whose Supplier is
+// fixture-console-suppliers-api's, with a new product's form, and which
+// lists no supplier itself: Supplier's options are the dependency's own
+// listSuppliers (D61, amended).
+func hostedCopy(t *testing.T) string {
+	t.Helper()
+	return suppliersCopy(t, func(schema string) string {
+		start := strings.Index(schema, "      # The suppliers, by name, one to a page")
+		end := strings.Index(schema, "      # A supplier's products")
+		return productForm(schema[:start] + schema[end:])
+	})
+}
+
+// bothServices is the [extension.topcoat] table of one app that hosts
+// fixture-console-api and fixture-console-suppliers-api.
+const bothServices = "services = [\"fixture-console-api\", \"fixture-console-suppliers-api\"]\n"
+
+// suppliersOutputs are fixture-console-suppliers-api's outputs when one app
+// hosts it beside fixture-console-api: its Rust API and its Topcoat crate,
+// with pages under /suppliers.
+func suppliersOutputs() map[string]any {
+	outputs := rustOutputs()
+	outputs["topcoat"] = map[string]any{"enabled": true, "pages": map[string]any{"enabled": true, "prefix": "/suppliers"}}
+	return outputs
+}
+
+// TestAReferenceToAnotherAPIsOptions builds a copy of fixture-console-api
+// whose Supplier, and its options, are fixture-console-suppliers-api's
+// (D61, amended). With the table listing both, the references call the
+// dependency's crate in-process, through its operations, its listing, its
+// lookup-free labels and its picker's search; the crate depends on it; and
+// a page and the picker's shard that call listSuppliers meet its rate
+// limit, its limiter taken from the dependency's setup. With one listed,
+// with the dependency's server in Go, and with its crate not built first,
+// the reference is left out, and the build log gives the reason.
+func TestAReferenceToAnotherAPIsOptions(t *testing.T) {
+	dir := hostedCopy(t)
+	names, err := registry.ParseNaming([]byte("[extension.topcoat]\n"+bothServices), "superschematic.toml")
+	if err != nil {
+		t.Fatalf("ParseNaming: %v", err)
+	}
+	root := testpaths.TempDir(t)
+	dep := dependencyDir(dir, suppliersService)
+	if _, err := buildIn(t, buildSpec{names: names, dir: dep, root: root, outputs: suppliersOutputs()}); err != nil {
+		t.Fatalf("build %s: %v", suppliersService, err)
+	}
+	var log strings.Builder
+	depOutputs := map[string]map[string]any{suppliersService: suppliersOutputs()}
+	if _, err := buildIn(t, buildSpec{names: names, dir: dir, root: root, outputs: livePagesOutputs(), log: &log, depOutputs: depOutputs}); err != nil {
+		t.Fatalf("build: %v\n%s", err, log.String())
+	}
+	crate := topcoat.Dir(root, consoleService)
+	read := func(name string) string {
+		data, err := os.ReadFile(filepath.Join(crate, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(data)
+	}
+	const hosted = "schemas_fixture_console_suppliers_api_topcoat"
+	for file, wants := range map[string][]string{
+		"Cargo.toml": {`schemas-fixture-console-suppliers-api-topcoat = { path = "../fixture-console-suppliers-api" }`},
+		"src/references.rs": {
+			"async fn fixture_console_suppliers_api_supplier_list_suppliers_options(cx: &Cx) -> Option<Listed> {",
+			"    let args = " + hosted + "::api::SupplierListSuppliersArgs {",
+			"page: " + hosted + "::api::runtime::page::PageRequest::first(" + hosted + "::api::SupplierListSuppliersArgs::PAGE.max_limit()),",
+			"let page = " + hosted + "::operations::supplier_list_suppliers(cx, args).await.ok()?;",
+			"async fn fixture_console_suppliers_api_supplier_list_suppliers_search(cx: &Cx, text: &str) -> Option<Result<Listed, String>> {",
+			"async fn supplier_target_picks(cx: &Cx, wanted: &[(String, String, bool)]) -> Vec<Option<Pick>> {",
+			"rate_from: Some(|cx: &Cx| try_app_context::<" + hosted + "::Setup>(cx)?.rate_limits.of(&" + hosted + "::api::operations::SUPPLIER_LIST_SUPPLIERS)),",
+		},
+		"src/pages.rs": {
+			".rate_limiter_from(|cx: &Cx| try_app_context::<" + hosted + "::Setup>(cx)?.rate_limits.of(&" + hosted + "::api::operations::SUPPLIER_LIST_SUPPLIERS))",
+		},
+	} {
+		for _, want := range wants {
+			if !strings.Contains(read(file), want) {
+				t.Errorf("%s lacks %q", file, want)
+			}
+		}
+	}
+	if strings.Contains(log.String(), "fixture-console-suppliers-api.Supplier, whose options") {
+		t.Errorf("the build log leaves a hosted reference out:\n%s", log.String())
+	}
+
+	reason := func(t *testing.T, table string, depOutputs map[string]map[string]any, buildDep bool) string {
+		t.Helper()
+		names, err := registry.ParseNaming([]byte("[extension.topcoat]\n"+table), "superschematic.toml")
+		if err != nil {
+			t.Fatalf("ParseNaming: %v", err)
+		}
+		root := testpaths.TempDir(t)
+		if buildDep {
+			if _, err := buildIn(t, buildSpec{names: names, dir: dep, root: root, outputs: suppliersOutputs()}); err != nil {
+				t.Fatalf("build %s: %v", suppliersService, err)
+			}
+		}
+		var log strings.Builder
+		if _, err := buildIn(t, buildSpec{names: names, dir: dir, root: root, outputs: livePagesOutputs(), log: &log, depOutputs: depOutputs}); err != nil {
+			t.Fatalf("build: %v\n%s", err, log.String())
+		}
+		return log.String()
+	}
+	goServer := rustOutputs()
+	goServer["api"] = map[string]any{"enabled": true, "language": "GO"}
+	goServer["types"] = map[string]any{"go": map[string]any{"enabled": true}}
+	for _, tc := range []struct {
+		name, table string
+		depOutputs  map[string]map[string]any
+		buildDep    bool
+		want        string
+	}{
+		{"one listed", "services = [\"fixture-console-api\"]\n", nil, true,
+			"[extension.topcoat] services does not list fixture-console-suppliers-api beside fixture-console-api, so no app hosts both"},
+		{"a Go server", bothServices, map[string]map[string]any{suppliersService: goServer}, true,
+			"fixture-console-suppliers-api's API server is not Rust, so it has no crate"},
+		{"no crate built", bothServices, depOutputs, false,
+			"fixture-console-suppliers-api's Topcoat crate is not in the output root, which a build of it first writes (build --with-deps)"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			log := reason(t, tc.table, tc.depOutputs, tc.buildDep)
+			want := "  - topcoat: Product.supplierId refers to fixture-console-suppliers-api.Supplier, whose options operation fixture-console-suppliers-api's SupplierQueries.listSuppliers has no in-process call: " + tc.want + "\n"
+			if !strings.Contains(log, want) {
+				t.Errorf("the build log lacks %q:\n%s", want, log)
+			}
+		})
+	}
+}
+
+// TestTwoServicesInOneApp builds the crates of fixture-console-suppliers-api
+// and of a copy of fixture-console-api whose Supplier's options are its,
+// with the table listing both, and runs cargo clippy and cargo test with
+// hostedAppTest (D61, amended): one app sets up the console with its JSON
+// API and the suppliers without one, `_without_api`, and serves both
+// crates' pages; a product names its supplier and a new product picks one
+// through the suppliers' crate; a page meets listSuppliers' rate limit; an
+// app that does not set the suppliers up names a supplier by its id, and
+// its call is the 500; and an app that mounts both JSON APIs is refused as
+// it builds, by Topcoat's "duplicate any-method route", the reason for
+// `_without_api`.
+func TestTwoServicesInOneApp(t *testing.T) {
+	cargoTestCrateWith(t, consoleService, hostedAppTest, crateOptions{
+		outputs:      livePagesOutputs(),
+		dir:          hostedCopy(t),
+		dependencies: []string{suppliersService},
+		depOutputs:   map[string]map[string]any{suppliersService: suppliersOutputs()},
+		table:        bothServices,
+	})
 }
 
 // TestADerivedReferenceLabelsRows builds fixture-console-api with its order
@@ -745,7 +1103,7 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use http::request::Parts;
-use schemas_fixture_console_api_topcoat::api::runtime::page::{Cursor, Page};
+use schemas_fixture_console_api_topcoat::api::runtime::page::{Cursor, Page, PageRequest, Sort};
 use schemas_fixture_console_api_topcoat::api::runtime::search;
 use schemas_fixture_console_api_topcoat::api::runtime::{ApiError, Authenticator, Principal, RequestContext};
 use schemas_fixture_console_api_topcoat::api::{
@@ -764,6 +1122,9 @@ use topcoat::context::Cx;
 use topcoat::router::request::parts;
 use topcoat::router::{header, page, to_bytes, Body, Router, RouterBuilderDiscoverExt, StatusCode};
 use topcoat::view::{view, View};
+
+#[path = "support/enter.rs"]
+mod enter;
 
 const ANVIL: &str = "8d1f6c9e-0000-4000-8000-000000000001";
 const BUCKET: &str = "8d1f6c9e-0000-4000-8000-000000000002";
@@ -850,13 +1211,29 @@ impl Store {
 // one more: what an implementation reads, which Page::from_rows keeps.
 fn page_of<T, K: serde::Serialize + serde::de::DeserializeOwned + Ord>(
     mut rows: Vec<T>,
-    page: &schemas_fixture_console_api_topcoat::api::runtime::page::PageRequest,
+    page: &PageRequest,
     key: impl Fn(&T) -> K,
 ) -> Result<Page<T>, ApiError> {
     let after: Option<K> = page.cursor.as_ref().map(Cursor::decode).transpose()?;
     rows.sort_by_key(|row| key(row));
     rows.retain(|row| after.as_ref().is_none_or(|after| key(row) > *after));
     Page::from_rows(rows, page.limit, key)
+}
+
+// The rows of a sorted list (D60, amended) after the cursor, in the page's
+// order: the sort's field's text, then the row's id, either way, as key
+// gives them. The call fills the default sort in and hands the
+// implementation its own cursor, which a bound one would not decode as.
+fn sorted_page<T>(mut rows: Vec<T>, page: &PageRequest, key: impl Fn(&T, &str) -> (String, String)) -> Result<Page<T>, ApiError> {
+    let sort = page.sort.clone().expect("the call fills the default sort in");
+    let field = sort.field().to_owned();
+    let after: Option<(String, String)> = page.cursor.as_ref().map(Cursor::decode).transpose()?;
+    rows.sort_by_key(|row| key(row, &field));
+    if sort.desc() {
+        rows.reverse();
+    }
+    rows.retain(|row| after.as_ref().is_none_or(|after| if sort.desc() { key(row, &field) < *after } else { key(row, &field) > *after }));
+    Page::from_rows(rows, page.limit, |row| key(row, &field))
 }
 
 struct Shop(Arc<Store>);
@@ -881,7 +1258,7 @@ impl ProductImplementation for Shop {
             .filter(|product| search::matches(&product.name, &terms))
             .cloned()
             .collect();
-        page_of(rows, &args.page, |product| (product.name.clone(), wire(&product.id)))
+        sorted_page(rows, &args.page, |product, field| (if field == "sku" { product.sku.clone() } else { product.name.clone() }, wire(&product.id)))
     }
     async fn get_product(&self, _ctx: RequestContext, args: ProductGetProductArgs) -> Result<types::Product, ApiError> {
         let products = self.0.products.lock().unwrap();
@@ -901,7 +1278,7 @@ impl ReviewImplementation for Shop {
             .filter(|review| args.min_rating.is_none_or(|least| review.rating >= least))
             .cloned()
             .collect();
-        page_of(rows, &args.page, |review| review.id.clone())
+        sorted_page(rows, &args.page, |review, field| (if field == "rating" { format!("{:08.2}", review.rating) } else { review.title.clone() }, review.id.clone()))
     }
 }
 
@@ -941,7 +1318,17 @@ impl OrderImplementation for Shop {
             .filter(|order| search::matches(&format!("{} {}", order.number, order.note.as_deref().unwrap_or_default()), &terms))
             .cloned()
             .collect();
-        page_of(rows, &args.page, |order| order.number.clone())
+        // The orders sort by their numbers, which no two share, either way:
+        // the key is the number alone.
+        let desc = args.page.sort.as_ref().is_some_and(|sort| sort.desc());
+        let mut page = PageRequest { sort: None, ..args.page };
+        if desc {
+            let after: Option<String> = page.cursor.take().map(|cursor| cursor.decode()).transpose()?;
+            let mut rows: Vec<types::Order> = rows.into_iter().filter(|order| after.as_ref().is_none_or(|after| order.number < *after)).collect();
+            rows.sort_by(|a, b| b.number.cmp(&a.number));
+            return Page::from_rows(rows, page.limit, |order| order.number.clone());
+        }
+        page_of(rows, &page, |order| order.number.clone())
     }
     async fn place_order(&self, _ctx: RequestContext, args: OrderPlaceOrderArgs) -> Result<types::Order, ApiError> {
         let mut orders = self.0.orders.lock().unwrap();
@@ -1011,13 +1398,15 @@ fn app(store: &Arc<Store>) -> Router {
 }
 
 // The app's own page that places an order: the generated form, its
-// product a select from the references, as the console's new page has it.
+// product a picker from the references, as the console's new page has it.
 #[page("/app/new-order")]
 async fn app_new_order(cx: &Cx) -> topcoat::Result<impl View> {
-    let choices = references::order_input_form_choices(cx, Choices::new()).await;
+    let form = OrderInputForm::new();
+    let choices = references::order_input_form_choices(cx, &form, Choices::new()).await;
     Ok(view! {
         <form method="post">
-            order_input_fields(form: OrderInputForm::new(), errors: FormErrors::default(), choices: choices)
+            order_input_fields(form: form, errors: FormErrors::default(), choices: choices)
+            <button type="submit">"Place the order"</button>
         </form>
     })
 }
@@ -1028,7 +1417,8 @@ async fn app_orders_procedure(cx: &Cx) -> topcoat::Result<impl View> {
     let query = parts(cx).uri.query().unwrap_or_default().to_owned();
     let cursor = query.strip_prefix("cursor=").map(str::to_owned);
     let limit = query.strip_prefix("limit=").map_or(Some(3), |limit| limit.parse().ok());
-    let args = OrderListOrdersArgsRecord { statuses: None, product_id: None, q: None, cursor, limit };
+    let sort = query.strip_prefix("sort=").map(str::to_owned);
+    let args = OrderListOrdersArgsRecord { statuses: None, product_id: None, q: None, cursor, limit, sort };
     let said = match procedures::call_order_list_orders(cx, args).await {
         Ok(OrderPageRecord { items, next }) => {
             let numbers: Vec<String> = items.into_iter().map(|order| order.number).collect();
@@ -1053,9 +1443,11 @@ async fn send(router: &Router, method: &str, uri: &str, caller: &str, content_ty
         request = request.header(header::CONTENT_TYPE, content_type);
     }
     let response = router.handle(request.body(Body::from(body)).unwrap()).await;
-    let status = response.status();
+    let (status, headers) = (response.status(), response.headers().clone());
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    Answer { status, html: String::from_utf8(bytes.to_vec()).unwrap() }
+    let html = String::from_utf8(bytes.to_vec()).unwrap();
+    enter::check_page(uri, &headers, &html);
+    Answer { status, html }
 }
 
 async fn get(router: &Router, uri: &str, caller: &str) -> Answer {
@@ -1173,48 +1565,94 @@ async fn a_search_box_comes_first_filters_and_pages() {
     assert_eq!(long.status, StatusCode::UNPROCESSABLE_ENTITY, "{}", long.html);
 }
 
+// The text of the picker of the control named name: its shard's markup,
+// from the picker's start to its end.
+fn picker<'a>(html: &'a str, name: &str) -> &'a str {
+    between(html, &format!(r#"<div class="ss-pick" data-ss-pick="{name}">"#), "</div>")
+}
+
+// The options of a picker's select, each its value, its label and whether
+// it is selected.
+fn picked(picker: &str) -> Vec<(String, String, bool)> {
+    between(picker, "<select", "</select>")
+        .split("<option value=\"")
+        .skip(1)
+        .map(|option| {
+            let (value, rest) = option.split_once('"').unwrap();
+            let label = rest.split_once('>').unwrap().1.trim_end_matches("</option>").to_owned();
+            (value.to_owned(), label, rest.starts_with(r#" selected="""#))
+        })
+        .filter(|(value, _, _)| !value.is_empty())
+        .collect()
+}
+
+// A picker's options as their labels.
+fn labels(picker: &str) -> Vec<String> {
+    picked(picker).into_iter().map(|(_, label, _)| label).collect()
+}
+
+// The option a picker's select holds selected, by its value.
+fn chosen(picker: &str) -> Option<String> {
+    picked(picker).into_iter().find(|(_, _, selected)| *selected).map(|(value, _, _)| value)
+}
+
 #[tokio::test]
-async fn a_reference_is_a_select_of_its_items_and_a_value_is_named_by_its_label() {
+async fn a_searched_reference_is_a_picker_and_a_value_is_named_by_its_label() {
     let store = Store::new();
     let app = app(&store);
-    // The new order's line names its product from a select of the
-    // products, each by its name, and its gift by sku, from one listing.
+    // The new order's line and its gift are pickers: listProducts searches,
+    // so each is a search box, a Find and a select of the first page of
+    // the products, with a note that more match, from one listing.
     let new = get(&app, "/console/orders/new", "clerk").await;
     assert_eq!(new.status, StatusCode::OK, "{}", new.html);
-    let anvil = wire(&uuid(ANVIL));
+    let line = picker(&new.html, "lines[0].productId");
     for want in [
-        r#"<select id="order-input-lines-0-product-id" name="lines[0].productId" required"#.to_owned(),
-        format!(r#"<option value="{anvil}">Anvil</option>"#),
-        r#"<select id="order-input-gift-sku" name="giftSku""#.to_owned(),
-        r#"<option value="drum">Drum</option>"#.to_owned(),
+        r#"<input type="search" name="_find.lines[0].productId" value="" aria-label="Search Products" aria-controls="order-input-lines-0-product-id" maxlength="50""#,
+        r#"<button type="submit" name="_action" value="find:lines[0].productId" formnovalidate="""#,
+        r#"<select id="order-input-lines-0-product-id" name="lines[0].productId" required="""#,
+        r#"<p class="ss-pick-more">More products match: search for more of the text.</p>"#,
     ] {
-        assert!(new.html.contains(&want), "the new page lacks {want}: {}", new.html);
+        assert!(line.contains(want), "the line's picker lacks {want}: {line}");
     }
-    assert_eq!(store.calls(), (1, vec![]), "one listing for the new page's two references");
+    assert_eq!(labels(line), ["Anvil", "Bucket"], "{line}");
+    let anvil = wire(&uuid(ANVIL));
+    assert_eq!(picked(line)[0].0, anvil, "{line}");
+    let gift = picker(&new.html, "giftSku");
+    assert!(gift.contains(r#"name="_find.giftSku""#) && gift.contains(r#"value="find:giftSku""#), "{gift}");
+    assert_eq!(picked(gift), [("anvil".to_owned(), "Anvil".to_owned(), false), ("bucket".to_owned(), "Bucket".to_owned(), false)], "{gift}");
+    // The label stays the control's own, and Enter presses the hidden
+    // submit ahead of every Find.
+    assert!(new.html.contains(r#"<label for="order-input-lines-0-product-id">Product</label>"#), "{}", new.html);
+    let form = between(&new.html, r#"<form method="post" class="ss-form">"#, "</form>");
+    assert!(form.starts_with(r#"<button type="submit" class="ss-submit" hidden=""></button>"#), "{form}");
+    assert_eq!(store.calls(), (1, vec![]), "one listing for the new page's two pickers");
     // The app's own page takes the same choices.
     let own = get(&app, "/app/new-order", "clerk").await;
-    assert!(own.html.contains(&format!(r#"<option value="{anvil}">Anvil</option>"#)), "{}", own.html);
+    assert_eq!(labels(picker(&own.html, "lines[0].productId")), ["Anvil", "Bucket"], "{}", own.html);
     store.calls();
 
-    // An order's page names its lines' products through the lookup, its
-    // gift from the listing, and its action's product is a select.
-    let first = uuid("8d1f6c9e-0000-4000-8000-000000000101");
-    let item = get(&app, &format!("/console/orders/{}", wire(&first)), "clerk").await;
+    // An order's page names its lines' products through the lookup and its
+    // gift from the listing, and its action's product is a picker.
+    let item = get(&app, &format!("/console/orders/{}", wire(&uuid(FIRST))), "clerk").await;
     assert_eq!(item.status, StatusCode::OK, "{}", item.html);
     assert!(item.html.contains(r#"<td data-field="productId">Anvil</td>"#), "{}", item.html);
     assert!(item.html.contains(r#"<td data-field="productId">Crate</td>"#), "{}", item.html);
     assert!(item.html.contains(r#"<dd>Bucket</dd>"#), "the gift by its name: {}", item.html);
-    assert!(item.html.contains(r#"<select id="order-add-line-product-id" name="productId" required"#), "{}", item.html);
+    let action = picker(&item.html, "productId");
+    assert!(action.contains(r#"<select id="order-add-line-product-id" name="productId" required="""#), "{action}");
     let (listings, lookups) = store.calls();
-    assert_eq!(listings, 1, "one listing for the gift and the action's select");
+    assert_eq!(listings, 2, "the gift's listing and the action's first page");
     assert_eq!(lookups, vec![vec![anvil.clone(), wire(&uuid(CRATE))]], "one lookup of the lines' products");
 
-    // The list names each row's gift; its filter's product is a select.
+    // The list names each row's gift; its filter's product is a picker.
     let list = get(&app, "/console/orders", "clerk").await;
     assert!(list.html.contains(r#"<td data-field="giftSku">Bucket</td>"#), "{}", list.html);
-    assert!(list.html.contains(r#"<select id="order-list-orders-product-id" name="productId""#), "{}", list.html);
+    let filter = picker(&list.html, "productId");
+    assert!(filter.contains(r#"<select id="order-list-orders-product-id" name="productId""#), "{filter}");
+    // A filter's Find sends its query: it names no action.
+    assert!(filter.contains(r#"<button type="submit" formnovalidate="""#) && !filter.contains("_action"), "{filter}");
     let (listings, lookups) = store.calls();
-    assert_eq!(listings, 1, "one listing for the rows' gifts and the filter");
+    assert_eq!(listings, 2, "the rows' gifts' listing and the filter's first page");
     assert_eq!(lookups.len(), 1, "one lookup for the rows' lines: {lookups:?}");
 
     // A post through the select places the order with the product's id.
@@ -1225,13 +1663,129 @@ async fn a_reference_is_a_select_of_its_items_and_a_value_is_named_by_its_label(
 }
 
 #[tokio::test]
+async fn a_picker_finds_by_get_and_by_post() {
+    let store = Store::new();
+    let app = app(&store);
+    // A filter's picker searches the text its query sends, beside the
+    // list, which the product held filters.
+    let crate_id = wire(&uuid(CRATE));
+    let found = get(&app, &format!("/console/orders?productId={crate_id}&_find.productId=cr"), "clerk").await;
+    assert_eq!(found.status, StatusCode::OK, "{}", found.html);
+    assert_eq!(numbers(&found.html), ["A-1", "A-5"], "{}", found.html);
+    let filter = picker(&found.html, "productId");
+    assert!(filter.contains(r#"name="_find.productId" value="cr""#), "{filter}");
+    assert_eq!(labels(filter), ["Crate"], "{filter}");
+    assert_eq!(chosen(filter), Some(crate_id.clone()), "{filter}");
+    assert!(!filter.contains("ss-pick-more"), "{filter}");
+    // The pager's links keep the filter but not the search's text.
+    let next = link(&get(&app, "/console/orders?_find.productId=cr", "clerk").await.html, "next").unwrap();
+    assert!(!next.contains("_find"), "{next}");
+    store.calls();
+
+    // A post's Find renders the form again as it was sent, 200, without
+    // the operation: the pressed picker's text searched, the other's kept
+    // in its box over the first page.
+    let before = store.orders.lock().unwrap().len();
+    let body = "lines[0].productId=&lines[0].quantity=2&note=soon&giftSku=&_find.lines[0].productId=dr&_find.giftSku=an&_action=find:lines[0].productId";
+    let again = post(&app, "/console/orders/new", "clerk", body).await;
+    assert_eq!(again.status, StatusCode::OK, "{}", again.html);
+    assert_eq!(store.orders.lock().unwrap().len(), before, "a Find places no order");
+    let line = picker(&again.html, "lines[0].productId");
+    assert!(line.contains(r#"value="dr""#), "{line}");
+    assert_eq!(labels(line), ["Drum"], "{line}");
+    let gift = picker(&again.html, "giftSku");
+    assert!(gift.contains(r#"name="_find.giftSku" value="an""#), "{gift}");
+    assert_eq!(labels(gift), ["Anvil", "Bucket"], "{gift}");
+    assert!(again.html.contains(r#"name="lines[0].quantity" type="number""#) && again.html.contains(r#"value="2""#), "{}", again.html);
+    assert!(again.html.contains(r#"value="soon""#), "{}", again.html);
+    assert!(!again.html.contains("form-error"), "{}", again.html);
+    assert_eq!(store.calls(), (2, vec![]), "the pressed text's listing and the first page's");
+
+    // The value held past the first page is an option, named through the
+    // lookup, and selected.
+    let drum = wire(&uuid(DRUM));
+    let body = format!("lines[0].productId={drum}&lines[0].quantity=1&_find.giftSku=bu&_action=find:giftSku");
+    let held = post(&app, "/console/orders/new", "clerk", &body).await;
+    assert_eq!(held.status, StatusCode::OK, "{}", held.html);
+    let line = picker(&held.html, "lines[0].productId");
+    assert_eq!(labels(line), ["Drum", "Anvil", "Bucket"], "{line}");
+    assert_eq!(chosen(line), Some(drum.clone()), "{line}");
+    assert_eq!(labels(picker(&held.html, "giftSku")), ["Bucket"], "{}", held.html);
+    assert_eq!(store.calls(), (2, vec![vec![drum.clone()]]), "two listings and one lookup of the value held");
+
+    // Enter presses the hidden submit, which names no action: the form is
+    // placed.
+    let placed = post(&app, "/console/orders/new", "clerk", &format!("lines[0].productId={drum}&lines[0].quantity=1&_find.lines[0].productId=dr")).await;
+    assert_eq!(placed.status, StatusCode::SEE_OTHER, "{}", placed.html);
+    assert_eq!(store.orders.lock().unwrap().len(), before + 1);
+
+    // A text past the search argument's maxLength shows the route's
+    // message, and no matches.
+    let long = get(&app, &format!("/console/orders?_find.productId={}", "x".repeat(51)), "clerk").await;
+    assert_eq!(long.status, StatusCode::OK, "{}", long.html);
+    let refused = picker(&long.html, "productId");
+    assert!(refused.contains(r#"<p class="field-error">Invalid query parameter q"#), "{refused}");
+    assert!(labels(refused).is_empty(), "{refused}");
+}
+
+#[tokio::test]
+async fn a_pickers_shard_renders_what_the_text_finds() {
+    let store = Store::new();
+    let app = app(&store);
+    let new = get(&app, "/console/orders/new", "clerk").await;
+    let line = picker(&new.html, "lines[0].productId");
+    // The box's input sets the shard's searched and text signals, the
+    // select's change its value signal.
+    let identity = between(&new.html, r#"::topcoat::shard::start("/_superschematic/fixture-console-api/_pick/product", ""#, "\"");
+    let input = between(line, r#"<input type="search""#, "<button");
+    let signals: Vec<&str> = input.split("&quot;Signal&quot;,&quot;id&quot;:&quot;").skip(1).map(|rest| rest.split("&quot;").next().unwrap()).collect();
+    assert_eq!(signals.len(), 2, "{line}");
+    store.calls();
+    // The reader typed dr with Bucket held: the shard lists Drum, and
+    // Bucket, named through the lookup, stays selected.
+    let bucket = wire(&uuid(BUCKET));
+    // The arguments as the runtime sends them back, records, a list and an
+    // option tagged as the shard's start marker writes them.
+    let record = |fields: serde_json::Value| serde_json::json!({"t": "Record", "v": fields});
+    let control = record(serde_json::json!({"name": "lines[0].productId", "id": "order-input-lines-0-product-id", "required": true, "invalid": false, "value": bucket, "post": true}));
+    let pick = |text: &str, options: Vec<serde_json::Value>, more: bool| {
+        record(serde_json::json!({"text": text, "options": {"t": "Vec", "bits": 64, "v": options}, "more": more, "refused": {"t": "Option", "v": null}}))
+    };
+    let body = serde_json::json!({"args": [control, pick("", Vec::new(), false)], "signals": {signals[0]: true, signals[1]: "dr"}});
+    let mut request = http::Request::builder().method("POST").uri("/_superschematic/fixture-console-api/_pick/product").header("x-caller", "clerk");
+    request = request.header(header::CONTENT_TYPE, "application/json").header("x-topcoat-identity", identity);
+    let response = app.handle(request.body(Body::from(body.to_string())).unwrap()).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let html = String::from_utf8(to_bytes(response.into_body(), usize::MAX).await.unwrap().to_vec()).unwrap();
+    let shard = picker(&html, "lines[0].productId");
+    assert!(shard.contains(r#"name="_find.lines[0].productId" value="dr""#), "{shard}");
+    assert_eq!(labels(shard), ["Bucket", "Drum"], "{shard}");
+    assert_eq!(chosen(shard), Some(bucket.clone()), "{shard}");
+    assert_eq!(store.calls(), (1, vec![vec![bucket]]), "one listing of the text, one lookup of the value");
+    // Without the searched signal the shard renders the pick it was given.
+    let body = serde_json::json!({"args": [control, pick("x", vec![record(serde_json::json!({"value": "v", "label": "V"}))], true)]});
+    let response = app.handle(
+        http::Request::builder()
+            .method("POST")
+            .uri("/_superschematic/fixture-console-api/_pick/product")
+            .header("x-caller", "clerk")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap(),
+    ).await;
+    let html = String::from_utf8(to_bytes(response.into_body(), usize::MAX).await.unwrap().to_vec()).unwrap();
+    assert_eq!(labels(picker(&html, "lines[0].productId")), ["V"], "{html}");
+    assert_eq!(store.calls(), (0, vec![]));
+}
+
+#[tokio::test]
 async fn a_caller_who_may_not_list_the_items_gets_the_plain_control_and_the_value() {
     let store = Store::new();
     let app = app(&store);
     let new = get(&app, "/console/orders/new", "taker").await;
     assert_eq!(new.status, StatusCode::OK, "{}", new.html);
     assert!(new.html.contains(r#"<input id="order-input-lines-0-product-id" name="lines[0].productId" type="text" required"#), "{}", new.html);
-    assert!(!new.html.contains("<option value=\"drum\""), "{}", new.html);
+    assert!(!new.html.contains("ss-pick"), "{}", new.html);
     let item = get(&app, &format!("/console/orders/{}", wire(&uuid(FIRST))), "taker").await;
     assert_eq!(item.status, StatusCode::OK, "{}", item.html);
     assert!(item.html.contains(&format!(r#"<td data-field="productId">{}</td>"#, wire(&uuid(ANVIL)))), "{}", item.html);
@@ -1249,7 +1803,8 @@ async fn the_apps_choices_win_and_spare_the_call() {
     let app = app_with(&store, Settings::new().choices(own));
     let new = get(&app, "/console/orders/new", "clerk").await;
     assert!(new.html.contains(&format!(r#"<option value="{anvil}">The anvil</option>"#)), "{}", new.html);
-    assert!(new.html.contains(r#"<option value="drum">Drum</option>"#), "{}", new.html);
+    assert!(!new.html.contains(r#"data-ss-pick="lines[0].productId""#), "{}", new.html);
+    assert_eq!(labels(picker(&new.html, "giftSku")), ["Anvil", "Bucket"], "{}", new.html);
     assert_eq!(store.calls().0, 1, "the gift's listing alone");
     let item = get(&app, &format!("/console/orders/{}", wire(&uuid(FIRST))), "clerk").await;
     assert!(item.html.contains(r#"<td data-field="productId">The anvil</td>"#), "{}", item.html);
@@ -1257,14 +1812,17 @@ async fn the_apps_choices_win_and_spare_the_call() {
 }
 
 #[tokio::test]
-async fn more_items_than_a_page_keep_the_control_and_are_named_in_chunks() {
+async fn more_items_than_a_page_are_picked_and_named_in_chunks() {
     let store = Store::new();
     store.products.lock().unwrap().extend([product(EASEL, "Easel"), product(FUNNEL, "Funnel")]);
     let all = [ANVIL, BUCKET, CRATE, DRUM, EASEL, FUNNEL];
     store.orders.lock().unwrap().push(order(9, types::OrderStatus::Placed, None, None, all.iter().map(|id| line(id, 1.0)).collect()));
     let app = app(&store);
+    // A picker however many items there are.
     let new = get(&app, "/console/orders/new", "clerk").await;
-    assert!(new.html.contains(r#"<input id="order-input-lines-0-product-id" name="lines[0].productId" type="text" required"#), "{}", new.html);
+    let line = picker(&new.html, "lines[0].productId");
+    assert_eq!(labels(line), ["Anvil", "Bucket"], "{line}");
+    assert!(line.contains("ss-pick-more"), "{line}");
     store.calls();
     let item = get(&app, &format!("/console/orders/{}", wire(&uuid("8d1f6c9e-0000-4000-8000-000000000109"))), "clerk").await;
     for name in ["Anvil", "Easel", "Funnel"] {
@@ -1332,7 +1890,9 @@ async fn a_live_list_pages_in_place() {
     request = request.header(header::CONTENT_TYPE, "application/json").header("x-topcoat-identity", identity);
     let response = app.handle(request.body(Body::from(body.to_string())).unwrap()).await;
     assert_eq!(response.status(), StatusCode::OK);
+    let headers = response.headers().clone();
     let html = String::from_utf8(to_bytes(response.into_body(), usize::MAX).await.unwrap().to_vec()).unwrap();
+    enter::check_page("/console/_live/orders", &headers, &html);
     assert_eq!(numbers(&html), ["A-3", "A-4"], "{html}");
     // A refused cursor is the shard's 400 too.
     let refused = shard(&app, "/console/_live/orders", "clerk", serde_json::json!({"args": ["cursor=e30", "/console/orders"]})).await;
@@ -1352,6 +1912,12 @@ async fn a_procedure_answers_a_page_record() {
     assert_eq!(between(&forged.html, r#"<p id="said">"#, "</p>"), "400 cursor is not one this operation returned");
     let past = get(&app, "/app/orders-procedure?limit=9", "clerk").await;
     assert_eq!(between(&past.html, r#"<p id="said">"#, "</p>"), "400 Invalid query parameter limit: must be at most 5");
+    // The record's sort orders the page, and a sort the route does not
+    // offer is its 400 (D60, amended).
+    let reversed = get(&app, "/app/orders-procedure?sort=-number", "clerk").await;
+    assert_eq!(between(&reversed.html, r#"<p id="said">"#, "</p>").split_once(" next=").unwrap().0, "A-5,A-4,A-3");
+    let refused = get(&app, "/app/orders-procedure?sort=status", "clerk").await;
+    assert_eq!(between(&refused.html, r#"<p id="said">"#, "</p>"), "400 Invalid query parameter sort: expected one of number, -number");
 }
 
 #[tokio::test]
@@ -1437,10 +2003,11 @@ async fn the_pager_goes_back_a_page_by_its_history() {
 #[tokio::test]
 async fn a_history_past_its_bound_or_its_rule_has_no_previous_page() {
     let app = app(&seven_orders());
-    // A cursor of 1024 characters, the most a route reads, after A-1, and
-    // entries of 1024 characters, which are cursors by the rule though no
-    // page returned them.
-    let long = Cursor::encode(&format!("A-1{}", "x".repeat(763))).unwrap();
+    // A cursor of 1024 characters, the most a route reads, after A-1 and
+    // bound to the orders' default sort (D60, amended), and entries of 1024
+    // characters, which are cursors by the rule though no page returned
+    // them.
+    let long = Cursor::encode(&format!("A-1{}", "x".repeat(739))).unwrap().bind(&Sort::parse("number").unwrap()).unwrap();
     assert_eq!(long.as_str().len(), 1024);
     let long = long.as_str().to_owned();
     let entry = "A".repeat(1024);
@@ -1605,7 +2172,9 @@ async fn a_live_list_goes_back_and_sets_its_size_in_place() {
     request = request.header(header::CONTENT_TYPE, "application/json").header("x-topcoat-identity", identity);
     let response = app.handle(request.body(Body::from(body.to_string())).unwrap()).await;
     assert_eq!(response.status(), StatusCode::OK);
+    let headers = response.headers().clone();
     let html = String::from_utf8(to_bytes(response.into_body(), usize::MAX).await.unwrap().to_vec()).unwrap();
+    enter::check_page("/console/_live/orders", &headers, &html);
     assert_eq!(numbers(&html), ["A-1", "A-2", "A-3", "A-4", "A-5"], "{html}");
     assert!(link(&html, "first").is_none() && link(&html, "prev").is_none(), "{html}");
     assert!(size_form(&html).contains(r#"<option value="5" selected="">5</option>"#), "{html}");
@@ -1665,6 +2234,125 @@ async fn a_list_at_page_pages_beside_the_pagers_helpers() {
     assert!(second.html.contains("Terms") && !second.html.contains("About us"), "{}", second.html);
     assert_eq!(link(&second.html, "first").as_deref(), Some("/console/page"), "{}", second.html);
 }
+
+// The header cell of a table's column, from its start tag to its end.
+fn header<'a>(html: &'a str, field: &str) -> &'a str {
+    between(html, &format!(r#"<th scope="col" data-field="{field}""#), "</th>")
+}
+
+// The href of a header's sort link, unescaped, or none.
+fn sort_link(html: &str, field: &str) -> Option<String> {
+    let cell = header(html, field);
+    cell.contains("<a href=").then(|| between(cell, r#"<a href=""#, "\"").replace("&amp;", "&"))
+}
+
+// The names of the products a page's table shows, in order.
+fn names(html: &str) -> Vec<String> {
+    html.split(r#"<th scope="row" data-field="name">"#)
+        .skip(1)
+        .map(|cell| {
+            let cell = cell.split("</th>").next().unwrap();
+            cell.rsplit_once("\">").map_or(cell, |(_, text)| text).trim_end_matches("</a>").to_owned()
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn the_headers_sort_the_list() {
+    let app = app(&Store::new());
+    // The column of the default order says so, and its link reverses it;
+    // the other sort field's sorts by it ascending; a column that is no
+    // sort field keeps its label.
+    let list = get(&app, "/console/products", "clerk").await;
+    assert_eq!(list.status, StatusCode::OK, "{}", list.html);
+    assert_eq!(names(&list.html), ["Anvil", "Bucket"], "{}", list.html);
+    assert!(header(&list.html, "name").contains(r#"aria-sort="ascending""#), "{}", list.html);
+    assert!(header(&list.html, "name").contains(r#"data-ss-sort="name""#), "{}", list.html);
+    assert_eq!(sort_link(&list.html, "name").as_deref(), Some("/console/products?sort=-name"));
+    assert!(!header(&list.html, "sku").contains("aria-sort"), "{}", list.html);
+    assert_eq!(sort_link(&list.html, "sku").as_deref(), Some("/console/products?sort=sku"));
+    assert_eq!(sort_link(&list.html, "supplierId"), None, "{}", list.html);
+    assert!(!header(&list.html, "supplierId").contains("aria-sort"), "{}", list.html);
+
+    // The reversed order: its column descends, its link sorts ascending,
+    // and the pages after it keep the order.
+    let reversed = get(&app, "/console/products?sort=-name", "clerk").await;
+    assert_eq!(names(&reversed.html), ["Drum", "Crate"], "{}", reversed.html);
+    assert!(header(&reversed.html, "name").contains(r#"aria-sort="descending""#), "{}", reversed.html);
+    assert_eq!(sort_link(&reversed.html, "name").as_deref(), Some("/console/products?sort=name"));
+    let next = link(&reversed.html, "next").unwrap();
+    assert!(next.starts_with("/console/products?sort=-name&cursor="), "{next}");
+    let second = get(&app, &next, "clerk").await;
+    assert_eq!(second.status, StatusCode::OK, "{}", second.html);
+    assert_eq!(names(&second.html), ["Bucket", "Anvil"], "{}", second.html);
+    assert_eq!(link(&second.html, "first").as_deref(), Some("/console/products?sort=-name"), "{}", second.html);
+    // A header's link starts again at the first page: no cursor, no back.
+    let resort = sort_link(&second.html, "sku").unwrap();
+    assert_eq!(resort, "/console/products?sort=sku", "{}", second.html);
+    assert_eq!(names(&get(&app, &resort, "clerk").await.html), ["Anvil", "Bucket"]);
+
+    // The filter holds the sort as a hidden input, and the size form and
+    // the pager keep it, beside the search and the limit.
+    let searched = get(&app, "/console/products?q=r&sort=-sku&limit=1", "clerk").await;
+    assert_eq!(names(&searched.html), ["Drum"], "{}", searched.html);
+    let filter = between(&searched.html, r#"<form method="get" class="ss-filter""#, "</form>");
+    assert!(filter.contains(r#"<input type="hidden" name="sort" value="-sku"><input type="hidden" name="limit" value="1">"#), "{filter}");
+    assert!(size_form(&searched.html).contains(r#"<input type="hidden" name="sort" value="-sku">"#), "{}", searched.html);
+    let next = link(&searched.html, "next").unwrap();
+    assert!(next.starts_with("/console/products?q=r&sort=-sku&limit=1&cursor="), "{next}");
+    assert_eq!(sort_link(&searched.html, "name").as_deref(), Some("/console/products?q=r&sort=name&limit=1"));
+
+    // A sort the route does not offer is its 400, the form's own message,
+    // and no link or form keeps it.
+    let refused = get(&app, "/console/products?sort=price&limit=1", "clerk").await;
+    assert_eq!(refused.status, StatusCode::BAD_REQUEST, "{}", refused.html);
+    assert!(refused.html.contains(r#"<p class="form-error">sort: expected one of name, -name, sku, -sku</p>"#), "{}", refused.html);
+    let filter = between(&refused.html, r#"<form method="get" class="ss-filter""#, "</form>");
+    assert!(!filter.contains(r#"name="sort""#), "{filter}");
+    // A cursor returned under another sort is the route's 400 too.
+    let cursor = param(&next, "cursor").unwrap();
+    let other = get(&app, &format!("/console/products?sort=name&cursor={cursor}"), "clerk").await;
+    assert_eq!(other.status, StatusCode::BAD_REQUEST, "{}", other.html);
+    assert!(other.html.contains(r#"<p class="form-error">cursor: returned under another sort</p>"#), "{}", other.html);
+
+    // A list under an item sorts by its own headers, by a number among
+    // them; the item's page shows its first page with none.
+    let anvil = wire(&uuid(ANVIL));
+    let reviews = get(&app, &format!("/console/products/{anvil}/reviews?sort=-rating"), "clerk").await;
+    assert_eq!(reviews.status, StatusCode::OK, "{}", reviews.html);
+    assert!(header(&reviews.html, "rating").contains(r#"aria-sort="descending""#), "{}", reviews.html);
+    assert_eq!(sort_link(&reviews.html, "title"), Some(format!("/console/products/{anvil}/reviews?sort=title")));
+    let ratings: Vec<&str> = reviews.html.split(r#"<td data-field="rating">"#).skip(1).map(|cell| cell.split('<').next().unwrap()).collect();
+    assert_eq!(ratings, ["5", "4"], "{}", reviews.html);
+    let item = get(&app, &format!("/console/products/{anvil}"), "clerk").await;
+    let section = between(&item.html, r#"<section class="ss-section" data-resource="reviews">"#, "</section>");
+    assert!(!section.contains("data-ss-sort") && !section.contains("aria-sort"), "{section}");
+}
+
+#[tokio::test]
+async fn a_live_list_sorts_in_place() {
+    let app = app(&Store::new());
+    let list = get(&app, "/console/products", "clerk").await;
+    // A header's link sets the shard's query and the address bar.
+    let cell = header(&list.html, "sku");
+    assert!(cell.contains("data-topcoat-on:click=") && cell.contains("history.replaceState"), "{cell}");
+    // The shard renders the order its signal's query sets, under its
+    // identity, the headers following it.
+    let identity = between(&list.html, r#"::topcoat::shard::start("/console/_live/products", ""#, "\"");
+    let signal = between(&list.html, "::topcoat::signal({&quot;t&quot;:&quot;signal&quot;,&quot;id&quot;:&quot;", "&quot;");
+    let body = serde_json::json!({"args": ["", "/console/products"], "signals": {signal: "sort=-sku"}});
+    let mut request = http::Request::builder().method("POST").uri("/console/_live/products").header("x-caller", "clerk");
+    request = request.header(header::CONTENT_TYPE, "application/json").header("x-topcoat-identity", identity);
+    let response = app.handle(request.body(Body::from(body.to_string())).unwrap()).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let headers = response.headers().clone();
+    let html = String::from_utf8(to_bytes(response.into_body(), usize::MAX).await.unwrap().to_vec()).unwrap();
+    enter::check_page("/console/_live/products", &headers, &html);
+    assert_eq!(names(&html), ["Drum", "Crate"], "{html}");
+    assert!(header(&html, "sku").contains(r#"aria-sort="descending""#), "{html}");
+    assert!(!header(&html, "name").contains("aria-sort"), "{html}");
+    assert_eq!(sort_link(&html, "sku").as_deref(), Some("/console/products?sort=sku"), "{html}");
+}
 `
 
 // supplierAppTest is tests/app.rs of the Topcoat crate of the copy of
@@ -1685,6 +2373,9 @@ use schemas_fixture_console_api_topcoat::pages::Settings;
 use schemas_fixture_console_api_topcoat::{PageAuthenticator, RouterBuilderFixtureConsoleApiExt};
 use topcoat::context::Cx;
 use topcoat::router::{header, to_bytes, Body, Router, RouterBuilderDiscoverExt, StatusCode};
+
+#[path = "support/enter.rs"]
+mod enter;
 
 const ANVIL: &str = "8d1f6c9e-0000-4000-8000-000000000001";
 const BUCKET: &str = "8d1f6c9e-0000-4000-8000-000000000002";
@@ -1797,9 +2488,11 @@ async fn send(router: &Router, method: &str, uri: &str, body: &str) -> (StatusCo
         request = request.header(header::CONTENT_TYPE, "application/x-www-form-urlencoded");
     }
     let response = router.handle(request.body(Body::from(body.to_owned())).unwrap()).await;
-    let status = response.status();
+    let (status, headers) = (response.status(), response.headers().clone());
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    (status, String::from_utf8(bytes.to_vec()).unwrap())
+    let html = String::from_utf8(bytes.to_vec()).unwrap();
+    enter::check_page(uri, &headers, &html);
+    (status, html)
 }
 
 #[tokio::test]
@@ -1827,5 +2520,332 @@ async fn a_reference_to_a_dependencys_type_offers_and_names_its_items() {
     let (_, products) = send(&app, "GET", "/console/suppliers/bolt/products", "").await;
     assert!(products.contains("<li><span>Bolt</span></li>"), "{products}");
     assert!(products.contains(">Bucket</th>") && products.contains(">Crate</th>"), "{products}");
+}
+`
+
+// hostedAppTest is tests/app.rs of the Topcoat crate of the copy of
+// fixture-console-api whose Supplier, and its options, are
+// fixture-console-suppliers-api's, which one app hosts beside it.
+const hostedAppTest = `use std::sync::{Arc, Mutex};
+
+use async_trait::async_trait;
+use http::request::Parts;
+use schemas_fixture_console_api_topcoat::api::runtime::page::{Cursor, Page};
+use schemas_fixture_console_api_topcoat::api::runtime::{search, ApiError, Authenticator, Principal, RequestContext};
+use schemas_fixture_console_api_topcoat::api::{
+    types, Implementations, OrderAddLineArgs, OrderGetOrderArgs, OrderImplementation, OrderListOrdersArgs, OrderPlaceOrderArgs,
+    ProductCreateProductArgs, ProductGetProductArgs, ProductImplementation, ProductListProductsArgs, ReviewImplementation,
+    ReviewListReviewsArgs, SiteImplementation, SiteListPagesArgs, SupplierImplementation, SupplierListSupplierProductsArgs,
+};
+use schemas_fixture_console_api_topcoat::pages::Settings;
+use schemas_fixture_console_api_topcoat::{PageAuthenticator, RouterBuilderFixtureConsoleApiExt};
+use schemas_fixture_console_suppliers_api_topcoat as suppliers;
+use suppliers::RouterBuilderFixtureConsoleSuppliersApiExt;
+use topcoat::context::Cx;
+use topcoat::router::{header, page, to_bytes, Body, Router, RouterBuilderDiscoverExt, StatusCode};
+use topcoat::view::{view, View};
+
+#[path = "support/enter.rs"]
+mod enter;
+
+const ANVIL: &str = "8d1f6c9e-0000-4000-8000-000000000001";
+const BUCKET: &str = "8d1f6c9e-0000-4000-8000-000000000002";
+const CRATE: &str = "8d1f6c9e-0000-4000-8000-000000000003";
+
+fn uuid(text: &str) -> types::IdentityUUID {
+    serde_json::from_value(serde_json::json!(text)).unwrap()
+}
+
+fn product(id: &str, name: &str, supplier: &str) -> types::Product {
+    types::Product { id: uuid(id), name: name.to_owned(), sku: name.to_lowercase(), supplier_id: supplier.to_owned(), in_stock: true }
+}
+
+// The console's products, and nothing else: it lists no supplier.
+struct Shop(Mutex<Vec<types::Product>>);
+
+#[async_trait]
+impl ProductImplementation for Shop {
+    async fn list_products(&self, _ctx: RequestContext, args: ProductListProductsArgs) -> Result<Page<types::Product>, ApiError> {
+        let products = self.0.lock().unwrap();
+        Ok(Page::last(products.iter().filter(|product| args.ids.as_ref().is_none_or(|ids| ids.contains(&product.id))).cloned().collect()))
+    }
+    async fn get_product(&self, _ctx: RequestContext, args: ProductGetProductArgs) -> Result<types::Product, ApiError> {
+        let products = self.0.lock().unwrap();
+        products.iter().find(|product| product.id == args.product_id).cloned().ok_or_else(|| ApiError::not_found("No such product"))
+    }
+    async fn create_product(&self, _ctx: RequestContext, args: ProductCreateProductArgs) -> Result<types::Product, ApiError> {
+        let created = types::Product { name: args.input.name, sku: args.input.sku, supplier_id: args.input.supplier_id, ..product(CRATE, "", "") };
+        self.0.lock().unwrap().push(created.clone());
+        Ok(created)
+    }
+}
+
+#[async_trait]
+impl SupplierImplementation for Shop {
+    async fn list_supplier_products(&self, _ctx: RequestContext, args: SupplierListSupplierProductsArgs) -> Result<Vec<types::Product>, ApiError> {
+        let products = self.0.lock().unwrap();
+        Ok(products.iter().filter(|product| product.supplier_id == args.supplier_id).cloned().collect())
+    }
+}
+
+#[async_trait]
+impl ReviewImplementation for Shop {
+    async fn list_reviews(&self, _ctx: RequestContext, _args: ReviewListReviewsArgs) -> Result<Page<types::Review>, ApiError> {
+        Ok(Page::last(Vec::new()))
+    }
+}
+
+#[async_trait]
+impl SiteImplementation for Shop {
+    async fn list_pages(&self, _ctx: RequestContext, _args: SiteListPagesArgs) -> Result<Page<types::SitePage>, ApiError> {
+        Ok(Page::last(Vec::new()))
+    }
+}
+
+#[async_trait]
+impl OrderImplementation for Shop {
+    async fn list_orders(&self, _ctx: RequestContext, _args: OrderListOrdersArgs) -> Result<Page<types::Order>, ApiError> {
+        Ok(Page::last(Vec::new()))
+    }
+    async fn place_order(&self, _ctx: RequestContext, _args: OrderPlaceOrderArgs) -> Result<types::Order, ApiError> {
+        Err(ApiError::not_found("No orders here"))
+    }
+    async fn get_order(&self, _ctx: RequestContext, _args: OrderGetOrderArgs) -> Result<types::Order, ApiError> {
+        Err(ApiError::not_found("No orders here"))
+    }
+    async fn add_line(&self, _ctx: RequestContext, _args: OrderAddLineArgs) -> Result<types::Order, ApiError> {
+        Err(ApiError::not_found("No orders here"))
+    }
+}
+
+// The suppliers' API: Acme, Bolt and Cog, by name, searched by their names.
+struct Directory;
+
+#[async_trait]
+impl suppliers::api::SupplierImplementation for Directory {
+    async fn list_suppliers(&self, _ctx: RequestContext, args: suppliers::api::SupplierListSuppliersArgs) -> Result<Page<suppliers::api::types::Supplier>, ApiError> {
+        let terms = search::terms(args.q.as_deref().unwrap_or_default());
+        let after: Option<String> = args.page.cursor.as_ref().map(Cursor::decode).transpose()?;
+        let rows: Vec<suppliers::api::types::Supplier> = ["Acme", "Bolt", "Cog"]
+            .iter()
+            .filter(|name| search::matches(name, &terms) && after.as_ref().is_none_or(|after| **name > after.as_str()))
+            .map(|name| suppliers::api::types::Supplier { id: name.to_lowercase(), name: (*name).to_owned() })
+            .collect();
+        Page::from_rows(rows, args.page.limit, |supplier| supplier.name.clone())
+    }
+}
+
+struct NoRequests;
+
+#[async_trait]
+impl Authenticator for NoRequests {
+    async fn authenticate(&self, _request: &Parts) -> Result<Option<Principal>, ApiError> {
+        Ok(None)
+    }
+}
+
+// Every page's caller is a clerk, who reads products and suppliers, in
+// both crates.
+struct Clerk;
+
+fn clerk() -> Option<Principal> {
+    Some(Principal::new("clerk", ["orders", "products.read"]))
+}
+
+#[async_trait]
+impl PageAuthenticator for Clerk {
+    async fn principal(&self, _cx: &Cx) -> Result<Option<Principal>, ApiError> {
+        Ok(clerk())
+    }
+}
+
+#[async_trait]
+impl suppliers::PageAuthenticator for Clerk {
+    async fn principal(&self, _cx: &Cx) -> Result<Option<Principal>, ApiError> {
+        Ok(clerk())
+    }
+}
+
+fn console(shop: &Arc<Shop>) -> Implementations {
+    Implementations {
+        order: Arc::clone(shop) as _,
+        product: Arc::clone(shop) as _,
+        review: Arc::clone(shop) as _,
+        site: Arc::clone(shop) as _,
+        supplier: Arc::clone(shop) as _,
+        authenticator: Arc::new(NoRequests),
+    }
+}
+
+fn directory() -> suppliers::api::Implementations {
+    suppliers::api::Implementations { supplier: Arc::new(Directory), authenticator: Arc::new(NoRequests) }
+}
+
+fn shop() -> Arc<Shop> {
+    Arc::new(Shop(Mutex::new(vec![product(ANVIL, "Anvil", "acme"), product(BUCKET, "Bucket", "bolt")])))
+}
+
+// The app that hosts both services: the console's JSON API at /api, the
+// suppliers' crate without one.
+fn app(shop: &Arc<Shop>) -> Router {
+    Router::builder()
+        .discover()
+        .app_context(Settings::new().title("Shop console"))
+        .fixture_console_api(console(shop), Clerk)
+        .fixture_console_suppliers_api_without_api(directory(), Clerk)
+        .build()
+}
+
+// An app that hosts the console alone, though it links the suppliers'
+// crate.
+fn console_alone(shop: &Arc<Shop>) -> Router {
+    Router::builder().discover().app_context(Settings::new().title("Shop console")).fixture_console_api(console(shop), Clerk).build()
+}
+
+// The suppliers' in-process call, from the app's own page: how many
+// suppliers its first page holds, or its refusal.
+#[page("/app/suppliers")]
+async fn app_suppliers(cx: &Cx) -> topcoat::Result<impl View> {
+    let args = suppliers::api::SupplierListSuppliersArgs { q: None, page: suppliers::api::SupplierListSuppliersArgs::PAGE.first() };
+    let said = match suppliers::operations::supplier_list_suppliers(cx, args).await {
+        Ok(page) => page.items.len().to_string(),
+        Err(err) => format!("{} {}", err.status.as_u16(), err.message),
+    };
+    Ok(view! { <p id="said">(said)</p> })
+}
+
+struct Answer {
+    status: StatusCode,
+    headers: http::HeaderMap,
+    html: String,
+}
+
+async fn send(router: &Router, method: &str, uri: &str, body: &str) -> Answer {
+    let mut request = http::Request::builder().method(method).uri(uri);
+    if method == "POST" {
+        request = request.header(header::CONTENT_TYPE, "application/x-www-form-urlencoded");
+    }
+    let response = router.handle(request.body(Body::from(body.to_owned())).unwrap()).await;
+    let (status, headers) = (response.status(), response.headers().clone());
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let html = String::from_utf8(bytes.to_vec()).unwrap();
+    enter::check_page(uri, &headers, &html);
+    Answer { status, headers, html }
+}
+
+async fn get(router: &Router, uri: &str) -> Answer {
+    send(router, "GET", uri, "").await
+}
+
+fn between<'a>(html: &'a str, start: &str, end: &str) -> &'a str {
+    let rest = &html[html.find(start).unwrap_or_else(|| panic!("no {start} in {html}")) + start.len()..];
+    &rest[..rest.find(end).unwrap()]
+}
+
+// The labels of the options of the picker of the control named name.
+fn labels(html: &str, name: &str) -> Vec<String> {
+    let picker = between(html, &format!(r#"<div class="ss-pick" data-ss-pick="{name}">"#), "</select>");
+    picker
+        .split("<option value=\"")
+        .skip(1)
+        .filter(|option| !option.starts_with('"'))
+        .map(|option| option.split_once('>').unwrap().1.trim_end_matches("</option>").to_owned())
+        .collect()
+}
+
+#[tokio::test]
+async fn a_product_names_its_supplier_through_the_hosted_crate() {
+    let app = app(&shop());
+    let list = get(&app, "/console/products").await;
+    assert_eq!(list.status, StatusCode::OK, "{}", list.html);
+    assert!(list.html.contains(r#"<td data-field="supplierId">Acme</td>"#) && list.html.contains(r#"<td data-field="supplierId">Bolt</td>"#), "{}", list.html);
+    let anvil = serde_json::to_value(uuid(ANVIL)).unwrap().as_str().unwrap().to_owned();
+    let item = get(&app, &format!("/console/products/{anvil}")).await;
+    assert!(item.html.contains("<dd>Acme</dd>"), "{}", item.html);
+    // The trail names a supplier through the reference of its products'
+    // route, from the suppliers' listing.
+    let products = get(&app, "/console/suppliers/bolt/products").await;
+    assert!(products.html.contains("<li><span>Bolt</span></li>"), "{}", products.html);
+}
+
+#[tokio::test]
+async fn a_new_product_picks_its_supplier_through_the_hosted_crate() {
+    let shop = shop();
+    let app = app(&shop);
+    // The suppliers' listSuppliers searches, so the supplier is a picker of
+    // its first page, one supplier, and more match.
+    let new = get(&app, "/console/products/new").await;
+    assert_eq!(new.status, StatusCode::OK, "{}", new.html);
+    assert_eq!(labels(&new.html, "supplierId"), ["Acme"], "{}", new.html);
+    assert!(new.html.contains("More suppliers match"), "{}", new.html);
+    // Find searches the suppliers' API in-process.
+    let found = send(&app, "POST", "/console/products/new", "name=Crate&sku=crate&supplierId=&_find.supplierId=bo&_action=find:supplierId").await;
+    assert_eq!(found.status, StatusCode::OK, "{}", found.html);
+    assert_eq!(labels(&found.html, "supplierId"), ["Bolt"], "{}", found.html);
+    let placed = send(&app, "POST", "/console/products/new", "name=Crate&sku=crate&supplierId=bolt").await;
+    assert_eq!(placed.status, StatusCode::SEE_OTHER, "{}", placed.html);
+    assert_eq!(shop.0.lock().unwrap().last().map(|product| product.supplier_id.clone()).as_deref(), Some("bolt"));
+}
+
+#[tokio::test]
+async fn a_page_meets_the_suppliers_rate_limit() {
+    let app = app(&shop());
+    // listSuppliers takes three requests a minute a client: the products'
+    // list, whose rows it names, counts against the suppliers' limiter.
+    for _ in 0..3 {
+        assert_eq!(get(&app, "/console/products").await.status, StatusCode::OK);
+    }
+    let refused = get(&app, "/console/products").await;
+    assert_eq!(refused.status, StatusCode::TOO_MANY_REQUESTS, "{}", refused.html);
+    assert!(refused.headers.contains_key(header::RETRY_AFTER));
+    // A page that calls no supplier is not counted.
+    assert_eq!(get(&app, "/console/orders").await.status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn an_app_without_the_suppliers_names_them_by_their_ids() {
+    let alone = console_alone(&shop());
+    let list = get(&alone, "/console/products").await;
+    assert_eq!(list.status, StatusCode::OK, "{}", list.html);
+    assert!(list.html.contains(r#"<td data-field="supplierId">acme</td>"#), "{}", list.html);
+    let new = get(&alone, "/console/products/new").await;
+    assert!(new.html.contains(r#"<input id="product-input-supplier-id" name="supplierId" type="text" required"#), "{}", new.html);
+    // A call into the crate the app did not set up is the 500, not a panic.
+    let said = get(&alone, "/app/suppliers").await;
+    assert_eq!(
+        between(&said.html, r#"<p id="said">"#, "</p>"),
+        "500 the app does not host fixture-console-suppliers-api: its router builder calls neither fixture_console_suppliers_api nor fixture_console_suppliers_api_without_api"
+    );
+    let hosting = app(&shop());
+    assert_eq!(between(&get(&hosting, "/app/suppliers").await.html, r#"<p id="said">"#, "</p>"), "1");
+}
+
+#[tokio::test]
+async fn two_services_serve_their_pages_and_one_json_api() {
+    let app = app(&shop());
+    // Each crate's pages, under its own prefix.
+    let index = get(&app, "/console").await;
+    assert_eq!(index.status, StatusCode::OK, "{}", index.html);
+    let suppliers = get(&app, "/suppliers/suppliers").await;
+    assert_eq!(suppliers.status, StatusCode::OK, "{}", suppliers.html);
+    assert!(suppliers.html.contains(">Acme</th>"), "{}", suppliers.html);
+    // The console's JSON API at /api, which refuses a caller it does not
+    // know, as JSON.
+    let api = get(&app, "/api/products").await;
+    assert_eq!(api.status, StatusCode::UNAUTHORIZED, "{}", api.html);
+    assert!(api.headers.get(header::CONTENT_TYPE).and_then(|value| value.to_str().ok()).is_some_and(|kind| kind.contains("json")), "{:?}", api.headers);
+}
+
+#[test]
+fn a_second_json_api_is_refused() {
+    let shop = shop();
+    let built = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        Router::builder().fixture_console_api(console(&shop), Clerk).fixture_console_suppliers_api(directory(), Clerk).build()
+    }));
+    let Err(panic) = built else {
+        panic!("an app with two JSON APIs at /api built");
+    };
+    let message = panic.downcast_ref::<String>().cloned().or_else(|| panic.downcast_ref::<&str>().map(|text| (*text).to_owned())).unwrap_or_default();
+    assert!(message.contains("duplicate any-method route registered for"), "{message}");
 }
 `

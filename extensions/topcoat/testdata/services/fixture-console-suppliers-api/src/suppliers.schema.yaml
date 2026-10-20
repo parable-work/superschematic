@@ -1,5 +1,7 @@
 # The suppliers of a shop, as an API declares them, which another API
-# imports and lists: a supplier, named by its name.
+# imports and lists: a supplier, named by its name, and the suppliers,
+# listed a page at a time and searched by their names, three a minute a
+# client.
 name: fixture-console-suppliers-api
 kind: API
 types:
@@ -18,3 +20,22 @@ types:
       - name: name
         typeRef: { name: string }
         required: true
+operationSets:
+  - name: SupplierQueries
+    operations:
+      # The suppliers, by name, one to a page unless the caller asks for
+      # two, narrowed by a search of their names.
+      - name: listSuppliers
+        typeRef: { name: Supplier, isArray: true }
+        required: true
+        httpMethod: GET
+        restPath: suppliers
+        permissions: [products.read]
+        page: { defaultLimit: 1, maxLimit: 2 }
+        middleware: { rateLimit: 3 }
+        arguments:
+          - name: q
+            typeRef: { name: string }
+            isQuery: true
+            search: true
+            validateMaxLength: 50

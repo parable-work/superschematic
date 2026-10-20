@@ -1107,9 +1107,79 @@
     {
       "name": "a display key the schema lacks",
       "registry": "core",
-      "input": "{\"name\": \"Ticket\", \"role\": \"EmbeddedStruct\", \"display\": {\"icon\": \"ticket\"}}",
+      "input": "{\"name\": \"Ticket\", \"role\": \"EmbeddedStruct\", \"display\": {\"colour\": \"red\"}}",
       "accept": false,
-      "error": "a display key the schema lacks: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/display': additional properties 'icon' not allowed"
+      "error": "a display key the schema lacks: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/display': additional properties 'colour' not allowed"
+    },
+    {
+      "name": "a display icon alone",
+      "registry": "core",
+      "input": "{\"name\": \"Ticket\", \"role\": \"EmbeddedStruct\", \"display\": {\"icon\": \"ticket\"}}",
+      "accept": true,
+      "canonical": "{\"types\":{\"Ticket\":{\"display\":{\"icon\":\"ticket\"},\"name\":\"Ticket\",\"role\":\"EmbeddedStruct\"}}}"
+    },
+    {
+      "name": "a blank display icon",
+      "registry": "core",
+      "input": "{\"name\": \"Ticket\", \"role\": \"EmbeddedStruct\", \"display\": {\"icon\": \" \"}}",
+      "accept": false,
+      "error": "a blank display icon: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/display/icon': ' ' does not match pattern '^\\\\S(.*\\\\S)?$'"
+    },
+    {
+      "name": "a padded display icon",
+      "registry": "core",
+      "input": "{\"name\": \"Ticket\", \"role\": \"EmbeddedStruct\", \"display\": {\"icon\": \"ticket \"}}",
+      "accept": false,
+      "error": "a padded display icon: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/display/icon': 'ticket ' does not match pattern '^\\\\S(.*\\\\S)?$'"
+    },
+    {
+      "name": "a field display",
+      "registry": "core",
+      "input": "{\"name\": \"Note\", \"role\": \"APIInput\", \"fields\": [\n\t\t{\"name\": \"text\", \"typeRef\": {\"name\": \"String\"}, \"display\": {\"multiline\": true}},\n\t\t{\"name\": \"code\", \"typeRef\": {\"name\": \"String\"}, \"display\": {\"multiline\": false}}]}",
+      "accept": true,
+      "canonical": "{\"types\":{\"Note\":{\"fields\":[{\"display\":{\"multiline\":true},\"name\":\"text\",\"typeRef\":{\"name\":\"String\"}},{\"display\":{\"multiline\":false},\"name\":\"code\",\"typeRef\":{\"name\":\"String\"}}],\"name\":\"Note\",\"role\":\"APIInput\"}}}"
+    },
+    {
+      "name": "a field display that declares nothing",
+      "registry": "core",
+      "input": "{\"name\": \"Note\", \"role\": \"APIInput\", \"fields\": [{\"name\": \"text\", \"typeRef\": {\"name\": \"String\"}, \"display\": {}}]}",
+      "accept": false,
+      "error": "a field display that declares nothing: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/fields/0/display': minProperties: got 0, want 1"
+    },
+    {
+      "name": "a field display multiline that is not a boolean",
+      "registry": "core",
+      "input": "{\"name\": \"Note\", \"role\": \"APIInput\", \"fields\": [{\"name\": \"text\", \"typeRef\": {\"name\": \"String\"}, \"display\": {\"multiline\": \"yes\"}}]}",
+      "accept": false,
+      "error": "a field display multiline that is not a boolean: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/fields/0/display/multiline': got string, want boolean"
+    },
+    {
+      "name": "a field display key the schema lacks",
+      "registry": "core",
+      "input": "{\"name\": \"Note\", \"role\": \"APIInput\", \"fields\": [{\"name\": \"text\", \"typeRef\": {\"name\": \"String\"}, \"display\": {\"rows\": 6}}]}",
+      "accept": false,
+      "error": "a field display key the schema lacks: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/fields/0/display': additional properties 'rows' not allowed"
+    },
+    {
+      "name": "enum member titles in an enum file",
+      "registry": "core",
+      "input": "{\"kind\": \"Enum\", \"name\": \"OrderStatus\", \"values\": [\n\t\t{\"name\": \"Placed\", \"serializedAs\": \"placed\"}, {\"name\": \"OnHold\", \"title\": \"Held for a stock check\", \"serializedAs\": \"on_hold\"}]}",
+      "accept": true,
+      "canonical": "{\"enums\":{\"OrderStatus\":{\"name\":\"OrderStatus\",\"values\":[{\"name\":\"Placed\",\"serializedAs\":\"placed\"},{\"name\":\"OnHold\",\"serializedAs\":\"on_hold\",\"title\":\"Held for a stock check\"}]}}}"
+    },
+    {
+      "name": "enum member titles in a document",
+      "registry": "core",
+      "input": "{\"kind\": \"DB\", \"name\": \"orders\", \"enums\": {\"OrderStatus\": {\"name\": \"OrderStatus\", \"values\": [\n\t\t{\"name\": \"Fulfilled\", \"title\": \"Picked and packed\", \"comment\": \"Ready to ship.\"}, {\"name\": \"Shipped\"}]}}}",
+      "accept": true,
+      "canonical": "{\"enums\":{\"OrderStatus\":{\"name\":\"OrderStatus\",\"values\":[{\"comment\":\"Ready to ship.\",\"name\":\"Fulfilled\",\"title\":\"Picked and packed\"},{\"name\":\"Shipped\"}]}},\"kind\":\"DB\",\"name\":\"orders\"}"
+    },
+    {
+      "name": "an enum member title that is not a string",
+      "registry": "core",
+      "input": "{\"kind\": \"Enum\", \"name\": \"OrderStatus\", \"values\": [{\"name\": \"OnHold\", \"title\": 1}]}",
+      "accept": false,
+      "error": "an enum member title that is not a string: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/EnumFile'\n- at '/values/0/title': got number, want string"
     },
     {
       "name": "file display.schema.json",

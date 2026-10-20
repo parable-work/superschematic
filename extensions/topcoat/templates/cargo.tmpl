@@ -16,6 +16,11 @@ identity-sqlite = ["{{ .APICrate }}/identity-sqlite"]
 
 [dependencies]
 {{ .APICrate }} = { path = "{{ .APIDepPath }}" }
+{{- range .UsedHosted }}
+# The Topcoat crate of {{ .Service }}, which an app hosts beside this one: a
+# reference calls its options in-process (D61, amended).
+{{ .Crate }} = { path = "{{ .Path }}" }
+{{- end }}
 {{- if .HasAuth }}
 async-trait = "0.1.89"
 {{- end }}
@@ -30,6 +35,9 @@ serde_json = "1.0.149"
 tokio = { version = "1.52.2", features = ["time"] }
 {{- else if .ControlledProcedures }}
 # The timeout of a procedure's route controls.
+tokio = { version = "1.52.2", features = ["time"] }
+{{- else if .ControlledPicks }}
+# The timeout of a picker's route controls.
 tokio = { version = "1.52.2", features = ["time"] }
 {{- end }}
 topcoat = { version = "0.10", features = ["tower"] }

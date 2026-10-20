@@ -8,24 +8,32 @@
 //! shows or hides what the operation does. An operation without a call
 //! still has its guard, whose doc says why.
 //!
+//! `as_service(&caller)` calls an operation with a service clause
+//! (@requireService, @allowService) as a service this process acts for,
+//! held to the route's `from` (D37, amended). An operation only a service
+//! may call (@requireService) has no other call, so a page cannot call it
+//! for an end user, and its guard here refuses one 401.
+//!
 //! A call does not apply the route's traffic controls (@rateLimit,
 //! @bodyLimit, @timeout): the page that makes it is a route of the app,
-//! under the controls the app gives it.
+//! under the controls the app gives it. It reads what the app keeps for
+//! the crate (`setup`): an app that does not host fixture-controls-api, whose
+//! router builder calls neither `fixture_controls_api` nor `fixture_controls_api_without_api`,
+//! gets the 500 (D61, amended).
 
 #![allow(unused_imports)]
 
-use crate::Setup;
 use crate::api::operations;
 use crate::api::runtime::{ApiError, Principal};
+use crate::api::runtime::ServiceCaller;
 use crate::api::types;
-use topcoat::context::{Cx, app_context};
+use topcoat::context::Cx;
 
 /// order.listOrders (`GET /api/orders`): The orders, of one status when the query names one: two a minute.
 pub async fn order_list_orders(cx: &Cx, args: crate::api::OrderListOrdersArgs) -> Result<Vec<types::OrderView>, ApiError> {
     let caller = can_order_list_orders(cx).await?;
     args.check()?;
-    let setup: &Setup = app_context(cx);
-    setup
+    crate::setup(cx)?
         .implementations
         .order
         .list_orders(operations::ORDER_LIST_ORDERS.context(caller), args)
@@ -35,8 +43,7 @@ pub async fn order_list_orders(cx: &Cx, args: crate::api::OrderListOrdersArgs) -
 /// order.placeOrder (`POST /api/orders`): Places an order: two a minute, three megabytes, a second.
 pub async fn order_place_order(cx: &Cx) -> Result<types::OrderView, ApiError> {
     let caller = can_order_place_order(cx).await?;
-    let setup: &Setup = app_context(cx);
-    setup
+    crate::setup(cx)?
         .implementations
         .order
         .place_order(operations::ORDER_PLACE_ORDER.context(caller))
@@ -47,8 +54,7 @@ pub async fn order_place_order(cx: &Cx) -> Result<types::OrderView, ApiError> {
 pub async fn order_get_order(cx: &Cx, args: crate::api::OrderGetOrderArgs) -> Result<types::OrderView, ApiError> {
     let caller = can_order_get_order(cx).await?;
     args.check()?;
-    let setup: &Setup = app_context(cx);
-    setup
+    crate::setup(cx)?
         .implementations
         .order
         .get_order(operations::ORDER_GET_ORDER.context(caller), args)
@@ -59,8 +65,7 @@ pub async fn order_get_order(cx: &Cx, args: crate::api::OrderGetOrderArgs) -> Re
 pub async fn order_hold_order(cx: &Cx, args: crate::api::OrderHoldOrderArgs) -> Result<types::OrderView, ApiError> {
     let caller = can_order_hold_order(cx).await?;
     args.check()?;
-    let setup: &Setup = app_context(cx);
-    setup
+    crate::setup(cx)?
         .implementations
         .order
         .hold_order(operations::ORDER_HOLD_ORDER.context(caller), args)
@@ -70,36 +75,21 @@ pub async fn order_hold_order(cx: &Cx, args: crate::api::OrderHoldOrderArgs) -> 
 /// stock.listShipments (`GET /api/shipments`): The shipments, with no control of their own.
 pub async fn stock_list_shipments(cx: &Cx) -> Result<Vec<types::Shipment>, ApiError> {
     let caller = can_stock_list_shipments(cx).await?;
-    let setup: &Setup = app_context(cx);
-    setup
+    crate::setup(cx)?
         .implementations
         .stock
         .list_shipments(operations::STOCK_LIST_SHIPMENTS.context(caller))
         .await
 }
 
-/// stock.reindexStock (`POST /api/stock/reindex`): Reindexes the stock, for a service that calls this API.
-/// Its route admits only a service caller (@requireService). This call applies
-/// the end-user step alone, as `OperationInfo::admit` does; whether it should
-/// refuse stays open (D37, amended).
-/// It has no procedure: a browser holds no service credential
-/// (@requireService).
-pub async fn stock_reindex_stock(cx: &Cx) -> Result<types::StockRun, ApiError> {
-    let caller = can_stock_reindex_stock(cx).await?;
-    let setup: &Setup = app_context(cx);
-    setup
-        .implementations
-        .stock
-        .reindex_stock(operations::STOCK_REINDEX_STOCK.context(caller))
-        .await
-}
-
 /// stock.releaseReservation (`POST /api/stock/reservations/{id}/release`): Releases a reservation, for a signed-in user or a service.
+/// A service caller its route's `from` lists calls it through
+/// `as_service(caller)`, standing in for the end user (@allowService, D37,
+/// amended).
 pub async fn stock_release_reservation(cx: &Cx, args: crate::api::StockReleaseReservationArgs) -> Result<types::Reservation, ApiError> {
     let caller = can_stock_release_reservation(cx).await?;
     args.check()?;
-    let setup: &Setup = app_context(cx);
-    setup
+    crate::setup(cx)?
         .implementations
         .stock
         .release_reservation(operations::STOCK_RELEASE_RESERVATION.context(caller), args)
@@ -109,8 +99,7 @@ pub async fn stock_release_reservation(cx: &Cx, args: crate::api::StockReleaseRe
 /// stock.listWarehouses (`GET /api/warehouses`): The warehouses: two a minute and a second.
 pub async fn stock_list_warehouses(cx: &Cx) -> Result<Vec<types::Warehouse>, ApiError> {
     let caller = can_stock_list_warehouses(cx).await?;
-    let setup: &Setup = app_context(cx);
-    setup
+    crate::setup(cx)?
         .implementations
         .stock
         .list_warehouses(operations::STOCK_LIST_WAREHOUSES.context(caller))
@@ -155,10 +144,11 @@ pub async fn can_stock_list_shipments(cx: &Cx) -> Result<Option<Principal>, ApiE
     crate::admit(cx, &operations::STOCK_LIST_SHIPMENTS).await
 }
 
-/// Admits the caller of stock.reindexStock as its route does: it needs none, so
-/// `Ok(None)`.
-/// Its route admits only a service caller (@requireService), which a guard does
-/// not check (D37, amended).
+/// Admits the caller of stock.reindexStock as its route admits a request
+/// without a service credential: the route admits only a service caller
+/// (@requireService), so an end user is refused 401 `service_unauthorized`,
+/// signed in or not. `as_service(caller).can_stock_reindex_stock(cx)` admits a
+/// service caller (D37, amended).
 pub async fn can_stock_reindex_stock(cx: &Cx) -> Result<Option<Principal>, ApiError> {
     crate::admit(cx, &operations::STOCK_REINDEX_STOCK).await
 }
@@ -169,8 +159,99 @@ pub async fn can_stock_release_reservation(cx: &Cx) -> Result<Option<Principal>,
     crate::admit(cx, &operations::STOCK_RELEASE_RESERVATION).await
 }
 
+/// Admits the caller of stock.reserveStock as its route admits a request
+/// without a service credential: the route admits only a service caller
+/// (@requireService), so an end user is refused 401 `service_unauthorized`,
+/// signed in or not. `as_service(caller).can_stock_reserve_stock(cx)` admits a
+/// service caller (D37, amended).
+pub async fn can_stock_reserve_stock(cx: &Cx) -> Result<Option<Principal>, ApiError> {
+    crate::admit(cx, &operations::STOCK_RESERVE_STOCK).await
+}
+
 /// Admits the caller of stock.listWarehouses as its route does: it needs none, so
 /// `Ok(None)`.
 pub async fn can_stock_list_warehouses(cx: &Cx) -> Result<Option<Principal>, ApiError> {
     crate::admit(cx, &operations::STOCK_LIST_WAREHOUSES).await
+}
+
+/// Calls the operations that admit a service caller (@requireService,
+/// @allowService) as `caller`, a service this process acts for, which
+/// `ServiceCaller::in_process(deployable, serves)` names (D37, amended).
+/// The caller is held to each route's `from`: 403 `service_forbidden` when
+/// it lists none of the APIs the caller serves. Where the route still asks
+/// for an end user, the page's own caller is the one the service forwards.
+/// Then the arguments and the implementation run as the route runs them,
+/// and the implementation reads the caller in `ctx.service_caller`. A
+/// @requireService operation has no other call; an @allowService one also
+/// has its end user's.
+pub fn as_service(caller: &ServiceCaller) -> AsService<'_> {
+    AsService { caller }
+}
+
+/// The calls and guards of `as_service`, one of each per operation with a
+/// service clause.
+pub struct AsService<'a> {
+    caller: &'a ServiceCaller,
+}
+
+impl AsService<'_> {
+    /// stock.reindexStock (`POST /api/stock/reindex`), called as a service: Reindexes the stock, for a service that calls this API.
+    /// It has no procedure: a browser holds no service credential
+    /// (@requireService).
+    pub async fn stock_reindex_stock(&self, cx: &Cx) -> Result<types::StockRun, ApiError> {
+        let caller = self.can_stock_reindex_stock(cx).await?;
+        crate::setup(cx)?
+            .implementations
+            .stock
+            .reindex_stock(operations::STOCK_REINDEX_STOCK.service_context(self.caller.clone(), caller))
+            .await
+    }
+
+    /// Admits the caller as stock.reindexStock's route admits a service: 403
+    /// `service_forbidden` when its `from` lists none of the APIs the caller
+    /// serves; it asks for no end user, so `Ok(None)` otherwise.
+    pub async fn can_stock_reindex_stock(&self, cx: &Cx) -> Result<Option<Principal>, ApiError> {
+        crate::admit_as(cx, &operations::STOCK_REINDEX_STOCK, self.caller).await
+    }
+
+    /// stock.releaseReservation (`POST /api/stock/reservations/{id}/release`), called as a service: Releases a reservation, for a signed-in user or a service.
+    pub async fn stock_release_reservation(&self, cx: &Cx, args: crate::api::StockReleaseReservationArgs) -> Result<types::Reservation, ApiError> {
+        let caller = self.can_stock_release_reservation(cx).await?;
+        args.check()?;
+        crate::setup(cx)?
+            .implementations
+            .stock
+            .release_reservation(operations::STOCK_RELEASE_RESERVATION.service_context(self.caller.clone(), caller), args)
+            .await
+    }
+
+    /// Admits the caller as stock.releaseReservation's route admits a service:
+    /// a caller its `from` lists stands in for the end user, so `Ok(None)`; any
+    /// other goes on to the end-user step, as `can_stock_release_reservation`
+    /// admits it: 401 without a signed-in end user.
+    pub async fn can_stock_release_reservation(&self, cx: &Cx) -> Result<Option<Principal>, ApiError> {
+        crate::admit_as(cx, &operations::STOCK_RELEASE_RESERVATION, self.caller).await
+    }
+
+    /// stock.reserveStock (`POST /api/stock/{id}/reserve`), called as a service: Reserves stock, for fixture-api's server and the user it forwards.
+    /// It has no procedure: a browser holds no service credential
+    /// (@requireService).
+    pub async fn stock_reserve_stock(&self, cx: &Cx, args: crate::api::StockReserveStockArgs) -> Result<types::Reservation, ApiError> {
+        let caller = self.can_stock_reserve_stock(cx).await?;
+        args.check()?;
+        crate::setup(cx)?
+            .implementations
+            .stock
+            .reserve_stock(operations::STOCK_RESERVE_STOCK.service_context(self.caller.clone(), caller), args)
+            .await
+    }
+
+    /// Admits the caller as stock.reserveStock's route admits a service: 403
+    /// `service_forbidden` when its `from` lists none of the APIs the caller
+    /// serves; then the page's caller, as the end user the service forwards:
+    /// 401 without a signed-in end user to forward, 403 without one of
+    /// stock.write.
+    pub async fn can_stock_reserve_stock(&self, cx: &Cx) -> Result<Option<Principal>, ApiError> {
+        crate::admit_as(cx, &operations::STOCK_RESERVE_STOCK, self.caller).await
+    }
 }

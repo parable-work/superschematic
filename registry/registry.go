@@ -259,19 +259,21 @@ const (
 	// is written under in the OpenAPI document; an OpenAPIHook renames it.
 	OpenAPIDocsKey = apigen.OpenAPIDocsKey
 
-	// OpenAPIReferenceKey and OpenAPISearchKey are the vendor-extension
-	// keys a value's reference (D61) and a search argument's mark (D62)
-	// are written under in the OpenAPI document; an OpenAPIHook renames
-	// them.
+	// OpenAPIReferenceKey, OpenAPISearchKey and OpenAPISortKey are the
+	// vendor-extension keys a value's reference (D61), a search argument's
+	// mark (D62) and a sort argument's mark (D60, amended) are written
+	// under in the OpenAPI document; an OpenAPIHook renames them.
 	OpenAPIReferenceKey = apigen.OpenAPIReferenceKey
 	OpenAPISearchKey    = apigen.OpenAPISearchKey
+	OpenAPISortKey      = apigen.OpenAPISortKey
 
-	// DefaultToolScalarKey, DefaultToolReferenceKey, DefaultToolSearchKey
-	// and DefaultToolGuidanceKey are the vendor keys the SDK tool documents
-	// carry unless a ToolHook renames them.
+	// DefaultToolScalarKey, DefaultToolReferenceKey, DefaultToolSearchKey,
+	// DefaultToolSortKey and DefaultToolGuidanceKey are the vendor keys the
+	// SDK tool documents carry unless a ToolHook renames them.
 	DefaultToolScalarKey    = apigen.DefaultToolScalarKey
 	DefaultToolReferenceKey = apigen.DefaultToolReferenceKey
 	DefaultToolSearchKey    = apigen.DefaultToolSearchKey
+	DefaultToolSortKey      = apigen.DefaultToolSortKey
 	DefaultToolGuidanceKey  = apigen.DefaultToolGuidanceKey
 
 	// DefaultToolInvocationKey, ToolInvocationAuto and ToolInvocationAsk
@@ -405,6 +407,16 @@ func EnvConfigOf(schema *ir.Schema, schemaName string) (*EnvConfig, error) {
 // that writes Rust beside the crate checks that the service's API language
 // is Rust. See internal/generator.RustAPIOf.
 func RustAPIOf(c GenerateContext) (*RustAPI, error) { return generator.RustAPIOf(c) }
+
+// RustAPIOfService is the Rust REST API crate the api generator writes for
+// service, a dependency of the service c generates, as that service's own
+// build makes it; (nil, nil) when its config generates no API server, its
+// server is not Rust, or it has no operations. An extension that calls the
+// dependency's crate in-process reads its operations here. See
+// internal/generator.RustAPIOfService.
+func RustAPIOfService(c GenerateContext, service string) (*RustAPI, error) {
+	return generator.RustAPIOfService(c, service)
+}
 
 // APIDir is the directory the api generator writes service's server to
 // under outputRoot, the Rust crate's directory for a Rust API; see

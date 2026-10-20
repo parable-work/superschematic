@@ -10,21 +10,22 @@
 //!
 //! A call does not apply the route's traffic controls (@rateLimit,
 //! @bodyLimit, @timeout): the page that makes it is a route of the app,
-//! under the controls the app gives it.
+//! under the controls the app gives it. It reads what the app keeps for
+//! the crate (`setup`): an app that does not host fixture-api, whose
+//! router builder calls neither `fixture_api` nor `fixture_api_without_api`,
+//! gets the 500 (D61, amended).
 
 #![allow(unused_imports)]
 
-use crate::Setup;
 use crate::api::operations;
 use crate::api::runtime::{ApiError, Principal};
 use crate::api::types;
-use topcoat::context::{Cx, app_context};
+use topcoat::context::Cx;
 
 /// session.currentTenant (`GET /api/auth/me`).
 pub async fn session_current_tenant(cx: &Cx) -> Result<types::TenantView, ApiError> {
     let caller = can_session_current_tenant(cx).await?;
-    let setup: &Setup = app_context(cx);
-    setup
+    crate::setup(cx)?
         .implementations
         .session
         .current_tenant(operations::SESSION_CURRENT_TENANT.context(caller))
@@ -35,8 +36,7 @@ pub async fn session_current_tenant(cx: &Cx) -> Result<types::TenantView, ApiErr
 pub async fn tenant_list_tenants(cx: &Cx, args: crate::api::TenantListTenantsArgs) -> Result<Vec<types::TenantView>, ApiError> {
     let caller = can_tenant_list_tenants(cx).await?;
     args.check()?;
-    let setup: &Setup = app_context(cx);
-    setup
+    crate::setup(cx)?
         .implementations
         .tenant
         .list_tenants(operations::TENANT_LIST_TENANTS.context(caller), args)
@@ -47,8 +47,7 @@ pub async fn tenant_list_tenants(cx: &Cx, args: crate::api::TenantListTenantsArg
 pub async fn tenant_create_tenant(cx: &Cx, args: crate::api::TenantCreateTenantArgs) -> Result<types::TenantView, ApiError> {
     let caller = can_tenant_create_tenant(cx).await?;
     args.check()?;
-    let setup: &Setup = app_context(cx);
-    setup
+    crate::setup(cx)?
         .implementations
         .tenant
         .create_tenant(operations::TENANT_CREATE_TENANT.context(caller), args)
@@ -59,8 +58,7 @@ pub async fn tenant_create_tenant(cx: &Cx, args: crate::api::TenantCreateTenantA
 pub async fn tenant_get_tenant(cx: &Cx, args: crate::api::TenantGetTenantArgs) -> Result<types::TenantView, ApiError> {
     let caller = can_tenant_get_tenant(cx).await?;
     args.check()?;
-    let setup: &Setup = app_context(cx);
-    setup
+    crate::setup(cx)?
         .implementations
         .tenant
         .get_tenant(operations::TENANT_GET_TENANT.context(caller), args)
@@ -71,8 +69,7 @@ pub async fn tenant_get_tenant(cx: &Cx, args: crate::api::TenantGetTenantArgs) -
 pub async fn tenant_update_secret(cx: &Cx, args: crate::api::TenantUpdateSecretArgs) -> Result<types::TenantView, ApiError> {
     let caller = can_tenant_update_secret(cx).await?;
     args.check()?;
-    let setup: &Setup = app_context(cx);
-    setup
+    crate::setup(cx)?
         .implementations
         .tenant
         .update_secret(operations::TENANT_UPDATE_SECRET.context(caller), args)

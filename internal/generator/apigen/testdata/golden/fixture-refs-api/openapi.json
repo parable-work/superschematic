@@ -13,6 +13,7 @@
             "x-superschematic-reference": {
               "label": "name",
               "options": "CatalogListItemsHandler",
+              "search": "q",
               "target": "#/components/schemas/ItemView",
               "value": "sku"
             }
@@ -42,6 +43,7 @@
               "label": "name",
               "lookup": "ids",
               "options": "CatalogListItemsHandler",
+              "search": "q",
               "target": "#/components/schemas/ItemView",
               "value": "id"
             }
@@ -164,6 +166,7 @@
               "label": "name",
               "lookup": "ids",
               "options": "CatalogListItemsHandler",
+              "search": "q",
               "target": "#/components/schemas/ItemView",
               "value": "id"
             }
@@ -301,6 +304,7 @@
               "label": "name",
               "lookup": "ids",
               "options": "CatalogListItemsHandler",
+              "search": "q",
               "target": "#/components/schemas/ItemView",
               "value": "id"
             }
@@ -384,6 +388,7 @@
               "label": "name",
               "lookup": "ids",
               "options": "CatalogListItemsHandler",
+              "search": "q",
               "target": "#/components/schemas/ItemView",
               "value": "id"
             }
@@ -457,6 +462,7 @@
               "label": "name",
               "lookup": "ids",
               "options": "CatalogListItemsHandler",
+              "search": "q",
               "target": "#/components/schemas/ItemView",
               "value": "id"
             }

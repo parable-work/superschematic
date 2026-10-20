@@ -70,7 +70,7 @@ func TestToolManifestRoundTripsReferencesAndSearch(t *testing.T) {
 	rendered := readRendered(t, writeRefsTools(t), "tools/schema.json")
 	var manifest ir.ToolManifest
 	decodeDisallowingUnknownFields(t, rendered, &manifest)
-	byID := &ir.ToolSchemaReference{Target: "ItemView", Options: "catalog.listItems", Value: "id", Label: "name", Lookup: "ids"}
+	byID := &ir.ToolSchemaReference{Target: "ItemView", Options: "catalog.listItems", Value: "id", Label: "name", Lookup: "ids", Search: "q"}
 	list, _ := manifestTool(manifest, "catalog.listItems")
 	get, _ := manifestTool(manifest, "catalog.getItem")
 	place, _ := manifestTool(manifest, "catalog.placeBasket")
@@ -83,7 +83,7 @@ func TestToolManifestRoundTripsReferencesAndSearch(t *testing.T) {
 		{"getItem(itemId)", get.Parameters.Properties["itemId"].Reference, byID},
 		{"placeBasket lines[].itemId", place.Parameters.Properties["lines"].Items.Properties["itemId"].Reference, byID},
 		{"placeBasket giftSku", place.Parameters.Properties["giftSku"].Reference,
-			&ir.ToolSchemaReference{Target: "ItemView", Options: "catalog.listItems", Value: "sku", Label: "name"}},
+			&ir.ToolSchemaReference{Target: "ItemView", Options: "catalog.listItems", Value: "sku", Label: "name", Search: "q"}},
 	} {
 		if !reflect.DeepEqual(check.got, check.want) {
 			t.Errorf("%s decoded as %+v, want %+v", check.where, check.got, check.want)
@@ -119,7 +119,7 @@ func TestToolHookRenamesTheReferenceAndSearchKeys(t *testing.T) {
 		}
 	}
 	schema := string(readRendered(t, outDir, "tools/schema.json"))
-	for _, want := range []string{`"x-vendor-reference":{"label":"name","lookup":"ids","options":"catalog.listItems","target":"ItemView","value":"id"}`, `"x-vendor-search":true`} {
+	for _, want := range []string{`"x-vendor-reference":{"label":"name","lookup":"ids","options":"catalog.listItems","search":"q","target":"ItemView","value":"id"}`, `"x-vendor-search":true`} {
 		if !strings.Contains(schema, want) {
 			t.Errorf("tools/schema.json lacks %s", want)
 		}

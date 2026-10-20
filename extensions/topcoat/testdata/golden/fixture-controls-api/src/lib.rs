@@ -4,6 +4,13 @@
 //! mounts the JSON API at `/api`, its routes given the client's address,
 //! and keeps the implementations for the in-process calls of `operations`,
 //! which pages, shards and procedures make by each route's rules.
+//! `fixture_controls_api_without_api` keeps them and mounts no JSON API, for an app
+//! that hosts several services' crates and serves at most one JSON API at
+//! `/api` (D61, amended).
+//! It makes one registry of the operations' rate limiters
+//! (`Setup.rate_limits`), which the JSON API's routes take theirs from,
+//! and every procedure and page that meets a route's rate limit too, so a
+//! client has one budget per operation however it calls it.
 //! `records` mirrors each type a call in `operations` returns as a record a
 //! page can hand the browser; the result of an operation without a call, a
 //! webhook's, has none.
@@ -39,11 +46,12 @@ pub use schemas_fixture_controls_api_api as api;
 
 use std::sync::Arc;
 
-use api::runtime::ClientIp;
-use api::{build_router, Implementations};
-use api::runtime::{ApiError, OperationInfo, Principal};
+use api::runtime::{ApiError, ClientIp, RateLimits};
+use api::{build_router_with, Implementations, RouterOptions};
+use api::runtime::{OperationInfo, Principal};
+use api::runtime::ServiceCaller;
 use async_trait::async_trait;
-use topcoat::context::{Cx, app_context, memoize};
+use topcoat::context::{Cx, memoize, try_app_context};
 use topcoat::router::request::{client_ip, parts};
 use topcoat::router::tower::TowerRoute;
 use topcoat::router::{Body, Layer, LayerFuture, Next, Path, RouterBuilder};
@@ -61,41 +69,90 @@ pub trait PageAuthenticator: Send + Sync + 'static {
 pub struct Setup {
     pub implementations: Implementations,
     pub page_authenticator: Arc<dyn PageAuthenticator>,
+    /// The app's one limiter per rate-limited operation (D44, amended),
+    /// which the mounted JSON API's routes take theirs from, and so do the
+    /// procedures and the pages that meet a route's rate limit. An app that
+    /// builds the API's router again, or another crate's page that calls an
+    /// operation, shares the operation's budget by taking from it too:
+    /// `RouterOptions { rate_limits: setup.rate_limits.clone(), .. }`, or
+    /// `setup.rate_limits.of(&api::operations::<OPERATION>)`.
+    pub rate_limits: RateLimits,
 }
 
 /// Adds the fixture-controls-api API to a Topcoat app.
 pub trait RouterBuilderFixtureControlsApiExt {
-    /// Mounts the JSON API (`build_router`) at `/api/{*rest}`, its routes
-    /// given the client's address (`ClientAddress`), and keeps
+    /// Mounts the JSON API (`build_router_with`) at `/api/{*rest}`, its
+    /// routes given the client's address (`ClientAddress`) and their rate
+    /// limiters from a new registry, `Setup.rate_limits`, and keeps
     /// `implementations` and `page_authenticator` for the in-process calls of
     /// `operations`. Adds the layers that apply each procedure's route
     /// controls (`procedures::route_controls`).
     #[must_use]
     fn fixture_controls_api(self, implementations: Implementations, page_authenticator: impl PageAuthenticator) -> Self;
+
+    /// Keeps `implementations` and `page_authenticator` for the in-process
+    /// calls of `operations`, with its own registry of rate limiters and the
+    /// layers `fixture_controls_api` adds, and mounts no JSON API: for an app that hosts
+    /// several services' crates (D61, amended), each one's pages and calls,
+    /// which serves at most one service's JSON API at `/api`, since a second
+    /// `/api/{*rest}` is a route Topcoat refuses.
+    #[must_use]
+    fn fixture_controls_api_without_api(self, implementations: Implementations, page_authenticator: impl PageAuthenticator) -> Self;
 }
 
 impl RouterBuilderFixtureControlsApiExt for RouterBuilder {
     fn fixture_controls_api(self, implementations: Implementations, page_authenticator: impl PageAuthenticator) -> Self {
-        let api = build_router(implementations.clone());
-        let router = self
-            .app_context(Setup {
-                implementations,
-                page_authenticator: Arc::new(page_authenticator),
-            })
-            .route(TowerRoute::any("/api/{*rest}", api))
-            .layer(ClientAddress);
-        procedures::route_controls(router)
+        set_up(self, implementations, Arc::new(page_authenticator), true)
     }
+
+    fn fixture_controls_api_without_api(self, implementations: Implementations, page_authenticator: impl PageAuthenticator) -> Self {
+        set_up(self, implementations, Arc::new(page_authenticator), false)
+    }
+}
+
+/// The app's router with the crate's setup: a new registry of the
+/// operations' rate limiters, the JSON API at `/api/{*rest}` when `api`,
+/// its routes given the client's address and their limiters from the
+/// registry, `Setup` in the app context, and the layers of the routes'
+/// controls.
+fn set_up(router: RouterBuilder, implementations: Implementations, page_authenticator: Arc<dyn PageAuthenticator>, api: bool) -> RouterBuilder {
+    let rate_limits = RateLimits::new();
+    let router = if api {
+        let json = build_router_with(
+            implementations.clone(),
+            RouterOptions { rate_limits: rate_limits.clone(), ..RouterOptions::default() },
+        );
+        router.route(TowerRoute::any("/api/{*rest}", json)).layer(ClientAddress)
+    } else {
+        router
+    };
+    let router = router.app_context(Setup {
+        implementations,
+        page_authenticator,
+        rate_limits: rate_limits.clone(),
+    });
+    procedures::route_controls(router, &rate_limits)
+}
+
+/// What the app keeps for the crate's in-process calls, from its context,
+/// or the 500 of an app that does not host fixture-controls-api (D61, amended): an
+/// app links the crates of every service the Topcoat table lists, and may
+/// set up some of them, so a call into one it did not set up is refused,
+/// not a panic.
+pub(crate) fn setup(cx: &Cx) -> Result<&Setup, ApiError> {
+    try_app_context::<Setup>(cx).ok_or_else(|| {
+        ApiError::internal("the app does not host fixture-controls-api: its router builder calls neither fixture_controls_api nor fixture_controls_api_without_api")
+    })
 }
 
 /// Gives each request to the JSON API the client's address as Topcoat
 /// reads it (`client_ip`: the peer's, or the one a proxy the app trusts
 /// names), as the runtime's `ClientIp`, by which a route's rate limit
-/// counts clients, as a procedure's does. A request through Topcoat
-/// carries neither `ClientIp` nor the `ConnectInfo` the runtime falls back
-/// to, so without it every client of a route would share one budget. An
-/// address Topcoat does not know is left out, and the runtime's fallback
-/// stands.
+/// counts clients, as a procedure's and a page's do. A request through
+/// Topcoat carries neither `ClientIp` nor the `ConnectInfo` the runtime
+/// falls back to, so without it every client of a route would share one
+/// budget. An address Topcoat does not know is left out, and the
+/// runtime's fallback, `unknown`, stands.
 struct ClientAddress;
 
 impl Layer for ClientAddress {
@@ -115,16 +172,28 @@ impl Layer for ClientAddress {
     }
 }
 
-/// The caller of an operation that needs one, from the `PageAuthenticator`
-/// and admitted as the operation's route admits it; none for one that
-/// does not.
+/// The key a rate limit counts a request's client by: its address as
+/// Topcoat reads it (`client_ip`), or `unknown`. The JSON API's routes
+/// read the same key from the `ClientIp` that `ClientAddress` gives them,
+/// so a client is one client on every way into an operation, and the
+/// clients without an address share one bucket on all of them.
+pub(crate) fn client_key(cx: &Cx) -> String {
+    client_ip(cx).map_or_else(|| "unknown".to_owned(), |ip| ip.to_string())
+}
+
+/// The caller of a call that names no service caller, admitted as the
+/// operation's route admits a request without a service credential: the
+/// service step first, which refuses an operation only a service may call
+/// (@requireService) 401 `service_unauthorized` (D37, amended); then, for
+/// an operation that needs a caller, the one the `PageAuthenticator`
+/// establishes; none for one that does not.
 async fn admit(cx: &Cx, operation: &OperationInfo) -> Result<Option<Principal>, ApiError> {
+    operation.admit_service(None)?;
     if !operation.requires_auth {
         return Ok(None);
     }
     let principal = caller(cx).await.map_err(ApiError::clone)?.clone();
-    let setup: &Setup = app_context(cx);
-    operation.admit(setup.implementations.authenticator.as_ref(), principal)
+    operation.admit_end_user(setup(cx)?.implementations.authenticator.as_ref(), principal)
 }
 
 /// The request's caller, as the `PageAuthenticator` establishes it, once
@@ -132,6 +201,20 @@ async fn admit(cx: &Cx, operation: &OperationInfo) -> Result<Option<Principal>, 
 /// does, authenticates its caller once.
 #[memoize(as_ref)]
 async fn caller(cx: &Cx) -> Result<Option<Principal>, ApiError> {
-    let setup: &Setup = app_context(cx);
-    setup.page_authenticator.principal(cx).await
+    setup(cx)?.page_authenticator.principal(cx).await
+}
+
+/// The caller of a call `service` makes, a service this process acts for
+/// (`operations::as_service`), admitted as the operation's route admits a
+/// service's request (D37, amended): its service step, which holds the
+/// service to the route's `from` (403 `service_forbidden`); then, when
+/// the route still asks for an end user, the page's caller, as the one the
+/// service forwards. None when the service stands in for the end user
+/// (@allowService) or the route asks for none.
+async fn admit_as(cx: &Cx, operation: &OperationInfo, service: &ServiceCaller) -> Result<Option<Principal>, ApiError> {
+    if operation.admit_service(Some(service))? || !operation.requires_auth {
+        return Ok(None);
+    }
+    let principal = caller(cx).await.map_err(ApiError::clone)?.clone();
+    operation.admit_end_user(setup(cx)?.implementations.authenticator.as_ref(), principal)
 }

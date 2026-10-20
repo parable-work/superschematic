@@ -8,7 +8,9 @@ beside the API crate, at `<out>/topcoat/<service>`, and is named
 
 - mounts the service's JSON API in the app's router, at `/api/{*rest}`,
   giving its routes the client's address as Topcoat reads it, by which
-  their rate limits count clients;
+  their rate limits count clients, and their limiters from the app's one
+  registry, which the procedures and the pages share, so a client has one
+  budget per operation however it calls it ([Route controls](#route-controls));
 - calls each operation in-process, from a page, a shard or a procedure, by
   its route's rules: the caller admitted as the route admits it (401, 403),
   the arguments checked as the router checks them (the same 400), then the
@@ -16,7 +18,10 @@ beside the API crate, at `<out>/topcoat/<service>`, and is named
   route does something first that a call cannot has no call: a webhook
   (`@webhook`, `@hmacVerified`), which a third party calls and whose route
   checks its signature, and an operation the service mounts itself
-  (`@manualRouteRegistration`);
+  (`@manualRouteRegistration`). An operation only a service may call
+  (`@requireService`) has no end user's call: `operations::as_service`
+  calls it, and every operation with a service clause, as a service the
+  app names ([Calling as a service](#calling-as-a-service));
 - offers a guard per operation, `can_<operation>`, which admits the caller
   alone, and whose doc says why an operation has no call;
 - mirrors each type an operation a page calls returns, and the types it
@@ -110,8 +115,12 @@ services = ["shop-orders"]
 ```
 
 A listed service gets the crate with every default when its server is
-Rust. `outputs.topcoat` in its config, when present, wins. The table's
-`pages_prefix` also turns on the listed service's pages, under it:
+Rust. `outputs.topcoat` in its config, when present, wins. The services
+the table lists are those one app hosts (D61, amended): a listed
+service's reference whose options are a listed API dependency's calls
+that dependency's crate ([Several services in one
+app](#several-services-in-one-app)). The table's `pages_prefix` also turns
+on the listed service's pages, under it:
 
 ```toml
 [extension.topcoat]
@@ -165,6 +174,13 @@ match assets {
 
 `shop_orders` takes the API's `Implementations`, the same value the JSON
 API serves, and a `PageAuthenticator` when an operation needs a caller.
+It makes one registry of the operations' rate limiters, which the JSON
+API's routes, the procedures and the pages take theirs from, and keeps it
+in the app context as `Setup.rate_limits`: an app that mounts the API's
+router again (`RouterOptions { rate_limits: setup.rate_limits.clone(), ..
+}`), or a page of another crate that calls an operation
+(`setup.rate_limits.of(&api::operations::ORDER_PLACE_ORDER)`), shares the
+operation's budget by taking from it too.
 `console_settings()` is the [pages](#pages)' `pages::Settings`, since
 acme's `superschematic.toml` turns shop-orders' console on, with its lists
 live (`pages_live`). Its root layout, `#[layout("/")] document`, gives
@@ -180,6 +196,43 @@ cover an operation's, so pages and the JSON API agree.
 
 The app must name the crate, by `use`-ing an item of it. Topcoat discovers
 items through the linker, and a crate the app never names is not linked.
+
+### Several services in one app
+
+`[extension.topcoat] services` lists the services one Topcoat app hosts
+(D61, amended). Each crate's `<service>(implementations, page_authenticator)`
+mounts its JSON API at `/api/{*rest}`, and Topcoat refuses a second route
+there as the app builds ("duplicate any-method route registered"), so an
+app sets up one crate that way and every other with
+`<service>_without_api(implementations, page_authenticator)`, which keeps
+the implementations for the in-process calls, makes the crate's own
+registry of limiters and adds its procedures', pages' and pickers'
+layers, and mounts no JSON API. The app serves at most one service's JSON
+API at `/api`:
+
+```rust
+Router::builder()
+    .discover()
+    .fixture_console_api(console, Clerk)
+    .fixture_console_suppliers_api_without_api(suppliers, Clerk)
+    .build()
+```
+
+Each call reads its crate's `Setup` from the app context. A crate the app
+links but does not set up answers each call with a 500, `the app does not
+host fixture-console-suppliers-api: its router builder calls neither
+fixture_console_suppliers_api nor fixture_console_suppliers_api_without_api`,
+not a panic, so a page whose reference calls it shows the plain control
+and the value. An app links every crate the crates it names depend on,
+and `.discover()` registers their pages and procedures, set up or not.
+
+When the table lists both a service and an API dependency of it, a
+reference whose options operation is the dependency's ([What a value
+refers to](#what-a-value-refers-to)) calls the dependency's crate
+in-process: the service's crate depends on it, `path = "../<dependency>"`,
+and calls `<crate>::operations::<operation>`, by the dependency's rules
+and under its setup. The dependency's crate must be built first, as
+`build --with-deps` and `build-all` build it.
 
 ## Users and sessions
 
@@ -272,7 +325,10 @@ name, beside its input's fields. It is labeled by the field's `@docs`
 title, else by its name in words, in which a number that ends a word is
 a word of its own (`line1` is "Line 1", `addressLine2` "Address line 2")
 unless an acronym or a single letter holds it (`awsS3Bucket` is "Aws S3
-bucket").
+bucket"). An enum's member, a select's option or a checkbox's label, is
+labeled by its title (`/** @title Held for a stock check */` in
+TypeScript, `title` in the data forms, [D48](../../docs/DECISIONS.md)),
+else by its name in words: `OnHold` is "On hold".
 
 ### Input forms
 
@@ -310,7 +366,10 @@ async fn sign_up(cx: &Cx, Form(form): Form<SignupInputForm>) -> topcoat::Result<
     };
     Ok(view! {
         (StatusCode::UNPROCESSABLE_ENTITY)
-        <form method="post">signup_input_fields(form: form, errors: errors)</form>
+        <form method="post">
+            signup_input_fields(form: form, errors: errors)
+            <button type="submit">"Sign up"</button>
+        </form>
     })
 }
 ```
@@ -371,7 +430,10 @@ async fn cancel(cx: &Cx, Form(form): Form<OrderCancelOrderArgsForm>) -> topcoat:
     };
     Ok(view! {
         (refused.status)
-        <form method="post">order_cancel_order_args_fields(form: form, errors: refused.errors)</form>
+        <form method="post">
+            order_cancel_order_args_fields(form: form, errors: refused.errors)
+            <button type="submit">"Cancel the order"</button>
+        </form>
     })
 }
 
@@ -436,12 +498,20 @@ attributes its rules give it:
   (`step="any"`), so a held value with seconds is not refused;
 - `type="password"` for a `@secret` field, never rendered with its value:
   a form holds what a reader types, though a record leaves the field out;
-- a `<textarea>` for long text, a text field or argument whose
+- a `<textarea rows="6">` for long text, a text field or argument whose
   `maxLength`, its own or its scalar's, is **500** or more: a reason, a
-  review's body, not a name or a title. It takes `minlength` and
-  `maxlength`, but no `pattern`, which `parse` checks, and a newline after
-  its start tag, which a browser drops, so a value that starts with one
-  renders as sent;
+  review's body, not a name or a title. A field's multiline hint,
+  `@display({ multiline })` ([D48](../../docs/DECISIONS.md)), overrides
+  that rule either way: `true` makes text a textarea without a bound or
+  under 500, a note, and `false` keeps it one line at any bound, a code.
+  The hint applies where the control would be text: an email, URL,
+  phone, date or time control keeps its type, and the build log says so
+  (`topcoat: Account.email: @display multiline is ignored: its control is
+  an email input`). An argument takes no decorator, so it keeps the 500
+  rule; an argument form's input fields follow their own hints. A
+  textarea takes `minlength` and `maxlength`, but no `pattern`, which
+  `parse` checks, and a newline after its start tag, which a browser
+  drops, so a value that starts with one renders as sent;
 - a `<textarea>` of JSON text, "(JSON)" in its label, for a value no
   control holds: a union, any JSON value, a map, a list of lists, an
   argument's object or list of booleans, or a type that nests the type
@@ -482,13 +552,36 @@ A form whose input holds a list as rows has submit buttons named
 `_action`: `add:lines` after a list's rows, unless it holds its limit
 (its `listMax`, or `MAX_ROWS`), and `remove:lines[1]` in each row,
 unless the list holds no more than its `listMin`. They carry
-`formnovalidate`, so a row can be added before the others are valid, and
-the component renders a hidden submit button ahead of them, which Enter
-presses. The form holds the button pressed in `row_action`.
-`apply_action()`, on the input form and on an argument form that embeds
-it, applies it, numbering the rows after a removed one again with their
-values as sent, and is true when a row button submitted the form: the
-page renders the form again, 200, without calling the operation.
+`formnovalidate`, so a row can be added before the others are valid. A
+row's own list is named under the row: a room's notes add with
+`add:rooms[0].notes` and remove with `remove:rooms[0].notes[1]`. The form
+holds the button pressed in `row_action`. `apply_action()`, on the input
+form and on an argument form that embeds it, applies it, numbering the
+rows after a removed one again with their values as sent, and is true
+when a row button submitted the form: the page renders the form again,
+200, without calling the operation. A search picker's "Find" in a posted
+form is a row button too, `find:lines[0].productId` ([A search
+picker](#a-search-picker)): `apply_action()` records it as pressed in the
+form's `finds` and is true, and the page renders the form again, its
+values as sent and that picker's text searched.
+
+Enter in a text field presses a form's default button, its first submit
+control in tree order, which must submit the form as such. So the
+component renders a hidden submit button,
+`<button type="submit" class="ss-submit" hidden>`, ahead of every row
+button and every picker's "Find", and Enter submits the form with no
+`_action`. A page puts its own
+submit button after the component, inside the one `<form>` around it: a
+form nests no other form, which the HTML parser would drop, and no
+control names its form with `form=`, so tree order is the whole rule. The
+extension's tests hold every page they render to it without a browser:
+`testdata/enter.rs` checks that each form's first submit control has no
+`name`, `formaction`, `formmethod`, `formenctype`, `formtarget`,
+`formnovalidate` or `disabled`, and `TestRowButtonsFollowTheDefaultButton`
+reads every golden's components for the hidden button's place without
+cargo. An app's own tests, with `http` among their dev-dependencies, can
+hold its pages to the rule too: `#[path = ".../enter.rs"] mod enter;`,
+then `enter::check_page(uri, &headers, &body)` on each answer.
 
 ```rust
 #[page(POST "/book")]
@@ -507,7 +600,10 @@ async fn book(cx: &Cx, Form(form): Form<BookingInputForm>) -> topcoat::Result<im
     };
     Ok(view! {
         (status)
-        <form method="post">booking_input_fields(form: form, errors: errors)</form>
+        <form method="post">
+            booking_input_fields(form: form, errors: errors)
+            <button type="submit">"Book"</button>
+        </form>
     })
 }
 ```
@@ -538,7 +634,9 @@ whose input has none or one with an argument named as one of its input's
 fields, as its input's row buttons (`_action`) or as the form's
 `overflow`, and the build log says why. An input with a field of a name
 the form keeps for itself, `overflow`, or in a form with rows
-`row_action` or the JSON name `_action`, fails the build. A form submits
+`row_action` or the JSON name `_action`, fails the build, as does a form
+with a search picker and a field or an argument named `finds`,
+`row_action`, or by the JSON names `_find` and `_action`. A form submits
 through the operation's in-process call, so an operation without one, a
 webhook's or one the service mounts itself, gets none ([what has no
 procedure](#what-has-no-procedure)). `forms: false` in `outputs.topcoat`
@@ -584,9 +682,8 @@ so it exists only where a browser's request can meet the route's rules:
   not, and an operation the service mounts itself.
 - An operation whose route admits only a service caller
   (`@requireService`, [D37](../../docs/DECISIONS.md)) has none, since a
-  browser holds no service credential. Its in-process call stays and
-  applies the end-user step alone; whether it should refuse is still
-  open.
+  browser holds no service credential. Nor has it an end user's call:
+  only a service's ([Calling as a service](#calling-as-a-service)).
   An `@allowService` operation keeps its procedure, since its route
   admits an end user too.
 
@@ -594,6 +691,60 @@ The doc of the operation's call, or of its guard, says why, and so does
 the build log. The result of an operation without a call gets no record,
 and its input no form. A type that only a left-out procedure's arguments
 name gets no record either.
+
+### Calling as a service
+
+An operation with a service clause, `@requireService` or `@allowService`
+([D37](../../docs/DECISIONS.md)), is called as a service through
+`operations::as_service(&caller)`. The caller is the runtime's
+`ServiceCaller`, the record the route hands an implementation for a
+verified credential, which the app names itself:
+`ServiceCaller::in_process(deployable, serves)`, `serves` the APIs it acts
+for. Nothing in one process presents or verifies a credential, and the
+process's own code is trusted, so the rule makes the call deliberate; it
+does not stop an attack.
+
+- **`as_service(&caller).<ns>_<op>(cx, args)`** runs the route's service
+  step: 403 `service_forbidden` when the route's `from` lists none of the
+  APIs the caller serves. Where the route still asks for an end user, it
+  takes the page's caller, from the `PageAuthenticator`, as the end user
+  the service forwards (401, 403). A listed caller of an `@allowService`
+  operation stands in for the end user. Then `Args::check` and the
+  implementation run, the caller in `ctx.service_caller` as the route
+  hands it.
+- **`as_service(&caller).can_<ns>_<op>(cx)`** admits the caller alone.
+- A `@requireService` operation has **no end user's call**, so a page
+  cannot call it for a reader, by accident or not, and the compiler says
+  so. Its guard, `can_<ns>_<op>(cx)`, answers 401 `service_unauthorized`,
+  as the route refuses a request without a service credential. Its
+  argument form has **`submit_as(cx, &caller)`** in place of `submit(cx)`.
+  An `@allowService` operation keeps its end user's call, its procedure
+  and its pages, which call it as the end user, never as a service.
+
+An app that hosts a stock API's crate, whose `reserveStock` admits only
+`@requireService({ from: [shop-orders] })`, reserves as the orders service
+it acts for, forwarding the signed-in reader:
+
+```rust
+#[page(POST "/stock/{id}/reserve")]
+async fn reserve(cx: &Cx, Form(form): Form<StockReserveStockArgsForm>) -> topcoat::Result<impl View> {
+    let orders = ServiceCaller::in_process("shop-app", ["shop-orders"]);
+    let form = StockReserveStockArgsForm { id: Some(path_param::<Id>(cx)?.to_string()), ..form };
+    let refused = match form.submit_as(cx, &orders).await {
+        Ok(_) => return Err(see_other("/stock").into()),
+        Err(refused) => refused,
+    };
+    Ok(view! {
+        (refused.status)
+        <p>"Not reserved"</p>
+    })
+}
+```
+
+Call one only where the page acts as that service: the call carries the
+service's authority, not the reader's. The console and the procedures
+never call as a service, and a call as a service applies no traffic
+controls, as no in-process call does.
 
 ### Route controls
 
@@ -604,12 +755,17 @@ refusal as the route does, as a `ProblemRecord`: 429 `too_many_requests`
 `<service>(...)` puts a `ProcedureControls` layer on the path of each
 such procedure:
 
-- **Rate limit.** The procedure has its own limiter at the route's rate,
-  which counts each client by its IP address as Topcoat reads it
-  (`client_ip`: the peer's, or the one a trusted proxy names). The JSON
-  API's route keeps its own, so a client gets the rate on each, as it
-  would on two replicas; `<service>(...)` gives the JSON API's routes the
-  same address, so both count the same clients.
+- **Rate limit.** The procedure takes the operation's limiter from the
+  app's registry, `Setup.rate_limits`, the one the JSON API's route and
+  the [pages](#route-controls-of-the-pages) take too
+  ([D44](../../docs/DECISIONS.md)). It counts each client by its IP
+  address as Topcoat reads it (`client_ip`: the peer's, or the one a
+  trusted proxy names), and `<service>(...)` gives the JSON API's routes
+  the same address, so a client has one budget per operation through all
+  three, and the clients without an address share one. Another process
+  that serves the API, such as a stack's server beside the app, keeps a
+  registry of its own: a limiter lives in process memory, so replicas
+  share no budget.
 - **Body limit.** The procedure's request body is read up to the limit
   before its arguments are decoded, and Topcoat's own limit is raised to
   it for that procedure.
@@ -657,7 +813,7 @@ in words. A value renders by its field's type:
 | The type's field | Renders as |
 | --- | --- |
 | A string, a UUID, a number | its text, or the label the app's `choices` give it |
-| An enum | `<data value="on_hold">On hold</data>`: the member's name in words, which `<enum>_label` gives |
+| An enum | `<data value="on_hold">On hold</data>`: the member's title, else its name in words, which `<enum>_label` gives |
 | `Temporal.DateTime` | `<time datetime="2026-10-09T15:30:00+01:00">9 Oct 2026, 14:30 UTC</time>`: in UTC, to the minute |
 | `Temporal.Date` | `<time datetime="2026-10-09">9 Oct 2026</time>` |
 | `Temporal.Time` | `<time datetime="14:30:15">14:30</time>`: to the minute |
@@ -718,6 +874,16 @@ let hrefs: Vec<String> = rows.iter().map(|row| format!("/orders/{}", row.id)).co
 view! { order_view_table(rows: rows, hrefs: hrefs) }
 ```
 
+A table that a sorted list's console page shows (D44, amended) takes
+`sorted`, a `views::Sorted`, default none: the header of each column
+that is one of the list's sort fields is a link,
+`<a href=… data-ss-sort="placedAt">`, and the column the rows are in
+order of has `aria-sort="ascending"` or `"descending"`, which no other
+header repeats. `Sorted.by` is that column and its direction, and
+`Sorted.links` each sortable column's field, link and query, which a live
+list's `Sorted.live`, its shard's query, takes in place of loading the
+page. An item's page shows a section's table with none.
+
 ## Pages, references and search
 
 ### A paged list
@@ -776,6 +942,20 @@ first page, the page before, which the history in its query's `back`
 gives, and the next, then a form of its page sizes ([What each page
 does](#what-each-page-does)).
 
+A sorted operation, one with a `SortBy` argument (D60, amended), reads its
+order in `page.sort`. Its in-process call unbinds the cursor from the sort
+before the implementation reads it, the default sort filled in, and binds
+the page's `next` to the sort after, as the router does, so a cursor of
+the JSON API pages the call and one of the call the JSON API; a cursor
+returned under another sort is the 400 at `cursor`. Its argument form
+holds the sort as it holds the limit, under the argument's name, `sort`,
+as the query sends it, and renders no control for it: `page()` reads it
+by the route's rules, a sort the route does not offer being its 400, and
+`query_pairs()` keeps it before `limit`, so a page's links keep the order.
+Its procedure's record takes it beside `cursor` and `limit`
+(`PAGE.sorted_request(cursor, limit, sort)`). The console's headers set it
+([What each page does](#what-each-page-does)).
+
 ### What a value refers to
 
 A field or an argument declared `RefersTo<T, Target>` (D61) holds the
@@ -788,13 +968,16 @@ refers to the target by the same value, each derived by the core's
 and its options operation has an in-process call, the crate writes
 `references`:
 
-- **`<form>_choices(cx, choices) -> Choices`**, per form that holds a
-  reference (`order_input_form_choices`, `order_list_orders_args_form_choices`),
+- **`<form>_choices(cx, form, choices) -> Choices`**, per form that holds
+  a reference (`order_input_form_choices`, `order_list_orders_args_form_choices`),
   gives each such control, by its path (`lines.productId`, an argument by
   its name), the target's items as options, each by its value and named
   by its label. They are the options operation's items from one listing
   a request, the first page of up to its maxLimit when it pages; when
   more follow, a select would hide them, and the control stays as it is.
+  A control whose options operation searches is a search picker instead,
+  whose pick it gives by its control's name from `form` ([A search
+  picker](#a-search-picker)).
 - **`<record>_labels(cx, records, choices) -> Choices`**, per record that
   shows a reference at any depth (`order_view_labels`), names each value
   the records hold by its item's label: through the lookup with the
@@ -825,19 +1008,31 @@ amended). `OrderLineView.productId`, beside `@source(shop-db.OrderLine)`
 whose `product` is a `Relation<Product>`, refers to the one type of the
 API sourced from `shop-db.Product` with no `RefersTo`, and is offered and
 labeled as a written reference is. A target may be an API dependency's
-type (D66), imported by the API: its options operation is still one of
-the API's own, and the build log names it by its service,
-`fixture-console-suppliers-api.Supplier`.
+type (D66), imported by the API, and the build log names it by its
+service, `fixture-console-suppliers-api.Supplier`. Its options operation
+is one of the API's own when one lists it; else it is the dependency's
+own, by the same rule (D61, amended), which the crate calls through the
+dependency's crate when one app hosts both ([Several services in one
+app](#several-services-in-one-app)). Its functions are named after the
+dependency, `fixture_console_suppliers_api_supplier_list_suppliers_options`,
+and a page that calls it meets its rate limit, its limiter taken from the
+dependency's setup at the request. Otherwise the reference is left out,
+and the build log says why: `... whose options operation
+fixture-console-suppliers-api's SupplierQueries.listSuppliers has no
+in-process call: [extension.topcoat] services does not list
+fixture-console-suppliers-api beside fixture-console-api, so no app hosts
+both`, or the dependency's server is not Rust, or its crate is not built.
 
 An app's own page takes them as the console's pages do:
 
 ```rust
 #[page("/orders/new")]
 async fn new_order(cx: &Cx) -> topcoat::Result<impl View> {
-    let choices = references::place_order_input_form_choices(cx, Choices::new()).await;
+    let form = PlaceOrderInputForm::new();
+    let choices = references::place_order_input_form_choices(cx, &form, Choices::new()).await;
     Ok(view! {
         <form method="post">
-            place_order_input_fields(form: PlaceOrderInputForm::new(), choices: choices)
+            place_order_input_fields(form: form, choices: choices)
             <button type="submit">"Place the order"</button>
         </form>
     })
@@ -860,6 +1055,48 @@ A `SearchQuery` argument (D62) is its argument form's first control, an
 that holds one is `role="search"`, and its links to the next and the
 first page carry it. The implementation matches it: `runtime::search::terms`
 and `like_pattern` over SQL, `matches` in memory.
+
+### A search picker
+
+A control whose reference's options operation has a `SearchQuery`
+argument is a search picker (D61, amended), however many items there are:
+a search box, `_find.<control>`, labeled `Search <plural>` and with the
+search argument's attributes, a "Find" button, and the control's select,
+whose options are the first page of the items the box's text finds, at
+the options operation's defaultLimit, or of every item for an empty
+text, with a note when more match. The value held is always an option,
+named by its label through the lookup, else the listing, as a record's
+value is. The control keeps its label, and the select its id and name.
+
+`<form>_choices(cx, form, choices)` gives each picker its `Pick`
+(`crate::choices::Pick`) in `Choices`, by its control's name
+(`Choices::with_pick`, `Choices::pick`): each distinct text is one
+listing, kept for the request, and a render searches at most
+`MAX_LOOKUP_CALLS` texts a target, past which a picker lists the first
+page and says to search again; the values the form holds are named
+through the lookup in one batch. The form holds every box's text in
+`finds` (`Finds::text`). A filter's pickers each search their text: its
+"Find" sends its query, `_find.productId=anvil`, and the page renders the
+matches beside the list. A post searches only the text of the "Find" it
+pressed, `_action=find:<control>` ([Rows without
+JavaScript](#rows-without-javascript)), and the other pickers keep their
+boxes' texts over the first page. A text the search argument's rules
+refuse shows the route's message and no matches. The app's `Choices`
+still win: a control they name is a select of theirs, with no picker and
+no call. A caller the options operation refuses gets the plain control
+and the value. A query list argument, whose controls share its name,
+stays a select of the options.
+
+Each picker is a shard of its source, `references::<target>_pick`, at
+`/_superschematic/<service>/_pick/<target>`, taking the control
+(`PickControl`) and its pick. Without Topcoat's runtime it renders in
+place and "Find" submits the form. With it, the box's `input` event sets
+the shard's text, and the runtime renders the picker again with what the
+text finds, through `<target>_target_picks`, the value the select holds
+kept, while Topcoat keeps the focused box's text. The shard calls the
+options operation in-process as the page's caller, and meets its rate
+limit and timeout through a layer on its path (`references::route_controls`),
+whose limiter is the operation's one in the app's registry.
 
 ## Pages
 
@@ -970,6 +1207,19 @@ pages](#route-controls-of-the-pages)).
   new size starts at the first page; the filter form holds the limit sent,
   when the route admits it, as a hidden input, so a filter keeps the size,
   and it too starts at the first page.
+- **The headers** of a sorted list's table (D44, amended) each link a
+  sort field's column: the column the rows are in order of, the sort sent
+  or the route's defaultSort, has `aria-sort`, and its link reverses the
+  order; another sortable column's link sorts by it ascending. A link's
+  query is the list's with the new sort, before the limit, and no cursor
+  and no `back`, so a new order starts at the first page with no history.
+  The filter holds the sort sent, when the route admits it, as a hidden
+  input, and the pager's links and the size form keep it; a sort the
+  route refuses is its 400, as the form's message, and no link keeps it.
+  A section on an item's page shows its first page in the defaultSort,
+  with no links. A sort field the table shows no column of is sorted only
+  by the query, and the build log says so: `topcoat: orders sorts by
+  totalCents, which its table shows no column of`.
 - **An item's page** renders `<type>_detail`, headed by its title, links
   to its edit and delete pages, a form per action and a section per
   resource under it, each only when the caller may.
@@ -979,10 +1229,12 @@ pages](#route-controls-of-the-pages)).
 - **The delete page** shows the item and the form that deletes it, so a
   GET never deletes and no script confirms.
 
-Every form a page renders takes its references' options, and a list's
-rows and an item's detail their records' labels ([What a value refers
-to](#what-a-value-refers-to)), under the app's choices; an action's form
-takes its own beside the detail's labels.
+Every form a page renders takes its references' options and its search
+pickers' picks, and a list's rows and an item's detail their records'
+labels ([What a value refers to](#what-a-value-refers-to)), under the
+app's choices; an action's form takes its own beside the detail's
+labels. A post's "Find" renders its page's form again, 200, without the
+operation ([A search picker](#a-search-picker)).
 
 A route's values come from the page's path, set on the form over its
 hidden inputs, which a reader can change, and decoded as an argument form
@@ -1033,6 +1285,27 @@ request asks the `PageAuthenticator` for its caller once
 calls ask: the nav's guards are permission checks of one caller. The
 index at the prefix lists the same resources. The markup is semantic HTML
 with `ss-` classes and ships no styles.
+
+A link of the nav and the index starts with its resource's icon when the
+list's element type, else the detail's, declares one with
+`@display({ icon })` ([D48](../../docs/DECISIONS.md)): an empty span the
+app's stylesheet draws, before the label.
+
+```html
+<li><a href="/console/orders"><span class="ss-icon" data-icon="receipt" aria-hidden="true"></span>Orders</a></li>
+```
+
+The crate ships no icon set: the name is the app's to draw, with a mask
+per name, say.
+
+```css
+.ss-icon { display: inline-block; width: 1em; height: 1em; background: currentColor;
+           mask: center / contain no-repeat; }
+.ss-icon[data-icon="receipt"] { mask-image: url(/icons/receipt.svg); }
+```
+
+A link whose type declares no icon has no span, and a crate whose
+resources declare none renders the nav as it did before icons.
 
 ### Mounting them
 
@@ -1097,7 +1370,9 @@ it is registered at:
   an item's page, its edit page and its delete page the detail's. The
   index calls no operation, and meets none. A GET page carries no body
   for a body limit to refuse;
-- a [live list](#live-lists)'s shard meets its list's;
+- a [live list](#live-lists)'s shard meets its list's, and a [search
+  picker](#a-search-picker)'s shard its options operation's rate limit and
+  timeout, through a layer on its path, `references::route_controls`;
 - a page whose forms or records hold a
   [reference](#what-a-value-refers-to) meets, besides, the rate limit and
   the timeout of each options operation they call, listing or looking up
@@ -1111,11 +1386,17 @@ it is registered at:
   the step's item, and the item's own page, edit, delete and actions. A
   shard renders no trail.
 
-The rate limit is the operation's own limiter for the pages, at its
-route's rate, which every page and shard that calls the operation shares,
-and counts each client by its IP address as Topcoat reads it
-(`client_ip`), as a procedure's does; the JSON API's route and the
-procedure keep theirs, as replicas would. A page that meets several
+The rate limit is the operation's limiter in the app's registry,
+`Setup.rate_limits`, which every page and shard that calls the operation
+takes from, and so do its JSON API route and its procedure; an API
+dependency's options operation's is its own crate's, which the page takes
+from that crate's `Setup` at the request, none when the app does not set
+it up ([Several services in one app](#several-services-in-one-app)): a client has
+one budget per operation through all of them, counted by its IP address
+as Topcoat reads it (`client_ip`). A reference's options operation is
+counted with its route too, so a client who reloads a page holding a
+reference spends that listing's API budget, and a busy console can leave
+the client none for the JSON API's listing. A page that meets several
 operations' controls is counted by each limiter, its own operation's
 first, and the tightest timeout covers it; the body limit is its own
 operation's, since no other call carries the body. The body is read up
@@ -1169,8 +1450,11 @@ are links to the page. The shard reads `back` from its query as the page
 reads it from the request's, so Previous, First and Next are the page's
 links, and its size form's submit runs the filter's script over its own
 form (`data-ss-live-size`), through its own hidden input, which sets the
-same signal. A list without a filter or a page has nothing to update,
-and stays a component. An action's form, a post that changes the item,
+same signal. A sorted list's header links set it as the pager's do
+(D44, amended), so the shard renders the new order, its headers'
+`aria-sort` following it. A list without a filter or a page has nothing
+to update, and stays a component. A search picker is a shard of its own
+whatever `live` says ([A search picker](#a-search-picker)). An action's form, a post that changes the item,
 keeps its POST-redirect-GET
 without a reload of its own: a shard renders and a form posts, so posting
 through one would run the operation inside a render, and through a

@@ -3,6 +3,7 @@ package apigen_test
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -51,7 +52,9 @@ func generatePagedAPIOf(t *testing.T, schema *ir.Schema) *apigen.APIOutput {
 
 // TestPagedEndpoints: a paged operation's endpoint carries its page, whose
 // cursor and limit are not among its query parameters, and its result
-// stays the list; every other endpoint has no page.
+// stays the list; every other endpoint has no page. listItems's sort is a
+// query parameter, marked with its values and default, and its page's
+// sort (D60, amended), which the implementation's arguments leave out.
 func TestPagedEndpoints(t *testing.T) {
 	output := generatePagedAPI(t)
 	pages := map[string]apigen.PageInfo{}
@@ -69,12 +72,40 @@ func TestPagedEndpoints(t *testing.T) {
 			}
 		}
 	}
+	sort := &apigen.PageSort{Param: "sort", Fields: []string{"name", "sku"}, Default: "name"}
 	want := map[string]apigen.PageInfo{
-		"listItems": {DefaultLimit: 2, MaxLimit: 5, Operation: "Catalog.listItems"},
+		"listItems": {DefaultLimit: 2, MaxLimit: 5, Operation: "Catalog.listItems", Sort: sort},
 		"listTags":  {DefaultLimit: 20, MaxLimit: 100, Operation: "Catalog.listTags"},
 	}
-	if len(pages) != len(want) || pages["listItems"] != want["listItems"] || pages["listTags"] != want["listTags"] {
+	if !reflect.DeepEqual(pages, want) {
 		t.Fatalf("pages = %+v, want %+v", pages, want)
+	}
+	for _, endpoint := range output.Endpoints {
+		if endpoint.Name != "listItems" {
+			continue
+		}
+		var names, args []string
+		var marked *apigen.SortParam
+		for _, param := range endpoint.QueryParams {
+			names = append(names, param.Name)
+			if param.Sort != nil {
+				marked = param.Sort
+			}
+		}
+		for _, param := range endpoint.ArgQueryParams() {
+			args = append(args, param.Name)
+		}
+		wantSort := &apigen.SortParam{Fields: []string{"name", "sku"}, Values: []string{"name", "-name", "sku", "-sku"}, Default: "name"}
+		if !reflect.DeepEqual(names, []string{"ids", "inStock", "sort"}) || !reflect.DeepEqual(args, []string{"ids", "inStock"}) || !reflect.DeepEqual(marked, wantSort) {
+			t.Errorf("listItems: query params %v, the implementation's %v, sort %+v", names, args, marked)
+		}
+		if got, want := endpoint.Page.GoSpec(), `paging.Spec{DefaultLimit: 2, MaxLimit: 5, Sort: &paging.SortSpec{Param: "sort", Fields: []string{"name", "sku"}, Default: paging.Sort{Field: "name"}}}`; got != want {
+			t.Errorf("GoSpec = %s, want %s", got, want)
+		}
+	}
+	descending := &apigen.PageInfo{DefaultLimit: 20, MaxLimit: 100, Sort: &apigen.PageSort{Param: "order", Fields: []string{"rating"}, Default: "-rating"}}
+	if got, want := descending.GoSpec(), `paging.Spec{DefaultLimit: 20, MaxLimit: 100, Sort: &paging.SortSpec{Param: "order", Fields: []string{"rating"}, Default: paging.Sort{Field: "rating", Desc: true}}}`; got != want {
+		t.Errorf("GoSpec = %s, want %s", got, want)
 	}
 	if !output.HasPagedEndpoints() {
 		t.Fatal("HasPagedEndpoints = false")
@@ -150,8 +181,10 @@ func TestWriteAPIGoldenPaged(t *testing.T) {
 // runtimes' page vectors into it, and runs go build, go vet and go test
 // there: the routes page an in-memory catalog over httptest, first page,
 // next, last page with a null next, filters on each page, the limit's
-// bounds, and each refusal of a limit or cursor as page_parity.json words
-// it; the scaffolds implement the interface and answer 501.
+// bounds, the items sorted each way with the next bound to the sort (D60,
+// amended), and each refusal of a limit, a sort or a cursor as
+// page_parity.json words it; the scaffolds implement the interface and
+// answer 501.
 func TestPagedRoutesServePages(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping compile check in -short mode")
@@ -202,7 +235,7 @@ func TestPagedFilterableRoutesCompile(t *testing.T) {
 		t.Fatal(err)
 	}
 	filters := strings.Index(string(routes), "filters, filterErrors := filterparse.ParseFilters(r.URL.Query())")
-	page := strings.Index(string(routes), "page, ok := paging.Read(w, r, paging.Spec{DefaultLimit: 2, MaxLimit: 5})")
+	page := strings.Index(string(routes), "page, ok := paging.Read(w, r, paging.Spec{DefaultLimit: 2, MaxLimit: 5, Sort: ")
 	if filters < 0 || page < filters || !strings.Contains(string(routes), "impl.ListItems(r.Context(), Ids, InStock, filters, page)") {
 		t.Errorf("routes.go does not parse the filters, then read the page, then pass both:\n%s", routes)
 	}

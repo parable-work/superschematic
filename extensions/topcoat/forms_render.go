@@ -17,6 +17,16 @@ type formRenderer struct {
 	// used holds each variable the view reads a value of, form or a row's
 	// (row0), so a component or a loop that reads none binds `_`.
 	used map[string]bool
+	// picks are the search pickers of the form (D61, amended), by the
+	// paths of their controls, as Choices names them.
+	picks map[string]pickRender
+}
+
+// pickRender is how a form renders a search picker's control: through its
+// source's shard, and whether its "Find" posts the form.
+type pickRender struct {
+	Shard string // product_pick
+	Post  bool
 }
 
 func newFormRenderer() *formRenderer {
@@ -33,7 +43,7 @@ func (r *formRenderer) use(value string) {
 // sub is a renderer of a part of r's view, which r writes after what it
 // learns of it (absorb): whether the part reads a row's value.
 func (r *formRenderer) sub() *formRenderer {
-	return &formRenderer{used: r.used}
+	return &formRenderer{used: r.used, picks: r.picks}
 }
 
 // absorb writes part, a view sub rendered, after r's.
@@ -277,6 +287,16 @@ func (r *formRenderer) control(indent int, f *formField, value string, field, id
 		r.choosable = true
 		r.line(indent, "match choices.of("+field.arg+", "+rustString(choices)+") {")
 		r.line(indent+1, fmt.Sprintf("Some(options) => choice_select(id: %s, name: %s, required: %t, invalid: errors.invalid(%s), options: choice_options(options, %s.as_deref())),", id.arg, field.arg, required, field.arg, value))
+		if pick, ok := r.picks[choices]; ok {
+			// A search picker, which its pick makes a search box over a
+			// select of what its text finds (D61, amended).
+			r.line(indent+1, "None => match choices.pick("+field.arg+") {")
+			r.line(indent+2, fmt.Sprintf("Some(pick) => %s(control: pick_control(%s, %s, %t, errors.invalid(%s), %s.as_deref(), %t), pick: pick.clone()),", pick.Shard, field.arg, id.arg, required, field.arg, value, pick.Post))
+			r.line(indent+2, "None => "+input+",")
+			r.line(indent+1, "},")
+			r.line(indent, "}")
+			return
+		}
 		r.line(indent+1, "None => "+input+",")
 		r.line(indent, "}")
 	}

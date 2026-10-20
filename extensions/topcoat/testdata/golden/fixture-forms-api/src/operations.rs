@@ -10,22 +10,23 @@
 //!
 //! A call does not apply the route's traffic controls (@rateLimit,
 //! @bodyLimit, @timeout): the page that makes it is a route of the app,
-//! under the controls the app gives it.
+//! under the controls the app gives it. It reads what the app keeps for
+//! the crate (`setup`): an app that does not host fixture-forms-api, whose
+//! router builder calls neither `fixture_forms_api` nor `fixture_forms_api_without_api`,
+//! gets the 500 (D61, amended).
 
 #![allow(unused_imports)]
 
-use crate::Setup;
 use crate::api::operations;
 use crate::api::runtime::{ApiError, Principal};
 use crate::api::types;
-use topcoat::context::{Cx, app_context};
+use topcoat::context::Cx;
 
 /// account.signUp (`POST /api/accounts`): Sign up for an account.
 pub async fn account_sign_up(cx: &Cx, args: crate::api::AccountSignUpArgs) -> Result<types::AccountView, ApiError> {
     let caller = can_account_sign_up(cx).await?;
     args.check()?;
-    let setup: &Setup = app_context(cx);
-    setup
+    crate::setup(cx)?
         .implementations
         .account
         .sign_up(operations::ACCOUNT_SIGN_UP.context(caller), args)
@@ -36,8 +37,7 @@ pub async fn account_sign_up(cx: &Cx, args: crate::api::AccountSignUpArgs) -> Re
 pub async fn account_draft_note(cx: &Cx, args: crate::api::AccountDraftNoteArgs) -> Result<types::AccountView, ApiError> {
     let caller = can_account_draft_note(cx).await?;
     args.check()?;
-    let setup: &Setup = app_context(cx);
-    setup
+    crate::setup(cx)?
         .implementations
         .account
         .draft_note(operations::ACCOUNT_DRAFT_NOTE.context(caller), args)
@@ -48,8 +48,7 @@ pub async fn account_draft_note(cx: &Cx, args: crate::api::AccountDraftNoteArgs)
 pub async fn account_rotate_key(cx: &Cx, args: crate::api::AccountRotateKeyArgs) -> Result<types::AccountKey, ApiError> {
     let caller = can_account_rotate_key(cx).await?;
     args.check()?;
-    let setup: &Setup = app_context(cx);
-    setup
+    crate::setup(cx)?
         .implementations
         .account
         .rotate_key(operations::ACCOUNT_ROTATE_KEY.context(caller), args)
@@ -60,8 +59,7 @@ pub async fn account_rotate_key(cx: &Cx, args: crate::api::AccountRotateKeyArgs)
 pub async fn account_annotate(cx: &Cx, args: crate::api::AccountAnnotateArgs) -> Result<types::AccountView, ApiError> {
     let caller = can_account_annotate(cx).await?;
     args.check()?;
-    let setup: &Setup = app_context(cx);
-    setup
+    crate::setup(cx)?
         .implementations
         .account
         .annotate(operations::ACCOUNT_ANNOTATE.context(caller), args)
@@ -72,8 +70,7 @@ pub async fn account_annotate(cx: &Cx, args: crate::api::AccountAnnotateArgs) ->
 pub async fn booking_book(cx: &Cx, args: crate::api::BookingBookArgs) -> Result<types::BookingView, ApiError> {
     let caller = can_booking_book(cx).await?;
     args.check()?;
-    let setup: &Setup = app_context(cx);
-    setup
+    crate::setup(cx)?
         .implementations
         .booking
         .book(operations::BOOKING_BOOK.context(caller), args)

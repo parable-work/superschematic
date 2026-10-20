@@ -17,13 +17,16 @@ import (
 )
 
 // D48: no generator renders @display, as none renders a field's @docs
-// title. The DB, API and General fixtures build with every type language,
-// every SDK and the Go, TypeScript and Rust servers twice, as loaded and
-// with a display on every type, and the two trees hold the same files,
-// byte for byte, but for the one output that copies the IR: the Rust
-// types crate's schemas/<Type>.json, an IR document per @jsonField
-// payload, which carries each type's display as it carries its fields'
-// titles, and nothing else besides.
+// title, and none renders an enum member's title, a type's icon or a
+// field's multiline hint (D48, amended). The DB, API and General fixtures
+// build with every type language, every SDK and the Go, TypeScript and
+// Rust servers twice, as loaded and with a display, an icon, a title on
+// every enum member and a hint on every text field, and the two trees hold
+// the same files, byte for byte, but for the one output that copies the
+// IR: the Rust types crate's schemas/<Type>.json, an IR document per
+// @jsonField payload, which carries each type's display, its fields'
+// hints and its enums' titles as it carries its fields' titles, and
+// nothing else besides.
 func TestDisplayChangesNoGeneratedFile(t *testing.T) {
 	clock := codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC))
 	every := map[string]any{
@@ -144,6 +147,14 @@ func withoutDisplays(t *testing.T, rel string, data []byte) []byte {
 	for _, td := range doc.Types {
 		found = found || td.Display != nil
 		td.Display = nil
+		for _, f := range td.Fields {
+			f.Display = nil
+		}
+	}
+	for _, e := range doc.Enums {
+		for i := range e.Values {
+			e.Values[i].Title = ""
+		}
 	}
 	if !found {
 		t.Errorf("%s carries no display", rel)
@@ -156,14 +167,16 @@ func withoutDisplays(t *testing.T, rel string, data []byte) []byte {
 }
 
 // addDisplays gives every type of the schema a display with every member
-// a type without behaviors takes: the nouns, a create label, its first
-// string field as the title and its first field as the summary. It returns
-// how many types took one.
+// a type without behaviors takes: the nouns, a create label, an icon, its
+// first string field as the title and its first field as the summary. It
+// gives every text field that is not secret a multiline hint, and every
+// enum member a title. It returns how many types took a display.
 func addDisplays(schema *ir.Schema) int {
 	n := 0
+	multiline := true
 	for _, types := range []map[string]*ir.TypeDef{schema.Types, schema.Inputs} {
 		for name, td := range types {
-			display := &ir.TypeDisplay{Noun: name, Plural: name + "s", CreateLabel: "New " + name}
+			display := &ir.TypeDisplay{Noun: name, Plural: name + "s", CreateLabel: "New " + name, Icon: "glyph-" + name}
 			for _, f := range td.Fields {
 				if display.SummaryFields == nil {
 					display.SummaryFields = []string{f.Name}
@@ -171,9 +184,17 @@ func addDisplays(schema *ir.Schema) int {
 				if display.TitleField == "" && f.TypeRef.Name == "string" && !f.TypeRef.IsArray && !f.TypeRef.IsMap {
 					display.TitleField = f.Name
 				}
+				if !f.Secret && !f.TypeRef.IsMap && ir.TextValue(schema, ir.TypeRef{Name: f.TypeRef.Name}) {
+					f.Display = &ir.FieldDisplay{Multiline: &multiline}
+				}
 			}
 			td.Display = display
 			n++
+		}
+	}
+	for _, e := range schema.Enums {
+		for i := range e.Values {
+			e.Values[i].Title = "The " + e.Values[i].Name + " member"
 		}
 	}
 	return n

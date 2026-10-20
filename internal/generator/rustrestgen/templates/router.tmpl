@@ -29,7 +29,9 @@ use {{ .RuntimeCrateIdent }}::{
     request_ids, required_input, ApiError, ParamKind, ParamLocation, ParamSpec, QueryValues,
     RequestContext, RouterOptions, ScalarConstraints,
 };
-{{- if .HasPages }}
+{{- if .HasSortedPages }}
+use {{ .RuntimeCrateIdent }}::page::{PageSpec, SortSpec};
+{{- else if .HasPages }}
 use {{ .RuntimeCrateIdent }}::page::PageSpec;
 {{- end }}
 {{- if .HasAuth }}
@@ -75,7 +77,7 @@ pub struct RouterState {
 ///
 {{- range .ManualEndpoints }}
 /// - `{{ toUpper .Method }} {{ .Path }}` ({{ .Namespace }}.{{ .Name }}){{ if .HasControls }}: apply its controls,
-///   `RouteControls::new(){{ range .ControlCalls "authenticator" "service_authenticator" }}{{ . }}{{ end }}.apply(route)`
+///   `RouteControls::new(){{ range .ControlCalls "" "authenticator" "service_authenticator" }}{{ . }}{{ end }}.apply(route)`
 {{- end }}{{ if .WebhookProvider }}{{ if .HasControls }}, then{{ else }}, @hmacVerified:{{ end }}
 ///   wrap its route in `webhook_verified` with the {{ .WebhookProvider }} verifier
 {{- end }}
@@ -104,6 +106,12 @@ pub struct RouterState {
 /// A route's controls run in the order the Go server runs them: the rate
 /// limit, the body limit, the permission check of a route that needs a
 /// caller, then the timeout around the handler.
+{{- end }}
+{{- if .HasRateLimits }}
+///
+/// A @rateLimit route's limiter is its operation's in a `RateLimits`
+/// registry (D44, amended): `build_router` makes one of its own, and
+/// `build_router_with` takes `options.rate_limits`.
 {{- end }}
 {{- if .Identity }}
 ///
@@ -134,6 +142,11 @@ pub fn build_router(implementations: Implementations) -> Router {
 /// `options.serve_openapi` is off, stating `options.openapi_version` and
 /// `options.openapi_base_url` as the generated Go server states its
 /// `Config`'s.
+{{- if .HasRateLimits }} The @rateLimit routes take their operations'
+/// limiters from `options.rate_limits`, so the routers built with one
+/// registry, or a router and a Topcoat app's procedures and pages, count a
+/// client against one budget.
+{{- end }}
 {{- if .WebhookProviders }}
 ///
 /// # Panics
@@ -180,6 +193,9 @@ fn mount(
     }
 {{- end }}
 {{- $authenticator := "Arc::clone(&state.implementations.authenticator)" }}
+{{- if .HasRateLimits }}
+    let limits = options.rate_limits.clone();
+{{- end }}
 {{- if .Identity }}
     let identity_service = Arc::clone(implementations.authenticator.service());
 {{- if .HasAuth }}
@@ -193,7 +209,7 @@ fn mount(
 {{- $route := printf "%s(handle_%s)" .Method .SnakeName }}
 {{- if .HasControls }}
     let route = RouteControls::new()
-{{- range .ControlCalls $authenticator "Arc::clone(&state.implementations.service_authenticator)" }}
+{{- range .ControlCalls "limits" $authenticator "Arc::clone(&state.implementations.service_authenticator)" }}
         {{ . }}
 {{- end }}
         .apply({{ $route }});
@@ -215,7 +231,7 @@ fn mount(
 {{- $route := printf "identity_handler(&identity_service, identity::%s)" .IdentityConst }}
 {{- if .HasControls }}
     let route = RouteControls::new()
-{{- range .IdentityControlCalls $authenticator "Arc::clone(&state.implementations.service_authenticator)" }}
+{{- range .IdentityControlCalls "limits" $authenticator "Arc::clone(&state.implementations.service_authenticator)" }}
         {{ . }}
 {{- end }}
         .apply({{ $route }});
@@ -229,7 +245,7 @@ fn mount(
         let route = {{ .Method }}(handle_{{ .SnakeName }}).with_state(Arc::clone(&manual_routes));
 {{- if .HasControls }}
         let route = RouteControls::new()
-{{- range .ControlCalls $authenticator "Arc::clone(&state.implementations.service_authenticator)" }}
+{{- range .ControlCalls "limits" $authenticator "Arc::clone(&state.implementations.service_authenticator)" }}
             {{ . }}
 {{- end }}
             .apply(route);
@@ -331,7 +347,11 @@ fn decode_{{ .SnakeName }}({{ join .DecodeParams ", " }}) -> Result<{{ .ArgsName
         {{ .Field }}: {{ .Spec }}.query(query)?,
 {{- end }}
 {{- if .Page }}
+{{- if .Page.Sort }}
+        page: {{ .ArgsName }}::PAGE.unbind({{ .ArgsName }}::PAGE.query(query)?)?,
+{{- else }}
         page: {{ .ArgsName }}::PAGE.query(query)?,
+{{- end }}
 {{- end }}
 {{- with .Input }}
         input: {{ if .Required }}required_input{{ else }}input{{ end }}({{ if $endpoint.BodyArgs }}body.clone(){{ else }}body{{ end }}, {{ .Parse }})?,
@@ -347,6 +367,12 @@ impl {{ .ArgsName }} {
     /// The route's @paginated limits (D60): the router reads the `cursor`
     /// and `limit` query parameters into `page` by them, and `check` holds
     /// a caller's `page` to them.
+{{- if .Sort }}
+    /// Its sort (D60, amended) is the `{{ .Sort.Param }}` query parameter, which the
+    /// router reads after the limit; `PAGE.unbind` fills its default in and
+    /// unbinds the cursor, and `Page::bind` binds the next to it, in the
+    /// router and in an in-process call alike.
+{{- end }}
     pub const PAGE: PageSpec = {{ .SpecExpr }};
 {{ end }}
     /// Checks arguments a caller built, in-process rather than in a
@@ -454,11 +480,16 @@ async fn handle_{{ .SnakeName }}(
     ctx.path_params = path_params;
 {{- end }}
     ctx.query_params = query.last_values();
+{{- if and .Page .Page.Sort }}
+    // The page's next names the sort it was read in (D60, amended).
+    let page = args.page.clone();
+{{- end }}
     let result = state
         .implementations
         .{{ .ImplementationsField }}
         .{{ .FunctionName }}(ctx{{ if .HasArgs }}, args{{ end }})
-        .await;
+        .await{{ if and .Page .Page.Sort }}
+        .and_then(|listed| listed.bind(&page)){{ end }};
     operation_response(result, request_id.as_deref())
 }
 {{- end }}

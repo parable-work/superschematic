@@ -25,6 +25,10 @@ const (
 	// DefaultToolSearchKey is the key, true, that marks the property of an
 	// operation's search argument (D62), the OpenAPI document's key.
 	DefaultToolSearchKey = OpenAPISearchKey
+	// DefaultToolSortKey is the key, true, that marks the property of a
+	// paged operation's sort argument (SortBy, D60 amended), the OpenAPI
+	// document's key.
+	DefaultToolSortKey = OpenAPISortKey
 	// DefaultToolGuidanceKey is the MCP _meta key a visible tool carries its
 	// @docs guidance (useWhen, doNotUseWhen, success, errors) under.
 	DefaultToolGuidanceKey = "superschematic/operation-guidance"
@@ -39,12 +43,18 @@ type ToolKeys struct {
 	Scalar string
 	// Reference is the key a tool argument property that refers to an
 	// item (D61) carries its resolved reference under: { target, options,
-	// value, label, lookup }, target the type's name and options the
-	// options operation's tool name. Empty leaves references out.
+	// value, label, lookup, search, service }, target the type's name,
+	// options the options operation's tool name, and service the API
+	// dependency whose operation it is (D61, amended). Empty leaves
+	// references out.
 	Reference string
 	// Search is the key, true, that marks the property of an operation's
 	// search argument (D62). Empty leaves the mark out.
 	Search string
+	// Sort is the key, true, that marks the property of a paged
+	// operation's sort argument (SortBy, D60 amended), whose enum holds
+	// its values. Empty leaves the mark out.
+	Sort string
 	// Guidance is the MCP _meta key a visible tool carries its @docs
 	// guidance under. Empty leaves the guidance out of _meta; the tool
 	// documents' own guidance member is written either way.
@@ -68,7 +78,7 @@ type ToolKeyValue struct {
 func DefaultToolKeys() ToolKeys {
 	return ToolKeys{
 		Scalar: DefaultToolScalarKey, Reference: DefaultToolReferenceKey, Search: DefaultToolSearchKey,
-		Guidance: DefaultToolGuidanceKey,
+		Sort: DefaultToolSortKey, Guidance: DefaultToolGuidanceKey,
 	}
 }
 
@@ -130,7 +140,7 @@ var reservedToolParameterKeys = []string{"type", "additionalProperties", "proper
 // reservedToolPropertyKeys are the JSON Schema keywords a tool argument's
 // property is written with (toolsutil.JSONSchemaProperty), and those a
 // schema's property holds elsewhere ($ref, allOf, anyOf, nullable). The
-// scalar, reference and search keys cannot be one: the property would
+// scalar, reference, search and sort keys cannot be one: the property would
 // carry the keyword twice, or a vendor value where JSON Schema reads its
 // own.
 var reservedToolPropertyKeys = []string{
@@ -181,7 +191,9 @@ func applyToolHooks(schema *ir.Schema, endpoints []EndpointInfo, hooks []ToolHoo
 
 func validateToolKeys(keys ToolKeys) error {
 	// A property's own keys: two of one name would write one key twice.
-	propertyKeys := []struct{ name, key string }{{"scalar", keys.Scalar}, {"reference", keys.Reference}, {"search", keys.Search}}
+	propertyKeys := []struct{ name, key string }{
+		{"scalar", keys.Scalar}, {"reference", keys.Reference}, {"search", keys.Search}, {"sort", keys.Sort},
+	}
 	for _, k := range propertyKeys {
 		if slices.Contains(reservedToolPropertyKeys, k.key) {
 			return fmt.Errorf("the %s key %q is a JSON Schema keyword a tool argument's property is written with", k.name, k.key)
@@ -207,6 +219,8 @@ func validateToolKeys(keys ToolKeys) error {
 			return fmt.Errorf("tool parameter key %q is the reference key", kv.Key)
 		case kv.Key == keys.Search:
 			return fmt.Errorf("tool parameter key %q is the search key", kv.Key)
+		case kv.Key == keys.Sort:
+			return fmt.Errorf("tool parameter key %q is the sort key", kv.Key)
 		case seen[kv.Key]:
 			return fmt.Errorf("tool parameter key %q is listed twice", kv.Key)
 		}

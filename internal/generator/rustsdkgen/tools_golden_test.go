@@ -87,8 +87,8 @@ func TestWriteToolsGoldenRefs(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		`"x-superschematic-reference":{"label":"name","lookup":"ids","options":"catalog.listItems","target":"ItemView","value":"id"}`,
-		`"x-superschematic-reference":{"label":"name","options":"catalog.listItems","target":"ItemView","value":"sku"}`,
+		`"x-superschematic-reference":{"label":"name","lookup":"ids","options":"catalog.listItems","search":"q","target":"ItemView","value":"id"}`,
+		`"x-superschematic-reference":{"label":"name","options":"catalog.listItems","search":"q","target":"ItemView","value":"sku"}`,
 		`"x-superschematic-search":true`,
 	} {
 		if !strings.Contains(string(schema), want) {

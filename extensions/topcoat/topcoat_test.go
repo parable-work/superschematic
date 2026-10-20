@@ -88,12 +88,46 @@ func buildWithNaming(t *testing.T, names registry.Naming, name, outputRoot strin
 // test's own copy of one.
 func buildDir(t *testing.T, names registry.Naming, service, outputRoot string, outputs map[string]any, log io.Writer) (*registry.Result, error) {
 	t.Helper()
-	reg, err := registry.Assemble(names, topcoat.Extension{})
+	return buildIn(t, buildSpec{names: names, dir: service, root: outputRoot, outputs: outputs, log: log})
+}
+
+// buildSpec is a build of the service in dir under names, into root, with
+// outputs as its config's outputs block, writing the build's log to log
+// when it is not nil. depOutputs are the outputs block of each
+// dependency's config as the build reads it (LoadDependencyConfig), the
+// ones a test built the dependency with; a dependency it leaves out reads
+// its own config's.
+type buildSpec struct {
+	names      registry.Naming
+	dir        string
+	root       string
+	outputs    map[string]any
+	log        io.Writer
+	depOutputs map[string]map[string]any
+}
+
+// buildIn runs the build spec describes, with the extension linked. Its
+// encrypted operations are made plain: the Rust router has no decryption
+// step.
+func buildIn(t *testing.T, spec buildSpec) (*registry.Result, error) {
+	t.Helper()
+	service := spec.dir
+	reg, err := registry.Assemble(spec.names, topcoat.Extension{})
 	if err != nil {
 		t.Fatalf("Assemble: %v", err)
 	}
 	load := func(name string) (*ir.Schema, error) {
 		return loader.LoadService(dependencyDir(service, name), loader.WithRegistry(reg))
+	}
+	loadConfig := func(name string) (*registry.SchemaConfig, error) {
+		_, cfg, err := loader.LoadServiceWithConfig(dependencyDir(service, name), loader.WithRegistry(reg), loader.WithDependencyLoader(load))
+		if err != nil {
+			return nil, err
+		}
+		if outputs, ok := spec.depOutputs[name]; ok {
+			cfg.Outputs = outputs
+		}
+		return cfg, nil
 	}
 	schema, cfg, err := loader.LoadServiceWithConfig(service, loader.WithRegistry(reg), loader.WithDependencyLoader(load))
 	if err != nil {
@@ -108,15 +142,16 @@ func buildDir(t *testing.T, names registry.Naming, service, outputRoot string, o
 			}
 		}
 	}
-	cfg.Outputs = outputs
+	cfg.Outputs = spec.outputs
 	return registry.Generate(schema, cfg, registry.Options{
-		OutputRoot:     outputRoot,
-		ServicePath:    service,
-		Paths:          testpaths.Local(t),
-		Naming:         names,
-		Registry:       reg,
-		Log:            log,
-		LoadDependency: load,
+		OutputRoot:           spec.root,
+		ServicePath:          service,
+		Paths:                testpaths.Local(t),
+		Naming:               spec.names,
+		Registry:             reg,
+		Log:                  spec.log,
+		LoadDependency:       load,
+		LoadDependencyConfig: loadConfig,
 	})
 }
 
@@ -341,9 +376,12 @@ func TestACrateWithoutCallersBuilds(t *testing.T) {
 // valid post books with the input's JSON; a refused field, nested or in a
 // row, renders at its control with the values as sent and the secret
 // blank; row buttons add and remove rows within the list's bounds without
-// calling the operation; and the app's choices render a select. Its
-// AccountKey, whose fields are a secret one and a @uiHidden one, is an
-// empty record that clippy passes with warnings denied.
+// calling the operation, a room's notes rows within its row; and the
+// app's choices render a select. A note's unbounded text is a textarea by
+// its multiline hint. Enter in each form presses its default button, the
+// hidden one ahead of every row button (enterHelper). Its AccountKey,
+// whose fields are a secret one and a @uiHidden one, is an empty record
+// that clippy passes with warnings denied.
 func TestFormsServeATopcoatApp(t *testing.T) {
 	cargoTestCrate(t, formsService, formsAppTest)
 }
@@ -398,9 +436,9 @@ func TestEveryInputHasAForm(t *testing.T) {
 
 // TestViewsRenderRecords does the same for fixture-views-api with
 // viewsAppTest: pages render an order's detail and a table of orders, each
-// kind of field as its rules say, values escaped, the type's @display
-// naming the detail, captioning the table and choosing its columns, and a
-// comment thread that nests itself.
+// kind of field as its rules say, values escaped, an enum's member by its
+// title, the type's @display naming the detail, captioning the table and
+// choosing its columns, and a comment thread that nests itself.
 func TestViewsRenderRecords(t *testing.T) {
 	cargoTestCrate(t, viewsService, viewsAppTest)
 }
@@ -411,8 +449,9 @@ func TestViewsRenderRecords(t *testing.T) {
 // (hrefs) on it, its noun and id the link's text when the title is blank,
 // and naming the detail with the noun as fallback; a nested
 // Address shows its title in a
-// cell, and Money, which declares no title, its detail; Comment, which
-// nests itself, boxes its views.
+// cell, and Money, which declares no title, its detail; a status is
+// labeled by its member's title, else by its name in words; Comment,
+// which nests itself, boxes its views.
 func TestDisplayShapesTheComponents(t *testing.T) {
 	root := testpaths.TempDir(t)
 	if _, err := buildService(t, viewsService, root, rustOutputs()); err != nil {
@@ -445,7 +484,9 @@ func TestDisplayShapesTheComponents(t *testing.T) {
 		`<td data-field="shipTo">(text_of(&choices, "shipTo.recipient", &row.ship_to.recipient))</td>`,
 		`<td data-field="price">money_detail(record: row.price, choices: choices.under("price"))</td>`,
 		`<dt>"Ship to"</dt>`,
-		`"on_hold" => "On hold",`,
+		// A member is labeled by its title, else by its name in words.
+		`"on_hold" => "Held for a stock check",`,
+		`"pending" => "Pending",`,
 	} {
 		if !strings.Contains(views, want) {
 			t.Errorf("views.rs lacks %s", want)
@@ -489,10 +530,12 @@ func TestViewsOff(t *testing.T) {
 // has a guard and neither an in-process call nor a procedure, its input
 // no form, and its result, which no other
 // operation returns, no record and so no display components. Its
-// @requireService operation keeps its in-process call, whose doc says it
-// applies the end-user step alone, and has no procedure; its result keeps
-// its record and components. Its @allowService one has both. A procedure
-// whose route has traffic controls gets a layer with them, and the build
+// @requireService operations have no end-user call and no procedure: each
+// is called as a service, whose call's doc says why it has no procedure,
+// and its guard's doc says it refuses an end user; their results keep
+// their records and components. Its @allowService one has both. A
+// procedure whose route has traffic controls gets a layer with them, its
+// rate limit the operation's limiter in the app's registry, and the build
 // log says why each item is left out.
 func TestWhatHasNoProcedure(t *testing.T) {
 	root := testpaths.TempDir(t)
@@ -511,10 +554,10 @@ func TestWhatHasNoProcedure(t *testing.T) {
 	for _, want := range []string{
 		"pub async fn can_hook_receive_payment(",
 		"/// It has no in-process call: a third party calls it (@webhook), and its route\n/// checks the third party's signature first (@hmacVerified).",
-		"pub async fn stock_reindex_stock(",
-		"/// It has no procedure: a browser holds no service credential\n/// (@requireService).",
-		"This call applies\n/// the end-user step alone",
-		"pub async fn stock_release_reservation(",
+		"    pub async fn stock_reindex_stock(&self, cx: &Cx)",
+		"    /// It has no procedure: a browser holds no service credential\n    /// (@requireService).\n    pub async fn stock_reindex_stock(",
+		"/// (@requireService), so an end user is refused 401 `service_unauthorized`,\n/// signed in or not. `as_service(caller).can_stock_reindex_stock(cx)` admits a\n/// service caller (D37, amended).\npub async fn can_stock_reindex_stock(",
+		"pub async fn stock_release_reservation(cx: &Cx",
 	} {
 		if !strings.Contains(operations, want) {
 			t.Errorf("operations.rs lacks %q", want)
@@ -523,17 +566,19 @@ func TestWhatHasNoProcedure(t *testing.T) {
 	if strings.Contains(operations, "pub async fn hook_receive_payment(") {
 		t.Error("operations.rs has an in-process call for the webhook")
 	}
-	for _, path := range []string{"hook/receive-payment", "stock/reindex-stock"} {
+	for _, path := range []string{"hook/receive-payment", "stock/reindex-stock", "stock/reserve-stock"} {
 		if strings.Contains(procedures, path) {
 			t.Errorf("procedures.rs has a procedure on %s", path)
 		}
 	}
 	for _, want := range []string{
 		`#[procedure("/_superschematic/fixture-controls-api/stock/release-reservation")]`,
+		`pub(crate) fn route_controls(router: RouterBuilder, limits: &RateLimits) -> RouterBuilder {`,
 		`ProcedureControls::new("/_superschematic/fixture-controls-api/order/place-order", refusal::<OrderViewRecord>)
-                .rate_limit(2)
+                .rate_limiter(limits.of(&crate::api::operations::ORDER_PLACE_ORDER))
                 .body_limit_megabytes(3)
                 .timeout_seconds(1),`,
+		"limiter.take(&crate::client_key(cx))",
 	} {
 		if !strings.Contains(procedures, want) {
 			t.Errorf("procedures.rs lacks %q", want)
@@ -549,14 +594,126 @@ func TestWhatHasNoProcedure(t *testing.T) {
 		t.Error("views.rs renders the webhook's result, which has no record")
 	}
 	if !strings.Contains(views, "pub async fn stock_run_detail(") {
-		t.Error("views.rs lacks stock_run_detail, the @requireService operation's result, which a page calls")
+		t.Error("views.rs lacks stock_run_detail, the @requireService operation's result, which a page calls as a service")
 	}
 	for _, want := range []string{
 		"no in-process call for hook.receivePayment: a third party calls it (@webhook)",
+		"no end-user call for stock.reindexStock: its route admits only a service caller (@requireService); operations::as_service calls it",
 		"no procedure for stock.reindexStock: a browser holds no service credential (@requireService)",
+		"no procedure for stock.reserveStock: a browser holds no service credential (@requireService)",
 	} {
 		if !strings.Contains(log.String(), want) {
 			t.Errorf("the build log lacks %q:\n%s", want, log.String())
+		}
+	}
+}
+
+// TestAServiceOnlyOperationIsCalledAsAService builds fixture-controls-api.
+// A @requireService operation, with or without a user clause, has no
+// end-user call in operations.rs, so a page cannot call it for an end user
+// (D37, amended); its guard stays. AsService has a call and a guard for
+// each operation with a service clause, the @allowService one among them,
+// which keeps its end-user call too. The reservation's argument form
+// submits as a service (submit_as) and has no submit; every other form
+// keeps its submit.
+func TestAServiceOnlyOperationIsCalledAsAService(t *testing.T) {
+	root := testpaths.TempDir(t)
+	if _, err := buildService(t, controlsService, root, rustOutputs()); err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	read := func(file string) string {
+		data, err := os.ReadFile(filepath.Join(topcoat.Dir(root, controlsService), "src", file))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(data)
+	}
+	operations, forms := read("operations.rs"), read("forms.rs")
+	for _, absent := range []string{"pub async fn stock_reindex_stock(cx", "pub async fn stock_reserve_stock(cx"} {
+		if strings.Contains(operations, absent) {
+			t.Errorf("operations.rs has an end user's call of a @requireService operation, %q", absent)
+		}
+	}
+	at := strings.Index(operations, "impl AsService<'_> {")
+	if at < 0 {
+		t.Fatalf("operations.rs lacks impl AsService:\n%s", operations)
+	}
+	asService := operations[at:]
+	for _, want := range []string{
+		"pub async fn stock_reindex_stock(&self, cx: &Cx) -> Result<types::StockRun, ApiError> {",
+		"pub async fn can_stock_reindex_stock(&self, cx: &Cx) -> Result<Option<Principal>, ApiError> {",
+		"pub async fn stock_reserve_stock(&self, cx: &Cx, args: crate::api::StockReserveStockArgs) -> Result<types::Reservation, ApiError> {",
+		"pub async fn can_stock_reserve_stock(&self, cx: &Cx) -> Result<Option<Principal>, ApiError> {",
+		"pub async fn stock_release_reservation(&self, cx: &Cx, args: crate::api::StockReleaseReservationArgs) -> Result<types::Reservation, ApiError> {",
+		"pub async fn can_stock_release_reservation(&self, cx: &Cx) -> Result<Option<Principal>, ApiError> {",
+		".reserve_stock(operations::STOCK_RESERVE_STOCK.service_context(self.caller.clone(), caller), args)",
+		"crate::admit_as(cx, &operations::STOCK_RESERVE_STOCK, self.caller).await",
+	} {
+		if !strings.Contains(asService, want) {
+			t.Errorf("impl AsService lacks %q", want)
+		}
+	}
+	for _, guard := range []string{"pub async fn can_stock_reindex_stock(cx: &Cx)", "pub async fn can_stock_reserve_stock(cx: &Cx)", "pub async fn stock_release_reservation(cx: &Cx"} {
+		if !strings.Contains(operations[:at], guard) {
+			t.Errorf("operations.rs lacks %q, which an end user's page calls", guard)
+		}
+	}
+	if strings.Contains(asService, "list_orders") {
+		t.Error("impl AsService calls an operation without a service clause")
+	}
+	block := func(form string) string {
+		start := strings.Index(forms, "impl "+form+" {")
+		if start < 0 {
+			t.Fatalf("forms.rs lacks impl %s", form)
+		}
+		end := strings.Index(forms[start:], "\n}\n")
+		return forms[start : start+end]
+	}
+	reserve := block("StockReserveStockArgsForm")
+	if !strings.Contains(reserve, "pub async fn submit_as(&self, cx: &Cx, service: &crate::api::runtime::ServiceCaller) -> Result<types::Reservation, Refusal> {") ||
+		!strings.Contains(reserve, "operations::as_service(service).stock_reserve_stock(cx, args)") {
+		t.Errorf("StockReserveStockArgsForm lacks submit_as:\n%s", reserve)
+	}
+	if strings.Contains(reserve, "pub async fn submit(") {
+		t.Errorf("StockReserveStockArgsForm has a submit, which would call the operation for the end user:\n%s", reserve)
+	}
+	if release := block("StockReleaseReservationArgsForm"); !strings.Contains(release, "pub async fn submit(&self, cx: &Cx)") || strings.Contains(release, "submit_as") {
+		t.Errorf("StockReleaseReservationArgsForm, an @allowService operation's, does not keep its submit alone:\n%s", release)
+	}
+}
+
+// TestTheSetupSharesOneRegistry reads every golden crate: its setup makes
+// one registry of the operations' rate limiters, which the JSON API's
+// routes, the procedures and the pages take from, so none of them makes a
+// limiter of its own (D44, amended), whether it mounts the JSON API or not
+// (D61, amended).
+func TestTheSetupSharesOneRegistry(t *testing.T) {
+	dirs, err := filepath.Glob(filepath.Join("testdata", "golden", "*", "src"))
+	if err != nil || len(dirs) == 0 {
+		t.Fatalf("no goldens: %v", err)
+	}
+	for _, dir := range dirs {
+		lib, err := os.ReadFile(filepath.Join(dir, "lib.rs"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n := strings.Count(string(lib), "RateLimits::new()"); n != 1 {
+			t.Errorf("%s/lib.rs makes %d registries, not 1", dir, n)
+		}
+		if !strings.Contains(string(lib), "RouterOptions { rate_limits: rate_limits.clone(), ..RouterOptions::default() }") {
+			t.Errorf("%s/lib.rs does not mount the JSON API with the registry", dir)
+		}
+		for _, file := range []string{"procedures.rs", "pages.rs"} {
+			data, err := os.ReadFile(filepath.Join(dir, file))
+			if os.IsNotExist(err) {
+				continue
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(data), "RateLimiter::per_minute") {
+				t.Errorf("%s/%s makes a limiter of its own", dir, file)
+			}
 		}
 	}
 }
@@ -566,15 +723,21 @@ func TestWhatHasNoProcedure(t *testing.T) {
 // @requireService operation have no procedure path, the @allowService one
 // has, a procedure answers its route's rate limit, body limit and timeout
 // as a ProblemRecord, and the procedure's rate limit and the mounted JSON
-// API's each count each client by the address Topcoat records for it.
+// API's each count each client by the address Topcoat records for it. A
+// page calls the @requireService operations as a service (D37, amended):
+// their guards refuse an end user 401 service_unauthorized; a caller the
+// reservation's from lists reserves for the signed-in reader, whom the
+// implementation sees beside it, one it does not list is refused 403, and
+// a signed-out page 401; a service stands in for the reader of the
+// @allowService release; and the reservation's form submits as a service.
 func TestProceduresKeepTheirRoutesRules(t *testing.T) {
 	cargoTestCrate(t, controlsService, controlsAppTest, `axum = "0.8.9"`)
 }
 
 // cargoTestCrate builds service's crates with the Topcoat crate on, adds
-// test as tests/app.rs of the Topcoat crate, with devDeps beside the
-// dev-dependencies every test has, and runs cargo clippy with warnings
-// denied, then cargo test, on it.
+// test as tests/app.rs of the Topcoat crate, beside tests/support/enter.rs
+// (enterHelper), with devDeps beside the dev-dependencies every test has,
+// and runs cargo clippy with warnings denied, then cargo test, on it.
 func cargoTestCrate(t *testing.T, service, test string, devDeps ...string) {
 	t.Helper()
 	var options crateOptions
@@ -586,11 +749,15 @@ func cargoTestCrate(t *testing.T, service, test string, devDeps ...string) {
 
 // crateOptions are what a test of the Topcoat crate adds to its build: the
 // crate's features, which clippy and cargo test turn on, lines of the
-// manifest's [dev-dependencies], files of tests/ beside app.rs, the
-// config's outputs when they are not outputsOf the service's, the
-// service's directory when it is a test's own copy of the fixture, and the
-// dependencies whose Rust types crates its crates build against, each
-// built into the same output root first, as build --with-deps builds them.
+// manifest's [dev-dependencies], files of tests/ beside app.rs and
+// support/enter.rs, by slash path, the config's outputs when they are not
+// outputsOf the service's, the service's directory when it is a test's
+// own copy of the fixture, and the dependencies whose Rust types crates
+// its crates build against, each built into the same output root first,
+// as build --with-deps builds them, with depOutputs as its outputs when
+// the test gives them (its API and Topcoat crates, say), else its types
+// alone. table is the body of superschematic.toml's [extension.topcoat],
+// under which every crate is built.
 type crateOptions struct {
 	features        []string
 	devDependencies string
@@ -598,6 +765,8 @@ type crateOptions struct {
 	outputs         map[string]any
 	dir             string
 	dependencies    []string
+	depOutputs      map[string]map[string]any
+	table           string
 }
 
 // outputsOf are a fixture's outputs in the tests that build every fixture
@@ -610,6 +779,12 @@ func outputsOf(service string) map[string]any {
 	}
 	return rustOutputs()
 }
+
+// enterHelper is where every test of a Topcoat crate finds
+// testdata/enter.rs, the HTML implicit-submission rule (D44, amended),
+// under tests/: its app.rs declares `#[path = "support/enter.rs"] mod
+// enter;` and holds every HTML page it reads to the rule.
+const enterHelper = "support/enter.rs"
 
 // cargoTestCrateWith is cargoTestCrate with options.
 func cargoTestCrateWith(t *testing.T, service, test string, options crateOptions) {
@@ -630,13 +805,25 @@ func cargoTestCrateWith(t *testing.T, service, test string, options crateOptions
 	if source == "" {
 		source = serviceDir(service)
 	}
+	names := registry.DefaultNaming()
+	if options.table != "" {
+		var err error
+		if names, err = registry.ParseNaming([]byte("[extension.topcoat]\n"+options.table), "superschematic.toml"); err != nil {
+			t.Fatalf("ParseNaming: %v", err)
+		}
+	}
+	depOutputs := map[string]map[string]any{}
 	for _, dep := range options.dependencies {
-		types := map[string]any{"types": map[string]any{"rust": map[string]any{"enabled": true}}}
-		if _, err := buildDir(t, registry.DefaultNaming(), dependencyDir(source, dep), root, types, nil); err != nil {
+		built, ok := options.depOutputs[dep]
+		if !ok {
+			built = map[string]any{"types": map[string]any{"rust": map[string]any{"enabled": true}}}
+		}
+		depOutputs[dep] = built
+		if _, err := buildIn(t, buildSpec{names: names, dir: dependencyDir(source, dep), root: root, outputs: built}); err != nil {
 			t.Fatalf("build %s, a dependency of %s: %v", dep, service, err)
 		}
 	}
-	if _, err := buildDir(t, registry.DefaultNaming(), source, root, outputs, nil); err != nil {
+	if _, err := buildIn(t, buildSpec{names: names, dir: source, root: root, outputs: outputs, depOutputs: depOutputs}); err != nil {
 		t.Fatalf("build %s: %v", service, err)
 	}
 	dir := topcoat.Dir(root, service)
@@ -659,8 +846,20 @@ tokio = { version = "1.52.2", features = ["macros", "rt-multi-thread"] }
 	if err := os.WriteFile(filepath.Join(dir, "tests", "app.rs"), []byte(test), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	enter, err := os.ReadFile(filepath.Join("testdata", "enter.rs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{enterHelper: string(enter)}
 	for name, content := range options.files {
-		if err := os.WriteFile(filepath.Join(dir, "tests", name), []byte(content), 0o644); err != nil {
+		files[name] = content
+	}
+	for name, content := range files {
+		path := filepath.Join(dir, "tests", filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -749,6 +948,9 @@ use schemas_fixture_api_topcoat::{operations, PageAuthenticator, RouterBuilderFi
 use topcoat::context::Cx;
 use topcoat::router::{page, to_bytes, Body, Router, RouterBuilderDiscoverExt, StatusCode};
 use topcoat::view::{view, View};
+
+#[path = "support/enter.rs"]
+mod enter;
 
 // The API's own authenticator, for requests to the mounted JSON API.
 struct NoRequests;
@@ -901,9 +1103,11 @@ fn app(caller: Option<Principal>) -> Router {
 async fn send(router: &Router, method: &str, uri: &str) -> (StatusCode, String) {
     let request = http::Request::builder().method(method).uri(uri).body(Body::empty()).unwrap();
     let response = router.handle(request).await;
-    let status = response.status();
+    let (status, headers) = (response.status(), response.headers().clone());
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    (status, String::from_utf8(bytes.to_vec()).unwrap())
+    let body = String::from_utf8(bytes.to_vec()).unwrap();
+    enter::check_page(uri, &headers, &body);
+    (status, body)
 }
 
 #[tokio::test]
@@ -1009,6 +1213,9 @@ use topcoat::context::Cx;
 use topcoat::router::{page, to_bytes, Body, Router, StatusCode};
 use topcoat::view::{view, View};
 
+#[path = "support/enter.rs"]
+mod enter;
+
 struct Grids;
 
 fn grid() -> types::GridView {
@@ -1053,8 +1260,10 @@ async fn a_page_calls_an_operation_that_needs_no_caller() {
     let request = http::Request::builder().uri("/grid").body(Body::empty()).unwrap();
     let response = router.handle(request).await;
     assert_eq!(response.status(), StatusCode::OK);
-    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    assert!(String::from_utf8(body.to_vec()).unwrap().contains("<p>a,b</p>"));
+    let headers = response.headers().clone();
+    let body = String::from_utf8(to_bytes(response.into_body(), usize::MAX).await.unwrap().to_vec()).unwrap();
+    enter::check_page("/grid", &headers, &body);
+    assert!(body.contains("<p>a,b</p>"));
 }
 
 #[test]
@@ -1077,7 +1286,8 @@ use schemas_fixture_forms_api_topcoat::api::{
     Implementations,
 };
 use schemas_fixture_forms_api_topcoat::forms::{
-    booking_input_fields, signup_input_fields, BookingInputForm, Choices, FormErrors, NoteInputForm, RoomRequestForm, SignupInputForm,
+    account_annotate_args_fields, account_draft_note_args_fields, booking_input_fields, signup_input_fields, AccountAnnotateArgsForm,
+    AccountDraftNoteArgsForm, BookingInputForm, Choices, FormErrors, NoteInputForm, RoomRequestForm, SignupInputForm,
 };
 use schemas_fixture_forms_api_topcoat::records::AccountKeyRecord;
 use schemas_fixture_forms_api_topcoat::{operations, RouterBuilderFixtureFormsApiExt};
@@ -1088,9 +1298,13 @@ use topcoat::router::error::see_other;
 use topcoat::router::{header, page, to_bytes, Body, Router, StatusCode};
 use topcoat::view::{view, View};
 
+#[path = "support/enter.rs"]
+mod enter;
+
 const GARDEN: &str = "8d1f6c9e-0000-4000-8000-000000000001";
 const ATTIC: &str = "8d1f6c9e-0000-4000-8000-000000000002";
 const BOOKED: &str = "8d1f6c9e-0000-4000-8000-000000000003";
+const ACCOUNT: &str = "8d1f6c9e-0000-4000-8000-000000000004";
 
 struct Accounts;
 
@@ -1149,7 +1363,7 @@ fn uuid(text: &str) -> types::IdentityUUID {
 
 #[page("/signup")]
 async fn signup_form() -> topcoat::Result<impl View> {
-    Ok(view! { <form method="post">signup_input_fields()</form> })
+    Ok(view! { <form method="post">signup_input_fields()<button type="submit">"Sign up"</button></form> })
 }
 
 #[page(POST "/signup")]
@@ -1163,7 +1377,7 @@ async fn sign_up(cx: &Cx, Form(form): Form<SignupInputForm>) -> topcoat::Result<
     };
     Ok(view! {
         (StatusCode::UNPROCESSABLE_ENTITY)
-        <form method="post">signup_input_fields(form: form, errors: errors)</form>
+        <form method="post">signup_input_fields(form: form, errors: errors)<button type="submit">"Sign up"</button></form>
     })
 }
 
@@ -1207,6 +1421,49 @@ async fn book(cx: &Cx, Form(form): Form<BookingInputForm>) -> topcoat::Result<im
     })
 }
 
+/// The annotate form, its input's fields beside the account's id: the
+/// note's text, a textarea by its multiline hint, and its tags, rows.
+#[page("/annotate")]
+async fn annotate_form() -> topcoat::Result<impl View> {
+    let form = AccountAnnotateArgsForm::new(ACCOUNT);
+    Ok(view! { <form method="post">account_annotate_args_fields(form: form)<button type="submit">"Save the note"</button></form> })
+}
+
+/// A row button renders the annotate form again with its rows; any other
+/// post annotates, which the account refuses, and renders it again with the
+/// refusal's status.
+#[page(POST "/annotate")]
+async fn annotate(cx: &Cx, Form(form): Form<AccountAnnotateArgsForm>) -> topcoat::Result<impl View> {
+    let mut form = form;
+    let (status, errors) = if form.apply_action() {
+        (StatusCode::OK, FormErrors::default())
+    } else {
+        match form.submit(cx).await {
+            Ok(_) => return Err(see_other("/annotated").into()),
+            Err(refused) => (refused.status, refused.errors),
+        }
+    };
+    Ok(view! {
+        (status)
+        <form method="post">account_annotate_args_fields(form: form, errors: errors)<button type="submit">"Save the note"</button></form>
+    })
+}
+
+/// The draft form, whose input is optional, with its tag rows; a row
+/// button renders it again.
+#[page("/draft")]
+async fn draft_form() -> topcoat::Result<impl View> {
+    let form = AccountDraftNoteArgsForm::new(ACCOUNT);
+    Ok(view! { <form method="post">account_draft_note_args_fields(form: form)<button type="submit">"Save the draft"</button></form> })
+}
+
+#[page(POST "/draft")]
+async fn draft(Form(form): Form<AccountDraftNoteArgsForm>) -> topcoat::Result<impl View> {
+    let mut form = form;
+    form.apply_action();
+    Ok(view! { <form method="post">account_draft_note_args_fields(form: form)<button type="submit">"Save the draft"</button></form> })
+}
+
 fn app(bookings: Bookings) -> Router {
     Router::builder()
         .page(signup_form)
@@ -1214,19 +1471,30 @@ fn app(bookings: Bookings) -> Router {
         .page(booking_form)
         .page(booking_form_with_choices)
         .page(book)
+        .page(annotate_form)
+        .page(annotate)
+        .page(draft_form)
+        .page(draft)
         .fixture_forms_api(Implementations { account: Arc::new(Accounts), booking: Arc::new(bookings) })
         .build()
 }
 
 async fn send_to(router: &Router, request: http::Request<Body>) -> (StatusCode, http::HeaderMap, String) {
+    let uri = request.uri().to_string();
     let response = router.handle(request).await;
     let (status, headers) = (response.status(), response.headers().clone());
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    (status, headers, String::from_utf8(bytes.to_vec()).unwrap())
+    let html = String::from_utf8(bytes.to_vec()).unwrap();
+    enter::check_page(&uri, &headers, &html);
+    (status, headers, html)
 }
 
 async fn send(request: http::Request<Body>) -> (StatusCode, http::HeaderMap, String) {
     send_to(&app(Bookings::default()), request).await
+}
+
+async fn get(uri: &str) -> (StatusCode, http::HeaderMap, String) {
+    send(http::Request::builder().uri(uri).body(Body::empty()).unwrap()).await
 }
 
 fn post_request(path: &str, body: &str) -> http::Request<Body> {
@@ -1541,7 +1809,7 @@ async fn row_buttons_add_and_remove_rows_within_the_lists_bounds() {
     assert!(!html.contains("aria-invalid"), "a row button renders no errors: {html}");
     assert!(!html.contains("4321"), "{html}");
     // At listMax there is no add button, and adding adds nothing.
-    assert!(!html.contains("add:rooms"), "{html}");
+    assert!(!html.contains(r#"value="add:rooms""#), "{html}");
     let three = booking_with(&[("rooms[2]", ""), ("rooms[2].roomId", BOOKED), ("rooms[2].adults", "3"), ("_action", "add:rooms")]);
     let (status, _, html, calls) = book_with(&three).await;
     assert_eq!((status, calls.len()), (StatusCode::OK, 0), "{html}");
@@ -1790,6 +2058,93 @@ async fn a_list_of_secrets_books_and_is_never_rendered_back() {
     assert!(!html.contains("1111-2222"), "{html}");
 }
 
+#[tokio::test]
+async fn multiline_text_is_a_textarea_whatever_its_bound() {
+    // A note's text has no maxLength; its multiline hint makes it a
+    // textarea, in the input's form and in each argument form that embeds
+    // it.
+    let (status, _, html) = get("/annotate").await;
+    assert_eq!(status, StatusCode::OK, "{html}");
+    let text = control(&html, "text");
+    assert!(text.contains("<textarea id=\"account-annotate-text\" name=\"text\" rows=\"6\" required=\"\">\n</textarea>"), "{text}");
+    let (_, _, html) = get("/draft").await;
+    assert!(control(&html, "text").contains(r#"<textarea id="account-draft-note-text" name="text" rows="6" required="">"#), "{html}");
+    // Its lines render again as sent.
+    let (status, _, html) = send(post_request("/annotate", &encode(&[("id", ACCOUNT), ("text", "Two\nlines"), ("_action", "add:tags")]))).await;
+    assert_eq!(status, StatusCode::OK, "{html}");
+    assert!(control(&html, "text").contains("required=\"\">\nTwo\nlines</textarea>"), "{html}");
+    assert!(html.contains(r#"name="tags[0]""#), "{html}");
+}
+
+#[tokio::test]
+async fn rows_within_rows_add_and_remove_at_their_names() {
+    // A room's notes are rows within the room's row: adding one keeps the
+    // rooms as sent, calls nothing, and names the note under its room.
+    let (status, _, html, calls) = book_with(&booking_with(&[("_action", "add:rooms[0].notes")])).await;
+    assert_eq!((status, calls.len()), (StatusCode::OK, 0), "{html}");
+    assert!(html.contains(r#"<label for="booking-input-rooms-0-notes-0">Notes 1</label><input id="booking-input-rooms-0-notes-0" name="rooms[0].notes[0]" type="text" required="">"#), "{html}");
+    assert!(html.contains(r#"value="remove:rooms[0].notes[0]" formnovalidate="" aria-label="Remove Notes 1""#), "{html}");
+    assert!(html.contains(r#"value="add:rooms[0].notes" formnovalidate="">Add</button>"#), "{html}");
+    assert!(!html.contains("rooms[1].notes[0]"), "{html}");
+    // The room's own remove button, after its notes, keeps the room's label.
+    assert!(html.contains(r#"value="remove:rooms[0]" formnovalidate="" aria-label="Remove Room 1""#), "{html}");
+    assert!(control(&html, "rooms[1].roomId").contains(&format!(r#"value="{ATTIC}""#)), "{html}");
+
+    // At its listMax of two a room's notes take no more, and its add button
+    // goes; the other room's notes are its own.
+    let two = booking_with(&[("rooms[0].notes[0]", "Quiet"), ("rooms[0].notes[1]", "Late"), ("_action", "add:rooms[0].notes")]);
+    let (status, _, html, _) = book_with(&two).await;
+    assert_eq!(status, StatusCode::OK, "{html}");
+    assert!(!html.contains("rooms[0].notes[2]") && !html.contains("add:rooms[0].notes"), "{html}");
+    assert!(html.contains(r#"value="add:rooms[1].notes""#), "{html}");
+
+    // Removing the first note numbers the second as the first.
+    let removed = booking_with(&[("rooms[0].notes[0]", "Quiet"), ("rooms[0].notes[1]", "Late"), ("_action", "remove:rooms[0].notes[0]")]);
+    let (status, _, html, calls) = book_with(&removed).await;
+    assert_eq!((status, calls.len()), (StatusCode::OK, 0), "{html}");
+    assert!(html.contains(r#"name="rooms[0].notes[0]" type="text" required="" value="Late""#), "{html}");
+    assert!(!html.contains("rooms[0].notes[1]") && !html.contains("Quiet"), "{html}");
+
+    // A booking books with each room's notes, and a blank note is refused at
+    // its row.
+    let (status, _, html, calls) = book_with(&booking_with(&[("rooms[1].notes[0]", "Quiet please")])).await;
+    assert_eq!(status, StatusCode::SEE_OTHER, "{html}");
+    assert_eq!(serde_json::to_value(&calls[0].rooms).unwrap()[1]["notes"], json!(["Quiet please"]));
+    assert!(serde_json::to_value(&calls[0].rooms).unwrap()[0].get("notes").is_none());
+    let (status, _, html, calls) = book_with(&booking_with(&[("rooms[1].notes[0]", "")])).await;
+    assert_eq!((status, calls.len()), (StatusCode::UNPROCESSABLE_ENTITY, 0), "{html}");
+    let note = control(&html, "rooms[1].notes[0]");
+    assert!(note.contains(r#"aria-invalid="true""#) && note.contains(r#"<p class="field-error">"#), "{note}");
+}
+
+/// Enter in a text field presses a form's first submit control, which must
+/// submit the form without an _action: the hidden default ahead of every
+/// row button, on a new booking, after a room and a room's note are
+/// added, on a refused booking with rows, and on the argument forms that
+/// embed a note's tag rows.
+#[tokio::test]
+async fn enter_presses_the_default_button() {
+    const DEFAULT: &str = r#"<button type="submit" class="ss-submit" hidden=""></button>"#;
+    let mut pages = Vec::new();
+    pages.push(("/book", get("/book").await.2));
+    pages.push(("/book add:rooms", book_with(&booking_with(&[("_action", "add:rooms")])).await.2));
+    let notes = booking_with(&[("rooms[0].notes[0]", "Quiet"), ("_action", "add:rooms[1].notes")]);
+    pages.push(("/book add:rooms[1].notes", book_with(&notes).await.2));
+    let (status, _, refused, _) = book_with(&booking_with(&[("guest.name", "A"), ("rooms[0].notes[0]", "")])).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+    pages.push(("/book refused", refused));
+    pages.push(("/annotate", get("/annotate").await.2));
+    let tags = encode(&[("id", ACCOUNT), ("text", "Hi"), ("tags[0]", "a"), ("_action", "add:tags")]);
+    pages.push(("/annotate add:tags", send(post_request("/annotate", &tags)).await.2));
+    pages.push(("/draft add:tags", send(post_request("/draft", &tags)).await.2));
+    for (page, html) in &pages {
+        enter::assert_enter_submits(page, html);
+        let default = html.find(DEFAULT).unwrap_or_else(|| panic!("{page}: no default button in {html}"));
+        let row = html.find(r#"name="_action""#).unwrap_or_else(|| panic!("{page}: no row button in {html}"));
+        assert!(default < row, "{page}: a row button is ahead of the default: {html}");
+    }
+}
+
 #[test]
 fn a_record_whose_fields_are_all_left_out_is_empty() {
     let key = types::AccountKey { key: "sk_123".to_string(), hint: Some("sk_".to_string()) };
@@ -1808,6 +2163,9 @@ use schemas_fixture_views_api_topcoat::views::{
 use serde_json::json;
 use topcoat::router::{page, to_bytes, Body, Router, StatusCode};
 use topcoat::view::{view, View};
+
+#[path = "support/enter.rs"]
+mod enter;
 
 // An order as the API sends it, its hidden field included.
 fn order(reference: &str, status: &str, bill_to: bool) -> OrderViewRecord {
@@ -1911,8 +2269,11 @@ async fn render(uri: &str) -> String {
         .build();
     let response = router.handle(http::Request::builder().uri(uri).body(Body::empty()).unwrap()).await;
     assert_eq!(response.status(), StatusCode::OK);
+    let headers = response.headers().clone();
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    String::from_utf8(body.to_vec()).unwrap()
+    let html = String::from_utf8(body.to_vec()).unwrap();
+    enter::check_page(uri, &headers, &html);
+    html
 }
 
 fn assert_has(html: &str, wants: &[&str]) {
@@ -1927,7 +2288,8 @@ async fn a_detail_renders_each_kind_of_field() {
     assert_has(&html, &[
         r#"<div class="ss-detail" data-type="OrderView" role="group" aria-label="A-1001"><dl>"#,
         r#"<div data-field="id"><dt>Id</dt><dd>8d1f6c9e-0000-4000-8000-000000000001</dd></div>"#,
-        r#"<div data-field="status"><dt>Status</dt><dd><data value="on_hold">On hold</data></dd></div>"#,
+        // A member is labeled by its title.
+        r#"<div data-field="status"><dt>Status</dt><dd><data value="on_hold">Held for a stock check</data></dd></div>"#,
         // A date, a date-time and a time read as text a reader reads, the
         // value as sent in datetime.
         r#"<div data-field="placedAt"><dt>Placed at</dt><dd><time datetime="2026-10-09T08:30:00Z">9 Oct 2026, 08:30 UTC</time></dd></div>"#,
@@ -1964,7 +2326,7 @@ async fn a_table_shows_the_summary_fields_under_its_caption() {
     let html = render("/orders").await;
     assert_has(&html, &[
         r#"<table class="ss-table" data-type="OrderView"><caption>Orders</caption><thead><tr><th scope="col" data-field="reference">Reference</th><th scope="col" data-field="status">Status</th><th scope="col" data-field="placedAt">Placed at</th><th scope="col" data-field="shipTo">Ship to</th></tr></thead><tbody>"#,
-        r#"<tr><th scope="row" data-field="reference">A-1001</th><td data-field="status"><data value="on_hold">On hold</data></td><td data-field="placedAt"><time datetime="2026-10-09T08:30:00Z">9 Oct 2026, 08:30 UTC</time></td><td data-field="shipTo">Ada Lovelace</td></tr>"#,
+        r#"<tr><th scope="row" data-field="reference">A-1001</th><td data-field="status"><data value="on_hold">Held for a stock check</data></td><td data-field="placedAt"><time datetime="2026-10-09T08:30:00Z">9 Oct 2026, 08:30 UTC</time></td><td data-field="shipTo">Ada Lovelace</td></tr>"#,
         // A value the enum does not declare is its own label, escaped in
         // the attribute and the text.
         r#"<td data-field="status"><data value="x&quot; onclick=&quot;steal()">x" onclick="steal()</data></td>"#,
@@ -1983,8 +2345,9 @@ async fn a_record_that_nests_itself_renders_each_level() {
 }
 
 #[test]
-fn an_enum_value_is_labeled_by_its_member() {
-    assert_eq!(order_status_label("on_hold"), "On hold");
+fn an_enum_value_is_labeled_by_its_members_title_else_its_name() {
+    assert_eq!(order_status_label("on_hold"), "Held for a stock check");
+    assert_eq!(order_status_label("pending"), "Pending");
     assert_eq!(order_status_label("lost"), "lost");
 }
 
@@ -2071,12 +2434,19 @@ use schemas_fixture_controls_api_topcoat::api::runtime::{
 };
 use schemas_fixture_controls_api_topcoat::api::{
     types, HookImplementation, HookReceivePaymentArgs, Implementations, OrderGetOrderArgs, OrderHoldOrderArgs,
-    OrderImplementation, OrderListOrdersArgs, StockImplementation, StockReleaseReservationArgs, WebhookVerifier,
+    OrderImplementation, OrderListOrdersArgs, StockImplementation, StockReleaseReservationArgs, StockReserveStockArgs,
+    WebhookVerifier,
 };
+use schemas_fixture_controls_api_topcoat::forms::StockReserveStockArgsForm;
 use schemas_fixture_controls_api_topcoat::{operations, PageAuthenticator, RouterBuilderFixtureControlsApiExt};
 use topcoat::context::Cx;
+use topcoat::router::content::Form;
+use topcoat::router::request::headers;
 use topcoat::router::{header, page, to_bytes, Body, RemoteAddr, Router, RouterBuilderDiscoverExt, StatusCode};
 use topcoat::view::{view, View};
+
+#[path = "support/enter.rs"]
+mod enter;
 
 struct NoRequests;
 
@@ -2106,11 +2476,16 @@ impl WebhookVerifier for Unsigned {
     }
 }
 
+// Ada, who may write stock, signs in to every page but one whose request
+// says it is signed out.
 struct Caller;
 
 #[async_trait]
 impl PageAuthenticator for Caller {
-    async fn principal(&self, _cx: &Cx) -> Result<Option<Principal>, ApiError> {
+    async fn principal(&self, cx: &Cx) -> Result<Option<Principal>, ApiError> {
+        if headers(cx).contains_key("x-signed-out") {
+            return Ok(None);
+        }
         Ok(Some(Principal::new("ada", ["stock"])))
     }
 }
@@ -2127,13 +2502,25 @@ impl HookImplementation for Shop {
     }
 }
 
+// Who a call came from, as the implementation reads it: the end user and
+// the service, each "-" when the context names none.
+fn who(ctx: &RequestContext) -> String {
+    let user = ctx.principal.as_ref().map_or("-", |principal| principal.subject.as_str());
+    let service = ctx.service_caller.as_ref().map_or("-", |caller| caller.deployable.as_str());
+    format!("for {user} by {service}")
+}
+
 #[async_trait]
 impl StockImplementation for Shop {
-    async fn reindex_stock(&self, _ctx: RequestContext) -> Result<types::StockRun, ApiError> {
+    async fn reindex_stock(&self, ctx: RequestContext) -> Result<types::StockRun, ApiError> {
+        assert!(ctx.service_caller.is_some(), "an end user reindexed the stock");
         Ok(types::StockRun { done: true })
     }
-    async fn release_reservation(&self, _ctx: RequestContext, args: StockReleaseReservationArgs) -> Result<types::Reservation, ApiError> {
-        Ok(types::Reservation { id: args.id, held: false })
+    async fn reserve_stock(&self, ctx: RequestContext, args: StockReserveStockArgs) -> Result<types::Reservation, ApiError> {
+        Ok(types::Reservation { id: format!("{} x{} {}", args.id, args.quantity, who(&ctx)), held: true })
+    }
+    async fn release_reservation(&self, ctx: RequestContext, args: StockReleaseReservationArgs) -> Result<types::Reservation, ApiError> {
+        Ok(types::Reservation { id: format!("{} {}", args.id, who(&ctx)), held: false })
     }
     async fn list_warehouses(&self, _ctx: RequestContext) -> Result<Vec<types::Warehouse>, ApiError> {
         Ok(vec![types::Warehouse { id: "n".to_string(), name: "North".to_string() }])
@@ -2199,17 +2586,101 @@ async fn post_as(
     let response = router.handle(request.body(Body::from(body)).unwrap()).await;
     let (status, headers) = (response.status(), response.headers().clone());
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    (status, headers, String::from_utf8(bytes.to_vec()).unwrap())
+    let body = String::from_utf8(bytes.to_vec()).unwrap();
+    enter::check_page(uri, &headers, &body);
+    (status, headers, body)
 }
 
-// The webhook keeps its guard, and the @requireService operation its
-// in-process call, which applies the end-user step alone (D37, amended).
+// The service the app acts for, which fixture-api's server is, and one the
+// reservation's from does not list.
+fn listed() -> ServiceCaller {
+    ServiceCaller::in_process("app", ["fixture-api"])
+}
+
+fn unlisted() -> ServiceCaller {
+    ServiceCaller::in_process("app", ["fixture-views-api"])
+}
+
+// What a call answered: what its implementation saw, or the refusal's
+// status and code.
+fn answered<T>(result: Result<T, ApiError>, seen: impl FnOnce(T) -> String) -> String {
+    match result {
+        Ok(value) => seen(value),
+        Err(err) => format!("{} {}", err.status.as_u16(), err.code),
+    }
+}
+
+fn reservation() -> StockReserveStockArgs {
+    StockReserveStockArgs { id: "sku-1".to_owned(), quantity: 2.0 }
+}
+
+// The webhook keeps its guard, and the @requireService operation, which has
+// no end-user call, is called as a service (D37, amended).
 #[page("/guards")]
 async fn guards(cx: &Cx) -> topcoat::Result<impl View> {
     let hook = operations::can_hook_receive_payment(cx).await.is_ok();
-    let run = operations::stock_reindex_stock(cx).await?;
+    let run = operations::as_service(&listed()).stock_reindex_stock(cx).await?;
     let said = format!("webhook guard {hook}, reindexed {}", run.done);
     Ok(view! { <p>(said)</p> })
+}
+
+// The guards of the @requireService operations, which refuse an end user
+// whether or not the route also asks for one.
+#[page("/stock/end-user")]
+async fn end_user_page(cx: &Cx) -> topcoat::Result<impl View> {
+    let reindex = answered(operations::can_stock_reindex_stock(cx).await, |_| "admitted".to_owned());
+    let reserve = answered(operations::can_stock_reserve_stock(cx).await, |_| "admitted".to_owned());
+    let said = format!("reindex {reindex}, reserve {reserve}");
+    Ok(view! { <p>(said)</p> })
+}
+
+// A reservation as the listed service, then as the unlisted one.
+#[page("/stock/reserve")]
+async fn reserve_page(cx: &Cx) -> topcoat::Result<impl View> {
+    let listed = answered(operations::as_service(&listed()).stock_reserve_stock(cx, reservation()).await, |r| r.id);
+    let unlisted = answered(operations::as_service(&unlisted()).stock_reserve_stock(cx, reservation()).await, |r| r.id);
+    let said = format!("listed {listed}, unlisted {unlisted}");
+    Ok(view! { <p>(said)</p> })
+}
+
+// A release as a service, which the route's empty from lists whatever it
+// serves, then as the end user.
+#[page("/stock/release")]
+async fn release_page(cx: &Cx) -> topcoat::Result<impl View> {
+    let args = || StockReleaseReservationArgs { id: "r-1".to_owned() };
+    let listed = answered(operations::as_service(&listed()).stock_release_reservation(cx, args()).await, |r| r.id);
+    let other = answered(operations::as_service(&unlisted()).stock_release_reservation(cx, args()).await, |r| r.id);
+    let user = answered(operations::stock_release_reservation(cx, args()).await, |r| r.id);
+    let said = format!("service {listed}, another {other}, end user {user}");
+    Ok(view! { <p>(said)</p> })
+}
+
+// The reservation's argument form, which submits as the listed service.
+#[page(POST "/stock/reserve")]
+async fn reserve_form_page(cx: &Cx, Form(form): Form<StockReserveStockArgsForm>) -> topcoat::Result<impl View> {
+    let said = match form.submit_as(cx, &listed()).await {
+        Ok(reservation) => reservation.id,
+        Err(refused) => format!("refused {}", refused.status.as_u16()),
+    };
+    Ok(view! { <p>(said)</p> })
+}
+
+// A page's status and body, signed in as ada unless signed_out, with form
+// as its urlencoded body.
+async fn page_answer(router: &Router, method: &str, uri: &str, form: &str, signed_out: bool) -> (StatusCode, String) {
+    let mut request = http::Request::builder()
+        .method(method)
+        .uri(uri)
+        .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded");
+    if signed_out {
+        request = request.header("x-signed-out", "1");
+    }
+    let response = router.handle(request.body(Body::from(form.to_owned())).unwrap()).await;
+    let (status, headers) = (response.status(), response.headers().clone());
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let html = String::from_utf8(bytes.to_vec()).unwrap();
+    enter::check_page(uri, &headers, &html);
+    (status, html)
 }
 
 const PLACE_ORDER: &str = "/_superschematic/fixture-controls-api/order/place-order";
@@ -2229,8 +2700,10 @@ async fn a_webhook_has_no_procedure_and_its_route_checks_the_signature() {
     assert_eq!(body, "unsigned");
     let request = http::Request::builder().uri("/guards").body(Body::empty()).unwrap();
     let response = router.handle(request).await;
+    let headers = response.headers().clone();
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let body = String::from_utf8(bytes.to_vec()).unwrap();
+    enter::check_page("/guards", &headers, &body);
     assert!(body.contains("webhook guard true, reindexed true"), "{body}");
 }
 
@@ -2243,6 +2716,58 @@ async fn an_operation_only_services_call_has_no_procedure() {
     // refuses a body that is not its JSON rather than answering 404.
     let (status, _, _) = post(&router, "/_superschematic/fixture-controls-api/stock/release-reservation", "{".to_string(), None).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn an_end_user_is_refused_an_operation_only_services_call() {
+    let router = app(false);
+    let (status, body) = page_answer(&router, "GET", "/stock/end-user", "", false).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body.contains("reindex 401 service_unauthorized, reserve 401 service_unauthorized"), "{body}");
+    let (_, body) = page_answer(&router, "GET", "/stock/end-user", "", true).await;
+    assert!(body.contains("reindex 401 service_unauthorized, reserve 401 service_unauthorized"), "{body}");
+}
+
+#[tokio::test]
+async fn a_listed_caller_reserves_for_the_signed_in_reader() {
+    let (status, body) = page_answer(&app(false), "GET", "/stock/reserve", "", false).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body.contains("listed sku-1 x2 for ada by app,"), "{body}");
+}
+
+#[tokio::test]
+async fn a_caller_from_does_not_list_is_forbidden() {
+    let (_, body) = page_answer(&app(false), "GET", "/stock/reserve", "", false).await;
+    assert!(body.contains("unlisted 403 service_forbidden"), "{body}");
+}
+
+#[tokio::test]
+async fn a_reservation_needs_an_end_user_to_forward() {
+    let (_, body) = page_answer(&app(false), "GET", "/stock/reserve", "", true).await;
+    assert!(body.contains("listed 401 unauthorized, unlisted 403 service_forbidden"), "{body}");
+}
+
+#[tokio::test]
+async fn an_allow_service_caller_stands_in_for_the_reader() {
+    // Signed out or in, a service the route lists (its from is empty, so
+    // any) is admitted alone, the implementation seeing no end user, while
+    // the end user's call meets the end-user step.
+    let (_, body) = page_answer(&app(false), "GET", "/stock/release", "", true).await;
+    assert!(body.contains("service r-1 for - by app, another r-1 for - by app, end user 401 unauthorized"), "{body}");
+    let (_, body) = page_answer(&app(false), "GET", "/stock/release", "", false).await;
+    assert!(body.contains("service r-1 for - by app, another r-1 for - by app, end user r-1 for ada by -"), "{body}");
+}
+
+#[tokio::test]
+async fn a_service_only_form_submits_as_a_service() {
+    let router = app(false);
+    let (status, body) = page_answer(&router, "POST", "/stock/reserve", "id=sku-1&quantity=3", false).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body.contains("sku-1 x3 for ada by app"), "{body}");
+    let (_, body) = page_answer(&router, "POST", "/stock/reserve", "id=sku-1&quantity=lots", false).await;
+    assert!(body.contains("refused 422"), "{body}");
+    let (_, body) = page_answer(&router, "POST", "/stock/reserve", "id=sku-1&quantity=3", true).await;
+    assert!(body.contains("refused 401"), "{body}");
 }
 
 #[tokio::test]
@@ -2345,6 +2870,9 @@ use topcoat::context::Cx;
 use topcoat::router::{page, to_bytes, Body, OriginPolicy, Router, RouterBuilderDiscoverExt, StatusCode};
 use topcoat::view::{view, View};
 
+#[path = "support/enter.rs"]
+mod enter;
+
 const CONFIG: &str = r#"{"password": {"argon2": {"memoryKiB": 64, "iterations": 1, "parallelism": 1}}}"#;
 const PASSWORD: &str = "correct horse";
 
@@ -2436,15 +2964,12 @@ async fn send(router: &Router, method: &str, uri: &str, headers: &[(&str, &str)]
     }
     let body = body.map_or_else(Body::empty, |body| Body::from(body.to_string()));
     let response = router.handle(request.body(body).unwrap()).await;
-    let status = response.status();
-    let cookies = response
-        .headers()
-        .get_all("set-cookie")
-        .iter()
-        .map(|value| value.to_str().unwrap().to_string())
-        .collect();
+    let (status, response_headers) = (response.status(), response.headers().clone());
+    let cookies = response_headers.get_all("set-cookie").iter().map(|value| value.to_str().unwrap().to_string()).collect();
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    Reply { status, cookies, body: String::from_utf8(bytes.to_vec()).unwrap() }
+    let body = String::from_utf8(bytes.to_vec()).unwrap();
+    enter::check_page(uri, &response_headers, &body);
+    Reply { status, cookies, body }
 }
 
 // Signs in through the mounted JSON API with a cookie session, and answers

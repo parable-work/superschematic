@@ -1231,7 +1231,7 @@ pub async fn order_list_orders_args_fields(
                 <p class="field-error">(message)</p>
             }
             <label class="ss-choice"><input type="checkbox" name="statuses" value="placed" checked=(checked(&form.statuses, "placed"))>"Placed"</label>
-            <label class="ss-choice"><input type="checkbox" name="statuses" value="on_hold" checked=(checked(&form.statuses, "on_hold"))>"On hold"</label>
+            <label class="ss-choice"><input type="checkbox" name="statuses" value="on_hold" checked=(checked(&form.statuses, "on_hold"))>"Held for a stock check"</label>
             <label class="ss-choice"><input type="checkbox" name="statuses" value="shipped" checked=(checked(&form.statuses, "shipped"))>"Shipped"</label>
             <label class="ss-choice"><input type="checkbox" name="statuses" value="cancelled" checked=(checked(&form.statuses, "cancelled"))>"Cancelled"</label>
         </fieldset>

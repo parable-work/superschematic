@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"text/template"
@@ -38,11 +39,15 @@ type crate struct {
 	// page's caller from the session the JSON API signed in, and forwards
 	// the API crate's store features.
 	Identity bool
-	// Operations are the operations with an in-process call; Guards every
-	// operation, those without one included.
-	Operations []operation
-	Guards     []operation
-	Records    []record
+	// Operations are the operations with an in-process call an end user's
+	// page makes, every one with a call but a @requireService one;
+	// ServiceCalls those a service caller calls (operations::as_service),
+	// each with a @requireService or @allowService clause (D37, amended);
+	// Guards every operation, those without a call included.
+	Operations   []operation
+	ServiceCalls []operation
+	Guards       []operation
+	Records      []record
 	// PageRecords are the records of the pages the paged operations
 	// return (D60).
 	PageRecords []pageRecord
@@ -65,8 +70,112 @@ type crate struct {
 	// Pages are the pages of each resource the operations describe, nil
 	// unless outputs.topcoat.pages turns them on (pages.go).
 	Pages *pagesModel
+	// Hosted are the crates of the API dependencies one app hosts beside
+	// the service (D61, amended), by service, which a reference whose
+	// options operation is the dependency's calls in-process; hostedNot
+	// why each other API dependency has none.
+	Hosted    map[string]*hostedCrate
+	hostedNot map[string]string
 	// noCalls is why each operation without an in-process call has none.
 	noCalls map[*ir.FieldDef]string
+}
+
+// hostedCrate is the Topcoat crate of an API dependency that the app
+// hosting the service hosts too (D61, amended): its Cargo name, its name in
+// Rust source and its directory from the crate's, and its operations' in-
+// process calls, by their rules and under its own setup.
+type hostedCrate struct {
+	Service string // fixture-console-suppliers-api
+	Crate   string // schemas-fixture-console-suppliers-api-topcoat
+	Ident   string // schemas_fixture_console_suppliers_api_topcoat
+	Path    string // ../fixture-console-suppliers-api
+	// calls are its in-process calls by operation, noCall why each other
+	// operation has none.
+	calls  map[*ir.FieldDef]declared
+	noCall map[*ir.FieldDef]string
+	// used reports whether a reference calls it, so Cargo.toml depends on
+	// it.
+	used bool
+}
+
+// UsedHosted are the hosted crates a reference calls, by service, which
+// Cargo.toml depends on.
+func (c *crate) UsedHosted() []*hostedCrate {
+	var out []*hostedCrate
+	for _, service := range sortedKeys(c.Hosted) {
+		if h := c.Hosted[service]; h.used {
+			out = append(out, h)
+		}
+	}
+	return out
+}
+
+// hostedCrates are the crates of the service's API dependencies that one
+// app hosts beside it (D61, amended), by service: each one the table lists
+// beside the service, whose API server is Rust and whose Topcoat crate the
+// build wrote before the service's, as build --with-deps and build-all
+// do. Each other API dependency has the reason the build log gives.
+func hostedCrates(c registry.GenerateContext, table Table) (map[string]*hostedCrate, map[string]string, error) {
+	hosted, not := map[string]*hostedCrate{}, map[string]string{}
+	self := c.Config.Name
+	for _, dep := range c.Config.Dependencies {
+		if dep.Kind != ir.SchemaKindAPI {
+			continue
+		}
+		if !slices.Contains(table.Services, dep.Name) || !slices.Contains(table.Services, self) {
+			not[dep.Name] = fmt.Sprintf("[extension.topcoat] services does not list %s beside %s, so no app hosts both", dep.Name, self)
+			continue
+		}
+		api, err := registry.RustAPIOfService(c, dep.Name)
+		if err != nil {
+			return nil, nil, fmt.Errorf("topcoat: the API of %s, a dependency of %s: %w", dep.Name, self, err)
+		}
+		if api == nil {
+			not[dep.Name] = dep.Name + "'s API server is not Rust, so it has no crate"
+			continue
+		}
+		dir := Dir(c.Options.OutputRoot, dep.Name)
+		if _, err := os.Stat(filepath.Join(dir, "Cargo.toml")); err != nil {
+			not[dep.Name] = dep.Name + "'s Topcoat crate is not in the output root, which a build of it first writes (build --with-deps)"
+			continue
+		}
+		schema, err := c.LoadDependency(dep.Name)
+		if err != nil {
+			return nil, nil, fmt.Errorf("topcoat: load dependency %s: %w", dep.Name, err)
+		}
+		rel, err := filepath.Rel(Dir(c.Options.OutputRoot, self), dir)
+		if err != nil {
+			return nil, nil, fmt.Errorf("topcoat: path to the Topcoat crate of %s: %w", dep.Name, err)
+		}
+		h := &hostedCrate{
+			Service: dep.Name,
+			Crate:   c.Options.Naming.RustCratePrefix + dep.Name + "-topcoat",
+			Path:    filepath.ToSlash(rel),
+			calls:   map[*ir.FieldDef]declared{},
+			noCall:  map[*ir.FieldDef]string{},
+		}
+		h.Ident = strings.ReplaceAll(h.Crate, "-", "_")
+		for _, endpoint := range api.AllEndpoints() {
+			if endpoint.Manual {
+				continue
+			}
+			op, err := schemaSet{schema}.operation(endpoint)
+			if err != nil {
+				return nil, nil, err
+			}
+			reason := noCall(endpoint, op)
+			if reason == "" && requiresService(endpoint) {
+				reason = "its route admits only a service caller (@requireService)"
+			}
+			if reason != "" {
+				h.noCall[op] = reason
+				continue
+			}
+			h.calls[op] = declared{endpoint, op}
+		}
+		hosted[dep.Name] = h
+	}
+	return hosted, not, nil
 }
 
 // operation is one operation of the service, from the API crate's own
@@ -86,11 +195,18 @@ type operation struct {
 	RequiresAuth bool
 	Permissions  []string
 	// ServiceOnly marks an operation whose route admits only a service
-	// caller (@requireService). Its in-process call admits the end user
-	// alone, and its doc says so (D37, amended).
+	// caller (@requireService): it has no end-user call, and its guard
+	// refuses an end user (D37, amended). AsService marks one with a
+	// @requireService or @allowService clause, which a service caller
+	// calls through operations::as_service.
 	ServiceOnly bool
-	// Paged marks a @paginated operation (D60), whose call returns a page.
-	Paged bool
+	AsService   bool
+	// Paged marks a @paginated operation (D60), whose call returns a page;
+	// Sorted one with a SortBy argument (D60, amended), whose call unbinds
+	// the cursor from the sort before the implementation reads it and binds
+	// the page's next to it after, as the router does.
+	Paged  bool
+	Sorted bool
 	// NoCall is why the operation has no in-process call, and so no
 	// procedure; NoProcedure why one with a call has no procedure. Each is
 	// a reason (noCall, noProcedure), empty when the operation has the
@@ -114,12 +230,36 @@ func operationOf(e registry.RustEndpoint) operation {
 		RequiresAuth: e.RequiresAuth,
 		Permissions:  e.RequiredPerms,
 		ServiceOnly:  requiresService(e),
+		AsService:    e.ServiceCallers != nil,
 		Paged:        e.Page != nil,
+		Sorted:       e.Page != nil && e.Page.Sort != nil,
 	}
 	if e.HasArgs() {
 		op.ArgsName = e.ArgsName
 	}
 	return op
+}
+
+// ServiceGuardDoc is the doc of the operation's guard in AsService: how
+// its route admits a service caller, then what it asks of the end user
+// the service forwards (D37, amended).
+func (o operation) ServiceGuardDoc() string {
+	refuses := "401 without a signed-in end user"
+	if o.ServiceOnly {
+		refuses += " to forward"
+	}
+	if len(o.Permissions) > 0 {
+		refuses += ", 403 without one of " + strings.Join(o.Permissions, ", ")
+	}
+	head := fmt.Sprintf("Admits the caller as %s.%s's route admits a service: ", o.Namespace, o.Name)
+	switch {
+	case !o.ServiceOnly:
+		return head + "a caller its `from` lists stands in for the end user, so `Ok(None)`; any other goes on to the end-user step, as `can_" + o.SnakeName + "` admits it: " + refuses + "."
+	case o.RequiresAuth:
+		return head + "403 `service_forbidden` when its `from` lists none of the APIs the caller serves; then the page's caller, as the end user the service forwards: " + refuses + "."
+	default:
+		return head + "403 `service_forbidden` when its `from` lists none of the APIs the caller serves; it asks for no end user, so `Ok(None)` otherwise."
+	}
 }
 
 // declared is an operation of the API crate with its declaration in the
@@ -171,7 +311,7 @@ func requiresService(e registry.RustEndpoint) bool {
 	return e.ServiceCallers != nil && e.ServiceCallers.Mode == ir.ServiceCallersRequire
 }
 
-func newCrate(c registry.GenerateContext, api *registry.RustAPI, cfg Config) (*crate, error) {
+func newCrate(c registry.GenerateContext, api *registry.RustAPI, cfg Config, table Table) (*crate, error) {
 	service := c.Config.Name
 	apiDir := registry.APIDir(c.Options.OutputRoot, service)
 	rel, err := filepath.Rel(Dir(c.Options.OutputRoot, service), apiDir)
@@ -193,6 +333,9 @@ func newCrate(c registry.GenerateContext, api *registry.RustAPI, cfg Config) (*c
 	}
 	schemas, err := schemasOf(c)
 	if err != nil {
+		return nil, err
+	}
+	if out.Hosted, out.hostedNot, err = hostedCrates(c, table); err != nil {
 		return nil, err
 	}
 	// The operations a page calls in-process, and of those the ones browser
@@ -220,7 +363,17 @@ func newCrate(c registry.GenerateContext, api *registry.RustAPI, cfg Config) (*c
 			c.Logf("  - topcoat: no in-process call for %s.%s: %s\n", o.Namespace, o.Name, o.NoCall)
 			continue
 		}
-		out.Operations = append(out.Operations, o)
+		// A @requireService operation is called only as a service: a page
+		// cannot call it for an end user, so the compiler refuses the
+		// mistake (D37, amended).
+		if o.ServiceOnly {
+			c.Logf("  - topcoat: no end-user call for %s.%s: its route admits only a service caller (@requireService); operations::as_service calls it\n", o.Namespace, o.Name)
+		} else {
+			out.Operations = append(out.Operations, o)
+		}
+		if o.AsService {
+			out.ServiceCalls = append(out.ServiceCalls, o)
+		}
 		inProcess = append(inProcess, declared{endpoint, op})
 		if o.NoProcedure != "" {
 			c.Logf("  - topcoat: no procedure for %s.%s: %s\n", o.Namespace, o.Name, o.NoProcedure)
@@ -268,6 +421,9 @@ func newCrate(c registry.GenerateContext, api *registry.RustAPI, cfg Config) (*c
 		trails = trailSteps(site.roots)
 	}
 	if out.References, err = referencesOf(out, schemas, inProcess, trails, c.Logf); err != nil {
+		return nil, err
+	}
+	if err := out.markPicks(); err != nil {
 		return nil, err
 	}
 	if site != nil {
@@ -323,10 +479,22 @@ func (c *crate) RecordsUseTypes() bool {
 }
 
 // Paged reports whether an operation with an in-process call pages (D60),
-// so operations.rs names the runtime its result's page is of.
+// an end user's or a service's, so operations.rs names the runtime its
+// result's page is of.
 func (c *crate) Paged() bool {
-	for _, o := range c.Operations {
+	for _, o := range slices.Concat(c.Operations, c.ServiceCalls) {
 		if o.Paged {
+			return true
+		}
+	}
+	return false
+}
+
+// Sorted reports whether an operation with an in-process call sorts (D60,
+// amended), so operations.rs says how its call unbinds and binds the page.
+func (c *crate) Sorted() bool {
+	for _, o := range slices.Concat(c.Operations, c.ServiceCalls) {
+		if o.Sorted {
 			return true
 		}
 	}
@@ -379,6 +547,7 @@ func (c *crate) formUses() map[string]bool {
 	uses := map[string]bool{}
 	for _, f := range c.Forms {
 		uses["choosable"] = uses["choosable"] || f.Choosable
+		uses["picks"] = uses["picks"] || f.Picks
 	}
 	for _, st := range c.FormStructs {
 		if st.Rows {
@@ -411,6 +580,7 @@ func (c *crate) formUses() map[string]bool {
 	}
 	for _, f := range c.ArgForms {
 		uses["args"], uses["choosable"] = true, uses["choosable"] || f.Choosable
+		uses["picks"] = uses["picks"] || f.Picks
 		uses["query"] = uses["query"] || f.IsGet()
 		uses["argsInput"] = uses["argsInput"] || f.Input != nil
 		if f.Paged {
@@ -432,6 +602,75 @@ func (c *crate) formUses() map[string]bool {
 		}
 	}
 	return uses
+}
+
+// PickShards are the pickers' shards (D61, amended) the forms render,
+// sorted and joined, for forms.rs's use.
+func (c *crate) PickShards() string {
+	if c.References == nil {
+		return ""
+	}
+	var names []string
+	for _, s := range c.References.Sources {
+		if c.References.UsesPick(s) {
+			names = append(names, s.Base+"_pick")
+		}
+	}
+	sort.Strings(names)
+	return strings.Join(names, ", ")
+}
+
+// markPicks makes each form's control whose reference's options operation
+// searches a search picker (D61, amended): its form holds the pickers'
+// texts, a post's "Find" acts on it, and its view renders each through its
+// source's shard. A form whose field is named as what a form keeps for
+// its pickers is refused.
+func (c *crate) markPicks() error {
+	m := c.References
+	if !m.Picking() {
+		return nil
+	}
+	byForm := map[string]*refForm{}
+	for _, f := range m.Forms {
+		byForm[f.Form] = f
+	}
+	renders := func(f *refForm, post bool) map[string]pickRender {
+		picks := map[string]pickRender{}
+		for _, site := range f.Sites {
+			if site.Pick {
+				picks[site.Path] = pickRender{Shard: site.Source.Base + "_pick", Post: post}
+			}
+		}
+		return picks
+	}
+	for i := range c.Forms {
+		f := &c.Forms[i]
+		if rf := byForm[f.Name]; rf != nil && rf.Picks() {
+			f.Picks, f.Struct.Picks = true, true
+			if err := reservedPicks(f.Name, f.Struct.Fields); err != nil {
+				return err
+			}
+			r := newFormRenderer()
+			r.picks = renders(rf, true)
+			r.fields(scope{form: "form", idBase: f.Struct.IDBase}, f.Struct, 2)
+			f.Choosable, f.UsesForm, f.Body = r.choosable, r.used["form"], r.String()
+		}
+	}
+	for i := range c.ArgForms {
+		f := &c.ArgForms[i]
+		if rf := byForm[f.Name]; rf != nil && rf.Picks() {
+			f.Picks = true
+			fields := make([]*formField, len(f.Fields))
+			for j, a := range f.Fields {
+				fields[j] = a.formField
+			}
+			if err := reservedPicks(f.Name, fields); err != nil {
+				return err
+			}
+			f.render(renders(rf, !f.IsGet()))
+		}
+	}
+	return nil
 }
 
 // addRendered adds what a rendered control of f needs.
@@ -465,27 +704,62 @@ func (c *crate) ControlledPages() bool { return c.Pages != nil && len(c.Pages.Co
 
 // SetupLayers is the expression `<service>(...)` returns its router
 // through, `router` wrapped in each module's call that adds its route
-// controls' layers; empty when no procedure or page has any.
+// controls' layers; empty when no procedure or page has any. A module
+// whose routes have a rate limit takes the app's registry, `rate_limits`,
+// so its procedures and pages share each operation's limiter with its
+// route (D44, amended).
 func (c *crate) SetupLayers() string {
 	expr := ""
-	wrap := func(call string) {
+	wrap := func(call string, limited bool) {
 		if expr == "" {
 			expr = "router"
 		}
-		expr = call + "(" + expr + ")"
+		expr = call + "(" + expr
+		if limited {
+			expr += ", &rate_limits"
+		}
+		expr += ")"
 	}
 	if len(c.ControlledProcedures()) > 0 {
-		wrap("procedures::route_controls")
+		wrap("procedures::route_controls", c.ControlsUse("rate_limit"))
 	}
 	if c.ControlledPages() {
-		wrap("pages::route_controls")
+		wrap("pages::route_controls", c.Pages.ControlsUse("rate_limit"))
+	}
+	if c.ControlledPicks() {
+		wrap("references::route_controls", c.References.PicksUse("rate_limit"))
 	}
 	return expr
 }
 
+// LayersTakeLimits reports whether a layer `<service>(...)` adds takes the
+// app's registry of limiters, so the setup keeps a clone of it.
+func (c *crate) LayersTakeLimits() bool {
+	return c.ControlsUse("rate_limit") || c.ControlledPages() && c.Pages.ControlsUse("rate_limit") ||
+		c.ControlledPicks() && c.References.PicksUse("rate_limit")
+}
+
+// ControlledPicks reports whether a picker's shard meets its options
+// operation's rate limit or timeout (D61, amended), so `<service>(...)`
+// adds the layers that apply them (`references::route_controls`).
+func (c *crate) ControlledPicks() bool {
+	return c.References != nil && len(c.References.PickControlled()) > 0
+}
+
+// RateLimited reports whether a procedure, a page or a picker's shard
+// meets a route's rate limit, so `<service>(...)` hands their layers the
+// registry and lib.rs declares `client_key`, by which each counts a
+// client.
+func (c *crate) RateLimited() bool {
+	pages := c.ControlledPages() && (c.Pages.ControlsUse("rate_limit") || c.Pages.ControlsUse("rate_from"))
+	picks := c.ControlledPicks() && (c.References.PicksUse("rate_limit") || c.References.PicksUse("rate_from"))
+	return c.ControlsUse("rate_limit") || pages || picks
+}
+
 // ControlsUse reports whether a procedure's route has the control
 // ("rate_limit", "body_limit" or "timeout"), so procedures.rs declares
-// ProcedureControls' builder method for it.
+// ProcedureControls' builder method for it, and, for a rate limit, its
+// route_controls takes the app's registry of limiters.
 func (c *crate) ControlsUse(control string) bool {
 	for _, p := range c.Procedures {
 		switch {
@@ -535,6 +809,7 @@ func (c *crate) write(dir string) error {
 		"join":         strings.Join,
 		"doc":          doc,
 		"doc4":         doc4,
+		"lowerFirst":   lowerFirst,
 	}
 	for name, fn := range pageFuncs {
 		funcs[name] = fn

@@ -19,7 +19,10 @@ type form struct {
 	Parse     string // types::validators::parse_booking_input
 	// Rows reports whether the form holds a list rendered as rows, so a
 	// row button submits it: it then has row_action and apply_action.
-	Rows bool
+	// Picks reports whether a control is a search picker (D61, amended),
+	// whose "Find" submits it as a row button does.
+	Rows  bool
+	Picks bool
 	// Choosable reports whether a field takes the app's choices.
 	Choosable bool
 	// UsesForm reports whether the component's view reads the form: a
@@ -42,8 +45,11 @@ type formStruct struct {
 	// parses into the input.
 	Input bool
 	// Rows reports whether it or a struct it nests holds rows, so a row
-	// button can act on it.
-	Rows bool
+	// button can act on it. Picks marks an input's whose form holds a
+	// search picker (D61, amended): it holds the pickers' texts, finds, and
+	// its "Find" buttons act on it as a row button does.
+	Rows  bool
+	Picks bool
 	// Sent reports whether a form asks it whether any of its fields was
 	// sent: it is an optional nested object, or nested in one.
 	Sent bool
@@ -87,9 +93,9 @@ type formField struct {
 	Required bool
 
 	// Control is a value's or a row's control: text, longtext (a textarea
-	// of text, from a maxLength of longText), email, url, tel, number,
-	// checkbox, select (an enum), password (a secret), date, time,
-	// datetime-local, or textarea (JSON text).
+	// of text, from a maxLength of longText or a multiline hint), email,
+	// url, tel, number, checkbox, select (an enum), password (a secret),
+	// date, time, datetime-local, or textarea (JSON text).
 	Control string
 	// Read is the helper that reads the control's value as the input's
 	// JSON: text, integer, number, boolean, date_time or json_text.
@@ -132,7 +138,7 @@ type formOption struct {
 // without one, a webhook's or one the service mounts, gives its input
 // none, as it gives its result no record.
 func formsOf(schemas schemaSet, inProcess []declared, log func(format string, args ...any)) ([]form, []*formStruct, error) {
-	b := &formBuilder{schemaSet: schemas, structs: map[string]*formStruct{}}
+	b := &formBuilder{schemaSet: schemas, structs: map[string]*formStruct{}, log: log}
 	seen := map[string]bool{}
 	var roots []*formStruct
 	var forms []form
@@ -219,8 +225,38 @@ func reserved(st *formStruct) error {
 }
 
 // rowActionName is the name of a form's row buttons, whose value is the
-// row action (add:rooms, remove:rooms[1]).
+// row action (add:rooms, remove:rooms[1]), and of a picker's "Find"
+// (find:lines[0].productId).
 const rowActionName = "_action"
+
+// findName is the name a picker's search box is under: `_find.` and its
+// control's name (D61, amended).
+const findName = "_find"
+
+// reservedPicks refuses a form with a picker whose field would be named as
+// what the form keeps for its pickers: finds, their texts, which the JSON
+// name _find holds, and row_action, the "Find" pressed, which the JSON name
+// _action holds.
+func reservedPicks(form string, fields []*formField) error {
+	for _, f := range fields {
+		switch {
+		case f.Name == "finds":
+			return fmt.Errorf("topcoat: form %s: field %s is the form's finds, its pickers' texts (D61, amended)", form, f.JSONName)
+		case f.JSONName == findName:
+			return fmt.Errorf("topcoat: form %s: field %s has the name of the form's search boxes", form, f.JSONName)
+		case f.Name == "row_action":
+			return fmt.Errorf("topcoat: form %s: field %s is the form's row_action, the picker whose Find is pressed", form, f.JSONName)
+		case f.JSONName == rowActionName:
+			return fmt.Errorf("topcoat: form %s: field %s has the name of the form's Find buttons", form, f.JSONName)
+		}
+	}
+	return nil
+}
+
+// Acts reports whether a button other than the submit acts on the form, a
+// row button or a picker's "Find": it then has row_action and
+// apply_action.
+func (st *formStruct) Acts() bool { return st.Rows || st.Picks }
 
 // maxRows is the most rows a form holds of a list without a listMax, or
 // with one above it, the crate's MAX_ROWS.
@@ -228,13 +264,17 @@ const maxRows = 1000
 
 // longText is the maxLength from which a text field or argument is long
 // text, a textarea rather than a one-line input: a reason or a review's
-// body (500, 5000), not a name or a title (120, 200, 255).
+// body (500, 5000), not a name or a title (120, 200, 255). A field's
+// multiline hint overrides it either way; an argument, which has no
+// display, keeps it.
 const longText = 500
 
-// formBuilder builds the struct of each object type a form holds.
+// formBuilder builds the struct of each object type a form holds, and
+// writes to log why it leaves a hint out.
 type formBuilder struct {
 	schemaSet
 	structs map[string]*formStruct
+	log     func(format string, args ...any)
 }
 
 func (b *formBuilder) sorted() []*formStruct {
@@ -331,6 +371,9 @@ func (b *formBuilder) kindOf(f *formField, owner *ir.TypeDef, field *ir.FieldDef
 	if !b.control(f, field) {
 		b.jsonText(f, field)
 		return nil
+	}
+	if multiline := multilineOf(field); multiline != nil && *multiline && f.Control != "longtext" && b.log != nil {
+		b.log("  - topcoat: %s.%s: @display multiline is ignored: its control is %s\n", owner.Name, field.Name, controlNoun(f.Control))
 	}
 	if ref.IsArray {
 		f.Kind = kindValueRows
@@ -562,7 +605,8 @@ func defaultOf(field *ir.FieldDef, f *formField) string {
 }
 
 // control sets a value's control, its reader and its attributes from its
-// type and rules; false for a type no control holds but JSON text.
+// type, its rules and its multiline hint; false for a type no control
+// holds but JSON text.
 func (s schemaSet) control(f *formField, field *ir.FieldDef) bool {
 	ref := field.TypeRef
 	scalar := s.scalar(ref.Name)
@@ -596,8 +640,14 @@ func (s schemaSet) control(f *formField, field *ir.FieldDef) bool {
 			attrs = append(attrs, fmt.Sprintf("maxlength=%q", strconv.Itoa(*maxLength)))
 		}
 		// Long text is a textarea, which takes the lengths but no pattern:
-		// its pattern is checked when the form is parsed.
-		if f.Control == "text" && maxLength != nil && *maxLength >= longText {
+		// its pattern is checked when the form is parsed. A field's
+		// multiline hint says so either way, whatever its maxLength (D48,
+		// amended); without one, a maxLength of longText makes text long.
+		long := maxLength != nil && *maxLength >= longText
+		if multiline := multilineOf(field); multiline != nil {
+			long = *multiline
+		}
+		if f.Control == "text" && long {
 			f.Control = "longtext"
 		}
 		pattern := field.ValidatePattern
@@ -643,6 +693,33 @@ func (s schemaSet) control(f *formField, field *ir.FieldDef) bool {
 	}
 	f.Attrs = joinAttrs(attrs)
 	return true
+}
+
+// controlNoun names a control that is not text for the build log: an
+// email input.
+func controlNoun(control string) string {
+	switch control {
+	case "email":
+		return "an email input"
+	case "url":
+		return "a URL input"
+	case "tel":
+		return "a phone number input"
+	case "datetime-local":
+		return "a date-time input"
+	case "checkbox":
+		return "a checkbox"
+	}
+	return "a " + control + " input"
+}
+
+// multilineOf is a field's multiline hint, from its @display (D48,
+// amended): true for several lines, false for one, nil for neither.
+func multilineOf(field *ir.FieldDef) *bool {
+	if field.Display == nil {
+		return nil
+	}
+	return field.Display.Multiline
 }
 
 // textControl is the input type of a string scalar: email or url by its

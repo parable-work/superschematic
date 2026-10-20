@@ -19,8 +19,24 @@ pub struct {{ .Name }} {
     pub cursor: Option<String>,
     pub limit: Option<String>,
 {{- end }}
+{{- with .Sort }}
+    /// The order the page is asked for in (D60, amended), the `{{ .Param }}` query
+    /// parameter as sent, which `page` reads by the route's rules: none for
+    /// its defaultSort. No control renders it; a sorted list's headers set
+    /// it.
+    pub {{ .Field }}: Option<String>,
+{{- end }}
 {{- with .Input }}
     pub input: {{ .Struct.Name }},
+{{- end }}
+{{- if .Picks }}
+    /// The texts of its search pickers (D61, amended){{ if .Input }}, its input's among them{{ end }}.
+    pub finds: Finds,
+{{- end }}
+{{- if .OwnAction }}
+    /// The picker's "Find" that submitted the form (`_action`), which
+    /// `apply_action` applies.
+    pub row_action: Option<String>,
 {{- end }}
     /// The browser sent more than `MAX_PAIRS` pairs, past which the form
     /// read none: `parse` refuses it with the form's error.
@@ -45,8 +61,17 @@ impl {{ .Name }} {
             cursor: None,
             limit: None,
 {{- end }}
+{{- with .Sort }}
+            {{ .Field }}: None,
+{{- end }}
 {{- with .Input }}
             input: {{ .Struct.Name }}::new(),
+{{- end }}
+{{- if .Picks }}
+            finds: Finds::default(),
+{{- end }}
+{{- if .OwnAction }}
+            row_action: None,
 {{- end }}
             overflow: false,
         }
@@ -67,8 +92,17 @@ impl {{ .Name }} {
             cursor: posted.get("cursor").first(),
             limit: posted.get("limit").first(),
 {{- end }}
+{{- with .Sort }}
+            {{ .Field }}: posted.get({{ rustString .Param }}).first(),
+{{- end }}
 {{- with .Input }}
             input: {{ .Struct.Name }}::from_post(&posted),
+{{- end }}
+{{- if .Picks }}
+            finds: Finds::from_posted(posted.get("_find")),
+{{- end }}
+{{- if .OwnAction }}
+            row_action: posted.get("_action").text(),
 {{- end }}
             overflow: posted.overflow,
         }
@@ -145,23 +179,41 @@ impl {{ .Name }} {
         Ok(args)
     }
 {{- if .Paged }}
+{{- if .Sort }}
+
+    /// The page the form asks for, its `cursor`, `limit` and `{{ .Sort.Param }}` read by
+    /// the route's rules (`PageSpec::query`, D60, amended): an absent cursor
+    /// is the first page, an absent limit the route's default and an absent
+    /// sort its defaultSort, which the call fills in, and a refusal is the
+    /// router's 400 at the first it refuses. The cursor is still bound to
+    /// its sort; the in-process call unbinds it.
+{{- else }}
 
     /// The page the form asks for, its `cursor` and `limit` read by the
     /// route's rules (`PageSpec::query`, D60): an absent cursor is the first
     /// page and an absent limit the route's default, and a refusal is the
     /// router's 400 at either.
+{{- end }}
     pub fn page(&self) -> Result<runtime::page::PageRequest, ApiError> {
-        let pairs = [("cursor", &self.cursor), ("limit", &self.limit)]
+        let pairs = [("cursor", &self.cursor), ("limit", &self.limit){{ with .Sort }}, ({{ rustString .Param }}, &self.{{ .Field }}){{ end }}]
             .into_iter()
             .filter_map(|(name, value)| value.clone().map(|value| (name.to_owned(), value)))
             .collect();
         crate::api::{{ .ArgsName }}::PAGE.query(&QueryValues::new(pairs))
     }
+{{- if .Sort }}
+
+    /// The pairs the form holds as a query sends them, in control order:
+    /// each argument's values as sent, then the sort and `limit` when sent,
+    /// never `cursor`. A page links the next page and the first with them,
+    /// so each keeps the filter, the order and the limit.
+{{- else }}
 
     /// The pairs the form holds as a query sends them, in control order:
     /// each argument's values as sent, then `limit` when sent, never
     /// `cursor`. A page links the next page and the first with them, so each
     /// keeps the filter and the limit.
+{{- end }}
     pub fn query_pairs(&self) -> Vec<(String, String)> {
         let mut pairs = Vec::new();
 {{- range .QueryFields }}
@@ -173,32 +225,75 @@ impl {{ .Name }} {
         }
 {{- end }}
 {{- end }}
+{{- with .Sort }}
+        if let Some(sort) = &self.{{ .Field }} {
+            pairs.push(({{ rustString .Param }}.to_owned(), sort.clone()));
+        }
+{{- end }}
         if let Some(limit) = &self.limit {
             pairs.push(("limit".to_owned(), limit.clone()));
         }
         pairs
     }
 {{- end }}
-
+{{ if .ServiceOnly }}
+    {{ doc4 (printf "Parses the form, then calls the operation in-process as `service`, a service this process acts for (`operations::as_service(service).%s`): its route admits only a service caller (@requireService), so the form has no `submit` (D37, amended). Call it only where the page acts as that service, never just because a reader sent the form: the call carries the service's authority, and the page's caller is the end user it forwards when the route asks for one. A refusal is the status a page answers with and the errors it renders the form again with: 422 and `parse`'s errors, or the route's status (401, 403, 404, 409, ...) and the operation's errors (`Refusal::from_api`)." .Call) }}
+    pub async fn submit_as(&self, cx: &Cx, service: &crate::api::runtime::ServiceCaller) -> Result<{{ .Output }}, Refusal> {
+{{- else }}
     {{ doc4 (printf "Parses the form, then calls the operation in-process (`operations::%s`). A refusal is the status a page answers with and the errors it renders the form again with: 422 and `parse`'s errors, or the route's status (401, 403, 404, 409, ...) and the operation's errors (`Refusal::from_api`)." .Call) }}
     pub async fn submit(&self, cx: &Cx) -> Result<{{ .Output }}, Refusal> {
+{{- end }}
 {{- if .Paged }}
         // A cursor or a limit the route refuses is its 400, as the router
         // answers it.
         self.page().map_err(|err| Refusal::from_api(&err))?;
 {{- end }}
         let args = self.parse()?;
+{{- if .ServiceOnly }}
+        operations::as_service(service).{{ .Call }}(cx, args).await.map_err(|err| Refusal::from_api(&err))
+{{- else }}
         operations::{{ .Call }}(cx, args).await.map_err(|err| Refusal::from_api(&err))
+{{- end }}
     }
-{{- if .Rows }}
+{{- if .Acts }}
+{{- if and .InputActs .Picks }}
+
+    /// Applies the button that submitted the form to its input
+    /// (`{{ .Input.Struct.Name }}::apply_action`), a picker's "Find", an argument's or the
+    /// input's, recorded as pressed (D61, amended): true when one did, and
+    /// the page renders the form again without calling the operation.
+{{- else if .InputActs }}
 
     /// Applies the row button that submitted the form to its input's rows
     /// (`{{ .Input.Struct.Name }}::apply_action`): true when a row button
     /// submitted it, and the page renders the form again without calling
     /// the operation.
+{{- end }}
+{{- if .InputActs }}
     pub fn apply_action(&mut self) -> bool {
+{{- if .Picks }}
+        if let Some(name) = self.input.row_action.as_deref().and_then(|action| action.strip_prefix("find:")) {
+            self.finds.pressed = Some(name.to_owned());
+        }
+{{- end }}
         self.input.apply_action()
     }
+{{- else }}
+
+    /// Applies the picker's "Find" that submitted the form, `row_action`,
+    /// `find:` and its name, which it records as pressed (D61, amended):
+    /// true when one did, and the page renders the form again with what its
+    /// text finds, without calling the operation.
+    pub fn apply_action(&mut self) -> bool {
+        let Some(action) = self.row_action.take() else {
+            return false;
+        };
+        if let Some(name) = action.strip_prefix("find:") {
+            self.finds.pressed = Some(name.to_owned());
+        }
+        true
+    }
+{{- end }}
 {{- end }}
 
     {{ doc4 (printf "Whether the component shows the errors at `path`: at an argument's control%s. A path argument's are the form's own." (or (and .Input " or the input's") "")) }}
@@ -258,9 +353,9 @@ pub async fn {{ .Component }}(
     let _ = form;
 {{- end }}
     Ok(view! {
-{{- if .Rows }}
-        // The button Enter presses, ahead of every row button: it submits
-        // the form without an `_action`.
+{{- if .Hidden }}
+        // The button Enter presses, ahead of every {{ if .Rows }}row button{{ if .Picks }} and "Find"{{ end }}{{ else }}"Find"{{ end }}: it submits
+        // the form{{ if not .IsGet }} without an `_action`{{ end }}.
         <button type="submit" class="ss-submit" hidden=(true)></button>
 {{- end }}
         for message in form_errors {

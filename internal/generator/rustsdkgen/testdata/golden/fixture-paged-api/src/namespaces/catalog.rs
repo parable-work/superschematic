@@ -17,6 +17,7 @@ pub struct CatalogNamespace {
 pub struct ListItemsQueryParams {
     pub ids: Option<Vec<types::IdentityUUID>>,
     pub in_stock: Option<bool>,
+    pub sort: Option<String>,
     pub cursor: Option<String>,
     pub limit: Option<i64>,
 }
@@ -54,7 +55,8 @@ impl CatalogNamespace {
             .await
     }
     /// The items, two to a page unless the caller asks for up to five, by
-    /// their ids or their stock.
+    /// their ids or their stock, in order of their names unless the caller
+    /// sorts them by name or sku, either way.
     ///
     /// - `query`: optional query parameters for this request.
     ///
@@ -89,6 +91,9 @@ impl CatalogNamespace {
             }
             if let Some(query_param_value) = &query.in_stock {
             query_params.push(("inStock".to_string(), query_param_value.to_string()));
+            }
+            if let Some(query_param_value) = &query.sort {
+            query_params.push(("sort".to_string(), query_param_value.to_string()));
             }
             // An empty value is left out, as the route reads it: none.
             if let Some(query_param_value) = query.cursor.as_ref().filter(|text| !text.is_empty()) {

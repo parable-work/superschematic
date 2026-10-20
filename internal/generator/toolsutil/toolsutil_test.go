@@ -443,12 +443,18 @@ func TestValidateReplayContract(t *testing.T) {
 	}
 }
 
-// TestToolKeysNameTheReferenceAndSearchKeys: a property's reference and
-// search mark are written under ToolKeys.Reference and ToolKeys.Search,
-// after its scalar key, in that order, on a list rather than its items; a
-// rename reaches nested properties, and an empty key leaves the member out.
-func TestToolKeysNameTheReferenceAndSearchKeys(t *testing.T) {
-	ref := &apigen.Reference{Target: "ItemView", OptionsOperationID: "CatalogListItemsHandler", OptionsTool: "catalog.listItems", Value: "id", Label: "name"}
+// TestToolKeysNameTheReferenceSearchAndSortKeys: a property's reference,
+// search mark and sort mark are written under ToolKeys.Reference,
+// ToolKeys.Search and ToolKeys.Sort, after its scalar key, in that order,
+// on a list rather than its items; the reference's search and service
+// follow its lookup (D61, amended); a sort is a string of its values
+// (D60, amended); a rename reaches nested properties, and an empty key
+// leaves the member out.
+func TestToolKeysNameTheReferenceSearchAndSortKeys(t *testing.T) {
+	ref := &apigen.Reference{
+		Target: "ItemView", OptionsOperationID: "CatalogListItemsHandler", OptionsTool: "catalog.listItems", Value: "id", Label: "name",
+		Search: "q", Service: "fixture-shelves-api",
+	}
 	fields := map[string][]apigen.Param{
 		"Line":  {{Name: "itemId", Type: "Identity.UUID", Required: true, Reference: ref}},
 		"Input": {{Name: "lines", Type: "Line", Required: true, IsArray: true}},
@@ -457,6 +463,7 @@ func TestToolKeysNameTheReferenceAndSearchKeys(t *testing.T) {
 	queryArgs := []ToolQueryArg{
 		{Name: "q", Type: "string", Search: true},
 		{Name: "ids", Type: "Identity.UUID", IsArray: true, Reference: ref},
+		{Name: "sort", Type: "string", Sort: &apigen.SortParam{Fields: []string{"name"}, Values: []string{"name", "-name"}, Default: "-name"}},
 	}
 	pathParams := []ToolPathParam{{Name: "itemId", Type: "Identity.UUID", Reference: ref}}
 
@@ -469,12 +476,13 @@ func TestToolKeysNameTheReferenceAndSearchKeys(t *testing.T) {
 		}
 		return string(encoded)
 	}
-	const reference = `{"target":"ItemView","options":"catalog.listItems","value":"id","label":"name"}`
+	const reference = `{"target":"ItemView","options":"catalog.listItems","value":"id","label":"name","search":"q","service":"fixture-shelves-api"}`
 	core := encode(apigen.DefaultToolKeys())
 	for _, want := range []string{
 		`"itemId":{"x-superschematic-scalar":"Identity.UUID","x-superschematic-reference":` + reference + `,"type":"string","description":"itemId parameter"}`,
 		`"ids":{"x-superschematic-reference":` + reference + `,"type":"array","description":"Array of Identity.UUID values","items":{"x-superschematic-scalar":"Identity.UUID","type":"string"}}`,
 		`"q":{"x-superschematic-search":true,"type":"string"`,
+		`"sort":{"x-superschematic-sort":true,"type":"string","description":"` + apigen.PageSortDescription + " One of `name` or `-name`; `-name` when left out." + `","enum":["name","-name"]}`,
 		`"items":{"additionalProperties":false,"type":"object","description":"Line object","properties":{"itemId":{"x-superschematic-scalar":"Identity.UUID","x-superschematic-reference":` + reference + `,"type":"string"}}`,
 	} {
 		if !strings.Contains(core, want) {
@@ -482,10 +490,11 @@ func TestToolKeysNameTheReferenceAndSearchKeys(t *testing.T) {
 		}
 	}
 
-	renamed := encode(apigen.ToolKeys{Scalar: "x-acme-scalar", Reference: "x-acme-ref", Search: "x-acme-search"})
+	renamed := encode(apigen.ToolKeys{Scalar: "x-acme-scalar", Reference: "x-acme-ref", Search: "x-acme-search", Sort: "x-acme-sort"})
 	for _, want := range []string{
 		`"itemId":{"x-acme-scalar":"Identity.UUID","x-acme-ref":` + reference + `,"type":"string"}`,
 		`"q":{"x-acme-search":true,"type":"string"`,
+		`"sort":{"x-acme-sort":true,"type":"string"`,
 	} {
 		if !strings.Contains(renamed, want) {
 			t.Errorf("the renamed keys' encoding lacks %s:\n%s", want, renamed)
@@ -496,6 +505,6 @@ func TestToolKeysNameTheReferenceAndSearchKeys(t *testing.T) {
 	}
 
 	if unkeyed := encode(apigen.ToolKeys{}); strings.Contains(unkeyed, `"target"`) || strings.Contains(unkeyed, "true") {
-		t.Fatalf("empty keys still wrote a reference or a search: %s", unkeyed)
+		t.Fatalf("empty keys still wrote a reference, a search or a sort: %s", unkeyed)
 	}
 }

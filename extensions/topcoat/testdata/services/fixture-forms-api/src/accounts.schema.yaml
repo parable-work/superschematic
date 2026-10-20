@@ -1,13 +1,15 @@
 # Accounts, signed up through a form: the input's fields are an email, a
 # URL, strings with rules, an enum, an integer and a number scalar, and a
-# boolean. A note's input holds a list of strings, a row each; one
-# operation requires it and another takes it optionally. A booking's
-# input holds a field of every other kind a form renders: a nested object
-# with an optional field, an optional nested object whose second line its
-# name labels, a list of objects with bounds, a list of enums, a date, a
-# time, a date-time, a secret, a list of secrets without a listMax, a
-# default, long text, any JSON value and a map. An account's key has a
-# secret field and a @uiHidden one, so its record has none.
+# boolean. A note's input holds text without a bound that its multiline
+# hint makes a textarea, and a list of strings, a row each; one operation
+# requires it and another takes it optionally. A booking's input holds a
+# field of every other kind a form renders: a nested object with an
+# optional field, an optional nested object whose second line its name
+# labels, a list of objects with bounds, each holding a list of strings,
+# rows within rows, a list of enums, a date, a time, a date-time, a
+# secret, a list of secrets without a listMax, a default, long text, any
+# JSON value and a map. An account's key has a secret field and a
+# @uiHidden one, so its record has none.
 name: fixture-forms-api
 kind: API
 scalars:
@@ -90,6 +92,7 @@ types:
     role: APIInput
     fields:
       - name: text
+        display: { multiline: true }
         typeRef: { name: string }
         required: true
       - name: tags
@@ -141,6 +144,9 @@ types:
         validateMax: 4
       - name: extras
         typeRef: { name: Amenity, isArray: true }
+      - name: notes
+        typeRef: { name: string, isArray: true }
+        validateListMax: 2
   BookingInput:
     name: BookingInput
     role: APIInput
