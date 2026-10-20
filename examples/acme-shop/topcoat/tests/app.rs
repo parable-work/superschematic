@@ -41,7 +41,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::thread::sleep;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 use acme_shop_orders_server::sqlite::SqliteShop;
 use acme_shop_orders_server::{SHOPPER_PERMISSIONS, Shop, add_shopper, add_staff, users_at, users_in_memory};
@@ -972,39 +972,89 @@ fn place_order_args() -> OrderPlaceOrderArgsRecord {
     }
 }
 
+/// How many more posts through one way into placeOrder its rate limit
+/// admits before it refuses one: `post` places an order, `Some(true)`, or
+/// is refused with the rate limit's 429, `Some(false)`.
+async fn placed_until_refused<F, Fut>(way: &str, mut post: F) -> u64
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Option<bool>>,
+{
+    let mut placed = 0;
+    loop {
+        match post().await {
+            Some(true) => placed += 1,
+            Some(false) => return placed,
+            None => panic!("{way}: neither an order nor a 429"),
+        }
+        assert!(placed <= 200, "{way}: {placed} more orders and no 429");
+    }
+}
+
 #[tokio::test]
 async fn place_orders_rate_limit_is_one_budget_across_the_api_its_procedure_and_the_console() {
     // placeOrder's 60 a minute is one budget per client, which the JSON
     // API's route, its procedure and the console's new-order post share
-    // (D44, amended): 20 orders through each spend it, and the next post
-    // through each is refused with 429, the route's problem, the
-    // procedure's ProblemRecord and the console's refusal. A client
-    // without an address is one client on all three. The bucket refills at
-    // one a second, and the 60 posts take far less, so none comes back
-    // before the refusals.
+    // (D44, amended): 20 orders through each spend it, and then each is
+    // refused with 429, the route's problem, the procedure's ProblemRecord
+    // and the console's refusal. A client without an address is one client
+    // on all three. The bucket refills at one a second, so a slow run
+    // places a few more before each refusal: at most one a whole second
+    // since the first post, and one for the second under way. Three
+    // budgets would place about 120 more.
     let router = shop().await;
     let cookie = sign_in(&router).await;
     let json = format!(
         r#"{{"lines":[{{"productId":"{PRODUCT}","quantity":2}}],"shippingAddress":{{"recipient":"Ada Lovelace","line1":"1 Analytical Way","city":"London","postcode":"N1 9GU","country":"GB"}}}}"#
     );
-    for n in 0..20 {
+    let api = || async {
         let placed = call_api(&router, "POST", "/api/orders", &cookie, &json).await;
-        assert!(placed.status.is_success(), "API order {n}: {}: {}", placed.status, placed.body);
-    }
-    for n in 0..20 {
+        match placed.status {
+            status if status.is_success() => Some(true),
+            StatusCode::TOO_MANY_REQUESTS => Some(false),
+            status => {
+                eprintln!("API order: {status}: {}", placed.body);
+                None
+            }
+        }
+    };
+    let procedure = || async {
         let placed = call_procedure(&router, PLACE_ORDER_PROCEDURE, &cookie, place_order_args()).await;
-        assert!(placed.status.is_success() && placed.body.contains(r#""ok""#), "procedure order {n}: {}: {}", placed.status, placed.body);
+        match placed.status.is_success() {
+            true if placed.body.contains(r#""ok""#) => Some(true),
+            true if placed.body.contains(r#""code":"too_many_requests""#) => Some(false),
+            _ => {
+                eprintln!("procedure order: {}: {}", placed.status, placed.body);
+                None
+            }
+        }
+    };
+    let console = || async {
+        let placed = send(&router, "POST", "/console/orders/new", Some(&cookie), Some(&order_form("2"))).await;
+        match placed.status {
+            StatusCode::SEE_OTHER => Some(true),
+            StatusCode::TOO_MANY_REQUESTS => Some(false),
+            status => {
+                eprintln!("console order: {status}: {}", placed.body);
+                None
+            }
+        }
+    };
+    let start = Instant::now();
+    for n in 0..20 {
+        assert_eq!(api().await, Some(true), "API order {n}");
     }
     for n in 0..20 {
-        let placed = send(&router, "POST", "/console/orders/new", Some(&cookie), Some(&order_form("2"))).await;
-        assert_eq!(placed.status, StatusCode::SEE_OTHER, "console order {n}: {}", placed.body);
+        assert_eq!(procedure().await, Some(true), "procedure order {n}");
     }
-    let api = call_api(&router, "POST", "/api/orders", &cookie, &json).await;
-    assert_eq!(api.status, StatusCode::TOO_MANY_REQUESTS, "{}", api.body);
-    let procedure = call_procedure(&router, PLACE_ORDER_PROCEDURE, &cookie, place_order_args()).await;
-    assert!(procedure.body.contains(r#""code":"too_many_requests""#), "{}: {}", procedure.status, procedure.body);
-    let console = send(&router, "POST", "/console/orders/new", Some(&cookie), Some(&order_form("2"))).await;
-    assert_eq!(console.status, StatusCode::TOO_MANY_REQUESTS, "{}", console.body);
+    for n in 0..20 {
+        assert_eq!(console().await, Some(true), "console order {n}");
+    }
+    let more = placed_until_refused("the API", api).await
+        + placed_until_refused("the procedure", procedure).await
+        + placed_until_refused("the console", console).await;
+    let seconds = start.elapsed().as_secs();
+    assert!(more <= seconds + 1, "{more} more orders after one budget's 60, in {seconds}s");
 
     // The app's own new-order page calls placeOrder in-process, which no
     // traffic control meets, so it still places an order.

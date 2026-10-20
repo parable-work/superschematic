@@ -7,7 +7,9 @@
 //! It makes one registry of the operations' rate limiters
 //! (`Setup.rate_limits`), which the JSON API's routes take theirs from,
 //! and every procedure and page that meets a route's rate limit too, so a
-//! client has one budget per operation however it calls it.
+//! client has one budget per operation through its route, its procedure
+//! and the pages. An in-process call, an end user's or a service's, meets
+//! no traffic control, so it takes from no budget.
 //! `records` mirrors each type a call in `operations` returns as a record a
 //! page can hand the browser; the result of an operation without a call, a
 //! webhook's, has none.
@@ -47,7 +49,8 @@ pub struct Setup {
     /// builds the API's router again, or another crate's page that calls an
     /// operation, shares the operation's budget by taking from it too:
     /// `RouterOptions { rate_limits: setup.rate_limits.clone(), .. }`, or
-    /// `setup.rate_limits.of(&api::operations::<OPERATION>)`.
+    /// `setup.rate_limits.of(&api::operations::<OPERATION>)`, whose limiter
+    /// a page takes a token from with the client's `client_key(cx)`.
     pub rate_limits: RateLimits,
 }
 
@@ -104,4 +107,20 @@ impl Layer for ClientAddress {
             next.run(&cx.with(request), body).await
         })
     }
+}
+
+/// The key a rate limit counts a request's client by: its address as
+/// Topcoat reads it (`client_ip`), or `unknown`. The JSON API's routes
+/// read the same key from the `ClientIp` that `ClientAddress` gives them,
+/// and the procedures and the pages that meet a route's rate limit count
+/// by it, so a client is one client on every way into an operation that
+/// takes from `Setup.rate_limits`, and the clients without an address
+/// share one bucket on all of them. Another crate's page shares an
+/// operation's budget by the same key: it takes the operation's limiter,
+/// `setup.rate_limits.of(&api::operations::<OPERATION>)`, none for an
+/// operation without a `@rateLimit`, then a token from it,
+/// `limiter.take(&client_key(cx))`, whose `Err(retry_after)` it answers
+/// 429 with `Retry-After`.
+pub fn client_key(cx: &Cx) -> String {
+    client_ip(cx).map_or_else(|| "unknown".to_owned(), |ip| ip.to_string())
 }

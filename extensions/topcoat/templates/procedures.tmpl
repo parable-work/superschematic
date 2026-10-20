@@ -30,7 +30,7 @@
 
 use crate::api::runtime::ApiError;
 {{- if .ControlledProcedures }}
-use crate::api::runtime::{RateLimiter, RateLimits};
+use crate::api::runtime::{{ if .ControlsUse "rate_limit" }}{RateLimiter, RateLimits}{{ else }}RateLimiter{{ end }};
 {{- end }}
 use crate::operations;
 use crate::records::*;

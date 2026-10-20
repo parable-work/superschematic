@@ -65,7 +65,7 @@ pub async fn {{ .SnakeName }}(cx: &Cx{{ with .ArgsName }}, args: crate::api::{{ 
 {{- range .Guards }}
 {{- if .ServiceOnly }}
 
-{{ doc (printf "Admits the caller of %s.%s as its route admits a request without a service credential: the route admits only a service caller (@requireService), so an end user is refused 401 `service_unauthorized`, signed in or not. `as_service(caller).can_%s(cx)` admits a service caller (D37, amended)." .Namespace .Name .SnakeName) }}
+{{ doc .ServiceOnlyGuardDoc }}
 {{- else }}
 
 /// Admits the caller of {{ .Namespace }}.{{ .Name }} as its route does: {{ if .RequiresAuth }}401 without one, 403

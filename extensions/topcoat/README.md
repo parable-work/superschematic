@@ -10,7 +10,9 @@ beside the API crate, at `<out>/topcoat/<service>`, and is named
   giving its routes the client's address as Topcoat reads it, by which
   their rate limits count clients, and their limiters from the app's one
   registry, which the procedures and the pages share, so a client has one
-  budget per operation however it calls it ([Route controls](#route-controls));
+  budget per operation through its route, its procedure and the pages
+  ([Route controls](#route-controls)); an in-process call, the app's own
+  or a service's, meets no traffic control;
 - calls each operation in-process, from a page, a shard or a procedure, by
   its route's rules: the caller admitted as the route admits it (401, 403),
   the arguments checked as the router checks them (the same 400), then the
@@ -176,7 +178,23 @@ in the app context as `Setup.rate_limits`: an app that mounts the API's
 router again (`RouterOptions { rate_limits: setup.rate_limits.clone(), ..
 }`), or a page of another crate that calls an operation
 (`setup.rate_limits.of(&api::operations::ORDER_PLACE_ORDER)`), shares the
-operation's budget by taking from it too.
+operation's budget by taking from it too. The page counts its client by
+the crate's `client_key(cx)`, the key the routes, the procedures and the
+pages count by, so the client is one client on every way in:
+
+```rust
+use acme_shop_orders_topcoat::{api, client_key, Setup};
+use topcoat::context::app_context;
+
+let setup: &Setup = app_context(cx);
+// None for an operation without a @rateLimit.
+if let Some(limiter) = setup.rate_limits.of(&api::operations::ORDER_PLACE_ORDER)
+    && let Err(retry_after) = limiter.take(&client_key(cx))
+{
+    // The client's budget is spent: answer 429 with Retry-After.
+}
+```
+
 `console_settings()` is the [pages](#pages)' `pages::Settings`, since
 acme's `superschematic.toml` turns shop-orders' console on, with its lists
 live (`pages_live`). Its root layout, `#[layout("/")] document`, gives
@@ -672,15 +690,18 @@ does not stop an attack.
   APIs the caller serves. Where the route still asks for an end user, it
   takes the page's caller, from the `PageAuthenticator`, as the end user
   the service forwards (401, 403). A listed caller of an `@allowService`
-  operation stands in for the end user. Then `Args::check` and the
-  implementation run, the caller in `ctx.service_caller` as the route
-  hands it.
+  operation stands in for the end user; one its `from` does not list goes
+  on to the end-user step, as the route sends it on. Then `Args::check`
+  and the implementation run, the caller in `ctx.service_caller` as the
+  route hands it.
 - **`as_service(&caller).can_<ns>_<op>(cx)`** admits the caller alone.
 - A `@requireService` operation has **no end user's call**, so a page
   cannot call it for a reader, by accident or not, and the compiler says
   so. Its guard, `can_<ns>_<op>(cx)`, answers 401 `service_unauthorized`,
   as the route refuses a request without a service credential. Its
   argument form has **`submit_as(cx, &caller)`** in place of `submit(cx)`.
+  One without an in-process call, a manual one say, keeps that guard
+  alone: `as_service` has neither its call nor its guard.
   An `@allowService` operation keeps its end user's call, its procedure
   and its pages, which call it as the end user, never as a service.
 
