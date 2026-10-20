@@ -165,6 +165,28 @@
         "sql": "BIGINT"
       }
     },
+    "Generic_Boolean": {
+      "description": "True or false",
+      "type": "string",
+      "x-example": "true",
+      "x-scalar": "Generic_Boolean",
+      "x-typeMapping": {
+        "go": "GenericBoolean",
+        "json_schema": "boolean",
+        "sql": "BOOLEAN"
+      }
+    },
+    "Generic_Float64": {
+      "description": "A finite 64-bit floating-point number",
+      "type": "number",
+      "x-example": "3.5",
+      "x-scalar": "Generic_Float64",
+      "x-typeMapping": {
+        "go": "GenericFloat64",
+        "json_schema": "number",
+        "sql": "DOUBLE PRECISION"
+      }
+    },
     "Generic_Int64": {
       "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
       "maximum": 9007199254740991,
@@ -221,6 +243,17 @@
         "rust": "std::collections::HashMap<String, String>",
         "sql": "JSONB",
         "typescript": "Record<string, string>"
+      }
+    },
+    "Generic_Text": {
+      "description": "Text with no further shape",
+      "type": "string",
+      "x-example": "Platform Engineering",
+      "x-scalar": "Generic_Text",
+      "x-typeMapping": {
+        "go": "GenericText",
+        "json_schema": "string",
+        "sql": "TEXT"
       }
     },
     "Geo_Location": {
@@ -1036,9 +1069,9 @@
       }
     },
     "Temporal_TimeZone": {
-      "description": "IANA timezone identifier (e.g., America/New_York, UTC, Etc/UTC)",
+      "description": "IANA tz database name: UTC, GMT, or two or more '/'-separated segments of ASCII letters, digits, '_', '-', and '+', each starting with a letter (e.g., America/New_York, America/Port-au-Prince, Etc/GMT+5). Checks the name's shape, not that a tz release lists it.",
       "maxLength": 100,
-      "pattern": "^(?:UTC|[A-Za-z]+/[A-Za-z_/]+)$",
+      "pattern": "^(?:UTC|GMT|[A-Za-z][A-Za-z0-9_+-]*(?:/[A-Za-z][A-Za-z0-9_+-]*)+)$",
       "type": "string",
       "x-example": "America/New_York",
       "x-scalar": "Temporal_TimeZone",
