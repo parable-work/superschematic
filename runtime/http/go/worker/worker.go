@@ -14,6 +14,10 @@
 // then cancels them and releases their messages, which are due again at
 // once for another worker, and returns.
 //
+// Each message's handling is a span of the global tracer, "process
+// <queue>", of kind consumer, which the telemetry package's Start makes
+// export (D67); its status records the handler's error.
+//
 // The package knows no database: the ORM's claims are the functions of
 // Queue, so the loop is the same for every queue and every dialect.
 package worker
@@ -28,8 +32,15 @@ import (
 	"sync"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 )
+
+// scope is the instrumentation scope of a message's span.
+const scope = "github.com/parable-work/superschematic/runtime/http/go/worker"
 
 // ConcurrencyVariable is the environment variable a platform sets to the
 // number of messages a worker handles at a time in its environment: the
@@ -252,13 +263,36 @@ func (w *loop) start(msg Message) {
 			default:
 			}
 		}()
+		ctx, span := w.span(msg)
+		defer span.End()
 		extended := make(chan struct{})
 		stopExtending := w.extend(msg, extended)
-		err := handle(w.handlers, msg)
+		err := handle(ctx, msg)
 		stopExtending()
 		<-extended
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
+		}
 		w.finish(h, err)
 	}()
+}
+
+// span starts the span of msg's handling, a child of nothing: the
+// messaging conventions' process span of the queue (D67).
+func (w *loop) span(msg Message) (context.Context, trace.Span) {
+	return otel.Tracer(scope).Start(w.handlers, "process "+w.q.Name,
+		trace.WithNewRoot(),
+		trace.WithSpanKind(trace.SpanKindConsumer),
+		trace.WithAttributes(
+			attribute.String("messaging.system", "superschematic"),
+			attribute.String("messaging.operation.name", "process"),
+			attribute.String("messaging.operation.type", "process"),
+			attribute.String("messaging.destination.name", w.q.Name),
+			attribute.String("messaging.message.id", msg.ID),
+			attribute.Int("superschematic.message.attempt", msg.Attempt),
+		),
+	)
 }
 
 // extend extends msg's claim every third of the lease until the returned

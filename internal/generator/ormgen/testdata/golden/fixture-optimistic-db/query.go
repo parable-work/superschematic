@@ -105,6 +105,26 @@ type DateRange struct {
 	End   string
 }
 
+// DurationFilter provides filtering operations for duration fields stored as
+// INTERVAL. Each value goes as its whole microseconds, as a duration is
+// written, and Postgres compares intervals with a day as 24 hours and a
+// month as 30 days, as a duration is read.
+type DurationFilter struct {
+	Eq      *time.Duration
+	Gt      *time.Duration
+	Gte     *time.Duration
+	Lt      *time.Duration
+	Lte     *time.Duration
+	Between *DurationRange
+	IsNull  *bool // true for IS NULL, false for IS NOT NULL
+}
+
+// DurationRange represents a range for duration values
+type DurationRange struct {
+	Min time.Duration
+	Max time.Duration
+}
+
 // GeoPointFilter provides filtering operations for location fields stored as
 // POINT. Postgres has no equality operator for a point, and its ~= compares
 // coordinates within 1e-6 on a plane, so a location matches on presence only.

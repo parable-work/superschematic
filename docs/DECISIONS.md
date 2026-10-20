@@ -4082,9 +4082,9 @@ and its amendment on `Deps` left both to the build. Building them for Go
 | Each client of a `calls` edge sends the D37 credential its `ServiceEndpoint` names and forwards the request's end user. The service authenticator waits for the service-auth field: until a connector derives it, a server whose API has a service clause refuses to start. | A service-auth configuration in one JSON variable, the encoding section 3.4 refused for derived fields. Starting with no authenticator, whose routes would answer every service caller 401. |
 | The Dockerfile's context is the repository root, cut down by `Dockerfile.dockerignore`. A Rust stage builds superscalar's static archive (and the version graph's, when a database declares one) with `tools.env`'s Rust release, the Go stage links it on Debian's glibc, and the binary runs on distroless `cc` as a non-root user. | A `CGO_ENABLED=0` binary on a static base, which cgo against the archive rules out (D3). An archive from the host's checkout, whose platform is the host's. |
 
-OpenTelemetry export is not built. The Cloud SQL connector (D30's
-amendment on Cloud SQL, below) and the entrypoints of TypeScript and Rust
-servers (D51, D57) are built since. `examples/acme-shop` keeps its
+The Cloud SQL connector (D30's amendment on Cloud SQL, below) and the
+entrypoints of TypeScript and Rust servers (D51, D57) are built since, and
+D67 builds OpenTelemetry export. `examples/acme-shop` keeps its
 implementations at `go/{service}`, which the entrypoints of its
 `shop-stack` import, and `stack dev` runs it (`docs/stack-model.md`,
 section 14, milestone 1).
@@ -4418,10 +4418,11 @@ the release's Dockerfile and pins, whose golden is
 release page and runs the image. A clean `golang` container, with a
 project of no `[paths]`, built both servers with the archives step's
 commands, the runtime modules coming from the module proxy at a commit.
-Not built: `stack dev`, and a local `go build` in such a project, still
-need `CGO_LDFLAGS` set by hand. D47's next amendment pins the other Go
-generators' modules, which required the runtime modules at the zero
-pseudo-version.
+D47's next amendment pins the other Go generators' modules, which
+required the runtime modules at the zero pseudo-version, and a later one
+has `stack dev`, `stack run` and `superschematic env` fetch the archives
+for the machine, so a local build no longer needs `CGO_LDFLAGS` set by
+hand.
 
 ### D30, amended: a project names its build context when its runtime modules lie above it
 
@@ -4565,9 +4566,48 @@ commit on `main`, the nine modules of `fixture-db`, `fixture-api`,
 `fixture-version-graph-db` and `fixture-env-go` each built on their own
 with `go build -mod=mod ./...`, from `proxy.golang.org` alone, with no
 checkout and no `CGO_LDFLAGS`. The same types module with the old
-requires failed at superscalar's `v1.0.0`. Not built: linking a binary or
-a test in such a project, and `stack dev`, still need `CGO_LDFLAGS` set
-by hand.
+requires failed at superscalar's `v1.0.0`. Linking a binary or a test in
+such a project, and `stack dev`, needed `CGO_LDFLAGS` set by hand until
+the amendment below, which fetches the release's archives for the
+machine.
+
+The rule is reversible until the first release.
+
+### D47, amended: `stack dev`, `stack run` and `superschematic env` fetch the release's static archives for the machine
+
+The amendments above give a project whose naming file names no
+superscalar checkout (`[paths] scalar_go`) Go modules that resolve from
+the module proxy and images that download the release's archives. Its
+Go code still did not link on an engineer's machine: `stack dev` and
+`stack run` ran `go build` with the shell's environment, and superscalar's
+binding from the proxy carries no `lib/`, so every Go server, job and
+worker failed at the link unless the engineer found the archives and set
+`CGO_LDFLAGS` by hand. A `go build` or `go test` run by hand failed the
+same way.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `stack dev` and `stack run` fetch the release's `superschematic-archives_<version>_<platform>.tar.gz` for the machine's platform, as the generated CI's `check` does for the runner's: from the release's page, or the base URL `SUPERSCHEMATIC_RELEASE` names, the variable a server's Dockerfile takes as a build argument; checked against the digest the binary names; unpacked into `superschematic/archives/<digest>` in the user's cache directory, through a directory of its own renamed into place, so a later run, or another checkout, finds it whole. They do it only when the environment has a Go server, job or worker, the naming file names no superscalar checkout and does not rename superscalar's Go module, and the binary is a release; a checkout's binary pins nothing, so its builds need the checkout's `[paths]` anyway. `internal/release` holds the fetch, `Release.FetchArchives`, beside the digests it checks. | Downloading in the provisioner, which knows neither the naming file nor the release. A cache under the project's `.superschematic`, which every checkout would fill with the same archives. Building the archives with cargo, a Rust toolchain on every machine for what the release already built. |
+| The archives reach the builds through a new field of the provision request, `BuildEnv`: variables a provisioner that builds code sets for its builds alone. The local provisioner appends it to each `go build`'s environment, and no process it starts sees it. `CGO_LDFLAGS` holds `-L` and the archives' `lib/` after any `CGO_LDFLAGS` the shell set, so a person's flags come first. A fetch that fails stops the run, saying what to set, unless `CGO_LDFLAGS` is set, which the builds then take as it is. | Setting `CGO_LDFLAGS` in the CLI's own environment, which every process the provisioner starts would inherit and every test in the process would see. A setter on the local provisioner, state shared by every run the registered provisioner serves. Replacing the shell's `CGO_LDFLAGS`, which would drop a person's flags for other libraries. |
+| A `go build` run by hand takes the flags from a new command, `superschematic env`, which fetches the archives as `stack dev` does and prints `export CGO_LDFLAGS='-L…/lib'` for a POSIX shell to evaluate, or, given `CGO_LDFLAGS`, its value alone, as `go env` does, so `go env -w` can keep it. It fails for a binary that names no archives, and says why. | A generated `.envrc`, which needs direnv, holds a path of one machine's cache in the output root, and still needs a command that downloads the archives. A `--print` flag on `stack dev`, which would build and run a stack to print a line. Writing the flags into each generated `go.mod` or a `#cgo` file, which would hold one machine's path in generated code. |
+
+Status: built. `TestFetchArchivesDownloadsChecksAndKeeps` and
+`TestFetchArchivesRefuses` run the fetch against a stand-in release page:
+the cache's directory, a second fetch that downloads nothing, a tarball
+of another digest, a page without the file, an entry outside the
+tarball's directory and a tarball without `lib/`.
+`TestGoBuildsTakeTheRequestsBuildEnv` holds every `go build` of a
+server, a worker and a job to the request's `CGO_LDFLAGS`, and the
+processes it starts to none. `TestStackDevLinksTheReleaseArchives` and
+`TestEnvPrintsCGOLinkerFlags` run the CLI's half with a stand-in release:
+when it fetches, the flags after the shell's, the cases that fetch
+nothing, a failed fetch with and without `CGO_LDFLAGS`, and `env`'s two
+forms. `TestALocalGoBuildLinksTheArchivesTheReleaseFetches` builds
+Storefront's module as a release builds it, with no superscalar
+checkout: `go build` fails at the link with no `CGO_LDFLAGS`, and links
+with the flags of the archives the release fetched from a stand-in page,
+packed from this checkout's archive. No published release has run it.
+No `CGO_CFLAGS` is set: each binding's module holds its own headers.
 
 The rule is reversible until the first release.
 
@@ -4612,11 +4652,11 @@ Status: built.
 No TypeScript server has run on Cloud Run.
 
 Not built:
-- OpenTelemetry export;
 - `stack init`, which would write the amendment's ignore rule; D59
   builds it.
 
-D51's last amendment hands a manual route's handlers to `buildRouter`.
+D51's last amendment hands a manual route's handlers to `buildRouter`, and
+D67 builds OpenTelemetry export.
 
 The rule is reversible until the first release.
 
@@ -5541,9 +5581,8 @@ D65 builds what this left out of a stack: Rust jobs and workers, and an
 output root that builds against a mirror of each implementation crate,
 so `stack dev --out` elsewhere no longer collides in Cargo's lockfile.
 
-D54's second amendment builds buckets from a Rust server.
-
-Not built: OpenTelemetry export.
+D54's second amendment builds buckets from a Rust server, and D67 builds
+OpenTelemetry export.
 
 The rule is reversible until the first release.
 
@@ -5847,10 +5886,11 @@ latter against Postgres when
 `SUPERSCHEMATIC_HTTP_RUNTIME_TEST_DATABASE_URL` names one. No TypeScript
 worker has run on Cloud Run.
 
-Not built:
-- a `POINT` or `INTERVAL` column in a TypeScript queue's message;
-- a `POINT` or `INTERVAL` column in a Rust worker's message (D65 builds
-  Rust workers).
+A later D53 amendment holds a `POINT` and an `INTERVAL` column in a
+TypeScript, Rust and Go queue's message alike.
+
+Not built: a list of locations or durations, a `POINT[]` or `INTERVAL[]`
+column, in a queue's message.
 
 The rule is reversible until the first release.
 
@@ -6116,6 +6156,64 @@ SQLite gets a queue's table and its migrations, but no claim.
 | A queue's table is written in every dialect, and resolution refuses a worker whose queue's database the environment places on any platform but Postgres (`unrealizable`). The claim on SQLite (a write transaction) and on D1 lands with an ORM for those dialects. | Claims through raw SQL beside the ORM for SQLite, which would split a queue's code across two layers. Refusing `@queue` in a SQLite DB service, which would keep its table out of migrations the service can already run. |
 
 Status: built in #336.
+
+### D53, amended: a queue's message holds a location and a duration, as a `POINT` and an `INTERVAL` of whole microseconds, in every language, and the Go ORM's tables hold a duration the same way
+
+D53's TypeScript amendment left a queue whose message holds a `POINT` or
+an `INTERVAL` column out of `queues.ts`, and D65 left it out of
+`queues.rs`, so a TypeScript or Rust worker of it was refused. The Go
+ORM's queue did not hold them either: it passed a `Geo.Location` to pgx,
+which sends its JSON, which Postgres refuses as a point, and cannot scan
+a point back into it, and `Temporal.Duration` crossed
+through its `Valuer` and `Scanner`, which write `-1h2m` for a duration
+Postgres reads as minus one hour plus two minutes, write `250µs`, which
+Postgres refuses, and read back `01:30:00`, which `time.ParseDuration`
+refuses. The "as the Go ORM writes it" of the TypeScript amendment had no
+Go behavior to copy. The Go ORM's tables wrote and read a duration the
+same way, so a table with an `INTERVAL` column could not take a row:
+`CreateOne` wrote `1h30m0s`, then failed to read back the `01:30:00` its
+`RETURNING` gave. A duration's filter was a `StringFilter`, whose `Eq`
+sent Go's text and whose `ILike` Postgres has no operator for. A table's
+location was already a `POINT` (D14, amended), and no other language
+reads or writes a table's `INTERVAL` but the version graph's adapters,
+which write `[-]HH:MM:SS` with the nanoseconds, which Postgres rounds to
+microseconds where this entry truncates, and read their canonical form,
+which refuses a month (D19).
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A location crosses as a `POINT` whose x is the longitude and y the latitude, as the Go ORM's tables write it (D14, amended): Go passes a `pgtype.Point`, TypeScript writes `(lon,lat)` with JavaScript's shortest round-trip text, and Rust writes the same text with Rust's. Each reads the point back as `{lat, lon}`. | A JSON column for a location in a queue alone, which would give one scalar two storages. |
+| A duration crosses as its whole microseconds, the precision of an `INTERVAL`, a nanosecond remainder truncated toward zero. Go passes a `time.Duration`, which pgx writes as an interval of microseconds; TypeScript and Rust parse the duration's text as the scalar core does and write `[-]H:MM:SS.ffffff`, a form whose sign Postgres gives to the whole time. A claim reads the interval's months, days and microseconds as pgx does, a month 30 days and a day 24 hours, and TypeScript and Rust write the result in the scalar core's canonical text (`1h30m0s`, `1.5s`, `250us`); Go scans a `time.Duration`. | The duration's text as Go's `Valuer` writes it, which loses the sign of a negative duration of two units and fails on microseconds. Refusing an interval with months or days, as the version graph's canonical form does, which would fail a claim of a row someone wrote by hand where Go's pgx reads it. |
+| The definition marks such a field, `point: true` or `interval: true`, in `queues.ts` and in the descriptor `queues.rs` holds, so the two stay one shape (`TestQueuesDescribeWhatTypeScriptWrites`). The TypeScript client needs the mark to write a location, since pg would send an object as JSON; it reads each by the column's type, with its own type parsers for `POINT` and `INTERVAL`. The Rust client writes and reads both by the column's type, which the prepared statement gives it. | A conversion by the shape of the value, `{lat, lon}` written as a point wherever it appears, which would guess. |
+| A list of locations or durations, a `POINT[]` or an `INTERVAL[]` column, is not held yet: the Go ORM refuses such a queue, naming the field, where before it generated a queue that failed at its first enqueue, and the TypeScript and Rust types leave it out, saying why. A list goes in a `@jsonField` type until a client converts each element. | Lists now, which need the Go ORM's `POINT[]` helpers in `queues.go` and an element conversion in each client, for a field no schema has asked for. |
+| `fixture-queue-geo-db` declares the queue `DeliveryPlanned` with a required and an optional location and duration, on Postgres alone, since SQLite has no storage for a `POINT` and `fixture-queue-db` writes its queues in both dialects. The ORM tests and the parity test add it to `fixture-queue-db`'s schema, so one module, one types package and one crate hold both. | A field of `fixture-queue-db`'s `OrderPlaced`, which would drop the fixture's SQLite dialect and the SQLite tests of a queue's table. |
+| The Go ORM's tables write and read a duration as its queue does. `CreateOne`, `CreateMany`, `UpdateOne` and `UpdateMany` pass a `time.Duration`. Each read scans a `time.Duration`: a required field through a `*time.Duration` that points at the field, an optional one through a `*time.Duration` it converts, so a NULL stays nil. The history decoder reads the interval's text, which `to_jsonb` writes (`1 mon 2 days 03:04:05`), with pgx's own parser and the same 30-day month, and still reads a version graph's canonical row, which holds the duration's text (`1.5ms`). | A fix in superscalar's `Valuer` and `Scanner`, in a repository this one pins: their text is Go's, which round-trips where a column is text, as a SQLite one is, and Postgres's interval text is pgx's to parse. The ORM converts at its boundary, as it does a date through `pgtype.Date` and a location through `pgtype.Point`. |
+| A list of durations in a table, an `INTERVAL[]` column, goes through a `[]time.Duration` and is scanned through `[]*time.Duration`, which refuses a NULL element at `field[i]` as any native list does, and the history decoder reads a JSON list of the texts. A queue still refuses one, as the row above says. | Leaving the table's list on the `Valuer`, since a queue refuses one; a table's `POINT[]` was already held, and generic helpers over `~int64` make the list a few lines. |
+| A duration's filter is `DurationFilter`: `Eq`, `Gt`, `Gte`, `Lt`, `Lte`, `Between` and `IsNull`, each a `time.Duration` that goes as its microseconds. Postgres compares intervals with a 30-day month and a 24-hour day, as the ORM reads them. A caller that set `Eq`, `In` or `ILike` of a `StringFilter` on a duration no longer compiles. | `StringFilter`, which compiled and failed or matched Go's text as Postgres read it. |
+
+Status: built. `TestQueueParityOfGoTypeScriptAndRustOnPostgres` gains
+`LocationsAndDurationsAgree`: Go, TypeScript and Rust each enqueue a
+`DeliveryPlanned`, one with a remainder of nanoseconds and one negative,
+and each reads all three as its types hold them, then reads an interval
+written with a month and days as their hours. `TestGeneratedQueuesOnPostgres`
+holds the Go ORM's columns to what Postgres stores (`26:00:00.000001`,
+`-00:01:30.25`, `(151.2093,-33.8688)`), and the runtimes' tests do the
+same for TypeScript and Rust, besides their parsers' cases.
+`TestQueuesWriteWhatTheGoORMWrites` and
+`TestQueuesDescribeWhatTypeScriptWrites` cover both fixtures, and
+`TestQueuesHoldALocationAndADuration` the Go ORM's refusal of a list.
+`TestDurationColumnsOnPostgres` writes a table's durations, positive,
+negative, of microseconds, over a day and with a nanosecond remainder,
+alone and in a list, through every write, holds the columns to what
+Postgres stores, writes intervals of a month and days with SQL, and reads
+each back through every read, a selection of fields and the history,
+beside the table's locations; it filters on each comparison, a range and
+`IS NULL`. `TestVersionGraphFacadeKeepsEveryClass` reads the tasting the
+version graph wrote through the table's repository.
+
+Not built: a list of locations or durations in a queue's message. The
+history decoder reads Postgres's default `IntervalStyle`, `postgres`, as
+pgx does; a server set to another style writes history rows it refuses.
 
 ### D54, amended: a workload links the GCS client whenever its APIs list a bucket
 
@@ -6701,10 +6799,10 @@ Status: built.
 
 No Rust job or worker has run on Cloud Run.
 
-Not built, and out of this entry: OpenTelemetry export (D54's second
-amendment builds buckets from a Rust server, job or worker). A TypeScript build into another output
-root relinks the project's own `node_modules` there, as a Rust build did
-before the mirror.
+Out of this entry: buckets from a Rust server, job or worker, which
+D54's second amendment builds, and OpenTelemetry export, which D67
+builds. A TypeScript build into another output root relinks the project's
+own `node_modules` there, as a Rust build did before the mirror.
 
 The rule is reversible until the first release.
 
@@ -6972,5 +7070,91 @@ the route's rate limit. `TestServiceAuthManualRoutes` refuses a protected
 manual route without a user and a `@requireService` one without a service,
 and the three `...PredatesItsManualRoutesFails` tests the build's
 refusals.
+
+The rule is reversible until the first release.
+
+## D67. A server, job or worker exports its traces over OTLP when OpenTelemetry's own variables name an endpoint, and sets up nothing otherwise
+
+D30's amendment, D51, D57 and D65 left OpenTelemetry export out of every
+generated entrypoint. The Go runtime's request log middleware set
+`http.route` on a span that no entrypoint started, section 7.5 of
+`docs/stack-model.md` promised traces "through the entrypoint's
+OpenTelemetry setup", and no deployable of a stack exported a span. This
+entry builds traces for the Go, TypeScript and Rust servers, jobs and
+workers.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The configuration is OpenTelemetry's standard environment variables: `OTEL_EXPORTER_OTLP_ENDPOINT` and `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`, `OTEL_EXPORTER_OTLP_HEADERS` and the timeout, with their traces forms, `OTEL_EXPORTER_OTLP_PROTOCOL`, `OTEL_SERVICE_NAME`, `OTEL_RESOURCE_ATTRIBUTES`, `OTEL_TRACES_SAMPLER` and `OTEL_TRACES_SAMPLER_ARG`, `OTEL_PROPAGATORS` and `OTEL_SDK_DISABLED`. A schema says nothing about export. | An `otel` block in an API's config, or an `@envVars` field for each variable, which would put each collector, vendor and environment into the schemas. |
+| Export is off when neither endpoint variable is set, or when `OTEL_SDK_DISABLED` is `true`: no exporter, no context manager, no background thread, and the tracer stays a no-op. The server middleware, the client transport, and the job and message wrappers then only call through, and a deployable forwards no trace context. | OpenTelemetry's default endpoint, `localhost:4318`, to which every deployable would send, and retry, where nothing listens. Forwarding the context with export off, which the Rust runtime cannot do without the SDK's layer. |
+| The exporter is OTLP over HTTP in protobuf, through a batch processor. The protocol variables may name `http/protobuf` alone. | gRPC, which brings the transports of tonic and grpc-go into the Rust and Go binaries. JSON, which no collector needs. |
+| A value a runtime does not support stops the deployable with an error that names the variable: another protocol; a propagator other than `tracecontext`, `baggage` and `none`; a sampler other than the six standard ones; a sampler argument outside 0 to 1; an endpoint that is no http or https URL; and an `OTEL_RESOURCE_ATTRIBUTES` member without `=`. The three runtimes refuse alike. | The SDKs' own reading, which warns and goes on, so a typo shows only as traces that never arrive, and each SDK reads a different set. |
+| The generated entrypoint gives the defaults that only it knows: `service.name` the deployable's name, `service.namespace` the stack, and `superschematic.deployable.kind` `server`, `job` or `worker`. `OTEL_SERVICE_NAME` and `OTEL_RESOURCE_ATTRIBUTES` override each. The entrypoint knows neither the environment nor the image, so a target sets `deployment.environment.name` and `service.version` through `OTEL_RESOURCE_ATTRIBUTES`. | The environment in the entrypoint, which is one for every environment of the stack (D30, amended). |
+| The telemetry is in each HTTP runtime, behind one call from the entrypoint. Go's `telemetry.Start` returns the function that flushes. TypeScript's `startTelemetry` is in the runtime's own `./telemetry` entry, the only entry that imports the OpenTelemetry packages, so the entries that a Workers build bundles stay without them. Rust's `telemetry::start`, behind the runtime's `otel` feature, installs the JSON-line log with `tracing-opentelemetry`'s layer beside it, and returns a guard that flushes when it drops. | Instrumentation in each entrypoint, which would change every generated file for each change to it. An auto-instrumentation agent, which the three runtimes do not have in one form. |
+| The first signals are traces. A server makes a server span for each request but `/healthz` and `/readyz`, the child of an incoming `traceparent`, named `<METHOD> <route template>` (`GET /api/orders/{id}`), or by its method when no route takes the request. A `calls` edge's SDK client makes a client span for each call, and sends W3C `traceparent` and `tracestate`, through Go's `Transport`, TypeScript's `fetch`, and the `transport` that the Rust SDK gets. A job's run is a span with the name of its `@job` class. A worker's message is a consumer span, `process <queue>`, the root of a trace of its own. Each process flushes before it exits: a server after it drains, a job after its run, and a worker after its grace. | A span for each database query, which no runtime's pool records yet. A message span that continues the trace of the request that enqueued the message, which needs a column that the queue tables do not have. |
+| No target changes its resource graph. `stack dev` and `stack run` give each server, job and worker every `OTEL_` variable of the developer's shell but `OTEL_SERVICE_NAME`, which would give every deployable one name. Without them, export is off. The gcp target's `env` settings bind `@envVars` fields alone, so they cannot set these variables, and a gcp environment exports nothing yet. | A collector that `stack dev` starts in Docker, which a developer with another collector must then stop. All of the developer's environment, which section 8.3 keeps from the processes. |
+
+Metrics and logs are out of this entry. Metrics come next: the request
+duration and the queue's claims, through the meter providers of the same
+SDKs (Go's `otelhttp` already records them for a provider it is given).
+Then logs: first the `trace_id` and `span_id` of the current span on each
+JSON line, then OTLP log export through each SDK's log bridge.
+
+Status: built.
+- `runtime/http/go/telemetry`: `Start`, `Handler` (`otelhttp`), `Transport`
+  and `Job`, over `go.opentelemetry.io/otel` v1.46.0, its OTLP HTTP trace
+  exporter v1.46.0 and `otelhttp` v0.71.0. `RequestLogMiddleware` names the
+  server span by its chi route, and `worker.Run` makes the message spans.
+  `telemetry/otlptest` is an OTLP/HTTP receiver for tests, in the test's
+  process, which decodes the protobuf of each export.
+- `@superschematic/http-runtime/telemetry`: `startTelemetry`, with
+  `middleware()` for Hono, `fetch`, `job`, `message` and `shutdown`, over
+  `@opentelemetry/api` 1.9.1, `sdk-trace`, `resources`, `core` and
+  `context-async-hooks` 2.12.0, and `exporter-trace-otlp-proto` 0.223.0,
+  the runtime's optional peer dependencies. Bun's `AsyncLocalStorage`
+  carries a span's context through a request's awaits.
+- The Rust runtime's `otel` feature: `telemetry::start`, `dispatch`,
+  `ServerLayer`, `transport` and `job`, and the worker loop's message
+  spans, over `opentelemetry` and `opentelemetry_sdk` 0.33.1 with traces
+  alone, `opentelemetry-otlp` 0.33.1 with `http-proto` and no HTTP client of
+  its own, `opentelemetry-http` 0.33.1 and `tracing-opentelemetry` 0.34.0.
+  The exporter sends through the `http-client` feature's `reqwest`, on a
+  current-thread runtime of its own. The JSON-line log leaves out a span's
+  `otel.` fields, so its lines are the same with export on and off.
+- The Rust SDK's `ClientConfig` gets `transport`, which sends each request
+  in place of `reqwest::Client::execute`.
+- servergen: each Go, TypeScript and Rust server, job and worker calls the
+  runtime's start first and flushes as it exits, wraps its handler or app
+  in the server spans, gives each `calls` client the runtime's transport,
+  and runs a job's method in its span. A Bun package depends on the
+  OpenTelemetry packages, and a Rust crate turns on `otel`.
+- The local provisioner gives each process the shell's `OTEL_` variables
+  but `OTEL_SERVICE_NAME`.
+- Each runtime's tests export to a receiver in the test's process: a
+  request is a server span with its route template and its incoming
+  `traceparent` as parent, a call carries `traceparent` in a client span,
+  a job's run and a worker's message are spans, the flush sends a batch
+  that is not yet due, the variables override the defaults, the
+  refusals, and with no endpoint nothing starts. `TestStackDevRunsTheShop`
+  points `stack dev` at a receiver: an order is one trace from
+  shop-orders' Go server, through its client span, to shop-stock's Rust
+  server; the storefront's TypeScript requests are spans named by their
+  routes; each worker's message is a span; and each job's process sends
+  its span before it exits.
+
+Not built:
+- Export on gcp. A target would need to set the variables for each Cloud
+  Run service, job and worker pool, from a value of the environment, and a
+  place to send to: an OpenTelemetry Collector as a sidecar container,
+  with Google's exporter and the Cloud Trace agent role each workload's
+  account has (section 7.2), or Google's OTLP endpoint,
+  `telemetry.googleapis.com`, whose OAuth token expires, so a static
+  `OTEL_EXPORTER_OTLP_HEADERS` cannot carry it. The target would set
+  `deployment.environment.name` and the image digest in
+  `OTEL_RESOURCE_ATTRIBUTES` too.
+- The cloudflare target's Workers build, which does not import
+  `./telemetry`.
+- Metrics and logs, as above.
+- A message span that continues the trace that enqueued it.
 
 The rule is reversible until the first release.

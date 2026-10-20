@@ -147,6 +147,15 @@ func TestVersionGraphFacadeKeepsEveryClass(t *testing.T) {
 			t.Errorf("%s tasting has recipe %v and entity key %v, want the root and a generated key", what, got.Recipe.Id, got.EntityKey)
 		}
 	}
+	// The table's repository reads the row the graph wrote, its INTERVAL
+	// as a duration's microseconds.
+	row, err := db.Tasting.GetOne(ctx, *tree.Tasting[0].Id, nil)
+	if err != nil {
+		t.Fatalf("the repository's GetOne of the graph's tasting: %v", err)
+	}
+	if row.Rested != rested || row.TastedOn != tastedOn || row.Score != 4.5 {
+		t.Errorf("the repository's GetOne = rested %v tasted on %v score %v, want %v, %v and 4.5", row.Rested, row.TastedOn, row.Score, rested, tastedOn)
+	}
 }
 
 // facadeValue decodes a JSON value, keeping each number's text.

@@ -19,9 +19,14 @@ import (
 {{- end }}
 	"strings"
 	"sync"
-{{- if .GeoPointListTypes }}
+{{- if or .HasIntervalLists .HasIntervalHistory }}
+	"time"
+{{- end }}
+{{- if or .GeoPointListTypes .HasIntervalHistory }}
 
 	"github.com/jackc/pgx/v5/pgtype"
+{{- end }}
+{{- if .GeoPointListTypes }}
 	types "{{ .TypesModule }}"
 {{- end }}
 )
@@ -411,6 +416,101 @@ func copyListElements[T any](field string, values []*T, dst *[]T) error {
 	*dst = list
 	return nil
 }
+{{- end }}
+{{- if .HasIntervalLists }}
+
+// intervalList converts a list of durations to the time.Durations of an
+// INTERVAL[] column, which pgx writes as intervals of whole microseconds,
+// sign and all. A nil list stays nil, which pgx writes as NULL.
+func intervalList[T ~int64](durations []T) []time.Duration {
+	if durations == nil {
+		return nil
+	}
+	list := make([]time.Duration, len(durations))
+	for i, duration := range durations {
+		list[i] = time.Duration(duration)
+	}
+	return list
+}
+
+// copyIntervalElements sets *dst to the durations of an INTERVAL[] column,
+// scanned through *time.Duration elements into values, which pgx reads as
+// microseconds, a day 24 hours and a month 30 days. It returns an error that
+// names the first nil element, a SQL NULL, at field[i]: a list element is
+// never null. A nil values, a NULL column, sets *dst to nil.
+func copyIntervalElements[T ~int64](field string, values []*time.Duration, dst *[]T) error {
+	if values == nil {
+		*dst = nil
+		return nil
+	}
+	list := make([]T, len(values))
+	for i, value := range values {
+		if value == nil {
+			return fmt.Errorf("%s[%d]: null element", field, i)
+		}
+		list[i] = T(*value)
+	}
+	*dst = list
+	return nil
+}
+{{- end }}
+{{- if .HasIntervalHistory }}
+
+// parseHistoryInterval reads a duration of a row the history decoder reads.
+// A version graph's canonical row holds the duration's own text ("1h30m0s",
+// "250us"). A history row holds the INTERVAL's text, as to_jsonb writes it
+// ("1 mon 2 days 03:04:05", "-00:01:30.25"), which has a space or a colon
+// where a duration's text has neither, and which reads as pgx reads an
+// interval into a time.Duration: its microseconds, a day 24 hours and a
+// month 30 days.
+func parseHistoryInterval(text string) (time.Duration, error) {
+	if duration, err := time.ParseDuration(text); err == nil {
+		return duration, nil
+	}
+	var interval pgtype.Interval
+	if err := interval.Scan(text); err != nil {
+		return 0, err
+	}
+	const day = 24 * time.Hour
+	return time.Duration(interval.Months)*30*day + time.Duration(interval.Days)*day + time.Duration(interval.Microseconds)*time.Microsecond, nil
+}
+
+// unmarshalHistoryInterval decodes an INTERVAL column of a history row,
+// which to_jsonb writes as its text, or of a version graph's canonical row
+// (parseHistoryInterval).
+func unmarshalHistoryInterval(raw []byte) (time.Duration, error) {
+	var text string
+	if err := json.Unmarshal(raw, &text); err != nil {
+		return 0, err
+	}
+	return parseHistoryInterval(text)
+}
+{{- if .HasIntervalLists }}
+
+// unmarshalHistoryIntervals decodes an INTERVAL[] column of a history row
+// into *dst. to_jsonb writes the column as a JSON list of interval texts,
+// and a NULL element as null, which the decoder refuses at field[i]; a
+// version graph's canonical row holds a list of durations' texts.
+func unmarshalHistoryIntervals[T ~int64](raw []byte, dst *[]T, field string) error {
+	var texts []*string
+	if err := json.Unmarshal(raw, &texts); err != nil {
+		return err
+	}
+	list := make([]T, len(texts))
+	for i, text := range texts {
+		if text == nil {
+			return fmt.Errorf("%s[%d]: null element", field, i)
+		}
+		duration, err := parseHistoryInterval(*text)
+		if err != nil {
+			return fmt.Errorf("%s[%d]: %w", field, i, err)
+		}
+		list[i] = T(duration)
+	}
+	*dst = list
+	return nil
+}
+{{- end }}
 {{- end }}
 {{- range .GeoPointListTypes }}
 
