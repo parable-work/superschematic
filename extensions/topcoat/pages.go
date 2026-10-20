@@ -207,6 +207,10 @@ type pageResource struct {
 	Words      string // the collection's own words: tasks
 	Noun       string
 	Plural     string
+	// Icon is the glyph the nav and the index show beside the list's link:
+	// the @display icon of the list's element type, else of the detail's
+	// (D44, amended), empty for none.
+	Icon string
 	// CreateLabel is the new page's heading and the link to it, and
 	// SubmitLabel its button's text: the type's @display createLabel, or
 	// Create.
@@ -510,6 +514,9 @@ func pagesOf(c *crate, schemas schemaSet, site *pageSite, prefix, title string, 
 	for _, r := range m.Resources {
 		if len(r.ColParams) == 0 && r.List != nil {
 			m.Top = append(m.Top, r)
+			if r.Icon != "" {
+				m.use("icons")
+			}
 		}
 	}
 	for _, name := range sortedKeys(b.params) {
@@ -890,6 +897,9 @@ func (b *pageBuilder) fill(r *pageResource) error {
 		}
 		if display.CreateLabel != "" {
 			createLabel = display.CreateLabel
+		}
+		if display.Icon != "" && r.Icon == "" {
+			r.Icon = display.Icon
 		}
 	}
 	r.CreateLabel, r.SubmitLabel = createLabel, createLabel

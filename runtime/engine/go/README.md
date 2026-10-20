@@ -44,6 +44,14 @@ superschematic_engine_abi::export_engine_c_abi!(behaviors = behaviors);
 scripts/engine-archive.sh --crate <the crate> --out <dir>   # then CGO_LDFLAGS="-L<dir> ..."
 ```
 
+The build writes that crate itself: for a schema whose types compose an
+extension's behavior, the `projectengine` generator's
+`engine/rust/<schema>` holds it as its `ffi` member, over the library's
+`behaviors()` (`--crate <output root>/engine/rust/<schema>/ffi`). Its
+engine's config passes the engine document's `tools`, the binary's
+invocation policy and vendor keys, without which the engine refuses an
+extension's operation that names a value of the extension's policy.
+
 `-L<dir>` comes first on cgo's link line, so the project's archive is the
 one linked. The crate depends on the ABI's library alone, never on the
 core's archive, whose exports its own would define again. `export_engine_c_abi!(configure = f)` takes a function that
@@ -77,7 +85,7 @@ err = e.Runner().Start(ctx)
   the meta-schema, the value store's limits, the runner, retention and the
   tools' options. It refuses an archive of another ABI version.
 - `Call(ctx, op, principal, args...)` makes any of the engine's calls by
-  name, as the TypeScript engine's methods take them
+  name, as `@superschematic/engine`'s methods take them
   (`instances.create(principal, 'Order', data, { id })` is `Call(ctx,
   "instances.create", principal, "Order", data, map[string]any{"id":
   ...})`), and returns its result as JSON, nil where the method returns
@@ -97,7 +105,7 @@ err = e.Runner().Start(ctx)
   runs.
 - `Close` stops the runner, ends every event stream, and refuses every
   later call with `ErrClosed`.
-- A refusal is an `*engine.Error`: the TypeScript engine's class
+- A refusal is an `*engine.Error`: `@superschematic/engine`'s class
   (`EngineError`, `InstanceValidationError`, `BehaviorVetoError`,
   `TypeError`, ...), its `Code` and the HTTP status the code answers
   (`Status`), the message, and `Details`, the class's other members as

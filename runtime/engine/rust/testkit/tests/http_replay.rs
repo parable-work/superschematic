@@ -13,8 +13,11 @@
 //! `ENGINE_HTTP_CORPUS_DIR` names another directory, and `ENGINE_HTTP_ONLY`
 //! one file of it to replay alone. A directory that is
 //! not there fails the test, so the replay cannot pass by running nothing.
+//! Each file on each database replays on a thread of its own; the reports
+//! print and are checked in the files' order.
 
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, PoisonError};
 
 use superschematic_engine_testkit::{
     load, replay_file_through, Database, Direct, FileReport, Transport, HTTP_FILES,
@@ -77,28 +80,44 @@ fn replay_through(transport: &dyn Transport, label: &str) {
         dir.display()
     );
     let mut failures = Vec::new();
-    for database in databases() {
-        let mut reports: Vec<FileReport> = Vec::new();
-        let only = std::env::var("ENGINE_HTTP_ONLY").unwrap_or_default();
-        for name in HTTP_FILES {
-            if !only.is_empty() && only != name {
-                continue;
+    let only = std::env::var("ENGINE_HTTP_ONLY").unwrap_or_default();
+    let names: Vec<&str> = HTTP_FILES
+        .iter()
+        .copied()
+        .filter(|name| only.is_empty() || only == *name)
+        .collect();
+    let databases = databases();
+    let reports: Mutex<Vec<Vec<Option<FileReport>>>> = Mutex::new(
+        databases
+            .iter()
+            .map(|_| names.iter().map(|_| None).collect())
+            .collect(),
+    );
+    std::thread::scope(|scope| {
+        for (d, database) in databases.iter().enumerate() {
+            for (n, name) in names.iter().enumerate() {
+                let (dir, reports) = (&dir, &reports);
+                scope.spawn(move || {
+                    let path = dir.join(format!("{name}.json"));
+                    let file = load(&path).unwrap_or_else(|error| panic!("{error}"));
+                    assert!(
+                        file.scenarios.len() > 5,
+                        "{} holds {} cases",
+                        path.display(),
+                        file.scenarios.len()
+                    );
+                    let report = replay_file_through(&file, database, &repository(), transport);
+                    reports.lock().unwrap_or_else(PoisonError::into_inner)[d][n] = Some(report);
+                });
             }
-            let path = dir.join(format!("{name}.json"));
-            let file = load(&path).unwrap_or_else(|error| panic!("{error}"));
-            assert!(
-                file.scenarios.len() > 5,
-                "{} holds {} cases",
-                path.display(),
-                file.scenarios.len()
-            );
-            reports.push(replay_file_through(
-                &file,
-                &database,
-                &repository(),
-                transport,
-            ));
         }
+    });
+    let reports = reports.into_inner().unwrap_or_else(PoisonError::into_inner);
+    for (database, reports) in databases.iter().zip(reports) {
+        let reports: Vec<FileReport> = reports
+            .into_iter()
+            .map(|report| report.expect("every file replayed"))
+            .collect();
         eprintln!("\nhttp replay through {label} on {:?}:", database.dialect());
         for report in &reports {
             eprintln!("  {}", report.summary());

@@ -34,7 +34,9 @@ import (
 // and its service authenticator from its callers field, joins them with
 // the handlers through `Implementations::new`, and serves every API's
 // router beside /healthz and /readyz, under the site CORS of the APIs a
-// site calls. It logs JSON lines through the HTTP runtime's logging.
+// site calls. It logs JSON lines through the HTTP runtime's logging, and
+// exports its traces through the runtime's telemetry when the environment
+// names an OTLP endpoint (D67).
 //
 // A Rust job's and a Rust worker's entrypoint (D65; sections 8.7 and 8.8)
 // is a crate beside the servers', `<output-root>/server/<stack>/<job>/`, of
@@ -689,7 +691,9 @@ func (s *RustServer) planManifest(in RustInput, dir string) error {
 	if len(s.APIs) > 1 {
 		registry = append(registry, CargoDependency{"tower", fmt.Sprintf(`{ version = %s, features = ["util"] }`, quoteToml(rustTowerVersion))})
 	}
-	features := map[string]bool{"logging": true}
+	// Every server, job and worker exports its traces when the environment
+	// names an OTLP endpoint (D67).
+	features := map[string]bool{"logging": true, "otel": true}
 	if len(s.Databases) > 0 {
 		features["postgres"] = true
 	}
@@ -956,6 +960,7 @@ func (s *RustServer) RuntimeUses() []string {
 	if stackconfig := s.stackconfigUses(); len(stackconfig) > 0 {
 		uses = append(uses, rustutil.UseLine(runtime+"::stackconfig", stackconfig))
 	}
+	uses = append(uses, rustutil.UseLine(runtime+"::telemetry", []string{"self", "Defaults"}))
 	var root []string
 	if s.AnyCORS() || s.Dispatches() {
 		root = append(root, "cors")
@@ -977,8 +982,9 @@ func (s *RustServer) RuntimeUses() []string {
 
 // backgroundUses are the use declarations of a job's or a worker's main.rs
 // from the HTTP runtime, in the order rustfmt sorts them: its buckets', its
-// log, its pool and the readers of its fields, the queue and the claim
-// loop for a worker, and the Shutdown it stops on.
+// log, its pool and the readers of its fields, the queue for a worker, its
+// trace export (D67), the claim loop for a worker, and the Shutdown it
+// stops on.
 func (s *RustServer) backgroundUses(runtime string) []string {
 	uses := append(s.bucketUses(runtime), rustutil.UseLine(runtime+"::logging", []string{"self", "tracing"}))
 	if len(s.Databases) > 0 {
@@ -990,6 +996,7 @@ func (s *RustServer) backgroundUses(runtime string) []string {
 	if stackconfig := s.stackconfigUses(); len(stackconfig) > 0 {
 		uses = append(uses, rustutil.UseLine(runtime+"::stackconfig", stackconfig))
 	}
+	uses = append(uses, rustutil.UseLine(runtime+"::telemetry", []string{"self", "Defaults"}))
 	if s.Worker != nil {
 		uses = append(uses, rustutil.UseLine(runtime+"::worker", []string{"self", "Options"}))
 	}
@@ -1193,6 +1200,36 @@ func rustLetChain(name, root string, calls ...string) string {
 		b.WriteString("\n" + indent + indent + "." + c)
 	}
 	return b.String() + ";"
+}
+
+// ServerSpans is main.rs's statement that layers the server spans of trace
+// export around the app (D67), with the operations of every API it serves,
+// as rustfmt lays it out: on one line when the layer's call takes
+// rustCallWidth columns at most and the line fits, and each API's
+// operations to a line otherwise.
+func (s *RustServer) ServerSpans() string {
+	operations := make([]string, len(s.APIs))
+	for i, a := range s.APIs {
+		operations[i] = a.Alias + "::operations::ALL"
+	}
+	const open, close = "    let app = app.layer(telemetry::ServerLayer::new(&[", "]));"
+	call := "telemetry::ServerLayer::new(&[" + strings.Join(operations, ", ") + "])"
+	if line := open + strings.Join(operations, ", ") + close; len(call) <= rustCallWidth && len(line) <= rustWidth {
+		return line
+	}
+	return open + "\n        " + strings.Join(operations, ",\n        ") + ",\n    " + close
+}
+
+// JobRun is a job's main.rs's last expression, which runs the job's method
+// in the span of trace export (D67), as rustfmt lays it out: on one line
+// when it fits, and each argument on a line of its own otherwise.
+func (s *RustServer) JobRun() string {
+	const indent = "    "
+	args := []string{rustString(s.Job.Name), "jobs." + s.Job.Method + "(shutdown)"}
+	if line := indent + "telemetry::job(" + strings.Join(args, ", ") + ").await"; len(line) <= rustWidth {
+		return line
+	}
+	return indent + "telemetry::job(\n" + indent + indent + strings.Join(args, ",\n"+indent+indent) + ",\n" + indent + ")\n" + indent + ".await"
 }
 
 // SiteCORS is main.rs's statement that layers the site CORS of the APIs a

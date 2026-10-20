@@ -8,7 +8,8 @@
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
 
-import { ACTOR_NAMESPACE, defineBehavior, uuidV5, type Principal } from '../dist/index.js';
+import { ACTOR_NAMESPACE, uuidV5, type Principal } from '../dist/index.js';
+import { defineBehavior } from '../dist/testing/index.js';
 import { openMetaSchema } from './behavior-fixtures.ts';
 import { Calls, openBranches, publish, recipeConfig, recipeDocument, type Commit, type Ref } from './branches-fixtures.ts';
 import { alice, cleanup, clone, drivers } from './helpers.ts';

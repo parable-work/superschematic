@@ -47,6 +47,12 @@ func TestTypeScriptDeclarationsRefuseWhatTheyCannotExpress(t *testing.T) {
 			},
 			want: `$defs/TypeRef/properties/name: unsupported JSON Schema keyword "format"`,
 		},
+		"a not that is no excluded pattern": {
+			edit: func(root map[string]any) {
+				defProperties(root, "EnumValueDef")["title"].(map[string]any)["not"] = map[string]any{"type": "string"}
+			},
+			want: "$defs/EnumValueDef/properties/title: a not must be a pattern a string does not match",
+		},
 		"a type union": {
 			edit: func(root map[string]any) {
 				defProperties(root, "TypeRef")["name"] = map[string]any{"type": []any{"string", "null"}}

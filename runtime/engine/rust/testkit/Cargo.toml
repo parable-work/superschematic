@@ -34,5 +34,11 @@ superschematic-engine-workqueue = { path = "../../../engine-workqueue/rust", def
 tokio = { version = "1.52.2", default-features = false, features = ["rt-multi-thread", "time"], optional = true }
 tower = { version = "0.5.3", default-features = false, features = ["util"], optional = true }
 
+[dev-dependencies]
+# A Postgres client of the tests' own, for what the storage runs only inside
+# a transaction and Postgres refuses there: CREATE DATABASE, for a case that
+# needs a database of its own (the database-wide extension Search creates).
+postgres = "0.19.14"
+
 [lints]
 workspace = true

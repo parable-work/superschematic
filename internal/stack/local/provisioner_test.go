@@ -397,6 +397,11 @@ func (f *fixture) listContainers() string {
 // with its resolved environment, callees first, and waits until each is
 // ready. Destroy stops the callers first, then the containers.
 func TestApplyFromNothing(t *testing.T) {
+	// The developer's shell turns trace export on for every process, and
+	// names no deployable alike (D67).
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://127.0.0.1:4318")
+	t.Setenv("OTEL_RESOURCE_ATTRIBUTES", "deployment.environment.name=Dev")
+	t.Setenv("OTEL_SERVICE_NAME", "everything")
 	f := newFixture(t, "Dev")
 	f.runner.notReady = 1
 	f.runner.rules = []rule{
@@ -471,6 +476,14 @@ func TestApplyFromNothing(t *testing.T) {
 		t.Fatalf("started %d processes, want 3", len(f.runner.started))
 	}
 	api, orders, worker := f.runner.started[0].cmd.Env, f.runner.started[1].cmd.Env, f.runner.started[2].cmd.Env
+	for _, env := range [][]string{api, orders, worker} {
+		if envValue(env, "OTEL_EXPORTER_OTLP_ENDPOINT") != "http://127.0.0.1:4318" || envValue(env, "OTEL_RESOURCE_ATTRIBUTES") != "deployment.environment.name=Dev" {
+			t.Errorf("a process does not inherit the shell's OpenTelemetry variables: %v", env)
+		}
+		if slices.ContainsFunc(env, func(kv string) bool { return strings.HasPrefix(kv, "OTEL_SERVICE_NAME=") }) {
+			t.Errorf("a process inherits OTEL_SERVICE_NAME, which would name every deployable alike: %v", env)
+		}
+	}
 	// The worker takes its API's config and its own edges, and the
 	// concurrency its platform sets, and listens on no port (D53).
 	for name, want := range map[string]string{
@@ -574,6 +587,41 @@ func TestApplyFromNothing(t *testing.T) {
 	}
 	if !strings.Contains(out, "[shop-api] a line with no end\n") {
 		t.Errorf("an unfinished line was not flushed:\n%s", out)
+	}
+}
+
+// TestGoBuildsTakeTheRequestsBuildEnv: the request's BuildEnv, stack dev's
+// CGO_LDFLAGS pointing at the release's static archives (D47, amended),
+// reaches every go build of a server, a worker and a job, over the
+// provisioner's own CGO_LDFLAGS, and no process it starts.
+func TestGoBuildsTakeTheRequestsBuildEnv(t *testing.T) {
+	t.Setenv("CGO_LDFLAGS", "-L/mine")
+	f := newFixture(t, "Dev")
+	f.runner.rules = []rule{
+		{prefix: inspectPrefix, stderr: "Error response from daemon: No such container: " + f.pgName},
+		{prefix: migrateStatus, stderr: "superschematic-migrate: service shop-db has no applied model"},
+		{prefix: "/bin/superschematic-migrate apply", out: "applied 2 steps\n"},
+	}
+	f.req.BuildEnv = map[string]string{"CGO_LDFLAGS": "-L/mine -L/cache/archives/lib"}
+	if err := f.applyAll(t); err != nil {
+		t.Fatalf("%v\n%s", err, f.out)
+	}
+	builds := 0
+	for _, cmd := range f.runner.commands {
+		if strings.HasSuffix(cmd.Path, "/go") {
+			builds++
+			if got := envValue(cmd.Env, "CGO_LDFLAGS"); got != "-L/mine -L/cache/archives/lib" {
+				t.Errorf("go build in %s with CGO_LDFLAGS=%q, want the request's", cmd.Dir, got)
+			}
+		}
+	}
+	if builds != 4 {
+		t.Errorf("%d go builds, want the two servers', the worker's and the job's", builds)
+	}
+	for _, s := range f.runner.started {
+		if got := envValue(s.cmd.Env, "CGO_LDFLAGS"); got != "" {
+			t.Errorf("%s runs with CGO_LDFLAGS=%q, which only its build takes", s.cmd.Path, got)
+		}
 	}
 }
 

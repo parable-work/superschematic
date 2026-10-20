@@ -488,6 +488,13 @@ type ProvisionRequest struct {
 	// provisioner hands them to its tool's process for this run only, and
 	// never writes them to its config, its program, a log or a file.
 	Env map[string]string
+
+	// BuildEnv holds variables a provisioner that builds code on this
+	// machine sets for its builds, over its own environment: CGO_LDFLAGS
+	// pointing cgo's linker at the release's static archives in a project
+	// whose naming file names no superscalar checkout (D47, amended). The
+	// processes it runs from what it built never see them.
+	BuildEnv map[string]string
 }
 
 // StateBackend is where a provisioner keeps an environment's state, and

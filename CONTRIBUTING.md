@@ -155,7 +155,7 @@ agent or a bot with write access counts.
 | `make go-lint`        | `golangci-lint run` with `.golangci.yml` in the Go modules           |
 | `make catalog-check`  | The committed TypeScript and Python scalar catalogs match the pinned superscalar, and the TypeScript one's value classes match the graph descriptor's rule |
 | `make schema-file-types-check` | The committed schema-file JSON Schema and TypeScript types in `ir/typescript` match the IR |
-| `make behaviors-check` | The copies of the core's behavior declarations in the packages that implement them (`runtime/engine/typescript/src/behaviors/core/declarations`, the Rust engine's `runtime/engine/rust/behaviors/declarations`, `runtime/engine-workqueue/typescript/src/declarations`) match the core registry; `make behaviors` rewrites them |
+| `make behaviors-check` | The copies of the core's behavior declarations in the crates that implement them (the engine's `runtime/engine/rust/behaviors/declarations`, the work queue's `runtime/engine-workqueue/rust/declarations`) match the core registry; `make behaviors` rewrites them |
 | `make build`          | `go build ./...` in the Go modules, then `bin/superschematic`, the installed binary (`cmd/superschematic`: the core with the gcp target, the Cloudflare DNS platform and the Pulumi provisioner linked) |
 | `make cli-smoke`      | `bin/superschematic-core`, the core with no extension linked (`internal/cmd/superschematic-core`, never shipped), builds the DB, API and General fixtures |
 | `make example-migrations` | `examples/migrations/scripts/check.sh`: `migrate plan` between the example's two versions for Postgres and SQLite, its hazard gate, and `superschematic-migrate` applying it to SQLite, and to Postgres when `SUPERSCHEMATIC_MIGRATE_TEST_DATABASE_URL` is set; the outputs the docs quote match `testdata/generated/` there |
@@ -273,7 +273,9 @@ and concrete.
 
 One version for everything: the npm packages (`@superschematic/schema`, `db`,
 `api`, `schema-config`, `stack`, `schema-ir`, `schema-runtime`,
-`http-runtime`, `versiongraph`, `engine`, `engine-workqueue`), the
+`http-runtime`, `versiongraph`, `engine`, `engine-workqueue`, and the
+engine's prebuilt addons `engine-darwin-arm64`, `engine-darwin-x64`,
+`engine-linux-x64-gnu` and `engine-linux-arm64-gnu`), the
 PyPI distributions (`superschematic-schema-runtime`, and
 `superschematic-versiongraph`, which is not published), the crates
 (`superschematic-schema-runtime`, `superschematic-http-runtime`, and
@@ -314,6 +316,20 @@ platform's tarball and every tarball's SHA-256 (`internal/release`), which
 the Dockerfiles and workflows it generates pin
 ([`docs/stack-model.md`](docs/stack-model.md), section 8.2; D47, amended).
 A CLI built any other way names no digests.
+
+The same job packs the engine's prebuilt Node-API addon for its platform
+(D58): `scripts/release-engine-addon.sh` builds the core's addon
+(`runtime/engine/rust/addon`) with the engine workspace's `dist` profile
+(fat LTO, one codegen unit, symbols stripped), loads it and opens an
+engine on it, and packs `@superschematic/engine-<target>` from
+`runtime/engine/typescript/npm/<target>` (napi-rs's per-platform layout:
+the package's `os`, `cpu` and, on Linux, `libc`, and the `.node`).
+`assemble` names the four as `@superschematic/engine`'s
+`optionalDependencies` at the release's version, so npm installs the one
+for its host, and `publish-npm` publishes them before the engine. On
+Linux the job logs the newest glibc symbol version the addon needs, which
+the runner's glibc sets: an older glibc builds the addon from source
+(`scripts/engine-napi.sh`), as a Docker image does.
 
 `release-pr.yml` opens a pull request with the workflow token, which the
 repository setting "Allow GitHub Actions to create and approve pull requests"

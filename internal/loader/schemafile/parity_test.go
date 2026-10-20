@@ -375,7 +375,47 @@ var parityInputs = []struct{ name, registry, input string }{
 	{"a display state that is no state name", "core", `{"name": "Ticket", "role": "EmbeddedStruct", "display": {"states": {"to do": {"label": "To do"}}}}`},
 	{"a display transition to no state name", "core", `{"name": "Ticket", "role": "EmbeddedStruct", "display": {"transitions": {"todo": {"in progress": "Start"}}}}`},
 	{"a display transition from a state that labels none", "core", `{"name": "Ticket", "role": "EmbeddedStruct", "display": {"transitions": {"todo": {}}}}`},
-	{"a display key the schema lacks", "core", `{"name": "Ticket", "role": "EmbeddedStruct", "display": {"icon": "ticket"}}`},
+	{"a display key the schema lacks", "core", `{"name": "Ticket", "role": "EmbeddedStruct", "display": {"colour": "red"}}`},
+	// A type's icon, a field's display and an enum member's title (D48,
+	// amended).
+	{"a display icon alone", "core", `{"name": "Ticket", "role": "EmbeddedStruct", "display": {"icon": "ticket"}}`},
+	{"a blank display icon", "core", `{"name": "Ticket", "role": "EmbeddedStruct", "display": {"icon": " "}}`},
+	{"a padded display icon", "core", `{"name": "Ticket", "role": "EmbeddedStruct", "display": {"icon": "ticket "}}`},
+	// An icon is an icon name by one explicit pattern, which RE2, Ajv and
+	// Rust read alike: none of them takes a carriage return, a byte order
+	// mark or a space, which "\\S(.*\\S)?" let through in one engine or
+	// another.
+	{"a display icon with a set's prefix", "core", `{"name": "Ticket", "role": "EmbeddedStruct", "display": {"icon": "mdi:file-document/outline_2.svg"}}`},
+	{"a display icon with a carriage return", "core", `{"name": "Ticket", "role": "EmbeddedStruct", "display": {"icon": "a\rb"}}`},
+	{"a display icon with a line separator", "core", `{"name": "Ticket", "role": "EmbeddedStruct", "display": {"icon": "a\u2028b"}}`},
+	{"a display icon after a byte order mark", "core", `{"name": "Ticket", "role": "EmbeddedStruct", "display": {"icon": "\ufeffx"}}`},
+	{"a display icon padded with a no-break space", "core", `{"name": "Ticket", "role": "EmbeddedStruct", "display": {"icon": "ticket\u00a0"}}`},
+	{"a display icon of two words", "core", `{"name": "Ticket", "role": "EmbeddedStruct", "display": {"icon": "a b"}}`},
+	{"a field display", "core", `{"name": "Note", "role": "APIInput", "fields": [
+		{"name": "text", "typeRef": {"name": "String"}, "display": {"multiline": true}},
+		{"name": "code", "typeRef": {"name": "String"}, "display": {"multiline": false}}]}`},
+	{"a field display that declares nothing", "core", `{"name": "Note", "role": "APIInput", "fields": [{"name": "text", "typeRef": {"name": "String"}, "display": {}}]}`},
+	{"a field display multiline that is not a boolean", "core", `{"name": "Note", "role": "APIInput", "fields": [{"name": "text", "typeRef": {"name": "String"}, "display": {"multiline": "yes"}}]}`},
+	{"a field display key the schema lacks", "core", `{"name": "Note", "role": "APIInput", "fields": [{"name": "text", "typeRef": {"name": "String"}, "display": {"rows": 6}}]}`},
+	{"enum member titles in an enum file", "core", `{"kind": "Enum", "name": "OrderStatus", "values": [
+		{"name": "Placed", "serializedAs": "placed"}, {"name": "OnHold", "title": "Held for a stock check", "serializedAs": "on_hold"}]}`},
+	{"enum member titles in a document", "core", `{"kind": "DB", "name": "orders", "enums": {"OrderStatus": {"name": "OrderStatus", "values": [
+		{"name": "Fulfilled", "title": "Picked and packed", "comment": "Ready to ship."}, {"name": "Shipped"}]}}}`},
+	{"an enum member title that is not a string", "core", `{"kind": "Enum", "name": "OrderStatus", "values": [{"name": "OnHold", "title": 1}]}`},
+	// A member's title by ir.EnumTitlePattern and no "*/", which RE2, Ajv
+	// and Rust read alike.
+	{"an enum member title of any text on one line", "core", `{"kind": "Enum", "name": "OrderStatus", "values": [{"name": "OnHold", "title": "Held\u00a0for a stock check: 2\u20133 days \u2014 \u00e9t\u00e9 / *ok*"}]}`},
+	{"an empty enum member title", "core", `{"kind": "Enum", "name": "OrderStatus", "values": [{"name": "OnHold", "title": ""}]}`},
+	{"a blank enum member title", "core", `{"kind": "Enum", "name": "OrderStatus", "values": [{"name": "OnHold", "title": " "}]}`},
+	{"a padded enum member title", "core", `{"kind": "Enum", "name": "OrderStatus", "values": [{"name": "OnHold", "title": "Held "}]}`},
+	{"an enum member title with a carriage return", "core", `{"kind": "Enum", "name": "OrderStatus", "values": [{"name": "OnHold", "title": "a\rb"}]}`},
+	{"an enum member title with a line feed", "core", `{"kind": "Enum", "name": "OrderStatus", "values": [{"name": "OnHold", "title": "a\nb"}]}`},
+	{"an enum member title with a line separator", "core", `{"kind": "Enum", "name": "OrderStatus", "values": [{"name": "OnHold", "title": "a\u2028b"}]}`},
+	{"an enum member title with a paragraph separator", "core", `{"kind": "Enum", "name": "OrderStatus", "values": [{"name": "OnHold", "title": "a\u2029b"}]}`},
+	{"an enum member title with a tab", "core", `{"kind": "Enum", "name": "OrderStatus", "values": [{"name": "OnHold", "title": "a\tb"}]}`},
+	{"an enum member title with a DEL", "core", `{"kind": "Enum", "name": "OrderStatus", "values": [{"name": "OnHold", "title": "a\u007fb"}]}`},
+	{"an enum member title with a comment's end", "core", `{"kind": "Enum", "name": "OrderStatus", "values": [{"name": "OnHold", "title": "a */ b"}]}`},
+	{"an enum member title that ends a comment", "core", `{"kind": "Enum", "name": "OrderStatus", "values": [{"name": "OnHold", "title": "*/"}]}`},
 }
 
 // parityFiles are data-form files the JSON writer wrote for the loader's

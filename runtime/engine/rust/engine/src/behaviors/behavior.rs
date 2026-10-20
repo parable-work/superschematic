@@ -640,10 +640,41 @@ impl BehaviorSet {
         self.behaviors.push(super::erased::erase(behavior));
     }
 
+    /// Adds a behavior whose hooks are named at run time after the ones
+    /// before it (the `dynamic` feature).
+    #[cfg(feature = "dynamic")]
+    pub fn push_dynamic<D: super::dynamic::DynamicBehavior>(&mut self, behavior: D) {
+        self.behaviors.push(super::dynamic::erase_dynamic(behavior));
+    }
+
     /// The set with every behavior of another after its own.
     pub fn extend(mut self, other: BehaviorSet) -> Self {
         self.behaviors.extend(other.behaviors);
         self
+    }
+
+    /// The declared name of each behavior, in the set's order (a
+    /// declaration that cannot be read is `implementation`).
+    pub fn names(&self) -> Vec<String> {
+        self.behaviors
+            .iter()
+            .map(|behavior| behavior.label())
+            .collect()
+    }
+
+    /// The behaviors whose declared names `keep` accepts, in the set's
+    /// order: a binding that is built with more behaviors than an engine's
+    /// options name picks the ones they do (the Node-API addon's
+    /// `behaviors`).
+    pub fn select(&self, keep: impl Fn(&str) -> bool) -> BehaviorSet {
+        BehaviorSet {
+            behaviors: self
+                .behaviors
+                .iter()
+                .filter(|behavior| keep(&behavior.label()))
+                .cloned()
+                .collect(),
+        }
     }
 
     pub fn len(&self) -> usize {

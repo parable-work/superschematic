@@ -4,16 +4,8 @@
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
 
-import {
-  BehaviorError,
-  BehaviorVetoError,
-  InstanceValidationError,
-  defineBehavior,
-  type Engine,
-  type FrozenJSON,
-  type GuardRequest,
-  type InstanceChange,
-} from '../dist/index.js';
+import { BehaviorError, BehaviorVetoError, InstanceValidationError, type Engine } from '../dist/index.js';
+import { defineBehavior, type FrozenJSON, type GuardRequest, type InstanceChange } from '../dist/testing/index.js';
 import { flag, openMetaSchema, publishItem } from './behavior-fixtures.ts';
 import { alice, cleanup, drivers, fieldsOf, openTestEngine, thrown } from './helpers.ts';
 

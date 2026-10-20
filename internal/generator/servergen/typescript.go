@@ -30,7 +30,9 @@ import (
 // SQLite file its sqlite: URL names (D64), builds one SDK client per API
 // called, builds each API's
 // implementation from its Deps and mounts every API's router on one Hono
-// app beside /healthz and /readyz. An API whose authDb has a User table
+// app beside /healthz and /readyz. It exports its traces through the HTTP
+// runtime's ./telemetry entry when the environment names an OTLP endpoint
+// (D67). An API whose authDb has a User table
 // authenticates with the identity runtime (D50), as on a Go server: main.ts
 // builds one identity store over the pool of that database, from the
 // descriptor its TypeScript types export, and the API's identity service
@@ -77,6 +79,19 @@ const (
 	cloudSQLConnectorPackage = "@google-cloud/cloud-sql-connector"
 	cloudSQLConnectorVersion = "1.12.0"
 )
+
+// TelemetryPackages are the OpenTelemetry packages the HTTP runtime's
+// ./telemetry entry imports, which every Bun server, job and worker
+// depends on (D67): the runtime's optional peer dependencies, at the
+// versions its tests run with.
+var TelemetryPackages = map[string]string{
+	"@opentelemetry/api":                       "1.9.1",
+	"@opentelemetry/context-async-hooks":       "2.12.0",
+	"@opentelemetry/core":                      "2.12.0",
+	"@opentelemetry/exporter-trace-otlp-proto": "0.223.0",
+	"@opentelemetry/resources":                 "2.12.0",
+	"@opentelemetry/sdk-trace":                 "2.12.0",
+}
 
 // The GCS Node client the HTTP runtime's ./gcs entry imports, which only a
 // server whose APIs list a bucket depends on (D54): the release the
@@ -891,12 +906,14 @@ func (s *TypeScriptServer) WorkersImports() []string {
 // database an identity store reads, or a worker's queue is of, from the
 // workspace; the HTTP
 // runtime, which the workspace's root overrides with a checkout or the
-// registry serves; and the third-party packages main.ts imports.
+// registry serves; and the third-party packages main.ts imports, the
+// OpenTelemetry packages of the runtime's ./telemetry entry among them.
 func (s *TypeScriptServer) planPackage() {
 	deps := map[string]string{
 		s.Naming.HTTPRuntimeNpmPackage: "*",
 		"hono":                         tsrestgen.HonoVersion,
 	}
+	maps.Copy(deps, TelemetryPackages)
 	for _, a := range s.APIs {
 		deps[a.Package] = "workspace:*"
 		deps[a.ImplPackage] = "workspace:*"

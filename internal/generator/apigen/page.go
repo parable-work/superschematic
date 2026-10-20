@@ -48,12 +48,14 @@ func pageInfo(set *ir.OperationSet, op *ir.FieldDef) *PageInfo {
 
 // GoResultType is what the endpoint's Go implementation method returns
 // beside its error: the HTTP runtime's paging.Page of the list's element
-// for a paged operation (D60), the list for any other list, and a pointer
-// to the output otherwise.
+// for a paged operation (D60), the map for a map, the list for any other
+// list, and a pointer to the output otherwise.
 func (e EndpointInfo) GoResultType() string {
 	switch {
 	case e.Page != nil:
 		return "paging.Page[" + e.OutputGoType + "]"
+	case e.OutputIsMap:
+		return e.OutputGoMapType()
 	case e.OutputIsArray:
 		return e.OutputGoListType()
 	}

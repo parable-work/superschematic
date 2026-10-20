@@ -160,6 +160,12 @@ A response outside 2xx raises `APIError`, whose message is the problem's
 retries a 429 up to 3 times after `Retry-After`
 (`max_rate_limit_retries`).
 
+A method returns `list[T]` for a list, `dict[str, T]` for a map
+(`dict[str, list[T]]` for a map of lists) and `T | None` for a
+`Nullable<T>`, which is `None` when the server answers null. An object
+type's values in a map are read into its model one by one, as a list's
+elements are.
+
 An operation without an input type sends its arguments where the route
 reads them: on a `GET` in the query string, and on any other method, a
 `DELETE` among them, as the fields of the JSON body. A `QueryParam<T>`

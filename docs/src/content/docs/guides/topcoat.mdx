@@ -116,9 +116,14 @@ route does:
 3. the implementation.
 
 `can_<namespace>_<operation>(cx)` admits the caller alone, for a page that
-shows or hides what the operation does. Both apply the end-user rule
-only: an operation's `@requireService` or `@allowService` clause is not
-checked in-process, since a page is the service's own code
+shows or hides what the operation does. An operation only a service may
+call (`@requireService`) has no such call, so a page cannot call it for a
+reader, and its guard refuses one 401 `service_unauthorized`, as its route
+refuses a request without a service credential. A page that acts as a
+service calls it, and any operation with a service clause, through
+`operations::as_service(&caller)`, the caller one it names with
+`ServiceCaller::in_process(deployable, serves)` and holds to the route's
+`from`
 ([Calling an operation in-process](/superschematic/install/rust/#calling-an-operation-in-process)).
 The acme pages ask the guard whether to show the sign-in button above a
 form:
@@ -155,7 +160,10 @@ the input type's rules give them: `required`, `min` and `max` on the
 rating, `maxlength` on the title. A browser checks them before it sends the
 form, and `parse()` checks every rule again. A field is labeled by its
 `@docs` title, else by its name in words, a number at the end of a word
-a word of its own: the shipping address's `line1` reads "Line 1".
+a word of its own: the shipping address's `line1` reads "Line 1". An
+enum's member, a select's option or a checkbox's label, is labeled by its
+title, a JSDoc `@title` on the member, else by its name in words: `OnHold`
+reads "On hold".
 
 ### Nested objects and lists
 
@@ -195,7 +203,15 @@ or renders the form again with each error at its control:
 A page answers with one view, so the row action and a refusal set the
 status, and both render the same `place_order_page` component. The
 buttons skip the browser's checks (`formnovalidate`), so a row can be
-added before the others are valid, and Enter still submits the form.
+added before the others are valid, and a list within a row has buttons
+of its own, named under the row. Enter in a text field presses a form's
+first submit button, so the component renders a hidden one ahead of
+every row button, which submits the form with no `_action`, and the page
+puts its own button after the component, in the one `<form>` around it.
+The extension's tests check every page they render for that order
+without a browser, through `extensions/topcoat/testdata/enter.rs`. The
+file ships with neither the extension nor the crate, so an app's tests
+copy it from the superschematic repository to use it too.
 
 The page answers a refusal with its status, through a `Refusal` of
 `forms`, the status and the errors the form renders again with:
@@ -316,12 +332,21 @@ UTC and its label says so, and a value held with an offset renders in
 UTC. Long text, a text field or argument whose `maxLength` is 500 or
 more, such as a cancel's reason or a review's body, is a `<textarea>`
 with the same `minlength` and `maxlength`; its pattern, which a textarea
-does not take, is checked by `parse()`. A number field holding a whole
-number reads any a browser sends, `1e1` and `2.0` too. A `@secret` field
-is `type="password"` and is never rendered with its value, so a refused
-form asks for it again. A record leaves the field out, but a form holds
-what a reader types. A value no control holds, a union, any JSON value
-or a map, is a `<textarea>` of its JSON text.
+does not take, is checked by `parse()`. A field's multiline hint
+overrides the 500 rule either way: `@display({ multiline: true })` makes
+its text a textarea whatever its `maxLength`, a note without a bound,
+and `@display({ multiline: false })` keeps it one line at any bound. The
+hint applies only where the control would be text: an email, URL, phone,
+date or time keeps its control, and the build log says it ignored the
+hint. An argument takes no decorator, so it keeps the 500 rule. A
+review's body says `@display({ multiline: true })`, which its
+`maxLength` of 5000 would decide alone. A number
+field holding a whole number reads any a browser sends, `1e1` and `2.0`
+too. A `@secret` field is `type="password"` and is never rendered with
+its value, so a refused form asks for it again. A record leaves the
+field out, but a form holds what a reader types. A value no control
+holds, a union, any JSON value or a map, is a `<textarea>` of its JSON
+text.
 
 ### Errors
 
@@ -410,8 +435,12 @@ links, so the page lists a link to each order's page after it:
 A field is labeled as its form field is: its `@docs` title, else its name
 in words. A value renders by its type:
 
-- an enum's value is its member's name in words, in a `<data>` element
-  whose `value` is the one the API sends;
+- an enum's value is its member's title, else its name in words, in a
+  `<data>` element whose `value` is the one the API sends: shop-db titles
+  `OrderStatus.Fulfilled` with `/** @title Picked and packed */`, so a
+  fulfilled order reads "Picked and packed" in the tables and the
+  filters, and a placed one "Placed". `<enum>_label` gives the same label
+  for a page's own markup;
 - a date, a time or a date-time is a `<time>` element whose `datetime`
   is the value the API sends and whose text a reader reads, the same for
   every reader: "9 Oct 2026", "14:30", and a date-time in UTC to the
@@ -531,8 +560,10 @@ post the controls of the operation it submits, a list's page or an
 item's those of the operation it shows, and every page the rate limit and
 timeout of the listing operations its
 [references](#choices-from-references) call. `placeOrder` allows a client
-60 a minute, so the console's new-order post does too, from a limiter of
-the console's own, keyed by the client's address, as a procedure's is. A
+60 a minute, and the console's new-order post takes from the same budget
+as `POST /api/orders` and the operation's procedure: `shop_orders` makes
+one limiter per operation, keyed by the client's address, and the JSON
+API, the procedures and the pages all take from it. A
 refusal is the route's 429 with `Retry-After`, 413 or 504, as the pages'
 refusal section without the layout, since the page did not run. A
 route's values come from the page's path, never from the form's hidden
@@ -547,7 +578,11 @@ link to the app's sign-in page that comes back to the page.
 
 A layout at the prefix puts each page in `<main>`, after a nav of the
 resources the caller may list, the current one marked with
-`aria-current`, and a breadcrumb trail from the index to the page, an
+`aria-current`, each after its type's icon when its `@display` names one
+(`<span class="ss-icon" data-icon="receipt" aria-hidden="true">`, which
+the app's stylesheet draws, since the crate ships no icon set: acme's
+`ProductView` and `OrderView` name `package` and `receipt`), and a
+breadcrumb trail from the index to the page, an
 item by its title where its type declares one. Else an item is named by
 the label of what its route's value refers to, when every operation whose
 route holds that value refers to one target by one value, so a supplier's
@@ -668,9 +703,10 @@ its route's rules. A webhook (`@webhook`, `@hmacVerified`) has neither an
 in-process call nor a procedure: a third party calls it, and its route
 checks the signature before anything else. Nor has an operation the
 service mounts itself (`@manualRouteRegistration`). An operation only a
-service may call (`@requireService`) keeps its in-process call but has
-no procedure, since a browser holds no service credential; an
-`@allowService` one keeps both, since its route admits an end user too.
+service may call (`@requireService`) has no procedure, since a browser
+holds no service credential, and no end user's call, only a service's
+(`operations::as_service`); an `@allowService` one keeps both, since its
+route admits an end user too.
 Each guard's or call's doc says why, and so does the build log. The
 result of an operation without a call reaches no page, so it has no
 record and no display components, and its input has no form.
@@ -679,11 +715,13 @@ A procedure keeps its route's traffic controls, in the route's order, and
 refuses as the route does, as a `ProblemRecord`: `placeOrder`'s procedure
 allows a client 60 calls a minute (429 with `Retry-After`), a body of a
 megabyte (413) and ten seconds (504). `shop_orders` puts a layer with
-them on the procedure's path. Its limiter is its own, at the route's
-rate, and counts clients by the IP address Topcoat reads for them; the
-JSON API's route keeps its own, counting by the same address. A page's
-in-process call applies none of them: the page is a route of the app,
-under the controls the app gives it. The [generated
+them on the procedure's path. Its limiter is the operation's one, which
+the JSON API's route and the console's pages share, and counts clients by
+the IP address Topcoat reads for them, so a client has 60 a minute
+through the route, the procedure and the console's pages together. A
+page's in-process call applies none of them, nor does a call as a
+service: the page is a route of the app, under the controls the app gives
+it. The [generated
 pages](#generated-pages) apply them to their own requests.
 
 ## Keep the shop in SQLite

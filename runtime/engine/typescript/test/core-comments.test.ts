@@ -5,14 +5,8 @@
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
 
-import {
-  IncompatibleChangeError,
-  OperationParamsError,
-  type AccessRequest,
-  type Engine,
-  type EngineOptions,
-} from '../dist/index.js';
-import { alice, cleanup, drivers, openTestEngine, schemaDocument, thrown } from './helpers.ts';
+import { IncompatibleChangeError, OperationParamsError, type AccessRequest, type Engine } from '../dist/index.js';
+import { alice, cleanup, drivers, openTestEngine, schemaDocument, thrown, type TestEngineOptions } from './helpers.ts';
 
 afterEach(cleanup);
 
@@ -29,7 +23,7 @@ function reviewSchema(behaviors: Array<{ name: string; config?: unknown }> = [{ 
 const bob = { subject: 'bob', permissions: [] };
 
 for (const driver of drivers) {
-  function published(options: Partial<EngineOptions> = {}): Engine {
+  function published(options: Partial<TestEngineOptions> = {}): Engine {
     const engine = openTestEngine({ driver, ...options });
     engine.schemas.define(alice, reviewSchema());
     engine.schemas.publish(alice, 'Review');

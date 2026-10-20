@@ -10,16 +10,15 @@ import { afterEach, describe, test } from 'node:test';
 import {
   EngineError,
   UnknownToolError,
-  defineBehavior,
   type AccessPolicy,
   type DescribedOperation,
   type Engine,
-  type EngineOptions,
   type Principal,
   type ToolDefinition,
   type ToolFilter,
   type ToolSummary,
 } from '../dist/index.js';
+import { defineBehavior } from '../dist/testing/index.js';
 import { counterDeclaration, flagDeclaration, hold, holdDeclaration, openBehaviorEngine, openMetaSchema, publishItem, testBehaviors } from './behavior-fixtures.ts';
 import {
   alice,
@@ -35,6 +34,7 @@ import {
   tasksDocument,
   thrown,
   track,
+  type TestEngineOptions,
 } from './helpers.ts';
 import { reachBehaviors } from './reach-fixtures.ts';
 
@@ -536,7 +536,7 @@ describe('invocation policies', () => {
   });
 
   test("the tool options are checked as the compiler's registry checks them", () => {
-    const refusal = (tools: EngineOptions['tools']) => thrown(() => openTestEngine({ tools }), TypeError).message;
+    const refusal = (tools: TestEngineOptions['tools']) => thrown(() => openTestEngine({ tools }), TypeError).message;
     assert.match(refusal({ invocationPolicy: { key: 'handle', values: ['auto'], default: 'auto' } }), /key "handle" is a key @mcp already uses/);
     assert.match(refusal({ invocationPolicy: { key: '9lives', values: ['auto'], default: 'auto' } }), /must be a letter followed by/);
     assert.match(refusal({ invocationPolicy: { key: 'confirm', values: [], default: 'auto' } }), /lists no values/);

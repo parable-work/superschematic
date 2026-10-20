@@ -22,8 +22,9 @@ const (
 	shopRatingsTS = "testdata/services/shop-ratings-ts"
 )
 
-// TestRatingBehavior: acme declares acme.Rating with no core edit, a
-// General schema composes it and the IR carries it; the build writes the
+// TestRatingBehavior: acme declares acme.Rating with no core edit, with
+// the Rust crate that implements it; a General schema composes it and the
+// IR carries it; the build writes the
 // TypeScript types with ProductBehaviors, the behavior's fields under its
 // exact name, since every generator of the General pipeline renders
 // behaviors (D58); the core registry does not know the behavior.
@@ -35,6 +36,24 @@ func TestRatingBehavior(t *testing.T) {
 	}
 	if rating.Extension != ext.Name || len(rating.Operations) != 2 || rating.Operations[0].InvocationPolicy != ext.ConfirmAlways {
 		t.Fatalf("%s = %+v", ext.RatingBehavior, rating)
+	}
+	// The Rust crate that implements it (D58) is this module's
+	// crates/behaviors, the path the spec gives relative to the project,
+	// whose manifest names the crate and whose library has the Rating the
+	// register expression names.
+	manifest, err := os.ReadFile(filepath.Join("..", filepath.FromSlash(rating.Rust.Path), "Cargo.toml"))
+	if err != nil {
+		t.Fatalf("%s's crate: %v", ext.RatingBehavior, err)
+	}
+	if !strings.Contains(string(manifest), "\nname = \""+rating.Rust.Crate+"\"\n") {
+		t.Errorf("crates/behaviors/Cargo.toml does not name %s", rating.Rust.Crate)
+	}
+	lib, err := os.ReadFile(filepath.Join("..", filepath.FromSlash(rating.Rust.Path), "src", "lib.rs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rating.Rust.Register != rating.Rust.Ident()+"::Rating" || !strings.Contains(string(lib), "\npub struct Rating;\n") {
+		t.Errorf("Register = %q, and lib.rs declares no Rating", rating.Rust.Register)
 	}
 
 	schema, cfg, err := loader.LoadServiceWithConfig(shopRatings, loader.WithRegistry(reg), loader.WithNaming(names))

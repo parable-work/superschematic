@@ -1,519 +1,27 @@
-// The engine's own migrations, from an empty file and from the file each
-// earlier version of the engine left. A new migration adds a seed here for
-// the version before it: rows written the way that version wrote them,
-// which the engine must still read and build on after migrating.
+// The engine's own migrations, as an engine's file shows them: an engine
+// brings a new file up to its migrations, each recorded once in the ledger;
+// a reopen keeps what the file holds and runs nothing again; a file newer
+// than the build is refused; and the event log's indexes, triggers and
+// checks are there. Each earlier version's file migrating, with rows written
+// the way that version wrote them, is the Rust engine's test of its own
+// migrations (runtime/engine/rust/engine/tests/migrations.rs,
+// from_each_earlier_version), and a file the TypeScript engine wrote opening
+// and migrating is its SQLite corpus's (runtime/engine/testdata/sqlite).
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
 import { afterEach, describe, test } from 'node:test';
 
-import { loadSchemaFile } from '@superschematic/schema-runtime';
+import { allowAll } from '../dist/index.js';
+import { openConnection } from '../dist/native/sqlite.js';
+import { alice, appliedMigrations, cleanup, drivers, freshPath, openEngine, orderDocument, track, type SqliteReader } from './helpers.ts';
 
-import {
-  ENGINE_OWNER,
-  EngineError,
-  Storage,
-  UniqueConflictError,
-  allowAll,
-  appliedMigrations,
-  canonicalJSON,
-  engineMigrations,
-  migrate,
-  type Engine,
-} from '../dist/index.js';
-import { counter, itemDocument, openMetaSchema, publishItem } from './behavior-fixtures.ts';
-import { holder } from './reach-fixtures.ts';
-import { ledger, ledgerDocument, mark, probe, resetProbe, runnerPrincipal } from './runner-fixtures.ts';
-import { alice, cleanup, drivers, freshPath, openEngine, orderDocument, schemaDocument, thrown, track } from './helpers.ts';
+afterEach(cleanup);
 
-afterEach((t) => {
-  resetProbe();
-  cleanup(t);
-});
+/** The owner the engine records its own migrations under. */
+const ENGINE_OWNER = 'engine';
 
-interface Seed {
-  /** Writes rows into a file at this version, as that version wrote them. */
-  write(storage: Storage): void;
-  /** Checks, through the engine, that the rows survived the later migrations. */
-  check(engine: Engine): void;
-}
-
-const noteDocument = schemaDocument('Note', [{ name: 'body', typeRef: { name: 'string' } }]);
-
-function canonical(document: Record<string, unknown>): { text: string; hash: string } {
-  const text = loadSchemaFile(JSON.stringify(document)).canonical;
-  return { text, hash: createHash('sha256').update(text).digest('hex') };
-}
-
-const seeds: Record<number, Seed> = {
-  0: {
-    write() {},
-    check(engine) {
-      assert.deepEqual(engine.schemas.list(alice), []);
-    },
-  },
-  // Version 1 stored schemas without actors, and had no instances or events.
-  1: {
-    write(storage) {
-      const order = canonical(orderDocument());
-      const note = canonical(noteDocument);
-      storage.run(
-        'INSERT INTO engine_schemas (namespace, name, version, document, hash, defined_at, published_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-        ['default', 'Order', 1, order.text, order.hash, 100, 200]
-      );
-      storage.run(
-        'INSERT INTO engine_schemas (namespace, name, version, document, hash, defined_at, published_at) VALUES (?, ?, ?, ?, ?, ?, NULL)',
-        ['default', 'Note', 0, note.text, note.hash, 300]
-      );
-    },
-    check(engine) {
-      const order = engine.schemas.live(alice, 'Order');
-      assert.equal(order?.version, 1);
-      assert.equal(order?.definedAt, 100);
-      assert.equal(order?.definedBy, null);
-      assert.equal(order?.publishedBy, null);
-      assert.equal(engine.schemas.draft(alice, 'Note')?.definedBy, null);
-      assert.deepEqual(engine.events.read(alice).events, []);
-      const created = engine.instances.create(alice, 'Order', { title: 'Desk' }, { id: 'o1' });
-      assert.equal(created.version, 1);
-      assert.equal(engine.schemas.publish(alice, 'Note').version, 1);
-      assert.deepEqual(
-        engine.events.read(alice).events.map((event) => [event.kind, event.schema]),
-        [
-          ['create', 'Order'],
-          ['publish', 'Note'],
-        ]
-      );
-    },
-  },
-  // Version 2 added actors, instances and the event log, with no operation
-  // events and no behavior storage.
-  2: {
-    write(storage) {
-      const order = canonical(orderDocument());
-      storage.run(
-        `INSERT INTO engine_schemas (namespace, name, version, document, hash, defined_at, defined_by, published_at, published_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        ['default', 'Order', 1, order.text, order.hash, 100, 'alice', 200, 'alice']
-      );
-      storage.run(
-        `INSERT INTO engine_instances (namespace, schema, id, schema_namespace, version, seq, data, created_at, created_by, updated_at, updated_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        ['default', 'Order', 'o1', 'default', 1, 1, '{"title":"Desk"}', 300, 'alice', 300, 'alice']
-      );
-      storage.run(
-        'INSERT INTO engine_events (kind, namespace, schema, instance_id, seq, version, actor, at, change) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        ['publish', 'default', 'Order', null, null, 1, 'alice', 200, order.text]
-      );
-      storage.run(
-        'INSERT INTO engine_events (kind, namespace, schema, instance_id, seq, version, actor, at, change) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        ['create', 'default', 'Order', 'o1', 1, 1, 'alice', 300, '{"title":"Desk"}']
-      );
-    },
-    check(engine) {
-      assert.deepEqual(
-        engine.events.read(alice).events.map((event) => [event.cursor, event.kind, event.seq]),
-        [
-          [1, 'publish', null],
-          [2, 'create', 1],
-        ]
-      );
-      const updated = engine.instances.update(alice, 'Order', 'o1', { title: 'Lamp' }, { expectedSeq: 1 });
-      assert.deepEqual([updated.seq, updated.data], [2, { title: 'Lamp' }]);
-      checkOperationEvents(engine, 3);
-    },
-  },
-  // Version 3 indexed the publish events alone; its rows are version 2's.
-  3: {
-    write(storage) {
-      const order = canonical(orderDocument());
-      storage.run(
-        `INSERT INTO engine_schemas (namespace, name, version, document, hash, defined_at, defined_by, published_at, published_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        ['default', 'Order', 1, order.text, order.hash, 100, 'alice', 200, 'alice']
-      );
-      storage.run(
-        `INSERT INTO engine_instances (namespace, schema, id, schema_namespace, version, seq, data, created_at, created_by, updated_at, updated_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        ['default', 'Order', 'o1', 'default', 1, 2, '{"title":"Lamp"}', 300, 'alice', 400, 'alice']
-      );
-      const insert = 'INSERT INTO engine_events (kind, namespace, schema, instance_id, seq, version, actor, at, change) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)';
-      storage.run(insert, ['publish', 'default', 'Order', null, null, 1, 'alice', 200, order.text]);
-      storage.run(insert, ['create', 'default', 'Order', 'o1', 1, 1, 'alice', 300, '{"title":"Desk"}']);
-      storage.run(insert, ['update', 'default', 'Order', 'o1', 2, 1, 'alice', 400, '{"title":"Lamp"}']);
-    },
-    check(engine) {
-      assert.deepEqual(
-        engine.events.read(alice).events.map((event) => [event.cursor, event.kind, event.seq]),
-        [
-          [1, 'publish', null],
-          [2, 'create', 1],
-          [3, 'update', 2],
-        ]
-      );
-      assert.deepEqual(engine.events.read(alice, { schema: 'Order', instanceId: 'o1', after: 2 }).events.map((event) => event.change), [
-        { title: 'Lamp' },
-      ]);
-      const updated = engine.instances.update(alice, 'Order', 'o1', { title: 'Chair' }, { expectedSeq: 2 });
-      assert.deepEqual([updated.seq, updated.data], [3, { title: 'Chair' }]);
-      checkOperationEvents(engine, 4);
-    },
-  },
-  // Version 4 added operation events and behavior storage, with no
-  // references between instances.
-  4: {
-    write(storage) {
-      const order = canonical(orderDocument());
-      storage.run(
-        `INSERT INTO engine_schemas (namespace, name, version, document, hash, defined_at, defined_by, published_at, published_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        ['default', 'Order', 1, order.text, order.hash, 100, 'alice', 200, 'alice']
-      );
-      storage.run(
-        `INSERT INTO engine_instances (namespace, schema, id, schema_namespace, version, seq, data, created_at, created_by, updated_at, updated_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        ['default', 'Order', 'o1', 'default', 1, 1, '{"title":"Desk"}', 300, 'alice', 300, 'alice']
-      );
-      const insert = 'INSERT INTO engine_events (kind, namespace, schema, instance_id, seq, version, actor, at, change) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)';
-      storage.run(insert, ['publish', 'default', 'Order', null, null, 1, 'alice', 200, order.text]);
-      storage.run(insert, ['create', 'default', 'Order', 'o1', 1, 1, 'alice', 300, '{"title":"Desk"}']);
-    },
-    check(engine) {
-      // A behavior on a migrated file records a reference to an instance
-      // the seed wrote, and the delete of that instance runs its hook.
-      engine.schemas.define(alice, itemDocument([{ name: 'test.Holder' }]));
-      engine.schemas.publish(alice, 'Item');
-      engine.instances.create(alice, 'Item', { title: 'Lamp' }, { id: 'i1' });
-      engine.instances.invoke(alice, 'Item', 'i1', 'hold', { schema: 'Order', id: 'o1' });
-      assert.deepEqual(engine.instances.get(alice, 'Item', 'i1')?.behaviors['test.Holder']?.held, ['Order/o1/']);
-      assert.equal(engine.instances.delete(alice, 'Order', 'o1'), true);
-      assert.equal(engine.instances.get(alice, 'Item', 'i1')?.behaviors['test.Holder']?.held, undefined);
-      assert.deepEqual(engine.instances.invoke(alice, 'Item', 'i1', 'notes'), ['delete Order o1']);
-    },
-  },
-  // Version 5 added references between instances. Its events record no
-  // cause, and it has no subscriptions or schedules.
-  5: {
-    write(storage) {
-      const order = canonical(orderDocument());
-      storage.run(
-        `INSERT INTO engine_schemas (namespace, name, version, document, hash, defined_at, defined_by, published_at, published_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        ['default', 'Order', 1, order.text, order.hash, 100, 'alice', 200, 'alice']
-      );
-      storage.run(
-        `INSERT INTO engine_instances (namespace, schema, id, schema_namespace, version, seq, data, created_at, created_by, updated_at, updated_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        ['default', 'Order', 'o1', 'default', 1, 1, '{"title":"Desk"}', 300, 'alice', 300, 'alice']
-      );
-      const insert = 'INSERT INTO engine_events (kind, namespace, schema, instance_id, seq, version, actor, at, change) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)';
-      storage.run(insert, ['publish', 'default', 'Order', null, null, 1, 'alice', 200, order.text]);
-      storage.run(insert, ['create', 'default', 'Order', 'o1', 1, 1, 'alice', 300, '{"title":"Desk"}']);
-    },
-    check(engine) {
-      // The seed's events read with no cause. A reaction on the migrated
-      // file hears the events after its schema's publish, not the seed's,
-      // and the event it writes records its cause.
-      assert.deepEqual(
-        engine.events.read(alice).events.map((event) => [event.kind, event.cause]),
-        [
-          ['publish', undefined],
-          ['create', undefined],
-        ]
-      );
-      engine.schemas.define(alice, ledgerDocument('Ledgered'));
-      engine.schemas.publish(alice, 'Ledgered');
-      probe.react = (context, event) => {
-        if (event.cause === undefined) {
-          mark(context, event);
-        }
-      };
-      engine.instances.create(alice, 'Ledgered', { title: 'Lamp' }, { id: 'l1' });
-      assert.equal(engine.runner.runDue().handled, 2);
-      const [created, marked] = engine.events.read(alice, { schema: 'Ledgered', instanceId: 'l1' }).events;
-      assert.deepEqual(marked.cause, { behavior: 'test.Ledger', event: created.cursor, depth: 1 });
-      assert.deepEqual(
-        engine.runner.status().subscriptions.map((status) => [status.schema, status.cursor]),
-        [['Ledgered', marked.cursor]]
-      );
-    },
-  },
-  // Version 6 added subscriptions, schedules and the causes of the
-  // runner's events. It had no define events and recorded no service.
-  6: {
-    write(storage) {
-      const order = canonical(orderDocument());
-      storage.run(
-        `INSERT INTO engine_schemas (namespace, name, version, document, hash, defined_at, defined_by, published_at, published_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        ['default', 'Order', 1, order.text, order.hash, 100, 'alice', 200, 'alice']
-      );
-      storage.run(
-        `INSERT INTO engine_instances (namespace, schema, id, schema_namespace, version, seq, data, created_at, created_by, updated_at, updated_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        ['default', 'Order', 'o1', 'default', 1, 2, '{"title":"Lamp"}', 300, 'alice', 400, 'runner']
-      );
-      const insert = `INSERT INTO engine_events (kind, namespace, schema, instance_id, seq, version, actor, at, change, cause_behavior, cause_event, depth)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
-      storage.run(insert, ['publish', 'default', 'Order', null, null, 1, 'alice', 200, order.text, null, null, 0]);
-      storage.run(insert, ['create', 'default', 'Order', 'o1', 1, 1, 'alice', 300, '{"title":"Desk"}', null, null, 0]);
-      storage.run(insert, ['update', 'default', 'Order', 'o1', 2, 1, 'runner', 400, '{"title":"Lamp"}', 'test.Ledger', 2, 1]);
-      storage.run('INSERT INTO engine_subscriptions (behavior, namespace, schema, cursor) VALUES (?, ?, ?, ?)', ['test.Ledger', 'default', 'Order', 3]);
-    },
-    check(engine) {
-      assert.deepEqual(
-        engine.events.read(alice).events.map((event) => [event.cursor, event.kind, event.version, event.cause, 'service' in event]),
-        [
-          [1, 'publish', 1, undefined, false],
-          [2, 'create', 1, undefined, false],
-          [3, 'update', 1, { behavior: 'test.Ledger', event: 2, depth: 1 }, false],
-        ]
-      );
-      assert.deepEqual(
-        engine.runner.status().subscriptions.map((status) => [status.behavior, status.schema, status.cursor]),
-        [['test.Ledger', 'Order', 3]]
-      );
-      const draft = engine.schemas.define(alice, { ...orderDocument(), description: 'a draft' });
-      assert.deepEqual(
-        engine.events.read(alice, { after: 3 }).events.map((event) => [event.cursor, event.kind, event.version, event.change]),
-        [[4, 'define', null, { hash: draft.hash }]]
-      );
-      checkOperationEvents(engine, 4, 'define');
-    },
-  },
-  // Version 7 recorded references that hear every change of their target,
-  // with no column to say otherwise.
-  7: {
-    write(storage) {
-      storage.run(
-        `INSERT INTO engine_references (namespace, target_schema, target_id, source_schema, source_id, behavior, key)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        ['default', 'Item', 'i1', 'Note', 'n1', 'test.Holder', 'desk']
-      );
-    },
-    check(engine) {
-      // The reference still hears every change: an update of i1 runs the
-      // holder's hook, which notes it, and it lists with no hears.
-      publishItem(engine, [{ name: 'test.Counter' }]);
-      const note = schemaDocument('Note', [{ name: 'title', typeRef: { name: 'string' } }]) as { types: { Note: Record<string, unknown> } };
-      note.types.Note.behaviors = [{ name: 'test.Holder' }];
-      engine.schemas.define(alice, note);
-      engine.schemas.publish(alice, 'Note');
-      engine.instances.create(alice, 'Note', { title: 'First' }, { id: 'n1' });
-      engine.instances.create(alice, 'Item', { title: 'Desk' }, { id: 'i1' });
-      assert.deepEqual(engine.instances.invoke(alice, 'Note', 'n1', 'holding'), [{ schema: 'Item', id: 'i1', key: 'desk' }]);
-      engine.instances.update(alice, 'Item', 'i1', { title: 'Oak desk' });
-      assert.deepEqual(engine.instances.invoke(alice, 'Note', 'n1', 'notes'), ['update Item i1']);
-    },
-  },
-  // Version 8 kept every field inline in the row and in the event log,
-  // however large, and had no value store.
-  8: {
-    write(storage) {
-      const order = canonical(orderDocument());
-      const data = JSON.stringify({ title: 'Bulk', lines: bulkLines() });
-      storage.run(
-        `INSERT INTO engine_schemas (namespace, name, version, document, hash, defined_at, defined_by, published_at, published_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        ['default', 'Order', 1, order.text, order.hash, 100, 'alice', 200, 'alice']
-      );
-      storage.run(
-        `INSERT INTO engine_instances (namespace, schema, id, schema_namespace, version, seq, data, created_at, created_by, updated_at, updated_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        ['default', 'Order', 'o1', 'default', 1, 1, data, 300, 'alice', 300, 'alice']
-      );
-      const insert = 'INSERT INTO engine_events (kind, namespace, schema, instance_id, seq, version, actor, at, change) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)';
-      storage.run(insert, ['publish', 'default', 'Order', null, null, 1, 'alice', 200, order.text]);
-      storage.run(insert, ['create', 'default', 'Order', 'o1', 1, 1, 'alice', 300, data]);
-    },
-    check(engine) {
-      // The row and its create event read as they were written, inline.
-      const lines = bulkLines();
-      assert.deepEqual(engine.instances.get(alice, 'Order', 'o1')?.data.lines, lines);
-      const created = engine.events.read(alice).events[1];
-      assert.deepEqual([(created.change as { lines: unknown }).lines, created.valueRefs], [lines, undefined]);
-      // The row's next write moves the large field to the value store; the
-      // event the seed wrote keeps it inline.
-      engine.instances.update(alice, 'Order', 'o1', { title: 'Bulk order' }, { expectedSeq: 1 });
-      const row = engine.storage.get("SELECT data, value_refs FROM engine_instances WHERE id = 'o1'");
-      assert.equal(row?.value_refs, '["/lines"]');
-      const hash = createHash('sha256').update(canonicalJSON(lines)).digest('hex');
-      assert.deepEqual((JSON.parse(String(row?.data)) as { lines: unknown }).lines, { $value: hash, bytes: canonicalJSON(lines).length });
-      assert.deepEqual(engine.instances.get(alice, 'Order', 'o1')?.data.lines, lines);
-      assert.deepEqual(engine.values.get(alice, hash).value, lines);
-      assert.deepEqual((engine.events.read(alice).events[1].change as { lines: unknown }).lines, lines);
-      checkOperationEvents(engine, 3);
-    },
-  },
-  // Version 9 ignored @unique, and kept a long slug by hash in the row.
-  9: {
-    write(storage) {
-      writeModels(storage);
-    },
-    check(engine) {
-      // Migration 10 indexed the slug and put b's back inline in its row.
-      const row = engine.storage.get("SELECT data, value_refs FROM engine_instances WHERE id = 'b'");
-      assert.deepEqual([JSON.parse(String(row?.data)), row?.value_refs], [{ slug: longSlug() }, null]);
-      assert.equal(
-        Number(engine.storage.get("SELECT COUNT(*) AS n FROM engine_payload_holders WHERE holder = 'instance'")?.n),
-        0,
-        "b's row holds no value; its create event still does"
-      );
-      assert.equal(engine.instances.lookup(alice, 'Model', { slug: longSlug() })?.id, 'b');
-      assert.equal(engine.instances.lookup(alice, 'Model', { slug: 'models/plain' })?.id, 'a');
-      assert.throws(() => engine.instances.create(alice, 'Model', { slug: 'models/plain' }), UniqueConflictError);
-      engine.instances.create(alice, 'Model', { slug: 'models/new' }, { id: 'c' });
-      checkOperationEvents(engine, 4, 'create');
-    },
-  },
-  // Version 10 had no namespaces but the configured ones, kept every
-  // event, and found where a subscription starts from its publish event.
-  10: {
-    write(storage) {
-      const order = canonical(orderDocument());
-      storage.run(
-        `INSERT INTO engine_schemas (namespace, name, version, document, hash, defined_at, defined_by, published_at, published_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        ['default', 'Order', 1, order.text, order.hash, 100, 'alice', 200, 'alice']
-      );
-      storage.run(
-        `INSERT INTO engine_instances (namespace, schema, id, schema_namespace, version, seq, data, created_at, created_by, updated_at, updated_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        ['default', 'Order', 'o1', 'default', 1, 2, '{"title":"Lamp"}', 300, 'alice', 400, 'alice']
-      );
-      const insert = 'INSERT INTO engine_events (kind, namespace, schema, instance_id, seq, version, actor, at, change) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)';
-      storage.run(insert, ['publish', 'default', 'Order', null, null, 1, 'alice', 200, order.text]);
-      storage.run(insert, ['create', 'default', 'Order', 'o1', 1, 1, 'alice', 300, '{"title":"Desk"}']);
-      storage.run(insert, ['update', 'default', 'Order', 'o1', 2, 1, 'alice', 400, '{"title":"Lamp"}']);
-    },
-    check(engine) {
-      // The version keeps its publish's cursor, which the migration read
-      // from the log.
-      assert.equal(engine.storage.get("SELECT published_cursor FROM engine_schemas WHERE name = 'Order' AND version = 1")?.published_cursor, 1);
-      // The namespaces are the configured ones, and a create makes one.
-      assert.deepEqual(engine.namespaces.list(alice).map((namespace) => [namespace.name, namespace.origin]), [['default', 'configured']]);
-      assert.equal(engine.namespaces.create(alice, 'acme').origin, 'created');
-      // The log is append-only above a namespace's floor and gives way at
-      // or before it, as retention moves it.
-      engine.storage.run("INSERT INTO engine_log_floors (namespace, floor) VALUES ('default', 2)");
-      assert.throws(() => engine.storage.run('DELETE FROM engine_events WHERE cursor = 3'), /engine_events is append-only/);
-      engine.storage.run('DELETE FROM engine_events WHERE cursor <= 2');
-      assert.equal(thrown(() => engine.events.read(alice, { after: 1 }), EngineError).code, 'cursor_expired');
-      assert.deepEqual(
-        engine.events.read(alice, { after: 2 }).events.map((event) => [event.cursor, event.kind]),
-        [[3, 'update']]
-      );
-      const updated = engine.instances.update(alice, 'Order', 'o1', { title: 'Chair' }, { expectedSeq: 2 });
-      assert.deepEqual([updated.seq, updated.data], [3, { title: 'Chair' }]);
-      checkOperationEvents(engine, 4);
-    },
-  },
-  // Version 11 kept the namespaces a create made, and every event.
-  11: {
-    write(storage) {
-      const order = canonical(orderDocument());
-      storage.run('INSERT INTO engine_namespaces (name, created_at, created_by, archived_at, archived_by) VALUES (?, ?, ?, ?, ?)', ['acme', 100, 'alice', 200, 'bob']);
-      storage.run('INSERT INTO engine_namespaces (name, created_at, created_by) VALUES (?, ?, ?)', ['beta', 150, 'alice']);
-      storage.run(
-        `INSERT INTO engine_schemas (namespace, name, version, document, hash, defined_at, defined_by, published_at, published_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        ['beta', 'Order', 1, order.text, order.hash, 160, 'alice', 170, 'alice']
-      );
-      const insert = 'INSERT INTO engine_events (kind, namespace, schema, instance_id, seq, version, actor, at, change) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)';
-      storage.run(insert, ['publish', 'beta', 'Order', null, null, 1, 'alice', 170, order.text]);
-    },
-    check(engine) {
-      assert.deepEqual(engine.namespaces.names, ['default', 'acme', 'beta']);
-      assert.deepEqual(engine.namespaces.get(alice, 'acme'), {
-        name: 'acme',
-        origin: 'created',
-        shared: false,
-        state: 'archived',
-        createdAt: 100,
-        createdBy: 'alice',
-        archivedAt: 200,
-        archivedBy: 'bob',
-      });
-      assert.equal(engine.storage.get("SELECT published_cursor FROM engine_schemas WHERE namespace = 'beta' AND name = 'Order'")?.published_cursor, 1);
-      assert.equal(thrown(() => engine.schemas.define(alice, orderDocument(), { namespace: 'acme' }), EngineError).code, 'namespace_archived');
-      assert.equal(engine.instances.create(alice, 'Order', { title: 'Desk' }, { id: 'o1', namespace: 'beta' }).seq, 1);
-      assert.equal(engine.namespaces.unarchive(alice, 'acme').state, 'active');
-      assert.equal(engine.schemas.define(alice, orderDocument(), { namespace: 'acme' }).namespace, 'acme');
-    },
-  },
-};
-
-// A Model whose slug is @unique, which version 9 stored and ignored.
-const modelDocument = schemaDocument('Model', [
-  { name: 'slug', typeRef: { name: 'string' }, unique: true },
-  { name: 'title', typeRef: { name: 'string' } },
-]);
-
-/** longSlug is a slug a version 9 engine with a 1 KiB threshold stored by hash. */
-function longSlug(): string {
-  return `models/${'x'.repeat(2000)}`;
-}
-
-// writeModels writes version 1 of Model and its instances, as version 9
-// wrote them: a by its slug inline, b by its slug's ref, and the extra
-// rows given.
-function writeModels(storage: Storage, rows: Array<[string, string]> = []): void {
-  const model = canonical(modelDocument);
-  storage.run(
-    `INSERT INTO engine_schemas (namespace, name, version, document, hash, defined_at, defined_by, published_at, published_by)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ['default', 'Model', 1, model.text, model.hash, 100, 'alice', 200, 'alice']
-  );
-  const json = canonicalJSON(longSlug());
-  const hash = createHash('sha256').update(json).digest('hex');
-  const ref = JSON.stringify({ slug: { $value: hash, bytes: json.length } });
-  storage.run('INSERT INTO engine_payloads (hash, value, bytes) VALUES (?, ?, ?)', [hash, json, json.length]);
-  const instance = `INSERT INTO engine_instances (namespace, schema, id, schema_namespace, version, seq, data, created_at, created_by, updated_at, updated_by, value_refs)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
-  const event = 'INSERT INTO engine_events (kind, namespace, schema, instance_id, seq, version, actor, at, change, value_refs) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
-  const holder = 'INSERT INTO engine_payload_holders (hash, namespace, schema, holder, id, key) VALUES (?, ?, ?, ?, ?, ?)';
-  storage.run(event, ['publish', 'default', 'Model', null, null, 1, 'alice', 200, model.text, null]);
-  storage.run(instance, ['default', 'Model', 'a', 'default', 1, 1, '{"slug":"models/plain"}', 300, 'alice', 300, 'alice', null]);
-  storage.run(event, ['create', 'default', 'Model', 'a', 1, 1, 'alice', 300, '{"slug":"models/plain"}', null]);
-  storage.run(instance, ['default', 'Model', 'b', 'default', 1, 1, ref, 300, 'alice', 300, 'alice', '["/slug"]']);
-  const created = storage.run(event, ['create', 'default', 'Model', 'b', 1, 1, 'alice', 300, ref, '["/slug"]']);
-  storage.run(holder, [hash, 'default', 'Model', 'instance', 'b', '']);
-  storage.run(holder, [hash, 'default', 'Model', 'event', 'b', String(created.lastInsertRowid)]);
-  for (const [id, data] of rows) {
-    storage.run(instance, ['default', 'Model', id, 'default', 1, 1, data, 300, 'alice', 300, 'alice', null]);
-  }
-}
-
-/** bulkLines is an order's lines whose JSON is past the default threshold, 64 KiB. */
-function bulkLines(): Array<{ sku: string; count: number }> {
-  return Array.from({ length: 3000 }, (_, index) => ({ sku: `SKU-${String(index).padStart(5, '0')}`, count: index + 1 }));
-}
-
-// checkOperationEvents publishes a schema with a behavior on a migrated file,
-// runs one of its writing operations and reads the events that follow the
-// write the seed's check made at cursor `last`: the log's cursors carry
-// on from the seed's, and the rebuilt kind CHECK admits a define and an
-// operation.
-function checkOperationEvents(engine: Engine, last: number, kind = 'update'): void {
-  publishItem(engine, [{ name: 'test.Counter' }]);
-  engine.instances.create(alice, 'Item', { title: 'Lamp' }, { id: 'i1' });
-  engine.instances.invoke(alice, 'Item', 'i1', 'increment');
-  assert.equal(engine.instances.get(alice, 'Item', 'i1')?.seq, 2);
-  assert.deepEqual(
-    engine.events.read(alice, { after: last - 1 }).events.map((event) => [event.cursor, event.kind]),
-    [
-      [last, kind],
-      [last + 1, 'define'],
-      [last + 2, 'publish'],
-      [last + 3, 'create'],
-      [last + 4, 'operation'],
-    ]
-  );
-}
-
-// The indexes and triggers of engine_events that the code relies on: the
+// The indexes and triggers of engine_events that the engine relies on: the
 // instance index a one-instance read names (INDEXED BY), the namespace,
-// schema and publish ranges, and the append-only triggers. Migration 7
-// rebuilds the table, which drops its indexes and triggers.
+// schema and publish ranges, and the append-only triggers.
 const EVENT_LOG_OBJECTS = [
   'index engine_events_instance',
   'index engine_events_namespace',
@@ -523,83 +31,59 @@ const EVENT_LOG_OBJECTS = [
   'trigger engine_events_no_update',
 ];
 
-function eventLogObjects(storage: Storage): string[] {
+function eventLogObjects(storage: SqliteReader): string[] {
   return storage
     .all("SELECT type, name FROM sqlite_master WHERE tbl_name = 'engine_events' AND type IN ('index', 'trigger') ORDER BY type, name")
     .map((row) => `${String(row.type)} ${String(row.name)}`);
 }
 
-const latest = engineMigrations.migrations.length;
-
 for (const driver of drivers) {
   describe(`engine migrations (${driver})`, () => {
-    for (let from = 0; from < latest; from += 1) {
-      test(`from version ${from}`, () => {
-        const seed = seeds[from];
-        assert.ok(seed, `add a seed for engine storage version ${from}`);
-        const path = freshPath();
-        const storage = Storage.open(path, { driver });
-        migrate(storage, { owner: ENGINE_OWNER, migrations: engineMigrations.migrations.slice(0, from) });
-        seed.write(storage);
-        storage.close();
-
-        const engine = track(
-          openEngine({ path, driver, policy: allowAll, metaSchema: openMetaSchema(), behaviors: [counter, holder, ledger], runner: { principal: runnerPrincipal } })
-        );
-        assert.deepEqual(
-          appliedMigrations(engine.storage, ENGINE_OWNER).map((row) => row.version),
-          engineMigrations.migrations.map((migration) => migration.version)
-        );
-        seed.check(engine);
-        assert.deepEqual(eventLogObjects(engine.storage), EVENT_LOG_OBJECTS);
-        engine.schemas.define(alice, { ...orderDocument(), description: 'after the migration' });
-        assert.equal(engine.schemas.publish(alice, 'Order').published, true);
-        // The log now holds an event whatever the seed wrote, so its triggers fire.
-        assert.throws(() => engine.storage.run('DELETE FROM engine_events'), /engine_events is append-only/);
-        assert.throws(() => engine.storage.run("UPDATE engine_events SET actor = 'mallory'"), /engine_events is append-only/);
-        // A define has no instance and no version, and only a define lacks a version.
-        const insert = 'INSERT INTO engine_events (kind, namespace, schema, instance_id, seq, version, actor, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)';
-        for (const row of [
-          ['define', 'default', 'Order', null, null, 1, 'mallory', 1],
-          ['define', 'default', 'Order', 'o9', 1, null, 'mallory', 1],
-          ['publish', 'default', 'Order', null, null, null, 'mallory', 1],
-          ['create', 'default', 'Order', 'o9', 1, null, 'mallory', 1],
-        ]) {
-          assert.throws(() => engine.storage.run(insert, row), /CHECK constraint failed/, JSON.stringify(row));
-        }
-      });
-    }
-
-    test('migration 10 refuses a file whose instances break a unique field the engine ignored before', () => {
+    test('a new file is brought up to every migration, each recorded once, and a reopen runs none again', () => {
       const path = freshPath();
-      const storage = Storage.open(path, { driver });
-      migrate(storage, { owner: ENGINE_OWNER, migrations: engineMigrations.migrations.slice(0, 9) });
-      writeModels(storage, [
-        ['c', '{"slug":"models/plain"}'],
-        ['d', '{"slug":"models/plain"}'],
-      ]);
-      storage.close();
-      assert.throws(
-        () => openEngine({ path, driver, policy: allowAll }),
-        /engine migration 10: schema Model in namespace default has unique fields its stored instances break: field Model.slug becomes unique, and 3 instances in namespace default hold slug "models\/plain"/
-      );
-      // Nothing of the migration stays: the file is still at version 9.
-      const reopened = Storage.open(path, { driver });
+      const engine = openEngine({ path, driver, policy: allowAll });
+      const ledger = appliedMigrations(engine.storage, ENGINE_OWNER);
+      assert.ok(ledger.length >= 11, `the engine has its migrations, got ${ledger.length}`);
       assert.deepEqual(
-        appliedMigrations(reopened, ENGINE_OWNER).map((row) => row.version),
-        engineMigrations.migrations.slice(0, 9).map((migration) => migration.version)
+        ledger.map((row) => row.version),
+        ledger.map((_, index) => index + 1)
       );
-      reopened.close();
+      for (const row of ledger) {
+        assert.ok(row.name.length > 0, `migration ${row.version} has a name`);
+      }
+      assert.deepEqual(eventLogObjects(engine.storage), EVENT_LOG_OBJECTS);
+      engine.close();
+
+      const reopened = track(openEngine({ path, driver, policy: allowAll }));
+      assert.deepEqual(appliedMigrations(reopened.storage, ENGINE_OWNER), ledger);
+    });
+
+    test("the event log is append-only, and a row's kind, instance and version are checked", () => {
+      const engine = track(openEngine({ path: freshPath(), driver, policy: allowAll }));
+      engine.schemas.define(alice, orderDocument());
+      assert.equal(engine.schemas.publish(alice, 'Order').published, true);
+      // The log holds the define's and the publish's events, so its triggers fire.
+      assert.throws(() => engine.storage.run('DELETE FROM engine_events'), /engine_events is append-only/);
+      assert.throws(() => engine.storage.run("UPDATE engine_events SET actor = 'mallory'"), /engine_events is append-only/);
+      // A define has no instance and no version, and only a define lacks a version.
+      const insert = 'INSERT INTO engine_events (kind, namespace, schema, instance_id, seq, version, actor, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)';
+      for (const row of [
+        ['define', 'default', 'Order', null, null, 1, 'mallory', 1],
+        ['define', 'default', 'Order', 'o9', 1, null, 'mallory', 1],
+        ['publish', 'default', 'Order', null, null, null, 'mallory', 1],
+        ['create', 'default', 'Order', 'o9', 1, null, 'mallory', 1],
+      ]) {
+        assert.throws(() => engine.storage.run(insert, row), /CHECK constraint failed/, JSON.stringify(row));
+      }
     });
 
     test('an engine whose file is newer than the build refuses to open it', () => {
       const path = freshPath();
-      const storage = Storage.open(path, { driver });
-      migrate(storage, {
-        owner: ENGINE_OWNER,
-        migrations: [...engineMigrations.migrations, { version: latest + 1, name: 'from a later build', up() {} }],
-      });
-      storage.close();
+      openEngine({ path, driver, policy: allowAll }).close();
+      const connection = openConnection(path);
+      const latest = Number(connection.get('SELECT MAX(version) AS latest FROM engine_migrations WHERE owner = ?', [ENGINE_OWNER])?.latest);
+      connection.run('INSERT INTO engine_migrations (owner, version, name, applied_at) VALUES (?, ?, ?, ?)', [ENGINE_OWNER, latest + 1, 'from a later build', 1]);
+      connection.close();
       assert.throws(() => openEngine({ path, driver, policy: allowAll }), /migrations do not run backwards/);
     });
 

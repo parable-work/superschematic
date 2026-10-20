@@ -26,10 +26,12 @@ rule.
 
 ## What the engine is
 
-- A TypeScript library for Node.js 24 and Bun. Your server opens it in
+- The Rust library every server links (D58), which `@superschematic/engine`
+  loads as a Node-API addon on Node.js 24 and Bun. Your server opens it in
   its own process; the engine has no server or process of its own.
-- One SQLite file, through the runtime's built-in `node:sqlite` or
-  `bun:sqlite`. There is no native addon and no database server.
+- One SQLite file, through the SQLite the engine bundles, or a schema of a
+  Postgres database ([On Postgres](#on-postgres)). On SQLite there is no
+  database server.
 - One process writes the file. The engine caches each schema version's
   validator and behaviors in the process and announces new events in the
   process, and nothing coordinates either across processes. Run one server
@@ -41,10 +43,11 @@ rule.
 - It has no roles and no default policy. Your server says who each caller
   is and what each caller may do.
 
-It is not a database server that several processes share, and it does not
-run on Postgres. D16 in
+It is not a database server of its own: on SQLite one server process
+owns the file, and on Postgres each instance of your server opens its own
+engine on one schema of the database. D16 and D58 in
 [docs/DECISIONS.md](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md)
-records the design, what is built and what is still to come.
+record the design, what is built and what is still to come.
 
 ## Set up
 
@@ -57,26 +60,39 @@ with `make setup`:
 examples/engine-notes/scripts/check.sh
 ```
 
-It builds the schema runtime, the HTTP runtime, the version graph and
-the engine (`bun install --frozen-lockfile` and `bun run build` in each),
-links them into the example's `node_modules` (`scripts/link.sh`),
-type-checks the example, and runs its end-to-end test with `node --test`
-and with `bun test`. The version graph's build compiles its core to
-WebAssembly, so it needs cargo and the `wasm32-unknown-unknown` target.
-The last line it prints is `engine-notes: ok`.
+It builds the HTTP runtime and the engine (`bun install --frozen-lockfile`
+and `bun run build` in each), and the engine's Node-API addon with cargo
+when the engine has none (`scripts/engine-napi.sh`), links them into the
+example's `node_modules` (`scripts/link.sh`), type-checks the example, and
+runs its end-to-end test with `node --test` and with `bun test`. The last
+line it prints is `engine-notes: ok`.
+
+`@superschematic/engine` loads its addon when the first engine opens,
+from the first of these:
+
+- the file the engine option `addon` names, or, for every engine the
+  process opens, the environment variable `SUPERSCHEMATIC_ENGINE_ADDON`:
+  a project's own addon, built over its own behaviors
+  ([Your own behaviors](#your-own-behaviors)). Nothing else is tried when
+  it does not load;
+- the checkout's `runtime/engine/typescript/native/`, which
+  `scripts/engine-napi.sh` builds, as here;
+- the published platform package `@superschematic/engine-<target>`, for
+  `darwin-arm64`, `darwin-x64`, `linux-x64-gnu` or `linux-arm64-gnu`, an
+  optional dependency of `@superschematic/engine` that npm installs for
+  its host.
 
 `scripts/link.sh` links `@superschematic/engine`, and, from the engine's
 own install, the packages the example imports: `@superschematic/http-runtime`,
 `hono`, `@hono/node-server` and `@modelcontextprotocol/client`, and
 TypeScript and the Node.js types for the type-check. Each resolves to the
 engine's copy, so the engine and the example share one Hono. The engine
-needs `@superschematic/schema-runtime`, `@superschematic/schema-ir`,
-`@superschematic/http-runtime` and `superscalar` beside it, which its build
-links into its own `node_modules`. It depends on
-`@superschematic/versiongraph`, whose engine and SQLite adapter run the
-`Branches` behavior over the version graph's WebAssembly core. Its `./http`
-entry point also needs `hono`, and its `./mcp` entry point `hono` and
-`@modelcontextprotocol/server`.
+needs `@superschematic/http-runtime` beside it, and `superscalar`, which
+the HTTP runtime imports; its build links both into its own
+`node_modules`. Its `./http` and `./mcp` entry points also need `hono`.
+The engine speaks MCP itself, so `./mcp` needs no MCP SDK, and its
+`Branches` behavior runs the version graph's Rust engine inside the
+addon, so nothing else needs building.
 
 ## The schema
 
@@ -100,12 +116,13 @@ from a TypeScript or YAML schema file. The notes schema:
   and its `review` config lets a caller propose a change that someone
   holding `notes.review` approves or rejects.
 
-The engine checks a document with the strict loader of
-`@superschematic/schema-runtime`, against the core binary's
+The engine checks a document with the strict loader of the schema
+runtime's Rust crate, against the core binary's
 [`json-schema`](/superschematic/reference/cli/) output by default, which
 admits the core's behaviors, the
 [work-queue behaviors](/superschematic/guides/work-queues/) included
-(those run once the server registers `@superschematic/engine-workqueue`).
+(those run once the server names them in the engine's `behaviors`
+option).
 A deployment whose binary registers more behaviors passes that binary's
 output as the `metaSchema` option.
 
@@ -148,6 +165,36 @@ The first is refused and the server would not start; the second becomes
 version 2, and every stored note stays as it was. The same rule holds for
 a draft defined over HTTP; see
 [Change the schema over HTTP](#change-the-schema-over-http).
+
+### On Postgres
+
+`openEngine` is synchronous: each call returns its result, which suits a
+SQLite file in the server's own process. A server on Postgres, where a
+call waits on the network, opens the engine with `openEngineAsync`, whose
+`AsyncEngine` returns a promise from every call:
+
+```ts
+import { openEngineAsync } from '@superschematic/engine';
+
+const engine = await openEngineAsync({ postgres: { url: process.env.DATABASE_URL! }, policy: 'permission' });
+await engine.schemas.define(deployer, notesSchema);
+await engine.schemas.publish(deployer, 'notes');
+```
+
+`postgres` names the database's `url` and the Postgres `schema` the
+engine's tables live in, `engine` by default, with the pool's options
+beside them (`PostgresOptions`); a `path` in its place opens a SQLite file
+the same way. Its calls run off the JavaScript thread, so its options are
+data alone: the policy is `allowAll`, `permissionPolicy()` (or its name,
+`'permission'`) or `{ rules }`, a list of rules the first match of which
+decides. It takes no policy of your own written as a function, no
+permission matcher but the HTTP runtime's `hasAnyPermission`, no id
+function and no behavior written in TypeScript.
+Every instance of the server opens its own engine on the one schema; the
+README's
+[several instances on one Postgres database](https://github.com/parable-work/superschematic/blob/main/runtime/engine/README.md#several-instances-on-one-postgres-database)
+has what the engine holds across them. `engineApp` and `engineMcp` serve
+either engine.
 
 ## Callers and the access policy
 
@@ -579,37 +626,48 @@ the proposal.
 An extension adds a behavior in two halves. The compiler half is a JSON
 declaration its Go package registers; the binary's
 [`behaviors --out`](/superschematic/reference/cli/) command copies it into
-the npm package that implements it. The engine half is a
-`BehaviorImplementation`, built with `defineBehavior`: a handler per
-operation, a reader per field, guards (which may refuse a create too),
-an `initialize` that gets the parameters a create gives it, and
-migrations for its own storage, and optionally config checks, a
-`validate` that judges the fields a write stores (with `checkedTypes`
-and `instanceSchema`), `afterChange`, schema-level operations,
-reactions and schedules for the runner, and hooks that run when an
-instance it references changes. A guard's veto carries a code the
+the crate that implements it. The engine half is that crate: a Rust type
+that implements the engine's `Behavior` trait, with a parsed config and
+its hooks, a handler per operation, a reader per field, guards (which may
+refuse a create too), an `initialize` that gets the parameters a create
+gives it, and migrations for its own storage, and optionally config
+checks, a `validate` that judges the fields a write stores (with
+`checked_types` and `instance_schema`), `after_change`, schema-level
+operations, reactions and schedules for the runner, and hooks that run
+when an instance it references changes. A guard's veto carries a code the
 declaration lists, at a create as at any other change, and a caller can
 send a behavior a precondition with a write, which its guard checks:
-`Lease`'s token is one (`Preconditions` header over HTTP). A server
-registers it with `openEngine({ behaviors, metaSchema })`, where
-`metaSchema` is the extension binary's `json-schema` output, which
-declares it. `acme.Rating` in `examples/acme-schematic` is the worked
-example, and
-[Write an extension](/superschematic/extending/write-an-extension/#a-behavior)
-walks through it.
+`Lease`'s token is one (`Preconditions` header over HTTP).
 
-A behavior's functions reach the instance they run on, the behavior's own
+The behavior's registration names its crate, and a build of a schema
+whose types compose the behavior writes the project's engine crate, which
+compiles the core's behaviors and the extension's into the engine, with a
+Node-API addon over them as its `napi/` member. A TypeScript server loads
+that addon in place of the core's, with the engine option `addon` or
+`SUPERSCHEMATIC_ENGINE_ADDON`, names the behavior in `behaviors`
+(`behaviors: ['acme.Rating']`), and passes the extension binary's
+`json-schema` output, which declares it, as `metaSchema`, and its
+invocation policy and vendor keys as `tools`. `acme.Rating`
+in `examples/acme-schematic` is the worked example, and
+[Write an extension](/superschematic/extending/write-an-extension/#a-behavior)
+walks through it. A behavior written in TypeScript, with
+`@superschematic/engine/testing`'s `defineBehavior`, runs only on the
+engine's test addon (`scripts/engine-napi.sh --js-behaviors`), through
+its bridge, and the shipped addon refuses it: it is for tests and
+fixtures, not a deployment.
+
+A behavior's hooks reach the instance they run on, the behavior's own
 columns and tables, and the rest of the namespace as the caller: they
 read other instances and change them through their operations, and the
 access policy is asked at each step. Beyond one instance, a behavior
 reads its own columns across every instance of its schema with SQL, on a
-read-only relation the engine names (`sql.instances()`) and a migration
+read-only relation the engine names (`sql().instances()`) and a migration
 can index; creates instances wherever it may invoke a writing operation
-(`instances.create`), with their behaviors' create parameters, so a
+(`instances().create`), with their behaviors' create parameters, so a
 parent's children commit with it, linked and blocked; and runs
 schedules at an interval its schema's config can set, or turn off. A
 behavior that keeps values of the schema's other types in its own
-tables reads those types' fields in `parseConfig` (`target.types`),
+tables reads those types' fields in `parse_config` (`target.types()`),
 which holds them to the schema's checks and its compatibility rule, and
 checks a value against one with `validate(type, value)`. Which types a
 config reads may depend on the config and the document only, not on the
@@ -617,7 +675,7 @@ other schemas, since a version is checked against the next with no other
 schema in reach; a define or publish refuses a config whose reads do. A
 behavior that keeps an object with large members in its own tables, a
 copy of the instance's fields say, keeps it through the value store
-(`values.stow`, `load` and `release`), as Revisions does, so the value
+(`values().stow`, `load` and `release`), as Revisions does, so the value
 is stored once however many rows hold it. A schedule's
 run may write the behavior's own tables directly, but only what no
 operation returns, history nothing pins say; a change a read shows goes

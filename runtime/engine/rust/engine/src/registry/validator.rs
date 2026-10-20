@@ -265,6 +265,12 @@ fn overlay(given: &Value, parsed: Option<&Value>, defaults: bool) -> Value {
 // json_issues reports each number JavaScript reads as Infinity, which is
 // not a JSON number.
 fn json_issues(value: &Value, path: &str, issues: &mut Vec<ValidationIssue>) {
+    // A value a binding marked as no JSON (a NaN, a Date), in the
+    // TypeScript engine's words.
+    if let Some(problem) = json::not_json(value) {
+        issues.push(ValidationIssue::new(path, "type", problem));
+        return;
+    }
     match value {
         Value::Number(number) => {
             let read = json::number_value(number);

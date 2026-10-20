@@ -17,10 +17,9 @@ import {
   type AccessPolicy,
   type AccessRequest,
   type Engine,
-  type EngineOptions,
   type Principal,
 } from '../dist/index.js';
-import { alice, cleanup, drivers, openTestEngine, schemaDocument, thrown } from './helpers.ts';
+import { alice, cleanup, drivers, openTestEngine, schemaDocument, thrown, type TestEngineOptions } from './helpers.ts';
 
 afterEach(cleanup);
 
@@ -116,7 +115,7 @@ function recording(rules: (request: AccessRequest) => boolean): { policy: Access
 }
 
 for (const driver of drivers) {
-  function open(options: Partial<EngineOptions> = {}): Engine {
+  function open(options: Partial<TestEngineOptions> = {}): Engine {
     return openTestEngine({ driver, ...options });
   }
 
@@ -131,7 +130,7 @@ for (const driver of drivers) {
   const rollupsOf = (engine: Engine, id: string, principal: Principal = alice) => engine.instances.get(principal, 'Project', id)?.behaviors.Rollups.values;
 
   // Projects p1, p2 and p3; tasks t1 to t3 point at p1, t4 at p2 and t5 at none.
-  function world(options: Partial<EngineOptions> = {}, rollups: Record<string, unknown> = every): Engine {
+  function world(options: Partial<TestEngineOptions> = {}, rollups: Record<string, unknown> = every): Engine {
     const engine = open(options);
     publish(engine, tasks());
     publish(engine, projects(rollups));

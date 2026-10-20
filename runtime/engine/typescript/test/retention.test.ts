@@ -7,17 +7,9 @@
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
 
-import {
-  CursorExpiredError,
-  EngineError,
-  allowAll,
-  type Engine,
-  type EngineEvent,
-  type EngineOptions,
-  type InstanceFields,
-} from '../dist/index.js';
+import { CursorExpiredError, EngineError, allowAll, type Engine, type EngineEvent, type InstanceFields } from '../dist/index.js';
 import { openMetaSchema } from './behavior-fixtures.ts';
-import { alice, cleanup, drivers, freshPath, openEngine, schemaDocument, thrown, track } from './helpers.ts';
+import { alice, cleanup, drivers, freshPath, openEngine, schemaDocument, thrown, track, type TestEngineOptions } from './helpers.ts';
 import { ledger, ledgerDocument, mark, openRunnerEngine, plainDocument, probe, publish, resetProbe, testClock } from './runner-fixtures.ts';
 
 afterEach((t) => {
@@ -52,7 +44,7 @@ function retentionOf(engine: Engine): NonNullable<ReturnType<Engine['runner']['s
 
 for (const driver of drivers) {
   describe(`event log retention (${driver})`, () => {
-    function open(options: Partial<EngineOptions> = {}): Engine {
+    function open(options: Partial<TestEngineOptions> = {}): Engine {
       return openRunnerEngine({ driver, values: { thresholdBytes: 1024 }, ...options });
     }
 
@@ -67,7 +59,7 @@ for (const driver of drivers) {
         ['all', /retention is \{ maxAgeMs\?/],
       ];
       for (const [retention, message] of bad) {
-        assert.throws(() => openEngine({ path: freshPath(), driver, policy: allowAll, retention: retention as EngineOptions['retention'] }), message);
+        assert.throws(() => openEngine({ path: freshPath(), driver, policy: allowAll, retention: retention as TestEngineOptions['retention'] }), message);
       }
       const engine = open();
       assert.throws(() => engine.runner.prune(), /runner.prune needs retention/);

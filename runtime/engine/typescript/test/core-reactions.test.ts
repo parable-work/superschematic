@@ -13,11 +13,10 @@ import {
   SchemaDocumentError,
   type Engine,
   type EngineEvent,
-  type EngineOptions,
   type OperationChange,
   type SubscriptionStatus,
 } from '../dist/index.js';
-import { alice, cleanup, drivers, openTestEngine, schemaDocument, thrown } from './helpers.ts';
+import { alice, cleanup, drivers, openTestEngine, schemaDocument, thrown, type TestEngineOptions } from './helpers.ts';
 import { runnerPrincipal, testClock } from './runner-fixtures.ts';
 
 afterEach(cleanup);
@@ -130,12 +129,12 @@ function subscriptions(engine: Engine): SubscriptionStatus[] {
 }
 
 for (const driver of drivers) {
-  function open(options: Partial<EngineOptions> = {}): Engine {
+  function open(options: Partial<TestEngineOptions> = {}): Engine {
     return openTestEngine({ driver, runner: { principal: runnerPrincipal }, ...options });
   }
 
   // Project p1; tasks t1 and t2, linked to it.
-  function world(options: Partial<EngineOptions> = {}, extra: BehaviorRef[] = []): Engine {
+  function world(options: Partial<TestEngineOptions> = {}, extra: BehaviorRef[] = []): Engine {
     const engine = open(options);
     publish(engine, projects(extra));
     publish(engine, tasks());

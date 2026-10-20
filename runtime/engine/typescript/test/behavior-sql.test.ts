@@ -4,7 +4,8 @@
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
 
-import { BehaviorError, defineBehavior, type BehaviorMigration, type Engine, type SqlValue } from '../dist/index.js';
+import { BehaviorError, type Engine, type SqlValue } from '../dist/index.js';
+import { defineBehavior, type BehaviorMigration } from '../dist/testing/index.js';
 import { counter, openBehaviorEngine, publishItem, tablesOf } from './behavior-fixtures.ts';
 import { alice, cleanup, drivers, fieldsOf, thrown } from './helpers.ts';
 

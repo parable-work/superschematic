@@ -10,15 +10,8 @@ import { afterEach, describe, test } from 'node:test';
 
 import { Ajv2020 } from 'ajv/dist/2020.js';
 
-import {
-  BehaviorError,
-  CreateParamsError,
-  defineBehavior,
-  type BehaviorGuidance,
-  type DescribeDocument,
-  type Engine,
-  type ToolGuidance,
-} from '../dist/index.js';
+import { BehaviorError, CreateParamsError, type DescribeDocument, type Engine, type ToolGuidance } from '../dist/index.js';
+import { defineBehavior, type BehaviorGuidance } from '../dist/testing/index.js';
 import { openMetaSchema } from './behavior-fixtures.ts';
 import {
   alice,

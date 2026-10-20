@@ -300,8 +300,18 @@ func (d *declarations) typeOf(schema any, at string) (string, error) {
 		}
 		return strings.Join(types, " | "), nil
 	}
-	if err := onlyKeys(node, at, append([]string{"type", "enum", "const", "items", "additionalProperties", "description", "title", "default"}, valueConstraints...)...); err != nil {
+	if err := onlyKeys(node, at, append([]string{"type", "enum", "const", "items", "additionalProperties", "description", "title", "default", "not"}, valueConstraints...)...); err != nil {
 		return "", err
+	}
+	// A not narrows a string by a pattern it must not match, as an enum
+	// member's title's "*/" (D48, amended), which the types leave to the
+	// validators as they leave a pattern; any other not would change the
+	// type.
+	if not, ok := node["not"]; ok {
+		excluded, _ := not.(map[string]any)
+		if _, isPattern := excluded["pattern"].(string); node["type"] != "string" || len(excluded) != 1 || !isPattern {
+			return "", fmt.Errorf("%s: a not must be a pattern a string does not match", at)
+		}
 	}
 	if value, ok := node["const"]; ok {
 		s, isString := value.(string)

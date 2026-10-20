@@ -408,7 +408,11 @@ the `StateBackend` (its URL, its secrets provider, and `Env`, what the
 state store gives a run to reach the state and decrypt it, such as S3
 credentials and a passphrase), and `Env`, the platform credentials the run
 reads from the target's secret store. The provisioner hands both to its
-tool's process for that run only, the backend's last. `Render` takes the whole
+tool's process for that run only, the backend's last. `BuildEnv` holds the
+variables a provisioner that builds code on the machine sets for its
+builds alone: the local provisioner's `go build` takes the `CGO_LDFLAGS`
+that point at the release's static archives, which `stack dev` fetches in
+a project that names no superscalar checkout. `Render` takes the whole
 environment, not only its graph, because the program exports every output
 the environment references, a deployable's address included. `Apply`
 applies one step of the deploy order, so the deploy runs migrations

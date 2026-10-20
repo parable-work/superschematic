@@ -128,9 +128,9 @@ func (e EndpointInfo) IdentityConst() string {
 // for a user model's route: the identity runtime's handler checks an
 // administration route's permission itself, under the service's
 // permission prefix, so the router asks only for a caller.
-func (e EndpointInfo) IdentityControlCalls(authenticator, serviceAuthenticator string) []string {
+func (e EndpointInfo) IdentityControlCalls(limits, authenticator, serviceAuthenticator string) []string {
 	e.RequiredPerms = nil
-	return e.ControlCalls(authenticator, serviceAuthenticator)
+	return e.ControlCalls(limits, authenticator, serviceAuthenticator)
 }
 
 // ServiceOnly reports whether only a service calls the route
@@ -144,6 +144,38 @@ func (e EndpointInfo) ServiceOnly() bool {
 // principal.
 func (e EndpointInfo) AllowsService() bool {
 	return e.ServiceCallers != nil && e.ServiceCallers.Mode == ir.ServiceCallersAllow
+}
+
+// RateLimitExpr is the route's @rateLimit as OperationInfo.rate_limit
+// states it: Some(<requests per minute>), or None without one. The
+// router's limiter is the operation's in the RateLimits registry, which
+// reads it (D44, amended).
+func (e EndpointInfo) RateLimitExpr() string {
+	if e.RateLimit <= 0 {
+		return "None"
+	}
+	return fmt.Sprintf("Some(%d)", e.RateLimit)
+}
+
+// ServiceExpr is the operation's effective service clause as
+// OperationInfo.service states it, as its route applies it:
+// Some(ServiceClause { mode: ServiceMode::Require, from: &["shop-orders"] }),
+// or None without one. A route applies a clause only on a crate with the
+// service step, so an operation of a crate without one has none (D37,
+// amended).
+func (e EndpointInfo) ServiceExpr() string {
+	if e.ServiceCallers == nil || !e.ServiceStep {
+		return "None"
+	}
+	from := make([]string, len(e.ServiceCallers.From))
+	for i, api := range e.ServiceCallers.From {
+		from[i] = rustString(api)
+	}
+	mode := "Require"
+	if e.AllowsService() {
+		mode = "Allow"
+	}
+	return fmt.Sprintf("Some(ServiceClause { mode: ServiceMode::%s, from: &[%s] })", mode, strings.Join(from, ", "))
 }
 
 // ConstName is the operation's OperationInfo constant in the crate's
@@ -234,13 +266,20 @@ func (e EndpointInfo) HasControls() bool {
 // ControlCalls are the RouteControls builder calls of the route, in the
 // order a request meets them: the rate limit, the body limit, the service
 // step, the permission check, then the timeout around the handler.
+// limits is the Rust expression of the RateLimits registry the route takes
+// its operation's limiter from (D44, amended); empty gives the route a
+// limiter of its own, as a manual route the service mounts itself has.
 // authenticator and serviceAuthenticator are the Rust expressions of the
 // Arc<dyn Authenticator> and the Arc<dyn ServiceAuthenticator> the checks
 // use.
-func (e EndpointInfo) ControlCalls(authenticator, serviceAuthenticator string) []string {
+func (e EndpointInfo) ControlCalls(limits, authenticator, serviceAuthenticator string) []string {
 	var calls []string
 	if e.RateLimit > 0 {
-		calls = append(calls, fmt.Sprintf(".rate_limit(%d)", e.RateLimit))
+		if limits == "" {
+			calls = append(calls, fmt.Sprintf(".rate_limit(%d)", e.RateLimit))
+		} else {
+			calls = append(calls, fmt.Sprintf(".rate_limiter(%s.of(&crate::operations::%s))", limits, e.ConstName()))
+		}
 	}
 	if e.BodyLimit > 0 {
 		calls = append(calls, fmt.Sprintf(".body_limit_megabytes(%d)", e.BodyLimit))
@@ -350,6 +389,18 @@ type APIOutput struct {
 	// Workers trait deps.rs declares, which handles one message of the
 	// worker's queue (D53, D65).
 	Workers []WorkerInfo
+}
+
+// HasRateLimits reports whether a route the router mounts, a manual one
+// included, has a @rateLimit: build_router_with then takes the routes'
+// limiters from its options' registry (D44, amended).
+func (o *APIOutput) HasRateLimits() bool {
+	for _, endpoint := range o.AllEndpoints() {
+		if endpoint.RateLimit > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // HasPages reports whether a mounted operation pages (D60): the router then
@@ -517,7 +568,10 @@ type Options struct {
 // @rateLimit, @bodyLimit, the permission check of a route that needs a
 // caller, and @timeout around the handler. They are the runtime crate's
 // RouteControls. The caller comes from Implementations.authenticator,
-// which the crate has when an operation needs one (D29).
+// which the crate has when an operation needs one (D29). A @rateLimit
+// route takes its operation's limiter from RouterOptions.rate_limits, a
+// RateLimits registry, so the routers and the Topcoat surfaces built with
+// one registry count a client against one budget (D44, amended).
 //
 // When an operation, a manual one included, has a service clause
 // (@requireService or @allowService), Implementations has a
@@ -526,7 +580,11 @@ type Options struct {
 // it, and the others verify a service credential when one is present. A
 // listed caller on an @allowService route skips the permission check, so
 // its handler takes the principal as an Option. A schema without a service
-// clause generates the crate it did before.
+// clause generates the crate it did before. Each operation's OperationInfo
+// carries its clause, so an in-process call admits by the route's rule:
+// admit, naming no service caller, refuses a @requireService operation,
+// and admit_service holds a caller the process names to its from (D37,
+// amended).
 //
 // An API whose authDb has a User table authenticates with the identity
 // runtime (D50) when an operation needs a caller. The authenticator field

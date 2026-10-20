@@ -14,20 +14,29 @@ import (
 )
 
 // TestQueuesWriteWhatTheGoORMWrites: for every queue of fixture-queue-db,
-// whose message holds a field of every kind a column takes, queues.ts
-// carries the statements the Go ORM runs, byte for byte, and writes each
-// field to the column the Go ORM writes, as JSON where the Go ORM marshals
-// it and as an array where it passes a list, with the enum default it
-// writes (D53). A message one language enqueues the other claims alike.
+// whose message holds a field of every kind a column takes, and of
+// fixture-queue-geo-db, whose message holds locations and durations,
+// queues.ts carries the statements the Go ORM runs, byte for byte, and
+// writes each field to the column the Go ORM writes, as JSON where the Go
+// ORM marshals it, as an array where it passes a list, as a POINT where it
+// passes a pgtype.Point and as an INTERVAL where it passes a time.Duration,
+// with the enum default it writes (D53). A message one language enqueues
+// the other claims alike.
 func TestQueuesWriteWhatTheGoORMWrites(t *testing.T) {
-	schema, err := loader.LoadService(filepath.Join(fixturesDir, "fixture-queue-db"))
+	for _, fixture := range []string{"fixture-queue-db", "fixture-queue-geo-db"} {
+		t.Run(fixture, func(t *testing.T) { testQueuesWriteWhatTheGoORMWrites(t, fixture) })
+	}
+}
+
+func testQueuesWriteWhatTheGoORMWrites(t *testing.T, fixture string) {
+	schema, err := loader.LoadService(filepath.Join(fixturesDir, fixture))
 	if err != nil {
 		t.Fatal(err)
 	}
 	orm, err := ormgen.Generate(schema, ormgen.Options{
-		SchemaName:  "fixture-queue-db",
-		ModulePath:  "example.com/schemas/orm/fixture-queue-db",
-		TypesModule: "example.com/schemas/types/go/fixture-queue-db",
+		SchemaName:  fixture,
+		ModulePath:  "example.com/schemas/orm/" + fixture,
+		TypesModule: "example.com/schemas/types/go/" + fixture,
 		Clock:       codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)),
 	})
 	if err != nil {
@@ -57,18 +66,19 @@ func TestQueuesWriteWhatTheGoORMWrites(t *testing.T) {
 		}
 		for j, f := range q.Fields {
 			gf := g.Fields[j]
-			if f.Name != gf.Name || f.Column != gf.QuotedDBName || f.JSON != gf.IsJSONField || f.List != gf.NativeList() || f.Default != gf.EnumDefault {
-				t.Errorf("queue %s field %s: queues.ts writes %+v, the Go ORM column %s, JSON %v, list %v, default %q",
-					q.Name, f.Name, f, gf.QuotedDBName, gf.IsJSONField, gf.NativeList(), gf.EnumDefault)
+			if f.Name != gf.Name || f.Column != gf.QuotedDBName || f.JSON != gf.IsJSONField || f.List != gf.NativeList() || f.Default != gf.EnumDefault ||
+				f.Point != gf.IsGeoPoint || f.Interval != gf.IsInterval {
+				t.Errorf("queue %s field %s: queues.ts writes %+v, the Go ORM column %s, JSON %v, list %v, default %q, point %v, interval %v",
+					q.Name, f.Name, f, gf.QuotedDBName, gf.IsJSONField, gf.NativeList(), gf.EnumDefault, gf.IsGeoPoint, gf.IsInterval)
 			}
 		}
 	}
 }
 
 // TestQueuesLeaveOutWhatTheClientCannotHold: a queue whose message holds a
-// value the TypeScript queue client cannot write and read back yet, a
-// Temporal.Duration, which Postgres holds as an INTERVAL, is left out of
-// queues.ts with why, and the other queues are written.
+// value the TypeScript queue client cannot write and read back yet, a list
+// of Temporal.Duration values, which Postgres holds as an INTERVAL[], is
+// left out of queues.ts with why, and the other queues are written.
 func TestQueuesLeaveOutWhatTheClientCannotHold(t *testing.T) {
 	schema, err := loader.LoadService(filepath.Join(fixturesDir, "fixture-queue-db"))
 	if err != nil {
@@ -76,7 +86,7 @@ func TestQueuesLeaveOutWhatTheClientCannotHold(t *testing.T) {
 	}
 	schema.Scalars["Temporal.Duration"] = &ir.ScalarDef{Name: "Temporal.Duration", LanguagePrimitive: ir.LanguageString, TypeMappings: map[string]string{"sql": "INTERVAL"}}
 	ping := schema.Types["Ping"]
-	ping.Fields = append(ping.Fields, &ir.FieldDef{Name: "every", TypeRef: ir.TypeRef{Name: "Temporal.Duration"}})
+	ping.Fields = append(ping.Fields, &ir.FieldDef{Name: "every", TypeRef: ir.TypeRef{Name: "Temporal.Duration", IsArray: true}})
 	output, err := Generate(schema, Options{SchemaName: "fixture-queue-db", Clock: codegen.FixedClock(time.Unix(0, 0).UTC())})
 	if err != nil {
 		t.Fatal(err)
@@ -90,7 +100,7 @@ func TestQueuesLeaveOutWhatTheClientCannotHold(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"Queue Ping is left out: field every is a Temporal.Duration, an INTERVAL column, which the TypeScript queue client does not read yet.",
+		"Queue Ping is left out: field every is a list of Temporal.Duration values, an INTERVAL[] column, which the TypeScript queue client does not read yet.",
 		"import type { OrderPlaced } from './types';",
 		"export const orderPlacedQueue: QueueDefinition<OrderPlaced> = {",
 	} {

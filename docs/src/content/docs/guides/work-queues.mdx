@@ -33,10 +33,13 @@ is the full reference for every refusal, guard and config change.
 ## Set up
 
 The core declares the seven behaviors, so the default meta-schema admits
-a schema that composes them, and `@behavior` types their configs. The
-engine runs them only once your server registers the package's
-implementations. Until then it refuses to define such a schema, and a live
-version that composes one answers 503 `unavailable`.
+a schema that composes them, and `@behavior` types their configs. They
+are Rust (`runtime/engine-workqueue/rust`), and the engine's addon is
+built with them, but the engine runs them only once your server names
+them in the engine's `behaviors` option. Until then it refuses to define
+such a schema, and a live version that composes one answers 503
+`unavailable`. `@superschematic/engine-workqueue` holds their names, the
+types of their configs and records, and the worker.
 
 Nothing is published yet. Build the package from the checkout after the
 engine:
@@ -48,11 +51,12 @@ bun run build
 ```
 
 It needs `@superschematic/engine` beside it in `node_modules` as a peer
-dependency: the behaviors must run in the same copy of the engine your
-server opens. Pass them as the engine's `behaviors`, with a runner for
-the timed sweeps. The `examples/engine-jobs` server, a job runner that CI
-builds and tests, opens its engine this way, and its `src/main.ts` then
-calls `engine.runner.start()`:
+dependency: its types and its worker's client are the engine's, so both
+must be the copy your server opens. Pass the behaviors' names as the
+engine's `behaviors`, with a runner for the timed sweeps. The
+`examples/engine-jobs` server, a job runner that CI builds and tests,
+opens its engine this way, and its `src/main.ts` then calls
+`engine.runner.start()`:
 
 <Snippet example="engine-jobs" file="src/server.ts" symbol="openJobs" />
 
@@ -72,9 +76,8 @@ Two permissions are easy to miss:
 
 <Snippet example="engine-jobs" file="src/auth.ts" symbol="runner" />
 
-`workQueueBehaviors` is all seven. `lease`, `assignment`, `queue`,
-`presence`, `blueprint`, `budget` and `retries` are exported one by one,
-and `engine.behaviors.register(lease)` adds one later.
+`workQueueBehaviors` is the seven names, typed `WorkQueueBehavior`. A
+server that runs only some names those: `behaviors: ['Lease', 'Queue']`.
 
 ## A job queue
 
@@ -209,10 +212,10 @@ The package's `./worker` subpath runs the loop above for you, on the
 engine's typed client
 ([The engine](/superschematic/guides/engine/#call-it-from-typescript)).
 It imports only `@superschematic/engine/client`, so a worker process
-loads no SQLite and no behavior. The example's workers run on it: each
-process calls as its own principal, beats the worker instance that stands
-for it, claims the jobs of its topic, and runs a handler over each, which
-an operator's `cancel` directive stops:
+loads no engine addon and no SQLite. The example's workers run on it:
+each process calls as its own principal, beats the worker instance that
+stands for it, claims the jobs of its topic, and runs a handler over
+each, which an operator's `cancel` directive stops:
 
 <Snippet example="engine-jobs" file="src/worker.ts" symbol={['jobWorker', 'work']} />
 
@@ -417,8 +420,9 @@ priority last), then oldest, then by id, skipping work that is blocked,
 assigned to another principal, at `maxExpiries`, exhausted by `Retries`,
 pinned to a superseded revision or release or over its `Budget`, and claims the first that succeeds; a claim
 refused to this caller (`vetoed`, `conflict` or `forbidden`) passes to
-the next. Calls are synchronous and the engine writes from one process,
-so two claims never interleave.
+the next. Each claim is one transaction, and a namespace's writes take
+turns, so two claims never interleave, even from several instances of a
+server on one Postgres schema.
 
 - **Pools in one order.** A `match` value may be a list: `{ topic:
   ["search", "mail"] }` takes either topic, highest priority first across

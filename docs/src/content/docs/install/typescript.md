@@ -253,6 +253,12 @@ package's validator for `T` there, an object type's fields at
 `name[key].field`. Every failure is thrown at once in one
 `ValidationError`.
 
+A method resolves to the response's type: `T[]` for a list,
+`Record<string, T>` for a map (`Record<string, T[]>` for a map of lists),
+and `T | null` for a `Nullable<T>`, which resolves to `null` when the
+server answers null. An object type's values in a map are decoded one by
+one, as a list's elements are.
+
 ## Serve a generated API
 
 An API schema can be served by a generated TypeScript router instead of the

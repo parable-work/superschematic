@@ -13,7 +13,8 @@
 //! the fields every line carries, `stack` and `server`, which a job's line
 //! names `job` and a worker's `worker` ([`init_json_as`]); the fields of the
 //! spans the event is in, the outermost first, such as the `api` of an
-//! [`api_span`]; and the event's own. A later field replaces an earlier one
+//! [`api_span`], but a span's `otel.` fields, which are OpenTelemetry's
+//! (D67); and the event's own. A later field replaces an earlier one
 //! of the same name in its place, and none replaces `level`, `time` or
 //! `msg`; a `message` field beside the event's message (`info!(message =
 //! id, "handled")`, as a worker logs a message's ID) is a field of that
@@ -194,6 +195,12 @@ impl<'a> Fields<'a> {
     }
 
     fn put(&mut self, name: &str, value: Value) {
+        // A span's `otel.` fields are OpenTelemetry's (`otel.name`,
+        // `otel.kind`), which the telemetry module's spans set for its
+        // layer, and not the log's (D67).
+        if self.message.is_none() && name.starts_with("otel.") {
+            return;
+        }
         match (&mut self.message, value) {
             (Some(slot), Value::String(text)) if name == "message" && slot.is_none() => {
                 **slot = Some(text);

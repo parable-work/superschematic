@@ -294,7 +294,11 @@ config, callees first, each waited on until it answers /readyz. Each job is
 built from its entrypoint module the same way and runs on its schedule,
 never two runs of one job at once, until Ctrl-C; superschematic stack run
 runs one once, from another terminal. Every process's output is printed
-with its name in front. Dev stays in the foreground until Ctrl-C, then
+with its name in front. In a project whose naming file names no
+superscalar checkout ([paths] scalar_go), a release of superschematic
+first fetches the static archives it ships for this machine into the
+user's cache, and the Go builds take CGO_LDFLAGS pointing at them, after
+any set; superschematic env prints the same for a go build by hand. Dev stays in the foreground until Ctrl-C, then
 stops the servers and the containers, which keep their data for the next
 run: the databases, and the buckets' objects, as the SQLite files stay.
 --remove-data removes the containers and their data, and the SQLite
@@ -461,12 +465,17 @@ func runStackDev(cmd *cobra.Command, a *app, flags *stackDevFlags, dir string) e
 	if s, ok := prov.(outputSetter); ok {
 		s.SetOutput(out)
 	}
+	buildEnv, err := releaseBuildEnv(cmd.Context(), p.names, env, out)
+	if err != nil {
+		return err
+	}
 	req := registry.ProvisionRequest{
 		Environment:    env,
 		Dir:            program,
 		OutputRoot:     p.outputRoot,
 		RepositoryRoot: filepath.Dir(p.schemasRoot),
 		Backend:        local.StateBackend(stateDir),
+		BuildEnv:       buildEnv,
 	}
 	if err := prov.Render(env, program); err != nil {
 		return err

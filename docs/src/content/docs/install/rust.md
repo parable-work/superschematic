@@ -201,6 +201,12 @@ with `RequestOptions::forward(ctx.bearer_token())`: the call sends that
 token as `Authorization`, or none for `None`, instead of the configured
 one, and does not refresh it.
 
+A method returns `Vec<T>` for a list, `HashMap<String, T>` for a map
+(`HashMap<String, Vec<T>>` for a map of lists) and `Option<T>` for a
+`Nullable<T>`, `None` when the server answers null. A union decodes
+through its own `Deserialize`, so an element it cannot read, or a null
+one, is an error.
+
 An operation without an input type takes its arguments as one input
 struct, `<Operation>Input`, whose fields are sent under the arguments'
 names as the schema spells them (`shadeByName`, not `shade_by_name`). On
@@ -415,8 +421,12 @@ authenticator fetches no keys over the network: pass a `KeyFetcher`
 with `with_key_fetcher`, or turn the feature on.
 
 `@rateLimit`, `@bodyLimit` and `@timeout` apply as in the Go server. The
-rate limit counts each client's requests to the route per minute, in
-process memory, and answers 429 with `Retry-After`. A client is the
+rate limit counts each client's requests to the operation per minute, in
+process memory, and answers 429 with `Retry-After`. The limiter is the
+operation's in a `RateLimits` registry, `RouterOptions::rate_limits`:
+`build_router` makes a registry of its own, and routers built with one
+registry share each operation's budget, as a Topcoat app's JSON API, its
+procedures and its pages do. A client is the
 `ClientIp` a layer of yours puts on the request, or else the peer address,
 which axum records when the router is served with
 `into_make_service_with_connect_info::<SocketAddr>()`. The router reads no
@@ -478,6 +488,31 @@ let router = build_router_with(implementations, RouterOptions {
     ..RouterOptions::default()
 });
 ```
+
+The options also carry the rate limiters. A clone of a `RouterOptions`
+shares its `rate_limits`, so two routers built from clones of one count a
+client against one budget per operation, and `RateLimits::of(&operation)`
+hands your own code the same limiter:
+
+```rust
+use schemas_catalog_api::operations::PRODUCT_GET_PRODUCT;
+use schemas_catalog_api::runtime::RateLimits;
+
+let limits = RateLimits::new();
+let options = RouterOptions { rate_limits: limits.clone(), ..RouterOptions::default() };
+let public = build_router_with(implementations.clone(), options.clone());
+let internal = build_router_with(implementations, options);
+// None for an operation without a @rateLimit.
+let get_product = limits.of(&PRODUCT_GET_PRODUCT);
+```
+
+A registry is meant for one app's operations. It keys each limiter by
+the operation's method, path, namespace, name and rate, so two APIs'
+operations of one name on different routes keep their own budgets; an
+app that serves two APIs whose operations match on all of those gives
+each API a registry of its own. Options compare their registry by
+identity: a clone is equal to its original, and two
+`RouterOptions::default()` are not equal.
 
 A schema with an `@envVars` class (see
 [Modeling types](/superschematic/guides/modeling-types/)) also gets the
@@ -665,9 +700,11 @@ re-exports as `database_types`. Their `queues` module holds each queue's
 descriptor as JSON, `STOCK_LOW_QUEUE`, which the runtime's
 `queue::QueueDefinition::parse` reads: an implementation enqueues with it
 in the transaction whose writes caused the message (`queue::enqueue`),
-and a worker claims with it. A queue whose message holds a `POINT` or
-`INTERVAL` column is left out, saying why, and the build refuses a Rust
-worker of it.
+and a worker claims with it. A location crosses as a `POINT` and a
+duration as an `INTERVAL` of its whole microseconds, as Go and TypeScript
+write them ([Queues](/superschematic/guides/queues/)). A queue whose
+message holds a list of either, a `POINT[]` or `INTERVAL[]` column, is
+left out, saying why, and the build refuses a Rust worker of it.
 
 The scaffold writes `create_jobs` and `create_workers` beside `create`,
 each method failing until you implement it:
@@ -699,8 +736,10 @@ an API with a callers field, the crate's config module adds
 `main.rs` call: it loads what `load_env_config()` does, but leaves the
 callers field without issuers. The identity config and CORS fields read
 as their defaults when unset. Their log lines name the deployable as
-`"job"` or `"worker"` (`logging::init_json_as`), where a server's name it
-`"server"`.
+`"job"` or `"worker"`, where a server's name it `"server"`. Each
+entrypoint installs its log with `telemetry::start`, the runtime's `otel`
+feature, which exports the deployable's traces when the environment names
+an OTLP collector ([Traces](/superschematic/guides/traces/)).
 
 ### Users and sessions
 
@@ -780,7 +819,41 @@ does. `ApiError` implements `std::error::Error`, so `?` carries a refusal
 into the caller's own error type. The crate re-exports the runtime as
 `runtime`.
 
-`admit` applies the end-user rule only. An in-process caller is the
-service's own code, with no service credential to present, so an
-operation's `@requireService` or `@allowService` clause is not checked
-there: a `@requireService` operation is not refused in-process.
+`admit` is a call that names no service caller (D37). It runs the
+route's service step first, so a `@requireService` operation refuses it,
+with or without a user clause, as its route refuses a request without a
+service credential: 401 `service_unauthorized`. An `@allowService`
+operation, and one without a service clause, admit as before. To call a
+`@requireService` operation, name the service the process acts for with
+`ServiceCaller::in_process`, and admit it as the route admits a service:
+
+```rust
+use schemas_stock_api::operations::STOCK_RESERVE_STOCK;
+use schemas_stock_api::runtime::ServiceCaller;
+
+let service = ServiceCaller::in_process("shop-app", ["shop-orders"]);
+let caller = if STOCK_RESERVE_STOCK.admit_service(Some(&service))? {
+    None
+} else {
+    STOCK_RESERVE_STOCK.admit_end_user(implementations.authenticator.as_ref(), caller)?
+};
+args.check()?;
+let reservation = implementations
+    .stock
+    .reserve_stock(STOCK_RESERVE_STOCK.service_context(service, caller), args)
+    .await?;
+```
+
+`admit_service` applies the rule the router applies. It answers 403
+`service_forbidden` when the operation's `from` lists none of the APIs the
+caller serves. It answers `true` when the caller alone is admitted, a
+listed caller of an `@allowService` operation, which then needs no end
+user. It answers `false` when the end-user step still applies:
+`admit_end_user` checks the end user the service acts for, as the route
+checks the one a service forwards. `service_context` hands the
+implementation the caller in `ctx.service_caller`, as the route does. The
+caller presents no credential, so its `subject` is empty: within one
+process, the rule makes such a call deliberate rather than proving who
+makes it. A Topcoat app calls these operations through
+`operations::as_service(&caller)`
+([Topcoat](/superschematic/guides/topcoat/)).

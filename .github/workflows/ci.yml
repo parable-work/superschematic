@@ -11,11 +11,11 @@ name: ci
 # declarations drift, CLI smoke over the fixture corpus with the core alone,
 # the migrations example), the acme example extension (smoke plus the
 # no-core-edits check), the
-# TypeScript authoring packages, schema runtime, http runtime, engine, the
-# engine's work-queue
-# package and the engine example, the
-# Python schema runtime, the Rust http runtime, the Rust engine's workspace
-# and the engine's TypeScript suite on it through its Node-API addon (D58),
+# TypeScript authoring packages, schema runtime, http runtime, the engine
+# (the Rust engine's Node-API addon, D58) and its suite on the test addon,
+# the engine's work-queue
+# package and the engine examples, the
+# Python schema runtime, the Rust http runtime, the Rust engine's workspace,
 # the engine's C ABI and Go binding (its corpus replay, and a link check of
 # the three archives a Go server links), the version graph (the core
 # crate, its Go binding, the TypeScript package over its wasm build and the
@@ -163,9 +163,11 @@ jobs:
         # builds the version-graph TypeScript package and superscalar's
         # browser and workerd builds, and
         # rustsdkgen compile tests run cargo clippy on the generated SDK
-        # crates, so this toolchain carries clippy.
+        # crates, so this toolchain carries clippy; the projectengine tests
+        # hold the engine crates they write to rustfmt's layout, so it
+        # carries rustfmt too.
         run: |
-          rustup toolchain install "$RUST_VERSION" --profile minimal --target wasm32-unknown-unknown --component clippy
+          rustup toolchain install "$RUST_VERSION" --profile minimal --target wasm32-unknown-unknown --component clippy --component rustfmt
           rustup default "$RUST_VERSION"
 
       - name: Cache wasm-pack
@@ -199,6 +201,26 @@ jobs:
         run: |
           bun install --frozen-lockfile
           bun run build
+
+      - name: Cache the engine's Rust build
+        # The full tier's engine addon, below.
+        if: github.event_name != 'pull_request'
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: runtime/engine/rust
+
+      - name: Build the engine package and its addon
+        # TestEngineDocumentLoadsInTheEngine (the full tier: -short skips it)
+        # loads a generated engine document through @superschematic/engine,
+        # the Rust engine's Node-API addon (D58), as a TypeScript server
+        # will: the package's dist/, over the http runtime's, and the core's
+        # addon in its native/, a debug build, which compiles faster than the
+        # release's and loads the same.
+        if: github.event_name != 'pull_request'
+        run: |
+          (cd runtime/http/typescript && bun install --frozen-lockfile && bun run build)
+          (cd runtime/engine/typescript && bun install --frozen-lockfile && bun run build)
+          scripts/engine-napi.sh --debug
 
       - name: Install the authoring packages
         # TestEmbeddedDefinitionIsCurrent regenerates the schema-config JSON
@@ -370,7 +392,7 @@ jobs:
           GOTOOLCHAIN: go${{ env.GO_VERSION }}
         run: go run ./internal/tools/providerschemas -check
 
-      - name: Core behavior declarations drift (the engine's, the Rust engine's and the work-queue package's copies match the core registry)
+      - name: Core behavior declarations drift (the engine's and the work queue's Rust crates' copies match the core registry)
         env:
           GOTOOLCHAIN: go${{ env.GO_VERSION }}
         run: |
@@ -542,10 +564,12 @@ jobs:
           key: superscalar-${{ runner.os }}-${{ hashFiles('superscalar.pin', 'scripts/superscalar-dep.sh', 'tools.env') }}
 
       - name: Install Rust toolchain
-        # The wasm32 target builds the version-graph core the engine's
-        # Branches behavior runs, which the smoke's engine step builds.
+        # rustfmt and clippy check acme's Rust crate and the engine crate
+        # the binary writes for it (D58), whose addon the smoke builds and
+        # loads in Node.js. The wasm32 target builds superscalar's browser
+        # and workerd builds (D64).
         run: |
-          rustup toolchain install "$RUST_VERSION" --profile minimal --target wasm32-unknown-unknown
+          rustup toolchain install "$RUST_VERSION" --profile minimal --component rustfmt --component clippy --target wasm32-unknown-unknown
           rustup default "$RUST_VERSION"
 
       - name: Cache wasm-pack
@@ -574,9 +598,27 @@ jobs:
         # that imports it, link the core's Go binding against this archive.
         run: scripts/versiongraph-archive.sh
 
+      - name: Start Postgres
+        # The smoke's Rust step runs acme-behaviors' tests on SQLite, and on
+        # this Postgres too through SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL,
+        # each case in a schema of its own (D58). It has a port of its own,
+        # apart from the databases the acme-shop check's stack starts.
+        run: |
+          docker run --detach --name acme-engine-pg \
+            --env POSTGRES_PASSWORD=superschematic \
+            --publish 55433:5432 \
+            "postgres:${POSTGRES_VERSION}-alpine"
+          for _ in $(seq 1 60); do
+            if docker exec acme-engine-pg pg_isready --host 127.0.0.1 --username postgres >/dev/null 2>&1; then exit 0; fi
+            sleep 1
+          done
+          docker logs acme-engine-pg
+          exit 1
+
       - name: Smoke (module tests, build-all, every surface, generated API compiles, core rejects Catalog)
         env:
           GOTOOLCHAIN: go${{ env.GO_VERSION }}
+          SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:55433/postgres?sslmode=disable
         run: examples/acme-schematic/scripts/smoke.sh
 
       # The extension-model acceptance criterion: a second decorator added to
@@ -612,10 +654,17 @@ jobs:
         run: examples/acme-shop/scripts/check.sh
 
   typescript:
+    # The engine's suite and the work queue's run on the Rust engine (D58)
+    # through the test addon (scripts/engine-napi.sh --js-behaviors), whose
+    # bridge runs the behaviors the tests write in TypeScript, under Node.js
+    # and Bun. A test that loops over test/helpers.ts's backends runs on
+    # Postgres too, through openEngineAsync (ENGINE_TEST_PG_URL), as a
+    # TypeScript server opens the engine there. The addon as it ships is
+    # built first and checked to lack the bridge.
     name: typescript (authoring packages + schema and http runtimes + engine and its work-queue package)
     if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -647,11 +696,17 @@ jobs:
           key: superscalar-${{ runner.os }}-${{ hashFiles('superscalar.pin', 'scripts/superscalar-dep.sh', 'tools.env') }}
 
       - name: Install Rust toolchain
-        # The wasm32 target builds the version-graph core the engine's
-        # Branches behavior runs.
+        # Builds the engine's Node-API addon, the Rust engine (D58). The
+        # wasm32 target builds superscalar's browser and workerd builds
+        # (D64).
         run: |
           rustup toolchain install "$RUST_VERSION" --profile minimal --target wasm32-unknown-unknown
           rustup default "$RUST_VERSION"
+
+      - name: Cache the engine's Rust build
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: runtime/engine/rust
 
       - name: Cache wasm-pack
         id: wasm-pack
@@ -669,6 +724,22 @@ jobs:
 
       - name: Build the superscalar dependency
         run: scripts/superscalar-dep.sh
+
+      - name: Start Postgres
+        # The backends' Postgres pass of the engine's suite, each engine in
+        # a schema of its own. A role with a password: the runner's Postgres
+        # refuses a passwordless one off its loopback.
+        run: |
+          docker run --detach --name superschematic-pg \
+            --env POSTGRES_PASSWORD=superschematic \
+            --publish 5432:5432 \
+            "postgres:${POSTGRES_VERSION}-alpine"
+          for _ in $(seq 1 60); do
+            if docker exec superschematic-pg pg_isready --host 127.0.0.1 --username postgres >/dev/null 2>&1; then exit 0; fi
+            sleep 1
+          done
+          docker logs superschematic-pg
+          exit 1
 
       - name: packages/ typecheck + test
         working-directory: packages
@@ -692,29 +763,34 @@ jobs:
           bun run build
           bun run test
 
-      - name: Build the version-graph TypeScript package
-        # The engine depends on it: its Branches behavior runs the version
-        # graph's engine and SQLite adapter over the wasm core. The
-        # versiongraph job runs the package's own tests.
-        working-directory: runtime/versiongraph/typescript
-        run: |
-          bun install --frozen-lockfile
-          bun run build
-
-      - name: runtime/engine/typescript typecheck + build + test (Node.js and Bun)
-        # Runs after the schema and http runtimes' builds and the version
-        # graph's, whose dist/ the engine's scripts/link-local-deps.mjs
-        # copies into node_modules.
+      - name: Build the engine's Node-API addon, as it ships and the test addon
+        # The addon as it ships first, which must not have the bridge to
+        # behaviors written in TypeScript, then the test addon, which the
+        # suites run on: their tests define behaviors with defineBehavior.
         working-directory: runtime/engine/typescript
         run: |
           bun install --frozen-lockfile
+          ../../../scripts/engine-napi.sh
+          node -e "const a = require('./native/' + require('node:fs').readdirSync('native').find((f) => f.endsWith('.node'))); if (typeof a.bridgeCall !== 'undefined') { console.error('the shipped addon has the test bridge'); process.exit(1); }"
+          ../../../scripts/engine-napi.sh --js-behaviors
+
+      - name: runtime/engine/typescript typecheck + build + test (Node.js and Bun, SQLite and Postgres)
+        # Runs after the http runtime's build, whose dist/ the engine's
+        # scripts/link-local-deps.mjs copies into node_modules, and on the
+        # test addon. Its corpus check records the curated files again and
+        # holds runtime/engine/testdata to them.
+        working-directory: runtime/engine/typescript
+        env:
+          ENGINE_TEST_PG_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
+        run: |
           bun run typecheck
           bun run build
           bun run test
 
       - name: runtime/engine-workqueue/typescript typecheck + build + test (Node.js and Bun)
         # Runs after the engine's build, which its scripts/link-local-deps.mjs
-        # links into node_modules.
+        # links into node_modules, on the test addon, whose work-queue
+        # behaviors are the Rust ones.
         working-directory: runtime/engine-workqueue/typescript
         run: |
           bun install --frozen-lockfile
@@ -722,8 +798,9 @@ jobs:
           bun run test
 
       - name: examples/engine-notes type-check + end to end (Node.js and Bun)
-        # The engine guide's example: the runtimes and the engine rebuilt
-        # from the installs above, linked into the example, and its test run
+        # The engine guide's example: the http runtime and the engine rebuilt
+        # from the installs above, on the addon built above, linked into the
+        # example, and its test run
         # against a listening server under each runtime. A step of this job
         # rather than a job of its own: it needs only what this job installs,
         # and takes seconds. End to end, so the full tier.
@@ -867,9 +944,11 @@ jobs:
       # store and route tests run on SQLite here, and with a stack server's
       # features (D57): postgres, whose tests need a database and skip
       # here, logging, and the two at once, as a worker runs, whose loop's
-      # log lines a test reads (D65); and gcs, a bucket on GCS (D54), whose
+      # log lines a test reads (D65); gcs, a bucket on GCS (D54), whose
       # tests run against fakes, the fake-gcs-server run skipping here, and
-      # beside a worker's two, as a worker with a bucket builds.
+      # beside a worker's two, as a worker with a bucket builds; and otel, a
+      # deployable's trace export, alone and with postgres, as a worker
+      # builds it, whose message spans a test reads (D67).
       - name: fmt / clippy / test
         working-directory: runtime/http/rust
         run: |
@@ -893,6 +972,10 @@ jobs:
           cargo clippy --all-targets --features gcs -- -D warnings
           cargo test --features gcs
           cargo clippy --all-targets --features gcs,postgres,logging -- -D warnings
+          cargo clippy --all-targets --features otel -- -D warnings
+          cargo test --features otel
+          cargo clippy --all-targets --features postgres,otel -- -D warnings
+          cargo test --features postgres,otel
 
       - name: schema runtime fmt / clippy / test
         working-directory: runtime/schema/rust
@@ -975,12 +1058,15 @@ jobs:
       # the superscalar and version-graph scripts when it is parsed. Clippy
       # runs on every feature combination (each database alone, both, and
       # neither, and the axum router over one database, as a Rust server
-      # takes it), so a build that takes one database still compiles.
+      # takes it), so a build that takes one database still compiles, with
+      # the test addon's bridge (all features) and without it (the
+      # defaults, as an addon ships).
       - name: fmt / clippy (every feature combination)
         working-directory: runtime/engine/rust
         run: |
           cargo fmt --all --check
           cargo clippy --workspace --all-targets --all-features -- -D warnings
+          cargo clippy --workspace --all-targets -- -D warnings
           cargo clippy --workspace --all-targets --no-default-features -- -D warnings
           cargo clippy --workspace --all-targets --no-default-features --features superschematic-engine/sqlite -- -D warnings
           cargo clippy --workspace --all-targets --no-default-features --features superschematic-engine/postgres -- -D warnings
@@ -989,111 +1075,15 @@ jobs:
       # The test kit's replay of the scenario corpus
       # (runtime/engine/testdata/scenarios) runs here too, on both
       # databases, and of the HTTP corpus through the engine's routes and
-      # its axum router; it fails when the corpus is missing.
+      # its axum router; it fails when the corpus is missing. Each replays
+      # its files on threads of their own, one per core. The tests of two
+      # engines on one database (testkit/tests/replicas_*.rs) run here too;
+      # their soaks, `make engine-rust-soak`, do not.
       - name: test (SQLite and Postgres)
         working-directory: runtime/engine/rust
         env:
           SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
         run: cargo test --workspace --all-features
-
-  engine-napi:
-    # The engine's TypeScript suite on the Rust engine (D58): the Node-API
-    # addon (runtime/engine/rust/napi) built as scripts/engine-napi.sh builds
-    # it, then every test file run on its own with ENGINE_IMPL=rust under
-    # Node.js and Bun and held to runtime/engine/typescript/test/rust-pending.txt
-    # (scripts/rust-ratchet.mjs, the command a person runs too): a failing
-    # file not on the list fails the job, and so does a listed file that
-    # passes. The work queue's suite runs so too, its behaviors the addon's,
-    # held to runtime/engine-workqueue/typescript/test/rust-pending.txt. The
-    # setup is the typescript job's, which the engine's build needs.
-    name: engine-napi (the engine's and the work queue's TypeScript suites on the Rust engine)
-    if: github.event.pull_request.draft != true
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Load pinned tool versions
-        run: grep -E '^[A-Za-z_][A-Za-z0-9_]*=' tools.env >> "$GITHUB_ENV"
-
-      - name: Setup Go
-        # scripts/superscalar-dep.sh reads go env for the archive directory.
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version: ${{ env.GO_VERSION }}
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: ${{ env.BUN_VERSION }}
-
-      - name: Setup Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-
-      - name: Cache the superscalar checkout
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            third_party/superscalar
-            !third_party/superscalar/target
-          key: superscalar-${{ runner.os }}-${{ hashFiles('superscalar.pin', 'scripts/superscalar-dep.sh', 'tools.env') }}
-
-      - name: Install Rust toolchain
-        # The wasm32 target builds the version-graph core the TypeScript
-        # engine's Branches behavior runs.
-        run: |
-          rustup toolchain install "$RUST_VERSION" --profile minimal --target wasm32-unknown-unknown
-          rustup default "$RUST_VERSION"
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          workspaces: runtime/engine/rust
-
-      - name: Cache wasm-pack
-        id: wasm-pack
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cargo/bin/wasm-pack
-          key: wasm-pack-${{ runner.os }}-${{ runner.arch }}-${{ env.WASM_PACK_VERSION }}
-
-      - name: Install wasm-pack
-        # scripts/superscalar-dep.sh builds superscalar's browser and workerd
-        # builds over its WebAssembly core with it, for the wasm32 target
-        # the toolchain above carries (D55, amended; D64).
-        if: steps.wasm-pack.outputs.cache-hit != 'true'
-        run: cargo install wasm-pack --version "$WASM_PACK_VERSION" --locked
-
-      - name: Build the superscalar dependency
-        run: scripts/superscalar-dep.sh
-
-      - name: Build the schema and http runtimes and the version graph's package
-        # The engine's scripts/link-local-deps.mjs copies their dist/ into
-        # its node_modules.
-        run: |
-          (cd runtime/schema/typescript && bun install --frozen-lockfile && bun run build)
-          (cd runtime/http/typescript && bun install --frozen-lockfile && bun run build)
-          (cd runtime/versiongraph/typescript && bun install --frozen-lockfile && bun run build)
-
-      - name: Build the engine and its Node-API addon
-        working-directory: runtime/engine/typescript
-        run: |
-          bun install --frozen-lockfile
-          bun run build
-          ../../../scripts/engine-napi.sh
-
-      - name: The engine's suite on the Rust engine against test/rust-pending.txt (Node.js and Bun)
-        working-directory: runtime/engine/typescript
-        run: bun run test:rust
-
-      - name: The work queue's suite on the Rust engine against its test/rust-pending.txt (Node.js and Bun)
-        working-directory: runtime/engine-workqueue/typescript
-        run: |
-          bun install --frozen-lockfile
-          bun run build
-          bun run test:rust
 
   engine-go:
     name: engine-go (the engine's C ABI, Go binding, corpus replay and link check)
@@ -1404,7 +1394,6 @@ jobs:
       - python
       - rust
       - engine-rust
-      - engine-napi
       - engine-go
       - versiongraph
       - docs

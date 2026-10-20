@@ -37,8 +37,9 @@ export interface JobsOptions {
 /**
  * openJobs opens the engine's file, creating it if absent, publishes the
  * schemas and registers a worker instance for each worker the server
- * knows. The work-queue behaviors run only because they are registered
- * here; without them the engine refuses a schema that composes one. The
+ * knows. The work-queue behaviors run only because the options name them
+ * (workQueueBehaviors, the names of the Rust ones the engine's addon is
+ * built with); without them the engine refuses a schema that composes one. The
  * runner acts as `runner` once it is started: main.ts starts it, and a
  * test calls runner.runDue() after it moves the clock.
  */

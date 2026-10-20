@@ -37,7 +37,10 @@ This crate provides:
 - `schema`: the schema runtime crate the generated types crates validate
   with, re-exported so a parameter spec and an input parse share its types
 - `RouterOptions`, `openapi_router`: the OpenAPI document and its RapiDoc
-  page a generated router serves
+  page a generated router serves, and the `RateLimits` registry its routes
+  take their limiters from (`rate_limits`, a new one by default). Options
+  compare their registry by identity, so a clone is equal to its original
+  and two `RouterOptions::default()` are not
 - `Authenticator` and `Principal`: how a service tells the router who the
   caller is, and the dotted-path permission rule (`has_any_permission`)
 - `ServiceAuthenticator` and `ServiceCaller` (D37): which deployable is
@@ -46,7 +49,25 @@ This crate provides:
   with static keys or a JWKS it caches per URL
 - `RouteControls`: a route's `@rateLimit`, `@bodyLimit`, service step
   (`@requireService`, `@allowService`), permission check and `@timeout`,
-  applied with `route_layer` in that order
+  applied with `route_layer` in that order. A generated router gives a
+  route its operation's limiter from a `RateLimits` registry
+  (`rate_limiter(limits.of(&OPERATION))`), one per operation, so the
+  routers and the Topcoat procedures and pages that share the registry
+  count a client against one budget (D44, amended); `rate_limit(n)` gives
+  a manual route the service mounts itself a limiter of its own. A
+  registry is meant for one app's operations: it keys a limiter by the
+  operation's method, path, namespace, name and rate, so two APIs'
+  operations of one name on different routes keep their own
+- `OperationInfo`: an operation's route as the generated `operations`
+  module states it, its rate limit and service clause (`ServiceClause`)
+  included, for a caller that runs it in-process (D43). `admit` is the
+  route's admission of a call that names no service caller, so it refuses
+  a `@requireService` operation 401 `service_unauthorized`;
+  `admit_service(Some(&caller))` is the route's service step for a caller
+  the process names with `ServiceCaller::in_process(deployable, serves)`,
+  by the rule `RouteControls` applies, and `admit_end_user` the end-user
+  step; `context` and `service_context` build the `RequestContext` the
+  route would hand the implementation (D37, amended)
 - Service credential sources for a calling service, each a `TokenSource`:
   `GoogleIdTokenSource` (Cloud Run), `TokenFileSource` (a Kubernetes
   projected token) and `SignedKeySource` (an edge's Ed25519 key)
@@ -185,7 +206,41 @@ TypeScript runtimes' (D51):
   releases their messages. It logs Go's and TypeScript's messages and
   fields (`queue`, `message`, `attempt`, `took`, `error`, `retryIn`) through
   `tracing`. It claims through the `WorkerQueue` trait, which
-  `PostgresQueue` implements.
+  `PostgresQueue` implements. With the `otel` feature and export on, each
+  message's handling is a consumer span, `process <queue>`.
+- The `otel` feature's `telemetry` module (D67), OpenTelemetry trace
+  export over OTLP/HTTP in protobuf. `telemetry::start(Defaults { stack,
+  kind, name })` is what a generated server's, job's or worker's `main`
+  calls in place of `logging::init_json_as`: it installs the same log and,
+  when the environment sets `OTEL_EXPORTER_OTLP_ENDPOINT` or
+  `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` and `OTEL_SDK_DISABLED` is not
+  `true`, `tracing-opentelemetry`'s layer beside it, which takes spans but
+  not events, and not the spans that live as long as the process (an
+  `api_span`, the worker loop's). It reads OpenTelemetry's variables as
+  Go's and TypeScript's runtimes do: `OTEL_SERVICE_NAME` and
+  `OTEL_RESOURCE_ATTRIBUTES` over the defaults (`service.name` the
+  deployable, `service.namespace` the stack,
+  `superschematic.deployable.kind`), the six standard samplers,
+  `tracecontext`, `baggage` or `none` for `OTEL_PROPAGATORS`, and
+  `http/protobuf` alone for the protocol; a value it does not support is a
+  `TelemetryError` naming the variable. The `Telemetry` it returns flushes
+  the spans still buffered, within five seconds, when it drops. The
+  exporter sends through the `http-client` feature's `reqwest`, on a
+  current-thread runtime of its own from the batch processor's thread, so
+  export runs whatever runtime the process runs on. `ServerLayer::new(&[
+  operations::ALL, ...])` is the layer of a server's app: a server span per
+  request but `/healthz` and `/readyz`, the child of an incoming
+  `traceparent`, named `<METHOD> <path template>` by the most literal
+  operation whose route takes it. `transport()` is the `transport` of a
+  `calls` edge's SDK client, `None` with export off: a client span per
+  call, whose context the call carries in `traceparent` and `tracestate`.
+  `job(name, run)` runs a job's method in a span named after its `@job`
+  class. The runtime's spans carry their OpenTelemetry attributes beside
+  `tracing`'s fields, and the log leaves out a span's `otel.` fields, so
+  its lines are the same with export on or off. `telemetry::dispatch`
+  builds the subscriber without installing it, for a test.
+  `tests/telemetry.rs` runs each against an OTLP/HTTP receiver in the
+  test's process.
 
 - `bucket`, with no feature: the provider-neutral interface of a bucket an
   API lists in its `buckets` (D54), which its `Deps` holds as an
@@ -239,7 +294,7 @@ the descriptors tsgen's golden `queues.ts` holds for them, as JSON. The
 loop's timing runs on tokio's paused clock with no database:
 
 ```
-cargo test --features postgres,identity-postgres,identity-sqlite,logging
+cargo test --features postgres,identity-postgres,identity-sqlite,logging,otel
 ```
 
 ## Identity (D50)

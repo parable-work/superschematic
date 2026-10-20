@@ -5,7 +5,8 @@
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
 
-import { BehaviorError, defineBehavior, type Engine, type PublishContext } from '../dist/index.js';
+import { BehaviorError, type Engine } from '../dist/index.js';
+import { defineBehavior, type PublishContext } from '../dist/testing/index.js';
 import { itemDocument, openBehaviorEngine, tablesOf } from './behavior-fixtures.ts';
 import { alice, cleanup, drivers, thrown } from './helpers.ts';
 

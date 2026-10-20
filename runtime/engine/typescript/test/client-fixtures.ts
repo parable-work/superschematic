@@ -8,9 +8,9 @@ import { Hono } from 'hono';
 
 import { EngineClient, EngineProblem, type EngineClientOptions } from '../dist/client/index.js';
 import { engineApp, type EngineHttpOptions } from '../dist/http/index.js';
-import type { AccessPolicy, Engine, EngineOptions } from '../dist/index.js';
+import type { AccessPolicy, Engine } from '../dist/index.js';
 import { hold, openMetaSchema, testBehaviors } from './behavior-fixtures.ts';
-import { alice, openTestEngine, schemaDocument, type Field } from './helpers.ts';
+import { alice, openTestEngine, schemaDocument, type Field, type TestEngineOptions } from './helpers.ts';
 
 /** A bearer token is the caller's subject; reader may only read, outsider nothing. */
 export const authenticate: Authenticator = async (ctx) => {
@@ -74,7 +74,7 @@ export interface Served {
 }
 
 /** serve opens an engine with the Task schema published and mounts its app under /api. */
-export function serve(httpOptions: EngineHttpOptions = {}, engineOptions: Partial<EngineOptions> = {}): Served {
+export function serve(httpOptions: EngineHttpOptions = {}, engineOptions: Partial<TestEngineOptions> = {}): Served {
   const engine = openTestEngine({ policy, metaSchema: openMetaSchema(), behaviors: [...testBehaviors, hold], ...engineOptions });
   engine.schemas.define(alice, taskDocument());
   engine.schemas.publish(alice, 'Task');

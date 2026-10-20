@@ -22,4 +22,4 @@ tokio = { version = "1.52.2", features = ["macros", "rt-multi-thread"] }
 schemas-rs-pricing-sdk = { path = "../../../sdk/rust/rs-pricing" }
 schemas-rs-stock-api = { path = "../../../api/rs-stock" }
 schemas-rs-stock-implementation = { path = "../../../impl/rs-stock" }
-superschematic-http-runtime = { path = "../../../../../runtime/http/rust", features = ["gcs", "http-client", "identity", "identity-postgres", "logging", "postgres"] }
+superschematic-http-runtime = { path = "../../../../../runtime/http/rust", features = ["gcs", "http-client", "identity", "identity-postgres", "logging", "otel", "postgres"] }

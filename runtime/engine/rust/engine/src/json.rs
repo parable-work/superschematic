@@ -326,6 +326,99 @@ pub fn pointer<S: AsRef<str>>(tokens: &[S]) -> String {
     out
 }
 
+/// The member of the object a binding writes in place of a value JSON
+/// cannot carry (a JavaScript NaN, a Date, a Map, an undefined list item),
+/// its value the TypeScript engine's words for it (`NaN is not a JSON
+/// number`, `a Date is not a JSON value`): the engine refuses it where the
+/// TypeScript engine refuses that value, in its words (D58), rather than
+/// meeting what JSON.stringify would have made of it.
+pub const NOT_JSON: &str = "$superschematic:notJSON";
+
+/// The member beside [`NOT_JSON`] that holds the value as JavaScript's
+/// `String()` writes it (`NaN`, `undefined`), which a refusal that names
+/// the value it was given names it by ([`crate::calls::js_string`]).
+pub const NOT_JSON_STRING: &str = "$superschematic:string";
+
+// marker is the members of a value a binding marked as no JSON: NOT_JSON,
+// and NOT_JSON_STRING beside it, and nothing else.
+fn marker(value: &Value) -> Option<&serde_json::Map<String, Value>> {
+    let Value::Object(members) = value else {
+        return None;
+    };
+    let marked = members.contains_key(NOT_JSON)
+        && members
+            .keys()
+            .all(|key| key == NOT_JSON || key == NOT_JSON_STRING);
+    marked.then_some(members)
+}
+
+/// The problem of a value a binding marked as no JSON ([`NOT_JSON`]).
+pub fn not_json(value: &Value) -> Option<&str> {
+    marker(value)?.get(NOT_JSON).and_then(Value::as_str)
+}
+
+/// A value a binding marked as no JSON as JavaScript's `String()` writes
+/// it ([`NOT_JSON_STRING`]), when the binding says.
+pub fn not_json_string(value: &Value) -> Option<&str> {
+    marker(value)?.get(NOT_JSON_STRING).and_then(Value::as_str)
+}
+
+/// The first value a binding marked as no JSON in `value`, in the order
+/// JavaScript walks it, with its path as the TypeScript engine's jsonCopy
+/// writes one (`lines[0].sku`, `''` for the value itself) and its problem.
+pub fn first_not_json(value: &Value) -> Option<(String, String)> {
+    fn walk(value: &Value, path: &str) -> Option<(String, String)> {
+        if let Some(problem) = not_json(value) {
+            return Some((path.to_owned(), problem.to_owned()));
+        }
+        match value {
+            Value::Array(items) => items
+                .iter()
+                .enumerate()
+                .find_map(|(index, item)| walk(item, &format!("{path}[{index}]"))),
+            Value::Object(members) => js_keys(members).into_iter().find_map(|key| {
+                walk(
+                    &members[key],
+                    &if path.is_empty() {
+                        key.to_owned()
+                    } else {
+                        format!("{path}.{key}")
+                    },
+                )
+            }),
+            _ => None,
+        }
+    }
+    walk(value, "")
+}
+
+/// A jsonCopy path (`a.b[2]`) as the JSON pointer the TypeScript engine
+/// turns it into (`/a/b/2`), `''` for the value itself.
+pub fn path_pointer(path: &str) -> String {
+    if path.is_empty() {
+        return String::new();
+    }
+    let mut dotted = String::with_capacity(path.len());
+    let mut rest = path;
+    while let Some(open) = rest.find('[') {
+        let Some(close) = rest[open..].find(']').map(|at| open + at) else {
+            break;
+        };
+        let inside = &rest[open + 1..close];
+        dotted.push_str(&rest[..open]);
+        if !inside.is_empty() && inside.bytes().all(|b| b.is_ascii_digit()) {
+            dotted.push('.');
+            dotted.push_str(inside);
+        } else {
+            dotted.push_str(&rest[open..=close]);
+        }
+        rest = &rest[close + 1..];
+    }
+    dotted.push_str(rest);
+    let dotted = dotted.strip_prefix('.').unwrap_or(&dotted);
+    format!("/{}", dotted.split('.').collect::<Vec<_>>().join("/"))
+}
+
 /// A pointer's tokens, unescaped.
 pub fn pointer_tokens(pointer: &str) -> Vec<String> {
     pointer
@@ -358,6 +451,31 @@ pub fn shown(text: &str) -> String {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn a_value_marked_as_no_json_is_found_where_javascript_walks_to_it() {
+        let nan = json!({ NOT_JSON: "NaN is not a JSON number" });
+        let value = json!({"title": "Desk", "lines": [{"sku": "a"}, {"sku": nan}], "2": 1});
+        assert_eq!(
+            first_not_json(&value),
+            Some((
+                "lines[1].sku".to_owned(),
+                "NaN is not a JSON number".to_owned()
+            ))
+        );
+        assert_eq!(path_pointer("lines[1].sku"), "/lines/1/sku");
+        assert_eq!(path_pointer("[0]"), "/0");
+        assert_eq!(path_pointer(""), "");
+        assert_eq!(first_not_json(&json!({"a": [1, 2]})), None);
+        // An object that holds more than the marker is an object.
+        assert_eq!(not_json(&json!({ NOT_JSON: "x", "other": 1 })), None);
+        // The value as String() writes it rides beside the problem.
+        let marked = json!({ NOT_JSON: "NaN is not a JSON number", NOT_JSON_STRING: "NaN" });
+        assert_eq!(not_json(&marked), Some("NaN is not a JSON number"));
+        assert_eq!(not_json_string(&marked), Some("NaN"));
+        assert_eq!(not_json_string(&nan), None);
+        assert_eq!(not_json(&json!({ NOT_JSON_STRING: "NaN" })), None);
+    }
 
     fn parse(text: &str) -> Value {
         serde_json::from_str(text).unwrap()

@@ -34,24 +34,57 @@ func livePagesOutputs() map[string]any {
 // TestPagesServeATopcoatApp builds fixture-pages-api's crates with the
 // pages on and runs cargo clippy, then cargo test, with pagesAppTest: an
 // app discovers the pages; the index and the nav list what the caller may
-// list, and the trail names an item by its title; a list filters, links
-// its rows to their items, names their owners by the app's choices and
-// offers its new page to a writer; an item's page shows its detail, its
-// edit and delete links, its action's form and its tasks' section; the
-// new, edit, delete and action pages post, redirect (303) and refuse with
-// the Refusal's status, 422 at the control, the new page's owner a select
-// of the choices, the edit form filled from the item and a conflict (409)
-// the form's message; a nested resource's pages live under its parent's
-// item, and one under a collection without pages has no place in the nav;
-// a refused caller keeps the route's status: 401 with a sign-in link that
-// comes back, 403 and 404, a route's value that does not decode 404; an
-// untitled document's row links its noun and id; the drafts' list at
-// documents/drafts is its own in the nav and the trail, never a document;
-// a document's comments are a collection under it, which no PUT or DELETE
-// of theirs, nor the DELETE of its cover, turns into a form; and a
-// document starts from an optional input that its edit page requires.
+// list, the projects' links after their type's icon and the others
+// without one, and the trail names an item by its title; a list filters,
+// links its rows to their items, names their owners by the app's choices
+// and offers its new page to a writer; an item's page shows its detail,
+// its edit and delete links, its action's form and its tasks' section;
+// the new, edit, delete and action pages post, redirect (303) and refuse
+// with the Refusal's status, 422 at the control, the new page's owner a
+// select of the choices, the edit form filled from the item and a
+// conflict (409) the form's message; a nested resource's pages live under
+// its parent's item, and one under a collection without pages has no
+// place in the nav; a refused caller keeps the route's status: 401 with a
+// sign-in link that comes back, 403 and 404, a route's value that does
+// not decode 404; an untitled document's row links its noun and id; the
+// drafts' list at documents/drafts is its own in the nav and the trail,
+// never a document; a document's comments are a collection under it,
+// which no PUT or DELETE of theirs, nor the DELETE of its cover, turns
+// into a form; and a document starts from an optional input that its
+// edit page requires. Enter in each form a page renders presses its
+// default button (enterHelper).
 func TestPagesServeATopcoatApp(t *testing.T) {
 	cargoTestCrate(t, pagesService, pagesAppTest)
+}
+
+// TestTheNavShowsATypesIcon builds fixture-pages-api, whose Project
+// declares an icon, and fixture-console-api, whose types declare none
+// (D44, amended): the projects' links, the list's and the archived
+// list's, whose rows are projects, carry it for the nav and the index,
+// which render it before the label; the other links carry none; and a
+// crate whose resources declare no icon has no icon in its links.
+func TestTheNavShowsATypesIcon(t *testing.T) {
+	files, _ := readCrate(t, registry.DefaultNaming(), pagesService, pagesOutputs())
+	pages := files["pages.rs"]
+	for _, want := range []string{
+		`let link = Link { href: "/console/projects", label: "Projects", icon: Some("folder") };`,
+		`let link = Link { href: "/console/projects/archived", label: "Archived", icon: Some("folder") };`,
+		`let link = Link { href: "/console/members", label: "Members", icon: None };`,
+		`<span class="ss-icon" data-icon=(icon) aria-hidden="true"></span>`,
+	} {
+		if !strings.Contains(pages, want) {
+			t.Errorf("fixture-pages-api's pages.rs lacks %s", want)
+		}
+	}
+	if n := strings.Count(pages, `data-icon=(icon)`); n != 2 {
+		t.Errorf("fixture-pages-api's pages.rs renders an icon %d times, want the nav's and the index's", n)
+	}
+	files, _ = readCrate(t, registry.DefaultNaming(), consoleService, livePagesOutputs())
+	for _, unwanted := range []string{"data-icon", "icon:"} {
+		if strings.Contains(files["pages.rs"], unwanted) {
+			t.Errorf("fixture-console-api's pages.rs, whose types declare no icon, has %s", unwanted)
+		}
+	}
 }
 
 // TestPagesServeAnAPIWithoutCallers does the same for fixture-args-api with
@@ -377,6 +410,9 @@ use schemas_fixture_pages_api_topcoat::{PageAuthenticator, RouterBuilderFixtureP
 use topcoat::context::Cx;
 use topcoat::router::request::parts;
 use topcoat::router::{header, to_bytes, Body, Router, RouterBuilderDiscoverExt, StatusCode};
+
+#[path = "support/enter.rs"]
+mod enter;
 
 const APOLLO: &str = "8d1f6c9e-0000-4000-8000-000000000001";
 const GEMINI: &str = "8d1f6c9e-0000-4000-8000-000000000002";
@@ -717,10 +753,12 @@ async fn send(router: &Router, method: &str, uri: &str, caller: &str, body: &str
         request = request.header(header::CONTENT_TYPE, "application/x-www-form-urlencoded");
     }
     let response = router.handle(request.body(Body::from(body.to_owned())).unwrap()).await;
-    let status = response.status();
-    let location = response.headers().get(header::LOCATION).map(|value| value.to_str().unwrap().to_owned());
+    let (status, headers) = (response.status(), response.headers().clone());
+    let location = headers.get(header::LOCATION).map(|value| value.to_str().unwrap().to_owned());
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    Answer { status, html: String::from_utf8(bytes.to_vec()).unwrap(), location }
+    let html = String::from_utf8(bytes.to_vec()).unwrap();
+    enter::check_page(uri, &headers, &html);
+    Answer { status, html, location }
 }
 
 async fn get(router: &Router, uri: &str, caller: &str) -> Answer {
@@ -737,12 +775,16 @@ async fn the_index_and_the_nav_show_what_the_caller_may_list() {
     let index = get(&app, "/console", "reader").await;
     assert_eq!(index.status, StatusCode::OK, "{}", index.html);
     assert!(index.html.contains(r#"<header class="ss-header"><a href="/console">Projects console</a></header>"#), "{}", index.html);
-    assert!(index.html.contains(r#"<ul class="ss-index"><li><a href="/console/projects">Projects</a></li></ul>"#), "{}", index.html);
+    // The projects' link starts with their type's icon, which the app's
+    // stylesheet draws.
+    assert!(index.html.contains(r#"<ul class="ss-index"><li><a href="/console/projects"><span class="ss-icon" data-icon="folder" aria-hidden="true"></span>Projects</a></li></ul>"#), "{}", index.html);
     assert!(!index.html.contains("/console/members"), "a reader of projects sees members: {}", index.html);
     assert!(index.html.contains(r#"<li><span aria-current="page">Projects console</span></li>"#), "{}", index.html);
 
     let index = get(&app, "/console", "members").await;
+    // A link whose type declares no icon has no span.
     assert!(index.html.contains(r#"<li><a href="/console/members">Members</a></li>"#), "{}", index.html);
+    assert!(!index.html.contains("ss-icon"), "{}", index.html);
     assert!(!index.html.contains("/console/projects"), "a reader of members sees projects: {}", index.html);
 
     // Signed out, the index lists nothing and offers to sign in.
@@ -754,9 +796,11 @@ async fn the_index_and_the_nav_show_what_the_caller_may_list() {
     // The nav marks the current resource: its list as the page, an item's
     // page as under it.
     let list = get(&app, "/console/projects", "reader").await;
-    assert!(list.html.contains(r#"<nav class="ss-nav" aria-label="Resources"><ul><li><a href="/console/projects" aria-current="page">Projects</a></li></ul></nav>"#), "{}", list.html);
+    assert!(list.html.contains(r#"<nav class="ss-nav" aria-label="Resources"><ul><li><a href="/console/projects" aria-current="page"><span class="ss-icon" data-icon="folder" aria-hidden="true"></span>Projects</a></li></ul></nav>"#), "{}", list.html);
     let item = get(&app, &format!("/console/projects/{APOLLO}"), "reader").await;
-    assert!(item.html.contains(r#"<li><a href="/console/projects" aria-current="true">Projects</a></li>"#), "{}", item.html);
+    assert!(item.html.contains(r#"<li><a href="/console/projects" aria-current="true"><span class="ss-icon" data-icon="folder" aria-hidden="true"></span>Projects</a></li>"#), "{}", item.html);
+    // The trail shows no icon.
+    assert!(item.html.contains(r#"<li><a href="/console/projects">Projects</a></li>"#), "{}", item.html);
 }
 
 #[tokio::test]
@@ -1158,9 +1202,11 @@ async fn shard(router: &Router, uri: &str, caller: &str, body: serde_json::Value
         request = request.header("x-topcoat-identity", identity);
     }
     let response = router.handle(request.body(Body::from(body.to_string())).unwrap()).await;
-    let status = response.status();
+    let (status, headers) = (response.status(), response.headers().clone());
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    Answer { status, html: String::from_utf8(bytes.to_vec()).unwrap(), location: None }
+    let html = String::from_utf8(bytes.to_vec()).unwrap();
+    enter::check_page(uri, &headers, &html);
+    Answer { status, html, location: None }
 }
 
 // The text of html between the first start and the end after it.
@@ -1320,8 +1366,9 @@ async fn names_come_from_the_type_and_the_path_never_a_guessed_singular() {
     let archived = get(&app, "/console/projects/archived", "auditor").await;
     assert_eq!(archived.status, StatusCode::OK, "{}", archived.html);
     assert!(archived.html.contains("<h1>Archived</h1>"), "{}", archived.html);
-    assert!(archived.html.contains(r#"<li><a href="/console/projects/archived" aria-current="page">Archived</a></li>"#), "{}", archived.html);
-    assert!(archived.html.contains(r#"<li><a href="/console/projects">Projects</a></li>"#), "{}", archived.html);
+    // Their rows are projects, so their link has the projects' icon too.
+    assert!(archived.html.contains(r#"<li><a href="/console/projects/archived" aria-current="page"><span class="ss-icon" data-icon="folder" aria-hidden="true"></span>Archived</a></li>"#), "{}", archived.html);
+    assert!(archived.html.contains(r#"<li><a href="/console/projects"><span class="ss-icon" data-icon="folder" aria-hidden="true"></span>Projects</a></li>"#), "{}", archived.html);
     let reader = get(&app, "/console/projects", "reader").await;
     assert!(!reader.html.contains("/console/projects/archived"), "{}", reader.html);
 }
@@ -1355,6 +1402,9 @@ use schemas_fixture_args_api_topcoat::api::{
 };
 use schemas_fixture_args_api_topcoat::RouterBuilderFixtureArgsApiExt;
 use topcoat::router::{header, to_bytes, Body, Router, RouterBuilderDiscoverExt, StatusCode};
+
+#[path = "support/enter.rs"]
+mod enter;
 
 const ORDER: &str = "8d1f6c9e-0000-4000-8000-000000000001";
 const PRODUCT: &str = "8d1f6c9e-0000-4000-8000-000000000002";
@@ -1419,10 +1469,12 @@ async fn send(method: &str, uri: &str, body: &str) -> (StatusCode, String, Optio
         .body(Body::from(body.to_owned()))
         .unwrap();
     let response = app().handle(request).await;
-    let status = response.status();
-    let location = response.headers().get(header::LOCATION).map(|value| value.to_str().unwrap().to_owned());
+    let (status, headers) = (response.status(), response.headers().clone());
+    let location = headers.get(header::LOCATION).map(|value| value.to_str().unwrap().to_owned());
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    (status, String::from_utf8(bytes.to_vec()).unwrap(), location)
+    let html = String::from_utf8(bytes.to_vec()).unwrap();
+    enter::check_page(uri, &headers, &html);
+    (status, html, location)
 }
 
 #[tokio::test]
@@ -1473,7 +1525,9 @@ async fn an_action_without_callers_posts_and_refuses_by_its_status() {
 // body limit and timeout with 429, 413 and 504. The shipments' page, whose
 // list has no control, names each warehouse through listWarehouses, and
 // meets its rate limit, which the warehouses' own page shares, and its
-// timeout.
+// timeout. The list's route, its procedure and its page take from one
+// limiter (D44, amended): a client's request through the JSON API and one
+// through the procedure leave its page 429, and another client's 200.
 func TestPagesKeepTheirRoutesControls(t *testing.T) {
 	cargoTestCrateWith(t, controlsService, controlsPagesAppTest, crateOptions{
 		outputs:         livePagesOutputs(),
@@ -1484,6 +1538,7 @@ func TestPagesKeepTheirRoutesControls(t *testing.T) {
 // controlsPagesAppTest is tests/app.rs of fixture-controls-api's Topcoat
 // crate with the pages on.
 const controlsPagesAppTest = `use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -1497,11 +1552,15 @@ use schemas_fixture_controls_api_topcoat::api::runtime::{
 };
 use schemas_fixture_controls_api_topcoat::api::{
     types, HookImplementation, HookReceivePaymentArgs, Implementations, OrderGetOrderArgs, OrderHoldOrderArgs,
-    OrderImplementation, OrderListOrdersArgs, StockImplementation, StockReleaseReservationArgs, WebhookVerifier,
+    OrderImplementation, OrderListOrdersArgs, StockImplementation, StockReleaseReservationArgs, StockReserveStockArgs,
+    WebhookVerifier,
 };
 use schemas_fixture_controls_api_topcoat::{PageAuthenticator, RouterBuilderFixtureControlsApiExt};
 use topcoat::context::Cx;
-use topcoat::router::{header, to_bytes, Body, Router, RouterBuilderDiscoverExt, StatusCode};
+use topcoat::router::{header, to_bytes, Body, RemoteAddr, Router, RouterBuilderDiscoverExt, StatusCode};
+
+#[path = "support/enter.rs"]
+mod enter;
 
 struct NoRequests;
 
@@ -1556,6 +1615,9 @@ impl HookImplementation for Shop {
 impl StockImplementation for Shop {
     async fn reindex_stock(&self, _ctx: RequestContext) -> Result<types::StockRun, ApiError> {
         Ok(types::StockRun { done: true })
+    }
+    async fn reserve_stock(&self, _ctx: RequestContext, args: StockReserveStockArgs) -> Result<types::Reservation, ApiError> {
+        Ok(types::Reservation { id: args.id, held: true })
     }
     async fn release_reservation(&self, _ctx: RequestContext, args: StockReleaseReservationArgs) -> Result<types::Reservation, ApiError> {
         Ok(types::Reservation { id: args.id, held: false })
@@ -1619,11 +1681,32 @@ async fn send(router: &Router, method: &str, uri: &str, content_type: &str, body
     let status = response.status();
     let headers = response.headers().clone();
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    Answer { status, headers, html: String::from_utf8(bytes.to_vec()).unwrap() }
+    let html = String::from_utf8(bytes.to_vec()).unwrap();
+    enter::check_page(uri, &headers, &html);
+    Answer { status, headers, html }
 }
 
 async fn get(router: &Router, uri: &str) -> Answer {
     send(router, "GET", uri, "text/plain", String::new(), None).await
+}
+
+// A request from a client at ip, as Topcoat's server records the
+// connection's address.
+async fn send_from(router: &Router, method: &str, uri: &str, ip: [u8; 4]) -> Answer {
+    let request = http::Request::builder()
+        .method(method)
+        .uri(uri)
+        .header(header::CONTENT_TYPE, "application/json")
+        .extension(RemoteAddr(SocketAddr::from((ip, 40000))));
+    let response = router.handle(request.body(Body::from("[]")).unwrap()).await;
+    let status = response.status();
+    let headers = response.headers().clone();
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let html = String::from_utf8(bytes.to_vec()).unwrap();
+    // The JSON API's and the procedure's answers are not pages: only a
+    // text/html answer is held to the rule.
+    enter::check_page(uri, &headers, &html);
+    Answer { status, headers, html }
 }
 
 async fn hold(router: &Router, body: String, length: Option<usize>) -> Answer {
@@ -1669,6 +1752,30 @@ async fn a_list_and_its_shard_meet_the_lists_rate_limit() {
         assert_eq!(shard.status, StatusCode::OK, "{}", shard.html);
     }
     refusal(&get(&app, "/console/orders").await, 429, "Too many requests", "Too Many Requests");
+}
+
+#[tokio::test]
+async fn a_route_its_procedure_and_its_pages_share_one_budget() {
+    // The orders' list allows a client two a minute, however it lists
+    // them: one through the JSON API and one through the list's procedure,
+    // whose limiter counts it before it reads its arguments, leave the
+    // console's list none (D44, amended).
+    let app = app(false);
+    let (ada, bob) = ([10, 0, 0, 1], [10, 0, 0, 2]);
+    let api = send_from(&app, "GET", "/api/orders", ada).await;
+    assert_eq!(api.status, StatusCode::OK, "{}", api.html);
+    let procedure = send_from(&app, "POST", "/_superschematic/fixture-controls-api/order/list-orders", ada).await;
+    assert!(!procedure.html.contains("too_many_requests"), "{}", procedure.html);
+    let limited = send_from(&app, "GET", "/console/orders", ada).await;
+    refusal(&limited, 429, "Too many requests", "Too Many Requests");
+    assert!(limited.headers.contains_key(header::RETRY_AFTER), "{:?}", limited.headers);
+    // The list's route and its procedure meet the same bucket.
+    assert_eq!(send_from(&app, "GET", "/api/orders", ada).await.status, StatusCode::TOO_MANY_REQUESTS);
+    let procedure = send_from(&app, "POST", "/_superschematic/fixture-controls-api/order/list-orders", ada).await;
+    assert!(procedure.html.contains("too_many_requests"), "{}", procedure.html);
+    // Another client's budget is its own.
+    let other = send_from(&app, "GET", "/console/orders", bob).await;
+    assert_eq!(other.status, StatusCode::OK, "{}", other.html);
 }
 
 #[tokio::test]

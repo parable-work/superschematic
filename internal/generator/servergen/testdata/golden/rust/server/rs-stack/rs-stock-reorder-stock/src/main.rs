@@ -18,7 +18,9 @@
 //! error or panics, and logs each outcome. On SIGTERM or SIGINT it claims no
 //! more, lets the running methods finish for 2s, drops the rest and
 //! gives their messages back, and exits 0. It serves no port, and builds no
-//! identity service and no router (D53, D65).
+//! identity service and no router (D53, D65). When the environment names an
+//! OTLP endpoint (`OTEL_EXPORTER_OTLP_ENDPOINT`), it exports a span per
+//! message (D67).
 //!
 //! The API's implementation is the crate at the naming file's
 //! `[implementation_paths] rust` template, which each build copies into the
@@ -35,6 +37,7 @@ use superschematic_http_runtime::logging::{self, tracing};
 use superschematic_http_runtime::postgres::{self, Pool};
 use superschematic_http_runtime::queue::{PostgresQueue, QueueDefinition};
 use superschematic_http_runtime::stackconfig::{self, Database, Service};
+use superschematic_http_runtime::telemetry::{self, Defaults};
 use superschematic_http_runtime::worker::{self, Options};
 use superschematic_http_runtime::Shutdown;
 
@@ -65,10 +68,20 @@ type Failure = Box<dyn std::error::Error + Send + Sync>;
 
 #[tokio::main]
 async fn main() -> ExitCode {
-    if let Err(err) = logging::init_json_as(STACK, logging::WORKER, NAME) {
-        eprintln!("{NAME}: install the logger: {err}");
-        return ExitCode::FAILURE;
-    }
+    // The log and, when the environment names an OTLP endpoint, trace export
+    // (D67), which flushes the spans still buffered as main returns.
+    let installed = telemetry::start(Defaults {
+        stack: STACK,
+        kind: logging::WORKER,
+        name: NAME,
+    });
+    let _telemetry = match installed {
+        Ok(telemetry) => telemetry,
+        Err(err) => {
+            eprintln!("{NAME}: install the logger: {err}");
+            return ExitCode::FAILURE;
+        }
+    };
     match run().await {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
@@ -172,6 +185,8 @@ fn open_bucket(
 /// field its edge derives, and the client sends the service credential the
 /// edge's connector chose (docs/stack-model.md, section 9.6), and no end
 /// user: a worker serves none.
+/// With trace export on, each call is a client span that carries its trace
+/// context (D67).
 fn new_rs_pricing_client(endpoint: &Service) -> Result<rs_pricing_sdk::RsPricingSdk, Failure> {
     let service_credential = match &endpoint.credential {
         Some(credential) => Some(rs_pricing_sdk::ServiceCredential {
@@ -184,6 +199,7 @@ fn new_rs_pricing_client(endpoint: &Service) -> Result<rs_pricing_sdk::RsPricing
     rs_pricing_sdk::RsPricingSdk::new(rs_pricing_sdk::ClientConfig {
         base_url: endpoint.url.clone(),
         service_credential,
+        transport: telemetry::transport(),
         ..Default::default()
     })
     .map_err(|err| format!("client of rs-pricing: {err}").into())

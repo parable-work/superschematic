@@ -46,8 +46,10 @@ type Queue struct {
 }
 
 // queuesOf reads the schema's queues, sorted by name. It refuses a field
-// the queues do not hold yet: a union, and a list of Generic.JSON values in
-// a native array.
+// the queues do not hold yet: a union, a list of Generic.JSON values in a
+// native array, and a list of locations or durations, a POINT[] or an
+// INTERVAL[] column, which the TypeScript and Rust clients leave out too. A
+// single location or duration it holds (D53, amended).
 func queuesOf(schema *ir.Schema, scalars map[string]scalarLookup, unionNames, enumNames map[string]bool) ([]Queue, error) {
 	var queues []Queue
 	for _, td := range schema.Queues() {
@@ -78,6 +80,10 @@ func queuesOf(schema *ir.Schema, scalars map[string]scalarLookup, unionNames, en
 				return nil, fmt.Errorf("queue %s: field %s is a union, which a queue's message does not hold yet; hold it in a @jsonField type", td.Name, f.Name)
 			case field.NativeGenericJSONList():
 				return nil, fmt.Errorf("queue %s: field %s is a list of Generic.JSON values, which a queue's message does not hold yet; hold it in a @jsonField type", td.Name, f.Name)
+			case field.IsGeoPointList:
+				return nil, fmt.Errorf("queue %s: field %s is a list of %s values, a POINT[] column, which a queue's message does not hold yet; hold it in a @jsonField type", td.Name, f.Name, field.IRType)
+			case field.IsIntervalList:
+				return nil, fmt.Errorf("queue %s: field %s is a list of %s values, an INTERVAL[] column, which a queue's message does not hold yet; hold it in a @jsonField type", td.Name, f.Name, field.IRType)
 			}
 			q.Fields = append(q.Fields, field)
 		}
@@ -115,6 +121,12 @@ func (f Field) QueueScanTemp() string {
 		return "[]byte"
 	case f.ScansElementPointers():
 		return "[]*" + f.GoType
+	case f.IsGeoPoint:
+		return "pgtype.Point"
+	case f.IsInterval && f.IsNullableScalar:
+		return "*time.Duration"
+	case f.IsInterval:
+		return "time.Duration"
 	case !f.IsArray && f.IsDateLike:
 		return "pgtype.Date"
 	case !f.IsRequired && !f.IsArray && f.GoType == "string":
@@ -127,7 +139,8 @@ func (f Field) QueueScanTemp() string {
 
 // QueuesImportSQL, QueuesImportReflect and QueuesImportPgtype report
 // whether queues.go uses database/sql (an optional string field), reflect
-// (an optional field whose zero value is no nil) and pgtype (a date field).
+// (an optional field whose zero value is no nil) and pgtype (a date field,
+// or a location, which crosses as a POINT).
 func (o *ORMOutput) QueuesImportSQL() bool {
 	return queuesNeed(o.Queues, func(f Field) bool { return f.QueueScanTemp() == "sql.NullString" })
 }
@@ -137,7 +150,13 @@ func (o *ORMOutput) QueuesImportReflect() bool {
 }
 
 func (o *ORMOutput) QueuesImportPgtype() bool {
-	return queuesNeed(o.Queues, func(f Field) bool { return f.QueueScanTemp() == "pgtype.Date" })
+	return queuesNeed(o.Queues, func(f Field) bool { return f.QueueScanTemp() == "pgtype.Date" || f.IsGeoPoint })
+}
+
+// HasInterval reports whether a field of the queue is a duration, which
+// crosses as its microseconds rather than as a table's field does.
+func (q Queue) HasInterval() bool {
+	return q.needs(func(f Field) bool { return f.IsInterval })
 }
 
 // needs reports whether a field of the queue matches.

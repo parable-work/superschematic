@@ -21,9 +21,10 @@ carries extensions. A binary hands the error `Execute` returns to
 that already said why, such as `superschematic-identity`, exits with that
 program's status.
 
-The core has nine commands: `build`, `build-all`, `migrate`,
-`json-schema`, `format`, `behaviors`, `engine-client` and the `stack`
-and `identity` groups, beside cobra's own `help` and `completion`. The
+The core has ten commands: `build`, `build-all`, `migrate`,
+`json-schema`, `format`, `behaviors`, `engine-client`, `env` and the
+`stack` and `identity` groups, beside cobra's own `help` and
+`completion`. The
 installed `superschematic` links the official extensions (the gcp target, the Cloudflare DNS platform and
 target, and the Pulumi provisioner), which add none. The migration runner,
 `superschematic-migrate`, is a binary of its own ([The runner](/superschematic/reference/migrations/#the-runner)),
@@ -69,7 +70,15 @@ the `enginedoc` generator writes the schema's engine document,
 constant too
 ([Engine types](/superschematic/guides/engine-behaviors/#engine-types)).
 `outputs.engine.namespace` names the engine namespace its documents live
-in, the service's name unless set. The build fails before its generators
+in, the service's name unless set. When a type of a DB or General schema
+composes an extension's behavior whose registration names a Rust crate,
+the `projectengine` generator writes the project's engine crate,
+`engine/rust/<service>`, which compiles the core's behaviors and the
+extension's crates into the Rust engine (D58), with the C ABI's archive
+over them a Go server links as its `ffi` member and the Node-API addon a
+TypeScript server loads as its `napi` member
+([The project's engine crate](/superschematic/guides/engine-behaviors/#the-projects-engine-crate)).
+The build fails before its generators
 run, one line per problem, when an engine type reaches a table or another
 engine type through a field, a table references an engine type, or an
 engine type declares what only a table has:
@@ -437,14 +446,14 @@ for, fails to convert to `ts`, since the import would not resolve.
 
 ## `behaviors --out <dir>`
 
-Write the declaration of every behavior the binary registers into the npm
-package that implements it for `@superschematic/engine`: one
-`<name>.behavior.json` per behavior, the same declaration the Go package
-embeds and registers. The engine implementation imports that copy, so the
-engine and the compiler read one declaration. Other `*.behavior.json`
-files in the directory are removed. `--package` and `--extension` narrow
-what is written to the behaviors one npm package implements and the ones
-one extension registered.
+Write the declaration of every behavior the binary registers into the
+crate that implements it for the engine: one `<name>.behavior.json` per
+behavior, the same declaration the Go package embeds and registers. The
+Rust implementation embeds that copy (`include_str!`), so the engine and
+the compiler read one declaration. Other `*.behavior.json` files in the
+directory are removed. `--package` and `--extension` narrow what is
+written to the behaviors one npm package ships and the ones one
+extension registered.
 
 A copy is canonical rather than the source bytes: the declaration's keys
 in `BehaviorDeclaration`'s order, each JSON Schema's object keys sorted
@@ -452,29 +461,33 @@ with number literals as written, two-space indents and a final newline.
 It changes only when the declaration does.
 
 ```
-superschematic behaviors --package @superschematic/engine-workqueue --out runtime/engine-workqueue/typescript/src/declarations
-acme-schematic behaviors --extension acme --out packages/behaviors/declarations
-acme-schematic behaviors --extension acme --out packages/behaviors/declarations --check
+superschematic behaviors --package @superschematic/engine --out runtime/engine/rust/behaviors/declarations
+superschematic behaviors --package @superschematic/engine-workqueue --out runtime/engine-workqueue/rust/declarations --check
+acme-schematic behaviors --extension acme --out crates/behaviors/declarations
+acme-schematic behaviors --extension acme --out crates/behaviors/declarations --check
 ```
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
 | `--out` | (required) | the directory the copies go in |
 | `--check` | false | write nothing; fail, naming each file, when a copy differs, is missing, or is no registered behavior's |
-| `--package` | every behavior | only the behaviors this npm package implements, as their registration names it; fails, naming the packages there are, when it implements none |
+| `--package` | every behavior | only the behaviors this npm package ships, as their registration names it; fails, naming the packages there are, when it ships none |
 | `--extension` | every behavior | only the behaviors this extension (its `Name()`) registered; fails when it registers none |
 | `--naming` | built-in names | naming config file; this command has no service directory to discover one from |
 
 It is a command of the binary, not a tool in the core module, because an
 extension's declarations are registered only in its own binary: acme's
-copy comes from `acme-schematic`, and its smoke runs `--check`. The core
-binary writes the behaviors the core declares into the two packages that
-implement them: `Workflow`, `Comments`, `Revisions`, `Dependencies`,
-`Links`, `Rollups`, `Search`, `Reactions`, `Constants`, `Variants`,
-`Branches`, `Timers`, `StateRules`, `Numbering` and `Approvals` with `--package @superschematic/engine` (into the TypeScript engine and, the same
-files, the Rust engine's behaviors crate), and `Lease`, `Assignment`, `Queue`, `Presence`,
-`Blueprint`, `Budget` and `Retries` with `--package
-@superschematic/engine-workqueue` (`make behaviors`; `make
+copy comes from `acme-schematic`, into its `acme-behaviors` crate, and
+its smoke runs `--check`. The core binary writes the behaviors the core
+declares into the two Rust crates that implement them: `Workflow`,
+`Comments`, `Revisions`, `Dependencies`, `Links`, `Rollups`, `Search`,
+`Reactions`, `Constants`, `Variants`, `Branches`, `Timers`,
+`StateRules`, `Numbering` and `Approvals` with `--package
+@superschematic/engine` into the engine's behaviors crate
+(`runtime/engine/rust/behaviors/declarations`), and `Lease`,
+`Assignment`, `Queue`, `Presence`, `Blueprint`, `Budget` and `Retries`
+with `--package @superschematic/engine-workqueue` into the work queue's
+(`runtime/engine-workqueue/rust/declarations`) (`make behaviors`; `make
 behaviors-check` in CI). Without `--extension`, an extension's binary
 writes the core's declarations beside its own.
 
@@ -643,7 +656,11 @@ design is section 8.3 of
    package at the same place, and wait until it answers `/readyz`. Each
    line a server prints is printed with its name in front. Go servers need
    `go` on `PATH`, and TypeScript servers `bun`; a Rust server does not
-   run locally yet, and the environment does not resolve.
+   run locally yet, and the environment does not resolve. In a project
+   whose naming file names no superscalar checkout (`[paths] scalar_go`),
+   a release of superschematic first fetches the static archives it ships
+   for this machine's platform, as [`env`](#env-variable) does, and the
+   Go builds take `CGO_LDFLAGS` pointing at them, after any you set.
 6. Build each worker's entrypoint module at `<out>/server/<stack>/<worker>`
    the same way, a TypeScript worker's package needing no build, and start
    it with the servers of its wave, a TypeScript one as `bun main.ts`: a process with
@@ -723,7 +740,8 @@ API service's name and its class in kebab case,
 On the `local` target, run it from another terminal while `stack dev`
 runs the environment. It builds no schema: it reads the environment the
 last build resolved and the program `stack dev` rendered, builds a Go
-job's binary from its entrypoint module, or installs the workspace for a
+job's binary from its entrypoint module, linking the release's static
+archives as `stack dev` does, or installs the workspace for a
 TypeScript job's `main.ts`, so a change to the job's code is in the run, and runs it with the environment's values, secrets and keys, its
 timeout and its retries, each line it prints with the job's name in front.
 It refuses an environment whose Postgres container or servers do not
@@ -1078,6 +1096,37 @@ superschematic-identity version
 | `--database-url` | `$DATABASE_URL` | the database URL |
 | `--dialect` | the URL's | `postgres` or `sqlite` |
 | `--config` | the runtime's cost | an identity config JSON file; its `password.argon2` sets the hash's cost |
+
+## `env [<variable>...]`
+
+Print the variables a `go build` of the code this release of
+superschematic generates needs on this machine, in a project whose naming
+file names no superscalar checkout
+([`[paths] scalar_go`](/superschematic/reference/naming/#pathsscalar_go)).
+Such code links superscalar's static archive, the version graph's and the
+engine's through cgo, and no module the module proxy serves carries them.
+`env` downloads the release's
+`superschematic-archives_<version>_<platform>.tar.gz` for this machine
+once, checks it against the digest the binary names, unpacks it into
+`superschematic/archives/<digest>` in the user's cache directory, and
+prints `CGO_LDFLAGS` pointing cgo's linker at its `lib/`, as a line a
+POSIX shell evaluates. With variable names it prints each one's value
+alone, a line each, as `go env` does; `CGO_LDFLAGS` is the one it
+prints. `stack dev` and `stack run` fetch the archives the same way for
+the builds they run, and the generated CI's `check` job and a server's
+Dockerfile download the same tarball.
+
+The assets download from the release's page unless
+`SUPERSCHEMATIC_RELEASE` names a mirror, the base URL the tarball's name
+is appended to. A binary built from a checkout is no release, and one the
+release workflow did not build names no digests: `env` fails for either,
+and a project built with them names its checkouts in `[paths]`, whose
+`make setup` builds the archives.
+
+```
+eval "$(superschematic env)" && go build ./...
+go env -w CGO_LDFLAGS="$(superschematic env CGO_LDFLAGS)"
+```
 
 ## Extension commands
 

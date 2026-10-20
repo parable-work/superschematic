@@ -52,8 +52,8 @@ GO_BUILD_FLAGS := -trimpath -buildvcs=false
 
 .PHONY: all setup build test lint fmt vet go-build go-test go-vet go-fmt-check go-lint \
         go-goldens catalog-check schema-file-types schema-file-types-check behaviors behaviors-check \
-        gcp-schemas gcp-schemas-check cloudflare-schemas cloudflare-schemas-check generic-schemas generic-schemas-check ts python rust engine-rust \
-        engine-archive engine-go engine-link-check \
+        gcp-schemas gcp-schemas-check cloudflare-schemas cloudflare-schemas-check generic-schemas generic-schemas-check ts python rust engine-rust acme-engine-rust \
+        engine-rust-soak engine-archive engine-go engine-link-check \
         versiongraph versiongraph-scenarios versiongraph-scenarios-ts versiongraph-scenarios-rust \
         versiongraph-scenarios-python docs cli-smoke example-migrations scrub versions clean
 
@@ -160,27 +160,21 @@ generic-schemas:
 generic-schemas-check:
 	go run ./internal/tools/providerschemas -check
 
-# The engine and the work-queue package implement the core's behaviors over
-# a copy of each declaration (internal/registry/behaviors), which the core
-# with no extension linked writes into the package that implements it
-# (--package). The Rust engine's behaviors crate and the work queue's Rust
-# crate (D58) carry a copy of their package's declarations too, which each
-# behavior embeds with include_str!. CI fails when a committed copy differs.
-ENGINE_DECLARATIONS := runtime/engine/typescript/src/behaviors/core/declarations
+# The engine's behaviors crate and the work queue's crate (D58) implement
+# the core's behaviors over a copy of each declaration
+# (internal/registry/behaviors), which the core with no extension linked
+# writes into the crate that implements it, by the npm package that ships
+# it (--package): each behavior embeds its copy with include_str!. CI fails
+# when a committed copy differs.
 ENGINE_RUST_DECLARATIONS := runtime/engine/rust/behaviors/declarations
-WORKQUEUE_DECLARATIONS := runtime/engine-workqueue/typescript/src/declarations
 WORKQUEUE_RUST_DECLARATIONS := runtime/engine-workqueue/rust/declarations
 
 behaviors:
-	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/engine --out $(ENGINE_DECLARATIONS)
 	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/engine --out $(ENGINE_RUST_DECLARATIONS)
-	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/engine-workqueue --out $(WORKQUEUE_DECLARATIONS)
 	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/engine-workqueue --out $(WORKQUEUE_RUST_DECLARATIONS)
 
 behaviors-check:
-	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/engine --out $(ENGINE_DECLARATIONS) --check
 	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/engine --out $(ENGINE_RUST_DECLARATIONS) --check
-	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/engine-workqueue --out $(WORKQUEUE_DECLARATIONS) --check
 	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/engine-workqueue --out $(WORKQUEUE_RUST_DECLARATIONS) --check
 
 ts:
@@ -188,7 +182,9 @@ ts:
 	cd runtime/schema/typescript && bun install --frozen-lockfile && bun run typecheck && bun run build && bun run test
 	cd runtime/http/typescript && bun install --frozen-lockfile && bun run build && bun run test
 	cd runtime/versiongraph/typescript && bun install --frozen-lockfile && bun run typecheck && bun run test
-	cd runtime/engine/typescript && bun install --frozen-lockfile && bun run typecheck && bun run build && bun run test
+	cd runtime/engine/typescript && bun install --frozen-lockfile
+	scripts/engine-napi.sh --js-behaviors >/dev/null
+	cd runtime/engine/typescript && bun run typecheck && bun run build && bun run test
 	cd runtime/engine-workqueue/typescript && bun install --frozen-lockfile && bun run typecheck && bun run test
 	examples/engine-notes/scripts/check.sh
 	examples/engine-jobs/scripts/check.sh
@@ -224,7 +220,8 @@ python:
 # logging, and the two at once, as a worker runs (D65); and gcs, a bucket on
 # GCS (D54), whose tests run against fakes, and against the fake-gcs-server
 # SUPERSCHEMATIC_TEST_GCS_EMULATOR names, when it is set, and beside a
-# worker's two, as a worker with a bucket builds.
+# worker's two, as a worker with a bucket builds; and otel, a deployable's
+# trace export (D67), alone and with postgres, as a worker builds it.
 rust:
 	cd runtime/http/rust && cargo fmt --check && cargo clippy --all-targets -- -D warnings \
 		&& cargo clippy --all-targets --features serde_json/arbitrary_precision,serde_json/preserve_order -- -D warnings \
@@ -240,7 +237,10 @@ rust:
 		&& cargo clippy --all-targets --features postgres,logging -- -D warnings \
 		&& cargo test --features postgres,logging \
 		&& cargo clippy --all-targets --features gcs -- -D warnings && cargo test --features gcs \
-		&& cargo clippy --all-targets --features gcs,postgres,logging -- -D warnings
+		&& cargo clippy --all-targets --features gcs,postgres,logging -- -D warnings \
+		&& cargo clippy --all-targets --features otel -- -D warnings && cargo test --features otel \
+		&& cargo clippy --all-targets --features postgres,otel -- -D warnings \
+		&& cargo test --features postgres,otel
 	cd runtime/schema/rust && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test \
 		&& cargo test --features serde_json/arbitrary_precision,serde_json/preserve_order
 	cd runtime/schema/rust-ir && cargo fmt --check && cargo clippy --all-targets -- -D warnings \
@@ -278,6 +278,7 @@ rust:
 engine-rust:
 	cd runtime/engine/rust && cargo fmt --all --check \
 		&& cargo clippy --workspace --all-targets --all-features -- -D warnings \
+		&& cargo clippy --workspace --all-targets -- -D warnings \
 		&& cargo clippy --workspace --all-targets --no-default-features -- -D warnings \
 		&& cargo clippy --workspace --all-targets --no-default-features --features superschematic-engine/sqlite -- -D warnings \
 		&& cargo clippy --workspace --all-targets --no-default-features --features superschematic-engine/postgres -- -D warnings \
@@ -308,6 +309,37 @@ engine-go: engine-archive
 # after checking that each archive defines its own C functions alone.
 engine-link-check:
 	scripts/engine-link-check.sh
+
+# acme.Rating in the Rust engine (D58): examples/acme-schematic/crates/behaviors
+# is an extension's crate, a workspace of its own beside the engine's, checked
+# as engine-rust checks the engine: fmt, clippy, and its tests on SQLite, and
+# on Postgres too when SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL names one. The
+# tests read the meta-schema the acme binary writes (ACME_META_SCHEMA). acme's
+# smoke runs the same, and builds the engine crate the binary writes for a
+# schema that composes acme.Rating.
+ACME_CRATE := examples/acme-schematic/crates/behaviors
+acme-engine-rust:
+	@mkdir -p /tmp/superschematic-acme-engine
+	cd examples/acme-schematic && go run ./cmd/acme-schematic json-schema >/tmp/superschematic-acme-engine/acme-schema-file.json
+	cd $(ACME_CRATE) && cargo fmt --check \
+		&& cargo clippy --locked --all-targets -- -D warnings \
+		&& ACME_META_SCHEMA=/tmp/superschematic-acme-engine/acme-schema-file.json cargo test --locked
+
+# The Rust engine's soaks on Postgres (D58), which CI does not run: two
+# engines on one database racing long, with more threads than either pool
+# has connections, then the invariants the CI tests check (no lost update,
+# no repeated seq, cursor or number, no over-committed budget, no job
+# claimed twice); event streams that see every event once while their
+# listener's session is ended every 200 ms; and reactions handled once
+# each while the runner's lease is taken from its holder every 300 ms
+# (testkit/tests/replicas_*.rs). They need
+# SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL; ENGINE_SOAK_CALLS sets the calls
+# each thread makes, and the orders the handover soak creates (200 unless
+# set).
+engine-rust-soak:
+	@test -n "$$SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL" || \
+		{ echo "set SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL to the Postgres the soaks run against" >&2; exit 1; }
+	cd runtime/engine/rust && cargo test -p superschematic-engine-testkit --all-features --test 'replicas_*' -- --ignored --nocapture
 
 # The version-graph core's static archive, staged where the Go binding links
 # it (runtime/versiongraph/go/lib/<goos>_<goarch>).

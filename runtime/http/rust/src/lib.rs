@@ -52,6 +52,10 @@ mod service_auth;
 mod shutdown;
 // The readers of the config fields an API's edges derive in a stack (D57).
 pub mod stackconfig;
+// A stack deployable's trace export over OTLP (D67), with the `otel`
+// feature.
+#[cfg(feature = "otel")]
+pub mod telemetry;
 mod token_source;
 #[cfg(any(feature = "identity", feature = "postgres"))]
 mod uuid62;
@@ -80,14 +84,14 @@ pub use openapi::{
 };
 pub use operation::{
     body_fields, check_input, input, input_refusal, operation_response, required_input, InputParse,
-    OperationInfo,
+    OperationInfo, ServiceClause, ServiceMode,
 };
 pub use params::{
     decode_json_param, decode_param, ObjectPrepare, ParamKind, ParamLocation, ParamSpec,
     QueryValues, ScalarCheck, ScalarConstraints,
 };
 pub use path::path_is_percent_encoded;
-pub use ratelimit::{client_key, ClientIp, RateLimiter};
+pub use ratelimit::{client_key, ClientIp, RateLimiter, RateLimits};
 pub use request_id::{request_id_of, request_ids};
 pub use response::{
     error_response, json_response, problem_body, request_id_from_headers, status_title,

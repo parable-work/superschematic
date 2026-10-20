@@ -351,6 +351,7 @@ pub struct RoomRequestRecord {
     pub room_id: String,
     pub adults: i64,
     pub extras: Option<Vec<String>>,
+    pub notes: Option<Vec<String>>,
 }
 
 impl RoomRequestRecord {
@@ -360,6 +361,7 @@ impl RoomRequestRecord {
             room_id: wire::string(&json["roomId"]),
             adults: wire::integer(&json["adults"]),
             extras: wire::optional(&json["extras"], |v| wire::list(v, wire::string)),
+            notes: wire::optional(&json["notes"], |v| wire::list(v, wire::string)),
         }
     }
 
@@ -370,6 +372,9 @@ impl RoomRequestRecord {
         json.insert("adults".to_owned(), wire::put_integer(&self.adults));
         if let Some(value) = &self.extras {
             json.insert("extras".to_owned(), wire::put_list(value, wire::put_string));
+        }
+        if let Some(value) = &self.notes {
+            json.insert("notes".to_owned(), wire::put_list(value, wire::put_string));
         }
         serde_json::Value::Object(json)
     }

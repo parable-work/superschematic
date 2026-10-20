@@ -102,6 +102,34 @@ It serves `http://127.0.0.1:3000`, each page linking to the others:
   a filter, a search, a page's links and its size render the list again
   in place.
 
+`shop-db` titles `OrderStatus.Fulfilled` "Picked and packed"
+(`/** @title Picked and packed */` on the member), so the orders' filters
+and tables, the app's and the console's, label it so, and the other
+statuses by their names in words. `ProductView` and `OrderView` name an
+icon in their `@display`, `package` and `receipt`, and the console's nav
+and index start each link with
+`<span class="ss-icon" data-icon="receipt" aria-hidden="true"></span>`.
+The app ships no stylesheet, so the spans are empty; a stylesheet draws
+each name, with a mask, say:
+
+```css
+.ss-icon { display: inline-block; width: 1em; height: 1em; background: currentColor;
+           mask: center / contain no-repeat; }
+.ss-icon[data-icon="receipt"] { mask-image: url(/icons/receipt.svg); }
+.ss-icon[data-icon="package"] { mask-image: url(/icons/package.svg); }
+```
+
+A review's body says `@display({ multiline: true })`, a textarea, as its
+`maxLength` of 5000 would make it without the hint. Enter in any form's
+text field submits the form: every form's first submit button is its
+default, ahead of the place-order form's row buttons, which the app's
+tests check on every page they render.
+
+`placeOrder` allows 60 orders a minute per client, one budget across the
+JSON API's `POST /api/orders`, its procedure and the console's new-order
+page; the app's own `/orders/new` calls it in-process, which no traffic
+control meets.
+
 Every page renders in one HTML document, whose head loads Topcoat's
 runtime when the app finds its asset bundle beside the binary. `cargo run`
 alone writes none, so the app says so and serves the pages without the

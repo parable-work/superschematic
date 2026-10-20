@@ -22,9 +22,11 @@ which CI runs on Node.js and Bun.
 
 The core declares twenty-two behaviors, so every binary's meta-schema
 admits a schema that composes them. The engine implements fifteen itself
-and registers them when it opens. The other seven are claimable work,
-implemented by `@superschematic/engine-workqueue`; the engine refuses a
-schema that composes one until a deployment registers that package.
+and registers them when it opens. The other seven are claimable work, the
+work queue's Rust behaviors, which the engine's addon is built with; the
+engine refuses a schema that composes one until a deployment names them
+in the engine's `behaviors` option (`workQueueBehaviors`, from
+`@superschematic/engine-workqueue`).
 
 | Behavior | What it adds | Requires | Covered in |
 | --- | --- | --- | --- |
@@ -325,9 +327,11 @@ the types does not load it) and the Rust types as `ENGINE_DOCUMENT`:
   document that carries an extension's decorators loads; **`tools`** are
   the invocation policy and the vendor keys the binary registers (D11),
   the engine's `tools` option; **`behaviors`** names each behavior the
-  types compose and the package that implements it.
+  types compose and the package that implements it, and for an
+  extension's behavior the Rust crate its registration names
+  (`"crate"`), which the project's engine crate compiles in (below).
 
-With today's TypeScript engine:
+A TypeScript server opens the engine with it:
 
 ```ts
 import { engineDocument } from '@schemas/support-db-types/engine';
@@ -346,6 +350,94 @@ for (const schema of engineDocument.schemas) engine.schemas.publish(system, sche
 Every document is defined before any is published, since a link may name
 a type the document defines after it. A generated server will do this
 itself before it reports ready, once the servers open the engine.
+
+### The project's engine crate
+
+The Rust engine (D58) runs an extension's behavior from a Rust crate
+that implements the engine's `Behavior` trait, which the extension's
+`BehaviorSpec` names (`Rust`: the crate, its path in the project and
+the expression that registers it). When a DB or General schema's types
+compose such a behavior, the `projectengine` generator writes the
+project's engine crate, `engine/rust/<service>`, named
+`<rust_crate_prefix><service>-engine`:
+
+```rust
+pub fn behaviors() -> BehaviorSet {
+    superschematic_engine_behaviors::core()
+        .with(acme_behaviors::Rating)
+}
+```
+
+It depends on the engine's crates, at the `[paths]` keys `engine_rust`,
+`engine_behaviors_rust` and, when a type composes a work-queue behavior,
+`engine_workqueue_rust`, and on each extension's crate by its path. A
+Rust host links the crate and opens the engine with `behaviors()` and
+`tools()`, the binary's invocation policy and vendor keys (acme's crate
+for `shop-ratings` is `acme-shop-ratings-engine`):
+
+```rust
+let mut options = EngineOptions::postgres(url, PostgresOptions::default());
+options.policy = Some(policy);
+options.meta_schema = Some(MetaSchema::Text(meta_schema));
+options.behaviors = acme_shop_ratings_engine::behaviors();
+options.tools = acme_shop_ratings_engine::tools();
+let engine = Engine::open(options)?;
+```
+
+A Go host links the engine as a static archive through its C ABI, and
+the crate's workspace holds that archive as its member `ffi/`
+(`<crate>-ffi`), the C ABI over `behaviors()`:
+
+```rust
+use acme_shop_ratings_engine as project;
+
+superschematic_engine_abi::export_engine_c_abi!(behaviors = project::behaviors);
+```
+
+It depends on the C ABI's library at `[paths] engine_abi_rust`. Build
+it, and link it in place of the core's archive by putting its directory
+first in `CGO_LDFLAGS`; the binding's config passes the engine
+document's `tools`, without which an engine refuses an operation that
+names the extension's invocation policy value:
+
+```sh
+scripts/engine-archive.sh --crate dist/engine/rust/shop-ratings/ffi --out dist/engine/lib
+CGO_LDFLAGS="-L$PWD/dist/engine/lib ..." go build ./...
+```
+
+A TypeScript host loads the engine as a Node-API addon, and the crate's
+workspace holds one as its member `napi/` (`<crate>-napi`), the addon
+over `behaviors()`:
+
+```rust
+use acme_shop_ratings_engine as project;
+
+superschematic_engine_napi::export_engine_napi!(behaviors = project::behaviors);
+```
+
+It depends on the addon's library at `[paths] engine_napi_rust`. Build
+it, and name the file it prints when the engine opens, with the engine
+option `addon` or, for every engine the process opens,
+`SUPERSCHEMATIC_ENGINE_ADDON`; the engine's `behaviors` name the
+extension's, which it registers after the core's, and `tools` passes the
+engine document's:
+
+```sh
+export SUPERSCHEMATIC_ENGINE_ADDON="$(scripts/engine-napi.sh --crate dist/engine/rust/shop-ratings/napi --out dist/engine/addon)"
+```
+
+```ts
+const engine = await openEngineAsync({ postgres: { url }, policy: 'permission', behaviors: ['acme.Rating'], tools, metaSchema });
+```
+
+`openEngine({ path, ... })` opens the same addon on a SQLite file.
+
+A schema whose types compose the core's behaviors alone gets no crate,
+since the engine's release carries them, and one that composes an
+extension's behavior whose registration names no crate gets none either:
+the build logs that no engine can run the schema's behaviors, and an
+engine refuses the schema. acme's `crates/behaviors` is the worked
+example (`examples/acme-schematic`).
 
 ## Display
 
@@ -1101,8 +1193,8 @@ drafts of it, which only a merge brings back. A tagged commit of the
 primary line is released with `releaseCommit`, the version graph's
 release, and a rollback is a release of an earlier one. The instance's
 own fields stay outside the graph. The graph lives
-in the behavior's own tables, through the version graph's SQLite
-adapter, in the transaction of the operation that writes it.
+in the behavior's own tables, kept by the version graph's Rust engine in
+the transaction of the operation that writes it.
 [Version graphs](/superschematic/reference/version-graphs/) covers the
 model under it: refs, commits, merges by conflict unit, releases,
 snapshots and the sweep.

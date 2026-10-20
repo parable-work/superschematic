@@ -17,6 +17,87 @@ export class ShapeNamespace {
   }
 
   /**
+   * The shapes in named groups, a map of lists
+   * (Record<string, Shape[]>).
+   * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
+   * @returns Map of arrays of Shape
+   * @throws {ValidationError} if input validation fails
+   * @throws {ApiError} if the API request fails
+   */
+  public async shapeGroups(
+    signal?: any,
+    ...extraArgs: any[]
+  ): Promise<Record<string, Shape[]>> {
+    // Make GET request
+    const result = await this.client.get<Record<string, Shape[]>>(
+      `/api/shape-groups`,
+      { ...toRequestOptions(signal) }
+    );
+    return result;
+  }
+
+  /**
+   * Every shape by its name, a map (Record<string, Shape>).
+   * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
+   * @returns Map of Shape
+   * @throws {ValidationError} if input validation fails
+   * @throws {ApiError} if the API request fails
+   */
+  public async shapesByName(
+    signal?: any,
+    ...extraArgs: any[]
+  ): Promise<Record<string, Shape>> {
+    // Make GET request
+    const result = await this.client.get<Record<string, Shape>>(
+      `/api/shape-index`,
+      { ...toRequestOptions(signal) }
+    );
+    return result;
+  }
+
+  /**
+   * The shapes found, or null when the search found none
+   * (Nullable<Shape[]>).
+   * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
+   * @returns Array of Shape, or null
+   * @throws {ValidationError} if input validation fails
+   * @throws {ApiError} if the API request fails
+   */
+  public async findShapes(
+    signal?: any,
+    ...extraArgs: any[]
+  ): Promise<Shape[] | null> {
+    // Make GET request
+    const result = await this.client.get<Shape[] | null>(
+      `/api/shape-search`,
+      { ...toRequestOptions(signal) }
+    );
+    return result;
+  }
+
+  /**
+   * The shape with a name, or null when no shape has it
+   * (Nullable<Shape>).
+   * @param name - name parameter
+   * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
+   * @returns Shape, or null
+   * @throws {ValidationError} if input validation fails
+   * @throws {ApiError} if the API request fails
+   */
+  public async findShape(
+    name: string,
+    signal?: any,
+    ...extraArgs: any[]
+  ): Promise<Shape | null> {
+    // Make GET request
+    const result = await this.client.get<Shape | null>(
+      `/api/shape-search/${encodeURIComponent(name)}`,
+      { ...toRequestOptions(signal) }
+    );
+    return result;
+  }
+
+  /**
    * Every shape, circles and squares mixed, in one list that does not
    * page.
    * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward

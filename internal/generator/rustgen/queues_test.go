@@ -19,13 +19,20 @@ import (
 
 // TestQueuesDescribeWhatTypeScriptWrites: for every queue of
 // fixture-queue-db, whose message holds a field of every kind a column
-// takes, the descriptor queues.rs holds, read as JSON, is the definition
-// queues.ts writes, read as data: the same members, by the same names,
-// with the same values, the statements included (D65). So the Rust queue
-// client reads what the TypeScript one reads, and through tsgen's
+// takes, and of fixture-queue-geo-db, whose message holds locations and
+// durations, the descriptor queues.rs holds, read as JSON, is the
+// definition queues.ts writes, read as data: the same members, by the same
+// names, with the same values, the statements included (D65). So the Rust
+// queue client reads what the TypeScript one reads, and through tsgen's
 // TestQueuesWriteWhatTheGoORMWrites, what the Go ORM writes.
 func TestQueuesDescribeWhatTypeScriptWrites(t *testing.T) {
-	schema, err := loader.LoadService(filepath.Join(fixturesDir, "fixture-queue-db"))
+	for _, fixture := range []string{"fixture-queue-db", "fixture-queue-geo-db"} {
+		t.Run(fixture, func(t *testing.T) { testQueuesDescribeWhatTypeScriptWrites(t, fixture) })
+	}
+}
+
+func testQueuesDescribeWhatTypeScriptWrites(t *testing.T, fixture string) {
+	schema, err := loader.LoadService(filepath.Join(fixturesDir, fixture))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,10 +65,10 @@ func TestQueuesDescribeWhatTypeScriptWrites(t *testing.T) {
 }
 
 // TestQueuesLeaveOutWhatTheClientCannotHold: a queue whose message holds a
-// value the Rust queue client cannot write and read back yet, a
-// Temporal.Duration, which Postgres holds as an INTERVAL, is left out of
-// queues.rs with why, as queues.ts leaves it out, and the other queues are
-// written.
+// value the Rust queue client cannot write and read back yet, a list of
+// Temporal.Duration values, which Postgres holds as an INTERVAL[], is left
+// out of queues.rs with why, as queues.ts leaves it out, and the other
+// queues are written.
 func TestQueuesLeaveOutWhatTheClientCannotHold(t *testing.T) {
 	schema, err := loader.LoadService(filepath.Join(fixturesDir, "fixture-queue-db"))
 	if err != nil {
@@ -69,7 +76,7 @@ func TestQueuesLeaveOutWhatTheClientCannotHold(t *testing.T) {
 	}
 	schema.Scalars["Temporal.Duration"] = &ir.ScalarDef{Name: "Temporal.Duration", LanguagePrimitive: ir.LanguageString, TypeMappings: map[string]string{"sql": "INTERVAL"}}
 	ping := schema.Types["Ping"]
-	ping.Fields = append(ping.Fields, &ir.FieldDef{Name: "every", TypeRef: ir.TypeRef{Name: "Temporal.Duration"}})
+	ping.Fields = append(ping.Fields, &ir.FieldDef{Name: "every", TypeRef: ir.TypeRef{Name: "Temporal.Duration", IsArray: true}})
 
 	tsQueues, err := tsgen.TypeScriptQueues(schema)
 	if err != nil {
@@ -98,7 +105,7 @@ func TestQueuesLeaveOutWhatTheClientCannotHold(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"//! Queue Ping is left out: field every is a Temporal.Duration, an INTERVAL column, which the Rust queue client does not read yet.",
+		"//! Queue Ping is left out: field every is a list of Temporal.Duration values, an INTERVAL[] column, which the Rust queue client does not read yet.",
 		"pub const ORDER_PLACED_QUEUE: &str = r#\"{",
 	} {
 		if !strings.Contains(string(text), want) {
@@ -121,7 +128,7 @@ func TestQueuesOfOnlyLeftOutQueues(t *testing.T) {
 	schema.Scalars["Geo.Point"] = &ir.ScalarDef{Name: "Geo.Point", LanguagePrimitive: ir.LanguageString, TypeMappings: map[string]string{"sql": "POINT"}}
 	for _, name := range []string{"OrderPlaced", "Ping"} {
 		td := schema.Types[name]
-		td.Fields = append(td.Fields, &ir.FieldDef{Name: "at", TypeRef: ir.TypeRef{Name: "Geo.Point"}})
+		td.Fields = append(td.Fields, &ir.FieldDef{Name: "at", TypeRef: ir.TypeRef{Name: "Geo.Point", IsArray: true}})
 	}
 	output, err := Generate(schema, Options{SchemaName: "fixture-queue-db", Clock: codegen.FixedClock(time.Unix(0, 0).UTC())})
 	if err != nil {
@@ -142,7 +149,7 @@ func TestQueuesOfOnlyLeftOutQueues(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := "//! Queue OrderPlaced is left out: field at is a Geo.Point, a POINT column, which the Rust queue client does not read yet."; !strings.Contains(string(text), want) {
+	if want := "//! Queue OrderPlaced is left out: field at is a list of Geo.Point values, a POINT[] column, which the Rust queue client does not read yet."; !strings.Contains(string(text), want) {
 		t.Errorf("queues.rs lacks %q:\n%s", want, text)
 	}
 	if strings.Contains(string(text), "pub const") {

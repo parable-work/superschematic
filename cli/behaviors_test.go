@@ -451,9 +451,9 @@ func TestCoreBehaviorsWithNoExtension(t *testing.T) {
 	}
 
 	_, err = runCommandWith(t, nil, "behaviors", "--package", "@superschematic/engine",
-		"--out", filepath.Join("..", "runtime", "engine", "typescript", "src", "behaviors", "core", "declarations"), "--check")
+		"--out", filepath.Join("..", "runtime", "engine", "rust", "behaviors", "declarations"), "--check")
 	require.NoError(t, err, "the engine's copies of the core declarations are stale; run make behaviors")
 	_, err = runCommandWith(t, nil, "behaviors", "--package", "@superschematic/engine-workqueue",
-		"--out", filepath.Join("..", "runtime", "engine-workqueue", "typescript", "src", "declarations"), "--check")
-	require.NoError(t, err, "the work-queue package's copies of the core declarations are stale; run make behaviors")
+		"--out", filepath.Join("..", "runtime", "engine-workqueue", "rust", "declarations"), "--check")
+	require.NoError(t, err, "the work queue's copies of the core declarations are stale; run make behaviors")
 }

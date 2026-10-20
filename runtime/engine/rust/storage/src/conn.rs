@@ -144,6 +144,12 @@ impl<C: Send> Pool<C> {
         }
     }
 
+    /// The most connections the pool opens.
+    #[cfg_attr(not(feature = "postgres"), allow(dead_code))]
+    pub fn max(&self) -> usize {
+        self.max
+    }
+
     fn lock(&self) -> MutexGuard<'_, State<C>> {
         // Nothing panics while holding the lock, so a poisoned one is whole.
         self.state.lock().unwrap_or_else(PoisonError::into_inner)

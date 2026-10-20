@@ -4082,9 +4082,9 @@ and its amendment on `Deps` left both to the build. Building them for Go
 | Each client of a `calls` edge sends the D37 credential its `ServiceEndpoint` names and forwards the request's end user. The service authenticator waits for the service-auth field: until a connector derives it, a server whose API has a service clause refuses to start. | A service-auth configuration in one JSON variable, the encoding section 3.4 refused for derived fields. Starting with no authenticator, whose routes would answer every service caller 401. |
 | The Dockerfile's context is the repository root, cut down by `Dockerfile.dockerignore`. A Rust stage builds superscalar's static archive (and the version graph's, when a database declares one) with `tools.env`'s Rust release, the Go stage links it on Debian's glibc, and the binary runs on distroless `cc` as a non-root user. | A `CGO_ENABLED=0` binary on a static base, which cgo against the archive rules out (D3). An archive from the host's checkout, whose platform is the host's. |
 
-OpenTelemetry export is not built. The Cloud SQL connector (D30's
-amendment on Cloud SQL, below) and the entrypoints of TypeScript and Rust
-servers (D51, D57) are built since. `examples/acme-shop` keeps its
+The Cloud SQL connector (D30's amendment on Cloud SQL, below) and the
+entrypoints of TypeScript and Rust servers (D51, D57) are built since, and
+D67 builds OpenTelemetry export. `examples/acme-shop` keeps its
 implementations at `go/{service}`, which the entrypoints of its
 `shop-stack` import, and `stack dev` runs it (`docs/stack-model.md`,
 section 14, milestone 1).
@@ -4418,10 +4418,11 @@ the release's Dockerfile and pins, whose golden is
 release page and runs the image. A clean `golang` container, with a
 project of no `[paths]`, built both servers with the archives step's
 commands, the runtime modules coming from the module proxy at a commit.
-Not built: `stack dev`, and a local `go build` in such a project, still
-need `CGO_LDFLAGS` set by hand. D47's next amendment pins the other Go
-generators' modules, which required the runtime modules at the zero
-pseudo-version.
+D47's next amendment pins the other Go generators' modules, which
+required the runtime modules at the zero pseudo-version, and a later one
+has `stack dev`, `stack run` and `superschematic env` fetch the archives
+for the machine, so a local build no longer needs `CGO_LDFLAGS` set by
+hand.
 
 ### D30, amended: a project names its build context when its runtime modules lie above it
 
@@ -4565,9 +4566,48 @@ commit on `main`, the nine modules of `fixture-db`, `fixture-api`,
 `fixture-version-graph-db` and `fixture-env-go` each built on their own
 with `go build -mod=mod ./...`, from `proxy.golang.org` alone, with no
 checkout and no `CGO_LDFLAGS`. The same types module with the old
-requires failed at superscalar's `v1.0.0`. Not built: linking a binary or
-a test in such a project, and `stack dev`, still need `CGO_LDFLAGS` set
-by hand.
+requires failed at superscalar's `v1.0.0`. Linking a binary or a test in
+such a project, and `stack dev`, needed `CGO_LDFLAGS` set by hand until
+the amendment below, which fetches the release's archives for the
+machine.
+
+The rule is reversible until the first release.
+
+### D47, amended: `stack dev`, `stack run` and `superschematic env` fetch the release's static archives for the machine
+
+The amendments above give a project whose naming file names no
+superscalar checkout (`[paths] scalar_go`) Go modules that resolve from
+the module proxy and images that download the release's archives. Its
+Go code still did not link on an engineer's machine: `stack dev` and
+`stack run` ran `go build` with the shell's environment, and superscalar's
+binding from the proxy carries no `lib/`, so every Go server, job and
+worker failed at the link unless the engineer found the archives and set
+`CGO_LDFLAGS` by hand. A `go build` or `go test` run by hand failed the
+same way.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `stack dev` and `stack run` fetch the release's `superschematic-archives_<version>_<platform>.tar.gz` for the machine's platform, as the generated CI's `check` does for the runner's: from the release's page, or the base URL `SUPERSCHEMATIC_RELEASE` names, the variable a server's Dockerfile takes as a build argument; checked against the digest the binary names; unpacked into `superschematic/archives/<digest>` in the user's cache directory, through a directory of its own renamed into place, so a later run, or another checkout, finds it whole. They do it only when the environment has a Go server, job or worker, the naming file names no superscalar checkout and does not rename superscalar's Go module, and the binary is a release; a checkout's binary pins nothing, so its builds need the checkout's `[paths]` anyway. `internal/release` holds the fetch, `Release.FetchArchives`, beside the digests it checks. | Downloading in the provisioner, which knows neither the naming file nor the release. A cache under the project's `.superschematic`, which every checkout would fill with the same archives. Building the archives with cargo, a Rust toolchain on every machine for what the release already built. |
+| The archives reach the builds through a new field of the provision request, `BuildEnv`: variables a provisioner that builds code sets for its builds alone. The local provisioner appends it to each `go build`'s environment, and no process it starts sees it. `CGO_LDFLAGS` holds `-L` and the archives' `lib/` after any `CGO_LDFLAGS` the shell set, so a person's flags come first. A fetch that fails stops the run, saying what to set, unless `CGO_LDFLAGS` is set, which the builds then take as it is. | Setting `CGO_LDFLAGS` in the CLI's own environment, which every process the provisioner starts would inherit and every test in the process would see. A setter on the local provisioner, state shared by every run the registered provisioner serves. Replacing the shell's `CGO_LDFLAGS`, which would drop a person's flags for other libraries. |
+| A `go build` run by hand takes the flags from a new command, `superschematic env`, which fetches the archives as `stack dev` does and prints `export CGO_LDFLAGS='-L…/lib'` for a POSIX shell to evaluate, or, given `CGO_LDFLAGS`, its value alone, as `go env` does, so `go env -w` can keep it. It fails for a binary that names no archives, and says why. | A generated `.envrc`, which needs direnv, holds a path of one machine's cache in the output root, and still needs a command that downloads the archives. A `--print` flag on `stack dev`, which would build and run a stack to print a line. Writing the flags into each generated `go.mod` or a `#cgo` file, which would hold one machine's path in generated code. |
+
+Status: built. `TestFetchArchivesDownloadsChecksAndKeeps` and
+`TestFetchArchivesRefuses` run the fetch against a stand-in release page:
+the cache's directory, a second fetch that downloads nothing, a tarball
+of another digest, a page without the file, an entry outside the
+tarball's directory and a tarball without `lib/`.
+`TestGoBuildsTakeTheRequestsBuildEnv` holds every `go build` of a
+server, a worker and a job to the request's `CGO_LDFLAGS`, and the
+processes it starts to none. `TestStackDevLinksTheReleaseArchives` and
+`TestEnvPrintsCGOLinkerFlags` run the CLI's half with a stand-in release:
+when it fetches, the flags after the shell's, the cases that fetch
+nothing, a failed fetch with and without `CGO_LDFLAGS`, and `env`'s two
+forms. `TestALocalGoBuildLinksTheArchivesTheReleaseFetches` builds
+Storefront's module as a release builds it, with no superscalar
+checkout: `go build` fails at the link with no `CGO_LDFLAGS`, and links
+with the flags of the archives the release fetched from a stand-in page,
+packed from this checkout's archive. No published release has run it.
+No `CGO_CFLAGS` is set: each binding's module holds its own headers.
 
 The rule is reversible until the first release.
 
@@ -4612,11 +4652,11 @@ Status: built.
 No TypeScript server has run on Cloud Run.
 
 Not built:
-- OpenTelemetry export;
 - `stack init`, which would write the amendment's ignore rule; D59
   builds it.
 
-D51's last amendment hands a manual route's handlers to `buildRouter`.
+D51's last amendment hands a manual route's handlers to `buildRouter`, and
+D67 builds OpenTelemetry export.
 
 The rule is reversible until the first release.
 
@@ -5543,9 +5583,8 @@ D65 builds what this left out of a stack: Rust jobs and workers, and an
 output root that builds against a mirror of each implementation crate,
 so `stack dev --out` elsewhere no longer collides in Cargo's lockfile.
 
-D54's second amendment builds buckets from a Rust server.
-
-Not built: OpenTelemetry export.
+D54's second amendment builds buckets from a Rust server, and D67 builds
+OpenTelemetry export.
 
 The rule is reversible until the first release.
 
@@ -5624,8 +5663,8 @@ engine over the behavior's transaction in place of the TypeScript
 `SyncEngine`; and D47's archives. D57 gives a Rust server the entrypoint
 the engine mounts in.
 
-Status: partly built: milestones 1 to 12 (but 7b), 15 and 16; the rest
-are pending, as below. `runtime/engine/rust` holds the workspace;
+Status: built but for the generated servers that mount the engine
+(milestones 18 to 20). `runtime/engine/rust` holds the workspace;
 `superschematic-engine-storage`: both databases' transactions, savepoints
 and writer locks, the write counter, the migration ledger with the
 engine's migrations for each, a behavior's storage and SQL checker, and
@@ -5715,8 +5754,8 @@ behaviors and the work queue's, runs the cases of
 `test/behavior-*.test.ts`, the runner's, retention's and the tools',
 those of the core behaviors' `test/core-*.test.ts` and those of the
 work queue's tests against the engine, and replays the scenario and
-HTTP corpora, the core behaviors' files, the work queue's (211 of its
-213 scenarios on SQLite and 208 on Postgres, the rest `js` or writing
+HTTP corpora, the core behaviors' files, the work queue's (212 of its
+213 scenarios on SQLite and 209 on Postgres, the rest `js` or writing
 the file with SQL of their own) and the behavior catalog included, the
 HTTP corpus through the engine's routes and through its axum router,
 giving their recorded answers on SQLite and Postgres for every
@@ -5724,33 +5763,126 @@ case whose test behaviors it has, an event cursor on Postgres held to
 the recorded order rather than its number (a write a rollback undid
 leaves a gap in a Postgres identity column), but for a step it lists
 with what explains it (a change the recording does not see). CI tests
-the workspace on both databases. `superschematic-engine-napi` (milestone 7a)
-is the Rust engine as a Node-API addon, with the core's behaviors it is
-built with and the work queue's an engine's options name (`behaviors`,
-by name: a behavior object is TypeScript code, even one whose
-declaration names one the addon has), and `@superschematic/engine`'s
-`src/native` gives it the
-package's synchronous API: a call by name with JSON in and out on the
-JavaScript thread over SQLite, a promise of one off that thread (an
-`AsyncTask`, or on Postgres a future that owns the engine), the package's
-error classes rebuilt from the class, code and members the addon throws,
-a panic caught at every entry, and a policy or permission matcher
-written in TypeScript asked on the JavaScript thread during a call. With
-`ENGINE_IMPL=rust` the package's suite runs on it, each file on its own
-under Node.js and Bun, held to `test/rust-pending.txt`, the files not
-passing yet and why, which a file leaves once it passes (CI's
-`engine-napi` job): with all fifteen of the core's behaviors, 15 of the
-66 pass on both (491 of Node.js's 913 tests, 827 of Bun's 1,564), and no
-test that runs fails on what the Rust engine does. The work queue's
-suite runs so too (`--package`), its `test/helpers.ts` passing the
-package's own behaviors by name, held to its own `test/rust-pending.txt`:
-11 of its 19 files pass on both (211 of Node.js's 240 tests, 399 of
-Bun's 455), and none fails on what the Rust engine does. The rest wait for
-milestone 7b's test-only bridge for behaviors written in TypeScript; it
-brings too raw SQL on the engine's file, `events.watch`, and `engineApp`
-and `engineMcp` over the engine's routes. Until the Rust engine passes
-the TypeScript suite, `@superschematic/engine` is the TypeScript
-implementation and nothing uses the workspace.
+the workspace on both databases. `superschematic-engine-napi` (milestones
+7a and 7b) is the Rust engine as a Node-API addon, as a library whose
+`export_engine_napi!(behaviors = path)`, the twin of
+`export_engine_c_abi!`, a cdylib expands once:
+`superschematic-engine-addon` (`runtime/engine/rust/addon`) is the core's
+addon, over the core's behaviors and the work queue's, an engine
+registering the core's when it opens and each other one its options name
+(`behaviors`, by name: a behavior object is TypeScript code, even one
+whose declaration names one the addon has, and a name the addon is not
+built with is refused). An engine opens on a project's addon when the
+host names its file (the engine option `addon`, or
+`SUPERSCHEMATIC_ENGINE_ADDON`), else on the checkout's `native/`, else on
+the release's prebuilt `@superschematic/engine-<target>` (darwin-arm64,
+darwin-x64, linux-x64-gnu, linux-arm64-gnu, built with the workspace's
+`dist` profile, fat LTO and stripped, on the build-archives runners, and
+optional dependencies of `@superschematic/engine` at its version); a
+Docker image builds the addon from source. `@superschematic/engine`'s
+`src/native` gives it the package's synchronous API: a call by name with
+JSON in and out on the JavaScript thread over SQLite, the package's error
+classes rebuilt from the class, code and members the addon throws, a
+panic caught at every entry, and a policy, a permission matcher or an id
+source written in TypeScript asked on the JavaScript thread during a call
+(a behavior's own UUIDs then drawn from the host's `crypto.randomUUID`,
+as the TypeScript engine's version graph draws them). `openEngineAsync`,
+exported from the package's root for a server on Postgres, gives the
+same API with every call a promise made off that thread (an `AsyncTask`,
+or on Postgres a future on tokio's blocking pool that owns the engine),
+its options data alone. Milestone 7b adds the test addon's bridge (the
+`js-behaviors` feature, never in a shipped addon), which runs a behavior
+written in TypeScript on the JavaScript thread through the engine's
+dynamic behaviors, an engine with one called there alone and its runner
+on the event loop; `engine.storage`, raw SQL on the engine's SQLite file
+with transactions the engine's calls run inside; `events.watch` over the
+notifier; `schemas.validator`; `engineApp` and `engineMcp` as Hono
+adapters over the engine's own routes, synchronous or asynchronous, a
+clock function read for each request as for each call; and a value JSON
+cannot carry (`NaN`, a `Date`) refused where the TypeScript engine
+refused it, in its words. A value driver written in TypeScript is not on
+the Rust engine, whose drivers are Rust `ValueDriver`s. An extension's behavior is a
+crate of its own (milestone 13a): acme.Rating is `acme-behaviors`
+(`examples/acme-schematic/crates/behaviors`), a workspace of its own
+beside the engine's over the plug-in API alone, whose tests run
+`rating.test.ts`'s cases on SQLite and Postgres; `registry.BehaviorSpec`
+names such a crate (`Rust`: the crate, its path in the project and the
+expression that registers it), the engine document names it beside the
+package (`crate`), and the `projectengine` generator writes the project's
+engine crate, `engine/rust/<schema>`, for a DB or General schema whose
+types compose an extension's behavior: the engine's crates at the
+`[paths]` keys `engine_rust`, `engine_behaviors_rust` and
+`engine_workqueue_rust`, each extension's crate, `behaviors()` (the
+core's, the work queue's when used, then the extensions'), `tools()`
+(the binary's D11 options) and a test that opens it on SQLite, the
+library a Rust server links. The crate roots a workspace whose members
+are the bindings of the engine over `behaviors()` that a host of another
+language links: `ffi/`, `<crate>-ffi`, expands `export_engine_c_abi!`
+from `superschematic-engine-abi` (`[paths] engine_abi_rust`) into the
+archive a Go server links in the core's place (`scripts/engine-archive.sh
+--crate <crate>/ffi --out <dir>`), its test opening an engine through
+its own `eng_open`; and `napi/`, `<crate>-napi`, expands
+`export_engine_napi!` from `superschematic-engine-napi` (`[paths]
+engine_napi_rust`) into the addon a TypeScript server loads in the core's
+place (`scripts/engine-napi.sh --crate <crate>/napi --out <dir>`), the
+library's manifest pinning napi-derive-backend, which a fresh resolve of
+the crate's lock-less workspace would move past the version napi-derive
+compiles with. acme's smoke builds and tests the one its binary writes,
+its members with it, and loads its addon in Node.js, where an engine on
+it publishes shop-ratings' Product and rates one, acme.Rating in Rust. A
+schema of the core's behaviors alone gets none, and the release's engine
+runs it; one whose extension behavior names no crate, or one the project
+does not hold, gets none either, and the build says no engine can run it.
+
+The cutover (milestone 14) is built. `@superschematic/engine` is the Rust
+engine's addon: `openEngine` opens it synchronously on SQLite, `Engine`
+its class, `openEngineAsync` its `AsyncEngine`, with `EngineOptions` and
+`PostgresOptions` (formerly `NativeEngineOptions` and
+`NativePostgresOptions`), and the package's error classes, record and
+option types, constants and the config readers callers use
+(`isTerminalState`, `stateOutcome`, `linkPin`, `linkMany`, `uuidV5`) stay
+its surface (`src/types/`, `src/native/`). Removed: the TypeScript engine,
+about 32,000 lines of `runtime/engine/typescript/src` (its behaviors and
+their guidance and declarations' copy, the instances, the schema registry
+and validator, the runner, the event log and retention, the value store,
+the SQLite storage and migrations, the tools catalog, `engine.ts`, the
+TypeScript halves of `engineApp` and `engineMcp`), and with it the
+exports `Namespaces`, `SchemaRegistry`, `InstanceStore`, `EventLog`,
+`Runner`, `BehaviorRegistry`, `Storage`, `ToolCatalog`, `EngineValues`,
+`SqliteValueDriver`, `openDriver`, `isBun`, `migrate`,
+`appliedMigrations`, `engineMigrations`, `ENGINE_OWNER`, `kebabCase`,
+`snakeCase`, `typeArguments`, `linkedTo`, `movedOn`, `targetMove`,
+`SEARCH_SCHEMAS_PARAMS` and `listTools`, the types `DriverName`,
+`SqlDriver`, `StorageOptions`, the migration types, `ValueDriver` and
+`TargetMove`, the `driver` option, which is refused, and the
+dependencies on ajv, the version graph, the schema runtime, the schema IR
+and `@modelcontextprotocol/server`; the work queue's seven TypeScript
+behaviors (about 7,900 lines with their guidance and declarations' copy),
+`workQueueBehaviors` now their names; and acme's `@acme/behaviors`.
+`defineBehavior` and the behavior-authoring types moved to
+`@superschematic/engine/testing`, which runs on the test addon alone.
+`runtime/engine/README.md` ("Breaking changes at the cutover") lists every
+change for a caller. The package's suite and the work queue's are the
+Rust engine's now, on the test addon under Node.js and Bun (892 and 242
+tests), the backends on Postgres with `ENGINE_TEST_PG_URL`; `ENGINE_IMPL`,
+the ratchet and its pending lists are gone, with CI's `engine-napi` job,
+which the `typescript` job's steps replace. A test of the TypeScript
+engine's own workings went with it, its Rust twin kept: the SQLite seam,
+the migration chain from each earlier version, value drivers written in
+TypeScript, a behavior's SQL plans, the tool names' case conversions and
+argument digests, the object scalar rule, Branches' layout and
+descriptor, the `Namespaces` class and the counted calls of the work
+queue's wrappers. The corpora are recorded from the Rust engine, its wall
+clock the engine's strict clock, each write a reading of its own, and
+the readings of a case's engines kept apart as one clock's; they differ
+from the TypeScript engine's recording only where its own workings showed
+(a counting clock a publish read seven times, an archive that changes
+nothing reading the clock, the engine calls the TypeScript HTTP app made,
+the policy question a closed engine asked, a stream frame's place among
+the steps), and the Rust replay and the Go replay pass on them. The
+SQLite corpus stays the last file the TypeScript engine wrote: the
+engine opens it and reads it as recorded, and the script that wrote it,
+run on the engine, writes a file that reads the same.
 
 The Go binding (milestone 15) is built. `superschematic-engine-abi`
 (`runtime/engine/rust/abi`) is the C ABI of the bindings section, as a
@@ -5768,7 +5900,9 @@ the class's members), `ENG_BAD_ARGUMENTS` and `ENG_CLOSED`.
 `superschematic-engine-ffi` (`runtime/engine/rust/ffi`), the core's
 archive, exports it over `core()`; a project's engine crate exports it
 over its own behaviors or configure with `export_engine_c_abi!`, as
-`runtime/engine/rust/testkit-ffi` does for the replays. The library
+`runtime/engine/rust/testkit-ffi` does for the replays and the `ffi`
+member of the crate `projectengine` writes does over its `behaviors()`.
+The library
 exports nothing itself, so archive crates in one Cargo workspace, whose
 features Cargo unifies, never define a symbol twice.
 `scripts/engine-archive.sh` builds `libsuperschematic_engine.a` (`--crate`
@@ -5787,11 +5921,60 @@ does not define them; `scripts/engine-link-check.sh` links superscalar's,
 the version graph's and the engine's archives into one Go binary and runs
 it, in the engine-go CI job on linux-x64 and in the release's
 build-archives job on all four platforms, whose tarballs now carry the
-engine's archive and header. The config reader and the error mapping in
-the ffi crate have the shape of the Node-API addon's
-`EngineOptions::from_json` and `Error::thrown`, which replace them once
-they are on main. No generated server mounts the engine yet (milestone
-18).
+engine's archive and header. The ABI reads its config's `project` and
+hands the rest to `EngineOptions::from_json`, and writes an error as
+`Error::thrown` makes it, as the Node-API addon does, so the two bindings
+take one config and throw one error. No generated server mounts the
+engine yet (milestone 18).
+
+Several instances of a server on one Postgres database (milestone 13b)
+are tested as two engines, each with a pool of its own, on one schema
+(`testkit/tests/replicas_*.rs`, with the database's administrator ending
+sessions as a crash or a failover would; `make engine-rust-soak` runs the
+writers long). What holds across them: a namespace's writers take turns,
+so racing writes lose no update and repeat no seq, cursor or number, hold
+an id and a unique field, never pass a Budget limit nor claim a Queue job
+twice, and writers of two namespaces never wait for each other; a reader
+on any instance sees every event of a namespace once, in cursor order (a
+rolled-back write leaves a gap in the identity, nothing more), and a read
+from `head` waits for the namespace's writes in flight, since the head is
+global and a write held open could hold a cursor below it; a commit wakes
+every instance's waiters, streams and runner through its listener, which
+reconnects when its session ends and wakes them to read what they missed,
+and without one a stream reads at each heartbeat; one runner runs at a
+time, another takes the lease when it stops or its session ends, and
+when two passes overlap for a moment under a lease that just went, a
+reaction runs once per event and a schedule once per due time (each read
+again under the namespace's lock), Timers firing each deadline once;
+engines that start together migrate once, and one that starts on a
+storage already up to date only reads its ledger, so it holds no
+running instance's writes up; publishes of one draft at once mint one
+version, the others answered `published: false` or `not_found`; a
+publish that adds a behavior (Search, Branches, Lease) beside another
+instance's writes leaves each write wholly of one version, and an
+instance whose build lacks the behavior answers that version's writes
+`unavailable`. On failure: a lock past the busy timeout, a statement the
+server's `statement_timeout` cancels, a deadlock and a serialization
+failure are `busy` (503 with `Retry-After`), nothing written; a session
+the server ends inside a call is `unavailable`, nothing written, its
+locks freed at once; idle pooled connections the server ended are
+replaced at BEGIN, so no call fails on them; a connection lost while a
+call commits is `unavailable`, saying whether it was written is unknown;
+a session idle inside a transaction past
+`idle_in_transaction_session_timeout` (60 s unless configured,
+`idleInTransactionTimeoutMs`) is ended by the server, so an instance
+frozen mid-transaction holds its namespace no longer; and only a panic
+inside a transaction poisons an engine, that one alone. Not guaranteed:
+a connection the network cuts without a reset blocks its call until the
+operating system's TCP timeouts give up, and a listener cut off so wakes
+nothing meanwhile (streams read at their heartbeat, the runner at its
+timer); a lease holder cut off so keeps its lease until the server drops
+the session, while its own runner stops at its next check of the lease;
+a commit whose outcome is unknown is the caller's to read before trying
+again; cursors on Postgres are ordered, not contiguous; and two
+processes on one SQLite file share no notifier and no lease. The whole workspace's tests run on both databases in the
+engine-rust CI job, the scenario and HTTP corpora replaying their files
+on parallel threads.
 
 The rule is reversible until the first release.
 
@@ -5849,10 +6032,11 @@ latter against Postgres when
 `SUPERSCHEMATIC_HTTP_RUNTIME_TEST_DATABASE_URL` names one. No TypeScript
 worker has run on Cloud Run.
 
-Not built:
-- a `POINT` or `INTERVAL` column in a TypeScript queue's message;
-- a `POINT` or `INTERVAL` column in a Rust worker's message (D65 builds
-  Rust workers).
+A later D53 amendment holds a `POINT` and an `INTERVAL` column in a
+TypeScript, Rust and Go queue's message alike.
+
+Not built: a list of locations or durations, a `POINT[]` or `INTERVAL[]`
+column, in a queue's message.
 
 The rule is reversible until the first release.
 
@@ -6118,6 +6302,64 @@ SQLite gets a queue's table and its migrations, but no claim.
 | A queue's table is written in every dialect, and resolution refuses a worker whose queue's database the environment places on any platform but Postgres (`unrealizable`). The claim on SQLite (a write transaction) and on D1 lands with an ORM for those dialects. | Claims through raw SQL beside the ORM for SQLite, which would split a queue's code across two layers. Refusing `@queue` in a SQLite DB service, which would keep its table out of migrations the service can already run. |
 
 Status: built in #336.
+
+### D53, amended: a queue's message holds a location and a duration, as a `POINT` and an `INTERVAL` of whole microseconds, in every language, and the Go ORM's tables hold a duration the same way
+
+D53's TypeScript amendment left a queue whose message holds a `POINT` or
+an `INTERVAL` column out of `queues.ts`, and D65 left it out of
+`queues.rs`, so a TypeScript or Rust worker of it was refused. The Go
+ORM's queue did not hold them either: it passed a `Geo.Location` to pgx,
+which sends its JSON, which Postgres refuses as a point, and cannot scan
+a point back into it, and `Temporal.Duration` crossed
+through its `Valuer` and `Scanner`, which write `-1h2m` for a duration
+Postgres reads as minus one hour plus two minutes, write `250µs`, which
+Postgres refuses, and read back `01:30:00`, which `time.ParseDuration`
+refuses. The "as the Go ORM writes it" of the TypeScript amendment had no
+Go behavior to copy. The Go ORM's tables wrote and read a duration the
+same way, so a table with an `INTERVAL` column could not take a row:
+`CreateOne` wrote `1h30m0s`, then failed to read back the `01:30:00` its
+`RETURNING` gave. A duration's filter was a `StringFilter`, whose `Eq`
+sent Go's text and whose `ILike` Postgres has no operator for. A table's
+location was already a `POINT` (D14, amended), and no other language
+reads or writes a table's `INTERVAL` but the version graph's adapters,
+which write `[-]HH:MM:SS` with the nanoseconds, which Postgres rounds to
+microseconds where this entry truncates, and read their canonical form,
+which refuses a month (D19).
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A location crosses as a `POINT` whose x is the longitude and y the latitude, as the Go ORM's tables write it (D14, amended): Go passes a `pgtype.Point`, TypeScript writes `(lon,lat)` with JavaScript's shortest round-trip text, and Rust writes the same text with Rust's. Each reads the point back as `{lat, lon}`. | A JSON column for a location in a queue alone, which would give one scalar two storages. |
+| A duration crosses as its whole microseconds, the precision of an `INTERVAL`, a nanosecond remainder truncated toward zero. Go passes a `time.Duration`, which pgx writes as an interval of microseconds; TypeScript and Rust parse the duration's text as the scalar core does and write `[-]H:MM:SS.ffffff`, a form whose sign Postgres gives to the whole time. A claim reads the interval's months, days and microseconds as pgx does, a month 30 days and a day 24 hours, and TypeScript and Rust write the result in the scalar core's canonical text (`1h30m0s`, `1.5s`, `250us`); Go scans a `time.Duration`. | The duration's text as Go's `Valuer` writes it, which loses the sign of a negative duration of two units and fails on microseconds. Refusing an interval with months or days, as the version graph's canonical form does, which would fail a claim of a row someone wrote by hand where Go's pgx reads it. |
+| The definition marks such a field, `point: true` or `interval: true`, in `queues.ts` and in the descriptor `queues.rs` holds, so the two stay one shape (`TestQueuesDescribeWhatTypeScriptWrites`). The TypeScript client needs the mark to write a location, since pg would send an object as JSON; it reads each by the column's type, with its own type parsers for `POINT` and `INTERVAL`. The Rust client writes and reads both by the column's type, which the prepared statement gives it. | A conversion by the shape of the value, `{lat, lon}` written as a point wherever it appears, which would guess. |
+| A list of locations or durations, a `POINT[]` or an `INTERVAL[]` column, is not held yet: the Go ORM refuses such a queue, naming the field, where before it generated a queue that failed at its first enqueue, and the TypeScript and Rust types leave it out, saying why. A list goes in a `@jsonField` type until a client converts each element. | Lists now, which need the Go ORM's `POINT[]` helpers in `queues.go` and an element conversion in each client, for a field no schema has asked for. |
+| `fixture-queue-geo-db` declares the queue `DeliveryPlanned` with a required and an optional location and duration, on Postgres alone, since SQLite has no storage for a `POINT` and `fixture-queue-db` writes its queues in both dialects. The ORM tests and the parity test add it to `fixture-queue-db`'s schema, so one module, one types package and one crate hold both. | A field of `fixture-queue-db`'s `OrderPlaced`, which would drop the fixture's SQLite dialect and the SQLite tests of a queue's table. |
+| The Go ORM's tables write and read a duration as its queue does. `CreateOne`, `CreateMany`, `UpdateOne` and `UpdateMany` pass a `time.Duration`. Each read scans a `time.Duration`: a required field through a `*time.Duration` that points at the field, an optional one through a `*time.Duration` it converts, so a NULL stays nil. The history decoder reads the interval's text, which `to_jsonb` writes (`1 mon 2 days 03:04:05`), with pgx's own parser and the same 30-day month, and still reads a version graph's canonical row, which holds the duration's text (`1.5ms`). | A fix in superscalar's `Valuer` and `Scanner`, in a repository this one pins: their text is Go's, which round-trips where a column is text, as a SQLite one is, and Postgres's interval text is pgx's to parse. The ORM converts at its boundary, as it does a date through `pgtype.Date` and a location through `pgtype.Point`. |
+| A list of durations in a table, an `INTERVAL[]` column, goes through a `[]time.Duration` and is scanned through `[]*time.Duration`, which refuses a NULL element at `field[i]` as any native list does, and the history decoder reads a JSON list of the texts. A queue still refuses one, as the row above says. | Leaving the table's list on the `Valuer`, since a queue refuses one; a table's `POINT[]` was already held, and generic helpers over `~int64` make the list a few lines. |
+| A duration's filter is `DurationFilter`: `Eq`, `Gt`, `Gte`, `Lt`, `Lte`, `Between` and `IsNull`, each a `time.Duration` that goes as its microseconds. Postgres compares intervals with a 30-day month and a 24-hour day, as the ORM reads them. A caller that set `Eq`, `In` or `ILike` of a `StringFilter` on a duration no longer compiles. | `StringFilter`, which compiled and failed or matched Go's text as Postgres read it. |
+
+Status: built. `TestQueueParityOfGoTypeScriptAndRustOnPostgres` gains
+`LocationsAndDurationsAgree`: Go, TypeScript and Rust each enqueue a
+`DeliveryPlanned`, one with a remainder of nanoseconds and one negative,
+and each reads all three as its types hold them, then reads an interval
+written with a month and days as their hours. `TestGeneratedQueuesOnPostgres`
+holds the Go ORM's columns to what Postgres stores (`26:00:00.000001`,
+`-00:01:30.25`, `(151.2093,-33.8688)`), and the runtimes' tests do the
+same for TypeScript and Rust, besides their parsers' cases.
+`TestQueuesWriteWhatTheGoORMWrites` and
+`TestQueuesDescribeWhatTypeScriptWrites` cover both fixtures, and
+`TestQueuesHoldALocationAndADuration` the Go ORM's refusal of a list.
+`TestDurationColumnsOnPostgres` writes a table's durations, positive,
+negative, of microseconds, over a day and with a nanosecond remainder,
+alone and in a list, through every write, holds the columns to what
+Postgres stores, writes intervals of a month and days with SQL, and reads
+each back through every read, a selection of fields and the history,
+beside the table's locations; it filters on each comparison, a range and
+`IS NULL`. `TestVersionGraphFacadeKeepsEveryClass` reads the tasting the
+version graph wrote through the table's repository.
+
+Not built: a list of locations or durations in a queue's message. The
+history decoder reads Postgres's default `IntervalStyle`, `postgres`, as
+pgx does; a server set to another style writes history rows it refuses.
 
 ### D54, amended: a workload links the GCS client whenever its APIs list a bucket
 
@@ -6894,10 +7136,10 @@ Status: built.
 
 No Rust job or worker has run on Cloud Run.
 
-Not built, and out of this entry: OpenTelemetry export (D54's second
-amendment builds buckets from a Rust server, job or worker). A TypeScript build into another output
-root relinks the project's own `node_modules` there, as a Rust build did
-before the mirror.
+Out of this entry: buckets from a Rust server, job or worker, which
+D54's second amendment builds, and OpenTelemetry export, which D67
+builds. A TypeScript build into another output root relinks the project's
+own `node_modules` there, as a Rust build did before the mirror.
 
 The rule is reversible until the first release.
 
@@ -7165,6 +7407,228 @@ the route's rate limit. `TestServiceAuthManualRoutes` refuses a protected
 manual route without a user and a `@requireService` one without a service,
 and the three `...PredatesItsManualRoutesFails` tests the build's
 refusals.
+
+The rule is reversible until the first release.
+
+### D44, amended: an operation has one rate limiter in an app, which its route, its procedure and its pages share
+
+The procedures amendment gave a procedure a limiter of its own at its
+route's rate, and the pages amendment gave the pages one per operation,
+each beside the route's: a client of acme's `placeOrder`, at 60 a minute,
+got 60 through `/api/orders`, 60 through its procedure and 60 through the
+console's new-order post, 180 in all. The route's limiter could not be
+shared: `RouteControls::rate_limit` builds it inside the router each time
+`build_router` runs, and nothing outside the router reaches it.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The Rust runtime's `RateLimits` holds one app's limiters, one per operation with a `@rateLimit`, keyed by the operation's route (its method and path), namespace, name and rate. `RateLimits::of(&OperationInfo)` gives the operation's limiter, made the first time anything asks for it, or none for an operation without one. Each is the token bucket D29 describes, per client, refilled continuously at the route's rate. A clone shares the limiters. `OperationInfo` gains `rate_limit`, the route's requests per minute, so the registry needs nothing but the operation. A registry is meant for one app's operations: two APIs' operations of one name on different routes keep their own limiters, and an app that serves two APIs whose operations match on all five parts of the key gives each API a registry of its own. | A limiter per operation in a `static`, which every router and app in a process would share, tests included. A struct of limiters the API crate generates, one more argument for every `build_router` variant. Keying by the request's path, which a procedure's or a page's request does not carry; the `OperationInfo`'s method and path are the route's on every way in. Keying by the namespace, name and rate alone, so two APIs' routers built from clones of one `RouterOptions` would share a limiter for operations of one name. |
+| `RouterOptions` gains `rate_limits`, a new registry by default, so `build_router` and every stack server count as before. `build_router_with` takes each route's limiter from it with `RouteControls::rate_limiter`. Two routers built from one registry share a budget. This replaces D29's bucket per route with a bucket per operation in a registry, which a router built with the default options holds alone. `RouteControls::rate_limit(n)` stays, for a manual route the service mounts itself. `RouterOptions` keeps its `PartialEq` and `Eq`: `RateLimits` compares by identity, so two options are equal only when they share their registry, a clone is equal to its original, and two `RouterOptions::default()` are not equal. | A `build_router_with_limits` beside `build_router_with_manual_routes`, so the variants multiply. |
+| `<service>(...)` makes one registry. It mounts the JSON API with it and hands it to `procedures::route_controls` and `pages::route_controls`. So the route, the procedure, and every page and shard that meets the operation's controls take from one bucket per client. The registry is kept in `Setup.rate_limits`, so an app that builds the API's router again, or another crate's page that calls the operation, can share it: the page takes the operation's limiter with `setup.rate_limits.of(&api::operations::<OPERATION>)` and a token with the crate's `client_key(cx)`. | Keeping a limiter per surface, as replicas would have, which this amendment replaces. Sharing the route's and the procedure's alone, which leaves the console a second budget. |
+| On every surface, the key is the client's address as Topcoat reads it (`client_ip`), or `unknown` when Topcoat knows none. `ClientAddress` gives the route that address as the runtime's `ClientIp`, which the runtime's `client_key` reads. The procedures and the pages read it through the crate's one `client_key(cx)`, which `lib.rs` writes in every crate, public, whatever its routes' controls, so another crate's page counts by it too. So a client is one client on all three surfaces, and the clients without an address share one bucket on all three. | A key per surface, with the route keyed by its peer address, which a request through Topcoat does not carry. |
+| The limiter belongs to the operation, not to a route. A procedure or a page meets it whether or not a router was built for the operation. A route whose operation has neither, such as a webhook, a `@requireService` operation or a manual one, meets it alone. Each surface still answers the refusal its own way: the route with its 429 problem, the procedure with a `ProblemRecord`, the pages with their refusal section. Each carries the shared bucket's `Retry-After`. Another process that serves the API, such as a stack's server beside the app, has a registry of its own: a limiter is kept in process memory (D29), so replicas share no budget. An in-process call meets no traffic control (D43), whether the app's own page makes it or a service caller through `as_service`, so it takes from no budget: the budget is the client's through the route, the procedure and the pages. | Refusing a crate whose app does not mount the JSON API: no app can, since `<service>(...)` mounts it. |
+| A page that meets several operations' controls still takes from each limiter in turn, its own first. A page its own limiter admits and a reference's limiter refuses has spent its own token, as before. A reference's options operation is now counted with its route and its procedure, so a client who reloads a page holding a reference spends that operation's API budget too. | Exempting the references' limiters from the sharing, which would leave the listing a second budget through the console. |
+
+Status: built in the Rust runtime, rustrestgen, the Topcoat crate and
+acme. The tests are these:
+
+- The runtime's `ratelimit` tests: an operation has one limiter in a registry, two operations of one name on different routes have their own, a clone shares it, an operation without a rate limit has none, and a new registry shares nothing. `openapi` tests that options are equal when they share their registry, and two defaults are not. `controls` tests that two routes built from one registry share a budget, that one from another registry has its own, and that `rate_limiter(None)` leaves a route's own limiter in place.
+- rustrestgen: the `router.rs` goldens of fixture-api, fixture-user-routes-api and fixture-webhooks-api, and every `operations.rs` golden (`rate_limit`). `TestRouteControlsAPICrateBuildsAndRoutes` builds fixture-api's router twice from one `RouterOptions`: 30 requests through each spend a client's 60. Each router is then sent requests until it answers 429, and those it admits after the 60 are at most the whole seconds since the first request, plus one, where two budgets would admit about 60 more; another client's is 200. Two routers built apart each have their own budget.
+- Topcoat, built: `TestPagesKeepTheirRoutesControls` on `fixture-controls-api`'s list of orders, at two a minute: one request through `/api/orders` and one through its procedure leave the console's list page 429 for that client and 200 for another, and the route and the procedure 429 too. `TestTheSetupSharesOneRegistry` reads the goldens: `RateLimits::new()` once in `lib.rs`, the JSON API mounted with it, and no `RateLimiter::per_minute` in `procedures.rs` or `pages.rs`. `TestWhatHasNoProcedure` and `TestATrailStepMeetsItsOptionsControls` find each procedure's and page's rate limit taken from the registry. `TestControlsWithoutARateLimitBuild` takes fixture-controls-api's rate limits out, so its controls are body limits and timeouts alone, and builds its crate with the procedures, and with the pages and no procedures: each layer takes no limiter, `client_key` is still written, and cargo clippy and cargo test pass.
+- acme, built: `place_orders_rate_limit_is_one_budget_across_the_api_its_procedure_and_the_console`. At `placeOrder`'s 60 a minute, 20 orders through `/api/orders`, 20 through its procedure and 20 through the console's new-order page spend the budget. Each is then posted to until it refuses: the route's 429, the procedure's `too_many_requests` ProblemRecord and the console's 429. The orders placed after the 60 are at most the whole seconds since the first post, plus one, since the bucket refills at one a second; three budgets would place about 120 more. The app's own `/orders/new`, an in-process call, still places an order.
+
+The rule is reversible until the first release.
+
+### D37, amended: an in-process call reaches a `@requireService` operation only through a service caller it names
+
+D37's first amendment left open whether an in-process call should refuse
+a `@requireService` operation. `OperationInfo` carries no service clause,
+so `admit` applied the end-user step alone. An operation with no user
+clause admitted anyone: fixture-controls-api's `reindexStock` ran from a
+page with no caller. The Topcoat crate offers that call to every page.
+The user chose to allow such a call only through an explicit service
+caller.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `OperationInfo` gains `service`, the operation's effective clause (`ir.EffectiveServiceCallers`): `ServiceClause { mode: ServiceMode::Require` or `Allow, from }`, `None` without one. | The clause beside `OperationInfo`, as the identity runtime's `Route::service_only` carries it: one more table each caller must keep in step. |
+| `admit(authenticator, principal)` is a call that names no service caller. A `@requireService` operation refuses it, with or without a user clause, as its route refuses a request without a service credential: 401 `service_unauthorized`, "Service credential required". An `@allowService` operation, and one without a clause, admit as before. | Admitting it, D37's open answer, which lets a page call a service-only operation for any end user. Refusing it only without a user clause, which still lets any end user who meets the clause stand in for a service. |
+| A service caller is the runtime's `ServiceCaller`: the record the route hands an implementation for a verified credential, holding the deployable, the APIs it serves and a subject. An in-process caller builds its own with `ServiceCaller::in_process(deployable, serves)`. The subject is empty, since within one process nothing presents or verifies a credential. The process's own code is trusted, so the rule makes the call deliberate; it does not stop an attack. `serves` names the APIs the caller acts for, which the operation's `from` is checked against. | A credential the process signs and then verifies itself, which adds keys and proves nothing within one process. A caller type of its own, beside the one an implementation already reads in `ctx.service_caller`. The serving API as the caller, which `from`, naming the other APIs, would never list. |
+| `admit_service(caller)` is the route's service step, with one rule for the router and an in-process call: `ServiceRule::admit` becomes the runtime's `service_step`, which `Gate` and `admit_service` both call. `ServiceCaller::is_listed` keeps its `&[String]`, and the step reads a route's `from`, `String`s or an `OperationInfo`'s `&'static str`s, through a private helper. With no caller, a `@requireService` operation refuses (401), and `admit` runs this first. With a caller, it answers 403 `service_forbidden` when `from` lists none of the APIs the caller serves. It answers `Ok(true)` when the caller alone is admitted, that is, a listed caller of an `@allowService` operation. It answers `Ok(false)` when the end-user step still applies, which `admit_end_user(authenticator, principal)` runs: the user clause of a `@requireService` operation, or an operation without a clause. `service_context(caller, principal)` is the `RequestContext` of `context` with `service_caller` set, so the implementation sees the caller as the route hands it. | One `admit_as` taking an optional authenticator, which a crate whose operations need no caller has none to pass. |
+| A `@requireService` operation has no `operations::<op>(cx, args)` in the Topcoat crate. A page cannot call it for an end user, by accident or not, and the compiler says so. `operations::as_service(&caller)` returns `AsService`, which has a call and a guard per operation whose clause is `@requireService` or `@allowService`. `as_service(&caller).<op>(cx, args)` runs `admit_service`. When the end-user step applies, it takes the page's own caller, from the `PageAuthenticator`, as the end user the service forwards. It then runs `Args::check`, and the implementation with `service_context`. `can_<op>(cx)` of a `@requireService` operation answers the 401 above; `as_service(&caller).can_<op>(cx)` admits the service caller. An argument form of such an operation has `submit_as(cx, &caller)` in place of `submit(cx)`. A `@requireService` operation without an in-process call, a manual one say, keeps the end user's guard alone, and that guard's doc names no `as_service` guard. | An end-user call that always answers 401: a call no page should make, found only when it runs. A service caller held in `Setup`, which every call would then make silently. |
+| The console and the procedures are unchanged. A `@requireService` operation has no page and no procedure, since a browser holds no service credential, and no reference lists its items through one (`ir.ResolveReference`). An `@allowService` operation keeps its end-user call, its procedure and its pages, which call it as the end user, never as a service. A call through a service caller applies no traffic controls, as no in-process call does. | Pages that call as a service, which would act for every reader with the service's authority. |
+| Rust's API crate (D43) and the Topcoat crate built on it are the only in-process call surfaces. Go and TypeScript have none: their routers alone apply a clause. `serviceauth.WithCaller` in Go and the mutable `ctx.serviceCaller` in TypeScript exist for handler tests and the router. Code that calls an implementation directly applies no rule at all, in any language, as before. An in-process surface in Go or TypeScript would follow this rule; TypeScript's `operationSpecs` already carries the clause. | |
+
+This settles the in-process question the first amendment left open. A
+call between two APIs that one server serves goes over HTTP, and is
+section 9.9's question in `docs/stack-model.md`, not this one's.
+
+Status: built in the Rust runtime, rustrestgen and the Topcoat crate.
+The tests are these:
+
+- The runtime's `operation` tests: a `@requireService` operation refuses `admit`, with and without a user clause. A listed caller is admitted and an unlisted one refused 403, and an empty `from` lists any caller. A listed caller of an `@allowService` operation stands in for the end user, and an unlisted one goes on to the end-user step. The context of a service caller's call names the caller. A grid of 72 calls, over mode, `from`, caller, user clause and end user, gives an in-process call the status and code a `RouteControls` route answers. `service_auth` tests that `ServiceCaller::in_process` names a caller with an empty subject.
+- rustrestgen: every `operations.rs` golden (`service`), and in `TestServiceAuthAPICrateBuildsAndRoutes`, `an_in_process_call_needs_its_service_caller`: `admit` refuses each `@requireService` operation 401; a listed caller is admitted, with the end user it forwards, and the implementation reads both; an unlisted one is refused 403; and a listed caller of an `@allowService` operation stands in for the end user.
+- Topcoat, built: `fixture-controls-api` gains `reserveStock`, a `@requireService` operation with a `from` and a user clause. `TestAServiceOnlyOperationIsCalledAsAService` finds no end-user call of a `@requireService` operation in `operations.rs`, an `AsService` call and guard for each operation with a clause, and `submit_as` in place of `submit`. `TestProceduresKeepTheirRoutesRules`'s cargo test sees these:
+  - an end user refused 401 `service_unauthorized`, signed in or not;
+  - a listed caller admitted, with the page's caller forwarded;
+  - an unlisted caller refused 403;
+  - a signed-out page refused 401;
+  - an `@allowService` operation run as a service with no session, by the caller its `from` lists (`fixture-controls-api`'s `releaseReservation` lists fixture-api);
+  - a caller that `from` does not list sent on to the end-user step, refused 401 signed out and run for the reader signed in;
+  - the form submitted as a service.
+
+  `TestServiceCallsWithoutAnEndUser` builds `fixture-service-calls-api`, whose operations ask for no end user, so its crate has no `PageAuthenticator`. Each `@requireService` guard refuses an end user on the service step alone, and `admit_as` admits a service caller on it. The guard of its manual `recountStock`, which has no in-process call, names no `as_service` guard. Its cargo test refuses an end user's guards 401, reserves as the listed caller with no end user, refuses an unlisted one 403, and reindexes as any caller.
+- acme has no in-process service call. Its only `@requireService` operation, shop-stock's `reserveStock`, is in an API its Topcoat app does not host.
+
+The rule is reversible until the first release.
+
+### D48, amended: an enum member's title, a type's icon and a field's multiline hint
+
+D48 gave a type its display and left an enum's members to their names. A
+UI labeled `OnHold` "On hold" and had no way to say "Held for a stock
+check": `ir.EnumValueDef` has no title, and a TypeScript enum member takes
+no decorator. A type had no icon, though fields and operations have
+`@icon`, so a console's nav could not show one. And whether text is
+entered on one line or several was each UI's guess. The Topcoat forms make
+a textarea of text whose `maxLength` is 500 or more, so a note with no
+bound gets a one-line input, and a code of up to 2000 characters would
+get a textarea.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `ir.EnumValueDef` gains `Title`, after `Name`, omitted when empty, so IR without it is the same bytes. In the data forms a member writes `title`. In TypeScript, the member's JSDoc comment declares it: `/** @title Held for a stock check */ OnHold = "on_hold"`. The tag is the first word of a line of the member's one `/** */` comment, after the line's `*`, and the title is the rest of that line. The lines after it, up to the comment's next tag or its end, must be blank (`enum OrderStatus member OnHold: @title must fit on its line`), so a title that wraps is refused rather than cut short. The tag's line leaves the member's comment, and the rest stays its comment. The reader reads the tag on an enum's members, its own and a dependency's (`recordExternalEnum`, which records a dependency's enum for the loader's checks of a field's defaults; the dependent's IR does not copy it, and a UI labels its members from the dependency's schema). It reads every comment on a member, one by one, and refuses a tag it would not read as the member's whole title. These are an empty tag (`... @title needs the member's title after it`), a tag without a space (`... @title needs a space before the member's title`) and a second tag (`... @title is given twice`). So is a tag in a `//` or `/* */` comment (`... @title is read from a JSDoc comment (/** @title … */), not a // or /* */ comment`), a tag that is not the first word of its line (`... @title must begin a line of the member's JSDoc comment`), and a tag on a member with a second `/** */` comment (`... @title is read from the member's only JSDoc comment, and it has more than one`). `@titles` and `@title-case` are comment text. Anywhere but on an enum's member, a `@title` line is comment text, as today. The TypeScript writer writes the tag on a line of its own after the member's comment, and refuses a member's comment that holds the tag. | A decorator, which TypeScript refuses on an enum member. Labels keyed by field in a type's `@display`, D48's deferred option, which every type that holds the enum would repeat. A companion call such as `enumTitles(OrderStatus, {...})`, a top-level statement the reader does not evaluate. `description`, which has no TypeScript form. |
+| `Schema.Validate` holds a title to these rules in every form: non-blank (`enum OrderStatus member OnHold: title must be non-blank`), with no space at either end (`... title must not contain surrounding whitespace`) and one line (`... title must be one line`). It holds no ASCII control character, a tab included (`... title must not contain the control character U+0009`), and no U+2028 or U+2029. It must not contain `*/` (`... title must not contain */`), so the TypeScript comment can hold it. The schema-file JSON Schema states the same rule, as `ir.EnumTitlePattern` beside `"not": {"pattern": "\\*/"}`. The pattern's classes are explicit, with no `\s` or `.`, so Go's RE2, Ajv and the Rust strict loader reach one verdict, which the parity corpus checks. A title must differ from every other member's title in the enum, ignoring case (`enum OrderStatus: members OnHold and Shipped share the title "Shipped"`), so a select's options can be told apart. No JSON Schema keyword can say that, so only Go holds it: `Schema.Validate`, which the loader runs on every form. | Allowing two members one title, which a select would show twice. `\s` and `.` in the pattern, which the three engines read apart. |
+| `TypeDisplay` gains `icon`, after `createLabel`: the glyph a UI shows beside the type's name, as in `@display({ plural: "Orders", icon: "receipt" })`. It is a name for an app's icon set to draw: a letter or a digit, then letters, digits, `.`, `_`, `:`, `/` and `-` (`receipt`, `mdi:receipt`, `solid/box`), by one pattern, `^[A-Za-z0-9][A-Za-z0-9._:/-]*$`, in the registered spec and in Go's `ValidateTypeDisplay` (`ir.DisplayIconName`; `display icon "a b" is not an icon name (a letter or a digit, then letters, digits, ., _, :, / and -)`). Its classes are ASCII and explicit, so RE2, Ajv and the Rust strict loader refuse the same names, a carriage return, a byte order mark or a space among them. Which names a set draws is an extension's check (D48). `@display({ icon })` alone is a display. | The list operation's `@icon`, which is its MCP tool's icon and which a type without a list operation lacks. A type decorator `@icon`, a second spelling of what `@display` says. Any non-blank, unpadded text (`^\S(.*\S)?$`), which Go read apart from Ajv and Rust: Go took `"a\rb"`, `"\ufeffticket"` and a no-break space at either end. |
+| A field takes `@display({ multiline })` from `@superschematic/schema`. `true` asks for a control that holds several lines, and `false` for one line, whatever the field's `maxLength`. It writes `FieldDef.Display` (`ir.FieldDisplay`), omitted when absent. The data forms write the argument under the field's `display`, and the schema-file JSON Schema takes `$defs/FieldDisplay` from the spec's Args, as it takes a type's display. `@display({})` is refused, a field takes one, and an operation takes none (`OrderMutations.placeOrder carries a field display; only a field takes @display`). The loader refuses it on a field that holds no text (`type NoteInput: field count takes @display multiline, which is for text, but it is Generic.Int64`). It also refuses it on a secret field (`type LoginInput: field password takes @display multiline, but it is secret, a password input`). A list of text may take it, for a control per row. | A long-text scalar, which superscalar does not have (`Text.Markdown` and `Text.Sql` have no bound) and which a bounded field could not use. A flag decorator `@multiline`, which can only say yes. `@docs({ multiline })`, which is documentation. The 500 rule alone. |
+| An argument takes none, since arguments take no decorators and have no display metadata yet: an argument's label is its name in words. The Topcoat forms keep the 500 rule for an argument. The input fields of an argument form follow their own hints. | `Multiline<T>`, a type wrapper both fields and arguments could take, which would put a UI's choice into the value's type for every type generator to see through. |
+| Where each one appears. The IR, every authoring form and the writers carry all three. The engine's schema document copies an enum whole (`enginedoc`), and the engine checks it against the regenerated meta-schema. The engine's describe document copies a type's `display` whole, so it carries `icon`, and its TypeScript client's `TypeDisplay` types it. No other document gains a member's title or a field's multiline. The OpenAPI document and the tool manifests carry no field title either, and the engine describes an enum field by its values. A later change that puts reader-facing labels into those documents would carry both. No type, SDK or server generator renders them, so only the goldens that copy IR change. | `x-enum-varnames` or `x-enum-descriptions`, other tools' conventions, for members alone while fields stay untitled. |
+
+Status: the core is built: the IR fields and their rules, the reader's @title tag (own and dependency enums), the field @display spec, the regenerated schema-file JSON Schema, verify's text and secret rules, the TypeScript writer, the typings and the engine client's icon, with the tests listed.
+
+- ir: each title rule with its message, the icon's, and `FieldDisplay`'s. `TestEnumTitlePatternIsValidatesRule` holds `validateMemberTitle` to `ir.EnumTitlePattern` over every code point below U+0100 and others, at a title's start, middle and end.
+- The registry: the spec's icon pattern is `ir.DisplayIconName`'s, and the spec and `ValidateTypeDisplay` reach one verdict on each icon.
+- The parity corpus: icons with a carriage return, a line separator, a byte order mark, a no-break space or a space, and titles with each refused character, which Go, Ajv and the Rust strict loader all refuse.
+- The TypeScript reader:
+  - `fixture-display` gains a titled member, an icon and a multiline field;
+  - an empty, unspaced, doubled, wrapped, mid-line or `//` or `/* */` tag is refused, and so is one on a member with two JSDoc comments; a tag after a `/* */` comment on its line is read;
+  - a member's comment is read as `leadingComment` reads every other node's;
+  - a dependency's enum keeps its titles.
+- The registry's `@display` test on a field. `TestDisplayDefsAreTheRegisteredArgs` for `FieldDisplay`, and `make schema-file-types-check`.
+- verify: a multiline field that holds no text, and a secret one, among a type's fields, an input's and a configurable trait's config.
+- The writers' round trip: TypeScript to IR to TypeScript, JSON and YAML, with every member titled.
+- `TestDisplayChangesNoGeneratedFile` gives every enum member a title, every type an icon and every text field a hint. The trees match byte for byte, but for the Rust types crate's IR copies.
+- The engine's `the_meta_schema_holds_its_shape` refuses a blank icon.
+
+The rule is reversible until the first release.
+
+### D44, amended: the crate labels a member by its title, the console's nav shows a type's icon, a multiline field is a textarea, and each form's first submit control is its default button
+
+The crate labeled an enum's members by their names alone, rendered no
+icon, and chose a textarea by `maxLength` alone (D48, amended, above).
+And the rows amendment put a hidden default button ahead of a form's row
+buttons, so that Enter submits the form rather than adding or removing a
+row, but no test checked the order the HTML rule depends on. The user
+chose a structural test, with no browser.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A member is labeled by its title, else by its name in words, by one rule (`enumOptions`). The rule covers a form's select options and checkbox group, a filter's, and `<enum>_label`, which a display component's `<data>` shows. When two members of an enum the crate labels take one label, ignoring case, such as a title that is another member's name in words (`{OnHold, Paused /** @title On hold */}`), the build log warns once per pair: `topcoat: enum Status: members OnHold and Paused share the label "On hold", so a select offers it twice; a @title tells them apart`. | Titles in the display components alone, so a filter and a table would name one member two ways. Refusing the build, when the IR's own rule refuses only two titles alike. |
+| A link of the console's nav or index starts with `<span class="ss-icon" data-icon="receipt" aria-hidden="true"></span>`, before its label, when its resource's type declares an icon. The type is the list's element type, else the detail's. The crate ships no icon set and no styles: the app's stylesheet draws each name, for example with `.ss-icon[data-icon="receipt"] { mask-image: url(...) }`. A link without an icon has no span. A crate whose resources declare none renders the nav as before. | A class per name (`ss-icon-receipt`), which needs a name to be a CSS identifier, a rule the core does not make. An inline SVG set, a dependency and a style the crate does not choose. A slot or renderer in `Settings`, which hands markup to a layout that escapes every value. An icon in the trail or a table's caption, which a later change can add. |
+| A text field whose display says `multiline: true` is a `<textarea rows="6">`, as long text is, whatever its `maxLength`. One that says `false` is a one-line input, whatever its `maxLength`. Without the hint, the 500 rule stands. The hint applies only where the control would be text. An email, URL, phone, date or time control keeps its type, and the build log says so: `topcoat: Account.email: @display multiline is ignored: its control is an email input`. The app's choices still make the field a select. | Turning an email or a date into a textarea, which drops its browser checks. |
+| Every form the crate renders has a submit button, and so does each page's form around it. Its first submit control in tree order is the default button: one with no `name`, `formaction`, `formmethod`, `formenctype`, `formtarget`, `formnovalidate` or `disabled`. HTML's implicit submission, Enter in a text field, clicks that button, so Enter submits the form with no `_action` rather than adding or removing a row. A structural test holds this for every page the extension's cargo tests and acme's tests render. No form nests another, which the HTML parser would drop, and no control names its form with `form=`, so tree order is the whole rule. A `<fieldset disabled>` disables the default button inside it, but in its first `<legend>` child, as the button's own `disabled` would, so the test fails it. A `<template>`'s contents are a fragment of their own, out of the page's forms, which the test holds to the same rule. | A browser driving each form, which CI does not run. A script that handles Enter. Trusting the templates' order with no test. |
+
+Status: built in the Topcoat crate and acme. Rows within rows needed no
+change to `apply_action`, `act` or `shows`. The tests are these:
+
+- `TestViewsRenderRecords`: `order_status_label("on_hold")` is fixture-views-api's title, and the detail and the table show it; an untitled member reads by its name in words. `TestDisplayShapesTheComponents` reads it in `views.rs`.
+- `TestArgumentFormsServeATopcoatApp`: the status filter offers the title.
+- `TestPagesServeATopcoatApp`: fixture-pages-api's nav and index show the projects' icon, the projects' list's and the archived list's, whose rows are projects, and no other link has a span; the trail shows none. `TestTheNavShowsATypesIcon` reads the goldens: fixture-console-api, whose types declare no icon, keeps its nav.
+- `TestFormsServeATopcoatApp`: fixture-forms-api's `NoteInput.text`, which has no bound, is a textarea in the annotate and draft forms. `TestHowAFormHoldsAField` checks `true` without a bound, `false` at 5000, the 500 rule without a hint, a list of text's rows, and an email's ignored hint in the build log. `TestAMemberIsLabeledByItsTitle` checks `enumOptions`, and `TestTwoMembersOneLabelIsABuildWarning` the build log's word on two members one label, from a form, an argument form and a display component.
+- `extensions/topcoat/testdata/enter.rs` checks each form's submit controls. `cargoTestCrateWith` writes it into every crate it tests, and each cargo app test's request helper runs it on every HTML page, and so does acme's `respond`. It is run on the booking form with rooms whose notes are rows within rows (fixture-forms-api's `RoomRequest.notes`, which `rows_within_rows_add_and_remove_at_their_names` adds to, removes from and books with), the argument forms that embed their input, the console's new, edit, action, filter and page-size forms, and every 422 a form renders again. Its own tests fail a row button ahead of the default, a form with no submit button, a nested form, a button with no `type` ahead of the default, a control that names its form and a disabled default. They fail a default in a `<fieldset disabled>`, in an inner fieldset of one, in its second legend and in a legend that is no child of it, and pass one in its first legend. They pass a template's row button ahead of its form's default and a template's form in a form, and fail a template's form with no submit button, with a row button first or left open. `TestRowButtonsFollowTheDefaultButton` checks every golden's `forms.rs` without cargo. The file ships with neither the extension nor its crates; an app's tests copy it from the repository.
+- acme: shop-db's `OrderStatus.Fulfilled` reads "Picked and packed" in the orders filter, the app's and the console's, and in the console's table over SQLite. The console's nav and index show the orders' and the products' icons. The review's body states its multiline hint and is a textarea.
+## D67. A server, job or worker exports its traces over OTLP when OpenTelemetry's own variables name an endpoint, and sets up nothing otherwise
+
+D30's amendment, D51, D57 and D65 left OpenTelemetry export out of every
+generated entrypoint. The Go runtime's request log middleware set
+`http.route` on a span that no entrypoint started, section 7.5 of
+`docs/stack-model.md` promised traces "through the entrypoint's
+OpenTelemetry setup", and no deployable of a stack exported a span. This
+entry builds traces for the Go, TypeScript and Rust servers, jobs and
+workers.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The configuration is OpenTelemetry's standard environment variables: `OTEL_EXPORTER_OTLP_ENDPOINT` and `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`, `OTEL_EXPORTER_OTLP_HEADERS` and the timeout, with their traces forms, `OTEL_EXPORTER_OTLP_PROTOCOL`, `OTEL_SERVICE_NAME`, `OTEL_RESOURCE_ATTRIBUTES`, `OTEL_TRACES_SAMPLER` and `OTEL_TRACES_SAMPLER_ARG`, `OTEL_PROPAGATORS` and `OTEL_SDK_DISABLED`. A schema says nothing about export. | An `otel` block in an API's config, or an `@envVars` field for each variable, which would put each collector, vendor and environment into the schemas. |
+| Export is off when neither endpoint variable is set, or when `OTEL_SDK_DISABLED` is `true`: no exporter, no context manager, no background thread, and the tracer stays a no-op. The server middleware, the client transport, and the job and message wrappers then only call through, and a deployable forwards no trace context. | OpenTelemetry's default endpoint, `localhost:4318`, to which every deployable would send, and retry, where nothing listens. Forwarding the context with export off, which the Rust runtime cannot do without the SDK's layer. |
+| The exporter is OTLP over HTTP in protobuf, through a batch processor. The protocol variables may name `http/protobuf` alone. | gRPC, which brings the transports of tonic and grpc-go into the Rust and Go binaries. JSON, which no collector needs. |
+| A value a runtime does not support stops the deployable with an error that names the variable: another protocol; a propagator other than `tracecontext`, `baggage` and `none`; a sampler other than the six standard ones; a sampler argument outside 0 to 1; an endpoint that is no http or https URL; and an `OTEL_RESOURCE_ATTRIBUTES` member without `=`. The three runtimes refuse alike. | The SDKs' own reading, which warns and goes on, so a typo shows only as traces that never arrive, and each SDK reads a different set. |
+| The generated entrypoint gives the defaults that only it knows: `service.name` the deployable's name, `service.namespace` the stack, and `superschematic.deployable.kind` `server`, `job` or `worker`. `OTEL_SERVICE_NAME` and `OTEL_RESOURCE_ATTRIBUTES` override each. The entrypoint knows neither the environment nor the image, so a target sets `deployment.environment.name` and `service.version` through `OTEL_RESOURCE_ATTRIBUTES`. | The environment in the entrypoint, which is one for every environment of the stack (D30, amended). |
+| The telemetry is in each HTTP runtime, behind one call from the entrypoint. Go's `telemetry.Start` returns the function that flushes. TypeScript's `startTelemetry` is in the runtime's own `./telemetry` entry, the only entry that imports the OpenTelemetry packages, so the entries that a Workers build bundles stay without them. Rust's `telemetry::start`, behind the runtime's `otel` feature, installs the JSON-line log with `tracing-opentelemetry`'s layer beside it, and returns a guard that flushes when it drops. | Instrumentation in each entrypoint, which would change every generated file for each change to it. An auto-instrumentation agent, which the three runtimes do not have in one form. |
+| The first signals are traces. A server makes a server span for each request but `/healthz` and `/readyz`, the child of an incoming `traceparent`, named `<METHOD> <route template>` (`GET /api/orders/{id}`), or by its method when no route takes the request. A `calls` edge's SDK client makes a client span for each call, and sends W3C `traceparent` and `tracestate`, through Go's `Transport`, TypeScript's `fetch`, and the `transport` that the Rust SDK gets. A job's run is a span with the name of its `@job` class. A worker's message is a consumer span, `process <queue>`, the root of a trace of its own. Each process flushes before it exits: a server after it drains, a job after its run, and a worker after its grace. | A span for each database query, which no runtime's pool records yet. A message span that continues the trace of the request that enqueued the message, which needs a column that the queue tables do not have. |
+| No target changes its resource graph. `stack dev` and `stack run` give each server, job and worker every `OTEL_` variable of the developer's shell but `OTEL_SERVICE_NAME`, which would give every deployable one name. Without them, export is off. The gcp target's `env` settings bind `@envVars` fields alone, so they cannot set these variables, and a gcp environment exports nothing yet. | A collector that `stack dev` starts in Docker, which a developer with another collector must then stop. All of the developer's environment, which section 8.3 keeps from the processes. |
+
+Metrics and logs are out of this entry. Metrics come next: the request
+duration and the queue's claims, through the meter providers of the same
+SDKs (Go's `otelhttp` already records them for a provider it is given).
+Then logs: first the `trace_id` and `span_id` of the current span on each
+JSON line, then OTLP log export through each SDK's log bridge.
+
+Status: built.
+- `runtime/http/go/telemetry`: `Start`, `Handler` (`otelhttp`), `Transport`
+  and `Job`, over `go.opentelemetry.io/otel` v1.46.0, its OTLP HTTP trace
+  exporter v1.46.0 and `otelhttp` v0.71.0. `RequestLogMiddleware` names the
+  server span by its chi route, and `worker.Run` makes the message spans.
+  `telemetry/otlptest` is an OTLP/HTTP receiver for tests, in the test's
+  process, which decodes the protobuf of each export.
+- `@superschematic/http-runtime/telemetry`: `startTelemetry`, with
+  `middleware()` for Hono, `fetch`, `job`, `message` and `shutdown`, over
+  `@opentelemetry/api` 1.9.1, `sdk-trace`, `resources`, `core` and
+  `context-async-hooks` 2.12.0, and `exporter-trace-otlp-proto` 0.223.0,
+  the runtime's optional peer dependencies. Bun's `AsyncLocalStorage`
+  carries a span's context through a request's awaits.
+- The Rust runtime's `otel` feature: `telemetry::start`, `dispatch`,
+  `ServerLayer`, `transport` and `job`, and the worker loop's message
+  spans, over `opentelemetry` and `opentelemetry_sdk` 0.33.1 with traces
+  alone, `opentelemetry-otlp` 0.33.1 with `http-proto` and no HTTP client of
+  its own, `opentelemetry-http` 0.33.1 and `tracing-opentelemetry` 0.34.0.
+  The exporter sends through the `http-client` feature's `reqwest`, on a
+  current-thread runtime of its own. The JSON-line log leaves out a span's
+  `otel.` fields, so its lines are the same with export on and off.
+- The Rust SDK's `ClientConfig` gets `transport`, which sends each request
+  in place of `reqwest::Client::execute`.
+- servergen: each Go, TypeScript and Rust server, job and worker calls the
+  runtime's start first and flushes as it exits, wraps its handler or app
+  in the server spans, gives each `calls` client the runtime's transport,
+  and runs a job's method in its span. A Bun package depends on the
+  OpenTelemetry packages, and a Rust crate turns on `otel`.
+- The local provisioner gives each process the shell's `OTEL_` variables
+  but `OTEL_SERVICE_NAME`.
+- Each runtime's tests export to a receiver in the test's process: a
+  request is a server span with its route template and its incoming
+  `traceparent` as parent, a call carries `traceparent` in a client span,
+  a job's run and a worker's message are spans, the flush sends a batch
+  that is not yet due, the variables override the defaults, the
+  refusals, and with no endpoint nothing starts. `TestStackDevRunsTheShop`
+  points `stack dev` at a receiver: an order is one trace from
+  shop-orders' Go server, through its client span, to shop-stock's Rust
+  server; the storefront's TypeScript requests are spans named by their
+  routes; each worker's message is a span; and each job's process sends
+  its span before it exits.
+
+Not built:
+- Export on gcp. A target would need to set the variables for each Cloud
+  Run service, job and worker pool, from a value of the environment, and a
+  place to send to: an OpenTelemetry Collector as a sidecar container,
+  with Google's exporter and the Cloud Trace agent role each workload's
+  account has (section 7.2), or Google's OTLP endpoint,
+  `telemetry.googleapis.com`, whose OAuth token expires, so a static
+  `OTEL_EXPORTER_OTLP_HEADERS` cannot carry it. The target would set
+  `deployment.environment.name` and the image digest in
+  `OTEL_RESOURCE_ATTRIBUTES` too.
+- The cloudflare target's Workers build, which does not import
+  `./telemetry`.
+- Metrics and logs, as above.
+- A message span that continues the trace that enqueued it.
 
 The rule is reversible until the first release.
 

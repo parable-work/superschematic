@@ -15,7 +15,8 @@
 // fails it when the method returns an error or panics, and logs each
 // outcome. On SIGTERM or SIGINT it claims no more, lets the running methods
 // finish for 8s, cancels the rest and gives their messages back, and
-// exits 0.
+// exits 0. When the environment names an OTLP endpoint
+// (OTEL_EXPORTER_OTLP_ENDPOINT), it exports a span per message (D67).
 //
 // The API's implementation is the package at the naming file's
 // [implementation_paths] go template (section 8.5): example.com/schemas/implementation/shop-orders
@@ -32,6 +33,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/parable-work/superschematic/runtime/http/go/serviceauth"
 	"github.com/parable-work/superschematic/runtime/http/go/stackconfig"
+	"github.com/parable-work/superschematic/runtime/http/go/telemetry"
 	"github.com/parable-work/superschematic/runtime/http/go/worker"
 	"go.uber.org/zap"
 
@@ -63,6 +65,13 @@ func main() {
 func run(logger *zap.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
+
+	// Trace export, on when the environment names an OTLP endpoint (D67).
+	stopTelemetry, err := telemetry.Start(ctx, telemetry.Defaults{Service: "shop-orders-fulfil-orders", Stack: "shop-stack", Kind: "worker", Logger: logger})
+	if err != nil {
+		return fmt.Errorf("telemetry: %w", err)
+	}
+	defer stopTelemetry()
 
 	shopOrdersConfig, err := shoporders.LoadEnvConfig()
 	if err != nil {
@@ -163,10 +172,13 @@ func connect(ctx context.Context, field string, db stackconfig.Database) (*pgxpo
 // credential the edge's connector chose, and forwards the end user of the
 // request on each call's context (docs/stack-model.md, sections 9.4 and
 // 9.6): a worker serves no request, so it forwards none.
+// With trace export on, each call is a client span that carries its trace
+// context (D67).
 func newShopApiClient(endpoint stackconfig.Service) (*shopapisdk.ShopApiSDK, error) {
 	cfg := shopapisdk.SDKConfig{
-		BaseURL: endpoint.URL,
-		Auth:    &shopapisdk.AuthConfig{GetToken: serviceauth.ForwardedToken},
+		BaseURL:   endpoint.URL,
+		Auth:      &shopapisdk.AuthConfig{GetToken: serviceauth.ForwardedToken},
+		Transport: telemetry.Transport(nil),
 	}
 	token, headers, err := serviceCredential(endpoint)
 	if err != nil {

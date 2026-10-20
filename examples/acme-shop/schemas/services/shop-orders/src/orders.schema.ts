@@ -23,7 +23,7 @@ import { Order, OrderLine, OrderStatus, Product, Review, ShippingAddress } from 
 // A product as the order pages see it: a line of an order, a review and a
 // product's page refer to it by its id, and name it by its name.
 @source(Product)
-@display({ noun: "Product", plural: "Products", titleField: "name", summaryFields: ["name", "sku", "priceCents", "inStock"] })
+@display({ noun: "Product", plural: "Products", titleField: "name", icon: "package", summaryFields: ["name", "sku", "priceCents", "inStock"] })
 export abstract class ProductView {
   id: Identity.UUID;
   sku: Identity.Slug;
@@ -46,7 +46,7 @@ export abstract class OrderLineView {
 
 // An order as a caller sees it.
 @source(Order)
-@display({ noun: "Order", plural: "Orders", summaryFields: ["id", "placedAt", "status", "totalCents"] })
+@display({ noun: "Order", plural: "Orders", icon: "receipt", summaryFields: ["id", "placedAt", "status", "totalCents"] })
 export abstract class OrderView {
   id: Identity.UUID;
   status: OrderStatus;
@@ -91,6 +91,9 @@ export abstract class ReviewView {
 export abstract class WriteReviewInput {
   rating: Validate<number, { min: 1; max: 5 }>;
   title: Validate<string, { minLength: 1; maxLength: 120 }>;
+  // Several lines: its maxLength alone would make it a textarea, and the
+  // hint says so whatever the bound.
+  @display({ multiline: true })
   body: Validate<string, { maxLength: 5000 }>;
 }
 
