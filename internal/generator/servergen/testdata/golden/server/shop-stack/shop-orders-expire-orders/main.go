@@ -10,7 +10,9 @@
 // does, calls the implementation's NewJobs, and runs the job's method once,
 // with a context that SIGTERM or SIGINT cancels. It logs the run's end and,
 // when the job fails, exits 1, so the platform records the run as failed and
-// runs it again if the job's retries allow.
+// runs it again if the job's retries allow. When the environment names an
+// OTLP endpoint (OTEL_EXPORTER_OTLP_ENDPOINT), it exports a span of the run,
+// flushed before it exits (D67).
 //
 // The API's implementation is the package at the naming file's
 // [implementation_paths] go template (section 8.5): example.com/schemas/implementation/shop-orders
@@ -27,6 +29,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/parable-work/superschematic/runtime/http/go/serviceauth"
 	"github.com/parable-work/superschematic/runtime/http/go/stackconfig"
+	"github.com/parable-work/superschematic/runtime/http/go/telemetry"
 	"go.uber.org/zap"
 
 	shoporders "example.com/schemas/api/shop-orders"
@@ -60,6 +63,13 @@ func main() {
 func run(logger *zap.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
+
+	// Trace export, on when the environment names an OTLP endpoint (D67).
+	stopTelemetry, err := telemetry.Start(ctx, telemetry.Defaults{Service: "shop-orders-expire-orders", Stack: "shop-stack", Kind: "job", Logger: logger})
+	if err != nil {
+		return fmt.Errorf("telemetry: %w", err)
+	}
+	defer stopTelemetry()
 
 	shopOrdersConfig, err := shoporders.LoadEnvConfig()
 	if err != nil {
@@ -105,7 +115,7 @@ func run(logger *zap.Logger) error {
 		return fmt.Errorf("jobs of shop-orders: %w", err)
 	}
 	logger.Info("job started", zap.String("api", "shop-orders"), zap.String("class", "ExpireOrders"))
-	return jobs.ExpireOrders(ctx)
+	return telemetry.Job(ctx, "ExpireOrders", jobs.ExpireOrders)
 }
 
 // connect builds the pool of the database field named field, which the
@@ -129,10 +139,13 @@ func connect(ctx context.Context, field string, db stackconfig.Database) (*pgxpo
 // credential the edge's connector chose, and forwards the end user of the
 // request on each call's context (docs/stack-model.md, sections 9.4 and
 // 9.6): a job serves no request, so it forwards none.
+// With trace export on, each call is a client span that carries its trace
+// context (D67).
 func newShopApiClient(endpoint stackconfig.Service) (*shopapisdk.ShopApiSDK, error) {
 	cfg := shopapisdk.SDKConfig{
-		BaseURL: endpoint.URL,
-		Auth:    &shopapisdk.AuthConfig{GetToken: serviceauth.ForwardedToken},
+		BaseURL:   endpoint.URL,
+		Auth:      &shopapisdk.AuthConfig{GetToken: serviceauth.ForwardedToken},
+		Transport: telemetry.Transport(nil),
 	}
 	token, headers, err := serviceCredential(endpoint)
 	if err != nil {

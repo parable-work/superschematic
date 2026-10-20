@@ -10,6 +10,12 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "@opentelemetry/api": "1.9.1",
+    "@opentelemetry/context-async-hooks": "2.12.0",
+    "@opentelemetry/core": "2.12.0",
+    "@opentelemetry/exporter-trace-otlp-proto": "0.223.0",
+    "@opentelemetry/resources": "2.12.0",
+    "@opentelemetry/sdk-trace": "2.12.0",
     "@schemas/users-db-types": "workspace:*",
     "@schemas/users-ts-api-api": "workspace:*",
     "@schemas/users-ts-api-implementation": "workspace:*",

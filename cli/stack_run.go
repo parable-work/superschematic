@@ -106,11 +106,16 @@ func runLocalJob(ctx context.Context, cmd *cobra.Command, c *deployContext, para
 	if s, ok := spec.Provisioner.(outputSetter); ok {
 		s.SetOutput(cmd.OutOrStdout())
 	}
+	buildEnv, err := releaseBuildEnv(ctx, p.names, env, cmd.OutOrStdout())
+	if err != nil {
+		return err
+	}
 	return runner.RunJob(ctx, registry.ProvisionRequest{
 		Environment: env,
 		Parameters:  params,
 		Dir:         c.dir,
 		OutputRoot:  p.outputRoot,
 		Backend:     local.StateBackend(local.StateDir(p.schemasRoot, env.Stack, env.Environment)),
+		BuildEnv:    buildEnv,
 	}, job)
 }

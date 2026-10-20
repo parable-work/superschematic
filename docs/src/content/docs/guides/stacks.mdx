@@ -30,7 +30,8 @@ balancer and DNS resources that the Pulumi provisioner applies.
 | the Stack kind and `@superschematic/stack`; every build resolves each environment to `environment.json` | |
 | [`stack init`](#start-a-stack): a Stack service over the tree's APIs and sites, `Dev` and a gcp environment, the target's types, `outputs.ci` and the ignore rules | a stack written in YAML or JSON; an environment on a target other than gcp |
 | `calls` in an API's config, and a build ordered by output | |
-| Go, TypeScript and Rust: derived config fields in `EnvConfig`, a typed `Deps`, the implementation scaffold, and each server's entrypoint and Dockerfile, which reaches Cloud SQL with IAM database authentication where an environment places its database there | OpenTelemetry export |
+| Go, TypeScript and Rust: derived config fields in `EnvConfig`, a typed `Deps`, the implementation scaffold, and each server's entrypoint and Dockerfile, which reaches Cloud SQL with IAM database authentication where an environment places its database there | |
+| [traces](/superschematic/guides/traces/): each server, job and worker exports its spans over OTLP when OpenTelemetry's variables name a collector, under `stack dev` from your shell | export on gcp; metrics and logs |
 | the core's `local` target and `stack dev` | restarting a server that exits; key rotation |
 | the gcp target, with `stack bootstrap`, `secrets set`, `build`, `plan`, `deploy`, `destroy` and `outputs`; image builds on Cloud Build; each migration phase as a Cloud Run job that also grants the servers their privileges | a deploy lock beyond the provisioner's and the runner's |
 | the Pulumi provisioner and the typed bindings generator | |
@@ -939,6 +940,16 @@ says how to install it). It then:
 Ctrl-C stops the servers, callers first, and the containers, which keep
 their data for the next run; `--remove-data` removes them instead.
 
+A Go server, job or worker links superscalar's static archive through
+cgo. In a project whose naming file names no superscalar checkout
+([`[paths] scalar_go`](/superschematic/reference/naming/#pathsscalar_go)),
+a release of superschematic fetches the static archives it ships for your
+machine before the Go builds, checks them against the digest it names,
+keeps them in your cache directory, and builds with `CGO_LDFLAGS`
+pointing at them, after any you set; `stack run` does the same.
+`eval "$(superschematic env)"` sets the same `CGO_LDFLAGS` for a `go
+build` you run yourself ([`env`](/superschematic/reference/cli/#env-variable)).
+
 Each checkout of the repository runs an environment with containers and
 ports of its own, so two worktrees run `stack dev` on one stack at once.
 The containers are named after the stack, the environment and the
@@ -972,6 +983,14 @@ pairs too; no secret or private key reaches the output root or
 two listeners on one port. The
 [CLI reference](/superschematic/reference/cli/#stack-dev-stack-service-dir)
 lists the flags.
+
+A process gets nothing else of your shell's environment but its
+OpenTelemetry variables, `OTEL_SERVICE_NAME` aside. Export a collector's
+address, `OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318`, before
+`stack dev`, and every server, job and worker sends it its traces;
+without it, none starts an exporter.
+[Traces](/superschematic/guides/traces/) shows a collector to run and what
+each deployable sends.
 
 ## What environment.json holds
 
@@ -1200,7 +1219,9 @@ in every Go module it generates, to its own release. A Go stage links the
 server, and the image runs it on distroless `cc` as a non-root user. A
 server whose modules lie outside the repository root gets no Dockerfile,
 as does one without `[paths] scalar_go` built by a superschematic built
-from a checkout, which ships no archives; the build says why.
+from a checkout, which ships no archives; the build says why. Outside an
+image, `stack dev` and `superschematic env` fetch the same archives for
+your machine ([Run it locally](#run-it-locally)).
 
 ## Deploy to Google Cloud
 
