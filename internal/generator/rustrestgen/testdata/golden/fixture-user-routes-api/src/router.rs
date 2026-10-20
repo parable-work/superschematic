@@ -38,6 +38,10 @@ pub struct RouterState {
 /// limit, the body limit, the permission check of a route that needs a
 /// caller, then the timeout around the handler.
 ///
+/// A @rateLimit route's limiter is its operation's in a `RateLimits`
+/// registry (D44, amended): `build_router` makes one of its own, and
+/// `build_router_with` takes `options.rate_limits`.
+///
 /// The caller is the user whose session the request carries, as
 /// `implementations.authenticator` reads it (D50), and the router answers
 /// the CORS of the identity config's trusted origins. The user model's
@@ -52,8 +56,12 @@ pub fn build_router(implementations: Implementations) -> Router {
 /// `GET /api/openapi.json` with its RapiDoc page at `GET /api/docs` unless
 /// `options.serve_openapi` is off, stating `options.openapi_version` and
 /// `options.openapi_base_url` as the generated Go server states its
-/// `Config`'s.
+/// `Config`'s. The @rateLimit routes take their operations'
+/// limiters from `options.rate_limits`, so the routers built with one
+/// registry, or a router and a Topcoat app's procedures and pages, count a
+/// client against one budget.
 pub fn build_router_with(implementations: Implementations, options: RouterOptions) -> Router {
+    let limits = options.rate_limits.clone();
     let identity_service = Arc::clone(implementations.authenticator.service());
     let authenticator: Arc<dyn Authenticator> = implementations.authenticator.clone();
     let state = Arc::new(RouterState { implementations });
@@ -67,7 +75,7 @@ pub fn build_router_with(implementations: Implementations, options: RouterOption
         .apply(identity_handler(&identity_service, identity::OP_CAPABILITIES));
     router = router.route("/api/auth/capabilities", route);
     let route = RouteControls::new()
-        .rate_limit(10)
+        .rate_limiter(limits.of(&crate::operations::ACCOUNT_LOGIN))
         .apply(identity_handler(&identity_service, identity::OP_LOGIN));
     router = router.route("/api/auth/login", route);
     let route = RouteControls::new()
@@ -79,12 +87,12 @@ pub fn build_router_with(implementations: Implementations, options: RouterOption
         .apply(identity_handler(&identity_service, identity::OP_ME));
     router = router.route("/api/auth/me", route);
     let route = RouteControls::new()
-        .rate_limit(10)
+        .rate_limiter(limits.of(&crate::operations::ACCOUNT_CHANGE_PASSWORD))
         .authorize(Arc::clone(&authenticator), &[])
         .apply(identity_handler(&identity_service, identity::OP_CHANGE_PASSWORD));
     router = router.route("/api/auth/password", route);
     let route = RouteControls::new()
-        .rate_limit(5)
+        .rate_limiter(limits.of(&crate::operations::ACCOUNT_REGISTER))
         .apply(identity_handler(&identity_service, identity::OP_REGISTER));
     router = router.route("/api/auth/register", route);
     let route = RouteControls::new()

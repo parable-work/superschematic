@@ -53,6 +53,10 @@ pub struct RouterState {
 /// A route's controls run in the order the Go server runs them: the rate
 /// limit, the body limit, the permission check of a route that needs a
 /// caller, then the timeout around the handler.
+///
+/// A @rateLimit route's limiter is its operation's in a `RateLimits`
+/// registry (D44, amended): `build_router` makes one of its own, and
+/// `build_router_with` takes `options.rate_limits`.
 pub fn build_router(implementations: Implementations) -> Router {
     build_router_with(implementations, RouterOptions::default())
 }
@@ -61,7 +65,10 @@ pub fn build_router(implementations: Implementations) -> Router {
 /// `GET /api/openapi.json` with its RapiDoc page at `GET /api/docs` unless
 /// `options.serve_openapi` is off, stating `options.openapi_version` and
 /// `options.openapi_base_url` as the generated Go server states its
-/// `Config`'s.
+/// `Config`'s. The @rateLimit routes take their operations'
+/// limiters from `options.rate_limits`, so the routers built with one
+/// registry, or a router and a Topcoat app's procedures and pages, count a
+/// client against one budget.
 pub fn build_router_with(implementations: Implementations, options: RouterOptions) -> Router {
     mount(implementations, options, None)
 }
@@ -88,6 +95,7 @@ fn mount(
     options: RouterOptions,
     manual_routes: Option<Arc<dyn ManualRoutes>>,
 ) -> Router {
+    let limits = options.rate_limits.clone();
     let state = Arc::new(RouterState { implementations });
     let mut router: Router<Arc<RouterState>> = Router::new();
     let route = RouteControls::new()
@@ -95,7 +103,7 @@ fn mount(
         .apply(get(handle_session_current_tenant));
     router = router.route("/api/auth/me", route);
     let route = RouteControls::new()
-        .rate_limit(60)
+        .rate_limiter(limits.of(&crate::operations::TENANT_LIST_TENANTS))
         .body_limit_megabytes(1)
         .authorize(Arc::clone(&state.implementations.authenticator), &["tenants.read"])
         .apply(get(handle_tenant_list_tenants));
@@ -105,7 +113,7 @@ fn mount(
         .apply(post(handle_tenant_create_tenant));
     router = router.route("/api/tenants", route);
     let route = RouteControls::new()
-        .rate_limit(60)
+        .rate_limiter(limits.of(&crate::operations::TENANT_GET_TENANT))
         .body_limit_megabytes(1)
         .authorize(Arc::clone(&state.implementations.authenticator), &["tenants.read"])
         .timeout_seconds(5)

@@ -5,7 +5,8 @@
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
 
-import type { Engine, ScheduleStatus, SqlWriter } from '../dist/index.js';
+import type { Engine, ScheduleStatus } from '../dist/index.js';
+import type { SqlWriter } from '../dist/testing/index.js';
 import { alice, cleanup, drivers } from './helpers.ts';
 import {
   ledger,

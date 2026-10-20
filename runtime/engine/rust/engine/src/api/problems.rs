@@ -78,6 +78,11 @@ impl Problem {
         };
         let mut problem =
             Problem::new(refusal.status(), refusal.message(), refusal.code().as_str());
+        // A busy storage clears once the writer ahead lets go of its lock:
+        // a client tries again after a moment.
+        if refusal.code() == crate::errors::EngineErrorCode::Busy {
+            problem = problem.with_header("retry-after", "1");
+        }
         let details = match refusal.kind() {
             EngineErrorKind::BehaviorVeto { .. }
             | EngineErrorKind::SchemaDocument { .. }
@@ -199,5 +204,37 @@ pub fn default_detail(code: &str) -> &'static str {
         "gateway_timeout" => "Gateway Timeout",
         "not_found" => "Not Found",
         _ => "Request failed",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::errors::{EngineError, EngineErrorCode};
+
+    #[test]
+    fn a_busy_storage_answers_503_with_a_retry_after_and_a_lost_connection_without() {
+        let busy = Problem::of(&Error::from(superschematic_engine_storage::Error::Busy {
+            code: None,
+            message: "held".into(),
+        }));
+        assert_eq!(busy.status, 503);
+        assert_eq!(busy.code.as_deref(), Some("busy"));
+        assert_eq!(busy.headers, [("retry-after".to_owned(), "1".to_owned())]);
+        let lost = Problem::of(&Error::from(
+            superschematic_engine_storage::Error::Connection {
+                message: "gone".into(),
+            },
+        ));
+        assert_eq!(
+            (lost.status, lost.code.as_deref()),
+            (503, Some("unavailable"))
+        );
+        assert!(lost.headers.is_empty());
+        let other = Problem::of(&Error::Engine(EngineError::new(
+            EngineErrorCode::Unavailable,
+            "a version this engine cannot run",
+        )));
+        assert!(other.headers.is_empty());
     }
 }

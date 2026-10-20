@@ -10,9 +10,10 @@
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
 
-import { SchemaDocumentError, defineBehavior, type Engine, type EngineEvent, type EngineOptions, type OperationChange } from '../dist/index.js';
+import { SchemaDocumentError, type Engine, type EngineEvent, type OperationChange } from '../dist/index.js';
+import { defineBehavior } from '../dist/testing/index.js';
 import { openMetaSchema } from './behavior-fixtures.ts';
-import { alice, cleanup, drivers, openTestEngine, schemaDocument, thrown } from './helpers.ts';
+import { alice, cleanup, drivers, openTestEngine, schemaDocument, thrown, type TestEngineOptions } from './helpers.ts';
 import { runnerPrincipal } from './runner-fixtures.ts';
 
 afterEach(cleanup);
@@ -140,7 +141,7 @@ function moves(engine: Engine, schema: string, id: string): Array<[unknown, numb
 }
 
 for (const driver of drivers) {
-  function open(options: Partial<EngineOptions> = {}): Engine {
+  function open(options: Partial<TestEngineOptions> = {}): Engine {
     return openTestEngine({ driver, runner: { principal: runnerPrincipal }, ...options });
   }
 

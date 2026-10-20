@@ -21,9 +21,12 @@ use superschematic_engine_workqueue::{
 use support::{alice, repository, targets};
 use workqueue_support::{job_flow, jobs_document, publish};
 
+/// A work-queue behavior's declaration as the core registers it
+/// (`internal/registry/behaviors`), whose copy the crate embeds.
 fn declaration_file(name: &str) -> Value {
     let path = repository().join(format!(
-        "runtime/engine-workqueue/typescript/src/declarations/{name}.behavior.json"
+        "internal/registry/behaviors/{}.behavior.json",
+        name.to_lowercase()
     ));
     serde_json::from_str(&std::fs::read_to_string(&path).expect("the declaration")).expect("JSON")
 }
@@ -34,7 +37,7 @@ fn declared(behavior: &impl Behavior) -> Value {
 
 #[test]
 fn its_behaviors_carry_the_core_declarations_and_register_beside_the_core_behaviors() {
-    // The TypeScript package's workQueueBehaviors, in its order.
+    // @superschematic/engine-workqueue's workQueueBehaviors, in its order.
     assert_eq!(
         NAMES,
         [

@@ -37,6 +37,11 @@ type argForm struct {
 	// asked for, `cursor` and `limit`, as the query sends them, renders no
 	// control for either, and reads them by the route's rules.
 	Paged bool
+	// ServiceOnly marks the form of an operation whose route admits only a
+	// service caller (@requireService): it has `submit_as(cx, service)`,
+	// which calls it through operations::as_service, in place of
+	// `submit(cx)` (D37, amended).
+	ServiceOnly bool
 	// Choosable reports whether a control takes the app's choices,
 	// UsesForm whether the component's view reads the form, and Body is
 	// the view.
@@ -208,6 +213,8 @@ func (s schemaSet) argForm(e registry.RustEndpoint, op *ir.FieldDef, inputs map[
 		Method:    method,
 		IDBase:    kebabCase(e.Namespace) + "-" + kebabCase(e.Name),
 		Paged:     e.Page != nil,
+		// The form of a @requireService operation submits as a service.
+		ServiceOnly: o.ServiceOnly,
 	}
 	// The input's fields and the arguments share the form's names.
 	names := map[string]string{}
@@ -304,7 +311,7 @@ func (s schemaSet) argField(arg *ir.ArgumentDef, param registry.RustParam, locat
 	case ref.IsMap || ref.IsArrayOfArrays || s.objectType(ref.Name) != nil:
 		af.jsonText()
 	case enum != nil:
-		f.Options = enumOptions(enum)
+		f.Options, f.enum = enumOptions(enum), enum
 		f.Kind, f.Control, f.Read = kindValue, "select", "text"
 		if ref.IsArray {
 			f.Kind = kindGroup

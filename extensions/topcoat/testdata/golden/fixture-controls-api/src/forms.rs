@@ -367,6 +367,15 @@ fn text(value: Option<&str>) -> Read {
     Ok(value.map(Value::from))
 }
 
+/// A number, refused when it is not one.
+fn number(value: Option<&str>) -> Read {
+    match value.map(|text| text.trim().parse::<f64>()) {
+        None => Ok(None),
+        Some(Ok(number)) if number.is_finite() => Ok(Some(Value::from(number))),
+        Some(_) => Err("must be a number"),
+    }
+}
+
 /// A single argument: its value read as the JSON a request carries,
 /// absent when none was sent, then decoded into the argument's type.
 /// `None` when refused, with the field's error.
@@ -736,5 +745,134 @@ pub async fn stock_release_reservation_args_fields(
             <p class="form-error">(message)</p>
         }
         <input type="hidden" name="id" value=(form.id.clone())>
+    })
+}
+
+/// The arguments of stock.reserveStock, each as the browser sends it. Sent by
+/// POST.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct StockReserveStockArgsForm {
+    pub id: Option<String>,
+    pub quantity: Option<String>,
+    /// The browser sent more than `MAX_PAIRS` pairs, past which the form
+    /// read none: `parse` refuses it with the form's error.
+    pub overflow: bool,
+}
+
+impl StockReserveStockArgsForm {
+    /// How a page sends the form: `<form method=(Self::METHOD)>`.
+    pub const METHOD: &'static str = "post";
+
+    /// A new form of one resource, whose path arguments, which the form holds
+    /// as hidden inputs, the page knows: each argument's declared default.
+    pub fn new(id: impl ToString) -> Self {
+        Self {
+            id: Some(id.to_string()),
+            quantity: None,
+            overflow: false,
+        }
+    }
+
+    /// The form a browser sent, from its pairs: each argument's first value and
+    /// a list's every value. `Form<StockReserveStockArgsForm>` decodes a post
+    /// this way.
+    pub fn from_pairs(pairs: impl IntoIterator<Item = (String, String)>) -> Self {
+        let posted = Posted::from_pairs(pairs);
+        Self {
+            id: posted.get("id").first(),
+            quantity: posted.get("quantity").first(),
+            overflow: posted.overflow,
+        }
+    }
+
+    /// The operation's arguments: each written as the JSON a request carries
+    /// and decoded into its type, then checked as the router checks a request's
+    /// (`Args::check`); else each control's errors, or the form's when the
+    /// browser sent more than it reads. `check` refuses the first argument that
+    /// breaks a rule.
+    pub fn parse(&self) -> Result<crate::api::StockReserveStockArgs, FormErrors> {
+        if self.overflow {
+            return Err(overflowed());
+        }
+        let mut errors = FormErrors::default();
+        let arg_id = single(&mut errors, "id", text(self.id.as_deref()));
+        let arg_quantity = single(&mut errors, "quantity", number(self.quantity.as_deref()));
+        let Some(arg_id) = arg_id else {
+            return Err(errors);
+        };
+        let Some(arg_quantity) = arg_quantity else {
+            return Err(errors);
+        };
+        let args = crate::api::StockReserveStockArgs {
+            id: arg_id,
+            quantity: arg_quantity,
+        };
+        args.check().map_err(|err| FormErrors::from_api(&err))?;
+        Ok(args)
+    }
+
+    /// Parses the form, then calls the operation in-process as `service`, a
+    /// service this process acts for
+    /// (`operations::as_service(service).stock_reserve_stock`): its route
+    /// admits only a service caller (@requireService), so the form has no
+    /// `submit` (D37, amended). Call it only where the page acts as that
+    /// service, never just because a reader sent the form: the call carries the
+    /// service's authority, and the page's caller is the end user it forwards
+    /// when the route asks for one. A refusal is the status a page answers with
+    /// and the errors it renders the form again with: 422 and `parse`'s errors,
+    /// or the route's status (401, 403, 404, 409, ...) and the operation's
+    /// errors (`Refusal::from_api`).
+    pub async fn submit_as(&self, cx: &Cx, service: &crate::api::runtime::ServiceCaller) -> Result<types::Reservation, Refusal> {
+        let args = self.parse()?;
+        operations::as_service(service).stock_reserve_stock(cx, args).await.map_err(|err| Refusal::from_api(&err))
+    }
+
+    /// Whether the component shows the errors at `path`: at an argument's
+    /// control. A path argument's are the form's own.
+    fn shows(path: &[Segment]) -> bool {
+        match path {
+            [Segment::Key(key), rest @ ..] => match key.as_str() {
+                "quantity" => rest.is_empty(),
+                _ => false,
+            },
+            _ => false,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for StockReserveStockArgsForm {
+    /// Reads the pairs a browser sends, as Topcoat's `Form` hands them, by
+    /// `from_pairs`.
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Vec::<(String, String)>::deserialize(deserializer).map(Self::from_pairs)
+    }
+}
+
+/// The controls of `StockReserveStockArgsForm`: each argument's, with its
+/// label, its value as sent, the attributes its rules give it and its errors, a
+/// path argument's a hidden input. `choices` turns a text or number control the
+/// app names into a select.
+#[component]
+pub async fn stock_reserve_stock_args_fields(
+    #[default] form: StockReserveStockArgsForm,
+    #[default] errors: FormErrors,
+    #[default] choices: Choices,
+) -> topcoat::Result<impl View> {
+    let form_errors = errors.unshown(StockReserveStockArgsForm::shows);
+    Ok(view! {
+        for message in form_errors {
+            <p class="form-error">(message)</p>
+        }
+        <input type="hidden" name="id" value=(form.id.clone())>
+        <div class="field">
+            <label for="stock-reserve-stock-quantity">"Quantity"</label>
+            match choices.of("quantity", "quantity") {
+                Some(options) => choice_select(id: "stock-reserve-stock-quantity", name: "quantity", required: true, invalid: errors.invalid("quantity"), options: choice_options(options, form.quantity.as_deref())),
+                None => <input id="stock-reserve-stock-quantity" name="quantity" type="number" required=(true) step="any" value=(form.quantity.clone()) aria-invalid=(errors.invalid("quantity"))>,
+            }
+            for message in errors.of("quantity") {
+                <p class="field-error">(message)</p>
+            }
+        </div>
     })
 }

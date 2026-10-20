@@ -307,6 +307,79 @@ fn the_http_api_is_a_call_and_a_stream_is_pulled_by_its_id() {
     }
 }
 
+// Keeps names a tool filter keeps: the tools of an Order that only read.
+struct ReadsOnly;
+
+impl superschematic_engine::ToolFilter for ReadsOnly {
+    fn keeps(&self, _: &Principal, tool: &superschematic_engine::ToolSummary, _: &str) -> bool {
+        !tool.writes
+    }
+}
+
+#[test]
+fn a_bindings_http_takes_a_body_of_bytes_and_a_mounts_filter_narrows_the_tools() {
+    for target in targets("a_bindings_http_takes_a_body_of_bytes") {
+        let engine = opened(&target);
+        let caller = json!({"principal": {"subject": "alice", "permissions": []}});
+        let reply = superschematic_engine::calls::http(
+            &engine,
+            &json!({
+                "method": "POST",
+                "prefix": "/api",
+                "path": "/api/namespaces/default/schemas/Order/instances",
+                "headers": [["content-type", "application/json"]],
+                "caller": caller,
+                "requestId": "r1",
+            }),
+            Some(br#"{"id":"o1","data":{"title":"Desk"}}"#.to_vec()),
+            None,
+        )
+        .unwrap();
+        assert_eq!(reply.status, 201);
+        assert!(reply.headers.contains(&(
+            "location".to_owned(),
+            "/api/namespaces/default/schemas/Order/instances/o1".to_owned()
+        )));
+        let body: Value = serde_json::from_slice(reply.body.as_deref().unwrap()).unwrap();
+        assert_eq!(body["data"]["id"], "o1");
+        assert!(reply.stream.is_none());
+        // The tools route and a tools call through the mount's filter.
+        let filter: Arc<dyn superschematic_engine::ToolFilter> = Arc::new(ReadsOnly);
+        let tools = superschematic_engine::calls::http(
+            &engine,
+            &json!({"method": "GET", "path": "/namespaces/default/tools", "caller": caller}),
+            None,
+            Some(Arc::clone(&filter)),
+        )
+        .unwrap();
+        let manifest: Value = serde_json::from_slice(tools.body.as_deref().unwrap()).unwrap();
+        let handles: Vec<&str> = manifest["data"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|tool| tool["mcp"]["hidden"] != Value::Bool(true))
+            .filter_map(|tool| tool["mcp"]["handle"].as_str())
+            .collect();
+        assert!(
+            handles.contains(&"order_get") && !handles.contains(&"order_create"),
+            "{handles:?}"
+        );
+        let alice = alice();
+        let refused = superschematic_engine::calls::call_with(
+            &engine,
+            "tools.call",
+            Some(&alice),
+            &[json!("order_create"), json!({"data": {"title": "Lamp"}})],
+            Some(filter.as_ref()),
+        );
+        assert_eq!(refused_code(refused), EngineErrorCode::NotFound);
+    }
+}
+
+fn refused_code(result: superschematic_engine::Result<Option<Value>>) -> EngineErrorCode {
+    refused(result).0
+}
+
 #[test]
 fn what_json_says_and_rusts_types_do_not_is_refused_in_the_typescript_engines_words() {
     for target in targets("what_json_says_and_rusts_types_do_not_is_refused") {

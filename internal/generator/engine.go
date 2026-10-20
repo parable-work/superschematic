@@ -6,11 +6,17 @@ import (
 	"path/filepath"
 
 	"github.com/parable-work/superschematic/internal/generator/enginedoc"
+	"github.com/parable-work/superschematic/internal/generator/projectengine"
+	"github.com/parable-work/superschematic/internal/generator/servergen"
 )
 
 // enginedocGenerator is the name of the core generator of a DB schema's
 // engine document (D58).
 const enginedocGenerator = "enginedoc"
+
+// projectengineGenerator is the name of the core generator of a schema's
+// project engine crate (D58).
+const projectengineGenerator = "projectengine"
 
 // engineOutputSchema is the JSON Schema of outputs.engine. The namespace's
 // own rule is enginedoc.Namespace's, which names the setting when it
@@ -111,5 +117,38 @@ func removeStaleEngineDocument(path string) error {
 			return fmt.Errorf("generator: remove the empty %s: %w", dir, err)
 		}
 	}
+	return nil
+}
+
+// generateProjectEngine writes the project's engine crate of a schema
+// whose types compose an extension's behavior into engine/rust/<schema>
+// (internal/generator/projectengine), and removes the one an earlier build
+// wrote when the schema needs none now. An extension behavior that names
+// no Rust crate, or one the project does not hold, leaves the schema with
+// no engine that can run it, and the log says so: an engine refuses it.
+func (r run) generateProjectEngine() error {
+	dir := EngineDir(r.Options.OutputRoot, LangRust, r.Config.Name)
+	crate, why, err := projectengine.Build(r.Schema, projectengine.Options{
+		SchemaName:     r.Config.Name,
+		Registry:       r.Registry,
+		Naming:         r.Options.Naming,
+		RepositoryRoot: r.Options.RepositoryRoot,
+		Paths:          r.Options.Paths,
+		Dir:            dir,
+		RustVersion:    servergen.RustVersion,
+	})
+	if err != nil {
+		return fmt.Errorf("generator: engine crate for %s: %w", r.Config.Name, err)
+	}
+	if crate == nil {
+		if why != "" {
+			r.Logf("  - engine-rust: %s\n", why)
+		}
+		return projectengine.RemoveStale(dir, r.Options.OutputRoot)
+	}
+	if err := crate.Write(dir); err != nil {
+		return fmt.Errorf("generator: engine crate for %s: %w", r.Config.Name, err)
+	}
+	r.Done("engine-rust", dir)
 	return nil
 }

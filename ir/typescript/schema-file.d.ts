@@ -149,6 +149,7 @@ export interface EnumValueDef {
   description?: string;
   name: string;
   serializedAs?: string;
+  title?: string;
 }
 
 export interface EnvValue {
@@ -174,6 +175,7 @@ export interface FieldDef {
   conflictUnit?: 'atomic' | 'keyed' | 'jsonSchema' | 'excluded';
   default?: string;
   description?: string;
+  display?: FieldDisplay;
   docs?: OperationDocs;
   encrypted?: boolean;
   extensions?: Extensions;
@@ -227,6 +229,13 @@ export interface FieldDef {
   validateUploadMaxBytes?: number;
   virtual?: boolean;
   webhook?: boolean;
+}
+
+/**
+ * How a UI renders a field's control (@display on a field).
+ */
+export interface FieldDisplay {
+  multiline?: boolean;
 }
 
 export interface FileUploadConfig {
@@ -597,11 +606,12 @@ export interface TypeDef {
 /**
  * What a UI reads to render the instances of a type (@display): what to call
  * one and many, which field is an instance's title, what a create button says,
- * which fields summarize it in a list, and the labels of its Workflow's states
- * and transitions.
+ * the glyph shown beside its name, which fields summarize it in a list, and
+ * the labels of its Workflow's states and transitions.
  */
 export interface TypeDisplay {
   createLabel?: string;
+  icon?: string;
   noun?: string;
   plural?: string;
   states?: { [key: string]: DisplayState };

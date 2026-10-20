@@ -1326,6 +1326,8 @@ async fn an_in_process_caller_is_admitted_by_the_routes_rule() {
         permissions: &["orders.audit"],
         require_ownership: false,
         manual: false,
+        rate_limit: None,
+        service: None,
     };
     assert!(AUDIT
         .admit(&authenticator, Some(principal))

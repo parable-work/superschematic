@@ -21,12 +21,7 @@ import {
   type AccessRequest,
   type Principal,
 } from '../dist/index.js';
-import { createHash } from 'node:crypto';
 
-import { uuidHyphenated } from '@superschematic/versiongraph/engine';
-import { sqliteLayout } from '@superschematic/versiongraph/sqlite';
-
-import { branches, type BranchesConfig } from '../dist/behaviors/core/branches.js';
 import { Calls, contentOf, openBranches, publish, recipeConfig, recipeDocument, type Commit, type Ref, type Tree } from './branches-fixtures.ts';
 import { alice, cleanup, clone, drivers, thrown } from './helpers.ts';
 
@@ -818,187 +813,26 @@ for (const driver of drivers) {
 }
 
 
-// What the behavior takes from its dependencies as it is: the layout its
-// first migration creates, and the version-5 UUIDs of actors and roots.
-describe("Branches' fixed points", () => {
-  test("the first migration's layout is pinned: a layout @superschematic/versiongraph changes needs a migration of its own", () => {
-    // Migration 1 runs sqliteLayout() as the installed adapter gives it, and
-    // a file it already created keeps what it created then. Were the
-    // adapter's statements to change, a new file would get the new layout
-    // and an old one would not, so the change must come as migration 2,
-    // which brings an old file up to it; then pin the new statements here.
-    const statements = sqliteLayout((local) => `bhv_branches__${local}`);
-    assert.deepEqual(
-      [statements.length, createHash('sha256').update(statements.join('\n')).digest('hex')],
-      [21, 'f3583c44e0634b535f54adb1637dabed879ee18179e53327c13334a11e45f49d']
-    );
-  });
+// The hyphenated form of a UUID given in the version graph's canonical
+// form, base62.
+function uuidHyphenated(base62: string): string {
+  const digits = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
+  let n = 0n;
+  for (const c of base62) {
+    n = n * 62n + BigInt(digits.indexOf(c));
+  }
+  const hex = n.toString(16).padStart(32, '0');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
 
+// The version-5 UUIDs of actors and roots, which the package exports for a
+// caller that names them. What Branches takes of the version graph as it
+// is, the layout its first migration creates and the descriptor its config
+// builds, is the Rust engine's (runtime/engine/rust/behaviors, its tests).
+describe("Branches' fixed points", () => {
   test("uuidV5 is RFC 9562's version-5 UUID, in its canonical form", () => {
     // RFC 9562, Appendix A.4: the DNS namespace and www.example.com.
     assert.equal(uuidHyphenated(uuidV5('6ba7b810-9dad-11d1-80b4-00c04fd430c8', 'www.example.com')), '2ed6657d-e927-568b-95e1-2665a8aea6a2');
     assert.equal(uuidHyphenated(uuidV5(ACTOR_NAMESPACE, 'alice')).charAt(14), '5');
-  });
-});
-
-// parseConfig on its own, over a ConfigTarget whose types the test gives:
-// the descriptor the graph runs with, and each field's value class.
-describe("Branches' descriptor", () => {
-  type Field = { key: string; type: string; kind: 'primitive' | 'scalar' | 'enum' | 'type'; jsonType?: string; depth: 0 | 1 | 2; optional: boolean };
-  const field = (key: string, type: string, kind: Field['kind'], extra: Partial<Field> = {}): Field => ({ key, type, kind, depth: 0, optional: true, ...extra });
-  const types: Record<string, { name: string; fields: Field[] }> = {
-    Step: {
-      name: 'Step',
-      fields: [
-        field('instruction', 'string', 'primitive', { optional: false }),
-        field('position', 'Int', 'primitive', { optional: false }),
-        field('timings', 'Generic.JSON', 'scalar', { jsonType: 'any' }),
-        field('notes', 'string', 'primitive'),
-      ],
-    },
-    Ingredient: { name: 'Ingredient', fields: [field('stepKey', 'Identity.UUID', 'scalar', { jsonType: 'string' })] },
-    Every: {
-      name: 'Every',
-      fields: [
-        field('s', 'string', 'primitive'),
-        field('S', 'String', 'primitive'),
-        field('id2', 'ID', 'primitive'),
-        field('n', 'Int', 'primitive'),
-        field('f', 'number', 'primitive'),
-        field('F', 'Float', 'primitive'),
-        field('b', 'boolean', 'primitive'),
-        field('B', 'Boolean', 'primitive'),
-        field('e', 'Unit', 'enum'),
-        field('t', 'Step', 'type'),
-        field('tl', 'Step', 'type', { depth: 1 }),
-        field('l', 'string', 'primitive', { depth: 1 }),
-        field('ll', 'Int', 'primitive', { depth: 2 }),
-        field('u', 'Identity.UUID', 'scalar', { jsonType: 'object' }),
-        field('dt', 'Temporal.DateTime', 'scalar', { jsonType: 'string' }),
-        field('d', 'Temporal.Date', 'scalar', { jsonType: 'string' }),
-        field('tm', 'Temporal.Time', 'scalar', { jsonType: 'string' }),
-        field('dur', 'Temporal.Duration', 'scalar', { jsonType: 'string' }),
-        field('i64', 'Generic.Int64', 'scalar', { jsonType: 'integer' }),
-        field('p', 'Generic.Probability', 'scalar', { jsonType: 'number' }),
-        field('em', 'Contact.Email', 'scalar', { jsonType: 'string', depth: 1 }),
-        field('grams', 'Grams', 'scalar', { jsonType: 'integer' }),
-        field('ratio', 'Ratio', 'scalar', { jsonType: 'number' }),
-        field('flag', 'Flag', 'scalar', { jsonType: 'boolean' }),
-        field('code', 'Code', 'scalar', { jsonType: 'string' }),
-        field('blob', 'Blob', 'scalar', { jsonType: 'object' }),
-        field('arr', 'Arr', 'scalar', { jsonType: 'array' }),
-        field('anything', 'Anything', 'scalar', { jsonType: 'any' }),
-      ],
-    },
-    Where: { name: 'Where', fields: [field('at', 'Geo.Location', 'scalar', { jsonType: 'object' })] },
-  };
-  const target = {
-    schema: 'Recipe',
-    type: 'Recipe',
-    fields: ['title'],
-    fieldSchemas: {},
-    types: { names: Object.keys(types).sort(), get: (name: string) => types[name] },
-    behaviors: ['Branches'],
-    configs: {},
-  };
-  const parse = (config: unknown) => (branches.parseConfig as (config: unknown, target: unknown) => BranchesConfig)(config, target);
-
-  test('each kind has the fixed role and audit columns beside its fields, updated_by as its author and actor, and images that exclude nothing', () => {
-    const parsed = parse({
-      kinds: {
-        step: { type: 'Step', order: 'position', units: { timings: 'keyed', notes: 'excluded' }, retentionDays: 30 },
-        ingredient: { type: 'Ingredient', parent: { key: 'stepKey', of: 'step' } },
-        cover: { type: 'Ingredient', singleton: true },
-      },
-    });
-    assert.deepEqual([parsed.primary, parsed.snapshotEvery, parsed.sweep], ['main', 64, undefined]);
-    const descriptor = JSON.parse(parsed.descriptor) as { kinds: Array<Record<string, unknown>> } & Record<string, unknown>;
-    assert.deepEqual(
-      { ...descriptor, kinds: descriptor.kinds.map((kind) => kind.kind) },
-      {
-        version: 3,
-        graph: 'Recipe',
-        root: { table: 'Recipe', key: 'id' },
-        refTable: 'ref',
-        commitTable: 'commit',
-        patchTable: 'patch',
-        releaseTable: 'release',
-        snapshotTable: 'snapshot_entry',
-        kinds: ['cover', 'ingredient', 'step'],
-      }
-    );
-    const roles = {
-      id: 'uuid',
-      entity_key: 'uuid',
-      ref_id: 'uuid',
-      root_id: 'uuid',
-      deleted_on_ref: 'boolean',
-      _version: 'integer',
-      created_at: 'dateTime',
-      created_by: 'uuid',
-      updated_at: 'dateTime',
-      updated_by: 'uuid',
-    };
-    assert.deepEqual(descriptor.kinds[2], {
-      kind: 'step',
-      table: 'step',
-      historyTable: 'step_history',
-      key: 'entity_key',
-      id: 'id',
-      ref: 'ref_id',
-      root: 'root_id',
-      tombstone: 'deleted_on_ref',
-      version: '_version',
-      author: 'updated_by',
-      order: 'position',
-      units: { timings: 'keyed' },
-      excluded: ['created_at', 'created_by', 'notes', 'root_id', 'updated_at'],
-      history: { retentionDays: 30, exclude: [], actor: 'updated_by' },
-      columns: { ...roles, instruction: 'string', position: 'integer', timings: 'json', notes: 'string' },
-    });
-    assert.deepEqual(
-      [descriptor.kinds[0].singleton, descriptor.kinds[1].parent, descriptor.kinds[1].history],
-      [true, { key: 'stepKey', kind: 'step' }, { exclude: [], actor: 'updated_by' }]
-    );
-    assert.deepEqual(parse({ kinds: { step: { type: 'Step' } }, primary: 'trunk', snapshotEvery: 8, sweep: { intervalMs: 1000 } }).primary, 'trunk');
-  });
-
-  test("a field's value class follows graphdesc's rule: a primitive's by its name, an enum's, a type's json, a catalog scalar's the catalog's, a document scalar's by its JSON type, and [] per list level", () => {
-    const descriptor = JSON.parse(parse({ kinds: { every: { type: 'Every' } } }).descriptor) as { kinds: Array<{ columns: Record<string, string> }> };
-    const { columns } = descriptor.kinds[0];
-    assert.deepEqual(
-      Object.fromEntries(types.Every.fields.map(({ key }) => [key, columns[key]])),
-      {
-        s: 'string',
-        S: 'string',
-        id2: 'string',
-        n: 'integer',
-        f: 'number',
-        F: 'number',
-        b: 'boolean',
-        B: 'boolean',
-        e: 'enum',
-        t: 'json',
-        tl: 'json[]',
-        l: 'string[]',
-        ll: 'integer[][]',
-        u: 'uuid',
-        dt: 'dateTime',
-        d: 'date',
-        tm: 'time',
-        dur: 'duration',
-        i64: 'integer',
-        p: 'number',
-        em: 'string[]',
-        grams: 'integer',
-        ratio: 'number',
-        flag: 'boolean',
-        code: 'string',
-        blob: 'json',
-        arr: 'json',
-        anything: 'json',
-      }
-    );
-    assert.throws(() => parse({ kinds: { where: { type: 'Where' } } }), /kind where: Where\.at is of Geo\.Location, which has no value class a graph's row can hold/);
   });
 });

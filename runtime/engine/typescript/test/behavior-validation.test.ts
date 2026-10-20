@@ -14,12 +14,11 @@ import {
   InstanceValidationError,
   PreconditionsError,
   SchemaDocumentError,
-  defineBehavior,
   type Engine,
-  type FrozenJSON,
   type Principal,
   type ValidationIssue,
 } from '../dist/index.js';
+import { defineBehavior, type FrozenJSON } from '../dist/testing/index.js';
 import { hold, holdRequests, openMetaSchema } from './behavior-fixtures.ts';
 import { alice, cleanup, drivers, openTestEngine, schemaDocument, thrown } from './helpers.ts';
 

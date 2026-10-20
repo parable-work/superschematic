@@ -12,14 +12,12 @@ import {
   IncompatibleChangeError,
   SchemaDocumentError,
   UniqueConflictError,
-  defineBehavior,
   type AccessPolicy,
   type Engine,
-  type EngineOptions,
-  type FrozenJSON,
 } from '../dist/index.js';
+import { defineBehavior, type FrozenJSON } from '../dist/testing/index.js';
 import { openMetaSchema } from './behavior-fixtures.ts';
-import { alice, cleanup, drivers, openTestEngine, schemaDocument, thrown, type Field } from './helpers.ts';
+import { alice, cleanup, drivers, openTestEngine, schemaDocument, thrown, type Field, type TestEngineOptions } from './helpers.ts';
 
 afterEach(cleanup);
 
@@ -82,7 +80,7 @@ function publish(engine: Engine, document: Record<string, unknown>, namespace?: 
   engine.schemas.publish(alice, String(document.name), { namespace });
 }
 
-function open(options: Partial<EngineOptions> = {}): Engine {
+function open(options: Partial<TestEngineOptions> = {}): Engine {
   return openTestEngine({ metaSchema: openMetaSchema(), behaviors: [slugger], ...options });
 }
 

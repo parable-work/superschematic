@@ -595,6 +595,11 @@ mod tests {
             json!({"summaryFields": ["title", "title"]}),
             json!({"summaryFields": []}),
             json!({"colour": "red"}),
+            json!({"icon": " "}),
+            json!({"icon": "ticket "}),
+            json!({"icon": "a\rb"}),
+            json!({"icon": "\u{feff}ticket"}),
+            json!({"icon": "a b"}),
         ] {
             let issues = refusals(&tickets(|ticket| ticket["display"] = display.clone()));
             assert!(!issues.is_empty(), "{display}");

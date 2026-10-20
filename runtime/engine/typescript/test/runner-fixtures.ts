@@ -4,20 +4,10 @@
 // interval follows the config of each schema that composes it. probe is a
 // recorder hook: a scenario in which a behavior runs a closure the test put
 // there is one only this engine replays.
-import {
-  allowAll,
-  defineBehavior,
-  type BehaviorDeclaration,
-  type Engine,
-  type EngineEvent,
-  type EngineOptions,
-  type FrozenJSON,
-  type Principal,
-  type ReactionContext,
-  type ScheduleContext,
-} from '../dist/index.js';
+import { allowAll, type BehaviorDeclaration, type Engine, type EngineEvent, type Principal } from '../dist/index.js';
+import { defineBehavior, type FrozenJSON, type ReactionContext, type ScheduleContext } from '../dist/testing/index.js';
 import { openMetaSchema } from './behavior-fixtures.ts';
-import { alice, freshPath, openEngine, schemaDocument, track } from './helpers.ts';
+import { alice, freshPath, openEngine, schemaDocument, track, type TestEngineOptions } from './helpers.ts';
 import { testHooks } from './recorder.ts';
 
 /** The principal the runner acts as in these tests. */
@@ -215,7 +205,7 @@ export function testClock(start = 1_000_000): TestClock {
 }
 
 /** openRunnerEngine opens an engine with test.Ledger, a test clock and the runner principal; the test cleans it up. */
-export function openRunnerEngine(options: Partial<EngineOptions> = {}): Engine {
+export function openRunnerEngine(options: Partial<TestEngineOptions> = {}): Engine {
   return track(
     openEngine({
       path: freshPath(),

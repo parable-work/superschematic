@@ -17,14 +17,24 @@ import {
   IncompatibleChangeError,
   OperationParamsError,
   SchemaDocumentError,
-  Storage,
   allowAll,
-  appliedMigrations,
   type Engine,
-  type EngineOptions,
   type SubscriptionStatus,
 } from '../dist/index.js';
-import { alice, cleanup, drivers, freshPath, openEngine, openTestEngine, schemaDocument, thrown, track } from './helpers.ts';
+import { openConnection } from '../dist/native/sqlite.js';
+import {
+  appliedMigrations,
+  alice,
+  cleanup,
+  drivers,
+  freshPath,
+  openEngine,
+  openTestEngine,
+  schemaDocument,
+  thrown,
+  track,
+  type TestEngineOptions,
+} from './helpers.ts';
 import { runnerPrincipal } from './runner-fixtures.ts';
 
 afterEach(cleanup);
@@ -69,13 +79,13 @@ const flow: BehaviorRef = {
 };
 
 for (const driver of drivers) {
-  function open(options: Partial<EngineOptions> = {}): Engine {
+  function open(options: Partial<TestEngineOptions> = {}): Engine {
     return openTestEngine({ driver, ...options });
   }
 
   // People p1 to p4; specs s1 and s2, which keep revisions; tasks t1 to t3,
   // with no link; reviews are published, with none.
-  function world(options: Partial<EngineOptions> = {}): Engine {
+  function world(options: Partial<TestEngineOptions> = {}): Engine {
     const engine = open(options);
     publish(engine, schema('Person', []));
     publish(engine, schema('Spec', [{ name: 'Revisions' }]));
@@ -400,7 +410,7 @@ for (const driver of drivers) {
 
       // The table as Links' migrations 1 and 2 left it, with the rows the
       // engine wrote, and the ledger without migration 3.
-      const storage = Storage.open(path, { driver });
+      const storage = openConnection(path);
       const columns = 'row, namespace, schema, id, name, target_schema, target_id, revision, created_by, created_at, release';
       const rows = storage.all(`SELECT ${columns} FROM bhv_links__links ORDER BY row`);
       storage.exec('DROP TABLE bhv_links__links');

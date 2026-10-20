@@ -12,9 +12,9 @@
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
 
-import { SchemaDocumentError, type Engine, type EngineEvent, type EngineOptions, type SubscriptionStatus } from '../dist/index.js';
+import { SchemaDocumentError, type Engine, type EngineEvent, type SubscriptionStatus } from '../dist/index.js';
 import { Calls, recipeDocument, type Commit } from './branches-fixtures.ts';
-import { alice, cleanup, drivers, openTestEngine, schemaDocument, thrown } from './helpers.ts';
+import { alice, cleanup, drivers, openTestEngine, schemaDocument, thrown, type TestEngineOptions } from './helpers.ts';
 import { runnerPrincipal } from './runner-fixtures.ts';
 
 afterEach(cleanup);
@@ -111,12 +111,12 @@ function subscriptions(engine: Engine): SubscriptionStatus[] {
 }
 
 for (const driver of drivers) {
-  function open(options: Partial<EngineOptions> = {}): Engine {
+  function open(options: Partial<TestEngineOptions> = {}): Engine {
     return openTestEngine({ driver, runner: { principal: runnerPrincipal }, ...options });
   }
 
   // Step links to its Run; Run r1 has steps s1 and s2.
-  function runs(rules: unknown[] = [completeWhenPassed, failWhenOneFailed], options: Partial<EngineOptions> = {}): Engine {
+  function runs(rules: unknown[] = [completeWhenPassed, failWhenOneFailed], options: Partial<TestEngineOptions> = {}): Engine {
     const engine = open(options);
     publish(engine, schema('Step', [stepFlow, { name: 'Links', config: { links: { run: { schema: 'Run' } } } }]));
     publish(engine, schema('Run', [runFlow, runRollups, { name: 'Reactions', config: { rules } }]));

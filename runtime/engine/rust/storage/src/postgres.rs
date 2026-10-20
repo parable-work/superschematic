@@ -73,6 +73,16 @@ pub struct PostgresOptions {
     /// while it migrates (another process migrating first) and for the
     /// tables it changes (an open read).
     pub migration_timeout: Duration,
+    /// How long the server lets one of the pool's sessions sit idle inside
+    /// a transaction before it ends the session
+    /// (`idle_in_transaction_session_timeout`), so a process that stops
+    /// mid-transaction (frozen, paused, cut off without the network
+    /// telling) holds its namespace's lock no longer than this; `None`
+    /// leaves the server's own setting. The engine's transactions are
+    /// busy with statements, so only code that waits between two of them
+    /// (a behavior's, a host's policy) meets it, and its call fails as a
+    /// lost connection.
+    pub idle_in_transaction_timeout: Option<Duration>,
 }
 
 /// The schema the engine's tables live in unless configured.
@@ -80,6 +90,9 @@ pub const DEFAULT_SCHEMA: &str = "engine";
 
 /// The most connections a Postgres storage opens unless configured.
 pub const DEFAULT_POOL_MAX: usize = 4;
+
+/// How long a session may sit idle inside a transaction unless configured.
+pub const DEFAULT_IDLE_IN_TRANSACTION_TIMEOUT: Duration = Duration::from_secs(60);
 
 impl Default for PostgresOptions {
     fn default() -> Self {
@@ -90,6 +103,7 @@ impl Default for PostgresOptions {
             listen: true,
             connect_timeout: Duration::from_secs(10),
             migration_timeout: Duration::from_secs(60),
+            idle_in_transaction_timeout: Some(DEFAULT_IDLE_IN_TRANSACTION_TIMEOUT),
         }
     }
 }
@@ -132,7 +146,14 @@ impl Db {
         // plan, which Postgres switches a prepared statement to after five
         // runs, can scan the whole table in position order instead. A
         // statement is still parsed once (Postgres 12 and later).
-        let session = format!("-c search_path={schema} -c plan_cache_mode=force_custom_plan");
+        let mut session = format!("-c search_path={schema} -c plan_cache_mode=force_custom_plan");
+        if let Some(idle) = options.idle_in_transaction_timeout {
+            let _ = write!(
+                session,
+                " -c idle_in_transaction_session_timeout={}",
+                idle.as_millis().max(1)
+            );
+        }
         let options_text = match config.get_options() {
             Some(existing) => format!("{existing} {session}"),
             None => session,
@@ -279,6 +300,10 @@ impl Backend for PostgresBackend {
 
     fn channel(&self) -> Option<&str> {
         Some(&self.channel)
+    }
+
+    fn stale_retries(&self) -> usize {
+        self.pool.max()
     }
 
     fn try_lease(&self, key: i64) -> Result<Option<crate::db::Lease>> {
@@ -726,11 +751,25 @@ fn pg_error(error: postgres::Error) -> Error {
         return match state.as_str() {
             // lock_not_available (a lock_timeout), deadlock_detected,
             // serialization_failure: another writer held what this one
-            // needed.
-            "55P03" | "40P01" | "40001" => Error::Busy {
+            // needed; query_canceled: the server's statement_timeout, most
+            // often a wait for a lock too, or an administrator's cancel.
+            "55P03" | "40P01" | "40001" | "57014" => Error::Busy {
                 code: Some(DbCode::Postgres(state)),
                 message,
             },
+            // The server ended the session: connection_exception (class
+            // 08), admin_shutdown (pg_terminate_backend, a smart or fast
+            // shutdown), crash_shutdown, cannot_connect_now (starting or
+            // in recovery), idle_session_timeout and
+            // idle_in_transaction_session_timeout. Its transaction is
+            // gone with it.
+            code if code.starts_with("08")
+                || matches!(code, "57P01" | "57P02" | "57P03" | "57P05" | "25P03") =>
+            {
+                Error::Connection {
+                    message: format!("{message} (SQLSTATE {state})"),
+                }
+            }
             "23505" => Error::Unique {
                 index: db.constraint().map(str::to_owned),
                 code: DbCode::Postgres(state),

@@ -1,52 +1,79 @@
 // Shared test setup: every test opens real SQLite files under a fresh
 // temporary directory (not :memory:, so write-ahead logging behaves as it
-// does in a deployment), and cleanup closes and removes them. With
-// ENGINE_RECORD set, the engines they open record the test's calls
-// (recorder.ts). With ENGINE_IMPL=rust they are the Rust engine, through
-// its Node-API addon (D58; scripts/engine-napi.sh builds it, and
-// scripts/rust-ratchet.mjs runs the suite so against rust-pending.txt).
+// does in a deployment), and cleanup closes and removes them. The engine is
+// the Rust engine, through its Node-API addon (D58): the test addon, which
+// scripts/engine-napi.sh --js-behaviors builds into native/, whose bridge
+// runs the behaviors the tests write in TypeScript. With ENGINE_RECORD set,
+// the engines they open record the test's calls (recorder.ts). A test that
+// loops over backends runs on SQLite, and with ENGINE_TEST_PG_URL set on
+// Postgres too, through openEngineAsync, as a TypeScript server opens the
+// engine there.
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import {
   allowAll,
-  isBun,
   openEngine as openDistEngine,
-  type DriverName,
+  openEngineAsync,
   type Engine,
   type EngineOptions,
   type InstanceFields,
   type InstanceRecord,
   type Principal,
+  type Row,
+  type SqlValue,
 } from '../dist/index.js';
-import { openNativeEngine } from '../dist/native/index.js';
 import { endCase, recordOpen, registerDirectory, type TestContextLike } from './recorder.ts';
 
 /**
- * The engine the tests open: the TypeScript engine, or with
- * ENGINE_IMPL=rust the Rust engine, behind the same API.
+ * The SQLite module a test names, as the TypeScript engine took one: node
+ * (node:sqlite) or bun (bun:sqlite). The engine has a SQLite of its own,
+ * so the suite's loop over drivers runs once, under the name the corpus's
+ * cases carry, and openEngine leaves the option out.
  */
-export const engineImpl: 'typescript' | 'rust' = implementation(process.env.ENGINE_IMPL);
+export type DriverName = 'node' | 'bun';
 
-function implementation(given: string | undefined): 'typescript' | 'rust' {
-  if (given === undefined || given === '' || given === 'typescript') {
-    return 'typescript';
-  }
-  if (given === 'rust') {
-    return 'rust';
-  }
-  throw new Error(`ENGINE_IMPL is typescript (the default) or rust, got ${given}`);
+/** What the tests open an engine with: the engine's options, and a driver name the engine does not take. */
+export type TestEngineOptions = EngineOptions & { driver?: DriverName };
+
+/** isBun reports whether the tests run on Bun. */
+export function isBun(): boolean {
+  return typeof (globalThis as { Bun?: unknown }).Bun !== 'undefined';
 }
 
-const openImpl: (options: EngineOptions) => Engine = engineImpl === 'rust' ? (options) => openNativeEngine(options) as unknown as Engine : openDistEngine;
+/** A reader of SQLite rows: engine.storage, or a connection of a test's own on the file. */
+export interface SqliteReader {
+  get(sql: string, params?: readonly SqlValue[]): Row | undefined;
+  all(sql: string, params?: readonly SqlValue[]): Row[];
+}
+
+/** A row of the engine's migration ledger (engine_migrations). */
+export interface AppliedMigration {
+  owner: string;
+  version: number;
+  name: string;
+  appliedAt: number;
+}
+
+/** appliedMigrations lists an owner's rows of the engine's migration ledger, in version order. */
+export function appliedMigrations(storage: SqliteReader, owner: string): AppliedMigration[] {
+  const ledger = storage.get("SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'engine_migrations'");
+  if (!ledger) {
+    return [];
+  }
+  return storage
+    .all('SELECT owner, version, name, applied_at FROM engine_migrations WHERE owner = ? ORDER BY version', [owner])
+    .map((row) => ({ owner: String(row.owner), version: Number(row.version), name: String(row.name), appliedAt: Number(row.applied_at) }));
+}
 
 /** The principal most tests act as; openTestEngine allows it everything. */
 export const alice: Principal = { subject: 'alice', permissions: [] };
 
-/** The adapters this runtime opens: node:sqlite everywhere, bun:sqlite too on Bun. */
-export const drivers: DriverName[] = isBun() ? ['bun', 'node'] : ['node'];
+/** The suite's loop over SQLite modules: the engine's own SQLite, once (DriverName). */
+export const drivers: DriverName[] = ['node'];
 
 const directories: string[] = [];
 const open: Array<{ close(): void }> = [];
@@ -66,16 +93,59 @@ export function track<T extends { close(): void }>(item: T): T {
 }
 
 /**
- * openEngine is the engine's openEngine (the Rust engine's with
- * ENGINE_IMPL=rust), recording the engine's calls when ENGINE_RECORD is
- * set; tests open engines through it or openTestEngine.
+ * openEngine is the engine's openEngine, recording the engine's calls when
+ * ENGINE_RECORD is set; tests open engines through it or openTestEngine.
  */
-export function openEngine(options: EngineOptions): Engine {
-  return recordOpen(options, openImpl);
+export function openEngine(options: TestEngineOptions): Engine {
+  const { driver: _driver, ...engineOptions } = options;
+  return recordOpen(engineOptions, openDistEngine);
 }
 
-export function openTestEngine(options: Partial<EngineOptions> = {}): Engine {
+export function openTestEngine(options: Partial<TestEngineOptions> = {}): Engine {
   return track(openEngine({ path: freshPath(), policy: allowAll, ...options }));
+}
+
+/**
+ * A database a test runs on: SQLite, a file of its own as openTestEngine
+ * opens it, or with ENGINE_TEST_PG_URL set a schema of its own of that
+ * Postgres database, through openEngineAsync, as a
+ * TypeScript server opens the engine there (D58). The engine open returns
+ * is the API every test uses, whose every call on Postgres returns a
+ * promise: a test that loops over backends awaits each call, which on
+ * SQLite awaits a value. openEngineAsync takes its options as data, so a
+ * test that passes a function (a behavior written in TypeScript, a policy,
+ * ids) skips on Postgres, with its reason (unlessOn).
+ */
+export interface Backend {
+  readonly name: 'sqlite' | 'postgres';
+  open(options?: Partial<TestEngineOptions>): Promise<Engine>;
+}
+
+const postgresUrl = process.env.ENGINE_TEST_PG_URL || undefined;
+
+/** The backends a test that loops over them runs on: SQLite, and Postgres when ENGINE_TEST_PG_URL names one. */
+export const backends: Backend[] = [
+  { name: 'sqlite', open: async (options = {}) => openTestEngine(options) },
+  ...(postgresUrl
+    ? [
+        {
+          name: 'postgres' as const,
+          open: async ({ driver: _driver, ...options }: Partial<TestEngineOptions> = {}) =>
+            track(
+              await openEngineAsync({
+                postgres: { url: postgresUrl, schema: `engine_test_${randomUUID().replaceAll('-', '').slice(0, 16)}` },
+                policy: allowAll,
+                ...options,
+              })
+            ) as unknown as Engine,
+        },
+      ]
+    : []),
+];
+
+/** The skip of a test on a backend that cannot run it, with why; false where it runs. */
+export function unlessOn(backend: Backend, name: Backend['name'], why: string): string | false {
+  return backend.name === name && why;
 }
 
 /**
@@ -193,8 +263,9 @@ export function documentsDocument(): Record<string, unknown> {
  * loads with no extension linked (fixture-display-json, which
  * `superschematic format --to=json` wrote from its TypeScript twin): its
  * Ticket type composes Workflow and Comments and declares @display over
- * its fields, its states and its transitions, and its fields' titles and
- * icons.
+ * its fields, its states and its transitions, with an icon, and its
+ * fields' titles, icons and multiline hint; its Priority enum's members
+ * take titles.
  */
 export function ticketsDocument(): Record<string, unknown> {
   return JSON.parse(

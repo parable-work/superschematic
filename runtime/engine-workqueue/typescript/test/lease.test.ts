@@ -26,7 +26,6 @@ import {
 
 import { gate, openMetaSchema, signal } from './fixtures.ts';
 import { Clock, alice, cleanup, drivers, fenced, jobFlow, jobsDocument, openTestEngine, publish, thrown, type BehaviorRef } from './helpers.ts';
-import { lease } from '../dist/index.js';
 
 afterEach(cleanup);
 
@@ -102,39 +101,26 @@ for (const driver of drivers) {
       assert.deepEqual(leaseOf(engine), { holder: 'wren', token: 3, acquiredAt: T0 + 0, renewedAt: T0 + 30000, expiresAt: T0 + 90000, active: false, expiries: 0 });
     });
 
-    test("a heartbeat neither rewrites nor loads a large field the value store holds: the job's row keeps its ref", () => {
-      // A value driver that counts its reads and writes, with no cache.
-      const stored = new Map<string, string>();
-      const counts = { reads: 0, writes: 0 };
-      const values = {
-        read: (hash: string) => {
-          counts.reads += 1;
-          return stored.get(hash);
-        },
-        write: (hash: string, json: string) => {
-          counts.writes += 1;
-          stored.set(hash, json);
-        },
-        remove: (hash: string) => {
-          stored.delete(hash);
-        },
-      };
+    test("a heartbeat neither rewrites nor stores again a large field the value store holds: the job's row keeps its ref", () => {
+      // The engine's own driver, the value store's table in its file.
       const clock = new Clock(T0);
-      const engine = openTestEngine({ driver, clock: clock.now, values: { thresholdBytes: 1024, driver: values, cacheBytes: 0 } });
+      const engine = openTestEngine({ driver, clock: clock.now, values: { thresholdBytes: 1024, cacheBytes: 0 } });
       publish(engine, jobsDocument([{ name: 'Workflow', config: jobFlow }, { name: 'Lease' }, { name: 'Comments' }]));
       const topic = 'build log '.repeat(200);
       engine.instances.create(alice, 'Job', { title: 'Build', topic }, { id: 'j1' });
       const row = () => engine.storage.get("SELECT data, value_refs FROM engine_instances WHERE id = 'j1'");
+      const payloads = () => engine.storage.all('SELECT hash FROM engine_payloads ORDER BY hash');
       const before = row();
+      const stored = payloads();
       assert.equal(before?.value_refs, '["/topic"]');
-      assert.deepEqual(counts, { reads: 0, writes: 1 });
+      assert.equal(stored.length, 1);
       invoke(engine, worker, 'acquire');
       for (let beat = 1; beat <= 3; beat += 1) {
         clock.advance(10000);
         invoke(engine, worker, 'heartbeat', {}, 'j1', 1);
       }
       assert.deepEqual(row(), before);
-      assert.deepEqual(counts, { reads: 0, writes: 1 });
+      assert.deepEqual(payloads(), stored);
       assert.equal(engine.instances.get(alice, 'Job', 'j1')?.data.topic, topic);
     });
 
@@ -753,7 +739,7 @@ for (const driver of drivers) {
 
     test("a guard's veto of one expiry leaves that lease for the next sweep, and the sweep goes on", () => {
       const clock = new Clock(T0);
-      const engine = openTestEngine({ driver, clock: clock.now, behaviors: [lease, gate], metaSchema: openMetaSchema(), runner: { principal: runner } });
+      const engine = openTestEngine({ driver, clock: clock.now, behaviors: ['Lease', gate], metaSchema: openMetaSchema(), runner: { principal: runner } });
       publish(engine, jobsDocument([{ name: 'Workflow', config: jobFlow }, { name: 'Lease', config: requeue }, { name: 'test.Gate' }]));
       for (const id of ['a', 'stuck', 'z']) {
         engine.instances.create(alice, 'Job', { title: id }, { id });
@@ -834,7 +820,7 @@ for (const driver of drivers) {
 
   describe(`Lease: directives from another behavior (${driver})`, () => {
     function signalled(config?: Record<string, unknown>) {
-      const engine = openTestEngine({ driver, behaviors: [lease, signal], metaSchema: openMetaSchema() });
+      const engine = openTestEngine({ driver, behaviors: ['Lease', signal], metaSchema: openMetaSchema() });
       publish(
         engine,
         jobsDocument([{ name: 'Workflow', config: jobFlow }, config === undefined ? { name: 'Lease' } : { name: 'Lease', config }, { name: 'test.Signal' }])

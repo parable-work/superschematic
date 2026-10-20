@@ -87,21 +87,22 @@
       ]
     },
     {
-      "name": "Lease: acquire, heartbeat and release (node) > a heartbeat neither rewrites nor loads a large field the value store holds: the job's row keeps its ref",
+      "name": "Lease: acquire, heartbeat and release (node) > a heartbeat neither rewrites nor stores again a large field the value store holds: the job's row keeps its ref",
       "behaviors": ["Comments","Lease","Workflow"],
-      "js": ["options","values.driver"],
       "principals": {"alice":{"subject":"alice","permissions":[]},"wren":{"subject":"wren","permissions":[]}},
       "steps": [
-        {"call":"open","as":"e1","args":[{"path":"{{dir:1}}/engine.db","policy":"allowAll","behaviors":["Lease","Assignment","Queue","Presence","Blueprint","Budget","Retries"],"clock":"fixed","values":{"thresholdBytes":1024,"driver":"custom","cacheBytes":0},"ids":"seeded"}],"now":1000000},
+        {"call":"open","as":"e1","args":[{"path":"{{dir:1}}/engine.db","policy":"allowAll","behaviors":["Lease","Assignment","Queue","Presence","Blueprint","Budget","Retries"],"clock":"fixed","values":{"thresholdBytes":1024,"cacheBytes":0},"ids":"seeded"}],"now":1000000},
         {"call":"schemas.define","principal":"alice","args":[{"$shared":"s1"}],"expect":{"$shared":"s2"}},
         {"call":"schemas.publish","principal":"alice","args":["Job"],"expect":{"namespace":"default","name":"Job","version":1,"published":true}},
         {"call":"instances.create","principal":"alice","args":["Job",{"$shared":"s4"},{"id":"j1"}],"expect":{"namespace":"default","schema":"Job","id":"j1","schemaNamespace":"default","version":1,"seq":1,"data":{"$shared":"s4"},"behaviors":{"Workflow":{"status":"queued","enteredAt":1000000},"Lease":{"token":0,"active":false,"expiries":0},"Comments":{"commentCount":0}},"createdAt":1000000,"createdBy":"alice","updatedAt":1000000,"updatedBy":"alice"}},
         {"call":"storage.get","args":["SELECT data, value_refs FROM engine_instances WHERE id = 'j1'"],"dialect":"sqlite","expect":{"data":"{\"title\":\"Build\",\"topic\":{\"$value\":\"c030db65b729c16ffa2d7ca3a2789d31c187b2cc867557f0b4e3ad361433ec07\",\"bytes\":2002}}","value_refs":"[\"/topic\"]"}},
+        {"call":"storage.all","args":["SELECT hash FROM engine_payloads ORDER BY hash"],"dialect":"sqlite","expect":[{"hash":"c030db65b729c16ffa2d7ca3a2789d31c187b2cc867557f0b4e3ad361433ec07"}]},
         {"call":"instances.invoke","principal":"wren","args":["Job","j1","acquire",{},{}],"expect":{"token":1,"expiresAt":1060000,"heartbeatMs":20000}},
         {"call":"instances.invoke","principal":"wren","args":["Job","j1","heartbeat",{},{"preconditions":{"Lease":{"token":1}}}],"expect":{"expiresAt":1070000,"directives":[]},"now":1010000},
         {"call":"instances.invoke","principal":"wren","args":["Job","j1","heartbeat",{},{"preconditions":{"Lease":{"token":1}}}],"expect":{"expiresAt":1080000,"directives":[]},"now":1020000},
         {"call":"instances.invoke","principal":"wren","args":["Job","j1","heartbeat",{},{"preconditions":{"Lease":{"token":1}}}],"expect":{"expiresAt":1090000,"directives":[]},"now":1030000},
         {"call":"storage.get","args":["SELECT data, value_refs FROM engine_instances WHERE id = 'j1'"],"dialect":"sqlite","expect":{"data":"{\"title\":\"Build\",\"topic\":{\"$value\":\"c030db65b729c16ffa2d7ca3a2789d31c187b2cc867557f0b4e3ad361433ec07\",\"bytes\":2002}}","value_refs":"[\"/topic\"]"}},
+        {"call":"storage.all","args":["SELECT hash FROM engine_payloads ORDER BY hash"],"dialect":"sqlite","expect":[{"hash":"c030db65b729c16ffa2d7ca3a2789d31c187b2cc867557f0b4e3ad361433ec07"}]},
         {"call":"instances.get","principal":"alice","args":["Job","j1"],"expect":{"namespace":"default","schema":"Job","id":"j1","schemaNamespace":"default","version":1,"seq":5,"data":{"$shared":"s4"},"behaviors":{"Workflow":{"status":"queued","enteredAt":1000000},"Lease":{"holder":"wren","token":1,"acquiredAt":1000000,"renewedAt":1030000,"expiresAt":1090000,"active":true,"expiries":0},"Comments":{"commentCount":0}},"createdAt":1000000,"createdBy":"alice","updatedAt":1030000,"updatedBy":"wren"}}
       ]
     },

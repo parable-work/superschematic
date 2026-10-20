@@ -5,8 +5,10 @@
 #   examples/engine-notes/scripts/check.sh
 #
 # Needs the superscalar checkout scripts/superscalar-dep.sh stands up (make
-# setup runs it), bun, Node.js 24, and cargo with the wasm32-unknown-unknown
-# target, which builds the version-graph core the engine depends on.
+# setup runs it), bun, Node.js 24, and cargo, which builds the engine's
+# Node-API addon (scripts/engine-napi.sh) when the engine's native/ holds
+# none: the Rust engine (D58), which @superschematic/engine loads. An addon
+# already there is used as it is, the test addon CI builds included.
 # Installs the runtimes' pinned dependencies from the npm registry (bun
 # install --frozen-lockfile).
 #
@@ -20,10 +22,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 EXAMPLE_DIR="$(dirname "$SCRIPT_DIR")"
 REPO_ROOT="$(cd "$EXAMPLE_DIR/../.." && pwd)"
 
-echo "==> build the schema runtime, the HTTP runtime, the version graph and the engine"
-for runtime in schema http versiongraph engine; do
+echo "==> build the HTTP runtime and the engine"
+for runtime in http engine; do
   (cd "$REPO_ROOT/runtime/$runtime/typescript" && bun install --frozen-lockfile >/dev/null && bun run build >/dev/null)
 done
+if ! compgen -G "$REPO_ROOT/runtime/engine/typescript/native/superschematic-engine.*.node" >/dev/null; then
+  echo "==> build the engine's addon"
+  "$REPO_ROOT/scripts/engine-napi.sh" >/dev/null
+fi
 
 echo "==> link them into the example"
 "$SCRIPT_DIR/link.sh"

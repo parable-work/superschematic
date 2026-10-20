@@ -337,6 +337,7 @@ func generate(c registry.GenerateContext, table Table) error {
 	if err != nil {
 		return err
 	}
+	warnSharedLabels(data, c.Logf)
 	dir := Dir(c.Options.OutputRoot, c.Config.Name)
 	if err := data.write(dir); err != nil {
 		return err

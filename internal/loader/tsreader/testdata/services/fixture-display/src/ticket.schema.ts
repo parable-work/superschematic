@@ -17,6 +17,7 @@ import { Validate, behavior, display, docs, icon } from "@superschematic/schema"
   plural: "Tickets",
   titleField: "title",
   createLabel: "New ticket",
+  icon: "ticket",
   summaryFields: ["Workflow.status", "assignee"],
   states: {
     todo: { label: "To do", tone: "muted" },
@@ -40,5 +41,19 @@ export abstract class Ticket {
   @icon("person")
   assignee?: string;
 
+  @display({ multiline: true })
   body?: string;
+}
+
+// How soon a ticket needs an answer.
+export enum Priority {
+  Low = "low",
+  // Within the week.
+  /** @title Needs attention */
+  High = "high",
+  /**
+   * Drop everything else.
+   * @title Drop everything
+   */
+  Urgent = "urgent",
 }

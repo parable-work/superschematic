@@ -634,9 +634,10 @@ own table, not in the core's naming keys. See
 
 A behavior is code that adds fields, operations, checks and storage to a
 type when an engine runs the schema. The compiler declares, carries and
-checks behaviors; `@superschematic/engine` runs them. An extension ships
-both halves: the declaration, registered with the compiler, and a
-TypeScript implementation of it, registered with an engine.
+checks behaviors; the engine, the Rust library every server links (D58),
+runs them. An extension ships both halves: the declaration, registered
+with the compiler, and a Rust crate that implements it, which the
+project's engine compiles in (below).
 
 An extension declares a behavior in a JSON file beside its Go package,
 embeds it and registers it:
@@ -770,7 +771,7 @@ under the name in PascalCase (`acme.Rating` is `AcmeRating`). The DB and
 General pipelines build such a schema: on a DB type a behavior makes an
 engine type, which `sql` and `orm` leave out and the `enginedoc`
 generator writes into the engine document, with your behavior and the
-`Package` its `BehaviorSpec` names
+crate its `BehaviorSpec`'s `Rust` names
 ([Engine types](/superschematic/guides/engine-behaviors/#engine-types)).
 An API's own type cannot compose one, and the API generators refuse an
 API that uses an engine type, naming themselves. A generator of yours
@@ -783,124 +784,227 @@ that runs it fails and names it. acme's `shop-ratings` and
 
 ### The implementation
 
-The engine runs a `BehaviorImplementation` that carries the same
-declaration. Copy it into the npm package that implements the behavior
-with your binary's `behaviors` command, and run it with `--check` in CI
-so the copy cannot fall behind:
+The engine runs a Rust type that implements its `Behavior` trait over the
+same declaration. The crate lives in your project, as a Cargo workspace of
+its own with its own lock file, and depends on `superschematic-engine`
+without its database features, which the project's engine picks. Copy
+the declaration into the crate with your binary's `behaviors` command, and
+run it with `--check` in CI so the copy cannot fall behind:
 
 ```sh
-acme-schematic behaviors --extension acme --out packages/behaviors/declarations
-acme-schematic behaviors --extension acme --out packages/behaviors/declarations --check
+acme-schematic behaviors --extension acme --out crates/behaviors/declarations
+acme-schematic behaviors --extension acme --out crates/behaviors/declarations --check
 ```
 
-The implementation gives the engine a function for each point of an
-instance's life, and a handler and a reader for exactly the operations
-and fields the declaration names:
+The implementation embeds that copy, parses a type's config into the
+value its hooks get, and gives the engine a hook for each point of an
+instance's life, with a handler and a reader for exactly the operations
+and fields the declaration names. acme's `Rating`, in the `acme-behaviors`
+crate (`crates/behaviors/src/lib.rs`), whose `RatingConfig`, `Totals`,
+`totals`, `summary` and `average` are its own:
 
-```ts
-import { EngineError, defineBehavior } from "@superschematic/engine";
-import declaration from "../declarations/acme.Rating.behavior.json" with { type: "json" };
+```rust
+use serde_json::Value;
+use superschematic_engine::behaviors::{BehaviorMigration, ColumnSpec};
+use superschematic_engine::json::number_value;
+use superschematic_engine::storage::SqlValue;
+use superschematic_engine::{Behavior, ConfigTarget, EngineError, Error, Hooks, Result};
 
-export const rating = defineBehavior<{ readonly maxStars: number }>({
-  declaration,
-  configChange: (before, after) =>
-    before && after && after.maxStars >= before.maxStars ? undefined : "maxStars may only rise",
-  migrations: [{
-    version: 1,
-    name: "rating totals",
-    columns: {
-      count: { type: "integer", notNull: true, default: 0 },
-      stars: { type: "integer", notNull: true, default: 0 },
-    },
-  }],
-  operations: {
-    rate(context, params) {
-      const stars = params.stars as number;
-      if (stars > context.config.maxStars) {
-        throw new EngineError("invalid_argument", `a rating is 1 to ${context.config.maxStars} stars`);
-      }
-      const count = Number(context.columns.get().count) + 1;
-      const total = Number(context.columns.get().stars) + stars;
-      context.columns.set({ count, stars: total });
-      return { ratingCount: count, ratingAverage: total / count };
-    },
-    ratingSummary: (context) => ({ /* ... */ }),
-  },
-  fields: {
-    ratingCount: (view) => Number(view.columns.get().count),
-    ratingAverage: (view) => { /* ... */ },
-  },
-});
+pub struct Rating;
+
+impl Behavior for Rating {
+    type Config = RatingConfig;
+
+    fn declaration(&self) -> &str {
+        include_str!("../declarations/acme.Rating.behavior.json")
+    }
+
+    fn parse_config(&self, raw: &Value, _target: &ConfigTarget<'_>) -> Result<RatingConfig> {
+        match raw.get("maxStars") {
+            Some(Value::Number(max)) => Ok(RatingConfig { max_stars: number_value(max) as i64 }),
+            _ => Err(Error::config("maxStars, the highest rating a shopper can give, is required")),
+        }
+    }
+
+    fn hooks(&self) -> Hooks<Self> {
+        Hooks {
+            config_change: Some(|_, before, after, _| { /* maxStars may rise, not fall */ }),
+            migrations: vec![BehaviorMigration::new(1, "rating totals")
+                .column("count", ColumnSpec::integer().not_null().default(0))
+                .column("stars", ColumnSpec::integer().not_null().default(0))],
+            operations: vec![
+                ("rate", |_, cx, params| {
+                    let stars = match params.get("stars") {
+                        Some(Value::Number(stars)) => number_value(stars),
+                        _ => 0.0,
+                    };
+                    if stars > cx.config().max_stars as f64 {
+                        return Err(EngineError::invalid_argument(/* ... */).into());
+                    }
+                    let before = totals(&cx.columns().get()?)?;
+                    let after = Totals { count: before.count + 1, stars: before.stars + stars as i64 };
+                    cx.columns().set(&[
+                        ("count", SqlValue::Integer(after.count)),
+                        ("stars", SqlValue::Integer(after.stars)),
+                    ])?;
+                    Ok(summary(&after))
+                }),
+                ("ratingSummary", |_, cx, _| Ok(summary(&totals(&cx.columns().get()?)?))),
+            ],
+            fields: vec![
+                ("ratingCount", |_, view| Ok(Some(Value::from(totals(&view.columns().get()?)?.count)))),
+                ("ratingAverage", |_, view| Ok(Some(average(&totals(&view.columns().get()?)?)))),
+            ],
+            ..Hooks::default()
+        }
+    }
+}
 ```
 
-Every function is synchronous and writes only the behavior's own
-storage: columns the engine adds to its instances table and names for
-the behavior, and tables of its own through `sql.table(name)`. Its SQL
-also reads its own columns across every instance of the schema, with
-their own fields, through a read-only relation the engine names
-(`sql.instances()`), asking the access policy for read as the caller. A
-guard may veto an update, a delete or any behavior's operation on the
-type, with a reason or `{ reason, code, details }` whose code the
-declaration lists, and reads the caller's precondition for its behavior
-in `request.precondition`; another behavior changes this one's state only
-by calling its operations, so those guards always run. Where a config names a permission, the
-behavior asks `can(permission)`, which the permission matcher the
-deployment gives the engine answers. An operation can change the
-instance's own fields with `update(patch)`, which runs the checks and
-guards of an update. A `validate` function judges the fields a create or
-an update would store and returns issues at their paths, which refuse
-the write as `invalid_instance`, as the live version's own do, before
-any guard is asked; it never sees a precondition, which is the guard's
-to judge. `checkedTypes` names the document's types it checks values
-against, which the compatibility rule then holds, and `instanceSchema`
-shows clients what it holds the fields to, under `allOf` in the describe
-document and the create and update tools. A behavior that keeps values
-of the schema's other types in its own tables reads those types in
-`parseConfig` (`target.types.get(name)`), which holds them to the
-schema's checks and its compatibility rule as a type a field reaches is
-held, and checks a value against one with `validate(type, value)` in its
-contexts. `guidance` tells an MCP client what the config means: a
-summary, and for each operation of the type, the behavior's own and the
-ones its guard holds, when to call it and the codes of the vetoes it can
-meet, which the engine merges into each tool's guidance, as an SDK tool
-carries its `@docs`. `createParamsSchema` shows the create parameters
-the config takes, narrower than the declaration's. The engine's README
-("Behaviors", and "Guidance" under "Tools") has the whole interface:
-`parseConfig`, `configChange`, `afterConfigChange`, `migrations`,
-`initialize`, `validate`, `checkedTypes`, `instanceSchema`, `guidance`,
-`createParamsSchema`, `guard`, `operations`, `schemaOperations`,
-`fields`, `filters`, `afterChange`, `guardReference`,
-`afterReferenceChange`, `reactions` and `schedules`. `configChange`'s
-third argument says whether the schema has instances, so a change only
-stored ones could break is refused only while there are some.
+Every hook is optional and a plain function, runs inside the call's
+transaction, and writes only the behavior's own storage: columns the
+engine adds to its instances table and names for the behavior
+(`cx.columns()`), and tables of its own through `cx.sql().table(name)`.
+Its SQL also reads its own columns across every instance of the schema,
+with their own fields, through a read-only relation the engine names
+(`cx.sql().instances()`), asking the access policy for read as the
+caller. A refusal is an `EngineError`, such as `invalid_argument`, or a
+veto. A guard may veto an update, a delete or any behavior's operation on
+the type with a `Veto`, a reason or `{ reason, code, details }` whose code
+the declaration lists, and reads the caller's precondition for its
+behavior in `request.precondition()`; another behavior changes this one's
+state only by calling its operations, so those guards always run. Where a
+config names a permission, the behavior asks `cx.can(permission)`, which
+the permission matcher the deployment gives the engine answers. An
+operation can change the instance's own fields with `cx.update(patch)`,
+which runs the checks and guards of an update. A `validate` hook judges
+the fields a create or an update would store and returns issues at their
+paths, which refuse the write as `invalid_instance`, as the live
+version's own do, before any guard is asked; it never sees a
+precondition, which is the guard's to judge. `checked_types` names the
+document's types it checks values against, which the compatibility rule
+then holds, and `instance_schema` shows clients what it holds the fields
+to, under `allOf` in the describe document and the create and update
+tools. A behavior that keeps values of the schema's other types in its
+own tables reads those types in `parse_config`
+(`target.types().get(name)`), which holds them to the schema's checks and
+its compatibility rule as a type a field reaches is held, and checks a
+value against one with `validate(type, value)` in its contexts.
+`guidance` tells an MCP client what the config means: a summary, and for
+each operation of the type, the behavior's own and the ones its guard
+holds, when to call it and the codes of the vetoes it can meet, which the
+engine merges into each tool's guidance, as an SDK tool carries its
+`@docs`. `create_params_schema` shows the create parameters the config
+takes, narrower than the declaration's. The engine's README ("Behaviors",
+and "Guidance" under "Tools") has the whole interface: `parse_config`,
+and the hooks `config_change`, `after_config_change`, `migrations`,
+`initialize`, `validate`, `checked_types`, `instance_schema`, `guidance`,
+`create_params_schema`, `guard`, `operations`, `schema_operations`,
+`fields`, `filters`, `after_change`, `guard_reference`,
+`after_reference_change`, `reactions` and `schedules`. `config_change`'s
+last argument says whether the schema has instances (`instances()`), so a
+change only stored ones could break is refused only while there are some.
 
-A deployment registers the implementation with the engine and passes the
-meta-schema its binary writes, which declares the behavior, and the tool
-invocation policy and vendor keys its binary registers, which the engine
-writes its MCP tools with (an operation's `invocationPolicy` must be one
-of the policy's values):
+A behavior written in TypeScript, with `defineBehavior` from
+`@superschematic/engine/testing`, runs only on the engine's test addon
+(`scripts/engine-napi.sh --js-behaviors`), through its bridge; the
+shipped addon and a project's refuse it. It is for an engine's tests and
+fixtures, not an extension's implementation.
+
+### The project's engine
+
+Name the crate in the behavior's registration: its Cargo package name,
+its directory relative to your project (the parent of the schemas root,
+which `[paths]` is relative to as well), and the Rust expression that
+registers it:
+
+```go
+r.RegisterBehavior(registry.BehaviorSpec{
+	Extension: Name,
+	Rust: registry.BehaviorRust{
+		Crate:    "acme-behaviors",
+		Path:     "crates/behaviors",
+		Register: "acme_behaviors::Rating",
+	},
+	Declaration: ratingDeclaration,
+})
+```
+
+For a DB or General schema whose types compose the behavior, the build's
+`projectengine` generator writes the project's engine crate,
+`engine/rust/<service>`, named `<rust_crate_prefix><service>-engine`: it
+depends on the engine's crates at the `[paths]` keys `engine_rust`,
+`engine_behaviors_rust` and `engine_workqueue_rust`, and on yours at its
+path, and its `behaviors()` registers the core's behaviors, the work
+queue's when the schema uses one, then yours; `tools()` carries your
+binary's invocation policy and vendor keys, under which an operation that
+names your policy's value registers. Each server language takes the
+engine from that crate its own way
+([The project's engine crate](/superschematic/guides/engine-behaviors/#the-projects-engine-crate)):
+
+- A Rust server links the library and opens the engine with its
+  `behaviors()` and `tools()`.
+- A Go server links the workspace's `ffi/` member, the engine's C ABI
+  over the same `behaviors()`, as a static archive in place of the
+  core's (`scripts/engine-archive.sh --crate <crate>/ffi --out <dir>`).
+- A TypeScript server loads the workspace's `napi/` member, the engine's
+  Node-API addon over them, in place of the core's addon: build it with
+  `scripts/engine-napi.sh --crate <crate>/napi --out <dir>`, which prints
+  the file it wrote, and name that file with the engine option `addon`
+  or, for every engine the process opens, `SUPERSCHEMATIC_ENGINE_ADDON`.
+
+The host runs your behavior beside the core's: a Rust host passes the
+set of both, as the engine crate's `behaviors()` is, and a TypeScript
+host names yours in `behaviors`, which the addon registers after the
+core's. It passes the meta-schema its binary writes,
+which declares the behavior, and the tool invocation policy and vendor
+keys its binary registers, which the engine writes its MCP tools with (an
+operation's `invocationPolicy` must be one of the policy's values). In
+TypeScript, with `addon` the file `scripts/engine-napi.sh` printed and
+`tools` the engine document's:
 
 ```ts
 import { openEngine } from "@superschematic/engine";
-import { behaviors, tools } from "@acme/behaviors";
 
-const engine = openEngine({ path: "shop.db", policy, metaSchema: acmeJSONSchema, behaviors, tools });
+const engine = openEngine({ path: "shop.db", policy, addon, metaSchema: acmeJSONSchema, behaviors: ["acme.Rating"], tools });
 engine.schemas.define(me, productSchema);   // composes acme.Rating
 engine.schemas.publish(me, "Product");       // creates the rating columns
 engine.instances.invoke(me, "Product", id, "rate", { stars: 4 });
 ```
 
-An engine without the implementation refuses a schema that composes the
-behavior. The engine registers the core's own behaviors, `Workflow`,
-`Comments`, `Revisions`, `Dependencies`, `Links`, `Rollups`, `Search`,
-`Reactions`, `Constants`, `Variants`, `Branches`, `Timers`, `StateRules`, `Numbering` and `Approvals`, when it opens; `behaviors` adds yours beside them, as it adds
-the core's [work-queue behaviors](/superschematic/guides/work-queues/)
-from `@superschematic/engine-workqueue`. No core operation names an
+and in Rust, over the core's set and the crate's:
+
+```rust
+use superschematic_engine::{Engine, EngineOptions, MetaSchema, Policy};
+
+let mut options = EngineOptions::sqlite("shop.db");
+options.policy = Some(Policy::allow_all());
+options.meta_schema = Some(MetaSchema::Text(std::fs::read_to_string("acme-schema-file.json")?));
+options.behaviors = superschematic_engine_behaviors::core().extend(acme_behaviors::behaviors());
+options.tools = acme_behaviors::tools();
+let engine = Engine::open(options)?;
+```
+
+An engine without the behavior refuses a schema that composes it. The
+engine registers the core's own behaviors, `Workflow`, `Comments`,
+`Revisions`, `Dependencies`, `Links`, `Rollups`, `Search`, `Reactions`,
+`Constants`, `Variants`, `Branches`, `Timers`, `StateRules`, `Numbering`
+and `Approvals`, when it opens, and the core's addon also carries the
+[work-queue behaviors](/superschematic/guides/work-queues/), which run
+once a host names them (`workQueueBehaviors` from
+`@superschematic/engine-workqueue`). No core operation names an
 invocation policy, so their tools take the default of the policy you
-pass. acme's `packages/behaviors` is the
-whole example, and its smoke runs it. The
-[engine guide](/superschematic/guides/engine/) serves three of the core's
-behaviors in `examples/engine-notes`.
+pass. A behavior whose registration names no crate, or a crate the
+project does not hold, gets no project engine: the build's log says no
+engine can run the schema's behaviors, and an engine refuses the schema.
+
+acme's `crates/behaviors` is the whole example: its tests
+(`tests/rating.rs`) run the engine scenario on SQLite and Postgres, and
+the smoke builds and tests the engine crate the acme binary writes for
+`shop-ratings`, its archive with it, and loads its addon in Node.js,
+where an engine on it publishes `shop-ratings`' `Product`, creates one
+and rates it. The [engine guide](/superschematic/guides/engine/) serves
+three of the core's behaviors in `examples/engine-notes`.
 
 ## A deploy target
 

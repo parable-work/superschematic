@@ -26,9 +26,10 @@ From the repository root, after `make setup`:
 examples/engine-notes/scripts/check.sh
 ```
 
-It builds the schema runtime, the HTTP runtime, the version graph (which
-needs cargo and the `wasm32-unknown-unknown` target) and the engine, links
-them into `node_modules`, type-checks the example, and runs
+It builds the HTTP runtime and the engine, and the engine's Node-API addon
+with cargo when the engine has none (`scripts/engine-napi.sh`: the engine
+is the Rust library every server links, D58, which the package loads),
+links them into `node_modules`, type-checks the example, and runs
 `test/notes.test.ts` with `node --test` and with `bun test`, each serving
 the example on a free port. The `typescript` job in
 `.github/workflows/ci.yml` runs it after the engine's own tests in the
@@ -89,9 +90,11 @@ starting.
 `hono`, `@hono/node-server`, `@modelcontextprotocol/client`, TypeScript and
 the Node.js types from the engine's `node_modules`, so the engine, the HTTP
 runtime and the example share one Hono at the version the engine pins. The
-engine's build links the schema runtime, the HTTP runtime, the schema IR,
-the version graph and superscalar into the engine's own `node_modules`. Once the packages
-are published, a project declares `@superschematic/engine`, the four
-packages the engine README ("Runtimes") names, `hono` and
-`@modelcontextprotocol/server` for the `./http` and `./mcp` entry points,
-and a server for the app, such as `@hono/node-server`.
+engine's build links the HTTP runtime and superscalar into the engine's own
+`node_modules`, and the engine loads its addon from `native/` there. Once
+the packages are published, a project declares `@superschematic/engine`,
+whose prebuilt addon for its platform npm installs as an optional
+dependency (`@superschematic/engine-<target>`), the HTTP runtime and
+superscalar the engine README ("Runtimes") names, `hono` for the `./http`
+and `./mcp` entry points, and a server for the app, such as
+`@hono/node-server`.
