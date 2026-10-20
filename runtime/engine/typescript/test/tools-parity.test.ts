@@ -5,7 +5,11 @@
 // document covers every scalar of the pinned catalog, enums, nested and
 // recursive types, lists and lists of lists, field rules and the
 // document's own scalars; the cases cover the core's vendor keys, a
-// distribution's and none.
+// distribution's and none. The tool names' case conversions and the
+// arguments' digests are the Rust engine's to hold to the vectors
+// (runtime/engine/rust/testkit/tests/tools_parity.rs); here the engine's
+// describe and tools documents are, and the tool options the package
+// checks before it opens an engine.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { afterEach, describe, test } from 'node:test';
@@ -15,10 +19,7 @@ import {
   DEFAULT_TOOL_KEYS,
   MCP_HANDLE,
   MCP_HANDLE_MAX_LENGTH,
-  kebabCase,
   resolveToolOptions,
-  snakeCase,
-  typeArguments,
   type DescribedOperation,
   type ToolKeys,
 } from '../dist/index.js';
@@ -92,14 +93,7 @@ describe('the Go vectors', () => {
   });
 });
 
-describe('names and the options the registry checks', () => {
-  test("a tool's name and handle take the Go case conversions", () => {
-    assert.ok(corpus.names.length > 0);
-    for (const { input, kebab, snake } of corpus.names) {
-      assert.deepEqual([kebabCase(input), snakeCase(input)], [kebab, snake], input);
-    }
-  });
-
+describe('the handles and the options the registry checks', () => {
   test('a derived handle is one @mcp would take exactly when Go says so', () => {
     for (const { value, valid } of corpus.handles) {
       assert.equal(MCP_HANDLE.test(value) && value.length <= MCP_HANDLE_MAX_LENGTH, valid, JSON.stringify(value));
@@ -114,16 +108,6 @@ describe('names and the options the registry checks', () => {
       assert.equal(accepts({ invocationPolicy: { key: 'review', values: [value], default: value } }), valid, JSON.stringify(value));
     }
   });
-});
-
-describe('typeArguments', () => {
-  for (const parity of corpus.cases) {
-    test(`writes the SDK generators' arguments and digest with ${parity.name}`, () => {
-      const got = typeArguments(corpus.document as never, corpus.instanceType, parity.keys);
-      assert.deepEqual(got.parameters, parity.parameters);
-      assert.equal(got.inputSchemaDigest, parity.inputSchemaDigest);
-    });
-  }
 });
 
 describe('a published schema', () => {

@@ -9,10 +9,22 @@ import { afterEach, describe, test } from 'node:test';
 import type { Authenticator } from '@superschematic/http-runtime';
 import type { Hono } from 'hono';
 
-import { EngineError, type AccessPolicy, type Engine, type EngineOptions } from '../dist/index.js';
+import { EngineError, type AccessPolicy, type Engine } from '../dist/index.js';
 import { engineApp } from '../dist/http/index.js';
 import { flag, openBehaviorEngine, openMetaSchema, publishItem, testBehaviors } from './behavior-fixtures.ts';
-import { alice, cleanup, documentsDocument, freshPath, notesDocument, openTestEngine, orderDocument, projectsDocument, tasksDocument, thrown } from './helpers.ts';
+import {
+  alice,
+  cleanup,
+  documentsDocument,
+  freshPath,
+  notesDocument,
+  openTestEngine,
+  orderDocument,
+  projectsDocument,
+  tasksDocument,
+  thrown,
+  type TestEngineOptions,
+} from './helpers.ts';
 import { reachBehaviors } from './reach-fixtures.ts';
 import { servedApp } from './recorder.ts';
 
@@ -26,7 +38,7 @@ const authenticate: Authenticator = async (ctx) =>
 const policy: AccessPolicy = ({ principal, action }) =>
   principal.subject === 'alice' || principal.permissions.includes('*') || principal.permissions.includes(action);
 
-function serve(engineOptions: Partial<EngineOptions> = {}): { engine: Engine; app: Hono } {
+function serve(engineOptions: Partial<TestEngineOptions> = {}): { engine: Engine; app: Hono } {
   const engine = openBehaviorEngine({ policy, ...engineOptions });
   return { engine, app: servedApp(engineApp, engine, { authenticate }) };
 }
@@ -71,7 +83,7 @@ async function problem(response: Promise<Response>, status: number): Promise<Rec
 const ITEMS = '/namespaces/default/schemas/Item/instances';
 const operation = (id: string, name: string) => `${ITEMS}/${id}/operations/${name}`;
 
-function withItem(engineOptions: Partial<EngineOptions> = {}): { engine: Engine; app: Hono } {
+function withItem(engineOptions: Partial<TestEngineOptions> = {}): { engine: Engine; app: Hono } {
   const served = serve(engineOptions);
   publishItem(served.engine, [{ name: 'test.Counter', config: { start: 0, limit: 5 } }, { name: 'test.Flag' }]);
   served.engine.instances.create(alice, 'Item', { title: 'Desk' }, { id: 'i1' });

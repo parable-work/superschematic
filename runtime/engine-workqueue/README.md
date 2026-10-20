@@ -1,15 +1,21 @@
 # Engine work queue
 
-`@superschematic/engine-workqueue` (`typescript/`) carries claimable work
-for `@superschematic/engine` (D16 in `docs/DECISIONS.md`): behaviors that
+The engine work queue is claimable work for the engine (D16 in
+`docs/DECISIONS.md`), its crate `rust/` and the npm package
+`@superschematic/engine-workqueue` (`typescript/`): behaviors that
 make a schema's instances work a principal takes, holds and gives back.
 The core declares them under bare names (`internal/registry/behaviors`,
 section 3.16 of `docs/extension-model.md`), so every binary's meta-schema
 admits a schema that composes them, and `BehaviorConfigs` in
-`@superschematic/schema` types their configs. The engine runs them only
-once a deployment registers this package's implementations; without them
-it refuses a schema that composes one, as it refuses any behavior it has
-no implementation for.
+`@superschematic/schema` types their configs. The behaviors are Rust,
+the crate (D58, "The Rust crate"), which the engine's addon is built with.
+The engine runs them only once a deployment names them in its
+`behaviors` option; without them it refuses a schema that composes one,
+as it refuses any behavior it does not run. This package holds their
+names (`workQueueBehaviors`, each a `WorkQueueBehavior`), the types of
+their configs and records, their constants (`DEFAULT_TTL_MS`,
+`DEFAULT_SWEEP_MS`, `MAX_SWEEP`, `DEFAULT_MAX_CANDIDATES`, `EXCLUDED`,
+`MAX_STEPS`) and the worker, `./worker`.
 
 Built: `Lease`, an exclusive lease with a fencing token, heartbeats,
 expiry on the engine's runner and directives to its holder;
@@ -36,29 +42,27 @@ engine.instances.invoke(worker, 'jobs', claimed.id, 'transition', { to: 'done' }
 
 ## Registering the behaviors
 
-A deployment passes the implementations as the engine's `behaviors`
-option when it opens the engine, after the core's, which the engine
-registers itself: `workQueueBehaviors` is every one, and `lease`,
-`assignment`, `queue`, `presence`, `blueprint`, `budget` and `retries` are
-exported one by one for a deployment that runs only some.
-`engine.behaviors.register(lease)` registers one later; a published
-version that composes a behavior the engine cannot run is `unavailable`
-until it does. Registering one whose storage already
-exists in the file brings it up to date, as for any behavior
-(`runtime/engine/README.md`, "Behaviors").
+A deployment names the behaviors in the engine's `behaviors` option when
+it opens the engine, and the engine registers them after the core's,
+which it registers itself: `workQueueBehaviors` is every one, and a
+deployment that runs only some names those (`behaviors: ['Lease',
+'Queue']`). A published version that composes a behavior the engine does
+not run is `unavailable` until an engine that names it opens the file.
+Opening on a file where one's storage already exists brings it up to
+date, as for any behavior (`runtime/engine/README.md`, "Behaviors").
 
-Each implementation carries the copy of its declaration in
-`typescript/src/declarations`, which the core binary writes with
-`superschematic behaviors --package @superschematic/engine-workqueue
---out runtime/engine-workqueue/typescript/src/declarations` (`make
-behaviors`) and CI checks (`make behaviors-check`), so the package and
-the compiler read one declaration. The implementations reach the engine
-only through its plug-in interface, as an extension's behavior does.
+Each behavior carries the copy of its declaration in `rust/declarations`,
+which the core binary writes with `superschematic behaviors --package
+@superschematic/engine-workqueue --out
+runtime/engine-workqueue/rust/declarations` (`make behaviors`) and CI
+checks (`make behaviors-check`), so the engine and the compiler read one
+declaration. The behaviors reach the engine only through its plug-in
+interface, as an extension's behavior does.
 
-Each implementation gives guidance from its config, which the describe
+Each behavior gives guidance from its config, which the describe
 document and every tool of a type that composes it carry
 (`runtime/engine/README.md`, "Guidance" under "Tools"), in a module of
-its own in `typescript/src/guidance/`: `Lease` its lengths, its expiry
+its own in `rust/src/guidance/`: `Lease` its lengths, its expiry
 moves, the token, its `directOn` directives, and its refusals on every
 write its guard holds;
 `Queue` the claim states, the order, the match fields and what keeps
@@ -74,26 +78,30 @@ Assignment's, Budget's and Retries' refusals together.
 The package ships compiled ESM with declarations (`dist/`), runs on
 Node.js 24 and on Bun, and its tests run under both. It needs
 `@superschematic/engine` next to it in `node_modules`: a peer dependency,
-since the behaviors must run in the engine the deployment opens and share
-its classes. A second copy of the engine would bring its own
-`BehaviorVetoError`, which the engine's checks would not recognize. The
+since its types and its worker's client are the engine's, and a
+deployment opens that engine with these behaviors' names. The
 peer dependency is optional only so bun does not look for the unpublished
 engine in the registry, as the engine's own optional peer dependency on
 `@superschematic/http-runtime` is; a consumer declares it, and this
 package's build and tests link the checkout's engine
 (`typescript/scripts/link-local-deps.mjs`).
 
-### The Rust engine's crate
+### The Rust crate
 
-`rust/` is `superschematic-engine-workqueue`, the same behaviors for the
-Rust engine (D58), a member of the engine's Cargo workspace
-(`runtime/engine/rust`), so it builds with that lock file and toolchain
-and `make engine-rust` lints and tests it. It reaches the engine through
-the plug-in API alone, as this package does, and the core's behaviors
-through the helpers the package imports from `@superschematic/engine`
-(`superschematic-engine-behaviors`). Each behavior embeds its
-declaration from `rust/declarations`, a copy `make behaviors` writes and
-`make behaviors-check` checks. A host registers them after the core's:
+`rust/` is `superschematic-engine-workqueue`, the behaviors themselves
+(D58), a member of the engine's Cargo workspace (`runtime/engine/rust`),
+so it builds with that lock file and toolchain and `make engine-rust`
+lints and tests it. It reaches the core's behaviors through their
+operations and their helpers in `superschematic-engine-behaviors`
+(Workflow's terminal states, Links' pins, `revised`). Each behavior
+embeds its declaration from `rust/declarations` ("Registering the
+behaviors").
+
+The engine's core Node-API addon (`runtime/engine/rust/addon`, over
+`runtime/engine/rust/napi`) is built with this crate, so an engine
+`@superschematic/engine` opens runs the ones its options' `behaviors`
+name, after the core's. A Rust host registers them after the core's
+itself:
 
 ```rust
 options.behaviors = superschematic_engine_behaviors::core()
@@ -101,46 +109,20 @@ options.behaviors = superschematic_engine_behaviors::core()
 ```
 
 `workqueue()` is all seven, in `workQueueBehaviors`' order (`NAMES`),
-and `behavior(name)` one alone (milestone 12: Lease with directOn,
-Assignment, Presence and Retries in 12a; Queue, Budget and Blueprint in
-12b), each keeping this package's table and column names. The guidance
-tests are `rust/tests/guidance_<behavior>.rs`, each held to the text
-this package's built guidance returned under node, recorded in
-`rust/tests/guidance/<behavior>.json`; the behaviors' own tests, ports
-of `typescript/test/*.test.ts` on SQLite and on Postgres when
-`SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL` names one, are the engine test
-kit's `tests/workqueue_<file>.rs`, with the test behaviors of
-`typescript/test/fixtures.ts` in its `workqueue_fixtures`, and every
-case runs. The test kit's replay holds them to this suite's recording,
+and `behavior(name)` one alone, each keeping the table and column names
+the TypeScript implementation used. The guidance tests are
+`rust/tests/guidance_<behavior>.rs`, each held to the text the
+TypeScript implementation's guidance returned under node, recorded in
+`rust/tests/guidance/<behavior>.json`; the behaviors' own tests, on
+SQLite and on Postgres when `SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL`
+names one, are the engine test kit's `tests/workqueue_<file>.rs`, with
+the test behaviors of `typescript/test/fixtures.ts` in its
+`workqueue_fixtures`, and every case runs. The test kit's replay holds
+them to this suite's recording,
 `runtime/engine/testdata/scenarios/workqueue-*.json`, on both databases:
 212 of its 213 scenarios replay on SQLite (one is `js`) and 209 on
 Postgres (three more write the file with SQL of their own), each giving
 the recorded answers.
-
-The engine's Node-API addon (`runtime/engine/rust/napi`) is built with
-this crate: an engine opened through it registers, after the core's, the
-ones its options' `behaviors` name. With `ENGINE_IMPL=rust`,
-`typescript/test/helpers.ts` opens the Rust engine in place of the
-TypeScript one, passing each of this package's own objects by its
-declaration's name, so the addon runs the Rust behavior; any other
-behavior a test registers (a fixture, the Budget stand-in, a wrapper of
-one of this package's that counts its calls) is TypeScript code, which
-the engine's test addon runs through its bridge (D58's milestone 7b). A
-test over a value driver written in TypeScript is the TypeScript
-engine's alone (`TYPESCRIPT_DRIVER`), unrecorded, beside a twin over the
-engine's own driver. The engine's `scripts/rust-ratchet.mjs --package`
-runs each test file so under Node.js and Bun and holds the result to
-`typescript/test/rust-pending.txt`, the files not passing yet and why
-(CI's `engine-napi` job):
-
-```
-scripts/engine-napi.sh --js-behaviors       # from the repository's root, after the engine's build
-cd runtime/engine-workqueue/typescript && bun run build
-bun run test:rust                           # Node.js, then Bun
-```
-
-All 19 files pass on both, Node.js's 240 tests and Bun's 455, and the
-corpus this suite records on the Rust engine is the committed one.
 
 ## Lease
 
@@ -1050,7 +1032,7 @@ acknowledge directives, stop writing once the lease is gone, record the
 attempt, release or abandon, hand back what it holds at shutdown, and beat
 the `Presence` instance the worker stands for. It
 imports only `@superschematic/engine/client`, so a worker process loads
-no SQLite and no behavior, and runs wherever the client does
+no engine addon and no SQLite, and runs wherever the client does
 (`tsconfig.worker.json` compiles it with the DOM's globals and no Node.js
 types).
 
@@ -1163,10 +1145,9 @@ still ends with its release.
 ## Development
 
 ```
-cd runtime/schema/typescript && bun install --frozen-lockfile && bun run build
 cd runtime/http/typescript && bun install --frozen-lockfile && bun run build
-cd runtime/versiongraph/typescript && bun install --frozen-lockfile && bun run build
 cd runtime/engine/typescript && bun install --frozen-lockfile && bun run build
+scripts/engine-napi.sh --js-behaviors   # from the repository's root: the engine's test addon
 cd runtime/engine-workqueue/typescript
 bun install --frozen-lockfile
 bun run typecheck
@@ -1174,8 +1155,20 @@ bun run test        # build, then test:node (node --test) and test:bun (bun test
 ```
 
 The tests import the built package from `dist/` and the engine from
-`node_modules`, open real SQLite files in temporary directories with a
-clock they move, and on Bun run against both adapters.
+`node_modules`, and open real SQLite files in temporary directories with
+a clock they move. They run on the Rust engine through its test addon,
+which `scripts/engine-napi.sh --js-behaviors` builds (it needs cargo and
+the superscalar checkout `make setup` stands up):
+`typescript/test/helpers.ts` opens each engine with this package's
+behaviors by name, which the addon runs in Rust, and the other behaviors
+a test registers, `test/fixtures.ts`' test behaviors and the Budget
+stand-in, are written in TypeScript with `@superschematic/engine/testing`'s
+`defineBehavior`, which the test addon runs through its bridge and the
+shipped addon refuses. `test/corpus.test.ts` records the suite's part of
+the scenario corpus again,
+`runtime/engine/testdata/scenarios/workqueue-*.json`, and fails when a
+committed file is not what it records;
+`UPDATE_ENGINE_CORPUS=1 node --test test/corpus.test.ts` rewrites them.
 `test/package.test.ts` runs the documents the core binary builds in
 `make cli-smoke` (`fixture-workqueue-json`). `test/worker.test.ts` runs
 the worker against an engine served in process, the app's fetch standing

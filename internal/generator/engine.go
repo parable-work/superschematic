@@ -203,7 +203,8 @@ func (r run) engineDatabase(deps map[string]*ir.Schema) (*apigen.EngineInfo, err
 // engine/rust/<schema> (internal/generator/projectengine), and removes the
 // one an earlier build wrote when the schema needs none now. An extension
 // behavior that names no Rust crate, or one the project does not hold,
-// leaves the schema to the TypeScript engine, and the log says so.
+// leaves the schema with no engine that can run it, and the log says so:
+// an engine refuses it.
 func (r run) generateProjectEngine() error {
 	dir := EngineDir(r.Options.OutputRoot, LangRust, r.Config.Name)
 	crate, why, err := projectengine.Build(r.Schema, r.projectEngineOptions(r.Config.Name, dir))

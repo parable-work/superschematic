@@ -1,26 +1,39 @@
-//! The engine's Node-API addon (D58): what `@superschematic/engine` loads
-//! to run on the Rust engine. It holds one engine per `NativeEngine` and
-//! makes its calls by name ([`superschematic_engine::calls`]) with JSON in
-//! and out, so the TypeScript facade (`src/native/` in the package) keeps
-//! the engine's synchronous, principal-first API over it.
+//! The engine's Node-API addon as a library (D58): what
+//! `@superschematic/engine` loads to run on the Rust engine, and
+//! [`export_engine_napi!`], which a cdylib crate expands once over the
+//! behaviors its addon is built with, the twin of the C ABI's
+//! `export_engine_c_abi!` (`superschematic-engine-abi`). The library exports
+//! nothing itself: `superschematic-engine-addon` (`runtime/engine/rust/addon`)
+//! is the core's addon, over the core's behaviors and the work queue's, and
+//! a project whose schemas compose an extension's behaviors builds its own
+//! from the `napi/` member of the engine crate `projectengine` writes, over
+//! that crate's `behaviors()`. Two addons in one Cargo workspace, whose
+//! features Cargo unifies, so never register a class twice.
 //!
+//! An addon holds one engine per `NativeEngine` and makes its calls by name
+//! ([`superschematic_engine::calls`]) with JSON in and out, so the
+//! TypeScript facade (`src/native/` in the package) keeps the engine's
+//! synchronous, principal-first API over it:
+//!
+//! - `NativeEngine.open(optionsJson, host?)` opens an engine on the
+//!   options [`EngineOptions::from_json`] reads, with the behaviors the
+//!   addon was built with ([`Project::behaviors`]): the core's of them
+//!   ([`superschematic_engine_behaviors::NAMES`]) always, then each one the
+//!   options' `behaviors` member names, in its order, as the TypeScript
+//!   engine registers a deployment's after the core's. A name is always a
+//!   behavior in Rust; a behavior object is TypeScript code, which the
+//!   options' `jsBehaviors` describe (below).
+//!   The options' `hosted` member, which the addon takes off first, lists
+//!   what the facade answers in JavaScript through `host(kind, json)`: a
+//!   `policy` written in TypeScript, which gets each question as the
+//!   TypeScript engine asks it, and a `permissionMatcher`, which gets
+//!   `[held, required]`; each answers `"true"` to allow.
 //! - `NativeEngine.openAsync(optionsJson)` opens one as `open` does, off
 //!   the JavaScript thread, and returns a promise of it: what a server on
 //!   Postgres opens with, since the open connects and migrates while the
 //!   thread serves, and the connection may be one the thread itself
 //!   carries (a Cloud SQL socket the host serves). Its options are data
 //!   alone: none hosts anything on the JavaScript thread.
-//! - `NativeEngine.open(optionsJson, host?)` opens an engine on the
-//!   options [`EngineOptions::from_json`] reads, with the core's behaviors
-//!   this addon was built with ([`superschematic_engine_behaviors::core`]),
-//!   then the work queue's its `behaviors` member names
-//!   ([`superschematic_engine_workqueue::behavior`]), in its order, as
-//!   the TypeScript engine registers a deployment's after the core's.
-//!   The options' `hosted` member, which the addon takes off first, lists
-//!   what the facade answers in JavaScript through `host(kind, json)`: a
-//!   `policy` written in TypeScript, which gets each question as the
-//!   TypeScript engine asks it, and a `permissionMatcher`, which gets
-//!   `[held, required]`; each answers `"true"` to allow.
 //! - `callSync(requestJson)` makes a call on the JavaScript thread and
 //!   returns its result as JSON text, `""` where the TypeScript method
 //!   returns `undefined`. A request is `{ op, principal?, args?, now? }`:
@@ -44,13 +57,17 @@
 //!   when a commit made elsewhere (the runner's thread, an asynchronous
 //!   call, another process on Postgres) moves it, through a weak
 //!   threadsafe function, so it never holds the process open.
+//! - `abiVersion()` is [`ABI_VERSION`], `engineRoutes()` the routes the
+//!   engine serves, and `project()` the name of the crate that built the
+//!   addon ([`Project::name`]).
 //! - The test addon, built with the `js-behaviors` feature, runs behaviors
 //!   written in TypeScript (`bridge`): the options' `jsBehaviors` and
 //!   `registerBehavior(descriptor)` register what the facade describes,
 //!   and `bridgeCall(generation, method, args)` is a behavior context's
 //!   method while its hook runs. An engine with one is `hosted`: it is
 //!   called on the JavaScript thread alone, and the facade runs its runner
-//!   on the event loop. The shipped addon refuses such a behavior.
+//!   on the event loop. An addon built without the feature, as every
+//!   shipped one is, has no `bridgeCall` and refuses such a behavior.
 //!
 //! A refusal is thrown as an `Error` whose `name` is the TypeScript class
 //! (`EngineError`, `BehaviorVetoError`, `TypeError`, ...), with its `code`
@@ -79,11 +96,27 @@ use superschematic_engine::{
 
 #[cfg(feature = "js-behaviors")]
 mod bridge;
+mod macros;
 mod sql;
 #[cfg(feature = "js-behaviors")]
-pub use bridge::bridge_call;
-#[cfg(feature = "js-behaviors")]
 use bridge::Entry;
+
+/// What [`export_engine_napi!`]'s expansion names: the crates its
+/// `#[napi]` items are written in and the library's items they call. Not
+/// an API.
+#[doc(hidden)]
+pub mod __private {
+    pub use napi;
+    pub use napi_derive;
+
+    #[cfg(feature = "js-behaviors")]
+    pub use crate::bridge::bridge_call;
+    pub use crate::{
+        engine_routes, CallTask, HostFunction, HttpAnswer, Native, OpenTask, StreamPull,
+    };
+}
+
+pub use superschematic_engine::BehaviorSet;
 
 // Entry, without the bridge, holds nothing.
 #[cfg(not(feature = "js-behaviors"))]
@@ -101,15 +134,16 @@ impl Entry {
 /// another, which a checkout's stale `native/` would be.
 pub const ABI_VERSION: u32 = 3;
 
-/// The contract's version ([`ABI_VERSION`]).
-#[napi]
-pub fn abi_version() -> u32 {
-    ABI_VERSION
+/// The addon an [`export_engine_napi!`] expansion builds: the crate's
+/// name, which its `project()` reports, and every behavior it is built
+/// with, the core's among them.
+pub struct Project {
+    pub name: &'static str,
+    pub behaviors: fn() -> BehaviorSet,
 }
 
 /// The routes the engine serves (`api::routes`), as JSON: what the
 /// facade's HTTP adapters mount, for any engine.
-#[napi]
 pub fn engine_routes() -> String {
     serde_json::to_string(&superschematic_engine::api::routes()).unwrap_or_else(|_| "[]".to_owned())
 }
@@ -203,9 +237,9 @@ fn parse<'env>(env: &'env Env, value: &Value) -> Result<Unknown<'env>> {
     parse.call(json::stringify(value))
 }
 
-// The facade's function that answers what the options leave to
-// JavaScript: host(kind, json) -> json.
-type HostFunction = FunctionRef<FnArgs<(String, String)>, String>;
+/// The facade's function that answers what the options leave to
+/// JavaScript: `host(kind, json) -> json`.
+pub type HostFunction = FunctionRef<FnArgs<(String, String)>, String>;
 
 thread_local! {
     // The environment of the synchronous call this thread is making, set
@@ -295,9 +329,48 @@ impl PermissionMatcher for HostMatcher {
     }
 }
 
-// What an engine's options may name in behaviors: the behaviors this
-// addon has beside the core's, by name.
-const BEHAVIORS: &str = "behaviors names the work queue's behaviors the addon is built with (Lease, Assignment, Queue, Presence, Blueprint, Budget, Retries); a behavior written in TypeScript needs the bridge";
+// behaviors_of is the behaviors an engine registers: the core's of the
+// ones the addon is built with, in their order, then each one the options'
+// behaviors name, in theirs. A name is always a behavior in Rust: one the
+// addon is built with beside the core's.
+fn behaviors_of(project: &Project, named: &[Value]) -> std::result::Result<BehaviorSet, Failure> {
+    let built = (project.behaviors)();
+    let mut behaviors = built.select(is_core);
+    for name in named {
+        let picked = name
+            .as_str()
+            .filter(|name| !is_core(name))
+            .map(|name| built.select(|each| each == name))
+            .filter(|picked| !picked.is_empty())
+            .ok_or_else(|| not_built(project, &built, name))?;
+        behaviors = behaviors.extend(picked);
+    }
+    Ok(behaviors)
+}
+
+fn is_core(name: &str) -> bool {
+    superschematic_engine_behaviors::NAMES.contains(&name)
+}
+
+// not_built refuses a name the addon is not built with, naming the ones it
+// is beside the core's.
+fn not_built(project: &Project, built: &BehaviorSet, name: &Value) -> Failure {
+    let beside: Vec<String> = built
+        .names()
+        .into_iter()
+        .filter(|each| !is_core(each))
+        .collect();
+    let beside = if beside.is_empty() {
+        "none".to_owned()
+    } else {
+        beside.join(", ")
+    };
+    Failure::usage(format!(
+        "behaviors names the behaviors {} is built with beside the core's ({beside}); a behavior written in TypeScript needs the bridge, not {}",
+        project.name,
+        json::stringify(name)
+    ))
+}
 
 // What the options open: the engine's, whether the facade answers
 // something on the JavaScript thread alone (a policy, a matcher, a
@@ -386,7 +459,11 @@ impl IdSource for HostIds {
 // options_of reads the options the facade passes: the engine's, the work
 // queue's behaviors they name, the behaviors written in TypeScript they
 // describe, and what it hosts.
-fn options_of(text: &str, host: Option<HostFunction>) -> std::result::Result<Opening, Failure> {
+fn options_of(
+    project: &Project,
+    text: &str,
+    host: Option<HostFunction>,
+) -> std::result::Result<Opening, Failure> {
     let mut given: Value = serde_json::from_str(text)
         .map_err(|error| Failure::usage(format!("engine options are JSON: {error}")))?;
     let members = given.as_object_mut();
@@ -409,7 +486,11 @@ fn options_of(text: &str, host: Option<HostFunction>) -> std::result::Result<Ope
     {
         None | Some(Value::Null) => Vec::new(),
         Some(Value::Array(names)) => names,
-        Some(_) => return Err(Failure::usage(BEHAVIORS)),
+        Some(_) => {
+            return Err(Failure::usage(
+                "behaviors lists the names of behaviors the addon is built with; a behavior written in TypeScript needs the bridge",
+            ))
+        }
     };
     let behaviors = match behaviors {
         None | Some(Value::Null) => Vec::new(),
@@ -417,20 +498,11 @@ fn options_of(text: &str, host: Option<HostFunction>) -> std::result::Result<Ope
         Some(_) => return Err(Failure::usage("jsBehaviors lists behavior descriptors")),
     };
     let mut options = EngineOptions::from_json(&given).map_err(|error| Failure::of(&error))?;
-    // The core's, then the work queue's the options name, in their order,
-    // then the ones written in TypeScript (the bridge): a behavior named by
-    // a string is always the Rust one the addon is built with, and an
-    // object always the bridge's, whatever its declaration names.
-    options.behaviors = superschematic_engine_behaviors::core();
-    for name in named {
-        let set = name
-            .as_str()
-            .and_then(superschematic_engine_workqueue::behavior)
-            .ok_or_else(|| {
-                Failure::usage(format!("{BEHAVIORS}, not {}", json::stringify(&name)))
-            })?;
-        options.behaviors = std::mem::take(&mut options.behaviors).extend(set);
-    }
+    // The core's, then the ones the options name, in their order, then the
+    // ones written in TypeScript (the bridge): a behavior named by a string
+    // is always the Rust one the addon is built with, and an object always
+    // the bridge's, whatever its declaration names.
+    options.behaviors = behaviors_of(project, &named)?;
     let host = host.map(|function| Host(Arc::new(function)));
     let needs_host = || {
         host.clone().ok_or_else(|| {
@@ -570,9 +642,10 @@ fn call(
     }
 }
 
-/// An engine, opened from JavaScript.
-#[napi]
-pub struct NativeEngine {
+/// An engine, opened from JavaScript: what an addon's `NativeEngine` holds
+/// and calls ([`export_engine_napi!`]), each of its methods one of the
+/// class's.
+pub struct Native {
     // None once closed.
     engine: RwLock<Option<Arc<Engine>>>,
     dialect: Dialect,
@@ -588,7 +661,7 @@ pub struct NativeEngine {
     released: bridge::Released,
 }
 
-impl NativeEngine {
+impl Native {
     #[cfg(feature = "js-behaviors")]
     fn register(&self, engine: &Engine, descriptor: &str) -> std::result::Result<(), Failure> {
         let descriptor: Value = serde_json::from_str(descriptor)
@@ -610,20 +683,15 @@ impl NativeEngine {
         Err(no_bridge())
     }
 
-    // holding is the NativeEngine of an engine opened off the JavaScript
-    // thread (openAsync), which hosts nothing.
-    fn holding(
-        env: &Env,
-        engine: Arc<Engine>,
-        hosted: bool,
-        host: Option<Host>,
-    ) -> Result<NativeEngine> {
+    // holding is the Native of an engine opened off the JavaScript thread
+    // (openAsync), which hosts nothing.
+    fn holding(env: &Env, engine: Arc<Engine>) -> Result<Native> {
         shut_down_with(env, &engine)?;
-        Ok(NativeEngine {
+        Ok(Native {
             dialect: engine.dialect(),
             engine: RwLock::new(Some(engine)),
-            hosted: AtomicBool::new(hosted),
-            host,
+            hosted: AtomicBool::new(false),
+            host: None,
             watching: Mutex::new(None),
             #[cfg(feature = "js-behaviors")]
             released: bridge::Released::default(),
@@ -732,26 +800,29 @@ fn pull_of(pulled: superschematic_engine::api::Pull) -> StreamPull {
 }
 
 /// An open on libuv's pool (`openAsync`): the engine opens there, and the
-/// `NativeEngine` that holds it is made on the JavaScript thread.
-pub struct OpenTask {
+/// class that holds it, `T`, the addon's `NativeEngine`
+/// ([`export_engine_napi!`]), is made on the JavaScript thread by `wrap`.
+pub struct OpenTask<T> {
+    project: &'static Project,
     options: String,
+    wrap: fn(Native) -> T,
 }
 
-impl Task for OpenTask {
+impl<T: ToNapiValue + TypeName> Task for OpenTask<T> {
     type Output = std::result::Result<Arc<Engine>, Failure>;
-    type JsValue = NativeEngine;
+    type JsValue = T;
 
     fn compute(&mut self) -> Result<Self::Output> {
         let opened = catch_unwind(AssertUnwindSafe(|| {
-            let Opening { options, .. } = options_of(&self.options, None)?;
+            let Opening { options, .. } = options_of(self.project, &self.options, None)?;
             Engine::open_shared(options).map_err(|error| Failure::of(&error))
         }));
         Ok(opened.unwrap_or_else(|payload| Err(Failure::panic(payload.as_ref()))))
     }
 
-    fn resolve(&mut self, env: Env, output: Self::Output) -> Result<NativeEngine> {
+    fn resolve(&mut self, env: Env, output: Self::Output) -> Result<T> {
         let engine = output.map_err(|failure| failure.into_napi(&env))?;
-        NativeEngine::holding(&env, engine, false, None)
+        Native::holding(&env, engine).map(self.wrap)
     }
 }
 
@@ -774,13 +845,16 @@ impl Task for CallTask {
     }
 }
 
-#[napi]
-impl NativeEngine {
+impl Native {
     /// Opens an engine on its options' JSON: its storage created if absent
     /// and migrated, the core's behaviors registered. `host` answers what
     /// the options' `hosted` lists.
-    #[napi(factory)]
-    pub fn open(env: Env, options: String, host: Option<HostFunction>) -> Result<NativeEngine> {
+    pub fn open(
+        env: Env,
+        project: &Project,
+        options: String,
+        host: Option<HostFunction>,
+    ) -> Result<Native> {
         if IN_HOST.get() {
             return Err(reentry().into_napi(&env));
         }
@@ -793,9 +867,9 @@ impl NativeEngine {
                 host,
                 #[cfg(feature = "js-behaviors")]
                 released,
-            } = options_of(&options, host)?;
+            } = options_of(project, &options, host)?;
             let engine = Engine::open_shared(options).map_err(|error| Failure::of(&error))?;
-            Ok::<_, Failure>(NativeEngine {
+            Ok::<_, Failure>(Native {
                 dialect: engine.dialect(),
                 engine: RwLock::new(Some(engine)),
                 hosted: AtomicBool::new(hosted),
@@ -816,37 +890,43 @@ impl NativeEngine {
     }
 
     /// Opens an engine as `open` does, off the JavaScript thread, and
-    /// returns a promise of it: its storage created if absent and
-    /// migrated, the core's behaviors registered. Its options are data
+    /// returns a promise of it, which `wrap` makes the addon's class of:
+    /// its storage created if absent and migrated, the core's behaviors
+    /// registered and the ones its `behaviors` name. Its options are data
     /// alone: options that host something on the JavaScript thread are
     /// refused, as they are without `open`'s host function.
-    #[napi(ts_return_type = "Promise<NativeEngine>")]
-    pub fn open_async(env: Env, options: String) -> Result<AsyncTask<OpenTask>> {
+    pub fn open_async<T: ToNapiValue + TypeName>(
+        env: &Env,
+        project: &'static Project,
+        options: String,
+        wrap: fn(Native) -> T,
+    ) -> Result<AsyncTask<OpenTask<T>>> {
         if IN_HOST.get() {
-            return Err(reentry().into_napi(&env));
+            return Err(reentry().into_napi(env));
         }
-        Ok(AsyncTask::new(OpenTask { options }))
+        Ok(AsyncTask::new(OpenTask {
+            project,
+            options,
+            wrap,
+        }))
     }
 
     /// Whether the facade answers something of this engine on the
     /// JavaScript thread alone (a policy, a matcher, a behavior written in
     /// TypeScript): its asynchronous call and the runner's thread are
     /// refused, and the facade runs the runner on its event loop.
-    #[napi(getter)]
     pub fn hosted(&self) -> bool {
         self.hosted.load(Ordering::SeqCst)
     }
 
     /// Whether this addon has the bridge to behaviors written in
     /// TypeScript (the test addon, built with the js-behaviors feature).
-    #[napi(getter)]
     pub fn bridged(&self) -> bool {
         cfg!(feature = "js-behaviors")
     }
 
     /// Registers a behavior written in TypeScript, as the facade describes
     /// it (`src/native/bridge.ts`), on the test addon alone.
-    #[napi]
     pub fn register_behavior(&self, env: Env, descriptor: String) -> Result<()> {
         if IN_HOST.get() {
             return Err(reentry().into_napi(&env));
@@ -863,7 +943,6 @@ impl NativeEngine {
     }
 
     /// `"sqlite"` or `"postgres"`.
-    #[napi(getter)]
     pub fn dialect(&self) -> &'static str {
         match self.dialect {
             Dialect::Postgres => "postgres",
@@ -872,7 +951,6 @@ impl NativeEngine {
     }
 
     /// Makes a call on the JavaScript thread; SQLite only.
-    #[napi]
     pub fn call_sync(&self, env: Env, request: String) -> Result<String> {
         if IN_HOST.get() {
             return Err(reentry().into_napi(&env));
@@ -894,7 +972,6 @@ impl NativeEngine {
 
     /// Makes a call off the JavaScript thread, returning a promise of its
     /// result.
-    #[napi(ts_return_type = "Promise<string>")]
     pub fn call<'env>(
         &self,
         env: &'env Env,
@@ -929,7 +1006,6 @@ impl NativeEngine {
     /// does on it: what an engine on Postgres serves through (on SQLite as
     /// well). Its promise resolves on the JavaScript thread. A tool filter
     /// written in TypeScript, which answers on that thread, is refused.
-    #[napi(ts_return_type = "Promise<HttpAnswer>")]
     pub fn handle_http_async<'env>(
         &self,
         env: &'env Env,
@@ -970,7 +1046,6 @@ impl NativeEngine {
     /// Pulls an event stream off the JavaScript thread, waiting up to
     /// `timeoutMs` for its next bytes: an engine on Postgres's stream
     /// waits there for a commit in any process.
-    #[napi(ts_return_type = "Promise<StreamPull>")]
     pub fn stream_pull_async<'env>(
         &self,
         env: &'env Env,
@@ -1015,7 +1090,6 @@ impl NativeEngine {
     /// not do (its tests' looks at the tables, an identity store's DDL),
     /// and a write the engine does not expect is the deployment's to
     /// answer for. An engine on Postgres refuses it.
-    #[napi]
     pub fn storage_query(
         &self,
         env: Env,
@@ -1079,7 +1153,6 @@ impl NativeEngine {
     /// makes run in savepoints of it, and commit together when it returns
     /// true or roll back together when it returns false (the facade keeps
     /// what it threw). Inside another, a savepoint of that one.
-    #[napi(ts_args_type = "callback: () => boolean")]
     pub fn storage_transaction(&self, env: Env, callback: Function<(), bool>) -> Result<bool> {
         if IN_HOST.get() {
             return Err(reentry().into_napi(&env));
@@ -1124,7 +1197,6 @@ impl NativeEngine {
 
     /// Whether this thread holds a transaction on the engine's storage: a
     /// host's (`storageTransaction`), or the engine's own around a hook.
-    #[napi(getter)]
     pub fn storage_in_transaction(&self) -> bool {
         self.engine()
             .is_ok_and(|engine| engine.db().in_transaction())
@@ -1137,7 +1209,6 @@ impl NativeEngine {
     /// call's), and its body's bytes. The answer's body is bytes,
     /// or the id of an event stream the engine holds open, which
     /// `streamPull` pulls.
-    #[napi]
     pub fn handle_http(&self, env: Env, head: String, body: Option<Buffer>) -> Result<HttpAnswer> {
         if IN_HOST.get() {
             return Err(reentry().into_napi(&env));
@@ -1168,7 +1239,6 @@ impl NativeEngine {
     /// thread and without waiting: its next bytes, `end` once it is over,
     /// or neither while it has nothing yet (the facade waits for a commit
     /// or the heartbeat, and pulls again).
-    #[napi]
     pub fn stream_pull(&self, env: Env, id: f64) -> Result<StreamPull> {
         let engine = self.engine().map_err(|failure| failure.into_napi(&env))?;
         let _on_js_thread = OnJsThread::enter(&env);
@@ -1186,7 +1256,6 @@ impl NativeEngine {
     }
 
     /// Ends an event stream `handleHttp` holds open: the client went away.
-    #[napi]
     pub fn stream_close(&self, id: f64) {
         if let Ok(engine) = self.engine() {
             #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
@@ -1197,7 +1266,6 @@ impl NativeEngine {
     /// How many commits that notified the engine's notifier has counted
     /// (D58): the facade reads it after each call to tell its watchers of
     /// what the call committed.
-    #[napi(getter)]
     pub fn epoch(&self) -> f64 {
         #[allow(clippy::cast_precision_loss)] // an epoch stays below 2^53
         self.engine()
@@ -1211,7 +1279,6 @@ impl NativeEngine {
     /// function, so a watch never holds the process open. It ends when the
     /// engine shuts down (a last call) or at `unwatch`; a second watch
     /// replaces the first.
-    #[napi(ts_args_type = "callback: (epoch: number) => void")]
     pub fn watch(&self, env: Env, callback: Function<f64, ()>) -> Result<()> {
         let engine = self.engine().map_err(|failure| failure.into_napi(&env))?;
         let tsfn = callback
@@ -1254,7 +1321,6 @@ impl NativeEngine {
     }
 
     /// Ends the watch `watch` started.
-    #[napi]
     pub fn unwatch(&self) {
         if let Some(stop) = self
             .watching
@@ -1268,7 +1334,6 @@ impl NativeEngine {
 
     /// Stops the runner and ends every event stream; every later call is
     /// refused.
-    #[napi]
     pub fn shutdown(&self) {
         if let Ok(engine) = self.engine() {
             engine.shutdown();
@@ -1277,7 +1342,6 @@ impl NativeEngine {
 
     /// Shuts the engine down and lets it go: its storage closes once a
     /// call in flight returns.
-    #[napi]
     pub fn close(&self) {
         let engine = self
             .engine
@@ -1290,11 +1354,6 @@ impl NativeEngine {
     }
 }
 
-// reentry is the refusal of a call that a behavior, a policy or a matcher
-// written in TypeScript makes back into the engine itself while it runs,
-// rather than through its context: it would open a second transaction
-// inside the call's (D58: a behavior reaches the engine through its
-// context alone).
 // shut_down_with stops the engine's runner and streams when the runtime
 // tears its environment down (a worker that ends, a process that exits).
 fn shut_down_with(env: &Env, engine: &Arc<Engine>) -> Result<()> {
@@ -1306,6 +1365,11 @@ fn shut_down_with(env: &Env, engine: &Arc<Engine>) -> Result<()> {
     Ok(())
 }
 
+// reentry is the refusal of a call that a behavior, a policy or a matcher
+// written in TypeScript makes back into the engine itself while it runs,
+// rather than through its context: it would open a second transaction
+// inside the call's (D58: a behavior reaches the engine through its
+// context alone).
 fn reentry() -> Failure {
     Failure::usage(
         "a behavior, access policy or permission matcher written in TypeScript cannot call the engine itself while it runs: it runs inside the engine's transaction, so a behavior reaches the engine through its context",

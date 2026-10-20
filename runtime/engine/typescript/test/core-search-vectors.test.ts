@@ -24,14 +24,13 @@ import {
   RRF_K,
   type AccessPolicy,
   type Engine,
-  type EngineOptions,
   type Principal,
   type SchemaSearchHit,
   type SearchHit,
 } from '../dist/index.js';
 import { engineApp } from '../dist/http/index.js';
 import { MCP_PATH, engineMcp } from '../dist/mcp/index.js';
-import { alice, cleanup, drivers, openTestEngine, schemaDocument, thrown } from './helpers.ts';
+import { alice, cleanup, drivers, openTestEngine, schemaDocument, thrown, type TestEngineOptions } from './helpers.ts';
 
 const embedder: Principal = { subject: 'embedder', permissions: ['notes.embed'] };
 const bob: Principal = { subject: 'bob', permissions: [] };
@@ -122,11 +121,11 @@ const rrf = (...places: number[]) => places.reduce((score, place) => score + 1 /
 afterEach(cleanup);
 
 for (const driver of drivers) {
-  function open(options: Partial<EngineOptions> = {}): Engine {
+  function open(options: Partial<TestEngineOptions> = {}): Engine {
     return openTestEngine({ driver, clock: () => 1_790_000_000_000, ...options });
   }
 
-  function desks(options: Partial<EngineOptions> = {}): Engine {
+  function desks(options: Partial<TestEngineOptions> = {}): Engine {
     const engine = open(options);
     publish(engine, notes());
     engine.instances.create(alice, 'Note', { title: 'Walnut desk', body: 'A desk of solid wood.' }, { id: 'n1' });

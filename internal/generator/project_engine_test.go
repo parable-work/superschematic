@@ -72,7 +72,8 @@ func ratings(behaviors ...string) (*ir.Schema, *schemaconfig.SchemaConfig) {
 // compose an extension's behavior gets engine/rust/<schema>, depending on
 // the extension's crate at its path in the project and on the engine's at
 // the [paths] checkouts, with its ffi member, the archive a Go server
-// links; a later build without it removes the crate and
+// links, and its napi member, the addon a TypeScript server loads; a later
+// build without it removes the crate and
 // the directories it leaves empty; a schema whose types compose the core's
 // alone, the engine fixture, gets none.
 func TestProjectEngineCrateIsWrittenAndRemoved(t *testing.T) {
@@ -85,7 +86,7 @@ func TestProjectEngineCrateIsWrittenAndRemoved(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := filepath.Join(repo, "schemas", "dist")
-	paths := naming.LocalPaths{EngineRust: filepath.Join(repo, "engine"), EngineBehaviorsRust: filepath.Join(repo, "behaviors"), EngineABIRust: filepath.Join(repo, "abi")}
+	paths := naming.LocalPaths{EngineRust: filepath.Join(repo, "engine"), EngineBehaviorsRust: filepath.Join(repo, "behaviors"), EngineABIRust: filepath.Join(repo, "abi"), EngineNapiRust: filepath.Join(repo, "napi")}
 	opts := Options{OutputRoot: out, Registry: reg, RepositoryRoot: repo, Paths: paths}
 
 	schema, cfg := ratings("acme.Rating", "Comments")
@@ -124,6 +125,13 @@ func TestProjectEngineCrateIsWrittenAndRemoved(t *testing.T) {
 	if !strings.Contains(string(ffi), "export_engine_c_abi!(behaviors = project::behaviors);") {
 		t.Errorf("ffi/src/lib.rs exports no C ABI over the crate's behaviors:\n%s", ffi)
 	}
+	napi, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(projectengine.NapiLibFile)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(napi), "export_engine_napi!(behaviors = project::behaviors);") {
+		t.Errorf("napi/src/lib.rs exports no addon over the crate's behaviors:\n%s", napi)
+	}
 
 	schema, cfg = ratings("Comments")
 	result, err = Run(schema, cfg, opts)
@@ -147,7 +155,7 @@ func TestProjectEngineCrateIsWrittenAndRemoved(t *testing.T) {
 }
 
 // An extension behavior whose crate the project does not hold leaves the
-// schema to the TypeScript engine: no crate, and the log says why.
+// schema with no engine that can run it: no crate, and the log says why.
 func TestProjectEngineCrateIsNotWrittenWithoutTheExtensionsCrate(t *testing.T) {
 	var log strings.Builder
 	schema, cfg := ratings("acme.Rating")
@@ -159,7 +167,7 @@ func TestProjectEngineCrateIsNotWrittenWithoutTheExtensionsCrate(t *testing.T) {
 	if _, ok := result.Outputs["engine-rust"]; ok {
 		t.Errorf("wrote %v", result.Outputs)
 	}
-	if !strings.Contains(log.String(), "  - engine-rust: the Rust engine cannot run shop-ratings's behaviors yet, so no engine crate is written: acme.Rating's crate acme-behaviors is not at crates/behaviors in the project") {
+	if !strings.Contains(log.String(), "  - engine-rust: no engine can run shop-ratings's behaviors, so no engine crate is written and an engine refuses the schema: acme.Rating's crate acme-behaviors is not at crates/behaviors in the project") {
 		t.Errorf("the log says nothing of it:\n%s", log.String())
 	}
 }
@@ -169,8 +177,10 @@ func TestProjectEngineCrateIsNotWrittenWithoutTheExtensionsCrate(t *testing.T) {
 // builds and passes its tests, its ffi member's with them: the engine
 // opens on SQLite with behaviors() under tools(), acme's policy, and runs
 // acme.Rating, and so does the one the C ABI's archive opens through its
-// own eng_open, as a Go server would. It needs cargo, and builds the
-// engine: CARGO_TARGET_DIR shares a build.
+// own eng_open, as a Go server would. Its napi member, the addon, builds
+// beside them, with the napi crates a resolve beyond acme's lock file
+// picks (acme's smoke loads it from TypeScript). It needs cargo, and
+// builds the engine: CARGO_TARGET_DIR shares a build.
 func TestProjectEngineCrateBuildsWithAcmeRating(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping cargo build in -short mode")
@@ -199,10 +209,14 @@ func TestProjectEngineCrateBuildsWithAcmeRating(t *testing.T) {
 	if target == "" {
 		target = filepath.Join(t.TempDir(), "target")
 	}
-	cmd := exec.Command(cargo, "test", "--workspace", "--quiet")
-	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "CARGO_TARGET_DIR="+target)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("cargo test in %s: %v\n%s", dir, err, output)
+	// cargo test builds no cdylib whose lib has no tests, so the napi
+	// member builds first.
+	for _, args := range [][]string{{"build", "--workspace", "--quiet"}, {"test", "--workspace", "--quiet"}} {
+		cmd := exec.Command(cargo, args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(), "CARGO_TARGET_DIR="+target)
+		if output, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("cargo %s in %s: %v\n%s", args[0], dir, err, output)
+		}
 	}
 }

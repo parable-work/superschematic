@@ -3,7 +3,7 @@
 `superschematic-schema-ir` is the behavior engine's run-time schema reader
 (D58). The engine defines schemas while it runs, so it reads each one as a
 schema-file document and checks instances against its IR there and then,
-as the TypeScript engine does with `@superschematic/schema-runtime`. This
+as the TypeScript engine did with `@superschematic/schema-runtime`. This
 crate is that runtime's IR reader, validation and parse, and its strict
 schema-file loader, ported to Rust with the same paths, validator names
 and messages.

@@ -1,6 +1,6 @@
 [package]
 name = "superschematic-engine-napi"
-description = "The engine's Node-API addon, which @superschematic/engine loads to run on the Rust engine (D58)"
+description = "The engine's Node-API addon as a library (D58): its implementation and export_engine_napi!, which an addon crate expands once over its project's behaviors"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,12 +10,10 @@ publish.workspace = true
 
 [lib]
 name = "superschematic_engine_napi"
-# The addon `napi build` writes into runtime/engine/typescript/native
-# (scripts/engine-napi.sh). Its Node-API symbols resolve only when Node.js
-# or Bun loads it, so it has no Rust tests: a test binary would not link.
-# The TypeScript suite tests it (ENGINE_IMPL=rust).
-crate-type = ["cdylib"]
 path = "src/lib.rs"
+# Its Node-API symbols resolve only when Node.js or Bun loads an addon, so
+# it has no Rust tests: a test binary would not link. @superschematic/engine's
+# TypeScript suite tests the addons built over it.
 test = false
 doctest = false
 
@@ -23,36 +21,38 @@ doctest = false
 # Both databases by default, as the engine has them: a test or a local run
 # opens SQLite, a server Postgres.
 default = ["sqlite", "postgres"]
-sqlite = ["superschematic-engine/sqlite", "superschematic-engine-behaviors/sqlite", "superschematic-engine-workqueue/sqlite"]
-postgres = ["superschematic-engine/postgres", "superschematic-engine-behaviors/postgres", "superschematic-engine-workqueue/postgres"]
+sqlite = ["superschematic-engine/sqlite", "superschematic-engine-behaviors/sqlite"]
+postgres = ["superschematic-engine/postgres", "superschematic-engine-behaviors/postgres"]
 # The test addon's bridge to behaviors written in TypeScript (src/bridge.rs,
 # D58 milestone 7b): the engine's TypeScript suite defines behaviors with
-# defineBehavior and runs them on the Rust engine through it. Never in a
-# shipped addon: scripts/engine-napi.sh builds it for tests with
-# --features js-behaviors.
+# defineBehavior and runs them on the Rust engine through it, and
+# export_engine_napi! exports bridgeCall. Never in a shipped addon:
+# scripts/engine-napi.sh --js-behaviors builds the test addon with it.
 js-behaviors = ["superschematic-engine/dynamic"]
 
 [dependencies]
 # superscalar's pins (third_party/superscalar/Cargo.lock): napi 3.13.0,
-# napi-derive 3.6.9 over napi-derive-backend 6.1.4, napi-build 2.5.0. The
-# lock file holds napi-derive-backend at 6.1.4, which a fresh resolve moves
-# past to one that does not compile, so the addon builds --locked. `async`
-# runs a call on Postgres off the JavaScript thread (tokio's blocking
-# pool).
+# napi-derive 3.6.9 over napi-derive-backend 6.1.4, and napi-build 2.5.0 in
+# an addon crate's build script. `async` runs a call on Postgres off the
+# JavaScript thread (tokio's blocking pool). An addon crate names neither
+# napi nor napi-derive: export_engine_napi! writes its exports through this
+# crate's.
 napi = { version = "=3.13.0", default-features = false, features = ["napi8", "async"] }
 napi-derive = "=3.6.9"
 serde_json = { version = "1.0.149", features = ["arbitrary_precision", "preserve_order"] }
 superschematic-engine = { path = "../engine", default-features = false }
-# The core's behaviors, which the addon registers when an engine opens:
-# whatever core() returns when it is built.
+# The core's behaviors' names (NAMES): an engine registers the core's of
+# an addon's behaviors whatever its options name.
 superschematic-engine-behaviors = { path = "../behaviors", default-features = false }
-# The work queue's behaviors, which an engine registers after the core's
-# when its options name them (behaviors), as a deployment registers
-# @superschematic/engine-workqueue's.
-superschematic-engine-workqueue = { path = "../../../engine-workqueue/rust", default-features = false }
 
+# napi-derive-backend held at 6.1.4, which a fresh resolve moves past to a
+# release napi-derive 3.6.9 does not compile with. A build-dependency of a
+# crate with no build script is resolved and never built, so this pins it
+# in every workspace that builds an addon over this crate, the engine's
+# (whose lock file holds it too) and a project's engine crate's, which has
+# no committed lock file.
 [build-dependencies]
-napi-build = "=2.5.0"
+napi-derive-backend = "=6.1.4"
 
 [lints]
 workspace = true

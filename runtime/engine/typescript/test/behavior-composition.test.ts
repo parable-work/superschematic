@@ -10,12 +10,10 @@ import {
   IncompatibleChangeError,
   SchemaDocumentError,
   allowAll,
-  appliedMigrations,
-  defineBehavior,
   type BehaviorDeclaration,
-  type ConfigChange,
   type Engine,
 } from '../dist/index.js';
+import { defineBehavior, type ConfigChange } from '../dist/testing/index.js';
 import {
   columnsOf,
   counter,
@@ -29,7 +27,7 @@ import {
   tally,
   type CounterConfig,
 } from './behavior-fixtures.ts';
-import { alice, cleanup, clone, drivers, fieldsOf, freshPath, openEngine, schemaDocument, thrown, track } from './helpers.ts';
+import { appliedMigrations, alice, cleanup, clone, drivers, fieldsOf, freshPath, openEngine, schemaDocument, thrown, track } from './helpers.ts';
 
 afterEach(cleanup);
 

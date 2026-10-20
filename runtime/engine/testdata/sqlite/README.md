@@ -6,28 +6,22 @@ moves the engine to Rust over SQLite and Postgres; a file the TypeScript
 engine wrote must open in the Rust engine and migrate. The Rust engine loads
 `typescript.sql` into an empty file, opens it as the engine opens any file
 (bringing it up to its migrations, a no-op for today's ledger), and must
-answer every read in `expected.json` as recorded.
+answer every read in `expected.json` as recorded. The files are frozen: they
+are the last the TypeScript engine wrote, before the cutover (milestone 14)
+removed it.
 
 | File | What it holds |
 |---|---|
 | `typescript.sql` | The file, as SQL text. |
 | `expected.json` | The reads, and what each returns. |
 
-`runtime/engine-workqueue/typescript/test/sqlite-corpus.ts` writes both
-(the work-queue package depends on the engine, so it can register both sets
-of behaviors), and `test/sqlite-corpus.test.ts` there fails when they are
-stale, when the file the engine writes reads otherwise than its dump loaded
-into a file, or when that file dumps otherwise:
-
-```
-cd runtime/engine/typescript && bun run build
-cd runtime/engine-workqueue/typescript && bun run build
-UPDATE_ENGINE_CORPUS=1 node --test test/sqlite-corpus.test.ts   # rewrite both; review the diff
-```
-
-Until the TypeScript engine goes, a change to its tables or to what a
-behavior stores shows in the diff and is committed with it. After, the files
-stay as the last the TypeScript engine wrote.
+`runtime/engine-workqueue/typescript/test/sqlite-corpus.ts` wrote both with
+the TypeScript engine, and `test/sqlite-corpus.test.ts` there now holds the
+engine, through `@superschematic/engine`, to them: `typescript.sql` loaded
+into a file opens, migrates and reads as `expected.json` says; the script
+below, run on the engine on a file of its own, writes one that reads the
+same; and the text loaded into a file dumps the same text. The Rust test
+kit opens the file too (`testkit/tests/core_branches.rs`).
 
 ## The script
 
@@ -39,7 +33,6 @@ stay as the last the TypeScript engine wrote.
 - the runner, acting as `runner` (who holds `jobs.override`);
 - `values: { thresholdBytes: 1024 }`, so a note's long body goes to the
   value store;
-- the SQLite adapter `node`;
 - a fixed clock, which starts at 2026-10-09T09:00:00Z (1791536400000) and
   which the script moves; and
 - ids from a seeded generator, which `crypto.randomUUID`, which the version

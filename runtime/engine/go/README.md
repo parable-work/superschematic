@@ -85,7 +85,7 @@ err = e.Runner().Start(ctx)
   the meta-schema, the value store's limits, the runner, retention and the
   tools' options. It refuses an archive of another ABI version.
 - `Call(ctx, op, principal, args...)` makes any of the engine's calls by
-  name, as the TypeScript engine's methods take them
+  name, as `@superschematic/engine`'s methods take them
   (`instances.create(principal, 'Order', data, { id })` is `Call(ctx,
   "instances.create", principal, "Order", data, map[string]any{"id":
   ...})`), and returns its result as JSON, nil where the method returns
@@ -105,7 +105,7 @@ err = e.Runner().Start(ctx)
   runs.
 - `Close` stops the runner, ends every event stream, and refuses every
   later call with `ErrClosed`.
-- A refusal is an `*engine.Error`: the TypeScript engine's class
+- A refusal is an `*engine.Error`: `@superschematic/engine`'s class
   (`EngineError`, `InstanceValidationError`, `BehaviorVetoError`,
   `TypeError`, ...), its `Code` and the HTTP status the code answers
   (`Status`), the message, and `Details`, the class's other members as

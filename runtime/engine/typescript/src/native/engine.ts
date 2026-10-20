@@ -1,11 +1,11 @@
 /*
-The engine's synchronous, principal-first API over the Rust engine (D58):
-each method writes its call by name with JSON arguments to the addon's
-callSync, which makes it on this thread, and reads its result back, or
-rethrows its error as the TypeScript engine's class. It is the
-TypeScript Engine's shape, so the engine's suite runs against it
-(ENGINE_IMPL=rust, test/helpers.ts); what it does not do yet throws
-NativeUnsupportedError, naming the gap (test/rust-pending.txt).
+The engine (openEngine, D58): its synchronous, principal-first API over
+the Rust engine's Node-API addon. Each method writes its call by name
+with JSON arguments to the addon's callSync, which makes it on this
+thread, and reads its result back, or rethrows its error as the
+package's class (src/errors.ts). It keeps the API the TypeScript engine
+had (D16), which the package's suite holds it to (test/); what the Rust
+engine does not do throws UnsupportedError, naming the gap.
 
 On Postgres a synchronous call would hold this thread while it waits on
 the database, so the addon refuses it (sync_on_async_storage): an engine
@@ -16,11 +16,11 @@ every call a promise.
 import { hasAnyPermission, type PermissionMatcher } from '@superschematic/http-runtime';
 
 import type { AccessRequest, Principal } from '../access.js';
-import type { SchemaSearchHit } from '../behaviors/core/index.js';
-import type { BehaviorDeclaration } from '../behaviors/declaration.js';
-import type { Page } from '../behaviors/paging.js';
-import type { EventPage, ReadEventsOptions } from '../events/log.js';
-import type { EventWatcher } from '../events/notifier.js';
+import { EngineError, type ValidationIssue } from '../errors.js';
+import type { AnyBehaviorImplementation } from '../testing/behavior.js';
+import type { SchemaSearchHit } from '../types/core.js';
+import type { BehaviorDeclaration } from '../types/declarations.js';
+import type { EventPage, EventWatcher, ReadEventsOptions } from '../types/events.js';
 import type {
   CreateOptions,
   DeleteOptions,
@@ -32,27 +32,22 @@ import type {
   ListOptions,
   OperationOutcome,
   UpdateOptions,
-} from '../instances/store.js';
-import type { NamespaceRecord } from '../namespaces.js';
-import type { PublishResult, SchemaRecord, SchemaSummary } from '../registry/catalog.js';
-import type { ComposedBehavior, DefineOptions, SchemaCapabilities, SchemaTarget, ValidateOptions } from '../registry/registry.js';
-import { EngineError, type ValidationIssue } from '../errors.js';
-import { DEFAULT_NAMESPACE } from '../namespaces.js';
-import type { PruneResult, RunnerPass, RunnerStatus, SubscriptionKey, SubscriptionStatus } from '../runner/runner.js';
-import type { BehaviorDocument, BehaviorSummary } from '../tools/behaviors.js';
-import type { DescribeDocument, ToolFilter, ToolManifest, ToolSummary, ToolTarget } from '../tools/catalog.js';
-import { resolveToolOptions, type ResolvedToolOptions } from '../tools/options.js';
-import type { StoredValue } from '../values/store.js';
-import type { ValueTarget } from '../values/values.js';
-import type { AnyBehaviorImplementation } from '../behaviors/behavior.js';
-import { deepFreeze } from '../behaviors/json.js';
-import { loadAddon, type AddonEngine, type HttpAnswer, type StreamPull } from './addon.js';
+} from '../types/instances.js';
+import { DEFAULT_NAMESPACE, type NamespaceRecord } from '../types/namespaces.js';
+import type { Page } from '../types/paging.js';
+import type { PruneResult, RunnerPass, RunnerStatus, SubscriptionKey, SubscriptionStatus } from '../types/runner.js';
+import type { ComposedBehavior, DefineOptions, PublishResult, SchemaCapabilities, SchemaRecord, SchemaSummary, SchemaTarget, ValidateOptions } from '../types/schemas.js';
+import type { Row, RunResult, SqlValue } from '../types/storage.js';
+import type { BehaviorDocument, BehaviorSummary, DescribeDocument, ToolFilter, ToolManifest, ToolSummary, ToolTarget } from '../types/tools.js';
+import type { StoredValue, ValueTarget } from '../types/values.js';
+import { loadAddon, type Addon, type AddonEngine, type HttpAnswer, type StreamPull } from './addon.js';
 import { Bridge, rowOf, sqlParams } from './bridge.js';
 import { carry } from './carry.js';
-import type { Row, RunResult, SqlValue } from '../storage/driver.js';
-import { Storage } from '../storage/storage.js';
-import { NativeUnsupportedError, restoreError } from './errors.js';
-import { nativeOptions, type HostedOptions, type NativeEngineOptions } from './options.js';
+import { UnsupportedError, restoreError } from './errors.js';
+import { deepFreeze } from './json.js';
+import { nativeOptions, type EngineOptions, type HostedOptions } from './options.js';
+import { openConnection, type SqliteConnection } from './sqlite.js';
+import { resolveToolOptions, type ResolvedToolOptions } from './tool-options.js';
 
 // Hosts answers what the options leave to TypeScript (a policy, a
 // permission matcher, an id source and, with it, a behavior's own UUIDs
@@ -256,7 +251,7 @@ function targetOf(target: ToolTarget | undefined): { target: Omit<ToolTarget, 'f
   return { target: rest, filter };
 }
 
-class NativeNamespaces {
+class EngineNamespaces {
   constructor(private readonly calls: Calls) {}
 
   get names(): readonly string[] {
@@ -321,17 +316,17 @@ class SchemaValidator {
   }
 
   normalize(): never {
-    throw new NativeUnsupportedError("SchemaValidator.normalize, the TypeScript validator's own", 'validator');
+    throw new UnsupportedError("SchemaValidator.normalize, the TypeScript validator's own", 'validator');
   }
 
   validateType(): never {
-    throw new NativeUnsupportedError("SchemaValidator.validateType, the TypeScript validator's own", 'validator');
+    throw new UnsupportedError("SchemaValidator.validateType, the TypeScript validator's own", 'validator');
   }
 }
 
-export { SchemaValidator as NativeSchemaValidator };
+export { SchemaValidator };
 
-class NativeSchemas {
+class EngineSchemas {
   constructor(private readonly calls: Calls) {}
 
   define(principal: Principal, input: string | Record<string, unknown>, options?: DefineOptions): SchemaRecord {
@@ -399,7 +394,7 @@ class NativeSchemas {
   }
 }
 
-class NativeInstances {
+class EngineInstances {
   constructor(private readonly calls: Calls) {}
 
   create(principal: Principal, schema: string, data: unknown, options?: CreateOptions): InstanceRecord {
@@ -440,8 +435,8 @@ class NativeInstances {
 }
 
 // Watchers hears of the commits the engine makes, as the TypeScript
-// engine's notifier tells them (src/events/notifier.ts): after each commit
-// that appended events, once per event, with its cursor. A call this
+// engine's notifier told them: after each commit that appended events,
+// once per event, with its cursor. A call this
 // facade makes is followed by a look at the notifier's epoch, so a
 // watcher hears of its commits before the call returns, as it would on
 // the TypeScript engine; a commit made elsewhere (the runner's thread, an
@@ -545,7 +540,7 @@ class Watchers {
   }
 }
 
-class NativeEvents {
+class EngineEvents {
   constructor(
     private readonly calls: Calls,
     private readonly watchers: Watchers
@@ -577,7 +572,7 @@ class NativeEvents {
   }
 }
 
-class NativeTools {
+class EngineTools {
   constructor(
     private readonly calls: Calls,
     /** The invocation policy and vendor keys the documents are written with, the defaults filled in. */
@@ -609,7 +604,7 @@ class NativeTools {
 }
 
 // HostedRunner runs the runner on this thread's event loop, as the
-// TypeScript engine's runner runs (src/runner/runner.ts): for an engine
+// TypeScript engine's runner ran: for an engine
 // whose policy, matcher or a behavior is written in TypeScript, which
 // answer on this thread alone, so the runner's own thread cannot run
 // them. It wakes on a commit (setImmediate) and at the next retry,
@@ -622,7 +617,7 @@ class HostedRunner {
 
   constructor(
     private readonly calls: Calls,
-    private readonly events: NativeEvents,
+    private readonly events: EngineEvents,
     private readonly clock: () => number,
     private readonly retryInitialMs: number,
     private readonly runDue: () => unknown
@@ -701,13 +696,13 @@ class HostedRunner {
 // The longest setTimeout delay, as the TypeScript runner caps it.
 const MAX_TIMER_MS = 2_147_483_647;
 
-class NativeRunner {
+class EngineRunner {
   private hostedRunner: HostedRunner | undefined;
 
   constructor(
     private readonly calls: Calls,
     private readonly addon: AddonEngine,
-    private readonly events: NativeEvents,
+    private readonly events: EngineEvents,
     private readonly runner: { principal?: unknown; retryInitialMs?: number } | undefined,
     private readonly clock: () => number,
     private readonly closed: () => boolean,
@@ -779,7 +774,7 @@ class NativeRunner {
   }
 }
 
-class NativeValues {
+class EngineValues {
   constructor(private readonly calls: Calls) {}
 
   get(principal: Principal, hash: string, target?: ValueTarget): StoredValue {
@@ -799,7 +794,7 @@ class NativeValues {
   }
 }
 
-class NativeBehaviors {
+class EngineBehaviors {
   constructor(
     private readonly calls: Calls,
     private readonly addon: AddonEngine,
@@ -809,7 +804,7 @@ class NativeBehaviors {
   /** register registers a behavior written in TypeScript, which the test addon's bridge runs. */
   register(implementation: AnyBehaviorImplementation): void {
     if (!this.addon.bridged) {
-      throw new NativeUnsupportedError('a behavior written in TypeScript (behaviors.register)', 'bridge');
+      throw new UnsupportedError('a behavior written in TypeScript (behaviors.register)', 'bridge');
     }
     const descriptor = this.bridge.describe(implementation);
     try {
@@ -835,20 +830,20 @@ class NativeBehaviors {
   }
 
   lookup(): never {
-    throw new NativeUnsupportedError('behaviors.lookup, which returns a TypeScript implementation', 'bridge');
+    throw new UnsupportedError('behaviors.lookup, which returns a TypeScript implementation', 'bridge');
   }
 }
 
 /**
- * The engine's SQLite file, as the TypeScript engine's `engine.storage`
- * reaches it: raw SQL on the engine's own connection, nothing checked, and
+ * The engine's SQLite file (`engine.storage`): raw SQL on the engine's own
+ * connection, nothing checked, and
  * transactions the engine's calls inside run in savepoints of (D58: the
  * deployment's reach into the file, for its tests' looks at the tables and
  * an identity store's DDL). A store that runs transactions of its own
  * statement by statement (BEGIN IMMEDIATE, then COMMIT), as the identity
  * store does, takes a connection of its own on the file (connection()).
  */
-export class NativeStorage {
+export class EngineStorage {
   private readonly connections: Array<{ close(): void }> = [];
 
   constructor(
@@ -922,10 +917,10 @@ export class NativeStorage {
   }
 
   /** connection opens a connection of its own on the engine's file, closed with the engine. */
-  connection(): Storage {
-    const storage = Storage.open(this.path);
-    this.connections.push(storage);
-    return storage;
+  connection(): SqliteConnection {
+    const connection = openConnection(this.path);
+    this.connections.push(connection);
+    return connection;
   }
 
   /** close closes the connections connection() opened. */
@@ -961,26 +956,29 @@ export interface EngineRoute {
   readonly mcp: boolean;
 }
 
-/** The engine on the Rust engine: the TypeScript Engine's API over the addon. */
-export class NativeEngine {
-  readonly namespaces: NativeNamespaces;
-  readonly behaviors: NativeBehaviors;
-  readonly schemas: NativeSchemas;
-  readonly instances: NativeInstances;
-  readonly events: NativeEvents;
-  readonly tools: NativeTools;
-  readonly runner: NativeRunner;
-  readonly values: NativeValues;
+/** The engine: its API over the Rust engine's addon, opened by openEngine. */
+export class Engine {
+  readonly namespaces: EngineNamespaces;
+  readonly behaviors: EngineBehaviors;
+  readonly schemas: EngineSchemas;
+  readonly instances: EngineInstances;
+  readonly events: EngineEvents;
+  readonly tools: EngineTools;
+  readonly runner: EngineRunner;
+  readonly values: EngineValues;
   /** Decides whether a principal holds a permission, as the options gave it; hasAnyPermission by default. */
   readonly permissionMatcher: PermissionMatcher;
   /** `sqlite`, or `postgres`, whose engine is called through callAsync. */
   readonly dialect: 'sqlite' | 'postgres';
   private readonly addon: AddonEngine;
+  // The addon module that opened it, whose routes it serves.
+  private readonly module: Addon;
   private readonly calls: Calls;
   private readonly watchers: Watchers;
-  private readonly nativeStorage: NativeStorage | undefined;
+  private readonly nativeStorage: EngineStorage | undefined;
 
   private constructor(
+    module: Addon,
     addon: AddonEngine,
     clock: (() => number) | undefined,
     hosts: Hosts,
@@ -989,6 +987,7 @@ export class NativeEngine {
     runner: { principal?: unknown; retryInitialMs?: number } | undefined,
     path: string | undefined
   ) {
+    this.module = module;
     this.addon = addon;
     this.dialect = addon.dialect;
     this.permissionMatcher = permissionMatcher;
@@ -996,19 +995,19 @@ export class NativeEngine {
     this.watchers = watchers;
     this.calls = new Calls(addon, clock, hosts, watchers);
     watchers.attach(this.calls);
-    this.namespaces = new NativeNamespaces(this.calls);
-    this.behaviors = new NativeBehaviors(this.calls, addon, hosts.bridge);
-    this.schemas = new NativeSchemas(this.calls);
-    this.instances = new NativeInstances(this.calls);
-    this.events = new NativeEvents(this.calls, watchers);
-    this.tools = new NativeTools(this.calls, tools);
-    this.runner = new NativeRunner(this.calls, addon, this.events, runner, clock ?? Date.now, () => watchers.closed, () => hosts.bridge.depth > 0);
-    this.values = new NativeValues(this.calls);
-    this.nativeStorage = path === undefined || addon.dialect !== 'sqlite' ? undefined : new NativeStorage(addon, path, () => watchers.poll());
+    this.namespaces = new EngineNamespaces(this.calls);
+    this.behaviors = new EngineBehaviors(this.calls, addon, hosts.bridge);
+    this.schemas = new EngineSchemas(this.calls);
+    this.instances = new EngineInstances(this.calls);
+    this.events = new EngineEvents(this.calls, watchers);
+    this.tools = new EngineTools(this.calls, tools);
+    this.runner = new EngineRunner(this.calls, addon, this.events, runner, clock ?? Date.now, () => watchers.closed, () => hosts.bridge.depth > 0);
+    this.values = new EngineValues(this.calls);
+    this.nativeStorage = path === undefined || addon.dialect !== 'sqlite' ? undefined : new EngineStorage(addon, path, () => watchers.poll());
   }
 
-  /** open opens the Rust engine on the options, as Engine.open opens the TypeScript one. */
-  static open(options: NativeEngineOptions): NativeEngine {
+  /** open opens the engine on the options: its storage migrated, the core's behaviors and the ones the options name registered. */
+  static open(options: EngineOptions): Engine {
     if (options.policy === undefined || options.policy === null) {
       throw new TypeError('an engine needs an access policy (policy); pass allowAll for tests and local use');
     }
@@ -1020,14 +1019,14 @@ export class NativeEngine {
     const tools = resolveToolOptions(options.tools);
     const bridge = new Bridge();
     const hosts = new Hosts(hosted, bridge);
-    const loaded = loadAddon();
+    const loaded = loadAddon(options.addon);
     if (loaded.bridgeCall !== undefined) {
       bridge.connect(loaded.bridgeCall);
     }
     bridge.restore = (error) => restoreError(error, (token) => bridge.parkedValue(token));
     if (hosted.behaviors !== undefined) {
       if (loaded.bridgeCall === undefined) {
-        throw new NativeUnsupportedError('a behavior written in TypeScript (defineBehavior), which only the test addon runs', 'bridge');
+        throw new UnsupportedError('a behavior written in TypeScript (defineBehavior), which only the test addon runs', 'bridge');
       }
       json.jsBehaviors = hosted.behaviors.map((implementation) => bridge.describe(implementation));
     }
@@ -1047,20 +1046,20 @@ export class NativeEngine {
       addon.close();
       throw error;
     }
-    return new NativeEngine(addon, clock, hosts, options.permissionMatcher ?? hasAnyPermission, tools, options.runner, options.path);
+    return new Engine(loaded, addon, clock, hosts, options.permissionMatcher ?? hasAnyPermission, tools, options.runner, options.path);
   }
 
-  /** The engine's SQLite file (NativeStorage); an engine on Postgres has none. */
-  get storage(): NativeStorage {
+  /** The engine's SQLite file (EngineStorage); an engine on Postgres has none. */
+  get storage(): EngineStorage {
     if (this.nativeStorage === undefined) {
-      throw new NativeUnsupportedError('engine.storage on Postgres, which is the SQLite file\'s', 'storage');
+      throw new UnsupportedError('engine.storage on Postgres, which is the SQLite file\'s', 'storage');
     }
     return this.nativeStorage;
   }
 
   /** The routes the engine serves (api::routes): what engineApp and engineMcp mount. */
   routes(): EngineRoute[] {
-    return JSON.parse(loadAddon().engineRoutes()) as EngineRoute[];
+    return JSON.parse(this.module.engineRoutes()) as EngineRoute[];
   }
 
   /** handleHttp serves one request through the engine's own routes (src/native/http.ts). */
@@ -1119,7 +1118,11 @@ export class NativeEngine {
   }
 }
 
-/** openNativeEngine is NativeEngine.open. */
-export function openNativeEngine(options: NativeEngineOptions): NativeEngine {
-  return NativeEngine.open(options);
+/**
+ * openEngine opens the engine (D16, D58) on a SQLite file (options.path),
+ * its calls synchronous on this thread; an engine on Postgres is
+ * openEngineAsync's.
+ */
+export function openEngine(options: EngineOptions): Engine {
+  return Engine.open(options);
 }

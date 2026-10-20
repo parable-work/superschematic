@@ -15,7 +15,7 @@ import { afterEach, describe, test } from 'node:test';
 
 import type { Principal } from '@superschematic/engine';
 
-import { DEFAULT_TTL_MS, assignment, blueprint, budget, lease, presence, queue, retries, workQueueBehaviors } from '../dist/index.js';
+import { DEFAULT_TTL_MS, workQueueBehaviors } from '../dist/index.js';
 import { Clock, alice, cleanup, drivers, fenced, jobsFixture, openTestEngine } from './helpers.ts';
 
 afterEach(cleanup);
@@ -33,23 +33,21 @@ function fixtureType(name: string, file: string): Record<string, unknown> {
   return { kind: 'General', name, types: { [type.name]: type } };
 }
 
+// The declaration the work queue's Rust crate embeds, the copy `make
+// behaviors` writes and CI checks.
 function declarationFile(name: string): unknown {
-  return JSON.parse(readFileSync(new URL(`../src/declarations/${name}.behavior.json`, import.meta.url), 'utf8'));
+  return JSON.parse(readFileSync(new URL(`../../rust/declarations/${name}.behavior.json`, import.meta.url), 'utf8'));
 }
 
 for (const driver of drivers) {
   describe(`the work-queue package (${driver})`, () => {
     test('its behaviors carry the core declarations and register with an engine, beside the core behaviors', () => {
-      assert.deepEqual(workQueueBehaviors, [lease, assignment, queue, presence, blueprint, budget, retries]);
-      assert.deepEqual(lease.declaration, declarationFile('Lease'));
-      assert.deepEqual(assignment.declaration, declarationFile('Assignment'));
-      assert.deepEqual(queue.declaration, declarationFile('Queue'));
-      assert.deepEqual(presence.declaration, declarationFile('Presence'));
-      assert.deepEqual(blueprint.declaration, declarationFile('Blueprint'));
-      assert.deepEqual(budget.declaration, declarationFile('Budget'));
-      assert.deepEqual(retries.declaration, declarationFile('Retries'));
+      assert.deepEqual(workQueueBehaviors, ['Lease', 'Assignment', 'Queue', 'Presence', 'Blueprint', 'Budget', 'Retries']);
       assert.equal(DEFAULT_TTL_MS, 60000);
       const engine = openTestEngine({ driver });
+      for (const name of workQueueBehaviors) {
+        assert.deepEqual(engine.behaviors.declaration(name), declarationFile(name), name);
+      }
       assert.deepEqual(engine.behaviors.names(), [
         'Approvals',
         'Assignment',

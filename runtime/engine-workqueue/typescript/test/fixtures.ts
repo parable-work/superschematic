@@ -7,9 +7,8 @@
 // the engines that compose them load against one that admits any name.
 import { readFileSync } from 'node:fs';
 
-import { BehaviorVetoError, EngineError, defineBehavior, type AnyBehaviorImplementation } from '@superschematic/engine';
-
-import { assignment, lease, queue } from '../dist/index.js';
+import { BehaviorVetoError, EngineError, type EngineOptions } from '@superschematic/engine';
+import { defineBehavior } from '@superschematic/engine/testing';
 
 /**
  * The core meta-schema with behaviors let through: any name, any config.
@@ -132,5 +131,5 @@ export const budgetStandIn = defineBehavior({
   },
 });
 
-/** The package's behaviors and the test ones, for an engine on openMetaSchema. */
-export const withTestBehaviors: readonly AnyBehaviorImplementation[] = [lease, assignment, queue, signal, gate];
+/** The package's behaviors, by name, and the test ones, for an engine on openMetaSchema. */
+export const withTestBehaviors: NonNullable<EngineOptions['behaviors']> = ['Lease', 'Assignment', 'Queue', signal, gate];

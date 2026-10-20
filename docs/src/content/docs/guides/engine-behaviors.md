@@ -22,9 +22,11 @@ which CI runs on Node.js and Bun.
 
 The core declares twenty-two behaviors, so every binary's meta-schema
 admits a schema that composes them. The engine implements fifteen itself
-and registers them when it opens. The other seven are claimable work,
-implemented by `@superschematic/engine-workqueue`; the engine refuses a
-schema that composes one until a deployment registers that package.
+and registers them when it opens. The other seven are claimable work, the
+work queue's Rust behaviors, which the engine's addon is built with; the
+engine refuses a schema that composes one until a deployment names them
+in the engine's `behaviors` option (`workQueueBehaviors`, from
+`@superschematic/engine-workqueue`).
 
 | Behavior | What it adds | Requires | Covered in |
 | --- | --- | --- | --- |
@@ -329,7 +331,7 @@ the types does not load it) and the Rust types as `ENGINE_DOCUMENT`:
   extension's behavior the Rust crate its registration names
   (`"crate"`), which the project's engine crate compiles in (below).
 
-With today's TypeScript engine:
+A TypeScript server opens the engine with it:
 
 ```ts
 import { engineDocument } from '@schemas/support-db-types/engine';
@@ -470,22 +472,46 @@ scripts/engine-archive.sh --crate dist/engine/rust/shop-ratings/ffi --out dist/e
 CGO_LDFLAGS="-L$PWD/dist/engine/lib ..." go build ./...
 ```
 
-A TypeScript server's addon will be the workspace's next member, `napi/`,
-once the Node-API addon exports `export_engine_napi!`; until then a
-generated TypeScript server runs the core's addon, which carries the work
-queue's behaviors too, registered by name, so its build refuses only an
-engine database that composes an extension's behavior, and the
-TypeScript engine runs an extension's TypeScript implementation.
+A TypeScript host loads the engine as a Node-API addon, and the crate's
+workspace holds one as its member `napi/` (`<crate>-napi`), the addon
+over `behaviors()`:
+
+```rust
+use acme_shop_ratings_engine as project;
+
+superschematic_engine_napi::export_engine_napi!(behaviors = project::behaviors);
+```
+
+It depends on the addon's library at `[paths] engine_napi_rust`. Build
+it, and name the file it prints when the engine opens, with the engine
+option `addon` or, for every engine the process opens,
+`SUPERSCHEMATIC_ENGINE_ADDON`; the engine's `behaviors` name the
+extension's, which it registers after the core's, and `tools` passes the
+engine document's:
+
+```sh
+export SUPERSCHEMATIC_ENGINE_ADDON="$(scripts/engine-napi.sh --crate dist/engine/rust/shop-ratings/napi --out dist/engine/addon)"
+```
+
+```ts
+const engine = await openEngineAsync({ postgres: { url }, policy: 'permission', behaviors: ['acme.Rating'], tools, metaSchema });
+```
+
+`openEngine({ path, ... })` opens the same addon on a SQLite file.
 
 A generated Go server and runner on the database link it so: the
 checkout's Dockerfile builds the `ffi` member in its engine stage, and
-the generated CI's `check` builds it before it compiles the server.
+the generated CI's `check` builds it before it compiles the server. A
+generated TypeScript server and runner load the `napi` member's addon:
+the checkout's Dockerfile builds it in its engine stage and names it with
+`SUPERSCHEMATIC_ENGINE_ADDON`.
 
 A schema whose types compose the core's behaviors alone gets no crate,
 since the engine's release carries them, and one that composes an
-extension's behavior without a crate gets none either: the TypeScript
-engine runs it, and the build refuses a Go server on it. acme's `crates/behaviors` is the worked example
-(`examples/acme-schematic`).
+extension's behavior whose registration names no crate gets none either:
+the build logs that no engine can run the schema's behaviors, an engine
+refuses the schema, and the build refuses a server on it. acme's
+`crates/behaviors` is the worked example (`examples/acme-schematic`).
 
 ## Display
 
@@ -1241,8 +1267,8 @@ drafts of it, which only a merge brings back. A tagged commit of the
 primary line is released with `releaseCommit`, the version graph's
 release, and a rollback is a release of an earlier one. The instance's
 own fields stay outside the graph. The graph lives
-in the behavior's own tables, through the version graph's SQLite
-adapter, in the transaction of the operation that writes it.
+in the behavior's own tables, kept by the version graph's Rust engine in
+the transaction of the operation that writes it.
 [Version graphs](/superschematic/reference/version-graphs/) covers the
 model under it: refs, commits, merges by conflict unit, releases,
 snapshots and the sweep.

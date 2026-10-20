@@ -1,24 +1,35 @@
 /*
 Loads the engine's Node-API addon (D58), the Rust engine built as
-runtime/engine/rust/napi. Two layouts, as superscalar's loader has them:
+runtime/engine/rust/addon over runtime/engine/rust/napi
+(export_engine_napi!). Where it comes from, first match wins:
 
+- a file the host names: the engine option `addon`, or for every engine
+  the process opens the environment variable SUPERSCHEMATIC_ENGINE_ADDON,
+  a .node file a project's engine crate built over its own behaviors
+  (scripts/engine-napi.sh --crate <crate>/napi). Nothing else is tried
+  when it does not load;
 - a checkout: scripts/engine-napi.sh (`napi build --platform`) leaves
   native/superschematic-engine.<triple>.node beside the package, which is
-  loaded first;
+  loaded first, as superscalar's loader does;
 - a published package: the addon ships in the platform package
-  @superschematic/engine-<triple>, which a later milestone publishes.
+  @superschematic/engine-<triple>, an optional dependency of this package
+  at its version, of which npm installs the one for its host.
 
-The addon is loaded on first use, never when this module is imported, so
-the TypeScript engine runs without it.
+The addon is loaded when the first engine opens, never when this module
+is imported, so the package's types, client and helpers load without it;
+each file loads once.
 */
 
 import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 /** package.json "napi.binaryName": the basename of the .node file the napi CLI writes. */
 export const NATIVE_BINARY_NAME = 'superschematic-engine';
+
+/** The environment variable that names an addon to load in the core's place: a project's. */
+export const NATIVE_ADDON_ENV = 'SUPERSCHEMATIC_ENGINE_ADDON';
 
 /**
  * The version of the contract between the addon and this facade: the
@@ -105,6 +116,8 @@ export interface StreamPull {
 /** What the addon exports. */
 export interface Addon {
   abiVersion(): number;
+  /** The crate that built it: superschematic-engine-addon, the core's, or a project's. */
+  project?(): string;
   /** The routes the engine serves (api::routes), as JSON. */
   engineRoutes(): string;
   /** A behavior context's method, on the test addon alone (src/native/bridge.ts). */
@@ -135,45 +148,68 @@ export function nativePackageName(triple: string): string {
 // dist/native/addon.js -> ../../native, the checkout's native/.
 const nativeDir = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'native');
 
-let loaded: Addon | undefined;
+// Each addon loaded, by its file (resolved), or '' for the core's.
+const loaded = new Map<string, Addon>();
 
-/** loadAddon loads the addon once: the checkout's native/ first, then the platform package. */
-export function loadAddon(): Addon {
-  if (loaded !== undefined) {
-    return loaded;
+/**
+ * loadAddon loads an addon once: the file `path` names, else the one
+ * SUPERSCHEMATIC_ENGINE_ADDON names, else the core's (the checkout's
+ * native/ first, then the platform package).
+ */
+export function loadAddon(path?: string): Addon {
+  const named = path ?? (process.env[NATIVE_ADDON_ENV] || undefined);
+  const key = named === undefined ? '' : resolve(named);
+  const cached = loaded.get(key);
+  if (cached !== undefined) {
+    return cached;
   }
   const require = createRequire(import.meta.url);
+  let addon: Addon;
+  let rebuild = 'scripts/engine-napi.sh';
+  if (named !== undefined) {
+    const source = path === undefined ? NATIVE_ADDON_ENV : 'the engine option addon';
+    rebuild = 'scripts/engine-napi.sh --crate <its crate>';
+    try {
+      addon = require(key) as Addon;
+    } catch (error) {
+      throw new Error(`@superschematic/engine: cannot load the Node-API addon ${key}, which ${source} names: ${message(error)}`);
+    }
+  } else {
+    addon = loadCoreAddon(require);
+  }
+  const version = addon.abiVersion();
+  if (version !== NATIVE_ABI_VERSION) {
+    throw new Error(
+      `@superschematic/engine: the Rust engine's addon${key === '' ? '' : ` ${key}`} speaks contract ${version}, this package ${NATIVE_ABI_VERSION}; rebuild it (${rebuild})`
+    );
+  }
+  loaded.set(key, addon);
+  return addon;
+}
+
+// loadCoreAddon is the core's addon: the checkout's native/ first, then the
+// platform package.
+function loadCoreAddon(require: NodeJS.Require): Addon {
   const triple = nativeTriple();
   const local = join(nativeDir, `${NATIVE_BINARY_NAME}.${triple}.node`);
-  let addon: Addon | undefined;
   // A local file that exists but does not load (stale, truncated, wrong
   // ABI) must not hide an installed platform package; its error rides along.
   let localDetail = '';
   if (existsSync(local)) {
     try {
-      addon = require(local) as Addon;
+      return require(local) as Addon;
     } catch (error) {
       localDetail = `; the checkout's ${local} failed to load: ${message(error)}`;
     }
   }
-  if (addon === undefined) {
-    const pkg = nativePackageName(triple);
-    try {
-      addon = require(pkg) as Addon;
-    } catch (error) {
-      throw new Error(
-        `@superschematic/engine: cannot load the Rust engine's Node-API addon: no ${local} (scripts/engine-napi.sh builds it) and no package ${pkg} (${message(error)})${localDetail}`
-      );
-    }
-  }
-  const version = addon.abiVersion();
-  if (version !== NATIVE_ABI_VERSION) {
+  const pkg = nativePackageName(triple);
+  try {
+    return require(pkg) as Addon;
+  } catch (error) {
     throw new Error(
-      `@superschematic/engine: the Rust engine's addon speaks contract ${version}, this package ${NATIVE_ABI_VERSION}; rebuild it (scripts/engine-napi.sh)`
+      `@superschematic/engine: cannot load the Rust engine's Node-API addon: no ${local} (scripts/engine-napi.sh builds it) and no package ${pkg} (${message(error)})${localDetail}`
     );
   }
-  loaded = addon;
-  return addon;
 }
 
 function message(error: unknown): string {

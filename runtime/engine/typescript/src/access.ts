@@ -23,7 +23,9 @@ Principal has the shape of the HTTP runtime's (@superschematic/http-runtime),
 so a principal its Authenticator returns can be passed on as it is. This
 entry point imports only that package's framework-free entry point, for
 the default permission matcher; the engine's ./http entry point imports
-its Hono adapter (http/app.ts).
+its Hono adapter (http/app.ts). The Rust engine (D58) reads allowAll and
+permissionPolicy() as data, "allowAll" and "permission", and asks any
+other policy on the JavaScript thread during a synchronous call.
 
 A call a service makes (D37) carries the calling service in `service`,
 beside the end user it acts for, whose subject and permissions the
@@ -35,8 +37,6 @@ principal, and a behavior's can() is false for a service standing in.
 */
 
 import { hasAnyPermission, type PermissionMatcher } from '@superschematic/http-runtime';
-
-import { EngineError } from './errors.js';
 
 /** The caller an engine call acts for. */
 export interface Principal {
@@ -158,7 +158,7 @@ export type AccessPolicy = (request: AccessRequest) => boolean;
 export const allowAll: AccessPolicy = () => true;
 
 // The policies permissionPolicy made without a matcher of their own, which
-// an engine answers with its permissionMatcher (boundPolicy).
+// an engine answers as its "permission" rule, with its permissionMatcher.
 const enginePermissionPolicies = new WeakSet<AccessPolicy>();
 
 /**
@@ -210,101 +210,7 @@ export function isEnginePermissionPolicy(policy: AccessPolicy): boolean {
   return enginePermissionPolicies.has(policy);
 }
 
-/**
- * boundPolicy is the policy an engine asks: a permissionPolicy made
- * without a matcher matches with the engine's, and any other policy is
- * itself.
- */
-export function boundPolicy(policy: AccessPolicy, matcher: PermissionMatcher): AccessPolicy {
-  return enginePermissionPolicies.has(policy) ? (request) => permissionAllows(request, matcher) : policy;
-}
-
-/**
- * checkPrincipal refuses a call without a principal that names its
- * subject, and one whose service is malformed or, standing in for an end
- * user, holds permissions.
- */
-export function checkPrincipal(principal: Principal): void {
-  if (
-    typeof principal !== 'object' ||
-    principal === null ||
-    typeof principal.subject !== 'string' ||
-    principal.subject === ''
-  ) {
-    throw new EngineError('invalid_argument', 'an engine call needs a principal with a subject');
-  }
-  const service: unknown = principal.service;
-  if (service === undefined) {
-    return;
-  }
-  const { deployable, serves, subject, standsIn } = (typeof service === 'object' && service !== null ? service : {}) as Partial<PrincipalService>;
-  if (
-    typeof deployable !== 'string' ||
-    deployable === '' ||
-    !Array.isArray(serves) ||
-    !serves.every((api) => typeof api === 'string') ||
-    typeof subject !== 'string' ||
-    typeof standsIn !== 'boolean'
-  ) {
-    throw new EngineError('invalid_argument', "a principal's service is { deployable, serves, subject, standsIn }");
-  }
-  if (standsIn && (!Array.isArray(principal.permissions) || principal.permissions.length > 0)) {
-    throw new EngineError('invalid_argument', `service ${deployable} stands in for an end user and holds no permissions (D37)`);
-  }
-}
-
 /** standsIn reports whether a principal is a service standing in for an end user. */
 export function standsIn(principal: Principal): boolean {
   return principal.service?.standsIn === true;
-}
-
-/** Access asks the deployment's policy and throws forbidden on a refusal. */
-export class Access {
-  constructor(private readonly policy: AccessPolicy) {
-    if (typeof policy !== 'function') {
-      throw new TypeError('an engine needs an access policy (policy); pass allowAll for tests and local use');
-    }
-  }
-
-  /** allows asks the policy about a schema; only a literal true allows. */
-  allows(principal: Principal, action: SchemaAction, namespace: string, schema: string, operation?: string): boolean {
-    return this.ask(operation === undefined ? { principal, action, namespace, schema } : { principal, action, namespace, schema, operation });
-  }
-
-  /** require throws forbidden unless the policy allows the action on the schema. */
-  require(principal: Principal, action: SchemaAction, namespace: string, schema: string, operation?: string): void {
-    if (!this.allows(principal, action, namespace, schema, operation)) {
-      const what = operation === undefined ? `${action} ${schema}` : `call ${operation} (${action}) on ${schema}`;
-      throw new EngineError('forbidden', `${principal.subject} may not ${what} in namespace ${namespace}`);
-    }
-  }
-
-  /** allowsManage asks the policy about a namespace itself (`manage`); only a literal true allows. */
-  allowsManage(principal: Principal, namespace: string, operation: NamespaceOperation): boolean {
-    return this.ask({ principal, action: 'manage', namespace, operation });
-  }
-
-  /**
-   * allowsListing asks the policy whether the principal may do what an
-   * engine tool does at all, for the tools document (ListingAccessRequest);
-   * only a literal true allows.
-   */
-  allowsListing(principal: Principal, action: 'define' | 'manage', namespace: string, operation?: NamespaceOperation): boolean {
-    return this.ask(operation === undefined ? { principal, action, namespace, listing: true } : { principal, action, namespace, operation, listing: true });
-  }
-
-  /** requireManage throws forbidden unless the policy allows the operation on the namespace. */
-  requireManage(principal: Principal, namespace: string, operation: NamespaceOperation): void {
-    if (!this.allowsManage(principal, namespace, operation)) {
-      throw new EngineError('forbidden', `${principal.subject} may not ${operation} namespace ${namespace}`);
-    }
-  }
-
-  private ask(request: AccessRequest): boolean {
-    const answer: unknown = this.policy(request);
-    if (typeof answer === 'object' && answer !== null && typeof (answer as { then?: unknown }).then === 'function') {
-      throw new TypeError('an access policy is synchronous: it returned a promise');
-    }
-    return answer === true;
-  }
 }

@@ -2,50 +2,31 @@
 The engine's MCP endpoint (D16): /namespaces/{namespace}/mcp speaks MCP
 over the streamable HTTP transport, one tool per operation of every live
 schema the namespace reaches, the schema tools and the search across
-schemas (tools/catalog.ts).
-
-The protocol is the official TypeScript SDK's (@modelcontextprotocol/server,
-an optional peer dependency of this entry point): createMcpHandler serves
-each request with a fresh low-level Server over a web-standard
-Request/Response exchange, statelessly, for the 2025 protocol revisions
-(initialize, tools/list, tools/call; GET and DELETE answer 405) and for
-2026-07-28 (server/discover). It needs no HTTP server of its own, so the
-route mounts on Hono beside the engine's others.
+schemas. The engine serves it itself (D58): MCP's stateless JSON-RPC, on
+the 2025 protocol revisions (initialize, tools/list, tools/call; GET and
+DELETE answer 405) and 2026-07-28 (server/discover), so instances share
+nothing for it. engineMcp is the Hono adapter that mounts it
+(src/native/http.ts).
 
 The route goes through the HTTP runtime (D15) like every engine route:
 its rate limit, timeout, body limit, service step and authentication
 gate, with the deployment's Authenticator, or the identity service of
 the core user model (D50), and, when it passes one, its service
-authenticator (D37). The caller it establishes, an end user, a
-service acting for one, or a service standing in for one
-(http/callers.ts), is the principal every tools/list and tools/call acts
-as, so the engine's access policy answers each call, and the list holds
-the tools the policy lets that caller see. The mount's `tools` filter
-narrows it further, per caller: a session limited to one schema's
-operations lists and calls those alone. A call the engine refuses returns a tool error
-(isError) whose structured content is the problem document the HTTP API
-would answer with; a tool the namespace does not have is a JSON-RPC
-invalid-params error, and a malformed message the SDK's JSON-RPC error.
+authenticator (D37). The caller it establishes is the principal every
+tools/list and tools/call acts as, so the engine's access policy answers
+each call, and the list holds the tools the policy lets that caller see.
+The mount's `tools` filter narrows it further, per caller. A call the
+engine refuses returns a tool error (isError) whose structured content
+is the problem document the HTTP API would answer with; a tool the
+namespace does not have is a JSON-RPC invalid-params error.
 */
 
-import { readFileSync } from 'node:fs';
+import type { RouterRuntimeOptions } from '@superschematic/http-runtime/hono';
+import type { IdentityService } from '@superschematic/http-runtime/identity';
+import type { Hono } from 'hono';
 
-import { Server, ProtocolError, ProtocolErrorCode, createMcpHandler, type CallToolResult, type McpRequestContext, type Tool } from '@modelcontextprotocol/server';
-import { internal, problemBody, HttpProblem, type OperationSpec, type RequestContext } from '@superschematic/http-runtime';
-import { errorHandler, mountManualOperation, notFoundHandler, type RouterRuntimeOptions } from '@superschematic/http-runtime/hono';
-import { identityCorsRoutes, identityRouterOptions, type IdentityService } from '@superschematic/http-runtime/identity';
-import { Hono } from 'hono';
-
-import type { Principal } from '../access.js';
-import type { Engine } from '../engine.js';
-import { callerAuthenticator, principalOf } from '../http/callers.js';
-import { AsyncNativeEngine } from '../native/async.js';
-import { NativeEngine } from '../native/engine.js';
-import { nativeEngineMcp } from '../native/http.js';
-import { EngineBackground } from '../server/background.js';
-import { engineProblem } from '../http/problems.js';
-import { isPlainObject } from '../instances/patch.js';
-import { UnknownToolError, type ToolFilter } from '../tools/catalog.js';
+import { nativeEngineMcp, type ServedEngine } from '../native/http.js';
+import type { ToolFilter } from '../types/tools.js';
 
 export interface EngineMcpOptions extends RouterRuntimeOptions {
   /** Requests per minute per client (the runtime's @rateLimit); absent or 0 for none. */
@@ -70,13 +51,13 @@ export interface EngineMcpOptions extends RouterRuntimeOptions {
    * tools/call of it is the invalid-params error of a tool the namespace
    * does not have, so an agent's session limited to one schema's
    * operations reaches no other tool. Absent, every tool the policy lets
-   * the caller see.
+   * the caller see. It is asked on the JavaScript thread, so an engine
+   * opened with openEngineAsync serves without one.
    */
   tools?: ToolFilter;
   /**
    * Aborted when the host stops serving, which ends every response the
-   * endpoint streams, so a server's shutdown waits for none. On the Rust
-   * engine.
+   * endpoint streams, so a server's shutdown waits for none.
    */
   done?: AbortSignal;
 }
@@ -84,141 +65,14 @@ export interface EngineMcpOptions extends RouterRuntimeOptions {
 /** The MCP endpoint's path, relative to where the app is mounted. */
 export const MCP_PATH = '/namespaces/{namespace}/mcp';
 
-// What the route hands the SDK's factory for one request.
-interface Caller {
-  principal: Principal;
-  namespace: string;
-  ctx: RequestContext;
-}
-
 /**
- * engineMcp builds the Hono app that serves an engine's MCP endpoint.
- * Mount it where the HTTP API is mounted
+ * engineMcp builds the Hono app that serves an engine's MCP endpoint,
+ * openEngine's, openEngineAsync's or one opening in the background
+ * (openEngineInBackground), which answers 503 until it opens. Mount it
+ * where the HTTP API is mounted
  * (`app.route('/api', engineMcp(engine, options))`), with the same
- * options. It serves the Rust engine too, openEngineAsync's on Postgres
- * included, as an adapter over the engine's own MCP endpoint (D58).
+ * options.
  */
-export function engineMcp(engine: Engine | AsyncNativeEngine | EngineBackground, options: EngineMcpOptions = {}): Hono {
-  // The Rust engine serves its own MCP endpoint (D58); this app is its adapter.
-  if (engine instanceof AsyncNativeEngine || engine instanceof EngineBackground || (engine as unknown) instanceof NativeEngine) {
-    return nativeEngineMcp(engine as unknown as NativeEngine | AsyncNativeEngine | EngineBackground, options);
-  }
-  const deployed = options.onError;
-  const mapError = async (error: unknown, ctx: RequestContext): Promise<HttpProblem | Response | undefined> =>
-    engineProblem(error) ?? (deployed ? await deployed(error, ctx) : undefined);
-  const authenticate = options.identity ? identityRouterOptions(options, 'engineMcp').authenticate : options.authenticate;
-  const runtime: RouterRuntimeOptions = { ...options, authenticate: callerAuthenticator(authenticate), onError: mapError };
-  const serverInfo = options.serverInfo ?? packageInfo();
-  const handler = createMcpHandler((context) => serverFor(engine, context, serverInfo, options.instructions, mapError, options.tools));
-  const app = new Hono();
-  // The trusted origins' CORS on the endpoint alone, as engineApp's on its
-  // routes, so an app mounted beside it gets none of it.
-  const cors = options.identity ? identityCorsRoutes(app, options.identity) : () => {};
-
-  for (const method of ['POST', 'GET', 'DELETE'] as const) {
-    const spec: OperationSpec = {
-      name: `mcp${method[0]}${method.slice(1).toLowerCase()}`,
-      namespace: 'engine',
-      method,
-      path: MCP_PATH,
-      pathParams: [{ name: 'namespace', kind: 'string', required: true }],
-      queryParams: [],
-      bodyParams: [],
-      auth: { public: false, required: true, permissions: [] },
-      manual: true,
-      ...(options.rateLimitPerMinute ? { rateLimitPerMinute: options.rateLimitPerMinute } : {}),
-      ...(options.timeoutSeconds ? { timeoutSeconds: options.timeoutSeconds } : {}),
-    };
-    cors(spec);
-    mountManualOperation(
-      app,
-      spec,
-      (c, ctx) => {
-        const principal = principalOf(ctx);
-        // An unknown namespace is the HTTP API's 404 problem, before any
-        // MCP exchange.
-        const namespace = engine.namespaces.resolve(c.req.param('namespace') as string);
-        const caller: Caller = { principal, namespace, ctx };
-        return handler.fetch(c.req.raw, {
-          authInfo: { token: ctx.bearerToken ?? '', clientId: principal.subject, scopes: [...principal.permissions], extra: { caller } },
-        });
-      },
-      runtime
-    );
-  }
-
-  app.notFound(notFoundHandler());
-  app.onError(errorHandler((error) => engineProblem(error)));
-  return app;
-}
-
-// serverFor is the SDK factory: a Server for one request, whose tools are
-// the namespace's as the caller sees them.
-function serverFor(
-  engine: Engine,
-  context: McpRequestContext,
-  serverInfo: { name: string; version: string },
-  instructions: string | undefined,
-  mapError: (error: unknown, ctx: RequestContext) => Promise<HttpProblem | Response | undefined>,
-  filter: ToolFilter | undefined
-): Server {
-  const caller = (context.authInfo?.extra as { caller?: Caller } | undefined)?.caller;
-  if (!caller) {
-    throw new Error('the MCP endpoint serves only requests its route authenticated');
-  }
-  const { principal, namespace, ctx } = caller;
-  const server = new Server(serverInfo, { capabilities: { tools: { listChanged: false } }, ...(instructions ? { instructions } : {}) });
-  server.setRequestHandler('tools/list', () => ({ tools: listTools(engine, principal, namespace, filter) }));
-  server.setRequestHandler('tools/call', async (request) => {
-    try {
-      return toolResult(engine.tools.call(principal, request.params.name, request.params.arguments, { namespace, ...(filter === undefined ? {} : { filter }) }));
-    } catch (error) {
-      if (error instanceof UnknownToolError) {
-        throw new ProtocolError(ProtocolErrorCode.InvalidParams, error.message);
-      }
-      const mapped = await mapError(error, ctx);
-      const problem = mapped instanceof HttpProblem ? mapped : internal(undefined, { cause: error });
-      const body = problemBody(problem, ctx.requestId);
-      return { isError: true, content: [{ type: 'text', text: JSON.stringify(body) }], structuredContent: { ...body } };
-    }
-  });
-  return server;
-}
-
-/**
- * listTools is the namespace's visible tools as MCP tools: the handle as
- * the name, the title and description, the argument schema as the input
- * schema, whether it only reads, and `_meta` with the tool's guidance and
- * its invocation policy under the policy's key. A filter narrows them as
- * EngineMcpOptions.tools does.
- */
-export function listTools(engine: Engine, principal: Principal, namespace: string, filter?: ToolFilter): Tool[] {
-  const policyKey = engine.tools.options.invocationPolicy.key;
-  const tools: Tool[] = [];
-  for (const tool of engine.tools.manifest(principal, { namespace, ...(filter === undefined ? {} : { filter }) }).tools) {
-    if (tool.mcp.hidden) {
-      continue;
-    }
-    tools.push({
-      name: tool.mcp.handle,
-      title: tool.mcp.name,
-      description: tool.mcp.description,
-      inputSchema: tool.parameters as Tool['inputSchema'],
-      annotations: { readOnlyHint: tool.replay?.mode === 'read_only' },
-      _meta: { ...(tool.mcp._meta ?? {}), [policyKey]: tool.mcp[policyKey] },
-    });
-  }
-  return tools;
-}
-
-// toolResult is a call's result as MCP carries it: its JSON as text, and
-// as structured content when it is an object.
-function toolResult(result: unknown): CallToolResult {
-  const text = JSON.stringify(result === undefined ? null : result);
-  return isPlainObject(result) ? { content: [{ type: 'text', text }], structuredContent: result } : { content: [{ type: 'text', text }] };
-}
-
-function packageInfo(): { name: string; version: string } {
-  const manifest = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as { name: string; version: string };
-  return { name: manifest.name, version: manifest.version };
+export function engineMcp(engine: ServedEngine, options: EngineMcpOptions = {}): Hono {
+  return nativeEngineMcp(engine, options);
 }

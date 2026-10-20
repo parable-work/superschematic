@@ -1677,6 +1677,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "superschematic-engine-addon"
+version = "0.0.0"
+dependencies = [
+ "napi-build",
+ "superschematic-engine-behaviors",
+ "superschematic-engine-napi",
+ "superschematic-engine-workqueue",
+]
+
+[[package]]
 name = "superschematic-engine-behaviors"
 version = "0.0.0"
 dependencies = [
@@ -1703,12 +1713,11 @@ name = "superschematic-engine-napi"
 version = "0.0.0"
 dependencies = [
  "napi",
- "napi-build",
  "napi-derive",
+ "napi-derive-backend",
  "serde_json",
  "superschematic-engine",
  "superschematic-engine-behaviors",
- "superschematic-engine-workqueue",
 ]
 
 [[package]]

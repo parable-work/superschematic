@@ -1,74 +1,45 @@
 // Shared test setup, the parts of the engine's own test helpers these
 // tests need: every test opens a real SQLite file under a fresh temporary
-// directory with this package's behaviors registered, on a clock the test
-// moves, and cleanup closes and removes them. With ENGINE_RECORD set, the
-// engines they open record the test's calls through the engine's recorder
-// (runtime/engine/typescript/test/recorder.ts), as the engine's own tests
-// do, into scenarios/workqueue-<file>.json: the corpus a second
-// implementation of the engine and these behaviors replays (D58). With
-// ENGINE_IMPL=rust they are the Rust engine, through the engine's Node-API
-// addon, which has this package's behaviors in Rust: an open names each
-// of this package's own objects by its declaration's name, and the addon
-// registers the Rust one; any other behavior (a fixture, a stand-in, a
-// wrapper of one of this package's) is written in TypeScript, which the
-// test addon's bridge runs (scripts/engine-napi.sh --js-behaviors builds
-// it, and the engine's scripts/rust-ratchet.mjs runs this suite against
-// test/rust-pending.txt).
+// directory with this package's behaviors named, on a clock the test
+// moves, and cleanup closes and removes them. The engine is the Rust
+// engine, through its Node-API addon (D58), whose work-queue behaviors are
+// the Rust ones it is built with, by name; any other behavior (a fixture,
+// a stand-in) is written in TypeScript, which the test addon's bridge runs
+// (scripts/engine-napi.sh --js-behaviors builds it). With ENGINE_RECORD
+// set, the engines they open record the test's calls through the engine's
+// recorder (runtime/engine/typescript/test/recorder.ts), as the engine's
+// own tests do, into scenarios/workqueue-<file>.json: the corpus a second
+// implementation of the engine and these behaviors replays (D58).
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { allowAll, isBun, openEngine as openDistEngine, type DriverName, type Engine, type EngineOptions, type Principal } from '@superschematic/engine';
+import { allowAll, openEngine, type Engine, type EngineOptions, type Principal } from '@superschematic/engine';
 
 import { workQueueBehaviors } from '../dist/index.js';
-import { openNativeEngine } from '../../../engine/typescript/dist/native/index.js';
 import { endCase, recordOpen, recordPackage, registerDirectory, type TestContextLike } from '../../../engine/typescript/test/recorder.ts';
 
 /**
- * The engine the tests open: the TypeScript engine, or with
- * ENGINE_IMPL=rust the Rust engine, behind the same API.
+ * The SQLite module a test names, as the TypeScript engine took one. The
+ * engine has a SQLite of its own, so the loop over drivers runs once,
+ * under the name the corpus's cases carry, and the open leaves it out.
  */
-export const engineImpl: 'typescript' | 'rust' = implementation(process.env.ENGINE_IMPL);
+export type DriverName = 'node' | 'bun';
 
-/**
- * Why a test that passes a value driver written in TypeScript
- * (values.driver) skips on the Rust engine: the TypeScript engine's alone,
- * dropped at the cutover (D58), since the Rust engine's drivers are Rust
- * ValueDrivers compiled into it. Such a test is not recorded either, so the
- * corpus each implementation records is the same.
- */
-export const TYPESCRIPT_DRIVER = engineImpl === 'rust' && 'a value driver written in TypeScript (values.driver), dropped at the cutover (D58)';
-
-function implementation(given: string | undefined): 'typescript' | 'rust' {
-  if (given === undefined || given === '' || given === 'typescript') {
-    return 'typescript';
-  }
-  if (given === 'rust') {
-    return 'rust';
-  }
-  throw new Error(`ENGINE_IMPL is typescript (the default) or rust, got ${given}`);
-}
-
-/** openNative opens the Rust engine, each of this package's behaviors by its name, the addon's. */
-function openNative(options: EngineOptions): Engine {
-  const behaviors = options.behaviors?.map((behavior) => (workQueueBehaviors.includes(behavior) ? behavior.declaration.name : behavior));
-  return openNativeEngine({ ...options, behaviors }) as unknown as Engine;
-}
-
-/** openEngine is the engine's openEngine, or with ENGINE_IMPL=rust the Rust engine's. */
-const openEngine: (options: EngineOptions) => Engine = engineImpl === 'rust' ? openNative : openDistEngine;
+/** What the tests open an engine with: the engine's options, and a driver name the engine does not take. */
+export type TestEngineOptions = EngineOptions & { driver?: DriverName };
 
 // This package's behaviors are a replayer's to implement, as the core's
 // are: an open names them, and a scenario lists as test behaviors only
 // those fixtures.ts and the tests define.
-recordPackage('workqueue-', workQueueBehaviors);
+recordPackage('workqueue-');
 
 /** The principal that defines and publishes; the test policy allows it everything. */
 export const alice: Principal = { subject: 'alice', permissions: [] };
 
-/** The adapters this runtime opens: node:sqlite everywhere, bun:sqlite too on Bun. */
-export const drivers: DriverName[] = isBun() ? ['bun', 'node'] : ['node'];
+/** The suite's loop over SQLite modules: the engine's own SQLite, once (DriverName). */
+export const drivers: DriverName[] = ['node'];
 
 const directories: string[] = [];
 const open: Array<{ close(): void }> = [];
@@ -96,7 +67,7 @@ export class Clock {
  * worker over HTTP, whose requests come on its timers and whose clock runs
  * on the wall's.
  */
-export function openTestEngine(options: Partial<EngineOptions> = {}, { record = true }: { record?: boolean } = {}): Engine {
+export function openTestEngine({ driver: _driver, ...options }: Partial<TestEngineOptions> = {}, { record = true }: { record?: boolean } = {}): Engine {
   const directory = mkdtempSync(join(tmpdir(), 'superschematic-workqueue-'));
   directories.push(directory);
   const given: EngineOptions = { path: join(directory, 'engine.db'), policy: allowAll, behaviors: workQueueBehaviors, ...options };

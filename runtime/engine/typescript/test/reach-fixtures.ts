@@ -2,7 +2,8 @@
 // invokes other instances and schema-level operations, and a holder that
 // records references to them, hears of their changes and has schema-level
 // operations.
-import { EngineError, defineBehavior, type BehaviorDeclaration, type FrozenJSON, type ReferenceHears } from '../dist/index.js';
+import { EngineError, type BehaviorDeclaration } from '../dist/index.js';
+import { defineBehavior, type FrozenJSON, type ReferenceHears } from '../dist/testing/index.js';
 
 const noParams = { type: 'object', additionalProperties: false } as const;
 const target = {

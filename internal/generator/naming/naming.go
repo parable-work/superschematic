@@ -441,6 +441,11 @@ type PathsConfig struct {
 	// project's engine crate's ffi member expands: the archive a Go server
 	// links in the core's place.
 	EngineABIRust string `toml:"engine_abi_rust"`
+	// EngineNapiRust holds the engine's Node-API addon as a library,
+	// superschematic-engine-napi (D58), whose export_engine_napi! the
+	// project's engine crate's napi member expands: the addon a TypeScript
+	// server loads in the core's place.
+	EngineNapiRust string `toml:"engine_napi_rust"`
 	// EngineGo holds the behavior engine's Go binding module (D58), which
 	// a Go server whose API's database holds engine types requires. A
 	// server's checkout Dockerfile builds the engine's static archive from
@@ -496,6 +501,7 @@ type LocalPaths struct {
 	EngineBehaviorsRust    string
 	EngineWorkQueueRust    string
 	EngineABIRust          string
+	EngineNapiRust         string
 	EngineGo               string
 	EngineTypeScript       string
 	VersionGraphPython     string
@@ -528,6 +534,7 @@ func (n Naming) LocalPaths(repoRoot string) LocalPaths {
 		EngineBehaviorsRust:    resolve(n.Paths.EngineBehaviorsRust),
 		EngineWorkQueueRust:    resolve(n.Paths.EngineWorkQueueRust),
 		EngineABIRust:          resolve(n.Paths.EngineABIRust),
+		EngineNapiRust:         resolve(n.Paths.EngineNapiRust),
 		EngineGo:               resolve(n.Paths.EngineGo),
 		EngineTypeScript:       resolve(n.Paths.EngineTypeScript),
 		VersionGraphPython:     resolve(n.Paths.VersionGraphPython),
@@ -581,6 +588,7 @@ func (p PathsConfig) checkRelative() error {
 		{"engine_behaviors_rust", p.EngineBehaviorsRust},
 		{"engine_workqueue_rust", p.EngineWorkQueueRust},
 		{"engine_abi_rust", p.EngineABIRust},
+		{"engine_napi_rust", p.EngineNapiRust},
 		{"engine_go", p.EngineGo},
 		{"engine_typescript", p.EngineTypeScript},
 		{"versiongraph_python", p.VersionGraphPython},

@@ -855,12 +855,13 @@ roots, so they build from one lock file:
 | Member | Package | What it is |
 | --- | --- | --- |
 | `ffi/` | `<crate>-ffi` | The engine's C ABI over `behaviors()` (`superschematic_engine_abi::export_engine_c_abi!(behaviors = project::behaviors)`, the C ABI's library at `[paths] engine_abi_rust`), the static archive a Go server links in place of the core's: `scripts/engine-archive.sh --crate <crate>/ffi --out <dir>`, then `-L<dir>` first in `CGO_LDFLAGS`. Its config takes the engine document's `tools`, without which an engine refuses an operation that names the extension's policy value. Its test opens an engine through its own `eng_open` and finds every composed behavior registered |
-| `napi/` (to come) | `<crate>-napi` | A TypeScript server's Node-API addon over `behaviors()`, once the addon crate exports `export_engine_napi!`, the twin of `export_engine_c_abi!` |
+| `napi/` | `<crate>-napi` | The engine's Node-API addon over `behaviors()` (`superschematic_engine_napi::export_engine_napi!(behaviors = project::behaviors)`, the twin of `export_engine_c_abi!`, the addon's library at `[paths] engine_napi_rust`), a cdylib a TypeScript server loads in place of the core's addon: `scripts/engine-napi.sh --crate <crate>/napi --out <dir>` prints the `.node` file, which the engine option `addon` or `SUPERSCHEMATIC_ENGINE_ADDON` names. An engine registers the core's behaviors when it opens, then each other one its options' `behaviors` name. Node-API symbols resolve only when Node.js or Bun loads it, so it has no Rust test; acme's smoke loads it in Node.js and rates a product on it |
 
 A schema that composes the
 core's behaviors alone gets no crate: the release's engine runs them. An
 extension behavior that names no crate, or one the project does not hold,
-leaves the schema to the TypeScript engine, and the build's log says why.
+leaves the schema with no engine that can run it (an engine refuses it),
+and the build's log says why.
 The generator claims no output directory, so the build cache does not
 store the crate, and it removes a crate an earlier build wrote when the
 schema needs none.
@@ -1240,14 +1241,13 @@ core module, as `internal/tools/scalarcatalog` is, because an extension's
 declarations are registered only in its own binary: acme's copy comes
 from `acme-schematic behaviors --extension acme`, which acme's smoke runs
 with `--check` (section 10). The core's copies come from
-the core binary, each into the package that implements it: `make
-behaviors` writes `runtime/engine/typescript/src/behaviors/core/declarations`
-with `--package @superschematic/engine`, the same declarations into the
-Rust engine's `runtime/engine/rust/behaviors/declarations` (D58), and
-`runtime/engine-workqueue/typescript/src/declarations` with `--package
-@superschematic/engine-workqueue`, so each package carries only the
+the core binary, each into the Rust crate that implements it (D58): `make
+behaviors` writes the engine's `runtime/engine/rust/behaviors/declarations`
+with `--package @superschematic/engine` and the work queue's
+`runtime/engine-workqueue/rust/declarations` with `--package
+@superschematic/engine-workqueue`, so each crate carries only the
 declarations it implements, and `make behaviors-check`, part of `make
-test` and CI's go job, fails on a stale copy in any of them. The copy is canonical, not the source bytes:
+test` and CI's go job, fails on a stale copy in either. The copy is canonical, not the source bytes:
 the declaration's keys in `BehaviorDeclaration`'s order, each JSON
 Schema's object keys sorted (`createParamsSchema` and `preconditionSchema`
 included), two-space
@@ -1753,7 +1753,7 @@ each surface:
 | Command | `describe` and `fields`, through `cli.CommandProvider` | `ext/command.go`, `ext/fields.go` |
 | Configuration | `[extension.acme] region` and `projection_scope_setting`; `metadata_key_prefix`, `scalar_jsdoc_tag`, `[package_aliases]` (`@acme/schema-config`) and `[deps] copy` | `ext/extension.go`, `schemas/superschematic.toml` |
 | Tool invocation policy | `confirm`: `never` or `always`, `never` by default, with its `MCPToolOptions` augmentation | `ext/mcp.go`, `packages/schema/src/mcp.ts` |
-| Behavior | `acme.Rating`, which a General data-form service in `ext/testdata/services/shop-ratings` composes, and its TypeScript twin `shop-ratings-ts` with `@behavior`; its `BehaviorConfigs` augmentation; its engine implementation over the declaration's copy | `ext/behavior.go`, `ext/rating.behavior.json`, `packages/schema/src/behaviors.ts`, `packages/behaviors` |
+| Behavior | `acme.Rating`, which a General data-form service in `ext/testdata/services/shop-ratings` composes, and its TypeScript twin `shop-ratings-ts` with `@behavior`; its `BehaviorConfigs` augmentation; its engine implementation, a Rust crate over the declaration's copy, which the project's engine crate compiles in (D58) | `ext/behavior.go`, `ext/rating.behavior.json`, `packages/schema/src/behaviors.ts`, `crates/behaviors` |
 | Binary | `cli.New(cli.Config{Name: "acme-schematic"}, ext.Extension{})` | `cmd/acme-schematic` |
 | A core mechanism in acme's terms | the `Planogram` version graph (D17): `Bay` and `Facing` members declared with the core's `@versionGraph`, `@graphMember` and `@conflictUnit` | `schemas/services/shop-db/src/planogram.schema.ts` |
 

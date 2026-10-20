@@ -9,23 +9,20 @@ import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
 
 import {
-  BehaviorConfigError,
   BehaviorError,
   BehaviorVetoError,
   EngineError,
   OperationParamsError,
   SchemaDocumentError,
-  defineBehavior,
   type AccessPolicy,
   type AccessRequest,
   type Engine,
-  type EngineOptions,
-  type FrozenJSON,
   type Principal,
 } from '../dist/index.js';
+import { BehaviorConfigError, defineBehavior, type FrozenJSON } from '../dist/testing/index.js';
 import { openMetaSchema, testBehaviors } from './behavior-fixtures.ts';
 import { reachBehaviors } from './reach-fixtures.ts';
-import { alice, cleanup, drivers, openTestEngine, schemaDocument, thrown } from './helpers.ts';
+import { alice, cleanup, drivers, openTestEngine, schemaDocument, thrown, type TestEngineOptions } from './helpers.ts';
 
 afterEach(cleanup);
 
@@ -57,12 +54,12 @@ function publish(engine: Engine, name: string, behaviors: Array<{ name: string; 
 }
 
 for (const driver of drivers) {
-  function open(options: Partial<EngineOptions> = {}): Engine {
+  function open(options: Partial<TestEngineOptions> = {}): Engine {
     return openTestEngine({ driver, metaSchema: openMetaSchema(), behaviors: [...testBehaviors, ...reachBehaviors], ...options });
   }
 
   // A Note reads and holds; an Item counts to 5 and can be flagged.
-  function world(options: Partial<EngineOptions> = {}, holder: Record<string, unknown> = {}): Engine {
+  function world(options: Partial<TestEngineOptions> = {}, holder: Record<string, unknown> = {}): Engine {
     const engine = open(options);
     publish(engine, 'Note', [{ name: 'test.Reader' }, { name: 'test.Holder', config: holder }]);
     publish(engine, 'Item', [{ name: 'test.Counter', config: { start: 1, limit: 5 } }, { name: 'test.Flag' }]);

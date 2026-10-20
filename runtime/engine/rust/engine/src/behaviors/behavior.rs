@@ -653,6 +653,30 @@ impl BehaviorSet {
         self
     }
 
+    /// The declared name of each behavior, in the set's order (a
+    /// declaration that cannot be read is `implementation`).
+    pub fn names(&self) -> Vec<String> {
+        self.behaviors
+            .iter()
+            .map(|behavior| behavior.label())
+            .collect()
+    }
+
+    /// The behaviors whose declared names `keep` accepts, in the set's
+    /// order: a binding that is built with more behaviors than an engine's
+    /// options name picks the ones they do (the Node-API addon's
+    /// `behaviors`).
+    pub fn select(&self, keep: impl Fn(&str) -> bool) -> BehaviorSet {
+        BehaviorSet {
+            behaviors: self
+                .behaviors
+                .iter()
+                .filter(|behavior| keep(&behavior.label()))
+                .cloned()
+                .collect(),
+        }
+    }
+
     pub fn len(&self) -> usize {
         self.behaviors.len()
     }

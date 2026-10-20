@@ -13,7 +13,7 @@ validator checks; a refusal that names the value it was given (an
 expected sequence of NaN) names it as the TypeScript engine does.
 */
 
-import { isPlainObject, setMember } from '../instances/patch.js';
+import { isPlainObject, setMember } from './json.js';
 
 /** The member of the object that stands for a value JSON cannot carry. */
 export const NOT_JSON = '$superschematic:notJSON';

@@ -1,7 +1,7 @@
 {
   "name": "@superschematic/engine-workqueue",
   "version": "0.0.0",
-  "description": "Claimable work for @superschematic/engine (D16): the implementations of the core's work-queue behaviors, Lease, Assignment, Queue, Presence, Blueprint, Budget and Retries, which a deployment registers with the engine it opens. Runs on Node.js 24 and Bun. Needs @superschematic/engine next to it in node_modules, the copy the deployment opens; see scripts/link-local-deps.mjs. The ./worker subpath runs a handler over the instances a process claims through the engine's HTTP API, importing only @superschematic/engine/client.",
+  "description": "Claimable work for @superschematic/engine (D16): the work queue's behaviors, Lease, Assignment, Queue, Presence, Blueprint, Budget and Retries, which are Rust (runtime/engine-workqueue/rust, D58) in the engine's addon and a deployment names in the engine's behaviors option (workQueueBehaviors), with their configs' and records' types. Runs on Node.js 24 and Bun. Needs @superschematic/engine next to it in node_modules, the copy the deployment opens; see scripts/link-local-deps.mjs. The ./worker subpath runs a handler over the instances a process claims through the engine's HTTP API, importing only @superschematic/engine/client.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -27,8 +27,7 @@
     "build": "node scripts/link-local-deps.mjs && node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.json",
     "test": "bun run build && bun run test:node && bun run test:bun",
     "test:node": "node scripts/link-local-deps.mjs && tsc -p tsconfig.test.json && node --test 'test/*.test.ts'",
-    "test:bun": "node scripts/link-local-deps.mjs && tsc -p tsconfig.test.json && bun test ./test",
-    "test:rust": "node scripts/link-local-deps.mjs && tsc -p tsconfig.test.json && node ../../engine/typescript/scripts/rust-ratchet.mjs --package ."
+    "test:bun": "node scripts/link-local-deps.mjs && tsc -p tsconfig.test.json && bun test ./test"
   },
   "peerDependencies": {
     "@superschematic/engine": "*"

@@ -5614,7 +5614,10 @@ engine over the behavior's transaction in place of the TypeScript
 `SyncEngine`; and D47's archives. D57 gives a Rust server the entrypoint
 the engine mounts in.
 
-Status: not built. `runtime/engine/rust` holds the workspace;
+Status: built, the cutover (milestone 14) and the generated servers
+that mount the engine (milestones 18 to 20, the amendment below)
+included; what is not built yet is the amendment's status's last
+paragraph. `runtime/engine/rust` holds the workspace;
 `superschematic-engine-storage`: both databases' transactions, savepoints
 and writer locks, the write counter, the migration ledger with the
 engine's migrations for each, a behavior's storage and SQL checker, and
@@ -5714,10 +5717,22 @@ the recorded order rather than its number (a write a rollback undid
 leaves a gap in a Postgres identity column), but for a step it lists
 with what explains it (a change the recording does not see). CI tests
 the workspace on both databases. `superschematic-engine-napi` (milestones
-7a and 7b) is the Rust engine as a Node-API addon, with the core's
-behaviors it is built with and the work queue's an engine's options name
+7a and 7b) is the Rust engine as a Node-API addon, as a library whose
+`export_engine_napi!(behaviors = path)`, the twin of
+`export_engine_c_abi!`, a cdylib expands once:
+`superschematic-engine-addon` (`runtime/engine/rust/addon`) is the core's
+addon, over the core's behaviors and the work queue's, an engine
+registering the core's when it opens and each other one its options name
 (`behaviors`, by name: a behavior object is TypeScript code, even one
-whose declaration names one the addon has), and `@superschematic/engine`'s
+whose declaration names one the addon has, and a name the addon is not
+built with is refused). An engine opens on a project's addon when the
+host names its file (the engine option `addon`, or
+`SUPERSCHEMATIC_ENGINE_ADDON`), else on the checkout's `native/`, else on
+the release's prebuilt `@superschematic/engine-<target>` (darwin-arm64,
+darwin-x64, linux-x64-gnu, linux-arm64-gnu, built with the workspace's
+`dist` profile, fat LTO and stripped, on the build-archives runners, and
+optional dependencies of `@superschematic/engine` at its version); a
+Docker image builds the addon from source. `@superschematic/engine`'s
 `src/native` gives it the package's synchronous API: a call by name with
 JSON in and out on the JavaScript thread over SQLite, the package's error
 classes rebuilt from the class, code and members the addon throws, a
@@ -5740,27 +5755,8 @@ notifier; `schemas.validator`; `engineApp` and `engineMcp` as Hono
 adapters over the engine's own routes, synchronous or asynchronous, a
 clock function read for each request as for each call; and a value JSON
 cannot carry (`NaN`, a `Date`) refused where the TypeScript engine
-refuses it, in its words. A value driver written in TypeScript is not on
-the Rust engine, whose drivers are Rust `ValueDriver`s: the tests that
-pass one are the TypeScript engine's alone, dropped at the cutover. With
-`ENGINE_IMPL=rust` the package's suite runs on the test addon, each file
-on its own under Node.js and Bun, held to `test/rust-pending.txt`, the
-files not passing yet and why, which a file leaves once it passes (CI's
-`engine-napi` job): 66 of its 67 files pass on both (944 of Node.js's 945
-tests, 1,594 of Bun's 1,595), a test of the TypeScript engine's own
-workings skipping on the Rust engine with the Rust test that is its twin
-(the plan of a behavior's SQL, now read through a behavior's
-`sql.explain` on both databases in the test kit); the one left is the
-corpus check, which records the corpus again on the Rust engine and
-meets the TypeScript engine's workings in it (how often a call reads a
-clock function, the engine calls the TypeScript HTTP app makes) until
-the cutover records the corpus from the Rust engine. A test that loops
-over the suite's `backends` runs on Postgres too, through
-`openEngineAsync`, with `ENGINE_TEST_PG_URL` set (the event stream). The
-work queue's suite runs so too (`--package`), its `test/helpers.ts`
-passing the package's own behaviors by name, held to its own
-`test/rust-pending.txt`: all 19 of its files pass on both (240 and 455
-tests). An extension's behavior is a
+refused it, in its words. A value driver written in TypeScript is not on
+the Rust engine, whose drivers are Rust `ValueDriver`s. An extension's behavior is a
 crate of its own (milestone 13a): acme.Rating is `acme-behaviors`
 (`examples/acme-schematic/crates/behaviors`), a workspace of its own
 beside the engine's over the plug-in API alone, whose tests run
@@ -5780,15 +5776,71 @@ language links: `ffi/`, `<crate>-ffi`, expands `export_engine_c_abi!`
 from `superschematic-engine-abi` (`[paths] engine_abi_rust`) into the
 archive a Go server links in the core's place (`scripts/engine-archive.sh
 --crate <crate>/ffi --out <dir>`), its test opening an engine through
-its own `eng_open`; a TypeScript server's addon joins them as `napi/`
-once the Node-API addon exports `export_engine_napi!`, the twin of
-`export_engine_c_abi!`. acme's smoke builds and tests the one its binary
-writes, both members. A schema of the core's behaviors alone gets none,
-and the release's engine runs it; one that composes the work queue's
-behaviors and no extension's gets one too (milestone 18), since the
-core's archive, which a Go server links, leaves the work queue out. Until the cutover (milestone 14), `@superschematic/engine`'s
-`openEngine` is the TypeScript implementation, and acme's `@acme/behaviors`
-implements acme.Rating for it until the cutover removes the package.
+its own `eng_open`; and `napi/`, `<crate>-napi`, expands
+`export_engine_napi!` from `superschematic-engine-napi` (`[paths]
+engine_napi_rust`) into the addon a TypeScript server loads in the core's
+place (`scripts/engine-napi.sh --crate <crate>/napi --out <dir>`), the
+library's manifest pinning napi-derive-backend, which a fresh resolve of
+the crate's lock-less workspace would move past the version napi-derive
+compiles with. acme's smoke builds and tests the one its binary writes,
+its members with it, and loads its addon in Node.js, where an engine on
+it publishes shop-ratings' Product and rates one, acme.Rating in Rust. A
+schema of the core's behaviors alone gets none, and the release's engine
+runs it; one that composes the work queue's behaviors and no extension's
+gets one too (milestone 18), since the core's archive, which a Go server
+links, leaves the work queue out; and one whose extension behavior names
+no crate, or one the project does not hold, gets none, and the build
+says no engine can run it.
+
+The cutover (milestone 14) is built. `@superschematic/engine` is the Rust
+engine's addon: `openEngine` opens it synchronously on SQLite, `Engine`
+its class, `openEngineAsync` its `AsyncEngine`, with `EngineOptions` and
+`PostgresOptions` (formerly `NativeEngineOptions` and
+`NativePostgresOptions`), and the package's error classes, record and
+option types, constants and the config readers callers use
+(`isTerminalState`, `stateOutcome`, `linkPin`, `linkMany`, `uuidV5`) stay
+its surface (`src/types/`, `src/native/`). Removed: the TypeScript engine,
+about 32,000 lines of `runtime/engine/typescript/src` (its behaviors and
+their guidance and declarations' copy, the instances, the schema registry
+and validator, the runner, the event log and retention, the value store,
+the SQLite storage and migrations, the tools catalog, `engine.ts`, the
+TypeScript halves of `engineApp` and `engineMcp`), and with it the
+exports `Namespaces`, `SchemaRegistry`, `InstanceStore`, `EventLog`,
+`Runner`, `BehaviorRegistry`, `Storage`, `ToolCatalog`, `EngineValues`,
+`SqliteValueDriver`, `openDriver`, `isBun`, `migrate`,
+`appliedMigrations`, `engineMigrations`, `ENGINE_OWNER`, `kebabCase`,
+`snakeCase`, `typeArguments`, `linkedTo`, `movedOn`, `targetMove`,
+`SEARCH_SCHEMAS_PARAMS` and `listTools`, the types `DriverName`,
+`SqlDriver`, `StorageOptions`, the migration types, `ValueDriver` and
+`TargetMove`, the `driver` option, which is refused, and the
+dependencies on ajv, the version graph, the schema runtime, the schema IR
+and `@modelcontextprotocol/server`; the work queue's seven TypeScript
+behaviors (about 7,900 lines with their guidance and declarations' copy),
+`workQueueBehaviors` now their names; and acme's `@acme/behaviors`.
+`defineBehavior` and the behavior-authoring types moved to
+`@superschematic/engine/testing`, which runs on the test addon alone.
+`runtime/engine/README.md` ("Breaking changes at the cutover") lists every
+change for a caller. The package's suite and the work queue's are the
+Rust engine's now, on the test addon under Node.js and Bun (892 and 242
+tests), the backends on Postgres with `ENGINE_TEST_PG_URL`; `ENGINE_IMPL`,
+the ratchet and its pending lists are gone, with CI's `engine-napi` job,
+which the `typescript` job's steps replace. A test of the TypeScript
+engine's own workings went with it, its Rust twin kept: the SQLite seam,
+the migration chain from each earlier version, value drivers written in
+TypeScript, a behavior's SQL plans, the tool names' case conversions and
+argument digests, the object scalar rule, Branches' layout and
+descriptor, the `Namespaces` class and the counted calls of the work
+queue's wrappers. The corpora are recorded from the Rust engine, its wall
+clock the engine's strict clock, each write a reading of its own, and
+the readings of a case's engines kept apart as one clock's; they differ
+from the TypeScript engine's recording only where its own workings showed
+(a counting clock a publish read seven times, an archive that changes
+nothing reading the clock, the engine calls the TypeScript HTTP app made,
+the policy question a closed engine asked, a stream frame's place among
+the steps), and the Rust replay and the Go replay pass on them. The
+SQLite corpus stays the last file the TypeScript engine wrote: the
+engine opens it and reads it as recorded, and the script that wrote it,
+run on the engine, writes a file that reads the same.
 
 The Go binding (milestone 15) is built. `superschematic-engine-abi`
 (`runtime/engine/rust/abi`) is the C ABI of the bindings section, as a

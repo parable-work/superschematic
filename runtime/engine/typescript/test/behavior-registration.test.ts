@@ -3,7 +3,8 @@
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
 
-import { defineBehavior, type AnyBehaviorImplementation, type BehaviorDeclaration } from '../dist/index.js';
+import type { BehaviorDeclaration } from '../dist/index.js';
+import { defineBehavior, type AnyBehaviorImplementation } from '../dist/testing/index.js';
 import { counter, counterDeclaration, flag, openBehaviorEngine, testBehaviors } from './behavior-fixtures.ts';
 import { cleanup, clone, drivers, openTestEngine } from './helpers.ts';
 

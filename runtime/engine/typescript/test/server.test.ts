@@ -5,16 +5,15 @@
 // it from the start, 503 unavailable until it opens; deploy defines and
 // publishes a server's documents once; and a mount's done signal ends its
 // event streams. On SQLite always, and on Postgres when ENGINE_TEST_PG_URL
-// names one (a schema of the test's own). It runs whichever engine the
-// suite runs (ENGINE_IMPL), since the entry is the Rust engine's alone, and
-// skips when the addon is not built.
+// names one (a schema of the test's own). It skips when the addon is not
+// built.
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { afterEach, describe, test } from 'node:test';
 
 import { Hono } from 'hono';
 
-import { loadAddon } from '../dist/native/index.js';
+import { loadAddon } from '../dist/native/addon.js';
 import {
   EngineNotOpenError,
   engineApp,

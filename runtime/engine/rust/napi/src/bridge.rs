@@ -37,7 +37,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use napi::bindgen_prelude::*;
-use napi_derive::napi;
 use serde_json::{Map, Value};
 
 use superschematic_engine::behaviors::{
@@ -1238,8 +1237,9 @@ enum ValuesHandle<'a> {
 /// A context's method, called from JavaScript: the generation of the hook
 /// whose context it is, the method, and its arguments as JSON; the result
 /// as JSON, `""` for undefined. A generation whose hook has returned
-/// throws `context_expired`.
-#[napi]
+/// throws `context_expired`. The test addon's `bridgeCall`
+/// ([`crate::export_engine_napi!`] exports it when the library has the
+/// `js-behaviors` feature).
 pub fn bridge_call(env: Env, generation: f64, method: String, args: String) -> Result<String> {
     let _on_js_thread = OnJsThread::enter(&env);
     let _entry = Entry::enter();

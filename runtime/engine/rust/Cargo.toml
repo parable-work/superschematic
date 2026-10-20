@@ -7,7 +7,7 @@ resolver = "2"
 # The work queue's behaviors (runtime/engine-workqueue/rust) are a member
 # too, outside this directory: they build with this lock file and this
 # toolchain, and `cargo --workspace` lints and tests them with the rest.
-members = ["abi", "behaviors", "engine", "ffi", "napi", "storage", "testkit", "testkit-ffi", "../../engine-workqueue/rust"]
+members = ["abi", "addon", "behaviors", "engine", "ffi", "napi", "storage", "testkit", "testkit-ffi", "../../engine-workqueue/rust"]
 
 [workspace.package]
 version = "0.0.0"
@@ -20,3 +20,14 @@ publish = false
 [workspace.lints.clippy]
 all = { level = "deny", priority = -1 }
 cognitive_complexity = "warn"
+
+# What a release ships (D58): the prebuilt addons (@superschematic/engine-<target>,
+# scripts/engine-napi.sh --dist). One codegen unit and LTO across the crates
+# let the linker drop what no export reaches, and stripping drops the
+# symbol table; a release build without them is quicker to link, which a
+# test run wants.
+[profile.dist]
+inherits = "release"
+lto = "fat"
+codegen-units = 1
+strip = "symbols"

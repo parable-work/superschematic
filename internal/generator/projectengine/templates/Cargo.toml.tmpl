@@ -20,10 +20,21 @@ publish = false
 # The bindings a host of another language links, each a crate of its own
 # over behaviors(), built from this lock file into this target directory:
 # ffi, the C ABI's static archive a Go server links in the core's place
-# (scripts/engine-archive.sh --crate <this directory>/ffi --out <dir>).
+# (scripts/engine-archive.sh --crate <this directory>/ffi --out <dir>), and
+# napi, the Node-API addon a TypeScript server loads in the core's place
+# (scripts/engine-napi.sh --crate <this directory>/napi --out <dir>).
 [workspace]
 resolver = "2"
 members = [{{ range $i, $m := .Members }}{{ if $i }}, {{ end }}{{ quote $m }}{{ end }}]
+
+# What a release of the engine ships its archive and addon with: one
+# codegen unit and LTO across the crates, symbols stripped
+# (scripts/engine-napi.sh --dist).
+[profile.dist]
+inherits = "release"
+lto = "fat"
+codegen-units = 1
+strip = "symbols"
 
 # The databases the engine runs on: both by default, as the engine has
 # them. A host that needs one turns the default off and names it.

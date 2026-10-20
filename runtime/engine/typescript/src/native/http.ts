@@ -59,29 +59,34 @@ import { callerAuthenticator, principalOf } from '../http/callers.js';
 import { engineProblem } from '../http/problems.js';
 import { checkStreamOptions } from '../http/stream.js';
 import type { EngineMcpOptions } from '../mcp/app.js';
-import type { ToolFilter } from '../tools/catalog.js';
+import type { ToolFilter } from '../types/tools.js';
 import { EngineBackground } from '../server/background.js';
 import { loadAddon, type StreamPull } from './addon.js';
-import { AsyncNativeEngine } from './async.js';
-import type { EngineRoute, NativeEngine } from './engine.js';
+import { AsyncEngine } from './async.js';
+import type { Engine, EngineRoute } from './engine.js';
 
 /** An engine these adapters serve: the synchronous facade's, openEngineAsync's, or one opening in the background. */
-export type ServedEngine = NativeEngine | AsyncNativeEngine | EngineBackground;
+export type ServedEngine = Engine | AsyncEngine | EngineBackground;
 
-/** The routes the engine serves (api::routes), for any engine: the addon's. */
-export function engineRoutes(): EngineRoute[] {
-  return JSON.parse(loadAddon().engineRoutes()) as EngineRoute[];
+/**
+ * The routes the engine serves (api::routes), for any engine: those of the
+ * addon the path names, else of the one SUPERSCHEMATIC_ENGINE_ADDON names,
+ * else of the core's, which are every addon's.
+ */
+export function engineRoutes(addon?: string): EngineRoute[] {
+  return JSON.parse(loadAddon(addon).engineRoutes()) as EngineRoute[];
 }
 
 /**
  * The method and path of each of the engine's routes mounted at prefix,
  * its path parameters in braces: what a host's CORS matches the engine's
  * routes by, beside its APIs' operations (the HTTP runtime's
- * matchOperations and corsMethods).
+ * matchOperations and corsMethods). addon names the addon, as
+ * engineRoutes's does.
  */
-export function engineRouteSpecs(prefix: string): { readonly method: string; readonly path: string }[] {
+export function engineRouteSpecs(prefix: string, addon?: string): { readonly method: string; readonly path: string }[] {
   const base = prefix.replace(/\/+$/u, '');
-  return engineRoutes().map((route) => ({ method: route.method, path: base + route.path }));
+  return engineRoutes(addon).map((route) => ({ method: route.method, path: base + route.path }));
 }
 
 /** What every route answers until a background engine opens. */
@@ -115,7 +120,7 @@ function servingOf(engine: ServedEngine): Serving {
   if (engine instanceof EngineBackground) {
     return backgroundServing(engine);
   }
-  if (engine instanceof AsyncNativeEngine) {
+  if (engine instanceof AsyncEngine) {
     return {
       routes: () => engine.routes(),
       serve: async (head, body, filter) => {
@@ -146,7 +151,7 @@ function servingOf(engine: ServedEngine): Serving {
 // backgroundServing serves a background engine's routes: 503 unavailable
 // until it opens, then the open engine's, through openEngineAsync's serving.
 function backgroundServing(background: EngineBackground): Serving {
-  let opened: { engine: AsyncNativeEngine; serving: Serving } | undefined;
+  let opened: { engine: AsyncEngine; serving: Serving } | undefined;
   const current = (): Serving => {
     const engine = background.current;
     if (engine === undefined) {
@@ -158,7 +163,7 @@ function backgroundServing(background: EngineBackground): Serving {
     return opened.serving;
   };
   return {
-    routes: () => engineRoutes(),
+    routes: () => background.routes(),
     serve: (head, body, filter) => current().serve(head, body, filter),
     pull: (id, heartbeatMs) => current().pull(id, heartbeatMs),
     waitsHere: false,

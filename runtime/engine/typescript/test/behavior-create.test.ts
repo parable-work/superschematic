@@ -12,19 +12,29 @@ import {
   EngineError,
   InstanceValidationError,
   allowAll,
-  defineBehavior,
   type AccessPolicy,
   type AccessRequest,
   type BehaviorDeclaration,
   type Engine,
-  type EngineOptions,
-  type FrozenJSON,
   type InstanceFields,
   type InstanceRecord,
   type Principal,
 } from '../dist/index.js';
+import { defineBehavior, type FrozenJSON } from '../dist/testing/index.js';
 import { counter, openMetaSchema } from './behavior-fixtures.ts';
-import { alice, cleanup, drivers, fieldsOf, freshPath, openEngine, openTestEngine, schemaDocument, thrown, track } from './helpers.ts';
+import {
+  alice,
+  cleanup,
+  drivers,
+  fieldsOf,
+  freshPath,
+  openEngine,
+  openTestEngine,
+  schemaDocument,
+  thrown,
+  track,
+  type TestEngineOptions,
+} from './helpers.ts';
 import { testHooks } from './recorder.ts';
 import { runnerPrincipal, testClock } from './runner-fixtures.ts';
 
@@ -239,7 +249,7 @@ function recording(rules: (request: AccessRequest) => boolean = () => true): { p
 }
 
 for (const driver of drivers) {
-  function open(options: Partial<EngineOptions> = {}): Engine {
+  function open(options: Partial<TestEngineOptions> = {}): Engine {
     let made = 0;
     return openTestEngine({
       driver,
@@ -251,7 +261,7 @@ for (const driver of drivers) {
   }
 
   // A Note spawns; a Task counts from 7 and is born.
-  function world(options: Partial<EngineOptions> = {}): Engine {
+  function world(options: Partial<TestEngineOptions> = {}): Engine {
     const engine = open(options);
     publish(engine, 'Note', [{ name: 'test.Spawner' }]);
     publish(engine, 'Task', taskBehaviors);

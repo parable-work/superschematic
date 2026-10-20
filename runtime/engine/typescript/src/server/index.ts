@@ -1,7 +1,7 @@
 /*
-@superschematic/engine/server is what a server on the Rust engine (D58)
-opens and mounts, without the TypeScript engine: a generated TypeScript
-server whose API's database is an engine database imports it alone.
+@superschematic/engine/server is what a generated TypeScript server opens
+and mounts (D58): a server whose API's database is an engine database
+imports it alone.
 
 - openEngineInBackground opens the engine off the JavaScript thread on
   its database, Postgres in a stack, retrying until the database answers,
@@ -18,7 +18,7 @@ server whose API's database is an engine database imports it alone.
   matches beside its APIs' operations.
 
 Its runtime imports are the addon's facade (src/native) and the HTTP
-runtime; nothing of src/behaviors, src/registry or src/storage loads.
+runtime.
 */
 
 export {
@@ -29,9 +29,9 @@ export {
   openEngineInBackground,
 } from './background.js';
 export type { BackgroundOptions } from './background.js';
-export { AsyncNativeEngine, openEngineAsync } from '../native/async.js';
+export { AsyncEngine, openEngineAsync } from '../native/async.js';
 export type { DeployedSchema, DeployOptions, EngineHealth, Promised } from '../native/async.js';
-export type { NativeEngineOptions, NativePostgresOptions } from '../native/options.js';
+export type { EngineOptions, PostgresOptions } from '../native/options.js';
 export {
   nativeEngineApp as engineApp,
   nativeEngineMcp as engineMcp,

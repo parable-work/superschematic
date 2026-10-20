@@ -5,7 +5,7 @@ database is not up yet, as its pools do, and reports the engine
 unavailable, in its readiness and on the engine's routes, until the engine
 opens and its setup passes.
 
-openEngineInBackground opens the Rust engine with openEngineAsync, off the
+openEngineInBackground opens the engine as openEngineAsync does, off the
 JavaScript thread, and tries again after each failure, the open's or the
 setup's, waiting a second, doubling to thirty, until it opens or the
 background closes. A setup is what runs on the engine before it is handed
@@ -13,12 +13,15 @@ out: a server deploys its database's engine document, a runner starts the
 engine's runner; a setup that fails closes the engine, and the next attempt
 opens it again.
 
-It imports nothing of the TypeScript engine, so a server that loads it
-loads the addon's facade alone (the package's ./server entry).
+Its routes are its addon's from the start (the options' addon, else the
+one SUPERSCHEMATIC_ENGINE_ADDON names, else the core's), so a server
+mounts them, and its CORS sees them, before the engine opens.
 */
 
-import { AsyncNativeEngine } from '../native/async.js';
-import type { NativeEngineOptions } from '../native/options.js';
+import { loadAddon } from '../native/addon.js';
+import { AsyncEngine } from '../native/async.js';
+import type { EngineRoute } from '../native/engine.js';
+import type { EngineOptions } from '../native/options.js';
 
 /** The first wait between a background's attempts, which doubles up to DEFAULT_RETRY_MAX_MS, unless its options set them. */
 export const DEFAULT_RETRY_MIN_MS = 1_000;
@@ -40,14 +43,14 @@ export interface BackgroundOptions {
    * engine, and the next attempt opens it again. signal aborts when the
    * background closes.
    */
-  readonly setup?: (engine: AsyncNativeEngine, signal: AbortSignal) => Promise<void> | void;
+  readonly setup?: (engine: AsyncEngine, signal: AbortSignal) => Promise<void> | void;
   /** The wait between attempts, which doubles from retryMinMs to retryMaxMs: DEFAULT_RETRY_MIN_MS and DEFAULT_RETRY_MAX_MS unless set. */
   readonly retryMinMs?: number;
   readonly retryMaxMs?: number;
   /** Told of each failed attempt and how long the background waits before the next. */
   readonly onError?: (error: unknown, retryMs: number) => void;
   /** Told of the open engine, once its setup passed. */
-  readonly onOpen?: (engine: AsyncNativeEngine) => void;
+  readonly onOpen?: (engine: AsyncEngine) => void;
 }
 
 /**
@@ -56,15 +59,17 @@ export interface BackgroundOptions {
  * EngineNotOpenError, with why the last attempt failed.
  */
 export class EngineBackground {
-  #engine: AsyncNativeEngine | undefined;
+  #engine: AsyncEngine | undefined;
   #error: unknown;
   #closed = false;
   readonly #stop = new AbortController();
   readonly #opened: Promise<void>;
+  readonly #addon: string | undefined;
   #open!: () => void;
 
   /** @internal Use openEngineInBackground. */
-  constructor(options: NativeEngineOptions, background: BackgroundOptions = {}) {
+  constructor(options: EngineOptions, background: BackgroundOptions = {}) {
+    this.#addon = options.addon;
     this.#opened = new Promise<void>((resolve) => {
       this.#open = resolve;
     });
@@ -72,8 +77,16 @@ export class EngineBackground {
   }
 
   /** The open engine, or undefined until it opens and once the background closed. */
-  get current(): AsyncNativeEngine | undefined {
+  get current(): AsyncEngine | undefined {
     return this.#closed ? undefined : this.#engine;
+  }
+
+  /**
+   * The routes the engine serves, which engineApp and engineMcp mount:
+   * the open engine's, or until it opens its addon's, which loads here.
+   */
+  routes(): EngineRoute[] {
+    return this.#engine?.routes() ?? (JSON.parse(loadAddon(this.#addon).engineRoutes()) as EngineRoute[]);
   }
 
   /** Whether the background closed. */
@@ -82,7 +95,7 @@ export class EngineBackground {
   }
 
   /** The open engine, or a throw: EngineNotOpenError until it opens, an Error once the background closed. */
-  engine(): AsyncNativeEngine {
+  engine(): AsyncEngine {
     if (this.#closed) {
       throw new Error('the engine is closed');
     }
@@ -97,7 +110,7 @@ export class EngineBackground {
    * aborts first, or the background closes: what a job, a worker or an
    * implementation awaits before it calls the engine.
    */
-  async wait(signal?: AbortSignal): Promise<AsyncNativeEngine> {
+  async wait(signal?: AbortSignal): Promise<AsyncEngine> {
     if (this.#engine !== undefined || this.#closed) {
       return this.engine();
     }
@@ -157,14 +170,14 @@ export class EngineBackground {
     engine?.close();
   }
 
-  async #run(options: NativeEngineOptions, background: BackgroundOptions): Promise<void> {
+  async #run(options: EngineOptions, background: BackgroundOptions): Promise<void> {
     const min = background.retryMinMs !== undefined && background.retryMinMs > 0 ? background.retryMinMs : DEFAULT_RETRY_MIN_MS;
     const max = Math.max(background.retryMaxMs ?? DEFAULT_RETRY_MAX_MS, min);
     let wait = min;
     for (;;) {
-      let engine: AsyncNativeEngine | undefined;
+      let engine: AsyncEngine | undefined;
       try {
-        engine = await AsyncNativeEngine.openAsync(options);
+        engine = await AsyncEngine.openAsync(options);
         if (this.#closed) {
           engine.close();
           return;
@@ -202,11 +215,11 @@ export class EngineBackground {
 }
 
 /**
- * openEngineInBackground opens the Rust engine on options, which are data
+ * openEngineInBackground opens the engine on options, which are data
  * alone, off the JavaScript thread, trying again after each failure, the
  * open's or the setup's, until it opens or the background closes.
  */
-export function openEngineInBackground(options: NativeEngineOptions, background: BackgroundOptions = {}): EngineBackground {
+export function openEngineInBackground(options: EngineOptions, background: BackgroundOptions = {}): EngineBackground {
   return new EngineBackground(options, background);
 }
 
