@@ -16,6 +16,7 @@ type BoardRepositoryInterface interface {
 	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Board, error)
 	FindOne(ctx context.Context, filter *BoardFilter, opts *BoardFindOptions) (*types.Board, error)
 	FindMany(ctx context.Context, filter *BoardFilter, opts *BoardFindOptions) ([]*types.Board, int, error)
+	FindPage(ctx context.Context, filter *BoardFilter, opts *BoardPageOptions) (*BoardPage, error)
 	CreateOne(ctx context.Context, input *types.Board) (*types.Board, error)
 	CreateMany(ctx context.Context, inputs []*types.Board) ([]*types.Board, error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *BoardUpdate) (*types.Board, error)
@@ -117,6 +118,10 @@ func (r *NoOpBoardRepository) FindOne(_ context.Context, _ *BoardFilter, _ *Boar
 
 func (r *NoOpBoardRepository) FindMany(_ context.Context, _ *BoardFilter, _ *BoardFindOptions) ([]*types.Board, int, error) {
 	return []*types.Board{}, 0, nil
+}
+
+func (r *NoOpBoardRepository) FindPage(_ context.Context, _ *BoardFilter, _ *BoardPageOptions) (*BoardPage, error) {
+	return &BoardPage{Rows: []*types.Board{}}, nil
 }
 
 func (r *NoOpBoardRepository) CreateOne(_ context.Context, input *types.Board) (*types.Board, error) {

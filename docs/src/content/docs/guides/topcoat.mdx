@@ -98,6 +98,37 @@ cover an operation's. A page and the JSON API therefore admit the same
 callers. The app names the crate, so the linker keeps it and `.discover()`
 finds its procedures.
 
+### Several services in one app
+
+`[extension.topcoat] services` lists the services one Topcoat app hosts.
+Each crate's `<service>(implementations, page_authenticator)` mounts its
+JSON API at `/api/{*rest}`, a route Topcoat refuses twice as the app
+builds, so an app that hosts several services sets one up that way and
+the others with `<service>_without_api`, which keeps the implementations
+for the in-process calls and adds the crate's pages', procedures' and
+pickers' controls, with a registry of limiters of its own, but mounts no
+JSON API. The app serves at most one service's JSON API at `/api`:
+
+```rust
+Router::builder()
+    .discover()
+    .fixture_console_api(console, Clerk)
+    .fixture_console_suppliers_api_without_api(suppliers, Clerk)
+    .build()
+```
+
+An app links the crates of every service its crates depend on, and
+`.discover()` registers their pages, set up or not. A call into a crate
+the app did not set up answers with a 500 that names the setup it lacks,
+`the app does not host fixture-console-suppliers-api: ...`, not a panic,
+so a page that names one of its items shows the item's id instead.
+
+When the table lists a service and an API dependency of it, a reference
+whose options are the dependency's own operation calls the dependency's
+crate in-process ([Choices from references](#choices-from-references)).
+The service's crate then depends on it, at `../<dependency>`, which
+`build --with-deps` builds first.
+
 A page whose operation would refuse a caller who is not signed in shows a
 Sign in button. It opens the sign-in page with the page to come back to
 (`next`), which the sign-in form sends along, and a sign-in goes back
@@ -323,6 +354,19 @@ a page that pages the list carries it in its links. `listReviews`' `q` is
 the first control of the console's reviews filter
 ([Generated pages](#generated-pages)).
 
+A sorted operation, one with a `SortBy` argument
+([Pages](/superschematic/guides/api-routes/#pages)), reads its order in
+`page.sort`. Its form holds the sort as it holds the limit, `sort` as the
+query sends it, with no control of its own: `page()` reads it by the
+route's rules, a sort the route does not offer being its 400, and
+`query_pairs()` keeps it before the limit, so a page's links keep the
+order. The in-process call unbinds the cursor from the sort before the
+implementation reads it, and binds the page's `next` to it after, as the
+router does: a cursor from the JSON API pages the call, one from the call
+pages the JSON API, and one returned under another sort is the 400 at
+`cursor`. A sorted operation's procedure takes `sort` beside `cursor` and
+`limit`.
+
 ### Typed controls
 
 A `Temporal.Date` field or argument is `type="date"` and a
@@ -383,7 +427,7 @@ An API that declares what an id refers to, `productId: RefersTo<Identity.UUID, P
 ([References and search](/superschematic/reference/references-and-search/#refersto-a-value-that-names-an-item)),
 needs no choices for it: the
 crate writes `references`, with a function per form that holds one,
-`<form>_choices(cx, choices)`, and per record, `<record>_labels(cx,
+`<form>_choices(cx, form, choices)`, and per record, `<record>_labels(cx,
 records, choices)`. The first gives each such control the target's items
 as options, from the one operation that lists them, called once a request
 as the page's caller, its first page when it pages; when more items
@@ -395,14 +439,61 @@ values in chunks of the lesser of its `listMax` and, when the listing
 pages, its `maxLimit`, at most ten calls a target each time. Both
 answer under the app's choices, which win where they name a field, and
 for which no call is made. The acme new-order page gives no choices of
-its own, so each line's product is a select of the products
-`listProducts` lists, each by its name:
+its own, and `listProducts` searches the products by name, so each line's
+product is a search picker, below, of the products it finds, each by its
+name. The page passes the form it renders, the one posted after a
+"Find", so the picker lists what that text finds:
 
 <Snippet file="topcoat/src/lib.rs" from="let choices = references::place_order_input_form_choices" to="place_order_input_fields(form" />
 
 A caller the listing operation refuses gets a text input and the id, and
 the page renders as it did. A reference whose listing operation has no
 in-process call, a webhook's, is left out, and the build log says why.
+
+When the listing operation searches, with a `SearchQuery` argument, the
+control is a search picker instead, however many items there are: a
+search box, `_find.<control>`, labeled after the target's plural and
+with the search's rules' attributes, a "Find" button, and the select of
+the first page of the items the box's text finds, at the listing's
+`defaultLimit`, with a note when more match. The value held is always an
+option, named through the lookup. `<form>_choices` reads the texts from
+the form it is given, which holds them in `finds`, and every picker
+searches its text, so its box always says what its select lists. Each
+distinct text is one listing a request, and a request searches at most
+ten distinct texts through one listing operation, every picker it lists
+counted together; a picker past them lists the first page and says to
+search again. A filter's "Find" sends its query, so the matches show
+beside the list. A post's posts the form with `_action=find:<control>`,
+as a row button does, and the page renders the form again as sent, 200,
+without the operation, that picker's text searched past the ten; the
+hidden submit ahead of every "Find" is still the one Enter presses. A row
+button's post and a refused one render each picker's text searched too,
+and a removed line's text goes with it. A text the search refuses shows
+the route's message. The app's choices win, with no picker and no call,
+and a caller the listing refuses gets the plain control.
+
+Each picker is a Topcoat shard, at
+`/_superschematic/<service>/_pick/<target>`. Without Topcoat's runtime it
+renders in place. With it, the picker renders again as the reader types
+and each time the reader presses "Find", the same text too, the value the
+select holds kept, and its requests meet the listing's rate limit and
+timeout, as a page that calls it does: past the limit, the shard answers
+the route's 429 with `Retry-After`.
+
+A target that an API dependency declares
+([Options from an API dependency](/superschematic/reference/references-and-search/#options-from-an-api-dependency))
+is listed by the API's own operation when it has one, else by the
+dependency's. One app that hosts both, by the table
+([Several services in one app](#several-services-in-one-app)), calls the
+dependency's crate for its items, under its rules and its setup, and a
+page that does meets the dependency's rate limit. Otherwise the reference
+is left out, and the build log gives the reason: the table does not list
+both, the dependency's config generates no API server, its server is not
+Rust, its config or its API cannot be read, or its crate is not built.
+The extension reads a dependency's API only for a reference that calls
+it, so a dependency no reference calls fails no build. When both APIs
+authenticate with the identity runtime, the crate's `identity-*` features
+turn on the dependency's crate's too.
 
 ## Records
 
@@ -536,7 +627,7 @@ beside `orders`, is titled by its own words, Archived.
 | --- | --- |
 | The index of the resources the shopper may list | `/console` |
 | The orders, a page at a time, with their filter and a link to each | `/console/orders` |
-| The new order, each line's product a select of the products, and the POST that places it | `/console/orders/new` |
+| The new order, each line's product a picker of the products, and the POST that places it | `/console/orders/new` |
 | An order: its detail, its lines by their products' names, and the cancel form | `/console/orders/{order_id}` |
 | The cancel's POST | `/console/orders/{order_id}/cancel` |
 | The products, a page at a time, their `ids` lookup a product select, and a link to each | `/console/products` |
@@ -600,8 +691,8 @@ procedures. The app tells them its site's title, its sign-in page and
 any choices of its own through `pages::Settings` in its app context. The
 acme app gives its title and sign-in page and no choices: the console
 names what an order's lines refer to through `listProducts`, so the
-new-order page offers each line's product in a select and an order's
-page names its lines' products. It adds a Console link to its own pages:
+new-order page offers each line's product in a picker, which finds the
+products by name, and an order's page names its lines' products. It adds a Console link to its own pages:
 
 <Snippet file="topcoat/src/lib.rs" symbol="console_settings" />
 
@@ -630,7 +721,20 @@ cursor offers only the first page's link, and a refused limit is kept by
 no link and no form, so that link and the filter start again at the
 route's default. A paged list without a filter renders no filter form,
 and a paged section on an item's page its first page and a link to the
-next. A search argument is the filter's first control, in a
+next.
+
+A sorted list's table links the headers of its sort fields' columns. The
+column the rows are in order of, the sort sent or the route's
+`defaultSort`, has `aria-sort="ascending"` or `"descending"`, and its link
+reverses the order; another sortable column's link sorts by it
+ascending, `<a href="/console/products?sort=sku" data-ss-sort="sku">`. A
+link keeps the filter and the limit and drops the cursor and `back`, so a
+new order starts at the first page. The filter holds the sort as a hidden
+input, and the pager and the size form keep it. A sort the route refuses
+is its 400, as the form's message, and a section on an item's page shows
+its first page in the default order, with no links. A sort field the
+table shows no column of is sorted by the query alone, and the build log
+names it. A search argument is the filter's first control, in a
 `role="search"` form. Every form a page renders
 takes its references' options, and its tables and details their labels,
 under the app's choices, and a list's rows link to their items through a
@@ -666,7 +770,8 @@ caller and checks the filter, with the route's status for a refusal. The
 runtime applies only a 200, so a refusal leaves the table as it was
 until a reload. A paged list's links set the shard's query too, so a list
 pages in place, back and forth, with or without a filter, and its size
-form sets the query as the filter does. An action's form keeps its
+form sets the query as the filter does. A sorted list's header links set
+it as well, and the headers follow the order the shard renders. An action's form keeps its
 POST-redirect-GET.
 
 acme's console is live: its `superschematic.toml` sets `pages_live =
@@ -767,6 +872,17 @@ create.sql](/superschematic/reference/migrations/#adopt-a-database-built-from-cr
 shows the commands). `Review`'s search fields give the SQLite table its
 `search_text` column, `VIRTUAL`, without the trigram index Postgres
 builds.
+
+An order stores its total, `totalCents`, so the orders table sorts by
+it. `shop-db`'s plan adds `total_cents` as a required column with no
+default and no backfill: a schema's `Default` fills in the decoders'
+value, not the column's, and a backfill is a migration written by hand.
+So a database that already holds orders cannot take the column, in
+SQLite or in Postgres; the step fails on its first order. Delete a
+`shop.db` made before it and plan it anew. Purge a `Dev` environment
+made before it with `superschematic stack dev --remove-data` once, which
+removes its containers and their data as it stops, after the failed
+migration too, then run `stack dev` again.
 
 ## Test the app
 

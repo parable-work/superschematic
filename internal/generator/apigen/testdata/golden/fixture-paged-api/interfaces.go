@@ -22,7 +22,8 @@ type CatalogImplementation interface {
 	// ListItems handles GET /api/items
 	//
 	// The items, two to a page unless the caller asks for up to five, by
-	// their ids or their stock.
+	// their ids or their stock, in order of their names unless the caller
+	// sorts them by name or sku, either way.
 	//
 	// This endpoint pages its list (@paginated): page is the request's cursor,
 	// "" for the first page, and its limit, 1 to 5 (2 when the request
@@ -30,6 +31,10 @@ type CatalogImplementation interface {
 	// order and, while more follow, the cursor of the last one: read up to
 	// page.Limit+1 rows and build the page with paging.FromRows, and read the
 	// cursor back with paging.DecodeCursor, which refuses one it cannot read.
+	// page.Sort is the order to read them in (D60, amended), name when the
+	// request sends none: a field of name, sku, descending when page.Sort.Desc,
+	// ties broken by id in the same direction. The cursor is your own key's;
+	// the route binds it to the sort and back.
 	ListItems(ctx context.Context, ids []types.IdentityUUID, inStock *bool, page paging.Request) (paging.Page[types.ItemView], error)
 	// GetItem handles GET /api/items/{itemId}
 	//

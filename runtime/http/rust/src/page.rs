@@ -1,19 +1,29 @@
 //! The page of a `@paginated` operation (D60).
 //!
-//! The generated router reads the request's `cursor` and `limit` with
-//! [`PageSpec::query`], the `Args` of the operation hold the
+//! The generated router reads the request's `cursor`, `limit` and sort
+//! with [`PageSpec::query`], the `Args` of the operation hold the
 //! [`PageRequest`] as `page`, and the implementation returns a [`Page`],
 //! `{items, next}`, which the router answers as the envelope's `data`. An
 //! in-process caller builds the request with [`PageRequest::first`] or
 //! [`PageRequest::after`], or from the values a record or a form holds
-//! with [`PageSpec::request`], and `Args::check` holds it to the route's
-//! spec with [`PageSpec::check`].
+//! with [`PageSpec::request`] or [`PageSpec::sorted_request`], and
+//! `Args::check` holds it to the route's spec with [`PageSpec::check`].
 //!
 //! A cursor is opaque to the caller: the unpadded base64url of the compact
 //! JSON of the implementation's key, the position of the last item of a
-//! page in the operation's order ([`Cursor::encode`]). The Go runtime's
-//! `paging` package and the TypeScript runtime's `page.ts` read and build
-//! the same, held to `runtime/http/testdata/page_parity.json`.
+//! page in the operation's order ([`Cursor::encode`]). A sorted
+//! operation's cursor also names its sort (D60, amended,
+//! [`Cursor::bind`]), so the implementation's keys are the same with a sort
+//! as without. [`PageSpec::query`] reads a request as it was sent, its
+//! cursor still bound; [`PageSpec::unbind`] gives the request the
+//! implementation reads, its sort's default filled in and its cursor
+//! unbound, and [`Page::bind`] binds the `next` the implementation
+//! returns. The router's decode and the in-process call each unbind once,
+//! and bind once.
+//!
+//! The Go runtime's `paging` package and the TypeScript runtime's
+//! `page.ts` read and build the same, held to
+//! `runtime/http/testdata/page_parity.json`.
 
 use std::fmt;
 
@@ -37,16 +47,182 @@ pub const CURSOR_MAX_LENGTH: usize = 1024;
 pub const REFUSED_CURSOR_DETAIL: &str = "cursor is not one this operation returned";
 pub const REFUSED_CURSOR_REASON: &str = "not a cursor this operation returned";
 
+/// The detail and reason of a cursor returned under another sort (D60,
+/// amended).
+pub const SORTED_CURSOR_DETAIL: &str = "cursor is not one this sort returned";
+pub const SORTED_CURSOR_REASON: &str = "returned under another sort";
+
+/// The bytes a bound cursor's JSON starts with, follows its sort with, and
+/// ends with: `{"sort":"-placedAt","key":K}`.
+const BOUND_PREFIX: &[u8] = br#"{"sort":""#;
+const BOUND_KEY: &[u8] = br#"","key":"#;
+const BOUND_SUFFIX: &[u8] = b"}";
+
 /// The largest integer every runtime reads exactly, 2^53 - 1, which
 /// JavaScript's numbers stop at.
 const MAX_SAFE_INTEGER: i64 = (1 << 53) - 1;
 
-/// An operation's `@paginated` limits, as its `Args` carry them in an
-/// associated const: `PageSpec::new(20, 100)`.
+/// The order a page is read in (D60, amended): a field of the item type,
+/// by its JSON name, ascending, or descending; ties break by the item's id
+/// in the same direction. It writes and reads as its text, `placedAt` or
+/// `-placedAt`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct Sort {
+    field: String,
+    desc: bool,
+}
+
+impl Sort {
+    /// Reads `placedAt` or `-placedAt`; `None` for any other text, a
+    /// field's name being a letter or `_`, then letters, digits and `_`.
+    pub fn parse(text: &str) -> Option<Self> {
+        let (field, desc) = match text.strip_prefix('-') {
+            Some(field) => (field, true),
+            None => (text, false),
+        };
+        let mut bytes = field.bytes();
+        let starts = bytes
+            .next()
+            .is_some_and(|byte| byte.is_ascii_alphabetic() || byte == b'_');
+        if !starts || !bytes.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_') {
+            return None;
+        }
+        Some(Self {
+            field: field.to_owned(),
+            desc,
+        })
+    }
+
+    /// The field, by its JSON name.
+    pub fn field(&self) -> &str {
+        &self.field
+    }
+
+    /// Whether the page descends.
+    pub fn desc(&self) -> bool {
+        self.desc
+    }
+
+    /// The sort by the same field in the other direction.
+    pub fn reversed(&self) -> Self {
+        Self {
+            field: self.field.clone(),
+            desc: !self.desc,
+        }
+    }
+}
+
+impl fmt::Display for Sort {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.desc {
+            f.write_str("-")?;
+        }
+        f.write_str(&self.field)
+    }
+}
+
+impl TryFrom<String> for Sort {
+    type Error = String;
+
+    fn try_from(text: String) -> Result<Self, Self::Error> {
+        Self::parse(&text).ok_or_else(|| format!("{text:?} is not a field, or - and a field"))
+    }
+}
+
+impl From<Sort> for String {
+    fn from(sort: Sort) -> Self {
+        sort.to_string()
+    }
+}
+
+/// An operation's `SortBy` argument (D60, amended), as its `Args` carry it
+/// in `PAGE`: the query parameter, the fields by their JSON names, and
+/// `@paginated`'s `defaultSort`, the order of a request that sends none.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SortSpec {
+    param: &'static str,
+    fields: &'static [&'static str],
+    default: &'static str,
+}
+
+impl SortSpec {
+    pub const fn new(
+        param: &'static str,
+        fields: &'static [&'static str],
+        default: &'static str,
+    ) -> Self {
+        Self {
+            param,
+            fields,
+            default,
+        }
+    }
+
+    /// The query parameter the router reads the sort from.
+    pub const fn param(&self) -> &'static str {
+        self.param
+    }
+
+    /// The fields a page sorts by, by their JSON names.
+    pub const fn fields(&self) -> &'static [&'static str] {
+        self.fields
+    }
+
+    /// The order of a request that sends none, as its text.
+    pub const fn default(&self) -> &'static str {
+        self.default
+    }
+
+    /// The values the parameter takes: each field, then the field after
+    /// `-` (`placedAt`, `-placedAt`, `totalCents`, `-totalCents`).
+    pub fn values(&self) -> Vec<String> {
+        self.fields
+            .iter()
+            .flat_map(|field| [(*field).to_owned(), format!("-{field}")])
+            .collect()
+    }
+
+    /// Whether `sort` is one of the values.
+    pub fn offers(&self, sort: &Sort) -> bool {
+        self.fields.contains(&sort.field())
+    }
+
+    /// The default as a [`Sort`]; a default that is no sort's text is the
+    /// generator's error, a 500.
+    fn default_sort(&self) -> Result<Sort, ApiError> {
+        Sort::parse(self.default).ok_or_else(|| {
+            ApiError::internal(format!(
+                "the default sort {:?} is not a field, or - and a field",
+                self.default
+            ))
+        })
+    }
+
+    /// The sort of a value as sent: one of the values, or the 400 an enum
+    /// query parameter gets.
+    fn read(&self, text: &str) -> Result<Sort, ApiError> {
+        match Sort::parse(text) {
+            Some(sort) if self.offers(&sort) => Ok(sort),
+            _ => Err(self.refuse()),
+        }
+    }
+
+    fn refuse(&self) -> ApiError {
+        let reason = format!("expected one of {}", self.values().join(", "));
+        refuse(self.param, &reason, None)
+    }
+}
+
+/// An operation's `@paginated` limits, and its `SortBy` argument when it
+/// has one, as its `Args` carry them in an associated const:
+/// `PageSpec::new(20, 100)`, or `PageSpec::new(2, 5).sorted(SortSpec::new("sort",
+/// &["name", "sku"], "name"))`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PageSpec {
     default_limit: i64,
     max_limit: i64,
+    sort: Option<SortSpec>,
 }
 
 impl PageSpec {
@@ -54,7 +230,21 @@ impl PageSpec {
         Self {
             default_limit,
             max_limit,
+            sort: None,
         }
+    }
+
+    /// The spec of an operation that sorts by `sort`.
+    pub const fn sorted(self, sort: SortSpec) -> Self {
+        Self {
+            sort: Some(sort),
+            ..self
+        }
+    }
+
+    /// The operation's `SortBy` argument; `None` for one without.
+    pub const fn sort(&self) -> Option<&SortSpec> {
+        self.sort.as_ref()
     }
 
     /// The limit of a request that sends none.
@@ -67,19 +257,34 @@ impl PageSpec {
         self.max_limit
     }
 
-    /// The router's reader: the first value of `cursor` and of `limit` in
-    /// the query, an empty one as absent. A cursor is 1 to
-    /// [`CURSOR_MAX_LENGTH`] characters of the unpadded base64url alphabet;
-    /// a limit a whole number from 1 to the spec's maximum, its default
-    /// when absent. A refusal is the 400 at the parameter, the cursor's
-    /// first, as a string or integer query parameter's (`ParamSpec`).
+    /// The router's reader, of the request as it was sent: the first value
+    /// of `cursor`, of `limit` and of the sort's parameter in the query, an
+    /// empty one as absent. A cursor is 1 to [`CURSOR_MAX_LENGTH`]
+    /// characters of the unpadded base64url alphabet, still bound to its
+    /// sort; a limit a whole number from 1 to the spec's maximum, its
+    /// default when absent; a sort one of the spec's values, `None` when
+    /// absent. A refusal is the 400 at the parameter, as a string, integer
+    /// or enum query parameter's (`ParamSpec`), in this order: the
+    /// cursor's text, the limit, then the sort. [`PageSpec::unbind`] gives
+    /// the request the implementation reads.
     pub fn query(&self, query: &QueryValues) -> Result<PageRequest, ApiError> {
         let cursor = read_cursor(query.all(CURSOR_PARAM).first().copied())?;
         let limit = match query.all(LIMIT_PARAM).first().copied() {
             None | Some("") => self.default_limit,
             Some(text) => self.limit_of(parse_limit(text)?)?,
         };
-        Ok(PageRequest { cursor, limit })
+        let sort = match &self.sort {
+            None => None,
+            Some(spec) => match query.all(spec.param()).first().copied() {
+                None | Some("") => None,
+                Some(text) => Some(spec.read(text)?),
+            },
+        };
+        Ok(PageRequest {
+            cursor,
+            limit,
+            sort,
+        })
     }
 
     /// The request of the values a record or a form holds, with the
@@ -90,22 +295,83 @@ impl PageSpec {
         cursor: Option<&str>,
         limit: Option<i64>,
     ) -> Result<PageRequest, ApiError> {
+        self.sorted_request(cursor, limit, None)
+    }
+
+    /// The request of the values a record or a form holds, the sort among
+    /// them, as sent, with the router's refusals: an absent or empty
+    /// cursor is the first page, an absent limit the default, and an
+    /// absent or empty sort none, the default once unbound. A sort for an
+    /// operation without one is the caller's error, a 500.
+    pub fn sorted_request(
+        &self,
+        cursor: Option<&str>,
+        limit: Option<i64>,
+        sort: Option<&str>,
+    ) -> Result<PageRequest, ApiError> {
         let cursor = read_cursor(cursor)?;
         let limit = match limit {
             None => self.default_limit,
             Some(limit) => self.limit_of(limit)?,
         };
-        Ok(PageRequest { cursor, limit })
+        let sort = match (sort, &self.sort) {
+            (None | Some(""), _) => None,
+            (Some(text), Some(spec)) => Some(spec.read(text)?),
+            (Some(_), None) => return Err(unsorted()),
+        };
+        Ok(PageRequest {
+            cursor,
+            limit,
+            sort,
+        })
     }
 
     /// Holds a request an in-process caller built to the route's spec
     /// (`Args::check`): the router would refuse anything this refuses,
-    /// with the same 400.
+    /// with the same 400, the cursor's text, the limit, then the sort. A
+    /// sort for an operation without one is the caller's error, a 500.
     pub fn check(&self, request: &PageRequest) -> Result<(), ApiError> {
         if let Some(cursor) = &request.cursor {
             check_cursor_text(cursor.as_str())?;
         }
-        self.limit_of(request.limit).map(drop)
+        self.limit_of(request.limit)?;
+        match (&request.sort, &self.sort) {
+            (None, _) => Ok(()),
+            (Some(sort), Some(spec)) if spec.offers(sort) => Ok(()),
+            (Some(_), Some(spec)) => Err(spec.refuse()),
+            (Some(_), None) => Err(unsorted()),
+        }
+    }
+
+    /// The request the implementation reads, of one as it was sent or an
+    /// in-process caller built it: a sorted operation's sort, its default
+    /// filled in, and its cursor unbound from that sort
+    /// ([`Cursor::unbind`]), so the cursor is the implementation's own. A
+    /// cursor of another sort, or one bound to none, is its 400. The
+    /// router's decode and the in-process call each call it once, after
+    /// [`PageSpec::query`] or [`PageSpec::check`]. An unsorted operation's
+    /// request is as it is.
+    pub fn unbind(&self, request: PageRequest) -> Result<PageRequest, ApiError> {
+        let Some(spec) = &self.sort else {
+            return match request.sort {
+                None => Ok(request),
+                Some(_) => Err(unsorted()),
+            };
+        };
+        let sort = match request.sort {
+            Some(sort) if spec.offers(&sort) => sort,
+            Some(_) => return Err(spec.refuse()),
+            None => spec.default_sort()?,
+        };
+        let cursor = request
+            .cursor
+            .map(|cursor| cursor.unbind(&sort))
+            .transpose()?;
+        Ok(PageRequest {
+            cursor,
+            limit: request.limit,
+            sort: Some(sort),
+        })
     }
 
     /// The first page at the default limit.
@@ -129,27 +395,43 @@ impl PageSpec {
 }
 
 /// The page a caller asks for: the cursor of the page before, none for the
-/// first page, and the limit, its default filled in.
+/// first page, the limit, its default filled in, and a sorted operation's
+/// sort (D60, amended). The implementation reads it unbound
+/// ([`PageSpec::unbind`]): the cursor its own, and the sort `Some`, the
+/// default filled in. An unsorted operation's sort is `None`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PageRequest {
     pub cursor: Option<Cursor>,
     pub limit: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sort: Option<Sort>,
 }
 
 impl PageRequest {
-    /// The first page, `limit` items.
+    /// The first page, `limit` items, in the default order.
     pub const fn first(limit: i64) -> Self {
         Self {
             cursor: None,
             limit,
+            sort: None,
         }
     }
 
-    /// The page after `cursor`, a page's `next`, `limit` items.
+    /// The page after `cursor`, a page's `next`, `limit` items, in the
+    /// default order.
     pub fn after(cursor: Cursor, limit: i64) -> Self {
         Self {
             cursor: Some(cursor),
             limit,
+            sort: None,
+        }
+    }
+
+    /// The request in `sort`'s order.
+    pub fn sorted(self, sort: Sort) -> Self {
+        Self {
+            sort: Some(sort),
+            ..self
         }
     }
 }
@@ -223,6 +505,76 @@ impl Cursor {
         Ok(Self(text.to_owned()))
     }
 
+    /// The cursor of this, the implementation's cursor, under `sort` (D60,
+    /// amended): the unpadded base64url of exactly the bytes
+    /// `{"sort":"-placedAt","key":K}`, `K` the key's JSON as this cursor
+    /// holds it, byte for byte. A cursor [`Cursor::decode`] would refuse,
+    /// and a bound cursor past [`CURSOR_MAX_LENGTH`] characters, are the
+    /// implementation's error, a 500.
+    pub fn bind(&self, sort: &Sort) -> Result<Cursor, ApiError> {
+        if self.decode::<Value>().is_err() {
+            return Err(ApiError::internal(format!(
+                "bind a cursor: {:?} is not a cursor Cursor::encode writes",
+                self.0
+            )));
+        }
+        // The key's bytes as the cursor holds them, which decode read.
+        let key = URL_SAFE_NO_PAD
+            .decode(&self.0)
+            .map_err(|_| ApiError::internal("bind a cursor: its key does not decode"))?;
+        let text = sort.to_string();
+        let mut bytes = Vec::with_capacity(
+            BOUND_PREFIX.len() + text.len() + BOUND_KEY.len() + key.len() + BOUND_SUFFIX.len(),
+        );
+        for part in [BOUND_PREFIX, text.as_bytes(), BOUND_KEY, &key, BOUND_SUFFIX] {
+            bytes.extend_from_slice(part);
+        }
+        let bound = URL_SAFE_NO_PAD.encode(bytes);
+        if bound.len() > CURSOR_MAX_LENGTH {
+            return Err(ApiError::internal(format!(
+                "bind a cursor: its cursor under {text} is {} characters, past the {CURSOR_MAX_LENGTH} a router reads",
+                bound.len()
+            )));
+        }
+        Ok(Self(bound))
+    }
+
+    /// The implementation's cursor of this, a cursor bound under `sort`
+    /// (D60, amended): the key's JSON of `{"sort":"-placedAt","key":K}`,
+    /// read by its bytes, encoded again as [`Cursor::encode`] would. A
+    /// cursor bound under another sort is the 400 [`SORTED_CURSOR_DETAIL`]
+    /// at `cursor`; one that is not of the alphabet, not canonical unpadded
+    /// base64url, or not those bytes around a key, names no sort and is
+    /// [`refused_cursor`]. The key itself is the implementation's
+    /// [`Cursor::decode`]'s to read.
+    pub fn unbind(&self, sort: &Sort) -> Result<Cursor, ApiError> {
+        let text = self.0.as_str();
+        if text.is_empty() || text.len() > CURSOR_MAX_LENGTH || !text.bytes().all(is_cursor_byte) {
+            return Err(refused_cursor());
+        }
+        let bytes = URL_SAFE_NO_PAD.decode(text).map_err(|_| refused_cursor())?;
+        let rest = bytes
+            .strip_prefix(BOUND_PREFIX)
+            .ok_or_else(refused_cursor)?;
+        let end = rest
+            .iter()
+            .position(|&byte| byte == b'"')
+            .ok_or_else(refused_cursor)?;
+        let bound = std::str::from_utf8(&rest[..end])
+            .ok()
+            .and_then(Sort::parse)
+            .ok_or_else(refused_cursor)?;
+        let key = rest[end..]
+            .strip_prefix(BOUND_KEY)
+            .and_then(|rest| rest.strip_suffix(BOUND_SUFFIX))
+            .filter(|key| !key.is_empty())
+            .ok_or_else(refused_cursor)?;
+        if &bound != sort {
+            return Err(sorted_cursor());
+        }
+        Ok(Self(URL_SAFE_NO_PAD.encode(key)))
+    }
+
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -287,6 +639,21 @@ impl<T> Page<T> {
             next: self.next,
         }
     }
+
+    /// The page with its `next` bound to the request's sort
+    /// ([`Cursor::bind`]), which the router answers; the page as it is when
+    /// the request has no sort or the page no `next`. Its error is
+    /// [`Cursor::bind`]'s, the implementation's.
+    pub fn bind(self, request: &PageRequest) -> Result<Self, ApiError> {
+        let (Some(sort), Some(next)) = (&request.sort, &self.next) else {
+            return Ok(self);
+        };
+        let next = next.bind(sort)?;
+        Ok(Self {
+            items: self.items,
+            next: Some(next),
+        })
+    }
 }
 
 /// The 400 of a cursor the implementation cannot read, which it may return
@@ -297,6 +664,21 @@ pub fn refused_cursor() -> ApiError {
     details.insert("parameter".to_owned(), Value::from(CURSOR_PARAM));
     details.insert("reason".to_owned(), Value::from(REFUSED_CURSOR_REASON));
     ApiError::bad_request(REFUSED_CURSOR_DETAIL).with_details(Value::Object(details))
+}
+
+/// The 400 of a cursor returned under another sort (D60, amended).
+pub fn sorted_cursor() -> ApiError {
+    let mut details = Map::new();
+    details.insert("location".to_owned(), Value::from("query"));
+    details.insert("parameter".to_owned(), Value::from(CURSOR_PARAM));
+    details.insert("reason".to_owned(), Value::from(SORTED_CURSOR_REASON));
+    ApiError::bad_request(SORTED_CURSOR_DETAIL).with_details(Value::Object(details))
+}
+
+/// A sort an in-process caller gave an operation without a `SortBy`
+/// argument, which no request can send: the caller's error.
+fn unsorted() -> ApiError {
+    ApiError::internal("the operation has no SortBy argument, so its page takes no sort")
 }
 
 /// The 400 of a parameter a request carries, worded as `ParamSpec` words a
@@ -542,6 +924,171 @@ mod tests {
         assert_eq!(
             reason(&SPEC.request(None, Some(9)).unwrap_err()),
             "must be at most 5"
+        );
+    }
+
+    const SORTED: PageSpec = PageSpec::new(2, 5).sorted(SortSpec::new(
+        "sort",
+        &["placedAt", "totalCents"],
+        "placedAt",
+    ));
+
+    #[test]
+    fn a_sort_reads_and_writes_as_its_text() {
+        let sort = Sort::parse("-totalCents").unwrap();
+        assert_eq!((sort.field(), sort.desc()), ("totalCents", true));
+        assert_eq!(sort.to_string(), "-totalCents");
+        assert_eq!(sort.reversed().to_string(), "totalCents");
+        assert_eq!(serde_json::to_value(&sort).unwrap(), json!("-totalCents"));
+        assert_eq!(
+            serde_json::from_value::<Sort>(json!("placedAt"))
+                .unwrap()
+                .to_string(),
+            "placedAt"
+        );
+        assert!(serde_json::from_value::<Sort>(json!("placed At")).is_err());
+        for text in [
+            "",
+            "-",
+            "--placedAt",
+            "+placedAt",
+            "placedAt,id",
+            "2nd",
+            "placed At",
+            "é",
+        ] {
+            assert_eq!(Sort::parse(text), None, "{text}");
+        }
+        assert_eq!(
+            SORTED.sort().unwrap().values(),
+            ["placedAt", "-placedAt", "totalCents", "-totalCents"]
+        );
+        assert_eq!(SPEC.sort(), None);
+
+        // An unsorted request writes as it did before sorts.
+        assert_eq!(
+            serde_json::to_value(PageRequest::first(2)).unwrap(),
+            json!({"cursor": null, "limit": 2})
+        );
+        let request = PageRequest::first(2).sorted(sort);
+        let back: PageRequest =
+            serde_json::from_value(serde_json::to_value(&request).unwrap()).unwrap();
+        assert_eq!(back, request);
+    }
+
+    #[test]
+    fn check_refuses_a_sort_the_spec_does_not_offer() {
+        let status = Sort::parse("status").unwrap();
+        let err = SORTED
+            .check(&PageRequest::first(2).sorted(status.clone()))
+            .unwrap_err();
+        assert_eq!(
+            err.message,
+            "Invalid query parameter sort: expected one of placedAt, -placedAt, totalCents, -totalCents"
+        );
+        assert_eq!(err.details.as_ref().unwrap()["parameter"], "sort");
+        // The limit is refused before the sort.
+        let err = SORTED
+            .check(&PageRequest::first(9).sorted(status.clone()))
+            .unwrap_err();
+        assert_eq!(reason(&err), "must be at most 5");
+        assert!(SORTED.check(&PageRequest::first(2)).is_ok());
+        assert!(SORTED
+            .check(&PageRequest::first(2).sorted(Sort::parse("-totalCents").unwrap()))
+            .is_ok());
+        assert_eq!(
+            reason(
+                &SORTED
+                    .sorted_request(None, None, Some("status"))
+                    .unwrap_err()
+            ),
+            "expected one of placedAt, -placedAt, totalCents, -totalCents"
+        );
+        assert_eq!(
+            SORTED.sorted_request(None, None, Some("")).unwrap(),
+            PageRequest::first(2)
+        );
+
+        // An operation without a sort takes none: the caller's error.
+        let err = SPEC
+            .check(&PageRequest::first(2).sorted(status.clone()))
+            .unwrap_err();
+        assert_eq!(err.status, http::StatusCode::INTERNAL_SERVER_ERROR);
+        assert!(SPEC.unbind(PageRequest::first(2).sorted(status)).is_err());
+        assert!(SPEC.sorted_request(None, None, Some("placedAt")).is_err());
+        assert_eq!(
+            SPEC.unbind(PageRequest::first(2)).unwrap(),
+            PageRequest::first(2)
+        );
+    }
+
+    #[test]
+    fn an_in_process_call_unbinds_and_binds_as_the_router_does() {
+        let rows = vec![("a", 300), ("b", 200), ("c", 100)];
+        let key = |row: &(&str, i64)| json!({"totalCents": row.1, "id": row.0});
+
+        // The first page, sorted, its default filled in by unbind.
+        let first = SORTED
+            .sorted_request(None, None, Some("-totalCents"))
+            .unwrap();
+        SORTED.check(&first).unwrap();
+        let first = SORTED.unbind(first).unwrap();
+        assert_eq!(first.sort.as_ref().unwrap().to_string(), "-totalCents");
+        let page = Page::from_rows(rows.clone(), first.limit, key).unwrap();
+        let own = page.next.clone().unwrap();
+        let page = page.bind(&first).unwrap();
+        let next = page.next.clone().unwrap();
+        assert_ne!(next, own);
+        // The key's bytes as the implementation's cursor holds them: its
+        // members in serde_json's order, which preserve_order changes.
+        let own_key = String::from_utf8(URL_SAFE_NO_PAD.decode(own.as_str()).unwrap()).unwrap();
+        assert_eq!(
+            String::from_utf8(URL_SAFE_NO_PAD.decode(next.as_str()).unwrap()).unwrap(),
+            format!(r#"{{"sort":"-totalCents","key":{own_key}}}"#)
+        );
+        assert_eq!(
+            next.decode::<Value>().unwrap(),
+            json!({"sort": "-totalCents", "key": {"id": "b", "totalCents": 200}})
+        );
+
+        // Its next, sent back under the sort, is the implementation's own.
+        let second =
+            PageRequest::after(next.clone(), 2).sorted(Sort::parse("-totalCents").unwrap());
+        SORTED.check(&second).unwrap();
+        let second = SORTED.unbind(second).unwrap();
+        assert_eq!(second.cursor.as_ref(), Some(&own));
+        assert_eq!(
+            own.decode::<Value>().unwrap(),
+            json!({"totalCents": 200, "id": "b"})
+        );
+
+        // Under the default, it is another sort's.
+        let err = SORTED.unbind(PageRequest::after(next, 2)).unwrap_err();
+        assert_eq!(
+            (err.message.as_str(), reason(&err)),
+            (SORTED_CURSOR_DETAIL, SORTED_CURSOR_REASON)
+        );
+        // The implementation's own cursor names no sort.
+        let err = SORTED.unbind(PageRequest::after(own, 2)).unwrap_err();
+        assert_eq!(err.message, REFUSED_CURSOR_DETAIL);
+
+        // A page without a next, or a request without a sort, is as it is.
+        let last = Page::last(vec![1]);
+        assert_eq!(last.clone().bind(&first).unwrap(), last);
+        let unsorted = Page::more(vec![1], Cursor("MQ".to_owned()));
+        assert_eq!(
+            unsorted.clone().bind(&PageRequest::first(1)).unwrap(),
+            unsorted
+        );
+        // A next no router reads back under the sort is the
+        // implementation's error.
+        let long = Page::more(vec![1], Cursor::encode(&"x".repeat(740)).unwrap());
+        let err = long.bind(&first).unwrap_err();
+        assert_eq!(err.status, http::StatusCode::INTERNAL_SERVER_ERROR);
+        assert!(
+            err.message.contains("past the 1024 a router reads"),
+            "{}",
+            err.message
         );
     }
 }

@@ -13,37 +13,48 @@
 //! limit)` builds and `check` holds to the route's limits, and returns the
 //! page, its items and the cursor of the next.
 //!
+//! A sorted operation's call (D60, amended) reads the sort in `page.sort`,
+//! `PageRequest::sorted` or `PAGE.sorted_request` sets it, and its default
+//! fills in when none is sent. As the router does, the call unbinds the
+//! cursor from the sort before the implementation reads it, a cursor of
+//! another sort the 400, and binds the page's next to the sort after, so a
+//! cursor of the JSON API pages the call and one of the call the JSON API.
+//!
 //! A call does not apply the route's traffic controls (@rateLimit,
 //! @bodyLimit, @timeout): the page that makes it is a route of the app,
-//! under the controls the app gives it.
+//! under the controls the app gives it. It reads what the app keeps for
+//! the crate (`setup`): an app that does not host fixture-console-api, whose
+//! router builder calls neither `fixture_console_api` nor `fixture_console_api_without_api`,
+//! gets the 500 (D61, amended).
 
 #![allow(unused_imports)]
 
-use crate::Setup;
 use crate::api::operations;
 use crate::api::runtime;
 use crate::api::runtime::{ApiError, Principal};
 use crate::api::types;
-use topcoat::context::{Cx, app_context};
+use topcoat::context::Cx;
 
-/// order.listOrders (`GET /api/orders`): The orders, by number, two to a page unless the caller asks for up
-pub async fn order_list_orders(cx: &Cx, args: crate::api::OrderListOrdersArgs) -> Result<runtime::page::Page<types::Order>, ApiError> {
+/// order.listOrders (`GET /api/orders`): The orders, by number, either way, two to a page unless the caller
+pub async fn order_list_orders(cx: &Cx, mut args: crate::api::OrderListOrdersArgs) -> Result<runtime::page::Page<types::Order>, ApiError> {
     let caller = can_order_list_orders(cx).await?;
     args.check()?;
-    let setup: &Setup = app_context(cx);
-    setup
+    // The cursor names the sort it was returned under (D60, amended).
+    args.page = crate::api::OrderListOrdersArgs::PAGE.unbind(args.page)?;
+    let request = args.page.clone();
+    crate::setup(cx)?
         .implementations
         .order
         .list_orders(operations::ORDER_LIST_ORDERS.context(caller), args)
-        .await
+        .await?
+        .bind(&request)
 }
 
 /// order.placeOrder (`POST /api/orders`): Places an order.
 pub async fn order_place_order(cx: &Cx, args: crate::api::OrderPlaceOrderArgs) -> Result<types::Order, ApiError> {
     let caller = can_order_place_order(cx).await?;
     args.check()?;
-    let setup: &Setup = app_context(cx);
-    setup
+    crate::setup(cx)?
         .implementations
         .order
         .place_order(operations::ORDER_PLACE_ORDER.context(caller), args)
@@ -54,8 +65,7 @@ pub async fn order_place_order(cx: &Cx, args: crate::api::OrderPlaceOrderArgs) -
 pub async fn order_get_order(cx: &Cx, args: crate::api::OrderGetOrderArgs) -> Result<types::Order, ApiError> {
     let caller = can_order_get_order(cx).await?;
     args.check()?;
-    let setup: &Setup = app_context(cx);
-    setup
+    crate::setup(cx)?
         .implementations
         .order
         .get_order(operations::ORDER_GET_ORDER.context(caller), args)
@@ -66,56 +76,59 @@ pub async fn order_get_order(cx: &Cx, args: crate::api::OrderGetOrderArgs) -> Re
 pub async fn order_add_line(cx: &Cx, args: crate::api::OrderAddLineArgs) -> Result<types::Order, ApiError> {
     let caller = can_order_add_line(cx).await?;
     args.check()?;
-    let setup: &Setup = app_context(cx);
-    setup
+    crate::setup(cx)?
         .implementations
         .order
         .add_line(operations::ORDER_ADD_LINE.context(caller), args)
         .await
 }
 
-/// product.listProducts (`GET /api/products`): The products, by name, two to a page unless the caller asks for up
-pub async fn product_list_products(cx: &Cx, args: crate::api::ProductListProductsArgs) -> Result<runtime::page::Page<types::Product>, ApiError> {
+/// product.listProducts (`GET /api/products`): The products, by name unless the caller sorts them by sku, two to a
+pub async fn product_list_products(cx: &Cx, mut args: crate::api::ProductListProductsArgs) -> Result<runtime::page::Page<types::Product>, ApiError> {
     let caller = can_product_list_products(cx).await?;
     args.check()?;
-    let setup: &Setup = app_context(cx);
-    setup
+    // The cursor names the sort it was returned under (D60, amended).
+    args.page = crate::api::ProductListProductsArgs::PAGE.unbind(args.page)?;
+    let request = args.page.clone();
+    crate::setup(cx)?
         .implementations
         .product
         .list_products(operations::PRODUCT_LIST_PRODUCTS.context(caller), args)
-        .await
+        .await?
+        .bind(&request)
 }
 
 /// product.getProduct (`GET /api/products/{productId}`): One product, by an id that refers to it.
 pub async fn product_get_product(cx: &Cx, args: crate::api::ProductGetProductArgs) -> Result<types::Product, ApiError> {
     let caller = can_product_get_product(cx).await?;
     args.check()?;
-    let setup: &Setup = app_context(cx);
-    setup
+    crate::setup(cx)?
         .implementations
         .product
         .get_product(operations::PRODUCT_GET_PRODUCT.context(caller), args)
         .await
 }
 
-/// review.listReviews (`GET /api/products/{productId}/reviews`): A product's reviews, two to a page unless the caller asks for up to
-pub async fn review_list_reviews(cx: &Cx, args: crate::api::ReviewListReviewsArgs) -> Result<runtime::page::Page<types::Review>, ApiError> {
+/// review.listReviews (`GET /api/products/{productId}/reviews`): A product's reviews, by title unless the caller sorts them by
+pub async fn review_list_reviews(cx: &Cx, mut args: crate::api::ReviewListReviewsArgs) -> Result<runtime::page::Page<types::Review>, ApiError> {
     let caller = can_review_list_reviews(cx).await?;
     args.check()?;
-    let setup: &Setup = app_context(cx);
-    setup
+    // The cursor names the sort it was returned under (D60, amended).
+    args.page = crate::api::ReviewListReviewsArgs::PAGE.unbind(args.page)?;
+    let request = args.page.clone();
+    crate::setup(cx)?
         .implementations
         .review
         .list_reviews(operations::REVIEW_LIST_REVIEWS.context(caller), args)
-        .await
+        .await?
+        .bind(&request)
 }
 
 /// site.listPages (`GET /api/page`): The site's pages, one to a page unless the caller asks for two, at
 pub async fn site_list_pages(cx: &Cx, args: crate::api::SiteListPagesArgs) -> Result<runtime::page::Page<types::SitePage>, ApiError> {
     let caller = can_site_list_pages(cx).await?;
     args.check()?;
-    let setup: &Setup = app_context(cx);
-    setup
+    crate::setup(cx)?
         .implementations
         .site
         .list_pages(operations::SITE_LIST_PAGES.context(caller), args)
@@ -126,8 +139,7 @@ pub async fn site_list_pages(cx: &Cx, args: crate::api::SiteListPagesArgs) -> Re
 pub async fn supplier_list_suppliers(cx: &Cx, args: crate::api::SupplierListSuppliersArgs) -> Result<runtime::page::Page<types::Supplier>, ApiError> {
     let caller = can_supplier_list_suppliers(cx).await?;
     args.check()?;
-    let setup: &Setup = app_context(cx);
-    setup
+    crate::setup(cx)?
         .implementations
         .supplier
         .list_suppliers(operations::SUPPLIER_LIST_SUPPLIERS.context(caller), args)
@@ -138,8 +150,7 @@ pub async fn supplier_list_suppliers(cx: &Cx, args: crate::api::SupplierListSupp
 pub async fn supplier_list_supplier_products(cx: &Cx, args: crate::api::SupplierListSupplierProductsArgs) -> Result<Vec<types::Product>, ApiError> {
     let caller = can_supplier_list_supplier_products(cx).await?;
     args.check()?;
-    let setup: &Setup = app_context(cx);
-    setup
+    crate::setup(cx)?
         .implementations
         .supplier
         .list_supplier_products(operations::SUPPLIER_LIST_SUPPLIER_PRODUCTS.context(caller), args)

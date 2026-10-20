@@ -17,6 +17,11 @@ const OpenAPIReferenceKey = "x-superschematic-reference"
 // OpenAPIHook renames it.
 const OpenAPISearchKey = "x-superschematic-search"
 
+// OpenAPISortKey is the vendor-extension key, true, that marks a paged
+// operation's sort argument (SortBy, D60 amended) on its parameter object,
+// whose schema's enum holds its values. An OpenAPIHook renames it.
+const OpenAPISortKey = "x-superschematic-sort"
+
 // Reference is the reference a parameter or a field holds (D61, amended),
 // resolved: written with RefersTo, or derived from a relation's key. The
 // OpenAPI document and the tool documents write it under their reference
@@ -38,10 +43,21 @@ type Reference struct {
 	// Lookup is the options operation's argument that narrows its list to
 	// the items with the values given; empty when it has none.
 	Lookup string
+	// Search is the options operation's search argument (SearchQuery,
+	// D62), which a UI fills with the text a reader types to pick an item
+	// (D61, amended); empty when it has none.
+	Search string
+	// Service is the API dependency whose operation the options are, by
+	// its service name, when the API's own operations list no Target and
+	// that dependency's do (D61, amended); empty for the API's own. The
+	// options operation's names are then the dependency's, as its own
+	// documents write them.
+	Service string
 }
 
 // openAPIValue is the reference as the OpenAPI document writes it: the
-// target as its component, and the options operation by its operationId.
+// target as its component, and the options operation by its operationId,
+// the dependency's when service names one.
 func (r *Reference) openAPIValue() map[string]interface{} {
 	value := map[string]interface{}{
 		"target":  "#/components/schemas/" + r.Target,
@@ -53,6 +69,12 @@ func (r *Reference) openAPIValue() map[string]interface{} {
 	}
 	if r.Lookup != "" {
 		value["lookup"] = r.Lookup
+	}
+	if r.Search != "" {
+		value["search"] = r.Search
+	}
+	if r.Service != "" {
+		value["service"] = r.Service
 	}
 	return value
 }
@@ -81,6 +103,10 @@ func resolveReference(schema *ir.Schema, dependencies map[string]*ir.Schema, ref
 	if resolved.Lookup != nil {
 		out.Lookup = resolved.Lookup.Name
 	}
+	if resolved.Search != nil {
+		out.Search = resolved.Search.Name
+	}
+	out.Service = resolved.OptionsService
 	return out
 }
 
@@ -94,9 +120,10 @@ func endpointNames(set *ir.OperationSet, op *ir.FieldDef) (operationID, tool str
 
 // fieldReference is the reference field of holder holds, written or
 // derived (ir.FieldReference), resolved in the API schema; nil when it
-// holds none. A dependency's type is read against the API too: the API's
-// operations are the only ones its documents name, and its RefersTo holds
-// only when it resolves there to a value of the field's type.
+// holds none. A dependency's type is read against the API too: its
+// RefersTo holds only when it resolves there to a value of the field's
+// type, and its options are the API's own operation, or the dependency's
+// when none of the API's lists it (D61, amended).
 func fieldReference(schema *ir.Schema, dependencies map[string]*ir.Schema, holder *ir.TypeDef, field *ir.FieldDef) *Reference {
 	ref, _ := ir.FieldReference(schema, dependencies, holder, field)
 	return resolveReference(schema, dependencies, ref)
@@ -163,12 +190,12 @@ func openAPIExtensionTarget(property map[string]interface{}) map[string]interfac
 }
 
 // openAPIParameterKeys gives a path or query parameter object, or a body
-// argument's property schema, the reference and search keys its argument
-// holds: on a property that is a bare $ref, beside an allOf that holds it
-// (openAPIExtensionTarget). A parameter object holds its schema under
-// "schema", and takes them as it is.
+// argument's property schema, the reference, search and sort keys its
+// argument holds: on a property that is a bare $ref, beside an allOf that
+// holds it (openAPIExtensionTarget). A parameter object holds its schema
+// under "schema", and takes them as it is.
 func openAPIParameterKeys(target map[string]interface{}, param Param) {
-	if param.Reference == nil && !param.Search {
+	if param.Reference == nil && !param.Search && param.Sort == nil {
 		return
 	}
 	target = openAPIExtensionTarget(target)
@@ -177,5 +204,8 @@ func openAPIParameterKeys(target map[string]interface{}, param Param) {
 	}
 	if param.Search {
 		target[OpenAPISearchKey] = true
+	}
+	if param.Sort != nil {
+		target[OpenAPISortKey] = true
 	}
 }

@@ -18,10 +18,49 @@
 //! value leaves its `<dd>` or `<td>` empty. Every value is text the view
 //! escapes. The markup has `ss-` classes and `data-field` attributes, the
 //! field's JSON key, for a stylesheet or a test, and no style of its own.
+//!
+//! A table a sorted list's page shows (D44, amended) takes `Sorted`: the
+//! header of each column that is a sort field links the list in its order,
+//! and the column the rows are in order of says so in `aria-sort`.
 
 use crate::choices::Choices;
 use crate::records::{OrderInputRecord, OrderLineInputRecord, OrderLineRecord, OrderRecord, ProductRecord, ReviewRecord, SitePageRecord, SupplierRecord};
+use topcoat::runtime::{Event, Signal};
 use topcoat::view::{View, component, view};
+
+/// A table's sortable headers (D44, amended): the column its rows are in
+/// order of, and each sortable column's link and the query it sets. The
+/// default has no order and no link, as a section's table has none.
+#[derive(Clone, Debug, Default)]
+pub struct Sorted {
+    /// The field the rows are in order of, by its JSON name, and whether
+    /// they descend.
+    pub by: Option<(String, bool)>,
+    /// Each sortable column's field, the link that sorts the list by it, its
+    /// own order reversed and any other's ascending, and the link's query.
+    pub links: Vec<(String, String, String)>,
+    /// A live list's query, which a header's link sets in place of loading
+    /// the page (D44, amended); none for a list that loads it.
+    pub live: Option<Signal<String>>,
+}
+
+impl Sorted {
+    /// The `aria-sort` of the column of `field`: `ascending` or
+    /// `descending` on the column the rows are in order of, and none on any
+    /// other, which ARIA asks authors not to repeat.
+    pub fn aria(&self, field: &str) -> Option<&'static str> {
+        match &self.by {
+            Some((by, desc)) if by == field => Some(if *desc { "descending" } else { "ascending" }),
+            _ => None,
+        }
+    }
+
+    /// The link of the column of `field` and its query; none for a column
+    /// the list does not sort by.
+    pub fn link(&self, field: &str) -> Option<(String, String)> {
+        self.links.iter().find(|(at, _, _)| at == field).map(|(_, href, query)| (href.clone(), query.clone()))
+    }
+}
 
 /// A detail's accessible name: its title when it has one, else its type's
 /// noun.
@@ -112,18 +151,33 @@ pub async fn order_detail(record: OrderRecord, #[default] choices: Choices) -> t
 /// page: the i-th, unless it is empty, row i's title cell; a row past
 /// its end links nowhere. A linked cell without text
 /// links the type's noun in its place, with the row's id when it has one.
+/// `sorted` links the header of each column a sorted list sorts by, and
+/// marks the one its rows are in order of (D44, amended).
 #[component]
 pub async fn order_table(
     rows: Vec<OrderRecord>,
     #[default] choices: Choices,
     #[default] hrefs: Vec<String>,
+    #[default] sorted: Sorted,
 ) -> topcoat::Result<impl View> {
     Ok(view! {
         <table class="ss-table" data-type="Order">
             <caption>"Orders"</caption>
             <thead>
                 <tr>
-                    <th scope="col" data-field="number">"Number"</th>
+                    <th scope="col" data-field="number" aria-sort=(sorted.aria("number"))>
+                        match sorted.link("number") {
+                            Some((href, query)) => match sorted.live.clone() {
+                                Some(live) => <a href=(href.clone()) data-ss-sort="number" @click=$(|e: Event| {
+                                    e.prevent_default();
+                                    raw!("history.replaceState(history.state, '', ${href});", ());
+                                    live.set(query.to_owned())
+                                })>"Number"</a>,
+                                None => <a href=(href) data-ss-sort="number">"Number"</a>,
+                            },
+                            None => "Number",
+                        }
+                    </th>
                     <th scope="col" data-field="status">"Status"</th>
                     <th scope="col" data-field="giftSku">"Gift"</th>
                 </tr>
@@ -419,19 +473,46 @@ pub async fn product_detail(record: ProductRecord, #[default] choices: Choices) 
 /// page: the i-th, unless it is empty, row i's title cell; a row past
 /// its end links nowhere. A linked cell without text
 /// links the type's noun in its place, with the row's id when it has one.
+/// `sorted` links the header of each column a sorted list sorts by, and
+/// marks the one its rows are in order of (D44, amended).
 #[component]
 pub async fn product_table(
     rows: Vec<ProductRecord>,
     #[default] choices: Choices,
     #[default] hrefs: Vec<String>,
+    #[default] sorted: Sorted,
 ) -> topcoat::Result<impl View> {
     Ok(view! {
         <table class="ss-table" data-type="Product">
             <caption>"Products"</caption>
             <thead>
                 <tr>
-                    <th scope="col" data-field="name">"Name"</th>
-                    <th scope="col" data-field="sku">"Sku"</th>
+                    <th scope="col" data-field="name" aria-sort=(sorted.aria("name"))>
+                        match sorted.link("name") {
+                            Some((href, query)) => match sorted.live.clone() {
+                                Some(live) => <a href=(href.clone()) data-ss-sort="name" @click=$(|e: Event| {
+                                    e.prevent_default();
+                                    raw!("history.replaceState(history.state, '', ${href});", ());
+                                    live.set(query.to_owned())
+                                })>"Name"</a>,
+                                None => <a href=(href) data-ss-sort="name">"Name"</a>,
+                            },
+                            None => "Name",
+                        }
+                    </th>
+                    <th scope="col" data-field="sku" aria-sort=(sorted.aria("sku"))>
+                        match sorted.link("sku") {
+                            Some((href, query)) => match sorted.live.clone() {
+                                Some(live) => <a href=(href.clone()) data-ss-sort="sku" @click=$(|e: Event| {
+                                    e.prevent_default();
+                                    raw!("history.replaceState(history.state, '', ${href});", ());
+                                    live.set(query.to_owned())
+                                })>"Sku"</a>,
+                                None => <a href=(href) data-ss-sort="sku">"Sku"</a>,
+                            },
+                            None => "Sku",
+                        }
+                    </th>
                     <th scope="col" data-field="supplierId">"Supplier"</th>
                     <th scope="col" data-field="inStock">"In stock"</th>
                 </tr>
@@ -498,19 +579,46 @@ pub async fn review_detail(record: ReviewRecord, #[default] choices: Choices) ->
 /// page: the i-th, unless it is empty, row i's title cell; a row past
 /// its end links nowhere. A linked cell without text
 /// links the type's noun in its place, with the row's id when it has one.
+/// `sorted` links the header of each column a sorted list sorts by, and
+/// marks the one its rows are in order of (D44, amended).
 #[component]
 pub async fn review_table(
     rows: Vec<ReviewRecord>,
     #[default] choices: Choices,
     #[default] hrefs: Vec<String>,
+    #[default] sorted: Sorted,
 ) -> topcoat::Result<impl View> {
     Ok(view! {
         <table class="ss-table" data-type="Review">
             <caption>"Reviews"</caption>
             <thead>
                 <tr>
-                    <th scope="col" data-field="title">"Title"</th>
-                    <th scope="col" data-field="rating">"Rating"</th>
+                    <th scope="col" data-field="title" aria-sort=(sorted.aria("title"))>
+                        match sorted.link("title") {
+                            Some((href, query)) => match sorted.live.clone() {
+                                Some(live) => <a href=(href.clone()) data-ss-sort="title" @click=$(|e: Event| {
+                                    e.prevent_default();
+                                    raw!("history.replaceState(history.state, '', ${href});", ());
+                                    live.set(query.to_owned())
+                                })>"Title"</a>,
+                                None => <a href=(href) data-ss-sort="title">"Title"</a>,
+                            },
+                            None => "Title",
+                        }
+                    </th>
+                    <th scope="col" data-field="rating" aria-sort=(sorted.aria("rating"))>
+                        match sorted.link("rating") {
+                            Some((href, query)) => match sorted.live.clone() {
+                                Some(live) => <a href=(href.clone()) data-ss-sort="rating" @click=$(|e: Event| {
+                                    e.prevent_default();
+                                    raw!("history.replaceState(history.state, '', ${href});", ());
+                                    live.set(query.to_owned())
+                                })>"Rating"</a>,
+                                None => <a href=(href) data-ss-sort="rating">"Rating"</a>,
+                            },
+                            None => "Rating",
+                        }
+                    </th>
                     <th scope="col" data-field="productId">"Product"</th>
                 </tr>
             </thead>

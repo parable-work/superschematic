@@ -16,6 +16,7 @@ type OrderRepositoryInterface interface {
 	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Order, error)
 	FindOne(ctx context.Context, filter *OrderFilter, opts *OrderFindOptions) (*types.Order, error)
 	FindMany(ctx context.Context, filter *OrderFilter, opts *OrderFindOptions) ([]*types.Order, int, error)
+	FindPage(ctx context.Context, filter *OrderFilter, opts *OrderPageOptions) (*OrderPage, error)
 	CreateOne(ctx context.Context, input *types.Order) (*types.Order, error)
 	CreateMany(ctx context.Context, inputs []*types.Order) ([]*types.Order, error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *OrderUpdate) (*types.Order, error)
@@ -117,6 +118,10 @@ func (r *NoOpOrderRepository) FindOne(_ context.Context, _ *OrderFilter, _ *Orde
 
 func (r *NoOpOrderRepository) FindMany(_ context.Context, _ *OrderFilter, _ *OrderFindOptions) ([]*types.Order, int, error) {
 	return []*types.Order{}, 0, nil
+}
+
+func (r *NoOpOrderRepository) FindPage(_ context.Context, _ *OrderFilter, _ *OrderPageOptions) (*OrderPage, error) {
+	return &OrderPage{Rows: []*types.Order{}}, nil
 }
 
 func (r *NoOpOrderRepository) CreateOne(_ context.Context, input *types.Order) (*types.Order, error) {

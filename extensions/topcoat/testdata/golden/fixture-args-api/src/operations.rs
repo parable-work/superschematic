@@ -10,22 +10,23 @@
 //!
 //! A call does not apply the route's traffic controls (@rateLimit,
 //! @bodyLimit, @timeout): the page that makes it is a route of the app,
-//! under the controls the app gives it.
+//! under the controls the app gives it. It reads what the app keeps for
+//! the crate (`setup`): an app that does not host fixture-args-api, whose
+//! router builder calls neither `fixture_args_api` nor `fixture_args_api_without_api`,
+//! gets the 500 (D61, amended).
 
 #![allow(unused_imports)]
 
-use crate::Setup;
 use crate::api::operations;
 use crate::api::runtime::{ApiError, Principal};
 use crate::api::types;
-use topcoat::context::{Cx, app_context};
+use topcoat::context::Cx;
 
 /// order.listOrders (`GET /api/orders`): The orders that match every filter.
 pub async fn order_list_orders(cx: &Cx, args: crate::api::OrderListOrdersArgs) -> Result<Vec<types::OrderView>, ApiError> {
     let caller = can_order_list_orders(cx).await?;
     args.check()?;
-    let setup: &Setup = app_context(cx);
-    setup
+    crate::setup(cx)?
         .implementations
         .order
         .list_orders(operations::ORDER_LIST_ORDERS.context(caller), args)
@@ -36,8 +37,7 @@ pub async fn order_list_orders(cx: &Cx, args: crate::api::OrderListOrdersArgs) -
 pub async fn order_get_order(cx: &Cx, args: crate::api::OrderGetOrderArgs) -> Result<types::OrderView, ApiError> {
     let caller = can_order_get_order(cx).await?;
     args.check()?;
-    let setup: &Setup = app_context(cx);
-    setup
+    crate::setup(cx)?
         .implementations
         .order
         .get_order(operations::ORDER_GET_ORDER.context(caller), args)
@@ -48,8 +48,7 @@ pub async fn order_get_order(cx: &Cx, args: crate::api::OrderGetOrderArgs) -> Re
 pub async fn order_cancel_order(cx: &Cx, args: crate::api::OrderCancelOrderArgs) -> Result<types::OrderView, ApiError> {
     let caller = can_order_cancel_order(cx).await?;
     args.check()?;
-    let setup: &Setup = app_context(cx);
-    setup
+    crate::setup(cx)?
         .implementations
         .order
         .cancel_order(operations::ORDER_CANCEL_ORDER.context(caller), args)
@@ -60,8 +59,7 @@ pub async fn order_cancel_order(cx: &Cx, args: crate::api::OrderCancelOrderArgs)
 pub async fn order_hold_order(cx: &Cx, args: crate::api::OrderHoldOrderArgs) -> Result<types::OrderView, ApiError> {
     let caller = can_order_hold_order(cx).await?;
     args.check()?;
-    let setup: &Setup = app_context(cx);
-    setup
+    crate::setup(cx)?
         .implementations
         .order
         .hold_order(operations::ORDER_HOLD_ORDER.context(caller), args)
@@ -72,8 +70,7 @@ pub async fn order_hold_order(cx: &Cx, args: crate::api::OrderHoldOrderArgs) -> 
 pub async fn order_note_order(cx: &Cx, args: crate::api::OrderNoteOrderArgs) -> Result<types::OrderView, ApiError> {
     let caller = can_order_note_order(cx).await?;
     args.check()?;
-    let setup: &Setup = app_context(cx);
-    setup
+    crate::setup(cx)?
         .implementations
         .order
         .note_order(operations::ORDER_NOTE_ORDER.context(caller), args)
@@ -84,8 +81,7 @@ pub async fn order_note_order(cx: &Cx, args: crate::api::OrderNoteOrderArgs) -> 
 pub async fn order_tag_order(cx: &Cx, args: crate::api::OrderTagOrderArgs) -> Result<types::OrderView, ApiError> {
     let caller = can_order_tag_order(cx).await?;
     args.check()?;
-    let setup: &Setup = app_context(cx);
-    setup
+    crate::setup(cx)?
         .implementations
         .order
         .tag_order(operations::ORDER_TAG_ORDER.context(caller), args)
@@ -96,8 +92,7 @@ pub async fn order_tag_order(cx: &Cx, args: crate::api::OrderTagOrderArgs) -> Re
 pub async fn product_reviews_write_review(cx: &Cx, args: crate::api::ProductReviewsWriteReviewArgs) -> Result<types::ReviewView, ApiError> {
     let caller = can_product_reviews_write_review(cx).await?;
     args.check()?;
-    let setup: &Setup = app_context(cx);
-    setup
+    crate::setup(cx)?
         .implementations
         .product_reviews
         .write_review(operations::PRODUCT_REVIEWS_WRITE_REVIEW.context(caller), args)

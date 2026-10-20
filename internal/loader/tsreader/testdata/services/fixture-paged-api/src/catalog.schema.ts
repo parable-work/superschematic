@@ -1,6 +1,6 @@
 import { Identity } from "superscalar";
 import { display, Nullable, Validate } from "@superschematic/schema";
-import { HttpMethod, paginated, QueryParam, rest } from "@superschematic/api";
+import { HttpMethod, paginated, QueryParam, rest, SortBy } from "@superschematic/api";
 
 // An item of the catalog.
 @display({ noun: "Item", plural: "Items", titleField: "name", summaryFields: ["name", "sku"] })
@@ -30,12 +30,14 @@ export abstract class BasketView {
 
 export class Catalog {
   // The items, two to a page unless the caller asks for up to five, by
-  // their ids or their stock.
+  // their ids or their stock, in order of their names unless the caller
+  // sorts them by name or sku, either way.
   @rest(HttpMethod.GET, "items")
-  @paginated({ defaultLimit: 2, maxLimit: 5 })
+  @paginated({ defaultLimit: 2, maxLimit: 5, defaultSort: "name" })
   listItems(
     ids: QueryParam<Nullable<Validate<Identity.UUID[], { listMax: 5 }>>>,
-    inStock: QueryParam<Nullable<boolean>>
+    inStock: QueryParam<Nullable<boolean>>,
+    sort: SortBy<ItemView, ["name", "sku"]>
   ): ItemView[] {
     throw new Error("schema declaration only");
   }

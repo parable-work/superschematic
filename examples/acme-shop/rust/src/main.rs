@@ -15,6 +15,9 @@ mod types_test;
 
 const PRODUCT: &str = "00000000-0000-4000-8000-0000000000b1";
 const MISSING_ORDER: &str = "00000000-0000-4000-8000-0000000000c1";
+/// The cursor of `{"sort":"name","key":{"name":"Anvil","id":"1"}}`, one the
+/// router binds to the products by name.
+const BY_NAME: &str = "eyJzb3J0IjoibmFtZSIsImtleSI6eyJuYW1lIjoiQW52aWwiLCJpZCI6IjEifX0";
 
 fn status<T>(result: Result<T, SDKError>) -> String {
     match result {
@@ -58,6 +61,24 @@ async fn main() -> Result<(), SDKError> {
     println!("products: {}, {}", products.items.len(), last_page(&products));
     println!("every product: {}", count(anonymous.product_catalog.list_products_all(Some(&two), None)).await?);
 
+    // A sorted list takes its sort with each page (D60, amended): two pages
+    // of the products by price, the dearest first.
+    let by_price = ListProductsQueryParams { sort: Some("-priceCents".to_string()), limit: Some(2), ..Default::default() };
+    let priced = anonymous.product_catalog.list_products(Some(&by_price), None).await?;
+    println!("products by price, dearest first: {}, {}", priced.items.len(), last_page(&priced));
+    if let Some(next) = priced.next {
+        let after = ListProductsQueryParams { cursor: Some(next), ..by_price.clone() };
+        let priced = anonymous.product_catalog.list_products(Some(&after), None).await?;
+        println!("the next page by price: {}, {}", priced.items.len(), last_page(&priced));
+    }
+
+    // A cursor bound to another sort is refused.
+    let refused = ListProductsQueryParams { cursor: Some(BY_NAME.to_string()), ..by_price.clone() };
+    println!(
+        "products by price after a cursor of the products by name: {}",
+        status(anonymous.product_catalog.list_products(Some(&refused), None).await)
+    );
+
     println!("get a missing product: {}", status(anonymous.product_catalog.get_product(product, None).await));
 
     let smoky = ListReviewsQueryParams { q: Some("smoky".to_string()), ..Default::default() };
@@ -92,6 +113,11 @@ async fn main() -> Result<(), SDKError> {
     let orders = shopper.order.list_orders(Some(&one), None).await?;
     println!("orders: {}, {}", orders.items.len(), last_page(&orders));
     println!("every order: {}", count(shopper.order.list_orders_all(Some(&one), None)).await?);
+    let largest = ListOrdersQueryParams { sort: Some("-totalCents".to_string()), limit: Some(1), ..Default::default() };
+    println!(
+        "every order by total, largest first: {}",
+        count(shopper.order.list_orders_all(Some(&largest), None)).await?
+    );
 
     // e30 is the cursor of {}, a key that names no order.
     let forged = ListOrdersQueryParams { cursor: Some("e30".to_string()), ..Default::default() };

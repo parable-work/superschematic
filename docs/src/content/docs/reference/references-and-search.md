@@ -13,8 +13,9 @@ documents describe both ([In the documents](#in-the-documents)).
 ## `RefersTo`: a value that names an item
 
 `RefersTo<T, Target, { options, value, label }>` says that a value of type
-`T` names an item of `Target`, as an operation of the same API lists it
-(D61):
+`T` names an item of `Target`, as an operation lists it (D61): the API's
+own, or, when none lists the target, an API dependency's
+([Options from an API dependency](#options-from-an-api-dependency)):
 
 ```ts
 import { Identity } from "superscalar";
@@ -60,13 +61,16 @@ Each member left out is derived, by `ir.ResolveReference` in the public
 
 | Member | Unsaid |
 | --- | --- |
-| `options` | the API's one operation that lists the target: a `GET` returning `Target[]`, one level, with no path argument and no required one, that an end user may call (not `@requireService`, `@manualRouteRegistration` or `@webhook`). Named, it is `listProducts`, or `Catalog.listProducts` when the name alone is not unique, and must meet the same rules |
+| `options` | the API's one operation that lists the target: a `GET` returning `Target[]`, one level, with no path argument and no required one, that an end user may call (not `@requireService`, `@manualRouteRegistration` or `@webhook`). Named, it is `listProducts`, or `Catalog.listProducts` when the name alone is not unique, and must meet the same rules. When the API has none and the target is an API dependency's type, it is the dependency's ([Options from an API dependency](#options-from-an-api-dependency)) |
 | `value` | `id`: the target's field the value holds, one value of the reference's own type |
 | `label` | the target's `@display` `titleField`, else none, and a UI shows the value. Named, it follows `titleField`'s rule: one text value, not secret, not `@uiHidden` |
 
 The options operation's lookup is its optional list query argument that
 refers to the same target by the same value (`ids` above); a UI calls it
-with the values it must name. An operation has at most one.
+with the values it must name. An operation has at most one. Its search,
+when it has one, is its `SearchQuery` argument, which a UI fills with the
+text a reader types to pick an item
+([`SearchQuery`](#searchquery-a-lists-search-text)).
 
 The JSON and YAML forms carry `references` on the field or argument, the
 members as written:
@@ -91,7 +95,9 @@ argument (`Set.operation(argument)`) named first:
 - no operation that lists the target, or two (`name one with options`),
   and an `options` that is no operation of the API, does not list the
   target, or has a path or required argument, admits only services, or is
-  manual or a webhook;
+  manual or a webhook. For an API dependency's target, the refusal names
+  the dependency too: `no operation of shop-api, nor of shelves-api, which
+  declares ShelfView, lists it`;
 - a `value` that is not a field of the target holding one value of the
   reference's type (`is Identity.UUID, but ProductView.sku, its value, is
   Identity.Slug`), and a `label` that is not one text field;
@@ -195,8 +201,39 @@ the schema imports, in the loader and in every generator (D66).
 A type of an API dependency that the API's operations take or return may
 hold a `RefersTo` of its own, which names its own API's operations. In
 the consuming API, the documents and the console read it against the
-API's operations, and keep it only when it resolves there to a value of
-the field's type. Otherwise the field is a plain value.
+consuming API, by the rule below, and keep it only when it resolves there
+to a value of the field's type. Otherwise the field is a plain value.
+
+### Options from an API dependency
+
+A reference's options are the API's own operation first. When the API
+has no operation that lists the target, and the target is a type of an
+API dependency, the options are that dependency's one operation that
+lists it, by the same rule, or the one `options` names there (D61,
+amended):
+
+```ts
+import { Identity } from "superscalar";
+import { RefersTo } from "@superschematic/api";
+// shelves-api, an API dependency, declares ShelfView and lists it in
+// Shelves.listShelves; this API declares no list of shelves.
+import { ShelfView } from "@acme/shelves-api";
+
+export abstract class PlaceInput {
+  shelfId: RefersTo<Identity.UUID, ShelfView>;
+}
+```
+
+The dependency's operation is compared with the target's name as the
+dependency declares it. Its lookup is that operation's argument matched
+by the type it names, however it is spelled; its search is the
+operation's `SearchQuery` argument, whatever its name.
+`ir.ResolveReference` names the dependency in `ResolvedReference.OptionsService`,
+which is empty for the API's own operation. A General dependency has no
+operations, so a reference to its type needs the API's own. The loader
+reads the dependency's whole schema, its operations among it, as it does
+for its type. Adding a list of the target to the API itself moves the
+reference's options back to the API.
 
 ## `SearchQuery`: a list's search text
 
@@ -219,6 +256,16 @@ A bare `SearchQuery` is `SearchQuery<string>`. The data forms write
 a search argument that is required, has a default, is not text or is a
 list, sits on an operation that is not a `GET`, or is the operation's
 second.
+
+A reference whose options operation has a search argument resolves with
+it: `ir.ResolveReference` gives it in `ResolvedReference.Search`, nil when
+the options do not search (D61, amended). A UI that picks the
+reference's item sends the text a reader types in it, and offers the
+items the search finds, so a target with many items can still be picked.
+acme's `listProducts` searches the products by name, its `q` a
+`SearchQuery` over `Product.name`'s `search_text`, so a Topcoat app's
+control for each order line's product is a search picker
+([Choices from references](/superschematic/guides/topcoat/#choices-from-references)).
 
 A search keeps the items whose searchable text contains each of its words,
 case-insensitively, and does not rank them. A word is a run of characters
@@ -249,11 +296,13 @@ from the ORM module's own `search.go`, written only for a schema with
 search fields and held to the same `search_parity.json`, so an ORM module
 needs no HTTP runtime. `<Type>FilterConditions(filter, &args)` gives a
 filter's conditions, each column qualified by its table, numbered after
-the values `args` already holds, to a query of the implementation's own:
-acme's `listReviews` puts its product, rating and search conditions into
-its keyset page's key query this way, and adds the cursor's comparison
-itself, and `deleted_at IS NULL`, which `FindMany` adds on its own and no
-filter's conditions hold. The loader refuses a field whose column would
+the values `args` already holds, to a query of the implementation's own,
+which adds `deleted_at IS NULL` itself, since `FindMany` adds it on its
+own and no filter's conditions hold it. `FindPage` puts the same
+conditions beside a page's keyset
+([Pages](/superschematic/guides/database-tables/#pages)): acme's
+`listReviews` and `listProducts` read their pages through it, the search
+among their filters' conditions. The loader refuses a field whose column would
 be `search_text` on a table with search fields:
 `Review.searchText: its column is search_text, the column @searchField generates`.
 
@@ -279,7 +328,8 @@ In the OpenAPI document, the value that refers gives
   "options": "CatalogListProductsHandler",
   "value": "id",
   "label": "name",
-  "lookup": "ids"
+  "lookup": "ids",
+  "search": "q"
 }
 ```
 
@@ -290,6 +340,25 @@ In the OpenAPI document, the value that refers gives
 | `value` | the target's key the value holds |
 | `label` | the target's key that names an item; absent when it has none |
 | `lookup` | the options operation's argument that narrows its list to the values given; absent when it has none |
+| `search` | the options operation's search argument, which a picker fills with the text a reader types (D61, amended); absent when it has none |
+| `service` | the API dependency whose operation the options are, when none of the API's own lists the target ([Options from an API dependency](#options-from-an-api-dependency)); absent for the API's own |
+
+When `service` names a dependency, `options` is the `operationId` the
+dependency's own document gives its operation, and `lookup` and `search`
+are that operation's arguments. The dependency's operation is not in the
+API's document, so a client calls it at the dependency's API:
+
+```json
+"x-superschematic-reference": {
+  "target": "#/components/schemas/ShelfView",
+  "options": "ShelvesListShelvesHandler",
+  "service": "shelves-api",
+  "value": "id",
+  "label": "title",
+  "lookup": "ids",
+  "search": "q"
+}
+```
 
 The key sits on the property schema of a field (of an output or an input
 type) and of a body argument, and on the parameter object of a path or
@@ -331,12 +400,14 @@ document.
 A tool's parameters in `tools/schema.json`, the provider lists and
 `tools/index.ts` give each argument's or field's property the same keys,
 beside `x-superschematic-scalar`. There `target` is the type's name and
-`options` the tool name of the options operation (`catalog.listProducts`).
+`options` the tool name of the options operation (`catalog.listProducts`),
+the dependency's tool when `service` names one (`shelves.listShelves`).
 A tool hook renames the keys through `ToolKeys.Reference` and
 `ToolKeys.Search`
 ([MCP tools](/superschematic/reference/mcp-tools/#toolsschemajson)). In
 Go, `ir.ToolSchemaProperty` decodes them as `Reference`, an
-`ir.ToolSchemaReference`, and `Search`.
+`ir.ToolSchemaReference` whose `Search` and `Service` are the members
+above, and `Search`.
 
 Neither key changes what a server accepts. A reference is not checked at
 run time, and a search keeps its rule.

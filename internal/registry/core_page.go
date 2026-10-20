@@ -12,8 +12,9 @@ import (
 // schema-file JSON Schema takes its $defs/OperationPage from the
 // registered spec in place of the one it reflects from ir.OperationPage, so
 // the TypeScript frontend, the data forms and the strict loader an engine
-// runs check one schema. Both members are optional; the loader fills them
-// (ir.OperationPage.WithDefaults).
+// runs check one schema. Every member is optional; the loader fills the
+// limits (ir.OperationPage.WithDefaults), and holds defaultSort to the
+// operation's SortBy argument (D60, amended).
 var pageArgs = json.RawMessage(`{
 	"$ref": "#/$defs/OperationPage",
 	"$defs": {
@@ -23,15 +24,17 @@ var pageArgs = json.RawMessage(`{
 			"additionalProperties": false,
 			"properties": {
 				"defaultLimit": {"description": "How many items a page holds when the caller sends no limit: 20, or maxLimit when that is less.", "type": "integer", "minimum": 1, "maximum": 1000},
-				"maxLimit": {"description": "The most items a caller may ask a page to hold: 1 to 1000, 100 when left out.", "type": "integer", "minimum": 1, "maximum": 1000}
+				"maxLimit": {"description": "The most items a caller may ask a page to hold: 1 to 1000, 100 when left out.", "type": "integer", "minimum": 1, "maximum": 1000},
+				"defaultSort": {"description": "The order of a request that sends no sort: one of the SortBy argument's values, a field or - and a field. Required with a SortBy argument, and refused without one.", "type": "string", "pattern": "^-?[A-Za-z_][A-Za-z0-9_]*$"}
 			}
 		}
 	}
 }`)
 
 // paginatedDecorator is @paginated() or @paginated({ defaultLimit,
-// maxLimit }) from @superschematic/api, on an operation of an API schema:
-// it writes FieldDef.Page, once per operation, with both limits filled in.
+// maxLimit, defaultSort }) from @superschematic/api, on an operation of an
+// API schema: it writes FieldDef.Page, once per operation, with both
+// limits filled in.
 // The frontend has held the argument to pageArgs; the loader holds the
 // operation to the page's rules (verify.checkPages).
 func paginatedDecorator() DecoratorSpec {

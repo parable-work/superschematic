@@ -84,14 +84,20 @@ use topcoat::router::content::Form;
 use topcoat::router::error::see_other;
 {{- end }}
 use topcoat::router::request::uri;
+{{- if .Pages.Params }}
 use topcoat::router::{Slot, StatusCode, layout, page, path_param};
+{{- else }}
+use topcoat::router::{Slot, StatusCode, layout, page};
+{{- end }}
 {{- if .Pages.Uses "controls" }}
 use topcoat::router::error::ContentTooLargeError;
 use topcoat::router::request::{headers, method};
 use topcoat::router::response::Response;
 use topcoat::router::{Body, BodyLimit, HeaderValue, Layer, LayerFuture, Method, Next, Path, RouterBuilder, header, to_bytes, try_endpoint};
 {{- end }}
-{{- if .Pages.Live }}
+{{- if and .Pages.Live (.Pages.Uses "sorting") }}
+use topcoat::runtime::{Event, Signal, shard, signal};
+{{- else if .Pages.Live }}
 use topcoat::runtime::{Event, shard, signal};
 {{- end }}
 use topcoat::view::{View, component, view};
@@ -409,12 +415,90 @@ fn admitted_limit<'a>(sent: Option<&'a str>, page: &runtime::page::PageSpec) -> 
     page.query(&query).is_ok().then_some(limit)
 }
 
+{{- if .Pages.Uses "sorting" }}
+
+/// The sort sent, as the query sent it, when the route admits it, as its
+/// router reads a sort (`PageSpec::query`, D60 amended), its defaultSort
+/// sent among them; none for one it refuses, an empty one, none sent, or a
+/// list that does not sort. A link and a form keep only an admitted sort,
+/// since a refused one would refuse each page they lead to.
+fn admitted_sort<'a>(sent: Option<&'a str>, page: &runtime::page::PageSpec) -> Option<&'a str> {
+    let spec = page.sort()?;
+    let sort = sent.filter(|sort| !sort.is_empty())?;
+    let query = runtime::QueryValues::new(vec![(spec.param().to_owned(), sort.to_owned())]);
+    page.query(&query).is_ok().then_some(sort)
+}
+
+/// A paged list's query pairs without a limit or a sort the route refuses,
+/// which a page's links carry: a refused page's First link starts again at
+/// the route's default.
+fn admitted_pairs(pairs: Vec<(String, String)>, page: &runtime::page::PageSpec) -> Vec<(String, String)> {
+    let sort = page.sort().map(|spec| spec.param());
+    pairs
+        .into_iter()
+        .filter(|(name, value)| name != "limit" || admitted_limit(Some(value), page).is_some())
+        .filter(|(name, value)| sort != Some(name.as_str()) || admitted_sort(Some(value), page).is_some())
+        .collect()
+}
+
+/// The query of a sorted list's header link (D44, amended): `pairs` with
+/// the sort set to `value`, before the limit, and no cursor and no `back`,
+/// so the list starts again at its first page in the new order.
+fn sort_query(pairs: &[(String, String)], param: &str, value: &str) -> String {
+    let mut sorted: Vec<(String, String)> = pairs.iter().filter(|(name, _)| name != param).cloned().collect();
+    let at = sorted.iter().position(|(name, _)| name == "limit").unwrap_or(sorted.len());
+    sorted.insert(at, (param.to_owned(), value.to_owned()));
+    pager_query(&sorted, None, None)
+}
+
+/// A sorted list's headers (D44, amended): the order its rows are in, the
+/// sort sent when the route admits it, else its defaultSort; and the link
+/// of each of `columns`, the table's sortable columns, `base` with the
+/// query `pairs` hold and the column's order: the current column's
+/// reversed, any other's ascending.{{ if .Pages.Live }} A live list's links set `live`, its
+/// shard's query.{{ end }}
+fn sorting(
+    pairs: &[(String, String)],
+    page: &runtime::page::PageSpec,
+    sent: Option<&str>,
+    columns: &[&str],
+    base: &str,
+{{- if .Pages.Live }}
+    live: Option<Signal<String>>,
+{{- end }}
+) -> Sorted {
+    let Some(spec) = page.sort() else {
+        return Sorted::default();
+    };
+    let by = runtime::page::Sort::parse(admitted_sort(sent, page).unwrap_or(spec.default()));
+    let links = columns
+        .iter()
+        .map(|field| {
+            let value = match &by {
+                Some(sort) if sort.field() == *field => sort.reversed().to_string(),
+                _ => (*field).to_owned(),
+            };
+            let query = sort_query(pairs, spec.param(), &value);
+            ((*field).to_owned(), pager_href(base, &query), query)
+        })
+        .collect();
+    Sorted {
+        by: by.map(|sort| (sort.field().to_owned(), sort.desc())),
+        links,
+{{- if .Pages.Live }}
+        live,
+{{- end }}
+    }
+}
+{{- else }}
+
 /// A paged list's query pairs without a limit the route refuses, which a
 /// page's links carry: a refused page's First link starts again at the
 /// route's default.
 fn admitted_pairs(pairs: Vec<(String, String)>, page: &runtime::page::PageSpec) -> Vec<(String, String)> {
     pairs.into_iter().filter(|(name, value)| name != "limit" || admitted_limit(Some(value), page).is_some()).collect()
 }
+{{- end }}
 
 /// The sizes of a paged list's size form (D44, amended): its own, `own`,
 /// then the limit sent when the route admits it, in order and each once,
@@ -1089,7 +1173,7 @@ async fn {{ $r.Ident }}_list(cx: &Cx{{ declareAfter $r.ColParams "String" }}{{ i
         Err(refusal) if !alone(refusal, &[{{ .RouteNames }}]) => refusal.errors.clone(),
         _ => FormErrors::default(),
     };
-    let choices = {{ .ChoicesExpr $r.Name }};
+    let choices = {{ .ChoicesExpr $r.Name "&filter" }};
 {{- end }}
 {{- if .Paged }}
 {{- if $r.Prev }}
@@ -1133,8 +1217,19 @@ async fn {{ $r.Ident }}_list(cx: &Cx{{ declareAfter $r.ColParams "String" }}{{ i
 {{- end }}
     let hidden = size_pairs(&pairs);
 {{- if $r.Filters }}
+{{- if $r.Sort }}
+    // The filter keeps the sort and the limit sent, unless the route
+    // refused them.
+    let sort = admitted_sort(filter.{{ $r.Sort.Field }}.as_deref(), &crate::api::{{ .ArgsName }}::PAGE).map(str::to_owned);
+{{- else }}
     // The filter keeps the limit sent, unless the route refused it.
+{{- end }}
     let limit = admitted_limit(filter.limit.as_deref(), &crate::api::{{ .ArgsName }}::PAGE).map(str::to_owned);
+{{- end }}
+{{- if $r.SortColumns }}
+    // The headers sort the list (D44, amended): each link starts again at
+    // the first page in its order{{ if $r.Live }}, and sets the shard's query{{ end }}.
+    let sorted = sorting(&pairs, &crate::api::{{ .ArgsName }}::PAGE, filter.{{ $r.Sort.Field }}.as_deref(), {{ $r.SortColumnsExpr }}, &base{{ if $r.Live }}, Some(query.clone()){{ else if $.Pages.Live }}, None{{ end }});
 {{- end }}
 {{- end }}
 {{- else }}
@@ -1162,6 +1257,11 @@ async fn {{ $r.Ident }}_list(cx: &Cx{{ declareAfter $r.ColParams "String" }}{{ i
         <form method="get" class="ss-filter"{{ if .ArgForm.HasSearch }} role="search"{{ end }}>
 {{- end }}
             {{ .ArgForm.Component }}(form: filter, errors: errors, choices: choices)
+{{- if $r.Sort }}
+            if let Some(sort) = sort {
+                <input type="hidden" name={{ rustString $r.Sort.Param }} value=(sort)>
+            }
+{{- end }}
 {{- if .Paged }}
             if let Some(limit) = limit {
                 <input type="hidden" name="limit" value=(limit)>
@@ -1170,13 +1270,13 @@ async fn {{ $r.Ident }}_list(cx: &Cx{{ declareAfter $r.ColParams "String" }}{{ i
             <button type="submit">"Filter"</button>
         </form>
         match listed {
-            Ok(items) => {{ $r.Ident }}_rows({{ if $r.Linked }}{{ props $r.ColParams }}{{ end }}items: items),
+            Ok(items) => {{ $r.Ident }}_rows({{ if $r.Linked }}{{ props $r.ColParams }}{{ end }}items: items{{ if $r.SortColumns }}, sorted: sorted{{ end }}),
             Err(refusal) if alone(&refusal, &[{{ .RouteNames }}]) => refused(refusal: page_refusal(refusal, &[{{ .RouteNames }}]), next: next),
             Err(refusal) => (refusal.status),
         }
 {{- else if .ArgForm }}
         match listed {
-            Ok(items) => {{ $r.Ident }}_rows({{ if $r.Linked }}{{ props $r.ColParams }}{{ end }}items: items),
+            Ok(items) => {{ $r.Ident }}_rows({{ if $r.Linked }}{{ props $r.ColParams }}{{ end }}items: items{{ if $r.SortColumns }}, sorted: sorted{{ end }}),
             Err(refusal) => refused(refusal: page_refusal(refusal, &[{{ .RouteNames }}]), next: next),
         }
 {{- else }}
@@ -1243,9 +1343,9 @@ async fn {{ $r.Ident }}_list(cx: &Cx{{ declareAfter $r.ColParams "String" }}{{ i
     })
 }
 
-{{ doc (printf "%s as `%s` renders them, the app's choices naming their values%s%s." $r.Plural $r.RowTable (or (and $r.RowLabels ", over the labels of what they refer to") "") (or (and $r.Linked ", each row linked to its page") "")) }}
+{{ doc (printf "%s as `%s` renders them, the app's choices naming their values%s%s%s." $r.Plural $r.RowTable (or (and $r.RowLabels ", over the labels of what they refer to") "") (or (and $r.Linked ", each row linked to its page") "") (or (and $r.SortColumns ", the headers that sort them as `sorted` says, none on an item's page") "")) }}
 #[component]
-async fn {{ $r.Ident }}_rows(cx: &Cx{{ if $r.Linked }}{{ declareAfter $r.ColParams "String" }}{{ end }}, items: {{ .Items }}) -> topcoat::Result<impl View> {
+async fn {{ $r.Ident }}_rows(cx: &Cx{{ if $r.Linked }}{{ declareAfter $r.ColParams "String" }}{{ end }}, items: {{ .Items }}{{ if $r.SortColumns }}, #[default] sorted: Sorted{{ end }}) -> topcoat::Result<impl View> {
     let rows: Vec<{{ $r.RowRecord }}> = items.iter().map({{ $r.RowRecord }}::from).collect();
 {{- if $r.Linked }}
     let hrefs: Vec<String> = rows.iter().map(|row| {{ $r.LinkExpr }}).collect();
@@ -1259,7 +1359,7 @@ async fn {{ $r.Ident }}_rows(cx: &Cx{{ if $r.Linked }}{{ declareAfter $r.ColPara
         if rows.is_empty() {
             <p class="ss-empty">{{ rustString (printf "There are no %s." $r.PluralLower) }}</p>
         } else {
-            {{ $r.RowTable }}(rows: rows, choices: choices{{ if $r.Linked }}, hrefs: hrefs{{ end }})
+            {{ $r.RowTable }}(rows: rows, choices: choices{{ if $r.Linked }}, hrefs: hrefs{{ end }}{{ if $r.SortColumns }}, sorted: sorted{{ end }})
         }
     })
 }
@@ -1361,7 +1461,7 @@ async fn {{ $r.Ident }}_item(
     };
 {{- if .ChoicesFn }}
     let {{ .Field }}_choices = match &{{ .Field }} {
-        Some(_) => references::{{ .ChoicesFn }}(cx, choices.clone()).await,
+        Some((form, _)) => references::{{ .ChoicesFn }}(cx, form, choices.clone()).await,
         None => choices.clone(),
     };
 {{- end }}
@@ -1439,7 +1539,7 @@ pub async fn {{ $r.Ident }}_create_page(cx: &Cx, Form(form): Form<{{ .FormName }
 /// The new page's form, new or as sent with its errors.
 #[component]
 async fn {{ $r.Ident }}_new(cx: &Cx, form: {{ .FormName }}, errors: FormErrors) -> topcoat::Result<impl View> {
-    let choices = {{ .ChoicesExpr $r.Name }};
+    let choices = {{ .ChoicesExpr $r.Name "&form" }};
     Ok(view! {
         <h1>{{ rustString $r.CreateLabel }}</h1>
         <form method="post" class="ss-form">
@@ -1492,7 +1592,7 @@ pub async fn {{ $r.Ident }}_update_page(cx: &Cx, Form(form): Form<{{ .ArgForm.Na
 /// The edit page's form, filled from the item or as sent with its errors.
 #[component]
 async fn {{ $r.Ident }}_edit(cx: &Cx, form: {{ .ArgForm.Name }}, errors: FormErrors) -> topcoat::Result<impl View> {
-    let choices = {{ .ChoicesExpr $r.Name }};
+    let choices = {{ .ChoicesExpr $r.Name "&form" }};
     Ok(view! {
         <h1>{{ rustString (printf "Edit the %s" $r.NounLower) }}</h1>
         <form method="post" class="ss-form">
@@ -1551,7 +1651,7 @@ async fn {{ $r.Ident }}_delete(cx: &Cx{{ declareAfter $r.ItemParams "String" }},
     let labels = app.clone();
 {{- end }}
 {{- if .ChoicesFn }}
-    let choices = references::{{ .ChoicesFn }}(cx, app).await;
+    let choices = references::{{ .ChoicesFn }}(cx, &form, app).await;
 {{- else }}
     let choices = app;
 {{- end }}
@@ -1619,6 +1719,14 @@ pub(crate) fn route_controls(router: RouterBuilder{{ if .Pages.ControlsUse "rate
     })
 }
 
+{{- if .Pages.ControlsUse "rate_from" }}
+
+/// How a page takes an API dependency's operation's limiter at a request:
+/// from the dependency's crate's setup, none when the app does not set it
+/// up (D61, amended).
+type LimiterFrom = fn(&Cx) -> Option<Arc<RateLimiter>>;
+{{- end }}
+
 /// The traffic controls of an operation's route, which a page that calls
 /// it meets as the route's request does (`RouteControls`, D35): the rate
 /// limit, the body limit, read before the page decodes its form, then the
@@ -1636,6 +1744,12 @@ struct Controls {
     /// its form up to it.
     body_limit: Option<(usize, BodyLimit)>,
     timeout: Option<Duration>,
+{{- if .Pages.ControlsUse "rate_from" }}
+    /// The limiter of an API dependency's operation (D61, amended), which
+    /// its crate's setup holds in the app context: taken at the request,
+    /// none when the app does not set the crate up.
+    rate_from: Option<LimiterFrom>,
+{{- end }}
 }
 
 impl Controls {
@@ -1645,6 +1759,23 @@ impl Controls {
     fn rate_limiter(mut self, limiter: Option<Arc<RateLimiter>>) -> Self {
         self.rate_limit = limiter;
         self
+    }
+{{- end }}
+{{- if .Pages.ControlsUse "rate_from" }}
+{{- if .Pages.ControlsUse "rate_limit" }}
+{{ end }}
+    /// `@rateLimit({ requestsPerMinute })` of an API dependency's operation,
+    /// as its limiter in its crate's registry (D61, amended), taken at the
+    /// request.
+    fn rate_limiter_from(mut self, from: LimiterFrom) -> Self {
+        self.rate_from = Some(from);
+        self
+    }
+
+    /// The operation's limiter, at the request: its own, or a dependency's
+    /// from its crate's setup.
+    fn limiter(&self, cx: &Cx) -> Option<Arc<RateLimiter>> {
+        self.rate_limit.clone().or_else(|| self.rate_from.and_then(|from| from(cx)))
     }
 {{- end }}
 {{- if .Pages.ControlsUse "body_limit" }}
@@ -1703,7 +1834,11 @@ impl Layer for PageControls {
             // operation bounds its body, which no other call carries; and
             // the tightest timeout covers the page.
             let every = || own.into_iter().chain(called.iter().copied());
+{{- if .Pages.ControlsUse "rate_from" }}
+            for limiter in every().filter_map(|controls| controls.limiter(cx)) {
+{{- else }}
             for limiter in every().filter_map(|controls| controls.rate_limit.as_ref()) {
+{{- end }}
                 if let Err(retry_after) = limiter.take(&crate::client_key(cx)) {
                     let mut response = control_refusal(&ApiError::too_many_requests("Too Many Requests"));
                     response.headers_mut().insert(header::RETRY_AFTER, retry_after.into());

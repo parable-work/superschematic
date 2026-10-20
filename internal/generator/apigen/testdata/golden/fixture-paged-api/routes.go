@@ -122,7 +122,8 @@ func publicAPIRoutes(cfg Config) []runtimerouting.Route {
 			Handler: createCatalogPlaceBasketHandler(cfg.Implementations.Catalog),
 		},
 		// The items, two to a page unless the caller asks for up to five, by
-		// their ids or their stock.
+		// their ids or their stock, in order of their names unless the caller
+		// sorts them by name or sku, either way.
 		{
 			Method:  "GET",
 			Path:    "/items",
@@ -202,7 +203,8 @@ func createCatalogPlaceBasketHandler(impl CatalogImplementation) gohttp.HandlerF
 // createCatalogListItemsHandler creates a handler for GET /api/items
 //
 // The items, two to a page unless the caller asks for up to five, by
-// their ids or their stock.
+// their ids or their stock, in order of their names unless the caller
+// sorts them by name or sku, either way.
 func createCatalogListItemsHandler(impl CatalogImplementation) gohttp.HandlerFunc {
 	// List arguments in the query string: the JSON type of each item, then
 	// its rules in the order they are checked (the scalar type's own, then
@@ -228,7 +230,10 @@ func createCatalogListItemsHandler(impl CatalogImplementation) gohttp.HandlerFun
 
 		// Read the page's cursor and limit (@paginated): its own reader, whose
 		// refusal is the 400 every server answers at cursor or limit.
-		page, ok := paging.Read(w, r, paging.Spec{DefaultLimit: 2, MaxLimit: 5})
+		// It also reads sort, the page's sort (D60, amended), after the limit,
+		// and unbinds the cursor from the sort it was returned under, so the
+		// implementation reads its own key.
+		page, ok := paging.Read(w, r, paging.Spec{DefaultLimit: 2, MaxLimit: 5, Sort: &paging.SortSpec{Param: "sort", Fields: []string{"name", "sku"}, Default: paging.Sort{Field: "name"}}})
 		if !ok {
 			return
 		}
@@ -246,6 +251,13 @@ func createCatalogListItemsHandler(impl CatalogImplementation) gohttp.HandlerFun
 			// Get logger from context and use proper error handling
 			logger := LoggerFromContext(r.Context())
 			RespondAppError(w, logger, err)
+			return
+		}
+		// The next page's cursor names the sort the page was read in (D60,
+		// amended); a next no router reads back under it is the
+		// implementation's error.
+		if result, err = paging.Bind(result, page); err != nil {
+			RespondAppError(w, LoggerFromContext(r.Context()), err)
 			return
 		}
 

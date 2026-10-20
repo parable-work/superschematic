@@ -43,9 +43,16 @@ func TestGeneratedVersionGraphORM(t *testing.T) {
 // and returns the ORM module's directory.
 func generateORMModule(t *testing.T, fixture string) string {
 	t.Helper()
+	return generateORMModuleAt(t, filepath.Join(fixturesDir, fixture), fixture)
+}
+
+// generateORMModuleAt is generateORMModule for the service in serviceDir,
+// named fixture.
+func generateORMModuleAt(t *testing.T, serviceDir, fixture string) string {
+	t.Helper()
 	paths := testpaths.Local(t)
 
-	schema, err := loader.LoadService(filepath.Join(fixturesDir, fixture))
+	schema, err := loader.LoadService(serviceDir)
 	if err != nil {
 		t.Fatalf("load %s: %v", fixture, err)
 	}

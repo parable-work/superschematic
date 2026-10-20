@@ -16,6 +16,7 @@ type AgentRepositoryInterface interface {
 	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Agent, error)
 	FindOne(ctx context.Context, filter *AgentFilter, opts *AgentFindOptions) (*types.Agent, error)
 	FindMany(ctx context.Context, filter *AgentFilter, opts *AgentFindOptions) ([]*types.Agent, int, error)
+	FindPage(ctx context.Context, filter *AgentFilter, opts *AgentPageOptions) (*AgentPage, error)
 	CreateOne(ctx context.Context, input *types.Agent) (*types.Agent, error)
 	CreateMany(ctx context.Context, inputs []*types.Agent) ([]*types.Agent, error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *AgentUpdate) (*types.Agent, error)
@@ -30,6 +31,7 @@ type CustomerRepositoryInterface interface {
 	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Customer, error)
 	FindOne(ctx context.Context, filter *CustomerFilter, opts *CustomerFindOptions) (*types.Customer, error)
 	FindMany(ctx context.Context, filter *CustomerFilter, opts *CustomerFindOptions) ([]*types.Customer, int, error)
+	FindPage(ctx context.Context, filter *CustomerFilter, opts *CustomerPageOptions) (*CustomerPage, error)
 	CreateOne(ctx context.Context, input *types.Customer) (*types.Customer, error)
 	CreateMany(ctx context.Context, inputs []*types.Customer) ([]*types.Customer, error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *CustomerUpdate) (*types.Customer, error)
@@ -139,6 +141,10 @@ func (r *NoOpAgentRepository) FindMany(_ context.Context, _ *AgentFilter, _ *Age
 	return []*types.Agent{}, 0, nil
 }
 
+func (r *NoOpAgentRepository) FindPage(_ context.Context, _ *AgentFilter, _ *AgentPageOptions) (*AgentPage, error) {
+	return &AgentPage{Rows: []*types.Agent{}}, nil
+}
+
 func (r *NoOpAgentRepository) CreateOne(_ context.Context, input *types.Agent) (*types.Agent, error) {
 	return input, nil
 }
@@ -191,6 +197,10 @@ func (r *NoOpCustomerRepository) FindOne(_ context.Context, _ *CustomerFilter, _
 
 func (r *NoOpCustomerRepository) FindMany(_ context.Context, _ *CustomerFilter, _ *CustomerFindOptions) ([]*types.Customer, int, error) {
 	return []*types.Customer{}, 0, nil
+}
+
+func (r *NoOpCustomerRepository) FindPage(_ context.Context, _ *CustomerFilter, _ *CustomerPageOptions) (*CustomerPage, error) {
+	return &CustomerPage{Rows: []*types.Customer{}}, nil
 }
 
 func (r *NoOpCustomerRepository) CreateOne(_ context.Context, input *types.Customer) (*types.Customer, error) {

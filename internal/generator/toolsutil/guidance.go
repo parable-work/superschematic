@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/apigen"
+	"github.com/parable-work/superschematic/internal/generator/tsutil"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -69,14 +70,28 @@ func ExpectedRevisionPointers(docs *ir.OperationDocs) []string {
 // PageSentence is what a paged operation's tool description adds (D60).
 const PageSentence = "Pages: pass the result's `next` back as `cursor` for the next page; `next` is null after the last."
 
+// SortedPageSentence is what a sorted paged operation's tool description
+// adds in place of PageSentence (D60, amended): a cursor holds the sort it
+// was returned under, so the next page asks for the same one. param is
+// the sort argument's tool parameter ("sort").
+func SortedPageSentence(param string) string {
+	return "Pages: pass the result's `next` back as `cursor`, with the same `" + param + "`, for the next page; `next` is null after the last."
+}
+
 // PagedDescription is a tool's description with PageSentence after it when
-// the endpoint pages, and the description as it is otherwise.
+// the endpoint pages, SortedPageSentence when its page sorts, and the
+// description as it is otherwise.
 func PagedDescription(description string, page *apigen.PageInfo) string {
 	if page == nil {
 		return description
 	}
-	if description == "" {
-		return PageSentence
+	sentence := PageSentence
+	if page.Sort != nil {
+		// The SDKs key a tool's parameters by the argument's camelCase name.
+		sentence = SortedPageSentence(tsutil.ToCamelCase(page.Sort.Param))
 	}
-	return strings.TrimRight(description, " ") + " " + PageSentence
+	if description == "" {
+		return sentence
+	}
+	return strings.TrimRight(description, " ") + " " + sentence
 }

@@ -55,8 +55,13 @@ type JSONSchemaProperty struct {
 	ReferenceKey string                  `json:"-"`
 	// Search marks an operation's search argument (D62), written as true
 	// under SearchKey after the reference key when both are set.
-	Search               bool                            `json:"-"`
-	SearchKey            string                          `json:"-"`
+	Search    bool   `json:"-"`
+	SearchKey string `json:"-"`
+	// Sort marks a paged operation's sort argument (SortBy, D60 amended),
+	// whose Enum holds its values, written as true under SortKey after the
+	// search key when both are set.
+	Sort                 bool                            `json:"-"`
+	SortKey              string                          `json:"-"`
 	AdditionalProperties *JSONSchemaAdditionalProperties `json:"additionalProperties,omitempty"`
 	Type                 string                          `json:"type"`
 	Format               string                          `json:"format,omitempty"`
@@ -103,11 +108,16 @@ var jsonValueTypes = []string{"object", "array", "string", "number", "boolean"}
 // MarshalJSON preserves body-field nullability independently from whether the
 // containing object requires the field. Array items retain their own
 // contract. The vendor keys come first: the scalar's, the reference's,
-// then the search's, each when set.
+// the search's, then the sort's, each when set.
 func (property JSONSchemaProperty) MarshalJSON() ([]byte, error) {
 	encoded, err := property.marshalShape()
 	if err != nil {
 		return nil, err
+	}
+	if property.SortKey != "" && property.Sort {
+		if encoded, err = prependKey(encoded, property.SortKey, true); err != nil {
+			return nil, err
+		}
 	}
 	if property.SearchKey != "" && property.Search {
 		if encoded, err = prependKey(encoded, property.SearchKey, true); err != nil {
@@ -182,10 +192,10 @@ func prependKey(object []byte, key string, value any) ([]byte, error) {
 }
 
 // withVendorKeys sets the property keys of keys (the scalar's, the
-// reference's and the search's) on the property and every property nested
-// in it.
+// reference's, the search's and the sort's) on the property and every
+// property nested in it.
 func (property JSONSchemaProperty) withVendorKeys(keys apigen.ToolKeys) JSONSchemaProperty {
-	property.ScalarKey, property.ReferenceKey, property.SearchKey = keys.Scalar, keys.Reference, keys.Search
+	property.ScalarKey, property.ReferenceKey, property.SearchKey, property.SortKey = keys.Scalar, keys.Reference, keys.Search, keys.Sort
 	if property.Items != nil {
 		items := property.Items.withVendorKeys(keys)
 		property.Items = &items
@@ -211,13 +221,23 @@ func (property JSONSchemaProperty) withVendorKeys(keys apigen.ToolKeys) JSONSche
 	return property
 }
 
-// holds reports whether the property, or a property nested in it, holds a
-// reference and a search.
-func (property JSONSchemaProperty) holds() (reference, search bool) {
-	reference, search = property.Reference != nil, property.Search
+// Holding is what the properties of a tool's arguments hold, at any
+// depth: a reference (D61), a search argument (D62) and a sort argument
+// (D60, amended). tools/index.ts types each key a tool holds.
+type Holding struct {
+	Reference, Search, Sort bool
+}
+
+// or is the union of two holdings.
+func (h Holding) or(other Holding) Holding {
+	return Holding{Reference: h.Reference || other.Reference, Search: h.Search || other.Search, Sort: h.Sort || other.Sort}
+}
+
+// holds reports what the property, or a property nested in it, holds.
+func (property JSONSchemaProperty) holds() Holding {
+	holding := Holding{Reference: property.Reference != nil, Search: property.Search, Sort: property.Sort}
 	visit := func(child JSONSchemaProperty) {
-		r, s := child.holds()
-		reference, search = reference || r, search || s
+		holding = holding.or(child.holds())
 	}
 	if property.Items != nil {
 		visit(*property.Items)
@@ -231,27 +251,32 @@ func (property JSONSchemaProperty) holds() (reference, search bool) {
 	for _, member := range property.OneOf {
 		visit(member)
 	}
-	return reference, search
+	return holding
 }
 
-// Holds reports whether a property of the schema, at any depth, holds a
-// reference (D61) and whether one is a search argument (D62).
-func (object JSONSchemaObject) Holds() (reference, search bool) {
+// Holds reports what the properties of the schema hold, at any depth: a
+// reference (D61), a search argument (D62) and a sort argument (D60,
+// amended).
+func (object JSONSchemaObject) Holds() Holding {
+	var holding Holding
 	for _, property := range object.Properties {
-		r, s := property.holds()
-		reference, search = reference || r, search || s
+		holding = holding.or(property.holds())
 	}
-	return reference, search
+	return holding
 }
 
 // ToolReference is a resolved reference as the tool documents write it:
-// target the type's name and options the options operation's tool name.
-// Nil for nil.
+// target the type's name, options the options operation's tool name, and
+// service the API dependency whose tool that is, when it is one (D61,
+// amended). Nil for nil.
 func ToolReference(ref *apigen.Reference) *ir.ToolSchemaReference {
 	if ref == nil {
 		return nil
 	}
-	return &ir.ToolSchemaReference{Target: ref.Target, Options: ref.OptionsTool, Value: ref.Value, Label: ref.Label, Lookup: ref.Lookup}
+	return &ir.ToolSchemaReference{
+		Target: ref.Target, Options: ref.OptionsTool, Value: ref.Value, Label: ref.Label, Lookup: ref.Lookup,
+		Search: ref.Search, Service: ref.Service,
+	}
 }
 
 // JSONSchemaReturn represents the return type schema. Properties and
@@ -292,9 +317,10 @@ type ToolScalarArg struct {
 }
 
 // ToolQueryArg is one query parameter as a tool argument: its type,
-// collection shape, requiredness, Validate<> bounds, reference and search
-// mark. Tool arguments are one flat object, so query values appear in the
-// same JSON Schema as path and body values.
+// collection shape, requiredness, Validate<> bounds, reference, search
+// mark and sort (D60, amended): a sort argument is a string of its values.
+// Tool arguments are one flat object, so query values appear in the same
+// JSON Schema as path and body values.
 type ToolQueryArg struct {
 	Name              string
 	TSName            string
@@ -311,6 +337,7 @@ type ToolQueryArg struct {
 	ValidatePattern   string
 	Reference         *apigen.Reference
 	Search            bool
+	Sort              *apigen.SortParam
 }
 
 // ParamKeyFn chooses the JSON object key for a parameter.
@@ -341,9 +368,10 @@ func BuildInputTypeFieldsMap(apiOutput *apigen.APIOutput) map[string][]apigen.Pa
 // expanded, unions as oneOf, enums with their values) or the scalar
 // arguments, the encryption key of an encrypted endpoint, and a paged
 // endpoint's cursor and limit (D60), both optional. A value that refers to
-// an item gives its reference (D61), and the search argument its mark
-// (D62), under the keys' names. keys supplies the vendor keys; page is nil
-// for an endpoint that does not page.
+// an item gives its reference (D61), the search argument its mark (D62),
+// and the sort argument its values and its mark (D60, amended), under the
+// keys' names. keys supplies the vendor keys; page is nil for an endpoint
+// that does not page.
 func BuildParametersSchema(
 	pathParams []ToolPathParam,
 	queryArgs []ToolQueryArg,
@@ -383,7 +411,7 @@ func BuildParametersSchema(
 			ValidateMinLength: arg.ValidateMinLength, ValidateMaxLength: arg.ValidateMaxLength,
 			ValidateListMin: arg.ValidateListMin, ValidateListMax: arg.ValidateListMax,
 			ValidatePattern: arg.ValidatePattern,
-			Reference:       arg.Reference, Search: arg.Search,
+			Reference:       arg.Reference, Search: arg.Search, Sort: arg.Sort,
 		}, scalars, inputTypeFields, inputTypeUnions, inputTypeEnums, nil)
 		key := paramKeyFn(arg.Name, arg.TSName)
 		schema.Properties[key] = prop
@@ -503,7 +531,8 @@ func typeToJSONSchemaProperty(
 // array. A type already on the expansion stack stays a plain reference, so
 // recursive types end. A field that is not required is nullable; the inner
 // lists of an array of arrays never are. A field's reference and search
-// mark sit on its outer schema, a list's on the list.
+// mark sit on its outer schema, a list's on the list. A sort argument
+// (D60, amended) is a string of its values (SortProperty).
 func FieldToJSONSchemaProperty(
 	field apigen.Param,
 	scalars map[string]apigen.ScalarJSONSchemaInfo,
@@ -582,7 +611,37 @@ func FieldToJSONSchemaProperty(
 	value.Nullable = !field.Required
 	value.Reference = ToolReference(field.Reference)
 	value.Search = field.Search
+	if field.Sort != nil {
+		value = SortProperty(value, field.Sort)
+	}
 	return value
+}
+
+// SortProperty is a sort argument's property (D60, amended): a string of
+// its values, as the OpenAPI document's enum lists them, described by
+// apigen.PageSortDescription and a sentence that names the values and the
+// default (SortDescription), and marked under the sort key.
+func SortProperty(property JSONSchemaProperty, sort *apigen.SortParam) JSONSchemaProperty {
+	property.Type = "string"
+	property.Enum = append([]string(nil), sort.Values...)
+	property.Description = SortDescription(sort)
+	property.Sort = true
+	return property
+}
+
+// SortDescription describes a sort argument in the tool documents:
+// apigen.PageSortDescription, then "One of `name`, `-name`, `sku` or
+// `-sku`; `name` when left out."
+func SortDescription(sort *apigen.SortParam) string {
+	values := make([]string, len(sort.Values))
+	for i, value := range sort.Values {
+		values[i] = "`" + value + "`"
+	}
+	list := strings.Join(values, ", ")
+	if len(values) > 1 {
+		list = strings.Join(values[:len(values)-1], ", ") + " or " + values[len(values)-1]
+	}
+	return fmt.Sprintf("%s One of %s; `%s` when left out.", apigen.PageSortDescription, list, sort.Default)
 }
 
 // wrapArrayProperty wraps an item property in depth array levels. The

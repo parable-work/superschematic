@@ -1,5 +1,12 @@
 # The Topcoat extension's fixture for an API whose type another API's
-# reference names (D66): fixture-console-api's tests import its Supplier.
+# reference names (D66), and whose own operation lists it (D61, amended):
+# fixture-console-api's tests import its Supplier, and a copy of it that
+# lists no supplier itself offers this API's, through its Topcoat crate,
+# when one app hosts both. Its server is Rust, with its Topcoat crate.
 name: fixture-console-suppliers-api
 kind: API
-outputs: {}
+outputs:
+  types:
+    rust: { enabled: true }
+  api: { enabled: true, language: RUST }
+  topcoat: { enabled: true }

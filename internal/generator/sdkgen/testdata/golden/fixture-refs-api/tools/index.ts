@@ -96,7 +96,7 @@ export interface ToolDefinition {
  */
 export interface JSONSchemaProperty {
   'x-superschematic-scalar'?: string;
-  'x-superschematic-reference'?: { target: string; options: string; value: string; label?: string; lookup?: string };
+  'x-superschematic-reference'?: { target: string; options: string; value: string; label?: string; lookup?: string; search?: string; service?: string };
   'x-superschematic-search'?: boolean;
   additionalProperties?: boolean | JSONSchemaProperty;
   type: string | string[];
@@ -196,13 +196,13 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     requiresAuth: false,
     isScoped: false,
     bindingStatus: 'ready',
-    inputSchemaDigest: 'sha256:2540aa1e84acf1bd302fecdf783b7116096d960358b6deb45939c5ee5b14c4b3',
+    inputSchemaDigest: 'sha256:014cf856c8ba0766dcb11f71691a76a5a9723c294511bdb332b5b08168f0ac8d',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        giftSku: {"description":"A URL friendly version of a string","maxLength":255,"minLength":1,"pattern":"^[a-z0-9]+(?:[-_][a-z0-9]+)*$","type":["string","null"],"x-superschematic-reference":{"label":"name","options":"catalog.listItems","target":"ItemView","value":"sku"},"x-superschematic-scalar":"Identity.Slug"},
-        lines: {"description":"Array of BasketLine values","items":{"additionalProperties":false,"description":"BasketLine object","properties":{"itemId":{"description":"UUID v4 with automatic base62 encoding for client-facing APIs","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-reference":{"label":"name","lookup":"ids","options":"catalog.listItems","target":"ItemView","value":"id"},"x-superschematic-scalar":"Identity.UUID"},"quantity":{"description":"A numeric value","maximum":9,"minimum":1,"type":"number"}},"required":["itemId","quantity"],"type":"object"},"maxItems":5,"minItems":1,"type":"array"},
+        giftSku: {"description":"A URL friendly version of a string","maxLength":255,"minLength":1,"pattern":"^[a-z0-9]+(?:[-_][a-z0-9]+)*$","type":["string","null"],"x-superschematic-reference":{"label":"name","options":"catalog.listItems","search":"q","target":"ItemView","value":"sku"},"x-superschematic-scalar":"Identity.Slug"},
+        lines: {"description":"Array of BasketLine values","items":{"additionalProperties":false,"description":"BasketLine object","properties":{"itemId":{"description":"UUID v4 with automatic base62 encoding for client-facing APIs","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-reference":{"label":"name","lookup":"ids","options":"catalog.listItems","search":"q","target":"ItemView","value":"id"},"x-superschematic-scalar":"Identity.UUID"},"quantity":{"description":"A numeric value","maximum":9,"minimum":1,"type":"number"}},"required":["itemId","quantity"],"type":"object"},"maxItems":5,"minItems":1,"type":"array"},
       },
       required: ['lines']
     },
@@ -230,12 +230,12 @@ a UI names the references' values through.`,
     requiresAuth: false,
     isScoped: false,
     bindingStatus: 'ready',
-    inputSchemaDigest: 'sha256:e73c2af0cb458b02d869c72d0c61b09ebe595f4c5a54ba3b965de64c80bd8e48',
+    inputSchemaDigest: 'sha256:3a514fb1e6737448b146519eb4b87b09174e2663f3ca1d01445f5414017bfe60',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        ids: {"description":"Array of Identity.UUID values","items":{"description":"UUID v4 with automatic base62 encoding for client-facing APIs","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},"maxItems":5,"type":"array","x-superschematic-reference":{"label":"name","lookup":"ids","options":"catalog.listItems","target":"ItemView","value":"id"}},
+        ids: {"description":"Array of Identity.UUID values","items":{"description":"UUID v4 with automatic base62 encoding for client-facing APIs","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},"maxItems":5,"type":"array","x-superschematic-reference":{"label":"name","lookup":"ids","options":"catalog.listItems","search":"q","target":"ItemView","value":"id"}},
         inStock: {"description":"A boolean value (true or false)","type":"boolean"},
         q: {"description":"A string value","maxLength":50,"type":"string","x-superschematic-search":true},
       }
@@ -267,12 +267,12 @@ a UI names the references' values through.`,
     requiresAuth: false,
     isScoped: false,
     bindingStatus: 'ready',
-    inputSchemaDigest: 'sha256:ee3e7d9c79fc7548033793c8a3c2607cd9e42cf21785a3deeb9785e5951ad939',
+    inputSchemaDigest: 'sha256:6a972ce8b265ab956da376d2ac8b7dc5638f92203bf046c5553e5522612443c5',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        itemId: {"description":"itemId parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-reference":{"label":"name","lookup":"ids","options":"catalog.listItems","target":"ItemView","value":"id"},"x-superschematic-scalar":"Identity.UUID"},
+        itemId: {"description":"itemId parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-reference":{"label":"name","lookup":"ids","options":"catalog.listItems","search":"q","target":"ItemView","value":"id"},"x-superschematic-scalar":"Identity.UUID"},
       },
       required: ['itemId']
     },
@@ -300,12 +300,12 @@ code.`,
     requiresAuth: false,
     isScoped: false,
     bindingStatus: 'ready',
-    inputSchemaDigest: 'sha256:bd00406c1ed8a252d512081a4a4ada0a19645051386de2a4ae0d14c91ba77d2a',
+    inputSchemaDigest: 'sha256:6f968c80c757d75e41c09cd8cc0198fe1fd8492b3c3784454fa5519808563a55',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        itemId: {"description":"itemId parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-reference":{"label":"name","lookup":"ids","options":"catalog.listItems","target":"ItemView","value":"id"},"x-superschematic-scalar":"Identity.UUID"},
+        itemId: {"description":"itemId parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-reference":{"label":"name","lookup":"ids","options":"catalog.listItems","search":"q","target":"ItemView","value":"id"},"x-superschematic-scalar":"Identity.UUID"},
         kind: {"description":"A ItemKind value","enum":["book","game"],"type":"string","x-superschematic-reference":{"label":"name","options":"catalog.listKinds","target":"KindView","value":"code"}},
       },
       required: ['itemId', 'kind']
@@ -363,8 +363,8 @@ export const openAIFunctions: OpenAIFunction[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        giftSku: {"description":"A URL friendly version of a string","maxLength":255,"minLength":1,"pattern":"^[a-z0-9]+(?:[-_][a-z0-9]+)*$","type":["string","null"],"x-superschematic-reference":{"label":"name","options":"catalog.listItems","target":"ItemView","value":"sku"},"x-superschematic-scalar":"Identity.Slug"},
-        lines: {"description":"Array of BasketLine values","items":{"additionalProperties":false,"description":"BasketLine object","properties":{"itemId":{"description":"UUID v4 with automatic base62 encoding for client-facing APIs","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-reference":{"label":"name","lookup":"ids","options":"catalog.listItems","target":"ItemView","value":"id"},"x-superschematic-scalar":"Identity.UUID"},"quantity":{"description":"A numeric value","maximum":9,"minimum":1,"type":"number"}},"required":["itemId","quantity"],"type":"object"},"maxItems":5,"minItems":1,"type":"array"},
+        giftSku: {"description":"A URL friendly version of a string","maxLength":255,"minLength":1,"pattern":"^[a-z0-9]+(?:[-_][a-z0-9]+)*$","type":["string","null"],"x-superschematic-reference":{"label":"name","options":"catalog.listItems","search":"q","target":"ItemView","value":"sku"},"x-superschematic-scalar":"Identity.Slug"},
+        lines: {"description":"Array of BasketLine values","items":{"additionalProperties":false,"description":"BasketLine object","properties":{"itemId":{"description":"UUID v4 with automatic base62 encoding for client-facing APIs","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-reference":{"label":"name","lookup":"ids","options":"catalog.listItems","search":"q","target":"ItemView","value":"id"},"x-superschematic-scalar":"Identity.UUID"},"quantity":{"description":"A numeric value","maximum":9,"minimum":1,"type":"number"}},"required":["itemId","quantity"],"type":"object"},"maxItems":5,"minItems":1,"type":"array"},
       },
       required: ['lines']
     }
@@ -377,7 +377,7 @@ a UI names the references' values through.`,
       type: 'object',
       additionalProperties: false,
       properties: {
-        ids: {"description":"Array of Identity.UUID values","items":{"description":"UUID v4 with automatic base62 encoding for client-facing APIs","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},"maxItems":5,"type":"array","x-superschematic-reference":{"label":"name","lookup":"ids","options":"catalog.listItems","target":"ItemView","value":"id"}},
+        ids: {"description":"Array of Identity.UUID values","items":{"description":"UUID v4 with automatic base62 encoding for client-facing APIs","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},"maxItems":5,"type":"array","x-superschematic-reference":{"label":"name","lookup":"ids","options":"catalog.listItems","search":"q","target":"ItemView","value":"id"}},
         inStock: {"description":"A boolean value (true or false)","type":"boolean"},
         q: {"description":"A string value","maxLength":50,"type":"string","x-superschematic-search":true},
       }
@@ -390,7 +390,7 @@ a UI names the references' values through.`,
       type: 'object',
       additionalProperties: false,
       properties: {
-        itemId: {"description":"itemId parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-reference":{"label":"name","lookup":"ids","options":"catalog.listItems","target":"ItemView","value":"id"},"x-superschematic-scalar":"Identity.UUID"},
+        itemId: {"description":"itemId parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-reference":{"label":"name","lookup":"ids","options":"catalog.listItems","search":"q","target":"ItemView","value":"id"},"x-superschematic-scalar":"Identity.UUID"},
       },
       required: ['itemId']
     }
@@ -403,7 +403,7 @@ code.`,
       type: 'object',
       additionalProperties: false,
       properties: {
-        itemId: {"description":"itemId parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-reference":{"label":"name","lookup":"ids","options":"catalog.listItems","target":"ItemView","value":"id"},"x-superschematic-scalar":"Identity.UUID"},
+        itemId: {"description":"itemId parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-reference":{"label":"name","lookup":"ids","options":"catalog.listItems","search":"q","target":"ItemView","value":"id"},"x-superschematic-scalar":"Identity.UUID"},
         kind: {"description":"A ItemKind value","enum":["book","game"],"type":"string","x-superschematic-reference":{"label":"name","options":"catalog.listKinds","target":"KindView","value":"code"}},
       },
       required: ['itemId', 'kind']
@@ -433,8 +433,8 @@ export const anthropicTools: AnthropicTool[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
-        giftSku: {"description":"A URL friendly version of a string","maxLength":255,"minLength":1,"pattern":"^[a-z0-9]+(?:[-_][a-z0-9]+)*$","type":["string","null"],"x-superschematic-reference":{"label":"name","options":"catalog.listItems","target":"ItemView","value":"sku"},"x-superschematic-scalar":"Identity.Slug"},
-        lines: {"description":"Array of BasketLine values","items":{"additionalProperties":false,"description":"BasketLine object","properties":{"itemId":{"description":"UUID v4 with automatic base62 encoding for client-facing APIs","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-reference":{"label":"name","lookup":"ids","options":"catalog.listItems","target":"ItemView","value":"id"},"x-superschematic-scalar":"Identity.UUID"},"quantity":{"description":"A numeric value","maximum":9,"minimum":1,"type":"number"}},"required":["itemId","quantity"],"type":"object"},"maxItems":5,"minItems":1,"type":"array"},
+        giftSku: {"description":"A URL friendly version of a string","maxLength":255,"minLength":1,"pattern":"^[a-z0-9]+(?:[-_][a-z0-9]+)*$","type":["string","null"],"x-superschematic-reference":{"label":"name","options":"catalog.listItems","search":"q","target":"ItemView","value":"sku"},"x-superschematic-scalar":"Identity.Slug"},
+        lines: {"description":"Array of BasketLine values","items":{"additionalProperties":false,"description":"BasketLine object","properties":{"itemId":{"description":"UUID v4 with automatic base62 encoding for client-facing APIs","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-reference":{"label":"name","lookup":"ids","options":"catalog.listItems","search":"q","target":"ItemView","value":"id"},"x-superschematic-scalar":"Identity.UUID"},"quantity":{"description":"A numeric value","maximum":9,"minimum":1,"type":"number"}},"required":["itemId","quantity"],"type":"object"},"maxItems":5,"minItems":1,"type":"array"},
       },
       required: ['lines']
     }
@@ -447,7 +447,7 @@ a UI names the references' values through.`,
       type: 'object',
       additionalProperties: false,
       properties: {
-        ids: {"description":"Array of Identity.UUID values","items":{"description":"UUID v4 with automatic base62 encoding for client-facing APIs","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},"maxItems":5,"type":"array","x-superschematic-reference":{"label":"name","lookup":"ids","options":"catalog.listItems","target":"ItemView","value":"id"}},
+        ids: {"description":"Array of Identity.UUID values","items":{"description":"UUID v4 with automatic base62 encoding for client-facing APIs","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},"maxItems":5,"type":"array","x-superschematic-reference":{"label":"name","lookup":"ids","options":"catalog.listItems","search":"q","target":"ItemView","value":"id"}},
         inStock: {"description":"A boolean value (true or false)","type":"boolean"},
         q: {"description":"A string value","maxLength":50,"type":"string","x-superschematic-search":true},
       }
@@ -460,7 +460,7 @@ a UI names the references' values through.`,
       type: 'object',
       additionalProperties: false,
       properties: {
-        itemId: {"description":"itemId parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-reference":{"label":"name","lookup":"ids","options":"catalog.listItems","target":"ItemView","value":"id"},"x-superschematic-scalar":"Identity.UUID"},
+        itemId: {"description":"itemId parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-reference":{"label":"name","lookup":"ids","options":"catalog.listItems","search":"q","target":"ItemView","value":"id"},"x-superschematic-scalar":"Identity.UUID"},
       },
       required: ['itemId']
     }
@@ -473,7 +473,7 @@ code.`,
       type: 'object',
       additionalProperties: false,
       properties: {
-        itemId: {"description":"itemId parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-reference":{"label":"name","lookup":"ids","options":"catalog.listItems","target":"ItemView","value":"id"},"x-superschematic-scalar":"Identity.UUID"},
+        itemId: {"description":"itemId parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-reference":{"label":"name","lookup":"ids","options":"catalog.listItems","search":"q","target":"ItemView","value":"id"},"x-superschematic-scalar":"Identity.UUID"},
         kind: {"description":"A ItemKind value","enum":["book","game"],"type":"string","x-superschematic-reference":{"label":"name","options":"catalog.listKinds","target":"KindView","value":"code"}},
       },
       required: ['itemId', 'kind']

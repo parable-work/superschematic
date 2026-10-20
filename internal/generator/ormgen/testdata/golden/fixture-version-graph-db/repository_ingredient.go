@@ -108,6 +108,17 @@ var IngredientQuotedFields = map[string]string{
 	"ref_id":         `ref_id`,
 }
 
+// ingredientSortColumns are the columns of Ingredient's sort fields, by
+// field, as FindPage's ORDER BY and keyset write them: qualified by the table,
+// and by page_key, the alias of the subquery that reads the key's row. They
+// are the only text of a sort that reaches its SQL (D60, amended).
+var ingredientSortColumns = map[IngredientSortField]struct{ sql, key string }{
+	IngredientSortById:        {`ingredient.id`, `page_key.id`},
+	IngredientSortByStepKey:   {`ingredient.step_key`, `page_key.step_key`},
+	IngredientSortByQuantity:  {`ingredient.quantity`, `page_key.quantity`},
+	IngredientSortByEntityKey: {`ingredient.entity_key`, `page_key.entity_key`},
+}
+
 // buildIngredientOrderByClause builds an ORDER BY clause for Ingredient.
 // quotedTable is the table's name as the FROM clause spells it, quoted when
 // it is a keyword (a table named order is "order").
@@ -1143,34 +1154,7 @@ func (r *IngredientRepository) FindMany(ctx context.Context, filter *IngredientF
 	}
 
 	// Build selected fields in OrderedMembers order so FK columns match scan order.
-	var fieldStrings []string
-	if opts.Fields.Id {
-		fieldStrings = append(fieldStrings, "id")
-	}
-	if opts.Fields.Recipe || !opts.Fields.RecipeNested.IsZero() {
-		fieldStrings = append(fieldStrings, "recipe_id")
-	}
-	if opts.Fields.StepKey {
-		fieldStrings = append(fieldStrings, "step_key")
-	}
-	if opts.Fields.Quantity {
-		fieldStrings = append(fieldStrings, "quantity")
-	}
-	if opts.Fields.Substitutes {
-		fieldStrings = append(fieldStrings, "substitutes")
-	}
-	if opts.Fields.EntityKey {
-		fieldStrings = append(fieldStrings, "entity_key")
-	}
-	if opts.Fields.Ref || !opts.Fields.RefNested.IsZero() {
-		fieldStrings = append(fieldStrings, "ref_id")
-	}
-	if opts.Fields.DeletedOnRef {
-		fieldStrings = append(fieldStrings, "deleted_on_ref")
-	}
-	if opts.Fields.Version {
-		fieldStrings = append(fieldStrings, "_version")
-	}
+	fieldStrings := ingredientFieldStrings(opts.Fields)
 
 	// Validate fields
 	if err := validateFields(fieldStrings, IngredientAllowedFields); err != nil {
@@ -1210,6 +1194,52 @@ func (r *IngredientRepository) FindMany(ctx context.Context, filter *IngredientF
 		return nil, 0, fmt.Errorf("failed to get count: %w", err)
 	}
 
+	results, err := r.findRows(ctx, "FindMany", query, args, fieldStrings, opts.Fields)
+	if err != nil {
+		return nil, 0, err
+	}
+	return results, totalCount, nil
+}
+
+// ingredientFieldStrings are the columns fields selects, in OrderedMembers
+// order so FK columns match scan order, and the primary key when fields
+// hydrates a hasMany relation, which maps the children by it.
+func ingredientFieldStrings(fields IngredientFields) []string {
+	var fieldStrings []string
+	if fields.Id {
+		fieldStrings = append(fieldStrings, "id")
+	}
+	if fields.Recipe || !fields.RecipeNested.IsZero() {
+		fieldStrings = append(fieldStrings, "recipe_id")
+	}
+	if fields.StepKey {
+		fieldStrings = append(fieldStrings, "step_key")
+	}
+	if fields.Quantity {
+		fieldStrings = append(fieldStrings, "quantity")
+	}
+	if fields.Substitutes {
+		fieldStrings = append(fieldStrings, "substitutes")
+	}
+	if fields.EntityKey {
+		fieldStrings = append(fieldStrings, "entity_key")
+	}
+	if fields.Ref || !fields.RefNested.IsZero() {
+		fieldStrings = append(fieldStrings, "ref_id")
+	}
+	if fields.DeletedOnRef {
+		fieldStrings = append(fieldStrings, "deleted_on_ref")
+	}
+	if fields.Version {
+		fieldStrings = append(fieldStrings, "_version")
+	}
+	return fieldStrings
+}
+
+// findRows runs query, a select of the columns fieldStrings names, in turn,
+// with args, scans its rows, and hydrates the relations fields selects, as
+// FindMany and FindPage read them. method names the caller in an error.
+func (r *IngredientRepository) findRows(ctx context.Context, method, query string, args []interface{}, fieldStrings []string, fields IngredientFields) ([]*types.Ingredient, error) {
 	// Execute query
 	var rows pgx.Rows
 	var err error
@@ -1219,7 +1249,7 @@ func (r *IngredientRepository) FindMany(ctx context.Context, filter *IngredientF
 		rows, err = r.db.pool.Query(ctx, query, args...)
 	}
 	if err != nil {
-		return nil, 0, fmt.Errorf("failed to execute query: %w", err)
+		return nil, fmt.Errorf("failed to execute query: %w", err)
 	}
 	defer rows.Close()
 
@@ -1265,12 +1295,12 @@ func (r *IngredientRepository) FindMany(ctx context.Context, filter *IngredientF
 				scanDest[i] = &tempRelRef
 				selectedRelRef = true
 			default:
-				return nil, 0, fmt.Errorf("unexpected field %q for Ingredient.FindMany", fieldName)
+				return nil, fmt.Errorf("unexpected field %q for Ingredient.%s", fieldName, method)
 			}
 		}
 
 		if err := rows.Scan(scanDest...); err != nil {
-			return nil, 0, fmt.Errorf("failed to scan row: %w", err)
+			return nil, fmt.Errorf("failed to scan row: %w", err)
 		}
 
 		// Copy nullable fields when present
@@ -1282,7 +1312,7 @@ func (r *IngredientRepository) FindMany(ctx context.Context, filter *IngredientF
 			}
 		}
 		if jsonFieldDecodeErr != nil {
-			return nil, 0, jsonFieldDecodeErr
+			return nil, jsonFieldDecodeErr
 		}
 
 		// Set relationship IDs from scanned FK values (hydration happens after loop)
@@ -1297,11 +1327,11 @@ func (r *IngredientRepository) FindMany(ctx context.Context, filter *IngredientF
 	}
 
 	if err := rows.Err(); err != nil {
-		return nil, 0, fmt.Errorf("error iterating rows: %w", err)
+		return nil, fmt.Errorf("error iterating rows: %w", err)
 	}
 
 	// Batch hydrate relationships (outside the row loop for efficiency)
-	if opts.Fields.Recipe || !opts.Fields.RecipeNested.IsZero() {
+	if fields.Recipe || !fields.RecipeNested.IsZero() {
 		// Collect unique FK IDs from results (dedupe during collection)
 		recipeIDSet := make(map[types.IdentityUUID]bool)
 		var recipeIDs []types.IdentityUUID
@@ -1317,8 +1347,8 @@ func (r *IngredientRepository) FindMany(ctx context.Context, filter *IngredientF
 		// Batch fetch related entities with typed child field options.
 		childFields := (RecipeFields{}).All()
 		childFieldsAreDefault := true
-		if !opts.Fields.RecipeNested.IsZero() {
-			childFields = opts.Fields.RecipeNested
+		if !fields.RecipeNested.IsZero() {
+			childFields = fields.RecipeNested
 			childFieldsAreDefault = false
 		}
 
@@ -1327,7 +1357,7 @@ func (r *IngredientRepository) FindMany(ctx context.Context, filter *IngredientF
 			Limit:  len(recipeIDs),
 		}, childFieldsAreDefault)
 		if err != nil {
-			return nil, 0, fmt.Errorf("failed to batch fetch recipe: %w", err)
+			return nil, fmt.Errorf("failed to batch fetch recipe: %w", err)
 		}
 
 		// Hydrate results from map
@@ -1340,7 +1370,7 @@ func (r *IngredientRepository) FindMany(ctx context.Context, filter *IngredientF
 			}
 		}
 	}
-	if opts.Fields.Ref || !opts.Fields.RefNested.IsZero() {
+	if fields.Ref || !fields.RefNested.IsZero() {
 		// Collect unique FK IDs from results (dedupe during collection)
 		refIDSet := make(map[types.IdentityUUID]bool)
 		var refIDs []types.IdentityUUID
@@ -1356,8 +1386,8 @@ func (r *IngredientRepository) FindMany(ctx context.Context, filter *IngredientF
 		// Batch fetch related entities with typed child field options.
 		childFields := (RecipeRefFields{}).All()
 		childFieldsAreDefault := true
-		if !opts.Fields.RefNested.IsZero() {
-			childFields = opts.Fields.RefNested
+		if !fields.RefNested.IsZero() {
+			childFields = fields.RefNested
 			childFieldsAreDefault = false
 		}
 
@@ -1366,7 +1396,7 @@ func (r *IngredientRepository) FindMany(ctx context.Context, filter *IngredientF
 			Limit:  len(refIDs),
 		}, childFieldsAreDefault)
 		if err != nil {
-			return nil, 0, fmt.Errorf("failed to batch fetch ref: %w", err)
+			return nil, fmt.Errorf("failed to batch fetch ref: %w", err)
 		}
 
 		// Hydrate results from map
@@ -1380,7 +1410,124 @@ func (r *IngredientRepository) FindMany(ctx context.Context, filter *IngredientF
 		}
 	}
 
-	return results, totalCount, nil
+	return results, nil
+}
+
+// FindPage reads a page of the Ingredient rows filter finds (D60, amended), in
+// opts.Sort's order, ties broken by id in the same direction: up to
+// opts.Limit rows after opts.After, and Next when more follow. It runs one
+// query of opts.Limit + 1 rows and no count. A key is a row's id alone:
+// in an order by a sort field, the query reads the key's row for its value,
+// soft-deleted or not and whatever the filter, so a row the filter no longer
+// finds still places the page. An After that holds no id, or whose row
+// no longer exists in an order by a sort field, is ErrPageKey. A key of another
+// order cannot be told from one of this order: the router refuses a cursor
+// of another sort before FindPage reads it.
+func (r *IngredientRepository) FindPage(ctx context.Context, filter *IngredientFilter, opts *IngredientPageOptions) (*IngredientPage, error) {
+	if opts == nil || opts.Fields.IsZero() {
+		return nil, fmt.Errorf("fields must be specified in PageOptions for performance")
+	}
+	if opts.Limit < 0 {
+		return nil, fmt.Errorf("orm: a page of Ingredient rows holds 1 or more, not %d", opts.Limit)
+	}
+	limit := opts.Limit
+	if limit == 0 {
+		limit = 100
+	}
+	field := opts.Sort.Field
+	if field == "" {
+		field = IngredientSortById
+	}
+	column, ok := ingredientSortColumns[field]
+	if !ok {
+		return nil, fmt.Errorf("orm: Ingredient sorts by id, stepKey, quantity and entityKey, not %q", string(field))
+	}
+	byKey := field == IngredientSortById
+
+	// Next is the key of the page's last row, so the page reads its primary
+	// key whatever Fields selects.
+	fieldStrings := ingredientFieldStrings(opts.Fields)
+	if !containsString(fieldStrings, "id") {
+		fieldStrings = append(fieldStrings, "id")
+	}
+	if err := validateFields(fieldStrings, IngredientAllowedFields); err != nil {
+		return nil, err
+	}
+	selectFields := buildSelectFieldsTyped(fieldStrings, "ingredient")
+	// The filter's conditions, each qualified by the table, then the
+	// keyset's.
+	var args []interface{}
+	conditions := filter.conditions(&args, 0)
+	comparison, direction := ">", "ASC"
+	if opts.Sort.Desc {
+		comparison, direction = "<", "DESC"
+	}
+	var key any
+	if opts.After != nil {
+		var err error
+		if key, err = opts.After.arg(); err != nil {
+			return nil, err
+		}
+		args = append(args, key)
+		placeholder := fmt.Sprintf("$%d", len(args))
+		if byKey {
+			conditions = append(conditions, fmt.Sprintf(`ingredient.id %s %s`, comparison, placeholder))
+		} else {
+			// The key's row gives the sort field's value: no deleted_at
+			// condition and no filter, so a row soft-deleted or changed
+			// since the page before still places this one.
+			conditions = append(conditions, fmt.Sprintf(`(%s, ingredient.id) %s ((SELECT %s FROM ingredient AS page_key WHERE page_key.id = %s), %s)`,
+				column.sql, comparison, column.key, placeholder, placeholder))
+		}
+	}
+	whereClause := ""
+	if len(conditions) > 0 {
+		whereClause = " WHERE " + strings.Join(conditions, " AND ")
+	}
+	orderByClause := fmt.Sprintf(" ORDER BY %s %s", column.sql, direction)
+	if !byKey {
+		orderByClause += fmt.Sprintf(`, ingredient.id %s`, direction)
+	}
+	query := fmt.Sprintf(`SELECT %s FROM ingredient%s%s LIMIT %d`, selectFields, whereClause, orderByClause, limit+1)
+
+	rows, err := r.findRows(ctx, "FindPage", query, args, fieldStrings, opts.Fields)
+	if err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 && opts.After != nil && !byKey {
+		// A key whose row no longer exists places no row: its value is
+		// null, which no row comes after. Only then is the page empty
+		// without being the last.
+		if err := r.pageKeyExists(ctx, key); err != nil {
+			return nil, err
+		}
+	}
+	page := &IngredientPage{Rows: rows}
+	if len(rows) > limit {
+		page.Rows = rows[:limit]
+		page.Next = ingredientPageKeyOf(page.Rows[limit-1])
+	}
+	return page, nil
+}
+
+// pageKeyExists is nil when the table holds a row whose primary key is key,
+// soft-deleted or not, and ErrPageKey when it holds none.
+func (r *IngredientRepository) pageKeyExists(ctx context.Context, key any) error {
+	query := `SELECT EXISTS (SELECT 1 FROM ingredient WHERE ingredient.id = $1)`
+	var row pgx.Row
+	if r.tx != nil {
+		row = r.tx.QueryRow(ctx, query, key)
+	} else {
+		row = r.db.pool.QueryRow(ctx, query, key)
+	}
+	var exists bool
+	if err := row.Scan(&exists); err != nil {
+		return fmt.Errorf("failed to read the page key's row: %w", err)
+	}
+	if !exists {
+		return fmt.Errorf("%w: no Ingredient row has the key's id", ErrPageKey)
+	}
+	return nil
 }
 
 // CreateOne inserts a new Ingredient record

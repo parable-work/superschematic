@@ -37,6 +37,7 @@ type {{ .TypeName }}RepositoryInterface interface {
 	{{- end }}
 	FindOne(ctx context.Context, filter *{{ .TypeName }}Filter, opts *{{ .TypeName }}FindOptions) (*types.{{ .TypeName }}, error)
 	FindMany(ctx context.Context, filter *{{ .TypeName }}Filter, opts *{{ .TypeName }}FindOptions) ([]*types.{{ .TypeName }}, int, error)
+	FindPage(ctx context.Context, filter *{{ .TypeName }}Filter, opts *{{ .TypeName }}PageOptions) (*{{ .TypeName }}Page, error)
 	CreateOne(ctx context.Context, input *types.{{ .TypeName }}) (*types.{{ .TypeName }}, error)
 	CreateMany(ctx context.Context, inputs []*types.{{ .TypeName }}) ([]*types.{{ .TypeName }}, error)
 	UpdateOne(ctx context.Context, id {{ .PrimaryKeyType }}, update *{{ .TypeName }}Update) (*types.{{ .TypeName }}, error)
@@ -195,6 +196,10 @@ func (r *NoOp{{ .Name }}) FindOne(_ context.Context, _ *{{ .TypeName }}Filter, _
 
 func (r *NoOp{{ .Name }}) FindMany(_ context.Context, _ *{{ .TypeName }}Filter, _ *{{ .TypeName }}FindOptions) ([]*types.{{ .TypeName }}, int, error) {
 	return []*types.{{ .TypeName }}{}, 0, nil
+}
+
+func (r *NoOp{{ .Name }}) FindPage(_ context.Context, _ *{{ .TypeName }}Filter, _ *{{ .TypeName }}PageOptions) (*{{ .TypeName }}Page, error) {
+	return &{{ .TypeName }}Page{Rows: []*types.{{ .TypeName }}{}}, nil
 }
 
 func (r *NoOp{{ .Name }}) CreateOne(_ context.Context, input *types.{{ .TypeName }}) (*types.{{ .TypeName }}, error) {

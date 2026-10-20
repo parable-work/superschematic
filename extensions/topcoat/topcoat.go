@@ -82,9 +82,12 @@ func (Extension) Register(r *registry.Registry) error {
 // Services lists services whose crate is written as if their config
 // enabled outputs.topcoat, which a binary without the extension never
 // reads: a project builds the same configs with the core binary and with
-// this one. PagesPrefixes turns on the pages of the listed services it
-// names, each under its prefix, as outputs.topcoat.pages would, and
-// PagesLive their live lists, as outputs.topcoat.pages.live would.
+// this one. They are the services one Topcoat app hosts (D61, amended): a
+// listed service's reference whose options operation is a listed API
+// dependency's calls that dependency's crate in-process. PagesPrefixes
+// turns on the pages of the listed services it names, each under its
+// prefix, as outputs.topcoat.pages would, and PagesLive their live lists,
+// as outputs.topcoat.pages.live would.
 type Table struct {
 	Services      []string
 	PagesPrefixes map[string]string
@@ -333,7 +336,7 @@ func generate(c registry.GenerateContext, table Table) error {
 		c.Skip(OutputKey)
 		return nil
 	}
-	data, err := newCrate(c, api, cfg)
+	data, err := newCrate(c, api, cfg, table)
 	if err != nil {
 		return err
 	}

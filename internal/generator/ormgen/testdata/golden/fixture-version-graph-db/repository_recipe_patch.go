@@ -41,6 +41,17 @@ var RecipePatchQuotedFields = map[string]string{
 	"commit_id":      `commit_id`,
 }
 
+// recipePatchSortColumns are the columns of RecipePatch's sort fields, by
+// field, as FindPage's ORDER BY and keyset write them: qualified by the table,
+// and by page_key, the alias of the subquery that reads the key's row. They
+// are the only text of a sort that reaches its SQL (D60, amended).
+var recipePatchSortColumns = map[RecipePatchSortField]struct{ sql, key string }{
+	RecipePatchSortById:            {`recipe_patch.id`, `page_key.id`},
+	RecipePatchSortByEntityKey:     {`recipe_patch.entity_key`, `page_key.entity_key`},
+	RecipePatchSortByEntityId:      {`recipe_patch.entity_id`, `page_key.entity_id`},
+	RecipePatchSortByEntityVersion: {`recipe_patch.entity_version`, `page_key.entity_version`},
+}
+
 // buildRecipePatchOrderByClause builds an ORDER BY clause for RecipePatch.
 // quotedTable is the table's name as the FROM clause spells it, quoted when
 // it is a keyword (a table named order is "order").
@@ -607,28 +618,7 @@ func (r *RecipePatchRepository) FindMany(ctx context.Context, filter *RecipePatc
 	}
 
 	// Build selected fields in OrderedMembers order so FK columns match scan order.
-	var fieldStrings []string
-	if opts.Fields.Id {
-		fieldStrings = append(fieldStrings, "id")
-	}
-	if opts.Fields.Commit || !opts.Fields.CommitNested.IsZero() {
-		fieldStrings = append(fieldStrings, "commit_id")
-	}
-	if opts.Fields.EntityKind {
-		fieldStrings = append(fieldStrings, "entity_kind")
-	}
-	if opts.Fields.EntityKey {
-		fieldStrings = append(fieldStrings, "entity_key")
-	}
-	if opts.Fields.EntityId {
-		fieldStrings = append(fieldStrings, "entity_id")
-	}
-	if opts.Fields.EntityVersion {
-		fieldStrings = append(fieldStrings, "entity_version")
-	}
-	if opts.Fields.Operation {
-		fieldStrings = append(fieldStrings, "operation")
-	}
+	fieldStrings := recipePatchFieldStrings(opts.Fields)
 
 	// Validate fields
 	if err := validateFields(fieldStrings, RecipePatchAllowedFields); err != nil {
@@ -668,6 +658,46 @@ func (r *RecipePatchRepository) FindMany(ctx context.Context, filter *RecipePatc
 		return nil, 0, fmt.Errorf("failed to get count: %w", err)
 	}
 
+	results, err := r.findRows(ctx, "FindMany", query, args, fieldStrings, opts.Fields)
+	if err != nil {
+		return nil, 0, err
+	}
+	return results, totalCount, nil
+}
+
+// recipePatchFieldStrings are the columns fields selects, in OrderedMembers
+// order so FK columns match scan order, and the primary key when fields
+// hydrates a hasMany relation, which maps the children by it.
+func recipePatchFieldStrings(fields RecipePatchFields) []string {
+	var fieldStrings []string
+	if fields.Id {
+		fieldStrings = append(fieldStrings, "id")
+	}
+	if fields.Commit || !fields.CommitNested.IsZero() {
+		fieldStrings = append(fieldStrings, "commit_id")
+	}
+	if fields.EntityKind {
+		fieldStrings = append(fieldStrings, "entity_kind")
+	}
+	if fields.EntityKey {
+		fieldStrings = append(fieldStrings, "entity_key")
+	}
+	if fields.EntityId {
+		fieldStrings = append(fieldStrings, "entity_id")
+	}
+	if fields.EntityVersion {
+		fieldStrings = append(fieldStrings, "entity_version")
+	}
+	if fields.Operation {
+		fieldStrings = append(fieldStrings, "operation")
+	}
+	return fieldStrings
+}
+
+// findRows runs query, a select of the columns fieldStrings names, in turn,
+// with args, scans its rows, and hydrates the relations fields selects, as
+// FindMany and FindPage read them. method names the caller in an error.
+func (r *RecipePatchRepository) findRows(ctx context.Context, method, query string, args []interface{}, fieldStrings []string, fields RecipePatchFields) ([]*types.RecipePatch, error) {
 	// Execute query
 	var rows pgx.Rows
 	var err error
@@ -677,7 +707,7 @@ func (r *RecipePatchRepository) FindMany(ctx context.Context, filter *RecipePatc
 		rows, err = r.db.pool.Query(ctx, query, args...)
 	}
 	if err != nil {
-		return nil, 0, fmt.Errorf("failed to execute query: %w", err)
+		return nil, fmt.Errorf("failed to execute query: %w", err)
 	}
 	defer rows.Close()
 
@@ -714,19 +744,19 @@ func (r *RecipePatchRepository) FindMany(ctx context.Context, filter *RecipePatc
 				scanDest[i] = &tempRelCommit
 				selectedRelCommit = true
 			default:
-				return nil, 0, fmt.Errorf("unexpected field %q for RecipePatch.FindMany", fieldName)
+				return nil, fmt.Errorf("unexpected field %q for RecipePatch.%s", fieldName, method)
 			}
 		}
 
 		if err := rows.Scan(scanDest...); err != nil {
-			return nil, 0, fmt.Errorf("failed to scan row: %w", err)
+			return nil, fmt.Errorf("failed to scan row: %w", err)
 		}
 
 		// Copy nullable fields when present
 		var jsonFieldDecodeErr error
 
 		if jsonFieldDecodeErr != nil {
-			return nil, 0, jsonFieldDecodeErr
+			return nil, jsonFieldDecodeErr
 		}
 
 		// Set relationship IDs from scanned FK values (hydration happens after loop)
@@ -738,11 +768,11 @@ func (r *RecipePatchRepository) FindMany(ctx context.Context, filter *RecipePatc
 	}
 
 	if err := rows.Err(); err != nil {
-		return nil, 0, fmt.Errorf("error iterating rows: %w", err)
+		return nil, fmt.Errorf("error iterating rows: %w", err)
 	}
 
 	// Batch hydrate relationships (outside the row loop for efficiency)
-	if opts.Fields.Commit || !opts.Fields.CommitNested.IsZero() {
+	if fields.Commit || !fields.CommitNested.IsZero() {
 		// Collect unique FK IDs from results (dedupe during collection)
 		commitIDSet := make(map[types.IdentityUUID]bool)
 		var commitIDs []types.IdentityUUID
@@ -758,8 +788,8 @@ func (r *RecipePatchRepository) FindMany(ctx context.Context, filter *RecipePatc
 		// Batch fetch related entities with typed child field options.
 		childFields := (RecipeCommitFields{}).All()
 		childFieldsAreDefault := true
-		if !opts.Fields.CommitNested.IsZero() {
-			childFields = opts.Fields.CommitNested
+		if !fields.CommitNested.IsZero() {
+			childFields = fields.CommitNested
 			childFieldsAreDefault = false
 		}
 
@@ -768,7 +798,7 @@ func (r *RecipePatchRepository) FindMany(ctx context.Context, filter *RecipePatc
 			Limit:  len(commitIDs),
 		}, childFieldsAreDefault)
 		if err != nil {
-			return nil, 0, fmt.Errorf("failed to batch fetch commit: %w", err)
+			return nil, fmt.Errorf("failed to batch fetch commit: %w", err)
 		}
 
 		// Hydrate results from map
@@ -782,7 +812,124 @@ func (r *RecipePatchRepository) FindMany(ctx context.Context, filter *RecipePatc
 		}
 	}
 
-	return results, totalCount, nil
+	return results, nil
+}
+
+// FindPage reads a page of the RecipePatch rows filter finds (D60, amended), in
+// opts.Sort's order, ties broken by id in the same direction: up to
+// opts.Limit rows after opts.After, and Next when more follow. It runs one
+// query of opts.Limit + 1 rows and no count. A key is a row's id alone:
+// in an order by a sort field, the query reads the key's row for its value,
+// soft-deleted or not and whatever the filter, so a row the filter no longer
+// finds still places the page. An After that holds no id, or whose row
+// no longer exists in an order by a sort field, is ErrPageKey. A key of another
+// order cannot be told from one of this order: the router refuses a cursor
+// of another sort before FindPage reads it.
+func (r *RecipePatchRepository) FindPage(ctx context.Context, filter *RecipePatchFilter, opts *RecipePatchPageOptions) (*RecipePatchPage, error) {
+	if opts == nil || opts.Fields.IsZero() {
+		return nil, fmt.Errorf("fields must be specified in PageOptions for performance")
+	}
+	if opts.Limit < 0 {
+		return nil, fmt.Errorf("orm: a page of RecipePatch rows holds 1 or more, not %d", opts.Limit)
+	}
+	limit := opts.Limit
+	if limit == 0 {
+		limit = 100
+	}
+	field := opts.Sort.Field
+	if field == "" {
+		field = RecipePatchSortById
+	}
+	column, ok := recipePatchSortColumns[field]
+	if !ok {
+		return nil, fmt.Errorf("orm: RecipePatch sorts by id, entityKey, entityId and entityVersion, not %q", string(field))
+	}
+	byKey := field == RecipePatchSortById
+
+	// Next is the key of the page's last row, so the page reads its primary
+	// key whatever Fields selects.
+	fieldStrings := recipePatchFieldStrings(opts.Fields)
+	if !containsString(fieldStrings, "id") {
+		fieldStrings = append(fieldStrings, "id")
+	}
+	if err := validateFields(fieldStrings, RecipePatchAllowedFields); err != nil {
+		return nil, err
+	}
+	selectFields := buildSelectFieldsTyped(fieldStrings, "recipe_patch")
+	// The filter's conditions, each qualified by the table, then the
+	// keyset's.
+	var args []interface{}
+	conditions := filter.conditions(&args, 0)
+	comparison, direction := ">", "ASC"
+	if opts.Sort.Desc {
+		comparison, direction = "<", "DESC"
+	}
+	var key any
+	if opts.After != nil {
+		var err error
+		if key, err = opts.After.arg(); err != nil {
+			return nil, err
+		}
+		args = append(args, key)
+		placeholder := fmt.Sprintf("$%d", len(args))
+		if byKey {
+			conditions = append(conditions, fmt.Sprintf(`recipe_patch.id %s %s`, comparison, placeholder))
+		} else {
+			// The key's row gives the sort field's value: no deleted_at
+			// condition and no filter, so a row soft-deleted or changed
+			// since the page before still places this one.
+			conditions = append(conditions, fmt.Sprintf(`(%s, recipe_patch.id) %s ((SELECT %s FROM recipe_patch AS page_key WHERE page_key.id = %s), %s)`,
+				column.sql, comparison, column.key, placeholder, placeholder))
+		}
+	}
+	whereClause := ""
+	if len(conditions) > 0 {
+		whereClause = " WHERE " + strings.Join(conditions, " AND ")
+	}
+	orderByClause := fmt.Sprintf(" ORDER BY %s %s", column.sql, direction)
+	if !byKey {
+		orderByClause += fmt.Sprintf(`, recipe_patch.id %s`, direction)
+	}
+	query := fmt.Sprintf(`SELECT %s FROM recipe_patch%s%s LIMIT %d`, selectFields, whereClause, orderByClause, limit+1)
+
+	rows, err := r.findRows(ctx, "FindPage", query, args, fieldStrings, opts.Fields)
+	if err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 && opts.After != nil && !byKey {
+		// A key whose row no longer exists places no row: its value is
+		// null, which no row comes after. Only then is the page empty
+		// without being the last.
+		if err := r.pageKeyExists(ctx, key); err != nil {
+			return nil, err
+		}
+	}
+	page := &RecipePatchPage{Rows: rows}
+	if len(rows) > limit {
+		page.Rows = rows[:limit]
+		page.Next = recipePatchPageKeyOf(page.Rows[limit-1])
+	}
+	return page, nil
+}
+
+// pageKeyExists is nil when the table holds a row whose primary key is key,
+// soft-deleted or not, and ErrPageKey when it holds none.
+func (r *RecipePatchRepository) pageKeyExists(ctx context.Context, key any) error {
+	query := `SELECT EXISTS (SELECT 1 FROM recipe_patch WHERE recipe_patch.id = $1)`
+	var row pgx.Row
+	if r.tx != nil {
+		row = r.tx.QueryRow(ctx, query, key)
+	} else {
+		row = r.db.pool.QueryRow(ctx, query, key)
+	}
+	var exists bool
+	if err := row.Scan(&exists); err != nil {
+		return fmt.Errorf("failed to read the page key's row: %w", err)
+	}
+	if !exists {
+		return fmt.Errorf("%w: no RecipePatch row has the key's id", ErrPageKey)
+	}
+	return nil
 }
 
 // CreateOne inserts a new RecipePatch record

@@ -3,9 +3,11 @@
 //! TestWriteParityVectors -update` in `runtime/http/go`) and the Go,
 //! TypeScript and Rust runtimes each run through their page reader and
 //! builder. This reads each vector's query as the router does, through
-//! axum's `Query` into `QueryValues`, then `PageSpec::query`; encodes and
-//! decodes the cursors with `Cursor`; and builds the pages with
-//! `Page::from_rows`. A member the harness does not know fails it.
+//! axum's `Query` into `QueryValues`, then `PageSpec::query` and
+//! `PageSpec::unbind`; encodes and decodes the cursors with `Cursor`;
+//! builds the pages with `Page::from_rows`; and binds and unbinds sorted
+//! cursors (D60, amended) with `Cursor::bind`, `Cursor::unbind` and
+//! `Page::bind`. A member the harness does not know fails it.
 
 use std::collections::BTreeSet;
 
@@ -13,7 +15,7 @@ use axum::extract::Query;
 use http::Uri;
 use serde::Deserialize;
 use serde_json::{json, Value};
-use superschematic_http_runtime::page::{Cursor, Page, PageSpec};
+use superschematic_http_runtime::page::{Cursor, Page, PageRequest, PageSpec, Sort, SortSpec};
 use superschematic_http_runtime::{ApiError, QueryValues};
 
 const VECTORS: &str = "../testdata/page_parity.json";
@@ -29,6 +31,10 @@ struct ParityFile {
     unencodable: Vec<Unencodable>,
     #[serde(rename = "fromRows")]
     from_rows: Vec<FromRows>,
+    bindings: Vec<Binding>,
+    #[serde(rename = "refusedBindings")]
+    refused_bindings: Vec<RefusedBinding>,
+    unbindable: Vec<Unbindable>,
 }
 
 #[derive(Deserialize)]
@@ -36,6 +42,33 @@ struct ParityFile {
 struct Spec {
     default_limit: i64,
     max_limit: i64,
+    sort: Option<SortVector>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SortVector {
+    param: String,
+    fields: Vec<String>,
+    default: String,
+}
+
+impl Spec {
+    /// The vector's spec as `Args::PAGE` carries one, its strings leaked
+    /// for the `'static` a generated spec's literals have.
+    fn page_spec(&self) -> PageSpec {
+        let spec = PageSpec::new(self.default_limit, self.max_limit);
+        let Some(sort) = &self.sort else {
+            return spec;
+        };
+        let leak = |text: &str| -> &'static str { Box::leak(text.to_owned().into_boxed_str()) };
+        let fields: Vec<&'static str> = sort.fields.iter().map(|field| leak(field)).collect();
+        spec.sorted(SortSpec::new(
+            leak(&sort.param),
+            Box::leak(fields.into_boxed_slice()),
+            leak(&sort.default),
+        ))
+    }
 }
 
 #[derive(Deserialize)]
@@ -43,6 +76,7 @@ struct Spec {
 struct Request {
     cursor: Option<String>,
     limit: i64,
+    sort: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -89,6 +123,41 @@ struct FromRows {
     page: Value,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Binding {
+    name: String,
+    sort: String,
+    cursor: String,
+    bound: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RefusedBinding {
+    name: String,
+    sort: String,
+    cursor: String,
+    problem: Value,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Unbindable {
+    name: String,
+    sort: String,
+    cursor: String,
+}
+
+/// A cursor of any text, as a request's JSON may carry one.
+fn cursor_of(text: &str) -> Cursor {
+    serde_json::from_value(Value::String(text.to_owned())).unwrap()
+}
+
+fn sort_of(text: &str) -> Sort {
+    Sort::parse(text).unwrap_or_else(|| panic!("{text} is no sort"))
+}
+
 fn corpus() -> ParityFile {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(VECTORS);
     serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
@@ -114,12 +183,18 @@ fn query_of(query: &str) -> QueryValues {
 #[test]
 fn every_section_has_vectors_with_distinct_names() {
     let file = corpus();
-    let sections: [Vec<&str>; 5] = [
+    let sections: [Vec<&str>; 8] = [
         file.reads.iter().map(|v| v.name.as_str()).collect(),
         file.cursors.iter().map(|v| v.name.as_str()).collect(),
         file.refused.iter().map(|v| v.name.as_str()).collect(),
         file.unencodable.iter().map(|v| v.name.as_str()).collect(),
         file.from_rows.iter().map(|v| v.name.as_str()).collect(),
+        file.bindings.iter().map(|v| v.name.as_str()).collect(),
+        file.refused_bindings
+            .iter()
+            .map(|v| v.name.as_str())
+            .collect(),
+        file.unbindable.iter().map(|v| v.name.as_str()).collect(),
     ];
     for names in sections {
         assert!(!names.is_empty());
@@ -130,8 +205,11 @@ fn every_section_has_vectors_with_distinct_names() {
 #[test]
 fn reads() {
     for vector in corpus().reads {
-        let spec = PageSpec::new(vector.spec.default_limit, vector.spec.max_limit);
-        let got = spec.query(&query_of(&vector.query));
+        let spec = vector.spec.page_spec();
+        // The router's decode: the request as sent, then unbound.
+        let got = spec
+            .query(&query_of(&vector.query))
+            .and_then(|request| spec.unbind(request));
         match (&vector.request, &vector.problem) {
             (Some(want), None) => {
                 let request = got.unwrap_or_else(|err| panic!("{}: refused: {err:?}", vector.name));
@@ -142,6 +220,12 @@ fn reads() {
                     vector.name
                 );
                 assert_eq!(request.limit, want.limit, "{}", vector.name);
+                assert_eq!(
+                    request.sort.as_ref().map(Sort::to_string),
+                    want.sort,
+                    "{}",
+                    vector.name
+                );
                 // The same request built in process passes the route's check.
                 assert!(spec.check(&request).is_ok(), "{}", vector.name);
             }
@@ -214,6 +298,52 @@ fn from_rows() {
         assert_eq!(
             serde_json::to_value(&page).unwrap(),
             vector.page,
+            "{}",
+            vector.name
+        );
+    }
+}
+
+#[test]
+fn bindings() {
+    for vector in corpus().bindings {
+        let sort = sort_of(&vector.sort);
+        let cursor = Cursor::parse(&vector.cursor).unwrap();
+        let bound = cursor
+            .bind(&sort)
+            .unwrap_or_else(|err| panic!("{}: {err:?}", vector.name));
+        assert_eq!(bound.as_str(), vector.bound, "{}", vector.name);
+        assert_eq!(bound.unbind(&sort).unwrap(), cursor, "{}", vector.name);
+        let request = PageRequest::first(1).sorted(sort);
+        let page = Page::more(vec![1], cursor).bind(&request).unwrap();
+        assert_eq!(page.next.unwrap().as_str(), vector.bound, "{}", vector.name);
+    }
+}
+
+#[test]
+fn refused_bindings() {
+    for vector in corpus().refused_bindings {
+        let err = cursor_of(&vector.cursor)
+            .unbind(&sort_of(&vector.sort))
+            .err()
+            .unwrap_or_else(|| panic!("{}: accepted", vector.name));
+        assert_eq!(problem(&err), vector.problem, "{}", vector.name);
+    }
+}
+
+#[test]
+fn unbindable() {
+    for vector in corpus().unbindable {
+        let sort = sort_of(&vector.sort);
+        let cursor = cursor_of(&vector.cursor);
+        let err = cursor
+            .bind(&sort)
+            .err()
+            .unwrap_or_else(|| panic!("{}: bound", vector.name));
+        assert_eq!(err.status.as_u16(), 500, "{}", vector.name);
+        let request = PageRequest::first(1).sorted(sort);
+        assert!(
+            Page::more(vec![1], cursor).bind(&request).is_err(),
             "{}",
             vector.name
         );

@@ -2,6 +2,7 @@ package apigen_test
 
 import (
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -68,7 +69,8 @@ func TestToolHooksEditKeysAndRecords(t *testing.T) {
 	}
 	want := apigen.ToolKeys{
 		Scalar: "x-vendor-scalar", Reference: apigen.DefaultToolReferenceKey, Search: apigen.DefaultToolSearchKey,
-		Guidance: apigen.DefaultToolGuidanceKey, Parameters: []apigen.ToolKeyValue{{Key: "x-vendor-version", Value: 1}},
+		Sort: apigen.DefaultToolSortKey, Guidance: apigen.DefaultToolGuidanceKey,
+		Parameters: []apigen.ToolKeyValue{{Key: "x-vendor-version", Value: 1}},
 	}
 	if !reflect.DeepEqual(output.ToolKeys, want) {
 		t.Fatalf("ToolKeys = %+v, want %+v", output.ToolKeys, want)
@@ -109,6 +111,10 @@ func TestToolHookErrors(t *testing.T) {
 			tools.Keys.Parameters = []apigen.ToolKeyValue{{Key: apigen.DefaultToolSearchKey, Value: true}}
 			return nil
 		}, want: `tool parameter key "x-superschematic-search" is the search key`},
+		{name: "sort key", edit: func(_ *ir.Schema, tools *apigen.ToolSet) error {
+			tools.Keys.Parameters = []apigen.ToolKeyValue{{Key: apigen.DefaultToolSortKey, Value: true}}
+			return nil
+		}, want: `tool parameter key "x-superschematic-sort" is the sort key`},
 		{name: "a scalar key that is a keyword", edit: func(_ *ir.Schema, tools *apigen.ToolSet) error {
 			tools.Keys.Scalar = "type"
 			return nil
@@ -121,10 +127,26 @@ func TestToolHookErrors(t *testing.T) {
 			tools.Keys.Search = "nullable"
 			return nil
 		}, want: `the search key "nullable" is a JSON Schema keyword a tool argument's property is written with`},
+		{name: "a sort key that is a keyword", edit: func(_ *ir.Schema, tools *apigen.ToolSet) error {
+			tools.Keys.Sort = "enum"
+			return nil
+		}, want: `the sort key "enum" is a JSON Schema keyword a tool argument's property is written with`},
+		{name: "a sort key that is an annotation", edit: func(_ *ir.Schema, tools *apigen.ToolSet) error {
+			tools.Keys.Sort = "default"
+			return nil
+		}, want: `the sort key "default" is a JSON Schema keyword a tool argument's property is written with`},
+		{name: "a reference key that is a rule", edit: func(_ *ir.Schema, tools *apigen.ToolSet) error {
+			tools.Keys.Reference = "const"
+			return nil
+		}, want: `the reference key "const" is a JSON Schema keyword a tool argument's property is written with`},
 		{name: "one key for two", edit: func(_ *ir.Schema, tools *apigen.ToolSet) error {
 			tools.Keys.Reference = tools.Keys.Scalar
 			return nil
 		}, want: `the scalar key and the reference key are both "x-superschematic-scalar"`},
+		{name: "the sort key as the search key", edit: func(_ *ir.Schema, tools *apigen.ToolSet) error {
+			tools.Keys.Sort = tools.Keys.Search
+			return nil
+		}, want: `the search key and the sort key are both "x-superschematic-search"`},
 		{name: "duplicate key", edit: func(_ *ir.Schema, tools *apigen.ToolSet) error {
 			tools.Keys.Parameters = []apigen.ToolKeyValue{{Key: "x-v", Value: 1}, {Key: "x-v", Value: 2}}
 			return nil
@@ -162,6 +184,35 @@ func TestToolHookErrors(t *testing.T) {
 			_, err := generateMCPWithHooks(t, apigen.ToolHook{Name: "vendor", Edit: test.edit})
 			if err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("err = %v, want %q", err, test.want)
+			}
+		})
+	}
+}
+
+// TestToolPropertyKeysAreNoJSONSchemaKeyword: a hook may not rename the
+// scalar, reference, search or sort key to a keyword JSON Schema reads on
+// a property, an annotation, an identity or a rule among them, where a
+// vendor value would be read as JSON Schema's own.
+func TestToolPropertyKeysAreNoJSONSchemaKeyword(t *testing.T) {
+	keys := []struct {
+		name string
+		set  func(*apigen.ToolKeys, string)
+	}{
+		{"scalar", func(k *apigen.ToolKeys, key string) { k.Scalar = key }},
+		{"reference", func(k *apigen.ToolKeys, key string) { k.Reference = key }},
+		{"search", func(k *apigen.ToolKeys, key string) { k.Search = key }},
+		{"sort", func(k *apigen.ToolKeys, key string) { k.Sort = key }},
+	}
+	for i, keyword := range []string{"default", "const", "title", "examples", "deprecated", "readOnly", "writeOnly", "$id", "$schema", "not", "if", "then", "else"} {
+		key := keys[i%len(keys)]
+		t.Run(key.name+" "+keyword, func(t *testing.T) {
+			_, err := generateMCPWithHooks(t, apigen.ToolHook{Name: "vendor", Edit: func(_ *ir.Schema, tools *apigen.ToolSet) error {
+				key.set(&tools.Keys, keyword)
+				return nil
+			}})
+			want := fmt.Sprintf("the %s key %q is a JSON Schema keyword a tool argument's property is written with", key.name, keyword)
+			if err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("err = %v, want %q", err, want)
 			}
 		})
 	}

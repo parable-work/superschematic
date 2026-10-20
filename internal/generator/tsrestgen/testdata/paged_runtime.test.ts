@@ -5,15 +5,17 @@ PAGE_PARITY to runtime/http/testdata/page_parity.json. The implementation
 is paged_implementation.ts, staged beside the router and type-checked with
 it. A paged route reads cursor and limit after the operation's own query
 parameters, hands the implementation args.page, and sends the Page it
-returns as data, {items, next}, next null after the last page. A limit or
-cursor the reader refuses is the 400 the vectors hold and never reaches the
-implementation, and a cursor the implementation cannot read is the vectors'
-refused-cursor 400.
+returns as data, {items, next}, next null after the last page. listItems
+also reads its sort (D60, amended) into args.page.sort, unbinds the cursor
+from the sort it was returned under, and binds the next it answers to the
+sort. A limit, sort or cursor the reader refuses is the 400 the vectors
+hold and never reaches the implementation, and a cursor the implementation
+cannot read is the vectors' refused-cursor 400.
 */
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { Hono } from 'hono';
-import { encodeCursor } from '@superschematic/http-runtime';
+import { bindCursor, encodeCursor, parseSort, type PageSort } from '@superschematic/http-runtime';
 import { errorHandler, notFoundHandler } from '@superschematic/http-runtime/hono';
 
 const apiDir = process.env.API_DIR;
@@ -21,7 +23,7 @@ if (!apiDir) throw new Error('API_DIR is required');
 const parityPath = process.env.PAGE_PARITY;
 if (!parityPath) throw new Error('PAGE_PARITY is required');
 const { buildRouter, operationSpecs } = await import(`${apiDir}/router.ts`);
-const { catalog, items, recording, received, tags } = await import(`${apiDir}/paged_implementation.ts`);
+const { catalog, itemKey, items, recording, received, sortedItems, tags } = await import(`${apiDir}/paged_implementation.ts`);
 
 interface Problem {
   readonly status: number;
@@ -33,13 +35,27 @@ interface Problem {
 const vectors = JSON.parse(readFileSync(parityPath, 'utf8')) as {
   reads: {
     name: string;
-    spec: { defaultLimit: number; maxLimit: number };
+    spec: { defaultLimit: number; maxLimit: number; sort?: { param: string; fields: string[]; default: string } };
     query: string;
-    request?: { cursor: string | null; limit: number };
+    request?: { cursor: string | null; limit: number; sort?: string };
     problem?: Problem;
   }[];
   refused: { name: string; cursor: string; problem: Problem }[];
 };
+
+const byName: PageSort = { field: 'name', desc: false };
+
+/** The cursor the route answers for an item under a sort: its key's, bound to the sort. */
+function nextOf(row: unknown, sort: PageSort = byName): string {
+  return bindCursor(encodeCursor(itemKey(row, sort)), sort);
+}
+
+/** A cursor bound to sort as the router binds a next, whatever its key; one that is no canonical base64url stays as it is. */
+function boundTo(cursor: string, sort: string): string {
+  const key = Buffer.from(cursor, 'base64url');
+  if (cursor === '' || key.toString('base64url') !== cursor) return cursor;
+  return Buffer.concat([Buffer.from(`{"sort":"${sort}","key":`), key, Buffer.from('}')]).toString('base64url');
+}
 
 function app(implementation: unknown) {
   const root = new Hono();
@@ -94,12 +110,16 @@ async function walk(path: string) {
 }
 
 describe('the operation table', () => {
-  test('carries each paged operation its limits', () => {
-    expect(operationSpecs.listItems.page).toEqual({ defaultLimit: 2, maxLimit: 5 });
+  test('carries each paged operation its limits, and a sorted one its sort', () => {
+    expect(operationSpecs.listItems.page).toEqual({
+      defaultLimit: 2,
+      maxLimit: 5,
+      sort: { param: 'sort', fields: ['name', 'sku'], default: 'name' },
+    });
     expect(operationSpecs.listTags.page).toEqual({ defaultLimit: 20, maxLimit: 100 });
     expect('page' in operationSpecs.getItem).toBe(false);
     expect('page' in operationSpecs.placeBasket).toBe(false);
-    // cursor and limit are the page's, not query parameters of the operation.
+    // cursor, limit and sort are the page's, not query parameters of the operation.
     expect(operationSpecs.listItems.queryParams.map((param: { name: string }) => param.name)).toEqual(['ids', 'inStock']);
   });
 });
@@ -110,26 +130,48 @@ describe('a paged list', () => {
     expect(response.status).toBe(200);
     expect(response.body.data).toEqual({
       items: items.slice(0, 2),
-      next: encodeCursor({ id: items[1].id }),
+      next: nextOf(items[1]),
     });
     expect(Object.keys(response.body.meta)).toEqual(['requestId']);
-    expect(received.at(-1)).toEqual({ operation: 'listItems', args: { page: { limit: 2 } } });
+    expect(received.at(-1)).toEqual({ operation: 'listItems', args: { page: { limit: 2, sort: byName } } });
   });
 
   test('follows each next to the last page, whose next is null', async () => {
     const { seen, sizes } = await walk('/api/items');
     expect(seen).toEqual([...items]);
     expect(sizes).toEqual([2, 2, 1]);
-    const last = await get(`/api/items?cursor=${encodeCursor({ id: items[3].id })}`);
+    const last = await get(`/api/items?cursor=${nextOf(items[3])}`);
     expect(last.body.data).toEqual({ items: [items[4]], next: null });
   });
 
-  test('hands the implementation the cursor and limit asked for', async () => {
-    const cursor = encodeCursor({ id: items[0].id });
-    const response = await get(`/api/items?limit=3&cursor=${cursor}`);
+  test('hands the implementation the cursor, unbound, and the limit asked for', async () => {
+    const own = encodeCursor(itemKey(items[0], byName));
+    const response = await get(`/api/items?limit=3&cursor=${nextOf(items[0])}`);
     expect(response.status).toBe(200);
     expect(response.body.data.items).toEqual(items.slice(1, 4));
-    expect(received.at(-1)?.args.page).toEqual({ cursor, limit: 3 });
+    expect(received.at(-1)?.args.page).toEqual({ cursor: own, limit: 3, sort: byName });
+  });
+
+  test('sorts by each field either way, ties broken by id, and binds each next to the sort', async () => {
+    const names = (rows: readonly { name: string }[]) => rows.map(row => row.name);
+    for (const [text, want] of [
+      ['name', ['Anvil', 'Bucket', 'Chisel', 'Drill', 'Easel']],
+      ['-name', ['Easel', 'Drill', 'Chisel', 'Bucket', 'Anvil']],
+      ['sku', ['Bucket', 'Anvil', 'Drill', 'Easel', 'Chisel']],
+      ['-sku', ['Chisel', 'Easel', 'Drill', 'Anvil', 'Bucket']],
+    ] as const) {
+      const sort = parseSort(text)!;
+      expect(names(sortedItems(sort))).toEqual([...want]);
+      const before = received.length;
+      const { seen, sizes } = await walk(`/api/items?sort=${text}`);
+      expect(names(seen as { name: string }[])).toEqual([...want]);
+      expect(sizes).toEqual([2, 2, 1]);
+      for (const { args } of received.slice(before)) expect(args.page.sort).toEqual(sort);
+    }
+    const first = await get('/api/items?sort=-sku');
+    const descending = parseSort('-sku')!;
+    expect(first.body.data.next).toBe(nextOf(sortedItems(descending)[1], descending));
+    expect(Buffer.from(first.body.data.next, 'base64url').toString()).toStartWith('{"sort":"-sku","key":{"sku":"sku-4","id":');
   });
 
   test('a limit up to the max', async () => {
@@ -168,6 +210,17 @@ describe('a refused page', () => {
     expectProblem(await refused('/api/tags?limit=101'), readVector('a limit past the max').problem!);
   });
 
+  test('a sort not offered, and a cursor of another sort, are the reader vectors', async () => {
+    expectProblem(await refused('/api/items?sort=price'), readVector("a list's sort not offered").problem!);
+    const next = nextOf(items[1]);
+    const sorted = readVector("a list's cursor of another sort").problem!;
+    expectProblem(await refused(`/api/items?sort=-name&cursor=${next}`), sorted);
+    expectProblem(await refused(`/api/items?sort=sku&cursor=${next}`), sorted);
+    // The implementation's own cursor names no sort.
+    const own = encodeCursor(itemKey(items[1], byName));
+    expectProblem(await refused(`/api/items?cursor=${own}`), readVector("a list's key cursor no sort is bound to").problem!);
+  });
+
   test("the operation's own query parameters are read first", async () => {
     const body = await refused('/api/items?inStock=maybe&limit=0');
     expect(body.details).toMatchObject({ location: 'query', parameter: 'inStock' });
@@ -175,22 +228,25 @@ describe('a refused page', () => {
 
   test("a forged cursor is the vectors' refused cursor", async () => {
     // The refused cursors the router's pattern admits reach the
-    // implementation, whose decodeCursor refuses them with the vector's 400;
-    // the others are the reader's (above and below).
+    // implementation, bound to the items' sort for theirs, whose
+    // decodeCursor refuses them with the vector's 400; the others are the
+    // reader's (above and below).
     const forged = vectors.refused.filter(vector => /^[A-Za-z0-9_-]{1,1024}$/.test(vector.cursor));
     expect(forged.map(vector => vector.name)).toContain('base64url of text that is not JSON');
     for (const vector of forged) {
-      const response = await get(`/api/items?cursor=${vector.cursor}`);
-      expect(response.status).toBe(400);
-      expectProblem(response.body, vector.problem);
+      for (const path of [`/api/items?cursor=${boundTo(vector.cursor, 'name')}`, `/api/tags?cursor=${vector.cursor}`]) {
+        const response = await get(path);
+        expect(response.status).toBe(400);
+        expectProblem(response.body, vector.problem);
+      }
     }
     const problem = forged[0]!.problem;
     expect(problem.detail).toBe('cursor is not one this operation returned');
     // JSON that names no position of the order, and another list's cursor:
     // the implementation refuses each with refusedCursor().
     for (const path of [
-      `/api/items?cursor=${encodeCursor({ position: 3 })}`,
-      `/api/items?cursor=${encodeCursor('green')}`,
+      `/api/items?cursor=${bindCursor(encodeCursor({ position: 3 }), byName)}`,
+      `/api/items?cursor=${bindCursor(encodeCursor('green'), byName)}`,
       `/api/tags?cursor=${encodeCursor({ id: items[0].id })}`,
     ]) {
       const response = await get(path);
@@ -201,13 +257,13 @@ describe('a refused page', () => {
 });
 
 describe('every reader vector over HTTP', () => {
-  // Each vector runs on the route whose limits are its spec's.
+  // Each vector runs on the route whose limits and sort are its spec's.
   const routes = [
     { path: '/api/items', operation: 'listItems', spec: operationSpecs.listItems.page },
     { path: '/api/tags', operation: 'listTags', spec: operationSpecs.listTags.page },
   ];
   const runs = vectors.reads.flatMap(vector => {
-    const route = routes.find(r => r.spec.defaultLimit === vector.spec.defaultLimit && r.spec.maxLimit === vector.spec.maxLimit);
+    const route = routes.find(r => Bun.deepEquals(r.spec, vector.spec));
     return route ? [{ vector, route }] : [];
   });
 
@@ -228,7 +284,13 @@ describe('every reader vector over HTTP', () => {
       const want = vector.request!;
       expect(received.at(-1)).toEqual({
         operation: route.operation,
-        args: { page: want.cursor === null ? { limit: want.limit } : { cursor: want.cursor, limit: want.limit } },
+        args: {
+          page: {
+            ...(want.cursor === null ? {} : { cursor: want.cursor }),
+            limit: want.limit,
+            ...(want.sort === undefined ? {} : { sort: parseSort(want.sort) }),
+          },
+        },
       });
     });
   }

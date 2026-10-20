@@ -19,7 +19,8 @@ CREATE TABLE "order" (
   status TEXT NOT NULL,
   placed_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
   shipping_address TEXT NOT NULL,
-  cancel_reason TEXT
+  cancel_reason TEXT,
+  total_cents BIGINT NOT NULL
 );
 
 COMMENT ON TABLE "order" IS 'A shopper''s order. Staff look orders up by customer, newest first.';
@@ -46,7 +47,12 @@ CREATE TABLE product (
   UNIQUE (sku)
 );
 
-COMMENT ON TABLE product IS 'Something the shop sells.';
+-- Add search_text generated column for trigram search
+ALTER TABLE product ADD COLUMN search_text TEXT GENERATED ALWAYS AS (
+  COALESCE("name", '')
+) STORED;
+
+COMMENT ON TABLE product IS 'Something the shop sells. Shoppers find a product by its name.';
 
 CREATE TABLE restock_request (
   created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
@@ -272,6 +278,8 @@ ALTER TABLE user_role_grant
 -- Create indexes
 
 CREATE INDEX idx_order_customer_placed_at ON "order" USING BTREE (customer_id, placed_at);
+
+CREATE INDEX idx_product_search_trgm ON product USING GIN (search_text gin_trgm_ops);
 
 CREATE UNIQUE INDEX uq_restock_request_one_open_per_product ON restock_request USING BTREE (open_product_id);
 

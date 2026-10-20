@@ -44,6 +44,23 @@ const products = await anonymous.productCatalog.listProducts({ limit: 2 });
 console.log(`products: ${products.items.length}, ${lastPage(products)}`);
 console.log(`every product: ${await count(anonymous.productCatalog.listProductsAll({ limit: 2 }))}`);
 
+// A sorted list takes its sort with each page (D60, amended): two pages of
+// the products by price, the dearest first.
+let priced = await anonymous.productCatalog.listProducts({ sort: '-priceCents', limit: 2 });
+console.log(`products by price, dearest first: ${priced.items.length}, ${lastPage(priced)}`);
+if (priced.next !== null) {
+  priced = await anonymous.productCatalog.listProducts({ sort: '-priceCents', cursor: priced.next, limit: 2 });
+  console.log(`the next page by price: ${priced.items.length}, ${lastPage(priced)}`);
+}
+
+// byName is the cursor of {"sort":"name","key":{"name":"Anvil","id":"1"}},
+// one the router binds to the products by name; sent with another sort,
+// it is refused.
+const byName = 'eyJzb3J0IjoibmFtZSIsImtleSI6eyJuYW1lIjoiQW52aWwiLCJpZCI6IjEifX0';
+console.log(`products by price after a cursor of the products by name: ${await status(() =>
+  anonymous.productCatalog.listProducts({ sort: '-priceCents', cursor: byName })
+)}`);
+
 console.log(`get a missing product: ${await status(() => anonymous.productCatalog.getProduct(product))}`);
 
 const reviews = await anonymous.productReviews.listReviews(product, { q: 'smoky' });
@@ -71,6 +88,7 @@ console.log(`order a product that does not exist: ${await status(() =>
 const orders = await shopper.order.listOrders({ limit: 1 });
 console.log(`orders: ${orders.items.length}, ${lastPage(orders)}`);
 console.log(`every order: ${await count(shopper.order.listOrdersAll({ limit: 1 }))}`);
+console.log(`every order by total, largest first: ${await count(shopper.order.listOrdersAll({ sort: '-totalCents', limit: 1 }))}`);
 
 // e30 is the cursor of {}, a key that names no order.
 console.log(`orders after a cursor the server never returned: ${await status(() =>

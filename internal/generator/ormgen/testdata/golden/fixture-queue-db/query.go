@@ -3,6 +3,7 @@
 package orm
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -155,6 +156,14 @@ type ArrayStringFilter struct {
 	Eq       []string
 }
 
+// ErrPageKey is FindPage's error for an After that holds no primary key, or
+// whose row no longer exists in an order by a sort field, which reads the
+// row's value from the table (D60, amended). A key of another order is not
+// one: a key is a row's primary key alone, the same in every order, so a
+// cursor of another sort is refused before the ORM reads it, by the router
+// that binds a cursor to its sort.
+var ErrPageKey = errors.New("orm: the page key names no row of its sort")
+
 // ========================================
 // Type-Safe Field Selectors and Options
 // ========================================
@@ -241,6 +250,84 @@ type OrderFindOptions struct {
 	Offset int
 	// IncludeDeleted includes soft-deleted records in results (default false)
 	IncludeDeleted bool
+}
+
+// OrderSortField is a field FindPage orders Order rows by, by its
+// schema name (D60, amended): its primary key, or a column of one value of
+// text, a number or a time.
+type OrderSortField string
+
+const (
+	OrderSortById       OrderSortField = "id"
+	OrderSortByPlacedAt OrderSortField = "placedAt"
+)
+
+// OrderSort is the order FindPage reads Order rows in: Field,
+// ascending, or descending when Desc; ties break by id in the same
+// direction. The zero value orders by id, ascending.
+type OrderSort struct {
+	Field OrderSortField
+	Desc  bool
+}
+
+// ParseOrderSort reads a sort as a page request writes it, "placedAt" or
+// "-placedAt": an error for a field Order cannot be sorted by.
+func ParseOrderSort(text string) (OrderSort, error) {
+	parsed := OrderSort{Field: OrderSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
+	switch parsed.Field {
+	case OrderSortById, OrderSortByPlacedAt:
+		return parsed, nil
+	}
+	return OrderSort{}, fmt.Errorf("orm: Order sorts by id and placedAt, not %q", text)
+}
+
+// OrderPageKey is the position of a Order row in a FindPage order: the
+// row's id, as a cursor holds it, {"id": ...}. FindPage reads the row's
+// value of its sort field from the table, so a key is the same in every order
+// and its length is the id's, whatever the row holds (D60, amended).
+type OrderPageKey struct {
+	Id types.IdentityUUID `json:"id"`
+}
+
+// arg is the key's id as the repository writes its column. A key without
+// one is ErrPageKey.
+func (k *OrderPageKey) arg() (any, error) {
+	var zeroKey types.IdentityUUID
+	if k.Id == zeroKey {
+		return nil, fmt.Errorf("%w: the Order key holds no id", ErrPageKey)
+	}
+	return k.Id.ToUUID(), nil
+}
+
+// orderPageKeyOf is row's key: its id.
+func orderPageKeyOf(row *types.Order) *OrderPageKey {
+	key := &OrderPageKey{}
+	if row.Id != nil {
+		key.Id = *row.Id
+	}
+	return key
+}
+
+// OrderPageOptions are FindPage's options.
+type OrderPageOptions struct {
+	// Fields specifies which fields to select, as FindMany's do; zero is an
+	// error. A page reads the id too, which Next holds.
+	Fields OrderFields
+	// Sort is the order the rows are read in.
+	Sort OrderSort
+	// After is the key of the last row of the page before, nil for the first page.
+	After *OrderPageKey
+	// Limit is the rows a page holds: 1 or more, 100 when 0.
+	Limit int
+	// IncludeDeleted includes soft-deleted records in results (default false)
+	IncludeDeleted bool
+}
+
+// OrderPage is a page of Order rows in FindPage's order: at most
+// Limit rows, and Next, the key of the last of them, when more rows follow.
+type OrderPage struct {
+	Rows []*types.Order
+	Next *OrderPageKey
 }
 
 // ========================================

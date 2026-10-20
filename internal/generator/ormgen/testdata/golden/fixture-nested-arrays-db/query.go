@@ -3,6 +3,7 @@
 package orm
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -155,6 +156,14 @@ type ArrayStringFilter struct {
 	Eq       []string
 }
 
+// ErrPageKey is FindPage's error for an After that holds no primary key, or
+// whose row no longer exists in an order by a sort field, which reads the
+// row's value from the table (D60, amended). A key of another order is not
+// one: a key is a row's primary key alone, the same in every order, so a
+// cursor of another sort is refused before the ORM reads it, by the router
+// that binds a cursor to its sort.
+var ErrPageKey = errors.New("orm: the page key names no row of its sort")
+
 // ========================================
 // Type-Safe Field Selectors and Options
 // ========================================
@@ -262,6 +271,83 @@ type BoardFindOptions struct {
 	Offset int
 	// IncludeDeleted includes soft-deleted records in results (default false)
 	IncludeDeleted bool
+}
+
+// BoardSortField is a field FindPage orders Board rows by, by its
+// schema name (D60, amended): its primary key, or a column of one value of
+// text, a number or a time.
+type BoardSortField string
+
+const (
+	BoardSortById BoardSortField = "id"
+)
+
+// BoardSort is the order FindPage reads Board rows in: Field,
+// ascending, or descending when Desc; ties break by id in the same
+// direction. The zero value orders by id, ascending.
+type BoardSort struct {
+	Field BoardSortField
+	Desc  bool
+}
+
+// ParseBoardSort reads a sort as a page request writes it, "id" or
+// "-id": an error for a field Board cannot be sorted by.
+func ParseBoardSort(text string) (BoardSort, error) {
+	parsed := BoardSort{Field: BoardSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
+	switch parsed.Field {
+	case BoardSortById:
+		return parsed, nil
+	}
+	return BoardSort{}, fmt.Errorf("orm: Board sorts by id, not %q", text)
+}
+
+// BoardPageKey is the position of a Board row in a FindPage order: the
+// row's id, as a cursor holds it, {"id": ...}. FindPage reads the row's
+// value of its sort field from the table, so a key is the same in every order
+// and its length is the id's, whatever the row holds (D60, amended).
+type BoardPageKey struct {
+	Id types.IdentityUUID `json:"id"`
+}
+
+// arg is the key's id as the repository writes its column. A key without
+// one is ErrPageKey.
+func (k *BoardPageKey) arg() (any, error) {
+	var zeroKey types.IdentityUUID
+	if k.Id == zeroKey {
+		return nil, fmt.Errorf("%w: the Board key holds no id", ErrPageKey)
+	}
+	return k.Id.ToUUID(), nil
+}
+
+// boardPageKeyOf is row's key: its id.
+func boardPageKeyOf(row *types.Board) *BoardPageKey {
+	key := &BoardPageKey{}
+	if row.Id != nil {
+		key.Id = *row.Id
+	}
+	return key
+}
+
+// BoardPageOptions are FindPage's options.
+type BoardPageOptions struct {
+	// Fields specifies which fields to select, as FindMany's do; zero is an
+	// error. A page reads the id too, which Next holds.
+	Fields BoardFields
+	// Sort is the order the rows are read in.
+	Sort BoardSort
+	// After is the key of the last row of the page before, nil for the first page.
+	After *BoardPageKey
+	// Limit is the rows a page holds: 1 or more, 100 when 0.
+	Limit int
+	// IncludeDeleted includes soft-deleted records in results (default false)
+	IncludeDeleted bool
+}
+
+// BoardPage is a page of Board rows in FindPage's order: at most
+// Limit rows, and Next, the key of the last of them, when more rows follow.
+type BoardPage struct {
+	Rows []*types.Board
+	Next *BoardPageKey
 }
 
 // ========================================

@@ -4,13 +4,18 @@
 // and the implementation scaffold as impl/). It registers the generated
 // routes with an in-memory catalog and pages its lists over httptest
 // (D60): the first page, the next by its cursor, the last with a null
-// next; filters applied to each page; the limit and its bounds; and every
-// refusal the vectors hold, worded as they word it.
+// next; filters applied to each page; the limit and its bounds; the items
+// sorted by name or sku, each way, with the next cursor bound to the sort
+// (D60, amended); and every refusal the vectors hold, worded as they word
+// it.
 package fixturepagedapi_test
 
 import (
+	"cmp"
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -18,6 +23,7 @@ import (
 	"os"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -35,9 +41,12 @@ import (
 // for, paged methods included.
 var _ api.CatalogImplementation = (*catalog.Implementation)(nil)
 
-// itemKey is the position of an item in the catalog's order: its id.
+// itemKey is the position of an item in the catalog's order: the value of
+// the field the page is sorted by, and its id, which breaks ties.
 type itemKey struct {
-	ID types.IdentityUUID `json:"id"`
+	Name string             `json:"name,omitempty"`
+	Sku  string             `json:"sku,omitempty"`
+	ID   types.IdentityUUID `json:"id"`
 }
 
 // shelf is an in-memory catalog: its items in their order, its tags in
@@ -62,16 +71,31 @@ func (s *shelf) GetItem(_ context.Context, id types.IdentityUUID) (*types.ItemVi
 }
 
 // ListItems reads, as a query would, up to one item past the limit after
-// the cursor's, under the filters, and builds the page from them.
+// the cursor's, in the page's sort, ties broken by id in the same
+// direction, under the filters, and builds the page from them.
 func (s *shelf) ListItems(_ context.Context, ids []types.IdentityUUID, inStock *bool, page paging.Request) (paging.Page[types.ItemView], error) {
 	s.pages = append(s.pages, page)
+	value := func(item types.ItemView) string {
+		if page.Sort.Field == "sku" {
+			return string(item.Sku)
+		}
+		return item.Name
+	}
+	sorted := slices.Clone(s.items)
+	slices.SortFunc(sorted, func(a, b types.ItemView) int {
+		order := cmp.Or(strings.Compare(value(a), value(b)), strings.Compare(a.Id.String(), b.Id.String()))
+		if page.Sort.Desc {
+			return -order
+		}
+		return order
+	})
 	start := 0
 	if page.Cursor != "" {
 		var key itemKey
 		if err := paging.DecodeCursor(page.Cursor, &key); err != nil {
 			return paging.Page[types.ItemView]{}, err
 		}
-		at := slices.IndexFunc(s.items, func(item types.ItemView) bool { return item.Id == key.ID })
+		at := slices.IndexFunc(sorted, func(item types.ItemView) bool { return item.Id == key.ID })
 		if at < 0 {
 			// A cursor that reads but names no position of the order.
 			return paging.Page[types.ItemView]{}, paging.RefusedCursor()
@@ -79,7 +103,7 @@ func (s *shelf) ListItems(_ context.Context, ids []types.IdentityUUID, inStock *
 		start = at + 1
 	}
 	var rows []types.ItemView
-	for _, item := range s.items[start:] {
+	for _, item := range sorted[start:] {
 		if inStock != nil && item.InStock != *inStock {
 			continue
 		}
@@ -90,7 +114,12 @@ func (s *shelf) ListItems(_ context.Context, ids []types.IdentityUUID, inStock *
 			break
 		}
 	}
-	return paging.FromRows(rows, page.Limit, func(item types.ItemView) any { return itemKey{ID: item.Id} })
+	return paging.FromRows(rows, page.Limit, func(item types.ItemView) any {
+		if page.Sort.Field == "sku" {
+			return itemKey{Sku: string(item.Sku), ID: item.Id}
+		}
+		return itemKey{Name: item.Name, ID: item.Id}
+	})
 }
 
 // ListTags pages the sorted tags by the last tag of a page: any string
@@ -114,16 +143,17 @@ func (s *shelf) ListTags(_ context.Context, page paging.Request) (paging.Page[st
 	return paging.FromRows(rows, page.Limit, func(tag string) any { return tag })
 }
 
-// The catalog's items, in its order; ids are the scalar's text.
+// The catalog's items, in the order of their names; ids are the scalar's
+// text. Two share a sku, which their ids order.
 var stock = []struct {
-	id, name string
-	inStock  bool
+	id, name, sku string
+	inStock       bool
 }{
-	{"0b9a4e1c-6f2d-4c1a-9b7e-2d5f8a3c1e41", "anvil", true},
-	{"0b9a4e1c-6f2d-4c1a-9b7e-2d5f8a3c1e42", "bucket", false},
-	{"0b9a4e1c-6f2d-4c1a-9b7e-2d5f8a3c1e43", "crate", true},
-	{"0b9a4e1c-6f2d-4c1a-9b7e-2d5f8a3c1e44", "drum", true},
-	{"0b9a4e1c-6f2d-4c1a-9b7e-2d5f8a3c1e45", "easel", false},
+	{"0b9a4e1c-6f2d-4c1a-9b7e-2d5f8a3c1e41", "anvil", "sku-2", true},
+	{"0b9a4e1c-6f2d-4c1a-9b7e-2d5f8a3c1e42", "bucket", "sku-1", false},
+	{"0b9a4e1c-6f2d-4c1a-9b7e-2d5f8a3c1e43", "crate", "sku-5", true},
+	{"0b9a4e1c-6f2d-4c1a-9b7e-2d5f8a3c1e44", "drum", "sku-2", true},
+	{"0b9a4e1c-6f2d-4c1a-9b7e-2d5f8a3c1e45", "easel", "sku-4", false},
 }
 
 func serve(t *testing.T) (*httptest.Server, *shelf) {
@@ -134,7 +164,7 @@ func serve(t *testing.T) (*httptest.Server, *shelf) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		impl.items = append(impl.items, types.ItemView{Id: id, Name: item.name, Sku: types.IdentitySlug(item.name), InStock: item.inStock})
+		impl.items = append(impl.items, types.ItemView{Id: id, Name: item.name, Sku: types.IdentitySlug(item.sku), InStock: item.inStock})
 	}
 	return serveWith(t, api.Implementations{Catalog: impl}), impl
 }
@@ -238,9 +268,10 @@ func TestListItemsPagesTheCatalog(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("pages = %v, want %v", got, want)
 	}
-	// Each request had the default limit; only the first had no cursor.
+	// Each request had the default limit and sort; only the first had no
+	// cursor.
 	for i, request := range impl.pages {
-		if request.Limit != 2 || (request.Cursor == "") != (i == 0) {
+		if request.Limit != 2 || request.Sort != (paging.Sort{Field: "name"}) || (request.Cursor == "") != (i == 0) {
 			t.Errorf("page request %d = %+v", i, request)
 		}
 	}
@@ -308,16 +339,93 @@ func TestListTagsPagesAPrimitive(t *testing.T) {
 	}
 }
 
+// The page's sort, read and bound (D60, amended): each direction of each
+// field pages the whole catalog, ties broken by id in the same direction;
+// the implementation reads its own cursor, and the next the route answers
+// names the sort; a sort not offered, a cursor of another sort and the
+// implementation's own cursor are each the route's 400, which no
+// implementation sees.
+func TestListItemsSortsThePage(t *testing.T) {
+	server, impl := serve(t)
+	for _, tc := range []struct {
+		sort string
+		want [][]string
+	}{
+		{"name", [][]string{{"anvil", "bucket"}, {"crate", "drum"}, {"easel"}}},
+		{"-name", [][]string{{"easel", "drum"}, {"crate", "bucket"}, {"anvil"}}},
+		{"sku", [][]string{{"bucket", "anvil"}, {"drum", "easel"}, {"crate"}}},
+		{"-sku", [][]string{{"crate", "easel"}, {"drum", "anvil"}, {"bucket"}}},
+	} {
+		before := len(impl.pages)
+		if got := walk(t, server, url.Values{"sort": {tc.sort}}); !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("sort=%s: pages = %v, want %v", tc.sort, got, tc.want)
+		}
+		sort, _ := paging.ParseSort(tc.sort)
+		for _, request := range impl.pages[before:] {
+			if request.Sort != sort {
+				t.Errorf("sort=%s: page request %+v", tc.sort, request)
+			}
+		}
+	}
+
+	// The next names its sort; the implementation reads its own key.
+	_, next := page(t, get(t, server, "/api/items", "sort=-sku"))
+	data, err := base64.RawURLEncoding.DecodeString(next.(string))
+	if err != nil || !strings.HasPrefix(string(data), `{"sort":"-sku","key":{"sku":"sku-4","id":`) {
+		t.Fatalf("next = %s, %v", data, err)
+	}
+	before := len(impl.pages)
+	page(t, get(t, server, "/api/items", "sort=-sku&cursor="+next.(string)))
+	var key itemKey
+	if err := paging.DecodeCursor(impl.pages[before].Cursor, &key); err != nil || key.Sku != "sku-4" || key.Name != "" {
+		t.Fatalf("the implementation's cursor reads %+v, %v", key, err)
+	}
+	own := impl.pages[before].Cursor
+
+	sorted := map[string]any{
+		"status": float64(http.StatusBadRequest), "code": "bad_request", "detail": paging.SortedCursorDetail,
+		"details": map[string]any{"location": "query", "parameter": "cursor", "reason": paging.SortedCursorReason},
+	}
+	refused := map[string]any{
+		"status": float64(http.StatusBadRequest), "code": "bad_request", "detail": paging.RefusedCursorDetail,
+		"details": map[string]any{"location": "query", "parameter": "cursor", "reason": paging.RefusedCursorReason},
+	}
+	values := "expected one of name, -name, sku, -sku"
+	notOffered := map[string]any{
+		"status": float64(http.StatusBadRequest), "code": "bad_request", "detail": "Invalid query parameter sort: " + values,
+		"details": map[string]any{"location": "query", "parameter": "sort", "reason": values},
+	}
+	before = len(impl.pages)
+	for _, tc := range []struct {
+		name, query string
+		want        map[string]any
+	}{
+		{"a cursor of another sort", "sort=sku&cursor=" + next.(string), sorted},
+		{"a cursor of another sort under the default", "cursor=" + next.(string), sorted},
+		{"the implementation's own cursor", "sort=-sku&cursor=" + own, refused},
+		{"a sort not offered", "sort=price", notOffered},
+		{"a sort not offered before a cursor of another sort", "sort=price&cursor=" + next.(string), notOffered},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			checkProblem(t, get(t, server, "/api/items", tc.query), tc.want)
+		})
+	}
+	if len(impl.pages) != before {
+		t.Errorf("a refused page reached the implementation: %+v", impl.pages[before:])
+	}
+}
+
 // vectors are the HTTP runtimes' page vectors
 // (runtime/http/testdata/page_parity.json).
 type vectors struct {
 	Reads []struct {
 		Name    string
-		Spec    paging.Spec
+		Spec    vectorSpec
 		Query   string
 		Request *struct {
 			Cursor *string
 			Limit  int
+			Sort   string
 		}
 		Problem map[string]any
 	}
@@ -326,6 +434,25 @@ type vectors struct {
 		Cursor  string
 		Problem map[string]any
 	}
+}
+
+// vectorSpec is a vector's spec: the page's limits and its sort.
+type vectorSpec struct {
+	DefaultLimit int
+	MaxLimit     int
+	Sort         *struct {
+		Param   string
+		Fields  []string
+		Default string
+	}
+}
+
+// route is the spec as a route's key: its limits and its sort.
+func (s vectorSpec) route() string {
+	if s.Sort == nil {
+		return fmt.Sprintf("%d/%d", s.DefaultLimit, s.MaxLimit)
+	}
+	return fmt.Sprintf("%d/%d/%s/%s/%s", s.DefaultLimit, s.MaxLimit, s.Sort.Param, strings.Join(s.Sort.Fields, ","), s.Sort.Default)
 }
 
 func readVectors(t *testing.T) vectors {
@@ -356,22 +483,23 @@ func checkProblem(t *testing.T, refusal reply, want map[string]any) {
 	}
 }
 
-// Every read vector of either route's limits goes through the route: a
-// refusal is the vector's 400, and a request the reader takes reaches the
-// implementation as the vector's page request.
+// Every read vector of either route's limits and sort goes through the
+// route: a refusal is the vector's 400, and a request the reader takes
+// reaches the implementation as the vector's page request, its cursor
+// unbound and its sort read.
 func TestRoutesReadThePageAsTheVectors(t *testing.T) {
 	server, impl := serve(t)
-	routes := map[paging.Spec]string{
-		{DefaultLimit: 2, MaxLimit: 5}:    "/api/items",
-		{DefaultLimit: 20, MaxLimit: 100}: "/api/tags",
+	routes := map[string]string{
+		"2/5/sort/name,sku/name": "/api/items",
+		"20/100":                 "/api/tags",
 	}
-	ran := 0
+	ran := map[string]int{}
 	for _, vector := range readVectors(t).Reads {
-		path, ok := routes[vector.Spec]
+		path, ok := routes[vector.Spec.route()]
 		if !ok {
 			continue
 		}
-		ran++
+		ran[path]++
 		t.Run(vector.Name, func(t *testing.T) {
 			before := len(impl.pages)
 			got := get(t, server, path, vector.Query)
@@ -389,19 +517,34 @@ func TestRoutesReadThePageAsTheVectors(t *testing.T) {
 			if vector.Request.Cursor != nil {
 				want.Cursor = *vector.Request.Cursor
 			}
+			if vector.Request.Sort != "" {
+				want.Sort, _ = paging.ParseSort(vector.Request.Sort)
+			}
 			if got := impl.pages[before]; got != want {
 				t.Errorf("page request = %+v, want %+v", got, want)
 			}
 		})
 	}
-	if ran == 0 {
-		t.Fatal("no read vector has either route's limits")
+	if ran["/api/items"] == 0 || ran["/api/tags"] == 0 {
+		t.Fatalf("read vectors run on each route: %v", ran)
 	}
 }
 
+// boundTo is cursor bound to sort as a router binds a next, whatever its
+// key: a cursor that is no base64url stays as it is, and is refused as
+// no envelope.
+func boundTo(cursor, sort string) string {
+	key, err := base64.RawURLEncoding.Strict().DecodeString(cursor)
+	if err != nil || cursor == "" {
+		return cursor
+	}
+	return base64.RawURLEncoding.EncodeToString([]byte(`{"sort":"` + sort + `","key":` + string(key) + `}`))
+}
+
 // A cursor the reader takes and the implementation cannot read back is
-// the vectors' 400 at cursor, through either route; so is one that reads
-// but names no item, and one forged from another key.
+// the vectors' 400 at cursor, through either route, bound to the items'
+// sort for theirs; so is one that reads but names no item, and one forged
+// from another key.
 func TestRoutesRefuseCursorsAsTheVectors(t *testing.T) {
 	server, _ := serve(t)
 	vectors := readVectors(t).Refused
@@ -411,9 +554,9 @@ func TestRoutesRefuseCursorsAsTheVectors(t *testing.T) {
 			continue // the reader refuses it first, or reads none
 		}
 		ran++
-		for _, path := range []string{"/api/items", "/api/tags"} {
+		for path, cursor := range map[string]string{"/api/items": boundTo(vector.Cursor, "name"), "/api/tags": vector.Cursor} {
 			t.Run(vector.Name+" "+path, func(t *testing.T) {
-				checkProblem(t, get(t, server, path, "cursor="+url.QueryEscape(vector.Cursor)), vector.Problem)
+				checkProblem(t, get(t, server, path, "cursor="+url.QueryEscape(cursor)), vector.Problem)
 			})
 		}
 	}
@@ -437,7 +580,7 @@ func TestRoutesRefuseCursorsAsTheVectors(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Run(name, func(t *testing.T) {
-			checkProblem(t, get(t, server, "/api/items", "cursor="+cursor), refused)
+			checkProblem(t, get(t, server, "/api/items", "cursor="+boundTo(cursor, "name")), refused)
 		})
 	}
 }

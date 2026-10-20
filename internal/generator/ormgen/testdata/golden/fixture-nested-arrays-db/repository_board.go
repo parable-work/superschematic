@@ -38,6 +38,14 @@ var BoardQuotedFields = map[string]string{
 	"scores": `scores`,
 }
 
+// boardSortColumns are the columns of Board's sort fields, by
+// field, as FindPage's ORDER BY and keyset write them: qualified by the table,
+// and by page_key, the alias of the subquery that reads the key's row. They
+// are the only text of a sort that reaches its SQL (D60, amended).
+var boardSortColumns = map[BoardSortField]struct{ sql, key string }{
+	BoardSortById: {`board.id`, `page_key.id`},
+}
+
 // buildBoardOrderByClause builds an ORDER BY clause for Board.
 // quotedTable is the table's name as the FROM clause spells it, quoted when
 // it is a keyword (a table named order is "order").
@@ -539,22 +547,7 @@ func (r *BoardRepository) FindMany(ctx context.Context, filter *BoardFilter, opt
 	}
 
 	// Build selected fields in OrderedMembers order so FK columns match scan order.
-	var fieldStrings []string
-	if opts.Fields.Id {
-		fieldStrings = append(fieldStrings, "id")
-	}
-	if opts.Fields.Labels {
-		fieldStrings = append(fieldStrings, "labels")
-	}
-	if opts.Fields.States {
-		fieldStrings = append(fieldStrings, "states")
-	}
-	if opts.Fields.Walls {
-		fieldStrings = append(fieldStrings, "walls")
-	}
-	if opts.Fields.Scores {
-		fieldStrings = append(fieldStrings, "scores")
-	}
+	fieldStrings := boardFieldStrings(opts.Fields)
 
 	// Validate fields
 	if err := validateFields(fieldStrings, BoardAllowedFields); err != nil {
@@ -594,6 +587,40 @@ func (r *BoardRepository) FindMany(ctx context.Context, filter *BoardFilter, opt
 		return nil, 0, fmt.Errorf("failed to get count: %w", err)
 	}
 
+	results, err := r.findRows(ctx, "FindMany", query, args, fieldStrings, opts.Fields)
+	if err != nil {
+		return nil, 0, err
+	}
+	return results, totalCount, nil
+}
+
+// boardFieldStrings are the columns fields selects, in OrderedMembers
+// order so FK columns match scan order, and the primary key when fields
+// hydrates a hasMany relation, which maps the children by it.
+func boardFieldStrings(fields BoardFields) []string {
+	var fieldStrings []string
+	if fields.Id {
+		fieldStrings = append(fieldStrings, "id")
+	}
+	if fields.Labels {
+		fieldStrings = append(fieldStrings, "labels")
+	}
+	if fields.States {
+		fieldStrings = append(fieldStrings, "states")
+	}
+	if fields.Walls {
+		fieldStrings = append(fieldStrings, "walls")
+	}
+	if fields.Scores {
+		fieldStrings = append(fieldStrings, "scores")
+	}
+	return fieldStrings
+}
+
+// findRows runs query, a select of the columns fieldStrings names, in turn,
+// with args, scans its rows, and hydrates the relations fields selects, as
+// FindMany and FindPage read them. method names the caller in an error.
+func (r *BoardRepository) findRows(ctx context.Context, method, query string, args []interface{}, fieldStrings []string, fields BoardFields) ([]*types.Board, error) {
 	// Execute query
 	var rows pgx.Rows
 	var err error
@@ -603,7 +630,7 @@ func (r *BoardRepository) FindMany(ctx context.Context, filter *BoardFilter, opt
 		rows, err = r.db.pool.Query(ctx, query, args...)
 	}
 	if err != nil {
-		return nil, 0, fmt.Errorf("failed to execute query: %w", err)
+		return nil, fmt.Errorf("failed to execute query: %w", err)
 	}
 	defer rows.Close()
 
@@ -637,12 +664,12 @@ func (r *BoardRepository) FindMany(ctx context.Context, filter *BoardFilter, opt
 			case "scores":
 				scanDest[i] = &tempScores
 			default:
-				return nil, 0, fmt.Errorf("unexpected field %q for Board.FindMany", fieldName)
+				return nil, fmt.Errorf("unexpected field %q for Board.%s", fieldName, method)
 			}
 		}
 
 		if err := rows.Scan(scanDest...); err != nil {
-			return nil, 0, fmt.Errorf("failed to scan row: %w", err)
+			return nil, fmt.Errorf("failed to scan row: %w", err)
 		}
 
 		// Copy nullable fields when present
@@ -669,7 +696,7 @@ func (r *BoardRepository) FindMany(ctx context.Context, filter *BoardFilter, opt
 			}
 		}
 		if jsonFieldDecodeErr != nil {
-			return nil, 0, jsonFieldDecodeErr
+			return nil, jsonFieldDecodeErr
 		}
 
 		// Set relationship IDs from scanned FK values (hydration happens after loop)
@@ -678,12 +705,129 @@ func (r *BoardRepository) FindMany(ctx context.Context, filter *BoardFilter, opt
 	}
 
 	if err := rows.Err(); err != nil {
-		return nil, 0, fmt.Errorf("error iterating rows: %w", err)
+		return nil, fmt.Errorf("error iterating rows: %w", err)
 	}
 
 	// Batch hydrate relationships (outside the row loop for efficiency)
 
-	return results, totalCount, nil
+	return results, nil
+}
+
+// FindPage reads a page of the Board rows filter finds (D60, amended), in
+// opts.Sort's order, ties broken by id in the same direction: up to
+// opts.Limit rows after opts.After, and Next when more follow. It runs one
+// query of opts.Limit + 1 rows and no count. A key is a row's id alone:
+// in an order by a sort field, the query reads the key's row for its value,
+// soft-deleted or not and whatever the filter, so a row the filter no longer
+// finds still places the page. An After that holds no id, or whose row
+// no longer exists in an order by a sort field, is ErrPageKey. A key of another
+// order cannot be told from one of this order: the router refuses a cursor
+// of another sort before FindPage reads it.
+func (r *BoardRepository) FindPage(ctx context.Context, filter *BoardFilter, opts *BoardPageOptions) (*BoardPage, error) {
+	if opts == nil || opts.Fields.IsZero() {
+		return nil, fmt.Errorf("fields must be specified in PageOptions for performance")
+	}
+	if opts.Limit < 0 {
+		return nil, fmt.Errorf("orm: a page of Board rows holds 1 or more, not %d", opts.Limit)
+	}
+	limit := opts.Limit
+	if limit == 0 {
+		limit = 100
+	}
+	field := opts.Sort.Field
+	if field == "" {
+		field = BoardSortById
+	}
+	column, ok := boardSortColumns[field]
+	if !ok {
+		return nil, fmt.Errorf("orm: Board sorts by id, not %q", string(field))
+	}
+	byKey := field == BoardSortById
+
+	// Next is the key of the page's last row, so the page reads its primary
+	// key whatever Fields selects.
+	fieldStrings := boardFieldStrings(opts.Fields)
+	if !containsString(fieldStrings, "id") {
+		fieldStrings = append(fieldStrings, "id")
+	}
+	if err := validateFields(fieldStrings, BoardAllowedFields); err != nil {
+		return nil, err
+	}
+	selectFields := buildSelectFieldsTyped(fieldStrings, "board")
+	// The filter's conditions, each qualified by the table, then the
+	// keyset's.
+	var args []interface{}
+	conditions := filter.conditions(&args, 0)
+	comparison, direction := ">", "ASC"
+	if opts.Sort.Desc {
+		comparison, direction = "<", "DESC"
+	}
+	var key any
+	if opts.After != nil {
+		var err error
+		if key, err = opts.After.arg(); err != nil {
+			return nil, err
+		}
+		args = append(args, key)
+		placeholder := fmt.Sprintf("$%d", len(args))
+		if byKey {
+			conditions = append(conditions, fmt.Sprintf(`board.id %s %s`, comparison, placeholder))
+		} else {
+			// The key's row gives the sort field's value: no deleted_at
+			// condition and no filter, so a row soft-deleted or changed
+			// since the page before still places this one.
+			conditions = append(conditions, fmt.Sprintf(`(%s, board.id) %s ((SELECT %s FROM board AS page_key WHERE page_key.id = %s), %s)`,
+				column.sql, comparison, column.key, placeholder, placeholder))
+		}
+	}
+	whereClause := ""
+	if len(conditions) > 0 {
+		whereClause = " WHERE " + strings.Join(conditions, " AND ")
+	}
+	orderByClause := fmt.Sprintf(" ORDER BY %s %s", column.sql, direction)
+	if !byKey {
+		orderByClause += fmt.Sprintf(`, board.id %s`, direction)
+	}
+	query := fmt.Sprintf(`SELECT %s FROM board%s%s LIMIT %d`, selectFields, whereClause, orderByClause, limit+1)
+
+	rows, err := r.findRows(ctx, "FindPage", query, args, fieldStrings, opts.Fields)
+	if err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 && opts.After != nil && !byKey {
+		// A key whose row no longer exists places no row: its value is
+		// null, which no row comes after. Only then is the page empty
+		// without being the last.
+		if err := r.pageKeyExists(ctx, key); err != nil {
+			return nil, err
+		}
+	}
+	page := &BoardPage{Rows: rows}
+	if len(rows) > limit {
+		page.Rows = rows[:limit]
+		page.Next = boardPageKeyOf(page.Rows[limit-1])
+	}
+	return page, nil
+}
+
+// pageKeyExists is nil when the table holds a row whose primary key is key,
+// soft-deleted or not, and ErrPageKey when it holds none.
+func (r *BoardRepository) pageKeyExists(ctx context.Context, key any) error {
+	query := `SELECT EXISTS (SELECT 1 FROM board WHERE board.id = $1)`
+	var row pgx.Row
+	if r.tx != nil {
+		row = r.tx.QueryRow(ctx, query, key)
+	} else {
+		row = r.db.pool.QueryRow(ctx, query, key)
+	}
+	var exists bool
+	if err := row.Scan(&exists); err != nil {
+		return fmt.Errorf("failed to read the page key's row: %w", err)
+	}
+	if !exists {
+		return fmt.Errorf("%w: no Board row has the key's id", ErrPageKey)
+	}
+	return nil
 }
 
 // CreateOne inserts a new Board record

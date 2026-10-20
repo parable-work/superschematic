@@ -10,6 +10,12 @@
 // the request's cursor and limit with readPage after the query parameters,
 // answering their 400 as the Go and Rust routers do, and sends the Page the
 // implementation returns as data.
+{{- if .HasSortedPages }}
+// A sorted page's spec carries its sort too (D60, amended): readPage reads
+// it after the limit into args.page.sort and unbinds the cursor from the
+// sort it was returned under, and bindPage binds the next the
+// implementation returns to it.
+{{- end }}
 {{- end }}
 {{- if .Identity }}
 //
@@ -26,7 +32,7 @@
 
 import { Hono, type Env } from 'hono';
 {{- if .HasPages }}
-import { readPage, type OperationSpec, type PageSpec } from '{{ .RuntimePackage }}';
+import { {{ if .HasSortedPages }}bindPage, {{ end }}readPage, type OperationSpec, type PageSpec } from '{{ .RuntimePackage }}';
 {{- else }}
 import type { OperationSpec } from '{{ .RuntimePackage }}';
 {{- end }}
@@ -96,7 +102,7 @@ export const operationSpecs = {
     input: { parse: (value: unknown) => {{ .InputParser }}({{ .InputValidator }}(value)), required: {{ .InputRequired }} },
 {{- end }}
 {{- if .Page }}
-    page: { defaultLimit: {{ .Page.DefaultLimit }}, maxLimit: {{ .Page.MaxLimit }} },
+    page: {{ .PageSpecLiteral }},
 {{- end }}
 {{- if .OutputIsArrayOfArrays }}
     outputIsArrayOfArrays: true,
@@ -239,6 +245,45 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
     webhookVerifier: implementations.webhookVerifiers[{{ tsString .WebhookProvider }}],
 {{- end }}
   });
+{{- else if and .Page .Page.Sort }}
+  mountOperation(
+    router,
+    operationSpecs.{{ .Name }},
+    (ctx, request) => {
+      // The page names the sort it was read in (D60, amended): readPage
+      // unbinds the cursor, and bindPage binds the next.
+      const page = readPage(ctx.query, operationSpecs.{{ .Name }}.page);
+      return implementations.{{ .NamespaceProperty }}
+        .{{ .Name }}(
+          {
+{{- range .PathParams }}
+            {{ .TSName }}: request.path[{{ tsString .Name }}] as {{ .TSType }},
+{{- end }}
+{{- range .QueryParams }}
+            {{ .TSName }}: request.query[{{ tsString .Name }}] as {{ .TSType }}{{ if not .Required }} | undefined{{ end }},
+{{- end }}
+{{- range .BodyParams }}
+            {{ .TSName }}: request.body[{{ tsString .Name }}] as {{ .TSType }}{{ if not .Required }} | undefined{{ end }},
+{{- end }}
+{{- if .HasInput }}
+            input: request.input as {{ .InputType }}{{ if not .InputRequired }} | undefined{{ end }},
+{{- end }}
+            page,
+          },
+          ctx
+        )
+        .then(outcome => bindPage(outcome, page));
+    },
+    {{ $runtime }},
+    {
+      bodyLimitBytes: options.bodyLimits?.{{ .Name }},
+      rateLimitPerMinute: options.rateLimits?.{{ .Name }},
+      timeoutSeconds: options.timeouts?.{{ .Name }},
+{{- if .WebhookProvider }}
+      webhookVerifier: implementations.webhookVerifiers[{{ tsString .WebhookProvider }}],
+{{- end }}
+    }
+  );
 {{- else }}
   mountOperation(
     router,
