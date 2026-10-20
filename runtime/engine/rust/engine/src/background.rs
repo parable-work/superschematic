@@ -57,7 +57,8 @@ pub struct BackgroundOptions {
     pub retry_max: Duration,
     /// Told of each failed attempt and the wait before the next.
     pub on_error: Option<OnError>,
-    /// Told of the engine once its setup passed.
+    /// Told of the engine once its setup passed, before
+    /// [`Background::wait`] returns it.
     pub on_open: Option<OnOpen>,
 }
 
@@ -294,10 +295,12 @@ where
                     .await;
                     return;
                 }
-                inner.settled.send_replace(true);
+                // on_open runs before the waiters wake, so a wait that
+                // returns finds it told.
                 if let Some(on_open) = &background.on_open {
                     on_open(&engine);
                 }
+                inner.settled.send_replace(true);
                 // The task's own hold goes off the runtime too.
                 let _ = tokio::task::spawn_blocking(move || drop(engine)).await;
                 return;
