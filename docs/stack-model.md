@@ -2191,7 +2191,14 @@ as they are, with no build step (D51). The pieces mirror Go's:
   which the generator owns, not the repository root's, which is the
   project's own: its members are `types/typescript/*`, `sdk/typescript/*`,
   `api/*` and `server/*/*`, and the implementations through a `../`
-  pattern from the implementation template, which Bun 1.4 accepts. Where
+  pattern from the implementation template, which Bun 1.4 accepts. The
+  project's own packages, the implementations and the sites, are members
+  of the default output root's workspace alone, `<schemas-root>/dist`,
+  where every command writes without `--out`: an install links each
+  member's `node_modules` into the root that installs it, so a second
+  root that listed them would take their links over. Any other output
+  root lists the implementations' mirrors, `impl/*`, in their place
+  (below). Where
   `[paths]` names a checkout of superscalar, the HTTP runtime or the
   version-graph runtime, the root's `overrides` point every dependency on
   it at the checkout with a `file:` path from the root; a member's own
@@ -2233,6 +2240,40 @@ as they are, with no build step (D51). The pieces mirror Go's:
   repository whose rules ignore the lockfile, prints one line naming the
   rule and the fix, and changes no ignore file. `stack init` (section
   11.1) writes the rule, and the take-back where a broader rule needs it.
+- **Mirror.** A build of a stack into an output root other than the
+  default one, as `stack dev --out` makes, copies each implementation its
+  TypeScript servers, jobs and workers build against into
+  `<output-root>/impl/<service>/`, as a Rust implementation's mirror is
+  copied (below), and the root's workspace lists `impl/*` in place of the
+  project's packages (D65, amended). The copy keeps its package's name,
+  so a server's `package.json` names the implementation alike in every
+  root and resolves to the root's own copy; Bun refuses two members of
+  one name, so the default root, whose servers build against the
+  project's packages, its members, holds no copy. So another root's
+  install leaves the project's `node_modules` as the default root's
+  install linked them, two output roots build and install at once, and the
+  image of a server in another root needs no implementation directory.
+  The copy's `package.json` is the package's, its members in their order,
+  with a first member `"//"` that says it is a copy a build writes, by
+  which a build knows the directory as its own, and each dependency on a
+  path (`file:`, `link:`, `./` or `../`) re-based for the copy's
+  directory: one into the default output root names the same place under
+  the current one, one inside the package stays, since the copy holds it,
+  and any other names the same directory. A dependency by name or with
+  `workspace:` needs none. The copy holds the package's other files by
+  the walk a Rust mirror's are chosen by: not `.git`, a `node_modules`
+  directory at any depth, which the root's install links anew, the root's
+  `bun.lock` or `bun.lockb`, or what the package's `.gitignore` files
+  leave out. A TypeScript package has no build directory its toolchain
+  fixes, as Cargo's `target/`, so its `.gitignore` files say what its
+  build writes. A build writes only the files whose content changed,
+  removes the files the package no longer has, and removes a copy no
+  server, job or worker package under the output root depends on, and,
+  in the default root, every copy. A change to the package reaches another
+  root's servers with that root's next build of the stack, which `stack
+  dev` runs first. A site is copied into no root: it is no member of
+  another root's workspace, and its build there runs in its own package
+  against the default root's install.
 - **Entrypoint.** The `server` generator writes
   `<output-root>/server/<stack>/<server>/` for a TypeScript server in the
   pass that writes the Go ones (section 8.1): `package.json`
@@ -2325,7 +2366,10 @@ as they are, with no build step (D51). The pieces mirror Go's:
   pattern, so the context does not depend on which services built before
   the stack, every types package, each package the server depends on
   whole, the two checkouts without their build output, and the
-  superscalar crates. Without either `[paths]` key no Dockerfile is
+  superscalar crates. In an output root other than the default one, the
+  implementations are the root's copies under `impl/`: the context takes
+  their manifests by pattern and the server's own whole, and no
+  implementation's own directory. Without either `[paths]` key no Dockerfile is
   written, and the build says why. The deploy builds it as it builds Go's,
   from the Dockerfile at the server's path.
 
@@ -2335,9 +2379,15 @@ workspace package `typescript/shop-storefront`, whose `create` keeps carts
 in memory and whose `authenticate` knows its callers by static tokens,
 built from `Deps`; `shop-stack` deploys and exposes it; and
 `TestStackDevRunsTheShop` waits for its `/readyz` and reads a cart through
-its API. The example's other TypeScript, its clients and type tests, is a
-second member, `typescript/clients`, so nothing in the example links a
-package by hand.
+its API, then runs it once more in an output root of its own, against that
+root's copy of the package, and sees the example's packages keep the links
+the default root's install made. The example's other TypeScript, its
+clients and type tests, is a second member, `typescript/clients`, so
+nothing in the example links a package by hand.
+`TestTypeScriptServersBuildInAnyOutputRoot` builds a fixture into two
+other output roots, in turn and at once, installs each frozen to its
+lockfile and runs a server there against its own copies, and fails without
+the mirror on the project's links.
 
 #### Rust servers
 
