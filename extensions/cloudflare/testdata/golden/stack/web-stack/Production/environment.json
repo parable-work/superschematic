@@ -30,8 +30,8 @@
       "language": "TYPESCRIPT",
       "artifact": "bundle",
       "exposed": true,
-      "resourceName": "shop-storefront",
-      "address": "https://shop-storefront",
+      "resourceName": "web-stack-production-shop-storefront",
+      "address": "https://web-stack-production-shop-storefront",
       "publicAddress": "https://shop-storefront.acme.dev",
       "bindings": [
         {
@@ -78,7 +78,7 @@
       "settings": {
         "logs": false
       },
-      "resourceName": "shop-storefront-sweep-carts",
+      "resourceName": "web-stack-production-shop-storefront-sweep-carts",
       "bindings": [
         {
           "field": "CART_TTL_DAYS",
@@ -111,7 +111,7 @@
         "fallback": "index.html"
       },
       "exposed": true,
-      "resourceName": "storefront-web",
+      "resourceName": "web-stack-production-storefront-web",
       "address": "https://storefront-web.acme.dev",
       "publicAddress": "https://storefront-web.acme.dev",
       "bindings": [
@@ -255,7 +255,7 @@
         "type": "cloudflare:index/worker:Worker",
         "properties": {
           "accountId": "0123456789abcdef0123456789abcdef",
-          "name": "shop-storefront-sweep-carts",
+          "name": "web-stack-production-shop-storefront-sweep-carts",
           "observability": {
             "enabled": false,
             "logs": {
@@ -386,7 +386,7 @@
         "type": "cloudflare:index/worker:Worker",
         "properties": {
           "accountId": "0123456789abcdef0123456789abcdef",
-          "name": "shop-storefront",
+          "name": "web-stack-production-shop-storefront",
           "observability": {
             "enabled": true,
             "logs": {
@@ -518,7 +518,7 @@
         "type": "cloudflare:index/worker:Worker",
         "properties": {
           "accountId": "0123456789abcdef0123456789abcdef",
-          "name": "storefront-web",
+          "name": "web-stack-production-storefront-web",
           "observability": {
             "enabled": true,
             "logs": {

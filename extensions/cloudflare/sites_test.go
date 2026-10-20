@@ -127,7 +127,8 @@ func siteBinding(version *ir.Resource, name string) map[string]any {
 // /__superschematic/; the embedded script as its one module; the assets
 // binding, the config naming shop-storefront's public address, and the
 // fallback; and a deployment of all traffic to it. The site's origin is
-// its workers.dev address, which shop-storefront's CORS field lists.
+// its workers.dev address, under its Worker's name, which shop-storefront's
+// CORS field lists.
 func TestSiteNodes(t *testing.T) {
 	reg := assemble(t)
 	env := resolveWeb(t, reg, "Staging")
@@ -135,7 +136,7 @@ func TestSiteNodes(t *testing.T) {
 	if site.Platform != cloudflare.Sites || !site.Exposed {
 		t.Fatalf("the site is placed as %+v", site)
 	}
-	if site.PublicAddress != "https://storefront-web.acme.workers.dev" {
+	if site.PublicAddress != "https://web-stack-staging-storefront-web.acme.workers.dev" {
 		t.Errorf("the site's public address is %v", site.PublicAddress)
 	}
 	if got := jsonOf(t, node(t, env, "storefront-web.worker").Properties["subdomain"]); got != `{"enabled":true,"previewsEnabled":false}` {
@@ -158,7 +159,7 @@ func TestSiteNodes(t *testing.T) {
 		t.Errorf("the version's module is %v (%v)", module, err)
 	}
 	if got := jsonOf(t, version.Properties["bindings"]); got != `[{"name":"ASSETS","type":"assets"},`+
-		`{"name":"SITE_CONFIG","text":"{\"apis\":{\"shop-storefront\":{\"url\":\"https://shop-storefront.acme.workers.dev\"}}}","type":"plain_text"},`+
+		`{"name":"SITE_CONFIG","text":"{\"apis\":{\"shop-storefront\":{\"url\":\"https://web-stack-staging-shop-storefront.acme.workers.dev\"}}}","type":"plain_text"},`+
 		`{"name":"SITE_FALLBACK","text":"index.html","type":"plain_text"}]` {
 		t.Errorf("the version's bindings are %s", got)
 	}
@@ -168,13 +169,14 @@ func TestSiteNodes(t *testing.T) {
 	if env.Resources.Resource("storefront-web.domain") != nil {
 		t.Error("a site without a domain has a custom domain")
 	}
-	if got := siteBinding(node(t, env, "shop-storefront.version"), "SHOP_STOREFRONT_CORS_ORIGINS"); got == nil || got["text"] != "https://storefront-web.acme.workers.dev" {
+	if got := siteBinding(node(t, env, "shop-storefront.version"), "SHOP_STOREFRONT_CORS_ORIGINS"); got == nil || got["text"] != "https://web-stack-staging-storefront-web.acme.workers.dev" {
 		t.Errorf("shop-storefront's CORS binding is %v", got)
 	}
 }
 
 // TestSiteExposure: under a domain, the site has a custom domain for its
-// host in the exposure step and no workers.dev, its origin there in
+// host, the site's name alone under the environment's domain, in the
+// exposure step and no workers.dev, its origin there in
 // shop-storefront's CORS field, and its config names shop-storefront under
 // the domain; under a parameter, the member's config and origin carry the
 // parameter's value; a site with no fallback has no SITE_FALLBACK.
@@ -201,10 +203,10 @@ func TestSiteExposure(t *testing.T) {
 
 	preview := resolveWeb(t, reg, "Preview")
 	version = node(t, preview, "storefront-web.version")
-	if got := jsonOf(t, siteBinding(version, cloudflare.SiteConfigBinding)["text"]); got != `{"$concat":["{\"apis\":{\"shop-storefront\":{\"url\":\"https://shop-storefront-pr",{"$parameter":"pr"},".acme.workers.dev\"}}}"]}` {
+	if got := jsonOf(t, siteBinding(version, cloudflare.SiteConfigBinding)["text"]); got != `{"$concat":["{\"apis\":{\"shop-storefront\":{\"url\":\"https://web-stack-preview-shop-storefront-pr",{"$parameter":"pr"},".acme.workers.dev\"}}}"]}` {
 		t.Errorf("Preview's site config is %s", got)
 	}
-	if got := jsonOf(t, siteBinding(node(t, preview, "shop-storefront.version"), "SHOP_STOREFRONT_CORS_ORIGINS")["text"]); got != `{"$concat":["https://storefront-web-pr",{"$parameter":"pr"},".acme.workers.dev"]}` {
+	if got := jsonOf(t, siteBinding(node(t, preview, "shop-storefront.version"), "SHOP_STOREFRONT_CORS_ORIGINS")["text"]); got != `{"$concat":["https://web-stack-preview-storefront-web-pr",{"$parameter":"pr"},".acme.workers.dev"]}` {
 		t.Errorf("Preview's CORS origins are %s", got)
 	}
 
@@ -240,7 +242,8 @@ func TestSiteRefusals(t *testing.T) {
 		s := webStack()
 		s.Deploy[1] = ir.ServiceRef{Name: long, Kind: ir.SchemaKindSite}
 		_, errs := resolveOver(t, reg, s, services, "Staging")
-		refusedWith(t, errs, stack.CodeUnrealizable, "the Worker of site "+long+" would be named \""+long+"\", 64 characters")
+		refusedWith(t, errs, stack.CodeUnrealizable, "the Worker of site "+long+" would be named \"web-stack-staging-"+long+"\", 82 characters")
+		refusedWith(t, errs, stack.CodeUnrealizable, "shorten the site's name, the longest")
 	})
 	t.Run("an API that is not exposed", func(t *testing.T) {
 		s := webStack()

@@ -238,6 +238,14 @@ type MigrationRequest struct {
 	// Plans are the plans to run, in service order.
 	Plans []MigrationPlan
 
+	// Outputs reads the applied graph's outputs, by node ID and output
+	// name, as the provisioner's Outputs reads them after the steps before
+	// this one: a runner that reaches a database by an id its node
+	// outputs, as the cloudflare target's reaches a D1 database by its
+	// uuid (D64), reads it here rather than looking the database up by
+	// name. The deploy sets it; a runner that reads no output ignores it.
+	Outputs func(ctx context.Context) (map[string]map[string]any, error)
+
 	// Log receives progress.
 	Log io.Writer
 }

@@ -21,7 +21,7 @@
         }
       ],
       "dialect": "sqlite",
-      "resourceName": "reviews-stack-archive"
+      "resourceName": "reviews-stack-staging-archive"
     },
     {
       "name": "reviews",
@@ -36,9 +36,9 @@
       "language": "TYPESCRIPT",
       "artifact": "bundle",
       "exposed": true,
-      "resourceName": "reviews",
-      "address": "https://reviews",
-      "publicAddress": "https://reviews.acme.workers.dev",
+      "resourceName": "reviews-stack-staging-reviews",
+      "address": "https://reviews-stack-staging-reviews",
+      "publicAddress": "https://reviews-stack-staging-reviews.acme.workers.dev",
       "bindings": [
         {
           "field": "REVIEWS_DB_DATABASE",
@@ -72,7 +72,7 @@
       "settings": {
         "locationHint": "enam"
       },
-      "resourceName": "reviews-stack-reviews-db"
+      "resourceName": "reviews-stack-staging-reviews-db"
     }
   ],
   "edges": [
@@ -96,7 +96,7 @@
         "type": "cloudflare:index/d1Database:D1Database",
         "properties": {
           "accountId": "0123456789abcdef0123456789abcdef",
-          "name": "reviews-stack-notes-db"
+          "name": "reviews-stack-staging-notes-db"
         },
         "phase": "infrastructure",
         "owners": [
@@ -108,7 +108,7 @@
         "type": "cloudflare:index/d1Database:D1Database",
         "properties": {
           "accountId": "0123456789abcdef0123456789abcdef",
-          "name": "reviews-stack-reviews-db",
+          "name": "reviews-stack-staging-reviews-db",
           "primaryLocationHint": "enam"
         },
         "phase": "infrastructure",
@@ -224,7 +224,7 @@
         "type": "cloudflare:index/worker:Worker",
         "properties": {
           "accountId": "0123456789abcdef0123456789abcdef",
-          "name": "reviews",
+          "name": "reviews-stack-staging-reviews",
           "observability": {
             "enabled": true,
             "logs": {

@@ -22,8 +22,8 @@
       ],
       "language": "TYPESCRIPT",
       "artifact": "bundle",
-      "resourceName": "shop-pricing",
-      "address": "https://shop-pricing"
+      "resourceName": "workers-stack-staging-shop-pricing",
+      "address": "https://workers-stack-staging-shop-pricing"
     },
     {
       "name": "shop-storefront",
@@ -42,9 +42,9 @@
         "cpuMs": 50,
         "placement": "smart"
       },
-      "resourceName": "shop-storefront",
-      "address": "https://shop-storefront",
-      "publicAddress": "https://shop-storefront.acme.workers.dev",
+      "resourceName": "workers-stack-staging-shop-storefront",
+      "address": "https://workers-stack-staging-shop-storefront",
+      "publicAddress": "https://workers-stack-staging-shop-storefront.acme.workers.dev",
       "bindings": [
         {
           "field": "LOG_LEVEL",
@@ -152,7 +152,7 @@
         "type": "cloudflare:index/worker:Worker",
         "properties": {
           "accountId": "0123456789abcdef0123456789abcdef",
-          "name": "shop-pricing",
+          "name": "workers-stack-staging-shop-pricing",
           "observability": {
             "enabled": true,
             "logs": {
@@ -269,7 +269,7 @@
         "type": "cloudflare:index/worker:Worker",
         "properties": {
           "accountId": "0123456789abcdef0123456789abcdef",
-          "name": "shop-storefront",
+          "name": "workers-stack-staging-shop-storefront",
           "observability": {
             "enabled": true,
             "logs": {

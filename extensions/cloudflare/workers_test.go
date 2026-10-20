@@ -234,7 +234,7 @@ func TestWorkerNodes(t *testing.T) {
 	if store.Artifact != ir.ArtifactBundle || store.Platform != cloudflare.Workers {
 		t.Fatalf("the storefront is placed as %+v", store)
 	}
-	if store.PublicAddress != "https://shop-storefront.acme.workers.dev" || store.Address != "https://shop-storefront" {
+	if store.PublicAddress != "https://workers-stack-staging-shop-storefront.acme.workers.dev" || store.Address != "https://workers-stack-staging-shop-storefront" {
 		t.Errorf("the storefront's addresses are %v and %v", store.PublicAddress, store.Address)
 	}
 	if pricing := env.Deployable("shop-pricing"); pricing.PublicAddress != nil {
@@ -354,10 +354,10 @@ func TestWorkerExposure(t *testing.T) {
 	if errs != nil {
 		t.Fatal(errs)
 	}
-	if got := jsonOf(t, preview.Deployable("shop-storefront").ResourceName); got != `{"$concat":["shop-storefront-pr",{"$parameter":"pr"}]}` {
+	if got := jsonOf(t, preview.Deployable("shop-storefront").ResourceName); got != `{"$concat":["workers-stack-preview-shop-storefront-pr",{"$parameter":"pr"}]}` {
 		t.Errorf("the member's Worker is named %s", got)
 	}
-	if got := jsonOf(t, preview.Deployable("shop-storefront").PublicAddress); got != `{"$concat":["https://shop-storefront-pr",{"$parameter":"pr"},".acme.workers.dev"]}` {
+	if got := jsonOf(t, preview.Deployable("shop-storefront").PublicAddress); got != `{"$concat":["https://workers-stack-preview-shop-storefront-pr",{"$parameter":"pr"},".acme.workers.dev"]}` {
 		t.Errorf("the member's public address is %s", got)
 	}
 }
@@ -389,16 +389,17 @@ func TestWorkersRefusals(t *testing.T) {
 		s.Deployables = []*ir.DeployableDecl{{Name: long, Kind: ir.DeployableServer, Serves: []ir.ServiceRef{stacktest.ShopStorefront}}}
 		s.Expose = []ir.DeployableRef{{Deployable: long}}
 		_, errs := resolveOver(t, reg, s, stacktest.AcmeShop(), "Staging")
-		refusedWith(t, errs, stack.CodeUnrealizable, "the Worker of server "+long+" would be named \""+long+"\", 65 characters, and a Worker's name is at most 63")
+		refusedWith(t, errs, stack.CodeUnrealizable, "the Worker of server "+long+" would be named \"storefront-stack-staging-"+long+"\", 90 characters, and a Worker's name is at most 63, one DNS label under workers.dev: "+
+			"it joins stack's \"storefront-stack\" (16), environment's \"staging\" (7), deployable's \""+long+"\" (65) with hyphens; shorten the deployable's name, the longest")
 	})
 	t.Run("a name under a parameter", func(t *testing.T) {
 		s := workersStack()
-		name := strings.Repeat("s", 60)
+		name := strings.Repeat("s", 40)
 		s.Deployables = []*ir.DeployableDecl{{Name: name, Kind: ir.DeployableServer, Serves: []ir.ServiceRef{shopPricing}}}
 		_, errs := resolveOver(t, reg, s, workersServices(), "Preview")
-		refusedWith(t, errs, stack.CodeUnrealizable, "would be named with 63 characters before its parameter values")
+		refusedWith(t, errs, stack.CodeUnrealizable, "would be named with 65 characters before its parameter values")
 		if _, errs := resolveOver(t, reg, s, workersServices(), "Staging"); errs != nil {
-			t.Errorf("a 60-character name without a parameter: %v", errs)
+			t.Errorf("a 40-character name, 62 with the stack and the environment, without a parameter: %v", errs)
 		}
 	})
 	t.Run("an API over the user model", func(t *testing.T) {

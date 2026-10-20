@@ -5,10 +5,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -25,8 +23,11 @@ import (
 //
 //  1. it finds the runner: SUPERSCHEMATIC_MIGRATE, else
 //     superschematic-migrate on PATH;
-//  2. it looks up the uuid of each hosted DB schema's D1 database by the
-//     name its node gives, with the run's parameter values in place;
+//  2. it reads the uuid of each hosted DB schema's D1 database from the
+//     outputs of the graph the deploy applied (MigrationRequest.Outputs):
+//     its node's `uuid`, which the Worker's d1 binding names too, else its
+//     `id`, which the provider sets to the same uuid and which the program
+//     exports for every node, for a database no Worker binds;
 //  3. it writes a job document in a temporary directory, each database at
 //     `d1://<accountId>/<uuid>` with no privileges, and the plans beside it;
 //  4. it runs `superschematic-migrate job --job <path>` with the run's
@@ -137,9 +138,12 @@ func (r migrationRunner) Migrate(ctx context.Context, req registry.MigrationRequ
 	if err != nil {
 		return err
 	}
-	cloud, err := r.ext.cloud()
+	if req.Outputs == nil {
+		return fmt.Errorf("cloudflare: migrate %s: the deploy reads the runner no outputs, where each D1 database's uuid is", req.Database)
+	}
+	outputs, err := req.Outputs(ctx)
 	if err != nil {
-		return err
+		return fmt.Errorf("cloudflare: migrate %s: %w", req.Database, err)
 	}
 	dir, err := os.MkdirTemp("", "superschematic-d1-migrate-")
 	if err != nil {
@@ -153,12 +157,9 @@ func (r migrationRunner) Migrate(ctx context.Context, req registry.MigrationRequ
 		if err != nil {
 			return err
 		}
-		uuid, err := cloud.D1Database(ctx, v.accountID, name)
-		if errors.Is(err, fs.ErrNotExist) {
-			return fmt.Errorf("cloudflare: migrate %s: account %s has no D1 database %s, which the infrastructure step creates", plan.Service, v.accountID, name)
-		}
-		if err != nil {
-			return fmt.Errorf("cloudflare: migrate %s: find D1 database %s: %w", plan.Service, name, err)
+		uuid := d1UUID(outputs[id])
+		if uuid == "" {
+			return fmt.Errorf("cloudflare: migrate %s: the outputs of %s hold no uuid of node %s, D1 database %s, which the infrastructure step creates", plan.Service, req.Run.Name(), id, name)
 		}
 		if len(plan.Plan) == 0 {
 			return fmt.Errorf("cloudflare: the migration plan of %s has steps and no document", plan.Service)
@@ -189,6 +190,18 @@ func (r migrationRunner) Migrate(ctx context.Context, req registry.MigrationRequ
 		return fmt.Errorf("cloudflare: the %s phase on %s: %s job: %w", req.Phase, req.Database, MigrateBinary, err)
 	}
 	return nil
+}
+
+// d1UUID is a D1 database's uuid among its node's outputs: `uuid`, which a
+// Worker's d1 binding names and the program exports when one does, else
+// `id`, the same uuid, which the program exports for every node.
+func d1UUID(outputs map[string]any) string {
+	for _, name := range []string{"uuid", "id"} {
+		if s, ok := outputs[name].(string); ok && s != "" {
+			return s
+		}
+	}
+	return ""
 }
 
 // withToken is env with CLOUDFLARE_API_TOKEN set to token, in place of any

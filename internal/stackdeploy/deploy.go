@@ -397,7 +397,7 @@ func connecting(env *ir.ResolvedEnvironment, database, service string) []string 
 // it records each plan's phase as pending on the schema the database
 // held before.
 func (d *deploy) runPhase(ctx context.Context, database string, phase ir.MigrationPhase, plans []*DatabasePlan) error {
-	req := registry.MigrationRequest{Run: d.run, Database: database, Phase: phase, Log: d.log}
+	req := registry.MigrationRequest{Run: d.run, Database: database, Phase: phase, Log: d.log, Outputs: d.outputs}
 	var names []string
 	for _, plan := range plans {
 		req.Plans = append(req.Plans, registry.MigrationPlan{
@@ -430,6 +430,16 @@ func (d *deploy) runPhase(ctx context.Context, database string, phase ir.Migrati
 		d.manifest.setApplied(database, plan.Service, applied)
 	}
 	return nil
+}
+
+// outputs reads the outputs of the graph the run has applied so far, which
+// a migration runner reads through MigrationRequest.Outputs.
+func (d *deploy) outputs(ctx context.Context) (map[string]map[string]any, error) {
+	outputs, err := d.prov.Outputs(ctx, d.req)
+	if err != nil {
+		return nil, fmt.Errorf("read the outputs of %s: %w", d.run.Name(), err)
+	}
+	return outputs, nil
 }
 
 // ensureSecrets checks, once, that every secret of the environment has a

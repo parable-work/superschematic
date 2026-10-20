@@ -17,8 +17,8 @@ import (
 	"github.com/parable-work/superschematic/registry"
 )
 
-// The site platform (section 18.8, D55, D64): a static site is a Worker
-// named after the deployable that serves the site's build as static
+// The site platform (section 18.8, D55, D64): a static site is a Worker,
+// named as a server's is (workerName), that serves the site's build as static
 // assets. Its version holds:
 //
 //   - the build's files as its assets' directory, the program's
@@ -41,7 +41,7 @@ import (
 //     path in the build, when the site has one.
 //
 // A site is always exposed: under a domain at a custom domain,
-// `<name>.<domain>`, in the exposure step, else at workers.dev, which needs
+// `<label>.<domain>`, in the exposure step, else at workers.dev, which needs
 // the subdomain bootstrap records. Its public address is its origin, which
 // the CORS field of each API it calls lists.
 
@@ -106,7 +106,7 @@ func lowerSite(ctx registry.PlatformContext) (registry.Lowered, error) {
 	if d.Site == nil {
 		return registry.Lowered{}, fmt.Errorf("site %s says nothing of how it builds", d.Name)
 	}
-	if err := checkWorkerName("the Worker of site "+d.Name, d.ResourceName, "the site"); err != nil {
+	if err := checkWorkerName("the Worker of site "+d.Name, d.ResourceName, workerNameParts(env, d, "the site")); err != nil {
 		return registry.Lowered{}, err
 	}
 	workersDev := env.Domain == ""
@@ -144,7 +144,7 @@ func lowerSite(ctx registry.PlatformContext) (registry.Lowered, error) {
 	}
 	out := registry.Lowered{Resources: workerNodes(d, v, workersDev, true, version)}
 	if env.Domain != "" {
-		out.Resources = append(out.Resources, customDomain(d, v, env.Domain))
+		out.Resources = append(out.Resources, customDomain(d, v, env))
 	}
 	return out, nil
 }

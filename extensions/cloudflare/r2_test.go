@@ -22,7 +22,7 @@ import (
 // TestR2Bucket reads the calls fixture's bucket and the storefront's edge
 // to it (sections 18.2 and 18.7):
 //
-//   - Staging's bucket is `calls-stack-shop-media`, in western Europe, and
+//   - Staging's bucket is `calls-stack-staging-shop-media`, in western Europe, and
 //     its lifecycle deletes each object 30 days after it was written;
 //     Production's stores new objects as infrequently accessed and has no
 //     lifecycle;
@@ -35,14 +35,14 @@ func TestR2Bucket(t *testing.T) {
 	reg := assemble(t)
 	env := resolveCalls(t, reg, "Staging")
 	media := env.Deployable("shop-media")
-	if media.Platform != cloudflare.R2 || media.ResourceName != "calls-stack-shop-media" {
+	if media.Platform != cloudflare.R2 || media.ResourceName != "calls-stack-staging-shop-media" {
 		t.Errorf("the bucket is placed as %s, named %v", media.Platform, media.ResourceName)
 	}
 	bucket := node(t, env, "shop-media.bucket")
 	if bucket.Type != cloudflare.TypeR2Bucket || bucket.Phase != ir.PhaseInfrastructure {
 		t.Errorf("the bucket is %s in %s", bucket.Type, bucket.Phase)
 	}
-	if got, want := jsonOf(t, bucket.Properties), `{"accountId":"`+accountID+`","location":"weur","name":"calls-stack-shop-media"}`; got != want {
+	if got, want := jsonOf(t, bucket.Properties), `{"accountId":"`+accountID+`","location":"weur","name":"calls-stack-staging-shop-media"}`; got != want {
 		t.Errorf("the bucket is %s, want %s", got, want)
 	}
 	lifecycle := node(t, env, "shop-media.lifecycle")
@@ -54,7 +54,7 @@ func TestR2Bucket(t *testing.T) {
 	}
 
 	token := node(t, env, "shop-storefront.r2.shop-media.token")
-	if token.Type != cloudflare.TypeAccountToken || token.Phase != ir.PhaseInfrastructure || token.Properties["name"] != "calls-stack-shop-storefront-shop-media" {
+	if token.Type != cloudflare.TypeAccountToken || token.Phase != ir.PhaseInfrastructure || token.Properties["name"] != "calls-stack-staging-shop-storefront-shop-media" {
 		t.Errorf("the edge's token is %s in %s named %v", token.Type, token.Phase, token.Properties["name"])
 	}
 	want := `[{"effect":"allow","permissionGroups":[{"id":"` + cloudflare.R2ObjectsWriteGroup + `"}],` +
@@ -84,7 +84,7 @@ func TestR2Bucket(t *testing.T) {
 	}
 
 	production := resolveCalls(t, reg, "Production")
-	if got, want := jsonOf(t, node(t, production, "shop-media.bucket").Properties), `{"accountId":"`+accountID+`","name":"calls-stack-shop-media","storageClass":"InfrequentAccess"}`; got != want {
+	if got, want := jsonOf(t, node(t, production, "shop-media.bucket").Properties), `{"accountId":"`+accountID+`","name":"calls-stack-production-shop-media","storageClass":"InfrequentAccess"}`; got != want {
 		t.Errorf("Production's bucket is %s, want %s", got, want)
 	}
 	if production.Resources.Resource("shop-media.lifecycle") != nil {
@@ -92,16 +92,16 @@ func TestR2Bucket(t *testing.T) {
 	}
 
 	preview := resolveCalls(t, reg, "Preview")
-	if got := jsonOf(t, node(t, preview, "shop-media.bucket").Properties["name"]); got != `{"$concat":["calls-stack-shop-media-pr",{"$parameter":"pr"}]}` {
+	if got := jsonOf(t, node(t, preview, "shop-media.bucket").Properties["name"]); got != `{"$concat":["calls-stack-preview-shop-media-pr",{"$parameter":"pr"}]}` {
 		t.Errorf("the member's bucket is named %s", got)
 	}
-	if got := jsonOf(t, node(t, preview, "shop-storefront.r2.shop-media.token").Properties["name"]); got != `{"$concat":["calls-stack-shop-storefront-shop-media-pr",{"$parameter":"pr"}]}` {
+	if got := jsonOf(t, node(t, preview, "shop-storefront.r2.shop-media.token").Properties["name"]); got != `{"$concat":["calls-stack-preview-shop-storefront-shop-media-pr",{"$parameter":"pr"}]}` {
 		t.Errorf("the member's token is named %s", got)
 	}
 }
 
-// TestR2Refusals: a bucket whose name R2 would refuse, or which would be
-// the state bucket, is refused as unrealizable; a jurisdiction, which the
+// TestR2Refusals: a bucket whose name R2 would refuse is refused as
+// unrealizable, saying which part of the name to shorten; a jurisdiction, which the
 // runtime's signed URLs cannot reach, and gcp's versioning are refused as
 // settings R2 does not take.
 func TestR2Refusals(t *testing.T) {
@@ -110,33 +110,15 @@ func TestR2Refusals(t *testing.T) {
 		s := callsStack()
 		s.Name = strings.Repeat("calls", 12)
 		_, errs := resolveOver(t, reg, s, callsServices(), "Staging")
-		refusedWith(t, errs, stack.CodeUnrealizable, "the R2 bucket of shop-media would be named \""+s.Name+"-shop-media\", 71 characters, and R2 takes a name of 3 to 63")
+		refusedWith(t, errs, stack.CodeUnrealizable, "the R2 bucket of shop-media would be named \""+s.Name+"-staging-shop-media\", 79 characters, and R2 takes a name of 3 to 63: "+
+			"it joins stack's \""+s.Name+"\" (60), environment's \"staging\" (7), Bucket service's \"shop-media\" (10) with hyphens; shorten the stack's name, the longest")
 	})
 	t.Run("a long name under a parameter", func(t *testing.T) {
 		s := callsStack()
 		s.Name = strings.Repeat("c", 52)
 		_, errs := resolveOver(t, reg, s, callsServices(), "Preview")
-		refusedWith(t, errs, stack.CodeUnrealizable, "the R2 bucket of shop-media would be named with 66 characters before its parameter values")
-	})
-	t.Run("the state bucket", func(t *testing.T) {
-		s := callsStack()
-		s.Name = "superschematic"
-		services := callsServices()
-		for i := range services {
-			if services[i].Name == "shop-media" {
-				services[i].Name = "state"
-			}
-			for j, ref := range services[i].Buckets {
-				if ref.Name == "shop-media" {
-					services[i].Buckets[j].Name = "state"
-				}
-			}
-		}
-		for _, env := range s.Environments {
-			env.Settings = nil
-		}
-		_, errs := resolveOver(t, reg, s, services, "Production")
-		refusedWith(t, errs, stack.CodeUnrealizable, "the R2 bucket of state would be named superschematic-state, the bucket bootstrap keeps the account's state in")
+		refusedWith(t, errs, stack.CodeUnrealizable, "the R2 bucket of shop-media would be named with 74 characters before its parameter values, and R2 takes a name of at most 63: "+
+			"it joins stack's \""+s.Name+"\" (52), environment's \"preview\" (7), Bucket service's \"shop-media\" (10), parameter pr's \"pr\" (2)")
 	})
 	for _, setting := range []string{"jurisdiction", "versioning"} {
 		t.Run(setting, func(t *testing.T) {
@@ -188,7 +170,7 @@ func TestPolicyBucketsNeverPublic(t *testing.T) {
 			"bucketName": ir.Output{Resource: "shop-media.bucket", Name: "name"}, "enabled": true,
 		}},
 		{ID: "media.domain", Type: cloudflare.TypeR2CustomDomain, Properties: map[string]any{
-			"bucketName": "calls-stack-shop-media", "domain": "media.acme.dev",
+			"bucketName": "calls-stack-staging-shop-media", "domain": "media.acme.dev",
 		}},
 		{ID: "other.domain", Type: cloudflare.TypeR2CustomDomain, Properties: map[string]any{
 			"bucketName": "a-bucket-of-another-stack", "domain": "assets.acme.dev",
@@ -246,9 +228,9 @@ func putObjects(t *testing.T, cloud *fakeCloud, bucket string, keys ...string) {
 func TestPreDestroyEmptiesAMembersBuckets(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
-	putObjects(t, f.cloud, "calls-stack-shop-media-pr123", "carts/ada.png", "carts/grace.png")
-	putObjects(t, f.cloud, "calls-stack-shop-media-pr124", "carts/alan.png")
-	putObjects(t, f.cloud, "calls-stack-shop-media", "carts/staging.png")
+	putObjects(t, f.cloud, "calls-stack-preview-shop-media-pr123", "carts/ada.png", "carts/grace.png")
+	putObjects(t, f.cloud, "calls-stack-preview-shop-media-pr124", "carts/alan.png")
+	putObjects(t, f.cloud, "calls-stack-staging-shop-media", "carts/staging.png")
 	prepare := f.target(t).PreDestroy
 
 	log := &bytes.Buffer{}
@@ -263,13 +245,13 @@ func TestPreDestroyEmptiesAMembersBuckets(t *testing.T) {
 		}
 		return keys
 	}
-	if keys := left("calls-stack-shop-media-pr123"); len(keys) != 0 {
+	if keys := left("calls-stack-preview-shop-media-pr123"); len(keys) != 0 {
 		t.Errorf("the member's bucket still holds %v", keys)
 	}
-	if keys := left("calls-stack-shop-media-pr124"); !slices.Equal(keys, []string{"carts/alan.png"}) {
+	if keys := left("calls-stack-preview-shop-media-pr124"); !slices.Equal(keys, []string{"carts/alan.png"}) {
 		t.Errorf("another member's bucket holds %v", keys)
 	}
-	if got := log.String(); got != "  bucket calls-stack-shop-media-pr123: emptied, 2 objects deleted\n" {
+	if got := log.String(); got != "  bucket calls-stack-preview-shop-media-pr123: emptied, 2 objects deleted\n" {
 		t.Errorf("the log says %q", got)
 	}
 
@@ -277,12 +259,12 @@ func TestPreDestroyEmptiesAMembersBuckets(t *testing.T) {
 	if err := prepare.PrepareDestroy(ctx, registry.Run{Environment: staging}, log); err != nil {
 		t.Fatal(err)
 	}
-	if keys := left("calls-stack-shop-media"); !slices.Equal(keys, []string{"carts/staging.png"}) {
+	if keys := left("calls-stack-staging-shop-media"); !slices.Equal(keys, []string{"carts/staging.png"}) {
 		t.Errorf("Staging's bucket holds %v after its destroy was readied", keys)
 	}
 
 	// A bucket that is gone is empty.
-	gone := goneBucketCloud{fakeCloud: f.cloud, gone: map[string]bool{"calls-stack-shop-media-pr125": true}}
+	gone := goneBucketCloud{fakeCloud: f.cloud, gone: map[string]bool{"calls-stack-preview-shop-media-pr125": true}}
 	reg, err := registry.Assemble(registry.DefaultNaming(), &stacktest.Extension{}, cloudflare.Extension{Cloud: gone, Getenv: f.shell.getenv}, pulumiStub{})
 	if err != nil {
 		t.Fatal(err)
@@ -292,7 +274,7 @@ func TestPreDestroyEmptiesAMembersBuckets(t *testing.T) {
 	if err := target.PreDestroy.PrepareDestroy(ctx, registry.Run{Environment: preview, Parameters: map[string]string{"pr": "125"}}, log); err != nil {
 		t.Errorf("a bucket that is gone: %v", err)
 	}
-	if got := log.String(); got != "  bucket calls-stack-shop-media-pr125: gone\n" {
+	if got := log.String(); got != "  bucket calls-stack-preview-shop-media-pr125: gone\n" {
 		t.Errorf("the log says %q", got)
 	}
 }
@@ -328,17 +310,17 @@ func TestDestroyEmptiesTheMembersBucketFirst(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("deploy: %v\n%s", err, log)
 	}
-	putObjects(t, f.cloud, "calls-stack-shop-media-pr123", "carts/ada.png")
+	putObjects(t, f.cloud, "calls-stack-preview-shop-media-pr123", "carts/ada.png")
 
 	log.Reset()
 	if err := stack.Destroy(ctx, options); err != nil {
 		t.Fatalf("destroy: %v\n%s", err, log)
 	}
-	if keys, _ := f.cloud.ListObjects(ctx, accountID, "calls-stack-shop-media-pr123", ""); len(keys) != 0 {
+	if keys, _ := f.cloud.ListObjects(ctx, accountID, "calls-stack-preview-shop-media-pr123", ""); len(keys) != 0 {
 		t.Errorf("the member's bucket holds %v after its destroy", keys)
 	}
 	out := log.String()
-	emptied, destroyed := strings.Index(out, "bucket calls-stack-shop-media-pr123: emptied, 1 objects deleted"), strings.Index(out, "destroy Preview.pr-123")
+	emptied, destroyed := strings.Index(out, "bucket calls-stack-preview-shop-media-pr123: emptied, 1 objects deleted"), strings.Index(out, "destroy Preview.pr-123")
 	if emptied < 0 || destroyed < 0 || emptied > destroyed {
 		t.Errorf("the destroy did not empty the bucket before it destroyed the member:\n%s", out)
 	}

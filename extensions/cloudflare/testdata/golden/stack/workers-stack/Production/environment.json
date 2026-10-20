@@ -30,8 +30,8 @@
       ],
       "language": "TYPESCRIPT",
       "artifact": "bundle",
-      "resourceName": "shop-pricing",
-      "address": "https://shop-pricing"
+      "resourceName": "workers-stack-production-shop-pricing",
+      "address": "https://workers-stack-production-shop-pricing"
     },
     {
       "name": "shop-storefront",
@@ -50,8 +50,8 @@
         "compatibilityDate": "2026-10-01",
         "logs": false
       },
-      "resourceName": "shop-storefront",
-      "address": "https://shop-storefront",
+      "resourceName": "workers-stack-production-shop-storefront",
+      "address": "https://workers-stack-production-shop-storefront",
       "publicAddress": "https://shop-storefront.acme.dev",
       "bindings": [
         {
@@ -160,7 +160,7 @@
         "type": "cloudflare:index/worker:Worker",
         "properties": {
           "accountId": "0123456789abcdef0123456789abcdef",
-          "name": "shop-pricing",
+          "name": "workers-stack-production-shop-pricing",
           "observability": {
             "enabled": true,
             "logs": {
@@ -292,7 +292,7 @@
         "type": "cloudflare:index/worker:Worker",
         "properties": {
           "accountId": "0123456789abcdef0123456789abcdef",
-          "name": "shop-storefront",
+          "name": "workers-stack-production-shop-storefront",
           "observability": {
             "enabled": false,
             "logs": {

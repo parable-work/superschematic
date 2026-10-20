@@ -28,7 +28,7 @@
       "artifact": "bundle",
       "resourceName": {
         "$concat": [
-          "shop-pricing-pr",
+          "workers-stack-preview-shop-pricing-pr",
           {
             "$parameter": "pr"
           }
@@ -36,7 +36,7 @@
       },
       "address": {
         "$concat": [
-          "https://shop-pricing-pr",
+          "https://workers-stack-preview-shop-pricing-pr",
           {
             "$parameter": "pr"
           }
@@ -62,7 +62,7 @@
       },
       "resourceName": {
         "$concat": [
-          "shop-storefront-pr",
+          "workers-stack-preview-shop-storefront-pr",
           {
             "$parameter": "pr"
           }
@@ -70,7 +70,7 @@
       },
       "address": {
         "$concat": [
-          "https://shop-storefront-pr",
+          "https://workers-stack-preview-shop-storefront-pr",
           {
             "$parameter": "pr"
           }
@@ -78,7 +78,7 @@
       },
       "publicAddress": {
         "$concat": [
-          "https://shop-storefront-pr",
+          "https://workers-stack-preview-shop-storefront-pr",
           {
             "$parameter": "pr"
           },
@@ -202,7 +202,7 @@
           "accountId": "0123456789abcdef0123456789abcdef",
           "name": {
             "$concat": [
-              "shop-pricing-pr",
+              "workers-stack-preview-shop-pricing-pr",
               {
                 "$parameter": "pr"
               }
@@ -333,7 +333,7 @@
           "accountId": "0123456789abcdef0123456789abcdef",
           "name": {
             "$concat": [
-              "shop-storefront-pr",
+              "workers-stack-preview-shop-storefront-pr",
               {
                 "$parameter": "pr"
               }

@@ -15,7 +15,7 @@ resources:
     properties:
       accountId: 0123456789abcdef0123456789abcdef
       location: weur
-      name: calls-stack-shop-media-pr${pr}
+      name: calls-stack-preview-shop-media-pr${pr}
     options:
       version: 6.22.0
   # phase infrastructure; owners shop-media
@@ -121,7 +121,7 @@ resources:
     type: cloudflare:index/worker:Worker
     properties:
       accountId: 0123456789abcdef0123456789abcdef
-      name: shop-pricing-pr${pr}
+      name: calls-stack-preview-shop-pricing-pr${pr}
       observability:
         enabled: true
         logs:
@@ -162,7 +162,7 @@ resources:
     type: cloudflare:index/accountToken:AccountToken
     properties:
       accountId: 0123456789abcdef0123456789abcdef
-      name: calls-stack-shop-storefront-shop-media-pr${pr}
+      name: calls-stack-preview-shop-storefront-shop-media-pr${pr}
       policies:
         - effect: allow
           permissionGroups:
@@ -222,7 +222,7 @@ resources:
           text: signed-token
           type: plain_text
         - name: SHOP_PRICING_SERVICE_URL
-          text: https://shop-pricing-pr${pr}
+          text: https://calls-stack-preview-shop-pricing-pr${pr}
           type: plain_text
       compatibilityDate: "2026-09-15"
       mainModule: main.js
@@ -254,7 +254,7 @@ resources:
     type: cloudflare:index/worker:Worker
     properties:
       accountId: 0123456789abcdef0123456789abcdef
-      name: shop-storefront-pr${pr}
+      name: calls-stack-preview-shop-storefront-pr${pr}
       observability:
         enabled: true
         logs:

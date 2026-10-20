@@ -68,11 +68,6 @@ type Cloud interface {
 
 	// ListObjects returns the keys of the objects under prefix, sorted.
 	ListObjects(ctx context.Context, account, bucket, prefix string) ([]string, error)
-
-	// D1Database returns the uuid of the account's D1 database named
-	// name, which the migration runner's d1:// URL names, or an error that
-	// wraps fs.ErrNotExist when the account has none.
-	D1Database(ctx context.Context, account, name string) (string, error)
 }
 
 // Token is an API token as Cloudflare verifies it.
@@ -332,30 +327,6 @@ func (c *restCloud) CreateSecret(ctx context.Context, account, store, name strin
 func (c *restCloud) UpdateSecret(ctx context.Context, account, store, id string, value []byte) error {
 	_, err := c.call(ctx, http.MethodPatch, c.secretsPath(account, store)+"/"+url.PathEscape(id), map[string]string{"value": string(value)}, nil)
 	return err
-}
-
-// d1Database is a D1 database as the API lists it.
-type d1Database struct {
-	UUID string `json:"uuid"`
-	Name string `json:"name"`
-}
-
-func (c *restCloud) D1Database(ctx context.Context, account, name string) (string, error) {
-	// The list's name filter may match more than the name, so the name is
-	// matched here too.
-	dbs, err := list[d1Database](ctx, c, "/accounts/"+url.PathEscape(account)+"/d1/database", url.Values{"name": {name}})
-	if err != nil {
-		return "", err
-	}
-	for _, db := range dbs {
-		if db.Name == name {
-			if db.UUID == "" {
-				return "", fmt.Errorf("cloudflare: D1 database %s is listed with no uuid", name)
-			}
-			return db.UUID, nil
-		}
-	}
-	return "", fmt.Errorf("cloudflare: account %s has no D1 database %s: %w", account, name, fs.ErrNotExist)
 }
 
 func (c *restCloud) EnsureBucket(ctx context.Context, account, bucket string) (bool, error) {

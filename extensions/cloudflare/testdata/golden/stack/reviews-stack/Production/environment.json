@@ -24,7 +24,7 @@
       "settings": {
         "jurisdiction": "eu"
       },
-      "resourceName": "reviews-stack-archive"
+      "resourceName": "reviews-stack-production-archive"
     },
     {
       "name": "reviews",
@@ -39,9 +39,9 @@
       "language": "TYPESCRIPT",
       "artifact": "bundle",
       "exposed": true,
-      "resourceName": "reviews",
-      "address": "https://reviews",
-      "publicAddress": "https://reviews.acme.workers.dev",
+      "resourceName": "reviews-stack-production-reviews",
+      "address": "https://reviews-stack-production-reviews",
+      "publicAddress": "https://reviews-stack-production-reviews.acme.workers.dev",
       "bindings": [
         {
           "field": "REVIEWS_DB_DATABASE",
@@ -75,7 +75,7 @@
       "settings": {
         "jurisdiction": "eu"
       },
-      "resourceName": "reviews-stack-reviews-db"
+      "resourceName": "reviews-stack-production-reviews-db"
     }
   ],
   "edges": [
@@ -100,7 +100,7 @@
         "properties": {
           "accountId": "0123456789abcdef0123456789abcdef",
           "jurisdiction": "eu",
-          "name": "reviews-stack-notes-db"
+          "name": "reviews-stack-production-notes-db"
         },
         "phase": "infrastructure",
         "owners": [
@@ -113,7 +113,7 @@
         "properties": {
           "accountId": "0123456789abcdef0123456789abcdef",
           "jurisdiction": "eu",
-          "name": "reviews-stack-reviews-db"
+          "name": "reviews-stack-production-reviews-db"
         },
         "phase": "infrastructure",
         "owners": [
@@ -228,7 +228,7 @@
         "type": "cloudflare:index/worker:Worker",
         "properties": {
           "accountId": "0123456789abcdef0123456789abcdef",
-          "name": "reviews",
+          "name": "reviews-stack-production-reviews",
           "observability": {
             "enabled": true,
             "logs": {
