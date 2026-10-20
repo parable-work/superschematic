@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -24,10 +25,8 @@ func (e *emitter) emitEnum(def *ir.EnumDef) {
 		if v.Description != "" {
 			e.failf("enum %s.%s: descriptions have no TypeScript authoring form", def.Name, v.Name)
 		}
-		for _, line := range strings.Split(v.Comment, "\n") {
-			if rest, ok := strings.CutPrefix(strings.TrimSpace(line), "@title"); ok && (rest == "" || unicode.IsSpace([]rune(rest)[0])) {
-				e.failf("enum %s.%s: a comment line that begins with @title has no TypeScript authoring form: the reader takes the tag for the member's title", def.Name, v.Name)
-			}
+		if holdsTitleTag(v.Comment) {
+			e.failf("enum %s.%s: a comment that holds @title has no TypeScript authoring form: the reader reads the tag only as the member's title", def.Name, v.Name)
 		}
 		e.comment("  ", v.Comment)
 		if v.Title != "" {
@@ -47,6 +46,35 @@ func (e *emitter) emitEnum(def *ir.EnumDef) {
 		e.body.WriteString("\n")
 	}
 	e.body.WriteString("}\n")
+}
+
+// holdsTitleTag reports whether a member's comment holds the @title tag,
+// which the TypeScript reader refuses anywhere in a member's comments but
+// as the tag the writer writes (tsreader.titleAt): "@title" with no
+// identifier character or "@" before it, and no identifier character or
+// "-" after it. "@titles" and "a@title" are comment text.
+func holdsTitleTag(comment string) bool {
+	const tag = "@title"
+	for from := 0; ; {
+		i := strings.Index(comment[from:], tag)
+		if i < 0 {
+			return false
+		}
+		i += from
+		before, _ := utf8.DecodeLastRuneInString(comment[:i])
+		after, _ := utf8.DecodeRuneInString(comment[i+len(tag):])
+		if (i == 0 || !tagNameRune(before) && before != '@') &&
+			(i+len(tag) == len(comment) || !tagNameRune(after) && after != '-') {
+			return true
+		}
+		from = i + 1
+	}
+}
+
+// tagNameRune reports whether r may continue a JavaScript identifier, as
+// far as a JSDoc tag's name is concerned.
+func tagNameRune(r rune) bool {
+	return r == '_' || r == '$' || unicode.IsLetter(r) || unicode.IsDigit(r)
 }
 
 // emitType renders one type definition: an abstract class for table, view,
