@@ -99,15 +99,21 @@ async function connect(service: string, field: string, db: Database): Promise<Po
  * call it makes for a request, so nothing captures the request's
  * Authorization here, where the Go entrypoint wraps its handler in
  * CaptureAuthorization (section 9.4).
-{{- end }}
+{{- end }} It calls through fetch, the
+ * telemetry's, which with trace export on makes each call a client span
+ * that carries its trace context (D67).
  */
-function {{ .Constructor }}(endpoint: Service): {{ .Module }}.{{ .Class }} {
-  return new {{ .Module }}.{{ .Class }}({ baseUrl: endpoint.url, serviceCredential: serviceCredentialFor(endpoint.credential) });
+function {{ .Constructor }}(endpoint: Service, fetch: Telemetry['fetch']): {{ .Module }}.{{ .Class }} {
+  return new {{ .Module }}.{{ .Class }}({ baseUrl: endpoint.url, serviceCredential: serviceCredentialFor(endpoint.credential), fetch });
 }
 {{- end }}
 {{- end }}
 
 {{- define "ts-background-connections" }}
+  // Trace export, on when the environment names an OTLP endpoint (D67); main
+  // flushes the spans as it ends the pools.
+  const telemetry = startTelemetry({ service: {{ tsQuote .Name }}, stack: {{ tsQuote .Stack }}, kind: {{ tsQuote .Kind }}, logger });
+  pools.push({ end: () => telemetry.shutdown() });
 {{- range .APIs }}
 {{- if .Config }}
   const {{ .Config }} = configure({{ tsQuote .Service }}, () => {{ .Module }}.{{ .ConfigLoader }}());
@@ -133,7 +139,7 @@ function {{ .Constructor }}(endpoint: Service): {{ .Module }}.{{ .Class }} {
 
   // One client per API called.
 {{- range .Clients }}
-  const {{ .Var }} = {{ .Constructor }}({{ .From }});
+  const {{ .Var }} = {{ .Constructor }}({{ .From }}, telemetry.fetch);
 {{- end }}
 {{- end }}
 {{- if .Buckets }}

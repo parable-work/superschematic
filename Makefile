@@ -216,7 +216,8 @@ python:
 # logging, and the two at once, as a worker runs (D65); and gcs, a bucket on
 # GCS (D54), whose tests run against fakes, and against the fake-gcs-server
 # SUPERSCHEMATIC_TEST_GCS_EMULATOR names, when it is set, and beside a
-# worker's two, as a worker with a bucket builds.
+# worker's two, as a worker with a bucket builds; and otel, a deployable's
+# trace export (D67), alone and with postgres, as a worker builds it.
 rust:
 	cd runtime/http/rust && cargo fmt --check && cargo clippy --all-targets -- -D warnings \
 		&& cargo clippy --all-targets --features serde_json/arbitrary_precision,serde_json/preserve_order -- -D warnings \
@@ -232,7 +233,10 @@ rust:
 		&& cargo clippy --all-targets --features postgres,logging -- -D warnings \
 		&& cargo test --features postgres,logging \
 		&& cargo clippy --all-targets --features gcs -- -D warnings && cargo test --features gcs \
-		&& cargo clippy --all-targets --features gcs,postgres,logging -- -D warnings
+		&& cargo clippy --all-targets --features gcs,postgres,logging -- -D warnings \
+		&& cargo clippy --all-targets --features otel -- -D warnings && cargo test --features otel \
+		&& cargo clippy --all-targets --features postgres,otel -- -D warnings \
+		&& cargo test --features postgres,otel
 	cd runtime/schema/rust && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test \
 		&& cargo test --features serde_json/arbitrary_precision,serde_json/preserve_order
 	cd runtime/schema/rust-ir && cargo fmt --check && cargo clippy --all-targets -- -D warnings \

@@ -111,6 +111,15 @@ pub struct QueueField {
     /// member unset writes.
     #[serde(default)]
     pub default: Option<String>,
+    /// The column is a `POINT`, which a location, `{lat, lon}`, writes.
+    /// The client writes and reads it by the column's type, so this only
+    /// says what the descriptor says.
+    #[serde(default)]
+    pub point: bool,
+    /// The column is an `INTERVAL`, which a duration's text writes. The
+    /// client writes and reads it by the column's type.
+    #[serde(default)]
+    pub interval: bool,
 }
 
 /// A queue's statements on Postgres, TypeScript's `QueueStatements`:
@@ -555,7 +564,9 @@ mod tests {
             { "name": "sentAt", "column": "sent_at" },
             { "name": "priority", "column": "priority", "default": "low" },
             { "name": "shipTo", "column": "ship_to", "json": true },
-            { "name": "tags", "column": "tags", "list": true }
+            { "name": "tags", "column": "tags", "list": true },
+            { "name": "dropAt", "column": "drop_at", "point": true },
+            { "name": "wait", "column": "wait", "interval": true }
         ],
         "statements": {
             "insert": "INSERT INTO ping_queue",
@@ -585,28 +596,54 @@ mod tests {
                     column: "sent_at".into(),
                     json: false,
                     list: false,
-                    default: None
+                    default: None,
+                    point: false,
+                    interval: false,
                 },
                 QueueField {
                     name: "priority".into(),
                     column: "priority".into(),
                     json: false,
                     list: false,
-                    default: Some("low".into())
+                    default: Some("low".into()),
+                    point: false,
+                    interval: false,
                 },
                 QueueField {
                     name: "shipTo".into(),
                     column: "ship_to".into(),
                     json: true,
                     list: false,
-                    default: None
+                    default: None,
+                    point: false,
+                    interval: false,
                 },
                 QueueField {
                     name: "tags".into(),
                     column: "tags".into(),
                     json: false,
                     list: true,
-                    default: None
+                    default: None,
+                    point: false,
+                    interval: false,
+                },
+                QueueField {
+                    name: "dropAt".into(),
+                    column: "drop_at".into(),
+                    json: false,
+                    list: false,
+                    default: None,
+                    point: true,
+                    interval: false,
+                },
+                QueueField {
+                    name: "wait".into(),
+                    column: "wait".into(),
+                    json: false,
+                    list: false,
+                    default: None,
+                    point: false,
+                    interval: true,
                 },
             ]
         );

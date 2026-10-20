@@ -11,7 +11,9 @@
 //! `GET /healthz` while the process runs and `GET /readyz` while its
 //! databases answer and its engines are open (D58), and on SIGTERM or
 //! SIGINT stops taking requests and lets those in flight finish. It logs
-//! one JSON object per line on stdout.
+//! one JSON object per line on stdout, and when the environment names an
+//! OTLP endpoint (`OTEL_EXPORTER_OTLP_ENDPOINT`) it exports a span per
+//! request and per call to another API (D67).
 //!
 //! Each API's implementation is the crate at the naming file's
 //! `[implementation_paths] rust` template, which the build scaffolded once
@@ -47,6 +49,7 @@ use superschematic_http_runtime::identity::{PostgresPool, Store};
 use superschematic_http_runtime::logging::{self, tracing};
 use superschematic_http_runtime::postgres::{self, Pool};
 use superschematic_http_runtime::stackconfig::Database;
+use superschematic_http_runtime::telemetry::{self, Defaults};
 use superschematic_http_runtime::{IdentityAuthenticator, JwtServiceAuthenticator};
 use tokio::signal::unix::{signal, Signal, SignalKind};
 use tokio::sync::watch;
@@ -90,10 +93,20 @@ struct EngineDependency {
 
 #[tokio::main]
 async fn main() -> ExitCode {
-    if let Err(err) = logging::init_json("desk-rs-stack", "desk-rs-api") {
-        eprintln!("desk-rs-api: install the logger: {err}");
-        return ExitCode::FAILURE;
-    }
+    // The log and, when the environment names an OTLP endpoint, trace export
+    // (D67), which flushes the spans still buffered as main returns.
+    let installed = telemetry::start(Defaults {
+        stack: "desk-rs-stack",
+        kind: logging::SERVER,
+        name: "desk-rs-api",
+    });
+    let _telemetry = match installed {
+        Ok(telemetry) => telemetry,
+        Err(err) => {
+            eprintln!("desk-rs-api: install the logger: {err}");
+            return ExitCode::FAILURE;
+        }
+    };
     match run().await {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
@@ -203,6 +216,11 @@ async fn run() -> Result<(), Failure> {
         .with_state(Arc::clone(&readiness))
         .merge(desk_db_engine_routes)
         .fallback_service(desk_rs_api_router);
+    // With trace export on, each request but the probes is a server span,
+    // named by the route of the operation that takes it.
+    let app = app.layer(telemetry::ServerLayer::new(&[
+        desk_rs_api_api::operations::ALL,
+    ]));
     let served = serve(port, app, readiness, stop_streams).await;
     // Each engine closes after the requests in flight finish: its runner
     // and streams stop, and it lets go of its database off the runtime.

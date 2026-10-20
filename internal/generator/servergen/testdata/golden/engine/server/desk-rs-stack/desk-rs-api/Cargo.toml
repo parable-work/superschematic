@@ -26,4 +26,4 @@ schemas-desk-rs-api-api = { path = "../../../api/desk-rs-api" }
 schemas-desk-rs-api-implementation = { path = "../../../impl/desk-rs-api" }
 superschematic-engine = { path = "../../../../../runtime/engine/rust/engine", default-features = false, features = ["axum", "postgres"] }
 superschematic-engine-behaviors = { path = "../../../../../runtime/engine/rust/behaviors", default-features = false, features = ["postgres"] }
-superschematic-http-runtime = { path = "../../../../../runtime/http/rust", features = ["identity", "identity-postgres", "logging", "postgres"] }
+superschematic-http-runtime = { path = "../../../../../runtime/http/rust", features = ["identity", "identity-postgres", "logging", "otel", "postgres"] }

@@ -9,7 +9,9 @@
 // member (section 3.4). It listens on $PORT, 8080 when unset, answers
 // GET /healthz while the process runs and GET /readyz while its databases
 // answer, and on SIGTERM or SIGINT stops taking requests and lets those in
-// flight finish.
+// flight finish. When the environment names an OTLP endpoint
+// (OTEL_EXPORTER_OTLP_ENDPOINT), it exports a span per request and per call
+// to another API (D67).
 //
 // Each API's implementation is the package at the naming file's
 // [implementation_paths] typescript template, which the build scaffolded
@@ -20,6 +22,7 @@
 import { Hono } from 'hono';
 import { createLogger, serviceCredentialFor, type Database, type Service } from '@superschematic/http-runtime';
 import { errorHandler, notFoundHandler } from '@superschematic/http-runtime/hono';
+import { startTelemetry, type Telemetry } from '@superschematic/http-runtime/telemetry';
 import { connectPostgres, ping } from '@superschematic/http-runtime/postgres';
 import type { Pool } from 'pg';
 import { openBucket } from '@superschematic/http-runtime/gcs';
@@ -66,6 +69,8 @@ const exitCodes: Readonly<Record<string, number>> = { SIGINT: 130, SIGTERM: 143 
 
 /** Builds the server from the environment and serves until SIGTERM or SIGINT. */
 async function main(): Promise<void> {
+  // Trace export, on when the environment names an OTLP endpoint (D67).
+  const telemetry = startTelemetry({ service: 'ts-shop', stack: 'ts-cloud-stack', kind: 'server', logger });
   const port = listenPort();
   const tsShopConfig = configure('ts-shop', () => tsShopApi.loadEnvConfig());
 
@@ -79,13 +84,15 @@ async function main(): Promise<void> {
   ];
 
   // One client per API called, shared by every API that calls it.
-  const tsPricingClient = newTsPricingClient(tsShopConfig.TS_PRICING_SERVICE);
+  const tsPricingClient = newTsPricingClient(tsShopConfig.TS_PRICING_SERVICE, telemetry.fetch);
 
   // One handle per bucket, shared by every API that lists it, on GCS or on
   // the emulator its connection names (D54).
   const tsMediaBucket = openBucket(tsShopConfig.TS_MEDIA_BUCKET);
 
   const app = new Hono();
+  // With trace export on, each request but the probes is a server span.
+  app.use(telemetry.middleware());
   let draining = false;
   app.get('/healthz', c => c.json({ status: 'ok' }));
   app.get('/readyz', async c => {
@@ -143,16 +150,19 @@ async function main(): Promise<void> {
     stopping = true;
     draining = true;
     logger.info('shutting down', { signal });
-    drain(server, pools).then(
-      () => {
-        logger.info('stopped');
-        process.exit(0);
-      },
-      (error: unknown) => {
-        logger.error('server stopped', { error });
-        process.exit(1);
-      }
-    );
+    // The spans still buffered are flushed once the requests are done.
+    drain(server, pools)
+      .finally(() => telemetry.shutdown())
+      .then(
+        () => {
+          logger.info('stopped');
+          process.exit(0);
+        },
+        (error: unknown) => {
+          logger.error('server stopped', { error });
+          process.exit(1);
+        }
+      );
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));
   process.on('SIGINT', () => shutdown('SIGINT'));
@@ -211,10 +221,12 @@ async function connect(service: string, field: string, db: Database): Promise<Po
  * travels per call: an implementation passes { forward: ctx } with each
  * call it makes for a request, so nothing captures the request's
  * Authorization here, where the Go entrypoint wraps its handler in
- * CaptureAuthorization (section 9.4).
+ * CaptureAuthorization (section 9.4). It calls through fetch, the
+ * telemetry's, which with trace export on makes each call a client span
+ * that carries its trace context (D67).
  */
-function newTsPricingClient(endpoint: Service): tsPricingSdk.TsPricingSDK {
-  return new tsPricingSdk.TsPricingSDK({ baseUrl: endpoint.url, serviceCredential: serviceCredentialFor(endpoint.credential) });
+function newTsPricingClient(endpoint: Service, fetch: Telemetry['fetch']): tsPricingSdk.TsPricingSDK {
+  return new tsPricingSdk.TsPricingSDK({ baseUrl: endpoint.url, serviceCredential: serviceCredentialFor(endpoint.credential), fetch });
 }
 
 /**

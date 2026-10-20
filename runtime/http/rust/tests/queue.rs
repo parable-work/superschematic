@@ -5,7 +5,10 @@
 //! the fixture-queue-db schema, and reads the descriptors of its queues
 //! from `order_placed.json` and `ping.json`, tsgen's golden `queues.ts`
 //! for the same schema as JSON, which a Rust types crate's `queues.rs`
-//! holds. The worker loop runs over the same queues at the end.
+//! holds. `create_geo.sql` and `delivery_planned.json` are the same for
+//! fixture-queue-geo-db, whose queue's message holds locations and
+//! durations, `POINT` and `INTERVAL` columns. The worker loop runs over the
+//! same queues at the end.
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;
@@ -682,6 +685,146 @@ async fn a_column_of_each_type_reads_back_as_the_value_written() {
         empty.claim(1, LEASE).await.unwrap().remove(0).message,
         json!({})
     );
+    db.close().await;
+}
+
+/// `Geo.Location` as superscalar's Rust type serializes it.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+struct Location {
+    lat: f64,
+    lon: f64,
+}
+
+/// fixture-queue-geo-db's `DeliveryPlanned`, as rustgen writes a type: its
+/// durations are `Temporal.Duration`'s text.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+struct DeliveryPlanned {
+    #[serde(rename = "orderId")]
+    order_id: Base62,
+    #[serde(rename = "dropAt")]
+    drop_at: Location,
+    wait: String,
+    #[serde(rename = "meetAt", default, skip_serializing_if = "Option::is_none")]
+    meet_at: Option<Location>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    grace: Option<String>,
+}
+
+#[tokio::test]
+async fn a_location_and_a_duration_cross_as_the_go_orm_writes_them() {
+    let Some(db) = Db::open().await else { return };
+    let ddl: String = testdata("create_geo.sql")
+        .lines()
+        .filter(|line| !line.starts_with("CREATE EXTENSION"))
+        .map(|line| format!("{line}\n"))
+        .collect();
+    db.execute(&ddl).await;
+    let def = QueueDefinition::parse(&testdata("delivery_planned.json")).unwrap();
+    let full = DeliveryPlanned {
+        order_id: Base62(uuid::Uuid::new_v4()),
+        drop_at: Location {
+            lat: 37.7749,
+            lon: -122.4194,
+        },
+        wait: "26h0m0.0000015s".into(),
+        meet_at: Some(Location {
+            lat: -33.8688,
+            lon: 151.2093,
+        }),
+        grace: Some("-1m30.25s".into()),
+    };
+    let unset = DeliveryPlanned {
+        order_id: Base62(uuid::Uuid::new_v4()),
+        drop_at: Location { lat: 0.0, lon: 0.0 },
+        wait: "-1500ns".into(),
+        meet_at: None,
+        grace: None,
+    };
+    db.enqueue(&def, &full).await;
+    db.enqueue(&def, &unset).await;
+
+    // A location is a POINT whose x is the longitude, and a duration an
+    // INTERVAL of its whole microseconds, its sign for the whole.
+    let rows = db
+        .pool
+        .get()
+        .await
+        .unwrap()
+        .query(
+            "SELECT concat_ws(' ', (drop_at)[0], (drop_at)[1], wait, coalesce(meet_at::text, 'NULL'), coalesce(grace::text, 'NULL'))
+            FROM delivery_planned_queue ORDER BY wait DESC",
+            &[],
+        )
+        .await
+        .unwrap();
+    let columns: Vec<String> = rows.iter().map(|row| row.get(0)).collect();
+    assert_eq!(
+        columns,
+        [
+            "-122.4194 37.7749 26:00:00.000001 (151.2093,-33.8688) -00:01:30.25",
+            "0 0 -00:00:00.000001 NULL NULL",
+        ]
+    );
+
+    // Each reads back in the scalar core's canonical form, truncated to
+    // its microseconds.
+    let deliveries = queue::<DeliveryPlanned>(&db, def.clone());
+    let claims = deliveries.claim(5, LEASE).await.unwrap();
+    let read = |id: Base62| {
+        claims
+            .iter()
+            .find(|c| c.message.order_id == id)
+            .map(|c| c.message.clone())
+            .unwrap()
+    };
+    assert_eq!(
+        read(full.order_id),
+        DeliveryPlanned {
+            wait: "26h0m0.000001s".into(),
+            ..full.clone()
+        }
+    );
+    assert_eq!(
+        read(unset.order_id),
+        DeliveryPlanned {
+            wait: "-1us".into(),
+            ..unset.clone()
+        }
+    );
+    for claim in &claims {
+        deliveries.release(&claim.id, &claim.token).await.unwrap();
+    }
+
+    // An interval written with days and months reads as their hours, a
+    // day 24 and a month 30 days.
+    db.execute(
+        "UPDATE delivery_planned_queue SET wait = '1 mon 1 day -01:00:00', grace = '-2 days'",
+    )
+    .await;
+    for claim in deliveries.claim(5, LEASE).await.unwrap() {
+        assert_eq!(
+            (claim.message.wait.as_str(), claim.message.grace.as_deref()),
+            ("743h0m0s", Some("-48h0m0s"))
+        );
+    }
+
+    // A value that is no location or no duration is refused, naming its
+    // field.
+    let client = db.pool.get().await.unwrap();
+    for (message, want) in [
+        (
+            json!({ "orderId": Base62(uuid::Uuid::new_v4()), "dropAt": { "lat": 1 }, "wait": "1s" }),
+            r#"field dropAt: {"lat":1} is no location, {lat, lon}"#,
+        ),
+        (
+            json!({ "orderId": Base62(uuid::Uuid::new_v4()), "dropAt": { "lat": 1, "lon": 2 }, "wait": "1 day" }),
+            r#"field wait: "1 day" is no duration"#,
+        ),
+    ] {
+        let err = enqueue(&client, &def, &message).await.unwrap_err();
+        assert!(err.to_string().contains(want), "{err}");
+    }
+    drop(client);
     db.close().await;
 }
 

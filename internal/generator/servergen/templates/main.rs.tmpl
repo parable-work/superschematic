@@ -12,10 +12,15 @@
 {{- if .Engines }}
 //! databases answer and its engines are open (D58), and on SIGTERM or
 //! SIGINT stops taking requests and lets those in flight finish. It logs
-//! one JSON object per line on stdout.
+//! one JSON object per line on stdout, and when the environment names an
+//! OTLP endpoint (`OTEL_EXPORTER_OTLP_ENDPOINT`) it exports a span per
+//! request and per call to another API (D67).
 {{- else }}
 //! databases answer, and on SIGTERM or SIGINT stops taking requests and
-//! lets those in flight finish. It logs one JSON object per line on stdout.
+//! lets those in flight finish. It logs one JSON object per line on stdout,
+//! and when the environment names an OTLP endpoint
+//! (`OTEL_EXPORTER_OTLP_ENDPOINT`) it exports a span per request and per call
+//! to another API (D67).
 {{- end }}
 {{- if .Buckets }}
 //!
@@ -125,10 +130,20 @@ struct EngineDependency {
 
 #[tokio::main]
 async fn main() -> ExitCode {
-    if let Err(err) = logging::init_json({{ rustString .Stack }}, {{ rustString .Name }}) {
-        eprintln!("{{ .Name }}: install the logger: {err}");
-        return ExitCode::FAILURE;
-    }
+    // The log and, when the environment names an OTLP endpoint, trace export
+    // (D67), which flushes the spans still buffered as main returns.
+    let installed = telemetry::start(Defaults {
+        stack: {{ rustString .Stack }},
+        kind: logging::SERVER,
+        name: {{ rustString .Name }},
+    });
+    let _telemetry = match installed {
+        Ok(telemetry) => telemetry,
+        Err(err) => {
+            eprintln!("{{ .Name }}: install the logger: {err}");
+            return ExitCode::FAILURE;
+        }
+    };
     match run().await {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
@@ -333,6 +348,9 @@ async fn run() -> Result<(), Failure> {
     // inside it.
 {{ .SiteCORS }}
 {{- end }}
+    // With trace export on, each request but the probes is a server span,
+    // named by the route of the operation that takes it.
+{{ .ServerSpans }}
 {{- if .Engines }}
     let served = serve(port, app, readiness{{ if .MountsEngines }}, stop_streams{{ end }}).await;
     // Each engine closes after the requests in flight finish: its runner

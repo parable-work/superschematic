@@ -671,9 +671,11 @@ re-exports as `database_types`. Their `queues` module holds each queue's
 descriptor as JSON, `STOCK_LOW_QUEUE`, which the runtime's
 `queue::QueueDefinition::parse` reads: an implementation enqueues with it
 in the transaction whose writes caused the message (`queue::enqueue`),
-and a worker claims with it. A queue whose message holds a `POINT` or
-`INTERVAL` column is left out, saying why, and the build refuses a Rust
-worker of it.
+and a worker claims with it. A location crosses as a `POINT` and a
+duration as an `INTERVAL` of its whole microseconds, as Go and TypeScript
+write them ([Queues](/superschematic/guides/queues/)). A queue whose
+message holds a list of either, a `POINT[]` or `INTERVAL[]` column, is
+left out, saying why, and the build refuses a Rust worker of it.
 
 The scaffold writes `create_jobs` and `create_workers` beside `create`,
 each method failing until you implement it:
@@ -705,8 +707,10 @@ an API with a callers field, the crate's config module adds
 `main.rs` call: it loads what `load_env_config()` does, but leaves the
 callers field without issuers. The identity config and CORS fields read
 as their defaults when unset. Their log lines name the deployable as
-`"job"` or `"worker"` (`logging::init_json_as`), where a server's name it
-`"server"`.
+`"job"` or `"worker"`, where a server's name it `"server"`. Each
+entrypoint installs its log with `telemetry::start`, the runtime's `otel`
+feature, which exports the deployable's traces when the environment names
+an OTLP collector ([Traces](/superschematic/guides/traces/)).
 
 ### Users and sessions
 

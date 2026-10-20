@@ -14,7 +14,9 @@
 // while the method runs, completes the message when the method resolves,
 // fails it when the method rejects, and logs each outcome. On SIGTERM or
 // SIGINT it claims no more, lets the running methods finish for 2s, aborts
-// the rest and gives their messages back, and exits 0.
+// the rest and gives their messages back, and exits 0. When the environment
+// names an OTLP endpoint (OTEL_EXPORTER_OTLP_ENDPOINT), it exports a span per
+// message (D67).
 //
 // The API's implementation is the package at the naming file's
 // [implementation_paths] typescript template (section 8.6):
@@ -23,6 +25,7 @@
 import { createLogger, serviceCredentialFor, type Database, type Service } from '@superschematic/http-runtime';
 import { connectPostgres, postgresQueue } from '@superschematic/http-runtime/postgres';
 import { runWorker, workerConcurrency } from '@superschematic/http-runtime/worker';
+import { startTelemetry, type Telemetry } from '@superschematic/http-runtime/telemetry';
 import type { Pool } from 'pg';
 import { openBucket } from '@superschematic/http-runtime/gcs';
 import { cartAbandonedQueue } from '@schemas/ts-db-types/queues';
@@ -38,9 +41,14 @@ const logger = createLogger({ stack: 'ts-stack', worker: 'ts-shop-remind-shopper
 /**
  * Builds the worker from the environment and claims and handles messages
  * until signal aborts, when SIGTERM or SIGINT arrives, then stops within
- * the grace. Each pool it opens goes in pools, which main ends.
+ * the grace. Each pool it opens goes in pools, which main ends, and so does
+ * its telemetry, which main flushes.
  */
 async function run(signal: AbortSignal, pools: { end(): Promise<void> }[]): Promise<void> {
+  // Trace export, on when the environment names an OTLP endpoint (D67); main
+  // flushes the spans as it ends the pools.
+  const telemetry = startTelemetry({ service: 'ts-shop-remind-shoppers', stack: 'ts-stack', kind: 'worker', logger });
+  pools.push({ end: () => telemetry.shutdown() });
   const tsShopConfig = configure('ts-shop', () => tsShopApi.loadEnvConfig());
 
   // One pool per database, which connects when it is first used.
@@ -48,7 +56,7 @@ async function run(signal: AbortSignal, pools: { end(): Promise<void> }[]): Prom
   pools.push(tsDbPool);
 
   // One client per API called.
-  const tsPricingClient = newTsPricingClient(tsShopConfig.TS_PRICING_SERVICE);
+  const tsPricingClient = newTsPricingClient(tsShopConfig.TS_PRICING_SERVICE, telemetry.fetch);
 
   // One handle per bucket, on GCS or on the emulator its connection names
   // (D54).
@@ -75,7 +83,7 @@ async function run(signal: AbortSignal, pools: { end(): Promise<void> }[]): Prom
           id: claim.id,
           token: claim.token,
           attempt: claim.attempt,
-          handle: (handlerSignal: AbortSignal) => workers.remindShoppers(claim.message, handlerSignal),
+          handle: (handlerSignal: AbortSignal) => telemetry.message(queue.name, claim, () => workers.remindShoppers(claim.message, handlerSignal)),
         })),
       extend: (id, token, leaseSeconds) => queue.extend(id, token, leaseSeconds),
       complete: (id, token) => queue.complete(id, token),
@@ -162,10 +170,12 @@ async function connect(service: string, field: string, db: Database): Promise<Po
  * Builds the client of ts-pricing. The worker calls it at endpoint, the
  * field its edge derives, and the client sends the service credential the
  * edge's connector chose (docs/stack-model.md, section 9.6). The worker serves
- * no request, so it forwards no end user.
+ * no request, so it forwards no end user. It calls through fetch, the
+ * telemetry's, which with trace export on makes each call a client span
+ * that carries its trace context (D67).
  */
-function newTsPricingClient(endpoint: Service): tsPricingSdk.TsPricingSDK {
-  return new tsPricingSdk.TsPricingSDK({ baseUrl: endpoint.url, serviceCredential: serviceCredentialFor(endpoint.credential) });
+function newTsPricingClient(endpoint: Service, fetch: Telemetry['fetch']): tsPricingSdk.TsPricingSDK {
+  return new tsPricingSdk.TsPricingSDK({ baseUrl: endpoint.url, serviceCredential: serviceCredentialFor(endpoint.credential), fetch });
 }
 
 main();

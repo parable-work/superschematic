@@ -23,4 +23,4 @@ tokio = { version = "1.52.2", features = ["macros", "rt-multi-thread"] }
 schemas-desk-db-types = { path = "../../../types/rust/desk-db" }
 superschematic-engine = { path = "../../../../../runtime/engine/rust/engine", default-features = false, features = ["background", "postgres"] }
 superschematic-engine-behaviors = { path = "../../../../../runtime/engine/rust/behaviors", default-features = false, features = ["postgres"] }
-superschematic-http-runtime = { path = "../../../../../runtime/http/rust", features = ["logging", "postgres"] }
+superschematic-http-runtime = { path = "../../../../../runtime/http/rust", features = ["logging", "otel", "postgres"] }

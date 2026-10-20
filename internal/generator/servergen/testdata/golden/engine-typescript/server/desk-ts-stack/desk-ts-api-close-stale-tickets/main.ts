@@ -10,13 +10,16 @@
 // does, calls the implementation's createJobs, and runs the job's method
 // once, with a signal that SIGTERM or SIGINT aborts. It logs the run's end
 // and, when the job fails, exits 1, so the platform records the run as
-// failed and runs it again if the job's retries allow.
+// failed and runs it again if the job's retries allow. When the environment
+// names an OTLP endpoint (OTEL_EXPORTER_OTLP_ENDPOINT), it exports a span of
+// the run, flushed before it exits (D67).
 //
 // The API's implementation is the package at the naming file's
 // [implementation_paths] typescript template (section 8.6):
 // @schemas/desk-ts-api-implementation, at typescript/desk-ts-api
 
 import { createLogger, type Database, type Logger } from '@superschematic/http-runtime';
+import { startTelemetry } from '@superschematic/http-runtime/telemetry';
 import { connectPostgres } from '@superschematic/http-runtime/postgres';
 import type { Pool } from 'pg';
 import { openEngineInBackground, type AsyncEngine, type EngineBackground, type EngineOptions, type Principal } from '@superschematic/engine/server';
@@ -29,10 +32,14 @@ const logger = createLogger({ stack: 'desk-ts-stack', job: 'desk-ts-api-close-st
 /**
  * Builds the job from the environment and runs it once, until its method
  * settles; signal aborts when SIGTERM or SIGINT arrives. Each pool it opens
- * goes in pools, which main ends, and each engine in engines, which
- * main closes.
+ * goes in pools, which main ends, and so does its telemetry, which main
+ * flushes. Each engine it opens goes in engines, which main closes.
  */
 async function run(signal: AbortSignal, pools: { end(): Promise<void> }[], engines: { close(): void }[]): Promise<void> {
+  // Trace export, on when the environment names an OTLP endpoint (D67); main
+  // flushes the spans as it ends the pools.
+  const telemetry = startTelemetry({ service: 'desk-ts-api-close-stale-tickets', stack: 'desk-ts-stack', kind: 'job', logger });
+  pools.push({ end: () => telemetry.shutdown() });
   const deskTsApiConfig = configure('desk-ts-api', () => deskTsApiApi.loadBackgroundEnvConfig());
 
   // One pool per database, which connects when it is first used.
@@ -54,7 +61,7 @@ async function run(signal: AbortSignal, pools: { end(): Promise<void> }[], engin
   };
   const jobs = await construct('desk-ts-api', 'jobs', () => deskTsApiImpl.createJobs(deskTsApiDeps));
   logger.info('job started', { api: 'desk-ts-api', class: 'CloseStaleTickets' });
-  await jobs.closeStaleTickets(signal);
+  await telemetry.job('CloseStaleTickets', () => jobs.closeStaleTickets(signal));
 }
 
 /** The exit status of a process a signal ends at once: 128 and its number. */

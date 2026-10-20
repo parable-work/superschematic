@@ -9,6 +9,11 @@ import (
 	"testing"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/codes"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest/observer"
 )
@@ -296,5 +301,60 @@ func TestRunRefusesAnIncompleteQueue(t *testing.T) {
 	q := newFake().queue(0)
 	if err := Run(context.Background(), q, Options{}); err == nil {
 		t.Fatal("a queue without a lease ran")
+	}
+}
+
+// TestEachMessageIsASpan: each message's handling is a consumer span of the
+// global tracer, the root of a trace of its own, which the handler's
+// context carries and whose status records its error (D67).
+func TestEachMessageIsASpan(t *testing.T) {
+	exporter := tracetest.NewInMemoryExporter()
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter))
+	previous := otel.GetTracerProvider()
+	otel.SetTracerProvider(provider)
+	defer otel.SetTracerProvider(previous)
+
+	f := newFake()
+	var handledIn trace.SpanContext
+	f.add("ok", func(ctx context.Context) error {
+		handledIn = trace.SpanContextFromContext(ctx)
+		return nil
+	})
+	f.add("retry", func(context.Context) error { return errors.New("try later") })
+	ctx, cancel := context.WithCancel(context.Background())
+	stopped := make(chan error, 1)
+	go func() {
+		stopped <- Run(ctx, f.queue(time.Minute), Options{Concurrency: 2, Idle: 10 * time.Millisecond})
+	}()
+	waitFor(t, "both messages' outcomes", func() bool {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		return len(f.completed)+len(f.failed) == 2
+	})
+	cancel()
+	if err := <-stopped; err != nil {
+		t.Fatalf("Run = %v", err)
+	}
+
+	spans := exporter.GetSpans()
+	if len(spans) != 2 {
+		t.Fatalf("got %d spans, want one per message", len(spans))
+	}
+	byID := map[string]tracetest.SpanStub{}
+	for _, s := range spans {
+		if s.Name != "process Fake" || s.SpanKind != trace.SpanKindConsumer || s.Parent.IsValid() {
+			t.Errorf("span %q of kind %v and parent %v; want process Fake, a consumer, with no parent", s.Name, s.SpanKind, s.Parent)
+		}
+		for _, a := range s.Attributes {
+			if a.Key == "messaging.message.id" {
+				byID[a.Value.AsString()] = s
+			}
+		}
+	}
+	if byID["ok"].SpanContext.SpanID() != handledIn.SpanID() {
+		t.Errorf("the handler ran in span %v; want the message's, %v", handledIn.SpanID(), byID["ok"].SpanContext.SpanID())
+	}
+	if byID["ok"].Status.Code == codes.Error || byID["retry"].Status.Code != codes.Error {
+		t.Errorf("statuses %v and %v; want ok unset and retry an error", byID["ok"].Status, byID["retry"].Status)
 	}
 }

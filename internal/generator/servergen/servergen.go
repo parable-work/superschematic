@@ -4,7 +4,8 @@
 // go.mod and a Dockerfile. main.go loads each served API's config, connects
 // one pool per database, builds one SDK client per API called, builds each
 // API's implementation from its Deps and mounts every API's routes on one
-// handler beside /healthz and /readyz. cloudsql.go beside it connects a
+// handler beside /healthz and /readyz, and starts the HTTP runtime's trace
+// export, which the environment turns on (D67). cloudsql.go beside it connects a
 // database through the Cloud SQL connector, on a server that some
 // environment places on Cloud SQL, and buckets.go opens each bucket on GCS,
 // or on an emulator that serves its API, on a server whose APIs list one

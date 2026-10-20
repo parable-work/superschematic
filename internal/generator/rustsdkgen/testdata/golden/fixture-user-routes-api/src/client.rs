@@ -22,6 +22,15 @@ pub type ServiceTokenFuture = Pin<Box<dyn Future<Output = Result<String, String>
 /// shape.
 pub type ServiceTokenSource = Arc<dyn Fn(bool) -> ServiceTokenFuture + Send + Sync>;
 
+pub type TransportFuture =
+    Pin<Box<dyn Future<Output = Result<reqwest::Response, reqwest::Error>> + Send>>;
+/// Sends each request the client builds, in place of
+/// `reqwest::Client::execute`. A stack deployable's trace export sends each
+/// call in a client span and carries its trace context (D67), as Go's
+/// `Transport` and TypeScript's `fetch` do. The HTTP runtime's
+/// `telemetry::transport` has this shape.
+pub type Transport = Arc<dyn Fn(reqwest::Client, reqwest::Request) -> TransportFuture + Send + Sync>;
+
 /// The calling service's own credential, beside the end user's (D37). The
 /// client sends `Bearer <token>` in each header on every request. A 401
 /// whose problem code is `service_unauthorized` asks `token(true)` for a
@@ -60,6 +69,9 @@ pub struct ClientConfig {
     /// routing, tracing baggage). Per-call dynamic headers should use
     /// [`RequestOptions::request_hook`] instead.
     pub request_interceptor: Option<RequestInterceptor>,
+    /// Sends each request in place of the client's own `execute`; see
+    /// [`Transport`].
+    pub transport: Option<Transport>,
 }
 
 impl ClientConfig {
@@ -87,6 +99,7 @@ pub struct HttpClient {
     auth: Arc<AuthState>,
     service: Option<Arc<ServiceState>>,
     request_interceptor: Option<RequestInterceptor>,
+    transport: Option<Transport>,
 }
 
 struct AuthState {
@@ -191,6 +204,7 @@ impl HttpClient {
             }),
             service,
             request_interceptor: config.request_interceptor,
+            transport: config.transport,
         })
     }
 
@@ -288,7 +302,21 @@ impl HttpClient {
         if let Some(payload) = body {
             request = request.json(&payload);
         }
-        request.send().await.map_err(SDKError::from)
+        self.send(request).await
+    }
+
+    /// Sends a request through the configured [`Transport`], or the
+    /// client's own `send` without one.
+    async fn send(&self, request: reqwest::RequestBuilder) -> Result<reqwest::Response, SDKError> {
+        match &self.transport {
+            Some(transport) => {
+                let request = request.build().map_err(SDKError::from)?;
+                transport(self.client.clone(), request)
+                    .await
+                    .map_err(SDKError::from)
+            }
+            None => request.send().await.map_err(SDKError::from),
+        }
     }
 
     async fn send_multipart_with_refresh(
@@ -348,7 +376,7 @@ impl HttpClient {
         }
 
         request = request.multipart(form);
-        request.send().await.map_err(SDKError::from)
+        self.send(request).await
     }
 
     /// Whether a response is retried, spending the retry: a 401 whose code

@@ -8,6 +8,12 @@
 //! or a boolean as JSON writes it. A string for a `UUID` column is read as
 //! superscalar's `Identity.UUID` reads one, base62 or hyphenated, since a
 //! Rust type's `Identity.UUID` serializes as base62, and goes hyphenated.
+//! A location, `{lat, lon}`, goes to a `POINT` column as `(lon,lat)`: x is
+//! the longitude and y the latitude. A duration's text (`1h30m0s`,
+//! `-1.5s`, `250us`) goes to an `INTERVAL` column as its whole
+//! microseconds, `[-]H:MM:SS.ffffff`, so its sign holds for the whole and a
+//! nanosecond remainder is truncated toward zero, as the Go ORM's
+//! `time.Duration` goes through pgx.
 //!
 //! A column comes back by its type: a boolean, an integer or a float as a
 //! JSON number or boolean; a `NUMERIC` as the number its digits write; text
@@ -15,9 +21,11 @@
 //! a `TIMESTAMPTZ` in RFC 3339 in UTC, as superscalar's `DateTime` writes
 //! it (`2026-10-14T12:00:00.5Z`); a `DATE` as `YYYY-MM-DD` and a `TIME` as
 //! `HH:MM:SS` with its fraction, as Postgres writes them; an `INET` as
-//! Postgres writes it; `JSON` and `JSONB` as the value they hold; and an
-//! array as a list of its elements, `NULL` as null. Any other type is
-//! refused, naming it.
+//! Postgres writes it; a `POINT` as the location `{lat, lon}`; an
+//! `INTERVAL` as its duration's text in the scalar core's canonical form,
+//! a day 24 hours and a month 30 days, as pgx reads one; `JSON` and `JSONB`
+//! as the value they hold; and an array as a list of its elements, `NULL`
+//! as null. Any other type is refused, naming it.
 
 use std::error::Error;
 use std::fmt::Write as _;
@@ -93,7 +101,167 @@ pub(crate) fn param_text(value: &Value, ty: &Type, json: bool) -> Result<Option<
     match ty.kind() {
         Kind::Array(element) => array_literal(value, element).map(Some),
         Kind::Domain(base) => param_text(value, base, false),
+        _ if *ty == Type::POINT => point_text(value).map(Some),
+        _ if *ty == Type::INTERVAL => interval_text(value).map(Some),
         _ => Ok(Some(scalar_text(value, ty))),
+    }
+}
+
+/// A location, `{lat, lon}`, as the text of a `POINT`, `(x,y)`: x is the
+/// longitude and y the latitude, each written as Rust writes the `f64`,
+/// which reads back as the same number.
+fn point_text(value: &Value) -> Result<String, String> {
+    let coordinate = |name: &str| value.get(name).and_then(Value::as_f64);
+    match (coordinate("lat"), coordinate("lon")) {
+        (Some(lat), Some(lon)) => Ok(format!("({lon},{lat})")),
+        _ => Err(format!("{value} is no location, {{lat, lon}}")),
+    }
+}
+
+/// The nanoseconds in a unit of a duration's text, the scalar core's
+/// units, the longer first where one starts another.
+const DURATION_UNITS: [(&str, i128); 8] = [
+    ("ns", 1),
+    ("us", 1_000),
+    ("\u{00b5}s", 1_000),
+    ("\u{03bc}s", 1_000),
+    ("ms", 1_000_000),
+    ("s", 1_000_000_000),
+    ("m", 60_000_000_000),
+    ("h", 3_600_000_000_000),
+];
+
+/// A duration's text, as `Temporal.Duration` holds it (`1h30m0s`, `-1.5s`,
+/// `90m`, `250us`), as its nanoseconds: a sign for the whole, then one or
+/// more numbers, each with its unit, or a bare `0`.
+pub(crate) fn parse_duration(text: &str) -> Result<i128, String> {
+    let refused = || format!("{text:?} is no duration");
+    let value = text.trim();
+    let (sign, mut rest) = match value.as_bytes().first() {
+        Some(b'-') => (-1, &value[1..]),
+        Some(b'+') => (1, &value[1..]),
+        _ => (1, value),
+    };
+    if rest == "0" {
+        return Ok(0);
+    }
+    if rest.is_empty() {
+        return Err(refused());
+    }
+    let mut nanos: i128 = 0;
+    while !rest.is_empty() {
+        let digits = rest
+            .find(|c: char| !c.is_ascii_digit() && c != '.')
+            .unwrap_or(rest.len());
+        let number = &rest[..digits];
+        let (whole, fraction) = number.split_once('.').unwrap_or((number, ""));
+        if (whole.is_empty() && fraction.is_empty()) || fraction.contains('.') {
+            return Err(refused());
+        }
+        rest = &rest[digits..];
+        let (unit, scale) = DURATION_UNITS
+            .iter()
+            .find(|(unit, _)| rest.starts_with(unit))
+            .ok_or_else(refused)?;
+        rest = &rest[unit.len()..];
+        let parse = |digits: &str| -> Result<i128, String> {
+            if digits.is_empty() {
+                Ok(0)
+            } else {
+                digits.parse::<i128>().map_err(|_| refused())
+            }
+        };
+        let mut part = parse(whole)?.checked_mul(*scale).ok_or_else(refused)?;
+        if !fraction.is_empty() {
+            let places = u32::try_from(fraction.len()).map_err(|_| refused())?;
+            let denominator = 10_i128.checked_pow(places).ok_or_else(refused)?;
+            part += parse(fraction)?.checked_mul(*scale).ok_or_else(refused)? / denominator;
+        }
+        nanos = nanos.checked_add(part).ok_or_else(refused)?;
+    }
+    Ok(sign * nanos)
+}
+
+/// A duration's text as the text of an `INTERVAL` of its whole
+/// microseconds, `[-]H:MM:SS.ffffff`, the remainder truncated toward zero.
+/// Postgres gives the sign of this form to the whole time, where it would
+/// give the sign of `-1h2m` to its hours alone.
+fn interval_text(value: &Value) -> Result<String, String> {
+    let Value::String(text) = value else {
+        return Err(format!("{value} is no duration"));
+    };
+    let micros = parse_duration(text)? / 1_000;
+    let whole = micros.unsigned_abs();
+    let seconds = whole / 1_000_000;
+    let fraction = whole % 1_000_000;
+    let mut out = format!(
+        "{}{}:{:02}:{:02}",
+        if micros < 0 { "-" } else { "" },
+        seconds / 3600,
+        seconds / 60 % 60,
+        seconds % 60
+    );
+    if fraction != 0 {
+        let _ = write!(out, ".{fraction:06}");
+    }
+    Ok(out)
+}
+
+/// An `INTERVAL` in its binary form, microseconds, days and months, as its
+/// nanoseconds: a day is 24 hours and a month 30 days, as pgx reads one
+/// into a `time.Duration`.
+fn interval_nanos(raw: &[u8]) -> Result<i128, BoxError> {
+    let [m0, m1, m2, m3, m4, m5, m6, m7, d0, d1, d2, d3, n0, n1, n2, n3] = raw else {
+        return Err("an INTERVAL of the wrong length".into());
+    };
+    let micros = i64::from_be_bytes([*m0, *m1, *m2, *m3, *m4, *m5, *m6, *m7]);
+    let days = i32::from_be_bytes([*d0, *d1, *d2, *d3]);
+    let months = i32::from_be_bytes([*n0, *n1, *n2, *n3]);
+    const MICROS_PER_DAY: i128 = 86_400_000_000;
+    let total = i128::from(micros)
+        + i128::from(days) * MICROS_PER_DAY
+        + i128::from(months) * 30 * MICROS_PER_DAY;
+    Ok(total * 1_000)
+}
+
+/// Nanoseconds as a duration's text in the scalar core's canonical form:
+/// under a second, the largest of `ms`, `us` and `ns` that holds it whole
+/// (`500ms`, `250us`); from a second, hours and minutes when there are any,
+/// then seconds with their fraction (`1h30m0s`, `1m30s`, `1.5s`); `0s` for
+/// zero.
+pub(crate) fn format_duration(nanos: i128) -> String {
+    const SECOND: u128 = 1_000_000_000;
+    if nanos == 0 {
+        return "0s".to_string();
+    }
+    let sign = if nanos < 0 { "-" } else { "" };
+    let mut rest = nanos.unsigned_abs();
+    if rest < SECOND {
+        return if rest.is_multiple_of(1_000_000) {
+            format!("{sign}{}ms", rest / 1_000_000)
+        } else if rest.is_multiple_of(1_000) {
+            format!("{sign}{}us", rest / 1_000)
+        } else {
+            format!("{sign}{rest}ns")
+        };
+    }
+    let hours = rest / (3600 * SECOND);
+    rest %= 3600 * SECOND;
+    let minutes = rest / (60 * SECOND);
+    rest %= 60 * SECOND;
+    let mut seconds = (rest / SECOND).to_string();
+    let fraction = rest % SECOND;
+    if fraction != 0 {
+        let digits = format!("{fraction:09}");
+        seconds.push('.');
+        seconds.push_str(digits.trim_end_matches('0'));
+    }
+    if hours > 0 {
+        format!("{sign}{hours}h{minutes}m{seconds}s")
+    } else if minutes > 0 {
+        format!("{sign}{minutes}m{seconds}s")
+    } else {
+        format!("{sign}{seconds}s")
     }
 }
 
@@ -189,6 +357,8 @@ fn decode(ty: &Type, raw: &[u8]) -> Result<Value, BoxError> {
             _ => return Err("a JSONB value of a version other than 1".into()),
         },
         Type::INET | Type::CIDR => Value::from(inet(raw, *ty == Type::CIDR)?),
+        Type::POINT => point(raw)?,
+        Type::INTERVAL => Value::from(format_duration(interval_nanos(raw)?)),
         _ => {
             return Err(format!(
                 "a column of type {}, which the Rust queue client does not read",
@@ -213,6 +383,20 @@ fn decode_number(ty: &Type, raw: &[u8]) -> Result<Option<Value>, BoxError> {
             .map_err(|_| "a NUMERIC that is not a number, which JSON cannot hold")?,
         _ => return Ok(None),
     }))
+}
+
+/// A `POINT` in its binary form, x then y, as the location it holds,
+/// `{lat: y, lon: x}`.
+fn point(raw: &[u8]) -> Result<Value, BoxError> {
+    if raw.len() != 16 {
+        return Err("a POINT of the wrong length".into());
+    }
+    let lon = f64::from_sql(&Type::FLOAT8, &raw[..8])?;
+    let lat = f64::from_sql(&Type::FLOAT8, &raw[8..])?;
+    let mut location = serde_json::Map::new();
+    location.insert("lat".into(), float(lat)?);
+    location.insert("lon".into(), float(lon)?);
+    Ok(Value::Object(location))
 }
 
 /// A float as a JSON number; JSON has no NaN or infinity.
@@ -525,10 +709,109 @@ mod tests {
         assert_eq!(column(&Type::JSON, br#"{"a":1}"#), json!({"a": 1}));
         assert_eq!(column(&Type::JSONB, b"\x01[1,2]"), json!([1, 2]));
         assert!(decode(&Type::JSONB, b"\x02[1,2]").is_err());
-        let err = decode(&Type::POINT, &[0; 16]).unwrap_err().to_string();
+        let err = decode(&Type::BOX, &[0; 32]).unwrap_err().to_string();
         assert_eq!(
             err,
-            "a column of type point, which the Rust queue client does not read"
+            "a column of type box, which the Rust queue client does not read"
         );
+    }
+
+    #[test]
+    fn a_location_is_a_point_whose_x_is_the_longitude() {
+        let text = |value: Value| param_text(&value, &Type::POINT, false);
+        assert_eq!(
+            text(json!({"lat": 37.7749, "lon": -122.4194}))
+                .unwrap()
+                .as_deref(),
+            Some("(-122.4194,37.7749)")
+        );
+        assert_eq!(
+            text(json!({"lat": 0, "lon": 1e-7})).unwrap().as_deref(),
+            Some("(0.0000001,0)")
+        );
+        assert_eq!(
+            text(json!({"lat": 1})).unwrap_err(),
+            r#"{"lat":1} is no location, {lat, lon}"#
+        );
+        assert_eq!(
+            text(json!("(1,2)")).unwrap_err(),
+            r#""(1,2)" is no location, {lat, lon}"#
+        );
+        let mut raw = (-122.4194_f64).to_be_bytes().to_vec();
+        raw.extend_from_slice(&37.7749_f64.to_be_bytes());
+        assert_eq!(
+            decode(&Type::POINT, &raw).unwrap(),
+            json!({"lat": 37.7749, "lon": -122.4194})
+        );
+        assert!(decode(&Type::POINT, &raw[..8]).is_err());
+    }
+
+    #[test]
+    fn a_durations_text_reads_as_its_nanoseconds_in_every_unit_the_scalar_takes() {
+        for (text, nanos) in [
+            ("0", 0),
+            ("0s", 0),
+            ("1h30m0s", 5_400_000_000_000),
+            ("90m", 5_400_000_000_000),
+            ("1.5s", 1_500_000_000),
+            ("-1h2m3.5s", -3_723_500_000_000),
+            ("+500ms", 500_000_000),
+            ("250us", 250_000),
+            ("250\u{00b5}s", 250_000),
+            ("250\u{03bc}s", 250_000),
+            ("1500ns", 1_500),
+            (".5s", 500_000_000),
+            ("2562047h47m16.854775807s", i128::from(i64::MAX)),
+        ] {
+            assert_eq!(parse_duration(text), Ok(nanos), "{text}");
+        }
+        for text in ["", "-", "1", "1d", "s", "1h-2m", "1.2.3s"] {
+            assert_eq!(
+                parse_duration(text),
+                Err(format!("{text:?} is no duration")),
+                "{text}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_duration_writes_the_interval_of_its_whole_microseconds() {
+        let text = |value: &str| param_text(&json!(value), &Type::INTERVAL, false).unwrap();
+        assert_eq!(text("1h30m0s").as_deref(), Some("1:30:00"));
+        assert_eq!(text("26h0m0.000001s").as_deref(), Some("26:00:00.000001"));
+        assert_eq!(text("-1h2m3.5s").as_deref(), Some("-1:02:03.500000"));
+        assert_eq!(text("1500ns").as_deref(), Some("0:00:00.000001"));
+        assert_eq!(text("-1500ns").as_deref(), Some("-0:00:00.000001"));
+        assert_eq!(text("999ns").as_deref(), Some("0:00:00"));
+        assert_eq!(
+            param_text(&json!(90), &Type::INTERVAL, false).unwrap_err(),
+            "90 is no duration"
+        );
+    }
+
+    #[test]
+    fn an_interval_reads_as_its_duration_a_day_24_hours_and_a_month_30_days() {
+        let interval = |micros: i64, days: i32, months: i32| {
+            let mut raw = micros.to_be_bytes().to_vec();
+            raw.extend_from_slice(&days.to_be_bytes());
+            raw.extend_from_slice(&months.to_be_bytes());
+            decode(&Type::INTERVAL, &raw).unwrap()
+        };
+        let hour = 3_600_000_000;
+        assert_eq!(interval(0, 0, 0), json!("0s"));
+        assert_eq!(interval(90 * 60_000_000, 0, 0), json!("1h30m0s"));
+        assert_eq!(interval(26 * hour + 1, 0, 0), json!("26h0m0.000001s"));
+        assert_eq!(interval(-3_723_500_000, 0, 0), json!("-1h2m3.5s"));
+        assert_eq!(interval(250, 0, 0), json!("250us"));
+        assert_eq!(interval(-1, 0, 0), json!("-1us"));
+        assert_eq!(interval(1_500_000, 0, 0), json!("1.5s"));
+        assert_eq!(interval(90_000_000, 0, 0), json!("1m30s"));
+        assert_eq!(interval(500_000, 0, 0), json!("500ms"));
+        assert_eq!(interval(2 * hour, 1, 0), json!("26h0m0s"));
+        assert_eq!(interval(2 * hour, -1, 0), json!("-22h0m0s"));
+        assert_eq!(interval(-hour, 1, 1), json!("743h0m0s"));
+        assert_eq!(interval(0, 0, 14), json!("10080h0m0s"));
+        assert!(decode(&Type::INTERVAL, &[0; 12]).is_err());
+        assert_eq!(format_duration(1_500), "1500ns");
     }
 }

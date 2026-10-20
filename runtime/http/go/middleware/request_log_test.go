@@ -266,6 +266,8 @@ func TestRequestLogMiddleware(t *testing.T) {
 			}
 		}
 		assert.Equal(t, "/users/{id}", routeAttr)
+		// The span is named by the method and the route template (D67).
+		assert.Equal(t, "GET /users/{id}", spans[0].Name)
 	})
 
 	t.Run("panic logged as 500 with panic field then re-panics", func(t *testing.T) {
