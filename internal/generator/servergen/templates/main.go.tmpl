@@ -121,7 +121,7 @@ func run(logger *zap.Logger) error {
 	}
 {{- end }}
 {{- if .ServiceAuth }}
-	{{ .Var }}ServiceAuthenticator, err := serviceAuthenticator({{ quote .Service }})
+	{{ .Var }}ServiceAuthenticator, err := serviceAuthenticator({{ quote .Service }}{{ if $.Loopback }}, {{ $.Loopback.Var }}{{ end }})
 	if err != nil {
 		return fmt.Errorf("service authenticator of {{ .Service }}: %w", err)
 	}

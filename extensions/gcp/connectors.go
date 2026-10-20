@@ -124,8 +124,10 @@ func serviceAccountEmail(v values, name any) any {
 // so an operation whose `from` names the API admits its jobs and workers
 // as its server.
 //
-// A server that calls an API it serves itself reaches it over loopback,
-// needs no grant and sends no credential.
+// A server that calls an API it serves itself reaches it over loopback and
+// needs no grant. The connector gives the call no credential: the server
+// signs it with a loopback key of its own, which only its process holds
+// (docs/stack-model.md, section 9.9).
 func connectHTTP(ctx registry.ConnectorContext) (registry.Connected, error) {
 	from, to := ctx.From, ctx.To
 	if from.Name == to.Name {

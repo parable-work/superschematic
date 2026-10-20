@@ -205,6 +205,12 @@ type ResolvedJob struct {
 	// run is run again.
 	TimeoutSeconds int `json:"timeoutSeconds"`
 	Retries        int `json:"retries,omitempty"`
+
+	// OnDeploy runs the job once on every deploy, in the deploy order's
+	// jobs step, after the last rollout wave and before the contract phase
+	// (D52, amended). A deploy waits for the run, its retries included,
+	// and fails when its last try fails.
+	OnDeploy bool `json:"onDeploy,omitempty"`
 }
 
 // ResolvedWorker is a worker's run in one environment (D53): the method of
@@ -484,6 +490,13 @@ const (
 	// each roll out in an earlier wave.
 	StepRollout DeployStepKind = "rollout"
 
+	// StepJobs runs, once each, the jobs that run on every deploy, after
+	// the last rollout wave, so every server of the new version runs, and
+	// before the contract phase, so a job may still read what the contract
+	// drops (D52, amended). It holds no resources: the deploy runs each
+	// job through its target's job runner, and stack dev runs it itself.
+	StepJobs DeployStepKind = "jobs"
+
 	// StepExposure applies the exposure resources.
 	StepExposure DeployStepKind = "exposure"
 )
@@ -503,7 +516,8 @@ const (
 
 // DeployStep is one step of the deploy order. The provisioner applies a
 // step's resources; a migrate step names the databases whose migration
-// phase runs there and holds no resources.
+// phase runs there and holds no resources, and a jobs step the jobs that
+// run there.
 type DeployStep struct {
 	// Step is the step's kind.
 	Step DeployStepKind `json:"step"`
@@ -514,8 +528,9 @@ type DeployStep struct {
 	// Wave numbers a rollout step's wave from 1.
 	Wave int `json:"wave,omitempty"`
 
-	// Deployables are the databases a migrate step migrates, or the
-	// servers and jobs a rollout wave rolls out, sorted.
+	// Deployables are the databases a migrate step migrates, the servers
+	// and jobs a rollout wave rolls out, or the jobs a jobs step runs,
+	// sorted.
 	Deployables []string `json:"deployables,omitempty"`
 
 	// Resources are the IDs of the resources the step applies, sorted.

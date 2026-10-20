@@ -41,6 +41,11 @@
       "type": "string",
       "description": "Derived: a member of DEPS_RUST_PRICING_SERVICE, the service endpoint of deps-rust-pricing, which the platform sets."
     },
+    "DEPS_RUST_SHOP_CALLERS_ISSUERS": {
+      "type": "string",
+      "description": "The number of issuers of the callers field DEPS_RUST_SHOP_CALLERS, from 0 to 1000; 0 refuses every service credential.",
+      "pattern": "^[+-]?[0-9]+$"
+    },
     "DEPS_USERS_DB_DATABASE_CLOUD_SQL_DATABASE": {
       "type": "string",
       "description": "Derived: a member of DEPS_USERS_DB_DATABASE, the database connection of deps-users-db, which the platform sets."
@@ -60,6 +65,74 @@
     "STOREFRONT_REGION": {
       "type": "string",
       "default": "eu"
+    }
+  },
+  "patternProperties": {
+    "^DEPS_RUST_SHOP_CALLERS_ISSUERS_(0|[1-9][0-9]*)_ALGORITHMS$": {
+      "type": "string",
+      "description": "The algorithms the issuer signs with, comma-separated: RS256, ES256 or EdDSA.",
+      "pattern": "^\\s*(RS256|ES256|EdDSA)\\s*(,\\s*(RS256|ES256|EdDSA)\\s*)*$"
+    },
+    "^DEPS_RUST_SHOP_CALLERS_ISSUERS_(0|[1-9][0-9]*)_AUDIENCE$": {
+      "type": "string",
+      "description": "The aud a token of the issuer must hold: this server.",
+      "minLength": 1
+    },
+    "^DEPS_RUST_SHOP_CALLERS_ISSUERS_(0|[1-9][0-9]*)_CALLERS$": {
+      "type": "string",
+      "description": "The number of the issuer's callers, at least 1.",
+      "pattern": "^[+-]?[0-9]+$"
+    },
+    "^DEPS_RUST_SHOP_CALLERS_ISSUERS_(0|[1-9][0-9]*)_CALLERS_(0|[1-9][0-9]*)_DEPLOYABLE$": {
+      "type": "string",
+      "description": "The deployable a caller is.",
+      "minLength": 1
+    },
+    "^DEPS_RUST_SHOP_CALLERS_ISSUERS_(0|[1-9][0-9]*)_CALLERS_(0|[1-9][0-9]*)_SERVES$": {
+      "type": "string",
+      "description": "The APIs a caller serves, comma-separated, which an operation's from is checked against.",
+      "pattern": "^[^,]*[^,\\s][^,]*(,[^,]*[^,\\s][^,]*)*$"
+    },
+    "^DEPS_RUST_SHOP_CALLERS_ISSUERS_(0|[1-9][0-9]*)_CALLERS_(0|[1-9][0-9]*)_SUBJECT$": {
+      "type": "string",
+      "description": "The subject claim's value that names a caller.",
+      "minLength": 1
+    },
+    "^DEPS_RUST_SHOP_CALLERS_ISSUERS_(0|[1-9][0-9]*)_ISSUER$": {
+      "type": "string",
+      "description": "The iss an issuer writes.",
+      "minLength": 1
+    },
+    "^DEPS_RUST_SHOP_CALLERS_ISSUERS_(0|[1-9][0-9]*)_ISSUER_ALIASES$": {
+      "type": "string",
+      "description": "Other iss values of the issuer, comma-separated, such as Google's accounts.google.com.",
+      "pattern": "^$|^[^,]*[^,\\s][^,]*(,[^,]*[^,\\s][^,]*)*$"
+    },
+    "^DEPS_RUST_SHOP_CALLERS_ISSUERS_(0|[1-9][0-9]*)_JWKS_URL$": {
+      "type": "string",
+      "description": "Where the issuer publishes its keys; an issuer has it or KEYS, not both."
+    },
+    "^DEPS_RUST_SHOP_CALLERS_ISSUERS_(0|[1-9][0-9]*)_KEYS$": {
+      "type": "string",
+      "description": "The number of the issuer's keys, at least 1, when it lists them rather than JWKS_URL.",
+      "pattern": "^[+-]?[0-9]+$"
+    },
+    "^DEPS_RUST_SHOP_CALLERS_ISSUERS_(0|[1-9][0-9]*)_KEYS_(0|[1-9][0-9]*)_JWK$": {
+      "type": "string",
+      "description": "A key of the issuer: a public JWK's JSON, with its kid. A key has JWK or PEM, not both."
+    },
+    "^DEPS_RUST_SHOP_CALLERS_ISSUERS_(0|[1-9][0-9]*)_KEYS_(0|[1-9][0-9]*)_PEM$": {
+      "type": "string",
+      "description": "A key of the issuer: an Ed25519 public key's SubjectPublicKeyInfo PEM, whose kid is its RFC 7638 thumbprint (D63). A key has JWK or PEM, not both."
+    },
+    "^DEPS_RUST_SHOP_CALLERS_ISSUERS_(0|[1-9][0-9]*)_MAX_LIFETIME_SECONDS$": {
+      "type": "string",
+      "description": "The longest a token of the issuer may live, from its iat to its exp, in whole seconds above 0.",
+      "pattern": "^[+-]?[0-9]+$"
+    },
+    "^DEPS_RUST_SHOP_CALLERS_ISSUERS_(0|[1-9][0-9]*)_SUBJECT_CLAIM$": {
+      "type": "string",
+      "description": "The claim that names the caller; sub when unset."
     }
   },
   "x-superschematic": {
@@ -97,6 +170,34 @@
           "DEPS_RUST_PRICING_SERVICE_CREDENTIAL_ISSUER",
           "DEPS_RUST_PRICING_SERVICE_CREDENTIAL_KEY",
           "DEPS_RUST_PRICING_SERVICE_CREDENTIAL_HEADERS"
+        ]
+      },
+      {
+        "name": "DEPS_RUST_SHOP_CALLERS",
+        "irType": "ServiceAuth",
+        "primitive": "object",
+        "required": true,
+        "hasDefault": false,
+        "description": "The callers field of deps-rust-shop: the issuers whose service credentials its server accepts, and the callers each vouches for, which a @requireService or @allowService operation checks. In a stack the http edges to deps-rust-shop derive it; outside one, set it. A list is a variable holding its length and each entry's members under its index; no issuers refuses every service credential.",
+        "variables": [
+          "DEPS_RUST_SHOP_CALLERS_ISSUERS"
+        ],
+        "callersOf": "deps-rust-shop",
+        "variablePatterns": [
+          "^DEPS_RUST_SHOP_CALLERS_ISSUERS_(0|[1-9][0-9]*)_ISSUER$",
+          "^DEPS_RUST_SHOP_CALLERS_ISSUERS_(0|[1-9][0-9]*)_ISSUER_ALIASES$",
+          "^DEPS_RUST_SHOP_CALLERS_ISSUERS_(0|[1-9][0-9]*)_AUDIENCE$",
+          "^DEPS_RUST_SHOP_CALLERS_ISSUERS_(0|[1-9][0-9]*)_ALGORITHMS$",
+          "^DEPS_RUST_SHOP_CALLERS_ISSUERS_(0|[1-9][0-9]*)_JWKS_URL$",
+          "^DEPS_RUST_SHOP_CALLERS_ISSUERS_(0|[1-9][0-9]*)_KEYS$",
+          "^DEPS_RUST_SHOP_CALLERS_ISSUERS_(0|[1-9][0-9]*)_KEYS_(0|[1-9][0-9]*)_JWK$",
+          "^DEPS_RUST_SHOP_CALLERS_ISSUERS_(0|[1-9][0-9]*)_KEYS_(0|[1-9][0-9]*)_PEM$",
+          "^DEPS_RUST_SHOP_CALLERS_ISSUERS_(0|[1-9][0-9]*)_SUBJECT_CLAIM$",
+          "^DEPS_RUST_SHOP_CALLERS_ISSUERS_(0|[1-9][0-9]*)_MAX_LIFETIME_SECONDS$",
+          "^DEPS_RUST_SHOP_CALLERS_ISSUERS_(0|[1-9][0-9]*)_CALLERS$",
+          "^DEPS_RUST_SHOP_CALLERS_ISSUERS_(0|[1-9][0-9]*)_CALLERS_(0|[1-9][0-9]*)_SUBJECT$",
+          "^DEPS_RUST_SHOP_CALLERS_ISSUERS_(0|[1-9][0-9]*)_CALLERS_(0|[1-9][0-9]*)_DEPLOYABLE$",
+          "^DEPS_RUST_SHOP_CALLERS_ISSUERS_(0|[1-9][0-9]*)_CALLERS_(0|[1-9][0-9]*)_SERVES$"
         ]
       },
       {

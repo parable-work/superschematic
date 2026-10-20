@@ -18,8 +18,8 @@ func TestQueuesAreMessageTypes(t *testing.T) {
 	}
 	three := 3
 	for name, want := range map[string]*ir.QueueDef{
-		"OrderPlaced": {Retries: &three, Backoff: "1m", Lease: "2m"},
-		"Ping":        {},
+		"OrderPlaced": {Retries: &three, Backoff: "1m", MaxBackoff: "200s", Lease: "2m", Retain: "1h"},
+		"Ping":        {Retain: "0s"},
 	} {
 		td := schema.Types[name]
 		if td == nil {
@@ -109,12 +109,42 @@ export abstract class FractionalRetries {
 
 @queue()
 export abstract class NoFields {}
+
+@queue({ backoff: "1m", maxBackoff: "30s" })
+export abstract class CapUnderTheBackoff {
+  orderId: Identity.UUID;
+}
+
+@queue({ maxBackoff: "10s" })
+export abstract class CapUnderTheDefaultBackoff {
+  orderId: Identity.UUID;
+}
+
+@queue({ retain: "-1h" })
+export abstract class NegativeRetention {
+  orderId: Identity.UUID;
+}
+
+@queue({ retain: "1.5s" })
+export abstract class RetentionNotWholeSeconds {
+  orderId: Identity.UUID;
+}
+
+@queue({ retain: "a week" })
+export abstract class RetentionNoDuration {
+  orderId: Identity.UUID;
+}
 `,
 			want: []string{
 				`@queue NegativeRetries: retries is -1; it is zero or more`,
 				`@queue NotWholeSeconds: backoff: "1500ms" is not a whole number of seconds`,
 				`@queue retries is 1.5; it is a whole number`,
 				`@queue class NoFields has no fields`,
+				`@queue CapUnderTheBackoff: maxBackoff is "30s", shorter than the backoff of 60s; it caps the backoff a failure doubles, so it is the backoff or more`,
+				`@queue CapUnderTheDefaultBackoff: maxBackoff is "10s", shorter than the backoff of 30s`,
+				`@queue NegativeRetention: retain: "-1h" is negative; it is zero or more, and zero keeps no done message`,
+				`@queue RetentionNotWholeSeconds: retain: "1.5s" is not a whole number of seconds`,
+				"@queue RetentionNoDuration: retain: \"a week\" is no duration; write one as `168h`, `30m` or `0s`",
 			},
 		},
 		{

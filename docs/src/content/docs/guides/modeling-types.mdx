@@ -289,7 +289,9 @@ reports every one that is missing or invalid at once, never a value:
 Beside the loader, `api/<service>/values-schema.json` is a JSON Schema of
 the variables (types, defaults and which are required), with an
 `x-superschematic.envVars` list that also says which are enums, scalars
-and secrets. Deployment tooling can check a values file against it; the
+and secrets. An API's lists the fields its edges derive too, and, with a
+service clause, its callers field, whose indexed variables are
+`patternProperties`. Deployment tooling can check a values file against it; the
 [deploy extension](/superschematic/extending/deploy/) is one that maps
 the same fields to Helm values.
 

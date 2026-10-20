@@ -4292,8 +4292,8 @@ image by its tag and uploads the context again for a build, and each
 execution's documents are written again, so a deleted one costs nothing.
 Pulumi's state and the manifests have no rule.
 `TestStateBucketLifecycle` deletes every object the rule covers after a
-deploy, and the next deploy builds nothing. Not built: a deploy lock
-beyond the provisioner's and the runner's.
+deploy, and the next deploy builds nothing. D46's last amendment builds
+a deploy lock beyond the provisioner's and the runner's.
 
 ### D37, amended: the callee's callers field, which the connectors write and the entrypoint verifies against
 
@@ -4328,11 +4328,11 @@ with no credential, from a server with no edge, or for another audience is
 Docker. The parity vectors are unchanged.
 
 The TypeScript and Rust entrypoints read the same field (D51, D57), and
-D63 builds the generic connector. Not built: key rotation, and the field
-outside a stack, where `values-schema.json` does not list it. A call
-between two APIs one server serves carries no credential, so a
-`@requireService` operation refuses it though section 9.3's check counts
-it, which section 9.9 of `docs/stack-model.md` leaves open.
+D63 builds the generic connector. The last amendment of D37 builds the
+field outside a stack, which `values-schema.json` now lists, and a
+credential for a call between two APIs one server serves, which a
+`@requireService` operation refused though section 9.3's check counted
+it. Not built: key rotation.
 
 The rule is reversible until the first release.
 
@@ -4708,8 +4708,8 @@ No job has run on Google Cloud. A live run should check:
 Cloud Run starts an execution on every firing, even while the last one
 runs, where `stack dev` skips that firing.
 
-Not built:
-- a job that runs on every deploy (Cloud Run's `runExecutionToken`).
+D52's last amendment runs a job on every deploy, through the deploy's
+own run of it rather than Cloud Run's `runExecutionToken`.
 
 Workers came with queues in D53, built in #336 and #339, and TypeScript
 jobs and workers in #348.
@@ -5119,11 +5119,11 @@ No worker has run on Google Cloud.
 #348 adds TypeScript workers, which claim through the HTTP runtime with
 the Go ORM's statements (the amendment below), and D65 Rust workers.
 
+D68 builds a backoff that grows with each attempt, the removal of done
+messages, and an operator's command to read, retry and drop dead ones.
+
 Not built:
 - claims on SQLite and D1, in a write transaction (the amendment below);
-- removing `done` messages, and an operator's command to read and retry
-  dead ones;
-- a backoff that grows with each attempt;
 - scaling a worker with its queue's depth.
 
 The rule is reversible until the first release.
@@ -6945,8 +6945,9 @@ No Rust job or worker has run on Cloud Run.
 
 Out of this entry: buckets from a Rust server, job or worker, which
 D54's second amendment builds, and OpenTelemetry export, which D67
-builds. A TypeScript build into another output root relinks the project's
-own `node_modules` there, as a Rust build did before the mirror.
+builds. D65's amendment mirrors TypeScript implementations into another
+output root, so a TypeScript build there no longer relinks the project's
+own `node_modules`.
 
 The rule is reversible until the first release.
 
@@ -7436,5 +7437,144 @@ Not built:
   `./telemetry`.
 - Metrics and logs, as above.
 - A message span that continues the trace that enqueued it.
+
+The rule is reversible until the first release.
+
+### D46, amended: a deploy holds a lock per run, on the target's state store
+
+Two `stack deploy`s, or a deploy and a `stack destroy`, of one environment
+could run at once: Pulumi locks each step's stack, but between steps a
+second deploy read the manifest the first was replacing and planned from it.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `deploy` and `destroy` take the run's lock before they read the manifest and release it when they end, on success, on failure and on the first SIGINT or SIGTERM, whose context the CLI cancels; a second signal kills the process. A second one fails at once, naming the holder, host, process, CI run and time, and the unlock command. `plan` takes none, since `planner` writes nothing, and says when a deploy holds one. Each run, each member of a parameterized environment, has its own. | A lock around each step alone, which Pulumi already has, and which leaves a second deploy planning from a manifest the first is replacing. A lock per environment, which would serialize the members of a parameterized one. |
+| The seam is `registry.StateLocker` (`Lock`, `ReadLock`, `Unlock`), an optional interface of the state store, beside the manifest it guards: `Lock` writes a `DeployLock` where none is, atomically, and returns `*LockHeldError` where one is; `Unlock` removes the run's lock only when its id is the holder's. A store without it deploys unlocked and says so. gcp writes `superschematic/locks/<stack>/<run>.json` in the state bucket with `ifGenerationMatch=0`, and deletes it at the generation that holds its id, under the object admin role `deployer` already holds. | A `TargetSpec.Lock` seam of its own, which would have to stay in step with the state store. A method `StateStore` requires, which breaks every store at once. |
+| The lock is held, not leased: it has no expiry. Its holder releases it by its id, on a context that outlives cancellation, and leaves in place a lock that changed hands. After a crash, `stack unlock <environment> [--param]` shows the lock, asks for the run's name (or takes `--yes`, which a run with no terminal needs), and removes only the lock it showed. | A lease with heartbeats: a holder paused past its lease lets a second deploy run beside it, and nothing the deploy writes, Pulumi's state above all, can check a fencing token. `--force-unlock` on deploy, which folds a destructive choice into the command that then deploys. |
+
+Status: built. `internal/stackdeploy`'s `lock_test.go` holds the lock
+across a step and refuses a second deploy, releases it on a failure and on
+a gate's refusal, and leaves a lock that changed hands; gcp's
+`lock_test.go` runs the generations against its fake `Cloud`; `cli`'s
+`TestStackUnlock` the command. No lock has been taken on Google Cloud.
+
+The rule is reversible until the first release.
+
+### D52, amended: a job runs on every deploy, after the rollout and before the contract
+
+D52 left out a job a deploy runs, such as a backfill each release needs.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| An environment's settings run a job on every deploy: `{ of, job, onDeploy: true }` (`ir.DeployableSettings.OnDeploy`, `ir.ResolvedJob.OnDeploy`). It merges over the `extends` chain as any setting does, so a preview member inherits it, which a schedule does not, and `false` turns it off. `onDeploy` on a server or a worker is refused. | A `@job({ onDeploy })` option: whether a deploy runs a job is the environment's call, as a schedule's on and off is, and the option would put a deploy concern into the API schema's IR, its data forms, the runtimes and the engine. Both a default and an override, two places to read for one switch. |
+| Resolution puts such jobs in a `jobs` step (`ir.StepJobs`), which holds no resources, after the last rollout wave and before the contract, so a job reads what the contract drops and fills what it tightens. The deploy runs each, one at a time, through the target's `JobRunner` with the image the rollout pinned, waits for it, retries included, and fails at that step with the last try's error: the contract does not run, the manifest records the failure, and the next deploy runs the job again. On gcp it is one execution of the job's Cloud Run job, as `stack run` starts one, its error read from Cloud Logging. A target with no job runner, or a job that runs a bundle, is refused before any step. `stack dev` runs each once in the same place, and a failure stops nothing. | Cloud Run's `runExecutionToken` on the job's node: it starts in the job's own wave, before later waves' servers are live, needs a token that changes on every deploy in a graph that is a function of the schemas, reports Cloud Run's message rather than the job's error, and leaves a failed node that the same token never runs again. Running after exposure, where the contract has already dropped what the job may need. Running the jobs at once. |
+
+Status: built. `internal/stack`'s `TestJobOnDeploy` resolves the step,
+`internal/stackdeploy`'s `jobs_test.go` runs it and reports a failure,
+gcp's `TestDeployRunsTheJobOnEveryDeploy` reads a failed execution's error,
+the gcp goldens hold a job that runs on deploy, the Pulumi render goldens
+are unchanged by it, and the local target's
+`TestJobRunsOnceTheEnvironmentIsUp` runs it under `stack dev`. No job has
+run on a deploy on Google Cloud.
+
+The rule is reversible until the first release.
+
+### D65, amended: another output root builds its TypeScript deployables against mirrors of their implementations
+
+D65 mirrored Rust implementations into each output root and left
+TypeScript's as members of every root's Bun workspace, so a build into
+another root (`stack dev --out`) relinked the project's own packages'
+`node_modules` there, and they dangled once that root was gone.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| An output root other than the default one, `<schemas-root>/dist`, builds its TypeScript servers, jobs and workers against mirrors at `<output-root>/impl/<service>/`, and its workspace lists `impl/*` in place of the project's packages. The default root keeps the project's packages as members and holds no mirror. A build that names no schemas root takes its output root as the default. | Mirrors in every root, as Rust has: Bun refuses two members of one name, and the project's package, then a member of no workspace, would lose its `node_modules`, its editor and its `tsc`. A mirror of another name, which gives `main.ts` and the lockfile a second name for each implementation. |
+| A mirror keeps its package's name. Its `package.json` is the package's, its members in order, with a first `"//"` notice that marks the directory as the build's, and each `file:`, `link:`, `./` or `../` dependency re-based for where the mirror sits. Its files are those Rust's mirror chooses, the package's `.gitignore` files deciding, less `node_modules` at any depth and a lockfile at its root; only a changed file is written, and a mirror no package under `server/*/*` depends on is removed, as is every TypeScript mirror in the default root. An image built in another root takes its mirrors and no implementation directory. | Skipping `dist/` by name, which a package whose `main` is built there needs. npm pack's `files`, which leaves a published package's sources out. |
+| A site is mirrored into no root: in another root it is no member of the workspace, and builds in its own package against the default root's install. | Mirroring sites, which the local provisioner, the deploy and the CI build in their own package. |
+
+Status: built. servergen's `TestTypeScriptServersBuildInAnyOutputRoot`
+builds its fixture into two other roots, in turn and at once, installs
+each with `--frozen-lockfile`, type-checks and serves from each, and finds
+the project's links unmoved, and fails without the mirror; the TypeScript
+Dockerfile test builds and serves an image from another root.
+`TestStackDevRunsTheShop` no longer reinstalls the shop after its run into
+an output root of its own. Not built: mirrors of sites.
+
+The rule is reversible until the first release.
+
+### D37, amended: a call between two APIs one server serves carries the server's own loopback credential, and `values-schema.json` lists the callers field
+
+A call between two APIs one server serves stayed on loopback with no
+credential, so the callee's `@requireService` operation refused what
+section 9.3's check counted as admitted (`docs/stack-model.md`, section
+9.9). And a server deployed outside a stack could not be told its
+callers: `values-schema.json` left the callers field out, so its
+`@requireService` operations refused everyone. This settles the HTTP path
+alone; an operation run in process (D43) is another amendment's.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A server that holds a client of an API it serves itself, where that API has a service clause, generates an Ed25519 key pair at start, held only in its process: Go's `serviceauth.NewLoopback`, TypeScript's `loopbackServiceAuth` in the shared wiring, Rust's `Loopback::generate`. The client sends a token under it, D63's, whose `iss`, `sub` and `aud` are the server's deployable, good for 300 seconds and signed again with 60 left, only to a loopback URL and only when its endpoint carries no credential of its own. Each API with a clause takes the key into its callers field as one more issuer before its verifier is built, so the shared verifier checks it. | Exempting such calls from the service step, which admits anything that reaches loopback, a sidecar or a forwarded port. Running the callee in process, which only Rust has (D43). A key per environment that a connector generates and the secret store holds, a secret no other process needs. |
+| The loopback caller is the server, serving every API it serves, so `from` admits what section 9.3's check counts, as it admits a caller on another server. | A token naming the calling API, which would refuse calls the same two APIs pass on two servers and needs a client per calling API. |
+| The connectors do not change: the edge still derives a loopback URL with no credential, and the generated entrypoint adds the credential, since it knows at build time which of its clients call an API it serves. An endpoint set by hand that names another host, or carries a credential, sends what it says. A callers field that already uses the server's name as an issuer is refused at start. One literal rule says what a loopback URL is in all three runtimes, http or https, then `localhost`, `[::1]` or a canonical `127.x.x.x`, then an optional port, and the parity vectors' `loopback` section pins it with the issuer and the token. | A credential source the connector names in the endpoint, which a values file could point at another host. Each language's URL parser, whose leniencies differ. |
+| `values-schema.json` lists an API's callers field when an operation has a service clause, in every server language and even as the API's only configuration: `<API>_CALLERS_ISSUERS` a property, each issuer's, key's and caller's members `patternProperties` under its index with the shapes the loaders accept, and an `x-superschematic` entry naming the field's variables. The CORS and identity config fields stay unlisted: they are optional and default safely. | Leaving the field unlisted, so a deployment outside a stack writes its variables with no contract. One JSON variable holding the field, which section 3.4 refuses. |
+
+Status: built. Each server's serve test runs a server of two APIs behind
+a capturing proxy on loopback: Go's
+`TestAServerCallsAnAPIItServesWithItsLoopbackKey`, TypeScript's
+`ts-merged-stack` in `TestTypeScriptEntrypointCompilesAndServes`, and
+Rust's Warehouse in `TestRustEntrypointCompilesAndServes`. The call to
+the `@requireService` operation is admitted as the server; a call with no
+credential, a token under another key, and the captured token at a second
+process of the server are 401. `serviceauth_parity.json`'s `loopback`
+section holds the three runtimes to one issuer, token, clock and URL rule.
+`TestTheCallersFieldsSchemaIsWhatTheReadersRead` holds the schema to the
+loaders, and `TestAServiceClauseAdmitsItsCallers` starts a server from a
+values file the schema checks. No loopback call has run on Cloud Run.
+
+The rule is reversible until the first release.
+
+## D68. A failed message waits longer with each attempt, a done message is removed after a retention, and an operator lists, retries and drops a queue's dead messages
+
+D53 left a queue's lifecycle half built: a failed message waited the same
+`backoff` every time, a done message stayed in its table for good, and a
+dead one waited for nothing, since no command read it or brought it back.
+The table and its states stay as D53 has them; what changes is how long a
+message waits and what removes it.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A message whose attempt n fails waits `backoff × 2^(n−1)`, capped by a new `@queue` option, `maxBackoff`: whole seconds, no shorter than the backoff, an hour when unsaid or the backoff when that is longer, so an equal one gives a fixed wait. The shared fail statement computes the wait from the row's attempts, `LEAST($4 * power(2, LEAST(attempts - 1, 40)), $6)`, its exponent capped so `power` cannot overflow, and every client passes the cap as `$6` beside the backoff, so Go, TypeScript and Rust cannot disagree. | Each client computing the delay, three copies of one rule. Jitter, which spreads a burst's retries but makes a due time no test can hold across languages. A default cap that would refuse a schema whose backoff alone exceeds it. Renumbering the statement's parameters. |
+| A new `@queue` option, `retain`, a week when unsaid, says how long a done message stays; `0s` keeps none, and that queue's complete statement deletes the message. A done message is never changed again, so its `updated_at` is when it was done: the prune goes by it, and sqlgen gives every queue table a partial index on `updated_at` where the state is done, which the migration plan carries. | `0s` meaning "at the next prune", which keeps rows for up to five minutes. A `completed_at` column, a new reserved name on every row for a value `updated_at` holds. Days in durations, which Go's do not have. |
+| sqlutil writes a `prune` statement that deletes up to `$2` done messages done `$1` seconds ago or more, oldest first, `FOR UPDATE SKIP LOCKED`, never a dead one, and each client prunes up to a limit and returns the count (`Prune`, `prune`, `PostgresQueue::prune`). Every worker loop prunes as it starts and every five minutes, in batches of 1000 until one comes back short, each with its five-second operation timeout, and logs `done messages pruned` at info when it removed any and `pruning the done messages failed` at warn. Every instance prunes without coordination, and a stopping worker drops its prune. | One unbounded delete, holding its locks over the whole backlog. A pruner deployable, a stack job or `pg_cron`, each a schedule some queues would lack. One elected pruner, which needs a lock or a leader. Pruning in the claim path, which would slow claims. |
+| `superschematic stack queue dead\|retry\|drop <environment> <db>.<Queue>`, in the stack group. `dead` lists the dead messages, the oldest death first, up to `--limit` (100), with their total, each one's id, attempts, time of death, last error and columns; `retry` makes those named, or all with `--all`, ready, due now, with no attempts and no claim, the last error kept; `drop` deletes those named, or all with `--all` and `--yes`. A retry or a drop changes every message named or none, and names what each one that is not dead is. `--format json` prints the runner's result. | A command outside the stack group, with no environment to resolve. A retry of no ids meaning all of them, an accidental mass retry. Changing the dead ones named and skipping the rest, so a mistyped id does part of the job silently. |
+| Its statements are `sqlutil.PostgresQueueOperatorStatements`, a function of their own beside the claims, which the clients do not carry: the listing with its total, the states of the ids named, and retry and drop of the ids named or of all, the ids one `$1::text[]::uuid[]` parameter. The time of death is `updated_at`, which expire and fail set and nothing changes after. The migration runner runs them, `superschematic-migrate queue`, from a document (`internal/queueops`) the CLI writes with the compiler's statements, as a plan carries its own, so the compiler links no driver (D27). | The statements among `PostgresQueueStatements`, which the Go ORM, `queues.ts` and `queues.rs` carry. A `died_at` column. SQL the CLI writes, a second writer of it. `docker exec psql` in the local container, which quotes ids into SQL and works locally alone. |
+| On the local target it reaches the database at the URL the environment resolves from the schemas, with no build, on the container `stack dev` runs, and it refuses a queue on a database of another dialect and any environment on another target, saying what is not built. | A Cloud SQL Auth Proxy or a public address from the operator's machine, a new way to reach Cloud SQL. |
+
+Status: built on Postgres, in Go, TypeScript and Rust.
+`TestQueueParityOfGoTypeScriptAndRustOnPostgres` gains two cases: a
+message each side fails in turn comes due after 60, 120 and then 200
+seconds, the fixture's cap, and dies at its fourth failure; and each
+side's prune removes the others' done messages past the retention in
+batches, leaving one done a minute ago and one dead for a month. The
+generated Go ORM's own test, the runtimes' worker tests (Rust's on a
+paused clock) and their Postgres tests cover the cadence, the batches, a
+failed or hung prune and a `0s` retention. The migration runner's
+`TestQueueOnPostgres` lists, retries and drops on sqlgen's own tables,
+`internal/queueops`' goldens hold the documents, and `cli`'s
+`TestStackQueueRefuses` and `TestStackQueueOnALocalEnvironment` drive the
+command.
+
+Not built:
+- `stack queue` on a cloud environment. On gcp the document would run as
+  an execution of the migration job, which reaches Cloud SQL through its
+  dialer, behind a target seam, with its result read back. Reading it
+  from Cloud Logging, as a failed migration's error is, would write the
+  dead messages' bodies, which may hold personal data, into logs every
+  holder of Logs Viewer reads; a result object in the state bucket needs
+  a write path the migrator does not have (D46, amended). Which way is
+  open.
+- Scaling a worker with its queue's depth.
+- Claims on SQLite and D1.
 
 The rule is reversible until the first release.

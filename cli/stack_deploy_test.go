@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
@@ -16,6 +18,7 @@ import (
 
 	"github.com/parable-work/superschematic/internal/stack/local"
 	"github.com/parable-work/superschematic/internal/stackdeploy"
+	ir "github.com/parable-work/superschematic/ir"
 	"github.com/parable-work/superschematic/registry"
 	"github.com/parable-work/superschematic/stack/stacktest"
 )
@@ -389,6 +392,70 @@ func TestStackBuild(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(out), &result))
 	assert.Empty(t, result.Built)
 	assert.Equal(t, []string{"demo-api"}, result.Unchanged)
+}
+
+// TestStackUnlock: a lock a killed deploy of Staging left refuses the next
+// deploy and the destroy, naming who holds it and the unlock command, and
+// the plan says it is held. Without a terminal unlock refuses and the lock
+// stays; with --yes it removes it, and the deploy runs. Unlock of a run
+// with no lock says so, a member's takes its parameter, and a local
+// environment holds none (D46, amended).
+func TestStackUnlock(t *testing.T) {
+	stackDir := demoTree(t)
+	ext := &stacktest.Extension{State: &stacktest.FakeState{}}
+	run := func(args ...string) (string, error) {
+		t.Helper()
+		var stdout, stderr bytes.Buffer
+		root := New(Config{}, ext)
+		root.SetOut(&stdout)
+		root.SetErr(&stderr)
+		root.SetIn(strings.NewReader(""))
+		root.SetArgs(append([]string{"stack"}, append(args, "--stack", stackDir)...))
+		err := root.Execute()
+		return stdout.String(), err
+	}
+	useTerminal(t, &fakeTerminal{answers: []string{"key-1"}})
+	staging := registry.Run{Environment: &ir.ResolvedEnvironment{Environment: "Staging"}}
+	crashed := registry.DeployLock{ID: "0123456789abcdef", Run: "Staging", Operation: "deploy", Holder: "ana", Host: "ana-laptop", PID: 4242,
+		Time: time.Date(2026, 10, 19, 9, 0, 0, 0, time.UTC)}
+	require.NoError(t, ext.State.Lock(context.Background(), staging, crashed))
+
+	_, err := run("deploy", "Staging", "--image", demoImage(1))
+	require.ErrorContains(t, err, "the deploy lock of Staging is held by a deploy by ana on ana-laptop (pid 4242) since 2026-10-19T09:00:00Z, ")
+	require.ErrorContains(t, err, "remove its lock with `superschematic stack unlock Staging`")
+	_, err = run("destroy", "Staging", "--yes")
+	require.ErrorIs(t, err, registry.ErrLockHeld)
+	out, err := run("plan", "Staging", "--image", demoImage(1))
+	require.NoError(t, err)
+	assert.Contains(t, out, "The deploy lock of Staging is held by a deploy by ana on ana-laptop (pid 4242) since 2026-10-19T09:00:00Z: the plan may change when it ends.")
+
+	_, err = run("unlock", "Staging")
+	require.ErrorContains(t, err, "the deploy lock of Staging is held by a deploy by ana on ana-laptop (pid 4242) since 2026-10-19T09:00:00Z; unlock asks for the run's name at a terminal, and stdin is not one: pass --yes to remove it")
+	held, err := ext.State.ReadLock(context.Background(), staging)
+	require.NoError(t, err)
+	require.NotNil(t, held)
+	out, err = run("unlock", "Staging", "--yes")
+	require.NoError(t, err)
+	assert.Equal(t, "unlocked Staging\n", out)
+	out, err = run("unlock", "Staging", "--yes")
+	require.NoError(t, err)
+	assert.Equal(t, "no deploy holds the lock of Staging\n", out)
+	_, err = run("deploy", "Staging", "--image", demoImage(1))
+	require.NoError(t, err)
+
+	member := registry.Run{Environment: &ir.ResolvedEnvironment{Environment: "Preview", Parameters: []string{"pr"}}, Parameters: map[string]string{"pr": "7"}}
+	crashed.Run = "Preview.pr-7"
+	require.NoError(t, ext.State.Lock(context.Background(), member, crashed))
+	_, err = run("deploy", "Preview", "--param", "pr=7", "--image", demoImage(2))
+	require.ErrorContains(t, err, "`superschematic stack unlock Preview --param pr=7`")
+	_, err = run("unlock", "Preview")
+	require.ErrorContains(t, err, "takes parameter pr")
+	out, err = run("unlock", "Preview", "--param", "pr=7", "--yes")
+	require.NoError(t, err)
+	assert.Equal(t, "unlocked Preview.pr-7\n", out)
+
+	_, err = run("unlock", "Dev")
+	require.ErrorContains(t, err, "environment Dev is on the local target, which `stack unlock` does not deploy")
 }
 
 // TestStackBootstrapRecordsProjectNumber bootstraps Preview of the

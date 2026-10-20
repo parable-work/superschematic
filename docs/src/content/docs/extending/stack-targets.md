@@ -306,7 +306,7 @@ seams on its `TargetSpec`, each an interface in `registry`:
 | `Migrations` | `MigrationRunner` | runs one phase of each database's migration plans between two steps of the deploy |
 | `Builder` | `ImageBuilder` | builds a server's or a job's image from the Dockerfile a stack's build writes, and returns it by digest; `BuildRequest.Deployable` names which |
 | `CI` | `CIIdentities` | says how a generated CI job signs in to a resolved environment as `planner` or `deployer`: a `CIIdentity`, or nil when it cannot yet |
-| `Jobs` | `JobRunner` | runs a deployed job once on demand, for `stack run`: a `JobRunRequest` names the run, the job and the image the deploy manifest records, and `RunJob` returns when the run ends, with the last try's error when it fails (D52) |
+| `Jobs` | `JobRunner` | runs a deployed job once on demand, for `stack run` and for the deploy's jobs step, which runs each job an environment runs on every deploy after the rollout (D52, amended): a `JobRunRequest` names the run, the job and the image the deploy manifest records, or the rollout just pinned, and `RunJob` returns when the run ends, with the last try's error when it fails (D52) |
 | `Sites` | `SitePublisher` | puts a site's files under their digest, and its config for a run, where its platform serves them (D55) |
 | `Bundles` | `BundlePublisher` | keeps the files of a server's, job's or worker's bundle under their digest, `Publish(ctx, run, deployable, dir, digest)` (D64) |
 | `PreDestroy` | `DestroyPreparer` | readies a run's resources before `stack destroy` hands them to the provisioner, such as emptying a member's buckets; an error stops the destroy (D64) |
@@ -316,9 +316,26 @@ refuses any of them but `Secrets` without a provisioner, and any of them
 but `State` and `Secrets` without `State`. With no `Migrations`, a deploy
 that has a migration to run is refused; with no `Builder`, every image
 comes from `--image` or the deploy manifest; with no `Jobs`, `stack run`
-refuses the target's environments; with no `Sites` or `Bundles`, an
+refuses the target's environments, and so does a deploy of one that runs
+a job on every deploy; with no `Sites` or `Bundles`, an
 environment with a site, or with a deployable that runs a bundle, does not
 deploy.
+
+A `StateStore` should also be a `registry.StateLocker`, which keeps a
+deploy lock per run beside its manifest (D46, amended): `Lock(ctx, run,
+lock)` writes the `DeployLock` only where none is, atomically, and
+returns a `*registry.LockHeldError` holding the lock that is there
+otherwise; `ReadLock(ctx, run)` returns the lock, or nil; and
+`Unlock(ctx, run, id)` removes the lock only while its `ID` is `id`,
+returning a `*LockHeldError` for one another took. A deploy and a
+destroy take it before they read the manifest and release it when they
+end, so two of them never run on one run at once; `stack unlock` removes
+one a killed deploy left. The lock is held, with no expiry. Without a
+`StateLocker`, a deploy runs with no lock and says so. gcp's is an
+object of the state bucket written with `ifGenerationMatch=0` and
+deleted at the generation it read; a store over S3's API can take it
+with a conditional write (`If-None-Match: *`), and check the ID it reads
+back before it deletes.
 
 A `BundlePublisher` should also be a `registry.ArtifactFetcher`,
 `Fetch(ctx, run, deployable, digest, dest)`, which writes the files it

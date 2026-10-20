@@ -261,6 +261,11 @@ type Server struct {
 	Databases []*Database
 	Clients   []*Client
 
+	// Loopback is the server's loopback key, nil without one: a server
+	// has one when it calls an API it serves itself whose operations have a
+	// service clause (docs/stack-model.md, section 9.9).
+	Loopback *Loopback
+
 	// Buckets are the buckets the server opens once, for every API that
 	// lists it. With one, buckets.go opens each on GCS, or on an emulator
 	// that serves its API, and go.mod requires GCS's Go client; with none
@@ -290,6 +295,20 @@ type Server struct {
 // module proxy.
 func (s *Server) Pinned() bool {
 	return slices.ContainsFunc(s.Replaces, func(r Replace) bool { return r.Version != "" })
+}
+
+// Loopback is a server's loopback key (docs/stack-model.md, section 9.9):
+// a call between two APIs the server serves reaches it on its own loopback
+// address, and no connector gives it a credential. So the server generates
+// an Ed25519 key pair when it starts, which only its process holds; each
+// client of an API it serves whose operations have a service clause sends
+// a token signed with it, and the service authenticator of each API it
+// serves with a service clause accepts the key beside its callers field,
+// as the server serving Serves. Var is its variable in run, and its
+// parameter's name where it is passed.
+type Loopback struct {
+	Var    string
+	Serves []string
 }
 
 // Job is the job a job's entrypoint runs: its @job class and the method of
@@ -436,6 +455,11 @@ type Client struct {
 	// From is the expression that reads the callee's endpoint from the
 	// first calling API's config.
 	From string
+
+	// Loopback is true when the callee is an API the server serves itself
+	// whose operations have a service clause: the client then sends the
+	// server's loopback credential when its endpoint carries none.
+	Loopback bool
 }
 
 // Docker is a Dockerfile's plan. Paths are relative to the repository
@@ -731,6 +755,7 @@ func Plan(in Input) (*Server, error) {
 	if s.Worker != nil {
 		s.Worker.Database = apis[0].Database
 	}
+	s.planLoopback(taken)
 	slices.Sort(s.CloudSQL)
 	dir, err := filepath.Abs(in.Dir)
 	if err != nil {
@@ -744,6 +769,29 @@ func Plan(in Input) (*Server, error) {
 		return nil, err
 	}
 	return s, nil
+}
+
+// planLoopback gives a server that calls an API it serves itself, whose
+// operations have a service clause, its loopback key, and marks each such
+// client to send it (docs/stack-model.md, section 9.9). A job or a worker
+// has none: an API it calls is served by another deployable, whose
+// connector gives the call its credential.
+func (s *Server) planLoopback(taken names) {
+	if s.Background() {
+		return
+	}
+	serves := make([]string, len(s.APIs))
+	guarded := map[string]bool{}
+	for i, a := range s.APIs {
+		serves[i] = a.Service
+		guarded[a.Service] = a.ServiceAuth
+	}
+	for _, c := range s.Clients {
+		c.Loopback = guarded[c.Service]
+	}
+	if slices.ContainsFunc(s.Clients, func(c *Client) bool { return c.Loopback }) {
+		s.Loopback = &Loopback{Var: taken.take("loopback"), Serves: serves}
+	}
 }
 
 // planModule plans go.mod: the third-party modules main.go, cloudsql.go

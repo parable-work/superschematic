@@ -27,6 +27,8 @@ var queueParitySubtests = []string{
 	"GoAndTypeScriptReadRust",
 	"EachChangesTheOthersClaims",
 	"AttemptsAndStatesAgree",
+	"BackoffGrowsForEverySide",
+	"EachPrunesTheOthersDoneMessages",
 	"LocationsAndDurationsAgree",
 }
 
@@ -58,6 +60,13 @@ var queueParitySubtests = []string{
 //   - AttemptsAndStatesAgree: one message's attempts pass through every
 //     side until it is dead, and a claim one side lets expire another
 //     claims again;
+//   - BackoffGrowsForEverySide: each side's failure of another's claim
+//     makes the message due after the backoff doubled for each attempt
+//     before, capped at the maximum backoff, and no side claims it sooner
+//     (D68);
+//   - EachPrunesTheOthersDoneMessages: each side's prune deletes, a batch
+//     at a time, the messages the other two completed past the retention,
+//     and leaves one done within it and a dead one;
 //   - LocationsAndDurationsAgree: on DeliveryPlanned, each side reads the
 //     locations and durations each enqueues, a duration truncated to its
 //     microseconds, and an interval written with days and months as their
@@ -408,6 +417,10 @@ async fn run_on<M: Serialize + DeserializeOwned>(descriptor: &str, args: &[Strin
             queue.release(arg(rest, 0)?, arg(rest, 1)?).await.map_err(refused)?;
             Value::Null
         }
+        "prune" => {
+            let limit: usize = arg(rest, 0)?.parse().map_err(|err| format!("limit: {err}"))?;
+            Value::from(queue.prune(limit).await.map_err(refused)?)
+        }
         other => return Err(format!("no step {other}")),
     };
     pool.close();
@@ -455,6 +468,9 @@ try {
       break;
     case 'complete':
       await queue.complete(args[0], args[1]);
+      break;
+    case 'prune':
+      result = await queue.prune(Number(args[0]));
       break;
     default:
       throw new Error('no step ' + step);
@@ -518,6 +534,7 @@ type side struct {
 	fail     func(id, token, cause string) (bool, error)
 	extend   func(id, token string, seconds int) error
 	release  func(id, token string) error
+	prune    func(limit int) (int, error)
 }
 
 // parity is a schema of a subtest's own holding the queue's tables, the Go
@@ -686,6 +703,7 @@ func (p *parity) sides() map[string]side {
 			return p.queue.Extend(ctx, id, token, time.Duration(seconds)*time.Second)
 		},
 		release: func(id, token string) error { return p.queue.Release(ctx, id, token) },
+		prune:   func(limit int) (int, error) { return p.queue.Prune(ctx, limit) },
 	}
 	process := func(name string) side {
 		return side{
@@ -722,6 +740,17 @@ func (p *parity) sides() map[string]side {
 				_, err := p.step(name, "release", id, token)
 				return err
 			},
+			prune: func(limit int) (int, error) {
+				out, err := p.step(name, "prune", fmt.Sprint(limit))
+				if err != nil {
+					return 0, err
+				}
+				var n int
+				if _, err := fmt.Sscan(out, &n); err != nil {
+					return 0, fmt.Errorf("the %s prune printed %q", name, out)
+				}
+				return n, nil
+			},
 		}
 	}
 	return map[string]side{"Go": goSide, "TypeScript": process("TypeScript"), "Rust": process("Rust")}
@@ -755,6 +784,24 @@ func (p *parity) expect(id, state string, attempts int, lastError string) {
 	p.t.Helper()
 	if s, a, e := p.state(id); s != state || a != attempts || e != lastError {
 		p.t.Fatalf("message %s is %s after %d attempts, its last error %q; want %s after %d, %q", id, s, a, e, state, attempts, lastError)
+	}
+}
+
+// dueIn is the seconds until a message is due.
+func (p *parity) dueIn(id string) float64 {
+	p.t.Helper()
+	var seconds float64
+	if err := p.pool.QueryRow(p.ctx, "SELECT extract(epoch FROM due_at - now())::float8 FROM order_placed_queue WHERE id = $1::uuid", id).Scan(&seconds); err != nil {
+		p.t.Fatal(err)
+	}
+	return seconds
+}
+
+// exec runs a statement on the parity's schema.
+func (p *parity) exec(sql string, args ...any) {
+	p.t.Helper()
+	if _, err := p.pool.Exec(p.ctx, sql, args...); err != nil {
+		p.t.Fatal(err)
 	}
 }
 
@@ -853,6 +900,8 @@ func TestQueueParity(t *testing.T) {
 	t.Run("GoAndTypeScriptReadRust", testGoAndTypeScriptReadRust)
 	t.Run("EachChangesTheOthersClaims", testEachChangesTheOthersClaims)
 	t.Run("AttemptsAndStatesAgree", testAttemptsAndStatesAgree)
+	t.Run("BackoffGrowsForEverySide", testBackoffGrowsForEverySide)
+	t.Run("EachPrunesTheOthersDoneMessages", testEachPrunesTheOthersDoneMessages)
 	t.Run("LocationsAndDurationsAgree", testLocationsAndDurationsAgree)
 }
 
@@ -1303,6 +1352,112 @@ func testAttemptsAndStatesAgree(t *testing.T) {
 		t.Fatalf("Go's complete of Rust's claim: %v", err)
 	}
 	p.expect(again.ID, "done", 2, "")
+}
+
+// testBackoffGrowsForEverySide: a message TypeScript enqueues fails three
+// times, each failure another side's of a third side's claim. OrderPlaced's
+// backoff is a minute and its maximum 200s, so the first failure makes it
+// due in 60s, the second in 120s and the third in 200s, not 240s. Within
+// each wait no side claims it: brought to two seconds before it is due,
+// every side's claim finds nothing; once due, the next side claims it. The
+// fourth failure, past the three retries, leaves it dead.
+func testBackoffGrowsForEverySide(t *testing.T) {
+	p := newParity(t)
+	sides := p.sides()
+	const id = "9b8a7c6d-5e4f-4a3b-9c2d-1e0f9a8b7c6d"
+	sides["TypeScript"].enqueue(orderJSON(id))
+	for i, round := range []struct {
+		claimer, failer string
+		wait            float64
+	}{
+		{"Go", "Rust", 60},
+		{"Rust", "TypeScript", 120},
+		{"TypeScript", "Go", 200},
+	} {
+		attempt := i + 1
+		c := p.one(sides[round.claimer], attempt)
+		cause := fmt.Sprintf("attempt %d failed in %s", attempt, round.failer)
+		if dead, err := sides[round.failer].fail(c.ID, c.Token, cause); err != nil || dead {
+			t.Fatalf("%s's fail of %s's attempt %d = %t, %v", round.failer, round.claimer, attempt, dead, err)
+		}
+		p.expect(c.ID, "ready", attempt, cause)
+		if left := p.dueIn(c.ID); left > round.wait || left < round.wait-5 {
+			t.Fatalf("after %s's fail of attempt %d the message is due in %.1fs, want about %.0fs", round.failer, attempt, left, round.wait)
+		}
+		p.exec("UPDATE order_placed_queue SET due_at = now() + interval '2 seconds' WHERE id = $1::uuid", c.ID)
+		for name, s := range sides {
+			if got := s.claim(1); len(got) != 0 {
+				t.Fatalf("%s claimed %+v within the backoff of attempt %d", name, got, attempt)
+			}
+		}
+		p.due()
+	}
+	last := p.one(sides["Go"], 4)
+	if dead, err := sides["Rust"].fail(last.ID, last.Token, "the last"); err != nil || !dead {
+		t.Fatalf("Rust's fail of the fourth attempt = %t, %v, want dead", dead, err)
+	}
+	p.expect(last.ID, "dead", 4, "the last")
+}
+
+// testEachPrunesTheOthersDoneMessages: for each side that prunes, the other
+// two each enqueue, claim and complete three messages, which are then done
+// two hours ago, past OrderPlaced's hour's retention; one more done a
+// minute ago is within it, and one dead a month is never pruned. The
+// pruner's batches of four delete four, then the other two, then nothing,
+// and leave the recent one and the dead one.
+func testEachPrunesTheOthersDoneMessages(t *testing.T) {
+	names := []string{"Go", "TypeScript", "Rust"}
+	for _, pruner := range names {
+		t.Run(pruner+"Prunes", func(t *testing.T) {
+			p := newParity(t)
+			sides := p.sides()
+			var old []string
+			for _, other := range names {
+				if other == pruner {
+					continue
+				}
+				s := sides[other]
+				for i := range 3 {
+					s.enqueue(orderJSON(fmt.Sprintf("9b8a7c6d-5e4f-4a3b-9c2d-1e0f9a8b7c%02d", len(old)+i)))
+				}
+				claims := s.claim(3)
+				if len(claims) != 3 {
+					t.Fatalf("%s claimed %d of its three messages", other, len(claims))
+				}
+				for _, c := range claims {
+					if err := s.complete(c.ID, c.Token); err != nil {
+						t.Fatalf("%s's complete: %v", other, err)
+					}
+					old = append(old, c.ID)
+				}
+			}
+			for _, id := range old {
+				p.exec("UPDATE order_placed_queue SET updated_at = now() - interval '2 hours' WHERE id = $1::uuid", id)
+			}
+			sides["Go"].enqueue(orderJSON("0c7a0e14-6a43-4f0e-8f1b-5d6c7e8f9a0b"))
+			recent := p.one(sides["Go"], 1)
+			if err := sides["Rust"].complete(recent.ID, recent.Token); err != nil {
+				t.Fatal(err)
+			}
+			p.exec("UPDATE order_placed_queue SET updated_at = now() - interval '1 minute' WHERE id = $1::uuid", recent.ID)
+			sides["TypeScript"].enqueue(orderJSON("5e6f7a8b-9c0d-4e1f-a2b3-c4d5e6f7a8b9"))
+			dead := p.one(sides["TypeScript"], 1)
+			p.exec("UPDATE order_placed_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL, updated_at = now() - interval '30 days' WHERE id = $1::uuid", dead.ID)
+
+			for i, want := range []int{4, 2, 0} {
+				if n, err := sides[pruner].prune(4); err != nil || n != want {
+					t.Fatalf("%s's prune %d deleted %d, %v; want %d", pruner, i+1, n, err, want)
+				}
+			}
+			var deadIDs, doneIDs string
+			if err := p.pool.QueryRow(p.ctx, "SELECT COALESCE(string_agg(id::text, ',') FILTER (WHERE state = 'dead'), ''), COALESCE(string_agg(id::text, ',') FILTER (WHERE state = 'done'), '') FROM order_placed_queue").Scan(&deadIDs, &doneIDs); err != nil {
+				t.Fatal(err)
+			}
+			if deadIDs != dead.ID || doneIDs != recent.ID {
+				t.Fatalf("after %s's prunes the queue holds dead %q and done %q, want the dead %s and the recent %s", pruner, deadIDs, doneIDs, dead.ID, recent.ID)
+			}
+		})
+	}
 }
 
 // deliveryJSON is a message of DeliveryPlanned as JSON.

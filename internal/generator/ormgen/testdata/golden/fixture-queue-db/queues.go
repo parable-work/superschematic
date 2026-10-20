@@ -13,9 +13,11 @@ package orm
 // claim at once take different messages, and gives each a new claim token
 // and one more attempt. Delivery is at least once: a handler may see a
 // message again after a worker dies holding it. A handler that fails makes
-// the message due again after the queue's backoff, until its retries are
-// spent, and then the message is dead, where an operator finds it. Times
-// are the database's clock.
+// the message due again after the queue's backoff, doubled for each attempt
+// before it and capped at the queue's maximum backoff, until its retries
+// are spent, and then the message is dead, where an operator finds it. A
+// done message stays for the queue's retention, then a worker's Prune
+// removes it; dead messages stay. Times are the database's clock.
 
 import (
 	"context"
@@ -42,18 +44,23 @@ var ErrClaimLost = errors.New("the claim on the message is lost: it expired, and
 type queueTable struct {
 	name string
 	// retries is how many times a failed message is handled again; backoff
-	// is how long it then waits.
+	// is how long it then waits, doubled for each attempt before, up to
+	// maxBackoff.
 	retries    int
 	backoff    time.Duration
+	maxBackoff time.Duration
+	// retain is how long a done message stays before a prune removes it.
+	retain     time.Duration
 	statements queueStatements
 }
 
 // queueStatements are a queue's statements on Postgres: insert begins an
 // enqueue; expire marks dead each message whose last attempt's claim
 // expired; claim claims up to $1 due messages for $2 seconds; complete,
-// fail, extend and release change message $1 while token $2 claims it.
+// fail, extend and release change message $1 while token $2 claims it;
+// prune deletes up to $2 messages done $1 seconds ago or more.
 type queueStatements struct {
-	insert, expire, claim, complete, fail, extend, release string
+	insert, expire, claim, complete, fail, extend, release, prune string
 }
 
 // insert writes one message into the table in tx: the columns its fields
@@ -106,11 +113,12 @@ func (t queueTable) complete(ctx context.Context, pool *pgxpool.Pool, id, token 
 }
 
 // fail records cause on a claimed message and makes it due again after the
+// backoff, doubled for each attempt before and capped at the maximum
 // backoff, or marks it dead when its retries are spent. It reports whether
 // the message is dead.
 func (t queueTable) fail(ctx context.Context, pool *pgxpool.Pool, id, token, cause string) (bool, error) {
 	var state string
-	err := pool.QueryRow(ctx, t.statements.fail, id, token, t.retries, t.backoff.Seconds(), cause).Scan(&state)
+	err := pool.QueryRow(ctx, t.statements.fail, id, token, t.retries, t.backoff.Seconds(), cause, t.maxBackoff.Seconds()).Scan(&state)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, fmt.Errorf("fail message %s on %s: %w", id, t.name, ErrClaimLost)
 	}
@@ -131,6 +139,19 @@ func (t queueTable) release(ctx context.Context, pool *pgxpool.Pool, id, token s
 	return t.update(ctx, pool, "release", t.statements.release, id, token)
 }
 
+// prune deletes up to limit messages done for the retention or longer, and
+// returns how many it deleted. It never deletes a dead message.
+func (t queueTable) prune(ctx context.Context, pool *pgxpool.Pool, limit int) (int, error) {
+	if limit <= 0 {
+		return 0, nil
+	}
+	tag, err := pool.Exec(ctx, t.statements.prune, t.retain.Seconds(), limit)
+	if err != nil {
+		return 0, fmt.Errorf("prune %s: %w", t.name, err)
+	}
+	return int(tag.RowsAffected()), nil
+}
+
 // update runs statement, which changes the message id while token claims
 // it.
 func (t queueTable) update(ctx context.Context, pool *pgxpool.Pool, what, statement, id, token string, args ...any) error {
@@ -146,9 +167,11 @@ func (t queueTable) update(ctx context.Context, pool *pgxpool.Pool, what, statem
 
 // orderPlacedQueue is the table of the queue OrderPlaced.
 var orderPlacedQueue = queueTable{
-	name:    `order_placed_queue`,
-	retries: 3,
-	backoff: 60 * time.Second,
+	name:       `order_placed_queue`,
+	retries:    3,
+	backoff:    60 * time.Second,
+	maxBackoff: 200 * time.Second,
+	retain:     3600 * time.Second,
 	statements: queueStatements{
 		insert: `INSERT INTO order_placed_queue`,
 		expire: `UPDATE order_placed_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
@@ -169,7 +192,7 @@ RETURNING q.id::text, q.claim_token::text, q.attempts, q.order_id, q.placed_at, 
 WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
 		fail: `UPDATE order_placed_queue SET
   state = CASE WHEN attempts > $3 THEN 'dead' ELSE 'ready' END,
-  due_at = CASE WHEN attempts > $3 THEN due_at ELSE now() + make_interval(secs => $4) END,
+  due_at = CASE WHEN attempts > $3 THEN due_at ELSE now() + make_interval(secs => LEAST($4 * power(2, LEAST(attempts - 1, 40)), $6)) END,
   last_error = $5, claim_token = NULL, claim_expires_at = NULL, updated_at = now()
 WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'
 RETURNING state`,
@@ -177,6 +200,13 @@ RETURNING state`,
 WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
 		release: `UPDATE order_placed_queue SET state = 'ready', attempts = GREATEST(attempts - 1, 0), claim_token = NULL, claim_expires_at = NULL, updated_at = now()
 WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
+		prune: `DELETE FROM order_placed_queue WHERE id IN (
+  SELECT id FROM order_placed_queue
+  WHERE state = 'done' AND updated_at <= now() - make_interval(secs => $1)
+  ORDER BY updated_at
+  LIMIT $2
+  FOR UPDATE SKIP LOCKED
+)`,
 	},
 }
 
@@ -224,8 +254,9 @@ func EnqueueOrderPlaced(ctx context.Context, tx TxInterface, msg *types.OrderPla
 }
 
 // OrderPlacedQueue claims the messages of the queue OrderPlaced for a worker. A
-// message whose handler fails is due again after 60s, and is dead
-// after 3 such retries.
+// message whose handler fails is due again after 60s, doubled for each
+// attempt before, up to 200s, and is dead after 3 such retries. A done
+// message stays 3600s, then Prune removes it.
 //
 // Placed when an order is: the worker that fulfils orders handles it.
 type OrderPlacedQueue struct {
@@ -285,8 +316,9 @@ func (q *OrderPlacedQueue) Complete(ctx context.Context, id, token string) error
 }
 
 // Fail records cause on the message id, which token claims, and makes it
-// due again after the backoff, or dead when its retries are spent. It
-// reports whether the message is dead.
+// due again after the backoff, doubled for each attempt before and capped at
+// the maximum backoff, or dead when its retries are spent. It reports
+// whether the message is dead.
 func (q *OrderPlacedQueue) Fail(ctx context.Context, id, token, cause string) (bool, error) {
 	return orderPlacedQueue.fail(ctx, q.pool, id, token, cause)
 }
@@ -301,11 +333,20 @@ func (q *OrderPlacedQueue) Release(ctx context.Context, id, token string) error 
 	return orderPlacedQueue.release(ctx, q.pool, id, token)
 }
 
+// Prune deletes up to limit messages done 3600s ago or more, the oldest
+// first, and returns how many it deleted; a worker runs it again while it
+// deletes limit. It never deletes a dead message.
+func (q *OrderPlacedQueue) Prune(ctx context.Context, limit int) (int, error) {
+	return orderPlacedQueue.prune(ctx, q.pool, limit)
+}
+
 // pingQueue is the table of the queue Ping.
 var pingQueue = queueTable{
-	name:    `ping_queue`,
-	retries: 5,
-	backoff: 30 * time.Second,
+	name:       `ping_queue`,
+	retries:    5,
+	backoff:    30 * time.Second,
+	maxBackoff: 3600 * time.Second,
+	retain:     0 * time.Second,
 	statements: queueStatements{
 		insert: `INSERT INTO ping_queue`,
 		expire: `UPDATE ping_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
@@ -322,11 +363,11 @@ UPDATE ping_queue AS q SET state = 'claimed', attempts = q.attempts + 1, claim_t
   claim_expires_at = now() + make_interval(secs => $2), updated_at = now()
 FROM due WHERE q.id = due.id
 RETURNING q.id::text, q.claim_token::text, q.attempts, q.sent_at`,
-		complete: `UPDATE ping_queue SET state = 'done', claim_token = NULL, claim_expires_at = NULL, updated_at = now()
+		complete: `DELETE FROM ping_queue
 WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
 		fail: `UPDATE ping_queue SET
   state = CASE WHEN attempts > $3 THEN 'dead' ELSE 'ready' END,
-  due_at = CASE WHEN attempts > $3 THEN due_at ELSE now() + make_interval(secs => $4) END,
+  due_at = CASE WHEN attempts > $3 THEN due_at ELSE now() + make_interval(secs => LEAST($4 * power(2, LEAST(attempts - 1, 40)), $6)) END,
   last_error = $5, claim_token = NULL, claim_expires_at = NULL, updated_at = now()
 WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'
 RETURNING state`,
@@ -334,6 +375,13 @@ RETURNING state`,
 WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
 		release: `UPDATE ping_queue SET state = 'ready', attempts = GREATEST(attempts - 1, 0), claim_token = NULL, claim_expires_at = NULL, updated_at = now()
 WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
+		prune: `DELETE FROM ping_queue WHERE id IN (
+  SELECT id FROM ping_queue
+  WHERE state = 'done' AND updated_at <= now() - make_interval(secs => $1)
+  ORDER BY updated_at
+  LIMIT $2
+  FOR UPDATE SKIP LOCKED
+)`,
 	},
 }
 
@@ -355,8 +403,9 @@ func EnqueuePing(ctx context.Context, tx TxInterface, msg *types.Ping) error {
 }
 
 // PingQueue claims the messages of the queue Ping for a worker. A
-// message whose handler fails is due again after 30s, and is dead
-// after 5 such retries.
+// message whose handler fails is due again after 30s, doubled for each
+// attempt before, up to 3600s, and is dead after 5 such retries. A done
+// message is removed as it completes.
 //
 // Sent when nobody asked for anything in particular.
 type PingQueue struct {
@@ -400,14 +449,16 @@ func (q *PingQueue) Claim(ctx context.Context, n int, lease time.Duration) ([]Pi
 	return claims, nil
 }
 
-// Complete marks the message id, which token claims, done.
+// Complete deletes the message id, which token claims: it is done, and the
+// queue keeps no done message.
 func (q *PingQueue) Complete(ctx context.Context, id, token string) error {
 	return pingQueue.complete(ctx, q.pool, id, token)
 }
 
 // Fail records cause on the message id, which token claims, and makes it
-// due again after the backoff, or dead when its retries are spent. It
-// reports whether the message is dead.
+// due again after the backoff, doubled for each attempt before and capped at
+// the maximum backoff, or dead when its retries are spent. It reports
+// whether the message is dead.
 func (q *PingQueue) Fail(ctx context.Context, id, token, cause string) (bool, error) {
 	return pingQueue.fail(ctx, q.pool, id, token, cause)
 }
@@ -420,4 +471,11 @@ func (q *PingQueue) Extend(ctx context.Context, id, token string, lease time.Dur
 // Release gives the message id, which token claims, back, due at once.
 func (q *PingQueue) Release(ctx context.Context, id, token string) error {
 	return pingQueue.release(ctx, q.pool, id, token)
+}
+
+// Prune deletes up to limit done messages, the oldest first, which the queue
+// holds only from before it kept none, and returns how many it deleted. It
+// never deletes a dead message.
+func (q *PingQueue) Prune(ctx context.Context, limit int) (int, error) {
+	return pingQueue.prune(ctx, q.pool, limit)
 }

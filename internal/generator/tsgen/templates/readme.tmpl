@@ -73,6 +73,9 @@ Validation errors follow a standardized format (see `validation_errors.md`):
 - `types/behaviors.ts` - `<Type>Behaviors` for each type that composes behaviors: each behavior's fields as a read returns them under `behaviors`, narrowed by the type's config
 {{- end}}
 - `validators/` - Validation functions; use `{{.PackageName}}/validators/scalars/<name>` for granular imports
+{{- if .Unions}}
+- `validators/unions.ts` - `parse<Union>FromJSON` for each union: it picks the member as the Go and Rust decoders do (by the discriminator when every member gives it a value, else by the payload's keys and the members' tags) and reads it with the member's `parse<Type>FromJSON`; a type's parser reads its union fields with it
+{{- end}}
 - `mask/` - Secret-masking helpers for types with @secret fields
 - `index.ts` - Main export (re-exports all; backward compatible)
 

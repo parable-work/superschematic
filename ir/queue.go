@@ -19,15 +19,30 @@ type QueueDef struct {
 	// again before it is dead. Nil is DefaultQueueRetries.
 	Retries *int `json:"retries,omitempty" yaml:"retries,omitempty"`
 
-	// Backoff is how long a failed message waits before it is due again,
-	// a duration of whole seconds as Go writes one (`30s`, `5m`). Empty is
+	// Backoff is how long a message that failed once waits before it is
+	// due again, a duration of whole seconds as Go writes one (`30s`,
+	// `5m`). Each failure after the first doubles the wait, up to
+	// MaxBackoff: attempt n waits Backoff × 2^(n−1). Empty is
 	// DefaultQueueBackoffSeconds.
 	Backoff string `json:"backoff,omitempty" yaml:"backoff,omitempty"`
+
+	// MaxBackoff caps the wait a failure doubles, a duration of whole
+	// seconds, the backoff or more; equal to it, every failure waits the
+	// backoff. Empty is DefaultQueueMaxBackoffSeconds, or the backoff when
+	// that is longer.
+	MaxBackoff string `json:"maxBackoff,omitempty" yaml:"maxBackoff,omitempty"`
 
 	// Lease is how long a claim holds a message before it returns to
 	// ready, unless the worker extends it, which it does while the
 	// handler runs. Empty is DefaultQueueLeaseSeconds.
 	Lease string `json:"lease,omitempty" yaml:"lease,omitempty"`
+
+	// Retain is how long a done message stays in the table before a
+	// worker removes it, a duration of whole seconds, zero or more. Zero
+	// (`0s`) keeps none: completing a message removes it. Dead messages
+	// stay whatever it says, for an operator. Empty is
+	// DefaultQueueRetainSeconds.
+	Retain string `json:"retain,omitempty" yaml:"retain,omitempty"`
 }
 
 // The defaults of a queue and a worker that leave an argument out (D53).
@@ -36,9 +51,17 @@ const (
 	// dead.
 	DefaultQueueRetries = 5
 
-	// DefaultQueueBackoffSeconds is how long a failed message waits before
-	// it is due again.
+	// DefaultQueueBackoffSeconds is how long a message that failed once
+	// waits before it is due again.
 	DefaultQueueBackoffSeconds = 30
+
+	// DefaultQueueMaxBackoffSeconds caps the wait a failure doubles: an
+	// hour.
+	DefaultQueueMaxBackoffSeconds = 60 * 60
+
+	// DefaultQueueRetainSeconds is how long a done message stays before a
+	// worker removes it: a week.
+	DefaultQueueRetainSeconds = 7 * 24 * 60 * 60
 
 	// DefaultQueueLeaseSeconds is how long a claim holds a message: a
 	// worker that dies holding it gives it back within a minute.
@@ -73,7 +96,9 @@ const (
 	// QueueStateClaimed is a message a worker holds until the claim
 	// expires.
 	QueueStateClaimed = "claimed"
-	// QueueStateDone is a message a handler handled.
+	// QueueStateDone is a message a handler handled, which nothing changes
+	// again: its updated_at is when it was done, by which a worker removes
+	// it once the queue's retention passes.
 	QueueStateDone = "done"
 	// QueueStateDead is a message whose handler failed on every try,
 	// which stays for an operator to read.

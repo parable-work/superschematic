@@ -385,7 +385,8 @@
         "schedule": "0 * * * *",
         "timeZone": "America/New_York",
         "timeoutSeconds": 300,
-        "retries": 1
+        "retries": 1,
+        "onDeploy": true
       },
       "resourceName": "shop-orders-ship-orders",
       "bindings": [
@@ -2978,6 +2979,12 @@
         "shop-orders-ship-orders.schedule",
         "shop-orders-ship-orders.schedule-invoker",
         "shop-web.url-map"
+      ]
+    },
+    {
+      "step": "jobs",
+      "deployables": [
+        "shop-orders-ship-orders"
       ]
     },
     {

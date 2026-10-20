@@ -1,0 +1,28 @@
+# One declared server, Monolith, serves shop-api and shop-orders, so
+# shop-orders' calls of shop-api stay within it, on its own loopback
+# address, and carry its loopback credential when the operation they reach
+# has a service clause (docs/stack-model.md, section 9.9). Its one
+# environment, Local, runs on the local target.
+kind: Stack
+types:
+  Shop:
+    name: Shop
+    role: EmbeddedStruct
+    stack:
+      deploy:
+        - { name: shop-api, kind: API }
+        - { name: shop-orders, kind: API }
+      expose:
+        - deployable: Monolith
+  Monolith:
+    name: Monolith
+    role: EmbeddedStruct
+    server:
+      serves:
+        - { name: shop-api, kind: API }
+        - { name: shop-orders, kind: API }
+  Local:
+    name: Local
+    role: EmbeddedStruct
+    environment:
+      target: local

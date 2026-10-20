@@ -11,14 +11,17 @@
 //!
 //! [`enqueue`] writes a message in the caller's transaction, so it commits
 //! with the writes that caused it, or not at all. A [`PostgresQueue`]
-//! claims, completes, fails, extends and releases messages for a worker,
-//! over the pool: a claim first marks dead each message whose last
+//! claims, completes, fails, extends, releases and prunes messages for a
+//! worker, over the pool: a claim first marks dead each message whose last
 //! attempt's claim expired, then takes up to n messages that are ready and
 //! due, or claimed past their claim's expiry, with `FOR UPDATE SKIP
 //! LOCKED`, and gives each a new claim token and one more attempt. Each
-//! change but the claim refuses a token that no longer claims the message
-//! with [`QueueError::ClaimLost`]. Delivery is at least once, and times are
-//! the database's clock.
+//! change but the claim and the prune refuses a token that no longer claims
+//! the message with [`QueueError::ClaimLost`]. A failed message waits the
+//! backoff, doubled for each attempt before it and capped at the maximum
+//! backoff (D68), and a prune deletes a batch of the messages done for the
+//! queue's retention, never a dead one. Delivery is at least once, and
+//! times are the database's clock.
 //!
 //! A message crosses to its row through its serde form, as the TypeScript
 //! client's crosses through its object: each field of the descriptor is the
@@ -126,7 +129,8 @@ pub struct QueueField {
 /// `insert` begins an enqueue; `expire` marks dead each message whose last
 /// attempt's claim expired (`$1` the retries); `claim` claims up to `$1` due
 /// messages for `$2` seconds; `complete`, `fail`, `extend` and `release`
-/// change message `$1` while token `$2` claims it.
+/// change message `$1` while token `$2` claims it; `prune` deletes up to
+/// `$2` messages done `$1` seconds ago or more.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 pub struct QueueStatements {
     pub insert: String,
@@ -136,6 +140,7 @@ pub struct QueueStatements {
     pub fail: String,
     pub extend: String,
     pub release: String,
+    pub prune: String,
 }
 
 /// A queue of a database, as its Rust types crate's `queues.rs` describes
@@ -150,10 +155,16 @@ pub struct QueueDefinition {
     /// How many times a message whose handler fails is handled again
     /// before it is dead.
     pub retries: u32,
-    /// How long a failed message waits before it is due again.
+    /// How long a message that failed once waits before it is due again;
+    /// each failure after doubles it.
     pub backoff_seconds: u64,
+    /// The longest a failed message waits, however many times it failed.
+    pub max_backoff_seconds: u64,
     /// How long a claim holds a message unless its worker extends it.
     pub lease_seconds: u64,
+    /// How long a done message stays before a prune deletes it; zero
+    /// deletes it as it completes.
+    pub retain_seconds: u64,
     /// The message's fields, in the order a claim returns their columns.
     pub fields: Vec<QueueField>,
     pub statements: QueueStatements,
@@ -162,8 +173,8 @@ pub struct QueueDefinition {
 impl QueueDefinition {
     /// Reads a descriptor: the JSON a Rust types crate's `queues.rs` holds.
     /// It refuses one that is not a descriptor, or whose queue cannot run:
-    /// no name, table or statement, a field without its name or column, or
-    /// a lease of zero.
+    /// no name, table or statement, a field without its name or column, a
+    /// lease of zero, or a maximum backoff under the backoff.
     pub fn parse(json: &str) -> Result<Self, QueueError> {
         let definition: QueueDefinition = serde_json::from_str(json)
             .map_err(|err| QueueError::Definition(format!("a queue descriptor: {err}")))?;
@@ -191,6 +202,12 @@ impl QueueDefinition {
         if self.lease_seconds == 0 {
             return refuse("its lease is 0 s; it is positive".to_string());
         }
+        if self.max_backoff_seconds < self.backoff_seconds {
+            return refuse(format!(
+                "its maximum backoff, {} s, is under its backoff, {} s",
+                self.max_backoff_seconds, self.backoff_seconds
+            ));
+        }
         for (i, field) in self.fields.iter().enumerate() {
             if field.name.is_empty() || field.column.is_empty() {
                 return refuse(format!("field {i} lacks its name or its column"));
@@ -205,6 +222,7 @@ impl QueueDefinition {
             ("fail", &s.fail),
             ("extend", &s.extend),
             ("release", &s.release),
+            ("prune", &s.prune),
         ];
         for (name, sql) in statements {
             if sql.trim().is_empty() {
@@ -219,9 +237,19 @@ impl QueueDefinition {
         Duration::from_secs(self.lease_seconds)
     }
 
-    /// How long a failed message waits before it is due again.
+    /// How long a message that failed once waits before it is due again.
     pub fn backoff(&self) -> Duration {
         Duration::from_secs(self.backoff_seconds)
+    }
+
+    /// The longest a failed message waits.
+    pub fn max_backoff(&self) -> Duration {
+        Duration::from_secs(self.max_backoff_seconds)
+    }
+
+    /// How long a done message stays before a prune deletes it.
+    pub fn retain(&self) -> Duration {
+        Duration::from_secs(self.retain_seconds)
     }
 }
 
@@ -458,7 +486,8 @@ impl<M: DeserializeOwned> PostgresQueue<M> {
     }
 
     /// Records `cause` on the message `id`, which `token` claims, and makes
-    /// it due again after the backoff, or dead when its retries are spent.
+    /// it due again after the backoff, doubled for each attempt before and
+    /// capped at the maximum backoff, or dead when its retries are spent.
     /// Returns whether the message is dead.
     pub async fn fail(&self, id: &str, token: &str, cause: &str) -> Result<bool, QueueError> {
         let context = format!("fail message {id} on {}", self.definition.table);
@@ -473,6 +502,7 @@ impl<M: DeserializeOwned> PostgresQueue<M> {
             Text::of(self.definition.retries),
             Text::of(self.definition.backoff_seconds),
             Text::of(cause),
+            Text::of(self.definition.max_backoff_seconds),
         ];
         let refs: Vec<&(dyn ToSql + Sync)> =
             params.iter().map(|p| p as &(dyn ToSql + Sync)).collect();
@@ -507,6 +537,28 @@ impl<M: DeserializeOwned> PostgresQueue<M> {
     pub async fn release(&self, id: &str, token: &str) -> Result<(), QueueError> {
         let sql = &self.definition.statements.release;
         self.update("release", sql, id, token, None).await
+    }
+
+    /// Deletes up to `limit` messages done for the queue's retention or
+    /// longer, the oldest first, and returns how many it deleted. It never
+    /// deletes a dead message.
+    pub async fn prune(&self, limit: usize) -> Result<u64, QueueError> {
+        if limit == 0 {
+            return Ok(0);
+        }
+        let context = format!("prune {}", self.definition.table);
+        let client = self.client(&context).await?;
+        let statement = client
+            .prepare_cached(&self.definition.statements.prune)
+            .await
+            .map_err(|err| QueueError::failed(&context, &err))?;
+        client
+            .execute(
+                &statement,
+                &[&Text::of(self.definition.retain_seconds), &Text::of(limit)],
+            )
+            .await
+            .map_err(|err| QueueError::failed(&context, &err))
     }
 
     /// A connection of the pool.
@@ -559,7 +611,9 @@ mod tests {
         "table": "ping_queue",
         "retries": 5,
         "backoffSeconds": 30,
+        "maxBackoffSeconds": 3600,
         "leaseSeconds": 60,
+        "retainSeconds": 604800,
         "fields": [
             { "name": "sentAt", "column": "sent_at" },
             { "name": "priority", "column": "priority", "default": "low" },
@@ -575,7 +629,8 @@ mod tests {
             "complete": "UPDATE ... complete",
             "fail": "UPDATE ... fail",
             "extend": "UPDATE ... extend",
-            "release": "UPDATE ... release"
+            "release": "UPDATE ... release",
+            "prune": "DELETE ... prune"
         }
     }"#;
 
@@ -587,6 +642,10 @@ mod tests {
         assert_eq!(
             (def.retries, def.backoff(), def.lease()),
             (5, Duration::from_secs(30), Duration::from_secs(60))
+        );
+        assert_eq!(
+            (def.max_backoff(), def.retain()),
+            (Duration::from_secs(3600), Duration::from_secs(604800))
         );
         assert_eq!(
             def.fields,
@@ -662,6 +721,14 @@ mod tests {
         assert_eq!(
             edit(r#""release": "UPDATE ... release""#, r#""release": " ""#).to_string(),
             "the descriptor of queue Ping: its release statement is empty"
+        );
+        assert_eq!(
+            edit(r#""prune": "DELETE ... prune""#, r#""prune": """#).to_string(),
+            "the descriptor of queue Ping: its prune statement is empty"
+        );
+        assert_eq!(
+            edit(r#""maxBackoffSeconds": 3600"#, r#""maxBackoffSeconds": 29"#).to_string(),
+            "the descriptor of queue Ping: its maximum backoff, 29 s, is under its backoff, 30 s"
         );
         assert_eq!(
             edit(r#""column": "sent_at""#, r#""column": """#).to_string(),

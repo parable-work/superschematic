@@ -36,8 +36,9 @@ use axum::routing::get;
 use axum::{Json, Router};
 use serde_json::json;
 use superschematic_http_runtime::logging::{self, tracing};
+use superschematic_http_runtime::stackconfig::{self, Service};
 use superschematic_http_runtime::telemetry::{self, Defaults};
-use superschematic_http_runtime::{cors, JwtServiceAuthenticator, OperationInfo};
+use superschematic_http_runtime::{cors, JwtServiceAuthenticator, Loopback, OperationInfo};
 use tokio::signal::unix::{signal, Signal, SignalKind};
 use tower::ServiceExt;
 
@@ -45,6 +46,7 @@ use schemas_rs_catalog_api as rs_catalog_api;
 use schemas_rs_catalog_implementation as rs_catalog_impl;
 use schemas_rs_pricing_api as rs_pricing_api;
 use schemas_rs_pricing_implementation as rs_pricing_impl;
+use schemas_rs_pricing_sdk as rs_pricing_sdk;
 
 /// The port the server listens on when $PORT is unset.
 const DEFAULT_PORT: u16 = 8080;
@@ -93,9 +95,21 @@ async fn run() -> Result<(), Failure> {
     let rs_catalog_config = configure("rs-catalog", rs_catalog_api::config::load_env_config())?;
     let rs_pricing_config = configure("rs-pricing", rs_pricing_api::config::load_env_config())?;
 
+    // The server's own credential for its calls between the APIs it
+    // serves, which reach it on loopback: a key only this process holds,
+    // which each client of such an API signs with and each API with a
+    // service clause accepts (docs/stack-model.md, section 9.9).
+    let loopback = Loopback::generate("Warehouse", ["rs-catalog", "rs-pricing"])
+        .map_err(|err| format!("loopback key: {err}"))?;
+
+    // One client per API called, shared by every API that calls it.
+    let rs_pricing_client =
+        new_rs_pricing_client(&rs_catalog_config.rs_pricing_service, &loopback)?;
+
     // rs-catalog: its implementation, built from its Deps, and its routes.
     let rs_catalog_deps = rs_catalog_api::Deps {
         config: rs_catalog_config.clone(),
+        rs_pricing: rs_pricing_client.clone(),
         span: logging::api_span("rs-catalog"),
     };
     let rs_catalog_handlers = rs_catalog_impl::create(rs_catalog_deps)
@@ -113,10 +127,12 @@ async fn run() -> Result<(), Failure> {
         .await
         .map_err(|err| format!("implementation of rs-pricing: {err}"))?;
     // It verifies a calling service's credential against its callers
-    // field (section 9.2).
-    let rs_pricing_service_authenticator =
-        JwtServiceAuthenticator::new(rs_pricing_config.rs_pricing_callers.clone())
-            .map_err(|err| format!("service authenticator of rs-pricing: {err}"))?;
+    // field (section 9.2), and the server's own against its loopback key
+    // (section 9.9).
+    let rs_pricing_service_authenticator = loopback
+        .accept(rs_pricing_config.rs_pricing_callers.clone())
+        .and_then(JwtServiceAuthenticator::new)
+        .map_err(|err| format!("service authenticator of rs-pricing: {err}"))?;
     let rs_pricing_implementations = rs_pricing_api::Implementations::new(
         rs_pricing_handlers,
         Arc::new(rs_pricing_service_authenticator),
@@ -158,6 +174,41 @@ fn listen_port() -> Result<u16, Failure> {
 /// missing or invalid.
 fn configure<T, E: std::fmt::Display>(api: &str, loaded: Result<T, E>) -> Result<T, Failure> {
     loaded.map_err(|err| format!("configuration of {api}: {err}").into())
+}
+
+/// Builds the client of rs-pricing. The server calls it at `endpoint`, the
+/// field its edge derives, and the client sends the service credential the
+/// edge's connector chose (docs/stack-model.md, section 9.6). The end user
+/// travels per call: an implementation passes
+/// `RequestOptions::forward(ctx.bearer_token())` with each call it makes
+/// for a request.
+/// With trace export on, each call is a client span that carries its trace
+/// context (D67).
+///
+/// rs-pricing is an API the server serves itself, which no connector gives a
+/// credential, so to a loopback endpoint without one the client sends the
+/// server's loopback credential (section 9.9).
+fn new_rs_pricing_client(
+    endpoint: &Service,
+    loopback: &Loopback,
+) -> Result<rs_pricing_sdk::RsPricingSdk, Failure> {
+    let service_credential = match &endpoint.credential {
+        Some(credential) => Some(rs_pricing_sdk::ServiceCredential {
+            token: stackconfig::credential_source(credential)
+                .map_err(|err| format!("client of rs-pricing: {err}"))?,
+            headers: credential.header_names(),
+        }),
+        None => loopback
+            .credential_for(&endpoint.url)
+            .map(|(token, headers)| rs_pricing_sdk::ServiceCredential { token, headers }),
+    };
+    rs_pricing_sdk::RsPricingSdk::new(rs_pricing_sdk::ClientConfig {
+        base_url: endpoint.url.clone(),
+        service_credential,
+        transport: telemetry::transport(),
+        ..Default::default()
+    })
+    .map_err(|err| format!("client of rs-pricing: {err}").into())
 }
 
 /// Hands a request to the router of the first API whose operations take

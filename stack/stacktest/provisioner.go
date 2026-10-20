@@ -29,6 +29,11 @@ type FakeProvisioner struct {
 	// name (`rollout 2`, `exposure`).
 	Fail map[string]error
 
+	// OnApply, when set, is called with the step's name as Apply records
+	// it, before it returns: a test does there what happens while the
+	// step runs, such as a second deploy of the run.
+	OnApply func(step string)
+
 	mu       sync.Mutex
 	calls    []string
 	rendered *ir.ResolvedEnvironment
@@ -137,6 +142,9 @@ func (p *FakeProvisioner) Apply(_ context.Context, req registry.ProvisionRequest
 	}
 	p.keepEnv(req)
 	p.record("apply %s: %s", name, strings.Join(step.Resources, ", "))
+	if p.OnApply != nil {
+		p.OnApply(name)
+	}
 	return p.Fail[name]
 }
 

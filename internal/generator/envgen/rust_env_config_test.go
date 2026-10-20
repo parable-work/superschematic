@@ -115,7 +115,9 @@ func TestRustConfigWithoutEnvConfig(t *testing.T) {
 // TestCORSAndIdentityFields: with CORS and Identity set, every API gets its
 // CORS field and its identity config field, which only the Rust EnvConfig
 // holds (D57), even without settings or edges; a setting that collides
-// with either is refused; neither is in values-schema.json.
+// with either is refused; neither is in values-schema.json, which lists
+// the callers field alone of the fields an API's server reads beside its
+// settings and derived fields.
 func TestCORSAndIdentityFields(t *testing.T) {
 	schema := &ir.Schema{Name: "shop-api", Kind: ir.SchemaKindAPI}
 	output, err := envgen.GenerateWithOptions(schema, envgen.Options{SchemaName: "shop-api", Derived: true, CORS: true})
@@ -142,7 +144,7 @@ func TestCORSAndIdentityFields(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, v := range envgen.BuildValuesSchema(output).XSuperschematic.EnvVars {
-		if strings.HasPrefix(v.Name, "SHOP_API_") {
+		if strings.HasPrefix(v.Name, "SHOP_API_") && v.Name != output.ListedCallersField {
 			t.Errorf("values-schema.json lists %s", v.Name)
 		}
 	}

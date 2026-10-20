@@ -162,9 +162,19 @@ retries a 429 up to 3 times after `Retry-After`
 
 A method returns `list[T]` for a list, `dict[str, T]` for a map
 (`dict[str, list[T]]` for a map of lists) and `T | None` for a
-`Nullable<T>`, which is `None` when the server answers null. An object
-type's values in a map are read into its model one by one, as a list's
-elements are.
+`Nullable<T>`, which is `None` when the server answers null.
+
+With the types package installed, a response is read as its type, at each
+list level, in each value of a map and in each item of a page. A model is
+read with `from_dict_non_strict`. A union is read as the member its alias
+picks: by the discriminator when every member marks the same field
+`@internalMetadata`, and otherwise the member the payload fits best, by
+pydantic's smart union matching. A union field of a model is read the
+same way. An enum stays the string the API sent.
+A value its type cannot read, or data that is not the list or map the
+operation returns, raises `SDKError` naming where it is in the response
+(`data[1]`, `data[a]` for a map's key `a`, `data.items[0]`), with
+pydantic's error as its cause.
 
 An operation without an input type sends its arguments where the route
 reads them: on a `GET` in the query string, and on any other method, a
