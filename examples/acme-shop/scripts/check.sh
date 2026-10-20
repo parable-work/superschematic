@@ -34,7 +34,8 @@
 #      entrypoint fetch.ts included, the storefront's implementation in
 #      typescript/shop-storefront, the clients in typescript/clients and
 #      the site in web/shop-web type-check, the storefront bundles for
-#      Workers with bun bundle.ts --check, and the site builds, its
+#      Workers with bun bundle.ts --check, and its bundle runs under
+#      workerd, which puts two teas in a cart, and the site builds, its
 #      bundle carrying shop-api's SDK and superscalar's browser build and
 #      nothing from node:, all of them one Bun workspace, which installs
 #      frozen to
@@ -275,9 +276,19 @@ for pkg in \
   (cd "$pkg" && "$TSC" --noEmit -p tsconfig.json)
 done
 # The storefront bundles for Workers as a deploy bundles it, and holds
-# nothing a Worker cannot run (D64).
+# nothing a Worker cannot run (D64); then the bundle runs under workerd, the
+# runtime's pinned one (test/workerd), with the bindings its Staging gives
+# it, and scripts/workerd/tester.js puts two teas in a cart through a
+# service binding.
 echo "    schemas/dist/server/storefront-stack/shop-storefront: bun bundle.ts --check"
 (cd "$DIST/server/storefront-stack/shop-storefront" && bun bundle.ts --check)
+echo "    schemas/dist/server/storefront-stack/shop-storefront: the bundle under workerd"
+WORKERD_RUN="$OUT/workerd"
+mkdir -p "$WORKERD_RUN"
+(cd "$DIST/server/storefront-stack/shop-storefront" && bun bundle.ts "$WORKERD_RUN/bundle")
+cp "$WORKERD_RUN/bundle/main.js" "$WORKERD_RUN/bundle/superscalar_wasm_bg.wasm" "$SCRIPT_DIR/workerd/storefront.capnp" "$SCRIPT_DIR/workerd/tester.js" "$WORKERD_RUN/"
+(cd "$RUNTIME/test/workerd" && bun install --frozen-lockfile >/dev/null)
+(cd "$WORKERD_RUN" && "$RUNTIME/test/workerd/node_modules/.bin/workerd" test storefront.capnp)
 # The site, shop-web, builds with its package's script, as stack dev and a
 # deploy build it, into one page and its script (D55). It lists products
 # through shop-api's SDK, which the bundle takes with superscalar's browser

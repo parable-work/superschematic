@@ -271,7 +271,7 @@ func TestWorkerNodes(t *testing.T) {
 			t.Errorf("module %v does not read its file from the bundle", m)
 		}
 	}
-	if !slices.Equal(modules, []string{"main.js", "main.js.map", "superscalar.wasm"}) {
+	if !slices.Equal(modules, []string{"main.js", "main.js.map", "superscalar_wasm_bg.wasm"}) {
 		t.Errorf("the version's modules are %v", modules)
 	}
 	if got := jsonOf(t, version.Properties["limits"]) + jsonOf(t, version.Properties["placement"]); got != `{"cpuMs":50}{"mode":"smart"}` {

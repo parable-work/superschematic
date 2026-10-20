@@ -1485,7 +1485,7 @@ package after the workspace's frozen install, and keeps the files in the
 state bucket under `superschematic/bundles/<stack>/<deployable>/<hex>/`
 when their digest is new. The Worker is three nodes: the `worker`, in
 infrastructure; a `workerVersion` per rollout, which uploads `main.js`,
-`main.js.map` and `superscalar.wasm` from beside the program, each with
+`main.js.map` and `superscalar_wasm_bg.wasm` from beside the program, each with
 its pinned SHA-256; and a `workersDeployment` that sends it all traffic.
 `--bundle shop-storefront=sha256:...` rolls the server back to an earlier
 bundle with no build.

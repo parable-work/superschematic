@@ -29,11 +29,11 @@ import { env } from 'cloudflare:workers';
 import { Hono } from 'hono';
 import { createLogger, serviceAuthenticator } from '@superschematic/http-runtime';
 import { errorHandler, notFoundHandler } from '@superschematic/http-runtime/hono';
-import { awaitSecrets, isolate, requestIP, stackEnvOf } from '@superschematic/http-runtime/workers';
+import { perIsolate, requestIP, stackEnvOf } from '@superschematic/http-runtime/workers';
 import * as tsPricingApi from '@schemas/ts-pricing-api';
 import * as tsPricingImpl from '@schemas/ts-pricing-implementation';
 
-/** What a request's handler takes beside the request: the client's address. */
+/** What answers a request, once the isolate has built it. */
 type Handle = (request: Request) => Response | Promise<Response>;
 
 const logger = createLogger({ stack: 'ts-workers-stack', server: 'ts-pricing' });
@@ -44,8 +44,8 @@ configure('ts-pricing', () => tsPricingApi.loadEnvConfig(stackEnvOf(env)));
 
 /** Builds the server from the Worker's bindings, once per isolate. */
 async function build(): Promise<Handle> {
-  // The string bindings with each secret binding's value, awaited once.
-  const values = await awaitSecrets(env);
+  // The string bindings.
+  const values = stackEnvOf(env);
   const tsPricingConfig = configure('ts-pricing', () => tsPricingApi.loadEnvConfig(values));
 
   const app = new Hono();
@@ -62,14 +62,13 @@ async function build(): Promise<Handle> {
   app.notFound(notFoundHandler());
   app.onError(errorHandler());
 
-  // Hono hands the bindings to the routes, from which the runtime reads
-  // the client's address.
-  const bindings = { requestIP };
-  return request => app.fetch(request, bindings);
+  // Hono hands requestIP to the routes, from which the runtime reads the
+  // client's address.
+  return request => app.fetch(request, { requestIP });
 }
 
 /** The server, built on an isolate's first request, and again after a failure. */
-const server = isolate(build);
+const server = perIsolate(build);
 
 export default {
   async fetch(request: Request): Promise<Response> {

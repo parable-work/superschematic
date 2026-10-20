@@ -77,7 +77,7 @@ func storefrontEnvironment(t *testing.T) *ir.ResolvedEnvironment {
 		t.Fatal(err)
 	}
 	files := map[string]string{}
-	for i, name := range []string{"main.js", "main.js.map", "superscalar.wasm"} {
+	for i, name := range []string{"main.js", "main.js.map", "superscalar_wasm_bg.wasm"} {
 		files[name] = strings.Repeat(string(rune('a'+i)), 64)
 	}
 	pinned, err := stack.PinBundles(env, map[string]stack.Bundle{

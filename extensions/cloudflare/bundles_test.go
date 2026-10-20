@@ -223,7 +223,7 @@ func TestDeployPublishesAndFetchesTheBundle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{prefix + "__superschematic/files", prefix + "main.js", prefix + "main.js.map", prefix + "superscalar.wasm"}; !slices.Equal(keys, want) {
+	if want := []string{prefix + "__superschematic/files", prefix + "main.js", prefix + "main.js.map", prefix + "superscalar_wasm_bg.wasm"}; !slices.Equal(keys, want) {
 		t.Errorf("the state bucket holds %v, want %v", keys, want)
 	}
 	version := f.prov.Rendered().Resources.Resource("shop-storefront.version")
@@ -254,6 +254,6 @@ func TestDeployPublishesAndFetchesTheBundle(t *testing.T) {
 		}
 	}
 	if placed, err := os.ReadFile(filepath.Join(program, ir.ArtifactsDir, "shop-storefront", hexDigest, cloudflare.WasmModule)); err != nil || string(placed) != bundleFiles("v1")[cloudflare.WasmModule] {
-		t.Errorf("--no-build placed superscalar.wasm as %q, %v", placed, err)
+		t.Errorf("--no-build placed superscalar_wasm_bg.wasm as %q, %v", placed, err)
 	}
 }

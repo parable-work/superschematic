@@ -4794,23 +4794,27 @@ and removes it.
 The package also holds `workers.d.ts`, which declares the
 `cloudflare:workers` module `fetch.ts` imports, since TypeScript takes an
 ambient module only from a file with no import, and its `tsconfig.json`
-type-checks `fetch.ts` with it. Until the D1 and R2 platforms land, the
-server generator refuses a server on a bundle platform whose APIs open a
-database or list a bucket, and a job or a worker on one.
+type-checks `fetch.ts` with it. Until the D1 platform lands, the server
+generator refuses a server on a bundle platform whose APIs open a
+database, and a job or a worker on one.
 
-**`fetch.ts`** (generated) declares the few Workers types it uses, as
-`main.ts` declares Bun's:
-- **At module scope**, it imports `env` from `cloudflare:workers` and
-  reads each API's string config through
-  `loadEnvConfig(stackEnvOf(env))`, the string members alone
+**`fetch.ts`** (generated) imports `env` from `cloudflare:workers`, which
+`workers.d.ts` declares, and its helpers from the runtime's `./workers`
+entry:
+- **At module scope**, it reads each API's config through
+  `loadEnvConfig(stackEnvOf(env))`, the string bindings alone
   (`@superschematic/http-runtime/workers`). A refused
   config throws there, so Cloudflare refuses the version's upload and the
   rollout step fails, naming each variable: the twin of a server that
-  refuses to start.
+  refuses to start. An API whose config has a `Secret<T>` field is not
+  read there: a Secrets Store secret is read only within a request, and
+  `loadEnvConfig` reads every field, so its config loads on the isolate's
+  first request.
 - **On the first request of an isolate**, and again after a failure, it:
-  - awaits each secret binding into the config, with
-    `stackEnvWithSecrets(env, names)`, which reads each once per isolate
-    and again after a failed `get()`;
+  - loads each API's config from `stackEnvOf(env)`, or, when a config has
+    a `Secret<T>` field, from `stackEnvWithSecrets(env, names)`, which
+    awaits each secret binding the configs name once per isolate and
+    again after a failed `get()`;
   - takes each D1, R2 and service binding by the name its value gives,
     with `binding(env, name, kind)`, which refuses a missing binding or
     one of another kind by its name;
@@ -4830,7 +4834,10 @@ database or list a bucket, and a job or a worker on one.
 
 `perIsolate(build)` is the lazy builder: it builds on the first request,
 shares the build with every request while it runs and after, and builds
-again on the next request after a build that failed.
+again on the next request after a build that failed. A request whose build
+fails is answered 503, `{"status":"unavailable"}`, and the failure logged.
+A derived value with no binding, as when an environment places a callee
+where the Worker binds nothing, fails the build, naming the field.
 
 Per isolate it caches config strings, binding objects, SDK clients, the
 service authenticator with its keys, the credential sources with their

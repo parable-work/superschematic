@@ -719,8 +719,12 @@ func (dev *stackDev) waitUntilRunning(t *testing.T, outputRoot, stack string, se
 		time.Sleep(200 * time.Millisecond)
 	}
 	t.Logf("%s ran the stack in %s", strings.Join(dev.cmd.Args[1:], " "), time.Since(started).Round(time.Second))
-	env := readEnvironment(t, filepath.Join(outputRoot, "stack", stack, "Dev", "environment.json"))
+	path := filepath.Join(outputRoot, "stack", stack, "Dev", "environment.json")
+	env := readEnvironment(t, path)
 	dev.containers = env.containers
+	if stack == "shop-stack" && (env.database == "" || env.bucket == "" || len(env.containers) != 2) {
+		t.Fatalf("%s names no shop-db database, no shop-media bucket, or not two containers", path)
+	}
 	for _, server := range servers {
 		if env.servers[server] == "" {
 			t.Fatalf("environment Dev has no server %s: %v", server, env.servers)
@@ -965,9 +969,6 @@ func readEnvironment(t *testing.T, path string) environment {
 			name, _ := r.Properties["name"].(string)
 			env.bucket = endpoint + "/" + name
 		}
-	}
-	if env.database == "" || env.bucket == "" || len(env.containers) != 2 {
-		t.Fatalf("%s names no shop-db database, no shop-media bucket, or not two containers", path)
 	}
 	return env
 }

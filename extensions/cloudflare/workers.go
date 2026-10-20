@@ -46,11 +46,11 @@ const (
 // The files of a server's bundle, the names its bundle.ts writes and the
 // version's modules carry (section 18.5): the main module, its source map,
 // and superscalar's WebAssembly module, which the main module imports as
-// `./superscalar.wasm`.
+// `./superscalar_wasm_bg.wasm`, the name its workerd build imports it by.
 const (
 	MainModule = "main.js"
 	SourceMap  = "main.js.map"
-	WasmModule = "superscalar.wasm"
+	WasmModule = "superscalar_wasm_bg.wasm"
 )
 
 // BundleModules are the files of a server's bundle, the main module first,

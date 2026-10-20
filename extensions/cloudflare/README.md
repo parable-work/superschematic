@@ -130,7 +130,7 @@ DNS platform names no credential: the run's token carries the zone.
   named after the deployable, with Workers Logs on unless `logs: false`,
   workers.dev on only for an exposed server without a domain, previews off;
 - `<server>.version`, a `workerVersion` per rollout: `main.js`,
-  `main.js.map` and `superscalar.wasm`, each a `contentFile` under the
+  `main.js.map` and `superscalar_wasm_bg.wasm`, each a `contentFile` under the
   program's `artifacts/<server>/{bundle-digest}/` with its
   `{bundle-sha256:<file>}`, which the deploy pins; `mainModule: main.js`;
   `CompatibilityDate` unless `compatibilityDate` is set; `cpuMs` and

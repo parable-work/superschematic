@@ -126,10 +126,10 @@
               "name": "main.js.map"
             },
             {
-              "contentFile": "artifacts/shop-pricing/{bundle-digest}/superscalar.wasm",
-              "contentSha256": "{bundle-sha256:superscalar.wasm}",
+              "contentFile": "artifacts/shop-pricing/{bundle-digest}/superscalar_wasm_bg.wasm",
+              "contentSha256": "{bundle-sha256:superscalar_wasm_bg.wasm}",
               "contentType": "application/wasm",
-              "name": "superscalar.wasm"
+              "name": "superscalar_wasm_bg.wasm"
             }
           ],
           "workerId": {
@@ -240,10 +240,10 @@
               "name": "main.js.map"
             },
             {
-              "contentFile": "artifacts/shop-storefront/{bundle-digest}/superscalar.wasm",
-              "contentSha256": "{bundle-sha256:superscalar.wasm}",
+              "contentFile": "artifacts/shop-storefront/{bundle-digest}/superscalar_wasm_bg.wasm",
+              "contentSha256": "{bundle-sha256:superscalar_wasm_bg.wasm}",
               "contentType": "application/wasm",
-              "name": "superscalar.wasm"
+              "name": "superscalar_wasm_bg.wasm"
             }
           ],
           "placement": {

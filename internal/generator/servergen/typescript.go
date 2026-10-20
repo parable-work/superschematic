@@ -314,6 +314,10 @@ type TypeScriptAPI struct {
 
 	// Buckets are Deps' buckets (D54).
 	Buckets []TypeScriptBucketUse
+
+	// Secrets are the Secret<T> fields of its config, which a Worker binds
+	// as Secrets Store secrets and fetch.ts awaits per isolate (D64).
+	Secrets []string
 }
 
 // TypeScriptCall is a client in an API's Deps.
@@ -335,8 +339,9 @@ type TypeScriptBucket struct {
 	Var     string
 
 	// From is the expression that reads the bucket's connection from the
-	// first listing API's config.
-	From string
+	// first listing API's config, and Field the config field it reads.
+	From  string
+	Field string
 }
 
 // TypeScriptDatabase is a database the server opens one pool to, for every
@@ -372,8 +377,9 @@ type TypeScriptClient struct {
 	Class       string
 
 	// From is the expression that reads the callee's endpoint from the
-	// first calling API's config.
-	From string
+	// first calling API's config, and Field the config field it reads.
+	From  string
+	Field string
 }
 
 // TypeScriptDocker is a TypeScript server's Dockerfile plan. Paths are
@@ -422,8 +428,8 @@ var tsReserved = []string{
 	"run", "jobs", "workers", "queue", "stop", "signal", "started", "concurrency", "pools",
 	"postgresQueue", "runWorker", "workerConcurrency",
 	// fetch.ts's, the Workers entrypoint's (D64).
-	"env", "build", "isolate", "requestIP", "stackEnvOf", "awaitSecrets", "serviceFetch", "values",
-	"bindings", "Handle",
+	"env", "build", "perIsolate", "requestIP", "stackEnvOf", "stackEnvWithSecrets", "binding", "serviceFetch",
+	"openR2Bucket", "bindingName", "values", "bindings", "Handle",
 }
 
 // PlanTypeScript plans the entrypoint of one TypeScript server. It refuses
@@ -548,6 +554,13 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 		if o.HasEnvConfig {
 			api.Config = taken.take(stem + "Config")
 		}
+		if a.Config != nil {
+			for _, f := range a.Config.Fields {
+				if f.Secret {
+					api.Secrets = append(api.Secrets, f.Key)
+				}
+			}
+		}
 		// A job or a worker serves no request: it answers no CORS,
 		// establishes no end user, and verifies no caller (D52, D50).
 		if a.CORS && !background {
@@ -629,6 +642,7 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 					Package:     call.Package,
 					Class:       call.Client,
 					From:        api.Config + "." + key,
+					Field:       key,
 				}
 				clients[call.Service] = c
 				s.Clients = append(s.Clients, c)
@@ -636,9 +650,6 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 			api.Calls = append(api.Calls, TypeScriptCall{Field: call.Field, Client: c})
 		}
 		for _, b := range o.Deps.Buckets {
-			if s.Workers {
-				return nil, fmt.Errorf("stack %s: server %s serves %s, which lists bucket %s, and an environment places the server on Cloudflare Workers, whose entrypoint opens no bucket yet (D64)", in.Stack, in.Server, o.SchemaName, b.Service)
-			}
 			h := buckets[b.Service]
 			if h == nil {
 				key, ok := derived[string(ir.EdgeBucket)+" "+b.Service]
@@ -649,6 +660,7 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 					Service: b.Service,
 					Var:     taken.take(varStem(b.Service) + "Bucket"),
 					From:    api.Config + "." + key,
+					Field:   key,
 				}
 				buckets[b.Service] = h
 				s.Buckets = append(s.Buckets, h)
@@ -740,22 +752,38 @@ func (s *TypeScriptServer) APIsWithConfig() bool {
 // origins its CORS field lists.
 func (s *TypeScriptServer) ReadsBindings() bool { return s.APIsWithConfig() || s.AnyCORS() }
 
+// SecretBindings are the Secret<T> fields of every API's config, sorted:
+// the Secrets Store secret bindings fetch.ts awaits once per isolate
+// (D64).
+func (s *TypeScriptServer) SecretBindings() []string {
+	var out []string
+	for _, a := range s.APIs {
+		out = append(out, a.Secrets...)
+	}
+	slices.Sort(out)
+	return slices.Compact(out)
+}
+
 // WorkersImports are the names fetch.ts imports from the HTTP runtime's
 // ./workers entry (D64): the per-isolate builder and the client's address
-// always; the readers of the bindings' strings and secrets when an API has
-// a config; and the transport through a service binding when the server
-// calls another API.
+// always; the readers of the string bindings, and of the secret ones when
+// a config has a Secret<T> field, when it reads a config; and the binding
+// lookup, with the transport through a service binding, when the server
+// calls another API or lists a bucket.
 func (s *TypeScriptServer) WorkersImports() []string {
 	var out []string
-	if s.ReadsBindings() {
-		out = append(out, "awaitSecrets")
+	if len(s.Clients) > 0 || len(s.Buckets) > 0 {
+		out = append(out, "binding")
 	}
-	out = append(out, "isolate", "requestIP")
+	out = append(out, "perIsolate", "requestIP")
 	if len(s.Clients) > 0 {
 		out = append(out, "serviceFetch")
 	}
-	if s.APIsWithConfig() {
+	if s.ReadsBindings() {
 		out = append(out, "stackEnvOf")
+	}
+	if len(s.SecretBindings()) > 0 {
+		out = append(out, "stackEnvWithSecrets")
 	}
 	return out
 }

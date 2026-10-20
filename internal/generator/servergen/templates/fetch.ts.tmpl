@@ -32,6 +32,9 @@ import { Hono } from 'hono';
 import { {{ join .RuntimeImports ", " }} } from '{{ .Naming.HTTPRuntimeNpmPackage }}';
 import { errorHandler, notFoundHandler } from '{{ .Naming.HTTPRuntimeNpmPackage }}/hono';
 import { {{ join .WorkersImports ", " }} } from '{{ .Naming.HTTPRuntimeNpmPackage }}/workers';
+{{- if .Buckets }}
+import { openR2Bucket } from '{{ .Naming.HTTPRuntimeNpmPackage }}/r2';
+{{- end }}
 {{- range .APIs }}
 import * as {{ .Module }} from '{{ .Package }}';
 import * as {{ .Impl }} from '{{ .ImplPackage }}';
@@ -40,7 +43,7 @@ import * as {{ .Impl }} from '{{ .ImplPackage }}';
 import * as {{ .Module }} from '{{ .Package }}';
 {{- end }}
 
-/** What a request's handler takes beside the request: the client's address. */
+/** What answers a request, once the isolate has built it. */
 type Handle = (request: Request) => Response | Promise<Response>;
 
 const logger = createLogger({ stack: {{ tsQuote .Stack }}, server: {{ tsQuote .Name }} });
@@ -50,7 +53,12 @@ const logger = createLogger({ stack: {{ tsQuote .Stack }}, server: {{ tsQuote .N
 // bindings: a refused config throws here, and Cloudflare refuses the version.
 {{- range .APIs }}
 {{- if .Config }}
+{{- if .Secrets }}
+// {{ .Service }}'s config holds Secret<T> fields, which a Worker reads only within
+// a request, so the isolate's first request loads it.
+{{- else }}
 configure({{ tsQuote .Service }}, () => {{ .Module }}.{{ .ConfigLoader }}(stackEnvOf(env)));
+{{- end }}
 {{- end }}
 {{- end }}
 {{- end }}
@@ -58,8 +66,14 @@ configure({{ tsQuote .Service }}, () => {{ .Module }}.{{ .ConfigLoader }}(stackE
 /** Builds the server from the Worker's bindings, once per isolate. */
 async function build(): Promise<Handle> {
 {{- if .ReadsBindings }}
-  // The string bindings with each secret binding's value, awaited once.
-  const values = await awaitSecrets(env);
+{{- if .SecretBindings }}
+  // The string bindings, and the value of each Secrets Store secret a
+  // config names, awaited once per isolate.
+  const values = await stackEnvWithSecrets(env, [{{ range $i, $s := .SecretBindings }}{{ if $i }}, {{ end }}{{ tsQuote $s }}{{ end }}]);
+{{- else }}
+  // The string bindings.
+  const values = stackEnvOf(env);
+{{- end }}
 {{- range .APIs }}
 {{- if .Config }}
   const {{ .Config }} = configure({{ tsQuote .Service }}, () => {{ .Module }}.{{ .ConfigLoader }}(values));
@@ -78,7 +92,15 @@ async function build(): Promise<Handle> {
   const {{ .Var }} = {{ .Constructor }}({{ .From }});
 {{- end }}
 {{- end }}
-{{- if or .ReadsBindings .Clients }}
+{{- if .Buckets }}
+
+  // One handle per bucket, shared by every API that lists it, over the R2
+  // binding its connection names.
+{{- range .Buckets }}
+  const {{ .Var }} = openR2Bucket(binding(env, bindingName({{ tsQuote .Field }}, {{ .From }}.binding), 'r2'), {{ .From }});
+{{- end }}
+{{- end }}
+{{- if or .ReadsBindings .Clients .Buckets }}
 {{ end }}
   const app = new Hono();
   app.get('/healthz', c => c.json({ status: 'ok' }));
@@ -100,18 +122,15 @@ async function build(): Promise<Handle> {
 {{- end }}
   app.notFound(notFoundHandler());
   app.onError(errorHandler());
-
-  // Hono hands the bindings to the routes, from which the runtime reads
-  // the client's address.
-  const bindings = { requestIP };
 {{- if .AnyCORS }}
 
   // A site's browser calls an API here from the site's origin: each API a
   // site calls answers CORS for the origins its CORS field lists, the API a
   // request is by the operations that take it, and hands a preflight from
   // another origin on to the app, so an identity API's CORS still answers
-  // its trusted origins (section 8.10).
-  const handle = corsHandler(
+  // its trusted origins (section 8.10). Hono hands requestIP to the routes,
+  // from which the runtime reads the client's address.
+  return corsHandler(
     [
 {{- range .APIs }}
 {{- if .CORS }}
@@ -122,16 +141,18 @@ async function build(): Promise<Handle> {
 {{- end }}
 {{- end }}
     ],
-    (request: Request) => app.fetch(request, bindings)
+    (request: Request) => app.fetch(request, { requestIP })
   );
-  return handle;
 {{- else }}
-  return request => app.fetch(request, bindings);
+
+  // Hono hands requestIP to the routes, from which the runtime reads the
+  // client's address.
+  return request => app.fetch(request, { requestIP });
 {{- end }}
 }
 
 /** The server, built on an isolate's first request, and again after a failure. */
-const server = isolate(build);
+const server = perIsolate(build);
 
 export default {
   async fetch(request: Request): Promise<Response> {
@@ -149,6 +170,20 @@ export default {
 {{ template "ts-configure" . }}
 
 {{ template "ts-construct" . }}
+{{- if or .Clients .Buckets }}
+
+/**
+ * The name of the binding a derived field's value gives, which the Worker's
+ * platform writes beside the field's variables: a Worker reaches a callee
+ * and a bucket through a binding alone.
+ */
+function bindingName(field: string, name: string | undefined): string {
+  if (!name) {
+    throw new Error(`${field} names no binding: the environment places what it reaches on a platform the server's Worker binds nothing of`);
+  }
+  return name;
+}
+{{- end }}
 {{- range .Clients }}
 
 /**
@@ -161,7 +196,7 @@ export default {
 function {{ .Constructor }}(endpoint: Service): {{ .Module }}.{{ .Class }} {
   return new {{ .Module }}.{{ .Class }}({
     baseUrl: endpoint.url,
-    fetch: serviceFetch(env, endpoint),
+    fetch: serviceFetch(binding(env, bindingName({{ tsQuote .Field }}, endpoint.binding?.name), 'service')),
     serviceCredential: serviceCredentialFor(endpoint.credential),
   });
 }
