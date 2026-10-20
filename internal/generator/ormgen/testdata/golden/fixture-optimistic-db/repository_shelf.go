@@ -46,8 +46,10 @@ var ShelfQuotedFields = map[string]string{
 	"_version":   `_version`,
 }
 
-// buildShelfOrderByClause builds an ORDER BY clause for Shelf
-func buildShelfOrderByClause(orderBy []ShelfOrderBy, tableName string) string {
+// buildShelfOrderByClause builds an ORDER BY clause for Shelf.
+// quotedTable is the table's name as the FROM clause spells it, quoted when
+// it is a keyword (a table named order is "order").
+func buildShelfOrderByClause(orderBy []ShelfOrderBy, quotedTable string) string {
 	if len(orderBy) == 0 {
 		return ""
 	}
@@ -64,7 +66,7 @@ func buildShelfOrderByClause(orderBy []ShelfOrderBy, tableName string) string {
 		if !ok {
 			quotedField = fieldStr // Fallback to unquoted if not found
 		}
-		clauses = append(clauses, fmt.Sprintf("%s.%s %s", tableName, quotedField, direction))
+		clauses = append(clauses, fmt.Sprintf("%s.%s %s", quotedTable, quotedField, direction))
 	}
 
 	if len(clauses) == 0 {
@@ -394,7 +396,7 @@ func (r *ShelfRepository) FindOne(ctx context.Context, filter *ShelfFilter, opts
 	}
 
 	// Build ORDER BY clause
-	orderByClause := buildShelfOrderByClause(opts.OrderBy, "shelf")
+	orderByClause := buildShelfOrderByClause(opts.OrderBy, `shelf`)
 
 	// Build query
 	query := fmt.Sprintf(`SELECT %s FROM shelf%s%s LIMIT 1`, selectFields, whereClause, orderByClause)
@@ -556,7 +558,7 @@ func (r *ShelfRepository) FindMany(ctx context.Context, filter *ShelfFilter, opt
 	}
 
 	// Build ORDER BY clause
-	orderByClause := buildShelfOrderByClause(opts.OrderBy, "shelf")
+	orderByClause := buildShelfOrderByClause(opts.OrderBy, `shelf`)
 
 	// Build LIMIT/OFFSET clause
 	limitOffsetClause := buildLimitOffsetClauseTyped(opts.Limit, opts.Offset)

@@ -144,7 +144,7 @@ get a missing order: 404
 // ACME_SHOP_CLIENTS=1 once it has built and linked the TypeScript, Python
 // and Rust clients; without it only the Go client runs.
 func TestEverySDKCallsTheGoServer(t *testing.T) {
-	server, token := ordersServer(t, "orders")
+	server, token := ordersServer(t, shopperPermissions...)
 	runClients(t, server.URL, token)
 }
 
@@ -163,7 +163,7 @@ func TestEverySDKCallsTheRustServer(t *testing.T) {
 	}
 	database := filepath.Join(t.TempDir(), "shop.db")
 	u := newSQLiteUsers(t, database)
-	u.add(t, shopperLogin, "Grace Hopper", shopperPassword, "orders")
+	u.add(t, shopperLogin, "Grace Hopper", shopperPassword, shopperPermissions...)
 	token := signIn(t, productsClient(t, productsServer(t, u)), shopperLogin, shopperPassword)
 
 	server := exec.Command(binary)

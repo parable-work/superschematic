@@ -101,8 +101,10 @@ var NoteQuotedFields = map[string]string{
 	"ref_id":         `ref_id`,
 }
 
-// buildNoteOrderByClause builds an ORDER BY clause for Note
-func buildNoteOrderByClause(orderBy []NoteOrderBy, tableName string) string {
+// buildNoteOrderByClause builds an ORDER BY clause for Note.
+// quotedTable is the table's name as the FROM clause spells it, quoted when
+// it is a keyword (a table named order is "order").
+func buildNoteOrderByClause(orderBy []NoteOrderBy, quotedTable string) string {
 	if len(orderBy) == 0 {
 		return ""
 	}
@@ -119,7 +121,7 @@ func buildNoteOrderByClause(orderBy []NoteOrderBy, tableName string) string {
 		if !ok {
 			quotedField = fieldStr // Fallback to unquoted if not found
 		}
-		clauses = append(clauses, fmt.Sprintf("%s.%s %s", tableName, quotedField, direction))
+		clauses = append(clauses, fmt.Sprintf("%s.%s %s", quotedTable, quotedField, direction))
 	}
 
 	if len(clauses) == 0 {
@@ -880,7 +882,7 @@ func (r *NoteRepository) FindOne(ctx context.Context, filter *NoteFilter, opts *
 	whereClause := filter.buildWhereClause(&args, 0)
 
 	// Build ORDER BY clause
-	orderByClause := buildNoteOrderByClause(opts.OrderBy, "note")
+	orderByClause := buildNoteOrderByClause(opts.OrderBy, `note`)
 
 	// Build query
 	query := fmt.Sprintf(`SELECT %s FROM note%s%s LIMIT 1`, selectFields, whereClause, orderByClause)
@@ -1108,7 +1110,7 @@ func (r *NoteRepository) FindMany(ctx context.Context, filter *NoteFilter, opts 
 	whereClause := filter.buildWhereClause(&args, 0)
 
 	// Build ORDER BY clause
-	orderByClause := buildNoteOrderByClause(opts.OrderBy, "note")
+	orderByClause := buildNoteOrderByClause(opts.OrderBy, `note`)
 
 	// Build LIMIT/OFFSET clause
 	limitOffsetClause := buildLimitOffsetClauseTyped(opts.Limit, opts.Offset)

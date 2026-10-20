@@ -264,15 +264,22 @@ func newCrate(c registry.GenerateContext, api *registry.RustAPI, cfg Config) (*c
 			return nil, err
 		}
 	}
-	if out.References, err = referencesOf(out, schemas, inProcess, c.Logf); err != nil {
+	// The pages' resources, whose trail's steps a reference may name.
+	var site *pageSite
+	var trails []trailStep
+	if cfg.WritesPages() {
+		site = siteOf(out, schemas, inProcess)
+		trails = trailSteps(site.roots)
+	}
+	if out.References, err = referencesOf(out, schemas, inProcess, trails, c.Logf); err != nil {
 		return nil, err
 	}
 	if out.Engine, err = engineOf(c, api, Dir(c.Options.OutputRoot, service)); err != nil {
 		return nil, err
 	}
-	if cfg.WritesPages() {
+	if site != nil {
 		title := humanize(strings.ReplaceAll(service, "-", " "))
-		if out.Pages, err = pagesOf(out, schemas, inProcess, cfg.PagesPrefix(), title, cfg.PagesLive(), c.Logf); err != nil {
+		if out.Pages, err = pagesOf(out, schemas, site, cfg.PagesPrefix(), title, cfg.PagesLive(), c.Logf); err != nil {
 			return nil, err
 		}
 	}

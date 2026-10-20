@@ -48,6 +48,50 @@ func LoadOptionalJSONService() (*ir.Schema, error) {
 	return loader.LoadService(filepath.Join(filepath.Dir(file), "testdata", OptionalJSONService))
 }
 
+// UnionListsService is the name of the schema LoadUnionListsService loads.
+const UnionListsService = "union-lists-api"
+
+// LoadUnionListsService loads union-lists-api from this package's testdata:
+// the union Shape (Circle | Square) as the response of operations that do
+// not page, ShapeQueries.listShapes (a list of it), ShapeQueries.shapeRows
+// (a list of lists of it), ShapeQueries.getShape (one of it),
+// ShapeQueries.shapesByName (a map of it), ShapeQueries.shapeGroups (a map
+// of lists of it), ShapeQueries.findShape (one of it that may be null) and
+// ShapeQueries.findShapes (a list of it that may be null). An SDK decodes
+// each element through the union. It is local to the SDK generator tests,
+// so no other generator's goldens read it.
+func LoadUnionListsService() (*ir.Schema, error) {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		return nil, fmt.Errorf("locate package sdktest")
+	}
+	return loader.LoadService(filepath.Join(filepath.Dir(file), "testdata", UnionListsService))
+}
+
+// AddCircleOperations adds three operations on Circle, an object type, to
+// the loaded union-lists-api schema's ShapeQueries, for an SDK that parses
+// an object type's response and not a union's: circlesByName, a map of it
+// (GET circle-index), circleGroups, a map of lists of it (GET
+// circle-groups), and findCircle, one that may be null (GET
+// circle-search/{name}).
+func AddCircleOperations(schema *ir.Schema) error {
+	for _, set := range schema.OperationSets {
+		if set.Name != "ShapeQueries" {
+			continue
+		}
+		set.Operations = append(set.Operations,
+			&ir.FieldDef{Name: "circlesByName", TypeRef: ir.TypeRef{Name: "Circle", IsMap: true}, Required: true, HTTPMethod: "GET", RestPath: "circle-index"},
+			&ir.FieldDef{Name: "circleGroups", TypeRef: ir.TypeRef{Name: "Circle", IsMap: true, IsArray: true}, Required: true, HTTPMethod: "GET", RestPath: "circle-groups"},
+			&ir.FieldDef{
+				Name: "findCircle", TypeRef: ir.TypeRef{Name: "Circle"}, HTTPMethod: "GET", RestPath: "circle-search/{name}",
+				Arguments: []*ir.ArgumentDef{{Name: "name", TypeRef: ir.TypeRef{Name: "string"}, Required: true}},
+			},
+		)
+		return nil
+	}
+	return fmt.Errorf("schema %s has no ShapeQueries operation set", schema.Name)
+}
+
 // AddPaintOperation adds grid.paint to the loaded fixture-nested-arrays-api
 // schema: a PUT whose body arguments are a required list of lists of the
 // Shade enum and an optional list of lists of the Point object, and whose

@@ -1,6 +1,6 @@
 ---
 title: Buckets
-description: Keep files in a private bucket a Bucket service declares. List it in an API's config, use it from Deps in Go or TypeScript, hand a browser a signed URL to upload or download an object, and run it locally on fake-gcs-server.
+description: Keep files in a private bucket a Bucket service declares. List it in an API's config, use it from Deps in Go, TypeScript or Rust, hand a browser a signed URL to upload or download an object, and run it locally on fake-gcs-server.
 sidebar:
   order: 5.6
 ---
@@ -19,10 +19,10 @@ and D54 in `docs/DECISIONS.md` records the decision.
 | Built | Not built yet |
 | --- | --- |
 | the `Bucket` kind, `buckets` in an API's config, and the `bucket` deployable and edge | |
-| `Deps` gains a bucket per listed bucket, in Go and TypeScript, implemented over GCS | a bucket on another provider |
+| `Deps` gains a bucket per listed bucket, in Go, TypeScript and Rust, implemented over GCS | a bucket on another provider |
 | signed URLs to upload or download an object directly | |
 | `stack dev` runs fake-gcs-server with a bucket per Bucket service | |
-| on gcp, a private Cloud Storage bucket per Bucket service, with its grants | a bucket for a Rust server, job or worker |
+| on gcp, a private Cloud Storage bucket per Bucket service, with its grants | |
 
 ## Declare a bucket
 
@@ -58,20 +58,26 @@ The name comes from the naming file's
 [`[derived_fields] bucket`](/superschematic/reference/naming/#derived_fieldsbucket)
 template, `{SERVICE}_BUCKET` by default. `Deps` gains the bucket itself,
 named after the service: `ShopMedia bucket.Bucket` in Go, from
-`runtime/http/go/bucket`, and `shopMedia: Bucket` in TypeScript, from
-`@superschematic/http-runtime`. Both have the same methods:
+`runtime/http/go/bucket`, `shopMedia: Bucket` in TypeScript, from
+`@superschematic/http-runtime`, and `shop_media: Arc<dyn Bucket>` in Rust,
+from the Rust HTTP runtime's `bucket` module. All three have the same
+methods:
 
-| Go | TypeScript | Does |
-| --- | --- | --- |
-| `Put(ctx, name, body, opts)` | `put(name, body, options)` | writes the object from a stream, replacing any, with an optional content type |
-| `Get(ctx, name)` | `get(name)` | opens the object as a stream, with its size, content type and time; the caller closes it |
-| `Delete(ctx, name)` | `delete(name)` | removes the object |
-| `List(ctx, opts)` | `list(options)` | a page of the objects whose names begin with a prefix, in name order, and the token of the next page |
-| `SignedURL(ctx, name, opts)` | `signedUrl(name, options)` | a URL that lets its holder `GET` the object or `PUT` it, with no other credential, until it expires |
+| Go | TypeScript | Rust | Does |
+| --- | --- | --- | --- |
+| `Put(ctx, name, body, opts)` | `put(name, body, options)` | `put(name, body, options)` | writes the object from a stream, replacing any, with an optional content type |
+| `Get(ctx, name)` | `get(name)` | `get(name)` | opens the object as a stream, with its size, content type and time; the caller closes it, or in Rust drops it |
+| `Delete(ctx, name)` | `delete(name)` | `delete(name)` | removes the object |
+| `List(ctx, opts)` | `list(options)` | `list(options)` | a page of the objects whose names begin with a prefix, in name order, and the token of the next page |
+| `SignedURL(ctx, name, opts)` | `signedUrl(name, options)` | `signed_url(name, options)` | a URL that lets its holder `GET` the object or `PUT` it, with no other credential, until it expires |
 
-A missing object is `bucket.ErrNotFound` in Go and an
-`ObjectNotFoundError` in TypeScript. Object names are slash-separated
-paths such as `products/7b0e/image.png`; a bucket has no directories.
+A missing object is `bucket.ErrNotFound` in Go, an
+`ObjectNotFoundError` in TypeScript and `BucketError::NotFound` in Rust.
+Object names are slash-separated paths such as `products/7b0e/image.png`;
+a bucket has no directories. In Rust, a `Body` is bytes, text, or a
+stream of chunks such as an axum request's `into_data_stream()`, and a
+`Reader` is a stream an axum handler answers with as
+`Body::from_stream(reader)`.
 
 ## Hand a browser a signed URL
 
@@ -84,6 +90,23 @@ the upload of a product's image and records the object's name on the
 product:
 
 <Snippet file="go/shop-api/products.go" symbol="Products.CreateProductImageUpload" />
+
+In Rust, an implementation signs one the same way:
+
+```rust
+use std::time::Duration;
+use superschematic_http_runtime::bucket::SignedUrlOptions;
+
+let upload = deps
+    .shop_media
+    .signed_url(
+        &format!("products/{id}/image.png"),
+        SignedUrlOptions::put(Duration::from_secs(15 * 60)).with_content_type("image/png"),
+    )
+    .await?;
+```
+
+A Rust URL's expiry is a whole number of seconds, as TypeScript's is.
 
 The browser then sends the file with the content type it asked for:
 
@@ -99,10 +122,10 @@ GCS's API, in a container beside Postgres, one per environment and
 checkout, and
 creates a bucket per Bucket service, named after it. The bucket field's
 endpoint points at it, so the same GCS implementation reaches it, with no
-credential. It signs URLs too: against an emulator, a V4 URL for the
-emulator's host signed with a key the process makes, which the emulator
-takes and does not check. A process with `STORAGE_EMULATOR_HOST` set
-reaches that emulator the same way.
+credential, in Go, TypeScript and Rust alike. It signs URLs too: against
+an emulator, a V4 URL for the emulator's host signed with a key the
+process makes, which the emulator takes and does not check. A process
+with `STORAGE_EMULATOR_HOST` set reaches that emulator the same way.
 
 The container keeps its objects between runs; `stack dev --remove-data`
 removes them with the containers. The environment's `storageImage` and
@@ -118,20 +141,25 @@ export abstract class Dev {}
 
 The acme shop's `go/stack_dev_test.go` runs it: it asks `shop-api` for an
 upload URL, `PUT`s an image through it to the emulator, and reads it back
-from the bucket.
+from the bucket. `TestStackDevRunsRustJobsAndWorkers` runs a Rust API's
+job, which puts objects in its bucket on the emulator, its worker, which
+reads and deletes them, and its server, which lists the rest and signs a
+URL that downloads one.
 
 ## On Google Cloud
 
-A server or job whose APIs list a bucket links GCS's Go client, or depends
-on its Node client, and no other does. On Cloud Run it reaches the bucket
-as its own service account, and signs a URL as that account through IAM's
-`signBlob`.
+A server, job or worker whose APIs list a bucket links GCS's Go client,
+depends on its Node client, or in Rust turns on the HTTP runtime's `gcs`
+feature, and no other does. The Rust one links no Google library: it calls
+Cloud Storage's JSON API with an access token for its account from the
+metadata server. On Cloud Run each reaches the bucket as its own service
+account, and signs a URL as that account through IAM's `signBlob`.
 
 The gcp target places each Bucket service on the `gcp.storage` platform:
 a Cloud Storage bucket in the environment's region, named
 `<project>-<stack>-<bucket>` since bucket names are global, with uniform
-bucket-level access and public access prevention enforced. Each server or
-job whose APIs list it gets:
+bucket-level access and public access prevention enforced. Each server,
+job or worker whose APIs list it, in any language, gets:
 
 - `roles/storage.objectUser` on that bucket alone, to read, write, list
   and delete its objects;

@@ -70,7 +70,7 @@ export interface {{ .InterfaceName }} {
 {{- range .Endpoints }}
   /**
 {{- range .DocLines }}
-   *{{ if . }} {{ . }}{{ end }}
+   *{{ if . }} {{ jsdoc . }}{{ end }}
 {{- end }}
    */
   {{ .Name }}(args: {{ .ArgsTypeName }}, ctx: RequestContext): Promise<OperationOutcome<{{ .OutputType }}>>;

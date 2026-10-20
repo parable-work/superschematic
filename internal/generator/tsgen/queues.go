@@ -151,8 +151,9 @@ func queueField(schema *ir.Schema, f *ir.FieldDef, sqlTypes map[string]string) (
 	return field, ""
 }
 
-// queueDocLines splits a comment into lines, or returns none for an empty
-// one.
+// queueDocLines splits a comment into lines, each with "*/" escaped so it
+// cannot close the class's JSDoc early (codegen.JSDocEscape), or returns
+// none for an empty one.
 func queueDocLines(doc string) []string {
 	doc = strings.TrimSpace(doc)
 	if doc == "" {
@@ -160,7 +161,7 @@ func queueDocLines(doc string) []string {
 	}
 	var lines []string
 	for _, line := range strings.Split(doc, "\n") {
-		lines = append(lines, strings.TrimSpace(line))
+		lines = append(lines, codegen.JSDocEscape(strings.TrimSpace(line)))
 	}
 	return lines
 }

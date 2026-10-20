@@ -238,6 +238,11 @@ from the query string (below). In the body:
   is one error named by the rule it breaks (`minLength`, `maxLength`,
   `pattern`, `min`, `max`). An enum value outside the enum is `enum`.
 
+An implementation returns a list as `[]T`, a map (`Record<string, T>`) as
+`map[string]T` (`map[string][]T` for a map of lists) and any other result
+as `*T`. A nil list is sent as `[]` and a nil map as `{}`; a nil `*T` is
+null.
+
 A required argument that is absent or null is `required`; an optional one
 is its zero value, but for the null of an optional `Generic.JSON`. The body
 must be one JSON object, and its keys match the argument names exactly.
@@ -310,6 +315,41 @@ adds `Config.ServiceAuthenticator`, a `serviceauth.Authenticator` from the
 HTTP runtime, which `Config.Validate` requires. A handler reads the
 calling service with `serviceauth.CallerFromContext(ctx)`.
 
+An operation declared `@manualRouteRegistration` answers with a handler
+you write, for a response the JSON envelope cannot hold, such as a file
+or a stream. `Config` gains `ManualRoutes`, a `*ManualRoutes` with an
+`http.Handler` per such operation, named by its namespace and operation
+(`OrderExportOrder`). With it set, `RegisterRoutes` mounts each handler
+at its operation's route behind the middlewares the route would have as
+any other: the request log, the auth middleware of a route that needs a
+caller, the webhook verifier, the rate limit, the body limit, the service
+step, the permission check, the payload decryptor and the timeout. A nil
+handler answers 501. Without it, `RegisterRoutes` mounts none, and you
+mount each route on the router yourself. The namespace's interface keeps
+a method for the operation, which a route mounted from `ManualRoutes`
+does not call.
+
+In a [stack](/superschematic/guides/stacks/#the-generated-server), the
+server's `main.go` sets `ManualRoutes` from your implementation's
+`NewManualRoutes(deps)`, of the generated `ManualRoutesConstructor`'s
+signature, which the scaffold writes with a handler per operation that
+answers 501:
+
+```go
+func NewManualRoutes(deps api.Deps) (api.ManualRoutes, error) {
+	return api.ManualRoutes{
+		OrderExportOrder: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/csv")
+			fmt.Fprintf(w, "id,region\n%s,%s\n", chi.URLParam(r, "id"), deps.Config.FulfillmentRegion)
+		}),
+	}, nil
+}
+```
+
+A stack's build fails on an implementation that declares no
+`NewManualRoutes` while its API declares a manual route, and says what to
+add.
+
 ## Consume a generated SDK
 
 An API schema with `outputs.sdk.go` enabled writes
@@ -353,9 +393,19 @@ required map is `required`, a nil list value is `required` at
 `name[key]`, and each value or list element runs its own validation at
 `name[key]` or `name[key][i]`.
 
+A method returns the response as the schema's Go type: `[]T` for a list
+and `map[string]T` for a map (`map[string][]T` for a map of lists). A
+union response decodes through its `<Union>Wrapper`, element by element
+and key by key, and an element the union cannot read, or a null one, is
+an error. A null list or map returns nil, and so does a `Nullable<T>` of a
+union that answers null; a required union that answers null is an error.
+
 A response outside 2xx returns an `*APIError`, or a type that embeds one:
 `*AuthenticationError` for 401, `*AuthorizationError` for 403 and
-`*RateLimitError` for 429. `Message` is the problem's `detail` (or an
+`*RateLimitError` for 429. Each of the three unwraps to its
+`*APIError`, so `errors.As(err, &apiErr)` finds every HTTP answer. A
+`*NetworkError` does not unwrap: `errors.As` finds no `*APIError` behind a
+request that never reached the server. `Message` is the problem's `detail` (or an
 older body's `error` or `message`), `Code` is its `code` and
 `StatusCode` the HTTP status. `Error()` joins them:
 `order 7 has already shipped (code: ORDER_SHIPPED, status: 409)`, or

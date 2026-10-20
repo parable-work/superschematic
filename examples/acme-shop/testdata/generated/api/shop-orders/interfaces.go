@@ -17,7 +17,8 @@ import (
 type OrderImplementation interface {
 	// ListOrders handles GET /api/orders
 	//
-	// The orders, oldest first: by when each was placed, then by its id.
+	// The caller's orders, or every customer's for staff, oldest first.
+	// They are ordered by when each was placed, then by their ids.
 	//
 	// This endpoint pages its list (@paginated): page is the request's cursor,
 	// "" for the first page, and its limit, 1 to 100 (20 when the request
@@ -29,10 +30,16 @@ type OrderImplementation interface {
 	// PlaceOrder handles POST /api/orders
 	PlaceOrder(ctx context.Context, input *types.PlaceOrderInput) (*types.OrderView, error)
 	// GetOrder handles GET /api/orders/{id}
+	//
+	// One order: the caller's own, or any customer's for staff.
+	// Another customer's order is not found, as one no one placed is, so
+	// its id tells a shopper nothing.
 	GetOrder(ctx context.Context, id types.IdentityUUID) (*types.OrderView, error)
 	// CancelOrder handles POST /api/orders/{id}/cancel
 	//
 	// Cancels an order that has not shipped, recording why.
+	// It cancels the caller's own order, or any customer's for staff;
+	// another customer's order is not found, as getOrder answers.
 	CancelOrder(ctx context.Context, id types.IdentityUUID, reason string) (*types.OrderView, error)
 }
 

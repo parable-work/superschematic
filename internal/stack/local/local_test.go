@@ -2,11 +2,13 @@ package local_test
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"flag"
 	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -227,17 +229,17 @@ func rustStack() *ir.Stack {
 	return s
 }
 
-// rustShop is the acme-shop services with shop-api written in Rust and no
-// bucket, which a Rust server does not reach (D57): its server, which
-// reaches shop-db through its authDb, is a Rust process.
+// rustShop is the acme-shop services with shop-api written in Rust (D57):
+// its server, which reaches shop-db through its authDb and shop-media
+// through the storage emulator (D54), is a Rust process.
 func rustShop() []stack.Service {
-	return stacktest.InRust(stacktest.WithoutBuckets(stacktest.AcmeShop()), "shop-api")
+	return stacktest.InRust(stacktest.AcmeShop(), "shop-api")
 }
 
 // TestRustGolden resolves the shop with shop-api in Rust in Dev: shop-api's
-// process is a Rust one, with the sql edge and port a Go server's has, and
-// no binary in the program, since the provisioner reads the binary's name
-// from the crate as it builds it.
+// process is a Rust one, with the sql edge, the bucket edge and the port a
+// Go server's has, and no binary in the program, since the provisioner
+// reads the binary's name from the crate as it builds it.
 func TestRustGolden(t *testing.T) {
 	checkGoldenEnvironment(t, assemble(t), rustStack(), rustShop(), "Dev")
 	env := resolve(t, assemble(t), rustStack(), rustShop(), "Dev")
@@ -270,6 +272,56 @@ func rustOrdersStack() *ir.Stack {
 // shop-orders lists none.
 func rustOrdersShop() []stack.Service {
 	return stacktest.InRust(stacktest.AcmeShop(), "shop-orders")
+}
+
+// TestRustBucketsLowerAsGoOnes: a Rust server's, job's and worker's bucket
+// edge lowers as a Go one's does (D54): shop-api's server, and with
+// shop-orders listing shop-media its server, its job and its worker, each
+// get the bucket's name on the storage emulator and the emulator's
+// endpoint, with no credential, which the Rust runtime's gcs reaches.
+func TestRustBucketsLowerAsGoOnes(t *testing.T) {
+	reg := assemble(t)
+	withMedia := func(services []stack.Service) []stack.Service {
+		for i := range services {
+			if services[i].Name == stacktest.ShopOrders.Name {
+				services[i].Buckets = []ir.ServiceRef{stacktest.ShopMedia}
+			}
+		}
+		return services
+	}
+	goEnv := resolve(t, reg, shop(), withMedia(stacktest.AcmeShop()), "Dev")
+	env := resolve(t, reg, shop(), withMedia(stacktest.InRust(stacktest.AcmeShop(), "shop-api", "shop-orders")), "Dev")
+	for _, name := range []string{"shop-api", "Orders", stacktest.ShipOrdersJob, stacktest.FulfilOrdersWorker} {
+		d, goD := env.Deployable(name), goEnv.Deployable(name)
+		if d == nil || d.Language != registry.APILanguageRust {
+			t.Fatalf("%s is %+v, want a Rust deployable", name, d)
+		}
+		edge := "bucket:" + name + "->shop-media"
+		i := slices.IndexFunc(env.Edges, func(e *ir.Edge) bool { return e.ID == edge })
+		j := slices.IndexFunc(goEnv.Edges, func(e *ir.Edge) bool { return e.ID == edge })
+		if i < 0 || j < 0 || env.Edges[i].Connector != goEnv.Edges[j].Connector {
+			t.Fatalf("%s is not connected as a Go %s's is", edge, d.Kind)
+		}
+		if !equalJSON(t, d.Bindings, goD.Bindings) {
+			t.Errorf("%s's bindings differ from a Go %s's", name, d.Kind)
+		}
+		var media *ir.Binding
+		for _, b := range d.Bindings {
+			if b.Field == "SHOP_MEDIA_BUCKET" {
+				media = b
+			}
+		}
+		if media == nil {
+			t.Fatalf("%s has no SHOP_MEDIA_BUCKET binding: %+v", name, d.Bindings)
+		}
+		value, err := json.Marshal(media.Value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(value), `"name":"`) || !strings.Contains(string(value), `"endpoint":"http://127.0.0.1:`) {
+			t.Errorf("%s's bucket connection is %s, want the bucket on the emulator's loopback endpoint", name, value)
+		}
+	}
 }
 
 // TestRustJobAndWorkerGolden resolves the shop with shop-orders in Rust in
@@ -623,38 +675,6 @@ func TestRefusals(t *testing.T) {
 			}
 		}
 		wantFailure(t, resolveErr(t, shop(), services, "Dev"), stack.CodeLowering, `the bucket of m would be named "m"`)
-	})
-	t.Run("a Rust server's bucket", func(t *testing.T) {
-		// shop-api lists shop-media; the Rust runtime has no Bucket, so
-		// the edge is refused as gcp refuses it, and nothing else is.
-		errs := resolveErr(t, shop(), stacktest.InRust(stacktest.AcmeShop(), "shop-api"), "Dev")
-		want := "server shop-api is a RUST server, which has no Bucket in its runtime to reach bucket shop-media with: buckets from a Rust server are not built (D57)"
-		if len(errs.List) != 1 || errs.List[0].Code != stack.CodeLowering || !strings.Contains(errs.List[0].Message, want) {
-			t.Errorf("got %v, want the one lowering error %q", errs, want)
-		}
-	})
-	t.Run("a Rust job's or worker's bucket", func(t *testing.T) {
-		// shop-orders lists shop-media in Rust: its job and its worker
-		// take its edges (D52, D53), so each bucket edge is refused as
-		// its server's is, and nothing else is (D65).
-		services := stacktest.InRust(stacktest.AcmeShop(), "shop-orders")
-		for i := range services {
-			if services[i].Name == stacktest.ShopOrders.Name {
-				services[i].Buckets = []ir.ServiceRef{stacktest.ShopMedia}
-			}
-		}
-		errs := resolveErr(t, shop(), services, "Dev")
-		var got []string
-		for _, e := range errs.List {
-			got = append(got, string(e.Code)+": "+e.Message)
-		}
-		for _, d := range []string{"server Orders", "job " + stacktest.ShipOrdersJob, "worker " + stacktest.FulfilOrdersWorker} {
-			kind, _, _ := strings.Cut(d, " ")
-			wantFailure(t, errs, stack.CodeLowering, d+" is a RUST "+kind+", which has no Bucket in its runtime to reach bucket shop-media with: buckets from a Rust server are not built (D57)")
-		}
-		if len(errs.List) != 3 {
-			t.Errorf("got %d failures, want the three bucket edges':\n%s", len(errs.List), strings.Join(got, "\n"))
-		}
 	})
 	t.Run("a PORT field", func(t *testing.T) {
 		services := stacktest.AcmeShop()

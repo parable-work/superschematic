@@ -597,6 +597,44 @@ func (r run) checkTypeScriptExport(stackName, api, what, fn, typ string, methods
 		stackName, api, what, dir, fn, fn, typ, strings.Join(methods, "\n"), typ, r.Options.Naming.NpmAPIPackage(api), section)
 }
 
+// checkTypeScriptManualRoutes refuses a TypeScript API with a
+// @manualRouteRegistration operation whose implementation exists and
+// exports no createManualRoutes (D51): a server's main.ts builds the
+// handlers its router mounts with it, and the build no longer writes into
+// the implementation, so one that predates the operation, or the
+// entrypoint's handing its handlers to buildRouter, fails here, saying
+// what to add, rather than when tsc checks main.ts or Bun runs it.
+func (r run) checkTypeScriptManualRoutes(stackName string, output *tsrestgen.APIOutput) error {
+	var handlers []string
+	for _, ep := range output.ManualEndpoints {
+		handlers = append(handlers, fmt.Sprintf("    async %s(c, ctx) {\n      // answer %s %s with a Response\n    },", ep.Name, ep.Method, ep.Path))
+	}
+	return r.checkTypeScriptExport(stackName, output.SchemaName, "@manualRouteRegistration operations", tsrestgen.ManualRoutesFunc, "ManualRoutesConstructor", handlers, "8.6")
+}
+
+// checkGoManualRoutes refuses a Go API with a @manualRouteRegistration
+// operation whose implementation, at dir, exists and declares no
+// NewManualRoutes (D51): a server's main.go builds the handlers
+// RegisterRoutes mounts with it, and the build no longer writes into the
+// implementation, so one that predates the operation, or the entrypoint's
+// mounting it, fails here, saying what to add, rather than when go builds
+// main.go.
+func (r run) checkGoManualRoutes(stackName string, output *apigen.APIOutput, dir string) error {
+	declares, err := apigen.DeclaresFunc(dir, apigen.ManualRoutesFunc)
+	if err != nil || declares {
+		return err
+	}
+	var handlers []string
+	for _, ep := range output.ManualEndpoints() {
+		handlers = append(handlers, fmt.Sprintf("\t%s: http.HandlerFunc(...), // answers %s %s", ep.ImplName, ep.Method, ep.Path))
+	}
+	return fmt.Errorf("stack %s: %s declares @manualRouteRegistration operations, and its implementation at %s, which the build no longer writes into, declares no %s; add\n\n"+
+		"\tfunc %s(deps api.Deps) (api.ManualRoutes, error)\n\n"+
+		"returning an api.ManualRoutes with an http.Handler per operation:\n\n%s\n\n"+
+		"where api is %s, whose api.ManualRoutesConstructor is %s's signature (docs/stack-model.md, section 8.5)",
+		stackName, output.SchemaName, dir, apigen.ManualRoutesFunc, apigen.ManualRoutesFunc, strings.Join(handlers, "\n"), output.ModulePath, apigen.ManualRoutesFunc)
+}
+
 // checkRustFunc refuses a Rust API whose implementation exists and whose
 // src/lib.rs declares no fn, which returns the API crate's trait typ,
 // while the API declares what, its jobs or its workers, each a method of
@@ -622,6 +660,32 @@ func (r run) checkRustFunc(stackName, api, what, fn, typ string, methods []strin
 		"where %s (docs/stack-model.md, section %s)",
 		stackName, api, what, dir, fn, rustrestgen.ImplementationLib, fn, typ, typ, strings.TrimSuffix(what, "s"), typ, strings.Join(methods, "\n"),
 		fmt.Sprintf(names, crate), section)
+}
+
+// checkRustManualRoutes refuses a Rust API with a @manualRouteRegistration
+// operation whose implementation exists and whose src/lib.rs declares no
+// create_manual_routes (D51): a server's main.rs builds the handlers
+// build_router_with_manual_routes mounts with it, and the build no longer
+// writes into the implementation, so one that predates the operation, or
+// the entrypoint's mounting it, fails here, saying what to add, rather
+// than when cargo builds the server's crate.
+func (r run) checkRustManualRoutes(stackName string, output *rustrestgen.APIOutput) error {
+	dir := r.Options.Naming.RustImplementationDir(r.Options.RepositoryRoot, output.SchemaName)
+	declares, err := rustrestgen.DeclaresFunc(dir, rustrestgen.ManualRoutesFunc)
+	if err != nil || declares {
+		return err
+	}
+	var methods []string
+	for _, ep := range output.ManualEndpoints {
+		methods = append(methods, fmt.Sprintf("      async fn %s(&self, ctx: RequestContext, request: Request) -> Result<Response, ApiError> {\n          // answer %s %s\n      }", ep.SnakeName(), strings.ToUpper(ep.Method), ep.Path))
+	}
+	crate := strings.ReplaceAll(r.Options.Naming.RustAPICrate(output.SchemaName), "-", "_")
+	return fmt.Errorf("stack %s: %s declares @manualRouteRegistration operations, and its implementation at %s, which the build no longer writes into, declares no %s in %s; add\n\n"+
+		"  pub async fn %s(deps: Deps) -> Result<Arc<dyn ManualRoutes>, Box<dyn std::error::Error + Send + Sync>>\n\n"+
+		"returning a value that implements ManualRoutes, with a method per operation:\n\n"+
+		"  #[async_trait]\n  impl ManualRoutes for ... {\n%s\n  }\n\n"+
+		"where Deps and ManualRoutes are %s's, RequestContext and ApiError the HTTP runtime's, and Request and Response axum's (docs/stack-model.md, section 8.6)",
+		stackName, output.SchemaName, dir, rustrestgen.ManualRoutesFunc, rustrestgen.ImplementationLib, rustrestgen.ManualRoutesFunc, strings.Join(methods, "\n"), crate)
 }
 
 // workerDatabase is the database whose queue the worker w claims: the one
@@ -766,6 +830,10 @@ func (r run) planEntrypoint(stackName string, s *ir.ResolvedDeployable, cloudSQL
 		}
 		if !exists {
 			scaffolds = append(scaffolds, scaffold{output: output, impl: impl, newModule: newModule, modules: apiModules})
+		} else if s.Kind == ir.DeployableServer && output.HasManualRoutes() {
+			if err := r.checkGoManualRoutes(stackName, output, impl.Dir); err != nil {
+				return nil, nil, err
+			}
 		}
 		if (output.IsPublic && output.UpstreamVersionGraph) || output.Deps.VersionGraph {
 			versionGraph = true
@@ -860,6 +928,10 @@ func (r run) planTypeScriptServer(stackName string, s *ir.ResolvedDeployable, cl
 			scaffolds = append(scaffolds, output)
 		} else if _, err := os.Stat(filepath.Join(dir, servergen.TypeScriptPackageFile)); errors.Is(err, fs.ErrNotExist) {
 			return nil, nil, fmt.Errorf("stack %s: server %s serves %s, whose implementation %s holds no package.json, by which the Bun workspace links it; add one named %s", stackName, s.Name, ref.Name, dir, r.Options.Naming.NpmImplementationPackage(ref.Name))
+		} else if s.Kind == ir.DeployableServer && output.HasManualRoutes() {
+			if err := r.checkTypeScriptManualRoutes(stackName, output); err != nil {
+				return nil, nil, err
+			}
 		}
 		pkg, err := servergen.ImplementationPackage(r.Options.Naming, ref.Name, dir)
 		if err != nil {
@@ -958,6 +1030,10 @@ func (r run) planRustServer(stackName string, s *ir.ResolvedDeployable, cors map
 		}
 		if !exists {
 			scaffolds = append(scaffolds, output)
+		} else if s.Kind == ir.DeployableServer && len(output.ManualEndpoints) > 0 {
+			if err := r.checkRustManualRoutes(stackName, output); err != nil {
+				return nil, nil, err
+			}
 		}
 		impl, err := servergen.ReadRustImplementation(r.Options.Naming, ref.Name, dir)
 		if err != nil {

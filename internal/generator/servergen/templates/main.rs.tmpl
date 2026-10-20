@@ -17,6 +17,12 @@
 //! databases answer, and on SIGTERM or SIGINT stops taking requests and
 //! lets those in flight finish. It logs one JSON object per line on stdout.
 {{- end }}
+{{- if .Buckets }}
+//!
+//! It opens each bucket its APIs list once, on GCS as the workload's
+//! account or on the emulator the bucket's connection names, through the
+//! HTTP runtime's `gcs` (D54; section 8.9).
+{{- end }}
 //!
 //! Each API's implementation is the crate at the naming file's
 //! `[implementation_paths] rust` template, which the build scaffolded once
@@ -182,6 +188,15 @@ async fn run() -> Result<(), Failure> {
 {{ rustLetCall .Var .Constructor "?" (printf "&%s" .From) }}
 {{- end }}
 {{- end }}
+{{- if .Buckets }}
+
+    // One bucket per Bucket service, shared by every API that lists it, on
+    // GCS or on the emulator its connection names (D54). Opening makes no
+    // request.
+{{- range .Buckets }}
+{{ rustLetCall .Var "open_bucket" "?" (rustString .Service) (rustString .Field) (printf "&%s" .From) }}
+{{- end }}
+{{- end }}
 {{- range .APIs }}
 
     // {{ .Service }}: its implementation, built from its Deps, and its routes.
@@ -198,8 +213,16 @@ async fn run() -> Result<(), Failure> {
 {{- range .Calls }}
         {{ .Field }}: {{ .Client.Var }}.clone(),
 {{- end }}
+{{- range .Buckets }}
+        {{ .Field }}: Arc::clone(&{{ .Bucket.Var }}),
+{{- end }}
         span: logging::api_span({{ rustString .Service }}),
     };
+{{- if .ManualRoutes }}
+    // The handlers of its @manualRouteRegistration operations, which its
+    // router mounts behind each one's route controls (D51).
+{{ rustLet .ManualRoutes (printf "%s::create_manual_routes(%s.clone())" .ImplAlias .Deps) ".await" (printf "map_err(|err| format!(\"manual routes of %s: {err}\"))?" .Service) }}
+{{- end }}
 {{ rustLet .Handlers (printf "%s::create(%s)" .ImplAlias .Deps) ".await" (printf "map_err(|err| format!(\"implementation of %s: {err}\"))?" .Service) }}
 {{- if .Identity }}
     // The identity runtime authenticates its callers and serves its user
@@ -229,7 +252,11 @@ async fn run() -> Result<(), Failure> {
         .validate_implementations()
         .map_err(|err| format!("implementation of {{ .Service }}: {err}"))?;
 {{- end }}
+{{- if .ManualRoutes }}
+{{ rustLetCall .Router (printf "%s::build_router_with_manual_routes" .Alias) "" .Implementations (printf "%s::RouterOptions::default()" .Alias) .ManualRoutes }}
+{{- else }}
 {{ rustLetCall .Router (printf "%s::build_router" .Alias) "" .Implementations }}
+{{- end }}
 {{- end }}
 {{- range .Engines }}
 {{- if .API }}

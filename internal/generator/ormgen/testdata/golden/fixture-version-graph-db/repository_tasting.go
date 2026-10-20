@@ -179,8 +179,10 @@ var TastingQuotedFields = map[string]string{
 	"ref_id":         `ref_id`,
 }
 
-// buildTastingOrderByClause builds an ORDER BY clause for Tasting
-func buildTastingOrderByClause(orderBy []TastingOrderBy, tableName string) string {
+// buildTastingOrderByClause builds an ORDER BY clause for Tasting.
+// quotedTable is the table's name as the FROM clause spells it, quoted when
+// it is a keyword (a table named order is "order").
+func buildTastingOrderByClause(orderBy []TastingOrderBy, quotedTable string) string {
 	if len(orderBy) == 0 {
 		return ""
 	}
@@ -197,7 +199,7 @@ func buildTastingOrderByClause(orderBy []TastingOrderBy, tableName string) strin
 		if !ok {
 			quotedField = fieldStr // Fallback to unquoted if not found
 		}
-		clauses = append(clauses, fmt.Sprintf("%s.%s %s", tableName, quotedField, direction))
+		clauses = append(clauses, fmt.Sprintf("%s.%s %s", quotedTable, quotedField, direction))
 	}
 
 	if len(clauses) == 0 {
@@ -1144,7 +1146,7 @@ func (r *TastingRepository) FindOne(ctx context.Context, filter *TastingFilter, 
 	whereClause := filter.buildWhereClause(&args, 0)
 
 	// Build ORDER BY clause
-	orderByClause := buildTastingOrderByClause(opts.OrderBy, "tasting")
+	orderByClause := buildTastingOrderByClause(opts.OrderBy, `tasting`)
 
 	// Build query
 	query := fmt.Sprintf(`SELECT %s FROM tasting%s%s LIMIT 1`, selectFields, whereClause, orderByClause)
@@ -1483,7 +1485,7 @@ func (r *TastingRepository) FindMany(ctx context.Context, filter *TastingFilter,
 	whereClause := filter.buildWhereClause(&args, 0)
 
 	// Build ORDER BY clause
-	orderByClause := buildTastingOrderByClause(opts.OrderBy, "tasting")
+	orderByClause := buildTastingOrderByClause(opts.OrderBy, `tasting`)
 
 	// Build LIMIT/OFFSET clause
 	limitOffsetClause := buildLimitOffsetClauseTyped(opts.Limit, opts.Offset)

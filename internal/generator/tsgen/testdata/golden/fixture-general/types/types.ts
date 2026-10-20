@@ -37,8 +37,8 @@ export function makeFixtureConfig(overrides?: Partial<FixtureConfig>): FixtureCo
 
 /**
  * FixtureFilter - JSON-persisted filter: exercises optional-list constraint gating.
-Absent/null must skip listMin; an explicit [] must fail it (decode must
-not normalize an absent optional list into an empty non-nil slice).
+ * Absent/null must skip listMin; an explicit [] must fail it (decode must
+ * not normalize an absent optional list into an empty non-nil slice).
  */
 export interface FixtureFilter {
   kind: string;

@@ -1423,7 +1423,7 @@ Bootstrap reads the GitHub repository from the git remote.
 | runner | a Cloud Run worker pool (`gcp.cloudrunrunner`) named after the deployable, an engine database's runner (D58), in its API's language, with its own service account and its database's Cloud SQL connection as its one config; one instance under manual scaling, which runs the engine's runner while it holds the runner's lock, since a Cloud Run service's instance has CPU only while it serves. Its database user is its own, a member of the role that owns the engine's schema, as each server's, job's and worker's on the database is (section 8.4, D58). A settings element that turns it off (`{ of: ShopDb, runner: true, enabled: false }`) leaves the pool no instance |
 | sql edge | `roles/cloudsql.client` and `roles/cloudsql.instanceUser` for the server's, the job's or the worker's account, held to the edge's instance by an IAM condition; an IAM database user, which the migration job gives read and write privileges; the Cloud SQL connection, which the connector derives (instance connection name, database, IAM user) and the service, the job or the worker pool mounts at `/cloudsql`. The same for a Rust server, job or worker, which dials the mount's socket as the IAM user (section 7.4, D57, D65) |
 | http edge | `roles/run.invoker` on the callee for the caller's account; the callee's `run.app` URL in the caller's config, with a Google ID token for the callee's custom audience, its full resource name `//run.googleapis.com/projects/<project>/locations/<region>/services/<service>`, as the service credential, since the service's own callers field cannot reference its URL; every service lists its resource name in `customAudiences`. The callee's callers field gets Google's issuer and keys, and the caller's service account by its email (section 9.2): a job's, as a caller that serves its API |
-| bucket edge | `roles/storage.objectUser` on the bucket alone for the server's, the job's or the worker's account, which reads, writes, lists and deletes its objects and changes nothing of the bucket, and `roles/iam.serviceAccountTokenCreator` for that account on itself, which IAM's `signBlob` asks of an account that signs a URL as itself; the bucket's name, which the connector derives, with no credential, since the client takes the workload's own from the metadata server. A Rust server's, job's or worker's bucket edge is refused: its runtime has no `Bucket`, and buckets from a Rust server are not built (D57) |
+| bucket edge | `roles/storage.objectUser` on the bucket alone for the server's, the job's or the worker's account, which reads, writes, lists and deletes its objects and changes nothing of the bucket, and `roles/iam.serviceAccountTokenCreator` for that account on itself, which IAM's `signBlob` asks of an account that signs a URL as itself; the bucket's name, which the connector derives, with no credential, since the client takes the workload's own from the metadata server. A Rust server's, job's or worker's edge lowers as a Go one's: its runtime's `gcs` asks the metadata server for the token and signs through `signBlob` (D54) |
 | internal server | internal-only ingress, with Cloud Run's invoker check on; callers also send the token in `X-Serverless-Authorization`, which the check reads |
 | calling server, job or worker | Direct VPC egress for all its traffic through the environment's network: a VPC, a subnet with Private Google Access, and Cloud NAT so the internet stays reachable. A job or a worker runs apart from every server, so it reaches each API its API calls this way, one its API's server serves too |
 | exposure | a global external Application Load Balancer per exposed server, with a Google-managed certificate from Certificate Manager on a host under the domain, authorized by a DNS record, and the records written by the environment's DNS platform (section 6.9); the service takes traffic from the load balancer only, with the invoker check off. Without a domain, the `run.app` URL, open to all traffic. The server's public address is `https://<server>.<domain>`, or without a domain its `run.app` URL |
@@ -1609,8 +1609,9 @@ The target sets defaults that `settings` can override:
 - a bucket with object versioning off (`versioning`) and no lifecycle
   rule, unless `deleteAfterDays` deletes each object that many days after
   it was written (D54);
-- logs to Cloud Logging, and traces to Cloud Trace through the entrypoint's
-  OpenTelemetry setup.
+- logs to Cloud Logging. Each account may write to Cloud Trace, but no
+  entrypoint exports traces yet: OpenTelemetry export is not built
+  (section 8.1).
 
 Cloud Run allocates a service's CPU only while it handles a request, and
 bills its instances for that time and their starts and stops, unless the
@@ -1680,14 +1681,16 @@ only what the last build wrote.
   (section 9.6), and forwards the end user of the request on each call's
   context (section 9.4);
 - calls each implementation's constructor with its `Deps`, and its
-  `AuthMiddleware` and `PayloadDecryptor` where the API's generated
-  `Config` takes them (section 8.5);
-- registers each API's routes on a router of its own, and hands each
-  request to the API whose router registers its method and path. The
-  build refuses two served APIs that register one method and path, path
-  parameters matched whatever their names. The routes every API
-  registers, its index, OpenAPI document and docs, answer for the first
-  API by name;
+  `AuthMiddleware`, `PayloadDecryptor` and `NewManualRoutes` where the
+  API's generated `Config` takes them (section 8.5);
+- registers each API's routes on a router of its own, a
+  `@manualRouteRegistration` operation's among them, with the handler
+  `NewManualRoutes` built behind the middlewares its route would have as
+  any other (D51), and hands each request to the API whose router
+  registers its method and path. The build refuses two served APIs that
+  register one method and path, path parameters matched whatever their
+  names, a manual route included. The routes every API registers, its
+  index, OpenAPI document and docs, answer for the first API by name;
 - answers `GET /healthz` while the process runs, and `GET /readyz` while
   every database answers a ping and the server is not shutting down;
 - listens on `$PORT`, 8080 when unset, logs JSON through zap, and on
@@ -1926,7 +1929,7 @@ runs an environment on the `local` target (`internal/stack/local`):
 | runner | an engine database's runner (D58), a process built and run as a worker is, from its entrypoint at `<output-root>/server/<stack>/<db>-engine-runner`: the same node with no port, `kind: runner` and a readiness of `started`, its environment its database's connection string alone. It takes the runner's lock on the environment's Postgres as it does on Cloud SQL, so the servers run no runner of their own here either |
 | site | built once, `bun run <build>` in its package at the naming file's `[implementation_paths] site` template after the workspace's install, then served from a file server of the provisioner's own on `http://127.0.0.1:<port>`: each file of its output, its config at `/__superschematic/config.json` with each API it calls at its loopback URL, and its fallback for a path that names no file. HTML files and the config are served `no-cache` and `no-store`, so a reload sees a rebuilt site (D55) |
 | sql edge | `postgres://postgres@127.0.0.1:<port>/<database>?sslmode=disable` |
-| bucket edge | the bucket's name and the emulator's `http://127.0.0.1:<port>` as its endpoint, with no credential. A Rust server's, job's or worker's is refused, as on gcp: buckets from a Rust server are not built (D57) |
+| bucket edge | the bucket's name and the emulator's `http://127.0.0.1:<port>` as its endpoint, with no credential, which the Go, TypeScript and Rust runtimes' GCS implementations reach alike |
 | http edge | the callee's `http://127.0.0.1:<port>`, with a `signed-token` credential (D37): `iss` and `sub` the caller's deployable, `aud` the callee's, signed with an Ed25519 key pair per calling and called server. A call between two APIs one server serves stays on loopback with no credential |
 | site edge | the server's public address, its loopback URL, which is also its address. The server's CORS field lists the site's origin, `http://127.0.0.1:<port>` (D55) |
 | secret | a line `<Type>.<FIELD>=<value>` in `<schemas-root>/.superschematic/local/<stack>/<environment>/secrets.env` |
@@ -2129,14 +2132,17 @@ found with no declaration:
   `Config` takes them, it also writes `AuthMiddleware(deps)`, which
   refuses every request with 401 until it verifies the end user, and
   `PayloadDecryptor(deps)`, which refuses every encrypted payload. For an
-  API with jobs it writes `NewJobs`, whose value has a method per job that
-  returns the not-implemented error (D52), and for an API with workers
-  `NewWorkers`, whose value has a method per worker that does (D53). It
-  never writes into a directory that holds a Go file, so the package is
-  the engineer's from then on: a stack's build fails on an API whose
-  package declares no `NewJobs` while the API declares jobs, or no
-  `NewWorkers` while it declares workers, an implementation that predates
-  them, and says what to add. A stack's build scaffolds each API its servers
+  API with a `@manualRouteRegistration` operation it writes
+  `NewManualRoutes`, whose `ManualRoutes` holds a handler per such
+  operation that answers 501 (D51). For an API with jobs it writes
+  `NewJobs`, whose value has a method per job that returns the
+  not-implemented error (D52), and for an API with workers `NewWorkers`,
+  whose value has a method per worker that does (D53). It never writes
+  into a directory that holds a Go file, so the package is the engineer's
+  from then on: a stack's build fails on an API whose package declares no
+  `NewManualRoutes` while the API declares a manual route, no `NewJobs`
+  while it declares jobs, or no `NewWorkers` while it declares workers,
+  an implementation that predates them, and says what to add. A stack's build scaffolds each API its servers
   serve; `build --scaffold` and `build-all --scaffold` scaffold each Go
   API built, outside a stack. A service the cache would restore builds
   again when its implementation is missing, and so does a stack that
@@ -2168,8 +2174,33 @@ found with no declaration:
   generated `Config`'s is, so the entrypoint passes one logger to both. A
   dependency must generate what `Deps` imports, its Go types (and so its
   ORM) for the database and its Go SDK for a callee, and the build refuses
-  one whose config does not. The generated `Config` and `RegisterRoutes`
-  do not change.
+  one whose config does not. `Deps` changes neither the generated
+  `Config` nor `RegisterRoutes`.
+
+  For an API with a `@manualRouteRegistration` operation, `routes.go`
+  declares `ManualRoutes`, an `http.Handler` per such operation, named by
+  its namespace and operation, and `Config.ManualRoutes`, and `deps.go`
+  declares `ManualRoutesConstructor`, which the scaffold asserts with
+  `var _ api.ManualRoutesConstructor = NewManualRoutes` (D51). The
+  entrypoint passes the handlers `NewManualRoutes(deps)` builds as
+  `Config.ManualRoutes`, and `RegisterRoutes` mounts each at its
+  operation's route behind the middlewares the route would have as any
+  other: the request log, the auth middleware of a route that needs a
+  caller, the webhook verifier, the rate limit, the body limit, the
+  service step, the permission check, the payload decryptor and the
+  timeout. A nil handler answers 501. Without `Config.ManualRoutes`,
+  outside a stack, `RegisterRoutes` mounts none, and the service mounts
+  each route itself. The namespace's interface keeps a method for the
+  operation, which a route mounted this way does not call:
+
+  ```go
+  type ManualRoutes struct {
+      // OrderExportOrder answers GET /api/orders/{id}/export.
+      OrderExportOrder http.Handler
+  }
+
+  type ManualRoutesConstructor func(deps Deps) (ManualRoutes, error)
+  ```
 
   For an API with jobs, `deps.go` also declares `Jobs`, a method per job
   sorted by name, and `JobsConstructor`, which the scaffold asserts with
@@ -2244,16 +2275,24 @@ as they are, with no build step (D51). The pieces mirror Go's:
   Promise<Implementations>`, in `deps.ts`, and, for an API with a route
   that needs an end user, `AuthenticatorFactory`, the type of the
   implementation's `authenticate`, which builds the router's
-  `Authenticator` from `Deps` as Go's `AuthMiddleware(deps)` does. `Deps`
-  holds `config`, `db`, a client per callee in a member named after it
-  (`shopApi`), and `logger`, each left out by Go's rule. The scaffold
-  writes the package once, as Go's does (section 8.5), in a directory
-  that holds no `.ts` file: `package.json`
+  `Authenticator` from `Deps` as Go's `AuthMiddleware(deps)` does. For an
+  API with a `@manualRouteRegistration` operation it writes
+  `ManualRoutes`, a `ManualRouteHandler` per such operation, and
+  `ManualRoutesConstructor`, the type of the implementation's
+  `createManualRoutes`, which builds them from `Deps` for the router's
+  `manualRoutes` (D51). `Deps` holds `config`, `db`, a client per callee
+  in a member named after it (`shopApi`), and `logger`, each left out by
+  Go's rule. The scaffold writes the package once, as Go's does (section
+  8.5), in a directory that holds no `.ts` file: `package.json`
   (`<npm_scope>/<service>-implementation`), `tsconfig.json`, and an
   `index.ts` whose `create` is a `Constructor` and whose methods throw the
   runtime's `notImplemented()`, with an `authenticate` that establishes no
-  end user and a verifier per `@hmacVerified` provider that refuses every
-  request. `deps.db` is a `pg` Pool that the runtime's `connectPostgres`
+  end user, a `createManualRoutes` whose handlers throw it too, and a
+  verifier per `@hmacVerified` provider that refuses every request. An
+  implementation that exists and exports no `createManualRoutes` while its
+  API declares a manual route fails a stack's build, which says what to
+  add, as one without its `createJobs` does (section 8.7). `deps.db` is a
+  `pg` Pool that the runtime's `connectPostgres`
   (`@superschematic/http-runtime/postgres`) opens from the derived
   connection; a TypeScript ORM, when one exists, adds a typed client on
   the same pool. The Node Cloud SQL connector reads the instance's
@@ -2342,13 +2381,21 @@ as they are, with no build step (D51). The pieces mirror Go's:
     captures it as Go's `CaptureAuthorization` does;
   - mounts each API's `buildRouter` on one Hono app, with
     `authenticateService: serviceAuthenticator(config.<API>_CALLERS)` for
-    an API with a service clause, then the runtime's `notFoundHandler` and
-    `errorHandler`. Hono merges the routers' routes, so an identity API's
+    an API with a service clause, and `manualRoutes`, the handlers the
+    implementation's `createManualRoutes(deps)` builds, for an API with a
+    `@manualRouteRegistration` operation, which the router mounts behind
+    the operation's route controls and auth gate (D51), then the
+    runtime's `notFoundHandler` and `errorHandler`. A Go server mounts
+    such an operation too, with the handler its implementation's
+    `NewManualRoutes(deps)` builds (sections 8.1 and 8.5), and so does a
+    Rust server, with the handlers its implementation's
+    `create_manual_routes(deps)` builds (below). Hono merges
+    the routers' routes, so an identity API's
     router registers its CORS on each of its own routes: a request gets
     the CORS of the API that serves it alone, and a preflight that of the
     API that registers the method it asks for, as Go's dispatch does.
     The build refuses two served APIs that register one method and path,
-    a manually routed operation included, which a TypeScript router
+    a manually routed operation included, which every server's router
     mounts;
   - serves `/healthz`, and `/readyz`, which answers 503 `draining` during
     shutdown and 503 `unavailable` with each database whose ping fails
@@ -2371,12 +2418,13 @@ as they are, with no build step (D51). The pieces mirror Go's:
   port, so its Dockerfile sets no `PORT` and exposes nothing. SIGTERM or
   SIGINT aborts the signal it hands the job or the worker loop; a second
   signal exits at once, as a server's does. It ends its pools before it
-  exits.
+  exits. The generated CI's `check` type-checks its package as it does a
+  server's (section 11.3).
 - **Engine.** An API whose database is an engine database (D58; section
   8.1) holds the engine in its `Deps`, `engine`, an `EngineBackground` of
   the engine's `./server` entry (`@superschematic/engine/server`), which
-  loads the engine's Node-API addon and the HTTP runtime alone, none of
-  the TypeScript engine; the API package peers on the engine's package.
+  loads the engine's Node-API addon and the HTTP runtime; the API package
+  peers on the engine's package.
   `engine.wait()` resolves with the engine once it opens, its calls the
   synchronous engine's, each returning a promise. `main.ts` opens it once
   per database with `openEngineInBackground`: off the JavaScript thread,
@@ -2412,11 +2460,13 @@ as they are, with no build step (D51). The pieces mirror Go's:
   (section 8.1) is a package of its own, `main.ts` reading the database's
   connection field alone, starting the engine's runner as the
   deployable's name, and holding the process open until SIGTERM, when it
-  stops the runner and closes the engine. The addon runs the core's
-  behaviors and the work queue's, which `main.ts` names when it opens the
-  engine (`behaviors: [...]`), so the build refuses only an engine
-  database that composes an extension's, which the project's engine
-  crate's addon will run.
+  stops the runner and closes the engine. The core's addon runs the
+  core's behaviors and the work queue's, which `main.ts` names when it
+  opens the engine (`behaviors: [...]`); an engine database that composes
+  an extension's behavior gets the project's engine crate's addon, its
+  `napi` member, which the engine opens on when the environment's
+  `SUPERSCHEMATIC_ENGINE_ADDON` names its file, as the image's engine
+  stage sets it.
 - **Image.** With the naming file's `[paths]` naming the checkouts of
   superscalar's TypeScript binding and the HTTP runtime's package, which
   no registry serves yet, the Dockerfile's addon stage builds
@@ -2470,7 +2520,8 @@ are the jobs and workers of a Rust API (D65; sections 8.7 and 8.8).
 
 - **Derived config.** The API crate's `config.rs` declares `EnvConfig`
   and `load_env_config()`: the `@envVars` settings beside a `Database` per
-  sql edge, a `Service` per `calls` entry, the callers field, the CORS
+  sql edge, a `Service` per `calls` entry, a `Bucket` per `buckets` entry
+  (D54), the callers field, the CORS
   field and, over the user model, the identity config, which the HTTP
   runtime's `stackconfig` readers and `identity::Config::parse` read from
   the variables Go's `stackconfig` reads. Its error names every variable
@@ -2483,9 +2534,20 @@ are the jobs and workers of a Rust API (D65; sections 8.7 and 8.8).
 - **Implementation.** `[implementation_paths] rust` defaults to
   `rust/{service}`. The API crate's `deps.rs` declares `Deps` (`config`,
   `db`, a Postgres pool from the runtime's `postgres`, a client per callee
-  from its Rust SDK, and `span`, the API's `tracing` span) and `Handlers`,
+  from its Rust SDK, an `Arc<dyn Bucket>` per bucket, the runtime's
+  provider-neutral `bucket::Bucket` (section 8.9), and `span`, the API's
+  `tracing` span) and `Handlers`,
   which the implementation's `create(deps)` returns; the entrypoint joins
-  them with what it builds through `Implementations::new`. The scaffold
+  them with what it builds through `Implementations::new`. For an API with
+  a `@manualRouteRegistration` operation, the crate's `ManualRoutes` trait
+  has a handler per such operation, which takes the route's
+  `RequestContext` and axum's `Request` and answers a `Response` or an
+  `ApiError`, and `build_router_with_manual_routes` mounts them behind the
+  request id, the webhook verifier and the controls the route would have
+  as a mounted one; the implementation's `create_manual_routes(deps)`
+  builds them, and the scaffold's answer 501 (D51). An implementation that
+  exists and declares no `create_manual_routes` while its API declares a
+  manual route fails a stack's build, which says what to add. The scaffold
   writes the crate once, in a directory that holds no `Cargo.toml`, as
   its own workspace, so no `Cargo.toml` above it claims it. The server's
   crate depends on its mirror by the package name its `Cargo.toml` gives
@@ -2555,13 +2617,21 @@ are the jobs and workers of a Rust API (D65; sections 8.7 and 8.8).
     it, with the token source its credential names
     (`stackconfig::credential_source`) and its header names; the end user
     travels per call, `RequestOptions::forward`;
+  - opens one bucket per Bucket service, shared by every API that lists
+    it, with the runtime's `gcs::open_bucket`, which makes no request: on
+    GCS as the workload's account, or on the emulator its connection
+    names (section 8.9). The crate turns on the runtime's `gcs` feature
+    only when one of its APIs lists a bucket;
   - calls each implementation's `create` with its `Deps`, then builds, for
     an API over the user model, one identity store per database
     (`identity::store` over `PostgresPool`) and the API's identity service
     from its identity config field, and, for an API with a service clause,
     a `JwtServiceAuthenticator` over its callers field, which it joins with
     the handlers through `Implementations::new`. An API with webhooks has
-    its verifiers checked first, where `build_router` would panic;
+    its verifiers checked first, where `build_router` would panic. An API
+    with a `@manualRouteRegistration` operation has its handlers built by
+    the implementation's `create_manual_routes`, from a clone of its
+    `Deps`, and its router built with `build_router_with_manual_routes`;
   - serves `/healthz`, and `/readyz`, which answers 503 `draining` during
     shutdown and 503 `unavailable` with each database whose ping fails
     within two seconds, and hands every other request to the router of
@@ -2631,12 +2701,15 @@ are the jobs and workers of a Rust API (D65; sections 8.7 and 8.8).
   (section 11.3).
 
 `TestStackDevRunsARustServer` runs a Rust server over Postgres that calls
-another, and signs an end user in with the identity runtime.
-`TestRustEngineEntrypointServes` builds a Rust server, its job and the
-Rust runner of its engine database, and runs them offline and on Postgres
-(D58).
-`TestStackDevRunsRustJobsAndWorkers` runs a Rust API's server and worker,
-and its job through `stack run` (sections 8.7 and 8.8).
+another and opens its bucket on the emulator, and signs an end user in
+with the identity runtime. `TestStackDevRunsRustJobsAndWorkers` runs a
+Rust API's server and worker, and its job through `stack run` (sections
+8.7 and 8.8): the job puts an object per product in the API's bucket on
+the emulator, the worker reads each and deletes those it handles, and the
+server lists what is left and signs a URL that downloads it (section
+8.9). `TestRustEngineEntrypointServes` builds a Rust server, its job and
+the Rust runner of its engine database, and runs them offline and on
+Postgres (D58).
 acme-shop's `TestStackDevRunsTheShop` runs `shop-stock`, a Rust server
 over `shop-db` whose reservations admit only `shop-orders`' Go server,
 which reserves an order's stock through `shop-stock`'s Go SDK with its
@@ -2646,8 +2719,7 @@ transaction; `shop-stock`'s Rust worker `ReorderStock` files the
 product's restock request, and its Rust job `OrderRestocks`, which
 the test runs with `stack run`, orders it (D65).
 
-Not built: buckets from a Rust server, job or worker, and OpenTelemetry
-export (D57, D65).
+Not built: OpenTelemetry export (D57, D65).
 
 ### 8.7 Jobs
 
@@ -3077,17 +3149,22 @@ export default defineConfig({ name: "shop-api", kind: SchemaKind.API, authDb: Sh
   locally and nowhere else. It holds no credential. The field is
   `{SERVICE}_BUCKET` (`[derived_fields] bucket`), its variables
   `SHOP_MEDIA_BUCKET_NAME` and `SHOP_MEDIA_BUCKET_ENDPOINT`, which Go's
-  `stackconfig.LoadBucket` and TypeScript's `loadBucket` read, held to one
-  encoding by the shared vectors (D51).
+  `stackconfig.LoadBucket`, TypeScript's `loadBucket` and Rust's
+  `stackconfig::load_bucket` read, held to one encoding by the shared
+  vectors (D51, D57).
 - **Code.** `Deps` gains a field per bucket the API lists, of the HTTP
   runtime's provider-neutral type: Go's `bucket.Bucket`
-  (`runtime/http/go/bucket`), TypeScript's `Bucket`. It puts an object
+  (`runtime/http/go/bucket`), TypeScript's `Bucket`, Rust's
+  `Arc<dyn bucket::Bucket>`. It puts an object
   from a stream, gets one as a stream with its metadata, deletes one,
   lists a page of the objects under a prefix with a token for the next,
   and signs a URL that lets its holder GET or PUT one object, with no
   other credential, for up to seven days, a PUT with the content type the
-  signature names. A missing object is `bucket.ErrNotFound`, or
-  `ObjectNotFoundError`.
+  signature names. A missing object is `bucket.ErrNotFound`,
+  `ObjectNotFoundError`, or `BucketError::NotFound`. Each refuses before
+  any request a name that is empty, longer than 1024 bytes or holds a
+  carriage return, a line feed or a NUL, and a URL's expiry out of range;
+  Rust's takes a URL's expiry in whole seconds, as TypeScript's does.
 - **GCS.** The implementation is GCS's, which reaches the local emulator
   too. The entrypoint of a Go server or job whose APIs list a bucket gets
   `buckets.go`, written beside `main.go` as `cloudsql.go` is, and its
@@ -3097,7 +3174,16 @@ export default defineConfig({ name: "shop-api", kind: SchemaKind.API, authDb: Sh
   bucket alone, where Cloud SQL's connector is decided per environment.
   A TypeScript server opens each bucket with `openBucket` from the HTTP
   runtime's `./gcs` entry, whose `@google-cloud/storage` is an optional
-  peer, and its `package.json` depends on it only with a bucket. A
+  peer, and its `package.json` depends on it only with a bucket. A Rust
+  server, job or worker opens each with `gcs::open_bucket`, behind the
+  runtime's `gcs` feature, which its crate turns on only with a bucket.
+  It links no Google library, as Rust's Cloud SQL connection links none
+  (D57): it calls Cloud Storage's JSON API over the runtime's reqwest
+  client with an OAuth access token for the workload's account from the
+  metadata server, kept until 3 minutes 45 seconds before it expires,
+  uploads an object in one multipart request, reads one's metadata then
+  that generation's bytes, and tries a read that fails with 408, 429 or a
+  5xx twice more. A
   process opens each bucket once, for every API that lists it, and one
   client per endpoint. A connection with an endpoint, or a process with
   `STORAGE_EMULATOR_HOST` set, reaches an emulator with no credential; on
@@ -3107,9 +3193,13 @@ export default defineConfig({ name: "shop-api", kind: SchemaKind.API, authDb: Sh
   object directly through a signed URL, which also avoids Cloud Run's
   32 MiB request limit. A signed URL is a V4 one. On gcp, the client signs
   it as the workload's own account through IAM's `signBlob`, which needs
-  the account to hold `roles/iam.serviceAccountTokenCreator` on itself.
-  Against an emulator, the runtime signs a V4 URL for the emulator's host
-  with an RSA key the process generates once, which nothing checks:
+  the account to hold `roles/iam.serviceAccountTokenCreator` on itself;
+  Rust's asks the metadata server for the account's email and IAM's
+  credentials API for the signature, and a vector of
+  `@google-cloud/storage`'s output holds its canonical request to
+  TypeScript's. Against an emulator, the runtime signs a V4 URL for the
+  emulator's host with a key the process makes once, which nothing
+  checks, an RSA key in Go and TypeScript and an HMAC key in Rust:
   fake-gcs-server takes a PUT at an object's path only when it carries a
   V4 signature's parameters, and checks no signature.
 - **Local.** `stack dev` runs fake-gcs-server in a container beside
@@ -3123,7 +3213,8 @@ export default defineConfig({ name: "shop-api", kind: SchemaKind.API, authDb: Sh
   bucket names are global, at most 63 characters, and holds no `google`,
   which Cloud Storage refuses. Its settings are `versioning`, off unless
   set, and `deleteAfterDays`, a lifecycle rule's age. The connectors from
-  a Cloud Run service and a Cloud Run job grant the workload's account
+  a Cloud Run service, job and worker pool, in Go, TypeScript or Rust,
+  grant the workload's account
   `roles/storage.objectUser` on the bucket and
   `roles/iam.serviceAccountTokenCreator` on itself, the right to sign as
   itself, one node however many buckets it reaches. A member of a
@@ -3190,9 +3281,9 @@ config may leave `outputs` out.
 - **CORS.** Each API answers CORS for the origins of the sites that call
   it. Those origins are derived into a field of the API, `<API>_CORS`
   (`ir.CORSPolicy`, one variable, `<API>_CORS_ORIGINS`), as its callers
-  are (section 9.2). The Go and TypeScript runtimes read it
-  (`stackconfig.LoadCORS`, `loadCors`) and check it (`runtime/http`'s
-  `cors`): a preflight from a listed origin is answered 204 with the
+  are (section 9.2). The Go, TypeScript and Rust runtimes read it
+  (`stackconfig.LoadCORS`, `loadCors`, `load_cors`) and check it
+  (`runtime/http`'s `cors`; Rust's `SiteCorsLayer`, D57): a preflight from a listed origin is answered 204 with the
   origin, credentials, `Accept`, `Authorization` and `Content-Type`, the
   methods of the API's operations and a max age of ten minutes, and any
   other request from it carries the origin and credentials. Any other
@@ -3205,7 +3296,7 @@ config may leave `outputs` out.
   origin that is both a site and trusted gets the site's answer. On a
   server that serves several APIs, a request is the API's whose routes
   take it, a preflight by the method it asks for. The vectors in
-  `runtime/http/testdata/cors_parity.json` hold both runtimes to one
+  `runtime/http/testdata/cors_parity.json` hold the three runtimes to one
   decision, which says whether the server answers a request itself, and
   the generated entrypoints wire it for each API a site of the stack
   calls, around the server and so outside each identity API's own CORS.
@@ -3621,10 +3712,10 @@ credential. It refuses a credential it cannot verify with 401, code
 `service_unauthorized`, and a verified identity that is no caller of this
 server with 403, code `service_forbidden`. A failure that is not the
 caller's, such as keys it cannot fetch, answers 503. Each runtime ships one
-implementation over the config of section 9.2, which the generated Go
-entrypoint builds from the API's callers field (section 8.1), and the
-TypeScript and Rust entrypoints will when they exist; a deployment with a
-credential that config cannot express passes its own.
+implementation over the config of section 9.2, which the generated Go,
+TypeScript and Rust entrypoints build from the API's callers field
+(sections 8.1 and 8.6); a deployment with a credential that config
+cannot express passes its own.
 
 A route runs its steps in this order:
 
@@ -3765,8 +3856,8 @@ The callers field has its own tests:
 - A deployable that serves no API has no handle to put in `from`, and may
   call only operations whose `from` is empty. A job is not one: it serves
   its API in a callee's callers field, so `from` names it by its API
-  (section 8.7, D52). A worker, when queues land, may follow the same
-  rule.
+  (section 8.7, D52). A worker is not one either: it follows the same
+  rule (section 8.8, D53).
 - A credential the callee config cannot express, such as a service mesh's
   mTLS identity in `X-Forwarded-Client-Cert`. A deployment can pass its
   own service authenticator today; a platform kind of credential can come
@@ -4080,39 +4171,47 @@ The GitHub workflow:
     the root's lockfile (`bun install --frozen-lockfile` or `npm ci`),
     runs `build-all` over the services root, which resolves every
     environment and checks its graph (levels 1 and 3), and compiles each
-    Go server's entrypoint module with `go build -mod=mod` (level 2). It
-    runs on a push too. A binary the release workflow did not build names
-    no digests, and its archives step fails.
-  - For a Go server on an engine database whose engine composes a
-    behavior the core's engine archive does not run, the work queue's or
-    an extension's (D58), `check` sets up the Rust release `tools.env`
-    pins, builds the archive of the project's engine crate after the
-    build, from its `ffi` member at `<schemas-root>/dist/engine/rust/<db>/ffi`,
-    staging it as `libsuperschematic_engine.a`, and compiles the server
-    with it searched before the release's.
-  - For a stack with a TypeScript server, `check` then installs the
-    output root's Bun workspace from the lockfile the project commits
-    (section 8.6), `bun install --frozen-lockfile` in
+    Go server's, job's, worker's and engine runner's entrypoint module
+    with `go build -mod=mod` (level 2), in that order and each named for
+    its kind, so a job or a worker that no longer builds against its
+    implementation fails the pull request as a server does. It runs on a push too. A binary the
+    release workflow did not build names no digests, and its archives step
+    fails.
+  - For a Go server, job, worker or engine runner on an engine database
+    whose engine composes a behavior the core's engine archive does not
+    run, the work queue's or an extension's (D58), `check` sets up the
+    Rust release `tools.env` pins, builds the archive of the project's
+    engine crate after the build, from its `ffi` member at
+    `<schemas-root>/dist/engine/rust/<db>/ffi`, staging it as
+    `libsuperschematic_engine.a`, and compiles the module with it searched
+    before the release's.
+  - For a stack with a TypeScript server, job, worker or engine runner,
+    `check` then installs the output root's Bun workspace from the
+    lockfile the project commits (section 8.6), `bun install
+    --frozen-lockfile` in
     `<schemas-root>/dist`, in a step that names the lockfile. It fails
     when the lockfile is missing, where a frozen install alone would
     install without one, or no longer matches the packages the build
     wrote, and says to run `bun install` there after `build-all` and
-    commit it. Then each
-    TypeScript server's entrypoint package and the implementation of each
-    API one serves type-checks with `tsc --noEmit` (level 2), through `bun
-    x --no-install`, so the compiler is the one the package depends on and
-    the install linked, never one bunx downloads. The type-check reads the
+    commit it. Then each TypeScript server's, job's, worker's and engine
+    runner's entrypoint package, in that order and each named for its
+    kind, and
+    the implementation of each API one of them imports type-checks with
+    `tsc --noEmit` (level 2), through `bun x --no-install`, so the
+    compiler is the one the package depends on and the install linked,
+    never one bunx downloads. The type-check reads the
     runtime packages as the install linked them: from the registry they
     carry their declarations, while a checkout that `[paths]` names needs
     its build output in the CI checkout, which the image builds for itself
     and the workflow does not.
-  - For a stack with a Rust server, job or worker, `check` sets up the
+  - For a stack with a Rust server, job, worker or engine runner, `check` sets up the
     Rust release `tools.env` pins with the runner's `rustup` before the
     build, which brings the output root's Cargo lockfile up to date with
     it (section 8.6). After the build it fails, in a step that names the lockfile,
     when git does not track the lockfile or the build changed it, and says
-    to build every service and commit it. Then each Rust server's, job's
-    and worker's crate compiles with `cargo check --locked` (level 2), in
+    to build every service and commit it. Then each Rust server's, job's,
+    worker's and engine runner's crate compiles with `cargo check
+    --locked` (level 2), in
     that order and each named for its kind, which checks the
     implementations it depends on. The crates name the runtime checkouts
     `[paths]` names by path, so the CI checkout holds them, as the image's
@@ -4171,7 +4270,10 @@ credentials file gives superschematic and Pulumi application default
 credentials. The cloud jobs install the provisioner's tools: the Pulumi
 provisioner declares the `pulumi` CLI at the release of the Pulumi SDK it
 is built with. A job that installs Bun installs `tools.env`'s release, the
-one a TypeScript server's image runs on.
+one a TypeScript server's image runs on, and a job that installs an npm
+project's packages sets up Node.js at `tools.env`'s `NODE_VERSION`
+(`cigen.NodeVersion`), the release this repository's CI runs Node on,
+rather than whichever release is the current LTS.
 
 The workflow installs the release of superschematic that generated it,
 the version of the root module in the binary's build information, from
@@ -4262,9 +4364,9 @@ whatever the deploy decides is affected, and needs no list of its own.
    `server` generator writes each TypeScript server's package, `main.ts`
    and Dockerfile at `server/<stack>/<server>` in the pass that writes the
    Go servers' (section 8.6). For Rust, `Deps`, `Handlers`,
-   `Implementations::new` and the scaffold at `[implementation_paths]
-   rust` have landed (D57). Next: OpenTelemetry export; then the
-   entrypoint in Rust.
+   `Implementations::new`, the scaffold at `[implementation_paths]
+   rust` and each Rust server's entrypoint crate and Dockerfile have
+   landed (D57). Next: OpenTelemetry export.
    `examples/acme-shop` keeps its implementations at the scaffold layout,
    `go/shop-api`, `go/shop-orders` and `typescript/shop-storefront`,
    which the entrypoints of its `shop-stack` import (section 14,
@@ -4304,11 +4406,11 @@ whatever the deploy decides is affected, and needs no list of its own.
    that runs `superschematic-migrate job` on Cloud SQL and owns the
    servers' privileges (section 8.4, D46), and `stackdeploy.CredentialsOf`
    reading the credentials a DNS platform resolves into
-   `dns.credentials`. Next: a deploy lock beyond the provisioner's and
-   the runner's, and the generated CI of section 11.3.
+   `dns.credentials`. So has the generated CI of section 11.3 (D47).
+   Next: a deploy lock beyond the provisioner's and the runner's.
 8. **CLI.** The `stack` command group. Landed: `stack dev` (section 8.3),
-   which runs Go and TypeScript servers, and `bootstrap`, `secrets set`,
-   `plan`, `deploy`, `destroy` and `outputs` (section 11).
+   which runs Go, TypeScript and Rust servers, and `bootstrap`, `secrets
+   set`, `plan`, `deploy`, `destroy` and `outputs` (section 11).
 
 ## 13. Module layout
 
@@ -4447,8 +4549,18 @@ model, or retired, when it lands.
    and a calling server's network, which waits for a stack with `calls`
    edges (milestone 4).
 4. **Service auth.** Admission and identity (section 9) on Cloud Run.
+   Built (D37, amended; D51; D57): gcp's http connector gives each
+   caller a Google ID token for its callee's audience, and the Go,
+   TypeScript and Rust servers verify it against their callers field.
+   It has not run on Cloud Run: milestone 3's run had no `calls` edge,
+   which acme-shop's stack has since gained.
 5. **Database lifecycle.** The `sqlgen` migration plan and apply step in
-   deploys, the hazard gate and the deploy manifest.
+   deploys, the hazard gate and the deploy manifest. Built (D45, D46):
+   each deploy plans its databases' migrations, gates their hazards,
+   records the manifest, and on gcp runs each phase as the migration
+   job. Milestone 3's run applied an expand phase on Cloud SQL; no
+   contract phase has run there, and a deploy lock beyond the
+   provisioner's and the runner's is not built.
 6. **CI generation and parameterized environments.** Built (D47). A
    stack's `outputs.ci` writes its GitHub Actions workflow (section
    11.3), which checks with no credentials, plans each cloud environment
@@ -4459,17 +4571,18 @@ model, or retired, when it lands.
 7. **Breadth.** Jobs and scheduled jobs, buckets, queues and static sites,
    and a second target (GKE or Cloudflare) added as a registration, with
    the generic connector (section 6.2) so compute can mix. Built so far:
-   - TypeScript servers on Bun (section 8.6, D51);
-   - jobs and scheduled jobs, in Go and TypeScript, on the local target
-     and on gcp as Cloud Run jobs with Cloud Scheduler (section 8.7, D52);
+   - TypeScript servers on Bun, and Rust servers (section 8.6, D51, D57);
+   - jobs and scheduled jobs, in Go, TypeScript and Rust, on the local
+     target and on gcp as Cloud Run jobs with Cloud Scheduler (section
+     8.7, D52, D65);
    - static sites, on the local target and on gcp from a bucket behind a
      load balancer with Cloud CDN, never run against Google Cloud
      (section 8.10, D55);
    - buckets, on the local target's storage emulator and on gcp in Cloud
      Storage, never run against Google Cloud (section 8.9, D54);
-   - queues in a DB service's database, and Go and TypeScript workers
-     that handle them, on the local target and on gcp as Cloud Run worker
-     pools (section 8.8, D53);
+   - queues in a DB service's database, and Go, TypeScript and Rust
+     workers that handle them, on the local target and on gcp as Cloud
+     Run worker pools (section 8.8, D53, D65);
    - the generic connector (section 6.2, D63), ahead of the second target:
      platforms name their provider, an http or a site edge between two
      providers falls back to it, an http one signs with a per-edge Ed25519

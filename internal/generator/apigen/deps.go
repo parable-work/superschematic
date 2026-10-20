@@ -232,6 +232,12 @@ const JobsFunc = "NewJobs"
 // declares, of the generated WorkersConstructor's signature (D53).
 const WorkersFunc = "NewWorkers"
 
+// ManualRoutesFunc is the function an implementation of an API with a
+// @manualRouteRegistration operation declares, of the generated
+// ManualRoutesConstructor's signature: a stack's server builds the
+// handlers RegisterRoutes mounts with it (D51).
+const ManualRoutesFunc = "NewManualRoutes"
+
 // DeclaresFunc reports whether the Go package at dir declares a function
 // named name, in a file that is not a test.
 func DeclaresFunc(dir, name string) (bool, error) {

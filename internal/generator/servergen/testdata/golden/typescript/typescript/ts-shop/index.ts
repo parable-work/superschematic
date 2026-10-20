@@ -12,6 +12,7 @@ import type {
   Constructor,
   Deps,
   JobsConstructor,
+  ManualRoutesConstructor,
   WorkersConstructor,
   CartsImplementation,
 } from '@schemas/ts-shop-api';
@@ -28,6 +29,19 @@ export const create: Constructor = deps => ({
  * header) with your identity provider and return its Principal.
  */
 export const authenticate: AuthenticatorFactory = () => async () => null;
+
+/**
+ * Builds the handlers of the @manualRouteRegistration operations of
+ * ts-shop from its dependencies. Its type is the generated
+ * ManualRoutesConstructor. The router runs each route's auth gate, then
+ * hands its handler the Hono context and the RequestContext, and sends the
+ * Response the handler returns.
+ */
+export const createManualRoutes: ManualRoutesConstructor = deps => ({
+  async exportCart() {
+    throw notImplemented('carts.exportCart');
+  },
+});
 
 /**
  * Builds the jobs of ts-shop from its dependencies. Its type is the

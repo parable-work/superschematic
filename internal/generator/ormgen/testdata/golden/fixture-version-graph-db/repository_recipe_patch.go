@@ -41,8 +41,10 @@ var RecipePatchQuotedFields = map[string]string{
 	"commit_id":      `commit_id`,
 }
 
-// buildRecipePatchOrderByClause builds an ORDER BY clause for RecipePatch
-func buildRecipePatchOrderByClause(orderBy []RecipePatchOrderBy, tableName string) string {
+// buildRecipePatchOrderByClause builds an ORDER BY clause for RecipePatch.
+// quotedTable is the table's name as the FROM clause spells it, quoted when
+// it is a keyword (a table named order is "order").
+func buildRecipePatchOrderByClause(orderBy []RecipePatchOrderBy, quotedTable string) string {
 	if len(orderBy) == 0 {
 		return ""
 	}
@@ -59,7 +61,7 @@ func buildRecipePatchOrderByClause(orderBy []RecipePatchOrderBy, tableName strin
 		if !ok {
 			quotedField = fieldStr // Fallback to unquoted if not found
 		}
-		clauses = append(clauses, fmt.Sprintf("%s.%s %s", tableName, quotedField, direction))
+		clauses = append(clauses, fmt.Sprintf("%s.%s %s", quotedTable, quotedField, direction))
 	}
 
 	if len(clauses) == 0 {
@@ -469,7 +471,7 @@ func (r *RecipePatchRepository) FindOne(ctx context.Context, filter *RecipePatch
 	whereClause := filter.buildWhereClause(&args, 0)
 
 	// Build ORDER BY clause
-	orderByClause := buildRecipePatchOrderByClause(opts.OrderBy, "recipe_patch")
+	orderByClause := buildRecipePatchOrderByClause(opts.OrderBy, `recipe_patch`)
 
 	// Build query
 	query := fmt.Sprintf(`SELECT %s FROM recipe_patch%s%s LIMIT 1`, selectFields, whereClause, orderByClause)
@@ -644,7 +646,7 @@ func (r *RecipePatchRepository) FindMany(ctx context.Context, filter *RecipePatc
 	whereClause := filter.buildWhereClause(&args, 0)
 
 	// Build ORDER BY clause
-	orderByClause := buildRecipePatchOrderByClause(opts.OrderBy, "recipe_patch")
+	orderByClause := buildRecipePatchOrderByClause(opts.OrderBy, `recipe_patch`)
 
 	// Build LIMIT/OFFSET clause
 	limitOffsetClause := buildLimitOffsetClauseTyped(opts.Limit, opts.Offset)

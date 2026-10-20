@@ -3949,10 +3949,11 @@ and cargo, and output for a schema without the decorators is unchanged
 byte for byte. `from` declares its handles identities
 (`DecoratorSpec.Identities`, D41): naming a caller adds no reference, so
 two APIs may list each other, and the callee's cache key follows only the
-caller's sentinel file, not its schema. The stack-model pieces that do
-not exist yet are not built: connectors writing the callee config, the
-generated entrypoint, key rotation in the resource graph, and
-`stack dev`'s keys.
+caller's sentinel file, not its schema. Of the stack-model pieces, the
+connectors writing the callee config and the generated entrypoint are
+built since (D37's amendment on the callers field, below), and so are
+`stack dev`'s keys (D30's amendment on the local target, below); key
+rotation in the resource graph is not built.
 
 D43's `OperationInfo` carries no service clause, so `OperationInfo::admit`
 applies only the end-user step: an in-process caller is the service's own
@@ -3999,8 +4000,8 @@ Status: built. `extensions/cloudflare` pins pulumi-cloudflare 6.22.0, whose
 record type is `cloudflare:index/dnsRecord:DnsRecord` (the 6.0 release
 renamed `cloudflare:index/record:Record`), and its goldens resolve the
 `stack/stacktest` shop stack with its domains on Cloudflare, DNS-only and
-proxied. The target's bootstrap and the deploy that read
-`dns.credentials` are not built.
+proxied. D45, amended, builds the target's bootstrap and the deploy that
+read `dns.credentials` (`TestBootstrapAndDeployReadTheToken`).
 
 ### D30, amended: the core registers the local target, with a resource vocabulary of its own
 
@@ -4061,12 +4062,11 @@ carries no deploy seam: `stack dev` runs it, the cloud commands refuse a
 local environment and point to it, and `secrets set` writes a local
 environment's `secrets.env` through a store the CLI hands the operation,
 since the file sits under the schemas root, which a registry does not
-know. Not built: the
-gcp migration runner, a Cloud Run job running `superschematic-migrate`, so
-a gcp deploy with a migration to run is refused; `CredentialsOf` returns
-none until the Cloudflare DNS platform resolves its credentials into
-`environment.json`; image builds; and a lock that keeps two deploys of one
-run apart beyond the provisioner's and the runner's own.
+know. D46 builds the gcp migration runner, a Cloud Run job running
+`superschematic-migrate`, and image builds, and D45, amended, has
+`CredentialsOf` return the credentials the Cloudflare DNS platform
+resolves into `environment.json`. Not built: a lock that keeps two
+deploys of one run apart beyond the provisioner's and the runner's own.
 ### D30, amended: the server entrypoint, its Dockerfile and the scaffold a stack writes
 
 D30 said superschematic generates each server's entrypoint and Dockerfile,
@@ -4082,8 +4082,9 @@ and its amendment on `Deps` left both to the build. Building them for Go
 | Each client of a `calls` edge sends the D37 credential its `ServiceEndpoint` names and forwards the request's end user. The service authenticator waits for the service-auth field: until a connector derives it, a server whose API has a service clause refuses to start. | A service-auth configuration in one JSON variable, the encoding section 3.4 refused for derived fields. Starting with no authenticator, whose routes would answer every service caller 401. |
 | The Dockerfile's context is the repository root, cut down by `Dockerfile.dockerignore`. A Rust stage builds superscalar's static archive (and the version graph's, when a database declares one) with `tools.env`'s Rust release, the Go stage links it on Debian's glibc, and the binary runs on distroless `cc` as a non-root user. | A `CGO_ENABLED=0` binary on a static base, which cgo against the archive rules out (D3). An archive from the host's checkout, whose platform is the host's. |
 
-OpenTelemetry export, the Cloud SQL connector and the entrypoints of
-TypeScript and Rust servers are not built. `examples/acme-shop` keeps its
+OpenTelemetry export is not built. The Cloud SQL connector (D30's
+amendment on Cloud SQL, below) and the entrypoints of TypeScript and Rust
+servers (D51, D57) are built since. `examples/acme-shop` keeps its
 implementations at `go/{service}`, which the entrypoints of its
 `shop-stack` import, and `stack dev` runs it (`docs/stack-model.md`,
 section 14, milestone 1).
@@ -4248,7 +4249,7 @@ no privileges. Building both settled the rest.
 |----------|------------------------|
 | Image builds are a fifth seam on `TargetSpec`, `Builder` (`registry.ImageBuilder`). A `BuildRequest` is a run, a server, its Dockerfile's path in the context and the context itself, which the deploy writes; the result is the image by digest, which the deploy pins as it pins `--image`. `RegisterTarget` refuses a `Builder` without a provisioner or without `State`, which records each build. `stack build <environment>` runs the same builds without deploying, prints `--image` flags and writes no manifest. | Builds inside the provisioner's program, as a Docker image resource, which would put the context's digest, not a function of the schemas, into the graph; a build command per target, which section 11.1 rules out |
 | The core writes the context: the repository root as the Dockerfile's ignore file (`Dockerfile.dockerignore`, else the root's `.dockerignore`) cuts it down, by BuildKit's matching rules, as a gzipped tarball in path order whose entries are at the epoch, owned by root, with mode 0644, or 0755 for a directory or an executable file. The Dockerfile and its ignore file are always in it, as Docker's client sends them. | Each target walking the context with its own ignore rules, two matchers that would drift; the context as a directory the target archives, so the digest the deploy compares would not be the archive the target uploads |
-| A server is built again only when its context changed: the digest of the context's tar stream, before compression, is recorded in the manifest beside the image a deploy built (`Contexts`), and a deploy whose context has the same digest keeps that image. `--image` overrides, and drops the context; `--no-build` builds nothing; a server with no Dockerfile, such as a TypeScript or Rust server for now, keeps the manifest's image. Builds run before any step, after the plans and the gate, so a failed build changes nothing. | A digest over the server's module and its implementation sources only, which misses the generated and runtime modules and the superscalar checkout the image also builds from; always building, which rebuilds the Rust archive on every deploy; the IR digests, which do not cover the implementations |
+| A server is built again only when its context changed: the digest of the context's tar stream, before compression, is recorded in the manifest beside the image a deploy built (`Contexts`), and a deploy whose context has the same digest keeps that image. `--image` overrides, and drops the context; `--no-build` builds nothing; a server with no Dockerfile, one the build has not written, keeps the manifest's image. Builds run before any step, after the plans and the gate, so a failed build changes nothing. | A digest over the server's module and its implementation sources only, which misses the generated and runtime modules and the superscalar checkout the image also builds from; always building, which rebuilds the Rust archive on every deploy; the IR digests, which do not cover the implementations |
 | gcp builds with Cloud Build: the builder uploads the archive to the state bucket under `superschematic/builds/` and runs the Dockerfile with BuildKit (`gcr.io/cloud-builders/docker`, `DOCKER_BUILDKIT=1`) on an `E2_HIGHCPU_8` machine, as a `builder` account bootstrap creates, which pushes to the stack's repository with the tag `context-<digest>` and reads only its prefix of the bucket. A tag that exists is not built again, so a `stack build`, or a deploy that failed after its builds, saves the next one the build. | Building as `deployer`, whose credentials a build's own steps could reach through the metadata server; a `gcloud builds submit` the deploy shells out to, a tool it cannot fake |
 | gcp's migration runner, the default of `gcp.Extension{Migrations}`, runs each phase on a database as one execution of the stack's Cloud Run job, `<stack>-migrate`, with one task and no retry, as a `migrator` account bootstrap creates. It writes each plan with steps and a job document into the state bucket under `superschematic/migrations/<stack>/<run>/`, creates or updates the job, and runs it with the document's `gs://` URL; a failed execution fails the step with its name and logs, and the deploy records the phase as pending (D45). The job is not a node of the graph: it changes with the runner's release, not the schemas, and one serves every run of the stack in the project. | The job as a graph node, whose image the graph would then depend on; a job per run or per phase, which a member's destroy would leave behind; executions passing plans in arguments or variables, which Cloud Run limits in size, while a plan carries its models |
 | The runner gains `superschematic-migrate job --job <path or gs:// URL>`, which runs a job document (runtime/migrate/README.md, "Jobs"): the phase of each DB service's plan on its database, then its privileges. Its databases sit on one Cloud SQL instance, reached through the Cloud SQL Go connector (`cloud.google.com/go/cloudsqlconn`, in `runtime/migrate/go`, beside the drivers, D27) with IAM database authentication, or each at a URL. `gs://` documents are read through Cloud Storage's JSON API with application default credentials. gcp writes the document without importing the runner, and the runner's tests read gcp's golden document. | One `apply` invocation per plan, which a distroless image has no shell to chain and which leaves the privileges to another tool; the Cloud SQL mount Cloud Run provides, which carries no IAM authentication; a Cloud Storage FUSE volume, whose directory lookups need options a test cannot check offline |
@@ -4267,9 +4268,13 @@ its tests fake; its golden job document is
 `extensions/gcp/testdata/golden/migrations/Staging-expand.json`. The
 runner's `job` command, its Cloud SQL dialer and its grants run in its
 tests against Postgres, the dialer replaced by one of a local server and
-Cloud Storage by a fake of its API. None of it has run against Google
-Cloud. Bootstrap gives the state bucket a lifecycle rule, on a bucket
-that exists already too, that deletes the build contexts under
+Cloud Storage by a fake of its API. The live run of 2026-10-07
+(`docs/stack-model.md`, section 14, milestone 3) built the images with
+Cloud Build and ran the expand phase as the job, its runner image from
+`scripts/migrate-dev-image.sh`, since no release exists. What follows
+came after that run and has not run against Google Cloud. Bootstrap
+gives the state bucket a lifecycle rule, on a bucket that exists already
+too, that deletes the build contexts under
 `superschematic/builds/` and the job documents and plans under
 `superschematic/migrations/` after 30 days, live and noncurrent versions
 alike, and keeps the bucket's other rules (`EnsureLifecycleRule`). A
@@ -4322,12 +4327,12 @@ with no credential, from a server with no edge, or for another audience is
 403 `service_forbidden`. The stack has no database, so the run needs no
 Docker. The parity vectors are unchanged.
 
-Not built: the TypeScript and Rust entrypoints, which will read the same
-field; the generic connector; key rotation; and the field outside a
-stack, where `values-schema.json` does not list it. A call between two
-APIs one server serves carries no credential, so a `@requireService`
-operation refuses it though section 9.3's check counts it, which section
-9.9 of `docs/stack-model.md` leaves open.
+The TypeScript and Rust entrypoints read the same field (D51, D57), and
+D63 builds the generic connector. Not built: key rotation, and the field
+outside a stack, where `values-schema.json` does not list it. A call
+between two APIs one server serves carries no credential, so a
+`@requireService` operation refuses it though section 9.3's check counts
+it, which section 9.9 of `docs/stack-model.md` leaves open.
 
 The rule is reversible until the first release.
 
@@ -4371,11 +4376,14 @@ rest as graph resources. No generated workflow has run on GitHub
 Actions: a run needs a release, a project bootstrapped with a GitHub
 remote, and a repository that turns the workflow on.
 
-Not built:
-- a check that the committed workflow is current;
-- pinned Bun and Node releases in the workflow;
-- installing the TypeScript workspace and type-checking TypeScript
-  servers in `check` (D51).
+D51, amended, builds a pinned Bun in the workflow, and installing the
+TypeScript workspace and type-checking TypeScript servers in `check`.
+`check` also compiles each Go job and worker and type-checks each
+TypeScript job and worker (`TestGoJobsAndWorkersInCheck`), and the
+workflow pins Node to the release `tools.env` names (`cigen.NodeVersion`,
+held to it by `TestNodeIsPinnedAsToolsEnvPinsIt`).
+
+Not built: a check that the committed workflow is current.
 
 The rule is reversible until the first release.
 
@@ -4411,8 +4419,9 @@ release page and runs the image. A clean `golang` container, with a
 project of no `[paths]`, built both servers with the archives step's
 commands, the runtime modules coming from the module proxy at a commit.
 Not built: `stack dev`, and a local `go build` in such a project, still
-need `CGO_LDFLAGS` set by hand, and the other Go generators' modules
-still require the runtime modules at the zero pseudo-version.
+need `CGO_LDFLAGS` set by hand. D47's next amendment pins the other Go
+generators' modules, which required the runtime modules at the zero
+pseudo-version.
 
 ### D30, amended: a project names its build context when its runtime modules lie above it
 
@@ -4603,10 +4612,11 @@ Status: built.
 No TypeScript server has run on Cloud Run.
 
 Not built:
-- passing manual-route handlers to `buildRouter`;
 - OpenTelemetry export;
 - `stack init`, which would write the amendment's ignore rule; D59
   builds it.
+
+D51's last amendment hands a manual route's handlers to `buildRouter`.
 
 The rule is reversible until the first release.
 
@@ -4864,9 +4874,9 @@ module whose route takes `Geo.Location` in every body-argument shape, and
 `TestCheckJSONChecksAValuesOwnJSONBeforeItIsDecoded` pins where
 `bodyargs` runs the check.
 
-Not built: the ORM does not read or write a list of locations (`POINT[]`),
-and a `POINT` column's generated filter is the string filter, whose
-equality Postgres cannot evaluate for a point.
+The amendment below has the ORM read and write a list of locations
+(`POINT[]`), and gives a `POINT` column a filter of its own in place of
+the string filter, whose equality Postgres cannot evaluate for a point.
 
 The rule is reversible until the first release.
 
@@ -5067,10 +5077,9 @@ its refusals.
 No worker has run on Google Cloud.
 
 #348 adds TypeScript workers, which claim through the HTTP runtime with
-the Go ORM's statements (the amendment below).
+the Go ORM's statements (the amendment below), and D65 Rust workers.
 
 Not built:
-- Rust workers;
 - claims on SQLite and D1, in a write transaction (the amendment below);
 - removing `done` messages, and an operator's command to read and retry
   dead ones;
@@ -5136,10 +5145,9 @@ bucket's IAM policy carries the project's convenience bindings, through
 which `planner`'s `roles/viewer` would read its objects. A project bootstrapped before #338 needs `stack
 bootstrap` again for `deployer`'s new role.
 
-Not built:
-- a `Bucket` in the Rust runtime, so gcp's connectors refuse a bucket
-  edge from a Rust server or job;
-- buckets on another provider.
+Its second amendment, below, builds a `Bucket` in the Rust runtime.
+
+Not built: buckets on another provider.
 
 The rule is reversible until the first release.
 
@@ -5533,9 +5541,9 @@ D65 builds what this left out of a stack: Rust jobs and workers, and an
 output root that builds against a mirror of each implementation crate,
 so `stack dev --out` elsewhere no longer collides in Cargo's lockfile.
 
-Not built:
-- buckets from a Rust server;
-- OpenTelemetry export.
+D54's second amendment builds buckets from a Rust server.
+
+Not built: OpenTelemetry export.
 
 The rule is reversible until the first release.
 
@@ -6161,9 +6169,8 @@ worker has run on Cloud Run.
 
 Not built:
 - a `POINT` or `INTERVAL` column in a TypeScript queue's message;
-- type-checking a TypeScript job's or worker's package in the generated
-  CI, which checks the servers';
-- a Rust worker.
+- a `POINT` or `INTERVAL` column in a Rust worker's message (D65 builds
+  Rust workers).
 
 The rule is reversible until the first release.
 
@@ -6473,12 +6480,12 @@ and `offset` arguments it finds by name (`<method>_all`).
 | A paged list's console page reads `cursor` and `limit` from its query beside its filters, renders the page's items in its table and, after it, a `<nav class="ss-pager">` with "Next page" (`rel="next"`), the same filters and limit with `cursor` set to `next`, while `next` is not null, and "First page", without the cursor, while one was given. The filter form holds neither as a control, so a submitted filter starts at the first page, and a cursor or limit the route refuses is the form's own message with the route's 400. | A previous link, which needs every cursor before it in the URL; numbered pages, which a cursor cannot give; a "more" button, which needs script |
 | `runtime/http/testdata/page_parity.json`, written by the Go runtime's test, holds the reader's answers (absent values, each bound, a limit that is no whole number, a cursor with padding, with a character outside the alphabet and of 1025 characters), cursors encoded and read back, and `from_rows`. The TypeScript and Rust runtimes read it. | |
 
-Status: designed; the core, the servers, the SDKs and the Topcoat console
-built. This batch builds all of it: the IR, the decorator, the readers, the JSON Schema and
+Status: built: the core, the servers, the SDKs and the Topcoat console.
+This batch builds all of it: the IR, the decorator, the readers, the JSON Schema and
 `format`; the OpenAPI document and the tool documents; the Go, TypeScript
 and Rust servers and the in-process call; the four SDKs and the vectors;
 and the Topcoat records, procedures and pager. acme's `listOrders`,
-`listReviews` and a new `listProducts` page. Built so far, the core:
+`listReviews` and a new `listProducts` page. Built in the core:
 `ir.OperationPage` on `FieldDef.Page`, with `ir.ValidateOperationPage`;
 `@paginated` and its argument schema, which the schema-file JSON Schema
 takes; the merge that fills a data form's unsaid limits, so TypeScript,
@@ -6623,8 +6630,9 @@ holder. `internal/loader/verify/references.go` runs it after the display
 checks, adds the refusals of placement and of the value's type, and reads
 the dependency whose type a reference names when the schema imports it:
 only a dependency its config declares, of a kind an API may reference
-types from, so two APIs that refer to each other get the import's own
-refusal, and a cycle of such reads is refused, not read without end.
+types from, which D66 widens to another API, and a cycle of such reads is
+refused, not read without end: since D66, two APIs that refer to each
+other are refused as that cycle, no longer by the import rule.
 The tests: `ir/reference_test.go`, `verify/references_test.go`, the
 reader's `refers_to_test.go` with `broken-references`, the loader's
 `references_test.go` (a dependency's target and two APIs that refer to
@@ -6666,7 +6674,9 @@ its lines' products through `references::order_view_labels`, both through
 `listProducts`, and its console, given no choices, does the same, lists
 the products to anyone, links each row to its page by `getProduct`'s
 reference and names a product in its trail. Follows: the target derived from `@source` and a `Relation`; a
-reference to another service's type; a picker that searches (D62) when the
+reference to another service's type, half done: D66 lets the type be a
+dependency's, an API's among them, but the options operation must still
+be the referring API's own; a picker that searches (D62) when the
 options do not fit a page; a vendor key in the OpenAPI and tool documents;
 and a breadcrumb step named by the reference of its route parameter.
 
@@ -7011,8 +7021,8 @@ Status: built.
 
 No Rust job or worker has run on Cloud Run.
 
-Not built, and out of this entry: buckets from a Rust server, job or
-worker; and OpenTelemetry export. A TypeScript build into another output
+Not built, and out of this entry: OpenTelemetry export (D54's second
+amendment builds buckets from a Rust server, job or worker). A TypeScript build into another output
 root relinks the project's own `node_modules` there, as a Rust build did
 before the mirror.
 
@@ -7036,5 +7046,251 @@ Status: built. `TestCrossKindReferenceRules` admits API from API;
 `TestReferenceToADependencysType` resolves a reference to a General and to
 an API dependency's type; `TestAPIsReferringToEachOtherAreRefused` refuses
 two APIs that refer to each other as a cycle.
+
+The rule is reversible until the first release.
+
+### D60, amended: an envelope's `meta` holds the request's id alone, and no envelope has `links`
+
+D60 found that the Go runtime's envelope declares `meta.totalCount` and
+`links` and that the OpenAPI document advertises both on every response,
+but no server writes either. Every call of `response.JSONEnvelope` and
+`CollectionEnvelope` passes no links and a `Meta` that holds only
+`RequestID`. The TypeScript and Rust runtimes write `{data, meta:
+{requestId}}`, and no SDK reads anything else. A paged list carries its
+cursor in `data` (D60). The document therefore promised a total and four
+links that a client could only ever find absent.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The OpenAPI document's envelope is `{data, meta}`, both required. Its `ResponseMeta` component is `{requestId}`, which is required. `ResponseMeta.totalCount`, the envelope's `links` and the `ResponseLinks` component go. | Keeping them, nullable, for a total or links that a later decision may add: a client generated from the document would type them today as always absent. Marking them deprecated: a second state for keys nothing ever wrote. |
+| In the Go runtime, `response.Meta` holds `RequestID` alone and `Envelope` holds `Data` and `Meta`. `Links` goes, and so does the `links` parameter of `JSONEnvelope` and `CollectionEnvelope`, so a server cannot write keys the document does not declare. The generated `response.go` and the identity runtime call both functions without it. The TypeScript client's comment that a caller can read `meta.totalCount` and `links` goes. | Keeping the Go types for a distribution's own envelope, which would write keys its document does not declare. An OpenAPI hook that adds them back stays open to a distribution. |
+| The change is to the document and the Go runtime alone. The TypeScript and Rust runtimes, every SDK and the tools already read and write `{data, meta: {requestId}}`. | |
+
+Status: built. The goldens it changes are the generated OpenAPI
+documents. In apigen that is eight files in seven fixtures:
+body-args-api; fixture-api-session's `openapi.json` and the `openapi.go`
+that embeds it; fixture-docs; fixture-nested-arrays-api;
+fixture-paged-api; fixture-service-auth-api; and fixture-user-routes-api.
+In rustrestgen it is six `openapi.json`: fixture-api,
+fixture-multiword-api, fixture-paged-api, fixture-service-auth-api,
+fixture-user-routes-api and fixture-webhooks-api. Each loses the
+envelope's `links`, the `ResponseLinks` component and `totalCount`, and
+nothing else. The other changes are fixture-api-session's `response.go`,
+which calls both functions without links, and sdkgen's four `client.ts`
+(fixture-api, fixture-nested-arrays-api, fixture-paged-api,
+fixture-user-routes-api), which change by the comment alone. The test of
+`runtime/http/go/response` replaces its case with links by one that
+`meta` holds the request's id alone. No runtime, SDK, example, scenario
+or guide read either key, and acme-shop pins no OpenAPI document, so
+nothing else changes.
+
+The rule is reversible until the first release.
+
+### D61, amended: a relation's key refers to the type sourced from its table, and the documents describe each reference
+
+D61 left two follow-ups in the core. First, an API type sourced from a
+table (`@source`) holds a relation's key, an id, but no rule matched that
+key to a source field. acme's `OrderLineView.productId` is `@virtual`
+beside `@source(OrderLine)`, and it says `RefersTo<Identity.UUID,
+ProductView>`, though `OrderLine.product` already says `Relation<Product>`
+and `ProductView` is `@source(Product)`. Second, neither the OpenAPI
+document nor the tool documents mention a reference, so a client or an
+agent cannot learn that `productId` takes an item that `listProducts`
+lists. D66 adds a third gap. A dependency's target was found by name in
+each dependency in turn. Where two of an API's dependencies declared types
+of one name, the loader and the Topcoat crate could therefore resolve one
+reference to two types: the loader reads only the dependency that the
+schema imports the type from, and the crate reads every dependency.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A field is a relation's key when it is on a type with `@source(T)`, is named `<r>Id`, and `T` does not declare it, where `T`'s field `r` is one `Relation<U>` (not `HasMany` and not many-to-many). It reads `r`'s foreign key, the column sqlgen names `<r>_id`, as `productId` reads `product_id` of `OrderLine.product`. The key needs no `@virtual`; `@virtual` still makes it a field the implementation fills. Its type is the type of `U`'s `id`, one value. A `@virtual` field named `<r>Id` that does not hold one value of that type is not a key. It derives no reference, the loader refuses nothing of it, and it is a field the implementation fills, as any `@virtual` field is. `ir.RelationKeyFits` holds the rule, which the loader and `ir.FieldReference` share, and so do the generators and the Topcoat crate, which read references through `ir.FieldReference`. `sqlmigrate.SourceReads` counts the key as a read of that column, and reads nothing for a `@virtual` field. | Requiring `@virtual`, which says the field reads nothing from the source when it reads the key. A field named `r` that holds the id, when every API names it `<r>Id`. Treating `<r>Id` as a guess, which it is not: `ToSnakeCase` gives exactly that column name, by the rule sqlgen names every column with. Refusing a `@virtual` `<r>Id` of another type, which leaves an author no way to keep a field the implementation fills under a name the rule claims. |
+| A relation's key that declares no `RefersTo` refers to the one object type W of the API itself whose `@source` is `U`, by its `id`. Every other member is derived as D61 derives it: `{ type: W }`. The reference exists only when it resolves (`ir.ResolveReference`). If no operation, or more than one, lists W, the key refers to nothing and is a plain value. An explicit `RefersTo` always wins, with its members as written. Arguments and input types hold no `@source`, so they still say `RefersTo`. | Writing the derived reference into the IR, which `format` would then write back as a `RefersTo` the author never wrote. Refusing a derived reference that does not resolve, which would fail every API that exposes a key to a table it does not list. A target among a dependency's types, which an author names with `RefersTo`. |
+| `ir.FieldReference(schema, dependencies, holder, field)` returns the reference a field holds, written or derived, and says which. `ir.DerivedReferences(schema, dependencies)` lists the derived ones beside `ir.ReferencesOf`. The loader, the Topcoat crate and the document generators read references through these, not through `FieldDef.References`. A holder that is a dependency's type, which the API's operations take or return (D66), is read against the API, whose operations are the only ones its references name: its written `RefersTo` holds only when it resolves there to a value of the field's type, and is no reference otherwise. | Reading a dependency's `RefersTo` as written, which the loader checked against the dependency's operations, not the API's, and so may name a value of another type. |
+| The loader refuses three things where it checks `@source`, that is, where the source's fields are at hand, as for the other source checks. First, a key that is not `@virtual` and whose type is not the type of `U`'s id: `OrderLineView.productId reads the key of shop-db.OrderLine.product, a Relation to Product, whose id is Identity.UUID, not string`. Second, a key that is not `@virtual` and is a list or a map. Third, a `RefersTo` on a key whose target is `@source` of another table, the target found as `ir.ResolveReference` finds it, so an imported type of a dependency is held to it too: `OrderLineView.productId: RefersTo names SupplierView, which is @source(shop-db.Supplier), but the field reads the key of shop-db.OrderLine.product, a Relation to Product`. It warns when several of the API's types are `@source(U)`: `OrderLineView.productId reads the key of shop-db.OrderLine.product and refers to nothing: ProductCard and ProductView are both @source(shop-db.Product); name one with RefersTo`. | Refusing the ambiguity. An author fixes it by naming one type, and it broke nothing before. |
+| The OpenAPI document gives each value that refers to an item the vendor key `x-superschematic-reference`, holding the resolved reference: `{"target": "#/components/schemas/ProductView", "options": "<operationId>", "value": "id", "label": "name", "lookup": "ids"}`. `value` and `label` are the target's JSON keys; `label` and `lookup` are absent when there is none. The key sits on the property schema of a field, an input field or a body argument, and on the parameter object of a path or query argument. On a list, the key sits on the list, and each item refers. A property that is a bare `$ref`, as one whose value is an enum's is, holds it in `allOf: [{$ref}]` and takes the key beside it, since OpenAPI 3.0.3 ignores the siblings of a Reference Object. A tool's parameters give the same key on the property of the argument or field; there `target` is the type's name and `options` is the tool name of the options operation, which `apigen.ToolName` gives the reference and every SDK's tools alike: the namespace and the TypeScript method's name (`catalog.listItems` for `list_items`). Derived references are written like written ones. Both keys are constants that an OpenAPI hook renames, as it renames `x-superschematic-docs`; in the tools a `ToolHook` renames the key through `ToolKeys.Reference`, as it renames the scalar key. | A list of references at the operation, which a client would have to match back to paths. The members as written, which would leave every client to derive the rest by D61's rule. A JSON Schema `$ref` to the target, which tools would resolve as the value's own schema. |
+| A dependency's type that a reference names is found through the import that names it. When no import names it, it is found by name in each dependency in turn, as before. The loader and every generator, which has every dependency, therefore resolve it alike (D66). `ir.LookupScopes` lists that order. The OpenAPI document builds a component that a dependency declares from the type found in it, and its reference keys read that type's fields, so two dependencies that declare one name give one component on every run. | Passing generators only the imported dependencies, which every caller of `ResolveReference` would have to compute. |
+
+Status: built, in the core, the documents and acme.
+`ir.FieldReference` and `ir.DerivedReferences` derive a relation key's
+reference, `ResolveReference` finds a dependency's target through its
+import first, and `ResolvedReference.TargetService` names the dependency.
+The loader accepts a key without `@virtual`, refuses the three keys and
+warns of the ambiguity, and `SourceReads` counts the key's column. A
+`@virtual` `<r>Id` of another type is no key (`ir.RelationKeyFits`), and a
+key's `RefersTo` to an imported type is held to the related table. The
+TypeScript reader flattens the types an `@source` target relates to, so
+the key's type is checked against the related type's id, and records
+nothing of them in the API: a scalar only a related type holds is not the
+API's. The OpenAPI document gives each reference, written or derived,
+under `x-superschematic-reference` (`registry.OpenAPIReferenceKey`) on the
+field's or body argument's property, beside an `allOf` for a bare `$ref`,
+and on the path or query parameter. The tool documents give it under
+`ToolKeys.Reference`, with the target's name and the options operation's
+tool name (`apigen.ToolName`), and a hook cannot rename a key to a JSON
+Schema keyword; `tools/index.ts` types the key when a tool holds one. The
+tests are these:
+
+- ir's `TestFieldReference`: a derived key; an explicit target that wins; two sourced types; an unlisted target; and the cases that derive nothing, a `@virtual` field of another type than the related type's id among them. `TestResolveReferenceThroughTheImport`: a dependency's type found through its import beside a same-named type of a General dependency. `TestLookupScopes` and `TestRelationKeyFits` hold the lookup's order and the key's rule. `TestFieldReferenceOfADependencysType` holds a dependency's `RefersTo` to the field's type in the API. All are built.
+- verify's `TestARelationsKeyNeedsNoVirtual`, `TestARelationsKeyRefusalsAndWarning` and `TestARelationsKeyAccepted`, one for each message, are built; the refusals and the accepted cases include a `RefersTo` to an imported type of another table and of the related table. `TestAVirtualFieldOfAnotherTypeIsNoKey` shows a `@virtual` `<r>Id` of another type, a list or a map refused for nothing, still virtual, and deriving nothing.
+- The reads test of `sqlmigrate` is built.
+- The loader's `TestADerivedReferenceRoundTripsWithoutRefersTo` loads `fixture-refs-keys-api`, writes it as JSON, YAML and TypeScript with no `RefersTo`, and reads each back to the same derived reference. `TestARelationsKeyIsCheckedInTheTypeScriptForm` holds the key to the related type's id and warns of two sourced types. `TestARelatedTypeRecordsNothingInTheAPI` shows the related type's scalars left out of the API unless its own fields hold them. All are built.
+- apigen's `TestRefsOpenAPIGolden` and toolsutil's `TestToolSchemasGoldenRefs` pin `fixture-refs-api`'s OpenAPI document and tool schemas, whose basket lines, gift, lookup, path argument and search hold every placement, and whose shelf entry's kind and `shelveItem`'s body argument refer by an enum's value, and `TestRefsOpenAPIPlacesEachKey` reads each placement. `TestAReferenceToAComponentSitsBesideAnAllOf` holds a component's value to an `allOf` beside the key, a nullable one to its `oneOf` and a list to its items. sdkgen's and rustsdkgen's `TestWriteToolsGoldenRefs` pin the fixture's `tools/schema.json`, and sdkgen's its `tools/index.ts`, which `TestGeneratedRefsToolsCompile` type-checks with the core's keys and a hook's. apigen's `TestADerivedReferenceIsDocumentedAsAWrittenOne` shows that a derived reference writes the key a written one does, in the document and the tools, `TestADependencysReferenceIsHeldToTheFieldsType` that a dependency's type's `RefersTo` to a value of another type writes none, and `TestAComponentTwoDependenciesDeclareIsTheImportedOne` that a component two dependencies declare is the imported one on every run. No other golden changes, since no other fixture holds a reference. All are built.
+- sdkgen's `TestToolManifestRoundTripsReferencesAndSearch` decodes the fixture's `tools/schema.json` into `ir.ToolManifest` with unknown fields refused, `ir.ToolSchemaProperty` holding `Reference` (`ir.ToolSchemaReference`) and `Search`, and re-encodes it to the same JSON. `TestToolHookRenamesTheReferenceAndSearchKeys` renames both keys. sdkgen's and rustsdkgen's `TestAReferenceNamesItsOptionsByTheToolsName` name an operation `list_items`, whose tool and options are `catalog.listItems` in both. All are built.
+
+acme's `OrderLineView.productId` drops `@virtual` and `RefersTo`, and its
+reference to `ProductView` is derived. The Topcoat crate's
+`order_view_labels` and every acme test show it unchanged.
+
+The rule is reversible until the first release.
+
+### D62, amended: the documents mark a search argument, and the Go ORM filters on `search_text`
+
+D62 left the search out of the documents and out of the Go ORM. acme's Go
+`listReviews` writes `search_text ILIKE $n ESCAPE '\'` itself for each
+word. An ORM user has only `StringFilter.ILike`, which neither splits a
+text into words nor escapes `%` and `_`.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The OpenAPI document gives a search argument's parameter `x-superschematic-search: true`. A tool's parameters give its property the same key, which a hook renames as it renames D61's key (`ToolKeys.Search`). | A sentence in the description, which a client cannot read as a rule. The rule's numbers (8 words) in the key, which belong to D62. |
+| A table with search fields gets `SearchText *string` on its ORM filter (`ReviewFilter.SearchText`). Absent, it filters nothing. Present, each of its words (D62's words: runs of characters that are not White_Space, the first 8 of them) is a condition `"review"."search_text" ILIKE $n ESCAPE '\'`, its value the word's pattern with `\`, `%` and `_` escaped. A blank text has no words and keeps every row. The ORM is Postgres's, so the condition is `ILIKE`, which the trigram index serves. | `Search`, which a field named `search` would also be. An operator on each field's `StringFilter`, which misses a word that is in another field. Ranking (D62). |
+| The ORM writes the words and the pattern itself: `searchTerms` and `searchLikePattern` in its `search.go`, written only when a table has search fields. ormgen's test holds them to `runtime/http/testdata/search_parity.json`, as the three runtimes are held. | Importing the Go runtime's `search` package. Every ORM module with a search field would then require the HTTP runtime's module, with its replaces and pins, for thirty lines, and a DB package would depend on a server's runtime. |
+| `<Type>FilterConditions(filter, args)`, a function of the ORM's package, gives a filter's conditions for a query of the caller's own. Each column is qualified by its table, and each value is appended to `args`, its placeholder numbered after those already there. `FindMany`'s `WHERE` is the same conditions joined by `AND`. acme's paged lists take their filters' conditions from it and add their keyset comparison (D60) themselves. | A method on the filter, whose name a field could also take. A keyset `After` on `FindOptions`, which is a page reader in the ORM and is left for the sort argument. |
+| The loader refuses a field whose column would be `search_text` on a table with search fields: `Review.searchText: its column is search_text, the column @searchField generates`. | |
+
+Status: built. The OpenAPI document gives the search argument's
+parameter `x-superschematic-search: true` (`registry.OpenAPISearchKey`), and
+the tool documents its property, under `ToolKeys.Search`. The goldens of
+`fixture-refs-api` (apigen's, toolsutil's, sdkgen's and rustsdkgen's) hold
+it on `listItems(q)`, and sdkgen's
+`TestToolHookRenamesTheReferenceAndSearchKeys` renames it. ormgen writes
+`SearchText` on the filter of each table with search fields, its
+conditions last among the filter's, the column qualified as the ORM names
+the table, quoted only where SQL needs it (`review.search_text`). Every
+filter's conditions are an unexported `conditions` method, which
+`buildWhereClause` joins as before and `<Type>FilterConditions` returns;
+the soft-delete condition, which `FindMany` adds after them unless its
+options include deleted rows, is not among them, so acme's key query adds
+`deleted_at IS NULL` itself.
+`search.go` comes from `templates/search.tmpl`, and a build of a schema
+without search fields removes one an earlier build wrote. The loader's
+check is `verify.checkSearchColumns`; verify names the column with a
+constant of its own, which its test holds to `sqlgen.SearchTextColumn`,
+since sqlgen's tests load schemas through the loader and an import would
+be a cycle. The ORM's tests are these:
+
+- ormgen's fixture-db golden. `Tenant.name` is a search field, so `TenantFilter.SearchText`, `TenantFilterConditions` and `search.go` appear in it. Every other ORM golden changes by `<Type>FilterConditions` and the `conditions` method alone.
+- `TestGenerateSearchTextFilter`: the field and the condition on Tenant, neither on TenantUser, and no `search.go` for a schema without search fields.
+- `TestGeneratedSearchFilterOnPostgres`, the generated module against Postgres: each word, in any case and any order; a `%` and a `_` that match themselves; a blank text, an empty one and nil; a ninth word that does not count; another field's condition beside the search; and conditions numbered after a caller's values.
+- `TestGeneratedSearchHelpersMatchTheParity`: the generated helpers held to `search_parity.json`'s `terms` and `patterns`.
+- verify's `search_column_test.go`: the refusal, for a field, a `@jsonField` and a search field itself, and on the table that extends a base class; none for a relation or on a table without search fields.
+
+acme's `ListReviews` drops its search SQL: its product, its rating and its
+words are a `ReviewFilter`, whose conditions `ReviewFilterConditions`
+gives its keyset page's key query beside the cursor's comparison, and it
+reads the page's reviews through `FindMany`, sorted by the key.
+`TestStackDevRunsTheShop` searches as before.
+
+The rule is reversible until the first release.
+
+### D44, amended: the console goes back a page and sets its page size, names an item in its trail by its route's reference, and acme's console runs live
+
+The console's pager (D60, the console amendment) links the next page and
+the first page, and nothing in between. A reader five pages in goes back
+one page only by starting again. They read pages of the route's
+`defaultLimit` unless they edit the URL's `limit`. An item's step in the
+trail that has no title is named by its id, though the route's parameter
+may say what it refers to (D61). No console test covered a reference to
+an API dependency's type (D66). acme's console renders its lists as GET
+forms, since the app loads no runtime. The user chose to keep the history
+in the console's URL, so the wire stays D60's `{items, next}`.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A paged list's page reads `back` from its query, beside `cursor` and `limit`. `back` holds the cursors of the pages before the current one, oldest first, from the second page on, joined by `.`. The first page has no cursor and is never among them. A leading `~` means that earlier cursors were dropped. `back` is the console's own: the argument form ignores it, as it ignores any name it does not hold, and no operation reads it. It holds at most 4096 characters. To build the next page's `back`, the current `back` gets the current cursor after it; while that is too long, the oldest cursors are dropped, with `~` first, until it fits. A URL therefore carries at most about 5 KB of paging, under the 8 KB request line that common servers and proxies accept. Cursors and both marks are unreserved characters, so `back` is written as it is. It is read as sent when it is at most 4096 characters long, its first entry is a cursor or `~`, and every other entry is a cursor by D60's rule (1 to 1024 characters of the base64url alphabet). Any other `back`, and any `back` sent without a cursor, reads as `~`: the page before is unknown. It is never a 400. | Every earlier cursor without a bound, so a URL grows without end. A previous cursor in the page (D60), a second order that every implementation would keep. The history in a cookie or the session, which a link or a second tab does not carry. A 400 for a history that no route reads. Repeating `cursor`, which a query cannot tell apart from the cursor sent. |
+| The pager has three links. "First page" (`rel="first"`) renders while a cursor was sent: the list's path with `query_pairs()`. "Previous page" (`rel="prev"`) renders while a cursor was sent and the page before is known: its `cursor` is the last entry of `back` and its `back` the rest, or it is the first page's link when `back` is empty. "Next page" (`rel="next"`) renders while a page follows: its `cursor` is `next`, and its `back` is the current `back` with the current cursor after it. On the second page Previous and First are the same link, and both render, so every page offers its links in the same places. A refused cursor offers the first page alone, as before. A paged operation that declares an argument named `back` has no Previous link, and the build log gives the reason: `no previous page for orders: order.listOrders declares an argument named back, the query parameter the console keeps the earlier pages' cursors in`. A section on its parent's page shows the first page and links the next one with no history, so the Previous link there is the first page. | Hiding First on the second page, where it is Previous, which moves the links from page to page. A name the core reserves, which would refuse an argument for one UI's sake. |
+| After the links comes a GET form, `<form class="ss-page-size">`. It holds the filter's pairs (`query_pairs()` without `limit`) as hidden inputs, a select named `limit` labeled "Per page", and a "Show" button. Its sizes, in order and each once, are the route's `defaultLimit` and `maxLimit`, each of 10, 20, 50, 100, 200, 500 and 1000 below `maxLimit`, and the limit sent when the route admits it. The limit sent is selected, else the default. A route with one size has no form. The form sends no cursor and no `back`, so a new size starts at the first page with no history. The filter form holds the limit sent as a hidden input, so a filter keeps the size. It too sends neither cursor nor `back`, so a filter starts at the first page with no history. | The select inside the filter form, which a paged list without a filter does not render. Links for each size, which multiply the pager's links. Keeping the cursor across a change of size, which would mix pages of two sizes. Submitting on change, which moves the reader while they choose. |
+| A live list's shard reads `back` from its signal's query, as the page reads it from the request's query, so the shard's links are the page's. Previous sets the shard's query as First and Next do, and puts the query in the address bar. The size form's submit runs the filter's script over its own form (`data-ss-live-size`) and writes the query to the form's own hidden input, which sets the same signal. | A signal for the history beside the query, which a reload would lose. |
+| The trail names an item's step in the first of these ways that applies. It uses the item's title (its detail's `titleField`), as before. Else it uses a reference: if every operation whose route holds the step's parameter at that place and declares it `RefersTo` refers to one target by one value, and that target's options operation has an in-process call, the step is named by the target's label for the step's value. These operations are the item's detail, its edit, delete and actions, and the operations of the collections under it. The label comes through the lookup with that one value, or through the listing when there is no lookup. Else the step is its noun and id, or its id alone. When those references disagree, they name nothing, and the build log gives the reason. A page whose trail names a step this way meets the rate limit and timeout of the options operation it calls, as a page that holds a reference does. A value that no item has, or a call that is refused or fails, leaves the id. | The reference's label ahead of the title, which would call for a label the detail already gives. One route's reference, chosen by order, which another route may contradict. |
+| A reference whose target is an API dependency's type works as any other does. Its options operation is one of the API's own (D61), and it has an in-process call unless it is a webhook or checks a signature; then the reference is left out, as any is. When the target is a dependency's, the build log names it by its service: `PlaceInput.shelfId refers to fixture-shelves-api.ShelfView, whose options operation Shelves.listShelves has no in-process call: its route checks a provider's signature first (@hmacVerified)`. | Calling the dependency's own listing, which the crate has no call for: cross-service options, which come later. |
+| acme's `superschematic.toml` sets `pages_live = true`. Its app gains a root layout, `#[layout("/")] document`: the HTML document every page renders in. Its head has `topcoat::runtime::script()` when the router set the runtime up (`RuntimeSetup` is in the app context). `app(shop, users, assets)` takes an `Option<AssetConfig>`. With one, the router adds `.assets(config).runtime()` after `.shop_orders(...)`, so the pages' controls see a rerun as a GET. `main` loads `AssetBundle::load()`, which `topcoat asset bundle` writes beside the binary. Without a bundle, `main` says so and serves without the runtime, and the lists are the GET forms they are today. The tests build the app with a hosted catalog that holds only the runtime's script, so the script's tag renders without a bundle. | Requiring the bundle, so every `cargo run` and every test would need the Topcoat CLI. The runtime in the console's layout, which renders no document. |
+
+Status: built, every row but the last in `extensions/topcoat` and the
+last in acme's Topcoat app (`examples/acme-shop/topcoat`). Topcoat nests
+a layer without a path, the runtime's, outside the console's
+`PageControls` at the prefix whatever their order, so acme's rerun reaches
+the controls as a GET either way; the app still adds the runtime last, as
+Topcoat's documents ask. The tests are these:
+
+- `TestTheConsolePagesPicksAndSearches` drives `fixture-console-api`:
+  - The orders are walked forward and back by their links, and each Previous lands on the page that was left.
+  - On the second page, Previous is First.
+  - A `back` near the bound drops its oldest cursor with `~` first.
+  - A `back` that is malformed, too long, or sent beside no cursor gives no Previous link and a 200.
+  - The size form offers the route's sizes with the limit selected and the filter hidden, and its submit and a filter's start at the first page.
+  - The shard's links carry `back`, and its size form sets the signal.
+  - A new `suppliers/{supplierId}/products` list names its supplier in the trail through `listSuppliers`, and shows the id for a supplier past the listing's first page and to a caller who may not list suppliers.
+- A copy of the fixture whose `listOrders` declares `back` has no Previous link and gives the build log's reason.
+- A copy with a second list under a supplier, whose `supplierId` refers to a product by its sku, names the supplier by its id and gives the build log's reason; a copy whose `listSuppliers` has a rate limit applies it to a page whose trail names a supplier.
+- `TestAReferenceToAnAPIDependencysType` moves `Supplier` into an API dependency. Selects and labels come through `listSuppliers`, under cargo test too. With the listing behind a signature, the build log names `fixture-console-suppliers-api.Supplier`.
+- `TestADerivedReferenceLabelsRows`: a relation's key with no `RefersTo` (D61, amended) gives the crate the references of the written one.
+- `fixture-console-api`'s golden changes, and `fixture-pages-api`'s by two doc comments; no other golden pages.
+- acme's Topcoat tests (`tests/app.rs`), in memory and, where they page or search, over SQLite too:
+  - `every_page_is_one_document_with_the_runtime`: each page, the shop's and the console's, is one document with the runtime's script once, in its head.
+  - `the_consoles_lists_are_live`: the orders render between their shard's markers, and the shard answers a filter, a page, a Previous link from the history in its query, and a refused caller (401); a page the runtime renders again (`x-topcoat-runtime`) answers as its GET.
+  - `the_reviews_shard_is_live`: a product's reviews' shard takes the product as its argument and carries the search across its pages.
+  - `the_console_goes_back_a_page_and_sets_its_size`: 25 orders at 10 a page, walked forward and back by Next and Previous; the sizes 10, 20, 50 and 100 for the orders and the products and 10, 20 and 50 for the reviews; the filter held by the size form and first in the links; and the shard rendering Previous and a new size.
+  - `without_the_runtime_the_pages_have_no_script`: built with no catalog, the pages render without a script, the lists are GET forms, and a rerun is no page's (405).
+### D54, amended: a Rust server, job or worker reaches its buckets through the Rust runtime's `Bucket`
+
+D54 gave Go and TypeScript a `Bucket` and left Rust out: the Rust runtime
+read a bucket connection (`stackconfig::Bucket`, `load_bucket`) and had
+nothing to open it with, so gcp's and the local target's connectors
+refused a bucket edge from a Rust server, job or worker (D57, D65).
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The Rust HTTP runtime's `bucket` module, with no feature, is the twin of Go's `bucket` package and TypeScript's main entry: an async `Bucket` trait (`name`, `put`, `get`, `delete`, `list`, `signed_url`) a `Deps` holds as `Arc<dyn Bucket>`, a `Body` of bytes, text or a stream, a `Reader` that carries the `Object` and streams its chunks, `ListOptions` whose page is 1000 by default and refuses 0, and `SignedUrlOptions` for a GET or a PUT, up to seven days in whole seconds. `BucketError::NotFound` is Go's `ErrNotFound` and TypeScript's `ObjectNotFoundError`, and a name, an expiry or a content type the others refuse is refused with their messages before any request. | A Rust interface of its own shape, which an implementation moved between languages would relearn. |
+| Its GCS implementation, behind the `gcs` feature, calls Cloud Storage's JSON API over the runtime's HTTP client, as D57's pool reaches Cloud SQL, with no Google library: each request carries the workload's access token from the metadata server, cached until shortly before it expires; `put` is one multipart upload, streamed for a stream; `get` reads the metadata, then that generation's bytes; a read that fails with 408, 429, a 5xx or no answer is tried twice more. A signed URL is V4, signed by IAM `signBlob` as the account the metadata server names, which the grant gcp gives every workload with a bucket already allows; its canonical request is `@google-cloud/storage`'s, byte for byte. Against the emulator (the connection's endpoint or `STORAGE_EMULATOR_HOST`) it sends no credential and signs with a key the process makes, as the other runtimes do. It reads no credentials file, so off Google Cloud it reaches a bucket through an emulator alone. | Google's Rust client, a large dependency for six calls and a second way to authenticate beside Cloud SQL's. |
+| A Rust API that lists a bucket gets a `Deps` field per bucket, its service's name in snake case, and its `EnvConfig` reads `{SERVICE}_BUCKET`. A Rust server's, job's and worker's `main.rs` opens each bucket once and hands it to every API that lists it, and only an entrypoint with a bucket turns on `gcs`. The local target derives the bucket's name and the emulator's endpoint for a Rust workload, and gcp grants it `roles/storage.objectUser` and signing as itself, as it does a Go one. | |
+
+Status: built. The runtime's tests run the trait and the GCS client
+against a fake GCS server and metadata server, and against
+fake-gcs-server, and hold its signatures to vectors from
+`@google-cloud/storage`; CI and `make rust` run its `gcs` feature.
+servergen's Rust fixture stack gains the bucket `rs-media`, which
+`rs-stock` lists, and `TestStackDevRunsRustJobsAndWorkers` has the job
+put objects, the worker read and delete them, and the server list the
+rest and sign a URL the test downloads from the emulator. No Rust
+workload has reached a bucket on Google Cloud.
+
+The rule is reversible until the first release.
+
+### D51, amended: every stack server mounts its APIs' manual routes, with handlers the implementation gives
+
+A `@manualRouteRegistration` operation is one the service routes itself
+(D20, amended; D26; D29): outside a stack the service adds the route to
+the router the generator built. A stack's server has no `main` of the
+service's, and none of the three entrypoints mounted one: TypeScript's
+answered 501, since no handler reached `buildRouter`, and Go's and
+Rust's left the route out, so it was 404.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| An API with a manual route declares what its implementation gives for them beside its `Deps`: TypeScript's `deps.ts` a `ManualRoutes` of a `ManualRouteHandler` per operation and `ManualRoutesConstructor`; Go's `routes.go` a `ManualRoutes` struct of an `http.Handler` per operation, named by namespace and operation (`OrderExportOrder`), and `deps.go` a `ManualRoutesConstructor`; Rust's `interfaces.rs` a `ManualRoutes` trait with a method per operation that takes the `RequestContext` and the request and returns the response. The implementation provides `createManualRoutes(deps)`, `NewManualRoutes(deps)` or `create_manual_routes(deps)`, which the scaffold writes with handlers that answer 501, and a stack's build refuses an implementation that exists without it, naming what to add, as it refuses one without its jobs. | The service's own `main`, which a stack's entrypoint replaces; a handler looked up by name at run time, which no compiler checks. |
+| The entrypoint builds them from the `Deps` it built and gives them to the router: `buildRouter`'s `manualRoutes`, Go's `Config.ManualRoutes`, and Rust's new `build_router_with_manual_routes`. The router mounts each behind the steps every route of the API gets: the request log and id, authentication, the webhook verifier, the rate limit, the body limit, the service step, the permission check and the timeout. Go's decryptor runs on every route, so a Go handler of an encrypted manual route gets the decrypted body. Jobs and workers mount no routes and call nothing new. | Mounting a manual route outside the API's controls, which would leave its `@rateLimit` and `@requireService` to each handler. |
+| Outside a stack nothing changes: `build_router`, `buildRouter` without `manualRoutes` and Go's `RegisterRoutes` with no `ManualRoutes` mount no manual route, and the service routes it as D20's amendment, D26 and D29 say. | |
+
+Status: built. servergen's fixtures each gain a manual route, ts-shop's
+`exportCart`, shop-orders' `exportOrder` and rs-stock's `exportLevel`,
+which `TestTypeScriptEntrypointCompilesAndServes`,
+`TestEntrypointCompilesAndServes` and `TestRustEntrypointCompilesAndServes`
+call on the running server: the scaffold's 501, then the implementation's
+answer with its `Deps` and the request id, and Go's and Rust's 429 from
+the route's rate limit. `TestServiceAuthManualRoutes` refuses a protected
+manual route without a user and a `@requireService` one without a service,
+and the three `...PredatesItsManualRoutesFails` tests the build's
+refusals.
 
 The rule is reversible until the first release.

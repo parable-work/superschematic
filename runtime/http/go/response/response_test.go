@@ -10,7 +10,6 @@ import (
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/parable-work/superschematic/runtime/http/go/bodyargs"
 	"github.com/parable-work/superschematic/runtime/http/go/requestctx"
-	"github.com/parable-work/superschematic/runtime/schema/go/ptr"
 	"github.com/parable-work/superschematic/runtime/schema/go/validate"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -74,7 +73,6 @@ func TestJSONEnvelope(t *testing.T) {
 		status int
 		data   any
 		meta   *Meta
-		links  *Links
 		assert func(t *testing.T, rec *httptest.ResponseRecorder)
 	}{
 		{
@@ -183,15 +181,13 @@ func TestJSONEnvelope(t *testing.T) {
 			},
 		},
 		{
-			name:   "with_links",
+			name:   "meta_is_the_request_id_alone",
 			status: http.StatusOK,
 			data:   struct{}{},
 			meta:   testMeta(),
-			links:  &Links{Next: ptr.To("/next")},
 			assert: func(t *testing.T, rec *httptest.ResponseRecorder) {
 				m := parseBody(t, rec)
-				links := m["links"].(map[string]any)
-				assert.Equal(t, "/next", links["next"])
+				assert.Equal(t, map[string]any{"requestId": "test-request-id"}, m["meta"])
 			},
 		},
 	}
@@ -199,7 +195,7 @@ func TestJSONEnvelope(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			rec := httptest.NewRecorder()
-			JSONEnvelope(rec, tt.status, tt.data, tt.meta, tt.links)
+			JSONEnvelope(rec, tt.status, tt.data, tt.meta)
 			tt.assert(t, rec)
 		})
 	}
@@ -471,7 +467,7 @@ func TestCollectionEnvelope(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			rec := httptest.NewRecorder()
-			CollectionEnvelope(rec, http.StatusOK, tt.data, tt.meta, nil)
+			CollectionEnvelope(rec, http.StatusOK, tt.data, tt.meta)
 			tt.assert(t, rec)
 		})
 	}

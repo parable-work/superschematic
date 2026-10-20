@@ -187,10 +187,11 @@ func typePrimitiveHelpers(t *TypeInfo) []string {
 	return helpers
 }
 
-// tsDoc escapes "*/" in doc text placed inside a JSDoc comment, so the text
-// cannot close the comment early.
-func tsDoc(doc string) string {
-	return strings.ReplaceAll(doc, "*/", "*\\/")
+// tsDoc writes doc text into a JSDoc comment (codegen.JSDocText): "*/"
+// escaped so the text cannot close the comment early, and every line after
+// the first starting with linePrefix, the comment's own line prefix.
+func tsDoc(doc, linePrefix string) string {
+	return codegen.JSDocText(doc, linePrefix)
 }
 
 // scalarLibTypeName returns the structured superscalar type name a scalar's

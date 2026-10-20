@@ -230,6 +230,11 @@ async function main(): Promise<void> {
   // routes and the engine's verify a calling service with.
   const {{ .ServiceAuthenticator }} = serviceAuthenticator({{ .Config }}.{{ .Callers }});
 {{- end }}
+{{- if .ManualRoutes }}
+  // The handlers of its @manualRouteRegistration operations, which its
+  // router mounts behind each one's auth gate (D51).
+  const {{ .ManualRoutes }} = await construct({{ tsQuote .Service }}, 'manual routes', () => {{ .Impl }}.createManualRoutes({{ .Deps }}));
+{{- end }}
   app.route('/', {{ .Module }}.buildRouter({{ .Implementations }}{{ if .RouterOptions }}, { {{ join .RouterOptions ", " }} }{{ end }}));
 {{- if .MountsEngine }}
   // The engine's routes, its event stream and its MCP endpoint (D58),

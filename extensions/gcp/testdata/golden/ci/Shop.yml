@@ -3,14 +3,14 @@
 # The stack's service is schemas/services/Shop. Change it and build it again
 # with superschematic build, which writes this file.
 #
-# On a pull request to main, check builds the stack and compiles its servers
-# with no credentials; each plan job plans a cloud environment as its
-# planner account, and each preview job deploys a member of an environment
-# with one parameter for the pull request, and destroys it when the pull
-# request closes. A pull request from a fork runs check alone. On a push to
-# main, each deploy job deploys a cloud environment in the order the stack
-# declares them, in the GitHub environment of its name, whose required
-# reviewers approve it.
+# On a pull request to main, check builds the stack and compiles its
+# servers, jobs and workers with no credentials; each plan job plans a cloud
+# environment as its planner account, and each preview job deploys a member
+# of an environment with one parameter for the pull request, and destroys it
+# when the pull request closes. A pull request from a fork runs check alone.
+# On a push to main, each deploy job deploys a cloud environment in the
+# order the stack declares them, in the GitHub environment of its name,
+# whose required reviewers approve it.
 #
 # Environments with no job:
 # - Production has no CI identity for planner or deployer yet: run
@@ -77,6 +77,12 @@ jobs:
         run: go build -mod=mod -o /dev/null .
       - name: Compile server shop-api
         working-directory: schemas/dist/server/Shop/shop-api
+        run: go build -mod=mod -o /dev/null .
+      - name: Compile job shop-orders-ship-orders
+        working-directory: schemas/dist/server/Shop/shop-orders-ship-orders
+        run: go build -mod=mod -o /dev/null .
+      - name: Compile worker shop-orders-fulfil-orders
+        working-directory: schemas/dist/server/Shop/shop-orders-fulfil-orders
         run: go build -mod=mod -o /dev/null .
       - name: Install the TypeScript workspace from schemas/dist/bun.lock
         working-directory: schemas/dist

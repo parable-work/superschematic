@@ -52,6 +52,7 @@ type NamespaceInfo struct {
 // EndpointInfo represents a single API endpoint for the SDK
 type EndpointInfo struct {
 	Name           string            // Method name (e.g., "sendMagicLink")
+	ToolName       string            // Tool name (apigen.ToolName, e.g., "auth.sendMagicLink")
 	OperationID    string            // OpenAPI operation id (the handler name)
 	Title          string            // @docs title; "" without it
 	Docs           *ir.OperationDocs // @docs record; nil without it
@@ -86,6 +87,13 @@ type EndpointInfo struct {
 	// OutputIsArrayOfArrays marks a T[][] response; OutputIsArray is also
 	// set.
 	OutputIsArrayOfArrays bool
+	// OutputIsMap marks a Record<string, T> response, or, with
+	// OutputIsArray, Record<string, T[]>: each value is parsed as a
+	// response of the output at its list levels is.
+	OutputIsMap bool
+	// OutputNullable marks a response that may be null (Nullable<T>),
+	// typed T | null and not parsed when null.
+	OutputNullable bool
 }
 
 // ScalarArg is an argument of an endpoint without an input type: a body
@@ -110,10 +118,11 @@ type FileUploadField struct {
 
 // PathParam represents a path parameter
 type PathParam struct {
-	Name   string // Parameter name (e.g., "orderId")
-	TSName string // TypeScript variable name
-	TSType string // TypeScript type
-	IRType string // Original IR type name (for JSON Schema conversion)
+	Name      string            // Parameter name (e.g., "orderId")
+	TSName    string            // TypeScript variable name
+	TSType    string            // TypeScript type
+	IRType    string            // Original IR type name (for JSON Schema conversion)
+	Reference *apigen.Reference // the reference it holds (D61), for the tool documents; nil when none
 }
 
 // QueryParam represents a query string parameter (from @query directive)
@@ -137,6 +146,9 @@ type QueryParam struct {
 	ValidateListMin   *int     // Minimum list cardinality
 	ValidateListMax   *int     // Maximum list cardinality
 	ValidatePattern   string   // Regex pattern validation
+
+	Reference *apigen.Reference // the reference it holds (D61), for the tool documents; nil when none
+	Search    bool              // the operation's search argument (D62)
 }
 
 // ChecksItems reports whether the SDK checks each item of a list parameter
@@ -402,10 +414,11 @@ func convertEndpoint(ep apigen.EndpointInfo, parseableTypes map[string]bool) End
 	tsPathParams := make([]PathParam, len(ep.PathParams))
 	for i, param := range ep.PathParams {
 		tsPathParams[i] = PathParam{
-			Name:   param.Name,
-			TSName: tsutil.ToCamelCase(param.Name),
-			TSType: tsutil.IRTypeToTSType(param.Type),
-			IRType: param.Type,
+			Name:      param.Name,
+			TSName:    tsutil.ToCamelCase(param.Name),
+			TSType:    tsutil.IRTypeToTSType(param.Type),
+			IRType:    param.Type,
+			Reference: param.Reference,
 		}
 	}
 
@@ -442,6 +455,9 @@ func convertEndpoint(ep apigen.EndpointInfo, parseableTypes map[string]bool) End
 			ValidateListMin:   param.ValidateListMin,
 			ValidateListMax:   param.ValidateListMax,
 			ValidatePattern:   param.ValidatePattern,
+
+			Reference: param.Reference,
+			Search:    param.Search,
 		}
 	}
 
@@ -466,6 +482,7 @@ func convertEndpoint(ep apigen.EndpointInfo, parseableTypes map[string]bool) End
 
 	return EndpointInfo{
 		Name:             tsutil.ToCamelCase(ep.Name),
+		ToolName:         apigen.ToolName(ep.Namespace, ep.Name),
 		OperationID:      ep.HandlerName,
 		Title:            ep.Title,
 		Docs:             ep.Docs,
@@ -492,6 +509,8 @@ func convertEndpoint(ep apigen.EndpointInfo, parseableTypes map[string]bool) End
 		HasOutputParser:  hasOutputParser,
 
 		OutputIsArrayOfArrays: ep.OutputIsArrayOfArrays,
+		OutputIsMap:           ep.OutputIsMap,
+		OutputNullable:        ep.OutputNullable,
 	}
 }
 
@@ -533,7 +552,8 @@ func (e EndpointInfo) OutputArrayDepth() int {
 
 // TSOutputType is the TypeScript type of the response: the output type
 // with one "[]" per list level ("GridView", "GridView[]", "string[][]"),
-// or a paged endpoint's page of its items ("Page<ItemView>", D60).
+// in a Record<string, ...> for a map, with "| null" when the response may
+// be null, or a paged endpoint's page of its items ("Page<ItemView>", D60).
 func (e EndpointInfo) TSOutputType() string {
 	if e.Page != nil {
 		pageType := e.PageType
@@ -542,9 +562,16 @@ func (e EndpointInfo) TSOutputType() string {
 		}
 		return pageType + "<" + e.TSItemType() + ">"
 	}
-	return codegen.WrapArray(normalizeTSTypeIdentifier(e.OutputType), e.OutputArrayDepth(), func(inner string) string {
+	tsType := codegen.WrapArray(normalizeTSTypeIdentifier(e.OutputType), e.OutputArrayDepth(), func(inner string) string {
 		return inner + "[]"
 	})
+	if e.OutputIsMap {
+		tsType = "Record<string, " + tsType + ">"
+	}
+	if e.OutputNullable {
+		tsType += " | null"
+	}
+	return tsType
 }
 
 // IRTypeToTSType converts an IR type-reference name to a TypeScript type for
@@ -737,6 +764,7 @@ func suffixProfilePrefixes(phasePrefixes []string, suffix string) []string {
 // These are merged with the base functions from tsutil
 func customTemplateFuncs() template.FuncMap {
 	return template.FuncMap{
+		"jsdoc": codegen.JSDocText,
 		"join_params": func(params []PathParam) string {
 			names := make([]string, len(params))
 			for i, p := range params {

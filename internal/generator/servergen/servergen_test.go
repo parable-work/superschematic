@@ -460,7 +460,7 @@ func TestTheScaffoldNeverOverwrites(t *testing.T) {
 
 	dir := naming.Default().GoImplementationDir(repoRoot, "shop-orders")
 	file := filepath.Join(dir, apigen.ImplementationFile)
-	edited := []byte("package shoporders\n\n// The engineer's code, with the jobs' and the workers' constructors.\nfunc NewJobs() {}\n\nfunc NewWorkers() {}\n")
+	edited := []byte("package shoporders\n\n// The engineer's code, with the constructors of its manual routes, jobs and workers.\nfunc NewManualRoutes() {}\n\nfunc NewJobs() {}\n\nfunc NewWorkers() {}\n")
 	if err := os.WriteFile(file, edited, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -505,7 +505,7 @@ func TestAnImplementationThatPredatesItsJobsFails(t *testing.T) {
 	f.build(t, repoRoot, fakePaths(repoRoot))
 	dir := naming.Default().GoImplementationDir(repoRoot, "shop-orders")
 	file := filepath.Join(dir, apigen.ImplementationFile)
-	before := []byte("package shoporders\n\n// The engineer's code, from before the job.\nfunc New() {}\n")
+	before := []byte("package shoporders\n\n// The engineer's code, from before the job.\nfunc New() {}\n\nfunc NewManualRoutes() {}\n")
 	if err := os.WriteFile(file, before, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -535,7 +535,7 @@ func TestAnImplementationThatPredatesItsWorkersFails(t *testing.T) {
 	f.build(t, repoRoot, fakePaths(repoRoot))
 	dir := naming.Default().GoImplementationDir(repoRoot, "shop-orders")
 	file := filepath.Join(dir, apigen.ImplementationFile)
-	before := []byte("package shoporders\n\n// The engineer's code, from before the worker.\nfunc New() {}\n\nfunc NewJobs() {}\n")
+	before := []byte("package shoporders\n\n// The engineer's code, from before the worker.\nfunc New() {}\n\nfunc NewManualRoutes() {}\n\nfunc NewJobs() {}\n")
 	if err := os.WriteFile(file, before, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -552,6 +552,44 @@ func TestAnImplementationThatPredatesItsWorkersFails(t *testing.T) {
 	}
 	if got, err := os.ReadFile(file); err != nil || string(got) != string(before) {
 		t.Errorf("a refused build wrote %s: %q, %v", file, got, err)
+	}
+}
+
+// TestAnImplementationThatPredatesItsManualRoutesFails: shop-orders
+// declares a @manualRouteRegistration operation, exportOrder, and its
+// implementation, which exists and so is the engineer's, declares no
+// NewManualRoutes, whose handlers Storefront's main.go passes to
+// RegisterRoutes (D51). The build writes nothing into it and fails, saying
+// what to add; with it declared, it builds.
+func TestAnImplementationThatPredatesItsManualRoutesFails(t *testing.T) {
+	repoRoot := t.TempDir()
+	f := loadFixture(t, servicesRoot)
+	f.build(t, repoRoot, fakePaths(repoRoot))
+	dir := naming.Default().GoImplementationDir(repoRoot, "shop-orders")
+	file := filepath.Join(dir, apigen.ImplementationFile)
+	before := []byte("package shoporders\n\n// The engineer's code, from before the manual route.\nfunc New() {}\n\nfunc NewJobs() {}\n\nfunc NewWorkers() {}\n")
+	if err := os.WriteFile(file, before, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := generator.Run(f.schemas["shop-stack"], f.configs["shop-stack"], f.options(repoRoot, fakePaths(repoRoot)))
+	for _, want := range []string{
+		"stack shop-stack: shop-orders declares @manualRouteRegistration operations, and its implementation at " + dir + ", which the build no longer writes into, declares no NewManualRoutes",
+		"func NewManualRoutes(deps api.Deps) (api.ManualRoutes, error)",
+		"OrderExportOrder: http.HandlerFunc(...), // answers GET /api/orders/{id}/export",
+		"where api is example.com/schemas/api/shop-orders, whose api.ManualRoutesConstructor is NewManualRoutes's signature (docs/stack-model.md, section 8.5)",
+	} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("build = %v, want it to say %q", err, want)
+		}
+	}
+	if got, err := os.ReadFile(file); err != nil || string(got) != string(before) {
+		t.Errorf("a refused build wrote %s: %q, %v", file, got, err)
+	}
+	if err := os.WriteFile(file, append(before, "\nfunc NewManualRoutes() {}\n"...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := generator.Run(f.schemas["shop-stack"], f.configs["shop-stack"], f.options(repoRoot, fakePaths(repoRoot))); err != nil {
+		t.Fatalf("a build over an implementation that declares NewManualRoutes = %v", err)
 	}
 }
 
@@ -858,11 +896,14 @@ func (s *started) stop(t *testing.T) {
 // TestEntrypointCompilesAndServes: each server's entrypoint builds with
 // its scaffolded implementations and vets. Storefront starts with no
 // database up, answers /healthz and reports the database in /readyz, and
-// routes each API's requests to it, the scaffold answering 501 and its
-// payload decryptor refusing an encrypted body; shop-api's scaffolded auth
-// middleware refuses its protected route. Each stops cleanly on SIGTERM.
-// Storefront, which no environment places on Cloud SQL, refuses to start
-// on a Cloud SQL configuration.
+// routes each API's requests to it, the scaffold answering 501, its
+// manual route's handler included, and its payload decryptor refusing an
+// encrypted body; shop-api's scaffolded auth middleware refuses its
+// protected route. Each stops cleanly on SIGTERM. Storefront, which no
+// environment places on Cloud SQL, refuses to start on a Cloud SQL
+// configuration. With shop-orders' manual route implemented, Storefront
+// answers it with the handler NewManualRoutes built from its Deps, behind
+// the route's rate limit and request log (D51).
 func TestEntrypointCompilesAndServes(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping compile check in -short mode")
@@ -896,7 +937,8 @@ func TestEntrypointCompilesAndServes(t *testing.T) {
 	// shop-orders' CORS field lists (D55).
 	const siteOrigin = "https://shop-web.acme.dev"
 	media := bucketVariables(t, "SHOP_MEDIA_BUCKET", "http://127.0.0.1:9")
-	storefront := start(t, binaries["Storefront"], append(append([]string{"SHOP_DB_DATABASE_URL=" + unreachable, "SHOP_ORDERS_CORS_ORIGINS=" + siteOrigin}, edgeVariables(t, "SHOP_API_SERVICE")...), media...)...)
+	storefrontEnv := append(append([]string{"SHOP_DB_DATABASE_URL=" + unreachable, "SHOP_ORDERS_CORS_ORIGINS=" + siteOrigin}, edgeVariables(t, "SHOP_API_SERVICE")...), media...)
+	storefront := start(t, binaries["Storefront"], storefrontEnv...)
 	// A preflight to shop-orders from the site is answered; one from
 	// another origin is not, but goes on to shop-orders' router, which
 	// allows no OPTIONS, nor one to shop-reviews, which no site calls.
@@ -908,6 +950,9 @@ func TestEntrypointCompilesAndServes(t *testing.T) {
 	storefront.expect(t, http.MethodGet, "/readyz", http.StatusServiceUnavailable, `"unavailable":["shop-db"]`)
 	storefront.expect(t, http.MethodGet, "/api/orders/o-1", http.StatusNotImplemented, "Order.GetOrder")
 	storefront.expect(t, http.MethodGet, "/api/products/p-1/reviews", http.StatusNotImplemented, "Review.ListReviews")
+	// shop-orders' manual route reaches the scaffold's handler, which
+	// RegisterRoutes mounted from Config.ManualRoutes (D51).
+	storefront.expect(t, http.MethodGet, "/api/orders/o-1/export", http.StatusNotImplemented, "Order.ExportOrder")
 	storefront.send(t, http.MethodPost, "/api/orders", `{"algorithm":"RSA_OAEP_256","payload":"c2t1"}`, http.StatusBadRequest, "Failed to decrypt request payload")
 	storefront.expect(t, http.MethodGet, "/api/openapi.json", http.StatusOK, "/api/orders/{id}")
 	storefront.expect(t, http.MethodGet, "/api/nowhere", http.StatusNotFound)
@@ -955,12 +1000,42 @@ func TestEntrypointCompilesAndServes(t *testing.T) {
 	if implemented == string(source) {
 		t.Fatalf("%s has no not-implemented ExpireOrders:\n%s", impl, source)
 	}
+	// The manual route answers a CSV of the order with the region its Deps'
+	// config holds, and the id of the request, which the server's request
+	// ID middleware put on its context.
+	withExport := strings.Replace(strings.Replace(implemented, `OrderExportOrder: notImplemented("Order.ExportOrder"),`, `OrderExportOrder: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			deps.Logger.Info("exported", zap.String("id", chi.URLParam(r, "id")))
+			w.Header().Set("Content-Type", "text/csv")
+			w.Header().Set("X-Export-Request", chimiddleware.GetReqID(r.Context()))
+			_, _ = io.WriteString(w, "id,region\n"+chi.URLParam(r, "id")+","+deps.Config.FulfillmentRegion+"\n")
+		}),`, 1), "\t\"net/http\"\n", "\t\"io\"\n\t\"net/http\"\n\n\t\"github.com/go-chi/chi/v5\"\n\tchimiddleware \"github.com/go-chi/chi/v5/middleware\"\n\t\"go.uber.org/zap\"\n", 1)
+	if !strings.Contains(withExport, "X-Export-Request") || !strings.Contains(withExport, "chimiddleware \"github.com") {
+		t.Fatalf("%s has no scaffolded handler of OrderExportOrder:\n%s", impl, source)
+	}
+	implemented = withExport
 	if err := os.WriteFile(impl, []byte(implemented), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	goCommand(t, jobDir, "build", "-o", jobBinary, ".")
 	if output, err := runJob(); err != nil || !strings.Contains(output, `"msg":"expired no order"`) || !strings.Contains(output, `"msg":"job done"`) {
 		t.Errorf("the implemented job = %v, want exit 0 after the method's log:\n%s", err, output)
+	}
+
+	// Storefront, built over it, answers the manual route with the
+	// handler's CSV, not the JSON envelope, logs the request, and refuses a
+	// second request within the minute, the route's rate limit.
+	goCommand(t, servergen.ServerDir(out, "shop-stack", "Storefront"), "build", "-mod=mod", "-o", binaries["Storefront"], ".")
+	exporting := start(t, binaries["Storefront"], storefrontEnv...)
+	exportOrder(t, exporting.base+"/api/orders/o-1/export")
+	exporting.expect(t, http.MethodGet, "/api/orders/o-1/export", http.StatusTooManyRequests, "too_many_requests")
+	exporting.stop(t)
+	for _, want := range []string{`"msg":"exported"`, `"id":"o-1"`, `"api":"shop-orders"`} {
+		if !strings.Contains(exporting.out.String(), want) {
+			t.Errorf("Storefront's manual route logged no %s:\n%s", want, exporting.out.String())
+		}
+	}
+	if !strings.Contains(exporting.out.String(), "/api/orders/{id}/export") {
+		t.Errorf("Storefront's request log names no manual route:\n%s", exporting.out.String())
 	}
 
 	// shop-orders' worker builds the same Deps and claims shop-db's queue
@@ -994,6 +1069,35 @@ func TestEntrypointCompilesAndServes(t *testing.T) {
 	}
 	if err != nil {
 		t.Errorf("the worker stopped with %v, want exit 0:\n%s", err, workerOutput.String())
+	}
+}
+
+// exportOrder calls shop-orders' manual route at url: RegisterRoutes hands
+// the request to the implementation's handler, which answers it as it is,
+// the CSV with the region shop-orders' config holds, not the JSON
+// envelope, and with the request's id, which the server's request ID
+// middleware put on the request's context.
+func exportOrder(t *testing.T, url string) {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("X-Request-Id", "export-1")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK || string(body) != "id,region\no-1,us\n" || resp.Header.Get("Content-Type") != "text/csv" {
+		t.Errorf("GET %s = %d %s: %q, want 200 text/csv from the manual route's handler", url, resp.StatusCode, resp.Header.Get("Content-Type"), body)
+	}
+	if id := resp.Header.Get("X-Export-Request"); id != "export-1" {
+		t.Errorf("GET %s: the handler's request held id %q, want the request's export-1", url, id)
 	}
 }
 

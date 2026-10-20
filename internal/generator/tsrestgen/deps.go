@@ -17,9 +17,10 @@ import (
 // The implementation side of a TypeScript API (D51; docs/stack-model.md,
 // sections 8.5 and 8.6): deps.ts declares Deps, what the implementation is
 // built from, and the types of the implementation's create and
-// authenticate, the twin of the Go API's deps.go; the scaffold writes the
-// implementation's package once, at the naming file's
-// [implementation_paths] typescript template.
+// authenticate, and of its createManualRoutes for an API with a
+// @manualRouteRegistration operation, the twin of the Go API's deps.go;
+// the scaffold writes the implementation's package once, at the naming
+// file's [implementation_paths] typescript template.
 
 const (
 	// PGPeerRange is the pg the package peers on when Deps holds a pool:
@@ -243,10 +244,14 @@ func (o *APIOutput) WorkerQueues() []string {
 }
 
 // The functions an implementation of an API with jobs or workers exports,
-// of the generated JobsConstructor's and WorkersConstructor's types.
+// of the generated JobsConstructor's and WorkersConstructor's types, and
+// the one an implementation of an API with a @manualRouteRegistration
+// operation exports, of ManualRoutesConstructor's, whose handlers a
+// server's entrypoint hands buildRouter (D51).
 const (
-	JobsFunc    = "createJobs"
-	WorkersFunc = "createWorkers"
+	JobsFunc         = "createJobs"
+	WorkersFunc      = "createWorkers"
+	ManualRoutesFunc = "createManualRoutes"
 )
 
 // exportPattern matches a declaration that exports a name, by the name's

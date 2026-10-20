@@ -23,8 +23,9 @@ type SessionImplementation interface {
 type TenantImplementation interface {
 	// CustomHandler handles POST /api/tenant/custom-handler
 	//
-	// This endpoint uses @manualRouteRegistration: RegisterRoutes does not
-	// register it. Wire createTenantCustomHandlerHandler onto the router yourself.
+	// This endpoint uses @manualRouteRegistration: RegisterRoutes mounts
+	// Config.ManualRoutes.TenantCustomHandler at its route, not this method,
+	// or, without Config.ManualRoutes, leaves the route to you.
 	CustomHandler(ctx context.Context) (*types.TenantView, error)
 	// ListTenants handles GET /api/tenants
 	//

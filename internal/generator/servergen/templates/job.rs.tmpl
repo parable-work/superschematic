@@ -28,6 +28,9 @@ mod engine;
 {{- end }}
 
 use std::process::ExitCode;
+{{- if .Buckets }}
+use std::sync::Arc;
+{{- end }}
 use std::time::Instant;
 {{ range .RuntimeUses }}
 {{ . }}

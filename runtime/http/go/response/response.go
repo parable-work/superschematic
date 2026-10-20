@@ -291,45 +291,31 @@ func NoContent(w http.ResponseWriter) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// Envelope wraps a response payload with optional metadata and pagination links.
+// Envelope wraps a response payload with its metadata: {data, meta}, the
+// envelope the OpenAPI document declares (D60, amended).
 type Envelope struct {
-	Data  any    `json:"data"`
-	Meta  *Meta  `json:"meta,omitempty"`
-	Links *Links `json:"links,omitempty"`
+	Data any   `json:"data"`
+	Meta *Meta `json:"meta,omitempty"`
 }
 
-// Meta holds response metadata such as request tracing and pagination counts.
+// Meta holds response metadata: the request's id.
 type Meta struct {
-	RequestID  string `json:"requestId"`
-	TotalCount *int   `json:"totalCount,omitempty"`
+	RequestID string `json:"requestId"`
 }
 
-// Links holds HATEOAS-style pagination links.
-type Links struct {
-	First *string `json:"first,omitempty"`
-	Prev  *string `json:"prev,omitempty"`
-	Next  *string `json:"next,omitempty"`
-	Last  *string `json:"last,omitempty"`
-}
-
-// JSONEnvelope sends a JSON response wrapped in an envelope with optional meta and links.
-func JSONEnvelope(w http.ResponseWriter, status int, data any, meta *Meta, links *Links) {
-	env := Envelope{
-		Data:  data,
-		Meta:  meta,
-		Links: links,
-	}
-	JSON(w, status, env)
+// JSONEnvelope sends a JSON response wrapped in an envelope with its meta.
+func JSONEnvelope(w http.ResponseWriter, status int, data any, meta *Meta) {
+	JSON(w, status, Envelope{Data: data, Meta: meta})
 }
 
 // CollectionEnvelope sends a JSON response for collection endpoints.
 // It ensures the data field is always serialized as an array ([] not null),
 // handling both untyped nil and typed nil slices (e.g., []Widget(nil)).
-func CollectionEnvelope(w http.ResponseWriter, status int, data any, meta *Meta, links *Links) {
+func CollectionEnvelope(w http.ResponseWriter, status int, data any, meta *Meta) {
 	if isNilOrNilSlice(data) {
 		data = []any{}
 	}
-	JSONEnvelope(w, status, data, meta, links)
+	JSONEnvelope(w, status, data, meta)
 }
 
 func isNilOrNilSlice(v any) bool {
