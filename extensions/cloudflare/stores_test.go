@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -19,7 +20,8 @@ import (
 // TestStateBackend: the state is the account's R2 bucket through Pulumi's
 // S3 backend, with the passphrase secrets provider; Env hands the run the
 // token's S3 credentials, its id and the SHA-256 of its value, and the
-// shell's passphrase. A run without a passphrase or a token is refused
+// shell's passphrase, and clears the shell's AWS session token, profile
+// and shared files, which the backend would read in their place. A run without a passphrase or a token is refused
 // before anything calls Cloudflare.
 func TestStateBackend(t *testing.T) {
 	f := newFixture(t)
@@ -35,9 +37,15 @@ func TestStateBackend(t *testing.T) {
 	}
 	sum := sha256.Sum256([]byte(engineerToken))
 	want := map[string]string{
-		"AWS_ACCESS_KEY_ID":        tokenID,
-		"AWS_SECRET_ACCESS_KEY":    hex.EncodeToString(sum[:]),
-		"PULUMI_CONFIG_PASSPHRASE": "the passphrase",
+		"AWS_ACCESS_KEY_ID":           tokenID,
+		"AWS_SECRET_ACCESS_KEY":       hex.EncodeToString(sum[:]),
+		"AWS_SESSION_TOKEN":           "",
+		"AWS_SECURITY_TOKEN":          "",
+		"AWS_PROFILE":                 "",
+		"AWS_DEFAULT_PROFILE":         "",
+		"AWS_CONFIG_FILE":             os.DevNull,
+		"AWS_SHARED_CREDENTIALS_FILE": os.DevNull,
+		"PULUMI_CONFIG_PASSPHRASE":    "the passphrase",
 	}
 	if backend.SecretsProvider != "passphrase" || !mapsEqual(backend.Env, want) {
 		t.Errorf("backend = %+v", backend)

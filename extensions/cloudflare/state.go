@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
+	"os"
 
 	ir "github.com/parable-work/superschematic/ir"
 	"github.com/parable-work/superschematic/registry"
@@ -70,16 +72,33 @@ func (s stateStore) Backend(ctx context.Context, env *ir.ResolvedEnvironment) (r
 // stateBackend is the backend of an account's state, reached with a
 // token's S3 credentials and encrypted with passphrase.
 func stateBackend(account, tokenID, token, passphrase string) registry.StateBackend {
-	id, secret := S3Credentials(tokenID, token)
 	return registry.StateBackend{
 		URL:             StateURL(R2Endpoint(account)),
 		SecretsProvider: passphraseProvider,
-		Env: map[string]string{
-			"AWS_ACCESS_KEY_ID":     id,
-			"AWS_SECRET_ACCESS_KEY": secret,
-			PassphraseEnv:           passphrase,
-		},
+		Env:             s3Env(tokenID, token, map[string]string{PassphraseEnv: passphrase}),
 	}
+}
+
+// s3Env is the environment that hands Pulumi's S3 backend a token's S3
+// credentials and nothing else of the shell's AWS setup, beside extra: a
+// session token or a profile there would be signed with or read in place
+// of them (an AWS session token beside R2's key fails every request, and a
+// profile the machine lacks fails the backend's start), so each is
+// cleared, and the shared config and credentials files are empty.
+func s3Env(tokenID, token string, extra map[string]string) map[string]string {
+	id, secret := S3Credentials(tokenID, token)
+	env := map[string]string{
+		"AWS_ACCESS_KEY_ID":           id,
+		"AWS_SECRET_ACCESS_KEY":       secret,
+		"AWS_SESSION_TOKEN":           "",
+		"AWS_SECURITY_TOKEN":          "",
+		"AWS_PROFILE":                 "",
+		"AWS_DEFAULT_PROFILE":         "",
+		"AWS_CONFIG_FILE":             os.DevNull,
+		"AWS_SHARED_CREDENTIALS_FILE": os.DevNull,
+	}
+	maps.Copy(env, extra)
+	return env
 }
 
 // passphraseProvider is Pulumi's secrets provider that encrypts with the

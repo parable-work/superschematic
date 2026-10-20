@@ -103,15 +103,18 @@ func (s *s3StandIn) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // state store gives a run reaches the pulumi CLI, its URL and its Env: the
 // CLI reads the bucket path-style at the URL's endpoint, here a local
 // stand-in for R2's, signed in region auto with the token's id as the
-// access key (D64).
+// access key (D64). The shell's AWS session token and profile, here a
+// stale one and one the machine lacks, do not reach the backend.
 func TestCloudflareStateReachesTheCLI(t *testing.T) {
 	requirePulumi(t)
-	for _, name := range []string{"AWS_PROFILE", "AWS_SESSION_TOKEN", "AWS_REGION", "AWS_DEFAULT_REGION", "PULUMI_CONFIG_PASSPHRASE", "PULUMI_CONFIG_PASSPHRASE_FILE"} {
+	for _, name := range []string{"AWS_REGION", "AWS_DEFAULT_REGION", "PULUMI_CONFIG_PASSPHRASE", "PULUMI_CONFIG_PASSPHRASE_FILE"} {
 		t.Setenv(name, "")
 		if err := os.Unsetenv(name); err != nil {
 			t.Fatal(err)
 		}
 	}
+	t.Setenv("AWS_SESSION_TOKEN", "a-stale-session-token")
+	t.Setenv("AWS_PROFILE", "a-profile-this-machine-lacks")
 	standIn := &s3StandIn{}
 	srv := httptest.NewServer(standIn)
 	t.Cleanup(srv.Close)
@@ -153,6 +156,9 @@ func TestCloudflareStateReachesTheCLI(t *testing.T) {
 	auth := r.Header.Get("Authorization")
 	if !regexp.MustCompile(`^AWS4-HMAC-SHA256 Credential=token-id/\d{8}/auto/s3/aws4_request, `).MatchString(auth) {
 		t.Errorf("the CLI signed with %q, not the token's id in region auto", auth)
+	}
+	if token := r.Header.Get("X-Amz-Security-Token"); token != "" {
+		t.Errorf("the CLI sent the shell's session token %q", token)
 	}
 }
 
