@@ -336,7 +336,7 @@ func TestDestroyEmptiesTheMembersBucketFirst(t *testing.T) {
 // need it.
 func TestBootstrapChecksTheBucketTokenGroup(t *testing.T) {
 	f := newFixture(t)
-	f.shell[cloudflare.PassphraseEnv] = "the-passphrase"
+	f.givePassphrases("the-passphrase", "the-bootstraps")
 	ctx := context.Background()
 	staging := resolveCalls(t, f.reg, "Staging")
 	if _, err := f.target(t).Bootstrap.Bootstrap(ctx, f.request(t, staging, nil, nil)); err != nil {
@@ -362,7 +362,7 @@ func TestBootstrapChecksTheBucketTokenGroup(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newFixture(t)
-			f.shell[cloudflare.PassphraseEnv] = "the-passphrase"
+			f.givePassphrases("the-passphrase", "the-bootstraps")
 			f.cloud.groups = tc.groups(slices.Clone(permissionGroups))
 			if _, err := f.target(t).Bootstrap.Bootstrap(ctx, f.request(t, resolveCalls(t, f.reg, "Staging"), nil, nil)); err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Errorf("bootstrap = %v, want it to say %q", err, tc.want)

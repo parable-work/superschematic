@@ -23,7 +23,8 @@ import (
 // the state store and the deploy keep in R2. NewCloud returns the one over
 // Cloudflare's REST API and R2's S3 API, with an API token; tests pass a
 // fake. Every call is idempotent but CreateSecretsStore and CreateSecret,
-// which their callers make only after they found none.
+// which their callers make only after they found none, and CreateObject,
+// which writes only the first time.
 type Cloud interface {
 	// VerifyToken checks the token the Cloud calls with: an account token
 	// of account, else a user token. It returns the token's id, which is
@@ -62,6 +63,11 @@ type Cloud interface {
 
 	// PutObject replaces an object, with metadata, which may be nil.
 	PutObject(ctx context.Context, account, bucket, key string, data []byte, metadata map[string]string) error
+
+	// CreateObject writes an object only if the key holds none, a PUT
+	// with `If-None-Match: *`: created is false, with no error, when one
+	// was there, which a write at the same time may have put.
+	CreateObject(ctx context.Context, account, bucket, key string, data []byte) (created bool, err error)
 
 	// DeleteObject deletes an object; a missing one is not an error.
 	DeleteObject(ctx context.Context, account, bucket, key string) error
@@ -440,6 +446,25 @@ func (c *restCloud) PutObject(ctx context.Context, account, bucket, key string, 
 	}
 	_, _, err := c.s3(ctx, account, http.MethodPut, bucket, key, nil, data, header)
 	return err
+}
+
+func (c *restCloud) CreateObject(ctx context.Context, account, bucket, key string, data []byte) (bool, error) {
+	header := http.Header{}
+	header.Set("Content-Type", "application/octet-stream")
+	header.Set("If-None-Match", "*")
+	if data == nil {
+		data = []byte{}
+	}
+	resp, _, err := c.s3(ctx, account, http.MethodPut, bucket, key, nil, data, header)
+	if resp != nil && (resp.StatusCode == http.StatusPreconditionFailed || resp.StatusCode == http.StatusConflict) {
+		// 412: the key holds an object. 409: another conditional write
+		// to the key is in flight, which R2 lets win.
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func (c *restCloud) DeleteObject(ctx context.Context, account, bucket, key string) error {

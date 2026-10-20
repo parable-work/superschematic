@@ -223,8 +223,8 @@ func checkBucketName(bucket string, name any, parts []namePart) error {
 	if !bucketNamePattern.MatchString(literal) {
 		return registry.Unrealizable("the R2 bucket of %s would be named %q, and R2 takes lowercase letters, digits and hyphens, a letter or a digit at each end; give the stack, the environment or the Bucket service another name", bucket, literal)
 	}
-	if literal == StateBucket {
-		return registry.Unrealizable("the R2 bucket of %s would be named %s, the bucket bootstrap keeps the account's state in; give the stack, the environment or the Bucket service another name", bucket, literal)
+	if literal == StateBucket || literal == BootstrapBucket {
+		return registry.Unrealizable("the R2 bucket of %s would be named %s, a bucket bootstrap keeps an account's state in; give the stack, the environment or the Bucket service another name", bucket, literal)
 	}
 	return nil
 }

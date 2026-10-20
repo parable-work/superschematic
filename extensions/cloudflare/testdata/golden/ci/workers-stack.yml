@@ -116,8 +116,8 @@ jobs:
           pulumi-version: "3.259.0"
       - name: Plan Staging
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_PLANNER_TOKEN_STAGING }}
-          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE_STAGING }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_PLANNER_TOKEN_WORKERS_STACK_STAGING }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE_WORKERS_STACK_STAGING }}
         run: superschematic stack plan Staging --stack schemas/services/workers-stack
 
   plan-production:
@@ -155,8 +155,8 @@ jobs:
           pulumi-version: "3.259.0"
       - name: Plan Production
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_PLANNER_TOKEN_PRODUCTION }}
-          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE_PRODUCTION }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_PLANNER_TOKEN_WORKERS_STACK_PRODUCTION }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE_WORKERS_STACK_PRODUCTION }}
         run: superschematic stack plan Production --stack schemas/services/workers-stack
 
   preview-preview:
@@ -208,14 +208,14 @@ jobs:
       - name: Deploy Preview for the pull request
         if: github.event.action != 'closed'
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_PREVIEW_TOKEN_PREVIEW }}
-          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE_PREVIEW }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_PREVIEW_TOKEN_WORKERS_STACK_PREVIEW }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE_WORKERS_STACK_PREVIEW }}
         run: superschematic stack deploy Preview --stack schemas/services/workers-stack --param pr=${{ github.event.pull_request.number }}
       - name: Destroy Preview for the pull request
         if: github.event.action == 'closed'
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_PREVIEW_TOKEN_PREVIEW }}
-          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE_PREVIEW }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_PREVIEW_TOKEN_WORKERS_STACK_PREVIEW }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE_WORKERS_STACK_PREVIEW }}
         run: superschematic stack destroy Preview --stack schemas/services/workers-stack --param pr=${{ github.event.pull_request.number }} --yes
 
   deploy-staging:
@@ -265,8 +265,8 @@ jobs:
           }
       - name: Deploy Staging
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_DEPLOYER_TOKEN_WORKERS_STACK_STAGING }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE_WORKERS_STACK_STAGING }}
         run: superschematic stack deploy Staging --stack schemas/services/workers-stack
 
   deploy-production:
@@ -316,6 +316,6 @@ jobs:
           }
       - name: Deploy Production
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_DEPLOYER_TOKEN_WORKERS_STACK_PRODUCTION }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE_WORKERS_STACK_PRODUCTION }}
         run: superschematic stack deploy Production --stack schemas/services/workers-stack

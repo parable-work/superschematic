@@ -45,10 +45,10 @@ exit 2
 			t.Errorf("EnsureEnvironment(%s) = %v, %v; want %v", env, created, err, want)
 		}
 	}
-	if err := gh.SetSecret(ctx, "acme/edge", "Staging", "CLOUDFLARE_API_TOKEN", []byte("the-token")); err != nil {
+	if err := gh.SetSecret(ctx, "acme/edge", "Staging", "CLOUDFLARE_DEPLOYER_TOKEN_EDGE_STACK_STAGING", []byte("the-token")); err != nil {
 		t.Fatal(err)
 	}
-	if err := gh.SetSecret(ctx, "acme/edge", "", "CLOUDFLARE_PLANNER_TOKEN_STAGING", []byte("the-planner")); err != nil {
+	if err := gh.SetSecret(ctx, "acme/edge", "", "CLOUDFLARE_PLANNER_TOKEN_EDGE_STACK_STAGING", []byte("the-planner")); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(log)
@@ -59,8 +59,8 @@ exit 2
 	for _, want := range []string{
 		"auth status\n",
 		"api repos/acme/edge/environments/Preview --silent\napi --method PUT repos/acme/edge/environments/Preview --silent\n",
-		"secret set CLOUDFLARE_API_TOKEN --repo acme/edge --env Staging\nstdin: the-token\n",
-		"secret set CLOUDFLARE_PLANNER_TOKEN_STAGING --repo acme/edge\nstdin: the-planner\n",
+		"secret set CLOUDFLARE_DEPLOYER_TOKEN_EDGE_STACK_STAGING --repo acme/edge --env Staging\nstdin: the-token\n",
+		"secret set CLOUDFLARE_PLANNER_TOKEN_EDGE_STACK_STAGING --repo acme/edge\nstdin: the-planner\n",
 	} {
 		if !strings.Contains(calls, want) {
 			t.Errorf("gh was not called with %q:\n%s", want, calls)

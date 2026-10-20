@@ -252,6 +252,11 @@ func (f *fakeAPI) s3(w http.ResponseWriter, r *http.Request) {
 		}
 		_, _ = w.Write(data)
 	case r.Method == http.MethodPut:
+		if _, ok := f.objects[bucket+"/"+key]; ok && r.Header.Get("If-None-Match") == "*" {
+			w.WriteHeader(http.StatusPreconditionFailed)
+			_, _ = io.WriteString(w, "<Error><Code>PreconditionFailed</Code><Message>At least one of the pre-conditions you specified did not hold</Message></Error>")
+			return
+		}
 		f.objects[bucket+"/"+key] = body
 		meta := http.Header{}
 		for k, v := range r.Header {
@@ -397,7 +402,7 @@ func TestCloudREST(t *testing.T) {
 // TestCloudS3 covers the object calls over R2's S3 API, path-style and
 // signed with the token's S3 credentials: a put with metadata, a get that
 // returns it, a missing object, a list across pages, a delete of a present
-// and of a missing object.
+// and of a missing object, and a conditional write that finds an object.
 func TestCloudS3(t *testing.T) {
 	c, api := newTestCloud(t)
 	ctx := context.Background()
@@ -422,6 +427,17 @@ func TestCloudS3(t *testing.T) {
 		if err := c.DeleteObject(ctx, accountOf, "superschematic-state", "superschematic/other"); err != nil {
 			t.Errorf("DeleteObject: %v", err)
 		}
+	}
+	// A conditional write puts the first object at a key, signed with its
+	// If-None-Match header, and puts nothing the second time.
+	for i, want := range []bool{true, false} {
+		created, err := c.CreateObject(ctx, accountOf, "superschematic-state", "superschematic/passphrase-check", []byte(fmt.Sprintf("write %d", i)))
+		if err != nil || created != want {
+			t.Errorf("CreateObject %d = %v, %v; want %v", i, created, err, want)
+		}
+	}
+	if data, _, err := c.GetObject(ctx, accountOf, "superschematic-state", "superschematic/passphrase-check"); err != nil || string(data) != "write 0" {
+		t.Errorf("after two conditional writes the object holds %q, %v", data, err)
 	}
 	if _, _, err := c.GetObject(ctx, accountOf, "missing-bucket", "x"); err == nil || !strings.Contains(err.Error(), "NoSuchBucket") {
 		t.Errorf("GetObject of a missing bucket: %v", err)
