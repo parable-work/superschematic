@@ -11,7 +11,6 @@
 !runtime/schema/rust-ir
 !runtime/versiongraph/rust
 !runtime/versiongraph/rust-engine
-!runtime/versiongraph/typescript/package.json
 !schemas/dist/api/*/package.json
 !schemas/dist/api/desk-ts-api
 !schemas/dist/bun.lock*

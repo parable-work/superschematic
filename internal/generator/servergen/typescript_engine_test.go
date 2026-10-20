@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -26,6 +27,7 @@ import (
 	"github.com/parable-work/superschematic/internal/stackdeploy"
 	"github.com/parable-work/superschematic/internal/testpaths"
 	ir "github.com/parable-work/superschematic/ir"
+	"github.com/parable-work/superschematic/internal/registry"
 	publicregistry "github.com/parable-work/superschematic/registry"
 	"github.com/parable-work/superschematic/stack/stacktest"
 )
@@ -135,12 +137,11 @@ func TestATypeScriptEntrypointOpensTheWorkQueuesBehaviorsByName(t *testing.T) {
 	}
 }
 
-// TestATypeScriptEntrypointRefusesAnExtensionsBehavior: the engine's
-// Node-API addon runs the core's behaviors and the work queue's, so a
+// TestATypeScriptEntrypointRefusesAnExtensionsBehaviorNoEngineRuns: an
+// extension's behavior runs in the engine from its Rust crate alone, so a
 // stack's build refuses a TypeScript server on an engine database that
-// composes an extension's, naming it and the project engine crate's addon
-// it waits for (D58).
-func TestATypeScriptEntrypointRefusesAnExtensionsBehavior(t *testing.T) {
+// composes one whose registration names no crate, naming it (D58).
+func TestATypeScriptEntrypointRefusesAnExtensionsBehaviorNoEngineRuns(t *testing.T) {
 	reg, err := publicregistry.Assemble(publicregistry.DefaultNaming(), &stacktest.Extension{}, ratingWithoutACrate{repo: testpaths.RepoRoot(t)})
 	if err != nil {
 		t.Fatal(err)
@@ -158,8 +159,90 @@ func TestATypeScriptEntrypointRefusesAnExtensionsBehavior(t *testing.T) {
 			}
 			continue
 		}
-		if want := "composes acme.Rating, an extension's, which the engine's Node-API addon does not run"; err == nil || !strings.Contains(err.Error(), want) {
+		if want := "whose engine database is desk-db, and no engine can run desk-db's behaviors, so no engine crate is written and an engine refuses the schema: acme.Rating (extension acme) names no Rust crate"; err == nil || !strings.Contains(err.Error(), want) {
 			t.Fatalf("build %s = %v, want it refused saying %q", name, err, want)
+		}
+	}
+}
+
+// ratingWithACrate registers acme.Rating as the acme-schematic example
+// does: its declaration, the Rust crate at crates/behaviors in the project,
+// and the confirm policy its rate operation names a value of.
+type ratingWithACrate struct{ repo string }
+
+func (ratingWithACrate) Name() string { return "acme" }
+
+func (r ratingWithACrate) Register(reg *registry.Registry) error {
+	declaration, err := os.ReadFile(filepath.Join(r.repo, "examples", "acme-schematic", "ext", "rating.behavior.json"))
+	if err != nil {
+		return err
+	}
+	return errors.Join(
+		reg.RegisterBehavior(registry.BehaviorSpec{
+			Extension:   "acme",
+			Rust:        registry.BehaviorRust{Crate: "acme-behaviors", Path: "crates/behaviors", Register: "acme_behaviors::Rating"},
+			Declaration: json.RawMessage(declaration),
+		}),
+		reg.RegisterToolInvocationPolicy(registry.ToolInvocationPolicy{Extension: "acme", Key: "confirm", Values: []string{"never", "always"}, Default: "never"}),
+	)
+}
+
+// TestATypeScriptEntrypointLoadsTheProjectsEngineAddon: the core's addon
+// runs the core's behaviors and the work queue's, so when desk-db's Account
+// composes acme.Rating, whose crate the project holds, desk-db's build
+// writes its engine crate, and desk-ts-api's server, its job and desk-db's
+// runner open the engine naming acme.Rating among its behaviors; each
+// image's engine stage builds the crate's napi member, the project's engine
+// addon, in the core's addon's place, its lock file seeded from the engine
+// workspace's, and names it with SUPERSCHEMATIC_ENGINE_ADDON (D58).
+func TestATypeScriptEntrypointLoadsTheProjectsEngineAddon(t *testing.T) {
+	repo := testpaths.RepoRoot(t)
+	reg, err := publicregistry.Assemble(publicregistry.DefaultNaming(), &stacktest.Extension{}, ratingWithACrate{repo: repo})
+	if err != nil {
+		t.Fatal(err)
+	}
+	repoRoot := t.TempDir()
+	copyTree(t, filepath.Join(repo, "examples", "acme-schematic", "crates", "behaviors"), filepath.Join(repoRoot, "crates", "behaviors"), "target")
+	f := loadTypeScriptEngineFixture(t)
+	f.reg = reg
+	composeOnAccount(f, ir.BehaviorRef{Name: "acme.Rating", Config: json.RawMessage(`{"maxStars":5}`)})
+	f.build(t, repoRoot, tsEngineFakePaths(repoRoot), engineTSOrder...)
+	out := filepath.Join(repoRoot, "schemas", "dist")
+	crate := filepath.Join(out, "engine", "rust", "desk-db")
+	if _, err := os.Stat(filepath.Join(crate, "napi", "Cargo.toml")); err != nil {
+		t.Fatalf("desk-db's build wrote no engine crate with a napi member: %v", err)
+	}
+	addon := naming.Default().RustEngineCrate("desk-db") + "-napi.node"
+	for _, d := range []string{engineTSServer, engineTSJob, engineRunner} {
+		dir := servergen.ServerDir(out, engineTSStack, d)
+		main, err := os.ReadFile(filepath.Join(dir, servergen.TypeScriptMainFile))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(main), `deskDbEngineDocument, 'permission', { behaviors: ['acme.Rating']`) {
+			t.Errorf("%s opens the engine without acme.Rating:\n%s", d, main)
+		}
+		if d == engineTSJob {
+			continue
+		}
+		dockerfile, err := os.ReadFile(filepath.Join(dir, servergen.DockerFile))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, want := range []string{
+			"COPY schemas/dist/engine/rust/desk-db schemas/dist/engine/rust/desk-db\n",
+			"COPY crates/behaviors crates/behaviors\n",
+			"cp runtime/engine/rust/Cargo.lock schemas/dist/engine/rust/desk-db/Cargo.lock",
+			"cargo build --release --manifest-path schemas/dist/engine/rust/desk-db/napi/Cargo.toml",
+			"COPY --from=engine /native/" + addon + " /engine/" + addon + "\n",
+			"ENV SUPERSCHEMATIC_ENGINE_ADDON=/engine/" + addon + "\n",
+		} {
+			if !strings.Contains(string(dockerfile), want) {
+				t.Errorf("%s's Dockerfile lacks %q:\n%s", d, want, dockerfile)
+			}
+		}
+		if strings.Contains(string(dockerfile), "superschematic-engine-addon") {
+			t.Errorf("%s's Dockerfile builds the core's addon beside the project's:\n%s", d, dockerfile)
 		}
 	}
 }
@@ -549,19 +632,6 @@ func TestTheTypeScriptEngineDockerfileBuildsAnImageThatServes(t *testing.T) {
 	copyTree(t, local.EngineTypeScript, filepath.Join(repoRoot, "runtime", "engine", "typescript"), "dist", "native")
 	for _, dir := range []string{"runtime/engine/rust", "runtime/engine-workqueue/rust", "runtime/schema/rust-ir", "runtime/schema/rust", "runtime/versiongraph/rust-engine", "runtime/versiongraph/rust"} {
 		copyTree(t, filepath.Join(repo, filepath.FromSlash(dir)), filepath.Join(repoRoot, filepath.FromSlash(dir)))
-	}
-	// The engine's package depends on the version graph's by a path beside
-	// it, which the workspace's root overrides with this one.
-	versionGraph := filepath.Join(repoRoot, "runtime", "versiongraph", "typescript")
-	if err := os.MkdirAll(versionGraph, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	manifest, err := os.ReadFile(filepath.Join(local.VersionGraphTypeScript, "package.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(versionGraph, "package.json"), manifest, 0o644); err != nil {
-		t.Fatal(err)
 	}
 	f := loadTypeScriptEngineFixture(t)
 	f.build(t, repoRoot, tsEngineFakePaths(repoRoot), engineTSOrder...)

@@ -17,7 +17,7 @@
 // signal exits at once.
 
 import { createLogger, loadDatabase, type Database, type Logger } from '@superschematic/http-runtime';
-import { openEngineInBackground, type AsyncNativeEngine, type EngineBackground, type NativeEngineOptions, type Principal } from '@superschematic/engine/server';
+import { openEngineInBackground, type AsyncEngine, type EngineBackground, type EngineOptions, type Principal } from '@superschematic/engine/server';
 import { engineDocument as deskDbEngineDocument } from '@schemas/desk-db-types/engine';
 
 const logger = createLogger({ stack: 'desk-ts-stack', runner: 'desk-db-engine-runner' });
@@ -76,13 +76,13 @@ async function main(): Promise<void> {
  */
 interface EngineDocumentOf {
   readonly namespace: string;
-  readonly tools: NativeEngineOptions['tools'];
-  readonly metaSchema: NativeEngineOptions['metaSchema'];
+  readonly tools: EngineOptions['tools'];
+  readonly metaSchema: EngineOptions['metaSchema'];
   readonly schemas: readonly unknown[];
 }
 
 /** What runs on an engine once it opens, before it is handed out: the runner's start. */
-type EngineSetup = (engine: AsyncNativeEngine, document: EngineDocumentOf, log: Logger) => Promise<void>;
+type EngineSetup = (engine: AsyncEngine, document: EngineDocumentOf, log: Logger) => Promise<void>;
 
 /**
  * An engine opened in the background, and what serves its database's
@@ -97,9 +97,11 @@ interface OpenedEngine {
 /**
  * Opens, in the background, the engine of the engine database service on
  * the database the field named field holds, db, with document, its engine
- * document, and the access policy policy. behaviors are the work queue's
- * the engine types compose, which the engine's addon carries and registers
- * by name after the core's. runner, for an engine's runner, is the
+ * document, and the access policy policy. behaviors are the ones the
+ * engine types compose beside the core's, which the engine's addon carries
+ * and registers by name after the core's: the work queue's, in the core's
+ * addon, and an extension's, in the project's engine addon, which
+ * SUPERSCHEMATIC_ENGINE_ADDON names. runner, for an engine's runner, is the
  * principal its reactions and schedules act as. setup runs on the engine
  * once it opens; none sets nothing up. Each attempt that fails is logged
  * with the wait before the next.
@@ -109,7 +111,7 @@ async function openEngine(
   field: string,
   db: Database,
   document: EngineDocumentOf,
-  policy: NativeEngineOptions['policy'],
+  policy: EngineOptions['policy'],
   options: { readonly behaviors?: readonly string[]; readonly runner?: Principal; readonly setup?: EngineSetup } = {}
 ): Promise<OpenedEngine> {
   const { url, release } = await engineURL(field, db);
@@ -126,7 +128,7 @@ async function openEngine(
       ...(options.runner !== undefined ? { runner: { principal: options.runner } } : {}),
     },
     {
-      ...(setup !== undefined ? { setup: (engine: AsyncNativeEngine) => setup(engine, document, log) } : {}),
+      ...(setup !== undefined ? { setup: (engine: AsyncEngine) => setup(engine, document, log) } : {}),
       onError: (error, retryMs) => log.warn('engine not open', { error, retry: retryMs / 1000 }),
       onOpen: engine => log.info('engine open', { dialect: engine.dialect }),
     }
@@ -156,7 +158,7 @@ async function engineURL(field: string, db: Database): Promise<{ readonly url: s
 }
 
 /** Starts the engine's runner on its own thread. */
-async function startRunner(engine: AsyncNativeEngine, _document: EngineDocumentOf, log: Logger): Promise<void> {
+async function startRunner(engine: AsyncEngine, _document: EngineDocumentOf, log: Logger): Promise<void> {
   try {
     await engine.runner.start();
   } catch (error) {

@@ -47,9 +47,11 @@ type TypeScriptEngine struct {
 	// holds as its permissions.
 	Types []string
 
-	// Behaviors are the work queue's behaviors the engine types compose,
-	// sorted, which the engine registers by name after the core's: the
-	// engine's addon carries them.
+	// Behaviors are the behaviors the engine types compose beside the
+	// core's, which the engine registers by name after the core's: the
+	// work queue's, sorted, which the core's addon carries, then the
+	// extensions', sorted, which the project's engine crate's addon
+	// carries (its napi member, EngineProject).
 	Behaviors []string
 
 	// Database is the pool's database, whose field the engine opens on.
@@ -172,11 +174,18 @@ func (s *TypeScriptServer) newTypeScriptEngine(d *TypeScriptDatabase, info *apig
 		Types:           slices.Clone(info.Types),
 		Database:        d,
 	}
+	var extensions []string
 	for _, b := range info.Behaviors {
-		if b.Extension == "" && b.Package == registry.WorkQueuePackage {
+		switch {
+		case b.Extension != "":
+			extensions = append(extensions, b.Name)
+		case b.Package == registry.WorkQueuePackage:
 			e.Behaviors = append(e.Behaviors, b.Name)
 		}
 	}
+	slices.Sort(e.Behaviors)
+	slices.Sort(extensions)
+	e.Behaviors = append(e.Behaviors, extensions...)
 	s.Engines = append(s.Engines, e)
 	return e
 }
@@ -223,23 +232,40 @@ func (s *TypeScriptServer) EngineImports() []string {
 			out = append(out, "engineRouteSpecs")
 		}
 	}
-	out = append(out, "type AsyncNativeEngine", "type EngineBackground")
+	out = append(out, "type AsyncEngine", "type EngineBackground")
 	if s.Job == nil && s.Worker == nil && s.Runner == nil {
 		out = append(out, "type EngineHttpOptions")
 	}
-	return append(out, "type NativeEngineOptions", "type Principal")
+	return append(out, "type EngineOptions", "type Principal")
 }
 
 // tsEngineDocker is where a TypeScript entrypoint's checkout Dockerfile
 // builds the engine's Node-API addon from (D58): the engine's npm package,
 // the Cargo workspace beside it, and the crates outside it its manifests
 // reach by path, at their places in the checkout, each relative to the
-// build context.
+// build context; and, for an engine database that composes an extension's
+// behavior, the project's engine crate, whose napi member it builds in the
+// core's addon's place.
 type tsEngineDocker struct {
-	// TypeScript is the engine's package, whose native/ the addon goes in
-	// and whose ./server entry the build emits; Workspace the Cargo
-	// workspace beside it.
+	// TypeScript is the engine's package, whose native/ the core's addon
+	// goes in and whose ./server entry the build emits; Workspace the
+	// Cargo workspace beside it.
 	TypeScript string
 	Workspace  string
 	Crates     []string
+
+	// Project is the project's engine crate, empty for the core's addon;
+	// ProjectCrates the extensions' crates it reaches by path; Addon the
+	// .node file its napi member builds, which the image keeps at
+	// AddonPath and names with SUPERSCHEMATIC_ENGINE_ADDON.
+	Project       string
+	ProjectCrates []string
+	ProjectLib    string
+	Addon         string
+}
+
+// AddonPath is where the image keeps the project's engine addon, which its
+// SUPERSCHEMATIC_ENGINE_ADDON names.
+func (d *tsEngineDocker) AddonPath() string {
+	return "/engine/" + d.Addon
 }

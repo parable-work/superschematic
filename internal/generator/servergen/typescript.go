@@ -157,6 +157,13 @@ type TypeScriptInput struct {
 	// Runner, when set, plans the entrypoint of an engine's runner (D58):
 	// APIs is empty, and Server is the runner's deployable.
 	Runner *TypeScriptRunnerInput
+
+	// EngineProject is the project's engine crate the entrypoint's engine
+	// loads its addon from, nil when the core's addon runs every behavior
+	// its engine database composes (D58): one that composes an extension's
+	// gets the crate's napi member, which the checkout's Dockerfile builds
+	// in the core's addon's place.
+	EngineProject *EngineProject
 }
 
 // TypeScriptServer is a planned TypeScript entrypoint, what the templates
@@ -432,8 +439,8 @@ var tsReserved = []string{
 	"loadCors", "corsHandler", "corsMethods", "matchOperations", "handle",
 	"run", "jobs", "workers", "queue", "stop", "signal", "started", "concurrency", "pools",
 	"postgresQueue", "runWorker", "workerConcurrency",
-	"openEngineInBackground", "engineApp", "engineMcp", "engineRouteSpecs", "AsyncNativeEngine", "EngineBackground",
-	"EngineHttpOptions", "NativeEngineOptions", "Principal", "Logger", "cloudSqlSocket", "loadDatabase",
+	"openEngineInBackground", "engineApp", "engineMcp", "engineRouteSpecs", "AsyncEngine", "EngineBackground",
+	"EngineHttpOptions", "EngineOptions", "Principal", "Logger", "cloudSqlSocket", "loadDatabase",
 	"openEngine", "engineURL", "deployEngine", "startRunner", "engineReady", "mountEngine", "engineStreams", "engines",
 	"EngineDocumentOf", "OpenedEngine", "EngineSetup", "EngineCallers", "ENGINE_TIMEOUT_SECONDS", "principal", "alive",
 	"stopped", "closeEngines",
@@ -922,7 +929,7 @@ func planTypeScriptDocker(in TypeScriptInput, s *TypeScriptServer, dir string) (
 	}
 	d.Include = append(d.Include, d.ScalarTypeScript, d.HTTPRuntime,
 		d.ScalarWorkspace+"/Cargo.toml", d.ScalarWorkspace+"/Cargo.lock", d.ScalarWorkspace+"/crates")
-	if versionGraph := in.Paths.VersionGraphTypeScriptPackage(); versionGraph != "" {
+	if versionGraph := in.Paths.VersionGraphTypeScript; versionGraph != "" {
 		// The workspace's root overrides the version-graph runtime too, so
 		// an install reads its manifest, though no server imports it.
 		vg, ok := rel(versionGraph)
@@ -939,13 +946,20 @@ func planTypeScriptDocker(in TypeScriptInput, s *TypeScriptServer, dir string) (
 		if in.Paths.EngineTypeScript == "" {
 			return nil, fmt.Sprintf("the %s opens the engine (D58), and the naming file's [paths] engine_typescript, the engine's npm package, whose Cargo workspace the image builds the engine's Node-API addon from, is unset; set it to a superschematic checkout's runtime/engine/typescript", s.Kind), nil
 		}
-		engine, why := planEngineDocker(in.Paths.EngineTypeScript, nil, root, rel, "the engine's npm package")
+		engine, why := planEngineDocker(in.Paths.EngineTypeScript, in.EngineProject, root, rel, "the engine's npm package")
 		if engine == nil {
 			return nil, why, nil
 		}
 		d.Engine = &tsEngineDocker{TypeScript: engine.Go, Workspace: engine.Workspace, Crates: engine.Crates}
 		d.Include = append(d.Include, engine.Go, engine.Workspace)
 		d.Include = append(d.Include, engine.Crates...)
+		if p := in.EngineProject; p != nil {
+			d.Engine.Project, d.Engine.ProjectCrates = engine.Project, engine.ProjectCrates
+			d.Engine.ProjectLib = "lib" + strings.ReplaceAll(p.Crate+"-napi", "-", "_") + ".so"
+			d.Engine.Addon = p.Crate + "-napi.node"
+			d.Include = append(d.Include, engine.Project)
+			d.Include = append(d.Include, engine.ProjectCrates...)
+		}
 	}
 	slices.Sort(d.Include)
 	d.Include = slices.Compact(d.Include)

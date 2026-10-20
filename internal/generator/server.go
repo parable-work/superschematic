@@ -919,6 +919,12 @@ func (r run) planTypeScriptServer(stackName string, s *ir.ResolvedDeployable, cl
 		if err := r.checkTypeScriptEngine(stackName, s, ref.Name, routes); err != nil {
 			return nil, nil, err
 		}
+		if routes != nil && routes.Engine != nil {
+			what := fmt.Sprintf("stack %s: %s %s serves %s", stackName, s.Kind, s.Name, ref.Name)
+			if err := r.typeScriptEngineProject(what, fmt.Sprintf("stack %s: %s %s", stackName, s.Kind, s.Name), routes.Engine, &in.EngineProject); err != nil {
+				return nil, nil, err
+			}
+		}
 		dir := r.Options.Naming.TypeScriptImplementationDir(r.Options.RepositoryRoot, ref.Name)
 		exists, err := tsrestgen.ImplementationExists(dir)
 		if err != nil {
@@ -1466,18 +1472,12 @@ func (r run) runtimeModules(engine, versionGraph bool) []servergen.Module {
 
 // checkTypeScriptEngine checks what a TypeScript server, job or worker s
 // opens of the engine database of api, which it serves, whose server
-// output is o (D58): its addon is the engine's own, which runs the core's
-// behaviors and the work queue's, so a database that composes an
-// extension's is refused until the project's engine crate builds an addon
-// with it. A server of a public API that authenticates with an
+// output is o (D58): a server of a public API that authenticates with an
 // authenticator of its own gives the engine no end user, and the build
 // says so, as for a Go server.
 func (r run) checkTypeScriptEngine(stackName string, s *ir.ResolvedDeployable, api string, o *apigen.APIOutput) error {
 	if o == nil || o.Engine == nil {
 		return nil
-	}
-	if extension := addonExtensionBehaviors(o.Engine); len(extension) > 0 {
-		return fmt.Errorf("stack %s: %s %s serves %s, whose engine database %s composes %s, an extension's, which the engine's Node-API addon does not run; a project's engine addon, built with it, comes with the project's engine crate's napi member (D58)", stackName, s.Kind, s.Name, api, o.Engine.Database, strings.Join(extension, ", "))
 	}
 	if s.Kind == ir.DeployableServer && o.IsPublic && !o.Auth.Identity {
 		r.Logf("  - server %s: %s authenticates its users with its own authenticate, so the engine of %s it mounts at %s admits service callers alone; authenticate with the user model's identity runtime (D50) to reach it as an end user\n", s.Name, api, o.Engine.Database, o.Engine.Mount)
@@ -1503,8 +1503,10 @@ func (r run) planTypeScriptRunner(stackName string, rn *ir.ResolvedDeployable, c
 	if routes == nil || routes.Engine == nil || routes.Engine.Database != db {
 		return nil, fmt.Errorf("stack %s: runner %s runs the engine of %s, which is not the engine database of %s", stackName, rn.Name, db, api)
 	}
-	if extension := addonExtensionBehaviors(routes.Engine); len(extension) > 0 {
-		return nil, fmt.Errorf("stack %s: runner %s runs the engine of %s, which composes %s, an extension's, which the engine's Node-API addon does not run; a project's engine addon, built with it, comes with the project's engine crate's napi member (D58)", stackName, rn.Name, db, strings.Join(extension, ", "))
+	var project *servergen.EngineProject
+	what := fmt.Sprintf("stack %s: runner %s runs the engine of %s for %s", stackName, rn.Name, db, api)
+	if err := r.typeScriptEngineProject(what, fmt.Sprintf("stack %s: runner %s", stackName, rn.Name), routes.Engine, &project); err != nil {
+		return nil, err
 	}
 	_, config, err := served.typeScriptAPI()
 	if err != nil {
@@ -1534,11 +1536,41 @@ func (r run) planTypeScriptRunner(stackName string, rn *ir.ResolvedDeployable, c
 		Paths:              r.Options.Paths,
 		CloudSQL:           cloudSQL,
 		Runner:             &servergen.TypeScriptRunnerInput{Database: db, Field: field, Engine: routes.Engine},
+		EngineProject:      project,
 	})
 }
 
+// typeScriptEngineProject records, in linked, the project's engine crate
+// of the engine database e as the one whose addon a TypeScript entrypoint
+// loads, when e composes an extension's behavior, which the core's addon
+// does not run (D58): the crate's napi member builds an addon over its
+// behaviors(), which the entrypoint loads in the core's place. The core's
+// addon carries the work queue's behaviors, so a database that composes
+// those alone needs none. what names the entrypoint and what it opens the
+// engine for, who the entrypoint, in the errors: of an extension's
+// behavior whose registration names no Rust crate, or one the project
+// does not hold, which no engine runs; and of a second project, since a
+// process loads one addon in the core's place.
+func (r run) typeScriptEngineProject(what, who string, e *apigen.EngineInfo, linked **servergen.EngineProject) error {
+	if len(addonExtensionBehaviors(e)) == 0 {
+		return nil
+	}
+	project, err := r.projectEngine(what, e.Database)
+	if err != nil {
+		return err
+	}
+	if project == nil {
+		return nil
+	}
+	if *linked != nil && (*linked).Dir != project.Dir {
+		return fmt.Errorf("%s opens the engines of %s and %s, which each compose behaviors only their own project's engine addon runs, and a process loads one addon in the core's place; serve the APIs on them from servers of their own", who, (*linked).Database, project.Database)
+	}
+	*linked = project
+	return nil
+}
+
 // addonExtensionBehaviors are the behaviors an engine database composes
-// that an extension declares, by name: what the engine's Node-API addon,
+// that an extension declares, by name: what the core's Node-API addon,
 // which runs the core's and the work queue's, does not (D58).
 func addonExtensionBehaviors(e *apigen.EngineInfo) []string {
 	var out []string

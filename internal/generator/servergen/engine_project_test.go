@@ -103,7 +103,7 @@ func TestAnEngineNoRustEngineRunsIsRefused(t *testing.T) {
 		t.Errorf("queue-db's build wrote an engine crate: %v", err)
 	}
 	_, err = generator.Run(f.schemas[queueStack], f.configs[queueStack], f.options(repoRoot, fakePaths(repoRoot)))
-	if err == nil || !strings.Contains(err.Error(), "stack queue-stack: server queue-api serves queue-api, whose engine database is queue-db, and the Rust engine cannot run queue-db's behaviors yet, so no engine crate is written: acme.Rating (extension acme) names no Rust crate") {
+	if err == nil || !strings.Contains(err.Error(), "stack queue-stack: server queue-api serves queue-api, whose engine database is queue-db, and no engine can run queue-db's behaviors, so no engine crate is written and an engine refuses the schema: acme.Rating (extension acme) names no Rust crate") {
 		t.Fatalf("the build of queue-stack: %v", err)
 	}
 }

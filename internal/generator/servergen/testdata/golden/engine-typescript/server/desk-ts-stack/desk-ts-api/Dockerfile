@@ -33,14 +33,14 @@
 # Bun release tools.env pins, as a non-root user.
 #
 # The server opens the behavior engine (D58) through the engine's Node-API
-# addon, which no published package ships yet either. The engine stage
-# builds the core's addon (superschematic-engine-napi) for the image's
-# platform from the Cargo workspace beside the engine's package, the
-# naming file's [paths] engine_typescript, with the crates it reaches by
-# path at their places in the checkout. The build stage puts it in the
-# package's native/, where the engine's loader looks for it, and emits the
-# package's ./server entry, which the workspace's root overrides the package
-# with.
+# addon, which the image builds from source for its platform, with the
+# crates the engine's Cargo workspace reaches by path at their places in
+# the checkout: the workspace beside the engine's package, the naming
+# file's [paths] engine_typescript. The engine stage builds the core's
+# addon (superschematic-engine-addon), and the build stage puts it in the
+# package's native/, where the engine's loader looks for it. The build
+# stage emits the package's ./server entry, which the workspace's root
+# overrides the package with.
 
 ARG RUST_VERSION=1.99.0
 ARG BUN_VERSION=1.4.2
@@ -70,14 +70,14 @@ COPY runtime/versiongraph/rust runtime/versiongraph/rust
 COPY third_party/superscalar/Cargo.toml third_party/superscalar/Cargo.toml
 COPY third_party/superscalar/crates third_party/superscalar/crates
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    cargo build --locked --release --manifest-path runtime/engine/rust/Cargo.toml -p superschematic-engine-napi \
+    cargo build --locked --release --manifest-path runtime/engine/rust/Cargo.toml -p superschematic-engine-addon \
     && case "$(uname -m)" in \
       x86_64) triple=linux-x64-gnu ;; \
       aarch64) triple=linux-arm64-gnu ;; \
       *) echo "the engine builds no Node-API addon for linux/$(uname -m)" >&2; exit 1 ;; \
     esac \
     && mkdir /native \
-    && cp runtime/engine/rust/target/release/libsuperschematic_engine_napi.so "/native/superschematic-engine.$triple.node"
+    && cp runtime/engine/rust/target/release/libsuperschematic_engine_addon.so "/native/superschematic-engine.$triple.node"
 
 FROM oven/bun:${BUN_VERSION} AS build
 WORKDIR /src

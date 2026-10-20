@@ -15,7 +15,6 @@
   "overrides": {
     "@superschematic/engine": "file:../../runtime/engine/typescript",
     "@superschematic/http-runtime": "file:../../runtime/http/typescript",
-    "@superschematic/versiongraph": "file:../../runtime/versiongraph/typescript",
     "superscalar": "file:../../third_party/superscalar/bindings/typescript"
   }
 }

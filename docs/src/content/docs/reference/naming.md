@@ -563,14 +563,14 @@ engine through its Node-API addon, and depends on it with `*`; with this
 key set, the output root's Bun workspace overrides that with a `file:`
 path to the checkout, which the install copies with its `dist/` and the
 addon in its `native/`, so build both first (`bun run build` there, and
-`scripts/engine-napi.sh`). The workspace overrides the version graph's
-package too, which the engine's package depends on by a path in its
-checkout: with `paths.versiongraph_typescript` when it is set, else with
-the checkout's beside it. The server's Dockerfile builds the addon from
-the Cargo workspace beside the package (`../rust`), with the crates it
-reaches by path at their places in the same checkout, and the `./server`
-entry's `dist/`. Unset, such a server gets no Dockerfile, and the install
-fetches the package, which fails until it is published.
+`scripts/engine-napi.sh`). The server's Dockerfile builds the core's
+addon from the Cargo workspace beside the package (`../rust`), with the
+crates it reaches by path at their places in the same checkout, and the
+`./server` entry's `dist/`; on an engine database that composes an
+extension's behavior it builds the project's engine crate's `napi`
+member instead and names it with `SUPERSCHEMATIC_ENGINE_ADDON`. Unset,
+such a server gets no Dockerfile, and the install fetches the package
+from the registry.
 
 ### `paths.versiongraph_python`
 

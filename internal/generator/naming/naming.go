@@ -457,11 +457,11 @@ type PathsConfig struct {
 	// @superschematic/engine (its package.json), whose ./server entry a
 	// TypeScript server whose API's database holds engine types opens the
 	// engine with, through the engine's Node-API addon. The output root's
-	// Bun workspace overrides the servers' dependency on it with it, and
-	// the version graph's package with the checkout's beside it, which the
-	// engine's package depends on by path, unless versiongraph_typescript
-	// names another. A server's checkout Dockerfile builds the addon from
-	// the Cargo workspace beside it (the package's ../rust).
+	// Bun workspace overrides the servers' dependency on it with it. A
+	// server's checkout Dockerfile builds the core's addon from the Cargo
+	// workspace beside it (the package's ../rust), or the project's
+	// engine crate's napi member for a database that composes an
+	// extension's behavior.
 	EngineTypeScript string `toml:"engine_typescript"`
 	// VersionGraphPython holds the version graph's Python package.
 	VersionGraphPython string `toml:"versiongraph_python"`
@@ -544,21 +544,6 @@ func (n Naming) LocalPaths(repoRoot string) LocalPaths {
 		Ptr:                    resolve(n.Paths.Ptr),
 		BuildContext:           resolve(n.Paths.BuildContext),
 	}
-}
-
-// VersionGraphTypeScriptPackage is the version graph's npm package the
-// output root's Bun workspace overrides its dependents' dependency with:
-// [paths] versiongraph_typescript, else, when [paths] engine_typescript
-// names the engine's package, the checkout's beside it
-// (runtime/versiongraph/typescript), which the engine's package depends
-// on by path (D58); "" when neither is set. A path dependency inside a
-// package the workspace installs from a path resolves against the
-// workspace, not the package, so the workspace names it.
-func (p LocalPaths) VersionGraphTypeScriptPackage() string {
-	if p.VersionGraphTypeScript != "" || p.EngineTypeScript == "" {
-		return p.VersionGraphTypeScript
-	}
-	return filepath.Join(filepath.Dir(filepath.Dir(p.EngineTypeScript)), "versiongraph", "typescript")
 }
 
 // BuildContext returns the build context of the stack's server images:

@@ -33,10 +33,7 @@ import (
 // A package depends on superscalar, the HTTP runtime, the version-graph
 // runtime and the behavior engine (D58) by name. Where [paths] names a
 // checkout of one, the root overrides every dependency on it with a file:
-// path from the root. The engine's package depends on the version graph's
-// by a path in its checkout, which an install of the engine from that
-// checkout resolves against the root, so the root names the version
-// graph's beside the engine's when [paths] names no other. A
+// path from the root. A
 // member's own file: spec would do the same only from the member's depth,
 // which Bun 1.4 reads wrongly once members sit at different depths: a
 // types package at types/typescript/<name>, an API package at api/<name>,
@@ -161,11 +158,7 @@ func (w WorkspaceRoot) Manifest() (string, error) {
 	for _, local := range []struct{ pkg, dir string }{
 		{n.ScalarNpmPackage, w.Paths.ScalarTypeScript},
 		{n.HTTPRuntimeNpmPackage, w.Paths.HTTPRuntimeTypeScript},
-		// The engine's package depends on the version graph's by a path in
-		// its checkout, which an install from the engine's checkout
-		// resolves against the workspace: the root names the checkout's
-		// (D58).
-		{n.VersionGraphNpmPackage, w.Paths.VersionGraphTypeScriptPackage()},
+		{n.VersionGraphNpmPackage, w.Paths.VersionGraphTypeScript},
 		{n.EngineNpmPackage, w.Paths.EngineTypeScript},
 	} {
 		rel, err := naming.PhysicalRelPath(w.OutputRoot, local.dir)
