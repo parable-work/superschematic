@@ -32,17 +32,23 @@
 //! (D61, amended): a search box, a "Find" button and a select of the items
 //! the box's text finds, the first page of the search, the value held
 //! among them by its label. `<form>_choices` gives each picker its `Pick`:
-//! a filter's every picker searches its text, a post's only the one whose
-//! "Find" it pressed (`find:<control>`), and the rest list the first page.
-//! One listing a distinct text, at most `MAX_LOOKUP_CALLS` texts a target
-//! a render, and the values held named through the lookup, as a record's
-//! are. A picker is a shard, `<target>_pick`, at
+//! every picker searches the text its box holds, a filter's as its query
+//! sends it and a post's as it posts it, so the box always says what its
+//! select lists. One listing a distinct text, and at most
+//! `MAX_LOOKUP_CALLS` distinct texts a request through one options
+//! operation, every picker of every form and target counted together; a
+//! text past them lists the first page with `TOO_MANY_SEARCHES`, but the
+//! picker whose "Find" a post pressed (`find:<control>`) is searched past
+//! them. The values held are named through the lookup, as a record's are.
+//! A picker is a shard, `<target>_pick`, at
 //! `/_superschematic/fixture-console-api/_pick/<target>`: with Topcoat's runtime
-//! it renders again as the reader types, and without it "Find" submits
-//! the form. The shard meets its options operation's rate limit and
-//! timeout, as a page that calls it does.
+//! it renders again as the reader types and each time the reader presses
+//! "Find", and without it "Find" submits the form. The shard meets its
+//! options operation's rate limit and timeout, as a page that calls it
+//! does.
 
 use std::collections::BTreeSet;
+use std::sync::{Mutex, PoisonError};
 
 use crate::api::runtime::page::PageRequest;
 use crate::api::runtime::ApiError;
@@ -58,13 +64,38 @@ use topcoat::view::{View, view};
 
 /// The most calls one target's lookup makes for one `<record>_labels`
 /// call, which names the values of the records it is given; a value past
-/// them shows as it is. A form's pickers of one target search at most
-/// this many texts a render (D61, amended).
+/// them shows as it is. A request's pickers search at most this many
+/// distinct texts through one options operation (D61, amended).
 pub const MAX_LOOKUP_CALLS: usize = 10;
 
-/// What a picker past a render's `MAX_LOOKUP_CALLS` searches says, beside
+/// What a picker past a request's `MAX_LOOKUP_CALLS` searches says, beside
 /// the first page it lists.
 const TOO_MANY_SEARCHES: &str = "Too many searches at once; search this one again";
+
+/// The distinct texts a request's pickers searched through one options
+/// operation (D61, amended), which its `<operation>_searched` keeps for the
+/// request: at most `MAX_LOOKUP_CALLS`, past which only a pressed "Find"'s
+/// text is searched.
+#[derive(Debug, Default)]
+struct Searched(Mutex<BTreeSet<String>>);
+
+impl Searched {
+    /// Whether a picker searches `text`: one the request searched already,
+    /// one of its first `MAX_LOOKUP_CALLS` distinct texts, or the text of
+    /// the picker whose "Find" the reader pressed, `pressed`, which counts
+    /// but is searched past them.
+    fn admits(&self, text: &str, pressed: bool) -> bool {
+        let mut searched = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        if searched.contains(text) {
+            return true;
+        }
+        if searched.len() >= MAX_LOOKUP_CALLS && !pressed {
+            return false;
+        }
+        searched.insert(text.to_owned());
+        true
+    }
+}
 
 /// A place a record shows a reference: its path, as `Choices` names it, and
 /// its JSON keys from the record's root.
@@ -221,6 +252,14 @@ async fn product_list_products_search(cx: &Cx, text: &str) -> Option<Result<List
     }
 }
 
+/// The distinct texts the request's pickers searched through
+/// product.listProducts, every target's and every form's, kept for the request
+/// (`#[memoize]`), so one `MAX_LOOKUP_CALLS` caps them all (D61, amended).
+#[memoize]
+fn product_list_products_searched(cx: &Cx) -> Searched {
+    Searched::default()
+}
+
 /// product.listProducts narrowed by its lookup, `ids`, to `values`, its items
 /// as JSON, kept for the request (`#[memoize]`). None when no value decodes as
 /// the argument's, or the caller may not call it, or the call fails.
@@ -259,22 +298,20 @@ async fn product_target_labels(cx: &Cx, values: &BTreeSet<String>) -> Vec<Choice
 }
 
 /// The picks of controls that refer to Product (D61, amended), one per `(value,
-/// text, search)` wanted: when `search`, the items `text` finds through
-/// product.listProducts's `q`, else the first page of them all; the first
-/// `MAX_LOOKUP_CALLS` distinct texts are searched, one listing each, and a text
-/// past them lists the first page with `TOO_MANY_SEARCHES`. The value held is
-/// always an option, named by its name through `product_target_labels`, which
-/// names every value no match holds at once. None for each when the caller may
-/// not list the items or the call fails.
+/// text, pressed)` wanted: the items `text` finds through
+/// product.listProducts's `q`, the first page of them all for an empty one, one
+/// listing a distinct text. The request searches at most `MAX_LOOKUP_CALLS`
+/// distinct texts through it, counted by `product_list_products_searched` for
+/// every picker it lists; a text past them lists the first page with
+/// `TOO_MANY_SEARCHES`, unless `pressed` says its "Find" is the one the reader
+/// pressed. The value held is always an option, named by its name through
+/// `product_target_labels`, which names every value no match holds at once.
+/// None for each when the caller may not list the items or the call fails.
 async fn product_target_picks(cx: &Cx, wanted: &[(String, String, bool)]) -> Vec<Option<Pick>> {
-    let mut searched: Vec<&str> = Vec::new();
+    let searched = product_list_products_searched(cx);
     let mut found = Vec::with_capacity(wanted.len());
-    for (_, text, search) in wanted {
-        let text = if *search { text.as_str() } else { "" };
-        let capped = !text.is_empty() && !searched.contains(&text) && searched.len() >= MAX_LOOKUP_CALLS;
-        if !text.is_empty() && !capped && !searched.contains(&text) {
-            searched.push(text);
-        }
+    for (_, text, pressed) in wanted {
+        let capped = !text.is_empty() && !searched.admits(text, *pressed);
         found.push(match product_list_products_search(cx, if capped { "" } else { text }).await {
             None => None,
             Some(Ok(listed)) => Some((choices_of(&listed.items, "id", Some("name")), listed.more, capped.then(|| TOO_MANY_SEARCHES.to_owned()))),
@@ -309,10 +346,12 @@ async fn product_target_picks(cx: &Cx, wanted: &[(String, String, bool)]) -> Vec
 /// The picker of a control that refers to Product (D61, amended): a search box
 /// of `pick`'s text, a "Find" button and a select of its options, the value
 /// held selected, a note when more match and the search's refusal. A shard:
-/// when the app loads Topcoat's runtime, the box's text renders it again as the
-/// reader types, through `product_target_picks`, the value the select holds
-/// kept; without the runtime it renders in place, and "Find" submits its form.
-/// A caller who may not list the items gets the plain control and the value.
+/// when the app loads Topcoat's runtime, it renders again through
+/// `product_target_picks`, the value the select holds kept, as the reader types
+/// and each time the reader presses "Find", the text unchanged too, so a pick
+/// past the request's `MAX_LOOKUP_CALLS` searches; without the runtime it
+/// renders in place, and "Find" submits its form. A caller who may not list the
+/// items gets the plain control and the value.
 #[shard("/_superschematic/fixture-console-api/_pick/product")]
 pub async fn product_pick(cx: &Cx, control: PickControl, pick: Pick) -> topcoat::Result<impl View> {
     let typed = pick.text.clone();
@@ -321,9 +360,14 @@ pub async fn product_pick(cx: &Cx, control: PickControl, pick: Pick) -> topcoat:
     let value = signal(cx, move || held);
     // The reader typed, so the shard searches what the box holds.
     let searched = signal(cx, || false);
+    // How many times the reader pressed "Find": tracked, so each press
+    // renders the shard again and searches the box's text, the same text
+    // too.
+    let presses = signal(cx, || 0_u32);
     let typed = text.get();
+    let pressed = presses.get() > 0;
     let held = value.get_untracked();
-    let pick = if searched.get_untracked() {
+    let pick = if pressed || searched.get_untracked() {
         product_target_picks(cx, &[(held.clone(), typed.clone(), true)]).await.pop().flatten()
     } else {
         Some(pick)
@@ -342,12 +386,12 @@ pub async fn product_pick(cx: &Cx, control: PickControl, pick: Pick) -> topcoat:
                     if control.post {
                         <button type="submit" name="_action" value=(find) formnovalidate=(true) @click=$(|e: Event| {
                             e.prevent_default();
-                            searched.set(true)
+                            presses.increment()
                         })>"Find"</button>
                     } else {
                         <button type="submit" formnovalidate=(true) @click=$(|e: Event| {
                             e.prevent_default();
-                            searched.set(true)
+                            presses.increment()
                         })>"Find"</button>
                     }
                     <select id=(control.id.clone()) name=(control.name.clone()) required=(control.required) aria-invalid=(invalid) @change=$(|e: Event| value.set(e.target.value))>
@@ -394,22 +438,21 @@ async fn product_by_sku_target_labels(cx: &Cx, values: &BTreeSet<String>) -> Vec
 }
 
 /// The picks of controls that refer to Product (D61, amended), one per `(value,
-/// text, search)` wanted: when `search`, the items `text` finds through
-/// product.listProducts's `q`, else the first page of them all; the first
-/// `MAX_LOOKUP_CALLS` distinct texts are searched, one listing each, and a text
-/// past them lists the first page with `TOO_MANY_SEARCHES`. The value held is
-/// always an option, named by its name through `product_by_sku_target_labels`,
-/// which names every value no match holds at once. None for each when the
-/// caller may not list the items or the call fails.
+/// text, pressed)` wanted: the items `text` finds through
+/// product.listProducts's `q`, the first page of them all for an empty one, one
+/// listing a distinct text. The request searches at most `MAX_LOOKUP_CALLS`
+/// distinct texts through it, counted by `product_list_products_searched` for
+/// every picker it lists; a text past them lists the first page with
+/// `TOO_MANY_SEARCHES`, unless `pressed` says its "Find" is the one the reader
+/// pressed. The value held is always an option, named by its name through
+/// `product_by_sku_target_labels`, which names every value no match holds at
+/// once. None for each when the caller may not list the items or the call
+/// fails.
 async fn product_by_sku_target_picks(cx: &Cx, wanted: &[(String, String, bool)]) -> Vec<Option<Pick>> {
-    let mut searched: Vec<&str> = Vec::new();
+    let searched = product_list_products_searched(cx);
     let mut found = Vec::with_capacity(wanted.len());
-    for (_, text, search) in wanted {
-        let text = if *search { text.as_str() } else { "" };
-        let capped = !text.is_empty() && !searched.contains(&text) && searched.len() >= MAX_LOOKUP_CALLS;
-        if !text.is_empty() && !capped && !searched.contains(&text) {
-            searched.push(text);
-        }
+    for (_, text, pressed) in wanted {
+        let capped = !text.is_empty() && !searched.admits(text, *pressed);
         found.push(match product_list_products_search(cx, if capped { "" } else { text }).await {
             None => None,
             Some(Ok(listed)) => Some((choices_of(&listed.items, "sku", Some("name")), listed.more, capped.then(|| TOO_MANY_SEARCHES.to_owned()))),
@@ -444,11 +487,12 @@ async fn product_by_sku_target_picks(cx: &Cx, wanted: &[(String, String, bool)])
 /// The picker of a control that refers to Product (D61, amended): a search box
 /// of `pick`'s text, a "Find" button and a select of its options, the value
 /// held selected, a note when more match and the search's refusal. A shard:
-/// when the app loads Topcoat's runtime, the box's text renders it again as the
-/// reader types, through `product_by_sku_target_picks`, the value the select
-/// holds kept; without the runtime it renders in place, and "Find" submits its
-/// form. A caller who may not list the items gets the plain control and the
-/// value.
+/// when the app loads Topcoat's runtime, it renders again through
+/// `product_by_sku_target_picks`, the value the select holds kept, as the
+/// reader types and each time the reader presses "Find", the text unchanged
+/// too, so a pick past the request's `MAX_LOOKUP_CALLS` searches; without the
+/// runtime it renders in place, and "Find" submits its form. A caller who may
+/// not list the items gets the plain control and the value.
 #[shard("/_superschematic/fixture-console-api/_pick/product-by-sku")]
 pub async fn product_by_sku_pick(cx: &Cx, control: PickControl, pick: Pick) -> topcoat::Result<impl View> {
     let typed = pick.text.clone();
@@ -457,9 +501,14 @@ pub async fn product_by_sku_pick(cx: &Cx, control: PickControl, pick: Pick) -> t
     let value = signal(cx, move || held);
     // The reader typed, so the shard searches what the box holds.
     let searched = signal(cx, || false);
+    // How many times the reader pressed "Find": tracked, so each press
+    // renders the shard again and searches the box's text, the same text
+    // too.
+    let presses = signal(cx, || 0_u32);
     let typed = text.get();
+    let pressed = presses.get() > 0;
     let held = value.get_untracked();
-    let pick = if searched.get_untracked() {
+    let pick = if pressed || searched.get_untracked() {
         product_by_sku_target_picks(cx, &[(held.clone(), typed.clone(), true)]).await.pop().flatten()
     } else {
         Some(pick)
@@ -478,12 +527,12 @@ pub async fn product_by_sku_pick(cx: &Cx, control: PickControl, pick: Pick) -> t
                     if control.post {
                         <button type="submit" name="_action" value=(find) formnovalidate=(true) @click=$(|e: Event| {
                             e.prevent_default();
-                            searched.set(true)
+                            presses.increment()
                         })>"Find"</button>
                     } else {
                         <button type="submit" formnovalidate=(true) @click=$(|e: Event| {
                             e.prevent_default();
-                            searched.set(true)
+                            presses.increment()
                         })>"Find"</button>
                     }
                     <select id=(control.id.clone()) name=(control.name.clone()) required=(control.required) aria-invalid=(invalid) @change=$(|e: Event| value.set(e.target.value))>
@@ -532,10 +581,11 @@ pub(crate) async fn supplier_target_label(cx: &Cx, value: &str) -> Option<String
 /// The options of each control of `OrderAddLineArgsForm` that refers to an
 /// item, by its path, under `choices`, the app's, which win where they name the
 /// control: `productId` (Product). A picker's control has its pick by its name,
-/// from `form`: the items the text of the picker whose "Find" the post pressed
-/// finds, and the first page for the others, the values held among them (D61,
-/// amended). A control keeps its own when the caller may not list the items,
-/// and one that does not pick when more follow than a page holds.
+/// from `form`: the items its text finds, as the post sends it, the text of the
+/// picker whose "Find" it pressed searched past the request's
+/// `MAX_LOOKUP_CALLS`, the values held among them (D61, amended). A control
+/// keeps its own when the caller may not list the items, and one that does not
+/// pick when more follow than a page holds.
 pub async fn order_add_line_args_form_choices(cx: &Cx, form: &OrderAddLineArgsForm, choices: Choices) -> Choices {
     let mut found = Choices::new();
     {
@@ -560,11 +610,11 @@ pub async fn order_add_line_args_form_choices(cx: &Cx, form: &OrderAddLineArgsFo
 /// The options of each control of `OrderInputForm` that refers to an item, by
 /// its path, under `choices`, the app's, which win where they name the control:
 /// `lines.productId` (Product), `giftSku` (Product). A picker's control has its
-/// pick by its name, from `form`: the items the text of the picker whose "Find"
-/// the post pressed finds, and the first page for the others, the values held
-/// among them (D61, amended). A control keeps its own when the caller may not
-/// list the items, and one that does not pick when more follow than a page
-/// holds.
+/// pick by its name, from `form`: the items its text finds, as the post sends
+/// it, the text of the picker whose "Find" it pressed searched past the
+/// request's `MAX_LOOKUP_CALLS`, the values held among them (D61, amended). A
+/// control keeps its own when the caller may not list the items, and one that
+/// does not pick when more follow than a page holds.
 pub async fn order_input_form_choices(cx: &Cx, form: &OrderInputForm, choices: Choices) -> Choices {
     let mut found = Choices::new();
     {
@@ -610,9 +660,10 @@ pub async fn order_input_form_choices(cx: &Cx, form: &OrderInputForm, choices: C
 /// The options of each control of `OrderListOrdersArgsForm` that refers to an
 /// item, by its path, under `choices`, the app's, which win where they name the
 /// control: `productId` (Product). A picker's control has its pick by its name,
-/// from `form`: the items each picker's text finds, the values held among them
-/// (D61, amended). A control keeps its own when the caller may not list the
-/// items, and one that does not pick when more follow than a page holds.
+/// from `form`: the items its text finds, as the query sends it, the values
+/// held among them (D61, amended). A control keeps its own when the caller may
+/// not list the items, and one that does not pick when more follow than a page
+/// holds.
 pub async fn order_list_orders_args_form_choices(cx: &Cx, form: &OrderListOrdersArgsForm, choices: Choices) -> Choices {
     let mut found = Choices::new();
     {
@@ -623,7 +674,7 @@ pub async fn order_list_orders_args_form_choices(cx: &Cx, form: &OrderListOrders
         }
         let wanted: Vec<(String, String, bool)> = controls
             .iter()
-            .map(|(name, value)| (value.clone().unwrap_or_default(), form.finds.text(name).to_owned(), true))
+            .map(|(name, value)| (value.clone().unwrap_or_default(), form.finds.text(name).to_owned(), false))
             .collect();
         for ((name, _), pick) in controls.into_iter().zip(product_target_picks(cx, &wanted).await) {
             if let Some(pick) = pick {

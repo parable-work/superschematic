@@ -39,11 +39,15 @@ const consoleService = "fixture-console-api"
 // picker (D61, amended) on the new page, the app's own page, an action's
 // form and the orders' filter: a search box, a Find after the hidden
 // submit and a select of the first page of the matches, from one listing
-// a distinct text a render, the value held among them named through the
+// a distinct text a request, the value held among them named through the
 // lookup. A filter's Find searches by GET, a post's renders the form again
-// as sent, 200, searching only the text it pressed, Enter still submits,
-// a text past the search's maxLength shows the route's message, and the
-// shard renders what a typed text finds with the value kept. A record's
+// as sent, 200, every picker's text searched, as a row button's post and
+// a refused one do, a removed line's text going with it, Enter still
+// submits, a text past the search's maxLength shows the route's message,
+// and the shard renders what a typed text finds with the value kept, and
+// again for each press of its Find. A unit test of references.rs,
+// referencesUnitTest, holds a request to MAX_LOOKUP_CALLS distinct texts
+// through listProducts, a pressed Find's past them. A record's
 // value is named by its item's label through the lookup, one call a
 // render, in chunks of its listMax when more, or from the listing for a
 // reference by sku; a caller who may not list the items gets the plain
@@ -67,8 +71,40 @@ const consoleService = "fixture-console-api"
 // a cursor of another sort are the route's 400, and a section's table has
 // no header links.
 func TestTheConsolePagesPicksAndSearches(t *testing.T) {
-	cargoTestCrate(t, consoleService, consoleAppTest)
+	cargoTestCrateWith(t, consoleService, consoleAppTest, crateOptions{appends: map[string]string{"src/references.rs": referencesUnitTest}})
 }
+
+// referencesUnitTest is appended to fixture-console-api's
+// src/references.rs, under cargo test alone: a request searches at most
+// MAX_LOOKUP_CALLS distinct texts through listProducts, every call of its
+// memo counting together, a text searched already and a pressed Find's
+// text past them, and another request counts again (D61, amended). The
+// pages' tests cannot post that many texts, since an order holds at most
+// three lines and a gift.
+const referencesUnitTest = `
+#[cfg(test)]
+mod searched_tests {
+    use super::*;
+
+    #[test]
+    fn a_request_searches_at_most_max_lookup_calls_texts_through_one_listing() {
+        let cx = Cx::default();
+        let searched = product_list_products_searched(&cx);
+        for i in 0..MAX_LOOKUP_CALLS {
+            assert!(searched.admits(&format!("text {i}"), false), "text {i}");
+        }
+        assert!(!searched.admits("one too many", false), "a text past the cap");
+        assert!(searched.admits("text 0", false), "a text the request searched");
+        assert!(searched.admits("pressed", true), "a pressed Find's text");
+        assert!(searched.admits("pressed", false), "a text a pressed Find searched");
+        // Each picker's call is the request's one memo: the product's
+        // target and the product by sku's count together.
+        assert!(!product_list_products_searched(&cx).admits("one too many", false));
+        // Another request counts again.
+        assert!(product_list_products_searched(&Cx::default()).admits("one too many", false));
+    }
+}
+`
 
 // TestTheCoreFixturesPageAndRefer builds the core's fixture-paged-api,
 // whose tags are a page of strings and whose items a page with a filter,
@@ -336,10 +372,14 @@ func TestReferenceFunctionsAreNamedApart(t *testing.T) {
 // TestPickersAreWrittenForSearchingOptions reads fixture-console-api's
 // crate, whose listProducts searches (D61, amended): each reference to
 // Product is a picker, its source's picks and its shard at
-// /_superschematic/<service>/_pick/<target>; its form holds the pickers'
-// texts and a post's Find acts on it after the hidden submit; a filter's
-// Find sends its query; and the ids argument, a query list whose controls
-// share a name, stays a select of the options.
+// /_superschematic/<service>/_pick/<target>, whose Find counts its presses
+// in a signal the shard reads tracked, so each press renders it again; the
+// picks of both of Product's sources count their texts in one memo of
+// listProducts' for the request; its form holds the pickers' texts,
+// numbered again as a removed row's are, and a post's Find acts on it
+// after the hidden submit; a filter's Find sends its query; and the ids
+// argument, a query list whose controls share a name, stays a select of
+// the options.
 func TestPickersAreWrittenForSearchingOptions(t *testing.T) {
 	files, _ := readCrate(t, registry.DefaultNaming(), consoleService, livePagesOutputs())
 	for file, wants := range map[string][]string{
@@ -353,8 +393,12 @@ func TestPickersAreWrittenForSearchingOptions(t *testing.T) {
 			"            for (i0, row0) in form.lines.iter().enumerate() {\n                let name = format!(\"lines[{i0}].productId\");",
 			`controls.push(("giftSku".to_owned(), form.gift_sku.clone()));`,
 			"form.finds.text(name).to_owned(), form.finds.pressed(name))",
-			"form.finds.text(name).to_owned(), true)",
+			"form.finds.text(name).to_owned(), false)",
 			`found = found.with("ids", pairs(&options));`,
+			"#[memoize]\nfn product_list_products_searched(cx: &Cx) -> Searched {",
+			"let capped = !text.is_empty() && !searched.admits(text, *pressed);",
+			"    let presses = signal(cx, || 0_u32);\n    let typed = text.get();\n    let pressed = presses.get() > 0;\n    let held = value.get_untracked();\n    let pick = if pressed || searched.get_untracked() {",
+			"formnovalidate=(true) @click=$(|e: Event| {\n                            e.prevent_default();\n                            presses.increment()\n                        })>\"Find\"</button>",
 		},
 		"choices.rs": {
 			"pub struct Pick {",
@@ -367,6 +411,8 @@ func TestPickersAreWrittenForSearchingOptions(t *testing.T) {
 			"    pub finds: Finds,\n",
 			`finds: Finds::from_posted(posted.get("_find")),`,
 			"        if let Some(name) = action.strip_prefix(\"find:\") {\n            self.finds.pressed = Some(name.to_owned());",
+			"    fn removed(&mut self, path: &[Segment]) {",
+			"        self.finds.removed(&path);\n        Some(path)",
 			`Some(pick) => product_pick(control: pick_control(&name, &id, true, errors.invalid(&name), row0.product_id.as_deref(), true), pick: pick.clone()),`,
 			`Some(pick) => product_pick(control: pick_control("productId", "order-list-orders-product-id", false, errors.invalid("productId"), form.product_id.as_deref(), false), pick: pick.clone()),`,
 		},
@@ -379,6 +425,15 @@ func TestPickersAreWrittenForSearchingOptions(t *testing.T) {
 				t.Errorf("%s lacks %q", file, want)
 			}
 		}
+	}
+	// Both of Product's sources count their texts in listProducts' memo,
+	// and Find sets no searched signal, which the shard reads untracked.
+	references := files["references.rs"]
+	if n := strings.Count(references, "    let searched = product_list_products_searched(cx);\n"); n != 2 {
+		t.Errorf("references.rs counts listProducts' texts in %d picks, want 2 (product's and product-by-sku's)", n)
+	}
+	if strings.Contains(references, "searched.set(true)\n                        })>\"Find\"") {
+		t.Error("a Find sets the searched signal, which renders nothing again")
 	}
 	// The products' filter's ids keep their select, and need no hidden
 	// submit, nor its form a finds.
@@ -1683,8 +1738,8 @@ async fn a_picker_finds_by_get_and_by_post() {
     store.calls();
 
     // A post's Find renders the form again as it was sent, 200, without
-    // the operation: the pressed picker's text searched, the other's kept
-    // in its box over the first page.
+    // the operation: every picker's text searched, the pressed one's and
+    // the other's, so each box says what its select lists.
     let before = store.orders.lock().unwrap().len();
     let body = "lines[0].productId=&lines[0].quantity=2&note=soon&giftSku=&_find.lines[0].productId=dr&_find.giftSku=an&_action=find:lines[0].productId";
     let again = post(&app, "/console/orders/new", "clerk", body).await;
@@ -1695,11 +1750,26 @@ async fn a_picker_finds_by_get_and_by_post() {
     assert_eq!(labels(line), ["Drum"], "{line}");
     let gift = picker(&again.html, "giftSku");
     assert!(gift.contains(r#"name="_find.giftSku" value="an""#), "{gift}");
-    assert_eq!(labels(gift), ["Anvil", "Bucket"], "{gift}");
+    assert_eq!(labels(gift), ["Anvil"], "{gift}");
     assert!(again.html.contains(r#"name="lines[0].quantity" type="number""#) && again.html.contains(r#"value="2""#), "{}", again.html);
     assert!(again.html.contains(r#"value="soon""#), "{}", again.html);
     assert!(!again.html.contains("form-error"), "{}", again.html);
-    assert_eq!(store.calls(), (2, vec![]), "the pressed text's listing and the first page's");
+    assert_eq!(store.calls(), (2, vec![]), "a listing of each text");
+
+    // A row button's post, and a refused one, search each text too: a
+    // line's box that held dr when the reader added a line still lists
+    // what dr finds, beside the new line's first page.
+    let added = post(&app, "/console/orders/new", "clerk", "lines[0].productId=&lines[0].quantity=2&_find.lines[0].productId=dr&_action=add:lines").await;
+    assert_eq!(added.status, StatusCode::OK, "{}", added.html);
+    let line = picker(&added.html, "lines[0].productId");
+    assert!(line.contains(r#"name="_find.lines[0].productId" value="dr""#), "{line}");
+    assert_eq!(labels(line), ["Drum"], "{line}");
+    assert_eq!(labels(picker(&added.html, "lines[1].productId")), ["Anvil", "Bucket"], "{}", added.html);
+    store.calls();
+    let refused = post(&app, "/console/orders/new", "clerk", "lines[0].productId=&lines[0].quantity=2&_find.lines[0].productId=dr").await;
+    assert_eq!(refused.status, StatusCode::UNPROCESSABLE_ENTITY, "{}", refused.html);
+    assert_eq!(labels(picker(&refused.html, "lines[0].productId")), ["Drum"], "{}", refused.html);
+    assert_eq!(store.calls().0, 2, "the line's text and the gift's first page");
 
     // The value held past the first page is an option, named through the
     // lookup, and selected.
@@ -1729,6 +1799,28 @@ async fn a_picker_finds_by_get_and_by_post() {
 }
 
 #[tokio::test]
+async fn a_removed_lines_search_text_goes_with_it() {
+    let store = Store::new();
+    let app = app(&store);
+    // Removing the first line moves the second up with its box's text: it
+    // still says dr and lists what dr finds, and an is gone with its line.
+    let body = "lines[0].productId=&lines[0].quantity=1&lines[1].productId=&lines[1].quantity=2&_find.lines[0].productId=an&_find.lines[1].productId=dr&_action=remove:lines[0]";
+    let removed = post(&app, "/console/orders/new", "clerk", body).await;
+    assert_eq!(removed.status, StatusCode::OK, "{}", removed.html);
+    let line = picker(&removed.html, "lines[0].productId");
+    assert!(line.contains(r#"name="_find.lines[0].productId" value="dr""#), "{line}");
+    assert_eq!(labels(line), ["Drum"], "{line}");
+    assert!(removed.html.contains(r#"name="lines[0].quantity" type="number""#) && removed.html.contains(r#"value="2""#), "{}", removed.html);
+    assert!(!removed.html.contains(r#"data-ss-pick="lines[1].productId""#), "{}", removed.html);
+    // A line its list's listMin keeps stays, and so does its text.
+    let kept = post(&app, "/console/orders/new", "clerk", "lines[0].productId=&lines[0].quantity=1&_find.lines[0].productId=an&_action=remove:lines[0]").await;
+    assert_eq!(kept.status, StatusCode::OK, "{}", kept.html);
+    let line = picker(&kept.html, "lines[0].productId");
+    assert!(line.contains(r#"value="an""#), "{line}");
+    assert_eq!(labels(line), ["Anvil"], "{line}");
+}
+
+#[tokio::test]
 async fn a_pickers_shard_renders_what_the_text_finds() {
     let store = Store::new();
     let app = app(&store);
@@ -1737,9 +1829,20 @@ async fn a_pickers_shard_renders_what_the_text_finds() {
     // The box's input sets the shard's searched and text signals, the
     // select's change its value signal.
     let identity = between(&new.html, r#"::topcoat::shard::start("/_superschematic/fixture-console-api/_pick/product", ""#, "\"");
+    let ids = |markup: &str| -> Vec<String> {
+        markup.split("&quot;Signal&quot;,&quot;id&quot;:&quot;").skip(1).map(|rest| rest.split("&quot;").next().unwrap().to_owned()).collect()
+    };
     let input = between(line, r#"<input type="search""#, "<button");
-    let signals: Vec<&str> = input.split("&quot;Signal&quot;,&quot;id&quot;:&quot;").skip(1).map(|rest| rest.split("&quot;").next().unwrap()).collect();
+    let signals = ids(input);
     assert_eq!(signals.len(), 2, "{line}");
+    // Find's click counts its presses in a signal of its own, which the
+    // shard reads tracked: each press renders it again, the text unchanged
+    // too.
+    let find = between(line, r#"value="find:lines[0].productId""#, "</button>");
+    let presses = ids(find);
+    assert_eq!(presses.len(), 1, "{find}");
+    assert!(!signals.contains(&presses[0]), "{line}");
+    assert!(new.html.contains(&format!("::topcoat::dep(\"{}\")", presses[0])), "the shard does not depend on Find's presses: {}", new.html);
     store.calls();
     // The reader typed dr with Bucket held: the shard lists Drum, and
     // Bucket, named through the lookup, stays selected.
@@ -1751,7 +1854,7 @@ async fn a_pickers_shard_renders_what_the_text_finds() {
     let pick = |text: &str, options: Vec<serde_json::Value>, more: bool| {
         record(serde_json::json!({"text": text, "options": {"t": "Vec", "bits": 64, "v": options}, "more": more, "refused": {"t": "Option", "v": null}}))
     };
-    let body = serde_json::json!({"args": [control, pick("", Vec::new(), false)], "signals": {signals[0]: true, signals[1]: "dr"}});
+    let body = serde_json::json!({"args": [control, pick("", Vec::new(), false)], "signals": {signals[0].clone(): true, signals[1].clone(): "dr"}});
     let mut request = http::Request::builder().method("POST").uri("/_superschematic/fixture-console-api/_pick/product").header("x-caller", "clerk");
     request = request.header(header::CONTENT_TYPE, "application/json").header("x-topcoat-identity", identity);
     let response = app.handle(request.body(Body::from(body.to_string())).unwrap()).await;
@@ -1761,7 +1864,19 @@ async fn a_pickers_shard_renders_what_the_text_finds() {
     assert!(shard.contains(r#"name="_find.lines[0].productId" value="dr""#), "{shard}");
     assert_eq!(labels(shard), ["Bucket", "Drum"], "{shard}");
     assert_eq!(chosen(shard), Some(bucket.clone()), "{shard}");
-    assert_eq!(store.calls(), (1, vec![vec![bucket]]), "one listing of the text, one lookup of the value");
+    assert_eq!(store.calls(), (1, vec![vec![bucket.clone()]]), "one listing of the text, one lookup of the value");
+    // A press of Find with the text as the page rendered it, after a post
+    // say, searches it: the pick it was given is stale.
+    let press = serde_json::json!({"t": "u32", "bits": 32, "v": "1"});
+    let stale = pick("dr", vec![record(serde_json::json!({"value": "v", "label": "V"}))], true);
+    let body = serde_json::json!({"args": [control, stale], "signals": {signals[0].clone(): false, signals[1].clone(): "dr", presses[0].clone(): press}});
+    let mut request = http::Request::builder().method("POST").uri("/_superschematic/fixture-console-api/_pick/product").header("x-caller", "clerk");
+    request = request.header(header::CONTENT_TYPE, "application/json").header("x-topcoat-identity", identity);
+    let response = app.handle(request.body(Body::from(body.to_string())).unwrap()).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let html = String::from_utf8(to_bytes(response.into_body(), usize::MAX).await.unwrap().to_vec()).unwrap();
+    assert_eq!(labels(picker(&html, "lines[0].productId")), ["Bucket", "Drum"], "{html}");
+    assert_eq!(store.calls(), (1, vec![vec![bucket]]), "the text searched again");
     // Without the searched signal the shard renders the pick it was given.
     let body = serde_json::json!({"args": [control, pick("x", vec![record(serde_json::json!({"value": "v", "label": "V"}))], true)]});
     let response = app.handle(
@@ -2800,6 +2915,39 @@ async fn a_page_meets_the_suppliers_rate_limit() {
     assert!(refused.headers.contains_key(header::RETRY_AFTER));
     // A page that calls no supplier is not counted.
     assert_eq!(get(&app, "/console/orders").await.status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn a_pickers_shard_meets_the_suppliers_rate_limit() {
+    let app = app(&shop());
+    // The supplier's picker's shard takes from listSuppliers' limiter, three
+    // requests a minute a client, as a page that calls it does: the fourth
+    // is the route's 429, with Retry-After, in the place of the picker.
+    let record = |fields: serde_json::Value| serde_json::json!({"t": "Record", "v": fields});
+    let control = record(serde_json::json!({"name": "supplierId", "id": "product-input-supplier-id", "required": true, "invalid": false, "value": "", "post": true}));
+    let pick = record(serde_json::json!({"text": "", "options": {"t": "Vec", "bits": 64, "v": []}, "more": false, "refused": {"t": "Option", "v": null}}));
+    let body = serde_json::json!({"args": [control, pick]}).to_string();
+    let mut answers = Vec::new();
+    for _ in 0..4 {
+        let request = http::Request::builder()
+            .method("POST")
+            .uri("/_superschematic/fixture-console-api/_pick/supplier")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(body.clone()))
+            .unwrap();
+        let response = app.handle(request).await;
+        let (status, headers) = (response.status(), response.headers().clone());
+        let html = String::from_utf8(to_bytes(response.into_body(), usize::MAX).await.unwrap().to_vec()).unwrap();
+        answers.push(Answer { status, headers, html });
+    }
+    for answer in &answers[..3] {
+        assert_eq!(answer.status, StatusCode::OK, "{}", answer.html);
+        assert!(answer.html.contains(r#"data-ss-pick="supplierId""#), "{}", answer.html);
+    }
+    let refused = &answers[3];
+    assert_eq!(refused.status, StatusCode::TOO_MANY_REQUESTS, "{}", refused.html);
+    assert!(refused.headers.contains_key(header::RETRY_AFTER), "{:?}", refused.headers);
+    assert_eq!(refused.html, r#"<p class="field-error" data-status="429">Too Many Requests</p>"#);
 }
 
 #[tokio::test]

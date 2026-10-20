@@ -82,11 +82,14 @@ func (o *refOptions) PageRequest() string {
 
 // refSearch is an options operation's search argument (SearchQuery, D62),
 // which makes a reference to its target a picker (D61, amended): one call
-// per distinct text, kept for the request, of the first page.
+// per distinct text, kept for the request, of the first page, and at most
+// MAX_LOOKUP_CALLS texts a request, which Searched counts for every picker
+// whose options it is.
 type refSearch struct {
-	Fn    string // product_list_products_search
-	Arg   string // q
-	Field string // q, its Args field
+	Fn       string // product_list_products_search
+	Searched string // product_list_products_searched
+	Arg      string // q
+	Field    string // q, its Args field
 	// Others are the Args fields the call leaves out.
 	Others []string
 	// Attrs are the search box's attributes from the argument's rules, as
@@ -949,7 +952,7 @@ func (b *refBuilder) optionsOf(d declared, search *ir.ArgumentDef, hosted *hoste
 			if param.Name != search.Name {
 				continue
 			}
-			o.Search = &refSearch{Fn: stem + "_search", Arg: search.Name, Field: param.Field}
+			o.Search = &refSearch{Fn: stem + "_search", Searched: stem + "_searched", Arg: search.Name, Field: param.Field}
 			o.Search.Attrs = b.schemas.argField(search, param, "query", true).Attrs
 			for _, other := range e.QueryArgs {
 				if other.Name != search.Name {

@@ -892,11 +892,14 @@ func cargoTestCrate(t *testing.T, service, test string, devDeps ...string) {
 // as build --with-deps builds them, with depOutputs as its outputs when
 // the test gives them (its API and Topcoat crates, say), else its types
 // alone. table is the body of superschematic.toml's [extension.topcoat],
-// under which every crate is built.
+// under which every crate is built. appends are text added to the end of
+// the crate's own files, by slash path from the crate's directory, such as
+// a unit test module that reaches a module's private items.
 type crateOptions struct {
 	features        []string
 	devDependencies string
 	files           map[string]string
+	appends         map[string]string
 	outputs         map[string]any
 	dir             string
 	dependencies    []string
@@ -995,6 +998,16 @@ tokio = { version = "1.52.2", features = ["macros", "rt-multi-thread"] }
 			t.Fatal(err)
 		}
 		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for name, content := range options.appends {
+		path := filepath.Join(dir, filepath.FromSlash(name))
+		source, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, append(source, content...), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}

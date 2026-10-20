@@ -550,9 +550,10 @@ func (c *crate) HasChoices() bool { return c.HasForms() || len(c.Views) > 0 }
 // "rows" for writing an input form; "first", "values", "postedText" and
 // "postedRows" for reading a post, and "maxRows" when a list's limit is
 // MAX_ROWS; "args", "argsSingle", "argsList", "argsInput" and "query" for
-// argument forms; "noRows", "choosable"; and what a rendered control
-// needs ("checked", "localDateTime", "showsAll", "showsRow",
-// "showsRows").
+// argument forms; "noRows", "choosable"; "picks" for a search picker's
+// form, and "pickRows" for one with rows, whose removal numbers the
+// pickers' texts again; and what a rendered control needs ("checked",
+// "localDateTime", "showsAll", "showsRow", "showsRows").
 func (c *crate) FormsUse(item string) bool {
 	return c.formUses()[item]
 }
@@ -563,6 +564,7 @@ func (c *crate) formUses() map[string]bool {
 	for _, f := range c.Forms {
 		uses["choosable"] = uses["choosable"] || f.Choosable
 		uses["picks"] = uses["picks"] || f.Picks
+		uses["pickRows"] = uses["pickRows"] || f.Picks && f.Struct.Rows
 	}
 	for _, st := range c.FormStructs {
 		if st.Rows {
@@ -596,6 +598,7 @@ func (c *crate) formUses() map[string]bool {
 	for _, f := range c.ArgForms {
 		uses["args"], uses["choosable"] = true, uses["choosable"] || f.Choosable
 		uses["picks"] = uses["picks"] || f.Picks
+		uses["pickRows"] = uses["pickRows"] || f.Picks && f.Input != nil && f.Input.Struct.Picks && f.Input.Struct.Rows
 		uses["query"] = uses["query"] || f.IsGet()
 		uses["argsInput"] = uses["argsInput"] || f.Input != nil
 		if f.Paged {
