@@ -128,7 +128,10 @@ func TestPagesChangeNoOtherSDKFile(t *testing.T) {
 // the page), against an httptest server that pages as D60's routers do:
 // the first page, the next and the last, the query each request sends, the
 // limit refused before any request, and the iterators collecting every
-// item lazily, stopping at a null next and ending with an error.
+// item lazily, stopping at a null next and ending with an error. Its
+// listItems sorts (D60, amended), so the iterator is seen sending the sort
+// with every page, and the SDK sends a sort as it is, for the server to
+// refuse one it does not offer.
 func TestPagedSDKBuildsAndRuns(t *testing.T) {
 	schema, apiOutput := loadPagedAPI(t, sdktest.AddShelfItemsOperation)
 	runInSDK(t, schema, apiOutput, pagedService, "paged_test.go", pagedSDKTest)
@@ -170,7 +173,8 @@ const shelfID = "5d0c7e2a-1b3f-4a6d-8c9e-0f1a2b3c4d5e"
 
 // server pages names (as items) and tags. repeat makes a page's next the
 // cursor it was asked with; refuse is a cursor it answers with the 400 of
-// a cursor no page returned.
+// a cursor no page returned. /api/items reads its sort: by name or sku,
+// which agree, ascending, or descending after a -.
 type server struct {
 	mu      sync.Mutex
 	paths   []string
@@ -214,6 +218,18 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		limit = parsed
 	}
+	order := func(position int) int { return position }
+	if sort := query.Get("sort"); r.URL.Path == "/api/items" && sort != "" {
+		switch sort {
+		case "name", "sku":
+		case "-name", "-sku":
+			order = func(position int) int { return count + 1 - position }
+		default:
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte("{\"status\":400,\"code\":\"bad_request\",\"detail\":\"Invalid query parameter sort: expected one of name, -name, sku, -sku\"}"))
+			return
+		}
+	}
 	cursor := query.Get("cursor")
 	after := 0
 	if cursor != "" {
@@ -234,11 +250,12 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			items = append(items, tags[position-1])
 			continue
 		}
+		n := order(position)
 		items = append(items, map[string]any{
-			"id":      fmt.Sprintf("00000000-0000-4000-8000-%012d", position),
-			"name":    names[position-1],
-			"sku":     names[position-1] + "-sku",
-			"inStock": position%2 == 1,
+			"id":      fmt.Sprintf("00000000-0000-4000-8000-%012d", n),
+			"name":    names[n-1],
+			"sku":     names[n-1] + "-sku",
+			"inStock": n%2 == 1,
 		})
 	}
 	var next any
@@ -403,6 +420,44 @@ func TestListItemsAllCollectsEveryItemLazily(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, []string{"drum", "easel"}) {
 		t.Fatalf("items after the third = %v", got)
+	}
+}
+
+func TestListItemsAllKeepsTheSort(t *testing.T) {
+	client, pages := serve(t)
+	ctx := context.Background()
+	sort := "-name"
+	var got []string
+	for item, err := range client.CatalogNamespace.ListItemsAll(ctx, &namespaces.CatalogListItemsQueryParams{Sort: &sort}, runtime.PageRequest{Limit: 2}) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, item.Name)
+	}
+	if want := []string{"easel", "drum", "crate", "bucket", "anvil"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("items = %v, want %v", got, want)
+	}
+	want := []url.Values{
+		{"sort": {"-name"}, "limit": {"2"}},
+		{"sort": {"-name"}, "cursor": {"Mg"}, "limit": {"2"}},
+		{"sort": {"-name"}, "cursor": {cursorOf(4)}, "limit": {"2"}},
+	}
+	if requests := pages.requests(); !reflect.DeepEqual(requests, want) {
+		t.Fatalf("queries = %v, want %v", requests, want)
+	}
+
+	// The SDK sends a sort as it is; the server refuses one it does not
+	// offer.
+	client, pages = serve(t)
+	unknown := "price"
+	_, err := client.CatalogNamespace.ListItems(ctx, &namespaces.CatalogListItemsQueryParams{Sort: &unknown}, runtime.PageRequest{})
+	var apiErr *sdk.APIError
+	if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusBadRequest ||
+		apiErr.Message != "Invalid query parameter sort: expected one of name, -name, sku, -sku" {
+		t.Fatalf("err = %v", err)
+	}
+	if requests := pages.requests(); !reflect.DeepEqual(requests, []url.Values{{"sort": {"price"}}}) {
+		t.Fatalf("queries = %v", requests)
 	}
 }
 

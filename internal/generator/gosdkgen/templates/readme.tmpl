@@ -16,3 +16,6 @@ Generated Go SDK for the `{{.SchemaName}}` API. Auto-generated from GraphQL sche
 {{- if .HasPagedEndpoints}}
 - Paged lists (`@paginated`): a paged method takes a `runtime.PageRequest` and returns one `runtime.Page`, and its `<Method>All` yields every item as an `iter.Seq2`, asking for each page as the loop reaches it
 {{- end}}
+{{- if .HasSortedEndpoints}}
+- Sorted lists (`SortBy`): the sort is a `*string` field of the method's query parameters, a field or `-` and a field; a cursor holds the sort it was returned under, so `<Method>All` sends the same sort with every page, and the route refuses a sort it does not offer
+{{- end}}

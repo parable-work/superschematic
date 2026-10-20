@@ -14,3 +14,4 @@ Generated Go SDK for the `fixture-paged-api` API. Auto-generated from GraphQL sc
 - Multipart file upload helpers
 - Typed API errors by status code
 - Paged lists (`@paginated`): a paged method takes a `runtime.PageRequest` and returns one `runtime.Page`, and its `<Method>All` yields every item as an `iter.Seq2`, asking for each page as the loop reaches it
+- Sorted lists (`SortBy`): the sort is a `*string` field of the method's query parameters, a field or `-` and a field; a cursor holds the sort it was returned under, so `<Method>All` sends the same sort with every page, and the route refuses a sort it does not offer

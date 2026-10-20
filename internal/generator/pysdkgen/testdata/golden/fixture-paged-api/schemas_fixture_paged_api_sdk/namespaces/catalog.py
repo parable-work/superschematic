@@ -464,7 +464,7 @@ class CatalogNamespace:
             extra_headers=extra_headers,
         )
         return self._coerce_response(response, "ItemView", False)
-    def list_items(self, ids: list[str] | None = None, in_stock: bool | None = None, cursor: str | None = None, limit: int | None = None, timeout_seconds: float | None = None, extra_headers: Mapping[str, str] | None = None) -> Page[ItemView]:
+    def list_items(self, ids: list[str] | None = None, in_stock: bool | None = None, sort: str | None = None, cursor: str | None = None, limit: int | None = None, timeout_seconds: float | None = None, extra_headers: Mapping[str, str] | None = None) -> Page[ItemView]:
         path = "/api/items"
         query_params: dict[str, Any] | None = {}
         if ids is not None:
@@ -473,6 +473,8 @@ class CatalogNamespace:
                 query_params["ids"] = self._query_list_value(ids)
         if in_stock is not None:
             query_params["inStock"] = in_stock
+        if sort is not None:
+            query_params["sort"] = sort
         if cursor:
             self._validate_query_param_constraints(
                 cursor,
@@ -497,7 +499,7 @@ class CatalogNamespace:
             extra_headers=extra_headers,
         )
         return self._coerce_page(response, "ItemView")
-    def list_items_all(self, ids: list[str] | None = None, in_stock: bool | None = None, cursor: str | None = None, limit: int | None = None, timeout_seconds: float | None = None, extra_headers: Mapping[str, str] | None = None) -> Iterator[ItemView]:
+    def list_items_all(self, ids: list[str] | None = None, in_stock: bool | None = None, sort: str | None = None, cursor: str | None = None, limit: int | None = None, timeout_seconds: float | None = None, extra_headers: Mapping[str, str] | None = None) -> Iterator[ItemView]:
         """Yield every item of list_items, page after page (D60).
 
         The first page is the one cursor names, the first of the list when
@@ -507,7 +509,7 @@ class CatalogNamespace:
         cursor it was asked with, after its items.
         """
         while True:
-            page = self.list_items(ids=ids, in_stock=in_stock, cursor=cursor, limit=limit, timeout_seconds=timeout_seconds, extra_headers=extra_headers)
+            page = self.list_items(ids=ids, in_stock=in_stock, sort=sort, cursor=cursor, limit=limit, timeout_seconds=timeout_seconds, extra_headers=extra_headers)
             yield from page.items
             if page.next is None:
                 return
