@@ -292,13 +292,17 @@ func connectR2(ctx registry.ConnectorContext) (registry.Connected, error) {
 	}, nil
 }
 
-// checkBucketTokenGroup refuses an environment with a bucket edge on an
-// account that does not list R2ObjectsWriteGroup under its name. A bucket
-// edge's token names the group by the id Cloudflare publishes, since
-// resolution lists nothing; bootstrap, which lists the account's groups,
-// checks it, so a changed id fails there rather than at a deploy.
+// checkBucketTokenGroup refuses an environment with an edge to an R2
+// bucket, from a server or any other Worker, on an account that does not
+// list R2ObjectsWriteGroup under its name. A bucket edge's token names the
+// group by the id Cloudflare publishes, since resolution lists nothing;
+// bootstrap, which lists the account's groups, checks it, so a changed id
+// fails there rather than at a deploy.
 func checkBucketTokenGroup(env *ir.ResolvedEnvironment, groups []PermissionGroup) error {
-	if !slices.ContainsFunc(env.Edges, func(e *ir.Edge) bool { return e.Connector == WorkersR2Connector }) {
+	if !slices.ContainsFunc(env.Edges, func(e *ir.Edge) bool {
+		d := env.Deployable(e.To)
+		return e.Kind == ir.EdgeBucket && d != nil && d.Platform == R2
+	}) {
 		return nil
 	}
 	i := slices.IndexFunc(groups, func(g PermissionGroup) bool { return g.ID == R2ObjectsWriteGroup })
