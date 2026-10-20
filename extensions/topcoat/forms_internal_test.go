@@ -273,6 +273,49 @@ func TestAMemberIsLabeledByItsTitle(t *testing.T) {
 	}
 }
 
+// TestTwoMembersOneLabelIsABuildWarning: when two members of an enum the
+// crate labels take one label, ignoring case, a title and another
+// member's name in words, or two names in the same words, the build log
+// says so, once per enum and pair, whichever of the forms, the argument
+// forms and the display components shows it. The crate still builds.
+func TestTwoMembersOneLabelIsABuildWarning(t *testing.T) {
+	status := &ir.EnumDef{Name: "OrderStatus", Values: []ir.EnumValueDef{
+		{Name: "OnHold", SerializedAs: "on_hold"},
+		{Name: "Paused", Title: "On hold", SerializedAs: "paused"},
+		{Name: "Shipped"},
+		{Name: "ON_HOLD"},
+	}}
+	tier := &ir.EnumDef{Name: "Tier", Values: []ir.EnumValueDef{{Name: "Gold"}, {Name: "gold"}}}
+	plain := &ir.EnumDef{Name: "Colour", Values: []ir.EnumValueDef{{Name: "Red", Title: "Warm"}, {Name: "Warmth"}}}
+	schema := &ir.Schema{
+		Enums: map[string]*ir.EnumDef{"OrderStatus": status, "Tier": tier, "Colour": plain},
+		Types: map[string]*ir.TypeDef{"Input": {Name: "Input", Fields: []*ir.FieldDef{
+			{Name: "status", TypeRef: ir.TypeRef{Name: "OrderStatus"}},
+			{Name: "statuses", TypeRef: ir.TypeRef{Name: "OrderStatus", IsArray: true}},
+			{Name: "colour", TypeRef: ir.TypeRef{Name: "Colour"}},
+		}}},
+	}
+	b := &formBuilder{schemaSet: schemaSet{schema}, structs: map[string]*formStruct{}}
+	st, err := b.structOf(schema.Types["Input"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := &crate{
+		FormStructs: []*formStruct{st},
+		ArgForms:    []argForm{{Fields: []*argField{{formField: &formField{Options: enumOptions(status), enum: status}}}}},
+		EnumLabels:  []enumLabel{{Name: "Tier", Options: enumOptions(tier), enum: tier}},
+	}
+	var log strings.Builder
+	warnSharedLabels(c, func(format string, args ...any) { fmt.Fprintf(&log, format, args...) })
+	want := `  - topcoat: enum OrderStatus: members OnHold and Paused share the label "On hold", so a select offers it twice; a @title tells them apart
+  - topcoat: enum OrderStatus: members OnHold and ON_HOLD share the label "On hold", so a select offers it twice; a @title tells them apart
+  - topcoat: enum Tier: members Gold and gold share the label "Gold", so a select offers it twice; a @title tells them apart
+`
+	if log.String() != want {
+		t.Fatalf("build log:\n%s\nwant:\n%s", log.String(), want)
+	}
+}
+
 // TestRowButtonsFollowTheDefaultButton reads every golden's forms.rs, as
 // cargo never does, for the order Enter depends on (D44, amended): in each
 // component whose view holds a row button (name="_action"), the first

@@ -98,8 +98,10 @@ type formField struct {
 	// `required` aside: ` minlength="2"`.
 	Attrs string
 	// Options are an enum's members: a select's options, or a group's
-	// checkboxes.
+	// checkboxes; enum is the enum, for the build log's word on two members
+	// one label (warnSharedLabels).
 	Options []formOption
+	enum    *ir.EnumDef
 	// Choosable marks a control the app's choices turn into a select.
 	Choosable bool
 	// Default is the Rust expression of the field's value in a new form.
@@ -317,7 +319,7 @@ func (b *formBuilder) kindOf(f *formField, owner *ir.TypeDef, field *ir.FieldDef
 		return nil
 	}
 	if enum := b.enum(ref.Name); enum != nil {
-		f.Options = enumOptions(enum)
+		f.Options, f.enum = enumOptions(enum), enum
 		if ref.IsArray {
 			f.Kind = kindGroup
 			return nil

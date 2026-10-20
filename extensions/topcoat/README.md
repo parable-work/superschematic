@@ -287,7 +287,11 @@ unless an acronym or a single letter holds it (`awsS3Bucket` is "Aws S3
 bucket"). An enum's member, a select's option or a checkbox's label, is
 labeled by its title (`/** @title Held for a stock check */` in
 TypeScript, `title` in the data forms, [D48](../../docs/DECISIONS.md)),
-else by its name in words: `OnHold` is "On hold".
+else by its name in words: `OnHold` is "On hold". When two members of an
+enum the crate labels take one label, ignoring case, such as `OnHold` and
+`Paused` titled "On hold", the build log says so, and a `@title` tells
+them apart: `topcoat: enum Status: members OnHold and Paused share the
+label "On hold", so a select offers it twice; a @title tells them apart`.
 
 ### Input forms
 
@@ -531,11 +535,18 @@ control names its form with `form=`, so tree order is the whole rule. The
 extension's tests hold every page they render to it without a browser:
 `testdata/enter.rs` checks that each form's first submit control has no
 `name`, `formaction`, `formmethod`, `formenctype`, `formtarget`,
-`formnovalidate` or `disabled`, and `TestRowButtonsFollowTheDefaultButton`
-reads every golden's components for the hidden button's place without
-cargo. An app's own tests, with `http` among their dev-dependencies, can
-hold its pages to the rule too: `#[path = ".../enter.rs"] mod enter;`,
-then `enter::check_page(uri, &headers, &body)` on each answer.
+`formnovalidate` or `disabled`, and no `<fieldset disabled>` around it
+outside that fieldset's first `<legend>`. It reads a `<template>`'s
+contents as a fragment of their own, out of the page's forms, held to the
+same rule. `TestRowButtonsFollowTheDefaultButton` reads every golden's
+components for the hidden button's place without cargo. The file ships
+with neither the extension nor the crate it writes, so an app's own
+tests, with `http` among their dev-dependencies, hold its pages to the
+rule by copying it from the superschematic repository
+(`extensions/topcoat/testdata/enter.rs`) into their `tests/support/`,
+declaring `#[path = "support/enter.rs"] mod enter;`, then calling
+`enter::check_page(uri, &headers, &body)` on each answer. acme's tests
+read the repository's copy by its path.
 
 ```rust
 #[page(POST "/book")]
