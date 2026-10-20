@@ -4292,8 +4292,8 @@ image by its tag and uploads the context again for a build, and each
 execution's documents are written again, so a deleted one costs nothing.
 Pulumi's state and the manifests have no rule.
 `TestStateBucketLifecycle` deletes every object the rule covers after a
-deploy, and the next deploy builds nothing. Not built: a deploy lock
-beyond the provisioner's and the runner's.
+deploy, and the next deploy builds nothing. D46's last amendment builds
+a deploy lock beyond the provisioner's and the runner's.
 
 ### D37, amended: the callee's callers field, which the connectors write and the entrypoint verifies against
 
@@ -4668,8 +4668,8 @@ No job has run on Google Cloud. A live run should check:
 Cloud Run starts an execution on every firing, even while the last one
 runs, where `stack dev` skips that firing.
 
-Not built:
-- a job that runs on every deploy (Cloud Run's `runExecutionToken`).
+D52's last amendment runs a job on every deploy, through the deploy's
+own run of it rather than Cloud Run's `runExecutionToken`.
 
 Workers came with queues in D53, built in #336 and #339, and TypeScript
 jobs and workers in #348.
@@ -6702,9 +6702,10 @@ Status: built.
 No Rust job or worker has run on Cloud Run.
 
 Not built, and out of this entry: OpenTelemetry export (D54's second
-amendment builds buckets from a Rust server, job or worker). A TypeScript build into another output
-root relinks the project's own `node_modules` there, as a Rust build did
-before the mirror.
+amendment builds buckets from a Rust server, job or worker). D65's
+amendment mirrors TypeScript implementations into another output root, so
+a TypeScript build there no longer relinks the project's own
+`node_modules`.
 
 The rule is reversible until the first release.
 
@@ -6972,5 +6973,67 @@ the route's rate limit. `TestServiceAuthManualRoutes` refuses a protected
 manual route without a user and a `@requireService` one without a service,
 and the three `...PredatesItsManualRoutesFails` tests the build's
 refusals.
+
+The rule is reversible until the first release.
+
+### D46, amended: a deploy holds a lock per run, on the target's state store
+
+Two `stack deploy`s, or a deploy and a `stack destroy`, of one environment
+could run at once: Pulumi locks each step's stack, but between steps a
+second deploy read the manifest the first was replacing and planned from it.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `deploy` and `destroy` take the run's lock before they read the manifest and release it when they end, on success, on failure and on the first SIGINT or SIGTERM, whose context the CLI cancels; a second signal kills the process. A second one fails at once, naming the holder, host, process, CI run and time, and the unlock command. `plan` takes none, since `planner` writes nothing, and says when a deploy holds one. Each run, each member of a parameterized environment, has its own. | A lock around each step alone, which Pulumi already has, and which leaves a second deploy planning from a manifest the first is replacing. A lock per environment, which would serialize the members of a parameterized one. |
+| The seam is `registry.StateLocker` (`Lock`, `ReadLock`, `Unlock`), an optional interface of the state store, beside the manifest it guards: `Lock` writes a `DeployLock` where none is, atomically, and returns `*LockHeldError` where one is; `Unlock` removes the run's lock only when its id is the holder's. A store without it deploys unlocked and says so. gcp writes `superschematic/locks/<stack>/<run>.json` in the state bucket with `ifGenerationMatch=0`, and deletes it at the generation that holds its id, under the object admin role `deployer` already holds. | A `TargetSpec.Lock` seam of its own, which would have to stay in step with the state store. A method `StateStore` requires, which breaks every store at once. |
+| The lock is held, not leased: it has no expiry. Its holder releases it by its id, on a context that outlives cancellation, and leaves in place a lock that changed hands. After a crash, `stack unlock <environment> [--param]` shows the lock, asks for the run's name (or takes `--yes`, which a run with no terminal needs), and removes only the lock it showed. | A lease with heartbeats: a holder paused past its lease lets a second deploy run beside it, and nothing the deploy writes, Pulumi's state above all, can check a fencing token. `--force-unlock` on deploy, which folds a destructive choice into the command that then deploys. |
+
+Status: built. `internal/stackdeploy`'s `lock_test.go` holds the lock
+across a step and refuses a second deploy, releases it on a failure and on
+a gate's refusal, and leaves a lock that changed hands; gcp's
+`lock_test.go` runs the generations against its fake `Cloud`; `cli`'s
+`TestStackUnlock` the command. No lock has been taken on Google Cloud.
+
+The rule is reversible until the first release.
+
+### D52, amended: a job runs on every deploy, after the rollout and before the contract
+
+D52 left out a job a deploy runs, such as a backfill each release needs.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| An environment's settings run a job on every deploy: `{ of, job, onDeploy: true }` (`ir.DeployableSettings.OnDeploy`, `ir.ResolvedJob.OnDeploy`). It merges over the `extends` chain as any setting does, so a preview member inherits it, which a schedule does not, and `false` turns it off. `onDeploy` on a server or a worker is refused. | A `@job({ onDeploy })` option: whether a deploy runs a job is the environment's call, as a schedule's on and off is, and the option would put a deploy concern into the API schema's IR, its data forms, the runtimes and the engine. Both a default and an override, two places to read for one switch. |
+| Resolution puts such jobs in a `jobs` step (`ir.StepJobs`), which holds no resources, after the last rollout wave and before the contract, so a job reads what the contract drops and fills what it tightens. The deploy runs each, one at a time, through the target's `JobRunner` with the image the rollout pinned, waits for it, retries included, and fails at that step with the last try's error: the contract does not run, the manifest records the failure, and the next deploy runs the job again. On gcp it is one execution of the job's Cloud Run job, as `stack run` starts one, its error read from Cloud Logging. A target with no job runner, or a job that runs a bundle, is refused before any step. `stack dev` runs each once in the same place, and a failure stops nothing. | Cloud Run's `runExecutionToken` on the job's node: it starts in the job's own wave, before later waves' servers are live, needs a token that changes on every deploy in a graph that is a function of the schemas, reports Cloud Run's message rather than the job's error, and leaves a failed node that the same token never runs again. Running after exposure, where the contract has already dropped what the job may need. Running the jobs at once. |
+
+Status: built. `internal/stack`'s `TestJobOnDeploy` resolves the step,
+`internal/stackdeploy`'s `jobs_test.go` runs it and reports a failure,
+gcp's `TestDeployRunsTheJobOnEveryDeploy` reads a failed execution's error,
+the gcp goldens hold a job that runs on deploy, the Pulumi render goldens
+are unchanged by it, and the local target's
+`TestJobRunsOnceTheEnvironmentIsUp` runs it under `stack dev`. No job has
+run on a deploy on Google Cloud.
+
+The rule is reversible until the first release.
+
+### D65, amended: another output root builds its TypeScript deployables against mirrors of their implementations
+
+D65 mirrored Rust implementations into each output root and left
+TypeScript's as members of every root's Bun workspace, so a build into
+another root (`stack dev --out`) relinked the project's own packages'
+`node_modules` there, and they dangled once that root was gone.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| An output root other than the default one, `<schemas-root>/dist`, builds its TypeScript servers, jobs and workers against mirrors at `<output-root>/impl/<service>/`, and its workspace lists `impl/*` in place of the project's packages. The default root keeps the project's packages as members and holds no mirror. A build that names no schemas root takes its output root as the default. | Mirrors in every root, as Rust has: Bun refuses two members of one name, and the project's package, then a member of no workspace, would lose its `node_modules`, its editor and its `tsc`. A mirror of another name, which gives `main.ts` and the lockfile a second name for each implementation. |
+| A mirror keeps its package's name. Its `package.json` is the package's, its members in order, with a first `"//"` notice that marks the directory as the build's, and each `file:`, `link:`, `./` or `../` dependency re-based for where the mirror sits. Its files are those Rust's mirror chooses, the package's `.gitignore` files deciding, less `node_modules` at any depth and a lockfile at its root; only a changed file is written, and a mirror no package under `server/*/*` depends on is removed, as is every TypeScript mirror in the default root. An image built in another root takes its mirrors and no implementation directory. | Skipping `dist/` by name, which a package whose `main` is built there needs. npm pack's `files`, which leaves a published package's sources out. |
+| A site is mirrored into no root: in another root it is no member of the workspace, and builds in its own package against the default root's install. | Mirroring sites, which the local provisioner, the deploy and the CI build in their own package. |
+
+Status: built. servergen's `TestTypeScriptServersBuildInAnyOutputRoot`
+builds its fixture into two other roots, in turn and at once, installs
+each with `--frozen-lockfile`, type-checks and serves from each, and finds
+the project's links unmoved, and fails without the mirror; the TypeScript
+Dockerfile test builds and serves an image from another root.
+`TestStackDevRunsTheShop` no longer reinstalls the shop after its run into
+an output root of its own. Not built: mirrors of sites.
 
 The rule is reversible until the first release.
