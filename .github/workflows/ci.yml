@@ -196,7 +196,7 @@ jobs:
         # TestEngineDocumentLoadsInTheEngine (the full tier: -short skips it)
         # loads a generated engine document through @superschematic/engine,
         # the Rust engine's Node-API addon (D58), as a TypeScript server
-        # will: the package's dist/, over the http runtime's, and the core's
+        # does: the package's dist/, over the http runtime's, and the core's
         # addon in its native/, a debug build, which compiles faster than the
         # release's and loads the same.
         if: github.event_name != 'pull_request'

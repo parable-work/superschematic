@@ -2492,14 +2492,19 @@ as they are, with no build step (D51). The pieces mirror Go's:
   superscalar crates. Without either `[paths]` key no Dockerfile is
   written, and the build says why. An entrypoint that opens the engine
   gets an engine stage, which builds the core's addon
-  (`superschematic-engine-napi`) from the Cargo workspace beside `[paths]
+  (`superschematic-engine-addon`) from the Cargo workspace beside `[paths]
   engine_typescript`, with the crates it reaches by path at their places
   in the checkout, as a Go server's engine stage does; the build stage
   puts it in the engine package's `native/` and emits the package's
   `./server` entry (`tsconfig.server.json`, which emits without checking
-  types, so it needs none of the TypeScript engine's dependencies) before
-  the workspace's install copies the package. Without `[paths]
-  engine_typescript` such an entrypoint gets no Dockerfile. The deploy
+  types, so the image installs none of the package's own dependencies)
+  before the workspace's install copies the package. On an engine
+  database that composes an extension's behavior the stage builds the
+  project's engine crate's `napi` member instead, its lock file seeded
+  from the engine workspace's, and the image keeps it at
+  `/engine/<crate>-napi.node`, which `SUPERSCHEMATIC_ENGINE_ADDON` names.
+  Without `[paths] engine_typescript` such an entrypoint gets no
+  Dockerfile. The deploy
   builds it as it builds Go's, from the Dockerfile at the server's path.
 
 `stack dev` runs a TypeScript server on Bun beside the Go servers (section
