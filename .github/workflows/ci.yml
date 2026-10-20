@@ -161,9 +161,11 @@ jobs:
         # rather than the one the checkout's rust-toolchain.toml pins, as the
         # version-graph archive is (tools.env says why). The wasm32 target builds the version-graph TypeScript package, and
         # rustsdkgen compile tests run cargo clippy on the generated SDK
-        # crates, so this toolchain carries clippy.
+        # crates, so this toolchain carries clippy; the projectengine tests
+        # hold the engine crates they write to rustfmt's layout, so it
+        # carries rustfmt too.
         run: |
-          rustup toolchain install "$RUST_VERSION" --profile minimal --target wasm32-unknown-unknown --component clippy
+          rustup toolchain install "$RUST_VERSION" --profile minimal --target wasm32-unknown-unknown --component clippy --component rustfmt
           rustup default "$RUST_VERSION"
 
       - name: Build the superscalar dependency

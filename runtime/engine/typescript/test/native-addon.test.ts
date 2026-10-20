@@ -32,10 +32,13 @@ after(() => {
 });
 
 // A project's addon, as a host names it: a copy of the checkout's, under
-// another name in another directory.
+// another name in another directory. Each copy is a new file: on Linux a
+// copy over one the process has loaded truncates its mapping, relocations
+// and all, and the next call into it jumps to an unrelocated address.
+let copies = 0;
 function projectAddon(): string {
   const checkout = fileURLToPath(new URL(`../native/${NATIVE_BINARY_NAME}.${nativeTriple()}.node`, import.meta.url));
-  const copy = join(directory, `project-${opened.length}-${process.pid}.node`);
+  const copy = join(directory, `project-${copies++}-${process.pid}.node`);
   copyFileSync(checkout, copy);
   return copy;
 }
