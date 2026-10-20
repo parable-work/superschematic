@@ -3,14 +3,14 @@
 # The stack's service is schemas/services/desk-stack. Change it and build it
 # again with superschematic build, which writes this file.
 #
-# On a pull request to main, check builds the stack and compiles its servers
-# with no credentials; each plan job plans a cloud environment as its
-# planner account, and each preview job deploys a member of an environment
-# with one parameter for the pull request, and destroys it when the pull
-# request closes. A pull request from a fork runs check alone. On a push to
-# main, each deploy job deploys a cloud environment in the order the stack
-# declares them, in the GitHub environment of its name, whose required
-# reviewers approve it.
+# On a pull request to main, check builds the stack and compiles its
+# servers, jobs, workers and engine runners with no credentials; each plan
+# job plans a cloud environment as its planner account, and each preview job
+# deploys a member of an environment with one parameter for the pull
+# request, and destroys it when the pull request closes. A pull request from
+# a fork runs check alone. On a push to main, each deploy job deploys a
+# cloud environment in the order the stack declares them, in the GitHub
+# environment of its name, whose required reviewers approve it.
 
 name: desk-stack
 
@@ -78,6 +78,9 @@ jobs:
         run: go build -mod=mod -o /dev/null .
       - name: Compile server desk-api
         working-directory: schemas/dist/server/desk-stack/desk-api
+        run: CGO_LDFLAGS="-L$RUNNER_TEMP/superschematic-engine/desk-db $CGO_LDFLAGS" go build -mod=mod -o /dev/null .
+      - name: Compile runner desk-db-engine-runner
+        working-directory: schemas/dist/server/desk-stack/desk-db-engine-runner
         run: CGO_LDFLAGS="-L$RUNNER_TEMP/superschematic-engine/desk-db $CGO_LDFLAGS" go build -mod=mod -o /dev/null .
 
   plan-staging:

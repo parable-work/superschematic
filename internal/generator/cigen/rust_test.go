@@ -184,9 +184,10 @@ const engineGolden = "testdata/golden/desk-stack.yml"
 // the archive of the project's engine crate, which the build writes under
 // the output root (D58). check sets up the Rust release tools.env pins,
 // builds the archive from the crate's ffi member after the build, staging
-// it as libsuperschematic_engine.a, and compiles the server with it
-// searched before the release's; a server on another database compiles as
-// before. The golden, which -update rewrites, shows the job.
+// it as libsuperschematic_engine.a, and compiles the server and the
+// database's engine runner with it searched before the release's; a server
+// on another database compiles as before. The golden, which -update
+// rewrites, shows the job.
 func TestAProjectEngineArchiveInCheck(t *testing.T) {
 	req := storefrontRequest()
 	req.Stack.Name, req.Stack.Dir = "desk-stack", "schemas/services/desk-stack"
@@ -229,6 +230,7 @@ func TestAProjectEngineArchiveInCheck(t *testing.T) {
 	want := []string{
 		"Check out", "Install superschematic " + version, "Install the static archives", "Set up Go", "Set up Rust",
 		"Build the services", "Build the engine archive of desk-db", "Compile server Orders", "Compile server desk-api",
+		"Compile runner desk-db-engine-runner",
 	}
 	if !slices.Equal(names, want) {
 		t.Fatalf("check's steps:\n%q\nwant:\n%q", names, want)
@@ -237,8 +239,10 @@ func TestAProjectEngineArchiveInCheck(t *testing.T) {
 		!strings.Contains(s.Run, "cargo build --release") || !strings.Contains(s.Run, `"$dir/libsuperschematic_engine.a"`) {
 		t.Errorf("the archive step: %+v", s)
 	}
-	if s := check.step("Compile server desk-api"); !strings.HasPrefix(s.Run, `CGO_LDFLAGS="-L$RUNNER_TEMP/superschematic-engine/desk-db $CGO_LDFLAGS" go build`) {
-		t.Errorf("desk-api compiles with %q, not against the project's archive", s.Run)
+	for _, name := range []string{"Compile server desk-api", "Compile runner desk-db-engine-runner"} {
+		if s := check.step(name); !strings.HasPrefix(s.Run, `CGO_LDFLAGS="-L$RUNNER_TEMP/superschematic-engine/desk-db $CGO_LDFLAGS" go build`) {
+			t.Errorf("%s: %q, not against the project's archive", name, s.Run)
+		}
 	}
 	if s := check.step("Compile server Orders"); s.Run != "go build -mod=mod -o /dev/null ." {
 		t.Errorf("Orders, on another database, compiles with %q", s.Run)
