@@ -938,7 +938,8 @@ func (r *Registry) RegisterProvisioner(spec ProvisionerSpec) error {
 // checkStackReferences is Finalize's part for the stack specs: every
 // connector but a generic one, which names no platform, joins registered
 // platforms of the kinds its edge joins, every platform a target names is
-// registered and of the kind it places, and the DNS platform and
+// registered and of the kind it places, each database platform it names
+// for a dialect runs that dialect, and the DNS platform and
 // provisioner a target names, when it names one, are registered.
 func (r *Registry) checkStackReferences() error {
 	for _, name := range keysOf(r.stack.connectors) {
@@ -991,6 +992,16 @@ func (r *Registry) checkStackReferences() error {
 			}
 			if platform.Kind != kind {
 				return fmt.Errorf("registry: target %q names platform %q for %s, but it is a %s platform", name, platformName, kind, platform.Kind)
+			}
+		}
+		for _, dialect := range keysOf(spec.DatabasePlatforms) {
+			platformName := spec.DatabasePlatforms[dialect]
+			platform, ok := r.stack.platforms[platformName]
+			if !ok {
+				return fmt.Errorf("registry: target %q names database platform %q for %s, which is not registered (registered platforms: %v)", name, platformName, dialect, keysOf(r.stack.platforms))
+			}
+			if platform.Kind != ir.DeployableDatabase || !slices.Contains(platform.Dialects, dialect) {
+				return fmt.Errorf("registry: target %q names platform %q for %s databases, but it is a %s platform of dialects %v", name, platformName, dialect, platform.Kind, platform.Dialects)
 			}
 		}
 		if spec.DNS != "" {

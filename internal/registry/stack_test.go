@@ -456,6 +456,22 @@ func TestRegisterTargetRejects(t *testing.T) {
 			t.Fatalf("Finalize = %v", err)
 		}
 	})
+	t.Run("unknown database platform", func(t *testing.T) {
+		err := finalize(t, func(_ *Registry, s *TargetSpec) {
+			s.DatabasePlatforms = map[string]string{SQLDialectSQLite: "fake.lite"}
+		})
+		if err == nil || !strings.Contains(err.Error(), `target "fake" names database platform "fake.lite" for sqlite, which is not registered`) {
+			t.Fatalf("Finalize = %v", err)
+		}
+	})
+	t.Run("database platform of another dialect", func(t *testing.T) {
+		err := finalize(t, func(_ *Registry, s *TargetSpec) {
+			s.DatabasePlatforms = map[string]string{SQLDialectSQLite: "fake.sql"}
+		})
+		if err == nil || !strings.Contains(err.Error(), `names platform "fake.sql" for sqlite databases, but it is a database platform of dialects [postgres]`) {
+			t.Fatalf("Finalize = %v", err)
+		}
+	})
 	t.Run("unknown DNS platform", func(t *testing.T) {
 		err := finalize(t, func(_ *Registry, s *TargetSpec) { s.DNS = "fake.dns" })
 		if err == nil || !strings.Contains(err.Error(), `names DNS platform "fake.dns", which is not registered`) {
