@@ -125,10 +125,13 @@ func resolve(t *testing.T, reg *registry.Registry, s *ir.Stack, services []stack
 // calls shop-api (D55), in each environment and checks the
 // environment.json it writes, resource graph included, against the golden
 // file. Resolution validated every node against the pinned schema of its
-// type on the way.
+// type on the way. Staging runs shop-orders' job on every deploy (D52,
+// amended), and so do Preview's members, which extend it: the job's run
+// says so, and the deploy order runs it in a jobs step before the contract
+// phase, with no node of its own.
 func TestGolden(t *testing.T) {
 	reg := assemble(t)
-	s := stacktest.WithSite(shop())
+	s := stacktest.WithJobOnDeploy(stacktest.WithSite(shop()), "Staging")
 	for _, env := range s.Environments {
 		t.Run(env.Name, func(t *testing.T) {
 			checkGolden(t, reg, s, stacktest.SiteShop(), env.Name)

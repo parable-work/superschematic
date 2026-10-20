@@ -24,7 +24,9 @@ import (
 // never two runs of one job at once, each line of a run's output with the
 // job's name in front, a run stopped at the job's timeout and run again up
 // to its retries when it fails. A run's end, success or failure, is logged
-// and never stops the environment. RunJob runs one job once, for stack
+// and never stops the environment. A job that runs on every deploy (D52,
+// amended) also runs once in the deploy order's jobs step, after the last
+// rollout wave, before stack dev waits. RunJob runs one job once, for stack
 // run, against the environment stack dev runs.
 //
 // A lock file per job in the environment's state directory keeps a run
@@ -159,6 +161,9 @@ func (p *Provisioner) buildJobs(ctx context.Context, req registry.ProvisionReque
 		}
 		p.jobs[k] = append(slices.DeleteFunc(p.jobs[k], func(other *builtJob) bool { return other.job.ID == j.ID }), b)
 		p.mu.Unlock()
+		if d := req.Environment.Deployable(j.Deployable); d != nil && d.Job != nil && d.Job.OnDeploy {
+			p.printf("job %s runs once the environment is up, as on every deploy", j.Deployable)
+		}
 		if j.Schedule == "" {
 			p.printf("job %s runs only on demand: superschematic stack run %s %s", j.Deployable, req.Environment.Environment, j.Deployable)
 			continue
@@ -337,6 +342,52 @@ func (p *Provisioner) runOnce(ctx context.Context, b *builtJob) error {
 		}
 		return fmt.Errorf("timed out after %s, the job's timeout", timeout)
 	}
+}
+
+// runDeployJobs runs each job named, a job that runs on every deploy (D52,
+// amended), once, as the deploy order's jobs step: after the last rollout
+// wave, which built it, so every server runs, and before the environment
+// is handed to Wait. It waits for each run, its retries included. A run
+// that fails is logged, as a scheduled run's is, and stops nothing: a
+// job's run never stops the environment. A job whose run from stack run
+// goes on is skipped. When ctx ends, the run going on is stopped.
+func (p *Provisioner) runDeployJobs(ctx context.Context, req registry.ProvisionRequest, jobs []string) error {
+	for _, name := range jobs {
+		b := p.builtJob(req, name)
+		if b == nil {
+			return fmt.Errorf("local: job %s runs on each start of the environment, but no rollout step built it", name)
+		}
+		lock, held, err := p.lockJob(req, b.job)
+		if err != nil {
+			return err
+		}
+		if held {
+			p.printf("job %s: skipped the run after the rollout: a run of it goes on, from stack run", name)
+			continue
+		}
+		err = p.runJob(ctx, b, "the run after the rollout")
+		unlock(lock)
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if err != nil {
+			p.printf("job %s: the run after the rollout failed; the environment runs on: %v", name, err)
+		}
+	}
+	return nil
+}
+
+// builtJob returns the job of the environment a rollout built whose
+// deployable is name, or nil.
+func (p *Provisioner) builtJob(req registry.ProvisionRequest, name string) *builtJob {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, b := range p.jobs[key(req.Environment)] {
+		if b.job.Deployable == name {
+			return b
+		}
+	}
+	return nil
 }
 
 // RunJob runs a job of the environment once, as `superschematic stack run`

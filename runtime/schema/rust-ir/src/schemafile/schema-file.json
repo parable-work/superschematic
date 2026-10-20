@@ -2260,6 +2260,9 @@
         "of": {
           "$ref": "#/$defs/DeployableRef"
         },
+        "onDeploy": {
+          "type": "boolean"
+        },
         "platform": {
           "default": "",
           "type": "string"

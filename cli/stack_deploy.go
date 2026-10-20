@@ -634,6 +634,9 @@ func writePlanText(w io.Writer, environment string, r *stackdeploy.PlanResult) e
 			fmt.Fprintf(&b, "  %s\n    %s\n", h.ID, h.Reason)
 		}
 	}
+	if len(r.Jobs) > 0 {
+		fmt.Fprintf(&b, "\nJobs the deploy runs once after the rollout, before the contract phase: %s\n", strings.Join(r.Jobs, ", "))
+	}
 	if len(r.Unpinned) > 0 {
 		fmt.Fprintf(&b, "\nServers and jobs with no image yet, planned at their repository: %s (deploy builds them, or takes them with --image)\n", strings.Join(r.Unpinned, ", "))
 	}
@@ -773,7 +776,9 @@ func newStackDeployCmd(a *app) *cobra.Command {
 (docs/stack-model.md, section 5.3): the infrastructure; the expand phase
 of each database's migration, planned from the schema the deploy manifest
 records; the servers and jobs, callees first, each wave once the platform
-reports it ready; the contract phases; exposure. Then it writes the deploy
+reports it ready; each job the environment runs on every deploy (its
+settings' onDeploy), once, waiting for it and failing the deploy when its
+last try fails; the contract phases; exposure. Then it writes the deploy
 manifest to the target's state: the resolved environment, the IR digest of
 each service, the image of each server and job and each database's schema.
 

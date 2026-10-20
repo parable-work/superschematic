@@ -149,6 +149,88 @@ func TestJobRollsOutAfterItsCallees(t *testing.T) {
 	t.Fatalf("no rollout step rolls the job out: %+v", env.DeployOrder)
 }
 
+// TestJobOnDeploy: a job whose settings say onDeploy runs on every deploy
+// (D52, amended), in a jobs step of its own after the last rollout wave and
+// before the contract phase; no other environment has one. Preview's
+// members inherit Staging's onDeploy, as they inherit any setting, unlike
+// a schedule, and a member turns it off with false. onDeploy on a server
+// or a worker is refused.
+func TestJobOnDeploy(t *testing.T) {
+	reg := assemble(t)
+	order := func(env *ir.ResolvedEnvironment) string {
+		var steps []string
+		for _, step := range env.DeployOrder {
+			name := string(step.Step)
+			switch {
+			case step.Migration != "":
+				name += " " + string(step.Migration)
+			case step.Wave > 0:
+				name += fmt.Sprintf(" %d", step.Wave)
+			case step.Step == ir.StepJobs:
+				name += " (" + strings.Join(step.Deployables, ", ") + ")"
+				if len(step.Resources) > 0 {
+					name += " with resources"
+				}
+			}
+			steps = append(steps, name)
+		}
+		return strings.Join(steps, ", ")
+	}
+	s, services := jobShop()
+	stacktest.WithJobOnDeploy(s, "Staging")
+	staging := mustResolve(t, reg, s, services, "Staging")
+	job := staging.Deployable(stacktest.ShipOrdersJob)
+	if !job.Job.OnDeploy || job.Job.Schedule != "0 * * * *" {
+		t.Errorf("Staging's job runs %+v, want its schedule and on each deploy", job.Job)
+	}
+	if got, want := order(staging), "infrastructure, migrate expand, rollout 1, rollout 2, jobs (shop-orders-ship-orders), migrate contract, exposure"; got != want {
+		t.Errorf("Staging's deploy order: %s\nwant: %s", got, want)
+	}
+	production := mustResolve(t, reg, s, services, "Production")
+	if production.Deployable(stacktest.ShipOrdersJob).Job.OnDeploy || strings.Contains(order(production), "jobs") {
+		t.Errorf("Production, which sets no onDeploy: %s", order(production))
+	}
+	preview := mustResolve(t, reg, s, services, "Preview")
+	if run := preview.Deployable(stacktest.ShipOrdersJob).Job; !run.OnDeploy || run.Schedule != "" {
+		t.Errorf("a Preview member runs %+v, want no schedule and on each deploy, from Staging", run)
+	}
+
+	off := false
+	s, services = jobShop()
+	stacktest.WithJobOnDeploy(s, "Staging")
+	settingsFor(s.Environment("Preview"), stacktest.JobOf(stacktest.ShopOrders, "ShipOrders")).OnDeploy = &off
+	preview = mustResolve(t, reg, s, services, "Preview")
+	if preview.Deployable(stacktest.ShipOrdersJob).Job.OnDeploy || strings.Contains(order(preview), "jobs") {
+		t.Errorf("a Preview member turned off: %s", order(preview))
+	}
+
+	// The data form carries the setting, and environment.json the run.
+	data, err := stack.Marshal(staging)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"onDeploy": true`, `"step": "jobs"`} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("environment.json lacks %s", want)
+		}
+	}
+	back, err := stack.Unmarshal(data)
+	if err != nil || !back.Deployable(stacktest.ShipOrdersJob).Job.OnDeploy {
+		t.Errorf("environment.json read back: %v", err)
+	}
+
+	on := true
+	s, services = jobShop()
+	settingsFor(s.Environment("Staging"), stacktest.Of(stacktest.ShopAPI)).OnDeploy = &on
+	_, errs := resolve(t, reg, s, services, "Staging")
+	mustFail(t, errs, stack.CodeInvalidSettings, "sets a schedule, a time zone, enabled or onDeploy on server shop-api; only a job takes them")
+
+	s, services = workerShop()
+	settingsFor(s.Environment("Staging"), stacktest.WorkerOf(stacktest.ShopOrders, "FulfilOrders")).OnDeploy = &on
+	_, errs = resolve(t, reg, s, services, "Staging")
+	mustFail(t, errs, stack.CodeInvalidSettings, "sets onDeploy on worker shop-orders-fulfil-orders, which runs until it is stopped; only a job runs on each deploy")
+}
+
 // TestJobsOfTheStack: stack.Jobs gives each job with its API, its calls
 // and its language, whatever the environment.
 func TestJobsOfTheStack(t *testing.T) {
@@ -195,7 +277,7 @@ func TestJobRefusals(t *testing.T) {
 		s, services := jobShop()
 		settingsFor(s.Environment("Staging"), stacktest.Of(stacktest.ShopAPI)).Schedule = "0 * * * *"
 		_, errs := resolve(t, reg, s, services, "Staging")
-		mustFail(t, errs, stack.CodeInvalidSettings, "sets a schedule, a time zone or enabled on server shop-api; only a job takes them")
+		mustFail(t, errs, stack.CodeInvalidSettings, "sets a schedule, a time zone, enabled or onDeploy on server shop-api; only a job takes them")
 	})
 	t.Run("a schedule that is no cron", func(t *testing.T) {
 		s, services := jobShop()

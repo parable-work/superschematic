@@ -38,7 +38,7 @@ balancer and DNS resources that the Pulumi provisioner applies.
 | `@requireService` and `@allowService`, and the stack's check that every `calls` edge reaches an operation | the callee's half of service auth: a server whose API has a service clause does not start yet |
 | [generated CI](#generated-ci): `outputs.ci` writes a GitHub Actions workflow that checks, plans, previews and deploys the stack, signing in to gcp through Workload Identity Federation | other CI systems; a check that the committed workflow is current |
 | [buckets](/superschematic/guides/buckets/): the `Bucket` kind, `buckets` in an API's config, the `bucket` deployable and edge, a provider-neutral bucket in `Deps` over GCS with signed URLs, in Go, TypeScript and Rust, fake-gcs-server under `stack dev`, and on gcp a private Cloud Storage bucket | a bucket on another provider |
-| [jobs](#jobs): `@job`, the `job` deployable with its API's edges, its schedule per environment, Go's `Jobs` and `NewJobs`, TypeScript's `Jobs` and `createJobs`, Rust's `Jobs` and `create_jobs`, each job's entrypoint and image, `stack dev`'s schedules and `stack run`; on gcp a Cloud Run job, its schedule a Cloud Scheduler job, and `stack run` an execution | a job that runs on every deploy |
+| [jobs](#jobs): `@job`, the `job` deployable with its API's edges, its schedule per environment, Go's `Jobs` and `NewJobs`, TypeScript's `Jobs` and `createJobs`, Rust's `Jobs` and `create_jobs`, each job's entrypoint and image, `stack dev`'s schedules and `stack run`, and a job that runs on every deploy; on gcp a Cloud Run job, its schedule a Cloud Scheduler job, and `stack run` and a deploy's run an execution | |
 | [static sites](/superschematic/guides/static-sites/): the `Site` kind, the `site` deployable and edge, each API's CORS for the sites that call it, `stack dev`'s file server, the deploy's publish through a target's `Sites` seam, and on gcp a bucket per site behind a load balancer with Cloud CDN | a site's SDK clients in the browser |
 | [queues and workers](#queues-and-workers): `@queue` on a DB service's message class, its table in every dialect, the Go ORM's `Enqueue` in your transaction and its claims; `@worker`, the `worker` deployable with its API's edges and its instances and concurrency per environment, Go's `Workers` and `NewWorkers`, TypeScript's `Workers` and `createWorkers` over the HTTP runtime's queue client, Rust's `Workers` and `create_workers` over the Rust HTTP runtime's, each worker's entrypoint and image, and `stack dev`'s worker processes; on gcp a Cloud Run worker pool | claims on SQLite and D1 |
 
@@ -602,7 +602,47 @@ export abstract class Preview extends Staging {}
 environment, such as a preview, runs no schedule unless its settings turn
 it on with `enabled: true`. Each job's resolved deployable records what
 runs in the environment: its schedule, empty for none, its time zone,
-timeout and retries.
+timeout and retries, and whether it runs on every deploy.
+
+### Run a job on every deploy
+
+`onDeploy: true` runs a job once on every deploy of the environment, with
+or without a schedule. Use it for work that must follow each rollout: a
+backfill of what the new servers write, a cache to warm, reference rows
+to bring up to date.
+
+```ts
+// schemas/services/shop-orders/src/jobs.schema.ts
+// Fills each order's total_cents, which this release adds and its servers
+// write, for the orders placed before it.
+@job({ timeout: "30m", retries: 2 })
+export abstract class BackfillTotals {}
+
+// schemas/services/shop-stack/src/stack.schema.ts
+@environment({
+  target: "gcp",
+  gcp: { project: "acme-staging", region: "us-east1" },
+  settings: [{ of: ShopOrders, job: "BackfillTotals", onDeploy: true }],
+})
+export abstract class Staging {}
+```
+
+The deploy runs it in a step of its own after the last rollout wave,
+when every server of the new version runs, and before the `contract`
+phase, so the job can still read a column the contract drops, and a
+column the contract makes `NOT NULL` is filled first: the expand,
+backfill, contract order a renamed or tightened column needs. The deploy
+waits for the run, its retries included, and when its last try fails it
+stops there with that try's error, runs no `contract` step, and records
+the failure in the manifest; the next deploy runs the job again. Every
+deploy runs it, one that changes nothing included, so write it to be run
+twice. `stack plan` lists the jobs a deploy runs.
+
+`onDeploy` merges over the `extends` chain as any setting does, so a
+preview member of an environment that sets it runs the job too, unlike a
+schedule; `onDeploy: false` in the member turns it off. Only a job takes
+it. A target that runs no job on demand cannot run one on a deploy, and
+its deploy is refused before anything changes.
 
 ### Run a job
 
@@ -634,6 +674,17 @@ job shop-orders-ship-orders: the run due at 2026-10-07T12:01:00Z, try 1 of 2 suc
 
 A run that outlives the job's timeout is stopped, a failed run is run
 again up to its retries, and a run's failure never stops the environment.
+A job that runs on every deploy runs once when `stack dev` starts, after
+the last rollout wave, and `stack dev` waits for it before it prints where
+each server is:
+
+```text
+job shop-orders-backfill-totals runs once the environment is up, as on every deploy
+...
+job shop-orders-backfill-totals: start the run after the rollout, try 1 of 3
+job shop-orders-backfill-totals: the run after the rollout, try 1 of 3 succeeded in 1.2s
+```
+
 To run a job once, now, run `stack run` from another terminal:
 
 ```sh
@@ -1026,7 +1077,8 @@ Each node of the resource graph has an ID, a type token, its properties,
 owners, and `inherited` when a parameterized member reads it from the
 parent environment. `deployOrder` lists the steps: infrastructure; the
 migrations' `expand` phase; the rollout in waves, callees before their
-callers; the migrations' `contract` phase; then exposure.
+callers; the jobs that run on every deploy, in a `jobs` step that holds
+no nodes; the migrations' `contract` phase; then exposure.
 
 ## The generated server
 
@@ -1327,7 +1379,11 @@ superschematic stack unlock Staging
   `<stack>-migrate`, which also gives each server that connects to a
   database its privileges. An execution that fails stops the deploy with
   the runner's error, which the deploy reads from the execution's logs in
-  Cloud Logging, and the next deploy runs the phase again. The deploy
+  Cloud Logging, and the next deploy runs the phase again. A job that runs
+  on every deploy runs after the last wave as one execution of its Cloud
+  Run job, as `run` runs it, and the deploy waits for it; its last try
+  failing stops the deploy before the `contract` phase with the job's
+  error from Cloud Logging. The deploy
   records a manifest in the state bucket after every step, and refuses a
   migration hazard no `--allow` acknowledges. It holds the run's deploy
   lock throughout, an object of the state bucket, from before it reads
@@ -1567,7 +1623,8 @@ from its parent's stack through a stack reference.
 
 Each step of the deploy order is one targeted `up` of that program, and
 the last step that holds nodes updates the whole program, which deletes
-what the graph dropped. Migrations run between steps, outside the graph.
+what the graph dropped. Migrations, and the jobs that run on every
+deploy, run between steps, outside the graph.
 The release pins the `pulumi` CLI at the Go SDK's version,
 `PULUMI_VERSION` in `tools.env`.
 

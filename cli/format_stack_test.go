@@ -127,3 +127,42 @@ func TestFormatCommand_WritesTheEnvironmentsInTheirOrder(t *testing.T) {
 	_, err = runFormatCommand(t, "--to=ts", "--stdout", reorder(map[string]int{"Preview": 1, "Staging": 2, "Production": 3}))
 	require.ErrorContains(t, err, "the @environment classes in their order, Preview, Staging, Production, have no TypeScript form: a class is declared after the class it extends, so the reader would number them Staging, Preview, Production")
 }
+
+// TestFormatCommand_RoundTripsAJobsOnDeploy: a job's onDeploy (D52,
+// amended), on in Staging and off again in Preview, which extends it, is
+// written to TypeScript as the setting it is, and read back gives the same
+// JSON.
+func TestFormatCommand_RoundTripsAJobsOnDeploy(t *testing.T) {
+	asJSON, err := runFormatCommand(t, "--to=json", "--stdout", filepath.Join(formatStackTestdata, "services", "shop-stack", "src", "stack.schema.ts"))
+	require.NoError(t, err)
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal([]byte(asJSON), &doc))
+	types := doc["types"].(map[string]any)
+	staging := types["Staging"].(map[string]any)["environment"].(map[string]any)
+	found := false
+	for _, element := range staging["settings"].([]any) {
+		if of := element.(map[string]any)["of"].(map[string]any); of["job"] == "ShipOrders" {
+			element.(map[string]any)["onDeploy"] = true
+			found = true
+		}
+	}
+	require.True(t, found, "Staging sets no ShipOrders")
+	preview := types["Preview"].(map[string]any)["environment"].(map[string]any)
+	ship := map[string]any{"of": map[string]any{"service": map[string]any{"name": "shop-orders", "kind": "API"}, "job": "ShipOrders"}, "onDeploy": false}
+	settings, _ := preview["settings"].([]any)
+	preview["settings"] = append(settings, ship)
+	data, err := json.MarshalIndent(doc, "", "  ")
+	require.NoError(t, err)
+	jsonPath := filepath.Join(t.TempDir(), "stack.schema.json")
+	require.NoError(t, os.WriteFile(jsonPath, data, 0o644))
+
+	ts, err := runFormatCommand(t, "--to=ts", "--stdout", jsonPath)
+	require.NoError(t, err)
+	assert.Contains(t, ts, `{ of: ShopOrders, job: "ShipOrders", schedule: "0 * * * *", timeZone: "America/New_York", onDeploy: true }`)
+	assert.Contains(t, ts, `{ of: ShopOrders, job: "ShipOrders", onDeploy: false }`)
+	back, err := runFormatCommand(t, "--to=json", "--stdout", formatStackService(t, ts))
+	require.NoError(t, err)
+	var got map[string]any
+	require.NoError(t, json.Unmarshal([]byte(back), &got))
+	assert.Equal(t, doc, got)
+}

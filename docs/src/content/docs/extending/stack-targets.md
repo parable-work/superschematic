@@ -306,7 +306,7 @@ seams on its `TargetSpec`, each an interface in `registry`:
 | `Migrations` | `MigrationRunner` | runs one phase of each database's migration plans between two steps of the deploy |
 | `Builder` | `ImageBuilder` | builds a server's or a job's image from the Dockerfile a stack's build writes, and returns it by digest; `BuildRequest.Deployable` names which |
 | `CI` | `CIIdentities` | says how a generated CI job signs in to a resolved environment as `planner` or `deployer`: a `CIIdentity`, or nil when it cannot yet |
-| `Jobs` | `JobRunner` | runs a deployed job once on demand, for `stack run`: a `JobRunRequest` names the run, the job and the image the deploy manifest records, and `RunJob` returns when the run ends, with the last try's error when it fails (D52) |
+| `Jobs` | `JobRunner` | runs a deployed job once on demand, for `stack run` and for the deploy's jobs step, which runs each job an environment runs on every deploy after the rollout (D52, amended): a `JobRunRequest` names the run, the job and the image the deploy manifest records, or the rollout just pinned, and `RunJob` returns when the run ends, with the last try's error when it fails (D52) |
 | `Sites` | `SitePublisher` | puts a site's files under their digest, and its config for a run, where its platform serves them (D55) |
 | `Bundles` | `BundlePublisher` | keeps the files of a server's, job's or worker's bundle under their digest, `Publish(ctx, run, deployable, dir, digest)` (D64) |
 | `PreDestroy` | `DestroyPreparer` | readies a run's resources before `stack destroy` hands them to the provisioner, such as emptying a member's buckets; an error stops the destroy (D64) |
@@ -316,7 +316,8 @@ refuses any of them but `Secrets` without a provisioner, and any of them
 but `State` and `Secrets` without `State`. With no `Migrations`, a deploy
 that has a migration to run is refused; with no `Builder`, every image
 comes from `--image` or the deploy manifest; with no `Jobs`, `stack run`
-refuses the target's environments; with no `Sites` or `Bundles`, an
+refuses the target's environments, and so does a deploy of one that runs
+a job on every deploy; with no `Sites` or `Bundles`, an
 environment with a site, or with a deployable that runs a bundle, does not
 deploy.
 

@@ -90,8 +90,10 @@ type DeployOptions struct {
 //     migration runner runs the expand phase of each plan (first finishing
 //     any phase a failed deploy left part-way); the provisioner rolls the
 //     servers out wave by wave, callees first, each wave returning once
-//     the platform reports its servers ready; the runner runs the contract
-//     phases; the provisioner applies exposure;
+//     the platform reports its servers ready; the target's job runner runs
+//     each job that runs on every deploy, once, and waits for it (D52,
+//     amended); the runner runs the contract phases; the provisioner
+//     applies exposure;
 //  3. it writes the manifest after each step, and at the end.
 //
 // It holds the run's deploy lock throughout, from before it reads the
@@ -104,9 +106,11 @@ type DeployOptions struct {
 // failure. A rollout that fails runs no contract step, so the servers of
 // the previous version keep the expanded schema, and the manifest records
 // the model between the phases: the next deploy plans from it, and its
-// plan supersedes the pending contract (D27, amended). A migration phase
-// that fails is recorded as pending, and the next deploy finishes it
-// before anything else migrates, as the runner requires.
+// plan supersedes the pending contract (D27, amended). A job of the jobs
+// step whose last try fails stops the deploy in the same place, before the
+// contract, and the next deploy runs it again. A migration phase that
+// fails is recorded as pending, and the next deploy finishes it before
+// anything else migrates, as the runner requires.
 func Deploy(ctx context.Context, o DeployOptions) (m *Manifest, err error) {
 	s, err := open(o.Options)
 	if err != nil {
@@ -159,6 +163,9 @@ func Deploy(ctx context.Context, o DeployOptions) (m *Manifest, err error) {
 	}
 	if s.target.Migrations == nil && (len(pending) > 0 || hasSteps(plans)) {
 		return nil, fmt.Errorf("environment %s has migrations to run, and target %s has no migration runner", s.env.Environment, s.target.Name)
+	}
+	if err := s.checkDeployJobs(); err != nil {
+		return nil, err
 	}
 	if p, ok := s.target.Migrations.(registry.MigrationPreparer); ok && runsMigrations(s.env, prev, plans, pending) {
 		if err := p.PrepareMigrations(ctx, s.run, s.log); err != nil {
@@ -332,8 +339,55 @@ func (d *deploy) step(ctx context.Context, step *ir.DeployStep) error {
 			}
 		}
 		return nil
+	case ir.StepJobs:
+		// The jobs that run on every deploy (D52, amended), one at a time,
+		// each with the image the rollout gave it: the one the manifest now
+		// records.
+		for _, name := range step.Deployables {
+			image := d.images[name]
+			d.logf("  run job %s (image %s) and wait for it to end", name, image)
+			if err := d.target.Jobs.RunJob(ctx, registry.JobRunRequest{Run: d.run, Job: name, Image: image, Log: d.log}); err != nil {
+				return fmt.Errorf("job %s: %w", name, err)
+			}
+		}
+		return nil
 	}
 	return fmt.Errorf("the deploy order has a step of kind %q", step.Step)
+}
+
+// checkDeployJobs refuses, before any step, a deploy whose order runs a job
+// on the deploy (D52, amended) that the target cannot run: one with no job
+// runner, or a job whose artifact is not an image, which a job runner runs
+// by its image.
+func (s *session) checkDeployJobs() error {
+	for _, step := range s.env.DeployOrder {
+		if step.Step != ir.StepJobs {
+			continue
+		}
+		for _, name := range step.Deployables {
+			d := s.env.Deployable(name)
+			switch {
+			case d == nil || d.Kind != ir.DeployableJob:
+				return fmt.Errorf("the deploy order runs %s on each deploy, which is no job of environment %s", name, s.env.Environment)
+			case s.target.Jobs == nil:
+				return fmt.Errorf("environment %s runs job %s on each deploy, and target %s runs no job on demand; turn its onDeploy off", s.env.Environment, name, s.target.Name)
+			case !d.HasImage():
+				return fmt.Errorf("environment %s runs job %s on each deploy, and its platform %s runs a bundle, which a deploy does not run yet; turn its onDeploy off", s.env.Environment, name, d.Platform)
+			}
+		}
+	}
+	return nil
+}
+
+// deployJobs are the jobs the run's deploy order runs on each deploy.
+func deployJobs(env *ir.ResolvedEnvironment) []string {
+	var out []string
+	for _, step := range env.DeployOrder {
+		if step.Step == ir.StepJobs {
+			out = append(out, step.Deployables...)
+		}
+	}
+	return out
 }
 
 // finishPending runs, on database, each phase a failed deploy left

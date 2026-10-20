@@ -645,7 +645,9 @@ design is section 8.3 of
    that has a schedule in the environment on it, a TypeScript one as `bun
    main.ts`, in its time zone: never two runs of one job at once, a run stopped
    at the job's timeout and run again up to its retries, each line it
-   prints with its name in front. A job's run never stops the environment.
+   prints with its name in front. A job whose settings set `onDeploy` runs
+   once after the last rollout wave, and dev waits for it before it prints
+   its summary. A job's run never stops the environment.
 7. Build each site once, `bun run <build>` in its package after the same
    install, once the servers it calls are ready, and serve the directory
    its build wrote from a file server on `http://127.0.0.1:<port>`, with
@@ -821,7 +823,8 @@ the manifest records or `--bundle` names, fetched from the target and
 placed beside the program. It also lists
 the secrets with no value, the servers and jobs with no image or bundle
 yet and the sites with no files yet (which a deploy builds), the migration
-phases a failed deploy left part-way, the records to create by hand
+phases a failed deploy left part-way, the jobs the deploy runs once after
+its rollout, the records to create by hand
 for a domain no DNS platform holds, and the run's deploy lock when a
 deploy holds it, since what the plan reads may change when that deploy
 ends. It takes no lock itself. It exits 1 after printing when a plan
@@ -875,8 +878,13 @@ A build writes no deploy manifest.
 ### `stack deploy <environment>`
 
 Deploy the environment in deploy order: infrastructure, each database's
-`expand` phase, the servers and jobs wave by wave, callees first, the
-`contract` phases, exposure. Before any step, it builds the image of each
+`expand` phase, the servers and jobs wave by wave, callees first, each
+job the environment's settings run on every deploy (`onDeploy`), the
+`contract` phases, exposure. A job that runs on every deploy runs once,
+through the target's job runner as `stack run` runs it (on gcp an
+execution of its Cloud Run job), and the deploy waits for it; its last
+try failing stops the deploy before the `contract` phases with that try's
+error, and the next deploy runs it again. Before any step, it builds the image of each
 server and job
 `--image` names none for whose build context changed since the image the
 manifest records, as `stack build` does; one with no Dockerfile keeps the

@@ -507,7 +507,8 @@
         "name": "ShipOrders",
         "timeZone": "America/New_York",
         "timeoutSeconds": 300,
-        "retries": 1
+        "retries": 1,
+        "onDeploy": true
       },
       "resourceName": {
         "$concat": [
@@ -3511,6 +3512,12 @@
         "shop-orders-fulfil-orders.worker-pool",
         "shop-orders-ship-orders.job",
         "shop-web.url-map"
+      ]
+    },
+    {
+      "step": "jobs",
+      "deployables": [
+        "shop-orders-ship-orders"
       ]
     },
     {
