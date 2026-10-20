@@ -1,6 +1,6 @@
 [package]
 name = "superschematic-http-runtime"
-version = "0.0.0"
+version = "0.0.1"
 edition = "2021"
 rust-version = "1.99.0"
 authors = ["Parable Work, Inc."]
@@ -33,7 +33,7 @@ serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 # The version is the release's, which scripts/bump_version.py sets with the
 # crate's own: cargo publish needs one beside the path.
-superschematic-schema-runtime = { version = "0.0.0", path = "../../schema/rust" }
+superschematic-schema-runtime = { version = "0.0.1", path = "../../schema/rust" }
 # rt, signal and macros for Shutdown::on_signals, which spawns the task
 # that waits for SIGTERM or SIGINT.
 tokio = { version = "1.52.2", features = ["macros", "rt", "signal", "sync", "time"] }

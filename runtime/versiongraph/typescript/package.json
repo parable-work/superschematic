@@ -1,6 +1,6 @@
 {
   "name": "@superschematic/versiongraph",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "description": "The version-graph core built for WebAssembly (compose, merge, diff, contentHash and validate over the core's JSON contract, in the browser, bun and Node), the version-graph engine over storage adapters, and its Postgres and SQLite adapters. Ships the compiled ESM and the wasm module.",
   "type": "module",
   "main": "./dist/index.js",

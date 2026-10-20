@@ -2089,7 +2089,7 @@ dependencies = [
 
 [[package]]
 name = "superschematic-http-runtime"
-version = "0.0.0"
+version = "0.0.1"
 dependencies = [
  "argon2",
  "async-trait",
@@ -2119,7 +2119,7 @@ dependencies = [
 
 [[package]]
 name = "superschematic-schema-runtime"
-version = "0.0.0"
+version = "0.0.1"
 dependencies = [
  "regex",
  "serde",

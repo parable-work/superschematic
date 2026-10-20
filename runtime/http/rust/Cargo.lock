@@ -1446,7 +1446,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
 name = "superschematic-http-runtime"
-version = "0.0.0"
+version = "0.0.1"
 dependencies = [
  "argon2",
  "async-trait",
@@ -1479,7 +1479,7 @@ dependencies = [
 
 [[package]]
 name = "superschematic-schema-runtime"
-version = "0.0.0"
+version = "0.0.1"
 dependencies = [
  "regex",
  "serde",

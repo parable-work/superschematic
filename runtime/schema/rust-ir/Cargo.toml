@@ -1,6 +1,6 @@
 [package]
 name = "superschematic-schema-ir"
-version = "0.0.0"
+version = "0.0.1"
 edition = "2021"
 rust-version = "1.99.0"
 description = "The behavior engine's run-time schema reader: the IR reader, validation and parse, and the strict schema-file loader"

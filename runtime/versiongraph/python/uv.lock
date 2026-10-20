@@ -505,7 +505,7 @@ wheels = [
 
 [[package]]
 name = "superschematic-versiongraph"
-version = "0.0.0"
+version = "0.0.1"
 source = { editable = "." }
 
 [package.optional-dependencies]

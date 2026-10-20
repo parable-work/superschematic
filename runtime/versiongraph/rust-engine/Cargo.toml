@@ -1,6 +1,6 @@
 [package]
 name = "superschematic-versiongraph-engine"
-version = "0.0.0"
+version = "0.0.1"
 edition = "2021"
 rust-version = "1.99.0"
 description = "The version graph's engine: every graph operation over a storage adapter, with a Postgres adapter and a SQLite adapter"

@@ -8,8 +8,8 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/parable-work/superscalar/go v0.0.0-20261007220421-a48468f5a87e
-	github.com/parable-work/superschematic/ir v0.0.0
-	github.com/parable-work/superschematic/runtime/schema/go v0.0.0
+	github.com/parable-work/superschematic/ir v0.0.1
+	github.com/parable-work/superschematic/runtime/schema/go v0.0.1
 	github.com/stretchr/testify v1.12.1
 	go.opentelemetry.io/otel v1.46.0
 	go.opentelemetry.io/otel/sdk v1.46.0

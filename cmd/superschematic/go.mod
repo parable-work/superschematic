@@ -3,10 +3,10 @@ module github.com/parable-work/superschematic/cmd/superschematic
 go 1.26.4
 
 require (
-	github.com/parable-work/superschematic v0.0.0
-	github.com/parable-work/superschematic/extensions/cloudflare v0.0.0
-	github.com/parable-work/superschematic/extensions/gcp v0.0.0
-	github.com/parable-work/superschematic/extensions/pulumi v0.0.0
+	github.com/parable-work/superschematic v0.0.1
+	github.com/parable-work/superschematic/extensions/cloudflare v0.0.1
+	github.com/parable-work/superschematic/extensions/gcp v0.0.1
+	github.com/parable-work/superschematic/extensions/pulumi v0.0.1
 )
 
 require (
@@ -107,7 +107,7 @@ require (
 	github.com/opentracing/basictracer-go v1.1.0 // indirect
 	github.com/opentracing/opentracing-go v1.2.0 // indirect
 	github.com/parable-work/superscalar/go v0.0.0-20261007220421-a48468f5a87e // indirect
-	github.com/parable-work/superschematic/ir v0.0.0 // indirect
+	github.com/parable-work/superschematic/ir v0.0.1 // indirect
 	github.com/pb33f/ordered-map/v2 v2.3.1 // indirect
 	github.com/pgavlin/fx v0.1.6 // indirect
 	github.com/pgavlin/fx/v2 v2.0.12 // indirect

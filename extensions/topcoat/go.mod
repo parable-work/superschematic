@@ -13,8 +13,8 @@ replace github.com/parable-work/superschematic/ir => ../../ir
 replace github.com/microsoft/typescript-go => github.com/parable-work/typescript-go v0.0.0-20260701192534-c5de5679073f
 
 require (
-	github.com/parable-work/superschematic v0.0.0
-	github.com/parable-work/superschematic/ir v0.0.0
+	github.com/parable-work/superschematic v0.0.1
+	github.com/parable-work/superschematic/ir v0.0.1
 )
 
 require (

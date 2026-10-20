@@ -1526,7 +1526,7 @@ dependencies = [
 
 [[package]]
 name = "superschematic-schema-runtime"
-version = "0.0.0"
+version = "0.0.1"
 dependencies = [
  "regex",
  "serde",

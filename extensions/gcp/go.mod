@@ -14,8 +14,8 @@ require (
 	cloud.google.com/go/serviceusage v1.16.0
 	cloud.google.com/go/storage v1.69.0
 	github.com/googleapis/gax-go/v2 v2.26.2
-	github.com/parable-work/superschematic v0.0.0
-	github.com/parable-work/superschematic/ir v0.0.0
+	github.com/parable-work/superschematic v0.0.1
+	github.com/parable-work/superschematic/ir v0.0.1
 	google.golang.org/api v0.288.0
 	google.golang.org/grpc v1.84.0
 	google.golang.org/protobuf v1.36.11

@@ -3,8 +3,8 @@ module github.com/parable-work/superschematic/extensions/cloudflare
 go 1.26.4
 
 require (
-	github.com/parable-work/superschematic v0.0.0
-	github.com/parable-work/superschematic/ir v0.0.0
+	github.com/parable-work/superschematic v0.0.1
+	github.com/parable-work/superschematic/ir v0.0.1
 )
 
 require (

@@ -19,9 +19,9 @@ replace github.com/microsoft/typescript-go => github.com/parable-work/typescript
 
 require (
 	github.com/blang/semver v3.5.1+incompatible
-	github.com/parable-work/superschematic v0.0.0
-	github.com/parable-work/superschematic/extensions/gcp v0.0.0
-	github.com/parable-work/superschematic/ir v0.0.0
+	github.com/parable-work/superschematic v0.0.1
+	github.com/parable-work/superschematic/extensions/gcp v0.0.1
+	github.com/parable-work/superschematic/ir v0.0.1
 	github.com/pulumi/pulumi/sdk/v3 v3.259.0
 	gopkg.in/yaml.v3 v3.0.1
 )

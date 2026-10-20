@@ -1,6 +1,6 @@
 [package]
 name = "superschematic-versiongraph-python"
-version = "0.0.0"
+version = "0.0.1"
 edition = "2021"
 rust-version = "1.99.0"
 description = "PyO3 binding of the version-graph core; maturin builds it into the superschematic-versiongraph wheel"
