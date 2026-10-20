@@ -408,6 +408,7 @@ func TestGenerateUnionsAndDefaults(t *testing.T) {
 		"index.ts",
 		filepath.Join("types", "types.ts"),
 		filepath.Join("types", "unions.ts"),
+		filepath.Join("validators", "unions.ts"),
 		filepath.Join("validators", "types", "settings.ts"),
 		filepath.Join("mask", "types", "settings.ts"),
 	} {

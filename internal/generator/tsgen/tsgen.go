@@ -120,6 +120,10 @@ type FieldInfo struct {
 	// DefaultScalarCast is the scalar symbol DefaultLiteral is cast to when
 	// the field is a scalar (`"UTC" as TemporalTimeZone`), else "".
 	DefaultScalarCast string
+
+	// IsUnion marks a field whose type is a union, local or imported:
+	// parse<Type>FromJSON reads each of its values with parse<Union>FromJSON.
+	IsUnion bool
 }
 
 // TypeInfo holds information about a complex type for TypeScript generation.
@@ -146,6 +150,51 @@ type UnionInfo struct {
 	Name  string
 	Doc   string
 	Types []string
+
+	// Discriminator is the @internalMetadata field every member declares
+	// (codegen.UnionInfo.Discriminator), or "".
+	Discriminator string
+
+	// DispatchByDiscriminator is true when every member also gives the
+	// discriminator a @default: parse<Union>FromJSON then reads the member
+	// that value names, as the Go wrapper does. Otherwise it picks a member
+	// by its Fields and Tags.
+	DispatchByDiscriminator bool
+
+	// Members are the member types in declaration order, index-aligned with
+	// Types.
+	Members []UnionMemberInfo
+}
+
+// DiscriminatorValueList returns the members' discriminator values, each
+// quoted and comma-separated, for the error that names them.
+func (u UnionInfo) DiscriminatorValueList() string {
+	values := make([]string, len(u.Members))
+	for i, m := range u.Members {
+		values[i] = strconv.Quote(m.DiscriminatorValue)
+	}
+	return strings.Join(values, ", ")
+}
+
+// UnionMemberInfo is one member of a union as parse<Union>FromJSON reads
+// it.
+type UnionMemberInfo struct {
+	Name string
+
+	// DiscriminatorValue is the member's @default of the union's
+	// discriminator, or "".
+	DiscriminatorValue string
+
+	// Fields and Tags are the member's shape (codegen.UnionShapes), set for
+	// a union without discriminator dispatch: its JSON field names, and the
+	// values it fixes for fields it shares with other members.
+	Fields []string
+	Tags   []codegen.UnionTag
+
+	// Module is where the member's parse<Member>FromJSON is imported from,
+	// relative to validators/unions.ts: its own file in this package, or a
+	// dependency package's validators.
+	Module string
 }
 
 // ImportedTypeInfo holds alias metadata for definitions owned by a
@@ -157,6 +206,9 @@ type ImportedTypeInfo struct {
 	ImportPackage string
 	IsEnum        bool
 	IsObject      bool
+	// IsUnion reports whether the symbol is a union the dependency package
+	// declares, which writes its parse<Union>FromJSON.
+	IsUnion bool
 	// HasValidators reports whether the dependency package generates the
 	// object type with its validators (a table, a view, an embedded struct
 	// or an input), which a nested field of it is validated with.
@@ -270,13 +322,50 @@ func (o *ModuleOutput) UnionMemberTypeNames() []string {
 	return names
 }
 
+// UnionNames returns the names of the module's unions, for the type-only
+// import at the top of validators/unions.ts.
+func (o *ModuleOutput) UnionNames() []string {
+	names := make([]string, len(o.Unions))
+	for i, u := range o.Unions {
+		names[i] = u.Name
+	}
+	return names
+}
+
+// UnionMemberImports returns the union members' parser imports for
+// validators/unions.ts, one statement per module.
+func (o *ModuleOutput) UnionMemberImports() []ModuleImport {
+	var imports []NestedImport
+	for _, u := range o.Unions {
+		for _, member := range u.Members {
+			imports = append(imports, NestedImport{Name: member.Name, Module: member.Module})
+		}
+	}
+	return groupImports(imports)
+}
+
+// HasShapeDispatchedUnions reports whether a union picks its member by
+// shape, which needs the shape helpers of validators/unions.ts.
+func (o *ModuleOutput) HasShapeDispatchedUnions() bool {
+	for _, u := range o.Unions {
+		if !u.DispatchByDiscriminator {
+			return true
+		}
+	}
+	return false
+}
+
 // ParseableTypeNames returns the set of type names the generated TypeScript
-// package can parse from JSON (every type gets a parse<Type>FromJSON helper).
-// The SDK generator uses it to emit typed response parsing.
+// package can parse from JSON: every type and every union gets a
+// parse<Name>FromJSON helper. The SDK generator uses it to emit typed
+// response parsing.
 func ParseableTypeNames(output *ModuleOutput) map[string]bool {
-	names := make(map[string]bool, len(output.Types))
+	names := make(map[string]bool, len(output.Types)+len(output.Unions))
 	for _, t := range output.Types {
 		names[t.Name] = true
+	}
+	for _, u := range output.Unions {
+		names[u.Name] = true
 	}
 	return names
 }
@@ -387,9 +476,21 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 	objectTypes = codegen.AddVersionFields(objectTypes, extraction)
 	inputTypes := codegen.ExtractTypes(schema, codegenScalars, extraction, ir.RoleAPIInput)
 
-	output.Types = convertTypes(objectTypes, output.Scalars, enumLookup)
-	output.Types = append(output.Types, convertTypes(inputTypes, output.Scalars, enumLookup)...)
+	unionNames := make(map[string]bool, len(output.Unions))
+	for _, u := range output.Unions {
+		unionNames[u.Name] = true
+	}
+	for _, imported := range output.ImportedTypes {
+		if imported.IsUnion {
+			unionNames[imported.Name] = true
+		}
+	}
+	output.Types = convertTypes(objectTypes, output.Scalars, enumLookup, unionNames)
+	output.Types = append(output.Types, convertTypes(inputTypes, output.Scalars, enumLookup, unionNames)...)
 	output.HasVersionedTypes = codegen.HasHistoryTypes(objectTypes)
+	if err := annotateUnionMembers(output.Unions, append(append([]codegen.TypeInfo{}, objectTypes...), inputTypes...), output.ImportedTypes, opts.Dependencies, enumLookup); err != nil {
+		return nil, err
+	}
 
 	if output.VersionGraphs, err = versionGraphs(schema); err != nil {
 		return nil, err
@@ -462,21 +563,117 @@ func convertScalars(codegenScalars []codegen.ScalarInfo) []ScalarInfo {
 	return scalars
 }
 
-// convertUnions converts codegen.UnionInfo to tsgen.UnionInfo.
+// convertUnions converts codegen.UnionInfo to tsgen.UnionInfo. A union
+// dispatches by its discriminator when it has one and every member gives it
+// a @default, the rule of typegen's Go wrapper.
 func convertUnions(codegenUnions []codegen.UnionInfo) []UnionInfo {
 	unions := make([]UnionInfo, len(codegenUnions))
 	for i, u := range codegenUnions {
+		members := make([]UnionMemberInfo, len(u.Members))
+		byDiscriminator := u.Discriminator != "" && len(u.Members) > 0
+		for j, m := range u.Members {
+			members[j] = UnionMemberInfo{Name: m.Name, DiscriminatorValue: m.DiscriminatorValue}
+			if m.DiscriminatorValue == "" {
+				byDiscriminator = false
+			}
+		}
 		unions[i] = UnionInfo{
-			Name:  u.Name,
-			Doc:   u.Doc(),
-			Types: u.Types,
+			Name:                    u.Name,
+			Doc:                     u.Doc(),
+			Types:                   u.Types,
+			Discriminator:           u.Discriminator,
+			DispatchByDiscriminator: byDiscriminator,
+			Members:                 members,
 		}
 	}
 	return unions
 }
 
-// convertTypes converts codegen.TypeInfo to tsgen.TypeInfo.
-func convertTypes(codegenTypes []codegen.TypeInfo, scalars []ScalarInfo, enumLookup codegen.EnumLookup) []TypeInfo {
+// annotateUnionMembers sets where each union member's parser is imported
+// from and, for a union without discriminator dispatch, the member's shape
+// from codegen.UnionShapes, as typegen and rustgen set it for the Go and Rust
+// decoders. A member this package generates (types) reads its fields there;
+// a member imported from a dependency reads them from the schema that
+// declares it, and its parser comes from that package's validators.
+func annotateUnionMembers(unions []UnionInfo, types []codegen.TypeInfo, imported []ImportedTypeInfo, dependencies map[string]*ir.Schema, enumLookup codegen.EnumLookup) error {
+	fieldsByType := make(map[string][]codegen.FieldInfo, len(types))
+	for _, typeInfo := range types {
+		fieldsByType[typeInfo.Name] = typeInfo.Fields
+	}
+	importedByName := make(map[string]ImportedTypeInfo, len(imported))
+	for _, info := range imported {
+		importedByName[info.Name] = info
+	}
+	for u := range unions {
+		union := &unions[u]
+		members := make([][]codegen.FieldInfo, len(union.Members))
+		for i := range union.Members {
+			member := &union.Members[i]
+			if fields, ok := fieldsByType[member.Name]; ok {
+				member.Module = "./types/" + typeFileName(member.Name)
+				members[i] = fields
+				continue
+			}
+			info, ok := importedByName[member.Name]
+			if !ok || !info.IsObject || !info.HasValidators {
+				return fmt.Errorf("tsgen: union %s member %s is not an object type this package generates or imports", union.Name, member.Name)
+			}
+			member.Module = info.ImportPackage + "/validators"
+			members[i] = dependencyTypeFields(member.Name, dependencies)
+		}
+		if union.DispatchByDiscriminator {
+			continue
+		}
+		for i, shape := range codegen.UnionShapes(members, enumLookup) {
+			union.Members[i].Fields = shape.Fields
+			union.Members[i].Tags = shape.Tags
+		}
+	}
+	return nil
+}
+
+// dependencyTypeFields returns the fields of the type a dependency schema
+// declares by name, as codegen.UnionShapes reads them, or nil when none
+// declares it.
+func dependencyTypeFields(name string, dependencies map[string]*ir.Schema) []codegen.FieldInfo {
+	for _, depName := range sortedSchemaNames(dependencies) {
+		def := dependencies[depName].Types[name]
+		if def == nil {
+			continue
+		}
+		var fields []codegen.FieldInfo
+		for _, field := range def.Fields {
+			if field == nil {
+				continue
+			}
+			fields = append(fields, codegen.FieldInfo{
+				Name:    field.Name,
+				Type:    field.TypeRef.Name,
+				IsArray: field.TypeRef.IsArray,
+				IsMap:   field.TypeRef.IsMap,
+				Default: field.Default,
+			})
+		}
+		return fields
+	}
+	return nil
+}
+
+// sortedSchemaNames returns the keys of schemas in order.
+func sortedSchemaNames(schemas map[string]*ir.Schema) []string {
+	names := make([]string, 0, len(schemas))
+	for name, schema := range schemas {
+		if schema != nil {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
+// convertTypes converts codegen.TypeInfo to tsgen.TypeInfo. unionNames are
+// the local and imported unions, whose fields are union fields.
+func convertTypes(codegenTypes []codegen.TypeInfo, scalars []ScalarInfo, enumLookup codegen.EnumLookup, unionNames map[string]bool) []TypeInfo {
 	scalarMap := make(map[string]*ScalarInfo, len(scalars))
 	for i := range scalars {
 		scalarMap[scalars[i].Name] = &scalars[i]
@@ -484,7 +681,7 @@ func convertTypes(codegenTypes []codegen.TypeInfo, scalars []ScalarInfo, enumLoo
 
 	types := make([]TypeInfo, len(codegenTypes))
 	for i, t := range codegenTypes {
-		fields := convertFields(t.Fields, scalarMap, enumLookup)
+		fields := convertFields(t.Fields, scalarMap, enumLookup, unionNames)
 		hasDefaults := false
 		for _, f := range fields {
 			if f.HasDefault && f.DefaultLiteral != "" {
@@ -506,7 +703,7 @@ func convertTypes(codegenTypes []codegen.TypeInfo, scalars []ScalarInfo, enumLoo
 }
 
 // convertFields converts codegen.FieldInfo to tsgen.FieldInfo.
-func convertFields(codegenFields []codegen.FieldInfo, scalarMap map[string]*ScalarInfo, enumLookup codegen.EnumLookup) []FieldInfo {
+func convertFields(codegenFields []codegen.FieldInfo, scalarMap map[string]*ScalarInfo, enumLookup codegen.EnumLookup, unionNames map[string]bool) []FieldInfo {
 	fields := make([]FieldInfo, len(codegenFields))
 	for i, f := range codegenFields {
 		var scalarInfo *ScalarInfo
@@ -529,6 +726,7 @@ func convertFields(codegenFields []codegen.FieldInfo, scalarMap map[string]*Scal
 			Doc:              f.Doc(),
 			ScalarInfo:       scalarInfo,
 			Validations:      f.Validations,
+			IsUnion:          !f.IsScalar && (f.IsUnion || unionNames[f.Type]),
 		}
 
 		if f.Default != nil {

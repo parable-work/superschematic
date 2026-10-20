@@ -98,6 +98,7 @@ func resolveImports(schema *ir.Schema, opts Options) (*resolvedImports, error) {
 			var doc string
 			isEnum := false
 			isObject := false
+			isUnion := false
 			hasValidators := false
 			switch {
 			case depSchema.Enums[symbol] != nil:
@@ -108,6 +109,7 @@ func resolveImports(schema *ir.Schema, opts Options) (*resolvedImports, error) {
 			case depSchema.Unions[symbol] != nil:
 				unionDef := depSchema.Unions[symbol]
 				doc = codegen.DocText(unionDef.Description, unionDef.Comment)
+				isUnion = true
 			case depSchema.Types[symbol] != nil:
 				typeDef := depSchema.Types[symbol]
 				// Traits are flattened into tables and are not emitted as
@@ -129,6 +131,7 @@ func resolveImports(schema *ir.Schema, opts Options) (*resolvedImports, error) {
 				ImportPackage: pkgName,
 				IsEnum:        isEnum,
 				IsObject:      isObject,
+				IsUnion:       isUnion,
 				HasValidators: hasValidators,
 			})
 			usedDep = true
