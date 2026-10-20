@@ -12,7 +12,7 @@ import { {{join .PrimitiveHelpers ", "}} } from '../primitives';
 {{- end}}
 import { load as loadYaml } from 'js-yaml';
 import { ParseError } from '../errors';
-import type { {{.Type.Name}}{{if .ParserScalarsUsed}}, JSDate{{end}}{{range .ParserNestedTypes}}, {{.}}{{end}}{{range .EnumDefaultsUsed}}, {{.}}{{end}}{{range .ScalarDefaultCasts}}, {{.}}{{end}} } from '../../types';
+import type { {{.Type.Name}}{{if .ParserScalarsUsed}}, JSDate{{end}}{{range .ParserNestedTypes}}, {{.}}{{end}}{{range .ParserUnionTypes}}, {{.}}{{end}}{{range .EnumDefaultsUsed}}, {{.}}{{end}}{{range .ScalarDefaultCasts}}, {{.}}{{end}} } from '../../types';
 {{range .ScalarsUsed}}
 import { validate{{.Symbol}}Required, validate{{.Symbol}} } from '../scalars/{{.Module}}';
 {{end}}
@@ -27,6 +27,9 @@ import { parse{{.Symbol}} as parse{{.Symbol}}FromLib } from '{{$.Naming.ScalarNp
 {{end}}
 {{range .ParserNestedImports}}
 import { parse{{.Name}}FromJSON, validate{{.Name}}{{if $.Type.StrictJSON}}Required{{end}} } from '{{.Module}}';
+{{end}}
+{{range .ParserUnionImports}}
+import { {{range $i, $name := .Names}}{{if $i}}, {{end}}parse{{$name}}FromJSON{{end}} } from '{{.Module}}';
 {{end}}
 
 /**
@@ -791,7 +794,7 @@ export function parse{{.Type.Name}}FromJSON(input: unknown): {{.Type.Name}} {
     {{.TSName}}: obj.{{.TSName}} != null
       ? Object.fromEntries(
           Object.entries(obj.{{.TSName}} as Record<string, unknown>).map(([k, v]) =>
-            [k, Array.isArray(v) ? (v as unknown[]).map((item) => parse{{.ScalarInfo.Symbol}}FromLib(item as string) as JSDate) : v]
+            [k, Array.isArray(v) ? (v as unknown[]).map((item) => parse{{.ScalarInfo.Symbol}}FromLib(item as string) as JSDate) : (v as unknown as JSDate[])]
           )
         )
       : (obj.{{.TSName}} as unknown as Record<string, JSDate[]>{{if not .Required}} | null{{end}}),
@@ -819,13 +822,13 @@ export function parse{{.Type.Name}}FromJSON(input: unknown): {{.Type.Name}} {
       ? (parse{{.ScalarInfo.Symbol}}FromLib(obj.{{.TSName}} as string) as JSDate)
       : (obj.{{.TSName}} as unknown as JSDate{{if not .Required}} | null{{end}}),
     {{end}}
-    {{else if and (not .IsScalar) (containsString $.ParserNestedTypes .Type)}}
+    {{else if and (not .IsScalar) (or (containsString $.ParserNestedTypes .Type) .IsUnion)}}
     {{if .IsMap}}
     {{if .IsArray}}
     {{.TSName}}: obj.{{.TSName}} != null
       ? Object.fromEntries(
           Object.entries(obj.{{.TSName}} as Record<string, unknown>).map(([k, v]) =>
-            [k, Array.isArray(v) ? (v as unknown[]).map((item) => parse{{.Type}}FromJSON(item)) : v]
+            [k, Array.isArray(v) ? (v as unknown[]).map((item) => parse{{.Type}}FromJSON(item)) : (v as unknown as {{.Type}}[])]
           )
         )
       : (obj.{{.TSName}} as unknown as Record<string, {{.Type}}[]>{{if not .Required}} | null{{end}}),

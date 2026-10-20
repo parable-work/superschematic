@@ -17,6 +17,9 @@ export * from './scalars';
 {{if .Enums}}
 export * from './enums';
 {{end}}
+{{if .Unions}}
+export * from './unions';
+{{end}}
 {{if .Types}}
 export * from './types';
 export { ParseError } from './errors';
