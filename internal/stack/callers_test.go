@@ -115,7 +115,7 @@ func TestCallersWithoutAnEdge(t *testing.T) {
 	s.Environments[0].Settings = []*ir.DeployableSettings{{Of: ir.DeployableRef{Deployable: "Backend"}, Env: map[string]ir.EnvValue{"FULFILLMENT_REGION": {Value: "us"}}}}
 	env = mustResolve(t, assemble(t), s, stacktest.WithoutWorkers(stacktest.WithoutJobs(stacktest.RequireServiceShop())), "Staging")
 	if b := callersOf(env, "Backend", "shop-api"); b == nil || len(b.Edges) != 0 || jsonOf(t, b.Value) != `{"issuers":[]}` {
-		t.Errorf("Backend's SHOP_API_CALLERS = %+v, want no issuers: its call to shop-api carries no credential", b)
+		t.Errorf("Backend's SHOP_API_CALLERS = %+v, want no issuers: its call to shop-api stays in the server, whose own loopback key signs it", b)
 	}
 
 	// shop-orders' job and worker are processes of their own, so their
