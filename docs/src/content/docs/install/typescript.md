@@ -130,7 +130,11 @@ same versions: a TypeScript server's image and the generated CI install
 frozen to it. No build removes it, and the root `package.json` it pairs
 with is the same on every build of the same schemas, so the lockfile is
 the one file of `schemas/dist` to commit. Write it after building every
-service (`build-all`), so it names every package. Git cannot take back a
+service (`build-all`), so it names every package. An output root that
+holds only some services' packages, as a stack's build leaves it, leaves
+out of the workspace each implementation or site that depends on a
+package it lacks, and `stack dev` installs it with `--no-save`, which
+keeps the lockfile as it is. Git cannot take back a
 file under an ignored directory, so ignore the output root's contents
 rather than the directory:
 

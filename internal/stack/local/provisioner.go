@@ -1194,6 +1194,14 @@ var binaryNamePattern = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 // engineer's own bun install does, so the lockfile the project commits
 // (D51, amended) follows the schemas through stack dev. It is not frozen:
 // the generated CI's frozen install is what refuses a stale lockfile.
+//
+// A root built for one stack leaves out, with `!` patterns, the
+// implementations and sites whose generated packages the stack's build
+// did not write (tsgen.WorkspaceRoot; D51, amended). Bun drops from the
+// lockfile what the manifest no longer names, so the install of such a
+// partial workspace runs with --no-save: it installs the versions the
+// lockfile pins and leaves it as it is, pinning the whole workspace, as
+// the project commits it.
 func (p *Provisioner) installWorkspace(ctx context.Context, outputRoot, bun string) error {
 	p.mu.Lock()
 	done := p.installed[outputRoot]
@@ -1201,11 +1209,18 @@ func (p *Provisioner) installWorkspace(ctx context.Context, outputRoot, bun stri
 	if done {
 		return nil
 	}
-	if _, err := os.Stat(filepath.Join(outputRoot, "package.json")); err != nil {
+	leftOut, err := workspaceLeftOut(outputRoot)
+	if err != nil {
 		return fmt.Errorf("local: no Bun workspace at %s, whose package.json the stack's build writes for its TypeScript servers (docs/stack-model.md, section 8.6): %w", outputRoot, err)
 	}
-	p.printf("install the TypeScript workspace: bun install in %s", outputRoot)
-	if _, err := p.runner().Run(ctx, Command{Path: bun, Args: []string{"install"}, Dir: outputRoot, Env: os.Environ()}); err != nil {
+	args := []string{"install"}
+	if len(leftOut) > 0 {
+		args = append(args, "--no-save")
+		p.printf("install the TypeScript workspace: bun install --no-save in %s, which leaves out %s, whose packages this output root lacks, and keeps its lockfile as it is", outputRoot, strings.Join(leftOut, ", "))
+	} else {
+		p.printf("install the TypeScript workspace: bun install in %s", outputRoot)
+	}
+	if _, err := p.runner().Run(ctx, Command{Path: bun, Args: args, Dir: outputRoot, Env: os.Environ()}); err != nil {
 		return fmt.Errorf("local: install the TypeScript workspace at %s: %w", outputRoot, err)
 	}
 	p.mu.Lock()
@@ -1215,6 +1230,31 @@ func (p *Provisioner) installWorkspace(ctx context.Context, outputRoot, bun stri
 	p.installed[outputRoot] = true
 	p.mu.Unlock()
 	return nil
+}
+
+// workspaceLeftOut returns the members the Bun workspace's root in
+// outputRoot leaves out, as its `!` patterns name them, which the build
+// writes for the implementations and sites whose generated packages the
+// output root lacks (tsgen.WorkspaceLeftOut, which the provisioner, apart
+// from the generators, does not import).
+func workspaceLeftOut(outputRoot string) ([]string, error) {
+	data, err := os.ReadFile(filepath.Join(outputRoot, "package.json"))
+	if err != nil {
+		return nil, err
+	}
+	var manifest struct {
+		Workspaces []string `json:"workspaces"`
+	}
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, pattern := range manifest.Workspaces {
+		if member, ok := strings.CutPrefix(pattern, "!"); ok {
+			out = append(out, member)
+		}
+	}
+	return out, nil
 }
 
 // runOutputs are the outputs a process's env references resolve against:
