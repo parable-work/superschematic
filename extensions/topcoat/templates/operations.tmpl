@@ -8,6 +8,14 @@
 //! shows or hides what the operation does. An operation without a call
 //! still has its guard, whose doc says why.
 //!
+{{- if .ServiceCalls }}
+//! `as_service(&caller)` calls an operation with a service clause
+//! (@requireService, @allowService) as a service this process acts for,
+//! held to the route's `from` (D37, amended). An operation only a service
+//! may call (@requireService) has no other call, so a page cannot call it
+//! for an end user, and its guard here refuses one 401.
+//!
+{{- end }}
 {{- if .Paged }}
 //! A paged operation's call (D60) takes the page asked for in its `Args`,
 //! `page`, which `PageRequest::first(limit)` or `PageRequest::after(next,
@@ -27,13 +35,16 @@ use crate::api::operations;
 use crate::api::runtime;
 {{- end }}
 use crate::api::runtime::{ApiError, Principal};
+{{- if .ServiceCalls }}
+use crate::api::runtime::ServiceCaller;
+{{- end }}
 use crate::api::types;
 use topcoat::context::{Cx, app_context};
 {{- range .Operations }}
 
 /// {{ .Namespace }}.{{ .Name }} (`{{ .Method }} {{ .Path }}`){{ with .Description }}: {{ . }}{{ else }}.{{ end }}
-{{- if .ServiceOnly }}
-{{ doc "Its route admits only a service caller (@requireService). This call applies the end-user step alone, as `OperationInfo::admit` does; whether it should refuse stays open (D37, amended)." }}
+{{- if .AsService }}
+{{ doc "A service caller its route's `from` lists calls it through `as_service(caller)`, standing in for the end user (@allowService, D37, amended)." }}
 {{- end }}
 {{- with .NoProcedure }}
 {{ doc (printf "It has no procedure: %s." .) }}
@@ -52,12 +63,14 @@ pub async fn {{ .SnakeName }}(cx: &Cx{{ with .ArgsName }}, args: crate::api::{{ 
 }
 {{- end }}
 {{- range .Guards }}
+{{- if .ServiceOnly }}
+
+{{ doc (printf "Admits the caller of %s.%s as its route admits a request without a service credential: the route admits only a service caller (@requireService), so an end user is refused 401 `service_unauthorized`, signed in or not. `as_service(caller).can_%s(cx)` admits a service caller (D37, amended)." .Namespace .Name .SnakeName) }}
+{{- else }}
 
 /// Admits the caller of {{ .Namespace }}.{{ .Name }} as its route does: {{ if .RequiresAuth }}401 without one, 403
 /// {{- if .Permissions }} without one of {{ join .Permissions ", " }}{{ else }} never{{ end }}. The caller, for the implementation.{{ else }}it needs none, so
 /// `Ok(None)`.{{ end }}
-{{- if .ServiceOnly }}
-{{ doc "Its route admits only a service caller (@requireService), which a guard does not check (D37, amended)." }}
 {{- end }}
 {{- with .NoCall }}
 {{ doc (printf "It has no in-process call: %s." .) }}
@@ -65,9 +78,62 @@ pub async fn {{ .SnakeName }}(cx: &Cx{{ with .ArgsName }}, args: crate::api::{{ 
 pub async fn can_{{ .SnakeName }}(cx: &Cx) -> Result<Option<Principal>, ApiError> {
 {{- if $.HasAuth }}
     crate::admit(cx, &operations::{{ .ConstName }}).await
+{{- else if .AsService }}
+    let _ = cx;
+    operations::{{ .ConstName }}.admit_service(None).map(|_| None)
 {{- else }}
     let _ = cx;
     Ok(None)
+{{- end }}
+}
+{{- end }}
+{{- if .ServiceCalls }}
+
+/// Calls the operations that admit a service caller (@requireService,
+/// @allowService) as `caller`, a service this process acts for, which
+/// `ServiceCaller::in_process(deployable, serves)` names (D37, amended).
+/// The caller is held to each route's `from`: 403 `service_forbidden` when
+/// it lists none of the APIs the caller serves. Where the route still asks
+/// for an end user, the page's own caller is the one the service forwards.
+/// Then the arguments and the implementation run as the route runs them,
+/// and the implementation reads the caller in `ctx.service_caller`. A
+/// @requireService operation has no other call; an @allowService one also
+/// has its end user's.
+pub fn as_service(caller: &ServiceCaller) -> AsService<'_> {
+    AsService { caller }
+}
+
+/// The calls and guards of `as_service`, one of each per operation with a
+/// service clause.
+pub struct AsService<'a> {
+    caller: &'a ServiceCaller,
+}
+
+impl AsService<'_> {
+{{- range $i, $op := .ServiceCalls }}
+{{- if $i }}
+{{ end }}
+    /// {{ .Namespace }}.{{ .Name }} (`{{ .Method }} {{ .Path }}`), called as a service{{ with .Description }}: {{ . }}{{ else }}.{{ end }}
+{{- with .NoProcedure }}
+    {{ doc4 (printf "It has no procedure: %s." .) }}
+{{- end }}
+    pub async fn {{ .SnakeName }}(&self, cx: &Cx{{ with .ArgsName }}, args: crate::api::{{ . }}{{ end }}) -> Result<{{ .Output }}, ApiError> {
+        let caller = self.can_{{ .SnakeName }}(cx).await?;
+{{- if .ArgsName }}
+        args.check()?;
+{{- end }}
+        let setup: &Setup = app_context(cx);
+        setup
+            .implementations
+            .{{ .Field }}
+            .{{ .FunctionName }}(operations::{{ .ConstName }}.service_context(self.caller.clone(), caller){{ if .ArgsName }}, args{{ end }})
+            .await
+    }
+
+    {{ doc4 .ServiceGuardDoc }}
+    pub async fn can_{{ .SnakeName }}(&self, cx: &Cx) -> Result<Option<Principal>, ApiError> {
+        crate::admit_as(cx, &operations::{{ .ConstName }}, self.caller).await
+    }
 {{- end }}
 }
 {{- end }}

@@ -503,7 +503,7 @@ func TestATrailStepMeetsItsOptionsControls(t *testing.T) {
 	pages := string(data)
 	controls := pages[strings.Index(pages, "        controls: vec![\n"):]
 	controls = controls[:strings.Index(controls, "        ],\n    })")]
-	limiter := strings.Count(controls[:strings.Index(controls, "Controls::default().rate_limit(30)")], "Controls::default()")
+	limiter := strings.Count(controls[:strings.Index(controls, "Controls::default().rate_limiter(limits.of(&crate::api::operations::SUPPLIER_LIST_SUPPLIERS))")], "Controls::default()")
 	for _, want := range []string{
 		fmt.Sprintf(`(Method::GET, "/console/suppliers/{supplier_id}/pages", None, &[%d]),`, limiter),
 		fmt.Sprintf(`(Method::GET, "/console/suppliers", Some(%d), &[]),`, limiter),
