@@ -162,8 +162,10 @@ func utilityRoutes(apiVersion, baseURL string) []runtimerouting.Route {
 
 func publicAPIRoutes(cfg Config) []runtimerouting.Route {
 	return []runtimerouting.Route{
-		// The products, by name, then by id; ids narrows them to the products
-		// with those ids, the lookup a page names its products' ids through.
+		// The products, by name, or by price with sort, then by id; ids narrows
+		// them to the products with those ids, the lookup a page names its
+		// products' ids through, and q to those whose name holds each of its
+		// words, the search a product picker finds them by.
 		{
 			Method:  "GET",
 			Path:    "/products",
@@ -176,9 +178,9 @@ func publicAPIRoutes(cfg Config) []runtimerouting.Route {
 			Path:    "/products/{productId}",
 			Handler: createProductCatalogGetProductHandler(cfg.Implementations.ProductCatalog),
 		},
-		// The product's reviews, oldest first: by when each was written, then by
-		// its id. q keeps the reviews whose title or body holds each of its
-		// words.
+		// The product's reviews, oldest first: by when each was written, or by
+		// its rating with sort, then by its id. q keeps the reviews whose title
+		// or body holds each of its words.
 		{
 			Method:  "GET",
 			Path:    "/products/{productId}/reviews",
@@ -189,8 +191,8 @@ func publicAPIRoutes(cfg Config) []runtimerouting.Route {
 
 func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 	return []runtimerouting.Route{
-		// The caller's orders, or every customer's for staff, oldest first.
-		// They are ordered by when each was placed, then by their ids.
+		// The caller's orders, or every customer's for staff, oldest first:
+		// by when each was placed, or by its total with sort, then by their ids.
 		{
 			Method:  "GET",
 			Path:    "/orders",
@@ -249,8 +251,8 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 
 // createOrderListOrdersHandler creates a handler for GET /api/orders
 //
-// The caller's orders, or every customer's for staff, oldest first.
-// They are ordered by when each was placed, then by their ids.
+// The caller's orders, or every customer's for staff, oldest first:
+// by when each was placed, or by its total with sort, then by their ids.
 func createOrderListOrdersHandler(impl OrderImplementation) gohttp.HandlerFunc {
 	// List arguments in the query string: the JSON type of each item, then
 	// its rules in the order they are checked (the scalar type's own, then
@@ -275,7 +277,10 @@ func createOrderListOrdersHandler(impl OrderImplementation) gohttp.HandlerFunc {
 
 		// Read the page's cursor and limit (@paginated): its own reader, whose
 		// refusal is the 400 every server answers at cursor or limit.
-		page, ok := paging.Read(w, r, paging.Spec{DefaultLimit: 20, MaxLimit: 100})
+		// It also reads sort, the page's sort (D60, amended), after the limit,
+		// and unbinds the cursor from the sort it was returned under, so the
+		// implementation reads its own key.
+		page, ok := paging.Read(w, r, paging.Spec{DefaultLimit: 20, MaxLimit: 100, Sort: &paging.SortSpec{Param: "sort", Fields: []string{"placedAt", "totalCents"}, Default: paging.Sort{Field: "placedAt"}}})
 		if !ok {
 			return
 		}
@@ -293,6 +298,13 @@ func createOrderListOrdersHandler(impl OrderImplementation) gohttp.HandlerFunc {
 			// Get logger from context and use proper error handling
 			logger := LoggerFromContext(r.Context())
 			RespondAppError(w, logger, err)
+			return
+		}
+		// The next page's cursor names the sort the page was read in (D60,
+		// amended); a next no router reads back under it is the
+		// implementation's error.
+		if result, err = paging.Bind(result, page); err != nil {
+			RespondAppError(w, LoggerFromContext(r.Context()), err)
 			return
 		}
 
@@ -458,8 +470,10 @@ func createOrderCancelOrderHandler(impl OrderImplementation) gohttp.HandlerFunc 
 
 // createProductCatalogListProductsHandler creates a handler for GET /api/products
 //
-// The products, by name, then by id; ids narrows them to the products
-// with those ids, the lookup a page names its products' ids through.
+// The products, by name, or by price with sort, then by id; ids narrows
+// them to the products with those ids, the lookup a page names its
+// products' ids through, and q to those whose name holds each of its
+// words, the search a product picker finds them by.
 func createProductCatalogListProductsHandler(impl ProductCatalogImplementation) gohttp.HandlerFunc {
 	// List arguments in the query string: the JSON type of each item, then
 	// its rules in the order they are checked (the scalar type's own, then
@@ -481,10 +495,20 @@ func createProductCatalogListProductsHandler(impl ProductCatalogImplementation) 
 				return
 			}
 		}
+		Q := parseStringQueryParamPtr(r, "q")
+		if Q != nil && len([]rune(*Q)) > 100 {
+			validationErrors := types.NewValidationErrors()
+			validationErrors.SetFieldErrors("q", []types.ValidationError{{Validator: "maxLength", Message: "must be at most 100 characters"}})
+			RespondValidationErrors(w, r, validationErrors)
+			return
+		}
 
 		// Read the page's cursor and limit (@paginated): its own reader, whose
 		// refusal is the 400 every server answers at cursor or limit.
-		page, ok := paging.Read(w, r, paging.Spec{DefaultLimit: 20, MaxLimit: 100})
+		// It also reads sort, the page's sort (D60, amended), after the limit,
+		// and unbinds the cursor from the sort it was returned under, so the
+		// implementation reads its own key.
+		page, ok := paging.Read(w, r, paging.Spec{DefaultLimit: 20, MaxLimit: 100, Sort: &paging.SortSpec{Param: "sort", Fields: []string{"name", "priceCents"}, Default: paging.Sort{Field: "name"}}})
 		if !ok {
 			return
 		}
@@ -497,11 +521,18 @@ func createProductCatalogListProductsHandler(impl ProductCatalogImplementation) 
 		}
 
 		// Call implementation
-		result, err := impl.ListProducts(r.Context(), Ids, page)
+		result, err := impl.ListProducts(r.Context(), Ids, Q, page)
 		if err != nil {
 			// Get logger from context and use proper error handling
 			logger := LoggerFromContext(r.Context())
 			RespondAppError(w, logger, err)
+			return
+		}
+		// The next page's cursor names the sort the page was read in (D60,
+		// amended); a next no router reads back under it is the
+		// implementation's error.
+		if result, err = paging.Bind(result, page); err != nil {
+			RespondAppError(w, LoggerFromContext(r.Context()), err)
 			return
 		}
 
@@ -557,9 +588,9 @@ func createProductCatalogGetProductHandler(impl ProductCatalogImplementation) go
 
 // createProductReviewsListReviewsHandler creates a handler for GET /api/products/{productId}/reviews
 //
-// The product's reviews, oldest first: by when each was written, then by
-// its id. q keeps the reviews whose title or body holds each of its
-// words.
+// The product's reviews, oldest first: by when each was written, or by
+// its rating with sort, then by its id. q keeps the reviews whose title
+// or body holds each of its words.
 func createProductReviewsListReviewsHandler(impl ProductReviewsImplementation) gohttp.HandlerFunc {
 	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
 		// Extract path parameters, each percent-decoded once
@@ -589,7 +620,10 @@ func createProductReviewsListReviewsHandler(impl ProductReviewsImplementation) g
 
 		// Read the page's cursor and limit (@paginated): its own reader, whose
 		// refusal is the 400 every server answers at cursor or limit.
-		page, ok := paging.Read(w, r, paging.Spec{DefaultLimit: 20, MaxLimit: 50})
+		// It also reads sort, the page's sort (D60, amended), after the limit,
+		// and unbinds the cursor from the sort it was returned under, so the
+		// implementation reads its own key.
+		page, ok := paging.Read(w, r, paging.Spec{DefaultLimit: 20, MaxLimit: 50, Sort: &paging.SortSpec{Param: "sort", Fields: []string{"createdAt", "rating"}, Default: paging.Sort{Field: "createdAt"}}})
 		if !ok {
 			return
 		}
@@ -607,6 +641,13 @@ func createProductReviewsListReviewsHandler(impl ProductReviewsImplementation) g
 			// Get logger from context and use proper error handling
 			logger := LoggerFromContext(r.Context())
 			RespondAppError(w, logger, err)
+			return
+		}
+		// The next page's cursor names the sort the page was read in (D60,
+		// amended); a next no router reads back under it is the
+		// implementation's error.
+		if result, err = paging.Bind(result, page); err != nil {
+			RespondAppError(w, LoggerFromContext(r.Context()), err)
 			return
 		}
 

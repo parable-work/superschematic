@@ -13,8 +13,9 @@
 // @index placement and keys, each type's
 // behaviors against their declarations, each type's @display against the
 // type and its Workflow, each RefersTo against its target and the
-// operation that lists it, each SearchQuery against its operation, the
-// kind's own KindSpec.Verify and every registered CheckSpec.
+// operation that lists it, each SearchQuery against its operation, each
+// SortBy against its page and its item, the kind's own KindSpec.Verify and
+// every registered CheckSpec.
 //
 // The readers stay responsible for syntax-level invariants (wildcard
 // imports, decorator argument shapes); this pass is what makes those rules
@@ -134,10 +135,12 @@ type Input struct {
 	AuthDB *ir.Schema
 
 	// DependencySchemas holds the loaded schemas of the dependencies whose
-	// types a RefersTo names (D61), by service name, which ResolveReference
-	// reads a target from when the schema does not declare it. The loader
-	// reads a dependency only for a reference that names a type the schema
-	// imports from it, and leaves the map nil otherwise.
+	// types a RefersTo names (D61), or a SortBy operation lists (D60,
+	// amended), by service name, which ResolveReference reads a target and
+	// its options from, and checkSorts an item, when the schema does not
+	// declare it. The loader reads a dependency only for a reference or a
+	// sorted list that names a type the schema imports from it, and leaves
+	// the map nil otherwise.
 	DependencySchemas map[string]*ir.Schema
 }
 
@@ -237,6 +240,7 @@ func Run(schema *ir.Schema, in Input) *Result {
 	checkDisplays(schema, reg, r)
 	checkReferences(schema, in, r)
 	checkSearches(schema, r)
+	checkSorts(schema, in, r)
 	if kind, ok := reg.Kind(string(schema.Kind)); ok && kind.Verify != nil {
 		kind.Verify(schema, r)
 	}

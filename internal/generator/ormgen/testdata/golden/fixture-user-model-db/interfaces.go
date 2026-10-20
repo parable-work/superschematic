@@ -16,6 +16,7 @@ type RoleRepositoryInterface interface {
 	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Role, error)
 	FindOne(ctx context.Context, filter *RoleFilter, opts *RoleFindOptions) (*types.Role, error)
 	FindMany(ctx context.Context, filter *RoleFilter, opts *RoleFindOptions) ([]*types.Role, int, error)
+	FindPage(ctx context.Context, filter *RoleFilter, opts *RolePageOptions) (*RolePage, error)
 	CreateOne(ctx context.Context, input *types.Role) (*types.Role, error)
 	CreateMany(ctx context.Context, inputs []*types.Role) ([]*types.Role, error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *RoleUpdate) (*types.Role, error)
@@ -30,6 +31,7 @@ type SessionRepositoryInterface interface {
 	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Session, error)
 	FindOne(ctx context.Context, filter *SessionFilter, opts *SessionFindOptions) (*types.Session, error)
 	FindMany(ctx context.Context, filter *SessionFilter, opts *SessionFindOptions) ([]*types.Session, int, error)
+	FindPage(ctx context.Context, filter *SessionFilter, opts *SessionPageOptions) (*SessionPage, error)
 	CreateOne(ctx context.Context, input *types.Session) (*types.Session, error)
 	CreateMany(ctx context.Context, inputs []*types.Session) ([]*types.Session, error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *SessionUpdate) (*types.Session, error)
@@ -44,6 +46,7 @@ type UserRepositoryInterface interface {
 	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.User, error)
 	FindOne(ctx context.Context, filter *UserFilter, opts *UserFindOptions) (*types.User, error)
 	FindMany(ctx context.Context, filter *UserFilter, opts *UserFindOptions) ([]*types.User, int, error)
+	FindPage(ctx context.Context, filter *UserFilter, opts *UserPageOptions) (*UserPage, error)
 	CreateOne(ctx context.Context, input *types.User) (*types.User, error)
 	CreateMany(ctx context.Context, inputs []*types.User) ([]*types.User, error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *UserUpdate) (*types.User, error)
@@ -58,6 +61,7 @@ type UserCredentialRepositoryInterface interface {
 	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.UserCredential, error)
 	FindOne(ctx context.Context, filter *UserCredentialFilter, opts *UserCredentialFindOptions) (*types.UserCredential, error)
 	FindMany(ctx context.Context, filter *UserCredentialFilter, opts *UserCredentialFindOptions) ([]*types.UserCredential, int, error)
+	FindPage(ctx context.Context, filter *UserCredentialFilter, opts *UserCredentialPageOptions) (*UserCredentialPage, error)
 	CreateOne(ctx context.Context, input *types.UserCredential) (*types.UserCredential, error)
 	CreateMany(ctx context.Context, inputs []*types.UserCredential) ([]*types.UserCredential, error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *UserCredentialUpdate) (*types.UserCredential, error)
@@ -72,6 +76,7 @@ type UserRoleGrantRepositoryInterface interface {
 	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.UserRoleGrant, error)
 	FindOne(ctx context.Context, filter *UserRoleGrantFilter, opts *UserRoleGrantFindOptions) (*types.UserRoleGrant, error)
 	FindMany(ctx context.Context, filter *UserRoleGrantFilter, opts *UserRoleGrantFindOptions) ([]*types.UserRoleGrant, int, error)
+	FindPage(ctx context.Context, filter *UserRoleGrantFilter, opts *UserRoleGrantPageOptions) (*UserRoleGrantPage, error)
 	CreateOne(ctx context.Context, input *types.UserRoleGrant) (*types.UserRoleGrant, error)
 	CreateMany(ctx context.Context, inputs []*types.UserRoleGrant) ([]*types.UserRoleGrant, error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *UserRoleGrantUpdate) (*types.UserRoleGrant, error)
@@ -199,6 +204,10 @@ func (r *NoOpRoleRepository) FindMany(_ context.Context, _ *RoleFilter, _ *RoleF
 	return []*types.Role{}, 0, nil
 }
 
+func (r *NoOpRoleRepository) FindPage(_ context.Context, _ *RoleFilter, _ *RolePageOptions) (*RolePage, error) {
+	return &RolePage{Rows: []*types.Role{}}, nil
+}
+
 func (r *NoOpRoleRepository) CreateOne(_ context.Context, input *types.Role) (*types.Role, error) {
 	return input, nil
 }
@@ -251,6 +260,10 @@ func (r *NoOpSessionRepository) FindOne(_ context.Context, _ *SessionFilter, _ *
 
 func (r *NoOpSessionRepository) FindMany(_ context.Context, _ *SessionFilter, _ *SessionFindOptions) ([]*types.Session, int, error) {
 	return []*types.Session{}, 0, nil
+}
+
+func (r *NoOpSessionRepository) FindPage(_ context.Context, _ *SessionFilter, _ *SessionPageOptions) (*SessionPage, error) {
+	return &SessionPage{Rows: []*types.Session{}}, nil
 }
 
 func (r *NoOpSessionRepository) CreateOne(_ context.Context, input *types.Session) (*types.Session, error) {
@@ -307,6 +320,10 @@ func (r *NoOpUserRepository) FindMany(_ context.Context, _ *UserFilter, _ *UserF
 	return []*types.User{}, 0, nil
 }
 
+func (r *NoOpUserRepository) FindPage(_ context.Context, _ *UserFilter, _ *UserPageOptions) (*UserPage, error) {
+	return &UserPage{Rows: []*types.User{}}, nil
+}
+
 func (r *NoOpUserRepository) CreateOne(_ context.Context, input *types.User) (*types.User, error) {
 	return input, nil
 }
@@ -361,6 +378,10 @@ func (r *NoOpUserCredentialRepository) FindMany(_ context.Context, _ *UserCreden
 	return []*types.UserCredential{}, 0, nil
 }
 
+func (r *NoOpUserCredentialRepository) FindPage(_ context.Context, _ *UserCredentialFilter, _ *UserCredentialPageOptions) (*UserCredentialPage, error) {
+	return &UserCredentialPage{Rows: []*types.UserCredential{}}, nil
+}
+
 func (r *NoOpUserCredentialRepository) CreateOne(_ context.Context, input *types.UserCredential) (*types.UserCredential, error) {
 	return input, nil
 }
@@ -413,6 +434,10 @@ func (r *NoOpUserRoleGrantRepository) FindOne(_ context.Context, _ *UserRoleGran
 
 func (r *NoOpUserRoleGrantRepository) FindMany(_ context.Context, _ *UserRoleGrantFilter, _ *UserRoleGrantFindOptions) ([]*types.UserRoleGrant, int, error) {
 	return []*types.UserRoleGrant{}, 0, nil
+}
+
+func (r *NoOpUserRoleGrantRepository) FindPage(_ context.Context, _ *UserRoleGrantFilter, _ *UserRoleGrantPageOptions) (*UserRoleGrantPage, error) {
+	return &UserRoleGrantPage{Rows: []*types.UserRoleGrant{}}, nil
 }
 
 func (r *NoOpUserRoleGrantRepository) CreateOne(_ context.Context, input *types.UserRoleGrant) (*types.UserRoleGrant, error) {

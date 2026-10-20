@@ -517,7 +517,7 @@ class ShapeNamespace:
             extra_headers=extra_headers,
         )
         return self._coerce_response(response, "Shape", True)
-    def page_shapes(self, cursor: str | None = None, limit: int | None = None, timeout_seconds: float | None = None, extra_headers: Mapping[str, str] | None = None) -> Page[Shape]:
+    def page_shapes(self, *, cursor: str | None = None, limit: int | None = None, timeout_seconds: float | None = None, extra_headers: Mapping[str, str] | None = None) -> Page[Shape]:
         path = "/api/shape-pages"
         query_params: dict[str, Any] | None = {}
         if cursor:
@@ -544,7 +544,7 @@ class ShapeNamespace:
             extra_headers=extra_headers,
         )
         return self._coerce_page(response, "Shape")
-    def page_shapes_all(self, cursor: str | None = None, limit: int | None = None, timeout_seconds: float | None = None, extra_headers: Mapping[str, str] | None = None) -> Iterator[Shape]:
+    def page_shapes_all(self, *, cursor: str | None = None, limit: int | None = None, timeout_seconds: float | None = None, extra_headers: Mapping[str, str] | None = None) -> Iterator[Shape]:
         """Yield every item of page_shapes, page after page (D60).
 
         The first page is the one cursor names, the first of the list when

@@ -660,7 +660,7 @@ class {{.Namespace.ClassName}}:
 {{- end}}
 
 {{- range .Namespace.Endpoints}}
-    def {{.MethodName}}(self{{- range .MethodParams}}, {{.Declaration}}{{- end}}) -> {{.OutputTypeHint}}:
+    def {{.MethodName}}(self{{- range .MethodParams}}, {{if .KeywordsFollow}}*, {{end}}{{.Declaration}}{{- end}}) -> {{.OutputTypeHint}}:
 {{- if .PathIsFString}}
         path = f"{{.PathTemplate}}"
 {{- else}}
@@ -897,7 +897,7 @@ class {{.Namespace.ClassName}}:
 {{- end}}
 {{- end}}
 {{- if .Paged}}
-    def {{.AllMethodName}}(self{{- range .MethodParams}}, {{.Declaration}}{{- end}}) -> Iterator[{{.ItemTypeHint}}]:
+    def {{.AllMethodName}}(self{{- range .MethodParams}}, {{if .KeywordsFollow}}*, {{end}}{{.Declaration}}{{- end}}) -> Iterator[{{.ItemTypeHint}}]:
         """Yield every item of {{.MethodName}}, page after page (D60).
 
         The first page is the one cursor names, the first of the list when

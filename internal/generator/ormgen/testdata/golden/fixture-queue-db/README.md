@@ -31,8 +31,8 @@ record, err := db.Order.GetOne(ctx, id, nil)
 ```
 
 Repositories expose `GetOne`, `GetManyByIDs`, `FindOne`, `FindMany`,
-`CreateOne`, `CreateMany`, `UpdateOne`, `UpdateMany`, `DeleteOne`, and
-`DeleteMany`. Versioned tables also expose `GetVersion`, `ListVersions`,
+`FindPage`, `CreateOne`, `CreateMany`, `UpdateOne`, `UpdateMany`, `DeleteOne`,
+and `DeleteMany`. Versioned tables also expose `GetVersion`, `ListVersions`,
 `GetAsOf`, `UpdateOneIfVersion`, and `DeleteOneIfVersion`, which soft-deletes
 a table with soft deletes and hard-deletes one without. Tables with soft
 deletes additionally expose `HardDeleteOne`.
@@ -44,3 +44,16 @@ replacement from a complete value.
 `<Type>FilterConditions(filter, &args)` gives a filter's conditions, each
 column qualified by its table, for a query of your own: its values are
 appended to `args`, their placeholders numbered after those already there.
+
+`FindPage(ctx, filter, opts)` reads a page of the rows a filter finds, in a
+`<Type>Sort`'s order of one column, ties broken by the primary key: one query
+of `Limit + 1` rows after `After`, and no count. The page's `Next` is the
+`<Type>PageKey` of its last row when more rows follow, which the next page
+takes as `After`. A key is the row's primary key alone: the query reads the
+key's row for its value of the sort's column, so an `After` whose row no
+longer exists is `ErrPageKey`. A key does not say which order it came from,
+so a cursor that carries one must name its sort, as a router's bound cursor
+does. `Parse<Type>Sort` reads a page request's sort, `name` or `-name`, and
+refuses a field the table cannot sort by. A page reads fastest with an index
+on the sort's column, then the primary key, after any column the filter
+compares by equality.

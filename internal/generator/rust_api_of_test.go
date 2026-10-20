@@ -6,6 +6,8 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/loader"
+	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
+	ir "github.com/parable-work/superschematic/ir"
 )
 
 // TestRustAPIOfIsTheCrateTheAPIGeneratorWrites builds fixture-nested-arrays-api's
@@ -71,5 +73,72 @@ func TestRustAPIOfIsTheCrateTheAPIGeneratorWrites(t *testing.T) {
 	r, _ = newRun(db, dbCfg, dbOutputs, opts, CoreRegistry(opts.Naming))
 	if output, err := RustAPIOf(r.GenerateContext); err != nil || output != nil {
 		t.Errorf("RustAPIOf on a DB schema: %v, %v; want no crate", output, err)
+	}
+}
+
+// TestRustAPIOfServiceIsTheDependencysCrate reads fixture-nested-arrays-api's
+// Rust API crate through RustAPIOfService from another service's run, as
+// the Topcoat extension reads an API dependency's (D61, amended): the
+// crate the dependency's own build writes, by its config. A dependency
+// whose server is Go, or whose config generates no API server, has none.
+func TestRustAPIOfServiceIsTheDependencysCrate(t *testing.T) {
+	dep := "fixture-nested-arrays-api"
+	depSchema, depCfg, err := loader.LoadServiceWithConfig(filepath.Join(tsFixtures, dep))
+	if err != nil {
+		t.Fatalf("LoadServiceWithConfig: %v", err)
+	}
+	db, dbCfg, err := loader.LoadServiceWithConfig(filepath.Join(tsFixtures, "fixture-db"))
+	if err != nil {
+		t.Fatalf("LoadServiceWithConfig: %v", err)
+	}
+	dbOutputs, err := ParseOutputs(dbCfg.Outputs)
+	if err != nil {
+		t.Fatalf("ParseOutputs: %v", err)
+	}
+	for _, tc := range []struct {
+		api   map[string]any
+		crate bool
+	}{
+		{map[string]any{"enabled": true, "language": "RUST"}, true},
+		{map[string]any{"enabled": true, "language": "GO"}, false},
+		{map[string]any{"enabled": false}, false},
+	} {
+		opts := Options{
+			OutputRoot: t.TempDir(),
+			Naming:     naming.Default(),
+			LoadDependency: func(name string) (*ir.Schema, error) {
+				if name != dep {
+					t.Fatalf("loaded %s", name)
+				}
+				return depSchema, nil
+			},
+			LoadDependencyConfig: func(string) (*schemaconfig.SchemaConfig, error) {
+				cfg := *depCfg
+				on := map[string]any{"enabled": true}
+				cfg.Outputs = map[string]any{"api": tc.api, "types": map[string]any{"rust": on, "go": on}}
+				return &cfg, nil
+			},
+		}
+		r, _ := newRun(db, dbCfg, dbOutputs, opts, CoreRegistry(opts.Naming))
+		output, err := RustAPIOfService(r.GenerateContext, dep)
+		if err != nil {
+			t.Fatalf("RustAPIOfService with %v: %v", tc.api, err)
+		}
+		if !tc.crate {
+			if output != nil {
+				t.Errorf("RustAPIOfService with %v: a crate, want none", tc.api)
+			}
+			continue
+		}
+		if output == nil || output.CrateName != naming.Default().RustAPICrate(dep) {
+			t.Fatalf("RustAPIOfService: %+v, want %s's crate", output, dep)
+		}
+		found := false
+		for _, endpoint := range output.Endpoints {
+			found = found || endpoint.Namespace+"."+endpoint.Name == "grid.saveGrid" && endpoint.ArgsName == "GridSaveGridArgs"
+		}
+		if !found {
+			t.Error("RustAPIOfService: no grid.saveGrid with its Args")
+		}
 	}
 }

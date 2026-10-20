@@ -4,7 +4,9 @@
 //! a shopper signs in with their password, their review is listed, and the
 //! JSON API at `/api` serves the same reviews and admits the same session.
 //! An order is placed through the form with its lines as rows, each line's
-//! product a select of the products `listProducts` lists, filtered by the
+//! product a picker of the products `listProducts` finds by their names,
+//! its "Find" posting the form again without JavaScript and its shard
+//! rendering in place with it, filtered by the
 //! GET form on `/orders`, paged through its links to the next page and the
 //! first, and cancelled from its page, each refusal rendered at its control
 //! with the route's status, and a forged cursor or a limit out of range as
@@ -16,8 +18,13 @@
 //! page, places one, and lists the products, each linked to its page, which
 //! shows the first page of its reviews, and searches and writes a product's
 //! reviews, each list a page at a time; a signed-out shopper gets 401 and a
-//! sign-in link that comes back. The orders' procedure answers a page
-//! record. The pages, the search and the refusals of a forged cursor are
+//! sign-in link that comes back. The console's tables sort by their
+//! headers, which say the order and reverse it: the orders by when they
+//! were placed or by their totals, the products by name or by price, a
+//! product's reviews by when they were written or by their ratings, the
+//! pages keeping the sort, its live shard too, and a cursor of one sort
+//! refused by another, on the console and on the JSON API. The orders'
+//! procedure answers a page record in its sort. The pages, the search and the refusals of a forged cursor are
 //! the same over the shop in memory and over a SQLite file of shop-db's
 //! tables, where the reviews, orders and sessions outlive the app, and the
 //! console lists the orders. A shopper's pages, the console's and the JSON
@@ -187,11 +194,13 @@ fn reviewer(n: usize) -> String {
 
 /// Writes a review of the anvil for each title and body, the `n`th as the
 /// `n`th reviewer, a few milliseconds apart, so the reviews list, oldest
-/// first, in the order written.
+/// first, in the order written. The first is rated 5, the next 4, and so
+/// on down to 1, then 5 again.
 async fn write_reviews<S: ProductReviewsImplementation>(shop: &S, reviews: &[(&str, &str)]) {
     for (n, (title, body)) in reviews.iter().enumerate() {
         let caller = RequestContext { principal: Some(Principal::new(reviewer(n), SHOPPER_PERMISSIONS)), ..RequestContext::default() };
-        let input = types::WriteReviewInput { rating: 4.0, title: (*title).to_owned(), body: (*body).to_owned() };
+        let rating = f64::from(5 - u8::try_from(n % 5).unwrap());
+        let input = types::WriteReviewInput { rating, title: (*title).to_owned(), body: (*body).to_owned() };
         shop.write_review(caller, ProductReviewsWriteReviewArgs { product_id: product(), input }).await.unwrap();
         sleep(Duration::from_millis(3));
     }
@@ -465,15 +474,18 @@ async fn an_order_is_placed_through_its_form_with_a_row_per_line() {
     let cookie = sign_in(&router).await;
     let anvil = product().to_string();
 
-    // A new form: one line, its product a select of the products
-    // `listProducts` lists, each by its name, its value the id as the API
-    // sends it.
+    // A new form: one line, its product a picker, since `listProducts`
+    // searches: a search box, its "Find" button, and a select of the
+    // products the search finds, the first page of them with no text, each
+    // by its name, its value the id as the API sends it.
     let form = send(&router, "GET", "/orders/new", Some(&cookie), None).await;
     assert_eq!(form.status, StatusCode::OK);
     for want in [
         r#"<fieldset class="ss-row"><legend>Line 1</legend><input type="hidden" name="lines[0]" value="">"#,
-        r#"<select id="place-order-input-lines-0-product-id" name="lines[0].productId" required=""><option value="" selected=""></option>"#,
-        &format!(r#"<option value="{anvil}">Anvil</option></select>"#),
+        r#"<div class="ss-pick" data-ss-pick="lines[0].productId"><input type="search" name="_find.lines[0].productId" value="" aria-label="Search Products""#,
+        r#"<button type="submit" name="_action" value="find:lines[0].productId" formnovalidate="""#,
+        r#"<select id="place-order-input-lines-0-product-id" name="lines[0].productId" required="""#,
+        &format!(r#"<option value="" selected=""></option><option value="{anvil}">Anvil</option></select>"#),
         r#"name="lines[0].quantity" type="number" required="" step="any" min="1" max="99">"#,
         r#"<button type="submit" class="ss-add" name="_action" value="add:lines" formnovalidate="">Add a line</button>"#,
         r#"name="shippingAddress.country" type="text" required="" pattern="^[A-Z]{2}$">"#,
@@ -492,7 +504,7 @@ async fn an_order_is_placed_through_its_form_with_a_row_per_line() {
         &format!(r#"<option value="{anvil}" selected="">Anvil</option>"#),
         r#"name="lines[0].quantity" type="number" required="" step="any" min="1" max="99" value="2">"#,
         r#"<legend>Line 2</legend>"#,
-        r#"<select id="place-order-input-lines-1-product-id" name="lines[1].productId" required="">"#,
+        r#"<select id="place-order-input-lines-1-product-id" name="lines[1].productId" required="""#,
         r#"value="remove:lines[1]" formnovalidate="" aria-label="Remove Line 2">Remove</button>"#,
         r#"value="Ada Lovelace""#,
     ] {
@@ -899,15 +911,14 @@ async fn the_console_lists_orders_and_cancels_one_from_its_page() {
 async fn the_console_places_an_order_with_the_catalogs_products() {
     let router = shop().await;
     let cookie = sign_in(&router).await;
-    // Each line's product is a select of the products `listProducts`
-    // lists, which the console names with no choices of the app's.
+    // Each line's product is a picker of the products `listProducts`
+    // finds, which the console names with no choices of the app's.
     let new = send(&router, "GET", "/console/orders/new", Some(&cookie), None).await;
     assert_eq!(new.status, StatusCode::OK, "{}", new.body);
-    let select = format!(
-        r#"<select id="place-order-input-lines-0-product-id" name="lines[0].productId" required=""><option value="" selected=""></option><option value="{}">Anvil</option></select>"#,
-        product()
-    );
-    assert!(new.body.contains(&select), "{}", new.body);
+    assert!(new.body.contains(r#"<input type="search" name="_find.lines[0].productId" value="""#), "{}", new.body);
+    assert!(new.body.contains(r#"<select id="place-order-input-lines-0-product-id" name="lines[0].productId" required="""#), "{}", new.body);
+    let options = format!(r#"<option value="" selected=""></option><option value="{}">Anvil</option></select>"#, product());
+    assert!(new.body.contains(&options), "{}", new.body);
 
     // A row button adds a line and places nothing.
     let added = send(&router, "POST", "/console/orders/new", Some(&cookie), Some(&format!("{}&_action=add:lines", order_form("2")))).await;
@@ -1238,6 +1249,206 @@ async fn a_products_page_shows_the_first_page_of_its_reviews() {
     }
 }
 
+/// The totals of the orders a table lists, in its order.
+fn totals(body: &str) -> Vec<&str> {
+    each_between(body, r#"<td data-field="totalCents">"#, "</td>")
+}
+
+/// The prices of the products a console table lists, in its order.
+fn prices(body: &str) -> Vec<&str> {
+    each_between(body, r#"<td data-field="priceCents">"#, "</td>")
+}
+
+/// The column header of `field` in a table, from its attributes on.
+fn header<'a>(body: &'a str, field: &str) -> &'a str {
+    each_between(body, &format!(r#"<th scope="col" data-field="{field}""#), "</th>").first().copied().unwrap_or_default()
+}
+
+/// Where the header of `field` links, which sorts the list by it.
+fn sort_link(body: &str, field: &str) -> String {
+    let header = header(body, field);
+    assert!(header.contains(&format!(r#"data-ss-sort="{field}""#)), "{field}'s header sorts nothing: {header}");
+    each_between(header, r#"<a href=""#, "\"").first().expect("the header's link").replace("&amp;", "&")
+}
+
+#[tokio::test]
+async fn the_consoles_lists_sort_by_their_headers() {
+    for (shop, router) in each_shop("sorted.db", &REVIEWS).await {
+        let cookie = sign_in(&router).await;
+        // Three orders of the anvil at 19.99, of 1, 3 and 2.
+        for quantity in ["1", "3", "2"] {
+            let placed = send(&router, "POST", "/orders/new", Some(&cookie), Some(&order_form(quantity))).await;
+            assert_eq!(placed.status, StatusCode::SEE_OTHER, "{shop}: {}", placed.body);
+            sleep(Duration::from_millis(3));
+        }
+
+        // The orders are in the order they were placed, which their header
+        // says, and its link reverses; the total's header sorts by it.
+        let list = send(&router, "GET", "/console/orders", Some(&cookie), None).await;
+        assert_eq!(list.status, StatusCode::OK, "{shop}: {}", list.body);
+        assert_eq!(totals(&list.body), ["1999", "5997", "3998"], "{shop}");
+        assert!(header(&list.body, "placedAt").starts_with(r#" aria-sort="ascending">"#), "{shop}: {}", list.body);
+        assert!(header(&list.body, "totalCents").starts_with('>'), "{shop}: {}", list.body);
+        assert!(!header(&list.body, "status").contains("data-ss-sort"), "{shop}: a status is no sort field");
+        assert_eq!(sort_link(&list.body, "placedAt"), "/console/orders?sort=-placedAt", "{shop}");
+        let by_total = sort_link(&list.body, "totalCents");
+        assert_eq!(by_total, "/console/orders?sort=totalCents", "{shop}");
+
+        let ascending = send(&router, "GET", &by_total, Some(&cookie), None).await;
+        assert_eq!(totals(&ascending.body), ["1999", "3998", "5997"], "{shop}");
+        assert!(header(&ascending.body, "totalCents").starts_with(r#" aria-sort="ascending">"#), "{shop}: {}", ascending.body);
+        assert_eq!(sort_link(&ascending.body, "totalCents"), "/console/orders?sort=-totalCents", "{shop}");
+
+        // A page at a time, the largest first: the links keep the sort.
+        let mut page = send(&router, "GET", "/console/orders?sort=-totalCents&limit=1", Some(&cookie), None).await;
+        let mut seen = totals(&page.body).iter().map(|total| (*total).to_owned()).collect::<Vec<_>>();
+        assert!(header(&page.body, "totalCents").starts_with(r#" aria-sort="descending">"#), "{shop}: {}", page.body);
+        while let Some(next) = link(&page.body, "next") {
+            assert!(next.starts_with("/console/orders?sort=-totalCents&limit=1&cursor="), "{shop}: {next}");
+            page = send(&router, "GET", &next, Some(&cookie), None).await;
+            assert_eq!(page.status, StatusCode::OK, "{shop}: {}", page.body);
+            seen.extend(totals(&page.body).iter().map(|total| (*total).to_owned()));
+        }
+        assert_eq!(seen, ["5997", "3998", "1999"], "{shop}");
+
+        // A header's link through the live list's shard renders the rows
+        // in place, the header saying their order.
+        let live = shard(&router, "/console/_live/orders", Some(&cookie), &["sort=-totalCents", "/console/orders"]).await;
+        assert_eq!(live.status, StatusCode::OK, "{shop}: {}", live.body);
+        assert_eq!(totals(&live.body), ["5997", "3998", "1999"], "{shop}");
+        assert!(header(&live.body, "totalCents").starts_with(r#" aria-sort="descending">"#), "{shop}: {}", live.body);
+
+        // A cursor of one sort is refused by another, the route's 400, on
+        // the console and on the JSON API.
+        let first = send(&router, "GET", "/console/orders?sort=-totalCents&limit=1", Some(&cookie), None).await;
+        let next = link(&first.body, "next").expect("a next page");
+        let cursor = next.split("cursor=").nth(1).expect("the next page's cursor");
+        let refused = send(&router, "GET", &format!("/console/orders?sort=placedAt&limit=1&cursor={cursor}"), Some(&cookie), None).await;
+        assert_eq!(refused.status, StatusCode::BAD_REQUEST, "{shop}: {}", refused.body);
+        assert!(refused.body.contains(r#"<p class="form-error">cursor: returned under another sort</p>"#), "{shop}: {}", refused.body);
+        let api = send(&router, "GET", &format!("/api/orders?sort=totalCents&cursor={cursor}"), Some(&cookie), None).await;
+        assert_eq!(api.status, StatusCode::BAD_REQUEST, "{shop}: {}", api.body);
+        assert!(api.body.contains("cursor is not one this sort returned"), "{shop}: {}", api.body);
+
+        // The products by price, which compares as a number, and back.
+        let dearest = send(&router, "GET", "/console/products?sort=-priceCents", None, None).await;
+        assert_eq!(product_names(&dearest.body), ["Bellows", "Anvil", "Chisel"], "{shop}");
+        assert_eq!(prices(&dearest.body), ["2500", "1999", "450"], "{shop}");
+        assert!(header(&dearest.body, "priceCents").starts_with(r#" aria-sort="descending">"#), "{shop}: {}", dearest.body);
+        let cheapest = send(&router, "GET", &sort_link(&dearest.body, "priceCents"), None, None).await;
+        assert_eq!(product_names(&cheapest.body), ["Chisel", "Anvil", "Bellows"], "{shop}");
+        assert_eq!(sort_link(&cheapest.body, "name"), "/console/products?sort=name", "{shop}");
+
+        // A product's reviews by rating, the best first, and the worst.
+        let reviews = format!("/console/products/{}/reviews", product());
+        let best = send(&router, "GET", &format!("{reviews}?sort=-rating"), None, None).await;
+        assert_eq!(best.status, StatusCode::OK, "{shop}: {}", best.body);
+        assert_eq!(review_titles(&best.body), ["Sturdy and heavy", "Too heavy", "Rings true"], "{shop}");
+        assert!(header(&best.body, "rating").starts_with(r#" aria-sort="descending">"#), "{shop}: {}", best.body);
+        let worst = send(&router, "GET", &sort_link(&best.body, "rating"), None, None).await;
+        assert_eq!(review_titles(&worst.body), ["Rings true", "Too heavy", "Sturdy and heavy"], "{shop}");
+    }
+}
+
+/// The options of the picker of `name` in a page: each one's value and
+/// label, in turn, and the value selected.
+fn picker_options<'a>(body: &'a str, name: &str) -> (Vec<(&'a str, &'a str)>, Option<&'a str>) {
+    let picker = each_between(body, &format!(r#"<div class="ss-pick" data-ss-pick="{name}">"#), "</select>")
+        .first()
+        .copied()
+        .unwrap_or_else(|| panic!("no picker of {name}: {body}"));
+    let mut chosen = None;
+    let options = each_between(picker, r#"<option value=""#, "</option>")
+        .into_iter()
+        .filter_map(|option| {
+            let (value, rest) = option.split_once('"')?;
+            if rest.starts_with(r#" selected="""#) && !value.is_empty() {
+                chosen = Some(value);
+            }
+            let (_, label) = rest.split_once('>')?;
+            (!value.is_empty()).then_some((value, label))
+        })
+        .collect();
+    (options, chosen)
+}
+
+/// The labels of `options`.
+fn labels<'a>(options: &[(&'a str, &'a str)]) -> Vec<&'a str> {
+    options.iter().map(|(_, label)| *label).collect()
+}
+
+#[tokio::test]
+async fn the_new_order_page_finds_a_product_by_its_name() {
+    for (shop, router) in each_shop("picker.db", &[]).await {
+        let cookie = sign_in(&router).await;
+        let line = "lines[0].productId";
+        let chisel = MORE[1].id().to_string();
+
+        // With no text, the picker offers the first page of the products.
+        let new = send(&router, "GET", "/orders/new", Some(&cookie), None).await;
+        assert_eq!(new.status, StatusCode::OK, "{shop}: {}", new.body);
+        assert_eq!(labels(&picker_options(&new.body, line).0), ["Anvil", "Bellows", "Chisel"], "{shop}");
+
+        // Without JavaScript, "Find" posts the form, which renders again as
+        // sent, 200, placing nothing, its select of the products whose name
+        // holds the text, in any case.
+        let find = |text: &str, held: &str| {
+            format!("_action=find%3Alines%5B0%5D.productId&_find.lines%5B0%5D.productId={text}&lines[0].productId={held}&lines[0].quantity=2&{ADDRESS}")
+        };
+        let found = send(&router, "POST", "/orders/new", Some(&cookie), Some(&find("BELL", ""))).await;
+        assert_eq!(found.status, StatusCode::OK, "{shop}: {}", found.body);
+        assert_eq!(labels(&picker_options(&found.body, line).0), ["Bellows"], "{shop}");
+        assert!(found.body.contains(r#"name="_find.lines[0].productId" value="BELL""#), "{shop}: {}", found.body);
+        assert!(found.body.contains(r#"name="lines[0].quantity" type="number" required="" step="any" min="1" max="99" value="2">"#), "{shop}: {}", found.body);
+        let orders = send(&router, "GET", "/orders", Some(&cookie), None).await;
+        assert!(orders.body.contains("No orders yet."), "{shop}: {}", orders.body);
+
+        // The product a line holds stays an option, chosen, by its name.
+        let anvil = product().to_string();
+        let found = send(&router, "POST", "/orders/new", Some(&cookie), Some(&find("chis", &anvil))).await;
+        let (options, chosen) = picker_options(&found.body, line);
+        assert_eq!(labels(&options), ["Anvil", "Chisel"], "{shop}: {}", found.body);
+        assert_eq!(chosen, Some(anvil.as_str()), "{shop}");
+
+        // The chisel found, the form places its order.
+        let placed = send(&router, "POST", "/orders/new", Some(&cookie), Some(&format!("lines[0].productId={chisel}&lines[0].quantity=2&{ADDRESS}"))).await;
+        assert_eq!(placed.status, StatusCode::SEE_OTHER, "{shop}: {}", placed.body);
+        let order = send(&router, "GET", &placed.location.expect("the order's page"), Some(&cookie), None).await;
+        assert!(order.body.contains(r#"<div data-field="totalCents"><dt>Total cents</dt><dd>900</dd></div>"#), "{shop}: {}", order.body);
+        assert!(order.body.contains(r#"<td data-field="productId">Chisel</td>"#), "{shop}: {}", order.body);
+
+        // Live, the picker is a shard the box's input renders again in
+        // place: the text the reader typed, through its signals, lists the
+        // products that hold it.
+        let identity = each_between(&new.body, r#"::topcoat::shard::start("/_superschematic/shop-orders/_pick/product-view", ""#, "\"")
+            .first()
+            .copied()
+            .expect("the picker's shard");
+        let input = each_between(&new.body, r#"<input type="search" name="_find.lines[0].productId""#, "<button").first().copied().expect("the box");
+        let signals: Vec<&str> = input.split("&quot;Signal&quot;,&quot;id&quot;:&quot;").skip(1).filter_map(|rest| rest.split("&quot;").next()).collect();
+        assert_eq!(signals.len(), 2, "{shop}: {input}");
+        let record = |fields: serde_json::Value| serde_json::json!({"t": "Record", "v": fields});
+        let control = record(serde_json::json!({
+            "name": line, "id": "place-order-input-lines-0-product-id", "required": true, "invalid": false, "value": "", "post": true,
+        }));
+        let pick = record(serde_json::json!({"text": "", "options": {"t": "Vec", "bits": 64, "v": []}, "more": false, "refused": {"t": "Option", "v": null}}));
+        let body = serde_json::json!({"args": [control, pick], "signals": {signals[0]: true, signals[1]: "anv"}});
+        let request = http::Request::builder()
+            .method("POST")
+            .uri("/_superschematic/shop-orders/_pick/product-view")
+            .header(header::COOKIE, &cookie)
+            .header(header::CONTENT_TYPE, "application/json")
+            .header("x-topcoat-identity", identity)
+            .body(Body::from(body.to_string()))
+            .unwrap();
+        let live = respond(&router, request).await;
+        assert_eq!(live.status, StatusCode::OK, "{shop}: {}", live.body);
+        assert!(live.body.contains(r#"name="_find.lines[0].productId" value="anv""#), "{shop}: {}", live.body);
+        assert_eq!(labels(&picker_options(&live.body, line).0), ["Anvil"], "{shop}");
+        assert!(!live.body.contains("<html"), "{shop}: {}", live.body);
+    }
+}
+
 #[tokio::test]
 async fn the_console_searches_a_products_reviews() {
     for (shop, router) in each_shop("search.db", &REVIEWS).await {
@@ -1535,7 +1746,12 @@ async fn without_the_runtime_the_pages_have_no_script() {
 async fn orders_procedure(cx: &Cx) -> topcoat::Result<impl View> {
     let query = parts(cx).uri.query().unwrap_or_default().to_owned();
     let value = |name: &str| form_urlencoded::parse(query.as_bytes()).find(|(key, _)| key == name).map(|(_, value)| value.into_owned());
-    let args = OrderListOrdersArgsRecord { statuses: None, cursor: value("cursor"), limit: value("limit").and_then(|limit| limit.parse().ok()) };
+    let args = OrderListOrdersArgsRecord {
+        statuses: None,
+        cursor: value("cursor"),
+        limit: value("limit").and_then(|limit| limit.parse().ok()),
+        sort: value("sort"),
+    };
     let said = match call_order_list_orders(cx, args).await {
         Ok(OrderViewPageRecord { items, next }) => {
             let ids: Vec<String> = items.into_iter().map(|order| order.id).collect();
@@ -1568,8 +1784,17 @@ async fn the_orders_procedure_answers_a_page_record() {
     // The page asked for meets the route's rules, and its caller the route's.
     let forged = said("/test/orders-procedure?cursor=e30".to_owned(), Some(cookie.clone())).await;
     assert_eq!(forged, "400 cursor is not one this operation returned");
-    let past = said("/test/orders-procedure?limit=101".to_owned(), Some(cookie)).await;
+    let past = said("/test/orders-procedure?limit=101".to_owned(), Some(cookie.clone())).await;
     assert_eq!(past, "400 Invalid query parameter limit: must be at most 100");
+    // The sort is the route's too: the newest first, a sort it does not
+    // offer refused, and the cursor of one sort refused by another.
+    let newest = said("/test/orders-procedure?limit=2&sort=-placedAt".to_owned(), Some(cookie.clone())).await;
+    let (orders, next) = newest.split_once(" next=").expect("a page record");
+    assert_eq!(orders, [ids[2], ids[1]].join(","));
+    let unsorted = said("/test/orders-procedure?sort=status".to_owned(), Some(cookie.clone())).await;
+    assert_eq!(unsorted, "400 Invalid query parameter sort: expected one of placedAt, -placedAt, totalCents, -totalCents");
+    let other = said(format!("/test/orders-procedure?limit=2&sort=placedAt&cursor={next}"), Some(cookie)).await;
+    assert_eq!(other, "400 cursor is not one this sort returned");
     let signed_out = said("/test/orders-procedure".to_owned(), None).await;
     assert_eq!(signed_out, "401 Authentication required");
 }

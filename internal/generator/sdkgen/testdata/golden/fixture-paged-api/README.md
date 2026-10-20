@@ -42,6 +42,13 @@ pass `next` back as `cursor` for the page after it, until `next` is
 `null`. Its `<method>All` yields every item, asking for each page only
 when the loop reaches it.
 
+A sorted list (`SortBy`) takes its order as one of its query parameters:
+a field, or `-` and a field for descending, as the OpenAPI document's
+enum lists them. A cursor holds the sort it was returned under, so ask
+for each next page with the same sort; `<method>All` sends it with every
+page. The SDK sends the sort as it is, and the route refuses one it does
+not offer.
+
 ```typescript
 const page = await sdk.catalog.listItems();
 if (page.next !== null) {

@@ -12,7 +12,7 @@ type FixturePagedApiSDK struct {
 	//
 	// Endpoints:
 	// - GetItem: One item.
-	// - ListItems: The items, two to a page unless the caller asks for up to five, by their ids or their stock.
+	// - ListItems: The items, two to a page unless the caller asks for up to five, by their ids or their stock, in order of their names unless the caller sorts them by name or sku, either way.
 	// - ListTags: The tags items carry: a page of a primitive, with the default limits.
 	// - PlaceBasket: Place a basket.
 	CatalogNamespace *namespaces.CatalogNamespace

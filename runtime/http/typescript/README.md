@@ -28,7 +28,13 @@ Its entry points:
   with a query parameter's 400s; `encodeCursor`, `decodeCursor` and
   `pageFromRows` build its `Page`, `{items, next}`, as the Go and Rust
   runtimes do (`runtime/http/testdata/page_parity.json`), the encoder
-  throwing for a key no router reads back.
+  throwing for a key no router reads back. A sorted operation's spec has a
+  `sort` (D60, amended): `readPage` reads it into `PageRequest.sort`,
+  `{field, desc}`, its default filled in, and unbinds the cursor from it
+  (`unbindCursor`); `bindPage` binds the `next` of a `Page`, or of an
+  `OperationResult` holding one, to it (`bindCursor`), the base64url of
+  `{"sort":"-placedAt","key":K}`. A cursor sent with another sort is the
+  400 `SORTED_CURSOR_DETAIL`.
   `decodeParam` reads a path or query value from its strings; a query
   list accepts repeated keys and comma-separated values.
   `decodeJsonParam` reads every body parameter from its JSON value, with

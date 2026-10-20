@@ -224,7 +224,9 @@ func buildCommonHeaderParameters(output *APIOutput) []map[string]interface{} {
 // "required" says whether it may be absent. A list uses style=form and
 // explode=false, the ?name=a,b encoding the generated servers and SDKs use.
 // A parameter that refers to an item gives its reference, and the search
-// argument says so, on the parameter object (D61, D62).
+// argument says so, on the parameter object (D61, D62). The sort argument
+// is a string of its values, its default when absent, and says so too
+// (D60, amended).
 func buildQueryParams(params []Param, scalarExamples, scalarDescriptions, scalarMap map[string]string, schema *ir.Schema, dependencies map[string]*ir.Schema) []map[string]interface{} {
 	var result []map[string]interface{}
 	for _, param := range params {
@@ -243,6 +245,16 @@ func buildQueryParams(params []Param, scalarExamples, scalarDescriptions, scalar
 		if param.IsArray {
 			definition["style"] = "form"
 			definition["explode"] = false
+		}
+		if param.Sort != nil {
+			// A sort is one of its values, its default when absent (D60,
+			// amended).
+			definition["description"] = PageSortDescription
+			definition["schema"] = map[string]interface{}{
+				"type":    "string",
+				"enum":    param.Sort.Values,
+				"default": param.Sort.Default,
+			}
 		}
 		openAPIParameterKeys(definition, param)
 		result = append(result, definition)

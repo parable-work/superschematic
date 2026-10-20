@@ -22,6 +22,7 @@ type CoverRepositoryInterface interface {
 	ListAsOfByRefID(ctx context.Context, refID types.IdentityUUID, ts time.Time, opts *CoverHistoryOptions) ([]types.HistoryRecord[*types.Cover], error)
 	FindOne(ctx context.Context, filter *CoverFilter, opts *CoverFindOptions) (*types.Cover, error)
 	FindMany(ctx context.Context, filter *CoverFilter, opts *CoverFindOptions) ([]*types.Cover, int, error)
+	FindPage(ctx context.Context, filter *CoverFilter, opts *CoverPageOptions) (*CoverPage, error)
 	CreateOne(ctx context.Context, input *types.Cover) (*types.Cover, error)
 	CreateMany(ctx context.Context, inputs []*types.Cover) ([]*types.Cover, error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *CoverUpdate) (*types.Cover, error)
@@ -45,6 +46,7 @@ type IngredientRepositoryInterface interface {
 	ListAsOfByRefID(ctx context.Context, refID types.IdentityUUID, ts time.Time, opts *IngredientHistoryOptions) ([]types.HistoryRecord[*types.Ingredient], error)
 	FindOne(ctx context.Context, filter *IngredientFilter, opts *IngredientFindOptions) (*types.Ingredient, error)
 	FindMany(ctx context.Context, filter *IngredientFilter, opts *IngredientFindOptions) ([]*types.Ingredient, int, error)
+	FindPage(ctx context.Context, filter *IngredientFilter, opts *IngredientPageOptions) (*IngredientPage, error)
 	CreateOne(ctx context.Context, input *types.Ingredient) (*types.Ingredient, error)
 	CreateMany(ctx context.Context, inputs []*types.Ingredient) ([]*types.Ingredient, error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *IngredientUpdate) (*types.Ingredient, error)
@@ -66,6 +68,7 @@ type NoteRepositoryInterface interface {
 	ListAsOfByRefID(ctx context.Context, refID types.IdentityUUID, ts time.Time, opts *NoteHistoryOptions) ([]types.HistoryRecord[*types.Note], error)
 	FindOne(ctx context.Context, filter *NoteFilter, opts *NoteFindOptions) (*types.Note, error)
 	FindMany(ctx context.Context, filter *NoteFilter, opts *NoteFindOptions) ([]*types.Note, int, error)
+	FindPage(ctx context.Context, filter *NoteFilter, opts *NotePageOptions) (*NotePage, error)
 	CreateOne(ctx context.Context, input *types.Note) (*types.Note, error)
 	CreateMany(ctx context.Context, inputs []*types.Note) ([]*types.Note, error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *NoteUpdate) (*types.Note, error)
@@ -82,6 +85,7 @@ type RecipeRepositoryInterface interface {
 	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Recipe, error)
 	FindOne(ctx context.Context, filter *RecipeFilter, opts *RecipeFindOptions) (*types.Recipe, error)
 	FindMany(ctx context.Context, filter *RecipeFilter, opts *RecipeFindOptions) ([]*types.Recipe, int, error)
+	FindPage(ctx context.Context, filter *RecipeFilter, opts *RecipePageOptions) (*RecipePage, error)
 	CreateOne(ctx context.Context, input *types.Recipe) (*types.Recipe, error)
 	CreateMany(ctx context.Context, inputs []*types.Recipe) ([]*types.Recipe, error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *RecipeUpdate) (*types.Recipe, error)
@@ -96,6 +100,7 @@ type RecipeCommitRepositoryInterface interface {
 	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.RecipeCommit, error)
 	FindOne(ctx context.Context, filter *RecipeCommitFilter, opts *RecipeCommitFindOptions) (*types.RecipeCommit, error)
 	FindMany(ctx context.Context, filter *RecipeCommitFilter, opts *RecipeCommitFindOptions) ([]*types.RecipeCommit, int, error)
+	FindPage(ctx context.Context, filter *RecipeCommitFilter, opts *RecipeCommitPageOptions) (*RecipeCommitPage, error)
 	CreateOne(ctx context.Context, input *types.RecipeCommit) (*types.RecipeCommit, error)
 	CreateMany(ctx context.Context, inputs []*types.RecipeCommit) ([]*types.RecipeCommit, error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *RecipeCommitUpdate) (*types.RecipeCommit, error)
@@ -110,6 +115,7 @@ type RecipePatchRepositoryInterface interface {
 	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.RecipePatch, error)
 	FindOne(ctx context.Context, filter *RecipePatchFilter, opts *RecipePatchFindOptions) (*types.RecipePatch, error)
 	FindMany(ctx context.Context, filter *RecipePatchFilter, opts *RecipePatchFindOptions) ([]*types.RecipePatch, int, error)
+	FindPage(ctx context.Context, filter *RecipePatchFilter, opts *RecipePatchPageOptions) (*RecipePatchPage, error)
 	CreateOne(ctx context.Context, input *types.RecipePatch) (*types.RecipePatch, error)
 	CreateMany(ctx context.Context, inputs []*types.RecipePatch) ([]*types.RecipePatch, error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *RecipePatchUpdate) (*types.RecipePatch, error)
@@ -131,6 +137,7 @@ type RecipeRefRepositoryInterface interface {
 	ListAsOfByHeadCommitID(ctx context.Context, headCommitID types.IdentityUUID, ts time.Time, opts *RecipeRefHistoryOptions) ([]types.HistoryRecord[*types.RecipeRef], error)
 	FindOne(ctx context.Context, filter *RecipeRefFilter, opts *RecipeRefFindOptions) (*types.RecipeRef, error)
 	FindMany(ctx context.Context, filter *RecipeRefFilter, opts *RecipeRefFindOptions) ([]*types.RecipeRef, int, error)
+	FindPage(ctx context.Context, filter *RecipeRefFilter, opts *RecipeRefPageOptions) (*RecipeRefPage, error)
 	CreateOne(ctx context.Context, input *types.RecipeRef) (*types.RecipeRef, error)
 	CreateMany(ctx context.Context, inputs []*types.RecipeRef) ([]*types.RecipeRef, error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *RecipeRefUpdate) (*types.RecipeRef, error)
@@ -153,6 +160,7 @@ type RecipeReleaseRepositoryInterface interface {
 	ListAsOfByCommitID(ctx context.Context, commitID types.IdentityUUID, ts time.Time, opts *RecipeReleaseHistoryOptions) ([]types.HistoryRecord[*types.RecipeRelease], error)
 	FindOne(ctx context.Context, filter *RecipeReleaseFilter, opts *RecipeReleaseFindOptions) (*types.RecipeRelease, error)
 	FindMany(ctx context.Context, filter *RecipeReleaseFilter, opts *RecipeReleaseFindOptions) ([]*types.RecipeRelease, int, error)
+	FindPage(ctx context.Context, filter *RecipeReleaseFilter, opts *RecipeReleasePageOptions) (*RecipeReleasePage, error)
 	CreateOne(ctx context.Context, input *types.RecipeRelease) (*types.RecipeRelease, error)
 	CreateMany(ctx context.Context, inputs []*types.RecipeRelease) ([]*types.RecipeRelease, error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *RecipeReleaseUpdate) (*types.RecipeRelease, error)
@@ -169,6 +177,7 @@ type RecipeSnapshotEntryRepositoryInterface interface {
 	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.RecipeSnapshotEntry, error)
 	FindOne(ctx context.Context, filter *RecipeSnapshotEntryFilter, opts *RecipeSnapshotEntryFindOptions) (*types.RecipeSnapshotEntry, error)
 	FindMany(ctx context.Context, filter *RecipeSnapshotEntryFilter, opts *RecipeSnapshotEntryFindOptions) ([]*types.RecipeSnapshotEntry, int, error)
+	FindPage(ctx context.Context, filter *RecipeSnapshotEntryFilter, opts *RecipeSnapshotEntryPageOptions) (*RecipeSnapshotEntryPage, error)
 	CreateOne(ctx context.Context, input *types.RecipeSnapshotEntry) (*types.RecipeSnapshotEntry, error)
 	CreateMany(ctx context.Context, inputs []*types.RecipeSnapshotEntry) ([]*types.RecipeSnapshotEntry, error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *RecipeSnapshotEntryUpdate) (*types.RecipeSnapshotEntry, error)
@@ -190,6 +199,7 @@ type StepRepositoryInterface interface {
 	ListAsOfByRefID(ctx context.Context, refID types.IdentityUUID, ts time.Time, opts *StepHistoryOptions) ([]types.HistoryRecord[*types.Step], error)
 	FindOne(ctx context.Context, filter *StepFilter, opts *StepFindOptions) (*types.Step, error)
 	FindMany(ctx context.Context, filter *StepFilter, opts *StepFindOptions) ([]*types.Step, int, error)
+	FindPage(ctx context.Context, filter *StepFilter, opts *StepPageOptions) (*StepPage, error)
 	CreateOne(ctx context.Context, input *types.Step) (*types.Step, error)
 	CreateMany(ctx context.Context, inputs []*types.Step) ([]*types.Step, error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *StepUpdate) (*types.Step, error)
@@ -211,6 +221,7 @@ type TastingRepositoryInterface interface {
 	ListAsOfByRefID(ctx context.Context, refID types.IdentityUUID, ts time.Time, opts *TastingHistoryOptions) ([]types.HistoryRecord[*types.Tasting], error)
 	FindOne(ctx context.Context, filter *TastingFilter, opts *TastingFindOptions) (*types.Tasting, error)
 	FindMany(ctx context.Context, filter *TastingFilter, opts *TastingFindOptions) ([]*types.Tasting, int, error)
+	FindPage(ctx context.Context, filter *TastingFilter, opts *TastingPageOptions) (*TastingPage, error)
 	CreateOne(ctx context.Context, input *types.Tasting) (*types.Tasting, error)
 	CreateMany(ctx context.Context, inputs []*types.Tasting) ([]*types.Tasting, error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *TastingUpdate) (*types.Tasting, error)
@@ -232,6 +243,7 @@ type UtensilRepositoryInterface interface {
 	ListAsOfByRefID(ctx context.Context, refID types.IdentityUUID, ts time.Time, opts *UtensilHistoryOptions) ([]types.HistoryRecord[*types.Utensil], error)
 	FindOne(ctx context.Context, filter *UtensilFilter, opts *UtensilFindOptions) (*types.Utensil, error)
 	FindMany(ctx context.Context, filter *UtensilFilter, opts *UtensilFindOptions) ([]*types.Utensil, int, error)
+	FindPage(ctx context.Context, filter *UtensilFilter, opts *UtensilPageOptions) (*UtensilPage, error)
 	CreateOne(ctx context.Context, input *types.Utensil) (*types.Utensil, error)
 	CreateMany(ctx context.Context, inputs []*types.Utensil) ([]*types.Utensil, error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *UtensilUpdate) (*types.Utensil, error)
@@ -423,6 +435,10 @@ func (r *NoOpCoverRepository) FindMany(_ context.Context, _ *CoverFilter, _ *Cov
 	return []*types.Cover{}, 0, nil
 }
 
+func (r *NoOpCoverRepository) FindPage(_ context.Context, _ *CoverFilter, _ *CoverPageOptions) (*CoverPage, error) {
+	return &CoverPage{Rows: []*types.Cover{}}, nil
+}
+
 func (r *NoOpCoverRepository) CreateOne(_ context.Context, input *types.Cover) (*types.Cover, error) {
 	return input, nil
 }
@@ -513,6 +529,10 @@ func (r *NoOpIngredientRepository) FindMany(_ context.Context, _ *IngredientFilt
 	return []*types.Ingredient{}, 0, nil
 }
 
+func (r *NoOpIngredientRepository) FindPage(_ context.Context, _ *IngredientFilter, _ *IngredientPageOptions) (*IngredientPage, error) {
+	return &IngredientPage{Rows: []*types.Ingredient{}}, nil
+}
+
 func (r *NoOpIngredientRepository) CreateOne(_ context.Context, input *types.Ingredient) (*types.Ingredient, error) {
 	return input, nil
 }
@@ -595,6 +615,10 @@ func (r *NoOpNoteRepository) FindMany(_ context.Context, _ *NoteFilter, _ *NoteF
 	return []*types.Note{}, 0, nil
 }
 
+func (r *NoOpNoteRepository) FindPage(_ context.Context, _ *NoteFilter, _ *NotePageOptions) (*NotePage, error) {
+	return &NotePage{Rows: []*types.Note{}}, nil
+}
+
 func (r *NoOpNoteRepository) CreateOne(_ context.Context, input *types.Note) (*types.Note, error) {
 	return input, nil
 }
@@ -657,6 +681,10 @@ func (r *NoOpRecipeRepository) FindMany(_ context.Context, _ *RecipeFilter, _ *R
 	return []*types.Recipe{}, 0, nil
 }
 
+func (r *NoOpRecipeRepository) FindPage(_ context.Context, _ *RecipeFilter, _ *RecipePageOptions) (*RecipePage, error) {
+	return &RecipePage{Rows: []*types.Recipe{}}, nil
+}
+
 func (r *NoOpRecipeRepository) CreateOne(_ context.Context, input *types.Recipe) (*types.Recipe, error) {
 	return input, nil
 }
@@ -711,6 +739,10 @@ func (r *NoOpRecipeCommitRepository) FindMany(_ context.Context, _ *RecipeCommit
 	return []*types.RecipeCommit{}, 0, nil
 }
 
+func (r *NoOpRecipeCommitRepository) FindPage(_ context.Context, _ *RecipeCommitFilter, _ *RecipeCommitPageOptions) (*RecipeCommitPage, error) {
+	return &RecipeCommitPage{Rows: []*types.RecipeCommit{}}, nil
+}
+
 func (r *NoOpRecipeCommitRepository) CreateOne(_ context.Context, input *types.RecipeCommit) (*types.RecipeCommit, error) {
 	return input, nil
 }
@@ -763,6 +795,10 @@ func (r *NoOpRecipePatchRepository) FindOne(_ context.Context, _ *RecipePatchFil
 
 func (r *NoOpRecipePatchRepository) FindMany(_ context.Context, _ *RecipePatchFilter, _ *RecipePatchFindOptions) ([]*types.RecipePatch, int, error) {
 	return []*types.RecipePatch{}, 0, nil
+}
+
+func (r *NoOpRecipePatchRepository) FindPage(_ context.Context, _ *RecipePatchFilter, _ *RecipePatchPageOptions) (*RecipePatchPage, error) {
+	return &RecipePatchPage{Rows: []*types.RecipePatch{}}, nil
 }
 
 func (r *NoOpRecipePatchRepository) CreateOne(_ context.Context, input *types.RecipePatch) (*types.RecipePatch, error) {
@@ -845,6 +881,10 @@ func (r *NoOpRecipeRefRepository) FindOne(_ context.Context, _ *RecipeRefFilter,
 
 func (r *NoOpRecipeRefRepository) FindMany(_ context.Context, _ *RecipeRefFilter, _ *RecipeRefFindOptions) ([]*types.RecipeRef, int, error) {
 	return []*types.RecipeRef{}, 0, nil
+}
+
+func (r *NoOpRecipeRefRepository) FindPage(_ context.Context, _ *RecipeRefFilter, _ *RecipeRefPageOptions) (*RecipeRefPage, error) {
+	return &RecipeRefPage{Rows: []*types.RecipeRef{}}, nil
 }
 
 func (r *NoOpRecipeRefRepository) CreateOne(_ context.Context, input *types.RecipeRef) (*types.RecipeRef, error) {
@@ -933,6 +973,10 @@ func (r *NoOpRecipeReleaseRepository) FindMany(_ context.Context, _ *RecipeRelea
 	return []*types.RecipeRelease{}, 0, nil
 }
 
+func (r *NoOpRecipeReleaseRepository) FindPage(_ context.Context, _ *RecipeReleaseFilter, _ *RecipeReleasePageOptions) (*RecipeReleasePage, error) {
+	return &RecipeReleasePage{Rows: []*types.RecipeRelease{}}, nil
+}
+
 func (r *NoOpRecipeReleaseRepository) CreateOne(_ context.Context, input *types.RecipeRelease) (*types.RecipeRelease, error) {
 	return input, nil
 }
@@ -993,6 +1037,10 @@ func (r *NoOpRecipeSnapshotEntryRepository) FindOne(_ context.Context, _ *Recipe
 
 func (r *NoOpRecipeSnapshotEntryRepository) FindMany(_ context.Context, _ *RecipeSnapshotEntryFilter, _ *RecipeSnapshotEntryFindOptions) ([]*types.RecipeSnapshotEntry, int, error) {
 	return []*types.RecipeSnapshotEntry{}, 0, nil
+}
+
+func (r *NoOpRecipeSnapshotEntryRepository) FindPage(_ context.Context, _ *RecipeSnapshotEntryFilter, _ *RecipeSnapshotEntryPageOptions) (*RecipeSnapshotEntryPage, error) {
+	return &RecipeSnapshotEntryPage{Rows: []*types.RecipeSnapshotEntry{}}, nil
 }
 
 func (r *NoOpRecipeSnapshotEntryRepository) CreateOne(_ context.Context, input *types.RecipeSnapshotEntry) (*types.RecipeSnapshotEntry, error) {
@@ -1077,6 +1125,10 @@ func (r *NoOpStepRepository) FindMany(_ context.Context, _ *StepFilter, _ *StepF
 	return []*types.Step{}, 0, nil
 }
 
+func (r *NoOpStepRepository) FindPage(_ context.Context, _ *StepFilter, _ *StepPageOptions) (*StepPage, error) {
+	return &StepPage{Rows: []*types.Step{}}, nil
+}
+
 func (r *NoOpStepRepository) CreateOne(_ context.Context, input *types.Step) (*types.Step, error) {
 	return input, nil
 }
@@ -1159,6 +1211,10 @@ func (r *NoOpTastingRepository) FindMany(_ context.Context, _ *TastingFilter, _ 
 	return []*types.Tasting{}, 0, nil
 }
 
+func (r *NoOpTastingRepository) FindPage(_ context.Context, _ *TastingFilter, _ *TastingPageOptions) (*TastingPage, error) {
+	return &TastingPage{Rows: []*types.Tasting{}}, nil
+}
+
 func (r *NoOpTastingRepository) CreateOne(_ context.Context, input *types.Tasting) (*types.Tasting, error) {
 	return input, nil
 }
@@ -1239,6 +1295,10 @@ func (r *NoOpUtensilRepository) FindOne(_ context.Context, _ *UtensilFilter, _ *
 
 func (r *NoOpUtensilRepository) FindMany(_ context.Context, _ *UtensilFilter, _ *UtensilFindOptions) ([]*types.Utensil, int, error) {
 	return []*types.Utensil{}, 0, nil
+}
+
+func (r *NoOpUtensilRepository) FindPage(_ context.Context, _ *UtensilFilter, _ *UtensilPageOptions) (*UtensilPage, error) {
+	return &UtensilPage{Rows: []*types.Utensil{}}, nil
 }
 
 func (r *NoOpUtensilRepository) CreateOne(_ context.Context, input *types.Utensil) (*types.Utensil, error) {

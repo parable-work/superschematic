@@ -55,6 +55,57 @@ func TestPagedToolParametersReturnsAndDescription(t *testing.T) {
 	}
 }
 
+// A sorted page's tool (D60, amended) takes its sort as a string of its
+// values, as the OpenAPI document lists them, with a description that
+// names the default and the sort key's mark; its description asks for the
+// same sort with each next. A rename of the sort key reaches the property,
+// and an empty key leaves the mark out but keeps the values.
+func TestSortedToolParametersAndDescription(t *testing.T) {
+	sort := &apigen.SortParam{Fields: []string{"name", "sku"}, Values: []string{"name", "-name", "sku", "-sku"}, Default: "name"}
+	page := &apigen.PageInfo{
+		DefaultLimit: 2, MaxLimit: 5, Operation: "Catalog.listItems",
+		Sort: &apigen.PageSort{Param: "sort", Fields: sort.Fields, Default: sort.Default},
+	}
+	query := []ToolQueryArg{{Name: "inStock", Type: "boolean"}, {Name: "sort", Type: "string", Sort: sort}}
+	scalars := map[string]apigen.ScalarJSONSchemaInfo{"boolean": {Type: "boolean"}, "string": {Type: "string", Description: "A string value"}}
+
+	encode := func(keys apigen.ToolKeys) string {
+		t.Helper()
+		schema := BuildParametersSchema(nil, query, false, "", nil, nil, nil, nil, false, scalars, byName, keys, page)
+		if len(schema.Required) != 0 {
+			t.Fatalf("required = %v", schema.Required)
+		}
+		if holding := schema.Holds(); !holding.Sort || holding.Search || holding.Reference {
+			t.Fatalf("holds %+v", holding)
+		}
+		encoded, err := json.Marshal(schema.Properties["sort"])
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(encoded)
+	}
+	description := apigen.PageSortDescription + " One of `name`, `-name`, `sku` or `-sku`; `name` when left out."
+	shape := `"type":"string","description":"` + description + `","enum":["name","-name","sku","-sku"]}`
+	if got, want := encode(apigen.DefaultToolKeys()), `{"x-superschematic-sort":true,`+shape; got != want {
+		t.Fatalf("sort =\n%s\nwant\n%s", got, want)
+	}
+	if got, want := encode(apigen.ToolKeys{Sort: "x-vendor-sort"}), `{"x-vendor-sort":true,`+shape; got != want {
+		t.Fatalf("renamed sort =\n%s\nwant\n%s", got, want)
+	}
+	if got, want := encode(apigen.ToolKeys{}), `{`+shape; got != want {
+		t.Fatalf("unkeyed sort =\n%s\nwant\n%s", got, want)
+	}
+
+	want := "The items. Pages: pass the result's `next` back as `cursor`, with the same `sort`, for the next page; `next` is null after the last."
+	if got := PagedDescription("The items.", page); got != want || got != "The items. "+SortedPageSentence("sort") {
+		t.Fatalf("sorted description = %q", got)
+	}
+	page.Sort.Param = "order_by"
+	if got := PagedDescription("", page); got != SortedPageSentence("orderBy") {
+		t.Fatalf("a sort named order_by = %q", got)
+	}
+}
+
 func jsonEqual(t *testing.T, a, b any) bool {
 	t.Helper()
 	x, err := json.Marshal(a)

@@ -57,7 +57,11 @@ export interface {{ .ArgsTypeName }} {
   input{{ if not .InputRequired }}?{{ end }}: {{ .InputType }};
 {{- end }}
 {{- if .Page }}
+{{- if .Page.Sort }}
+  /** The page asked for (D60): the cursor of the page before, absent for the first page; the limit, 1 to {{ .Page.MaxLimit }}, {{ .Page.DefaultLimit }} when the caller sends none; and the sort (D60, amended), by {{ join .Page.Sort.Fields ", " }}, descending when desc, {{ .Page.Sort.Default }} when the caller sends none, ties broken by id. The cursor is the method's own key's: the router binds it to the sort and back. */
+{{- else }}
   /** The page asked for (D60): the cursor of the page before, absent for the first page, and the limit, 1 to {{ .Page.MaxLimit }}, {{ .Page.DefaultLimit }} when the caller sends none. */
+{{- end }}
   page: PageRequest;
 {{- end }}
 }

@@ -36,6 +36,13 @@
           "default": false,
           "type": "boolean"
         },
+        "sort": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "typeRef": {
           "$ref": "#/$defs/TypeRef"
         },
@@ -3357,6 +3364,12 @@
           "maximum": 1000,
           "minimum": 1,
           "type": "integer"
+        },
+        "defaultSort": {
+          "default": "",
+          "description": "The order of a request that sends no sort: one of the SortBy argument's values, a field or - and a field. Required with a SortBy argument, and refused without one.",
+          "pattern": "^-?[A-Za-z_][A-Za-z0-9_]*$",
+          "type": "string"
         },
         "maxLimit": {
           "default": 0,

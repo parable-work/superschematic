@@ -1,15 +1,17 @@
-//! shop-orders' implementations over a SQLite file of shop-db's tables,
-//! with the `sqlite` feature. shop-db lists `sqlite` in
-//! `outputs.sql.dialects`, so its build writes the tables' SQLite DDL,
-//! `sql/shop-db/sqlite/create.sql`, and `superschematic migrate plan
-//! --dialect sqlite` plans the file that `superschematic-migrate apply`
-//! migrates. The shop keeps the rows as shop-db declares them, as the Go
-//! server keeps them in Postgres: an id is a UUID as hyphenated text, a time
-//! RFC 3339 UTC text and a shipping address its JSON. The tables' defaults
-//! give a new row its id and its times. A list reads up to one row past
-//! its page's limit after the cursor's key, the columns it orders by as
-//! the table holds them, its id last, with a row-value comparison (D60);
-//! the reviews' search is a `LIKE` per word over the review's
+//! shop-orders' implementations over a SQLite file of shop-db's tables, with
+//! the `sqlite` feature. shop-db lists `sqlite` in `outputs.sql.dialects`, so
+//! its build writes the tables' SQLite DDL, `sql/shop-db/sqlite/create.sql`,
+//! and `superschematic migrate plan --dialect sqlite` plans the file that
+//! `superschematic-migrate apply` migrates. The shop keeps the rows as
+//! shop-db declares them, as the Go server keeps them in Postgres: an id is a
+//! UUID as hyphenated text, a time RFC 3339 UTC text and a shipping address
+//! its JSON. The tables' defaults give a new row its id and its times. A list
+//! reads up to one row past its page's limit after the cursor's row, by the
+//! column of its page's sort, its id last, with a row-value comparison (D60,
+//! amended): the column comes from the list's own whitelist, and a cursor is
+//! the row's id, whose value of the column is read from the table, so it
+//! binds as the column's type and a price compares as a number. The reviews'
+//! and the products' searches are a `LIKE` per word over the row's
 //! `search_text`, which SQLite computes as it reads each row (D62). A
 //! shopper's lists, reads and cancels of orders hold a condition on the
 //! order's `customer_id`, and staff's none.
@@ -31,10 +33,10 @@ use acme_shop_orders_api::{
 use async_trait::async_trait;
 use rusqlite::types::Value;
 use rusqlite::{ffi, params, params_from_iter, Connection, OpenFlags, OptionalExtension, Row};
-use superschematic_http_runtime::page::{Cursor, Page, PageRequest};
+use superschematic_http_runtime::page::{refused_cursor, Cursor, Page, PageRequest, Sort};
 use superschematic_http_runtime::{search, ApiError, RequestContext};
 
-use crate::{caller, now, sees_every_order};
+use crate::{caller, now, sees_every_order, sort_field, unsorted};
 
 /// The shop's catalog, orders and reviews in a SQLite file.
 pub struct SqliteShop {
@@ -268,7 +270,7 @@ fn order_status(text: &str) -> Result<types::OrderStatus, String> {
         .ok_or_else(|| format!("no order status is {text}"))
 }
 
-const ORDER_COLUMNS: &str = "id, status, placed_at, shipping_address, cancel_reason";
+const ORDER_COLUMNS: &str = "id, status, placed_at, shipping_address, cancel_reason, total_cents";
 
 /// An order's row, its lines not read yet.
 fn order_row(row: &Row) -> rusqlite::Result<types::OrderView> {
@@ -278,13 +280,12 @@ fn order_row(row: &Row) -> rusqlite::Result<types::OrderView> {
         placed_at: parsed(row, 2, types::TemporalDateTime::parse)?,
         shipping_address: parsed(row, 3, |text: &str| serde_json::from_str(text))?,
         cancel_reason: row.get(4)?,
+        total_cents: row.get(5)?,
         lines: Vec::new(),
-        total_cents: 0,
     })
 }
 
-/// Reads an order's lines into it, in the order they were placed, and
-/// totals them.
+/// Reads an order's lines into it, in the order they were placed.
 fn with_lines(
     conn: &Connection,
     mut order: types::OrderView,
@@ -302,11 +303,6 @@ fn with_lines(
             })
         })?
         .collect::<rusqlite::Result<_>>()?;
-    order.total_cents = order
-        .lines
-        .iter()
-        .map(|line| line.quantity * line.unit_price_cents)
-        .sum();
     Ok(order)
 }
 
@@ -332,9 +328,48 @@ fn read_order(
     with_lines(conn, order).map_err(internal)
 }
 
-/// A row's place in a list's order: the columns the list orders by, as
-/// the table holds them, the row's id last.
-type RowKey = (String, String);
+/// A page's key, as its cursor holds it: the id of the page's last row, as
+/// hyphenated text. The list reads that row's value of the sort column from
+/// the table, so a key is the same in every order and as short as an id,
+/// whatever the row holds (D60, amended).
+type RowKey = String;
+
+/// The column a list's page is sorted by (D60, amended), from the list's
+/// own columns, never the request's text, and the direction.
+struct SortColumn {
+    column: &'static str,
+    desc: bool,
+}
+
+impl SortColumn {
+    /// The column of the field the page's sort names among `columns`, a
+    /// list's sort fields by their JSON names, each with its column;
+    /// `default` when the request has no sort.
+    fn of(
+        sort: Option<&Sort>,
+        default: &str,
+        list: &str,
+        columns: &[(&str, &'static str)],
+    ) -> Result<Self, ApiError> {
+        let field = sort_field(sort, default);
+        let (_, column) = columns
+            .iter()
+            .find(|(name, _)| *name == field)
+            .ok_or_else(|| unsorted(list, field))?;
+        Ok(Self {
+            column,
+            desc: sort.is_some_and(Sort::desc),
+        })
+    }
+
+    fn direction(&self) -> &'static str {
+        if self.desc {
+            "DESC"
+        } else {
+            "ASC"
+        }
+    }
+}
 
 /// The query of a page of a list: the conditions its rows meet, each with
 /// a `?` for each of its values, in turn.
@@ -350,45 +385,67 @@ impl ListQuery {
         self.values.extend(values);
     }
 
-    /// The rows after the key a page's cursor names, in the order of the
-    /// key's columns, `key`, a pair such as `placed_at, id`. A cursor that
-    /// does not decode to two texts is the 400 of one this list never
-    /// returned.
-    fn after(&mut self, cursor: Option<&Cursor>, key: &str) -> Result<(), ApiError> {
+    /// The rows after the row a page's cursor names, in the sort's order:
+    /// `(column, id) > (?, ?)`, or `<` descending, with the row's value of
+    /// the column as the table holds it, so a price compares as a number.
+    /// The row is read by its id alone, not by the list's conditions, so a
+    /// row they no longer keep, a deleted review among them, still places
+    /// the page. A cursor that holds no text, or whose row is gone, is the
+    /// 400 of one this list never returned.
+    fn after(
+        &mut self,
+        conn: &Connection,
+        table: &str,
+        cursor: Option<&Cursor>,
+        sort: &SortColumn,
+    ) -> Result<(), ApiError> {
         if let Some(cursor) = cursor {
-            let (first, id): RowKey = cursor.decode()?;
+            let id: RowKey = cursor.decode()?;
+            let column = sort.column;
+            let value: Value = conn
+                .query_row(
+                    &format!("SELECT {column} FROM {table} WHERE id = ?1"),
+                    [&id],
+                    |row| row.get(0),
+                )
+                .optional()
+                .map_err(internal)?
+                .ok_or_else(refused_cursor)?;
+            let comparison = if sort.desc { "<" } else { ">" };
             self.condition(
-                &format!("({key}) > (?, ?)"),
-                [Value::Text(first), Value::Text(id)],
+                &format!("({column}, id) {comparison} (?, ?)"),
+                [value, Value::Text(id)],
             );
         }
         Ok(())
     }
 
     /// Reads up to one row past the page's limit, `columns`, which `read`
-    /// reads, then the key's, ordered by the key, and keeps the page with
-    /// `Page::from_rows`, whose next page's cursor is its last row's key.
+    /// reads, then the id, ordered by the sort's column and the id in the
+    /// sort's direction, and keeps the page with `Page::from_rows`, whose
+    /// next page's cursor is its last row's id.
     fn page<T>(
         mut self,
         conn: &Connection,
         columns: &str,
         table: &str,
-        key: &str,
+        sort: &SortColumn,
         page: &PageRequest,
         read: impl Fn(&Row) -> rusqlite::Result<T>,
     ) -> Result<Page<T>, ApiError> {
-        let mut sql = format!("SELECT {columns}, {key} FROM {table}");
+        let column = sort.column;
+        let mut sql = format!("SELECT {columns}, id FROM {table}");
         if !self.conditions.is_empty() {
             sql = format!("{sql} WHERE {}", self.conditions.join(" AND "));
         }
-        sql = format!("{sql} ORDER BY {key} LIMIT ?");
+        let direction = sort.direction();
+        sql = format!("{sql} ORDER BY {column} {direction}, id {direction} LIMIT ?");
         self.values
             .push(Value::Integer(page.limit.max(1).saturating_add(1)));
         let mut stmt = conn.prepare(&sql).map_err(internal)?;
         let rows = stmt
             .query_map(params_from_iter(&self.values), |row| {
-                let last = row.as_ref().column_count() - 1;
-                let key: RowKey = (row.get(last - 1)?, row.get(last)?);
+                let key: RowKey = row.get(row.as_ref().column_count() - 1)?;
                 Ok((key, read(row)?))
             })
             .and_then(|rows| rows.collect::<rusqlite::Result<Vec<_>>>())
@@ -396,6 +453,15 @@ impl ListQuery {
         Ok(Page::from_rows(rows, page.limit, |(key, _)| key.clone())?.map(|(_, row)| row))
     }
 }
+
+/// The orders' sort columns: `placedAt`, by default, and `totalCents`.
+const ORDER_SORTS: [(&str, &str); 2] = [("placedAt", "placed_at"), ("totalCents", "total_cents")];
+
+/// The products' sort columns: `name`, by default, and `priceCents`.
+const PRODUCT_SORTS: [(&str, &str); 2] = [("name", "name"), ("priceCents", "price_cents")];
+
+/// The reviews' sort columns: `createdAt`, by default, and `rating`.
+const REVIEW_SORTS: [(&str, &str); 2] = [("createdAt", "created_at"), ("rating", "rating")];
 
 fn review_row(row: &Row) -> rusqlite::Result<types::ReviewView> {
     Ok(types::ReviewView {
@@ -409,14 +475,17 @@ fn review_row(row: &Row) -> rusqlite::Result<types::ReviewView> {
 
 #[async_trait]
 impl OrderImplementation for SqliteShop {
-    /// The caller's orders, or every customer's for staff, oldest first,
-    /// with the given statuses, or of every status when there are none. A
-    /// cursor names a place among the orders the caller lists.
+    /// The caller's orders, or every customer's for staff, in the page's
+    /// sort, by when each was placed or by its total, with the given
+    /// statuses, or of every status when there are none. A cursor names
+    /// the order a page ends at, and the caller's condition holds every
+    /// page, so a shopper's pages hold their own orders alone.
     async fn list_orders(
         &self,
         ctx: RequestContext,
         args: OrderListOrdersArgs,
     ) -> Result<Page<types::OrderView>, ApiError> {
+        let sort = SortColumn::of(args.page.sort.as_ref(), "placedAt", "orders", &ORDER_SORTS)?;
         let mut query = ListQuery::default();
         if let Some(customer) = customer_of(&ctx)? {
             query.condition("customer_id = ?", [Value::Text(customer)]);
@@ -430,13 +499,13 @@ impl OrderImplementation for SqliteShop {
                 [Value::Text(statuses)],
             );
         }
-        query.after(args.page.cursor.as_ref(), "placed_at, id")?;
         let conn = self.conn();
+        query.after(&conn, r#""order""#, args.page.cursor.as_ref(), &sort)?;
         let orders = query.page(
             &conn,
             ORDER_COLUMNS,
             r#""order""#,
-            "placed_at, id",
+            &sort,
             &args.page,
             order_row,
         )?;
@@ -462,9 +531,11 @@ impl OrderImplementation for SqliteShop {
         let mut conn = self.conn();
         // Dropping the transaction before its commit rolls it back.
         let tx = conn.transaction().map_err(internal)?;
+        // The order's total is written once its lines are: they do not
+        // change after.
         let id: String = tx
             .query_row(
-                r#"INSERT INTO "order" (customer_id, status, shipping_address) VALUES (?1, ?2, ?3) RETURNING id"#,
+                r#"INSERT INTO "order" (customer_id, status, shipping_address, total_cents) VALUES (?1, ?2, ?3, 0) RETURNING id"#,
                 params![customer, types::OrderStatus::Placed.as_str(), address],
                 |row| row.get(0),
             )
@@ -490,6 +561,11 @@ impl OrderImplementation for SqliteShop {
                 )));
             }
         }
+        tx.execute(
+            r#"UPDATE "order" SET total_cents = (SELECT sum(quantity * unit_price_cents) FROM order_line WHERE order_id = ?1) WHERE id = ?1"#,
+            [&id],
+        )
+        .map_err(internal)?;
         let order = read_order(&tx, &id, Some(customer.as_str()))?;
         tx.commit().map_err(internal)?;
         Ok(order)
@@ -560,26 +636,37 @@ fn product_row(row: &Row) -> rusqlite::Result<types::ProductView> {
 
 #[async_trait]
 impl ProductCatalogImplementation for SqliteShop {
-    /// The products by name, those with the given ids when there are any:
-    /// the lookup a page that holds products' ids names them through
-    /// (D61).
+    /// The products in the page's sort, by name or by price: those with
+    /// the given ids when there are any, the lookup a page that holds
+    /// products' ids names them through (D61), and those whose
+    /// `search_text`, the name shop-db's `@searchField` holds, holds each
+    /// word of `q`, the search a product picker finds them by (D61,
+    /// amended).
     async fn list_products(
         &self,
         _ctx: RequestContext,
         args: ProductCatalogListProductsArgs,
     ) -> Result<Page<types::ProductView>, ApiError> {
+        let sort = SortColumn::of(args.page.sort.as_ref(), "name", "products", &PRODUCT_SORTS)?;
         let mut query = ListQuery::default();
         if let Some(ids) = args.ids.filter(|ids| !ids.is_empty()) {
             let ids: Vec<String> = ids.iter().map(uuid_text).collect();
             let ids = serde_json::to_string(&ids).map_err(internal)?;
             query.condition("id IN (SELECT value FROM json_each(?))", [Value::Text(ids)]);
         }
-        query.after(args.page.cursor.as_ref(), "name, id")?;
+        for term in args.q.as_deref().map(search::terms).unwrap_or_default() {
+            query.condition(
+                r"search_text LIKE ? ESCAPE '\'",
+                [Value::Text(search::like_pattern(&term))],
+            );
+        }
+        let conn = self.conn();
+        query.after(&conn, "product", args.page.cursor.as_ref(), &sort)?;
         query.page(
-            &self.conn(),
+            &conn,
             PRODUCT_COLUMNS,
             "product",
-            "name, id",
+            &sort,
             &args.page,
             product_row,
         )
@@ -604,16 +691,23 @@ impl ProductCatalogImplementation for SqliteShop {
 
 #[async_trait]
 impl ProductReviewsImplementation for SqliteShop {
-    /// A product's reviews, oldest first, those rated `min_rating` or more
-    /// when it is given. A search, `q`, keeps the reviews whose
-    /// `search_text`, the title and body shop-db's `@searchField`s join,
-    /// holds each of its words: SQLite's `LIKE` folds ASCII letters alone,
-    /// and reads every review of the product, as D62 says.
+    /// A product's reviews in the page's sort, by when each was written or
+    /// by its rating, those rated `min_rating` or more when it is given. A
+    /// search, `q`, keeps the reviews whose `search_text`, the title and
+    /// body shop-db's `@searchField`s join, holds each of its words:
+    /// SQLite's `LIKE` folds ASCII letters alone, and reads every review of
+    /// the product, as D62 says.
     async fn list_reviews(
         &self,
         _ctx: RequestContext,
         args: ProductReviewsListReviewsArgs,
     ) -> Result<Page<types::ReviewView>, ApiError> {
+        let sort = SortColumn::of(
+            args.page.sort.as_ref(),
+            "createdAt",
+            "reviews",
+            &REVIEW_SORTS,
+        )?;
         let mut query = ListQuery::default();
         query.condition("product_id = ?", [Value::Text(uuid_text(&args.product_id))]);
         query.condition("deleted_at IS NULL", []);
@@ -626,12 +720,13 @@ impl ProductReviewsImplementation for SqliteShop {
                 [Value::Text(search::like_pattern(&term))],
             );
         }
-        query.after(args.page.cursor.as_ref(), "created_at, id")?;
+        let conn = self.conn();
+        query.after(&conn, "review", args.page.cursor.as_ref(), &sort)?;
         query.page(
-            &self.conn(),
+            &conn,
             "id, rating, title, body, created_at",
             "review",
-            "created_at, id",
+            &sort,
             &args.page,
             review_row,
         )

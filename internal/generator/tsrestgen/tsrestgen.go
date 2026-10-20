@@ -108,7 +108,10 @@ type EndpointInfo struct {
 	// the router reads the request's cursor and limit with the runtime's
 	// readPage after the query parameters and hands them to the method as
 	// args.page, a PageRequest; the method answers a Page, which the
-	// router sends as data.
+	// router sends as data. Its Sort is the operation's sort argument (D60,
+	// amended), which readPage reads into args.page.sort, and which the
+	// router binds the page's next to (bindPage); it is not among
+	// QueryParams.
 	Page *apigen.PageInfo
 
 	PathParams  []ParamInfo
@@ -262,6 +265,9 @@ type APIOutput struct {
 	// interfaces import the runtime's Page and PageRequest, and the router
 	// its readPage and PageSpec.
 	HasPages bool
+	// HasSortedPages reports whether a paged endpoint sorts (D60,
+	// amended): the router then imports the runtime's bindPage.
+	HasSortedPages bool
 	// Identity is the user model (D50), nil when the API's authDb has no
 	// User table.
 	Identity *IdentityInfo
@@ -401,6 +407,7 @@ func Generate(schema *ir.Schema, apiOutput *apigen.APIOutput, opts Options) (*AP
 		}
 		output.Endpoints = append(output.Endpoints, endpoint)
 		output.HasPages = output.HasPages || endpoint.Page != nil
+		output.HasSortedPages = output.HasSortedPages || (endpoint.Page != nil && endpoint.Page.Sort != nil)
 		if endpoint.WebhookProvider != "" {
 			webhookProviders[endpoint.WebhookProvider] = struct{}{}
 		}
@@ -615,7 +622,8 @@ func (b *builder) endpoint(ep apigen.EndpointInfo) (EndpointInfo, error) {
 		}
 		endpoint.PathParams = append(endpoint.PathParams, info)
 	}
-	for _, p := range ep.QueryParams {
+	// The sort argument reaches the method in its page (D60, amended).
+	for _, p := range ep.ArgQueryParams() {
 		info, err := param(p, inQuery)
 		if err != nil {
 			return endpoint, err
@@ -1026,6 +1034,17 @@ func docLines(ep EndpointInfo) []string {
 func tsString(s string) string {
 	replacer := strings.NewReplacer(`\`, `\\`, `'`, `\'`, "\n", `\n`, "\r", `\r`)
 	return "'" + replacer.Replace(s) + "'"
+}
+
+// PageSpecLiteral is the operation table's page, its PageSpec: { defaultLimit:
+// 2, maxLimit: 5 }, and with a sort, sort: { param: 'sort', fields: ['name',
+// 'sku'], default: 'name' }.
+func (e EndpointInfo) PageSpecLiteral() string {
+	literal := fmt.Sprintf("{ defaultLimit: %d, maxLimit: %d", e.Page.DefaultLimit, e.Page.MaxLimit)
+	if sort := e.Page.Sort; sort != nil {
+		literal += fmt.Sprintf(", sort: { param: %s, fields: %s, default: %s }", tsString(sort.Param), tsStringList(sort.Fields), tsString(sort.Default))
+	}
+	return literal + " }"
 }
 
 func tsStringList(values []string) string {

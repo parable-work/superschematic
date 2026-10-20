@@ -206,12 +206,15 @@ func (value ToolSchemaType) Missing() bool {
 // ToolSchemaProperty is one property of a ToolParameterSchema.
 // x-superschematic-scalar names the scalar whose parser applies to the
 // value; x-superschematic-reference gives the item a value refers to
-// (D61), and x-superschematic-search marks an operation's search argument
-// (D62). Declaration order matters (see the file comment).
+// (D61), x-superschematic-search marks an operation's search argument
+// (D62), and x-superschematic-sort a paged operation's sort argument,
+// whose enum holds its values (D60, amended). Declaration order matters
+// (see the file comment).
 type ToolSchemaProperty struct {
 	CanonicalScalar      string                          `json:"x-superschematic-scalar,omitempty"`
 	Reference            *ToolSchemaReference            `json:"x-superschematic-reference,omitempty"`
 	Search               bool                            `json:"x-superschematic-search,omitempty"`
+	Sort                 bool                            `json:"x-superschematic-sort,omitempty"`
 	AdditionalProperties *ToolSchemaAdditionalProperties `json:"additionalProperties,omitempty"`
 	Type                 ToolSchemaType                  `json:"type"`
 	Format               string                          `json:"format,omitempty"`
@@ -233,16 +236,21 @@ type ToolSchemaProperty struct {
 // ToolSchemaReference is the reference a tool argument's value holds
 // (D61), resolved: the value names an item of Target, which the tool
 // Options lists, by the item's field Value. Label is the item's field that
-// names it, and Lookup the argument of Options that narrows its list to
-// the items with the values given; each is absent when there is none. A
-// list refers item by item. Declaration order matters (see the file
-// comment).
+// names it, Lookup the argument of Options that narrows its list to the
+// items with the values given, and Search its search argument, which a
+// picker fills with the text a reader types (D61, amended); each is absent
+// when there is none. Service is the API dependency whose tool Options is,
+// when the API's own operations list no Target (D61, amended); absent for
+// the API's own. A list refers item by item. Declaration order matters
+// (see the file comment).
 type ToolSchemaReference struct {
 	Target  string `json:"target"`
 	Options string `json:"options"`
 	Value   string `json:"value"`
 	Label   string `json:"label,omitempty"`
 	Lookup  string `json:"lookup,omitempty"`
+	Search  string `json:"search,omitempty"`
+	Service string `json:"service,omitempty"`
 }
 
 // ToolReturnSchema is the return shape of one tool. Properties and

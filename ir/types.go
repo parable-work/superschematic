@@ -718,4 +718,10 @@ type ArgumentDef struct {
 	// text, an optional query parameter whose words each item's searchable
 	// text must contain. An operation has at most one.
 	Search bool `json:"search,omitempty" yaml:"search,omitempty"`
+
+	// Sort is SortBy (D60, amended): the argument is its paged operation's
+	// order, an optional query parameter whose value is one of these fields
+	// of the item type, by their JSON names, ascending, or after a "-",
+	// descending. Nil for every other argument. An operation has at most one.
+	Sort []string `json:"sort,omitempty" yaml:"sort,omitempty"`
 }

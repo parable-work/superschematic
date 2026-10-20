@@ -42,8 +42,59 @@ type refOptions struct {
 	ArgsName string
 	Nones    []string
 	Paged    bool
+	// Search is its search argument's call (D61, amended), which a picker
+	// makes for the text a reader types; nil when it does not search.
+	Search *refSearch
+	// Hosted is the crate of the API dependency whose operation it is
+	// (D61, amended), nil for the service's own, whose call it makes
+	// through that crate's operations, under that crate's setup.
+	Hosted *hostedCrate
 	// controls are its route's, which a page that calls it meets.
 	controls routeControls
+}
+
+// API is the Rust path of the API crate of the options operation: the
+// service's own, or its dependency's through its hosted crate.
+func (o *refOptions) API() string {
+	if o.Hosted != nil {
+		return o.Hosted.Ident + "::api"
+	}
+	return "crate::api"
+}
+
+// Ops is the Rust path of the module of the options operation's in-process
+// call.
+func (o *refOptions) Ops() string {
+	if o.Hosted != nil {
+		return o.Hosted.Ident + "::operations"
+	}
+	return "operations"
+}
+
+// PageRequest is the Rust path of the page request a paged options call
+// asks for.
+func (o *refOptions) PageRequest() string {
+	if o.Hosted != nil {
+		return o.Hosted.Ident + "::api::runtime::page::PageRequest"
+	}
+	return "PageRequest"
+}
+
+// refSearch is an options operation's search argument (SearchQuery, D62),
+// which makes a reference to its target a picker (D61, amended): one call
+// per distinct text, kept for the request, of the first page, and at most
+// MAX_LOOKUP_CALLS texts a request, which Searched counts for every picker
+// whose options it is.
+type refSearch struct {
+	Fn       string // product_list_products_search
+	Searched string // product_list_products_searched
+	Arg      string // q
+	Field    string // q, its Args field
+	// Others are the Args fields the call leaves out.
+	Others []string
+	// Attrs are the search box's attributes from the argument's rules, as
+	// an argument form's search box has them: ` maxlength="50"`.
+	Attrs string
 }
 
 // refLookup is an options operation's lookup argument, the list query
@@ -79,6 +130,9 @@ type refSource struct {
 	// and <Base>_target_labels: item_view.
 	Base   string
 	Target string // ItemView
+	// Plural names the target's items in a sentence: its @display plural,
+	// else its name in words.
+	Plural string
 	Value  string // id
 	// Label is the field that names an item, empty when none does and an
 	// item is named by its value.
@@ -86,6 +140,46 @@ type refSource struct {
 	Options *refOptions
 	Lookup  *refLookup
 	key     string
+}
+
+// Picks reports whether a form's reference to the source is a picker
+// (D61, amended): its options operation searches.
+func (s *refSource) Picks() bool { return s.Options.Search != nil }
+
+// PickPath is the path of the source's pick shard, under the crate's
+// procedures': /_superschematic/<service>/_pick/<base>.
+func (s *refSource) PickPath(service string) string {
+	return "/_superschematic/" + service + "/_pick/" + strings.ReplaceAll(s.Base, "_", "-")
+}
+
+// RateLimitExpr is the Rust of the limiter of the source's options
+// operation, from the app's registry, `limits`, which a picker's shard
+// meets; None for a route without a rate limit.
+func (s *refSource) RateLimitExpr() string {
+	if s.Options.controls.RateLimit == 0 || s.Options.Hosted != nil {
+		return "None"
+	}
+	return "limits.of(&crate::api::operations::" + s.Options.controls.Const + ")"
+}
+
+// RateFromExpr is the Rust of the function that takes the limiter of an
+// API dependency's options operation from its crate's setup at a request
+// (D61, amended); None for the service's own, or a route without a rate
+// limit.
+func (s *refSource) RateFromExpr() string {
+	if s.Options.controls.RateLimit == 0 || s.Options.Hosted == nil {
+		return "None"
+	}
+	return "Some(" + s.Options.controls.LimiterFrom() + ")"
+}
+
+// TimeoutExpr is the Rust Option of the options operation's route's
+// timeout, which a picker's shard meets.
+func (s *refSource) TimeoutExpr() string {
+	if s.Options.controls.Timeout == 0 {
+		return "None"
+	}
+	return fmt.Sprintf("Some(Duration::from_secs(%d))", s.Options.controls.Timeout)
 }
 
 // LabelExpr is the Rust Option of the label field's JSON name.
@@ -98,11 +192,67 @@ func (s *refSource) LabelExpr() string {
 
 // refSite is one place a form or a record holds a reference: its path, as
 // Choices names it (`lines.itemId`), its JSON keys from the record's root,
-// and its source.
+// and its source. A form's site also has the Rust place of its form's
+// struct its steps start at, Root, form or form.input, and the steps from
+// there to its controls.
 type refSite struct {
 	Path   string
 	Keys   []string
 	Source *refSource
+	Root   string
+	Steps  []siteStep
+	// Pick marks a form's site whose source searches (D61, amended): each
+	// of its controls is a picker. A query list argument's controls share
+	// its name, which no picker's box and select could, so they are a
+	// select of the options as any other site's are.
+	Pick bool
+}
+
+// siteStep is one step from a form's struct to a site's controls: a field,
+// by its Rust name and its JSON name, that holds one value or object, or
+// rows of them.
+type siteStep struct {
+	Field string
+	Key   string
+	Rows  bool
+}
+
+// ControlsLines are the Rust lines, at indent levels, that push each of
+// the site's controls onto `controls`, its name and the value it holds,
+// through the rows on the way, unless the app's choices name the control.
+func (s refSite) ControlsLines(indent int) string {
+	var lines []string
+	pad := func(depth int) string { return strings.Repeat("    ", indent+depth) }
+	expr, name, dynamic, depth := s.Root, "", false, 0
+	for i, step := range s.Steps {
+		expr += "." + step.Field
+		if i > 0 {
+			name += "."
+		}
+		name += escapeBraces(step.Key)
+		if step.Rows {
+			index, row := fmt.Sprintf("i%d", depth), fmt.Sprintf("row%d", depth)
+			lines = append(lines, pad(depth)+"for ("+index+", "+row+") in "+expr+".iter().enumerate() {")
+			name += "[{" + index + "}]"
+			expr, dynamic = row, true
+			depth++
+		}
+	}
+	if !dynamic {
+		// The site's path is its one control's name, which the caller
+		// checked the app's choices do not name.
+		plain := strings.ReplaceAll(strings.ReplaceAll(name, "{{", "{"), "}}", "}")
+		return pad(0) + "controls.push((" + rustString(plain) + ".to_owned(), " + expr + ".clone()));"
+	}
+	lines = append(lines,
+		pad(depth)+"let name = format!("+rustString(name)+");",
+		pad(depth)+"if !named(&choices, &name) {",
+		pad(depth)+"    controls.push((name, "+expr+".clone()));",
+		pad(depth)+"}")
+	for ; depth > 0; depth-- {
+		lines = append(lines, pad(depth-1)+"}")
+	}
+	return strings.Join(lines, "\n")
 }
 
 // KeysExpr is the Rust slice of the site's keys.
@@ -115,12 +265,53 @@ func (s refSite) KeysExpr() string {
 }
 
 // refForm is a form that holds a reference: its choices function gives
-// each such control its options.
+// each such control its options, and each picker its pick (D61, amended).
+// Get marks a filter, sent by GET, whose pickers each search their text;
+// a post's searches only the one whose "Find" it pressed.
 type refForm struct {
 	Fn    string // basket_input_form_choices
 	Form  string // BasketInputForm
 	Sites []refSite
+	Get   bool
 }
+
+// ChoiceSites are the form's sites whose source does not search, each a
+// select of its options.
+func (f *refForm) ChoiceSites() []refSite {
+	var out []refSite
+	for _, site := range f.Sites {
+		if !site.Pick {
+			out = append(out, site)
+		}
+	}
+	return out
+}
+
+// PickGroups are the form's picker sites by their source, in the order of
+// their first site: one call of the source's picks covers every control
+// of the group.
+func (f *refForm) PickGroups() []refGroup {
+	var groups []refGroup
+	for _, site := range f.Sites {
+		if !site.Pick {
+			continue
+		}
+		placed := false
+		for i := range groups {
+			if groups[i].Source == site.Source {
+				groups[i].Sites = append(groups[i].Sites, site)
+				placed = true
+			}
+		}
+		if !placed {
+			groups = append(groups, refGroup{Source: site.Source, Sites: []refSite{site}})
+		}
+	}
+	return groups
+}
+
+// Picks reports whether a control of the form is a picker.
+func (f *refForm) Picks() bool { return len(f.PickGroups()) > 0 }
 
 // refRecord is a record that shows a reference, at any depth: its labels
 // function names each value its records hold, a call per source.
@@ -168,11 +359,11 @@ func sitesText(sites []refSite) string {
 	return strings.Join(parts, ", ")
 }
 
-// Paged reports whether an options operation pages, so references.rs
-// names PageRequest.
+// Paged reports whether an options operation of the service's own pages,
+// so references.rs names PageRequest.
 func (m *referencesModel) Paged() bool {
 	for _, o := range m.Options {
-		if o.Paged {
+		if o.Paged && o.Hosted == nil {
 			return true
 		}
 	}
@@ -199,12 +390,25 @@ func (m *referencesModel) RecordNames() string {
 	return strings.Join(names, ", ")
 }
 
-// UsesChoices and UsesLabels report whether a form's choices function, or
-// a record's labels function, calls a source's.
+// UsesChoices, UsesPick and UsesLabels report whether a form's choices
+// function gives a source's options, or its picks (D61, amended), or a
+// record's labels function or a picker names the values a source's
+// reference holds.
 func (m *referencesModel) UsesChoices(s *refSource) bool {
 	for _, f := range m.Forms {
 		for _, site := range f.Sites {
-			if site.Source == s {
+			if site.Source == s && !site.Pick {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (m *referencesModel) UsesPick(s *refSource) bool {
+	for _, f := range m.Forms {
+		for _, site := range f.Sites {
+			if site.Source == s && site.Pick {
 				return true
 			}
 		}
@@ -220,7 +424,62 @@ func (m *referencesModel) UsesLabels(s *refSource) bool {
 			}
 		}
 	}
-	return m.UsesTrail(s)
+	return m.UsesTrail(s) || m.UsesPick(s)
+}
+
+// Picking reports whether a form's control is a picker, so the crate has
+// the picks, their shards and their records.
+func (m *referencesModel) Picking() bool {
+	if m == nil {
+		return false
+	}
+	for _, s := range m.Sources {
+		if m.UsesPick(s) {
+			return true
+		}
+	}
+	return false
+}
+
+// Searching reports whether an options operation's search is called, by
+// a picker.
+func (m *referencesModel) Searching(o *refOptions) bool {
+	for _, s := range m.Sources {
+		if s.Options == o && m.UsesPick(s) {
+			return true
+		}
+	}
+	return false
+}
+
+// PickControlled are the sources of the pickers whose shards meet their
+// options operation's route controls (its rate limit and timeout), each a
+// layer on the shard's path.
+func (m *referencesModel) PickControlled() []*refSource {
+	var out []*refSource
+	for _, s := range m.Sources {
+		if m.UsesPick(s) && (s.Options.controls.RateLimit > 0 || s.Options.controls.Timeout > 0) {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// PicksUse reports whether a picker's shard meets the control
+// ("rate_limit" or "timeout"): "rate_limit" the rate limit of the
+// service's own operation, from the app's registry the setup hands
+// route_controls, and "rate_from" an API dependency's, from its crate's
+// setup (D61, amended).
+func (m *referencesModel) PicksUse(control string) bool {
+	for _, s := range m.PickControlled() {
+		switch {
+		case control == "rate_limit" && s.Options.controls.RateLimit > 0 && s.Options.Hosted == nil,
+			control == "rate_from" && s.Options.controls.RateLimit > 0 && s.Options.Hosted != nil,
+			control == "timeout" && s.Options.controls.Timeout > 0:
+			return true
+		}
+	}
+	return false
 }
 
 // UsesTrail reports whether a step of the console's trail is named by a
@@ -246,11 +505,11 @@ func (m *referencesModel) UsesListing(o *refOptions) bool {
 	return false
 }
 
-// Choosing reports whether a form's choices are written, which read
-// whether more items follow a listing's.
+// Choosing reports whether a form's choices or picks are written, which
+// read whether more items follow a listing's.
 func (m *referencesModel) Choosing() bool {
 	for _, s := range m.Sources {
-		if m.UsesChoices(s) {
+		if m.UsesChoices(s) || m.UsesPick(s) {
 			return true
 		}
 	}
@@ -261,14 +520,37 @@ func (m *referencesModel) Choosing() bool {
 // references.rs declares what holds one.
 func (m *referencesModel) Listing() bool {
 	for _, o := range m.Options {
-		if m.UsesListing(o) {
+		if m.UsesListing(o) || m.Searching(o) {
 			return true
 		}
 	}
 	return false
 }
 
-// UsesLookup reports whether a lookup is called: by a record's labels.
+// OwnOperations reports whether an options operation is the service's
+// own, so references.rs names its operations module.
+func (m *referencesModel) OwnOperations() bool {
+	for _, o := range m.Options {
+		if o.Hosted == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// FormNames are the forms references.rs names, whose choices functions
+// read them, sorted and joined.
+func (m *referencesModel) FormNames() string {
+	names := make([]string, 0, len(m.Forms))
+	for _, f := range m.Forms {
+		names = append(names, f.Form)
+	}
+	sort.Strings(names)
+	return strings.Join(names, ", ")
+}
+
+// UsesLookup reports whether a lookup is called: by a record's labels,
+// or a picker's.
 func (m *referencesModel) UsesLookup(l *refLookup) bool {
 	for _, s := range m.Sources {
 		if s.Lookup == l && m.UsesLabels(s) {
@@ -294,6 +576,7 @@ func referencesOf(c *crate, schemas schemaSet, inProcess []declared, trails []tr
 		sources: map[string]*refSource{},
 		options: map[*ir.FieldDef]*refOptions{},
 		lookups: map[string]*refLookup{},
+		hosting: c.hosting,
 		logged:  map[string]bool{},
 		logf:    logf,
 		m:       &referencesModel{},
@@ -315,7 +598,7 @@ func referencesOf(c *crate, schemas schemaSet, inProcess []declared, trails []tr
 		}
 	}
 	for _, f := range c.Forms {
-		sites := b.structSites(f.Struct, nil, map[*formStruct]bool{f.Struct: true})
+		sites := b.structSites(f.Struct, "form", nil, map[*formStruct]bool{f.Struct: true})
 		if len(sites) > 0 {
 			b.m.Forms = append(b.m.Forms, &refForm{Fn: componentName(f.Name) + "_choices", Form: f.Name, Sites: sites})
 		}
@@ -330,16 +613,19 @@ func referencesOf(c *crate, schemas schemaSet, inProcess []declared, trails []tr
 			for _, arg := range op.Arguments {
 				if arg.Name == a.JSONName && arg.References != nil {
 					if source := b.source(fmt.Sprintf("%s.%s(%s)", f.Namespace, f.Operation, arg.Name), arg.References); source != nil {
-						sites = append(sites, refSite{Path: arg.Name, Keys: []string{arg.Name}, Source: source})
+						site := refSite{Path: arg.Name, Keys: []string{arg.Name}, Source: source, Root: "form"}
+						site.Steps = []siteStep{{Field: a.Name, Key: arg.Name}}
+						site.Pick = source.Picks() && a.Kind == kindValue
+						sites = append(sites, site)
 					}
 				}
 			}
 		}
 		if f.Input != nil {
-			sites = append(sites, b.structSites(f.Input.Struct, nil, map[*formStruct]bool{f.Input.Struct: true})...)
+			sites = append(sites, b.structSites(f.Input.Struct, "form.input", nil, map[*formStruct]bool{f.Input.Struct: true})...)
 		}
 		if len(sites) > 0 {
-			b.m.Forms = append(b.m.Forms, &refForm{Fn: componentName(f.Name) + "_choices", Form: f.Name, Sites: sites})
+			b.m.Forms = append(b.m.Forms, &refForm{Fn: componentName(f.Name) + "_choices", Form: f.Name, Sites: sites, Get: f.IsGet()})
 		}
 	}
 	// A display component names what a record shows, so only a crate with
@@ -428,8 +714,12 @@ type refBuilder struct {
 	dependencies map[string]*ir.Schema
 	// calls are the in-process calls by their operation; noCall the reason
 	// of each operation without one.
-	calls   map[*ir.FieldDef]declared
-	noCall  map[*ir.FieldDef]string
+	calls  map[*ir.FieldDef]declared
+	noCall map[*ir.FieldDef]string
+	// hosting gives the crates of the API dependencies one app hosts
+	// beside the service, whose calls a reference to a dependency's options
+	// makes (D61, amended), or why one has none.
+	hosting *hosting
 	sources map[string]*refSource
 	options map[*ir.FieldDef]*refOptions
 	lookups map[string]*refLookup
@@ -448,9 +738,10 @@ func (b *refBuilder) log(format string, args ...any) {
 }
 
 // structSites are the references the controls of a form struct hold, at
-// their paths under prefix, through its nested objects and rows. A struct
-// already on the way down is not entered again.
-func (b *refBuilder) structSites(st *formStruct, prefix []string, open map[*formStruct]bool) []refSite {
+// their paths under prefix, through its nested objects and rows, the Rust
+// place of the form's struct at root. A struct already on the way down is
+// not entered again.
+func (b *refBuilder) structSites(st *formStruct, root string, prefix []siteStep, open map[*formStruct]bool) []refSite {
 	typeDef := b.schemas.objectType(st.TypeName)
 	if typeDef == nil {
 		return nil
@@ -460,7 +751,11 @@ func (b *refBuilder) structSites(st *formStruct, prefix []string, open map[*form
 		if f.Hidden {
 			continue
 		}
-		keys := append(append([]string(nil), prefix...), f.JSONName)
+		steps := append(append([]siteStep(nil), prefix...), siteStep{Field: f.Name, Key: f.JSONName, Rows: f.Kind == kindValueRows || f.Kind == kindObjectRows})
+		keys := make([]string, len(steps))
+		for i, step := range steps {
+			keys[i] = step.Key
+		}
 		switch f.Kind {
 		case kindValue, kindValueRows:
 			field := fieldNamed(typeDef, f.JSONName)
@@ -472,14 +767,14 @@ func (b *refBuilder) structSites(st *formStruct, prefix []string, open map[*form
 				continue
 			}
 			if source := b.source(st.TypeName+"."+field.Name, ref); source != nil {
-				sites = append(sites, refSite{Path: strings.Join(keys, "."), Keys: keys, Source: source})
+				sites = append(sites, refSite{Path: strings.Join(keys, "."), Keys: keys, Source: source, Root: root, Steps: steps, Pick: source.Picks()})
 			}
 		case kindObject, kindObjectRows:
 			if open[f.Child] {
 				continue
 			}
 			open[f.Child] = true
-			sites = append(sites, b.structSites(f.Child, keys, open)...)
+			sites = append(sites, b.structSites(f.Child, root, steps, open)...)
 			delete(open, f.Child)
 		}
 	}
@@ -558,14 +853,30 @@ func (b *refBuilder) source(holder string, ref *ir.ReferenceDef) *refSource {
 		return nil
 	}
 	options := resolved.OptionsSet.Name + "." + resolved.Options.Name
-	d, ok := b.calls[resolved.Options]
+	calls, noCalls := b.calls, b.noCall
+	var hosted *hostedCrate
+	if service := resolved.OptionsService; service != "" {
+		// The options of an API dependency's type are its own operation's
+		// (D61, amended), which its crate calls, when one app hosts both.
+		options = service + "'s " + options
+		var why string
+		if hosted, why = b.hosting.crate(service); hosted == nil {
+			b.log("  - topcoat: %s refers to %s, whose options operation %s has no in-process call: %s\n", holder, targetName(resolved), options, why)
+			return nil
+		}
+		calls, noCalls = hosted.calls, hosted.noCall
+	}
+	d, ok := calls[resolved.Options]
 	if !ok {
-		reason := b.noCall[resolved.Options]
+		reason := noCalls[resolved.Options]
 		if reason == "" {
 			reason = "it is not among the crate's operations"
 		}
 		b.log("  - topcoat: %s refers to %s, whose options operation %s has no in-process call: %s\n", holder, targetName(resolved), options, reason)
 		return nil
+	}
+	if hosted != nil {
+		hosted.used = true
 	}
 	label := ""
 	if resolved.Label != nil {
@@ -575,15 +886,16 @@ func (b *refBuilder) source(holder string, ref *ir.ReferenceDef) *refSource {
 	if resolved.Lookup != nil {
 		lookup = resolved.Lookup.Name
 	}
-	key := strings.Join([]string{resolved.TargetService, resolved.TargetName, resolved.Value.Name, label, options, lookup}, "|")
+	key := strings.Join([]string{resolved.TargetService, resolved.TargetName, resolved.Value.Name, label, resolved.OptionsService, options, lookup}, "|")
 	if s := b.sources[key]; s != nil {
 		return s
 	}
 	s := &refSource{
 		Target:  resolved.TargetName,
+		Plural:  b.pluralOf(resolved),
 		Value:   resolved.Value.Name,
 		Label:   label,
-		Options: b.optionsOf(d),
+		Options: b.optionsOf(d, resolved.Search, hosted),
 		key:     key,
 	}
 	if resolved.Lookup != nil {
@@ -593,23 +905,59 @@ func (b *refBuilder) source(holder string, ref *ir.ReferenceDef) *refSource {
 	return s
 }
 
-// optionsOf is the options call of the operation d serves, made once.
-func (b *refBuilder) optionsOf(d declared) *refOptions {
+// pluralOf names a reference's target's items in a sentence: the
+// target's @display plural, else its name in words.
+func (b *refBuilder) pluralOf(resolved ir.ResolvedReference) string {
+	if display := resolved.Target.Display; display != nil && display.Plural != "" {
+		return display.Plural
+	}
+	return humanize(resolved.TargetName)
+}
+
+// optionsOf is the options call of the operation d serves, made once, and
+// its search's, by search, when it has one (D61, amended), through hosted,
+// the crate of the API dependency whose operation it is, or the service's
+// own when nil. A dependency's functions are named after it too.
+func (b *refBuilder) optionsOf(d declared, search *ir.ArgumentDef, hosted *hostedCrate) *refOptions {
 	if o := b.options[d.op]; o != nil {
 		return o
 	}
 	e := d.endpoint
+	stem := e.SnakeName()
+	operation := e.Namespace + "." + e.Name
+	if hosted != nil {
+		stem = strings.TrimPrefix(registry.RustIdentifier(hosted.Service, "service"), "r#") + "_" + stem
+		operation = hosted.Service + "'s " + operation
+	}
 	o := &refOptions{
-		Fn:        e.SnakeName() + "_options",
-		Operation: e.Namespace + "." + e.Name,
+		Fn:        stem + "_options",
+		Operation: operation,
 		Snake:     e.SnakeName(),
 		Paged:     e.Page != nil,
+		Hosted:    hosted,
 		controls:  controlsOf(e),
+	}
+	if hosted != nil {
+		o.controls.Crate = hosted.Ident
 	}
 	if e.HasArgs() {
 		o.ArgsName = e.ArgsName
 		for _, param := range e.QueryArgs {
 			o.Nones = append(o.Nones, param.Field)
+		}
+	}
+	if search != nil && e.HasArgs() {
+		for _, param := range e.QueryArgs {
+			if param.Name != search.Name {
+				continue
+			}
+			o.Search = &refSearch{Fn: stem + "_search", Searched: stem + "_searched", Arg: search.Name, Field: param.Field}
+			o.Search.Attrs = b.schemas.argField(search, param, "query", true).Attrs
+			for _, other := range e.QueryArgs {
+				if other.Name != search.Name {
+					o.Search.Others = append(o.Search.Others, other.Field)
+				}
+			}
 		}
 	}
 	b.options[d.op] = o
@@ -620,7 +968,7 @@ func (b *refBuilder) optionsOf(d declared) *refOptions {
 // lookupOf is the lookup call of the operation d serves by arg, made once.
 func (b *refBuilder) lookupOf(d declared, options *refOptions, arg *ir.ArgumentDef) *refLookup {
 	e := d.endpoint
-	key := e.SnakeName() + "|" + arg.Name
+	key := options.Fn + "|" + arg.Name
 	if l := b.lookups[key]; l != nil {
 		return l
 	}
@@ -632,7 +980,7 @@ func (b *refBuilder) lookupOf(d declared, options *refOptions, arg *ir.ArgumentD
 			l.Others = append(l.Others, param.Field)
 		}
 	}
-	l.Fn = e.SnakeName() + "_by_" + strings.TrimPrefix(registry.RustIdentifier(arg.Name, "values"), "r#")
+	l.Fn = strings.TrimSuffix(options.Fn, "_options") + "_by_" + strings.TrimPrefix(registry.RustIdentifier(arg.Name, "values"), "r#")
 	switch b.schemas.leafOf(arg.TypeRef.Name) {
 	case integerLeaf:
 		l.Read = "as_integer"
@@ -669,13 +1017,17 @@ func (b *refBuilder) finish() {
 	}
 	for _, o := range b.m.Options {
 		module[o.Fn] = true
+		if o.Search != nil {
+			module[o.Search.Fn] = true
+		}
 	}
 	for _, l := range b.m.Lookups {
 		module[l.Fn] = true
 	}
 	taken := map[string]bool{}
 	clashes := func(name string) bool {
-		return taken[name] || module[name+"_target_choices"] || module[name+"_target_labels"] || module[name+"_target_label"]
+		return taken[name] || module[name+"_target_choices"] || module[name+"_target_labels"] || module[name+"_target_label"] ||
+			module[name+"_target_picks"] || module[name+"_pick"]
 	}
 	for _, key := range sortedKeys(b.sources) {
 		s := b.sources[key]
@@ -702,7 +1054,7 @@ func (b *refBuilder) finish() {
 	b.m.Lookups = lookups
 	var options []*refOptions
 	for _, o := range b.m.Options {
-		used := b.m.UsesListing(o)
+		used := b.m.UsesListing(o) || b.m.Searching(o)
 		for _, l := range lookups {
 			used = used || l.Options == o
 		}

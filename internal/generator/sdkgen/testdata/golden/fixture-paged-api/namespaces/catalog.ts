@@ -60,7 +60,8 @@ export class CatalogNamespace {
 
   /**
    * The items, two to a page unless the caller asks for up to five, by
-   * their ids or their stock.
+   * their ids or their stock, in order of their names unless the caller
+   * sorts them by name or sku, either way.
    * @param params - Optional query parameters, with the page: cursor, the next of the page before, absent for the first page, and limit, 1 to 5, 2 when absent
    * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
    * @returns One page of ItemView: its items and next, null after the last page; listItemsAll yields every item
@@ -105,6 +106,13 @@ export class CatalogNamespace {
       const inStockValue = params?.inStock;
       if (inStockErrors.length > 0) {
         setFieldErrors(queryParamErrors, "inStock", inStockErrors);
+      }
+    }
+    {
+      const sortErrors: { validator: string; message: string }[] = [];
+      const sortValue = params?.sort;
+      if (sortErrors.length > 0) {
+        setFieldErrors(queryParamErrors, "sort", sortErrors);
       }
     }
     if (Object.keys(queryParamErrors).length > 0) {

@@ -181,6 +181,8 @@ export type PaginatedConfig = {
   readonly defaultLimit?: number;
   /** The most items a caller may ask a page to hold: 1 to 1000, 100 when left out. */
   readonly maxLimit?: number;
+  /** The order of a request that sends no sort: one of the SortBy argument's values (D60, amended). */
+  readonly defaultSort?: string;
 };
 
 /**

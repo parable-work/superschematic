@@ -20,6 +20,7 @@ type TenantRepositoryInterface interface {
 	GetAsOf(ctx context.Context, id types.IdentityUUID, ts time.Time) (*types.Tenant, error)
 	FindOne(ctx context.Context, filter *TenantFilter, opts *TenantFindOptions) (*types.Tenant, error)
 	FindMany(ctx context.Context, filter *TenantFilter, opts *TenantFindOptions) ([]*types.Tenant, int, error)
+	FindPage(ctx context.Context, filter *TenantFilter, opts *TenantPageOptions) (*TenantPage, error)
 	CreateOne(ctx context.Context, input *types.Tenant) (*types.Tenant, error)
 	CreateMany(ctx context.Context, inputs []*types.Tenant) ([]*types.Tenant, error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *TenantUpdate) (*types.Tenant, error)
@@ -40,6 +41,7 @@ type TenantUserRepositoryInterface interface {
 	ListAsOfByTenantID(ctx context.Context, tenantID types.IdentityUUID, ts time.Time, opts *TenantUserHistoryOptions) ([]types.HistoryRecord[*types.TenantUser], error)
 	FindOne(ctx context.Context, filter *TenantUserFilter, opts *TenantUserFindOptions) (*types.TenantUser, error)
 	FindMany(ctx context.Context, filter *TenantUserFilter, opts *TenantUserFindOptions) ([]*types.TenantUser, int, error)
+	FindPage(ctx context.Context, filter *TenantUserFilter, opts *TenantUserPageOptions) (*TenantUserPage, error)
 	CreateOne(ctx context.Context, input *types.TenantUser) (*types.TenantUser, error)
 	CreateMany(ctx context.Context, inputs []*types.TenantUser) ([]*types.TenantUser, error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *TenantUserUpdate) (*types.TenantUser, error)
@@ -164,6 +166,10 @@ func (r *NoOpTenantRepository) FindMany(_ context.Context, _ *TenantFilter, _ *T
 	return []*types.Tenant{}, 0, nil
 }
 
+func (r *NoOpTenantRepository) FindPage(_ context.Context, _ *TenantFilter, _ *TenantPageOptions) (*TenantPage, error) {
+	return &TenantPage{Rows: []*types.Tenant{}}, nil
+}
+
 func (r *NoOpTenantRepository) CreateOne(_ context.Context, input *types.Tenant) (*types.Tenant, error) {
 	return input, nil
 }
@@ -240,6 +246,10 @@ func (r *NoOpTenantUserRepository) FindOne(_ context.Context, _ *TenantUserFilte
 
 func (r *NoOpTenantUserRepository) FindMany(_ context.Context, _ *TenantUserFilter, _ *TenantUserFindOptions) ([]*types.TenantUser, int, error) {
 	return []*types.TenantUser{}, 0, nil
+}
+
+func (r *NoOpTenantUserRepository) FindPage(_ context.Context, _ *TenantUserFilter, _ *TenantUserPageOptions) (*TenantUserPage, error) {
+	return &TenantUserPage{Rows: []*types.TenantUser{}}, nil
 }
 
 func (r *NoOpTenantUserRepository) CreateOne(_ context.Context, input *types.TenantUser) (*types.TenantUser, error) {

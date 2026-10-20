@@ -33,6 +33,15 @@ var RoleQuotedFields = map[string]string{
 	"permissions": `permissions`,
 }
 
+// roleSortColumns are the columns of Role's sort fields, by
+// field, as FindPage's ORDER BY and keyset write them: qualified by the table,
+// and by page_key, the alias of the subquery that reads the key's row. They
+// are the only text of a sort that reaches its SQL (D60, amended).
+var roleSortColumns = map[RoleSortField]struct{ sql, key string }{
+	RoleSortById:   {`role.id`, `page_key.id`},
+	RoleSortByName: {`role."name"`, `page_key."name"`},
+}
+
 // buildRoleOrderByClause builds an ORDER BY clause for Role.
 // quotedTable is the table's name as the FROM clause spells it, quoted when
 // it is a keyword (a table named order is "order").
@@ -408,16 +417,7 @@ func (r *RoleRepository) FindMany(ctx context.Context, filter *RoleFilter, opts 
 	}
 
 	// Build selected fields in OrderedMembers order so FK columns match scan order.
-	var fieldStrings []string
-	if opts.Fields.Id {
-		fieldStrings = append(fieldStrings, "id")
-	}
-	if opts.Fields.Name {
-		fieldStrings = append(fieldStrings, "name")
-	}
-	if opts.Fields.Permissions {
-		fieldStrings = append(fieldStrings, "permissions")
-	}
+	fieldStrings := roleFieldStrings(opts.Fields)
 
 	// Validate fields
 	if err := validateFields(fieldStrings, RoleAllowedFields); err != nil {
@@ -457,6 +457,34 @@ func (r *RoleRepository) FindMany(ctx context.Context, filter *RoleFilter, opts 
 		return nil, 0, fmt.Errorf("failed to get count: %w", err)
 	}
 
+	results, err := r.findRows(ctx, "FindMany", query, args, fieldStrings, opts.Fields)
+	if err != nil {
+		return nil, 0, err
+	}
+	return results, totalCount, nil
+}
+
+// roleFieldStrings are the columns fields selects, in OrderedMembers
+// order so FK columns match scan order, and the primary key when fields
+// hydrates a hasMany relation, which maps the children by it.
+func roleFieldStrings(fields RoleFields) []string {
+	var fieldStrings []string
+	if fields.Id {
+		fieldStrings = append(fieldStrings, "id")
+	}
+	if fields.Name {
+		fieldStrings = append(fieldStrings, "name")
+	}
+	if fields.Permissions {
+		fieldStrings = append(fieldStrings, "permissions")
+	}
+	return fieldStrings
+}
+
+// findRows runs query, a select of the columns fieldStrings names, in turn,
+// with args, scans its rows, and hydrates the relations fields selects, as
+// FindMany and FindPage read them. method names the caller in an error.
+func (r *RoleRepository) findRows(ctx context.Context, method, query string, args []interface{}, fieldStrings []string, fields RoleFields) ([]*types.Role, error) {
 	// Execute query
 	var rows pgx.Rows
 	var err error
@@ -466,7 +494,7 @@ func (r *RoleRepository) FindMany(ctx context.Context, filter *RoleFilter, opts 
 		rows, err = r.db.pool.Query(ctx, query, args...)
 	}
 	if err != nil {
-		return nil, 0, fmt.Errorf("failed to execute query: %w", err)
+		return nil, fmt.Errorf("failed to execute query: %w", err)
 	}
 	defer rows.Close()
 
@@ -493,12 +521,12 @@ func (r *RoleRepository) FindMany(ctx context.Context, filter *RoleFilter, opts 
 			case "permissions":
 				scanDest[i] = &tempPermissions
 			default:
-				return nil, 0, fmt.Errorf("unexpected field %q for Role.FindMany", fieldName)
+				return nil, fmt.Errorf("unexpected field %q for Role.%s", fieldName, method)
 			}
 		}
 
 		if err := rows.Scan(scanDest...); err != nil {
-			return nil, 0, fmt.Errorf("failed to scan row: %w", err)
+			return nil, fmt.Errorf("failed to scan row: %w", err)
 		}
 
 		// Copy nullable fields when present
@@ -508,7 +536,7 @@ func (r *RoleRepository) FindMany(ctx context.Context, filter *RoleFilter, opts 
 			jsonFieldDecodeErr = fmt.Errorf("failed to decode field permissions: %w", err)
 		}
 		if jsonFieldDecodeErr != nil {
-			return nil, 0, jsonFieldDecodeErr
+			return nil, jsonFieldDecodeErr
 		}
 
 		// Set relationship IDs from scanned FK values (hydration happens after loop)
@@ -517,12 +545,129 @@ func (r *RoleRepository) FindMany(ctx context.Context, filter *RoleFilter, opts 
 	}
 
 	if err := rows.Err(); err != nil {
-		return nil, 0, fmt.Errorf("error iterating rows: %w", err)
+		return nil, fmt.Errorf("error iterating rows: %w", err)
 	}
 
 	// Batch hydrate relationships (outside the row loop for efficiency)
 
-	return results, totalCount, nil
+	return results, nil
+}
+
+// FindPage reads a page of the Role rows filter finds (D60, amended), in
+// opts.Sort's order, ties broken by id in the same direction: up to
+// opts.Limit rows after opts.After, and Next when more follow. It runs one
+// query of opts.Limit + 1 rows and no count. A key is a row's id alone:
+// in an order by a sort field, the query reads the key's row for its value,
+// soft-deleted or not and whatever the filter, so a row the filter no longer
+// finds still places the page. An After that holds no id, or whose row
+// no longer exists in an order by a sort field, is ErrPageKey. A key of another
+// order cannot be told from one of this order: the router refuses a cursor
+// of another sort before FindPage reads it.
+func (r *RoleRepository) FindPage(ctx context.Context, filter *RoleFilter, opts *RolePageOptions) (*RolePage, error) {
+	if opts == nil || opts.Fields.IsZero() {
+		return nil, fmt.Errorf("fields must be specified in PageOptions for performance")
+	}
+	if opts.Limit < 0 {
+		return nil, fmt.Errorf("orm: a page of Role rows holds 1 or more, not %d", opts.Limit)
+	}
+	limit := opts.Limit
+	if limit == 0 {
+		limit = 100
+	}
+	field := opts.Sort.Field
+	if field == "" {
+		field = RoleSortById
+	}
+	column, ok := roleSortColumns[field]
+	if !ok {
+		return nil, fmt.Errorf("orm: Role sorts by id and name, not %q", string(field))
+	}
+	byKey := field == RoleSortById
+
+	// Next is the key of the page's last row, so the page reads its primary
+	// key whatever Fields selects.
+	fieldStrings := roleFieldStrings(opts.Fields)
+	if !containsString(fieldStrings, "id") {
+		fieldStrings = append(fieldStrings, "id")
+	}
+	if err := validateFields(fieldStrings, RoleAllowedFields); err != nil {
+		return nil, err
+	}
+	selectFields := buildSelectFieldsTyped(fieldStrings, "role")
+	// The filter's conditions, each qualified by the table, then the
+	// keyset's.
+	var args []interface{}
+	conditions := filter.conditions(&args, 0)
+	comparison, direction := ">", "ASC"
+	if opts.Sort.Desc {
+		comparison, direction = "<", "DESC"
+	}
+	var key any
+	if opts.After != nil {
+		var err error
+		if key, err = opts.After.arg(); err != nil {
+			return nil, err
+		}
+		args = append(args, key)
+		placeholder := fmt.Sprintf("$%d", len(args))
+		if byKey {
+			conditions = append(conditions, fmt.Sprintf(`role.id %s %s`, comparison, placeholder))
+		} else {
+			// The key's row gives the sort field's value: no deleted_at
+			// condition and no filter, so a row soft-deleted or changed
+			// since the page before still places this one.
+			conditions = append(conditions, fmt.Sprintf(`(%s, role.id) %s ((SELECT %s FROM role AS page_key WHERE page_key.id = %s), %s)`,
+				column.sql, comparison, column.key, placeholder, placeholder))
+		}
+	}
+	whereClause := ""
+	if len(conditions) > 0 {
+		whereClause = " WHERE " + strings.Join(conditions, " AND ")
+	}
+	orderByClause := fmt.Sprintf(" ORDER BY %s %s", column.sql, direction)
+	if !byKey {
+		orderByClause += fmt.Sprintf(`, role.id %s`, direction)
+	}
+	query := fmt.Sprintf(`SELECT %s FROM role%s%s LIMIT %d`, selectFields, whereClause, orderByClause, limit+1)
+
+	rows, err := r.findRows(ctx, "FindPage", query, args, fieldStrings, opts.Fields)
+	if err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 && opts.After != nil && !byKey {
+		// A key whose row no longer exists places no row: its value is
+		// null, which no row comes after. Only then is the page empty
+		// without being the last.
+		if err := r.pageKeyExists(ctx, key); err != nil {
+			return nil, err
+		}
+	}
+	page := &RolePage{Rows: rows}
+	if len(rows) > limit {
+		page.Rows = rows[:limit]
+		page.Next = rolePageKeyOf(page.Rows[limit-1])
+	}
+	return page, nil
+}
+
+// pageKeyExists is nil when the table holds a row whose primary key is key,
+// soft-deleted or not, and ErrPageKey when it holds none.
+func (r *RoleRepository) pageKeyExists(ctx context.Context, key any) error {
+	query := `SELECT EXISTS (SELECT 1 FROM role WHERE role.id = $1)`
+	var row pgx.Row
+	if r.tx != nil {
+		row = r.tx.QueryRow(ctx, query, key)
+	} else {
+		row = r.db.pool.QueryRow(ctx, query, key)
+	}
+	var exists bool
+	if err := row.Scan(&exists); err != nil {
+		return fmt.Errorf("failed to read the page key's row: %w", err)
+	}
+	if !exists {
+		return fmt.Errorf("%w: no Role row has the key's id", ErrPageKey)
+	}
+	return nil
 }
 
 // CreateOne inserts a new Role record

@@ -94,7 +94,9 @@ func writePagedSDK(t *testing.T, apiOutput *apigen.APIOutput, sdkDir, typesDir s
 // TestPagedMethodsReturnAPageAndAPager: a paged operation's query struct
 // ends with cursor and limit, checked by the bounds the route reads them
 // with, its method returns runtime::Page<T> and <method>_all returns a
-// Pager of T; an operation that does not page is unchanged.
+// Pager of T; an operation that does not page is unchanged. A sorted
+// page's sort (D60, amended) is one of its own query fields, an optional
+// String, before cursor and limit.
 func TestPagedMethodsReturnAPageAndAPager(t *testing.T) {
 	_, apiOutput := loadPagedAPI(t)
 	sdkOutput, err := Generate(apiOutput, "", "", nestedArraysClock)
@@ -113,7 +115,7 @@ func TestPagedMethodsReturnAPageAndAPager(t *testing.T) {
 		params               []string
 		maxLimit             float64
 	}{
-		{"list_items", "runtime::Page<types::ItemView>", "types::ItemView", []string{"ids", "inStock", "cursor", "limit"}, 5},
+		{"list_items", "runtime::Page<types::ItemView>", "types::ItemView", []string{"ids", "inStock", "sort", "cursor", "limit"}, 5},
 		{"list_tags", "runtime::Page<String>", "String", []string{"cursor", "limit"}, 100},
 	} {
 		endpoint := endpoints[tc.method]
@@ -138,6 +140,9 @@ func TestPagedMethodsReturnAPageAndAPager(t *testing.T) {
 		if limit.RustType != "i64" || limit.Required || *limit.ValidateMin != 1 || *limit.ValidateMax != tc.maxLimit {
 			t.Errorf("%s limit = %+v", tc.method, limit)
 		}
+	}
+	if sort := endpoints["list_items"].QueryParams[2]; sort.RustType != "String" || sort.Required {
+		t.Errorf("list_items sort = %+v", sort)
 	}
 	for _, method := range []string{"get_item", "place_basket"} {
 		if endpoint := endpoints[method]; endpoint.Page != nil || endpoint.AllMethodName != "" || endpoint.HasQueryParams {
@@ -178,8 +183,9 @@ func TestWriteSDKGoldenPaged(t *testing.T) {
 // Rust SDK crate of fixture-paged-api, with listShelfTags
 // (addShelfTagsOperation), into a temp tree laid out as a build writes it, checks the SDK crate with cargo clippy and runs cargo test on
 // it with pagedSDKTest, against a stub server that pages as the runtimes
-// do (D60), its cursors and pages held to page_parity.json. CARGO_TARGET_DIR
-// is honored when set.
+// do (D60), its cursors and pages held to page_parity.json, and sorts
+// listItems (D60, amended), so a pager is seen keeping its sort.
+// CARGO_TARGET_DIR is honored when set.
 func TestPagedSDKCrateBuildsAndRuns(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping cargo build in -short mode")
@@ -305,8 +311,10 @@ impl Stub {
     }
 }
 
-/// Pages /api/items five items, by the cursor of the last item's id,
-/// /api/shelves/{shelf}/tags two tags of the prefix, by the cursor of the
+/// Pages /api/items five items, by the cursor of the last item's id, in the
+/// order its sort asks (ascending by name or sku, which agree, or
+/// descending after a -), /api/shelves/{shelf}/tags two tags of the
+/// prefix, by the cursor of the
 /// last tag, and /api/tags three tags, answering the cursor it was sent
 /// after the first page. A cursor it cannot read is the operation's 400.
 fn serve() -> (String, Stub) {
@@ -345,6 +353,10 @@ fn serve() -> (String, Stub) {
             let param = |name: &str| query.iter().find(|(key, _)| key == name).map(|(_, value)| value.clone());
             let cursor = param("cursor");
             let (status, payload) = if url.path() == "/api/items" {
+                let mut items = items.clone();
+                if param("sort").is_some_and(|sort| sort.starts_with('-')) {
+                    items.reverse();
+                }
                 let limit: usize = param("limit").map_or(2, |limit| limit.parse().unwrap());
                 let start = match &cursor {
                     None => Some(0),
@@ -533,6 +545,31 @@ async fn the_pager_asks_for_each_page_when_its_items_are_reached() {
     assert_eq!(names(&items), NAMES[4..]);
     let (items, _) = drain(&mut sdk.catalog.list_items_all(None, None)).await;
     assert_eq!(names(&items), NAMES);
+}
+
+#[tokio::test]
+async fn a_pager_keeps_its_sort() {
+    let (base_url, stub) = serve();
+    let sdk = sdk(base_url);
+    let query = ListItemsQueryParams {
+        sort: Some("-name".to_string()),
+        limit: Some(2),
+        ..Default::default()
+    };
+    let (items, err) = drain(&mut sdk.catalog.list_items_all(Some(&query), None)).await;
+    assert!(err.is_none(), "{:?}", err);
+    let mut reversed = NAMES.to_vec();
+    reversed.reverse();
+    assert_eq!(names(&items), reversed);
+    let asked: Vec<_> = stub.take().into_iter().map(|(_, query)| query).collect();
+    assert_eq!(
+        asked,
+        vec![
+            pairs(&[("sort", "-name"), ("limit", "2")]),
+            pairs(&[("sort", "-name"), ("cursor", &cursor_after(3)), ("limit", "2")]),
+            pairs(&[("sort", "-name"), ("cursor", &cursor_after(1)), ("limit", "2")]),
+        ]
+    );
 }
 
 #[tokio::test]

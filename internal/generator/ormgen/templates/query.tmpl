@@ -3,6 +3,7 @@
 package orm
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -155,6 +156,14 @@ type ArrayStringFilter struct {
 	Eq       []string
 }
 
+// ErrPageKey is FindPage's error for an After that holds no primary key, or
+// whose row no longer exists in an order by a sort field, which reads the
+// row's value from the table (D60, amended). A key of another order is not
+// one: a key is a row's primary key alone, the same in every order, so a
+// cursor of another sort is refused before the ORM reads it, by the router
+// that binds a cursor to its sort.
+var ErrPageKey = errors.New("orm: the page key names no row of its sort")
+
 // ========================================
 // Type-Safe Field Selectors and Options
 // ========================================
@@ -290,6 +299,90 @@ type {{ $typeName }}FindOptions struct {
 	Offset int
 	// IncludeDeleted includes soft-deleted records in results (default false)
 	IncludeDeleted bool
+}
+{{- $pk := .PrimaryKeySortField }}
+
+// {{ $typeName }}SortField is a field FindPage orders {{ $typeName }} rows by, by its
+// schema name (D60, amended): its primary key, or a column of one value of
+// text, a number or a time.
+type {{ $typeName }}SortField string
+
+const (
+	{{- range .SortFields }}
+	{{ $typeName }}SortBy{{ toGoName .Name }} {{ $typeName }}SortField = "{{ .Name }}"
+	{{- end }}
+)
+
+// {{ $typeName }}Sort is the order FindPage reads {{ $typeName }} rows in: Field,
+// ascending, or descending when Desc; ties break by {{ $pk.Name }} in the same
+// direction. The zero value orders by {{ $pk.Name }}, ascending.
+type {{ $typeName }}Sort struct {
+	Field {{ $typeName }}SortField
+	Desc  bool
+}
+
+// Parse{{ $typeName }}Sort reads a sort as a page request writes it, "{{ .SortExample }}" or
+// "-{{ .SortExample }}": an error for a field {{ $typeName }} cannot be sorted by.
+func Parse{{ $typeName }}Sort(text string) ({{ $typeName }}Sort, error) {
+	parsed := {{ $typeName }}Sort{Field: {{ $typeName }}SortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
+	switch parsed.Field {
+	case {{ range $i, $field := .SortFields }}{{ if $i }}, {{ end }}{{ $typeName }}SortBy{{ toGoName $field.Name }}{{ end }}:
+		return parsed, nil
+	}
+	return {{ $typeName }}Sort{}, fmt.Errorf("orm: {{ $typeName }} sorts by {{ .SortFieldList }}, not %q", text)
+}
+
+// {{ $typeName }}PageKey is the position of a {{ $typeName }} row in a FindPage order: the
+// row's {{ $pk.Name }}, as a cursor holds it, {"{{ $pk.Name }}": ...}. FindPage reads the row's
+// value of its sort field from the table, so a key is the same in every order
+// and its length is the {{ $pk.Name }}'s, whatever the row holds (D60, amended).
+type {{ $typeName }}PageKey struct {
+	{{ toGoName $pk.Name }} {{ $pk.GoType }} `json:"{{ $pk.Name }}"`
+}
+
+// arg is the key's {{ $pk.Name }} as the repository writes its column. A key without
+// one is ErrPageKey.
+func (k *{{ $typeName }}PageKey) arg() (any, error) {
+	var zeroKey {{ $pk.GoType }}
+	if k.{{ toGoName $pk.Name }} == zeroKey {
+		return nil, fmt.Errorf("%w: the {{ $typeName }} key holds no {{ $pk.Name }}", ErrPageKey)
+	}
+	return {{ $pk.KeyArg (printf "k.%s" (toGoName $pk.Name)) }}, nil
+}
+
+// {{ lowerFirst $typeName }}PageKeyOf is row's key: its {{ $pk.Name }}.
+func {{ lowerFirst $typeName }}PageKeyOf(row *types.{{ $typeName }}) *{{ $typeName }}PageKey {
+	key := &{{ $typeName }}PageKey{}
+	{{- if $pk.GoPointer }}
+	if row.{{ toGoName $pk.Name }} != nil {
+		key.{{ toGoName $pk.Name }} = *row.{{ toGoName $pk.Name }}
+	}
+	{{- else }}
+	key.{{ toGoName $pk.Name }} = row.{{ toGoName $pk.Name }}
+	{{- end }}
+	return key
+}
+
+// {{ $typeName }}PageOptions are FindPage's options.
+type {{ $typeName }}PageOptions struct {
+	// Fields specifies which fields to select, as FindMany's do; zero is an
+	// error. A page reads the {{ $pk.Name }} too, which Next holds.
+	Fields {{ $typeName }}Fields
+	// Sort is the order the rows are read in.
+	Sort {{ $typeName }}Sort
+	// After is the key of the last row of the page before, nil for the first page.
+	After *{{ $typeName }}PageKey
+	// Limit is the rows a page holds: 1 or more, 100 when 0.
+	Limit int
+	// IncludeDeleted includes soft-deleted records in results (default false)
+	IncludeDeleted bool
+}
+
+// {{ $typeName }}Page is a page of {{ $typeName }} rows in FindPage's order: at most
+// Limit rows, and Next, the key of the last of them, when more rows follow.
+type {{ $typeName }}Page struct {
+	Rows []*types.{{ $typeName }}
+	Next *{{ $typeName }}PageKey
 }
 {{- if .Versioned }}
 

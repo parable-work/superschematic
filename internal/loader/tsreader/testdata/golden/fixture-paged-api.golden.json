@@ -135,7 +135,7 @@
       "operations": [
         {
           "name": "listItems",
-          "comment": "The items, two to a page unless the caller asks for up to five, by\ntheir ids or their stock.",
+          "comment": "The items, two to a page unless the caller asks for up to five, by\ntheir ids or their stock, in order of their names unless the caller\nsorts them by name or sku, either way.",
           "typeRef": {
             "name": "ItemView",
             "isArray": true
@@ -157,11 +157,23 @@
                 "name": "boolean"
               },
               "isQuery": true
+            },
+            {
+              "name": "sort",
+              "typeRef": {
+                "name": "string"
+              },
+              "isQuery": true,
+              "sort": [
+                "name",
+                "sku"
+              ]
             }
           ],
           "page": {
             "defaultLimit": 2,
-            "maxLimit": 5
+            "maxLimit": 5,
+            "defaultSort": "name"
           },
           "httpMethod": "GET",
           "restPath": "items"

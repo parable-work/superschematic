@@ -47,10 +47,13 @@ func TestPageDefsAreTheRegisteredArgs(t *testing.T) {
 			t.Errorf("$defs/OperationPage/properties/%s = %v", member, prop)
 		}
 	}
+	if prop := emitted["properties"].(map[string]any)["defaultSort"].(map[string]any); prop["type"] != "string" || prop["pattern"] != ir.PageSortPattern {
+		t.Errorf("$defs/OperationPage/properties/defaultSort = %v, want a string of the pattern %s", prop, ir.PageSortPattern)
+	}
 
 	defs := map[string]any{"OperationPage": map[string]any{"properties": map[string]any{"limit": map[string]any{}}}}
 	err = replacePageDefs(defs, reg)
-	if err == nil || !strings.HasPrefix(err.Error(), "@paginated Args $defs/OperationPage has the properties [defaultLimit maxLimit], but ir.OperationPage has [limit]") {
+	if err == nil || !strings.HasPrefix(err.Error(), "@paginated Args $defs/OperationPage has the properties [defaultLimit defaultSort maxLimit], but ir.OperationPage has [limit]") {
 		t.Fatalf("replacePageDefs = %v", err)
 	}
 }

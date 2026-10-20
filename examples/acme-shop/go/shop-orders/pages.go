@@ -1,119 +1,61 @@
 package shoporders
 
 import (
-	"context"
-	"fmt"
-	"strconv"
-	"strings"
+	"errors"
 
 	orm "example.com/acme/orm/shop-db"
-	types "example.com/acme/types/go/shop-orders"
-	"github.com/jackc/pgx/v5"
 	"github.com/parable-work/superschematic/runtime/http/go/paging"
 )
 
-// The paged lists of shop-orders (D60) read a page in two steps, in one
-// transaction: the keys of up to page.Limit+1 rows after the cursor's, in
-// the list's order, then, through the ORM, the rows of the keys
-// paging.FromRows keeps, with their columns and an order's lines as
-// GetOrder reads them, in the keys' order: the ORM sorts the orders and
-// the reviews, and inKeyOrder puts the products found by their ids in it.
-// A page's cursor is the key of its last row. The ORM gives the keys'
-// query a filter's conditions too (<Type>FilterConditions), as the reviews
-// take their product, rating and search; what stays the implementation's
-// is the keyset comparison of two columns, which the ORM's filters cannot
-// say, and the select of the keys.
+// The paged lists of shop-orders (D60) read each page through the ORM's
+// FindPage, in one query: the rows the list's filter finds, in the order
+// of the page request's sort (D60, amended), then their ids, up to
+// page.Limit of them after the cursor's row. Parse<Type>Sort reads the
+// sort, whose fields are the table's columns of the same names. A page's
+// cursor is the ORM's key of its last row, {"id": ...}: FindPage reads
+// that row's value of the sort field from the table, so a cursor is as
+// short as an id, whatever the row holds. The key does not say its sort;
+// the router binds the cursor to the sort, and refuses one sent back with
+// another before the implementation reads it. What stays the
+// implementation's is the filter and the rows' views.
 
-// rowKey is a row's place in a list's order: the columns the list orders
-// by, the row's id last, which makes the order total.
-type rowKey interface {
-	rowID() types.IdentityUUID
-}
-
-// keyQuery is the query of a page's keys: its conditions and the values
-// they take, each value's placeholder numbered as it is added.
-type keyQuery struct {
-	conditions []string
-	args       []any
-}
-
-// where adds a condition, with a placeholder in place of each %s for each
-// value in turn.
-func (q *keyQuery) where(condition string, values ...any) {
-	placeholders := make([]any, len(values))
-	for i, value := range values {
-		q.args = append(q.args, value)
-		placeholders[i] = "$" + strconv.Itoa(len(q.args))
+// pageKey is the key a page request's cursor holds, nil for the first
+// page. A cursor that does not decode into K is the 400 of a cursor the
+// implementation cannot read.
+func pageKey[K any](page paging.Request) (*K, error) {
+	if page.Cursor == "" {
+		return nil, nil
 	}
-	q.conditions = append(q.conditions, fmt.Sprintf(condition, placeholders...))
-}
-
-// decodeKey reads a cursor back into the key of a row. DecodeCursor
-// refuses null and an empty object, but an object without an id decodes,
-// its id zero, so a key without one, which names no row, is refused here
-// as a cursor that does not decode is: 400 at cursor.
-func decodeKey[K rowKey](cursor string) (K, error) {
-	var key K
-	if err := paging.DecodeCursor(cursor, &key); err != nil {
-		return key, err
-	}
-	if key.rowID().IsZero() {
-		return key, paging.RefusedCursor()
+	key := new(K)
+	if err := paging.DecodeCursor(page.Cursor, key); err != nil {
+		return nil, err
 	}
 	return key, nil
 }
 
-// readPage reads a page of table's rows that meet the query's conditions,
-// in the order of the key columns, which K's fields hold in turn: the keys
-// of up to page.Limit+1 rows, then, with read, the rows of the ids the
-// page keeps, in the keys' order. table is spelled as SQL names it, quoted
-// when it is a keyword.
-func readPage[K rowKey, T any](
-	ctx context.Context,
-	db orm.DatabaseInterface,
-	query *keyQuery,
-	table, key string,
-	page paging.Request,
-	read func(tx orm.TxInterface, ids []types.IdentityUUID) ([]T, error),
-) (paging.Page[T], error) {
-	sql := "SELECT " + key + " FROM " + table
-	if len(query.conditions) > 0 {
-		sql += " WHERE " + strings.Join(query.conditions, " AND ")
+// pageOf is the page of FindPage's rows, each read as view, whose next
+// cursor is next, the key of the last row, nil after the last page.
+func pageOf[R, T, K any](rows []R, next *K, view func(R) T) (paging.Page[T], error) {
+	items := make([]T, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, view(row))
 	}
-	sql += " ORDER BY " + key + " LIMIT " + strconv.Itoa(max(page.Limit, 1)+1)
-	var listed paging.Page[T]
-	err := db.Transaction(ctx, func(tx orm.TxInterface) error {
-		rows, err := tx.Query(ctx, sql, query.args...)
-		if err != nil {
-			return err
-		}
-		found, err := pgx.CollectRows(rows, pgx.RowToStructByPos[K])
-		if err != nil {
-			return err
-		}
-		keys, err := paging.FromRows(found, page.Limit, func(key K) any { return key })
-		if err != nil || len(keys.Items) == 0 {
-			return err
-		}
-		ids := make([]types.IdentityUUID, 0, len(keys.Items))
-		for _, key := range keys.Items {
-			ids = append(ids, key.rowID())
-		}
-		listed.Items, err = read(tx, ids)
-		listed.Next = keys.Next
-		return err
-	})
-	return listed, err
+	if next == nil {
+		return paging.Last(items), nil
+	}
+	cursor, err := paging.EncodeCursor(next)
+	if err != nil {
+		return paging.Page[T]{}, err
+	}
+	return paging.More(items, cursor), nil
 }
 
-// inKeyOrder lists the rows found by their ids in the order of ids, a
-// page's, each as view makes it, leaving out an id no row has.
-func inKeyOrder[R, V any](ids []types.IdentityUUID, found map[types.IdentityUUID]R, view func(R) V) []V {
-	views := make([]V, 0, len(ids))
-	for _, id := range ids {
-		if row, ok := found[id]; ok {
-			views = append(views, view(row))
-		}
+// pageError is FindPage's error as the list answers it: a key that holds
+// no id, or whose row no longer exists (orm.ErrPageKey), is the 400 of a
+// cursor the implementation cannot read.
+func pageError(err error) error {
+	if errors.Is(err, orm.ErrPageKey) {
+		return paging.RefusedCursor()
 	}
-	return views
+	return err
 }

@@ -14,7 +14,7 @@ import (
 //
 // Endpoints:
 // - GetItem: One item.
-// - ListItems: The items, two to a page unless the caller asks for up to five, by their ids or their stock.
+// - ListItems: The items, two to a page unless the caller asks for up to five, by their ids or their stock, in order of their names unless the caller sorts them by name or sku, either way.
 // - ListTags: The tags items carry: a page of a primitive, with the default limits.
 // - PlaceBasket: Place a basket.
 type CatalogNamespace struct {
@@ -56,9 +56,10 @@ func (n *CatalogNamespace) GetItem(
 type CatalogListItemsQueryParams struct {
 	Ids     []types.IdentityUUID `json:"ids,omitzero"`
 	InStock *bool                `json:"inStock,omitempty"`
+	Sort    *string              `json:"sort,omitempty"`
 }
 
-// ListItems The items, two to a page unless the caller asks for up to five, by their ids or their stock.
+// ListItems The items, two to a page unless the caller asks for up to five, by their ids or their stock, in order of their names unless the caller sorts them by name or sku, either way.
 //
 // It returns one page of the list (D60): page.Cursor is the Next of the
 // page before, "" for the first page, and page.Limit the most items the
@@ -98,6 +99,9 @@ func (n *CatalogNamespace) ListItems(
 		runtime.AddQueryList(queryValues, "ids", query.Ids)
 		if query.InStock != nil {
 			runtime.AddQueryParam(queryValues, "inStock", *query.InStock)
+		}
+		if query.Sort != nil {
+			runtime.AddQueryParam(queryValues, "sort", *query.Sort)
 		}
 	}
 	runtime.AddPageRequest(queryValues, page)

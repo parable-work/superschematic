@@ -26,3 +26,13 @@ export type RefersTo<T, Target, C extends RefersToConfig<Target> = {}> = T & {
  * item's searchable text contains (D62). An operation takes one.
  */
 export type SearchQuery<T extends string = string> = (T & { readonly __queryParam: true; readonly __search: true }) | null;
+
+/**
+ * The order a paged list is read in (D60, amended): a field Fields names,
+ * ascending, or after a "-", descending; ties break by the item's id in
+ * the same direction. @paginated's defaultSort is the order when none is
+ * sent. An operation takes one.
+ */
+export type SortBy<Item, Fields extends readonly (keyof Item & string)[]> =
+  | ((Fields[number] | `-${Fields[number]}`) & { readonly __queryParam: true; readonly __sortBy: Fields })
+  | null;

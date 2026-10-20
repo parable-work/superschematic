@@ -163,3 +163,92 @@ func TestDecodeRefusesAKeyThatNamesNoPosition(t *testing.T) {
 		t.Fatalf("an escaped surrogate pair = %v, %v", key, err)
 	}
 }
+
+// A sorted operation's page (D60, amended): the router reads the sort with
+// the page, binds the next cursor the implementation returns to it, and
+// unbinds the cursor the caller sends back, so the implementation reads
+// its own key. A cursor of another sort is the 400 at cursor.
+func TestBindAndUnbind(t *testing.T) {
+	spec := Spec{DefaultLimit: 2, MaxLimit: 5, Sort: &SortSpec{Param: "sort", Fields: []string{"placedAt", "totalCents"}, Default: Sort{Field: "placedAt"}}}
+	if got := spec.Sort.Values(); strings.Join(got, " ") != "placedAt -placedAt totalCents -totalCents" {
+		t.Fatalf("Values = %v", got)
+	}
+	for text, want := range map[string]Sort{"placedAt": {Field: "placedAt"}, "-totalCents": {Field: "totalCents", Desc: true}} {
+		if got, ok := ParseSort(text); !ok || got != want || got.String() != text {
+			t.Errorf("ParseSort(%q) = %+v, %v", text, got, ok)
+		}
+	}
+	for _, text := range []string{"", "-", "--placedAt", "+placedAt", "placedAt,id", "2nd", "placed At"} {
+		if got, ok := ParseSort(text); ok {
+			t.Errorf("ParseSort(%q) = %+v", text, got)
+		}
+	}
+
+	first, refusal := Parse(QueryValues("sort=-totalCents"), spec)
+	if refusal != nil || first != (Request{Limit: 2, Sort: Sort{Field: "totalCents", Desc: true}}) {
+		t.Fatalf("first request = %+v, %v", first, refusal)
+	}
+	at := time.Date(2026, 10, 9, 14, 30, 0, 0, time.UTC)
+	rows := []order{{"a", at}, {"b", at.Add(time.Minute)}, {"c", at.Add(2 * time.Minute)}}
+	page, err := FromRows(rows, first.Limit, func(o order) any { return orderKey{PlacedAt: o.PlacedAt, ID: o.ID} })
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyCursor := *page.Next
+	bound, err := Bind(page, first)
+	if err != nil || bound.Next == nil || len(bound.Items) != 2 {
+		t.Fatalf("Bind = %+v, %v", bound, err)
+	}
+	data, err := base64.RawURLEncoding.DecodeString(*bound.Next)
+	if err != nil || !strings.HasPrefix(string(data), `{"sort":"-totalCents","key":{"placedAt":"2026-10-09T14:31:00Z","id":"b"}}`) {
+		t.Fatalf("bound next = %s, %v", data, err)
+	}
+	if *page.Next != keyCursor {
+		t.Fatal("Bind wrote over the implementation's page")
+	}
+
+	// The next request reads the implementation's own cursor back.
+	second, refusal := Parse(QueryValues("sort=-totalCents&cursor="+*bound.Next), spec)
+	if refusal != nil || second.Cursor != keyCursor || second.Sort != first.Sort {
+		t.Fatalf("second request = %+v, %v", second, refusal)
+	}
+	var key orderKey
+	if err := DecodeCursor(second.Cursor, &key); err != nil || key.ID != "b" {
+		t.Fatalf("the unbound cursor reads %+v, %v", key, err)
+	}
+
+	// Under another sort, the default among them, it is refused.
+	var appErr *apperror.AppError
+	for _, query := range []string{"sort=totalCents&cursor=" + *bound.Next, "cursor=" + *bound.Next} {
+		_, refusal := Parse(QueryValues(query), spec)
+		if !errors.As(error(refusal), &appErr) || appErr.Message != SortedCursorDetail || appErr.Details.(Details).Reason != SortedCursorReason {
+			t.Errorf("%s: refusal = %v", query, refusal)
+		}
+	}
+	// The implementation's own cursor names no sort.
+	if _, refusal := Parse(QueryValues("cursor="+keyCursor), spec); refusal == nil || refusal.Message != RefusedCursorDetail {
+		t.Errorf("an unbound cursor: refusal = %v", refusal)
+	}
+
+	// A page with no next, and a request with no sort, pass as they are.
+	last := Last([]int{1})
+	if got, err := Bind(last, first); err != nil || got.Next != nil {
+		t.Errorf("Bind of the last page = %+v, %v", got, err)
+	}
+	unsorted := More([]int{1}, "MQ")
+	if got, err := Bind(unsorted, Request{Limit: 1}); err != nil || *got.Next != "MQ" {
+		t.Errorf("Bind without a sort = %+v, %v", got, err)
+	}
+	// A next no router would read back under its sort is the
+	// implementation's error.
+	long, err := EncodeCursor(strings.Repeat("x", 740))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := Bind(More([]int{1}, long), first); err == nil || errors.As(err, &appErr) || !strings.Contains(err.Error(), "past the 1024 a router reads") {
+		t.Errorf("Bind of a long key = %+v, %v", got, err)
+	}
+	if got, err := Bind(More([]int{1}, "e30="), first); err == nil || errors.As(err, &appErr) {
+		t.Errorf("Bind of a cursor EncodeCursor does not write = %+v, %v", got, err)
+	}
+}
