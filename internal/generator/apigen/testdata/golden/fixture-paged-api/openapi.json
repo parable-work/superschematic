@@ -192,7 +192,7 @@
     },
     "/api/items": {
       "get": {
-        "description": "The items, two to a page unless the caller asks for up to five, by\ntheir ids or their stock.",
+        "description": "The items, two to a page unless the caller asks for up to five, by\ntheir ids or their stock, in order of their names unless the caller\nsorts them by name or sku, either way.",
         "operationId": "CatalogListItemsHandler",
         "parameters": [
           {
@@ -218,6 +218,23 @@
             "schema": {
               "type": "boolean"
             }
+          },
+          {
+            "description": "The order of the page: a field, or - and a field for descending; ties break by id. A cursor holds the sort it was returned under.",
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "name",
+              "enum": [
+                "name",
+                "-name",
+                "sku",
+                "-sku"
+              ],
+              "type": "string"
+            },
+            "x-superschematic-sort": true
           },
           {
             "description": "The `next` of the previous page; absent for the first page.",

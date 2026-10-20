@@ -29,17 +29,62 @@
 //! (`<target>_target_label`), when every operation whose route holds the
 //! value there refers to one target by one value (D44, amended).
 {{- end }}
+{{- if .References.Picking }}
+//!
+//! A control whose reference's options operation searches is a picker
+//! (D61, amended): a search box, a "Find" button and a select of the items
+//! the box's text finds, the first page of the search, the value held
+//! among them by its label. `<form>_choices` gives each picker its `Pick`:
+//! every picker searches the text its box holds, a filter's as its query
+//! sends it and a post's as it posts it, so the box always says what its
+//! select lists. One listing a distinct text, and at most
+//! `MAX_LOOKUP_CALLS` distinct texts a request through one options
+//! operation, every picker of every form and target counted together; a
+//! text past them lists the first page with `TOO_MANY_SEARCHES`, but the
+//! picker whose "Find" a post pressed (`find:<control>`) is searched past
+//! them. The values held are named through the lookup, as a record's are.
+//! A picker is a shard, `<target>_pick`, at
+//! `/_superschematic/{{ .SchemaName }}/_pick/<target>`: with Topcoat's runtime
+//! it renders again as the reader types and each time the reader presses
+//! "Find", and without it "Find" submits the form. The shard meets its
+//! options operation's rate limit and timeout, as a page that calls it
+//! does.
+{{- end }}
 
-{{ with .References -}}
-{{ if or .Records .Trails -}}
+{{ $crate := . }}
+{{- with .References -}}
+{{ if or .Records .Trails .Picking -}}
 use std::collections::BTreeSet;
+{{- if and .Picking .PickControlled }}
+use std::sync::{Arc, Mutex, PoisonError};
+use std::time::Duration;
+{{- else if .Picking }}
+use std::sync::{Mutex, PoisonError};
+{{- else if .PickControlled }}
+use std::sync::Arc;
+use std::time::Duration;
+{{- end }}
 
 {{ end -}}
 {{ if .Paged -}}
 use crate::api::runtime::page::PageRequest;
 {{ end -}}
-use crate::choices::{Choice, Choices};
+{{ if .Picking -}}
+use crate::api::runtime::ApiError;
+{{ end -}}
+{{ if .PickControlled -}}
+use crate::api::runtime::RateLimiter;
+{{ end -}}
+{{ if .PicksUse "rate_limit" -}}
+use crate::api::runtime::RateLimits;
+{{ end -}}
+use crate::choices::{Choice, Choices{{ if .Picking }}, Pick, PickControl, PickOption{{ end }}};
+{{- if .FormNames }}
+use crate::forms::{ {{- .FormNames -}} };
+{{- end }}
+{{- if .OwnOperations }}
 use crate::operations;
+{{- end }}
 {{- if .Records }}
 use crate::records::{ {{- .RecordNames -}} };
 {{- end }}
@@ -48,11 +93,54 @@ use serde::de::DeserializeOwned;
 {{- end }}
 use serde_json::Value;
 use topcoat::context::{Cx, memoize};
+{{- if .PicksUse "rate_from" }}
+use topcoat::context::try_app_context;
+{{- end }}
+{{- if .PickControlled }}
+use topcoat::router::response::Response;
+use topcoat::router::{Body, HeaderValue, Layer, LayerFuture, Next, Path, RouterBuilder, header};
+{{- end }}
+{{- if .Picking }}
+use topcoat::runtime::{Event, shard, signal};
+use topcoat::view::{View, view};
+{{- end }}
 
 /// The most calls one target's lookup makes for one `<record>_labels`
 /// call, which names the values of the records it is given; a value past
-/// them shows as it is.
+/// them shows as it is.{{ if .Picking }} A request's pickers search at most this many
+/// distinct texts through one options operation (D61, amended).{{ end }}
 pub const MAX_LOOKUP_CALLS: usize = 10;
+{{- if .Picking }}
+
+/// What a picker past a request's `MAX_LOOKUP_CALLS` searches says, beside
+/// the first page it lists.
+const TOO_MANY_SEARCHES: &str = "Too many searches at once; search this one again";
+
+/// The distinct texts a request's pickers searched through one options
+/// operation (D61, amended), which its `<operation>_searched` keeps for the
+/// request: at most `MAX_LOOKUP_CALLS`, past which only a pressed "Find"'s
+/// text is searched.
+#[derive(Debug, Default)]
+struct Searched(Mutex<BTreeSet<String>>);
+
+impl Searched {
+    /// Whether a picker searches `text`: one the request searched already,
+    /// one of its first `MAX_LOOKUP_CALLS` distinct texts, or the text of
+    /// the picker whose "Find" the reader pressed, `pressed`, which counts
+    /// but is searched past them.
+    fn admits(&self, text: &str, pressed: bool) -> bool {
+        let mut searched = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        if searched.contains(text) {
+            return true;
+        }
+        if searched.len() >= MAX_LOOKUP_CALLS && !pressed {
+            return false;
+        }
+        searched.insert(text.to_owned());
+        true
+    }
+}
+{{- end }}
 {{- if .Records }}
 
 /// A place a record shows a reference: its path, as `Choices` names it, and
@@ -115,6 +203,15 @@ fn choices_of<'a>(items: impl IntoIterator<Item = &'a Value>, value: &str, label
         })
         .collect()
 }
+
+{{- if .Picking }}
+
+/// Whether `err` refuses the argument `param`: the router's 400 at it.
+fn refuses(err: &ApiError, param: &str) -> bool {
+    err.status.as_u16() == 400
+        && err.details.as_deref().and_then(|details| details.get("parameter")).and_then(Value::as_str) == Some(param)
+}
+{{- end }}
 
 /// Options as the pairs `Choices::with` takes.
 fn pairs(options: &[Choice]) -> impl Iterator<Item = (String, String)> + '_ {
@@ -194,25 +291,58 @@ fn as_number(text: &str) -> Option<Value> {
 #[memoize(as_ref)]
 async fn {{ .Fn }}(cx: &Cx) -> Option<Listed> {
 {{- if .ArgsName }}
-    let args = crate::api::{{ .ArgsName }} {
+    let args = {{ .API }}::{{ .ArgsName }} {
 {{- range .Nones }}
         {{ . }}: None,
 {{- end }}
 {{- if .Paged }}
-        page: PageRequest::first(crate::api::{{ .ArgsName }}::PAGE.max_limit()),
+        page: {{ .PageRequest }}::first({{ .API }}::{{ .ArgsName }}::PAGE.max_limit()),
 {{- end }}
     };
 {{- if .Paged }}
-    let page = operations::{{ .Snake }}(cx, args).await.ok()?;
+    let page = {{ .Ops }}::{{ .Snake }}(cx, args).await.ok()?;
     Some(Listed { items: json_of(&page.items){{ if $m.Choosing }}, more: page.next.is_some(){{ end }} })
 {{- else }}
-    let items = operations::{{ .Snake }}(cx, args).await.ok()?;
+    let items = {{ .Ops }}::{{ .Snake }}(cx, args).await.ok()?;
     Some(Listed { items: json_of(&items){{ if $m.Choosing }}, more: false{{ end }} })
 {{- end }}
 {{- else }}
-    let items = operations::{{ .Snake }}(cx).await.ok()?;
+    let items = {{ .Ops }}::{{ .Snake }}(cx).await.ok()?;
     Some(Listed { items: json_of(&items){{ if $m.Choosing }}, more: false{{ end }} })
 {{- end }}
+}
+{{- end }}
+{{- end }}
+{{- range .Options }}
+{{- if $m.Searching . }}
+
+{{ doc (printf "The items %s finds for `text`, for a picker (D61, amended): %s with `%s` set, as JSON, and whether more follow, the text empty for every item; kept for the request (`#[memoize]`). None when the caller may not call it (401, 403) or the call fails; `Err` the search argument's refusal of the text, as its route words it." .Operation (or (and .Paged "its first page, at its defaultLimit,") "its items") .Search.Arg) }}
+#[memoize(as_ref)]
+async fn {{ .Search.Fn }}(cx: &Cx, text: &str) -> Option<Result<Listed, String>> {
+    let args = {{ .API }}::{{ .ArgsName }} {
+        {{ .Search.Field }}: (!text.is_empty()).then(|| text.to_owned()),
+{{- range .Search.Others }}
+        {{ . }}: None,
+{{- end }}
+{{- if .Paged }}
+        page: {{ .PageRequest }}::first({{ .API }}::{{ .ArgsName }}::PAGE.default_limit()),
+{{- end }}
+    };
+    match {{ .Ops }}::{{ .Snake }}(cx, args).await {
+{{- if .Paged }}
+        Ok(page) => Some(Ok(Listed { items: json_of(&page.items), more: page.next.is_some() })),
+{{- else }}
+        Ok(items) => Some(Ok(Listed { items: json_of(&items), more: false })),
+{{- end }}
+        Err(err) if !text.is_empty() && refuses(&err, {{ rustString .Search.Arg }}) => Some(Err(err.message)),
+        Err(_) => None,
+    }
+}
+
+{{ doc (printf "The distinct texts the request's pickers searched through %s, every target's and every form's, kept for the request (`#[memoize]`), so one `MAX_LOOKUP_CALLS` caps them all (D61, amended)." .Operation) }}
+#[memoize]
+fn {{ .Search.Searched }}(cx: &Cx) -> Searched {
+    Searched::default()
 }
 {{- end }}
 {{- end }}
@@ -223,20 +353,20 @@ async fn {{ .Fn }}(cx: &Cx) -> Option<Listed> {
 #[memoize(as_ref)]
 async fn {{ .Fn }}(cx: &Cx, values: &[String]) -> Option<Vec<Value>> {
     let wanted = decode_each(values.iter().filter_map(|value| {{ .Read }}(value)))?;
-    let args = crate::api::{{ .Options.ArgsName }} {
+    let args = {{ .Options.API }}::{{ .Options.ArgsName }} {
         {{ .Field }}: Some(wanted),
 {{- range .Others }}
         {{ . }}: None,
 {{- end }}
 {{- if .Options.Paged }}
-        page: PageRequest::first(crate::api::{{ .Options.ArgsName }}::PAGE.max_limit()),
+        page: {{ .Options.PageRequest }}::first({{ .Options.API }}::{{ .Options.ArgsName }}::PAGE.max_limit()),
 {{- end }}
     };
 {{- if .Options.Paged }}
-    let page = operations::{{ .Options.Snake }}(cx, args).await.ok()?;
+    let page = {{ .Options.Ops }}::{{ .Options.Snake }}(cx, args).await.ok()?;
     Some(json_of(&page.items))
 {{- else }}
-    let items = operations::{{ .Options.Snake }}(cx, args).await.ok()?;
+    let items = {{ .Options.Ops }}::{{ .Options.Snake }}(cx, args).await.ok()?;
     Some(json_of(&items))
 {{- end }}
 }
@@ -284,6 +414,107 @@ async fn {{ .Base }}_target_labels(cx: &Cx, values: &BTreeSet<String>) -> Vec<Ch
 {{- end }}
 }
 {{- end }}
+{{- if $m.UsesPick . }}
+
+{{ doc (printf "The picks of controls that refer to %s (D61, amended), one per `(value, text, pressed)` wanted: the items `text` finds through %s's `%s`, the first page of them all for an empty one, one listing a distinct text. The request searches at most `MAX_LOOKUP_CALLS` distinct texts through it, counted by `%s` for every picker it lists; a text past them lists the first page with `TOO_MANY_SEARCHES`, unless `pressed` says its \"Find\" is the one the reader pressed. The value held is always an option, named by its %s through `%s_target_labels`, which names every value no match holds at once. None for each when the caller may not list the items or the call fails." .Target .Options.Operation .Options.Search.Arg .Options.Search.Searched (or (and .Label (printf "%s" .Label)) "value") .Base) }}
+async fn {{ .Base }}_target_picks(cx: &Cx, wanted: &[(String, String, bool)]) -> Vec<Option<Pick>> {
+    let searched = {{ .Options.Search.Searched }}(cx);
+    let mut found = Vec::with_capacity(wanted.len());
+    for (_, text, pressed) in wanted {
+        let capped = !text.is_empty() && !searched.admits(text, *pressed);
+        found.push(match {{ .Options.Search.Fn }}(cx, if capped { "" } else { text }).await {
+            None => None,
+            Some(Ok(listed)) => Some((choices_of(&listed.items, {{ rustString .Value }}, {{ .LabelExpr }}), listed.more, capped.then(|| TOO_MANY_SEARCHES.to_owned()))),
+            Some(Err(refused)) => Some((Vec::new(), false, Some(refused.clone()))),
+        });
+    }
+    // The values held that no match is, named at once.
+    let missing: BTreeSet<String> = wanted
+        .iter()
+        .zip(&found)
+        .filter_map(|((value, _, _), found)| {
+            let (options, _, _) = found.as_ref()?;
+            (!value.is_empty() && !options.iter().any(|option: &Choice| option.value == *value)).then(|| value.clone())
+        })
+        .collect();
+    let labels = {{ .Base }}_target_labels(cx, &missing).await;
+    wanted
+        .iter()
+        .zip(found)
+        .map(|((value, text, _), found)| {
+            let (choices, more, refused) = found?;
+            let mut options: Vec<PickOption> = choices.into_iter().map(|choice| PickOption { value: choice.value, label: choice.label }).collect();
+            if !value.is_empty() && !options.iter().any(|option| option.value == *value) {
+                let label = labels.iter().find(|choice| choice.value == *value).map_or_else(|| value.clone(), |choice| choice.label.clone());
+                options.insert(0, PickOption { value: value.clone(), label });
+            }
+            Some(Pick { text: text.clone(), options, more, refused })
+        })
+        .collect()
+}
+
+{{ doc (printf "The picker of a control that refers to %s (D61, amended): a search box of `pick`'s text, a \"Find\" button and a select of its options, the value held selected, a note when more match and the search's refusal. A shard: when the app loads Topcoat's runtime, it renders again through `%s_target_picks`, the value the select holds kept, as the reader types and each time the reader presses \"Find\", the text unchanged too, so a pick past the request's `MAX_LOOKUP_CALLS` searches; without the runtime it renders in place, and \"Find\" submits its form. A caller who may not list the items gets the plain control and the value." .Target .Base) }}
+#[shard({{ rustString (.PickPath $crate.SchemaName) }})]
+pub async fn {{ .Base }}_pick(cx: &Cx, control: PickControl, pick: Pick) -> topcoat::Result<impl View> {
+    let typed = pick.text.clone();
+    let text = signal(cx, move || typed);
+    let held = control.value.clone();
+    let value = signal(cx, move || held);
+    // The reader typed, so the shard searches what the box holds.
+    let searched = signal(cx, || false);
+    // How many times the reader pressed "Find": tracked, so each press
+    // renders the shard again and searches the box's text, the same text
+    // too.
+    let presses = signal(cx, || 0_u32);
+    let typed = text.get();
+    let pressed = presses.get() > 0;
+    let held = value.get_untracked();
+    let pick = if pressed || searched.get_untracked() {
+        {{ .Base }}_target_picks(cx, &[(held.clone(), typed.clone(), true)]).await.pop().flatten()
+    } else {
+        Some(pick)
+    };
+    let find = format!("find:{}", control.name);
+    let invalid = control.invalid.then_some("true");
+    Ok(view! {
+        <div class="ss-pick" data-ss-pick=(control.name.clone())>
+            match pick {
+                Some(pick) => {
+                    let blank = !pick.options.iter().any(|option| option.value == held);
+                    <input type="search" name=(format!("_find.{}", control.name)) value=(typed) aria-label={{ rustString (printf "Search %s" .Plural) }} aria-controls=(control.id.clone()){{ .Options.Search.Attrs }} @input=$(|e: Event| {
+                        searched.set(true);
+                        text.set(e.target.value)
+                    })>
+                    if control.post {
+                        <button type="submit" name="_action" value=(find) formnovalidate=(true) @click=$(|e: Event| {
+                            e.prevent_default();
+                            presses.increment()
+                        })>"Find"</button>
+                    } else {
+                        <button type="submit" formnovalidate=(true) @click=$(|e: Event| {
+                            e.prevent_default();
+                            presses.increment()
+                        })>"Find"</button>
+                    }
+                    <select id=(control.id.clone()) name=(control.name.clone()) required=(control.required) aria-invalid=(invalid) @change=$(|e: Event| value.set(e.target.value))>
+                        <option value="" selected=(blank)>""</option>
+                        for option in pick.options {
+                            <option value=(option.value.clone()) selected=(option.value == held)>(option.label)</option>
+                        }
+                    </select>
+                    if pick.more {
+                        <p class="ss-pick-more">{{ rustString (printf "More %s match: search for more of the text." (lowerFirst .Plural)) }}</p>
+                    }
+                    if let Some(message) = pick.refused {
+                        <p class="field-error">(message)</p>
+                    }
+                },
+                None => <input id=(control.id.clone()) name=(control.name.clone()) type="text" value=(held) required=(control.required) aria-invalid=(invalid)>,
+            }
+        </div>
+    })
+}
+{{- end }}
 {{- if $m.UsesTrail . }}
 
 {{ doc (printf "The label of the item of %s whose %s is `value`, for the console's trail: %s. None when no item has it, its label is blank, or the call is refused or fails." .Target .Value (or (and .Lookup (printf "through %s's lookup with that one value" .Options.Operation)) (printf "from %s" (or (and .Options.Paged (printf "the first page of %s" .Options.Operation)) (printf "the items %s lists" .Options.Operation))))) }}
@@ -295,18 +526,116 @@ pub(crate) async fn {{ .Base }}_target_label(cx: &Cx, value: &str) -> Option<Str
 {{- end }}
 {{- end }}
 {{- range .Forms }}
+{{- $form := . }}
 
-{{ doc (printf "The options of each control of `%s` that refers to an item, by its path, under `choices`, the app's, which win where they name the control: %s. A control keeps its own when the caller may not list the items, or more follow than a page holds." .Form .SitesText) }}
-pub async fn {{ .Fn }}(cx: &Cx, choices: Choices) -> Choices {
+{{ doc (printf "The options of each control of `%s` that refers to an item, by its path, under `choices`, the app's, which win where they name the control: %s.%s" .Form .SitesText (or (and .Picks (printf " A picker's control has its pick by its name, from `form`: the items its text finds, %s, the values held among them (D61, amended). A control keeps its own when the caller may not list the items, and one that does not pick when more follow than a page holds." (or (and .Get "as the query sends it") "as the post sends it, the text of the picker whose \"Find\" it pressed searched past the request's `MAX_LOOKUP_CALLS`"))) " A control keeps its own when the caller may not list the items, or more follow than a page holds.")) }}
+pub async fn {{ .Fn }}(cx: &Cx, form: &{{ .Form }}, choices: Choices) -> Choices {
+{{- if not .Picks }}
+    let _ = form;
+{{- end }}
     let mut found = Choices::new();
-{{- range .Sites }}
+{{- range .ChoiceSites }}
     if !named(&choices, {{ rustString .Path }})
         && let Some(options) = {{ .Source.Base }}_target_choices(cx).await
     {
         found = found.with({{ rustString .Path }}, pairs(&options));
     }
 {{- end }}
+{{- range .PickGroups }}
+    {
+        // Each picker of {{ .Source.Target }}, the value it holds, that the app's choices do not name.
+        let mut controls: Vec<(String, Option<String>)> = Vec::new();
+{{- range .Sites }}
+        if !named(&choices, {{ rustString .Path }}) {
+{{ .ControlsLines 3 }}
+        }
+{{- end }}
+        let wanted: Vec<(String, String, bool)> = controls
+            .iter()
+            .map(|(name, value)| (value.clone().unwrap_or_default(), form.finds.text(name).to_owned(), {{ if $form.Get }}false{{ else }}form.finds.pressed(name){{ end }}))
+            .collect();
+        for ((name, _), pick) in controls.into_iter().zip({{ .Source.Base }}_target_picks(cx, &wanted).await) {
+            if let Some(pick) = pick {
+                found = found.with_pick(name, pick);
+            }
+        }
+    }
+{{- end }}
     choices.or(found)
+}
+{{- end }}
+{{- if .PickControlled }}
+
+/// Adds a layer on the shard of each picker whose options operation's route
+/// has a rate limit or a timeout, which the shard meets as the route's
+/// request does (D61, amended){{ if .PicksUse "rate_limit" }}: each rate limit is the operation's limiter in
+/// `limits`, the app's registry, which its JSON API route, its procedure
+/// and the pages take from too (D44, amended){{ end }}. `{{ $crate.SetupMethod }}` calls it.
+pub(crate) fn route_controls(router: RouterBuilder{{ if .PicksUse "rate_limit" }}, limits: &RateLimits{{ end }}) -> RouterBuilder {
+    router
+{{- range .PickControlled }}
+        .layer(PickControls {
+            path: Path::new({{ rustString (.PickPath $crate.SchemaName) }}),
+            rate_limit: {{ .RateLimitExpr }},
+            rate_from: {{ .RateFromExpr }},
+            timeout: {{ .TimeoutExpr }},
+        })
+{{- end }}
+}
+
+/// The rate limit and the timeout a picker's shard meets: its options
+/// operation's limiter, which counts each client by its address as Topcoat
+/// reads it (`client_key`), the key the route reads too, and the timeout
+/// around the shard. A refusal is the route's 429, with `Retry-After`, or
+/// its 504, as a page's is.
+struct PickControls {
+    path: &'static Path,
+    rate_limit: Option<Arc<RateLimiter>>,
+    /// The limiter of an API dependency's options operation (D61, amended),
+    /// which its crate's setup holds in the app context: taken at the
+    /// request, none when the app does not set the crate up.
+    rate_from: Option<LimiterFrom>,
+    timeout: Option<Duration>,
+}
+
+/// How a shard takes an API dependency's operation's limiter at a request.
+type LimiterFrom = fn(&Cx) -> Option<Arc<RateLimiter>>;
+
+impl Layer for PickControls {
+    fn path(&self) -> Option<&Path> {
+        Some(self.path)
+    }
+
+    fn handle<'a>(&'a self, cx: &'a Cx, body: Body, next: Next<'a>) -> LayerFuture<'a> {
+        Box::pin(async move {
+            let limiter = self.rate_limit.clone().or_else(|| self.rate_from.and_then(|from| from(cx)));
+            if let Some(limiter) = limiter
+                && let Err(retry_after) = limiter.take(&crate::client_key(cx))
+            {
+                let mut response = pick_refusal(&ApiError::too_many_requests("Too Many Requests"));
+                response.headers_mut().insert(header::RETRY_AFTER, retry_after.into());
+                return Ok(response);
+            }
+            match self.timeout {
+                Some(timeout) => match tokio::time::timeout(timeout, next.run(cx, body)).await {
+                    Ok(response) => response,
+                    Err(_) => Ok(pick_refusal(&ApiError::gateway_timeout("Gateway Timeout"))),
+                },
+                None => next.run(cx, body).await,
+            }
+        })
+    }
+}
+
+/// A route control's refusal as a picker's shard answers it: its status,
+/// and its message in the place of the picker.
+fn pick_refusal(err: &ApiError) -> Response {
+    let message = err.message.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
+    let html = format!(r#"<p class="field-error" data-status="{}">{message}</p>"#, err.status.as_str());
+    let mut response = Response::new(Body::from(html));
+    *response.status_mut() = err.status;
+    response.headers_mut().insert(header::CONTENT_TYPE, HeaderValue::from_static("text/html; charset=utf-8"));
+    response
 }
 {{- end }}
 {{- range .Records }}

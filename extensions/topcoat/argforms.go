@@ -35,8 +35,11 @@ type argForm struct {
 	Input *argInput
 	// Paged marks a @paginated operation's form (D60): it holds the page
 	// asked for, `cursor` and `limit`, as the query sends them, renders no
-	// control for either, and reads them by the route's rules.
+	// control for either, and reads them by the route's rules. Sort is a
+	// sorted one's sort (D60, amended), which it holds the same way, nil
+	// for an unsorted one.
 	Paged bool
+	Sort  *argSort
 	// ServiceOnly marks the form of an operation whose route admits only a
 	// service caller (@requireService): it has `submit_as(cx, service)`,
 	// which calls it through operations::as_service, in place of
@@ -48,6 +51,37 @@ type argForm struct {
 	Choosable bool
 	UsesForm  bool
 	Body      string
+	// Picks reports whether a control, an argument's or its input's, is a
+	// search picker (D61, amended): the form holds every picker's text in
+	// finds, and a post's "Find" acts on it as a row button does.
+	Picks bool
+}
+
+// Hidden reports whether the component renders a hidden submit button
+// ahead of every other, which Enter presses: ahead of its input's row
+// buttons, or of a picker's "Find".
+func (f argForm) Hidden() bool { return f.Rows() || f.Picks }
+
+// Acts reports whether a button other than the submit acts on the form, so
+// it has apply_action: its input's row buttons, or a post's "Find". A
+// filter's "Find" sends its query.
+func (f argForm) Acts() bool { return f.Rows() || f.Picks && !f.IsGet() }
+
+// InputActs reports whether its input's form has apply_action, which the
+// argument form's applies, the input reading the button pressed.
+func (f argForm) InputActs() bool { return f.Input != nil && f.Input.Struct.Acts() }
+
+// OwnAction reports whether the form reads the button pressed itself,
+// row_action: a post whose "Find" acts on it, and whose input does not
+// read it.
+func (f argForm) OwnAction() bool { return f.Acts() && !f.InputActs() }
+
+// argSort is the sort of a sorted operation's form (D60, amended): the
+// query parameter its SortBy argument names, and the form's field, which
+// holds it as sent.
+type argSort struct {
+	Param string // sort
+	Field string // sort
 }
 
 // argInput is the input form an argument form embeds.
@@ -216,6 +250,9 @@ func (s schemaSet) argForm(e registry.RustEndpoint, op *ir.FieldDef, inputs map[
 		// The form of a @requireService operation submits as a service.
 		ServiceOnly: o.ServiceOnly,
 	}
+	if e.Page != nil && e.Page.Sort != nil {
+		f.Sort = &argSort{Param: e.Page.Sort.Param, Field: registry.RustIdentifier(e.Page.Sort.Param, "sort")}
+	}
 	// The input's fields and the arguments share the form's names.
 	names := map[string]string{}
 	if input := e.Input; input != nil {
@@ -227,6 +264,11 @@ func (s schemaSet) argForm(e registry.RustEndpoint, op *ir.FieldDef, inputs map[
 		f.Input = &argInput{Struct: st, Optional: !input.Required}
 		for _, field := range st.Fields {
 			names[field.JSONName] = "its input's field " + field.JSONName
+		}
+		if f.Sort != nil {
+			if other, taken := names[f.Sort.Param]; taken {
+				return argForm{}, fmt.Sprintf("its sort, %s, and %s share a form field's name", f.Sort.Param, other), nil
+			}
 		}
 		if st.Rows {
 			names[rowActionName] = "the name of its input's row buttons"
@@ -262,10 +304,17 @@ func (s schemaSet) argForm(e registry.RustEndpoint, op *ir.FieldDef, inputs map[
 	}
 	// The search text is the form's first control (D62).
 	sort.SliceStable(f.Fields, func(i, j int) bool { return f.Fields[i].Search && !f.Fields[j].Search })
-	r := newFormRenderer()
-	r.arguments(f, 2)
-	f.Choosable, f.UsesForm, f.Body = r.choosable, r.used["form"], r.String()
+	f.render(nil)
 	return f, "", nil
+}
+
+// render writes the form's view, picks the search pickers by the paths
+// of their controls (D61, amended).
+func (f *argForm) render(picks map[string]pickRender) {
+	r := newFormRenderer()
+	r.picks = picks
+	r.arguments(*f, 2)
+	f.Choosable, f.UsesForm, f.Body = r.choosable, r.used["form"], r.String()
 }
 
 // argField builds the field of one argument. Its control and attributes

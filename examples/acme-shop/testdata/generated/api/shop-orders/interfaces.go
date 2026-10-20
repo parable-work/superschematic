@@ -17,8 +17,8 @@ import (
 type OrderImplementation interface {
 	// ListOrders handles GET /api/orders
 	//
-	// The caller's orders, or every customer's for staff, oldest first.
-	// They are ordered by when each was placed, then by their ids.
+	// The caller's orders, or every customer's for staff, oldest first:
+	// by when each was placed, or by its total with sort, then by their ids.
 	//
 	// This endpoint pages its list (@paginated): page is the request's cursor,
 	// "" for the first page, and its limit, 1 to 100 (20 when the request
@@ -26,6 +26,10 @@ type OrderImplementation interface {
 	// order and, while more follow, the cursor of the last one: read up to
 	// page.Limit+1 rows and build the page with paging.FromRows, and read the
 	// cursor back with paging.DecodeCursor, which refuses one it cannot read.
+	// page.Sort is the order to read them in (D60, amended), placedAt when the
+	// request sends none: a field of placedAt, totalCents, descending when page.Sort.Desc,
+	// ties broken by id in the same direction. The cursor is your own key's;
+	// the route binds it to the sort and back.
 	ListOrders(ctx context.Context, statuses []types.OrderStatus, page paging.Request) (paging.Page[types.OrderView], error)
 	// PlaceOrder handles POST /api/orders
 	PlaceOrder(ctx context.Context, input *types.PlaceOrderInput) (*types.OrderView, error)
@@ -48,8 +52,10 @@ type OrderImplementation interface {
 type ProductCatalogImplementation interface {
 	// ListProducts handles GET /api/products
 	//
-	// The products, by name, then by id; ids narrows them to the products
-	// with those ids, the lookup a page names its products' ids through.
+	// The products, by name, or by price with sort, then by id; ids narrows
+	// them to the products with those ids, the lookup a page names its
+	// products' ids through, and q to those whose name holds each of its
+	// words, the search a product picker finds them by.
 	//
 	// This endpoint pages its list (@paginated): page is the request's cursor,
 	// "" for the first page, and its limit, 1 to 100 (20 when the request
@@ -57,7 +63,11 @@ type ProductCatalogImplementation interface {
 	// order and, while more follow, the cursor of the last one: read up to
 	// page.Limit+1 rows and build the page with paging.FromRows, and read the
 	// cursor back with paging.DecodeCursor, which refuses one it cannot read.
-	ListProducts(ctx context.Context, ids []types.IdentityUUID, page paging.Request) (paging.Page[types.ProductView], error)
+	// page.Sort is the order to read them in (D60, amended), name when the
+	// request sends none: a field of name, priceCents, descending when page.Sort.Desc,
+	// ties broken by id in the same direction. The cursor is your own key's;
+	// the route binds it to the sort and back.
+	ListProducts(ctx context.Context, ids []types.IdentityUUID, q *string, page paging.Request) (paging.Page[types.ProductView], error)
 	// GetProduct handles GET /api/products/{productId}
 	//
 	// One product. Its parameter is productId, as the reviews' routes name
@@ -70,9 +80,9 @@ type ProductCatalogImplementation interface {
 type ProductReviewsImplementation interface {
 	// ListReviews handles GET /api/products/{productId}/reviews
 	//
-	// The product's reviews, oldest first: by when each was written, then by
-	// its id. q keeps the reviews whose title or body holds each of its
-	// words.
+	// The product's reviews, oldest first: by when each was written, or by
+	// its rating with sort, then by its id. q keeps the reviews whose title
+	// or body holds each of its words.
 	//
 	// This endpoint pages its list (@paginated): page is the request's cursor,
 	// "" for the first page, and its limit, 1 to 50 (20 when the request
@@ -80,6 +90,10 @@ type ProductReviewsImplementation interface {
 	// order and, while more follow, the cursor of the last one: read up to
 	// page.Limit+1 rows and build the page with paging.FromRows, and read the
 	// cursor back with paging.DecodeCursor, which refuses one it cannot read.
+	// page.Sort is the order to read them in (D60, amended), createdAt when the
+	// request sends none: a field of createdAt, rating, descending when page.Sort.Desc,
+	// ties broken by id in the same direction. The cursor is your own key's;
+	// the route binds it to the sort and back.
 	ListReviews(ctx context.Context, productId types.IdentityUUID, minRating *float64, q *string, page paging.Request) (paging.Page[types.ReviewView], error)
 	// WriteReview handles POST /api/products/{productId}/reviews
 	WriteReview(ctx context.Context, productId types.IdentityUUID, input *types.WriteReviewInput) (*types.ReviewView, error)

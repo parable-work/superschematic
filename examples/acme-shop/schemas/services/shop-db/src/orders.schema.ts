@@ -47,6 +47,13 @@ export abstract class Order extends Auditable {
   // Why the order was cancelled, when it was.
   cancelReason: Nullable<Validate<string, { maxLength: 500 }>>;
 
+  // The sum of each line's quantity times its unit price, written when the
+  // order is placed: its lines do not change after. A migration plan adds
+  // the column with neither a SQL default nor a backfill, so a database
+  // holding orders from before it is purged rather than migrated
+  // (README.md).
+  totalCents: Generic.Int64;
+
   lines: HasMany<OrderLine>;
 }
 

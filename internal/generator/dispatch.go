@@ -1199,6 +1199,41 @@ func RustAPIOf(c registry.GenerateContext) (*rustrestgen.APIOutput, error) {
 	return output, err
 }
 
+// RustAPIOfService is the Rust REST API crate the api generator writes for
+// service, a dependency of the run's schema, as that service's own build
+// makes it: a run of the service, from LoadDependency and
+// Options.LoadDependencyConfig, as a stack's server builds the API it
+// serves (servedRun). It is nil when the service's config generates no API
+// server, its server is not Rust, or its schema has no operations. An
+// extension that calls a dependency's crate in-process, the Topcoat crate
+// of an API that hosts another's (D61, amended), reads its operations here.
+func RustAPIOfService(c registry.GenerateContext, service string) (*rustrestgen.APIOutput, error) {
+	r := run{c}
+	if r.Options.LoadDependencyConfig == nil {
+		return nil, fmt.Errorf("generator: the Rust API of %s: the build reads no dependency's config", service)
+	}
+	schema, err := r.LoadDependency(service)
+	if err != nil {
+		return nil, fmt.Errorf("generator: the Rust API of %s: %w", service, err)
+	}
+	cfg, err := r.Options.LoadDependencyConfig(service)
+	if err != nil {
+		return nil, fmt.Errorf("generator: the Rust API of %s: %w", service, err)
+	}
+	outputs, err := registry.ParseOutputs(cfg.Outputs, r.Registry)
+	if err != nil {
+		return nil, fmt.Errorf("schema config for %s: %w", service, err)
+	}
+	if !outputs.APIEnabled() || outputs.API.Language != registry.APILanguageRust {
+		return nil, nil
+	}
+	opts := r.Options
+	opts.Stage = registry.StageAll
+	served, _ := newRun(schema, cfg, outputs, opts, r.Registry)
+	output, _, err := served.rustAPI()
+	return output, err
+}
+
 // rustAPI is the Rust REST API crate of the run's schema, with its Deps,
 // and the env config it writes beside it, src/config.rs: the @envVars
 // settings and every field a stack sets for the API, its derived fields,

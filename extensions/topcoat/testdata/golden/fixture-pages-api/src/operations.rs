@@ -10,21 +10,22 @@
 //!
 //! A call does not apply the route's traffic controls (@rateLimit,
 //! @bodyLimit, @timeout): the page that makes it is a route of the app,
-//! under the controls the app gives it.
+//! under the controls the app gives it. It reads what the app keeps for
+//! the crate (`setup`): an app that does not host fixture-pages-api, whose
+//! router builder calls neither `fixture_pages_api` nor `fixture_pages_api_without_api`,
+//! gets the 500 (D61, amended).
 
 #![allow(unused_imports)]
 
-use crate::Setup;
 use crate::api::operations;
 use crate::api::runtime::{ApiError, Principal};
 use crate::api::types;
-use topcoat::context::{Cx, app_context};
+use topcoat::context::Cx;
 
 /// document.listDocuments (`GET /api/documents`): Every document.
 pub async fn document_list_documents(cx: &Cx) -> Result<Vec<types::Document>, ApiError> {
     let caller = can_document_list_documents(cx).await?;
-    let setup: &Setup = app_context(cx);
-    setup
+    crate::setup(cx)?
         .implementations
         .document
         .list_documents(operations::DOCUMENT_LIST_DOCUMENTS.context(caller))
@@ -35,8 +36,7 @@ pub async fn document_list_documents(cx: &Cx) -> Result<Vec<types::Document>, Ap
 pub async fn document_create_document(cx: &Cx, args: crate::api::DocumentCreateDocumentArgs) -> Result<types::Document, ApiError> {
     let caller = can_document_create_document(cx).await?;
     args.check()?;
-    let setup: &Setup = app_context(cx);
-    setup
+    crate::setup(cx)?
         .implementations
         .document
         .create_document(operations::DOCUMENT_CREATE_DOCUMENT.context(caller), args)
@@ -46,8 +46,7 @@ pub async fn document_create_document(cx: &Cx, args: crate::api::DocumentCreateD
 /// document.listDrafts (`GET /api/documents/drafts`): The documents not yet published, a collection whose path extends
 pub async fn document_list_drafts(cx: &Cx) -> Result<Vec<types::Document>, ApiError> {
     let caller = can_document_list_drafts(cx).await?;
-    let setup: &Setup = app_context(cx);
-    setup
+    crate::setup(cx)?
         .implementations
         .document
         .list_drafts(operations::DOCUMENT_LIST_DRAFTS.context(caller))
@@ -58,8 +57,7 @@ pub async fn document_list_drafts(cx: &Cx) -> Result<Vec<types::Document>, ApiEr
 pub async fn document_clear_comments(cx: &Cx, args: crate::api::DocumentClearCommentsArgs) -> Result<Vec<types::Comment>, ApiError> {
     let caller = can_document_clear_comments(cx).await?;
     args.check()?;
-    let setup: &Setup = app_context(cx);
-    setup
+    crate::setup(cx)?
         .implementations
         .document
         .clear_comments(operations::DOCUMENT_CLEAR_COMMENTS.context(caller), args)
@@ -70,8 +68,7 @@ pub async fn document_clear_comments(cx: &Cx, args: crate::api::DocumentClearCom
 pub async fn document_list_comments(cx: &Cx, args: crate::api::DocumentListCommentsArgs) -> Result<Vec<types::Comment>, ApiError> {
     let caller = can_document_list_comments(cx).await?;
     args.check()?;
-    let setup: &Setup = app_context(cx);
-    setup
+    crate::setup(cx)?
         .implementations
         .document
         .list_comments(operations::DOCUMENT_LIST_COMMENTS.context(caller), args)
@@ -82,8 +79,7 @@ pub async fn document_list_comments(cx: &Cx, args: crate::api::DocumentListComme
 pub async fn document_replace_comments(cx: &Cx, args: crate::api::DocumentReplaceCommentsArgs) -> Result<Vec<types::Comment>, ApiError> {
     let caller = can_document_replace_comments(cx).await?;
     args.check()?;
-    let setup: &Setup = app_context(cx);
-    setup
+    crate::setup(cx)?
         .implementations
         .document
         .replace_comments(operations::DOCUMENT_REPLACE_COMMENTS.context(caller), args)
@@ -94,8 +90,7 @@ pub async fn document_replace_comments(cx: &Cx, args: crate::api::DocumentReplac
 pub async fn document_get_document(cx: &Cx, args: crate::api::DocumentGetDocumentArgs) -> Result<types::Document, ApiError> {
     let caller = can_document_get_document(cx).await?;
     args.check()?;
-    let setup: &Setup = app_context(cx);
-    setup
+    crate::setup(cx)?
         .implementations
         .document
         .get_document(operations::DOCUMENT_GET_DOCUMENT.context(caller), args)
@@ -106,8 +101,7 @@ pub async fn document_get_document(cx: &Cx, args: crate::api::DocumentGetDocumen
 pub async fn document_replace_document(cx: &Cx, args: crate::api::DocumentReplaceDocumentArgs) -> Result<types::Document, ApiError> {
     let caller = can_document_replace_document(cx).await?;
     args.check()?;
-    let setup: &Setup = app_context(cx);
-    setup
+    crate::setup(cx)?
         .implementations
         .document
         .replace_document(operations::DOCUMENT_REPLACE_DOCUMENT.context(caller), args)
@@ -118,8 +112,7 @@ pub async fn document_replace_document(cx: &Cx, args: crate::api::DocumentReplac
 pub async fn document_remove_cover(cx: &Cx, args: crate::api::DocumentRemoveCoverArgs) -> Result<types::Document, ApiError> {
     let caller = can_document_remove_cover(cx).await?;
     args.check()?;
-    let setup: &Setup = app_context(cx);
-    setup
+    crate::setup(cx)?
         .implementations
         .document
         .remove_cover(operations::DOCUMENT_REMOVE_COVER.context(caller), args)
@@ -129,8 +122,7 @@ pub async fn document_remove_cover(cx: &Cx, args: crate::api::DocumentRemoveCove
 /// member.listMembers (`GET /api/members`): Everyone who works on projects.
 pub async fn member_list_members(cx: &Cx) -> Result<Vec<types::Member>, ApiError> {
     let caller = can_member_list_members(cx).await?;
-    let setup: &Setup = app_context(cx);
-    setup
+    crate::setup(cx)?
         .implementations
         .member
         .list_members(operations::MEMBER_LIST_MEMBERS.context(caller))
@@ -141,8 +133,7 @@ pub async fn member_list_members(cx: &Cx) -> Result<Vec<types::Member>, ApiError
 pub async fn project_list_projects(cx: &Cx, args: crate::api::ProjectListProjectsArgs) -> Result<Vec<types::Project>, ApiError> {
     let caller = can_project_list_projects(cx).await?;
     args.check()?;
-    let setup: &Setup = app_context(cx);
-    setup
+    crate::setup(cx)?
         .implementations
         .project
         .list_projects(operations::PROJECT_LIST_PROJECTS.context(caller), args)
@@ -153,8 +144,7 @@ pub async fn project_list_projects(cx: &Cx, args: crate::api::ProjectListProject
 pub async fn project_create_project(cx: &Cx, args: crate::api::ProjectCreateProjectArgs) -> Result<types::Project, ApiError> {
     let caller = can_project_create_project(cx).await?;
     args.check()?;
-    let setup: &Setup = app_context(cx);
-    setup
+    crate::setup(cx)?
         .implementations
         .project
         .create_project(operations::PROJECT_CREATE_PROJECT.context(caller), args)
@@ -164,8 +154,7 @@ pub async fn project_create_project(cx: &Cx, args: crate::api::ProjectCreateProj
 /// project.listArchivedProjects (`GET /api/projects/archived`): The archived projects, a collection whose path extends the
 pub async fn project_list_archived_projects(cx: &Cx) -> Result<Vec<types::Project>, ApiError> {
     let caller = can_project_list_archived_projects(cx).await?;
-    let setup: &Setup = app_context(cx);
-    setup
+    crate::setup(cx)?
         .implementations
         .project
         .list_archived_projects(operations::PROJECT_LIST_ARCHIVED_PROJECTS.context(caller))
@@ -175,8 +164,7 @@ pub async fn project_list_archived_projects(cx: &Cx) -> Result<Vec<types::Projec
 /// project.listNewProjects (`GET /api/projects/new`): The projects started this week, at a path the projects' new page
 pub async fn project_list_new_projects(cx: &Cx) -> Result<Vec<types::Project>, ApiError> {
     let caller = can_project_list_new_projects(cx).await?;
-    let setup: &Setup = app_context(cx);
-    setup
+    crate::setup(cx)?
         .implementations
         .project
         .list_new_projects(operations::PROJECT_LIST_NEW_PROJECTS.context(caller))
@@ -187,8 +175,7 @@ pub async fn project_list_new_projects(cx: &Cx) -> Result<Vec<types::Project>, A
 pub async fn project_delete_project(cx: &Cx, args: crate::api::ProjectDeleteProjectArgs) -> Result<types::Project, ApiError> {
     let caller = can_project_delete_project(cx).await?;
     args.check()?;
-    let setup: &Setup = app_context(cx);
-    setup
+    crate::setup(cx)?
         .implementations
         .project
         .delete_project(operations::PROJECT_DELETE_PROJECT.context(caller), args)
@@ -199,8 +186,7 @@ pub async fn project_delete_project(cx: &Cx, args: crate::api::ProjectDeleteProj
 pub async fn project_get_project(cx: &Cx, args: crate::api::ProjectGetProjectArgs) -> Result<types::Project, ApiError> {
     let caller = can_project_get_project(cx).await?;
     args.check()?;
-    let setup: &Setup = app_context(cx);
-    setup
+    crate::setup(cx)?
         .implementations
         .project
         .get_project(operations::PROJECT_GET_PROJECT.context(caller), args)
@@ -211,8 +197,7 @@ pub async fn project_get_project(cx: &Cx, args: crate::api::ProjectGetProjectArg
 pub async fn project_update_project(cx: &Cx, args: crate::api::ProjectUpdateProjectArgs) -> Result<types::Project, ApiError> {
     let caller = can_project_update_project(cx).await?;
     args.check()?;
-    let setup: &Setup = app_context(cx);
-    setup
+    crate::setup(cx)?
         .implementations
         .project
         .update_project(operations::PROJECT_UPDATE_PROJECT.context(caller), args)
@@ -223,8 +208,7 @@ pub async fn project_update_project(cx: &Cx, args: crate::api::ProjectUpdateProj
 pub async fn project_archive_project(cx: &Cx, args: crate::api::ProjectArchiveProjectArgs) -> Result<types::Project, ApiError> {
     let caller = can_project_archive_project(cx).await?;
     args.check()?;
-    let setup: &Setup = app_context(cx);
-    setup
+    crate::setup(cx)?
         .implementations
         .project
         .archive_project(operations::PROJECT_ARCHIVE_PROJECT.context(caller), args)
@@ -235,8 +219,7 @@ pub async fn project_archive_project(cx: &Cx, args: crate::api::ProjectArchivePr
 pub async fn project_list_project_deletions(cx: &Cx, args: crate::api::ProjectListProjectDeletionsArgs) -> Result<Vec<types::Comment>, ApiError> {
     let caller = can_project_list_project_deletions(cx).await?;
     args.check()?;
-    let setup: &Setup = app_context(cx);
-    setup
+    crate::setup(cx)?
         .implementations
         .project
         .list_project_deletions(operations::PROJECT_LIST_PROJECT_DELETIONS.context(caller), args)
@@ -247,8 +230,7 @@ pub async fn project_list_project_deletions(cx: &Cx, args: crate::api::ProjectLi
 pub async fn project_list_project_edits(cx: &Cx, args: crate::api::ProjectListProjectEditsArgs) -> Result<Vec<types::Comment>, ApiError> {
     let caller = can_project_list_project_edits(cx).await?;
     args.check()?;
-    let setup: &Setup = app_context(cx);
-    setup
+    crate::setup(cx)?
         .implementations
         .project
         .list_project_edits(operations::PROJECT_LIST_PROJECT_EDITS.context(caller), args)
@@ -258,8 +240,7 @@ pub async fn project_list_project_edits(cx: &Cx, args: crate::api::ProjectListPr
 /// shelf.listShelves (`GET /api/shelves`): Every shelf.
 pub async fn shelf_list_shelves(cx: &Cx) -> Result<Vec<types::Shelf>, ApiError> {
     let caller = can_shelf_list_shelves(cx).await?;
-    let setup: &Setup = app_context(cx);
-    setup
+    crate::setup(cx)?
         .implementations
         .shelf
         .list_shelves(operations::SHELF_LIST_SHELVES.context(caller))
@@ -270,8 +251,7 @@ pub async fn shelf_list_shelves(cx: &Cx) -> Result<Vec<types::Shelf>, ApiError> 
 pub async fn shelf_get_shelf(cx: &Cx, args: crate::api::ShelfGetShelfArgs) -> Result<types::Shelf, ApiError> {
     let caller = can_shelf_get_shelf(cx).await?;
     args.check()?;
-    let setup: &Setup = app_context(cx);
-    setup
+    crate::setup(cx)?
         .implementations
         .shelf
         .get_shelf(operations::SHELF_GET_SHELF.context(caller), args)
@@ -282,8 +262,7 @@ pub async fn shelf_get_shelf(cx: &Cx, args: crate::api::ShelfGetShelfArgs) -> Re
 pub async fn task_list_labelled_tasks(cx: &Cx, args: crate::api::TaskListLabelledTasksArgs) -> Result<Vec<types::Task>, ApiError> {
     let caller = can_task_list_labelled_tasks(cx).await?;
     args.check()?;
-    let setup: &Setup = app_context(cx);
-    setup
+    crate::setup(cx)?
         .implementations
         .task
         .list_labelled_tasks(operations::TASK_LIST_LABELLED_TASKS.context(caller), args)
@@ -294,8 +273,7 @@ pub async fn task_list_labelled_tasks(cx: &Cx, args: crate::api::TaskListLabelle
 pub async fn task_list_tasks(cx: &Cx, args: crate::api::TaskListTasksArgs) -> Result<Vec<types::Task>, ApiError> {
     let caller = can_task_list_tasks(cx).await?;
     args.check()?;
-    let setup: &Setup = app_context(cx);
-    setup
+    crate::setup(cx)?
         .implementations
         .task
         .list_tasks(operations::TASK_LIST_TASKS.context(caller), args)
@@ -306,8 +284,7 @@ pub async fn task_list_tasks(cx: &Cx, args: crate::api::TaskListTasksArgs) -> Re
 pub async fn task_add_task(cx: &Cx, args: crate::api::TaskAddTaskArgs) -> Result<types::Task, ApiError> {
     let caller = can_task_add_task(cx).await?;
     args.check()?;
-    let setup: &Setup = app_context(cx);
-    setup
+    crate::setup(cx)?
         .implementations
         .task
         .add_task(operations::TASK_ADD_TASK.context(caller), args)
@@ -318,8 +295,7 @@ pub async fn task_add_task(cx: &Cx, args: crate::api::TaskAddTaskArgs) -> Result
 pub async fn task_get_task(cx: &Cx, args: crate::api::TaskGetTaskArgs) -> Result<types::Task, ApiError> {
     let caller = can_task_get_task(cx).await?;
     args.check()?;
-    let setup: &Setup = app_context(cx);
-    setup
+    crate::setup(cx)?
         .implementations
         .task
         .get_task(operations::TASK_GET_TASK.context(caller), args)
@@ -329,8 +305,7 @@ pub async fn task_get_task(cx: &Cx, args: crate::api::TaskGetTaskArgs) -> Result
 /// viewer.me (`GET /api/auth/me`): The signed-in caller.
 pub async fn viewer_me(cx: &Cx) -> Result<types::Viewer, ApiError> {
     let caller = can_viewer_me(cx).await?;
-    let setup: &Setup = app_context(cx);
-    setup
+    crate::setup(cx)?
         .implementations
         .viewer
         .me(operations::VIEWER_ME.context(caller))

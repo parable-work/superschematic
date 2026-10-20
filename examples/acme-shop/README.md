@@ -16,7 +16,7 @@ kind, decorators and auth provider.
 | `schemas/services/shop-common` | General: `Price`, `Currency` and the `@strictJSON` `FeedItem`, in all four languages |
 | `schemas/services/shop-db` | DB: users and roles, with the core `User` and `UserRole` traits (D50), products, stock, a row per product with the threshold it is restocked below, restock requests, one open per product, orders and reviews, and the queues `OrderPlaced` and `StockLow`, built for Postgres and SQLite |
 | `schemas/services/shop-api` | API over `shop-db`, served in Go, with Go and TypeScript SDKs: products, and the user model's sign-in and administration routes |
-| `schemas/services/shop-orders` | API over `shop-db`, served in Go and in Rust, with SDKs in Go, TypeScript, Python and Rust; it calls `shop-stock`, which reserves each order's stock as it is placed; its worker `FulfilOrders` fulfils each order placed, from `OrderPlaced`, and its job `ShipOrders` ships the fulfilled ones. A shopper, who holds `orders.read` and `orders.write`, lists, reads and cancels their own orders, another customer's answering 404 (`@requireOwnership`), and staff, who hold `orders.read`, `orders.write` and `orders.any` (or simply `orders`), every customer's: `orders.any` opens no route alone, and since only the implementations check it, it is missing from `permissions.json`, so `identity bootstrap --permission orders.any` warns that it is uncatalogued. Its lists of orders, of a product's reviews and of the catalog page by cursor (D60), an order's lines and the reviews' routes refer to the catalog's products (D61), and the reviews are searched by their words (D62) |
+| `schemas/services/shop-orders` | API over `shop-db`, served in Go and in Rust, with SDKs in Go, TypeScript, Python and Rust; it calls `shop-stock`, which reserves each order's stock as it is placed; its worker `FulfilOrders` fulfils each order placed, from `OrderPlaced`, and its job `ShipOrders` ships the fulfilled ones. A shopper, who holds `orders.read` and `orders.write`, lists, reads and cancels their own orders, another customer's answering 404 (`@requireOwnership`), and staff, who hold `orders.read`, `orders.write` and `orders.any` (or simply `orders`), every customer's: `orders.any` opens no route alone, and since only the implementations check it, it is missing from `permissions.json`, so `identity bootstrap --permission orders.any` warns that it is uncatalogued. Its lists of orders, of a product's reviews and of the catalog page by cursor (D60), each in a sort (D60, amended), an order's lines and the reviews' routes refer to the catalog's products (D61), and the reviews and the products are searched by their words (D62) |
 | `schemas/services/shop-stock` | API over `shop-db`'s stock, served in Rust (D57), with Go and Rust SDKs: anyone lists the stock, staff with `stock.write` set a product's level and its threshold, and only `shop-orders`' server reserves stock (`@requireService`), for a shopper with `orders.write` it forwards; a reservation that takes a level below its threshold enqueues `StockLow`, from which its Rust worker `ReorderStock` files a restock request, and its Rust job `OrderRestocks` orders the open ones (D65) |
 | `schemas/services/shop-storefront` | API served in TypeScript, with a TypeScript SDK; uses `Price` |
 | `schemas/services/shop-web` | Site: the shop's static site, which calls `shop-api` from the browser (D55) |
@@ -83,9 +83,10 @@ cd topcoat && cargo run
 It serves `http://127.0.0.1:3000`, each page linking to the others:
 
 - `/orders/new` places an order: a row per line, each line's product a
-  select of the products `listProducts` lists (the app's catalog, its one
-  product, an anvil), buttons that add and remove lines without
-  JavaScript, and the shipping address;
+  picker of the products `listProducts` finds by their names (the app's
+  catalog, its one product, an anvil), a search box, its "Find" button and
+  a select, buttons that add and remove lines without JavaScript, and the
+  shipping address;
 - `/orders` lists the shopper's own orders, filtered by status through a
   GET form, 20 a page, or the `limit` its query gives, with a link to each
   order's page and links to the next page and back to the first;
@@ -97,10 +98,33 @@ It serves `http://127.0.0.1:3000`, each page linking to the others:
 - `/console` is the console the crate generates: the orders and the
   products a page at a time, with links to the next, the previous and the
   first page and a choice of page size, an order's and a product's pages,
-  and a product's reviews with a search box. Its lists are live
+  and a product's reviews with a search box, each table's sortable
+  columns' headers linking it in their order. Its lists are live
   (`pages_live` in `superschematic.toml`): with Topcoat's runtime loaded,
-  a filter, a search, a page's links and its size render the list again
-  in place.
+  a filter, a search, a header, a page's links and its size render the
+  list again in place.
+
+`shop-orders`' lists sort by an argument, `sort` (`SortBy`, D60 amended):
+the orders by `placedAt`, the default, or `totalCents`, the products by
+`name`, the default, or `priceCents`, and a product's reviews by
+`createdAt`, the default, or `rating`, each ascending or, after a `-`,
+descending, ties broken by id. An order stores its total when it is
+placed, so its table orders by it. `shop-db`'s migration plan adds
+`total_cents` as a required column with no default and no backfill: a
+schema's `Default` fills in the decoders' value, not the column's, and a
+backfill is a migration written by hand, which `stack dev` does not run.
+So a database that already holds orders cannot take the column; the step
+fails on its first order. Purge a `Dev` environment made before it: run
+`superschematic stack dev --remove-data` once, which removes its
+containers and their data as it stops, after the failed migration too,
+then run `stack dev` again. A `shop.db` made before it is deleted and
+planned anew ([The Topcoat app on SQLite](#the-topcoat-app-on-sqlite)).
+The Go implementation reads each page through the ORM's `FindPage`, and
+the Rust one sorts in memory and over SQLite; a cursor holds the id of
+the page's last row and the sort it was returned under, and one sent with
+another sort is refused with 400. `listProducts` also takes a search,
+`q`, which finds products by their names, so the order forms' product
+controls are pickers.
 
 `shop-db` titles `OrderStatus.Fulfilled` "Picked and packed"
 (`/** @title Picked and packed */` on the member), so the orders' filters
@@ -177,7 +201,9 @@ file, unless an earlier run added them, as a shop's own flows would. Each
 run also rewrites the `shopper` and `staff` roles to the permissions they
 grant now, so a `shop.db` made before staff held `orders.any`, whose
 `shopper` role grants all of `orders` and so every customer's orders,
-needs only the app started on it again.
+needs only the app started on it again. A `shop.db` that holds orders
+from before an order stored its total does not migrate (`total_cents` has
+no default to give them): delete it and apply the plan to a new file.
 
 ### The wishlist, on SQLite and on D1
 

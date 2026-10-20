@@ -3,6 +3,7 @@
 package orm
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -154,6 +155,14 @@ type ArrayStringFilter struct {
 	Overlaps []string
 	Eq       []string
 }
+
+// ErrPageKey is FindPage's error for an After that holds no primary key, or
+// whose row no longer exists in an order by a sort field, which reads the
+// row's value from the table (D60, amended). A key of another order is not
+// one: a key is a row's primary key alone, the same in every order, so a
+// cursor of another sort is refused before the ORM reads it, by the router
+// that binds a cursor to its sort.
+var ErrPageKey = errors.New("orm: the page key names no row of its sort")
 
 // ========================================
 // Type-Safe Field Selectors and Options
@@ -312,6 +321,88 @@ type TenantFindOptions struct {
 	IncludeDeleted bool
 }
 
+// TenantSortField is a field FindPage orders Tenant rows by, by its
+// schema name (D60, amended): its primary key, or a column of one value of
+// text, a number or a time.
+type TenantSortField string
+
+const (
+	TenantSortById        TenantSortField = "id"
+	TenantSortByCreatedAt TenantSortField = "createdAt"
+	TenantSortByName      TenantSortField = "name"
+	TenantSortBySlug      TenantSortField = "slug"
+	TenantSortByEmail     TenantSortField = "email"
+	TenantSortBySeatCount TenantSortField = "seatCount"
+)
+
+// TenantSort is the order FindPage reads Tenant rows in: Field,
+// ascending, or descending when Desc; ties break by id in the same
+// direction. The zero value orders by id, ascending.
+type TenantSort struct {
+	Field TenantSortField
+	Desc  bool
+}
+
+// ParseTenantSort reads a sort as a page request writes it, "createdAt" or
+// "-createdAt": an error for a field Tenant cannot be sorted by.
+func ParseTenantSort(text string) (TenantSort, error) {
+	parsed := TenantSort{Field: TenantSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
+	switch parsed.Field {
+	case TenantSortById, TenantSortByCreatedAt, TenantSortByName, TenantSortBySlug, TenantSortByEmail, TenantSortBySeatCount:
+		return parsed, nil
+	}
+	return TenantSort{}, fmt.Errorf("orm: Tenant sorts by id, createdAt, name, slug, email and seatCount, not %q", text)
+}
+
+// TenantPageKey is the position of a Tenant row in a FindPage order: the
+// row's id, as a cursor holds it, {"id": ...}. FindPage reads the row's
+// value of its sort field from the table, so a key is the same in every order
+// and its length is the id's, whatever the row holds (D60, amended).
+type TenantPageKey struct {
+	Id types.IdentityUUID `json:"id"`
+}
+
+// arg is the key's id as the repository writes its column. A key without
+// one is ErrPageKey.
+func (k *TenantPageKey) arg() (any, error) {
+	var zeroKey types.IdentityUUID
+	if k.Id == zeroKey {
+		return nil, fmt.Errorf("%w: the Tenant key holds no id", ErrPageKey)
+	}
+	return k.Id.ToUUID(), nil
+}
+
+// tenantPageKeyOf is row's key: its id.
+func tenantPageKeyOf(row *types.Tenant) *TenantPageKey {
+	key := &TenantPageKey{}
+	if row.Id != nil {
+		key.Id = *row.Id
+	}
+	return key
+}
+
+// TenantPageOptions are FindPage's options.
+type TenantPageOptions struct {
+	// Fields specifies which fields to select, as FindMany's do; zero is an
+	// error. A page reads the id too, which Next holds.
+	Fields TenantFields
+	// Sort is the order the rows are read in.
+	Sort TenantSort
+	// After is the key of the last row of the page before, nil for the first page.
+	After *TenantPageKey
+	// Limit is the rows a page holds: 1 or more, 100 when 0.
+	Limit int
+	// IncludeDeleted includes soft-deleted records in results (default false)
+	IncludeDeleted bool
+}
+
+// TenantPage is a page of Tenant rows in FindPage's order: at most
+// Limit rows, and Next, the key of the last of them, when more rows follow.
+type TenantPage struct {
+	Rows []*types.Tenant
+	Next *TenantPageKey
+}
+
 // TenantHistoryOptions contains options for Tenant version history reads.
 type TenantHistoryOptions struct {
 	// Limit limits the number of results (default 100)
@@ -444,6 +535,84 @@ type TenantUserFindOptions struct {
 	Offset int
 	// IncludeDeleted includes soft-deleted records in results (default false)
 	IncludeDeleted bool
+}
+
+// TenantUserSortField is a field FindPage orders TenantUser rows by, by its
+// schema name (D60, amended): its primary key, or a column of one value of
+// text, a number or a time.
+type TenantUserSortField string
+
+const (
+	TenantUserSortById        TenantUserSortField = "id"
+	TenantUserSortByCreatedAt TenantUserSortField = "createdAt"
+)
+
+// TenantUserSort is the order FindPage reads TenantUser rows in: Field,
+// ascending, or descending when Desc; ties break by id in the same
+// direction. The zero value orders by id, ascending.
+type TenantUserSort struct {
+	Field TenantUserSortField
+	Desc  bool
+}
+
+// ParseTenantUserSort reads a sort as a page request writes it, "createdAt" or
+// "-createdAt": an error for a field TenantUser cannot be sorted by.
+func ParseTenantUserSort(text string) (TenantUserSort, error) {
+	parsed := TenantUserSort{Field: TenantUserSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
+	switch parsed.Field {
+	case TenantUserSortById, TenantUserSortByCreatedAt:
+		return parsed, nil
+	}
+	return TenantUserSort{}, fmt.Errorf("orm: TenantUser sorts by id and createdAt, not %q", text)
+}
+
+// TenantUserPageKey is the position of a TenantUser row in a FindPage order: the
+// row's id, as a cursor holds it, {"id": ...}. FindPage reads the row's
+// value of its sort field from the table, so a key is the same in every order
+// and its length is the id's, whatever the row holds (D60, amended).
+type TenantUserPageKey struct {
+	Id types.IdentityUUID `json:"id"`
+}
+
+// arg is the key's id as the repository writes its column. A key without
+// one is ErrPageKey.
+func (k *TenantUserPageKey) arg() (any, error) {
+	var zeroKey types.IdentityUUID
+	if k.Id == zeroKey {
+		return nil, fmt.Errorf("%w: the TenantUser key holds no id", ErrPageKey)
+	}
+	return k.Id.ToUUID(), nil
+}
+
+// tenantUserPageKeyOf is row's key: its id.
+func tenantUserPageKeyOf(row *types.TenantUser) *TenantUserPageKey {
+	key := &TenantUserPageKey{}
+	if row.Id != nil {
+		key.Id = *row.Id
+	}
+	return key
+}
+
+// TenantUserPageOptions are FindPage's options.
+type TenantUserPageOptions struct {
+	// Fields specifies which fields to select, as FindMany's do; zero is an
+	// error. A page reads the id too, which Next holds.
+	Fields TenantUserFields
+	// Sort is the order the rows are read in.
+	Sort TenantUserSort
+	// After is the key of the last row of the page before, nil for the first page.
+	After *TenantUserPageKey
+	// Limit is the rows a page holds: 1 or more, 100 when 0.
+	Limit int
+	// IncludeDeleted includes soft-deleted records in results (default false)
+	IncludeDeleted bool
+}
+
+// TenantUserPage is a page of TenantUser rows in FindPage's order: at most
+// Limit rows, and Next, the key of the last of them, when more rows follow.
+type TenantUserPage struct {
+	Rows []*types.TenantUser
+	Next *TenantUserPageKey
 }
 
 // TenantUserHistoryOptions contains options for TenantUser version history reads.

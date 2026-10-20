@@ -1133,6 +1133,9 @@ func (w *walker) fieldFromProperty(member *astNode) (*ir.FieldDef, *SchemaError)
 	if info.search {
 		return nil, errorAtNode(prop.Type, "SearchQuery marks an operation's argument; a field is no search")
 	}
+	if info.sortBy != nil {
+		return nil, errorAtNode(prop.Type, "SortBy marks an operation's argument; a field is no sort")
+	}
 	fd.References = info.references
 	applyValidateConfig(info.validate, fd)
 
@@ -1385,6 +1388,10 @@ func (w *walker) walkTypeAlias(node *astNode) {
 			w.addErr(errorAtNode(sig.Type, "SearchQuery marks an operation's argument; a field is no search"))
 			continue
 		}
+		if info.sortBy != nil {
+			w.addErr(errorAtNode(sig.Type, "SortBy marks an operation's argument; a field is no sort"))
+			continue
+		}
 		optional := sig.PostfixToken != nil && sig.PostfixToken.Kind == kindQuestionToken
 		td.Fields = append(td.Fields, &ir.FieldDef{
 			Name:       m.Name().Text(),
@@ -1452,7 +1459,7 @@ func (w *walker) walkOperationSet(node *astNode, name string, decorators []decor
 			w.addErr(errorAtNode(m, "operation sets may only contain methods"))
 			continue
 		}
-		op, opDecorators, serr := w.operationFromMethod(m)
+		op, opDecorators, serr := w.operationFromMethod(name, m)
 		if serr != nil {
 			w.addErr(serr)
 			continue
@@ -1485,7 +1492,7 @@ func (w *walker) walkOperationSet(node *astNode, name string, decorators []decor
 // FieldDef, and returns the method's decorators for diagnostics that point
 // at one of them. Every operation carries its HTTP method explicitly via
 // @rest; there is no Queries-versus-Mutations inference in v2.
-func (w *walker) operationFromMethod(m *astNode) (*ir.FieldDef, []decoratorRef, *SchemaError) {
+func (w *walker) operationFromMethod(setName string, m *astNode) (*ir.FieldDef, []decoratorRef, *SchemaError) {
 	method := m.AsMethodDeclaration()
 	if method.Type == nil {
 		return nil, nil, errorAtNode(m, "operations must declare an explicit return type")
@@ -1498,6 +1505,9 @@ func (w *walker) operationFromMethod(m *astNode) (*ir.FieldDef, []decoratorRef, 
 
 	if info.search {
 		return nil, nil, errorAtNode(method.Type, "SearchQuery marks an operation's argument, not its result")
+	}
+	if info.sortBy != nil {
+		return nil, nil, errorAtNode(method.Type, "SortBy marks an operation's argument, not its result")
 	}
 	// A reference on the result is the loader's refusal, in every form.
 	op := &ir.FieldDef{
@@ -1530,9 +1540,15 @@ func (w *walker) operationFromMethod(m *astNode) (*ir.FieldDef, []decoratorRef, 
 
 	if method.Parameters != nil {
 		for _, p := range method.Parameters.Nodes {
-			arg, serr := w.argumentFromParameter(p)
+			arg, sortItem, serr := w.argumentFromParameter(p)
 			if serr != nil {
 				return nil, nil, serr
+			}
+			// Only this form names the item a sort sorts, so this check is
+			// the reader's; the loader holds the fields to the result's item.
+			if sortItem != "" && sortItem != op.TypeRef.Name {
+				return nil, nil, errorAtNode(p.AsParameterDeclaration().Type, "%s.%s: SortBy<%s, …> sorts %s, and %s lists %s",
+					setName, op.Name, sortItem, sortItem, op.Name, op.TypeRef.Name)
 			}
 			op.Arguments = append(op.Arguments, arg)
 		}
@@ -1540,20 +1556,21 @@ func (w *walker) operationFromMethod(m *astNode) (*ir.FieldDef, []decoratorRef, 
 	return op, decorators, nil
 }
 
-// argumentFromParameter converts one method parameter into an ArgumentDef.
-// Older schema files may prefix intentionally-unused stub parameters with "_";
+// argumentFromParameter converts one method parameter into an ArgumentDef,
+// and names the item of its SortBy, empty for any other argument. Older
+// schema files may prefix intentionally-unused stub parameters with "_";
 // keep stripping that prefix so they load the same as the preferred names.
-func (w *walker) argumentFromParameter(p *astNode) (*ir.ArgumentDef, *SchemaError) {
+func (w *walker) argumentFromParameter(p *astNode) (*ir.ArgumentDef, string, *SchemaError) {
 	param := p.AsParameterDeclaration()
 	if param.Type == nil {
-		return nil, errorAtNode(p, "operation parameters must have an explicit type annotation")
+		return nil, "", errorAtNode(p, "operation parameters must have an explicit type annotation")
 	}
 	info, serr := w.resolveTypeNode(param.Type)
 	if serr != nil {
-		return nil, serr
+		return nil, "", serr
 	}
 	if info.platformDefault {
-		return nil, errorAtNode(p, "PlatformDefault<T> is only valid on object fields")
+		return nil, "", errorAtNode(p, "PlatformDefault<T> is only valid on object fields")
 	}
 	w.recordReference(info)
 
@@ -1566,12 +1583,13 @@ func (w *walker) argumentFromParameter(p *astNode) (*ir.ArgumentDef, *SchemaErro
 		Encrypted:  info.encrypted,
 		References: info.references,
 		Search:     info.search,
+		Sort:       info.sortBy,
 	}
 	if info.validate != nil {
 		fd := &ir.FieldDef{}
 		applyValidateConfig(info.validate, fd)
 		if fd.ValidateUploadMaxBytes != nil {
-			return nil, errorAtNode(p, "Validate uploadMaxBytes is only valid on object fields")
+			return nil, "", errorAtNode(p, "Validate uploadMaxBytes is only valid on object fields")
 		}
 		arg.ValidateMin = fd.ValidateMin
 		arg.ValidateMax = fd.ValidateMax
@@ -1581,7 +1599,7 @@ func (w *walker) argumentFromParameter(p *astNode) (*ir.ArgumentDef, *SchemaErro
 		arg.ValidateListMax = fd.ValidateListMax
 		arg.ValidatePattern = fd.ValidatePattern
 	}
-	return arg, nil
+	return arg, info.sortItem, nil
 }
 
 // recordReference records cross-service imports and known-external names off

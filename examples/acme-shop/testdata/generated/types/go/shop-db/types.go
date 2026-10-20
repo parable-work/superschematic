@@ -789,6 +789,8 @@ type Order struct {
 
 	CancelReason string `json:"cancelReason,omitempty"`
 
+	TotalCents GenericInt64 `json:"totalCents"`
+
 	Lines []OrderLine `json:"lines"`
 }
 
@@ -845,6 +847,8 @@ func (t *Order) MaskSecrets() *Order {
 
 	masked.CancelReason = t.CancelReason
 
+	masked.TotalCents = t.TotalCents
+
 	if t.Lines != nil {
 		masked.Lines = make([]OrderLine, len(t.Lines))
 
@@ -864,7 +868,7 @@ func (t *Order) MaskSecrets() *Order {
 // route refuses an input body with any other top-level key, as every
 // generated server does.
 func (*Order) JSONFieldNames() []string {
-	return []string{"createdAt", "updatedAt", "id", "customer", "status", "placedAt", "shippingAddress", "cancelReason", "lines"}
+	return []string{"createdAt", "updatedAt", "id", "customer", "status", "placedAt", "shippingAddress", "cancelReason", "totalCents", "lines"}
 }
 
 // Validate validates all fields in Order
@@ -923,6 +927,12 @@ func (t *Order) Validate() ValidationErrors {
 			errors.AddFieldError("cancelReason", "maxLength", "must be at most 500 characters")
 		}
 
+	}
+
+	// Validate totalCents (required)
+
+	if valid, fieldErrs := validateGenericInt64Value(t.TotalCents, true); !valid {
+		errors.SetFieldErrors("totalCents", fieldErrs)
 	}
 
 	// Validate lines (required nested type)
@@ -1663,7 +1673,7 @@ func OrderPlacedFromYAMLNonStrict(data []byte) (*OrderPlaced, error) {
 	return decoded, nil
 }
 
-// Product - Something the shop sells.
+// Product - Something the shop sells. Shoppers find a product by its name.
 type Product struct {
 	CreatedAt TemporalDateTime `json:"createdAt"`
 

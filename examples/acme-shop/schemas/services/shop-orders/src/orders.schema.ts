@@ -6,6 +6,7 @@ import {
   QueryParam,
   RefersTo,
   SearchQuery,
+  SortBy,
   auth,
   bodyLimit,
   paginated,
@@ -59,8 +60,8 @@ export abstract class OrderView {
   @virtual
   lines: OrderLineView[];
 
-  // The sum of each line's quantity times its unit price.
-  @virtual
+  // The sum of each line's quantity times its unit price, stored with the
+  // order when it is placed, so a page of orders sorts by it.
   totalCents: Generic.Int64;
 }
 
@@ -110,12 +111,15 @@ export class OrderQueries extends Authenticated {
     throw new Error("schema declaration only");
   }
 
-  // The caller's orders, or every customer's for staff, oldest first.
-  // They are ordered by when each was placed, then by their ids.
+  // The caller's orders, or every customer's for staff, oldest first:
+  // by when each was placed, or by its total with sort, then by their ids.
   @rest(HttpMethod.GET, "orders")
   @requirePermission(["orders.read"])
-  @paginated({ defaultLimit: 20, maxLimit: 100 })
-  listOrders(statuses: QueryParam<Nullable<OrderStatus[]>>): OrderView[] {
+  @paginated({ defaultLimit: 20, maxLimit: 100, defaultSort: "placedAt" })
+  listOrders(
+    statuses: QueryParam<Nullable<OrderStatus[]>>,
+    sort: SortBy<OrderView, ["placedAt", "totalCents"]>
+  ): OrderView[] {
     throw new Error("schema declaration only");
   }
 }
@@ -144,13 +148,17 @@ export class OrderMutations extends Authenticated {
 // The catalog a shopper orders from: anyone may read it. shop-api keeps
 // the staff's catalog, which adds and edits the products.
 export class ProductCatalog {
-  // The products, by name, then by id; ids narrows them to the products
-  // with those ids, the lookup a page names its products' ids through.
+  // The products, by name, or by price with sort, then by id; ids narrows
+  // them to the products with those ids, the lookup a page names its
+  // products' ids through, and q to those whose name holds each of its
+  // words, the search a product picker finds them by.
   @rest(HttpMethod.GET, "products")
   @publicRoute
-  @paginated({ defaultLimit: 20, maxLimit: 100 })
+  @paginated({ defaultLimit: 20, maxLimit: 100, defaultSort: "name" })
   listProducts(
-    ids: QueryParam<Nullable<Validate<RefersTo<Identity.UUID, ProductView>[], { listMax: 100 }>>>
+    ids: QueryParam<Nullable<Validate<RefersTo<Identity.UUID, ProductView>[], { listMax: 100 }>>>,
+    q: SearchQuery<Validate<string, { maxLength: 100 }>>,
+    sort: SortBy<ProductView, ["name", "priceCents"]>
   ): ProductView[] {
     throw new Error("schema declaration only");
   }
@@ -167,16 +175,17 @@ export class ProductCatalog {
 // A product's reviews: anyone may read them, and a signed-in shopper may
 // write one.
 export class ProductReviews {
-  // The product's reviews, oldest first: by when each was written, then by
-  // its id. q keeps the reviews whose title or body holds each of its
-  // words.
+  // The product's reviews, oldest first: by when each was written, or by
+  // its rating with sort, then by its id. q keeps the reviews whose title
+  // or body holds each of its words.
   @rest(HttpMethod.GET, "products/{productId}/reviews")
   @publicRoute
-  @paginated({ defaultLimit: 20, maxLimit: 50 })
+  @paginated({ defaultLimit: 20, maxLimit: 50, defaultSort: "createdAt" })
   listReviews(
     productId: RefersTo<Identity.UUID, ProductView>,
     minRating: QueryParam<Nullable<number>>,
-    q: SearchQuery<Validate<string, { maxLength: 100 }>>
+    q: SearchQuery<Validate<string, { maxLength: 100 }>>,
+    sort: SortBy<ReviewView, ["createdAt", "rating"]>
   ): ReviewView[] {
     throw new Error("schema declaration only");
   }

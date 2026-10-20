@@ -68,7 +68,8 @@ operationSets:
   - name: Catalog
     operations:
       # The items, two to a page unless the caller asks for up to five, by
-      # their ids or their stock.
+      # their ids or their stock, in order of their names unless the caller
+      # sorts them by name or sku, either way.
       - name: listItems
         typeRef: { name: ItemView, isArray: true }
         required: true
@@ -80,7 +81,11 @@ operationSets:
           - name: inStock
             typeRef: { name: boolean }
             isQuery: true
-        page: { defaultLimit: 2, maxLimit: 5 }
+          - name: sort
+            typeRef: { name: string }
+            isQuery: true
+            sort: [name, sku]
+        page: { defaultLimit: 2, maxLimit: 5, defaultSort: name }
         httpMethod: GET
         restPath: items
       # One item.

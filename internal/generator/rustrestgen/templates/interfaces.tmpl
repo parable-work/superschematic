@@ -45,6 +45,13 @@ pub struct {{ .ArgsName }} {
     /// the limit's default filled in. `PageRequest::first(limit)` asks for
     /// the first page and `PageRequest::after(next, limit)` for the one
     /// after a page's `next`.
+{{- with .Page.Sort }}
+    /// Its `sort` is the `{{ .Param }}` query parameter (D60, amended): {{ join .Fields ", " }},
+    /// descending after a `-`, `{{ .Default }}` when the request sends none;
+    /// ties break by id. The implementation reads it `Some`, its default
+    /// filled in, and its cursor its own key's: the router unbinds the
+    /// cursor from the sort and binds the page's `next` to it.
+{{- end }}
     pub page: runtime::page::PageRequest,
 {{- end }}
 {{- with .Input }}
@@ -74,9 +81,15 @@ pub trait {{ toPascalCase . }}Implementation: Send + Sync + 'static {
     {{- if .Description }}
     ///
     {{- end }}
+    {{- if .Page.Sort }}
+    /// It pages (D60): read up to `args.page.limit + 1` items after
+    /// `args.page.cursor` (`Cursor::decode`) in `args.page.sort`'s order,
+    /// ties broken by id (D60, amended), and return `Page::from_rows`.
+    {{- else }}
     /// It pages (D60): read up to `args.page.limit + 1` items after
     /// `args.page.cursor` (`Cursor::decode`) in the operation's order, and
     /// return `Page::from_rows`.
+    {{- end }}
     {{- end }}
     async fn {{ .FunctionName }}(&self, ctx: RequestContext{{ if .HasArgs }}, args: {{ .ArgsName }}{{ end }}) -> Result<{{ .OutputRustType }}, ApiError>;
 {{- end }}

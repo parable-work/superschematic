@@ -1,6 +1,6 @@
 import { Contact, Generic, Identity, Temporal } from "superscalar";
 import { Default, Nullable, Validate } from "@superschematic/schema";
-import { AutoGenerate, Relation, User as UserTrait, UserRole, index, key, unique } from "@superschematic/db";
+import { AutoGenerate, Relation, User as UserTrait, UserRole, index, key, searchField, unique } from "@superschematic/db";
 
 // Timestamps every table carries.
 export abstract class Auditable {
@@ -39,7 +39,7 @@ export abstract class Role extends Auditable implements UserRole {
   permissions: string[];
 }
 
-// Something the shop sells.
+// Something the shop sells. Shoppers find a product by its name.
 export abstract class Product extends Auditable {
   @key
   id: AutoGenerate<Identity.UUID>;
@@ -47,6 +47,7 @@ export abstract class Product extends Auditable {
   @unique
   sku: Identity.Slug;
 
+  @searchField
   name: Identity.Name;
 
   priceCents: Generic.Int64;

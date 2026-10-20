@@ -27,8 +27,16 @@ This crate provides:
   write and read a position as the unpadded base64url of its JSON, the
   encoder's error a 500 for a key no router reads back, and
   `Page::from_rows` keeps `limit` of the `limit + 1` rows an
-  implementation read and sets `next`, or returns that error. `tests/page_parity.rs` runs
-  `runtime/http/testdata/page_parity.json`
+  implementation read and sets `next`, or returns that error. A sorted
+  operation's spec is `PageSpec::new(2, 5).sorted(SortSpec::new("sort",
+  &["name", "sku"], "name"))` (D60, amended): `query` reads its `Sort` as
+  sent, `sorted_request` from a form's values, and `check` holds it to the
+  spec's values; `PageSpec::unbind` fills the default in and unbinds the
+  cursor (`Cursor::unbind`), and `Page::bind` binds the `next`
+  (`Cursor::bind`) to the base64url of `{"sort":"-placedAt","key":K}`. The
+  router's decode and an in-process call each unbind once and bind once,
+  and a cursor sent with another sort is the 400 `SORTED_CURSOR_DETAIL`.
+  `tests/page_parity.rs` runs `runtime/http/testdata/page_parity.json`
 - `input`, `required_input` and `input_refusal`: an operation's input
   parsed by its type's generated `parse_<type>`, with undeclared keys
   refused and field errors in the problem's `errors`; `body_fields` and

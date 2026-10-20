@@ -21,7 +21,8 @@ import (
 // ListItems implements the business logic for GET /api/items
 //
 // The items, two to a page unless the caller asks for up to five, by
-// their ids or their stock.
+// their ids or their stock, in order of their names unless the caller
+// sorts them by name or sku, either way.
 //
 // Query Parameters:
 //   - ids (*types.IdentityUUID): Optional
@@ -29,6 +30,7 @@ import (
 //
 // Page (@paginated):
 //   - page (paging.Request): the cursor, "" for the first page, and the limit, 1 to 5 (2 when absent)
+//     and the sort, a field of name, sku, descending when Desc (name when absent; ties break by id)
 //
 // Returns:
 //   - paging.Page[types.ItemView]: the page's items and the cursor of the next page, nil after the last

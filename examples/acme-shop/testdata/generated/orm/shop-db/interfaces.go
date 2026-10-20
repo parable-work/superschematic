@@ -16,6 +16,7 @@ type OrderRepositoryInterface interface {
 	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Order, error)
 	FindOne(ctx context.Context, filter *OrderFilter, opts *OrderFindOptions) (*types.Order, error)
 	FindMany(ctx context.Context, filter *OrderFilter, opts *OrderFindOptions) ([]*types.Order, int, error)
+	FindPage(ctx context.Context, filter *OrderFilter, opts *OrderPageOptions) (*OrderPage, error)
 	CreateOne(ctx context.Context, input *types.Order) (*types.Order, error)
 	CreateMany(ctx context.Context, inputs []*types.Order) ([]*types.Order, error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *OrderUpdate) (*types.Order, error)
@@ -30,6 +31,7 @@ type OrderLineRepositoryInterface interface {
 	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.OrderLine, error)
 	FindOne(ctx context.Context, filter *OrderLineFilter, opts *OrderLineFindOptions) (*types.OrderLine, error)
 	FindMany(ctx context.Context, filter *OrderLineFilter, opts *OrderLineFindOptions) ([]*types.OrderLine, int, error)
+	FindPage(ctx context.Context, filter *OrderLineFilter, opts *OrderLinePageOptions) (*OrderLinePage, error)
 	CreateOne(ctx context.Context, input *types.OrderLine) (*types.OrderLine, error)
 	CreateMany(ctx context.Context, inputs []*types.OrderLine) ([]*types.OrderLine, error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *OrderLineUpdate) (*types.OrderLine, error)
@@ -44,6 +46,7 @@ type ProductRepositoryInterface interface {
 	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Product, error)
 	FindOne(ctx context.Context, filter *ProductFilter, opts *ProductFindOptions) (*types.Product, error)
 	FindMany(ctx context.Context, filter *ProductFilter, opts *ProductFindOptions) ([]*types.Product, int, error)
+	FindPage(ctx context.Context, filter *ProductFilter, opts *ProductPageOptions) (*ProductPage, error)
 	CreateOne(ctx context.Context, input *types.Product) (*types.Product, error)
 	CreateMany(ctx context.Context, inputs []*types.Product) ([]*types.Product, error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *ProductUpdate) (*types.Product, error)
@@ -58,6 +61,7 @@ type RestockRequestRepositoryInterface interface {
 	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.RestockRequest, error)
 	FindOne(ctx context.Context, filter *RestockRequestFilter, opts *RestockRequestFindOptions) (*types.RestockRequest, error)
 	FindMany(ctx context.Context, filter *RestockRequestFilter, opts *RestockRequestFindOptions) ([]*types.RestockRequest, int, error)
+	FindPage(ctx context.Context, filter *RestockRequestFilter, opts *RestockRequestPageOptions) (*RestockRequestPage, error)
 	CreateOne(ctx context.Context, input *types.RestockRequest) (*types.RestockRequest, error)
 	CreateMany(ctx context.Context, inputs []*types.RestockRequest) ([]*types.RestockRequest, error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *RestockRequestUpdate) (*types.RestockRequest, error)
@@ -72,6 +76,7 @@ type ReviewRepositoryInterface interface {
 	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Review, error)
 	FindOne(ctx context.Context, filter *ReviewFilter, opts *ReviewFindOptions) (*types.Review, error)
 	FindMany(ctx context.Context, filter *ReviewFilter, opts *ReviewFindOptions) ([]*types.Review, int, error)
+	FindPage(ctx context.Context, filter *ReviewFilter, opts *ReviewPageOptions) (*ReviewPage, error)
 	CreateOne(ctx context.Context, input *types.Review) (*types.Review, error)
 	CreateMany(ctx context.Context, inputs []*types.Review) ([]*types.Review, error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *ReviewUpdate) (*types.Review, error)
@@ -87,6 +92,7 @@ type RoleRepositoryInterface interface {
 	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Role, error)
 	FindOne(ctx context.Context, filter *RoleFilter, opts *RoleFindOptions) (*types.Role, error)
 	FindMany(ctx context.Context, filter *RoleFilter, opts *RoleFindOptions) ([]*types.Role, int, error)
+	FindPage(ctx context.Context, filter *RoleFilter, opts *RolePageOptions) (*RolePage, error)
 	CreateOne(ctx context.Context, input *types.Role) (*types.Role, error)
 	CreateMany(ctx context.Context, inputs []*types.Role) ([]*types.Role, error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *RoleUpdate) (*types.Role, error)
@@ -101,6 +107,7 @@ type SessionRepositoryInterface interface {
 	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Session, error)
 	FindOne(ctx context.Context, filter *SessionFilter, opts *SessionFindOptions) (*types.Session, error)
 	FindMany(ctx context.Context, filter *SessionFilter, opts *SessionFindOptions) ([]*types.Session, int, error)
+	FindPage(ctx context.Context, filter *SessionFilter, opts *SessionPageOptions) (*SessionPage, error)
 	CreateOne(ctx context.Context, input *types.Session) (*types.Session, error)
 	CreateMany(ctx context.Context, inputs []*types.Session) ([]*types.Session, error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *SessionUpdate) (*types.Session, error)
@@ -115,6 +122,7 @@ type StockLevelRepositoryInterface interface {
 	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.StockLevel, error)
 	FindOne(ctx context.Context, filter *StockLevelFilter, opts *StockLevelFindOptions) (*types.StockLevel, error)
 	FindMany(ctx context.Context, filter *StockLevelFilter, opts *StockLevelFindOptions) ([]*types.StockLevel, int, error)
+	FindPage(ctx context.Context, filter *StockLevelFilter, opts *StockLevelPageOptions) (*StockLevelPage, error)
 	CreateOne(ctx context.Context, input *types.StockLevel) (*types.StockLevel, error)
 	CreateMany(ctx context.Context, inputs []*types.StockLevel) ([]*types.StockLevel, error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *StockLevelUpdate) (*types.StockLevel, error)
@@ -129,6 +137,7 @@ type UserRepositoryInterface interface {
 	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.User, error)
 	FindOne(ctx context.Context, filter *UserFilter, opts *UserFindOptions) (*types.User, error)
 	FindMany(ctx context.Context, filter *UserFilter, opts *UserFindOptions) ([]*types.User, int, error)
+	FindPage(ctx context.Context, filter *UserFilter, opts *UserPageOptions) (*UserPage, error)
 	CreateOne(ctx context.Context, input *types.User) (*types.User, error)
 	CreateMany(ctx context.Context, inputs []*types.User) ([]*types.User, error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *UserUpdate) (*types.User, error)
@@ -143,6 +152,7 @@ type UserCredentialRepositoryInterface interface {
 	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.UserCredential, error)
 	FindOne(ctx context.Context, filter *UserCredentialFilter, opts *UserCredentialFindOptions) (*types.UserCredential, error)
 	FindMany(ctx context.Context, filter *UserCredentialFilter, opts *UserCredentialFindOptions) ([]*types.UserCredential, int, error)
+	FindPage(ctx context.Context, filter *UserCredentialFilter, opts *UserCredentialPageOptions) (*UserCredentialPage, error)
 	CreateOne(ctx context.Context, input *types.UserCredential) (*types.UserCredential, error)
 	CreateMany(ctx context.Context, inputs []*types.UserCredential) ([]*types.UserCredential, error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *UserCredentialUpdate) (*types.UserCredential, error)
@@ -157,6 +167,7 @@ type UserRoleGrantRepositoryInterface interface {
 	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.UserRoleGrant, error)
 	FindOne(ctx context.Context, filter *UserRoleGrantFilter, opts *UserRoleGrantFindOptions) (*types.UserRoleGrant, error)
 	FindMany(ctx context.Context, filter *UserRoleGrantFilter, opts *UserRoleGrantFindOptions) ([]*types.UserRoleGrant, int, error)
+	FindPage(ctx context.Context, filter *UserRoleGrantFilter, opts *UserRoleGrantPageOptions) (*UserRoleGrantPage, error)
 	CreateOne(ctx context.Context, input *types.UserRoleGrant) (*types.UserRoleGrant, error)
 	CreateMany(ctx context.Context, inputs []*types.UserRoleGrant) ([]*types.UserRoleGrant, error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *UserRoleGrantUpdate) (*types.UserRoleGrant, error)
@@ -320,6 +331,10 @@ func (r *NoOpOrderRepository) FindMany(_ context.Context, _ *OrderFilter, _ *Ord
 	return []*types.Order{}, 0, nil
 }
 
+func (r *NoOpOrderRepository) FindPage(_ context.Context, _ *OrderFilter, _ *OrderPageOptions) (*OrderPage, error) {
+	return &OrderPage{Rows: []*types.Order{}}, nil
+}
+
 func (r *NoOpOrderRepository) CreateOne(_ context.Context, input *types.Order) (*types.Order, error) {
 	return input, nil
 }
@@ -372,6 +387,10 @@ func (r *NoOpOrderLineRepository) FindOne(_ context.Context, _ *OrderLineFilter,
 
 func (r *NoOpOrderLineRepository) FindMany(_ context.Context, _ *OrderLineFilter, _ *OrderLineFindOptions) ([]*types.OrderLine, int, error) {
 	return []*types.OrderLine{}, 0, nil
+}
+
+func (r *NoOpOrderLineRepository) FindPage(_ context.Context, _ *OrderLineFilter, _ *OrderLinePageOptions) (*OrderLinePage, error) {
+	return &OrderLinePage{Rows: []*types.OrderLine{}}, nil
 }
 
 func (r *NoOpOrderLineRepository) CreateOne(_ context.Context, input *types.OrderLine) (*types.OrderLine, error) {
@@ -428,6 +447,10 @@ func (r *NoOpProductRepository) FindMany(_ context.Context, _ *ProductFilter, _ 
 	return []*types.Product{}, 0, nil
 }
 
+func (r *NoOpProductRepository) FindPage(_ context.Context, _ *ProductFilter, _ *ProductPageOptions) (*ProductPage, error) {
+	return &ProductPage{Rows: []*types.Product{}}, nil
+}
+
 func (r *NoOpProductRepository) CreateOne(_ context.Context, input *types.Product) (*types.Product, error) {
 	return input, nil
 }
@@ -482,6 +505,10 @@ func (r *NoOpRestockRequestRepository) FindMany(_ context.Context, _ *RestockReq
 	return []*types.RestockRequest{}, 0, nil
 }
 
+func (r *NoOpRestockRequestRepository) FindPage(_ context.Context, _ *RestockRequestFilter, _ *RestockRequestPageOptions) (*RestockRequestPage, error) {
+	return &RestockRequestPage{Rows: []*types.RestockRequest{}}, nil
+}
+
 func (r *NoOpRestockRequestRepository) CreateOne(_ context.Context, input *types.RestockRequest) (*types.RestockRequest, error) {
 	return input, nil
 }
@@ -534,6 +561,10 @@ func (r *NoOpReviewRepository) FindOne(_ context.Context, _ *ReviewFilter, _ *Re
 
 func (r *NoOpReviewRepository) FindMany(_ context.Context, _ *ReviewFilter, _ *ReviewFindOptions) ([]*types.Review, int, error) {
 	return []*types.Review{}, 0, nil
+}
+
+func (r *NoOpReviewRepository) FindPage(_ context.Context, _ *ReviewFilter, _ *ReviewPageOptions) (*ReviewPage, error) {
+	return &ReviewPage{Rows: []*types.Review{}}, nil
 }
 
 func (r *NoOpReviewRepository) CreateOne(_ context.Context, input *types.Review) (*types.Review, error) {
@@ -594,6 +625,10 @@ func (r *NoOpRoleRepository) FindMany(_ context.Context, _ *RoleFilter, _ *RoleF
 	return []*types.Role{}, 0, nil
 }
 
+func (r *NoOpRoleRepository) FindPage(_ context.Context, _ *RoleFilter, _ *RolePageOptions) (*RolePage, error) {
+	return &RolePage{Rows: []*types.Role{}}, nil
+}
+
 func (r *NoOpRoleRepository) CreateOne(_ context.Context, input *types.Role) (*types.Role, error) {
 	return input, nil
 }
@@ -646,6 +681,10 @@ func (r *NoOpSessionRepository) FindOne(_ context.Context, _ *SessionFilter, _ *
 
 func (r *NoOpSessionRepository) FindMany(_ context.Context, _ *SessionFilter, _ *SessionFindOptions) ([]*types.Session, int, error) {
 	return []*types.Session{}, 0, nil
+}
+
+func (r *NoOpSessionRepository) FindPage(_ context.Context, _ *SessionFilter, _ *SessionPageOptions) (*SessionPage, error) {
+	return &SessionPage{Rows: []*types.Session{}}, nil
 }
 
 func (r *NoOpSessionRepository) CreateOne(_ context.Context, input *types.Session) (*types.Session, error) {
@@ -702,6 +741,10 @@ func (r *NoOpStockLevelRepository) FindMany(_ context.Context, _ *StockLevelFilt
 	return []*types.StockLevel{}, 0, nil
 }
 
+func (r *NoOpStockLevelRepository) FindPage(_ context.Context, _ *StockLevelFilter, _ *StockLevelPageOptions) (*StockLevelPage, error) {
+	return &StockLevelPage{Rows: []*types.StockLevel{}}, nil
+}
+
 func (r *NoOpStockLevelRepository) CreateOne(_ context.Context, input *types.StockLevel) (*types.StockLevel, error) {
 	return input, nil
 }
@@ -754,6 +797,10 @@ func (r *NoOpUserRepository) FindOne(_ context.Context, _ *UserFilter, _ *UserFi
 
 func (r *NoOpUserRepository) FindMany(_ context.Context, _ *UserFilter, _ *UserFindOptions) ([]*types.User, int, error) {
 	return []*types.User{}, 0, nil
+}
+
+func (r *NoOpUserRepository) FindPage(_ context.Context, _ *UserFilter, _ *UserPageOptions) (*UserPage, error) {
+	return &UserPage{Rows: []*types.User{}}, nil
 }
 
 func (r *NoOpUserRepository) CreateOne(_ context.Context, input *types.User) (*types.User, error) {
@@ -810,6 +857,10 @@ func (r *NoOpUserCredentialRepository) FindMany(_ context.Context, _ *UserCreden
 	return []*types.UserCredential{}, 0, nil
 }
 
+func (r *NoOpUserCredentialRepository) FindPage(_ context.Context, _ *UserCredentialFilter, _ *UserCredentialPageOptions) (*UserCredentialPage, error) {
+	return &UserCredentialPage{Rows: []*types.UserCredential{}}, nil
+}
+
 func (r *NoOpUserCredentialRepository) CreateOne(_ context.Context, input *types.UserCredential) (*types.UserCredential, error) {
 	return input, nil
 }
@@ -862,6 +913,10 @@ func (r *NoOpUserRoleGrantRepository) FindOne(_ context.Context, _ *UserRoleGran
 
 func (r *NoOpUserRoleGrantRepository) FindMany(_ context.Context, _ *UserRoleGrantFilter, _ *UserRoleGrantFindOptions) ([]*types.UserRoleGrant, int, error) {
 	return []*types.UserRoleGrant{}, 0, nil
+}
+
+func (r *NoOpUserRoleGrantRepository) FindPage(_ context.Context, _ *UserRoleGrantFilter, _ *UserRoleGrantPageOptions) (*UserRoleGrantPage, error) {
+	return &UserRoleGrantPage{Rows: []*types.UserRoleGrant{}}, nil
 }
 
 func (r *NoOpUserRoleGrantRepository) CreateOne(_ context.Context, input *types.UserRoleGrant) (*types.UserRoleGrant, error) {

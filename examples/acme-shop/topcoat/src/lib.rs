@@ -10,9 +10,11 @@
 //! who hold `orders.any`, every customer's. The reviews and the orders render through
 //! the display components the crate builds from their types, and the orders
 //! a page at a time, with links to the next page and back to the first.
-//! An order line's product is a select of the catalog's products, and an
-//! order's lines name theirs, both from `listProducts`, which the crate's
-//! `references` call (D61). The crate's generated pages serve a console of
+//! An order line's product is a picker of the catalog's products, a search
+//! box and a select of those whose name holds its text, and an order's
+//! lines name theirs, both from `listProducts`, which searches and which
+//! the crate's `references` call (D61, amended). The crate's generated
+//! pages serve a console of
 //! shop-orders' resources at `/console`, the catalog among them. The JSON API
 //! is mounted at `/api` beside the pages, on the same implementations,
 //! which keep the shop in memory or in a SQLite file of shop-db's tables,
@@ -584,12 +586,14 @@ async fn cancel_order(cx: &Cx, Form(form): Form<OrderCancelOrderArgsForm>) -> to
 }
 
 /// The form that places an order: a row per line, each line's product a
-/// select of the catalog's, and the shipping address. The sign-in button
+/// picker of the catalog's, and the shipping address. The sign-in button
 /// comes first for a shopper the operation would refuse. The products are
-/// `listProducts`' first page, which `references::place_order_input_form_choices`
-/// gives every line's `productId` (`lines.productId`), each by its name. A
-/// choice's value is the product's id as the API sends it, the compact text
-/// `to_string()` gives, which a record holds.
+/// those `listProducts` finds by the text of each line's search box, its
+/// first page with none, which `references::place_order_input_form_choices`
+/// gives every line's `productId` (`lines.productId`) from `form`, each by
+/// its name: the form as the shopper sent it, so a pressed "Find" lists
+/// what its text finds. A choice's value is the product's id as the API
+/// sends it, the compact text `to_string()` gives, which a record holds.
 #[component]
 async fn place_order_page(
     cx: &Cx,
@@ -597,7 +601,7 @@ async fn place_order_page(
     #[default] errors: FormErrors,
 ) -> topcoat::Result<impl View> {
     let signed_out = needs_sign_in(operations::can_order_place_order(cx).await);
-    let choices = references::place_order_input_form_choices(cx, Choices::new()).await;
+    let choices = references::place_order_input_form_choices(cx, &form, Choices::new()).await;
     Ok(view! {
         shop_page(
             title: "Place an order",
@@ -618,7 +622,8 @@ async fn new_order() -> topcoat::Result<impl View> {
 }
 
 /// Places an order from the form. A row button (`_action`) adds or removes
-/// a line and renders the form again, 200, without placing it. Otherwise
+/// a line, and a picker's "Find" (`find:lines[0].productId`) searches, each
+/// rendering the form again, 200, without placing it. Otherwise
 /// the form is parsed by `PlaceOrderInput`'s rules and the operation
 /// called: the new order's page (303), or the form again as sent, each
 /// error at its control (`lines[0].quantity`), with a `Refusal`'s status:

@@ -10,21 +10,22 @@
 //!
 //! A call does not apply the route's traffic controls (@rateLimit,
 //! @bodyLimit, @timeout): the page that makes it is a route of the app,
-//! under the controls the app gives it.
+//! under the controls the app gives it. It reads what the app keeps for
+//! the crate (`setup`): an app that does not host fixture-user-routes-api, whose
+//! router builder calls neither `fixture_user_routes_api` nor `fixture_user_routes_api_without_api`,
+//! gets the 500 (D61, amended).
 
 #![allow(unused_imports)]
 
-use crate::Setup;
 use crate::api::operations;
 use crate::api::runtime::{ApiError, Principal};
 use crate::api::types;
-use topcoat::context::{Cx, app_context};
+use topcoat::context::Cx;
 
 /// greeting.greet (`GET /api/greeting`).
 pub async fn greeting_greet(cx: &Cx) -> Result<types::Greeting, ApiError> {
     let caller = can_greeting_greet(cx).await?;
-    let setup: &Setup = app_context(cx);
-    setup
+    crate::setup(cx)?
         .implementations
         .greeting
         .greet(operations::GREETING_GREET.context(caller))

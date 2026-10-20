@@ -11,6 +11,7 @@ package apigen
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -71,6 +72,22 @@ type Param struct {
 	Reference *Reference
 	// Search marks the operation's search argument (SearchQuery, D62).
 	Search bool
+	// Sort is the operation's sort argument (SortBy, D60 amended), nil for
+	// every other. It stays among the endpoint's QueryParams, so the SDKs
+	// and the tool documents send it as the optional query argument it
+	// is; the servers read it with the page and leave it out of the
+	// implementation's arguments (ArgQueryParams).
+	Sort *SortParam
+}
+
+// SortParam is a sort argument's order (D60, amended): the fields it
+// sorts by, by their JSON names; the values it takes, each field and then
+// the field after "-" (ir.SortValues); and @paginated's defaultSort, the
+// order of a request that sends none.
+type SortParam struct {
+	Fields  []string
+	Values  []string
+	Default string
 }
 
 // ArrayDepth is 0 for T, 1 for T[] and 2 for T[][], as ir.TypeRef.ArrayDepth.
@@ -1022,6 +1039,15 @@ func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *
 		param, err := types.mapArgument(arg)
 		if err != nil {
 			return nil, fmt.Errorf("apigen: operation %s.%s argument %s: %w", namespace, op.Name, arg.Name, err)
+		}
+		if arg.Sort != nil {
+			// The loader refuses any other sort (D60, amended); a generator
+			// holds IR built without it to the same.
+			if !arg.IsQuery || arg.Required || op.Page == nil || op.Page.DefaultSort == "" || ir.SortArgument(op) != arg ||
+				!slices.Contains(ir.SortValues(arg.Sort), op.Page.DefaultSort) {
+				return nil, fmt.Errorf("apigen: operation %s.%s argument %s: a sort argument is the one optional query parameter of a @paginated operation whose defaultSort is one of its values", namespace, op.Name, arg.Name)
+			}
+			param.Sort = &SortParam{Fields: arg.Sort, Values: ir.SortValues(arg.Sort), Default: op.Page.DefaultSort}
 		}
 
 		// A @query argument whose name is also embedded in the rest path is a

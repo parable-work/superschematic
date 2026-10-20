@@ -4,12 +4,16 @@
 //! mounts the JSON API at `/api`, its routes given the client's address,
 //! and keeps the implementations for the in-process calls of `operations`,
 //! which pages, shards and procedures make by each route's rules.
+//! `fixture_forms_api_without_api` keeps them and mounts no JSON API, for an app
+//! that hosts several services' crates and serves at most one JSON API at
+//! `/api` (D61, amended).
 //! It makes one registry of the operations' rate limiters
 //! (`Setup.rate_limits`), which the JSON API's routes take theirs from,
-//! and every procedure and page that meets a route's rate limit too, so a
-//! client has one budget per operation through its route, its procedure
-//! and the pages. An in-process call, an end user's or a service's, meets
-//! no traffic control, so it takes from no budget.
+//! and every procedure, page and picker's shard that meets a route's rate
+//! limit too, so a client has one budget per operation through its route,
+//! its procedure, the pages and the pickers. An in-process call, an end
+//! user's or a service's, meets no traffic control, so it takes from no
+//! budget.
 //! `records` mirrors each type a call in `operations` returns as a record a
 //! page can hand the browser; the result of an operation without a call, a
 //! webhook's, has none.
@@ -37,9 +41,9 @@ pub mod views;
 /// `types`.
 pub use schemas_fixture_forms_api_api as api;
 
-use api::runtime::{ClientIp, RateLimits};
+use api::runtime::{ApiError, ClientIp, RateLimits};
 use api::{build_router_with, Implementations, RouterOptions};
-use topcoat::context::Cx;
+use topcoat::context::{Cx, try_app_context};
 use topcoat::router::request::{client_ip, parts};
 use topcoat::router::tower::TowerRoute;
 use topcoat::router::{Body, Layer, LayerFuture, Next, Path, RouterBuilder};
@@ -67,23 +71,56 @@ pub trait RouterBuilderFixtureFormsApiExt {
     /// `operations`.
     #[must_use]
     fn fixture_forms_api(self, implementations: Implementations) -> Self;
+
+    /// Keeps `implementations` for the in-process
+    /// calls of `operations`, with its own registry of rate limiters, and mounts no JSON API: for an app that hosts
+    /// several services' crates (D61, amended), each one's pages and calls,
+    /// which serves at most one service's JSON API at `/api`, since a second
+    /// `/api/{*rest}` is a route Topcoat refuses.
+    #[must_use]
+    fn fixture_forms_api_without_api(self, implementations: Implementations) -> Self;
 }
 
 impl RouterBuilderFixtureFormsApiExt for RouterBuilder {
     fn fixture_forms_api(self, implementations: Implementations) -> Self {
-        let rate_limits = RateLimits::new();
-        let api = build_router_with(
+        set_up(self, implementations, true)
+    }
+
+    fn fixture_forms_api_without_api(self, implementations: Implementations) -> Self {
+        set_up(self, implementations, false)
+    }
+}
+
+/// The app's router with the crate's setup: a new registry of the
+/// operations' rate limiters, the JSON API at `/api/{*rest}` when `api`,
+/// its routes given the client's address and their limiters from the
+/// registry, `Setup` in the app context.
+fn set_up(router: RouterBuilder, implementations: Implementations, api: bool) -> RouterBuilder {
+    let rate_limits = RateLimits::new();
+    let router = if api {
+        let json = build_router_with(
             implementations.clone(),
             RouterOptions { rate_limits: rate_limits.clone(), ..RouterOptions::default() },
         );
-        self
-            .app_context(Setup {
-                implementations,
-                rate_limits,
-            })
-            .route(TowerRoute::any("/api/{*rest}", api))
-            .layer(ClientAddress)
-    }
+        router.route(TowerRoute::any("/api/{*rest}", json)).layer(ClientAddress)
+    } else {
+        router
+    };
+    router.app_context(Setup {
+        implementations,
+        rate_limits,
+    })
+}
+
+/// What the app keeps for the crate's in-process calls, from its context,
+/// or the 500 of an app that does not host fixture-forms-api (D61, amended): an
+/// app links the crates of every service the Topcoat table lists, and may
+/// set up some of them, so a call into one it did not set up is refused,
+/// not a panic.
+pub(crate) fn setup(cx: &Cx) -> Result<&Setup, ApiError> {
+    try_app_context::<Setup>(cx).ok_or_else(|| {
+        ApiError::internal("the app does not host fixture-forms-api: its router builder calls neither fixture_forms_api nor fixture_forms_api_without_api")
+    })
 }
 
 /// Gives each request to the JSON API the client's address as Topcoat
@@ -116,13 +153,13 @@ impl Layer for ClientAddress {
 /// The key a rate limit counts a request's client by: its address as
 /// Topcoat reads it (`client_ip`), or `unknown`. The JSON API's routes
 /// read the same key from the `ClientIp` that `ClientAddress` gives them,
-/// and the procedures and the pages that meet a route's rate limit count
-/// by it, so a client is one client on every way into an operation that
-/// takes from `Setup.rate_limits`, and the clients without an address
-/// share one bucket on all of them. Another crate's page shares an
-/// operation's budget by the same key: it takes the operation's limiter,
-/// `setup.rate_limits.of(&api::operations::<OPERATION>)`, none for an
-/// operation without a `@rateLimit`, then a token from it,
+/// and the procedures, the pages and the pickers' shards that meet a
+/// route's rate limit count by it, so a client is one client on every way
+/// into an operation that takes from `Setup.rate_limits`, and the clients
+/// without an address share one bucket on all of them. Another crate's
+/// page shares an operation's budget by the same key: it takes the
+/// operation's limiter, `setup.rate_limits.of(&api::operations::<OPERATION>)`,
+/// none for an operation without a `@rateLimit`, then a token from it,
 /// `limiter.take(&client_key(cx))`, whose `Err(retry_after)` it answers
 /// 429 with `Retry-After`.
 pub fn client_key(cx: &Cx) -> String {

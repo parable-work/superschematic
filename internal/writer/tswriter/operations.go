@@ -165,8 +165,13 @@ func (e *emitter) emitOperation(setName string, op *ir.FieldDef) {
 		fmt.Fprintf(&e.body, "  @%s\n", e.use("manualRouteRegistration"))
 	}
 	if op.Page != nil {
-		// Both limits, as the loader filled them in (D60).
-		fmt.Fprintf(&e.body, "  @%s({ defaultLimit: %d, maxLimit: %d })\n", e.use("paginated"), op.Page.DefaultLimit, op.Page.MaxLimit)
+		// Both limits, as the loader filled them in (D60), and the order of
+		// a request that sends none when the author wrote it (D60, amended).
+		sort := ""
+		if op.Page.DefaultSort != "" {
+			sort = ", defaultSort: " + quote(op.Page.DefaultSort)
+		}
+		fmt.Fprintf(&e.body, "  @%s({ defaultLimit: %d, maxLimit: %d%s })\n", e.use("paginated"), op.Page.DefaultLimit, op.Page.MaxLimit, sort)
 	}
 	e.emitMiddlewareDecorators("  ", op.Middleware)
 
@@ -176,7 +181,12 @@ func (e *emitter) emitOperation(setName string, op *ir.FieldDef) {
 		if arg.Comment != "" || arg.Description != "" {
 			e.failf("%s: argument comments and descriptions have no TypeScript authoring form", argOwner)
 		}
-		params = append(params, fmt.Sprintf("%s: %s", e.ident(arg.Name, "argument"), e.argumentTypeExpr(arg, argOwner)))
+		item := ""
+		if arg.Sort != nil {
+			// SortBy names the item the operation lists.
+			item = e.renderTypeName(op.TypeRef.Name, argOwner)
+		}
+		params = append(params, fmt.Sprintf("%s: %s", e.ident(arg.Name, "argument"), e.argumentTypeExpr(arg, item, argOwner)))
 	}
 
 	returnExpr := e.operationReturnExpr(op, owner)

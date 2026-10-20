@@ -3,6 +3,7 @@
 package orm
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -155,6 +156,14 @@ type ArrayStringFilter struct {
 	Eq       []string
 }
 
+// ErrPageKey is FindPage's error for an After that holds no primary key, or
+// whose row no longer exists in an order by a sort field, which reads the
+// row's value from the table (D60, amended). A key of another order is not
+// one: a key is a row's primary key alone, the same in every order, so a
+// cursor of another sort is refused before the ORM reads it, by the router
+// that binds a cursor to its sort.
+var ErrPageKey = errors.New("orm: the page key names no row of its sort")
+
 // ========================================
 // Type-Safe Field Selectors and Options
 // ========================================
@@ -249,6 +258,84 @@ type RoleFindOptions struct {
 	Offset int
 	// IncludeDeleted includes soft-deleted records in results (default false)
 	IncludeDeleted bool
+}
+
+// RoleSortField is a field FindPage orders Role rows by, by its
+// schema name (D60, amended): its primary key, or a column of one value of
+// text, a number or a time.
+type RoleSortField string
+
+const (
+	RoleSortById   RoleSortField = "id"
+	RoleSortByName RoleSortField = "name"
+)
+
+// RoleSort is the order FindPage reads Role rows in: Field,
+// ascending, or descending when Desc; ties break by id in the same
+// direction. The zero value orders by id, ascending.
+type RoleSort struct {
+	Field RoleSortField
+	Desc  bool
+}
+
+// ParseRoleSort reads a sort as a page request writes it, "name" or
+// "-name": an error for a field Role cannot be sorted by.
+func ParseRoleSort(text string) (RoleSort, error) {
+	parsed := RoleSort{Field: RoleSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
+	switch parsed.Field {
+	case RoleSortById, RoleSortByName:
+		return parsed, nil
+	}
+	return RoleSort{}, fmt.Errorf("orm: Role sorts by id and name, not %q", text)
+}
+
+// RolePageKey is the position of a Role row in a FindPage order: the
+// row's id, as a cursor holds it, {"id": ...}. FindPage reads the row's
+// value of its sort field from the table, so a key is the same in every order
+// and its length is the id's, whatever the row holds (D60, amended).
+type RolePageKey struct {
+	Id types.IdentityUUID `json:"id"`
+}
+
+// arg is the key's id as the repository writes its column. A key without
+// one is ErrPageKey.
+func (k *RolePageKey) arg() (any, error) {
+	var zeroKey types.IdentityUUID
+	if k.Id == zeroKey {
+		return nil, fmt.Errorf("%w: the Role key holds no id", ErrPageKey)
+	}
+	return k.Id.ToUUID(), nil
+}
+
+// rolePageKeyOf is row's key: its id.
+func rolePageKeyOf(row *types.Role) *RolePageKey {
+	key := &RolePageKey{}
+	if row.Id != nil {
+		key.Id = *row.Id
+	}
+	return key
+}
+
+// RolePageOptions are FindPage's options.
+type RolePageOptions struct {
+	// Fields specifies which fields to select, as FindMany's do; zero is an
+	// error. A page reads the id too, which Next holds.
+	Fields RoleFields
+	// Sort is the order the rows are read in.
+	Sort RoleSort
+	// After is the key of the last row of the page before, nil for the first page.
+	After *RolePageKey
+	// Limit is the rows a page holds: 1 or more, 100 when 0.
+	Limit int
+	// IncludeDeleted includes soft-deleted records in results (default false)
+	IncludeDeleted bool
+}
+
+// RolePage is a page of Role rows in FindPage's order: at most
+// Limit rows, and Next, the key of the last of them, when more rows follow.
+type RolePage struct {
+	Rows []*types.Role
+	Next *RolePageKey
 }
 
 // SessionFields specifies which Session fields to select
@@ -373,6 +460,86 @@ type SessionFindOptions struct {
 	IncludeDeleted bool
 }
 
+// SessionSortField is a field FindPage orders Session rows by, by its
+// schema name (D60, amended): its primary key, or a column of one value of
+// text, a number or a time.
+type SessionSortField string
+
+const (
+	SessionSortById        SessionSortField = "id"
+	SessionSortByTokenHash SessionSortField = "tokenHash"
+	SessionSortByCreatedAt SessionSortField = "createdAt"
+	SessionSortByExpiresAt SessionSortField = "expiresAt"
+)
+
+// SessionSort is the order FindPage reads Session rows in: Field,
+// ascending, or descending when Desc; ties break by id in the same
+// direction. The zero value orders by id, ascending.
+type SessionSort struct {
+	Field SessionSortField
+	Desc  bool
+}
+
+// ParseSessionSort reads a sort as a page request writes it, "tokenHash" or
+// "-tokenHash": an error for a field Session cannot be sorted by.
+func ParseSessionSort(text string) (SessionSort, error) {
+	parsed := SessionSort{Field: SessionSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
+	switch parsed.Field {
+	case SessionSortById, SessionSortByTokenHash, SessionSortByCreatedAt, SessionSortByExpiresAt:
+		return parsed, nil
+	}
+	return SessionSort{}, fmt.Errorf("orm: Session sorts by id, tokenHash, createdAt and expiresAt, not %q", text)
+}
+
+// SessionPageKey is the position of a Session row in a FindPage order: the
+// row's id, as a cursor holds it, {"id": ...}. FindPage reads the row's
+// value of its sort field from the table, so a key is the same in every order
+// and its length is the id's, whatever the row holds (D60, amended).
+type SessionPageKey struct {
+	Id types.IdentityUUID `json:"id"`
+}
+
+// arg is the key's id as the repository writes its column. A key without
+// one is ErrPageKey.
+func (k *SessionPageKey) arg() (any, error) {
+	var zeroKey types.IdentityUUID
+	if k.Id == zeroKey {
+		return nil, fmt.Errorf("%w: the Session key holds no id", ErrPageKey)
+	}
+	return k.Id.ToUUID(), nil
+}
+
+// sessionPageKeyOf is row's key: its id.
+func sessionPageKeyOf(row *types.Session) *SessionPageKey {
+	key := &SessionPageKey{}
+	if row.Id != nil {
+		key.Id = *row.Id
+	}
+	return key
+}
+
+// SessionPageOptions are FindPage's options.
+type SessionPageOptions struct {
+	// Fields specifies which fields to select, as FindMany's do; zero is an
+	// error. A page reads the id too, which Next holds.
+	Fields SessionFields
+	// Sort is the order the rows are read in.
+	Sort SessionSort
+	// After is the key of the last row of the page before, nil for the first page.
+	After *SessionPageKey
+	// Limit is the rows a page holds: 1 or more, 100 when 0.
+	Limit int
+	// IncludeDeleted includes soft-deleted records in results (default false)
+	IncludeDeleted bool
+}
+
+// SessionPage is a page of Session rows in FindPage's order: at most
+// Limit rows, and Next, the key of the last of them, when more rows follow.
+type SessionPage struct {
+	Rows []*types.Session
+	Next *SessionPageKey
+}
+
 // UserFields specifies which User fields to select
 type UserFields struct {
 	Id          bool
@@ -469,6 +636,86 @@ type UserFindOptions struct {
 	Offset int
 	// IncludeDeleted includes soft-deleted records in results (default false)
 	IncludeDeleted bool
+}
+
+// UserSortField is a field FindPage orders User rows by, by its
+// schema name (D60, amended): its primary key, or a column of one value of
+// text, a number or a time.
+type UserSortField string
+
+const (
+	UserSortById          UserSortField = "id"
+	UserSortByEmail       UserSortField = "email"
+	UserSortByDisplayName UserSortField = "displayName"
+	UserSortByCreatedAt   UserSortField = "createdAt"
+)
+
+// UserSort is the order FindPage reads User rows in: Field,
+// ascending, or descending when Desc; ties break by id in the same
+// direction. The zero value orders by id, ascending.
+type UserSort struct {
+	Field UserSortField
+	Desc  bool
+}
+
+// ParseUserSort reads a sort as a page request writes it, "email" or
+// "-email": an error for a field User cannot be sorted by.
+func ParseUserSort(text string) (UserSort, error) {
+	parsed := UserSort{Field: UserSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
+	switch parsed.Field {
+	case UserSortById, UserSortByEmail, UserSortByDisplayName, UserSortByCreatedAt:
+		return parsed, nil
+	}
+	return UserSort{}, fmt.Errorf("orm: User sorts by id, email, displayName and createdAt, not %q", text)
+}
+
+// UserPageKey is the position of a User row in a FindPage order: the
+// row's id, as a cursor holds it, {"id": ...}. FindPage reads the row's
+// value of its sort field from the table, so a key is the same in every order
+// and its length is the id's, whatever the row holds (D60, amended).
+type UserPageKey struct {
+	Id types.IdentityUUID `json:"id"`
+}
+
+// arg is the key's id as the repository writes its column. A key without
+// one is ErrPageKey.
+func (k *UserPageKey) arg() (any, error) {
+	var zeroKey types.IdentityUUID
+	if k.Id == zeroKey {
+		return nil, fmt.Errorf("%w: the User key holds no id", ErrPageKey)
+	}
+	return k.Id.ToUUID(), nil
+}
+
+// userPageKeyOf is row's key: its id.
+func userPageKeyOf(row *types.User) *UserPageKey {
+	key := &UserPageKey{}
+	if row.Id != nil {
+		key.Id = *row.Id
+	}
+	return key
+}
+
+// UserPageOptions are FindPage's options.
+type UserPageOptions struct {
+	// Fields specifies which fields to select, as FindMany's do; zero is an
+	// error. A page reads the id too, which Next holds.
+	Fields UserFields
+	// Sort is the order the rows are read in.
+	Sort UserSort
+	// After is the key of the last row of the page before, nil for the first page.
+	After *UserPageKey
+	// Limit is the rows a page holds: 1 or more, 100 when 0.
+	Limit int
+	// IncludeDeleted includes soft-deleted records in results (default false)
+	IncludeDeleted bool
+}
+
+// UserPage is a page of User rows in FindPage's order: at most
+// Limit rows, and Next, the key of the last of them, when more rows follow.
+type UserPage struct {
+	Rows []*types.User
+	Next *UserPageKey
 }
 
 // UserCredentialFields specifies which UserCredential fields to select
@@ -580,6 +827,84 @@ type UserCredentialFindOptions struct {
 	IncludeDeleted bool
 }
 
+// UserCredentialSortField is a field FindPage orders UserCredential rows by, by its
+// schema name (D60, amended): its primary key, or a column of one value of
+// text, a number or a time.
+type UserCredentialSortField string
+
+const (
+	UserCredentialSortById                UserCredentialSortField = "id"
+	UserCredentialSortByPasswordChangedAt UserCredentialSortField = "passwordChangedAt"
+)
+
+// UserCredentialSort is the order FindPage reads UserCredential rows in: Field,
+// ascending, or descending when Desc; ties break by id in the same
+// direction. The zero value orders by id, ascending.
+type UserCredentialSort struct {
+	Field UserCredentialSortField
+	Desc  bool
+}
+
+// ParseUserCredentialSort reads a sort as a page request writes it, "passwordChangedAt" or
+// "-passwordChangedAt": an error for a field UserCredential cannot be sorted by.
+func ParseUserCredentialSort(text string) (UserCredentialSort, error) {
+	parsed := UserCredentialSort{Field: UserCredentialSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
+	switch parsed.Field {
+	case UserCredentialSortById, UserCredentialSortByPasswordChangedAt:
+		return parsed, nil
+	}
+	return UserCredentialSort{}, fmt.Errorf("orm: UserCredential sorts by id and passwordChangedAt, not %q", text)
+}
+
+// UserCredentialPageKey is the position of a UserCredential row in a FindPage order: the
+// row's id, as a cursor holds it, {"id": ...}. FindPage reads the row's
+// value of its sort field from the table, so a key is the same in every order
+// and its length is the id's, whatever the row holds (D60, amended).
+type UserCredentialPageKey struct {
+	Id types.IdentityUUID `json:"id"`
+}
+
+// arg is the key's id as the repository writes its column. A key without
+// one is ErrPageKey.
+func (k *UserCredentialPageKey) arg() (any, error) {
+	var zeroKey types.IdentityUUID
+	if k.Id == zeroKey {
+		return nil, fmt.Errorf("%w: the UserCredential key holds no id", ErrPageKey)
+	}
+	return k.Id.ToUUID(), nil
+}
+
+// userCredentialPageKeyOf is row's key: its id.
+func userCredentialPageKeyOf(row *types.UserCredential) *UserCredentialPageKey {
+	key := &UserCredentialPageKey{}
+	if row.Id != nil {
+		key.Id = *row.Id
+	}
+	return key
+}
+
+// UserCredentialPageOptions are FindPage's options.
+type UserCredentialPageOptions struct {
+	// Fields specifies which fields to select, as FindMany's do; zero is an
+	// error. A page reads the id too, which Next holds.
+	Fields UserCredentialFields
+	// Sort is the order the rows are read in.
+	Sort UserCredentialSort
+	// After is the key of the last row of the page before, nil for the first page.
+	After *UserCredentialPageKey
+	// Limit is the rows a page holds: 1 or more, 100 when 0.
+	Limit int
+	// IncludeDeleted includes soft-deleted records in results (default false)
+	IncludeDeleted bool
+}
+
+// UserCredentialPage is a page of UserCredential rows in FindPage's order: at most
+// Limit rows, and Next, the key of the last of them, when more rows follow.
+type UserCredentialPage struct {
+	Rows []*types.UserCredential
+	Next *UserCredentialPageKey
+}
+
 // UserRoleGrantFields specifies which UserRoleGrant fields to select
 type UserRoleGrantFields struct {
 	Id        bool
@@ -684,6 +1009,84 @@ type UserRoleGrantFindOptions struct {
 	Offset int
 	// IncludeDeleted includes soft-deleted records in results (default false)
 	IncludeDeleted bool
+}
+
+// UserRoleGrantSortField is a field FindPage orders UserRoleGrant rows by, by its
+// schema name (D60, amended): its primary key, or a column of one value of
+// text, a number or a time.
+type UserRoleGrantSortField string
+
+const (
+	UserRoleGrantSortById        UserRoleGrantSortField = "id"
+	UserRoleGrantSortByGrantedAt UserRoleGrantSortField = "grantedAt"
+)
+
+// UserRoleGrantSort is the order FindPage reads UserRoleGrant rows in: Field,
+// ascending, or descending when Desc; ties break by id in the same
+// direction. The zero value orders by id, ascending.
+type UserRoleGrantSort struct {
+	Field UserRoleGrantSortField
+	Desc  bool
+}
+
+// ParseUserRoleGrantSort reads a sort as a page request writes it, "grantedAt" or
+// "-grantedAt": an error for a field UserRoleGrant cannot be sorted by.
+func ParseUserRoleGrantSort(text string) (UserRoleGrantSort, error) {
+	parsed := UserRoleGrantSort{Field: UserRoleGrantSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
+	switch parsed.Field {
+	case UserRoleGrantSortById, UserRoleGrantSortByGrantedAt:
+		return parsed, nil
+	}
+	return UserRoleGrantSort{}, fmt.Errorf("orm: UserRoleGrant sorts by id and grantedAt, not %q", text)
+}
+
+// UserRoleGrantPageKey is the position of a UserRoleGrant row in a FindPage order: the
+// row's id, as a cursor holds it, {"id": ...}. FindPage reads the row's
+// value of its sort field from the table, so a key is the same in every order
+// and its length is the id's, whatever the row holds (D60, amended).
+type UserRoleGrantPageKey struct {
+	Id types.IdentityUUID `json:"id"`
+}
+
+// arg is the key's id as the repository writes its column. A key without
+// one is ErrPageKey.
+func (k *UserRoleGrantPageKey) arg() (any, error) {
+	var zeroKey types.IdentityUUID
+	if k.Id == zeroKey {
+		return nil, fmt.Errorf("%w: the UserRoleGrant key holds no id", ErrPageKey)
+	}
+	return k.Id.ToUUID(), nil
+}
+
+// userRoleGrantPageKeyOf is row's key: its id.
+func userRoleGrantPageKeyOf(row *types.UserRoleGrant) *UserRoleGrantPageKey {
+	key := &UserRoleGrantPageKey{}
+	if row.Id != nil {
+		key.Id = *row.Id
+	}
+	return key
+}
+
+// UserRoleGrantPageOptions are FindPage's options.
+type UserRoleGrantPageOptions struct {
+	// Fields specifies which fields to select, as FindMany's do; zero is an
+	// error. A page reads the id too, which Next holds.
+	Fields UserRoleGrantFields
+	// Sort is the order the rows are read in.
+	Sort UserRoleGrantSort
+	// After is the key of the last row of the page before, nil for the first page.
+	After *UserRoleGrantPageKey
+	// Limit is the rows a page holds: 1 or more, 100 when 0.
+	Limit int
+	// IncludeDeleted includes soft-deleted records in results (default false)
+	IncludeDeleted bool
+}
+
+// UserRoleGrantPage is a page of UserRoleGrant rows in FindPage's order: at most
+// Limit rows, and Next, the key of the last of them, when more rows follow.
+type UserRoleGrantPage struct {
+	Rows []*types.UserRoleGrant
+	Next *UserRoleGrantPageKey
 }
 
 // ========================================

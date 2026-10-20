@@ -23,13 +23,24 @@
 //! page, its items and the cursor of the next.
 //!
 {{- end }}
+{{- if .Sorted }}
+//! A sorted operation's call (D60, amended) reads the sort in `page.sort`,
+//! `PageRequest::sorted` or `PAGE.sorted_request` sets it, and its default
+//! fills in when none is sent. As the router does, the call unbinds the
+//! cursor from the sort before the implementation reads it, a cursor of
+//! another sort the 400, and binds the page's next to the sort after, so a
+//! cursor of the JSON API pages the call and one of the call the JSON API.
+//!
+{{- end }}
 //! A call does not apply the route's traffic controls (@rateLimit,
 //! @bodyLimit, @timeout): the page that makes it is a route of the app,
-//! under the controls the app gives it.
+//! under the controls the app gives it. It reads what the app keeps for
+//! the crate (`setup`): an app that does not host {{ .SchemaName }}, whose
+//! router builder calls neither `{{ .SetupMethod }}` nor `{{ .SetupMethod }}_without_api`,
+//! gets the 500 (D61, amended).
 
 #![allow(unused_imports)]
 
-use crate::Setup;
 use crate::api::operations;
 {{- if .Paged }}
 use crate::api::runtime;
@@ -39,7 +50,7 @@ use crate::api::runtime::{ApiError, Principal};
 use crate::api::runtime::ServiceCaller;
 {{- end }}
 use crate::api::types;
-use topcoat::context::{Cx, app_context};
+use topcoat::context::Cx;
 {{- range .Operations }}
 
 /// {{ .Namespace }}.{{ .Name }} (`{{ .Method }} {{ .Path }}`){{ with .Description }}: {{ . }}{{ else }}.{{ end }}
@@ -49,17 +60,22 @@ use topcoat::context::{Cx, app_context};
 {{- with .NoProcedure }}
 {{ doc (printf "It has no procedure: %s." .) }}
 {{- end }}
-pub async fn {{ .SnakeName }}(cx: &Cx{{ with .ArgsName }}, args: crate::api::{{ . }}{{ end }}) -> Result<{{ .Output }}, ApiError> {
+pub async fn {{ .SnakeName }}(cx: &Cx{{ if .ArgsName }}, {{ if .Sorted }}mut {{ end }}args: crate::api::{{ .ArgsName }}{{ end }}) -> Result<{{ .Output }}, ApiError> {
     let caller = can_{{ .SnakeName }}(cx).await?;
 {{- if .ArgsName }}
     args.check()?;
 {{- end }}
-    let setup: &Setup = app_context(cx);
-    setup
+{{- if .Sorted }}
+    // The cursor names the sort it was returned under (D60, amended).
+    args.page = crate::api::{{ .ArgsName }}::PAGE.unbind(args.page)?;
+    let request = args.page.clone();
+{{- end }}
+    crate::setup(cx)?
         .implementations
         .{{ .Field }}
         .{{ .FunctionName }}(operations::{{ .ConstName }}.context(caller){{ if .ArgsName }}, args{{ end }})
-        .await
+        .await{{ if .Sorted }}?
+        .bind(&request){{ end }}
 }
 {{- end }}
 {{- range .Guards }}
@@ -117,17 +133,22 @@ impl AsService<'_> {
 {{- with .NoProcedure }}
     {{ doc4 (printf "It has no procedure: %s." .) }}
 {{- end }}
-    pub async fn {{ .SnakeName }}(&self, cx: &Cx{{ with .ArgsName }}, args: crate::api::{{ . }}{{ end }}) -> Result<{{ .Output }}, ApiError> {
+    pub async fn {{ .SnakeName }}(&self, cx: &Cx{{ if .ArgsName }}, {{ if .Sorted }}mut {{ end }}args: crate::api::{{ .ArgsName }}{{ end }}) -> Result<{{ .Output }}, ApiError> {
         let caller = self.can_{{ .SnakeName }}(cx).await?;
 {{- if .ArgsName }}
         args.check()?;
 {{- end }}
-        let setup: &Setup = app_context(cx);
-        setup
+{{- if .Sorted }}
+        // The cursor names the sort it was returned under (D60, amended).
+        args.page = crate::api::{{ .ArgsName }}::PAGE.unbind(args.page)?;
+        let request = args.page.clone();
+{{- end }}
+        crate::setup(cx)?
             .implementations
             .{{ .Field }}
             .{{ .FunctionName }}(operations::{{ .ConstName }}.service_context(self.caller.clone(), caller){{ if .ArgsName }}, args{{ end }})
-            .await
+            .await{{ if .Sorted }}?
+            .bind(&request){{ end }}
     }
 
     {{ doc4 .ServiceGuardDoc }}

@@ -48,6 +48,12 @@
           "target": "query.inStock"
         },
         {
+          "toolParameter": "sort",
+          "required": false,
+          "kind": "query",
+          "target": "query.sort"
+        },
+        {
           "toolParameter": "cursor",
           "required": false,
           "kind": "query",
@@ -65,7 +71,7 @@
           "position": 0,
           "kind": "query",
           "target": "query",
-          "sources": ["ids", "inStock", "cursor", "limit"]
+          "sources": ["ids", "inStock", "sort", "cursor", "limit"]
         }
       ]
     },

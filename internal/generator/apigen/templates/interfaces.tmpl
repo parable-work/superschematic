@@ -68,6 +68,12 @@ type {{ toGoName . }}Implementation interface {
 	// order and, while more follow, the cursor of the last one: read up to
 	// page.Limit+1 rows and build the page with paging.FromRows, and read the
 	// cursor back with paging.DecodeCursor, which refuses one it cannot read.
+{{- with .Page.Sort }}
+	// page.Sort is the order to read them in (D60, amended), {{ .Default }} when the
+	// request sends none: a field of {{ join .Fields ", " }}, descending when page.Sort.Desc,
+	// ties broken by id in the same direction. The cursor is your own key's;
+	// the route binds it to the sort and back.
+{{- end }}
 {{- end }}
 {{- if .HasFileUpload }}
 	//
@@ -77,7 +83,7 @@ type {{ toGoName . }}Implementation interface {
 	//   - {{ .Name }} ({{ .ScalarType }}{{ if not .Required }}, optional{{ end }}): max {{ .MaxSize }} bytes, types: {{ join .AllowedTypes ", " }}
 {{- end }}
 {{- end }}
-	{{ .ShortImplName }}(ctx context.Context{{- range .PathParams }}, {{ .Name }} {{ .GoType }}{{- end }}{{- range .QueryParams }}, {{ .Name }} {{ if .IsArray }}[]{{ else if not .Required }}*{{ end }}{{ .GoType }}{{- end }}{{- if .Filterable }}, filters []filterparse.Filter{{- end }}{{- if .HasInput }}, input *types.{{ .InputType }}{{- else if .ScalarArgs }}{{- range .ScalarArgs }}, {{ .Name }} {{ .GoListType }}{{- end }}{{- end }}{{- if .HasFileUpload }}, files map[string]*FileUploadData{{- end }}{{- if .Page }}, page paging.Request{{- end }}) ({{ .GoResultType }}, error)
+	{{ .ShortImplName }}(ctx context.Context{{- range .PathParams }}, {{ .Name }} {{ .GoType }}{{- end }}{{- range .ArgQueryParams }}, {{ .Name }} {{ if .IsArray }}[]{{ else if not .Required }}*{{ end }}{{ .GoType }}{{- end }}{{- if .Filterable }}, filters []filterparse.Filter{{- end }}{{- if .HasInput }}, input *types.{{ .InputType }}{{- else if .ScalarArgs }}{{- range .ScalarArgs }}, {{ .Name }} {{ .GoListType }}{{- end }}{{- end }}{{- if .HasFileUpload }}, files map[string]*FileUploadData{{- end }}{{- if .Page }}, page paging.Request{{- end }}) ({{ .GoResultType }}, error)
 {{- end }}
 {{- end }}
 }

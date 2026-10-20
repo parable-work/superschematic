@@ -77,6 +77,7 @@ const (
 	kindPrefixUnaryExpression       = tsast.Kind(225)
 	kindMinusToken                  = tsast.Kind(40)
 	kindTypeLiteral                 = tsast.Kind(188)
+	kindTupleType                   = tsast.Kind(190)
 	kindPropertySignature           = tsast.Kind(172)
 	kindLiteralType                 = tsast.Kind(202)
 	kindParameter                   = tsast.Kind(170)

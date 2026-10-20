@@ -19,7 +19,10 @@ type form struct {
 	Parse     string // types::validators::parse_booking_input
 	// Rows reports whether the form holds a list rendered as rows, so a
 	// row button submits it: it then has row_action and apply_action.
-	Rows bool
+	// Picks reports whether a control is a search picker (D61, amended),
+	// whose "Find" submits it as a row button does.
+	Rows  bool
+	Picks bool
 	// Choosable reports whether a field takes the app's choices.
 	Choosable bool
 	// UsesForm reports whether the component's view reads the form: a
@@ -42,8 +45,11 @@ type formStruct struct {
 	// parses into the input.
 	Input bool
 	// Rows reports whether it or a struct it nests holds rows, so a row
-	// button can act on it.
-	Rows bool
+	// button can act on it. Picks marks an input's whose form holds a
+	// search picker (D61, amended): it holds the pickers' texts, finds, and
+	// its "Find" buttons act on it as a row button does.
+	Rows  bool
+	Picks bool
 	// Sent reports whether a form asks it whether any of its fields was
 	// sent: it is an optional nested object, or nested in one.
 	Sent bool
@@ -221,8 +227,38 @@ func reserved(st *formStruct) error {
 }
 
 // rowActionName is the name of a form's row buttons, whose value is the
-// row action (add:rooms, remove:rooms[1]).
+// row action (add:rooms, remove:rooms[1]), and of a picker's "Find"
+// (find:lines[0].productId).
 const rowActionName = "_action"
+
+// findName is the name a picker's search box is under: `_find.` and its
+// control's name (D61, amended).
+const findName = "_find"
+
+// reservedPicks refuses a form with a picker whose field would be named as
+// what the form keeps for its pickers: finds, their texts, which the JSON
+// name _find holds, and row_action, the "Find" pressed, which the JSON name
+// _action holds.
+func reservedPicks(form string, fields []*formField) error {
+	for _, f := range fields {
+		switch {
+		case f.Name == "finds":
+			return fmt.Errorf("topcoat: form %s: field %s is the form's finds, its pickers' texts (D61, amended)", form, f.JSONName)
+		case f.JSONName == findName:
+			return fmt.Errorf("topcoat: form %s: field %s has the name of the form's search boxes", form, f.JSONName)
+		case f.Name == "row_action":
+			return fmt.Errorf("topcoat: form %s: field %s is the form's row_action, the picker whose Find is pressed", form, f.JSONName)
+		case f.JSONName == rowActionName:
+			return fmt.Errorf("topcoat: form %s: field %s has the name of the form's Find buttons", form, f.JSONName)
+		}
+	}
+	return nil
+}
+
+// Acts reports whether a button other than the submit acts on the form, a
+// row button or a picker's "Find": it then has row_action and
+// apply_action.
+func (st *formStruct) Acts() bool { return st.Rows || st.Picks }
 
 // maxRows is the most rows a form holds of a list without a listMax, or
 // with one above it, the crate's MAX_ROWS.

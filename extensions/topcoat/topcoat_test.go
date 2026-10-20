@@ -88,12 +88,46 @@ func buildWithNaming(t *testing.T, names registry.Naming, name, outputRoot strin
 // test's own copy of one.
 func buildDir(t *testing.T, names registry.Naming, service, outputRoot string, outputs map[string]any, log io.Writer) (*registry.Result, error) {
 	t.Helper()
-	reg, err := registry.Assemble(names, topcoat.Extension{})
+	return buildIn(t, buildSpec{names: names, dir: service, root: outputRoot, outputs: outputs, log: log})
+}
+
+// buildSpec is a build of the service in dir under names, into root, with
+// outputs as its config's outputs block, writing the build's log to log
+// when it is not nil. depOutputs are the outputs block of each
+// dependency's config as the build reads it (LoadDependencyConfig), the
+// ones a test built the dependency with; a dependency it leaves out reads
+// its own config's.
+type buildSpec struct {
+	names      registry.Naming
+	dir        string
+	root       string
+	outputs    map[string]any
+	log        io.Writer
+	depOutputs map[string]map[string]any
+}
+
+// buildIn runs the build spec describes, with the extension linked. Its
+// encrypted operations are made plain: the Rust router has no decryption
+// step.
+func buildIn(t *testing.T, spec buildSpec) (*registry.Result, error) {
+	t.Helper()
+	service := spec.dir
+	reg, err := registry.Assemble(spec.names, topcoat.Extension{})
 	if err != nil {
 		t.Fatalf("Assemble: %v", err)
 	}
 	load := func(name string) (*ir.Schema, error) {
 		return loader.LoadService(dependencyDir(service, name), loader.WithRegistry(reg))
+	}
+	loadConfig := func(name string) (*registry.SchemaConfig, error) {
+		_, cfg, err := loader.LoadServiceWithConfig(dependencyDir(service, name), loader.WithRegistry(reg), loader.WithDependencyLoader(load))
+		if err != nil {
+			return nil, err
+		}
+		if outputs, ok := spec.depOutputs[name]; ok {
+			cfg.Outputs = outputs
+		}
+		return cfg, nil
 	}
 	schema, cfg, err := loader.LoadServiceWithConfig(service, loader.WithRegistry(reg), loader.WithDependencyLoader(load))
 	if err != nil {
@@ -108,15 +142,16 @@ func buildDir(t *testing.T, names registry.Naming, service, outputRoot string, o
 			}
 		}
 	}
-	cfg.Outputs = outputs
+	cfg.Outputs = spec.outputs
 	return registry.Generate(schema, cfg, registry.Options{
-		OutputRoot:     outputRoot,
-		ServicePath:    service,
-		Paths:          testpaths.Local(t),
-		Naming:         names,
-		Registry:       reg,
-		Log:            log,
-		LoadDependency: load,
+		OutputRoot:           spec.root,
+		ServicePath:          service,
+		Paths:                testpaths.Local(t),
+		Naming:               spec.names,
+		Registry:             reg,
+		Log:                  spec.log,
+		LoadDependency:       load,
+		LoadDependencyConfig: loadConfig,
 	})
 }
 
@@ -650,7 +685,8 @@ func TestAServiceOnlyOperationIsCalledAsAService(t *testing.T) {
 // TestTheSetupSharesOneRegistry reads every golden crate: its setup makes
 // one registry of the operations' rate limiters, which the JSON API's
 // routes, the procedures and the pages take from, so none of them makes a
-// limiter of its own (D44, amended).
+// limiter of its own (D44, amended), whether it mounts the JSON API or not
+// (D61, amended).
 func TestTheSetupSharesOneRegistry(t *testing.T) {
 	dirs, err := filepath.Glob(filepath.Join("testdata", "golden", "*", "src"))
 	if err != nil || len(dirs) == 0 {
@@ -853,14 +889,22 @@ func cargoTestCrate(t *testing.T, service, test string, devDeps ...string) {
 // outputsOf the service's, the service's directory when it is a test's
 // own copy of the fixture, and the dependencies whose Rust types crates
 // its crates build against, each built into the same output root first,
-// as build --with-deps builds them.
+// as build --with-deps builds them, with depOutputs as its outputs when
+// the test gives them (its API and Topcoat crates, say), else its types
+// alone. table is the body of superschematic.toml's [extension.topcoat],
+// under which every crate is built. appends are text added to the end of
+// the crate's own files, by slash path from the crate's directory, such as
+// a unit test module that reaches a module's private items.
 type crateOptions struct {
 	features        []string
 	devDependencies string
 	files           map[string]string
+	appends         map[string]string
 	outputs         map[string]any
 	dir             string
 	dependencies    []string
+	depOutputs      map[string]map[string]any
+	table           string
 }
 
 // outputsOf are a fixture's outputs in the tests that build every fixture
@@ -899,13 +943,25 @@ func cargoTestCrateWith(t *testing.T, service, test string, options crateOptions
 	if source == "" {
 		source = serviceDir(service)
 	}
+	names := registry.DefaultNaming()
+	if options.table != "" {
+		var err error
+		if names, err = registry.ParseNaming([]byte("[extension.topcoat]\n"+options.table), "superschematic.toml"); err != nil {
+			t.Fatalf("ParseNaming: %v", err)
+		}
+	}
+	depOutputs := map[string]map[string]any{}
 	for _, dep := range options.dependencies {
-		types := map[string]any{"types": map[string]any{"rust": map[string]any{"enabled": true}}}
-		if _, err := buildDir(t, registry.DefaultNaming(), dependencyDir(source, dep), root, types, nil); err != nil {
+		built, ok := options.depOutputs[dep]
+		if !ok {
+			built = map[string]any{"types": map[string]any{"rust": map[string]any{"enabled": true}}}
+		}
+		depOutputs[dep] = built
+		if _, err := buildIn(t, buildSpec{names: names, dir: dependencyDir(source, dep), root: root, outputs: built}); err != nil {
 			t.Fatalf("build %s, a dependency of %s: %v", dep, service, err)
 		}
 	}
-	if _, err := buildDir(t, registry.DefaultNaming(), source, root, outputs, nil); err != nil {
+	if _, err := buildIn(t, buildSpec{names: names, dir: source, root: root, outputs: outputs, depOutputs: depOutputs}); err != nil {
 		t.Fatalf("build %s: %v", service, err)
 	}
 	dir := topcoat.Dir(root, service)
@@ -942,6 +998,16 @@ tokio = { version = "1.52.2", features = ["macros", "rt-multi-thread"] }
 			t.Fatal(err)
 		}
 		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for name, content := range options.appends {
+		path := filepath.Join(dir, filepath.FromSlash(name))
+		source, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, append(source, content...), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}

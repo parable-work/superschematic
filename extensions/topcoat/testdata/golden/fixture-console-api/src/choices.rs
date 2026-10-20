@@ -7,6 +7,8 @@
 
 use std::sync::Arc;
 
+use topcoat::runtime::record;
+
 /// The options the app supplies for fields, each a value and its label. An
 /// API type does not say which values an id may take (a product's, a
 /// room's), so the page says, per field: a form renders a text or number
@@ -23,6 +25,8 @@ pub struct Choices {
     /// Each field's options by its name, shared with the choices `under`
     /// gives.
     fields: Arc<Vec<(String, Vec<Choice>)>>,
+    /// Each search picker's pick (D61, amended), by its control's name.
+    picks: Arc<Vec<(String, Pick)>>,
     /// The place of the record or object these choices are for, before each
     /// name they look up: `lines.` for a line's, empty at the root.
     at: String,
@@ -33,6 +37,48 @@ pub struct Choices {
 pub struct Choice {
     pub value: String,
     pub label: String,
+}
+
+/// A search picker's pick (D61, amended): the control refers to an item of
+/// a target whose options operation searches, so it is a search box over a
+/// select of the items the box's text finds.
+#[record]
+#[derive(Debug, Clone, PartialEq)]
+pub struct Pick {
+    /// The text sent, the box's value.
+    pub text: String,
+    /// The items the text finds, its first page, or the first page of all
+    /// of them for an empty text, and the value held among them, each by
+    /// its label.
+    pub options: Vec<PickOption>,
+    /// More items match than the page holds.
+    pub more: bool,
+    /// Why the text found nothing: the search argument's refusal, as its
+    /// route words it, or a render's searches past their cap.
+    pub refused: Option<String>,
+}
+
+/// One item a picker offers: the value its select sends and its label.
+#[record]
+#[derive(Debug, Clone, PartialEq)]
+pub struct PickOption {
+    pub value: String,
+    pub label: String,
+}
+
+/// A picker's control as its form renders it, which its shard renders
+/// again: the select's name and id, whether it requires a value and has an
+/// error, the value it holds, and whether its "Find" posts its form
+/// (`_action=find:<name>`) or, in a filter, sends its query.
+#[record]
+#[derive(Debug, Clone, PartialEq)]
+pub struct PickControl {
+    pub name: String,
+    pub id: String,
+    pub required: bool,
+    pub invalid: bool,
+    pub value: String,
+    pub post: bool,
 }
 
 impl Choices {
@@ -70,6 +116,20 @@ impl Choices {
             .map(|choice| choice.label.as_str())
     }
 
+    /// The pick of the search picker named `name`, `lines[0].productId`
+    /// (D61, amended).
+    pub fn pick(&self, name: &str) -> Option<&Pick> {
+        let name = format!("{}{name}", self.at);
+        self.picks.iter().rev().find(|(at, _)| *at == name).map(|(_, pick)| pick)
+    }
+
+    /// These choices with `pick` for the search picker named `name`.
+    #[must_use]
+    pub fn with_pick(mut self, name: impl Into<String>, pick: Pick) -> Self {
+        Arc::make_mut(&mut self.picks).push((format!("{}{}", self.at, name.into()), pick));
+        self
+    }
+
     /// These choices, then `other`'s, which win where both name a field:
     /// the app's choices with one resource's own (`pages::Settings`).
     #[must_use]
@@ -98,13 +158,22 @@ impl Choices {
             })
             .collect();
         fields.extend(self.fields.iter().cloned());
-        Self { fields: Arc::new(fields), at: self.at }
+        let mut picks: Vec<(String, Pick)> = base
+            .picks
+            .iter()
+            .filter_map(|(name, pick)| {
+                let field = name.strip_prefix(base.at.as_str())?;
+                Some((format!("{}{field}", self.at), pick.clone()))
+            })
+            .collect();
+        picks.extend(self.picks.iter().cloned());
+        Self { fields: Arc::new(fields), picks: Arc::new(picks), at: self.at }
     }
 
     /// The choices of the object or the rows at `field`, by their own
     /// fields' names: `productId` under `lines` is `lines.productId`.
     pub fn under(&self, field: &str) -> Self {
-        Self { fields: Arc::clone(&self.fields), at: format!("{}{field}.", self.at) }
+        Self { fields: Arc::clone(&self.fields), picks: Arc::clone(&self.picks), at: format!("{}{field}.", self.at) }
     }
 
     fn find(&self, field: &str) -> Option<&[Choice]> {

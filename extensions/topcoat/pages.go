@@ -128,11 +128,15 @@ func (m *pagesModel) Live() bool {
 
 // ControlsUse reports whether the route of an operation a page calls has
 // the control ("rate_limit", "body_limit" or "timeout"), so pages.rs
-// declares what applies it.
+// declares what applies it. "rate_limit" is a rate limit of the service's
+// own operation, whose limiter the app's registry the setup hands
+// route_controls holds, and "rate_from" one of an API dependency's (D61,
+// amended), whose limiter its crate's setup holds.
 func (m *pagesModel) ControlsUse(control string) bool {
 	for _, c := range m.Controls {
 		switch {
-		case control == "rate_limit" && c.RateLimit > 0,
+		case control == "rate_limit" && c.RateLimit > 0 && c.Crate == "",
+			control == "rate_from" && c.RateLimit > 0 && c.Crate != "",
 			control == "body_limit" && c.BodyLimit > 0,
 			control == "timeout" && c.Timeout > 0:
 			return true
@@ -199,6 +203,12 @@ type pageResource struct {
 	Prev       bool
 	Sizes      []int
 	SizesConst string
+	// Sort is a sorted list's sort (D60, amended), its argument form's,
+	// and SortColumns its table's columns that are its sort fields, whose
+	// headers sort it (D44, amended), in the table's order; nil and none
+	// for a list without a sort.
+	Sort        *argSort
+	SortColumns []string
 	// ColParams are the route parameters of the collection, its
 	// ancestors' items'; ItemParams those and Item, an item's.
 	ColParams  []string
@@ -324,15 +334,15 @@ type pageOp struct {
 	ChoicesFn string
 }
 
-// ChoicesExpr is the Rust of the choices the operation's form takes on
-// the pages of resource: the app's, and each reference's options under
-// them.
-func (o *pageOp) ChoicesExpr(resource string) string {
+// ChoicesExpr is the Rust of the choices the operation's form, form, a
+// reference to it, takes on the pages of resource: the app's, and each
+// reference's options and each picker's pick under them.
+func (o *pageOp) ChoicesExpr(resource, form string) string {
 	app := "choices_of(cx, " + rustString(resource) + ")"
 	if o.ChoicesFn == "" {
 		return app
 	}
-	return "references::" + o.ChoicesFn + "(cx, " + app + ").await"
+	return "references::" + o.ChoicesFn + "(cx, " + form + ", " + app + ").await"
 }
 
 // routeField is a path argument of an operation: the page route's
@@ -365,13 +375,15 @@ func (o *pageOp) FormComponent() string {
 	return o.InputForm.Component
 }
 
-// Rows reports whether the form holds rows, which a row button adds or
-// removes without the operation.
-func (o *pageOp) Rows() bool {
+// Acts reports whether a button other than the submit acts on the form
+// without the operation: a row button, which adds or removes a row, or a
+// picker's "Find" (D61, amended), which renders it again with what its text
+// finds.
+func (o *pageOp) Acts() bool {
 	if o.ArgForm != nil {
-		return o.ArgForm.Rows()
+		return o.ArgForm.Acts()
 	}
-	return o.InputForm != nil && o.InputForm.Rows
+	return o.InputForm != nil && (o.InputForm.Rows || o.InputForm.Picks)
 }
 
 // NewForm is the Rust of the operation's new form, its path arguments the
@@ -406,7 +418,7 @@ func (o *pageOp) paramOf(name string) string {
 
 // MutForm reports whether submit_<op> changes the form it is given: the
 // route's values or a row button.
-func (o *pageOp) MutForm() bool { return len(o.RouteFields) > 0 && o.ArgForm != nil || o.Rows() }
+func (o *pageOp) MutForm() bool { return len(o.RouteFields) > 0 && o.ArgForm != nil || o.Acts() }
 
 // RouteNames are the API's names of its path arguments, as a Rust slice's
 // items.
@@ -505,6 +517,21 @@ func pagesOf(c *crate, schemas schemaSet, site *pageSite, prefix, title string, 
 			return nil, err
 		}
 	}
+	// A table a sorted list shows takes the headers' Sorted, its sortable
+	// columns those of every such list.
+	for _, r := range m.Resources {
+		for i := range c.Views {
+			if len(r.SortColumns) == 0 || c.Views[i].Record != r.RowRecord {
+				continue
+			}
+			if c.Views[i].SortFields == nil {
+				c.Views[i].SortFields = map[string]bool{}
+			}
+			for _, column := range r.SortColumns {
+				c.Views[i].SortFields[column] = true
+			}
+		}
+	}
 	if len(m.Resources) == 0 {
 		logf("  - topcoat: no pages: no operation a page calls describes a resource\n")
 		return nil, nil
@@ -564,12 +591,13 @@ func (b *pageBuilder) controls() {
 	add := func(method, path string, o *pageOp, refs ...string) {
 		page := controlledPage{Method: method, Path: path, Own: -1}
 		if o != nil {
-			page.Own = place(o.Snake, controlsOf(o.c.d.endpoint))
+			own := controlsOf(o.c.d.endpoint)
+			page.Own = place(own.key(), own)
 		}
 		seen := map[int]bool{page.Own: true}
 		for _, fn := range refs {
 			for _, options := range b.refs.OptionsCalledBy(fn) {
-				if i := place(options.Snake, options.controls); i >= 0 && !seen[i] {
+				if i := place(options.controls.key(), options.controls); i >= 0 && !seen[i] {
 					seen[i] = true
 					page.Called = append(page.Called, i)
 				}
@@ -817,6 +845,43 @@ func (b *pageBuilder) pager(r *pageResource) {
 	}
 }
 
+// sorting sets a sorted list's sort and the columns of its table, v,
+// whose headers sort it (D44, amended): each sort field the table shows,
+// in the table's order. A sort field the table shows no column of is
+// sorted only by the query, which the build log says.
+func (b *pageBuilder) sorting(r *pageResource, v view) {
+	e := r.List.c.d.endpoint
+	if e.Page.Sort == nil || r.List.ArgForm == nil || r.List.ArgForm.Sort == nil {
+		return
+	}
+	r.Sort = r.List.ArgForm.Sort
+	shown := map[string]bool{}
+	for _, column := range v.Columns {
+		shown[column.JSONName] = true
+		if slices.Contains(e.Page.Sort.Fields, column.JSONName) {
+			r.SortColumns = append(r.SortColumns, column.JSONName)
+		}
+	}
+	for _, field := range e.Page.Sort.Fields {
+		if !shown[field] {
+			b.logf("  - topcoat: %s sorts by %s, which its table shows no column of\n", r.Name, field)
+		}
+	}
+	b.m.use("sorting")
+	if len(r.SortColumns) > 0 {
+		b.m.importName("views", "Sorted")
+	}
+}
+
+// SortColumnsExpr is the Rust slice of the list's sortable columns.
+func (r *pageResource) SortColumnsExpr() string {
+	columns := make([]string, len(r.SortColumns))
+	for i, column := range r.SortColumns {
+		columns[i] = rustString(column)
+	}
+	return "&[" + strings.Join(columns, ", ") + "]"
+}
+
 // pageSizes are the sizes a paged list's size form offers whatever the
 // query sends, in order and each once: the route's defaultLimit and
 // maxLimit, and each of pageSizeSteps below maxLimit. The page adds the
@@ -960,6 +1025,7 @@ func (b *pageBuilder) fill(r *pageResource) error {
 		if r.List.Paged {
 			r.BaseExpr = r.Ident + "_href(" + pass(r.ColParams, "&") + ").unwrap_or_default()"
 			b.pager(r)
+			b.sorting(r, v)
 		}
 	}
 	if r.Detail != nil {
@@ -1405,7 +1471,7 @@ func (b *pageBuilder) finish() {
 				continue
 			}
 			m.use("seeOther", "form", "alone", "pageRefusal", "formErrors")
-			if o.Rows() {
+			if o.Acts() {
 				m.use("rowsAgain")
 			}
 		}
@@ -1434,7 +1500,7 @@ func (o *pageOp) SentLines() string {
 	switch {
 	case o.ArgForm != nil && len(o.RouteFields) > 0:
 		mut := ""
-		if o.Rows() {
+		if o.Acts() {
 			mut = "mut "
 		}
 		lines = append(lines, "// The route's values, never the hidden inputs, which a reader can change.", "let "+mut+"form = "+o.ArgForm.Name+" {")
@@ -1442,7 +1508,7 @@ func (o *pageOp) SentLines() string {
 			lines = append(lines, "    "+field.Field+": Some("+field.Param+".clone()),")
 		}
 		lines = append(lines, "    ..form", "};")
-	case o.Rows():
+	case o.Acts():
 		lines = append(lines, "let mut form = form;")
 	}
 	done := strings.Split(o.DoneLines, "\n")
@@ -1462,7 +1528,7 @@ func (o *pageOp) SentLines() string {
 		send = append(send, indentEach(12, done)...)
 		send = append(send, "        }", "        Err(err) => Refusal::from_api(&err),", "    },", "    Err(errors) => Refusal::from(errors),", "}")
 	}
-	if o.Rows() {
+	if o.Acts() {
 		lines = append(lines, "let sent = if form.apply_action() {", "    rows_again()", "} else {")
 		lines = append(lines, indentEach(4, send)...)
 		lines = append(lines, "};")

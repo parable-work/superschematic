@@ -99,11 +99,13 @@ type ToolsOutput struct {
 	// HasPagedReturns reports whether a tool returns a page (D60), whose
 	// return schema has properties, {items, next}.
 	HasPagedReturns bool
-	// HasReferences and HasSearch report whether a tool's parameters hold
-	// a reference (D61) or a search argument (D62), which tools/index.ts
-	// then types under the keys' names.
+	// HasReferences, HasSearch and HasSort report whether a tool's
+	// parameters hold a reference (D61), a search argument (D62) or a sort
+	// argument (D60, amended), which tools/index.ts then types under the
+	// keys' names.
 	HasReferences bool
 	HasSearch     bool
+	HasSort       bool
 }
 
 // ToolsNamespace groups tools by namespace for TypeScript generation
@@ -179,9 +181,10 @@ func GenerateTools(sdkOutput *SDKOutput, apiOutput *apigen.APIOutput, clock code
 			if len(tool.Returns.Properties) > 0 {
 				output.HasPagedReturns = true
 			}
-			reference, search := tool.Parameters.Holds()
-			output.HasReferences = output.HasReferences || reference
-			output.HasSearch = output.HasSearch || search
+			holding := tool.Parameters.Holds()
+			output.HasReferences = output.HasReferences || holding.Reference
+			output.HasSearch = output.HasSearch || holding.Search
+			output.HasSort = output.HasSort || holding.Sort
 			if tool.MCP != nil && !tool.MCP.Hidden {
 				output.VisibleTools = append(output.VisibleTools, tool)
 			}
@@ -252,7 +255,7 @@ func endpointToTool(
 			ValidateMinLength: arg.ValidateMinLength, ValidateMaxLength: arg.ValidateMaxLength,
 			ValidateListMin: arg.ValidateListMin, ValidateListMax: arg.ValidateListMax,
 			ValidatePattern: arg.ValidatePattern,
-			Reference:       arg.Reference, Search: arg.Search,
+			Reference:       arg.Reference, Search: arg.Search, Sort: arg.Sort,
 		}
 	}
 

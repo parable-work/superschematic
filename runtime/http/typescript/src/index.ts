@@ -53,15 +53,24 @@ export {
   PAGE_CURSOR_MAX_LENGTH,
   REFUSED_CURSOR_DETAIL,
   REFUSED_CURSOR_REASON,
+  SORTED_CURSOR_DETAIL,
+  SORTED_CURSOR_REASON,
+  bindCursor,
+  bindPage,
   decodeCursor,
   encodeCursor,
   lastPage,
   morePage,
   pageFromRows,
+  parseSort,
   readPage,
   refusedCursor,
+  sortText,
+  sortValues,
+  sortedCursor,
+  unbindCursor,
 } from './page.js';
-export type { Page, PageQuery, PageRequest, PageSpec } from './page.js';
+export type { Page, PageQuery, PageRequest, PageSort, PageSpec, SortSpec } from './page.js';
 export { authorize, covers, hasAnyPermission } from './auth.js';
 export type { Authenticator, PermissionMatcher, Principal } from './auth.js';
 export { authorizeService, ed25519PublicJwkFromPem, serviceAuthenticator } from './serviceauth.js';

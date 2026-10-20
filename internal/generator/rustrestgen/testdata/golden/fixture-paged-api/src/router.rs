@@ -17,7 +17,7 @@ use superschematic_http_runtime::{
     request_ids, required_input, ApiError, ParamKind, ParamLocation, ParamSpec, QueryValues,
     RequestContext, RouterOptions, ScalarConstraints,
 };
-use superschematic_http_runtime::page::PageSpec;
+use superschematic_http_runtime::page::{PageSpec, SortSpec};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -136,7 +136,7 @@ fn decode_catalog_list_items(query: &QueryValues) -> Result<CatalogListItemsArgs
     Ok(CatalogListItemsArgs {
         ids: CATALOG_LIST_ITEMS_IDS.query(query)?,
         in_stock: CATALOG_LIST_ITEMS_IN_STOCK.query(query)?,
-        page: CatalogListItemsArgs::PAGE.query(query)?,
+        page: CatalogListItemsArgs::PAGE.unbind(CatalogListItemsArgs::PAGE.query(query)?)?,
     })
 }
 
@@ -144,7 +144,11 @@ impl CatalogListItemsArgs {
     /// The route's @paginated limits (D60): the router reads the `cursor`
     /// and `limit` query parameters into `page` by them, and `check` holds
     /// a caller's `page` to them.
-    pub const PAGE: PageSpec = PageSpec::new(2, 5);
+    /// Its sort (D60, amended) is the `sort` query parameter, which the
+    /// router reads after the limit; `PAGE.unbind` fills its default in and
+    /// unbinds the cursor, and `Page::bind` binds the next to it, in the
+    /// router and in an in-process call alike.
+    pub const PAGE: PageSpec = PageSpec::new(2, 5).sorted(SortSpec::new("sort", &["name", "sku"], "name"));
 
     /// Checks arguments a caller built, in-process rather than in a
     /// request, as the router checks a request's: each by its parameter's
@@ -175,11 +179,14 @@ async fn handle_catalog_list_items(
     let mut ctx = RequestContext::new(method_from_str("get"), "/api/items".to_string());
     ctx.headers = headers_to_map(&headers);
     ctx.query_params = query.last_values();
+    // The page's next names the sort it was read in (D60, amended).
+    let page = args.page.clone();
     let result = state
         .implementations
         .catalog
         .list_items(ctx, args)
-        .await;
+        .await
+        .and_then(|listed| listed.bind(&page));
     operation_response(result, request_id.as_deref())
 }
 
