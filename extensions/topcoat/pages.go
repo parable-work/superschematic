@@ -128,11 +128,15 @@ func (m *pagesModel) Live() bool {
 
 // ControlsUse reports whether the route of an operation a page calls has
 // the control ("rate_limit", "body_limit" or "timeout"), so pages.rs
-// declares what applies it.
+// declares what applies it. "rate_limit" is a rate limit of the service's
+// own operation, whose limiter the app's registry the setup hands
+// route_controls holds, and "rate_from" one of an API dependency's (D61,
+// amended), whose limiter its crate's setup holds.
 func (m *pagesModel) ControlsUse(control string) bool {
 	for _, c := range m.Controls {
 		switch {
-		case control == "rate_limit" && c.RateLimit > 0,
+		case control == "rate_limit" && c.RateLimit > 0 && c.Crate == "",
+			control == "rate_from" && c.RateLimit > 0 && c.Crate != "",
 			control == "body_limit" && c.BodyLimit > 0,
 			control == "timeout" && c.Timeout > 0:
 			return true
@@ -587,12 +591,13 @@ func (b *pageBuilder) controls() {
 	add := func(method, path string, o *pageOp, refs ...string) {
 		page := controlledPage{Method: method, Path: path, Own: -1}
 		if o != nil {
-			page.Own = place(o.Snake, controlsOf(o.c.d.endpoint))
+			own := controlsOf(o.c.d.endpoint)
+			page.Own = place(own.key(), own)
 		}
 		seen := map[int]bool{page.Own: true}
 		for _, fn := range refs {
 			for _, options := range b.refs.OptionsCalledBy(fn) {
-				if i := place(options.Snake, options.controls); i >= 0 && !seen[i] {
+				if i := place(options.controls.key(), options.controls); i >= 0 && !seen[i] {
 					seen[i] = true
 					page.Called = append(page.Called, i)
 				}

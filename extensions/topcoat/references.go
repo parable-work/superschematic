@@ -45,8 +45,39 @@ type refOptions struct {
 	// Search is its search argument's call (D61, amended), which a picker
 	// makes for the text a reader types; nil when it does not search.
 	Search *refSearch
+	// Hosted is the crate of the API dependency whose operation it is
+	// (D61, amended), nil for the service's own, whose call it makes
+	// through that crate's operations, under that crate's setup.
+	Hosted *hostedCrate
 	// controls are its route's, which a page that calls it meets.
 	controls routeControls
+}
+
+// API is the Rust path of the API crate of the options operation: the
+// service's own, or its dependency's through its hosted crate.
+func (o *refOptions) API() string {
+	if o.Hosted != nil {
+		return o.Hosted.Ident + "::api"
+	}
+	return "crate::api"
+}
+
+// Ops is the Rust path of the module of the options operation's in-process
+// call.
+func (o *refOptions) Ops() string {
+	if o.Hosted != nil {
+		return o.Hosted.Ident + "::operations"
+	}
+	return "operations"
+}
+
+// PageRequest is the Rust path of the page request a paged options call
+// asks for.
+func (o *refOptions) PageRequest() string {
+	if o.Hosted != nil {
+		return o.Hosted.Ident + "::api::runtime::page::PageRequest"
+	}
+	return "PageRequest"
 }
 
 // refSearch is an options operation's search argument (SearchQuery, D62),
@@ -122,10 +153,21 @@ func (s *refSource) PickPath(service string) string {
 // operation, from the app's registry, `limits`, which a picker's shard
 // meets; None for a route without a rate limit.
 func (s *refSource) RateLimitExpr() string {
-	if s.Options.controls.RateLimit == 0 {
+	if s.Options.controls.RateLimit == 0 || s.Options.Hosted != nil {
 		return "None"
 	}
 	return "limits.of(&crate::api::operations::" + s.Options.controls.Const + ")"
+}
+
+// RateFromExpr is the Rust of the function that takes the limiter of an
+// API dependency's options operation from its crate's setup at a request
+// (D61, amended); None for the service's own, or a route without a rate
+// limit.
+func (s *refSource) RateFromExpr() string {
+	if s.Options.controls.RateLimit == 0 || s.Options.Hosted == nil {
+		return "None"
+	}
+	return "Some(" + s.Options.controls.LimiterFrom() + ")"
 }
 
 // TimeoutExpr is the Rust Option of the options operation's route's
@@ -314,11 +356,11 @@ func sitesText(sites []refSite) string {
 	return strings.Join(parts, ", ")
 }
 
-// Paged reports whether an options operation pages, so references.rs
-// names PageRequest.
+// Paged reports whether an options operation of the service's own pages,
+// so references.rs names PageRequest.
 func (m *referencesModel) Paged() bool {
 	for _, o := range m.Options {
-		if o.Paged {
+		if o.Paged && o.Hosted == nil {
 			return true
 		}
 	}
@@ -421,11 +463,15 @@ func (m *referencesModel) PickControlled() []*refSource {
 }
 
 // PicksUse reports whether a picker's shard meets the control
-// ("rate_limit" or "timeout").
+// ("rate_limit" or "timeout"): "rate_limit" the rate limit of the
+// service's own operation, from the app's registry the setup hands
+// route_controls, and "rate_from" an API dependency's, from its crate's
+// setup (D61, amended).
 func (m *referencesModel) PicksUse(control string) bool {
 	for _, s := range m.PickControlled() {
 		switch {
-		case control == "rate_limit" && s.Options.controls.RateLimit > 0,
+		case control == "rate_limit" && s.Options.controls.RateLimit > 0 && s.Options.Hosted == nil,
+			control == "rate_from" && s.Options.controls.RateLimit > 0 && s.Options.Hosted != nil,
 			control == "timeout" && s.Options.controls.Timeout > 0:
 			return true
 		}
@@ -478,6 +524,17 @@ func (m *referencesModel) Listing() bool {
 	return false
 }
 
+// OwnOperations reports whether an options operation is the service's
+// own, so references.rs names its operations module.
+func (m *referencesModel) OwnOperations() bool {
+	for _, o := range m.Options {
+		if o.Hosted == nil {
+			return true
+		}
+	}
+	return false
+}
+
 // FormNames are the forms references.rs names, whose choices functions
 // read them, sorted and joined.
 func (m *referencesModel) FormNames() string {
@@ -511,14 +568,16 @@ func (m *referencesModel) UsesLookup(l *refLookup) bool {
 // refers to an item.
 func referencesOf(c *crate, schemas schemaSet, inProcess []declared, trails []trailStep, logf func(format string, args ...any)) (*referencesModel, error) {
 	b := &refBuilder{
-		schemas: schemas,
-		calls:   map[*ir.FieldDef]declared{},
-		sources: map[string]*refSource{},
-		options: map[*ir.FieldDef]*refOptions{},
-		lookups: map[string]*refLookup{},
-		logged:  map[string]bool{},
-		logf:    logf,
-		m:       &referencesModel{},
+		schemas:   schemas,
+		calls:     map[*ir.FieldDef]declared{},
+		sources:   map[string]*refSource{},
+		options:   map[*ir.FieldDef]*refOptions{},
+		lookups:   map[string]*refLookup{},
+		hosted:    c.Hosted,
+		hostedNot: c.hostedNot,
+		logged:    map[string]bool{},
+		logf:      logf,
+		m:         &referencesModel{},
 	}
 	b.dependencies = map[string]*ir.Schema{}
 	for _, dep := range schemas[1:] {
@@ -653,14 +712,19 @@ type refBuilder struct {
 	dependencies map[string]*ir.Schema
 	// calls are the in-process calls by their operation; noCall the reason
 	// of each operation without one.
-	calls   map[*ir.FieldDef]declared
-	noCall  map[*ir.FieldDef]string
-	sources map[string]*refSource
-	options map[*ir.FieldDef]*refOptions
-	lookups map[string]*refLookup
-	logged  map[string]bool
-	logf    func(format string, args ...any)
-	m       *referencesModel
+	calls  map[*ir.FieldDef]declared
+	noCall map[*ir.FieldDef]string
+	// hosted are the crates of the API dependencies one app hosts beside
+	// the service, whose calls a reference to a dependency's options makes
+	// (D61, amended); hostedNot why each other API dependency has none.
+	hosted    map[string]*hostedCrate
+	hostedNot map[string]string
+	sources   map[string]*refSource
+	options   map[*ir.FieldDef]*refOptions
+	lookups   map[string]*refLookup
+	logged    map[string]bool
+	logf      func(format string, args ...any)
+	m         *referencesModel
 }
 
 // log writes a reference's reason once.
@@ -788,14 +852,29 @@ func (b *refBuilder) source(holder string, ref *ir.ReferenceDef) *refSource {
 		return nil
 	}
 	options := resolved.OptionsSet.Name + "." + resolved.Options.Name
-	d, ok := b.calls[resolved.Options]
+	calls, noCalls := b.calls, b.noCall
+	var hosted *hostedCrate
+	if service := resolved.OptionsService; service != "" {
+		// The options of an API dependency's type are its own operation's
+		// (D61, amended), which its crate calls, when one app hosts both.
+		options = service + "'s " + options
+		if hosted = b.hosted[service]; hosted == nil {
+			b.log("  - topcoat: %s refers to %s, whose options operation %s has no in-process call: %s\n", holder, targetName(resolved), options, b.hostedNot[service])
+			return nil
+		}
+		calls, noCalls = hosted.calls, hosted.noCall
+	}
+	d, ok := calls[resolved.Options]
 	if !ok {
-		reason := b.noCall[resolved.Options]
+		reason := noCalls[resolved.Options]
 		if reason == "" {
 			reason = "it is not among the crate's operations"
 		}
 		b.log("  - topcoat: %s refers to %s, whose options operation %s has no in-process call: %s\n", holder, targetName(resolved), options, reason)
 		return nil
+	}
+	if hosted != nil {
+		hosted.used = true
 	}
 	label := ""
 	if resolved.Label != nil {
@@ -805,7 +884,7 @@ func (b *refBuilder) source(holder string, ref *ir.ReferenceDef) *refSource {
 	if resolved.Lookup != nil {
 		lookup = resolved.Lookup.Name
 	}
-	key := strings.Join([]string{resolved.TargetService, resolved.TargetName, resolved.Value.Name, label, options, lookup}, "|")
+	key := strings.Join([]string{resolved.TargetService, resolved.TargetName, resolved.Value.Name, label, resolved.OptionsService, options, lookup}, "|")
 	if s := b.sources[key]; s != nil {
 		return s
 	}
@@ -814,7 +893,7 @@ func (b *refBuilder) source(holder string, ref *ir.ReferenceDef) *refSource {
 		Plural:  b.pluralOf(resolved),
 		Value:   resolved.Value.Name,
 		Label:   label,
-		Options: b.optionsOf(d, resolved.Search),
+		Options: b.optionsOf(d, resolved.Search, hosted),
 		key:     key,
 	}
 	if resolved.Lookup != nil {
@@ -834,18 +913,30 @@ func (b *refBuilder) pluralOf(resolved ir.ResolvedReference) string {
 }
 
 // optionsOf is the options call of the operation d serves, made once, and
-// its search's, by search, when it has one (D61, amended).
-func (b *refBuilder) optionsOf(d declared, search *ir.ArgumentDef) *refOptions {
+// its search's, by search, when it has one (D61, amended), through hosted,
+// the crate of the API dependency whose operation it is, or the service's
+// own when nil. A dependency's functions are named after it too.
+func (b *refBuilder) optionsOf(d declared, search *ir.ArgumentDef, hosted *hostedCrate) *refOptions {
 	if o := b.options[d.op]; o != nil {
 		return o
 	}
 	e := d.endpoint
+	stem := e.SnakeName()
+	operation := e.Namespace + "." + e.Name
+	if hosted != nil {
+		stem = strings.TrimPrefix(registry.RustIdentifier(hosted.Service, "service"), "r#") + "_" + stem
+		operation = hosted.Service + "'s " + operation
+	}
 	o := &refOptions{
-		Fn:        e.SnakeName() + "_options",
-		Operation: e.Namespace + "." + e.Name,
+		Fn:        stem + "_options",
+		Operation: operation,
 		Snake:     e.SnakeName(),
 		Paged:     e.Page != nil,
+		Hosted:    hosted,
 		controls:  controlsOf(e),
+	}
+	if hosted != nil {
+		o.controls.Crate = hosted.Ident
 	}
 	if e.HasArgs() {
 		o.ArgsName = e.ArgsName
@@ -858,7 +949,7 @@ func (b *refBuilder) optionsOf(d declared, search *ir.ArgumentDef) *refOptions {
 			if param.Name != search.Name {
 				continue
 			}
-			o.Search = &refSearch{Fn: e.SnakeName() + "_search", Arg: search.Name, Field: param.Field}
+			o.Search = &refSearch{Fn: stem + "_search", Arg: search.Name, Field: param.Field}
 			o.Search.Attrs = b.schemas.argField(search, param, "query", true).Attrs
 			for _, other := range e.QueryArgs {
 				if other.Name != search.Name {
@@ -875,7 +966,7 @@ func (b *refBuilder) optionsOf(d declared, search *ir.ArgumentDef) *refOptions {
 // lookupOf is the lookup call of the operation d serves by arg, made once.
 func (b *refBuilder) lookupOf(d declared, options *refOptions, arg *ir.ArgumentDef) *refLookup {
 	e := d.endpoint
-	key := e.SnakeName() + "|" + arg.Name
+	key := options.Fn + "|" + arg.Name
 	if l := b.lookups[key]; l != nil {
 		return l
 	}
@@ -887,7 +978,7 @@ func (b *refBuilder) lookupOf(d declared, options *refOptions, arg *ir.ArgumentD
 			l.Others = append(l.Others, param.Field)
 		}
 	}
-	l.Fn = e.SnakeName() + "_by_" + strings.TrimPrefix(registry.RustIdentifier(arg.Name, "values"), "r#")
+	l.Fn = strings.TrimSuffix(options.Fn, "_options") + "_by_" + strings.TrimPrefix(registry.RustIdentifier(arg.Name, "values"), "r#")
 	switch b.schemas.leafOf(arg.TypeRef.Name) {
 	case integerLeaf:
 		l.Read = "as_integer"

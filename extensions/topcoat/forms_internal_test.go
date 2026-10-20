@@ -275,10 +275,11 @@ func TestAMemberIsLabeledByItsTitle(t *testing.T) {
 
 // TestRowButtonsFollowTheDefaultButton reads every golden's forms.rs, as
 // cargo never does, for the order Enter depends on (D44, amended): in each
-// component whose view holds a row button (name="_action"), the first
-// button is the hidden default, which submits the form without an
-// _action. testdata/enter.rs holds every page the cargo tests render to
-// the whole rule.
+// component whose view holds a row button (name="_action"), or a search
+// picker, whose shard renders a Find (D61, amended), the first button is
+// the hidden default, which submits the form without an _action.
+// testdata/enter.rs holds every page the cargo tests render to the whole
+// rule.
 func TestRowButtonsFollowTheDefaultButton(t *testing.T) {
 	const defaultButton = `<button type="submit" class="ss-submit" hidden=(true)></button>`
 	goldens, err := filepath.Glob(filepath.Join("testdata", "golden", "*", "src", "forms.rs"))
@@ -300,11 +301,15 @@ func TestRowButtonsFollowTheDefaultButton(t *testing.T) {
 			// the file's first column.
 			component, _, _ = strings.Cut(component, "\n}\n")
 			name, _, _ := strings.Cut(strings.TrimPrefix(component, "pub async fn "), "(")
-			if !strings.Contains(component, `name="_action"`) {
+			if !strings.Contains(component, `name="_action"`) && !strings.Contains(component, "_pick(control: ") {
 				continue
 			}
 			checked++
 			first := strings.Index(component, "<button")
+			if first < 0 {
+				t.Errorf("%s: %s holds a picker and no default button", golden, name)
+				continue
+			}
 			if !strings.HasPrefix(component[first:], defaultButton) {
 				line, _, _ := strings.Cut(component[first:], "\n")
 				t.Errorf("%s: %s's first button is %s, not the default %s", golden, name, line, defaultButton)

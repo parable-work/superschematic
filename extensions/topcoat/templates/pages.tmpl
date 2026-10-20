@@ -84,7 +84,11 @@ use topcoat::router::content::Form;
 use topcoat::router::error::see_other;
 {{- end }}
 use topcoat::router::request::uri;
+{{- if .Pages.Params }}
 use topcoat::router::{Slot, StatusCode, layout, page, path_param};
+{{- else }}
+use topcoat::router::{Slot, StatusCode, layout, page};
+{{- end }}
 {{- if .Pages.Uses "controls" }}
 use topcoat::router::error::ContentTooLargeError;
 use topcoat::router::request::{headers, method};
@@ -1715,6 +1719,14 @@ pub(crate) fn route_controls(router: RouterBuilder{{ if .Pages.ControlsUse "rate
     })
 }
 
+{{- if .Pages.ControlsUse "rate_from" }}
+
+/// How a page takes an API dependency's operation's limiter at a request:
+/// from the dependency's crate's setup, none when the app does not set it
+/// up (D61, amended).
+type LimiterFrom = fn(&Cx) -> Option<Arc<RateLimiter>>;
+{{- end }}
+
 /// The traffic controls of an operation's route, which a page that calls
 /// it meets as the route's request does (`RouteControls`, D35): the rate
 /// limit, the body limit, read before the page decodes its form, then the
@@ -1732,6 +1744,12 @@ struct Controls {
     /// its form up to it.
     body_limit: Option<(usize, BodyLimit)>,
     timeout: Option<Duration>,
+{{- if .Pages.ControlsUse "rate_from" }}
+    /// The limiter of an API dependency's operation (D61, amended), which
+    /// its crate's setup holds in the app context: taken at the request,
+    /// none when the app does not set the crate up.
+    rate_from: Option<LimiterFrom>,
+{{- end }}
 }
 
 impl Controls {
@@ -1741,6 +1759,23 @@ impl Controls {
     fn rate_limiter(mut self, limiter: Option<Arc<RateLimiter>>) -> Self {
         self.rate_limit = limiter;
         self
+    }
+{{- end }}
+{{- if .Pages.ControlsUse "rate_from" }}
+{{- if .Pages.ControlsUse "rate_limit" }}
+{{ end }}
+    /// `@rateLimit({ requestsPerMinute })` of an API dependency's operation,
+    /// as its limiter in its crate's registry (D61, amended), taken at the
+    /// request.
+    fn rate_limiter_from(mut self, from: LimiterFrom) -> Self {
+        self.rate_from = Some(from);
+        self
+    }
+
+    /// The operation's limiter, at the request: its own, or a dependency's
+    /// from its crate's setup.
+    fn limiter(&self, cx: &Cx) -> Option<Arc<RateLimiter>> {
+        self.rate_limit.clone().or_else(|| self.rate_from.and_then(|from| from(cx)))
     }
 {{- end }}
 {{- if .Pages.ControlsUse "body_limit" }}
@@ -1799,7 +1834,11 @@ impl Layer for PageControls {
             // operation bounds its body, which no other call carries; and
             // the tightest timeout covers the page.
             let every = || own.into_iter().chain(called.iter().copied());
+{{- if .Pages.ControlsUse "rate_from" }}
+            for limiter in every().filter_map(|controls| controls.limiter(cx)) {
+{{- else }}
             for limiter in every().filter_map(|controls| controls.rate_limit.as_ref()) {
+{{- end }}
                 if let Err(retry_after) = limiter.take(&crate::client_key(cx)) {
                     let mut response = control_refusal(&ApiError::too_many_requests("Too Many Requests"));
                     response.headers_mut().insert(header::RETRY_AFTER, retry_after.into());

@@ -4,6 +4,9 @@
 //! mounts the JSON API at `/api`, its routes given the client's address,
 //! and keeps the implementations for the in-process calls of `operations`,
 //! which pages, shards and procedures make by each route's rules.
+//! `fixture_controls_api_without_api` keeps them and mounts no JSON API, for an app
+//! that hosts several services' crates and serves at most one JSON API at
+//! `/api` (D61, amended).
 //! It makes one registry of the operations' rate limiters
 //! (`Setup.rate_limits`), which the JSON API's routes take theirs from,
 //! and every procedure and page that meets a route's rate limit too, so a
@@ -43,12 +46,12 @@ pub use schemas_fixture_controls_api_api as api;
 
 use std::sync::Arc;
 
-use api::runtime::{ClientIp, RateLimits};
+use api::runtime::{ApiError, ClientIp, RateLimits};
 use api::{build_router_with, Implementations, RouterOptions};
-use api::runtime::{ApiError, OperationInfo, Principal};
+use api::runtime::{OperationInfo, Principal};
 use api::runtime::ServiceCaller;
 use async_trait::async_trait;
-use topcoat::context::{Cx, app_context, memoize};
+use topcoat::context::{Cx, memoize, try_app_context};
 use topcoat::router::request::{client_ip, parts};
 use topcoat::router::tower::TowerRoute;
 use topcoat::router::{Body, Layer, LayerFuture, Next, Path, RouterBuilder};
@@ -86,25 +89,60 @@ pub trait RouterBuilderFixtureControlsApiExt {
     /// controls (`procedures::route_controls`).
     #[must_use]
     fn fixture_controls_api(self, implementations: Implementations, page_authenticator: impl PageAuthenticator) -> Self;
+
+    /// Keeps `implementations` and `page_authenticator` for the in-process
+    /// calls of `operations`, with its own registry of rate limiters and the
+    /// layers `fixture_controls_api` adds, and mounts no JSON API: for an app that hosts
+    /// several services' crates (D61, amended), each one's pages and calls,
+    /// which serves at most one service's JSON API at `/api`, since a second
+    /// `/api/{*rest}` is a route Topcoat refuses.
+    #[must_use]
+    fn fixture_controls_api_without_api(self, implementations: Implementations, page_authenticator: impl PageAuthenticator) -> Self;
 }
 
 impl RouterBuilderFixtureControlsApiExt for RouterBuilder {
     fn fixture_controls_api(self, implementations: Implementations, page_authenticator: impl PageAuthenticator) -> Self {
-        let rate_limits = RateLimits::new();
-        let api = build_router_with(
+        set_up(self, implementations, Arc::new(page_authenticator), true)
+    }
+
+    fn fixture_controls_api_without_api(self, implementations: Implementations, page_authenticator: impl PageAuthenticator) -> Self {
+        set_up(self, implementations, Arc::new(page_authenticator), false)
+    }
+}
+
+/// The app's router with the crate's setup: a new registry of the
+/// operations' rate limiters, the JSON API at `/api/{*rest}` when `api`,
+/// its routes given the client's address and their limiters from the
+/// registry, `Setup` in the app context, and the layers of the routes'
+/// controls.
+fn set_up(router: RouterBuilder, implementations: Implementations, page_authenticator: Arc<dyn PageAuthenticator>, api: bool) -> RouterBuilder {
+    let rate_limits = RateLimits::new();
+    let router = if api {
+        let json = build_router_with(
             implementations.clone(),
             RouterOptions { rate_limits: rate_limits.clone(), ..RouterOptions::default() },
         );
-        let router = self
-            .app_context(Setup {
-                implementations,
-                page_authenticator: Arc::new(page_authenticator),
-                rate_limits: rate_limits.clone(),
-            })
-            .route(TowerRoute::any("/api/{*rest}", api))
-            .layer(ClientAddress);
-        procedures::route_controls(router, &rate_limits)
-    }
+        router.route(TowerRoute::any("/api/{*rest}", json)).layer(ClientAddress)
+    } else {
+        router
+    };
+    let router = router.app_context(Setup {
+        implementations,
+        page_authenticator,
+        rate_limits: rate_limits.clone(),
+    });
+    procedures::route_controls(router, &rate_limits)
+}
+
+/// What the app keeps for the crate's in-process calls, from its context,
+/// or the 500 of an app that does not host fixture-controls-api (D61, amended): an
+/// app links the crates of every service the Topcoat table lists, and may
+/// set up some of them, so a call into one it did not set up is refused,
+/// not a panic.
+pub(crate) fn setup(cx: &Cx) -> Result<&Setup, ApiError> {
+    try_app_context::<Setup>(cx).ok_or_else(|| {
+        ApiError::internal("the app does not host fixture-controls-api: its router builder calls neither fixture_controls_api nor fixture_controls_api_without_api")
+    })
 }
 
 /// Gives each request to the JSON API the client's address as Topcoat
@@ -155,8 +193,7 @@ async fn admit(cx: &Cx, operation: &OperationInfo) -> Result<Option<Principal>, 
         return Ok(None);
     }
     let principal = caller(cx).await.map_err(ApiError::clone)?.clone();
-    let setup: &Setup = app_context(cx);
-    operation.admit_end_user(setup.implementations.authenticator.as_ref(), principal)
+    operation.admit_end_user(setup(cx)?.implementations.authenticator.as_ref(), principal)
 }
 
 /// The request's caller, as the `PageAuthenticator` establishes it, once
@@ -164,8 +201,7 @@ async fn admit(cx: &Cx, operation: &OperationInfo) -> Result<Option<Principal>, 
 /// does, authenticates its caller once.
 #[memoize(as_ref)]
 async fn caller(cx: &Cx) -> Result<Option<Principal>, ApiError> {
-    let setup: &Setup = app_context(cx);
-    setup.page_authenticator.principal(cx).await
+    setup(cx)?.page_authenticator.principal(cx).await
 }
 
 /// The caller of a call `service` makes, a service this process acts for
@@ -180,6 +216,5 @@ async fn admit_as(cx: &Cx, operation: &OperationInfo, service: &ServiceCaller) -
         return Ok(None);
     }
     let principal = caller(cx).await.map_err(ApiError::clone)?.clone();
-    let setup: &Setup = app_context(cx);
-    operation.admit_end_user(setup.implementations.authenticator.as_ref(), principal)
+    operation.admit_end_user(setup(cx)?.implementations.authenticator.as_ref(), principal)
 }

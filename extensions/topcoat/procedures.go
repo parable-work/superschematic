@@ -42,12 +42,27 @@ type procedure struct {
 // routeControls are an operation's route's @rateLimit requests per minute,
 // @bodyLimit megabytes and @timeout seconds, 0 without the directive, and
 // Const, the API crate's OperationInfo constant of the operation, whose
-// limiter the app's registry holds (D44, amended).
+// limiter the app's registry holds (D44, amended). Crate is the Topcoat
+// crate of the API dependency whose operation it is (D61, amended), empty
+// for the service's own: its limiter is in that crate's registry, which
+// its setup keeps in the app context.
 type routeControls struct {
 	RateLimit int
 	BodyLimit int
 	Timeout   int
 	Const     string
+	Crate     string
+}
+
+// key names the operation the controls are of, apart from a dependency's
+// of the same name.
+func (p routeControls) key() string { return p.Crate + "::" + p.Const }
+
+// LimiterFrom is the Rust of the function that takes a dependency's
+// operation's limiter from its crate's setup, at a request (D61, amended),
+// none when the app does not set the crate up.
+func (p routeControls) LimiterFrom() string {
+	return "|cx: &Cx| try_app_context::<" + p.Crate + "::Setup>(cx)?.rate_limits.of(&" + p.Crate + "::api::operations::" + p.Const + ")"
 }
 
 func controlsOf(e registry.RustEndpoint) routeControls {
@@ -67,7 +82,10 @@ func (p routeControls) HasControls() bool {
 // the timeout.
 func (p routeControls) ControlCalls() []string {
 	var calls []string
-	if p.RateLimit > 0 {
+	switch {
+	case p.RateLimit > 0 && p.Crate != "":
+		calls = append(calls, ".rate_limiter_from("+p.LimiterFrom()+")")
+	case p.RateLimit > 0:
 		calls = append(calls, fmt.Sprintf(".rate_limiter(limits.of(&crate::api::operations::%s))", p.Const))
 	}
 	if p.BodyLimit > 0 {

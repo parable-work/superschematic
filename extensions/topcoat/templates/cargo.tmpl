@@ -16,6 +16,11 @@ identity-sqlite = ["{{ .APICrate }}/identity-sqlite"]
 
 [dependencies]
 {{ .APICrate }} = { path = "{{ .APIDepPath }}" }
+{{- range .UsedHosted }}
+# The Topcoat crate of {{ .Service }}, which an app hosts beside this one: a
+# reference calls its options in-process (D61, amended).
+{{ .Crate }} = { path = "{{ .Path }}" }
+{{- end }}
 {{- if .HasAuth }}
 async-trait = "0.1.89"
 {{- end }}

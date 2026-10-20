@@ -10,22 +10,23 @@
 //!
 //! A call does not apply the route's traffic controls (@rateLimit,
 //! @bodyLimit, @timeout): the page that makes it is a route of the app,
-//! under the controls the app gives it.
+//! under the controls the app gives it. It reads what the app keeps for
+//! the crate (`setup`): an app that does not host fixture-views-api, whose
+//! router builder calls neither `fixture_views_api` nor `fixture_views_api_without_api`,
+//! gets the 500 (D61, amended).
 
 #![allow(unused_imports)]
 
-use crate::Setup;
 use crate::api::operations;
 use crate::api::runtime::{ApiError, Principal};
 use crate::api::types;
-use topcoat::context::{Cx, app_context};
+use topcoat::context::Cx;
 
 /// order.getOrder (`GET /api/orders/{id}`): One order.
 pub async fn order_get_order(cx: &Cx, args: crate::api::OrderGetOrderArgs) -> Result<types::OrderView, ApiError> {
     let caller = can_order_get_order(cx).await?;
     args.check()?;
-    let setup: &Setup = app_context(cx);
-    setup
+    crate::setup(cx)?
         .implementations
         .order
         .get_order(operations::ORDER_GET_ORDER.context(caller), args)
@@ -36,8 +37,7 @@ pub async fn order_get_order(cx: &Cx, args: crate::api::OrderGetOrderArgs) -> Re
 pub async fn order_order_comments(cx: &Cx, args: crate::api::OrderOrderCommentsArgs) -> Result<Vec<types::Comment>, ApiError> {
     let caller = can_order_order_comments(cx).await?;
     args.check()?;
-    let setup: &Setup = app_context(cx);
-    setup
+    crate::setup(cx)?
         .implementations
         .order
         .order_comments(operations::ORDER_ORDER_COMMENTS.context(caller), args)

@@ -4,6 +4,9 @@
 //! mounts the JSON API at `/api`, its routes given the client's address,
 //! and keeps the implementations for the in-process calls of `operations`,
 //! which pages, shards and procedures make by each route's rules.
+//! `fixture_nested_arrays_api_without_api` keeps them and mounts no JSON API, for an app
+//! that hosts several services' crates and serves at most one JSON API at
+//! `/api` (D61, amended).
 //! It makes one registry of the operations' rate limiters
 //! (`Setup.rate_limits`), which the JSON API's routes take theirs from,
 //! and every procedure and page that meets a route's rate limit too, so a
@@ -35,9 +38,9 @@ pub mod views;
 /// `types`.
 pub use schemas_fixture_nested_arrays_api_api as api;
 
-use api::runtime::{ClientIp, RateLimits};
+use api::runtime::{ApiError, ClientIp, RateLimits};
 use api::{build_router_with, Implementations, RouterOptions};
-use topcoat::context::Cx;
+use topcoat::context::{Cx, try_app_context};
 use topcoat::router::request::{client_ip, parts};
 use topcoat::router::tower::TowerRoute;
 use topcoat::router::{Body, Layer, LayerFuture, Next, Path, RouterBuilder};
@@ -64,23 +67,56 @@ pub trait RouterBuilderFixtureNestedArraysApiExt {
     /// `operations`.
     #[must_use]
     fn fixture_nested_arrays_api(self, implementations: Implementations) -> Self;
+
+    /// Keeps `implementations` for the in-process
+    /// calls of `operations`, with its own registry of rate limiters, and mounts no JSON API: for an app that hosts
+    /// several services' crates (D61, amended), each one's pages and calls,
+    /// which serves at most one service's JSON API at `/api`, since a second
+    /// `/api/{*rest}` is a route Topcoat refuses.
+    #[must_use]
+    fn fixture_nested_arrays_api_without_api(self, implementations: Implementations) -> Self;
 }
 
 impl RouterBuilderFixtureNestedArraysApiExt for RouterBuilder {
     fn fixture_nested_arrays_api(self, implementations: Implementations) -> Self {
-        let rate_limits = RateLimits::new();
-        let api = build_router_with(
+        set_up(self, implementations, true)
+    }
+
+    fn fixture_nested_arrays_api_without_api(self, implementations: Implementations) -> Self {
+        set_up(self, implementations, false)
+    }
+}
+
+/// The app's router with the crate's setup: a new registry of the
+/// operations' rate limiters, the JSON API at `/api/{*rest}` when `api`,
+/// its routes given the client's address and their limiters from the
+/// registry, `Setup` in the app context.
+fn set_up(router: RouterBuilder, implementations: Implementations, api: bool) -> RouterBuilder {
+    let rate_limits = RateLimits::new();
+    let router = if api {
+        let json = build_router_with(
             implementations.clone(),
             RouterOptions { rate_limits: rate_limits.clone(), ..RouterOptions::default() },
         );
-        self
-            .app_context(Setup {
-                implementations,
-                rate_limits,
-            })
-            .route(TowerRoute::any("/api/{*rest}", api))
-            .layer(ClientAddress)
-    }
+        router.route(TowerRoute::any("/api/{*rest}", json)).layer(ClientAddress)
+    } else {
+        router
+    };
+    router.app_context(Setup {
+        implementations,
+        rate_limits,
+    })
+}
+
+/// What the app keeps for the crate's in-process calls, from its context,
+/// or the 500 of an app that does not host fixture-nested-arrays-api (D61, amended): an
+/// app links the crates of every service the Topcoat table lists, and may
+/// set up some of them, so a call into one it did not set up is refused,
+/// not a panic.
+pub(crate) fn setup(cx: &Cx) -> Result<&Setup, ApiError> {
+    try_app_context::<Setup>(cx).ok_or_else(|| {
+        ApiError::internal("the app does not host fixture-nested-arrays-api: its router builder calls neither fixture_nested_arrays_api nor fixture_nested_arrays_api_without_api")
+    })
 }
 
 /// Gives each request to the JSON API the client's address as Topcoat

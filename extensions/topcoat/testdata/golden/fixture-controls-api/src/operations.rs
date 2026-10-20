@@ -16,23 +16,24 @@
 //!
 //! A call does not apply the route's traffic controls (@rateLimit,
 //! @bodyLimit, @timeout): the page that makes it is a route of the app,
-//! under the controls the app gives it.
+//! under the controls the app gives it. It reads what the app keeps for
+//! the crate (`setup`): an app that does not host fixture-controls-api, whose
+//! router builder calls neither `fixture_controls_api` nor `fixture_controls_api_without_api`,
+//! gets the 500 (D61, amended).
 
 #![allow(unused_imports)]
 
-use crate::Setup;
 use crate::api::operations;
 use crate::api::runtime::{ApiError, Principal};
 use crate::api::runtime::ServiceCaller;
 use crate::api::types;
-use topcoat::context::{Cx, app_context};
+use topcoat::context::Cx;
 
 /// order.listOrders (`GET /api/orders`): The orders, of one status when the query names one: two a minute.
 pub async fn order_list_orders(cx: &Cx, args: crate::api::OrderListOrdersArgs) -> Result<Vec<types::OrderView>, ApiError> {
     let caller = can_order_list_orders(cx).await?;
     args.check()?;
-    let setup: &Setup = app_context(cx);
-    setup
+    crate::setup(cx)?
         .implementations
         .order
         .list_orders(operations::ORDER_LIST_ORDERS.context(caller), args)
@@ -42,8 +43,7 @@ pub async fn order_list_orders(cx: &Cx, args: crate::api::OrderListOrdersArgs) -
 /// order.placeOrder (`POST /api/orders`): Places an order: two a minute, three megabytes, a second.
 pub async fn order_place_order(cx: &Cx) -> Result<types::OrderView, ApiError> {
     let caller = can_order_place_order(cx).await?;
-    let setup: &Setup = app_context(cx);
-    setup
+    crate::setup(cx)?
         .implementations
         .order
         .place_order(operations::ORDER_PLACE_ORDER.context(caller))
@@ -54,8 +54,7 @@ pub async fn order_place_order(cx: &Cx) -> Result<types::OrderView, ApiError> {
 pub async fn order_get_order(cx: &Cx, args: crate::api::OrderGetOrderArgs) -> Result<types::OrderView, ApiError> {
     let caller = can_order_get_order(cx).await?;
     args.check()?;
-    let setup: &Setup = app_context(cx);
-    setup
+    crate::setup(cx)?
         .implementations
         .order
         .get_order(operations::ORDER_GET_ORDER.context(caller), args)
@@ -66,8 +65,7 @@ pub async fn order_get_order(cx: &Cx, args: crate::api::OrderGetOrderArgs) -> Re
 pub async fn order_hold_order(cx: &Cx, args: crate::api::OrderHoldOrderArgs) -> Result<types::OrderView, ApiError> {
     let caller = can_order_hold_order(cx).await?;
     args.check()?;
-    let setup: &Setup = app_context(cx);
-    setup
+    crate::setup(cx)?
         .implementations
         .order
         .hold_order(operations::ORDER_HOLD_ORDER.context(caller), args)
@@ -77,8 +75,7 @@ pub async fn order_hold_order(cx: &Cx, args: crate::api::OrderHoldOrderArgs) -> 
 /// stock.listShipments (`GET /api/shipments`): The shipments, with no control of their own.
 pub async fn stock_list_shipments(cx: &Cx) -> Result<Vec<types::Shipment>, ApiError> {
     let caller = can_stock_list_shipments(cx).await?;
-    let setup: &Setup = app_context(cx);
-    setup
+    crate::setup(cx)?
         .implementations
         .stock
         .list_shipments(operations::STOCK_LIST_SHIPMENTS.context(caller))
@@ -92,8 +89,7 @@ pub async fn stock_list_shipments(cx: &Cx) -> Result<Vec<types::Shipment>, ApiEr
 pub async fn stock_release_reservation(cx: &Cx, args: crate::api::StockReleaseReservationArgs) -> Result<types::Reservation, ApiError> {
     let caller = can_stock_release_reservation(cx).await?;
     args.check()?;
-    let setup: &Setup = app_context(cx);
-    setup
+    crate::setup(cx)?
         .implementations
         .stock
         .release_reservation(operations::STOCK_RELEASE_RESERVATION.context(caller), args)
@@ -103,8 +99,7 @@ pub async fn stock_release_reservation(cx: &Cx, args: crate::api::StockReleaseRe
 /// stock.listWarehouses (`GET /api/warehouses`): The warehouses: two a minute and a second.
 pub async fn stock_list_warehouses(cx: &Cx) -> Result<Vec<types::Warehouse>, ApiError> {
     let caller = can_stock_list_warehouses(cx).await?;
-    let setup: &Setup = app_context(cx);
-    setup
+    crate::setup(cx)?
         .implementations
         .stock
         .list_warehouses(operations::STOCK_LIST_WAREHOUSES.context(caller))
@@ -205,8 +200,7 @@ impl AsService<'_> {
     /// (@requireService).
     pub async fn stock_reindex_stock(&self, cx: &Cx) -> Result<types::StockRun, ApiError> {
         let caller = self.can_stock_reindex_stock(cx).await?;
-        let setup: &Setup = app_context(cx);
-        setup
+        crate::setup(cx)?
             .implementations
             .stock
             .reindex_stock(operations::STOCK_REINDEX_STOCK.service_context(self.caller.clone(), caller))
@@ -224,8 +218,7 @@ impl AsService<'_> {
     pub async fn stock_release_reservation(&self, cx: &Cx, args: crate::api::StockReleaseReservationArgs) -> Result<types::Reservation, ApiError> {
         let caller = self.can_stock_release_reservation(cx).await?;
         args.check()?;
-        let setup: &Setup = app_context(cx);
-        setup
+        crate::setup(cx)?
             .implementations
             .stock
             .release_reservation(operations::STOCK_RELEASE_RESERVATION.service_context(self.caller.clone(), caller), args)
@@ -246,8 +239,7 @@ impl AsService<'_> {
     pub async fn stock_reserve_stock(&self, cx: &Cx, args: crate::api::StockReserveStockArgs) -> Result<types::Reservation, ApiError> {
         let caller = self.can_stock_reserve_stock(cx).await?;
         args.check()?;
-        let setup: &Setup = app_context(cx);
-        setup
+        crate::setup(cx)?
             .implementations
             .stock
             .reserve_stock(operations::STOCK_RESERVE_STOCK.service_context(self.caller.clone(), caller), args)

@@ -10,22 +10,23 @@
 //!
 //! A call does not apply the route's traffic controls (@rateLimit,
 //! @bodyLimit, @timeout): the page that makes it is a route of the app,
-//! under the controls the app gives it.
+//! under the controls the app gives it. It reads what the app keeps for
+//! the crate (`setup`): an app that does not host fixture-nested-arrays-api, whose
+//! router builder calls neither `fixture_nested_arrays_api` nor `fixture_nested_arrays_api_without_api`,
+//! gets the 500 (D61, amended).
 
 #![allow(unused_imports)]
 
-use crate::Setup;
 use crate::api::operations;
 use crate::api::runtime::{ApiError, Principal};
 use crate::api::types;
-use topcoat::context::{Cx, app_context};
+use topcoat::context::Cx;
 
 /// grid.saveGrid (`POST /api/grids`): Store a grid from a request body.
 pub async fn grid_save_grid(cx: &Cx, args: crate::api::GridSaveGridArgs) -> Result<types::GridView, ApiError> {
     let caller = can_grid_save_grid(cx).await?;
     args.check()?;
-    let setup: &Setup = app_context(cx);
-    setup
+    crate::setup(cx)?
         .implementations
         .grid
         .save_grid(operations::GRID_SAVE_GRID.context(caller), args)
@@ -36,8 +37,7 @@ pub async fn grid_save_grid(cx: &Cx, args: crate::api::GridSaveGridArgs) -> Resu
 pub async fn grid_get_grid(cx: &Cx, args: crate::api::GridGetGridArgs) -> Result<types::GridView, ApiError> {
     let caller = can_grid_get_grid(cx).await?;
     args.check()?;
-    let setup: &Setup = app_context(cx);
-    setup
+    crate::setup(cx)?
         .implementations
         .grid
         .get_grid(operations::GRID_GET_GRID.context(caller), args)
@@ -48,8 +48,7 @@ pub async fn grid_get_grid(cx: &Cx, args: crate::api::GridGetGridArgs) -> Result
 pub async fn grid_grid_labels(cx: &Cx, args: crate::api::GridGridLabelsArgs) -> Result<Vec<Vec<String>>, ApiError> {
     let caller = can_grid_grid_labels(cx).await?;
     args.check()?;
-    let setup: &Setup = app_context(cx);
-    setup
+    crate::setup(cx)?
         .implementations
         .grid
         .grid_labels(operations::GRID_GRID_LABELS.context(caller), args)
@@ -60,8 +59,7 @@ pub async fn grid_grid_labels(cx: &Cx, args: crate::api::GridGridLabelsArgs) -> 
 pub async fn grid_replace_labels(cx: &Cx, args: crate::api::GridReplaceLabelsArgs) -> Result<types::GridView, ApiError> {
     let caller = can_grid_replace_labels(cx).await?;
     args.check()?;
-    let setup: &Setup = app_context(cx);
-    setup
+    crate::setup(cx)?
         .implementations
         .grid
         .replace_labels(operations::GRID_REPLACE_LABELS.context(caller), args)

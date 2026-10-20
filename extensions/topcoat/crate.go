@@ -70,8 +70,112 @@ type crate struct {
 	// Pages are the pages of each resource the operations describe, nil
 	// unless outputs.topcoat.pages turns them on (pages.go).
 	Pages *pagesModel
+	// Hosted are the crates of the API dependencies one app hosts beside
+	// the service (D61, amended), by service, which a reference whose
+	// options operation is the dependency's calls in-process; hostedNot
+	// why each other API dependency has none.
+	Hosted    map[string]*hostedCrate
+	hostedNot map[string]string
 	// noCalls is why each operation without an in-process call has none.
 	noCalls map[*ir.FieldDef]string
+}
+
+// hostedCrate is the Topcoat crate of an API dependency that the app
+// hosting the service hosts too (D61, amended): its Cargo name, its name in
+// Rust source and its directory from the crate's, and its operations' in-
+// process calls, by their rules and under its own setup.
+type hostedCrate struct {
+	Service string // fixture-console-suppliers-api
+	Crate   string // schemas-fixture-console-suppliers-api-topcoat
+	Ident   string // schemas_fixture_console_suppliers_api_topcoat
+	Path    string // ../fixture-console-suppliers-api
+	// calls are its in-process calls by operation, noCall why each other
+	// operation has none.
+	calls  map[*ir.FieldDef]declared
+	noCall map[*ir.FieldDef]string
+	// used reports whether a reference calls it, so Cargo.toml depends on
+	// it.
+	used bool
+}
+
+// UsedHosted are the hosted crates a reference calls, by service, which
+// Cargo.toml depends on.
+func (c *crate) UsedHosted() []*hostedCrate {
+	var out []*hostedCrate
+	for _, service := range sortedKeys(c.Hosted) {
+		if h := c.Hosted[service]; h.used {
+			out = append(out, h)
+		}
+	}
+	return out
+}
+
+// hostedCrates are the crates of the service's API dependencies that one
+// app hosts beside it (D61, amended), by service: each one the table lists
+// beside the service, whose API server is Rust and whose Topcoat crate the
+// build wrote before the service's, as build --with-deps and build-all
+// do. Each other API dependency has the reason the build log gives.
+func hostedCrates(c registry.GenerateContext, table Table) (map[string]*hostedCrate, map[string]string, error) {
+	hosted, not := map[string]*hostedCrate{}, map[string]string{}
+	self := c.Config.Name
+	for _, dep := range c.Config.Dependencies {
+		if dep.Kind != ir.SchemaKindAPI {
+			continue
+		}
+		if !slices.Contains(table.Services, dep.Name) || !slices.Contains(table.Services, self) {
+			not[dep.Name] = fmt.Sprintf("[extension.topcoat] services does not list %s beside %s, so no app hosts both", dep.Name, self)
+			continue
+		}
+		api, err := registry.RustAPIOfService(c, dep.Name)
+		if err != nil {
+			return nil, nil, fmt.Errorf("topcoat: the API of %s, a dependency of %s: %w", dep.Name, self, err)
+		}
+		if api == nil {
+			not[dep.Name] = dep.Name + "'s API server is not Rust, so it has no crate"
+			continue
+		}
+		dir := Dir(c.Options.OutputRoot, dep.Name)
+		if _, err := os.Stat(filepath.Join(dir, "Cargo.toml")); err != nil {
+			not[dep.Name] = dep.Name + "'s Topcoat crate is not in the output root, which a build of it first writes (build --with-deps)"
+			continue
+		}
+		schema, err := c.LoadDependency(dep.Name)
+		if err != nil {
+			return nil, nil, fmt.Errorf("topcoat: load dependency %s: %w", dep.Name, err)
+		}
+		rel, err := filepath.Rel(Dir(c.Options.OutputRoot, self), dir)
+		if err != nil {
+			return nil, nil, fmt.Errorf("topcoat: path to the Topcoat crate of %s: %w", dep.Name, err)
+		}
+		h := &hostedCrate{
+			Service: dep.Name,
+			Crate:   c.Options.Naming.RustCratePrefix + dep.Name + "-topcoat",
+			Path:    filepath.ToSlash(rel),
+			calls:   map[*ir.FieldDef]declared{},
+			noCall:  map[*ir.FieldDef]string{},
+		}
+		h.Ident = strings.ReplaceAll(h.Crate, "-", "_")
+		for _, endpoint := range api.AllEndpoints() {
+			if endpoint.Manual {
+				continue
+			}
+			op, err := schemaSet{schema}.operation(endpoint)
+			if err != nil {
+				return nil, nil, err
+			}
+			reason := noCall(endpoint, op)
+			if reason == "" && requiresService(endpoint) {
+				reason = "its route admits only a service caller (@requireService)"
+			}
+			if reason != "" {
+				h.noCall[op] = reason
+				continue
+			}
+			h.calls[op] = declared{endpoint, op}
+		}
+		hosted[dep.Name] = h
+	}
+	return hosted, not, nil
 }
 
 // operation is one operation of the service, from the API crate's own
@@ -207,7 +311,7 @@ func requiresService(e registry.RustEndpoint) bool {
 	return e.ServiceCallers != nil && e.ServiceCallers.Mode == ir.ServiceCallersRequire
 }
 
-func newCrate(c registry.GenerateContext, api *registry.RustAPI, cfg Config) (*crate, error) {
+func newCrate(c registry.GenerateContext, api *registry.RustAPI, cfg Config, table Table) (*crate, error) {
 	service := c.Config.Name
 	apiDir := registry.APIDir(c.Options.OutputRoot, service)
 	rel, err := filepath.Rel(Dir(c.Options.OutputRoot, service), apiDir)
@@ -229,6 +333,9 @@ func newCrate(c registry.GenerateContext, api *registry.RustAPI, cfg Config) (*c
 	}
 	schemas, err := schemasOf(c)
 	if err != nil {
+		return nil, err
+	}
+	if out.Hosted, out.hostedNot, err = hostedCrates(c, table); err != nil {
 		return nil, err
 	}
 	// The operations a page calls in-process, and of those the ones browser
@@ -625,6 +732,13 @@ func (c *crate) SetupLayers() string {
 	return expr
 }
 
+// LayersTakeLimits reports whether a layer `<service>(...)` adds takes the
+// app's registry of limiters, so the setup keeps a clone of it.
+func (c *crate) LayersTakeLimits() bool {
+	return c.ControlsUse("rate_limit") || c.ControlledPages() && c.Pages.ControlsUse("rate_limit") ||
+		c.ControlledPicks() && c.References.PicksUse("rate_limit")
+}
+
 // ControlledPicks reports whether a picker's shard meets its options
 // operation's rate limit or timeout (D61, amended), so `<service>(...)`
 // adds the layers that apply them (`references::route_controls`).
@@ -637,8 +751,9 @@ func (c *crate) ControlledPicks() bool {
 // registry and lib.rs declares `client_key`, by which each counts a
 // client.
 func (c *crate) RateLimited() bool {
-	return c.ControlsUse("rate_limit") || c.ControlledPages() && c.Pages.ControlsUse("rate_limit") ||
-		c.ControlledPicks() && c.References.PicksUse("rate_limit")
+	pages := c.ControlledPages() && (c.Pages.ControlsUse("rate_limit") || c.Pages.ControlsUse("rate_from"))
+	picks := c.ControlledPicks() && (c.References.PicksUse("rate_limit") || c.References.PicksUse("rate_from"))
+	return c.ControlsUse("rate_limit") || pages || picks
 }
 
 // ControlsUse reports whether a procedure's route has the control

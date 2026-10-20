@@ -408,6 +408,16 @@ func EnvConfigOf(schema *ir.Schema, schemaName string) (*EnvConfig, error) {
 // is Rust. See internal/generator.RustAPIOf.
 func RustAPIOf(c GenerateContext) (*RustAPI, error) { return generator.RustAPIOf(c) }
 
+// RustAPIOfService is the Rust REST API crate the api generator writes for
+// service, a dependency of the service c generates, as that service's own
+// build makes it; (nil, nil) when its config generates no API server, its
+// server is not Rust, or it has no operations. An extension that calls the
+// dependency's crate in-process reads its operations here. See
+// internal/generator.RustAPIOfService.
+func RustAPIOfService(c GenerateContext, service string) (*RustAPI, error) {
+	return generator.RustAPIOfService(c, service)
+}
+
 // APIDir is the directory the api generator writes service's server to
 // under outputRoot, the Rust crate's directory for a Rust API; see
 // internal/generator.APIDir.

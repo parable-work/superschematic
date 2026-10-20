@@ -263,9 +263,9 @@ async fn product_target_labels(cx: &Cx, values: &BTreeSet<String>) -> Vec<Choice
 /// product.listProducts's `q`, else the first page of them all; the first
 /// `MAX_LOOKUP_CALLS` distinct texts are searched, one listing each, and a text
 /// past them lists the first page with `TOO_MANY_SEARCHES`. The value held is
-/// always an option, named by its name through `product_target_labels`, one
-/// call for every value no match is. None for each when the caller may not list
-/// the items or the call fails.
+/// always an option, named by its name through `product_target_labels`, which
+/// names every value no match holds at once. None for each when the caller may
+/// not list the items or the call fails.
 async fn product_target_picks(cx: &Cx, wanted: &[(String, String, bool)]) -> Vec<Option<Pick>> {
     let mut searched: Vec<&str> = Vec::new();
     let mut found = Vec::with_capacity(wanted.len());
@@ -399,8 +399,8 @@ async fn product_by_sku_target_labels(cx: &Cx, values: &BTreeSet<String>) -> Vec
 /// `MAX_LOOKUP_CALLS` distinct texts are searched, one listing each, and a text
 /// past them lists the first page with `TOO_MANY_SEARCHES`. The value held is
 /// always an option, named by its name through `product_by_sku_target_labels`,
-/// one call for every value no match is. None for each when the caller may not
-/// list the items or the call fails.
+/// which names every value no match holds at once. None for each when the
+/// caller may not list the items or the call fails.
 async fn product_by_sku_target_picks(cx: &Cx, wanted: &[(String, String, bool)]) -> Vec<Option<Pick>> {
     let mut searched: Vec<&str> = Vec::new();
     let mut found = Vec::with_capacity(wanted.len());

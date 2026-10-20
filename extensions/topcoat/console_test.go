@@ -751,41 +751,7 @@ func suppliersCopy(t *testing.T, edit func(schema string) string) string {
 // listSuppliers behind a provider's signature, the build log names the
 // target by its service.
 func TestAReferenceToAnAPIDependencysType(t *testing.T) {
-	withForm := func(schema string) string {
-		schema = strings.Replace(schema, "  OrderLineInput:\n", `  # A new product, whose supplier is one of the suppliers.
-  ProductInput:
-    name: ProductInput
-    role: APIInput
-    fields:
-      - name: name
-        typeRef: { name: string }
-        required: true
-      - name: sku
-        typeRef: { name: string }
-        required: true
-      - name: supplierId
-        title: Supplier
-        typeRef: { name: string }
-        required: true
-        references: { type: Supplier }
-  OrderLineInput:
-`, 1)
-		return strings.Replace(schema, "  - name: SupplierQueries\n", `  - name: ProductMutations
-    operations:
-      # Adds a product.
-      - name: createProduct
-        typeRef: { name: Product }
-        required: true
-        httpMethod: POST
-        restPath: products
-        permissions: [products.read]
-        arguments:
-          - name: input
-            typeRef: { name: ProductInput }
-            required: true
-  - name: SupplierQueries
-`, 1)
-	}
+	withForm := productForm
 	dir := suppliersCopy(t, withForm)
 	root := testpaths.TempDir(t)
 	var log strings.Builder
@@ -826,6 +792,194 @@ func TestAReferenceToAnAPIDependencysType(t *testing.T) {
 			t.Errorf("the build log lacks %q:\n%s", want, log.String())
 		}
 	}
+}
+
+// productForm adds to fixture-console-api's schema a new product's form,
+// whose supplier refers to Supplier, and the operation that takes it.
+func productForm(schema string) string {
+	schema = strings.Replace(schema, "  OrderLineInput:\n", `  # A new product, whose supplier is one of the suppliers.
+  ProductInput:
+    name: ProductInput
+    role: APIInput
+    fields:
+      - name: name
+        typeRef: { name: string }
+        required: true
+      - name: sku
+        typeRef: { name: string }
+        required: true
+      - name: supplierId
+        title: Supplier
+        typeRef: { name: string }
+        required: true
+        references: { type: Supplier }
+  OrderLineInput:
+`, 1)
+	return strings.Replace(schema, "  - name: SupplierQueries\n", `  - name: ProductMutations
+    operations:
+      # Adds a product.
+      - name: createProduct
+        typeRef: { name: Product }
+        required: true
+        httpMethod: POST
+        restPath: products
+        permissions: [products.read]
+        arguments:
+          - name: input
+            typeRef: { name: ProductInput }
+            required: true
+  - name: SupplierQueries
+`, 1)
+}
+
+// hostedCopy is a copy of fixture-console-api whose Supplier is
+// fixture-console-suppliers-api's, with a new product's form, and which
+// lists no supplier itself: Supplier's options are the dependency's own
+// listSuppliers (D61, amended).
+func hostedCopy(t *testing.T) string {
+	t.Helper()
+	return suppliersCopy(t, func(schema string) string {
+		start := strings.Index(schema, "      # The suppliers, by name, one to a page")
+		end := strings.Index(schema, "      # A supplier's products")
+		return productForm(schema[:start] + schema[end:])
+	})
+}
+
+// bothServices is the [extension.topcoat] table of one app that hosts
+// fixture-console-api and fixture-console-suppliers-api.
+const bothServices = "services = [\"fixture-console-api\", \"fixture-console-suppliers-api\"]\n"
+
+// suppliersOutputs are fixture-console-suppliers-api's outputs when one app
+// hosts it beside fixture-console-api: its Rust API and its Topcoat crate,
+// with pages under /suppliers.
+func suppliersOutputs() map[string]any {
+	outputs := rustOutputs()
+	outputs["topcoat"] = map[string]any{"enabled": true, "pages": map[string]any{"enabled": true, "prefix": "/suppliers"}}
+	return outputs
+}
+
+// TestAReferenceToAnotherAPIsOptions builds a copy of fixture-console-api
+// whose Supplier, and its options, are fixture-console-suppliers-api's
+// (D61, amended). With the table listing both, the references call the
+// dependency's crate in-process, through its operations, its listing, its
+// lookup-free labels and its picker's search; the crate depends on it; and
+// a page and the picker's shard that call listSuppliers meet its rate
+// limit, its limiter taken from the dependency's setup. With one listed,
+// with the dependency's server in Go, and with its crate not built first,
+// the reference is left out, and the build log gives the reason.
+func TestAReferenceToAnotherAPIsOptions(t *testing.T) {
+	dir := hostedCopy(t)
+	names, err := registry.ParseNaming([]byte("[extension.topcoat]\n"+bothServices), "superschematic.toml")
+	if err != nil {
+		t.Fatalf("ParseNaming: %v", err)
+	}
+	root := testpaths.TempDir(t)
+	dep := dependencyDir(dir, suppliersService)
+	if _, err := buildIn(t, buildSpec{names: names, dir: dep, root: root, outputs: suppliersOutputs()}); err != nil {
+		t.Fatalf("build %s: %v", suppliersService, err)
+	}
+	var log strings.Builder
+	depOutputs := map[string]map[string]any{suppliersService: suppliersOutputs()}
+	if _, err := buildIn(t, buildSpec{names: names, dir: dir, root: root, outputs: livePagesOutputs(), log: &log, depOutputs: depOutputs}); err != nil {
+		t.Fatalf("build: %v\n%s", err, log.String())
+	}
+	crate := topcoat.Dir(root, consoleService)
+	read := func(name string) string {
+		data, err := os.ReadFile(filepath.Join(crate, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(data)
+	}
+	const hosted = "schemas_fixture_console_suppliers_api_topcoat"
+	for file, wants := range map[string][]string{
+		"Cargo.toml": {`schemas-fixture-console-suppliers-api-topcoat = { path = "../fixture-console-suppliers-api" }`},
+		"src/references.rs": {
+			"async fn fixture_console_suppliers_api_supplier_list_suppliers_options(cx: &Cx) -> Option<Listed> {",
+			"    let args = " + hosted + "::api::SupplierListSuppliersArgs {",
+			"page: " + hosted + "::api::runtime::page::PageRequest::first(" + hosted + "::api::SupplierListSuppliersArgs::PAGE.max_limit()),",
+			"let page = " + hosted + "::operations::supplier_list_suppliers(cx, args).await.ok()?;",
+			"async fn fixture_console_suppliers_api_supplier_list_suppliers_search(cx: &Cx, text: &str) -> Option<Result<Listed, String>> {",
+			"async fn supplier_target_picks(cx: &Cx, wanted: &[(String, String, bool)]) -> Vec<Option<Pick>> {",
+			"rate_from: Some(|cx: &Cx| try_app_context::<" + hosted + "::Setup>(cx)?.rate_limits.of(&" + hosted + "::api::operations::SUPPLIER_LIST_SUPPLIERS)),",
+		},
+		"src/pages.rs": {
+			".rate_limiter_from(|cx: &Cx| try_app_context::<" + hosted + "::Setup>(cx)?.rate_limits.of(&" + hosted + "::api::operations::SUPPLIER_LIST_SUPPLIERS))",
+		},
+	} {
+		for _, want := range wants {
+			if !strings.Contains(read(file), want) {
+				t.Errorf("%s lacks %q", file, want)
+			}
+		}
+	}
+	if strings.Contains(log.String(), "fixture-console-suppliers-api.Supplier, whose options") {
+		t.Errorf("the build log leaves a hosted reference out:\n%s", log.String())
+	}
+
+	reason := func(t *testing.T, table string, depOutputs map[string]map[string]any, buildDep bool) string {
+		t.Helper()
+		names, err := registry.ParseNaming([]byte("[extension.topcoat]\n"+table), "superschematic.toml")
+		if err != nil {
+			t.Fatalf("ParseNaming: %v", err)
+		}
+		root := testpaths.TempDir(t)
+		if buildDep {
+			if _, err := buildIn(t, buildSpec{names: names, dir: dep, root: root, outputs: suppliersOutputs()}); err != nil {
+				t.Fatalf("build %s: %v", suppliersService, err)
+			}
+		}
+		var log strings.Builder
+		if _, err := buildIn(t, buildSpec{names: names, dir: dir, root: root, outputs: livePagesOutputs(), log: &log, depOutputs: depOutputs}); err != nil {
+			t.Fatalf("build: %v\n%s", err, log.String())
+		}
+		return log.String()
+	}
+	goServer := rustOutputs()
+	goServer["api"] = map[string]any{"enabled": true, "language": "GO"}
+	goServer["types"] = map[string]any{"go": map[string]any{"enabled": true}}
+	for _, tc := range []struct {
+		name, table string
+		depOutputs  map[string]map[string]any
+		buildDep    bool
+		want        string
+	}{
+		{"one listed", "services = [\"fixture-console-api\"]\n", nil, true,
+			"[extension.topcoat] services does not list fixture-console-suppliers-api beside fixture-console-api, so no app hosts both"},
+		{"a Go server", bothServices, map[string]map[string]any{suppliersService: goServer}, true,
+			"fixture-console-suppliers-api's API server is not Rust, so it has no crate"},
+		{"no crate built", bothServices, depOutputs, false,
+			"fixture-console-suppliers-api's Topcoat crate is not in the output root, which a build of it first writes (build --with-deps)"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			log := reason(t, tc.table, tc.depOutputs, tc.buildDep)
+			want := "  - topcoat: Product.supplierId refers to fixture-console-suppliers-api.Supplier, whose options operation fixture-console-suppliers-api's SupplierQueries.listSuppliers has no in-process call: " + tc.want + "\n"
+			if !strings.Contains(log, want) {
+				t.Errorf("the build log lacks %q:\n%s", want, log)
+			}
+		})
+	}
+}
+
+// TestTwoServicesInOneApp builds the crates of fixture-console-suppliers-api
+// and of a copy of fixture-console-api whose Supplier's options are its,
+// with the table listing both, and runs cargo clippy and cargo test with
+// hostedAppTest (D61, amended): one app sets up the console with its JSON
+// API and the suppliers without one, `_without_api`, and serves both
+// crates' pages; a product names its supplier and a new product picks one
+// through the suppliers' crate; a page meets listSuppliers' rate limit; an
+// app that does not set the suppliers up names a supplier by its id, and
+// its call is the 500; and an app that mounts both JSON APIs is refused as
+// it builds, by Topcoat's "duplicate any-method route", the reason for
+// `_without_api`.
+func TestTwoServicesInOneApp(t *testing.T) {
+	cargoTestCrateWith(t, consoleService, hostedAppTest, crateOptions{
+		outputs:      livePagesOutputs(),
+		dir:          hostedCopy(t),
+		dependencies: []string{suppliersService},
+		depOutputs:   map[string]map[string]any{suppliersService: suppliersOutputs()},
+		table:        bothServices,
+	})
 }
 
 // TestADerivedReferenceLabelsRows builds fixture-console-api with its order
@@ -2366,5 +2520,332 @@ async fn a_reference_to_a_dependencys_type_offers_and_names_its_items() {
     let (_, products) = send(&app, "GET", "/console/suppliers/bolt/products", "").await;
     assert!(products.contains("<li><span>Bolt</span></li>"), "{products}");
     assert!(products.contains(">Bucket</th>") && products.contains(">Crate</th>"), "{products}");
+}
+`
+
+// hostedAppTest is tests/app.rs of the Topcoat crate of the copy of
+// fixture-console-api whose Supplier, and its options, are
+// fixture-console-suppliers-api's, which one app hosts beside it.
+const hostedAppTest = `use std::sync::{Arc, Mutex};
+
+use async_trait::async_trait;
+use http::request::Parts;
+use schemas_fixture_console_api_topcoat::api::runtime::page::{Cursor, Page};
+use schemas_fixture_console_api_topcoat::api::runtime::{search, ApiError, Authenticator, Principal, RequestContext};
+use schemas_fixture_console_api_topcoat::api::{
+    types, Implementations, OrderAddLineArgs, OrderGetOrderArgs, OrderImplementation, OrderListOrdersArgs, OrderPlaceOrderArgs,
+    ProductCreateProductArgs, ProductGetProductArgs, ProductImplementation, ProductListProductsArgs, ReviewImplementation,
+    ReviewListReviewsArgs, SiteImplementation, SiteListPagesArgs, SupplierImplementation, SupplierListSupplierProductsArgs,
+};
+use schemas_fixture_console_api_topcoat::pages::Settings;
+use schemas_fixture_console_api_topcoat::{PageAuthenticator, RouterBuilderFixtureConsoleApiExt};
+use schemas_fixture_console_suppliers_api_topcoat as suppliers;
+use suppliers::RouterBuilderFixtureConsoleSuppliersApiExt;
+use topcoat::context::Cx;
+use topcoat::router::{header, page, to_bytes, Body, Router, RouterBuilderDiscoverExt, StatusCode};
+use topcoat::view::{view, View};
+
+#[path = "support/enter.rs"]
+mod enter;
+
+const ANVIL: &str = "8d1f6c9e-0000-4000-8000-000000000001";
+const BUCKET: &str = "8d1f6c9e-0000-4000-8000-000000000002";
+const CRATE: &str = "8d1f6c9e-0000-4000-8000-000000000003";
+
+fn uuid(text: &str) -> types::IdentityUUID {
+    serde_json::from_value(serde_json::json!(text)).unwrap()
+}
+
+fn product(id: &str, name: &str, supplier: &str) -> types::Product {
+    types::Product { id: uuid(id), name: name.to_owned(), sku: name.to_lowercase(), supplier_id: supplier.to_owned(), in_stock: true }
+}
+
+// The console's products, and nothing else: it lists no supplier.
+struct Shop(Mutex<Vec<types::Product>>);
+
+#[async_trait]
+impl ProductImplementation for Shop {
+    async fn list_products(&self, _ctx: RequestContext, args: ProductListProductsArgs) -> Result<Page<types::Product>, ApiError> {
+        let products = self.0.lock().unwrap();
+        Ok(Page::last(products.iter().filter(|product| args.ids.as_ref().is_none_or(|ids| ids.contains(&product.id))).cloned().collect()))
+    }
+    async fn get_product(&self, _ctx: RequestContext, args: ProductGetProductArgs) -> Result<types::Product, ApiError> {
+        let products = self.0.lock().unwrap();
+        products.iter().find(|product| product.id == args.product_id).cloned().ok_or_else(|| ApiError::not_found("No such product"))
+    }
+    async fn create_product(&self, _ctx: RequestContext, args: ProductCreateProductArgs) -> Result<types::Product, ApiError> {
+        let created = types::Product { name: args.input.name, sku: args.input.sku, supplier_id: args.input.supplier_id, ..product(CRATE, "", "") };
+        self.0.lock().unwrap().push(created.clone());
+        Ok(created)
+    }
+}
+
+#[async_trait]
+impl SupplierImplementation for Shop {
+    async fn list_supplier_products(&self, _ctx: RequestContext, args: SupplierListSupplierProductsArgs) -> Result<Vec<types::Product>, ApiError> {
+        let products = self.0.lock().unwrap();
+        Ok(products.iter().filter(|product| product.supplier_id == args.supplier_id).cloned().collect())
+    }
+}
+
+#[async_trait]
+impl ReviewImplementation for Shop {
+    async fn list_reviews(&self, _ctx: RequestContext, _args: ReviewListReviewsArgs) -> Result<Page<types::Review>, ApiError> {
+        Ok(Page::last(Vec::new()))
+    }
+}
+
+#[async_trait]
+impl SiteImplementation for Shop {
+    async fn list_pages(&self, _ctx: RequestContext, _args: SiteListPagesArgs) -> Result<Page<types::SitePage>, ApiError> {
+        Ok(Page::last(Vec::new()))
+    }
+}
+
+#[async_trait]
+impl OrderImplementation for Shop {
+    async fn list_orders(&self, _ctx: RequestContext, _args: OrderListOrdersArgs) -> Result<Page<types::Order>, ApiError> {
+        Ok(Page::last(Vec::new()))
+    }
+    async fn place_order(&self, _ctx: RequestContext, _args: OrderPlaceOrderArgs) -> Result<types::Order, ApiError> {
+        Err(ApiError::not_found("No orders here"))
+    }
+    async fn get_order(&self, _ctx: RequestContext, _args: OrderGetOrderArgs) -> Result<types::Order, ApiError> {
+        Err(ApiError::not_found("No orders here"))
+    }
+    async fn add_line(&self, _ctx: RequestContext, _args: OrderAddLineArgs) -> Result<types::Order, ApiError> {
+        Err(ApiError::not_found("No orders here"))
+    }
+}
+
+// The suppliers' API: Acme, Bolt and Cog, by name, searched by their names.
+struct Directory;
+
+#[async_trait]
+impl suppliers::api::SupplierImplementation for Directory {
+    async fn list_suppliers(&self, _ctx: RequestContext, args: suppliers::api::SupplierListSuppliersArgs) -> Result<Page<suppliers::api::types::Supplier>, ApiError> {
+        let terms = search::terms(args.q.as_deref().unwrap_or_default());
+        let after: Option<String> = args.page.cursor.as_ref().map(Cursor::decode).transpose()?;
+        let rows: Vec<suppliers::api::types::Supplier> = ["Acme", "Bolt", "Cog"]
+            .iter()
+            .filter(|name| search::matches(name, &terms) && after.as_ref().is_none_or(|after| **name > after.as_str()))
+            .map(|name| suppliers::api::types::Supplier { id: name.to_lowercase(), name: (*name).to_owned() })
+            .collect();
+        Page::from_rows(rows, args.page.limit, |supplier| supplier.name.clone())
+    }
+}
+
+struct NoRequests;
+
+#[async_trait]
+impl Authenticator for NoRequests {
+    async fn authenticate(&self, _request: &Parts) -> Result<Option<Principal>, ApiError> {
+        Ok(None)
+    }
+}
+
+// Every page's caller is a clerk, who reads products and suppliers, in
+// both crates.
+struct Clerk;
+
+fn clerk() -> Option<Principal> {
+    Some(Principal::new("clerk", ["orders", "products.read"]))
+}
+
+#[async_trait]
+impl PageAuthenticator for Clerk {
+    async fn principal(&self, _cx: &Cx) -> Result<Option<Principal>, ApiError> {
+        Ok(clerk())
+    }
+}
+
+#[async_trait]
+impl suppliers::PageAuthenticator for Clerk {
+    async fn principal(&self, _cx: &Cx) -> Result<Option<Principal>, ApiError> {
+        Ok(clerk())
+    }
+}
+
+fn console(shop: &Arc<Shop>) -> Implementations {
+    Implementations {
+        order: Arc::clone(shop) as _,
+        product: Arc::clone(shop) as _,
+        review: Arc::clone(shop) as _,
+        site: Arc::clone(shop) as _,
+        supplier: Arc::clone(shop) as _,
+        authenticator: Arc::new(NoRequests),
+    }
+}
+
+fn directory() -> suppliers::api::Implementations {
+    suppliers::api::Implementations { supplier: Arc::new(Directory), authenticator: Arc::new(NoRequests) }
+}
+
+fn shop() -> Arc<Shop> {
+    Arc::new(Shop(Mutex::new(vec![product(ANVIL, "Anvil", "acme"), product(BUCKET, "Bucket", "bolt")])))
+}
+
+// The app that hosts both services: the console's JSON API at /api, the
+// suppliers' crate without one.
+fn app(shop: &Arc<Shop>) -> Router {
+    Router::builder()
+        .discover()
+        .app_context(Settings::new().title("Shop console"))
+        .fixture_console_api(console(shop), Clerk)
+        .fixture_console_suppliers_api_without_api(directory(), Clerk)
+        .build()
+}
+
+// An app that hosts the console alone, though it links the suppliers'
+// crate.
+fn console_alone(shop: &Arc<Shop>) -> Router {
+    Router::builder().discover().app_context(Settings::new().title("Shop console")).fixture_console_api(console(shop), Clerk).build()
+}
+
+// The suppliers' in-process call, from the app's own page: how many
+// suppliers its first page holds, or its refusal.
+#[page("/app/suppliers")]
+async fn app_suppliers(cx: &Cx) -> topcoat::Result<impl View> {
+    let args = suppliers::api::SupplierListSuppliersArgs { q: None, page: suppliers::api::SupplierListSuppliersArgs::PAGE.first() };
+    let said = match suppliers::operations::supplier_list_suppliers(cx, args).await {
+        Ok(page) => page.items.len().to_string(),
+        Err(err) => format!("{} {}", err.status.as_u16(), err.message),
+    };
+    Ok(view! { <p id="said">(said)</p> })
+}
+
+struct Answer {
+    status: StatusCode,
+    headers: http::HeaderMap,
+    html: String,
+}
+
+async fn send(router: &Router, method: &str, uri: &str, body: &str) -> Answer {
+    let mut request = http::Request::builder().method(method).uri(uri);
+    if method == "POST" {
+        request = request.header(header::CONTENT_TYPE, "application/x-www-form-urlencoded");
+    }
+    let response = router.handle(request.body(Body::from(body.to_owned())).unwrap()).await;
+    let (status, headers) = (response.status(), response.headers().clone());
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let html = String::from_utf8(bytes.to_vec()).unwrap();
+    enter::check_page(uri, &headers, &html);
+    Answer { status, headers, html }
+}
+
+async fn get(router: &Router, uri: &str) -> Answer {
+    send(router, "GET", uri, "").await
+}
+
+fn between<'a>(html: &'a str, start: &str, end: &str) -> &'a str {
+    let rest = &html[html.find(start).unwrap_or_else(|| panic!("no {start} in {html}")) + start.len()..];
+    &rest[..rest.find(end).unwrap()]
+}
+
+// The labels of the options of the picker of the control named name.
+fn labels(html: &str, name: &str) -> Vec<String> {
+    let picker = between(html, &format!(r#"<div class="ss-pick" data-ss-pick="{name}">"#), "</select>");
+    picker
+        .split("<option value=\"")
+        .skip(1)
+        .filter(|option| !option.starts_with('"'))
+        .map(|option| option.split_once('>').unwrap().1.trim_end_matches("</option>").to_owned())
+        .collect()
+}
+
+#[tokio::test]
+async fn a_product_names_its_supplier_through_the_hosted_crate() {
+    let app = app(&shop());
+    let list = get(&app, "/console/products").await;
+    assert_eq!(list.status, StatusCode::OK, "{}", list.html);
+    assert!(list.html.contains(r#"<td data-field="supplierId">Acme</td>"#) && list.html.contains(r#"<td data-field="supplierId">Bolt</td>"#), "{}", list.html);
+    let anvil = serde_json::to_value(uuid(ANVIL)).unwrap().as_str().unwrap().to_owned();
+    let item = get(&app, &format!("/console/products/{anvil}")).await;
+    assert!(item.html.contains("<dd>Acme</dd>"), "{}", item.html);
+    // The trail names a supplier through the reference of its products'
+    // route, from the suppliers' listing.
+    let products = get(&app, "/console/suppliers/bolt/products").await;
+    assert!(products.html.contains("<li><span>Bolt</span></li>"), "{}", products.html);
+}
+
+#[tokio::test]
+async fn a_new_product_picks_its_supplier_through_the_hosted_crate() {
+    let shop = shop();
+    let app = app(&shop);
+    // The suppliers' listSuppliers searches, so the supplier is a picker of
+    // its first page, one supplier, and more match.
+    let new = get(&app, "/console/products/new").await;
+    assert_eq!(new.status, StatusCode::OK, "{}", new.html);
+    assert_eq!(labels(&new.html, "supplierId"), ["Acme"], "{}", new.html);
+    assert!(new.html.contains("More suppliers match"), "{}", new.html);
+    // Find searches the suppliers' API in-process.
+    let found = send(&app, "POST", "/console/products/new", "name=Crate&sku=crate&supplierId=&_find.supplierId=bo&_action=find:supplierId").await;
+    assert_eq!(found.status, StatusCode::OK, "{}", found.html);
+    assert_eq!(labels(&found.html, "supplierId"), ["Bolt"], "{}", found.html);
+    let placed = send(&app, "POST", "/console/products/new", "name=Crate&sku=crate&supplierId=bolt").await;
+    assert_eq!(placed.status, StatusCode::SEE_OTHER, "{}", placed.html);
+    assert_eq!(shop.0.lock().unwrap().last().map(|product| product.supplier_id.clone()).as_deref(), Some("bolt"));
+}
+
+#[tokio::test]
+async fn a_page_meets_the_suppliers_rate_limit() {
+    let app = app(&shop());
+    // listSuppliers takes three requests a minute a client: the products'
+    // list, whose rows it names, counts against the suppliers' limiter.
+    for _ in 0..3 {
+        assert_eq!(get(&app, "/console/products").await.status, StatusCode::OK);
+    }
+    let refused = get(&app, "/console/products").await;
+    assert_eq!(refused.status, StatusCode::TOO_MANY_REQUESTS, "{}", refused.html);
+    assert!(refused.headers.contains_key(header::RETRY_AFTER));
+    // A page that calls no supplier is not counted.
+    assert_eq!(get(&app, "/console/orders").await.status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn an_app_without_the_suppliers_names_them_by_their_ids() {
+    let alone = console_alone(&shop());
+    let list = get(&alone, "/console/products").await;
+    assert_eq!(list.status, StatusCode::OK, "{}", list.html);
+    assert!(list.html.contains(r#"<td data-field="supplierId">acme</td>"#), "{}", list.html);
+    let new = get(&alone, "/console/products/new").await;
+    assert!(new.html.contains(r#"<input id="product-input-supplier-id" name="supplierId" type="text" required"#), "{}", new.html);
+    // A call into the crate the app did not set up is the 500, not a panic.
+    let said = get(&alone, "/app/suppliers").await;
+    assert_eq!(
+        between(&said.html, r#"<p id="said">"#, "</p>"),
+        "500 the app does not host fixture-console-suppliers-api: its router builder calls neither fixture_console_suppliers_api nor fixture_console_suppliers_api_without_api"
+    );
+    let hosting = app(&shop());
+    assert_eq!(between(&get(&hosting, "/app/suppliers").await.html, r#"<p id="said">"#, "</p>"), "1");
+}
+
+#[tokio::test]
+async fn two_services_serve_their_pages_and_one_json_api() {
+    let app = app(&shop());
+    // Each crate's pages, under its own prefix.
+    let index = get(&app, "/console").await;
+    assert_eq!(index.status, StatusCode::OK, "{}", index.html);
+    let suppliers = get(&app, "/suppliers/suppliers").await;
+    assert_eq!(suppliers.status, StatusCode::OK, "{}", suppliers.html);
+    assert!(suppliers.html.contains(">Acme</th>"), "{}", suppliers.html);
+    // The console's JSON API at /api, which refuses a caller it does not
+    // know, as JSON.
+    let api = get(&app, "/api/products").await;
+    assert_eq!(api.status, StatusCode::UNAUTHORIZED, "{}", api.html);
+    assert!(api.headers.get(header::CONTENT_TYPE).and_then(|value| value.to_str().ok()).is_some_and(|kind| kind.contains("json")), "{:?}", api.headers);
+}
+
+#[test]
+fn a_second_json_api_is_refused() {
+    let shop = shop();
+    let built = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        Router::builder().fixture_console_api(console(&shop), Clerk).fixture_console_suppliers_api(directory(), Clerk).build()
+    }));
+    let Err(panic) = built else {
+        panic!("an app with two JSON APIs at /api built");
+    };
+    let message = panic.downcast_ref::<String>().cloned().or_else(|| panic.downcast_ref::<&str>().map(|text| (*text).to_owned())).unwrap_or_default();
+    assert!(message.contains("duplicate any-method route registered for"), "{message}");
 }
 `

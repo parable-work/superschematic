@@ -72,7 +72,9 @@ use crate::choices::{Choice, Choices{{ if .Picking }}, Pick, PickControl, PickOp
 {{- if .FormNames }}
 use crate::forms::{ {{- .FormNames -}} };
 {{- end }}
+{{- if .OwnOperations }}
 use crate::operations;
+{{- end }}
 {{- if .Records }}
 use crate::records::{ {{- .RecordNames -}} };
 {{- end }}
@@ -81,6 +83,9 @@ use serde::de::DeserializeOwned;
 {{- end }}
 use serde_json::Value;
 use topcoat::context::{Cx, memoize};
+{{- if .PicksUse "rate_from" }}
+use topcoat::context::try_app_context;
+{{- end }}
 {{- if .PickControlled }}
 use topcoat::router::response::Response;
 use topcoat::router::{Body, HeaderValue, Layer, LayerFuture, Next, Path, RouterBuilder, header};
@@ -251,23 +256,23 @@ fn as_number(text: &str) -> Option<Value> {
 #[memoize(as_ref)]
 async fn {{ .Fn }}(cx: &Cx) -> Option<Listed> {
 {{- if .ArgsName }}
-    let args = crate::api::{{ .ArgsName }} {
+    let args = {{ .API }}::{{ .ArgsName }} {
 {{- range .Nones }}
         {{ . }}: None,
 {{- end }}
 {{- if .Paged }}
-        page: PageRequest::first(crate::api::{{ .ArgsName }}::PAGE.max_limit()),
+        page: {{ .PageRequest }}::first({{ .API }}::{{ .ArgsName }}::PAGE.max_limit()),
 {{- end }}
     };
 {{- if .Paged }}
-    let page = operations::{{ .Snake }}(cx, args).await.ok()?;
+    let page = {{ .Ops }}::{{ .Snake }}(cx, args).await.ok()?;
     Some(Listed { items: json_of(&page.items){{ if $m.Choosing }}, more: page.next.is_some(){{ end }} })
 {{- else }}
-    let items = operations::{{ .Snake }}(cx, args).await.ok()?;
+    let items = {{ .Ops }}::{{ .Snake }}(cx, args).await.ok()?;
     Some(Listed { items: json_of(&items){{ if $m.Choosing }}, more: false{{ end }} })
 {{- end }}
 {{- else }}
-    let items = operations::{{ .Snake }}(cx).await.ok()?;
+    let items = {{ .Ops }}::{{ .Snake }}(cx).await.ok()?;
     Some(Listed { items: json_of(&items){{ if $m.Choosing }}, more: false{{ end }} })
 {{- end }}
 }
@@ -279,16 +284,16 @@ async fn {{ .Fn }}(cx: &Cx) -> Option<Listed> {
 {{ doc (printf "The items %s finds for `text`, for a picker (D61, amended): %s with `%s` set, as JSON, and whether more follow, the text empty for every item; kept for the request (`#[memoize]`). None when the caller may not call it (401, 403) or the call fails; `Err` the search argument's refusal of the text, as its route words it." .Operation (or (and .Paged "its first page, at its defaultLimit,") "its items") .Search.Arg) }}
 #[memoize(as_ref)]
 async fn {{ .Search.Fn }}(cx: &Cx, text: &str) -> Option<Result<Listed, String>> {
-    let args = crate::api::{{ .ArgsName }} {
+    let args = {{ .API }}::{{ .ArgsName }} {
         {{ .Search.Field }}: (!text.is_empty()).then(|| text.to_owned()),
 {{- range .Search.Others }}
         {{ . }}: None,
 {{- end }}
 {{- if .Paged }}
-        page: PageRequest::first(crate::api::{{ .ArgsName }}::PAGE.default_limit()),
+        page: {{ .PageRequest }}::first({{ .API }}::{{ .ArgsName }}::PAGE.default_limit()),
 {{- end }}
     };
-    match operations::{{ .Snake }}(cx, args).await {
+    match {{ .Ops }}::{{ .Snake }}(cx, args).await {
 {{- if .Paged }}
         Ok(page) => Some(Ok(Listed { items: json_of(&page.items), more: page.next.is_some() })),
 {{- else }}
@@ -307,20 +312,20 @@ async fn {{ .Search.Fn }}(cx: &Cx, text: &str) -> Option<Result<Listed, String>>
 #[memoize(as_ref)]
 async fn {{ .Fn }}(cx: &Cx, values: &[String]) -> Option<Vec<Value>> {
     let wanted = decode_each(values.iter().filter_map(|value| {{ .Read }}(value)))?;
-    let args = crate::api::{{ .Options.ArgsName }} {
+    let args = {{ .Options.API }}::{{ .Options.ArgsName }} {
         {{ .Field }}: Some(wanted),
 {{- range .Others }}
         {{ . }}: None,
 {{- end }}
 {{- if .Options.Paged }}
-        page: PageRequest::first(crate::api::{{ .Options.ArgsName }}::PAGE.max_limit()),
+        page: {{ .Options.PageRequest }}::first({{ .Options.API }}::{{ .Options.ArgsName }}::PAGE.max_limit()),
 {{- end }}
     };
 {{- if .Options.Paged }}
-    let page = operations::{{ .Options.Snake }}(cx, args).await.ok()?;
+    let page = {{ .Options.Ops }}::{{ .Options.Snake }}(cx, args).await.ok()?;
     Some(json_of(&page.items))
 {{- else }}
-    let items = operations::{{ .Options.Snake }}(cx, args).await.ok()?;
+    let items = {{ .Options.Ops }}::{{ .Options.Snake }}(cx, args).await.ok()?;
     Some(json_of(&items))
 {{- end }}
 }
@@ -370,7 +375,7 @@ async fn {{ .Base }}_target_labels(cx: &Cx, values: &BTreeSet<String>) -> Vec<Ch
 {{- end }}
 {{- if $m.UsesPick . }}
 
-{{ doc (printf "The picks of controls that refer to %s (D61, amended), one per `(value, text, search)` wanted: when `search`, the items `text` finds through %s's `%s`, else the first page of them all; the first `MAX_LOOKUP_CALLS` distinct texts are searched, one listing each, and a text past them lists the first page with `TOO_MANY_SEARCHES`. The value held is always an option, named by its %s through `%s_target_labels`, one call for every value no match is. None for each when the caller may not list the items or the call fails." .Target .Options.Operation .Options.Search.Arg (or (and .Label (printf "%s" .Label)) "value") .Base) }}
+{{ doc (printf "The picks of controls that refer to %s (D61, amended), one per `(value, text, search)` wanted: when `search`, the items `text` finds through %s's `%s`, else the first page of them all; the first `MAX_LOOKUP_CALLS` distinct texts are searched, one listing each, and a text past them lists the first page with `TOO_MANY_SEARCHES`. The value held is always an option, named by its %s through `%s_target_labels`, which names every value no match holds at once. None for each when the caller may not list the items or the call fails." .Target .Options.Operation .Options.Search.Arg (or (and .Label (printf "%s" .Label)) "value") .Base) }}
 async fn {{ .Base }}_target_picks(cx: &Cx, wanted: &[(String, String, bool)]) -> Vec<Option<Pick>> {
     let mut searched: Vec<&str> = Vec::new();
     let mut found = Vec::with_capacity(wanted.len());
@@ -530,6 +535,7 @@ pub(crate) fn route_controls(router: RouterBuilder{{ if .PicksUse "rate_limit" }
         .layer(PickControls {
             path: Path::new({{ rustString (.PickPath $crate.SchemaName) }}),
             rate_limit: {{ .RateLimitExpr }},
+            rate_from: {{ .RateFromExpr }},
             timeout: {{ .TimeoutExpr }},
         })
 {{- end }}
@@ -543,8 +549,15 @@ pub(crate) fn route_controls(router: RouterBuilder{{ if .PicksUse "rate_limit" }
 struct PickControls {
     path: &'static Path,
     rate_limit: Option<Arc<RateLimiter>>,
+    /// The limiter of an API dependency's options operation (D61, amended),
+    /// which its crate's setup holds in the app context: taken at the
+    /// request, none when the app does not set the crate up.
+    rate_from: Option<LimiterFrom>,
     timeout: Option<Duration>,
 }
+
+/// How a shard takes an API dependency's operation's limiter at a request.
+type LimiterFrom = fn(&Cx) -> Option<Arc<RateLimiter>>;
 
 impl Layer for PickControls {
     fn path(&self) -> Option<&Path> {
@@ -553,7 +566,8 @@ impl Layer for PickControls {
 
     fn handle<'a>(&'a self, cx: &'a Cx, body: Body, next: Next<'a>) -> LayerFuture<'a> {
         Box::pin(async move {
-            if let Some(limiter) = &self.rate_limit
+            let limiter = self.rate_limit.clone().or_else(|| self.rate_from.and_then(|from| from(cx)));
+            if let Some(limiter) = limiter
                 && let Err(retry_after) = limiter.take(&crate::client_key(cx))
             {
                 let mut response = pick_refusal(&ApiError::too_many_requests("Too Many Requests"));
