@@ -178,6 +178,7 @@ func fakePaths(repoRoot string) naming.LocalPaths {
 		EngineBehaviorsRust: filepath.Join(repoRoot, "runtime", "engine", "rust", "behaviors"),
 		EngineWorkQueueRust: filepath.Join(repoRoot, "runtime", "engine-workqueue", "rust"),
 		EngineABIRust:       filepath.Join(repoRoot, "runtime", "engine", "rust", "abi"),
+		EngineNapiRust:      filepath.Join(repoRoot, "runtime", "engine", "rust", "napi"),
 	}
 }
 
