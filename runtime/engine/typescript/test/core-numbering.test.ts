@@ -14,13 +14,12 @@ import {
   IncompatibleChangeError,
   InstanceValidationError,
   SchemaDocumentError,
-  defineBehavior,
   type Engine,
-  type EngineOptions,
   type ListOptions,
 } from '../dist/index.js';
+import { defineBehavior } from '../dist/testing/index.js';
 import { openMetaSchema } from './behavior-fixtures.ts';
-import { alice, cleanup, clone, drivers, openTestEngine, schemaDocument, thrown } from './helpers.ts';
+import { alice, cleanup, clone, drivers, openTestEngine, schemaDocument, thrown, type TestEngineOptions } from './helpers.ts';
 import { testClock, type TestClock } from './runner-fixtures.ts';
 
 afterEach(cleanup);
@@ -60,7 +59,7 @@ const refuser = defineBehavior({
 });
 
 for (const driver of drivers) {
-  function open(clock: TestClock = testClock(MARCH_2026), options: Partial<EngineOptions> = {}): Engine {
+  function open(clock: TestClock = testClock(MARCH_2026), options: Partial<TestEngineOptions> = {}): Engine {
     const engine = openTestEngine({ driver, clock, ...options });
     engine.schemas.define(alice, customers);
     engine.schemas.publish(alice, 'Customer');

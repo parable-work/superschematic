@@ -2,7 +2,8 @@
 //! database each earlier version of the engine left (`engine-migrations
 //! .test.ts`, at the storage's level: rows written as that version wrote
 //! them must survive the later migrations), on both databases; and on
-//! SQLite, the same tables as the TypeScript engine's statements make.
+//! SQLite, the same tables as the TypeScript engine made, in the file it
+//! wrote (runtime/engine/testdata/sqlite).
 
 mod support;
 
@@ -598,61 +599,122 @@ fn check_rows(db: &Db, version: usize) {
     }
 }
 
-/// The TypeScript engine's migrations, if its source is still beside the
-/// Rust engine's (it goes at the cutover, D58).
+/// The file the TypeScript engine wrote with every core and work-queue
+/// behavior in use, frozen at the cutover (D58), as its corpus's dump
+/// wrote it: one statement per line (runtime/engine/testdata/sqlite).
 #[cfg(feature = "sqlite")]
-fn typescript_migrations() -> Option<String> {
-    let path =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../typescript/src/migrations.ts");
-    std::fs::read_to_string(path).ok()
+fn typescript_file() -> String {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../testdata/sqlite/typescript.sql");
+    std::fs::read_to_string(path).expect("the SQLite corpus")
 }
 
-// The SQL of each `storage.exec(`...`)` in the TypeScript engine's
-// migrations, in order: every migration's but the tenth, which builds
-// indexes in code.
+/// A schema statement on one line, as the corpus's dump writes one: its
+/// lines joined with single spaces outside quoted text, a `--` comment
+/// left out, no space after `(` or before `)`.
 #[cfg(feature = "sqlite")]
-fn typescript_statements(source: &str) -> Vec<String> {
-    source
-        .split("storage.exec(`")
-        .skip(1)
-        .map(|rest| {
-            rest.split("`)")
-                .next()
-                .expect("a closing backtick")
-                .to_owned()
-        })
-        .collect()
+fn one_line(sql: &str) -> String {
+    let mut out = String::new();
+    let mut quote: Option<char> = None;
+    let mut chars = sql.chars().peekable();
+    while let Some(c) = chars.next() {
+        if let Some(open) = quote {
+            out.push(c);
+            if c == open {
+                quote = None;
+            }
+            continue;
+        }
+        if c == '-' && chars.peek() == Some(&'-') {
+            for rest in chars.by_ref() {
+                if rest == '\n' {
+                    break;
+                }
+            }
+            if !out.ends_with(' ') && !out.ends_with('(') {
+                out.push(' ');
+            }
+            continue;
+        }
+        if c == '\'' || c == '"' || c == '`' {
+            quote = Some(c);
+            out.push(c);
+            continue;
+        }
+        if c.is_whitespace() {
+            if !out.ends_with(' ') && !out.ends_with('(') {
+                out.push(' ');
+            }
+            continue;
+        }
+        if c == ')' && out.ends_with(' ') {
+            out.pop();
+        }
+        out.push(c);
+    }
+    out.trim().to_owned()
+}
+
+/// A table's statement without the columns the behaviors' migrations add
+/// (`"bhv_<key>__<name>" <type>...`), which an `ALTER TABLE` appends to it.
+#[cfg(feature = "sqlite")]
+fn without_behavior_columns(sql: &str) -> String {
+    let mut out = sql.to_owned();
+    while let Some(start) = out.find(", \"bhv_") {
+        let rest = &out[start + 2..];
+        let end = rest.find(", ").map_or(out.len(), |at| start + 2 + at);
+        out.replace_range(start..end, "");
+    }
+    out
 }
 
 #[cfg(feature = "sqlite")]
 #[test]
-fn sqlite_makes_the_tables_the_typescript_engines_statements_make() {
-    let Some(source) = typescript_migrations() else {
-        eprintln!("the TypeScript engine's migrations are gone; nothing to compare");
-        return;
-    };
-    let statements = typescript_statements(&source);
-    assert_eq!(statements.len(), 11);
+fn sqlite_makes_the_tables_the_typescript_engine_made() {
+    // The engine's own objects in the file the TypeScript engine wrote,
+    // loaded as its dump holds them, against a file the engine's
+    // migrations made: the same objects, from the same statements. A
+    // publish's unique indexes, a behavior's objects and the columns its
+    // migrations add to engine_instances are the schemas' and the
+    // behaviors', not the engine's migrations'.
+    let text = typescript_file();
     let theirs = support::Target::sqlite();
     let theirs_db = theirs.open();
-    for statement in &statements {
-        write(&theirs_db, |tx| tx.exec(statement.as_str())).unwrap();
-    }
+    write(&theirs_db, |tx| {
+        tx.exec("PRAGMA defer_foreign_keys = ON")?;
+        for statement in text.lines().filter(|line| !line.is_empty()) {
+            tx.exec(statement)?;
+        }
+        Ok(())
+    })
+    .unwrap();
     let ours = support::Target::sqlite();
     let ours_db = ours.open();
     ours_db.migrate(&engine(), 1).unwrap();
     let schema = |db: &Db| {
         rows(
             db,
-            "SELECT type, name, tbl_name, sql FROM sqlite_master WHERE name NOT IN ('engine_migrations', 'sqlite_sequence') AND name NOT LIKE 'sqlite_autoindex_engine_migrations%' ORDER BY type, name",
+            "SELECT type, name, tbl_name, sql FROM sqlite_master WHERE sql IS NOT NULL AND name LIKE 'engine\\_%' ESCAPE '\\' AND name NOT LIKE 'engine\\_unique\\_%' ESCAPE '\\' ORDER BY type, name",
         )
         .iter()
-        .map(|row| row.values().to_vec())
+        .map(|row| {
+            [
+                row.text("type").unwrap().to_owned(),
+                row.text("name").unwrap().to_owned(),
+                row.text("tbl_name").unwrap().to_owned(),
+                without_behavior_columns(&one_line(row.text("sql").unwrap())),
+            ]
+        })
         .collect::<Vec<_>>()
     };
+    let made = schema(&ours_db);
+    assert!(
+        made.len() > TABLES.len(),
+        "the engine's tables, indexes and triggers"
+    );
     assert_eq!(
-        schema(&ours_db),
+        made,
         schema(&theirs_db),
-        "the same objects, from the same statement text"
+        "the same objects, from the same statements"
     );
 }

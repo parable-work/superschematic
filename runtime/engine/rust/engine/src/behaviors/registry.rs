@@ -326,6 +326,7 @@ fn compile(
         .map(|field| field.name.clone())
         .collect();
     match_names("fields", &hooks.fields, &fields, &mut problems);
+    problems.extend(hooks.problems.iter().cloned());
     if hooks.create_params_schema && declaration.create_params_schema.is_none() {
         problems.push("createParamsSchema narrows the create parameters its declaration takes, and its declaration takes none (no createParamsSchema)".to_owned());
     }

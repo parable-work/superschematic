@@ -19,6 +19,10 @@ postgres = ["superschematic-engine-storage/postgres"]
 # which a Rust server mounts (D58). Off by default, so the bindings' builds
 # (the C archive, the Node-API addon) leave axum and its runtime out.
 axum = ["dep:axum", "dep:futures-util", "dep:tokio"]
+# Behaviors whose hooks are named at run time (behaviors::DynamicBehavior):
+# what a binding's test bridge registers for a behavior written in the
+# host's language. No production build turns it on (D58).
+dynamic = []
 
 [dependencies]
 # The axum feature's router, at the versions the generated Rust servers pin

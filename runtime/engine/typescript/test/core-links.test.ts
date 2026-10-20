@@ -17,11 +17,10 @@ import {
   type AccessPolicy,
   type AccessRequest,
   type Engine,
-  type EngineOptions,
   type Principal,
 } from '../dist/index.js';
 import { Calls, recipeDocument, type Commit } from './branches-fixtures.ts';
-import { alice, cleanup, drivers, openTestEngine, schemaDocument, thrown } from './helpers.ts';
+import { alice, cleanup, drivers, openTestEngine, schemaDocument, thrown, type TestEngineOptions } from './helpers.ts';
 
 afterEach(cleanup);
 
@@ -55,13 +54,13 @@ function policy(rules: (request: AccessRequest) => boolean): AccessPolicy {
 }
 
 for (const driver of drivers) {
-  function open(options: Partial<EngineOptions> = {}): Engine {
+  function open(options: Partial<TestEngineOptions> = {}): Engine {
     return openTestEngine({ driver, ...options });
   }
 
   // Specs s1 and s2 keep revisions; people p1 and p2; tasks t1 to t3, whose
   // required owner their create gives: p1 owns t1, p2 the others.
-  function world(options: Partial<EngineOptions> = {}): Engine {
+  function world(options: Partial<TestEngineOptions> = {}): Engine {
     const engine = open(options);
     publish(engine, schema('Spec', [{ name: 'Revisions' }]));
     publish(engine, schema('Person', []));

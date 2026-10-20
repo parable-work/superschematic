@@ -3,8 +3,28 @@
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
 
-import { EngineError, IncompatibleChangeError, InstanceValidationError, allowAll, type Engine, type EngineOptions, type Principal } from '../dist/index.js';
-import { alice, cleanup, clone, drivers, freshPath, openEngine, openTestEngine, orderDocument, schemaDocument, thrown, track } from './helpers.ts';
+import {
+  EngineError,
+  IncompatibleChangeError,
+  InstanceValidationError,
+  allowAll,
+  type Engine,
+  type Principal,
+} from '../dist/index.js';
+import {
+  alice,
+  cleanup,
+  clone,
+  drivers,
+  freshPath,
+  openEngine,
+  openTestEngine,
+  orderDocument,
+  schemaDocument,
+  thrown,
+  track,
+  type TestEngineOptions,
+} from './helpers.ts';
 
 afterEach(cleanup);
 
@@ -37,7 +57,7 @@ function publish(engine: Engine, document: Record<string, unknown>, namespace?: 
   engine.schemas.publish(alice, record.name, { namespace });
 }
 
-function withOrders(options: Partial<EngineOptions> = {}): Engine {
+function withOrders(options: Partial<TestEngineOptions> = {}): Engine {
   const engine = openTestEngine(options);
   publish(engine, orderDocument());
   return engine;

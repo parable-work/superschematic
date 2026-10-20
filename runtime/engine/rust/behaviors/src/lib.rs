@@ -125,3 +125,23 @@ pub fn core() -> BehaviorSet {
         .with(Numbering)
         .with(Timers)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// core() registers what NAMES lists, in its order: what the Node-API
+    /// addon reads to tell the core's of its behaviors from the rest.
+    #[test]
+    fn core_registers_every_name_in_order() {
+        assert_eq!(core().names(), NAMES);
+    }
+
+    /// A selection keeps the set's order, whatever order the names come in.
+    #[test]
+    fn a_selection_keeps_the_sets_order() {
+        let picked = core().select(|name| name == "Timers" || name == "Comments");
+        assert_eq!(picked.names(), ["Comments", "Timers"]);
+        assert!(core().select(|_| false).is_empty());
+    }
+}

@@ -13,15 +13,14 @@ import {
   InstanceValidationError,
   OperationParamsError,
   SchemaDocumentError,
-  defineBehavior,
   isTerminalState,
   stateOutcome,
   type Engine,
-  type EngineOptions,
   type Principal,
 } from '../dist/index.js';
+import { defineBehavior } from '../dist/testing/index.js';
 import { openMetaSchema } from './behavior-fixtures.ts';
-import { alice, cleanup, clone, drivers, openTestEngine, schemaDocument, thrown } from './helpers.ts';
+import { alice, cleanup, clone, drivers, openTestEngine, schemaDocument, thrown, type TestEngineOptions } from './helpers.ts';
 import { testClock } from './runner-fixtures.ts';
 
 afterEach(cleanup);
@@ -74,11 +73,11 @@ const dispatch = defineBehavior({
 });
 
 for (const driver of drivers) {
-  function open(options: Partial<EngineOptions> = {}): Engine {
+  function open(options: Partial<TestEngineOptions> = {}): Engine {
     return openTestEngine({ driver, ...options });
   }
 
-  function published(config: unknown = orderFlow, options: Partial<EngineOptions> = {}): Engine {
+  function published(config: unknown = orderFlow, options: Partial<TestEngineOptions> = {}): Engine {
     const engine = open(options);
     engine.schemas.define(alice, orderSchema(config));
     engine.schemas.publish(alice, 'Order');

@@ -185,8 +185,8 @@ func TestNamespace(t *testing.T) {
 	}
 }
 
-// helpdesk is an extension that declares a behavior with its npm package,
-// its own invocation policy and a tool hook that renames the scalar key
+// helpdesk is an extension that declares a behavior with its npm package
+// and its Rust crate, its own invocation policy and a tool hook that renames the scalar key
 // and adds an argument-schema key.
 type helpdesk struct{}
 
@@ -194,7 +194,11 @@ func (helpdesk) Name() string { return "helpdesk" }
 
 func (helpdesk) Register(r *registry.Registry) error {
 	return errors.Join(
-		r.RegisterBehavior(registry.BehaviorSpec{Extension: "helpdesk", Package: "@helpdesk/behaviors", Declaration: json.RawMessage(`{"name":"helpdesk.Triage"}`)}),
+		r.RegisterBehavior(registry.BehaviorSpec{
+			Extension: "helpdesk", Package: "@helpdesk/behaviors",
+			Rust:        registry.BehaviorRust{Crate: "helpdesk-behaviors", Path: "crates/behaviors", Register: "helpdesk_behaviors::Triage"},
+			Declaration: json.RawMessage(`{"name":"helpdesk.Triage"}`),
+		}),
 		r.RegisterToolInvocationPolicy(registry.ToolInvocationPolicy{Extension: "helpdesk", Key: "confirm", Values: []string{"never", "always"}, Default: "never"}),
 		r.RegisterToolHook(registry.ToolHook{Name: "keys", Extension: "helpdesk", Edit: func(_ *ir.Schema, set *apigen.ToolSet) error {
 			set.Keys.Scalar = "x-helpdesk-scalar"
@@ -206,7 +210,7 @@ func (helpdesk) Register(r *registry.Registry) error {
 
 // The document carries the D11 options this binary registers, the core's
 // by default, and each behavior with what implements it: the core engine,
-// the work queue or the extension's package.
+// the work queue or the extension's package and crate.
 func TestBuildCarriesTheToolOptionsAndTheBehaviors(t *testing.T) {
 	doc := build(t, desk(), enginedoc.Options{})
 	want := enginedoc.Tools{
@@ -239,7 +243,7 @@ func TestBuildCarriesTheToolOptionsAndTheBehaviors(t *testing.T) {
 		{Name: "Lease", Package: "@superschematic/engine-workqueue"},
 		{Name: "Links", Package: "@superschematic/engine"},
 		{Name: "Workflow", Package: "@superschematic/engine"},
-		{Name: "helpdesk.Triage", Extension: "helpdesk", Package: "@helpdesk/behaviors"},
+		{Name: "helpdesk.Triage", Extension: "helpdesk", Package: "@helpdesk/behaviors", Crate: "helpdesk-behaviors"},
 	}; !reflect.DeepEqual(doc.Behaviors, want) {
 		t.Errorf("Behaviors = %+v, want %+v", doc.Behaviors, want)
 	}

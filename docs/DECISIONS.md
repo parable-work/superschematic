@@ -5661,8 +5661,8 @@ engine over the behavior's transaction in place of the TypeScript
 `SyncEngine`; and D47's archives. D57 gives a Rust server the entrypoint
 the engine mounts in.
 
-Status: partly built: milestones 1 to 12 (but 7b), 15 and 16; the rest
-are pending, as below. `runtime/engine/rust` holds the workspace;
+Status: built but for the generated servers that mount the engine
+(milestones 18 to 20). `runtime/engine/rust` holds the workspace;
 `superschematic-engine-storage`: both databases' transactions, savepoints
 and writer locks, the write counter, the migration ledger with the
 engine's migrations for each, a behavior's storage and SQL checker, and
@@ -5752,8 +5752,8 @@ behaviors and the work queue's, runs the cases of
 `test/behavior-*.test.ts`, the runner's, retention's and the tools',
 those of the core behaviors' `test/core-*.test.ts` and those of the
 work queue's tests against the engine, and replays the scenario and
-HTTP corpora, the core behaviors' files, the work queue's (211 of its
-213 scenarios on SQLite and 208 on Postgres, the rest `js` or writing
+HTTP corpora, the core behaviors' files, the work queue's (212 of its
+213 scenarios on SQLite and 209 on Postgres, the rest `js` or writing
 the file with SQL of their own) and the behavior catalog included, the
 HTTP corpus through the engine's routes and through its axum router,
 giving their recorded answers on SQLite and Postgres for every
@@ -5761,33 +5761,126 @@ case whose test behaviors it has, an event cursor on Postgres held to
 the recorded order rather than its number (a write a rollback undid
 leaves a gap in a Postgres identity column), but for a step it lists
 with what explains it (a change the recording does not see). CI tests
-the workspace on both databases. `superschematic-engine-napi` (milestone 7a)
-is the Rust engine as a Node-API addon, with the core's behaviors it is
-built with and the work queue's an engine's options name (`behaviors`,
-by name: a behavior object is TypeScript code, even one whose
-declaration names one the addon has), and `@superschematic/engine`'s
-`src/native` gives it the
-package's synchronous API: a call by name with JSON in and out on the
-JavaScript thread over SQLite, a promise of one off that thread (an
-`AsyncTask`, or on Postgres a future that owns the engine), the package's
-error classes rebuilt from the class, code and members the addon throws,
-a panic caught at every entry, and a policy or permission matcher
-written in TypeScript asked on the JavaScript thread during a call. With
-`ENGINE_IMPL=rust` the package's suite runs on it, each file on its own
-under Node.js and Bun, held to `test/rust-pending.txt`, the files not
-passing yet and why, which a file leaves once it passes (CI's
-`engine-napi` job): with all fifteen of the core's behaviors, 15 of the
-66 pass on both (491 of Node.js's 913 tests, 827 of Bun's 1,564), and no
-test that runs fails on what the Rust engine does. The work queue's
-suite runs so too (`--package`), its `test/helpers.ts` passing the
-package's own behaviors by name, held to its own `test/rust-pending.txt`:
-11 of its 19 files pass on both (211 of Node.js's 240 tests, 399 of
-Bun's 455), and none fails on what the Rust engine does. The rest wait for
-milestone 7b's test-only bridge for behaviors written in TypeScript; it
-brings too raw SQL on the engine's file, `events.watch`, and `engineApp`
-and `engineMcp` over the engine's routes. Until the Rust engine passes
-the TypeScript suite, `@superschematic/engine` is the TypeScript
-implementation and nothing uses the workspace.
+the workspace on both databases. `superschematic-engine-napi` (milestones
+7a and 7b) is the Rust engine as a Node-API addon, as a library whose
+`export_engine_napi!(behaviors = path)`, the twin of
+`export_engine_c_abi!`, a cdylib expands once:
+`superschematic-engine-addon` (`runtime/engine/rust/addon`) is the core's
+addon, over the core's behaviors and the work queue's, an engine
+registering the core's when it opens and each other one its options name
+(`behaviors`, by name: a behavior object is TypeScript code, even one
+whose declaration names one the addon has, and a name the addon is not
+built with is refused). An engine opens on a project's addon when the
+host names its file (the engine option `addon`, or
+`SUPERSCHEMATIC_ENGINE_ADDON`), else on the checkout's `native/`, else on
+the release's prebuilt `@superschematic/engine-<target>` (darwin-arm64,
+darwin-x64, linux-x64-gnu, linux-arm64-gnu, built with the workspace's
+`dist` profile, fat LTO and stripped, on the build-archives runners, and
+optional dependencies of `@superschematic/engine` at its version); a
+Docker image builds the addon from source. `@superschematic/engine`'s
+`src/native` gives it the package's synchronous API: a call by name with
+JSON in and out on the JavaScript thread over SQLite, the package's error
+classes rebuilt from the class, code and members the addon throws, a
+panic caught at every entry, and a policy, a permission matcher or an id
+source written in TypeScript asked on the JavaScript thread during a call
+(a behavior's own UUIDs then drawn from the host's `crypto.randomUUID`,
+as the TypeScript engine's version graph draws them). `openEngineAsync`,
+exported from the package's root for a server on Postgres, gives the
+same API with every call a promise made off that thread (an `AsyncTask`,
+or on Postgres a future on tokio's blocking pool that owns the engine),
+its options data alone. Milestone 7b adds the test addon's bridge (the
+`js-behaviors` feature, never in a shipped addon), which runs a behavior
+written in TypeScript on the JavaScript thread through the engine's
+dynamic behaviors, an engine with one called there alone and its runner
+on the event loop; `engine.storage`, raw SQL on the engine's SQLite file
+with transactions the engine's calls run inside; `events.watch` over the
+notifier; `schemas.validator`; `engineApp` and `engineMcp` as Hono
+adapters over the engine's own routes, synchronous or asynchronous, a
+clock function read for each request as for each call; and a value JSON
+cannot carry (`NaN`, a `Date`) refused where the TypeScript engine
+refused it, in its words. A value driver written in TypeScript is not on
+the Rust engine, whose drivers are Rust `ValueDriver`s. An extension's behavior is a
+crate of its own (milestone 13a): acme.Rating is `acme-behaviors`
+(`examples/acme-schematic/crates/behaviors`), a workspace of its own
+beside the engine's over the plug-in API alone, whose tests run
+`rating.test.ts`'s cases on SQLite and Postgres; `registry.BehaviorSpec`
+names such a crate (`Rust`: the crate, its path in the project and the
+expression that registers it), the engine document names it beside the
+package (`crate`), and the `projectengine` generator writes the project's
+engine crate, `engine/rust/<schema>`, for a DB or General schema whose
+types compose an extension's behavior: the engine's crates at the
+`[paths]` keys `engine_rust`, `engine_behaviors_rust` and
+`engine_workqueue_rust`, each extension's crate, `behaviors()` (the
+core's, the work queue's when used, then the extensions'), `tools()`
+(the binary's D11 options) and a test that opens it on SQLite, the
+library a Rust server links. The crate roots a workspace whose members
+are the bindings of the engine over `behaviors()` that a host of another
+language links: `ffi/`, `<crate>-ffi`, expands `export_engine_c_abi!`
+from `superschematic-engine-abi` (`[paths] engine_abi_rust`) into the
+archive a Go server links in the core's place (`scripts/engine-archive.sh
+--crate <crate>/ffi --out <dir>`), its test opening an engine through
+its own `eng_open`; and `napi/`, `<crate>-napi`, expands
+`export_engine_napi!` from `superschematic-engine-napi` (`[paths]
+engine_napi_rust`) into the addon a TypeScript server loads in the core's
+place (`scripts/engine-napi.sh --crate <crate>/napi --out <dir>`), the
+library's manifest pinning napi-derive-backend, which a fresh resolve of
+the crate's lock-less workspace would move past the version napi-derive
+compiles with. acme's smoke builds and tests the one its binary writes,
+its members with it, and loads its addon in Node.js, where an engine on
+it publishes shop-ratings' Product and rates one, acme.Rating in Rust. A
+schema of the core's behaviors alone gets none, and the release's engine
+runs it; one whose extension behavior names no crate, or one the project
+does not hold, gets none either, and the build says no engine can run it.
+
+The cutover (milestone 14) is built. `@superschematic/engine` is the Rust
+engine's addon: `openEngine` opens it synchronously on SQLite, `Engine`
+its class, `openEngineAsync` its `AsyncEngine`, with `EngineOptions` and
+`PostgresOptions` (formerly `NativeEngineOptions` and
+`NativePostgresOptions`), and the package's error classes, record and
+option types, constants and the config readers callers use
+(`isTerminalState`, `stateOutcome`, `linkPin`, `linkMany`, `uuidV5`) stay
+its surface (`src/types/`, `src/native/`). Removed: the TypeScript engine,
+about 32,000 lines of `runtime/engine/typescript/src` (its behaviors and
+their guidance and declarations' copy, the instances, the schema registry
+and validator, the runner, the event log and retention, the value store,
+the SQLite storage and migrations, the tools catalog, `engine.ts`, the
+TypeScript halves of `engineApp` and `engineMcp`), and with it the
+exports `Namespaces`, `SchemaRegistry`, `InstanceStore`, `EventLog`,
+`Runner`, `BehaviorRegistry`, `Storage`, `ToolCatalog`, `EngineValues`,
+`SqliteValueDriver`, `openDriver`, `isBun`, `migrate`,
+`appliedMigrations`, `engineMigrations`, `ENGINE_OWNER`, `kebabCase`,
+`snakeCase`, `typeArguments`, `linkedTo`, `movedOn`, `targetMove`,
+`SEARCH_SCHEMAS_PARAMS` and `listTools`, the types `DriverName`,
+`SqlDriver`, `StorageOptions`, the migration types, `ValueDriver` and
+`TargetMove`, the `driver` option, which is refused, and the
+dependencies on ajv, the version graph, the schema runtime, the schema IR
+and `@modelcontextprotocol/server`; the work queue's seven TypeScript
+behaviors (about 7,900 lines with their guidance and declarations' copy),
+`workQueueBehaviors` now their names; and acme's `@acme/behaviors`.
+`defineBehavior` and the behavior-authoring types moved to
+`@superschematic/engine/testing`, which runs on the test addon alone.
+`runtime/engine/README.md` ("Breaking changes at the cutover") lists every
+change for a caller. The package's suite and the work queue's are the
+Rust engine's now, on the test addon under Node.js and Bun (892 and 242
+tests), the backends on Postgres with `ENGINE_TEST_PG_URL`; `ENGINE_IMPL`,
+the ratchet and its pending lists are gone, with CI's `engine-napi` job,
+which the `typescript` job's steps replace. A test of the TypeScript
+engine's own workings went with it, its Rust twin kept: the SQLite seam,
+the migration chain from each earlier version, value drivers written in
+TypeScript, a behavior's SQL plans, the tool names' case conversions and
+argument digests, the object scalar rule, Branches' layout and
+descriptor, the `Namespaces` class and the counted calls of the work
+queue's wrappers. The corpora are recorded from the Rust engine, its wall
+clock the engine's strict clock, each write a reading of its own, and
+the readings of a case's engines kept apart as one clock's; they differ
+from the TypeScript engine's recording only where its own workings showed
+(a counting clock a publish read seven times, an archive that changes
+nothing reading the clock, the engine calls the TypeScript HTTP app made,
+the policy question a closed engine asked, a stream frame's place among
+the steps), and the Rust replay and the Go replay pass on them. The
+SQLite corpus stays the last file the TypeScript engine wrote: the
+engine opens it and reads it as recorded, and the script that wrote it,
+run on the engine, writes a file that reads the same.
 
 The Go binding (milestone 15) is built. `superschematic-engine-abi`
 (`runtime/engine/rust/abi`) is the C ABI of the bindings section, as a
@@ -5805,7 +5898,9 @@ the class's members), `ENG_BAD_ARGUMENTS` and `ENG_CLOSED`.
 `superschematic-engine-ffi` (`runtime/engine/rust/ffi`), the core's
 archive, exports it over `core()`; a project's engine crate exports it
 over its own behaviors or configure with `export_engine_c_abi!`, as
-`runtime/engine/rust/testkit-ffi` does for the replays. The library
+`runtime/engine/rust/testkit-ffi` does for the replays and the `ffi`
+member of the crate `projectengine` writes does over its `behaviors()`.
+The library
 exports nothing itself, so archive crates in one Cargo workspace, whose
 features Cargo unifies, never define a symbol twice.
 `scripts/engine-archive.sh` builds `libsuperschematic_engine.a` (`--crate`
@@ -5824,11 +5919,60 @@ does not define them; `scripts/engine-link-check.sh` links superscalar's,
 the version graph's and the engine's archives into one Go binary and runs
 it, in the engine-go CI job on linux-x64 and in the release's
 build-archives job on all four platforms, whose tarballs now carry the
-engine's archive and header. The config reader and the error mapping in
-the ffi crate have the shape of the Node-API addon's
-`EngineOptions::from_json` and `Error::thrown`, which replace them once
-they are on main. No generated server mounts the engine yet (milestone
-18).
+engine's archive and header. The ABI reads its config's `project` and
+hands the rest to `EngineOptions::from_json`, and writes an error as
+`Error::thrown` makes it, as the Node-API addon does, so the two bindings
+take one config and throw one error. No generated server mounts the
+engine yet (milestone 18).
+
+Several instances of a server on one Postgres database (milestone 13b)
+are tested as two engines, each with a pool of its own, on one schema
+(`testkit/tests/replicas_*.rs`, with the database's administrator ending
+sessions as a crash or a failover would; `make engine-rust-soak` runs the
+writers long). What holds across them: a namespace's writers take turns,
+so racing writes lose no update and repeat no seq, cursor or number, hold
+an id and a unique field, never pass a Budget limit nor claim a Queue job
+twice, and writers of two namespaces never wait for each other; a reader
+on any instance sees every event of a namespace once, in cursor order (a
+rolled-back write leaves a gap in the identity, nothing more), and a read
+from `head` waits for the namespace's writes in flight, since the head is
+global and a write held open could hold a cursor below it; a commit wakes
+every instance's waiters, streams and runner through its listener, which
+reconnects when its session ends and wakes them to read what they missed,
+and without one a stream reads at each heartbeat; one runner runs at a
+time, another takes the lease when it stops or its session ends, and
+when two passes overlap for a moment under a lease that just went, a
+reaction runs once per event and a schedule once per due time (each read
+again under the namespace's lock), Timers firing each deadline once;
+engines that start together migrate once, and one that starts on a
+storage already up to date only reads its ledger, so it holds no
+running instance's writes up; publishes of one draft at once mint one
+version, the others answered `published: false` or `not_found`; a
+publish that adds a behavior (Search, Branches, Lease) beside another
+instance's writes leaves each write wholly of one version, and an
+instance whose build lacks the behavior answers that version's writes
+`unavailable`. On failure: a lock past the busy timeout, a statement the
+server's `statement_timeout` cancels, a deadlock and a serialization
+failure are `busy` (503 with `Retry-After`), nothing written; a session
+the server ends inside a call is `unavailable`, nothing written, its
+locks freed at once; idle pooled connections the server ended are
+replaced at BEGIN, so no call fails on them; a connection lost while a
+call commits is `unavailable`, saying whether it was written is unknown;
+a session idle inside a transaction past
+`idle_in_transaction_session_timeout` (60 s unless configured,
+`idleInTransactionTimeoutMs`) is ended by the server, so an instance
+frozen mid-transaction holds its namespace no longer; and only a panic
+inside a transaction poisons an engine, that one alone. Not guaranteed:
+a connection the network cuts without a reset blocks its call until the
+operating system's TCP timeouts give up, and a listener cut off so wakes
+nothing meanwhile (streams read at their heartbeat, the runner at its
+timer); a lease holder cut off so keeps its lease until the server drops
+the session, while its own runner stops at its next check of the lease;
+a commit whose outcome is unknown is the caller's to read before trying
+again; cursors on Postgres are ordered, not contiguous; and two
+processes on one SQLite file share no notifier and no lease. The whole workspace's tests run on both databases in the
+engine-rust CI job, the scenario and HTTP corpora replaying their files
+on parallel threads.
 
 The rule is reversible until the first release.
 

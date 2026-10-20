@@ -137,7 +137,7 @@ public packages at the module root:
 
 | Package | What it is |
 | --- | --- |
-| `registry` | Aliases and forwarding functions over `internal/registry`, plus the helpers an extension calls: `Assemble`, `DecodeArgs`, `ArgErrorf`, `ParseOutputs`, `DecodeOutput`, `Generate`, `EnvConfigOf`, `RustAPIOf` and `APIDir` (the Rust API crate the `api` generator writes, as `RustAPI` with its `RustEndpoint`, `RustParam`, `RustInput` and `RustPage` records, and where), `HasTable`, `AnalyzeSessionStores`, `AuthSnippetFunc`, `CoreScalars`, `ScalarCatalogOf`, `ScalarCatalogWithUploads`, `ScalarCatalogWithRawBodyChecks`, `ScalarCatalogWithNpmPackages`, `DefaultNaming`, `LoadNaming`, `ParseNaming`, `GoPublicIdentifier`. The hook types (`BuildAllService`, `CheckSpec`, `VerifyReporter`, `OpenAPIHook`, `ToolHook`, `ToolSet`, `Tool`, `ToolKeys`, `ToolKeyValue`), the behavior types (`BehaviorSpec`, `BehaviorDeclaration`, `BehaviorField`, `BehaviorOperation`, `Behavior`), the default vendor keys (`OpenAPIDocsKey`, `OpenAPIReferenceKey`, `OpenAPISearchKey`, `DefaultToolScalarKey`, `DefaultToolReferenceKey`, `DefaultToolSearchKey`, `DefaultToolGuidanceKey`) and the stack model's specs (`PlatformSpec`, `ConnectorSpec`, `TargetSpec`, `DNSPlatformSpec`, `ProvisionerSpec`, the `Provisioner` interface and their contexts) are aliased here too |
+| `registry` | Aliases and forwarding functions over `internal/registry`, plus the helpers an extension calls: `Assemble`, `DecodeArgs`, `ArgErrorf`, `ParseOutputs`, `DecodeOutput`, `Generate`, `EnvConfigOf`, `RustAPIOf` and `APIDir` (the Rust API crate the `api` generator writes, as `RustAPI` with its `RustEndpoint`, `RustParam`, `RustInput` and `RustPage` records, and where), `HasTable`, `AnalyzeSessionStores`, `AuthSnippetFunc`, `CoreScalars`, `ScalarCatalogOf`, `ScalarCatalogWithUploads`, `ScalarCatalogWithRawBodyChecks`, `ScalarCatalogWithNpmPackages`, `DefaultNaming`, `LoadNaming`, `ParseNaming`, `GoPublicIdentifier`. The hook types (`BuildAllService`, `CheckSpec`, `VerifyReporter`, `OpenAPIHook`, `ToolHook`, `ToolSet`, `Tool`, `ToolKeys`, `ToolKeyValue`), the behavior types (`BehaviorSpec`, `BehaviorRust`, `BehaviorDeclaration`, `BehaviorField`, `BehaviorOperation`, `Behavior`), the default vendor keys (`OpenAPIDocsKey`, `OpenAPIReferenceKey`, `OpenAPISearchKey`, `DefaultToolScalarKey`, `DefaultToolReferenceKey`, `DefaultToolSearchKey`, `DefaultToolGuidanceKey`) and the stack model's specs (`PlatformSpec`, `ConnectorSpec`, `TargetSpec`, `DNSPlatformSpec`, `ProvisionerSpec`, the `Provisioner` interface and their contexts) are aliased here too |
 | `loader` | `LoadService` and `LoadServiceWithConfig` with `WithRegistry`, `WithNaming` and `WithSchemaCatalog`, for extension tests against real fixtures; `NewDeclarationProgram`, a type-checked TypeScript program over in-memory files with the loader's compiler, lib files and module resolution, for an extension that checks declarations the schema frontend does not walk; `SchemaError` and `SchemaErrorList`, its located diagnostics |
 | `cli` | `cli.New`, `cli.Config`, `cli.CommandProvider` |
 | `ir` | The IR, its own Go module, with the extension codecs (section 4.2) |
@@ -802,13 +802,73 @@ with them. It declares, carries and checks behaviors; it runs none.
 type BehaviorSpec struct {
     Extension   string
     Package     string
+    Rust        BehaviorRust
     Declaration json.RawMessage
+}
+
+type BehaviorRust struct {
+    Crate    string // the Cargo package name
+    Path     string // its directory, relative to the project
+    Register string // the Rust expression the project's engine registers
 }
 ```
 
 `Package` is optional: the npm package whose implementation runs the
 behavior in an engine, which the `behaviors` command's `--package` keeps
 (below). When set it must be an npm package name.
+
+`Rust` is optional too: the Rust crate that implements an extension's
+behavior for the Rust engine (D58), a crate implementing the engine's
+`Behavior` trait, which the project's engine compiles in. `Crate` is its
+Cargo package name (a letter, then letters, digits, `-` and `_`, at most
+64 characters); `Path` is its directory relative to the project, the
+parent of the schemas root that the `[paths]` keys are relative to as
+well, slash-separated, clean and not absolute; and `Register` is the
+expression `BehaviorSet::with` takes, a Rust path into the crate (its name
+with `-` folded to `_`, then `::<Name>`), called with no arguments or
+not. acme's is `{Crate: "acme-behaviors", Path: "crates/behaviors",
+Register: "acme_behaviors::Rating"}`. `RegisterBehavior` refuses a `Rust`
+on a core behavior, whose implementations are the engine's own crates,
+and any part that breaks these rules; `Finalize` refuses two behaviors
+that name one crate at two paths. The behaviors command copies the
+declaration into the crate as into a package:
+
+```sh
+acme-schematic behaviors --extension acme --out crates/behaviors/declarations
+```
+
+For a DB or General schema whose types compose an extension's behavior,
+the core's `projectengine` generator (`internal/generator/projectengine`)
+writes the project's engine crate, `engine/rust/<schema>`, named
+`<rust_crate_prefix><schema>-engine`. It depends on
+`superschematic-engine`, `superschematic-engine-behaviors` and, when the
+schema composes one of the work queue's behaviors,
+`superschematic-engine-workqueue`, by path at the `[paths]` keys
+`engine_rust`, `engine_behaviors_rust` and `engine_workqueue_rust` (by
+version when unset), and on each extension's crate by its path in the
+project. Its `behaviors()` registers the core's behaviors, the work
+queue's and each composed extension behavior, by `Register`; `tools()` is
+the D11 options the binary registers, under which an operation that names
+a value of the extension's invocation policy registers; and `COMPOSED`
+lists the behaviors the schema's types compose, which its test finds
+registered in an engine opened on SQLite. That library is what a Rust
+server links. A host of another language links a binding of the engine
+over `behaviors()`, a member of the workspace the crate's `Cargo.toml`
+roots, so they build from one lock file:
+
+| Member | Package | What it is |
+| --- | --- | --- |
+| `ffi/` | `<crate>-ffi` | The engine's C ABI over `behaviors()` (`superschematic_engine_abi::export_engine_c_abi!(behaviors = project::behaviors)`, the C ABI's library at `[paths] engine_abi_rust`), the static archive a Go server links in place of the core's: `scripts/engine-archive.sh --crate <crate>/ffi --out <dir>`, then `-L<dir>` first in `CGO_LDFLAGS`. Its config takes the engine document's `tools`, without which an engine refuses an operation that names the extension's policy value. Its test opens an engine through its own `eng_open` and finds every composed behavior registered |
+| `napi/` | `<crate>-napi` | The engine's Node-API addon over `behaviors()` (`superschematic_engine_napi::export_engine_napi!(behaviors = project::behaviors)`, the twin of `export_engine_c_abi!`, the addon's library at `[paths] engine_napi_rust`), a cdylib a TypeScript server loads in place of the core's addon: `scripts/engine-napi.sh --crate <crate>/napi --out <dir>` prints the `.node` file, which the engine option `addon` or `SUPERSCHEMATIC_ENGINE_ADDON` names. An engine registers the core's behaviors when it opens, then each other one its options' `behaviors` name. Node-API symbols resolve only when Node.js or Bun loads it, so it has no Rust test; acme's smoke loads it in Node.js and rates a product on it |
+
+A schema that composes the
+core's behaviors alone gets no crate: the release's engine runs them. An
+extension behavior that names no crate, or one the project does not hold,
+leaves the schema with no engine that can run it (an engine refuses it),
+and the build's log says why.
+The generator claims no output directory, so the build cache does not
+store the crate, and it removes a crate an earlier build wrote when the
+schema needs none.
 
 A behavior is declared once, in a JSON file beside the Go package that
 registers it, which embeds it and passes it to `RegisterBehavior`. Its
@@ -854,8 +914,8 @@ case, or is listed twice, is refused (D16, amended). `Finalize`
 checks `requires`, `conflicts` and the invocation policy values, since the
 policy is fixed only once every extension has registered.
 `Registry.Behavior(name)` returns a registered `Behavior`: the declaration,
-the registering extension, the package that implements it,
-`ConfigRequired()` (its config schema rejects `{}`) and `ValidateConfig`.
+the registering extension, the package and the Rust crate that implement
+it, `ConfigRequired()` (its config schema rejects `{}`) and `ValidateConfig`.
 
 An operation's `paramsSchema` sets `"additionalProperties": false`, so its
 parameters are exactly the ones it declares. An engine runs a behavior's
@@ -949,8 +1009,8 @@ alike; document generators, which render their documents, are not asked.
 the schema. A generator whose output holds nothing a behavior adds, as
 acme's `acmeManifest` lists the types by name, sets the flag too.
 
-Of the core's pipeline generators, `types`, `sql`, `orm`, `enginedoc`
-and `envConfig` set the flag (D58), so the DB and General pipelines build
+Of the core's pipeline generators, `types`, `sql`, `orm`, `enginedoc`,
+`projectengine` and `envConfig` set the flag (D58), so the DB and General pipelines build
 a schema whose types compose behaviors. For each such type, each
 language's types write `<T>Behaviors`: what a read returns under
 `behaviors`, one member per behavior that declares a field, holding those
@@ -973,7 +1033,8 @@ same bytes as `EngineDocument` in Go, `engineDocument` in TypeScript
 the binary's `json-schema` prints, the D11 tool options the binary
 registers (its invocation policy and the vendor keys the tool hooks
 leave), each behavior the engine types compose with the package that
-implements it, and one schema-file document per engine type: a `General`
+implements it and, for an extension's, the crate its `Rust` names, and
+one schema-file document per engine type: a `General`
 document named after the type, holding it, the value types it reaches
 (`@jsonField` types, and types it imports from a General dependency) and
 the enums and scalars they use, with no imports.
@@ -1184,14 +1245,13 @@ core module, as `internal/tools/scalarcatalog` is, because an extension's
 declarations are registered only in its own binary: acme's copy comes
 from `acme-schematic behaviors --extension acme`, which acme's smoke runs
 with `--check` (section 10). The core's copies come from
-the core binary, each into the package that implements it: `make
-behaviors` writes `runtime/engine/typescript/src/behaviors/core/declarations`
-with `--package @superschematic/engine`, the same declarations into the
-Rust engine's `runtime/engine/rust/behaviors/declarations` (D58), and
-`runtime/engine-workqueue/typescript/src/declarations` with `--package
-@superschematic/engine-workqueue`, so each package carries only the
+the core binary, each into the Rust crate that implements it (D58): `make
+behaviors` writes the engine's `runtime/engine/rust/behaviors/declarations`
+with `--package @superschematic/engine` and the work queue's
+`runtime/engine-workqueue/rust/declarations` with `--package
+@superschematic/engine-workqueue`, so each crate carries only the
 declarations it implements, and `make behaviors-check`, part of `make
-test` and CI's go job, fails on a stale copy in any of them. The copy is canonical, not the source bytes:
+test` and CI's go job, fails on a stale copy in either. The copy is canonical, not the source bytes:
 the declaration's keys in `BehaviorDeclaration`'s order, each JSON
 Schema's object keys sorted (`createParamsSchema` and `preconditionSchema`
 included), two-space
@@ -1697,7 +1757,7 @@ each surface:
 | Command | `describe` and `fields`, through `cli.CommandProvider` | `ext/command.go`, `ext/fields.go` |
 | Configuration | `[extension.acme] region` and `projection_scope_setting`; `metadata_key_prefix`, `scalar_jsdoc_tag`, `[package_aliases]` (`@acme/schema-config`) and `[deps] copy` | `ext/extension.go`, `schemas/superschematic.toml` |
 | Tool invocation policy | `confirm`: `never` or `always`, `never` by default, with its `MCPToolOptions` augmentation | `ext/mcp.go`, `packages/schema/src/mcp.ts` |
-| Behavior | `acme.Rating`, which a General data-form service in `ext/testdata/services/shop-ratings` composes, and its TypeScript twin `shop-ratings-ts` with `@behavior`; its `BehaviorConfigs` augmentation; its engine implementation over the declaration's copy | `ext/behavior.go`, `ext/rating.behavior.json`, `packages/schema/src/behaviors.ts`, `packages/behaviors` |
+| Behavior | `acme.Rating`, which a General data-form service in `ext/testdata/services/shop-ratings` composes, and its TypeScript twin `shop-ratings-ts` with `@behavior`; its `BehaviorConfigs` augmentation; its engine implementation, a Rust crate over the declaration's copy, which the project's engine crate compiles in (D58) | `ext/behavior.go`, `ext/rating.behavior.json`, `packages/schema/src/behaviors.ts`, `crates/behaviors` |
 | Binary | `cli.New(cli.Config{Name: "acme-schematic"}, ext.Extension{})` | `cmd/acme-schematic` |
 | A core mechanism in acme's terms | the `Planogram` version graph (D17): `Bay` and `Facing` members declared with the core's `@versionGraph`, `@graphMember` and `@conflictUnit` | `schemas/services/shop-db/src/planogram.schema.ts` |
 

@@ -6,10 +6,8 @@
 A spec such as file:../../versiongraph/typescript installs inside this
 checkout, where the path exists, and nowhere else: an install from the
 published tarball leaves the dependency unresolved. release.yml packs each
-package, rewrites the engine's file: spec of @superschematic/versiongraph
-to the release's version first, and runs this on every tarball it packed,
-so a local spec that reaches a tarball fails the release before anything
-is published. Development dependencies are not installed from a tarball,
+package and runs this on every tarball it packed, so a local spec that
+reaches a tarball fails the release before anything is published. Development dependencies are not installed from a tarball,
 so their specs are not read.
 
 Python 3.9+, standard library only.

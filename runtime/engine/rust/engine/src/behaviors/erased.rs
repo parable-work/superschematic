@@ -58,6 +58,10 @@ pub(crate) struct HookSet {
     /// config gives).
     pub schedules: Vec<(String, Option<i64>)>,
     pub migrations: Vec<superschematic_engine_storage::behavior::BehaviorMigration>,
+    /// What the host of a dynamic behavior found wrong with it that the
+    /// engine cannot see; registration refuses it with these. Always empty
+    /// for a Rust behavior.
+    pub problems: Vec<String>,
 }
 
 /// A behavior with its config type erased.
@@ -166,22 +170,49 @@ pub(crate) trait Erased: Send + Sync {
     ) -> Option<Result<Vec<Value>>>;
 }
 
+/// Calls one hook of a behavior, catching a panic as a defect of the
+/// behavior's.
+pub(crate) fn run_hook<T>(label: &str, hook: &str, call: impl FnOnce() -> Result<T>) -> Result<T> {
+    match catch_unwind(AssertUnwindSafe(call)) {
+        Ok(result) => result,
+        Err(payload) => {
+            let message = payload
+                .downcast_ref::<&str>()
+                .map(|text| (*text).to_owned())
+                .or_else(|| payload.downcast_ref::<String>().cloned())
+                .unwrap_or_else(|| "a panic".to_owned());
+            Err(Error::behavior(
+                label,
+                format!("{hook} panicked: {message}"),
+            ))
+        }
+    }
+}
+
 /// Erases a behavior's config type.
 pub(crate) fn erase<B: Behavior>(behavior: B) -> Arc<dyn Erased> {
     let hooks = behavior.hooks();
-    Arc::new(Implementation { behavior, hooks })
+    // The declaration's name, read once: every hook's run names it, and a
+    // declaration (Lease's is 20 KB) is too long to parse on each.
+    let label = super::declaration::BehaviorDeclaration::parse(behavior.declaration())
+        .map(|declaration| declaration.name)
+        .unwrap_or_else(|_| "implementation".to_owned());
+    Arc::new(Implementation {
+        behavior,
+        hooks,
+        label,
+    })
 }
 
 struct Implementation<B: Behavior> {
     behavior: B,
     hooks: Hooks<B>,
+    label: String,
 }
 
 impl<B: Behavior> Implementation<B> {
     fn label_or(&self) -> String {
-        super::declaration::BehaviorDeclaration::parse(self.behavior.declaration())
-            .map(|declaration| declaration.name)
-            .unwrap_or_else(|_| "implementation".to_owned())
+        self.label.clone()
     }
 
     fn config<'c>(&self, config: &'c ConfigBox) -> Result<&'c B::Config> {
@@ -195,20 +226,7 @@ impl<B: Behavior> Implementation<B> {
 
     // run calls one hook, catching a panic as a defect of the behavior's.
     fn run<T>(&self, hook: &str, call: impl FnOnce() -> Result<T>) -> Result<T> {
-        match catch_unwind(AssertUnwindSafe(call)) {
-            Ok(result) => result,
-            Err(payload) => {
-                let message = payload
-                    .downcast_ref::<&str>()
-                    .map(|text| (*text).to_owned())
-                    .or_else(|| payload.downcast_ref::<String>().cloned())
-                    .unwrap_or_else(|| "a panic".to_owned());
-                Err(Error::behavior(
-                    &self.label_or(),
-                    format!("{hook} panicked: {message}"),
-                ))
-            }
-        }
+        run_hook(&self.label, hook, call)
     }
 
     fn scope<'a>(core: &'a dyn Core, config: &'a B::Config) -> Scope<'a, B::Config> {
@@ -279,6 +297,7 @@ impl<B: Behavior> Erased for Implementation<B> {
                 })
                 .collect(),
             migrations: hooks.migrations.clone(),
+            problems: Vec::new(),
         }
     }
 

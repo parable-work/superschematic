@@ -7,7 +7,8 @@
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
 
-import { EngineError, FILTER_SCAN_ROWS, defineBehavior, type BehaviorDeclaration, type Engine, type ListOptions } from '../dist/index.js';
+import { EngineError, FILTER_SCAN_ROWS, type BehaviorDeclaration, type Engine, type ListOptions } from '../dist/index.js';
+import { defineBehavior } from '../dist/testing/index.js';
 import { counter, openMetaSchema, publishItem } from './behavior-fixtures.ts';
 import { alice, cleanup, drivers, openTestEngine, schemaDocument, thrown } from './helpers.ts';
 

@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
 
-import { EngineError, Namespaces, allowAll, type AccessPolicy, type AccessRequest, type Engine, type Principal } from '../dist/index.js';
+import { EngineError, allowAll, openEngine as openUnrecorded, type AccessPolicy, type AccessRequest, type Engine, type Principal } from '../dist/index.js';
 import { alice, cleanup, drivers, freshPath, openEngine, openTestEngine, orderDocument, schemaDocument, thrown, track } from './helpers.ts';
 import { ledgerDocument, mark, openRunnerEngine, plainDocument, probe, resetProbe, testClock } from './runner-fixtures.ts';
 
@@ -22,21 +22,37 @@ function publish(engine: Engine, document: Record<string, unknown>, namespace?: 
 
 const noteDocument = schemaDocument('Note', [{ name: 'body', typeRef: { name: 'string' }, required: true }]);
 
+// The options' namespaces, as an engine reads them; these open engines the
+// corpus does not record (the engine's own open, not the helpers').
 test('there is one namespace, default, unless more are configured', () => {
-  assert.deepEqual(new Namespaces().names, ['default']);
-  const namespaces = new Namespaces({ names: ['east', 'west', 'east'] });
-  assert.deepEqual(namespaces.names, ['default', 'east', 'west']);
-  assert.equal(namespaces.shared, undefined);
-  assert.equal(namespaces.resolve(undefined), 'default');
-  assert.deepEqual(namespaces.lookup('east'), ['east']);
+  const plain = track(openUnrecorded({ path: freshPath(), policy: allowAll }));
+  assert.deepEqual(plain.namespaces.names, ['default']);
+  const engine = track(openUnrecorded({ path: freshPath(), policy: allowAll, namespaces: { names: ['east', 'west', 'east'] } }));
+  assert.deepEqual(engine.namespaces.names, ['default', 'east', 'west']);
+  assert.deepEqual(
+    engine.namespaces.list(alice).map((namespace) => [namespace.name, namespace.shared]),
+    [
+      ['default', false],
+      ['east', false],
+      ['west', false],
+    ]
+  );
+  assert.equal(engine.namespaces.resolve(undefined), 'default');
+  assert.equal(engine.namespaces.resolve('east'), 'east');
 });
 
 test('namespace names are checked, and the shared namespace must be one of them', () => {
+  const open = (namespaces: { names?: string[]; shared?: string }) => track(openUnrecorded({ path: freshPath(), policy: allowAll, namespaces }));
   for (const name of ['East', '1east', 'east_side', '', 'e'.repeat(64)]) {
-    assert.throws(() => new Namespaces({ names: [name] }), /must match/);
+    assert.throws(() => open({ names: [name] }), /must match/);
   }
-  assert.throws(() => new Namespaces({ names: ['east'], shared: 'common' }), /the shared namespace "common" is not one of the namespaces/);
-  assert.deepEqual(new Namespaces({ shared: 'default' }).lookup('default'), ['default']);
+  assert.throws(() => open({ names: ['east'], shared: 'common' }), /the shared namespace "common" is not one of the namespaces/);
+  assert.deepEqual(
+    open({ shared: 'default' })
+      .namespaces.list(alice)
+      .map((namespace) => [namespace.name, namespace.shared]),
+    [['default', true]]
+  );
 });
 
 for (const driver of drivers) {

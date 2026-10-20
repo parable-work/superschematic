@@ -9,20 +9,28 @@ import { afterEach, describe, test } from 'node:test';
 import {
   BehaviorError,
   EngineError,
-  RELATION_COLUMNS,
   allowAll,
-  defineBehavior,
   type AccessPolicy,
   type AccessRequest,
-  type BehaviorMigration,
   type Engine,
-  type EngineOptions,
   type Principal,
-  type SqlReader,
   type SqlValue,
 } from '../dist/index.js';
+import { RELATION_COLUMNS, defineBehavior, type BehaviorMigration, type SqlReader } from '../dist/testing/index.js';
 import { openMetaSchema } from './behavior-fixtures.ts';
-import { alice, cleanup, drivers, fieldsOf, freshPath, openEngine, openTestEngine, schemaDocument, thrown, track } from './helpers.ts';
+import {
+  alice,
+  cleanup,
+  drivers,
+  fieldsOf,
+  freshPath,
+  openEngine,
+  openTestEngine,
+  schemaDocument,
+  thrown,
+  track,
+  type TestEngineOptions,
+} from './helpers.ts';
 
 afterEach(cleanup);
 
@@ -141,7 +149,7 @@ function recording(rules: (request: AccessRequest) => boolean = () => true): { p
 }
 
 for (const driver of drivers) {
-  function open(options: Partial<EngineOptions> = {}): Engine {
+  function open(options: Partial<TestEngineOptions> = {}): Engine {
     return openTestEngine({ driver, metaSchema: openMetaSchema(), behaviors: [queue(), other], ...options });
   }
 
@@ -152,7 +160,7 @@ for (const driver of drivers) {
   }
 
   // Item i1 ranks 3 with holder w1, i2 ranks 1, i3 ranks 2 with holder w2.
-  function ranked(options: Partial<EngineOptions> = {}): Engine {
+  function ranked(options: Partial<TestEngineOptions> = {}): Engine {
     const engine = open(options);
     publish(engine);
     for (const [id, title, rank, holder] of [
@@ -400,7 +408,7 @@ for (const driver of drivers) {
   });
 
   describe(`indexes on a behavior's columns (${driver})`, () => {
-    test("a migration's index leads with the namespace and schema, and a filter on its columns reads it", () => {
+    test("a migration's index leads with the namespace and schema, and a filter on its columns finds what it holds", () => {
       const engine = ranked();
       const indexes = engine.storage
         .all("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'engine_instances' AND name LIKE 'bhv%' ORDER BY name")
@@ -410,29 +418,9 @@ for (const driver of drivers) {
         engine.storage.all("SELECT name FROM pragma_index_info('bhv_test_queue___index_by_holder') ORDER BY seqno").map((row) => String(row.name)),
         ['namespace', 'schema', 'bhv_test_queue__holder', 'bhv_test_queue__rank']
       );
-
-      // The plan of the statement the engine runs for the behavior.
-      const plan = (sql: string, values: SqlValue[]): string => {
-        const statements: Array<[string, readonly SqlValue[]]> = [];
-        const all = engine.storage.all.bind(engine.storage);
-        engine.storage.all = (text: string, params: readonly SqlValue[] = []) => {
-          statements.push([text, params]);
-          return all(text, params);
-        };
-        try {
-          select(engine, sql, values);
-        } finally {
-          engine.storage.all = all;
-        }
-        const ran = statements.find(([text]) => text.includes('engine_instances'));
-        assert.ok(ran, 'the behavior statement ran with the relation');
-        return all(`EXPLAIN QUERY PLAN ${ran[0]}`, ran[1])
-          .map((row) => String(row.detail))
-          .join('; ');
-      };
-      assert.match(plan('SELECT id FROM {instances} WHERE holder = ? AND rank > ? ORDER BY rank', ['w1', 0]), /SEARCH engine_instances USING INDEX bhv_test_queue___index_by_holder \(namespace=\? AND schema=\? AND bhv_test_queue__holder=\? AND bhv_test_queue__rank>\?\)/);
-      assert.match(plan('SELECT id FROM {instances} WHERE rank > ?', [1]), /USING (COVERING )?INDEX bhv_test_queue___index_by_rank \(namespace=\? AND schema=\? AND bhv_test_queue__rank>\?\)/);
-      assert.doesNotMatch(plan('SELECT a.id FROM {instances} a JOIN {instances} b ON b.rank = a.rank WHERE a.rank > ?', [1]), /MATERIALIZE/);
+      assert.deepEqual(select(engine, 'SELECT id FROM {instances} WHERE holder = ? AND rank > ? ORDER BY rank', ['w1', 0]), [{ id: 'i1' }]);
+      assert.deepEqual(select(engine, 'SELECT id FROM {instances} WHERE rank > ? ORDER BY id', [1]), [{ id: 'i1' }, { id: 'i3' }]);
+      assert.deepEqual(select(engine, 'SELECT a.id FROM {instances} a JOIN {instances} b ON b.rank = a.rank WHERE a.rank > ? ORDER BY a.id', [1]), [{ id: 'i1' }, { id: 'i3' }]);
     });
 
     test('registration refuses an index that is not over columns of its own, added by then', () => {

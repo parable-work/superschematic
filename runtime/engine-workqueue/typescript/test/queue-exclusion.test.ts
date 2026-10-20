@@ -9,15 +9,9 @@
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
 
-import {
-  BehaviorVetoError,
-  SchemaDocumentError,
-  type AnyBehaviorImplementation,
-  type Engine,
-  type Principal,
-} from '@superschematic/engine';
+import { BehaviorVetoError, SchemaDocumentError, type Engine, type EngineOptions, type Principal } from '@superschematic/engine';
 
-import { assignment, blueprint, budget, lease, presence, queue, retries } from '../dist/index.js';
+import { workQueueBehaviors } from '../dist/index.js';
 import {
   Clock,
   alice,
@@ -54,41 +48,6 @@ function scopeDocument(name: string, behaviors: readonly BehaviorRef[]): Record<
   };
 }
 
-/** The work-queue behaviors, with Budget's checkReserve and Queue's afterReferenceChange counted. */
-function counting(): { calls: { checks: number; hooks: number }; behaviors: AnyBehaviorImplementation[] } {
-  const calls = { checks: 0, hooks: 0 };
-  const operations = budget.operations as NonNullable<typeof budget.operations>;
-  const checkReserve = operations.checkReserve;
-  const hook = queue.afterReferenceChange as NonNullable<typeof queue.afterReferenceChange>;
-  return {
-    calls,
-    behaviors: [
-      lease,
-      assignment,
-      {
-        ...queue,
-        afterReferenceChange(context, reference, change) {
-          calls.hooks += 1;
-          hook.call(queue, context, reference, change);
-        },
-      },
-      presence,
-      blueprint,
-      {
-        ...budget,
-        operations: {
-          ...operations,
-          checkReserve(context, params) {
-            calls.checks += 1;
-            return checkReserve.call(operations, context, params);
-          },
-        },
-      },
-      retries,
-    ],
-  };
-}
-
 for (const driver of drivers) {
   const create = (engine: Engine, id: string, data: Record<string, unknown> = {}, behaviors?: Record<string, unknown>) =>
     engine.instances.create(alice, 'Job', { title: id, ...data }, { id, ...(behaviors === undefined ? {} : { behaviors }) });
@@ -109,7 +68,7 @@ for (const driver of drivers) {
     // points at: 10 a claim, or its timeLimitMs when it holds one; p1's
     // limit is 20. Two jobs at the head of the order, and 20 that claim 10
     // and 20 that claim 5 behind them.
-    function pooled(behaviors: readonly AnyBehaviorImplementation[]) {
+    function pooled(behaviors: EngineOptions['behaviors']) {
       const engine = openTestEngine({ driver, clock: new Clock(T0).now, behaviors });
       publish(engine, scopeDocument('Pool', [{ name: 'Budget', config: { meters: { cpu: { limit: 20 } }, limitPermission: 'pools.limit' } }]));
       publish(
@@ -133,34 +92,32 @@ for (const driver of drivers) {
       return engine;
     }
 
+    // How many of Budget's checks and Queue's hooks a write runs is the Rust
+    // engine's to count (testkit's workqueue_queue_exclusion.rs); here, what
+    // each write lets in.
     test('with 40 instances waiting under one scope, a write that crosses no amount runs no check and no hook, and one that does reaches only those it crosses', () => {
-      const { calls, behaviors } = counting();
-      const engine = pooled(behaviors);
+      const engine = pooled(workQueueBehaviors);
       assert.equal(claimNext(engine)?.id, 'a1');
       const second = claimNext(engine) as { id: string; token: number };
       assert.equal(second.id, 'a2');
       // p1's 20 are reserved: every one of the 40 waits.
       assert.equal(count(engine), 0);
 
-      const reset = () => {
-        calls.checks = 0;
-        calls.hooks = 0;
-        return cursorOf(engine);
-      };
+      const reset = () => cursorOf(engine);
       const smalls = Array.from({ length: 20 }, (_, at) => `small${at + 1}`);
       const bigs = Array.from({ length: 20 }, (_, at) => `big${at + 1}`);
       // Usage inside a1's reservation moves p1's used and reserved, not its
       // remaining: no waiting instance is asked anything.
       let from = reset();
       engine.instances.invoke(worker, 'Job', 'a1', 'recordUsage', { meter: 'cpu', amount: 4 }, fenced(1));
-      assert.deepEqual([calls.checks, calls.hooks, refreshes(engine, from)], [0, 0, []]);
+      assert.deepEqual(refreshes(engine, from), []);
       // Usage past it takes the remaining from 0 to -6, and a2's release
       // to 4: below 5, so across no amount of the others. a2, back in the
       // queue, checks itself in its own write and waits too; its own
       // reference hears its own settlement, which its write settles.
       engine.instances.invoke(worker, 'Job', 'a1', 'recordUsage', { meter: 'cpu', amount: 12 }, fenced(1));
       engine.instances.invoke(worker, 'Job', 'a2', 'release', {}, fenced(second.token));
-      assert.deepEqual([calls.checks, calls.hooks, refreshes(engine, from)], [1, 1, []]);
+      assert.deepEqual(refreshes(engine, from), []);
       assert.equal(count(engine), 0);
 
       // A limit of 25 leaves 9: across 5, not 10, so the 20 that claim 5
@@ -168,23 +125,21 @@ for (const driver of drivers) {
       // its fit moved, and once more in the refresh that lets it in.
       from = reset();
       engine.instances.invoke(pam, 'Pool', 'p1', 'setLimit', { meter: 'cpu', limit: 25 });
-      assert.deepEqual([calls.checks, calls.hooks], [40, 20]);
       assert.deepEqual(refreshes(engine, from).sort(), [...smalls].sort());
       assert.equal(count(engine), 20);
       // 30 leaves 14: across 10, so the 20 that claim 10 and a2 come in.
       from = reset();
       engine.instances.invoke(pam, 'Pool', 'p1', 'setLimit', { meter: 'cpu', limit: 30 });
-      assert.deepEqual([calls.checks, calls.hooks], [42, 21]);
       assert.deepEqual(refreshes(engine, from).sort(), ['a2', ...bigs].sort());
       assert.equal(count(engine), 41);
       // With every one of the 41 waiting on it, a write that crosses no amount still asks none of them.
       from = reset();
       engine.instances.invoke(worker, 'Job', 'a1', 'recordUsage', { meter: 'cpu', amount: 1 }, fenced(1));
-      assert.deepEqual([calls.checks, calls.hooks, refreshes(engine, from)], [0, 0, []]);
+      assert.deepEqual(refreshes(engine, from), []);
     });
 
     test('each waiting instance hears the values of its scopes the answer turns on, at its own amount', () => {
-      const engine = pooled([lease, assignment, queue, presence, blueprint, budget, retries]);
+      const engine = pooled(workQueueBehaviors);
       const heard = (id: string) =>
         engine.storage
           .all(`SELECT target_id, key, hears, crosses FROM engine_references WHERE source_id = ? AND behavior = 'Queue' ORDER BY rowid`, [id])
@@ -300,7 +255,7 @@ for (const driver of drivers) {
   describe(`Queue: excludeStale (${driver})`, () => {
     // specced opens an engine whose Job pins its spec link to a Spec's
     // revision and is kept out while the spec has moved past it.
-    function specced(extra: readonly BehaviorRef[] = [], behaviors?: readonly AnyBehaviorImplementation[]) {
+    function specced(extra: readonly BehaviorRef[] = [], behaviors?: EngineOptions['behaviors']) {
       const engine = openTestEngine({ driver, clock: new Clock(T0).now, ...(behaviors === undefined ? {} : { behaviors }) });
       publish(engine, scopeDocument('Spec', [{ name: 'Revisions' }]));
       publish(
@@ -373,12 +328,9 @@ for (const driver of drivers) {
     });
 
     test('with Budget beside it, a stale link keeps the instance out without a budget check, and it hears nothing more', () => {
-      const { calls, behaviors } = counting();
-      const engine = specced([{ name: 'Budget', config: { meters: { cpu: { limit: 100, reserve: 10 } } } }], behaviors);
+      const engine = specced([{ name: 'Budget', config: { meters: { cpu: { limit: 100, reserve: 10 } } } }], workQueueBehaviors);
       create(engine, 'j1', {}, { Links: { spec: 'sp1' } });
-      assert.equal(calls.checks, 1);
       engine.instances.update(alice, 'Spec', 'sp1', { title: 'v2' });
-      assert.deepEqual([calls.checks, calls.hooks], [1, 1]);
       assert.equal(excludedUntil(engine, 'j1'), Number.MAX_SAFE_INTEGER);
       assert.deepEqual(
         engine.storage.all(`SELECT key FROM engine_references WHERE source_id = 'j1' AND behavior = 'Queue'`).map((row) => row.key),
