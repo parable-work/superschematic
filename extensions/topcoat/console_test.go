@@ -35,13 +35,20 @@ const consoleService = "fixture-console-api"
 // message, and a paged list without a filter renders no filter form and
 // its refusal alone. The search box is the filter's first control, a search
 // form's, labeled Search, and filters by each word in any case, its pages
-// carrying it. A reference is a select of the options operation's items
-// on the new page, the app's own page and an action's form, from one
-// listing a render, and a value is named by its item's label through the
-// lookup, one call a render, in chunks of its listMax when more, or from
-// the listing for a reference by sku; a caller who may not list the items
-// gets the plain control and the value, the app's choices win and spare
-// the call, and more items than a page keeps the control. Products link
+// carrying it. A reference to Product, whose listProducts searches, is a
+// picker (D61, amended) on the new page, the app's own page, an action's
+// form and the orders' filter: a search box, a Find after the hidden
+// submit and a select of the first page of the matches, from one listing
+// a distinct text a render, the value held among them named through the
+// lookup. A filter's Find searches by GET, a post's renders the form again
+// as sent, 200, searching only the text it pressed, Enter still submits,
+// a text past the search's maxLength shows the route's message, and the
+// shard renders what a typed text finds with the value kept. A record's
+// value is named by its item's label through the lookup, one call a
+// render, in chunks of its listMax when more, or from the listing for a
+// reference by sku; a caller who may not list the items gets the plain
+// control and the value, and the app's choices win and spare the call.
+// Products link
 // their rows through the reference of getProduct's productId, name their
 // suppliers, a target's own reference, beside the reviews and lines that
 // name products, and a product's page shows the first page of its reviews
@@ -235,13 +242,14 @@ func TestASortFieldWithoutAColumnIsLogged(t *testing.T) {
 
 // TestReferencesResolveByTheCoreRule reads the references of
 // fixture-console-api's crate: a source per target and value, its options
-// from the one operation that lists the target, its labels through the
-// lookup in chunks of its listMax, or from the listing for a reference by
-// sku, which no lookup refers by; a choices function per form and a labels
-// function per record that holds a reference, Product's among them, since
-// a product names its supplier, beside the private functions of Product as
-// a target; the pages calling them; and products' rows linked through
-// getProduct's reference.
+// from the one operation that lists the target, its search from that
+// operation's search argument, its labels through the lookup in chunks of
+// its listMax, or from the listing for a reference by sku, which no lookup
+// refers by; a choices function per form, which takes the form, and a
+// labels function per record that holds a reference, Product's among
+// them, since a product names its supplier, beside the private functions
+// of Product as a target; the pages calling them; and products' rows
+// linked through getProduct's reference.
 func TestReferencesResolveByTheCoreRule(t *testing.T) {
 	files, _ := readCrate(t, registry.DefaultNaming(), consoleService, livePagesOutputs())
 	references := files["references.rs"]
@@ -250,16 +258,17 @@ func TestReferencesResolveByTheCoreRule(t *testing.T) {
 		"page: PageRequest::first(crate::api::ProductListProductsArgs::PAGE.max_limit()),",
 		"async fn product_list_products_by_ids(cx: &Cx, values: &[String]) -> Option<Vec<Value>> {",
 		`(!listed.more).then(|| choices_of(&listed.items, "id", Some("name")))`,
-		`(!listed.more).then(|| choices_of(&listed.items, "sku", Some("name")))`,
+		"async fn product_list_products_search(cx: &Cx, text: &str) -> Option<Result<Listed, String>> {",
+		`Some(Ok(listed)) => Some((choices_of(&listed.items, "sku", Some("name")), listed.more, capped.then(|| TOO_MANY_SEARCHES.to_owned()))),`,
 		"for chunk in values.chunks(5).take(MAX_LOOKUP_CALLS) {",
 		"async fn product_by_sku_target_labels(cx: &Cx, values: &BTreeSet<String>) -> Vec<Choice> {",
 		"async fn product_target_labels(cx: &Cx, values: &BTreeSet<String>) -> Vec<Choice> {",
 		"async fn product_target_choices(cx: &Cx) -> Option<Vec<Choice>> {",
 		"pub async fn product_labels(cx: &Cx, records: &[ProductRecord], choices: Choices) -> Choices {",
 		"let labels = supplier_target_labels(cx, &values_at(&json, &sites)).await;",
-		"pub async fn order_input_form_choices(cx: &Cx, choices: Choices) -> Choices {",
-		"pub async fn order_list_orders_args_form_choices(cx: &Cx, choices: Choices) -> Choices {",
-		"pub async fn order_add_line_args_form_choices(cx: &Cx, choices: Choices) -> Choices {",
+		"pub async fn order_input_form_choices(cx: &Cx, form: &OrderInputForm, choices: Choices) -> Choices {",
+		"pub async fn order_list_orders_args_form_choices(cx: &Cx, form: &OrderListOrdersArgsForm, choices: Choices) -> Choices {",
+		"pub async fn order_add_line_args_form_choices(cx: &Cx, form: &OrderAddLineArgsForm, choices: Choices) -> Choices {",
 		"pub async fn order_labels(cx: &Cx, records: &[OrderRecord], choices: Choices) -> Choices {",
 		"pub async fn review_labels(cx: &Cx, records: &[ReviewRecord], choices: Choices) -> Choices {",
 		`let sites = unnamed(&choices, &[("lines.productId", &["lines", "productId"])]);`,
@@ -271,7 +280,9 @@ func TestReferencesResolveByTheCoreRule(t *testing.T) {
 	for _, want := range []string{
 		"use crate::references;",
 		`let choices = references::order_labels(cx, &rows, choices_of(cx, "orders")).await;`,
-		`let choices = references::order_input_form_choices(cx, choices_of(cx, "orders")).await;`,
+		`let choices = references::order_input_form_choices(cx, &form, choices_of(cx, "orders")).await;`,
+		`let choices = references::order_list_orders_args_form_choices(cx, &filter, choices_of(cx, "orders")).await;`,
+		"Some((form, _)) => references::order_add_line_args_form_choices(cx, form, choices.clone()).await,",
 		"let add_line_form_choices = match &add_line_form {",
 		"let labels = match &found {",
 		"products_item_href(&row.id).unwrap_or_default()",
@@ -320,6 +331,113 @@ func TestReferenceFunctionsAreNamedApart(t *testing.T) {
 	if n := strings.Count(references, "fn product_target_labels("); n != 1 {
 		t.Errorf("references.rs has %d functions product_target_labels, want 1", n)
 	}
+}
+
+// TestPickersAreWrittenForSearchingOptions reads fixture-console-api's
+// crate, whose listProducts searches (D61, amended): each reference to
+// Product is a picker, its source's picks and its shard at
+// /_superschematic/<service>/_pick/<target>; its form holds the pickers'
+// texts and a post's Find acts on it after the hidden submit; a filter's
+// Find sends its query; and the ids argument, a query list whose controls
+// share a name, stays a select of the options.
+func TestPickersAreWrittenForSearchingOptions(t *testing.T) {
+	files, _ := readCrate(t, registry.DefaultNaming(), consoleService, livePagesOutputs())
+	for file, wants := range map[string][]string{
+		"references.rs": {
+			`#[shard("/_superschematic/fixture-console-api/_pick/product")]`,
+			"pub async fn product_pick(cx: &Cx, control: PickControl, pick: Pick) -> topcoat::Result<impl View> {",
+			`#[shard("/_superschematic/fixture-console-api/_pick/product-by-sku")]`,
+			"async fn product_target_picks(cx: &Cx, wanted: &[(String, String, bool)]) -> Vec<Option<Pick>> {",
+			"let labels = product_target_labels(cx, &missing).await;",
+			`aria-label="Search Products" aria-controls=(control.id.clone()) maxlength="50" @input=$(|e: Event| {`,
+			"            for (i0, row0) in form.lines.iter().enumerate() {\n                let name = format!(\"lines[{i0}].productId\");",
+			`controls.push(("giftSku".to_owned(), form.gift_sku.clone()));`,
+			"form.finds.text(name).to_owned(), form.finds.pressed(name))",
+			"form.finds.text(name).to_owned(), true)",
+			`found = found.with("ids", pairs(&options));`,
+		},
+		"choices.rs": {
+			"pub struct Pick {",
+			"pub fn with_pick(mut self, name: impl Into<String>, pick: Pick) -> Self {",
+			"picks: Arc<Vec<(String, Pick)>>,",
+		},
+		"forms.rs": {
+			"pub struct Finds {",
+			"use crate::references::{product_by_sku_pick, product_pick};",
+			"    pub finds: Finds,\n",
+			`finds: Finds::from_posted(posted.get("_find")),`,
+			"        if let Some(name) = action.strip_prefix(\"find:\") {\n            self.finds.pressed = Some(name.to_owned());",
+			`Some(pick) => product_pick(control: pick_control(&name, &id, true, errors.invalid(&name), row0.product_id.as_deref(), true), pick: pick.clone()),`,
+			`Some(pick) => product_pick(control: pick_control("productId", "order-list-orders-product-id", false, errors.invalid("productId"), form.product_id.as_deref(), false), pick: pick.clone()),`,
+		},
+		"pages.rs": {
+			"let sent = if form.apply_action() {\n        rows_again()",
+		},
+	} {
+		for _, want := range wants {
+			if !strings.Contains(files[file], want) {
+				t.Errorf("%s lacks %q", file, want)
+			}
+		}
+	}
+	// The products' filter's ids keep their select, and need no hidden
+	// submit, nor its form a finds.
+	forms := files["forms.rs"]
+	products := forms[strings.Index(forms, "pub struct ProductListProductsArgsForm {"):]
+	products = products[:strings.Index(products, "\n}\n")]
+	if strings.Contains(products, "finds") {
+		t.Errorf("the products' filter holds finds:\n%s", products)
+	}
+}
+
+// TestAPickerNameIsReserved builds fixture-console-api with an order input
+// field named finds, which a form with a picker keeps for its pickers'
+// texts (D61, amended): the build is refused.
+func TestAPickerNameIsReserved(t *testing.T) {
+	dir := consoleCopy(t, func(schema string) string {
+		return strings.Replace(schema, "      - name: note\n        typeRef: { name: string }\n        validateMaxLength: 200\n", "      - name: note\n        typeRef: { name: string }\n        validateMaxLength: 200\n      - name: finds\n        typeRef: { name: string }\n", 1)
+	})
+	_, err := buildDir(t, registry.DefaultNaming(), dir, testpaths.TempDir(t), rustOutputs(), nil)
+	if err == nil || !strings.Contains(err.Error(), "topcoat: form OrderInputForm: field finds is the form's finds, its pickers' texts (D61, amended)") {
+		t.Fatalf("build: %v, want the field named finds refused", err)
+	}
+}
+
+// TestAPickerMeetsItsOptionsControls builds fixture-console-api with a rate
+// limit and a timeout on listProducts: each picker's shard meets them
+// through a layer on its path, its limiter the operation's in the app's
+// registry, which the setup adds after the pages' (D61, amended).
+func TestAPickerMeetsItsOptionsControls(t *testing.T) {
+	dir := consoleCopy(t, func(schema string) string {
+		return strings.Replace(schema, "        restPath: products\n        permissions: [products.read]\n", "        restPath: products\n        permissions: [products.read]\n        middleware: { rateLimit: 30, timeout: 5 }\n", 1)
+	})
+	root := testpaths.TempDir(t)
+	if _, err := buildDir(t, registry.DefaultNaming(), dir, root, livePagesOutputs(), nil); err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	src := filepath.Join(topcoat.Dir(root, consoleService), "src")
+	read := func(name string) string {
+		data, err := os.ReadFile(filepath.Join(src, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(data)
+	}
+	references, lib := read("references.rs"), read("lib.rs")
+	for _, want := range []string{
+		"pub(crate) fn route_controls(router: RouterBuilder, limits: &RateLimits) -> RouterBuilder {",
+		`path: Path::new("/_superschematic/fixture-console-api/_pick/product"),`,
+		"rate_limit: limits.of(&crate::api::operations::PRODUCT_LIST_PRODUCTS),",
+		"timeout: Some(Duration::from_secs(5)),",
+	} {
+		if !strings.Contains(references, want) {
+			t.Errorf("references.rs lacks %q", want)
+		}
+	}
+	if !strings.Contains(lib, "references::route_controls(pages::route_controls(procedures::route_controls(router, &rate_limits), &rate_limits), &rate_limits)") {
+		t.Errorf("lib.rs adds no picker's controls:\n%s", lib)
+	}
+	cargoTestCrateWith(t, consoleService, "#[test]\nfn builds() {}\n", crateOptions{outputs: livePagesOutputs(), dir: dir})
 }
 
 // TestACollectionAtPagerIsNamedApart reads fixture-console-api's pages,
@@ -685,7 +803,7 @@ func TestAReferenceToAnAPIDependencysType(t *testing.T) {
 		"pub async fn product_labels(cx: &Cx, records: &[ProductRecord], choices: Choices) -> Choices {",
 		`let sites = unnamed(&choices, &[("supplierId", &["supplierId"])]);`,
 		"let labels = supplier_target_labels(cx, &values_at(&json, &sites)).await;",
-		"pub async fn product_input_form_choices(cx: &Cx, choices: Choices) -> Choices {",
+		"pub async fn product_input_form_choices(cx: &Cx, form: &ProductInputForm, choices: Choices) -> Choices {",
 	} {
 		if !strings.Contains(references, want) {
 			t.Errorf("references.rs lacks %q", want)
@@ -1126,13 +1244,14 @@ fn app(store: &Arc<Store>) -> Router {
 }
 
 // The app's own page that places an order: the generated form, its
-// product a select from the references, as the console's new page has it.
+// product a picker from the references, as the console's new page has it.
 #[page("/app/new-order")]
 async fn app_new_order(cx: &Cx) -> topcoat::Result<impl View> {
-    let choices = references::order_input_form_choices(cx, Choices::new()).await;
+    let form = OrderInputForm::new();
+    let choices = references::order_input_form_choices(cx, &form, Choices::new()).await;
     Ok(view! {
         <form method="post">
-            order_input_fields(form: OrderInputForm::new(), errors: FormErrors::default(), choices: choices)
+            order_input_fields(form: form, errors: FormErrors::default(), choices: choices)
             <button type="submit">"Place the order"</button>
         </form>
     })
@@ -1292,48 +1411,94 @@ async fn a_search_box_comes_first_filters_and_pages() {
     assert_eq!(long.status, StatusCode::UNPROCESSABLE_ENTITY, "{}", long.html);
 }
 
+// The text of the picker of the control named name: its shard's markup,
+// from the picker's start to its end.
+fn picker<'a>(html: &'a str, name: &str) -> &'a str {
+    between(html, &format!(r#"<div class="ss-pick" data-ss-pick="{name}">"#), "</div>")
+}
+
+// The options of a picker's select, each its value, its label and whether
+// it is selected.
+fn picked(picker: &str) -> Vec<(String, String, bool)> {
+    between(picker, "<select", "</select>")
+        .split("<option value=\"")
+        .skip(1)
+        .map(|option| {
+            let (value, rest) = option.split_once('"').unwrap();
+            let label = rest.split_once('>').unwrap().1.trim_end_matches("</option>").to_owned();
+            (value.to_owned(), label, rest.starts_with(r#" selected="""#))
+        })
+        .filter(|(value, _, _)| !value.is_empty())
+        .collect()
+}
+
+// A picker's options as their labels.
+fn labels(picker: &str) -> Vec<String> {
+    picked(picker).into_iter().map(|(_, label, _)| label).collect()
+}
+
+// The option a picker's select holds selected, by its value.
+fn chosen(picker: &str) -> Option<String> {
+    picked(picker).into_iter().find(|(_, _, selected)| *selected).map(|(value, _, _)| value)
+}
+
 #[tokio::test]
-async fn a_reference_is_a_select_of_its_items_and_a_value_is_named_by_its_label() {
+async fn a_searched_reference_is_a_picker_and_a_value_is_named_by_its_label() {
     let store = Store::new();
     let app = app(&store);
-    // The new order's line names its product from a select of the
-    // products, each by its name, and its gift by sku, from one listing.
+    // The new order's line and its gift are pickers: listProducts searches,
+    // so each is a search box, a Find and a select of the first page of
+    // the products, with a note that more match, from one listing.
     let new = get(&app, "/console/orders/new", "clerk").await;
     assert_eq!(new.status, StatusCode::OK, "{}", new.html);
-    let anvil = wire(&uuid(ANVIL));
+    let line = picker(&new.html, "lines[0].productId");
     for want in [
-        r#"<select id="order-input-lines-0-product-id" name="lines[0].productId" required"#.to_owned(),
-        format!(r#"<option value="{anvil}">Anvil</option>"#),
-        r#"<select id="order-input-gift-sku" name="giftSku""#.to_owned(),
-        r#"<option value="drum">Drum</option>"#.to_owned(),
+        r#"<input type="search" name="_find.lines[0].productId" value="" aria-label="Search Products" aria-controls="order-input-lines-0-product-id" maxlength="50""#,
+        r#"<button type="submit" name="_action" value="find:lines[0].productId" formnovalidate="""#,
+        r#"<select id="order-input-lines-0-product-id" name="lines[0].productId" required="""#,
+        r#"<p class="ss-pick-more">More products match: search for more of the text.</p>"#,
     ] {
-        assert!(new.html.contains(&want), "the new page lacks {want}: {}", new.html);
+        assert!(line.contains(want), "the line's picker lacks {want}: {line}");
     }
-    assert_eq!(store.calls(), (1, vec![]), "one listing for the new page's two references");
+    assert_eq!(labels(line), ["Anvil", "Bucket"], "{line}");
+    let anvil = wire(&uuid(ANVIL));
+    assert_eq!(picked(line)[0].0, anvil, "{line}");
+    let gift = picker(&new.html, "giftSku");
+    assert!(gift.contains(r#"name="_find.giftSku""#) && gift.contains(r#"value="find:giftSku""#), "{gift}");
+    assert_eq!(picked(gift), [("anvil".to_owned(), "Anvil".to_owned(), false), ("bucket".to_owned(), "Bucket".to_owned(), false)], "{gift}");
+    // The label stays the control's own, and Enter presses the hidden
+    // submit ahead of every Find.
+    assert!(new.html.contains(r#"<label for="order-input-lines-0-product-id">Product</label>"#), "{}", new.html);
+    let form = between(&new.html, r#"<form method="post" class="ss-form">"#, "</form>");
+    assert!(form.starts_with(r#"<button type="submit" class="ss-submit" hidden=""></button>"#), "{form}");
+    assert_eq!(store.calls(), (1, vec![]), "one listing for the new page's two pickers");
     // The app's own page takes the same choices.
     let own = get(&app, "/app/new-order", "clerk").await;
-    assert!(own.html.contains(&format!(r#"<option value="{anvil}">Anvil</option>"#)), "{}", own.html);
+    assert_eq!(labels(picker(&own.html, "lines[0].productId")), ["Anvil", "Bucket"], "{}", own.html);
     store.calls();
 
-    // An order's page names its lines' products through the lookup, its
-    // gift from the listing, and its action's product is a select.
-    let first = uuid("8d1f6c9e-0000-4000-8000-000000000101");
-    let item = get(&app, &format!("/console/orders/{}", wire(&first)), "clerk").await;
+    // An order's page names its lines' products through the lookup and its
+    // gift from the listing, and its action's product is a picker.
+    let item = get(&app, &format!("/console/orders/{}", wire(&uuid(FIRST))), "clerk").await;
     assert_eq!(item.status, StatusCode::OK, "{}", item.html);
     assert!(item.html.contains(r#"<td data-field="productId">Anvil</td>"#), "{}", item.html);
     assert!(item.html.contains(r#"<td data-field="productId">Crate</td>"#), "{}", item.html);
     assert!(item.html.contains(r#"<dd>Bucket</dd>"#), "the gift by its name: {}", item.html);
-    assert!(item.html.contains(r#"<select id="order-add-line-product-id" name="productId" required"#), "{}", item.html);
+    let action = picker(&item.html, "productId");
+    assert!(action.contains(r#"<select id="order-add-line-product-id" name="productId" required="""#), "{action}");
     let (listings, lookups) = store.calls();
-    assert_eq!(listings, 1, "one listing for the gift and the action's select");
+    assert_eq!(listings, 2, "the gift's listing and the action's first page");
     assert_eq!(lookups, vec![vec![anvil.clone(), wire(&uuid(CRATE))]], "one lookup of the lines' products");
 
-    // The list names each row's gift; its filter's product is a select.
+    // The list names each row's gift; its filter's product is a picker.
     let list = get(&app, "/console/orders", "clerk").await;
     assert!(list.html.contains(r#"<td data-field="giftSku">Bucket</td>"#), "{}", list.html);
-    assert!(list.html.contains(r#"<select id="order-list-orders-product-id" name="productId""#), "{}", list.html);
+    let filter = picker(&list.html, "productId");
+    assert!(filter.contains(r#"<select id="order-list-orders-product-id" name="productId""#), "{filter}");
+    // A filter's Find sends its query: it names no action.
+    assert!(filter.contains(r#"<button type="submit" formnovalidate="""#) && !filter.contains("_action"), "{filter}");
     let (listings, lookups) = store.calls();
-    assert_eq!(listings, 1, "one listing for the rows' gifts and the filter");
+    assert_eq!(listings, 2, "the rows' gifts' listing and the filter's first page");
     assert_eq!(lookups.len(), 1, "one lookup for the rows' lines: {lookups:?}");
 
     // A post through the select places the order with the product's id.
@@ -1344,13 +1509,129 @@ async fn a_reference_is_a_select_of_its_items_and_a_value_is_named_by_its_label(
 }
 
 #[tokio::test]
+async fn a_picker_finds_by_get_and_by_post() {
+    let store = Store::new();
+    let app = app(&store);
+    // A filter's picker searches the text its query sends, beside the
+    // list, which the product held filters.
+    let crate_id = wire(&uuid(CRATE));
+    let found = get(&app, &format!("/console/orders?productId={crate_id}&_find.productId=cr"), "clerk").await;
+    assert_eq!(found.status, StatusCode::OK, "{}", found.html);
+    assert_eq!(numbers(&found.html), ["A-1", "A-5"], "{}", found.html);
+    let filter = picker(&found.html, "productId");
+    assert!(filter.contains(r#"name="_find.productId" value="cr""#), "{filter}");
+    assert_eq!(labels(filter), ["Crate"], "{filter}");
+    assert_eq!(chosen(filter), Some(crate_id.clone()), "{filter}");
+    assert!(!filter.contains("ss-pick-more"), "{filter}");
+    // The pager's links keep the filter but not the search's text.
+    let next = link(&get(&app, "/console/orders?_find.productId=cr", "clerk").await.html, "next").unwrap();
+    assert!(!next.contains("_find"), "{next}");
+    store.calls();
+
+    // A post's Find renders the form again as it was sent, 200, without
+    // the operation: the pressed picker's text searched, the other's kept
+    // in its box over the first page.
+    let before = store.orders.lock().unwrap().len();
+    let body = "lines[0].productId=&lines[0].quantity=2&note=soon&giftSku=&_find.lines[0].productId=dr&_find.giftSku=an&_action=find:lines[0].productId";
+    let again = post(&app, "/console/orders/new", "clerk", body).await;
+    assert_eq!(again.status, StatusCode::OK, "{}", again.html);
+    assert_eq!(store.orders.lock().unwrap().len(), before, "a Find places no order");
+    let line = picker(&again.html, "lines[0].productId");
+    assert!(line.contains(r#"value="dr""#), "{line}");
+    assert_eq!(labels(line), ["Drum"], "{line}");
+    let gift = picker(&again.html, "giftSku");
+    assert!(gift.contains(r#"name="_find.giftSku" value="an""#), "{gift}");
+    assert_eq!(labels(gift), ["Anvil", "Bucket"], "{gift}");
+    assert!(again.html.contains(r#"name="lines[0].quantity" type="number""#) && again.html.contains(r#"value="2""#), "{}", again.html);
+    assert!(again.html.contains(r#"value="soon""#), "{}", again.html);
+    assert!(!again.html.contains("form-error"), "{}", again.html);
+    assert_eq!(store.calls(), (2, vec![]), "the pressed text's listing and the first page's");
+
+    // The value held past the first page is an option, named through the
+    // lookup, and selected.
+    let drum = wire(&uuid(DRUM));
+    let body = format!("lines[0].productId={drum}&lines[0].quantity=1&_find.giftSku=bu&_action=find:giftSku");
+    let held = post(&app, "/console/orders/new", "clerk", &body).await;
+    assert_eq!(held.status, StatusCode::OK, "{}", held.html);
+    let line = picker(&held.html, "lines[0].productId");
+    assert_eq!(labels(line), ["Drum", "Anvil", "Bucket"], "{line}");
+    assert_eq!(chosen(line), Some(drum.clone()), "{line}");
+    assert_eq!(labels(picker(&held.html, "giftSku")), ["Bucket"], "{}", held.html);
+    assert_eq!(store.calls(), (2, vec![vec![drum.clone()]]), "two listings and one lookup of the value held");
+
+    // Enter presses the hidden submit, which names no action: the form is
+    // placed.
+    let placed = post(&app, "/console/orders/new", "clerk", &format!("lines[0].productId={drum}&lines[0].quantity=1&_find.lines[0].productId=dr")).await;
+    assert_eq!(placed.status, StatusCode::SEE_OTHER, "{}", placed.html);
+    assert_eq!(store.orders.lock().unwrap().len(), before + 1);
+
+    // A text past the search argument's maxLength shows the route's
+    // message, and no matches.
+    let long = get(&app, &format!("/console/orders?_find.productId={}", "x".repeat(51)), "clerk").await;
+    assert_eq!(long.status, StatusCode::OK, "{}", long.html);
+    let refused = picker(&long.html, "productId");
+    assert!(refused.contains(r#"<p class="field-error">Invalid query parameter q"#), "{refused}");
+    assert!(labels(refused).is_empty(), "{refused}");
+}
+
+#[tokio::test]
+async fn a_pickers_shard_renders_what_the_text_finds() {
+    let store = Store::new();
+    let app = app(&store);
+    let new = get(&app, "/console/orders/new", "clerk").await;
+    let line = picker(&new.html, "lines[0].productId");
+    // The box's input sets the shard's searched and text signals, the
+    // select's change its value signal.
+    let identity = between(&new.html, r#"::topcoat::shard::start("/_superschematic/fixture-console-api/_pick/product", ""#, "\"");
+    let input = between(line, r#"<input type="search""#, "<button");
+    let signals: Vec<&str> = input.split("&quot;Signal&quot;,&quot;id&quot;:&quot;").skip(1).map(|rest| rest.split("&quot;").next().unwrap()).collect();
+    assert_eq!(signals.len(), 2, "{line}");
+    store.calls();
+    // The reader typed dr with Bucket held: the shard lists Drum, and
+    // Bucket, named through the lookup, stays selected.
+    let bucket = wire(&uuid(BUCKET));
+    // The arguments as the runtime sends them back, records, a list and an
+    // option tagged as the shard's start marker writes them.
+    let record = |fields: serde_json::Value| serde_json::json!({"t": "Record", "v": fields});
+    let control = record(serde_json::json!({"name": "lines[0].productId", "id": "order-input-lines-0-product-id", "required": true, "invalid": false, "value": bucket, "post": true}));
+    let pick = |text: &str, options: Vec<serde_json::Value>, more: bool| {
+        record(serde_json::json!({"text": text, "options": {"t": "Vec", "bits": 64, "v": options}, "more": more, "refused": {"t": "Option", "v": null}}))
+    };
+    let body = serde_json::json!({"args": [control, pick("", Vec::new(), false)], "signals": {signals[0]: true, signals[1]: "dr"}});
+    let mut request = http::Request::builder().method("POST").uri("/_superschematic/fixture-console-api/_pick/product").header("x-caller", "clerk");
+    request = request.header(header::CONTENT_TYPE, "application/json").header("x-topcoat-identity", identity);
+    let response = app.handle(request.body(Body::from(body.to_string())).unwrap()).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let html = String::from_utf8(to_bytes(response.into_body(), usize::MAX).await.unwrap().to_vec()).unwrap();
+    let shard = picker(&html, "lines[0].productId");
+    assert!(shard.contains(r#"name="_find.lines[0].productId" value="dr""#), "{shard}");
+    assert_eq!(labels(shard), ["Bucket", "Drum"], "{shard}");
+    assert_eq!(chosen(shard), Some(bucket.clone()), "{shard}");
+    assert_eq!(store.calls(), (1, vec![vec![bucket]]), "one listing of the text, one lookup of the value");
+    // Without the searched signal the shard renders the pick it was given.
+    let body = serde_json::json!({"args": [control, pick("x", vec![record(serde_json::json!({"value": "v", "label": "V"}))], true)]});
+    let response = app.handle(
+        http::Request::builder()
+            .method("POST")
+            .uri("/_superschematic/fixture-console-api/_pick/product")
+            .header("x-caller", "clerk")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap(),
+    ).await;
+    let html = String::from_utf8(to_bytes(response.into_body(), usize::MAX).await.unwrap().to_vec()).unwrap();
+    assert_eq!(labels(picker(&html, "lines[0].productId")), ["V"], "{html}");
+    assert_eq!(store.calls(), (0, vec![]));
+}
+
+#[tokio::test]
 async fn a_caller_who_may_not_list_the_items_gets_the_plain_control_and_the_value() {
     let store = Store::new();
     let app = app(&store);
     let new = get(&app, "/console/orders/new", "taker").await;
     assert_eq!(new.status, StatusCode::OK, "{}", new.html);
     assert!(new.html.contains(r#"<input id="order-input-lines-0-product-id" name="lines[0].productId" type="text" required"#), "{}", new.html);
-    assert!(!new.html.contains("<option value=\"drum\""), "{}", new.html);
+    assert!(!new.html.contains("ss-pick"), "{}", new.html);
     let item = get(&app, &format!("/console/orders/{}", wire(&uuid(FIRST))), "taker").await;
     assert_eq!(item.status, StatusCode::OK, "{}", item.html);
     assert!(item.html.contains(&format!(r#"<td data-field="productId">{}</td>"#, wire(&uuid(ANVIL)))), "{}", item.html);
@@ -1368,7 +1649,8 @@ async fn the_apps_choices_win_and_spare_the_call() {
     let app = app_with(&store, Settings::new().choices(own));
     let new = get(&app, "/console/orders/new", "clerk").await;
     assert!(new.html.contains(&format!(r#"<option value="{anvil}">The anvil</option>"#)), "{}", new.html);
-    assert!(new.html.contains(r#"<option value="drum">Drum</option>"#), "{}", new.html);
+    assert!(!new.html.contains(r#"data-ss-pick="lines[0].productId""#), "{}", new.html);
+    assert_eq!(labels(picker(&new.html, "giftSku")), ["Anvil", "Bucket"], "{}", new.html);
     assert_eq!(store.calls().0, 1, "the gift's listing alone");
     let item = get(&app, &format!("/console/orders/{}", wire(&uuid(FIRST))), "clerk").await;
     assert!(item.html.contains(r#"<td data-field="productId">The anvil</td>"#), "{}", item.html);
@@ -1376,14 +1658,17 @@ async fn the_apps_choices_win_and_spare_the_call() {
 }
 
 #[tokio::test]
-async fn more_items_than_a_page_keep_the_control_and_are_named_in_chunks() {
+async fn more_items_than_a_page_are_picked_and_named_in_chunks() {
     let store = Store::new();
     store.products.lock().unwrap().extend([product(EASEL, "Easel"), product(FUNNEL, "Funnel")]);
     let all = [ANVIL, BUCKET, CRATE, DRUM, EASEL, FUNNEL];
     store.orders.lock().unwrap().push(order(9, types::OrderStatus::Placed, None, None, all.iter().map(|id| line(id, 1.0)).collect()));
     let app = app(&store);
+    // A picker however many items there are.
     let new = get(&app, "/console/orders/new", "clerk").await;
-    assert!(new.html.contains(r#"<input id="order-input-lines-0-product-id" name="lines[0].productId" type="text" required"#), "{}", new.html);
+    let line = picker(&new.html, "lines[0].productId");
+    assert_eq!(labels(line), ["Anvil", "Bucket"], "{line}");
+    assert!(line.contains("ss-pick-more"), "{line}");
     store.calls();
     let item = get(&app, &format!("/console/orders/{}", wire(&uuid("8d1f6c9e-0000-4000-8000-000000000109"))), "clerk").await;
     for name in ["Anvil", "Easel", "Funnel"] {

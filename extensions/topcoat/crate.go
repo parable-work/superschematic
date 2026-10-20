@@ -316,6 +316,9 @@ func newCrate(c registry.GenerateContext, api *registry.RustAPI, cfg Config) (*c
 	if out.References, err = referencesOf(out, schemas, inProcess, trails, c.Logf); err != nil {
 		return nil, err
 	}
+	if err := out.markPicks(); err != nil {
+		return nil, err
+	}
 	if site != nil {
 		title := humanize(strings.ReplaceAll(service, "-", " "))
 		if out.Pages, err = pagesOf(out, schemas, site, cfg.PagesPrefix(), title, cfg.PagesLive(), c.Logf); err != nil {
@@ -437,6 +440,7 @@ func (c *crate) formUses() map[string]bool {
 	uses := map[string]bool{}
 	for _, f := range c.Forms {
 		uses["choosable"] = uses["choosable"] || f.Choosable
+		uses["picks"] = uses["picks"] || f.Picks
 	}
 	for _, st := range c.FormStructs {
 		if st.Rows {
@@ -469,6 +473,7 @@ func (c *crate) formUses() map[string]bool {
 	}
 	for _, f := range c.ArgForms {
 		uses["args"], uses["choosable"] = true, uses["choosable"] || f.Choosable
+		uses["picks"] = uses["picks"] || f.Picks
 		uses["query"] = uses["query"] || f.IsGet()
 		uses["argsInput"] = uses["argsInput"] || f.Input != nil
 		if f.Paged {
@@ -490,6 +495,75 @@ func (c *crate) formUses() map[string]bool {
 		}
 	}
 	return uses
+}
+
+// PickShards are the pickers' shards (D61, amended) the forms render,
+// sorted and joined, for forms.rs's use.
+func (c *crate) PickShards() string {
+	if c.References == nil {
+		return ""
+	}
+	var names []string
+	for _, s := range c.References.Sources {
+		if c.References.UsesPick(s) {
+			names = append(names, s.Base+"_pick")
+		}
+	}
+	sort.Strings(names)
+	return strings.Join(names, ", ")
+}
+
+// markPicks makes each form's control whose reference's options operation
+// searches a search picker (D61, amended): its form holds the pickers'
+// texts, a post's "Find" acts on it, and its view renders each through its
+// source's shard. A form whose field is named as what a form keeps for
+// its pickers is refused.
+func (c *crate) markPicks() error {
+	m := c.References
+	if !m.Picking() {
+		return nil
+	}
+	byForm := map[string]*refForm{}
+	for _, f := range m.Forms {
+		byForm[f.Form] = f
+	}
+	renders := func(f *refForm, post bool) map[string]pickRender {
+		picks := map[string]pickRender{}
+		for _, site := range f.Sites {
+			if site.Pick {
+				picks[site.Path] = pickRender{Shard: site.Source.Base + "_pick", Post: post}
+			}
+		}
+		return picks
+	}
+	for i := range c.Forms {
+		f := &c.Forms[i]
+		if rf := byForm[f.Name]; rf != nil && rf.Picks() {
+			f.Picks, f.Struct.Picks = true, true
+			if err := reservedPicks(f.Name, f.Struct.Fields); err != nil {
+				return err
+			}
+			r := newFormRenderer()
+			r.picks = renders(rf, true)
+			r.fields(scope{form: "form", idBase: f.Struct.IDBase}, f.Struct, 2)
+			f.Choosable, f.UsesForm, f.Body = r.choosable, r.used["form"], r.String()
+		}
+	}
+	for i := range c.ArgForms {
+		f := &c.ArgForms[i]
+		if rf := byForm[f.Name]; rf != nil && rf.Picks() {
+			f.Picks = true
+			fields := make([]*formField, len(f.Fields))
+			for j, a := range f.Fields {
+				fields[j] = a.formField
+			}
+			if err := reservedPicks(f.Name, fields); err != nil {
+				return err
+			}
+			f.render(renders(rf, !f.IsGet()))
+		}
+	}
+	return nil
 }
 
 // addRendered adds what a rendered control of f needs.
@@ -545,14 +619,26 @@ func (c *crate) SetupLayers() string {
 	if c.ControlledPages() {
 		wrap("pages::route_controls", c.Pages.ControlsUse("rate_limit"))
 	}
+	if c.ControlledPicks() {
+		wrap("references::route_controls", c.References.PicksUse("rate_limit"))
+	}
 	return expr
 }
 
-// RateLimited reports whether a procedure or a page meets a route's rate
-// limit, so `<service>(...)` hands their layers the registry and lib.rs
-// declares `client_key`, by which each counts a client.
+// ControlledPicks reports whether a picker's shard meets its options
+// operation's rate limit or timeout (D61, amended), so `<service>(...)`
+// adds the layers that apply them (`references::route_controls`).
+func (c *crate) ControlledPicks() bool {
+	return c.References != nil && len(c.References.PickControlled()) > 0
+}
+
+// RateLimited reports whether a procedure, a page or a picker's shard
+// meets a route's rate limit, so `<service>(...)` hands their layers the
+// registry and lib.rs declares `client_key`, by which each counts a
+// client.
 func (c *crate) RateLimited() bool {
-	return c.ControlsUse("rate_limit") || c.ControlledPages() && c.Pages.ControlsUse("rate_limit")
+	return c.ControlsUse("rate_limit") || c.ControlledPages() && c.Pages.ControlsUse("rate_limit") ||
+		c.ControlledPicks() && c.References.PicksUse("rate_limit")
 }
 
 // ControlsUse reports whether a procedure's route has the control
@@ -608,6 +694,7 @@ func (c *crate) write(dir string) error {
 		"join":         strings.Join,
 		"doc":          doc,
 		"doc4":         doc4,
+		"lowerFirst":   lowerFirst,
 	}
 	for name, fn := range pageFuncs {
 		funcs[name] = fn

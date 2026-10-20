@@ -30,13 +30,18 @@
 //! `{{ .SetupMethod }}` puts each operation's route controls in front of the
 //! pages that call it.
 {{- end }}
+{{- if .ControlledPicks }}
+//! `{{ .SetupMethod }}` puts each options operation's rate limit and timeout in
+//! front of the shards of the search pickers that call it.
+{{- end }}
 {{- if .Views }}
 //! `views` renders each record as a description list and as a table.
 {{- end }}
 {{- if .References }}
 //! `references` names what a value that refers to an item holds (D61): a
 //! form's options and a display component's labels, from the operation
-//! that lists the items.
+//! that lists the items{{ if .References.Picking }}, and a search picker's matches, from its search
+//! (D61, amended){{ end }}.
 {{- end }}
 {{- if .HasChoices }}
 //! `choices` holds the values the app names for a field, which a form
@@ -205,6 +210,10 @@ pub trait {{ .ExtTrait }} {
 {{- if .ControlledPages }}
     /// Adds the layer that applies each operation's route controls to the
     /// pages that call it (`pages::route_controls`).
+{{- end }}
+{{- if .ControlledPicks }}
+    /// Adds the layers that apply each options operation's rate limit and
+    /// timeout to its search pickers' shards (`references::route_controls`).
 {{- end }}
     #[must_use]
     fn {{ .SetupMethod }}(self, implementations: Implementations{{ if .HasAuth }}, page_authenticator: impl PageAuthenticator{{ end }}) -> Self;

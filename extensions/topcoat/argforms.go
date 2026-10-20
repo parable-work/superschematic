@@ -51,7 +51,30 @@ type argForm struct {
 	Choosable bool
 	UsesForm  bool
 	Body      string
+	// Picks reports whether a control, an argument's or its input's, is a
+	// search picker (D61, amended): the form holds every picker's text in
+	// finds, and a post's "Find" acts on it as a row button does.
+	Picks bool
 }
+
+// Hidden reports whether the component renders a hidden submit button
+// ahead of every other, which Enter presses: ahead of its input's row
+// buttons, or of a picker's "Find".
+func (f argForm) Hidden() bool { return f.Rows() || f.Picks }
+
+// Acts reports whether a button other than the submit acts on the form, so
+// it has apply_action: its input's row buttons, or a post's "Find". A
+// filter's "Find" sends its query.
+func (f argForm) Acts() bool { return f.Rows() || f.Picks && !f.IsGet() }
+
+// InputActs reports whether its input's form has apply_action, which the
+// argument form's applies, the input reading the button pressed.
+func (f argForm) InputActs() bool { return f.Input != nil && f.Input.Struct.Acts() }
+
+// OwnAction reports whether the form reads the button pressed itself,
+// row_action: a post whose "Find" acts on it, and whose input does not
+// read it.
+func (f argForm) OwnAction() bool { return f.Acts() && !f.InputActs() }
 
 // argSort is the sort of a sorted operation's form (D60, amended): the
 // query parameter its SortBy argument names, and the form's field, which
@@ -281,10 +304,17 @@ func (s schemaSet) argForm(e registry.RustEndpoint, op *ir.FieldDef, inputs map[
 	}
 	// The search text is the form's first control (D62).
 	sort.SliceStable(f.Fields, func(i, j int) bool { return f.Fields[i].Search && !f.Fields[j].Search })
-	r := newFormRenderer()
-	r.arguments(f, 2)
-	f.Choosable, f.UsesForm, f.Body = r.choosable, r.used["form"], r.String()
+	f.render(nil)
 	return f, "", nil
+}
+
+// render writes the form's view, picks the search pickers by the paths
+// of their controls (D61, amended).
+func (f *argForm) render(picks map[string]pickRender) {
+	r := newFormRenderer()
+	r.picks = picks
+	r.arguments(*f, 2)
+	f.Choosable, f.UsesForm, f.Body = r.choosable, r.used["form"], r.String()
 }
 
 // argField builds the field of one argument. Its control and attributes

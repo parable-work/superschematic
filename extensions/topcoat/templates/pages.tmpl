@@ -1169,7 +1169,7 @@ async fn {{ $r.Ident }}_list(cx: &Cx{{ declareAfter $r.ColParams "String" }}{{ i
         Err(refusal) if !alone(refusal, &[{{ .RouteNames }}]) => refusal.errors.clone(),
         _ => FormErrors::default(),
     };
-    let choices = {{ .ChoicesExpr $r.Name }};
+    let choices = {{ .ChoicesExpr $r.Name "&filter" }};
 {{- end }}
 {{- if .Paged }}
 {{- if $r.Prev }}
@@ -1457,7 +1457,7 @@ async fn {{ $r.Ident }}_item(
     };
 {{- if .ChoicesFn }}
     let {{ .Field }}_choices = match &{{ .Field }} {
-        Some(_) => references::{{ .ChoicesFn }}(cx, choices.clone()).await,
+        Some((form, _)) => references::{{ .ChoicesFn }}(cx, form, choices.clone()).await,
         None => choices.clone(),
     };
 {{- end }}
@@ -1535,7 +1535,7 @@ pub async fn {{ $r.Ident }}_create_page(cx: &Cx, Form(form): Form<{{ .FormName }
 /// The new page's form, new or as sent with its errors.
 #[component]
 async fn {{ $r.Ident }}_new(cx: &Cx, form: {{ .FormName }}, errors: FormErrors) -> topcoat::Result<impl View> {
-    let choices = {{ .ChoicesExpr $r.Name }};
+    let choices = {{ .ChoicesExpr $r.Name "&form" }};
     Ok(view! {
         <h1>{{ rustString $r.CreateLabel }}</h1>
         <form method="post" class="ss-form">
@@ -1588,7 +1588,7 @@ pub async fn {{ $r.Ident }}_update_page(cx: &Cx, Form(form): Form<{{ .ArgForm.Na
 /// The edit page's form, filled from the item or as sent with its errors.
 #[component]
 async fn {{ $r.Ident }}_edit(cx: &Cx, form: {{ .ArgForm.Name }}, errors: FormErrors) -> topcoat::Result<impl View> {
-    let choices = {{ .ChoicesExpr $r.Name }};
+    let choices = {{ .ChoicesExpr $r.Name "&form" }};
     Ok(view! {
         <h1>{{ rustString (printf "Edit the %s" $r.NounLower) }}</h1>
         <form method="post" class="ss-form">
@@ -1647,7 +1647,7 @@ async fn {{ $r.Ident }}_delete(cx: &Cx{{ declareAfter $r.ItemParams "String" }},
     let labels = app.clone();
 {{- end }}
 {{- if .ChoicesFn }}
-    let choices = references::{{ .ChoicesFn }}(cx, app).await;
+    let choices = references::{{ .ChoicesFn }}(cx, &form, app).await;
 {{- else }}
     let choices = app;
 {{- end }}

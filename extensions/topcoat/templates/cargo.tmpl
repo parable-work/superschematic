@@ -31,5 +31,8 @@ tokio = { version = "1.52.2", features = ["time"] }
 {{- else if .ControlledProcedures }}
 # The timeout of a procedure's route controls.
 tokio = { version = "1.52.2", features = ["time"] }
+{{- else if .ControlledPicks }}
+# The timeout of a picker's route controls.
+tokio = { version = "1.52.2", features = ["time"] }
 {{- end }}
 topcoat = { version = "0.10", features = ["tower"] }

@@ -1025,7 +1025,7 @@ async fn orders_list(cx: &Cx, query: String, next: String) -> topcoat::Result<im
         Err(refusal) if !alone(refusal, &[]) => refusal.errors.clone(),
         _ => FormErrors::default(),
     };
-    let choices = references::order_list_orders_args_form_choices(cx, choices_of(cx, "orders")).await;
+    let choices = references::order_list_orders_args_form_choices(cx, &filter, choices_of(cx, "orders")).await;
     // The links of the page: the first page's while a cursor was sent,
     // the page before's while `back` knows it, and the next page's while
     // one follows, its `back` this one's with the current cursor after it,
@@ -1183,7 +1183,7 @@ async fn orders_item(
         None => operations::can_order_add_line(cx).await.is_ok().then(|| (OrderAddLineArgsForm::new(order_id.as_str()), FormErrors::default())),
     };
     let add_line_form_choices = match &add_line_form {
-        Some(_) => references::order_add_line_args_form_choices(cx, choices.clone()).await,
+        Some((form, _)) => references::order_add_line_args_form_choices(cx, form, choices.clone()).await,
         None => choices.clone(),
     };
     Ok(view! {
@@ -1251,7 +1251,7 @@ pub async fn orders_create_page(cx: &Cx, Form(form): Form<OrderInputForm>) -> to
 /// The new page's form, new or as sent with its errors.
 #[component]
 async fn orders_new(cx: &Cx, form: OrderInputForm, errors: FormErrors) -> topcoat::Result<impl View> {
-    let choices = references::order_input_form_choices(cx, choices_of(cx, "orders")).await;
+    let choices = references::order_input_form_choices(cx, &form, choices_of(cx, "orders")).await;
     Ok(view! {
         <h1>"New order"</h1>
         <form method="post" class="ss-form">
@@ -1269,15 +1269,19 @@ pub async fn orders_add_line_form_page(cx: &Cx, Form(form): Form<OrderAddLineArg
     let order_id = path_param::<OrderId>(cx).to_owned();
     let item = orders_item_href(&order_id).unwrap_or_else(|| PREFIX.to_owned());
     // The route's values, never the hidden inputs, which a reader can change.
-    let form = OrderAddLineArgsForm {
+    let mut form = OrderAddLineArgsForm {
         id: Some(order_id.clone()),
         ..form
     };
-    let sent = match form.submit(cx).await {
-        Ok(_) => {
-            return Err(see_other(item).into());
+    let sent = if form.apply_action() {
+        rows_again()
+    } else {
+        match form.submit(cx).await {
+            Ok(_) => {
+                return Err(see_other(item).into());
+            }
+            Err(refusal) => refusal,
         }
-        Err(refusal) => refusal,
     };
     Ok(view! {
         match sent {
@@ -1470,7 +1474,7 @@ async fn products_list(cx: &Cx, query: String, next: String) -> topcoat::Result<
         Err(refusal) if !alone(refusal, &[]) => refusal.errors.clone(),
         _ => FormErrors::default(),
     };
-    let choices = references::product_list_products_args_form_choices(cx, choices_of(cx, "products")).await;
+    let choices = references::product_list_products_args_form_choices(cx, &filter, choices_of(cx, "products")).await;
     // The links of the page: the first page's while a cursor was sent,
     // the page before's while `back` knows it, and the next page's while
     // one follows, its `back` this one's with the current cursor after it,

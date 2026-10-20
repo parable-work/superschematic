@@ -19,7 +19,8 @@
 //! `views` renders each record as a description list and as a table.
 //! `references` names what a value that refers to an item holds (D61): a
 //! form's options and a display component's labels, from the operation
-//! that lists the items.
+//! that lists the items, and a search picker's matches, from its search
+//! (D61, amended).
 //! `choices` holds the values the app names for a field, which a form
 //! offers and a display component labels.
 //! `pages` serves a page per resource the operations describe, under

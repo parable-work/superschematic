@@ -19,6 +19,17 @@
 //! `remove:rooms[1]`), which `apply_action` applies without JavaScript.
 //! A form reads at most `MAX_PAIRS` pairs and one row past a list's
 //! limit, so what a post costs is bounded by the form, not by the post.
+{{- if .FormsUse "picks" }}
+//!
+//! A control whose reference's options operation searches is a search
+//! picker (D61, amended): a search box named `_find.<control>`, a "Find"
+//! button and a select of what the box's text finds, its pick, which the
+//! form's choices give it (`references`). The form holds every box's text
+//! in `finds`. A post's "Find" is a row button, `_action=find:<control>`,
+//! which `apply_action` records as pressed, so the page renders the form
+//! again with what that text finds; a filter's sends its query. Ahead of
+//! every "Find" a hidden submit button is what Enter presses.
+{{- end }}
 
 use std::collections::BTreeMap;
 use std::ops::Bound;
@@ -46,6 +57,9 @@ use serde::{Deserialize, Deserializer};
 use serde_json::Map;
 {{- end }}
 use serde_json::Value;
+{{- if .FormsUse "picks" }}
+use crate::references::{ {{- .PickShards -}} };
+{{- end }}
 {{- if .ArgForms }}
 use topcoat::context::Cx;
 {{- end }}
@@ -59,6 +73,9 @@ use topcoat::view::{View, component, view};
 /// The values the app names for a field, which a text or number control
 /// they name offers as a `<select>`; `crate::choices`, also here.
 pub use crate::choices::{Choice, Choices};
+{{- if .FormsUse "picks" }}
+use crate::choices::PickControl;
+{{- end }}
 
 /// Why a form was refused: each control's messages, and the form's own.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -293,6 +310,71 @@ async fn choice_select(
             }
         </select>
     })
+}
+{{- end }}
+
+{{- if .FormsUse "picks" }}
+
+/// The texts of a form's search pickers (D61, amended): each picker's box,
+/// `_find.<control>`, by its control's name, as sent, and the picker whose
+/// "Find" a post pressed (`find:<control>`), which `apply_action` records.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Finds {
+    pub texts: BTreeMap<String, String>,
+    pub pressed: Option<String>,
+}
+
+impl Finds {
+    /// The text of the box of the picker named `name`, as sent, or empty.
+    pub fn text(&self, name: &str) -> &str {
+        self.texts.get(name).map_or("", String::as_str)
+    }
+
+    /// Whether a post's "Find" was the one of the picker named `name`, so
+    /// it searches its text.
+    pub fn pressed(&self, name: &str) -> bool {
+        self.pressed.as_deref() == Some(name)
+    }
+
+    /// The texts posted under `_find`, `posted`, each by the name of its
+    /// control, which the tree's steps spell.
+    fn from_posted(posted: &Posted) -> Self {
+        let mut texts = BTreeMap::new();
+        texts_under(posted, String::new(), &mut texts);
+        Self { texts, pressed: None }
+    }
+}
+
+/// The last text posted at each name under `posted`, `at` the name so far.
+fn texts_under(posted: &Posted, at: String, out: &mut BTreeMap<String, String>) {
+    if let Some(text) = posted.values.last()
+        && !at.is_empty()
+    {
+        out.insert(at.clone(), text.clone());
+    }
+    for (key, under) in &posted.keys {
+        let name = if at.is_empty() { key.clone() } else { format!("{at}.{key}") };
+        texts_under(under, name, out);
+    }
+    for (index, under) in &posted.rows {
+        if !at.is_empty() {
+            texts_under(under, format!("{at}[{index}]"), out);
+        }
+    }
+}
+
+/// A picker's control as its form renders it, for its shard: the select's
+/// name and id, whether it requires a value and has an error, the value it
+/// holds, and whether its "Find" posts the form.
+fn pick_control(name: &str, id: &str, required: bool, invalid: Option<&str>, value: Option<&str>, post: bool) -> PickControl {
+    PickControl {
+        name: name.to_owned(),
+        id: id.to_owned(),
+        required,
+        invalid: invalid.is_some(),
+        value: value.unwrap_or_default().to_owned(),
+        post,
+    }
 }
 {{- end }}
 
@@ -854,10 +936,14 @@ pub struct {{ .Name }} {
 {{- range .Fields }}
     pub {{ .Name }}: {{ .RustType }},
 {{- end }}
-{{- if and .Input .Rows }}
-    /// The row button that submitted the form (`_action`), which
+{{- if and .Input .Acts }}
+    /// The {{ if .Rows }}row button{{ if .Picks }} or the picker's "Find"{{ end }}{{ else }}picker's "Find"{{ end }} that submitted the form (`_action`), which
     /// `apply_action` applies.
     pub row_action: Option<String>,
+{{- end }}
+{{- if and .Input .Picks }}
+    /// The texts of its search pickers (D61, amended).
+    pub finds: Finds,
 {{- end }}
 {{- if .Input }}
     /// The post sent more than `MAX_PAIRS` pairs, past which the form read
@@ -875,8 +961,11 @@ impl {{ .Name }} {
 {{- range .Fields }}
             {{ .Name }}: {{ .New }},
 {{- end }}
-{{- if and .Input .Rows }}
+{{- if and .Input .Acts }}
             row_action: None,
+{{- end }}
+{{- if and .Input .Picks }}
+            finds: Finds::default(),
 {{- end }}
 {{- if .Input }}
             overflow: false,
@@ -892,12 +981,15 @@ impl {{ .Name }} {
         Self::from_post(&Posted::from_pairs(pairs))
     }
 
-    /// The form as posted: its fields{{ if .Rows }}, the row button pressed{{ end }}
+    /// The form as posted: its fields{{ if and .Rows .Picks }}, the button pressed, its pickers' texts{{ else if .Rows }}, the row button pressed{{ else if .Picks }}, the "Find" pressed, its pickers' texts{{ end }}
     /// and whether the post sent more than the form reads.
     fn from_post(posted: &Posted) -> Self {
         Self {
-{{- if .Rows }}
+{{- if .Acts }}
             row_action: posted.get("_action").text(),
+{{- end }}
+{{- if .Picks }}
+            finds: Finds::from_posted(posted.get("_find")),
 {{- end }}
             overflow: posted.overflow,
             ..Self::from_posted(posted)
@@ -918,7 +1010,19 @@ impl {{ .Name }} {
         }
         {{ .Parse }}(Value::Object(json), UnknownFields::Refuse).map_err(FormErrors::from)
     }
-{{- if .Rows }}
+{{- if .Acts }}
+
+{{- if and .Rows .Picks }}
+
+    /// Applies the button that submitted the form, `row_action`: `add:` and
+    /// a list's name adds a row to it unless it holds its listMax, and
+    /// `remove:` and a row's name removes the row unless its list holds no
+    /// more than its listMin; the other rows keep their values, numbered
+    /// again. `find:` and a picker's name records its "Find" as pressed (D61,
+    /// amended). True when a row button or a "Find" submitted the form,
+    /// whether or not the list's bounds let it act: the page renders the
+    /// form again and does not call the operation.
+{{- else if .Rows }}
 
     /// Applies the row button that submitted the form, `row_action`: `add:`
     /// and a list's name adds a row to it unless it holds its listMax, and
@@ -927,10 +1031,24 @@ impl {{ .Name }} {
     /// again. True when a row button submitted the form, whether or not
     /// the list's bounds let it act: the page renders the form again and
     /// does not call the operation.
+{{- else }}
+
+    /// Applies the picker's "Find" that submitted the form, `row_action`,
+    /// `find:` and its name, which it records as pressed (D61, amended).
+    /// True when a "Find" submitted the form: the page renders the form
+    /// again with what its text finds, and does not call the operation.
+{{- end }}
     pub fn apply_action(&mut self) -> bool {
         let Some(action) = self.row_action.take() else {
             return false;
         };
+{{- if .Picks }}
+        if let Some(name) = action.strip_prefix("find:") {
+            self.finds.pressed = Some(name.to_owned());
+            return true;
+        }
+{{- end }}
+{{- if .Rows }}
         let (add, name) = match action.split_once(':') {
             Some(("add", name)) => (true, name),
             Some(("remove", name)) => (false, name),
@@ -939,6 +1057,7 @@ impl {{ .Name }} {
         if let Some(path) = segments(name) {
             self.act(&path, add);
         }
+{{- end }}
         true
     }
 {{- end }}
@@ -960,8 +1079,11 @@ impl {{ .Name }} {
             {{ .Name }}: posted.get({{ rustString .JSONName }}).values(false),
 {{- end }}
 {{- end }}
-{{- if and .Input .Rows }}
+{{- if and .Input .Acts }}
             row_action: None,
+{{- end }}
+{{- if and .Input .Picks }}
+            finds: Finds::default(),
 {{- end }}
 {{- if .Input }}
             overflow: false,
@@ -1114,8 +1236,8 @@ pub async fn {{ .Component }}(
     let _ = form;
 {{- end }}
     Ok(view! {
-{{- if .Rows }}
-        // The button Enter presses, ahead of every row button: it submits
+{{- if or .Rows .Picks }}
+        // The button Enter presses, ahead of every {{ if .Rows }}row button{{ if .Picks }} and "Find"{{ end }}{{ else }}"Find"{{ end }}: it submits
         // the form without an `_action`.
         <button type="submit" class="ss-submit" hidden=(true)></button>
 {{- end }}

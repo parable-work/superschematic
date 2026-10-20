@@ -330,15 +330,15 @@ type pageOp struct {
 	ChoicesFn string
 }
 
-// ChoicesExpr is the Rust of the choices the operation's form takes on
-// the pages of resource: the app's, and each reference's options under
-// them.
-func (o *pageOp) ChoicesExpr(resource string) string {
+// ChoicesExpr is the Rust of the choices the operation's form, form, a
+// reference to it, takes on the pages of resource: the app's, and each
+// reference's options and each picker's pick under them.
+func (o *pageOp) ChoicesExpr(resource, form string) string {
 	app := "choices_of(cx, " + rustString(resource) + ")"
 	if o.ChoicesFn == "" {
 		return app
 	}
-	return "references::" + o.ChoicesFn + "(cx, " + app + ").await"
+	return "references::" + o.ChoicesFn + "(cx, " + form + ", " + app + ").await"
 }
 
 // routeField is a path argument of an operation: the page route's
@@ -371,13 +371,15 @@ func (o *pageOp) FormComponent() string {
 	return o.InputForm.Component
 }
 
-// Rows reports whether the form holds rows, which a row button adds or
-// removes without the operation.
-func (o *pageOp) Rows() bool {
+// Acts reports whether a button other than the submit acts on the form
+// without the operation: a row button, which adds or removes a row, or a
+// picker's "Find" (D61, amended), which renders it again with what its text
+// finds.
+func (o *pageOp) Acts() bool {
 	if o.ArgForm != nil {
-		return o.ArgForm.Rows()
+		return o.ArgForm.Acts()
 	}
-	return o.InputForm != nil && o.InputForm.Rows
+	return o.InputForm != nil && (o.InputForm.Rows || o.InputForm.Picks)
 }
 
 // NewForm is the Rust of the operation's new form, its path arguments the
@@ -412,7 +414,7 @@ func (o *pageOp) paramOf(name string) string {
 
 // MutForm reports whether submit_<op> changes the form it is given: the
 // route's values or a row button.
-func (o *pageOp) MutForm() bool { return len(o.RouteFields) > 0 && o.ArgForm != nil || o.Rows() }
+func (o *pageOp) MutForm() bool { return len(o.RouteFields) > 0 && o.ArgForm != nil || o.Acts() }
 
 // RouteNames are the API's names of its path arguments, as a Rust slice's
 // items.
@@ -1464,7 +1466,7 @@ func (b *pageBuilder) finish() {
 				continue
 			}
 			m.use("seeOther", "form", "alone", "pageRefusal", "formErrors")
-			if o.Rows() {
+			if o.Acts() {
 				m.use("rowsAgain")
 			}
 		}
@@ -1493,7 +1495,7 @@ func (o *pageOp) SentLines() string {
 	switch {
 	case o.ArgForm != nil && len(o.RouteFields) > 0:
 		mut := ""
-		if o.Rows() {
+		if o.Acts() {
 			mut = "mut "
 		}
 		lines = append(lines, "// The route's values, never the hidden inputs, which a reader can change.", "let "+mut+"form = "+o.ArgForm.Name+" {")
@@ -1501,7 +1503,7 @@ func (o *pageOp) SentLines() string {
 			lines = append(lines, "    "+field.Field+": Some("+field.Param+".clone()),")
 		}
 		lines = append(lines, "    ..form", "};")
-	case o.Rows():
+	case o.Acts():
 		lines = append(lines, "let mut form = form;")
 	}
 	done := strings.Split(o.DoneLines, "\n")
@@ -1521,7 +1523,7 @@ func (o *pageOp) SentLines() string {
 		send = append(send, indentEach(12, done)...)
 		send = append(send, "        }", "        Err(err) => Refusal::from_api(&err),", "    },", "    Err(errors) => Refusal::from(errors),", "}")
 	}
-	if o.Rows() {
+	if o.Acts() {
 		lines = append(lines, "let sent = if form.apply_action() {", "    rows_again()", "} else {")
 		lines = append(lines, indentEach(4, send)...)
 		lines = append(lines, "};")

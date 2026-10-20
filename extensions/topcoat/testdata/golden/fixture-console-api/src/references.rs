@@ -27,21 +27,44 @@
 //! by the label of what the route's value there refers to
 //! (`<target>_target_label`), when every operation whose route holds the
 //! value there refers to one target by one value (D44, amended).
+//!
+//! A control whose reference's options operation searches is a picker
+//! (D61, amended): a search box, a "Find" button and a select of the items
+//! the box's text finds, the first page of the search, the value held
+//! among them by its label. `<form>_choices` gives each picker its `Pick`:
+//! a filter's every picker searches its text, a post's only the one whose
+//! "Find" it pressed (`find:<control>`), and the rest list the first page.
+//! One listing a distinct text, at most `MAX_LOOKUP_CALLS` texts a target
+//! a render, and the values held named through the lookup, as a record's
+//! are. A picker is a shard, `<target>_pick`, at
+//! `/_superschematic/fixture-console-api/_pick/<target>`: with Topcoat's runtime
+//! it renders again as the reader types, and without it "Find" submits
+//! the form. The shard meets its options operation's rate limit and
+//! timeout, as a page that calls it does.
 
 use std::collections::BTreeSet;
 
 use crate::api::runtime::page::PageRequest;
-use crate::choices::{Choice, Choices};
+use crate::api::runtime::ApiError;
+use crate::choices::{Choice, Choices, Pick, PickControl, PickOption};
+use crate::forms::{OrderAddLineArgsForm, OrderInputForm, OrderListOrdersArgsForm, ProductListProductsArgsForm};
 use crate::operations;
 use crate::records::{OrderInputRecord, OrderLineInputRecord, OrderLineRecord, OrderRecord, ProductRecord, ReviewRecord};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 use topcoat::context::{Cx, memoize};
+use topcoat::runtime::{Event, shard, signal};
+use topcoat::view::{View, view};
 
 /// The most calls one target's lookup makes for one `<record>_labels`
 /// call, which names the values of the records it is given; a value past
-/// them shows as it is.
+/// them shows as it is. A form's pickers of one target search at most
+/// this many texts a render (D61, amended).
 pub const MAX_LOOKUP_CALLS: usize = 10;
+
+/// What a picker past a render's `MAX_LOOKUP_CALLS` searches says, beside
+/// the first page it lists.
+const TOO_MANY_SEARCHES: &str = "Too many searches at once; search this one again";
 
 /// A place a record shows a reference: its path, as `Choices` names it, and
 /// its JSON keys from the record's root.
@@ -89,6 +112,12 @@ fn choices_of<'a>(items: impl IntoIterator<Item = &'a Value>, value: &str, label
             Some(Choice { value, label })
         })
         .collect()
+}
+
+/// Whether `err` refuses the argument `param`: the router's 400 at it.
+fn refuses(err: &ApiError, param: &str) -> bool {
+    err.status.as_u16() == 400
+        && err.details.as_deref().and_then(|details| details.get("parameter")).and_then(Value::as_str) == Some(param)
 }
 
 /// Options as the pairs `Choices::with` takes.
@@ -172,6 +201,26 @@ async fn supplier_list_suppliers_options(cx: &Cx) -> Option<Listed> {
     Some(Listed { items: json_of(&page.items), more: page.next.is_some() })
 }
 
+/// The items product.listProducts finds for `text`, for a picker (D61,
+/// amended): its first page, at its defaultLimit, with `q` set, as JSON, and
+/// whether more follow, the text empty for every item; kept for the request
+/// (`#[memoize]`). None when the caller may not call it (401, 403) or the call
+/// fails; `Err` the search argument's refusal of the text, as its route words
+/// it.
+#[memoize(as_ref)]
+async fn product_list_products_search(cx: &Cx, text: &str) -> Option<Result<Listed, String>> {
+    let args = crate::api::ProductListProductsArgs {
+        q: (!text.is_empty()).then(|| text.to_owned()),
+        ids: None,
+        page: PageRequest::first(crate::api::ProductListProductsArgs::PAGE.default_limit()),
+    };
+    match operations::product_list_products(cx, args).await {
+        Ok(page) => Some(Ok(Listed { items: json_of(&page.items), more: page.next.is_some() })),
+        Err(err) if !text.is_empty() && refuses(&err, "q") => Some(Err(err.message)),
+        Err(_) => None,
+    }
+}
+
 /// product.listProducts narrowed by its lookup, `ids`, to `values`, its items
 /// as JSON, kept for the request (`#[memoize]`). None when no value decodes as
 /// the argument's, or the caller may not call it, or the call fails.
@@ -209,6 +258,117 @@ async fn product_target_labels(cx: &Cx, values: &BTreeSet<String>) -> Vec<Choice
     out
 }
 
+/// The picks of controls that refer to Product (D61, amended), one per `(value,
+/// text, search)` wanted: when `search`, the items `text` finds through
+/// product.listProducts's `q`, else the first page of them all; the first
+/// `MAX_LOOKUP_CALLS` distinct texts are searched, one listing each, and a text
+/// past them lists the first page with `TOO_MANY_SEARCHES`. The value held is
+/// always an option, named by its name through `product_target_labels`, one
+/// call for every value no match is. None for each when the caller may not list
+/// the items or the call fails.
+async fn product_target_picks(cx: &Cx, wanted: &[(String, String, bool)]) -> Vec<Option<Pick>> {
+    let mut searched: Vec<&str> = Vec::new();
+    let mut found = Vec::with_capacity(wanted.len());
+    for (_, text, search) in wanted {
+        let text = if *search { text.as_str() } else { "" };
+        let capped = !text.is_empty() && !searched.contains(&text) && searched.len() >= MAX_LOOKUP_CALLS;
+        if !text.is_empty() && !capped && !searched.contains(&text) {
+            searched.push(text);
+        }
+        found.push(match product_list_products_search(cx, if capped { "" } else { text }).await {
+            None => None,
+            Some(Ok(listed)) => Some((choices_of(&listed.items, "id", Some("name")), listed.more, capped.then(|| TOO_MANY_SEARCHES.to_owned()))),
+            Some(Err(refused)) => Some((Vec::new(), false, Some(refused.clone()))),
+        });
+    }
+    // The values held that no match is, named at once.
+    let missing: BTreeSet<String> = wanted
+        .iter()
+        .zip(&found)
+        .filter_map(|((value, _, _), found)| {
+            let (options, _, _) = found.as_ref()?;
+            (!value.is_empty() && !options.iter().any(|option: &Choice| option.value == *value)).then(|| value.clone())
+        })
+        .collect();
+    let labels = product_target_labels(cx, &missing).await;
+    wanted
+        .iter()
+        .zip(found)
+        .map(|((value, text, _), found)| {
+            let (choices, more, refused) = found?;
+            let mut options: Vec<PickOption> = choices.into_iter().map(|choice| PickOption { value: choice.value, label: choice.label }).collect();
+            if !value.is_empty() && !options.iter().any(|option| option.value == *value) {
+                let label = labels.iter().find(|choice| choice.value == *value).map_or_else(|| value.clone(), |choice| choice.label.clone());
+                options.insert(0, PickOption { value: value.clone(), label });
+            }
+            Some(Pick { text: text.clone(), options, more, refused })
+        })
+        .collect()
+}
+
+/// The picker of a control that refers to Product (D61, amended): a search box
+/// of `pick`'s text, a "Find" button and a select of its options, the value
+/// held selected, a note when more match and the search's refusal. A shard:
+/// when the app loads Topcoat's runtime, the box's text renders it again as the
+/// reader types, through `product_target_picks`, the value the select holds
+/// kept; without the runtime it renders in place, and "Find" submits its form.
+/// A caller who may not list the items gets the plain control and the value.
+#[shard("/_superschematic/fixture-console-api/_pick/product")]
+pub async fn product_pick(cx: &Cx, control: PickControl, pick: Pick) -> topcoat::Result<impl View> {
+    let typed = pick.text.clone();
+    let text = signal(cx, move || typed);
+    let held = control.value.clone();
+    let value = signal(cx, move || held);
+    // The reader typed, so the shard searches what the box holds.
+    let searched = signal(cx, || false);
+    let typed = text.get();
+    let held = value.get_untracked();
+    let pick = if searched.get_untracked() {
+        product_target_picks(cx, &[(held.clone(), typed.clone(), true)]).await.pop().flatten()
+    } else {
+        Some(pick)
+    };
+    let find = format!("find:{}", control.name);
+    let invalid = control.invalid.then_some("true");
+    Ok(view! {
+        <div class="ss-pick" data-ss-pick=(control.name.clone())>
+            match pick {
+                Some(pick) => {
+                    let blank = !pick.options.iter().any(|option| option.value == held);
+                    <input type="search" name=(format!("_find.{}", control.name)) value=(typed) aria-label="Search Products" aria-controls=(control.id.clone()) maxlength="50" @input=$(|e: Event| {
+                        searched.set(true);
+                        text.set(e.target.value)
+                    })>
+                    if control.post {
+                        <button type="submit" name="_action" value=(find) formnovalidate=(true) @click=$(|e: Event| {
+                            e.prevent_default();
+                            searched.set(true)
+                        })>"Find"</button>
+                    } else {
+                        <button type="submit" formnovalidate=(true) @click=$(|e: Event| {
+                            e.prevent_default();
+                            searched.set(true)
+                        })>"Find"</button>
+                    }
+                    <select id=(control.id.clone()) name=(control.name.clone()) required=(control.required) aria-invalid=(invalid) @change=$(|e: Event| value.set(e.target.value))>
+                        <option value="" selected=(blank)>""</option>
+                        for option in pick.options {
+                            <option value=(option.value.clone()) selected=(option.value == held)>(option.label)</option>
+                        }
+                    </select>
+                    if pick.more {
+                        <p class="ss-pick-more">"More products match: search for more of the text."</p>
+                    }
+                    if let Some(message) = pick.refused {
+                        <p class="field-error">(message)</p>
+                    }
+                },
+                None => <input id=(control.id.clone()) name=(control.name.clone()) type="text" value=(held) required=(control.required) aria-invalid=(invalid)>,
+            }
+        </div>
+    })
+}
+
 /// The label of the item of Product whose id is `value`, for the console's
 /// trail: through product.listProducts's lookup with that one value. None when
 /// no item has it, its label is blank, or the call is refused or fails.
@@ -216,14 +376,6 @@ pub(crate) async fn product_target_label(cx: &Cx, value: &str) -> Option<String>
     let values = BTreeSet::from([value.to_owned()]);
     let labels = product_target_labels(cx, &values).await;
     labels.into_iter().find(|choice| choice.value == value).map(|choice| choice.label).filter(|label| label != value)
-}
-
-/// Product's items as options, each by its sku and named by its name: the first
-/// page of product.listProducts, when it holds them all; none when the caller
-/// may not list them, or more follow, which a select would hide.
-async fn product_by_sku_target_choices(cx: &Cx) -> Option<Vec<Choice>> {
-    let listed = product_list_products_options(cx).await?;
-    (!listed.more).then(|| choices_of(&listed.items, "sku", Some("name")))
 }
 
 /// The labels of Product's `values`, by its sku: the items of the first page of
@@ -239,6 +391,118 @@ async fn product_by_sku_target_labels(cx: &Cx, values: &BTreeSet<String>) -> Vec
     let mut out = choices_of(&listed.items, "sku", Some("name"));
     out.retain(|choice| values.contains(&choice.value));
     out
+}
+
+/// The picks of controls that refer to Product (D61, amended), one per `(value,
+/// text, search)` wanted: when `search`, the items `text` finds through
+/// product.listProducts's `q`, else the first page of them all; the first
+/// `MAX_LOOKUP_CALLS` distinct texts are searched, one listing each, and a text
+/// past them lists the first page with `TOO_MANY_SEARCHES`. The value held is
+/// always an option, named by its name through `product_by_sku_target_labels`,
+/// one call for every value no match is. None for each when the caller may not
+/// list the items or the call fails.
+async fn product_by_sku_target_picks(cx: &Cx, wanted: &[(String, String, bool)]) -> Vec<Option<Pick>> {
+    let mut searched: Vec<&str> = Vec::new();
+    let mut found = Vec::with_capacity(wanted.len());
+    for (_, text, search) in wanted {
+        let text = if *search { text.as_str() } else { "" };
+        let capped = !text.is_empty() && !searched.contains(&text) && searched.len() >= MAX_LOOKUP_CALLS;
+        if !text.is_empty() && !capped && !searched.contains(&text) {
+            searched.push(text);
+        }
+        found.push(match product_list_products_search(cx, if capped { "" } else { text }).await {
+            None => None,
+            Some(Ok(listed)) => Some((choices_of(&listed.items, "sku", Some("name")), listed.more, capped.then(|| TOO_MANY_SEARCHES.to_owned()))),
+            Some(Err(refused)) => Some((Vec::new(), false, Some(refused.clone()))),
+        });
+    }
+    // The values held that no match is, named at once.
+    let missing: BTreeSet<String> = wanted
+        .iter()
+        .zip(&found)
+        .filter_map(|((value, _, _), found)| {
+            let (options, _, _) = found.as_ref()?;
+            (!value.is_empty() && !options.iter().any(|option: &Choice| option.value == *value)).then(|| value.clone())
+        })
+        .collect();
+    let labels = product_by_sku_target_labels(cx, &missing).await;
+    wanted
+        .iter()
+        .zip(found)
+        .map(|((value, text, _), found)| {
+            let (choices, more, refused) = found?;
+            let mut options: Vec<PickOption> = choices.into_iter().map(|choice| PickOption { value: choice.value, label: choice.label }).collect();
+            if !value.is_empty() && !options.iter().any(|option| option.value == *value) {
+                let label = labels.iter().find(|choice| choice.value == *value).map_or_else(|| value.clone(), |choice| choice.label.clone());
+                options.insert(0, PickOption { value: value.clone(), label });
+            }
+            Some(Pick { text: text.clone(), options, more, refused })
+        })
+        .collect()
+}
+
+/// The picker of a control that refers to Product (D61, amended): a search box
+/// of `pick`'s text, a "Find" button and a select of its options, the value
+/// held selected, a note when more match and the search's refusal. A shard:
+/// when the app loads Topcoat's runtime, the box's text renders it again as the
+/// reader types, through `product_by_sku_target_picks`, the value the select
+/// holds kept; without the runtime it renders in place, and "Find" submits its
+/// form. A caller who may not list the items gets the plain control and the
+/// value.
+#[shard("/_superschematic/fixture-console-api/_pick/product-by-sku")]
+pub async fn product_by_sku_pick(cx: &Cx, control: PickControl, pick: Pick) -> topcoat::Result<impl View> {
+    let typed = pick.text.clone();
+    let text = signal(cx, move || typed);
+    let held = control.value.clone();
+    let value = signal(cx, move || held);
+    // The reader typed, so the shard searches what the box holds.
+    let searched = signal(cx, || false);
+    let typed = text.get();
+    let held = value.get_untracked();
+    let pick = if searched.get_untracked() {
+        product_by_sku_target_picks(cx, &[(held.clone(), typed.clone(), true)]).await.pop().flatten()
+    } else {
+        Some(pick)
+    };
+    let find = format!("find:{}", control.name);
+    let invalid = control.invalid.then_some("true");
+    Ok(view! {
+        <div class="ss-pick" data-ss-pick=(control.name.clone())>
+            match pick {
+                Some(pick) => {
+                    let blank = !pick.options.iter().any(|option| option.value == held);
+                    <input type="search" name=(format!("_find.{}", control.name)) value=(typed) aria-label="Search Products" aria-controls=(control.id.clone()) maxlength="50" @input=$(|e: Event| {
+                        searched.set(true);
+                        text.set(e.target.value)
+                    })>
+                    if control.post {
+                        <button type="submit" name="_action" value=(find) formnovalidate=(true) @click=$(|e: Event| {
+                            e.prevent_default();
+                            searched.set(true)
+                        })>"Find"</button>
+                    } else {
+                        <button type="submit" formnovalidate=(true) @click=$(|e: Event| {
+                            e.prevent_default();
+                            searched.set(true)
+                        })>"Find"</button>
+                    }
+                    <select id=(control.id.clone()) name=(control.name.clone()) required=(control.required) aria-invalid=(invalid) @change=$(|e: Event| value.set(e.target.value))>
+                        <option value="" selected=(blank)>""</option>
+                        for option in pick.options {
+                            <option value=(option.value.clone()) selected=(option.value == held)>(option.label)</option>
+                        }
+                    </select>
+                    if pick.more {
+                        <p class="ss-pick-more">"More products match: search for more of the text."</p>
+                    }
+                    if let Some(message) = pick.refused {
+                        <p class="field-error">(message)</p>
+                    }
+                },
+                None => <input id=(control.id.clone()) name=(control.name.clone()) type="text" value=(held) required=(control.required) aria-invalid=(invalid)>,
+            }
+        </div>
+    })
 }
 
 /// The labels of Supplier's `values`, by its id: the items of the first page of
@@ -267,47 +531,105 @@ pub(crate) async fn supplier_target_label(cx: &Cx, value: &str) -> Option<String
 
 /// The options of each control of `OrderAddLineArgsForm` that refers to an
 /// item, by its path, under `choices`, the app's, which win where they name the
-/// control: `productId` (Product). A control keeps its own when the caller may
-/// not list the items, or more follow than a page holds.
-pub async fn order_add_line_args_form_choices(cx: &Cx, choices: Choices) -> Choices {
+/// control: `productId` (Product). A picker's control has its pick by its name,
+/// from `form`: the items the text of the picker whose "Find" the post pressed
+/// finds, and the first page for the others, the values held among them (D61,
+/// amended). A control keeps its own when the caller may not list the items,
+/// and one that does not pick when more follow than a page holds.
+pub async fn order_add_line_args_form_choices(cx: &Cx, form: &OrderAddLineArgsForm, choices: Choices) -> Choices {
     let mut found = Choices::new();
-    if !named(&choices, "productId")
-        && let Some(options) = product_target_choices(cx).await
     {
-        found = found.with("productId", pairs(&options));
+        // Each picker of Product, the value it holds, that the app's choices do not name.
+        let mut controls: Vec<(String, Option<String>)> = Vec::new();
+        if !named(&choices, "productId") {
+            controls.push(("productId".to_owned(), form.product_id.clone()));
+        }
+        let wanted: Vec<(String, String, bool)> = controls
+            .iter()
+            .map(|(name, value)| (value.clone().unwrap_or_default(), form.finds.text(name).to_owned(), form.finds.pressed(name)))
+            .collect();
+        for ((name, _), pick) in controls.into_iter().zip(product_target_picks(cx, &wanted).await) {
+            if let Some(pick) = pick {
+                found = found.with_pick(name, pick);
+            }
+        }
     }
     choices.or(found)
 }
 
 /// The options of each control of `OrderInputForm` that refers to an item, by
 /// its path, under `choices`, the app's, which win where they name the control:
-/// `lines.productId` (Product), `giftSku` (Product). A control keeps its own
-/// when the caller may not list the items, or more follow than a page holds.
-pub async fn order_input_form_choices(cx: &Cx, choices: Choices) -> Choices {
+/// `lines.productId` (Product), `giftSku` (Product). A picker's control has its
+/// pick by its name, from `form`: the items the text of the picker whose "Find"
+/// the post pressed finds, and the first page for the others, the values held
+/// among them (D61, amended). A control keeps its own when the caller may not
+/// list the items, and one that does not pick when more follow than a page
+/// holds.
+pub async fn order_input_form_choices(cx: &Cx, form: &OrderInputForm, choices: Choices) -> Choices {
     let mut found = Choices::new();
-    if !named(&choices, "lines.productId")
-        && let Some(options) = product_target_choices(cx).await
     {
-        found = found.with("lines.productId", pairs(&options));
+        // Each picker of Product, the value it holds, that the app's choices do not name.
+        let mut controls: Vec<(String, Option<String>)> = Vec::new();
+        if !named(&choices, "lines.productId") {
+            for (i0, row0) in form.lines.iter().enumerate() {
+                let name = format!("lines[{i0}].productId");
+                if !named(&choices, &name) {
+                    controls.push((name, row0.product_id.clone()));
+                }
+            }
+        }
+        let wanted: Vec<(String, String, bool)> = controls
+            .iter()
+            .map(|(name, value)| (value.clone().unwrap_or_default(), form.finds.text(name).to_owned(), form.finds.pressed(name)))
+            .collect();
+        for ((name, _), pick) in controls.into_iter().zip(product_target_picks(cx, &wanted).await) {
+            if let Some(pick) = pick {
+                found = found.with_pick(name, pick);
+            }
+        }
     }
-    if !named(&choices, "giftSku")
-        && let Some(options) = product_by_sku_target_choices(cx).await
     {
-        found = found.with("giftSku", pairs(&options));
+        // Each picker of Product, the value it holds, that the app's choices do not name.
+        let mut controls: Vec<(String, Option<String>)> = Vec::new();
+        if !named(&choices, "giftSku") {
+            controls.push(("giftSku".to_owned(), form.gift_sku.clone()));
+        }
+        let wanted: Vec<(String, String, bool)> = controls
+            .iter()
+            .map(|(name, value)| (value.clone().unwrap_or_default(), form.finds.text(name).to_owned(), form.finds.pressed(name)))
+            .collect();
+        for ((name, _), pick) in controls.into_iter().zip(product_by_sku_target_picks(cx, &wanted).await) {
+            if let Some(pick) = pick {
+                found = found.with_pick(name, pick);
+            }
+        }
     }
     choices.or(found)
 }
 
 /// The options of each control of `OrderListOrdersArgsForm` that refers to an
 /// item, by its path, under `choices`, the app's, which win where they name the
-/// control: `productId` (Product). A control keeps its own when the caller may
-/// not list the items, or more follow than a page holds.
-pub async fn order_list_orders_args_form_choices(cx: &Cx, choices: Choices) -> Choices {
+/// control: `productId` (Product). A picker's control has its pick by its name,
+/// from `form`: the items each picker's text finds, the values held among them
+/// (D61, amended). A control keeps its own when the caller may not list the
+/// items, and one that does not pick when more follow than a page holds.
+pub async fn order_list_orders_args_form_choices(cx: &Cx, form: &OrderListOrdersArgsForm, choices: Choices) -> Choices {
     let mut found = Choices::new();
-    if !named(&choices, "productId")
-        && let Some(options) = product_target_choices(cx).await
     {
-        found = found.with("productId", pairs(&options));
+        // Each picker of Product, the value it holds, that the app's choices do not name.
+        let mut controls: Vec<(String, Option<String>)> = Vec::new();
+        if !named(&choices, "productId") {
+            controls.push(("productId".to_owned(), form.product_id.clone()));
+        }
+        let wanted: Vec<(String, String, bool)> = controls
+            .iter()
+            .map(|(name, value)| (value.clone().unwrap_or_default(), form.finds.text(name).to_owned(), true))
+            .collect();
+        for ((name, _), pick) in controls.into_iter().zip(product_target_picks(cx, &wanted).await) {
+            if let Some(pick) = pick {
+                found = found.with_pick(name, pick);
+            }
+        }
     }
     choices.or(found)
 }
@@ -316,7 +638,8 @@ pub async fn order_list_orders_args_form_choices(cx: &Cx, choices: Choices) -> C
 /// an item, by its path, under `choices`, the app's, which win where they name
 /// the control: `ids` (Product). A control keeps its own when the caller may
 /// not list the items, or more follow than a page holds.
-pub async fn product_list_products_args_form_choices(cx: &Cx, choices: Choices) -> Choices {
+pub async fn product_list_products_args_form_choices(cx: &Cx, form: &ProductListProductsArgsForm, choices: Choices) -> Choices {
+    let _ = form;
     let mut found = Choices::new();
     if !named(&choices, "ids")
         && let Some(options) = product_target_choices(cx).await
