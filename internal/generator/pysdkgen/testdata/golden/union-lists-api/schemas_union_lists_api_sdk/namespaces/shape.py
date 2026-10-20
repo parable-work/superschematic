@@ -368,11 +368,16 @@ class ShapeNamespace:
         return [self._coerce_response(row, output_type_name, True, f"data[{index}]") for index, row in enumerate(raw)]
 
     def _coerce_map_response(self, raw: Any, output_type_name: str, is_array: bool) -> Any:
-        """Coerce a map response value by value, as _coerce_response coerces
-        a response of the value's list levels."""
-        if not isinstance(raw, dict):
+        """Read a map response value by value, as _coerce_response reads a
+        response of the value's list levels, each value at data[key]."""
+        if raw is None or self._response_reader(output_type_name) is None:
             return raw
-        return {key: self._coerce_response(value, output_type_name, is_array) for key, value in raw.items()}
+        if not isinstance(raw, dict):
+            of_lists = "lists of " if is_array else ""
+            raise SDKError(f"SDK contract error: expected response data to be a map of {of_lists}{output_type_name}")
+        return {
+            key: self._coerce_response(value, output_type_name, is_array, f"data[{key}]") for key, value in raw.items()
+        }
 
     def _validate_query_param_constraints(
         self,

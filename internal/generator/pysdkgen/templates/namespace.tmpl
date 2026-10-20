@@ -499,11 +499,16 @@ class {{.Namespace.ClassName}}:
 {{- if .Namespace.HasMapModelOutput}}
 
     def _coerce_map_response(self, raw: Any, output_type_name: str, is_array: bool) -> Any:
-        """Coerce a map response value by value, as _coerce_response coerces
-        a response of the value's list levels."""
-        if not isinstance(raw, dict):
+        """Read a map response value by value, as _coerce_response reads a
+        response of the value's list levels, each value at data[key]."""
+        if raw is None or self._response_reader(output_type_name) is None:
             return raw
-        return {key: self._coerce_response(value, output_type_name, is_array) for key, value in raw.items()}
+        if not isinstance(raw, dict):
+            of_lists = "lists of " if is_array else ""
+            raise SDKError(f"SDK contract error: expected response data to be a map of {of_lists}{output_type_name}")
+        return {
+            key: self._coerce_response(value, output_type_name, is_array, f"data[{key}]") for key, value in raw.items()
+        }
 {{- end}}
 
     def _validate_query_param_constraints(
@@ -914,9 +919,9 @@ class {{.Namespace.ClassName}}:
 {{- end}}
 {{- /*
 coerceResponse is the value a method returns from the response data: a
-paged operation's page (D60), a map of models value by value, a list of
-lists of models row by row, and any other response as _coerce_response
-reads it.
+paged operation's page (D60), a map of models or unions value by value,
+a list of lists of them row by row, and any other response as
+_coerce_response reads it.
 */ -}}
 {{- define "coerceResponse" -}}
 {{if .Paged}}self._coerce_page(response, "{{.OutputModelName}}"){{else if and .OutputIsMap .OutputModelName}}self._coerce_map_response(response, "{{.OutputModelName}}", {{if .OutputIsArray}}True{{else}}False{{end}}){{else if and .OutputIsArrayOfArrays .OutputModelName}}self._coerce_list_of_lists_response(response, "{{.OutputModelName}}"){{else}}self._coerce_response(response, "{{.OutputModelName}}", {{if .OutputIsArray}}True{{else}}False{{end}}){{end}}

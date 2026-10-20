@@ -82,7 +82,8 @@ type NamespaceInfo struct {
 	HasListOfListsArgs        bool
 	HasListOfListsModelOutput bool
 	// HasMapModelOutput gates the _coerce_map_response helper, for a map
-	// response of a model (EndpointInfo.OutputIsMap).
+	// response of a model or a union (EndpointInfo.OutputIsMap): it reads
+	// each value at data[key], and data that is not a map raises SDKError.
 	HasMapModelOutput bool
 	// HasMapArgs gates the _validate_map_argument helper, for a map body
 	// argument (ScalarArg.IsMap).
