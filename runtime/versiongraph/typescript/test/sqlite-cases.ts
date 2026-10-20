@@ -11,7 +11,7 @@
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { sqlRefusal } from "../../../engine/typescript/src/behaviors/sql.ts";
+import { sqlRefusal } from "./behavior-sql.ts";
 import {
   CanonicalError,
   canonicalRow,

@@ -7,22 +7,25 @@ import (
 
 // coreBehaviorFiles holds the declarations of the behaviors the core
 // declares, one JSON file each (D16 in docs/DECISIONS.md), under bare
-// names: every behavior @superschematic/engine implements, and every one
-// the optional @superschematic/engine-workqueue package does. Each
-// package carries a copy of the declarations it implements, which
-// `superschematic behaviors --package <name> --out` writes and CI checks
+// names: every behavior @superschematic/engine ships, and every one the
+// optional @superschematic/engine-workqueue package does. Each package's
+// Rust crate (D58: runtime/engine/rust/behaviors, runtime/engine-workqueue/rust)
+// carries a copy of the declarations it implements, which `superschematic
+// behaviors --package <name> --out` writes and CI checks
 // (docs/extension-model.md section 3.16).
 //
 //go:embed behaviors/*.behavior.json
 var coreBehaviorFiles embed.FS
 
-// The npm packages that implement the core's behaviors.
+// The npm packages that ship the core's behaviors, which name them in a
+// behavior's spec and the engine document (enginedoc).
 const (
-	// EnginePackage is @superschematic/engine, which registers its
-	// behaviors when an engine opens.
+	// EnginePackage is @superschematic/engine, whose engine registers its
+	// behaviors when it opens.
 	EnginePackage = "@superschematic/engine"
 	// WorkQueuePackage is @superschematic/engine-workqueue, whose
-	// behaviors a deployment registers with the engine to run them.
+	// behaviors (in the engine's addon, by name) a deployment registers
+	// with the engine to run them.
 	WorkQueuePackage = "@superschematic/engine-workqueue"
 )
 

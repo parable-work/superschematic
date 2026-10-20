@@ -33,11 +33,10 @@ is no JSON refused at its path, a veto, an issue list or a guidance of the
 wrong shape refused with the TypeScript engine's words.
 */
 
-import { BehaviorConfigError, type AnyBehaviorImplementation } from '../behaviors/behavior.js';
-import { deepFreeze, jsonCopy } from '../behaviors/json.js';
-import { BehaviorError, BehaviorVetoError, EngineError } from '../errors.js';
-import { isPlainObject } from '../instances/patch.js';
+import { BehaviorConfigError, BehaviorError, BehaviorVetoError, EngineError } from '../errors.js';
+import type { AnyBehaviorImplementation } from '../testing/behavior.js';
 import { carry } from './carry.js';
+import { deepFreeze, isPlainObject, jsonCopy } from './json.js';
 
 /** The addon's entry for a context's method: generation, method, arguments as JSON; the result as JSON, '' for undefined. */
 export type BridgeCall = (generation: number, method: string, args: string) => string;
@@ -529,7 +528,7 @@ export class Bridge {
     }
   }
 
-  // The contexts, as src/behaviors/behavior.ts types them. Each method
+  // The contexts, as src/testing/behavior.ts types them. Each method
   // checks its arguments as the TypeScript engine's does, then calls the
   // addon with the context's generation.
 

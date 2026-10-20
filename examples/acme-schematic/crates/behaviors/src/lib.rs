@@ -1,5 +1,4 @@
-//! acme.Rating for the Rust engine (D58), the port of
-//! `packages/behaviors/src/rating.ts`: shoppers rate a catalog item from one
+//! acme.Rating for the engine (D58): shoppers rate a catalog item from one
 //! star to the maximum its type configures (D16). It is an extension's
 //! behavior, a crate of the project that declares it, which implements the
 //! trait the core's behaviors implement and reaches the engine only
@@ -19,8 +18,8 @@
 //! An engine runs it once a host registers it after the core's behaviors,
 //! with the meta-schema acme's binary writes (`acme-schematic
 //! json-schema`), which declares acme.Rating, and the tool options acme's
-//! binary registers ([`tools`]), as the TypeScript package's `behaviors`
-//! and `tools` are passed to `openEngine`:
+//! binary registers ([`tools`]), as the project's engine crate passes them
+//! (its `behaviors()` and `tools()`):
 //!
 //! ```no_run
 //! use superschematic_engine::{Engine, EngineOptions, MetaSchema, Policy};
@@ -187,8 +186,7 @@ impl Behavior for Rating {
 }
 
 /// Every behavior acme declares, for `EngineOptions::behaviors` after the
-/// core's (`superschematic_engine_behaviors::core`): the TypeScript
-/// package's `behaviors`.
+/// core's (`superschematic_engine_behaviors::core`).
 pub fn behaviors() -> BehaviorSet {
     BehaviorSet::new().with(Rating)
 }
@@ -196,8 +194,7 @@ pub fn behaviors() -> BehaviorSet {
 /// The invocation policy and vendor keys acme's binary registers
 /// (`ext/mcp.go`), for `EngineOptions::tools`: the engine writes acme's
 /// tools as acme's generated SDKs write theirs, and takes acme.Rating's
-/// rate, whose declaration asks confirm "always". The TypeScript package's
-/// `tools`.
+/// rate, whose declaration asks confirm "always".
 pub fn tools() -> ToolOptions {
     ToolOptions {
         invocation_policy: Some(InvocationPolicy {

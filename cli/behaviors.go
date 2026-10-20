@@ -31,27 +31,29 @@ type behaviorsFlags struct {
 }
 
 // newBehaviorsCmd writes the declaration of every behavior the binary
-// registers into the npm package that implements them (D16). It is a
-// command of the binary, not a tool of the core module, because an
-// extension's declarations are registered only in its own binary.
+// registers into the crate that implements them (D16, D58), by the npm
+// package that ships it. It is a command of the binary, not a tool of the
+// core module, because an extension's declarations are registered only in
+// its own binary.
 func newBehaviorsCmd(a *app) *cobra.Command {
 	flags := &behaviorsFlags{}
 	cmd := &cobra.Command{
 		Use:   "behaviors --out <dir> [--package <npm package>] [--extension <name>]",
-		Short: "Write each registered behavior's declaration for the package that implements it",
+		Short: "Write each registered behavior's declaration for the crate that implements it",
 		Long: `behaviors writes the declaration of every behavior this binary registers,
-the JSON file its Go package embeds, into a directory of the npm package
-that implements it: one <name>.behavior.json per behavior. An engine
-implementation carries that copy, so the engine and the compiler read one
-declaration.
+the JSON file its Go package embeds, into a directory of the crate that
+implements it: one <name>.behavior.json per behavior. An engine
+implementation carries that copy (a Rust behavior embeds it with
+include_str!), so the engine and the compiler read one declaration.
 
 A copy is canonical: the declaration's keys in their documented order,
 each JSON Schema's object keys sorted, two-space indents and a final
 newline, whatever the source file's layout. Other *.behavior.json files in
 the directory are removed. With --package, only the behaviors that npm
-package implements are written: the core's behaviors are implemented by
-@superschematic/engine and @superschematic/engine-workqueue, and each
-package carries only its own. With --extension, only the behaviors that
+package ships are written: the core's behaviors ship in
+@superschematic/engine (the crate runtime/engine/rust/behaviors) and
+@superschematic/engine-workqueue (runtime/engine-workqueue/rust), and
+each crate carries only its own. With --extension, only the behaviors that
 extension registered are written. Given both, a behavior must match both.
 
 With --check nothing is written: the command fails, naming each file, when
@@ -60,10 +62,10 @@ changed declaration cannot reach the compiler without its implementation's
 copy.
 
 Examples:
-  superschematic behaviors --package @superschematic/engine --out runtime/engine/typescript/src/behaviors/core/declarations
-  superschematic behaviors --package @superschematic/engine-workqueue --out runtime/engine-workqueue/typescript/src/declarations --check
-  acme-schematic behaviors --extension acme --out packages/behaviors/declarations
-  acme-schematic behaviors --extension acme --out packages/behaviors/declarations --check`,
+  superschematic behaviors --package @superschematic/engine --out runtime/engine/rust/behaviors/declarations
+  superschematic behaviors --package @superschematic/engine-workqueue --out runtime/engine-workqueue/rust/declarations --check
+  acme-schematic behaviors --extension acme --out crates/behaviors/declarations
+  acme-schematic behaviors --extension acme --out crates/behaviors/declarations --check`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runBehaviors(cmd, a, flags)
@@ -72,7 +74,7 @@ Examples:
 	cmd.Flags().StringVar(&flags.out, "out", "", "directory the <name>.behavior.json files go in (required)")
 	cmd.Flags().BoolVar(&flags.check, "check", false, "write nothing; fail when the directory's copies are not what would be written")
 	cmd.Flags().StringVar(&flags.extension, "extension", "", "only the behaviors this extension registered (its Name())")
-	cmd.Flags().StringVar(&flags.pkg, "package", "", "only the behaviors this npm package implements (@superschematic/engine, @superschematic/engine-workqueue)")
+	cmd.Flags().StringVar(&flags.pkg, "package", "", "only the behaviors this npm package ships (@superschematic/engine, @superschematic/engine-workqueue)")
 	cmd.Flags().StringVar(&flags.namingPath, "naming", "", "naming config file (default: built-in names; behaviors has no service directory to find superschematic.toml from)")
 	_ = cmd.MarkFlagRequired("out")
 	return cmd

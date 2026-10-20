@@ -16,13 +16,11 @@ import {
   IncompatibleChangeError,
   OperationParamsError,
   SchemaDocumentError,
-  type AnyBehaviorImplementation,
   type Engine,
   type EngineOptions,
   type Principal,
 } from '@superschematic/engine';
 
-import { lease, queue } from '../dist/index.js';
 import { budgetStandIn, gate, lock, openMetaSchema, reserved } from './fixtures.ts';
 import { Clock, alice, cleanup, drivers, fenced, jobFlow, jobsDocument, openTestEngine, publish, thrown, type BehaviorRef } from './helpers.ts';
 
@@ -47,7 +45,7 @@ interface World {
   readonly lease?: Record<string, unknown>;
   readonly queue?: Record<string, unknown>;
   readonly extra?: readonly BehaviorRef[];
-  readonly behaviors?: readonly AnyBehaviorImplementation[];
+  readonly behaviors?: EngineOptions['behaviors'];
   readonly options?: Partial<EngineOptions>;
 }
 
@@ -130,7 +128,7 @@ for (const driver of drivers) {
     });
 
     test('a refusal after the lease is taken undoes the lease: a vetoed transition leaves none', () => {
-      const { engine } = world({ behaviors: [lease, queue, gate], extra: [{ name: 'test.Gate' }] });
+      const { engine } = world({ behaviors: ['Lease', 'Queue', gate], extra: [{ name: 'test.Gate' }] });
       create(engine, 'held');
       const refused = veto(() => claim(engine, worker, 'held'));
       assert.deepEqual([refused.behavior, refused.action, refused.reason], ['test.Gate', 'transition', 'it is held']);
@@ -148,7 +146,7 @@ for (const driver of drivers) {
 
     test("with Budget on the type, claim reserves after the lease and before the transition, and a reservation that does not fit refuses it", () => {
       reserved.length = 0;
-      const { engine } = world({ behaviors: [lease, queue, budgetStandIn], extra: [{ name: 'Budget' }] });
+      const { engine } = world({ behaviors: ['Lease', 'Queue', budgetStandIn], extra: [{ name: 'Budget' }] });
       create(engine, 'j1');
       create(engine, 'broke');
       claim(engine, worker, 'j1');
@@ -210,7 +208,7 @@ for (const driver of drivers) {
     });
 
     test('a claim forbidden to the caller is skipped like a veto; when every one it tried is, claimNext says why', () => {
-      const { engine } = world({ behaviors: [lease, queue, lock], extra: [{ name: 'test.Lock' }] });
+      const { engine } = world({ behaviors: ['Lease', 'Queue', lock], extra: [{ name: 'test.Lock' }] });
       create(engine, 'locked', { priority: 9 });
       create(engine, 'open', { priority: 1 });
       assert.equal(next(engine, worker), 'open');

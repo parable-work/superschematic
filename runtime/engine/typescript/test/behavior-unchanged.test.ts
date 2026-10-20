@@ -5,7 +5,8 @@
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
 
-import { BehaviorError, defineBehavior, type Engine, type FrozenJSON, type InstanceChange } from '../dist/index.js';
+import { BehaviorError, type Engine } from '../dist/index.js';
+import { defineBehavior, type FrozenJSON, type InstanceChange } from '../dist/testing/index.js';
 import { engineApp } from '../dist/http/index.js';
 import { openMetaSchema, publishItem } from './behavior-fixtures.ts';
 import { alice, cleanup, drivers, openTestEngine, thrown } from './helpers.ts';

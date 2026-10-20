@@ -23,7 +23,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, join, relative, resolve } from 'node:path';
 
-import { allowAll, permissionPolicy, type AnyBehaviorImplementation, type Engine, type EngineOptions } from '../dist/index.js';
+import { allowAll, permissionPolicy, type AccessPolicy, type Engine, type EngineOptions } from '../dist/index.js';
 
 /** The directory the recorder writes to; undefined when it is off. */
 export const RECORD_DIR: string | undefined = process.env.ENGINE_RECORD ? resolve(process.env.ENGINE_RECORD) : undefined;
@@ -57,6 +57,10 @@ interface Case {
   // whose times it never does.
   readonly wallReadings: number[];
   readonly fixedReadings: number[];
+  // The engine of the last step on a wall clock, and the latest instant
+  // the case's steps have shown or ended at (holdWallApart).
+  wallEngine?: EngineRecord;
+  wallLatest: number;
   fixedClock: boolean;
   fixedIds: boolean;
   http: boolean;
@@ -131,9 +135,9 @@ export function seededUUID(): string {
   return id;
 }
 
-// wallClock is Date.now, but past the last reading: the clock of an engine
-// opened without one, whose readings the corpus writes as symbols, so each
-// one is a symbol of its own.
+// wallClock is Date.now, but past the last reading: where the span of an
+// engine's times starts that was opened without a clock, whose times the
+// corpus writes as symbols.
 function wallClock(): number {
   lastWall = Math.max(Date.now(), lastWall + 1);
   return lastWall;
@@ -156,31 +160,19 @@ function base62(id: string): string {
 }
 
 // A package beside the engine whose tests record here (recordPackage): the
-// prefix its files take, and the declarations of the behaviors it ships.
+// prefix its files take.
 let filePrefix = '';
-const packageDeclarations = new WeakSet<object>();
 
 /**
  * recordPackage says the tests running are a package's beside the engine,
  * as the work queue's are (runtime/engine-workqueue/typescript): each test
- * file's scenarios are written as `<prefix><file>.json`, and the behaviors
- * the package ships, which a replayer implements and registers by name as
- * it does the core's, are not test behaviors. An implementation is the
- * package's when it carries one of their declarations, the object itself:
- * the package's, or a copy of it that wraps a hook or an operation to
- * count its calls. A behavior the tests define, under a name of the
- * package's or not, has a declaration of its own, and is a test behavior.
+ * file's scenarios are written as `<prefix><file>.json`. The behaviors a
+ * package ships are Rust, in the engine's addon, which an open names, as
+ * it names the core's: a replayer implements and registers them by name.
+ * A behavior the tests define in TypeScript is a test behavior.
  */
-export function recordPackage(prefix: string, behaviors: readonly AnyBehaviorImplementation[]): void {
+export function recordPackage(prefix: string): void {
   filePrefix = prefix;
-  for (const behavior of behaviors) {
-    packageDeclarations.add(behavior.declaration);
-  }
-}
-
-function isPackageBehavior(implementation: unknown): boolean {
-  const declaration = (implementation as { declaration?: unknown } | undefined)?.declaration;
-  return typeof declaration === 'object' && declaration !== null && packageDeclarations.has(declaration);
 }
 
 /** registerDirectory names a temporary directory the recorder writes as {{dir:N}}. */
@@ -202,6 +194,7 @@ function caseNow(): Case {
     composed: new Set(),
     wallReadings: [],
     fixedReadings: [],
+    wallLatest: 0,
     fixedClock: false,
     fixedIds: false,
     http: false,
@@ -301,7 +294,7 @@ export function recordOpen(options: EngineOptions, open: (options: EngineOptions
         const kind = policyKind(value);
         described.policy = kind === 'custom' ? { answers: [] } : kind;
         if (kind === 'custom') {
-          const policy = value as EngineOptions['policy'];
+          const policy = value as AccessPolicy;
           wrapped.policy = (request) => {
             const answer = policy(request);
             notePolicy(engine, request, answer);
@@ -317,7 +310,9 @@ export function recordOpen(options: EngineOptions, open: (options: EngineOptions
         const implementations = (value as EngineOptions['behaviors']) ?? [];
         described.behaviors = implementations.map((implementation) => behaviorName(implementation));
         for (const implementation of implementations) {
-          if (!isPackageBehavior(implementation)) {
+          // A name is a behavior the addon is built with; an implementation
+          // object is one the test wrote.
+          if (typeof implementation !== 'string') {
             record.testBehaviors.add(behaviorName(implementation));
           }
         }
@@ -368,11 +363,13 @@ export function recordOpen(options: EngineOptions, open: (options: EngineOptions
   }
   if (options.clock === undefined) {
     described.clock = 'wall';
-    wrapped.clock = () => {
-      const now = wallClock();
-      noteReading(now, 'wall');
-      return now;
-    };
+    // The engine's own strict clock, as a replayer opens one: each read the
+    // system's time, past the engine's last, so each time it writes is a
+    // symbol of its own, however many it writes in one call. A clock
+    // function would be read once a call (src/native/engine.ts). Its span,
+    // which the corpus writes times in as symbols, starts where it opens.
+    wrapped.clock = 'strict';
+    noteReading(wallClock(), 'wall');
   }
   opened.args = [described];
 
@@ -390,10 +387,10 @@ export function recordOpen(options: EngineOptions, open: (options: EngineOptions
 }
 
 function policyKind(policy: unknown): 'allowAll' | 'permission' | 'custom' {
-  if (policy === allowAll) {
+  if (policy === allowAll || policy === 'allowAll') {
     return 'allowAll';
   }
-  if (typeof policy === 'function' && policy.toString() === permissionPolicy().toString()) {
+  if (policy === 'permission' || (typeof policy === 'function' && policy.toString() === permissionPolicy().toString())) {
     return 'permission';
   }
   return 'custom';
@@ -418,6 +415,9 @@ function metaSchemaKind(value: unknown): JSONValue {
 }
 
 function behaviorName(implementation: unknown): string {
+  if (typeof implementation === 'string') {
+    return implementation;
+  }
   const name = (implementation as { declaration?: { name?: unknown } } | undefined)?.declaration?.name;
   return typeof name === 'string' ? name : '?';
 }
@@ -601,9 +601,8 @@ function recordCall(engine: EngineRecord, call: string, args: unknown[], invoke:
   if (call === 'behaviors.register') {
     const name = behaviorName(args[0]);
     step.args = [{ behavior: name }];
-    if (!isPackageBehavior(args[0])) {
-      record.testBehaviors.add(name);
-    }
+    // behaviors.register takes an implementation the test wrote.
+    record.testBehaviors.add(name);
     record.registered.add(name);
   } else if (rest.length > 0) {
     step.args = rest.map((arg) => encode(arg, record, 'args', step));
@@ -629,6 +628,7 @@ function run<T>(engine: EngineRecord, step: JSONObject, invoke: () => T): T {
   const record = caseNow();
   const previous = active;
   const here: Active = { step, engine, readings: [], ids: [] };
+  holdWallApart(record, engine);
   active = here;
   depth += 1;
   try {
@@ -644,8 +644,74 @@ function run<T>(engine: EngineRecord, step: JSONObject, invoke: () => T): T {
     depth -= 1;
     active = previous;
     settle(record, here);
+    noteWallShown(record, engine, step);
     record.steps.push(step);
   }
+}
+
+// The engines a case opens without a clock each read the engine's own
+// strict clock, never one millisecond twice; across the case's engines the
+// recorder keeps them apart as the one clock a replayer's engines read
+// together would: a step on another engine than the last such step waits
+// until the wall clock is past every instant the case has shown and every
+// step has ended at. A replayer's engines, each with a strict clock of its
+// own, then read the times the recording holds apart apart too.
+function holdWallApart(record: Case, engine: EngineRecord | undefined): void {
+  if (engine === undefined || !engineHasWallClock(engine)) {
+    return;
+  }
+  if (record.wallEngine !== undefined && record.wallEngine !== engine) {
+    while (Date.now() <= record.wallLatest) {
+      // A millisecond or two at most: the clock moves past what was shown.
+    }
+  }
+  record.wallEngine = engine;
+}
+
+// How far past the wall clock an engine's strict clock reads, at most,
+// after reading more than once in a millisecond: an instant a step shows
+// further ahead is one the engine computed (a deadline, a lease's
+// expiry), not one it read.
+const STRICT_RUNAHEAD_MS = 50;
+
+// noteWallShown moves the case's latest wall instant past what a step on
+// a wall clock's engine read, as its answer shows it, and when it ended.
+function noteWallShown(record: Case, engine: EngineRecord | undefined, step: JSONObject): void {
+  if (engine === undefined || !engineHasWallClock(engine) || record.wallReadings.length === 0) {
+    return;
+  }
+  const ended = Date.now();
+  const window = { from: windowOf(record.wallReadings).from, to: ended + STRICT_RUNAHEAD_MS };
+  let latest = ended;
+  const visit = (value: unknown): void => {
+    if (typeof value === 'number') {
+      if (Number.isInteger(value) && inWindow(value, window)) {
+        latest = Math.max(latest, value);
+      } else if (Number.isInteger(value) && inWindow(value / 1000, window)) {
+        latest = Math.max(latest, Math.ceil(value / 1000));
+      }
+    } else if (typeof value === 'string') {
+      for (const [match] of value.matchAll(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})/gu)) {
+        const at = Date.parse(match);
+        if (inWindow(at, window)) {
+          latest = Math.max(latest, Math.ceil(at));
+        }
+      }
+    } else if (Array.isArray(value)) {
+      value.forEach(visit);
+    } else if (value !== null && typeof value === 'object') {
+      Object.values(value).forEach(visit);
+    }
+  };
+  visit(step.expect);
+  visit(step.error);
+  visit(step.response);
+  record.wallLatest = Math.max(record.wallLatest, latest);
+}
+
+function engineHasWallClock(engine: EngineRecord): boolean {
+  const options = (engine.open.args as JSONObject[] | undefined)?.[0];
+  return options?.clock === 'wall';
 }
 
 // settle writes what the fixed clock read and the fixed ids drawn during a
@@ -1026,6 +1092,7 @@ async function exchange(app: string, request: Request, serve: () => Response | P
   // request sets off (an event a stream sends) comes after it.
   record.steps.push(step);
   const here: Active = { step, engine: record.engines[record.engines.length - 1], readings: [], ids: [] };
+  holdWallApart(record, here.engine);
   let response: Response;
   try {
     response = await exchanges.run(here, async () => serve());
@@ -1060,6 +1127,7 @@ async function exchange(app: string, request: Request, serve: () => Response | P
   if (body !== '') {
     recordedResponse.body = bodyOf(body, type);
   }
+  noteWallShown(record, here.engine, step);
   return new Response(body, { status: response.status, statusText: response.statusText, headers: response.headers });
 }
 

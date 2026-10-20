@@ -4,7 +4,7 @@ promise, for a server on Postgres, where a call waits on the network and
 must not hold the JavaScript thread (the addon refuses a synchronous call
 there: sync_on_async_storage). Each call runs off the thread (the addon's
 call: tokio's blocking pool on Postgres, libuv's pool on SQLite) and its
-promise settles on it, with the TypeScript engine's error classes.
+promise settles on it, with the package's error classes (src/errors.ts).
 
 Its options are data alone: a policy, a permission matcher, an id source
 or a behavior written in TypeScript answers on the JavaScript thread, in a
@@ -18,15 +18,15 @@ the addon's asynchronous handleHttp.
 */
 
 import type { Principal } from '../access.js';
-import type { EventWatcher } from '../events/notifier.js';
-import { DEFAULT_NAMESPACE } from '../namespaces.js';
 import { EngineError } from '../errors.js';
-import { resolveToolOptions, type ResolvedToolOptions } from '../tools/options.js';
+import type { EventWatcher } from '../types/events.js';
+import { DEFAULT_NAMESPACE } from '../types/namespaces.js';
 import { loadAddon, type Addon, type AddonEngine, type HttpAnswer, type StreamPull } from './addon.js';
-import type { EngineRoute } from './engine.js';
 import { carry } from './carry.js';
+import type { EngineRoute } from './engine.js';
 import { restoreError } from './errors.js';
-import { nativeOptions, type NativeEngineOptions } from './options.js';
+import { nativeOptions, type EngineOptions } from './options.js';
+import { resolveToolOptions, type ResolvedToolOptions } from './tool-options.js';
 
 type Call = (op: string, principal: Principal | undefined, ...args: unknown[]) => Promise<unknown>;
 
@@ -39,8 +39,8 @@ function plainCall(call: Call, op: string): (...args: unknown[]) => Promise<unkn
   return (...args) => call(op, undefined, ...args);
 }
 
-/** The engine's API over the Rust engine, every call a promise (openEngineAsync). */
-export class AsyncNativeEngine {
+/** The engine's API with every call a promise (openEngineAsync). */
+export class AsyncEngine {
   readonly dialect: 'sqlite' | 'postgres';
   readonly namespaces;
   readonly schemas;
@@ -151,8 +151,8 @@ export class AsyncNativeEngine {
     };
   }
 
-  /** open opens the Rust engine on options that are data alone, its storage migrated. */
-  static open(options: NativeEngineOptions): AsyncNativeEngine {
+  /** open opens the engine on options that are data alone, its storage migrated. */
+  static open(options: EngineOptions): AsyncEngine {
     if (options.policy === undefined || options.policy === null) {
       throw new TypeError('an engine needs an access policy (policy); pass allowAll for tests and local use');
     }
@@ -170,7 +170,7 @@ export class AsyncNativeEngine {
     } catch (error) {
       throw restoreError(error);
     }
-    return new AsyncNativeEngine(loaded, addon, clock, tools);
+    return new AsyncEngine(loaded, addon, clock, tools);
   }
 
   /** search searches every schema the namespace reaches that composes Search. */
@@ -300,10 +300,10 @@ export class AsyncNativeEngine {
 }
 
 /**
- * openEngineAsync opens the Rust engine with the engine's API returning
- * promises: on Postgres (options.postgres), where a synchronous call is
- * refused, or on SQLite (options.path).
+ * openEngineAsync opens the engine with its API returning promises: on
+ * Postgres (options.postgres), where a synchronous call is refused, or on
+ * SQLite (options.path). Its options are data alone.
  */
-export async function openEngineAsync(options: NativeEngineOptions): Promise<AsyncNativeEngine> {
-  return AsyncNativeEngine.open(options);
+export async function openEngineAsync(options: EngineOptions): Promise<AsyncEngine> {
+  return AsyncEngine.open(options);
 }

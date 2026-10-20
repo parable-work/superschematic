@@ -13,7 +13,7 @@ name = "superschematic_engine_addon"
 # The addon `napi build` writes into runtime/engine/typescript/native
 # (scripts/engine-napi.sh). Its Node-API symbols resolve only when Node.js
 # or Bun loads it, so it has no Rust tests: a test binary would not link.
-# The TypeScript suite tests it (ENGINE_IMPL=rust).
+# @superschematic/engine's TypeScript suite tests it.
 crate-type = ["cdylib"]
 path = "src/lib.rs"
 test = false

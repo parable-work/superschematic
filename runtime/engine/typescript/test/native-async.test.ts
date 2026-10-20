@@ -3,20 +3,18 @@
 // ENGINE_TEST_PG_URL names one (a schema of the test's own, dropped after).
 // Its options are data; a synchronous call on Postgres is refused; it
 // hears commits through events.watch; and engineApp serves it, an event
-// stream included. Only the Rust engine has it, so the TypeScript suite
-// skips this file.
+// stream included.
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { afterEach, describe, test } from 'node:test';
 
 import { Hono } from 'hono';
 
-import { allowAll, openEngineAsync, type AsyncNativeEngine } from '../dist/index.js';
+import { allowAll, openEngine, openEngineAsync, type AsyncEngine } from '../dist/index.js';
 import { engineApp } from '../dist/http/index.js';
-import { openNativeEngine } from '../dist/native/index.js';
-import { alice, cleanup, engineImpl, freshPath, openTestEngine, orderDocument } from './helpers.ts';
+import { alice, cleanup, freshPath, openTestEngine, orderDocument } from './helpers.ts';
 
-const opened: AsyncNativeEngine[] = [];
+const opened: AsyncEngine[] = [];
 
 afterEach(async (context) => {
   for (const engine of opened.splice(0)) {
@@ -36,14 +34,14 @@ if (postgresUrl) {
   backends.push({ name: 'postgres', options: () => ({ postgres: { url: postgresUrl, schema: `engine_async_${randomUUID().replaceAll('-', '').slice(0, 12)}` } }) });
 }
 
-async function open(backend: Backend): Promise<AsyncNativeEngine> {
+async function open(backend: Backend): Promise<AsyncEngine> {
   const engine = await openEngineAsync({ ...backend.options(), policy: allowAll } as never);
   opened.push(engine);
   return engine;
 }
 
 for (const backend of backends) {
-  describe(`openEngineAsync (${backend.name})`, { skip: engineImpl !== 'rust' && 'the Rust engine alone has openEngineAsync' }, () => {
+  describe(`openEngineAsync (${backend.name})`, () => {
     test('every call is a promise of what the synchronous engine returns, and a watcher hears each commit', async () => {
       const engine = await open(backend);
       const heard: number[] = [];
@@ -120,9 +118,7 @@ describe('a clock function', () => {
           return new Hono().route('/api', engineApp(engine, { authenticate: async () => alice }));
         },
       },
-    ];
-    if (engineImpl === 'rust') {
-      engines.push({
+      {
         name: 'openEngineAsync',
         open: async () => {
           const engine = await openEngineAsync({ path: freshPath(), policy: allowAll, clock });
@@ -131,8 +127,8 @@ describe('a clock function', () => {
           await engine.schemas.publish(alice, 'Order');
           return new Hono().route('/api', engineApp(engine, { authenticate: async () => alice }));
         },
-      });
-    }
+      },
+    ];
     for (const { name, open: openOne } of engines) {
       now = 1_000_000;
       const app = await openOne();
@@ -156,9 +152,9 @@ describe('a clock function', () => {
   });
 });
 
-describe('a synchronous engine on Postgres', { skip: (engineImpl !== 'rust' || !postgresUrl) && 'the Rust engine on Postgres alone' }, () => {
+describe('a synchronous engine on Postgres', { skip: !postgresUrl && 'ENGINE_TEST_PG_URL names no Postgres' }, () => {
   test('refuses a synchronous call: it would hold the JavaScript thread while it waits on the database', () => {
-    const engine = openNativeEngine({ postgres: { url: postgresUrl as string, schema: `engine_sync_${randomUUID().replaceAll('-', '').slice(0, 12)}` }, policy: allowAll });
+    const engine = openEngine({ postgres: { url: postgresUrl as string, schema: `engine_sync_${randomUUID().replaceAll('-', '').slice(0, 12)}` }, policy: allowAll });
     try {
       assert.throws(() => engine.schemas.list(alice), (error: Error & { code?: string }) => error.code === 'sync_on_async_storage');
     } finally {

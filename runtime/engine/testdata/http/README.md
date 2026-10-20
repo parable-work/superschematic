@@ -1,12 +1,13 @@
 # Engine HTTP corpus
 
-What the TypeScript engine's HTTP surface answered, recorded as data, so the
-engine's transport-neutral routes (D58), and each server runtime that mounts
-them, Go through `httptest`, Rust through `tower::oneshot`, TypeScript
-through Hono, can replay it: request and response exchanges of the routes
-(`typescript/src/http/app.ts`), event-stream transcripts
-(`typescript/src/http/stream.ts`) and MCP's JSON-RPC exchanges
-(`typescript/src/mcp/app.ts`). It is written by the recorder that writes
+What the engine's HTTP surface answered, recorded as data, so the engine's
+transport-neutral routes (D58), and each server runtime that mounts them, Go
+through `httptest`, Rust through `tower::oneshot`, TypeScript through Hono,
+can replay it: request and response exchanges of the routes, event-stream
+transcripts and MCP's JSON-RPC exchanges. It was first recorded from the
+TypeScript engine's Hono app; since the cutover (milestone 14) it is recorded
+through `@superschematic/engine`'s `engineApp` and `engineMcp`, the Hono
+adapters over the Rust engine's own routes (`typescript/src/native/http.ts`). It is written by the recorder that writes
 `../scenarios`, from the tests that serve HTTP, and in the same format:
 `../scenarios/README.md` describes files, cases, engine steps, symbols,
 shared values and the values JSON cannot hold, and this file adds what

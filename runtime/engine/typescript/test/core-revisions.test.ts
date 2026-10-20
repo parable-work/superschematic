@@ -12,14 +12,13 @@ import {
   IncompatibleChangeError,
   InstanceValidationError,
   OperationParamsError,
-  defineBehavior,
   type AccessRequest,
   type Engine,
-  type EngineOptions,
   type Principal,
 } from '../dist/index.js';
+import { defineBehavior } from '../dist/testing/index.js';
 import { openMetaSchema } from './behavior-fixtures.ts';
-import { alice, cleanup, drivers, openTestEngine, schemaDocument, thrown } from './helpers.ts';
+import { alice, cleanup, drivers, openTestEngine, schemaDocument, thrown, type TestEngineOptions } from './helpers.ts';
 
 afterEach(cleanup);
 
@@ -64,7 +63,7 @@ type Revision = { revision: number; data: Record<string, unknown>; createdBy: st
 type Proposal = { id: number; state: string; base?: number; revision?: number; reviewedBy?: string; reason?: string; note?: string; patch: unknown };
 
 for (const driver of drivers) {
-  function published(behaviors?: Array<{ name: string; config?: unknown }>, options: Partial<EngineOptions> = {}): Engine {
+  function published(behaviors?: Array<{ name: string; config?: unknown }>, options: Partial<TestEngineOptions> = {}): Engine {
     const engine = openTestEngine({ driver, ...options });
     engine.schemas.define(alice, documentSchema(behaviors));
     engine.schemas.publish(alice, 'Document');

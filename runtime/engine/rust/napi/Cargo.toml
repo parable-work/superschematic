@@ -12,8 +12,8 @@ publish.workspace = true
 name = "superschematic_engine_napi"
 path = "src/lib.rs"
 # Its Node-API symbols resolve only when Node.js or Bun loads an addon, so
-# it has no Rust tests: a test binary would not link. The TypeScript suite
-# tests the addons built over it (ENGINE_IMPL=rust).
+# it has no Rust tests: a test binary would not link. @superschematic/engine's
+# TypeScript suite tests the addons built over it.
 test = false
 doctest = false
 

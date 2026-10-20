@@ -14,6 +14,7 @@ project's: the authDb's tables in the engine's own SQLite file
 database, shared with its APIs.
 */
 
+import { hasAnyPermission } from '@superschematic/http-runtime';
 import {
   IdentityService,
   principalOf as identityPrincipal,
@@ -23,7 +24,9 @@ import {
 } from '@superschematic/http-runtime/identity';
 
 import type { Principal } from '../access.js';
-import type { Engine } from '../engine.js';
+import { AsyncEngine } from '../native/async.js';
+import type { Engine } from '../native/engine.js';
+import type { SchemaCapabilities } from '../types/schemas.js';
 
 /** The actions a capability names, in the order a schema's keys list them. */
 const ACTIONS = ['read', 'write', 'define', 'publish'] as const;
@@ -34,12 +37,28 @@ const ACTIONS = ['read', 'write', 'define', 'publish'] as const;
  * may read, `<namespace>/<schema>.<action>` for read, write, define and
  * publish, true when the access policy allows the action, keys in
  * code-point order. A schema the principal may not read has no key, as the
- * schema list leaves it out.
+ * schema list leaves it out. On an engine openEngineAsync opened, a
+ * promise of it.
  */
-export function engineCapabilities(engine: Engine, principal: Principal): Record<string, boolean> {
+export function engineCapabilities(engine: Engine, principal: Principal): Record<string, boolean>;
+export function engineCapabilities(engine: AsyncEngine, principal: Principal): Promise<Record<string, boolean>>;
+export function engineCapabilities(engine: Engine | AsyncEngine, principal: Principal): Record<string, boolean> | Promise<Record<string, boolean>> {
+  if (engine instanceof AsyncEngine) {
+    return (async () => {
+      const each: Array<[string, SchemaCapabilities[]]> = [];
+      for (const namespace of await engine.namespaces.names()) {
+        each.push([namespace, (await engine.schemas.capabilities(principal, { namespace })) as SchemaCapabilities[]]);
+      }
+      return capabilityKeys(each);
+    })();
+  }
+  return capabilityKeys(engine.namespaces.names.map((namespace) => [namespace, engine.schemas.capabilities(principal, { namespace })]));
+}
+
+function capabilityKeys(each: ReadonlyArray<readonly [string, readonly SchemaCapabilities[]]>): Record<string, boolean> {
   const keys: Array<[string, boolean]> = [];
-  for (const namespace of engine.namespaces.names) {
-    for (const schema of engine.schemas.capabilities(principal, { namespace })) {
+  for (const [namespace, schemas] of each) {
+    for (const schema of schemas) {
       for (const action of ACTIONS) {
         keys.push([`${namespace}/${schema.name}.${action}`, schema[action]]);
       }
@@ -53,13 +72,18 @@ export function engineCapabilities(engine: Engine, principal: Principal): Record
  * engineIdentity builds the identity service an engine takes: options are
  * the service's but routes and capabilities, and capabilities answers with
  * engineCapabilities. The administration routes match permissions with
- * the engine's permissionMatcher unless options name another.
+ * the engine's permissionMatcher (hasAnyPermission on an engine
+ * openEngineAsync opened, whose options are data) unless options name
+ * another.
  */
-export function engineIdentity(engine: Engine, options: Omit<IdentityServiceOptions, 'routes' | 'capabilities'>): IdentityService {
+export function engineIdentity(engine: Engine | AsyncEngine, options: Omit<IdentityServiceOptions, 'routes' | 'capabilities'>): IdentityService {
   return new IdentityService({
-    permissionMatcher: engine.permissionMatcher,
+    permissionMatcher: engine instanceof AsyncEngine ? hasAnyPermission : engine.permissionMatcher,
     ...options,
-    capabilities: (principal) => engineCapabilities(engine, identityPrincipal(principal)),
+    capabilities: (principal) =>
+      engine instanceof AsyncEngine
+        ? engineCapabilities(engine, identityPrincipal(principal))
+        : engineCapabilities(engine, identityPrincipal(principal)),
   });
 }
 
@@ -68,12 +92,11 @@ export function engineIdentity(engine: Engine, options: Omit<IdentityServiceOpti
  * file, which holds the authDb's tables beside the engine's: the
  * deployment applies the authDb's SQLite DDL to the file before the store
  * reads it. descriptor is the authDb's identity descriptor, its JSON text
- * or its value. Each store operation runs synchronously on the engine's
- * connection, its transaction included, as the engine's own writes do.
+ * or its value. Each store operation runs synchronously, its transaction
+ * included, on a connection of its own on the file.
  */
 export function engineIdentityStore(engine: Engine, descriptor: string | unknown): SqlIdentityStore {
-  // The Rust engine's storage (src/native) runs no transaction a statement
-  // at a time, so the store takes a connection of its own on the file.
-  const storage = engine.storage as Engine['storage'] & { connection?: () => Engine['storage'] };
-  return sqliteIdentityStore(typeof storage.connection === 'function' ? storage.connection() : storage, descriptor);
+  // The engine's own connection runs no transaction a statement at a
+  // time, so the store takes a connection of its own on the file.
+  return sqliteIdentityStore(engine.storage.connection(), descriptor);
 }

@@ -74,7 +74,8 @@ composes an extension's behavior whose registration names a Rust crate,
 the `projectengine` generator writes the project's engine crate,
 `engine/rust/<service>`, which compiles the core's behaviors and the
 extension's crates into the Rust engine (D58), with the C ABI's archive
-over them a Go server links as its `ffi` member
+over them a Go server links as its `ffi` member and the Node-API addon a
+TypeScript server loads as its `napi` member
 ([The project's engine crate](/superschematic/guides/engine-behaviors/#the-projects-engine-crate)).
 The build fails before its generators
 run, one line per problem, when an engine type reaches a table or another
@@ -440,14 +441,14 @@ for, fails to convert to `ts`, since the import would not resolve.
 
 ## `behaviors --out <dir>`
 
-Write the declaration of every behavior the binary registers into the npm
-package that implements it for `@superschematic/engine`: one
-`<name>.behavior.json` per behavior, the same declaration the Go package
-embeds and registers. The engine implementation imports that copy, so the
-engine and the compiler read one declaration. Other `*.behavior.json`
-files in the directory are removed. `--package` and `--extension` narrow
-what is written to the behaviors one npm package implements and the ones
-one extension registered.
+Write the declaration of every behavior the binary registers into the
+crate that implements it for the engine: one `<name>.behavior.json` per
+behavior, the same declaration the Go package embeds and registers. The
+Rust implementation embeds that copy (`include_str!`), so the engine and
+the compiler read one declaration. Other `*.behavior.json` files in the
+directory are removed. `--package` and `--extension` narrow what is
+written to the behaviors one npm package ships and the ones one
+extension registered.
 
 A copy is canonical rather than the source bytes: the declaration's keys
 in `BehaviorDeclaration`'s order, each JSON Schema's object keys sorted
@@ -455,29 +456,33 @@ with number literals as written, two-space indents and a final newline.
 It changes only when the declaration does.
 
 ```
-superschematic behaviors --package @superschematic/engine-workqueue --out runtime/engine-workqueue/typescript/src/declarations
-acme-schematic behaviors --extension acme --out packages/behaviors/declarations
-acme-schematic behaviors --extension acme --out packages/behaviors/declarations --check
+superschematic behaviors --package @superschematic/engine --out runtime/engine/rust/behaviors/declarations
+superschematic behaviors --package @superschematic/engine-workqueue --out runtime/engine-workqueue/rust/declarations --check
+acme-schematic behaviors --extension acme --out crates/behaviors/declarations
+acme-schematic behaviors --extension acme --out crates/behaviors/declarations --check
 ```
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
 | `--out` | (required) | the directory the copies go in |
 | `--check` | false | write nothing; fail, naming each file, when a copy differs, is missing, or is no registered behavior's |
-| `--package` | every behavior | only the behaviors this npm package implements, as their registration names it; fails, naming the packages there are, when it implements none |
+| `--package` | every behavior | only the behaviors this npm package ships, as their registration names it; fails, naming the packages there are, when it ships none |
 | `--extension` | every behavior | only the behaviors this extension (its `Name()`) registered; fails when it registers none |
 | `--naming` | built-in names | naming config file; this command has no service directory to discover one from |
 
 It is a command of the binary, not a tool in the core module, because an
 extension's declarations are registered only in its own binary: acme's
-copy comes from `acme-schematic`, and its smoke runs `--check`. The core
-binary writes the behaviors the core declares into the two packages that
-implement them: `Workflow`, `Comments`, `Revisions`, `Dependencies`,
-`Links`, `Rollups`, `Search`, `Reactions`, `Constants`, `Variants`,
-`Branches`, `Timers`, `StateRules`, `Numbering` and `Approvals` with `--package @superschematic/engine` (into the TypeScript engine and, the same
-files, the Rust engine's behaviors crate), and `Lease`, `Assignment`, `Queue`, `Presence`,
-`Blueprint`, `Budget` and `Retries` with `--package
-@superschematic/engine-workqueue` (`make behaviors`; `make
+copy comes from `acme-schematic`, into its `acme-behaviors` crate, and
+its smoke runs `--check`. The core binary writes the behaviors the core
+declares into the two Rust crates that implement them: `Workflow`,
+`Comments`, `Revisions`, `Dependencies`, `Links`, `Rollups`, `Search`,
+`Reactions`, `Constants`, `Variants`, `Branches`, `Timers`,
+`StateRules`, `Numbering` and `Approvals` with `--package
+@superschematic/engine` into the engine's behaviors crate
+(`runtime/engine/rust/behaviors/declarations`), and `Lease`,
+`Assignment`, `Queue`, `Presence`, `Blueprint`, `Budget` and `Retries`
+with `--package @superschematic/engine-workqueue` into the work queue's
+(`runtime/engine-workqueue/rust/declarations`) (`make behaviors`; `make
 behaviors-check` in CI). Without `--extension`, an extension's binary
 writes the core's declarations beside its own.
 

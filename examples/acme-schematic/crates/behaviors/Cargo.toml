@@ -37,8 +37,8 @@ superschematic-engine = { path = "../../../../runtime/engine/rust/engine", defau
 # The tests open engines on SQLite, and on Postgres when
 # SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL names one.
 superschematic-engine = { path = "../../../../runtime/engine/rust/engine", features = ["sqlite", "postgres"] }
-# The core's behaviors, which an engine registers ahead of acme's, as the
-# TypeScript engine registers its own when it opens.
+# The core's behaviors, which an engine registers ahead of acme's, as an
+# engine's binding registers them when it opens.
 superschematic-engine-behaviors = { path = "../../../../runtime/engine/rust/behaviors" }
 
 [lints]

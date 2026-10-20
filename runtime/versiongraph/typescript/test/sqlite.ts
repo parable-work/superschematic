@@ -3,7 +3,7 @@
 // imports no SQLite module, so it loads under bun and Node alike; each test
 // file hands it the module it opens databases with. Under Node it loads with
 // Node's type stripping, so it uses no syntax that needs compiling.
-import { sqlRefusal, type SqlMode } from "../../../engine/typescript/src/behaviors/sql.ts";
+import { sqlRefusal, type SqlMode } from "./behavior-sql.ts";
 import {
   bunSqlite,
   nodeSqlite,

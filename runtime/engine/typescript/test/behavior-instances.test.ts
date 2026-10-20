@@ -11,14 +11,13 @@ import {
   EngineError,
   InstanceValidationError,
   OperationParamsError,
-  defineBehavior,
   type AccessRequest,
   type Engine,
-  type EngineOptions,
   type OperationChange,
 } from '../dist/index.js';
+import { defineBehavior } from '../dist/testing/index.js';
 import { counter, openBehaviorEngine, publishItem, tally } from './behavior-fixtures.ts';
-import { alice, cleanup, drivers, fieldsOf, thrown } from './helpers.ts';
+import { alice, cleanup, drivers, fieldsOf, thrown, type TestEngineOptions } from './helpers.ts';
 
 afterEach(cleanup);
 
@@ -95,7 +94,7 @@ const caller = defineBehavior({
 });
 
 for (const driver of drivers) {
-  const open = (options: Partial<EngineOptions> = {}): Engine => openBehaviorEngine({ driver, ...options });
+  const open = (options: Partial<TestEngineOptions> = {}): Engine => openBehaviorEngine({ driver, ...options });
 
   describe(`behaviors on instances (${driver})`, () => {
     test("create initializes each behavior, and reads carry their fields under each behavior's name, apart from the type's own", () => {

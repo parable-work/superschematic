@@ -17,7 +17,8 @@ import { Client, ProtocolError, ProtocolErrorCode, StreamableHTTPClientTransport
 import type { Authenticator, ServiceAuthenticator } from '@superschematic/http-runtime';
 import { Hono } from 'hono';
 
-import { defineBehavior, type AccessPolicy, type Engine, type EngineOptions } from '../dist/index.js';
+import type { AccessPolicy, Engine } from '../dist/index.js';
+import { defineBehavior } from '../dist/testing/index.js';
 import { engineApp } from '../dist/http/index.js';
 import { MCP_PATH, engineMcp, type EngineMcpOptions } from '../dist/mcp/index.js';
 import { hold, holdDeclaration, openMetaSchema, publishItem, testBehaviors } from './behavior-fixtures.ts';
@@ -32,6 +33,7 @@ import {
   schemaDocument,
   stepsDocument,
   tasksDocument,
+  type TestEngineOptions,
 } from './helpers.ts';
 import { reachBehaviors } from './reach-fixtures.ts';
 import { appFor, recordedApp } from './recorder.ts';
@@ -114,7 +116,7 @@ const everything = { subject: 'alice', permissions: ['*'] };
 // served opens an engine with the test behaviors and an Item that
 // composes them, with one instance, and serves it; setup replaces the Item.
 async function served(
-  engineOptions: Partial<EngineOptions> = {},
+  engineOptions: Partial<TestEngineOptions> = {},
   mcpOptions: EngineMcpOptions = {},
   setup: (engine: Engine) => void = (engine) => {
     publishItem(engine, [{ name: 'test.Counter', config: { start: 0, limit: 5 } }, { name: 'test.Flag' }, { name: 'test.Broken' }]);

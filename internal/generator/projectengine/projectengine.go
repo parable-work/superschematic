@@ -64,9 +64,10 @@
 // unit, stripped), which scripts/engine-napi.sh --dist names.
 //
 // Build writes nothing when an extension behavior the schema composes names
-// no Rust crate, or names one the project does not hold, and says why: the
-// TypeScript engine runs such a schema until the cutover (D58, milestone
-// 14).
+// no Rust crate, or names one the project does not hold, and says why: an
+// extension's behavior runs in the engine from its crate alone (D58), so no
+// engine can run such a schema, and an engine refuses it as it refuses any
+// schema that composes a behavior it is not built with.
 package projectengine
 
 import (
@@ -275,7 +276,7 @@ func Build(schema *ir.Schema, opts Options) (*Crate, string, error) {
 			c.WorkQueue = &Dependency{Crate: WorkQueueCrate}
 		case b.Extension == "":
 		case !b.Rust.Declared():
-			missing = append(missing, fmt.Sprintf("%s (extension %s) names no Rust crate", name, b.Extension))
+			missing = append(missing, fmt.Sprintf("%s (extension %s) names no Rust crate, and an extension's behavior runs from its crate alone", name, b.Extension))
 		default:
 			ext := crates[b.Rust.Crate]
 			if ext == nil {
@@ -295,7 +296,7 @@ func Build(schema *ir.Schema, opts Options) (*Crate, string, error) {
 		}
 	}
 	if len(missing) > 0 {
-		return nil, fmt.Sprintf("the Rust engine cannot run %s's behaviors yet, so no engine crate is written: %s; the TypeScript engine runs them (D58)", opts.SchemaName, strings.Join(missing, "; ")), nil
+		return nil, fmt.Sprintf("no engine can run %s's behaviors, so no engine crate is written and an engine refuses the schema: %s (D58)", opts.SchemaName, strings.Join(missing, "; ")), nil
 	}
 	if len(crates) == 0 {
 		return nil, "", nil

@@ -1,24 +1,20 @@
-// An engine file today's TypeScript engine wrote, as data a second
-// implementation opens (D58): writeCorpus writes one with every core and
-// work-queue behavior in use, dumpDatabase writes it as SQL text, one
-// statement per line, loadDatabase loads that text into an empty file, and
-// readCorpus makes the reads runtime/engine/testdata/sqlite/expected.json
-// holds. runtime/engine/testdata/sqlite/README.md gives the format and
-// the script.
-//
-// Run it to rewrite runtime/engine/testdata/sqlite (bun run build first):
-//
-//   node test/sqlite-corpus.ts
+// The engine file the TypeScript engine wrote, as data the engine opens
+// (D58): runtime/engine/testdata/sqlite/typescript.sql, with every core
+// and work-queue behavior in use, frozen at the cutover as the last file
+// that engine wrote, and the reads expected.json holds. writeCorpus runs
+// the script that wrote it, on the engine today; dumpDatabase writes a file
+// as SQL text, one statement per line, loadDatabase loads that text into an
+// empty file, and readCorpus makes the reads.
+// runtime/engine/testdata/sqlite/README.md gives the format and the
+// script.
 import { createHash } from 'node:crypto';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { readFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { allowAll, openDriver, openEngine, type Engine, type EngineOptions, type Principal, type SqlDriver } from '@superschematic/engine';
+import { allowAll, openEngine, type Engine, type EngineOptions, type Principal, type SqliteConnection } from '@superschematic/engine';
 
 import { workQueueBehaviors } from '../dist/index.js';
+import { openConnection } from '../../../engine/typescript/dist/native/sqlite.js';
 
 type JSONValue = null | boolean | number | string | JSONValue[] | { [key: string]: JSONValue };
 
@@ -83,7 +79,6 @@ export function openCorpusEngine(path: string, clock: { now: number }, ids: () =
     values: { thresholdBytes: OPTIONS.values.thresholdBytes },
     ids,
     clock: () => clock.now,
-    driver: 'node',
   };
   return openEngine(options);
 }
@@ -102,8 +97,8 @@ function workQueueType(name: string, file: string): Record<string, unknown> {
 }
 
 /**
- * writeCorpus writes the corpus's file at path: today's engine, the core's
- * behaviors and the work queue's, each in use. It draws every random id,
+ * writeCorpus runs the corpus's script on a file at path: the engine, the
+ * core's behaviors and the work queue's, each in use. It draws every random id,
  * the version graph's too, from the seeded generator, and leaves the
  * engine closed.
  */
@@ -429,7 +424,7 @@ const SHADOW_SUFFIXES = ['_data', '_idx', '_content', '_docsize', '_config'];
  * its triggers. README.md gives the rules.
  */
 export function dumpDatabase(path: string): string {
-  const db = openDriver(path, 'node');
+  const db = openConnection(path);
   try {
     return dump(db);
   } finally {
@@ -437,7 +432,7 @@ export function dumpDatabase(path: string): string {
   }
 }
 
-function dump(db: SqlDriver): string {
+function dump(db: SqliteConnection): string {
   const entries = db.all(`SELECT type, name, tbl_name AS owner, sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY rowid`) as Array<{
     type: string;
     name: string;
@@ -509,7 +504,7 @@ function oneLine(sql: string): string {
 // rows writes a table's rows as INSERT statements, in rowid order, the
 // rowid first when no column holds it; a WITHOUT ROWID table's by its
 // primary key; a virtual table's through it, with their rowids.
-function rows(db: SqlDriver, table: string, sql: string): string[] {
+function rows(db: SqliteConnection, table: string, sql: string): string[] {
   const info = db.all(`SELECT name, type, pk FROM pragma_table_info(?) ORDER BY cid`, [table]) as Array<{ name: string; type: string; pk: number }>;
   const columns = info.map((column) => column.name);
   const withoutRowid = /\)\s*(?:STRICT\s*,\s*)?WITHOUT\s+ROWID|WITHOUT\s+ROWID\s*(?:,\s*STRICT)?\s*$/iu.test(sql);
@@ -556,7 +551,7 @@ function ident(name: string): string {
  * then it requires that no foreign key is broken.
  */
 export function loadDatabase(text: string, path: string): void {
-  const db = openDriver(path, 'node');
+  const db = openConnection(path);
   try {
     db.exec('PRAGMA foreign_keys = OFF');
     db.exec('BEGIN');
@@ -573,39 +568,4 @@ export function loadDatabase(text: string, path: string): void {
   } finally {
     db.close();
   }
-}
-
-/**
- * writeTestdata writes the corpus into directory: typescript.sql, the file
- * writeCorpus wrote, and expected.json, what readCorpus reads from that
- * text loaded into a file of its own.
- */
-export function writeTestdata(directory: string): { sql: string; reads: string } {
-  const work = mkdtempSync(join(tmpdir(), 'superschematic-engine-sqlite-'));
-  try {
-    const written = join(work, 'written.db');
-    writeCorpus(written);
-    const sql = dumpDatabase(written);
-    const loaded = join(work, 'loaded.db');
-    loadDatabase(sql, loaded);
-    const clock = { now: END };
-    const engine = openCorpusEngine(loaded, clock);
-    let reads: string;
-    try {
-      reads = renderReads(readCorpus(engine));
-    } finally {
-      engine.close();
-    }
-    if (directory !== '') {
-      writeFileSync(join(directory, 'typescript.sql'), sql);
-      writeFileSync(join(directory, 'expected.json'), reads);
-    }
-    return { sql, reads };
-  } finally {
-    rmSync(work, { recursive: true, force: true });
-  }
-}
-
-if (process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.argv[1]) {
-  writeTestdata(SQLITE_TESTDATA);
 }

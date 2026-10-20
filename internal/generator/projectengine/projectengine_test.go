@@ -275,7 +275,7 @@ func TestBuildWritesNoCrateItDoesNotNeedOrCannotWrite(t *testing.T) {
 		}
 		return why
 	}
-	if got, want := refused(opts, "acme.Rating", "acme.Pin"), "the Rust engine cannot run shop's behaviors yet, so no engine crate is written: acme.Pin (extension acme) names no Rust crate; the TypeScript engine runs them (D58)"; got != want {
+	if got, want := refused(opts, "acme.Rating", "acme.Pin"), "no engine can run shop's behaviors, so no engine crate is written and an engine refuses the schema: acme.Pin (extension acme) names no Rust crate, and an extension's behavior runs from its crate alone (D58)"; got != want {
 		t.Errorf("reason = %q, want %q", got, want)
 	}
 	gone := opts

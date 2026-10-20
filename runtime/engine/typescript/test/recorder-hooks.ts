@@ -8,7 +8,8 @@
 import assert from 'node:assert/strict';
 import { afterEach, test } from 'node:test';
 
-import { BehaviorVetoError, defineBehavior, type Engine } from '../dist/index.js';
+import { BehaviorVetoError, type Engine } from '../dist/index.js';
+import { defineBehavior } from '../dist/testing/index.js';
 import { openMetaSchema, publishItem } from './behavior-fixtures.ts';
 import { alice, cleanup, openTestEngine } from './helpers.ts';
 import { testHooks } from './recorder.ts';

@@ -155,7 +155,7 @@ func TestProjectEngineCrateIsWrittenAndRemoved(t *testing.T) {
 }
 
 // An extension behavior whose crate the project does not hold leaves the
-// schema to the TypeScript engine: no crate, and the log says why.
+// schema with no engine that can run it: no crate, and the log says why.
 func TestProjectEngineCrateIsNotWrittenWithoutTheExtensionsCrate(t *testing.T) {
 	var log strings.Builder
 	schema, cfg := ratings("acme.Rating")
@@ -167,7 +167,7 @@ func TestProjectEngineCrateIsNotWrittenWithoutTheExtensionsCrate(t *testing.T) {
 	if _, ok := result.Outputs["engine-rust"]; ok {
 		t.Errorf("wrote %v", result.Outputs)
 	}
-	if !strings.Contains(log.String(), "  - engine-rust: the Rust engine cannot run shop-ratings's behaviors yet, so no engine crate is written: acme.Rating's crate acme-behaviors is not at crates/behaviors in the project") {
+	if !strings.Contains(log.String(), "  - engine-rust: no engine can run shop-ratings's behaviors, so no engine crate is written and an engine refuses the schema: acme.Rating's crate acme-behaviors is not at crates/behaviors in the project") {
 		t.Errorf("the log says nothing of it:\n%s", log.String())
 	}
 }

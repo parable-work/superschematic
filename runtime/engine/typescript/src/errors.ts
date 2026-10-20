@@ -1,7 +1,8 @@
 /*
 Errors the engine throws on a request it refuses. Each carries a code a
 server maps to a status; the HTTP and MCP surfaces read the code, not the
-message.
+message. The Rust engine (D58) throws each as its class's name, code and
+members, and src/native/errors.ts rebuilds the class here.
 */
 
 export type EngineErrorCode =
@@ -38,7 +39,13 @@ export type EngineErrorCode =
    * no implementation is registered for it, or the registered one refuses
    * the version's config.
    */
-  | 'unavailable';
+  | 'unavailable'
+  /**
+   * Another writer held the database's lock past the busy timeout:
+   * SQLite's SQLITE_BUSY, or a Postgres lock or connection wait (D58). The
+   * call wrote nothing and may be tried again.
+   */
+  | 'busy';
 
 export class EngineError extends Error {
   readonly code: EngineErrorCode;
@@ -302,5 +309,45 @@ export class BehaviorError extends Error {
     super(`behavior ${behavior}: ${message}`);
     this.name = 'BehaviorError';
     this.behavior = behavior;
+  }
+}
+
+/** A tool call named a handle the namespace has no tool for, as the caller sees it. */
+export class UnknownToolError extends EngineError {
+  readonly tool: string;
+
+  constructor(tool: string, namespace: string) {
+    super('not_found', `namespace ${namespace} has no tool ${JSON.stringify(tool)}`);
+    this.name = 'UnknownToolError';
+    this.tool = tool;
+  }
+}
+
+/** A failure SQLite reported to raw SQL on the engine's file (engine.storage), with its extended result code. */
+export class SqliteError extends Error {
+  readonly code: number;
+
+  constructor(message: string, code: number, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = 'SqliteError';
+    this.code = code;
+  }
+}
+
+/** SQLITE_BUSY: another connection holds the lock past the busy timeout. */
+export const SQLITE_BUSY = 5;
+
+/** SQLITE_CONSTRAINT_UNIQUE: a write would repeat the values of a UNIQUE index. */
+export const SQLITE_CONSTRAINT_UNIQUE = 2067;
+
+/**
+ * Thrown by a behavior's parseConfig, written in TypeScript
+ * (@superschematic/engine/testing), to refuse a config; the schema is
+ * refused with the message.
+ */
+export class BehaviorConfigError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'BehaviorConfigError';
   }
 }

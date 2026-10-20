@@ -46,9 +46,9 @@
 #   scripts/engine-napi.sh --js-behaviors    # the test addon, with the bridge (any profile)
 #   scripts/engine-napi.sh --crate <dir> [--out <dir>]   # a project's addon crate instead
 #
-# Then, in runtime/engine/typescript, `bun run build` and
-# `node scripts/rust-ratchet.mjs` run the engine's suite against the
-# core's (runtime/engine/README.md, "The Rust engine").
+# Then, in runtime/engine/typescript, `bun run build` and `bun run test`
+# run the engine's suite on the test addon (runtime/engine/README.md,
+# "Development").
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
