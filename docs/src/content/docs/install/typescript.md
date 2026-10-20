@@ -125,6 +125,19 @@ root, which sits in the output root, not above it, so add a dependency
 to an implementation's `package.json` and install in `schemas/dist`.
 Install with Bun: npm rejects the `workspace:` protocol.
 
+The implementations, and the sites, are members of `schemas/dist`'s
+workspace alone, the default output root's. An output root you build into
+with `--out` lists, in their place, `impl/*`: the copies its stack's
+build makes of the implementations its TypeScript servers, jobs and
+workers build against, each under its package's name, with each
+dependency on a path (`file:`, `link:`, `./`, `../`) re-based for the
+copy's directory. So `bun install` there links the copies, and leaves
+each implementation's `node_modules` linked to `schemas/dist`; edit the
+implementation, not the copy, which the next build into that root brings
+up to date. The copy leaves out `node_modules`, `.git`, a `bun.lock`
+beside the package's `package.json`, and what the package's `.gitignore`
+files leave out.
+
 Commit `schemas/dist/bun.lock`, so every install of one commit takes the
 same versions: a TypeScript server's image and the generated CI install
 frozen to it. No build removes it, and the root `package.json` it pairs
@@ -359,7 +372,8 @@ of its manual routes with `createManualRoutes(deps)`, which it hands the
 router as `manualRoutes`, mounts each router on one Hono app and serves
 it with `Bun.serve` beside `/healthz` and `/readyz`, and a Dockerfile.
 `superschematic stack dev` runs it with `bun main.ts` after one `bun
-install` in `schemas/dist`. Each job and worker of the API gets a package
+install` in `schemas/dist`, or, with `--out`, in that output root, whose
+servers build against its copies of the implementations. Each job and worker of the API gets a package
 of its own beside it, whose `main.ts` builds the same `Deps` and runs the
 job once, or the worker's claim loop.
 Neither serves a request, so a stack gives neither the callers field. For

@@ -672,8 +672,11 @@ func exportCart(t *testing.T, url string) {
 // package depends on, the scaffolds, the installed workspace's lockfile
 // and checkouts of superscalar and the HTTP runtime, and the image serves:
 // /healthz, an API's route, /readyz reporting its database down, and a
-// clean stop on docker stop. It needs Docker and the network, builds
-// superscalar's Node addon in a Rust stage, and runs only outside -short.
+// clean stop on docker stop. Built into a second output root inside the
+// repository, whose context takes that root's mirrors of the
+// implementations in place of the packages (D65, amended), the image
+// serves alike. It needs Docker and the network, builds superscalar's
+// Node addon in a Rust stage, and runs only outside -short.
 func TestTheTypeScriptDockerfileBuildsAnImageThatServes(t *testing.T) {
 	needDocker(t)
 	bun, err := exec.LookPath("bun")
@@ -709,7 +712,25 @@ func TestTheTypeScriptDockerfileBuildsAnImageThatServes(t *testing.T) {
 		testpaths.RequireOrSkipTS(t, fmt.Sprintf("bun install failed at the output root (likely offline): %v\n%s", err, output))
 	}
 
-	dockerfile := filepath.Join(servergen.ServerDir(out, tsCloudStack, "ts-shop"), servergen.DockerFile)
+	serveTypeScriptImage(t, repoRoot, filepath.Join(servergen.ServerDir(out, tsCloudStack, "ts-shop"), servergen.DockerFile))
+
+	other := filepath.Join(repoRoot, "schemas", "dist-b")
+	if err := buildTSInto(f, repoRoot, tsFakePaths(repoRoot), other, append([]string{"ts-db"}, append(slices.Clone(tsAPIs), tsCloudStack)...)...); err != nil {
+		t.Fatal(err)
+	}
+	install = exec.Command(bun, "install")
+	install.Dir = other
+	if output, err := install.CombinedOutput(); err != nil {
+		t.Fatalf("bun install in %s: %v\n%s", other, err, output)
+	}
+	serveTypeScriptImage(t, repoRoot, filepath.Join(servergen.ServerDir(other, tsCloudStack, "ts-shop"), servergen.DockerFile))
+}
+
+// serveTypeScriptImage builds the image of ts-shop's Dockerfile from the
+// context a deploy writes out of repoRoot, runs it with its database and
+// its callee unreachable, and checks it serves and stops cleanly.
+func serveTypeScriptImage(t *testing.T, repoRoot, dockerfile string) {
+	t.Helper()
 	archive := filepath.Join(t.TempDir(), "context.tar.gz")
 	file, err := os.Create(archive)
 	if err != nil {

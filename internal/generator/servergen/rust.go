@@ -740,7 +740,7 @@ func (s *RustServer) planManifest(in RustInput, dir string) error {
 		if local[a.Output.CrateName], err = pathDep(a.Dir); err != nil {
 			return err
 		}
-		if local[a.Implementation.Crate], err = pathDep(RustMirrorDir(in.OutputRoot, a.Output.SchemaName)); err != nil {
+		if local[a.Implementation.Crate], err = pathDep(MirrorDir(in.OutputRoot, a.Output.SchemaName)); err != nil {
 			return err
 		}
 	}
@@ -827,7 +827,7 @@ func planRustDocker(in RustInput, s *RustServer, dir string) (*RustDocker, strin
 		d.Workspace + "/api/*/" + RustManifestFile,
 		d.Workspace + "/api/*/src",
 		d.Workspace + "/api/*/openapi.json",
-		d.Workspace + "/" + RustMirrorRoot,
+		d.Workspace + "/" + MirrorRoot,
 		d.Workspace + "/sdk/rust",
 		d.Workspace + "/types/rust",
 		d.Context,

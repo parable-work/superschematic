@@ -785,12 +785,15 @@ func (r run) scaffoldTypeScriptImplementation(output *tsrestgen.APIOutput, repoR
 
 // writeTypeScriptWorkspace writes the Bun workspace root at the output
 // root, whose members are the generated TypeScript packages and the
-// TypeScript implementations under the repository root (D51). Every build
-// of one output root writes the same file.
+// TypeScript implementations under the repository root (D51), or, in an
+// output root other than the default one, the implementations' mirrors
+// under impl/ (D65, amended). Every build of one output root writes the
+// same file.
 func (r run) writeTypeScriptWorkspace() error {
 	return tsgen.WorkspaceRoot{
 		OutputRoot:     r.Options.OutputRoot,
 		RepositoryRoot: r.Options.RepositoryRoot,
+		Mirrored:       tsgen.Mirrored(r.Options.OutputRoot, r.Options.SchemasRoot),
 		Naming:         r.Options.Naming,
 		Paths:          r.Options.Paths,
 	}.Write()
