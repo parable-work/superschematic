@@ -89,8 +89,10 @@ func TestDirectivesBelowOneAreNone(t *testing.T) {
 // a route that needs a caller answers 401 without one and 403 when the
 // caller holds none of its permissions, an Authenticator's own permits
 // replaces the matching rule, @requireOwnership leaves ownership to the
-// implementation, @rateLimit answers 429 with Retry-After per client,
-// @bodyLimit answers 413, @timeout answers 504, the cheap refusals come
+// implementation, @rateLimit answers 429 with Retry-After per client, two
+// routers built from one RouterOptions share each operation's budget while
+// two built apart do not (D44, amended), @bodyLimit answers 413, @timeout
+// answers 504, the cheap refusals come
 // before the permission check, the service applies a manual route's
 // controls with RouteControls, and build_router_with_manual_routes mounts
 // the manual route's handler behind them (D51).
@@ -109,10 +111,10 @@ func TestRouteControlsAPICrateBuildsAndRoutes(t *testing.T) {
 // names. Its authenticator reads `Bearer <subject>:<permission>,...`.
 const routeControlsRouterTest = `use std::net::IpAddr;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use API_CRATE::{
-    build_router, build_router_with_manual_routes, types, Implementations, ManualRoutes, RouterOptions,
+    build_router, build_router_with, build_router_with_manual_routes, types, Implementations, ManualRoutes, RouterOptions,
     SessionImplementation, TenantCreateTenantArgs, TenantGetTenantArgs, TenantImplementation, TenantListTenantsArgs,
     TenantUpdateSecretArgs,
 };
@@ -324,8 +326,8 @@ async fn require_ownership_needs_a_caller_and_leaves_ownership_to_the_implementa
     assert_eq!(patch(Some("t1:tenants.write")).await.status, StatusCode::OK);
 }
 
-// TenantQueries is @rateLimit({ requestsPerMinute: 60 }): each route has its
-// own limiter, counting each client by its ClientIp.
+// TenantQueries is @rateLimit({ requestsPerMinute: 60 }): each operation has
+// its own limiter, counting each client by its ClientIp.
 #[tokio::test]
 async fn past_the_rate_limit_a_client_gets_429_with_retry_after() {
     let log = Log::default();
@@ -345,6 +347,58 @@ async fn past_the_rate_limit_a_client_gets_429_with_retry_after() {
     assert_eq!(list([198, 51, 100, 2]).await.status, StatusCode::OK);
     let other_route = send(&router, "GET", "/api/tenants/t1?includeArchived=false", Some("ana:tenants.read"), Body::empty(), Some([198, 51, 100, 1])).await;
     assert_eq!(other_route.status, StatusCode::OK);
+}
+
+async fn list_from(router: &Router, client: [u8; 4]) -> StatusCode {
+    send(router, "GET", "/api/tenants?ids=t1", Some("ana:tenants.read"), Body::empty(), Some(client)).await.status
+}
+
+// How many more of a client's requests a router admits before it refuses
+// one with 429.
+async fn admitted_until_refused(router: &Router, client: [u8; 4]) -> u64 {
+    let mut admitted = 0;
+    loop {
+        match list_from(router, client).await {
+            StatusCode::OK => admitted += 1,
+            StatusCode::TOO_MANY_REQUESTS => return admitted,
+            status => panic!("a request answered {status}"),
+        }
+        assert!(admitted <= 120, "{admitted} requests and no 429");
+    }
+}
+
+// Two routers built from one RouterOptions take tenant.listTenants' limiter
+// from one RateLimits registry (D44, amended): a client's requests through
+// either count against the one budget. Two routers built apart each hold a
+// registry of their own.
+#[tokio::test]
+async fn routers_built_from_one_registry_share_a_budget() {
+    let log = Log::default();
+    let options = RouterOptions::default();
+    let first = build_router_with(implementations(&log), options.clone());
+    let second = build_router_with(implementations(&log), options);
+    let (ana, bea) = ([198, 51, 100, 1], [198, 51, 100, 2]);
+    let start = Instant::now();
+    for _ in 0..30 {
+        assert_eq!(list_from(&first, ana).await, StatusCode::OK);
+        assert_eq!(list_from(&second, ana).await, StatusCode::OK);
+    }
+    // The bucket refills at one a second, so a slow run admits a few more
+    // before the refusal: at most one a whole second since the first
+    // request, and one for the second under way. Two budgets would admit
+    // about 60 more.
+    let more = admitted_until_refused(&first, ana).await + admitted_until_refused(&second, ana).await;
+    let seconds = start.elapsed().as_secs();
+    assert!(more <= seconds + 1, "{more} more requests after one budget's 60, in {seconds}s");
+    assert_eq!(list_from(&second, bea).await, StatusCode::OK);
+
+    let first = router(&log);
+    let second = build_router_with(implementations(&log), RouterOptions::default());
+    for _ in 0..60 {
+        assert_eq!(list_from(&first, ana).await, StatusCode::OK);
+    }
+    admitted_until_refused(&first, ana).await;
+    assert_eq!(list_from(&second, ana).await, StatusCode::OK);
 }
 
 #[tokio::test]

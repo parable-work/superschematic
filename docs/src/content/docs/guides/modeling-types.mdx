@@ -176,6 +176,28 @@ Go gets `type Currency string` with a constant per member, `IsValid()` and
 an `enum` with one serde rename per member. A value outside the enum fails
 validation with the `enum` rule.
 
+A member may take a title, the label a UI shows for it in place of its
+name in words. An enum member takes no decorator, so the title is a JSDoc
+tag on the member:
+
+```ts
+export enum OrderStatus {
+  Placed = "placed",
+  /** @title Picked and packed */
+  Fulfilled = "fulfilled",
+  Shipped = "shipped",
+  Cancelled = "cancelled"
+}
+```
+
+The JSON and YAML forms write `title` on the member. A title is the rest
+of the tag's line, so put the member's comment above the tag: a line of
+text after it is refused rather than cut off. A title is one line, and
+two members of an enum cannot share one. It changes no generated
+type; the Topcoat forms and display components label the member by it.
+[A title on an enum member](/superschematic/reference/documentation/#a-title-on-an-enum-member)
+has the rules.
+
 ## Lists and maps
 
 - `T[]` is a list: a slice in Go, an array in TypeScript, `List[T]` in

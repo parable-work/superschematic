@@ -1,0 +1,6 @@
+# The Topcoat extension's fixture of service calls in an API whose
+# operations ask for no end user: its crate has no PageAuthenticator, and
+# a service caller is admitted on its service step alone.
+name: fixture-service-calls-api
+kind: API
+outputs: {}

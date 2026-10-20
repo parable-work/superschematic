@@ -239,6 +239,8 @@ const OPERATIONS: &[OperationInfo] = &[
         permissions: &[],
         require_ownership: false,
         manual: false,
+        rate_limit: None,
+        service: None,
     },
     OperationInfo {
         namespace: "Orders",
@@ -249,6 +251,8 @@ const OPERATIONS: &[OperationInfo] = &[
         permissions: &[],
         require_ownership: false,
         manual: false,
+        rate_limit: None,
+        service: None,
     },
 ];
 

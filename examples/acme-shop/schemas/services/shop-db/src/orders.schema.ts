@@ -19,9 +19,11 @@ export abstract class ShippingAddress {
 }
 
 // An order is placed, fulfilled once its lines are picked, then shipped,
-// unless it is cancelled while it is still placed.
+// unless it is cancelled while it is still placed. A UI labels a member by
+// its title, else by its name in words.
 export enum OrderStatus {
   Placed = "placed",
+  /** @title Picked and packed */
   Fulfilled = "fulfilled",
   Shipped = "shipped",
   Cancelled = "cancelled"

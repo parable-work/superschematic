@@ -248,6 +248,12 @@ func (w *walker) resolveTypeReference(node *astNode) (*typeInfo, *SchemaError) {
 	return info, nil
 }
 
+// recordExternalEnum records a dependency's enum a local field uses, for
+// the loader's checks of the field's defaults (verify.Input.ExternalEnums,
+// which validateDefaultValues and loadCompositeDefaults read). Its
+// members are read as walkEnum reads them, so a @title the reader refuses
+// fails here too. The dependent's IR does not copy the enum: a UI labels
+// its members from the dependency's own schema.
 func (w *walker) recordExternalEnum(id symbolIdentity) {
 	if id.decl == nil || id.decl.Kind != kindEnumDeclaration {
 		return
@@ -269,7 +275,11 @@ func (w *walker) recordExternalEnum(id symbolIdentity) {
 	for _, node := range enum.Members.Nodes {
 		member := node.AsEnumMember()
 		valueName := node.Name().Text()
-		value := ir.EnumValueDef{Name: valueName, Comment: leadingComment(node)}
+		value := ir.EnumValueDef{Name: valueName}
+		var err error
+		if value.Title, value.Comment, err = memberTitle(node); err != nil {
+			w.addErr(errorAtNode(node, "enum %s member %s: %v", id.name, valueName, err))
+		}
 		if member.Initializer != nil {
 			if member.Initializer.Kind != kindStringLiteral {
 				w.addErr(errorAtNode(

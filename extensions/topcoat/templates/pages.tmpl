@@ -29,7 +29,10 @@
 //! @timeout) of the operation it is for, as the route's request does, and
 //! the rate limit and timeout of each options operation its references
 //! call, through the layer `route_controls` adds: a refusal is the route's
-//! 429, with `Retry-After`, 413 or 504, as the pages' refusal.
+//! 429, with `Retry-After`, 413 or 504, as the pages' refusal. A rate limit
+//! is the operation's one limiter in the app's registry (D44, amended), so
+//! a client has one budget through its JSON API route, its procedure and
+//! the pages.
 {{- end }}
 {{- if .Pages.Live }}
 //!
@@ -43,6 +46,7 @@
 
 use std::fmt::Write as _;
 {{- if .Pages.Uses "controls" }}
+use std::sync::Arc;
 use std::time::Duration;
 {{- end }}
 
@@ -51,6 +55,9 @@ use crate::api::runtime;
 {{- end }}
 {{- if .Pages.Uses "controls" }}
 use crate::api::runtime::{ApiError, RateLimiter};
+{{- if .Pages.ControlsUse "rate_limit" }}
+use crate::api::runtime::RateLimits;
+{{- end }}
 {{- end }}
 {{- if .Pages.Uses "types" }}
 use crate::api::types;
@@ -80,7 +87,7 @@ use topcoat::router::request::uri;
 use topcoat::router::{Slot, StatusCode, layout, page, path_param};
 {{- if .Pages.Uses "controls" }}
 use topcoat::router::error::ContentTooLargeError;
-use topcoat::router::request::{client_ip, headers, method};
+use topcoat::router::request::{headers, method};
 use topcoat::router::response::Response;
 use topcoat::router::{Body, BodyLimit, HeaderValue, Layer, LayerFuture, Method, Next, Path, RouterBuilder, header, to_bytes, try_endpoint};
 {{- end }}
@@ -621,10 +628,14 @@ fn heading(status: StatusCode) -> &'static str {
     }
 }
 
-/// A link of the nav and the index: a resource's list.
+/// A link of the nav and the index: a resource's list{{ if .Pages.Uses "icons" }}, and the icon its
+/// type's display names, which the app's stylesheet draws{{ end }}.
 struct Link {
     href: &'static str,
     label: &'static str,
+{{- if .Pages.Uses "icons" }}
+    icon: Option<&'static str>,
+{{- end }}
 }
 
 /// The resources no item holds whose list the caller may use (`can_*`),
@@ -637,7 +648,7 @@ async fn listed(cx: &Cx) -> (Vec<Link>, bool) {
     let mut links = Vec::new();
     let mut signed_out = false;
 {{- range .Pages.Top }}
-    let link = Link { href: {{ rustString .Path }}, label: {{ rustString .Plural }} };
+    let link = Link { href: {{ rustString .Path }}, label: {{ rustString .Plural }}{{ if $.Pages.Uses "icons" }}, icon: {{ if .Icon }}Some({{ rustString .Icon }}){{ else }}None{{ end }}{{ end }} };
     admit(operations::can_{{ .List.Snake }}(cx).await.map_err(|err| err.status), link, &mut links, &mut signed_out);
 {{- end }}
     (links, signed_out)
@@ -835,7 +846,11 @@ pub async fn pages_layout(cx: &Cx, slot: Slot<'_>) -> topcoat::Result<impl View>
     // current one on its own pages.
     let at = |href: &str| path.strip_prefix(href).is_some_and(|rest| rest.is_empty() || rest.starts_with('/'));
     let under = links.iter().map(|link| link.href).filter(|href| at(href)).max_by_key(|href| href.len());
+{{- if .Pages.Uses "icons" }}
+    let nav: Vec<(&'static str, &'static str, Option<&'static str>, Option<&'static str>)> = links
+{{- else }}
     let nav: Vec<(&'static str, &'static str, Option<&'static str>)> = links
+{{- end }}
         .iter()
         .map(|link| {
             let current = match under {
@@ -843,7 +858,7 @@ pub async fn pages_layout(cx: &Cx, slot: Slot<'_>) -> topcoat::Result<impl View>
                 Some(href) if href == link.href => Some("true"),
                 _ => None,
             };
-            (link.href, link.label, current)
+            (link.href, link.label{{ if .Pages.Uses "icons" }}, link.icon{{ end }}, current)
         })
         .collect();
 {{- if and (.Pages.Uses "itemTitle") (.Pages.Uses "trailReference") }}
@@ -894,9 +909,20 @@ pub async fn pages_layout(cx: &Cx, slot: Slot<'_>) -> topcoat::Result<impl View>
             if !nav.is_empty() {
                 <nav class="ss-nav" aria-label="Resources">
                     <ul>
+{{- if .Pages.Uses "icons" }}
+                        for (href, label, icon, current) in nav {
+                            <li><a href=(href) aria-current=(current)>
+                                if let Some(icon) = icon {
+                                    <span class="ss-icon" data-icon=(icon) aria-hidden="true"></span>
+                                }
+                                (label)
+                            </a></li>
+                        }
+{{- else }}
                         for (href, label, current) in nav {
                             <li><a href=(href) aria-current=(current)>(label)</a></li>
                         }
+{{- end }}
                     </ul>
                 </nav>
             }
@@ -932,7 +958,16 @@ pub async fn pages_index_page(cx: &Cx) -> topcoat::Result<impl View> {
         } else {
             <ul class="ss-index">
                 for link in links {
+{{- if .Pages.Uses "icons" }}
+                    <li><a href=(link.href)>
+                        if let Some(icon) = link.icon {
+                            <span class="ss-icon" data-icon=(icon) aria-hidden="true"></span>
+                        }
+                        (link.label)
+                    </a></li>
+{{- else }}
                     <li><a href=(link.href)>(link.label)</a></li>
+{{- end }}
                 }
             </ul>
         }
@@ -1564,8 +1599,12 @@ pub async fn {{ $r.Ident }}_{{ .Field }}_page(cx: &Cx, Form(form): Form<{{ .ArgF
 /// Adds the layer that applies, to each page's request, the traffic
 /// controls (@rateLimit, @bodyLimit, @timeout) of the operation the page is
 /// for and of the options operations its references call (D61).
+{{- if .Pages.ControlsUse "rate_limit" }} Each rate
+/// limit is the operation's limiter in `limits`, the app's registry, which
+/// the JSON API's routes and the procedures take from too (D44, amended).
+{{- end }}
 /// `{{ .SetupMethod }}` calls it.
-pub(crate) fn route_controls(router: RouterBuilder) -> RouterBuilder {
+pub(crate) fn route_controls(router: RouterBuilder{{ if .Pages.ControlsUse "rate_limit" }}, limits: &RateLimits{{ end }}) -> RouterBuilder {
     router.layer(PageControls {
         controls: vec![
 {{- range .Pages.Controls }}
@@ -1587,11 +1626,12 @@ pub(crate) fn route_controls(router: RouterBuilder) -> RouterBuilder {
 /// and the arguments.
 #[derive(Default)]
 struct Controls {
-    /// The operation's limiter for the pages, at its route's rate, which
-    /// counts each client by its IP address as Topcoat reads it
-    /// (`client_ip`). The JSON API's route and a procedure keep their own,
-    /// as two replicas would.
-    rate_limit: Option<RateLimiter>,
+    /// The operation's limiter, at its route's rate, from the app's
+    /// registry: the one its JSON API route and its procedure take from, so
+    /// every page and shard that calls the operation shares each client's
+    /// budget with them. It counts each client by its IP address as Topcoat
+    /// reads it (`client_key`), the key the route reads too.
+    rate_limit: Option<Arc<RateLimiter>>,
     /// The limit in bytes, and the Topcoat layer that lets the page read
     /// its form up to it.
     body_limit: Option<(usize, BodyLimit)>,
@@ -1600,9 +1640,10 @@ struct Controls {
 
 impl Controls {
 {{- if .Pages.ControlsUse "rate_limit" }}
-    /// `@rateLimit({ requestsPerMinute })`.
-    fn rate_limit(mut self, requests_per_minute: u32) -> Self {
-        self.rate_limit = Some(RateLimiter::per_minute(requests_per_minute));
+    /// `@rateLimit({ requestsPerMinute })`, as the operation's limiter in
+    /// the app's registry (`RateLimits::of`).
+    fn rate_limiter(mut self, limiter: Option<Arc<RateLimiter>>) -> Self {
+        self.rate_limit = limiter;
         self
     }
 {{- end }}
@@ -1663,8 +1704,7 @@ impl Layer for PageControls {
             // the tightest timeout covers the page.
             let every = || own.into_iter().chain(called.iter().copied());
             for limiter in every().filter_map(|controls| controls.rate_limit.as_ref()) {
-                let client = client_ip(cx).map_or_else(|| "unknown".to_owned(), |ip| ip.to_string());
-                if let Err(retry_after) = limiter.take(&client) {
+                if let Err(retry_after) = limiter.take(&crate::client_key(cx)) {
                     let mut response = control_refusal(&ApiError::too_many_requests("Too Many Requests"));
                     response.headers_mut().insert(header::RETRY_AFTER, retry_after.into());
                     return Ok(response);

@@ -6,6 +6,7 @@
 # two flags with defaults in the body; an order noted by its id and an
 # optional input; a review written by its product's id in the path and an
 # input; and an order tagged by a map, which its form holds as JSON text.
+# A status on hold is labeled by its member's title.
 name: fixture-args-api
 kind: API
 scalars:
@@ -23,6 +24,7 @@ enums:
       - name: Placed
         serializedAs: placed
       - name: OnHold
+        title: Held for a stock check
         serializedAs: on_hold
       - name: Shipped
         serializedAs: shipped

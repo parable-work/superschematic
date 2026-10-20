@@ -5,7 +5,9 @@
 # marks, listed under a label that has no pages; members, which only a
 # member reader lists; and the signed-in viewer, one object on a path with
 # no parameter, which is no resource. Reading a project needs
-# projects.read and changing one projects.write.
+# projects.read and changing one projects.write. A project's @display
+# names an icon, which the nav and the index show beside the projects'
+# lists alone.
 #
 # Documents, whose paths are the edge cases: a title that may be absent,
 # the drafts' list at documents/drafts beside a document at
@@ -53,6 +55,7 @@ types:
       plural: Projects
       titleField: name
       createLabel: Start a project
+      icon: folder
       summaryFields: [name, ownerId, status, budget]
     fields:
       - name: id

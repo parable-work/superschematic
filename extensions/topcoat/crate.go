@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"text/template"
@@ -38,11 +39,15 @@ type crate struct {
 	// page's caller from the session the JSON API signed in, and forwards
 	// the API crate's store features.
 	Identity bool
-	// Operations are the operations with an in-process call; Guards every
-	// operation, those without one included.
-	Operations []operation
-	Guards     []operation
-	Records    []record
+	// Operations are the operations with an in-process call an end user's
+	// page makes, every one with a call but a @requireService one;
+	// ServiceCalls those a service caller calls (operations::as_service),
+	// each with a @requireService or @allowService clause (D37, amended);
+	// Guards every operation, those without a call included.
+	Operations   []operation
+	ServiceCalls []operation
+	Guards       []operation
+	Records      []record
 	// PageRecords are the records of the pages the paged operations
 	// return (D60).
 	PageRecords []pageRecord
@@ -86,9 +91,12 @@ type operation struct {
 	RequiresAuth bool
 	Permissions  []string
 	// ServiceOnly marks an operation whose route admits only a service
-	// caller (@requireService). Its in-process call admits the end user
-	// alone, and its doc says so (D37, amended).
+	// caller (@requireService): it has no end-user call, and its guard
+	// refuses an end user (D37, amended). AsService marks one with a
+	// @requireService or @allowService clause, which a service caller
+	// calls through operations::as_service.
 	ServiceOnly bool
+	AsService   bool
 	// Paged marks a @paginated operation (D60), whose call returns a page.
 	Paged bool
 	// NoCall is why the operation has no in-process call, and so no
@@ -114,12 +122,50 @@ func operationOf(e registry.RustEndpoint) operation {
 		RequiresAuth: e.RequiresAuth,
 		Permissions:  e.RequiredPerms,
 		ServiceOnly:  requiresService(e),
+		AsService:    e.ServiceCallers != nil,
 		Paged:        e.Page != nil,
 	}
 	if e.HasArgs() {
 		op.ArgsName = e.ArgsName
 	}
 	return op
+}
+
+// ServiceOnlyGuardDoc is the doc of a @requireService operation's guard
+// in operations.rs, which refuses an end user as the route refuses a
+// request without a service credential (D37, amended). It names the
+// service caller's guard, `as_service(caller).can_<op>`, only where
+// AsService has one: an operation without an in-process call, a manual
+// one say, has neither its call nor its guard there, and the line after
+// the doc says why it has no call.
+func (o operation) ServiceOnlyGuardDoc() string {
+	doc := fmt.Sprintf("Admits the caller of %s.%s as its route admits a request without a service credential: the route admits only a service caller (@requireService), so an end user is refused 401 `service_unauthorized`, signed in or not", o.Namespace, o.Name)
+	if o.NoCall != "" {
+		return doc + " (D37, amended)."
+	}
+	return doc + fmt.Sprintf(". `as_service(caller).can_%s(cx)` admits a service caller (D37, amended).", o.SnakeName)
+}
+
+// ServiceGuardDoc is the doc of the operation's guard in AsService: how
+// its route admits a service caller, then what it asks of the end user
+// the service forwards (D37, amended).
+func (o operation) ServiceGuardDoc() string {
+	refuses := "401 without a signed-in end user"
+	if o.ServiceOnly {
+		refuses += " to forward"
+	}
+	if len(o.Permissions) > 0 {
+		refuses += ", 403 without one of " + strings.Join(o.Permissions, ", ")
+	}
+	head := fmt.Sprintf("Admits the caller as %s.%s's route admits a service: ", o.Namespace, o.Name)
+	switch {
+	case !o.ServiceOnly:
+		return head + "a caller its `from` lists stands in for the end user, so `Ok(None)`; any other goes on to the end-user step, as `can_" + o.SnakeName + "` admits it: " + refuses + "."
+	case o.RequiresAuth:
+		return head + "403 `service_forbidden` when its `from` lists none of the APIs the caller serves; then the page's caller, as the end user the service forwards: " + refuses + "."
+	default:
+		return head + "403 `service_forbidden` when its `from` lists none of the APIs the caller serves; it asks for no end user, so `Ok(None)` otherwise."
+	}
 }
 
 // declared is an operation of the API crate with its declaration in the
@@ -220,7 +266,17 @@ func newCrate(c registry.GenerateContext, api *registry.RustAPI, cfg Config) (*c
 			c.Logf("  - topcoat: no in-process call for %s.%s: %s\n", o.Namespace, o.Name, o.NoCall)
 			continue
 		}
-		out.Operations = append(out.Operations, o)
+		// A @requireService operation is called only as a service: a page
+		// cannot call it for an end user, so the compiler refuses the
+		// mistake (D37, amended).
+		if o.ServiceOnly {
+			c.Logf("  - topcoat: no end-user call for %s.%s: its route admits only a service caller (@requireService); operations::as_service calls it\n", o.Namespace, o.Name)
+		} else {
+			out.Operations = append(out.Operations, o)
+		}
+		if o.AsService {
+			out.ServiceCalls = append(out.ServiceCalls, o)
+		}
 		inProcess = append(inProcess, declared{endpoint, op})
 		if o.NoProcedure != "" {
 			c.Logf("  - topcoat: no procedure for %s.%s: %s\n", o.Namespace, o.Name, o.NoProcedure)
@@ -323,9 +379,10 @@ func (c *crate) RecordsUseTypes() bool {
 }
 
 // Paged reports whether an operation with an in-process call pages (D60),
-// so operations.rs names the runtime its result's page is of.
+// an end user's or a service's, so operations.rs names the runtime its
+// result's page is of.
 func (c *crate) Paged() bool {
-	for _, o := range c.Operations {
+	for _, o := range slices.Concat(c.Operations, c.ServiceCalls) {
 		if o.Paged {
 			return true
 		}
@@ -465,27 +522,44 @@ func (c *crate) ControlledPages() bool { return c.Pages != nil && len(c.Pages.Co
 
 // SetupLayers is the expression `<service>(...)` returns its router
 // through, `router` wrapped in each module's call that adds its route
-// controls' layers; empty when no procedure or page has any.
+// controls' layers; empty when no procedure or page has any. A module
+// whose routes have a rate limit takes the app's registry, `rate_limits`,
+// so its procedures and pages share each operation's limiter with its
+// route (D44, amended).
 func (c *crate) SetupLayers() string {
 	expr := ""
-	wrap := func(call string) {
+	wrap := func(call string, limited bool) {
 		if expr == "" {
 			expr = "router"
 		}
-		expr = call + "(" + expr + ")"
+		expr = call + "(" + expr
+		if limited {
+			expr += ", &rate_limits"
+		}
+		expr += ")"
 	}
 	if len(c.ControlledProcedures()) > 0 {
-		wrap("procedures::route_controls")
+		wrap("procedures::route_controls", c.ControlsUse("rate_limit"))
 	}
 	if c.ControlledPages() {
-		wrap("pages::route_controls")
+		wrap("pages::route_controls", c.Pages.ControlsUse("rate_limit"))
 	}
 	return expr
 }
 
+// RateLimited reports whether a procedure or a page meets a route's rate
+// limit, so `<service>(...)` hands their layers the registry. lib.rs
+// declares `client_key`, by which each counts a client, whatever the
+// routes' controls: a layer reads it whenever it applies one, and another
+// crate's page that takes from `Setup.rate_limits` counts by it too.
+func (c *crate) RateLimited() bool {
+	return c.ControlsUse("rate_limit") || c.ControlledPages() && c.Pages.ControlsUse("rate_limit")
+}
+
 // ControlsUse reports whether a procedure's route has the control
 // ("rate_limit", "body_limit" or "timeout"), so procedures.rs declares
-// ProcedureControls' builder method for it.
+// ProcedureControls' builder method for it, and, for a rate limit, its
+// route_controls takes the app's registry of limiters.
 func (c *crate) ControlsUse(control string) bool {
 	for _, p := range c.Procedures {
 		switch {

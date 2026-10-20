@@ -1,7 +1,8 @@
 # A shop's stock: a webhook a payment provider signs, whose input a form
-# would hold, a run only a service may start, a release a user or a service
-# may make, and an order whose route limits its rate, its body and its
-# time. The orders' list, filtered by a status, limits its rate, and an
+# would hold, a run only a service may start, a reservation only a listed
+# service may make for the user it forwards, a release a user or a listed
+# service may make, and an order whose route limits its rate, its body and
+# its time. The orders' list, filtered by a status, limits its rate, and an
 # order's hold, an action of its page, its rate, its body and its time, so
 # the pages that call them meet their routes' controls. The warehouses'
 # list limits its rate and its time, and the shipments' list, which has no
@@ -137,14 +138,30 @@ operationSets:
         httpMethod: POST
         restPath: stock/reindex
         serviceCallers: { mode: require }
-      # Releases a reservation, for a signed-in user or a service.
+      # Reserves stock, for fixture-api's server and the user it forwards.
+      - name: reserveStock
+        typeRef: { name: Reservation }
+        required: true
+        httpMethod: POST
+        restPath: "stock/{id}/reserve"
+        auth: true
+        permissions: [stock.write]
+        serviceCallers: { mode: require, from: [fixture-api] }
+        arguments:
+          - name: id
+            typeRef: { name: string }
+            required: true
+          - name: quantity
+            typeRef: { name: number }
+            required: true
+      # Releases a reservation, for a signed-in user or fixture-api's server.
       - name: releaseReservation
         typeRef: { name: Reservation }
         required: true
         httpMethod: POST
         restPath: "stock/reservations/{id}/release"
         auth: true
-        serviceCallers: { mode: allow }
+        serviceCallers: { mode: allow, from: [fixture-api] }
         arguments:
           - name: id
             typeRef: { name: string }
