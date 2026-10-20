@@ -5079,11 +5079,11 @@ No worker has run on Google Cloud.
 #348 adds TypeScript workers, which claim through the HTTP runtime with
 the Go ORM's statements (the amendment below), and D65 Rust workers.
 
+D68 builds a backoff that grows with each attempt, the removal of done
+messages, and an operator's command to read, retry and drop dead ones.
+
 Not built:
 - claims on SQLite and D1, in a write transaction (the amendment below);
-- removing `done` messages, and an operator's command to read and retry
-  dead ones;
-- a backoff that grows with each attempt;
 - scaling a worker with its queue's depth.
 
 The rule is reversible until the first release.
@@ -7067,5 +7067,50 @@ section holds the three runtimes to one issuer, token, clock and URL rule.
 `TestTheCallersFieldsSchemaIsWhatTheReadersRead` holds the schema to the
 loaders, and `TestAServiceClauseAdmitsItsCallers` starts a server from a
 values file the schema checks. No loopback call has run on Cloud Run.
+
+The rule is reversible until the first release.
+
+## D68. A failed message waits longer with each attempt, a done message is removed after a retention, and an operator lists, retries and drops a queue's dead messages
+
+D53 left a queue's lifecycle half built: a failed message waited the same
+`backoff` every time, a done message stayed in its table for good, and a
+dead one waited for nothing, since no command read it or brought it back.
+The table and its states stay as D53 has them; what changes is how long a
+message waits and what removes it.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A message whose attempt n fails waits `backoff × 2^(n−1)`, capped by a new `@queue` option, `maxBackoff`: whole seconds, no shorter than the backoff, an hour when unsaid or the backoff when that is longer, so an equal one gives a fixed wait. The shared fail statement computes the wait from the row's attempts, `LEAST($4 * power(2, LEAST(attempts - 1, 40)), $6)`, its exponent capped so `power` cannot overflow, and every client passes the cap as `$6` beside the backoff, so Go, TypeScript and Rust cannot disagree. | Each client computing the delay, three copies of one rule. Jitter, which spreads a burst's retries but makes a due time no test can hold across languages. A default cap that would refuse a schema whose backoff alone exceeds it. Renumbering the statement's parameters. |
+| A new `@queue` option, `retain`, a week when unsaid, says how long a done message stays; `0s` keeps none, and that queue's complete statement deletes the message. A done message is never changed again, so its `updated_at` is when it was done: the prune goes by it, and sqlgen gives every queue table a partial index on `updated_at` where the state is done, which the migration plan carries. | `0s` meaning "at the next prune", which keeps rows for up to five minutes. A `completed_at` column, a new reserved name on every row for a value `updated_at` holds. Days in durations, which Go's do not have. |
+| sqlutil writes a `prune` statement that deletes up to `$2` done messages done `$1` seconds ago or more, oldest first, `FOR UPDATE SKIP LOCKED`, never a dead one, and each client prunes up to a limit and returns the count (`Prune`, `prune`, `PostgresQueue::prune`). Every worker loop prunes as it starts and every five minutes, in batches of 1000 until one comes back short, each with its five-second operation timeout, and logs `done messages pruned` at info when it removed any and `pruning the done messages failed` at warn. Every instance prunes without coordination, and a stopping worker drops its prune. | One unbounded delete, holding its locks over the whole backlog. A pruner deployable, a stack job or `pg_cron`, each a schedule some queues would lack. One elected pruner, which needs a lock or a leader. Pruning in the claim path, which would slow claims. |
+| `superschematic stack queue dead\|retry\|drop <environment> <db>.<Queue>`, in the stack group. `dead` lists the dead messages, the oldest death first, up to `--limit` (100), with their total, each one's id, attempts, time of death, last error and columns; `retry` makes those named, or all with `--all`, ready, due now, with no attempts and no claim, the last error kept; `drop` deletes those named, or all with `--all` and `--yes`. A retry or a drop changes every message named or none, and names what each one that is not dead is. `--format json` prints the runner's result. | A command outside the stack group, with no environment to resolve. A retry of no ids meaning all of them, an accidental mass retry. Changing the dead ones named and skipping the rest, so a mistyped id does part of the job silently. |
+| Its statements are `sqlutil.PostgresQueueOperatorStatements`, a function of their own beside the claims, which the clients do not carry: the listing with its total, the states of the ids named, and retry and drop of the ids named or of all, the ids one `$1::text[]::uuid[]` parameter. The time of death is `updated_at`, which expire and fail set and nothing changes after. The migration runner runs them, `superschematic-migrate queue`, from a document (`internal/queueops`) the CLI writes with the compiler's statements, as a plan carries its own, so the compiler links no driver (D27). | The statements among `PostgresQueueStatements`, which the Go ORM, `queues.ts` and `queues.rs` carry. A `died_at` column. SQL the CLI writes, a second writer of it. `docker exec psql` in the local container, which quotes ids into SQL and works locally alone. |
+| On the local target it reaches the database at the URL the environment resolves from the schemas, with no build, on the container `stack dev` runs, and it refuses a queue on a database of another dialect and any environment on another target, saying what is not built. | A Cloud SQL Auth Proxy or a public address from the operator's machine, a new way to reach Cloud SQL. |
+
+Status: built on Postgres, in Go, TypeScript and Rust.
+`TestQueueParityOfGoTypeScriptAndRustOnPostgres` gains two cases: a
+message each side fails in turn comes due after 60, 120 and then 200
+seconds, the fixture's cap, and dies at its fourth failure; and each
+side's prune removes the others' done messages past the retention in
+batches, leaving one done a minute ago and one dead for a month. The
+generated Go ORM's own test, the runtimes' worker tests (Rust's on a
+paused clock) and their Postgres tests cover the cadence, the batches, a
+failed or hung prune and a `0s` retention. The migration runner's
+`TestQueueOnPostgres` lists, retries and drops on sqlgen's own tables,
+`internal/queueops`' goldens hold the documents, and `cli`'s
+`TestStackQueueRefuses` and `TestStackQueueOnALocalEnvironment` drive the
+command.
+
+Not built:
+- `stack queue` on a cloud environment. On gcp the document would run as
+  an execution of the migration job, which reaches Cloud SQL through its
+  dialer, behind a target seam, with its result read back. Reading it
+  from Cloud Logging, as a failed migration's error is, would write the
+  dead messages' bodies, which may hold personal data, into logs every
+  holder of Logs Viewer reads; a result object in the state bucket needs
+  a write path the migrator does not have (D46, amended). Which way is
+  open.
+- Scaling a worker with its queue's depth.
+- Claims on SQLite and D1.
 
 The rule is reversible until the first release.
