@@ -7217,22 +7217,33 @@ are; `options` then gives that operation's operationId, or its tool
 name, as the dependency's own documents do. `ir.ToolSchemaReference`
 decodes both, and `tools/index.ts` types them.
 
-Topcoat is designed and not yet built. The tests are these:
+Topcoat is built: the picker, whose form holds its texts in `finds` and
+whose post's "Find" is `_action=find:<control>` after the hidden submit;
+`<form>_choices(cx, form, choices)`, which gives each picker its `Pick`;
+the pick shard at `/_superschematic/<service>/_pick/<target>` with its
+options operation's rate limit and timeout; `registry.RustAPIOfService`,
+which reads an API dependency's Rust API as its own build makes it; the
+crates one app hosts, each with `<service>_without_api`, the referring
+crate depending on the other's and calling its operations, its limiter
+taken from the other's setup; and `setup`'s 500 for a crate the app does
+not set up. The tests are these:
 
 - ir's `TestResolveReferenceFindsTheSearch`, `TestOptionsFromADependencyAPI` (the API's own operation wins, the dependency's is found, one named by `options`, two that list it, and a General dependency, which lists nothing), and the loader's `TestAReferenceListedByItsAPIDependency`.
 - The `fixture-refs-api` goldens of apigen, toolsutil, sdkgen and rustsdkgen, whose `listItems` searches, gain `search`, which `TestRefsOpenAPIPlacesEachKey` reads; `TestAReferenceToADependencysOptionsNamesItsService` reads `service`.
 - `TestTheConsolePagesPicksAndSearches` drives `fixture-console-api`, whose `listProducts` searches:
-  - The order form's lines, its gift and the orders' product filter are pickers.
-  - A filter's "Find" lists the matches by GET.
-  - A post's "Find" renders the form again, 200, with its values and no call.
+  - The order form's lines, its gift, an order's action and the orders' product filter are pickers, the hidden submit first.
+  - A filter's "Find" lists the matches by GET, beside the list it filters.
+  - A post's "Find" renders the form again, 200, with its values, the pressed text searched and the other kept over the first page, and no order placed.
   - Enter submits the form.
-  - The value held is named past the first page.
-  - A refused search shows its message.
-  - The app's choices win.
-  - The shard renders the matches for a text and keeps the value.
-  - The listings and lookups are counted against the caps.
-- `TestAReferenceToAnotherAPIsOptions` moves `listSuppliers` into `fixture-console-suppliers-api`. With both listed, the products' supplier is a select through the dependency's crate, under cargo too, and a page meets its rate limit. With one listed, the build log gives the reason. With the dependency not set up, the 500 leaves the plain control.
-- `TestTwoServicesInOneApp` mounts both crates, one `_without_api`, and builds.
+  - The value held is named past the first page, through the lookup.
+  - A text past the search's maxLength shows the route's message.
+  - The app's choices win, with no picker and no call, and a caller who may not list the items gets the plain control.
+  - The shard renders the matches of a typed text and keeps the value, and renders the pick it was given before the reader types.
+  - The listings and lookups are counted: one listing a distinct text, one lookup for the values held.
+- `TestPickersAreWrittenForSearchingOptions` reads the picks, the shards, the form's `finds` and `apply_action`, and the query list argument that stays a select; `TestAPickerNameIsReserved` refuses a field named `finds`; `TestAPickerMeetsItsOptionsControls` builds the shard's layer, under cargo too.
+- `TestAReferenceToAnotherAPIsOptions` builds a copy whose Supplier and its options are `fixture-console-suppliers-api`'s: with both listed, the references call the dependency's crate, the crate depends on it, and a page and the picker's shard meet its rate limit; with one listed, a Go server, or its crate not built, the build log gives the reason.
+- `TestTwoServicesInOneApp` mounts both crates under cargo, the suppliers' `_without_api`: a product names its supplier and a new product picks one through the suppliers' crate, a page meets listSuppliers' rate limit, both crates serve their pages and one JSON API, an app without the suppliers names them by their ids and its call is the 500, and an app with both JSON APIs is refused as it builds.
+- `internal/generator`'s `TestRustAPIOfServiceIsTheDependencysCrate` reads a dependency's crate by its config, and none for a Go server or a config without an API server.
 
 acme changes only by the picker, if the user takes decision 3 of the
 memo: its `listProducts` would search the products' names, and the
@@ -7257,16 +7268,20 @@ sorts only by editing the URL. The console's table headers are labels.
 | A live list's header links set the shard's query as its pager's links do, and put the query in the address bar. The shard reads the sort from its signal, so the headers and their `aria-sort` follow it. | A signal for the sort beside the query, which a reload would lose. |
 | A section on its parent's page shows its first page in `defaultSort`, and its table has no header links. | Sorting a section in place, which would give an item's page a query of its own per section. |
 
-Status: designed; nothing built. The tests are these:
+Status: the Topcoat crate is built: `views::Sorted` and the tables'
+header links, the argument form's and the procedure's sort, the
+in-process call's unbinding and binding, and the live list's links. The
+tests are these:
 
 - `TestTheConsolePagesPicksAndSearches`, over `fixture-console-api`, whose `listProducts` sorts by `name` or `sku`, `listReviews` by `rating` or `title`, and `listOrders` by `number`:
   - The headers have the links and `aria-sort`, the default included, and a link reverses the order.
   - A link starts at the first page without `back`.
-  - The filter, the size form and the pager keep the sort.
+  - The filter, the size form and the pager keep the sort, and so does the orders' procedure.
   - A refused sort is the route's 400 as the form's message.
   - A cursor of another sort is 400.
   - The shard's header links set its signal.
   - A section has no links.
+- `TestTheHeadersSortAList` reads `Sorted` and the links in views.rs and the sorting in pages.rs, live and not; `TestAPagedOperationIsItsPageEverywhere` reads the sort in the call, the procedure and the form.
 - `TestASortFieldWithoutAColumnIsLogged` covers the build log.
 - `fixture-console-api`'s golden changes, and so does every golden whose table is sorted.
 - acme's Topcoat tests, in memory and over SQLite: the console's orders sort by their total and back, its products by price, and its reviews by rating, each through the headers and through the live shard.
