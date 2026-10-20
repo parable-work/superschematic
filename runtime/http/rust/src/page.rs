@@ -1039,9 +1039,16 @@ mod tests {
         let page = page.bind(&first).unwrap();
         let next = page.next.clone().unwrap();
         assert_ne!(next, own);
+        // The key's bytes as the implementation's cursor holds them: its
+        // members in serde_json's order, which preserve_order changes.
+        let own_key = String::from_utf8(URL_SAFE_NO_PAD.decode(own.as_str()).unwrap()).unwrap();
         assert_eq!(
-            URL_SAFE_NO_PAD.decode(next.as_str()).unwrap(),
-            br#"{"sort":"-totalCents","key":{"id":"b","totalCents":200}}"#
+            String::from_utf8(URL_SAFE_NO_PAD.decode(next.as_str()).unwrap()).unwrap(),
+            format!(r#"{{"sort":"-totalCents","key":{own_key}}}"#)
+        );
+        assert_eq!(
+            next.decode::<Value>().unwrap(),
+            json!({"sort": "-totalCents", "key": {"id": "b", "totalCents": 200}})
         );
 
         // Its next, sent back under the sort, is the implementation's own.
