@@ -6828,8 +6828,10 @@ and one whose tries fail and one whose tries outlive the timeout throw,
 each try logged. A job of the calls fixture binds its callee and its
 bucket with a key and a token of its own, and one of the D1 fixture its
 database, and servergen's `scheduled.ts` opens a sqlite-first database
-through its d1 binding. The CI's go job installs the pinned workerd. No
-call has reached Cloudflare.
+through its d1 binding: the sqlite fixture's job, on `fake.cron` beside
+its server on `fake.bundle`, type-checks, bundles and runs under workerd
+over a stand-in for the binding, pruning through it at each firing. The
+CI's go job installs the pinned workerd. No call has reached Cloudflare.
 
 ## D65. A Rust API runs jobs and workers, its workers claim queues through a descriptor its types carry, and each output root builds against a mirror of its implementations
 
