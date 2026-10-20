@@ -585,10 +585,9 @@ func TestGenerateFindPage(t *testing.T) {
 		`TenantUserSortByCreatedAt TenantUserSortField = "createdAt"`,
 		"func ParseTenantSort(text string) (TenantSort, error) {",
 		`fmt.Errorf("orm: Tenant sorts by id, createdAt, name, slug, email and seatCount, not %q", text)`,
-		"SeatCount *float64                `json:\"seatCount,omitempty\"`",
-		"Id        types.IdentityUUID      `json:\"id\"`",
-		"value = time.Time(*k.CreatedAt)",
-		"key := k.Id.ToUUID()",
+		"type TenantPageKey struct {\n\tId types.IdentityUUID `json:\"id\"`\n}",
+		"return k.Id.ToUUID(), nil",
+		"func tenantPageKeyOf(row *types.Tenant) *TenantPageKey {",
 		"type TenantPageOptions struct {",
 		"type TenantPage struct {",
 	} {
@@ -604,11 +603,13 @@ func TestGenerateFindPage(t *testing.T) {
 
 	repository := read("repository_tenant.go")
 	for _, want := range []string{
-		"var tenantSortColumns = map[TenantSortField]struct{ name, sql string }{",
-		"TenantSortByName:      {\"name\", `tenant.\"name\"`},",
+		"var tenantSortColumns = map[TenantSortField]struct{ sql, key string }{",
+		"TenantSortByName:      {`tenant.\"name\"`, `page_key.\"name\"`},",
 		"func (r *TenantRepository) FindPage(ctx context.Context, filter *TenantFilter, opts *TenantPageOptions) (*TenantPage, error) {",
 		"column, ok := tenantSortColumns[field]",
-		"conditions = append(conditions, fmt.Sprintf(`(%s, tenant.id) %s (%s)`, column.sql, comparison, strings.Join(placeholders, \", \")))",
+		"conditions = append(conditions, fmt.Sprintf(`tenant.id %s %s`, comparison, placeholder))",
+		"conditions = append(conditions, fmt.Sprintf(`(%s, tenant.id) %s ((SELECT %s FROM tenant AS page_key WHERE page_key.id = %s), %s)`,",
+		"query := `SELECT EXISTS (SELECT 1 FROM tenant WHERE tenant.id = $1)`",
 		"query := fmt.Sprintf(`SELECT %s FROM tenant%s%s LIMIT %d`, selectFields, whereClause, orderByClause, limit+1)",
 		`rows, err := r.findRows(ctx, "FindPage", query, args, fieldStrings, opts.Fields)`,
 		`results, err := r.findRows(ctx, "FindMany", query, args, fieldStrings, opts.Fields)`,
@@ -740,13 +741,24 @@ func TestSortableColumns(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"EntryId   types.IdentityUUID      `json:\"entryId\"`",
-		"if field == EntrySortByEntryId && len(held) == 0 {",
-		"value = k.OwnerId.ToUUID()",
-		"value = *k.Rank",
+		"type EntryPageKey struct {\n\tEntryId types.IdentityUUID `json:\"entryId\"`\n}",
+		"return k.EntryId.ToUUID(), nil",
 	} {
 		if !strings.Contains(string(query), want) {
 			t.Errorf("query.go is missing %q", want)
+		}
+	}
+	repository, err := os.ReadFile(filepath.Join(outDir, "repository_entry.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"EntrySortByRank:      {`entry.rank`, `page_key.rank`},",
+		"byKey := field == EntrySortByEntryId",
+		"FROM entry AS page_key WHERE page_key.entry_id = %s",
+	} {
+		if !strings.Contains(string(repository), want) {
+			t.Errorf("repository_entry.go is missing %q", want)
 		}
 	}
 }

@@ -137,8 +137,11 @@ type ArrayStringFilter struct {
 }
 
 // ErrPageKey is FindPage's error for an After that holds no primary key, or
-// a sort field other than its sort's: the key of a page in another order,
-// which names no row of this one (D60, amended).
+// whose row no longer exists in an order by a sort field, which reads the
+// row's value from the table (D60, amended). A key of another order is not
+// one: a key is a row's primary key alone, the same in every order, so a
+// cursor of another sort is refused before the ORM reads it, by the router
+// that binds a cursor to its sort.
 var ErrPageKey = errors.New("orm: the page key names no row of its sort")
 
 // ========================================
@@ -258,51 +261,29 @@ func ParseOrderSort(text string) (OrderSort, error) {
 	return OrderSort{}, fmt.Errorf("orm: Order sorts by id and placedAt, not %q", text)
 }
 
-// OrderPageKey is the position of a Order row in a FindPage order: its
-// sort field's value and its id, as a cursor holds them,
-// {"placedAt": ..., "id": ...}. A key holds one sort field, and none
-// in an order by id.
+// OrderPageKey is the position of a Order row in a FindPage order: the
+// row's id, as a cursor holds it, {"id": ...}. FindPage reads the row's
+// value of its sort field from the table, so a key is the same in every order
+// and its length is the id's, whatever the row holds (D60, amended).
 type OrderPageKey struct {
-	PlacedAt *types.TemporalDateTime `json:"placedAt,omitempty"`
-	Id       types.IdentityUUID      `json:"id"`
+	Id types.IdentityUUID `json:"id"`
 }
 
-// args are the key's values in an order by field, as the repository writes
-// their columns: its sort field's, then its id, or its id alone in
-// an order by id. A key without its id, or with a sort field other
-// than field, is ErrPageKey.
-func (k *OrderPageKey) args(field OrderSortField) ([]any, error) {
+// arg is the key's id as the repository writes its column. A key without
+// one is ErrPageKey.
+func (k *OrderPageKey) arg() (any, error) {
 	var zeroKey types.IdentityUUID
 	if k.Id == zeroKey {
 		return nil, fmt.Errorf("%w: the Order key holds no id", ErrPageKey)
 	}
-	var held []string
-	var value any
-	if k.PlacedAt != nil {
-		held = append(held, "placedAt")
-		value = time.Time(*k.PlacedAt)
-	}
-	key := k.Id.ToUUID()
-	if field == OrderSortById && len(held) == 0 {
-		return []any{key}, nil
-	}
-	if len(held) == 1 && held[0] == string(field) {
-		return []any{value, key}, nil
-	}
-	return nil, fmt.Errorf("%w: a page of Order rows by %s, a key of %s", ErrPageKey, field, strings.Join(append(held, "id"), " and "))
+	return k.Id.ToUUID(), nil
 }
 
-// orderPageKeyOf is row's key in an order by field: its value of
-// field and its id.
-func orderPageKeyOf(row *types.Order, field OrderSortField) *OrderPageKey {
+// orderPageKeyOf is row's key: its id.
+func orderPageKeyOf(row *types.Order) *OrderPageKey {
 	key := &OrderPageKey{}
 	if row.Id != nil {
 		key.Id = *row.Id
-	}
-	switch field {
-	case OrderSortByPlacedAt:
-		value := row.PlacedAt
-		key.PlacedAt = &value
 	}
 	return key
 }
@@ -310,7 +291,7 @@ func orderPageKeyOf(row *types.Order, field OrderSortField) *OrderPageKey {
 // OrderPageOptions are FindPage's options.
 type OrderPageOptions struct {
 	// Fields specifies which fields to select, as FindMany's do; zero is an
-	// error. A page reads its sort's column and the id too, which Next holds.
+	// error. A page reads the id too, which Next holds.
 	Fields OrderFields
 	// Sort is the order the rows are read in.
 	Sort OrderSort

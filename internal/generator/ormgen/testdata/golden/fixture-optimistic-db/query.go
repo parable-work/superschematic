@@ -137,8 +137,11 @@ type ArrayStringFilter struct {
 }
 
 // ErrPageKey is FindPage's error for an After that holds no primary key, or
-// a sort field other than its sort's: the key of a page in another order,
-// which names no row of this one (D60, amended).
+// whose row no longer exists in an order by a sort field, which reads the
+// row's value from the table (D60, amended). A key of another order is not
+// one: a key is a row's primary key alone, the same in every order, so a
+// cursor of another sort is refused before the ORM reads it, by the router
+// that binds a cursor to its sort.
 var ErrPageKey = errors.New("orm: the page key names no row of its sort")
 
 // ========================================
@@ -303,67 +306,29 @@ func ParseShelfSort(text string) (ShelfSort, error) {
 	return ShelfSort{}, fmt.Errorf("orm: Shelf sorts by id, label, createdAt and updatedAt, not %q", text)
 }
 
-// ShelfPageKey is the position of a Shelf row in a FindPage order: its
-// sort field's value and its id, as a cursor holds them,
-// {"label": ..., "id": ...}. A key holds one sort field, and none
-// in an order by id.
+// ShelfPageKey is the position of a Shelf row in a FindPage order: the
+// row's id, as a cursor holds it, {"id": ...}. FindPage reads the row's
+// value of its sort field from the table, so a key is the same in every order
+// and its length is the id's, whatever the row holds (D60, amended).
 type ShelfPageKey struct {
-	Label     *string                 `json:"label,omitempty"`
-	CreatedAt *types.TemporalDateTime `json:"createdAt,omitempty"`
-	UpdatedAt *types.TemporalDateTime `json:"updatedAt,omitempty"`
-	Id        types.IdentityUUID      `json:"id"`
+	Id types.IdentityUUID `json:"id"`
 }
 
-// args are the key's values in an order by field, as the repository writes
-// their columns: its sort field's, then its id, or its id alone in
-// an order by id. A key without its id, or with a sort field other
-// than field, is ErrPageKey.
-func (k *ShelfPageKey) args(field ShelfSortField) ([]any, error) {
+// arg is the key's id as the repository writes its column. A key without
+// one is ErrPageKey.
+func (k *ShelfPageKey) arg() (any, error) {
 	var zeroKey types.IdentityUUID
 	if k.Id == zeroKey {
 		return nil, fmt.Errorf("%w: the Shelf key holds no id", ErrPageKey)
 	}
-	var held []string
-	var value any
-	if k.Label != nil {
-		held = append(held, "label")
-		value = *k.Label
-	}
-	if k.CreatedAt != nil {
-		held = append(held, "createdAt")
-		value = time.Time(*k.CreatedAt)
-	}
-	if k.UpdatedAt != nil {
-		held = append(held, "updatedAt")
-		value = time.Time(*k.UpdatedAt)
-	}
-	key := k.Id.ToUUID()
-	if field == ShelfSortById && len(held) == 0 {
-		return []any{key}, nil
-	}
-	if len(held) == 1 && held[0] == string(field) {
-		return []any{value, key}, nil
-	}
-	return nil, fmt.Errorf("%w: a page of Shelf rows by %s, a key of %s", ErrPageKey, field, strings.Join(append(held, "id"), " and "))
+	return k.Id.ToUUID(), nil
 }
 
-// shelfPageKeyOf is row's key in an order by field: its value of
-// field and its id.
-func shelfPageKeyOf(row *types.Shelf, field ShelfSortField) *ShelfPageKey {
+// shelfPageKeyOf is row's key: its id.
+func shelfPageKeyOf(row *types.Shelf) *ShelfPageKey {
 	key := &ShelfPageKey{}
 	if row.Id != nil {
 		key.Id = *row.Id
-	}
-	switch field {
-	case ShelfSortByLabel:
-		value := row.Label
-		key.Label = &value
-	case ShelfSortByCreatedAt:
-		value := row.CreatedAt
-		key.CreatedAt = &value
-	case ShelfSortByUpdatedAt:
-		value := row.UpdatedAt
-		key.UpdatedAt = &value
 	}
 	return key
 }
@@ -371,7 +336,7 @@ func shelfPageKeyOf(row *types.Shelf, field ShelfSortField) *ShelfPageKey {
 // ShelfPageOptions are FindPage's options.
 type ShelfPageOptions struct {
 	// Fields specifies which fields to select, as FindMany's do; zero is an
-	// error. A page reads its sort's column and the id too, which Next holds.
+	// error. A page reads the id too, which Next holds.
 	Fields ShelfFields
 	// Sort is the order the rows are read in.
 	Sort ShelfSort
@@ -529,59 +494,29 @@ func ParseStockSort(text string) (StockSort, error) {
 	return StockSort{}, fmt.Errorf("orm: Stock sorts by id, ingredient and quantity, not %q", text)
 }
 
-// StockPageKey is the position of a Stock row in a FindPage order: its
-// sort field's value and its id, as a cursor holds them,
-// {"ingredient": ..., "id": ...}. A key holds one sort field, and none
-// in an order by id.
+// StockPageKey is the position of a Stock row in a FindPage order: the
+// row's id, as a cursor holds it, {"id": ...}. FindPage reads the row's
+// value of its sort field from the table, so a key is the same in every order
+// and its length is the id's, whatever the row holds (D60, amended).
 type StockPageKey struct {
-	Ingredient *string             `json:"ingredient,omitempty"`
-	Quantity   *types.GenericInt64 `json:"quantity,omitempty"`
-	Id         types.IdentityUUID  `json:"id"`
+	Id types.IdentityUUID `json:"id"`
 }
 
-// args are the key's values in an order by field, as the repository writes
-// their columns: its sort field's, then its id, or its id alone in
-// an order by id. A key without its id, or with a sort field other
-// than field, is ErrPageKey.
-func (k *StockPageKey) args(field StockSortField) ([]any, error) {
+// arg is the key's id as the repository writes its column. A key without
+// one is ErrPageKey.
+func (k *StockPageKey) arg() (any, error) {
 	var zeroKey types.IdentityUUID
 	if k.Id == zeroKey {
 		return nil, fmt.Errorf("%w: the Stock key holds no id", ErrPageKey)
 	}
-	var held []string
-	var value any
-	if k.Ingredient != nil {
-		held = append(held, "ingredient")
-		value = *k.Ingredient
-	}
-	if k.Quantity != nil {
-		held = append(held, "quantity")
-		value = *k.Quantity
-	}
-	key := k.Id.ToUUID()
-	if field == StockSortById && len(held) == 0 {
-		return []any{key}, nil
-	}
-	if len(held) == 1 && held[0] == string(field) {
-		return []any{value, key}, nil
-	}
-	return nil, fmt.Errorf("%w: a page of Stock rows by %s, a key of %s", ErrPageKey, field, strings.Join(append(held, "id"), " and "))
+	return k.Id.ToUUID(), nil
 }
 
-// stockPageKeyOf is row's key in an order by field: its value of
-// field and its id.
-func stockPageKeyOf(row *types.Stock, field StockSortField) *StockPageKey {
+// stockPageKeyOf is row's key: its id.
+func stockPageKeyOf(row *types.Stock) *StockPageKey {
 	key := &StockPageKey{}
 	if row.Id != nil {
 		key.Id = *row.Id
-	}
-	switch field {
-	case StockSortByIngredient:
-		value := row.Ingredient
-		key.Ingredient = &value
-	case StockSortByQuantity:
-		value := row.Quantity
-		key.Quantity = &value
 	}
 	return key
 }
@@ -589,7 +524,7 @@ func stockPageKeyOf(row *types.Stock, field StockSortField) *StockPageKey {
 // StockPageOptions are FindPage's options.
 type StockPageOptions struct {
 	// Fields specifies which fields to select, as FindMany's do; zero is an
-	// error. A page reads its sort's column and the id too, which Next holds.
+	// error. A page reads the id too, which Next holds.
 	Fields StockFields
 	// Sort is the order the rows are read in.
 	Sort StockSort

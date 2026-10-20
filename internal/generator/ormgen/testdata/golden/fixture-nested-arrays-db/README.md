@@ -49,6 +49,11 @@ appended to `args`, their placeholders numbered after those already there.
 `<Type>Sort`'s order of one column, ties broken by the primary key: one query
 of `Limit + 1` rows after `After`, and no count. The page's `Next` is the
 `<Type>PageKey` of its last row when more rows follow, which the next page
-takes as `After`. `Parse<Type>Sort` reads a page request's sort, `name` or
-`-name`, and refuses a field the table cannot sort by; an `After` of another
-sort is `ErrPageKey`.
+takes as `After`. A key is the row's primary key alone: the query reads the
+key's row for its value of the sort's column, so an `After` whose row no
+longer exists is `ErrPageKey`. A key does not say which order it came from,
+so a cursor that carries one must name its sort, as a router's bound cursor
+does. `Parse<Type>Sort` reads a page request's sort, `name` or `-name`, and
+refuses a field the table cannot sort by. A page reads fastest with an index
+on the sort's column, then the primary key, after any column the filter
+compares by equality.
