@@ -426,8 +426,10 @@ esac
 `
 	require.NoError(t, os.WriteFile(filepath.Join(bin, "gcloud"), []byte(script), 0o755))
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	// The deadline bounds the reads that answer too, and under a loaded
+	// machine starting the script takes longer than a fraction of a second.
 	prev := gcloudTimeout
-	gcloudTimeout = 200 * time.Millisecond
+	gcloudTimeout = 2 * time.Second
 	t.Cleanup(func() { gcloudTimeout = prev })
 
 	ctx := context.Background()

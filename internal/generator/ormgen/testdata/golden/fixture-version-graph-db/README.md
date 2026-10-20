@@ -53,6 +53,10 @@ Each `*Update` type has `ApplyTo(*types.T)` to project set and `SetNull`
 fields onto a stored row, and `New*SnapshotUpdate` to build a full
 replacement from a complete value.
 
+`<Type>FilterConditions(filter, &args)` gives a filter's conditions, each
+column qualified by its table, for a query of your own: its values are
+appended to `args`, their placeholders numbered after those already there.
+
 ## Version graphs
 
 A version graph's facade (`db.<Name>Graph()`) creates refs, saves edits on

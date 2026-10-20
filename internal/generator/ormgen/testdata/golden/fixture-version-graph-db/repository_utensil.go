@@ -94,8 +94,10 @@ var UtensilQuotedFields = map[string]string{
 	"ref_id":         `ref_id`,
 }
 
-// buildUtensilOrderByClause builds an ORDER BY clause for Utensil
-func buildUtensilOrderByClause(orderBy []UtensilOrderBy, tableName string) string {
+// buildUtensilOrderByClause builds an ORDER BY clause for Utensil.
+// quotedTable is the table's name as the FROM clause spells it, quoted when
+// it is a keyword (a table named order is "order").
+func buildUtensilOrderByClause(orderBy []UtensilOrderBy, quotedTable string) string {
 	if len(orderBy) == 0 {
 		return ""
 	}
@@ -112,7 +114,7 @@ func buildUtensilOrderByClause(orderBy []UtensilOrderBy, tableName string) strin
 		if !ok {
 			quotedField = fieldStr // Fallback to unquoted if not found
 		}
-		clauses = append(clauses, fmt.Sprintf("%s.%s %s", tableName, quotedField, direction))
+		clauses = append(clauses, fmt.Sprintf("%s.%s %s", quotedTable, quotedField, direction))
 	}
 
 	if len(clauses) == 0 {
@@ -842,7 +844,7 @@ func (r *UtensilRepository) FindOne(ctx context.Context, filter *UtensilFilter, 
 	whereClause := filter.buildWhereClause(&args, 0)
 
 	// Build ORDER BY clause
-	orderByClause := buildUtensilOrderByClause(opts.OrderBy, "utensil")
+	orderByClause := buildUtensilOrderByClause(opts.OrderBy, `utensil`)
 
 	// Build query
 	query := fmt.Sprintf(`SELECT %s FROM utensil%s%s LIMIT 1`, selectFields, whereClause, orderByClause)
@@ -1051,7 +1053,7 @@ func (r *UtensilRepository) FindMany(ctx context.Context, filter *UtensilFilter,
 	whereClause := filter.buildWhereClause(&args, 0)
 
 	// Build ORDER BY clause
-	orderByClause := buildUtensilOrderByClause(opts.OrderBy, "utensil")
+	orderByClause := buildUtensilOrderByClause(opts.OrderBy, `utensil`)
 
 	// Build LIMIT/OFFSET clause
 	limitOffsetClause := buildLimitOffsetClauseTyped(opts.Limit, opts.Offset)

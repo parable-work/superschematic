@@ -135,10 +135,17 @@ func run(logger *zap.Logger) error {
 	if err != nil {
 		return fmt.Errorf("payload decryptor of shop-orders: %w", err)
 	}
+	// The handlers of its @manualRouteRegistration operations, which
+	// RegisterRoutes mounts behind each one's route steps (D51).
+	shopOrdersManualRoutes, err := shopordersimpl.NewManualRoutes(shopOrdersDeps)
+	if err != nil {
+		return fmt.Errorf("manual routes of shop-orders: %w", err)
+	}
 	shopOrdersRouter := chi.NewRouter()
 	shopOrdersRouter.Use(runtimemiddleware.Logger(shopOrdersLogger, shoporders.ContextWithLogger))
 	err = shoporders.RegisterRoutes(shopOrdersRouter, shoporders.Config{
 		PayloadDecryptor: shopOrdersDecryptor,
+		ManualRoutes:     &shopOrdersManualRoutes,
 		Logger:           shopOrdersLogger,
 		Implementations:  shopOrdersImplementations,
 	})

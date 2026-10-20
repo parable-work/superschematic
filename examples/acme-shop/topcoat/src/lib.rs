@@ -5,7 +5,9 @@
 //! their email and password, writes a review (`WriteReviewInputForm`),
 //! places an order with its lines as rows (`PlaceOrderInputForm`), filters
 //! their orders (`OrderListOrdersArgsForm`, a GET form) and cancels one
-//! (`OrderCancelOrderArgsForm`). The reviews and the orders render through
+//! (`OrderCancelOrderArgsForm`). A shopper's orders are their own: the
+//! implementations list, read and cancel no other customer's, and staff,
+//! who hold `orders.any`, every customer's. The reviews and the orders render through
 //! the display components the crate builds from their types, and the orders
 //! a page at a time, with links to the next page and back to the first.
 //! An order line's product is a select of the catalog's products, and an
@@ -15,13 +17,17 @@
 //! is mounted at `/api` beside the pages, on the same implementations,
 //! which keep the shop in memory or in a SQLite file of shop-db's tables,
 //! and the shop's users are the core user model's (D50): one session
-//! cookie signs the shopper in on both.
+//! cookie signs the shopper in on both. Every page renders in one HTML
+//! document, the app's root layout, whose head loads Topcoat's runtime
+//! when the router serves it, so the console's lists, which are live
+//! (`pages_live`), render a filter's or a page's results in place; without
+//! it they are GET forms and links that load the page (D44, amended).
 
 use std::sync::Arc;
 
 use acme_shop_orders_server::sqlite::SqliteShop;
-use acme_shop_orders_server::{Shop, ShopImplementation, implementations};
-use acme_shop_orders_topcoat::api::runtime::identity::{LoginInput, Service};
+use acme_shop_orders_server::{Shop, ShopImplementation, add_shopper, add_staff, implementations, update_roles};
+use acme_shop_orders_topcoat::api::runtime::identity::{LoginInput, Service, StoreError};
 use acme_shop_orders_topcoat::api::runtime::{ApiError, Principal};
 use acme_shop_orders_topcoat::api::{
     OrderGetOrderArgs, OrderPlaceOrderArgs, ProductReviewsListReviewsArgs, ProductReviewsWriteReviewArgs, types,
@@ -35,14 +41,15 @@ use acme_shop_orders_topcoat::records::{OrderViewRecord, ReviewViewRecord};
 use acme_shop_orders_topcoat::views::{order_view_detail, order_view_table, review_view_detail};
 use acme_shop_orders_topcoat::{IdentityPageAuthenticator, RouterBuilderShopOrdersExt, operations, pages, references};
 use serde::Deserialize;
-use topcoat::context::{Cx, app_context};
+use topcoat::asset::{AssetConfig, RouterBuilderAssetExt};
+use topcoat::context::{Cx, app_context, try_app_context};
 use topcoat::router::content::Form;
 use topcoat::router::error::see_other;
 use topcoat::router::header::SET_COOKIE;
 use topcoat::router::request::parts;
 use topcoat::router::response::response_headers;
-use topcoat::router::{HeaderValue, Router, RouterBuilderDiscoverExt, StatusCode, page, path_param};
-use topcoat::runtime::shard;
+use topcoat::router::{HeaderValue, Router, RouterBuilderDiscoverExt, Slot, StatusCode, layout, page, path_param};
+use topcoat::runtime::{RouterBuilderRuntimeExt, RuntimeSetup, shard};
 use topcoat::view::{Child, View, component, view};
 
 /// The one product the shop sells, at 19.99.
@@ -98,6 +105,28 @@ pub fn stock_sqlite(shop: &SqliteShop) -> Result<(), Box<dyn std::error::Error>>
     Ok(())
 }
 
+/// A user the app adds: their email, name and password.
+pub type Person = (&'static str, &'static str, &'static str);
+
+/// Adds `shopper`, holding the `shopper` role, and `staff`, holding the
+/// `staff` role, to `users`, each unless an earlier run over the same file
+/// added them, as a real shop's own flows would. It first brings both
+/// roles to the permissions they grant now (`update_roles`), users or no
+/// users: a file made before staff held `orders.any` has a `shopper` role
+/// that grants all of `orders`, and so every customer's orders.
+pub async fn add_people(users: &Service, shopper: Person, staff: Person) -> Result<(), Box<dyn std::error::Error>> {
+    update_roles(users).await?;
+    for ((login, name, password), is_staff) in [(shopper, false), (staff, true)] {
+        match users.store().find_login(login).await {
+            Ok(_) => {}
+            Err(StoreError::NotFound) if is_staff => add_staff(users, login, name, password).await?,
+            Err(StoreError::NotFound) => add_shopper(users, login, name, password).await?,
+            Err(err) => return Err(err.into()),
+        }
+    }
+    Ok(())
+}
+
 /// The identity config the app serves with: plain HTTP on a local port, so
 /// the session cookie is not `Secure`.
 pub const IDENTITY_CONFIG: &str = r#"{"cookie": {"secure": false}}"#;
@@ -111,16 +140,51 @@ pub const IDENTITY_CONFIG: &str = r#"{"cookie": {"secure": false}}"#;
 /// trusts must be one the router's `OriginPolicy` trusts too; this app
 /// trusts none. `.discover()` registers the console the crate generates
 /// under `/console`, whose `pages::Settings` name its title and the sign-in
-/// page a refused shopper comes back from.
-pub fn app<S: ShopImplementation>(shop: Arc<S>, users: Arc<Service>) -> Router {
+/// page a refused shopper comes back from, and the root layout, `document`.
+///
+/// With `assets`, the asset bundle `topcoat asset bundle` writes beside the
+/// binary (`AssetBundle::load()`), or a catalog hosted elsewhere, the
+/// router serves Topcoat's runtime: its layer and the script `document`
+/// loads. The runtime's layer comes after `.shop_orders(...)`, which
+/// registers the console's `PageControls`, so a page the runtime renders
+/// again meets its controls as the GET it becomes. Without `assets` the
+/// pages load no script, and the console's live lists are the GET forms and
+/// links they are without the runtime.
+pub fn app<S: ShopImplementation>(shop: Arc<S>, users: Arc<Service>, assets: Option<AssetConfig>) -> Router {
     let implementations = implementations(shop, Arc::clone(&users));
     let authenticator = IdentityPageAuthenticator::of(&implementations);
-    Router::builder()
+    let builder = Router::builder()
         .discover()
         .app_context(users)
         .app_context(console_settings())
-        .shop_orders(implementations, authenticator)
-        .build()
+        .shop_orders(implementations, authenticator);
+    match assets {
+        Some(assets) => builder.assets(assets).runtime().build(),
+        None => builder.build(),
+    }
+}
+
+/// The document every page renders in, around the console's layout and the
+/// shop's pages: the runtime's script in its head when the router set the
+/// runtime up (`RuntimeSetup`), which a live list of the console
+/// (`pages_live`) needs to render again in place. Without it, a filter and
+/// a page's links load the page.
+#[layout("/")]
+async fn document(cx: &Cx, slot: Slot<'_>) -> topcoat::Result<impl View> {
+    let live = try_app_context::<RuntimeSetup>(cx).is_some();
+    Ok(view! {
+        <!DOCTYPE html>
+        <html lang="en">
+            <head>
+                <meta charset="utf-8">
+                <title>"Acme shop"</title>
+                if live {
+                    topcoat::runtime::script()
+                }
+            </head>
+            <body>(slot)</body>
+        </html>
+    })
 }
 
 /// The console's settings: its title, and the sign-in page, which comes
@@ -345,9 +409,10 @@ async fn post_review(cx: &Cx, Form(form): Form<WriteReviewInputForm>) -> topcoat
     })
 }
 
-/// The shopper's orders, which need `orders.read`, a page at a time,
-/// filtered by the GET form `OrderListOrdersArgsForm` reads from the query,
-/// its controls showing the filters in effect. The query's `cursor` and
+/// The shopper's own orders, or every customer's for staff, which need
+/// `orders.read`, a page at a time, filtered by the GET form
+/// `OrderListOrdersArgsForm` reads from the query, its controls showing the
+/// filters in effect. The query's `cursor` and
 /// `limit` ask for the page, and no control holds them, so a submitted
 /// filter starts at the first page. After the orders, "Next page" links
 /// the page after this one, while one follows, and "First page" the first,
@@ -451,7 +516,8 @@ path_param!(id: types::IdentityUUID, error = not_found);
 /// One order, as `order_view_detail` renders it, which needs `orders.read`,
 /// each line's product by its name, which `references::order_view_labels`
 /// looks up through `listProducts`, with the route's status when the call
-/// is refused (401, 403, 404). While the order is placed, the form that
+/// is refused (401, 403, 404, which another customer's order answers as
+/// one no one placed does). While the order is placed, the form that
 /// cancels it: `cancel` as sent and its errors after a refused cancel,
 /// which keeps the form, and its form-level message, on the page even when
 /// the order is no longer placed.

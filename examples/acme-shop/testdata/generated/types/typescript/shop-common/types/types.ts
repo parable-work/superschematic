@@ -11,7 +11,7 @@ import type {
 
 /**
  * FeedItem - One row of a supplier's product feed. A key this type does not declare is
-a supplier's mistake, so every decoder refuses it.
+ * a supplier's mistake, so every decoder refuses it.
  */
 export interface FeedItem {
   sku: IdentitySlug;

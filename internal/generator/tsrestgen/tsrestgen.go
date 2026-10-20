@@ -973,7 +973,9 @@ func docLines(ep EndpointInfo) []string {
 	if ep.Title != "" {
 		lines = append(lines, ep.Title)
 	}
-	if desc := strings.TrimSpace(ep.Description); desc != "" {
+	// A description written with CRLF line ends splits on its LFs alone,
+	// so its CRs go first, as codegen's doc helpers drop them.
+	if desc := strings.TrimSpace(strings.ReplaceAll(ep.Description, "\r\n", "\n")); desc != "" {
 		lines = append(lines, strings.Split(desc, "\n")...)
 	}
 	if len(lines) > 0 {
@@ -1099,6 +1101,6 @@ func templateFuncs() template.FuncMap {
 		"sub":          func(a, b int) int { return a - b },
 		// jsdoc keeps text from ending the JSDoc comment it goes in: a
 		// schedule such as */15 would.
-		"jsdoc": func(s string) string { return strings.ReplaceAll(s, "*/", "*\\/") },
+		"jsdoc": codegen.JSDocEscape,
 	}
 }

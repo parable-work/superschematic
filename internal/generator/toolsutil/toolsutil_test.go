@@ -442,3 +442,60 @@ func TestValidateReplayContract(t *testing.T) {
 		})
 	}
 }
+
+// TestToolKeysNameTheReferenceAndSearchKeys: a property's reference and
+// search mark are written under ToolKeys.Reference and ToolKeys.Search,
+// after its scalar key, in that order, on a list rather than its items; a
+// rename reaches nested properties, and an empty key leaves the member out.
+func TestToolKeysNameTheReferenceAndSearchKeys(t *testing.T) {
+	ref := &apigen.Reference{Target: "ItemView", OptionsOperationID: "CatalogListItemsHandler", OptionsTool: "catalog.listItems", Value: "id", Label: "name"}
+	fields := map[string][]apigen.Param{
+		"Line":  {{Name: "itemId", Type: "Identity.UUID", Required: true, Reference: ref}},
+		"Input": {{Name: "lines", Type: "Line", Required: true, IsArray: true}},
+	}
+	scalars := map[string]apigen.ScalarJSONSchemaInfo{"Identity.UUID": {CanonicalName: "Identity.UUID", Type: "string"}}
+	queryArgs := []ToolQueryArg{
+		{Name: "q", Type: "string", Search: true},
+		{Name: "ids", Type: "Identity.UUID", IsArray: true, Reference: ref},
+	}
+	pathParams := []ToolPathParam{{Name: "itemId", Type: "Identity.UUID", Reference: ref}}
+
+	encode := func(keys apigen.ToolKeys) string {
+		t.Helper()
+		schema := BuildParametersSchema(pathParams, queryArgs, true, "Input", fields, nil, nil, nil, false, scalars, byName, keys, nil)
+		encoded, err := json.Marshal(schema)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(encoded)
+	}
+	const reference = `{"target":"ItemView","options":"catalog.listItems","value":"id","label":"name"}`
+	core := encode(apigen.DefaultToolKeys())
+	for _, want := range []string{
+		`"itemId":{"x-superschematic-scalar":"Identity.UUID","x-superschematic-reference":` + reference + `,"type":"string","description":"itemId parameter"}`,
+		`"ids":{"x-superschematic-reference":` + reference + `,"type":"array","description":"Array of Identity.UUID values","items":{"x-superschematic-scalar":"Identity.UUID","type":"string"}}`,
+		`"q":{"x-superschematic-search":true,"type":"string"`,
+		`"items":{"additionalProperties":false,"type":"object","description":"Line object","properties":{"itemId":{"x-superschematic-scalar":"Identity.UUID","x-superschematic-reference":` + reference + `,"type":"string"}}`,
+	} {
+		if !strings.Contains(core, want) {
+			t.Errorf("the core keys' encoding lacks %s:\n%s", want, core)
+		}
+	}
+
+	renamed := encode(apigen.ToolKeys{Scalar: "x-acme-scalar", Reference: "x-acme-ref", Search: "x-acme-search"})
+	for _, want := range []string{
+		`"itemId":{"x-acme-scalar":"Identity.UUID","x-acme-ref":` + reference + `,"type":"string"}`,
+		`"q":{"x-acme-search":true,"type":"string"`,
+	} {
+		if !strings.Contains(renamed, want) {
+			t.Errorf("the renamed keys' encoding lacks %s:\n%s", want, renamed)
+		}
+	}
+	if strings.Contains(renamed, "x-superschematic-") {
+		t.Fatalf("a core key survived a rename: %s", renamed)
+	}
+
+	if unkeyed := encode(apigen.ToolKeys{}); strings.Contains(unkeyed, `"target"`) || strings.Contains(unkeyed, "true") {
+		t.Fatalf("empty keys still wrote a reference or a search: %s", unkeyed)
+	}
+}

@@ -80,8 +80,10 @@ type EndpointInfo struct {
 	// credential when the request carries one (D37).
 	ServiceCallers *ir.ServiceCallers
 	ServiceStep    bool
-	// Manual marks an operation declared @manualRouteRegistration, which the
-	// service mounts itself.
+	// Manual marks an operation declared @manualRouteRegistration, whose
+	// handler is a method of the ManualRoutes trait, which
+	// build_router_with_manual_routes mounts, or which the service mounts
+	// itself (D51).
 	Manual bool
 	// OperationID is the operation's OpenAPI operation id, apigen's
 	// HandlerName (GreetingGreetHandler): its key in what the user model's
@@ -216,6 +218,12 @@ func (e EndpointInfo) UsesTypes() bool {
 	return strings.Contains(e.OutputRustType, "types::")
 }
 
+// HasPathCaptures reports whether the route's path has a {param} capture,
+// which a manual route's handler reads into its RequestContext.
+func (e EndpointInfo) HasPathCaptures() bool {
+	return strings.Contains(e.Path, "{")
+}
+
 // HasControls reports whether the route has a traffic control, needs a
 // caller or runs the service step: build_router applies RouteControls to
 // it.
@@ -277,7 +285,10 @@ type APIOutput struct {
 	rustapigen.APIOutputBase
 	// Endpoints are the operations the router mounts.
 	Endpoints []EndpointInfo
-	// ManualEndpoints are the @manualRouteRegistration operations, which the
+	// ManualEndpoints are the @manualRouteRegistration operations: a method
+	// each of the ManualRoutes trait, whose handlers
+	// build_router_with_manual_routes mounts, as a stack's server does with
+	// what the implementation's create_manual_routes builds (D51), or the
 	// service mounts itself.
 	ManualEndpoints []EndpointInfo
 	// IdentityEndpoints are the user model's operations (D50), which the
@@ -478,11 +489,14 @@ type Options struct {
 // operation's route and auth rules (OperationInfo), so an in-process caller
 // runs an operation by its route's rules.
 //
-// An operation declared @manualRouteRegistration is left to the service, as
-// the Go server leaves it out of RegisterRoutes and the TypeScript server
-// out of its implementation interfaces: the router does not mount it, its
-// namespace trait has no method for it, and it gets no scaffold. The service
-// adds its route to the router build_router returns. The router has no step
+// An operation declared @manualRouteRegistration has no method on its
+// namespace's trait and no scaffold of its own, as the TypeScript server
+// leaves it out of its implementation interfaces: its handler is a method
+// of the ManualRoutes trait, which build_router_with_manual_routes mounts
+// behind the route's controls, as a stack's server does with what the
+// implementation's create_manual_routes builds (D51). build_router does not
+// mount it, and a service may add its route to the router build_router
+// returns instead. The router has no step
 // that decrypts a request body and none that reads a multipart one, so an
 // encrypted operation or a file upload that is not
 // @manualRouteRegistration is refused.

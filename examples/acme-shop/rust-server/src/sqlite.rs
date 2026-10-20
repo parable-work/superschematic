@@ -10,7 +10,9 @@
 //! its page's limit after the cursor's key, the columns it orders by as
 //! the table holds them, its id last, with a row-value comparison (D60);
 //! the reviews' search is a `LIKE` per word over the review's
-//! `search_text`, which SQLite computes as it reads each row (D62).
+//! `search_text`, which SQLite computes as it reads each row (D62). A
+//! shopper's lists, reads and cancels of orders hold a condition on the
+//! order's `customer_id`, and staff's none.
 //!
 //! One connection serves every request, behind a mutex, and a statement
 //! blocks the executor while it runs, as the version graph's rusqlite
@@ -32,7 +34,7 @@ use rusqlite::{ffi, params, params_from_iter, Connection, OpenFlags, OptionalExt
 use superschematic_http_runtime::page::{Cursor, Page, PageRequest};
 use superschematic_http_runtime::{search, ApiError, RequestContext};
 
-use crate::{caller, now};
+use crate::{caller, now, sees_every_order};
 
 /// The shop's catalog, orders and reviews in a SQLite file.
 pub struct SqliteShop {
@@ -223,6 +225,16 @@ fn shopper(ctx: &RequestContext) -> Result<String, ApiError> {
         .map_err(|_| ApiError::forbidden("the caller is not a user of the shop"))
 }
 
+/// The customer whose orders the caller reads and cancels: the caller, by
+/// their id as the tables hold it, or, for staff, every customer (`None`).
+fn customer_of(ctx: &RequestContext) -> Result<Option<String>, ApiError> {
+    if sees_every_order(ctx) {
+        Ok(None)
+    } else {
+        shopper(ctx).map(Some)
+    }
+}
+
 fn internal(err: impl fmt::Display) -> ApiError {
     ApiError::internal(err.to_string())
 }
@@ -298,12 +310,20 @@ fn with_lines(
     Ok(order)
 }
 
-/// The order with this id, as hyphenated text.
-fn read_order(conn: &Connection, id: &str) -> Result<types::OrderView, ApiError> {
+/// The order with this id, as hyphenated text, when it is `customer`'s,
+/// or any customer's for `None`. Another customer's order is the 404 of
+/// one no one placed.
+fn read_order(
+    conn: &Connection,
+    id: &str,
+    customer: Option<&str>,
+) -> Result<types::OrderView, ApiError> {
     let order = conn
         .query_row(
-            &format!(r#"SELECT {ORDER_COLUMNS} FROM "order" WHERE id = ?1"#),
-            [id],
+            &format!(
+                r#"SELECT {ORDER_COLUMNS} FROM "order" WHERE id = ?1 AND (?2 IS NULL OR customer_id = ?2)"#
+            ),
+            params![id, customer],
             order_row,
         )
         .optional()
@@ -389,14 +409,18 @@ fn review_row(row: &Row) -> rusqlite::Result<types::ReviewView> {
 
 #[async_trait]
 impl OrderImplementation for SqliteShop {
-    /// The orders, oldest first, with the given statuses, or of every
-    /// status when there are none.
+    /// The caller's orders, or every customer's for staff, oldest first,
+    /// with the given statuses, or of every status when there are none. A
+    /// cursor names a place among the orders the caller lists.
     async fn list_orders(
         &self,
-        _ctx: RequestContext,
+        ctx: RequestContext,
         args: OrderListOrdersArgs,
     ) -> Result<Page<types::OrderView>, ApiError> {
         let mut query = ListQuery::default();
+        if let Some(customer) = customer_of(&ctx)? {
+            query.condition("customer_id = ?", [Value::Text(customer)]);
+        }
         if let Some(statuses) = args.statuses.filter(|statuses| !statuses.is_empty()) {
             // The statuses go in as one JSON array, which json_each reads.
             let statuses: Vec<&str> = statuses.iter().map(|status| status.as_str()).collect();
@@ -466,31 +490,35 @@ impl OrderImplementation for SqliteShop {
                 )));
             }
         }
-        let order = read_order(&tx, &id)?;
+        let order = read_order(&tx, &id, Some(customer.as_str()))?;
         tx.commit().map_err(internal)?;
         Ok(order)
     }
 
+    /// The caller's order, or any for staff.
     async fn get_order(
         &self,
-        _ctx: RequestContext,
+        ctx: RequestContext,
         args: OrderGetOrderArgs,
     ) -> Result<types::OrderView, ApiError> {
-        read_order(&self.conn(), &uuid_text(&args.id))
+        let customer = customer_of(&ctx)?;
+        read_order(&self.conn(), &uuid_text(&args.id), customer.as_deref())
     }
 
+    /// Cancels the caller's order, or any for staff, while it is placed.
     async fn cancel_order(
         &self,
-        _ctx: RequestContext,
+        ctx: RequestContext,
         args: OrderCancelOrderArgs,
     ) -> Result<types::OrderView, ApiError> {
+        let customer = customer_of(&ctx)?;
         let id = uuid_text(&args.id);
         let mut conn = self.conn();
         let tx = conn.transaction().map_err(internal)?;
         let status: Option<String> = tx
             .query_row(
-                r#"SELECT status FROM "order" WHERE id = ?1"#,
-                [&id],
+                r#"SELECT status FROM "order" WHERE id = ?1 AND (?2 IS NULL OR customer_id = ?2)"#,
+                params![&id, &customer],
                 |row| row.get(0),
             )
             .optional()
@@ -512,7 +540,7 @@ impl OrderImplementation for SqliteShop {
             ],
         )
         .map_err(internal)?;
-        let order = read_order(&tx, &id)?;
+        let order = read_order(&tx, &id, customer.as_deref())?;
         tx.commit().map_err(internal)?;
         Ok(order)
     }

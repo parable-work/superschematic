@@ -160,6 +160,21 @@ type EndpointInfo struct {
 	FilesStructName          string
 	Filterable               bool
 
+	// OutputArrayDepth is the number of list levels of the response: 0, 1
+	// for a list, 2 for a list of lists. For a map it is the list levels
+	// of a value.
+	OutputArrayDepth int
+	// OutputIsMap marks a map response, map[string] of the output at
+	// OutputArrayDepth (Record<string, T> or Record<string, T[]>).
+	OutputIsMap bool
+	// OutputNullable marks a response that may be null (Nullable<T>). One
+	// union value then decodes through a pointer to its wrapper, and null
+	// returns nil.
+	OutputNullable bool
+	// OutputUnionGoType is the union a union response holds (types.X),
+	// each element of a list of it decoded through its wrapper.
+	OutputUnionGoType string
+
 	// Page is the endpoint's @paginated (D60), nil when it does not page.
 	// The method then takes a runtime.PageRequest after its arguments and
 	// returns a runtime.Page of ItemGoType (OutputGoType), and
@@ -534,7 +549,7 @@ func convertEndpoint(ep apigen.EndpointInfo, isScopedNS bool, scopeParamName str
 
 	// A paged operation's list is one level (D60): its method returns a
 	// page of the list's items.
-	outputGoType := outputType(ep.OutputType, ep.OutputArrayDepth(), scalarSymbols)
+	outputGoType := outputType(ep.OutputType, ep.OutputArrayDepth(), ep.OutputIsMap, scalarSymbols)
 	var itemGoType, allMethodName string
 	if ep.Page != nil {
 		itemGoType = qualifyType(ep.OutputType, scalarSymbols)
@@ -550,6 +565,9 @@ func convertEndpoint(ep apigen.EndpointInfo, isScopedNS bool, scopeParamName str
 		InputType:             qualifyType(ep.InputType, scalarSymbols),
 		OutputType:            ep.OutputType,
 		OutputGoType:          outputGoType,
+		OutputArrayDepth:      ep.OutputArrayDepth(),
+		OutputIsMap:           ep.OutputIsMap,
+		OutputNullable:        ep.OutputNullable,
 		HasInput:              ep.HasInput,
 		RequiresAuth:          ep.RequiresAuth,
 		PathParams:            pathParams,
@@ -573,9 +591,18 @@ func convertEndpoint(ep apigen.EndpointInfo, isScopedNS bool, scopeParamName str
 }
 
 // outputType is the Go type of a response: the qualified output type in
-// arrayDepth slice levels.
-func outputType(typeName string, arrayDepth int, scalarSymbols map[string]string) string {
-	return goListType(qualifyType(typeName, scalarSymbols), arrayDepth)
+// arrayDepth slice levels, in a map[string] when isMap.
+func outputType(typeName string, arrayDepth int, isMap bool, scalarSymbols map[string]string) string {
+	return goMapOrListType(qualifyType(typeName, scalarSymbols), arrayDepth, isMap)
+}
+
+// goMapOrListType is goListType of elem, in a map[string] when isMap.
+func goMapOrListType(elem string, depth int, isMap bool) string {
+	listType := goListType(elem, depth)
+	if isMap {
+		return "map[string]" + listType
+	}
+	return listType
 }
 
 // goListType wraps a Go element type in depth slice levels: "T", "[]T" or
@@ -693,12 +720,24 @@ func WriteSDKWithToolsProfiled(output *SDKOutput, apiOutput *apigen.APIOutput, o
 						continue
 					}
 					endpoint.IsUnionOutput = true
-					endpoint.OutputUnionWrapperGoType = "types." + outputType + "Wrapper"
+					endpoint.OutputUnionGoType = "types." + outputType
+					wrapper := endpoint.OutputUnionGoType + "Wrapper"
 					if endpoint.Page != nil {
 						// A page of a union decodes each item through its
 						// wrapper, since a union is an interface, and
 						// returns the page of the items the wrappers hold.
-						endpoint.OutputUnionWrapperGoType = "runtime.Page[" + endpoint.OutputUnionWrapperGoType + "]"
+						endpoint.OutputUnionWrapperGoType = "runtime.Page[" + wrapper + "]"
+					} else if endpoint.OutputNullable && !endpoint.OutputIsMap && endpoint.OutputArrayDepth == 0 {
+						// One union value that may be null decodes
+						// through a pointer to its wrapper, nil for null.
+						endpoint.OutputUnionWrapperGoType = "*" + wrapper
+					} else {
+						// A list, a list of lists, a map or a map of
+						// lists of a union decodes each element through
+						// its wrapper, as a page's items are, and returns
+						// the values the wrappers hold, at the same list
+						// levels and keys.
+						endpoint.OutputUnionWrapperGoType = goMapOrListType(wrapper, endpoint.OutputArrayDepth, endpoint.OutputIsMap)
 					}
 				}
 			}

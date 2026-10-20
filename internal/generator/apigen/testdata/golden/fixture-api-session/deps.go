@@ -3,6 +3,10 @@
 // This file defines Deps, what the implementation of fixture-api is built
 // from, and Constructor, the signature of the implementation's constructor
 // (docs/stack-model.md, section 8.5).
+//
+// It also defines ManualRoutesConstructor, the signature of the
+// implementation's constructor of the handlers of its
+// @manualRouteRegistration operations (D51; section 8.5).
 
 package fixtureapi
 
@@ -27,3 +31,11 @@ type Deps struct {
 // New(deps Deps) (Implementations, error), which the entrypoint calls. The
 // scaffolded implementation asserts it: var _ fixtureapi.Constructor = New.
 type Constructor func(deps Deps) (Implementations, error)
+
+// ManualRoutesConstructor is the signature of the implementation's
+// constructor of the handlers of its @manualRouteRegistration operations,
+// NewManualRoutes(deps Deps) (ManualRoutes, error), which a server's
+// entrypoint calls with the API's Deps and passes to RegisterRoutes as
+// Config.ManualRoutes. The scaffolded implementation asserts it:
+// var _ fixtureapi.ManualRoutesConstructor = NewManualRoutes.
+type ManualRoutesConstructor func(deps Deps) (ManualRoutes, error)

@@ -37,8 +37,10 @@ var StockQuotedFields = map[string]string{
 	"shelf_id":   `shelf_id`,
 }
 
-// buildStockOrderByClause builds an ORDER BY clause for Stock
-func buildStockOrderByClause(orderBy []StockOrderBy, tableName string) string {
+// buildStockOrderByClause builds an ORDER BY clause for Stock.
+// quotedTable is the table's name as the FROM clause spells it, quoted when
+// it is a keyword (a table named order is "order").
+func buildStockOrderByClause(orderBy []StockOrderBy, quotedTable string) string {
 	if len(orderBy) == 0 {
 		return ""
 	}
@@ -55,7 +57,7 @@ func buildStockOrderByClause(orderBy []StockOrderBy, tableName string) string {
 		if !ok {
 			quotedField = fieldStr // Fallback to unquoted if not found
 		}
-		clauses = append(clauses, fmt.Sprintf("%s.%s %s", tableName, quotedField, direction))
+		clauses = append(clauses, fmt.Sprintf("%s.%s %s", quotedTable, quotedField, direction))
 	}
 
 	if len(clauses) == 0 {
@@ -441,7 +443,7 @@ func (r *StockRepository) FindOne(ctx context.Context, filter *StockFilter, opts
 	whereClause := filter.buildWhereClause(&args, 0)
 
 	// Build ORDER BY clause
-	orderByClause := buildStockOrderByClause(opts.OrderBy, "stock")
+	orderByClause := buildStockOrderByClause(opts.OrderBy, `stock`)
 
 	// Build query
 	query := fmt.Sprintf(`SELECT %s FROM stock%s%s LIMIT 1`, selectFields, whereClause, orderByClause)
@@ -602,7 +604,7 @@ func (r *StockRepository) FindMany(ctx context.Context, filter *StockFilter, opt
 	whereClause := filter.buildWhereClause(&args, 0)
 
 	// Build ORDER BY clause
-	orderByClause := buildStockOrderByClause(opts.OrderBy, "stock")
+	orderByClause := buildStockOrderByClause(opts.OrderBy, `stock`)
 
 	// Build LIMIT/OFFSET clause
 	limitOffsetClause := buildLimitOffsetClauseTyped(opts.Limit, opts.Offset)

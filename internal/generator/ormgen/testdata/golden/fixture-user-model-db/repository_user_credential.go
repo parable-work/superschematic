@@ -38,8 +38,10 @@ var UserCredentialQuotedFields = map[string]string{
 	"user_id":             `user_id`,
 }
 
-// buildUserCredentialOrderByClause builds an ORDER BY clause for UserCredential
-func buildUserCredentialOrderByClause(orderBy []UserCredentialOrderBy, tableName string) string {
+// buildUserCredentialOrderByClause builds an ORDER BY clause for UserCredential.
+// quotedTable is the table's name as the FROM clause spells it, quoted when
+// it is a keyword (a table named order is "order").
+func buildUserCredentialOrderByClause(orderBy []UserCredentialOrderBy, quotedTable string) string {
 	if len(orderBy) == 0 {
 		return ""
 	}
@@ -56,7 +58,7 @@ func buildUserCredentialOrderByClause(orderBy []UserCredentialOrderBy, tableName
 		if !ok {
 			quotedField = fieldStr // Fallback to unquoted if not found
 		}
-		clauses = append(clauses, fmt.Sprintf("%s.%s %s", tableName, quotedField, direction))
+		clauses = append(clauses, fmt.Sprintf("%s.%s %s", quotedTable, quotedField, direction))
 	}
 
 	if len(clauses) == 0 {
@@ -461,7 +463,7 @@ func (r *UserCredentialRepository) FindOne(ctx context.Context, filter *UserCred
 	whereClause := filter.buildWhereClause(&args, 0)
 
 	// Build ORDER BY clause
-	orderByClause := buildUserCredentialOrderByClause(opts.OrderBy, "user_credential")
+	orderByClause := buildUserCredentialOrderByClause(opts.OrderBy, `user_credential`)
 
 	// Build query
 	query := fmt.Sprintf(`SELECT %s FROM user_credential%s%s LIMIT 1`, selectFields, whereClause, orderByClause)
@@ -634,7 +636,7 @@ func (r *UserCredentialRepository) FindMany(ctx context.Context, filter *UserCre
 	whereClause := filter.buildWhereClause(&args, 0)
 
 	// Build ORDER BY clause
-	orderByClause := buildUserCredentialOrderByClause(opts.OrderBy, "user_credential")
+	orderByClause := buildUserCredentialOrderByClause(opts.OrderBy, `user_credential`)
 
 	// Build LIMIT/OFFSET clause
 	limitOffsetClause := buildLimitOffsetClauseTyped(opts.Limit, opts.Offset)

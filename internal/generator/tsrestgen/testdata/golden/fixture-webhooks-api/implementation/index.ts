@@ -9,6 +9,7 @@ import type {
   AuthenticatorFactory,
   Constructor,
   Deps,
+  ManualRoutesConstructor,
   EventImplementation,
   WebhookImplementation,
 } from '@schemas/fixture-webhooks-api-api';
@@ -36,6 +37,19 @@ export const create: Constructor = deps => ({
  * header) with your identity provider and return its Principal.
  */
 export const authenticate: AuthenticatorFactory = () => async () => null;
+
+/**
+ * Builds the handlers of the @manualRouteRegistration operations of
+ * fixture-webhooks-api from its dependencies. Its type is the generated
+ * ManualRoutesConstructor. The router runs each route's auth gate, then
+ * hands its handler the Hono context and the RequestContext, and sends the
+ * Response the handler returns.
+ */
+export const createManualRoutes: ManualRoutesConstructor = deps => ({
+  async receiveRawGithubEvent() {
+    throw notImplemented('webhook.receiveRawGithubEvent');
+  },
+});
 
 function eventImplementation(deps: Deps): EventImplementation {
   return {

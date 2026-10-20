@@ -531,7 +531,68 @@ func (n *{{$.Namespace.StructName}}) {{.MethodName}}(
 		items[i] = item.Value
 	}
 	return {{.OutputGoType}}{Items: items, Next: out.Next}, nil
+	{{- else if and .IsUnionOutput .OutputIsMap}}
+	if out == nil {
+		return nil, nil
+	}
+	values := make({{.OutputGoType}}, len(out))
+	{{- if eq .OutputArrayDepth 1}}
+	for key, list := range out {
+		items := make([]{{.OutputUnionGoType}}, len(list))
+		for i, item := range list {
+			if item.Value == nil {
+				var zero {{.OutputGoType}}
+				return zero, fmt.Errorf("decode {{.MethodName}} response: item [%q][%d]: {{.OutputType}} union value is nil", key, i)
+			}
+			items[i] = item.Value
+		}
+		values[key] = items
+	}
+	{{- else}}
+	for key, item := range out {
+		if item.Value == nil {
+			var zero {{.OutputGoType}}
+			return zero, fmt.Errorf("decode {{.MethodName}} response: item [%q]: {{.OutputType}} union value is nil", key)
+		}
+		values[key] = item.Value
+	}
+	{{- end}}
+	return values, nil
+	{{- else if and .IsUnionOutput (eq .OutputArrayDepth 2)}}
+	if out == nil {
+		return nil, nil
+	}
+	rows := make({{.OutputGoType}}, len(out))
+	for i, row := range out {
+		rows[i] = make([]{{.OutputUnionGoType}}, len(row))
+		for j, item := range row {
+			if item.Value == nil {
+				var zero {{.OutputGoType}}
+				return zero, fmt.Errorf("decode {{.MethodName}} response: item [%d][%d]: {{.OutputType}} union value is nil", i, j)
+			}
+			rows[i][j] = item.Value
+		}
+	}
+	return rows, nil
+	{{- else if and .IsUnionOutput (eq .OutputArrayDepth 1)}}
+	if out == nil {
+		return nil, nil
+	}
+	items := make({{.OutputGoType}}, len(out))
+	for i, item := range out {
+		if item.Value == nil {
+			var zero {{.OutputGoType}}
+			return zero, fmt.Errorf("decode {{.MethodName}} response: item %d: {{.OutputType}} union value is nil", i)
+		}
+		items[i] = item.Value
+	}
+	return items, nil
 	{{- else if .IsUnionOutput}}
+	{{- if .OutputNullable}}
+	if out == nil {
+		return nil, nil
+	}
+	{{- end}}
 	if out.Value == nil {
 		var zero {{.OutputGoType}}
 		return zero, fmt.Errorf("decode {{.MethodName}} response: {{.OutputType}} union value is nil")

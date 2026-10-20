@@ -13,19 +13,18 @@ import (
 	ir "github.com/parable-work/superschematic/ir"
 )
 
-// TestATypeScriptImplementationThatPredatesItsJobsFails: ts-shop declares
-// a job and a worker, and its implementation, which exists and so is the
-// engineer's, exports neither createJobs nor createWorkers. The build
-// writes nothing into it and fails, saying what to add (D52); with
-// createJobs added, it fails for createWorkers, the message's queue named
-// (D53); with both, it builds.
-func TestATypeScriptImplementationThatPredatesItsJobsFails(t *testing.T) {
+// buildOverTSShop builds ts-stack once, which scaffolds ts-shop's
+// implementation, and returns the implementation's directory and a build
+// of ts-stack over code in place of the scaffold, which fails the test
+// when the build writes into the implementation.
+func buildOverTSShop(t *testing.T) (string, func(code string) error) {
+	t.Helper()
 	repoRoot := t.TempDir()
 	f := loadTypeScriptFixture(t)
 	f.build(t, repoRoot, tsFakePaths(repoRoot), append(slices.Clone(tsAPIs), "ts-stack")...)
 	dir := naming.Default().TypeScriptImplementationDir(repoRoot, "ts-shop")
 	file := filepath.Join(dir, tsrestgen.ImplementationFile)
-	build := func(code string) error {
+	return dir, func(code string) error {
 		t.Helper()
 		if err := os.WriteFile(file, []byte(code), 0o644); err != nil {
 			t.Fatal(err)
@@ -36,7 +35,43 @@ func TestATypeScriptImplementationThatPredatesItsJobsFails(t *testing.T) {
 		}
 		return err
 	}
-	before := "// The engineer's code, from before the job.\nexport const create = () => ({});\n"
+}
+
+// TestATypeScriptImplementationThatPredatesItsManualRoutesFails: ts-shop
+// declares a @manualRouteRegistration operation, exportCart, and its
+// implementation, which exists and so is the engineer's, exports no
+// createManualRoutes, whose handlers the server's main.ts hands
+// buildRouter (D51). The build writes nothing into it and fails, saying
+// what to add; with it exported, it builds.
+func TestATypeScriptImplementationThatPredatesItsManualRoutesFails(t *testing.T) {
+	dir, build := buildOverTSShop(t)
+	before := "// The engineer's code, from before the manual route.\nexport const create = () => ({});\nexport const createJobs = () => ({});\nexport const createWorkers = () => ({});\n"
+	err := build(before)
+	for _, want := range []string{
+		"stack ts-stack: ts-shop declares @manualRouteRegistration operations, and its implementation at " + dir + ", which the build no longer writes into, exports no createManualRoutes",
+		"export const createManualRoutes: ManualRoutesConstructor = deps => ({",
+		"async exportCart(c, ctx) {\n      // answer GET /api/carts/{id}/export with a Response",
+		"importing ManualRoutesConstructor from @schemas/ts-shop-api",
+		"(docs/stack-model.md, section 8.6)",
+	} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("build = %v, want it to say %q", err, want)
+		}
+	}
+	if err := build(before + "export const createManualRoutes = () => ({});\n"); err != nil {
+		t.Fatalf("a build over an implementation that exports createManualRoutes = %v", err)
+	}
+}
+
+// TestATypeScriptImplementationThatPredatesItsJobsFails: ts-shop declares
+// a job and a worker, and its implementation, which exists and so is the
+// engineer's, exports neither createJobs nor createWorkers. The build
+// writes nothing into it and fails, saying what to add (D52); with
+// createJobs added, it fails for createWorkers, the message's queue named
+// (D53); with both, it builds.
+func TestATypeScriptImplementationThatPredatesItsJobsFails(t *testing.T) {
+	dir, build := buildOverTSShop(t)
+	before := "// The engineer's code, from before the job.\nexport const create = () => ({});\nexport const createManualRoutes = () => ({});\n"
 	err := build(before)
 	for _, want := range []string{
 		"stack ts-stack: ts-shop declares jobs, and its implementation at " + dir + ", which the build no longer writes into, exports no createJobs",

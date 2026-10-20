@@ -27,7 +27,10 @@ line's product from the catalog `shop-orders` lists, filters their orders
 at `/orders` and pages through them, and cancels one from its page,
 `/orders/{id}`, each page's input taken through a form the crate builds.
 The crate also generates a console of the shop's resources at `/console`
-([Generated pages](#generated-pages)).
+([Generated pages](#generated-pages)). The pages and the console show a
+shopper their own orders alone, since the implementations list, read
+and cancel no other customer's, and staff, who hold `orders.any`, every
+customer's.
 
 ## Build the crate
 
@@ -545,7 +548,11 @@ link to the app's sign-in page that comes back to the page.
 A layout at the prefix puts each page in `<main>`, after a nav of the
 resources the caller may list, the current one marked with
 `aria-current`, and a breadcrumb trail from the index to the page, an
-item by its title where its type declares one. A list whose path extends
+item by its title where its type declares one. Else an item is named by
+the label of what its route's value refers to, when every operation whose
+route holds that value refers to one target by one value, so a supplier's
+products at `suppliers/{supplierId}/products` name their supplier though
+no operation reads one; else by its noun and id. A list whose path extends
 another's, `orders/archived` beside `orders/{id}`, is its own in both,
 never an order named archived. List rows link to their items through the
 `hrefs` prop each `<type>_table` takes, a row without a title by its noun
@@ -569,12 +576,27 @@ to one resource's pages, named by its path below the prefix as
 resource's choice for a field wins on its pages over the app's.
 
 A paged list's page renders the page's items, then a `<nav
-class="ss-pager">` with "Next page" while another follows and "First
-page" on a later one, each keeping the filter and the limit; a cursor or
-limit the route refuses is its 400, as the form's message. A paged list
-without a filter renders no form, and a paged section on an item's page
-its first page and a link to the next. A search argument is the filter's
-first control, in a `role="search"` form. Every form a page renders
+class="ss-pager">`: "First page" on a later page, "Previous page"
+(`rel="prev"`) while the page before is known, and "Next page" while
+another follows, each keeping the filter and the limit, then a "Per page"
+form of the route's page sizes. The console keeps the cursors of the
+pages before the current one in the query's `back`, oldest first, joined
+by `.`: the fourth page's link reads `?cursor=c4&back=c2.c3`. `back`
+holds at most 4096 characters, so the oldest cursors are dropped first,
+and a leading `~` says so; a `back` the console cannot read links no page
+before and is never refused. On the second page Previous and First are
+the same link, and both render, so each page offers its links in the same
+places. The size form offers the route's `defaultLimit` and `maxLimit`
+and each of 10, 20, 50, 100, 200, 500 and 1000 below `maxLimit`, 10, 20,
+50 and 100 for acme's orders, and holds the filter; it starts at the
+first page, as a filter does, and the filter keeps the size. A cursor or
+limit the route refuses is its 400, as the form's message. A refused
+cursor offers only the first page's link, and a refused limit is kept by
+no link and no form, so that link and the filter start again at the
+route's default. A paged list without a filter renders no filter form,
+and a paged section on an item's page its first page and a link to the
+next. A search argument is the filter's first control, in a
+`role="search"` form. Every form a page renders
 takes its references' options, and its tables and details their labels,
 under the app's choices, and a list's rows link to their items through a
 detail whose path parameter refers to its own type, `products/{productId}`.
@@ -598,7 +620,7 @@ each word, in any case, and the links of a paged search carry it:
 
 With `live: true` beside `enabled` in `outputs.topcoat.pages`, or
 `pages_live = true` beside `pages_prefix` in the table, each list with a
-filter renders through a Topcoat shard at a path of its own,
+filter, or that pages, renders through a Topcoat shard at a path of its own,
 `/console/_live/orders`. Without Topcoat's runtime in the browser nothing
 changes: the filter is a GET form and its submit loads the page. With
 it, the submit sends the form's query to the shard, which renders the
@@ -608,37 +630,24 @@ does and calls the list through the in-process call, which admits the
 caller and checks the filter, with the route's status for a refusal. The
 runtime applies only a 200, so a refusal leaves the table as it was
 until a reload. A paged list's links set the shard's query too, so a list
-pages in place, with or without a filter. An action's form keeps its
+pages in place, back and forth, with or without a filter, and its size
+form sets the query as the filter does. An action's form keeps its
 POST-redirect-GET.
 
-The acme app loads no runtime, so its console's lists are not live. An
-app that does gives the document its head in a root layout of its own,
-since the console's layout renders no `<html>`, and builds its router
-with the asset bundle and the runtime:
+acme's console is live: its `superschematic.toml` sets `pages_live =
+true`. The console's layout renders no `<html>`, so the app gives every
+page its document in a root layout of its own, which loads the runtime's
+script in its head when the router set the runtime up, and `app` takes
+the asset bundle and, with one, adds the assets and the runtime after
+`shop_orders`:
 
-```rust
-#[layout("/")]
-async fn document(slot: Slot<'_>) -> topcoat::Result<impl View> {
-    Ok(view! {
-        <!DOCTYPE html>
-        <html>
-            <head>topcoat::runtime::script()</head>
-            <body>(slot)</body>
-        </html>
-    })
-}
+<Snippet file="topcoat/src/lib.rs" symbol={['app', 'document']} />
 
-Router::builder()
-    .discover()
-    .app_context(console_settings())
-    .shop_orders(implementations, authenticator)
-    .assets(AssetBundle::load()?)
-    .runtime()
-    .build()
-```
-
-`topcoat asset bundle` writes the bundle, which holds the runtime's
-script, beside the binary.
+`main` loads `AssetBundle::load()`, the bundle that `topcoat asset bundle
+--bin acme-shop-topcoat` writes beside the binary, which holds the
+runtime's script. Without one it says so and serves the pages without the
+runtime, and the console's lists are the GET forms and links they are
+without it.
 
 ## Procedures
 
@@ -693,10 +702,15 @@ With `DATABASE_URL` set, the app opens that file, which must hold
 orders, users and sessions outlive the process; without it, the shop and
 its users are in memory. Either way the app stocks the shop from its
 catalog, which `listProducts` lists and an order's lines are priced from,
-in SQLite from the product's row. `DATABASE_URL` is a `sqlite:`
-URL, a `file:` URI or a path. A URL of another database, such as a
-Postgres one already in the shell, stops the app with an error that names
-its scheme alone, since the URL may hold a password:
+in SQLite from the product's row, and adds the demo shopper and staff
+unless the file holds them. `add_people` first rewrites the `shopper`
+and `staff` roles to the permissions they grant now, so a file made
+before staff held `orders.any`, whose `shopper` role grants all of
+`orders`, stops showing a shopper every customer's orders.
+`DATABASE_URL` is a `sqlite:` URL, a `file:` URI or a path. A URL of
+another database, such as a Postgres one already in the shell, stops the
+app with an error that names its scheme alone, since the URL may hold a
+password:
 
 <Snippet file="topcoat/src/main.rs" symbol="main" />
 
@@ -726,6 +740,13 @@ invalid), post a valid one, and read it back from the page and from the
 JSON API:
 
 <Snippet file="topcoat/tests/app.rs" symbol="a_review_needs_a_signed_in_shopper_and_its_rules" />
+
+Another test signs two shoppers and staff in, over the shop in memory and
+over SQLite (`a_shopper_sees_their_own_orders_and_staff_every_customers`).
+Each shopper's `/orders`, a page at a time, and `/console/orders` list
+their own orders alone; another customer's order is a 404 on its page, its
+console page, both cancels and the JSON API's routes, and stays placed;
+staff list all four orders and cancel any.
 
 The orders tests place an order through its form: a row button adds a
 line and renders the form again without placing the order, a quantity of

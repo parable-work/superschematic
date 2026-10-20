@@ -35,8 +35,10 @@ var RecipeQuotedFields = map[string]string{
 	"created_by": `created_by`,
 }
 
-// buildRecipeOrderByClause builds an ORDER BY clause for Recipe
-func buildRecipeOrderByClause(orderBy []RecipeOrderBy, tableName string) string {
+// buildRecipeOrderByClause builds an ORDER BY clause for Recipe.
+// quotedTable is the table's name as the FROM clause spells it, quoted when
+// it is a keyword (a table named order is "order").
+func buildRecipeOrderByClause(orderBy []RecipeOrderBy, quotedTable string) string {
 	if len(orderBy) == 0 {
 		return ""
 	}
@@ -53,7 +55,7 @@ func buildRecipeOrderByClause(orderBy []RecipeOrderBy, tableName string) string 
 		if !ok {
 			quotedField = fieldStr // Fallback to unquoted if not found
 		}
-		clauses = append(clauses, fmt.Sprintf("%s.%s %s", tableName, quotedField, direction))
+		clauses = append(clauses, fmt.Sprintf("%s.%s %s", quotedTable, quotedField, direction))
 	}
 
 	if len(clauses) == 0 {
@@ -313,7 +315,7 @@ func (r *RecipeRepository) FindOne(ctx context.Context, filter *RecipeFilter, op
 	whereClause := filter.buildWhereClause(&args, 0)
 
 	// Build ORDER BY clause
-	orderByClause := buildRecipeOrderByClause(opts.OrderBy, "recipe")
+	orderByClause := buildRecipeOrderByClause(opts.OrderBy, `recipe`)
 
 	// Build query
 	query := fmt.Sprintf(`SELECT %s FROM recipe%s%s LIMIT 1`, selectFields, whereClause, orderByClause)
@@ -432,7 +434,7 @@ func (r *RecipeRepository) FindMany(ctx context.Context, filter *RecipeFilter, o
 	whereClause := filter.buildWhereClause(&args, 0)
 
 	// Build ORDER BY clause
-	orderByClause := buildRecipeOrderByClause(opts.OrderBy, "recipe")
+	orderByClause := buildRecipeOrderByClause(opts.OrderBy, `recipe`)
 
 	// Build LIMIT/OFFSET clause
 	limitOffsetClause := buildLimitOffsetClauseTyped(opts.Limit, opts.Offset)

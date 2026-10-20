@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -66,8 +67,10 @@ import (
 // with `superschematic stack run`, and again on the every-minute schedule
 // Dev's settings give it, which stack dev runs
 // (section 8.7, D52). shop-orders lists its catalog, by the lookup of the
-// products' ids, and its orders a page at a time over Postgres, and a
-// product's reviews searched by their words and paged (D60, D61, D62).
+// products' ids, and its orders a page at a time over Postgres, each
+// shopper's own and staff every customer's, and a product's reviews
+// searched by their words and paged (D60, D61, D62); a shopper gets and
+// cancels no other customer's order.
 // The order took the product's level below the threshold staff set, so
 // shop-stock's reservation enqueued StockLow in its transaction, and
 // shop-stock's worker ReorderStock, a Rust process on its generated
@@ -108,8 +111,10 @@ func TestStackDevRunsTheShop(t *testing.T) {
 	output := dev.output
 	env := dev.waitUntilRunning(t, outputRoot)
 
+	// Staff, who hold products, orders and stock, add and stock the
+	// products, and order them too.
 	ctx := context.Background()
-	token := signInOnTheStack(ctx, t, env.database, env.servers["shop-api"])
+	token := signInOnTheStack(ctx, t, env.database, env.servers["shop-api"], "Ada Lovelace", "products", "orders", "stock")
 	n := time.Now().UnixNano()
 
 	// shop-api: staff add a product, and it is listed.
@@ -200,10 +205,10 @@ func TestStackDevRunsTheShop(t *testing.T) {
 		t.Fatalf("ListStock = %+v, %v; want three of %s", stock, err, product.Id)
 	}
 
-	// shop-orders: a shopper orders two of it, in one transaction over
-	// the order and its lines, which reserves them on shop-stock. That
-	// leaves one, below the threshold, so the reservation enqueues
-	// StockLow in its transaction.
+	// shop-orders: staff order two of it, as a shopper would, in one
+	// transaction over the order and its lines, which reserves them on
+	// shop-stock. That leaves one, below the threshold, so the reservation
+	// enqueues StockLow in its transaction.
 	orders, err := orderssdk.New(orderssdk.SDKConfig{BaseURL: env.servers["shop-orders"], Auth: &orderssdk.AuthConfig{Token: token}})
 	if err != nil {
 		t.Fatal(err)
@@ -436,8 +441,8 @@ func TestStackDevRunsTheShop(t *testing.T) {
 	}
 
 	// The orders, oldest first: a page of one order at a time holds each
-	// order once, in the order of one page of them all, the shopper's two
-	// last, and a status filter holds on every page.
+	// order once, in the order of one page of them all, the two staff
+	// placed last, and a status filter holds on every page.
 	var paged []orderstypes.IdentityUUID
 	for listed, err := range orders.OrderNamespace.ListOrdersAll(ctx, nil, orderspages.PageRequest{Limit: 1}) {
 		if err != nil {
@@ -467,10 +472,87 @@ func TestStackDevRunsTheShop(t *testing.T) {
 		t.Fatalf("ListOrders after a cursor it never returned: %v, want 400", err)
 	}
 
+	// Two shoppers, who hold orders.read and orders.write, order the black
+	// tea, which staff stock, twice each. A shopper lists their own orders
+	// alone, a page of one at a time, and another customer's order is the
+	// 404 of one no one placed, to get and to cancel. Staff, whose orders
+	// covers orders.any, list everyone's, theirs first, as placed, and get
+	// and cancel any: the cancel answers the order cancelled, or 409 once
+	// the worker has fulfilled it, never 404.
+	if _, err := staff.StockNamespace.SetStock(ctx, other.Id.String(), stocktypes.SetStockInput{Quantity: 10}); err != nil {
+		t.Fatalf("SetStock of the black tea: %v", err)
+	}
+	shoppers := []string{"Grace Hopper", "Alan Turing"}
+	tokens := map[string]string{}
+	placedBy := map[string][]orderstypes.IdentityUUID{}
+	ordersOf := func(token string) *orderssdk.ShopOrdersSDK {
+		t.Helper()
+		client, err := orderssdk.New(orderssdk.SDKConfig{BaseURL: env.servers["shop-orders"], Auth: &orderssdk.AuthConfig{Token: token}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return client
+	}
+	listAll := func(client *orderssdk.ShopOrdersSDK) []orderstypes.IdentityUUID {
+		t.Helper()
+		var ids []orderstypes.IdentityUUID
+		for listed, err := range client.OrderNamespace.ListOrdersAll(ctx, nil, orderspages.PageRequest{Limit: 1}) {
+			if err != nil {
+				t.Fatalf("ListOrdersAll: %v", err)
+			}
+			ids = append(ids, listed.Id)
+		}
+		return ids
+	}
+	for _, name := range shoppers {
+		tokens[name] = signInOnTheStack(ctx, t, env.database, env.servers["shop-api"], name, "orders.read", "orders.write")
+		for range 2 {
+			placed, err := ordersOf(tokens[name]).OrderNamespace.PlaceOrder(ctx, orderstypes.PlaceOrderInput{
+				Lines:           []orderstypes.PlaceOrderLine{{ProductId: other.Id, Quantity: 1}},
+				ShippingAddress: address,
+			})
+			if err != nil {
+				t.Fatalf("%s's PlaceOrder: %v", name, err)
+			}
+			placedBy[name] = append(placedBy[name], placed.Id)
+		}
+	}
+	for i, name := range shoppers {
+		shopper := ordersOf(tokens[name])
+		if got := listAll(shopper); !slices.Equal(got, placedBy[name]) {
+			t.Fatalf("%s's ListOrdersAll = %v, want their own, %v", name, got, placedBy[name])
+		}
+		theirs := placedBy[shoppers[1-i]][0]
+		if _, err := shopper.OrderNamespace.GetOrder(ctx, theirs.String()); !errors.As(err, &refused) || refused.StatusCode != http.StatusNotFound {
+			t.Fatalf("%s's GetOrder of another customer's order: %v, want 404", name, err)
+		}
+		reason := "not mine"
+		if _, err := shopper.OrderNamespace.CancelOrder(ctx, theirs.String(), ordersns.OrderCancelOrderInput{Reason: &reason}); !errors.As(err, &refused) || refused.StatusCode != http.StatusNotFound {
+			t.Fatalf("%s's CancelOrder of another customer's order: %v, want 404", name, err)
+		}
+	}
+	everyone := slices.Concat(paged, placedBy[shoppers[0]], placedBy[shoppers[1]])
+	if got := listAll(orders); !slices.Equal(got, everyone) {
+		t.Fatalf("staff's ListOrdersAll = %v, want %v", got, everyone)
+	}
+	for _, name := range shoppers {
+		for _, id := range placedBy[name] {
+			got, err := orders.OrderNamespace.GetOrder(ctx, id.String())
+			if err != nil || got.Id != id || got.Status == orderstypes.OrderStatus_Cancelled {
+				t.Fatalf("staff's GetOrder of %s's order %s = %+v, %v; want it, not cancelled", name, id, got, err)
+			}
+		}
+	}
+	reason := "out of stock"
+	cancelled, err := orders.OrderNamespace.CancelOrder(ctx, placedBy[shoppers[1]][1].String(), ordersns.OrderCancelOrderInput{Reason: &reason})
+	if (err != nil || cancelled.Status != orderstypes.OrderStatus_Cancelled) && (!errors.As(err, &refused) || refused.StatusCode != http.StatusConflict) {
+		t.Fatalf("staff's CancelOrder of %s's order = %+v, %v; want it cancelled, or 409 once fulfilled", shoppers[1], cancelled, err)
+	}
+
 	// The product's reviews, searched by every word over Postgres's
-	// search_text, in any case, a % matching itself (D62), and paged: the
-	// shopper and a second shopper review it.
-	reviewer := signInOnTheStack(ctx, t, env.database, env.servers["shop-api"])
+	// search_text, in any case, a % matching itself (D62), and paged: staff
+	// and a shopper review it.
+	reviewer := tokens[shoppers[0]]
 	for _, review := range []struct {
 		token string
 		input orderstypes.WriteReviewInput
@@ -885,13 +967,14 @@ func readEnvironment(t *testing.T, path string) environment {
 	return env
 }
 
-// signInOnTheStack creates a user in shop-db with a role that holds
-// products, orders and stock, through the identity runtime's store over the
-// database, as staff would through shop-api's administration routes; signs
-// them in through shop-api's generated login with a bearer session, and
-// returns its token. It also signs in with a cookie session, which the
-// local target's servers, on plain HTTP, write as session without Secure.
-func signInOnTheStack(ctx context.Context, t *testing.T, databaseURL, shopAPI string) string {
+// signInOnTheStack creates a user in shop-db named name, with a role of
+// their own that holds permissions, through the identity runtime's store
+// over the database, as staff would through shop-api's administration
+// routes; signs them in through shop-api's generated login with a bearer
+// session, and returns its token. It also signs in with a cookie session,
+// which the local target's servers, on plain HTTP, write as session
+// without Secure.
+func signInOnTheStack(ctx context.Context, t *testing.T, databaseURL, shopAPI, name string, permissions ...string) string {
 	t.Helper()
 	config, err := pgx.ParseConfig(databaseURL)
 	if err != nil {
@@ -904,16 +987,17 @@ func signInOnTheStack(ctx context.Context, t *testing.T, databaseURL, shopAPI st
 		t.Fatal(err)
 	}
 	n := time.Now().UnixNano()
-	login, password := fmt.Sprintf("ada.%d@example.com", n), "ada's password"
+	first := strings.ToLower(strings.Fields(name)[0])
+	login, password := fmt.Sprintf("%s.%d@example.com", first, n), first+"'s password"
 	hash, err := identity.HashPassword(password, identity.Config{}.Argon2Params())
 	if err != nil {
 		t.Fatal(err)
 	}
-	user, err := store.CreateUser(ctx, identity.NewUser{Login: login, Name: "Ada Lovelace", PasswordHash: hash, At: time.Now()})
+	user, err := store.CreateUser(ctx, identity.NewUser{Login: login, Name: name, PasswordHash: hash, At: time.Now()})
 	if err != nil {
 		t.Fatalf("create the user: %v", err)
 	}
-	role, err := store.CreateRole(ctx, fmt.Sprintf("staff-%d", n), []string{"products", "orders", "stock"})
+	role, err := store.CreateRole(ctx, fmt.Sprintf("%s-%d", first, n), permissions)
 	if err != nil {
 		t.Fatalf("create the role: %v", err)
 	}

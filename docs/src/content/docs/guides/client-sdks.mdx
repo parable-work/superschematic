@@ -132,10 +132,13 @@ into `retry_after()`, and a refused input's field errors, the problem's
 problem's `details`.
 
 In TypeScript and Python the 401, 403 and 429 classes extend the general
-one. In Go they embed `*APIError` but are types of their own, so
-`errors.As(err, &apiErr)` does not match them; check for them first, as
-`status` in the Go program above does. A request that never reached the
-server is a `NetworkError`, or `SDKError::Network` in Rust.
+one. In Go they are types of their own that embed `*APIError` and unwrap
+to it, so `errors.As(err, &apiErr)` finds the `*APIError` behind each of
+them; to tell them apart, check for them first, as `status` in the Go
+program above does. A request that never reached the server is a
+`NetworkError`, or `SDKError::Network` in Rust. In Go a `NetworkError`
+does not unwrap, so `errors.As(err, &apiErr)` does not read a transport
+failure as an answer with status 0.
 
 ## Checks before sending
 

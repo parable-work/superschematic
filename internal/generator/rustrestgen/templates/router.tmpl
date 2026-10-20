@@ -3,8 +3,10 @@
 
 use crate::interfaces::*;
 use crate::types;
-{{- if .WebhookProviders }}
+{{- if or .WebhookProviders .ManualEndpoints }}
 use axum::extract::Request;
+{{- end }}
+{{- if .WebhookProviders }}
 use axum::middleware::Next;
 {{- end }}
 {{- if or .WebhookProviders .IdentityEndpoints }}
@@ -67,8 +69,9 @@ pub struct RouterState {
 }
 {{ if .ManualEndpoints }}
 /// Mounts every operation except those declared @manualRouteRegistration,
-/// which the service mounts itself by adding a route for each to the
-/// returned router:
+/// which `build_router_with_manual_routes` mounts with the handlers a
+/// `ManualRoutes` holds (D51), or the service mounts itself by adding a
+/// route for each to the returned router:
 ///
 {{- range .ManualEndpoints }}
 /// - `{{ toUpper .Method }} {{ .Path }}` ({{ .Namespace }}.{{ .Name }}){{ if .HasControls }}: apply its controls,
@@ -138,6 +141,39 @@ pub fn build_router(implementations: Implementations) -> Router {
 /// As `build_router` does.
 {{- end }}
 pub fn build_router_with(implementations: Implementations, options: RouterOptions) -> Router {
+{{- if .ManualEndpoints }}
+    mount(implementations, options, None)
+}
+
+/// `build_router_with` that also mounts each @manualRouteRegistration
+/// operation, with the handler `manual_routes` holds for it, behind every
+/// step its route would have as a mounted one, the request id, a webhook's
+/// verifier and its controls (D51): the router builds its `RequestContext`,
+/// the caller included, and hands it the request, whose response it sends.
+/// A stack's server mounts what the implementation's `create_manual_routes`
+/// builds.
+{{- if .WebhookProviders }}
+///
+/// # Panics
+///
+/// As `build_router` does.
+{{- end }}
+pub fn build_router_with_manual_routes(
+    implementations: Implementations,
+    options: RouterOptions,
+    manual_routes: Arc<dyn ManualRoutes>,
+) -> Router {
+    mount(implementations, options, Some(manual_routes))
+}
+
+/// The router of `build_router_with`, with the manual routes when
+/// `manual_routes` holds their handlers.
+fn mount(
+    implementations: Implementations,
+    options: RouterOptions,
+    manual_routes: Option<Arc<dyn ManualRoutes>>,
+) -> Router {
+{{- end }}
 {{- if .WebhookProviders }}
     if let Err(message) = implementations.validate_implementations() {
         panic!("{message}");
@@ -152,7 +188,7 @@ pub fn build_router_with(implementations: Implementations, options: RouterOption
 {{- end }}
 {{- end }}
     let state = Arc::new(RouterState { implementations });
-    let {{ if or .Endpoints .IdentityEndpoints }}mut {{ end }}router: Router<Arc<RouterState>> = Router::new();
+    let {{ if or .Endpoints .IdentityEndpoints .ManualEndpoints }}mut {{ end }}router: Router<Arc<RouterState>> = Router::new();
 {{- range .Endpoints }}
 {{- $route := printf "%s(handle_%s)" .Method .SnakeName }}
 {{- if .HasControls }}
@@ -186,6 +222,31 @@ pub fn build_router_with(implementations: Implementations, options: RouterOption
 {{- $route = "route" }}
 {{- end }}
     router = router.route("{{ .Path }}", {{ $route }});
+{{- end }}
+{{- if .ManualEndpoints }}
+    if let Some(manual_routes) = manual_routes {
+{{- range .ManualEndpoints }}
+        let route = {{ .Method }}(handle_{{ .SnakeName }}).with_state(Arc::clone(&manual_routes));
+{{- if .HasControls }}
+        let route = RouteControls::new()
+{{- range .ControlCalls $authenticator "Arc::clone(&state.implementations.service_authenticator)" }}
+            {{ . }}
+{{- end }}
+            .apply(route);
+{{- end }}
+{{- if .WebhookProvider }}
+        router = router.route(
+            "{{ .Path }}",
+            webhook_verified(
+                route,
+                Arc::clone(&state.implementations.webhook_verifiers[{{ rustString .WebhookProvider }}]),
+            ),
+        );
+{{- else }}
+        router = router.route("{{ .Path }}", route);
+{{- end }}
+{{- end }}
+    }
 {{- end }}
     router
         .with_state(state)
@@ -238,6 +299,8 @@ fn method_from_str(method: &str) -> Method {
         _ => Method::POST,
     }
 }
+{{- end }}
+{{- if or .Endpoints .ManualEndpoints }}
 
 /// Convert an axum `HeaderMap` to a plain string map for `RequestContext`.
 /// Header names are lowercased; non-UTF-8 values are dropped (the SDK
@@ -397,5 +460,62 @@ async fn handle_{{ .SnakeName }}(
         .{{ .FunctionName }}(ctx{{ if .HasArgs }}, args{{ end }})
         .await;
     operation_response(result, request_id.as_deref())
+}
+{{- end }}
+{{- range .ManualEndpoints }}
+
+/// Hands a request of {{ .Namespace }}.{{ .Name }} to its handler in `ManualRoutes`,
+/// with the `RequestContext` a mounted route builds, and answers with its
+/// response, or an `Err` as its problem.
+async fn handle_{{ .SnakeName }}(
+    State(manual_routes): State<Arc<dyn ManualRoutes>>,
+{{- if .AllowsService }}
+    principal: Option<Extension<Principal>>,
+{{- else if .RequiresAuth }}
+    Extension(principal): Extension<Principal>,
+{{- end }}
+{{- if .ServiceStep }}
+    service_caller: Option<Extension<ServiceCaller>>,
+{{- end }}
+{{- if .HasPathCaptures }}
+    path_params: Result<Path<HashMap<String, String>>, PathRejection>,
+{{- end }}
+    query: Result<Query<Vec<(String, String)>>, QueryRejection>,
+    request: Request,
+) -> Response {
+{{- if .HasPathCaptures }}
+    // As a mounted route refuses a path it cannot decode.
+    let path_params = match path_params {
+        Ok(Path(path_params)) if path_is_percent_encoded(request.uri().path()) => path_params,
+        _ => {
+            return error_response(ApiError::bad_request(
+                "The request path is not valid percent-encoding",
+            ))
+        }
+    };
+{{- end }}
+    let query = match query_values(query) {
+        Ok(query) => query,
+        Err(err) => return error_response(err),
+    };
+    let mut ctx = RequestContext::new(Method::{{ toUpper .Method }}, "{{ .Path }}".to_string());
+    ctx.headers = headers_to_map(request.headers());
+{{- if .AllowsService }}
+    // A listed service caller stands in for the end user: no principal.
+    ctx.principal = principal.map(|Extension(principal)| principal);
+{{- else if .RequiresAuth }}
+    ctx.principal = Some(principal);
+{{- end }}
+{{- if .ServiceStep }}
+    ctx.service_caller = service_caller.map(|Extension(caller)| caller);
+{{- end }}
+{{- if .HasPathCaptures }}
+    ctx.path_params = path_params;
+{{- end }}
+    ctx.query_params = query.last_values();
+    match manual_routes.{{ .SnakeName }}(ctx, request).await {
+        Ok(response) => response,
+        Err(err) => error_response(err),
+    }
 }
 {{- end }}

@@ -400,7 +400,7 @@ func respond(w http.ResponseWriter, r *http.Request, data any, err error) {
 		WriteError(w, r, err)
 		return
 	}
-	response.JSONEnvelope(w, http.StatusOK, data, meta(r), nil)
+	response.JSONEnvelope(w, http.StatusOK, data, meta(r))
 }
 
 func respondList(w http.ResponseWriter, r *http.Request, data any, err error) {
@@ -408,7 +408,7 @@ func respondList(w http.ResponseWriter, r *http.Request, data any, err error) {
 		WriteError(w, r, err)
 		return
 	}
-	response.CollectionEnvelope(w, http.StatusOK, data, meta(r), nil)
+	response.CollectionEnvelope(w, http.StatusOK, data, meta(r))
 }
 
 // respondTrue answers an operation the contract types as the boolean

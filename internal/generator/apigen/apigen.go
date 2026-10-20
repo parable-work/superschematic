@@ -63,6 +63,14 @@ type Param struct {
 	ValidateListMin   *int
 	ValidateListMax   *int
 	ValidatePattern   string
+
+	// Reference is the reference the argument or field holds (D61), as
+	// written or, for a field, derived from a relation's key, resolved in
+	// the API schema; nil when it refers to nothing. The OpenAPI document
+	// and the tool documents write it under their reference keys.
+	Reference *Reference
+	// Search marks the operation's search argument (SearchQuery, D62).
+	Search bool
 }
 
 // ArrayDepth is 0 for T, 1 for T[] and 2 for T[][], as ir.TypeRef.ArrayDepth.
@@ -141,6 +149,14 @@ type EndpointInfo struct {
 	// OutputIsArrayOfArrays marks a T[][] response; OutputIsArray is also
 	// set. OutputArrayDepth and OutputGoListType read both flags.
 	OutputIsArrayOfArrays bool
+	// OutputIsMap marks a Record<string, T> response (map[string]T), or,
+	// with OutputIsArray, Record<string, T[]> (map[string][]T): a JSON
+	// object whose values are the output at OutputArrayDepth.
+	OutputIsMap bool
+	// OutputNullable marks a response that may be null (Nullable<T>, an
+	// operation that is not required). An operation without a result
+	// (OutputType "") is not marked: it always answers null.
+	OutputNullable bool
 	// OutputAnyJSON and OutputStructuredJSON describe an output scalar
 	// whose value is a JSON value, as BodyArg.AnyJSON and
 	// BodyArg.StructuredJSON describe an argument's: a Generic.JSON output
@@ -212,9 +228,12 @@ type EndpointInfo struct {
 	// Page, and wraps the response, still OutputIsArray, in the page.
 	Page *PageInfo
 
-	// ManualRouteRegistration marks operations excluded from generated route
-	// registration. The handler factory and interface method are still
-	// generated so services can register the route themselves.
+	// ManualRouteRegistration marks an operation whose handler is the
+	// service's (@manualRouteRegistration): RegisterRoutes mounts the one
+	// Config.ManualRoutes holds for it, behind the steps its route would
+	// have, or, without Config.ManualRoutes, leaves the route to the
+	// service (D51). Its interface method and handler factory are still
+	// generated.
 	ManualRouteRegistration bool
 
 	// IdentityOperation names the user model's operation (D50) the endpoint
@@ -242,6 +261,12 @@ func (e EndpointInfo) OutputArrayDepth() int {
 // response.
 func (e EndpointInfo) OutputGoListType() string {
 	return goListType(e.OutputGoType, e.OutputArrayDepth())
+}
+
+// OutputGoMapType is the Go type of a map response: map[string] of
+// OutputGoListType, the value at its list levels.
+func (e EndpointInfo) OutputGoMapType() string {
+	return "map[string]" + e.OutputGoListType()
 }
 
 // APIOutput contains everything needed to render the generated API module.
@@ -303,7 +328,8 @@ type APIOutput struct {
 	HasServiceCallers bool
 
 	// RoutesNeedTime gates the time import in routes.go: only @rateLimit and
-	// @timeout render a time call, and only on routes RegisterRoutes mounts.
+	// @timeout render a time call, on the routes RegisterRoutes mounts, a
+	// manual one's included.
 	RoutesNeedTime bool
 
 	// RawBodyCheckImports are the packages routes.go imports for the
@@ -414,6 +440,60 @@ func (o *APIOutput) RoutedEndpoints() []EndpointInfo {
 		return routed[i].Method < routed[j].Method
 	})
 	return routed
+}
+
+// ManualEndpoints are the @manualRouteRegistration endpoints among
+// RoutedEndpoints, in their order: the ManualRoutes struct routes.go
+// declares holds a handler for each, which RegisterRoutes mounts when
+// Config.ManualRoutes is set (D51).
+func (o *APIOutput) ManualEndpoints() []EndpointInfo {
+	var manual []EndpointInfo
+	for _, ep := range o.RoutedEndpoints() {
+		if ep.ManualRouteRegistration {
+			manual = append(manual, ep)
+		}
+	}
+	return manual
+}
+
+// HasManualRoutes reports whether an endpoint is @manualRouteRegistration:
+// routes.go then declares ManualRoutes and Config.ManualRoutes, deps.go
+// ManualRoutesConstructor, and the scaffold NewManualRoutes.
+func (o *APIOutput) HasManualRoutes() bool {
+	return len(o.ManualEndpoints()) > 0
+}
+
+// GroupedManualEndpoints are the manual endpoints RegisterRoutes mounts in
+// the protected group, behind Config.AuthMiddleware, as it mounts the
+// protected routes: those that need a caller and have no service clause,
+// on an API whose Config takes an auth middleware. UngroupedManualEndpoints
+// are the others, which it mounts beside the public and the service routes.
+func (o *APIOutput) GroupedManualEndpoints() []EndpointInfo {
+	var grouped []EndpointInfo
+	for _, ep := range o.ManualEndpoints() {
+		if o.inProtectedGroup(ep) {
+			grouped = append(grouped, ep)
+		}
+	}
+	return grouped
+}
+
+// UngroupedManualEndpoints are the manual endpoints outside the protected
+// group (GroupedManualEndpoints).
+func (o *APIOutput) UngroupedManualEndpoints() []EndpointInfo {
+	var ungrouped []EndpointInfo
+	for _, ep := range o.ManualEndpoints() {
+		if !o.inProtectedGroup(ep) {
+			ungrouped = append(ungrouped, ep)
+		}
+	}
+	return ungrouped
+}
+
+// inProtectedGroup reports whether RegisterRoutes mounts ep's route in the
+// group that runs Config.AuthMiddleware first.
+func (o *APIOutput) inProtectedGroup(ep EndpointInfo) bool {
+	return o.AuthWired() && ep.RequiresAuth && ep.ServiceCallers == nil
 }
 
 // AuthWired reports whether the Go server's Config takes an auth
@@ -866,7 +946,7 @@ func (o *APIOutput) summarizeRoute(endpoint EndpointInfo) {
 	if endpoint.RequiresAuth {
 		o.HasAuth = true
 	}
-	if !endpoint.ManualRouteRegistration && (endpoint.RateLimit != nil || endpoint.Timeout != nil) {
+	if endpoint.RateLimit != nil || endpoint.Timeout != nil {
 		o.RoutesNeedTime = true
 	}
 	if len(endpoint.RequiredPerms) > 0 {
@@ -902,6 +982,18 @@ func defaultMethodForSet(setName string) string {
 	return "GET"
 }
 
+// implementationName is an operation's implementation name, its namespace
+// and its name in PascalCase ("CatalogListItems").
+func implementationName(namespace, operation string) string {
+	return codegen.ToPascalCase(namespace) + codegen.ToPascalCase(operation)
+}
+
+// handlerName is an operation's handler name, its OpenAPI operationId
+// ("CatalogListItemsHandler").
+func handlerName(namespace, operation string) string {
+	return implementationName(namespace, operation) + "Handler"
+}
+
 // operationToEndpoint converts an operation FieldDef into an endpoint.
 func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *ir.OperationSet, types *typeMapper, schema *ir.Schema, provider AuthProvider, invocation ToolInvocationPolicy) (*EndpointInfo, error) {
 	if err := ir.ValidateOperationDocs(op.Docs); err != nil {
@@ -916,9 +1008,8 @@ func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *
 		method = defaultMethod
 	}
 
-	namespacePascal := codegen.ToPascalCase(namespace)
 	shortImplName := codegen.ToPascalCase(op.Name)
-	implName := namespacePascal + shortImplName
+	implName := implementationName(namespace, op.Name)
 
 	embeddedParams := extractEmbeddedParams(op.RestPath)
 
@@ -1022,7 +1113,7 @@ func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *
 		Path:                         path,
 		RoutePath:                    strings.TrimPrefix(path, "/api"),
 		Method:                       method,
-		HandlerName:                  implName + "Handler",
+		HandlerName:                  handlerName(namespace, op.Name),
 		ImplName:                     implName,
 		ShortImplName:                shortImplName,
 		Namespace:                    namespace,
@@ -1034,6 +1125,8 @@ func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *
 		OutputGoType:                 outputGoType,
 		OutputIsArray:                op.TypeRef.IsArray,
 		OutputIsArrayOfArrays:        op.TypeRef.IsArrayOfArrays,
+		OutputIsMap:                  op.TypeRef.IsMap,
+		OutputNullable:               op.TypeRef.Name != "" && !op.Required,
 		OutputAnyJSON:                outputScalar.IsAnyJSON(),
 		OutputStructuredJSON:         outputScalar.StructuredJSONType(),
 		PathParams:                   pathParams,
@@ -1220,8 +1313,10 @@ func resolveUUIDTypeExpr(schema *ir.Schema) string {
 	return fallback
 }
 
-// validateRouteCollisions checks that no two auto-registered endpoints claim
-// the same (path, method) pair. Chi silently replaces handlers on collision.
+// validateRouteCollisions checks that no two endpoints claim the same
+// (path, method) pair, a manual one included, which RegisterRoutes mounts
+// with its handler from Config.ManualRoutes. Chi silently replaces handlers
+// on collision.
 func validateRouteCollisions(endpoints []EndpointInfo) error {
 	type routeKey struct {
 		path   string
@@ -1230,9 +1325,6 @@ func validateRouteCollisions(endpoints []EndpointInfo) error {
 
 	registered := make(map[routeKey]string)
 	for _, ep := range endpoints {
-		if ep.ManualRouteRegistration {
-			continue
-		}
 		key := routeKey{path: ep.Path, method: ep.Method}
 		if existing, ok := registered[key]; ok && existing != ep.Name {
 			return fmt.Errorf("apigen: route collision: %s %s is claimed by both %q and %q", ep.Method, ep.Path, existing, ep.Name)
@@ -1305,15 +1397,12 @@ func (m *typeMapper) isInputType(ref ir.TypeRef) bool {
 	}
 }
 
+// findTypeDef finds an object type of the schema or of a dependency, in
+// the order a reference's target is found (ir.LookupScopes): the schema's
+// own, the dependency an import names it in, then the rest by name.
 func (m *typeMapper) findTypeDef(name string) (*ir.TypeDef, bool) {
-	if typeDef, ok := m.schema.Types[name]; ok {
-		return typeDef, true
-	}
-	for _, dep := range m.dependencies {
-		if dep == nil {
-			continue
-		}
-		if typeDef, ok := dep.Types[name]; ok {
+	for _, scope := range ir.LookupScopes(m.schema, m.dependencies, name) {
+		if typeDef, ok := scope.Schema.Types[name]; ok {
 			return typeDef, true
 		}
 	}
@@ -1352,6 +1441,8 @@ func (m *typeMapper) mapArgument(arg *ir.ArgumentDef) (Param, error) {
 		ValidateListMin:   arg.ValidateListMin,
 		ValidateListMax:   arg.ValidateListMax,
 		ValidatePattern:   arg.ValidatePattern,
+		Reference:         resolveReference(m.schema, m.dependencies, arg.References),
+		Search:            arg.Search,
 	}
 	m.applyGoMapping(&param, arg.TypeRef.Name)
 	return param, nil
@@ -1431,8 +1522,8 @@ func (m *typeMapper) inputTypeFields(inputTypeName string) []Param {
 	return m.fieldsFromTypeDef(typeDef)
 }
 
-// fieldsFromTypeDef maps a type's fields to Params, with their shape and
-// Validate<> bounds.
+// fieldsFromTypeDef maps a type's fields to Params, with their shape,
+// Validate<> bounds and reference.
 func (m *typeMapper) fieldsFromTypeDef(typeDef *ir.TypeDef) []Param {
 	var fields []Param
 	for _, field := range typeDef.Fields {
@@ -1451,6 +1542,7 @@ func (m *typeMapper) fieldsFromTypeDef(typeDef *ir.TypeDef) []Param {
 			ValidateListMin:   field.ValidateListMin,
 			ValidateListMax:   field.ValidateListMax,
 			ValidatePattern:   field.ValidatePattern,
+			Reference:         m.fieldReference(typeDef, field),
 		}
 		m.applyGoMapping(&param, field.TypeRef.Name)
 		fields = append(fields, param)

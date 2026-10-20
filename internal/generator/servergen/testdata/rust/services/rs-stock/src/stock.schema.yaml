@@ -49,6 +49,20 @@ operationSets:
           - name: sku
             typeRef: { name: string }
             required: true
+      # The router mounts it behind its rate limit and hands it to the
+      # handler the implementation's create_manual_routes builds, which
+      # answers a CSV no JSON envelope holds (D51).
+      - name: exportLevel
+        typeRef: { name: LevelView }
+        required: true
+        httpMethod: GET
+        restPath: levels/{sku}/export
+        manualRouteRegistration: true
+        middleware: { rateLimit: 1 }
+        arguments:
+          - name: sku
+            typeRef: { name: string }
+            required: true
       - name: setLevel
         typeRef: { name: LevelView }
         required: true

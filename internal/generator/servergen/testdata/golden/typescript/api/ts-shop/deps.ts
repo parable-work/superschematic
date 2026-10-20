@@ -10,9 +10,14 @@
 //
 // It also declares Workers, a method per worker of ts-shop, and the type
 // of the implementation's createWorkers (D53; section 8.8).
+//
+// It also declares ManualRoutes, a handler per @manualRouteRegistration
+// operation of ts-shop, and the type of the implementation's
+// createManualRoutes (D51; section 8.6).
 
 import type { Pool } from 'pg';
 import type { Authenticator, Bucket, Logger } from '@superschematic/http-runtime';
+import type { ManualRouteHandler } from '@superschematic/http-runtime/hono';
 import type { TsPricingSDK } from '@schemas/ts-pricing-sdk';
 import type { CartAbandoned } from '@schemas/ts-db-types';
 import type { EnvConfig } from './config';
@@ -45,6 +50,25 @@ export type Constructor = (deps: Deps) => Implementations | Promise<Implementati
  * the API's Deps, as the Go entrypoint calls AuthMiddleware(deps).
  */
 export type AuthenticatorFactory = (deps: Deps) => Authenticator | Promise<Authenticator>;
+
+/**
+ * A handler per @manualRouteRegistration operation of ts-shop.
+ * The router mounts each at its declared path behind its route controls
+ * and auth gate, then hands it the Hono context and the RequestContext,
+ * and sends the Response it returns (RouterOptions.manualRoutes).
+ */
+export interface ManualRoutes {
+  /** GET /api/carts/{id}/export */
+  exportCart: ManualRouteHandler;
+}
+
+/**
+ * The type of the implementation's createManualRoutes, which a server's
+ * entrypoint calls with the API's Deps and hands buildRouter as
+ * RouterOptions.manualRoutes. The scaffolded implementation exports
+ * createManualRoutes: ManualRoutesConstructor.
+ */
+export type ManualRoutesConstructor = (deps: Deps) => ManualRoutes | Promise<ManualRoutes>;
 
 /**
  * The jobs of ts-shop, a method per @job class. A job's entrypoint calls

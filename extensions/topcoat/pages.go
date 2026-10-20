@@ -2,6 +2,7 @@ package topcoat
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"unicode"
 
@@ -77,8 +78,12 @@ type pagesModel struct {
 	// meets one, by its method and path, with their places in Controls.
 	Controls   []routeControls
 	Controlled []controlledPage
-	uses       map[string]bool
-	imports    map[string]map[string]bool
+	// Trails are the steps of the trail a reference names, an item's by
+	// what its route's value refers to when its title does not name it
+	// (D44, amended).
+	Trails  []*refTrail
+	uses    map[string]bool
+	imports map[string]map[string]bool
 }
 
 // controlledPage is a page whose request meets route controls: its
@@ -182,8 +187,18 @@ type pageResource struct {
 	LivePath string
 	// LiveSubmit is the script the filter's submit runs: it sends the
 	// form's query to the shard, through the hidden input whose input
-	// event sets the shard's signal, and puts it in the address bar.
-	LiveSubmit string
+	// event sets the shard's signal, and puts it in the address bar;
+	// LiveSizeSubmit the size form's, which does the same with its own.
+	LiveSubmit     string
+	LiveSizeSubmit string
+	// Prev reports whether a paged list links the page before its own,
+	// through the cursors its query's `back` keeps (D44, amended): not when
+	// its operation declares an argument named back. Sizes are the page
+	// sizes its size form offers whatever the query sends, SizesConst the
+	// constant that holds them.
+	Prev       bool
+	Sizes      []int
+	SizesConst string
 	// ColParams are the route parameters of the collection, its
 	// ancestors' items'; ItemParams those and Item, an item's.
 	ColParams  []string
@@ -408,10 +423,19 @@ type prefill struct {
 	Lines    []string
 }
 
-// pagesOf builds the pages of the resources the operations of inProcess
-// describe, under cfg's prefix, from the crate's records, views and forms.
-// It logs each operation left out, and is nil when no resource has a page.
-func pagesOf(c *crate, schemas schemaSet, inProcess []declared, prefix, title string, live bool, logf func(format string, args ...any)) (*pagesModel, error) {
+// pageSite is the resources the operations a page calls describe, which
+// the pages and the trail's references read: the forms the pages submit
+// through, the collections no item holds, with their children, and the
+// operations left out, with why.
+type pageSite struct {
+	forms pageForms
+	roots []*resourceNode
+	out   []leftOut
+}
+
+// siteOf classifies the operations of inProcess into the crate's
+// resources, through its forms.
+func siteOf(c *crate, schemas schemaSet, inProcess []declared) *pageSite {
 	forms := pageForms{args: map[string]*argForm{}, inputs: map[string]*form{}}
 	for i := range c.ArgForms {
 		forms.args[c.ArgForms[i].ArgsName] = &c.ArgForms[i]
@@ -420,6 +444,14 @@ func pagesOf(c *crate, schemas schemaSet, inProcess []declared, prefix, title st
 		forms.inputs[c.Forms[i].TypeName] = &c.Forms[i]
 	}
 	roots, out := classify(schemas, inProcess, forms)
+	return &pageSite{forms: forms, roots: roots, out: out}
+}
+
+// pagesOf builds the pages of the site's resources, under cfg's prefix,
+// from the crate's records, views and forms. It logs each operation left
+// out, and is nil when no resource has a page.
+func pagesOf(c *crate, schemas schemaSet, site *pageSite, prefix, title string, live bool, logf func(format string, args ...any)) (*pagesModel, error) {
+	forms, roots, out := site.forms, site.roots, site.out
 	m := &pagesModel{
 		Prefix:  prefix,
 		Title:   title,
@@ -429,6 +461,10 @@ func pagesOf(c *crate, schemas schemaSet, inProcess []declared, prefix, title st
 	}
 	for _, left := range out {
 		logf("  - topcoat: no page for %s: %s\n", left.Operation, left.Reason)
+	}
+	if c.References != nil && len(c.References.Trails) > 0 {
+		m.Trails = c.References.Trails
+		m.use("trailReference", "references")
 	}
 	b := &pageBuilder{
 		m:        m,
@@ -543,6 +579,11 @@ func (b *pageBuilder) controls() {
 		return o.ChoicesFn
 	}
 	for _, r := range m.Resources {
+		// The trail of a page under the collection names its ancestors'
+		// items by reference, and one under an item the item too (D44,
+		// amended); a shard renders no trail.
+		chain := r.node.chain()
+		above, through := b.trailLabels(chain[:len(chain)-1]), b.trailLabels(chain)
 		list := []string{choices(r.List), r.RowLabels}
 		item := []string{r.DetailLabels}
 		for _, o := range r.Actions {
@@ -552,33 +593,45 @@ func (b *pageBuilder) controls() {
 			item = append(item, s.RowLabels)
 		}
 		if r.List != nil {
-			add("GET", r.Path, r.List, list...)
+			add("GET", r.Path, r.List, slices.Concat(list, above)...)
 			if r.Live {
 				add("POST", r.LivePath, r.List, list...)
 			}
 		}
 		if r.Detail != nil {
-			add("GET", r.ItemPath, r.Detail, item...)
+			add("GET", r.ItemPath, r.Detail, slices.Concat(item, through)...)
 		}
 		if r.Create != nil {
-			add("GET", r.Path+"/new", nil, r.Create.ChoicesFn)
-			add("POST", r.Path+"/new", r.Create, r.Create.ChoicesFn)
+			add("GET", r.Path+"/new", nil, slices.Concat([]string{r.Create.ChoicesFn}, above)...)
+			add("POST", r.Path+"/new", r.Create, slices.Concat([]string{r.Create.ChoicesFn}, above)...)
 		}
 		if r.Update != nil {
-			add("GET", r.ItemPath+"/edit", r.Detail, r.Update.ChoicesFn)
-			add("POST", r.ItemPath+"/edit", r.Update, r.Update.ChoicesFn)
+			add("GET", r.ItemPath+"/edit", r.Detail, slices.Concat([]string{r.Update.ChoicesFn}, through)...)
+			add("POST", r.ItemPath+"/edit", r.Update, slices.Concat([]string{r.Update.ChoicesFn}, through)...)
 		}
 		if r.Delete != nil {
-			add("GET", r.ItemPath+"/delete", r.Detail, r.DetailLabels, r.Delete.ChoicesFn)
-			add("POST", r.ItemPath+"/delete", r.Delete, r.DetailLabels, r.Delete.ChoicesFn)
+			add("GET", r.ItemPath+"/delete", r.Detail, slices.Concat([]string{r.DetailLabels, r.Delete.ChoicesFn}, through)...)
+			add("POST", r.ItemPath+"/delete", r.Delete, slices.Concat([]string{r.DetailLabels, r.Delete.ChoicesFn}, through)...)
 		}
 		for _, o := range r.Actions {
-			add("POST", r.ItemPath+"/"+o.Verb, o, item...)
+			add("POST", r.ItemPath+"/"+o.Verb, o, slices.Concat(item, through)...)
 		}
 	}
 	if len(m.Controlled) > 0 {
 		m.use("controls")
 	}
+}
+
+// trailLabels are the label functions that name the items of nodes in
+// the trail, each collection's whose item a reference names.
+func (b *pageBuilder) trailLabels(nodes []*resourceNode) []string {
+	var fns []string
+	for _, node := range nodes {
+		if fn := b.refs.TrailLabel(node.key); fn != "" {
+			fns = append(fns, fn)
+		}
+	}
+	return fns
 }
 
 // pagerIdent is the ident no resource takes: its <ident>_href would be
@@ -692,12 +745,14 @@ func stepTitle(node *resourceNode) string {
 // <prefix>/_live/<resource>.
 const liveSegment = "_live"
 
-// liveList makes a list with a filter render through a shard, when the
-// pages' lists are live: the shard's path, under the prefix, is its own,
-// unless a page serves it, which leaves the list as it is, with the reason
-// in the build log.
+// liveList makes a list with a filter, or one that pages, render through a
+// shard, when the pages' lists are live: the shard's path, under the
+// prefix, is its own, unless a page serves it, which leaves the list as it
+// is, with the reason in the build log. A list whose argument form holds
+// its route's values alone, and does not page, has nothing that would set
+// the shard's query.
 func (b *pageBuilder) liveList(r *pageResource) {
-	if !b.live || r.List == nil || r.List.ArgForm == nil {
+	if !b.live || r.List == nil || r.List.ArgForm == nil || !r.Filters() && !r.List.Paged {
 		return
 	}
 	route := "POST " + liveSegment + "/" + r.Ident
@@ -707,19 +762,88 @@ func (b *pageBuilder) liveList(r *pageResource) {
 	}
 	b.routes[route] = true
 	r.Live, r.LivePath = true, b.m.Prefix+"/"+liveSegment+"/"+r.Ident
-	r.LiveSubmit = liveSubmit(r.Ident)
+	r.LiveSubmit = liveSubmit(`form[data-ss-live="` + r.Ident + `"]`)
+	if r.List.Paged {
+		r.LiveSizeSubmit = liveSubmit(`form[data-ss-live-size="` + r.Ident + `"]`)
+	}
 }
 
-// liveSubmit is the script a live list's filter runs on submit, after
-// Topcoat's handler stops the browser's own: the form's query, as the
-// browser would send it, written to the form's hidden input, whose input
-// event sets the shard's signal, which renders the list again, and put in
-// the address bar, so a reload or a link keeps the filter.
-func liveSubmit(ident string) string {
-	return `(() => { const form = document.querySelector('form[data-ss-live="` + ident + `"]'); ` +
+// liveSubmit is the script a live list's form runs on submit, after
+// Topcoat's handler stops the browser's own, for the form selector finds:
+// the filter (data-ss-live) or a paged list's size form (data-ss-live-size).
+// The form's query, as the browser would send it, is written to the form's
+// hidden input, whose input event sets the shard's signal, which renders
+// the list again, and put in the address bar, so a reload or a link keeps
+// the filter and the size.
+func liveSubmit(selector string) string {
+	return `(() => { const form = document.querySelector('` + selector + `'); ` +
 		`const query = new URLSearchParams(new FormData(form)).toString(); ` +
 		`history.replaceState(history.state, '', query === '' ? location.pathname : '?' + query); ` +
 		`const sent = form.querySelector('input[data-ss-query]'); sent.value = query; sent.dispatchEvent(new Event('input')); })()`
+}
+
+// backParam is the query parameter in which a paged list's page keeps the
+// cursors of the pages before it (D44, amended).
+const backParam = "back"
+
+// pageSizeSteps are the page sizes a size form offers below a route's
+// maxLimit, beside its defaultLimit and maxLimit (D44, amended).
+var pageSizeSteps = []int{10, 20, 50, 100, 200, 500, 1000}
+
+// pager sets how a paged list's pages link one another: the page before
+// its own unless its operation declares an argument named back, which the
+// build log says, and the sizes its size form offers.
+func (b *pageBuilder) pager(r *pageResource) {
+	e := r.List.c.d.endpoint
+	r.Prev = true
+	for _, arg := range r.List.c.d.op.Arguments {
+		if arg.Name == backParam {
+			r.Prev = false
+			b.logf("  - topcoat: no previous page for %s: %s declares an argument named %s, the query parameter the console keeps the earlier pages' cursors in\n", r.node.key, r.List.c.name(), backParam)
+		}
+	}
+	r.Sizes = pageSizes(e.Page.DefaultLimit, e.Page.MaxLimit)
+	r.SizesConst = strings.ToUpper(r.Ident) + "_PAGE_SIZES"
+	b.m.use("pageSizes")
+	if r.Prev {
+		b.m.use("back")
+	}
+}
+
+// pageSizes are the sizes a paged list's size form offers whatever the
+// query sends, in order and each once: the route's defaultLimit and
+// maxLimit, and each of pageSizeSteps below maxLimit. The page adds the
+// limit sent when the route admits it.
+func pageSizes(defaultLimit, maxLimit int) []int {
+	sizes := []int{defaultLimit, maxLimit}
+	for _, size := range pageSizeSteps {
+		if size < maxLimit {
+			sizes = append(sizes, size)
+		}
+	}
+	slices.Sort(sizes)
+	return slices.Compact(sizes)
+}
+
+// SizesExpr is the Rust slice of the list's page sizes.
+func (r *pageResource) SizesExpr() string {
+	sizes := make([]string, len(r.Sizes))
+	for i, size := range r.Sizes {
+		sizes[i] = fmt.Sprintf("%d", size)
+	}
+	return "&[" + strings.Join(sizes, ", ") + "]"
+}
+
+// SizesText names the list's page sizes for a doc: 2 and 5.
+func (r *pageResource) SizesText() string {
+	sizes := make([]string, len(r.Sizes))
+	for i, size := range r.Sizes {
+		sizes[i] = fmt.Sprintf("%d", size)
+	}
+	if len(sizes) < 2 {
+		return strings.Join(sizes, "")
+	}
+	return strings.Join(sizes[:len(sizes)-1], ", ") + " and " + sizes[len(sizes)-1]
 }
 
 // collectionWords are the words of each collection on the path to node.
@@ -825,6 +949,7 @@ func (b *pageBuilder) fill(r *pageResource) error {
 		r.RowLabels = b.refs.RecordLabels(rec.Name)
 		if r.List.Paged {
 			r.BaseExpr = r.Ident + "_href(" + pass(r.ColParams, "&") + ").unwrap_or_default()"
+			b.pager(r)
 		}
 	}
 	if r.Detail != nil {
@@ -1179,11 +1304,19 @@ func (b *pageBuilder) tree(nodes []*resourceNode, level int) string {
 			}
 		}
 		lines = append(lines, pad+"Node {")
-		// An item's title is read only where a type declares one.
+		// An item's title is read only where a type declares one, and what
+		// its route's value refers to only where a reference names it.
 		if b.m.uses["itemTitle"] {
 			lines = append(lines,
 				pad+"    key: "+rustString(node.key)+",",
 				pad+fmt.Sprintf("    titled: %t,", r != nil && r.TitleExpr != ""))
+		}
+		if b.m.uses["trailReference"] {
+			reference := "None"
+			if b.refs.TrailLabel(node.key) != "" {
+				reference = "Some(" + rustString(node.key) + ")"
+			}
+			lines = append(lines, pad+"    reference: "+reference+",")
 		}
 		lines = append(lines,
 			pad+"    words: &["+strings.Join(words, ", ")+"],",
@@ -1269,6 +1402,14 @@ func (b *pageBuilder) finish() {
 	}
 	if m.uses["pageRefusal"] || m.uses["formErrors"] {
 		m.importName("forms", "FormErrors")
+	}
+	// A size form's sizes read the route's page, and a page's history its
+	// cursors by the route's rule and its query as a form reads one.
+	if m.uses["pageSizes"] {
+		m.use("runtime")
+	}
+	if m.uses["back"] {
+		m.use("runtime", "form")
 	}
 }
 

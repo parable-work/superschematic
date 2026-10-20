@@ -21,6 +21,24 @@ fn connect(service: &str, field: &str, database: &Database) -> Result<Pool, Fail
         .map_err(|err| format!("database {service}, from {field}: {err}").into())
 }
 {{- end }}
+{{- if .Buckets }}
+
+/// Opens the bucket of the bucket field named `field`, which the
+/// environment sets as `<field>_NAME`, and as `<field>_ENDPOINT` when an
+/// emulator serves the bucket in GCS's place, such as the local target's
+/// (the HTTP runtime's `gcs`, D54). Opening makes no request; the first
+/// operation does.
+fn open_bucket(
+    service: &str,
+    field: &str,
+    connection: &stackconfig::Bucket,
+) -> Result<Arc<dyn Bucket>, Failure> {
+    match gcs::open_bucket(connection) {
+        Ok(bucket) => Ok(Arc::new(bucket)),
+        Err(err) => Err(format!("bucket {service}, from {field}: {err}").into()),
+    }
+}
+{{- end }}
 {{- range .Clients }}
 {{ if $.Background }}
 /// Builds the client of {{ .Service }}. The {{ $.Kind }} calls it at `endpoint`, the
@@ -73,6 +91,13 @@ fn {{ .Constructor }}(endpoint: &Service) -> Result<{{ .Alias }}::{{ .Client }},
 {{ rustLetCall .Var .Constructor "?" (printf "&%s" .From) }}
 {{- end }}
 {{- end }}
+{{- if .Buckets }}
+
+    // One bucket per Bucket service, which opening does not reach.
+{{- range .Buckets }}
+{{ rustLetCall .Var "open_bucket" "?" (rustString .Service) (rustString .Field) (printf "&%s" .From) }}
+{{- end }}
+{{- end }}
 
     // {{ $api.Service }}: its {{ .Kind }}s, built from its Deps.
     let {{ $api.Deps }} = {{ $api.Alias }}::Deps {
@@ -84,6 +109,9 @@ fn {{ .Constructor }}(endpoint: &Service) -> Result<{{ .Alias }}::{{ .Client }},
 {{- end }}
 {{- range $api.Calls }}
         {{ .Field }}: {{ .Client.Var }},
+{{- end }}
+{{- range $api.Buckets }}
+        {{ .Field }}: {{ .Bucket.Var }},
 {{- end }}
         span: logging::api_span({{ rustString $api.Service }}),
     };

@@ -39,8 +39,10 @@ var RecipeSnapshotEntryQuotedFields = map[string]string{
 	"commit_id":      `commit_id`,
 }
 
-// buildRecipeSnapshotEntryOrderByClause builds an ORDER BY clause for RecipeSnapshotEntry
-func buildRecipeSnapshotEntryOrderByClause(orderBy []RecipeSnapshotEntryOrderBy, tableName string) string {
+// buildRecipeSnapshotEntryOrderByClause builds an ORDER BY clause for RecipeSnapshotEntry.
+// quotedTable is the table's name as the FROM clause spells it, quoted when
+// it is a keyword (a table named order is "order").
+func buildRecipeSnapshotEntryOrderByClause(orderBy []RecipeSnapshotEntryOrderBy, quotedTable string) string {
 	if len(orderBy) == 0 {
 		return ""
 	}
@@ -57,7 +59,7 @@ func buildRecipeSnapshotEntryOrderByClause(orderBy []RecipeSnapshotEntryOrderBy,
 		if !ok {
 			quotedField = fieldStr // Fallback to unquoted if not found
 		}
-		clauses = append(clauses, fmt.Sprintf("%s.%s %s", tableName, quotedField, direction))
+		clauses = append(clauses, fmt.Sprintf("%s.%s %s", quotedTable, quotedField, direction))
 	}
 
 	if len(clauses) == 0 {
@@ -455,7 +457,7 @@ func (r *RecipeSnapshotEntryRepository) FindOne(ctx context.Context, filter *Rec
 	whereClause := filter.buildWhereClause(&args, 0)
 
 	// Build ORDER BY clause
-	orderByClause := buildRecipeSnapshotEntryOrderByClause(opts.OrderBy, "recipe_snapshot_entry")
+	orderByClause := buildRecipeSnapshotEntryOrderByClause(opts.OrderBy, `recipe_snapshot_entry`)
 
 	// Build query
 	query := fmt.Sprintf(`SELECT %s FROM recipe_snapshot_entry%s%s LIMIT 1`, selectFields, whereClause, orderByClause)
@@ -623,7 +625,7 @@ func (r *RecipeSnapshotEntryRepository) FindMany(ctx context.Context, filter *Re
 	whereClause := filter.buildWhereClause(&args, 0)
 
 	// Build ORDER BY clause
-	orderByClause := buildRecipeSnapshotEntryOrderByClause(opts.OrderBy, "recipe_snapshot_entry")
+	orderByClause := buildRecipeSnapshotEntryOrderByClause(opts.OrderBy, `recipe_snapshot_entry`)
 
 	// Build LIMIT/OFFSET clause
 	limitOffsetClause := buildLimitOffsetClauseTyped(opts.Limit, opts.Offset)

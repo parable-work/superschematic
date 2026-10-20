@@ -1,0 +1,6 @@
+# The bucket rs-stock lists (D54), which its Rust server, job and worker
+# each open on GCS, or on the emulator their connection names, through the
+# HTTP runtime's gcs feature.
+name: rs-media
+kind: Bucket
+outputs: {}

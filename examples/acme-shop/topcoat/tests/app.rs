@@ -20,21 +20,31 @@
 //! record. The pages, the search and the refusals of a forged cursor are
 //! the same over the shop in memory and over a SQLite file of shop-db's
 //! tables, where the reviews, orders and sessions outlive the app, and the
-//! console lists the orders.
+//! console lists the orders. A shopper's pages, the console's and the JSON
+//! API's list, show and cancel their own orders alone, another customer's
+//! answering 404, and staff's every customer's, and so do they over a
+//! SQLite file made before staff held `orders.any`, once the app opens it
+//! again and brings its shopper role up to date. Every page is one HTML
+//! document, whose head loads Topcoat's runtime from a hosted catalog of its
+//! script alone, as a bundle would serve it; the console's lists render
+//! again in place through their shards, for a filter, a page and a search,
+//! the runtime renders a page again as its GET, and without the runtime the
+//! pages load no script and the lists are GET forms.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::thread::sleep;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use acme_shop_orders_server::sqlite::SqliteShop;
-use acme_shop_orders_server::{Shop, add_shopper, users_at, users_in_memory};
-use acme_shop_orders_topcoat::api::runtime::identity::Service;
+use acme_shop_orders_server::{SHOPPER_PERMISSIONS, Shop, add_shopper, add_staff, users_at, users_in_memory};
+use acme_shop_orders_topcoat::api::runtime::identity::{NewUser, Service, hash_password};
 use acme_shop_orders_topcoat::api::runtime::{Principal, RequestContext};
 use acme_shop_orders_topcoat::api::{ProductReviewsImplementation, ProductReviewsWriteReviewArgs, types};
 use acme_shop_orders_topcoat::procedures::{OrderListOrdersArgsRecord, call_order_list_orders};
 use acme_shop_orders_topcoat::records::OrderViewPageRecord;
-use acme_shop_topcoat::{CATALOG, PRODUCT, Product, app, product, shop_in_memory, stock_sqlite};
+use acme_shop_topcoat::{CATALOG, PRODUCT, Product, add_people, app, product, shop_in_memory, stock_sqlite};
+use topcoat::asset::{AssetConfig, Manifest};
 use topcoat::context::Cx;
 use topcoat::router::request::parts;
 use topcoat::router::{Body, Router, StatusCode, header, page, to_bytes};
@@ -44,14 +54,44 @@ use topcoat::view::{View, view};
 /// fast.
 const CONFIG: &str = r#"{"cookie": {"secure": false}, "password": {"argon2": {"memoryKiB": 64, "iterations": 1, "parallelism": 1}}}"#;
 
-/// The sign-in form of the shopper `shop` adds, who holds `orders`
-/// through the shopper role.
+/// The sign-in form of the shopper `shop` adds, who holds `orders.read`
+/// and `orders.write` through the shopper role.
 const SHOPPER: &str = "login=grace%40example.com&password=grace%27s+password";
+
+/// A user's login, name and password.
+type Person = (&'static str, &'static str, &'static str);
+
+/// The demo shopper, whom `SHOPPER` signs in.
+const GRACE: Person = ("grace@example.com", "Grace Hopper", "grace's password");
+
+/// A second shopper, whom `each_shop` adds beside the demo's.
+const ALAN: Person = ("alan@example.com", "Alan Turing", "alan's password");
+
+/// A member of staff, whom `each_shop` adds too, who holds `orders.any`
+/// through the staff role, and lists, reads and cancels every customer's
+/// orders.
+const ADA: Person = ("ada@example.com", "Ada Lovelace", "ada's password");
+
+/// The asset catalog the tests serve Topcoat's runtime with: its script
+/// alone, hosted at `/_topcoat/assets`, as the bundle `topcoat asset bundle`
+/// writes would serve it, so the pages render the script's tag without a
+/// bundle beside the test binary.
+fn runtime_assets() -> AssetConfig {
+    let toml = format!(
+        "version = 1\n\n[[assets]]\nid = {}\nfile = \"topcoat.js\"\nhash = \"0\"\ncontent_type = \"text/javascript\"\n",
+        topcoat::runtime::SCRIPT.id().as_u64()
+    );
+    AssetConfig::hosted_at("/_topcoat/assets", Manifest::parse(&toml).expect("a manifest"))
+}
+
+/// The runtime's script tag, as the root layout renders it with
+/// `runtime_assets`.
+const SCRIPT: &str = r#"<script type="module" src="/_topcoat/assets/topcoat.js""#;
 
 async fn shop() -> Router {
     let users = users_in_memory(CONFIG).unwrap();
     add_shopper(&users, "grace@example.com", "Grace Hopper", "grace's password").await.unwrap();
-    app(Arc::new(shop_in_memory()), users)
+    app(Arc::new(shop_in_memory()), users, Some(runtime_assets()))
 }
 
 /// A new SQLite file of shop-db's tables at `name`: a copy of the file
@@ -85,7 +125,7 @@ fn temp_path(name: &str) -> PathBuf {
 /// The app over the SQLite shop at `path`, as src/main.rs opens it.
 async fn sqlite_shop(path: &Path) -> Router {
     let (shop, users) = open_sqlite(path).await;
-    app(Arc::new(shop), users)
+    app(Arc::new(shop), users, Some(runtime_assets()))
 }
 
 /// The SQLite shop at `path` and its users, the file's, with the demo's
@@ -100,6 +140,14 @@ async fn open_sqlite(path: &Path) -> (SqliteShop, Arc<Service>) {
     }
     stock_sqlite(&shop).unwrap();
     (shop, users)
+}
+
+/// Adds `ALAN`, a shopper, and `ADA`, staff, beside the demo's shopper.
+async fn add_alan_and_ada(users: &Service) {
+    let (login, name, password) = ALAN;
+    add_shopper(users, login, name, password).await.unwrap();
+    let (login, name, password) = ADA;
+    add_staff(users, login, name, password).await.unwrap();
 }
 
 /// Products beside the app's catalog, so that a page of one product, or
@@ -127,7 +175,7 @@ fn reviewer(n: usize) -> String {
 /// first, in the order written.
 async fn write_reviews<S: ProductReviewsImplementation>(shop: &S, reviews: &[(&str, &str)]) {
     for (n, (title, body)) in reviews.iter().enumerate() {
-        let caller = RequestContext { principal: Some(Principal::new(reviewer(n), ["orders"])), ..RequestContext::default() };
+        let caller = RequestContext { principal: Some(Principal::new(reviewer(n), SHOPPER_PERMISSIONS)), ..RequestContext::default() };
         let input = types::WriteReviewInput { rating: 4.0, title: (*title).to_owned(), body: (*body).to_owned() };
         shop.write_review(caller, ProductReviewsWriteReviewArgs { product_id: product(), input }).await.unwrap();
         sleep(Duration::from_millis(3));
@@ -136,16 +184,18 @@ async fn write_reviews<S: ProductReviewsImplementation>(shop: &S, reviews: &[(&s
 
 /// The app over each kind of shop, by its name: in memory, and over a new
 /// SQLite file of shop-db's tables (`file`, as `sqlite_file` makes it).
-/// Each holds the app's catalog and `MORE`, the demo's shopper, and
-/// `reviews` of the anvil, each by a reviewer of its own.
+/// Each holds the app's catalog and `MORE`, the demo's shopper, `ALAN` and
+/// `ADA`, and `reviews` of the anvil, each by a reviewer of its own.
 async fn each_shop(file: &str, reviews: &[(&str, &str)]) -> [(&'static str, Router); 2] {
     let memory = Shop::with_products(CATALOG.iter().chain(&MORE).map(Product::view));
     write_reviews(&memory, reviews).await;
     let users = users_in_memory(CONFIG).unwrap();
     add_shopper(&users, "grace@example.com", "Grace Hopper", "grace's password").await.unwrap();
-    let in_memory = app(Arc::new(memory), users);
+    add_alan_and_ada(&users).await;
+    let in_memory = app(Arc::new(memory), users, Some(runtime_assets()));
 
     let (sqlite, users) = open_sqlite(&sqlite_file(file)).await;
+    add_alan_and_ada(&users).await;
     for product in &MORE {
         sqlite.add_product(&product.id(), product.sku, product.name, product.price_cents).unwrap();
     }
@@ -154,7 +204,7 @@ async fn each_shop(file: &str, reviews: &[(&str, &str)]) -> [(&'static str, Rout
         sqlite.add_user(&id, &format!("reviewer{n}@example.com"), "A reviewer").unwrap();
     }
     write_reviews(&sqlite, reviews).await;
-    [("in memory", in_memory), ("over SQLite", app(Arc::new(sqlite), users))]
+    [("in memory", in_memory), ("over SQLite", app(Arc::new(sqlite), users, Some(runtime_assets())))]
 }
 
 struct Response {
@@ -207,6 +257,12 @@ async fn respond(router: &Router, request: http::Request<Body>) -> Response {
 /// back.
 async fn sign_in(router: &Router) -> String {
     send(router, "POST", "/sign-in", None, Some(SHOPPER)).await.cookie.expect("the session cookie")
+}
+
+/// Signs `person` in, as `sign_in` signs the demo shopper in.
+async fn sign_in_as(router: &Router, (login, _, password): Person) -> String {
+    let form = form_urlencoded::Serializer::new(String::new()).append_pair("login", login).append_pair("password", password).finish();
+    send(router, "POST", "/sign-in", None, Some(&form)).await.cookie.expect("the session cookie")
 }
 
 /// The shipping address the place-order form posts.
@@ -535,6 +591,141 @@ async fn orders_are_filtered_by_the_get_form() {
     assert!(!page.body.contains(&placed), "{}", page.body);
     let none = send(&router, "GET", "/orders?statuses=shipped", Some(&cookie), None).await;
     assert!(none.body.contains("No orders match the filter."), "{}", none.body);
+}
+
+#[tokio::test]
+async fn a_shopper_sees_their_own_orders_and_staff_every_customers() {
+    for (shop, router) in each_shop("customers.db", &[]).await {
+        let grace = sign_in(&router).await;
+        let alan = sign_in_as(&router, ALAN).await;
+        let ada = sign_in_as(&router, ADA).await;
+        let graces = place_orders(&router, &grace, 2).await;
+        let alans = place_orders(&router, &alan, 2).await;
+        let ids = |pages: &[String]| pages.iter().map(|page| page.trim_start_matches("/orders/").to_owned()).collect::<Vec<_>>();
+
+        for (who, cookie, own, other) in [("Grace", &grace, &graces, &alans), ("Alan", &alan, &alans, &graces)] {
+            // Their orders page, a page of one at a time, and the
+            // console's, list their own orders alone, and so does the API.
+            let first = send(&router, "GET", "/orders?limit=1", Some(cookie), None).await;
+            assert_eq!(order_links(&first.body), own[..1], "{shop} {who}");
+            let next = link(&first.body, "next").expect("a next page");
+            let second = send(&router, "GET", &next, Some(cookie), None).await;
+            assert_eq!(order_links(&second.body), own[1..], "{shop} {who}");
+            assert_eq!(link(&second.body, "next"), None, "{shop} {who}");
+            let console = send(&router, "GET", "/console/orders", Some(cookie), None).await;
+            assert_eq!(console_orders(&console.body), ids(own), "{shop} {who}");
+            let api = send(&router, "GET", "/api/orders", Some(cookie), None).await;
+            assert_eq!(api.status, StatusCode::OK, "{shop} {who}: {}", api.body);
+            assert_eq!(api.body.matches(r#""shippingAddress""#).count(), 2, "{shop} {who}: {}", api.body);
+
+            // Another customer's order is the 404 of one no one placed:
+            // its page, its console page, its cancel from either and the
+            // API's get and cancel, and it stays placed.
+            let theirs = &other[0];
+            let id = theirs.trim_start_matches("/orders/");
+            let page = send(&router, "GET", theirs, Some(cookie), None).await;
+            assert_eq!(page.status, StatusCode::NOT_FOUND, "{shop} {who}: {}", page.body);
+            assert!(page.body.contains(r#"<p class="refusal">order not found</p>"#), "{shop} {who}: {}", page.body);
+            assert!(!page.body.contains("Analytical Way"), "{shop} {who}: {}", page.body);
+            let console_page = send(&router, "GET", &format!("/console{theirs}"), Some(cookie), None).await;
+            assert_eq!(console_page.status, StatusCode::NOT_FOUND, "{shop} {who}: {}", console_page.body);
+            for cancel in [format!("{theirs}/cancel"), format!("/console{theirs}/cancel")] {
+                let refused = send(&router, "POST", &cancel, Some(cookie), Some("reason=Not+mine")).await;
+                assert_eq!(refused.status, StatusCode::NOT_FOUND, "{shop} {who} {cancel}: {}", refused.body);
+            }
+            let api = send(&router, "GET", &format!("/api/orders/{id}"), Some(cookie), None).await;
+            assert_eq!(api.status, StatusCode::NOT_FOUND, "{shop} {who}: {}", api.body);
+            let api = call_api(&router, "POST", &format!("/api/orders/{id}/cancel"), cookie, r#"{"reason":"Not mine"}"#).await;
+            assert_eq!(api.status, StatusCode::NOT_FOUND, "{shop} {who}: {}", api.body);
+        }
+
+        // Staff list every customer's orders, as they were placed, on the
+        // orders page and the console's, each still placed, and cancel any.
+        let everyone: Vec<String> = graces.iter().chain(&alans).cloned().collect();
+        let orders = send(&router, "GET", "/orders?statuses=placed", Some(&ada), None).await;
+        assert_eq!(order_links(&orders.body), everyone, "{shop}");
+        let console = send(&router, "GET", "/console/orders", Some(&ada), None).await;
+        assert_eq!(console_orders(&console.body), ids(&everyone), "{shop}");
+        let page = send(&router, "GET", &graces[0], Some(&ada), None).await;
+        assert_eq!(page.status, StatusCode::OK, "{shop}: {}", page.body);
+        let cancelled = send(&router, "POST", &format!("{}/cancel", alans[0]), Some(&ada), Some("reason=Out+of+stock")).await;
+        assert_eq!((cancelled.status, cancelled.location.as_deref()), (StatusCode::SEE_OTHER, Some(alans[0].as_str())), "{shop}: {}", cancelled.body);
+        let console_cancel = format!("/console{}/cancel", graces[1]);
+        let cancelled = send(&router, "POST", &console_cancel, Some(&ada), Some("reason=Out+of+stock")).await;
+        assert_eq!(cancelled.status, StatusCode::SEE_OTHER, "{shop}: {}", cancelled.body);
+
+        // Each shopper sees their order cancelled.
+        for (cookie, order) in [(&alan, &alans[0]), (&grace, &graces[1])] {
+            let page = send(&router, "GET", order, Some(cookie), None).await;
+            assert!(page.body.contains(r#"<data value="cancelled">Cancelled</data>"#), "{shop}: {}", page.body);
+            assert!(page.body.contains("<dd>Out of stock</dd>"), "{shop}: {}", page.body);
+        }
+    }
+}
+
+/// Adds `person` to `users`, holding the role whose id is `role`, as a file
+/// made before an earlier version of the app holds them.
+async fn add_holding(users: &Service, role: &str, (login, name, password): Person) {
+    let store = users.store();
+    let password_hash = hash_password(password, users.config().argon2_params()).unwrap();
+    let user = store
+        .create_user(NewUser { login: login.to_owned(), name: name.to_owned(), password_hash, at: SystemTime::now() })
+        .await
+        .unwrap();
+    store.grant_role(&user.id, role, SystemTime::now()).await.unwrap();
+}
+
+#[tokio::test]
+async fn an_old_files_shopper_role_stops_showing_every_customers_orders() {
+    // A SQLite file made before staff held orders.any: its shopper role
+    // grants all of orders, which covers orders.any, so Grace, who holds
+    // it, reads Alan's order.
+    let path = sqlite_file("old-roles.db");
+    let url = format!("sqlite:{}", path.display());
+    let users = users_at(&url, CONFIG).unwrap();
+    let old = users.store().create_role("shopper", &["orders".to_owned()]).await.unwrap();
+    add_holding(&users, &old.id, GRACE).await;
+    add_holding(&users, &old.id, ALAN).await;
+    let shop = SqliteShop::open(&url).unwrap();
+    stock_sqlite(&shop).unwrap();
+    let router = app(Arc::new(shop), users, Some(runtime_assets()));
+    let alans = place_order(&router, &sign_in_as(&router, ALAN).await).await;
+    let id = alans.trim_start_matches("/orders/").to_owned();
+    let grace = sign_in(&router).await;
+    let page = send(&router, "GET", &alans, Some(&grace), None).await;
+    assert_eq!(page.status, StatusCode::OK, "{}", page.body);
+    drop(router);
+
+    // The app opens the file again, as src/main.rs does: Grace's login is
+    // there, so add_people adds only Ada, and rewrites the shopper role.
+    let shop = SqliteShop::open(&url).unwrap();
+    let users = users_at(&url, CONFIG).unwrap();
+    add_people(&users, GRACE, ADA).await.unwrap();
+    stock_sqlite(&shop).unwrap();
+    let roles = users.store().list_roles().await.unwrap();
+    let shopper = roles.iter().find(|role| role.name == "shopper").expect("the shopper role");
+    assert_eq!((shopper.id.as_str(), shopper.permissions.as_slice()), (old.id.as_str(), &SHOPPER_PERMISSIONS.map(String::from)[..]));
+    let router = app(Arc::new(shop), users, Some(runtime_assets()));
+
+    // Grace's session, from before, now reads her own orders alone: Alan's
+    // is the 404 of one no one placed, on its page and through the API,
+    // and her orders page lists none.
+    let page = send(&router, "GET", &alans, Some(&grace), None).await;
+    assert_eq!(page.status, StatusCode::NOT_FOUND, "{}", page.body);
+    let api = send(&router, "GET", &format!("/api/orders/{id}"), Some(&grace), None).await;
+    assert_eq!(api.status, StatusCode::NOT_FOUND, "{}", api.body);
+    let refused = send(&router, "POST", &format!("{alans}/cancel"), Some(&grace), Some("reason=Not+mine")).await;
+    assert_eq!(refused.status, StatusCode::NOT_FOUND, "{}", refused.body);
+    let orders = send(&router, "GET", "/orders", Some(&grace), None).await;
+    assert_eq!(orders.status, StatusCode::OK, "{}", orders.body);
+    assert_eq!(order_links(&orders.body), Vec::<&str>::new(), "{}", orders.body);
+    // She still places an order of her own, and Ada, staff, reads Alan's.
+    let graces = place_order(&router, &grace).await;
+    let orders = send(&router, "GET", "/orders", Some(&grace), None).await;
+    assert_eq!(order_links(&orders.body), [graces.as_str()], "{}", orders.body);
+    let ada = sign_in_as(&router, ADA).await;
+    let page = send(&router, "GET", &alans, Some(&ada), None).await;
+    assert_eq!(page.status, StatusCode::OK, "{}", page.body);
 }
 
 #[tokio::test]
@@ -892,10 +1083,13 @@ async fn the_console_searches_a_products_reviews() {
             }
         };
 
-        // The search box comes first, in a form that is a search.
+        // The search box comes first, in a form that is a search, which
+        // the runtime submits in place (pages_live).
         let all = send(&router, "GET", &reviews, None, None).await;
-        let search = r#"<form method="get" class="ss-filter" role="search"><div class="field"><label for="product-reviews-list-reviews-q">Search</label><input id="product-reviews-list-reviews-q" name="q" type="search" maxlength="100"></div>"#;
-        assert!(all.body.contains(search), "{shop}: {}", all.body);
+        let form = r#"<form method="get" class="ss-filter" role="search" data-ss-live="products_reviews""#;
+        let search = r#"<div class="field"><label for="product-reviews-list-reviews-q">Search</label><input id="product-reviews-list-reviews-q" name="q" type="search" maxlength="100"></div>"#;
+        let first_field = all.body.split_once(form).and_then(|(_, rest)| rest.find(r#"<div class="field">"#).map(|at| &rest[at..]));
+        assert!(first_field.is_some_and(|field| field.starts_with(search)), "{shop}: {}", all.body);
         assert_eq!(review_titles(&all.body), ["Sturdy and heavy", "Too heavy", "Rings true"], "{shop}");
 
         // Every word, in any case, in the title or the body; the box holds
@@ -921,6 +1115,248 @@ async fn the_console_searches_a_products_reviews() {
         assert_eq!(seen, "Sturdy and heavy | Too heavy | Rings true", "{shop}");
         assert_eq!(link(&page.body, "first"), Some(format!("{reviews}?q=heavy&limit=1")), "{shop}");
     }
+}
+
+/// A shard's request, as Topcoat's runtime sends one when a live list
+/// renders again: its arguments in JSON, as the shopper whose session
+/// `cookie` holds, if any. No argument here needs escaping.
+async fn shard(router: &Router, uri: &str, cookie: Option<&str>, args: &[&str]) -> Response {
+    let args: Vec<String> = args
+        .iter()
+        .map(|arg| {
+            assert!(!arg.contains(['"', '\\']), "{arg}");
+            format!("\"{arg}\"")
+        })
+        .collect();
+    let mut request = http::Request::builder().method("POST").uri(uri).header(header::CONTENT_TYPE, "application/json");
+    if let Some(cookie) = cookie {
+        request = request.header(header::COOKIE, cookie);
+    }
+    respond(router, request.body(Body::from(format!(r#"{{"args": [{}]}}"#, args.join(", ")))).unwrap()).await
+}
+
+/// A page rendered again, as Topcoat's runtime asks for it: a POST to the
+/// page's URL with the runtime's header and the document's signals, which
+/// the runtime's layer turns into the page's GET.
+async fn rerun(router: &Router, uri: &str, cookie: &str) -> Response {
+    let request = http::Request::builder()
+        .method("POST")
+        .uri(uri)
+        .header(header::COOKIE, cookie)
+        .header(header::CONTENT_TYPE, "application/json")
+        .header("x-topcoat-runtime", "true")
+        .body(Body::from(r#"{"signals": {}}"#))
+        .unwrap();
+    respond(router, request).await
+}
+
+/// The ids of the orders at `pages`, the orders' pages of the shop.
+fn order_ids(pages: &[String]) -> Vec<&str> {
+    pages.iter().map(|page| page.trim_start_matches("/orders/")).collect()
+}
+
+#[tokio::test]
+async fn every_page_is_one_document_with_the_runtime() {
+    let router = shop().await;
+    let cookie = sign_in(&router).await;
+    for path in ["/reviews", "/orders", "/orders/new", "/sign-in", "/console", "/console/orders", "/console/products"] {
+        let page = send(&router, "GET", path, Some(&cookie), None).await;
+        assert_eq!(page.status, StatusCode::OK, "{path}: {}", page.body);
+        assert!(page.body.starts_with("<!DOCTYPE html>"), "{path}: {}", page.body);
+        assert_eq!(page.body.matches("<html").count(), 1, "{path}: {}", page.body);
+        // The runtime's script once, in the head, and no other.
+        let (head, body) = page.body.split_once("<body>").expect("a body");
+        assert_eq!(head.matches(SCRIPT).count(), 1, "{path}: {}", page.body);
+        assert_eq!(page.body.matches("<script").count(), 1, "{path}: {}", page.body);
+        assert!(body.ends_with("</body></html>"), "{path}: {}", page.body);
+    }
+    // The console's layout sits inside the document's body.
+    let console = send(&router, "GET", "/console/orders", Some(&cookie), None).await;
+    let (_, body) = console.body.split_once("<body>").expect("a body");
+    assert!(body.starts_with(r#"<div class="ss-pages">"#), "{}", console.body);
+}
+
+#[tokio::test]
+async fn the_consoles_lists_are_live() {
+    for (shop, router) in each_shop("live-orders.db", &[]).await {
+        let cookie = sign_in(&router).await;
+        let placed = place_orders(&router, &cookie, 3).await;
+        let ids = order_ids(&placed);
+        let cancelled = send(&router, "POST", &format!("{}/cancel", placed[1]), Some(&cookie), Some("reason=")).await;
+        assert_eq!(cancelled.status, StatusCode::SEE_OTHER, "{shop}: {}", cancelled.body);
+
+        // The list renders through its shard, its filter a form the
+        // runtime submits in place.
+        let list = send(&router, "GET", "/console/orders", Some(&cookie), None).await;
+        assert_eq!(list.status, StatusCode::OK, "{shop}: {}", list.body);
+        assert!(list.body.contains(r#"::topcoat::shard::start("/console/_live/orders""#), "{shop}: {}", list.body);
+        assert!(list.body.contains(r#"data-ss-live="orders""#), "{shop}: {}", list.body);
+
+        // The shard renders the orders a filter finds, without the layout
+        // or the document.
+        let placed_only = shard(&router, "/console/_live/orders", Some(&cookie), &["statuses=placed", "/console/orders"]).await;
+        assert_eq!(placed_only.status, StatusCode::OK, "{shop}: {}", placed_only.body);
+        assert_eq!(console_orders(&placed_only.body), [ids[0], ids[2]], "{shop}");
+        assert!(!placed_only.body.contains("ss-nav") && !placed_only.body.contains("<html"), "{shop}: {}", placed_only.body);
+        assert!(placed_only.body.contains(r#"<input type="checkbox" name="statuses" value="placed" checked="">"#), "{shop}: {}", placed_only.body);
+
+        // And a page, whose links' queries it renders in turn.
+        let first = shard(&router, "/console/_live/orders", Some(&cookie), &["limit=1", "/console/orders"]).await;
+        assert_eq!(console_orders(&first.body), ids[..1], "{shop}");
+        let next = link(&first.body, "next").expect("a next page");
+        let query = next.strip_prefix("/console/orders?").expect("the list's query");
+        let second = shard(&router, "/console/_live/orders", Some(&cookie), &[query, "/console/orders"]).await;
+        assert_eq!(second.status, StatusCode::OK, "{shop}: {}", second.body);
+        assert_eq!(console_orders(&second.body), ids[1..2], "{shop}");
+        assert_eq!(link(&second.body, "first").as_deref(), Some("/console/orders?limit=1"), "{shop}");
+        assert_eq!(link(&second.body, "prev"), link(&second.body, "first"), "{shop}");
+        // The next page's query holds the history, so the shard renders its
+        // Previous link from it, back to the page before.
+        let third = link(&second.body, "next").expect("a third page");
+        let query = third.strip_prefix("/console/orders?").expect("the list's query");
+        assert!(query.contains("&back="), "{shop}: {query}");
+        let third = shard(&router, "/console/_live/orders", Some(&cookie), &[query, "/console/orders"]).await;
+        assert_eq!(console_orders(&third.body), ids[2..], "{shop}");
+        assert_eq!(link(&third.body, "prev"), Some(next), "{shop}");
+
+        // A signed-out shard is refused as the list is.
+        let signed_out = shard(&router, "/console/_live/orders", None, &["", "/console/orders"]).await;
+        assert_eq!(signed_out.status, StatusCode::UNAUTHORIZED, "{shop}: {}", signed_out.body);
+
+        // The runtime renders the page again: its layer makes the POST the
+        // page's GET, which the console's controls, registered before it,
+        // meet as one.
+        let again = rerun(&router, "/console/orders?statuses=placed", &cookie).await;
+        assert_eq!(again.status, StatusCode::OK, "{shop}: {}", again.body);
+        assert!(again.body.starts_with("<!DOCTYPE html>"), "{shop}: {}", again.body);
+        assert_eq!(console_orders(&again.body), [ids[0], ids[2]], "{shop}");
+    }
+}
+
+/// The page-size form of a list, when it has one: the sizes it offers, the
+/// size selected, and the names of its hidden inputs, which carry the
+/// filter.
+fn size_form(body: &str) -> Option<(Vec<&str>, Vec<&str>, Vec<&str>)> {
+    let (_, rest) = body.split_once(r#"<form method="get" class="ss-page-size""#)?;
+    let (form, _) = rest.split_once("</form>")?;
+    Some((
+        each_between(form, r#"<option value=""#, "\""),
+        each_between(form, r#" selected="">"#, "</option>"),
+        each_between(form, r#"<input type="hidden" name=""#, "\""),
+    ))
+}
+
+#[tokio::test]
+async fn the_console_goes_back_a_page_and_sets_its_size() {
+    for (shop, router) in each_shop("back-and-size.db", &[]).await {
+        let cookie = sign_in(&router).await;
+        let placed = place_orders(&router, &cookie, 25).await;
+        let ids = order_ids(&placed);
+
+        // The size form offers the route's sizes, the default selected,
+        // and holds no limit of its own.
+        let all = send(&router, "GET", "/console/orders", Some(&cookie), None).await;
+        assert_eq!(size_form(&all.body), Some((vec!["10", "20", "50", "100"], vec!["20"], vec![])), "{shop}: {}", all.body);
+        let products = send(&router, "GET", "/console/products", None, None).await;
+        assert_eq!(size_form(&products.body).map(|(sizes, ..)| sizes), Some(vec!["10", "20", "50", "100"]), "{shop}");
+        let reviews = send(&router, "GET", &format!("/console/products/{PRODUCT}/reviews"), None, None).await;
+        assert_eq!(size_form(&reviews.body).map(|(sizes, ..)| sizes), Some(vec!["10", "20", "50"]), "{shop}");
+
+        // Its submit, a GET of limit=10: the first page at that size, with
+        // a next and nothing before it, the filter holding the limit.
+        let first = send(&router, "GET", "/console/orders?limit=10", Some(&cookie), None).await;
+        assert_eq!(first.status, StatusCode::OK, "{shop}: {}", first.body);
+        assert_eq!(console_orders(&first.body), ids[..10], "{shop}");
+        assert_eq!((link(&first.body, "first"), link(&first.body, "prev")), (None, None), "{shop}");
+        assert_eq!(size_form(&first.body).map(|(_, selected, _)| selected), Some(vec!["10"]), "{shop}");
+        assert!(first.body.contains(r#"<input type="hidden" name="limit" value="10">"#), "{shop}: {}", first.body);
+
+        // Next, twice: the second page goes back to the first, by First and
+        // by Previous alike, and the third holds the second in its history.
+        let second_href = link(&first.body, "next").expect("a second page");
+        assert!(second_href.starts_with("/console/orders?limit=10&cursor=") && !second_href.contains("back="), "{shop}: {second_href}");
+        let second = send(&router, "GET", &second_href, Some(&cookie), None).await;
+        assert_eq!(console_orders(&second.body), ids[10..20], "{shop}");
+        assert_eq!(link(&second.body, "first").as_deref(), Some("/console/orders?limit=10"), "{shop}");
+        assert_eq!(link(&second.body, "prev"), link(&second.body, "first"), "{shop}");
+        let third_href = link(&second.body, "next").expect("a third page");
+        assert!(third_href.contains("&back="), "{shop}: {third_href}");
+        let third = send(&router, "GET", &third_href, Some(&cookie), None).await;
+        assert_eq!(console_orders(&third.body), ids[20..], "{shop}");
+        assert_eq!(link(&third.body, "next"), None, "{shop}");
+
+        // Previous lands on each page it left.
+        assert_eq!(link(&third.body, "prev").as_deref(), Some(second_href.as_str()), "{shop}");
+        let back = send(&router, "GET", &second_href, Some(&cookie), None).await;
+        assert_eq!(console_orders(&back.body), ids[10..20], "{shop}");
+        let back = send(&router, "GET", &link(&back.body, "prev").expect("a previous page"), Some(&cookie), None).await;
+        assert_eq!(console_orders(&back.body), ids[..10], "{shop}");
+
+        // A filter keeps the size: the size form holds the filter, not the
+        // limit, and the links give the filter and the limit first.
+        let filtered = send(&router, "GET", "/console/orders?statuses=placed&limit=10", Some(&cookie), None).await;
+        assert_eq!(size_form(&filtered.body).map(|(_, _, hidden)| hidden), Some(vec!["statuses"]), "{shop}");
+        let next = link(&filtered.body, "next").expect("a next page");
+        assert!(next.starts_with("/console/orders?statuses=placed&limit=10&cursor="), "{shop}: {next}");
+
+        // In place: the shard renders a page's Previous from the history
+        // its query holds, and a new size from the first page.
+        let query = third_href.strip_prefix("/console/orders?").expect("the list's query");
+        let live = shard(&router, "/console/_live/orders", Some(&cookie), &[query, "/console/orders"]).await;
+        assert_eq!(console_orders(&live.body), ids[20..], "{shop}");
+        assert_eq!(link(&live.body, "prev").as_deref(), Some(second_href.as_str()), "{shop}");
+        let sized = shard(&router, "/console/_live/orders", Some(&cookie), &["limit=50", "/console/orders"]).await;
+        assert_eq!(console_orders(&sized.body), ids, "{shop}");
+        assert_eq!(size_form(&sized.body).map(|(_, selected, _)| selected), Some(vec!["50"]), "{shop}");
+    }
+}
+
+#[tokio::test]
+async fn the_reviews_shard_is_live() {
+    for (shop, router) in each_shop("live-reviews.db", &REVIEWS).await {
+        let reviews = format!("/console/products/{PRODUCT}/reviews");
+        let list = send(&router, "GET", &reviews, None, None).await;
+        assert_eq!(list.status, StatusCode::OK, "{shop}: {}", list.body);
+        assert!(list.body.contains(r#"::topcoat::shard::start("/console/_live/products_reviews""#), "{shop}: {}", list.body);
+
+        // The nested list's shard takes the product from its arguments, as
+        // the page takes it from its route, and carries the search.
+        let live = "/console/_live/products_reviews";
+        let sturdy = shard(&router, live, None, &[PRODUCT, "q=sturdy", &reviews]).await;
+        assert_eq!(sturdy.status, StatusCode::OK, "{shop}: {}", sturdy.body);
+        assert_eq!(review_titles(&sturdy.body), ["Sturdy and heavy", "Rings true"], "{shop}");
+        assert!(sturdy.body.contains(r#"name="q" type="search" maxlength="100" value="sturdy">"#), "{shop}: {}", sturdy.body);
+        let paged = shard(&router, live, None, &[PRODUCT, "q=heavy&limit=1", &reviews]).await;
+        assert_eq!(review_titles(&paged.body), ["Sturdy and heavy"], "{shop}");
+        let next = link(&paged.body, "next").expect("a next page");
+        assert!(next.starts_with(&format!("{reviews}?q=heavy&limit=1&cursor=")), "{shop}: {next}");
+        let query = next.strip_prefix(&format!("{reviews}?")).expect("the list's query");
+        let second = shard(&router, live, None, &[PRODUCT, query, &reviews]).await;
+        assert_eq!(review_titles(&second.body), ["Too heavy"], "{shop}");
+    }
+}
+
+#[tokio::test]
+async fn without_the_runtime_the_pages_have_no_script() {
+    let users = users_in_memory(CONFIG).unwrap();
+    add_shopper(&users, "grace@example.com", "Grace Hopper", "grace's password").await.unwrap();
+    let router = app(Arc::new(shop_in_memory()), users, None);
+    let cookie = sign_in(&router).await;
+    place_order(&router, &cookie).await;
+    for path in ["/reviews", "/orders", "/console/orders", &format!("/console/products/{PRODUCT}/reviews")] {
+        let page = send(&router, "GET", path, Some(&cookie), None).await;
+        assert_eq!(page.status, StatusCode::OK, "{path}: {}", page.body);
+        assert!(page.body.starts_with("<!DOCTYPE html>"), "{path}: {}", page.body);
+        assert!(!page.body.contains("<script"), "{path}: {}", page.body);
+    }
+    // The console's lists are the GET forms and links they are without the
+    // runtime, and a filter loads the page.
+    let filtered = send(&router, "GET", "/console/orders?statuses=placed", Some(&cookie), None).await;
+    assert!(filtered.body.contains(r#"<form method="get" class="ss-filter" data-ss-live="orders""#), "{}", filtered.body);
+    assert_eq!(console_orders(&filtered.body).len(), 1, "{}", filtered.body);
+    // No layer renders a page again: the POST is no page's.
+    let again = rerun(&router, "/console/orders", &cookie).await;
+    assert_eq!(again.status, StatusCode::METHOD_NOT_ALLOWED, "{}", again.body);
 }
 
 /// The orders' procedure, called from a page the test adds, which the app's

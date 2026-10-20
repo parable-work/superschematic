@@ -329,6 +329,15 @@ type {{ .TypeName }}Filter struct {
 	// {{ .SourceTypeName }} whose {{ .FieldName }} points at this row.
 	{{ .FilterField }} *ReferencedByFilter
 	{{- end }}
+	{{- if .HasSearch }}
+	// SearchText keeps the rows whose search fields hold each of its words,
+	// in any case (D62): its runs of characters that are not White_Space,
+	// the first 8 of them. Each word is a condition on the table's
+	// search_text column, which the trigram index serves, ILIKE the word
+	// with its \, % and _ escaped, so they match themselves. A text without
+	// words, such as a blank one, keeps every row, and nil filters nothing.
+	SearchText *string
+	{{- end }}
 }
 
 // {{ .TypeName }}Update provides fields that can be updated
@@ -470,10 +479,36 @@ func (u *{{ .TypeName }}Update) ApplyTo(row *types.{{ .TypeName }}) {
 	{{- end }}
 }
 
-// buildWhereClause builds a WHERE clause from a {{ .TypeName }}Filter
+// {{ .TypeName }}FilterConditions are the filter's conditions for a query of
+// the caller's own, each column qualified by its table: each value is
+// appended to args, its placeholder numbered after those already there.
+{{- if .HasSoftDelete }}
+// FindMany's WHERE is them joined by AND, then deleted_at IS NULL unless
+// its options include deleted rows. That soft-delete condition is not
+// among them: a query that leaves deleted rows out adds it itself. A nil
+// filter has none.
+{{- else }}
+// FindMany's WHERE is them joined by AND. A nil filter has none.
+{{- end }}
+func {{ .TypeName }}FilterConditions(filter *{{ .TypeName }}Filter, args *[]any) []string {
+	return filter.conditions(args, len(*args))
+}
+
+// buildWhereClause builds a WHERE clause from a {{ .TypeName }}Filter: its
+// conditions joined by AND, or nothing when it has none.
 func (f *{{ .TypeName }}Filter) buildWhereClause(args *[]interface{}, paramOffset int) string {
-	if f == nil {
+	conditions := f.conditions(args, paramOffset)
+	if len(conditions) == 0 {
 		return ""
+	}
+	return " WHERE " + strings.Join(conditions, " AND ")
+}
+
+// conditions are the filter's conditions, each value appended to args, its
+// placeholder numbered from paramOffset+1.
+func (f *{{ .TypeName }}Filter) conditions(args *[]interface{}, paramOffset int) []string {
+	if f == nil {
+		return nil
 	}
 
 	var conditions []string
@@ -657,11 +692,17 @@ func (f *{{ .TypeName }}Filter) buildWhereClause(args *[]interface{}, paramOffse
 		}
 	}
 	{{- end }}
+	{{- if .HasSearch }}
 
-	if len(conditions) == 0 {
-		return ""
+	if f.SearchText != nil {
+		for _, term := range searchTerms(*f.SearchText) {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`{{ $quotedTableName }}.{{ .QuotedSearchColumn }} ILIKE $%d ESCAPE '\'`, paramNum))
+			*args = append(*args, searchLikePattern(term))
+		}
 	}
+	{{- end }}
 
-	return " WHERE " + strings.Join(conditions, " AND ")
+	return conditions
 }
 {{- end }}

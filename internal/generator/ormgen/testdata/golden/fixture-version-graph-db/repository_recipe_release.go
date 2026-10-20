@@ -100,8 +100,10 @@ var RecipeReleaseQuotedFields = map[string]string{
 	"commit_id":  `commit_id`,
 }
 
-// buildRecipeReleaseOrderByClause builds an ORDER BY clause for RecipeRelease
-func buildRecipeReleaseOrderByClause(orderBy []RecipeReleaseOrderBy, tableName string) string {
+// buildRecipeReleaseOrderByClause builds an ORDER BY clause for RecipeRelease.
+// quotedTable is the table's name as the FROM clause spells it, quoted when
+// it is a keyword (a table named order is "order").
+func buildRecipeReleaseOrderByClause(orderBy []RecipeReleaseOrderBy, quotedTable string) string {
 	if len(orderBy) == 0 {
 		return ""
 	}
@@ -118,7 +120,7 @@ func buildRecipeReleaseOrderByClause(orderBy []RecipeReleaseOrderBy, tableName s
 		if !ok {
 			quotedField = fieldStr // Fallback to unquoted if not found
 		}
-		clauses = append(clauses, fmt.Sprintf("%s.%s %s", tableName, quotedField, direction))
+		clauses = append(clauses, fmt.Sprintf("%s.%s %s", quotedTable, quotedField, direction))
 	}
 
 	if len(clauses) == 0 {
@@ -860,7 +862,7 @@ func (r *RecipeReleaseRepository) FindOne(ctx context.Context, filter *RecipeRel
 	whereClause := filter.buildWhereClause(&args, 0)
 
 	// Build ORDER BY clause
-	orderByClause := buildRecipeReleaseOrderByClause(opts.OrderBy, "recipe_release")
+	orderByClause := buildRecipeReleaseOrderByClause(opts.OrderBy, `recipe_release`)
 
 	// Build query
 	query := fmt.Sprintf(`SELECT %s FROM recipe_release%s%s LIMIT 1`, selectFields, whereClause, orderByClause)
@@ -1076,7 +1078,7 @@ func (r *RecipeReleaseRepository) FindMany(ctx context.Context, filter *RecipeRe
 	whereClause := filter.buildWhereClause(&args, 0)
 
 	// Build ORDER BY clause
-	orderByClause := buildRecipeReleaseOrderByClause(opts.OrderBy, "recipe_release")
+	orderByClause := buildRecipeReleaseOrderByClause(opts.OrderBy, `recipe_release`)
 
 	// Build LIMIT/OFFSET clause
 	limitOffsetClause := buildLimitOffsetClauseTyped(opts.Limit, opts.Offset)

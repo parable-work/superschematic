@@ -2,13 +2,13 @@
 {{range .Enums}}
 {{if .Doc -}}
 /**
- * {{.Name}} - {{tsDoc .Doc}}
+ * {{.Name}} - {{tsDoc .Doc " * "}}
  */
 {{end -}}
 export enum {{.Name}} {
 {{- range .Values}}
   {{- if .Doc}}
-  /** {{tsDoc .Doc}} */
+  /** {{tsDoc .Doc "   * "}} */
   {{- end}}
   {{.Name}} = "{{.Value}}",
 {{- end}}

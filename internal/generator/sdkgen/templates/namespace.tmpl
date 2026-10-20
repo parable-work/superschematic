@@ -116,7 +116,7 @@ export class {{.Namespace.ClassName}} {
   {{- /* File upload endpoint: generate convenience method with File objects */}}
 
   /**
-   * {{if .Description}}{{.Description}}{{else}}{{.Name}} endpoint{{end}}
+   * {{if .Description}}{{jsdoc .Description "   * "}}{{else}}{{.Name}} endpoint{{end}}
    *
    * This is a convenience method that accepts File objects for file uploads.
    * The SDK automatically constructs the multipart/form-data request.
@@ -141,7 +141,7 @@ export class {{.Namespace.ClassName}} {
    * @param params - Optional query parameters
    {{- end}}
    * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
-   * @returns {{if .OutputIsArrayOfArrays}}Array of arrays of {{else if .OutputIsArray}}Array of {{end}}{{type_ref .OutputType}}
+   * @returns {{if .OutputIsMap}}Map of {{if .OutputIsArray}}arrays of {{end}}{{else if .OutputIsArrayOfArrays}}Array of arrays of {{else if .OutputIsArray}}Array of {{end}}{{type_ref .OutputType}}{{if .OutputNullable}}, or null{{end}}
    * @throws {ValidationError} if input validation fails
    * @throws {ApiError} if the API request fails
    */
@@ -179,12 +179,20 @@ export class {{.Namespace.ClassName}} {
     );
 
     {{- if $endpoint.HasOutputParser}}
-    {{- if $endpoint.OutputIsArrayOfArrays}}
+    {{- if $endpoint.OutputIsMap}}
+    return result !== null && typeof result === 'object'
+      ? Object.fromEntries(
+          Object.entries(result).map(([key, value]) => [key, {{if $endpoint.OutputIsArray}}Array.isArray(value) ? value.map(parse{{type_ref $endpoint.OutputType}}FromJSON) : value{{else}}parse{{type_ref $endpoint.OutputType}}FromJSON(value){{end}}])
+        )
+      : result;
+    {{- else if $endpoint.OutputIsArrayOfArrays}}
     return Array.isArray(result)
       ? result.map((row) => (Array.isArray(row) ? row.map(parse{{type_ref $endpoint.OutputType}}FromJSON) : row))
       : result;
     {{- else if $endpoint.OutputIsArray}}
     return Array.isArray(result) ? result.map(parse{{type_ref $endpoint.OutputType}}FromJSON) : result;
+    {{- else if $endpoint.OutputNullable}}
+    return result === null ? null : parse{{type_ref $endpoint.OutputType}}FromJSON(result);
     {{- else}}
     return parse{{type_ref $endpoint.OutputType}}FromJSON(result);
     {{- end}}
@@ -194,7 +202,7 @@ export class {{.Namespace.ClassName}} {
   }
 
   /**
-   * {{if .Description}}{{.Description}}{{else}}{{.Name}} endpoint{{end}}
+   * {{if .Description}}{{jsdoc .Description "   * "}}{{else}}{{.Name}} endpoint{{end}}
    *
    * Raw method for advanced use cases. You construct the FormData yourself.
    * The FormData should contain:
@@ -217,7 +225,7 @@ export class {{.Namespace.ClassName}} {
    * @param params - Optional query parameters
    {{- end}}
    * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
-   * @returns {{if .OutputIsArrayOfArrays}}Array of arrays of {{else if .OutputIsArray}}Array of {{end}}{{type_ref .OutputType}}
+   * @returns {{if .OutputIsMap}}Map of {{if .OutputIsArray}}arrays of {{end}}{{else if .OutputIsArrayOfArrays}}Array of arrays of {{else if .OutputIsArray}}Array of {{end}}{{type_ref .OutputType}}{{if .OutputNullable}}, or null{{end}}
    * @throws {ApiError} if the API request fails
    */
   public async {{.Name}}Raw(
@@ -237,12 +245,20 @@ export class {{.Namespace.ClassName}} {
     );
 
     {{- if $endpoint.HasOutputParser}}
-    {{- if $endpoint.OutputIsArrayOfArrays}}
+    {{- if $endpoint.OutputIsMap}}
+    return result !== null && typeof result === 'object'
+      ? Object.fromEntries(
+          Object.entries(result).map(([key, value]) => [key, {{if $endpoint.OutputIsArray}}Array.isArray(value) ? value.map(parse{{type_ref $endpoint.OutputType}}FromJSON) : value{{else}}parse{{type_ref $endpoint.OutputType}}FromJSON(value){{end}}])
+        )
+      : result;
+    {{- else if $endpoint.OutputIsArrayOfArrays}}
     return Array.isArray(result)
       ? result.map((row) => (Array.isArray(row) ? row.map(parse{{type_ref $endpoint.OutputType}}FromJSON) : row))
       : result;
     {{- else if $endpoint.OutputIsArray}}
     return Array.isArray(result) ? result.map(parse{{type_ref $endpoint.OutputType}}FromJSON) : result;
+    {{- else if $endpoint.OutputNullable}}
+    return result === null ? null : parse{{type_ref $endpoint.OutputType}}FromJSON(result);
     {{- else}}
     return parse{{type_ref $endpoint.OutputType}}FromJSON(result);
     {{- end}}
@@ -254,7 +270,7 @@ export class {{.Namespace.ClassName}} {
   {{- /* Standard endpoint (no file upload) */}}
 
   /**
-   * {{if .Description}}{{.Description}}{{else}}{{.Name}} endpoint{{end}}
+   * {{if .Description}}{{jsdoc .Description "   * "}}{{else}}{{.Name}} endpoint{{end}}
    {{- if .RequiresAuth}}
    * @requires Authentication
    {{- end}}
@@ -280,18 +296,18 @@ export class {{.Namespace.ClassName}} {
    {{- if .Filterable}}
    * @param filters - Optional bracket-notation filters (filter[field]=value)
    {{- end}}
-  {{- if has_encrypted_body .Method .Encrypted}}
-  * @param options - Optional encrypted request options
-  * @param options.publicEncryptionKey - Optional per-request public encryption key override
-  * @param options.signal - Optional AbortSignal for request cancellation
-  * @param options.forward - Optional end user to forward, such as a server's RequestContext
-  {{- else}}
-  * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
-  {{- end}}
+   {{- if has_encrypted_body .Method .Encrypted}}
+   * @param options - Optional encrypted request options
+   * @param options.publicEncryptionKey - Optional per-request public encryption key override
+   * @param options.signal - Optional AbortSignal for request cancellation
+   * @param options.forward - Optional end user to forward, such as a server's RequestContext
+   {{- else}}
+   * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
+   {{- end}}
    {{- if .Page}}
    * @returns One page of {{type_ref .OutputType}}: its items and next, null after the last page; {{.AllName}} yields every item
    {{- else}}
-   * @returns {{if .OutputIsArrayOfArrays}}Array of arrays of {{else if .OutputIsArray}}Array of {{end}}{{type_ref .OutputType}}
+   * @returns {{if .OutputIsMap}}Map of {{if .OutputIsArray}}arrays of {{end}}{{else if .OutputIsArrayOfArrays}}Array of arrays of {{else if .OutputIsArray}}Array of {{end}}{{type_ref .OutputType}}{{if .OutputNullable}}, or null{{end}}
    {{- end}}
    * @throws {ValidationError} if input validation fails
    * @throws {ApiError} if the API request fails
@@ -764,12 +780,20 @@ export class {{.Namespace.ClassName}} {
       items: Array.isArray(result.items) ? result.items.map(parse{{type_ref $endpoint.OutputType}}FromJSON) : result.items,
       next: result.next,
     };
+    {{- else if $endpoint.OutputIsMap}}
+    return result !== null && typeof result === 'object'
+      ? Object.fromEntries(
+          Object.entries(result).map(([key, value]) => [key, {{if $endpoint.OutputIsArray}}Array.isArray(value) ? value.map(parse{{type_ref $endpoint.OutputType}}FromJSON) : value{{else}}parse{{type_ref $endpoint.OutputType}}FromJSON(value){{end}}])
+        )
+      : result;
     {{- else if $endpoint.OutputIsArrayOfArrays}}
     return Array.isArray(result)
       ? result.map((row) => (Array.isArray(row) ? row.map(parse{{type_ref $endpoint.OutputType}}FromJSON) : row))
       : result;
     {{- else if $endpoint.OutputIsArray}}
     return Array.isArray(result) ? result.map(parse{{type_ref $endpoint.OutputType}}FromJSON) : result;
+    {{- else if $endpoint.OutputNullable}}
+    return result === null ? null : parse{{type_ref $endpoint.OutputType}}FromJSON(result);
     {{- else}}
     return parse{{type_ref $endpoint.OutputType}}FromJSON(result);
     {{- end}}

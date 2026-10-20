@@ -31,7 +31,7 @@ export class CatalogNamespace {
   /**
    * Place a basket.
    * @param input - Request payload
-  * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
+   * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
    * @returns BasketView
    * @throws {ValidationError} if input validation fails
    * @throws {ApiError} if the API request fails
@@ -60,9 +60,9 @@ export class CatalogNamespace {
 
   /**
    * The items, two to a page unless the caller asks for up to five, by
-their ids or their stock.
+   * their ids or their stock.
    * @param params - Optional query parameters, with the page: cursor, the next of the page before, absent for the first page, and limit, 1 to 5, 2 when absent
-  * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
+   * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
    * @returns One page of ItemView: its items and next, null after the last page; listItemsAll yields every item
    * @throws {ValidationError} if input validation fails
    * @throws {ApiError} if the API request fails
@@ -161,7 +161,7 @@ their ids or their stock.
   /**
    * One item.
    * @param itemId - itemId parameter
-  * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
+   * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
    * @returns ItemView
    * @throws {ValidationError} if input validation fails
    * @throws {ApiError} if the API request fails
@@ -182,7 +182,7 @@ their ids or their stock.
   /**
    * The tags items carry: a page of a primitive, with the default limits.
    * @param params - Optional query parameters, with the page: cursor, the next of the page before, absent for the first page, and limit, 1 to 100, 20 when absent
-  * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
+   * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
    * @returns One page of string: its items and next, null after the last page; listTagsAll yields every item
    * @throws {ValidationError} if input validation fails
    * @throws {ApiError} if the API request fails
