@@ -6,8 +6,9 @@
 // sessions shop-api's sign-in starts (D50). Placing an order reserves its
 // stock on shop-stock, a Rust server, through the client of shop-stock's
 // Go SDK its Deps holds (D57). Its lists of orders, reviews and products
-// answer a page at a time (D60), and the reviews' search reads each
-// review's search_text (D62).
+// answer a page at a time, in the sort a request asks for, through the
+// ORM's FindPage (D60, amended), and the reviews' and the products'
+// searches read each row's search_text (D62).
 package shoporders
 
 import (

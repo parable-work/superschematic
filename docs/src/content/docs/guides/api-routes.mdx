@@ -259,29 +259,41 @@ keyset, and its `Next` is the key the page's cursor holds
 reads the page request's sort into the ORM's order, and `ErrPageKey` is a
 cursor of another order.
 
-`shop-orders` pages its orders, a product's reviews and its catalog. Its Go
-implementation reads a page of orders in two steps: the keys of up to
-`limit + 1` of the caller's orders (every customer's for staff) after the
-cursor's, `placedAt` then `id`, with a query that compares the pair, which
-the ORM's filters cannot say, then the orders the page keeps, with their
-lines, through the ORM, which sorts them by the same pair:
+`shop-orders` pages its orders, a product's reviews and its catalog, each
+in a sort: the orders by `placedAt` or `totalCents`, the products by
+`name` or `priceCents`, and the reviews by `createdAt` or `rating`, each
+list's `defaultSort` the order it had before it took a sort. An order
+stores its total when it is placed, since its lines do not change after,
+so its table can order by it. The Go implementation reads each page
+through `FindPage`: the caller's orders (every customer's for staff),
+their statuses a filter, in the sort `ParseOrderSort` reads, after the
+key the cursor holds, with their lines:
 
-<Snippet file="go/shop-orders/orders.go" symbol={['orderKey', 'Orders.ListOrders']} />
+<Snippet file="go/shop-orders/orders.go" symbol="Orders.ListOrders" />
+
+`pageKey` decodes a cursor into the ORM's key, `pageOf` encodes the
+page's `Next` as the next cursor, and `pageError` answers `ErrPageKey`, a
+key of another order, as the cursor the implementation cannot read. A
+cursor the router bound to another sort never gets that far:
+
+<Snippet file="go/shop-orders/pages.go" symbol={['pageKey', 'pageOf', 'pageError']} />
 
 `listReviews` also takes a search, `q`, a `SearchQuery`
 ([References and search](/superschematic/reference/references-and-search/)),
 which keeps the reviews whose
 [`search_text`](/superschematic/guides/database-tables/#text-search) holds
 each of its words. Its product, its rating and its search are a
-`ReviewFilter`, whose `SearchText` makes each word one `ILIKE` condition,
-and `ReviewFilterConditions` gives the filter's conditions to the page's
-key query. The query adds two of its own: `deleted_at IS NULL`, since the
-soft-delete condition is not among a filter's conditions (`FindMany` adds
-it itself), and the comparison of the pair after the cursor's. The
-reviews the page keeps come back through `FindMany`, sorted by the same
-pair:
+`ReviewFilter`, whose `SearchText` makes each word one `ILIKE` condition
+beside the keyset, and `FindPage` leaves deleted reviews out itself.
+`listProducts` searches the products' names the same way:
 
-<Snippet file="go/shop-orders/orders.go" symbol={['reviewKey', 'Reviews.ListReviews']} />
+<Snippet file="go/shop-orders/orders.go" symbol="Reviews.ListReviews" />
+
+The Rust implementation sorts the same in memory and over SQLite. Its
+key is the sort field's value, as JSON of the field's kind (a time, a
+text, an integer or a number), then the id, and over SQLite it orders by
+a column of the list's own, the cursor's value bound as the column's
+type, so a price compares as a number.
 
 ## Errors
 

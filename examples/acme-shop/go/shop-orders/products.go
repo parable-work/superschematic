@@ -20,42 +20,38 @@ type Products struct {
 
 var _ api.ProductCatalogImplementation = (*Products)(nil)
 
-// productKey is a product's place in ListProducts' order: its name, then
-// its id.
-type productKey struct {
-	Name string             `json:"name"`
-	ID   types.IdentityUUID `json:"id"`
-}
-
-func (key productKey) rowID() types.IdentityUUID { return key.ID }
-
-// ListProducts answers a page of the products by name, those with the
-// given ids when there are any: the lookup a page that holds products' ids
-// names them through (D61).
-func (p *Products) ListProducts(ctx context.Context, ids []types.IdentityUUID, page paging.Request) (paging.Page[types.ProductView], error) {
-	query := &keyQuery{}
+// ListProducts answers a page of the products in the page's sort, by name
+// or by price: those with the given ids when there are any, the lookup a
+// page that holds products' ids names them through (D61), and those whose
+// name holds each word of q, the search a product picker finds them by
+// (D61, amended).
+func (p *Products) ListProducts(ctx context.Context, ids []types.IdentityUUID, q *string, page paging.Request) (paging.Page[types.ProductView], error) {
+	filter := &orm.ProductFilter{SearchText: q}
 	if len(ids) > 0 {
-		in := make([]string, 0, len(ids))
-		for _, id := range ids {
-			in = append(in, id.ToUUID().String())
-		}
-		query.where("id = ANY(%s::uuid[])", in)
+		filter.Id = &orm.UUIDFilter{In: ids}
 	}
-	if page.Cursor != "" {
-		after, err := decodeKey[productKey](page.Cursor)
-		if err != nil {
-			return paging.Page[types.ProductView]{}, err
-		}
-		query.where(`("name", id) > (%s, %s::uuid)`, after.Name, after.ID.ToUUID())
+	sort, err := orm.ParseProductSort(page.Sort.String())
+	if err != nil {
+		return paging.Page[types.ProductView]{}, err
 	}
-	return readPage[productKey](ctx, p.DB, query, "product", `"name", id`, page,
-		func(tx orm.TxInterface, ids []types.IdentityUUID) ([]types.ProductView, error) {
-			products, err := tx.GetProductRepository().GetManyByIDs(ctx, ids)
-			if err != nil {
-				return nil, err
-			}
-			return inKeyOrder(ids, products, productView), nil
-		})
+	after, err := pageKey[orm.ProductPageKey](page)
+	if err != nil {
+		return paging.Page[types.ProductView]{}, err
+	}
+	found, err := p.DB.GetProductRepository().FindPage(ctx, filter, &orm.ProductPageOptions{
+		Fields: orm.ProductFields{}.All(),
+		Sort:   sort,
+		After:  after,
+		Limit:  page.Limit,
+	})
+	if err != nil {
+		return paging.Page[types.ProductView]{}, pageError(err)
+	}
+	views := make([]types.ProductView, 0, len(found.Rows))
+	for _, product := range found.Rows {
+		views = append(views, productView(product))
+	}
+	return pageOf(views, found.Next)
 }
 
 // GetProduct answers the product with the id, or 404.

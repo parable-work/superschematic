@@ -7165,7 +7165,46 @@ SDKs send the sort from the query arguments they already read, with no
 change to a method's template, and each `<operation>All` sends it with
 every page. Only a sorted tool's `inputSchemaDigest` changes.
 
-The ORM and acme are designed and not yet built. The tests are these:
+The ORM is built. Each Go ORM repository has `FindPage`, `<T>SortField`
+and its `<T>SortBy<Field>` constants, `<T>Sort`, `Parse<T>Sort`,
+`<T>PageKey`, `<T>PageOptions` and `<T>Page`, and the package
+`ErrPageKey`. A sort field is the key, first, or a required column whose
+type `ir.SortValue` takes, the rule of an API's sort field, that is not
+JSON, an enum, a boolean, a point, internal metadata or an audit actor,
+and not `@secret`, whose value a cursor would carry. `FindPage` takes its
+column only from the generated `<t>SortColumns`, and shares
+`FindMany`'s execute, scan and hydrate code, which moved into
+`findRows`. The tests are ormgen's `TestGenerateFindPage` and
+`TestSortableColumns`, the goldens, `TestGeneratedFindPageOnPostgres`,
+which pages fixture-db's tenants by text, citext, a number and a time
+both ways across pages whose keys go through JSON, breaks ties by id,
+puts a filter and a search beside the keyset, hides a soft-deleted
+member and keeps it with `IncludeDeleted`, hydrates a `hasMany`, reads in
+a transaction, and refuses keys of another sort and sort fields of no
+column; and `TestGeneratedFindPageKeysOnPostgres`, which binds an
+integer, a number, a date, a UUID and a key not named id as their
+columns' types.
+
+acme is built. `Order` stores `totalCents`, written when the order is
+placed, and `OrderView.totalCents` is no longer `@virtual`;
+`Product.name` is a search field, and `listProducts` takes `q`; and the
+three lists take `sort`. The Go implementation reads each page through
+`FindPage`, and `pages.go`'s key query is gone. The Rust implementation
+sorts in memory, and over SQLite by a column of each list's own, by a key
+of the sort field's value as JSON of its kind and the id; SQLite binds the
+cursor's value as the column's type. The tests are `rust-server`'s
+`tests/shop.rs`, in memory and over SQLite (`products_page_by_price`,
+`orders_page_by_total` and `reviews_page_by_rating`, a cursor of another
+kind refused among them); the four clients against the Go and the Rust
+server, which page the products by price, list every order by total and
+see a cursor of another sort refused with 400; `TestStackDevRunsTheShop`,
+over Postgres, which pages the catalog by price both ways and searches it
+by name, lists every order and a shopper's own by total, ties by id,
+lists the reviews by rating with a search, and sees a cursor of another
+sort refused; and the Topcoat app's `the_orders_procedure_answers_a_page_record`
+in a sort.
+
+The tests the design named are these:
 
 - ir's `TestOperationPage_KeyPositionOmissionAndRoundTrip` (with `defaultSort`), `TestSortValue` and `TestParseSort`; the reader's `sort_by_test.go`; and `fixture-paged-api`, whose `listItems` gains `sort: SortBy<ItemView, ["name", "sku"]>` with `defaultSort: "name"`. Its TypeScript, JSON and YAML forms load to one IR and round-trip through `format`.
 - verify's `TestSortsNeedAPagedList`, one case for each message, and `TestASortByAVirtualFieldWarns`.
@@ -7246,10 +7285,16 @@ not set up. The tests are these:
 - `TestTwoServicesInOneApp` mounts both crates under cargo, the suppliers' `_without_api`: a product names its supplier and a new product picks one through the suppliers' crate, a page meets listSuppliers' rate limit, both crates serve their pages and one JSON API, an app without the suppliers names them by their ids and its call is the 500, and an app with both JSON APIs is refused as it builds.
 - `internal/generator`'s `TestRustAPIOfServiceIsTheDependencysCrate` reads a dependency's crate by its config, and none for a Go server or a config without an API server.
 
-acme changes only by the picker, if the user takes decision 3 of the
-memo: its `listProducts` would search the products' names, and the
-new-order page and the console's order lines would pick products by it.
-acme hosts one service, so it has no options from another API.
+acme is built: `Product.name` is a search field and `listProducts`
+takes `q`, so the new-order page's and the console's order lines pick
+their products, and the app's page passes the form it renders to
+`place_order_input_form_choices`. The Topcoat app's
+`the_new_order_page_finds_a_product_by_its_name`, in memory and over
+SQLite, covers the first page with no text, a post's "Find" rendering the
+form again, 200, with no order placed, the value held kept as an option,
+an order placed from a product found, and the shard rendering the matches
+of a typed text. acme hosts one service, so it has no options from
+another API.
 
 Follows: an app that serves several services' JSON APIs; a picker that
 pages through its matches.
@@ -7285,6 +7330,6 @@ tests are these:
 - `TestTheHeadersSortAList` reads `Sorted` and the links in views.rs and the sorting in pages.rs, live and not; `TestAPagedOperationIsItsPageEverywhere` reads the sort in the call, the procedure and the form.
 - `TestASortFieldWithoutAColumnIsLogged` covers the build log.
 - `fixture-console-api`'s golden changes, and so does every golden whose table is sorted.
-- acme's Topcoat tests, in memory and over SQLite: the console's orders sort by their total and back, its products by price, and its reviews by rating, each through the headers and through the live shard.
+- acme's Topcoat `the_consoles_lists_sort_by_their_headers`, in memory and over SQLite: the console's orders sort by their total and back, a page at a time, also through the live shard, its products by price, and its reviews by rating, each through the headers, and a cursor of another sort is the 400 on the console and the JSON API.
 
 The rule is reversible until the first release.

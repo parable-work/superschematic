@@ -438,8 +438,10 @@ values in chunks of the lesser of its `listMax` and, when the listing
 pages, its `maxLimit`, at most ten calls a target each time. Both
 answer under the app's choices, which win where they name a field, and
 for which no call is made. The acme new-order page gives no choices of
-its own, so each line's product is a select of the products
-`listProducts` lists, each by its name:
+its own, and `listProducts` searches the products by name, so each line's
+product is a search picker, below, of the products it finds, each by its
+name. The page passes the form it renders, the one posted after a
+"Find", so the picker lists what that text finds:
 
 <Snippet file="topcoat/src/lib.rs" from="let choices = references::place_order_input_form_choices" to="place_order_input_fields(form" />
 
@@ -613,7 +615,7 @@ beside `orders`, is titled by its own words, Archived.
 | --- | --- |
 | The index of the resources the shopper may list | `/console` |
 | The orders, a page at a time, with their filter and a link to each | `/console/orders` |
-| The new order, each line's product a select of the products, and the POST that places it | `/console/orders/new` |
+| The new order, each line's product a picker of the products, and the POST that places it | `/console/orders/new` |
 | An order: its detail, its lines by their products' names, and the cancel form | `/console/orders/{order_id}` |
 | The cancel's POST | `/console/orders/{order_id}/cancel` |
 | The products, a page at a time, their `ids` lookup a product select, and a link to each | `/console/products` |
@@ -677,8 +679,8 @@ procedures. The app tells them its site's title, its sign-in page and
 any choices of its own through `pages::Settings` in its app context. The
 acme app gives its title and sign-in page and no choices: the console
 names what an order's lines refer to through `listProducts`, so the
-new-order page offers each line's product in a select and an order's
-page names its lines' products. It adds a Console link to its own pages:
+new-order page offers each line's product in a picker, which finds the
+products by name, and an order's page names its lines' products. It adds a Console link to its own pages:
 
 <Snippet file="topcoat/src/lib.rs" symbol="console_settings" />
 

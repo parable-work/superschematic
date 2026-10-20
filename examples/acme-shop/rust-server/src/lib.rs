@@ -22,7 +22,7 @@ use acme_shop_orders_api::{
     ProductReviewsListReviewsArgs, ProductReviewsWriteReviewArgs,
 };
 use async_trait::async_trait;
-use superschematic_http_runtime::page::{Cursor, Page, PageRequest};
+use superschematic_http_runtime::page::{refused_cursor, Page, PageRequest, Sort};
 use superschematic_http_runtime::{covers, search, ApiError, RequestContext};
 
 #[cfg(feature = "sqlite")]
@@ -254,88 +254,220 @@ pub fn implementations<S: ShopImplementation>(
     }
 }
 
-/// A row's place in a list's order, which a page's cursor holds: what the
-/// list orders by, then the row's id, which makes the order total. Orders
-/// and reviews are ordered by a time, products by their names.
-trait ListKey: Sized {
-    /// What two keys compare by.
-    type Order: Ord;
-
-    fn order(&self) -> Self::Order;
-
-    /// The key a cursor names, or the 400 of one this list never returned.
-    fn decode(cursor: &Cursor) -> Result<Self, ApiError>;
+/// The kind of value a list sorts by (D60, amended): a time, a text, an
+/// integer or a number. A page's cursor holds the value as JSON, and reads
+/// back only as its kind, so a value binds as its column's type: a number
+/// compares as a number, not as its text.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SortKind {
+    Time,
+    Text,
+    Integer,
+    Number,
 }
 
-/// An order's key, its `placedAt` and id, or a review's, its `createdAt`
-/// and id.
-type TimeKey = (types::TemporalDateTime, types::IdentityUUID);
+/// A value a list sorts its rows by, of a `SortKind`.
+#[derive(Clone, Debug)]
+enum SortValue {
+    Time(types::TemporalDateTime),
+    Text(String),
+    Integer(i64),
+    Number(f64),
+}
 
-/// A product's key: its name and id.
-type NameKey = (String, types::IdentityUUID);
-
-impl ListKey for TimeKey {
-    type Order = (types::TemporalDateTime, [u8; 16]);
-
-    fn order(&self) -> Self::Order {
-        (self.0, *self.1.as_uuid().as_bytes())
+impl SortValue {
+    /// The two values' order: a time by its instant, a text by its bytes,
+    /// an integer by its value, and a number by `f64::total_cmp`. Values of
+    /// two kinds never meet, since a list sorts by one field.
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        match (self, other) {
+            (Self::Time(a), Self::Time(b)) => a.cmp(b),
+            (Self::Text(a), Self::Text(b)) => a.cmp(b),
+            (Self::Integer(a), Self::Integer(b)) => a.cmp(b),
+            (Self::Number(a), Self::Number(b)) => a.total_cmp(b),
+            _ => std::cmp::Ordering::Equal,
+        }
     }
 
-    fn decode(cursor: &Cursor) -> Result<Self, ApiError> {
-        cursor.decode()
+    /// The value as a cursor holds it.
+    fn json(&self) -> serde_json::Value {
+        match self {
+            Self::Time(time) => serde_json::Value::from(time.to_string()),
+            Self::Text(text) => serde_json::Value::from(text.as_str()),
+            Self::Integer(n) => serde_json::Value::from(*n),
+            Self::Number(n) => serde_json::Value::from(*n),
+        }
+    }
+
+    /// The value of `kind` a cursor holds, or `None` for JSON of another
+    /// kind.
+    fn read(kind: SortKind, json: &serde_json::Value) -> Option<Self> {
+        match kind {
+            SortKind::Time => json
+                .as_str()
+                .and_then(|text| types::TemporalDateTime::parse(text).ok())
+                .map(Self::Time),
+            SortKind::Text => json.as_str().map(|text| Self::Text(text.to_owned())),
+            SortKind::Integer => json.as_i64().map(Self::Integer),
+            SortKind::Number => json.as_f64().map(Self::Number),
+        }
     }
 }
 
-impl ListKey for NameKey {
-    type Order = (String, [u8; 16]);
+/// A page's key, as its cursor holds it: the sort field's value, then the
+/// row's id.
+type PageKey = (serde_json::Value, types::IdentityUUID);
 
-    fn order(&self) -> Self::Order {
-        (self.0.clone(), *self.1.as_uuid().as_bytes())
+/// The order a list reads its rows in (D60, amended): by a field of a
+/// `SortKind`, then by the row's id, which makes the order total, both
+/// ascending or both descending.
+struct RowOrder<T> {
+    kind: SortKind,
+    value: fn(&T) -> SortValue,
+    id: fn(&T) -> types::IdentityUUID,
+    desc: bool,
+}
+
+impl<T> RowOrder<T> {
+    fn new(
+        kind: SortKind,
+        value: fn(&T) -> SortValue,
+        id: fn(&T) -> types::IdentityUUID,
+        sort: Option<&Sort>,
+    ) -> Self {
+        Self {
+            kind,
+            value,
+            id,
+            desc: sort.is_some_and(Sort::desc),
+        }
     }
 
-    fn decode(cursor: &Cursor) -> Result<Self, ApiError> {
-        cursor.decode()
+    /// The order of two rows' places: their values, then their ids.
+    fn cmp(&self, a: &(SortValue, [u8; 16]), b: &(SortValue, [u8; 16])) -> std::cmp::Ordering {
+        let ascending = a.0.cmp(&b.0).then(a.1.cmp(&b.1));
+        if self.desc {
+            ascending.reverse()
+        } else {
+            ascending
+        }
+    }
+
+    fn place(&self, row: &T) -> (SortValue, [u8; 16]) {
+        ((self.value)(row), *(self.id)(row).as_uuid().as_bytes())
+    }
+
+    fn key(&self, row: &T) -> PageKey {
+        ((self.value)(row).json(), (self.id)(row))
+    }
+
+    /// The page of `rows`: those after the cursor's key in this order, up
+    /// to the page's limit, and the next page's cursor, the key of the last
+    /// one, when more follow. A cursor whose value is not of the sort's
+    /// kind is the 400 of one this list never returned.
+    fn page(
+        &self,
+        rows: impl IntoIterator<Item = T>,
+        page: &PageRequest,
+    ) -> Result<Page<T>, ApiError> {
+        let after = match &page.cursor {
+            None => None,
+            Some(cursor) => {
+                let (value, id): PageKey = cursor.decode()?;
+                let value = SortValue::read(self.kind, &value).ok_or_else(refused_cursor)?;
+                Some((value, *id.as_uuid().as_bytes()))
+            }
+        };
+        let mut rows: Vec<((SortValue, [u8; 16]), T)> = rows
+            .into_iter()
+            .map(|row| (self.place(&row), row))
+            .filter(|(place, _)| {
+                after
+                    .as_ref()
+                    .is_none_or(|after| self.cmp(place, after).is_gt())
+            })
+            .collect();
+        rows.sort_by(|(a, _), (b, _)| self.cmp(a, b));
+        let limit = usize::try_from(page.limit.max(1)).unwrap_or(usize::MAX);
+        let rows: Vec<T> = rows
+            .into_iter()
+            .take(limit.saturating_add(1))
+            .map(|(_, row)| row)
+            .collect();
+        Page::from_rows(rows, page.limit, |row| self.key(row))
     }
 }
 
-/// The rows a page reads: of `rows`, those after the cursor's key, in the
-/// order of their keys, up to one past the page's limit, from which
-/// `Page::from_rows` keeps the page and takes the next page's cursor.
-fn rows_after<T, K: ListKey>(
-    rows: impl IntoIterator<Item = T>,
-    page: &PageRequest,
-    key: impl Fn(&T) -> K,
-) -> Result<Vec<T>, ApiError> {
-    let after = page
-        .cursor
-        .as_ref()
-        .map(K::decode)
-        .transpose()?
-        .map(|after| after.order());
-    let mut rows: Vec<(K::Order, T)> = rows
-        .into_iter()
-        .map(|row| (key(&row).order(), row))
-        .filter(|(order, _)| after.as_ref().is_none_or(|after| order > after))
-        .collect();
-    rows.sort_by(|(a, _), (b, _)| a.cmp(b));
-    let limit = usize::try_from(page.limit.max(1)).unwrap_or(usize::MAX);
-    Ok(rows
-        .into_iter()
-        .take(limit.saturating_add(1))
-        .map(|(_, row)| row)
-        .collect())
+/// The field a page's sort names, or `default` for a request without one,
+/// as a trait call that bypasses the router may make.
+fn sort_field<'a>(sort: Option<&'a Sort>, default: &'a str) -> &'a str {
+    sort.map_or(default, Sort::field)
 }
 
-fn order_key(order: &types::OrderView) -> TimeKey {
-    (order.placed_at, order.id)
+/// The 400 of a sort a list does not offer, which only a call that
+/// bypasses the router can make.
+fn unsorted(list: &str, field: &str) -> ApiError {
+    ApiError::bad_request(format!("the {list} do not sort by {field}"))
 }
 
-fn review_key(review: &types::ReviewView) -> TimeKey {
-    (review.created_at, review.id)
+/// The orders' order: by `placedAt`, by default, or by `totalCents`.
+fn order_order(sort: Option<&Sort>) -> Result<RowOrder<types::OrderView>, ApiError> {
+    let id = |order: &types::OrderView| order.id;
+    Ok(match sort_field(sort, "placedAt") {
+        "placedAt" => RowOrder::new(
+            SortKind::Time,
+            |order| SortValue::Time(order.placed_at),
+            id,
+            sort,
+        ),
+        "totalCents" => RowOrder::new(
+            SortKind::Integer,
+            |order| SortValue::Integer(order.total_cents),
+            id,
+            sort,
+        ),
+        field => return Err(unsorted("orders", field)),
+    })
 }
 
-fn product_key(product: &types::ProductView) -> NameKey {
-    (product.name.clone(), product.id)
+/// The reviews' order: by `createdAt`, by default, or by `rating`.
+fn review_order(sort: Option<&Sort>) -> Result<RowOrder<types::ReviewView>, ApiError> {
+    let id = |review: &types::ReviewView| review.id;
+    Ok(match sort_field(sort, "createdAt") {
+        "createdAt" => RowOrder::new(
+            SortKind::Time,
+            |review| SortValue::Time(review.created_at),
+            id,
+            sort,
+        ),
+        "rating" => RowOrder::new(
+            SortKind::Number,
+            |review| SortValue::Number(review.rating),
+            id,
+            sort,
+        ),
+        field => return Err(unsorted("reviews", field)),
+    })
+}
+
+/// The products' order: by `name`, by default, or by `priceCents`.
+fn product_order(sort: Option<&Sort>) -> Result<RowOrder<types::ProductView>, ApiError> {
+    let id = |product: &types::ProductView| product.id;
+    Ok(match sort_field(sort, "name") {
+        "name" => RowOrder::new(
+            SortKind::Text,
+            |product| SortValue::Text(product.name.clone()),
+            id,
+            sort,
+        ),
+        "priceCents" => RowOrder::new(
+            SortKind::Integer,
+            |product| SortValue::Integer(product.price_cents),
+            id,
+            sort,
+        ),
+        field => return Err(unsorted("products", field)),
+    })
 }
 
 fn now() -> types::TemporalDateTime {
@@ -370,13 +502,15 @@ fn sees_every_order(ctx: &RequestContext) -> bool {
 
 #[async_trait]
 impl OrderImplementation for Shop {
-    /// The caller's orders, or every customer's for staff, oldest first,
-    /// with the given statuses, or of every status when there are none.
+    /// The caller's orders, or every customer's for staff, in the page's
+    /// sort, by when each was placed or by its total, with the given
+    /// statuses, or of every status when there are none.
     async fn list_orders(
         &self,
         ctx: RequestContext,
         args: OrderListOrdersArgs,
     ) -> Result<Page<types::OrderView>, ApiError> {
+        let order = order_order(args.page.sort.as_ref())?;
         let orders = self.orders.lock().unwrap();
         let listed = orders
             .iter()
@@ -387,8 +521,7 @@ impl OrderImplementation for Shop {
                     .as_ref()
                     .is_none_or(|statuses| statuses.is_empty() || statuses.contains(&order.status))
             });
-        let rows = rows_after(listed.cloned(), &args.page, order_key)?;
-        Page::from_rows(rows, args.page.limit, order_key)
+        order.page(listed.cloned(), &args.page)
     }
 
     async fn place_order(
@@ -471,21 +604,25 @@ impl OrderImplementation for Shop {
 
 #[async_trait]
 impl ProductCatalogImplementation for Shop {
-    /// The products by name, those with the given ids when there are any:
-    /// the lookup a page that holds products' ids names them through
-    /// (D61).
+    /// The products in the page's sort, by name or by price: those with
+    /// the given ids when there are any, the lookup a page that holds
+    /// products' ids names them through (D61), and those whose name holds
+    /// each word of `q`, in any case, the search a product picker finds
+    /// them by (D61, amended), as shop-db's `search_text` holds the name.
     async fn list_products(
         &self,
         _ctx: RequestContext,
         args: ProductCatalogListProductsArgs,
     ) -> Result<Page<types::ProductView>, ApiError> {
+        let order = product_order(args.page.sort.as_ref())?;
+        let terms = args.q.as_deref().map(search::terms).unwrap_or_default();
         let listed = self.products.iter().filter(|product| {
             args.ids
                 .as_ref()
                 .is_none_or(|ids| ids.is_empty() || ids.contains(&product.id))
+                && search::matches(&product.name, &terms)
         });
-        let rows = rows_after(listed.cloned(), &args.page, product_key)?;
-        Page::from_rows(rows, args.page.limit, product_key)
+        order.page(listed.cloned(), &args.page)
     }
 
     async fn get_product(
@@ -501,15 +638,16 @@ impl ProductCatalogImplementation for Shop {
 
 #[async_trait]
 impl ProductReviewsImplementation for Shop {
-    /// A product's reviews, oldest first, those rated `min_rating` or more
-    /// when it is given. A search, `q`, keeps the reviews whose title or
-    /// body holds each of its words, in any case (D62), as shop-db's
-    /// `search_text` joins them.
+    /// A product's reviews in the page's sort, by when each was written or
+    /// by its rating, those rated `min_rating` or more when it is given. A
+    /// search, `q`, keeps the reviews whose title or body holds each of its
+    /// words, in any case (D62), as shop-db's `search_text` joins them.
     async fn list_reviews(
         &self,
         _ctx: RequestContext,
         args: ProductReviewsListReviewsArgs,
     ) -> Result<Page<types::ReviewView>, ApiError> {
+        let order = review_order(args.page.sort.as_ref())?;
         let terms = args.q.as_deref().map(search::terms).unwrap_or_default();
         let reviews = self.reviews.lock().unwrap();
         let listed = reviews
@@ -523,8 +661,7 @@ impl ProductReviewsImplementation for Shop {
                     )
             })
             .map(|review| review.view.clone());
-        let rows = rows_after(listed, &args.page, review_key)?;
-        Page::from_rows(rows, args.page.limit, review_key)
+        order.page(listed, &args.page)
     }
 
     async fn write_review(

@@ -14,6 +14,9 @@ from acme_types_shop_orders import PlaceOrderInput, PlaceOrderLine, ShippingAddr
 
 PRODUCT = "00000000-0000-4000-8000-0000000000b1"
 MISSING_ORDER = "00000000-0000-4000-8000-0000000000c1"
+# The cursor of {"sort":"name","key":{"name":"Anvil","id":"1"}}, one the
+# router binds to the products by name.
+BY_NAME = "eyJzb3J0IjoibmFtZSIsImtleSI6eyJuYW1lIjoiQW52aWwiLCJpZCI6IjEifX0"
 
 
 def status(call: Callable[[], Any]) -> Union[int, str]:
@@ -38,6 +41,18 @@ def main(base_url: str, token: str) -> None:
     products = anonymous.product_catalog.list_products(limit=2)
     print(f"products: {len(products.items)}, {last_page(products)}")
     print(f"every product: {sum(1 for _ in anonymous.product_catalog.list_products_all(limit=2))}")
+
+    # A sorted list takes its sort with each page (D60, amended): two pages
+    # of the products by price, the dearest first.
+    priced = anonymous.product_catalog.list_products(sort="-priceCents", limit=2)
+    print(f"products by price, dearest first: {len(priced.items)}, {last_page(priced)}")
+    if priced.next is not None:
+        priced = anonymous.product_catalog.list_products(sort="-priceCents", cursor=priced.next, limit=2)
+        print(f"the next page by price: {len(priced.items)}, {last_page(priced)}")
+
+    # A cursor bound to another sort is refused.
+    refused = status(lambda: anonymous.product_catalog.list_products(sort="-priceCents", cursor=BY_NAME))
+    print(f"products by price after a cursor of the products by name: {refused}")
 
     print(f"get a missing product: {status(lambda: anonymous.product_catalog.get_product(PRODUCT))}")
 
@@ -64,6 +79,8 @@ def main(base_url: str, token: str) -> None:
     orders = shopper.order.list_orders(limit=1)
     print(f"orders: {len(orders.items)}, {last_page(orders)}")
     print(f"every order: {sum(1 for _ in shopper.order.list_orders_all(limit=1))}")
+    largest = sum(1 for _ in shopper.order.list_orders_all(sort="-totalCents", limit=1))
+    print(f"every order by total, largest first: {largest}")
 
     # e30 is the cursor of {}, a key that names no order.
     print(f"orders after a cursor the server never returned: {status(lambda: shopper.order.list_orders(cursor='e30'))}")

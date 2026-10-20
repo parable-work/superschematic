@@ -47,6 +47,10 @@ export abstract class Order extends Auditable {
   // Why the order was cancelled, when it was.
   cancelReason: Nullable<Validate<string, { maxLength: 500 }>>;
 
+  // The sum of each line's quantity times its unit price, written when the
+  // order is placed: its lines do not change after.
+  totalCents: Generic.Int64;
+
   lines: HasMany<OrderLine>;
 }
 

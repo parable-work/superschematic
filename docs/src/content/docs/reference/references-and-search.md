@@ -260,6 +260,10 @@ it: `ir.ResolveReference` gives it in `ResolvedReference.Search`, nil when
 the options do not search (D61, amended). A UI that picks the
 reference's item sends the text a reader types in it, and offers the
 items the search finds, so a target with many items can still be picked.
+acme's `listProducts` searches the products by name, its `q` a
+`SearchQuery` over `Product.name`'s `search_text`, so a Topcoat app's
+control for each order line's product is a search picker
+([Choices from references](/superschematic/guides/topcoat/#choices-from-references)).
 
 A search keeps the items whose searchable text contains each of its words,
 case-insensitively, and does not rank them. A word is a run of characters
@@ -290,11 +294,13 @@ from the ORM module's own `search.go`, written only for a schema with
 search fields and held to the same `search_parity.json`, so an ORM module
 needs no HTTP runtime. `<Type>FilterConditions(filter, &args)` gives a
 filter's conditions, each column qualified by its table, numbered after
-the values `args` already holds, to a query of the implementation's own:
-acme's `listReviews` puts its product, rating and search conditions into
-its keyset page's key query this way, and adds the cursor's comparison
-itself, and `deleted_at IS NULL`, which `FindMany` adds on its own and no
-filter's conditions hold. The loader refuses a field whose column would
+the values `args` already holds, to a query of the implementation's own,
+which adds `deleted_at IS NULL` itself, since `FindMany` adds it on its
+own and no filter's conditions hold it. `FindPage` puts the same
+conditions beside a page's keyset
+([Pages](/superschematic/guides/database-tables/#pages)): acme's
+`listReviews` and `listProducts` read their pages through it, the search
+among their filters' conditions. The loader refuses a field whose column would
 be `search_text` on a table with search fields:
 `Review.searchText: its column is search_text, the column @searchField generates`.
 

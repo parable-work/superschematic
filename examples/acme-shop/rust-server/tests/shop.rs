@@ -1,10 +1,13 @@
 //! shop-orders' lists page and its reviews search alike in memory (`Shop`)
 //! and, with the `sqlite` feature, over a SQLite file of shop-db's tables
-//! (`SqliteShop`): the catalog by name, with its lookup by ids; the orders
-//! oldest first, filtered by status on every page; a product's reviews
-//! oldest first, searched by every word of `q` in their titles and bodies,
-//! a `%` matching itself. Each list follows `next` to its last page, whose
-//! `next` is none, and refuses a cursor it never returned with 400. A
+//! (`SqliteShop`): the catalog by name, with its lookup by ids and its
+//! search by name, and by price, which compares as a number; the orders
+//! oldest first, filtered by status on every page, and by their totals, a
+//! tie broken by id; a product's reviews oldest first, searched by every
+//! word of `q` in their titles and bodies, a `%` matching itself, and by
+//! rating. Each sort reads both ways (D60, amended). Each list follows
+//! `next` to its last page, whose `next` is none, and refuses a cursor it
+//! never returned with 400, one of another sort's kind among them. A
 //! shopper lists, pages, reads and cancels their own orders alone, and
 //! staff every customer's. Adding a shopper or staff, or `update_roles`,
 //! rewrites a `shopper` or `staff` role that grants other permissions, as
@@ -14,7 +17,7 @@
 use std::thread::sleep;
 use std::time::Duration;
 
-use acme_shop_orders_api::runtime::page::{Cursor, Page, PageRequest};
+use acme_shop_orders_api::runtime::page::{Cursor, Page, PageRequest, Sort};
 use acme_shop_orders_api::runtime::{ApiError, Principal, RequestContext};
 use acme_shop_orders_api::{
     types, OrderCancelOrderArgs, OrderGetOrderArgs, OrderImplementation, OrderListOrdersArgs,
@@ -115,6 +118,18 @@ fn forged() -> PageRequest {
     PageRequest::after(Cursor::parse("e30").expect("a cursor's text"), 2)
 }
 
+/// The first page in `sort`'s order, `limit` items. A call to the trait
+/// bypasses the router, so its cursors are the implementation's own,
+/// unbound.
+fn in_order(sort: &str, limit: i64) -> PageRequest {
+    PageRequest::first(limit).sorted(Sort::parse(sort).expect("a sort"))
+}
+
+/// The page after `page` in `sort`'s order, `limit` items.
+fn in_order_after<T>(page: &Page<T>, sort: &str, limit: i64) -> PageRequest {
+    after(page, limit).sorted(Sort::parse(sort).expect("a sort"))
+}
+
 fn assert_refused_cursor<T: std::fmt::Debug>(result: Result<T, ApiError>) {
     let err = result.expect_err("a cursor the list never returned");
     assert_eq!(err.status.as_u16(), 400);
@@ -142,13 +157,19 @@ where
     S: OrderImplementation + ProductCatalogImplementation + ProductReviewsImplementation,
 {
     products_page_by_name(shop).await;
+    products_page_by_price(shop).await;
     orders_page_oldest_first(shop).await;
+    orders_page_by_total(shop).await;
     reviews_page_and_search(shop).await;
+    reviews_page_by_rating(shop).await;
 }
 
 async fn products_page_by_name<S: ProductCatalogImplementation>(shop: &S) {
     let list = |ids: Option<Vec<types::IdentityUUID>>, page| {
-        shop.list_products(anyone(), ProductCatalogListProductsArgs { ids, page })
+        shop.list_products(
+            anyone(),
+            ProductCatalogListProductsArgs { ids, q: None, page },
+        )
     };
     let first = list(None, PageRequest::first(2)).await.unwrap();
     assert_eq!(names(&first), ["Anvil", "Bellows"]);
@@ -200,6 +221,51 @@ async fn products_page_by_name<S: ProductCatalogImplementation>(shop: &S) {
         .await
         .expect_err("no product has a shopper's id");
     assert_eq!(missing.status.as_u16(), 404);
+}
+
+/// The catalog by price, which compares as a number: 450, 1999 and 2500
+/// cents read in that order, as their texts would not. Its search keeps the
+/// products whose name holds each word of `q`, in any case, as a product
+/// picker finds them.
+async fn products_page_by_price<S: ProductCatalogImplementation>(shop: &S) {
+    let list = |q: Option<&str>, page| {
+        let q = q.map(str::to_owned);
+        shop.list_products(
+            anyone(),
+            ProductCatalogListProductsArgs { ids: None, q, page },
+        )
+    };
+    let cheapest = list(None, in_order("priceCents", 2)).await.unwrap();
+    assert_eq!(names(&cheapest), ["Chisel", "Anvil"]);
+    let rest = list(None, in_order_after(&cheapest, "priceCents", 2))
+        .await
+        .unwrap();
+    assert_eq!(names(&rest), ["Bellows"]);
+    assert_eq!(rest.next, None);
+
+    let dearest = list(None, in_order("-priceCents", 2)).await.unwrap();
+    assert_eq!(names(&dearest), ["Bellows", "Anvil"]);
+    let rest = list(None, in_order_after(&dearest, "-priceCents", 2))
+        .await
+        .unwrap();
+    assert_eq!(names(&rest), ["Chisel"]);
+    assert_eq!(rest.next, None);
+
+    let by_name = list(None, in_order("-name", 2)).await.unwrap();
+    assert_eq!(names(&by_name), ["Chisel", "Bellows"]);
+
+    // The key of a page by name holds a text, which no page by price reads.
+    assert_refused_cursor(list(None, in_order_after(&by_name, "priceCents", 2)).await);
+
+    for (q, found) in [
+        ("anv", vec!["Anvil"]),
+        ("BELL", vec!["Bellows"]),
+        ("e", vec!["Bellows", "Chisel"]),
+        ("zz", vec![]),
+    ] {
+        let page = list(Some(q), PageRequest::first(20)).await.unwrap();
+        assert_eq!(names(&page), found, "the products whose name holds {q}");
+    }
 }
 
 /// Two of the product, shipped to London.
@@ -278,6 +344,58 @@ async fn orders_page_oldest_first<S: OrderImplementation>(shop: &S) {
     .unwrap();
     assert_eq!(ids(&cancelled), [placed[1]]);
     assert_refused_cursor(list(None, forged()).await);
+}
+
+/// The shopper's orders by total, both ways: the orders of
+/// `orders_page_oldest_first`, Anvil's 3998 cents, Bellows' 5000 and
+/// Chisel's 900, and a second order of the anvil, which ties with the
+/// first and follows it or comes before it by its id.
+async fn orders_page_by_total<S: OrderImplementation>(shop: &S) {
+    let list = |page| {
+        shop.list_orders(
+            shopper(SHOPPERS[0]),
+            OrderListOrdersArgs {
+                statuses: None,
+                page,
+            },
+        )
+    };
+    let every = |sort: &'static str| async move {
+        let mut page = list(in_order(sort, 2)).await.unwrap();
+        let mut totals: Vec<(i64, types::IdentityUUID)> = page
+            .items
+            .iter()
+            .map(|order| (order.total_cents, order.id))
+            .collect();
+        while page.next.is_some() {
+            page = list(in_order_after(&page, sort, 2)).await.unwrap();
+            totals.extend(page.items.iter().map(|order| (order.total_cents, order.id)));
+        }
+        totals
+    };
+    shop.place_order(shopper(SHOPPERS[0]), order_of("Anvil"))
+        .await
+        .unwrap();
+
+    let ascending = every("totalCents").await;
+    let amounts: Vec<i64> = ascending.iter().map(|(total, _)| *total).collect();
+    assert_eq!(amounts, [900, 3998, 3998, 5000]);
+    let (a, b) = (ascending[1].1, ascending[2].1);
+    assert!(
+        a.as_uuid().as_bytes() < b.as_uuid().as_bytes(),
+        "the tied totals read by their ids"
+    );
+    let mut descending = every("-totalCents").await;
+    descending.reverse();
+    assert_eq!(
+        descending, ascending,
+        "-totalCents reads them the other way"
+    );
+
+    // A page by when they were placed, newest first, starts with the order
+    // placed last.
+    let newest = list(in_order("-placedAt", 1)).await.unwrap();
+    assert_eq!(newest.items[0].total_cents, 3998);
 }
 
 /// Every order `ctx` lists, a page of one at a time.
@@ -455,6 +573,40 @@ async fn reviews_page_and_search<S: ProductReviewsImplementation>(shop: &S) {
         .await
         .unwrap();
     assert_eq!((other.items.len(), other.next), (0, None));
+}
+
+/// The anvil's reviews of `reviews_page_and_search` by rating, 2, 4 and 5,
+/// both ways, a review at a time, with a search; a cursor of a page by
+/// rating, a number, is refused by a page by when they were written.
+async fn reviews_page_by_rating<S: ProductReviewsImplementation>(shop: &S) {
+    let list = |q: Option<&str>, page| {
+        let args = ProductReviewsListReviewsArgs {
+            product_id: product("Anvil"),
+            min_rating: None,
+            q: q.map(str::to_owned),
+            page,
+        };
+        shop.list_reviews(anyone(), args)
+    };
+    for (sort, want) in [
+        ("rating", "Too heavy | Rings true | Sturdy and heavy"),
+        ("-rating", "Sturdy and heavy | Rings true | Too heavy"),
+    ] {
+        let mut page = list(Some("heavy"), in_order(sort, 1)).await.unwrap();
+        let mut seen = titles(&page).join(" | ");
+        while page.next.is_some() {
+            page = list(Some("heavy"), in_order_after(&page, sort, 1))
+                .await
+                .unwrap();
+            for title in titles(&page) {
+                seen.push_str(" | ");
+                seen.push_str(title);
+            }
+        }
+        assert_eq!(seen, want, "the reviews by {sort}");
+    }
+    let by_rating = list(None, in_order("rating", 1)).await.unwrap();
+    assert_refused_cursor(list(None, in_order_after(&by_rating, "createdAt", 1)).await);
 }
 
 #[tokio::test]

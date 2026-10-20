@@ -52,14 +52,10 @@ func (o *Orders) PlaceOrder(ctx context.Context, input *types.PlaceOrderInput) (
 	var placed *db.Order
 	reservation := stocktypes.ReserveStockInput{Lines: make([]stocktypes.ReserveStockLine, 0, len(input.Lines))}
 	err = o.DB.Transaction(ctx, func(tx orm.TxInterface) error {
-		order, err := tx.GetOrderRepository().CreateOne(ctx, &db.Order{
-			Customer:        db.User{Id: &customer},
-			PlacedAt:        db.TemporalDateTime(time.Now()),
-			ShippingAddress: input.ShippingAddress,
-		})
-		if err != nil {
-			return err
-		}
+		// Each line's product, at its price now. The order stores its
+		// total, the sum of its lines, which do not change after.
+		products := make([]*db.Product, 0, len(input.Lines))
+		var total db.GenericInt64
 		for _, item := range input.Lines {
 			product, err := tx.GetProductRepository().GetOne(ctx, item.ProductId, nil)
 			if errors.Is(err, orm.ErrNotFound) {
@@ -68,6 +64,20 @@ func (o *Orders) PlaceOrder(ctx context.Context, input *types.PlaceOrderInput) (
 			if err != nil {
 				return err
 			}
+			products = append(products, product)
+			total += db.GenericInt64(item.Quantity) * product.PriceCents
+		}
+		order, err := tx.GetOrderRepository().CreateOne(ctx, &db.Order{
+			Customer:        db.User{Id: &customer},
+			PlacedAt:        db.TemporalDateTime(time.Now()),
+			ShippingAddress: input.ShippingAddress,
+			TotalCents:      total,
+		})
+		if err != nil {
+			return err
+		}
+		for i, item := range input.Lines {
+			product := products[i]
 			line, err := tx.GetOrderLineRepository().CreateOne(ctx, &db.OrderLine{
 				Order:          db.Order{Id: order.Id},
 				Product:        db.Product{Id: product.Id},
@@ -162,61 +172,46 @@ func (o *Orders) GetOrder(ctx context.Context, id types.IdentityUUID) (*types.Or
 	return &view, nil
 }
 
-// orderKey is an order's place in ListOrders' order: when it was placed,
-// then its id.
-type orderKey struct {
-	PlacedAt time.Time          `json:"placedAt"`
-	ID       types.IdentityUUID `json:"id"`
-}
-
-func (key orderKey) rowID() types.IdentityUUID { return key.ID }
-
 // ListOrders answers a page of the caller's orders, or of every
-// customer's for staff, oldest first, with the given statuses, or of every
-// status when there are none. A cursor names a place among the orders the
-// caller lists, so a shopper's pages hold their own orders alone.
+// customer's for staff, in the page's sort, by when each was placed or by
+// its total, with the given statuses, or of every status when there are
+// none. The ORM reads the page, with each order's lines. A cursor names a
+// place among the orders the caller lists, so a shopper's pages hold their
+// own orders alone.
 func (o *Orders) ListOrders(ctx context.Context, statuses []types.OrderStatus, page paging.Request) (paging.Page[types.OrderView], error) {
-	query := &keyQuery{}
-	if !seesEveryOrder(ctx) {
-		customer, err := caller(ctx)
-		if err != nil {
-			return paging.Page[types.OrderView]{}, err
-		}
-		query.where("customer_id = %s::uuid", customer.ToUUID())
+	filter, err := callersOrders(ctx)
+	if err != nil {
+		return paging.Page[types.OrderView]{}, err
 	}
 	if len(statuses) > 0 {
 		in := make([]string, 0, len(statuses))
 		for _, status := range statuses {
 			in = append(in, string(status))
 		}
-		query.where("status = ANY(%s::text[])", in)
+		filter.Status = &orm.StringFilter{In: in}
 	}
-	if page.Cursor != "" {
-		after, err := decodeKey[orderKey](page.Cursor)
-		if err != nil {
-			return paging.Page[types.OrderView]{}, err
-		}
-		query.where("(placed_at, id) > (%s::timestamptz, %s::uuid)", after.PlacedAt, after.ID.ToUUID())
+	sort, err := orm.ParseOrderSort(page.Sort.String())
+	if err != nil {
+		return paging.Page[types.OrderView]{}, err
 	}
-	// The table is named order, a keyword, so the keys' query quotes it.
-	return readPage[orderKey](ctx, o.DB, query, `"order"`, "placed_at, id", page,
-		func(tx orm.TxInterface, ids []types.IdentityUUID) ([]types.OrderView, error) {
-			// The page's orders, with their lines, in the keys' order.
-			orders, _, err := tx.GetOrderRepository().FindMany(ctx, &orm.OrderFilter{Id: &orm.UUIDFilter{In: ids}},
-				&orm.OrderFindOptions{
-					Fields:  withLines().Fields,
-					OrderBy: []orm.OrderOrderBy{{Field: orm.OrderOrderByPlacedAt}, {Field: orm.OrderOrderById}},
-					Limit:   len(ids),
-				})
-			if err != nil {
-				return nil, err
-			}
-			views := make([]types.OrderView, 0, len(orders))
-			for _, order := range orders {
-				views = append(views, orderView(order))
-			}
-			return views, nil
-		})
+	after, err := pageKey[orm.OrderPageKey](page)
+	if err != nil {
+		return paging.Page[types.OrderView]{}, err
+	}
+	found, err := o.DB.GetOrderRepository().FindPage(ctx, filter, &orm.OrderPageOptions{
+		Fields: withLines().Fields,
+		Sort:   sort,
+		After:  after,
+		Limit:  page.Limit,
+	})
+	if err != nil {
+		return paging.Page[types.OrderView]{}, pageError(err)
+	}
+	views := make([]types.OrderView, 0, len(found.Rows))
+	for _, order := range found.Rows {
+		views = append(views, orderView(order))
+	}
+	return pageOf(views, found.Next)
 }
 
 // CancelOrder cancels the caller's order, or any order for staff, while
@@ -258,30 +253,43 @@ func (o *Orders) CancelOrder(ctx context.Context, id types.IdentityUUID, reason 
 	return o.GetOrder(ctx, id)
 }
 
-// callersOrderFilter filters the orders to the one with id when the caller
-// may see it: their own, by its customer, as the SQLite shop reads it, or
-// any order for staff. Another customer's order matches nothing, as one no
-// one placed does.
-func callersOrderFilter(ctx context.Context, id types.IdentityUUID) (*orm.OrderFilter, error) {
+// callersOrders filters the orders to those the caller may see: their
+// own, by its customer, as the SQLite shop reads them, or every order for
+// staff.
+func callersOrders(ctx context.Context) (*orm.OrderFilter, error) {
+	filter := &orm.OrderFilter{}
+	if seesEveryOrder(ctx) {
+		return filter, nil
+	}
 	customer, err := caller(ctx)
 	if err != nil {
 		return nil, err
 	}
-	filter := &orm.OrderFilter{Id: &orm.UUIDFilter{Eq: &id}}
-	if !seesEveryOrder(ctx) {
-		filter.CustomerID = &orm.UUIDFilter{Eq: &customer}
-	}
+	filter.CustomerID = &orm.UUIDFilter{Eq: &customer}
 	return filter, nil
 }
 
-// orderView copies an order and its lines into the view a caller sees, and
-// computes the fields the view declares @virtual.
+// callersOrderFilter filters the orders to the one with id when the caller
+// may see it (callersOrders). Another customer's order matches nothing, as
+// one no one placed does.
+func callersOrderFilter(ctx context.Context, id types.IdentityUUID) (*orm.OrderFilter, error) {
+	filter, err := callersOrders(ctx)
+	if err != nil {
+		return nil, err
+	}
+	filter.Id = &orm.UUIDFilter{Eq: &id}
+	return filter, nil
+}
+
+// orderView copies an order and its lines into the view a caller sees,
+// its lines being the one field the view declares @virtual.
 func orderView(order *db.Order) types.OrderView {
 	view := types.OrderView{
 		Status:          order.Status,
 		PlacedAt:        order.PlacedAt,
 		ShippingAddress: order.ShippingAddress,
 		CancelReason:    order.CancelReason,
+		TotalCents:      order.TotalCents,
 		Lines:           make([]types.OrderLineView, 0, len(order.Lines)),
 	}
 	if order.Id != nil {
@@ -296,7 +304,6 @@ func orderView(order *db.Order) types.OrderView {
 			lineView.ProductId = *line.Product.Id
 		}
 		view.Lines = append(view.Lines, lineView)
-		view.TotalCents += line.Quantity * line.UnitPriceCents
 	}
 	return view
 }
@@ -308,19 +315,11 @@ type Reviews struct {
 
 var _ api.ProductReviewsImplementation = (*Reviews)(nil)
 
-// reviewKey is a review's place in ListReviews' order: when it was
-// written, then its id.
-type reviewKey struct {
-	CreatedAt time.Time          `json:"createdAt"`
-	ID        types.IdentityUUID `json:"id"`
-}
-
-func (key reviewKey) rowID() types.IdentityUUID { return key.ID }
-
-// ListReviews answers a page of a product's reviews, oldest first, those
-// rated minRating or more when it is given. A search, q, keeps the reviews
-// whose title or body holds each of its words, in any case (D62): the
-// ORM's ReviewFilter.SearchText makes each word a condition on the table's
+// ListReviews answers a page of a product's reviews in the page's sort,
+// by when each was written or by its rating, those rated minRating or more
+// when it is given. A search, q, keeps the reviews whose title or body
+// holds each of its words, in any case (D62): the ORM's
+// ReviewFilter.SearchText makes each word a condition on the table's
 // search_text, which Postgres's trigram index serves. Deleted reviews are
 // left out.
 func (r *Reviews) ListReviews(ctx context.Context, productID types.IdentityUUID, minRating *float64, q *string, page paging.Request) (paging.Page[types.ReviewView], error) {
@@ -328,34 +327,28 @@ func (r *Reviews) ListReviews(ctx context.Context, productID types.IdentityUUID,
 	if minRating != nil {
 		filter.Rating = &orm.FloatFilter{Gte: minRating}
 	}
-	query := &keyQuery{}
-	query.conditions = orm.ReviewFilterConditions(filter, &query.args)
-	query.where("deleted_at IS NULL")
-	if page.Cursor != "" {
-		after, err := decodeKey[reviewKey](page.Cursor)
-		if err != nil {
-			return paging.Page[types.ReviewView]{}, err
-		}
-		query.where("(created_at, id) > (%s::timestamptz, %s::uuid)", after.CreatedAt, after.ID.ToUUID())
+	sort, err := orm.ParseReviewSort(page.Sort.String())
+	if err != nil {
+		return paging.Page[types.ReviewView]{}, err
 	}
-	return readPage[reviewKey](ctx, r.DB, query, "review", "created_at, id", page,
-		func(tx orm.TxInterface, ids []types.IdentityUUID) ([]types.ReviewView, error) {
-			// The page's reviews, in the keys' order.
-			reviews, _, err := tx.GetReviewRepository().FindMany(ctx, &orm.ReviewFilter{Id: &orm.UUIDFilter{In: ids}},
-				&orm.ReviewFindOptions{
-					Fields:  orm.ReviewFields{}.All(),
-					OrderBy: []orm.ReviewOrderBy{{Field: orm.ReviewOrderByCreatedAt}, {Field: orm.ReviewOrderById}},
-					Limit:   len(ids),
-				})
-			if err != nil {
-				return nil, err
-			}
-			views := make([]types.ReviewView, 0, len(reviews))
-			for _, review := range reviews {
-				views = append(views, reviewView(review))
-			}
-			return views, nil
-		})
+	after, err := pageKey[orm.ReviewPageKey](page)
+	if err != nil {
+		return paging.Page[types.ReviewView]{}, err
+	}
+	found, err := r.DB.GetReviewRepository().FindPage(ctx, filter, &orm.ReviewPageOptions{
+		Fields: orm.ReviewFields{}.All(),
+		Sort:   sort,
+		After:  after,
+		Limit:  page.Limit,
+	})
+	if err != nil {
+		return paging.Page[types.ReviewView]{}, pageError(err)
+	}
+	views := make([]types.ReviewView, 0, len(found.Rows))
+	for _, review := range found.Rows {
+		views = append(views, reviewView(review))
+	}
+	return pageOf(views, found.Next)
 }
 
 func (r *Reviews) WriteReview(ctx context.Context, productID types.IdentityUUID, input *types.WriteReviewInput) (*types.ReviewView, error) {

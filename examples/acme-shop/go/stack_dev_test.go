@@ -2,6 +2,7 @@ package shop_test
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -440,6 +441,40 @@ func TestStackDevRunsTheShop(t *testing.T) {
 		t.Fatalf("GetProduct = %+v, %v", got, err)
 	}
 
+	// The catalog by price, which compares as a number, either way, across
+	// pages of one (D60, amended), and searched by name, the search a
+	// product picker finds them by. A cursor of the pages by name is
+	// refused by a page by price: the router binds each cursor to its sort.
+	pricesOf := func(sort string) []orderstypes.GenericInt64 {
+		t.Helper()
+		query := &ordersns.ProductCatalogListProductsQueryParams{Ids: ours.Ids, Sort: &sort}
+		var prices []orderstypes.GenericInt64
+		for listed, err := range catalog.ProductCatalogNamespace.ListProductsAll(ctx, query, orderspages.PageRequest{Limit: 1}) {
+			if err != nil {
+				t.Fatalf("ListProductsAll by %s: %v", sort, err)
+			}
+			prices = append(prices, listed.PriceCents)
+		}
+		return prices
+	}
+	if got := pricesOf("priceCents"); !slices.Equal(got, []orderstypes.GenericInt64{350, 450}) {
+		t.Fatalf("the products by price = %v, want 350 then 450", got)
+	}
+	if got := pricesOf("-priceCents"); !slices.Equal(got, []orderstypes.GenericInt64{450, 350}) {
+		t.Fatalf("the products by price, the dearest first = %v, want 450 then 350", got)
+	}
+	black := "BLACK"
+	found, err := catalog.ProductCatalogNamespace.ListProducts(ctx, &ordersns.ProductCatalogListProductsQueryParams{Ids: ours.Ids, Q: &black}, orderspages.PageRequest{})
+	if err != nil || len(found.Items) != 1 || found.Items[0].Id != other.Id {
+		t.Fatalf("ListProducts q=BLACK = %+v, %v; want the black tea", found, err)
+	}
+	byPrice := "priceCents"
+	if _, err := catalog.ProductCatalogNamespace.ListProducts(ctx, &ordersns.ProductCatalogListProductsQueryParams{Ids: ours.Ids, Sort: &byPrice},
+		orderspages.PageRequest{Cursor: *first.Next, Limit: 1}); !errors.As(err, &refused) || refused.StatusCode != http.StatusBadRequest ||
+		!strings.Contains(string(refused.Body), "cursor is not one this sort returned") {
+		t.Fatalf("ListProducts by price after a cursor of the products by name: %v, want 400", err)
+	}
+
 	// The orders, oldest first: a page of one order at a time holds each
 	// order once, in the order of one page of them all, the two staff
 	// placed last, and a status filter holds on every page.
@@ -543,6 +578,47 @@ func TestStackDevRunsTheShop(t *testing.T) {
 			}
 		}
 	}
+	// Every order by its total, the largest first, a page of one at a
+	// time: the stored totals, in order, ties broken by their ids in the
+	// same direction, as Postgres orders a uuid; and a shopper's own alike.
+	byTotal := func(client *orderssdk.ShopOrdersSDK, sort string) []orderstypes.OrderView {
+		t.Helper()
+		var listed []orderstypes.OrderView
+		for order, err := range client.OrderNamespace.ListOrdersAll(ctx, &ordersns.OrderListOrdersQueryParams{Sort: &sort}, orderspages.PageRequest{Limit: 1}) {
+			if err != nil {
+				t.Fatalf("ListOrdersAll by %s: %v", sort, err)
+			}
+			listed = append(listed, order)
+		}
+		return listed
+	}
+	inTotalOrder := func(listed []orderstypes.OrderView, desc bool) bool {
+		return slices.IsSortedFunc(listed, func(a, b orderstypes.OrderView) int {
+			ida, idb := a.Id.ToUUID(), b.Id.ToUUID()
+			order := cmp.Or(cmp.Compare(a.TotalCents, b.TotalCents), bytes.Compare(ida[:], idb[:]))
+			if desc {
+				return -order
+			}
+			return order
+		})
+	}
+	largest := byTotal(orders, "-totalCents")
+	if len(largest) != len(everyone) || !inTotalOrder(largest, true) {
+		t.Fatalf("staff's orders by total, the largest first = %+v, want every one of %d in that order", largest, len(everyone))
+	}
+	for _, order := range largest {
+		var lines orderstypes.GenericInt64
+		for _, line := range order.Lines {
+			lines += line.Quantity * line.UnitPriceCents
+		}
+		if order.TotalCents != lines {
+			t.Fatalf("order %s's total is %d, and its lines sum to %d", order.Id, order.TotalCents, lines)
+		}
+	}
+	if own := byTotal(ordersOf(tokens[shoppers[0]]), "totalCents"); len(own) != 2 || !inTotalOrder(own, false) {
+		t.Fatalf("%s's orders by total = %+v, want their two in that order", shoppers[0], own)
+	}
+
 	reason := "out of stock"
 	cancelled, err := orders.OrderNamespace.CancelOrder(ctx, placedBy[shoppers[1]][1].String(), ordersns.OrderCancelOrderInput{Reason: &reason})
 	if (err != nil || cancelled.Status != orderstypes.OrderStatus_Cancelled) && (!errors.As(err, &refused) || refused.StatusCode != http.StatusConflict) {
@@ -598,6 +674,21 @@ func TestStackDevRunsTheShop(t *testing.T) {
 	page = search("smooth", orderspages.PageRequest{Cursor: *page.Next, Limit: 1})
 	if len(page.Items) != 1 || page.Items[0].Title != "Grassy" || page.Next != nil {
 		t.Fatalf("ListReviews smooth, the page after: %+v", page)
+	}
+	// By rating, with the search, either way, a page of one at a time.
+	for sort, want := range map[string]string{"rating": "Grassy | Smoky and smooth", "-rating": "Smoky and smooth | Grassy"} {
+		q := "smooth"
+		var titles []string
+		for review, err := range catalog.ProductReviewsNamespace.ListReviewsAll(ctx, product.Id.String(),
+			&ordersns.ProductReviewsListReviewsQueryParams{Q: &q, Sort: &sort}, orderspages.PageRequest{Limit: 1}) {
+			if err != nil {
+				t.Fatalf("ListReviewsAll by %s: %v", sort, err)
+			}
+			titles = append(titles, review.Title)
+		}
+		if got := strings.Join(titles, " | "); got != want {
+			t.Errorf("ListReviewsAll by %s = %q, want %q", sort, got, want)
+		}
 	}
 
 	// Ctrl-C stops the servers, then removes the containers and their data:

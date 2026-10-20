@@ -116,6 +116,10 @@ pgx. Each table gets a repository:
   the columns to read, the order and the page. It returns the rows and the
   total count of matching rows. Its options must name at least one column:
   `orm.ProductFields{}.All()` reads them all.
+- `FindPage` reads a page of the same rows in the order of one column, by
+  name or by price, say, after the key of the page before, in one query
+  and with no count
+  ([Pages](/superschematic/guides/database-tables/#pages)).
 - `CreateOne` leaves out a zero id and `createdAt`, so the database fills
   them in, and returns the inserted row.
 - A lookup that finds nothing returns `orm.ErrNotFound`.

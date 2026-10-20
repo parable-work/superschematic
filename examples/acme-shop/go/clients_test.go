@@ -49,6 +49,28 @@ func ordersClientGo(ctx context.Context, baseURL, token string) (string, error) 
 	}
 	fmt.Fprintf(&out, "every product: %d\n", every)
 
+	// A sorted list takes its sort with each page (D60, amended): two
+	// pages of the products by price, the dearest first.
+	dearest := "-priceCents"
+	byPrice := &namespaces.ProductCatalogListProductsQueryParams{Sort: &dearest}
+	priced, err := anonymous.ProductCatalogNamespace.ListProducts(ctx, byPrice, runtime.PageRequest{Limit: 2})
+	if err != nil {
+		return "", err
+	}
+	fmt.Fprintf(&out, "products by price, dearest first: %d, %s\n", len(priced.Items), lastPage(priced.Next))
+	if priced.Next != nil {
+		priced, err = anonymous.ProductCatalogNamespace.ListProducts(ctx, byPrice, runtime.PageRequest{Cursor: *priced.Next, Limit: 2})
+		if err != nil {
+			return "", err
+		}
+		fmt.Fprintf(&out, "the next page by price: %d, %s\n", len(priced.Items), lastPage(priced.Next))
+	}
+
+	// byName is a cursor the router bound to the products by name; sent
+	// with another sort, it is refused.
+	_, err = anonymous.ProductCatalogNamespace.ListProducts(ctx, byPrice, runtime.PageRequest{Cursor: byName})
+	fmt.Fprintf(&out, "products by price after a cursor of the products by name: %s\n", status(err))
+
 	_, err = anonymous.ProductCatalogNamespace.GetProduct(ctx, product.String())
 	fmt.Fprintf(&out, "get a missing product: %s\n", status(err))
 
@@ -84,6 +106,15 @@ func ordersClientGo(ctx context.Context, baseURL, token string) (string, error) 
 		every++
 	}
 	fmt.Fprintf(&out, "every order: %d\n", every)
+	largest := "-totalCents"
+	every = 0
+	for _, err := range shopper.OrderNamespace.ListOrdersAll(ctx, &namespaces.OrderListOrdersQueryParams{Sort: &largest}, runtime.PageRequest{Limit: 1}) {
+		if err != nil {
+			return "", err
+		}
+		every++
+	}
+	fmt.Fprintf(&out, "every order by total, largest first: %d\n", every)
 
 	// e30 is the cursor of {}, a key that names no order.
 	_, err = shopper.OrderNamespace.ListOrders(ctx, nil, runtime.PageRequest{Cursor: "e30"})
@@ -93,6 +124,10 @@ func ordersClientGo(ctx context.Context, baseURL, token string) (string, error) 
 	fmt.Fprintf(&out, "get a missing order: %s\n", status(err))
 	return out.String(), nil
 }
+
+// byName is the cursor of {"sort":"name","key":{"name":"Anvil","id":"1"}},
+// one the router binds to the products by name.
+const byName = "eyJzb3J0IjoibmFtZSIsImtleSI6eyJuYW1lIjoiQW52aWwiLCJpZCI6IjEifX0"
 
 // lastPage says whether a page is the last, which its next cursor, nil,
 // says.
@@ -129,12 +164,15 @@ func status(err error) string {
 // Go or in Rust.
 const clientsSee = `products: 0, the last page
 every product: 0
+products by price, dearest first: 0, the last page
+products by price after a cursor of the products by name: 400
 get a missing product: 404
 reviews that say smoky: 0, the last page
 write a review without a token: 401
 order a product that does not exist: 400
 orders: 0, the last page
 every order: 0
+every order by total, largest first: 0
 orders after a cursor the server never returned: 400
 get a missing order: 404
 `
