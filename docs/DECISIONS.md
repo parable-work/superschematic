@@ -7075,6 +7075,57 @@ its server on `fake.bundle`, type-checks, bundles and runs under workerd
 over a stand-in for the binding, pruning through it at each firing. The
 CI's go job installs the pinned workerd. No call has reached Cloudflare.
 
+### D64, amended: every name in an account holds its stack and its environment, bootstrap keeps its state where no CI token reads it, a preview job holds a token of its own, and a token reaches only the steps that run the stack
+
+A review of the target found that two plain environments of one account
+made the same Workers, D1 databases, R2 buckets and bucket tokens; that
+the planner's token, which wrote every object of the state bucket, and
+the passphrase CI holds together decrypted bootstrap's state, the
+deployer's token among its secrets; that a preview job held the
+deployer's token, in a job-level `env` a pull request's package install
+read; that the passphrase's check was an unstretched HMAC, written with
+no guard against a second first bootstrap; that the shell's AWS session
+token and profile reached the state's S3 backend; that a deploy whose D1
+databases only changed their connecting servers still demanded the
+runner and a token; that `nothing-public-unless-exposed` read
+`subdomain.enabled` alone; and that two stacks of one repository set
+GitHub secrets of the same names.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Every name an environment gives a resource in its account is `<stack>-<env>-<name>` (`AccountName`): a Worker of a server, a job or a site, `<stack>-<env>-<deployable>`; a D1 database, `<stack>-<env>-<db>`; an R2 bucket, `<stack>-<env>-<bucket>`; a bucket edge's token, `<stack>-<env>-<caller>-<bucket>`. Each part is in kebab case with nothing but lowercase letters, digits and single hyphens, and a member of a parameterized environment appends its parameters' names and values as before. A workers.dev host is the Worker's name, so addresses, site configs and CORS origins follow it. A custom domain's host stays the deployable's label under the environment's domain, which tells environments apart already. A Secrets Store secret already held both, and bootstrap's tokens are the stack's in the account, so neither changes. | The environment alone, which two stacks in one account still share. A hash suffix, which no person can read back to the stack. The stack and environment in a custom domain's host too, `acme-shop-staging-shop-api.staging.acme.dev`, a host no one would choose. |
+| A Worker name over 63 characters, or a bucket name over R2's, is still refused as unrealizable, and the refusal lists each part of the name with its length and names the longest to shorten. | Truncating, which can make two names one. |
+| The migration runner reads each D1 database's uuid from the graph the deploy applied, through a new `MigrationRequest.Outputs`, which the deploy fills from the provisioner's `Outputs`: the node's `uuid`, which a Worker's d1 binding references, else its `id`, which the provider sets to the same uuid and the program exports for every node. `Cloud.D1Database`, the lookup by name, is gone. | Looking up the environment-qualified name, matched exactly, which works but asks the API what the graph knows. Recording each uuid in the schema, which a member's database could not hold. |
+| Bootstrap keeps its own Pulumi state in a bucket of its own, `superschematic-bootstrap`, under a passphrase of its own, `SUPERSCHEMATIC_BOOTSTRAP_PASSPHRASE`, which it generates on an account's first run, prints once and checks as it checks the state's, and which no CI job holds. The planner no longer holds `Workers R2 Storage Read`, whose read reaches every bucket's objects; it writes the state bucket's objects alone. The deployer and the preview, whose account-wide `Workers R2 Storage Write` reaches every bucket, can read the bootstrap bucket's ciphertext and hold no key to it. A rerun needs one more variable set. | The bootstrap's state in its own bucket under the state's passphrase, which a preview job, holding that passphrase and account-wide R2, could still decrypt. A passphrase derived from the state's, which anyone holding the state's derives too. |
+| An account whose bootstrap state an earlier release kept in the state bucket (`.pulumi/stacks/<stack>-bootstrap/`) is refused, saying to delete the stack's three tokens in the dashboard, since the planner's could read them, and the project's objects under `.pulumi/`, and to run bootstrap again, which mints new tokens. A check of the earlier form is refused, saying to delete it. No real account ran the earlier release. | Moving the state with `pulumi stack export` and `import` and `change-secrets-provider`, which keeps tokens that were readable. Reading the old check and rewriting it, for an account that is refused anyway. |
+| Bootstrap's graph mints a third token, `<stack>-preview`, which a parameterized environment's preview job reads as `CLOUDFLARE_PREVIEW_TOKEN_<STACK>_<ENV>`: `Workers Scripts Write`, `D1 Write`, `Workers R2 Storage Write`, `Account API Tokens Write` and `Secrets Store Read` on the account, `Workers Routes Write` and `DNS Write` on its zones. It is revoked alone and writes no Secrets Store value. It still mints tokens, since a member's bucket edge does, so like the deployer it may grant itself more; the graph is one per account, so its permissions cannot depend on whether the stack's previews have buckets. | The deployer's token in the preview job, which a pull request from the repository could read. One preview token per parameterized environment, which bootstrapping a plain environment, applying the same graph, would delete. |
+| A passphrase's check is `{kdf: "pbkdf2-sha256", iterations, salt, key}`: a 32-byte key PBKDF2-HMAC-SHA256 derives from the passphrase over a 32-byte salt, written with 600,000 iterations and read with its own count, from 100,000 to 10,000,000 (Go's `crypto/pbkdf2`). | The HMAC, one hash per guess for a reader of the object. scrypt or argon2 from `x/crypto`, a dependency the extension does not have. |
+| A first bootstrap writes each check with `If-None-Match: *` (`Cloud.CreateObject`) and reads it back: when another bootstrap's check is there for another passphrase, it refuses, saying to run again with that bootstrap's passphrase, and prints none it generated. A bucket that holds Pulumi state and no check gets no generated passphrase. | Writing unconditionally, so the last of two first runs wins and the first prints a passphrase that decrypts nothing. |
+| The github renderer writes `CLOUDFLARE_API_TOKEN` and `PULUMI_CONFIG_PASSPHRASE` into the `env` of the steps that run `stack plan`, `deploy` or `destroy`, and no other; D1's migrations run within `stack deploy`. gcp's sign-in, a step whose short-lived credentials file later steps read, is its own path and does not change. | The job's `env`, which every step, a lockfile's install scripts included, reads. |
+| Every GitHub secret's name ends with `_<STACK>_<ENV>`: `CLOUDFLARE_DEPLOYER_TOKEN_*` and `PULUMI_CONFIG_PASSPHRASE_*` in the deploy job's GitHub environment, `CLOUDFLARE_PLANNER_TOKEN_*`, `CLOUDFLARE_PREVIEW_TOKEN_*` and the passphrase as repository secrets. | Refusing or warning when two stacks would collide, which bootstrap cannot see: GitHub lists secrets' names, not whose they are. |
+| `StateBackend.Env` clears `AWS_SESSION_TOKEN`, `AWS_SECURITY_TOKEN`, `AWS_PROFILE` and `AWS_DEFAULT_PROFILE`, and points `AWS_CONFIG_FILE` and `AWS_SHARED_CREDENTIALS_FILE` at the null device. | Leaving the shell's: a session token is signed with beside R2's key and fails every request, and a profile the machine lacks stops the backend. |
+| A runner that is a `registry.PrivilegelessMigrations`, as D1's is, is readied only for steps to migrate or a pending phase. | Readying it for a change of connecting servers, whose phase does nothing on D1. |
+| `nothing-public-unless-exposed` also refuses, for a deployable that is not exposed, a Worker whose preview URLs are not off and one with no `subdomain`, which leaves workers.dev and previews to Cloudflare's defaults. | Trusting the platform, which sets both, against a graph another platform or a hand writes. |
+
+Status: built, proven offline. `extensions/cloudflare`'s goldens hold the
+new names; a test resolves Staging and Production of the calls, D1, web
+and Workers fixtures, each pair in one account, and finds no name of one
+in the other; the refusals name the part to shorten; the runner reads a
+uuid, and a node's `id`, from the outputs; bootstrap's tests cover both
+buckets and passphrases, the three tokens and their policies, the refusal
+of a state in the old place and of an old check, a lost race and a won
+one, and the stack in every secret's name; the cigen test holds the
+secrets to the stack commands' steps, and actionlint passes the
+workflows; `extensions/pulumi`'s test runs the CLI with a stale session
+token and a missing profile in its environment; and the core's deploy
+test readies a privilegeless runner for steps alone and hands each phase
+the outputs. No call has reached Cloudflare or GitHub. A live run must
+check that the preview's permissions deploy and destroy a member,
+buckets and their tokens included, that `Secrets Store Read` lets a
+version bind a secret, that the planner plans without account-wide R2
+read, that the provider's `id` of a D1 database is its uuid, and R2's
+answer to a conditional write that finds an object.
+
 ## D65. A Rust API runs jobs and workers, its workers claim queues through a descriptor its types carry, and each output root builds against a mirror of its implementations
 
 D57 gave a Rust API a server and left out its jobs and workers: the

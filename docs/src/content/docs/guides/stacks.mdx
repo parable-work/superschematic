@@ -1462,7 +1462,16 @@ goes through:
 - **The token and the passphrase.** Every `stack` command reads the API
   token from `CLOUDFLARE_API_TOKEN` and the state's passphrase from
   `PULUMI_CONFIG_PASSPHRASE`, in the shell, as gcp's commands read
-  application default credentials. Neither is ever written to a file.
+  application default credentials; `stack bootstrap` also reads its own
+  passphrase from `SUPERSCHEMATIC_BOOTSTRAP_PASSPHRASE`. None is ever
+  written to a file. The run's AWS session token, profile and shared
+  files are kept from the state's S3 backend.
+- **Names.** One account may hold several stacks and environments, so
+  each Worker, D1 database, R2 bucket and bucket token is named
+  `<stack>-<env>-<name>` in kebab case, `acme-shop-staging-shop-api`,
+  with each parameter's name and value after it in a member of a
+  parameterized environment. A name too long for Cloudflare is refused,
+  naming its longest part to shorten.
 - **The state.** One R2 bucket per account, `superschematic-state`, holds
   Pulumi's state for every stack in it, through Pulumi's S3 backend on
   `https://<accountId>.r2.cloudflarestorage.com`, region `auto`,
@@ -1485,29 +1494,40 @@ one that reads the account, creates R2 buckets and account API tokens,
 and creates or reads the Secrets Store. It is safe to run again:
 
 1. it verifies the token, an account token or a user token;
-2. it creates the state bucket;
-3. on the account's first bootstrap, it generates the passphrase, 32
-   random bytes, and prints it once: keep it in your password manager,
-   and set it in `PULUMI_CONFIG_PASSPHRASE` from then on. Each later run
-   checks the passphrase in the shell against
-   `superschematic/passphrase-check` in the bucket, a salt and its HMAC
-   under the passphrase, and refuses another. Set a passphrase of your own
-   before the first run to have it take that one instead;
+2. it creates the state bucket and `superschematic-bootstrap`, where it
+   keeps its own state, the CI's tokens among its secrets;
+3. on the account's first bootstrap, it generates two passphrases, 32
+   random bytes each, and prints each once: the state's, which you set
+   in `PULUMI_CONFIG_PASSPHRASE` from then on and the CI holds too, and
+   the bootstrap's own, which you set in
+   `SUPERSCHEMATIC_BOOTSTRAP_PASSPHRASE` to bootstrap again and no CI job
+   ever holds. Keep both in your password manager. Each later run checks
+   each passphrase in the shell against `superschematic/passphrase-check`
+   in its bucket, a key PBKDF2-SHA256 derives from it, and refuses
+   another. Set a passphrase of your own before the first run to have it
+   take that one instead. Two first runs at once cannot both write a
+   check: the one that loses is refused;
 4. it finds the account's Secrets Store, or creates it;
-5. it applies two account tokens for the CI in the Pulumi project
+5. it applies three account tokens for the CI in the Pulumi project
    `<stack>-bootstrap`, a stack per account: `<stack>-deployer`, which
    edits the account's Workers scripts, D1, R2, Secrets Store and account
-   API tokens and the Workers routes and DNS of its zones, and
-   `<stack>-planner`, which reads all of that and writes the objects of
-   the state bucket alone, since a preview takes the stack's lock. For an
-   environment with a bucket, it first checks that the account lists the
-   permission group each bucket edge's token holds, by the id Cloudflare
-   publishes;
-6. with `--github`, it sets each token and the passphrase as the
-   repository's GitHub Actions secrets with `gh`, at the scopes the
-   [generated CI](#generated-ci) reads them from, and creates the deploy
-   job's GitHub environment when it is missing. Without `gh` on PATH,
-   signed in, it prints the `gh secret set` commands and each token once;
+   API tokens and the Workers routes and DNS of its zones;
+   `<stack>-planner`, which reads Workers scripts, D1, the Secrets Store's
+   names, account tokens, routes and DNS, and writes the objects of the
+   state bucket alone, since a preview takes the stack's lock; and
+   `<stack>-preview`, which deploys and destroys a pull request's member
+   and writes no secret's value. For an environment with a bucket, it
+   first checks that the account lists the permission group each bucket
+   edge's token holds, by the id Cloudflare publishes. An account whose
+   bootstrap state an earlier release kept in the state bucket is
+   refused, with the tokens to delete and the objects to remove before
+   it runs again;
+6. with `--github`, it sets the tokens the environment's jobs read and the
+   state's passphrase as the repository's GitHub Actions secrets with
+   `gh`, at the scopes the [generated CI](#generated-ci) reads them from,
+   and creates the deploy job's GitHub environment when it is missing.
+   Without `gh` on PATH, signed in, it prints the `gh secret set` commands
+   and each token once;
 7. it records `secretsStoreId` and `workersSubdomain` beside `accountId`.
    An account with no workers.dev subdomain yet is told to choose one in
    the dashboard.
@@ -1515,8 +1535,9 @@ and creates or reads the Secrets Store. It is safe to run again:
 ### Servers on Workers
 
 A TypeScript server on the cloudflare target is a Worker of
-`cloudflare.workers`, named after the deployable, with a suffix per
-parameter in a member of a parameterized environment. Its artifact is a
+`cloudflare.workers`, named after the stack, the environment and the
+deployable, `acme-shop-staging-shop-api`, with a suffix per parameter in
+a member of a parameterized environment. Its artifact is a
 bundle, not an image: a deploy runs `bun bundle.ts <dir>` in the server's
 package after the workspace's frozen install, and keeps the files in the
 state bucket under `superschematic/bundles/<stack>/<deployable>/<hex>/`
@@ -1541,10 +1562,12 @@ variable as plain text, a `Secret<T>` field as a binding to its Secrets
 Store secret, a signing key as a secret text binding from the deploy's
 state. An exposed server under a domain gets a custom domain,
 `<server>.<domain>`, whose record and certificate Cloudflare writes; one
-without a domain is at `https://<server>.<workersSubdomain>.workers.dev`,
-which needs bootstrap's `workersSubdomain`. An internal server has no
-route at all. The rule `nothing-public-unless-exposed` refuses workers.dev,
-a custom domain or a route for a server that is not exposed.
+without a domain is at `https://<worker>.<workersSubdomain>.workers.dev`,
+its Worker's name, which needs bootstrap's `workersSubdomain`. An internal
+server has no route at all. The rule `nothing-public-unless-exposed`
+refuses workers.dev, preview URLs, a Worker that leaves both to
+Cloudflare's defaults, a custom domain or a route for a server that is
+not exposed.
 
 The stack's build writes `fetch.ts`, the Worker's entrypoint, `bundle.ts`
 and `workers.d.ts` beside the server's `main.ts`, which `stack dev` still
@@ -1591,7 +1614,7 @@ app, with no binding and no credential.
 ### Buckets on R2
 
 A bucket on the cloudflare target is a private R2 bucket of
-`cloudflare.r2`, `<stack>-<bucket>`, with a suffix per parameter in a
+`cloudflare.r2`, `<stack>-<env>-<bucket>`, with a suffix per parameter in a
 member of a parameterized environment, which gets a bucket of its own.
 Its settings:
 
@@ -1625,7 +1648,7 @@ the same `Bucket` interface.
 ### Databases on D1
 
 A database on the cloudflare target is on `cloudflare.d1`, in SQLite: a
-D1 database per DB service it hosts, named `<stack>-<db>`, with each
+D1 database per DB service it hosts, named `<stack>-<env>-<db>`, with each
 parameter's name and value after it in a member of a parameterized
 environment, so each preview migrates databases of its own. A DB service
 that does not list `sqlite` is refused there. Its settings:
@@ -1666,12 +1689,14 @@ and a TypeScript API over the user model on a sqlite-first one.
 
 A deploy migrates each D1 database from your machine, or the CI job's,
 between its steps: it finds `superschematic-migrate` on `PATH`, or where
-`SUPERSCHEMATIC_MIGRATE` says, looks up the database's uuid by its name,
-and runs the runner's job at `d1://<accountId>/<uuid>` with the run's
+`SUPERSCHEMATIC_MIGRATE` says, reads the database's uuid from the outputs
+of what the deploy applied, and runs the runner's job at `d1://<accountId>/<uuid>` with the run's
 `CLOUDFLARE_API_TOKEN`. The expand phase runs before the rollout and the
 contract phase after it, as on gcp. D1 has no roles, so every Worker
 bound to a database reads and writes all of it; the runner gives no
-privileges, and the D1 driver's lease keeps two deploys apart. The
+privileges, a deploy that only changes which servers connect needs
+neither the runner nor a token for it, and the D1 driver's lease keeps
+two deploys apart. The
 generated CI's deploy and preview jobs install `superschematic-migrate`
 from the release, checked against `SHA256SUMS`.
 
@@ -1700,7 +1725,7 @@ of your own, and rolling back.
 ### Jobs on Cron Triggers
 
 A TypeScript job on the cloudflare target is a Worker of its own on
-`cloudflare.cron`, named after the deployable, `shop-storefront-sweep-carts`,
+`cloudflare.cron`, named as a server's is, `acme-shop-staging-shop-storefront-sweep-carts`,
 never exposed. Its bundle is built and kept as a server's is, from
 `scheduled.ts`, which the stack's build writes in the job's package with
 `bundle.ts` and `workers.d.ts`, beside the `main.ts` that `stack dev`
@@ -1738,7 +1763,7 @@ no job on demand, so `stack run` refuses it.
 ### Sites on Workers
 
 A site on the cloudflare target is a Worker of `cloudflare.sites`, named
-after the deployable, that serves the site's build as static assets. A
+as a server's is, that serves the site's build as static assets. A
 deploy builds the site after the workspace's frozen install, keeps its
 files in the state bucket under
 `superschematic/sites/<stack>/<site>/<hex>/` when their digest is new,
@@ -1761,8 +1786,8 @@ caching, which revalidates each by its ETag.
 
 A site is always exposed: under a domain at `https://<site>.<domain>`, a
 custom domain whose record and certificate Cloudflare writes, and
-without one at `https://<site>.<workersSubdomain>.workers.dev`, which
-needs bootstrap's `workersSubdomain`. That address is the site's origin
+without one at `https://<worker>.<workersSubdomain>.workers.dev`, its
+Worker's name, which needs bootstrap's `workersSubdomain`. That address is the site's origin
 in the CORS field of each API it calls, each of which must be a server on
 Workers, exposed.
 
@@ -1867,17 +1892,21 @@ gcp: { project: "acme-staging", projectNumber: "123456789012", region: "us-east1
 On cloudflare a job signs in with a long-lived account token, since
 Cloudflare offers no federation, and the state's passphrase, each a
 GitHub Actions secret `stack bootstrap --github` sets. No action signs
-in: the job's `env` reads them into `CLOUDFLARE_API_TOKEN` and
-`PULUMI_CONFIG_PASSPHRASE`, and the job asks GitHub for no identity token.
+in: the `env` of each step that runs a `stack` command, and of no other
+step, reads them into `CLOUDFLARE_API_TOKEN` and
+`PULUMI_CONFIG_PASSPHRASE`, so a pull request's package install never
+sees them, and the job asks GitHub for no identity token.
 
 | Job | Token | Passphrase |
 | --- | --- | --- |
-| a plain environment's deploy job | `CLOUDFLARE_API_TOKEN`, a secret of the GitHub environment of its name: the deployer's | `PULUMI_CONFIG_PASSPHRASE`, in the same GitHub environment |
-| a plan job | `CLOUDFLARE_PLANNER_TOKEN_<ENV>`, a repository secret: the planner's | `PULUMI_CONFIG_PASSPHRASE_<ENV>`, a repository secret |
-| a preview job | `CLOUDFLARE_PREVIEW_TOKEN_<ENV>`, a repository secret: the deployer's | `PULUMI_CONFIG_PASSPHRASE_<ENV>`, a repository secret |
+| a plain environment's deploy job | `CLOUDFLARE_DEPLOYER_TOKEN_<STACK>_<ENV>`, a secret of the GitHub environment of its name: the deployer's | `PULUMI_CONFIG_PASSPHRASE_<STACK>_<ENV>`, in the same GitHub environment |
+| a plan job | `CLOUDFLARE_PLANNER_TOKEN_<STACK>_<ENV>`, a repository secret: the planner's | `PULUMI_CONFIG_PASSPHRASE_<STACK>_<ENV>`, a repository secret |
+| a preview job | `CLOUDFLARE_PREVIEW_TOKEN_<STACK>_<ENV>`, a repository secret: the preview's | `PULUMI_CONFIG_PASSPHRASE_<STACK>_<ENV>`, a repository secret |
 
-`<ENV>` is the environment's name in upper case, its words joined by
-underscores: `Staging` is `STAGING`. A plan job's credentials decrypt the
+`<STACK>` and `<ENV>` are the stack's and the environment's names in
+upper case, their words joined by underscores: `acme-shop`'s `Staging` is
+`ACME_SHOP_STAGING`, so two stacks of one repository never set each
+other's secrets. A plan job's credentials decrypt the
 state, and so every secret in it, so they are as sensitive as the
 deployer's.
 

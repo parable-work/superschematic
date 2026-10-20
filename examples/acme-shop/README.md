@@ -192,11 +192,12 @@ which `stack dev` creates and migrates with `shop-wishlist-db`'s SQLite
 plan, and `--remove-data` removes.
 
 Its `Staging` runs the same implementation as a Worker over a D1
-database, `wishlist-stack-shop-wishlist-db`, on the docs' placeholder
+database, `wishlist-stack-staging-shop-wishlist-db`, on the docs' placeholder
 account. No test calls Cloudflare. To run it on an account of yours, with
 what section 18.6 of `docs/stack-model.md` lists in the shell (the API
 token, the state's passphrase, `superschematic-migrate`, the Pulumi CLI
-and Bun), from this directory:
+and Bun), and for bootstrap its own passphrase
+(`SUPERSCHEMATIC_BOOTSTRAP_PASSPHRASE`), from this directory:
 
 1. put the account's id in `Staging`'s `accountId`, in
    `schemas/services/wishlist-stack/src/stack.schema.ts`, and run
@@ -204,9 +205,10 @@ and Bun), from this directory:
    which records the account's workers.dev subdomain in place of `acme`;
 2. `superschematic stack deploy Staging --stack schemas/services/wishlist-stack`
    creates the D1 database, migrates it from your machine and rolls the
-   Worker out at `https://shop-wishlist.<subdomain>.workers.dev`. Keep a
-   tea with `curl -X PUT -H 'content-type: application/json' -d
-   '{"note":"for the mornings"}' https://shop-wishlist.<subdomain>.workers.dev/api/wishlists/ada/items/green-tea`;
+   Worker, `wishlist-stack-staging-shop-wishlist`, out at
+   `https://wishlist-stack-staging-shop-wishlist.<subdomain>.workers.dev`.
+   Keep a tea with `curl -X PUT -H 'content-type: application/json' -d
+   '{"note":"for the mornings"}' https://wishlist-stack-staging-shop-wishlist.<subdomain>.workers.dev/api/wishlists/ada/items/green-tea`;
 3. deploy the second version: copy `testdata/wishlist-v2/schemas/services/*`
    over `schemas/services/` and
    `testdata/wishlist-v2/typescript/shop-wishlist/index.ts` over

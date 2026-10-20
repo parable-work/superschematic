@@ -4661,6 +4661,8 @@ export abstract class Staging {}
   `CLOUDFLARE_API_TOKEN` and the state's passphrase in
   `PULUMI_CONFIG_PASSPHRASE`, in the shell that runs the `stack` commands,
   as gcp's commands use the shell's application default credentials.
+  `stack bootstrap` also reads the bootstrap's own passphrase in
+  `SUPERSCHEMATIC_BOOTSTRAP_PASSPHRASE` (section 18.3).
 
 `stack init --cloudflare-account <id>` writes the environment and
 `src/cloudflare-target.ts` with the target's types, as it writes gcp's
@@ -4688,21 +4690,38 @@ There is no `worker` key: resolution refuses the kind on this target.
 
 | Stack concept | cloudflare |
 | --- | --- |
-| server | A `cloudflare:index/worker:Worker` named after the deployable (`<deployable>.worker`), in infrastructure, with Workers Logs on unless `logs: false` (`observability.enabled` and `observability.logs`), workers.dev on only for an exposed server without a domain, and previews off (`subdomain.enabled`, `subdomain.previewsEnabled`). Each rollout makes a `workerVersion` (`<deployable>.version`, on the worker's `id`) and a `workersDeployment` (`<deployable>.deployment`) sending 100% of traffic to it. The version holds the server's bundle (`main.js`, `application/javascript+module`; `main.js.map`, `application/source-map`; and `superscalar_wasm_bg.wasm`, `application/wasm`, the name superscalar's `workerd` build imports it by; each a `contentFile` under `artifacts/<server>/{bundle-digest}/` with its pinned `contentSha256`), `mainModule: main.js`, the compatibility date the extension pins (`cloudflare.CompatibilityDate`, 2026-09-15) unless set, `limits.cpuMs` and `placement.mode` from the settings, and the server's config as bindings. Its address is `https://<name>`, the host a service binding's requests carry. TypeScript only, and no API over the user model; a name over 63 characters, or under a parameter 63 before the parameter's value, is refused as unrealizable. |
+| server | A `cloudflare:index/worker:Worker` (`<deployable>.worker`) named `<stack>-<env>-<deployable>`, as every name in the account is (below), in infrastructure, with Workers Logs on unless `logs: false` (`observability.enabled` and `observability.logs`), workers.dev on only for an exposed server without a domain, and previews off (`subdomain.enabled`, `subdomain.previewsEnabled`). Each rollout makes a `workerVersion` (`<deployable>.version`, on the worker's `id`) and a `workersDeployment` (`<deployable>.deployment`) sending 100% of traffic to it. The version holds the server's bundle (`main.js`, `application/javascript+module`; `main.js.map`, `application/source-map`; and `superscalar_wasm_bg.wasm`, `application/wasm`, the name superscalar's `workerd` build imports it by; each a `contentFile` under `artifacts/<server>/{bundle-digest}/` with its pinned `contentSha256`), `mainModule: main.js`, the compatibility date the extension pins (`cloudflare.CompatibilityDate`, 2026-09-15) unless set, `limits.cpuMs` and `placement.mode` from the settings, and the server's config as bindings. Its address is `https://<name>`, the host a service binding's requests carry. TypeScript only, and no API over the user model; a name over 63 characters, or under a parameter 63 before the parameter's value, is refused as unrealizable, the refusal listing each part of the name with its length and naming the longest to shorten. |
 | config | Each literal, parameter and derived variable is a `plain_text` binding named as the variable. A derived member flagged secret is a `secret_text` binding referencing the output that holds it. A `Secret<T>` field is a `secrets_store_secret` binding named after the field, with the environment's `secretsStoreId` and its secret's `SecretName`; without a `secretsStoreId` the server is refused, saying to run bootstrap. A D1 database, an R2 bucket or a callee Worker is a binding named after the derived field, which the value names: `d1: {binding, database}` a `d1` binding of the database's id, `binding: {name, worker}` a `service` binding to the Worker, and a bucket's `binding`, a name, an `r2_bucket` binding of the bucket its `name` names. Bindings are sorted by name, and two of one name are refused. |
-| database | A `d1Database` per hosted DB schema, `<stack>-<db>`, with a suffix under a parameter, and `sqlite` dialect: the node `<database>.d1.<db>`, in infrastructure. `locationHint` and `jurisdiction` become `primaryLocationHint` and `jurisdiction`; D1 ignores the hint under a jurisdiction, so both together are refused. |
+| database | A `d1Database` per hosted DB schema, `<stack>-<env>-<db>`, with a suffix under a parameter, and `sqlite` dialect: the node `<database>.d1.<db>`, in infrastructure. `locationHint` and `jurisdiction` become `primaryLocationHint` and `jurisdiction`; D1 ignores the hint under a jurisdiction, so both together are refused. |
 | sql edge | `cloudflare.workers-d1` derives `d1: { binding: "<FIELD>", database: <uuid output> }`, the uuid an output of the database's node. The platform writes `{type: "d1", name: <binding>, id: <database>}` beside the field's two `plain_text` variables, and the binding is the grant: D1 has no roles, so a Worker bound to a database reads and writes all of it, and the edge has no node. |
-| migration | The runner on the deploying machine, against `d1://<accountId>/<uuid>`, each uuid looked up by its database's name, with the run's token and no privileges (section 18.6). |
+| migration | The runner on the deploying machine, against `d1://<accountId>/<uuid>`, each uuid read from the applied graph's outputs, with the run's token and no privileges (section 18.6). |
 | http edge | A service binding `{type: "service", name: <binding>, service: <callee's Worker>}`, and D37's signed token with the edge's key, the generic connector's `tls:index/privateKey:PrivateKey` node `<caller>.calls.<callee>.key` (D63), in infrastructure. The value is `{url: "https://<callee's Worker>", binding: {name, worker}, credential: {source: signed-token, issuer, audience, key}}`: the binding's name is the derived field's, its worker the output `name` of the callee's `worker` node, the issuer the caller's deployable, the audience the callee's, and the key the node's `privateKeyPemPkcs8`, a secret member. The callee's callers field gets the edge's issuer: the caller, the node's `publicKeyPem`, EdDSA, at most 300 seconds. A call between two APIs one server serves derives the server's own address alone (section 18.10). |
 | internal server | No workers.dev, no custom domain and no route: only a service binding reaches it. |
-| bucket | An `r2Bucket` (`<bucket>.bucket`, in infrastructure), `<stack>-<bucket>`, with a suffix under a parameter, its `location` the settings' `locationHint` and its `storageClass` theirs. `deleteAfterDays` becomes an `r2BucketLifecycle` (`<bucket>.lifecycle`) whose one rule deletes each object that many days after it was written. Its address is the node's output `name`. A name R2 refuses, outside 3 to 63 lowercase letters, digits and hyphens, and the state bucket's, are refused as unrealizable. |
-| bucket edge | An `r2_bucket` binding named after the field, and an `accountToken` (`<caller>.r2.<bucket>.token`, in infrastructure), `<stack>-<caller>-<bucket>` with a suffix under a parameter, whose one policy allows Workers R2 Storage Bucket Item Write on `com.cloudflare.edge.r2.bucket.<account>_default_<bucket>`: the bucket's objects alone. The value is `{name, binding, r2: {account, accessKeyId: <token id>, token: <token value, secret>}}`. |
-| site | A Worker of `cloudflare.sites` per site, named as a server's is, workers.dev on without a domain, whose version holds the site's files as `assets.directory` `artifacts/<site>/{site-digest}` with `htmlHandling` and `notFoundHandling` `none` and `runWorkerFirst: ["/__superschematic/*"]`; the script the extension embeds, `site.js`, as its one module, inline (`contentBase64`); an `assets` binding, `ASSETS`; `SITE_CONFIG`, a `plain_text` binding composed from the site's bindings; and `SITE_FALLBACK` when it has one (section 18.8). Its address and public address are both `https://<name>.<domain>`, or `https://<name>.<workersSubdomain>.workers.dev`. |
+| bucket | An `r2Bucket` (`<bucket>.bucket`, in infrastructure), `<stack>-<env>-<bucket>`, with a suffix under a parameter, its `location` the settings' `locationHint` and its `storageClass` theirs. `deleteAfterDays` becomes an `r2BucketLifecycle` (`<bucket>.lifecycle`) whose one rule deletes each object that many days after it was written. Its address is the node's output `name`. A name R2 refuses, outside 3 to 63 lowercase letters, digits and hyphens, and the name of either bucket bootstrap makes, are refused as unrealizable. |
+| bucket edge | An `r2_bucket` binding named after the field, and an `accountToken` (`<caller>.r2.<bucket>.token`, in infrastructure), `<stack>-<env>-<caller>-<bucket>` with a suffix under a parameter, whose one policy allows Workers R2 Storage Bucket Item Write on `com.cloudflare.edge.r2.bucket.<account>_default_<bucket>`: the bucket's objects alone. The value is `{name, binding, r2: {account, accessKeyId: <token id>, token: <token value, secret>}}`. |
+| site | A Worker of `cloudflare.sites` per site, named as a server's is, workers.dev on without a domain, whose version holds the site's files as `assets.directory` `artifacts/<site>/{site-digest}` with `htmlHandling` and `notFoundHandling` `none` and `runWorkerFirst: ["/__superschematic/*"]`; the script the extension embeds, `site.js`, as its one module, inline (`contentBase64`); an `assets` binding, `ASSETS`; `SITE_CONFIG`, a `plain_text` binding composed from the site's bindings; and `SITE_FALLBACK` when it has one (section 18.8). Its address and public address are both `https://<label>.<domain>`, the label the site's name, or `https://<name>.<workersSubdomain>.workers.dev`, the name its Worker's. |
 | site edge | `cloudflare.site-workers` derives the server's public address, which goes in the site's config, and the core puts the site's origin in the server's CORS field (section 8.10). |
-| job | A Worker of `cloudflare.cron` per job, named after the deployable, workers.dev off, whose version runs the job's bundle, built from `scheduled.ts`, with `limits.cpuMs` from `cpuMs`, under a `workersCronTrigger` (`<job>.schedule`) on the job's schedule in UTC once the deployment is there. A job with no schedule has a Worker and no trigger. Its edges are its API's, through `cloudflare.cron-workers`, `cloudflare.cron-r2` and `cloudflare.cron-d1`, whose values are the server's connectors': a job calls even an API it serves through a service binding, and its Worker depends on each Worker it binds. TypeScript only; a schedule in another time zone, and a timeout times tries over 15 minutes, are refused as unrealizable (section 18.9). |
+| job | A Worker of `cloudflare.cron` per job, named as a server's is, workers.dev off, whose version runs the job's bundle, built from `scheduled.ts`, with `limits.cpuMs` from `cpuMs`, under a `workersCronTrigger` (`<job>.schedule`) on the job's schedule in UTC once the deployment is there. A job with no schedule has a Worker and no trigger. Its edges are its API's, through `cloudflare.cron-workers`, `cloudflare.cron-r2` and `cloudflare.cron-d1`, whose values are the server's connectors': a job calls even an API it serves through a service binding, and its Worker depends on each Worker it binds. TypeScript only; a schedule in another time zone, and a timeout times tries over 15 minutes, are refused as unrealizable (section 18.9). |
 | secret | A Secrets Store secret `<Stack>-<Environment>-<Type>-<FIELD>`, written by `stack secrets set`. A member of a parameterized environment reads its environment's. |
-| exposure | A `workersCustomDomain` (`<deployable>.domain`) for `<name>.<domain>`, in the exposure step; Cloudflare writes its DNS record and certificate. Without a domain, the public address is `https://<name>.<workersSubdomain>.workers.dev`, and an environment that exposes a server without a domain and records no `workersSubdomain` is refused, saying to run bootstrap. |
+| exposure | A `workersCustomDomain` (`<deployable>.domain`) for `<label>.<domain>`, the label the deployable's name with a suffix under a parameter, in the exposure step; Cloudflare writes its DNS record and certificate. Without a domain, the public address is `https://<name>.<workersSubdomain>.workers.dev`, the Worker's name, and an environment that exposes a server without a domain and records no `workersSubdomain` is refused, saying to run bootstrap. |
 | parameter | Names are suffixed with the parameter's value. Each member gets its own D1 database and R2 bucket, and the target's `DestroyPreparer` (`TargetSpec.PreDestroy`) empties the bucket before the member's destroy. Secrets are the environment's. |
+
+**Names.** One account may hold several stacks and several environments
+of each, so every name an environment gives a resource in its account
+holds the stack, the environment and what it is for: a Worker of a
+server, a job or a site is `<stack>-<env>-<deployable>`, a D1 database
+`<stack>-<env>-<db>`, an R2 bucket `<stack>-<env>-<bucket>` and a bucket
+edge's token `<stack>-<env>-<caller>-<bucket>` (`cloudflare.AccountName`):
+each part in kebab case, with nothing but lowercase letters, digits and
+single hyphens. A member of a parameterized environment appends each
+parameter's name and value: `acme-shop-preview-shop-api-pr123`. calls-stack's
+Staging and Production, in one account, are
+`calls-stack-staging-shop-pricing` and `calls-stack-production-shop-pricing`.
+A workers.dev host is the Worker's name; a custom domain's host is the
+deployable's name under the environment's domain, which tells
+environments apart already. A Secrets Store secret already holds the
+stack and the environment, and bootstrap's tokens are the stack's in the
+account, not an environment's.
 
 A Worker reaches a callee through its binding, exposed or not, so no
 caller waits for the exposure step. A call between two APIs that one
@@ -4722,13 +4741,19 @@ with its bindings, first.
   path-style addressing:
   `s3://superschematic-state?endpoint=<endpoint>&region=auto&use_path_style=true`
   (`cloudflare.StateURL`), the AWS SDK v2 parameters of the CLI's blob
-  store. One bucket serves every stack in the account.
+  store. One bucket serves every stack in the account. Bootstrap's own
+  graph is kept apart, in `superschematic-bootstrap`
+  (`cloudflare.BootstrapURL`), under a passphrase of its own.
 - At each run, the store verifies the token through
   `GET /accounts/{id}/tokens/verify`, falling back to
   `/user/tokens/verify` for a user token, and returns `StateBackend.Env`:
   - `AWS_ACCESS_KEY_ID` is the token's id;
   - `AWS_SECRET_ACCESS_KEY` is the hex SHA-256 of its value;
-  - `PULUMI_CONFIG_PASSPHRASE` comes from the shell.
+  - `PULUMI_CONFIG_PASSPHRASE` comes from the shell;
+  - `AWS_SESSION_TOKEN`, `AWS_SECURITY_TOKEN`, `AWS_PROFILE` and
+    `AWS_DEFAULT_PROFILE` are cleared and `AWS_CONFIG_FILE` and
+    `AWS_SHARED_CREDENTIALS_FILE` point at the null device, so no AWS
+    setup of the shell's reaches the S3 backend in place of the token's.
 - A run without the passphrase, or without a token, is refused before
   Pulumi starts, with what to set.
 - Deploy manifests are written to
@@ -4758,19 +4783,45 @@ engineer's token, which needs to:
 
 It then:
 1. verifies the token and the account;
-2. creates the state bucket directly, since Pulumi needs it first;
-3. handles the passphrase:
+2. creates the state bucket and the bootstrap bucket,
+   `superschematic-bootstrap`, directly, since Pulumi needs them first.
+   An account whose bootstrap state an earlier release kept in the state
+   bucket (`.pulumi/stacks/<stack>-bootstrap/`) is refused: the planner's
+   token reached it there. The refusal says to delete the stack's three
+   tokens in the dashboard, since they were readable, and the bootstrap
+   project's objects under `.pulumi/` in the state bucket, and to run
+   bootstrap again, which mints new tokens in the bootstrap bucket.
+   Bootstrap moves nothing itself;
+3. handles two passphrases, each the same way: the state's, in
+   `PULUMI_CONFIG_PASSPHRASE`, which CI holds, and the bootstrap's own, in
+   `SUPERSCHEMATIC_BOOTSTRAP_PASSPHRASE`, which encrypts the CI's tokens in
+   the bootstrap's state and which no CI job holds:
    - Without one, it generates 32 random bytes and prints them once, saying
-     where to keep them: the password manager, and the GitHub secrets
-     below.
-   - With one, it checks it against `superschematic/passphrase-check`, an
-     object holding a random salt and an HMAC of it under the passphrase,
-     which bootstrap writes on its first run: JSON, `{salt, hmac}`, each
-     hex, the HMAC-SHA256 keyed by the passphrase. A first run with a
-     passphrase in the shell takes that one and writes its check.
+     where to keep them: the password manager, and for the state's, the
+     GitHub secrets below. A bucket that holds Pulumi state and no check
+     gets no generated passphrase, which would not decrypt it.
+   - With one, it checks it against `superschematic/passphrase-check` in
+     the bucket whose state it encrypts: JSON,
+     `{kdf: "pbkdf2-sha256", iterations, salt, key}`, the key 32 bytes
+     PBKDF2-HMAC-SHA256 derives from the passphrase over the salt, salt and
+     key in hex. It is written with 600,000 iterations and read with its
+     own count, from 100,000 to 10,000,000, so a reader of the object
+     cannot cheaply try passphrases. A check of the earlier form, an HMAC,
+     is refused, saying to delete it and run bootstrap with the passphrase
+     set.
+   - A first run writes the check with a conditional write
+     (`If-None-Match: *`) and reads it back. When another bootstrap wrote
+     one first for another passphrase, it refuses, saying to run again
+     with the passphrase the other printed, and prints none it generated.
+     A first run with a passphrase in the shell takes that one.
    - The check is written before a generated passphrase is printed, and a
      bootstrap with nowhere to print one (`BootstrapRequest.Reveal`)
      refuses before it makes one.
+   - The bootstrap's own passphrase costs a rerun one more variable to
+     set, and keeps the CI's tokens out of reach of every CI job: the
+     deployer's and the preview's tokens read every bucket's objects, the
+     bootstrap bucket's among them, but hold neither its passphrase nor
+     any way to derive it.
 4. finds the account's Secrets Store, or creates it: the one the values'
    `secretsStoreId` names, which must exist, else the one named
    `default_secrets_store`, else the account's only one; with several and
@@ -4778,35 +4829,50 @@ It then:
    `default_secrets_store`, the name the dashboard gives an account's
    first;
 5. applies the bootstrap graph in Pulumi project `<stack>-bootstrap`, a
-   stack per account:
+   stack per account, kept in the bootstrap bucket under the bootstrap's
+   passphrase:
    - **`<stack>-deployer`**, an `accountToken` with `Workers Scripts
      Write`, `D1 Write`, `Workers R2 Storage Write`, `Secrets Store Write`
      and `Account API Tokens Write` on the account, and `Workers Routes
      Write` and `DNS Write` on every zone of the account. Bucket edges
      mint tokens, so the deployer, like gcp's, can grant itself more.
-   - **`<stack>-planner`**, an `accountToken` with the `Read` group of
-     each, and `Workers R2 Storage Bucket Item Write` on the state bucket
-     alone, `com.cloudflare.edge.r2.bucket.<accountId>_default_superschematic-state`,
-     since a preview takes the stack's lock.
-   - Both reach every zone of the account rather than each environment's:
-     the graph is one per account, and two environments of one account may
-     hold their domains in different zones, which a per-environment list
-     would swap at each bootstrap.
+   - **`<stack>-planner`**, an `accountToken` with `Workers Scripts Read`,
+     `D1 Read`, `Secrets Store Read` and `Account API Tokens Read` on the
+     account, `Workers Routes Read` and `DNS Read` on every zone, and
+     `Workers R2 Storage Bucket Item Write` on the state bucket alone,
+     `com.cloudflare.edge.r2.bucket.<accountId>_default_superschematic-state`,
+     since a preview takes the stack's lock. It holds no account-wide R2
+     group: `Workers R2 Storage Read` reads every bucket's objects, the
+     bootstrap bucket's among them.
+   - **`<stack>-preview`**, an `accountToken` for a parameterized
+     environment's preview job, which deploys and destroys its members:
+     `Workers Scripts Write`, `D1 Write`, `Workers R2 Storage Write` (a
+     member makes its own buckets) and `Account API Tokens Write` (a
+     member's bucket edges mint tokens) and `Secrets Store Read` on the
+     account, and `Workers Routes Write` and `DNS Write` on every zone. It
+     writes no Secrets Store value, and it can be revoked alone. The graph
+     is one per account, so its permissions cannot depend on which
+     environment bootstraps it.
+   - All three reach every zone of the account rather than each
+     environment's: the graph is one per account, and two environments of
+     one account may hold their domains in different zones, which a
+     per-environment list would swap at each bootstrap.
    - Permission group ids are read from the API before the graph renders,
      by name, preferring the group of the policy's scope; a name the API
      does not list is refused. The golden holds fixed ids.
-6. with `--github`, sets each token and the passphrase as the workflow's
-   secrets with `gh secret set`, at the scopes the CI seam names: a plain
-   environment's planner and deployer secrets, a parameterized one's
-   deployer secrets alone. It creates the deploy job's GitHub environment
-   first when it is missing (`gh api --method PUT`), since a secret of a
-   missing environment cannot be set. It reads the tokens' values from
-   the bootstrap graph's state through `registry.SecretOutputReader`, a
-   provisioner's optional read of a secret output, which the Pulumi
-   provisioner implements over `stack export --show-secrets`. Without
-   `gh` on PATH, signed in, it prints the commands and each token once, to
-   `BootstrapRequest.Reveal`, and the passphrase not at all. Without
-   `--github` it touches no token and says how to set them.
+6. with `--github`, sets each token the environment's jobs read and the
+   state's passphrase as the workflow's secrets with `gh secret set`, at
+   the scopes the CI seam names: a plain environment's planner's and
+   deployer's, a parameterized one's preview's alone. It creates the deploy
+   job's GitHub environment first when it is missing (`gh api --method
+   PUT`), since a secret of a missing environment cannot be set. It reads
+   the tokens' values from the bootstrap graph's state through
+   `registry.SecretOutputReader`, a provisioner's optional read of a secret
+   output, which the Pulumi provisioner implements over `stack export
+   --show-secrets`. Without `gh` on PATH, signed in, it prints the
+   commands and each token once, to `BootstrapRequest.Reveal`, and the
+   passphrase not at all. Without `--github` it touches no token and says
+   how to set them. The bootstrap's passphrase is never set anywhere.
 7. returns `workersSubdomain`, from `GET /accounts/{id}/workers/subdomain`,
    and `secretsStoreId` beside `accountId`. An account without a
    workers.dev subdomain is told to make one in the dashboard; bootstrap
@@ -4814,19 +4880,24 @@ It then:
 
 **CI.** `TargetSpec.CI` returns kind `cloudflare-api-token`, whose fields
 `token` and `passphrase` name GitHub secrets, and `environment`, set for a
-deploy job's, the GitHub environment that holds them. `<ENV>` is the
-environment's name in upper case, its words joined by underscores:
+deploy job's, the GitHub environment that holds them. Every name ends with
+`_<STACK>_<ENV>`, the stack's and the environment's names in upper case,
+their words joined by underscores, so two stacks of one repository, on one
+account or on two, never overwrite each other's:
 
 | Job | Token secret | Passphrase secret |
 | --- | --- | --- |
-| A plain environment's deploy job | `CLOUDFLARE_API_TOKEN`, a secret of the GitHub environment named for it | `PULUMI_CONFIG_PASSPHRASE`, in the same GitHub environment |
-| A plan job | `CLOUDFLARE_PLANNER_TOKEN_<ENV>`, a repository secret | `PULUMI_CONFIG_PASSPHRASE_<ENV>`, a repository secret |
-| A preview job | `CLOUDFLARE_PREVIEW_TOKEN_<ENV>`, a repository secret | `PULUMI_CONFIG_PASSPHRASE_<ENV>`, a repository secret |
+| A plain environment's deploy job | `CLOUDFLARE_DEPLOYER_TOKEN_<STACK>_<ENV>`, the deployer's, a secret of the GitHub environment named for it | `PULUMI_CONFIG_PASSPHRASE_<STACK>_<ENV>`, in the same GitHub environment |
+| A plan job | `CLOUDFLARE_PLANNER_TOKEN_<STACK>_<ENV>`, the planner's, a repository secret | `PULUMI_CONFIG_PASSPHRASE_<STACK>_<ENV>`, a repository secret |
+| A preview job | `CLOUDFLARE_PREVIEW_TOKEN_<STACK>_<ENV>`, the preview's, a repository secret | `PULUMI_CONFIG_PASSPHRASE_<STACK>_<ENV>`, a repository secret |
 
-The `github` renderer learns the kind and writes job-level `env` from
-those secrets, `CLOUDFLARE_API_TOKEN` and `PULUMI_CONFIG_PASSPHRASE`, with
-no action and no `id-token: write`; it refuses a field that is no
-secret's name. Deploy and preview jobs of an environment
+The `github` renderer learns the kind and writes `CLOUDFLARE_API_TOKEN`
+and `PULUMI_CONFIG_PASSPHRASE` from those secrets into the `env` of the
+steps that run `superschematic stack plan`, `deploy` or `destroy`, and of
+no other step: not the job's, where a pull request's `bun install` would
+run its packages' scripts with them. D1's migrations run within `stack
+deploy`. There is no action and no `id-token: write`; the renderer
+refuses a field that is no secret's name. Deploy and preview jobs of an environment
 with a server, job or worker whose artifact is a bundle set up Bun and
 install the workspace, as a site's do, since the deploy runs `bundle.ts` on
 the runner; a plan job builds nothing and does neither. With a D1
@@ -5076,20 +5147,25 @@ so a database whose DB service lists no sqlite is refused there.
 `Finalize` checks that each platform named for a dialect runs it.
 
 On D1 each hosted DB schema is a `d1Database` node, `<database>.d1.<db>`,
-named `<stack>-<db>` in kebab case (`cloudflare.D1Name`), with each
+named `<stack>-<env>-<db>` in kebab case (`cloudflare.D1Name`), with each
 parameter's name and value after it in a member of a parameterized
-environment, so each member migrates databases of its own.
+environment, so each environment and each member migrates databases of
+its own.
 
 The target's migration runner (`TargetSpec.Migrations`) works on the
 deploying machine:
 - it finds `superschematic-migrate` at `SUPERSCHEMATIC_MIGRATE`, else on
   `PATH`, as the local target does. `PrepareMigrations` refuses a run
   without it, or without `CLOUDFLARE_API_TOKEN`, before the deploy
-  changes anything;
-- it looks up each database's uuid by its name, with the run's parameter
-  values in place, through the API (`Cloud.D1Database`: `GET
-  /accounts/{id}/d1/database?name=`, matched exactly, since the filter
-  also lists longer names);
+  changes anything. The runner is a `registry.PrivilegelessMigrations`,
+  so a deploy whose databases' connecting servers alone changed, which
+  hands it phases with no steps, does not ask for either;
+- it reads each database's uuid from the outputs of the graph the deploy
+  applied, through `MigrationRequest.Outputs`, which the deploy reads
+  from the provisioner: the node's `uuid`, which a Worker's `d1` binding
+  references too, else its `id`, the same uuid, which the program
+  exports for every node, for a database no Worker binds. Nothing is
+  looked up by name;
 - it writes a job document in a temporary directory, whose databases have
   `databaseUrl: d1://<accountId>/<uuid>` and no privileges, writes the
   plans beside it, and runs `superschematic-migrate job --job <path>` with
@@ -5165,8 +5241,8 @@ The `cloudflare.r2` platform (D64, amended):
 
 ### 18.8 Sites on Workers static assets
 
-The `cloudflare.sites` platform gives each site a Worker named after the
-deployable (`workerNodes`), which serves the build's files as static
+The `cloudflare.sites` platform gives each site a Worker named as a
+server's is (`workerNodes`), which serves the build's files as static
 assets. Its version holds:
 - `assets.directory` set to `artifacts/<site>/{site-digest}`, pinned and
   placed as a bundle's files are;
@@ -5213,7 +5289,7 @@ content-hashed names is not given here.
 ### 18.9 Jobs on Cron Triggers
 
 The `cloudflare.cron` platform gives each TypeScript job a Worker named
-after the deployable (`workerNodes`, workers.dev off, Workers Logs on
+as a server's is (`workerNodes`, workers.dev off, Workers Logs on
 unless `logs: false`), whose version runs the job's bundle
 (`bundleVersion`), and, for a schedule the environment runs, a
 `workersCronTrigger`, `<job>.schedule`, on the Worker once its deployment
@@ -5291,8 +5367,8 @@ as a loopback call does on the other targets.
 
 ### 18.11 DNS and exposure
 
-Exposure is a `workersCustomDomain` for `<name>.<domain>`, in the exposure
-step, with no `zoneId`: Cloudflare finds the zone by the hostname within
+Exposure is a `workersCustomDomain` for `<label>.<domain>`, the label the
+deployable's name with a suffix under a parameter, in the exposure step, with no `zoneId`: Cloudflare finds the zone by the hostname within
 the account, writes the record and issues the certificate, so the Workers
 and site platforms return no `Records` and the DNS platform writes nothing
 for them. The rule `domain-on-cloudflare` refuses an environment with a
@@ -5300,7 +5376,8 @@ domain whose DNS platform is not `cloudflare`, a manual one included.
 Whether the token reaches the zone only Cloudflare knows, so a deploy
 finds that out. On this target the DNS platform names no credential: the
 run's token carries the zone. Without a domain, an exposed Worker turns on workers.dev,
-at `https://<name>.<workersSubdomain>.workers.dev`; an environment that
+at `https://<name>.<workersSubdomain>.workers.dev`, its Worker's name,
+`<stack>-<env>-<deployable>`; an environment that
 records no `workersSubdomain` is refused until bootstrap records it.
 
 ### 18.12 Resource graph and provider
@@ -5352,9 +5429,12 @@ runtime tests run fixture bundles under the `workerd` binary.
 ### 18.14 Policy rules
 
 - **`nothing-public-unless-exposed`** refuses, for a deployable that is
-  not exposed, or for no deployable, a Worker with workers.dev on, a
-  `workersCustomDomain` or a `workersRoute`; and all three for a job's
-  Worker, even one marked exposed. A site is always exposed, so its
+  not exposed, or for no deployable, a Worker that does not turn
+  workers.dev off, one that does not turn its preview URLs off, which
+  reach each version at workers.dev, one with no `subdomain` at all,
+  which leaves both to Cloudflare's defaults, a `workersCustomDomain` or a
+  `workersRoute`; and all of them for a job's Worker, even one marked
+  exposed. A site is always exposed, so its
   Worker's workers.dev and custom domain pass.
 - **`buckets-never-public`** refuses an r2.dev managed domain
   (`r2ManagedDomain`) or a custom domain (`r2CustomDomain`) on a Bucket
