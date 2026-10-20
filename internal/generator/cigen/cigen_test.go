@@ -1048,6 +1048,7 @@ type parsedStep struct {
 	Uses             string            `yaml:"uses"`
 	WorkingDirectory string            `yaml:"working-directory"`
 	With             map[string]string `yaml:"with"`
+	Env              map[string]string `yaml:"env"`
 	Run              string            `yaml:"run"`
 }
 
@@ -1094,11 +1095,12 @@ func parseWorkflow(t *testing.T, data []byte) parsed {
 }
 
 // TestAPITokenIdentity: a job whose identity is a cloudflare-api-token
-// (D64) signs in with no action and asks for no identity token: its env
-// reads the token and the state's passphrase from the workflow's secrets
-// the identity names, a deploy job's from its GitHub environment, a plan's
-// and a preview's from the repository's. A field that is no secret's name
-// is refused.
+// (D64) signs in with no action and asks for no identity token: the env of
+// each step that runs a stack command, and of no other step and not the
+// job's, reads the token and the state's passphrase from the workflow's
+// secrets the identity names, a deploy job's from its GitHub environment,
+// a plan's and a preview's from the repository's. A field that is no
+// secret's name is refused.
 func TestAPITokenIdentity(t *testing.T) {
 	identity := func(token, passphrase string) *publicregistry.CIIdentity {
 		return &publicregistry.CIIdentity{Kind: "cloudflare-api-token", Fields: map[string]string{"token": token, "passphrase": passphrase}}
@@ -1136,14 +1138,33 @@ func TestAPITokenIdentity(t *testing.T) {
 	if want := []string{"check", "plan-staging", "preview-preview", "deploy-staging"}; !slices.Equal(w.order, want) {
 		t.Fatalf("jobs = %v, want %v", w.order, want)
 	}
-	for id, want := range map[string][2]string{
-		"plan-staging":    {"CLOUDFLARE_PLANNER_TOKEN_STAGING", "PULUMI_CONFIG_PASSPHRASE_STAGING"},
-		"preview-preview": {"CLOUDFLARE_PREVIEW_TOKEN_PREVIEW", "PULUMI_CONFIG_PASSPHRASE_PREVIEW"},
-		"deploy-staging":  {"CLOUDFLARE_API_TOKEN", "PULUMI_CONFIG_PASSPHRASE"},
+	for id, want := range map[string]struct {
+		secrets  [2]string
+		commands []string
+	}{
+		"plan-staging":    {[2]string{"CLOUDFLARE_PLANNER_TOKEN_STAGING", "PULUMI_CONFIG_PASSPHRASE_STAGING"}, []string{"Plan Staging"}},
+		"preview-preview": {[2]string{"CLOUDFLARE_PREVIEW_TOKEN_PREVIEW", "PULUMI_CONFIG_PASSPHRASE_PREVIEW"}, []string{"Deploy Preview for the pull request", "Destroy Preview for the pull request"}},
+		"deploy-staging":  {[2]string{"CLOUDFLARE_API_TOKEN", "PULUMI_CONFIG_PASSPHRASE"}, []string{"Deploy Staging"}},
 	} {
 		j := w.jobs[id]
-		if got := j.Env; len(got) != 2 || got["CLOUDFLARE_API_TOKEN"] != "${{ secrets."+want[0]+" }}" || got["PULUMI_CONFIG_PASSPHRASE"] != "${{ secrets."+want[1]+" }}" {
-			t.Errorf("%s: env %v, want the secrets %v", id, got, want)
+		if j.Env != nil {
+			t.Errorf("%s: the job's env is %v, which every step would see", id, j.Env)
+		}
+		var withEnv []string
+		for _, s := range j.Steps {
+			if s.Env == nil {
+				continue
+			}
+			withEnv = append(withEnv, s.Name)
+			if got := s.Env; len(got) != 2 || got["CLOUDFLARE_API_TOKEN"] != "${{ secrets."+want.secrets[0]+" }}" || got["PULUMI_CONFIG_PASSPHRASE"] != "${{ secrets."+want.secrets[1]+" }}" {
+				t.Errorf("%s, %s: env %v, want the secrets %v", id, s.Name, got, want.secrets)
+			}
+			if !strings.HasPrefix(s.Run, "superschematic stack ") {
+				t.Errorf("%s, %s: a step that runs %q reads the secrets", id, s.Name, s.Run)
+			}
+		}
+		if !slices.Equal(withEnv, want.commands) {
+			t.Errorf("%s: the steps that read the secrets are %v, want %v", id, withEnv, want.commands)
 		}
 		if j.Permissions != nil {
 			t.Errorf("%s asks for permissions %v; the token needs no identity token", id, j.Permissions)

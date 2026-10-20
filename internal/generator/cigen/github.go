@@ -60,9 +60,12 @@ const gcpWorkloadIdentity = "gcp-workload-identity"
 // cloudflareAPIToken is the identity kind of the cloudflare target's CI
 // seam (D64): a long-lived account token and the state's passphrase, each
 // a secret of the workflow, whose names its fields `token` and
-// `passphrase` give. No action signs in with it: the job's env reads both
-// secrets, CLOUDFLARE_API_TOKEN for the provider and the state store, and
-// PULUMI_CONFIG_PASSPHRASE for the state's secrets.
+// `passphrase` give. No action signs in with it: the env of each step that
+// runs a stack command reads both secrets, CLOUDFLARE_API_TOKEN for the
+// provider and the state store, and PULUMI_CONFIG_PASSPHRASE for the
+// state's secrets, and no other step sees them: not the install of a
+// pull request's lockfile, whose packages' scripts run with the step's
+// environment.
 const cloudflareAPIToken = "cloudflare-api-token"
 
 // secretName is a GitHub Actions secret's name: letters, digits and
@@ -113,15 +116,12 @@ type job struct {
 	// cloud jobs sign in with an identity token they ask GitHub for.
 	cloud       bool
 	concurrency string
-	// env is the job's environment variables, in order: what a job whose
-	// identity is a secret of the workflow signs in with (D64).
-	env   [][2]string
-	steps []step
+	steps       []step
 }
 
 // signedIn is how a cloud job signs in: a step, which may ask GitHub for
-// an identity token, or environment variables the job reads from the
-// workflow's secrets.
+// an identity token, or environment variables that each step running a
+// stack command reads from the workflow's secrets (D64).
 type signedIn struct {
 	step    *step
 	idToken bool
@@ -135,7 +135,10 @@ type step struct {
 	uses *action
 	dir  string
 	with [][2]string
-	run  string
+	// env is the step's environment variables, in order: what a stack
+	// command signs in with when the identity is a secret (D64).
+	env [][2]string
+	run string
 }
 
 func (g github) render() ([]byte, error) {
@@ -437,7 +440,7 @@ func (g github) plan(env registry.CIEnvironment) (job, error) {
 	if err != nil {
 		return job{}, err
 	}
-	steps = append(steps, step{name: "Plan " + e.Environment, run: g.stackCommand("plan", e.Environment)})
+	steps = append(steps, step{name: "Plan " + e.Environment, env: in.env, run: g.stackCommand("plan", e.Environment)})
 	return job{
 		id:          "plan-" + jobID(e.Environment),
 		name:        "plan " + e.Environment,
@@ -445,7 +448,6 @@ func (g github) plan(env registry.CIEnvironment) (job, error) {
 		cond:        strings.Join([]string{onPullRequest, notClosed, sameRepository}, " && "),
 		cloud:       in.idToken,
 		concurrency: fmt.Sprintf("%s-plan-%s-%s", g.req.Stack.Name, e.Environment, prNumber),
-		env:         in.env,
 		steps:       steps,
 	}, nil
 }
@@ -470,8 +472,8 @@ func (g github) preview(env registry.CIEnvironment) (job, error) {
 		steps = append(steps, workspace)
 	}
 	steps = append(steps,
-		step{name: "Deploy " + e.Environment + " for the pull request", cond: notClosed, run: g.stackCommand("deploy", e.Environment, param)},
-		step{name: "Destroy " + e.Environment + " for the pull request", cond: closed, run: g.stackCommand("destroy", e.Environment, param, "--yes")},
+		step{name: "Deploy " + e.Environment + " for the pull request", cond: notClosed, env: in.env, run: g.stackCommand("deploy", e.Environment, param)},
+		step{name: "Destroy " + e.Environment + " for the pull request", cond: closed, env: in.env, run: g.stackCommand("destroy", e.Environment, param, "--yes")},
 	)
 	return job{
 		id:    "preview-" + jobID(e.Environment),
@@ -482,7 +484,6 @@ func (g github) preview(env registry.CIEnvironment) (job, error) {
 		cond:        fmt.Sprintf("!cancelled() && %s && %s && (%s || needs.check.result == 'success')", onPullRequest, sameRepository, closed),
 		cloud:       in.idToken,
 		concurrency: fmt.Sprintf("%s-%s-%s", g.req.Stack.Name, e.Environment, prNumber),
-		env:         in.env,
 		steps:       steps,
 	}, nil
 }
@@ -499,7 +500,7 @@ func (g github) deploy(env registry.CIEnvironment, after string) (job, error) {
 	if buildsWithBun(env) {
 		steps = append(steps, g.typeScriptWorkspace())
 	}
-	steps = append(steps, step{name: "Deploy " + e.Environment, run: g.stackCommand("deploy", e.Environment)})
+	steps = append(steps, step{name: "Deploy " + e.Environment, env: in.env, run: g.stackCommand("deploy", e.Environment)})
 	return job{
 		id:          "deploy-" + jobID(e.Environment),
 		name:        "deploy " + e.Environment,
@@ -508,7 +509,6 @@ func (g github) deploy(env registry.CIEnvironment, after string) (job, error) {
 		environment: e.Environment,
 		cloud:       in.idToken,
 		concurrency: g.req.Stack.Name + "-" + e.Environment,
-		env:         in.env,
 		steps:       steps,
 	}, nil
 }
@@ -516,7 +516,8 @@ func (g github) deploy(env registry.CIEnvironment, after string) (job, error) {
 // cloudSetup is the steps a cloud job takes before its command: the
 // checkout, superschematic, the schemas root's packages, Bun for a
 // deployer of an environment with a site or a bundle, the provisioner's
-// tools, and the sign-in as role, a step last, or the job's env.
+// tools, and the sign-in as role: a step last, or the env the steps that
+// run the stack's commands take.
 func (g github) cloudSetup(env registry.CIEnvironment, role registry.CIRole) ([]step, signedIn, error) {
 	steps := []step{g.checkout(), g.install()}
 	if role == registry.CIDeployer && env.Migrate {
@@ -795,8 +796,9 @@ func toolStep(tool registry.CLITool) (step, error) {
 
 // signIn is how a job signs in as role with identity: Workload Identity
 // Federation's step, which asks GitHub for an identity token, or a
-// Cloudflare token and the state's passphrase, which the job's env reads
-// from the workflow's secrets with no action (D64).
+// Cloudflare token and the state's passphrase, which the env of the steps
+// that run the stack's commands reads from the workflow's secrets with no
+// action (D64).
 func signIn(identity *registry.CIIdentity, role registry.CIRole) (signedIn, error) {
 	switch identity.Kind {
 	case gcpWorkloadIdentity:
@@ -866,12 +868,6 @@ func (j job) write(w *yamlWriter) {
 		w.line(3, "group: "+scalar(j.concurrency))
 		w.line(3, "cancel-in-progress: false")
 	}
-	if len(j.env) > 0 {
-		w.line(2, "env:")
-		for _, kv := range j.env {
-			w.line(3, kv[0]+": "+scalar(kv[1]))
-		}
-	}
 	w.line(2, "steps:")
 	for _, s := range j.steps {
 		s.write(w)
@@ -892,6 +888,12 @@ func (s step) write(w *yamlWriter) {
 	if len(s.with) > 0 {
 		w.line(4, "with:")
 		for _, kv := range s.with {
+			w.line(5, kv[0]+": "+scalar(kv[1]))
+		}
+	}
+	if len(s.env) > 0 {
+		w.line(4, "env:")
+		for _, kv := range s.env {
 			w.line(5, kv[0]+": "+scalar(kv[1]))
 		}
 	}
