@@ -1,0 +1,75 @@
+# A warehouse's stock, whose operations ask for no end user: anyone may
+# read a level, any service may reindex the stock, only fixture-api's
+# server may reserve it, and a recount, which the service mounts itself,
+# only a service may start.
+name: fixture-service-calls-api
+kind: API
+types:
+  StockLevel:
+    name: StockLevel
+    role: APIView
+    fields:
+      - name: sku
+        typeRef: { name: string }
+        required: true
+      - name: onHand
+        typeRef: { name: number }
+        required: true
+  StockRun:
+    name: StockRun
+    role: APIView
+    fields:
+      - name: done
+        typeRef: { name: boolean }
+        required: true
+  Reservation:
+    name: Reservation
+    role: APIView
+    fields:
+      - name: id
+        typeRef: { name: string }
+        required: true
+operationSets:
+  - name: StockQueries
+    operations:
+      # One product's level, for anyone.
+      - name: getLevel
+        typeRef: { name: StockLevel }
+        required: true
+        httpMethod: GET
+        restPath: "stock/{sku}"
+        arguments:
+          - name: sku
+            typeRef: { name: string }
+            required: true
+  - name: StockMutations
+    operations:
+      # Reindexes the stock, for any service that calls this API.
+      - name: reindexStock
+        typeRef: { name: StockRun }
+        required: true
+        httpMethod: POST
+        restPath: stock/reindex
+        serviceCallers: { mode: require }
+      # Reserves stock, for fixture-api's server alone.
+      - name: reserveStock
+        typeRef: { name: Reservation }
+        required: true
+        httpMethod: POST
+        restPath: "stock/{sku}/reserve"
+        serviceCallers: { mode: require, from: [fixture-api] }
+        arguments:
+          - name: sku
+            typeRef: { name: string }
+            required: true
+          - name: quantity
+            typeRef: { name: number }
+            required: true
+      # Recounts the stock, for a service, on a route the service mounts.
+      - name: recountStock
+        typeRef: { name: StockRun }
+        required: true
+        httpMethod: POST
+        restPath: stock/recount
+        manualRouteRegistration: true
+        serviceCallers: { mode: require }

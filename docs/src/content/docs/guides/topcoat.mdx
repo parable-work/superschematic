@@ -717,8 +717,9 @@ megabyte (413) and ten seconds (504). `shop_orders` puts a layer with
 them on the procedure's path. Its limiter is the operation's one, which
 the JSON API's route and the console's pages share, and counts clients by
 the IP address Topcoat reads for them, so a client has 60 a minute
-however it places an order. A page's in-process call applies none of
-them: the page is a route of the app, under the controls the app gives
+through the route, the procedure and the console's pages together. A
+page's in-process call applies none of them, nor does a call as a
+service: the page is a route of the app, under the controls the app gives
 it. The [generated
 pages](#generated-pages) apply them to their own requests.
 
