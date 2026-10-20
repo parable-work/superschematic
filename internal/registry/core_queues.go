@@ -3,6 +3,7 @@ package registry
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -30,13 +31,18 @@ func queueDecorator() DecoratorSpec {
 
 // queueArgs are the arguments of @queue, all optional.
 type queueArgs struct {
-	Retries *any    `json:"retries"`
-	Backoff *string `json:"backoff"`
-	Lease   *string `json:"lease"`
+	Retries    *any    `json:"retries"`
+	Backoff    *string `json:"backoff"`
+	MaxBackoff *string `json:"maxBackoff"`
+	Lease      *string `json:"lease"`
+	Retain     *string `json:"retain"`
 }
 
-// queueOf reads @queue({ retries, backoff, lease }) on td. Errors in the
-// object are ArgErrors, so the frontend points at it.
+// queueOptions names @queue's options, for its errors.
+const queueOptions = "retries, backoff, maxBackoff, lease and retain"
+
+// queueOf reads @queue({ retries, backoff, maxBackoff, lease, retain }) on
+// td. Errors in the object are ArgErrors, so the frontend points at it.
 func queueOf(td *ir.TypeDef, args []any) (*ir.QueueDef, error) {
 	if len(td.Fields) == 0 {
 		return nil, fmt.Errorf("@queue class %s has no fields; a queue's class holds its message's fields", td.Name)
@@ -50,13 +56,13 @@ func queueOf(td *ir.TypeDef, args []any) (*ir.QueueDef, error) {
 	}
 	obj, ok := args[0].(map[string]any)
 	if !ok {
-		return nil, ArgErrorf(0, "@queue takes an options object: { retries, backoff, lease }")
+		return nil, ArgErrorf(0, "@queue takes an options object: { retries, backoff, maxBackoff, lease, retain }")
 	}
 	for key := range obj {
 		switch key {
-		case "retries", "backoff", "lease":
+		case "retries", "backoff", "maxBackoff", "lease", "retain":
 		default:
-			return nil, ArgErrorf(0, "@queue has no option %q; it takes retries, backoff and lease", key)
+			return nil, ArgErrorf(0, "@queue has no option %q; it takes %s", key, queueOptions)
 		}
 	}
 	raw, err := json.Marshal(obj)
@@ -65,7 +71,7 @@ func queueOf(td *ir.TypeDef, args []any) (*ir.QueueDef, error) {
 	}
 	var a queueArgs
 	if err := json.Unmarshal(raw, &a); err != nil {
-		return nil, ArgErrorf(0, "@queue options: backoff and lease are strings and retries a whole number: %v", err)
+		return nil, ArgErrorf(0, "@queue options: backoff, maxBackoff, lease and retain are strings and retries a whole number: %v", err)
 	}
 	if a.Retries != nil {
 		n, ok := (*a.Retries).(float64)
@@ -78,8 +84,14 @@ func queueOf(td *ir.TypeDef, args []any) (*ir.QueueDef, error) {
 	if a.Backoff != nil {
 		def.Backoff = *a.Backoff
 	}
+	if a.MaxBackoff != nil {
+		def.MaxBackoff = *a.MaxBackoff
+	}
 	if a.Lease != nil {
 		def.Lease = *a.Lease
+	}
+	if a.Retain != nil {
+		def.Retain = *a.Retain
 	}
 	if err := CheckQueue(def); err != nil {
 		return nil, ArgErrorf(0, "@queue %s: %v", td.Name, err)
@@ -88,14 +100,28 @@ func queueOf(td *ir.TypeDef, args []any) (*ir.QueueDef, error) {
 }
 
 // CheckQueue checks a queue's arguments in every form: retries that are
-// not negative, and a backoff and a lease of whole seconds.
+// not negative, a backoff, a maximum backoff and a lease of whole seconds,
+// the maximum no shorter than the backoff, and a retention of whole
+// seconds, zero or more.
 func CheckQueue(def *ir.QueueDef) error {
 	if def.Retries != nil && *def.Retries < 0 {
 		return fmt.Errorf("retries is %d; it is zero or more", *def.Retries)
 	}
+	backoff := ir.DefaultQueueBackoffSeconds
 	if def.Backoff != "" {
-		if _, err := TimeoutSeconds(def.Backoff); err != nil {
+		seconds, err := TimeoutSeconds(def.Backoff)
+		if err != nil {
 			return fmt.Errorf("backoff: %w", err)
+		}
+		backoff = seconds
+	}
+	if def.MaxBackoff != "" {
+		seconds, err := TimeoutSeconds(def.MaxBackoff)
+		if err != nil {
+			return fmt.Errorf("maxBackoff: %w", err)
+		}
+		if seconds < backoff {
+			return fmt.Errorf("maxBackoff is %q, shorter than the backoff of %ds; it caps the backoff a failure doubles, so it is the backoff or more", def.MaxBackoff, backoff)
 		}
 	}
 	if def.Lease != "" {
@@ -103,36 +129,70 @@ func CheckQueue(def *ir.QueueDef) error {
 			return fmt.Errorf("lease: %w", err)
 		}
 	}
+	if def.Retain != "" {
+		if _, err := RetainSeconds(def.Retain); err != nil {
+			return fmt.Errorf("retain: %w", err)
+		}
+	}
 	return nil
 }
 
+// RetainSeconds reads a retention: a duration of whole seconds as Go
+// writes one, zero or more, so `0s` (or `0`) keeps nothing.
+func RetainSeconds(retain string) (int, error) {
+	d, err := time.ParseDuration(retain)
+	switch {
+	case err != nil:
+		return 0, fmt.Errorf("%q is no duration; write one as `168h`, `30m` or `0s`", retain)
+	case d < 0:
+		return 0, fmt.Errorf("%q is negative; it is zero or more, and zero keeps no done message", retain)
+	case d%time.Second != 0:
+		return 0, fmt.Errorf("%q is not a whole number of seconds", retain)
+	}
+	return int(d / time.Second), nil
+}
+
 // QueueSettings are a queue's arguments with their defaults (D53): how
-// many times a failed message is retried, and the backoff and the lease in
-// seconds.
+// many times a failed message is retried, the backoff and its cap, the
+// lease, and how long a done message stays, each in seconds.
 type QueueSettings struct {
-	Retries        int
-	BackoffSeconds int
-	LeaseSeconds   int
+	Retries           int
+	BackoffSeconds    int
+	MaxBackoffSeconds int
+	LeaseSeconds      int
+	RetainSeconds     int
 }
 
 // QueueSettingsOf reads a checked queue's arguments with their defaults.
+// An unset maximum backoff is DefaultQueueMaxBackoffSeconds, or the
+// backoff when that is longer, so a queue that sets only a backoff over an
+// hour waits that backoff after each failure.
 func QueueSettingsOf(def *ir.QueueDef) QueueSettings {
 	s := QueueSettings{
 		Retries:        ir.DefaultQueueRetries,
 		BackoffSeconds: ir.DefaultQueueBackoffSeconds,
 		LeaseSeconds:   ir.DefaultQueueLeaseSeconds,
+		RetainSeconds:  ir.DefaultQueueRetainSeconds,
 	}
-	if def == nil {
-		return s
+	if def != nil {
+		if def.Retries != nil {
+			s.Retries = *def.Retries
+		}
+		if def.Backoff != "" {
+			s.BackoffSeconds, _ = TimeoutSeconds(def.Backoff)
+		}
+		if def.MaxBackoff != "" {
+			s.MaxBackoffSeconds, _ = TimeoutSeconds(def.MaxBackoff)
+		}
+		if def.Lease != "" {
+			s.LeaseSeconds, _ = TimeoutSeconds(def.Lease)
+		}
+		if def.Retain != "" {
+			s.RetainSeconds, _ = RetainSeconds(def.Retain)
+		}
 	}
-	if def.Retries != nil {
-		s.Retries = *def.Retries
-	}
-	if def.Backoff != "" {
-		s.BackoffSeconds, _ = TimeoutSeconds(def.Backoff)
-	}
-	if def.Lease != "" {
-		s.LeaseSeconds, _ = TimeoutSeconds(def.Lease)
+	if s.MaxBackoffSeconds == 0 {
+		s.MaxBackoffSeconds = max(ir.DefaultQueueMaxBackoffSeconds, s.BackoffSeconds)
 	}
 	return s
 }

@@ -37,6 +37,11 @@ type fakeCloud struct {
 	objects map[string][]byte
 	secrets map[string]*fakeSecret
 
+	// generations holds the live generation of each object, from gen,
+	// which each write advances, as Cloud Storage's do (D46, amended).
+	generations map[string]int64
+	gen         int64
+
 	// lifecycle holds each bucket's lifecycle rule.
 	lifecycle map[string]gcp.LifecycleRule
 
@@ -108,7 +113,7 @@ var _ gcp.Cloud = (*fakeCloud)(nil)
 func newFakeCloud() *fakeCloud {
 	return &fakeCloud{
 		enabled: map[string][]string{}, buckets: map[string]string{}, keys: map[string]bool{}, lifecycle: map[string]gcp.LifecycleRule{},
-		objects: map[string][]byte{}, secrets: map[string]*fakeSecret{},
+		objects: map[string][]byte{}, secrets: map[string]*fakeSecret{}, generations: map[string]int64{},
 		images: map[string]string{}, jobs: map[string]gcp.JobSpec{}, graphJobs: map[string]string{}, stderr: map[string][]string{},
 		failRun: map[string]fakeFailure{}, failBuild: map[string]string{},
 		numbers: map[string]string{"acme-staging": "123456789012", "acme-prod": "210987654321"},
@@ -308,8 +313,50 @@ func (c *fakeCloud) ReadObject(_ context.Context, bucket, object string) ([]byte
 func (c *fakeCloud) WriteObject(_ context.Context, bucket, object string, data []byte) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.objects[bucket+"/"+object] = slices.Clone(data)
+	c.write(bucket+"/"+object, data)
 	return nil
+}
+
+// write keeps an object's content as a new generation; the caller holds
+// c.mu.
+func (c *fakeCloud) write(key string, data []byte) {
+	c.gen++
+	c.objects[key] = slices.Clone(data)
+	c.generations[key] = c.gen
+}
+
+func (c *fakeCloud) CreateObject(_ context.Context, bucket, object string, data []byte) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if _, ok := c.objects[bucket+"/"+object]; ok {
+		return fmt.Errorf("gs://%s/%s: %w", bucket, object, fs.ErrExist)
+	}
+	c.write(bucket+"/"+object, data)
+	c.change("create gs://%s/%s", bucket, object)
+	return nil
+}
+
+func (c *fakeCloud) ReadObjectGeneration(_ context.Context, bucket, object string) ([]byte, int64, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	data, ok := c.objects[bucket+"/"+object]
+	if !ok {
+		return nil, 0, fmt.Errorf("%s/%s: %w", bucket, object, fs.ErrNotExist)
+	}
+	return slices.Clone(data), c.generations[bucket+"/"+object], nil
+}
+
+func (c *fakeCloud) DeleteObjectGeneration(_ context.Context, bucket, object string, generation int64) (bool, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	key := bucket + "/" + object
+	if _, ok := c.objects[key]; !ok || c.generations[key] != generation {
+		return false, nil
+	}
+	delete(c.objects, key)
+	delete(c.generations, key)
+	c.change("delete gs://%s/%s", bucket, object)
+	return true, nil
 }
 
 func (c *fakeCloud) WriteSiteObject(_ context.Context, bucket, object string, data []byte, contentType, cacheControl string) error {
@@ -318,7 +365,7 @@ func (c *fakeCloud) WriteSiteObject(_ context.Context, bucket, object string, da
 	if c.absent[bucket] {
 		return fmt.Errorf("gs://%s: %w", bucket, fs.ErrNotExist)
 	}
-	c.objects[bucket+"/"+object] = slices.Clone(data)
+	c.write(bucket+"/"+object, data)
 	c.served[bucket+"/"+object] = [2]string{contentType, cacheControl}
 	if strings.Contains(object, "/__superschematic/") {
 		c.record("write gs://%s/%s", bucket, object)
@@ -330,6 +377,7 @@ func (c *fakeCloud) DeleteObject(_ context.Context, bucket, object string) error
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	delete(c.objects, bucket+"/"+object)
+	delete(c.generations, bucket+"/"+object)
 	return nil
 }
 

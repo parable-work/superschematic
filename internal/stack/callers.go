@@ -16,8 +16,9 @@ import (
 // (registry.Connected.Callee), and the resolver merges those entries by
 // issuer into an ir.ServiceAuth. An API no other server calls gets the
 // field with no issuers, so its server starts and refuses every service
-// credential. A call within one server stays on loopback and carries no
-// credential, so it adds no entry.
+// credential. A call within one server stays on loopback with the
+// server's own loopback credential, which its server accepts beside the
+// field (section 9.9), so it adds no entry.
 
 // hasServiceClause reports whether an operation of svc has a service
 // clause, its own or its set's.

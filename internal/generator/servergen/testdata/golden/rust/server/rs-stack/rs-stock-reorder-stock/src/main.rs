@@ -15,9 +15,10 @@
 //! sets, says how many it handles at a time: 2 unless it says otherwise.
 //! It extends each message's claim while the method runs, completes the
 //! message when the method returns `Ok`, fails it when the method returns an
-//! error or panics, and logs each outcome. On SIGTERM or SIGINT it claims no
-//! more, lets the running methods finish for 2s, drops the rest and
-//! gives their messages back, and exits 0. It serves no port, and builds no
+//! error or panics, and logs each outcome. As it starts and every five
+//! minutes it prunes the queue's done messages past their retention. On
+//! SIGTERM or SIGINT it claims no more, lets the running methods finish for
+//! 2s, drops the rest and gives their messages back, and exits 0. It serves no port, and builds no
 //! identity service and no router (D53, D65). When the environment names an
 //! OTLP endpoint (`OTEL_EXPORTER_OTLP_ENDPOINT`), it exports a span per
 //! message (D67).
@@ -140,6 +141,7 @@ async fn run() -> Result<(), Failure> {
         concurrency,
         grace: GRACE,
         idle: worker::DEFAULT_IDLE,
+        prune_every: worker::DEFAULT_PRUNE_EVERY,
     };
     let handle = move |message: Message| {
         let workers = Arc::clone(&workers);

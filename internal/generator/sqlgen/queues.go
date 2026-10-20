@@ -13,10 +13,11 @@ import (
 // after the class with ir.QueueTableSuffix: the message's ID, a column per
 // message field, as a table's field becomes one, and the columns the queue
 // keeps (ir.QueueColumns). A claim reads the messages that are ready and
-// due, or claimed past their claim's expiry, so a partial index on each
-// serves it. The table is a table like any other to the migration planner
-// (D27), in every dialect the service lists: the SQLite model reads it from
-// this output, as it reads every table.
+// due, or claimed past their claim's expiry, and a prune the done messages
+// by when they were done, their updated_at (D68), so a partial index on
+// each serves it. The table is a table like any other to the migration
+// planner (D27), in every dialect the service lists: the SQLite model reads
+// it from this output, as it reads every table.
 
 // QueueTableName is the table of the queue whose class is name: the name
 // in snake case, as a table's, and ir.QueueTableSuffix
@@ -63,11 +64,13 @@ func convertQueueToTable(typeDef *ir.TypeDef, schema *ir.Schema, scalarMapping m
 		seen[c.Name] = true
 	}
 	// A claim reads the ready messages by when they are due, and the
-	// claimed ones by when their claim expires.
+	// claimed ones by when their claim expires; a prune reads the done ones
+	// by when they were done.
 	var indexes []Index
 	for _, idx := range []struct{ column, state string }{
 		{ir.QueueColumnDueAt, ir.QueueStateReady},
 		{ir.QueueColumnClaimExpiresAt, ir.QueueStateClaimed},
+		{ir.QueueColumnUpdatedAt, ir.QueueStateDone},
 	} {
 		indexName, err := sqlutil.IndexName(name, []string{idx.column}, "", false)
 		if err != nil {

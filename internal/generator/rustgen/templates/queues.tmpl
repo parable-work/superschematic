@@ -2,15 +2,15 @@
 
 //! The queues of the `{{.SchemaName}}` database (D53, D65; docs/stack-model.md,
 //! section 8.8), as the HTTP runtime's queue client runs them: a descriptor
-//! per @queue class, as JSON, with its table, its retries, backoff and lease,
-//! the column each field of its message writes, and its statements on
-//! Postgres, which the Go ORM and the TypeScript queue client run too, so a
-//! message one language enqueues another claims alike.
+//! per @queue class, as JSON, with its table, its retries, backoff, maximum
+//! backoff, lease and retention, the column each field of its message writes,
+//! and its statements on Postgres, which the Go ORM and the TypeScript queue
+//! client run too, so a message one language enqueues another claims alike.
 //!
 //! Parse a descriptor with the runtime's `queue::QueueDefinition::parse`,
 //! enqueue a message in the transaction whose writes caused it, and claim,
-//! complete, fail, extend and release messages with its `PostgresQueue`.
-//! Delivery is at least once.
+//! complete, fail, extend, release and prune messages with its
+//! `PostgresQueue`. Delivery is at least once.
 {{- range .LeftOutQueues}}
 //!
 //! Queue {{.Name}} is left out: {{.Unsupported}}.
@@ -19,8 +19,12 @@
 
 /// The queue of `{{.Name}}` messages, whose descriptor this is.
 ///
-/// A message whose handler fails is due again after {{.Descriptor.BackoffSeconds}}s, and is dead
-/// after {{.Descriptor.Retries}} such retries; a claim holds it for {{.Descriptor.LeaseSeconds}}s unless extended.
+/// A message whose handler fails is due again after {{.Descriptor.BackoffSeconds}}s, doubled for
+/// each attempt before, up to {{.Descriptor.MaxBackoffSeconds}}s, and is dead after {{.Descriptor.Retries}} such retries; a
+/// claim holds it for {{.Descriptor.LeaseSeconds}}s unless extended.
+{{- if .Descriptor.RetainSeconds}} A done message stays {{.Descriptor.RetainSeconds}}s.
+{{- else}} A done message is deleted as it completes.
+{{- end}}
 {{- if .DocLines}}
 ///
 {{- range .DocLines}}

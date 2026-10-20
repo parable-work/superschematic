@@ -102,14 +102,14 @@ func TestStackDecoratorsWriteTheirDeclarations(t *testing.T) {
 	// its schedule; its other keys are the job platform's settings (D52).
 	staging := &ir.TypeDef{Name: "Staging"}
 	if err := applyStackDecorator(t, "environment", staging, map[string]any{"settings": []any{
-		map[string]any{"of": handle("shop-orders", "API"), "job": "ShipOrders", "schedule": "0 * * * *", "timeZone": "Europe/Paris", "enabled": false, "cpu": "2"},
+		map[string]any{"of": handle("shop-orders", "API"), "job": "ShipOrders", "schedule": "0 * * * *", "timeZone": "Europe/Paris", "enabled": false, "onDeploy": true, "cpu": "2"},
 	}}); err != nil {
 		t.Fatal(err)
 	}
 	orders := ir.ServiceRef{Name: "shop-orders", Kind: ir.SchemaKindAPI}
-	off := false
+	off, on := false, true
 	wantJob := &ir.DeployableSettings{
-		Of: ir.DeployableRef{Service: &orders, Job: "ShipOrders"}, Schedule: "0 * * * *", TimeZone: "Europe/Paris", Enabled: &off,
+		Of: ir.DeployableRef{Service: &orders, Job: "ShipOrders"}, Schedule: "0 * * * *", TimeZone: "Europe/Paris", Enabled: &off, OnDeploy: &on,
 		Values: map[string]any{"cpu": "2"},
 	}
 	if got := staging.Environment.Settings; len(got) != 1 || !reflect.DeepEqual(got[0], wantJob) {
@@ -256,6 +256,14 @@ func TestVerifyStack(t *testing.T) {
 		{"a schedule on a server", func(s *ir.Schema) {
 			s.Types["Staging"].Environment.Settings[0].Schedule = "0 * * * *"
 		}, "@environment class Staging settings[0] sets schedule, which only a job takes"},
+		{"onDeploy on a server", func(s *ir.Schema) {
+			on := true
+			s.Types["Staging"].Environment.Settings[0].OnDeploy = &on
+		}, "@environment class Staging settings[0] sets onDeploy, which only a job takes"},
+		{"onDeploy on a worker", func(s *ir.Schema) {
+			on := true
+			s.Types["Staging"].Environment.Settings[0] = &ir.DeployableSettings{Of: ir.DeployableRef{Service: &api, Worker: "FulfilOrders"}, OnDeploy: &on}
+		}, "@environment class Staging settings[0] sets onDeploy, which only a job takes"},
 		{"a job of a declared server", func(s *ir.Schema) {
 			s.Types["Staging"].Environment.Settings[0].Of.Job = "ShipOrders"
 		}, "names job ShipOrders of deployable Backend; a job belongs to an API service"},

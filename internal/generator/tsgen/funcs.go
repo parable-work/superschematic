@@ -2,6 +2,7 @@ package tsgen
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"text/template"
@@ -460,10 +461,65 @@ func typeValidatesNestedObjects(t *TypeInfo, parserNestedTypes []string) bool {
 	return false
 }
 
+// typeParserUnionTypes returns the unique union names of the type's union
+// fields, whose values parse<Type>FromJSON reads with parse<Union>FromJSON.
+func typeParserUnionTypes(t *TypeInfo) []string {
+	seen := make(map[string]bool)
+	var names []string
+	for _, f := range t.Fields {
+		if !f.IsUnion || seen[f.Type] {
+			continue
+		}
+		seen[f.Type] = true
+		names = append(names, f.Type)
+	}
+	return names
+}
+
+// ModuleImport is one import statement of parsers: the parse<Name>FromJSON
+// of each of Names, from Module.
+type ModuleImport struct {
+	Module string
+	Names  []string
+}
+
+// groupImports gathers imports by module into one statement each, modules
+// and the names in each sorted.
+func groupImports(imports []NestedImport) []ModuleImport {
+	byModule := map[string][]string{}
+	for _, imp := range imports {
+		if !slices.Contains(byModule[imp.Module], imp.Name) {
+			byModule[imp.Module] = append(byModule[imp.Module], imp.Name)
+		}
+	}
+	grouped := make([]ModuleImport, 0, len(byModule))
+	for module, names := range byModule {
+		sort.Strings(names)
+		grouped = append(grouped, ModuleImport{Module: module, Names: names})
+	}
+	sort.Slice(grouped, func(i, j int) bool { return grouped[i].Module < grouped[j].Module })
+	return grouped
+}
+
+// unionImports groups the parsers of a type's unions by the module they
+// come from: modules names the dependency-declared ones, and every other is
+// this package's validators/unions.ts.
+func unionImports(names []string, modules map[string]string) []ModuleImport {
+	imports := make([]NestedImport, 0, len(names))
+	for _, name := range names {
+		module, ok := modules[name]
+		if !ok {
+			module = "../unions"
+		}
+		imports = append(imports, NestedImport{Name: name, Module: module})
+	}
+	return groupImports(imports)
+}
+
 // typeNeedsJSONParse returns true if the type has any fields that need
 // runtime transformation when parsing from JSON: DateTime-like scalars that
-// must be converted from string to Date, or nested object types that need
-// recursive parsing.
+// must be converted from string to Date, nested object types that need
+// recursive parsing, or unions, whose member is read by its own parser.
 func typeNeedsJSONParse(t *TypeInfo, generatedTypeNames map[string]bool) bool {
 	for _, f := range t.Fields {
 		if f.IsScalar && f.ScalarInfo != nil &&
@@ -471,6 +527,9 @@ func typeNeedsJSONParse(t *TypeInfo, generatedTypeNames map[string]bool) bool {
 			return true
 		}
 		if !f.IsScalar && f.Type != "" && f.Type != t.Name && generatedTypeNames[f.Type] {
+			return true
+		}
+		if f.IsUnion {
 			return true
 		}
 	}

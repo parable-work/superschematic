@@ -289,6 +289,10 @@ CREATE INDEX idx_order_placed_queue_due_at ON order_placed_queue USING BTREE (du
 
 CREATE INDEX idx_order_placed_queue_claim_expires_at ON order_placed_queue USING BTREE (claim_expires_at) WHERE state = 'claimed';
 
+CREATE INDEX idx_order_placed_queue_updated_at ON order_placed_queue USING BTREE (updated_at) WHERE state = 'done';
+
 CREATE INDEX idx_stock_low_queue_due_at ON stock_low_queue USING BTREE (due_at) WHERE state = 'ready';
 
 CREATE INDEX idx_stock_low_queue_claim_expires_at ON stock_low_queue USING BTREE (claim_expires_at) WHERE state = 'claimed';
+
+CREATE INDEX idx_stock_low_queue_updated_at ON stock_low_queue USING BTREE (updated_at) WHERE state = 'done';

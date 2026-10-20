@@ -33,13 +33,13 @@ balancer and DNS resources that the Pulumi provisioner applies.
 | Go, TypeScript and Rust: derived config fields in `EnvConfig`, a typed `Deps`, the implementation scaffold, and each server's entrypoint and Dockerfile, which reaches Cloud SQL with IAM database authentication where an environment places its database there | |
 | [traces](/superschematic/guides/traces/): each server, job and worker exports its spans over OTLP when OpenTelemetry's variables name a collector, under `stack dev` from your shell | export on gcp; metrics and logs |
 | the core's `local` target and `stack dev` | restarting a server that exits; key rotation |
-| the gcp target, with `stack bootstrap`, `secrets set`, `build`, `plan`, `deploy`, `destroy` and `outputs`; image builds on Cloud Build; each migration phase as a Cloud Run job that also grants the servers their privileges | a deploy lock beyond the provisioner's and the runner's |
+| the gcp target, with `stack bootstrap`, `secrets set`, `build`, `plan`, `deploy`, `destroy`, `outputs` and `unlock`; image builds on Cloud Build; each migration phase as a Cloud Run job that also grants the servers their privileges; a deploy lock per run in the state bucket | |
 | the Pulumi provisioner and the typed bindings generator | |
 | the Cloudflare DNS platform, linked in the installed binary; bootstrap stores its API token and deploys read it | |
 | `@requireService` and `@allowService`, and the stack's check that every `calls` edge reaches an operation | the callee's half of service auth: a server whose API has a service clause does not start yet |
 | [generated CI](#generated-ci): `outputs.ci` writes a GitHub Actions workflow that checks, plans, previews and deploys the stack, signing in to gcp through Workload Identity Federation | other CI systems; a check that the committed workflow is current |
 | [buckets](/superschematic/guides/buckets/): the `Bucket` kind, `buckets` in an API's config, the `bucket` deployable and edge, a provider-neutral bucket in `Deps` over GCS with signed URLs, in Go, TypeScript and Rust, fake-gcs-server under `stack dev`, and on gcp a private Cloud Storage bucket | a bucket on another provider |
-| [jobs](#jobs): `@job`, the `job` deployable with its API's edges, its schedule per environment, Go's `Jobs` and `NewJobs`, TypeScript's `Jobs` and `createJobs`, Rust's `Jobs` and `create_jobs`, each job's entrypoint and image, `stack dev`'s schedules and `stack run`; on gcp a Cloud Run job, its schedule a Cloud Scheduler job, and `stack run` an execution | a job that runs on every deploy |
+| [jobs](#jobs): `@job`, the `job` deployable with its API's edges, its schedule per environment, Go's `Jobs` and `NewJobs`, TypeScript's `Jobs` and `createJobs`, Rust's `Jobs` and `create_jobs`, each job's entrypoint and image, `stack dev`'s schedules and `stack run`, and a job that runs on every deploy; on gcp a Cloud Run job, its schedule a Cloud Scheduler job, and `stack run` and a deploy's run an execution | |
 | [static sites](/superschematic/guides/static-sites/): the `Site` kind, the `site` deployable and edge, each API's CORS for the sites that call it, `stack dev`'s file server, the deploy's publish through a target's `Sites` seam, and on gcp a bucket per site behind a load balancer with Cloud CDN | a site's SDK clients in the browser |
 | [queues and workers](#queues-and-workers): `@queue` on a DB service's message class, its table in every dialect, the Go ORM's `Enqueue` in your transaction and its claims; `@worker`, the `worker` deployable with its API's edges and its instances and concurrency per environment, Go's `Workers` and `NewWorkers`, TypeScript's `Workers` and `createWorkers` over the HTTP runtime's queue client, Rust's `Workers` and `create_workers` over the Rust HTTP runtime's, each worker's entrypoint and image, and `stack dev`'s worker processes; on gcp a Cloud Run worker pool | claims on SQLite and D1 |
 
@@ -286,7 +286,10 @@ templates, `{SERVICE}_DATABASE`, `{SERVICE}_SERVICE` and
 loader refuses an `@envVars` field named after a derived field, or after
 one plus an underscore. `values-schema.json` lists each derived field
 under `x-superschematic.envVars` with `derived`, `service` and
-`variables`. The TypeScript API package's `loadEnvConfig()` and the
+`variables`, and the callers field of an API with `@requireService` or
+`@allowService` with `callersOf`, `variables` and `variablePatterns`,
+whose patterns are its `patternProperties`: a deployment outside a stack
+sets it ([Service callers](/superschematic/guides/auth-and-permissions/#service-callers)). The TypeScript API package's `loadEnvConfig()` and the
 Rust API crate's `config::load_env_config()` read them too, through the
 HTTP runtimes' readers.
 
@@ -603,7 +606,47 @@ export abstract class Preview extends Staging {}
 environment, such as a preview, runs no schedule unless its settings turn
 it on with `enabled: true`. Each job's resolved deployable records what
 runs in the environment: its schedule, empty for none, its time zone,
-timeout and retries.
+timeout and retries, and whether it runs on every deploy.
+
+### Run a job on every deploy
+
+`onDeploy: true` runs a job once on every deploy of the environment, with
+or without a schedule. Use it for work that must follow each rollout: a
+backfill of what the new servers write, a cache to warm, reference rows
+to bring up to date.
+
+```ts
+// schemas/services/shop-orders/src/jobs.schema.ts
+// Fills each order's total_cents, which this release adds and its servers
+// write, for the orders placed before it.
+@job({ timeout: "30m", retries: 2 })
+export abstract class BackfillTotals {}
+
+// schemas/services/shop-stack/src/stack.schema.ts
+@environment({
+  target: "gcp",
+  gcp: { project: "acme-staging", region: "us-east1" },
+  settings: [{ of: ShopOrders, job: "BackfillTotals", onDeploy: true }],
+})
+export abstract class Staging {}
+```
+
+The deploy runs it in a step of its own after the last rollout wave,
+when every server of the new version runs, and before the `contract`
+phase, so the job can still read a column the contract drops, and a
+column the contract makes `NOT NULL` is filled first: the expand,
+backfill, contract order a renamed or tightened column needs. The deploy
+waits for the run, its retries included, and when its last try fails it
+stops there with that try's error, runs no `contract` step, and records
+the failure in the manifest; the next deploy runs the job again. Every
+deploy runs it, one that changes nothing included, so write it to be run
+twice. `stack plan` lists the jobs a deploy runs.
+
+`onDeploy` merges over the `extends` chain as any setting does, so a
+preview member of an environment that sets it runs the job too, unlike a
+schedule; `onDeploy: false` in the member turns it off. Only a job takes
+it. A target that runs no job on demand cannot run one on a deploy, and
+its deploy is refused before anything changes.
 
 ### Run a job
 
@@ -635,6 +678,17 @@ job shop-orders-ship-orders: the run due at 2026-10-07T12:01:00Z, try 1 of 2 suc
 
 A run that outlives the job's timeout is stopped, a failed run is run
 again up to its retries, and a run's failure never stops the environment.
+A job that runs on every deploy runs once when `stack dev` starts, after
+the last rollout wave, and `stack dev` waits for it before it prints where
+each server is:
+
+```text
+job shop-orders-backfill-totals runs once the environment is up, as on every deploy
+...
+job shop-orders-backfill-totals: start the run after the rollout, try 1 of 3
+job shop-orders-backfill-totals: the run after the rollout, try 1 of 3 succeeded in 1.2s
+```
+
 To run a job once, now, run `stack run` from another terminal:
 
 ```sh
@@ -764,7 +818,9 @@ Under the output root, `schemas/dist` by default, the build writes:
   root's Cargo workspace, `Cargo.toml` beside `schemas/dist/Cargo.lock`
   ([Rust servers](#rust-servers));
 - `impl/<service>/`, a copy of each implementation a Rust server builds
-  against ([Rust servers](#rust-servers)).
+  against ([Rust servers](#rust-servers)), and, in an output root other
+  than `schemas/dist`, of each one a TypeScript server builds against
+  ([The generated server](#the-generated-server)).
 
 The build also scaffolds each implementation a TypeScript server serves
 that is missing, at the `typescript` template (`typescript/{service}`), as
@@ -891,7 +947,9 @@ the order, once with `stack run` and once on the schedule, and sees
 `OrderRestocks`, run with `stack run`, order the restock request.
 Then it runs `stack dev` and the job once more, into an output root of
 its own (`--out`), where `shop-stock`'s server, worker and job build
-against that root's mirror of `rust-impl/shop-stock`. `PlaceOrder`
+against that root's mirror of `rust-impl/shop-stock`, and the storefront
+against its copy of `typescript/shop-storefront`, while the example's
+packages keep the links `schemas/dist`'s install made. `PlaceOrder`
 reserves the
 stock through the client of `shop-stock` its `Deps` holds, which sends
 `shop-orders`' credential and forwards the shopper of the request its
@@ -1068,7 +1126,8 @@ Each node of the resource graph has an ID, a type token, its properties,
 owners, and `inherited` when a parameterized member reads it from the
 parent environment. `deployOrder` lists the steps: infrastructure; the
 migrations' `expand` phase; the rollout in waves, callees before their
-callers; the migrations' `contract` phase; then exposure.
+callers; the jobs that run on every deploy, in a `jobs` step that holds
+no nodes; the migrations' `contract` phase; then exposure.
 
 ## The generated server
 
@@ -1110,6 +1169,23 @@ the SDKs and the implementations. Its Dockerfile builds superscalar's Node
 addon in a Rust stage, from the checkout the naming file's `[paths]
 scalar_typescript` names, installs the workspace on `oven/bun`, frozen to
 its lockfile, and runs `main.ts` as a non-root user.
+
+Your implementations, and your sites, are members of `schemas/dist`'s
+workspace alone, so their `node_modules` link to it, and your editor and
+their own `tsc` work against it. A build into another output root
+(`stack dev --out`, `build-all --out`) copies each implementation its
+TypeScript servers, jobs and workers build against into
+`<output-root>/impl/<service>/`, and that root's workspace lists the
+copies, `impl/*`, and none of your packages, so an install there leaves
+your `node_modules` as they were. The copy keeps the package's name, so
+the server resolves it as it would the package, and its `package.json`
+re-bases each dependency on a path for where the copy sits. It holds the
+package's files but `node_modules`, `.git`, a lockfile beside its
+`package.json`, and what its `.gitignore` files leave out, and a build
+rewrites only the files that changed. Edit the package, not the copy: the
+next build into that root, which `stack dev` runs, brings the copy up to
+date. A site is not copied: its build in another output root runs in its
+own package, against `schemas/dist`'s install.
 
 Commit the workspace's lockfile, `schemas/dist/bun.lock`, which `bun
 install` in `schemas/dist` writes, so the image, the
@@ -1263,7 +1339,7 @@ and the [generated CI](#generated-ci) signs in with.
 | database | a Cloud SQL for Postgres instance (Enterprise edition, IAM database authentication on, connections only through a Cloud SQL connector) and a database per hosted DB schema |
 | bucket | a Cloud Storage bucket `<project>-<stack>-<bucket>` in the region, with uniform bucket-level access and public access prevention enforced |
 | sql edge | `roles/cloudsql.client` and `roles/cloudsql.instanceUser` for the server's or job's account, held to the instance by an IAM condition, and an IAM database user, which the migration job gives read and write privileges on the DB service's tables. On an engine database it also grants the user a role of the database's own, `<database>_engine`, which owns the engine's schema, `engine`, so each deployable that opens the engine, as its own user, may change what another created there; and it creates the `unaccent` extension the engine's Search needs. The derived value is the Cloud SQL connection, with no password, which a Rust server dials over the socket the service mounts at `/cloudsql` |
-| http edge | `roles/run.invoker` on the callee for the caller's account. The derived value is the callee's `run.app` URL with a Google ID token for it as the service credential, sent in `Service-Authorization` and, to an internal callee, also in `X-Serverless-Authorization`. A call to an API the same server serves stays on loopback |
+| http edge | `roles/run.invoker` on the callee for the caller's account. The derived value is the callee's `run.app` URL with a Google ID token for it as the service credential, sent in `Service-Authorization` and, to an internal callee, also in `X-Serverless-Authorization`. A call to an API the same server serves stays on loopback, with the server's own loopback credential ([Service callers](/superschematic/guides/auth-and-permissions/#service-callers)) |
 | bucket edge | `roles/storage.objectUser` on the bucket and `roles/iam.serviceAccountTokenCreator` on its own account for the server's, job's or worker's account, so it signs URLs as itself, in Go, TypeScript or Rust. The derived value is the bucket's name |
 | internal server | internal ingress only, with Cloud Run's invoker check on |
 | calling server or job | Direct VPC egress through the environment's network: a VPC, a subnet with Private Google Access, a router and Cloud NAT |
@@ -1315,7 +1391,7 @@ and resolution checks each node's properties against it.
 
 Each command resolves the environment as the build does, without writing
 a build. They reach Google Cloud with application default credentials,
-and all but `secrets set` and `run` run the `pulumi` CLI, which must be on `PATH`:
+and all but `secrets set`, `run` and `unlock` run the `pulumi` CLI, which must be on `PATH`:
 
 ```sh
 superschematic stack bootstrap Staging
@@ -1324,6 +1400,7 @@ superschematic stack plan Staging
 superschematic stack deploy Staging
 superschematic stack outputs Staging --out outputs.json
 superschematic stack run Staging shop-orders-ship-orders
+superschematic stack unlock Staging
 ```
 
 - **`bootstrap`** runs once per project with an owner's credentials, and
@@ -1372,9 +1449,23 @@ superschematic stack run Staging shop-orders-ship-orders
   `<stack>-migrate`, which also gives each server that connects to a
   database its privileges. An execution that fails stops the deploy with
   the runner's error, which the deploy reads from the execution's logs in
-  Cloud Logging, and the next deploy runs the phase again. The deploy
+  Cloud Logging, and the next deploy runs the phase again. A job that runs
+  on every deploy runs after the last wave as one execution of its Cloud
+  Run job, as `run` runs it, and the deploy waits for it; its last try
+  failing stops the deploy before the `contract` phase with the job's
+  error from Cloud Logging. The deploy
   records a manifest in the state bucket after every step, and refuses a
-  migration hazard no `--allow` acknowledges.
+  migration hazard no `--allow` acknowledges. It holds the run's deploy
+  lock throughout, an object of the state bucket, from before it reads
+  the manifest until it ends, whether it succeeds or fails: a second
+  deploy or a destroy of the run meanwhile fails at once and says who
+  holds the lock, on which machine, and since when. Ctrl-C stops the
+  step under way, records the failure and releases the lock.
+- **`unlock`** removes a lock a deploy left when its process was killed,
+  a CI job cancelled hard or a laptop closed mid-deploy. The lock has no
+  expiry, so nothing else removes it: check that the deploy it names no
+  longer runs, then type the run's name, or pass `--yes`. Each run has a
+  lock of its own, so `--param pr=123` names a preview member's.
 - **`run`** runs a deployed job once: an execution of its Cloud Run job
   as the last deploy left it. It refuses a job whose Cloud Run job runs
   another image than the manifest records, as during a deploy, waits for
@@ -1385,7 +1476,8 @@ superschematic stack run Staging shop-orders-ship-orders
   while the last one runs, so a job whose run may outlast its interval
   keeps its runs apart itself.
 - **`destroy`** removes a run's resources and its manifest, after you
-  type the run's name, or with `--yes`. What the stack's runs in the
+  type the run's name, or with `--yes`, holding the run's lock as a
+  deploy does. What the stack's runs in the
   project share stays: bootstrap's resources, the stack's images, its
   migration job `<stack>-migrate`, and the build contexts and job
   documents in the state bucket, until its lifecycle rule deletes them.
@@ -1601,7 +1693,8 @@ from its parent's stack through a stack reference.
 
 Each step of the deploy order is one targeted `up` of that program, and
 the last step that holds nodes updates the whole program, which deletes
-what the graph dropped. Migrations run between steps, outside the graph.
+what the graph dropped. Migrations, and the jobs that run on every
+deploy, run between steps, outside the graph.
 The release pins the `pulumi` CLI at the Go SDK's version,
 `PULUMI_VERSION` in `tools.env`.
 

@@ -21,13 +21,15 @@ schema's instances into claimable work, are another thing.
 
 | Built | Not built yet |
 | --- | --- |
-| `@queue` on a DB service's message class; its table in every dialect the service lists, which the migration plan carries | removing done messages; a command to read and retry dead ones |
+| `@queue` on a DB service's message class; its table in every dialect the service lists, which the migration plan carries | |
+| a backoff that doubles with each failure up to a maximum, and done messages removed after a retention | |
 | the Go ORM's `Enqueue<Queue>` in your transaction, and its claims on Postgres | claims on SQLite and D1 |
 | the TypeScript types' `./queues` entry and the HTTP runtime's `enqueue` and `postgresQueue`, which run the Go ORM's statements; the Rust types' `queues` module and the Rust HTTP runtime's `queue::enqueue` and `PostgresQueue`, which run them too; a location (`POINT`) and a duration (`INTERVAL`) in a message, in every language | a list of locations or durations (`POINT[]`, `INTERVAL[]`) in a queue's message |
 | `@worker` on an API, Go's `Workers` and `NewWorkers`, TypeScript's `Workers` and `createWorkers`, Rust's `Workers` and `create_workers`, the `worker` deployable, its entrypoint and image | |
 | `stack dev`'s worker processes; on gcp a Cloud Run worker pool | scaling a worker with its queue's depth |
+| `stack queue dead`, `retry` and `drop` on a local environment's queues | the same on a cloud environment's |
 
-D53 in `docs/DECISIONS.md` records the decisions, and section 8.8 of
+D53 and D68 in `docs/DECISIONS.md` record the decisions, and section 8.8 of
 [docs/stack-model.md](https://github.com/parable-work/superschematic/blob/main/docs/stack-model.md)
 the design.
 
@@ -45,8 +47,22 @@ Every argument is optional:
 | Argument | What it sets |
 | --- | --- |
 | `retries` | how many times a message whose handler fails is handled again before it is dead; five unless set |
-| `backoff` | how long a failed message waits before it is due again, as `30s` or `5m`; thirty seconds unless set |
+| `backoff` | how long a message that failed once waits before it is due again, as `30s` or `5m`; thirty seconds unless set. Each failure after the first doubles the wait |
+| `maxBackoff` | the longest a failed message waits, however many times it failed; the backoff or more, and an hour unless set, or the backoff when that is longer. Set it to the backoff for a wait that never grows |
 | `lease` | how long a claim holds a message unless its worker extends it, which it does while the handler runs; a minute unless set |
+| `retain` | how long a done message stays in the table before a worker removes it, as `168h`; a week unless set. `0s` keeps none: completing a message deletes it |
+
+Every duration is whole seconds as Go writes one: `90s`, `10m`, `1h30m`
+or `168h`, with no days. After its attempt `n` fails, a message waits
+`backoff × 2^(n−1)`, up to the maximum: with the defaults 30 seconds,
+then 1, 2, 4 and 8 minutes, and an hour at most.
+
+```ts
+@queue({ retries: 8, backoff: "10s", maxBackoff: "15m", retain: "72h" })
+export abstract class InvoiceIssued {
+  invoiceId: Identity.UUID;
+}
+```
 
 A message's fields are values a column holds: a scalar, an enum, a list
 or map of them, or a JSON value such as a `@jsonField` type. A message
@@ -64,7 +80,9 @@ enqueued and last changed:
 <Snippet file="testdata/generated/sql/shop-db/create.sql" from="CREATE TABLE order_placed_queue" to=");" />
 
 A partial index on `due_at` of the ready messages and one on
-`claim_expires_at` of the claimed ones serve the claims.
+`claim_expires_at` of the claimed ones serve the claims, and one on
+`updated_at` of the done ones serves the prune: nothing changes a done
+message, so its `updated_at` is when it was done.
 [Schema migrations](/superschematic/reference/migrations/) plan the table
 as any table, in each dialect the service lists.
 
@@ -231,12 +249,13 @@ it to, so a message that comes again files none:
 <Snippet file="rust-impl/shop-stock/src/lib.rs" from="    /// Files an open restock request" to="        Ok(())" />
 
 A method that returns nil, or resolves, or returns `Ok`, completes its
-message. One that returns an error, or panics, or rejects, fails it: the message is due again after the queue's
-backoff, until its retries are spent, and then it is dead, where its
-last error stays. Delivery is at least once: a worker that dies holding
-a message gives it back when its claim expires, and another worker
-handles it again, so write each method to be safe to run twice for one
-message.
+message. One that returns an error, or panics, or rejects, fails it: the
+message is due again after the queue's backoff, doubled for each attempt
+before and capped at its `maxBackoff`, until its retries are spent, and
+then it is dead, where its last error stays. Delivery is at least once: a
+worker that dies holding a message gives it back when its claim expires,
+and another worker handles it again, so write each method to be safe to
+run twice for one message.
 
 ## Run it
 
@@ -261,6 +280,13 @@ the queue's descriptor, the same loop:
   messages;
 - it extends each message's claim while the method runs;
 - it logs each message's outcome;
+- as it starts and every five minutes after, it deletes the done
+  messages older than the queue's `retain`, a thousand at a time until a
+  batch is short, and logs how many as `done messages pruned` with
+  `pruned`, or `pruning the done messages failed` with the error, which
+  the next prune tries again. Every instance of every worker of the queue
+  prunes, which is safe: each batch skips rows another holds, and a row
+  deleted once is gone. Dead messages are never pruned;
 - on SIGTERM it claims no more, lets the running methods finish within
   the grace, then cancels them and gives their messages back, due at once
   for another worker, and exits. A TypeScript method's signal aborts when
@@ -283,6 +309,62 @@ does:
 [shop-orders-fulfil-orders] {"level":"info",...,"msg":"fulfilled the order",...}
 [shop-orders-fulfil-orders] {"level":"info",...,"msg":"message handled","queue":"OrderPlaced","attempt":1,...}
 ```
+
+## Dead messages
+
+A message is dead once its handler has failed on every try its queue's
+`retries` allow, or once its last attempt's claim expired, as when the
+message kills its worker every time. It stays in the queue's table with
+its last error, and no worker claims it again. `stack queue` reads and
+repairs a queue's dead messages; it names a queue by its DB service and
+its class, `shop-db.OrderPlaced`.
+
+`stack queue dead` lists them, the oldest death first, up to `--limit`
+(a hundred unless set), and says how many there are in all. The message
+shows as its columns:
+
+```text
+$ superschematic stack queue dead Dev shop-db.OrderPlaced
+Queue shop-db.OrderPlaced of Dev: 2 dead messages, the oldest death first.
+
+3f2c8a10-5b1e-4c7a-9d2e-8f6b4a1c0e93
+  attempts:   6
+  died at:    2026-10-19T12:04:31Z
+  last error: the payment provider refused the card
+  message:    {"order_id":"9d0f6c2e-3a41-4b7e-8c55-1e2f3a4b5c6d"}
+
+8a41c6e2-7d3b-4f19-a0c5-2b9e6d4f1a37
+  attempts:   1
+  died at:    2026-10-19T12:20:07Z
+  last error: the claim of its last attempt expired before its handler finished
+  message:    {"order_id":"c7e3b1a9-0f2d-4e86-9b14-6a5d8c2f3e01"}
+```
+
+Once the cause is fixed, `stack queue retry` makes the messages it names
+ready again, or every dead one with `--all`: each is due at once with no
+attempts, so its retries start over, and a worker claims it as it claims
+a new message. Its last error stays until its next failure replaces it.
+`stack queue drop` deletes the messages it names, or every dead one with
+`--all --yes`:
+
+```sh
+superschematic stack queue retry Dev shop-db.OrderPlaced 3f2c8a10-5b1e-4c7a-9d2e-8f6b4a1c0e93
+superschematic stack queue retry Dev shop-db.OrderPlaced --all
+superschematic stack queue drop Dev shop-db.OrderPlaced 8a41c6e2-7d3b-4f19-a0c5-2b9e6d4f1a37
+```
+
+A retry or a drop that names a message that is not dead, one a worker
+already took again or one that is not in the queue, changes none of the
+messages it names and says what each such one is. `--format json` prints
+the result as JSON.
+
+Each command resolves the environment from your schemas and runs the
+operation with the migration runner, `superschematic-migrate`, which holds
+the database drivers, as `stack dev`'s migrations do. On the `local`
+target it reaches the Postgres container `stack dev` runs, so run it from
+another terminal while the environment runs. It runs on Postgres alone,
+as the claims do, and it does not reach a cloud environment's database
+yet: an environment on gcp is refused.
 
 ## Change it per environment
 

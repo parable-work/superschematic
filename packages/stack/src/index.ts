@@ -125,9 +125,10 @@ type ElementOf<T, Of> = { readonly of: Of; readonly platform?: string } & (Of ex
           : never);
 
 /**
- * A job's schedule as an environment changes it (D52): a five-field cron
- * read in an IANA time zone, and whether it runs. A member of a
- * parameterized environment runs no schedule unless `enabled` turns it on.
+ * When a job runs in an environment (D52): its schedule, a five-field cron
+ * read in an IANA time zone, whether the schedule runs, and whether the job
+ * runs on every deploy. A member of a parameterized environment runs no
+ * schedule unless `enabled` turns it on.
  */
 export type JobSchedule = {
   /** Replaces the `@job` schedule: minute, hour, day of the month, month and day of the week. */
@@ -136,6 +137,13 @@ export type JobSchedule = {
   readonly timeZone?: string;
   /** Turns the schedule on or off; off, the job runs only on demand. */
   readonly enabled?: boolean;
+  /**
+   * Runs the job once on every deploy, after the last rollout wave and
+   * before the contract phase, and fails the deploy when its last try
+   * fails; `stack dev` runs it once the environment is up. Off unless set;
+   * `false` turns off what an environment this one extends turned on.
+   */
+  readonly onDeploy?: boolean;
 };
 
 /**

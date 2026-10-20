@@ -73,6 +73,8 @@ export type {
   ServiceCallerConfig,
 } from './serviceauth.js';
 export { googleIdTokenSource, signedTokenSource, tokenFileSource } from './credentials.js';
+export { LOOPBACK_LIFETIME_SECONDS, isLoopbackUrl, loopbackServiceAuth } from './loopback.js';
+export type { Loopback, LoopbackOptions } from './loopback.js';
 export type {
   Ed25519PrivateJwk,
   GoogleIdTokenSourceOptions,

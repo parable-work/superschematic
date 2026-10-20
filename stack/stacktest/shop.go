@@ -194,6 +194,25 @@ func WithSite(s *ir.Stack) *ir.Stack {
 	return s
 }
 
+// WithJobOnDeploy returns s with shop-orders' job ShipOrders run on every
+// deploy of the environment named env (D52, amended): its settings element
+// there, or a new one, gets onDeploy.
+func WithJobOnDeploy(s *ir.Stack, env string) *ir.Stack {
+	on := true
+	e := s.Environment(env)
+	if e == nil {
+		return s
+	}
+	for _, settings := range e.Settings {
+		if settings != nil && settings.Of.Job == ShipOrders.Name && settings.Of.Service != nil && settings.Of.Service.Name == ShopOrders.Name {
+			settings.OnDeploy = &on
+			return s
+		}
+	}
+	e.Settings = append(e.Settings, &ir.DeployableSettings{Of: JobOf(ShopOrders, ShipOrders.Name), OnDeploy: &on})
+	return s
+}
+
 // WithoutJobs returns services with no jobs: the shop for a target that
 // places no job yet, or a test about the rest of the stack.
 func WithoutJobs(services []stack.Service) []stack.Service {

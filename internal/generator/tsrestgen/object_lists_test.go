@@ -121,8 +121,8 @@ func TestGenerateObjectBodyArgument(t *testing.T) {
 }
 
 // TestGenerateRefusesBodyArgumentsWithoutParser: a body argument whose type
-// has no generated parser (a union), alone or as a list element, is refused
-// with the argument named, never rendered as a string.
+// has no generated strict decoder (a union), alone or as a list element, is
+// refused with the argument named, never rendered as a string.
 func TestGenerateRefusesBodyArgumentsWithoutParser(t *testing.T) {
 	for _, tc := range []struct {
 		name string

@@ -105,11 +105,22 @@ exactly as a server does.
 {{- end }}
 {{- end }}
 {{- end }}
+{{- if .Loopback }}
+
+	// The server's own credential for its calls between the APIs it
+	// serves, which reach it on loopback: a key only this process holds,
+	// which each client of such an API signs with and each API with a
+	// service clause accepts (docs/stack-model.md, section 9.9).
+	{{ .Loopback.Var }}, err := serviceauth.NewLoopback({{ quote .Name }}, []string{ {{- range $i, $api := .Loopback.Serves }}{{ if $i }}, {{ end }}{{ quote $api }}{{ end -}} })
+	if err != nil {
+		return fmt.Errorf("loopback key: %w", err)
+	}
+{{- end }}
 {{- if .Clients }}
 
 	// One client per API called, shared by every API that calls it.
 {{- range .Clients }}
-	{{ .Var }}, err := {{ .Constructor }}({{ .From }})
+	{{ .Var }}, err := {{ .Constructor }}({{ .From }}{{ if .Loopback }}, {{ $.Loopback.Var }}{{ end }})
 	if err != nil {
 		return fmt.Errorf("client of {{ .Service }}: %w", err)
 	}
@@ -189,7 +200,12 @@ func connect(ctx context.Context, field string, db stackconfig.Database) (*pgxpo
 // 9.6){{ if $.Background }}: a {{ $.Kind }} serves no request, so it forwards none{{ end }}.
 // With trace export on, each call is a client span that carries its trace
 // context (D67).
-func {{ .Constructor }}(endpoint stackconfig.Service) (*{{ .Package }}.{{ .Type }}, error) {
+{{- if .Loopback }}
+// {{ .Service }} is an API the server serves itself, which no connector gives a
+// credential, so to a loopback endpoint without one the client sends the
+// server's loopback credential (section 9.9).
+{{- end }}
+func {{ .Constructor }}(endpoint stackconfig.Service{{ if .Loopback }}, {{ $.Loopback.Var }} *serviceauth.Loopback{{ end }}) (*{{ .Package }}.{{ .Type }}, error) {
 	cfg := {{ .Package }}.SDKConfig{
 		BaseURL:   endpoint.URL,
 		Auth:      &{{ .Package }}.AuthConfig{GetToken: serviceauth.ForwardedToken},
@@ -199,6 +215,11 @@ func {{ .Constructor }}(endpoint stackconfig.Service) (*{{ .Package }}.{{ .Type 
 	if err != nil {
 		return nil, err
 	}
+{{- if .Loopback }}
+	if token == nil {
+		token, headers = {{ $.Loopback.Var }}.CredentialFor(endpoint.URL)
+	}
+{{- end }}
 	if token != nil {
 		cfg.ServiceCredential = &{{ .Package }}.ServiceCredentialConfig{Token: token, Headers: headers}
 	}

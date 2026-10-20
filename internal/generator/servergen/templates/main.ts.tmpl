@@ -179,11 +179,12 @@ async function main(): Promise<void> {
 {{- end }}
   ];
 {{- end }}
+{{- template "ts-loopback" . }}
 {{- if .Clients }}
 
   // One client per API called, shared by every API that calls it.
 {{- range .Clients }}
-  const {{ .Var }} = {{ .Constructor }}({{ .From }}, telemetry.fetch);
+  const {{ .Var }} = {{ .Constructor }}({{ .From }}, telemetry.fetch{{ if .Loopback }}, {{ $.Loopback.Var }}{{ end }});
 {{- end }}
 {{- end }}
 {{- if .Buckets }}
@@ -235,9 +236,15 @@ async function main(): Promise<void> {
   );
 {{- end }}
 {{- if .ServiceAuthenticator }}
+{{- if .Loopback }}
+  // The service authenticator over its callers field (D37) and the
+  // server's own loopback key (section 9.9), which its routes and the
+  // engine's verify a calling service with.
+{{- else }}
   // The service authenticator over its callers field (D37), which its
   // routes and the engine's verify a calling service with.
-  const {{ .ServiceAuthenticator }} = serviceAuthenticator({{ .Config }}.{{ .Callers }});
+{{- end }}
+  const {{ .ServiceAuthenticator }} = serviceAuthenticator({{ if .Loopback }}{{ .Loopback }}.accept({{ .Config }}.{{ .Callers }}){{ else }}{{ .Config }}.{{ .Callers }}{{ end }});
 {{- end }}
 {{- if .ManualRoutes }}
   // The handlers of its @manualRouteRegistration operations, which its

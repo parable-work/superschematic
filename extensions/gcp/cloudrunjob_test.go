@@ -3,6 +3,8 @@ package gcp_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -322,4 +324,77 @@ func TestBootstrapEnablesSchedulerForASchedule(t *testing.T) {
 	if strings.Contains(changes, "cloudscheduler") || !strings.Contains(changes, "enable run.googleapis.com") {
 		t.Errorf("a bootstrap for Preview, which runs no schedule:\n%s", changes)
 	}
+}
+
+// TestDeployRunsTheJobOnEveryDeploy deploys a Staging that runs
+// shop-orders' job on every deploy (D52, amended) through the gcp target:
+// after the last rollout wave and before the contract phase, the deploy
+// runs one execution of the job's Cloud Run job as the rollout left it,
+// with no override, and waits for it. An execution whose last try fails
+// stops the deploy there, before the contract phase, with the job's error
+// from Cloud Logging and the URL of its logs, and the manifest records the
+// failure at the jobs step. The Cloud Run job the graph holds is the one
+// it holds without onDeploy: the run is the deploy's, not a node's.
+func TestDeployRunsTheJobOnEveryDeploy(t *testing.T) {
+	f := newDeployFixture(t, true)
+	f.cloud.log = f.prov
+	f.ready(t)
+	s := stacktest.WithJobOnDeploy(shop(), "Staging")
+	env := resolve(t, f.reg, s, stacktest.AcmeShop(), "Staging")
+	plain := resolve(t, f.reg, shop(), stacktest.AcmeShop(), "Staging")
+	if got, want := env.Resources.Resource(shipOrders+".job").Properties, plain.Resources.Resource(shipOrders+".job").Properties; !bytes.Equal(mustMarshal(t, got), mustMarshal(t, want)) {
+		t.Errorf("onDeploy changed the Cloud Run job's node:\n%s\nwant:\n%s", mustMarshal(t, got), mustMarshal(t, want))
+	}
+	images := shopImages("acme-staging", 1)
+	// The rollout leaves the Cloud Run job at the image it pins; the fake
+	// provisioner makes no job, so the test does.
+	f.cloud.graphJobs[shipOrdersKey] = images[shipOrders]
+	o := stack.DeployOptions{
+		Options: stack.Options{Registry: f.reg, Run: registry.Run{Environment: env}, Dir: t.TempDir()},
+		Images:  images,
+		Planner: shopPlanner,
+	}
+	if _, err := stack.Deploy(context.Background(), o); err != nil {
+		t.Fatal(err)
+	}
+	var order []string
+	for _, call := range f.prov.Calls() {
+		order = append(order, strings.SplitN(call, ":", 2)[0])
+	}
+	want := []string{"render 56 nodes", "apply infrastructure", "migrate expand shop-db", "apply rollout 1", "apply rollout 2",
+		"cloud run " + shipOrders, "migrate contract shop-db", "apply exposure"}
+	if !slices.Equal(order, want) {
+		t.Errorf("the deploy ran %q, want %q", order, want)
+	}
+	if last := f.cloud.runs[len(f.cloud.runs)-1]; last != nil {
+		t.Errorf("the job ran with overrides %q", last)
+	}
+
+	const exited = "Task shop-orders-ship-orders-x7k2p-task0 failed with exit code: 1 and message: The container exited with an error."
+	f.cloud.failRun[shipOrders] = fakeFailure{message: exited, stderr: []string{
+		`{"caller":"shop-orders-ship-orders/main.go:40","error":"backfill totals: order 7 has no lines","job":"shop-orders-ship-orders","level":"error","msg":"job failed","took":0.4}`,
+	}}
+	n := len(f.prov.Calls())
+	m, err := stack.Deploy(context.Background(), o)
+	wantErr := "deploy Staging, step jobs: job " + shipOrders + ": gcp: job " + shipOrders + " failed in execution " + shipOrdersKey + "/executions/2: " +
+		"backfill totals: order 7 has no lines; Cloud Run: " + exited + " (logs: https://console.cloud.google.com/logs/x)"
+	if err == nil || err.Error() != wantErr {
+		t.Fatalf("a deploy whose job fails: %v\nwant: %s", err, wantErr)
+	}
+	calls := strings.Join(f.prov.Calls()[n:], "\n")
+	if !strings.Contains(calls, "cloud run "+shipOrders) || strings.Contains(calls, "migrate contract") || strings.Contains(calls, "apply exposure") {
+		t.Errorf("a deploy whose job fails ran:\n%s", calls)
+	}
+	if m == nil || m.Status != stack.StatusFailed || m.Step != "jobs" {
+		t.Errorf("manifest: %+v", m)
+	}
+}
+
+func mustMarshal(t *testing.T, v any) []byte {
+	t.Helper()
+	data, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
 }

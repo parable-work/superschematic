@@ -246,7 +246,7 @@ func runBuildAll(cmd *cobra.Command, a *app, flags *buildAllFlags, servicesRootA
 		if flags.profile {
 			profileTotals.print(cmd.OutOrStdout())
 		}
-		if err := writeTypeScriptWorkspaceRoot(outputRoot, repoRoot, services, activeNaming); err != nil {
+		if err := writeTypeScriptWorkspaceRoot(outputRoot, schemasRoot, services, activeNaming); err != nil {
 			return err
 		}
 		if err := emitSchemaDeps(cmd, outputRoot, depsCopy, services); err != nil {
@@ -358,20 +358,28 @@ func hookServices(services []buildplan.Service) []registry.BuildAllService {
 }
 
 // writeTypeScriptWorkspaceRoot writes the manifest that makes the generated
-// TypeScript packages and the TypeScript implementations one Bun workspace
+// TypeScript packages and the TypeScript implementations, or outside the
+// default output root their mirrors (D65, amended), one Bun workspace
 // rooted at the output root (tsgen.WorkspaceRoot, D51) when any service
 // has a TypeScript package. The TypeScript generators write it beside the
 // package they build; a service restored from the cache or found up to
 // date brings back only its own package, so build-all writes it once every
 // service is in place, before the dependency graph reads the output root.
-func writeTypeScriptWorkspaceRoot(outputRoot, repoRoot string, services []buildplan.Service, n naming.Naming) error {
+func writeTypeScriptWorkspaceRoot(outputRoot, schemasRoot string, services []buildplan.Service, n naming.Naming) error {
+	repoRoot := filepath.Dir(schemasRoot)
 	for _, service := range services {
 		for _, dir := range []string{
 			generator.TypesDir(outputRoot, registry.LangTypeScript, service.Name),
 			generator.SDKDir(outputRoot, registry.LangTypeScript, service.Name),
 		} {
 			if slices.Contains(service.OutputDirs, dir) {
-				return tsgen.WorkspaceRoot{OutputRoot: outputRoot, RepositoryRoot: repoRoot, Naming: n, Paths: n.LocalPaths(repoRoot)}.Write()
+				return tsgen.WorkspaceRoot{
+					OutputRoot:     outputRoot,
+					RepositoryRoot: repoRoot,
+					Mirrored:       tsgen.Mirrored(outputRoot, schemasRoot),
+					Naming:         n,
+					Paths:          n.LocalPaths(repoRoot),
+				}.Write()
 			}
 		}
 	}

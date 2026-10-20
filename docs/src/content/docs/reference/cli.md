@@ -667,7 +667,9 @@ design is section 8.3 of
    that has a schedule in the environment on it, a TypeScript one as `bun
    main.ts`, in its time zone: never two runs of one job at once, a run stopped
    at the job's timeout and run again up to its retries, each line it
-   prints with its name in front. A job's run never stops the environment.
+   prints with its name in front. A job whose settings set `onDeploy` runs
+   once after the last rollout wave, and dev waits for it before it prints
+   its summary. A job's run never stops the environment.
 7. Build each site once, `bun run <build>` in its package after the same
    install, once the servers it calls are ready, and serve the directory
    its build wrote from a file server on `http://127.0.0.1:<port>`, with
@@ -763,7 +765,55 @@ It takes the flags of the commands below, `--stack`, `--naming`,
 | --- | --- | --- |
 | `--out` | `<schemas-root>/dist` | the output root the build wrote, `stack dev`'s `--out`: where `run` reads a local environment and the job's entrypoint module |
 
-## `stack bootstrap`, `secrets set`, `plan`, `build`, `deploy`, `destroy` and `outputs`
+## `stack queue dead|retry|drop <environment> <queue>`
+
+List, retry and drop the dead messages of a queue a DB service declares
+([Dead messages](/superschematic/guides/queues/#dead-messages)). `<queue>`
+is the DB service and its `@queue` class, `shop-db.OrderPlaced`. The design
+is section 8.8 of
+[docs/stack-model.md](https://github.com/parable-work/superschematic/blob/main/docs/stack-model.md).
+
+```
+superschematic stack queue dead Dev shop-db.OrderPlaced [--limit 100]
+superschematic stack queue retry Dev shop-db.OrderPlaced <id>... | --all
+superschematic stack queue drop Dev shop-db.OrderPlaced <id>... | --all --yes
+```
+
+- `dead` lists the dead messages, the oldest death first, up to
+  `--limit`, and their total: each one's ID, attempts, time of death, last
+  error and columns as JSON.
+- `retry` makes the dead messages named, or every one with `--all`,
+  ready again: due now, with no attempts and no claim, the last error
+  kept until the next failure replaces it.
+- `drop` deletes the dead messages named, or every one with `--all`,
+  which takes `--yes`.
+
+An ID is a message's UUID, in either case. A `retry` or a `drop` that
+names a message that is not dead changes none of them, and says what each
+such ID is: `ready`, `claimed`, `done`, or not in the queue.
+
+Each resolves the environment from the schemas, as `stack plan` does,
+without a build, and runs the operation with the migration runner, from
+`$SUPERSCHEMATIC_MIGRATE`, else `superschematic-migrate` on `PATH`
+(`superschematic-migrate queue`, [The runner](/superschematic/reference/migrations/#the-runner)).
+On the `local` target it reaches the database at the URL the environment
+resolves, on the Postgres container `stack dev` runs; run it from another
+terminal, and when the database does not answer it says to start `stack
+dev`. It refuses a queue no DB service of the stack declares, a queue
+whose database the environment places on another dialect than Postgres,
+on which no queue is claimed, and an environment on any target but
+`local`, whose databases it does not reach yet.
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--stack` | the working directory when it is a Stack service, else the one Stack service under `./schemas/services` | the Stack service directory |
+| `--naming` | `<stack>/../../superschematic.toml` | naming config file |
+| `--format` | `text` | `text`, or `json` for the runner's result: the operation, and the `total` and `messages` it listed or the `ids` it changed |
+| `--limit` | `100` | `dead`: list at most this many |
+| `--all` | off | `retry` and `drop`: every dead message, in place of IDs |
+| `--yes` | off | `drop`: confirm `--all` |
+
+## `stack bootstrap`, `secrets set`, `plan`, `build`, `deploy`, `destroy`, `outputs` and `unlock`
 
 The cloud half of the `stack` group bootstraps, plans, builds, deploys and
 destroys the environments a Stack service declares
@@ -773,8 +823,8 @@ drives the environment's target and provisioner. A binary deploys to a
 target only when it links the target's extension and the provisioner's
 (`gcp.Extension{}`, `pulumi.Extension{...}`). An environment on the
 `local` target runs with `stack dev`; `plan`, `build`, `deploy`,
-`bootstrap`, `destroy` and `outputs` refuse it, `secrets set` writes its
-`secrets.env`, and `stack run` runs a job against it.
+`bootstrap`, `destroy`, `outputs` and `unlock` refuse it, `secrets set`
+writes its `secrets.env`, and `stack run` runs a job against it.
 
 Each of these commands takes these flags:
 
@@ -783,7 +833,7 @@ Each of these commands takes these flags:
 | `--stack` | the working directory when it is a Stack service, else the one Stack service under `./schemas/services` | the Stack service directory |
 | `--naming` | `<stack>/../../superschematic.toml` | naming config file |
 | `--program-dir` | `<schemas-root>/dist/program/<stack>/<environment>` | where to render the provisioner's program |
-| `--param` | none | a parameter's value for one run of a parameterized environment, `<name>=<value>`; repeatable. `plan`, `build`, `deploy`, `destroy` and `outputs` take it |
+| `--param` | none | a parameter's value for one run of a parameterized environment, `<name>=<value>`; repeatable. `plan`, `build`, `deploy`, `destroy`, `outputs` and `unlock` take it |
 
 ### `stack bootstrap <environment>`
 
@@ -844,8 +894,11 @@ the manifest records or `--bundle` names, fetched from the target and
 placed beside the program. It also lists
 the secrets with no value, the servers and jobs with no image or bundle
 yet and the sites with no files yet (which a deploy builds), the migration
-phases a failed deploy left part-way, and the records to create by hand
-for a domain no DNS platform holds. It exits 1 after printing when a plan
+phases a failed deploy left part-way, the jobs the deploy runs once after
+its rollout, the records to create by hand
+for a domain no DNS platform holds, and the run's deploy lock when a
+deploy holds it, since what the plan reads may change when that deploy
+ends. It takes no lock itself. It exits 1 after printing when a plan
 has a hazard of a `--fail-on` class that no `--allow` names.
 
 | Flag | Default | Meaning |
@@ -896,8 +949,13 @@ A build writes no deploy manifest.
 ### `stack deploy <environment>`
 
 Deploy the environment in deploy order: infrastructure, each database's
-`expand` phase, the servers and jobs wave by wave, callees first, the
-`contract` phases, exposure. Before any step, it builds the image of each
+`expand` phase, the servers and jobs wave by wave, callees first, each
+job the environment's settings run on every deploy (`onDeploy`), the
+`contract` phases, exposure. A job that runs on every deploy runs once,
+through the target's job runner as `stack run` runs it (on gcp an
+execution of its Cloud Run job), and the deploy waits for it; its last
+try failing stops the deploy before the `contract` phases with that try's
+error, and the next deploy runs it again. Before any step, it builds the image of each
 server and job
 `--image` names none for whose build context changed since the image the
 manifest records, as `stack build` does; one with no Dockerfile keeps the
@@ -918,6 +976,16 @@ stack's Cloud Run job, `<stack>-migrate`, which also gives each server
 that connects to a database its privileges. A rollout that fails runs no
 `contract` step, and the next deploy plans from the schema between the
 phases.
+
+The deploy holds the run's deploy lock, kept by the target's state store
+(on gcp the object `superschematic/locks/<stack>/<run>.json` of the state
+bucket), from before it reads the manifest until it ends, whether it
+succeeds or fails. A second deploy or a destroy of the run meanwhile
+fails at once, naming who holds the lock, the host, the process, the CI
+run and since when. Ctrl-C stops the step under way, records the failure
+in the manifest and releases the lock; a second Ctrl-C ends the process.
+A deploy whose process was killed leaves its lock, which `stack unlock`
+removes.
 
 A binary built from a checkout names no release of the migration runner
 to build the job's image from: set `SUPERSCHEMATIC_MIGRATE_IMAGE` to an
@@ -945,7 +1013,28 @@ superschematic stack deploy Preview --param pr=123 --expect plan.json --allow 'd
 ### `stack destroy <environment>`
 
 Remove every resource of the run and its deploy manifest. It asks for the
-run's name at a terminal unless `--yes`, and refuses without either.
+run's name at a terminal unless `--yes`, and refuses without either. It
+holds the run's deploy lock while it runs, as a deploy does.
+
+### `stack unlock <environment>`
+
+Remove the deploy lock of a run, which a deploy or a destroy leaves when
+its process dies before it ends: a killed CI job, a closed laptop. The
+lock has no expiry. It shows who holds the lock, the host, the process
+and since when, and asks for the run's name at a terminal unless
+`--yes`, and refuses without either. Remove a lock only once the deploy
+that holds it no longer runs. It removes the lock it showed and no other,
+so a lock another deploy took meanwhile stays; a run with no lock prints
+`no deploy holds the lock of <run>`.
+
+```
+superschematic stack unlock Staging
+superschematic stack unlock Preview --param pr=123 --yes
+```
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--yes` | false | remove the lock without asking |
 
 ### `stack outputs <environment>`
 

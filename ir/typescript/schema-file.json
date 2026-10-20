@@ -2264,6 +2264,9 @@
         "of": {
           "$ref": "#/$defs/DeployableRef"
         },
+        "onDeploy": {
+          "type": "boolean"
+        },
         "platform": {
           "default": "",
           "type": "string"
@@ -3619,6 +3622,14 @@
           "type": "string"
         },
         "lease": {
+          "default": "",
+          "type": "string"
+        },
+        "maxBackoff": {
+          "default": "",
+          "type": "string"
+        },
+        "retain": {
           "default": "",
           "type": "string"
         },

@@ -23,9 +23,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use superschematic_http_runtime::{
-    bearer_token, ed25519_public_jwk_from_pem, ApiError, Authenticator, JwtServiceAuthenticator,
-    KeyFetcher, Principal, RouteControls, ServiceAuthConfig, ServiceAuthenticator, ServiceCaller,
-    SignedKeySource,
+    bearer_token, ed25519_public_jwk_from_pem, is_loopback_url, ApiError, Authenticator,
+    JwtServiceAuthenticator, KeyFetcher, Loopback, Principal, RouteControls, ServiceAuthConfig,
+    ServiceAuthenticator, ServiceCaller, SignedKeySource,
 };
 use tower::ServiceExt;
 
@@ -400,6 +400,135 @@ async fn the_shared_signed_token_vectors() {
     assert!(
         failures.is_empty(),
         "{} signing vectors differ:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+}
+
+/// The loopback key's section (section 9.9 of `docs/stack-model.md`): the
+/// file's comment states the harness.
+#[derive(Deserialize)]
+struct LoopbackFile {
+    configs: HashMap<String, ServiceAuthConfig>,
+    loopback: LoopbackVectors,
+}
+
+#[derive(Deserialize)]
+struct LoopbackVectors {
+    seed: String,
+    deployable: String,
+    serves: Vec<String>,
+    now: u64,
+    issuer: Value,
+    header: String,
+    claims: serde_json::Map<String, Value>,
+    config: String,
+    checks: Vec<LoopbackCheck>,
+    refused: Vec<LoopbackRefused>,
+    urls: BTreeMap<String, bool>,
+}
+
+#[derive(Deserialize)]
+struct LoopbackCheck {
+    name: String,
+    token: String,
+    at: u64,
+    status: u16,
+    code: Option<String>,
+    caller: Option<ServiceCaller>,
+}
+
+#[derive(Deserialize)]
+struct LoopbackRefused {
+    name: String,
+    config: ServiceAuthConfig,
+}
+
+#[tokio::test]
+async fn the_shared_loopback_vectors() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(VECTORS);
+    let Ok(data) = std::fs::read(&path) else {
+        eprintln!(
+            "skipped: {} is absent; the Go runtime writes it",
+            path.display()
+        );
+        return;
+    };
+    let file: LoopbackFile = serde_json::from_slice(&data).expect("serviceauth_parity.json");
+    let v = &file.loopback;
+    let seed: [u8; 32] = URL_SAFE_NO_PAD
+        .decode(&v.seed)
+        .expect("seed")
+        .try_into()
+        .expect("a 32-byte seed");
+    let now = UNIX_EPOCH + Duration::from_secs(v.now);
+    let loopback = Loopback::with_seed(&seed, &v.deployable, &v.serves, move || -> SystemTime {
+        now
+    })
+    .expect("loopback key");
+    assert_eq!(
+        serde_json::to_value(loopback.issuer()).unwrap(),
+        v.issuer,
+        "issuer"
+    );
+    let token = loopback.token_source()(false).await.expect("token");
+    let segments: Vec<&str> = token.split('.').collect();
+    assert_eq!(segments[0], v.header, "header");
+    let mut claims: serde_json::Map<String, Value> =
+        serde_json::from_slice(&URL_SAFE_NO_PAD.decode(segments[1]).unwrap()).unwrap();
+    let jti = claims.remove("jti").expect("jti");
+    assert_eq!(
+        URL_SAFE_NO_PAD
+            .decode(jti.as_str().unwrap_or_default())
+            .map(|raw| raw.len()),
+        Ok(16),
+        "jti {jti}"
+    );
+    assert_eq!(claims, v.claims, "claims");
+
+    let config = loopback
+        .accept(file.configs[&v.config].clone())
+        .expect("accept");
+    let mut failures = Vec::new();
+    for check in &v.checks {
+        let at = UNIX_EPOCH + Duration::from_secs(v.now + check.at);
+        let authenticator = JwtServiceAuthenticator::new(config.clone())
+            .unwrap()
+            .with_clock(move || -> SystemTime { at });
+        let sent = if check.token.is_empty() {
+            &token
+        } else {
+            &check.token
+        };
+        let (parts, ()) = http::Request::builder()
+            .header("service-authorization", format!("Bearer {sent}"))
+            .body(())
+            .unwrap()
+            .into_parts();
+        let got = match authenticator.authenticate(&parts).await {
+            Ok(caller) => (200, None, caller),
+            Err(err) => (err.status.as_u16(), Some(err.code), None),
+        };
+        if got != (check.status, check.code.clone(), check.caller.clone()) {
+            failures.push(format!(
+                "{}: got {got:?}, want {} {:?} {:?}",
+                check.name, check.status, check.code, check.caller
+            ));
+        }
+    }
+    for refused in &v.refused {
+        if loopback.accept(refused.config.clone()).is_ok() {
+            failures.push(format!("accept took {}", refused.name));
+        }
+    }
+    for (url, want) in &v.urls {
+        if is_loopback_url(url) != *want {
+            failures.push(format!("is_loopback_url({url:?}) = {}, want {want}", !want));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} loopback vectors differ:\n{}",
         failures.len(),
         failures.join("\n")
     );

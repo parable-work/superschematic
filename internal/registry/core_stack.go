@@ -71,12 +71,13 @@ var (
 	// holds the values of the target the environment names, under the
 	// target's name (`gcp: { project, region }`). A settings element's keys
 	// other than of, job, worker, runner, platform, env, schedule,
-	// timeZone, enabled, instances and concurrency are the platform
-	// settings. job names a job of the API of; schedule, timeZone and
-	// enabled change that job's schedule (D52). worker names a worker of
-	// the API of; enabled, instances and concurrency change how it runs
-	// (D53). runner, true, names the engine's runner of the DB of; enabled
-	// turns it on or off (D58).
+	// timeZone, enabled, onDeploy, instances and concurrency are the
+	// platform settings. job names a job of the API of; schedule, timeZone
+	// and enabled change that job's schedule (D52), and onDeploy runs it on
+	// every deploy (D52, amended). worker names a worker of the API of;
+	// enabled, instances and concurrency change how it runs (D53). runner,
+	// true, names the engine's runner of the DB of; enabled turns it on or
+	// off (D58).
 	environmentArgs = json.RawMessage(`{
 		"type": "object",
 		"additionalProperties": {"type": "object"},
@@ -98,6 +99,7 @@ var (
 					"schedule": {"type": "string", "minLength": 1},
 					"timeZone": {"type": "string", "minLength": 1},
 					"enabled": {"type": "boolean"},
+					"onDeploy": {"type": "boolean"},
 					"platform": {"type": "string", "minLength": 1},
 					"env": {"type": "object", "additionalProperties": {"oneOf": [
 						{"type": ["string", "number", "boolean"]},
@@ -236,9 +238,9 @@ func applyEnvironment(td *ir.TypeDef, arg any) error {
 }
 
 // deployableSettings reads one settings element: of, job, worker, runner,
-// platform, env, a job's schedule, timeZone and enabled, a worker's
-// enabled, instances and concurrency, a runner's enabled, and the platform
-// settings in every other key.
+// platform, env, a job's schedule, timeZone, enabled and onDeploy, a
+// worker's enabled, instances and concurrency, a runner's enabled, and the
+// platform settings in every other key.
 func deployableSettings(element map[string]any) (*ir.DeployableSettings, error) {
 	settings := &ir.DeployableSettings{}
 	var job, worker string
@@ -273,6 +275,9 @@ func deployableSettings(element map[string]any) (*ir.DeployableSettings, error) 
 		case "enabled":
 			enabled, _ := value.(bool)
 			settings.Enabled = &enabled
+		case "onDeploy":
+			onDeploy, _ := value.(bool)
+			settings.OnDeploy = &onDeploy
 		case "platform":
 			settings.Platform, _ = value.(string)
 		case "env":
@@ -472,9 +477,9 @@ func verifyStack(schema *ir.Schema, r VerifyReporter) {
 }
 
 // checkJobSettings checks a settings element's job settings (D52): only an
-// element whose of names a job sets a schedule, a time zone or enabled, a
-// schedule is a five-field cron and a time zone an IANA one. Whether the
-// API declares the job is resolution's to check.
+// element whose of names a job sets a schedule, a time zone, enabled or
+// onDeploy, a schedule is a five-field cron and a time zone an IANA one.
+// Whether the API declares the job is resolution's to check.
 func checkJobSettings(where, owner string, settings *ir.DeployableSettings, r VerifyReporter) {
 	if settings.Of.Job == "" {
 		var keys []string
@@ -486,6 +491,9 @@ func checkJobSettings(where, owner string, settings *ir.DeployableSettings, r Ve
 		}
 		if settings.Enabled != nil && settings.Of.Worker == "" && !settings.Of.Runner {
 			keys = append(keys, "enabled")
+		}
+		if settings.OnDeploy != nil {
+			keys = append(keys, "onDeploy")
 		}
 		if len(keys) > 0 {
 			r.Errorf(owner, "%s sets %s, which only a job takes; name the job beside its API's handle, `of: <API handle>, job: \"<job class>\"`", where, strings.Join(keys, " and "))

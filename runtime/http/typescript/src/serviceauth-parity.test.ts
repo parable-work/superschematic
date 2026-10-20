@@ -4,6 +4,8 @@ import { fileURLToPath } from 'node:url';
 import { Hono } from 'hono';
 import {
   ed25519PublicJwkFromPem,
+  isLoopbackUrl,
+  loopbackServiceAuth,
   serviceAuthenticator,
   signedTokenSource,
   type Ed25519PrivateJwk,
@@ -11,6 +13,7 @@ import {
   type OperationSpec,
   type RequestContext,
   type ServiceAuthConfig,
+  type ServiceAuthIssuer,
   type ServiceCaller,
 } from './index';
 import { mountOperation } from './hono';
@@ -67,12 +70,35 @@ interface ParitySigning {
   readonly want: { readonly header: string; readonly kid: string; readonly claims: Readonly<Record<string, unknown>> } | null;
 }
 
+/** The loopback key's section (section 9.9 of docs/stack-model.md); the file's comment states the harness. */
+interface ParityLoopback {
+  readonly seed: string;
+  readonly deployable: string;
+  readonly serves: readonly string[];
+  readonly now: number;
+  readonly issuer: ServiceAuthIssuer;
+  readonly header: string;
+  readonly claims: Readonly<Record<string, unknown>>;
+  readonly config: string;
+  readonly checks: readonly {
+    readonly name: string;
+    readonly token: string;
+    readonly at: number;
+    readonly status: number;
+    readonly code: string | null;
+    readonly caller: ServiceCaller | null;
+  }[];
+  readonly refused: readonly { readonly name: string; readonly config: ServiceAuthConfig }[];
+  readonly urls: Readonly<Record<string, boolean>>;
+}
+
 interface ParityCorpus {
   readonly users: Readonly<Record<string, ParityUser>>;
   readonly jwks: Readonly<Record<string, unknown>>;
   readonly configs: Readonly<Record<string, ServiceAuthConfig>>;
   readonly vectors: readonly ParityVector[];
   readonly signing: readonly ParitySigning[];
+  readonly loopback: ParityLoopback;
 }
 
 /** The token the signed-token source signs for a vector, or the Error it refuses the key with. */
@@ -199,6 +225,50 @@ describe('signed-token source parity vectors', () => {
       expect(caller?.deployable).toBe(vector.issuer);
     });
   }
+});
+
+describe('loopback key parity vectors', () => {
+  if (!corpus) {
+    test.skip(`skipped: ${CORPUS} is absent; the Go runtime writes it`, () => {});
+    return;
+  }
+  const vector = corpus.loopback;
+  const build = () => loopbackServiceAuth(vector.deployable, vector.serves, { seed: base64urlDecode(vector.seed)!, now: () => vector.now * 1000 });
+
+  test('the issuer and the token', async () => {
+    const loopback = await build();
+    expect(loopback.issuer).toEqual(vector.issuer);
+    const [header, payload] = (await loopback.token(false)).split('.') as [string, string, string];
+    expect(header).toBe(vector.header);
+    const { jti, ...claims } = JSON.parse(new TextDecoder().decode(base64urlDecode(payload))) as Record<string, unknown>;
+    expect(claims).toEqual({ ...vector.claims });
+    expect(base64urlDecode(jti as string)?.length).toBe(16);
+  });
+
+  for (const check of vector.checks) {
+    test(check.name, async () => {
+      const loopback = await build();
+      const token = check.token === '' ? await loopback.token(false) : check.token;
+      const authenticate = serviceAuthenticator(loopback.accept(corpus.configs[vector.config]!), { now: () => (vector.now + check.at) * 1000 });
+      let got: { status: number; code: string | null; caller: ServiceCaller | null };
+      try {
+        got = { status: 200, code: null, caller: await authenticate({ headers: new Headers({ 'service-authorization': `Bearer ${token}` }) } as RequestContext) };
+      } catch (error) {
+        const problem = error as { status: number; code?: string };
+        got = { status: problem.status, code: problem.code ?? null, caller: null };
+      }
+      expect(got).toEqual({ status: check.status, code: check.code, caller: check.caller });
+    });
+  }
+
+  test('the fields the issuer cannot be added to', async () => {
+    const loopback = await build();
+    for (const refused of vector.refused) expect(() => loopback.accept(refused.config)).toThrow(/loopback issuer/u);
+  });
+
+  test('the URLs the credential goes to', () => {
+    for (const [url, want] of Object.entries(vector.urls)) expect([url, isLoopbackUrl(url)]).toEqual([url, want]);
+  });
 });
 
 describe('sha256', () => {

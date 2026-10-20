@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { createLogger } from './logger';
-import { runWorker, workerConcurrency, WORKER_CONCURRENCY_VARIABLE, type WorkerMessage, type WorkerQueue } from './worker';
+import { PRUNE_BATCH, runWorker, workerConcurrency, WORKER_CONCURRENCY_VARIABLE, type WorkerMessage, type WorkerQueue } from './worker';
 
 /** A queue in memory: messages to claim, and what the loop did with each, as the Go loop's tests keep it. */
 class FakeQueue {
@@ -173,6 +173,58 @@ describe('runWorker', () => {
     await stopped;
     const failed = lines.filter(line => line.msg === 'claim failed');
     expect(failed.map(line => line.retryIn)).toEqual([0.005, 0.01]);
+  });
+
+  test('it prunes as it starts, a batch at a time while a batch is whole, then every period, and logs each total and each failure', async () => {
+    const answers: (number | Error)[] = [PRUNE_BATCH, PRUNE_BATCH, 7, new Error('the database is down'), 3];
+    const limits: number[] = [];
+    const { lines, logger } = logs();
+    const stop = new AbortController();
+    const stopped = runWorker(
+      {
+        ...new FakeQueue(60).queue(),
+        prune: async limit => {
+          limits.push(limit);
+          const answer = answers.shift() ?? 0;
+          if (answer instanceof Error) throw answer;
+          return answer;
+        },
+      },
+      { signal: stop.signal, idleMs: 5, pruneEveryMs: 20, logger }
+    );
+    await waitFor('four prunes', () => limits.length >= 6);
+    stop.abort();
+    await stopped;
+    expect(new Set(limits)).toEqual(new Set([PRUNE_BATCH]));
+    const pruned = lines.filter(line => line.msg === 'done messages pruned');
+    expect(pruned.map(line => [line.pruned, line.queue])).toEqual([
+      [2 * PRUNE_BATCH + 7, 'Fake'],
+      [3, 'Fake'],
+    ]);
+    const failed = lines.filter(line => line.msg === 'pruning the done messages failed');
+    expect(failed.map(line => [line.level, line.pruned])).toEqual([['warn', 0]]);
+  });
+
+  test('a stopping worker waits for no prune that runs', async () => {
+    let pruning = false;
+    const { lines, logger } = logs();
+    const stop = new AbortController();
+    const stopped = runWorker(
+      {
+        ...new FakeQueue(60).queue(),
+        prune: () => {
+          pruning = true;
+          return new Promise<number>(() => {});
+        },
+      },
+      { signal: stop.signal, idleMs: 5, logger }
+    );
+    await waitFor('the prune started', () => pruning);
+    const began = Date.now();
+    stop.abort();
+    await stopped;
+    expect(Date.now() - began).toBeLessThan(1_000);
+    expect(lines.some(line => line.msg === 'pruning the done messages failed')).toBe(false);
   });
 
   test('a queue without a lease does not run', async () => {

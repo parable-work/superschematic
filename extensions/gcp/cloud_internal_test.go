@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"reflect"
 	"strings"
 	"testing"
@@ -14,6 +15,7 @@ import (
 	"cloud.google.com/go/run/apiv2/runpb"
 	"cloud.google.com/go/storage"
 	"github.com/googleapis/gax-go/v2"
+	"google.golang.org/api/googleapi"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
@@ -330,5 +332,29 @@ func TestWithLifecycleRule(t *testing.T) {
 				t.Errorf("withLifecycleRule = %+v, %v; want %+v, %v", got, changed, tc.want, tc.changed)
 			}
 		})
+	}
+}
+
+// TestPreconditionFailed: the deploy lock reads Cloud Storage's refusal of
+// a generation precondition (D46, amended) from the JSON API's 412 and
+// gRPC's FAILED_PRECONDITION, wrapped or not, and nothing else as one.
+func TestPreconditionFailed(t *testing.T) {
+	for _, tc := range []struct {
+		err  error
+		want bool
+	}{
+		{&googleapi.Error{Code: http.StatusPreconditionFailed}, true},
+		{fmt.Errorf("close: %w", &googleapi.Error{Code: http.StatusPreconditionFailed}), true},
+		{status.Error(codes.FailedPrecondition, "conditionNotMet"), true},
+		{&googleapi.Error{Code: http.StatusNotFound}, false},
+		{&googleapi.Error{Code: http.StatusForbidden}, false},
+		{status.Error(codes.PermissionDenied, "denied"), false},
+		{storage.ErrObjectNotExist, false},
+		{errors.New("connection reset"), false},
+		{nil, false},
+	} {
+		if got := preconditionFailed(tc.err); got != tc.want {
+			t.Errorf("preconditionFailed(%v) = %v, want %v", tc.err, got, tc.want)
+		}
 	}
 }

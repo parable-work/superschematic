@@ -114,6 +114,15 @@ func WriteTypesWithProfile(output *ModuleOutput, outputDir string, prof *profile
 			nestedModules[imported.Name] = imported.ImportPackage + "/validators"
 		}
 	}
+	// A union field's values are read with parse<Union>FromJSON: a local
+	// union's from validators/unions.ts, an imported one's from its
+	// dependency package's validators.
+	unionModules := make(map[string]string)
+	for _, imported := range output.ImportedTypes {
+		if imported.IsUnion {
+			unionModules[imported.Name] = imported.ImportPackage + "/validators"
+		}
+	}
 	allEnums := append([]codegen.EnumInfo{}, output.Enums...)
 	for _, imported := range output.ImportedTypes {
 		if imported.IsEnum {
@@ -189,8 +198,13 @@ func WriteTypesWithProfile(output *ModuleOutput, outputDir string, prof *profile
 				// entry's validator and parser come from: the local
 				// type's file, or a dependency package's validators.
 				ParserNestedImports []NestedImport
-				ParserScalarsUsed   []ScalarInfo
-				NeedsJSONParse      bool
+				// ParserUnionTypes are the unions of the type's union
+				// fields, and ParserUnionImports where each one's
+				// parse<Union>FromJSON comes from.
+				ParserUnionTypes   []string
+				ParserUnionImports []ModuleImport
+				ParserScalarsUsed  []ScalarInfo
+				NeedsJSONParse     bool
 				// ValidatesNestedObjects is true when validate<Type>
 				// validates a nested object field and reports its errors
 				// with addNestedErrors.
@@ -209,11 +223,13 @@ func WriteTypesWithProfile(output *ModuleOutput, outputDir string, prof *profile
 				EnumDefaultsUsed:   typeEnumDefaultsUsed(t, allEnums),
 				ScalarDefaultCasts: typeScalarDefaultCasts(t),
 				ParserNestedTypes:  typeParserNestedTypes(t, nestedTypeNames),
+				ParserUnionTypes:   typeParserUnionTypes(t),
 				ParserScalarsUsed:  typeParserScalarsUsed(t),
 				NeedsJSONParse:     typeNeedsJSONParse(t, nestedTypeNames),
 				PrimitiveHelpers:   typePrimitiveHelpers(t),
 			}
 			data.ParserNestedImports = nestedImports(data.ParserNestedTypes, nestedModules)
+			data.ParserUnionImports = unionImports(data.ParserUnionTypes, unionModules)
 			data.ValidatesNestedObjects = typeValidatesNestedObjects(t, data.ParserNestedTypes)
 			if err := generateFile(generator, "validator_type.tmpl", outPath, data); err != nil {
 				return fmt.Errorf("failed to generate %s: %w", outPath, err)
@@ -236,6 +252,7 @@ func WriteTypesWithProfile(output *ModuleOutput, outputDir string, prof *profile
 		{Condition: hasPrimitiveHelpers, Template: "validator_primitives.tmpl", Filename: "primitives.ts"},
 		{Condition: hasScalars, Template: "validators_scalars_index.tmpl", Filename: filepath.Join("scalars", "index.ts")},
 		{Condition: hasEnums, Template: "validator_enums.tmpl", Filename: "enums.ts"},
+		{Condition: hasUnions, Template: "validator_unions.tmpl", Filename: "unions.ts"},
 		{Condition: len(output.Types) > 0, Template: "validators_types_index.tmpl", Filename: filepath.Join("types", "index.ts")},
 		{Condition: len(output.Types) > 0, Template: "validator_errors.tmpl", Filename: "errors.ts"},
 		{Condition: true, Template: "validators_index.tmpl", Filename: "index.ts"},

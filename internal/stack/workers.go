@@ -141,6 +141,9 @@ func (r *resolver) applyWorkerSettings(where, env string, d *deployable, entry *
 	if entry.Schedule != "" || entry.TimeZone != "" {
 		r.fail(CodeInvalidSettings, "%s sets a schedule or a time zone on worker %s, which runs until it is stopped; only a job takes them", where, d.res.Name)
 	}
+	if entry.OnDeploy != nil {
+		r.fail(CodeInvalidSettings, "%s sets onDeploy on worker %s, which runs until it is stopped; only a job runs on each deploy", where, d.res.Name)
+	}
 	s := &d.settings
 	if s.workerFrom == nil {
 		s.workerFrom = map[string]string{}

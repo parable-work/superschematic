@@ -261,6 +261,9 @@ func (r run) generateServers() error {
 		if err := servergen.PruneRustMirrors(r.Options.OutputRoot); err != nil {
 			return err
 		}
+		if err := r.pruneTypeScriptMirrors(); err != nil {
+			return err
+		}
 		r.Skip(serverGenerator)
 		return nil
 	}
@@ -287,6 +290,9 @@ func (r run) generateServers() error {
 		if server.Docker == nil {
 			r.Logf("  - %s %s: no Dockerfile, since %s\n", server.Kind, server.Name, server.NoDocker)
 		}
+	}
+	if err := r.writeTypeScriptMirrors(tsPlans); err != nil {
+		return fmt.Errorf("stack %s: %w", st.Name, err)
 	}
 	if err := r.writeRustMirrors(rustPlans); err != nil {
 		return fmt.Errorf("stack %s: %w", st.Name, err)
@@ -318,6 +324,36 @@ func (r run) writeRustMirrors(servers []*servergen.RustServer) error {
 		}
 	}
 	return servergen.PruneRustMirrors(r.Options.OutputRoot)
+}
+
+// writeTypeScriptMirrors brings the mirror of each implementation the
+// stack's TypeScript servers, jobs and workers build against up to date
+// under the output root, when it is not the default one (D65, amended;
+// servergen's tsmirror.go), once for an implementation two of them build
+// against, after the scaffolds are written, then removes the mirrors no
+// package under the output root's server/ depends on any longer,
+// whichever stack's. The output root's install reads them next.
+func (r run) writeTypeScriptMirrors(servers []*servergen.TypeScriptServer) error {
+	written := map[string]bool{}
+	for _, server := range servers {
+		for _, m := range server.Mirrors {
+			if written[m.Dir] {
+				continue
+			}
+			written[m.Dir] = true
+			if err := servergen.WriteTypeScriptMirror(m); err != nil {
+				return err
+			}
+		}
+	}
+	return r.pruneTypeScriptMirrors()
+}
+
+// pruneTypeScriptMirrors removes the TypeScript mirrors under the output
+// root no server, job or worker package depends on, or, in the default
+// output root, which holds none, every one.
+func (r run) pruneTypeScriptMirrors() error {
+	return servergen.PruneTypeScriptMirrors(r.Options.OutputRoot, tsgen.Mirrored(r.Options.OutputRoot, r.Options.SchemasRoot))
 }
 
 // writeRustWorkspace writes the output root's Cargo workspace for the
@@ -883,6 +919,7 @@ func (r run) planTypeScriptServer(stackName string, s *ir.ResolvedDeployable, cl
 		Server:             s.Name,
 		Dir:                servergen.ServerDir(out, stackName, s.Name),
 		OutputRoot:         out,
+		DefaultOutputRoot:  tsgen.DefaultOutputRoot(r.Options.SchemasRoot),
 		Naming:             r.Options.Naming,
 		RepositoryRoot:     r.Options.Naming.BuildContext(r.Options.RepositoryRoot),
 		ImplementationRoot: r.Options.RepositoryRoot,

@@ -237,12 +237,26 @@ export abstract class LocalPortString {}
   fake: { project: "acme-staging", region: "us-east1" },
   settings: [
     { of: ShopCart, job: "ExpireCarts", schedule: "0 * * * *", timeZone: "Europe/Paris", cpu: "1", env: { LOG_LEVEL: "warn" } },
-    { of: ShopCart, job: "SendDigest", enabled: false },
+    { of: ShopCart, job: "SendDigest", enabled: false, onDeploy: true },
     // A handle with no jobs type takes any job name, which the loader checks.
     { of: ShopOrders, job: "Anything", enabled: true },
   ],
 })
 export abstract class JobSettings {}
+
+@environment({
+  target: "fake",
+  // @ts-expect-error onDeploy is a job's setting
+  settings: [{ of: ShopApi, onDeploy: true }],
+})
+export abstract class OnDeployOnServer {}
+
+@environment({
+  target: "fake",
+  // @ts-expect-error onDeploy is a boolean
+  settings: [{ of: ShopCart, job: "ExpireCarts", onDeploy: "yes" }],
+})
+export abstract class OnDeployString {}
 
 @environment({
   target: "local",
@@ -364,6 +378,13 @@ export abstract class InstancesOnServer {}
   settings: [{ of: ShopFulfilment, worker: "FulfilOrders", schedule: "0 * * * *" }],
 })
 export abstract class ScheduleOnWorker {}
+
+@environment({
+  target: "fake",
+  // @ts-expect-error onDeploy is a job's setting, not a worker's
+  settings: [{ of: ShopFulfilment, worker: "FulfilOrders", onDeploy: true }],
+})
+export abstract class OnDeployOnWorker {}
 
 @environment({
   target: "fake",

@@ -1,6 +1,7 @@
 package tsgen
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,12 +17,14 @@ import (
 // TestQueuesWriteWhatTheGoORMWrites: for every queue of fixture-queue-db,
 // whose message holds a field of every kind a column takes, and of
 // fixture-queue-geo-db, whose message holds locations and durations,
-// queues.ts carries the statements the Go ORM runs, byte for byte, and
-// writes each field to the column the Go ORM writes, as JSON where the Go
-// ORM marshals it, as an array where it passes a list, as a POINT where it
-// passes a pgtype.Point and as an INTERVAL where it passes a time.Duration,
-// with the enum default it writes (D53). A message one language enqueues
-// the other claims alike.
+// queues.ts carries the statements the Go ORM runs, byte for byte, the
+// prune and a complete that deletes for a queue that keeps no done message
+// among them, with the Go ORM's arguments, and writes each field to the
+// column the Go ORM writes, as JSON where the Go ORM marshals it, as an
+// array where it passes a list, as a POINT where it passes a pgtype.Point
+// and as an INTERVAL where it passes a time.Duration, with the enum default
+// it writes (D53, D68). A message one language enqueues the other claims
+// alike.
 func TestQueuesWriteWhatTheGoORMWrites(t *testing.T) {
 	for _, fixture := range []string{"fixture-queue-db", "fixture-queue-geo-db"} {
 		t.Run(fixture, func(t *testing.T) { testQueuesWriteWhatTheGoORMWrites(t, fixture) })
@@ -57,9 +60,10 @@ func testQueuesWriteWhatTheGoORMWrites(t *testing.T, fixture string) {
 		if q.Statements != g.Statements {
 			t.Errorf("queue %s: queues.ts's statements are not the Go ORM's:\n%+v\n%+v", q.Name, q.Statements, g.Statements)
 		}
-		if q.Table != g.QuotedTableName || q.Retries != g.Retries || q.BackoffSeconds != g.BackoffSeconds || q.LeaseSeconds != g.LeaseSeconds {
-			t.Errorf("queue %s: queues.ts's table and arguments %s %d %d %d are not the Go ORM's %s %d %d %d", q.Name,
-				q.Table, q.Retries, q.BackoffSeconds, q.LeaseSeconds, g.QuotedTableName, g.Retries, g.BackoffSeconds, g.LeaseSeconds)
+		ts := fmt.Sprintf("%s %d %d %d %d %d", q.Table, q.Retries, q.BackoffSeconds, q.MaxBackoffSeconds, q.LeaseSeconds, q.RetainSeconds)
+		goORM := fmt.Sprintf("%s %d %d %d %d %d", g.QuotedTableName, g.Retries, g.BackoffSeconds, g.MaxBackoffSeconds, g.LeaseSeconds, g.RetainSeconds)
+		if ts != goORM {
+			t.Errorf("queue %s: queues.ts's table, retries, backoff, maximum backoff, lease and retention %s are not the Go ORM's %s", q.Name, ts, goORM)
 		}
 		if len(q.Fields) != len(g.Fields) {
 			t.Fatalf("queue %s: queues.ts writes %d fields and the Go ORM %d", q.Name, len(q.Fields), len(g.Fields))

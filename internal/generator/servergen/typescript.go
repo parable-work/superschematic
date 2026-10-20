@@ -129,6 +129,14 @@ type TypeScriptInput struct {
 	// OutputRoot is the root of the Bun workspace the package joins.
 	OutputRoot string
 
+	// DefaultOutputRoot is the output root whose Bun workspace the
+	// project's own packages are members of, the implementations among
+	// them (tsgen.DefaultOutputRoot). Under any other output root the
+	// server builds against mirrors of the implementations its APIs serve,
+	// which the build copies under the root's impl/ (D65; tsmirror.go).
+	// Empty takes OutputRoot as the default.
+	DefaultOutputRoot string
+
 	// APIs are the APIs the server serves, sorted by service.
 	APIs []TypeScriptAPIInput
 
@@ -218,6 +226,13 @@ type TypeScriptServer struct {
 	Databases []*TypeScriptDatabase
 	Clients   []*TypeScriptClient
 
+	// Loopback is the server's loopback key, nil without one: a server
+	// has one when it calls an API it serves itself whose operations have a
+	// service clause (docs/stack-model.md, section 9.9). The shared wiring's
+	// ts-loopback builds it, and each such client and service authenticator
+	// takes it.
+	Loopback *Loopback
+
 	// Buckets are the buckets main.ts opens once, for every API that lists
 	// it. With one, the package depends on GCS's Node client (D54).
 	Buckets []*TypeScriptBucket
@@ -236,6 +251,11 @@ type TypeScriptServer struct {
 	// NoDocker says why.
 	Docker   *TypeScriptDocker
 	NoDocker string
+
+	// Mirrors are the mirrors of the served APIs' implementations under
+	// the output root, which the server builds against outside the default
+	// output root (D65), one per API; none in the default one.
+	Mirrors []*TypeScriptMirror
 }
 
 // TypeScriptWorker is the worker a TypeScript worker's entrypoint runs
@@ -312,8 +332,11 @@ type TypeScriptAPI struct {
 	IdentityField string
 
 	// Callers is its callers field, which serviceAuthenticator reads, when
-	// an operation has a service clause (D37).
-	Callers string
+	// an operation has a service clause (D37), and Loopback the variable of
+	// the server's loopback key, which that authenticator accepts beside
+	// the field, when the server has one (section 9.9).
+	Callers  string
+	Loopback string
 
 	// CORS is the variable of the origins its CORS field lists, which
 	// loadCors reads, and CORSField that field, when a site of the stack
@@ -403,6 +426,11 @@ type TypeScriptClient struct {
 	// From is the expression that reads the callee's endpoint from the
 	// first calling API's config.
 	From string
+
+	// Loopback is true when the callee is an API the server serves itself
+	// whose operations have a service clause: the client then sends the
+	// server's loopback credential when its endpoint carries none.
+	Loopback bool
 }
 
 // TypeScriptDocker is a TypeScript server's Dockerfile plan. Paths are
@@ -453,7 +481,7 @@ var tsReserved = []string{
 	"parseIdentityConfigJSON", "postgresIdentityStore", "IdentityConfig", "identityConfig",
 	"loadCors", "corsHandler", "corsMethods", "matchOperations", "handle",
 	"run", "jobs", "workers", "queue", "stop", "signal", "started", "concurrency", "pools",
-	"postgresQueue", "runWorker", "workerConcurrency",
+	"postgresQueue", "runWorker", "workerConcurrency", "loopbackServiceAuth", "Loopback",
 	"openEngineInBackground", "engineApp", "engineMcp", "engineRouteSpecs", "AsyncEngine", "EngineBackground",
 	"EngineHttpOptions", "EngineOptions", "Principal", "Logger", "cloudSqlSocket", "loadDatabase",
 	"openEngine", "engineURL", "deployEngine", "startRunner", "engineReady", "mountEngine", "engineStreams", "engines",
@@ -691,7 +719,23 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 		s.APIs = append(s.APIs, api)
 	}
 	slices.Sort(s.CloudSQL)
+	s.planLoopback(taken)
 	s.planPackage()
+	if in.DefaultOutputRoot != "" && !tsgen.SamePath(in.OutputRoot, in.DefaultOutputRoot) {
+		// The image holds each mirror whole in place of its package.
+		dirs := maps.Clone(in.PackageDirs)
+		for _, a := range in.APIs {
+			m, err := planTypeScriptMirror(in.OutputRoot, in.DefaultOutputRoot, a)
+			if err != nil {
+				return nil, err
+			}
+			s.Mirrors = append(s.Mirrors, m)
+			if dirs != nil {
+				dirs[a.Implementation.Package] = m.Dir
+			}
+		}
+		in.PackageDirs = dirs
+	}
 	dir, err := filepath.Abs(in.Dir)
 	if err != nil {
 		return nil, err
@@ -701,6 +745,36 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 		return nil, err
 	}
 	return s, nil
+}
+
+// planLoopback gives a server that calls an API it serves itself, whose
+// operations have a service clause, its loopback key, marks each such
+// client to send it, and has each API with a callers field accept it
+// (docs/stack-model.md, section 9.9). A job or a worker has none: an API
+// it calls is served by another deployable, whose connector gives the call
+// its credential.
+func (s *TypeScriptServer) planLoopback(taken names) {
+	if s.Background() {
+		return
+	}
+	serves := make([]string, len(s.APIs))
+	guarded := map[string]bool{}
+	for i, a := range s.APIs {
+		serves[i] = a.Service
+		guarded[a.Service] = a.Callers != ""
+	}
+	for _, c := range s.Clients {
+		c.Loopback = guarded[c.Service]
+	}
+	if !slices.ContainsFunc(s.Clients, func(c *TypeScriptClient) bool { return c.Loopback }) {
+		return
+	}
+	s.Loopback = &Loopback{Var: taken.take("loopback"), Serves: serves}
+	for _, a := range s.APIs {
+		if a.Callers != "" {
+			a.Loopback = s.Loopback.Var
+		}
+	}
 }
 
 // RouterOptions are the members of the options main.ts builds the API's
@@ -718,6 +792,8 @@ func (a *TypeScriptAPI) RouterOptions() []string {
 	switch {
 	case a.ServiceAuthenticator != "":
 		out = append(out, "authenticateService: "+a.ServiceAuthenticator)
+	case a.Callers != "" && a.Loopback != "":
+		out = append(out, "authenticateService: serviceAuthenticator("+a.Loopback+".accept("+a.Config+"."+a.Callers+"))")
 	case a.Callers != "":
 		out = append(out, "authenticateService: serviceAuthenticator("+a.Config+"."+a.Callers+")")
 	}
@@ -766,6 +842,9 @@ func (s *TypeScriptServer) RuntimeImports() []string {
 	}
 	if len(s.Clients) > 0 {
 		out = append(out, "serviceCredentialFor")
+	}
+	if s.Loopback != nil {
+		out = append(out, "loopbackServiceAuth", "type Loopback")
 	}
 	if s.AnyCORS() {
 		out = append(out, "corsHandler", "corsMethods", "loadCors", "matchOperations")
@@ -915,13 +994,19 @@ func planTypeScriptDocker(in TypeScriptInput, s *TypeScriptServer, dir string) (
 	// built before the stack. The server runs the packages it imports,
 	// whole: every types package, whichever the generated packages it
 	// imports reach, and each API package, SDK and implementation it
-	// depends on.
-	if in.ImplementationRoot == "" {
-		return nil, "no repository root to find the implementations under", nil
-	}
-	implementations, ok := rel(filepath.Join(in.ImplementationRoot, filepath.FromSlash(in.Naming.OrDefault().TypeScriptImplementationGlob())))
-	if !ok {
-		return nil, outside("the TypeScript implementations at", in.Naming.OrDefault().TypeScriptImplementationGlob()), nil
+	// depends on. Outside the default output root the implementations are
+	// the root's mirrors, its members under impl/ (D65), and no
+	// implementation's own directory goes in.
+	var implementations string
+	if len(s.Mirrors) > 0 {
+		implementations = d.Workspace + "/" + MirrorRoot + "/*"
+	} else {
+		if in.ImplementationRoot == "" {
+			return nil, "no repository root to find the implementations under", nil
+		}
+		if implementations, ok = rel(filepath.Join(in.ImplementationRoot, filepath.FromSlash(in.Naming.OrDefault().TypeScriptImplementationGlob()))); !ok {
+			return nil, outside("the TypeScript implementations at", in.Naming.OrDefault().TypeScriptImplementationGlob()), nil
+		}
 	}
 	d.Include = []string{
 		d.Workspace + "/package.json",

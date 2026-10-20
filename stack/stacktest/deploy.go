@@ -24,13 +24,75 @@ import (
 // and a bootstrap that keep everything in memory and record each call in the
 // provisioner's call log, so a test reads the order a deploy ran in.
 
-// FakeState is a state store in memory.
+// FakeState is a state store in memory. It keeps each run's deploy lock
+// beside its manifest (D46, amended), as a target's store does where it
+// can take one atomically.
 type FakeState struct {
 	mu        sync.Mutex
 	manifests map[string][]byte
+	locks     map[string]registry.DeployLock
+
+	// LockFail, when set, is the error Lock returns; UnlockFail the error
+	// Unlock returns, with the lock left as it is.
+	LockFail   error
+	UnlockFail error
+
+	// Locked counts the locks taken, and Unlocked the locks released.
+	Locked, Unlocked int
 }
 
-var _ registry.StateStore = (*FakeState)(nil)
+var (
+	_ registry.StateStore  = (*FakeState)(nil)
+	_ registry.StateLocker = (*FakeState)(nil)
+)
+
+// Lock takes the run's lock, or refuses with the lock another holds.
+func (s *FakeState) Lock(_ context.Context, run registry.Run, lock registry.DeployLock) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.LockFail != nil {
+		return s.LockFail
+	}
+	if held, ok := s.locks[run.Name()]; ok {
+		return &registry.LockHeldError{Lock: held}
+	}
+	if s.locks == nil {
+		s.locks = map[string]registry.DeployLock{}
+	}
+	s.locks[run.Name()] = lock
+	s.Locked++
+	return nil
+}
+
+// ReadLock returns the run's lock, or nil.
+func (s *FakeState) ReadLock(_ context.Context, run registry.Run) (*registry.DeployLock, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	held, ok := s.locks[run.Name()]
+	if !ok {
+		return nil, nil
+	}
+	return &held, nil
+}
+
+// Unlock removes the run's lock when it holds id.
+func (s *FakeState) Unlock(_ context.Context, run registry.Run, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.UnlockFail != nil {
+		return s.UnlockFail
+	}
+	held, ok := s.locks[run.Name()]
+	switch {
+	case !ok:
+		return nil
+	case held.ID != id:
+		return &registry.LockHeldError{Lock: held}
+	}
+	delete(s.locks, run.Name())
+	s.Unlocked++
+	return nil
+}
 
 // Backend is a fake backend named after the environment's stack.
 func (s *FakeState) Backend(_ context.Context, env *ir.ResolvedEnvironment) (registry.StateBackend, error) {
