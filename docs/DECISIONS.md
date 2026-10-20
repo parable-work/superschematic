@@ -4328,11 +4328,11 @@ with no credential, from a server with no edge, or for another audience is
 Docker. The parity vectors are unchanged.
 
 The TypeScript and Rust entrypoints read the same field (D51, D57), and
-D63 builds the generic connector. Not built: key rotation, and the field
-outside a stack, where `values-schema.json` does not list it. A call
-between two APIs one server serves carries no credential, so a
-`@requireService` operation refuses it though section 9.3's check counts
-it, which section 9.9 of `docs/stack-model.md` leaves open.
+D63 builds the generic connector. The last amendment of D37 builds the
+field outside a stack, which `values-schema.json` now lists, and a
+credential for a call between two APIs one server serves, which a
+`@requireService` operation refused though section 9.3's check counted
+it. Not built: key rotation.
 
 The rule is reversible until the first release.
 
@@ -7035,5 +7035,37 @@ the project's links unmoved, and fails without the mirror; the TypeScript
 Dockerfile test builds and serves an image from another root.
 `TestStackDevRunsTheShop` no longer reinstalls the shop after its run into
 an output root of its own. Not built: mirrors of sites.
+
+The rule is reversible until the first release.
+
+### D37, amended: a call between two APIs one server serves carries the server's own loopback credential, and `values-schema.json` lists the callers field
+
+A call between two APIs one server serves stayed on loopback with no
+credential, so the callee's `@requireService` operation refused what
+section 9.3's check counted as admitted (`docs/stack-model.md`, section
+9.9). And a server deployed outside a stack could not be told its
+callers: `values-schema.json` left the callers field out, so its
+`@requireService` operations refused everyone. This settles the HTTP path
+alone; an operation run in process (D43) is another amendment's.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A server that holds a client of an API it serves itself, where that API has a service clause, generates an Ed25519 key pair at start, held only in its process: Go's `serviceauth.NewLoopback`, TypeScript's `loopbackServiceAuth` in the shared wiring, Rust's `Loopback::generate`. The client sends a token under it, D63's, whose `iss`, `sub` and `aud` are the server's deployable, good for 300 seconds and signed again with 60 left, only to a loopback URL and only when its endpoint carries no credential of its own. Each API with a clause takes the key into its callers field as one more issuer before its verifier is built, so the shared verifier checks it. | Exempting such calls from the service step, which admits anything that reaches loopback, a sidecar or a forwarded port. Running the callee in process, which only Rust has (D43). A key per environment that a connector generates and the secret store holds, a secret no other process needs. |
+| The loopback caller is the server, serving every API it serves, so `from` admits what section 9.3's check counts, as it admits a caller on another server. | A token naming the calling API, which would refuse calls the same two APIs pass on two servers and needs a client per calling API. |
+| The connectors do not change: the edge still derives a loopback URL with no credential, and the generated entrypoint adds the credential, since it knows at build time which of its clients call an API it serves. An endpoint set by hand that names another host, or carries a credential, sends what it says. A callers field that already uses the server's name as an issuer is refused at start. One literal rule says what a loopback URL is in all three runtimes, http or https, then `localhost`, `[::1]` or a canonical `127.x.x.x`, then an optional port, and the parity vectors' `loopback` section pins it with the issuer and the token. | A credential source the connector names in the endpoint, which a values file could point at another host. Each language's URL parser, whose leniencies differ. |
+| `values-schema.json` lists an API's callers field when an operation has a service clause, in every server language and even as the API's only configuration: `<API>_CALLERS_ISSUERS` a property, each issuer's, key's and caller's members `patternProperties` under its index with the shapes the loaders accept, and an `x-superschematic` entry naming the field's variables. The CORS and identity config fields stay unlisted: they are optional and default safely. | Leaving the field unlisted, so a deployment outside a stack writes its variables with no contract. One JSON variable holding the field, which section 3.4 refuses. |
+
+Status: built. Each server's serve test runs a server of two APIs behind
+a capturing proxy on loopback: Go's
+`TestAServerCallsAnAPIItServesWithItsLoopbackKey`, TypeScript's
+`ts-merged-stack` in `TestTypeScriptEntrypointCompilesAndServes`, and
+Rust's Warehouse in `TestRustEntrypointCompilesAndServes`. The call to
+the `@requireService` operation is admitted as the server; a call with no
+credential, a token under another key, and the captured token at a second
+process of the server are 401. `serviceauth_parity.json`'s `loopback`
+section holds the three runtimes to one issuer, token, clock and URL rule.
+`TestTheCallersFieldsSchemaIsWhatTheReadersRead` holds the schema to the
+loaders, and `TestAServiceClauseAdmitsItsCallers` starts a server from a
+values file the schema checks. No loopback call has run on Cloud Run.
 
 The rule is reversible until the first release.
