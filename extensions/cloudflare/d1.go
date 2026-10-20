@@ -2,7 +2,6 @@ package cloudflare
 
 import (
 	"encoding/json"
-	"fmt"
 
 	ir "github.com/parable-work/superschematic/ir"
 	"github.com/parable-work/superschematic/registry"
@@ -72,11 +71,7 @@ func D1Name(stack, service string) string {
 // member of a preview gets databases of its own:
 // `acme-shop-reviews-db-pr123` when pr is 123.
 func d1Name(env registry.StackEnvironment, service string) any {
-	parts := []any{D1Name(env.Stack, service)}
-	for _, param := range env.Parameters {
-		parts = append(parts, "-", param, ir.Parameter(param))
-	}
-	return join(parts...)
+	return suffixed(env, D1Name(env.Stack, service), "-")
 }
 
 // d1ID is the ID of the D1 database node of a DB schema a database
@@ -92,7 +87,7 @@ func lowerD1(ctx registry.PlatformContext) (registry.Lowered, error) {
 	hint, _ := d.Settings["locationHint"].(string)
 	jurisdiction, _ := d.Settings["jurisdiction"].(string)
 	if hint != "" && jurisdiction != "" {
-		return registry.Lowered{}, fmt.Errorf("database %s sets locationHint %s and jurisdiction %s; D1 places a database under a jurisdiction by the jurisdiction alone and ignores the hint, so set one", d.Name, hint, jurisdiction)
+		return registry.Lowered{}, registry.Unrealizable("database %s sets locationHint %s and jurisdiction %s; D1 places a database under a jurisdiction by the jurisdiction alone and ignores the hint, so set one", d.Name, hint, jurisdiction)
 	}
 	var out registry.Lowered
 	for _, svc := range d.Services {

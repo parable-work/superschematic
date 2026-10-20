@@ -1,9 +1,11 @@
 # acme-shop
 
 The project the docs site's tutorial and guides build: a small shop,
-generated with the core superschematic binary and no extension, except
-for the Topcoat app's crate, which `superschematic-topcoat` (the core with
-`extensions/topcoat` linked) writes. The
+generated with the installed superschematic binary, the core with the
+official targets linked, since `storefront-stack` runs the storefront on
+the cloudflare target; and the Topcoat app's crate, which
+`superschematic-topcoat` (the core with `extensions/topcoat` linked)
+writes. The
 "Start here", "Your first project" and "Guides" pages of the
 [docs site](https://parable-work.github.io/superschematic/) quote these
 files; `examples/acme-schematic` is the same shop extended with its own
@@ -19,6 +21,7 @@ kind, decorators and auth provider.
 | `schemas/services/shop-storefront` | API served in TypeScript, with a TypeScript SDK; uses `Price` |
 | `schemas/services/shop-web` | Site: the shop's static site, which calls `shop-api` from the browser (D55) |
 | `schemas/services/shop-stack` | Stack: deploys `shop-api` and `shop-orders`, each on a Go server, `shop-stock`, on a Rust server cargo builds, and `shop-storefront`, on a TypeScript server Bun runs, each on an entrypoint the build writes, `shop-orders`' Go worker and job and `shop-stock`'s Rust ones, and the site `shop-web`; its `Dev` environment runs on the `local` target, `ShipOrders` every minute and `OrderRestocks` only on demand |
+| `schemas/services/storefront-stack` | Stack: deploys `shop-storefront` alone, exposed: on Bun in `Dev`, on the `local` target, and in `Staging` as a Cloudflare Worker at workers.dev, on the `cloudflare` target with the docs' placeholder account (D64), whose build adds the Workers entrypoint `fetch.ts` and `bundle.ts` beside the server's `main.ts`; `src/cloudflare-target.ts` types the target's values and settings |
 | `go/` | the Go module and its tests, which sign in through `shop-api`'s login, call each API through the Go SDK, run every language's client against `shop-orders`, served in Go and in Rust, and run the stack with `stack dev` |
 | `go/shop-api`, `go/shop-orders` | each API's implementation over the generated ORM, at the naming file's `[implementation_paths]` default, `go/{service}`: `New(deps)`, which the generated entrypoints call, and `shop-orders`' `NewJobs(deps)` and `NewWorkers(deps)`, which its job's and its worker's do. No package authenticates a caller: both servers do it with the identity runtime |
 | `rust-impl/shop-stock` | `shop-stock`'s implementation, at the `[implementation_paths]` `rust` template the naming file sets, `rust-impl/{service}`, since the default, `rust/{service}`, would put it inside the client crate in `rust/`: `create(deps)`, which the generated entrypoint calls, reading and writing `shop-db`'s `stock_level` table with tokio-postgres over the pool its `Deps` holds, as there is no Rust ORM, and enqueueing `StockLow` with the HTTP runtime's queue client; and `create_workers(deps)` and `create_jobs(deps)`, which its worker's and its job's entrypoints call, filing and ordering `restock_request` rows |
@@ -35,7 +38,7 @@ kind, decorators and auth provider.
 
 ## Run it
 
-`superschematic stack dev`, from this directory, runs `shop-stack`'s `Dev`
+`superschematic stack dev schemas/services/shop-stack`, from this directory, runs `shop-stack`'s `Dev`
 environment: Postgres in a container with `shop-db` migrated, `shop-api`
 and `shop-orders` on their generated Go entrypoints, `shop-stock` on its
 generated Rust one, which cargo builds frozen to `schemas/dist/Cargo.lock`,
@@ -48,9 +51,10 @@ served on its own port with its config. It needs Docker, Go, Bun, cargo
 and the migration runner,
 `superschematic-migrate`, on `PATH`; it derives every connection string,
 URL, port and service credential, and Ctrl-C stops it. While it runs,
-`superschematic stack run Dev shop-orders-ship-orders` runs `ShipOrders`
-once, and `superschematic stack run Dev shop-stock-order-restocks`
-runs `OrderRestocks`, which `Dev` runs only on demand, ordering the
+`superschematic stack run Dev shop-orders-ship-orders --stack schemas/services/shop-stack`
+runs `ShipOrders` once, and `superschematic stack run Dev
+shop-stock-order-restocks --stack schemas/services/shop-stack` runs
+`OrderRestocks`, which `Dev` runs only on demand, ordering the
 open restock requests.
 
 Placing an order reserves its stock on `shop-stock`, so give the product

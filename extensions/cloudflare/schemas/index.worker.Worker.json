@@ -1,0 +1,362 @@
+{
+  "token": "cloudflare:index/worker:Worker",
+  "terraform": {
+    "type": "cloudflare_worker",
+    "renames": {
+      "accountId": "account_id",
+      "observability.headSamplingRate": "head_sampling_rate",
+      "observability.logs.headSamplingRate": "head_sampling_rate",
+      "observability.logs.invocationLogs": "invocation_logs",
+      "observability.traces.headSamplingRate": "head_sampling_rate",
+      "observability.traces.propagationPolicy": "propagation_policy",
+      "previewsBaseConfig": "previews_base_config",
+      "previewsBaseConfig.cacheOptions": "cache_options",
+      "previewsBaseConfig.cacheOptions.crossVersionCache": "cross_version_cache",
+      "previewsBaseConfig.limits.cpuMs": "cpu_ms",
+      "previewsBaseConfig.observability.headSamplingRate": "head_sampling_rate",
+      "previewsBaseConfig.observability.logs.headSamplingRate": "head_sampling_rate",
+      "previewsBaseConfig.observability.logs.invocationLogs": "invocation_logs",
+      "previewsBaseConfig.observability.redactQueryString": "redact_query_string",
+      "previewsBaseConfig.observability.traces.headSamplingRate": "head_sampling_rate",
+      "previewsBaseConfig.observability.traces.propagationPolicy": "propagation_policy",
+      "previewsBaseConfig.placement.targets": "target",
+      "previewsBaseConfig.tailConsumers": "tail_consumers",
+      "subdomain.previewUrlSuffix": "preview_url_suffix",
+      "subdomain.previewsEnabled": "previews_enabled",
+      "tailConsumers": "tail_consumers"
+    }
+  },
+  "inputProperties": {
+    "accountId": {
+      "type": "string"
+    },
+    "force": {
+      "type": "boolean"
+    },
+    "logpush": {
+      "type": "boolean"
+    },
+    "name": {
+      "type": "string"
+    },
+    "observability": {
+      "$ref": "#/types/cloudflare:index/WorkerObservability:WorkerObservability"
+    },
+    "previewsBaseConfig": {
+      "$ref": "#/types/cloudflare:index/WorkerPreviewsBaseConfig:WorkerPreviewsBaseConfig"
+    },
+    "subdomain": {
+      "$ref": "#/types/cloudflare:index/WorkerSubdomain:WorkerSubdomain"
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "tailConsumers": {
+      "type": "array",
+      "items": {
+        "$ref": "#/types/cloudflare:index/WorkerTailConsumer:WorkerTailConsumer"
+      }
+    }
+  },
+  "requiredInputs": [
+    "accountId",
+    "name"
+  ],
+  "types": {
+    "cloudflare:index/WorkerObservability:WorkerObservability": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "headSamplingRate": {
+          "type": "number"
+        },
+        "issues": {
+          "$ref": "#/types/cloudflare:index/WorkerObservabilityIssues:WorkerObservabilityIssues"
+        },
+        "logs": {
+          "$ref": "#/types/cloudflare:index/WorkerObservabilityLogs:WorkerObservabilityLogs"
+        },
+        "traces": {
+          "$ref": "#/types/cloudflare:index/WorkerObservabilityTraces:WorkerObservabilityTraces"
+        }
+      }
+    },
+    "cloudflare:index/WorkerObservabilityIssues:WorkerObservabilityIssues": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        }
+      }
+    },
+    "cloudflare:index/WorkerObservabilityLogs:WorkerObservabilityLogs": {
+      "type": "object",
+      "properties": {
+        "destinations": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "headSamplingRate": {
+          "type": "number"
+        },
+        "invocationLogs": {
+          "type": "boolean"
+        },
+        "persist": {
+          "type": "boolean"
+        }
+      }
+    },
+    "cloudflare:index/WorkerObservabilityTraces:WorkerObservabilityTraces": {
+      "type": "object",
+      "properties": {
+        "destinations": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "headSamplingRate": {
+          "type": "number"
+        },
+        "persist": {
+          "type": "boolean"
+        },
+        "propagationPolicy": {
+          "type": "string"
+        }
+      }
+    },
+    "cloudflare:index/WorkerPreviewsBaseConfig:WorkerPreviewsBaseConfig": {
+      "type": "object",
+      "properties": {
+        "cacheOptions": {
+          "$ref": "#/types/cloudflare:index/WorkerPreviewsBaseConfigCacheOptions:WorkerPreviewsBaseConfigCacheOptions"
+        },
+        "env": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/types/cloudflare:index/WorkerPreviewsBaseConfigEnv:WorkerPreviewsBaseConfigEnv"
+          }
+        },
+        "limits": {
+          "$ref": "#/types/cloudflare:index/WorkerPreviewsBaseConfigLimits:WorkerPreviewsBaseConfigLimits"
+        },
+        "logpush": {
+          "type": "boolean"
+        },
+        "observability": {
+          "$ref": "#/types/cloudflare:index/WorkerPreviewsBaseConfigObservability:WorkerPreviewsBaseConfigObservability"
+        },
+        "placement": {
+          "$ref": "#/types/cloudflare:index/WorkerPreviewsBaseConfigPlacement:WorkerPreviewsBaseConfigPlacement"
+        },
+        "tailConsumers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/cloudflare:index/WorkerPreviewsBaseConfigTailConsumer:WorkerPreviewsBaseConfigTailConsumer"
+          }
+        }
+      }
+    },
+    "cloudflare:index/WorkerPreviewsBaseConfigCacheOptions:WorkerPreviewsBaseConfigCacheOptions": {
+      "type": "object",
+      "properties": {
+        "crossVersionCache": {
+          "type": "boolean"
+        },
+        "enabled": {
+          "type": "boolean"
+        }
+      }
+    },
+    "cloudflare:index/WorkerPreviewsBaseConfigEnv:WorkerPreviewsBaseConfigEnv": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ]
+    },
+    "cloudflare:index/WorkerPreviewsBaseConfigLimits:WorkerPreviewsBaseConfigLimits": {
+      "type": "object",
+      "properties": {
+        "cpuMs": {
+          "type": "integer"
+        },
+        "subrequests": {
+          "type": "integer"
+        }
+      }
+    },
+    "cloudflare:index/WorkerPreviewsBaseConfigObservability:WorkerPreviewsBaseConfigObservability": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "headSamplingRate": {
+          "type": "number"
+        },
+        "issues": {
+          "$ref": "#/types/cloudflare:index/WorkerPreviewsBaseConfigObservabilityIssues:WorkerPreviewsBaseConfigObservabilityIssues"
+        },
+        "logs": {
+          "$ref": "#/types/cloudflare:index/WorkerPreviewsBaseConfigObservabilityLogs:WorkerPreviewsBaseConfigObservabilityLogs"
+        },
+        "redactQueryString": {
+          "type": "boolean"
+        },
+        "traces": {
+          "$ref": "#/types/cloudflare:index/WorkerPreviewsBaseConfigObservabilityTraces:WorkerPreviewsBaseConfigObservabilityTraces"
+        }
+      }
+    },
+    "cloudflare:index/WorkerPreviewsBaseConfigObservabilityIssues:WorkerPreviewsBaseConfigObservabilityIssues": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        }
+      }
+    },
+    "cloudflare:index/WorkerPreviewsBaseConfigObservabilityLogs:WorkerPreviewsBaseConfigObservabilityLogs": {
+      "type": "object",
+      "properties": {
+        "destinations": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "headSamplingRate": {
+          "type": "number"
+        },
+        "invocationLogs": {
+          "type": "boolean"
+        },
+        "persist": {
+          "type": "boolean"
+        }
+      }
+    },
+    "cloudflare:index/WorkerPreviewsBaseConfigObservabilityTraces:WorkerPreviewsBaseConfigObservabilityTraces": {
+      "type": "object",
+      "properties": {
+        "destinations": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "headSamplingRate": {
+          "type": "number"
+        },
+        "persist": {
+          "type": "boolean"
+        },
+        "propagationPolicy": {
+          "type": "string"
+        }
+      }
+    },
+    "cloudflare:index/WorkerPreviewsBaseConfigPlacement:WorkerPreviewsBaseConfigPlacement": {
+      "type": "object",
+      "properties": {
+        "host": {
+          "type": "string"
+        },
+        "hostname": {
+          "type": "string"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "region": {
+          "type": "string"
+        },
+        "targets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/cloudflare:index/WorkerPreviewsBaseConfigPlacementTarget:WorkerPreviewsBaseConfigPlacementTarget"
+          }
+        }
+      }
+    },
+    "cloudflare:index/WorkerPreviewsBaseConfigPlacementTarget:WorkerPreviewsBaseConfigPlacementTarget": {
+      "type": "object",
+      "properties": {
+        "host": {
+          "type": "string"
+        },
+        "hostname": {
+          "type": "string"
+        },
+        "region": {
+          "type": "string"
+        }
+      }
+    },
+    "cloudflare:index/WorkerPreviewsBaseConfigTailConsumer:WorkerPreviewsBaseConfigTailConsumer": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ]
+    },
+    "cloudflare:index/WorkerSubdomain:WorkerSubdomain": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "previewUrlSuffix": {
+          "type": "string"
+        },
+        "previewsEnabled": {
+          "type": "boolean"
+        },
+        "url": {
+          "type": "string"
+        }
+      }
+    },
+    "cloudflare:index/WorkerTailConsumer:WorkerTailConsumer": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ]
+    }
+  }
+}

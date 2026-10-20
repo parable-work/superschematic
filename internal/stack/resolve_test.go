@@ -1221,6 +1221,17 @@ func TestLoweringErrors(t *testing.T) {
 	}})
 	_, errs = resolve(t, reg, s, services, "Parent")
 	mustFail(t, errs, stack.CodeLowering, "platform broken.run returned DNS records for shop-api, which is not exposed")
+
+	// A platform that cannot realize the deployable, as a name its
+	// provider refuses, says so with registry.Unrealizable (D64).
+	reg = assemble(t, &broken{lower: func(registry.PlatformContext) (registry.Lowered, error) {
+		return registry.Lowered{}, fmt.Errorf("the name: %w", registry.Unrealizable("its name is too long"))
+	}})
+	_, errs = resolve(t, reg, s, services, "Parent")
+	mustFail(t, errs, stack.CodeUnrealizable, "server shop-api: platform broken.run cannot realize it: the name: its name is too long")
+	if len(errs.Of(stack.CodeLowering)) != 0 {
+		t.Errorf("an unrealizable deployable is also a lowering failure: %v", errs)
+	}
 }
 
 // TestDerivedValueContract: a connector's value that is no database

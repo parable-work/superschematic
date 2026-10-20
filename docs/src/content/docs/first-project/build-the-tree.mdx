@@ -92,7 +92,8 @@ and revision, so the key survives a commit that changes no Go code.
 `examples/acme-shop/scripts/check.sh` is a complete CI script for a
 project like this one:
 
-1. `build-all` with the core binary;
+1. `build-all` with the installed binary, which links the cloudflare
+   target that the example's `storefront-stack` names;
 2. `go build` and `go vet` on every generated Go module;
 3. `tsc` on the generated TypeScript router and SDKs, an import of the
    generated Python packages, and a Rust build against the generated Rust

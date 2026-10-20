@@ -1,5 +1,5 @@
-Discovered 9 schema services: shop-db, shop-media, shop-api, shop-common, shop-stock, shop-orders, shop-stack, shop-storefront, shop-web (mode: sequential)
-  Shared TypeScript program: 9 service(s)
+Discovered 10 schema services: shop-db, shop-media, shop-api, shop-common, shop-stock, shop-orders, shop-stack, shop-storefront, shop-web, storefront-stack (mode: sequential)
+  Shared TypeScript program: 10 service(s)
   OK: shop-db (built)
   OK: shop-media (built)
   OK: shop-api (built)
@@ -9,6 +9,7 @@ Discovered 9 schema services: shop-db, shop-media, shop-api, shop-common, shop-s
   OK: shop-stack (built)
   OK: shop-storefront (built)
   OK: shop-web (built)
+  OK: storefront-stack (built)
   Wrote .../schemas/dist/.deps.json
 
-All 9 schema services built successfully
+All 10 schema services built successfully

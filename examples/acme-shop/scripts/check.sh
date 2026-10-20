@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Build the acme-shop example with the core superschematic binary and check
-# that the code the docs site shows builds and behaves.
+# Build the acme-shop example with the installed superschematic binary and
+# check that the code the docs site shows builds and behaves.
 #
 #   examples/acme-shop/scripts/check.sh            check
 #   UPDATE=1 examples/acme-shop/scripts/check.sh   also rewrite testdata/generated/,
@@ -16,21 +16,26 @@
 # directory there, which keeps the compiled crates from run to run.
 #
 # Asserts, in order:
-#   1. build-all builds every service with the binary that links no
-#      extension, dependencies first, and the stack, shop-stack, last of
-#      the services it deploys, which writes the entrypoint of each server
-#      and of shop-orders' and shop-stock's jobs and workers, and brings the
-#      Cargo workspace's lockfile up to date, which fails the check when
-#      that changes it;
+#   1. build-all builds every service with the installed binary, which links
+#      the official targets, since storefront-stack's Staging is on the
+#      cloudflare target (D64), dependencies first, and each stack,
+#      shop-stack and storefront-stack, last of the services it deploys,
+#      which writes the entrypoint of each server and of shop-orders' and
+#      shop-stock's jobs and workers, the storefront's Workers entrypoint
+#      and bundle.ts beside its main.ts, and brings the Cargo workspace's
+#      lockfile up to date, which fails the check when that changes it;
 #   2. every generated Go module builds and vets, the entrypoints of
 #      shop-stack's Go servers, job and worker included, and shop-stack's
 #      Rust server, shop-stock, and its Rust job and worker check with its
 #      implementation in rust-impl/shop-stock, frozen to the committed
 #      lockfile;
 #   3. the generated TypeScript router and SDKs, the entrypoint of
-#      shop-stack's TypeScript server, the storefront's implementation in
+#      shop-stack's TypeScript server and storefront-stack's, its Workers
+#      entrypoint fetch.ts included, the storefront's implementation in
 #      typescript/shop-storefront, the clients in typescript/clients and
-#      the site in web/shop-web type-check, and the site builds, its
+#      the site in web/shop-web type-check, the storefront bundles for
+#      Workers with bun bundle.ts --check, and its bundle runs under
+#      workerd, which puts two teas in a cart, and the site builds, its
 #      bundle carrying shop-api's SDK and superscalar's browser build and
 #      nothing from node:, all of them one Bun workspace, which installs
 #      frozen to
@@ -69,7 +74,9 @@
 #      order that ran a product below its threshold enqueue StockLow,
 #      shop-stock's Rust worker file the product's restock request, and its
 #      Rust job, run with `stack run`, order it, then runs stack dev and the
-#      job once more into an output root of the test's own (D65);
+#      job once more into an output root of the test's own (D65); and
+#      `superschematic stack dev` runs storefront-stack's Dev, the storefront
+#      alone on Bun, and the test puts a tea in a cart and reads it (D64);
 #   4a. the Topcoat app in topcoat/ passes its tests: a shopper signs in
 #      with their password, and its pages call shop-orders in-process
 #      through the crate the Topcoat extension writes into
@@ -130,11 +137,13 @@ clean_dist() {
   fi
 }
 
-echo "==> core binary (no extension)"
-# The core with no extension linked, under the name the docs pages run, so
-# the example proves the core alone builds it. The installed binary
-# (cmd/superschematic) is the same CLI with the official extensions linked.
-(cd "$REPO_ROOT" && go build -o "$OUT/superschematic" ./internal/cmd/superschematic-core)
+echo "==> installed binary"
+# The installed binary, cmd/superschematic, under the name the docs pages
+# run: the core with the official extensions linked. storefront-stack's
+# Staging is on the cloudflare target, which the core alone does not link,
+# so the core with no extension builds every service of the example but
+# that stack.
+(cd "$REPO_ROOT/cmd/superschematic" && go build -o "$OUT/superschematic" .)
 # The core with the Topcoat extension, a module of its own: only the
 # Topcoat step below uses it.
 (cd "$REPO_ROOT/extensions/topcoat" && go build -o "$OUT/superschematic-topcoat" ./cmd/superschematic-topcoat)
@@ -149,7 +158,7 @@ if [[ -f "$DIST/Cargo.lock" ]]; then
 fi
 capture build-all.full.txt superschematic build-all schemas/services
 cat "$OUT/logs/build-all.full.txt"
-grep -q '^All 9 schema services built successfully$' "$OUT/logs/build-all.full.txt"
+grep -q '^All 10 schema services built successfully$' "$OUT/logs/build-all.full.txt"
 # A service builds after every service it depends on.
 built_before() {
   local first second
@@ -165,6 +174,7 @@ built_before shop-stock shop-orders
 built_before shop-api shop-stack
 built_before shop-orders shop-stack
 built_before shop-stock shop-stack
+built_before shop-storefront storefront-stack
 built_before shop-api shop-web
 # The pages show the summary lines of build-all, not each service's build.
 grep -E '^(Discovered|  Shared|  OK:|  Wrote|All |$)' "$OUT/logs/build-all.full.txt" >"$OUT/logs/build-all.txt"
@@ -260,10 +270,25 @@ TSC="$RUNTIME/node_modules/.bin/tsc"
 for pkg in \
   "$DIST/api/shop-storefront" "$DIST/sdk/typescript/shop-api" "$DIST/sdk/typescript/shop-orders" \
   "$DIST/sdk/typescript/shop-storefront" "$DIST/server/shop-stack/shop-storefront" \
+  "$DIST/server/storefront-stack/shop-storefront" \
   "$APP/shop-storefront" "$APP/clients" "$EXAMPLE_DIR/web/shop-web"; do
   echo "    ${pkg#"$EXAMPLE_DIR/"}"
   (cd "$pkg" && "$TSC" --noEmit -p tsconfig.json)
 done
+# The storefront bundles for Workers as a deploy bundles it, and holds
+# nothing a Worker cannot run (D64); then the bundle runs under workerd, the
+# runtime's pinned one (test/workerd), with the bindings its Staging gives
+# it, and scripts/workerd/tester.js puts two teas in a cart through a
+# service binding.
+echo "    schemas/dist/server/storefront-stack/shop-storefront: bun bundle.ts --check"
+(cd "$DIST/server/storefront-stack/shop-storefront" && bun bundle.ts --check)
+echo "    schemas/dist/server/storefront-stack/shop-storefront: the bundle under workerd"
+WORKERD_RUN="$OUT/workerd"
+mkdir -p "$WORKERD_RUN"
+(cd "$DIST/server/storefront-stack/shop-storefront" && bun bundle.ts "$WORKERD_RUN/bundle")
+cp "$WORKERD_RUN/bundle/main.js" "$WORKERD_RUN/bundle/superscalar_wasm_bg.wasm" "$SCRIPT_DIR/workerd/storefront.capnp" "$SCRIPT_DIR/workerd/tester.js" "$WORKERD_RUN/"
+(cd "$RUNTIME/test/workerd" && bun install --frozen-lockfile >/dev/null)
+(cd "$WORKERD_RUN" && "$RUNTIME/test/workerd/node_modules/.bin/workerd" test storefront.capnp)
 # The site, shop-web, builds with its package's script, as stack dev and a
 # deploy build it, into one page and its script (D55). It lists products
 # through shop-api's SDK, which the bundle takes with superscalar's browser
@@ -340,6 +365,7 @@ done
 if docker info >/dev/null 2>&1; then
   grep -q '^--- PASS: TestStackDevRunsTheShop ' "$OUT/go-test.log"
 fi
+grep -q '^--- PASS: TestStackDevRunsTheStorefront ' "$OUT/go-test.log"
 
 echo "==> the TypeScript tests"
 (cd "$APP" && bun test)
@@ -363,6 +389,9 @@ QUOTED=(
   types/rust/shop-common/src/types.rs
   stack/shop-stack/Dev/environment.json
   server/shop-stack/shop-storefront/main.ts
+  stack/storefront-stack/Staging/environment.json
+  server/storefront-stack/shop-storefront/fetch.ts
+  server/storefront-stack/shop-storefront/bundle.ts
 )
 mkdir -p "$OUT/quoted"
 for path in "${QUOTED[@]}"; do
@@ -380,15 +409,15 @@ capture build-all-restore.full.txt superschematic build-all "${CACHE_FLAGS[@]}" 
 for run in cache restore; do
   grep -E '^  OK:' "$OUT/logs/build-all-$run.full.txt" >"$OUT/logs/build-all-$run.txt"
 done
-test "$(grep -c '(up to date)$' "$OUT/logs/build-all-cache.txt")" -eq 9
+test "$(grep -c '(up to date)$' "$OUT/logs/build-all-cache.txt")" -eq 10
 # A schema's references to other services in its decorators' arguments
-# are recorded under dist (D41): the stack's to the APIs it deploys, and
+# are recorded under dist (D41): each stack's to the APIs it deploys, and
 # shop-stock's to shop-orders, the one caller its reservations admit. So
-# once dist is gone, both build again, and so does shop-orders, whose key
+# once dist is gone, they build again, and so does shop-orders, whose key
 # covers shop-stock's, the API it calls; each is cached under its new key,
 # and every other service is restored.
 test "$(grep -c '(restored from cache)$' "$OUT/logs/build-all-restore.txt")" -eq 6
-for service in shop-stock shop-orders shop-stack; do
+for service in shop-stock shop-orders shop-stack storefront-stack; do
   grep -q "^  OK: $service (built, cached)\$" "$OUT/logs/build-all-restore.txt"
 done
 rm -f "$OUT"/logs/*.full.txt

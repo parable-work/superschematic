@@ -12,5 +12,5 @@
     "forceConsistentCasingInFileNames": true,
     "allowImportingTsExtensions": true
   },
-  "include": ["main.ts"]
+  "include": ["main.ts"{{ if .Workers }}, "fetch.ts", "workers.d.ts"{{ end }}]
 }

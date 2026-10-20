@@ -206,6 +206,11 @@ type (
 	ArtifactFetcher = registry.ArtifactFetcher
 	DestroyPreparer = registry.DestroyPreparer
 
+	// UnrealizableError is a platform's refusal of a deployable it cannot
+	// realize, which Unrealizable makes: resolution reports it as
+	// unrealizable rather than as a failed lowering (D64).
+	UnrealizableError = registry.UnrealizableError
+
 	// The generated CI (docs/stack-model.md, section 11.3, D47): a CI
 	// renderer (CIRendererSpec) renders a CIRequest, a stack (CIStack, with
 	// its CISites) and its CIEnvironments with the renderer's CIOptions, to
@@ -299,6 +304,11 @@ var (
 	ErrNoManifest       = registry.ErrNoManifest
 	ErrSecretNotCreated = registry.ErrSecretNotCreated
 )
+
+// Unrealizable returns the error a platform's Lower returns for a
+// deployable it cannot realize, such as a name its provider refuses, whose
+// reason is the format applied to args (D64).
+func Unrealizable(format string, args ...any) error { return registry.Unrealizable(format, args...) }
 
 // DefaultToolInvocationPolicy returns the core's invocation policy:
 // invocationPolicy, auto or ask, auto by default.

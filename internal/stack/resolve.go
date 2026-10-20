@@ -930,6 +930,13 @@ func (r *resolver) placeServer(d *deployable) {
 		}
 		r.fail(CodeUnrealizable, "%s", msg)
 	}
+	if reason := d.platform.NoIdentity; reason != "" && d.res.Kind == ir.DeployableServer {
+		for _, served := range d.res.Services {
+			if svc := r.services[served.Name]; svc != nil && svc.Identity {
+				r.fail(CodeUnrealizable, "server %s serves %s, an API over the user model, which authenticates with the identity runtime (D50), and platform %s runs none: %s", d.res.Name, svc.Name, d.platform.Name, reason)
+			}
+		}
+	}
 }
 
 // unbuiltDeployables names, by kind and then language, the decision that

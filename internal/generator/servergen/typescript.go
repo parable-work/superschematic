@@ -49,6 +49,18 @@ const (
 	TypeScriptConfigFile  = "tsconfig.json"
 )
 
+// The files the package of a TypeScript server some environment places on
+// Cloudflare Workers holds beside main.ts (docs/stack-model.md, section
+// 18.5, D64): the Workers entrypoint, the script that bundles it, which a
+// deploy runs as `bun bundle.ts <dir>`, and the declaration of the
+// cloudflare:workers module fetch.ts imports, which the bundle leaves to
+// workerd.
+const (
+	TypeScriptFetchFile        = "fetch.ts"
+	TypeScriptBundleFile       = "bundle.ts"
+	TypeScriptWorkersTypesFile = "workers.d.ts"
+)
+
 // The versions of the third-party packages main.ts imports beside Hono,
 // which the API packages pin: pg, within the HTTP runtime's and the API
 // packages' peer range, and the Cloud SQL Node connector the runtime's
@@ -153,6 +165,12 @@ type TypeScriptInput struct {
 	// Worker, when set, plans the entrypoint of a worker of the one API in
 	// APIs (D53): Server is then the worker's deployable.
 	Worker *WorkerInput
+
+	// Workers is true when some environment of the stack places the server
+	// on a platform whose artifact is a bundle, Cloudflare Workers (D64):
+	// its package gets fetch.ts and bundle.ts beside main.ts, which stack
+	// dev still runs on Bun.
+	Workers bool
 }
 
 // TypeScriptServer is a planned TypeScript entrypoint, what the templates
@@ -173,6 +191,11 @@ type TypeScriptServer struct {
 	// Worker is what a worker's entrypoint runs, nil for a server and a
 	// job (D53).
 	Worker *TypeScriptWorker
+
+	// Workers is true for a server some environment places on Cloudflare
+	// Workers, whose package holds fetch.ts and bundle.ts beside main.ts
+	// (D64).
+	Workers bool
 
 	// RustVersion and BunVersion are the toolchain pins.
 	RustVersion string
@@ -293,6 +316,10 @@ type TypeScriptAPI struct {
 
 	// Buckets are Deps' buckets (D54).
 	Buckets []TypeScriptBucketUse
+
+	// Secrets are the Secret<T> fields of its config, which a Worker binds
+	// as Secrets Store secrets and fetch.ts awaits per isolate (D64).
+	Secrets []string
 }
 
 // TypeScriptCall is a client in an API's Deps.
@@ -314,8 +341,9 @@ type TypeScriptBucket struct {
 	Var     string
 
 	// From is the expression that reads the bucket's connection from the
-	// first listing API's config.
-	From string
+	// first listing API's config, and Field the config field it reads.
+	From  string
+	Field string
 }
 
 // TypeScriptDatabase is a database the server opens once, for every API on
@@ -357,8 +385,9 @@ type TypeScriptClient struct {
 	Class       string
 
 	// From is the expression that reads the callee's endpoint from the
-	// first calling API's config.
-	From string
+	// first calling API's config, and Field the config field it reads.
+	From  string
+	Field string
 }
 
 // TypeScriptDocker is a TypeScript server's Dockerfile plan. Paths are
@@ -407,6 +436,9 @@ var tsReserved = []string{
 	"run", "jobs", "workers", "queue", "stop", "signal", "started", "concurrency", "pools",
 	"postgresQueue", "runWorker", "workerConcurrency",
 	"openSqlite", "sqliteFile", "SqliteDatabase", "pingSqlDatabase", "openDatabase", "DatabaseConnection",
+	// fetch.ts's, the Workers entrypoint's (D64).
+	"env", "build", "perIsolate", "requestIP", "stackEnvOf", "stackEnvWithSecrets", "binding", "serviceFetch",
+	"openR2Bucket", "bindingName", "values", "bindings", "Handle",
 }
 
 // PlanTypeScript plans the entrypoint of one TypeScript server. It refuses
@@ -483,6 +515,14 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 		}
 	}
 	background := s.Background()
+	if in.Workers {
+		// The cron platform's scheduled.ts is a job's Workers entrypoint;
+		// a worker claims on Postgres, which no Worker reaches (D53, D64).
+		if background {
+			return nil, fmt.Errorf("stack %s: %s %s runs on a platform whose artifact is a bundle, and a Workers entrypoint is built for a server alone (D64)", in.Stack, s.Kind, in.Server)
+		}
+		s.Workers = true
+	}
 	taken := names{}
 	for _, name := range tsReserved {
 		taken[name] = true
@@ -523,6 +563,13 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 		if o.HasEnvConfig {
 			api.Config = taken.take(stem + "Config")
 		}
+		if a.Config != nil {
+			for _, f := range a.Config.Fields {
+				if f.Secret {
+					api.Secrets = append(api.Secrets, f.Key)
+				}
+			}
+		}
 		// A job or a worker serves no request: it answers no CORS,
 		// establishes no end user, and verifies no caller (D52, D50).
 		if a.CORS && !background {
@@ -535,12 +582,18 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 		if o.HasManualRoutes() && !background {
 			api.ManualRoutes = taken.take(stem + "ManualRoutes")
 		}
+		if o.Identity != nil && s.Workers {
+			return nil, fmt.Errorf("stack %s: server %s serves %s, which authenticates with the identity runtime over the user model (D50), and an environment places the server on Cloudflare Workers, where the identity runtime does not run: it hashes passwords with node:crypto's argon2 (D64)", in.Stack, in.Server, o.SchemaName)
+		}
 		if o.Identity != nil && !background {
 			api.Identity = taken.take(stem + "Identity")
 			api.IdentityField = ir.IdentityConfigField(o.SchemaName)
 		}
 		if o.HasServiceCallers && !background && (api.Callers == "" || api.Config == "") {
 			return nil, fmt.Errorf("stack %s: server %s serves %s, whose operations have a service clause, and whose config has no callers field", in.Stack, in.Server, o.SchemaName)
+		}
+		if db := o.Deps.Database; db != "" && s.Workers {
+			return nil, fmt.Errorf("stack %s: server %s serves %s, whose database is %s, and an environment places the server on Cloudflare Workers, which reaches a database through D1 alone; the Workers entrypoint opens no database yet (D64)", in.Stack, in.Server, o.SchemaName, db)
 		}
 		if db := o.Deps.Database; db != "" {
 			d := databases[db]
@@ -609,6 +662,7 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 					Package:     call.Package,
 					Class:       call.Client,
 					From:        api.Config + "." + key,
+					Field:       key,
 				}
 				clients[call.Service] = c
 				s.Clients = append(s.Clients, c)
@@ -626,6 +680,7 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 					Service: b.Service,
 					Var:     taken.take(varStem(b.Service) + "Bucket"),
 					From:    api.Config + "." + key,
+					Field:   key,
 				}
 				buckets[b.Service] = h
 				s.Buckets = append(s.Buckets, h)
@@ -725,6 +780,57 @@ func (s *TypeScriptServer) SQLiteDatabases() []*TypeScriptDatabase {
 		if d.SQLite {
 			out = append(out, d)
 		}
+	}
+	return out
+}
+
+// BundleEntry is the module a Workers server's bundle.ts bundles: its
+// fetch.ts (D64).
+func (s *TypeScriptServer) BundleEntry() string { return TypeScriptFetchFile }
+
+// APIsWithConfig reports whether an API of the server has an EnvConfig,
+// which fetch.ts reads from the Worker's bindings (D64).
+func (s *TypeScriptServer) APIsWithConfig() bool {
+	return slices.ContainsFunc(s.APIs, func(a *TypeScriptAPI) bool { return a.Config != "" })
+}
+
+// ReadsBindings reports whether fetch.ts reads the Worker's string and
+// secret bindings when it builds the server: for an API's config, or the
+// origins its CORS field lists.
+func (s *TypeScriptServer) ReadsBindings() bool { return s.APIsWithConfig() || s.AnyCORS() }
+
+// SecretBindings are the Secret<T> fields of every API's config, sorted:
+// the Secrets Store secret bindings fetch.ts awaits once per isolate
+// (D64).
+func (s *TypeScriptServer) SecretBindings() []string {
+	var out []string
+	for _, a := range s.APIs {
+		out = append(out, a.Secrets...)
+	}
+	slices.Sort(out)
+	return slices.Compact(out)
+}
+
+// WorkersImports are the names fetch.ts imports from the HTTP runtime's
+// ./workers entry (D64): the per-isolate builder and the client's address
+// always; the readers of the string bindings, and of the secret ones when
+// a config has a Secret<T> field, when it reads a config; and the binding
+// lookup, with the transport through a service binding, when the server
+// calls another API or lists a bucket.
+func (s *TypeScriptServer) WorkersImports() []string {
+	var out []string
+	if len(s.Clients) > 0 || len(s.Buckets) > 0 {
+		out = append(out, "binding")
+	}
+	out = append(out, "perIsolate", "requestIP")
+	if len(s.Clients) > 0 {
+		out = append(out, "serviceFetch")
+	}
+	if s.ReadsBindings() {
+		out = append(out, "stackEnvOf")
+	}
+	if len(s.SecretBindings()) > 0 {
+		out = append(out, "stackEnvWithSecrets")
 	}
 	return out
 }
@@ -930,7 +1036,10 @@ func ImplementationPackage(n naming.Naming, service, dir string) (string, error)
 // package.json and tsconfig.json, and the Dockerfile with its ignore file
 // when s.Docker is planned. A job's main.ts runs the job
 // (job.ts.tmpl), and a worker's its claim loop (worker.ts.tmpl); every
-// main.ts template takes the wiring they share from wiring.ts.tmpl.
+// main.ts template takes the wiring they share from wiring.ts.tmpl. A
+// server some environment places on Workers also gets fetch.ts, its
+// Workers entrypoint, bundle.ts, which bundles it, and workers.d.ts,
+// which declares the cloudflare:workers module fetch.ts imports (D64).
 func WriteTypeScript(s *TypeScriptServer, dir string) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("servergen: %w", err)
@@ -949,6 +1058,13 @@ func WriteTypeScript(s *TypeScriptServer, dir string) error {
 	}
 	if s.Docker != nil {
 		files = append(files, struct{ template, name string }{"Dockerfile.ts.tmpl", DockerFile}, struct{ template, name string }{"dockerignore.ts.tmpl", DockerIgnoreFile})
+	}
+	if s.Workers {
+		files = append(files,
+			struct{ template, name string }{"fetch.ts.tmpl", TypeScriptFetchFile},
+			struct{ template, name string }{"bundle.ts.tmpl", TypeScriptBundleFile},
+			struct{ template, name string }{"workers.d.ts.tmpl", TypeScriptWorkersTypesFile},
+		)
 	}
 	for _, f := range files {
 		if err := render(f.template, filepath.Join(dir, f.name), s); err != nil {

@@ -157,7 +157,11 @@ stack's: building a `Stack` service writes each Go and TypeScript server's
 entrypoint under `server/<stack>/<server>` in the output root and
 scaffolds, with no
 flag, each API its servers serve whose implementation is missing, with a
-`go.mod` beside a Go one when no module holds the package. A build never
+`go.mod` beside a Go one when no module holds the package. A TypeScript
+server some environment places on Cloudflare Workers also gets `fetch.ts`,
+its Workers entrypoint, `bundle.ts`, which a deploy runs as `bun bundle.ts
+<dir>` and `bun bundle.ts --check` runs into a temporary directory, and
+`workers.d.ts`, beside the `main.ts` that `stack dev` runs (D64). A build never
 removes the output root's `bun.lock`, the lockfile of its Bun workspace,
 which the project commits. When git ignores it, the build of a stack with
 a TypeScript server prints one line naming the rule and saying to ignore
@@ -876,14 +880,18 @@ serves sites from, under their digest, when they are new; they serve
 nothing until a deploy takes them. A server, job or worker whose platform
 runs a bundle builds with `bun bundle.ts` in its package after the same
 install, and the target keeps its files under their digest when they are
-new. It prints each image, each site's files and each bundle as a
-`stack deploy` flag:
+new; on cloudflare that is the account's state bucket, under
+`superschematic/bundles/<stack>/<deployable>/<hex>/`. It prints each image,
+each site's files and each bundle as a `stack deploy` flag:
 
 ```
 $ superschematic stack build Staging
 --image Orders=us-east1-docker.pkg.dev/acme-staging/shop/orders@sha256:...
 --image shop-api=us-east1-docker.pkg.dev/acme-staging/shop/shop-api@sha256:...
 --site shop-web=sha256:...
+
+$ superschematic stack build Staging --stack schemas/services/storefront-stack
+--bundle shop-storefront=sha256:...
 ```
 
 A build writes no deploy manifest.

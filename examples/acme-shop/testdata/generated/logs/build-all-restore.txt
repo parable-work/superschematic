@@ -7,3 +7,4 @@
   OK: shop-stock (built, cached)
   OK: shop-orders (built, cached)
   OK: shop-stack (built, cached)
+  OK: storefront-stack (built, cached)

@@ -16,6 +16,10 @@
   "types": [
     "cloudflare:index/accountToken:AccountToken",
     "cloudflare:index/d1Database:D1Database",
-    "cloudflare:index/dnsRecord:DnsRecord"
+    "cloudflare:index/dnsRecord:DnsRecord",
+    "cloudflare:index/worker:Worker",
+    "cloudflare:index/workerVersion:WorkerVersion",
+    "cloudflare:index/workersCustomDomain:WorkersCustomDomain",
+    "cloudflare:index/workersDeployment:WorkersDeployment"
   ]
 }

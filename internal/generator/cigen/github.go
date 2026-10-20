@@ -264,9 +264,11 @@ func (g github) header(w *yamlWriter, notes []string) {
 // commits, which fails when the lockfile is missing or does not match the
 // packages the build wrote, type-checks each TypeScript server's, job's
 // and worker's package and the implementation each imports (D51, amended;
-// D52, D53), and builds each site with its build script, as `stack
-// deploy` does, so a site that does not build fails the pull request
-// (D55). For the Rust servers, jobs and workers it
+// D52, D53), bundles each one some environment places on Workers with its
+// bundle.ts --check, as `stack deploy` bundles it (D64), and builds each
+// site with its build script, as `stack deploy` does, so a site that does
+// not build fails the pull request (D55). For the Rust servers, jobs and
+// workers it
 // sets up the Rust release tools.env pins before the build, which brings
 // the output root's Cargo lockfile up to date with it, refuses a lockfile
 // git does not track or the build changed, and checks each one's crate,
@@ -317,6 +319,13 @@ func (g github) check() job {
 				run:  typeCheck,
 			})
 		}
+		for _, p := range g.bundled() {
+			steps = append(steps, step{
+				name: "Bundle " + string(p.kind) + " " + p.name + " for Workers",
+				dir:  path.Join(st.OutputRoot, "server", st.Name, p.name),
+				run:  bundleCheck,
+			})
+		}
 		for _, service := range slices.Sorted(maps.Keys(st.TypeScriptImplementations)) {
 			steps = append(steps, step{
 				name: "Type-check the implementation of " + service,
@@ -344,6 +353,13 @@ func (g github) check() job {
 	}
 	return job{id: "check", name: "check", cond: notClosed, steps: steps}
 }
+
+// bundleCheck bundles a server, job or worker some environment places on a
+// platform whose artifact is a bundle, Cloudflare Workers, as a deploy
+// does, into a temporary directory, and fails on what a Worker cannot run:
+// a node: import, Bun's global, or a WebAssembly module other than
+// superscalar's (docs/stack-model.md, section 18.5, D64).
+const bundleCheck = "bun bundle.ts --check"
 
 // goBuild compiles the entrypoint module of a Go server, job or worker,
 // with the implementation it imports, and writes no binary: the deploy
@@ -448,7 +464,7 @@ func (g github) preview(env registry.CIEnvironment) (job, error) {
 		s.cond = notClosed
 		steps = append(steps, s)
 	}
-	if hasSite(env) {
+	if buildsWithBun(env) {
 		workspace := g.typeScriptWorkspace()
 		workspace.cond = notClosed
 		steps = append(steps, workspace)
@@ -480,7 +496,7 @@ func (g github) deploy(env registry.CIEnvironment, after string) (job, error) {
 		return job{}, err
 	}
 	steps = append(steps, g.buildSteps()...)
-	if hasSite(env) {
+	if buildsWithBun(env) {
 		steps = append(steps, g.typeScriptWorkspace())
 	}
 	steps = append(steps, step{name: "Deploy " + e.Environment, run: g.stackCommand("deploy", e.Environment)})
@@ -499,8 +515,8 @@ func (g github) deploy(env registry.CIEnvironment, after string) (job, error) {
 
 // cloudSetup is the steps a cloud job takes before its command: the
 // checkout, superschematic, the schemas root's packages, Bun for a
-// deployer of an environment with a site, the provisioner's tools, and
-// the sign-in as role, a step last, or the job's env.
+// deployer of an environment with a site or a bundle, the provisioner's
+// tools, and the sign-in as role, a step last, or the job's env.
 func (g github) cloudSetup(env registry.CIEnvironment, role registry.CIRole) ([]step, signedIn, error) {
 	steps := []step{g.checkout(), g.install()}
 	if role == registry.CIDeployer && env.Migrate {
@@ -508,7 +524,7 @@ func (g github) cloudSetup(env registry.CIEnvironment, role registry.CIRole) ([]
 		steps = append(steps, g.installMigrate())
 	}
 	steps = append(steps, g.packages()...)
-	if role == registry.CIDeployer && hasSite(env) && g.req.Stack.PackageManager != registry.PackageManagerBun {
+	if role == registry.CIDeployer && buildsWithBun(env) && g.req.Stack.PackageManager != registry.PackageManagerBun {
 		steps = append(steps, setupBun())
 	}
 	for _, tool := range env.Tools {
@@ -668,6 +684,41 @@ func setupNode() step {
 // the graph.
 func hasSite(env registry.CIEnvironment) bool {
 	return slices.ContainsFunc(env.Environment.Deployables, func(d *ir.ResolvedDeployable) bool { return d.Kind == ir.DeployableSite })
+}
+
+// hasBundle reports whether env places a server, a job or a worker on a
+// platform whose artifact is a bundle (D64), which `stack deploy` builds
+// on the runner with `bun bundle.ts` after a frozen install of the output
+// root's workspace, as it builds a site.
+func hasBundle(env registry.CIEnvironment) bool {
+	return slices.ContainsFunc(env.Environment.Deployables, func(d *ir.ResolvedDeployable) bool { return d.HasBundle() })
+}
+
+// buildsWithBun reports whether a deploy of env builds a site or a bundle
+// on the runner with Bun, so its deploy and preview jobs set up Bun and
+// install the workspace from the committed lockfile first.
+func buildsWithBun(env registry.CIEnvironment) bool { return hasSite(env) || hasBundle(env) }
+
+// bundled are the stack's servers, jobs and workers some environment
+// places on a platform whose artifact is a bundle, each sorted by name in
+// its kind, which check bundles as a deploy does (D64).
+func (g github) bundled() []deployable {
+	var out []deployable
+	for _, kind := range []ir.DeployableKind{ir.DeployableServer, ir.DeployableJob, ir.DeployableWorker} {
+		var names []string
+		for _, env := range g.req.Environments {
+			for _, d := range env.Environment.Deployables {
+				if d.Kind == kind && d.HasBundle() && !slices.Contains(names, d.Name) {
+					names = append(names, d.Name)
+				}
+			}
+		}
+		slices.Sort(names)
+		for _, name := range names {
+			out = append(out, deployable{kind, name})
+		}
+	}
+	return out
 }
 
 // build builds every service of the services root, the stack's included,
