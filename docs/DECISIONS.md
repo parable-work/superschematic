@@ -6975,6 +6975,136 @@ refusals.
 
 The rule is reversible until the first release.
 
+### D44, amended: an operation has one rate limiter in an app, which its route, its procedure and its pages share
+
+The procedures amendment gave a procedure a limiter of its own at its
+route's rate, and the pages amendment gave the pages one per operation,
+each beside the route's: a client of acme's `placeOrder`, at 60 a minute,
+got 60 through `/api/orders`, 60 through its procedure and 60 through the
+console's new-order post, 180 in all. The route's limiter could not be
+shared: `RouteControls::rate_limit` builds it inside the router each time
+`build_router` runs, and nothing outside the router reaches it.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The Rust runtime's `RateLimits` holds one API's limiters, one per operation with a `@rateLimit`, keyed by the operation's namespace, name and rate. `RateLimits::of(&OperationInfo)` gives the operation's limiter, made the first time anything asks for it, or none for an operation without one. Each is the token bucket D29 describes, per client, refilled continuously at the route's rate. A clone shares the limiters. `OperationInfo` gains `rate_limit`, the route's requests per minute, so the registry needs nothing but the operation. | A limiter per operation in a `static`, which every router and app in a process would share, tests included. A struct of limiters the API crate generates, one more argument for every `build_router` variant. Keying by the route's path, which a procedure and a page do not have. |
+| `RouterOptions` gains `rate_limits`, a new registry by default, so `build_router` and every stack server count as before. `build_router_with` takes each route's limiter from it with `RouteControls::rate_limiter`. Two routers built from one registry share a budget. This replaces D29's bucket per route with a bucket per operation in a registry, which a router built with the default options holds alone. `RouteControls::rate_limit(n)` stays, for a manual route the service mounts itself. | A `build_router_with_limits` beside `build_router_with_manual_routes`, so the variants multiply. |
+| `<service>(...)` makes one registry. It mounts the JSON API with it and hands it to `procedures::route_controls` and `pages::route_controls`. So the route, the procedure, and every page and shard that meets the operation's controls take from one bucket per client. The registry is kept in `Setup.rate_limits`, so an app that builds the API's router again, or another crate's page that calls the operation, can share it. | Keeping a limiter per surface, as replicas would have, which this amendment replaces. Sharing the route's and the procedure's alone, which leaves the console a second budget. |
+| On every surface, the key is the client's address as Topcoat reads it (`client_ip`), or `unknown` when Topcoat knows none. `ClientAddress` gives the route that address as the runtime's `ClientIp`, which the runtime's `client_key` reads. The procedures and the pages read it through the crate's one `client_key(cx)`. So a client is one client on all three surfaces, and the clients without an address share one bucket on all three. | A key per surface, with the route keyed by its peer address, which a request through Topcoat does not carry. |
+| The limiter belongs to the operation, not to a route. A procedure or a page meets it whether or not a router was built for the operation. A route whose operation has neither, such as a webhook, a `@requireService` operation or a manual one, meets it alone. Each surface still answers the refusal its own way: the route with its 429 problem, the procedure with a `ProblemRecord`, the pages with their refusal section. Each carries the shared bucket's `Retry-After`. Another process that serves the API, such as a stack's server beside the app, has a registry of its own: a limiter is kept in process memory (D29), so replicas share no budget. | Refusing a crate whose app does not mount the JSON API: no app can, since `<service>(...)` mounts it. |
+| A page that meets several operations' controls still takes from each limiter in turn, its own first. A page its own limiter admits and a reference's limiter refuses has spent its own token, as before. A reference's options operation is now counted with its route and its procedure, so a client who reloads a page holding a reference spends that operation's API budget too. | Exempting the references' limiters from the sharing, which would leave the listing a second budget through the console. |
+
+Status: built in the Rust runtime, rustrestgen and the Topcoat crate;
+acme's test is designed, not built. The tests are these:
+
+- The runtime's `ratelimit` tests: an operation has one limiter in a registry, a clone shares it, an operation without a rate limit has none, and a new registry shares nothing. `controls` tests that two routes built from one registry share a budget, that one from another registry has its own, and that `rate_limiter(None)` leaves a route's own limiter in place.
+- rustrestgen: the `router.rs` goldens of fixture-api, fixture-user-routes-api and fixture-webhooks-api, and every `operations.rs` golden (`rate_limit`). `TestRouteControlsAPICrateBuildsAndRoutes` builds fixture-api's router twice from one `RouterOptions`: 30 requests through each spend a client's 60, so the next through either is 429 while another client's is 200, and two routers built apart each have their own budget.
+- Topcoat, built: `TestPagesKeepTheirRoutesControls` on `fixture-controls-api`'s list of orders, at two a minute: one request through `/api/orders` and one through its procedure leave the console's list page 429 for that client and 200 for another, and the route and the procedure 429 too. `TestTheSetupSharesOneRegistry` reads the goldens: `RateLimits::new()` once in `lib.rs`, the JSON API mounted with it, and no `RateLimiter::per_minute` in `procedures.rs` or `pages.rs`. `TestWhatHasNoProcedure` and `TestATrailStepMeetsItsOptionsControls` find each procedure's and page's rate limit taken from the registry.
+- acme: at `placeOrder`'s 60 a minute, 20 posts through `/api/orders`, 20 through its procedure and 20 through the console's new-order page leave the next post through each 429.
+
+The rule is reversible until the first release.
+
+### D37, amended: an in-process call reaches a `@requireService` operation only through a service caller it names
+
+D37's first amendment left open whether an in-process call should refuse
+a `@requireService` operation. `OperationInfo` carries no service clause,
+so `admit` applied the end-user step alone. An operation with no user
+clause admitted anyone: fixture-controls-api's `reindexStock` ran from a
+page with no caller. The Topcoat crate offers that call to every page.
+The user chose to allow such a call only through an explicit service
+caller.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `OperationInfo` gains `service`, the operation's effective clause (`ir.EffectiveServiceCallers`): `ServiceClause { mode: ServiceMode::Require` or `Allow, from }`, `None` without one. | The clause beside `OperationInfo`, as the identity runtime's `Route::service_only` carries it: one more table each caller must keep in step. |
+| `admit(authenticator, principal)` is a call that names no service caller. A `@requireService` operation refuses it, with or without a user clause, as its route refuses a request without a service credential: 401 `service_unauthorized`, "Service credential required". An `@allowService` operation, and one without a clause, admit as before. | Admitting it, D37's open answer, which lets a page call a service-only operation for any end user. Refusing it only without a user clause, which still lets any end user who meets the clause stand in for a service. |
+| A service caller is the runtime's `ServiceCaller`: the record the route hands an implementation for a verified credential, holding the deployable, the APIs it serves and a subject. An in-process caller builds its own with `ServiceCaller::in_process(deployable, serves)`. The subject is empty, since within one process nothing presents or verifies a credential. The process's own code is trusted, so the rule makes the call deliberate; it does not stop an attack. `serves` names the APIs the caller acts for, which the operation's `from` is checked against. | A credential the process signs and then verifies itself, which adds keys and proves nothing within one process. A caller type of its own, beside the one an implementation already reads in `ctx.service_caller`. The serving API as the caller, which `from`, naming the other APIs, would never list. |
+| `admit_service(caller)` is the route's service step, with one rule for the router and an in-process call: `ServiceRule::admit` becomes the runtime's `service_step`, which `Gate` and `admit_service` both call. With no caller, a `@requireService` operation refuses (401), and `admit` runs this first. With a caller, it answers 403 `service_forbidden` when `from` lists none of the APIs the caller serves. It answers `Ok(true)` when the caller alone is admitted, that is, a listed caller of an `@allowService` operation. It answers `Ok(false)` when the end-user step still applies, which `admit_end_user(authenticator, principal)` runs: the user clause of a `@requireService` operation, or an operation without a clause. `service_context(caller, principal)` is the `RequestContext` of `context` with `service_caller` set, so the implementation sees the caller as the route hands it. | One `admit_as` taking an optional authenticator, which a crate whose operations need no caller has none to pass. |
+| A `@requireService` operation has no `operations::<op>(cx, args)` in the Topcoat crate. A page cannot call it for an end user, by accident or not, and the compiler says so. `operations::as_service(&caller)` returns `AsService`, which has a call and a guard per operation whose clause is `@requireService` or `@allowService`. `as_service(&caller).<op>(cx, args)` runs `admit_service`. When the end-user step applies, it takes the page's own caller, from the `PageAuthenticator`, as the end user the service forwards. It then runs `Args::check`, and the implementation with `service_context`. `can_<op>(cx)` of a `@requireService` operation answers the 401 above; `as_service(&caller).can_<op>(cx)` admits the service caller. An argument form of such an operation has `submit_as(cx, &caller)` in place of `submit(cx)`. | An end-user call that always answers 401: a call no page should make, found only when it runs. A service caller held in `Setup`, which every call would then make silently. |
+| The console and the procedures are unchanged. A `@requireService` operation has no page and no procedure, since a browser holds no service credential, and no reference lists its items through one (`ir.ResolveReference`). An `@allowService` operation keeps its end-user call, its procedure and its pages, which call it as the end user, never as a service. A call through a service caller applies no traffic controls, as no in-process call does. | Pages that call as a service, which would act for every reader with the service's authority. |
+| Rust's API crate (D43) and the Topcoat crate built on it are the only in-process call surfaces. Go and TypeScript have none: their routers alone apply a clause. `serviceauth.WithCaller` in Go and the mutable `ctx.serviceCaller` in TypeScript exist for handler tests and the router. Code that calls an implementation directly applies no rule at all, in any language, as before. An in-process surface in Go or TypeScript would follow this rule; TypeScript's `operationSpecs` already carries the clause. | |
+
+This settles the in-process question the first amendment left open. A
+call between two APIs that one server serves goes over HTTP, and is
+section 9.9's question in `docs/stack-model.md`, not this one's.
+
+Status: built in the Rust runtime, rustrestgen and the Topcoat crate.
+The tests are these:
+
+- The runtime's `operation` tests: a `@requireService` operation refuses `admit`, with and without a user clause. A listed caller is admitted and an unlisted one refused 403, and an empty `from` lists any caller. A listed caller of an `@allowService` operation stands in for the end user, and an unlisted one goes on to the end-user step. The context of a service caller's call names the caller. A grid of 72 calls, over mode, `from`, caller, user clause and end user, gives an in-process call the status and code a `RouteControls` route answers. `service_auth` tests that `ServiceCaller::in_process` names a caller with an empty subject.
+- rustrestgen: every `operations.rs` golden (`service`), and in `TestServiceAuthAPICrateBuildsAndRoutes`, `an_in_process_call_needs_its_service_caller`: `admit` refuses each `@requireService` operation 401; a listed caller is admitted, with the end user it forwards, and the implementation reads both; an unlisted one is refused 403; and a listed caller of an `@allowService` operation stands in for the end user.
+- Topcoat, built: `fixture-controls-api` gains `reserveStock`, a `@requireService` operation with a `from` and a user clause. `TestAServiceOnlyOperationIsCalledAsAService` finds no end-user call of a `@requireService` operation in `operations.rs`, an `AsService` call and guard for each operation with a clause, and `submit_as` in place of `submit`. `TestProceduresKeepTheirRoutesRules`'s cargo test sees these:
+  - an end user refused 401 `service_unauthorized`, signed in or not;
+  - a listed caller admitted, with the page's caller forwarded;
+  - an unlisted caller refused 403;
+  - a signed-out page refused 401;
+  - an `@allowService` operation run as a service with no session;
+  - the form submitted as a service.
+- acme has no in-process service call. Its only `@requireService` operation, shop-stock's `reserveStock`, is in an API its Topcoat app does not host.
+
+The rule is reversible until the first release.
+
+### D48, amended: an enum member's title, a type's icon and a field's multiline hint
+
+D48 gave a type its display and left an enum's members to their names. A
+UI labeled `OnHold` "On hold" and had no way to say "Held for a stock
+check": `ir.EnumValueDef` has no title, and a TypeScript enum member takes
+no decorator. A type had no icon, though fields and operations have
+`@icon`, so a console's nav could not show one. And whether text is
+entered on one line or several was each UI's guess. The Topcoat forms make
+a textarea of text whose `maxLength` is 500 or more, so a note with no
+bound gets a one-line input, and a code of up to 2000 characters would
+get a textarea.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `ir.EnumValueDef` gains `Title`, after `Name`, omitted when empty, so IR without it is the same bytes. In the data forms a member writes `title`. In TypeScript, the member's JSDoc comment declares it: `/** @title Held for a stock check */ OnHold = "on_hold"`. The tag's line leaves the member's comment, and the rest stays its comment. The reader reads the tag on an enum's members, its own and a dependency's (`recordExternalEnum`). It refuses an empty tag (`enum OrderStatus member OnHold: @title needs the member's title after it`) and a second tag (`enum OrderStatus member OnHold: @title is given twice`). It also refuses a tag in a `//` or `/* */` comment (`enum OrderStatus member OnHold: @title is read from a JSDoc comment (/** @title … */), not a // or /* */ comment`). Anywhere else, a `@title` line is comment text, as today. The TypeScript writer writes the tag on a line of its own after the member's comment. | A decorator, which TypeScript refuses on an enum member. Labels keyed by field in a type's `@display`, D48's deferred option, which every type that holds the enum would repeat. A companion call such as `enumTitles(OrderStatus, {...})`, a top-level statement the reader does not evaluate. `description`, which has no TypeScript form. |
+| `Schema.Validate` holds a title to these rules in every form: non-blank (`enum OrderStatus member OnHold: title must be non-blank`), unpadded (`... title must not contain surrounding whitespace`) and one line (`... title must be one line`). It must not contain `*/` (`... title must not contain */`), so the TypeScript comment can hold it. It must differ from every other member's title in the enum, ignoring case (`enum OrderStatus: members OnHold and Shipped share the title "Shipped"`), so a select's options can be told apart. | Allowing two members one title, which a select would show twice. |
+| `TypeDisplay` gains `icon`, after `createLabel`: the glyph a UI shows beside the type's name, as in `@display({ plural: "Orders", icon: "receipt" })`. It is a name, as a field's and an operation's `@icon` are, for an app's icon set to draw. It must be non-blank (`display icon must be non-blank`) and unpadded (`display icon must not contain surrounding whitespace`). Which names are allowed is an extension's check (D48). `@display({ icon })` alone is a display. | The list operation's `@icon`, which is its MCP tool's icon and which a type without a list operation lacks. A type decorator `@icon`, a second spelling of what `@display` says. |
+| A field takes `@display({ multiline })` from `@superschematic/schema`. `true` asks for a control that holds several lines, and `false` for one line, whatever the field's `maxLength`. It writes `FieldDef.Display` (`ir.FieldDisplay`), omitted when absent. The data forms write the argument under the field's `display`, and the schema-file JSON Schema takes `$defs/FieldDisplay` from the spec's Args, as it takes a type's display. `@display({})` is refused, a field takes one, and an operation takes none (`OrderMutations.placeOrder carries a field display; only a field takes @display`). The loader refuses it on a field that holds no text (`type NoteInput: field count takes @display multiline, which is for text, but it is Generic.Int64`). It also refuses it on a secret field (`type LoginInput: field password takes @display multiline, but it is secret, a password input`). A list of text may take it, for a control per row. | A long-text scalar, which superscalar does not have (`Text.Markdown` and `Text.Sql` have no bound) and which a bounded field could not use. A flag decorator `@multiline`, which can only say yes. `@docs({ multiline })`, which is documentation. The 500 rule alone. |
+| An argument takes none, since arguments take no decorators and have no display metadata yet: an argument's label is its name in words. The Topcoat forms keep the 500 rule for an argument. The input fields of an argument form follow their own hints. | `Multiline<T>`, a type wrapper both fields and arguments could take, which would put a UI's choice into the value's type for every type generator to see through. |
+| Where each one appears. The IR, every authoring form and the writers carry all three. The engine's schema document copies an enum whole (`enginedoc`), and the engine checks it against the regenerated meta-schema. The engine's describe document copies a type's `display` whole, so it carries `icon`, and its TypeScript client's `TypeDisplay` types it. No other document gains a member's title or a field's multiline. The OpenAPI document and the tool manifests carry no field title either, and the engine describes an enum field by its values. A later change that puts reader-facing labels into those documents would carry both. No type, SDK or server generator renders them, so only the goldens that copy IR change. | `x-enum-varnames` or `x-enum-descriptions`, other tools' conventions, for members alone while fields stay untitled. |
+
+Status: designed; nothing built. The tests are these:
+
+- ir: each title rule with its message, the icon's, and `FieldDisplay`'s.
+- The TypeScript reader:
+  - `fixture-display` gains a titled member, an icon and a multiline field;
+  - an empty, doubled or `//` tag is refused;
+  - a dependency's enum keeps its titles.
+- The registry's `@display` test on a field. `TestDisplayDefsAreTheRegisteredArgs` for `FieldDisplay`, and `make schema-file-types-check`.
+- verify: a multiline field that holds no text, and a secret one.
+- The writers' round trip: TypeScript to IR to TypeScript, JSON and YAML, with every member titled.
+- `TestDisplayChangesNoGeneratedFile` gives every enum member a title, every type an icon and every text field a hint. The trees match byte for byte, but for the Rust types crate's IR copies.
+- The engine's `the_meta_schema_holds_its_shape` refuses a blank icon.
+
+The rule is reversible until the first release.
+
+### D44, amended: the crate labels a member by its title, the console's nav shows a type's icon, a multiline field is a textarea, and each form's first submit control is its default button
+
+The crate labeled an enum's members by their names alone, rendered no
+icon, and chose a textarea by `maxLength` alone (D48, amended, above).
+And the rows amendment put a hidden default button ahead of a form's row
+buttons, so that Enter submits the form rather than adding or removing a
+row, but no test checked the order the HTML rule depends on. The user
+chose a structural test, with no browser.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A member is labeled by its title, else by its name in words, by one rule (`enumOptions`). The rule covers a form's select options and checkbox group, a filter's, and `<enum>_label`, which a display component's `<data>` shows. | Titles in the display components alone, so a filter and a table would name one member two ways. |
+| A link of the console's nav or index starts with `<span class="ss-icon" data-icon="receipt" aria-hidden="true"></span>`, before its label, when its resource's type declares an icon. The type is the list's element type, else the detail's. The crate ships no icon set and no styles: the app's stylesheet draws each name, for example with `.ss-icon[data-icon="receipt"] { mask-image: url(...) }`. A link without an icon has no span. A crate whose resources declare none renders the nav as before. | A class per name (`ss-icon-receipt`), which needs a name to be a CSS identifier, a rule the core does not make. An inline SVG set, a dependency and a style the crate does not choose. A slot or renderer in `Settings`, which hands markup to a layout that escapes every value. An icon in the trail or a table's caption, which a later change can add. |
+| A text field whose display says `multiline: true` is a `<textarea rows="6">`, as long text is, whatever its `maxLength`. One that says `false` is a one-line input, whatever its `maxLength`. Without the hint, the 500 rule stands. The hint applies only where the control would be text. An email, URL, phone, date or time control keeps its type, and the build log says so: `topcoat: Account.email: @display multiline is ignored: its control is an email input`. The app's choices still make the field a select. | Turning an email or a date into a textarea, which drops its browser checks. |
+| Every form the crate renders has a submit button, and so does each page's form around it. Its first submit control in tree order is the default button: one with no `name`, `formaction`, `formmethod`, `formenctype`, `formtarget`, `formnovalidate` or `disabled`. HTML's implicit submission, Enter in a text field, clicks that button, so Enter submits the form with no `_action` rather than adding or removing a row. A structural test holds this for every page the extension's cargo tests and acme's tests render. No form nests another, which the HTML parser would drop, and no control names its form with `form=`, so tree order is the whole rule. | A browser driving each form, which CI does not run. A script that handles Enter. Trusting the templates' order with no test. |
+
+Status: designed; nothing built. The tests are these:
+
+- `TestViewsRenderRecords`: `order_status_label("on_hold")` is fixture-views-api's title.
+- `TestArgumentFormsServeATopcoatApp`: the status filter offers the title.
+- `TestPagesServeATopcoatApp`: fixture-pages-api's nav and index show the projects' icon, and only theirs; goldens without icons keep their nav.
+- `TestFormsServeATopcoatApp`: fixture-forms-api's `NoteInput.text`, which has no bound, is a textarea. `TestHowAFormHoldsAField` checks `multiline: false` at 5000 and an email's ignored hint.
+- `extensions/topcoat/testdata/enter.rs` checks each form's submit controls. Each cargo app test's request helper runs it on every HTML page, and so does acme's. It is run on the booking form with rooms whose notes are rows within rows, an argument form that embeds its input, the console's new, edit, action, filter and page-size forms, and every 422 a form renders again. Its own tests fail a row button ahead of the default, a form with no submit button, a nested form and a button with no `type` ahead of the default. `TestRowButtonsFollowTheDefaultButton` checks every golden's `forms.rs` without cargo.
+- acme: shop-db's `OrderStatus.Fulfilled` reads "Picked and packed" in the orders filter and the console's table. The console's nav shows the orders' and the products' icons. The review's body states its multiline hint.
+
 ### D60, amended: a paged list sorts by a `SortBy` argument, its cursor names the sort, and the Go ORM reads a page
 
 D60 made a list's order the implementation's own, fixed. A caller cannot

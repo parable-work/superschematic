@@ -45,7 +45,8 @@ This crate provides:
 - `schema`: the schema runtime crate the generated types crates validate
   with, re-exported so a parameter spec and an input parse share its types
 - `RouterOptions`, `openapi_router`: the OpenAPI document and its RapiDoc
-  page a generated router serves
+  page a generated router serves, and the `RateLimits` registry its routes
+  take their limiters from (`rate_limits`, a new one by default)
 - `Authenticator` and `Principal`: how a service tells the router who the
   caller is, and the dotted-path permission rule (`has_any_permission`)
 - `ServiceAuthenticator` and `ServiceCaller` (D37): which deployable is
@@ -54,7 +55,22 @@ This crate provides:
   with static keys or a JWKS it caches per URL
 - `RouteControls`: a route's `@rateLimit`, `@bodyLimit`, service step
   (`@requireService`, `@allowService`), permission check and `@timeout`,
-  applied with `route_layer` in that order
+  applied with `route_layer` in that order. A generated router gives a
+  route its operation's limiter from a `RateLimits` registry
+  (`rate_limiter(limits.of(&OPERATION))`), one per operation, so the
+  routers and the Topcoat procedures and pages that share the registry
+  count a client against one budget (D44, amended); `rate_limit(n)` gives
+  a manual route the service mounts itself a limiter of its own
+- `OperationInfo`: an operation's route as the generated `operations`
+  module states it, its rate limit and service clause (`ServiceClause`)
+  included, for a caller that runs it in-process (D43). `admit` is the
+  route's admission of a call that names no service caller, so it refuses
+  a `@requireService` operation 401 `service_unauthorized`;
+  `admit_service(Some(&caller))` is the route's service step for a caller
+  the process names with `ServiceCaller::in_process(deployable, serves)`,
+  by the rule `RouteControls` applies, and `admit_end_user` the end-user
+  step; `context` and `service_context` build the `RequestContext` the
+  route would hand the implementation (D37, amended)
 - Service credential sources for a calling service, each a `TokenSource`:
   `GoogleIdTokenSource` (Cloud Run), `TokenFileSource` (a Kubernetes
   projected token) and `SignedKeySource` (an edge's Ed25519 key)

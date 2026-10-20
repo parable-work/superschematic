@@ -12,7 +12,7 @@
 //! same members in the Go and TypeScript runtimes. A deployment whose
 //! credential that config cannot express passes its own authenticator.
 
-use crate::{ApiError, JwsAlgorithm};
+use crate::{ApiError, JwsAlgorithm, ServiceMode};
 use async_trait::async_trait;
 use http::request::Parts;
 use serde::{Deserialize, Serialize};
@@ -45,10 +45,51 @@ impl ServiceCaller {
         }
     }
 
+    /// A caller the process names itself, for an in-process call of an
+    /// operation with a service clause (D37, amended): its deployable, and
+    /// the APIs it acts for, which the operation's `from` is checked
+    /// against. Nothing in one process presents or verifies a credential,
+    /// so its subject is empty.
+    pub fn in_process(
+        deployable: impl Into<String>,
+        serves: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        Self::new(deployable, serves, "")
+    }
+
     /// Whether a route's `from` lists this caller: `from` is empty, or the
     /// caller serves one of its APIs.
-    pub fn is_listed(&self, from: &[String]) -> bool {
-        from.is_empty() || self.serves.iter().any(|api| from.contains(api))
+    pub fn is_listed(&self, from: &[impl AsRef<str>]) -> bool {
+        from.is_empty()
+            || self
+                .serves
+                .iter()
+                .any(|api| from.iter().any(|listed| listed.as_ref() == api))
+    }
+}
+
+/// A route's service rule (D37), applied to the caller the service step
+/// established, or to none: one rule for the router's `RouteControls` and
+/// an in-process call's `OperationInfo::admit_service`. `Ok(true)` admits
+/// the call on the caller alone, so the end-user step is skipped;
+/// `Ok(false)` sends it on to the end-user step; otherwise it is refused.
+/// `has_user_clause` says the route also asks for an end user, without
+/// which `@allowService` reads as `@requireService`.
+pub(crate) fn service_step(
+    mode: ServiceMode,
+    from: &[impl AsRef<str>],
+    caller: Option<&ServiceCaller>,
+    has_user_clause: bool,
+) -> Result<bool, ApiError> {
+    let listed = caller.is_some_and(|caller| caller.is_listed(from));
+    match (mode, caller) {
+        (ServiceMode::Allow, _) if listed => Ok(true),
+        (ServiceMode::Allow, _) if has_user_clause => Ok(false),
+        (_, None) => Err(ApiError::service_unauthorized(
+            "Service credential required",
+        )),
+        (_, Some(_)) if !listed => Err(ApiError::service_forbidden("Service not permitted")),
+        (_, Some(_)) => Ok(false),
     }
 }
 
@@ -197,9 +238,21 @@ mod tests {
     #[test]
     fn a_caller_is_listed_when_from_is_empty_or_names_an_api_it_serves() {
         let caller = ServiceCaller::new("orders", ["shop-orders", "shop-admin"], "sa-1");
-        assert!(caller.is_listed(&[]));
+        assert!(caller.is_listed(&[] as &[&str]));
         assert!(caller.is_listed(&["shop-admin".to_string()]));
         assert!(!caller.is_listed(&["shop-stock".to_string()]));
         assert!(!ServiceCaller::new("job", Vec::<String>::new(), "s").is_listed(&["a".to_string()]));
+        // A route's from in an OperationInfo is a static list.
+        assert!(caller.is_listed(&["shop-stock", "shop-orders"]));
+    }
+
+    #[test]
+    fn an_in_process_caller_names_itself_and_presents_no_credential() {
+        let caller = ServiceCaller::in_process("app", ["shop-orders"]);
+        assert_eq!(
+            caller,
+            ServiceCaller::new("app", ["shop-orders"], String::new())
+        );
+        assert!(caller.is_listed(&["shop-orders"]));
     }
 }

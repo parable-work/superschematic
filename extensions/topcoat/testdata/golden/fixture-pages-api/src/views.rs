@@ -88,8 +88,8 @@ fn digits(bytes: &[u8]) -> Option<u32> {
         .then(|| bytes.iter().fold(0, |number, digit| number * 10 + u32::from(digit - b'0')))
 }
 
-/// Labels a value of `ProjectStatus`: its member's name in words. A value the
-/// enum does not declare is its own label.
+/// Labels a value of `ProjectStatus`: its member's title, else its name in
+/// words. A value the enum does not declare is its own label.
 pub fn project_status_label(value: &str) -> &str {
     match value {
         "planned" => "Planned",

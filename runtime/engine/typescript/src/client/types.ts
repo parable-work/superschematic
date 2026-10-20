@@ -195,6 +195,8 @@ export interface TypeDisplay {
   plural?: string;
   titleField?: string;
   createLabel?: string;
+  /** The glyph a UI shows beside the type's name, by a name an app's icon set draws (D48, amended). */
+  icon?: string;
   summaryFields?: string[];
   states?: { [state: string]: DisplayState };
   transitions?: { [from: string]: { [to: string]: string } };

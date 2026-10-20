@@ -8,8 +8,8 @@ import (
 )
 
 // The label rule a form and a display component share: a field is labeled
-// by its @docs title, else its name in words; an enum's member by its name
-// in words.
+// by its @docs title, else its name in words; an enum's member by its
+// title, else its name in words (D44, amended).
 
 // labelOf is a field's label: its @docs title, or its name in words.
 func labelOf(field *ir.FieldDef) string {
@@ -20,7 +20,9 @@ func labelOf(field *ir.FieldDef) string {
 }
 
 // enumOptions is each member of enum: the value its JSON holds and its
-// label, the member's name in words.
+// label, the member's title, else its name in words. A form's select and
+// checkbox group, a filter's, and the label a display component shows
+// for a value all take their labels from it.
 func enumOptions(enum *ir.EnumDef) []formOption {
 	options := make([]formOption, 0, len(enum.Values))
 	for _, value := range enum.Values {
@@ -28,7 +30,11 @@ func enumOptions(enum *ir.EnumDef) []formOption {
 		if serialized == "" {
 			serialized = value.Name
 		}
-		options = append(options, formOption{Value: serialized, Label: humanize(value.Name)})
+		label := value.Title
+		if label == "" {
+			label = humanize(value.Name)
+		}
+		options = append(options, formOption{Value: serialized, Label: label})
 	}
 	return options
 }

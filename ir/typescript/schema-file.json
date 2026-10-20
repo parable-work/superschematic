@@ -2504,6 +2504,10 @@
         "serializedAs": {
           "default": "",
           "type": "string"
+        },
+        "title": {
+          "default": "",
+          "type": "string"
         }
       },
       "required": [
@@ -2612,6 +2616,9 @@
         "description": {
           "default": "",
           "type": "string"
+        },
+        "display": {
+          "$ref": "#/$defs/FieldDisplay"
         },
         "docs": {
           "$ref": "#/$defs/OperationDocs"
@@ -2826,6 +2833,18 @@
         "name",
         "typeRef"
       ],
+      "type": "object"
+    },
+    "FieldDisplay": {
+      "additionalProperties": false,
+      "description": "How a UI renders a field's control (@display on a field).",
+      "minProperties": 1,
+      "properties": {
+        "multiline": {
+          "description": "A control that holds several lines (true) or one line (false), whatever the field's maxLength; absent leaves it to the UI.",
+          "type": "boolean"
+        }
+      },
       "type": "object"
     },
     "FileUploadConfig": {
@@ -4178,13 +4197,19 @@
     },
     "TypeDisplay": {
       "additionalProperties": false,
-      "description": "What a UI reads to render the instances of a type (@display): what to call one and many, which field is an instance's title, what a create button says, which fields summarize it in a list, and the labels of its Workflow's states and transitions.",
+      "description": "What a UI reads to render the instances of a type (@display): what to call one and many, which field is an instance's title, what a create button says, the glyph shown beside its name, which fields summarize it in a list, and the labels of its Workflow's states and transitions.",
       "minProperties": 1,
       "properties": {
         "createLabel": {
           "default": "",
           "description": "What a button that creates an instance says.",
           "pattern": "\\S",
+          "type": "string"
+        },
+        "icon": {
+          "default": "",
+          "description": "The glyph a UI shows beside the type's name, by a name an app's icon set draws.",
+          "pattern": "^\\S(.*\\S)?$",
           "type": "string"
         },
         "noun": {

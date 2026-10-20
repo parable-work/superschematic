@@ -156,6 +156,102 @@ The schema runtimes carry the three fields. The TypeScript runtime's
 `purpose` and `icon` from the IR; the Python runtime's `parse_schema` reads
 the legacy keys into `FieldDef.title`, `purpose` and `icon`.
 
+### `@display({ multiline })` on a field
+
+`@display` from `@superschematic/schema` also goes on a field, where it
+says how a UI renders the field's control. `multiline: true` asks for a
+control that holds several lines, and `multiline: false` for one line,
+whatever the field's `maxLength`:
+
+```ts
+import { Validate, display } from "@superschematic/schema";
+
+export abstract class WriteReviewInput {
+  @display({ multiline: true })
+  body: Validate<string, { maxLength: 5000 }>;
+}
+```
+
+| Decorator | Writes | Rule |
+| --- | --- | --- |
+| `@display({ multiline })` | `FieldDef.display` (`ir.FieldDisplay`) | a boolean; `@display({})` is an error; the field holds text (`string`, or a scalar whose values are strings) or a list of text, not a map, and is not `Secret` |
+
+A field takes one `@display`, and an operation or an argument takes none.
+Without the hint, a UI makes its own choice: the Topcoat forms make a
+textarea of text whose `maxLength` is 500 or more, and an argument keeps
+that rule, since arguments take no decorators. The JSON and YAML forms
+write the argument under the field's `display` key, which
+`superschematic json-schema` checks with the decorator's schema. The
+loader refuses the hint on a field that holds no text, or on a secret
+one, in every form:
+
+```
+src/notes.schema.ts: type NoteInput: field count takes @display multiline, which is for text, but it is Generic.Int64
+src/login.schema.ts: type LoginInput: field password takes @display multiline, but it is secret, a password input
+```
+
+It is presentation only: no generated type, validator or wire format
+changes, and the OpenAPI document and the tool manifests leave it out.
+
+## A title on an enum member
+
+A member's title is its reader-facing label: what a select's option or a
+table's cell shows in place of the member's name. TypeScript takes no
+decorator on an enum member, so the title is a JSDoc tag on the member,
+`@title`, on a line of its own:
+
+```ts
+export enum OrderStatus {
+  Placed = "placed",
+  /** @title Picked and packed */
+  Fulfilled = "fulfilled",
+  Shipped = "shipped",
+  Cancelled = "cancelled"
+}
+```
+
+The tag's line leaves the member's comment, and the rest of the comment
+stays its comment. The record is `EnumValueDef.title`, and the JSON and
+YAML forms write `title` on the member:
+
+```yaml
+values:
+  - name: Fulfilled
+    title: Picked and packed
+    serializedAs: fulfilled
+```
+
+A member without a title is labeled by its name in words ("On hold" for
+`OnHold`). The reader reads the tag only from a `/** */` comment on an
+enum's member, its own enums' and a dependency's. Anywhere else a
+`@title` line is comment text. These fail the load:
+
+```
+src/orders.schema.ts: enum OrderStatus member OnHold: @title needs the member's title after it
+src/orders.schema.ts: enum OrderStatus member OnHold: @title is given twice
+src/orders.schema.ts: enum OrderStatus member OnHold: @title is read from a JSDoc comment (/** @title … */), not a // or /* */ comment
+```
+
+In every form, a title must be non-blank, have no surrounding whitespace,
+fit on one line and not contain `*/`, so the TypeScript comment can hold
+it. It must also differ, ignoring case, from every other member's title
+in the enum, so a select's options can be told apart:
+
+```
+enum OrderStatus member OnHold: title must be non-blank
+enum OrderStatus member OnHold: title must not contain surrounding whitespace
+enum OrderStatus member OnHold: title must be one line
+enum OrderStatus member OnHold: title must not contain */
+enum OrderStatus: members OnHold and Shipped share the title "Shipped"
+```
+
+The TypeScript writer (`format`) writes the tag on a line of its own
+after the member's comment. A title changes no generated code, and the
+OpenAPI document and the tool manifests leave it out, as they leave out
+a field's title. The engine's schema document carries it. The Topcoat
+extension's forms, filters and display components label a member by its
+title ([Pages with Topcoat](/superschematic/guides/topcoat/)).
+
 ## `@display` on a type
 
 From `@superschematic/schema`, on a class of any kind. It says how a UI,
@@ -177,6 +273,7 @@ import { behavior, display, docs } from "@superschematic/schema";
   plural: "Tickets",
   titleField: "title",
   createLabel: "New ticket",
+  icon: "ticket",
   summaryFields: ["Workflow.status", "assignee"],
   states: {
     todo: { label: "To do", tone: "muted" },
@@ -201,6 +298,7 @@ export abstract class Ticket {
 | `noun`, `plural` | what to call one instance and several; non-blank |
 | `titleField` | the field whose value is an instance's title: one of the type's own fields, holding a single text value (`string`, or a scalar whose values are strings, such as `Identity.Name`; not a list, a map, a number, an enum or a JSON scalar), neither `Secret` nor `@uiHidden` |
 | `createLabel` | what a button that creates an instance says; non-blank |
+| `icon` | the glyph a UI shows beside the type's name, as a field's and an operation's `@icon` do; non-blank, with no surrounding whitespace; any name (see [Rules an extension adds](#rules-an-extension-adds)) |
 | `summaryFields` | the fields that summarize an instance in a list, in order, each once: the type's own fields, by name, neither secret nor hidden, or fields its behaviors add, by qualified name, the behavior's name, a dot and the field's (`Workflow.status`), as a read returns them under the behavior's name |
 | `states` | a label per `Workflow` state: `label`, `activeForm` (the present-progressive form a UI shows while an instance is in the state, "Implementing") and `tone`, at least one of the three |
 | `transitions` | a label per `Workflow` transition, by the state it leaves, then the state it enters |
@@ -210,7 +308,9 @@ colors: `muted` (nothing happens in it), `active` (work is under way),
 `success`, `warning` (it needs attention) or `danger`. The set is closed.
 
 Every key is optional, but `@display({})` is an error, and a type takes
-one `@display`. `states` and `transitions` label the type's `Workflow`
+one `@display`. Any one key is a display: `@display({ icon: "receipt" })`
+alone gives a type its icon. A type's icon is its `@display`'s alone: the
+`@icon` on its list operation is that operation's MCP tool's icon. `states` and `transitions` label the type's `Workflow`
 behavior, so a type that does not compose `Workflow` takes neither, and
 each state and transition must be one its config lists. The loader checks
 every rule in every form, and the engine checks them again when a schema
@@ -232,8 +332,11 @@ and its forms a row type's `noun` and `createLabel`, which number a list's
 rows and label its add button
 ([Rows without JavaScript](/superschematic/guides/topcoat/#rows-without-javascript)).
 The engine's describe document carries it
-for the schema's instance type, with each field's title and icon
+for the schema's instance type, its `icon` included, with each field's
+title and icon
 ([Engine behaviors](/superschematic/guides/engine-behaviors/#display)).
+The Topcoat console's nav shows a type's icon beside its link. The OpenAPI
+document and the tool manifests carry no display.
 
 A distribution's own display concepts, such as a role a UI shows a type
 to, a home page or link defaults, are its extension's: a type decorator

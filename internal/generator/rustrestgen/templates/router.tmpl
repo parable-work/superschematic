@@ -77,7 +77,7 @@ pub struct RouterState {
 ///
 {{- range .ManualEndpoints }}
 /// - `{{ toUpper .Method }} {{ .Path }}` ({{ .Namespace }}.{{ .Name }}){{ if .HasControls }}: apply its controls,
-///   `RouteControls::new(){{ range .ControlCalls "authenticator" "service_authenticator" }}{{ . }}{{ end }}.apply(route)`
+///   `RouteControls::new(){{ range .ControlCalls "" "authenticator" "service_authenticator" }}{{ . }}{{ end }}.apply(route)`
 {{- end }}{{ if .WebhookProvider }}{{ if .HasControls }}, then{{ else }}, @hmacVerified:{{ end }}
 ///   wrap its route in `webhook_verified` with the {{ .WebhookProvider }} verifier
 {{- end }}
@@ -106,6 +106,12 @@ pub struct RouterState {
 /// A route's controls run in the order the Go server runs them: the rate
 /// limit, the body limit, the permission check of a route that needs a
 /// caller, then the timeout around the handler.
+{{- end }}
+{{- if .HasRateLimits }}
+///
+/// A @rateLimit route's limiter is its operation's in a `RateLimits`
+/// registry (D44, amended): `build_router` makes one of its own, and
+/// `build_router_with` takes `options.rate_limits`.
 {{- end }}
 {{- if .Identity }}
 ///
@@ -136,6 +142,11 @@ pub fn build_router(implementations: Implementations) -> Router {
 /// `options.serve_openapi` is off, stating `options.openapi_version` and
 /// `options.openapi_base_url` as the generated Go server states its
 /// `Config`'s.
+{{- if .HasRateLimits }} The @rateLimit routes take their operations'
+/// limiters from `options.rate_limits`, so the routers built with one
+/// registry, or a router and a Topcoat app's procedures and pages, count a
+/// client against one budget.
+{{- end }}
 {{- if .WebhookProviders }}
 ///
 /// # Panics
@@ -182,6 +193,9 @@ fn mount(
     }
 {{- end }}
 {{- $authenticator := "Arc::clone(&state.implementations.authenticator)" }}
+{{- if .HasRateLimits }}
+    let limits = options.rate_limits.clone();
+{{- end }}
 {{- if .Identity }}
     let identity_service = Arc::clone(implementations.authenticator.service());
 {{- if .HasAuth }}
@@ -195,7 +209,7 @@ fn mount(
 {{- $route := printf "%s(handle_%s)" .Method .SnakeName }}
 {{- if .HasControls }}
     let route = RouteControls::new()
-{{- range .ControlCalls $authenticator "Arc::clone(&state.implementations.service_authenticator)" }}
+{{- range .ControlCalls "limits" $authenticator "Arc::clone(&state.implementations.service_authenticator)" }}
         {{ . }}
 {{- end }}
         .apply({{ $route }});
@@ -217,7 +231,7 @@ fn mount(
 {{- $route := printf "identity_handler(&identity_service, identity::%s)" .IdentityConst }}
 {{- if .HasControls }}
     let route = RouteControls::new()
-{{- range .IdentityControlCalls $authenticator "Arc::clone(&state.implementations.service_authenticator)" }}
+{{- range .IdentityControlCalls "limits" $authenticator "Arc::clone(&state.implementations.service_authenticator)" }}
         {{ . }}
 {{- end }}
         .apply({{ $route }});
@@ -231,7 +245,7 @@ fn mount(
         let route = {{ .Method }}(handle_{{ .SnakeName }}).with_state(Arc::clone(&manual_routes));
 {{- if .HasControls }}
         let route = RouteControls::new()
-{{- range .ControlCalls $authenticator "Arc::clone(&state.implementations.service_authenticator)" }}
+{{- range .ControlCalls "limits" $authenticator "Arc::clone(&state.implementations.service_authenticator)" }}
             {{ . }}
 {{- end }}
             .apply(route);

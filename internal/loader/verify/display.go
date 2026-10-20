@@ -36,6 +36,34 @@ func checkDisplays(schema *ir.Schema, reg *registry.Registry, r *Result) {
 			}
 		}
 	}
+	checkFieldDisplays(schema, r)
+}
+
+// checkFieldDisplays holds each field's @display (D48, amended) to a field
+// whose control it can say: multiline is for text, so the field holds a
+// string or a scalar whose values are strings, or a list of them (a
+// control per row), not a map; and the field is not secret, which a UI
+// renders as a password input, one line by nature.
+func checkFieldDisplays(schema *ir.Schema, r *Result) {
+	for _, types := range []map[string]*ir.TypeDef{schema.Types, schema.Inputs} {
+		for _, name := range sortedTypeNames(types) {
+			td := types[name]
+			if td == nil {
+				continue
+			}
+			for _, f := range td.Fields {
+				if f == nil || f.Display == nil || f.Display.Multiline == nil {
+					continue
+				}
+				switch {
+				case f.TypeRef.IsMap || !ir.TextValue(schema, ir.TypeRef{Name: f.TypeRef.Name}):
+					r.errorf(td.Owner, "type %s: field %s takes @display multiline, which is for text, but it is %s", td.Name, f.Name, typeLabel(f.TypeRef))
+				case f.Secret:
+					r.errorf(td.Owner, "type %s: field %s takes @display multiline, but it is secret, a password input", td.Name, f.Name)
+				}
+			}
+		}
+	}
 }
 
 func checkDisplay(schema *ir.Schema, td *ir.TypeDef, reg *registry.Registry, r *Result) {
