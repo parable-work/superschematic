@@ -7211,3 +7211,46 @@ Status: built.
   imports nothing from `node:` and carries the module.
 
 The rule is reversible until the first release.
+
+### D51, amended: the workspace leaves out what the output root cannot resolve, and a partial workspace installs without saving the lockfile
+
+D51's root took in every package under the implementation and site
+templates. An output root holds only the packages of the services built
+into it: `stack dev` builds its stack's services and what they need, and
+nothing else. An implementation depends on its API's generated packages
+with `workspace:*`, and Bun refuses the whole install when one member's
+`workspace:` dependency is missing, even with `--filter`. So a fresh
+`stack dev --out`, or the first `stack dev` of one stack in a clone of a
+project with several, failed at the install. acme-shop's three stacks
+showed it: `typescript/shop-wishlist` needs `@acme/shop-wishlist-api`,
+which `shop-stack` does not build. The workaround ran `build-all` into
+the root first, and the README and the Go tutorial told readers to do
+the same.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The root keeps its patterns and appends a `!` pattern (`tsgen.LeftOutPattern`) for each package the implementation or site pattern takes in whose `workspace:` dependencies, in any of the four dependency fields, are neither a generated package on disk nor another member, until no more resolve, so a package that needs a left-out one is left out too. Generated packages need no such pattern: their patterns match only what a build wrote, and a build writes what each depends on. Once every service is built nothing is left out, and the root is the same bytes as before, which the committed lockfile pins. | Filtering the install to the stack's packages, which Bun refuses as it refuses the whole install. Listing the members one by one, which changes every manifest a full build writes. `stack dev` building every service, which is `build-all` inside every run. |
+| The root depends on the packages on disk, so it is no longer the same bytes on every build of one output root. Each build still writes it beside its packages; `build-all` writes it once more when every service is in place, as it already did for restored services, and a stack's build runs its closure in order, so the last write sees every package. | A file lock around a recomputation in each build, which `build-all`'s last write already makes unnecessary. |
+| A partial workspace, one whose root leaves something out (`tsgen.WorkspaceLeftOut`), installs with `bun install --no-save`: `stack dev` and a deploy's or `stack build`'s install of sites and bundles. Bun 1.4.2 drops from the lockfile the members a plain install no longer finds, and a frozen install refuses a lockfile that names members the manifest leaves out ("lockfile had changes"). `--no-save` installs the versions the lockfile pins and leaves it as the project committed it, pinning the whole workspace. Each command prints what the root leaves out. A full workspace installs as before: plain under `stack dev`, frozen under a deploy. | A plain install, which would rewrite the committed lockfile without the other stacks' packages and resolve them afresh on the next full install. A frozen install of the partial workspace, which always fails against a full lockfile. Refusing a partial deploy, which would bring back "run `build-all` first". |
+| A partial deploy does not check that the lockfile is current. The generated CI runs `build-all` before its frozen install, so the CI check still refuses a stale lockfile. | |
+
+`TestStackDevRunsTheShop` runs `stack dev --out` into a fresh root
+holding only the committed lockfiles, with no `build-all` first. The
+README and the Go tutorial no longer tell readers to build every service
+before `stack dev`.
+
+Status: built. `TestWorkspaceRootLeavesOutWhatItCannotResolve` leaves out
+an implementation and a site whose API is gone, and an implementation
+that depends on a left-out one. It writes the full manifest again once
+the API is back. `TestPartialWorkspaceInstallKeepsTheLockfile` runs Bun:
+a full install writes the lockfile, the partial root installs with
+`--no-save` and the lockfile stays the same bytes, and a frozen install
+of the full root accepts it.
+`TestApplyInstallsAPartialWorkspaceWithoutSaving` and
+`TestDeployInstallsAPartialWorkspaceWithoutSaving` check the install
+commands of `stack dev` and of a deploy. acme's
+`TestStackDevRunsTheShop` runs its second `stack dev` into a fresh root
+over the committed `bun.lock`, which leaves out
+`typescript/shop-wishlist`, and checks the lockfile is unchanged.
+
+The rule is reversible until the first release.

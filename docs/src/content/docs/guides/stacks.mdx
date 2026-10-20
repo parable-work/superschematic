@@ -1097,7 +1097,10 @@ install` in `schemas/dist` writes, so the image, the
 [generated CI](#generated-ci) and every engineer install the same
 versions. Write it after `build-all`, which builds every service, so it
 names every package; `stack dev` brings it up to date as you change the
-schemas. The rest of `schemas/dist` stays ignored, but git cannot take
+schemas. An output root built for one stack, as `stack dev --out` builds
+a fresh one, holds only that stack's packages: its workspace leaves out
+each implementation or site that needs a package the root lacks, and its
+install leaves the lockfile as it is. The rest of `schemas/dist` stays ignored, but git cannot take
 back a file under an ignored directory, so ignore the output root's
 contents, not the directory:
 

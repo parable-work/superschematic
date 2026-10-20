@@ -658,6 +658,42 @@ func TestApplyRunsATypeScriptServer(t *testing.T) {
 	}
 }
 
+// TestApplyInstallsAPartialWorkspaceWithoutSaving: an output root built
+// for one stack leaves out the implementations whose packages it lacks
+// (D51, amended), and its install runs with --no-save, so it keeps the
+// lockfile, which pins the whole workspace, as it is.
+func TestApplyInstallsAPartialWorkspaceWithoutSaving(t *testing.T) {
+	f := newFixtureOf(t, storefront(), "Dev")
+	f.runner.rules = []rule{
+		{prefix: inspectPrefix, stderr: "Error response from daemon: No such container: " + f.pgName},
+		{prefix: migrateStatus, stderr: "superschematic-migrate: service shop-db has no applied model"},
+	}
+	manifest := `{"name": "@acme/workspace", "private": true, "workspaces": ["server/*/*", "../typescript/*", "!../typescript/shop-wishlist", "!../web/shop-web"]}` + "\n"
+	if err := os.WriteFile(filepath.Join(f.req.OutputRoot, "package.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.applyAll(t); err != nil {
+		t.Fatalf("%v\n%s", err, f.out)
+	}
+	var installs []string
+	for _, cmd := range f.runner.commands {
+		if cmd.Path == "/bin/bun" && len(cmd.Args) > 0 && cmd.Args[0] == "install" {
+			installs = append(installs, strings.Join(cmd.Args, " "))
+		}
+	}
+	if len(installs) != 1 || installs[0] != "install --no-save" {
+		t.Errorf("bun ran %q, want install --no-save once", installs)
+	}
+	want := "install the TypeScript workspace: bun install --no-save in " + f.req.OutputRoot + ", which leaves out ../typescript/shop-wishlist, ../web/shop-web, whose packages this output root lacks, and keeps its lockfile as it is"
+	if !strings.Contains(f.out.String(), want) {
+		t.Errorf("output lacks %q:\n%s", want, f.out)
+	}
+	f.runner.rules = []rule{{prefix: inspectPrefix, stderr: "Error: No such object: " + f.pgName}}
+	if err := f.prov.Destroy(context.Background(), f.req); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // TestApplyRefusesATypeScriptServerItCannotRun: without bun on PATH, or
 // with no Bun workspace at the output root, the storefront's wave fails
 // and says why.

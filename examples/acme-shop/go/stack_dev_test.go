@@ -611,9 +611,24 @@ func TestStackDevRunsTheShop(t *testing.T) {
 	// with the committed Cargo.lock, so they build the versions the first
 	// run built, and its Cargo target directory is the first run's, so
 	// cargo compiles the crates the root generates and reuses every other.
-	otherRoot := otherOutputRoot(t, binary, outputRoot)
+	// It starts with the committed bun.lock too, which pins the whole
+	// workspace: the root holds only shop-stack's packages, so its Bun
+	// workspace leaves out typescript/shop-wishlist, whose API shop-stack
+	// does not deploy, and stack dev installs it with --no-save, which
+	// keeps the lockfile as it is (D51, amended).
+	otherRoot := otherOutputRoot(t, outputRoot)
 	again := startStackDev(t, binary, shopStack, "--out", otherRoot)
 	againEnv := again.waitUntilRunning(t, otherRoot, "shop-stack", "shop-api", "shop-orders", "shop-stock", "shop-storefront")
+	if out := again.output.String(); !strings.Contains(out, "bun install --no-save in "+otherRoot+", which leaves out ") || !strings.Contains(out, "typescript/shop-wishlist") {
+		t.Fatalf("stack dev --out did not leave typescript/shop-wishlist out of the workspace it installed:\n%s", out)
+	}
+	committedLock, err := os.ReadFile(filepath.Join(outputRoot, "bun.lock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lock, err := os.ReadFile(filepath.Join(otherRoot, "bun.lock")); err != nil || !bytes.Equal(lock, committedLock) {
+		t.Fatalf("stack dev --out changed the lockfile it started with (%v)", err)
+	}
 	mirrored, err := os.ReadFile(filepath.Join(otherRoot, "impl", "shop-stock", "src", "lib.rs"))
 	if err != nil {
 		t.Fatal(err)
@@ -767,21 +782,19 @@ func (dev *stackDev) stop(t *testing.T) {
 }
 
 // otherOutputRoot is an output root of the test's own, outside the
-// example, holding the lockfile of outputRoot's Cargo workspace and a link
-// to the Cargo target directory of its Dev environment, which every Rust
-// deployable of Dev builds into (D57, D65). Its path is the real one, so
-// the relative paths the build writes from it to the checkout resolve.
+// example, holding the lockfiles of outputRoot's Cargo and Bun workspaces
+// and a link to the Cargo target directory of its Dev environment, which
+// every Rust deployable of Dev builds into (D57, D65). Its path is the
+// real one, so the relative paths the build writes from it to the
+// checkout resolve.
 //
 // The Bun workspace stack dev installs there takes in the packages under
-// typescript/ and web/, as outputRoot's does, and each depends on packages
-// a build writes into the root: typescript/shop-wishlist on shop-wishlist's,
-// an API shop-stack does not deploy. So build-all first builds every
-// service there, as scripts/check.sh does in outputRoot before the first
-// run, and the install finds each. The install links each package's
-// node_modules to the new root's, so when the test ends, it installs
-// outputRoot's workspace again, frozen to its lockfile, which links them
-// back, as the TypeScript tests after it and stack dev there need them.
-func otherOutputRoot(t *testing.T, binary, outputRoot string) string {
+// typescript/ and web/ whose generated packages the root holds, and the
+// install links each one's node_modules to the new root's. So when the
+// test ends, it installs outputRoot's workspace again, frozen to its
+// lockfile, which links them back, as the TypeScript tests after it and
+// stack dev there need them.
+func otherOutputRoot(t *testing.T, outputRoot string) string {
 	t.Helper()
 	root, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
@@ -794,12 +807,14 @@ func otherOutputRoot(t *testing.T, binary, outputRoot string) string {
 			t.Errorf("install the Bun workspace of %s again: %v\n%s", outputRoot, err, out)
 		}
 	})
-	lock, err := os.ReadFile(filepath.Join(outputRoot, "Cargo.lock"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(root, "Cargo.lock"), lock, 0o644); err != nil {
-		t.Fatal(err)
+	for _, name := range []string{"Cargo.lock", "bun.lock"} {
+		lock, err := os.ReadFile(filepath.Join(outputRoot, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, name), lock, 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
 	target, err := filepath.Abs(filepath.Join(outputRoot, "program", "shop-stack", "Dev", "target"))
 	if err != nil {
@@ -811,11 +826,6 @@ func otherOutputRoot(t *testing.T, binary, outputRoot string) string {
 	}
 	if err := os.Symlink(target, filepath.Join(program, "target")); err != nil {
 		t.Fatal(err)
-	}
-	build := exec.Command(binary, "build-all", "--out", root, "schemas/services")
-	build.Dir = ".."
-	if out, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build-all --out %s: %v\n%s", root, err, out)
 	}
 	return root
 }

@@ -1920,7 +1920,10 @@ main.ts`, and runs a TypeScript job the same way. The
 install is the one an engineer runs, not frozen: it writes the
 workspace's lockfile, or brings the committed one up to date with the
 packages the build wrote, so the lockfile follows the schemas through
-`stack dev` (section 8.6). That install also links the implementations,
+`stack dev` (section 8.6). An output root built for one stack, as
+`stack dev --out` builds a fresh one, holds a partial workspace, whose
+root leaves out the implementations and sites whose packages it lacks;
+that install runs with `--no-save` and leaves the lockfile as it is. That install also links the implementations,
 which lie outside the output root, to it, so a `stack dev --out`
 elsewhere leaves them linked to that output root until the next install
 in the usual one. Each server runs in a process group of its own, so
@@ -2215,7 +2218,14 @@ as they are, with no build step (D51). The pieces mirror Go's:
   which the generator owns, not the repository root's, which is the
   project's own: its members are `types/typescript/*`, `sdk/typescript/*`,
   `api/*` and `server/*/*`, and the implementations through a `../`
-  pattern from the implementation template, which Bun 1.4 accepts. Where
+  pattern from the implementation template, which Bun 1.4 accepts, and
+  the sites through their own. The output root holds only the packages
+  of the services built into it, as a stack's build leaves it, and Bun
+  refuses a whole install when one member's `workspace:` dependency is
+  missing, so the root leaves out, with a `!` pattern, each implementation
+  or site whose `workspace:` dependencies are neither on disk nor other
+  members (D51, amended); once every service is built it leaves out
+  nothing. Where
   `[paths]` names a checkout of superscalar, the HTTP runtime or the
   version-graph runtime, the root's `overrides` point every dependency on
   it at the checkout with a `file:` path from the root; a member's own
@@ -2231,13 +2241,14 @@ as they are, with no build step (D51). The pieces mirror Go's:
   project commits it (D51, amended), so every install of one commit takes
   the same versions: the image's, the generated CI's and an engineer's.
   No build removes it, and the root it pairs with is the same bytes on
-  every build of the same schemas. The members' manifests are the build's
-  and the implementations' are the project's, so nothing else is
-  committed for it. A frozen install needs every member the lockfile
-  names that another member depends on, so the lockfile to commit is the
-  one an install writes after `build-all`: an install after building only
-  some services, as `stack dev`'s first in a fresh clone of a project
-  whose stack does not reach them all, drops the others' packages from it.
+  every build of every service of the same schemas. The members'
+  manifests are the build's and the implementations' are the project's,
+  so nothing else is committed for it. The lockfile to commit is the one
+  an install writes after `build-all`, so it names every package. A root
+  that leaves packages out is a partial workspace: Bun would drop their
+  packages from the lockfile, and a frozen install refuses it, so `stack
+  dev` and a deploy install it with `--no-save`, which installs the
+  versions the lockfile pins and leaves it as it is (D51, amended).
   Its `file:` paths, like the root's overrides, are relative to the output
   root, so it is the same on every machine with the same layout, and a
   change to the manifest of a checkout `[paths]` names changes it too. An
@@ -4739,7 +4750,8 @@ resolution records it as the deployable's `artifact` in
 `environment.json`. For each deployable whose artifact is a bundle, the
 deploy and `stack build`:
 1. run one frozen `bun install` at the output root, shared with the
-   sites' builds;
+   sites' builds, or `bun install --no-save` where the output root holds
+   a partial workspace (section 8.6);
 2. run `bun bundle.ts <dir>` in the deployable's package,
    `server/<stack>/<deployable>/`, `<dir>` being a new, empty directory;
 3. digest `<dir>` as a site's output is digested, and record each file's
