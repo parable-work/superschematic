@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/parable-work/superschematic/internal/generator"
+	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/generator/servergen"
 	"github.com/parable-work/superschematic/internal/loader"
 	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
@@ -46,6 +47,33 @@ var engineTrioOrder = []string{"desk-db", engineServer, rustEngineServer, engine
 // server's transcript into, as JSON, when it is set: what to read when the
 // transcripts differ.
 const engineScriptDumpEnv = "SUPERSCHEMATIC_ENGINE_SCRIPT_DUMP"
+
+// requireEngineServersEnv, set to 1, makes the engine servers' tests fail
+// rather than skip when a toolchain, a built runtime or the Postgres they
+// run on is missing: CI's engine-servers job sets it, where a skip would
+// hide a broken gate.
+const requireEngineServersEnv = "SUPERSCHEMATIC_REQUIRE_ENGINE_SERVERS"
+
+// skipEngineServers skips the test, saying why, or fails it under
+// requireEngineServersEnv.
+func skipEngineServers(t testing.TB, format string, args ...any) {
+	t.Helper()
+	if os.Getenv(requireEngineServersEnv) == "1" {
+		t.Fatalf("%s=1 requires this test to run: %s", requireEngineServersEnv, fmt.Sprintf(format, args...))
+	}
+	t.Skipf(format, args...)
+}
+
+// engineDatabase is the Postgres engineDatabaseEnv names, or "" when it is
+// unset, which fails the test under requireEngineServersEnv.
+func engineDatabase(t *testing.T) string {
+	t.Helper()
+	postgres := os.Getenv(engineDatabaseEnv)
+	if postgres == "" && os.Getenv(requireEngineServersEnv) == "1" {
+		t.Fatalf("%s=1 requires %s, the Postgres the servers run on", requireEngineServersEnv, engineDatabaseEnv)
+	}
+	return postgres
+}
 
 // loadEngineTrioFixture loads the three servers' fixture with the core
 // registry and stacktest's fake target, as loadEngineFixture does.
@@ -101,6 +129,16 @@ func TestTheEngineRunnerOfThreeServersIsTheFirstAPIs(t *testing.T) {
 	}
 }
 
+// requireEngineArchive skips, or fails under requireEngineServersEnv,
+// unless the engine's archive a Go server links is built for this host.
+func requireEngineArchive(t *testing.T, paths naming.LocalPaths) {
+	t.Helper()
+	archive := filepath.Join(paths.EngineGo, "lib", runtime.GOOS+"_"+runtime.GOARCH, "libsuperschematic_engine.a")
+	if _, err := os.Stat(archive); err != nil {
+		skipEngineServers(t, "the engine's archive is not built (run scripts/engine-archive.sh): %v", err)
+	}
+}
+
 // engineTrio is the three servers, built, and the runner beside them.
 type engineTrio struct {
 	out string
@@ -119,17 +157,14 @@ func buildEngineTrio(t *testing.T) engineTrio {
 	t.Helper()
 	cargo, err := exec.LookPath("cargo")
 	if err != nil {
-		t.Skip("cargo not available: the Rust server cannot be built")
+		skipEngineServers(t, "cargo not available: the Rust server cannot be built")
 	}
 	bun, err := exec.LookPath("bun")
 	if err != nil {
-		testpaths.RequireOrSkipTS(t, fmt.Sprintf("bun not available: %v", err))
+		skipEngineServers(t, "bun not available: the TypeScript server cannot run: %v", err)
 	}
 	paths := testpaths.Local(t)
-	archive := filepath.Join(paths.EngineGo, "lib", runtime.GOOS+"_"+runtime.GOARCH, "libsuperschematic_engine.a")
-	if _, err := os.Stat(archive); err != nil {
-		t.Skipf("the engine's archive is not built (run scripts/engine-archive.sh): %v", err)
-	}
+	requireEngineArchive(t, paths)
 	requireEngineTypeScript(t, paths.EngineTypeScript)
 	installTypeScriptRuntime(t, bun, paths)
 
@@ -230,7 +265,7 @@ func TestEngineServersAnswerOneScriptAlike(t *testing.T) {
 	}
 	compareTranscripts(t, "offline", offline, transcripts, since)
 
-	postgres := os.Getenv(engineDatabaseEnv)
+	postgres := engineDatabase(t)
 	if postgres == "" {
 		t.Logf("%s is unset: the servers serve no database, so the script runs offline alone", engineDatabaseEnv)
 		return

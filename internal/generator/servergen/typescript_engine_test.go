@@ -180,12 +180,12 @@ func composeOnAccount(f fixture, behavior ir.BehaviorRef) {
 func requireEngineTypeScript(t *testing.T, dir string) {
 	t.Helper()
 	if _, err := os.Stat(filepath.Join(dir, "dist", "server", "index.js")); err != nil {
-		t.Skipf("the engine's package is not built (bun run build in %s): %v", dir, err)
+		skipEngineServers(t, "the engine's package is not built (bun run build in %s): %v", dir, err)
 	}
 	triples := map[string]string{"darwin/arm64": "darwin-arm64", "darwin/amd64": "darwin-x64", "linux/amd64": "linux-x64-gnu", "linux/arm64": "linux-arm64-gnu"}
 	addon := filepath.Join(dir, "native", "superschematic-engine."+triples[runtime.GOOS+"/"+runtime.GOARCH]+".node")
 	if _, err := os.Stat(addon); err != nil {
-		t.Skipf("the engine's Node-API addon is not built (run scripts/engine-napi.sh): %v", err)
+		skipEngineServers(t, "the engine's Node-API addon is not built (run scripts/engine-napi.sh): %v", err)
 	}
 }
 
@@ -262,7 +262,7 @@ func TestTypeScriptEngineEntrypointServes(t *testing.T) {
 	}
 	offline.stop(t)
 
-	postgres := os.Getenv(engineDatabaseEnv)
+	postgres := engineDatabase(t)
 	if postgres == "" {
 		t.Logf("%s is unset: the entrypoint serves no database", engineDatabaseEnv)
 		return

@@ -176,7 +176,7 @@ func TestEngineProjectArchiveServes(t *testing.T) {
 		t.Skip("skipping the archive's build in -short mode")
 	}
 	if _, err := exec.LookPath("cargo"); err != nil {
-		t.Skip("cargo not available; skipping the engine archive's build")
+		skipEngineServers(t, "cargo not available; skipping the engine archive's build")
 	}
 	paths := testpaths.Local(t)
 	repoRoot := t.TempDir()
@@ -205,7 +205,7 @@ func TestEngineProjectArchiveServes(t *testing.T) {
 	offline.expect(t, http.MethodGet, "/engine/queue-db/namespaces/queue-db/schemas", http.StatusServiceUnavailable, `"code":"unavailable"`)
 	offline.stop(t)
 
-	postgres := os.Getenv(engineDatabaseEnv)
+	postgres := engineDatabase(t)
 	if postgres == "" {
 		t.Logf("%s is unset: the entrypoint serves no database", engineDatabaseEnv)
 		return
