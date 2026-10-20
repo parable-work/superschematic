@@ -23,6 +23,8 @@ export interface DisplayState {
 /** A type's display (@display, D48), as the schema-file document holds it. */
 export interface TypeDisplay {
   createLabel?: string;
+  /** The glyph a UI shows beside the type's name, by a name an app's icon set draws (D48, amended). */
+  icon?: string;
   noun?: string;
   plural?: string;
   states?: { [key: string]: DisplayState };
