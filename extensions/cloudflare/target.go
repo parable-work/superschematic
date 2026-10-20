@@ -104,6 +104,10 @@ const (
 	BundlePrefix = StatePrefix + "bundles/"
 	SitePrefix   = StatePrefix + "sites/"
 
+	// LockPrefix holds each run's deploy lock while a deploy or a destroy
+	// holds it (D46 and D64, amended), `<stack>/<run>.json`.
+	LockPrefix = StatePrefix + "locks/"
+
 	// PassphraseCheck is the object, in StateBucket and in
 	// BootstrapBucket, that checks the passphrase of the state the bucket
 	// holds: a key PBKDF2-SHA256 derives from the passphrase, with its

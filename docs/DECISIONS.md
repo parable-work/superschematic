@@ -7910,3 +7910,29 @@ Not built:
 - Claims on SQLite and D1.
 
 The rule is reversible until the first release.
+
+### D64, amended: a Worker's call within itself carries the loopback credential, and the state store on R2 keeps the deploy lock
+
+D37's amendment gave a server that calls an API it serves a loopback key,
+and D46's gave each run a deploy lock on the target's state store; both
+waited for this target.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `fetch.ts` generates the loopback key within the isolate's build, as `main.ts` does at start, and an API with a service clause accepts it beside its callers field. The call stays in process, through the isolate's own app, and its endpoint is the Worker's address, which is no loopback URL, so the in-process client sends `loopback.credential` whenever its endpoint carries none. The request never leaves the isolate, so neither does the token. A job's `scheduled.ts` holds no key, since an API a job calls is another deployable's. | `credentialFor(url)`, which would send nothing to `https://<server>`. A credential from the connector, which would put a key in the Worker's bindings for a call that never leaves it. |
+| The cloudflare state store is a `registry.StateLocker`: the lock is `superschematic/locks/<stack>/<run>.json` in `superschematic-state`, written with `If-None-Match: *` (`Cloud.CreateObject`), so R2 creates it for one writer; a write that loses to another in flight finds no lock and writes again, up to three times. `Unlock` reads the lock back and deletes it only when it holds the ID asked for. | A conditional DELETE (`If-Match` on the ETag read): whether R2 honors one has not been checked, so a plain DELETE follows the read. A lock that `stack unlock` removed and another deploy took between that read and that delete would go too; only a person's `stack unlock` of a lock its holder still holds opens that window. |
+
+Status: built. servergen's
+`TestTypeScriptWorkersCallAnAPIItServesWithItsLoopbackKey` builds
+`ts-till-stack`, whose server Till serves `ts-checkout` and `ts-pricing` on
+stacktest's fake bundle platform (its new `fake.bundle-bundle` connector
+keeps a call within one server in process), type-checks it, runs
+`bundle.ts --check` and runs the bundle under workerd: a checkout reaches
+the quote as Till, and a quote with no credential or a forged token is
+401. cloudflare's `lock_test.go` takes, refuses, reads and releases the
+lock over the fake `Cloud`, retries after a write in flight, refuses a
+second deploy naming the holder while the first runs, and `stack.Unlock`
+removes a crash's lock. No lock has been taken on R2, and no loopback call
+has run on Cloudflare.
+
+The rule is reversible until the first release.

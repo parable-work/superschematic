@@ -112,7 +112,7 @@ export abstract class Staging {}
 | --- | --- |
 | `cloudflare.go`, `target.go` | the registration, the values, the state's layout in R2 (`StateBucket`, `StateURL`, and bootstrap's own `BootstrapBucket`, `BootstrapURL`) |
 | `cloud.go`, `sigv4.go` | `Cloud`, what the target calls on Cloudflare outside the provisioner, over the REST API and R2's S3 API with plain `net/http` and SigV4; tests pass a fake |
-| `state.go` | the state store: Pulumi's S3 backend on R2, with no AWS setup of the shell's, the passphrase secrets provider, and the manifests with a history copy |
+| `state.go` | the state store: Pulumi's S3 backend on R2, with no AWS setup of the shell's, the passphrase secrets provider, the manifests with a history copy, and each run's deploy lock, created with `If-None-Match: *` |
 | `secrets.go` | the secret store over the Secrets Store, `<Stack>-<Environment>-<Type>-<FIELD>` |
 | `bootstrap.go`, `github.go` | bootstrap: the state and bootstrap buckets, their passphrases and each one's PBKDF2 check, written once, the Secrets Store, the deployer, planner and preview account tokens, kept in the bootstrap bucket, and `--github` through `gh` |
 | `ci.go` | the CI identity, `cloudflare-api-token`, naming the GitHub secrets each job reads, `<NAME>_<STACK>_<ENV>` |
@@ -200,7 +200,9 @@ a `secret_text` binding. The callee's callers field gets the caller as an
 issuer with the key's `publicKeyPem`. The caller's `worker` node depends
 on the callee's, so a destroy removes the caller first, and the waves
 roll the callee out first. A call between two APIs one server serves
-derives `{"url": "https://<server>"}` alone and stays in process.
+derives `{"url": "https://<server>"}` alone and stays in process; when the
+callee has a service clause, the client sends the server's loopback
+credential, which `fetch.ts` generates within the isolate's build.
 
 ## Buckets on R2
 

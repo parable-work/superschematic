@@ -3659,6 +3659,12 @@ client of an API it serves whose operations have a service clause:
   field that already names an issuer, or an alias, of the server's name is
   refused at start, since no connector writes one.
 
+On Cloudflare Workers such a call stays in process (section 18.2): its
+endpoint is the Worker's address, not a loopback URL, and its transport
+is the isolate's own app, so there the client sends the loopback
+credential whenever its endpoint carries none, and `fetch.ts` generates
+the key within the isolate's build (D64, amended).
+
 So the caller of such a call is the server, as a caller on another server
 is that server, and a `from` that lists any API the server serves admits
 it, which is the rule resolution's check applies (section 9.3). The
@@ -4358,8 +4364,10 @@ the store). On gcp it is the object
 lock's JSON, created with `ifGenerationMatch=0`, so Cloud Storage creates
 it for one writer only, and deleted with `ifGenerationMatch` at the
 generation that holds the deploy's ID. `deployer` writes it with the
-object admin role it holds on the bucket. A target whose store keeps no
-lock deploys without one, and the deploy says so.
+object admin role it holds on the bucket. On cloudflare it is the same
+path in `superschematic-state`, created with `If-None-Match: *` and
+deleted once a read shows the deploy's ID (section 18.3). A target whose
+store keeps no lock deploys without one, and the deploy says so.
 
 `stack plan <environment>` runs the provisioner's `Plan` over the program
 with the images pinned, plans each database's migration the same way, and
@@ -5021,7 +5029,14 @@ account, not an environment's.
 A Worker reaches a callee through its binding, exposed or not, so no
 caller waits for the exposure step. A call between two APIs that one
 server serves stays in process: `fetch.ts` hands it to the server's own
-app. The `worker` node is in infrastructure, so a callee exists before
+app. Its endpoint is the Worker's address, `https://<server>`, with no
+credential, so when the callee has a service clause the client sends the
+server's loopback credential (section 9.2) whenever its endpoint carries
+none: `fetch.ts` generates the key within the isolate's build, as
+`main.ts` does at start, and the request never leaves the isolate, so the
+token does not either, whatever host the endpoint names (D64, amended). A
+job's `scheduled.ts` holds no key: an API it calls is another
+deployable's. The `worker` node is in infrastructure, so a callee exists before
 any caller's version binds to it, and the waves (section 5.3) put each
 callee's version first. The caller's `worker` node depends on each
 Worker its service bindings name, since Cloudflare refuses to delete a
@@ -5057,6 +5072,16 @@ with its bindings, first.
   versions. The copy is written first, so every manifest that was ever
   current has one, and a destroy deletes the current one and keeps the
   history.
+- Each run's deploy lock (section 11.2) is
+  `superschematic/locks/<stack>/<run>.json`, holding the lock's JSON.
+  `Lock` writes it with `If-None-Match: *`, so R2 creates it for one
+  writer only; a write that loses to another in flight finds no lock and
+  writes again, up to three times. `Unlock` reads it back and deletes it
+  only when it holds the ID asked for, with a plain DELETE: whether R2
+  honors a conditional one has not been checked, so a lock that `stack
+  unlock` removed and another deploy took between that read and that
+  delete would go too. Only a person's `stack unlock` of a lock its holder
+  still holds opens that window, a read and a delete wide (D64, amended).
 - Bundles are kept under `superschematic/bundles/<stack>/<deployable>/<hex>/`
   and site files under `superschematic/sites/<stack>/<site>/<hex>/`. Each
   prefix gets a marker object, `__superschematic/files`, written last, as
@@ -5761,10 +5786,12 @@ runtime tests run fixture bundles under the `workerd` binary.
 - A bucket under a jurisdiction, whose S3 host the R2 credential would
   need to name, and a bucket's CORS (section 18.7).
 
-Built so far: the target's values, state, secrets, bootstrap and CI
-identity, and the Workers platform for TypeScript servers, its bundle
-store in R2, `fetch.ts` and `bundle.ts`, and the CI's bundle check; calls
-between Workers through service bindings, and buckets on R2 with their
+Built so far: the target's values, state with a deploy lock per run,
+secrets, bootstrap and CI identity, and the Workers platform for
+TypeScript servers, its bundle store in R2, `fetch.ts` and `bundle.ts`,
+and the CI's bundle check; calls between Workers through service
+bindings, and within one Worker in process with its loopback credential;
+buckets on R2 with their
 tokens, their policy and the emptying of a member's buckets before its
 destroy; databases on D1, a Worker's d1 binding and their migrations
 from the deploying machine; the Cron platform for TypeScript jobs and

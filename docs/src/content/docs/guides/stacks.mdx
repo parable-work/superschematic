@@ -36,7 +36,7 @@ balancer and DNS resources that the Pulumi provisioner applies.
 | the gcp target, with `stack bootstrap`, `secrets set`, `build`, `plan`, `deploy`, `destroy`, `outputs` and `unlock`; image builds on Cloud Build; each migration phase as a Cloud Run job that also grants the servers their privileges; a deploy lock per run in the state bucket | |
 | the Pulumi provisioner and the typed bindings generator | |
 | the Cloudflare DNS platform, linked in the installed binary; bootstrap stores its API token and deploys read it | |
-| [the cloudflare target](#deploy-to-cloudflare): its values, its state in R2, its secrets in the Secrets Store, `stack bootstrap` with the CI's account tokens and `--github`, the generated CI's sign-in, [TypeScript servers on Workers](#servers-on-workers), with their bundles in R2 and the CI's bundle check, [calls between Workers](#calls-between-workers) through service bindings, [buckets on R2](#buckets-on-r2), [databases on D1](#databases-on-d1), migrated from the deploying machine, with sqlite-first databases as SQLite files under `stack dev`, [TypeScript jobs on Cron Triggers](#jobs-on-cron-triggers) and [sites on Workers](#sites-on-workers) static assets | a deploy that has reached Cloudflare; `stack run` and queue workers on Workers |
+| [the cloudflare target](#deploy-to-cloudflare): its values, its state in R2 with a deploy lock per run, its secrets in the Secrets Store, `stack bootstrap` with the CI's account tokens and `--github`, the generated CI's sign-in, [TypeScript servers on Workers](#servers-on-workers), with their bundles in R2 and the CI's bundle check, [calls between Workers](#calls-between-workers) through service bindings, [buckets on R2](#buckets-on-r2), [databases on D1](#databases-on-d1), migrated from the deploying machine, with sqlite-first databases as SQLite files under `stack dev`, [TypeScript jobs on Cron Triggers](#jobs-on-cron-triggers) and [sites on Workers](#sites-on-workers) static assets | a deploy that has reached Cloudflare; `stack run` and queue workers on Workers |
 | `@requireService` and `@allowService`, the stack's check that every `calls` edge reaches an operation, and each server's check of its callers' credentials against its API's callers field ([service callers](#service-callers)) | |
 | [generated CI](#generated-ci): `outputs.ci` writes a GitHub Actions workflow that checks, plans, previews and deploys the stack, signing in to gcp through Workload Identity Federation | other CI systems; a check that the committed workflow is current |
 | [buckets](/superschematic/guides/buckets/): the `Bucket` kind, `buckets` in an API's config, the `bucket` deployable and edge, a provider-neutral bucket in `Deps` with signed URLs, over GCS in Go, TypeScript and Rust and over R2 in TypeScript, fake-gcs-server under `stack dev`, on gcp a private Cloud Storage bucket, and on cloudflare a private R2 bucket from TypeScript | a bucket's CORS, which a browser's upload to a signed URL needs |
@@ -1574,7 +1574,9 @@ goes through:
   manifests are in the same bucket under
   `superschematic/manifests/<stack>/`, each written twice, as
   `<run>.json` and as a copy under `<run>/` named by the time it was
-  written, since R2 keeps no versions.
+  written, since R2 keeps no versions. A deploy or a destroy holds the
+  run's deploy lock, `superschematic/locks/<stack>/<run>.json` in the
+  same bucket, and `stack unlock` removes one a killed deploy left.
 - **Secrets.** Each secret is one in the account's Secrets Store per
   environment, `<Stack>-<Environment>-<Type>-<FIELD>`, which the members
   of a parameterized environment share. `stack secrets set` writes it,
@@ -1701,7 +1703,11 @@ caller binds it, and the rollout waves put the callee's version first.
 The caller's Worker depends on the callee's, so a destroy removes the
 caller, with its bindings, before the callee. A call between two APIs one
 server serves stays in process: `fetch.ts` hands it to the server's own
-app, with no binding and no credential.
+app, with no binding and no credential from the connector. When the
+callee has a service clause, the client sends the server's loopback
+credential, a key the isolate generates as it builds the server, which
+the callee accepts beside its callers field, as `main.ts` does on Bun
+([service callers](#service-callers)).
 
 ### Buckets on R2
 

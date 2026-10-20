@@ -1012,8 +1012,8 @@ that connects to a database its privileges. A rollout that fails runs no
 phases.
 
 The deploy holds the run's deploy lock, kept by the target's state store
-(on gcp the object `superschematic/locks/<stack>/<run>.json` of the state
-bucket), from before it reads the manifest until it ends, whether it
+(on gcp and on cloudflare the object
+`superschematic/locks/<stack>/<run>.json` of the state bucket), from before it reads the manifest until it ends, whether it
 succeeds or fails. A second deploy or a destroy of the run meanwhile
 fails at once, naming who holds the lock, the host, the process, the CI
 run and since when. Ctrl-C stops the step under way, records the failure
