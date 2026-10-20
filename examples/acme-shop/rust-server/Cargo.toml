@@ -20,12 +20,10 @@ axum = "0.8"
 # server in src/main.rs keeps them in memory.
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 tokio = { version = "1", features = ["macros", "net", "rt-multi-thread"] }
-# A page's cursor holds its sort field's value as JSON, of the field's
-# kind (src/lib.rs's `SortKind`).
-serde_json = "1"
+serde_json = { version = "1", optional = true }
 
 [features]
-sqlite = []
+sqlite = ["dep:serde_json"]
 
 # Its own workspace, so no Cargo.toml above this directory claims it.
 [workspace]

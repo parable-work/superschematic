@@ -47,11 +47,7 @@ func (p *Products) ListProducts(ctx context.Context, ids []types.IdentityUUID, q
 	if err != nil {
 		return paging.Page[types.ProductView]{}, pageError(err)
 	}
-	views := make([]types.ProductView, 0, len(found.Rows))
-	for _, product := range found.Rows {
-		views = append(views, productView(product))
-	}
-	return pageOf(views, found.Next)
+	return pageOf(found.Rows, found.Next, productView)
 }
 
 // GetProduct answers the product with the id, or 404.

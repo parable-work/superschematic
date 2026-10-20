@@ -7,7 +7,8 @@
 //! word of `q` in their titles and bodies, a `%` matching itself, and by
 //! rating. Each sort reads both ways (D60, amended). Each list follows
 //! `next` to its last page, whose `next` is none, and refuses a cursor it
-//! never returned with 400, one of another sort's kind among them. A
+//! never returned with 400, the id of a row it does not hold among them;
+//! a cursor is a row's id, whose value places a page in any order. A
 //! shopper lists, pages, reads and cancels their own orders alone, and
 //! staff every customer's. Adding a shopper or staff, or `update_roles`,
 //! rewrites a `shopper` or `staff` role that grants other permissions, as
@@ -116,6 +117,13 @@ fn after<T>(page: &Page<T>, limit: i64) -> PageRequest {
 /// A cursor this server never returned: `{}`, which names no position.
 fn forged() -> PageRequest {
     PageRequest::after(Cursor::parse("e30").expect("a cursor's text"), 2)
+}
+
+/// A cursor of a row no list holds, in `sort`'s order: a shopper's id,
+/// which names no product, order or review.
+fn gone(sort: &str) -> PageRequest {
+    let cursor = Cursor::encode(&id(SHOPPERS[2])).expect("a cursor of an id");
+    PageRequest::after(cursor, 2).sorted(Sort::parse(sort).expect("a sort"))
 }
 
 /// The first page in `sort`'s order, `limit` items. A call to the trait
@@ -251,11 +259,18 @@ async fn products_page_by_price<S: ProductCatalogImplementation>(shop: &S) {
     assert_eq!(names(&rest), ["Chisel"]);
     assert_eq!(rest.next, None);
 
+    // A cursor is the id of a page's last product, whose price places a
+    // page by price: Bellows', the last of a page by name, places one
+    // after 2500 cents. The router refuses a cursor sent back with another
+    // sort before the list reads it; the trait call bypasses the router.
     let by_name = list(None, in_order("-name", 2)).await.unwrap();
     assert_eq!(names(&by_name), ["Chisel", "Bellows"]);
-
-    // The key of a page by name holds a text, which no page by price reads.
-    assert_refused_cursor(list(None, in_order_after(&by_name, "priceCents", 2)).await);
+    let after_bellows = list(None, in_order_after(&by_name, "-priceCents", 2))
+        .await
+        .unwrap();
+    assert_eq!(names(&after_bellows), ["Anvil", "Chisel"]);
+    // A cursor of a row the list does not hold places no page.
+    assert_refused_cursor(list(None, gone("priceCents")).await);
 
     for (q, found) in [
         ("anv", vec!["Anvil"]),
@@ -396,6 +411,7 @@ async fn orders_page_by_total<S: OrderImplementation>(shop: &S) {
     // placed last.
     let newest = list(in_order("-placedAt", 1)).await.unwrap();
     assert_eq!(newest.items[0].total_cents, 3998);
+    assert_refused_cursor(list(gone("-totalCents")).await);
 }
 
 /// Every order `ctx` lists, a page of one at a time.
@@ -576,8 +592,8 @@ async fn reviews_page_and_search<S: ProductReviewsImplementation>(shop: &S) {
 }
 
 /// The anvil's reviews of `reviews_page_and_search` by rating, 2, 4 and 5,
-/// both ways, a review at a time, with a search; a cursor of a page by
-/// rating, a number, is refused by a page by when they were written.
+/// both ways, a review at a time, with a search; a cursor of no review
+/// places no page.
 async fn reviews_page_by_rating<S: ProductReviewsImplementation>(shop: &S) {
     let list = |q: Option<&str>, page| {
         let args = ProductReviewsListReviewsArgs {
@@ -605,8 +621,7 @@ async fn reviews_page_by_rating<S: ProductReviewsImplementation>(shop: &S) {
         }
         assert_eq!(seen, want, "the reviews by {sort}");
     }
-    let by_rating = list(None, in_order("rating", 1)).await.unwrap();
-    assert_refused_cursor(list(None, in_order_after(&by_rating, "createdAt", 1)).await);
+    assert_refused_cursor(list(None, gone("rating")).await);
 }
 
 #[tokio::test]

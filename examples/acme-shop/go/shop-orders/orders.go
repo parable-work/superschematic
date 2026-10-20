@@ -175,9 +175,9 @@ func (o *Orders) GetOrder(ctx context.Context, id types.IdentityUUID) (*types.Or
 // ListOrders answers a page of the caller's orders, or of every
 // customer's for staff, in the page's sort, by when each was placed or by
 // its total, with the given statuses, or of every status when there are
-// none. The ORM reads the page, with each order's lines. A cursor names a
-// place among the orders the caller lists, so a shopper's pages hold their
-// own orders alone.
+// none. The ORM reads the page, with each order's lines. A cursor names
+// the order a page ends at, and the filter holds every page, so a
+// shopper's pages hold their own orders alone.
 func (o *Orders) ListOrders(ctx context.Context, statuses []types.OrderStatus, page paging.Request) (paging.Page[types.OrderView], error) {
 	filter, err := callersOrders(ctx)
 	if err != nil {
@@ -207,11 +207,7 @@ func (o *Orders) ListOrders(ctx context.Context, statuses []types.OrderStatus, p
 	if err != nil {
 		return paging.Page[types.OrderView]{}, pageError(err)
 	}
-	views := make([]types.OrderView, 0, len(found.Rows))
-	for _, order := range found.Rows {
-		views = append(views, orderView(order))
-	}
-	return pageOf(views, found.Next)
+	return pageOf(found.Rows, found.Next, orderView)
 }
 
 // CancelOrder cancels the caller's order, or any order for staff, while
@@ -344,11 +340,7 @@ func (r *Reviews) ListReviews(ctx context.Context, productID types.IdentityUUID,
 	if err != nil {
 		return paging.Page[types.ReviewView]{}, pageError(err)
 	}
-	views := make([]types.ReviewView, 0, len(found.Rows))
-	for _, review := range found.Rows {
-		views = append(views, reviewView(review))
-	}
-	return pageOf(views, found.Next)
+	return pageOf(found.Rows, found.Next, reviewView)
 }
 
 func (r *Reviews) WriteReview(ctx context.Context, productID types.IdentityUUID, input *types.WriteReviewInput) (*types.ReviewView, error) {
