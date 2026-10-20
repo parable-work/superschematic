@@ -21,7 +21,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 
@@ -215,10 +215,10 @@ fn one_runner_runs_at_a_time_and_the_other_takes_over_when_it_stops_or_its_sessi
         }
         // The first's session ends, as its crash would: the second takes
         // the lease, and the first, finding its lease gone, stays idle.
-        assert!(admin.terminate_lock_holder(key), "the lease's session ends");
-        wait_for("the second takes the lease", || {
-            holder().as_deref() == Some(names[1].as_str())
-        });
+        let retaken = hand_over(&admin, key, &names[0], &names[1]);
+        if retaken > 0 {
+            eprintln!("the first took its lease again {retaken} times before the second");
+        }
         created(&first, 6, 12);
         wait_for("the second runner's notes", || all_handled(12));
         for n in 6..12 {
@@ -247,6 +247,41 @@ fn one_runner_runs_at_a_time_and_the_other_takes_over_when_it_stops_or_its_sessi
         assert!(!first.poisoned() && !second.poisoned());
         second.shutdown();
         first.shutdown();
+    }
+}
+
+/// Ends the session of `from`, the replica that holds the lease `key`,
+/// until `to` takes the lease. A runner whose lease's session ended tries
+/// the lease again at its next wake, as the other does every
+/// `lease_retry_ms`, and whichever tries first takes it: when the holder
+/// is still at work, or its listener wakes it for a notice of its own last
+/// commits, it is often its own runner that takes the lease again, with a
+/// new session, which is one runner holding the lease as it should, not a
+/// takeover. So each time `from` holds the lease again, its new session
+/// ends too, until `to` is the first to try. Returns how many times `from`
+/// took it again.
+fn hand_over(admin: &Admin, key: i64, from: &str, to: &str) -> usize {
+    let mut ended = admin.lock_holder(key).expect("a holder of the lease");
+    assert!(admin.terminate_lock_holder(key), "the lease's session ends");
+    let mut retaken = 0;
+    let deadline = Instant::now() + PATIENCE;
+    loop {
+        if let Some(pid) = admin.lock_holder(key) {
+            match admin.lock_holder_name(key).as_deref() {
+                Some(name) if name == to => return retaken,
+                Some(name) if name == from && pid != ended => {
+                    retaken += 1;
+                    ended = pid;
+                    admin.terminate_lock_holder(key);
+                }
+                _ => {}
+            }
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the lease passes from {from} to {to}: still not done, {from} took it again {retaken} times"
+        );
+        thread::sleep(Duration::from_millis(10));
     }
 }
 
