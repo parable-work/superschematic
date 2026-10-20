@@ -11,7 +11,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use rusqlite::types::{ToSqlOutput, ValueRef};
 use rusqlite::{Connection, ToSql};
@@ -83,9 +83,23 @@ fn open_connection(path: &Path, label: &str, busy_ms: i32) -> Result<SqliteConn>
     let conn = Connection::open(path).map_err(sqlite_error)?;
     conn.execute_batch(&format!("PRAGMA busy_timeout = {busy_ms}"))
         .map_err(sqlite_error)?;
-    let mode: String = conn
-        .query_row("PRAGMA journal_mode = WAL", [], |row| row.get(0))
-        .map_err(sqlite_error)?;
+    // Turning a new file to write-ahead logging takes an exclusive lock,
+    // which SQLite refuses at once, without its busy handler, to a
+    // connection whose shared lock another opener's would deadlock with:
+    // engines that open one new file together. The opener tries again
+    // until the busy timeout; a file already in write-ahead logging takes
+    // no lock for it.
+    let deadline = Instant::now() + Duration::from_millis(u64::try_from(busy_ms).unwrap_or(0));
+    let mode: String = loop {
+        match conn.query_row("PRAGMA journal_mode = WAL", [], |row| row.get(0)) {
+            Err(rusqlite::Error::SqliteFailure(failure, _))
+                if failure.extended_code & 0xff == SQLITE_BUSY && Instant::now() < deadline =>
+            {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            outcome => break outcome.map_err(sqlite_error)?,
+        }
+    };
     if !mode.eq_ignore_ascii_case("wal") {
         return Err(Error::usage(format!(
             "{label}: SQLite would not use write-ahead logging (journal mode {mode})"
