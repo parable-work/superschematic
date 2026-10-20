@@ -1755,7 +1755,14 @@ would each need a project archive of its own, since a binary links one.
 A release's image, which downloads the core's archive, cannot take a
 project's, so it gets no Dockerfile. A Rust server opens the engine as
 section 8.6 says, and so does a TypeScript server, through the engine's
-Node-API addon.
+Node-API addon. Servers of the APIs on one engine database, in whatever
+language each is written, share its engine: each deploys the same
+document, which mints one version however many deploy at once, each reads
+what another wrote and streams what another commits, a session one signed
+in reaches the others, since the user model's tables are the database's,
+and the database has one runner. `TestEngineServersAnswerOneScriptAlike`
+runs one script against a Go, a Rust and a TypeScript server over one
+database and requires their answers to be the same (D58).
 
 An engine database's runner is an entrypoint of its own,
 `<db>-engine-runner` (section 3.1), in the language of the first API on

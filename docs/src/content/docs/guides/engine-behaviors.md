@@ -249,8 +249,8 @@ naming the first generator that would run
 A type of a DB schema that composes a behavior is an engine type (D58).
 Its instances are the engine's, kept in the engine's own tables: in a
 stack, the DB service's database, under a Postgres schema of the
-engine's (`engine` unless configured), once the generated servers open
-the engine, which they do not yet. So `sql` writes no table for it, `orm`
+engine's (`engine` unless configured), where the generated servers open
+the engine. So `sql` writes no table for it, `orm`
 no repository, and a migration plan (D27) never creates, alters or drops
 one. Tables and engine types share one schema:
 
@@ -392,6 +392,14 @@ deadlines, is a deployable of its own, `<db>-engine-runner`, one instance
 in the language of the first API on the database: a Cloud Run worker pool
 on gcp, a process of its own under `stack dev`. It acts as its deployable's
 name, holding each engine type's name as a permission.
+
+Several APIs may share an engine database, each served in its own
+language. Their servers share the engine: each deploys the same document,
+which mints one version however many start at once, and each answers the
+engine's routes, its event stream and MCP as the others do, reading what
+another wrote and streaming what another commits. A Go, a Rust and a
+TypeScript server over one database answer one script alike, a test the
+release candidate runs.
 
 A Topcoat app (D44) whose API's database is an engine database keeps the
 engine in-process on SQLite: the crate the Topcoat extension writes has

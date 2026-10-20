@@ -53,7 +53,7 @@ GO_BUILD_FLAGS := -trimpath -buildvcs=false
 .PHONY: all setup build test lint fmt vet go-build go-test go-vet go-fmt-check go-lint \
         go-goldens catalog-check schema-file-types schema-file-types-check behaviors behaviors-check \
         gcp-schemas gcp-schemas-check cloudflare-schemas cloudflare-schemas-check generic-schemas generic-schemas-check ts python rust engine-rust acme-engine-rust \
-        engine-rust-soak engine-archive engine-go engine-link-check \
+        engine-rust-soak engine-archive engine-go engine-link-check engine-servers \
         versiongraph versiongraph-scenarios versiongraph-scenarios-ts versiongraph-scenarios-rust \
         versiongraph-scenarios-python docs cli-smoke example-migrations scrub versions clean
 
@@ -294,6 +294,22 @@ engine-go: engine-archive
 	cd runtime/engine/go && CGO_LDFLAGS="-L$(ENGINE_REPLAY_LIB) $(CGO_LDFLAGS)" ENGINE_REPLAY_ARCHIVE=1 \
 		go test -count=1 -run Replay -v ./enginehttp/
 	scripts/engine-archive.sh >/dev/null
+
+# Generated servers over the engine (D58), as CI's engine-servers job runs
+# them: servergen's engine entrypoint tests and the script three servers,
+# Go, Rust and TypeScript, answer alike over one engine database
+# (TestEngineServersAnswerOneScriptAlike), over the engine's archive, its
+# package and its Node-API addon, which this builds. They run offline, and
+# on the Postgres SUPERSCHEMATIC_IDENTITY_TEST_DATABASE_URL names when it is
+# set; SUPERSCHEMATIC_REQUIRE_ENGINE_SERVERS=1 makes a missing toolchain or
+# database a failure rather than a skip.
+ENGINE_SERVER_TESTS := ^(TestEngineEntrypointServes|TestTheEngineReachesCloudSQLThroughASocket|TestEngineProjectArchiveServes|TestRustEngineEntrypointServes|TestTypeScriptEngineEntrypointServes|TestEngineServersAnswerOneScriptAlike)$$
+engine-servers: versiongraph engine-archive
+	cd runtime/schema/typescript && bun install --frozen-lockfile && bun run build
+	cd runtime/versiongraph/typescript && bun install --frozen-lockfile && bun run build
+	cd runtime/engine/typescript && bun install --frozen-lockfile && bun run build
+	scripts/engine-napi.sh
+	go test -count=1 -timeout 80m -run '$(ENGINE_SERVER_TESTS)' ./internal/generator/servergen/
 
 # One Go binary that links superscalar's, the version graph's and the
 # engine's archives together and calls each (scripts/engine-link-check.sh),

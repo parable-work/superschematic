@@ -74,7 +74,7 @@ func TestRustEngineEntrypointServes(t *testing.T) {
 	}
 	cargo, err := exec.LookPath("cargo")
 	if err != nil {
-		t.Skip("cargo not available; skipping the Rust build")
+		skipEngineServers(t, "cargo not available; skipping the Rust build")
 	}
 	paths := testpaths.Local(t)
 	repoRoot := testpaths.TempDir(t)
@@ -123,7 +123,7 @@ func TestRustEngineEntrypointServes(t *testing.T) {
 	}
 	offline.stop(t)
 
-	postgres := os.Getenv(engineDatabaseEnv)
+	postgres := engineDatabase(t)
 	if postgres == "" {
 		t.Logf("%s is unset: the entrypoint serves no database", engineDatabaseEnv)
 		return

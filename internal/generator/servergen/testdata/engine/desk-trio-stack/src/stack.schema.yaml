@@ -1,0 +1,26 @@
+# desk-api, desk-rs-api and desk-ts-api, desk-db's three APIs in Go, Rust
+# and TypeScript, each on its default server, which opens the engine on
+# desk-db and mounts it at /engine/desk-db: three servers over one engine
+# database, as three replicas of one API in three languages would be. The
+# stack runs one runner of desk-db, desk-db-engine-runner, in the language
+# of the first API by name, desk-api's Go (D58). Its one environment,
+# Local, runs on the local target.
+kind: Stack
+types:
+  DeskTrio:
+    name: DeskTrio
+    role: EmbeddedStruct
+    stack:
+      deploy:
+        - { name: desk-api, kind: API }
+        - { name: desk-rs-api, kind: API }
+        - { name: desk-ts-api, kind: API }
+      expose:
+        - service: { name: desk-api, kind: API }
+        - service: { name: desk-rs-api, kind: API }
+        - service: { name: desk-ts-api, kind: API }
+  Local:
+    name: Local
+    role: EmbeddedStruct
+    environment:
+      target: local

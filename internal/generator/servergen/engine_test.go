@@ -11,7 +11,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -223,10 +222,7 @@ func TestEngineEntrypointServes(t *testing.T) {
 		t.Skip("skipping compile check in -short mode")
 	}
 	paths := testpaths.Local(t)
-	archive := filepath.Join(paths.EngineGo, "lib", runtime.GOOS+"_"+runtime.GOARCH, "libsuperschematic_engine.a")
-	if _, err := os.Stat(archive); err != nil {
-		t.Skipf("the engine's archive is not built (run scripts/engine-archive.sh): %v", err)
-	}
+	requireEngineArchive(t, paths)
 	repoRoot := t.TempDir()
 	f := loadEngineFixture(t)
 	f.build(t, repoRoot, paths, engineOrder...)
@@ -269,7 +265,7 @@ func TestEngineEntrypointServes(t *testing.T) {
 	}
 	offline.stop(t)
 
-	postgres := os.Getenv(engineDatabaseEnv)
+	postgres := engineDatabase(t)
 	if postgres == "" {
 		t.Logf("%s is unset: the entrypoint serves no database", engineDatabaseEnv)
 		return
@@ -442,7 +438,9 @@ func startBackground(t *testing.T, binary string, env ...string) *started {
 	}
 	s := &started{cmd: cmd, out: out}
 	t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
-	deadline := time.Now().Add(20 * time.Second)
+	// A minute: on a loaded machine a freshly linked binary is slow to
+	// start, and the engine opens before the runner starts.
+	deadline := time.Now().Add(time.Minute)
 	for !strings.Contains(out.String(), `"msg":"runner started"`) {
 		if time.Now().After(deadline) {
 			t.Fatalf("%s did not start its runner:\n%s", binary, out.String())
@@ -622,10 +620,7 @@ func TestTheEngineReachesCloudSQLThroughASocket(t *testing.T) {
 		t.Skip("skipping compile check in -short mode")
 	}
 	paths := testpaths.Local(t)
-	archive := filepath.Join(paths.EngineGo, "lib", runtime.GOOS+"_"+runtime.GOARCH, "libsuperschematic_engine.a")
-	if _, err := os.Stat(archive); err != nil {
-		t.Skipf("the engine's archive is not built (run scripts/engine-archive.sh): %v", err)
-	}
+	requireEngineArchive(t, paths)
 	repoRoot := t.TempDir()
 	f := loadEngineFixture(t)
 	f.build(t, repoRoot, paths, "desk-db", "desk-api", engineStack, engineCloudStack)

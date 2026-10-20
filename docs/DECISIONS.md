@@ -5831,7 +5831,9 @@ engine's archive and header. The ABI reads its config's `project` and
 hands the rest to `EngineOptions::from_json`, and writes an error as
 `Error::thrown` makes it, as the Node-API addon does, so the two bindings
 take one config and throw one error. Generated Go, TypeScript and Rust
-servers mount the engine (milestones 18 and 19, the amendment below).
+servers mount the engine (milestones 18 and 19, the amendment below), and
+one script run against all three over one engine database answers alike
+(milestone 20, the amendment's status).
 
 Several instances of a server on one Postgres database (milestone 13b)
 are tested as two engines, each with a pool of its own, on one schema
@@ -5906,7 +5908,7 @@ runner as a deployable.
 | A Topcoat app (D44) on an engine database opens the engine in-process on SQLite: the crate's `engine::open` opens it on a file with the database's engine document and the policy its config sets and deploys the document, and the setup method takes the engine, keeps it in the app context for a page's in-process calls, and mounts its routes at `/engine/{*rest}` behind the API's `Authenticator`. | Postgres for an app that runs as one process, whose SQLite file the engine writes alone |
 | The engine's end user is the identity runtime's (D50), with the claims the TypeScript identity authenticator gives (`sessionId`, `login`, `name`, `transport`, `roles`): a request with no session has none, so a verified service stands in (D37), and any other refusal of the session is the identity runtime's 401 `unauthorized` or 403 `cross_origin`. A service credential the API's service authenticator refuses is its 401 or 403 in the engine's place. An API that authenticates with an auth middleware of its own gives the engine no end user, and the build says so. | Running the API's auth middleware in front of the engine, which would refuse a service standing in |
 
-Status: milestone 18's plumbing, the Go servers and the Rust servers are built. An API's
+Status: built: milestone 18's plumbing, the Go, Rust and TypeScript servers (milestone 19), and the end-to-end proof (milestone 20), each in a paragraph below, with what is not built yet. An API's
 engine database, its permission catalog's engine permissions, the runner
 deployable on gcp, `local` and the fake target, `[paths] engine_go`, and the
 Go entrypoints: a server opens, deploys and mounts the engine
@@ -5985,6 +5987,71 @@ engine addon, which waits for the project engine crate's `napi` member
 that composes an extension's behavior; the generated CI's check of a
 TypeScript server on an engine database, which needs the engine package's
 `dist/` on the runner.
+
+The end-to-end proof is built (milestone 20).
+`TestEngineServersAnswerOneScriptAlike` builds desk-trio-stack, which
+deploys desk-db's three APIs, desk-api in Go, desk-rs-api in Rust and
+desk-ts-api in TypeScript, each on its default server, beside one runner
+of desk-db in the Go of desk-api, the first by name. Offline, the three
+answer alike: `/readyz` names the engine, the engine's routes and MCP are
+503 `unavailable`, and a trusted origin's preflight gets the identity
+runtime's CORS. On Postgres the three open one database at once, so each
+deploys the same document into the one `engine` schema, as replicas of
+one API in three languages would, and one script runs against each in
+turn, each run's ids, slug, titles and login carrying a tag of its own,
+since they share the namespace: a member registers and signs in, is
+refused with no credential (401) and for a write their roles lack (403)
+and, granted Account and Ticket out of band, lists the deployed schemas,
+creates an account, reads it, looks it up by its unique slug and is
+refused a second holder of it (409); a ticket whose title is too long is
+422 and one with no account 400, Links' required link; three tickets
+open linked to the account; one moves to waiting with `If-Match`, is
+refused at a stale sequence (412) and a transition the workflow does not
+allow (409 `vetoed`), takes a comment and lists its comments; another is
+patched as a merge patch and resolved; the run's tickets list filtered on
+their titles in pages of two and on `Workflow.status`, and a filter on a
+field no list filters on is 400; the ticket's events read as a JSON page,
+then as an event stream from `after=head`, which a comment committed
+while it is open reaches, then resumed from its `Last-Event-ID`; MCP
+answers `initialize`, the initialized notification (202), `tools/list`
+and a `tools/call` of `ticket_get`, and a transition the workflow refuses
+is a tool error with the 409 problem; a service with no session stands in
+for an end user and is refused (403 `service:ops`), one acting for the
+member reads as the member, and a forged credential is 401
+`service_unauthorized`; then the runner, started beside them, fires the
+deadline of the ticket left open, which reads back escalated by the
+runner, with the escalation in the ticket's events. Each run's
+transcript, its method, path, status, the headers the HTTP corpus
+records, and its body parsed, with the run's tag, the member's id, UUIDs,
+tokens, event cursors and list cursors written as symbols in order of
+appearance and every time as `{{time}}`, must be the others' step for
+step; every normalisation is the test's, and a step the HTTP corpus
+records keeps the shape of the corpus's exchange (its headers by name,
+Content-Type and Cache-Control, a problem's type, title, status and code,
+the members of an envelope, an instance, a list, an event page and a
+JSON-RPC answer, and an event stream's frames in order). The three
+interoperate: each reads what the others wrote alike, with its own
+member's session and with the writer's, since the sessions are the user
+model's in the one database; a stream one server holds open carries the
+comment another commits, as the writer's log holds it; and the three
+deploys at once published one version of Account and Ticket. The script
+found two bugs, fixed: a Go server's event-log routes answered
+`X-Request-Id` twice, the request log's and the engine's (enginehttp now
+lets the engine's headers replace the host's), and the Go HTTP runtime
+answered without `Cache-Control: no-store`, a sign-in's token included,
+where the Rust and TypeScript runtimes mark every answer `no-store`. Two
+differences are the hosts' and normalised: a Go server's request log
+writes `X-Request-Id` on an MCP answer, which the engine's MCP endpoint
+and the other two servers leave without one, and the identity runtimes
+write a session's `expiresAt` to the millisecond (TypeScript), the
+microsecond (Rust) and the nanosecond, trailing zeros dropped (Go). A
+request with no credential, which the TypeScript runtime refuses before
+the engine, answers as the engine does. CI's `engine-servers` job runs it
+with the engine entrypoint tests in the full tier, on Postgres
+(`make engine-servers`). Not proved by it: a Rust server's engine routes
+have no timeout, which no transcript shows, and the TypeScript runtime's
+1 MiB body limit on the engine's body routes, which the script's bodies
+stay under.
 
 ### D52, amended: a TypeScript API's jobs run on Bun from packages of their own, with a signal for Go's context
 
