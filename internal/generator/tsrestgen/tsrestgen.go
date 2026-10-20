@@ -670,7 +670,10 @@ const (
 // body. A body argument of a JSON-valued scalar
 // (Generic.JSON) is taken as the JSON value it is. param fails for a body
 // argument of any other type that is not a scalar or an enum: a union has
-// no parser. A scalar-typed parameter carries the scalar's own lengths,
+// parse<Union>FromJSON, but no strict decoder (parse<T>Json) that checks
+// the member it picks, as an object argument is checked. A union field of
+// an object argument or of the input is read by the object's
+// parse<T>FromJSON. A scalar-typed parameter carries the scalar's own lengths,
 // pattern and range, which the runtime checks on every value.
 func (b *builder) param(p apigen.Param, place paramPlace) (ParamInfo, error) {
 	info := ParamInfo{

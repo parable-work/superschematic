@@ -590,7 +590,7 @@ func (r run) generateTypeScriptAPI() error {
 		}
 	}
 
-	if envOutput == nil || (envOutput.TypeName == "" && len(envOutput.Derived) == 0) {
+	if envOutput == nil || (envOutput.TypeName == "" && len(envOutput.Derived) == 0 && envOutput.ListedCallersField == "") {
 		return nil
 	}
 	if err := envgen.WriteValuesSchema(envOutput, dir); err != nil {
@@ -785,12 +785,15 @@ func (r run) scaffoldTypeScriptImplementation(output *tsrestgen.APIOutput, repoR
 
 // writeTypeScriptWorkspace writes the Bun workspace root at the output
 // root, whose members are the generated TypeScript packages and the
-// TypeScript implementations under the repository root (D51). Every build
-// of one output root writes the same file.
+// TypeScript implementations under the repository root (D51), or, in an
+// output root other than the default one, the implementations' mirrors
+// under impl/ (D65, amended). Every build of one output root writes the
+// same file.
 func (r run) writeTypeScriptWorkspace() error {
 	return tsgen.WorkspaceRoot{
 		OutputRoot:     r.Options.OutputRoot,
 		RepositoryRoot: r.Options.RepositoryRoot,
+		Mirrored:       tsgen.Mirrored(r.Options.OutputRoot, r.Options.SchemasRoot),
 		Naming:         r.Options.Naming,
 		Paths:          r.Options.Paths,
 	}.Write()
@@ -914,7 +917,17 @@ func (r run) generateGoAPI() error {
 		return fmt.Errorf("generator: api for %s: %w", r.Config.Name, err)
 	}
 	if err := r.measure("output.api.write", func() error {
-		return apigen.WriteAPIWithProfile(output, dir, r.Options.Profile, r.Options.SkipFormat, codegenProfilePrefixes("output.api")...)
+		if err := apigen.WriteAPIWithProfile(output, dir, r.Options.Profile, r.Options.SkipFormat, codegenProfilePrefixes("output.api")...); err != nil {
+			return err
+		}
+		// An API whose only configuration is its callers field has no
+		// EnvConfig, since its entrypoint reads the field itself; its
+		// values-schema.json lists the field, which a deployment outside a
+		// stack sets.
+		if output.EnvConfig == nil && r.Schema.HasServiceCallers() {
+			return envgen.WriteValuesSchema(envgen.CallersValues(r.Config.Name), dir)
+		}
+		return nil
 	}); err != nil {
 		return fmt.Errorf("generator: api for %s: %w", r.Config.Name, err)
 	}

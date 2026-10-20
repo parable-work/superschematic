@@ -599,8 +599,13 @@ for a Cloud Run job.
 superschematic-migrate apply --plan plan.json [--phase expand|contract|all] [--database-url URL]
 superschematic-migrate status --service NAME [--model] [--database-url URL]
 superschematic-migrate adopt --model model.json [--database-url URL]
+superschematic-migrate queue --queue queue.json [--database-url URL]
 superschematic-migrate version
 ```
+
+`queue` runs the document `superschematic stack queue` writes to list,
+retry or drop a queue's dead messages, on Postgres alone
+([Dead messages](/superschematic/guides/queues/#dead-messages)).
 
 `--database-url` defaults to `$DATABASE_URL`. A `postgres://` or
 `postgresql://` URL selects Postgres; a `sqlite:` URL, a `file:` URI or a

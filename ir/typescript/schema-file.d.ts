@@ -92,6 +92,7 @@ export interface DeployableSettings {
   env?: { [key: string]: EnvValue };
   instances?: number;
   of: DeployableRef;
+  onDeploy?: boolean;
   platform?: string;
   schedule?: string;
   timeZone?: string;
@@ -454,6 +455,8 @@ export interface PruneReference {
 export interface QueueDef {
   backoff?: string;
   lease?: string;
+  maxBackoff?: string;
+  retain?: string;
   retries?: number;
 }
 

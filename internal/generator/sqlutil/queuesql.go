@@ -21,6 +21,14 @@ import (
 // first, so a message that kills its worker every time stops coming back.
 // Complete, Fail, Extend and Release change a message only while the token
 // still claims it: no row is a lost claim. Times are the database's clock.
+//
+// A failure waits longer each time (D68): the attempt that failed, n, waits
+// the backoff × 2^(n−1), up to the maximum backoff, before it is due again.
+// A done message is never changed again, so its updated_at is when it was
+// done: Prune removes the done messages older than the queue's retention,
+// a batch at a time, and never a dead one, which waits for an operator. A
+// queue that keeps no done message, a retention of zero, deletes a message
+// as it completes it.
 type QueueStatements struct {
 	// Insert begins an enqueue. The caller adds the columns its message
 	// sets with their placeholders, ` (a, b) VALUES ($1, $2)`, or
@@ -37,12 +45,15 @@ type QueueStatements struct {
 	// then the message's columns in field order.
 	Claim string
 
-	// Complete marks message $1 done while token $2 claims it.
+	// Complete marks message $1 done while token $2 claims it, or, for a
+	// queue that keeps no done message, deletes it.
 	Complete string
 
 	// Fail records the cause $5 on message $1 while token $2 claims it,
-	// and makes it due again after $4 seconds, or dead once its attempts
-	// pass the retries, $3. It returns the message's state.
+	// and makes it due again after $4 seconds, the backoff, doubled for
+	// each attempt before this one and capped at $6 seconds, the maximum
+	// backoff; or dead once its attempts pass the retries, $3. It returns
+	// the message's state.
 	Fail string
 
 	// Extend holds message $1 for $3 seconds from now while token $2
@@ -53,18 +64,41 @@ type QueueStatements struct {
 	// due at once, without counting the attempt: its handler did not
 	// finish, and did not fail.
 	Release string
+
+	// Prune deletes up to $2 done messages that were done $1 seconds ago
+	// or more, the queue's retention, the oldest first, skipping any row
+	// another prune holds, so workers that prune at once delete different
+	// rows. Each run is one short transaction; a worker runs it again
+	// while it deletes a whole batch.
+	Prune string
 }
+
+// queueBackoffDoublings bounds the exponent of a failure's backoff, so the
+// doubling cannot overflow however many retries a queue allows: 2^40
+// seconds is longer than any duration a queue can write, so the maximum
+// backoff caps the wait first.
+const queueBackoffDoublings = 40
 
 // PostgresQueueStatements are the statements of the queue whose table is
 // table and whose message's columns are columns, in field order, each
-// quoted for SQL as QuoteIdentifier quotes it.
-func PostgresQueueStatements(table string, columns []string) QueueStatements {
+// quoted for SQL as QuoteIdentifier quotes it. keepDone is whether the
+// queue keeps a done message for a retention, as every queue does unless
+// its retention is zero; one that does not deletes a message as it
+// completes it.
+func PostgresQueueStatements(table string, columns []string, keepDone bool) QueueStatements {
 	returned := "q.id::text, q.claim_token::text, q.attempts"
 	for _, c := range columns {
 		returned += ", q." + c
 	}
 	claimed := fmt.Sprintf("WHERE id = $1::uuid AND claim_token = $2::uuid AND state = '%s'", ir.QueueStateClaimed)
 	unclaim := "claim_token = NULL, claim_expires_at = NULL"
+	complete := lines("DELETE FROM "+table, claimed)
+	if keepDone {
+		complete = lines(
+			fmt.Sprintf("UPDATE %s SET state = '%s', %s, updated_at = now()", table, ir.QueueStateDone, unclaim),
+			claimed,
+		)
+	}
 	return QueueStatements{
 		Insert: "INSERT INTO " + table,
 		Expire: lines(
@@ -85,14 +119,11 @@ func PostgresQueueStatements(table string, columns []string) QueueStatements {
 			"FROM due WHERE q.id = due.id",
 			"RETURNING "+returned,
 		),
-		Complete: lines(
-			fmt.Sprintf("UPDATE %s SET state = '%s', %s, updated_at = now()", table, ir.QueueStateDone, unclaim),
-			claimed,
-		),
+		Complete: complete,
 		Fail: lines(
 			"UPDATE "+table+" SET",
 			fmt.Sprintf("  state = CASE WHEN attempts > $3 THEN '%s' ELSE '%s' END,", ir.QueueStateDead, ir.QueueStateReady),
-			"  due_at = CASE WHEN attempts > $3 THEN due_at ELSE now() + make_interval(secs => $4) END,",
+			fmt.Sprintf("  due_at = CASE WHEN attempts > $3 THEN due_at ELSE now() + make_interval(secs => LEAST($4 * power(2, LEAST(attempts - 1, %d)), $6)) END,", queueBackoffDoublings),
 			"  last_error = $5, "+unclaim+", updated_at = now()",
 			claimed,
 			"RETURNING state",
@@ -105,6 +136,15 @@ func PostgresQueueStatements(table string, columns []string) QueueStatements {
 			fmt.Sprintf("UPDATE %s SET state = '%s', attempts = GREATEST(attempts - 1, 0), %s, updated_at = now()", table, ir.QueueStateReady, unclaim),
 			claimed,
 		),
+		Prune: lines(
+			"DELETE FROM "+table+" WHERE id IN (",
+			"  SELECT id FROM "+table,
+			fmt.Sprintf("  WHERE state = '%s' AND updated_at <= now() - make_interval(secs => $1)", ir.QueueStateDone),
+			"  ORDER BY updated_at",
+			"  LIMIT $2",
+			"  FOR UPDATE SKIP LOCKED",
+			")",
+		),
 	}
 }
 
@@ -113,7 +153,7 @@ func PostgresQueueStatements(table string, columns []string) QueueStatements {
 func (s QueueStatements) All() []NamedStatement {
 	return []NamedStatement{
 		{"insert", s.Insert}, {"expire", s.Expire}, {"claim", s.Claim}, {"complete", s.Complete},
-		{"fail", s.Fail}, {"extend", s.Extend}, {"release", s.Release},
+		{"fail", s.Fail}, {"extend", s.Extend}, {"release", s.Release}, {"prune", s.Prune},
 	}
 }
 

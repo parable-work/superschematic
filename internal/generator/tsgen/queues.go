@@ -36,11 +36,14 @@ type QueueInfo struct {
 	// Table is the queue's table, quoted for SQL where it must be.
 	Table string
 
-	// Retries, BackoffSeconds and LeaseSeconds are the queue's arguments
-	// with their defaults (registry.QueueSettingsOf).
-	Retries        int
-	BackoffSeconds int
-	LeaseSeconds   int
+	// Retries, BackoffSeconds, MaxBackoffSeconds, LeaseSeconds and
+	// RetainSeconds are the queue's arguments with their defaults
+	// (registry.QueueSettingsOf).
+	Retries           int
+	BackoffSeconds    int
+	MaxBackoffSeconds int
+	LeaseSeconds      int
+	RetainSeconds     int
 
 	// Fields are the message's fields, in declaration order.
 	Fields []QueueFieldInfo
@@ -102,13 +105,15 @@ func TypeScriptQueues(schema *ir.Schema) ([]QueueInfo, error) {
 		}
 		settings := registry.QueueSettingsOf(td.Queue)
 		q := QueueInfo{
-			Name:           td.Name,
-			Const:          QueueConst(td.Name),
-			DocLines:       queueDocLines(codegen.DocText(td.Description, td.Comment)),
-			Table:          sqlutil.QuoteIdentifier(codegen.ToSnakeCase(td.Name) + ir.QueueTableSuffix),
-			Retries:        settings.Retries,
-			BackoffSeconds: settings.BackoffSeconds,
-			LeaseSeconds:   settings.LeaseSeconds,
+			Name:              td.Name,
+			Const:             QueueConst(td.Name),
+			DocLines:          queueDocLines(codegen.DocText(td.Description, td.Comment)),
+			Table:             sqlutil.QuoteIdentifier(codegen.ToSnakeCase(td.Name) + ir.QueueTableSuffix),
+			Retries:           settings.Retries,
+			BackoffSeconds:    settings.BackoffSeconds,
+			MaxBackoffSeconds: settings.MaxBackoffSeconds,
+			LeaseSeconds:      settings.LeaseSeconds,
+			RetainSeconds:     settings.RetainSeconds,
 		}
 		var columns []string
 		for _, f := range td.Fields {
@@ -122,7 +127,7 @@ func TypeScriptQueues(schema *ir.Schema) ([]QueueInfo, error) {
 			q.Fields = append(q.Fields, field)
 			columns = append(columns, field.Column)
 		}
-		q.Statements = sqlutil.PostgresQueueStatements(q.Table, columns)
+		q.Statements = sqlutil.PostgresQueueStatements(q.Table, columns, q.RetainSeconds > 0)
 		queues = append(queues, q)
 	}
 	return queues, nil

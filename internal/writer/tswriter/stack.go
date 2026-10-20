@@ -81,9 +81,9 @@ func (e *emitter) environmentLiteral(name string, env *ir.EnvironmentDecl) strin
 }
 
 // settingsLiteral renders one settings element: of, a job's or a worker's
-// name beside its API's handle, platform, a job's schedule, timeZone and
-// enabled, a worker's instances, concurrency and enabled, env, and the
-// platform settings in every other key.
+// name beside its API's handle, platform, a job's schedule, timeZone,
+// enabled and onDeploy, a worker's instances, concurrency and enabled, env,
+// and the platform settings in every other key.
 func (e *emitter) settingsLiteral(owner string, settings *ir.DeployableSettings) string {
 	parts := []string{"of: " + e.deployableRef(owner+" of", settings.Of)}
 	if settings.Of.Job != "" {
@@ -104,6 +104,9 @@ func (e *emitter) settingsLiteral(owner string, settings *ir.DeployableSettings)
 	if settings.Enabled != nil {
 		parts = append(parts, fmt.Sprintf("enabled: %t", *settings.Enabled))
 	}
+	if settings.OnDeploy != nil {
+		parts = append(parts, fmt.Sprintf("onDeploy: %t", *settings.OnDeploy))
+	}
 	if settings.Instances != nil {
 		parts = append(parts, fmt.Sprintf("instances: %d", *settings.Instances))
 	}
@@ -112,7 +115,7 @@ func (e *emitter) settingsLiteral(owner string, settings *ir.DeployableSettings)
 	}
 	for _, key := range sortedKeys(settings.Values) {
 		switch key {
-		case "of", "job", "worker", "platform", "env", "schedule", "timeZone", "enabled", "instances", "concurrency":
+		case "of", "job", "worker", "platform", "env", "schedule", "timeZone", "enabled", "onDeploy", "instances", "concurrency":
 			e.failf("%s: a platform setting named %q has no TypeScript form; the element's own key takes it", owner, key)
 			continue
 		}

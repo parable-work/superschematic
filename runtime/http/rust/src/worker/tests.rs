@@ -14,6 +14,15 @@ enum Call {
     Complete(String),
     Fail(String, String),
     Release(String),
+    Prune(usize),
+}
+
+/// What a prune does: delete so many messages, fail, or never answer.
+#[derive(Clone, Copy, Debug)]
+enum PruneDoes {
+    Delete(u64),
+    Fail,
+    Hang,
 }
 
 /// What a claim does.
@@ -29,6 +38,8 @@ struct State {
     ready: VecDeque<(String, u32)>,
     /// What the next claims do, before they claim as a queue does.
     script: VecDeque<ClaimDoes>,
+    /// What the next prunes do; once they run out, a prune deletes none.
+    prunes: VecDeque<PruneDoes>,
     next_token: usize,
     calls: Vec<(Duration, Call)>,
 }
@@ -54,6 +65,10 @@ impl Memory {
 
     fn script(&self, does: impl IntoIterator<Item = ClaimDoes>) {
         self.state.lock().unwrap().script.extend(does);
+    }
+
+    fn prunes(&self, does: impl IntoIterator<Item = PruneDoes>) {
+        self.state.lock().unwrap().prunes.extend(does);
     }
 
     fn record(&self, call: Call) {
@@ -138,6 +153,17 @@ impl WorkerQueue for Memory {
         self.record(Call::Release(id.into()));
         Ok(())
     }
+
+    async fn prune(&self, limit: usize) -> Result<u64, QueueError> {
+        self.record(Call::Prune(limit));
+        let does = self.state.lock().unwrap().prunes.pop_front();
+        match does {
+            Some(PruneDoes::Delete(n)) => Ok(n),
+            Some(PruneDoes::Fail) => Err(QueueError::Failed("the database is down".into())),
+            Some(PruneDoes::Hang) => std::future::pending().await,
+            None => Ok(0),
+        }
+    }
 }
 
 fn completed(call: &Call) -> Option<String> {
@@ -156,6 +182,10 @@ fn released(call: &Call) -> Option<String> {
 
 fn is_claim(call: &Call) -> bool {
     matches!(call, Call::Claim(_))
+}
+
+fn is_prune(call: &Call) -> bool {
+    matches!(call, Call::Prune(_))
 }
 
 /// Runs the worker over `queue` in a task of its own, with `handler`.
@@ -361,7 +391,12 @@ async fn a_handler_that_panics_before_its_future_fails_its_message() {
         Options::default(),
     );
     wait(0.5).await;
-    let calls: Vec<Call> = queue.calls().into_iter().map(|(_, call)| call).collect();
+    let calls: Vec<Call> = queue
+        .calls()
+        .into_iter()
+        .map(|(_, call)| call)
+        .filter(|call| !is_prune(call))
+        .collect();
     assert_eq!(
         calls[..2],
         [
@@ -456,6 +491,65 @@ async fn after_the_grace_the_unfinished_handlers_are_dropped_and_their_messages_
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_worker_prunes_as_it_starts_and_then_every_five_minutes() {
+    let queue = Memory::new(LEASE, 0);
+    let batch = PRUNE_BATCH as u64;
+    // The first prune deletes two whole batches and a short one; the second
+    // fails; the third deletes three.
+    queue.prunes([
+        PruneDoes::Delete(batch),
+        PruneDoes::Delete(batch),
+        PruneDoes::Delete(7),
+        PruneDoes::Fail,
+        PruneDoes::Delete(3),
+    ]);
+    let (shutdown, run) = spawn(&queue, |_| async { Ok(()) }, Options::default());
+    wait(900.5).await;
+    assert_eq!(
+        queue.times(is_prune),
+        [0.0, 0.0, 0.0, 300.0, 600.0, 900.0],
+        "batches while one is whole, then a prune every five minutes, a failed one too"
+    );
+    assert!(queue
+        .calls()
+        .iter()
+        .all(|(_, call)| !matches!(call, Call::Prune(n) if *n != PRUNE_BATCH)));
+    shutdown.cancel();
+    run.await.unwrap().unwrap();
+    assert_eq!(queue.times(is_prune).len(), 6, "no prune after the stop");
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_prune_that_does_not_answer_fails_after_five_seconds_and_the_next_runs() {
+    let queue = Memory::new(LEASE, 0);
+    queue.prunes([PruneDoes::Hang, PruneDoes::Delete(1)]);
+    let options = Options {
+        prune_every: Duration::from_secs(60),
+        ..Options::default()
+    };
+    let (shutdown, run) = spawn(&queue, |_| async { Ok(()) }, options);
+    wait(70.0).await;
+    assert_eq!(queue.times(is_prune), [0.0, 65.0]);
+    shutdown.cancel();
+    run.await.unwrap().unwrap();
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_stopping_worker_stops_its_prune() {
+    let queue = Memory::new(LEASE, 0);
+    queue.prunes([PruneDoes::Hang]);
+    let (shutdown, run) = spawn(&queue, |_| async { Ok(()) }, Options::default());
+    wait(1.5).await;
+    shutdown.cancel();
+    tokio::time::timeout(Duration::from_millis(1), run)
+        .await
+        .expect("the worker stops at once, its prune with it")
+        .unwrap()
+        .unwrap();
+    assert_eq!(queue.times(is_prune), [0.0]);
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_queue_without_a_lease_is_refused() {
     let queue = Memory::new(Duration::ZERO, 1);
     let err = run_worker(
@@ -478,6 +572,7 @@ fn a_zero_option_is_its_default() {
         concurrency: 0,
         grace: Duration::ZERO,
         idle: Duration::ZERO,
+        prune_every: Duration::ZERO,
     }
     .or_defaults();
     assert_eq!(options, Options::default());
@@ -485,6 +580,7 @@ fn a_zero_option_is_its_default() {
         concurrency: 4,
         grace: Duration::from_secs(2),
         idle: Duration::from_millis(10),
+        prune_every: Duration::from_secs(60),
     };
     assert_eq!(set.or_defaults(), set);
 }

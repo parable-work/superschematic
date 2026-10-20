@@ -3,13 +3,15 @@
 /*
 The queues of the fixture-queue-db database (D53; docs/stack-model.md,
 section 8.8), as the HTTP runtime's queue client runs them: a definition per
-@queue class with its table, its retries, backoff and lease, the column each
-field of its message writes, and its statements on Postgres, which the Go
-ORM runs too, so a message one language enqueues the other claims alike.
+@queue class with its table, its retries, backoff, maximum backoff, lease and
+retention, the column each field of its message writes, and its statements
+on Postgres, which the Go ORM runs too, so a message one language enqueues
+the other claims alike.
 
 Enqueue a message in the transaction whose writes caused it with enqueue,
-and claim, complete, fail, extend and release messages with postgresQueue,
-both from the runtime's ./postgres entry. Delivery is at least once.
+and claim, complete, fail, extend, release and prune messages with
+postgresQueue, both from the runtime's ./postgres entry. Delivery is at
+least once.
 */
 
 import type { OrderPlaced, Ping } from './types';
@@ -36,7 +38,8 @@ export interface QueueField {
  * A queue's statements on Postgres: insert begins an enqueue; expire marks
  * dead each message whose last attempt's claim expired ($1 the retries);
  * claim claims up to $1 due messages for $2 seconds; complete, fail, extend
- * and release change message $1 while token $2 claims it.
+ * and release change message $1 while token $2 claims it; prune deletes up
+ * to $2 messages done $1 seconds ago or more.
  */
 export interface QueueStatements {
   readonly insert: string;
@@ -46,6 +49,7 @@ export interface QueueStatements {
   readonly fail: string;
   readonly extend: string;
   readonly release: string;
+  readonly prune: string;
 }
 
 /** A queue of the database, whose messages are M. */
@@ -56,10 +60,14 @@ export interface QueueDefinition<M> {
   readonly table: string;
   /** How many times a message whose handler fails is handled again before it is dead. */
   readonly retries: number;
-  /** How long a failed message waits before it is due again. */
+  /** How long a message that failed once waits before it is due again; each failure after doubles it. */
   readonly backoffSeconds: number;
+  /** The longest a failed message waits, however many times it failed. */
+  readonly maxBackoffSeconds: number;
   /** How long a claim holds a message unless its worker extends it. */
   readonly leaseSeconds: number;
+  /** How long a done message stays before a prune deletes it; 0 deletes it as it completes. */
+  readonly retainSeconds: number;
   /** The message's fields, in the order a claim returns their columns. */
   readonly fields: readonly QueueField[];
   readonly statements: QueueStatements;
@@ -68,8 +76,9 @@ export interface QueueDefinition<M> {
 }
 
 /**
- * OrderPlaced: a message whose handler fails is due again after 60s, and is
- * dead after 3 such retries; a claim holds it for 120s unless extended.
+ * OrderPlaced: a message whose handler fails is due again after 60s, doubled
+ * for each attempt before, up to 200s, and is dead after 3 such retries; a
+ * claim holds it for 120s unless extended. A done message stays 3600s.
  *
  * Placed when an order is: the worker that fulfils orders handles it.
  */
@@ -78,7 +87,9 @@ export const orderPlacedQueue: QueueDefinition<OrderPlaced> = {
   table: "order_placed_queue",
   retries: 3,
   backoffSeconds: 60,
+  maxBackoffSeconds: 200,
   leaseSeconds: 120,
+  retainSeconds: 3600,
   fields: [
     { name: "orderId", column: "order_id" },
     { name: "placedAt", column: "placed_at" },
@@ -108,7 +119,7 @@ RETURNING q.id::text, q.claim_token::text, q.attempts, q.order_id, q.placed_at, 
 WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
     fail: `UPDATE order_placed_queue SET
   state = CASE WHEN attempts > $3 THEN 'dead' ELSE 'ready' END,
-  due_at = CASE WHEN attempts > $3 THEN due_at ELSE now() + make_interval(secs => $4) END,
+  due_at = CASE WHEN attempts > $3 THEN due_at ELSE now() + make_interval(secs => LEAST($4 * power(2, LEAST(attempts - 1, 40)), $6)) END,
   last_error = $5, claim_token = NULL, claim_expires_at = NULL, updated_at = now()
 WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'
 RETURNING state`,
@@ -116,12 +127,20 @@ RETURNING state`,
 WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
     release: `UPDATE order_placed_queue SET state = 'ready', attempts = GREATEST(attempts - 1, 0), claim_token = NULL, claim_expires_at = NULL, updated_at = now()
 WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
+    prune: `DELETE FROM order_placed_queue WHERE id IN (
+  SELECT id FROM order_placed_queue
+  WHERE state = 'done' AND updated_at <= now() - make_interval(secs => $1)
+  ORDER BY updated_at
+  LIMIT $2
+  FOR UPDATE SKIP LOCKED
+)`,
   },
 };
 
 /**
- * Ping: a message whose handler fails is due again after 30s, and is
- * dead after 5 such retries; a claim holds it for 60s unless extended.
+ * Ping: a message whose handler fails is due again after 30s, doubled
+ * for each attempt before, up to 3600s, and is dead after 5 such retries; a
+ * claim holds it for 60s unless extended. A done message is deleted as it completes.
  *
  * Sent when nobody asked for anything in particular.
  */
@@ -130,7 +149,9 @@ export const pingQueue: QueueDefinition<Ping> = {
   table: "ping_queue",
   retries: 5,
   backoffSeconds: 30,
+  maxBackoffSeconds: 3600,
   leaseSeconds: 60,
+  retainSeconds: 0,
   fields: [
     { name: "sentAt", column: "sent_at" },
   ],
@@ -150,11 +171,11 @@ UPDATE ping_queue AS q SET state = 'claimed', attempts = q.attempts + 1, claim_t
   claim_expires_at = now() + make_interval(secs => $2), updated_at = now()
 FROM due WHERE q.id = due.id
 RETURNING q.id::text, q.claim_token::text, q.attempts, q.sent_at`,
-    complete: `UPDATE ping_queue SET state = 'done', claim_token = NULL, claim_expires_at = NULL, updated_at = now()
+    complete: `DELETE FROM ping_queue
 WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
     fail: `UPDATE ping_queue SET
   state = CASE WHEN attempts > $3 THEN 'dead' ELSE 'ready' END,
-  due_at = CASE WHEN attempts > $3 THEN due_at ELSE now() + make_interval(secs => $4) END,
+  due_at = CASE WHEN attempts > $3 THEN due_at ELSE now() + make_interval(secs => LEAST($4 * power(2, LEAST(attempts - 1, 40)), $6)) END,
   last_error = $5, claim_token = NULL, claim_expires_at = NULL, updated_at = now()
 WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'
 RETURNING state`,
@@ -162,5 +183,12 @@ RETURNING state`,
 WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
     release: `UPDATE ping_queue SET state = 'ready', attempts = GREATEST(attempts - 1, 0), claim_token = NULL, claim_expires_at = NULL, updated_at = now()
 WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
+    prune: `DELETE FROM ping_queue WHERE id IN (
+  SELECT id FROM ping_queue
+  WHERE state = 'done' AND updated_at <= now() - make_interval(secs => $1)
+  ORDER BY updated_at
+  LIMIT $2
+  FOR UPDATE SKIP LOCKED
+)`,
   },
 };

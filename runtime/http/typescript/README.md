@@ -345,8 +345,12 @@ takes up to n due messages with `FOR UPDATE SKIP LOCKED`, after marking
 dead each message whose last attempt's claim expired, and reads each
 column as the TypeScript types hold it (a 64-bit integer a number, a date
 its text); `complete`, `fail` (which resolves to whether the message is
-dead), `extend` and `release` take the message's ID and its claim's token
-and reject with `ClaimLostError` once the token no longer claims it.
+dead; one that is not is due again after the backoff, doubled for each
+attempt before and capped at the queue's `maxBackoffSeconds`, D68),
+`extend` and `release` take the message's ID and its claim's token and
+reject with `ClaimLostError` once the token no longer claims it; and
+`prune(limit)` deletes up to `limit` messages done for the queue's
+`retainSeconds`, never a dead one, and resolves to how many.
 `src/queue.test.ts` runs them against the Postgres
 `SUPERSCHEMATIC_HTTP_RUNTIME_TEST_DATABASE_URL` names, and skips without
 one.
@@ -359,6 +363,9 @@ the handler runs, completes the message when the handler resolves and
 fails it when it rejects, and logs each outcome. When `signal` aborts it
 claims no more, lets the running handlers finish within the grace, eight
 seconds unless set, then aborts their signal and releases their messages.
+As it starts and every `pruneEveryMs`, five minutes unless set, it runs
+the queue's `prune` in batches of `PRUNE_BATCH`, a thousand, until a batch
+is short, and logs `done messages pruned` with `pruned`.
 `workerConcurrency(fallback)` reads `WORKER_CONCURRENCY`, which a platform
 sets.
 

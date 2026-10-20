@@ -7,7 +7,7 @@ import re
 from typing import TYPE_CHECKING, Any, Mapping, TypedDict
 
 from ..client import EncryptedRequestOptions, FilePart, SyncHTTPClient, path_segment
-from ..errors import ValidationError
+from ..errors import SDKError, ValidationError
 
 _BUILTIN_VALIDATION_TYPES: dict[str, Any] = {
     "str": str,
@@ -216,30 +216,56 @@ class EventNamespace:
             for key, field_errors in found_errors.items()
         }
 
-    def _coerce_response(self, raw: Any, output_type_name: str, is_array: bool) -> Any:
-        """Coerce raw JSON-decoded responses into typed Pydantic models.
+    def _response_reader(self, type_name: str) -> Any | None:
+        """Return the function that reads one value of a response as
+        type_name, or None to return the response as decoded: without the
+        types package, and for an enum, whose values stay the strings the
+        API sent.
 
         The HTTP client returns json.loads dicts; generated models have
         ConfigDict(strict=True), so callers cannot rely on plain
-        model_validate to coerce stringified enum values. Use the generated
-        from_dict_non_strict helper instead, which is the type library's
-        contract for parsing API payloads.
+        model_validate to coerce stringified enum values. A model is read
+        with the generated from_dict_non_strict helper instead, which is the
+        type library's contract for parsing API payloads.
+        """
+        output_type = self._resolve_validation_type(type_name)
+        if output_type is None:
+            return None
+        from_dict_non_strict = getattr(output_type, "from_dict_non_strict", None)
+        if callable(from_dict_non_strict):
+            return from_dict_non_strict
+        return None
+
+    @staticmethod
+    def _read_response_value(read: Any, value: Any, type_name: str, path: str) -> Any:
+        """Read one value of a response as type_name; a value the type
+        cannot read raises SDKError at its path (data, data[1])."""
+        try:
+            return read(value)
+        except Exception as err:
+            raise SDKError(f"SDK contract error: response {path} is not a valid {type_name}: {err}") from err
+
+    def _coerce_response(self, raw: Any, output_type_name: str, is_array: bool, path: str = "data") -> Any:
+        """Read JSON-decoded response data as its output type
+        (_response_reader), each element of a list at its index.
+
+        None is returned as is, and so is the data when the type has no
+        reader. Otherwise data that is not the list is_array asks for, and
+        a value the type cannot read, raise SDKError at path, the data's
+        place in the response (data, data[1], data.items[0]).
         """
         if raw is None or output_type_name == "":
             return raw
-        output_type = self._resolve_validation_type(output_type_name)
-        if output_type is None:
+        read = self._response_reader(output_type_name)
+        if read is None:
             return raw
-        from_dict_non_strict = getattr(output_type, "from_dict_non_strict", None)
-        if not callable(from_dict_non_strict):
-            return raw
-        if is_array:
-            if not isinstance(raw, list):
-                return raw
-            return [from_dict_non_strict(item) if isinstance(item, dict) else item for item in raw]
-        if not isinstance(raw, dict):
-            return raw
-        return from_dict_non_strict(raw)
+        if not is_array:
+            return self._read_response_value(read, raw, output_type_name, path)
+        if not isinstance(raw, list):
+            raise SDKError(f"SDK contract error: expected response {path} to be a list of {output_type_name}")
+        return [
+            self._read_response_value(read, item, output_type_name, f"{path}[{index}]") for index, item in enumerate(raw)
+        ]
 
     def _validate_scalar_argument(self, value: Any, scalar_type_name: str, field_name: str) -> Any:
         """Validate one value of an argument and return it as it is sent.

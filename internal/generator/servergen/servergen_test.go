@@ -60,6 +60,12 @@ const (
 	// servers, whose Staging environment places shop-db on Cloud SQL.
 	cloudStack = "shop-cloud-stack"
 
+	// monolithStack is a third, whose declared server Monolith serves
+	// shop-api and shop-orders, so shop-orders' calls of shop-api stay
+	// within it (docs/stack-model.md, section 9.9). It is loaded, and built
+	// only by the test of those calls.
+	monolithStack = "shop-monolith-stack"
+
 	// site is the fixture's site, which shop-stack deploys and which calls
 	// shop-orders: Storefront answers CORS for it on shop-orders' routes
 	// (D55). It is loaded, not built: its build writes no entrypoint.
@@ -95,9 +101,10 @@ type fixture struct {
 	configs map[string]*schemaconfig.SchemaConfig
 }
 
-// loadFixture loads every fixture service, cloudStack included, with the
-// core registry and stacktest's fake target, whose sql connector derives a
-// Cloud SQL connector configuration as the gcp target's does.
+// loadFixture loads every fixture service, cloudStack and monolithStack
+// included, with the core registry and stacktest's fake target, whose sql
+// connector derives a Cloud SQL connector configuration as the gcp
+// target's does.
 func loadFixture(t *testing.T, root string) fixture {
 	t.Helper()
 	reg, err := publicregistry.Assemble(publicregistry.DefaultNaming(), &stacktest.Extension{})
@@ -105,7 +112,7 @@ func loadFixture(t *testing.T, root string) fixture {
 		t.Fatal(err)
 	}
 	f := fixture{reg: reg, schemas: map[string]*ir.Schema{}, configs: map[string]*schemaconfig.SchemaConfig{}}
-	for _, name := range append(slices.Clone(order), cloudStack, site) {
+	for _, name := range append(slices.Clone(order), cloudStack, monolithStack, site) {
 		schema, cfg, err := loader.LoadServiceWithConfig(filepath.Join(root, name), loader.WithRegistry(reg))
 		if err != nil {
 			t.Fatalf("load %s: %v", name, err)
@@ -777,7 +784,12 @@ type started struct {
 // start runs binary with env and waits for /healthz.
 func start(t *testing.T, binary string, env ...string) *started {
 	t.Helper()
-	port := freePort(t)
+	return startOn(t, freePort(t), binary, env...)
+}
+
+// startOn is start on port.
+func startOn(t *testing.T, port, binary string, env ...string) *started {
+	t.Helper()
 	var out strings.Builder
 	cmd := exec.Command(binary)
 	cmd.Env = append(os.Environ(), append(env, "PORT="+port)...)

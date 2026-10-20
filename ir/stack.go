@@ -274,6 +274,15 @@ type DeployableSettings struct {
 	// instance, and its queue's messages wait (D53).
 	Enabled *bool `json:"enabled,omitempty" yaml:"enabled,omitempty"`
 
+	// OnDeploy runs a job once on every deploy of the environment, after
+	// the last rollout wave and before the contract phase, whether or not
+	// it has a schedule: a backfill the new servers' data needs before the
+	// contract drops what it reads, say. Unset, a job runs on no deploy; a
+	// later environment of the chain turns off what an earlier one turned
+	// on with false. Only an element whose `of` names a job sets it (D52,
+	// amended).
+	OnDeploy *bool `json:"onDeploy,omitempty" yaml:"onDeploy,omitempty"`
+
 	// Instances is how many instances of a worker the environment runs,
 	// one unless set, and Concurrency how many messages each handles at a
 	// time, its `@worker` concurrency unless set. Only an element whose

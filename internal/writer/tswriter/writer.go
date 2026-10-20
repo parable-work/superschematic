@@ -266,8 +266,14 @@ func queueArgs(def *ir.QueueDef) string {
 	if def.Backoff != "" {
 		parts = append(parts, "backoff: "+quote(def.Backoff))
 	}
+	if def.MaxBackoff != "" {
+		parts = append(parts, "maxBackoff: "+quote(def.MaxBackoff))
+	}
 	if def.Lease != "" {
 		parts = append(parts, "lease: "+quote(def.Lease))
+	}
+	if def.Retain != "" {
+		parts = append(parts, "retain: "+quote(def.Retain))
 	}
 	if len(parts) == 0 {
 		return ""

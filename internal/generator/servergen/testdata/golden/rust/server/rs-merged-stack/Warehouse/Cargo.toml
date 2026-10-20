@@ -26,4 +26,5 @@ schemas-rs-catalog-api = { path = "../../../api/rs-catalog" }
 schemas-rs-catalog-implementation = { path = "../../../impl/rs-catalog" }
 schemas-rs-pricing-api = { path = "../../../api/rs-pricing" }
 schemas-rs-pricing-implementation = { path = "../../../impl/rs-pricing" }
-superschematic-http-runtime = { path = "../../../../../runtime/http/rust", features = ["logging", "otel"] }
+schemas-rs-pricing-sdk = { path = "../../../sdk/rust/rs-pricing" }
+superschematic-http-runtime = { path = "../../../../../runtime/http/rust", features = ["http-client", "logging", "otel"] }

@@ -3,13 +3,15 @@
 /*
 The queues of the {{.SchemaName}} database (D53; docs/stack-model.md,
 section 8.8), as the HTTP runtime's queue client runs them: a definition per
-@queue class with its table, its retries, backoff and lease, the column each
-field of its message writes, and its statements on Postgres, which the Go
-ORM runs too, so a message one language enqueues the other claims alike.
+@queue class with its table, its retries, backoff, maximum backoff, lease and
+retention, the column each field of its message writes, and its statements
+on Postgres, which the Go ORM runs too, so a message one language enqueues
+the other claims alike.
 
 Enqueue a message in the transaction whose writes caused it with enqueue,
-and claim, complete, fail, extend and release messages with postgresQueue,
-both from the runtime's ./postgres entry. Delivery is at least once.
+and claim, complete, fail, extend, release and prune messages with
+postgresQueue, both from the runtime's ./postgres entry. Delivery is at
+least once.
 {{- range .LeftOutQueues}}
 
 Queue {{.Name}} is left out: {{.Unsupported}}.
@@ -42,7 +44,8 @@ export interface QueueField {
  * A queue's statements on Postgres: insert begins an enqueue; expire marks
  * dead each message whose last attempt's claim expired ($1 the retries);
  * claim claims up to $1 due messages for $2 seconds; complete, fail, extend
- * and release change message $1 while token $2 claims it.
+ * and release change message $1 while token $2 claims it; prune deletes up
+ * to $2 messages done $1 seconds ago or more.
  */
 export interface QueueStatements {
   readonly insert: string;
@@ -52,6 +55,7 @@ export interface QueueStatements {
   readonly fail: string;
   readonly extend: string;
   readonly release: string;
+  readonly prune: string;
 }
 
 /** A queue of the database, whose messages are M. */
@@ -62,10 +66,14 @@ export interface QueueDefinition<M> {
   readonly table: string;
   /** How many times a message whose handler fails is handled again before it is dead. */
   readonly retries: number;
-  /** How long a failed message waits before it is due again. */
+  /** How long a message that failed once waits before it is due again; each failure after doubles it. */
   readonly backoffSeconds: number;
+  /** The longest a failed message waits, however many times it failed. */
+  readonly maxBackoffSeconds: number;
   /** How long a claim holds a message unless its worker extends it. */
   readonly leaseSeconds: number;
+  /** How long a done message stays before a prune deletes it; 0 deletes it as it completes. */
+  readonly retainSeconds: number;
   /** The message's fields, in the order a claim returns their columns. */
   readonly fields: readonly QueueField[];
   readonly statements: QueueStatements;
@@ -75,8 +83,12 @@ export interface QueueDefinition<M> {
 {{- range .WrittenQueues}}
 
 /**
- * {{.Name}}: a message whose handler fails is due again after {{.BackoffSeconds}}s, and is
- * dead after {{.Retries}} such retries; a claim holds it for {{.LeaseSeconds}}s unless extended.
+ * {{.Name}}: a message whose handler fails is due again after {{.BackoffSeconds}}s, doubled
+ * for each attempt before, up to {{.MaxBackoffSeconds}}s, and is dead after {{.Retries}} such retries; a
+ * claim holds it for {{.LeaseSeconds}}s unless extended.
+{{- if .RetainSeconds}} A done message stays {{.RetainSeconds}}s.
+{{- else}} A done message is deleted as it completes.
+{{- end}}
 {{- if .DocLines}}
  *
 {{- range .DocLines}}
@@ -89,7 +101,9 @@ export const {{.Const}}: QueueDefinition<{{.Name}}> = {
   table: {{jsonString .Table}},
   retries: {{.Retries}},
   backoffSeconds: {{.BackoffSeconds}},
+  maxBackoffSeconds: {{.MaxBackoffSeconds}},
   leaseSeconds: {{.LeaseSeconds}},
+  retainSeconds: {{.RetainSeconds}},
   fields: [
 {{- range .Fields}}
     { name: {{jsonString .Name}}, column: {{jsonString .Column}}{{if .JSON}}, json: true{{end}}{{if .List}}, list: true{{end}}{{if .Default}}, default: {{jsonString .Default}}{{end}}{{if .Point}}, point: true{{end}}{{if .Interval}}, interval: true{{end}} },

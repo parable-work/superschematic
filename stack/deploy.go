@@ -5,6 +5,7 @@ import (
 	"io"
 
 	"github.com/parable-work/superschematic/internal/generator/servergen"
+	"github.com/parable-work/superschematic/internal/registry"
 	"github.com/parable-work/superschematic/internal/stackdeploy"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -14,8 +15,8 @@ import (
 // internal/stackdeploy.
 type (
 	// Options is what every operation reads; DeployOptions, PlanOptions,
-	// BuildOptions, BootstrapOptions, SecretsOptions and RunJobOptions
-	// add each one's own.
+	// BuildOptions, BootstrapOptions, SecretsOptions, RunJobOptions and
+	// UnlockOptions add each one's own.
 	Options          = stackdeploy.Options
 	DeployOptions    = stackdeploy.DeployOptions
 	PlanOptions      = stackdeploy.PlanOptions
@@ -23,6 +24,7 @@ type (
 	BootstrapOptions = stackdeploy.BootstrapOptions
 	SecretsOptions   = stackdeploy.SecretsOptions
 	RunJobOptions    = stackdeploy.RunJobOptions
+	UnlockOptions    = stackdeploy.UnlockOptions
 
 	// Sources says where a stack's build wrote each server's and job's
 	// Dockerfile; BuildResult is what a build made; Context is a build
@@ -129,6 +131,15 @@ func Outputs(ctx context.Context, o Options) (*RunOutputs, error) { return stack
 // RunJob runs a deployed job once on demand (D52); see
 // internal/stackdeploy.RunJob.
 func RunJob(ctx context.Context, o RunJobOptions) error { return stackdeploy.RunJob(ctx, o) }
+
+// Unlock removes a run's deploy lock, which a deploy whose process died
+// leaves (D46, amended); see internal/stackdeploy.Unlock.
+func Unlock(ctx context.Context, o UnlockOptions) (*registry.DeployLock, error) {
+	return stackdeploy.Unlock(ctx, o)
+}
+
+// ErrUnlockDeclined is what Unlock returns when its Confirm declines.
+var ErrUnlockDeclined = stackdeploy.ErrUnlockDeclined
 
 // What bootstrap did with a value its target returned.
 const (

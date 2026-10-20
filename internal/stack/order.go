@@ -24,12 +24,16 @@ func (s slot) after(o slot) bool {
 
 // order writes the deploy order of section 5.3 onto out: infrastructure;
 // the migrations' expand steps; the servers and jobs in waves, callees
-// before callers; the migrations' contract steps; exposure. A migrate step
-// names the databases and holds no resource: the deploy runs the migration
-// there. A resource lands in its phase, or in a later step when one of its
-// dependencies does, and its Phase is set to where it landed; a server's
-// or a job's own rollout resources land in its wave, and a database's
-// resources land in infrastructure, before the migration that needs them.
+// before callers; the jobs that run on every deploy (D52, amended); the
+// migrations' contract steps; exposure. A migrate step names the databases
+// and holds no resource: the deploy runs the migration there. A jobs step
+// names the jobs and holds no resource either: the deploy runs each there,
+// once every server of the new version runs and before the contract drops
+// what the previous version read. A resource lands in its phase, or in a
+// later step when one of its dependencies does, and its Phase is set to
+// where it landed; a server's or a job's own rollout resources land in its
+// wave, and a database's resources land in infrastructure, before the
+// migration that needs them.
 // An inherited resource is the parent environment's: no step applies it,
 // and nothing waits on it.
 func (r *resolver) order(out *ir.ResolvedEnvironment) {
@@ -133,6 +137,15 @@ func (r *resolver) order(out *ir.ResolvedEnvironment) {
 		if len(step.Deployables) > 0 || len(step.Resources) > 0 {
 			steps = append(steps, step)
 		}
+	}
+	var onDeploy []string
+	for _, d := range out.Deployables {
+		if d.Kind == ir.DeployableJob && d.Job != nil && d.Job.OnDeploy {
+			onDeploy = append(onDeploy, d.Name)
+		}
+	}
+	if len(onDeploy) > 0 {
+		steps = append(steps, &ir.DeployStep{Step: ir.StepJobs, Deployables: onDeploy})
 	}
 	if len(databases) > 0 {
 		steps = append(steps, &ir.DeployStep{Step: ir.StepMigrate, Migration: ir.MigrationContract, Deployables: databases})

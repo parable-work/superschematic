@@ -5,8 +5,10 @@
 -- Drop indexes
 DROP INDEX IF EXISTS idx_ping_queue_due_at CASCADE;
 DROP INDEX IF EXISTS idx_ping_queue_claim_expires_at CASCADE;
+DROP INDEX IF EXISTS idx_ping_queue_updated_at CASCADE;
 DROP INDEX IF EXISTS idx_order_placed_queue_due_at CASCADE;
 DROP INDEX IF EXISTS idx_order_placed_queue_claim_expires_at CASCADE;
+DROP INDEX IF EXISTS idx_order_placed_queue_updated_at CASCADE;
 
 -- Drop join tables first
 

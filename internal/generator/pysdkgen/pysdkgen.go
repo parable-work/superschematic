@@ -82,7 +82,8 @@ type NamespaceInfo struct {
 	HasListOfListsArgs        bool
 	HasListOfListsModelOutput bool
 	// HasMapModelOutput gates the _coerce_map_response helper, for a map
-	// response of a model (EndpointInfo.OutputIsMap).
+	// response of a model or a union (EndpointInfo.OutputIsMap): it reads
+	// each value at data[key], and data that is not a map raises SDKError.
 	HasMapModelOutput bool
 	// HasMapArgs gates the _validate_map_argument helper, for a map body
 	// argument (ScalarArg.IsMap).
@@ -111,6 +112,12 @@ type NamespaceInfo struct {
 	// would rebind the name for a type checker, as the TypeScript SDK
 	// names it.
 	PageType string
+	// UnionOutputTypes are the unions the namespace's operations answer
+	// with (EndpointInfo.OutputIsUnion), sorted. They gate
+	// _UNION_OUTPUT_TYPES and _union_reader: the types package's alias of
+	// a union has no from_dict_non_strict, so _coerce_response reads one
+	// through a pydantic TypeAdapter of it.
+	UnionOutputTypes []string
 }
 
 // EndpointInfo represents a single API endpoint for the Python SDK.
@@ -122,7 +129,7 @@ type EndpointInfo struct {
 	Description          string
 	InputType            string
 	OutputTypeHint       string
-	OutputModelName      string // Bare type name when output is an importable model; empty otherwise.
+	OutputModelName      string // Bare type name when output is an importable model or union; empty otherwise.
 	OutputIsArray        bool
 	HasInput             bool
 	InputRequired        bool
@@ -148,6 +155,11 @@ type EndpointInfo struct {
 	// OutputIsMap marks a map response (dict[str, T], or, with
 	// OutputIsArray, dict[str, list[T]]), coerced value by value.
 	OutputIsMap bool
+
+	// OutputIsUnion marks a response of a union (apigen.APIOutput.TypeUnions),
+	// OutputModelName, which the SDK reads as the member the union's alias
+	// picks, at each list level and in a page's items.
+	OutputIsUnion bool
 
 	// Paged marks an operation that pages its list (D60): the method takes
 	// cursor and limit, the last of its query parameters, and returns
@@ -320,6 +332,7 @@ func Generate(apiOutput *apigen.APIOutput, packageName, typesPackage string, clo
 	namespaceMap := make(map[string]*NamespaceInfo)
 	importsByNamespace := make(map[string]map[string]struct{})
 	jsonTypesByNamespace := make(map[string]map[string]struct{})
+	unionsByNamespace := make(map[string]map[string]struct{})
 
 	for _, endpoint := range apiOutput.Endpoints {
 		if endpoint.IsWebhook {
@@ -343,6 +356,7 @@ func Generate(apiOutput *apigen.APIOutput, packageName, typesPackage string, clo
 			namespaceMap[namespaceName] = namespace
 			importsByNamespace[namespaceName] = make(map[string]struct{})
 			jsonTypesByNamespace[namespaceName] = make(map[string]struct{})
+			unionsByNamespace[namespaceName] = make(map[string]struct{})
 		}
 
 		if endpoint.IsScopedEndpoint {
@@ -360,6 +374,10 @@ func Generate(apiOutput *apigen.APIOutput, packageName, typesPackage string, clo
 		}
 
 		converted := convertEndpoint(endpoint, namespace.IsScopedNS, namespace.scopeParamOriginal)
+		if _, isUnion := apiOutput.TypeUnions[endpoint.OutputType]; isUnion && converted.OutputModelName != "" {
+			converted.OutputIsUnion = true
+			unionsByNamespace[namespaceName][converted.OutputModelName] = struct{}{}
+		}
 		namespace.Endpoints = append(namespace.Endpoints, converted)
 
 		if endpoint.RequiresAuth {
@@ -421,6 +439,11 @@ func Generate(apiOutput *apigen.APIOutput, packageName, typesPackage string, clo
 	for name, jsonTypes := range jsonTypesByNamespace {
 		if len(jsonTypes) > 0 {
 			namespaceMap[name].JSONValueTypes = sortedKeys(jsonTypes)
+		}
+	}
+	for name, unions := range unionsByNamespace {
+		if len(unions) > 0 {
+			namespaceMap[name].UnionOutputTypes = sortedKeys(unions)
 		}
 	}
 
@@ -962,10 +985,12 @@ func pythonListType(elem string, depth int) string {
 	return codegen.WrapArray(elem, depth, func(inner string) string { return "list[" + inner + "]" })
 }
 
-// outputModelName returns the bare IR type name for endpoint outputs that
-// the type library exposes as importable Pydantic models, and the empty string
-// for primitives, enums, or void responses. Used by namespace.tmpl to decide
-// whether to coerce raw response dicts into typed models via from_dict_non_strict.
+// outputModelName returns the bare IR type name for endpoint outputs the
+// type library exposes by name, Pydantic models and union aliases among
+// them, and the empty string for primitives and void responses. namespace.tmpl
+// passes it to _coerce_response, which reads a model with from_dict_non_strict
+// and a union (EndpointInfo.OutputIsUnion) through a TypeAdapter of its alias,
+// and returns an enum's values as decoded.
 func outputModelName(typeName string) string {
 	if !shouldImportIRType(typeName) {
 		return ""

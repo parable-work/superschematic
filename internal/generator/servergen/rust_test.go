@@ -41,7 +41,9 @@ const (
 	// services; rs-orders' Go server calls rs-stock, whose reservations
 	// only it may make; and the site rs-web calls rs-stock. Its one
 	// environment is local. Beside it, rs-merged-stack's declared Rust
-	// server Warehouse serves rs-catalog and rs-pricing.
+	// server Warehouse serves rs-catalog and rs-pricing, and rs-catalog's
+	// calls of rs-pricing stay within it (docs/stack-model.md, section
+	// 9.9).
 	rustServicesRoot = "testdata/rust/services"
 
 	// rustStack is the fixture's stack, and rustMergedStack the second,
@@ -117,7 +119,7 @@ func rustGenerated(repoRoot string) map[string]string {
 		}
 	}
 	for _, service := range []string{"rs-catalog", "rs-pricing", "rs-stock"} {
-		files[filepath.Join(servergen.RustMirrorRoot, service, servergen.RustManifestFile)] = filepath.Join(servergen.RustMirrorDir(out, service), servergen.RustManifestFile)
+		files[filepath.Join(servergen.MirrorRoot, service, servergen.RustManifestFile)] = filepath.Join(servergen.MirrorDir(out, service), servergen.RustManifestFile)
 	}
 	return files
 }
@@ -187,6 +189,45 @@ impl QuotesImplementation for Quotes {
         Ok(types::Quote {
             sku: format!("{}:{caller}", args.sku),
             cents: 250.0,
+        })
+    }
+}
+`
+
+// rustCatalogImplementation is rs-catalog's implementation: an entry
+// named by rs-pricing's quote, which it asks for with the client in its
+// Deps. On Warehouse, which serves both, the quote names Warehouse, the
+// caller rs-pricing saw.
+const rustCatalogImplementation = `use std::sync::Arc;
+
+use async_trait::async_trait;
+use schemas_rs_catalog_api::types;
+use schemas_rs_catalog_api::{CatalogGetEntryArgs, CatalogImplementation, Deps, Handlers};
+use superschematic_http_runtime::{ApiError, RequestContext};
+
+pub async fn create(deps: Deps) -> Result<Handlers, Box<dyn std::error::Error + Send + Sync>> {
+    Ok(Handlers {
+        catalog: Arc::new(Catalog { deps: Arc::new(deps) }),
+    })
+}
+
+pub struct Catalog {
+    deps: Arc<Deps>,
+}
+
+#[async_trait]
+impl CatalogImplementation for Catalog {
+    async fn get_entry(&self, _ctx: RequestContext, args: CatalogGetEntryArgs) -> Result<types::Entry, ApiError> {
+        let quote = self
+            .deps
+            .rs_pricing
+            .quotes
+            .get_quote(args.sku.clone(), None)
+            .await
+            .map_err(|err| ApiError::internal(format!("rs-pricing: {err}")))?;
+        Ok(types::Entry {
+            sku: args.sku,
+            name: quote.sku,
         })
     }
 }
@@ -456,12 +497,13 @@ func buildRustFixture(t *testing.T, cargo string) (string, string) {
 	return repoRoot, filepath.Join(target, "debug")
 }
 
-// writeRustImplementations writes rs-pricing's and rs-stock's
-// implementations over their scaffolds in the repository at repoRoot.
+// writeRustImplementations writes rs-catalog's, rs-pricing's and
+// rs-stock's implementations over their scaffolds in the repository at
+// repoRoot.
 func writeRustImplementations(t *testing.T, repoRoot string) {
 	t.Helper()
 	names := naming.Default()
-	for service, code := range map[string]string{"rs-pricing": rustPricingImplementation, "rs-stock": rustStockImplementation} {
+	for service, code := range map[string]string{"rs-catalog": rustCatalogImplementation, "rs-pricing": rustPricingImplementation, "rs-stock": rustStockImplementation} {
 		if err := os.WriteFile(filepath.Join(names.RustImplementationDir(repoRoot, service), "src", "lib.rs"), []byte(code), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -514,14 +556,24 @@ func TestRustEntrypointCompilesAndServes(t *testing.T) {
 
 	// Warehouse serves rs-catalog and rs-pricing on one port, and hands
 	// each request to the router of the API whose operations take it, and
-	// the routes both register, the OpenAPI document's, to the first.
-	warehouse := start(t, filepath.Join(bin, rustMergedServer), ir.CallersField("rs-pricing")+"_ISSUERS=0")
+	// the routes both register, the OpenAPI document's, to the first. An
+	// entry asks rs-pricing for its quote at the loopback URL the local
+	// connector derives for a call within one server, with no credential,
+	// here through a proxy that keeps the token the call carries.
+	// rs-pricing admits it as Warehouse (docs/stack-model.md, section 9.9),
+	// and a second Warehouse process, whose loopback key is its own,
+	// refuses it.
+	warehousePort := freePort(t)
+	capture := captureLoopback(t, "http://127.0.0.1:"+warehousePort)
+	warehouse := startOn(t, warehousePort, filepath.Join(bin, rustMergedServer), ir.CallersField("rs-pricing")+"_ISSUERS=0", "RS_PRICING_SERVICE_URL="+capture.url)
 	warehouse.expect(t, http.MethodGet, "/readyz", http.StatusOK, `"ready"`)
-	warehouse.expect(t, http.MethodGet, "/api/catalog/tea", http.StatusNotImplemented, "catalog.get_entry is not implemented")
-	warehouse.expect(t, http.MethodGet, "/api/quotes/tea", http.StatusUnauthorized, "service_unauthorized")
+	loopbackToken := checkLoopbackCalls(t, warehouse, capture, rustMergedServer, "/api/catalog/tea", "/api/quotes/tea", `"name":"tea:Warehouse"`)
 	warehouse.expect(t, http.MethodGet, "/api/openapi.json", http.StatusOK, "/api/catalog/{sku}")
 	warehouse.expect(t, http.MethodGet, "/api/nowhere", http.StatusNotFound)
 	warehouse.stop(t)
+	again := start(t, filepath.Join(bin, rustMergedServer), ir.CallersField("rs-pricing")+"_ISSUERS=0", "RS_PRICING_SERVICE_URL=http://127.0.0.1:9")
+	again.sendWith(t, http.MethodGet, "/api/quotes/tea", "", map[string]string{"Service-Authorization": "Bearer " + loopbackToken}, http.StatusUnauthorized, "service_unauthorized")
+	again.stop(t)
 
 	// The edge from rs-stock to rs-pricing, as the local target's connector
 	// derives it: rs-stock signs with the private key as its own issuer,
@@ -1186,7 +1238,7 @@ func TestRustServersBuildInAnyOutputRoot(t *testing.T) {
 		if got := lockfile(out); got != lock {
 			t.Errorf("another build changed %s's lockfile:\n%s", out, got)
 		}
-		mirrored, err := os.ReadFile(filepath.Join(servergen.RustMirrorDir(out, "rs-pricing"), "src", "lib.rs"))
+		mirrored, err := os.ReadFile(filepath.Join(servergen.MirrorDir(out, "rs-pricing"), "src", "lib.rs"))
 		if err != nil || !strings.HasSuffix(string(mirrored), changed) {
 			t.Errorf("the change to rs-pricing did not reach %s's mirror: %v", out, err)
 		}
@@ -1201,7 +1253,7 @@ func TestRustServersBuildInAnyOutputRoot(t *testing.T) {
 			generated++
 			under := out
 			if strings.HasSuffix(crate[1], "-implementation") {
-				under = filepath.Join(out, servergen.RustMirrorRoot)
+				under = filepath.Join(out, servergen.MirrorRoot)
 			}
 			if rel, err := filepath.Rel(under, crate[2]); err != nil || strings.HasPrefix(rel, "..") {
 				t.Errorf("%s's workspace builds %s from %s, outside %s", out, crate[1], crate[2], under)
