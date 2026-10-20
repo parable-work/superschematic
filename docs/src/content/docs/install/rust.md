@@ -201,6 +201,12 @@ with `RequestOptions::forward(ctx.bearer_token())`: the call sends that
 token as `Authorization`, or none for `None`, instead of the configured
 one, and does not refresh it.
 
+A method returns `Vec<T>` for a list, `HashMap<String, T>` for a map
+(`HashMap<String, Vec<T>>` for a map of lists) and `Option<T>` for a
+`Nullable<T>`, `None` when the server answers null. A union decodes
+through its own `Deserialize`, so an element it cannot read, or a null
+one, is an error.
+
 An operation without an input type takes its arguments as one input
 struct, `<Operation>Input`, whose fields are sent under the arguments'
 names as the schema spells them (`shadeByName`, not `shade_by_name`). On
