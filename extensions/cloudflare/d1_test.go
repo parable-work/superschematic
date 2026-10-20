@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	ir "github.com/parable-work/superschematic/ir"
+	"github.com/parable-work/superschematic/registry"
 	"github.com/parable-work/superschematic/stack"
 
 	"github.com/parable-work/superschematic/extensions/cloudflare"
@@ -152,5 +154,75 @@ func TestD1Refusals(t *testing.T) {
 func TestD1Name(t *testing.T) {
 	if got := cloudflare.D1Name("AcmeReviews", "reviews-db"); got != "acme-reviews-reviews-db" {
 		t.Errorf("D1Name = %q", got)
+	}
+}
+
+// TestD1CIGolden renders the D1 fixture's workflow, its Staging and its
+// Preview, with the core's GitHub Actions renderer, and checks it against
+// the golden file, which -update rewrites: the cloudflare target migrates
+// D1 from the deploying machine, so each deploy job installs
+// superschematic-migrate from the release beside superschematic, checked
+// against SHA256SUMS, and no plan job does.
+func TestD1CIGolden(t *testing.T) {
+	reg := assemble(t)
+	renderer, ok := reg.CIRenderer("github")
+	if !ok {
+		t.Fatal("the core registers no github CI renderer")
+	}
+	s := d1Stack()
+	var envs []registry.CIEnvironment
+	for _, name := range []string{"Staging", "Preview"} {
+		resolved, err := stack.Resolve(reg, stack.Input{Stack: s, Services: d1Services(), Environment: name})
+		if err != nil {
+			t.Fatal(err)
+		}
+		env := reg.CIEnvironment(resolved)
+		if !env.Migrate {
+			t.Errorf("%s's CI does not install the migration runner", name)
+		}
+		envs = append(envs, env)
+	}
+	files, err := renderer.Render(registry.CIRequest{
+		Stack: registry.CIStack{
+			Name:           s.Name,
+			Dir:            "schemas/services/" + s.Name,
+			ServicesRoot:   "schemas/services",
+			SchemasRoot:    "schemas",
+			OutputRoot:     "schemas/dist",
+			PackageManager: registry.PackageManagerBun,
+		},
+		Environments: envs,
+		Options:      registry.CIOptions{}.WithDefaults(renderer),
+		Version:      "1.2.3",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 1 {
+		t.Fatalf("files = %+v", files)
+	}
+	golden := filepath.Join(goldenRoot, "ci", files[0].Path)
+	if *update {
+		if err := os.MkdirAll(filepath.Dir(golden), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(golden, files[0].Data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want, err := os.ReadFile(golden)
+	if err != nil {
+		t.Fatalf("%v (run with -update to write it)", err)
+	}
+	if !bytes.Equal(files[0].Data, want) {
+		t.Errorf("the workflow differs from %s; run with -update and review the diff", golden)
+	}
+	if n := strings.Count(string(want), "name: Install superschematic-migrate 1.2.3"); n != 2 {
+		t.Errorf("%d jobs install the migration runner, want the two deploy jobs", n)
+	}
+	if bin, err := exec.LookPath("actionlint"); err == nil {
+		if out, err := exec.Command(bin, "-no-color", golden).CombinedOutput(); err != nil {
+			t.Errorf("actionlint %s: %v\n%s", golden, err, out)
+		}
 	}
 }

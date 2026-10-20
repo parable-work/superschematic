@@ -187,6 +187,11 @@ type (
 	// step (D46).
 	MigrationPreparer = registry.MigrationPreparer
 
+	// A target's MigrationRunner that is a DeployingMachineMigrations runs
+	// superschematic-migrate on the deploying machine, so a generated CI
+	// job that deploys a database installs the runner (D64).
+	DeployingMachineMigrations = registry.DeployingMachineMigrations
+
 	// A target's SitePublisher puts a site's files and its config for a
 	// run where the site's platform serves them (SitePublishRequest, D55).
 	SitePublisher      = registry.SitePublisher

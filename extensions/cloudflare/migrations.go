@@ -73,9 +73,15 @@ type migrateTarget struct {
 type migrationRunner struct{ ext Extension }
 
 var (
-	_ registry.MigrationRunner   = migrationRunner{}
-	_ registry.MigrationPreparer = migrationRunner{}
+	_ registry.MigrationRunner            = migrationRunner{}
+	_ registry.MigrationPreparer          = migrationRunner{}
+	_ registry.DeployingMachineMigrations = migrationRunner{}
 )
+
+// MigratesOnTheDeployingMachine marks the runner as one the deploying
+// machine runs, so a generated CI job that deploys a D1 database installs
+// superschematic-migrate.
+func (migrationRunner) MigratesOnTheDeployingMachine() {}
 
 // PrepareMigrations refuses, before a deploy changes anything, a run whose
 // phases could not migrate: without the runner, or without a token.
