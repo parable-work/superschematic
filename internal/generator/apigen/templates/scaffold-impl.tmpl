@@ -98,8 +98,8 @@ import (
 // Returns:
 {{- if .Endpoint.Page }}
 //   - {{ .Endpoint.GoResultType }}: the page's items and the cursor of the next page, nil after the last
-{{- else if .Endpoint.OutputIsArray }}
-//   - {{ .Endpoint.OutputGoListType }}: Success response
+{{- else if or .Endpoint.OutputIsMap .Endpoint.OutputIsArray }}
+//   - {{ .Endpoint.GoResultType }}: Success response
 {{- else }}
 //   - *{{ .Endpoint.OutputGoType }}: Success response
 {{- end }}

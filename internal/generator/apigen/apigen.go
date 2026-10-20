@@ -165,6 +165,14 @@ type EndpointInfo struct {
 	// OutputIsArrayOfArrays marks a T[][] response; OutputIsArray is also
 	// set. OutputArrayDepth and OutputGoListType read both flags.
 	OutputIsArrayOfArrays bool
+	// OutputIsMap marks a Record<string, T> response (map[string]T), or,
+	// with OutputIsArray, Record<string, T[]> (map[string][]T): a JSON
+	// object whose values are the output at OutputArrayDepth.
+	OutputIsMap bool
+	// OutputNullable marks a response that may be null (Nullable<T>, an
+	// operation that is not required). An operation without a result
+	// (OutputType "") is not marked: it always answers null.
+	OutputNullable bool
 	// OutputAnyJSON and OutputStructuredJSON describe an output scalar
 	// whose value is a JSON value, as BodyArg.AnyJSON and
 	// BodyArg.StructuredJSON describe an argument's: a Generic.JSON output
@@ -269,6 +277,12 @@ func (e EndpointInfo) OutputArrayDepth() int {
 // response.
 func (e EndpointInfo) OutputGoListType() string {
 	return goListType(e.OutputGoType, e.OutputArrayDepth())
+}
+
+// OutputGoMapType is the Go type of a map response: map[string] of
+// OutputGoListType, the value at its list levels.
+func (e EndpointInfo) OutputGoMapType() string {
+	return "map[string]" + e.OutputGoListType()
 }
 
 // APIOutput contains everything needed to render the generated API module.
@@ -1135,6 +1149,8 @@ func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *
 		OutputGoType:                 outputGoType,
 		OutputIsArray:                op.TypeRef.IsArray,
 		OutputIsArrayOfArrays:        op.TypeRef.IsArrayOfArrays,
+		OutputIsMap:                  op.TypeRef.IsMap,
+		OutputNullable:               op.TypeRef.Name != "" && !op.Required,
 		OutputAnyJSON:                outputScalar.IsAnyJSON(),
 		OutputStructuredJSON:         outputScalar.StructuredJSONType(),
 		PathParams:                   pathParams,

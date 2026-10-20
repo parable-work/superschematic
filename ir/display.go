@@ -29,9 +29,9 @@ type TypeDisplay struct {
 	// ticket".
 	CreateLabel string `json:"createLabel,omitempty" yaml:"createLabel,omitempty"`
 
-	// Icon names the glyph a UI shows beside the type's name, as a field's
-	// and an operation's @icon do (D48, amended): "receipt". The core
-	// accepts any name; an icon set is an extension's check.
+	// Icon names the glyph a UI shows beside the type's name (D48,
+	// amended): "receipt", a name for an app's icon set to draw, matching
+	// DisplayIconName. Which names a set draws is an extension's check.
 	Icon string `json:"icon,omitempty" yaml:"icon,omitempty"`
 
 	// SummaryFields name the fields that summarize an instance in a list,
@@ -87,11 +87,18 @@ func DisplayTones() []DisplayTone {
 // letters, digits, `_` and `-`, as a Workflow config's states are.
 var DisplayStateName = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]*$`)
 
+// DisplayIconName is a type display's icon (D48, amended): a letter or a
+// digit, then letters, digits, ".", "_", ":", "/" and "-", as in
+// "receipt", "mdi:receipt" or "solid/box". Its classes are ASCII and
+// explicit, so the schema-file JSON Schema's pattern, which is this one,
+// reads the same in Go's RE2, an ECMAScript engine such as Ajv's and the
+// Rust regex crate.
+var DisplayIconName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/-]*$`)
+
 // ValidateTypeDisplay checks a display's shape, as the JSON Schema of
 // @display's argument does, for IR built without a frontend, and returns
 // the first problem: at least one member, every text non-blank, an icon
-// unpadded, each
-// summary field named once, a state name per states key with a known tone
+// that is an icon name (DisplayIconName), each summary field named once, a state name per states key with a known tone
 // and at least one member, and a state name per transitions key, each
 // holding at least one transition. Whether
 // the fields and states it names exist is the loader's check, which reads
@@ -114,12 +121,8 @@ func ValidateTypeDisplay(d *TypeDisplay) error {
 	text("plural", d.Plural)
 	text("titleField", d.TitleField)
 	text("createLabel", d.CreateLabel)
-	if d.Icon != "" {
-		if strings.TrimSpace(d.Icon) == "" {
-			errs = append(errs, errors.New("display icon must be non-blank"))
-		} else if strings.TrimSpace(d.Icon) != d.Icon {
-			errs = append(errs, errors.New("display icon must not contain surrounding whitespace"))
-		}
+	if d.Icon != "" && !DisplayIconName.MatchString(d.Icon) {
+		errs = append(errs, fmt.Errorf("display icon %q is not an icon name (a letter or a digit, then letters, digits, ., _, :, / and -)", d.Icon))
 	}
 	if d.SummaryFields != nil && len(d.SummaryFields) == 0 {
 		errs = append(errs, errors.New("display summaryFields must list a field"))

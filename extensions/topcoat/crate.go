@@ -240,6 +240,21 @@ func operationOf(e registry.RustEndpoint) operation {
 	return op
 }
 
+// ServiceOnlyGuardDoc is the doc of a @requireService operation's guard
+// in operations.rs, which refuses an end user as the route refuses a
+// request without a service credential (D37, amended). It names the
+// service caller's guard, `as_service(caller).can_<op>`, only where
+// AsService has one: an operation without an in-process call, a manual
+// one say, has neither its call nor its guard there, and the line after
+// the doc says why it has no call.
+func (o operation) ServiceOnlyGuardDoc() string {
+	doc := fmt.Sprintf("Admits the caller of %s.%s as its route admits a request without a service credential: the route admits only a service caller (@requireService), so an end user is refused 401 `service_unauthorized`, signed in or not", o.Namespace, o.Name)
+	if o.NoCall != "" {
+		return doc + " (D37, amended)."
+	}
+	return doc + fmt.Sprintf(". `as_service(caller).can_%s(cx)` admits a service caller (D37, amended).", o.SnakeName)
+}
+
 // ServiceGuardDoc is the doc of the operation's guard in AsService: how
 // its route admits a service caller, then what it asks of the end user
 // the service forwards (D37, amended).
@@ -744,16 +759,6 @@ func (c *crate) LayersTakeLimits() bool {
 // adds the layers that apply them (`references::route_controls`).
 func (c *crate) ControlledPicks() bool {
 	return c.References != nil && len(c.References.PickControlled()) > 0
-}
-
-// RateLimited reports whether a procedure, a page or a picker's shard
-// meets a route's rate limit, so `<service>(...)` hands their layers the
-// registry and lib.rs declares `client_key`, by which each counts a
-// client.
-func (c *crate) RateLimited() bool {
-	pages := c.ControlledPages() && (c.Pages.ControlsUse("rate_limit") || c.Pages.ControlsUse("rate_from"))
-	picks := c.ControlledPicks() && (c.References.PicksUse("rate_limit") || c.References.PicksUse("rate_from"))
-	return c.ControlsUse("rate_limit") || pages || picks
 }
 
 // ControlsUse reports whether a procedure's route has the control

@@ -84,6 +84,41 @@ func TestDisplayDecorator(t *testing.T) {
 		}
 	}
 
+	// An icon is an icon name, by one explicit pattern in the spec and in
+	// Go (ir.DisplayIconName), so every engine reads it alike: no \s or
+	// "." that RE2, Ajv and Rust read apart.
+	var args struct {
+		Defs map[string]struct {
+			Properties map[string]struct {
+				Pattern string `json:"pattern"`
+			} `json:"properties"`
+		} `json:"$defs"`
+	}
+	if err := json.Unmarshal(spec.Args, &args); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := args.Defs["TypeDisplay"].Properties["icon"].Pattern, ir.DisplayIconName.String(); got != want {
+		t.Fatalf("the spec's icon pattern = %q, want ir.DisplayIconName's %q", got, want)
+	}
+	for icon, ok := range map[string]bool{
+		"receipt": true, "mdi:receipt": true, "solid/box": true, "file-text": true, "ic_box": true, "2fa": true, "x.svg": true,
+		"": false, " ": false, " ticket": false, "ticket ": false, "ticket\n": false, "a\rb": false, "a\u2028b": false,
+		"\ufeffticket": false, "\u00a0ticket": false, "ticket\u00a0": false, "a b": false, "-ticket": false, ".ticket": false,
+		"tick\u00e9t": false, "a\tb": false,
+	} {
+		err := spec.ValidateArgs([]any{map[string]any{"icon": icon}})
+		if (err == nil) != ok {
+			t.Errorf("ValidateArgs of the icon %q = %v, want ok %v", icon, err, ok)
+		}
+		if icon == "" {
+			continue // an empty icon is absent in the IR
+		}
+		goErr := ir.ValidateTypeDisplay(&ir.TypeDisplay{Icon: icon})
+		if (goErr == nil) != ok {
+			t.Errorf("ir.ValidateTypeDisplay of the icon %q = %v, want ok %v", icon, goErr, ok)
+		}
+	}
+
 	// An icon alone is a display.
 	alone := &ir.TypeDef{Name: "Order"}
 	if err := spec.ValidateArgs([]any{map[string]any{"icon": "receipt"}}); err != nil {

@@ -1403,6 +1403,12 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 		// The page is the envelope's data, {items, next}: nil items are [] and
 		// no next is null.
 		RespondJSONEnvelope(w, gohttp.StatusOK, result, r)
+		{{- else if .OutputIsMap }}
+		// A nil map is sent as {}, as a nil list is sent as [].
+		if result == nil {
+			result = {{ .GoResultType }}{}
+		}
+		RespondJSONEnvelope(w, gohttp.StatusOK, result, r)
 		{{- else if .OutputIsArray }}
 		RespondCollectionEnvelope(w, gohttp.StatusOK, result, r)
 		{{- else }}

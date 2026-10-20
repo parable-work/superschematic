@@ -82,7 +82,7 @@ pub async fn stock_list_shipments(cx: &Cx) -> Result<Vec<types::Shipment>, ApiEr
         .await
 }
 
-/// stock.releaseReservation (`POST /api/stock/reservations/{id}/release`): Releases a reservation, for a signed-in user or a service.
+/// stock.releaseReservation (`POST /api/stock/reservations/{id}/release`): Releases a reservation, for a signed-in user or fixture-api's server.
 /// A service caller its route's `from` lists calls it through
 /// `as_service(caller)`, standing in for the end user (@allowService, D37,
 /// amended).
@@ -214,7 +214,7 @@ impl AsService<'_> {
         crate::admit_as(cx, &operations::STOCK_REINDEX_STOCK, self.caller).await
     }
 
-    /// stock.releaseReservation (`POST /api/stock/reservations/{id}/release`), called as a service: Releases a reservation, for a signed-in user or a service.
+    /// stock.releaseReservation (`POST /api/stock/reservations/{id}/release`), called as a service: Releases a reservation, for a signed-in user or fixture-api's server.
     pub async fn stock_release_reservation(&self, cx: &Cx, args: crate::api::StockReleaseReservationArgs) -> Result<types::Reservation, ApiError> {
         let caller = self.can_stock_release_reservation(cx).await?;
         args.check()?;

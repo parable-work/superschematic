@@ -14,7 +14,9 @@ import (
 // structs, so the TypeScript frontend, the data forms, `superschematic
 // json-schema` and the strict loader an engine runs check one schema. A
 // state name, a states key or either key of transitions, is a Workflow
-// state's (ir.DisplayStateName).
+// state's (ir.DisplayStateName), and an icon is an icon name
+// (ir.DisplayIconName), each pattern with explicit classes, so Go, Ajv and
+// Rust read it alike.
 var displayArgs = json.RawMessage(`{
 	"$ref": "#/$defs/TypeDisplay",
 	"$defs": {
@@ -28,7 +30,7 @@ var displayArgs = json.RawMessage(`{
 				"plural": {"description": "What to call several.", "type": "string", "pattern": "\\S"},
 				"titleField": {"description": "The field whose value is an instance's title: one of the type's own, a single text value.", "type": "string", "minLength": 1},
 				"createLabel": {"description": "What a button that creates an instance says.", "type": "string", "pattern": "\\S"},
-				"icon": {"description": "The glyph a UI shows beside the type's name, by a name an app's icon set draws.", "type": "string", "pattern": "^\\S(.*\\S)?$"},
+				"icon": {"description": "The glyph a UI shows beside the type's name, by a name an app's icon set draws: a letter or a digit, then letters, digits, ., _, :, / and -.", "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$"},
 				"summaryFields": {"description": "The fields that summarize an instance in a list, in order: the type's own, by name, or fields its behaviors add, by qualified name (Workflow.status).", "type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
 				"states": {"description": "Labels of states of the type's Workflow, by state.", "type": "object", "minProperties": 1, "propertyNames": {"pattern": "^[A-Za-z][A-Za-z0-9_-]*$"}, "additionalProperties": {"$ref": "#/$defs/DisplayState"}},
 				"transitions": {"description": "Labels of transitions of the type's Workflow, by the state a transition leaves, then by the state it enters.", "type": "object", "minProperties": 1, "propertyNames": {"pattern": "^[A-Za-z][A-Za-z0-9_-]*$"}, "additionalProperties": {"type": "object", "minProperties": 1, "propertyNames": {"pattern": "^[A-Za-z][A-Za-z0-9_-]*$"}, "additionalProperties": {"type": "string", "pattern": "\\S"}}}

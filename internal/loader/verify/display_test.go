@@ -176,4 +176,24 @@ func TestFieldDisplaysVerify(t *testing.T) {
 	if want := "src/login.schema.json: type LoginInput: field password takes @display multiline, but it is secret, a password input"; strings.Join(got, "\n") != want {
 		t.Fatalf("errors:\n%s\nwant:\n%s", strings.Join(got, "\n"), want)
 	}
+
+	// So are a configurable trait's config fields, which Schema.Validate
+	// holds to a field display's shape.
+	schema = displaySchema(nil)
+	schema.Types["Auditable"] = &ir.TypeDef{Name: "Auditable", Owner: "src/auditable.schema.json", Role: ir.RoleTrait, TraitConfig: &ir.TraitConfigSchema{Fields: []*ir.FieldDef{
+		{Name: "note", TypeRef: ir.TypeRef{Name: "string"}, Display: &ir.FieldDisplay{Multiline: &yes}},
+		{Name: "level", TypeRef: ir.TypeRef{Name: "Generic.Int64"}, Display: &ir.FieldDisplay{Multiline: &yes}},
+		{Name: "secret", TypeRef: ir.TypeRef{Name: "string"}, Secret: true, Display: &ir.FieldDisplay{Multiline: &no}},
+	}}}
+	got = nil
+	for _, d := range Run(schema, Input{Registry: reg}).Errors {
+		got = append(got, d.Error())
+	}
+	want := []string{
+		"src/auditable.schema.json: type Auditable: trait config field level takes @display multiline, which is for text, but it is Generic.Int64",
+		"src/auditable.schema.json: type Auditable: trait config field secret takes @display multiline, but it is secret, a password input",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("errors:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
 }

@@ -19,6 +19,10 @@ pub const DEFAULT_OPENAPI_BASE_URL: &str = "http://localhost:8080";
 
 /// What a generated server's `build_router_with` mounts beside its routes,
 /// and the rate limiters its routes take.
+///
+/// Two options are equal when their fields are and they share one
+/// registry: `RateLimits` compares by identity, so a clone of an options
+/// value is equal to it, while two `RouterOptions::default()` are not.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RouterOptions {
     /// Serve the OpenAPI document at `GET /api/openapi.json` and its RapiDoc
@@ -181,6 +185,25 @@ mod tests {
         let without_info: Value =
             serde_json::from_str(&openapi_document(r#"{"info":7}"#, "1.0.0", "x")).unwrap();
         assert_eq!(without_info["info"], json!({"version": "1.0.0"}));
+    }
+
+    #[test]
+    fn options_are_equal_when_they_share_their_registry() {
+        let options = RouterOptions::default();
+        assert_eq!(options, options.clone());
+        assert_ne!(RouterOptions::default(), RouterOptions::default());
+        let shared = RouterOptions {
+            serve_openapi: false,
+            ..options.clone()
+        };
+        assert_ne!(options, shared, "the fields still count");
+        assert_eq!(
+            options,
+            RouterOptions {
+                serve_openapi: true,
+                ..shared
+            }
+        );
     }
 
     #[test]

@@ -61,7 +61,7 @@ export abstract class Ticket {`
 // TypeScript to IR to TypeScript, JSON and YAML and back to equal IR. The
 // TypeScript writer puts the @title tag on a line of its own after the
 // member's comment, so a reread keeps the comment's lines in order; and it
-// refuses a comment line the reader would take for a tag.
+// refuses a comment that holds the tag, which the reader would refuse.
 func TestEnumTitlesRoundTrip(t *testing.T) {
 	schema, err := loader.LoadService(tsFixtures + "/fixture-display")
 	if err != nil {
@@ -73,7 +73,7 @@ func TestEnumTitlesRoundTrip(t *testing.T) {
 	}
 	// Title every member, one with a comment of two lines.
 	priority.Values[0].Title = "Whenever"
-	priority.Values[0].Comment = "No rush.\nSome @title text that is no tag."
+	priority.Values[0].Comment = "No rush.\nSome @titles text that is no tag."
 	dir := t.TempDir()
 	if _, err := WriteService(schema, FormatTS, dir); err != nil {
 		t.Fatalf("WriteService: %v", err)
@@ -84,7 +84,7 @@ func TestEnumTitlesRoundTrip(t *testing.T) {
 	}
 	want := `export enum Priority {
   // No rush.
-  // Some @title text that is no tag.
+  // Some @titles text that is no tag.
   /** @title Whenever */
   Low = "low",
   // Within the week.
@@ -103,14 +103,20 @@ func TestEnumTitlesRoundTrip(t *testing.T) {
 		}
 	}
 
-	tagged := &schemafile.Document{Name: "fixture", Kind: ir.SchemaKindGeneral, Enums: map[string]*ir.EnumDef{
-		"Priority": {Name: "Priority", Values: []ir.EnumValueDef{{Name: "Low", Comment: "Not urgent.\n@title Whenever"}}},
-	}}
-	if _, err := Write(tagged, FormatTS); err == nil || !strings.Contains(err.Error(), "enum Priority.Low: a comment line that begins with @title has no TypeScript authoring form") {
-		t.Fatalf("Write(ts) of a comment line that is a tag = %v", err)
+	for _, comment := range []string{"Not urgent.\n@title Whenever", "Says @title in passing.", "Not urgent (@title:Whenever)."} {
+		tagged := &schemafile.Document{Name: "fixture", Kind: ir.SchemaKindGeneral, Enums: map[string]*ir.EnumDef{
+			"Priority": {Name: "Priority", Values: []ir.EnumValueDef{{Name: "Low", Comment: comment}}},
+		}}
+		if _, err := Write(tagged, FormatTS); err == nil || !strings.Contains(err.Error(), "enum Priority.Low: a comment that holds @title has no TypeScript authoring form") {
+			t.Fatalf("Write(ts) of the comment %q, which holds the tag = %v", comment, err)
+		}
 	}
-	tagged.Enums["Priority"].Values[0].Comment = "Not urgent.\n@titles are fine"
-	if _, err := Write(tagged, FormatTS); err != nil {
-		t.Fatalf("Write(ts) of a comment line that is no tag = %v", err)
+	for _, comment := range []string{"Not urgent.\n@titles are fine", "Mail a@title.example.", "@title-case is no tag."} {
+		tagged := &schemafile.Document{Name: "fixture", Kind: ir.SchemaKindGeneral, Enums: map[string]*ir.EnumDef{
+			"Priority": {Name: "Priority", Values: []ir.EnumValueDef{{Name: "Low", Comment: comment}}},
+		}}
+		if _, err := Write(tagged, FormatTS); err != nil {
+			t.Fatalf("Write(ts) of the comment %q, which holds no tag = %v", comment, err)
+		}
 	}
 }

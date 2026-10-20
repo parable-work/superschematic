@@ -223,34 +223,69 @@ values:
 
 A member without a title is labeled by its name in words ("On hold" for
 `OnHold`). The reader reads the tag only from a `/** */` comment on an
-enum's member, its own enums' and a dependency's. Anywhere else a
-`@title` line is comment text. These fail the load:
+enum's member, its own enums' and a dependency's, as the first word of a
+line, after the line's `*`. The title is the rest of that line. The
+lines after it, up to the comment's next tag or its end, must be blank,
+so put the member's comment above the tag. The reader reads every
+comment on a member for the tag, and refuses one it would not read as
+the member's whole title: a tag in a `//` or `/* */` comment, a tag that
+is not the first word of its line, a tag on a member with a second
+`/** */` comment, a tag that wraps, an empty tag and a second tag. A word
+that only begins with `@title`, such as `@titles` or `@title-case`, is
+comment text. Anywhere but on an enum's member, a `@title` line is
+comment text. These fail the load:
 
 ```
 src/orders.schema.ts: enum OrderStatus member OnHold: @title needs the member's title after it
+src/orders.schema.ts: enum OrderStatus member OnHold: @title needs a space before the member's title
 src/orders.schema.ts: enum OrderStatus member OnHold: @title is given twice
+src/orders.schema.ts: enum OrderStatus member OnHold: @title must fit on its line
 src/orders.schema.ts: enum OrderStatus member OnHold: @title is read from a JSDoc comment (/** @title … */), not a // or /* */ comment
+src/orders.schema.ts: enum OrderStatus member OnHold: @title must begin a line of the member's JSDoc comment
+src/orders.schema.ts: enum OrderStatus member OnHold: @title is read from the member's only JSDoc comment, and it has more than one
 ```
 
-In every form, a title must be non-blank, have no surrounding whitespace,
+For example, a title that wraps onto a second line fails, where a reader
+that stopped at the line's end would have read "Picked and":
+
+```ts
+  /**
+   * @title Picked and
+   *   packed
+   */
+  Fulfilled = "fulfilled",
+```
+
+In every form, a title must be non-blank, start and end with no space,
 fit on one line and not contain `*/`, so the TypeScript comment can hold
-it. It must also differ, ignoring case, from every other member's title
-in the enum, so a select's options can be told apart:
+it. It holds no ASCII control character, a tab included, and no U+2028
+or U+2029, which TypeScript reads as line breaks. The JSON Schema of the
+data forms says this with one pattern beside `"not": {"pattern":
+"\\*/"}`, written with no `\s` or `.`, so Go's, an ECMAScript engine's and
+Rust's regular expressions reach one verdict, and `Schema.Validate`
+holds the IR to the same rule. A title must also differ, ignoring case,
+from every other member's title in the enum, so a select's options can
+be told apart. No JSON Schema keyword can say that, so only Go holds it:
+`Schema.Validate`, which the loader runs on every form:
 
 ```
 enum OrderStatus member OnHold: title must be non-blank
 enum OrderStatus member OnHold: title must not contain surrounding whitespace
 enum OrderStatus member OnHold: title must be one line
+enum OrderStatus member OnHold: title must not contain the control character U+0009
 enum OrderStatus member OnHold: title must not contain */
 enum OrderStatus: members OnHold and Shipped share the title "Shipped"
 ```
 
 The TypeScript writer (`format`) writes the tag on a line of its own
-after the member's comment. A title changes no generated code, and the
-OpenAPI document and the tool manifests leave it out, as they leave out
-a field's title. The engine's schema document carries it. The Topcoat
-extension's forms, filters and display components label a member by its
-title ([Pages with Topcoat](/superschematic/guides/topcoat/)).
+after the member's comment, and refuses a member's comment that holds
+the tag, which the reader would refuse. A title changes no generated
+code, and the OpenAPI document and the tool manifests leave it out, as
+they leave out a field's title. The engine's schema document carries it.
+The Topcoat extension's forms, filters and display components label a
+member by its title, and its build log warns when two members of an enum
+take one label, such as a title that is another member's name in words
+([Pages with Topcoat](/superschematic/guides/topcoat/)).
 
 ## `@display` on a type
 
@@ -298,7 +333,7 @@ export abstract class Ticket {
 | `noun`, `plural` | what to call one instance and several; non-blank |
 | `titleField` | the field whose value is an instance's title: one of the type's own fields, holding a single text value (`string`, or a scalar whose values are strings, such as `Identity.Name`; not a list, a map, a number, an enum or a JSON scalar), neither `Secret` nor `@uiHidden` |
 | `createLabel` | what a button that creates an instance says; non-blank |
-| `icon` | the glyph a UI shows beside the type's name, as a field's and an operation's `@icon` do; non-blank, with no surrounding whitespace; any name (see [Rules an extension adds](#rules-an-extension-adds)) |
+| `icon` | the glyph a UI shows beside the type's name, by a name for the app's icon set to draw: a letter or a digit, then letters, digits, `.`, `_`, `:`, `/` and `-` (`receipt`, `mdi:receipt`, `solid/box`); which names a set draws is an extension's check (see [Rules an extension adds](#rules-an-extension-adds)) |
 | `summaryFields` | the fields that summarize an instance in a list, in order, each once: the type's own fields, by name, neither secret nor hidden, or fields its behaviors add, by qualified name, the behavior's name, a dot and the field's (`Workflow.status`), as a read returns them under the behavior's name |
 | `states` | a label per `Workflow` state: `label`, `activeForm` (the present-progressive form a UI shows while an instance is in the state, "Implementing") and `tone`, at least one of the three |
 | `transitions` | a label per `Workflow` transition, by the state it leaves, then the state it enters |
@@ -310,7 +345,14 @@ colors: `muted` (nothing happens in it), `active` (work is under way),
 Every key is optional, but `@display({})` is an error, and a type takes
 one `@display`. Any one key is a display: `@display({ icon: "receipt" })`
 alone gives a type its icon. A type's icon is its `@display`'s alone: the
-`@icon` on its list operation is that operation's MCP tool's icon. `states` and `transitions` label the type's `Workflow`
+`@icon` on its list operation is that operation's MCP tool's icon. The
+icon's rule is one pattern, `^[A-Za-z0-9][A-Za-z0-9._:/-]*$`, in the
+JSON Schema and in the IR's check, with no `\s` or `.` that Go's, an
+ECMAScript engine's and Rust's regular expressions read apart, so every
+form and every engine refuses the same names: a space, a tab, a line
+break, a no-break space or a byte order mark anywhere in it fails
+(`display icon "a b" is not an icon name (a letter or a digit, then
+letters, digits, ., _, :, / and -)`). `states` and `transitions` label the type's `Workflow`
 behavior, so a type that does not compose `Workflow` takes neither, and
 each state and transition must be one its config lists. The loader checks
 every rule in every form, and the engine checks them again when a schema

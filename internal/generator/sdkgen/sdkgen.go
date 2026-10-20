@@ -87,6 +87,13 @@ type EndpointInfo struct {
 	// OutputIsArrayOfArrays marks a T[][] response; OutputIsArray is also
 	// set.
 	OutputIsArrayOfArrays bool
+	// OutputIsMap marks a Record<string, T> response, or, with
+	// OutputIsArray, Record<string, T[]>: each value is parsed as a
+	// response of the output at its list levels is.
+	OutputIsMap bool
+	// OutputNullable marks a response that may be null (Nullable<T>),
+	// typed T | null and not parsed when null.
+	OutputNullable bool
 }
 
 // ScalarArg is an argument of an endpoint without an input type: a body
@@ -510,6 +517,8 @@ func convertEndpoint(ep apigen.EndpointInfo, parseableTypes map[string]bool) End
 		HasOutputParser:  hasOutputParser,
 
 		OutputIsArrayOfArrays: ep.OutputIsArrayOfArrays,
+		OutputIsMap:           ep.OutputIsMap,
+		OutputNullable:        ep.OutputNullable,
 	}
 }
 
@@ -551,7 +560,8 @@ func (e EndpointInfo) OutputArrayDepth() int {
 
 // TSOutputType is the TypeScript type of the response: the output type
 // with one "[]" per list level ("GridView", "GridView[]", "string[][]"),
-// or a paged endpoint's page of its items ("Page<ItemView>", D60).
+// in a Record<string, ...> for a map, with "| null" when the response may
+// be null, or a paged endpoint's page of its items ("Page<ItemView>", D60).
 func (e EndpointInfo) TSOutputType() string {
 	if e.Page != nil {
 		pageType := e.PageType
@@ -560,9 +570,16 @@ func (e EndpointInfo) TSOutputType() string {
 		}
 		return pageType + "<" + e.TSItemType() + ">"
 	}
-	return codegen.WrapArray(normalizeTSTypeIdentifier(e.OutputType), e.OutputArrayDepth(), func(inner string) string {
+	tsType := codegen.WrapArray(normalizeTSTypeIdentifier(e.OutputType), e.OutputArrayDepth(), func(inner string) string {
 		return inner + "[]"
 	})
+	if e.OutputIsMap {
+		tsType = "Record<string, " + tsType + ">"
+	}
+	if e.OutputNullable {
+		tsType += " | null"
+	}
+	return tsType
 }
 
 // IRTypeToTSType converts an IR type-reference name to a TypeScript type for

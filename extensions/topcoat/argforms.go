@@ -360,7 +360,7 @@ func (s schemaSet) argField(arg *ir.ArgumentDef, param registry.RustParam, locat
 	case ref.IsMap || ref.IsArrayOfArrays || s.objectType(ref.Name) != nil:
 		af.jsonText()
 	case enum != nil:
-		f.Options = enumOptions(enum)
+		f.Options, f.enum = enumOptions(enum), enum
 		f.Kind, f.Control, f.Read = kindValue, "select", "text"
 		if ref.IsArray {
 			f.Kind = kindGroup

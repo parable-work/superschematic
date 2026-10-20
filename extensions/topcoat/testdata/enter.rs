@@ -4,10 +4,18 @@
 //! first submit control in tree order whose form owner is the form. Every
 //! form a page renders must have one, and it must submit the form as such:
 //! no `name`, so no `_action`, and no `formaction`, `formmethod`,
-//! `formenctype`, `formtarget`, `formnovalidate` or `disabled`. No form
-//! nests another, whose start tag the HTML parser drops, and no control
-//! names its form with `form=`, so tree order is the whole rule.
+//! `formenctype`, `formtarget`, `formnovalidate` or `disabled`, and no
+//! `<fieldset disabled>` around it but in that fieldset's first `<legend>`
+//! child, which disables it as its own `disabled` would. No form nests
+//! another, whose start tag the HTML parser drops, and no control names
+//! its form with `form=`, so tree order is the whole rule. A `<template>`'s
+//! contents are a fragment of their own, out of the page's forms, and the
+//! rule holds in it as it does in the page: a script that puts them into
+//! the page puts in what the parser read.
 //!
+//! The file ships with neither the extension nor the crate it writes. The
+//! extension's tests copy it into each crate they test as
+//! `tests/support/enter.rs`; an app's tests copy it from the repository.
 //! A test declares `#[path = "support/enter.rs"] mod enter;` and calls
 //! `enter::check_page(uri, &headers, &body)` on every answer it reads, or
 //! `enter::assert_enter_submits(uri, &html)` on a page it knows is HTML.
@@ -145,44 +153,126 @@ const NOT_DEFAULT: &[&str] = &[
     "disabled",
 ];
 
+/// The elements that hold nothing and take no end tag.
+const VOID: &[&str] = &[
+    "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr",
+];
+
+/// An element open where the scan is, by its tag's index: for a fieldset,
+/// whether a `<legend>` child has opened in it yet; for a legend, whether
+/// it is its fieldset's first legend child.
+struct Open {
+    tag: usize,
+    legend_seen: bool,
+    first_legend: bool,
+}
+
+/// A tree the rule reads on its own: the page, or a `<template>`'s
+/// contents. `form` is the form open in it, and `first` that form's first
+/// submit control, with the disabled fieldset that disables it, if one
+/// does.
+#[derive(Default)]
+struct Fragment {
+    open: Vec<Open>,
+    form: Option<usize>,
+    first: Option<(usize, Option<usize>)>,
+}
+
 /// Panics, naming `page` and the form's start tag, when a form of `html`
 /// breaks the rule: it nests another form, it has no submit control, or
 /// its first one is not a default button; or a control names its form.
+/// The forms of a `<template>`'s contents are read as their own fragment's.
 pub fn assert_enter_submits(page: &str, html: &str) {
     let tags = tags(html);
-    let mut open: Option<&Tag> = None;
-    let mut first: Option<&Tag> = None;
-    for tag in &tags {
-        if tag.name == "form" {
+    let mut fragments = vec![Fragment::default()];
+    for (at, tag) in tags.iter().enumerate() {
+        if tag.name == "template" {
             if !tag.end {
-                if let Some(form) = open {
-                    panic!(
-                        "{page}: the form {} holds another, {}, whose start tag the HTML parser drops",
-                        form.source, tag.source
-                    );
-                }
-                open = Some(tag);
-            } else if let Some(form) = open.take() {
-                check(page, form, first.take());
+                fragments.push(Fragment::default());
+            } else if fragments.len() > 1 {
+                let fragment = fragments.pop().unwrap_or_default();
+                finish(page, &tags, &fragment);
             }
             continue;
         }
+        let fragment = fragments.last_mut().expect("the page's fragment");
         if tag.end {
+            if tag.name == "form"
+                && let Some(form) = fragment.form.take()
+            {
+                let first = fragment.first.take();
+                check(
+                    page,
+                    &tags[form],
+                    first.map(|(button, fieldset)| (&tags[button], fieldset.map(|at| &tags[at]))),
+                );
+            }
+            // The end tag closes its element and any left open in it.
+            if let Some(i) = fragment.open.iter().rposition(|open| tags[open.tag].name == tag.name) {
+                fragment.open.truncate(i);
+            }
             continue;
         }
-        if let Some(owner) = tag.attr("form") {
-            panic!(
-                "{page}: {} names its form ({owner}), so its place in the tree does not say which form Enter submits",
-                tag.source
-            );
+        if tag.name == "form" {
+            if let Some(form) = fragment.form {
+                panic!(
+                    "{page}: the form {} holds another, {}, whose start tag the HTML parser drops",
+                    tags[form].source, tag.source
+                );
+            }
+            fragment.form = Some(at);
+        } else {
+            if let Some(owner) = tag.attr("form") {
+                panic!(
+                    "{page}: {} names its form ({owner}), so its place in the tree does not say which form Enter submits",
+                    tag.source
+                );
+            }
+            if fragment.form.is_some() && fragment.first.is_none() && is_submit(tag) {
+                fragment.first = Some((at, disabling_fieldset(&tags, &fragment.open)));
+            }
         }
-        if open.is_some() && first.is_none() && is_submit(tag) {
-            first = Some(tag);
+        if !VOID.contains(&tag.name.as_str()) {
+            let mut first_legend = false;
+            if tag.name == "legend"
+                && let Some(parent) = fragment.open.last_mut()
+                && tags[parent.tag].name == "fieldset"
+                && !parent.legend_seen
+            {
+                parent.legend_seen = true;
+                first_legend = true;
+            }
+            fragment.open.push(Open {
+                tag: at,
+                legend_seen: false,
+                first_legend,
+            });
         }
     }
-    if let Some(form) = open {
-        panic!("{page}: the form {} is not closed", form.source);
+    while let Some(fragment) = fragments.pop() {
+        finish(page, &tags, &fragment);
     }
+}
+
+/// Panics when a fragment's end leaves a form open.
+fn finish(page: &str, tags: &[Tag], fragment: &Fragment) {
+    if let Some(form) = fragment.form {
+        panic!("{page}: the form {} is not closed", tags[form].source);
+    }
+}
+
+/// The fieldset of `open`, the elements a control sits in, that disables
+/// it: one with `disabled` whose first legend child does not hold the
+/// control. The legend is the fieldset's child, so it is the next element
+/// open after it.
+fn disabling_fieldset(tags: &[Tag], open: &[Open]) -> Option<usize> {
+    open.iter()
+        .enumerate()
+        .find(|(i, element)| {
+            let tag = &tags[element.tag];
+            tag.name == "fieldset" && tag.attr("disabled").is_some() && !open.get(i + 1).is_some_and(|child| child.first_legend)
+        })
+        .map(|(_, element)| element.tag)
 }
 
 /// `assert_enter_submits` on an answer that is an HTML page, by its
@@ -198,15 +288,22 @@ pub fn check_page(page: &str, headers: &http::HeaderMap, body: &str) {
 }
 
 /// Panics when `first`, the first submit control of `form`, is missing or
-/// is not a default button.
-fn check(page: &str, form: &Tag, first: Option<&Tag>) {
-    let Some(button) = first else {
+/// is not a default button: an attribute of its own, or the fieldset that
+/// disables it.
+fn check(page: &str, form: &Tag, first: Option<(&Tag, Option<&Tag>)>) {
+    let Some((button, fieldset)) = first else {
         panic!("{page}: the form {} has no submit button for Enter to press", form.source);
     };
     if let Some(attr) = NOT_DEFAULT.iter().find(|attr| button.attr(attr).is_some()) {
         panic!(
             "{page}: Enter in the form {} presses its first submit control, {}, which has {attr}: the default button must submit the form as such",
             form.source, button.source
+        );
+    }
+    if let Some(fieldset) = fieldset {
+        panic!(
+            "{page}: Enter in the form {} presses its first submit control, {}, which the fieldset {} disables: the default button must submit the form as such",
+            form.source, button.source, fieldset.source
         );
     }
 }
@@ -296,6 +393,110 @@ mod tests {
         assert_enter_submits(
             "disabled",
             r#"<form method="post"><button type="submit" disabled="">Save</button></form>"#,
+        );
+    }
+
+    #[test]
+    fn a_templates_controls_are_not_the_forms() {
+        assert_enter_submits(
+            "template",
+            concat!(
+                r#"<form method="post"><template><button type="submit" name="_action" value="add:tags">Add</button></template>"#,
+                r#"<button type="submit">Save</button></form>"#,
+            ),
+        );
+    }
+
+    #[test]
+    fn a_form_in_a_template_in_a_form_is_not_nested() {
+        assert_enter_submits(
+            "template",
+            concat!(
+                r#"<form method="post"><template><form method="get"><button type="submit">Go</button></form></template>"#,
+                r#"<button type="submit">Save</button></form>"#,
+            ),
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "has no submit button")]
+    fn a_form_in_a_template_is_held_to_the_rule() {
+        assert_enter_submits(
+            "template",
+            r#"<template><form method="post"><input name="q" type="text"></form></template><form method="get"><button type="submit">Go</button></form>"#,
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "which has name")]
+    fn a_row_button_ahead_of_the_default_in_a_template_fails() {
+        assert_enter_submits(
+            "template",
+            r#"<template><form method="post"><button type="submit" name="_action" value="add:tags">Add</button><button type="submit">Save</button></form></template>"#,
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "is not closed")]
+    fn a_form_a_template_leaves_open_fails() {
+        assert_enter_submits(
+            "template",
+            r#"<template><form method="post"><button type="submit">Save</button></template>"#,
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "which the fieldset <fieldset disabled=\"\"> disables")]
+    fn a_default_in_a_disabled_fieldset_fails() {
+        assert_enter_submits(
+            "fieldset",
+            r#"<form method="post"><fieldset disabled=""><input name="q" type="text"><button type="submit">Save</button></fieldset></form>"#,
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "which the fieldset <fieldset class=\"outer\" disabled> disables")]
+    fn an_inner_fieldset_leaves_an_outer_ones_disabled() {
+        assert_enter_submits(
+            "fieldset",
+            r#"<form method="post"><fieldset class="outer" disabled><fieldset><button type="submit">Save</button></fieldset></fieldset></form>"#,
+        );
+    }
+
+    #[test]
+    fn a_default_in_a_disabled_fieldsets_first_legend_passes() {
+        assert_enter_submits(
+            "fieldset",
+            r#"<form method="post"><fieldset disabled=""><legend>Who <button type="submit">Save</button></legend><input name="q" type="text"></fieldset></form>"#,
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "disables")]
+    fn a_default_in_a_second_legend_fails() {
+        assert_enter_submits(
+            "fieldset",
+            r#"<form method="post"><fieldset disabled=""><legend>Who</legend><legend><button type="submit">Save</button></legend></fieldset></form>"#,
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "disables")]
+    fn a_legend_that_is_no_child_of_the_fieldset_fails() {
+        assert_enter_submits(
+            "fieldset",
+            r#"<form method="post"><fieldset disabled=""><div><legend><button type="submit">Save</button></legend></div></fieldset></form>"#,
+        );
+    }
+
+    #[test]
+    fn a_disabled_fieldset_away_from_the_default_passes() {
+        assert_enter_submits(
+            "fieldset",
+            concat!(
+                r#"<form method="post"><fieldset disabled=""><input name="a" type="text"></fieldset>"#,
+                r#"<button type="submit">Save</button><fieldset disabled><button type="submit">Other</button></fieldset></form>"#,
+            ),
         );
     }
 

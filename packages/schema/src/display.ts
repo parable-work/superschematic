@@ -30,9 +30,10 @@ export interface DisplayConfig {
   /** What a button that creates an instance says: "New ticket". */
   readonly createLabel?: string;
   /**
-   * The glyph a UI shows beside the type's name, as a field's and an
-   * operation's `@icon` do: "receipt". It is a name an app's icon set
-   * draws; which names exist is the app's rule.
+   * The glyph a UI shows beside the type's name: "receipt". It is a name
+   * an app's icon set draws, a letter or a digit, then letters, digits,
+   * `.`, `_`, `:`, `/` and `-` ("mdi:receipt", "solid/box"); which names
+   * exist is the app's rule.
    */
   readonly icon?: string;
   /**

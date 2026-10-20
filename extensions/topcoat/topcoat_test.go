@@ -728,10 +728,145 @@ func TestTheSetupSharesOneRegistry(t *testing.T) {
 // their guards refuse an end user 401 service_unauthorized; a caller the
 // reservation's from lists reserves for the signed-in reader, whom the
 // implementation sees beside it, one it does not list is refused 403, and
-// a signed-out page 401; a service stands in for the reader of the
-// @allowService release; and the reservation's form submits as a service.
+// a signed-out page 401; a service the @allowService release's from lists
+// stands in for the reader, and one it does not list goes on to the
+// end-user step; and the reservation's form submits as a service.
 func TestProceduresKeepTheirRoutesRules(t *testing.T) {
 	cargoTestCrate(t, controlsService, controlsAppTest, `axum = "0.8.9"`)
+}
+
+// serviceCallsService is the extension's own fixture of an API whose
+// operations ask for no end user: three only a service may call
+// (@requireService), one of them on a route the service mounts itself.
+const serviceCallsService = "fixture-service-calls-api"
+
+// TestServiceCallsWithoutAnEndUser builds fixture-service-calls-api, whose
+// crate has no PageAuthenticator: a @requireService operation's guard
+// refuses an end user on the service step alone, and admit_as admits a
+// service caller on it. The manual operation keeps its guard, whose doc
+// names no service caller's guard, since AsService has no call or guard of
+// an operation without an in-process call (D37, amended). cargo clippy and
+// cargo test then run on the crate with serviceCallsAppTest: an end user's
+// guards are refused 401, the listed caller reserves with no end user and
+// an unlisted one is refused 403, any caller reindexes, and the JSON API
+// refuses a request without a service credential.
+func TestServiceCallsWithoutAnEndUser(t *testing.T) {
+	files, _ := readCrate(t, registry.DefaultNaming(), serviceCallsService, rustOutputs())
+	lib, operations := files["lib.rs"], files["operations.rs"]
+	if strings.Contains(lib, "PageAuthenticator") {
+		t.Error("lib.rs has a PageAuthenticator, though no operation asks for an end user")
+	}
+	for _, want := range []string{
+		"async fn admit_as(cx: &Cx, operation: &OperationInfo, service: &ServiceCaller) -> Result<Option<Principal>, ApiError> {\n    let _ = cx;\n    operation.admit_service(Some(service)).map(|_| None)\n}",
+		"pub fn client_key(cx: &Cx) -> String {",
+	} {
+		if !strings.Contains(lib, want) {
+			t.Errorf("lib.rs lacks %q", want)
+		}
+	}
+	for _, want := range []string{
+		"pub async fn can_stock_reindex_stock(cx: &Cx) -> Result<Option<Principal>, ApiError> {\n    let _ = cx;\n    operations::STOCK_REINDEX_STOCK.admit_service(None).map(|_| None)\n}",
+		"pub async fn can_stock_recount_stock(cx: &Cx) -> Result<Option<Principal>, ApiError> {\n    let _ = cx;\n    operations::STOCK_RECOUNT_STOCK.admit_service(None).map(|_| None)\n}",
+		"signed in or not (D37, amended).\n/// It has no in-process call: the service mounts it (@manualRouteRegistration).\npub async fn can_stock_recount_stock(",
+		"`as_service(caller).can_stock_reindex_stock(cx)` admits",
+		"    pub async fn can_stock_reserve_stock(&self, cx: &Cx) -> Result<Option<Principal>, ApiError> {\n        crate::admit_as(cx, &operations::STOCK_RESERVE_STOCK, self.caller).await\n    }",
+	} {
+		if !strings.Contains(operations, want) {
+			t.Errorf("operations.rs lacks %q", want)
+		}
+	}
+	for _, absent := range []string{"as_service(caller).can_stock_recount_stock", "stock_recount_stock(&self", "pub async fn stock_recount_stock("} {
+		if strings.Contains(operations, absent) {
+			t.Errorf("operations.rs has %q, though the manual operation has no in-process call", absent)
+		}
+	}
+	cargoTestCrate(t, serviceCallsService, serviceCallsAppTest)
+}
+
+// controlsCopy is a copy of fixture-controls-api whose schema edit changes.
+func controlsCopy(t *testing.T, edit func(schema string) string) string {
+	t.Helper()
+	dir := filepath.Join(testpaths.TempDir(t), controlsService)
+	for _, file := range []string{"schema.config.yaml", filepath.Join("src", "stock.schema.yaml")} {
+		data, err := os.ReadFile(filepath.Join(serviceDir(controlsService), file))
+		if err != nil {
+			t.Fatal(err)
+		}
+		text := string(data)
+		if strings.HasSuffix(file, "stock.schema.yaml") {
+			edited := edit(text)
+			if edited == text {
+				t.Fatal("the edit changed nothing")
+			}
+			text = edited
+		}
+		path := filepath.Join(dir, file)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
+}
+
+// TestControlsWithoutARateLimitBuild builds fixture-controls-api with its
+// rate limits taken out, so its routes' controls are body limits and
+// timeouts alone: once with the procedures, once with the pages and no
+// procedures. Their layers take no limiter and lib.rs still writes
+// client_key, which each layer names; cargo clippy and cargo test run on
+// each crate.
+func TestControlsWithoutARateLimitBuild(t *testing.T) {
+	dir := controlsCopy(t, func(schema string) string {
+		schema = strings.ReplaceAll(schema, "        middleware: { rateLimit: 2 }\n", "")
+		return strings.ReplaceAll(schema, "rateLimit: 2, ", "")
+	})
+	data, err := os.ReadFile(filepath.Join(dir, "src", "stock.schema.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "rateLimit") {
+		t.Fatalf("the copy keeps a rate limit:\n%s", data)
+	}
+	pages := livePagesOutputs()
+	pages["topcoat"].(map[string]any)["procedures"] = false
+	for _, c := range []struct {
+		name, file string
+		outputs    map[string]any
+	}{
+		{"procedures", "procedures.rs", rustOutputs()},
+		{"pages", "pages.rs", pages},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			root := testpaths.TempDir(t)
+			if _, err := buildDir(t, registry.DefaultNaming(), dir, root, c.outputs, nil); err != nil {
+				t.Fatalf("build: %v", err)
+			}
+			read := func(file string) string {
+				data, err := os.ReadFile(filepath.Join(topcoat.Dir(root, controlsService), "src", file))
+				if err != nil {
+					t.Fatal(err)
+				}
+				return string(data)
+			}
+			layer := read(c.file)
+			for _, want := range []string{".body_limit_megabytes(", ".timeout_seconds(", "limiter.take(&crate::client_key(cx))"} {
+				if !strings.Contains(layer, want) {
+					t.Errorf("%s lacks %q", c.file, want)
+				}
+			}
+			for _, absent := range []string{"rate_limiter(", "RateLimits"} {
+				if strings.Contains(layer, absent) {
+					t.Errorf("%s has %q, though no route has a rate limit", c.file, absent)
+				}
+			}
+			if lib := read("lib.rs"); !strings.Contains(lib, "pub fn client_key(cx: &Cx) -> String {") {
+				t.Errorf("lib.rs lacks client_key:\n%s", lib)
+			}
+			cargoTestCrateWith(t, controlsService, "#[test]\nfn builds() {}\n", crateOptions{outputs: c.outputs, dir: dir})
+		})
+	}
 }
 
 // cargoTestCrate builds service's crates with the Topcoat crate on, adds
@@ -2643,8 +2778,8 @@ async fn reserve_page(cx: &Cx) -> topcoat::Result<impl View> {
     Ok(view! { <p>(said)</p> })
 }
 
-// A release as a service, which the route's empty from lists whatever it
-// serves, then as the end user.
+// A release as the service the route's from lists, then as one it does
+// not list, then as the end user.
 #[page("/stock/release")]
 async fn release_page(cx: &Cx) -> topcoat::Result<impl View> {
     let args = || StockReleaseReservationArgs { id: "r-1".to_owned() };
@@ -2749,13 +2884,27 @@ async fn a_reservation_needs_an_end_user_to_forward() {
 
 #[tokio::test]
 async fn an_allow_service_caller_stands_in_for_the_reader() {
-    // Signed out or in, a service the route lists (its from is empty, so
-    // any) is admitted alone, the implementation seeing no end user, while
-    // the end user's call meets the end-user step.
+    // Signed out or in, the service the route's from lists is admitted
+    // alone, the implementation seeing no end user, while the end user's
+    // call meets the end-user step.
     let (_, body) = page_answer(&app(false), "GET", "/stock/release", "", true).await;
-    assert!(body.contains("service r-1 for - by app, another r-1 for - by app, end user 401 unauthorized"), "{body}");
+    assert!(body.contains("service r-1 for - by app,"), "{body}");
+    assert!(body.contains("end user 401 unauthorized"), "{body}");
     let (_, body) = page_answer(&app(false), "GET", "/stock/release", "", false).await;
-    assert!(body.contains("service r-1 for - by app, another r-1 for - by app, end user r-1 for ada by -"), "{body}");
+    assert!(body.contains("service r-1 for - by app,"), "{body}");
+    assert!(body.contains("end user r-1 for ada by -"), "{body}");
+}
+
+#[tokio::test]
+async fn an_allow_service_caller_from_does_not_list_needs_an_end_user() {
+    // A service the route's from does not list is not refused: it goes on
+    // to the end-user step, as the route sends it on (D37), so a signed-out
+    // page is refused 401 and a signed-in one runs for the reader, the
+    // implementation seeing the reader and the service.
+    let (_, body) = page_answer(&app(false), "GET", "/stock/release", "", true).await;
+    assert!(body.contains("another 401 unauthorized,"), "{body}");
+    let (_, body) = page_answer(&app(false), "GET", "/stock/release", "", false).await;
+    assert!(body.contains("another r-1 for ada by app,"), "{body}");
 }
 
 #[tokio::test]
@@ -2849,6 +2998,119 @@ async fn a_procedure_answers_its_routes_timeout_as_a_problem() {
     let (status, _, body) = post(&app(true), PLACE_ORDER, no_arguments(0), None).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert!(body.contains(r#""err""#) && body.contains(r#""code":"gateway_timeout""#) && body.contains(r#""v":"504""#), "{body}");
+}
+`
+
+// serviceCallsAppTest is tests/app.rs of fixture-service-calls-api's
+// Topcoat crate.
+const serviceCallsAppTest = `use std::sync::Arc;
+
+use async_trait::async_trait;
+use http::request::Parts;
+use schemas_fixture_service_calls_api_topcoat::api::runtime::{ApiError, RequestContext, ServiceAuthenticator, ServiceCaller};
+use schemas_fixture_service_calls_api_topcoat::api::{
+    types, Implementations, StockGetLevelArgs, StockImplementation, StockReserveStockArgs,
+};
+use schemas_fixture_service_calls_api_topcoat::{operations, RouterBuilderFixtureServiceCallsApiExt};
+use topcoat::context::Cx;
+use topcoat::router::{page, to_bytes, Body, Router, RouterBuilderDiscoverExt, StatusCode};
+use topcoat::view::{view, View};
+
+#[path = "support/enter.rs"]
+mod enter;
+
+struct NoServices;
+
+#[async_trait]
+impl ServiceAuthenticator for NoServices {
+    async fn authenticate(&self, _request: &Parts) -> Result<Option<ServiceCaller>, ApiError> {
+        Ok(None)
+    }
+}
+
+struct Stock;
+
+#[async_trait]
+impl StockImplementation for Stock {
+    async fn get_level(&self, _ctx: RequestContext, args: StockGetLevelArgs) -> Result<types::StockLevel, ApiError> {
+        Ok(types::StockLevel { sku: args.sku, on_hand: 3.0 })
+    }
+    async fn reindex_stock(&self, ctx: RequestContext) -> Result<types::StockRun, ApiError> {
+        assert!(ctx.service_caller.is_some(), "an end user reindexed the stock");
+        Ok(types::StockRun { done: true })
+    }
+    async fn reserve_stock(&self, ctx: RequestContext, args: StockReserveStockArgs) -> Result<types::Reservation, ApiError> {
+        assert!(ctx.principal.is_none(), "a reservation forwarded an end user");
+        let by = ctx.service_caller.map_or_else(|| "-".to_owned(), |caller| caller.deployable);
+        Ok(types::Reservation { id: format!("{} x{} by {by}", args.sku, args.quantity) })
+    }
+}
+
+fn app() -> Router {
+    let implementations = Implementations { stock: Arc::new(Stock), service_authenticator: Arc::new(NoServices) };
+    Router::builder().discover().fixture_service_calls_api(implementations).build()
+}
+
+// The service the app acts for, which fixture-api's server is, and one the
+// reservation's from does not list.
+fn listed() -> ServiceCaller {
+    ServiceCaller::in_process("app", ["fixture-api"])
+}
+
+fn unlisted() -> ServiceCaller {
+    ServiceCaller::in_process("app", ["fixture-views-api"])
+}
+
+// What a call answered: what its implementation saw, or the refusal's
+// status and code.
+fn answered<T>(result: Result<T, ApiError>, seen: impl FnOnce(T) -> String) -> String {
+    match result {
+        Ok(value) => seen(value),
+        Err(err) => format!("{} {}", err.status.as_u16(), err.code),
+    }
+}
+
+fn reservation() -> StockReserveStockArgs {
+    StockReserveStockArgs { sku: "sku-1".to_owned(), quantity: 2.0 }
+}
+
+// The guards and calls of the operations, from a page with no end user:
+// the end user's guards of the @requireService operations refuse it, and
+// a service caller is admitted on its service step alone.
+#[page("/stock")]
+async fn stock_page(cx: &Cx) -> topcoat::Result<impl View> {
+    let reindex = answered(operations::can_stock_reindex_stock(cx).await, |_| "admitted".to_owned());
+    let recount = answered(operations::can_stock_recount_stock(cx).await, |_| "admitted".to_owned());
+    let level = answered(operations::stock_get_level(cx, StockGetLevelArgs { sku: "sku-1".to_owned() }).await, |level| level.on_hand.to_string());
+    let (fixture_api, views_api) = (listed(), unlisted());
+    let (as_listed, as_unlisted) = (operations::as_service(&fixture_api), operations::as_service(&views_api));
+    let reindexed = answered(as_unlisted.stock_reindex_stock(cx).await, |run| run.done.to_string());
+    let guard = answered(as_listed.can_stock_reserve_stock(cx).await, |caller| format!("{caller:?}"));
+    let reserved = answered(as_listed.stock_reserve_stock(cx, reservation()).await, |reservation| reservation.id);
+    let refused = answered(as_unlisted.stock_reserve_stock(cx, reservation()).await, |reservation| reservation.id);
+    let said = format!(
+        "end user: reindex {reindex}, recount {recount}, level {level}; service: reindexed {reindexed}, guard {guard}, reserved {reserved}, unlisted {refused}"
+    );
+    Ok(view! { <p>(said)</p> })
+}
+
+#[tokio::test]
+async fn a_service_caller_is_admitted_on_its_service_step_alone() {
+    let request = http::Request::builder().uri("/stock").body(Body::empty()).unwrap();
+    let response = app().handle(request).await;
+    let (status, headers) = (response.status(), response.headers().clone());
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body = String::from_utf8(bytes.to_vec()).unwrap();
+    enter::check_page("/stock", &headers, &body);
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body.contains("end user: reindex 401 service_unauthorized, recount 401 service_unauthorized, level 3;"), "{body}");
+    assert!(body.contains("service: reindexed true, guard None, reserved sku-1 x2 by app, unlisted 403 service_forbidden"), "{body}");
+}
+
+#[tokio::test]
+async fn the_json_api_refuses_a_request_without_a_service_credential() {
+    let request = http::Request::builder().method("POST").uri("/api/stock/reindex").body(Body::empty()).unwrap();
+    assert_eq!(app().handle(request).await.status(), StatusCode::UNAUTHORIZED);
 }
 `
 
