@@ -37,7 +37,12 @@ var dnsToken = stackdeploy.Credential{
 
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
-	ext := &stacktest.Extension{}
+	return newFixtureOf(t, &stacktest.Extension{})
+}
+
+// newFixtureOf is newFixture over ext, which a test configures first.
+func newFixtureOf(t *testing.T, ext *stacktest.Extension) *fixture {
+	t.Helper()
 	reg, err := registry.Assemble(registry.DefaultNaming(), ext)
 	if err != nil {
 		t.Fatal(err)

@@ -77,12 +77,18 @@ var (
 	_ registry.MigrationRunner            = migrationRunner{}
 	_ registry.MigrationPreparer          = migrationRunner{}
 	_ registry.DeployingMachineMigrations = migrationRunner{}
+	_ registry.PrivilegelessMigrations    = migrationRunner{}
 )
 
 // MigratesOnTheDeployingMachine marks the runner as one the deploying
 // machine runs, so a generated CI job that deploys a D1 database installs
 // superschematic-migrate.
 func (migrationRunner) MigratesOnTheDeployingMachine() {}
+
+// GrantsNoPrivileges marks the runner as one whose databases have no
+// roles, so a deploy whose D1 databases' connecting servers alone changed
+// asks for neither the runner nor a token.
+func (migrationRunner) GrantsNoPrivileges() {}
 
 // PrepareMigrations refuses, before a deploy changes anything, a run whose
 // phases could not migrate: without the runner, or without a token.

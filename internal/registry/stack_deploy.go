@@ -268,6 +268,17 @@ type DeployingMachineMigrations interface {
 	MigratesOnTheDeployingMachine()
 }
 
+// PrivilegelessMigrations is a MigrationRunner whose databases have no
+// roles, so the plan of a phase without steps, which the deploy hands the
+// runner when the servers that connect changed, has nothing to grant: the
+// cloudflare target's, on D1 (D64). The deploy prepares such a runner
+// (MigrationPreparer) only for a run with steps to migrate or a phase
+// left pending, not for a change of the servers that connect alone.
+type PrivilegelessMigrations interface {
+	MigrationRunner
+	GrantsNoPrivileges()
+}
+
 // MigrationPreparer is a MigrationRunner that readies, before a deploy
 // changes anything, what each phase it runs will need, and refuses a run
 // it could not migrate: on gcp, the runner's image, which it finds, or
