@@ -4856,7 +4856,9 @@ deployment.
 its size-optimized build; a small Worker's upload is about 2.2 MB, 685 KB
 gzipped. Cloudflare's script limit is 64 MiB on both plans, with no
 compressed limit, since September 2026. Every Worker, servers and jobs
-alike, carries its own copy. Instantiation takes tens of milliseconds
+alike, carries its own copy. acme-shop's storefront uploads `main.js`,
+113 KB (36 KB gzipped), its source map, 563 KB (124 KB), and the module,
+2.2 MB (662 KB): 2.9 MB, 822 KB gzipped. Instantiation takes tens of milliseconds
 against the one-second startup limit, and the first parse of a phone
 number or URL costs about 80 ms once. The deploy logs each version's
 `startupTimeMs`.

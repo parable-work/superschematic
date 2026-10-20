@@ -6688,6 +6688,7 @@ every deploy; and how an example with two stacks runs `stack dev`.
 | `bundle.ts` rewrites the source map's `sources` relative to the server's package. Bun writes them relative to the output directory, which a deploy makes anew, so the same code had a new digest, and a new upload and version, on every deploy. | Building into a fixed directory under the package, which two deploys at once would share. Leaving the source map out of the bundle, which loses Workers' mapped stack traces. |
 | The source map is `linked`, with its `sourceMappingURL` comment. Every WebAssembly module stays external, superscalar's under its own name, `superscalar_wasm_bg.wasm`, which its `workerd` build imports, and bundle.ts copies it from where the build's metafile says it was imported. The refusals of a `node:` or `bun:` import and another WebAssembly module read that metafile, since Bun's browser target swaps a `node:` module for an empty one; Bun's global is found through `define`, a `typeof` test allowed. They apply to every bundle, not to `--check` alone. | Refusing them only under `--check`, which lets a deploy upload what workerd refuses. Reading `node:` imports from the bundle's text, where they leave no trace. Renaming the module `superscalar.wasm` and rewriting the import, a name no other tool expects. |
 | `fetch.ts` imports `cloudflare:workers`, whose `env` the generated `workers.d.ts` declares: TypeScript allows an ambient module only in a file with no import. A build that fails answers the request 503 and builds again on the next. | Types from a Workers types package, a dependency for one declaration. |
+| An API whose config has a `Secret<T>` field loads its config on the isolate's first request alone, from `stackEnvWithSecrets`; the others load theirs at module scope too, so a refused config fails the upload. A Secrets Store secret is read only within a request, and `loadEnvConfig` reads every field. | A module-scope load with a placeholder per secret, which a secret of another type than a string refuses. A loader of the string fields alone, a second loader per API for one check. |
 | The bundle store's marker is `__superschematic/files` under each digest's prefix, and each file carries its SHA-256 beside its mode, so a fetch checks each file before the core checks the whole. | Checking the whole digest alone, which names no file that differs. |
 | The compatibility date the extension pins is 2026-09-15, older than the workerd its tests run on, which refuses a date after its own. | Today's date, which a workerd pinned two weeks back refuses. |
 | acme-shop's `storefront-stack` sits beside `shop-stack`, so a `stack` command run from the example names its stack (`stack dev schemas/services/shop-stack`), and its check builds with the installed binary, which links the cloudflare target, where it built with the core alone. | Another services root for the storefront's stack, which would build its services twice. Teaching the core to skip an environment whose target it does not link, which hides a misspelt target. |
@@ -6702,7 +6703,12 @@ fake `Cloud`, and deploys the storefront with the core's bundle build and
 placement; `extensions/pulumi` renders the storefront's program with its
 bundle pinned. servergen writes `fetch.ts`, `bundle.ts` and
 `workers.d.ts` for a server on the fake bundle platform against golden
-files, and cigen bundles it in `check`. No call has reached Cloudflare.
+files, type-checks them against the runtime's `./workers` entry, bundles
+them twice to the same bytes and refuses a `node:fs` import; cigen bundles
+them in `check`. acme-shop's check bundles the storefront (`main.js` 110
+KiB, `superscalar_wasm_bg.wasm` 2.1 MiB) and runs it under the runtime's
+pinned workerd, where a tester Worker puts two teas in a cart through a
+service binding. No call has reached Cloudflare.
 
 ## D65. A Rust API runs jobs and workers, its workers claim queues through a descriptor its types carry, and each output root builds against a mirror of its implementations
 
