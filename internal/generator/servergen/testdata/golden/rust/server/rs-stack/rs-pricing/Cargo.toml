@@ -23,4 +23,4 @@ serde_json = "1.0.149"
 tokio = { version = "1.52.2", features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 schemas-rs-pricing-api = { path = "../../../api/rs-pricing" }
 schemas-rs-pricing-implementation = { path = "../../../impl/rs-pricing" }
-superschematic-http-runtime = { path = "../../../../../runtime/http/rust", features = ["logging"] }
+superschematic-http-runtime = { path = "../../../../../runtime/http/rust", features = ["logging", "otel"] }

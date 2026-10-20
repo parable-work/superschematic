@@ -106,6 +106,26 @@ type DateRange struct {
 	End   string
 }
 
+// DurationFilter provides filtering operations for duration fields stored as
+// INTERVAL. Each value goes as its whole microseconds, as a duration is
+// written, and Postgres compares intervals with a day as 24 hours and a
+// month as 30 days, as a duration is read.
+type DurationFilter struct {
+	Eq      *time.Duration
+	Gt      *time.Duration
+	Gte     *time.Duration
+	Lt      *time.Duration
+	Lte     *time.Duration
+	Between *DurationRange
+	IsNull  *bool // true for IS NULL, false for IS NOT NULL
+}
+
+// DurationRange represents a range for duration values
+type DurationRange struct {
+	Min time.Duration
+	Max time.Duration
+}
+
 // GeoPointFilter provides filtering operations for location fields stored as
 // POINT. Postgres has no equality operator for a point, and its ~= compares
 // coordinates within 1e-6 on a plane, so a location matches on presence only.
@@ -6168,7 +6188,7 @@ type TastingFilter struct {
 	TastedOn     *DateFilter
 	TastedAt     *DateTimeFilter
 	ServedAt     *StringFilter
-	Rested       *StringFilter
+	Rested       *DurationFilter
 	Verdict      *StringFilter
 	Remarks      *StringFilter
 	Tags         *ArrayStringFilter
@@ -6540,24 +6560,38 @@ func (f *TastingFilter) conditions(args *[]interface{}, paramOffset int) []strin
 		}
 	}
 	if f.Rested != nil {
-		if f.Rested.Eq != nil {
-			paramNum++
-			conditions = append(conditions, fmt.Sprintf(`tasting.rested = $%d`, paramNum))
-			*args = append(*args, *f.Rested.Eq)
-		}
-		if len(f.Rested.In) > 0 {
-			placeholders := make([]string, len(f.Rested.In))
-			for i, value := range f.Rested.In {
+		// Each duration goes as its microseconds, which pgx encodes from a
+		// time.Duration.
+		for _, comparison := range []struct {
+			op    string
+			value *time.Duration
+		}{
+			{"=", f.Rested.Eq},
+			{">", f.Rested.Gt},
+			{">=", f.Rested.Gte},
+			{"<", f.Rested.Lt},
+			{"<=", f.Rested.Lte},
+		} {
+			if comparison.value != nil {
 				paramNum++
-				placeholders[i] = fmt.Sprintf("$%d", paramNum)
-				*args = append(*args, value)
+				conditions = append(conditions, fmt.Sprintf(`tasting.rested %s $%d`, comparison.op, paramNum))
+				*args = append(*args, *comparison.value)
 			}
-			conditions = append(conditions, fmt.Sprintf(`tasting.rested IN (%s)`, strings.Join(placeholders, ", ")))
 		}
-		if f.Rested.ILike != nil {
+		if f.Rested.Between != nil {
 			paramNum++
-			conditions = append(conditions, fmt.Sprintf(`tasting.rested ILIKE $%d`, paramNum))
-			*args = append(*args, "%"+*f.Rested.ILike+"%")
+			conditions = append(conditions, fmt.Sprintf(`tasting.rested >= $%d`, paramNum))
+			*args = append(*args, f.Rested.Between.Min)
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`tasting.rested <= $%d`, paramNum))
+			*args = append(*args, f.Rested.Between.Max)
+		}
+		if f.Rested.IsNull != nil {
+			if *f.Rested.IsNull {
+				conditions = append(conditions, `tasting.rested IS NULL`)
+			} else {
+				conditions = append(conditions, `tasting.rested IS NOT NULL`)
+			}
 		}
 	}
 	if f.Verdict != nil {

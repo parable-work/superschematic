@@ -72,6 +72,15 @@ type QueueFieldInfo struct {
 	// Default is the schema's default of an enum field, which a message
 	// that leaves the field unset writes, as the Go ORM writes it.
 	Default string
+
+	// Point is a location, {lat, lon}, the column holds as a POINT, which
+	// the client writes as (lon,lat), as the Go ORM writes a pgtype.Point.
+	Point bool
+
+	// Interval is a duration the column holds as an INTERVAL, which the
+	// client writes as its whole microseconds, as the Go ORM writes a
+	// time.Duration through pgx.
+	Interval bool
 }
 
 // QueuesEntry is the entry of a types package that exports its queues, as
@@ -140,11 +149,13 @@ func queueField(schema *ir.Schema, f *ir.FieldDef, sqlTypes map[string]string) (
 	switch {
 	case field.List && anyJSON:
 		return field, "is a list of JSON values, which a queue's message does not hold yet; hold it in a @jsonField type"
-	case !field.JSON && sqlType == "POINT":
-		return field, fmt.Sprintf("is a %s, a POINT column, which the TypeScript queue client does not read yet", ref.Name)
-	case !field.JSON && sqlType == "INTERVAL":
-		return field, fmt.Sprintf("is a %s, an INTERVAL column, which the TypeScript queue client does not read yet", ref.Name)
+	case field.List && sqlType == "POINT":
+		return field, fmt.Sprintf("is a list of %s values, a POINT[] column, which the TypeScript queue client does not read yet", ref.Name)
+	case field.List && sqlType == "INTERVAL":
+		return field, fmt.Sprintf("is a list of %s values, an INTERVAL[] column, which the TypeScript queue client does not read yet", ref.Name)
 	}
+	field.Point = !field.JSON && !field.List && sqlType == "POINT"
+	field.Interval = !field.JSON && !field.List && sqlType == "INTERVAL"
 	if enum := schema.Enums[ref.Name]; enum != nil && f.Required && !ref.IsArray && !ref.IsMap && f.Default != nil {
 		field.Default = *f.Default
 	}

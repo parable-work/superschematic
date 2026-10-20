@@ -46,6 +46,8 @@ The field's type decides its column:
 | `Identity.Name` | `VARCHAR(80)` |
 | `Generic.Int64` | `BIGINT` |
 | `Temporal.DateTime` | `TIMESTAMPTZ` |
+| `Temporal.Duration` | `INTERVAL` |
+| `Geo.Location` | `POINT`, x the longitude and y the latitude |
 | `string`, an enum | `TEXT` |
 | `number` | `DOUBLE PRECISION` |
 | `boolean` | `BOOLEAN` |
@@ -60,6 +62,15 @@ database, and `Default<T, V>` fills in decoded payloads, not columns.
 The SQLite DDL stores each column as the type its values need, such as a
 list as JSON text; [SQLite](/superschematic/reference/migrations/#types-and-defaults)
 has the table.
+
+The Go ORM writes a `Temporal.Duration` as its whole microseconds, the
+precision of an `INTERVAL`, and drops a remainder of nanoseconds toward
+zero. It reads an `INTERVAL` with a day as 24 hours and a month as 30
+days, so one written by hand as `'1 mon 2 days 03:04:05'` reads as
+`771h4m5s`. A duration's filter, `DurationFilter`, takes `time.Duration`
+values: `Eq`, `Gt`, `Gte`, `Lt`, `Lte`, `Between` and `IsNull`. A
+`Geo.Location`'s filter, `GeoPointFilter`, has `IsNull` only; [JSON-valued
+scalars](/superschematic/reference/json-scalars/) says why.
 
 ## Relations
 

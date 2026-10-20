@@ -222,8 +222,10 @@ func (e *HTTPServerError) Unwrap() error {
 
 // RequestLogMiddleware emits a single, information-dense log line per request.
 // It captures identity (request id, trace), outcome (status, error body), and
-// performance (duration, bytes) in one line. For 5xx responses it also records
-// an OTel span error event so the tracing backend surfaces error details.
+// performance (duration, bytes) in one line. It names the request's span by
+// its method and route template and sets http.route, and for 5xx responses it
+// also records an OTel span error event so the tracing backend surfaces error
+// details.
 //
 // Place this middleware after any middleware that enriches the request-scoped
 // logger (for example an account or principal resolver) so the line carries
@@ -268,7 +270,10 @@ func RequestLogMiddleware(getLogger LoggerGetter) func(http.Handler) http.Handle
 				span := trace.SpanFromContext(ctx)
 				if span.IsRecording() {
 					if route != "" {
+						// The server span is named by its method and route
+						// template, which only the router knows (D67).
 						span.SetAttributes(attribute.String("http.route", route))
+						span.SetName(r.Method + " " + route)
 					}
 					if rec.errorCode != "" {
 						span.SetAttributes(attribute.String("error.code", rec.errorCode))

@@ -31,6 +31,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/parable-work/superschematic/runtime/http/go/identity"
+	"github.com/parable-work/superschematic/runtime/http/go/telemetry/otlptest"
 )
 
 // TestStackDevRunsTheShop is milestones 1 and 7 of docs/stack-model.md
@@ -77,7 +78,13 @@ import (
 // shop-stock's worker ReorderStock, a Rust process on its generated
 // entrypoint with the implementation's create_workers, files the product's
 // restock request in shop-db; shop-stock's job OrderRestocks, a Rust job
-// Dev runs only on demand, orders it when stack run runs it (D65). The
+// Dev runs only on demand, orders it when stack run runs it (D65). Every
+// server, job and worker exports its traces to an OTLP receiver of the
+// test's own, which the test's environment names and stack dev hands on
+// (D67): an order is one trace from shop-orders' Go server through its call
+// to shop-stock's Rust server, the storefront's requests are spans named by
+// their routes, each worker makes a span of the message it handles, and
+// each job's process sends the span of its run before it exits. The
 // test stops the stack as Ctrl-C does, which with --remove-data removes
 // the containers. Last, it runs stack dev once more, into an output root
 // of its own (--out), where shop-stock's server, worker and job build
@@ -108,6 +115,12 @@ func TestStackDevRunsTheShop(t *testing.T) {
 	// implementation the build writes under schemas/dist/impl (D65), and
 	// reuses the crates an earlier run compiled there.
 	outputRoot := filepath.Join("..", "schemas", "dist")
+	// Every server, job and worker stack dev runs exports its traces to a
+	// receiver of the test's own, as a developer's shell points them at a
+	// collector: stack dev hands its OpenTelemetry variables on (D67).
+	traces := otlptest.Start(t)
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", traces.URL)
+	t.Setenv("OTEL_BSP_SCHEDULE_DELAY", "500")
 	dev := startStackDev(t, binary)
 	output := dev.output
 	env := dev.waitUntilRunning(t, outputRoot)
@@ -234,6 +247,25 @@ func TestStackDevRunsTheShop(t *testing.T) {
 			t.Fatalf("stack dev printed no %q", want)
 		}
 	}
+	// The order is one trace across two languages' runtimes (D67):
+	// shop-orders' Go server made a span of the request and a client span
+	// of its call to shop-stock, whose Rust server made a span of the
+	// reservation, the call's child, named by its route.
+	reserved := traces.Wait(t, 30*time.Second, "of shop-stock's reservation for shop-orders", func(s otlptest.Span) bool {
+		return s.Service() == "shop-stock" && s.Kind == otlptest.KindServer && s.Name == "POST /api/stock/reservations" && s.ParentSpanID != ""
+	})
+	reserving := traces.Wait(t, 30*time.Second, "of shop-orders' call to shop-stock", func(s otlptest.Span) bool {
+		return s.SpanID == reserved.ParentSpanID
+	})
+	placed := traces.Wait(t, 30*time.Second, "of shop-orders' request", func(s otlptest.Span) bool {
+		return s.SpanID == reserving.ParentSpanID
+	})
+	if reserving.Service() != "shop-orders" || reserving.Kind != otlptest.KindClient || reserving.Name != "POST" ||
+		placed.Service() != "shop-orders" || placed.Kind != otlptest.KindServer || !strings.HasPrefix(placed.Name, "POST /api/") ||
+		reserving.TraceID != reserved.TraceID || placed.TraceID != reserved.TraceID {
+		t.Fatalf("the order's spans are %v, %v and %v; want shop-orders' request, its call and shop-stock's reservation, in one trace", placed, reserving, reserved)
+	}
+	t.Logf("the order's trace:\n  %v\n  %v\n  %v", placed, reserving, reserved)
 
 	// An order beyond the stock is refused with shop-stock's reason, and
 	// reserves nothing.
@@ -266,6 +298,9 @@ func TestStackDevRunsTheShop(t *testing.T) {
 			t.Fatalf("stack dev printed no %q", want)
 		}
 	}
+	traces.Wait(t, 30*time.Second, "of the message "+fulfilOrders+" handled", func(s otlptest.Span) bool {
+		return s.Service() == fulfilOrders && s.Kind == otlptest.KindConsumer && s.Name == "process OrderPlaced"
+	})
 
 	// shop-stock's worker ReorderStock, a Rust process (D65), claims the
 	// StockLow message the reservation enqueued, and files the product's
@@ -283,6 +318,9 @@ func TestStackDevRunsTheShop(t *testing.T) {
 			t.Fatalf("stack dev printed no %q", want)
 		}
 	}
+	traces.Wait(t, 30*time.Second, "of the message "+reorderStock+" handled", func(s otlptest.Span) bool {
+		return s.Service() == reorderStock && s.Kind == otlptest.KindConsumer && s.Name == "process StockLow"
+	})
 
 	// shop-storefront, on Bun: a shopper puts two green teas in a cart,
 	// and a viewer reads the cart back. Its implementation keeps carts in
@@ -312,6 +350,12 @@ func TestStackDevRunsTheShop(t *testing.T) {
 	if status, body := call(t, http.MethodGet, cart, "", ""); status != http.StatusUnauthorized {
 		t.Fatalf("read the cart without a token: %d %s, want 401", status, body)
 	}
+	// The storefront's TypeScript server made a span of each request, named
+	// by its route (D67).
+	traces.Wait(t, 30*time.Second, "of the storefront's new cart line", func(s otlptest.Span) bool {
+		return s.Service() == "shop-storefront" && s.Kind == otlptest.KindServer &&
+			strings.HasPrefix(s.Name, "POST /api/carts/{") && strings.HasSuffix(s.Name, "}/lines")
+	})
 
 	// shop-web, the static site, which stack dev built once and serves
 	// from a file server of its own (D55): its page, its config with
@@ -369,6 +413,10 @@ func TestStackDevRunsTheShop(t *testing.T) {
 	if got := orderStatus(ctx, t, orders, order.Id); got != orderstypes.OrderStatus_Shipped {
 		t.Fatalf("after stack run, order %s is %s, want shipped", order.Id, got)
 	}
+	// The job's process flushed the span of its run before it exited.
+	traces.Wait(t, 30*time.Second, "of the run of "+shipOrders, func(s otlptest.Span) bool {
+		return s.Service() == shipOrders && s.Kind == otlptest.KindInternal && s.Name == "ShipOrders"
+	})
 
 	// shop-stock's job OrderRestocks, a Rust job (D65), runs only on
 	// demand in Dev, whose settings turn its schedule off. stack run runs
@@ -390,6 +438,9 @@ func TestStackDevRunsTheShop(t *testing.T) {
 	if ordered := restockRequestsOf(ctx, t, env.database, product.Id); len(ordered) != 1 || ordered[0].status != "ordered" || ordered[0].open || ordered[0].orderedAt == nil {
 		t.Fatalf("after stack run, the product's restock requests are %+v, want the one ordered", ordered)
 	}
+	traces.Wait(t, 30*time.Second, "of the run of "+orderRestocks, func(s otlptest.Span) bool {
+		return s.Service() == orderRestocks && s.Kind == otlptest.KindInternal && s.Name == "OrderRestocks"
+	})
 
 	// Dev's settings run the job every minute, so stack dev ships an order
 	// placed now within about one, once the worker fulfils it.

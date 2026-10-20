@@ -106,6 +106,26 @@ type DateRange struct {
 	End   string
 }
 
+// DurationFilter provides filtering operations for duration fields stored as
+// INTERVAL. Each value goes as its whole microseconds, as a duration is
+// written, and Postgres compares intervals with a day as 24 hours and a
+// month as 30 days, as a duration is read.
+type DurationFilter struct {
+	Eq      *time.Duration
+	Gt      *time.Duration
+	Gte     *time.Duration
+	Lt      *time.Duration
+	Lte     *time.Duration
+	Between *DurationRange
+	IsNull  *bool // true for IS NULL, false for IS NOT NULL
+}
+
+// DurationRange represents a range for duration values
+type DurationRange struct {
+	Min time.Duration
+	Max time.Duration
+}
+
 // GeoPointFilter provides filtering operations for location fields stored as
 // POINT. Postgres has no equality operator for a point, and its ~= compares
 // coordinates within 1e-6 on a plane, so a location matches on presence only.
@@ -392,6 +412,8 @@ type {{ .TypeName }}Filter struct {
 	{{ toGoName .Name }} *ArrayStringFilter
 	{{- else if .IsGeoPoint }}
 	{{ toGoName .Name }} *GeoPointFilter
+	{{- else if .IsInterval }}
+	{{ toGoName .Name }} *DurationFilter
 	{{- else if .IsUUIDLike }}
 	{{ toGoName .Name }} *UUIDFilter
 	{{- else if .IsDateTimeLike }}
@@ -617,6 +639,42 @@ func (f *{{ .TypeName }}Filter) conditions(args *[]interface{}, paramOffset int)
 			conditions = append(conditions, `{{ $quotedTableName }}.{{ .QuotedDBName }} IS NULL`)
 		} else {
 			conditions = append(conditions, `{{ $quotedTableName }}.{{ .QuotedDBName }} IS NOT NULL`)
+		}
+	}
+	{{- else if .IsInterval }}
+	if f.{{ toGoName .Name }} != nil {
+		// Each duration goes as its microseconds, which pgx encodes from a
+		// time.Duration.
+		for _, comparison := range []struct {
+			op    string
+			value *time.Duration
+		}{
+			{"=", f.{{ toGoName .Name }}.Eq},
+			{">", f.{{ toGoName .Name }}.Gt},
+			{">=", f.{{ toGoName .Name }}.Gte},
+			{"<", f.{{ toGoName .Name }}.Lt},
+			{"<=", f.{{ toGoName .Name }}.Lte},
+		} {
+			if comparison.value != nil {
+				paramNum++
+				conditions = append(conditions, fmt.Sprintf(`{{ $quotedTableName }}.{{ .QuotedDBName }} %s $%d`, comparison.op, paramNum))
+				*args = append(*args, *comparison.value)
+			}
+		}
+		if f.{{ toGoName .Name }}.Between != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`{{ $quotedTableName }}.{{ .QuotedDBName }} >= $%d`, paramNum))
+			*args = append(*args, f.{{ toGoName .Name }}.Between.Min)
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`{{ $quotedTableName }}.{{ .QuotedDBName }} <= $%d`, paramNum))
+			*args = append(*args, f.{{ toGoName .Name }}.Between.Max)
+		}
+		if f.{{ toGoName .Name }}.IsNull != nil {
+			if *f.{{ toGoName .Name }}.IsNull {
+				conditions = append(conditions, `{{ $quotedTableName }}.{{ .QuotedDBName }} IS NULL`)
+			} else {
+				conditions = append(conditions, `{{ $quotedTableName }}.{{ .QuotedDBName }} IS NOT NULL`)
+			}
 		}
 	}
 	{{- else if .IsUUIDLike }}

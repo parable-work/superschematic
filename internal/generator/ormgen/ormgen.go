@@ -79,6 +79,16 @@ type ORMOutput struct {
 	// helpers that convert a list of each to and from []pgtype.Point.
 	GeoPointListTypes []GeoPointListType
 
+	// HasIntervalLists is true when a table has an INTERVAL[] list column
+	// (Field.IsIntervalList); utils.go emits the helpers that convert a list
+	// of durations to and from []time.Duration.
+	HasIntervalLists bool
+
+	// HasIntervalHistory is true when a versioned table has an INTERVAL or
+	// INTERVAL[] column; utils.go emits the helpers that read the interval
+	// text to_jsonb writes in a history row.
+	HasIntervalHistory bool
+
 	// UUIDGoType is the Go type used for primary-key / foreign-key plumbing
 	// (e.g. "types.IdentityUUID"). Resolved from the schema's UUID-like
 	// scalar; all UUID-like superscalar aliases share one underlying type, so
@@ -249,6 +259,8 @@ type Field struct {
 	IsDateTimeScalar   bool   // non-array datetime-like scalar: values coerce via time.Time()
 	IsGeoPoint         bool   // single scalar stored as POINT (Geo.Location): values convert through pgtype.Point, x = Lon, y = Lat
 	IsGeoPointList     bool   // list of a scalar stored as POINT, a native POINT[] column: values convert through []pgtype.Point
+	IsInterval         bool   // single scalar stored as INTERVAL (Temporal.Duration): values convert through time.Duration, whole microseconds
+	IsIntervalList     bool   // list of a scalar stored as INTERVAL, a native INTERVAL[] column: values convert through []time.Duration
 	IsUUIDLike         bool
 	IsStringLike       bool
 	IsIntLike          bool
@@ -341,9 +353,32 @@ func (f Field) NativeGenericJSONList() bool {
 // pgx's own message. A Generic.JSON element's Go type holds a null itself, so
 // the repository checks that scanned list instead (NativeGenericJSONList). A
 // POINT[] is scanned into []pgtype.Point, whose NULL element is invalid
-// (GeoPointListCopy).
+// (GeoPointListCopy). An INTERVAL[] is scanned into []*time.Duration
+// (ListElementScanType).
 func (f Field) ScansElementPointers() bool {
 	return f.NativeList() && !f.IsGenericJSONList && !f.IsGeoPointList
+}
+
+// ListElementScanType is the Go type of the element pointers a native list
+// is scanned through (ScansElementPointers): time.Duration for an INTERVAL[],
+// which pgx reads as microseconds, a day 24 hours and a month 30 days, and
+// the element's own Go type for any other.
+func (f Field) ListElementScanType() string {
+	if f.IsIntervalList {
+		return "time.Duration"
+	}
+	return f.GoType
+}
+
+// ListCopyCall is the call that sets dst, a pointer to the field's list,
+// from values, the element pointers scanned from its native array
+// (ListElementScanType). It returns an error that names the first NULL
+// element.
+func (f Field) ListCopyCall(values, dst string) string {
+	if f.IsIntervalList {
+		return fmt.Sprintf("copyIntervalElements(%q, %s, %s)", f.Name, values, dst)
+	}
+	return fmt.Sprintf("copyListElements(%q, %s, %s)", f.Name, values, dst)
 }
 
 // GeoPointListSymbol is the Go type of a POINT[] list's element without its
@@ -657,6 +692,8 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 	hasJSONListFields := false
 	hasGenericJSONLists := false
 	hasElementPointerLists := false
+	hasIntervalLists := false
+	hasIntervalHistory := false
 	hasSearch := false
 	for _, repo := range repositories {
 		if repo.HasSearch {
@@ -687,11 +724,17 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 			if field.IsArrayOfArrays {
 				hasArraysOfArrays = true
 			}
-			if field.JSONListDepth() > 0 || (field.NativeList() && !field.IsGeoPointList && repo.Versioned) {
+			if field.JSONListDepth() > 0 || (field.NativeList() && !field.IsGeoPointList && !field.IsIntervalList && repo.Versioned) {
 				hasJSONListFields = true
 			}
-			if field.ScansElementPointers() {
+			if field.ScansElementPointers() && !field.IsIntervalList {
 				hasElementPointerLists = true
+			}
+			if field.IsIntervalList {
+				hasIntervalLists = true
+			}
+			if (field.IsInterval || field.IsIntervalList) && repo.Versioned {
+				hasIntervalHistory = true
 			}
 			if field.IsGenericJSONList {
 				hasGenericJSONLists = true
@@ -726,6 +769,8 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 		HasGenericJSONLists:      hasGenericJSONLists,
 		HasElementPointerLists:   hasElementPointerLists,
 		GeoPointListTypes:        geoPointListTypes,
+		HasIntervalLists:         hasIntervalLists,
+		HasIntervalHistory:       hasIntervalHistory,
 		Timestamp:                opts.Clock.RFC3339(),
 		UUIDGoType:               uuidGoType,
 		UserIDGoType:             resolveUserIDGoType(tableTypes, scalarMap, uuidGoType),
@@ -1195,6 +1240,12 @@ func extractField(fieldDef *ir.FieldDef, schema *ir.Schema, scalars map[string]s
 	// sqlgen stores a scalar mapped to POINT as POINT, and a list of it as
 	// POINT[]; a list of lists, a map and @jsonField are JSONB.
 	storedAsPoint := isScalar && !isMap && !fieldDef.JsonField && !fieldDef.TypeRef.IsArrayOfArrays && strings.EqualFold(scalar.sqlType, "POINT")
+	// Likewise a scalar mapped to INTERVAL (Temporal.Duration), whose Go
+	// type is a time.Duration. Its Valuer and Scanner write and read Go's
+	// duration text, which Postgres reads wrongly or refuses and does not
+	// write, so its values cross as time.Duration, which pgx writes as an
+	// interval of microseconds (D53, amended).
+	storedAsInterval := isScalar && !isMap && !fieldDef.JsonField && !fieldDef.TypeRef.IsArrayOfArrays && strings.EqualFold(scalar.sqlType, "INTERVAL")
 
 	field := Field{
 		Name:                      fieldDef.Name,
@@ -1223,6 +1274,8 @@ func extractField(fieldDef *ir.FieldDef, schema *ir.Schema, scalars map[string]s
 		IsDateTimeScalar:          isScalar && !isArray && traits.IsDateTimeLike,
 		IsGeoPoint:                storedAsPoint && !isArray,
 		IsGeoPointList:            storedAsPoint && isArray,
+		IsInterval:                storedAsInterval && !isArray,
+		IsIntervalList:            storedAsInterval && isArray,
 		IsUUIDLike:                traits.IsUUIDLike,
 		IsStringLike:              traits.IsStringLike || irType == codegen.PrimitiveString,
 		IsIntLike:                 traits.IsIntegerLike,
@@ -1460,6 +1513,10 @@ func computeImportNeeds(repo *Repository) {
 			repo.NeedsTime = true
 		}
 		if field.IsDateTimeScalar && !field.IsAuditField && !field.IsPrimaryKey {
+			repo.NeedsTime = true
+		}
+		// A duration is written and read as a time.Duration.
+		if field.IsInterval || field.IsIntervalList {
 			repo.NeedsTime = true
 		}
 		if !field.IsJSONField && !field.IsArray && field.IsDateLike && !field.IsPrimaryKey && !field.IsAuditField {

@@ -52,6 +52,10 @@ mod service_auth;
 mod shutdown;
 // The readers of the config fields an API's edges derive in a stack (D57).
 pub mod stackconfig;
+// A stack deployable's trace export over OTLP (D67), with the `otel`
+// feature.
+#[cfg(feature = "otel")]
+pub mod telemetry;
 mod token_source;
 #[cfg(any(feature = "identity", feature = "postgres"))]
 mod uuid62;

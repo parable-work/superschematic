@@ -1,6 +1,20 @@
 import { describe, expect, test } from 'bun:test';
 import pg from 'pg';
-import { ClaimLostError, enqueue, parseArray, postgresQueue, type QueueDefinition, type QueueQueryConfig, type QueueStatements } from './queue';
+import {
+  ClaimLostError,
+  enqueue,
+  formatDuration,
+  intervalText,
+  parseArray,
+  parseDuration,
+  parseInterval,
+  parsePoint,
+  pointText,
+  postgresQueue,
+  type QueueDefinition,
+  type QueueQueryConfig,
+  type QueueStatements,
+} from './queue';
 
 /** The variable that names a Postgres the queue's database tests run against; they are skipped without it. */
 const databaseVariable = 'SUPERSCHEMATIC_HTTP_RUNTIME_TEST_DATABASE_URL';
@@ -98,6 +112,88 @@ describe('parseArray', () => {
     expect(parseArray('{"a b",NULL,"say \\"hi\\"",c}')).toEqual(['a b', null, 'say "hi"', 'c']);
     expect(parseArray('{""}')).toEqual(['']);
     expect(() => parseArray('a,b')).toThrow('is no Postgres array');
+  });
+});
+
+describe('locations and durations', () => {
+  test('a location is a POINT whose x is the longitude and y the latitude', () => {
+    expect(pointText({ lat: 37.7749, lon: -122.4194 })).toBe('(-122.4194,37.7749)');
+    expect(pointText({ lat: 0, lon: 0 })).toBe('(0,0)');
+    expect(parsePoint('(-122.4194,37.7749)')).toEqual({ lat: 37.7749, lon: -122.4194 });
+    expect(parsePoint('(1e-7,-90)')).toEqual({ lat: -90, lon: 1e-7 });
+    expect(() => pointText({ lat: '1', lon: 2 })).toThrow('is no location');
+    expect(() => pointText(null)).toThrow('is no location');
+    expect(() => parsePoint('(1,2,3)')).toThrow('is no POINT');
+  });
+
+  test("a duration's text reads as its nanoseconds, in every unit and form the scalar takes", () => {
+    const cases: [string, bigint][] = [
+      ['0', 0n],
+      ['0s', 0n],
+      ['1h30m0s', 5_400_000_000_000n],
+      ['90m', 5_400_000_000_000n],
+      ['1.5s', 1_500_000_000n],
+      ['-1h2m3.5s', -3_723_500_000_000n],
+      ['+500ms', 500_000_000n],
+      ['250us', 250_000n],
+      ['250µs', 250_000n],
+      ['250μs', 250_000n],
+      ['1500ns', 1_500n],
+      ['.5s', 500_000_000n],
+      ['2562047h47m16.854775807s', 9_223_372_036_854_775_807n],
+    ];
+    for (const [text, nanos] of cases) expect([text, parseDuration(text)]).toEqual([text, nanos]);
+    for (const text of ['', '-', '1', '1d', 's', '1h-2m', '1.2.3s']) expect(() => parseDuration(text)).toThrow('is no duration');
+  });
+
+  test('a duration writes the interval of its whole microseconds, its sign for the whole', () => {
+    expect(intervalText('1h30m0s')).toBe('1:30:00');
+    expect(intervalText('26h0m0.000001s')).toBe('26:00:00.000001');
+    expect(intervalText('-1h2m3.5s')).toBe('-1:02:03.500000');
+    expect(intervalText('1500ns')).toBe('0:00:00.000001');
+    expect(intervalText('-1500ns')).toBe('-0:00:00.000001');
+    expect(intervalText('999ns')).toBe('0:00:00');
+    expect(intervalText('0s')).toBe('0:00:00');
+    expect(() => intervalText(90)).toThrow('is no duration');
+  });
+
+  test("an interval's text in IntervalStyle postgres reads as its duration, a day 24 hours and a month 30 days", () => {
+    const cases: [string, string][] = [
+      ['00:00:00', '0s'],
+      ['01:30:00', '1h30m0s'],
+      ['26:00:00.000001', '26h0m0.000001s'],
+      ['-01:02:03.5', '-1h2m3.5s'],
+      ['00:00:00.00025', '250us'],
+      ['-00:00:00.000001', '-1us'],
+      ['00:00:01.5', '1.5s'],
+      ['00:01:30', '1m30s'],
+      ['00:00:00.5', '500ms'],
+      ['1 day', '24h0m0s'],
+      ['1 day 02:00:00', '26h0m0s'],
+      ['-1 days +02:00:00', '-22h0m0s'],
+      ['-2 days', '-48h0m0s'],
+      ['1 mon 1 day -01:00:00', '743h0m0s'],
+      ['1 year 2 mons', '10080h0m0s'],
+    ];
+    for (const [text, duration] of cases) expect([text, formatDuration(parseInterval(text))]).toEqual([text, duration]);
+    for (const text of ['', 'P1D', '@ 1 hour', '1 week', '3']) expect(() => parseInterval(text)).toThrow('is no interval');
+  });
+
+  test('a location and a duration write their columns, and a value of neither is refused, naming its field', async () => {
+    const delivery: QueueDefinition<{ dropAt: unknown; wait: unknown; grace?: string }> = {
+      ...definition(),
+      table: 'delivery_planned_queue',
+      fields: [
+        { name: 'dropAt', column: 'drop_at', point: true },
+        { name: 'wait', column: 'wait', interval: true },
+        { name: 'grace', column: 'grace', interval: true },
+      ],
+    };
+    const client = recorder();
+    await enqueue(client, delivery, { dropAt: { lat: 37.7749, lon: -122.4194 }, wait: '-1h2m3.5s' });
+    expect(client.queries[0]?.values).toEqual(['(-122.4194,37.7749)', '-1:02:03.500000']);
+    await expect(enqueue(client, delivery, { dropAt: { lat: 1 }, wait: '1s' })).rejects.toThrow('enqueue on delivery_planned_queue: field dropAt: {"lat":1} is no location');
+    await expect(enqueue(client, delivery, { dropAt: { lat: 1, lon: 2 }, wait: '1 day' })).rejects.toThrow('enqueue on delivery_planned_queue: field wait: "1 day" is no duration');
   });
 });
 
@@ -203,7 +299,83 @@ function createTable(table: string): string {
 )`;
 }
 
+/** A queue's table whose message holds a location, a POINT, and a duration, an INTERVAL, each required and optional, as sqlgen writes it. */
+const deliveryTable = `CREATE TABLE delivery_planned_queue (
+  id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
+  drop_at POINT NOT NULL,
+  wait INTERVAL NOT NULL,
+  meet_at POINT,
+  grace INTERVAL,
+  state TEXT DEFAULT 'ready' NOT NULL,
+  attempts INTEGER DEFAULT 0 NOT NULL,
+  due_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+  claim_expires_at TIMESTAMPTZ,
+  claim_token UUID,
+  last_error TEXT,
+  created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+  updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL
+)`;
+
+interface DeliveryPlanned {
+  dropAt: { lat: number; lon: number };
+  wait: string;
+  meetAt?: { lat: number; lon: number };
+  grace?: string;
+}
+
 describe.skipIf(dsn === '')('on Postgres', () => {
+  test('a location crosses as a POINT and a duration as an INTERVAL, and each reads back as the TypeScript types hold it', async () => {
+    const schema = `queue_runtime_delivery_${Date.now()}`;
+    const admin = new pg.Pool({ connectionString: dsn, max: 1 });
+    await admin.query(`CREATE SCHEMA ${schema}`);
+    const pool = new pg.Pool({ connectionString: dsn, max: 2, options: `-c search_path=${schema},public` });
+    try {
+      await pool.query(deliveryTable);
+      const deliveryFields = [
+        { name: 'dropAt', column: 'drop_at', point: true },
+        { name: 'wait', column: 'wait', interval: true },
+        { name: 'meetAt', column: 'meet_at', point: true },
+        { name: 'grace', column: 'grace', interval: true },
+      ];
+      const def: QueueDefinition<DeliveryPlanned> = {
+        ...definition('delivery_planned_queue'),
+        name: 'DeliveryPlanned',
+        fields: deliveryFields,
+        statements: statements('delivery_planned_queue', deliveryFields.map(f => f.column)),
+      };
+      const full: DeliveryPlanned = { dropAt: { lat: 37.7749, lon: -122.4194 }, wait: '26h0m0.0000015s', meetAt: { lat: -33.8688, lon: 151.2093 }, grace: '-1m30.25s' };
+      await enqueue(pool, def, full);
+      await enqueue(pool, def, { dropAt: { lat: 0, lon: 0 }, wait: '-1500ns' });
+      const { rows } = await pool.query<{ x: number; y: number; wait: string; meet: string | null; grace: string | null }>(
+        'SELECT (drop_at)[0] AS x, (drop_at)[1] AS y, wait::text AS wait, meet_at::text AS meet, grace::text AS grace FROM delivery_planned_queue ORDER BY wait DESC'
+      );
+      expect(rows).toEqual([
+        { x: -122.4194, y: 37.7749, wait: '26:00:00.000001', meet: '(151.2093,-33.8688)', grace: '-00:01:30.25' },
+        { x: 0, y: 0, wait: '-00:00:00.000001', meet: null, grace: null },
+      ]);
+
+      const queue = postgresQueue(pool, def);
+      const claims = await queue.claim(5);
+      expect(claims.map(c => c.message).sort((a, b) => a.wait.localeCompare(b.wait))).toEqual([
+        { dropAt: { lat: 0, lon: 0 }, wait: '-1us' },
+        { ...full, wait: '26h0m0.000001s' },
+      ]);
+      for (const claim of claims) await queue.release(claim.id, claim.token);
+
+      // An interval with days and months reads as their hours.
+      await pool.query(`UPDATE delivery_planned_queue SET wait = '1 mon 1 day -01:00:00', grace = '-2 days'`);
+      const again = await queue.claim(5);
+      expect(again.map(c => [c.message.wait, c.message.grace])).toEqual([
+        ['743h0m0s', '-48h0m0s'],
+        ['743h0m0s', '-48h0m0s'],
+      ]);
+    } finally {
+      await pool.end();
+      await admin.query(`DROP SCHEMA ${schema} CASCADE`);
+      await admin.end();
+    }
+  });
+
   test('enqueue commits with its transaction, claims take different messages, and fail, extend, release and an expired claim behave as the Go ORM', async () => {
     const schema = `queue_runtime_${Date.now()}`;
     const admin = new pg.Pool({ connectionString: dsn, max: 1 });

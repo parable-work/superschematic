@@ -1,0 +1,42 @@
+{
+  "name": "DeliveryPlanned",
+  "table": "delivery_planned_queue",
+  "retries": 2,
+  "backoffSeconds": 30,
+  "leaseSeconds": 60,
+  "fields": [
+    {
+      "name": "orderId",
+      "column": "order_id"
+    },
+    {
+      "name": "dropAt",
+      "column": "drop_at",
+      "point": true
+    },
+    {
+      "name": "wait",
+      "column": "wait",
+      "interval": true
+    },
+    {
+      "name": "meetAt",
+      "column": "meet_at",
+      "point": true
+    },
+    {
+      "name": "grace",
+      "column": "grace",
+      "interval": true
+    }
+  ],
+  "statements": {
+    "insert": "INSERT INTO delivery_planned_queue",
+    "expire": "UPDATE delivery_planned_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,\n  last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()\nWHERE state = 'claimed' AND claim_expires_at <= now() AND attempts > $1",
+    "claim": "WITH due AS (\n  SELECT id FROM delivery_planned_queue\n  WHERE (state = 'ready' AND due_at <= now()) OR (state = 'claimed' AND claim_expires_at <= now())\n  ORDER BY due_at, id\n  LIMIT $1\n  FOR UPDATE SKIP LOCKED\n)\nUPDATE delivery_planned_queue AS q SET state = 'claimed', attempts = q.attempts + 1, claim_token = gen_random_uuid(),\n  claim_expires_at = now() + make_interval(secs => $2), updated_at = now()\nFROM due WHERE q.id = due.id\nRETURNING q.id::text, q.claim_token::text, q.attempts, q.order_id, q.drop_at, q.wait, q.meet_at, q.grace",
+    "complete": "UPDATE delivery_planned_queue SET state = 'done', claim_token = NULL, claim_expires_at = NULL, updated_at = now()\nWHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'",
+    "fail": "UPDATE delivery_planned_queue SET\n  state = CASE WHEN attempts > $3 THEN 'dead' ELSE 'ready' END,\n  due_at = CASE WHEN attempts > $3 THEN due_at ELSE now() + make_interval(secs => $4) END,\n  last_error = $5, claim_token = NULL, claim_expires_at = NULL, updated_at = now()\nWHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'\nRETURNING state",
+    "extend": "UPDATE delivery_planned_queue SET claim_expires_at = now() + make_interval(secs => $3), updated_at = now()\nWHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'",
+    "release": "UPDATE delivery_planned_queue SET state = 'ready', attempts = GREATEST(attempts - 1, 0), claim_token = NULL, claim_expires_at = NULL, updated_at = now()\nWHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'"
+  }
+}

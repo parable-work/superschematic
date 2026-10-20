@@ -23,7 +23,7 @@ schema's instances into claimable work, are another thing.
 | --- | --- |
 | `@queue` on a DB service's message class; its table in every dialect the service lists, which the migration plan carries | removing done messages; a command to read and retry dead ones |
 | the Go ORM's `Enqueue<Queue>` in your transaction, and its claims on Postgres | claims on SQLite and D1 |
-| the TypeScript types' `./queues` entry and the HTTP runtime's `enqueue` and `postgresQueue`, which run the Go ORM's statements; the Rust types' `queues` module and the Rust HTTP runtime's `queue::enqueue` and `PostgresQueue`, which run them too | a `POINT` or `INTERVAL` column in a TypeScript or Rust queue's message |
+| the TypeScript types' `./queues` entry and the HTTP runtime's `enqueue` and `postgresQueue`, which run the Go ORM's statements; the Rust types' `queues` module and the Rust HTTP runtime's `queue::enqueue` and `PostgresQueue`, which run them too; a location (`POINT`) and a duration (`INTERVAL`) in a message, in every language | a list of locations or durations (`POINT[]`, `INTERVAL[]`) in a queue's message |
 | `@worker` on an API, Go's `Workers` and `NewWorkers`, TypeScript's `Workers` and `createWorkers`, Rust's `Workers` and `create_workers`, the `worker` deployable, its entrypoint and image | |
 | `stack dev`'s worker processes; on gcp a Cloud Run worker pool | scaling a worker with its queue's depth |
 
@@ -111,10 +111,16 @@ try {
 `enqueue` is typed by the definition: the message is `OrderPlaced` from
 the database's types. A field writes its column as the Go ORM writes
 it: a JSON field its JSON text, an unset optional field or list nothing,
-and an unset enum its schema default. A message whose fields hold a
-`POINT` or an `INTERVAL` column, a `Geo.Location` or a
-`Temporal.Duration`, stays out of `./queues` for now, which says so;
-hold such a value in a `@jsonField` type. The implementation's
+and an unset enum its schema default. A `Geo.Location` goes to its
+`POINT` column as `(lon,lat)` and comes back as `{lat, lon}`. A
+`Temporal.Duration` goes to its `INTERVAL` column as its whole
+microseconds, so `-1h2m` stays negative as a whole and `1500ns` is stored
+as `1us`, and comes back in the scalar's canonical text (`1h30m0s`,
+`250us`), a day of an interval written by hand as 24 hours and a month as
+30 days, as Go's `time.Duration` reads it. A message whose fields hold a
+list of either, a `POINT[]` or an `INTERVAL[]` column, stays out of
+`./queues` for now, which says so, and the Go ORM refuses it; hold such a
+list in a `@jsonField` type. The implementation's
 `package.json` depends on the database's types package by its name, with
 `workspace:*`; the scaffold adds it for an API with workers.
 
@@ -140,8 +146,10 @@ enqueue(&tx, &queue, &StockLow { product_id, quantity, threshold }).await?;
 tx.commit().await?;
 ```
 
-A queue whose message holds a `POINT` or an `INTERVAL` column stays out
-of `queues`, which says so, and the build refuses a Rust worker of it.
+A location and a duration cross as they do from TypeScript and Go. A
+queue whose message holds a list of either, a `POINT[]` or an
+`INTERVAL[]` column, stays out of `queues`, which says so, and the build
+refuses a Rust worker of it.
 
 In the acme shop, `shop-db` declares `StockLow` too, which `shop-stock`'s
 reservation, in Rust, enqueues in its transaction for each line that takes

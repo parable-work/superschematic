@@ -91,6 +91,10 @@ Its entry points:
   It is the only entry that imports `@google-cloud/storage`.
 - `@superschematic/http-runtime/worker`, the claim loop of a stack's
   worker (D53, below). It imports nothing.
+- `@superschematic/http-runtime/telemetry`, OpenTelemetry trace export
+  for a stack's server, job and worker on Bun (D67, below). It is the
+  only entry that imports the `@opentelemetry/*` packages, so the other
+  entries bundle without them.
 
 ## Authentication and permissions
 
@@ -373,6 +377,44 @@ process makes, which fake-gcs-server takes without checking; on GCS the
 client takes the application default credentials and signs as the
 workload's account through IAM's `signBlob`. `src/gcs.test.ts` runs
 against a fake-gcs-server that `SUPERSCHEMATIC_TEST_GCS_EMULATOR` names.
+
+## Trace export
+
+`startTelemetry({ service, stack, kind, logger })`, from
+`@superschematic/http-runtime/telemetry`, is what a generated server's,
+job's or worker's `main.ts` calls first (D67), the twin of the Go
+runtime's `telemetry.Start`. Export is on only when the environment sets
+`OTEL_EXPORTER_OTLP_ENDPOINT` or `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` and
+`OTEL_SDK_DISABLED` is not `true`; off, it sets nothing up, and each hook
+it returns only calls through. On, it exports over OTLP/HTTP in protobuf
+(`@opentelemetry/exporter-trace-otlp-proto`) through a batch processor,
+carries a span's context through `AsyncLocalStorage`, which Bun
+implements, and reads OpenTelemetry's variables as Go's does:
+`OTEL_SERVICE_NAME` and `OTEL_RESOURCE_ATTRIBUTES` over the defaults
+(`service.name` the deployable, `service.namespace` the stack,
+`superschematic.deployable.kind`), the six standard samplers,
+`tracecontext`, `baggage` or `none` for `OTEL_PROPAGATORS`, and
+`http/protobuf` alone for the protocol. A value it does not support throws
+an error that names the variable. The `Telemetry` it returns holds:
+
+- `middleware()`, registered first on the server's Hono app: a server
+  span per request but `/healthz` and `/readyz`, the child of an incoming
+  `traceparent`, named `<METHOD> <route template>` from the route Hono
+  matched, in the `{param}` form the other runtimes write;
+- `fetch`, the `fetch` of each `calls` edge's SDK client: a client span
+  per call, whose context the call carries in `traceparent` and
+  `tracestate`;
+- `job(name, run)` and `message(queue, { id, attempt }, handle)`, a span
+  per job run and per message a worker handles, each recording its
+  error;
+- `shutdown()`, which flushes the spans still buffered within five
+  seconds and stops the exporter, before the process exits.
+
+The `@opentelemetry/*` packages are optional peer dependencies at the
+versions this package is tested with, which a generated Bun package
+depends on. `src/telemetry.test.ts` runs each hook against an OTLP/HTTP
+receiver in the test's process (`src/otlp.testing.ts`), and a job's
+process that flushes before it exits.
 
 ## Using it
 
