@@ -169,6 +169,24 @@ text; any other JSON type is `type`
 ([JSON-valued scalars](/superschematic/reference/json-scalars/)). Type-only imports (no runtime) come from
 `@schemas/catalog-types/types`.
 
+Every object type and every union also gets `parse<Name>FromJSON`, which
+reads a value as it arrives on the wire into its runtime types: a
+date-time field becomes a `Date`, a nested object or union field runs its
+own parser, and a `@strictJSON` type runs `parse<Type>Json`'s checks. A
+union's parser picks the member the Go and Rust types pick. When every
+member marks the same field `@internalMetadata`, that field's value names
+the member, and an absent, non-string or unknown value throws `ParseError`
+with `unknown discriminator`. Otherwise it picks by shape: the first member
+whose fields include every payload key wins, unless the payload
+contradicts one of the member's tags, a field that two or more members
+declare with distinct string or enum defaults; when no member declares
+every key, the first member whose tags the payload allows wins. A member
+wins only when its own parser reads the payload, so a `@strictJSON` member
+that refuses it is passed over, and a payload no member reads throws
+`ParseError` with `no matching member`. Any other value than an object
+throws `expected an object`; `null` and `undefined` are returned as they
+are.
+
 ## Load environment variables
 
 A schema with an `@envVars` class gets its loader in the types package,
@@ -217,6 +235,13 @@ an API with an operation that needs a caller (`@auth`,
 as `Authorization: Bearer <token>`. Each namespace is a camelCase field,
 and operation sets that share a namespace share it: `ProductQueries` and
 `ProductMutations` are both `sdk.product`.
+
+A response is read as its type, at each list level and in each item of a
+page. An object type or a union the schema declares goes through the
+types package's `parse<Name>FromJSON`, so a date-time field is a `Date`, a
+union is the member its parser picks, and a `@strictJSON` type is checked.
+A value its parser refuses rejects the call with the types package's
+`ParseError`. An enum or a scalar stays the value the API sent.
 
 `serviceCredential: { token, headers }` is the calling service's own
 credential
@@ -385,8 +410,12 @@ path, the query or the body, is checked against the scalar's own length,
 pattern and range, and a value that fails
 answers with the rule it breaks (`pattern`, `minLength`, `maxLength`,
 `min`, `max`). The problem `details` carry the `path` and the rule in
-`errors`. A body argument whose type is a union has no generated decoder,
-and the build refuses it.
+`errors`. A union field of the input or of an object argument is read
+with the union's `parse<Union>FromJSON`, so the implementation receives
+its member with date-time fields as `Date`, and a member the parser
+refuses answers 400 with the parser's reason. A body argument whose type
+is a union has no strict decoder to check its member, and the build
+refuses it.
 
 ```ts
 import { Hono } from "hono";
