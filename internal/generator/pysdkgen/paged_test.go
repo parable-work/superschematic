@@ -56,7 +56,9 @@ func generatePagedSDK(t *testing.T, apiOutput *apigen.APIOutput) *SDKOutput {
 // by the bounds the route reads them with, returns Page[T] and has a
 // <method>_all beside it; an operation that does not page is unchanged. A
 // sorted page's sort (D60, amended) is one of its own query parameters,
-// an optional str, before cursor and limit.
+// an optional str, before cursor and limit. The sort, cursor and limit
+// follow the method's own optional query parameters by keyword alone, so
+// a list that gains a sort keeps its callers' positional arguments.
 func TestPagedMethodsTakeCursorAndLimit(t *testing.T) {
 	_, apiOutput := loadPagedAPI(t)
 	sdkOutput := generatePagedSDK(t, apiOutput)
@@ -124,6 +126,17 @@ func TestPagedMethodsTakeCursorAndLimit(t *testing.T) {
 	}
 	if !hasMethodParam(endpoints["list_items"], "sort: str | None = None") {
 		t.Errorf("list_items has no parameter sort: str | None = None")
+	}
+	for method, first := range map[string]string{"list_items": "sort", "list_tags": "cursor"} {
+		var keywords []string
+		for _, param := range endpoints[method].MethodParams {
+			if param.KeywordsFollow {
+				keywords = append(keywords, param.Name)
+			}
+		}
+		if len(keywords) != 1 || keywords[0] != first {
+			t.Errorf("%s: the keywords follow %v, want %s alone", method, keywords, first)
+		}
 	}
 
 	for _, method := range []string{"get_item", "place_basket"} {
@@ -435,6 +448,23 @@ stub["drop_next"] = True
 assert catalog.list_items().next is None
 assert names_of(catalog.list_items_all(limit=3)) == NAMES[:3]
 stub["drop_next"] = False
+
+# The sort, the cursor and the limit are keywords alone (D60, amended), so
+# a list that gains a sort keeps its callers' arguments: a third positional
+# argument is refused before any request.
+asked = len(requests)
+for positional in (
+    lambda: catalog.list_items(None, None, first.next),
+    lambda: next(catalog.list_items_all(None, None, "-name")),
+    lambda: catalog.list_tags(first.next),
+):
+    try:
+        positional()
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("a paging argument given by position was taken")
+assert len(requests) == asked, requests[asked:]
 server.shutdown()
 `
 
