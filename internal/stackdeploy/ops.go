@@ -2,11 +2,13 @@ package stackdeploy
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
@@ -64,6 +66,15 @@ type PlanResult struct {
 	// ManualRecords are the DNS records to create by hand, when the
 	// environment's domain has no DNS platform (section 6.9).
 	ManualRecords []*ir.DNSRecord `json:"manualRecords,omitempty"`
+
+	// Jobs are the jobs a deploy runs once after its rollout, before the
+	// contract phase, as the environment's settings say (D52, amended).
+	Jobs []string `json:"jobs,omitempty"`
+
+	// Lock is the run's deploy lock when a deploy or a destroy held it as
+	// the plan read the manifest: what it plans from may change when that
+	// one ends (D46, amended).
+	Lock *registry.DeployLock `json:"lock,omitempty"`
 }
 
 // PendingNote names a migration phase a failed deploy left part-way.
@@ -97,6 +108,12 @@ func Plan(ctx context.Context, o PlanOptions) (*PlanResult, error) {
 		return nil, err
 	}
 	if err := s.requireDeploy(); err != nil {
+		return nil, err
+	}
+	// A plan takes no lock, since the planner account writes nothing; it
+	// says when a deploy holds one.
+	held, err := s.readLock(ctx)
+	if err != nil {
 		return nil, err
 	}
 	prev, err := readManifest(ctx, s.target.State, s.run)
@@ -149,7 +166,7 @@ func Plan(ctx context.Context, o PlanOptions) (*PlanResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	out := &PlanResult{Run: s.run.Name(), Databases: plans, Unpinned: unpinned, Unpublished: sites.missing(s.env), Unbundled: bundles.missing(s.env), Unallowed: o.Gate.unallowed(plans)}
+	out := &PlanResult{Run: s.run.Name(), Databases: plans, Unpinned: unpinned, Unpublished: sites.missing(s.env), Unbundled: bundles.missing(s.env), Unallowed: o.Gate.unallowed(plans), Jobs: deployJobs(s.env), Lock: held}
 	for _, database := range sortedKeys(pending) {
 		for _, p := range pending[database] {
 			out.Pending = append(out.Pending, PendingNote{Database: database, Service: p.Plan.Service, Phase: p.Phase, Plan: p.Plan.Hash})
@@ -178,8 +195,9 @@ func Plan(ctx context.Context, o PlanOptions) (*PlanResult, error) {
 // Destroy removes every resource of the run and its deploy manifest. It
 // renders the program the last deploy applied, with the bundles it ran
 // fetched and placed beside it, and has the target's registry.DestroyPreparer
-// ready the run's resources before the provisioner destroys them (D64).
-func Destroy(ctx context.Context, o Options) error {
+// ready the run's resources before the provisioner destroys them (D64). It
+// holds the run's deploy lock throughout, as a deploy does (D46, amended).
+func Destroy(ctx context.Context, o Options) (err error) {
 	s, err := open(o)
 	if err != nil {
 		return err
@@ -187,6 +205,11 @@ func Destroy(ctx context.Context, o Options) error {
 	if err := s.requireDeploy(); err != nil {
 		return err
 	}
+	release, err := s.lock(ctx, opDestroy, time.Now)
+	if err != nil {
+		return err
+	}
+	defer func() { err = errors.Join(err, release()) }()
 	req, cleanup, err := s.deployedRequest(ctx, true)
 	defer cleanup()
 	if err != nil {

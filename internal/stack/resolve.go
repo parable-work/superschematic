@@ -185,11 +185,11 @@ type settings struct {
 	// job whose fields lack one leaves out rather than refuses.
 	inherited map[string]bool
 
-	// schedule, timeZone and enabled are a job's: what the environment
-	// chain sets, the later over the earlier. scheduleFrom names the
-	// environment that set each.
+	// schedule, timeZone, enabled and onDeploy are a job's: what the
+	// environment chain sets, the later over the earlier. scheduleFrom
+	// names the environment that set each.
 	schedule, timeZone string
-	enabled            *bool
+	enabled, onDeploy  *bool
 	scheduleFrom       map[string]string
 
 	// instances and concurrency are a worker's, with enabled: what the
@@ -739,11 +739,11 @@ func (r *resolver) applySettings() {
 			if r.applyWorkerSettings(where, env.Name, d, entry) {
 				continue
 			}
-			if entry.Schedule == "" && entry.TimeZone == "" && entry.Enabled == nil {
+			if entry.Schedule == "" && entry.TimeZone == "" && entry.Enabled == nil && entry.OnDeploy == nil {
 				continue
 			}
 			if d.res.Kind != ir.DeployableJob {
-				r.fail(CodeInvalidSettings, "%s sets a schedule, a time zone or enabled on %s %s; only a job takes them, named beside its API's handle with `job`", where, d.res.Kind, d.res.Name)
+				r.fail(CodeInvalidSettings, "%s sets a schedule, a time zone, enabled or onDeploy on %s %s; only a job takes them, named beside its API's handle with `job`", where, d.res.Kind, d.res.Name)
 				continue
 			}
 			if s.scheduleFrom == nil {
@@ -764,6 +764,10 @@ func (r *resolver) applySettings() {
 			if entry.Enabled != nil {
 				enabled := *entry.Enabled
 				s.enabled, s.scheduleFrom["enabled"] = &enabled, env.Name
+			}
+			if entry.OnDeploy != nil {
+				onDeploy := *entry.OnDeploy
+				s.onDeploy, s.scheduleFrom["onDeploy"] = &onDeploy, env.Name
 			}
 		}
 	}
@@ -815,7 +819,9 @@ func (r *resolver) inheritServerEnv() {
 // settings, and run unless the settings turn it off. A parameterized
 // environment's members run no schedule unless their settings turn it on.
 // The timeout and retries are the decorator's, the timeout ten minutes
-// unless it sets one.
+// unless it sets one. A job runs on every deploy when the settings say
+// onDeploy, a member's inherited from its parent as any setting is (D52,
+// amended).
 func (r *resolver) scheduleJobs() {
 	parameterized := len(r.env.parameters) > 0
 	for _, name := range sortedKeys(r.deployables) {
@@ -854,6 +860,7 @@ func (r *resolver) scheduleJobs() {
 			job.TimeoutSeconds, _ = registry.TimeoutSeconds(d.job.Timeout) // CheckJob read it
 		}
 		job.Retries = d.job.Retries
+		job.OnDeploy = s.onDeploy != nil && *s.onDeploy
 	}
 }
 

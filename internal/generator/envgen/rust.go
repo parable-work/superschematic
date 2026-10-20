@@ -33,7 +33,7 @@ func WriteRustConfig(output *ConfigOutput, outputDir string) error {
 		return fmt.Errorf("failed to generate Rust config loader: %w", err)
 	}
 
-	if output.TypeName == "" && len(output.Derived) == 0 {
+	if output.TypeName == "" && len(output.Derived) == 0 && output.ListedCallersField == "" {
 		return nil
 	}
 	if err := WriteValuesSchema(output, outputDir); err != nil {

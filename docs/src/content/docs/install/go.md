@@ -320,7 +320,15 @@ API with `public: true` runs `Config.AuthMiddleware` on its protected
 routes, and a schema with an `@requireService` or `@allowService` clause
 adds `Config.ServiceAuthenticator`, a `serviceauth.Authenticator` from the
 HTTP runtime, which `Config.Validate` requires. A handler reads the
-calling service with `serviceauth.CallerFromContext(ctx)`.
+calling service with `serviceauth.CallerFromContext(ctx)`. In a stack,
+`main.go` builds it from the API's callers field, whose variables the
+API's `values-schema.json` lists for a deployment outside a stack, even
+for an API with no other configuration. A server that serves an
+API with a clause and calls it from another API it serves also generates
+a loopback key at start, `serviceauth.NewLoopback`, whose token its client
+of that API sends to the server's own loopback URL, and which the
+authenticator accepts as the server itself
+([Service callers](/superschematic/guides/auth-and-permissions/#service-callers)).
 
 An operation declared `@manualRouteRegistration` answers with a handler
 you write, for a response the JSON envelope cannot hold, such as a file

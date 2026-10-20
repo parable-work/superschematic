@@ -522,7 +522,13 @@ func printLocalSummary(w io.Writer, env *ir.ResolvedEnvironment, stateDir string
 				lines = append(lines, fmt.Sprintf("  server   %-24s %s", d.Name, address))
 			}
 		case d.Kind == ir.DeployableJob && d.Job != nil && d.Job.Schedule != "":
-			lines = append(lines, fmt.Sprintf("  job      %-24s on %s (%s)", d.Name, d.Job.Schedule, d.Job.TimeZone))
+			start := ""
+			if d.Job.OnDeploy {
+				start = ", and once at each start"
+			}
+			lines = append(lines, fmt.Sprintf("  job      %-24s on %s (%s)%s", d.Name, d.Job.Schedule, d.Job.TimeZone, start))
+		case d.Kind == ir.DeployableJob && d.Job != nil && d.Job.OnDeploy:
+			lines = append(lines, fmt.Sprintf("  job      %-24s once at each start, and on demand: superschematic stack run %s %s", d.Name, env.Environment, d.Name))
 		case d.Kind == ir.DeployableJob:
 			lines = append(lines, fmt.Sprintf("  job      %-24s on demand: superschematic stack run %s %s", d.Name, env.Environment, d.Name))
 		case d.Kind == ir.DeployableSite:

@@ -175,16 +175,19 @@ TypeScript runtimes' (D51):
   `queues.go` and TypeScript's `queue.ts` (D53): a DB's Rust types carry
   each queue's descriptor as JSON, which `QueueDefinition::parse` reads in
   TypeScript's `QueueDefinition` member names (`name`, `table`, `retries`,
-  `backoffSeconds`, `leaseSeconds`, `fields` with each `name`, `column`,
-  `json`, `list` and `default`, and the `statements`
-  `sqlutil.PostgresQueueStatements` writes). `enqueue(&tx, &queue, &message)`
+  `backoffSeconds`, `maxBackoffSeconds`, `leaseSeconds`, `retainSeconds`,
+  `fields` with each `name`, `column`, `json`, `list` and `default`, and
+  the `statements` `sqlutil.PostgresQueueStatements` writes). `enqueue(&tx, &queue, &message)`
   writes a message in the caller's transaction, a deadpool `Transaction`,
   each member of the message's serde form to its field's column, an unset
   enum to its schema default. `PostgresQueue::<M>::new(pool, queue)` claims
   (`claim(n, lease)`, expiring dead claims first, as Go does), `extend`s,
-  `complete`s, `fail`s (returning whether the message is dead) and
-  `release`s, each change refusing a token that no longer claims its
-  message with `QueueError::ClaimLost`. Parameters go as text, which
+  `complete`s, `fail`s (returning whether the message is dead, due again
+  after the backoff doubled for each attempt before and capped at the
+  maximum backoff, D68) and `release`s, each change refusing a token that
+  no longer claims its message with `QueueError::ClaimLost`, and
+  `prune(limit)` deletes up to `limit` messages done for the retention,
+  never a dead one, returning how many. Parameters go as text, which
   Postgres reads by each column's type, as node-postgres sends them, a
   base62 `Identity.UUID` hyphenated; a claimed row's columns come back as
   the JSON values a message's type reads: a `TIMESTAMPTZ` in RFC 3339 in
@@ -192,8 +195,8 @@ TypeScript runtimes' (D51):
   from its array, JSON as itself. A column of a type it does not read
   (`POINT`, `INTERVAL`, which the descriptors leave out) is refused.
 - The `postgres` feature's `worker` module, Go's `worker.Run` ported:
-  `run_worker(queue, handler, Options { concurrency, grace, idle },
-  shutdown)` claims for each free slot up to the concurrency
+  `run_worker(queue, handler, Options { concurrency, grace, idle,
+  prune_every }, shutdown)` claims for each free slot up to the concurrency
   (`concurrency_from_env(default)` reads `WORKER_CONCURRENCY`), waits the
   idle second after a claim that found too few, and after a failed claim a
   wait that doubles to 30 s. It runs each handler, any `Fn(M) -> impl
@@ -203,10 +206,13 @@ TypeScript runtimes' (D51):
   characters, as the cause. Each queue operation has 5 s to answer. Once
   `shutdown` is cancelled it claims no more, lets the running handlers
   finish within the grace (8 s by default), then drops the rest and
-  releases their messages. It logs Go's and TypeScript's messages and
-  fields (`queue`, `message`, `attempt`, `took`, `error`, `retryIn`) through
-  `tracing`. It claims through the `WorkerQueue` trait, which
-  `PostgresQueue` implements. With the `otel` feature and export on, each
+  releases their messages. As it starts and every `prune_every` (five
+  minutes by default) it prunes the queue, `PRUNE_BATCH` (1000) at a time
+  until a batch is short. It logs Go's and TypeScript's messages and
+  fields (`queue`, `message`, `attempt`, `took`, `error`, `retryIn`,
+  `pruned`) through `tracing`. It claims through the `WorkerQueue` trait,
+  which `PostgresQueue` implements; a queue that does not implement its
+  `prune` prunes nothing. With the `otel` feature and export on, each
   message's handling is a consumer span, `process <queue>`.
 - The `otel` feature's `telemetry` module (D67), OpenTelemetry trace
   export over OTLP/HTTP in protobuf. `telemetry::start(Defaults { stack,

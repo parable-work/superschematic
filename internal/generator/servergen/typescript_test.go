@@ -42,6 +42,13 @@ const (
 	// servers, whose Staging environment places ts-db on Cloud SQL.
 	tsCloudStack = "ts-cloud-stack"
 
+	// tsMergedStack is a third, whose declared server tsMergedServer
+	// serves ts-pricing and ts-shop, so ts-shop's calls of ts-pricing stay
+	// within it (docs/stack-model.md, section 9.9). It is loaded, and built
+	// only by the serve test.
+	tsMergedStack  = "ts-merged-stack"
+	tsMergedServer = "Counter"
+
 	// tsSite is the fixture's site, which ts-stack deploys and which calls
 	// ts-shop: ts-shop's server answers CORS for it (D55). It is loaded,
 	// not built.
@@ -70,7 +77,7 @@ func loadTypeScriptFixture(t *testing.T) fixture {
 		t.Fatal(err)
 	}
 	f := fixture{reg: reg, schemas: map[string]*ir.Schema{}, configs: map[string]*schemaconfig.SchemaConfig{}}
-	for _, name := range append(slices.Clone(tsOrder), tsCloudStack, tsWorkersStack, tsSite, tsReports, tsCronStack) {
+	for _, name := range append(slices.Clone(tsOrder), tsCloudStack, tsMergedStack, tsWorkersStack, tsSite, tsReports, tsCronStack) {
 		schema, cfg, err := loader.LoadServiceWithConfig(filepath.Join(tsServicesRoot, name), loader.WithRegistry(reg))
 		if err != nil {
 			t.Fatalf("load %s: %v", name, err)
@@ -435,7 +442,12 @@ func variables(t *testing.T, field string, value any) []string {
 // for /healthz.
 func bunServer(t *testing.T, bun, dir string, env ...string) *started {
 	t.Helper()
-	port := freePort(t)
+	return bunServerOn(t, freePort(t), bun, dir, env...)
+}
+
+// bunServerOn is bunServer on port.
+func bunServerOn(t *testing.T, port, bun, dir string, env ...string) *started {
+	t.Helper()
 	var out strings.Builder
 	cmd := exec.Command(bun, servergen.TypeScriptMainFile)
 	cmd.Dir = dir
@@ -513,7 +525,7 @@ func TestTypeScriptEntrypointCompilesAndServes(t *testing.T) {
 	f := loadTypeScriptFixture(t)
 	// ts-db's TypeScript types export the queue ts-shop's implementation
 	// enqueues on and its worker claims (D53).
-	f.build(t, repoRoot, paths, append([]string{"ts-db"}, append(slices.Clone(tsAPIs), "ts-stack")...)...)
+	f.build(t, repoRoot, paths, append([]string{"ts-db"}, append(slices.Clone(tsAPIs), "ts-stack", tsMergedStack)...)...)
 	names := naming.Default()
 	out := filepath.Join(repoRoot, "schemas", "dist")
 	run := func(dir, name string, args ...string) {
@@ -543,8 +555,9 @@ func TestTypeScriptEntrypointCompilesAndServes(t *testing.T) {
 	}
 	pricingDir := servergen.ServerDir(out, "ts-stack", "ts-pricing")
 	shopDir := servergen.ServerDir(out, "ts-stack", "ts-shop")
+	mergedDir := servergen.ServerDir(out, tsMergedStack, tsMergedServer)
 	for _, dir := range []string{
-		pricingDir, shopDir, servergen.ServerDir(out, "ts-stack", tsSweepCarts), servergen.ServerDir(out, "ts-stack", tsRemindShoppers),
+		pricingDir, shopDir, mergedDir, servergen.ServerDir(out, "ts-stack", tsSweepCarts), servergen.ServerDir(out, "ts-stack", tsRemindShoppers),
 		names.TypeScriptImplementationDir(repoRoot, "ts-pricing"), names.TypeScriptImplementationDir(repoRoot, "ts-shop"),
 	} {
 		run(dir, tsc, "--noEmit", "-p", "tsconfig.json")
@@ -619,6 +632,26 @@ func TestTypeScriptEntrypointCompilesAndServes(t *testing.T) {
 	}
 	pricing.stop(t)
 
+	// Counter serves ts-pricing and ts-shop, whose cart asks ts-pricing for
+	// its quote at the loopback URL the local connector derives for a call
+	// within one server, with no credential, here through a proxy that
+	// keeps the token the call carries. ts-pricing admits it as Counter
+	// (docs/stack-model.md, section 9.9), and a second Counter process,
+	// whose loopback key is its own, refuses it.
+	mergedEnv := append([]string{"TS_DB_DATABASE_URL=" + unreachable, ir.CallersField("ts-pricing") + "_ISSUERS=0"},
+		variables(t, "TS_MEDIA_BUCKET", ir.BucketConnection{Name: "ts-media", Endpoint: "http://127.0.0.1:9"})...)
+	mergedPort := freePort(t)
+	capture := captureLoopback(t, "http://127.0.0.1:"+mergedPort)
+	merged := bunServerOn(t, mergedPort, bun, mergedDir, append(mergedEnv, "TS_PRICING_SERVICE_URL="+capture.url)...)
+	token := checkLoopbackCalls(t, merged, capture, tsMergedServer, "/api/carts/tea", "/api/quotes/tea", `"cents":300`)
+	merged.stop(t)
+	if !strings.Contains(merged.out.String(), `"caller":"Counter"`) {
+		t.Errorf("ts-pricing on Counter did not log its quote for Counter:\n%s", merged.out.String())
+	}
+	again := bunServer(t, bun, mergedDir, append(mergedEnv, "TS_PRICING_SERVICE_URL=http://127.0.0.1:9")...)
+	again.sendWith(t, http.MethodGet, "/api/quotes/tea", "", map[string]string{"Service-Authorization": "Bearer " + token}, http.StatusUnauthorized, "service_unauthorized")
+	again.stop(t)
+
 	cmd := exec.Command(bun, servergen.TypeScriptMainFile)
 	cmd.Dir = shopDir
 	cmd.Env = append(os.Environ(), append(append(cloudSQLVariables(t, "TS_DB_DATABASE"), edge...), "PORT="+freePort(t))...)
@@ -672,8 +705,11 @@ func exportCart(t *testing.T, url string) {
 // package depends on, the scaffolds, the installed workspace's lockfile
 // and checkouts of superscalar and the HTTP runtime, and the image serves:
 // /healthz, an API's route, /readyz reporting its database down, and a
-// clean stop on docker stop. It needs Docker and the network, builds
-// superscalar's Node addon in a Rust stage, and runs only outside -short.
+// clean stop on docker stop. Built into a second output root inside the
+// repository, whose context takes that root's mirrors of the
+// implementations in place of the packages (D65, amended), the image
+// serves alike. It needs Docker and the network, builds superscalar's
+// Node addon in a Rust stage, and runs only outside -short.
 func TestTheTypeScriptDockerfileBuildsAnImageThatServes(t *testing.T) {
 	needDocker(t)
 	bun, err := exec.LookPath("bun")
@@ -709,7 +745,25 @@ func TestTheTypeScriptDockerfileBuildsAnImageThatServes(t *testing.T) {
 		testpaths.RequireOrSkipTS(t, fmt.Sprintf("bun install failed at the output root (likely offline): %v\n%s", err, output))
 	}
 
-	dockerfile := filepath.Join(servergen.ServerDir(out, tsCloudStack, "ts-shop"), servergen.DockerFile)
+	serveTypeScriptImage(t, repoRoot, filepath.Join(servergen.ServerDir(out, tsCloudStack, "ts-shop"), servergen.DockerFile))
+
+	other := filepath.Join(repoRoot, "schemas", "dist-b")
+	if err := buildTSInto(f, repoRoot, tsFakePaths(repoRoot), other, append([]string{"ts-db"}, append(slices.Clone(tsAPIs), tsCloudStack)...)...); err != nil {
+		t.Fatal(err)
+	}
+	install = exec.Command(bun, "install")
+	install.Dir = other
+	if output, err := install.CombinedOutput(); err != nil {
+		t.Fatalf("bun install in %s: %v\n%s", other, err, output)
+	}
+	serveTypeScriptImage(t, repoRoot, filepath.Join(servergen.ServerDir(other, tsCloudStack, "ts-shop"), servergen.DockerFile))
+}
+
+// serveTypeScriptImage builds the image of ts-shop's Dockerfile from the
+// context a deploy writes out of repoRoot, runs it with its database and
+// its callee unreachable, and checks it serves and stops cleanly.
+func serveTypeScriptImage(t *testing.T, repoRoot, dockerfile string) {
+	t.Helper()
 	archive := filepath.Join(t.TempDir(), "context.tar.gz")
 	file, err := os.Create(archive)
 	if err != nil {

@@ -158,6 +158,39 @@ func TestRenderKeepsParameterValuesOut(t *testing.T) {
 	}
 }
 
+// TestRenderRunsNoJobOnDeploy: gcp's golden Staging runs shop-orders' job
+// on every deploy (D52, amended), and the program is the one it is without:
+// the deploy runs the job through the target's job runner in the jobs step,
+// so no node starts an execution, and the Cloud Run job sets no
+// runExecutionToken or startExecutionToken.
+func TestRenderRunsNoJobOnDeploy(t *testing.T) {
+	env := gcpEnvironment(t, "Staging")
+	job := env.Deployable("shop-orders-ship-orders")
+	if job == nil || job.Job == nil || !job.Job.OnDeploy {
+		t.Fatalf("gcp's golden Staging runs no job on deploy: %+v", job)
+	}
+	program := render(t, env)
+	for _, token := range []string{"runExecutionToken", "startExecutionToken"} {
+		if strings.Contains(program, token) {
+			t.Errorf("the program sets %s", token)
+		}
+	}
+	job.Job.OnDeploy = false
+	var order []*ir.DeployStep
+	for _, step := range env.DeployOrder {
+		if step.Step != ir.StepJobs {
+			order = append(order, step)
+		}
+	}
+	if len(order) == len(env.DeployOrder) {
+		t.Fatal("gcp's golden Staging has no jobs step")
+	}
+	env.DeployOrder = order
+	if without := render(t, env); without != program {
+		t.Error("the program of Staging with its job's onDeploy off differs")
+	}
+}
+
 // TestExports lists what the program exports: every node's id, and every
 // output the environment references, inherited nodes' included.
 func TestExports(t *testing.T) {

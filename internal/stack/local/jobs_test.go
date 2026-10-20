@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -260,4 +261,89 @@ func TestRunJob(t *testing.T) {
 // stateDir is the fixture's environment's state directory.
 func stateDir(f *fixture) string {
 	return filepath.FromSlash(strings.TrimPrefix(f.req.Backend.URL, "file://"))
+}
+
+// TestJobRunsOnceTheEnvironmentIsUp: a job Pinned runs on every deploy
+// (D52, amended) runs in the deploy order's jobs step, after the last
+// rollout wave and before the contract phase: once, its retries included,
+// with its output prefixed, and the step returns when it ends. Its last
+// try failing is logged and stops nothing, as a scheduled run's does. A
+// run of it from stack run, which holds its lock, makes the step skip it.
+func TestJobRunsOnceTheEnvironmentIsUp(t *testing.T) {
+	f := newFixtureOf(t, stacktest.WithJobOnDeploy(shop(), "Pinned"), "Pinned")
+	out := &lockedOutput{}
+	f.prov.SetOutput(out)
+	f.runner.exits = map[string][]error{shipOrders: {errors.New("exit status 1"), nil, errors.New("exit status 1"), errors.New("exit status 1")}}
+	f.keys(t)
+	var steps []string
+	var jobs *ir.DeployStep
+	for _, step := range f.env.DeployOrder {
+		steps = append(steps, string(step.Step))
+		switch step.Step {
+		case ir.StepRollout:
+			if err := f.prov.Apply(context.Background(), f.req, *step); err != nil {
+				t.Fatal(err)
+			}
+		case ir.StepJobs:
+			jobs = step
+		}
+	}
+	if got, want := strings.Join(steps, ", "), "infrastructure, migrate, rollout, rollout, jobs, migrate"; got != want {
+		t.Errorf("Pinned's deploy order: %s, want %s", got, want)
+	}
+	if jobs == nil || !slices.Equal(jobs.Deployables, []string{shipOrders}) {
+		t.Fatalf("Pinned's jobs step: %+v", jobs)
+	}
+	waitFor(t, out, "job "+shipOrders+" runs once the environment is up, as on every deploy")
+	ran := func() int {
+		n := 0
+		for _, cmd := range f.runner.commands {
+			if filepath.Base(cmd.Path) == shipOrders {
+				n++
+			}
+		}
+		return n
+	}
+	if n := ran(); n != 0 {
+		t.Fatalf("the rollout ran the job %d times", n)
+	}
+
+	if err := f.prov.Apply(context.Background(), f.req, *jobs); err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range []string{
+		"job " + shipOrders + ": start the run after the rollout, try 1 of 2",
+		"job " + shipOrders + ": the run after the rollout, try 1 of 2 failed after ",
+		"job " + shipOrders + ": the run after the rollout, try 2 of 2 succeeded",
+	} {
+		if !strings.Contains(out.String(), line) {
+			t.Errorf("the output lacks %q:\n%s", line, out)
+		}
+	}
+	if n := ran(); n != 2 {
+		t.Errorf("the jobs step ran the job %d times, want 2: a failed try and its retry", n)
+	}
+
+	// Its last try fails: logged, and the step goes on.
+	if err := f.prov.Apply(context.Background(), f.req, *jobs); err != nil {
+		t.Errorf("a jobs step whose job fails = %v, want nil: a job's run never stops the environment", err)
+	}
+	waitFor(t, out, "job "+shipOrders+": the run after the rollout failed; the environment runs on: exit status 1")
+
+	// A run from stack run holds the job's lock.
+	lock, err := os.OpenFile(filepath.Join(stateDir(f), local.JobsDir, shipOrders+".lock"), os.O_RDWR, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	if err := flock(lock); err != nil {
+		t.Skipf("no flock here: %v", err)
+	}
+	if err := f.prov.Apply(context.Background(), f.req, *jobs); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, out, "job "+shipOrders+": skipped the run after the rollout: a run of it goes on, from stack run")
+	if n := ran(); n != 4 {
+		t.Errorf("the job ran %d times, want 4", n)
+	}
 }

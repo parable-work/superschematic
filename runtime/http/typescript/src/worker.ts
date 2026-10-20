@@ -25,6 +25,13 @@ handler was given, releases their messages, which are due again at once
 for another worker, and resolves. A handler that settles after its
 message was released changes nothing: JavaScript cannot stop it, but the
 process exits after runWorker resolves.
+
+Beside the claims, runWorker prunes the queue (D68): when it starts and
+every five minutes after, it deletes the done messages older than the
+queue's retention, PRUNE_BATCH at a time until a batch is short, and logs
+how many. Every instance of every worker of the queue prunes, which is
+safe: each batch skips the rows another holds, and a row deleted once is
+gone. It never deletes a dead message.
 */
 
 /** The environment variable a platform sets to the number of messages a worker handles at a time. */
@@ -36,10 +43,20 @@ export const DEFAULT_GRACE_MS = 8_000;
 /** How long a worker waits to claim again after a claim found fewer messages than it had slots for. */
 export const DEFAULT_IDLE_MS = 1_000;
 
+/** How often a worker prunes its queue's done messages, after the prune it starts with. */
+export const DEFAULT_PRUNE_EVERY_MS = 300_000;
+
+/**
+ * How many done messages one prune statement deletes at most, so no
+ * statement holds its locks for long; a prune runs another while one
+ * deletes a whole batch.
+ */
+export const PRUNE_BATCH = 1_000;
+
 /** The longest wait after a claim that failed, which doubles from the idle wait. */
 const MAX_BACKOFF_MS = 30_000;
 
-/** How long each complete, fail, extend and release may take, so a stopping worker still records them. */
+/** How long each complete, fail, extend, release and prune batch may take, so a stopping worker still records them. */
 const OP_TIMEOUT_MS = 5_000;
 
 /** The longest error a failed message records. */
@@ -66,6 +83,8 @@ export interface WorkerQueue {
   /** Records cause on a claimed message and resolves to whether it is dead. */
   fail(id: string, token: string, cause: string): Promise<boolean>;
   release(id: string, token: string): Promise<void>;
+  /** Deletes up to limit messages done for the queue's retention and resolves to how many; without it the worker prunes nothing. */
+  prune?(limit: number): Promise<number>;
 }
 
 export interface WorkerOptions {
@@ -77,6 +96,8 @@ export interface WorkerOptions {
   readonly graceMs?: number;
   /** How long to wait after a claim that found too few messages; DEFAULT_IDLE_MS unless set. */
   readonly idleMs?: number;
+  /** How often to prune the queue after the prune the worker starts with; DEFAULT_PRUNE_EVERY_MS unless set. */
+  readonly pruneEveryMs?: number;
   /** Logs each message's outcome; nothing is logged without one. */
   readonly logger?: Logger;
 }
@@ -130,6 +151,7 @@ export async function runWorker(queue: WorkerQueue, options: WorkerOptions): Pro
   const concurrency = Math.max(1, Math.floor(options.concurrency ?? 1));
   const graceMs = options.graceMs !== undefined && options.graceMs > 0 ? options.graceMs : DEFAULT_GRACE_MS;
   const idleMs = options.idleMs !== undefined && options.idleMs > 0 ? options.idleMs : DEFAULT_IDLE_MS;
+  const pruneEveryMs = options.pruneEveryMs !== undefined && options.pruneEveryMs > 0 ? options.pruneEveryMs : DEFAULT_PRUNE_EVERY_MS;
   const logger = (options.logger ?? silent).child({ queue: queue.name });
   const { signal } = options;
   // The handlers' signal outlives the worker's by the grace.
@@ -198,6 +220,39 @@ export async function runWorker(queue: WorkerQueue, options: WorkerOptions): Pro
     }
   };
 
+  // Deletes the done messages past the retention, a batch at a time until a
+  // batch is short, and logs how many. A failed batch ends the prune, which
+  // the next tries again. A stopping worker waits for no batch: one that
+  // runs settles unheard.
+  const stopped = new Promise<'stopped'>(resolve => {
+    if (signal.aborted) resolve('stopped');
+    else signal.addEventListener('abort', () => resolve('stopped'), { once: true });
+  });
+  const prune = async (deleteBatch: (limit: number) => Promise<number>): Promise<void> => {
+    let pruned = 0;
+    try {
+      while (!signal.aborted) {
+        const batch = withTimeout(deleteBatch(PRUNE_BATCH));
+        batch.catch(() => {});
+        const n = await Promise.race([batch, stopped]);
+        if (n === 'stopped') break;
+        pruned += n;
+        if (n < PRUNE_BATCH) break;
+      }
+    } catch (error) {
+      if (!signal.aborted) logger.warn('pruning the done messages failed', { pruned, error });
+    }
+    if (pruned > 0) logger.info('done messages pruned', { pruned });
+  };
+  // Prunes at once, then every pruneEveryMs, until the signal aborts.
+  const pruning = (async () => {
+    const deleteBatch = queue.prune?.bind(queue);
+    if (deleteBatch === undefined) return;
+    do {
+      await prune(deleteBatch);
+    } while (await sleep(pruneEveryMs, signal));
+  })();
+
   // Claims for the free slots until the signal aborts.
   let wait = idleMs;
   while (!signal.aborted) {
@@ -230,7 +285,7 @@ export async function runWorker(queue: WorkerQueue, options: WorkerOptions): Pro
   }
 
   // Stops: waits up to the grace for the running handlers, then aborts the
-  // rest and releases their messages.
+  // rest and releases their messages. The prune stops with the signal.
   if (running.size > 0) logger.info('stopping: letting the running handlers finish', { running: running.size, grace: graceMs / 1000 });
   const all = Promise.all([...running.values()].map(h => h.done));
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -240,6 +295,7 @@ export async function runWorker(queue: WorkerQueue, options: WorkerOptions): Pro
   const late = await Promise.race([all.then(() => false), over]);
   clearTimeout(timer);
   if (!late) {
+    await pruning;
     logger.info('worker stopped');
     return;
   }
@@ -255,6 +311,7 @@ export async function runWorker(queue: WorkerQueue, options: WorkerOptions): Pro
       logger.error('release failed: the message is due again when its claim expires', { message: message.id, error });
     }
   }
+  await pruning;
   logger.info('worker stopped: the grace is over, and the unfinished messages are released', { released, unfinished: unfinished.length });
 }
 

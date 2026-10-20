@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -60,6 +61,26 @@ func TestWorkspaceRootManifest(t *testing.T) {
 		t.Fatalf("manifest:\n%s\nwant:\n%s", got, want)
 	}
 
+	// Another output root lists the implementations' mirrors under impl/,
+	// and none of the project's packages, which are the default root's
+	// members (D65, amended).
+	w.OutputRoot = filepath.Join(root, "other")
+	w.Mirrored = true
+	mirrored, err := w.Manifest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := `  "workspaces": [
+    "types/typescript/*",
+    "sdk/typescript/*",
+    "api/*",
+    "server/*/*",
+    "impl/*"
+  ],
+`; !strings.Contains(mirrored, want) {
+		t.Fatalf("the mirrored root's manifest:\n%s\nwant its workspaces:\n%s", mirrored, want)
+	}
+
 	// Without [paths] or a repository root: the members the output root
 	// holds, and superscalar by name.
 	bare, err := (WorkspaceRoot{OutputRoot: root}).Manifest()
@@ -79,6 +100,33 @@ func TestWorkspaceRootManifest(t *testing.T) {
 	if manifest.Name != naming.Default().NpmScope+"/workspace" || !manifest.Private || len(manifest.Workspaces) != 4 ||
 		manifest.Dependencies["superscalar"] != "*" || manifest.Overrides != nil {
 		t.Fatalf("manifest without paths: %s", bare)
+	}
+}
+
+// TestMirrored: an output root is mirrored unless it is the default one,
+// <schemas-root>/dist, however a path names it, through a symbolic link
+// or before it exists; with no schemas root none is (D65, amended).
+func TestMirrored(t *testing.T) {
+	real := t.TempDir()
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	schemas := filepath.Join(real, "schemas")
+	for _, c := range []struct {
+		out, schemas string
+		want         bool
+	}{
+		{filepath.Join(real, "schemas", "dist"), schemas, false},
+		{filepath.Join(link, "schemas", "dist"), schemas, false},
+		{filepath.Join(real, "schemas", "dist", "..", "dist"), schemas, false},
+		{filepath.Join(real, "schemas", "dist-b"), schemas, true},
+		{filepath.Join(t.TempDir(), "out"), schemas, true},
+		{filepath.Join(t.TempDir(), "out"), "", false},
+	} {
+		if got := Mirrored(c.out, c.schemas); got != c.want {
+			t.Errorf("Mirrored(%s, %s) = %v, want %v", c.out, c.schemas, got, c.want)
+		}
 	}
 }
 

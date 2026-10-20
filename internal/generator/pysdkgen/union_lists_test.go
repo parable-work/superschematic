@@ -16,6 +16,8 @@ import (
 // loadUnionListsAPI loads union-lists-api (sdktest.LoadUnionListsService)
 // with sdktest.AddCircleOperations: the union Shape and the object Circle
 // as maps, maps of lists and responses that may be null, among others.
+// union_models_test.go's loadUnionModelsAPI adds a page, a model with union
+// fields and a discriminated union instead.
 func loadUnionListsAPI(t *testing.T) (*ir.Schema, *apigen.APIOutput) {
 	t.Helper()
 	schema, err := sdktest.LoadUnionListsService()
@@ -74,8 +76,11 @@ func TestUnionListsSDKOutputTypeHints(t *testing.T) {
 // the Python SDK of union-lists-api with sdktest.AddCircleOperations,
 // byte-compiles both, and runs unionListsProbe against a local HTTP
 // server: a map and a map of lists keep their keys, a Circle in one is
-// coerced to the model value by value, and a response that may be null is
-// None for null. The probe needs pydantic and skips without it.
+// coerced to the model value by value, and a Shape to its member model, as
+// a list's elements are, and a response that may be null is its model or
+// member, or None for null. A value that neither reads, or data that is not
+// the map it should be, raises SDKError at its key (data[b],
+// data[mixed][1]). The probe needs pydantic and skips without it.
 func TestUnionListsSDKReadsMapsAndNulls(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping compile check in -short mode")
@@ -117,7 +122,7 @@ func TestUnionListsSDKReadsMapsAndNulls(t *testing.T) {
 
 // unionListsProbe is formatted with the types and SDK directories, the SDK
 // package, the SDK class and the types package. A value of the union is
-// compared as plain data, the SDK not reading it into a member.
+// checked to be its member model, then compared as plain data.
 const unionListsProbe = `
 import json
 import sys
@@ -129,6 +134,7 @@ sys.path.insert(0, %[2]q)
 sdk_package = __import__(%[3]q)
 SDK = getattr(sdk_package, %[4]q)
 types = __import__(%[5]q)
+SDKError = sdk_package.SDKError
 
 circle = {"radius": 1}
 square = {"side": 2}
@@ -168,20 +174,39 @@ def plain(value):
     return value
 
 
+def refused(call, message):
+    try:
+        call()
+    except SDKError as err:
+        assert message in str(err), f"{message!r} not in {str(err)!r}"
+    else:
+        raise AssertionError(f"expected an SDKError with {message!r}")
+
+
 server = HTTPServer(("127.0.0.1", 0), Handler)
 threading.Thread(target=server.serve_forever, daemon=True).start()
 sdk = SDK(sdk_package.ClientConfig(base_url="http://127.0.0.1:%%d" %% server.server_address[1]))
 
-# A map and a map of lists of the union keep their keys.
+# A map and a map of lists of the union keep their keys, and each value or
+# element is the member model the union picks.
 shapes = sdk.shape.shapes_by_name()
+assert isinstance(shapes, dict) and sorted(shapes) == ["a", "b"], shapes
+assert type(shapes["a"]) is types.Circle and type(shapes["b"]) is types.Square, shapes
 assert plain(shapes) == {"a": circle, "b": square}, shapes
 groups = sdk.shape.shape_groups()
+assert isinstance(groups, dict) and sorted(groups) == ["mixed", "none", "round"], groups
+assert [type(item) for item in groups["round"]] == [types.Circle], groups
+assert [type(item) for item in groups["mixed"]] == [types.Square, types.Circle], groups
 assert plain(groups) == {"round": [circle], "mixed": [square, circle], "none": []}, groups
 
-# A response that may be null is None for null.
-assert plain(sdk.shape.find_shape("c-1")) == circle
+# A response of the union that may be null is its member, or None for null.
+found_shape = sdk.shape.find_shape("c-1")
+assert type(found_shape) is types.Circle and plain(found_shape) == circle, found_shape
 assert sdk.shape.find_shape("none") is None
 assert sdk.shape.find_shapes() is None
+answers["/api/shape-search"] = [square, circle]
+found_shapes = sdk.shape.find_shapes()
+assert [type(item) for item in found_shapes] == [types.Square, types.Circle], found_shapes
 
 # A Circle in a map or a map of lists is coerced to the model value by value.
 circles = sdk.shape.circles_by_name()
@@ -194,5 +219,29 @@ assert len(circle_groups["round"]) == 2 and circle_groups["none"] == [], circle_
 found = sdk.shape.find_circle("c-1")
 assert isinstance(found, types.Circle) and found.radius == 1, found
 assert sdk.shape.find_circle("none") is None
+
+# A map value that no member or model reads raises SDKError at its key, as
+# a list's element does at its index, and so does one that may be null.
+answers["/api/shape-index"] = {"a": circle, "b": "triangle"}
+refused(sdk.shape.shapes_by_name, "response data[b] is not a valid Shape")
+answers["/api/shape-groups"] = {"round": [circle], "mixed": [square, {"sides": 3}]}
+refused(sdk.shape.shape_groups, "response data[mixed][1] is not a valid Shape")
+answers["/api/circle-index"] = {"a": {"radius": "wide"}}
+refused(sdk.shape.circles_by_name, "response data[a] is not a valid Circle")
+answers["/api/shape-search/c-1"] = {"sides": 3}
+refused(lambda: sdk.shape.find_shape("c-1"), "response data is not a valid Shape")
+answers["/api/circle-search/c-1"] = {"radius": "wide"}
+refused(lambda: sdk.shape.find_circle("c-1"), "response data is not a valid Circle")
+
+# Data that is not the map, or a map value that is not the list, it should
+# be raises SDKError too.
+answers["/api/shape-index"] = [circle, square]
+refused(sdk.shape.shapes_by_name, "expected response data to be a map of Shape")
+answers["/api/shape-groups"] = [[circle]]
+refused(sdk.shape.shape_groups, "expected response data to be a map of lists of Shape")
+answers["/api/shape-groups"] = {"round": circle}
+refused(sdk.shape.shape_groups, "expected response data[round] to be a list of Shape")
+answers["/api/circle-groups"] = {"round": [circle, "wide"]}
+refused(sdk.shape.circle_groups, "response data[round][1] is not a valid Circle")
 server.shutdown()
 `

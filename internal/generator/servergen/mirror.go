@@ -15,6 +15,7 @@ import (
 	"github.com/BurntSushi/toml"
 
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/generator/tsgen"
 )
 
 // The mirror of a Rust implementation (D65; docs/stack-model.md, section
@@ -50,7 +51,8 @@ import (
 //     out when it is set, or else what [package] exclude and the crate's
 //     .gitignore files leave out, the .gitignore files standing in for
 //     git's ignore rules, so the mirror is the same whether or not the
-//     crate is in a git work tree (gitignore.go).
+//     crate is in a git work tree (gitignore.go). A TypeScript mirror
+//     selects its files by the same walk (mirrorFiles).
 //
 // A build copies only the files whose content changed, so an unchanged
 // file keeps its modification time and Cargo's fingerprints keep a rebuild
@@ -61,14 +63,14 @@ import (
 // removes a mirror no server, job or worker crate under the output root
 // depends on.
 
-// RustMirrorRoot is the directory of the output root that holds the
-// mirrors.
-const RustMirrorRoot = "impl"
+// MirrorRoot is the directory of the output root that holds the mirrors,
+// a Rust implementation's and a TypeScript one's alike (tsmirror.go).
+const MirrorRoot = tsgen.MirrorRoot
 
-// RustMirrorDir is the mirror of service's implementation under the output
-// root.
-func RustMirrorDir(outputRoot, service string) string {
-	return filepath.Join(outputRoot, RustMirrorRoot, service)
+// MirrorDir is the mirror of service's implementation under the output
+// root. An API has one language, so its implementation has one mirror.
+func MirrorDir(outputRoot, service string) string {
+	return filepath.Join(outputRoot, MirrorRoot, service)
 }
 
 // RustMirror is the plan of one implementation's mirror.
@@ -76,7 +78,7 @@ type RustMirror struct {
 	Service string
 
 	// Source is the implementation crate's directory, Dir the mirror's,
-	// RustMirrorDir, and OutputRoot the output root it lies in, each
+	// MirrorDir, and OutputRoot the output root it lies in, each
 	// absolute.
 	Source     string
 	Dir        string
@@ -101,7 +103,7 @@ func planRustMirror(outputRoot string, a RustAPIInput) (*RustMirror, error) {
 	}{
 		{&m.Source, a.Implementation.Dir},
 		{&m.OutputRoot, outputRoot},
-		{&m.Dir, RustMirrorDir(outputRoot, m.Service)},
+		{&m.Dir, MirrorDir(outputRoot, m.Service)},
 		{&m.APIDir, a.Dir},
 	} {
 		if *p.dst, err = filepath.Abs(p.from); err != nil {
@@ -496,9 +498,38 @@ type mirrorFile struct {
 	mode fs.FileMode
 }
 
+// mirrorSkip reports whether a mirror leaves out the entry name of the
+// directory rel of the package, slash-separated and "" for the package's
+// own, at path on disk, a directory when dir is set, by its language's
+// rules, which come before the .gitignore files'.
+type mirrorSkip func(rel, name, path string, dir bool) bool
+
+// skipRust is what a Rust mirror leaves out by Cargo's rules: the root's
+// Cargo.toml, which the mirror writes, and Cargo.lock, the lockfile of the
+// crate's own workspace, which the output root's stands in for; the root's
+// target/; and any directory with a Cargo.toml of its own, a crate of its
+// own, which Cargo leaves out of a package too.
+func skipRust(rel, name, path string, dir bool) bool {
+	switch {
+	case !dir:
+		return rel == "" && (name == RustManifestFile || name == RustLockfileName)
+	case rel == "" && name == "target":
+		return true
+	}
+	_, err := os.Stat(filepath.Join(path, RustManifestFile))
+	return err == nil
+}
+
 // mirrorFiles lists the files of the crate at source the mirror holds,
 // but its Cargo.toml, which the mirror writes.
 func mirrorFiles(source string, sel mirrorSelection) ([]mirrorFile, error) {
+	return packageFiles(source, sel, skipRust)
+}
+
+// packageFiles lists the files of the package at source a mirror holds:
+// every file but `.git`, what skip leaves out, and what the selection or
+// the package's .gitignore files leave out, as mirrorFiles reads them.
+func packageFiles(source string, sel mirrorSelection, skip mirrorSkip) ([]mirrorFile, error) {
 	var files []mirrorFile
 	open := map[string]bool{}
 	var walk func(rel string, gitignore []ignoreRule) error
@@ -526,7 +557,7 @@ func mirrorFiles(source string, sel mirrorSelection) ([]mirrorFile, error) {
 		for _, e := range entries {
 			name := e.Name()
 			p := path.Join(rel, name)
-			if name == ".git" || rel == "" && (name == RustManifestFile || name == RustLockfileName) {
+			if name == ".git" {
 				continue
 			}
 			info, err := os.Stat(filepath.Join(dir, name))
@@ -537,14 +568,11 @@ func mirrorFiles(source string, sel mirrorSelection) ([]mirrorFile, error) {
 			if err != nil {
 				return err
 			}
+			if skip(rel, name, filepath.Join(dir, name), info.IsDir()) {
+				continue
+			}
 			switch {
 			case info.IsDir():
-				if rel == "" && name == "target" {
-					continue
-				}
-				if _, err := os.Stat(filepath.Join(dir, name, RustManifestFile)); err == nil {
-					continue
-				}
 				if sel.include == nil && (ignored(gitignore, p, true) || ignored(sel.exclude, p, true)) {
 					continue
 				}
@@ -596,28 +624,38 @@ func WriteRustMirror(m *RustMirror) error {
 	} else if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return fail(err)
 	}
-	want := map[string]bool{RustManifestFile: true}
+	if err := writeMirror(m.Source, m.Dir, files, RustManifestFile, manifest); err != nil {
+		return fail(err)
+	}
+	return nil
+}
+
+// writeMirror brings the mirror at dir up to date with the package at
+// source: it removes every file under dir that is neither one of files nor
+// the manifest, writes each of files whose content differs from source's,
+// and writes the manifest, the file the mirror writes in place of the
+// package's own, at name. A file whose content is the same keeps its
+// modification time.
+func writeMirror(source, dir string, files []mirrorFile, name string, manifest []byte) error {
+	want := map[string]bool{name: true}
 	for _, f := range files {
 		want[f.rel] = true
 	}
-	if err := pruneMirror(m.Dir, want); err != nil {
-		return fail(err)
+	if err := pruneMirror(dir, want); err != nil {
+		return err
 	}
 	for _, f := range files {
-		data, err := os.ReadFile(filepath.Join(m.Source, filepath.FromSlash(f.rel)))
+		data, err := os.ReadFile(filepath.Join(source, filepath.FromSlash(f.rel)))
 		if err != nil {
-			return fail(err)
+			return err
 		}
-		if err := writeIfChanged(filepath.Join(m.Dir, filepath.FromSlash(f.rel)), data, f.mode); err != nil {
-			return fail(err)
+		if err := writeIfChanged(filepath.Join(dir, filepath.FromSlash(f.rel)), data, f.mode); err != nil {
+			return err
 		}
 	}
 	// The manifest goes last: a mirror whose manifest is the build's is
 	// whole.
-	if err := writeIfChanged(target, manifest, 0o644); err != nil {
-		return fail(err)
-	}
-	return nil
+	return writeIfChanged(filepath.Join(dir, name), manifest, 0o644)
 }
 
 // pruneMirror removes each file under dir that want, by its
@@ -706,7 +744,7 @@ func PruneRustMirrors(outputRoot string) error {
 	if err != nil {
 		return fail(err)
 	}
-	root := filepath.Join(outputRoot, RustMirrorRoot)
+	root := filepath.Join(outputRoot, MirrorRoot)
 	entries, err := os.ReadDir(root)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil

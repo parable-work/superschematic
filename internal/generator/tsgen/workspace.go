@@ -30,6 +30,19 @@ import (
 // package under it); an install in an implementation does not find the
 // root.
 //
+// The project's own packages, the implementations and the sites, are
+// members of one output root's workspace alone: the default one,
+// `<schemas-root>/dist`, where every command writes without --out. An
+// install links each member's node_modules into the root that installs it,
+// so a second root that listed them would take their links over, and leave
+// them dangling once it was gone. Any other output root lists the mirrors
+// the stack's build copies the implementations into, `impl/*` (D65;
+// servergen's tsmirror.go), and no package of the project's: its servers,
+// jobs and workers build against its own mirrors, as its Rust ones do. A
+// mirror keeps its package's name, so a server's package.json names the
+// implementation alike in every root, and Bun, which refuses two members of
+// one name, finds one.
+//
 // A package depends on superscalar, the HTTP runtime and the version-graph
 // runtime by name. Where [paths] names a checkout of one, the root
 // overrides every dependency on it with a file: path from the root. A
@@ -86,6 +99,49 @@ var workspacePackagePatterns = []string{
 // output root writes beside the root's package.json.
 const LockfileName = "bun.lock"
 
+// MirrorRoot is the directory of the output root that holds the mirrors of
+// the implementations its servers, jobs and workers build against, Rust's
+// and TypeScript's alike (D65): `impl/<service>/`. In an output root other
+// than the default one, the workspace's members include `impl/*`, which
+// takes in the TypeScript mirrors; Bun passes over a Rust one, which holds
+// no package.json.
+const MirrorRoot = "impl"
+
+// DefaultOutputRoot is the output root every command writes into without
+// --out, `<schemas-root>/dist`, whose Bun workspace the project's own
+// TypeScript packages are members of. It is "" for no schemas root.
+func DefaultOutputRoot(schemasRoot string) string {
+	if schemasRoot == "" {
+		return ""
+	}
+	return filepath.Join(schemasRoot, "dist")
+}
+
+// Mirrored reports whether outputRoot is an output root other than the
+// project's default one, whose servers, jobs and workers build against
+// mirrors of the TypeScript implementations and whose workspace lists
+// those in place of the project's packages (D65). With no schemas root to
+// find the default by, as in a build no command runs, every output root is
+// taken as the default.
+func Mirrored(outputRoot, schemasRoot string) bool {
+	def := DefaultOutputRoot(schemasRoot)
+	if def == "" || outputRoot == "" {
+		return false
+	}
+	return !SamePath(outputRoot, def)
+}
+
+// SamePath reports whether a and b name one directory, whether or not it
+// exists yet, through any symbolic link on the way.
+func SamePath(a, b string) bool {
+	absA, errA := filepath.Abs(a)
+	absB, errB := filepath.Abs(b)
+	if errA != nil || errB != nil {
+		return filepath.Clean(a) == filepath.Clean(b)
+	}
+	return absA == absB || naming.PhysicalPath(absA) == naming.PhysicalPath(absB)
+}
+
 // IgnoredLockfile reports whether git ignores the workspace's lockfile in
 // outputRoot, which the project commits (D51, amended), and the rule that
 // does, as `git check-ignore --verbose` names it: `<file>:<line>:<pattern>`.
@@ -128,8 +184,13 @@ type WorkspaceRoot struct {
 
 	// RepositoryRoot, when set, adds the TypeScript implementations under
 	// it, at the naming file's [implementation_paths] typescript template,
-	// and the sites, at its site template (D55).
+	// and the sites, at its site template (D55), unless Mirrored is set.
 	RepositoryRoot string
+
+	// Mirrored, set for an output root other than the default one
+	// (Mirrored), lists the implementations' mirrors under impl/ in place
+	// of the project's packages (D65).
+	Mirrored bool
 
 	// Naming names the root and the runtime packages.
 	Naming naming.Naming
@@ -162,7 +223,13 @@ func (w WorkspaceRoot) Manifest() (string, error) {
 		Workspaces:   append([]string(nil), workspacePackagePatterns...),
 		Dependencies: map[string]string{n.ScalarNpmPackage: "*"},
 	}
-	if w.RepositoryRoot != "" {
+	switch {
+	case w.Mirrored:
+		// The mirrors of the implementations this root's servers, jobs and
+		// workers build against; the project's packages are the default
+		// root's members.
+		manifest.Workspaces = append(manifest.Workspaces, MirrorRoot+"/*")
+	case w.RepositoryRoot != "":
 		rel, err := naming.PhysicalRelPath(w.OutputRoot, w.RepositoryRoot)
 		if err != nil {
 			return "", fmt.Errorf("workspace root: %w", err)

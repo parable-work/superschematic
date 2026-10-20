@@ -15,10 +15,11 @@ use superschematic_http_runtime::{BoxError, Shutdown};
 use tracing_subscriber::layer::SubscriberExt as _;
 
 /// A queue in memory whose first claim fails, then hands out its messages
-/// once each.
+/// once each, and whose first prune deletes three done messages.
 struct Memory {
     claims: Mutex<usize>,
     ready: Mutex<VecDeque<u32>>,
+    pruned: Mutex<bool>,
 }
 
 #[async_trait]
@@ -70,6 +71,13 @@ impl WorkerQueue for Memory {
     async fn release(&self, _id: &str, _token: &str) -> Result<(), QueueError> {
         Ok(())
     }
+
+    async fn prune(&self, _limit: usize) -> Result<u64, QueueError> {
+        let mut pruned = self.pruned.lock().unwrap();
+        let n = if *pruned { 0 } else { 3 };
+        *pruned = true;
+        Ok(n)
+    }
 }
 
 #[tokio::test(start_paused = true)]
@@ -84,6 +92,7 @@ async fn each_outcome_is_a_line_with_the_go_and_typescript_workers_fields() {
     let queue = Memory {
         claims: Mutex::new(0),
         ready: Mutex::new(VecDeque::from([1, 2])),
+        pruned: Mutex::new(false),
     };
     let shutdown = Shutdown::new();
     let run = tokio::spawn(run_worker(
@@ -116,6 +125,7 @@ async fn each_outcome_is_a_line_with_the_go_and_typescript_workers_fields() {
                 "claim failed",
                 r#","retryIn":1.0,"error":"the database is down""#
             ),
+            line("info", "done messages pruned", r#","pruned":3"#),
             line(
                 "info",
                 "message handled",

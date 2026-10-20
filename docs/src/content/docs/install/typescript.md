@@ -125,6 +125,19 @@ root, which sits in the output root, not above it, so add a dependency
 to an implementation's `package.json` and install in `schemas/dist`.
 Install with Bun: npm rejects the `workspace:` protocol.
 
+The implementations, and the sites, are members of `schemas/dist`'s
+workspace alone, the default output root's. An output root you build into
+with `--out` lists, in their place, `impl/*`: the copies its stack's
+build makes of the implementations its TypeScript servers, jobs and
+workers build against, each under its package's name, with each
+dependency on a path (`file:`, `link:`, `./`, `../`) re-based for the
+copy's directory. So `bun install` there links the copies, and leaves
+each implementation's `node_modules` linked to `schemas/dist`; edit the
+implementation, not the copy, which the next build into that root brings
+up to date. The copy leaves out `node_modules`, `.git`, a `bun.lock`
+beside the package's `package.json`, and what the package's `.gitignore`
+files leave out.
+
 Commit `schemas/dist/bun.lock`, so every install of one commit takes the
 same versions: a TypeScript server's image and the generated CI install
 frozen to it. No build removes it, and the root `package.json` it pairs
@@ -172,6 +185,24 @@ object and an `Embedding.Vector` field a JSON array, or the value's JSON
 text; any other JSON type is `type`
 ([JSON-valued scalars](/superschematic/reference/json-scalars/)). Type-only imports (no runtime) come from
 `@schemas/catalog-types/types`.
+
+Every object type and every union also gets `parse<Name>FromJSON`, which
+reads a value as it arrives on the wire into its runtime types: a
+date-time field becomes a `Date`, a nested object or union field runs its
+own parser, and a `@strictJSON` type runs `parse<Type>Json`'s checks. A
+union's parser picks the member the Go and Rust types pick. When every
+member marks the same field `@internalMetadata`, that field's value names
+the member, and an absent, non-string or unknown value throws `ParseError`
+with `unknown discriminator`. Otherwise it picks by shape: the first member
+whose fields include every payload key wins, unless the payload
+contradicts one of the member's tags, a field that two or more members
+declare with distinct string or enum defaults; when no member declares
+every key, the first member whose tags the payload allows wins. A member
+wins only when its own parser reads the payload, so a `@strictJSON` member
+that refuses it is passed over, and a payload no member reads throws
+`ParseError` with `no matching member`. Any other value than an object
+throws `expected an object`; `null` and `undefined` are returned as they
+are.
 
 ## Load environment variables
 
@@ -222,6 +253,13 @@ as `Authorization: Bearer <token>`. Each namespace is a camelCase field,
 and operation sets that share a namespace share it: `ProductQueries` and
 `ProductMutations` are both `sdk.product`.
 
+A response is read as its type, at each list level, in each value of a
+map and in each item of a page. An object type or a union the schema declares goes through the
+types package's `parse<Name>FromJSON`, so a date-time field is a `Date`, a
+union is the member its parser picks, and a `@strictJSON` type is checked.
+A value its parser refuses rejects the call with the types package's
+`ParseError`. An enum or a scalar stays the value the API sent.
+
 `serviceCredential: { token, headers }` is the calling service's own
 credential
 ([D37](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md#d37-a-service-caller-beside-the-end-user-admitted-per-operation)):
@@ -256,8 +294,8 @@ package's validator for `T` there, an object type's fields at
 A method resolves to the response's type: `T[]` for a list,
 `Record<string, T>` for a map (`Record<string, T[]>` for a map of lists),
 and `T | null` for a `Nullable<T>`, which resolves to `null` when the
-server answers null. An object type's values in a map are decoded one by
-one, as a list's elements are.
+server answers null. An object type's or a union's values in a map are
+decoded one by one, as a list's elements are.
 
 ## Serve a generated API
 
@@ -315,8 +353,10 @@ and `WorkersConstructor`, the type of its `createWorkers`.
 the HTTP runtime's `loadDatabase`, `loadService` and `loadCallers`: a
 `Database` per database, a `Service` per `calls` entry and, for an API
 with `@requireService` or `@allowService`, its callers field
-(`SHOP_API_CALLERS`), what its `serviceAuthenticator` checks. It throws a
-`StackConfigError` that names every variable missing or invalid.
+(`SHOP_API_CALLERS`), what its `serviceAuthenticator` checks, whose
+variables `values-schema.json` lists for a deployment outside a stack. It
+throws a `StackConfigError` that names every variable missing or
+invalid.
 
 The implementation is a package of its own at the naming file's
 [`[implementation_paths]`](/superschematic/reference/naming/#implementation_pathstypescript)
@@ -342,9 +382,17 @@ SDKs of the APIs called, a `main.ts` that builds each implementation from
 its `Deps` with `create(deps)` and `authenticate(deps)`, and the handlers
 of its manual routes with `createManualRoutes(deps)`, which it hands the
 router as `manualRoutes`, mounts each router on one Hono app and serves
-it with `Bun.serve` beside `/healthz` and `/readyz`, and a Dockerfile.
+it with `Bun.serve` beside `/healthz` and `/readyz`, and a Dockerfile. A
+server that serves an API with `@requireService` or `@allowService` and
+calls it from another API it serves awaits `loopbackServiceAuth(...)` at
+start, a key only its process holds: its client of that API sends the
+key's token to the server's own loopback URL, and the API's
+`serviceAuthenticator` takes the callers field with the key accepted
+(`loopback.accept(config.callers)`), which admits the server itself
+([Service callers](/superschematic/guides/auth-and-permissions/#service-callers)).
 `superschematic stack dev` runs it with `bun main.ts` after one `bun
-install` in `schemas/dist`. Each job and worker of the API gets a package
+install` in `schemas/dist`, or, with `--out`, in that output root, whose
+servers build against its copies of the implementations. Each job and worker of the API gets a package
 of its own beside it, whose `main.ts` builds the same `Deps` and runs the
 job once, or the worker's claim loop.
 Neither serves a request, so a stack gives neither the callers field. For
@@ -395,8 +443,12 @@ path, the query or the body, is checked against the scalar's own length,
 pattern and range, and a value that fails
 answers with the rule it breaks (`pattern`, `minLength`, `maxLength`,
 `min`, `max`). The problem `details` carry the `path` and the rule in
-`errors`. A body argument whose type is a union has no generated decoder,
-and the build refuses it.
+`errors`. A union field of the input or of an object argument is read
+with the union's `parse<Union>FromJSON`, so the implementation receives
+its member with date-time fields as `Date`, and a member the parser
+refuses answers 400 with the parser's reason. A body argument whose type
+is a union has no strict decoder to check its member, and the build
+refuses it.
 
 ```ts
 import { Hono } from "hono";

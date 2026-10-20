@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
+	"maps"
 	"net/http"
 	"os"
 	"os/exec"
@@ -88,7 +90,10 @@ import (
 // the containers. Last, it runs stack dev once more, into an output root
 // of its own (--out), where shop-stock's server, worker and job build
 // against that root's mirror of rust-impl/shop-stock and its own API
-// crates, and runs the job there with stack run.
+// crates, and shop-storefront against its mirror of
+// typescript/shop-storefront, and runs the job there with stack run. The
+// project's own TypeScript packages keep the links the default output
+// root's install made.
 //
 // scripts/check.sh sets ACME_SHOP_SUPERSCHEMATIC to the core binary and
 // SUPERSCHEMATIC_MIGRATE to the migration runner. Without the binary,
@@ -662,30 +667,32 @@ func TestStackDevRunsTheShop(t *testing.T) {
 	// with the committed Cargo.lock, so they build the versions the first
 	// run built, and its Cargo target directory is the first run's, so
 	// cargo compiles the crates the root generates and reuses every other.
-	// It starts with the committed bun.lock too, which pins the whole
-	// workspace: the root holds only shop-stack's packages, so its Bun
-	// workspace leaves out typescript/shop-wishlist, whose API shop-stack
-	// does not deploy, and stack dev installs it with --no-save, which
-	// keeps the lockfile as it is (D51, amended).
+	// It mirrors typescript/shop-storefront into impl/shop-storefront too,
+	// and its Bun workspace lists the mirror in place of the project's
+	// packages, so its install leaves their node_modules as the first
+	// run's install linked them, to outputRoot (D65, amended).
+	links := projectLinks(t, outputRoot)
 	otherRoot := otherOutputRoot(t, outputRoot)
 	again := startStackDev(t, binary, shopStack, "--out", otherRoot)
 	againEnv := again.waitUntilRunning(t, otherRoot, "shop-stack", "shop-api", "shop-orders", "shop-stock", "shop-storefront")
-	if out := again.output.String(); !strings.Contains(out, "bun install --no-save in "+otherRoot+", which leaves out ") || !strings.Contains(out, "typescript/shop-wishlist") {
-		t.Fatalf("stack dev --out did not leave typescript/shop-wishlist out of the workspace it installed:\n%s", out)
+	for mirror, implementation := range map[string]string{
+		filepath.Join(otherRoot, "impl", "shop-stock", "src", "lib.rs"):      filepath.Join("..", "rust-impl", "shop-stock", "src", "lib.rs"),
+		filepath.Join(otherRoot, "impl", "shop-storefront", "index.ts"):      filepath.Join("..", "typescript", "shop-storefront", "index.ts"),
+		filepath.Join(otherRoot, "impl", "shop-storefront", "tsconfig.json"): filepath.Join("..", "typescript", "shop-storefront", "tsconfig.json"),
+	} {
+		mirrored, err := os.ReadFile(mirror)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if source, err := os.ReadFile(implementation); err != nil || !bytes.Equal(mirrored, source) {
+			t.Fatalf("the output root %s holds no mirror of %s (%v)", otherRoot, implementation, err)
+		}
 	}
-	committedLock, err := os.ReadFile(filepath.Join(outputRoot, "bun.lock"))
-	if err != nil {
-		t.Fatal(err)
+	if status := get(t, againEnv.servers["shop-storefront"]+"/readyz"); status != http.StatusOK {
+		t.Fatalf("shop-storefront built in %s answered GET /readyz %d", otherRoot, status)
 	}
-	if lock, err := os.ReadFile(filepath.Join(otherRoot, "bun.lock")); err != nil || !bytes.Equal(lock, committedLock) {
-		t.Fatalf("stack dev --out changed the lockfile it started with (%v)", err)
-	}
-	mirrored, err := os.ReadFile(filepath.Join(otherRoot, "impl", "shop-stock", "src", "lib.rs"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if implementation, err := os.ReadFile(filepath.Join("..", "rust-impl", "shop-stock", "src", "lib.rs")); err != nil || !bytes.Equal(mirrored, implementation) {
-		t.Fatalf("the output root %s holds no mirror of rust-impl/shop-stock (%v)", otherRoot, err)
+	if got := projectLinks(t, outputRoot); !maps.Equal(got, links) {
+		t.Fatalf("stack dev --out %s relinked the project's TypeScript packages:\n%v\nwas\n%v", otherRoot, got, links)
 	}
 	if !strings.Contains(again.output.String(), "worker   "+reorderStock+" handles StockLow of shop-db, 2 at a time") {
 		t.Fatalf("stack dev --out did not run %s", reorderStock)
@@ -833,39 +840,25 @@ func (dev *stackDev) stop(t *testing.T) {
 }
 
 // otherOutputRoot is an output root of the test's own, outside the
-// example, holding the lockfiles of outputRoot's Cargo and Bun workspaces
-// and a link to the Cargo target directory of its Dev environment, which
-// every Rust deployable of Dev builds into (D57, D65). Its path is the
-// real one, so the relative paths the build writes from it to the
-// checkout resolve.
-//
-// The Bun workspace stack dev installs there takes in the packages under
-// typescript/ and web/ whose generated packages the root holds, and the
-// install links each one's node_modules to the new root's. So when the
-// test ends, it installs outputRoot's workspace again, frozen to its
-// lockfile, which links them back, as the TypeScript tests after it and
-// stack dev there need them.
+// example, holding the lockfile of outputRoot's Cargo workspace and a link
+// to the Cargo target directory of its Dev environment, which every Rust
+// deployable of Dev builds into (D57, D65). Its path is the real one, so
+// the relative paths the build writes from it to the checkout resolve.
+// Its Bun workspace lists its mirrors of the TypeScript implementations,
+// not the packages under typescript/ and web/, which are outputRoot's
+// members alone (D65, amended).
 func otherOutputRoot(t *testing.T, outputRoot string) string {
 	t.Helper()
 	root, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		install := exec.Command("bun", "install", "--frozen-lockfile")
-		install.Dir = outputRoot
-		if out, err := install.CombinedOutput(); err != nil {
-			t.Errorf("install the Bun workspace of %s again: %v\n%s", outputRoot, err, out)
-		}
-	})
-	for _, name := range []string{"Cargo.lock", "bun.lock"} {
-		lock, err := os.ReadFile(filepath.Join(outputRoot, name))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(root, name), lock, 0o644); err != nil {
-			t.Fatal(err)
-		}
+	lock, err := os.ReadFile(filepath.Join(outputRoot, "Cargo.lock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "Cargo.lock"), lock, 0o644); err != nil {
+		t.Fatal(err)
 	}
 	target, err := filepath.Abs(filepath.Join(outputRoot, "program", "shop-stack", "Dev", "target"))
 	if err != nil {
@@ -879,6 +872,38 @@ func otherOutputRoot(t *testing.T, outputRoot string) string {
 		t.Fatal(err)
 	}
 	return root
+}
+
+// projectLinks are the symbolic links under the node_modules of the
+// example's own TypeScript packages, the members of outputRoot's Bun
+// workspace under typescript/ and web/, by path, each with what it names.
+func projectLinks(t *testing.T, outputRoot string) map[string]string {
+	t.Helper()
+	dirs, err := filepath.Glob(filepath.Join("..", "*", "*", "node_modules"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	links := map[string]string{}
+	for _, dir := range dirs {
+		if group := filepath.Base(filepath.Dir(filepath.Dir(dir))); group != "typescript" && group != "web" {
+			continue
+		}
+		err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+			if err != nil || d.Type()&fs.ModeSymlink == 0 {
+				return err
+			}
+			target, err := os.Readlink(p)
+			links[p] = target
+			return err
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(links) == 0 {
+		t.Fatalf("the install of %s linked nothing into the example's TypeScript packages", outputRoot)
+	}
+	return links
 }
 
 // restockRequest is a row of shop-db's restock_request table, which

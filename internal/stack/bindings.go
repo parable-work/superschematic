@@ -458,7 +458,7 @@ func (r *resolver) connectEdges() {
 		callee := r.normalize(where, connected.Callee)
 		switch {
 		case e.res.Kind != ir.EdgeHTTP || e.res.From == e.res.To:
-			r.fail(CodeLowering, "connector %s on edge %s gives the callee a caller to verify, but only an http edge between two servers has one: a call within one server carries no service credential", e.connector.Name, id)
+			r.fail(CodeLowering, "connector %s on edge %s gives the callee a caller to verify, but only an http edge between two servers has one: a call within one server carries the server's own loopback credential, which no connector gives", e.connector.Name, id)
 			continue
 		case callee == nil:
 			continue

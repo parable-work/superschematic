@@ -38,7 +38,11 @@ interface OrderPlaced {
   emails?: string[];
 }
 
-/** The statements sqlutil.PostgresQueueStatements writes for a table and its columns, as a types package's queues.ts holds them. */
+/**
+ * The statements sqlutil.PostgresQueueStatements writes for a table and its
+ * columns, as a types package's queues.ts holds them, for a queue that keeps
+ * its done messages.
+ */
 function statements(table: string, columns: string[]): QueueStatements {
   const claimed = `WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`;
   return {
@@ -60,12 +64,19 @@ RETURNING q.id::text, q.claim_token::text, q.attempts${columns.map(c => `, q.${c
     complete: `UPDATE ${table} SET state = 'done', claim_token = NULL, claim_expires_at = NULL, updated_at = now()\n${claimed}`,
     fail: `UPDATE ${table} SET
   state = CASE WHEN attempts > $3 THEN 'dead' ELSE 'ready' END,
-  due_at = CASE WHEN attempts > $3 THEN due_at ELSE now() + make_interval(secs => $4) END,
+  due_at = CASE WHEN attempts > $3 THEN due_at ELSE now() + make_interval(secs => LEAST($4 * power(2, LEAST(attempts - 1, 40)), $6)) END,
   last_error = $5, claim_token = NULL, claim_expires_at = NULL, updated_at = now()
 ${claimed}
 RETURNING state`,
     extend: `UPDATE ${table} SET claim_expires_at = now() + make_interval(secs => $3), updated_at = now()\n${claimed}`,
     release: `UPDATE ${table} SET state = 'ready', attempts = GREATEST(attempts - 1, 0), claim_token = NULL, claim_expires_at = NULL, updated_at = now()\n${claimed}`,
+    prune: `DELETE FROM ${table} WHERE id IN (
+  SELECT id FROM ${table}
+  WHERE state = 'done' AND updated_at <= now() - make_interval(secs => $1)
+  ORDER BY updated_at
+  LIMIT $2
+  FOR UPDATE SKIP LOCKED
+)`,
   };
 }
 
@@ -87,7 +98,9 @@ function definition(table = 'order_placed_queue', retries = 2): QueueDefinition<
     table,
     retries,
     backoffSeconds: 60,
+    maxBackoffSeconds: 200,
     leaseSeconds: 120,
+    retainSeconds: 3600,
     fields,
     statements: statements(table, fields.map(f => f.column)),
   };
@@ -270,8 +283,27 @@ describe('postgresQueue', () => {
     const failing = recorder({ rows: [{ state: 'dead' }], rowCount: 1 }, { rows: [], rowCount: 0 });
     const q = postgresQueue(failing, definition());
     expect(await q.fail('m-1', 't-1', 'boom')).toBe(true);
-    expect(failing.queries[0]?.values).toEqual(['m-1', 't-1', 2, 60, 'boom']);
+    expect(failing.queries[0]?.values).toEqual(['m-1', 't-1', 2, 60, 'boom', 200]);
     await expect(q.fail('m-1', 't-1', 'boom')).rejects.toThrow('fail message m-1 on order_placed_queue: the claim on the message is lost');
+  });
+
+  test('a prune deletes up to its limit of the messages done for the retention, and asks nothing for none', async () => {
+    const client = recorder({ rows: [], rowCount: 2 }, { rows: [], rowCount: null });
+    const queue = postgresQueue(client, definition());
+    expect(await queue.prune(0)).toBe(0);
+    expect(client.queries).toEqual([]);
+    expect(await queue.prune(1000)).toBe(2);
+    expect(client.queries[0]).toEqual({ text: definition().statements.prune, values: [3600, 1000] });
+    expect(await queue.prune(1000)).toBe(0);
+    const failing = postgresQueue(
+      {
+        query: async () => {
+          throw new Error('the database is down');
+        },
+      },
+      definition()
+    );
+    await expect(failing.prune(10)).rejects.toThrow('prune order_placed_queue: the database is down');
   });
 });
 
@@ -470,6 +502,58 @@ describe.skipIf(dsn === '')('on Postgres', () => {
       expect(await queue.claim(1)).toEqual([]);
       const dead = await pool.query<{ state: string }>('SELECT state FROM order_placed_queue WHERE id = $1', [takenBack!.id]);
       expect(dead.rows[0]?.state).toBe('dead');
+
+      // Each failure doubles the backoff, up to the maximum: 60s, 120s,
+      // then 200s, under 240.
+      const patient = postgresQueue(pool, definition('order_placed_queue', 5));
+      await pool.query('DELETE FROM order_placed_queue');
+      await enqueue(pool, def, message);
+      for (const [attempt, wait] of [
+        [1, 60],
+        [2, 120],
+        [3, 200],
+      ] as const) {
+        await pool.query(`UPDATE order_placed_queue SET due_at = now() WHERE state = 'ready'`);
+        const [failing] = await patient.claim(1);
+        expect(failing?.attempt).toBe(attempt);
+        expect(await patient.fail(failing!.id, failing!.token, 'later')).toBe(false);
+        const { rows: due } = await pool.query<{ seconds: number }>(
+          'SELECT extract(epoch FROM due_at - now())::float8 AS seconds FROM order_placed_queue WHERE id = $1',
+          [failing!.id]
+        );
+        expect(due[0]!.seconds).toBeGreaterThan(wait - 5);
+        expect(due[0]!.seconds).toBeLessThanOrEqual(wait);
+      }
+
+      // A prune deletes the messages done past the retention, a batch at a
+      // time, and neither one done within it nor a dead one.
+      await pool.query('DELETE FROM order_placed_queue');
+      for (let i = 0; i < 4; i++) await enqueue(pool, def, message);
+      const claims = await queue.claim(4);
+      for (const c of claims.slice(0, 2)) {
+        await pool.query(`UPDATE order_placed_queue SET state = 'done', updated_at = now() - interval '2 hours' WHERE id = $1`, [c.id]);
+      }
+      await queue.complete(claims[2]!.id, claims[2]!.token);
+      await pool.query(`UPDATE order_placed_queue SET state = 'dead', updated_at = now() - interval '30 days' WHERE id = $1`, [claims[3]!.id]);
+      expect(await queue.prune(1)).toBe(1);
+      expect(await queue.prune(1)).toBe(1);
+      expect(await queue.prune(1)).toBe(0);
+      const { rows: left } = await pool.query<{ state: string }>('SELECT state FROM order_placed_queue ORDER BY state');
+      expect(left.map(r => r.state)).toEqual(['dead', 'done']);
+
+      // A queue that keeps no done message deletes it as it completes.
+      const none: QueueDefinition<OrderPlaced> = {
+        ...def,
+        retainSeconds: 0,
+        statements: { ...def.statements, complete: `DELETE FROM order_placed_queue\nWHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'` },
+      };
+      const keepsNone = postgresQueue(pool, none);
+      await enqueue(pool, none, message);
+      const [once] = await keepsNone.claim(1);
+      await keepsNone.complete(once!.id, once!.token);
+      const { rowCount } = await pool.query('SELECT 1 FROM order_placed_queue WHERE id = $1', [once!.id]);
+      expect(rowCount).toBe(0);
+      await expect(keepsNone.complete(once!.id, once!.token)).rejects.toBeInstanceOf(ClaimLostError);
     } finally {
       await pool.end();
       await admin.query(`DROP SCHEMA ${schema} CASCADE`);

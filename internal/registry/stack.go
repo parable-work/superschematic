@@ -226,7 +226,9 @@ type Connected struct {
 	// serves (D37). Resolution merges the entries of the edges to an API
 	// into the API's callers field when an operation of the API has a
 	// service clause, and refuses an edge to such an API without one. A
-	// call within one server carries no credential and has none.
+	// call within one server has none: the server signs it with a
+	// loopback key of its own, which it accepts itself
+	// (docs/stack-model.md, section 9.9).
 	Callee any
 }
 

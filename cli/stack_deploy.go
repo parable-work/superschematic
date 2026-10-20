@@ -12,12 +12,14 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"regexp"
 	"runtime"
 	"slices"
 	"sort"
 	"strings"
+	"syscall"
 
 	"github.com/spf13/cobra"
 
@@ -47,6 +49,7 @@ func init() {
 		newStackDeployCmd,
 		newStackDestroyCmd,
 		newStackOutputsCmd,
+		newStackUnlockCmd,
 	)
 }
 
@@ -647,6 +650,9 @@ func writePlanText(w io.Writer, environment string, r *stackdeploy.PlanResult) e
 			fmt.Fprintf(&b, "  %s\n    %s\n", h.ID, h.Reason)
 		}
 	}
+	if len(r.Jobs) > 0 {
+		fmt.Fprintf(&b, "\nJobs the deploy runs once after the rollout, before the contract phase: %s\n", strings.Join(r.Jobs, ", "))
+	}
 	if len(r.Unpinned) > 0 {
 		fmt.Fprintf(&b, "\nServers and jobs with no image yet, planned at their repository: %s (deploy builds them, or takes them with --image)\n", strings.Join(r.Unpinned, ", "))
 	}
@@ -658,6 +664,9 @@ func writePlanText(w io.Writer, environment string, r *stackdeploy.PlanResult) e
 	}
 	if len(r.MissingSecrets) > 0 {
 		fmt.Fprintf(&b, "\nSecrets with no value: %s (stack secrets set %s)\n", strings.Join(r.MissingSecrets, ", "), environment)
+	}
+	if r.Lock != nil {
+		fmt.Fprintf(&b, "\nThe deploy lock of %s is held by %s: the plan may change when it ends.\n", r.Run, r.Lock)
 	}
 	if len(r.ManualRecords) > 0 {
 		b.WriteString("\nNo DNS platform holds the domain; create these records by hand:\n")
@@ -783,7 +792,9 @@ func newStackDeployCmd(a *app) *cobra.Command {
 (docs/stack-model.md, section 5.3): the infrastructure; the expand phase
 of each database's migration, planned from the schema the deploy manifest
 records; the servers and jobs, callees first, each wave once the platform
-reports it ready; the contract phases; exposure. Then it writes the deploy
+reports it ready; each job the environment runs on every deploy (its
+settings' onDeploy), once, waiting for it and failing the deploy when its
+last try fails; the contract phases; exposure. Then it writes the deploy
 manifest to the target's state: the resolved environment, the IR digest of
 each service, the image of each server and job and each database's schema.
 
@@ -805,7 +816,15 @@ names it, and --expect refuses migration plans other than the ones stack
 plan --out wrote.
 
 A rollout that fails runs no contract step: the manifest records the
-schema between the phases, and the next deploy plans from it.`,
+schema between the phases, and the next deploy plans from it.
+
+A deploy holds the run's deploy lock, in the target's state, from before
+it reads the manifest until it ends, whether it succeeds or fails: a
+second deploy or a destroy of the run meanwhile fails at once, naming who
+holds the lock and since when. Ctrl-C stops the step under way, records
+the failure and releases the lock; a second Ctrl-C ends the process. A
+deploy whose process was killed leaves its lock, which stack unlock
+removes.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			params, err := parseParams(flags.params)
@@ -853,7 +872,9 @@ schema between the phases, and the next deploy plans from it.`,
 			if !noBuild {
 				src = c.sources()
 			}
-			m, err := stackdeploy.Deploy(cmd.Context(), stackdeploy.DeployOptions{
+			ctx, stop := interruptible(cmd)
+			defer stop()
+			m, err := stackdeploy.Deploy(ctx, stackdeploy.DeployOptions{
 				Options:  c.options(cmd, params),
 				Images:   imgs,
 				Sites:    files,
@@ -893,7 +914,8 @@ func newStackDestroyCmd(a *app) *cobra.Command {
 		Long: `destroy removes every resource the provisioner applied for the run, and
 its deploy manifest. It asks for the run's name at a terminal, unless
 --yes. A database's data goes with it, unless its platform protects it
-(deletion protection on a production Cloud SQL instance).`,
+(deletion protection on a production Cloud SQL instance). It holds the
+run's deploy lock while it runs, as a deploy does.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			params, err := parseParams(flags.params)
@@ -914,7 +936,9 @@ its deploy manifest. It asks for the run's name at a terminal, unless
 					return err
 				}
 			}
-			if err := stackdeploy.Destroy(cmd.Context(), o); err != nil {
+			ctx, stop := interruptible(cmd)
+			defer stop()
+			if err := stackdeploy.Destroy(ctx, o); err != nil {
 				return err
 			}
 			_, err = fmt.Fprintf(cmd.OutOrStdout(), "destroyed %s\n", o.Run.Name())
@@ -942,6 +966,94 @@ func confirmDestroy(cmd *cobra.Command, run string) error {
 		return errors.New("destroy: the name did not match; nothing was destroyed")
 	}
 	return nil
+}
+
+// interruptible returns the command's context, which the first SIGINT or
+// SIGTERM cancels, so a deploy or a destroy stops its step, records the
+// failure and releases the run's deploy lock (D46, amended); a second
+// signal ends the process at once.
+func interruptible(cmd *cobra.Command) (context.Context, func()) {
+	ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-ctx.Done()
+		stop()
+	}()
+	return ctx, stop
+}
+
+// --- unlock ---
+
+func newStackUnlockCmd(a *app) *cobra.Command {
+	flags := &stackFlags{}
+	var yes bool
+	cmd := &cobra.Command{
+		Use:   "unlock <environment>",
+		Short: "Remove the deploy lock a deploy or a destroy of a run left",
+		Long: `unlock removes the deploy lock of a run (D46, amended). A deploy and a
+destroy hold the run's lock, in the target's state, from before they read
+the deploy manifest until they end, whether they succeed or fail, and a
+second deploy of the run while one holds it fails at once, naming who
+holds it and since when. A deploy whose process died, or a CI job that was
+killed, leaves its lock; unlock removes it.
+
+It shows the lock and asks for the run's name at a terminal, unless --yes.
+Remove a lock only once the deploy that holds it no longer runs: two
+deploys at once can leave the run's resources, its migrations and its
+manifest out of step. It removes the lock it showed and no other, so a
+lock another deploy took meanwhile stays.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			params, err := parseParams(flags.params)
+			if err != nil {
+				return err
+			}
+			c, err := openDeployContext(cmd, a, flags, args[0], false)
+			if err != nil {
+				return err
+			}
+			defer c.close()
+			o := c.options(cmd, params)
+			if err := o.Run.Check(); err != nil {
+				return err
+			}
+			var confirm func(registry.DeployLock) (bool, error)
+			if !yes {
+				confirm = func(lock registry.DeployLock) (bool, error) { return confirmUnlock(cmd, o.Run.Name(), lock) }
+			}
+			removed, err := stackdeploy.Unlock(cmd.Context(), stackdeploy.UnlockOptions{Options: o, Confirm: confirm})
+			if err != nil {
+				return err
+			}
+			if removed == nil {
+				_, err = fmt.Fprintf(cmd.OutOrStdout(), "no deploy holds the lock of %s\n", o.Run.Name())
+				return err
+			}
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), "unlocked %s\n", o.Run.Name())
+			return err
+		},
+	}
+	flags.register(cmd, true)
+	cmd.Flags().BoolVar(&yes, "yes", false, "remove the lock without asking")
+	return cmd
+}
+
+// confirmUnlock shows the lock and asks for the run's name at a terminal.
+func confirmUnlock(cmd *cobra.Command, run string, lock registry.DeployLock) (bool, error) {
+	if !isTerminal(cmd.InOrStdin()) {
+		return false, fmt.Errorf("the deploy lock of %s is held by %s; unlock asks for the run's name at a terminal, and stdin is not one: pass --yes to remove it", run, lock)
+	}
+	if _, err := fmt.Fprintf(cmd.ErrOrStderr(), "The deploy lock of %s is held by %s.\n"+
+		"Remove it only once that %s no longer runs. Type %s to remove it: ", run, lock, lock.Operation, run); err != nil {
+		return false, err
+	}
+	line, err := bufio.NewReader(cmd.InOrStdin()).ReadString('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		return false, err
+	}
+	if strings.TrimSpace(line) != run {
+		return false, errors.New("unlock: the name did not match; the lock stays")
+	}
+	return true, nil
 }
 
 // --- outputs ---

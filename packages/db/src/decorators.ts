@@ -205,14 +205,21 @@ export const optimistic: ClassDecorator = noopClassDecorator;
 /** A schema class, referenced as a value in a decorator argument. */
 export type SchemaClass = abstract new (...args: never[]) => unknown;
 
-/** The options of a queue: how often a failed message is retried, and when. */
+/** The options of a queue: how often a failed message is retried, and when, and how long a done one stays. */
 export type QueueOptions = {
   /** How many times a message whose handler fails is handled again before it is dead; five unless set. */
   readonly retries?: number;
-  /** How long a failed message waits before it is due again, a duration of whole seconds (`"30s"`, `"5m"`); thirty seconds unless set. */
+  /**
+   * How long a message that failed once waits before it is due again, a duration of whole seconds (`"30s"`, `"5m"`);
+   * thirty seconds unless set. Each later failure doubles the wait, up to maxBackoff.
+   */
   readonly backoff?: string;
+  /** The longest wait a failure doubles to, a duration of whole seconds, the backoff or more; an hour unless set, or the backoff when that is longer. */
+  readonly maxBackoff?: string;
   /** How long a claim holds a message unless its worker extends it, a duration of whole seconds; a minute unless set. */
   readonly lease?: string;
+  /** How long a done message stays before a worker removes it, a duration of whole seconds (`"168h"`); `"0s"` removes it when it is done; a week unless set. Dead messages stay. */
+  readonly retain?: string;
 };
 
 /**
