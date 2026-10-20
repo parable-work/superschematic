@@ -76,6 +76,13 @@ var permissionGroups = func() []cloudflare.PermissionGroup {
 	add(account, "com.cloudflare.api.account")
 	add(zone, "com.cloudflare.api.account.zone")
 	add(bucket, "com.cloudflare.edge.r2.bucket")
+	// The group a bucket edge's token holds has the id Cloudflare
+	// publishes, which the connector names (r2.go).
+	for i := range out {
+		if out[i].Name == cloudflare.R2ObjectsWriteGroupName {
+			out[i].ID = cloudflare.R2ObjectsWriteGroup
+		}
+	}
 	return out
 }()
 

@@ -83,13 +83,6 @@ func d1ID(database, service string) string { return database + ".d1." + service 
 // 18.2).
 const D1Connector = "cloudflare.workers-d1"
 
-// d1Connectors are the connectors of the sql edges to D1.
-func d1Connectors() []registry.ConnectorSpec {
-	return []registry.ConnectorSpec{
-		{Name: D1Connector, Edge: ir.EdgeSQL, From: Workers, To: D1Platform, Connect: connectD1},
-	}
-}
-
 // connectD1 derives the D1 binding a Worker reaches its database through
 // (section 18.2): `d1: {binding, database}`, the binding named after the
 // edge's field and the database's uuid, an output of its node. The Workers

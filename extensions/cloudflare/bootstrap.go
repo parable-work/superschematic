@@ -31,7 +31,8 @@ import (
 //  5. it applies the bootstrap graph in Pulumi project `<stack>-bootstrap`,
 //     a stack per account: the `<stack>-deployer` and `<stack>-planner`
 //     account tokens, with the permission groups' ids read from the API
-//     first;
+//     first, which also checks the group a bucket edge's token names by its
+//     published id (checkBucketTokenGroup);
 //  6. with --github, it sets each token and the passphrase as the
 //     repository's Actions secrets through gh, at the scopes the CI seam
 //     names; without gh, it prints the commands and each token once;
@@ -265,6 +266,9 @@ func (b bootstrapper) Bootstrap(ctx context.Context, req registry.BootstrapReque
 	// 5. The bootstrap graph.
 	groups, err := cloud.PermissionGroups(ctx, account)
 	if err != nil {
+		return nil, err
+	}
+	if err := checkBucketTokenGroup(env, groups); err != nil {
 		return nil, err
 	}
 	graph, err := BootstrapEnvironment(env, groups)

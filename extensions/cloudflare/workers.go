@@ -160,6 +160,9 @@ func lowerServer(ctx registry.PlatformContext) (registry.Lowered, error) {
 		return registry.Lowered{}, err
 	}
 	out := registry.Lowered{Resources: workerNodes(d, v, workersDev, settingBool(d.Settings, "logs", true), version)}
+	// The Worker waits for each Worker its service bindings name, so a
+	// destroy removes it, with its bindings, first (calls.go).
+	out.Resources[0].DependsOn = bindingDependencies(d)
 	if d.Exposed && env.Domain != "" {
 		out.Resources = append(out.Resources, customDomain(d, v, env.Domain))
 	}
