@@ -24,8 +24,10 @@ const queueFixture = "fixture-queue-db"
 // rolls back and in one that commits, claims and reads each field back,
 // claims with two pools at once, extends, completes, fails until the
 // message is dead, releases, takes back a claim that expired, and marks
-// dead a message whose last attempt's claim expired. It skips without the
-// database.
+// dead a message whose last attempt's claim expired; and it doubles a
+// failure's backoff up to the maximum, prunes the done messages past the
+// retention, and deletes a message of a queue that keeps none as it
+// completes it. It skips without the database.
 func TestGeneratedQueuesOnPostgres(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping compile check in -short mode")
@@ -75,8 +77,12 @@ func TestGeneratedQueuesOnPostgres(t *testing.T) {
 		t.Fatalf("write ddl: %v", err)
 	}
 	out := runGeneratedORMModule(t, ormDir, filepath.Join(ddlDir, "create.sql"), "queues_test.go", queuesORMTest)
-	if os.Getenv("SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL") != "" && !strings.Contains(out, "--- PASS: TestQueueOnPostgres") {
-		t.Fatal("the generated queue test did not pass")
+	if os.Getenv("SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL") != "" {
+		for _, test := range []string{"TestQueueOnPostgres", "TestQueueBackoffGrowsAndPruneRemovesDoneMessages"} {
+			if !strings.Contains(out, "--- PASS: "+test) {
+				t.Fatalf("the generated %s did not pass", test)
+			}
+		}
 	}
 }
 
@@ -313,6 +319,105 @@ func TestQueueOnPostgres(t *testing.T) {
 	}
 	if s, _, lastError := state(t, pool, retaken[0].ID); s != "dead" || !strings.Contains(lastError, "claim of its last attempt expired") {
 		t.Fatalf("message past its last attempt is %s (%q), want dead", s, lastError)
+	}
+}
+
+// dueIn is the seconds until a message is due.
+func dueIn(t *testing.T, pool *pgxpool.Pool, id string) float64 {
+	t.Helper()
+	var seconds float64
+	if err := pool.QueryRow(context.Background(), "SELECT extract(epoch FROM due_at - now())::float8 FROM order_placed_queue WHERE id = $1::uuid", id).Scan(&seconds); err != nil {
+		t.Fatal(err)
+	}
+	return seconds
+}
+
+// TestQueueBackoffGrowsAndPruneRemovesDoneMessages: each failure of
+// OrderPlaced doubles its minute's backoff, up to its 200s maximum; a prune
+// deletes the messages done past its hour's retention, a batch at a time,
+// and none done within it and no dead one; and Ping, which keeps no done
+// message, deletes one as it completes it (D68).
+func TestQueueBackoffGrowsAndPruneRemovesDoneMessages(t *testing.T) {
+	db, pool, _ := openQueueDatabase(t)
+	ctx := context.Background()
+	queue := db.OrderPlacedQueue()
+	id, _ := scalars.ParseUUID("6f1c2f2e-7d1a-4b4a-9d43-3c7a1b2c3d4e")
+	msg := &types.OrderPlaced{OrderId: id, ShipTo: types.Address{Line1: "1 Main St", City: "Springfield"}}
+	enqueue := func() {
+		t.Helper()
+		if err := db.Transaction(ctx, func(tx TxInterface) error { return EnqueueOrderPlaced(ctx, tx, msg) }); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	enqueue()
+	for _, step := range []struct {
+		attempt int
+		wait    float64
+	}{{1, 60}, {2, 120}, {3, 200}} {
+		due(t, pool)
+		claims, err := queue.Claim(ctx, 1, time.Minute)
+		if err != nil || len(claims) != 1 || claims[0].Attempt != step.attempt {
+			t.Fatalf("Claim of attempt %d = %+v, %v", step.attempt, claims, err)
+		}
+		if dead, err := queue.Fail(ctx, claims[0].ID, claims[0].Token, "later"); err != nil || dead {
+			t.Fatalf("Fail of attempt %d = %t, %v", step.attempt, dead, err)
+		}
+		if left := dueIn(t, pool, claims[0].ID); left > step.wait || left < step.wait-5 {
+			t.Fatalf("attempt %d is due in %.1fs, want about %.0fs", step.attempt, left, step.wait)
+		}
+	}
+
+	if _, err := pool.Exec(ctx, "DELETE FROM order_placed_queue"); err != nil {
+		t.Fatal(err)
+	}
+	for range 4 {
+		enqueue()
+	}
+	claims, err := queue.Claim(ctx, 4, time.Minute)
+	if err != nil || len(claims) != 4 {
+		t.Fatalf("Claim = %+v, %v, want four", claims, err)
+	}
+	for _, c := range claims[:2] {
+		if _, err := pool.Exec(ctx, "UPDATE order_placed_queue SET state = 'done', updated_at = now() - interval '2 hours' WHERE id = $1::uuid", c.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := queue.Complete(ctx, claims[2].ID, claims[2].Token); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, "UPDATE order_placed_queue SET state = 'dead', updated_at = now() - interval '30 days' WHERE id = $1::uuid", claims[3].ID); err != nil {
+		t.Fatal(err)
+	}
+	for i, want := range []int{1, 1, 0} {
+		if n, err := queue.Prune(ctx, 1); err != nil || n != want {
+			t.Fatalf("Prune %d = %d, %v, want %d", i, n, err, want)
+		}
+	}
+	if s, _, _ := state(t, pool, claims[2].ID); s != "done" {
+		t.Fatalf("the message done within the retention is %s", s)
+	}
+	if s, _, _ := state(t, pool, claims[3].ID); s != "dead" {
+		t.Fatalf("the dead message is %s", s)
+	}
+
+	pings := db.PingQueue()
+	if err := db.Transaction(ctx, func(tx TxInterface) error { return EnqueuePing(ctx, tx, &types.Ping{}) }); err != nil {
+		t.Fatal(err)
+	}
+	ping, err := pings.Claim(ctx, 1, time.Minute)
+	if err != nil || len(ping) != 1 {
+		t.Fatalf("Ping claim = %+v, %v", ping, err)
+	}
+	if err := pings.Complete(ctx, ping[0].ID, ping[0].Token); err != nil {
+		t.Fatal(err)
+	}
+	var left int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM ping_queue").Scan(&left); err != nil || left != 0 {
+		t.Fatalf("ping_queue holds %d messages after the complete, %v; want none", left, err)
+	}
+	if err := pings.Complete(ctx, ping[0].ID, ping[0].Token); !errors.Is(err, ErrClaimLost) {
+		t.Fatalf("a second Complete of a deleted ping = %v, want ErrClaimLost", err)
 	}
 }
 `

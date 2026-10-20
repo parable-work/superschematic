@@ -2,20 +2,21 @@
 
 //! The queues of the `deps-stock-db` database (D53, D65; docs/stack-model.md,
 //! section 8.8), as the HTTP runtime's queue client runs them: a descriptor
-//! per @queue class, as JSON, with its table, its retries, backoff and lease,
-//! the column each field of its message writes, and its statements on
-//! Postgres, which the Go ORM and the TypeScript queue client run too, so a
-//! message one language enqueues another claims alike.
+//! per @queue class, as JSON, with its table, its retries, backoff, maximum
+//! backoff, lease and retention, the column each field of its message writes,
+//! and its statements on Postgres, which the Go ORM and the TypeScript queue
+//! client run too, so a message one language enqueues another claims alike.
 //!
 //! Parse a descriptor with the runtime's `queue::QueueDefinition::parse`,
 //! enqueue a message in the transaction whose writes caused it, and claim,
-//! complete, fail, extend and release messages with its `PostgresQueue`.
-//! Delivery is at least once.
+//! complete, fail, extend, release and prune messages with its
+//! `PostgresQueue`. Delivery is at least once.
 
 /// The queue of `Recount` messages, whose descriptor this is.
 ///
-/// A message whose handler fails is due again after 30s, and is dead
-/// after 5 such retries; a claim holds it for 60s unless extended.
+/// A message whose handler fails is due again after 30s, doubled for
+/// each attempt before, up to 3600s, and is dead after 5 such retries; a
+/// claim holds it for 60s unless extended. A done message stays 604800s.
 ///
 /// A queue with the defaults, which deps-rust-stock's worker RecountStock
 /// handles.
@@ -24,7 +25,9 @@ pub const RECOUNT_QUEUE: &str = r#"{
   "table": "recount_queue",
   "retries": 5,
   "backoffSeconds": 30,
+  "maxBackoffSeconds": 3600,
   "leaseSeconds": 60,
+  "retainSeconds": 604800,
   "fields": [
     {
       "name": "sku",
@@ -36,16 +39,18 @@ pub const RECOUNT_QUEUE: &str = r#"{
     "expire": "UPDATE recount_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,\n  last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()\nWHERE state = 'claimed' AND claim_expires_at <= now() AND attempts > $1",
     "claim": "WITH due AS (\n  SELECT id FROM recount_queue\n  WHERE (state = 'ready' AND due_at <= now()) OR (state = 'claimed' AND claim_expires_at <= now())\n  ORDER BY due_at, id\n  LIMIT $1\n  FOR UPDATE SKIP LOCKED\n)\nUPDATE recount_queue AS q SET state = 'claimed', attempts = q.attempts + 1, claim_token = gen_random_uuid(),\n  claim_expires_at = now() + make_interval(secs => $2), updated_at = now()\nFROM due WHERE q.id = due.id\nRETURNING q.id::text, q.claim_token::text, q.attempts, q.sku",
     "complete": "UPDATE recount_queue SET state = 'done', claim_token = NULL, claim_expires_at = NULL, updated_at = now()\nWHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'",
-    "fail": "UPDATE recount_queue SET\n  state = CASE WHEN attempts > $3 THEN 'dead' ELSE 'ready' END,\n  due_at = CASE WHEN attempts > $3 THEN due_at ELSE now() + make_interval(secs => $4) END,\n  last_error = $5, claim_token = NULL, claim_expires_at = NULL, updated_at = now()\nWHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'\nRETURNING state",
+    "fail": "UPDATE recount_queue SET\n  state = CASE WHEN attempts > $3 THEN 'dead' ELSE 'ready' END,\n  due_at = CASE WHEN attempts > $3 THEN due_at ELSE now() + make_interval(secs => LEAST($4 * power(2, LEAST(attempts - 1, 40)), $6)) END,\n  last_error = $5, claim_token = NULL, claim_expires_at = NULL, updated_at = now()\nWHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'\nRETURNING state",
     "extend": "UPDATE recount_queue SET claim_expires_at = now() + make_interval(secs => $3), updated_at = now()\nWHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'",
-    "release": "UPDATE recount_queue SET state = 'ready', attempts = GREATEST(attempts - 1, 0), claim_token = NULL, claim_expires_at = NULL, updated_at = now()\nWHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'"
+    "release": "UPDATE recount_queue SET state = 'ready', attempts = GREATEST(attempts - 1, 0), claim_token = NULL, claim_expires_at = NULL, updated_at = now()\nWHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'",
+    "prune": "DELETE FROM recount_queue WHERE id IN (\n  SELECT id FROM recount_queue\n  WHERE state = 'done' AND updated_at <= now() - make_interval(secs => $1)\n  ORDER BY updated_at\n  LIMIT $2\n  FOR UPDATE SKIP LOCKED\n)"
   }
 }"#;
 
 /// The queue of `StockLow` messages, whose descriptor this is.
 ///
-/// A message whose handler fails is due again after 60s, and is dead
-/// after 3 such retries; a claim holds it for 120s unless extended.
+/// A message whose handler fails is due again after 60s, doubled for
+/// each attempt before, up to 3600s, and is dead after 3 such retries; a
+/// claim holds it for 120s unless extended. A done message stays 604800s.
 ///
 /// A queue of the database (D53), whose message holds a field of each form
 /// a descriptor writes: a column, an enum with its default, a list and an
@@ -55,7 +60,9 @@ pub const STOCK_LOW_QUEUE: &str = r#"{
   "table": "stock_low_queue",
   "retries": 3,
   "backoffSeconds": 60,
+  "maxBackoffSeconds": 3600,
   "leaseSeconds": 120,
+  "retainSeconds": 604800,
   "fields": [
     {
       "name": "productId",
@@ -85,8 +92,9 @@ pub const STOCK_LOW_QUEUE: &str = r#"{
     "expire": "UPDATE stock_low_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,\n  last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()\nWHERE state = 'claimed' AND claim_expires_at <= now() AND attempts > $1",
     "claim": "WITH due AS (\n  SELECT id FROM stock_low_queue\n  WHERE (state = 'ready' AND due_at <= now()) OR (state = 'claimed' AND claim_expires_at <= now())\n  ORDER BY due_at, id\n  LIMIT $1\n  FOR UPDATE SKIP LOCKED\n)\nUPDATE stock_low_queue AS q SET state = 'claimed', attempts = q.attempts + 1, claim_token = gen_random_uuid(),\n  claim_expires_at = now() + make_interval(secs => $2), updated_at = now()\nFROM due WHERE q.id = due.id\nRETURNING q.id::text, q.claim_token::text, q.attempts, q.product_id, q.level, q.urgency, q.warehouses, q.note",
     "complete": "UPDATE stock_low_queue SET state = 'done', claim_token = NULL, claim_expires_at = NULL, updated_at = now()\nWHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'",
-    "fail": "UPDATE stock_low_queue SET\n  state = CASE WHEN attempts > $3 THEN 'dead' ELSE 'ready' END,\n  due_at = CASE WHEN attempts > $3 THEN due_at ELSE now() + make_interval(secs => $4) END,\n  last_error = $5, claim_token = NULL, claim_expires_at = NULL, updated_at = now()\nWHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'\nRETURNING state",
+    "fail": "UPDATE stock_low_queue SET\n  state = CASE WHEN attempts > $3 THEN 'dead' ELSE 'ready' END,\n  due_at = CASE WHEN attempts > $3 THEN due_at ELSE now() + make_interval(secs => LEAST($4 * power(2, LEAST(attempts - 1, 40)), $6)) END,\n  last_error = $5, claim_token = NULL, claim_expires_at = NULL, updated_at = now()\nWHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'\nRETURNING state",
     "extend": "UPDATE stock_low_queue SET claim_expires_at = now() + make_interval(secs => $3), updated_at = now()\nWHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'",
-    "release": "UPDATE stock_low_queue SET state = 'ready', attempts = GREATEST(attempts - 1, 0), claim_token = NULL, claim_expires_at = NULL, updated_at = now()\nWHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'"
+    "release": "UPDATE stock_low_queue SET state = 'ready', attempts = GREATEST(attempts - 1, 0), claim_token = NULL, claim_expires_at = NULL, updated_at = now()\nWHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'",
+    "prune": "DELETE FROM stock_low_queue WHERE id IN (\n  SELECT id FROM stock_low_queue\n  WHERE state = 'done' AND updated_at <= now() - make_interval(secs => $1)\n  ORDER BY updated_at\n  LIMIT $2\n  FOR UPDATE SKIP LOCKED\n)"
   }
 }"#;

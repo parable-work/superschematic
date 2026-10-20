@@ -62,11 +62,14 @@ type QueueDescriptor struct {
 	// Table is the queue's table, quoted for SQL where it must be.
 	Table string `json:"table"`
 
-	// Retries, BackoffSeconds and LeaseSeconds are the queue's arguments
-	// with their defaults (registry.QueueSettingsOf).
-	Retries        int `json:"retries"`
-	BackoffSeconds int `json:"backoffSeconds"`
-	LeaseSeconds   int `json:"leaseSeconds"`
+	// Retries, BackoffSeconds, MaxBackoffSeconds, LeaseSeconds and
+	// RetainSeconds are the queue's arguments with their defaults
+	// (registry.QueueSettingsOf).
+	Retries           int `json:"retries"`
+	BackoffSeconds    int `json:"backoffSeconds"`
+	MaxBackoffSeconds int `json:"maxBackoffSeconds"`
+	LeaseSeconds      int `json:"leaseSeconds"`
+	RetainSeconds     int `json:"retainSeconds"`
 
 	// Fields are the message's fields, in declaration order, the order a
 	// claim returns their columns in.
@@ -105,6 +108,7 @@ type QueueStatements struct {
 	Fail     string `json:"fail"`
 	Extend   string `json:"extend"`
 	Release  string `json:"release"`
+	Prune    string `json:"prune"`
 }
 
 // queueStatements are s by the names queues.ts gives them.
@@ -117,6 +121,7 @@ func queueStatements(s sqlutil.QueueStatements) QueueStatements {
 		Fail:     s.Fail,
 		Extend:   s.Extend,
 		Release:  s.Release,
+		Prune:    s.Prune,
 	}
 }
 
@@ -154,12 +159,14 @@ func RustQueues(schema *ir.Schema) ([]QueueInfo, error) {
 			Const:    QueueConst(td.Name),
 			DocLines: queueDocLines(codegen.DocText(td.Description, td.Comment)),
 			Descriptor: QueueDescriptor{
-				Name:           td.Name,
-				Table:          sqlutil.QuoteIdentifier(codegen.ToSnakeCase(td.Name) + ir.QueueTableSuffix),
-				Retries:        settings.Retries,
-				BackoffSeconds: settings.BackoffSeconds,
-				LeaseSeconds:   settings.LeaseSeconds,
-				Fields:         []QueueField{},
+				Name:              td.Name,
+				Table:             sqlutil.QuoteIdentifier(codegen.ToSnakeCase(td.Name) + ir.QueueTableSuffix),
+				Retries:           settings.Retries,
+				BackoffSeconds:    settings.BackoffSeconds,
+				MaxBackoffSeconds: settings.MaxBackoffSeconds,
+				LeaseSeconds:      settings.LeaseSeconds,
+				RetainSeconds:     settings.RetainSeconds,
+				Fields:            []QueueField{},
 			},
 		}
 		var columns []string
@@ -174,7 +181,7 @@ func RustQueues(schema *ir.Schema) ([]QueueInfo, error) {
 			q.Descriptor.Fields = append(q.Descriptor.Fields, field)
 			columns = append(columns, field.Column)
 		}
-		q.Descriptor.Statements = queueStatements(sqlutil.PostgresQueueStatements(q.Descriptor.Table, columns))
+		q.Descriptor.Statements = queueStatements(sqlutil.PostgresQueueStatements(q.Descriptor.Table, columns, q.Descriptor.RetainSeconds > 0))
 		if q.Unsupported == "" {
 			text, err := q.Descriptor.JSON()
 			if err != nil {
