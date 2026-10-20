@@ -7004,15 +7004,28 @@ ir's `TestSortValues`, `TestParseSort`, `TestSortArgument` and
 verify's `TestSortsNeedAPagedList`, `TestASortByAVirtualFieldWarns` and
 `TestASortOfADependencysItem`, the loader's
 `TestSortsAreCheckedInTheDataForms`, and the writer's
-`TestTSWriterEmitsPaginated`. The runtimes, the servers, the documents,
-the SDKs, the ORM and acme are designed and not yet built. The tests are
-these:
+`TestTSWriterEmitsPaginated`.
+
+The tool documents and the SDKs are built. A tool's sort property is a
+string of the sort's values, described with `PageSortDescription` and a
+sentence that names the values and the default, and marked
+`x-superschematic-sort` (`registry.DefaultToolSortKey`). A tool hook
+renames the mark through `ToolKeys.Sort`, which the hook may not make a
+JSON Schema keyword, a parameter key or another vendor key. A sorted
+tool's description asks for the same sort with each `next`, and
+`tools/index.ts` types the sort as the union of its values. The four
+SDKs send the sort from the query arguments they already read, with no
+change to a method's template, and each `<operation>All` sends it with
+every page. Only a sorted tool's `inputSchemaDigest` changes.
+
+The runtimes, the servers, the ORM and acme are designed and not yet
+built. The tests are these:
 
 - ir's `TestOperationPage_KeyPositionOmissionAndRoundTrip` (with `defaultSort`), `TestSortValue` and `TestParseSort`; the reader's `sort_by_test.go`; and `fixture-paged-api`, whose `listItems` gains `sort: SortBy<ItemView, ["name", "sku"]>` with `defaultSort: "name"`. Its TypeScript, JSON and YAML forms load to one IR and round-trip through `format`.
 - verify's `TestSortsNeedAPagedList`, one case for each message, and `TestASortByAVirtualFieldWarns`.
 - Each runtime's parity test over the new vectors, and Go's `TestBindAndUnbind`.
 - apigen's `TestPagedRoutesServePages`, tsrestgen's `TestGeneratedPagedRouter` and rustrestgen's `TestPagedListServesAPageAtATime`: a sort sent, the default, a refused sort, a cursor of another sort, and `next` bound. Also `TestPagedOpenAPIGolden` and the `fixture-paged-api` goldens of every generator.
-- The SDKs' paged tests: each stub server sees the sort on every page that `<operation>All` asks for. toolsutil's `TestPagedToolParametersReturnsAndDescription` covers the property and the sentence, and `TestToolHookRenamesTheSortKey` covers the hook.
+- The SDKs' paged tests: each stub server sees the sort on every page that `<operation>All` asks for (sdkgen's `TestPagedSDKCompilesAndRuns`, gosdkgen's `TestListItemsAllKeepsTheSort`, pysdkgen's `TestPagedSDKImportsAndRuns` and rustsdkgen's `a_pager_keeps_its_sort`). toolsutil's `TestSortedToolParametersAndDescription` covers the property and the sentence, apigen's `TestToolHookErrors` the key's refusals, and sdkgen's `TestToolHookRenamesTheSortKey` the hook.
 - ormgen's fixture-db golden; `TestGenerateFindPage`; and `TestGeneratedFindPageOnPostgres`, which pages tenants by each sortable kind in both directions, breaks ties by id, puts a filter and a search beside the keyset, hides soft-deleted rows and refuses a key of another sort.
 - acme: `TestStackDevRunsTheShop`, `rust-server/tests/shop.rs` and the four clients page sorted lists against the Go and the Rust server, and a cursor of one sort used with another is refused with the 400.
 
@@ -7050,12 +7063,19 @@ operation's search in `ResolvedReference.Search`. When the API lists no
 target, it takes an API dependency's options and names the dependency in
 `ResolvedReference.OptionsService`. ir's
 `TestResolveReferenceFindsTheSearch` and `TestOptionsFromADependencyAPI`
-cover it, with the loader's `TestAReferenceListedByItsAPIDependency`. The
-documents and Topcoat are designed and not yet built. The tests are
-these:
+cover it, with the loader's `TestAReferenceListedByItsAPIDependency`.
+
+The documents are built. The reference value of the OpenAPI document and
+of the tool documents gains `search`, the options operation's search
+argument, and `service`, the API dependency whose operation the options
+are; `options` then gives that operation's operationId, or its tool
+name, as the dependency's own documents do. `ir.ToolSchemaReference`
+decodes both, and `tools/index.ts` types them.
+
+Topcoat is designed and not yet built. The tests are these:
 
 - ir's `TestResolveReferenceFindsTheSearch`, `TestOptionsFromADependencyAPI` (the API's own operation wins, the dependency's is found, one named by `options`, two that list it, and a General dependency, which lists nothing), and the loader's `TestAReferenceListedByItsAPIDependency`.
-- The `fixture-refs-api` goldens of apigen, toolsutil, sdkgen and rustsdkgen, whose `listItems` searches, gain `search`, and `TestRefsOpenAPIPlacesEachKey` reads `service`.
+- The `fixture-refs-api` goldens of apigen, toolsutil, sdkgen and rustsdkgen, whose `listItems` searches, gain `search`, which `TestRefsOpenAPIPlacesEachKey` reads; `TestAReferenceToADependencysOptionsNamesItsService` reads `service`.
 - `TestTheConsolePagesPicksAndSearches` drives `fixture-console-api`, whose `listProducts` searches:
   - The order form's lines, its gift and the orders' product filter are pickers.
   - A filter's "Find" lists the matches by GET.

@@ -101,12 +101,31 @@ Each SDK's method takes `cursor` and `limit` and returns the page, and
 `<operation>All` yields every item, asking for each page with the `next` of
 the one before only once the loop has taken its items:
 
-| Language | One page | Every item |
-| --- | --- | --- |
-| Go | `ListOrders(ctx, query, runtime.PageRequest{Cursor, Limit})` returns a `runtime.Page[T]`, `Items` and `Next` | `ListOrdersAll(ctx, query, page)`, an `iter.Seq2[T, error]` |
-| TypeScript | `listOrders({ ...query, cursor, limit })` returns a `Page<T>`, `items` and `next` | `listOrdersAll(params)`, an `AsyncIterable<T>` |
-| Python | `list_orders(..., cursor=..., limit=...)` returns a `Page[T]`, `.items` and `.next` | `list_orders_all(...)`, an `Iterator[T]` |
-| Rust | `list_orders(Some(&ListOrdersQueryParams { cursor, limit, .. }), options)` returns a `Page<T>`, `items` and `next` | `list_orders_all(query, options)`, a `Pager<T>` whose `next().await` yields each item |
+| Language | One page | Every item | The sort |
+| --- | --- | --- | --- |
+| Go | `ListOrders(ctx, query, runtime.PageRequest{Cursor, Limit})` returns a `runtime.Page[T]`, `Items` and `Next` | `ListOrdersAll(ctx, query, page)`, an `iter.Seq2[T, error]` | `Sort *string` on the query struct |
+| TypeScript | `listOrders({ ...query, cursor, limit })` returns a `Page<T>`, `items` and `next` | `listOrdersAll(params)`, an `AsyncIterable<T>` | `params.sort` |
+| Python | `list_orders(..., cursor=..., limit=...)` returns a `Page[T]`, `.items` and `.next` | `list_orders_all(...)`, an `Iterator[T]` | `sort=`, before `cursor` and `limit` |
+| Rust | `list_orders(Some(&ListOrdersQueryParams { cursor, limit, .. }), options)` returns a `Page<T>`, `items` and `next` | `list_orders_all(query, options)`, a `Pager<T>` whose `next().await` yields each item | `sort: Option<String>` on the query struct |
+
+A list whose operation takes a `SortBy` argument
+([Pages](/superschematic/guides/api-routes/#pages)) takes its sort as the
+optional query argument it is, named after the schema's argument: a field,
+`placedAt`, or `-` and a field for descending, `-placedAt`. Left out, the
+page is in the operation's `defaultSort`. A cursor holds the sort it was
+returned under, so the page after it is asked with the same sort, and
+`<operation>All` sends the sort it was given with every page. The SDKs
+send a sort as it is, with no list of their own of the values; the
+server refuses one it does not offer, and a cursor of another sort, with
+400. The OpenAPI document and the tool documents list the values
+([MCP tools](/superschematic/reference/mcp-tools/#toolsschemajson)).
+
+```ts
+// Every order, the newest first.
+for await (const order of shopper.order.listOrdersAll({ sort: "-placedAt" })) {
+  console.log(order.id, order.placedAt);
+}
+```
 
 An SDK refuses a `limit` past the operation's most before it sends, and an
 iterator ends with an error, not a loop, on a page whose `next` is the

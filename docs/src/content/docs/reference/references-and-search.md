@@ -320,7 +320,8 @@ In the OpenAPI document, the value that refers gives
   "options": "CatalogListProductsHandler",
   "value": "id",
   "label": "name",
-  "lookup": "ids"
+  "lookup": "ids",
+  "search": "q"
 }
 ```
 
@@ -331,6 +332,25 @@ In the OpenAPI document, the value that refers gives
 | `value` | the target's key the value holds |
 | `label` | the target's key that names an item; absent when it has none |
 | `lookup` | the options operation's argument that narrows its list to the values given; absent when it has none |
+| `search` | the options operation's search argument, which a picker fills with the text a reader types (D61, amended); absent when it has none |
+| `service` | the API dependency whose operation the options are, when none of the API's own lists the target ([Options from an API dependency](#options-from-an-api-dependency)); absent for the API's own |
+
+When `service` names a dependency, `options` is the `operationId` the
+dependency's own document gives its operation, and `lookup` and `search`
+are that operation's arguments. The dependency's operation is not in the
+API's document, so a client calls it at the dependency's API:
+
+```json
+"x-superschematic-reference": {
+  "target": "#/components/schemas/ShelfView",
+  "options": "ShelvesListShelvesHandler",
+  "service": "shelves-api",
+  "value": "id",
+  "label": "title",
+  "lookup": "ids",
+  "search": "q"
+}
+```
 
 The key sits on the property schema of a field (of an output or an input
 type) and of a body argument, and on the parameter object of a path or
@@ -372,12 +392,14 @@ document.
 A tool's parameters in `tools/schema.json`, the provider lists and
 `tools/index.ts` give each argument's or field's property the same keys,
 beside `x-superschematic-scalar`. There `target` is the type's name and
-`options` the tool name of the options operation (`catalog.listProducts`).
+`options` the tool name of the options operation (`catalog.listProducts`),
+the dependency's tool when `service` names one (`shelves.listShelves`).
 A tool hook renames the keys through `ToolKeys.Reference` and
 `ToolKeys.Search`
 ([MCP tools](/superschematic/reference/mcp-tools/#toolsschemajson)). In
 Go, `ir.ToolSchemaProperty` decodes them as `Reference`, an
-`ir.ToolSchemaReference`, and `Search`.
+`ir.ToolSchemaReference` whose `Search` and `Service` are the members
+above, and `Search`.
 
 Neither key changes what a server accepts. A reference is not checked at
 run time, and a search keeps its rule.
