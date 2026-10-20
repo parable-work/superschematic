@@ -258,9 +258,9 @@ connector's value against it and refuses one that breaks it with a
 
 | Edge | Value | Members |
 | --- | --- | --- |
-| sql | `ir.DatabaseConnection` | `url`, a connection string; or `cloudSql`, a Cloud SQL connector configuration: `instance` (the instance connection name), `database` and `user` (the IAM database user) |
-| http | `ir.ServiceEndpoint` | `url`, the callee's base URL; and an optional `credential`: its `source` (`google-id-token`, `token-file` or `signed-token`, the runtimes' sources of section 9.6), the settings that source reads (`audience`, `tokenFile`, `issuer`, `key`), and the `headers` that carry it, which include `Service-Authorization`. A signed token's `key` is an Ed25519 private JWK's JSON or the PEM of its PKCS#8 encoding, and a secret member (below) |
-| bucket | `ir.BucketConnection` | `name`, the bucket's name with its provider; and an optional `endpoint`, the base URL of an emulator that serves the provider's API in its place. It holds no credential: on gcp the workload's own account reaches the bucket (D54) |
+| sql | `ir.DatabaseConnection` | `url`, a connection string; or `cloudSql`, a Cloud SQL connector configuration: `instance` (the instance connection name), `database` and `user` (the IAM database user); or, on Workers, `d1`, a D1 database bound to the Worker (D64): `binding`, the name of its `d1` binding, and `database`, the database's uuid |
+| http | `ir.ServiceEndpoint` | `url`, the callee's base URL; on Workers, an optional `binding`, the service binding the caller reaches the callee's Worker through (D64): `name`, the binding's name, and `worker`, the callee's Worker; and an optional `credential`: its `source` (`google-id-token`, `token-file` or `signed-token`, the runtimes' sources of section 9.6), the settings that source reads (`audience`, `tokenFile`, `issuer`, `key`), and the `headers` that carry it, which include `Service-Authorization`. A signed token's `key` is an Ed25519 private JWK's JSON or the PEM of its PKCS#8 encoding, and a secret member (below) |
+| bucket | `ir.BucketConnection` | `name`, the bucket's name with its provider; an optional `endpoint`, the base URL of an emulator that serves the provider's API in its place; and, on Workers, `binding`, the name of the Worker's `r2_bucket` binding, with `r2`, the credential that signs URLs for the bucket's objects (D64): `account`, `accessKeyId` and `token`, a secret member (below). `r2` needs `binding`, and `binding` excludes `endpoint`. On gcp it holds no credential: the workload's own account reaches the bucket (D54) |
 | http, for the callee's `<API>_CALLERS` | `ir.ServiceAuth` | `issuers`, each an `ir.ServiceAuthIssuer`: `issuer` and `issuerAliases`, `audience`, `algorithms`, `jwksUrl` or `keys` (each a `jwk`, a public JWK's JSON, or a `pem`, an Ed25519 public key's SubjectPublicKeyInfo PEM, D63), `subjectClaim`, `maxLifetimeSeconds`, and `callers`, each a `subject`, the `deployable` it is and the APIs it `serves`. A connector gives one issuer per edge, listing the edge's caller (`Connected.Callee`), and resolution merges the edges to the API by issuer (section 9.2) |
 | site | `ir.SiteEndpoint` | `url`, the API's public base URL, its server's `PublicAddressOf` (section 6.1) |
 | site, for the callee's `<API>_CORS` | `ir.CORSPolicy` | `origins`, the public origin of each site whose site edge reaches the API, in the order of the edges, each once: `<scheme>://<host>[:<port>]` or a reference. Resolution writes it from the sites' public addresses (D55) |
@@ -271,11 +271,18 @@ aliases, algorithms, subject claim and maximum lifetime, a whole number,
 and a caller's deployable and the APIs it serves. A member the contract
 lacks, or that the credential's source does not read, is refused.
 
+The members a Worker alone reads, a database's `d1`, a service's `binding`
+and a bucket's `binding` and `r2`, are read by the TypeScript runtime's
+readers, for its Workers entry (section 18.5). The Go and Rust readers
+refuse each of their variables, saying only a Worker reads it, and the
+parity vectors hold that refusal as a vector's `workerOnly`.
+
 In environment variables, a derived field is one variable per member:
 the field's name, an underscore and the member's path in upper snake case,
 with a list of strings joined by commas (`SHOP_DB_DATABASE_URL`,
 `SHOP_DB_DATABASE_CLOUD_SQL_INSTANCE`, `SHOP_API_SERVICE_URL`,
-`SHOP_API_SERVICE_CREDENTIAL_HEADERS`, `SHOP_MEDIA_BUCKET_NAME`). A list of
+`SHOP_API_SERVICE_CREDENTIAL_HEADERS`, `SHOP_MEDIA_BUCKET_NAME`,
+`SHOP_DB_DATABASE_D1_BINDING`, `SHOP_MEDIA_BUCKET_R2_ACCESS_KEY_ID`). A list of
 strings one of which is a reference, such as the origins of a CORS field
 whose site's address is an output, is one concatenation of them and the
 commas (`SHOP_API_CORS_ORIGINS`, D55). A list of objects, or an empty
@@ -288,7 +295,8 @@ Each variable is a plain string a platform can set from an output
 reference, or from its secret store for a member such as a signing key.
 
 A secret member is one the contract marks as holding a secret: a
-signed-token credential's `key`, today (`ir.SecretDerivedMember`). A
+signed-token credential's `key`, and an R2 credential's `token` (D64)
+(`ir.SecretDerivedMember`). A
 connector derives it as a reference to an output, never a literal, so
 `environment.json` never holds it, and resolution refuses a literal one
 (`lowering`). `ir.DerivedVariables` marks its variable `Secret`, and a
@@ -3061,13 +3069,18 @@ config may leave `outputs` out.
   calls. The build writes a typed browser config there,
   `config.generated.ts`, on every build: `loadApis()` returns each API the
   site calls, by the camel case of its name, with its public `baseUrl` and
-  `client(create)`, which builds a client of the API from a factory the
-  site hands it, its SDK's constructor or any other. It imports no SDK:
-  a browser bundle of a generated SDK takes superscalar's Node backend
-  until superscalar's browser build bundles (D55, amended). When the
-  package is missing, the build scaffolds a minimal site there once: an
-  `index.html`, a script that loads the config, and a `build` script that
-  bundles them with `bun build`.
+  `client(options)`, which builds the API's generated TypeScript SDK at
+  that address with the SDK's other options, `auth` among them. The
+  config imports each SDK, which validates through superscalar: `bun
+  build --target=browser` takes superscalar's browser build through its
+  `browser` export condition, with the WebAssembly module inlined and no
+  plugin, so a page's Content-Security-Policy must allow
+  `'wasm-unsafe-eval'` (D55, amended twice). An API whose config
+  generates no TypeScript SDK has its `baseUrl` alone. When the package
+  is missing, the build scaffolds a minimal site there once: an
+  `index.html`, a script that loads the config, and a `package.json`
+  that depends on each SDK and whose `build` script bundles them with
+  `bun build`.
 - **Build.** The deploy runs the site's `build` script after a frozen
   install of the workspace. It digests the output as it digests a server's
   build context (D46): every file in path order, at the epoch, owned by
@@ -4533,7 +4546,7 @@ There is no `worker` key: resolution refuses the kind on this target.
 
 | Stack concept | cloudflare |
 | --- | --- |
-| server | A `cloudflare:index/worker:Worker` named after the deployable (`<deployable>.worker`), in infrastructure, with Workers Logs on unless `logs: false` (`observability.enabled` and `observability.logs`), workers.dev on only for an exposed server without a domain, and previews off (`subdomain.enabled`, `subdomain.previewsEnabled`). Each rollout makes a `workerVersion` (`<deployable>.version`, on the worker's `id`) and a `workersDeployment` (`<deployable>.deployment`) sending 100% of traffic to it. The version holds the server's bundle (`main.js`, `application/javascript+module`; `main.js.map`, `application/source-map`; and `superscalar.wasm`, `application/wasm`; each a `contentFile` under `artifacts/<server>/{bundle-digest}/` with its pinned `contentSha256`), `mainModule: main.js`, the compatibility date the extension pins (`cloudflare.CompatibilityDate`, 2026-09-15) unless set, `limits.cpuMs` and `placement.mode` from the settings, and the server's config as bindings. Its address is `https://<name>`, the host a service binding's requests carry. TypeScript only, and no API over the user model; a name over 63 characters, or under a parameter 63 before the parameter's value, is refused as unrealizable. |
+| server | A `cloudflare:index/worker:Worker` named after the deployable (`<deployable>.worker`), in infrastructure, with Workers Logs on unless `logs: false` (`observability.enabled` and `observability.logs`), workers.dev on only for an exposed server without a domain, and previews off (`subdomain.enabled`, `subdomain.previewsEnabled`). Each rollout makes a `workerVersion` (`<deployable>.version`, on the worker's `id`) and a `workersDeployment` (`<deployable>.deployment`) sending 100% of traffic to it. The version holds the server's bundle (`main.js`, `application/javascript+module`; `main.js.map`, `application/source-map`; and `superscalar_wasm_bg.wasm`, `application/wasm`, the name superscalar's `workerd` build imports it by; each a `contentFile` under `artifacts/<server>/{bundle-digest}/` with its pinned `contentSha256`), `mainModule: main.js`, the compatibility date the extension pins (`cloudflare.CompatibilityDate`, 2026-09-15) unless set, `limits.cpuMs` and `placement.mode` from the settings, and the server's config as bindings. Its address is `https://<name>`, the host a service binding's requests carry. TypeScript only, and no API over the user model; a name over 63 characters, or under a parameter 63 before the parameter's value, is refused as unrealizable. |
 | config | Each literal, parameter and derived variable is a `plain_text` binding named as the variable. A derived member flagged secret is a `secret_text` binding referencing the output that holds it. A `Secret<T>` field is a `secrets_store_secret` binding named after the field, with the environment's `secretsStoreId` and its secret's `SecretName`; without a `secretsStoreId` the server is refused, saying to run bootstrap. A D1 database, an R2 bucket or a callee Worker is a binding named after the derived field, which the value names: `d1: {binding, database}` a `d1` binding of the database's id, `binding: {name, worker}` a `service` binding to the Worker, and a bucket's `binding`, a name, an `r2_bucket` binding of the bucket its `name` names. Bindings are sorted by name, and two of one name are refused. |
 | database | A `d1Database` per hosted DB schema, `<stack>-<db>`, with a suffix under a parameter, and `sqlite` dialect. `locationHint` and `jurisdiction` become `primaryLocationHint` and `jurisdiction`. |
 | sql edge | The value is `d1: { binding: "<FIELD>", database: <uuid output> }`. The platform writes `{type: "d1", name: <binding>, id: <database>}`, and the binding is the grant. |
@@ -4753,23 +4766,30 @@ a `--bundle <deployable>=sha256:<hex>` flag, which `stack deploy` and
   'worker', 'browser']`, which select superscalar's `workerd` build;
 - `minify`, a `linked` source map, `main.js.map`, which `main.js` names in
   its `sourceMappingURL` comment, and `external: ['cloudflare:*']`;
-- a plugin that keeps every WebAssembly module external:
-  superscalar's `superscalar_wasm_bg.wasm` as `./superscalar.wasm`, which
-  bundle.ts copies beside the bundle from where the import found it.
-  superscalar's `workerd` build imports it as a `WebAssembly.Module`,
-  since workerd refuses to compile WebAssembly from bytes. Any other
-  WebAssembly module is refused;
+- `external: ['*.wasm']`, with superscalar's `superscalar_wasm_bg.wasm`
+  copied beside the bundle under its own name, which the bundle imports
+  as `./superscalar_wasm_bg.wasm`. superscalar's `workerd` build imports
+  it as a `WebAssembly.Module`, since workerd refuses to compile
+  WebAssembly from bytes. Any other WebAssembly module is refused. Every
+  Worker that imports the HTTP runtime's main entry carries it, since the
+  runtime's parameter decoding parses through superscalar;
 - `define`, which turns Bun's global into a marker, so a use of it can be
-  found in `main.js`; a `typeof` test of it passes.
+  found in `main.js`; a `typeof` test of it passes;
+- `metafile`, which names each module's imports.
 
-The output is `main.js`, `main.js.map` and `superscalar.wasm`, the names
-the platform lists, and bundle.ts prints each one's size. It rewrites the
-source map's `sources` relative to the server's package: Bun names them
-relative to the output directory, which a deploy makes anew, so the same
-code would otherwise get a new digest on every deploy. Every bundle fails
-on a `node:` or `bun:` import, a use of Bun's global, another `.wasm`, or
-superscalar's `workerd` build not resolving, and on a file beside the
-three. With `--check`, it writes to a temporary directory and removes it.
+The output is `main.js`, `main.js.map` and `superscalar_wasm_bg.wasm`, the
+names the platform lists, and bundle.ts prints each one's size. It
+rewrites the source map's `sources` relative to the server's package: Bun
+names them relative to the output directory, which a deploy makes anew,
+so the same code would otherwise get a new digest on every deploy. Every
+bundle fails on a `node:` or `bun:` import, another `.wasm`, a use of
+Bun's global, superscalar's `workerd` build not resolving, or a file
+beside the three. It reads the imports from the build's metafile, not the
+bundle's text: Bun's browser target replaces a `node:` module with a
+polyfill or an empty one, so `node:fs` leaves no trace in the output.
+`runtime/http/typescript/scripts/workers-check.mjs` checks the runtime's
+own entries that way. With `--check`, it writes to a temporary directory
+and removes it.
 
 The package also holds `workers.d.ts`, which declares the
 `cloudflare:workers` module `fetch.ts` imports, since TypeScript takes an
@@ -4782,16 +4802,21 @@ database or list a bucket, and a job or a worker on one.
 `main.ts` declares Bun's:
 - **At module scope**, it imports `env` from `cloudflare:workers` and
   reads each API's string config through
-  `loadEnvConfig(stackEnvOf(env))`, the string members alone. A refused
+  `loadEnvConfig(stackEnvOf(env))`, the string members alone
+  (`@superschematic/http-runtime/workers`). A refused
   config throws there, so Cloudflare refuses the version's upload and the
   rollout step fails, naming each variable: the twin of a server that
   refuses to start.
 - **On the first request of an isolate**, and again after a failure, it:
-  - awaits each secret binding into the config;
-  - takes each D1, R2 and service binding by the name its value gives;
+  - awaits each secret binding into the config, with
+    `stackEnvWithSecrets(env, names)`, which reads each once per isolate
+    and again after a failed `get()`;
+  - takes each D1, R2 and service binding by the name its value gives,
+    with `binding(env, name, kind)`, which refuses a missing binding or
+    one of another kind by its name;
   - builds one SDK client per callee, with `fetch` through the service
-    binding and `serviceCredentialFor` the signed token;
-  - builds each `Bucket` over its R2 binding;
+    binding (`serviceFetch`) and `serviceCredentialFor` the signed token;
+  - builds each `Bucket` over its R2 binding (`openR2Bucket`);
   - builds `Deps` with the logger and calls `create(deps)`, and
     `authenticate(deps)` where a route needs an end user;
   - mounts each `buildRouter` on one Hono app, with `authenticateService`
@@ -4800,8 +4825,12 @@ database or list a bucket, and a job or a worker on one.
     `/healthz`, and `/readyz`, which pings each D1 with `SELECT 1` within
     two seconds.
 - **Every request** goes to `app.fetch(request, { requestIP })`, whose
-  `requestIP` reads `CF-Connecting-IP`, so the runtime keys rate limits by
-  the client.
+  `requestIP` reads `CF-Connecting-IP` in the shape of Bun's
+  `server.requestIP`, so the runtime keys rate limits by the client.
+
+`perIsolate(build)` is the lazy builder: it builds on the first request,
+shares the build with every request while it runs and after, and builds
+again on the next request after a build that failed.
 
 Per isolate it caches config strings, binding objects, SDK clients, the
 service authenticator with its keys, the credential sources with their
@@ -4833,10 +4862,15 @@ first dialect:
 - `sqlite` gives `SqlDatabase`, the runtime's copy of D1's interface
   (`prepare(sql).bind(…).first/all/run/raw`, `batch`, `exec`).
 
-A D1 binding provides `SqlDatabase` on Workers, and `openSqlite(path)`
-over `bun:sqlite` provides it under `stack dev`. Placeholders are `?` and
+A D1 binding provides `SqlDatabase` on Workers, and `openSqlite(path)` over
+`bun:sqlite` provides it under `stack dev`. Placeholders are `?` and
 `?N`, which both read. D1 has no interactive transaction, and `batch` is
-atomic.
+atomic. `openSqlite` keeps D1's behaviors that an implementation could
+come to rely on: foreign keys on, a boolean bound as 1 or 0, `batch` in
+one transaction, `exec` running a script one line per statement, and
+each run's `changes`, `last_row_id` and duration in its `meta`. `ping`,
+in the same `./d1` entry, answers `/readyz`, and `connectPostgres`
+refuses a D1 connection.
 
 Resolution refuses (`unrealizable`) a TypeScript server, job or worker
 whose database resolves to another dialect than its DB service's first,
@@ -4864,7 +4898,10 @@ assumption.
 ### 18.7 Buckets on R2
 
 The runtime's `./r2` entry implements D54's `Bucket`:
-- **Objects** are put, got, deleted and listed through the binding.
+- **Objects** are put, got, deleted and listed through the binding. A
+  stream is read whole before it is put, since R2 takes a stream only
+  when it knows its length, and a delete asks for the object's head
+  first, since R2's delete answers alike whether or not it was there.
 - **`signUrl`** presigns a V4 query-string URL for
   `https://<account>.r2.cloudflarestorage.com/<bucket>/<object>` with
   WebCrypto HMAC, for at most seven days. The access key is the edge's

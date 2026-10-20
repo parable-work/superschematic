@@ -1,0 +1,1 @@
+environment variables SHOP_DB_DATABASE_D1_BINDING are set and SHOP_DB_DATABASE_D1_DATABASE is not; a D1 binding sets both

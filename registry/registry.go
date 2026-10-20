@@ -269,10 +269,20 @@ const (
 	// is written under in the OpenAPI document; an OpenAPIHook renames it.
 	OpenAPIDocsKey = apigen.OpenAPIDocsKey
 
-	// DefaultToolScalarKey and DefaultToolGuidanceKey are the vendor keys
-	// the SDK tool documents carry unless a ToolHook renames them.
-	DefaultToolScalarKey   = apigen.DefaultToolScalarKey
-	DefaultToolGuidanceKey = apigen.DefaultToolGuidanceKey
+	// OpenAPIReferenceKey and OpenAPISearchKey are the vendor-extension
+	// keys a value's reference (D61) and a search argument's mark (D62)
+	// are written under in the OpenAPI document; an OpenAPIHook renames
+	// them.
+	OpenAPIReferenceKey = apigen.OpenAPIReferenceKey
+	OpenAPISearchKey    = apigen.OpenAPISearchKey
+
+	// DefaultToolScalarKey, DefaultToolReferenceKey, DefaultToolSearchKey
+	// and DefaultToolGuidanceKey are the vendor keys the SDK tool documents
+	// carry unless a ToolHook renames them.
+	DefaultToolScalarKey    = apigen.DefaultToolScalarKey
+	DefaultToolReferenceKey = apigen.DefaultToolReferenceKey
+	DefaultToolSearchKey    = apigen.DefaultToolSearchKey
+	DefaultToolGuidanceKey  = apigen.DefaultToolGuidanceKey
 
 	// DefaultToolInvocationKey, ToolInvocationAuto and ToolInvocationAsk
 	// are the core's invocation policy: the key, its values, and (auto)

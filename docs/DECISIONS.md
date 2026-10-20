@@ -5209,8 +5209,9 @@ the deploy and preview jobs of an environment with a site. #349 reads
 the CORS field on a Rust server (D57), and #344 lets the identity runtime
 answer its trusted origins on an API a site calls (the amendment below).
 
-Not built: a site's SDK clients in the browser, which wait on
-superscalar's browser build (the first amendment below).
+A site's SDK clients in the browser waited on superscalar's browser
+build (the first amendment below), and came with it (the last D55
+amendment, below D66).
 
 The rule is reversible until the first release.
 
@@ -5242,7 +5243,8 @@ from superscalar, at the commit `superscalar.pin` names:
 | What superscalar needs, in its own repository: a `browser` condition on `.` and `./scalars` that takes a build importing the browser backend (or a package `browser` map from `./dist/esm/backend.js` to `./dist/esm/backend.browser.mjs`); and a browser backend that instantiates its module without a bundler's integration, such as wasm-pack's `web` target initialized with top-level `await`, or the bytes inlined and `initSync`. superschematic then builds that target in `scripts/superscalar-dep.sh` and pins the commit. | |
 
 Status: built with the rest of D55's first half. The acme shop's
-`web/shop-web` calls shop-api with `fetch` through `loadApis()`.
+`web/shop-web` called shop-api with `fetch` through `loadApis()`. The last
+D55 amendment, below D66, lifts this one.
 
 The rule is reversible until the first release.
 
@@ -6791,6 +6793,199 @@ two APIs that refer to each other as a cycle.
 
 The rule is reversible until the first release.
 
+### D60, amended: an envelope's `meta` holds the request's id alone, and no envelope has `links`
+
+D60 found that the Go runtime's envelope declares `meta.totalCount` and
+`links` and that the OpenAPI document advertises both on every response,
+but no server writes either. Every call of `response.JSONEnvelope` and
+`CollectionEnvelope` passes no links and a `Meta` that holds only
+`RequestID`. The TypeScript and Rust runtimes write `{data, meta:
+{requestId}}`, and no SDK reads anything else. A paged list carries its
+cursor in `data` (D60). The document therefore promised a total and four
+links that a client could only ever find absent.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The OpenAPI document's envelope is `{data, meta}`, both required. Its `ResponseMeta` component is `{requestId}`, which is required. `ResponseMeta.totalCount`, the envelope's `links` and the `ResponseLinks` component go. | Keeping them, nullable, for a total or links that a later decision may add: a client generated from the document would type them today as always absent. Marking them deprecated: a second state for keys nothing ever wrote. |
+| In the Go runtime, `response.Meta` holds `RequestID` alone and `Envelope` holds `Data` and `Meta`. `Links` goes, and so does the `links` parameter of `JSONEnvelope` and `CollectionEnvelope`, so a server cannot write keys the document does not declare. The generated `response.go` and the identity runtime call both functions without it. The TypeScript client's comment that a caller can read `meta.totalCount` and `links` goes. | Keeping the Go types for a distribution's own envelope, which would write keys its document does not declare. An OpenAPI hook that adds them back stays open to a distribution. |
+| The change is to the document and the Go runtime alone. The TypeScript and Rust runtimes, every SDK and the tools already read and write `{data, meta: {requestId}}`. | |
+
+Status: built. The goldens it changes are the generated OpenAPI
+documents. In apigen that is eight files in seven fixtures:
+body-args-api; fixture-api-session's `openapi.json` and the `openapi.go`
+that embeds it; fixture-docs; fixture-nested-arrays-api;
+fixture-paged-api; fixture-service-auth-api; and fixture-user-routes-api.
+In rustrestgen it is six `openapi.json`: fixture-api,
+fixture-multiword-api, fixture-paged-api, fixture-service-auth-api,
+fixture-user-routes-api and fixture-webhooks-api. Each loses the
+envelope's `links`, the `ResponseLinks` component and `totalCount`, and
+nothing else. The other changes are fixture-api-session's `response.go`,
+which calls both functions without links, and sdkgen's four `client.ts`
+(fixture-api, fixture-nested-arrays-api, fixture-paged-api,
+fixture-user-routes-api), which change by the comment alone. The test of
+`runtime/http/go/response` replaces its case with links by one that
+`meta` holds the request's id alone. No runtime, SDK, example, scenario
+or guide read either key, and acme-shop pins no OpenAPI document, so
+nothing else changes.
+
+The rule is reversible until the first release.
+
+### D61, amended: a relation's key refers to the type sourced from its table, and the documents describe each reference
+
+D61 left two follow-ups in the core. First, an API type sourced from a
+table (`@source`) holds a relation's key, an id, but no rule matched that
+key to a source field. acme's `OrderLineView.productId` is `@virtual`
+beside `@source(OrderLine)`, and it says `RefersTo<Identity.UUID,
+ProductView>`, though `OrderLine.product` already says `Relation<Product>`
+and `ProductView` is `@source(Product)`. Second, neither the OpenAPI
+document nor the tool documents mention a reference, so a client or an
+agent cannot learn that `productId` takes an item that `listProducts`
+lists. D66 adds a third gap. A dependency's target was found by name in
+each dependency in turn. Where two of an API's dependencies declared types
+of one name, the loader and the Topcoat crate could therefore resolve one
+reference to two types: the loader reads only the dependency that the
+schema imports the type from, and the crate reads every dependency.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A field is a relation's key when it is on a type with `@source(T)`, is named `<r>Id`, and `T` does not declare it, where `T`'s field `r` is one `Relation<U>` (not `HasMany` and not many-to-many). It reads `r`'s foreign key, the column sqlgen names `<r>_id`, as `productId` reads `product_id` of `OrderLine.product`. The key needs no `@virtual`; `@virtual` still makes it a field the implementation fills. Its type is the type of `U`'s `id`, one value. A `@virtual` field named `<r>Id` that does not hold one value of that type is not a key. It derives no reference, the loader refuses nothing of it, and it is a field the implementation fills, as any `@virtual` field is. `ir.RelationKeyFits` holds the rule, which the loader and `ir.FieldReference` share, and so do the generators and the Topcoat crate, which read references through `ir.FieldReference`. `sqlmigrate.SourceReads` counts the key as a read of that column, and reads nothing for a `@virtual` field. | Requiring `@virtual`, which says the field reads nothing from the source when it reads the key. A field named `r` that holds the id, when every API names it `<r>Id`. Treating `<r>Id` as a guess, which it is not: `ToSnakeCase` gives exactly that column name, by the rule sqlgen names every column with. Refusing a `@virtual` `<r>Id` of another type, which leaves an author no way to keep a field the implementation fills under a name the rule claims. |
+| A relation's key that declares no `RefersTo` refers to the one object type W of the API itself whose `@source` is `U`, by its `id`. Every other member is derived as D61 derives it: `{ type: W }`. The reference exists only when it resolves (`ir.ResolveReference`). If no operation, or more than one, lists W, the key refers to nothing and is a plain value. An explicit `RefersTo` always wins, with its members as written. Arguments and input types hold no `@source`, so they still say `RefersTo`. | Writing the derived reference into the IR, which `format` would then write back as a `RefersTo` the author never wrote. Refusing a derived reference that does not resolve, which would fail every API that exposes a key to a table it does not list. A target among a dependency's types, which an author names with `RefersTo`. |
+| `ir.FieldReference(schema, dependencies, holder, field)` returns the reference a field holds, written or derived, and says which. `ir.DerivedReferences(schema, dependencies)` lists the derived ones beside `ir.ReferencesOf`. The loader, the Topcoat crate and the document generators read references through these, not through `FieldDef.References`. A holder that is a dependency's type, which the API's operations take or return (D66), is read against the API, whose operations are the only ones its references name: its written `RefersTo` holds only when it resolves there to a value of the field's type, and is no reference otherwise. | Reading a dependency's `RefersTo` as written, which the loader checked against the dependency's operations, not the API's, and so may name a value of another type. |
+| The loader refuses three things where it checks `@source`, that is, where the source's fields are at hand, as for the other source checks. First, a key that is not `@virtual` and whose type is not the type of `U`'s id: `OrderLineView.productId reads the key of shop-db.OrderLine.product, a Relation to Product, whose id is Identity.UUID, not string`. Second, a key that is not `@virtual` and is a list or a map. Third, a `RefersTo` on a key whose target is `@source` of another table, the target found as `ir.ResolveReference` finds it, so an imported type of a dependency is held to it too: `OrderLineView.productId: RefersTo names SupplierView, which is @source(shop-db.Supplier), but the field reads the key of shop-db.OrderLine.product, a Relation to Product`. It warns when several of the API's types are `@source(U)`: `OrderLineView.productId reads the key of shop-db.OrderLine.product and refers to nothing: ProductCard and ProductView are both @source(shop-db.Product); name one with RefersTo`. | Refusing the ambiguity. An author fixes it by naming one type, and it broke nothing before. |
+| The OpenAPI document gives each value that refers to an item the vendor key `x-superschematic-reference`, holding the resolved reference: `{"target": "#/components/schemas/ProductView", "options": "<operationId>", "value": "id", "label": "name", "lookup": "ids"}`. `value` and `label` are the target's JSON keys; `label` and `lookup` are absent when there is none. The key sits on the property schema of a field, an input field or a body argument, and on the parameter object of a path or query argument. On a list, the key sits on the list, and each item refers. A property that is a bare `$ref`, as one whose value is an enum's is, holds it in `allOf: [{$ref}]` and takes the key beside it, since OpenAPI 3.0.3 ignores the siblings of a Reference Object. A tool's parameters give the same key on the property of the argument or field; there `target` is the type's name and `options` is the tool name of the options operation, which `apigen.ToolName` gives the reference and every SDK's tools alike: the namespace and the TypeScript method's name (`catalog.listItems` for `list_items`). Derived references are written like written ones. Both keys are constants that an OpenAPI hook renames, as it renames `x-superschematic-docs`; in the tools a `ToolHook` renames the key through `ToolKeys.Reference`, as it renames the scalar key. | A list of references at the operation, which a client would have to match back to paths. The members as written, which would leave every client to derive the rest by D61's rule. A JSON Schema `$ref` to the target, which tools would resolve as the value's own schema. |
+| A dependency's type that a reference names is found through the import that names it. When no import names it, it is found by name in each dependency in turn, as before. The loader and every generator, which has every dependency, therefore resolve it alike (D66). `ir.LookupScopes` lists that order. The OpenAPI document builds a component that a dependency declares from the type found in it, and its reference keys read that type's fields, so two dependencies that declare one name give one component on every run. | Passing generators only the imported dependencies, which every caller of `ResolveReference` would have to compute. |
+
+Status: built, in the core, the documents and acme.
+`ir.FieldReference` and `ir.DerivedReferences` derive a relation key's
+reference, `ResolveReference` finds a dependency's target through its
+import first, and `ResolvedReference.TargetService` names the dependency.
+The loader accepts a key without `@virtual`, refuses the three keys and
+warns of the ambiguity, and `SourceReads` counts the key's column. A
+`@virtual` `<r>Id` of another type is no key (`ir.RelationKeyFits`), and a
+key's `RefersTo` to an imported type is held to the related table. The
+TypeScript reader flattens the types an `@source` target relates to, so
+the key's type is checked against the related type's id, and records
+nothing of them in the API: a scalar only a related type holds is not the
+API's. The OpenAPI document gives each reference, written or derived,
+under `x-superschematic-reference` (`registry.OpenAPIReferenceKey`) on the
+field's or body argument's property, beside an `allOf` for a bare `$ref`,
+and on the path or query parameter. The tool documents give it under
+`ToolKeys.Reference`, with the target's name and the options operation's
+tool name (`apigen.ToolName`), and a hook cannot rename a key to a JSON
+Schema keyword; `tools/index.ts` types the key when a tool holds one. The
+tests are these:
+
+- ir's `TestFieldReference`: a derived key; an explicit target that wins; two sourced types; an unlisted target; and the cases that derive nothing, a `@virtual` field of another type than the related type's id among them. `TestResolveReferenceThroughTheImport`: a dependency's type found through its import beside a same-named type of a General dependency. `TestLookupScopes` and `TestRelationKeyFits` hold the lookup's order and the key's rule. `TestFieldReferenceOfADependencysType` holds a dependency's `RefersTo` to the field's type in the API. All are built.
+- verify's `TestARelationsKeyNeedsNoVirtual`, `TestARelationsKeyRefusalsAndWarning` and `TestARelationsKeyAccepted`, one for each message, are built; the refusals and the accepted cases include a `RefersTo` to an imported type of another table and of the related table. `TestAVirtualFieldOfAnotherTypeIsNoKey` shows a `@virtual` `<r>Id` of another type, a list or a map refused for nothing, still virtual, and deriving nothing.
+- The reads test of `sqlmigrate` is built.
+- The loader's `TestADerivedReferenceRoundTripsWithoutRefersTo` loads `fixture-refs-keys-api`, writes it as JSON, YAML and TypeScript with no `RefersTo`, and reads each back to the same derived reference. `TestARelationsKeyIsCheckedInTheTypeScriptForm` holds the key to the related type's id and warns of two sourced types. `TestARelatedTypeRecordsNothingInTheAPI` shows the related type's scalars left out of the API unless its own fields hold them. All are built.
+- apigen's `TestRefsOpenAPIGolden` and toolsutil's `TestToolSchemasGoldenRefs` pin `fixture-refs-api`'s OpenAPI document and tool schemas, whose basket lines, gift, lookup, path argument and search hold every placement, and whose shelf entry's kind and `shelveItem`'s body argument refer by an enum's value, and `TestRefsOpenAPIPlacesEachKey` reads each placement. `TestAReferenceToAComponentSitsBesideAnAllOf` holds a component's value to an `allOf` beside the key, a nullable one to its `oneOf` and a list to its items. sdkgen's and rustsdkgen's `TestWriteToolsGoldenRefs` pin the fixture's `tools/schema.json`, and sdkgen's its `tools/index.ts`, which `TestGeneratedRefsToolsCompile` type-checks with the core's keys and a hook's. apigen's `TestADerivedReferenceIsDocumentedAsAWrittenOne` shows that a derived reference writes the key a written one does, in the document and the tools, `TestADependencysReferenceIsHeldToTheFieldsType` that a dependency's type's `RefersTo` to a value of another type writes none, and `TestAComponentTwoDependenciesDeclareIsTheImportedOne` that a component two dependencies declare is the imported one on every run. No other golden changes, since no other fixture holds a reference. All are built.
+- sdkgen's `TestToolManifestRoundTripsReferencesAndSearch` decodes the fixture's `tools/schema.json` into `ir.ToolManifest` with unknown fields refused, `ir.ToolSchemaProperty` holding `Reference` (`ir.ToolSchemaReference`) and `Search`, and re-encodes it to the same JSON. `TestToolHookRenamesTheReferenceAndSearchKeys` renames both keys. sdkgen's and rustsdkgen's `TestAReferenceNamesItsOptionsByTheToolsName` name an operation `list_items`, whose tool and options are `catalog.listItems` in both. All are built.
+
+acme's `OrderLineView.productId` drops `@virtual` and `RefersTo`, and its
+reference to `ProductView` is derived. The Topcoat crate's
+`order_view_labels` and every acme test show it unchanged.
+
+The rule is reversible until the first release.
+
+### D62, amended: the documents mark a search argument, and the Go ORM filters on `search_text`
+
+D62 left the search out of the documents and out of the Go ORM. acme's Go
+`listReviews` writes `search_text ILIKE $n ESCAPE '\'` itself for each
+word. An ORM user has only `StringFilter.ILike`, which neither splits a
+text into words nor escapes `%` and `_`.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The OpenAPI document gives a search argument's parameter `x-superschematic-search: true`. A tool's parameters give its property the same key, which a hook renames as it renames D61's key (`ToolKeys.Search`). | A sentence in the description, which a client cannot read as a rule. The rule's numbers (8 words) in the key, which belong to D62. |
+| A table with search fields gets `SearchText *string` on its ORM filter (`ReviewFilter.SearchText`). Absent, it filters nothing. Present, each of its words (D62's words: runs of characters that are not White_Space, the first 8 of them) is a condition `"review"."search_text" ILIKE $n ESCAPE '\'`, its value the word's pattern with `\`, `%` and `_` escaped. A blank text has no words and keeps every row. The ORM is Postgres's, so the condition is `ILIKE`, which the trigram index serves. | `Search`, which a field named `search` would also be. An operator on each field's `StringFilter`, which misses a word that is in another field. Ranking (D62). |
+| The ORM writes the words and the pattern itself: `searchTerms` and `searchLikePattern` in its `search.go`, written only when a table has search fields. ormgen's test holds them to `runtime/http/testdata/search_parity.json`, as the three runtimes are held. | Importing the Go runtime's `search` package. Every ORM module with a search field would then require the HTTP runtime's module, with its replaces and pins, for thirty lines, and a DB package would depend on a server's runtime. |
+| `<Type>FilterConditions(filter, args)`, a function of the ORM's package, gives a filter's conditions for a query of the caller's own. Each column is qualified by its table, and each value is appended to `args`, its placeholder numbered after those already there. `FindMany`'s `WHERE` is the same conditions joined by `AND`. acme's paged lists take their filters' conditions from it and add their keyset comparison (D60) themselves. | A method on the filter, whose name a field could also take. A keyset `After` on `FindOptions`, which is a page reader in the ORM and is left for the sort argument. |
+| The loader refuses a field whose column would be `search_text` on a table with search fields: `Review.searchText: its column is search_text, the column @searchField generates`. | |
+
+Status: built. The OpenAPI document gives the search argument's
+parameter `x-superschematic-search: true` (`registry.OpenAPISearchKey`), and
+the tool documents its property, under `ToolKeys.Search`. The goldens of
+`fixture-refs-api` (apigen's, toolsutil's, sdkgen's and rustsdkgen's) hold
+it on `listItems(q)`, and sdkgen's
+`TestToolHookRenamesTheReferenceAndSearchKeys` renames it. ormgen writes
+`SearchText` on the filter of each table with search fields, its
+conditions last among the filter's, the column qualified as the ORM names
+the table, quoted only where SQL needs it (`review.search_text`). Every
+filter's conditions are an unexported `conditions` method, which
+`buildWhereClause` joins as before and `<Type>FilterConditions` returns;
+the soft-delete condition, which `FindMany` adds after them unless its
+options include deleted rows, is not among them, so acme's key query adds
+`deleted_at IS NULL` itself.
+`search.go` comes from `templates/search.tmpl`, and a build of a schema
+without search fields removes one an earlier build wrote. The loader's
+check is `verify.checkSearchColumns`; verify names the column with a
+constant of its own, which its test holds to `sqlgen.SearchTextColumn`,
+since sqlgen's tests load schemas through the loader and an import would
+be a cycle. The ORM's tests are these:
+
+- ormgen's fixture-db golden. `Tenant.name` is a search field, so `TenantFilter.SearchText`, `TenantFilterConditions` and `search.go` appear in it. Every other ORM golden changes by `<Type>FilterConditions` and the `conditions` method alone.
+- `TestGenerateSearchTextFilter`: the field and the condition on Tenant, neither on TenantUser, and no `search.go` for a schema without search fields.
+- `TestGeneratedSearchFilterOnPostgres`, the generated module against Postgres: each word, in any case and any order; a `%` and a `_` that match themselves; a blank text, an empty one and nil; a ninth word that does not count; another field's condition beside the search; and conditions numbered after a caller's values.
+- `TestGeneratedSearchHelpersMatchTheParity`: the generated helpers held to `search_parity.json`'s `terms` and `patterns`.
+- verify's `search_column_test.go`: the refusal, for a field, a `@jsonField` and a search field itself, and on the table that extends a base class; none for a relation or on a table without search fields.
+
+acme's `ListReviews` drops its search SQL: its product, its rating and its
+words are a `ReviewFilter`, whose conditions `ReviewFilterConditions`
+gives its keyset page's key query beside the cursor's comparison, and it
+reads the page's reviews through `FindMany`, sorted by the key.
+`TestStackDevRunsTheShop` searches as before.
+
+The rule is reversible until the first release.
+
+### D44, amended: the console goes back a page and sets its page size, names an item in its trail by its route's reference, and acme's console runs live
+
+The console's pager (D60, the console amendment) links the next page and
+the first page, and nothing in between. A reader five pages in goes back
+one page only by starting again. They read pages of the route's
+`defaultLimit` unless they edit the URL's `limit`. An item's step in the
+trail that has no title is named by its id, though the route's parameter
+may say what it refers to (D61). No console test covered a reference to
+an API dependency's type (D66). acme's console renders its lists as GET
+forms, since the app loads no runtime. The user chose to keep the history
+in the console's URL, so the wire stays D60's `{items, next}`.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A paged list's page reads `back` from its query, beside `cursor` and `limit`. `back` holds the cursors of the pages before the current one, oldest first, from the second page on, joined by `.`. The first page has no cursor and is never among them. A leading `~` means that earlier cursors were dropped. `back` is the console's own: the argument form ignores it, as it ignores any name it does not hold, and no operation reads it. It holds at most 4096 characters. To build the next page's `back`, the current `back` gets the current cursor after it; while that is too long, the oldest cursors are dropped, with `~` first, until it fits. A URL therefore carries at most about 5 KB of paging, under the 8 KB request line that common servers and proxies accept. Cursors and both marks are unreserved characters, so `back` is written as it is. It is read as sent when it is at most 4096 characters long, its first entry is a cursor or `~`, and every other entry is a cursor by D60's rule (1 to 1024 characters of the base64url alphabet). Any other `back`, and any `back` sent without a cursor, reads as `~`: the page before is unknown. It is never a 400. | Every earlier cursor without a bound, so a URL grows without end. A previous cursor in the page (D60), a second order that every implementation would keep. The history in a cookie or the session, which a link or a second tab does not carry. A 400 for a history that no route reads. Repeating `cursor`, which a query cannot tell apart from the cursor sent. |
+| The pager has three links. "First page" (`rel="first"`) renders while a cursor was sent: the list's path with `query_pairs()`. "Previous page" (`rel="prev"`) renders while a cursor was sent and the page before is known: its `cursor` is the last entry of `back` and its `back` the rest, or it is the first page's link when `back` is empty. "Next page" (`rel="next"`) renders while a page follows: its `cursor` is `next`, and its `back` is the current `back` with the current cursor after it. On the second page Previous and First are the same link, and both render, so every page offers its links in the same places. A refused cursor offers the first page alone, as before. A paged operation that declares an argument named `back` has no Previous link, and the build log gives the reason: `no previous page for orders: order.listOrders declares an argument named back, the query parameter the console keeps the earlier pages' cursors in`. A section on its parent's page shows the first page and links the next one with no history, so the Previous link there is the first page. | Hiding First on the second page, where it is Previous, which moves the links from page to page. A name the core reserves, which would refuse an argument for one UI's sake. |
+| After the links comes a GET form, `<form class="ss-page-size">`. It holds the filter's pairs (`query_pairs()` without `limit`) as hidden inputs, a select named `limit` labeled "Per page", and a "Show" button. Its sizes, in order and each once, are the route's `defaultLimit` and `maxLimit`, each of 10, 20, 50, 100, 200, 500 and 1000 below `maxLimit`, and the limit sent when the route admits it. The limit sent is selected, else the default. A route with one size has no form. The form sends no cursor and no `back`, so a new size starts at the first page with no history. The filter form holds the limit sent as a hidden input, so a filter keeps the size. It too sends neither cursor nor `back`, so a filter starts at the first page with no history. | The select inside the filter form, which a paged list without a filter does not render. Links for each size, which multiply the pager's links. Keeping the cursor across a change of size, which would mix pages of two sizes. Submitting on change, which moves the reader while they choose. |
+| A live list's shard reads `back` from its signal's query, as the page reads it from the request's query, so the shard's links are the page's. Previous sets the shard's query as First and Next do, and puts the query in the address bar. The size form's submit runs the filter's script over its own form (`data-ss-live-size`) and writes the query to the form's own hidden input, which sets the same signal. | A signal for the history beside the query, which a reload would lose. |
+| The trail names an item's step in the first of these ways that applies. It uses the item's title (its detail's `titleField`), as before. Else it uses a reference: if every operation whose route holds the step's parameter at that place and declares it `RefersTo` refers to one target by one value, and that target's options operation has an in-process call, the step is named by the target's label for the step's value. These operations are the item's detail, its edit, delete and actions, and the operations of the collections under it. The label comes through the lookup with that one value, or through the listing when there is no lookup. Else the step is its noun and id, or its id alone. When those references disagree, they name nothing, and the build log gives the reason. A page whose trail names a step this way meets the rate limit and timeout of the options operation it calls, as a page that holds a reference does. A value that no item has, or a call that is refused or fails, leaves the id. | The reference's label ahead of the title, which would call for a label the detail already gives. One route's reference, chosen by order, which another route may contradict. |
+| A reference whose target is an API dependency's type works as any other does. Its options operation is one of the API's own (D61), and it has an in-process call unless it is a webhook or checks a signature; then the reference is left out, as any is. When the target is a dependency's, the build log names it by its service: `PlaceInput.shelfId refers to fixture-shelves-api.ShelfView, whose options operation Shelves.listShelves has no in-process call: its route checks a provider's signature first (@hmacVerified)`. | Calling the dependency's own listing, which the crate has no call for: cross-service options, which come later. |
+| acme's `superschematic.toml` sets `pages_live = true`. Its app gains a root layout, `#[layout("/")] document`: the HTML document every page renders in. Its head has `topcoat::runtime::script()` when the router set the runtime up (`RuntimeSetup` is in the app context). `app(shop, users, assets)` takes an `Option<AssetConfig>`. With one, the router adds `.assets(config).runtime()` after `.shop_orders(...)`, so the pages' controls see a rerun as a GET. `main` loads `AssetBundle::load()`, which `topcoat asset bundle` writes beside the binary. Without a bundle, `main` says so and serves without the runtime, and the lists are the GET forms they are today. The tests build the app with a hosted catalog that holds only the runtime's script, so the script's tag renders without a bundle. | Requiring the bundle, so every `cargo run` and every test would need the Topcoat CLI. The runtime in the console's layout, which renders no document. |
+
+Status: built, every row but the last in `extensions/topcoat` and the
+last in acme's Topcoat app (`examples/acme-shop/topcoat`). Topcoat nests
+a layer without a path, the runtime's, outside the console's
+`PageControls` at the prefix whatever their order, so acme's rerun reaches
+the controls as a GET either way; the app still adds the runtime last, as
+Topcoat's documents ask. The tests are these:
+
+- `TestTheConsolePagesPicksAndSearches` drives `fixture-console-api`:
+  - The orders are walked forward and back by their links, and each Previous lands on the page that was left.
+  - On the second page, Previous is First.
+  - A `back` near the bound drops its oldest cursor with `~` first.
+  - A `back` that is malformed, too long, or sent beside no cursor gives no Previous link and a 200.
+  - The size form offers the route's sizes with the limit selected and the filter hidden, and its submit and a filter's start at the first page.
+  - The shard's links carry `back`, and its size form sets the signal.
+  - A new `suppliers/{supplierId}/products` list names its supplier in the trail through `listSuppliers`, and shows the id for a supplier past the listing's first page and to a caller who may not list suppliers.
+- A copy of the fixture whose `listOrders` declares `back` has no Previous link and gives the build log's reason.
+- A copy with a second list under a supplier, whose `supplierId` refers to a product by its sku, names the supplier by its id and gives the build log's reason; a copy whose `listSuppliers` has a rate limit applies it to a page whose trail names a supplier.
+- `TestAReferenceToAnAPIDependencysType` moves `Supplier` into an API dependency. Selects and labels come through `listSuppliers`, under cargo test too. With the listing behind a signature, the build log names `fixture-console-suppliers-api.Supplier`.
+- `TestADerivedReferenceLabelsRows`: a relation's key with no `RefersTo` (D61, amended) gives the crate the references of the written one.
+- `fixture-console-api`'s golden changes, and `fixture-pages-api`'s by two doc comments; no other golden pages.
+- acme's Topcoat tests (`tests/app.rs`), in memory and, where they page or search, over SQLite too:
+  - `every_page_is_one_document_with_the_runtime`: each page, the shop's and the console's, is one document with the runtime's script once, in its head.
+  - `the_consoles_lists_are_live`: the orders render between their shard's markers, and the shard answers a filter, a page, a Previous link from the history in its query, and a refused caller (401); a page the runtime renders again (`x-topcoat-runtime`) answers as its GET.
+  - `the_reviews_shard_is_live`: a product's reviews' shard takes the product as its argument and carries the search across its pages.
+  - `the_console_goes_back_a_page_and_sets_its_size`: 25 orders at 10 a page, walked forward and back by Next and Previous; the sizes 10, 20, 50 and 100 for the orders and the products and 10, 20 and 50 for the reviews; the filter held by the size form and first in the links; and the shard rendering Previous and a new size.
+  - `without_the_runtime_the_pages_have_no_script`: built with no catalog, the pages render without a script, the lists are GET forms, and a rerun is no page's (405).
 ### D54, amended: a Rust server, job or worker reaches its buckets through the Rust runtime's `Bucket`
 
 D54 gave Go and TypeScript a `Bucket` and left Rust out: the Rust runtime
@@ -6841,5 +7036,49 @@ the route's rate limit. `TestServiceAuthManualRoutes` refuses a protected
 manual route without a user and a `@requireService` one without a service,
 and the three `...PredatesItsManualRoutesFails` tests the build's
 refusals.
+
+The rule is reversible until the first release.
+
+### D55, amended: a site's typed browser config hands out a client of each API's SDK, since superscalar bundles for the browser
+
+The first D55 amendment kept every SDK out of a site's typed browser
+config until superscalar bundled for the browser, and said what
+superscalar needed. superscalar's #72 built it, and `superscalar.pin` now
+names that commit (`bab3060b`):
+
+- `.`, `./scalars`, `./validation`, `./backend` and `./wasm` carry
+  `browser` and `workerd` export conditions. Each resolves into a build
+  whose backend is the WebAssembly core's, so no relative `./backend`
+  import reaches the Node backend.
+- The browser build inlines the module as base64 and instantiates it
+  synchronously when it is imported, so a bundler needs no WebAssembly
+  support. The workerd build imports the module as a `WebAssembly.Module`,
+  as a Worker's upload gives it (D64).
+- `scripts/superscalar-dep.sh` builds both: wasm-pack's `web` target with
+  the size-tuned profile into `wasm-web/`, then the two tsc passes and
+  `build-web.mjs`. `tools.env` pins wasm-pack (`WASM_PACK_VERSION`), and
+  every CI job and `make setup` that runs the script in full installs it,
+  with the `wasm32-unknown-unknown` target.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `config.generated.ts` imports the SDK of each API the site calls. `loadApis()` returns each API with its `service`, its public `baseUrl` and `client(options)`, which builds the SDK's root class at the base URL with the SDK's other options (`auth`, `credentials`, `fetch`, a timeout). An API whose config generates no TypeScript SDK keeps its address alone (`ApiAddress`), and the config's comment says to enable `outputs.sdk.typescript`. The scaffold's `package.json` depends on each SDK with `workspace:*`. | `client(create)` kept, a factory every site writes for the same constructor. Refusing a site that calls an API with no TypeScript SDK, which would break a site that calls it with `fetch`. |
+| `bun build --target=browser` takes superscalar's browser build through the `browser` condition, with no plugin. The bundle carries the module inlined: acme's page is 3.0 MB, 1.0 MB gzipped. | A Bun build plugin, which the first amendment refused. The module as a file the page fetches before its first call, which every SDK call would await. |
+| A page's Content-Security-Policy must allow `'wasm-unsafe-eval'` in `script-src`, since the browser build compiles its module. superschematic serves no Content-Security-Policy of its own; the static sites guide says so. | |
+| The SDK's client encodes and decodes base64 with `btoa` and `atob`, which browsers, Workers, Bun and Node.js all have, not with Node's `Buffer`, so a site whose tsconfig names no Node types type-checks it. | `@types/node` in every site, for one fallback no browser takes. |
+
+Status: built.
+- `TestASiteBundlesItsAPIsSDKForTheBrowser` builds the TypeScript
+  fixture's site, whose config hands out ts-shop's SDK and whose scaffold
+  depends on it. It type-checks the site with no Node types, builds the
+  scaffold, and bundles a script with `bun build --target=browser`. The
+  bundle imports nothing from `node:` and carries superscalar's module.
+  Node runs the bundle as a browser would: the script reads the site's
+  config, calls ts-shop through the client at the address the config
+  names, and parses an address through superscalar.
+- acme's `web/shop-web` lists shop-api's products through
+  `shopApi.client({ auth: { token } }).product.listProducts`.
+  `scripts/check.sh` type-checks and builds it, and checks its bundle
+  imports nothing from `node:` and carries the module.
 
 The rule is reversible until the first release.

@@ -154,8 +154,11 @@ the administrator in through the `identity` package's `Service`.
 
 ## Stack config parity vectors
 
-`runtime/http/testdata/stackconfig_parity.json` holds the vectors the Go
-and TypeScript runtimes read with their `stackconfig` readers (D51). The
+`runtime/http/testdata/stackconfig_parity.json` holds the vectors the Go,
+TypeScript and Rust runtimes read with their `stackconfig` readers (D51,
+D57). Go and Rust refuse the members only a Worker reads (D64), a D1
+binding, a service binding and an R2 binding with its credential, which
+TypeScript reads; a vector's `workerOnly` holds their refusal. The
 `stackconfig` package writes it from `ir.DerivedVariables`:
 
 ```

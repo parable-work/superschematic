@@ -205,9 +205,13 @@ func (value ToolSchemaType) Missing() bool {
 
 // ToolSchemaProperty is one property of a ToolParameterSchema.
 // x-superschematic-scalar names the scalar whose parser applies to the
-// value. Declaration order matters (see the file comment).
+// value; x-superschematic-reference gives the item a value refers to
+// (D61), and x-superschematic-search marks an operation's search argument
+// (D62). Declaration order matters (see the file comment).
 type ToolSchemaProperty struct {
 	CanonicalScalar      string                          `json:"x-superschematic-scalar,omitempty"`
+	Reference            *ToolSchemaReference            `json:"x-superschematic-reference,omitempty"`
+	Search               bool                            `json:"x-superschematic-search,omitempty"`
 	AdditionalProperties *ToolSchemaAdditionalProperties `json:"additionalProperties,omitempty"`
 	Type                 ToolSchemaType                  `json:"type"`
 	Format               string                          `json:"format,omitempty"`
@@ -224,6 +228,21 @@ type ToolSchemaProperty struct {
 	Properties           map[string]ToolSchemaProperty   `json:"properties,omitempty"`
 	Required             []string                        `json:"required,omitempty"`
 	OneOf                []ToolSchemaProperty            `json:"oneOf,omitempty"`
+}
+
+// ToolSchemaReference is the reference a tool argument's value holds
+// (D61), resolved: the value names an item of Target, which the tool
+// Options lists, by the item's field Value. Label is the item's field that
+// names it, and Lookup the argument of Options that narrows its list to
+// the items with the values given; each is absent when there is none. A
+// list refers item by item. Declaration order matters (see the file
+// comment).
+type ToolSchemaReference struct {
+	Target  string `json:"target"`
+	Options string `json:"options"`
+	Value   string `json:"value"`
+	Label   string `json:"label,omitempty"`
+	Lookup  string `json:"lookup,omitempty"`
 }
 
 // ToolReturnSchema is the return shape of one tool. Properties and

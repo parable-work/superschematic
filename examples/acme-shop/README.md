@@ -31,7 +31,7 @@ kind, decorators and auth provider.
 | `python/` | a `shop-orders` client and type tests |
 | `rust/` | a `shop-orders` client and type tests |
 | `rust-server/` | implements `shop-orders` on the generated Rust server, its catalog, orders and reviews in memory, or with its `sqlite` feature in a SQLite file of `shop-db`'s tables, and authenticates with the identity runtime over the shop's users in SQLite: in `identity.sql`'s tables (`shop-db`'s identity tables), or in the shop's file; built from `schemas/dist-rust` (`build --api-language RUST`); a library its `main` and the Topcoat app share |
-| `topcoat/` | a [Topcoat](https://github.com/tokio-rs/topcoat) app whose pages call `shop-orders` in-process, through the crate `extensions/topcoat` writes into `schemas/dist-rust` (`superschematic-topcoat`, listed in `superschematic.toml`): a shopper signs in with their password, places, filters, pages through and cancels orders, picking each line's product from the catalog `shop-orders` lists, and writes reviews through the crate's forms, and the pages render reviews and orders with its display components; the crate's console at `/console` lists, pages and searches `shop-orders`' resources; one session cookie signs the shopper in on the pages and the mounted JSON API; it keeps the shop and its users in memory, or in the SQLite file `DATABASE_URL` names |
+| `topcoat/` | a [Topcoat](https://github.com/tokio-rs/topcoat) app whose pages call `shop-orders` in-process, through the crate `extensions/topcoat` writes into `schemas/dist-rust` (`superschematic-topcoat`, listed in `superschematic.toml`): a shopper signs in with their password, places, filters, pages through and cancels orders, picking each line's product from the catalog `shop-orders` lists, and writes reviews through the crate's forms, and the pages render reviews and orders with its display components; the crate's console at `/console` lists, pages and searches `shop-orders`' resources, in place when Topcoat's runtime is loaded; one session cookie signs the shopper in on the pages and the mounted JSON API; it keeps the shop and its users in memory, or in the SQLite file `DATABASE_URL` names |
 | `testdata/generated/` | committed copies of the generated files the docs quote, under their `schemas/dist` paths |
 | `schemas/dist/bun.lock`, `schemas/dist/Cargo.lock` | the lockfiles of `schemas/dist`'s Bun and Cargo workspaces, the generated files committed, so the storefront's and `shop-stock`'s images and every install and build take the same versions; `schemas/.gitignore` ignores the rest of `schemas/dist` |
 | `scripts/check.sh` | builds, compiles and tests all of it |
@@ -89,8 +89,30 @@ It serves `http://127.0.0.1:3000`, each page linking to the others:
 - `/reviews` lists the anvil's first 20 reviews, with the form to write
   one;
 - `/console` is the console the crate generates: the orders and the
-  products a page at a time, an order's and a product's pages, and a
-  product's reviews with a search box.
+  products a page at a time, with links to the next, the previous and the
+  first page and a choice of page size, an order's and a product's pages,
+  and a product's reviews with a search box. Its lists are live
+  (`pages_live` in `superschematic.toml`): with Topcoat's runtime loaded,
+  a filter, a search, a page's links and its size render the list again
+  in place.
+
+Every page renders in one HTML document, whose head loads Topcoat's
+runtime when the app finds its asset bundle beside the binary. `cargo run`
+alone writes none, so the app says so and serves the pages without the
+runtime: the console's filters and links load the page, as they do in a
+browser without JavaScript. For live lists, install Topcoat's CLI and
+bundle the app's assets before starting it:
+
+```sh
+cargo install topcoat-cli --version 0.10.0
+cd topcoat && topcoat asset bundle --bin acme-shop-topcoat && cargo run
+```
+
+`topcoat asset bundle` builds the app to find its assets and writes them,
+the runtime's script among them, to `assets/` beside the binary, which
+`AssetBundle::load()` reads. Bundle again after a build with another
+profile, which keeps its own bundle (`--release` for `cargo run
+--release`).
 
 A refused form comes back with each message at its control. A page whose
 operation needs a signed-in shopper shows a Sign in button, which opens
@@ -141,7 +163,8 @@ server and against the Rust server, and, when Docker runs, `stack dev` on
 Postgres and the storefront on Bun), builds `schemas/dist-rust`
 again with `superschematic-topcoat` and runs the Topcoat app's tests, in
 memory and on a SQLite file the migration runner migrates with `shop-db`'s
-SQLite plan, and fails
+SQLite plan (they serve the runtime from a catalog of its script alone, so
+the check needs no asset bundle), and fails
 when a file under `testdata/generated/` differs from the run. `make setup`
 stands up everything it uses, the Python schema runtime's uv environment
 included; the Rust client and server fetch their crates on their first

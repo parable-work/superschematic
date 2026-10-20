@@ -159,12 +159,28 @@ jobs:
       - name: Install Rust toolchain
         # Builds the superscalar ffi archive from source, with this toolchain
         # rather than the one the checkout's rust-toolchain.toml pins, as the
-        # version-graph archive is (tools.env says why). The wasm32 target builds the version-graph TypeScript package, and
+        # version-graph archive is (tools.env says why). The wasm32 target
+        # builds the version-graph TypeScript package and superscalar's
+        # browser and workerd builds, and
         # rustsdkgen compile tests run cargo clippy on the generated SDK
         # crates, so this toolchain carries clippy.
         run: |
           rustup toolchain install "$RUST_VERSION" --profile minimal --target wasm32-unknown-unknown --component clippy
           rustup default "$RUST_VERSION"
+
+      - name: Cache wasm-pack
+        id: wasm-pack
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cargo/bin/wasm-pack
+          key: wasm-pack-${{ runner.os }}-${{ runner.arch }}-${{ env.WASM_PACK_VERSION }}
+
+      - name: Install wasm-pack
+        # scripts/superscalar-dep.sh builds superscalar's browser and workerd
+        # builds over its WebAssembly core with it, for the wasm32 target
+        # the toolchain above carries (D55, amended; D64).
+        if: steps.wasm-pack.outputs.cache-hit != 'true'
+        run: cargo install wasm-pack --version "$WASM_PACK_VERSION" --locked
 
       - name: Build the superscalar dependency
         run: scripts/superscalar-dep.sh
@@ -525,6 +541,20 @@ jobs:
           rustup toolchain install "$RUST_VERSION" --profile minimal --target wasm32-unknown-unknown
           rustup default "$RUST_VERSION"
 
+      - name: Cache wasm-pack
+        id: wasm-pack
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cargo/bin/wasm-pack
+          key: wasm-pack-${{ runner.os }}-${{ runner.arch }}-${{ env.WASM_PACK_VERSION }}
+
+      - name: Install wasm-pack
+        # scripts/superscalar-dep.sh builds superscalar's browser and workerd
+        # builds over its WebAssembly core with it, for the wasm32 target
+        # the toolchain above carries (D55, amended; D64).
+        if: steps.wasm-pack.outputs.cache-hit != 'true'
+        run: cargo install wasm-pack --version "$WASM_PACK_VERSION" --locked
+
       - name: Build the superscalar dependency
         run: scripts/superscalar-dep.sh
 
@@ -615,6 +645,20 @@ jobs:
         run: |
           rustup toolchain install "$RUST_VERSION" --profile minimal --target wasm32-unknown-unknown
           rustup default "$RUST_VERSION"
+
+      - name: Cache wasm-pack
+        id: wasm-pack
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cargo/bin/wasm-pack
+          key: wasm-pack-${{ runner.os }}-${{ runner.arch }}-${{ env.WASM_PACK_VERSION }}
+
+      - name: Install wasm-pack
+        # scripts/superscalar-dep.sh builds superscalar's browser and workerd
+        # builds over its WebAssembly core with it, for the wasm32 target
+        # the toolchain above carries (D55, amended; D64).
+        if: steps.wasm-pack.outputs.cache-hit != 'true'
+        run: cargo install wasm-pack --version "$WASM_PACK_VERSION" --locked
 
       - name: Build the superscalar dependency
         run: scripts/superscalar-dep.sh
@@ -734,10 +778,25 @@ jobs:
       - name: Install Rust toolchain
         # The superscalar Python package is built from the checkout by
         # maturin when uv syncs the runtime's dependencies, and so is the
-        # version-graph core's binding.
+        # version-graph core's binding. The wasm32 target builds
+        # superscalar's WebAssembly core for its browser and workerd builds.
         run: |
-          rustup toolchain install "$RUST_VERSION" --profile minimal --component rustfmt --component clippy
+          rustup toolchain install "$RUST_VERSION" --profile minimal --component rustfmt --component clippy --target wasm32-unknown-unknown
           rustup default "$RUST_VERSION"
+
+      - name: Cache wasm-pack
+        id: wasm-pack
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cargo/bin/wasm-pack
+          key: wasm-pack-${{ runner.os }}-${{ runner.arch }}-${{ env.WASM_PACK_VERSION }}
+
+      - name: Install wasm-pack
+        # scripts/superscalar-dep.sh builds superscalar's browser and workerd
+        # builds over its WebAssembly core with it, for the wasm32 target
+        # the toolchain above carries (D55, amended; D64).
+        if: steps.wasm-pack.outputs.cache-hit != 'true'
+        run: cargo install wasm-pack --version "$WASM_PACK_VERSION" --locked
 
       - name: Build the superscalar dependency
         run: scripts/superscalar-dep.sh
@@ -985,6 +1044,20 @@ jobs:
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: runtime/engine/rust
+
+      - name: Cache wasm-pack
+        id: wasm-pack
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cargo/bin/wasm-pack
+          key: wasm-pack-${{ runner.os }}-${{ runner.arch }}-${{ env.WASM_PACK_VERSION }}
+
+      - name: Install wasm-pack
+        # scripts/superscalar-dep.sh builds superscalar's browser and workerd
+        # builds over its WebAssembly core with it, for the wasm32 target
+        # the toolchain above carries (D55, amended; D64).
+        if: steps.wasm-pack.outputs.cache-hit != 'true'
+        run: cargo install wasm-pack --version "$WASM_PACK_VERSION" --locked
 
       - name: Build the superscalar dependency
         run: scripts/superscalar-dep.sh

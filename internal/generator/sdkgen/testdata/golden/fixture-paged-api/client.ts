@@ -473,7 +473,7 @@ export class HttpClient {
       };
 
       // Apply custom response interceptor BEFORE envelope unwrap so consumers
-      // can access meta.totalCount, links, and other envelope fields.
+      // can read the envelope itself: data, and meta.requestId.
       if (this.config.responseInterceptor) {
         apiResponse = await this.config.responseInterceptor(apiResponse);
       }
@@ -781,11 +781,10 @@ export class HttpClient {
     return this.base64ToArrayBuffer(normalized);
   }
 
+  // btoa and atob, which browsers, Workers, Bun and Node.js all have, and
+  // not Node's Buffer, so the SDK type-checks and bundles for a browser
+  // with no Node types (D55, amended).
   private arrayBufferToBase64(buffer: ArrayBuffer): string {
-    if (typeof Buffer !== 'undefined') {
-      return Buffer.from(new Uint8Array(buffer)).toString('base64');
-    }
-
     let binary = '';
     const bytes = new Uint8Array(buffer);
     for (const byte of bytes) {
@@ -806,11 +805,6 @@ export class HttpClient {
   }
 
   private base64ToArrayBuffer(base64: string): ArrayBuffer {
-    if (typeof Buffer !== 'undefined') {
-      const bytes = Buffer.from(base64, 'base64');
-      return this.uint8ArrayToArrayBuffer(bytes);
-    }
-
     if (typeof atob === 'undefined') {
       throw new Error('Unable to decode public key from base64');
     }

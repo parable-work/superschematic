@@ -34,8 +34,10 @@
 #      entrypoint fetch.ts included, the storefront's implementation in
 #      typescript/shop-storefront, the clients in typescript/clients and
 #      the site in web/shop-web type-check, the storefront bundles for
-#      Workers with bun bundle.ts --check, and the site builds, all of
-#      them one Bun workspace, which installs frozen to
+#      Workers with bun bundle.ts --check, and the site builds, its
+#      bundle carrying shop-api's SDK and superscalar's browser build and
+#      nothing from node:, all of them one Bun workspace, which installs
+#      frozen to
 #      the committed schemas/dist/bun.lock and fails when the build's
 #      packages no longer match it; the generated Python
 #      packages import and python/'s type tests pass; the Rust client in
@@ -277,9 +279,17 @@ done
 echo "    schemas/dist/server/storefront-stack/shop-storefront: bun bundle.ts --check"
 (cd "$DIST/server/storefront-stack/shop-storefront" && bun bundle.ts --check)
 # The site, shop-web, builds with its package's script, as stack dev and a
-# deploy build it, into one page and its script (D55).
+# deploy build it, into one page and its script (D55). It lists products
+# through shop-api's SDK, which the bundle takes with superscalar's browser
+# build: nothing from node:, and the WebAssembly module inlined, whose
+# magic number is AGFzbQ in base64 (D55, amended).
 echo "    web/shop-web: bun run build"
 (cd "$EXAMPLE_DIR/web/shop-web" && bun run build >/dev/null && test -f dist/index.html)
+if grep -lE "[\"']node:" "$EXAMPLE_DIR"/web/shop-web/dist/*.js; then
+  echo "web/shop-web's bundle imports from node:, which no browser loads" >&2
+  exit 1
+fi
+grep -q AGFzbQ "$EXAMPLE_DIR"/web/shop-web/dist/*.js
 
 echo "==> Python: the generated types and SDK import"
 # The schema runtime's uv environment (make setup) has pydantic and the

@@ -184,7 +184,7 @@ func endpointToTool(
 	scalars map[string]apigen.ScalarJSONSchemaInfo,
 	keys apigen.ToolKeys,
 ) ToolDefinition {
-	toolName := fmt.Sprintf("%s.%s", ns.Name, endpoint.Name)
+	toolName := apigen.ToolName(ns.Name, endpoint.Name)
 	description := endpoint.Description
 	if endpoint.Docs != nil {
 		description = endpoint.Docs.Description
@@ -200,9 +200,10 @@ func endpointToTool(
 	pathParams := make([]ToolPathParam, len(endpoint.PathParams))
 	for i, p := range endpoint.PathParams {
 		pathParams[i] = ToolPathParam{
-			Name:   p.Name,
-			TSName: tsutil.ToCamelCase(p.Name),
-			Type:   p.Type,
+			Name:      p.Name,
+			TSName:    tsutil.ToCamelCase(p.Name),
+			Type:      p.Type,
+			Reference: p.Reference,
 		}
 	}
 
@@ -218,6 +219,8 @@ func endpointToTool(
 			IsArray:         arg.IsArray,
 			IsArrayOfArrays: arg.IsArrayOfArrays,
 			IsMap:           arg.IsMap,
+			Reference:       arg.Reference,
+			Search:          arg.Search,
 		}
 	}
 	queryArgs := make([]ToolQueryArg, len(endpoint.QueryParams))
@@ -229,6 +232,7 @@ func endpointToTool(
 			ValidateMinLength: arg.ValidateMinLength, ValidateMaxLength: arg.ValidateMaxLength,
 			ValidateListMin: arg.ValidateListMin, ValidateListMax: arg.ValidateListMax,
 			ValidatePattern: arg.ValidatePattern,
+			Reference:       arg.Reference, Search: arg.Search,
 		}
 	}
 

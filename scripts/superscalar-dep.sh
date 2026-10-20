@@ -11,9 +11,15 @@
 #   2. builds the superscalar-ffi static archive from that checkout with its
 #      own go/scripts/build_ffi.sh, with tools.env's RUST_VERSION rather than
 #      the toolchain the checkout's rust-toolchain.toml names (see below);
-#   3. builds the TypeScript binding (napi addon for this host plus the CJS
-#      and ESM tsc passes; the browser/wasm pass is skipped) so generated
-#      TypeScript packages can depend on it by path;
+#   3. builds the TypeScript binding so generated TypeScript packages can
+#      depend on it by path: the napi addon for this host, the CJS and ESM
+#      tsc passes, and the browser and workerd builds over the WebAssembly
+#      core (wasm-pack's `web` target into bindings/typescript/wasm-web,
+#      then dist/browser and dist/workerd), which a site's bundle and a
+#      Worker's take through the `browser` and `workerd` export conditions
+#      (D55, amended; D64). This step needs wasm-pack at tools.env's
+#      WASM_PACK_VERSION and the wasm32-unknown-unknown target for
+#      tools.env's RUST_VERSION;
 #   4. prints the CGO_LDFLAGS value that lets `go build` and `go test` in
 #      this repository link it.
 #
@@ -30,9 +36,10 @@
 #
 # --archive skips the TypeScript binding, for the release's static archives
 # (scripts/release-archives.sh), and leaves the stamp below as it was, so a
-# later full run still builds the binding. --checkout builds nothing and
-# needs no Go: a Rust crate that depends on superscalar's core by path (the
-# engine's schema reader, runtime/schema/rust-ir) needs only the sources.
+# later full run still builds the binding; it needs no wasm-pack. --checkout
+# builds nothing and needs no Go: a Rust crate that depends on superscalar's
+# core by path (the engine's schema reader, runtime/schema/rust-ir) needs
+# only the sources.
 #
 # When superscalar publishes a release, replace step 2 with that
 # repository's fetch_release_archive.sh and drop the Rust requirement.
@@ -125,7 +132,14 @@ if [ "$archive_only" = "1" ]; then
 fi
 
 TS="$DEP/bindings/typescript"
-if [ ! -f "$TS/dist/esm/validation.js" ] || [ "$rebuild" = "1" ]; then
+if [ ! -f "$TS/dist/esm/validation.js" ] || [ ! -f "$TS/dist/workerd/backend.js" ] || [ ! -f "$TS/dist/browser/backend.js" ] || [ "$rebuild" = "1" ]; then
+  wasm_pack_version="$(grep -E '^WASM_PACK_VERSION=' "$ROOT/tools.env" | cut -d= -f2)"
+  if ! command -v wasm-pack >/dev/null 2>&1; then
+    echo "superscalar-dep: wasm-pack is not on PATH; install it with" >&2
+    echo "  cargo install wasm-pack --version $wasm_pack_version --locked" >&2
+    echo "and add the target with rustup target add wasm32-unknown-unknown --toolchain $RUSTUP_TOOLCHAIN" >&2
+    exit 1
+  fi
   (
     cd "$TS"
     bun install --frozen-lockfile >/dev/null 2>&1 || bun install >/dev/null
@@ -133,6 +147,15 @@ if [ ! -f "$TS/dist/esm/validation.js" ] || [ "$rebuild" = "1" ]; then
     bunx tsc -p tsconfig.json
     bunx tsc -p tsconfig.esm.json
     node scripts/fix-esm-extensions.mjs
+    # The browser and workerd builds over the WebAssembly core: wasm-pack's
+    # web target with the size-tuned wasm-release profile into wasm-web/,
+    # then the two tsc passes, which build-web.mjs finishes with the glue
+    # and the module (inlined as base64 for the browser, a file beside the
+    # workerd build's backend). `bun run build:web` runs the last three.
+    bash scripts/build_wasm_web.sh
+    bunx tsc -p tsconfig.browser.json
+    bunx tsc -p tsconfig.workerd.json
+    node scripts/build-web.mjs
   )
 fi
 printf '%s\n' "$built" > "$STAMP"

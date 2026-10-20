@@ -95,6 +95,9 @@ var corpus = []roundtripFixture{
 	{name: "fixture-refs-api", dir: tsFixtures + "/fixture-refs-api", native: FormatTS},
 	{name: "fixture-refs-api-json", dir: dataFixtures + "/fixture-refs-api-json", native: FormatJSON},
 	{name: "fixture-refs-api-yaml", dir: dataFixtures + "/fixture-refs-api-yaml", native: FormatYAML},
+	// A relation's key on an @source type, with no @virtual, whose
+	// reference the loader derives and no form writes (D61, amended).
+	{name: "fixture-refs-keys-api", dir: tsFixtures + "/fixture-refs-keys-api", native: FormatTS},
 	{name: "fixture-db-json", dir: dataFixtures + "/fixture-db-json", native: FormatJSON},
 	{name: "fixture-db-yaml", dir: dataFixtures + "/fixture-db-yaml", native: FormatYAML},
 	{name: "fixture-general-json", dir: dataFixtures + "/fixture-general-json", native: FormatJSON},

@@ -715,10 +715,29 @@ func (u *RoleUpdate) ApplyTo(row *types.Role) {
 	}
 }
 
-// buildWhereClause builds a WHERE clause from a RoleFilter
+// RoleFilterConditions are the filter's conditions for a query of
+// the caller's own, each column qualified by its table: each value is
+// appended to args, its placeholder numbered after those already there.
+// FindMany's WHERE is them joined by AND. A nil filter has none.
+func RoleFilterConditions(filter *RoleFilter, args *[]any) []string {
+	return filter.conditions(args, len(*args))
+}
+
+// buildWhereClause builds a WHERE clause from a RoleFilter: its
+// conditions joined by AND, or nothing when it has none.
 func (f *RoleFilter) buildWhereClause(args *[]interface{}, paramOffset int) string {
-	if f == nil {
+	conditions := f.conditions(args, paramOffset)
+	if len(conditions) == 0 {
 		return ""
+	}
+	return " WHERE " + strings.Join(conditions, " AND ")
+}
+
+// conditions are the filter's conditions, each value appended to args, its
+// placeholder numbered from paramOffset+1.
+func (f *RoleFilter) conditions(args *[]interface{}, paramOffset int) []string {
+	if f == nil {
+		return nil
 	}
 
 	var conditions []string
@@ -776,11 +795,7 @@ func (f *RoleFilter) buildWhereClause(args *[]interface{}, paramOffset int) stri
 		}
 	}
 
-	if len(conditions) == 0 {
-		return ""
-	}
-
-	return " WHERE " + strings.Join(conditions, " AND ")
+	return conditions
 }
 
 // SessionFilter provides filtering for Session queries
@@ -859,10 +874,29 @@ func (u *SessionUpdate) ApplyTo(row *types.Session) {
 	}
 }
 
-// buildWhereClause builds a WHERE clause from a SessionFilter
+// SessionFilterConditions are the filter's conditions for a query of
+// the caller's own, each column qualified by its table: each value is
+// appended to args, its placeholder numbered after those already there.
+// FindMany's WHERE is them joined by AND. A nil filter has none.
+func SessionFilterConditions(filter *SessionFilter, args *[]any) []string {
+	return filter.conditions(args, len(*args))
+}
+
+// buildWhereClause builds a WHERE clause from a SessionFilter: its
+// conditions joined by AND, or nothing when it has none.
 func (f *SessionFilter) buildWhereClause(args *[]interface{}, paramOffset int) string {
-	if f == nil {
+	conditions := f.conditions(args, paramOffset)
+	if len(conditions) == 0 {
 		return ""
+	}
+	return " WHERE " + strings.Join(conditions, " AND ")
+}
+
+// conditions are the filter's conditions, each value appended to args, its
+// placeholder numbered from paramOffset+1.
+func (f *SessionFilter) conditions(args *[]interface{}, paramOffset int) []string {
+	if f == nil {
+		return nil
 	}
 
 	var conditions []string
@@ -1103,11 +1137,7 @@ func (f *SessionFilter) buildWhereClause(args *[]interface{}, paramOffset int) s
 		}
 	}
 
-	if len(conditions) == 0 {
-		return ""
-	}
-
-	return " WHERE " + strings.Join(conditions, " AND ")
+	return conditions
 }
 
 // UserFilter provides filtering for User queries
@@ -1162,10 +1192,29 @@ func (u *UserUpdate) ApplyTo(row *types.User) {
 	}
 }
 
-// buildWhereClause builds a WHERE clause from a UserFilter
+// UserFilterConditions are the filter's conditions for a query of
+// the caller's own, each column qualified by its table: each value is
+// appended to args, its placeholder numbered after those already there.
+// FindMany's WHERE is them joined by AND. A nil filter has none.
+func UserFilterConditions(filter *UserFilter, args *[]any) []string {
+	return filter.conditions(args, len(*args))
+}
+
+// buildWhereClause builds a WHERE clause from a UserFilter: its
+// conditions joined by AND, or nothing when it has none.
 func (f *UserFilter) buildWhereClause(args *[]interface{}, paramOffset int) string {
-	if f == nil {
+	conditions := f.conditions(args, paramOffset)
+	if len(conditions) == 0 {
 		return ""
+	}
+	return " WHERE " + strings.Join(conditions, " AND ")
+}
+
+// conditions are the filter's conditions, each value appended to args, its
+// placeholder numbered from paramOffset+1.
+func (f *UserFilter) conditions(args *[]interface{}, paramOffset int) []string {
+	if f == nil {
+		return nil
 	}
 
 	var conditions []string
@@ -1302,11 +1351,7 @@ func (f *UserFilter) buildWhereClause(args *[]interface{}, paramOffset int) stri
 		}
 	}
 
-	if len(conditions) == 0 {
-		return ""
-	}
-
-	return " WHERE " + strings.Join(conditions, " AND ")
+	return conditions
 }
 
 // UserCredentialFilter provides filtering for UserCredential queries
@@ -1371,10 +1416,29 @@ func (u *UserCredentialUpdate) ApplyTo(row *types.UserCredential) {
 	}
 }
 
-// buildWhereClause builds a WHERE clause from a UserCredentialFilter
+// UserCredentialFilterConditions are the filter's conditions for a query of
+// the caller's own, each column qualified by its table: each value is
+// appended to args, its placeholder numbered after those already there.
+// FindMany's WHERE is them joined by AND. A nil filter has none.
+func UserCredentialFilterConditions(filter *UserCredentialFilter, args *[]any) []string {
+	return filter.conditions(args, len(*args))
+}
+
+// buildWhereClause builds a WHERE clause from a UserCredentialFilter: its
+// conditions joined by AND, or nothing when it has none.
 func (f *UserCredentialFilter) buildWhereClause(args *[]interface{}, paramOffset int) string {
-	if f == nil {
+	conditions := f.conditions(args, paramOffset)
+	if len(conditions) == 0 {
 		return ""
+	}
+	return " WHERE " + strings.Join(conditions, " AND ")
+}
+
+// conditions are the filter's conditions, each value appended to args, its
+// placeholder numbered from paramOffset+1.
+func (f *UserCredentialFilter) conditions(args *[]interface{}, paramOffset int) []string {
+	if f == nil {
+		return nil
 	}
 
 	var conditions []string
@@ -1531,11 +1595,7 @@ func (f *UserCredentialFilter) buildWhereClause(args *[]interface{}, paramOffset
 		}
 	}
 
-	if len(conditions) == 0 {
-		return ""
-	}
-
-	return " WHERE " + strings.Join(conditions, " AND ")
+	return conditions
 }
 
 // UserRoleGrantFilter provides filtering for UserRoleGrant queries
@@ -1588,10 +1648,29 @@ func (u *UserRoleGrantUpdate) ApplyTo(row *types.UserRoleGrant) {
 	}
 }
 
-// buildWhereClause builds a WHERE clause from a UserRoleGrantFilter
+// UserRoleGrantFilterConditions are the filter's conditions for a query of
+// the caller's own, each column qualified by its table: each value is
+// appended to args, its placeholder numbered after those already there.
+// FindMany's WHERE is them joined by AND. A nil filter has none.
+func UserRoleGrantFilterConditions(filter *UserRoleGrantFilter, args *[]any) []string {
+	return filter.conditions(args, len(*args))
+}
+
+// buildWhereClause builds a WHERE clause from a UserRoleGrantFilter: its
+// conditions joined by AND, or nothing when it has none.
 func (f *UserRoleGrantFilter) buildWhereClause(args *[]interface{}, paramOffset int) string {
-	if f == nil {
+	conditions := f.conditions(args, paramOffset)
+	if len(conditions) == 0 {
 		return ""
+	}
+	return " WHERE " + strings.Join(conditions, " AND ")
+}
+
+// conditions are the filter's conditions, each value appended to args, its
+// placeholder numbered from paramOffset+1.
+func (f *UserRoleGrantFilter) conditions(args *[]interface{}, paramOffset int) []string {
+	if f == nil {
+		return nil
 	}
 
 	var conditions []string
@@ -1708,9 +1787,5 @@ func (f *UserRoleGrantFilter) buildWhereClause(args *[]interface{}, paramOffset 
 		}
 	}
 
-	if len(conditions) == 0 {
-		return ""
-	}
-
-	return " WHERE " + strings.Join(conditions, " AND ")
+	return conditions
 }
