@@ -202,16 +202,18 @@ func buildEngineTrio(t *testing.T) engineTrio {
 // scriptServer is one of the servers the script runs against.
 type scriptServer struct {
 	// api is the API it serves, language its language and tag the text the
-	// script writes into the ids, the slug and the login it chooses, which
-	// the transcript writes {{run}}: the three runs share one namespace.
+	// script writes into the ids, the slug, the titles and the login it
+	// chooses, which the transcript writes {{run}}: the three runs share one
+	// namespace.
 	api, language, tag string
 	s                  *started
 	// token is the session the script's member signed in with on it.
 	token string
 }
 
-// startEngineTrio starts the three servers with env, each with its
-// identity config and its callers field, on the database at databaseURL.
+// startEngineTrio starts the three servers on the database at databaseURL,
+// each with its identity config and its callers field, whose one issuer,
+// ops, signs with the key public verifies.
 func startEngineTrio(t *testing.T, trio engineTrio, databaseURL string, public ed25519.PublicKey) []*scriptServer {
 	t.Helper()
 	identityConfig := `{"trustedOrigins": ["https://app.example.com"], "cookie": {"secure": false}, "password": {"argon2": {"memoryKiB": 64, "iterations": 1, "parallelism": 1}}}`
@@ -244,8 +246,19 @@ func startEngineTrio(t *testing.T, trio engineTrio, databaseURL string, public e
 // back escalated. Each server's transcript, normalised as normaliseScript
 // says, must be the others', and where a step is one the HTTP corpus
 // (runtime/engine/testdata/http) records, it must answer in the corpus's
-// shape. The servers interoperate too: what one wrote another reads, and an
-// event one commits shows on another's stream.
+// shape. The servers interoperate too (checkInterop): what one wrote each
+// other reads alike, a session one signed in reaches the others, an event
+// one commits shows on another's stream, and the three deploys at once
+// published one version of each type.
+//
+// What the script found, and what was fixed: a Go server answered its
+// event log's routes X-Request-Id twice (enginehttp added the engine's to
+// the request log's), and the Go HTTP runtime answered without
+// Cache-Control: no-store, a sign-in's token included, where the Rust and
+// TypeScript runtimes mark every answer no-store. What is a host's own and
+// normalised is listed where the normalising is (normaliseScript,
+// hostHeaders). A request with no credential, which the TypeScript runtime
+// refuses before the engine sees it, answers what the engine answers.
 func TestEngineServersAnswerOneScriptAlike(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping the three servers' builds in -short mode")
