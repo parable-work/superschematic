@@ -190,8 +190,10 @@ export enum OrderStatus {
 }
 ```
 
-The JSON and YAML forms write `title` on the member. A title is one line,
-and two members of an enum cannot share one. It changes no generated
+The JSON and YAML forms write `title` on the member. A title is the rest
+of the tag's line, so put the member's comment above the tag: a line of
+text after it is refused rather than cut off. A title is one line, and
+two members of an enum cannot share one. It changes no generated
 type; the Topcoat forms and display components label the member by it.
 [A title on an enum member](/superschematic/reference/documentation/#a-title-on-an-enum-member)
 has the rules.

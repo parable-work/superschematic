@@ -209,8 +209,9 @@ first submit button, so the component renders a hidden one ahead of
 every row button, which submits the form with no `_action`, and the page
 puts its own button after the component, in the one `<form>` around it.
 The extension's tests check every page they render for that order
-without a browser, through `extensions/topcoat/testdata/enter.rs`, which
-an app's tests can include too.
+without a browser, through `extensions/topcoat/testdata/enter.rs`. The
+file ships with neither the extension nor the crate, so an app's tests
+copy it from the superschematic repository to use it too.
 
 The page answers a refusal with its status, through a `Refusal` of
 `forms`, the status and the errors the form renders again with:
