@@ -151,34 +151,53 @@ orders reads its pages through it:
 
 <Snippet file="go/shop-orders/orders.go" symbol="Orders.ListOrders" />
 
-A table sorts by its key, and by each column of one value of text, a
-number, a time, a date or a UUID that is never null, `createdAt` and
-`updatedAt` among them. `OrderSortByPlacedAt` names one, and
+A table sorts by its key, and by each column of the table's own that
+holds one value of text, a number, a time, a date or a UUID and is never
+null: `createdAt` among them, and `updatedAt` when it is required.
+`OrderSortByPlacedAt` names one, and
 `orm.OrderSort{Field: orm.OrderSortByPlacedAt, Desc: true}` reads the
 newest orders first. A column that may be null, or holds an enum, a
-boolean, JSON, a list or a point, is not a sort field, and neither is a
-`@secret` one, whose value a cursor would carry. `ParseOrderSort` reads a
-sort as a page request writes it, `placedAt` or `-placedAt`, and refuses a
-field the table cannot sort by. A sort never reaches the SQL as text:
+boolean, JSON, a list, a map, a union or a point, is not a sort field.
+Neither is a relation's key, an audit actor (`createdBy`, `updatedBy`,
+`deletedBy`), internal metadata such as `_version`, or a `@secret`
+column, whose values an order by it would reveal. `ParseOrderSort` reads a sort as a
+page request writes it, `placedAt` or `-placedAt`, and refuses a field
+the table cannot sort by. A sort never reaches the SQL as text:
 `FindPage` takes the column from the table's generated list of sort
 fields.
 
-The page is one query, with no count. Its conditions are the filter's, then
-`deleted_at IS NULL` unless the options set `IncludeDeleted`
-([Soft delete](#soft-delete)), then, after `After`, one row comparison,
-`("order".placed_at, "order".id) < ($1, $2)` for a descending sort. It
-orders by the column, then the key, both in the sort's direction, so rows
-of one value read in the order of their keys, and it reads one row more
-than `Limit`, 100 when it is 0. `Rows` holds up to `Limit` rows. When more
-follow, `Next`, an `OrderPageKey`, is the position of the last of them: its
-sort field's value and its key, under their schema names,
-`{"placedAt": "…", "id": "…"}`. An implementation encodes it as the page's
-cursor and decodes the next request's cursor into `After`. An `After` that
-holds a field other than the sort's, or no key, is `ErrPageKey`: the
-cursor of another order, which the implementation answers as a cursor it
-cannot read. `Fields` selects the columns as `FindMany`'s do, a nested
-selection hydrating its relations the same way, and the page reads its
-sort's column and its key besides, which `Next` holds.
+The page is one query, with no count. Its conditions are the filter's,
+then `deleted_at IS NULL` unless the options set `IncludeDeleted`
+([Soft delete](#soft-delete)), then, after `After`, one row comparison
+with the row `After` names, which a subquery reads by its key:
+`("order".placed_at, "order".id) < ((SELECT placed_at FROM "order" AS
+page_key WHERE page_key.id = $1), $1)` for a descending sort. It orders by
+the column, then the key, both in the sort's direction, so rows of one
+value read in the order of their keys, and it reads one row more than
+`Limit`, 100 when it is 0. `Rows` holds up to `Limit` rows. When more
+follow, `Next`, an `OrderPageKey`, is the position of the last of them:
+its key alone, under its schema name, `{"id": "…"}`. A key is as long as
+an id whatever the row holds, so a long name never pushes a cursor past
+its 1024 characters, and it is the same in every order. An implementation
+encodes it as the page's cursor and decodes the next request's cursor
+into `After`.
+
+The subquery reads the row with no `deleted_at` condition and none of the
+filter's, so a row deleted, or changed so the filter no longer finds it,
+since the page before still places the next page. An `After` without a
+key, or, in an order by another column than the key, whose row no longer
+exists, is `ErrPageKey`, which the implementation answers as a cursor it cannot read. A key does not say
+which order it came from, so `FindPage` cannot refuse the key of another
+sort; a router binds each cursor to its sort and refuses one sent back
+with another before the implementation reads it
+([Pages](/superschematic/guides/api-routes/#pages)). `Fields` selects the
+columns as `FindMany`'s do, a nested selection hydrating its relations
+the same way, and the page reads its key besides, which `Next` holds.
+
+Give each sort a list offers an `@index` of its own, over the columns
+the filter compares for equality, then the sort's column, then the key
+([Indexes](#indexes)): without one, each page sorts every row the filter
+finds.
 
 ## JSON columns
 

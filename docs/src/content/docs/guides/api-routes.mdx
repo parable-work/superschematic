@@ -251,13 +251,21 @@ call and back. The OpenAPI parameter is a string with the values as its
 `enum`, `defaultSort` as its `default`, and `x-superschematic-sort: true`.
 Each SDK sends the sort as the optional query argument it is.
 
+The envelope is the only check of a cursor's sort, so a key need not
+name its sort, and the ORM's key and acme's Rust keys are a row's id
+alone: the implementation reads that row's value of the sort field. A key
+that holds the value itself can carry a long text past the bound
+cursor's 1024 characters, and a `next` past them is the implementation's
+error, a 500, for every reader paging past that row. The loader warns of
+a text sort field without a `maxLength` for that reason.
+
 A Go implementation over a database service reads a page through the
 ORM: `FindPage` runs one query of `limit + 1` rows after a key, in the
 order of one column, then the key, with a filter's conditions beside the
-keyset, and its `Next` is the key the page's cursor holds
-([Pages](/superschematic/guides/database-tables/#pages)). `Parse<Type>Sort`
-reads the page request's sort into the ORM's order, and `ErrPageKey` is a
-cursor of another order.
+keyset, and its `Next` is the key the page's cursor holds, the last row's
+key alone ([Pages](/superschematic/guides/database-tables/#pages)).
+`Parse<Type>Sort` reads the page request's sort into the ORM's order, and
+`ErrPageKey` is a key without an id, or whose row no longer exists.
 
 `shop-orders` pages its orders, a product's reviews and its catalog, each
 in a sort: the orders by `placedAt` or `totalCents`, the products by
@@ -271,10 +279,11 @@ key the cursor holds, with their lines:
 
 <Snippet file="go/shop-orders/orders.go" symbol="Orders.ListOrders" />
 
-`pageKey` decodes a cursor into the ORM's key, `pageOf` encodes the
-page's `Next` as the next cursor, and `pageError` answers `ErrPageKey`, a
-key of another order, as the cursor the implementation cannot read. A
-cursor the router bound to another sort never gets that far:
+`pageKey` decodes a cursor into the ORM's key, `pageOf` reads the rows'
+views and encodes the page's `Next` as the next cursor, and `pageError`
+answers `ErrPageKey`, a key whose row is gone, as the cursor the
+implementation cannot read. A cursor the router bound to another sort
+never gets that far:
 
 <Snippet file="go/shop-orders/pages.go" symbol={['pageKey', 'pageOf', 'pageError']} />
 
@@ -290,10 +299,10 @@ beside the keyset, and `FindPage` leaves deleted reviews out itself.
 <Snippet file="go/shop-orders/orders.go" symbol="Reviews.ListReviews" />
 
 The Rust implementation sorts the same in memory and over SQLite. Its
-key is the sort field's value, as JSON of the field's kind (a time, a
-text, an integer or a number), then the id, and over SQLite it orders by
-a column of the list's own, the cursor's value bound as the column's
-type, so a price compares as a number.
+key is the row's id alone, as the ORM's: in memory it finds the row among
+those it keeps, and over SQLite it reads the row's value of a column of
+the list's own, so a price compares as a number. A cursor whose row is
+gone is the 400 of a cursor it cannot read.
 
 ## Errors
 

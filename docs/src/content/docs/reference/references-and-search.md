@@ -13,8 +13,9 @@ documents describe both ([In the documents](#in-the-documents)).
 ## `RefersTo`: a value that names an item
 
 `RefersTo<T, Target, { options, value, label }>` says that a value of type
-`T` names an item of `Target`, as an operation of the same API lists it
-(D61):
+`T` names an item of `Target`, as an operation lists it (D61): the API's
+own, or, when none lists the target, an API dependency's
+([Options from an API dependency](#options-from-an-api-dependency)):
 
 ```ts
 import { Identity } from "superscalar";
@@ -224,8 +225,9 @@ export abstract class PlaceInput {
 ```
 
 The dependency's operation is compared with the target's name as the
-dependency declares it. Its lookup and its search are that operation's
-arguments, matched by the type they name, however it is spelled.
+dependency declares it. Its lookup is that operation's argument matched
+by the type it names, however it is spelled; its search is the
+operation's `SearchQuery` argument, whatever its name.
 `ir.ResolveReference` names the dependency in `ResolvedReference.OptionsService`,
 which is empty for the API's own operation. A General dependency has no
 operations, so a reference to its type needs the API's own. The loader
