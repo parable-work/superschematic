@@ -75,7 +75,8 @@ export const renamedPolicy: OperationSetFile = {
 
 // closedParts are documents the types refuse: an unknown key, a value
 // outside an enum, a missing required key, a single-definition file
-// without its discriminator and a display of the wrong shape.
+// without its discriminator, a display of the wrong shape, a field display
+// of the wrong shape and a member's title that is not a string.
 const closedParts = `
 // @ts-expect-error an unknown key
 export const unknownKey: TypeDef = { name: 'Item', role: 'DBTable', colour: 'red' };
@@ -94,7 +95,13 @@ export const behaviorExtraKey: TypeDef = { name: 'Item', role: 'DBTable', behavi
 // @ts-expect-error a tone outside the set
 export const unknownTone: TypeDef = { name: 'Item', role: 'DBTable', display: { states: { todo: { tone: 'blue' } } } };
 // @ts-expect-error an unknown key on a display
-export const displayExtraKey: TypeDef = { name: 'Item', role: 'DBTable', display: { icon: 'box' } };
+export const displayExtraKey: TypeDef = { name: 'Item', role: 'DBTable', display: { colour: 'red' } };
+// @ts-expect-error a field display's multiline that is not a boolean
+export const multilineAsString: FieldDef = { name: 'notes', typeRef: { name: 'string' }, display: { multiline: 'yes' } };
+// @ts-expect-error an unknown key on a field display
+export const fieldDisplayExtraKey: FieldDef = { name: 'notes', typeRef: { name: 'string' }, display: { rows: 6 } };
+// @ts-expect-error an enum member's title that is not a string
+export const titleAsNumber: EnumFile = { kind: 'Enum', name: 'Colour', values: [{ name: 'Red', title: 1 }] };
 // @ts-expect-error a transition label that is not a map by the state it enters
 export const flatTransition: TypeDef = { name: 'Item', role: 'DBTable', display: { transitions: { todo: 'Start' } } };
 `
