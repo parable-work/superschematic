@@ -15,7 +15,6 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/sqlgen"
 	"github.com/parable-work/superschematic/internal/generator/tsgen"
 	"github.com/parable-work/superschematic/internal/generator/typegen"
-	"github.com/parable-work/superschematic/internal/loader"
 	"github.com/parable-work/superschematic/internal/testpaths"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -30,12 +29,15 @@ var queueParitySubtests = []string{
 	"AttemptsAndStatesAgree",
 	"BackoffGrowsForEverySide",
 	"EachPrunesTheOthersDoneMessages",
+	"LocationsAndDurationsAgree",
 }
 
 // TestQueueParityOfGoTypeScriptAndRustOnPostgres runs the Go ORM's queue,
 // the TypeScript queue client and the Rust queue client against one
 // Postgres, on the queue OrderPlaced of fixture-queue-db, whose message
-// holds a field of every kind a column takes (D53, D65). All three run the
+// holds a field of every kind a column takes (D53, D65), and on
+// DeliveryPlanned of fixture-queue-geo-db, whose message holds locations,
+// POINT columns, and durations, INTERVAL ones (D53, amended). All three run the
 // statements sqlutil.PostgresQueueStatements writes, so each sees the
 // others' states, attempts and tokens. The Go ORM runs in the generated
 // test; the TypeScript client and the Rust client run a step per process,
@@ -64,7 +66,11 @@ var queueParitySubtests = []string{
 //     (D68);
 //   - EachPrunesTheOthersDoneMessages: each side's prune deletes, a batch
 //     at a time, the messages the other two completed past the retention,
-//     and leaves one done within it and a dead one.
+//     and leaves one done within it and a dead one;
+//   - LocationsAndDurationsAgree: on DeliveryPlanned, each side reads the
+//     locations and durations each enqueues, a duration truncated to its
+//     microseconds, and an interval written with days and months as their
+//     hours.
 //
 // It needs Bun and cargo, builds the HTTP runtimes, and runs on the
 // database at SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL, skipping without
@@ -100,10 +106,7 @@ func TestQueueParityOfGoTypeScriptAndRustOnPostgres(t *testing.T) {
 			testpaths.RequireOrSkipTS(t, fmt.Sprintf("bun %s in the HTTP runtime (likely offline): %v\n%s", strings.Join(step, " "), err, out))
 		}
 	}
-	schema, err := loader.LoadService(filepath.Join(fixturesDir, queueFixture))
-	if err != nil {
-		t.Fatalf("load %s: %v", queueFixture, err)
-	}
+	schema := queueSchema(t)
 	clock := codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC))
 	root, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
@@ -287,6 +290,7 @@ edition = "2021"
 publish = false
 
 [dependencies]
+serde = "1.0.228"
 serde_json = "1.0.149"
 superschematic-http-runtime = { path = %q, features = ["postgres"] }
 tokio = { version = "1.52.2", features = ["macros", "rt"] }
@@ -299,8 +303,9 @@ types = { package = %q, path = %q }
 // queueParityRust is the Rust side's src/main.rs: one step of the Rust
 // queue client on the database its second argument names, which prints
 // its result as JSON, as queueParityScript does for TypeScript.
-const queueParityRust = `//! One step of the Rust queue client (D65) on the queue ` + "`OrderPlaced`" + ` of
-//! fixture-queue-db, for ormgen's queue parity test, as its TypeScript
+const queueParityRust = `//! One step of the Rust queue client (D65) on the queue ` + "`OrderPlaced`" + `, or
+//! ` + "`DeliveryPlanned`" + ` when ` + "`QUEUE_PARITY_QUEUE`" + ` names it, for ormgen's queue
+//! parity test, as its TypeScript
 //! script runs one of the TypeScript client: the step, the database's URL,
 //! then the step's arguments. It prints the step's result as JSON, a
 //! claim's message as the Rust types serialize it, and on a failure its
@@ -309,11 +314,13 @@ const queueParityRust = `//! One step of the Rust queue client (D65) on the queu
 use std::process::ExitCode;
 use std::time::Duration;
 
+use serde::de::DeserializeOwned;
+use serde::Serialize;
 use serde_json::{json, Value};
 use superschematic_http_runtime::postgres::connect;
 use superschematic_http_runtime::queue::{enqueue, PostgresQueue, QueueDefinition, QueueError};
 use superschematic_http_runtime::stackconfig::Database;
-use types::{OrderPlaced, ORDER_PLACED_QUEUE};
+use types::{DeliveryPlanned, OrderPlaced, DELIVERY_PLANNED_QUEUE, ORDER_PLACED_QUEUE};
 
 /// The lease of a claim, the TypeScript script's.
 const LEASE: Duration = Duration::from_secs(60);
@@ -349,16 +356,24 @@ fn arg(args: &[String], i: usize) -> Result<&str, String> {
         .ok_or_else(|| format!("argument {i} is missing"))
 }
 
+/// The step on the queue QUEUE_PARITY_QUEUE names, OrderPlaced when unset.
 async fn run(args: &[String]) -> Result<Value, String> {
+    match std::env::var("QUEUE_PARITY_QUEUE").as_deref() {
+        Ok("DeliveryPlanned") => run_on::<DeliveryPlanned>(DELIVERY_PLANNED_QUEUE, args).await,
+        _ => run_on::<OrderPlaced>(ORDER_PLACED_QUEUE, args).await,
+    }
+}
+
+async fn run_on<M: Serialize + DeserializeOwned>(descriptor: &str, args: &[String]) -> Result<Value, String> {
     let step = arg(args, 0)?;
     let url = arg(args, 1)?;
     let rest = &args[2..];
-    let definition = QueueDefinition::parse(ORDER_PLACED_QUEUE).map_err(refused)?;
+    let definition = QueueDefinition::parse(descriptor).map_err(refused)?;
     let pool = connect(&Database::Url(url.to_string())).map_err(|err| err.to_string())?;
-    let queue = PostgresQueue::<OrderPlaced>::new(pool.clone(), definition.clone());
+    let queue = PostgresQueue::<M>::new(pool.clone(), definition.clone());
     let result = match step {
         "enqueue" => {
-            let message: OrderPlaced = serde_json::from_str(arg(rest, 0)?)
+            let message: M = serde_json::from_str(arg(rest, 0)?)
                 .map_err(|err| format!("the message: {err}"))?;
             let mut client = pool.get().await.map_err(|err| err.to_string())?;
             let tx = client.transaction().await.map_err(|err| err.to_string())?;
@@ -414,15 +429,18 @@ async fn run(args: &[String]) -> Result<Value, String> {
 `
 
 // queueParityScript runs one step of the TypeScript queue client on the
-// database its second argument names, and prints its result as JSON.
+// database its second argument names, on the queue QUEUE_PARITY_QUEUE
+// names, and prints its result as JSON.
 const queueParityScript = `import pg from 'pg';
 import { enqueue, postgresQueue } from '@superschematic/http-runtime/postgres';
-import { orderPlacedQueue } from '@TYPES@/queues';
+import { deliveryPlannedQueue, orderPlacedQueue } from '@TYPES@/queues';
 
 const [step, url, ...args] = process.argv.slice(2);
+// The queue QUEUE_PARITY_QUEUE names, OrderPlaced when unset.
+const definition = (process.env.QUEUE_PARITY_QUEUE === 'DeliveryPlanned' ? deliveryPlannedQueue : orderPlacedQueue) as typeof orderPlacedQueue;
 const pool = new pg.Pool({ connectionString: url, max: 1 });
 try {
-  const queue = postgresQueue(pool, orderPlacedQueue);
+  const queue = postgresQueue(pool, definition);
   let result: unknown = null;
   switch (step) {
     case 'claim':
@@ -432,7 +450,7 @@ try {
       const client = await pool.connect();
       try {
         await client.query('BEGIN');
-        await enqueue(client, orderPlacedQueue, JSON.parse(args[0]));
+        await enqueue(client, definition, JSON.parse(args[0]));
         await client.query('COMMIT');
       } finally {
         client.release();
@@ -529,6 +547,11 @@ type parity struct {
 	db    *Database
 	queue *OrderPlacedQueue
 	url   string
+
+	// on is the queue the TypeScript client and the Rust binary run their
+	// steps on, which they read from QUEUE_PARITY_QUEUE: OrderPlaced when
+	// empty.
+	on string
 }
 
 func newParity(t *testing.T) *parity {
@@ -595,6 +618,7 @@ func (p *parity) step(side, step string, args ...string) (string, error) {
 	default:
 		p.t.Fatalf("no side %s", side)
 	}
+	cmd.Env = append(os.Environ(), "QUEUE_PARITY_QUEUE="+p.on)
 	out, err := cmd.CombinedOutput()
 	text := strings.TrimSpace(string(out))
 	switch {
@@ -878,6 +902,7 @@ func TestQueueParity(t *testing.T) {
 	t.Run("AttemptsAndStatesAgree", testAttemptsAndStatesAgree)
 	t.Run("BackoffGrowsForEverySide", testBackoffGrowsForEverySide)
 	t.Run("EachPrunesTheOthersDoneMessages", testEachPrunesTheOthersDoneMessages)
+	t.Run("LocationsAndDurationsAgree", testLocationsAndDurationsAgree)
 }
 
 // testGoAndTypeScript: the Go ORM enqueues a message, which the TypeScript
@@ -1433,5 +1458,165 @@ func testEachPrunesTheOthersDoneMessages(t *testing.T) {
 			}
 		})
 	}
+}
+
+// deliveryJSON is a message of DeliveryPlanned as JSON.
+func deliveryJSON(message map[string]any) string {
+	data, err := json.Marshal(message)
+	if err != nil {
+		panic(err)
+	}
+	return string(data)
+}
+
+// location is a Geo.Location as Go's types hold it.
+func location(lat, lon float64) *types.GeoLocation {
+	return &types.GeoLocation{Lat: lat, Lon: lon}
+}
+
+// duration is a Temporal.Duration as Go's types hold it.
+func duration(d time.Duration) *types.TemporalDuration {
+	value := types.TemporalDuration(d)
+	return &value
+}
+
+// testLocationsAndDurationsAgree: on DeliveryPlanned, whose locations are
+// POINT columns and whose durations INTERVAL ones, each side enqueues a
+// message: Go's with every field set and a duration of a nanosecond
+// remainder, TypeScript's that leaves the optional fields out and has a
+// negative duration of nanoseconds, and Rust's in minutes and
+// microseconds. Each side then claims all three and reads each field as
+// its types hold it: a location as {lat, lon}, a duration in the scalar
+// core's canonical text (Go's as a time.Duration), truncated to its
+// microseconds toward zero, and an unset field as absent. Then an interval
+// written with days and months reads on each side as their hours, a day
+// 24 and a month 30 days.
+func testLocationsAndDurationsAgree(t *testing.T) {
+	p := newParity(t)
+	p.on = "DeliveryPlanned"
+	queue := p.db.DeliveryPlannedQueue()
+	const fromGo, fromTS, fromRust = "6f1c2f2e-7d1a-4b4a-9d43-3c7a1b2c3d4e", "0c7a0e14-6a43-4f0e-8f1b-5d6c7e8f9a0b", "3d2b1a0c-9e8f-4a7b-8c6d-5e4f3a2b1c0d"
+
+	var goMessage types.DeliveryPlanned
+	if err := json.Unmarshal([]byte(deliveryJSON(map[string]any{
+		"orderId": fromGo,
+		"dropAt":  map[string]any{"lat": 37.7749, "lon": -122.4194},
+		"wait":    "26h0m0.0000015s",
+		"meetAt":  map[string]any{"lat": -33.8688, "lon": 151.2093},
+		"grace":   "-1m30.25s",
+	})), &goMessage); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.db.Transaction(p.ctx, func(tx TxInterface) error { return EnqueueDeliveryPlanned(p.ctx, tx, &goMessage) }); err != nil {
+		t.Fatalf("Go's enqueue: %v", err)
+	}
+	p.must("TypeScript", "enqueue", deliveryJSON(map[string]any{
+		"orderId": fromTS,
+		"dropAt":  map[string]any{"lat": -90, "lon": 180},
+		"wait":    "-1500ns",
+	}))
+	p.must("Rust", "enqueue", deliveryJSON(map[string]any{
+		"orderId": fromRust,
+		"dropAt":  map[string]any{"lat": 0, "lon": 0},
+		"wait":    "90m",
+		"meetAt":  map[string]any{"lat": 51.5074, "lon": -0.1278},
+		"grace":   "250us",
+	}))
+
+	// Each message as TypeScript's and Rust's types hold it, by its ID,
+	// and as Go's do.
+	wantPrinted := map[string]map[string]any{
+		fromGo: {
+			"dropAt": map[string]any{"lat": 37.7749, "lon": -122.4194},
+			"wait":   "26h0m0.000001s",
+			"meetAt": map[string]any{"lat": -33.8688, "lon": 151.2093},
+			"grace":  "-1m30.25s",
+		},
+		fromTS: {
+			"dropAt": map[string]any{"lat": float64(-90), "lon": float64(180)},
+			"wait":   "-1us",
+		},
+		fromRust: {
+			"dropAt": map[string]any{"lat": float64(0), "lon": float64(0)},
+			"wait":   "1h30m0s",
+			"meetAt": map[string]any{"lat": 51.5074, "lon": -0.1278},
+			"grace":  "250us",
+		},
+	}
+	wantGo := map[string]types.DeliveryPlanned{
+		fromGo:   {DropAt: *location(37.7749, -122.4194), Wait: types.TemporalDuration(26*time.Hour + time.Microsecond), MeetAt: location(-33.8688, 151.2093), Grace: duration(-(time.Minute + 30*time.Second + 250*time.Millisecond))},
+		fromTS:   {DropAt: *location(-90, 180), Wait: types.TemporalDuration(-time.Microsecond)},
+		fromRust: {DropAt: *location(0, 0), Wait: types.TemporalDuration(90 * time.Minute), MeetAt: location(51.5074, -0.1278), Grace: duration(250 * time.Microsecond)},
+	}
+	check := func(round string, want func(id string) (map[string]any, types.DeliveryPlanned)) {
+		t.Helper()
+		got, err := queue.Claim(p.ctx, 5, time.Minute)
+		if err != nil || len(got) != 3 {
+			t.Fatalf("%s: Go's Claim = %+v, %v, want the three messages", round, got, err)
+		}
+		for _, c := range got {
+			id := c.Message.OrderId.ToUUID().String()
+			_, w := want(id)
+			w.OrderId = c.Message.OrderId
+			if !reflect.DeepEqual(c.Message, w) {
+				t.Errorf("%s: Go read %s as %+v, want %+v", round, id, c.Message, w)
+			}
+			if err := queue.Release(p.ctx, c.ID, c.Token); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for _, side := range []string{"TypeScript", "Rust"} {
+			claims := p.printed(side, 5)
+			if len(claims) != 3 {
+				t.Fatalf("%s: the %s claim = %+v, want the three messages", round, side, claims)
+			}
+			for _, c := range claims {
+				id := p.typedDelivery(side, c.Message).OrderId.ToUUID().String()
+				w, _ := want(id)
+				message := map[string]any{}
+				for k, v := range c.Message {
+					if k != "orderId" {
+						message[k] = v
+					}
+				}
+				if !reflect.DeepEqual(message, w) {
+					t.Errorf("%s: the %s client read %s as %v, want %v", round, side, id, message, w)
+				}
+				p.must(side, "release", c.ID, c.Token)
+			}
+		}
+	}
+	check("as written", func(id string) (map[string]any, types.DeliveryPlanned) { return wantPrinted[id], wantGo[id] })
+
+	// An interval written with days and months reads as their hours.
+	if _, err := p.pool.Exec(p.ctx, "UPDATE delivery_planned_queue SET wait = '1 mon 1 day -01:00:00', grace = '-2 days'"); err != nil {
+		t.Fatal(err)
+	}
+	check("with days and months", func(id string) (map[string]any, types.DeliveryPlanned) {
+		printed := map[string]any{"wait": "743h0m0s", "grace": "-48h0m0s"}
+		for k, v := range wantPrinted[id] {
+			if k != "wait" && k != "grace" {
+				printed[k] = v
+			}
+		}
+		g := wantGo[id]
+		g.Wait, g.Grace = types.TemporalDuration(743*time.Hour), duration(-48*time.Hour)
+		return printed, g
+	})
+}
+
+// typedDelivery reads a DeliveryPlanned message a side printed as Go's
+// types read it.
+func (p *parity) typedDelivery(side string, message map[string]any) types.DeliveryPlanned {
+	p.t.Helper()
+	data, err := json.Marshal(message)
+	if err != nil {
+		p.t.Fatal(err)
+	}
+	var m types.DeliveryPlanned
+	if err := json.Unmarshal(data, &m); err != nil {
+		p.t.Fatalf("Go's types read the %s message %s: %v", side, data, err)
+	}
+	return m
 }
 `

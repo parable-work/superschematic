@@ -100,18 +100,18 @@ func TestATypeScriptImplementationThatPredatesItsJobsFails(t *testing.T) {
 
 // TestATypeScriptWorkerOfAQueueTheClientCannotHoldFails: a TypeScript
 // worker whose queue's message holds a value the TypeScript queue client
-// cannot write and read back yet, a Temporal.Duration, which Postgres holds
-// as an INTERVAL, is refused, naming the field (D53).
+// cannot write and read back yet, a list of a scalar Postgres holds as
+// JSONB, a JSONB[] column, is refused, naming the field (D53).
 func TestATypeScriptWorkerOfAQueueTheClientCannotHoldFails(t *testing.T) {
 	repoRoot := t.TempDir()
 	f := loadTypeScriptFixture(t)
 	db := f.schemas["ts-db"]
-	db.Scalars["Temporal.Duration"] = &ir.ScalarDef{Name: "Temporal.Duration", LanguagePrimitive: ir.LanguageString, TypeMappings: map[string]string{"sql": "INTERVAL"}}
+	db.Scalars["Test.Labels"] = &ir.ScalarDef{Name: "Test.Labels", LanguagePrimitive: ir.LanguageString, TypeMappings: map[string]string{"sql": "JSONB"}}
 	queue := db.Types["CartAbandoned"]
-	queue.Fields = append(queue.Fields, &ir.FieldDef{Name: "idleFor", TypeRef: ir.TypeRef{Name: "Temporal.Duration"}, Required: true})
+	queue.Fields = append(queue.Fields, &ir.FieldDef{Name: "labels", TypeRef: ir.TypeRef{Name: "Test.Labels", IsArray: true}, Required: true})
 	f.build(t, repoRoot, tsFakePaths(repoRoot), tsAPIs...)
 	_, err := generator.Run(f.schemas["ts-stack"], f.configs["ts-stack"], f.options(repoRoot, tsFakePaths(repoRoot)))
-	want := "stack ts-stack: TypeScript worker ts-shop-remind-shoppers claims queue CartAbandoned of ts-db, which the TypeScript queue client cannot hold yet: its field idleFor is a Temporal.Duration, an INTERVAL column"
+	want := "stack ts-stack: TypeScript worker ts-shop-remind-shoppers claims queue CartAbandoned of ts-db, which the TypeScript queue client cannot hold yet: its field labels is a list of JSON values"
 	if err == nil || !strings.Contains(err.Error(), want) {
 		t.Fatalf("build = %v, want it to say %q", err, want)
 	}

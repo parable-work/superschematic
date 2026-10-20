@@ -53,6 +53,8 @@ fn open_bucket(
 /// `RequestOptions::forward(ctx.bearer_token())` with each call it makes
 /// for a request.
 {{- end }}
+/// With trace export on, each call is a client span that carries its trace
+/// context (D67).
 {{- if .Loopback }}
 ///
 /// {{ .Service }} is an API the server serves itself, which no connector gives a
@@ -77,6 +79,7 @@ fn open_bucket(
     {{ .Alias }}::{{ .Client }}::new({{ .Alias }}::ClientConfig {
         base_url: endpoint.url.clone(),
         service_credential,
+        transport: telemetry::transport(),
         ..Default::default()
     })
     .map_err(|err| format!("client of {{ .Service }}: {err}").into())

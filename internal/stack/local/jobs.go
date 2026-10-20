@@ -139,7 +139,7 @@ func (p *Provisioner) buildJob(ctx context.Context, req registry.ProvisionReques
 		return nil, err
 	}
 	p.printf("build %s: go build %s", j.Deployable, j.Module)
-	if _, err := p.runner().Run(ctx, Command{Path: goTool, Args: []string{"build", "-o", binary, "."}, Dir: module, Env: buildEnv()}); err != nil {
+	if _, err := p.runner().Run(ctx, Command{Path: goTool, Args: []string{"build", "-o", binary, "."}, Dir: module, Env: buildEnv(req)}); err != nil {
 		return nil, fmt.Errorf("local: build job %s: %w", j.Deployable, err)
 	}
 	return &builtJob{job: j, binary: binary, module: module, env: env}, nil

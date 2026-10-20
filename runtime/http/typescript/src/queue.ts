@@ -25,7 +25,16 @@ are the database's clock.
 
 A claimed row's values reach the message as the TypeScript types hold
 them: a timestamp a Date, a date its YYYY-MM-DD text, a 64-bit integer a
-number, a JSON column the value it holds, and a list an array.
+number, a JSON column the value it holds, a list an array, a POINT a
+location, {lat, lon}, and an INTERVAL a duration's text in the scalar
+core's canonical form (1h30m0s, 1.5s, 250us).
+
+A location crosses as Postgres's (x,y), x the longitude and y the
+latitude, and a duration as its whole microseconds, written
+[-]H:MM:SS.ffffff, so the sign holds for the whole duration and a
+nanosecond remainder is truncated toward zero, as the Go ORM's
+time.Duration crosses through pgx. An interval with days or months reads
+as their hours, a day 24 and a month 30 days, as pgx reads it.
 */
 
 /** A field of a queue's message and the column it writes, as a types package's ./queues entry declares it. */
@@ -40,6 +49,10 @@ export interface QueueField {
   readonly list?: boolean;
   /** The schema's default of an enum, which a message that leaves the member unset writes. */
   readonly default?: string;
+  /** The column is a POINT, which a location, {lat, lon}, writes as (lon,lat). */
+  readonly point?: boolean;
+  /** The column is an INTERVAL, which a duration's text writes as its whole microseconds. */
+  readonly interval?: boolean;
 }
 
 /**
@@ -174,7 +187,11 @@ export async function enqueue<M>(client: QueueQueryable, queue: QueueDefinition<
       continue;
     }
     columns.push(field.column);
-    values.push(field.json ? JSON.stringify(value) : value);
+    try {
+      values.push(columnValue(value, field));
+    } catch (error) {
+      throw new Error(`enqueue on ${queue.table}: field ${field.name}: ${errorMessage(error)}`, { cause: error });
+    }
   }
   const text =
     columns.length === 0
@@ -185,6 +202,14 @@ export async function enqueue<M>(client: QueueQueryable, queue: QueueDefinition<
   } catch (error) {
     throw new Error(`enqueue on ${queue.table}: ${errorMessage(error)}`, { cause: error });
   }
+}
+
+/** What a member a message sets writes to its column: its JSON text, a location's point, a duration's interval, or itself. */
+function columnValue(value: unknown, field: QueueField): unknown {
+  if (field.json) return JSON.stringify(value);
+  if (field.point) return pointText(value);
+  if (field.interval) return intervalText(value);
+  return value;
 }
 
 /** The claims of queue over pool, for a worker. */
@@ -266,15 +291,19 @@ function claimOf<M>(queue: QueueDefinition<M>, row: readonly unknown[]): QueueCl
 /**
  * The type parsers of a claim: pg's, but for the types whose TypeScript
  * type is not what pg makes of them. A 64-bit integer is a number, as the
- * TypeScript types hold Generic.Int64 and every integer scalar, and a date
+ * TypeScript types hold Generic.Int64 and every integer scalar, a date
  * its YYYY-MM-DD text, Temporal.Date's, where pg would make a Date at local
- * midnight.
+ * midnight, a POINT the location {lat, lon}, Geo.Location's, where pg would
+ * make {x, y}, and an INTERVAL the canonical text of its duration,
+ * Temporal.Duration's, where pg would make an object of its parts.
  */
 const overrides: Readonly<Record<number, (value: string) => unknown>> = {
   20: value => Number(value),
+  600: value => parsePoint(value),
   1016: value => parseArray(value).map(element => (element === null ? null : Number(element))),
   1082: value => value,
   1182: value => parseArray(value),
+  1186: value => formatDuration(parseInterval(value)),
 };
 
 const queueTypes = {
@@ -314,6 +343,152 @@ export function parseArray(text: string): (string | null)[] {
     i = end + 1;
   }
   return out;
+}
+
+/**
+ * A location, {lat, lon}, as the text of a Postgres POINT, (x,y): x is the
+ * longitude and y the latitude, each as JavaScript writes the number, so it
+ * reads back as the same number.
+ */
+export function pointText(value: unknown): string {
+  const { lat, lon } = (value ?? {}) as { lat?: unknown; lon?: unknown };
+  if (typeof lat !== 'number' || typeof lon !== 'number' || !Number.isFinite(lat) || !Number.isFinite(lon)) {
+    throw new Error(`${JSON.stringify(value)} is no location, {lat, lon}`);
+  }
+  return `(${lon},${lat})`;
+}
+
+/** A POINT's text, (x,y), as the location it holds, {lat: y, lon: x}. */
+export function parsePoint(text: string): { lat: number; lon: number } {
+  const match = /^\(([^,()]+),([^,()]+)\)$/u.exec(text);
+  const lon = Number(match?.[1]);
+  const lat = Number(match?.[2]);
+  if (match === null || Number.isNaN(lon) || Number.isNaN(lat)) throw new Error(`${JSON.stringify(text)} is no POINT`);
+  return { lat, lon };
+}
+
+/** The nanoseconds in each unit of a duration's text, the scalar core's units. */
+const durationUnits: Readonly<Record<string, bigint>> = {
+  ns: 1n,
+  us: 1_000n,
+  'µs': 1_000n,
+  'μs': 1_000n,
+  ms: 1_000_000n,
+  s: 1_000_000_000n,
+  m: 60_000_000_000n,
+  h: 3_600_000_000_000n,
+};
+
+/** A number of a duration's text and its unit, the longer unit first where one starts another. */
+const durationSegment = /^(\d+(?:\.\d*)?|\.\d+)(ns|us|µs|μs|ms|s|m|h)/u;
+
+/**
+ * A duration's text, as Temporal.Duration holds it (1h30m0s, -1.5s, 90m,
+ * 250us), as its nanoseconds: a sign for the whole, then one or more
+ * numbers, each with its unit, or a bare 0.
+ */
+export function parseDuration(text: string): bigint {
+  const value = text.trim();
+  const sign = value.startsWith('-') ? -1n : 1n;
+  let rest = /^[+-]/u.test(value) ? value.slice(1) : value;
+  if (rest === '0') return 0n;
+  if (rest === '') throw new Error(`${JSON.stringify(text)} is no duration`);
+  let nanos = 0n;
+  while (rest !== '') {
+    const match = durationSegment.exec(rest);
+    if (match === null) throw new Error(`${JSON.stringify(text)} is no duration`);
+    const [whole = '', fraction = ''] = (match[1] ?? '').split('.');
+    const unit = durationUnits[match[2] ?? ''] ?? 0n;
+    nanos += BigInt(whole || '0') * unit;
+    if (fraction !== '') nanos += (BigInt(fraction) * unit) / 10n ** BigInt(fraction.length);
+    rest = rest.slice(match[0].length);
+  }
+  return sign * nanos;
+}
+
+/**
+ * A duration's text as the text of a Postgres INTERVAL of its whole
+ * microseconds, [-]H:MM:SS.ffffff, the remainder truncated toward zero.
+ * Postgres gives the sign of this form to the whole time, where it would
+ * give the sign of -1h2m to its hours alone.
+ */
+export function intervalText(value: unknown): string {
+  if (typeof value !== 'string') throw new Error(`${JSON.stringify(value)} is no duration`);
+  const micros = parseDuration(value) / 1_000n;
+  const sign = micros < 0n ? '-' : '';
+  const whole = micros < 0n ? -micros : micros;
+  const seconds = whole / 1_000_000n;
+  const fraction = whole % 1_000_000n;
+  const two = (n: bigint): string => n.toString().padStart(2, '0');
+  const tail = fraction === 0n ? '' : `.${fraction.toString().padStart(6, '0')}`;
+  return `${sign}${seconds / 3600n}:${two((seconds / 60n) % 60n)}:${two(seconds % 60n)}${tail}`;
+}
+
+/** The nanoseconds in each unit an interval's text counts, a month 30 days and a year 12 months, as pgx counts them. */
+const intervalUnits: Readonly<Record<string, bigint>> = {
+  day: 86_400_000_000_000n,
+  days: 86_400_000_000_000n,
+  mon: 2_592_000_000_000_000n,
+  mons: 2_592_000_000_000_000n,
+  year: 31_104_000_000_000_000n,
+  years: 31_104_000_000_000_000n,
+};
+
+/** The time of an interval's text: a sign, hours, minutes, seconds and up to six places of a second. */
+const intervalTime = /^([+-]?)(\d+):(\d{2}):(\d{2})(?:\.(\d{1,6}))?$/u;
+
+/**
+ * An INTERVAL's text, as Postgres writes it in IntervalStyle postgres, its
+ * default (01:30:00, -00:00:01.5, 1 day 02:00:00, -1 days +02:00:00,
+ * 1 mon), as its nanoseconds: a day is 24 hours and a month 30 days.
+ */
+export function parseInterval(text: string): bigint {
+  const words = text.trim().split(/\s+/u);
+  let nanos = 0n;
+  for (let i = 0; i < words.length; i++) {
+    const word = words[i] ?? '';
+    const time = intervalTime.exec(word);
+    if (time !== null) {
+      const [, sign, hours = '0', minutes = '0', seconds = '0', fraction = ''] = time;
+      const micros = ((BigInt(hours) * 60n + BigInt(minutes)) * 60n + BigInt(seconds)) * 1_000_000n + BigInt(fraction.padEnd(6, '0') || '0');
+      nanos += (sign === '-' ? -micros : micros) * 1_000n;
+      continue;
+    }
+    const unit = intervalUnits[words[i + 1] ?? ''];
+    if (!/^[+-]?\d+$/u.test(word) || unit === undefined) {
+      throw new Error(`${JSON.stringify(text)} is no interval in IntervalStyle postgres`);
+    }
+    nanos += BigInt(word) * unit;
+    i++;
+  }
+  return nanos;
+}
+
+/**
+ * Nanoseconds as a duration's text in the scalar core's canonical form:
+ * under a second, the largest of ms, us and ns that holds it whole (500ms,
+ * 250us); from a second, hours and minutes when there are any, then
+ * seconds with their fraction (1h30m0s, 1m30s, 1.5s); 0s for zero.
+ */
+export function formatDuration(nanos: bigint): string {
+  if (nanos === 0n) return '0s';
+  const sign = nanos < 0n ? '-' : '';
+  let rest = nanos < 0n ? -nanos : nanos;
+  const second = 1_000_000_000n;
+  if (rest < second) {
+    if (rest % 1_000_000n === 0n) return `${sign}${rest / 1_000_000n}ms`;
+    if (rest % 1_000n === 0n) return `${sign}${rest / 1_000n}us`;
+    return `${sign}${rest}ns`;
+  }
+  const hours = rest / (3600n * second);
+  rest %= 3600n * second;
+  const minutes = rest / (60n * second);
+  rest %= 60n * second;
+  const fraction = rest % second;
+  const seconds = `${rest / second}${fraction === 0n ? '' : `.${fraction.toString().padStart(9, '0').replace(/0+$/u, '')}`}s`;
+  if (hours > 0n) return `${sign}${hours}h${minutes}m${seconds}`;
+  if (minutes > 0n) return `${sign}${minutes}m${seconds}`;
+  return `${sign}${seconds}`;
 }
 
 function errorMessage(error: unknown): string {

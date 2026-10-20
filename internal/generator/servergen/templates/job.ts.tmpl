@@ -11,13 +11,16 @@
 // does, calls the implementation's createJobs, and runs the job's method
 // once, with a signal that SIGTERM or SIGINT aborts. It logs the run's end
 // and, when the job fails, exits 1, so the platform records the run as
-// failed and runs it again if the job's retries allow.
+// failed and runs it again if the job's retries allow. When the environment
+// names an OTLP endpoint (OTEL_EXPORTER_OTLP_ENDPOINT), it exports a span of
+// the run, flushed before it exits (D67).
 //
 // The API's implementation is the package at the naming file's
 // [implementation_paths] typescript template (section 8.6):
 // {{ $api.ImplPackage }}{{ if $api.ImplDir }}, at {{ $api.ImplDir }}{{ end }}
 
 import { {{ join .RuntimeImports ", " }} } from '{{ .Naming.HTTPRuntimeNpmPackage }}';
+import { startTelemetry{{ if .Clients }}, type Telemetry{{ end }} } from '{{ .Naming.HTTPRuntimeNpmPackage }}/telemetry';
 {{- if .Databases }}
 import { connectPostgres } from '{{ .Naming.HTTPRuntimeNpmPackage }}/postgres';
 import type { Pool } from 'pg';
@@ -36,7 +39,8 @@ const logger = createLogger({ stack: {{ tsQuote .Stack }}, job: {{ tsQuote .Name
 /**
  * Builds the job from the environment and runs it once, until its method
  * settles; signal aborts when SIGTERM or SIGINT arrives. Each pool it opens
- * goes in pools, which main ends.
+ * goes in pools, which main ends, and so does its telemetry, which main
+ * flushes.
  */
 async function run(signal: AbortSignal, pools: { end(): Promise<void> }[]): Promise<void> {
 {{- template "ts-background-connections" . }}
@@ -45,7 +49,7 @@ async function run(signal: AbortSignal, pools: { end(): Promise<void> }[]): Prom
   {{ template "ts-deps" $api }}
   const jobs = await construct({{ tsQuote $api.Service }}, 'jobs', () => {{ $api.Impl }}.createJobs({{ $api.Deps }}));
   logger.info('job started', { api: {{ tsQuote $api.Service }}, class: {{ tsQuote .Job.Name }} });
-  await jobs.{{ .Job.Method }}(signal);
+  await telemetry.job({{ tsQuote .Job.Name }}, () => jobs.{{ .Job.Method }}(signal));
 }
 {{ template "ts-background-main" . }}
 

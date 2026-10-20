@@ -28,6 +28,10 @@ export interface QueueField {
   readonly list?: boolean;
   /** The schema's default of an enum, which a message that leaves the member unset writes. */
   readonly default?: string;
+  /** The column is a POINT, which a location, {lat, lon}, writes as (lon,lat). */
+  readonly point?: boolean;
+  /** The column is an INTERVAL, which a duration's text writes as its whole microseconds. */
+  readonly interval?: boolean;
 }
 
 /**

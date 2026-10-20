@@ -20,6 +20,7 @@ exactly as a server does.
 {{- if or .Databases .Clients }}
 	"{{ .Naming.HTTPRuntimeGoModule }}/stackconfig"
 {{- end }}
+	"{{ .Naming.HTTPRuntimeGoModule }}/telemetry"
 {{- if .Worker }}
 	"{{ .Naming.HTTPRuntimeGoModule }}/worker"
 {{- end }}
@@ -37,6 +38,16 @@ exactly as a server does.
 {{- range .Clients }}
 	{{ .Package }} "{{ .Module }}"
 {{- end }}
+{{- end }}
+
+{{- define "telemetry" }}
+
+	// Trace export, on when the environment names an OTLP endpoint (D67).
+	stopTelemetry, err := telemetry.Start(ctx, telemetry.Defaults{Service: {{ quote .Name }}, Stack: {{ quote .Stack }}, Kind: {{ quote .Kind }}, Logger: logger})
+	if err != nil {
+		return fmt.Errorf("telemetry: %w", err)
+	}
+	defer stopTelemetry()
 {{- end }}
 
 {{- define "connections" }}
@@ -169,6 +180,8 @@ func connect(ctx context.Context, field string, db stackconfig.Database) (*pgxpo
 // credential the edge's connector chose, and forwards the end user of the
 // request on each call's context (docs/stack-model.md, sections 9.4 and
 // 9.6){{ if $.Background }}: a {{ $.Kind }} serves no request, so it forwards none{{ end }}.
+// With trace export on, each call is a client span that carries its trace
+// context (D67).
 {{- if .Loopback }}
 // {{ .Service }} is an API the server serves itself, which no connector gives a
 // credential, so to a loopback endpoint without one the client sends the
@@ -176,8 +189,9 @@ func connect(ctx context.Context, field string, db stackconfig.Database) (*pgxpo
 {{- end }}
 func {{ .Constructor }}(endpoint stackconfig.Service{{ if .Loopback }}, {{ $.Loopback.Var }} *serviceauth.Loopback{{ end }}) (*{{ .Package }}.{{ .Type }}, error) {
 	cfg := {{ .Package }}.SDKConfig{
-		BaseURL: endpoint.URL,
-		Auth:    &{{ .Package }}.AuthConfig{GetToken: serviceauth.ForwardedToken},
+		BaseURL:   endpoint.URL,
+		Auth:      &{{ .Package }}.AuthConfig{GetToken: serviceauth.ForwardedToken},
+		Transport: telemetry.Transport(nil),
 	}
 	token, headers, err := serviceCredential(endpoint)
 	if err != nil {

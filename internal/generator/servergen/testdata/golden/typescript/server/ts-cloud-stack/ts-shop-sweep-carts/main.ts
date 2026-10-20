@@ -10,13 +10,16 @@
 // does, calls the implementation's createJobs, and runs the job's method
 // once, with a signal that SIGTERM or SIGINT aborts. It logs the run's end
 // and, when the job fails, exits 1, so the platform records the run as
-// failed and runs it again if the job's retries allow.
+// failed and runs it again if the job's retries allow. When the environment
+// names an OTLP endpoint (OTEL_EXPORTER_OTLP_ENDPOINT), it exports a span of
+// the run, flushed before it exits (D67).
 //
 // The API's implementation is the package at the naming file's
 // [implementation_paths] typescript template (section 8.6):
 // @schemas/ts-shop-implementation, at typescript/ts-shop
 
 import { createLogger, serviceCredentialFor, type Database, type Service } from '@superschematic/http-runtime';
+import { startTelemetry, type Telemetry } from '@superschematic/http-runtime/telemetry';
 import { connectPostgres } from '@superschematic/http-runtime/postgres';
 import type { Pool } from 'pg';
 import { openBucket } from '@superschematic/http-runtime/gcs';
@@ -29,9 +32,14 @@ const logger = createLogger({ stack: 'ts-cloud-stack', job: 'ts-shop-sweep-carts
 /**
  * Builds the job from the environment and runs it once, until its method
  * settles; signal aborts when SIGTERM or SIGINT arrives. Each pool it opens
- * goes in pools, which main ends.
+ * goes in pools, which main ends, and so does its telemetry, which main
+ * flushes.
  */
 async function run(signal: AbortSignal, pools: { end(): Promise<void> }[]): Promise<void> {
+  // Trace export, on when the environment names an OTLP endpoint (D67); main
+  // flushes the spans as it ends the pools.
+  const telemetry = startTelemetry({ service: 'ts-shop-sweep-carts', stack: 'ts-cloud-stack', kind: 'job', logger });
+  pools.push({ end: () => telemetry.shutdown() });
   const tsShopConfig = configure('ts-shop', () => tsShopApi.loadEnvConfig());
 
   // One pool per database, which connects when it is first used.
@@ -39,7 +47,7 @@ async function run(signal: AbortSignal, pools: { end(): Promise<void> }[]): Prom
   pools.push(tsDbPool);
 
   // One client per API called.
-  const tsPricingClient = newTsPricingClient(tsShopConfig.TS_PRICING_SERVICE);
+  const tsPricingClient = newTsPricingClient(tsShopConfig.TS_PRICING_SERVICE, telemetry.fetch);
 
   // One handle per bucket, on GCS or on the emulator its connection names
   // (D54).
@@ -55,7 +63,7 @@ async function run(signal: AbortSignal, pools: { end(): Promise<void> }[]): Prom
   };
   const jobs = await construct('ts-shop', 'jobs', () => tsShopImpl.createJobs(tsShopDeps));
   logger.info('job started', { api: 'ts-shop', class: 'SweepCarts' });
-  await jobs.sweepCarts(signal);
+  await telemetry.job('SweepCarts', () => jobs.sweepCarts(signal));
 }
 
 /** The exit status of a process a signal ends at once: 128 and its number. */
@@ -131,10 +139,12 @@ async function connect(service: string, field: string, db: Database): Promise<Po
  * Builds the client of ts-pricing. The job calls it at endpoint, the
  * field its edge derives, and the client sends the service credential the
  * edge's connector chose (docs/stack-model.md, section 9.6). The job serves
- * no request, so it forwards no end user.
+ * no request, so it forwards no end user. It calls through fetch, the
+ * telemetry's, which with trace export on makes each call a client span
+ * that carries its trace context (D67).
  */
-function newTsPricingClient(endpoint: Service): tsPricingSdk.TsPricingSDK {
-  return new tsPricingSdk.TsPricingSDK({ baseUrl: endpoint.url, serviceCredential: serviceCredentialFor(endpoint.credential) });
+function newTsPricingClient(endpoint: Service, fetch: Telemetry['fetch']): tsPricingSdk.TsPricingSDK {
+  return new tsPricingSdk.TsPricingSDK({ baseUrl: endpoint.url, serviceCredential: serviceCredentialFor(endpoint.credential), fetch });
 }
 
 main();

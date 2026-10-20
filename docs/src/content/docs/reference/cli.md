@@ -21,9 +21,10 @@ carries extensions. A binary hands the error `Execute` returns to
 that already said why, such as `superschematic-identity`, exits with that
 program's status.
 
-The core has nine commands: `build`, `build-all`, `migrate`,
-`json-schema`, `format`, `behaviors`, `engine-client` and the `stack`
-and `identity` groups, beside cobra's own `help` and `completion`. The
+The core has ten commands: `build`, `build-all`, `migrate`,
+`json-schema`, `format`, `behaviors`, `engine-client`, `env` and the
+`stack` and `identity` groups, beside cobra's own `help` and
+`completion`. The
 installed `superschematic` links the official extensions (the gcp target, the Cloudflare DNS platform and
 the Pulumi provisioner), which add none. The migration runner,
 `superschematic-migrate`, is a binary of its own ([The runner](/superschematic/reference/migrations/#the-runner)),
@@ -632,7 +633,11 @@ design is section 8.3 of
    package at the same place, and wait until it answers `/readyz`. Each
    line a server prints is printed with its name in front. Go servers need
    `go` on `PATH`, and TypeScript servers `bun`; a Rust server does not
-   run locally yet, and the environment does not resolve.
+   run locally yet, and the environment does not resolve. In a project
+   whose naming file names no superscalar checkout (`[paths] scalar_go`),
+   a release of superschematic first fetches the static archives it ships
+   for this machine's platform, as [`env`](#env-variable) does, and the
+   Go builds take `CGO_LDFLAGS` pointing at them, after any you set.
 6. Build each worker's entrypoint module at `<out>/server/<stack>/<worker>`
    the same way, a TypeScript worker's package needing no build, and start
    it with the servers of its wave, a TypeScript one as `bun main.ts`: a process with
@@ -714,7 +719,8 @@ API service's name and its class in kebab case,
 On the `local` target, run it from another terminal while `stack dev`
 runs the environment. It builds no schema: it reads the environment the
 last build resolved and the program `stack dev` rendered, builds a Go
-job's binary from its entrypoint module, or installs the workspace for a
+job's binary from its entrypoint module, linking the release's static
+archives as `stack dev` does, or installs the workspace for a
 TypeScript job's `main.ts`, so a change to the job's code is in the run, and runs it with the environment's values, secrets and keys, its
 timeout and its retries, each line it prints with the job's name in front.
 It refuses an environment whose Postgres container or servers do not
@@ -1133,6 +1139,37 @@ superschematic-identity version
 | `--database-url` | `$DATABASE_URL` | the database URL |
 | `--dialect` | the URL's | `postgres` or `sqlite` |
 | `--config` | the runtime's cost | an identity config JSON file; its `password.argon2` sets the hash's cost |
+
+## `env [<variable>...]`
+
+Print the variables a `go build` of the code this release of
+superschematic generates needs on this machine, in a project whose naming
+file names no superscalar checkout
+([`[paths] scalar_go`](/superschematic/reference/naming/#pathsscalar_go)).
+Such code links superscalar's static archive, the version graph's and the
+engine's through cgo, and no module the module proxy serves carries them.
+`env` downloads the release's
+`superschematic-archives_<version>_<platform>.tar.gz` for this machine
+once, checks it against the digest the binary names, unpacks it into
+`superschematic/archives/<digest>` in the user's cache directory, and
+prints `CGO_LDFLAGS` pointing cgo's linker at its `lib/`, as a line a
+POSIX shell evaluates. With variable names it prints each one's value
+alone, a line each, as `go env` does; `CGO_LDFLAGS` is the one it
+prints. `stack dev` and `stack run` fetch the archives the same way for
+the builds they run, and the generated CI's `check` job and a server's
+Dockerfile download the same tarball.
+
+The assets download from the release's page unless
+`SUPERSCHEMATIC_RELEASE` names a mirror, the base URL the tarball's name
+is appended to. A binary built from a checkout is no release, and one the
+release workflow did not build names no digests: `env` fails for either,
+and a project built with them names its checkouts in `[paths]`, whose
+`make setup` builds the archives.
+
+```
+eval "$(superschematic env)" && go build ./...
+go env -w CGO_LDFLAGS="$(superschematic env CGO_LDFLAGS)"
+```
 
 ## Extension commands
 

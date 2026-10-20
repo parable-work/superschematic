@@ -41,7 +41,8 @@
 //! `took` (seconds) and `error` on each outcome, `retryIn` (seconds) on a
 //! failed claim, `pruned` on a prune, and `running`, `grace`, `released` and
 //! `unfinished` as it stops. The `logging` module writes them as JSON
-//! lines.
+//! lines. With the `otel` feature and export on, each message's handling is
+//! a consumer span, `process <queue>`, the root of a trace of its own (D67).
 
 use std::any::Any;
 use std::collections::HashMap;
@@ -457,10 +458,14 @@ where
         let key = token.clone();
         let task = self.tracker.spawn(
             async move {
+                let span = message_span(worker.queue.name(), &id, attempt);
                 let outcome = tokio::select! {
-                    outcome = worker.handle(message) => outcome,
+                    outcome = worker.handle(message).instrument(span.clone()) => outcome,
                     never = worker.extend(&id, &token, attempt) => match never {},
                 };
+                if let Err(cause) = &outcome {
+                    message_failed(&span, cause);
+                }
                 worker.finish(&id, &token, attempt, outcome).await;
                 worker.freed.notify_one();
             }
@@ -622,6 +627,27 @@ where
         );
     }
 }
+
+/// The span of a message's handling, which trace export makes a consumer
+/// span (D67): none without the `otel` feature, or with export off.
+#[cfg(feature = "otel")]
+fn message_span(queue: &str, id: &str, attempt: u32) -> tracing::Span {
+    crate::telemetry::message_span(queue, id, attempt)
+}
+
+#[cfg(not(feature = "otel"))]
+fn message_span(_queue: &str, _id: &str, _attempt: u32) -> tracing::Span {
+    tracing::Span::none()
+}
+
+/// Records a message's failure on its span.
+#[cfg(feature = "otel")]
+fn message_failed(span: &tracing::Span, cause: &str) {
+    crate::telemetry::message_failed(span, cause);
+}
+
+#[cfg(not(feature = "otel"))]
+fn message_failed(_span: &tracing::Span, _cause: &str) {}
 
 /// A queue operation, given [`OP_TIMEOUT`] to answer.
 async fn timed<T>(operation: impl Future<Output = Result<T, QueueError>>) -> Result<T, QueueError> {

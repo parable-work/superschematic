@@ -10,7 +10,10 @@
 //! member (section 3.4). It listens on $PORT, 8080 when unset, answers
 //! `GET /healthz` while the process runs and `GET /readyz` while its
 //! databases answer, and on SIGTERM or SIGINT stops taking requests and
-//! lets those in flight finish. It logs one JSON object per line on stdout.
+//! lets those in flight finish. It logs one JSON object per line on stdout,
+//! and when the environment names an OTLP endpoint
+//! (`OTEL_EXPORTER_OTLP_ENDPOINT`) it exports a span per request and per call
+//! to another API (D67).
 //!
 //! Each API's implementation is the crate at the naming file's
 //! `[implementation_paths] rust` template, which the build scaffolded once
@@ -34,6 +37,7 @@ use axum::{Json, Router};
 use serde_json::json;
 use superschematic_http_runtime::logging::{self, tracing};
 use superschematic_http_runtime::stackconfig::{self, Service};
+use superschematic_http_runtime::telemetry::{self, Defaults};
 use superschematic_http_runtime::{cors, JwtServiceAuthenticator, Loopback, OperationInfo};
 use tokio::signal::unix::{signal, Signal, SignalKind};
 use tower::ServiceExt;
@@ -61,10 +65,20 @@ struct Readiness {
 
 #[tokio::main]
 async fn main() -> ExitCode {
-    if let Err(err) = logging::init_json("rs-merged-stack", "Warehouse") {
-        eprintln!("Warehouse: install the logger: {err}");
-        return ExitCode::FAILURE;
-    }
+    // The log and, when the environment names an OTLP endpoint, trace export
+    // (D67), which flushes the spans still buffered as main returns.
+    let installed = telemetry::start(Defaults {
+        stack: "rs-merged-stack",
+        kind: logging::SERVER,
+        name: "Warehouse",
+    });
+    let _telemetry = match installed {
+        Ok(telemetry) => telemetry,
+        Err(err) => {
+            eprintln!("Warehouse: install the logger: {err}");
+            return ExitCode::FAILURE;
+        }
+    };
     match run().await {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
@@ -136,6 +150,12 @@ async fn run() -> Result<(), Failure> {
             (rs_catalog_api::operations::ALL, rs_catalog_router),
             (rs_pricing_api::operations::ALL, rs_pricing_router),
         ]));
+    // With trace export on, each request but the probes is a server span,
+    // named by the route of the operation that takes it.
+    let app = app.layer(telemetry::ServerLayer::new(&[
+        rs_catalog_api::operations::ALL,
+        rs_pricing_api::operations::ALL,
+    ]));
     serve(port, app, readiness).await
 }
 
@@ -162,6 +182,8 @@ fn configure<T, E: std::fmt::Display>(api: &str, loaded: Result<T, E>) -> Result
 /// travels per call: an implementation passes
 /// `RequestOptions::forward(ctx.bearer_token())` with each call it makes
 /// for a request.
+/// With trace export on, each call is a client span that carries its trace
+/// context (D67).
 ///
 /// rs-pricing is an API the server serves itself, which no connector gives a
 /// credential, so to a loopback endpoint without one the client sends the
@@ -183,6 +205,7 @@ fn new_rs_pricing_client(
     rs_pricing_sdk::RsPricingSdk::new(rs_pricing_sdk::ClientConfig {
         base_url: endpoint.url.clone(),
         service_credential,
+        transport: telemetry::transport(),
         ..Default::default()
     })
     .map_err(|err| format!("client of rs-pricing: {err}").into())

@@ -163,6 +163,23 @@ func decode{{ .TypeName }}HistoryData(raw []byte) (*types.{{ .TypeName }}, error
 		if err := {{ .GeoPointListDecodeCall "rawValue" (printf "&result.%s" (toGoName .Name)) }}; err != nil {
 			return nil, fmt.Errorf("failed to decode history field {{ .DBName }}: %w", err)
 		}
+		{{- else if .IsIntervalList }}
+		if err := unmarshalHistoryIntervals(rawValue, &result.{{ toGoName .Name }}, {{ printf "%q" .Name }}); err != nil {
+			return nil, fmt.Errorf("failed to decode history field {{ .DBName }}: %w", err)
+		}
+		{{- else if .IsInterval }}
+		// to_jsonb writes an INTERVAL as its text, "1 mon 2 days 03:04:05",
+		// and a version graph's row holds the duration's text, "1h30m0s".
+		duration, err := unmarshalHistoryInterval(rawValue)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode history field {{ .DBName }}: %w", err)
+		}
+		{{- if .IsNullableScalar }}
+		value := {{ .GoType }}(duration)
+		result.{{ toGoName .Name }} = &value
+		{{- else }}
+		result.{{ toGoName .Name }} = {{ .GoType }}(duration)
+		{{- end }}
 		{{- else if .NativeList }}
 		if err := unmarshalJSONListFieldValue(rawValue, &result.{{ toGoName .Name }}, {{ printf "%q" .Name }}, 1); err != nil {
 			return nil, fmt.Errorf("failed to decode history field {{ .DBName }}: %w", err)
@@ -221,11 +238,13 @@ pgtype.Point{P: pgtype.Vec2{X: {{ . }}.Lon, Y: {{ . }}.Lat}, Valid: true}
 {{- else if $member.Field.IsJSONField }}
 var temp{{ toGoName $member.Field.Name }} []byte
 {{- else if $member.Field.ScansElementPointers }}
-var temp{{ toGoName $member.Field.Name }} []*{{ $member.Field.GoType }}
+var temp{{ toGoName $member.Field.Name }} []*{{ $member.Field.ListElementScanType }}
 {{- else if $member.Field.IsGeoPointList }}
 var temp{{ toGoName $member.Field.Name }} []pgtype.Point
 {{- else if $member.Field.IsGeoPoint }}
 var temp{{ toGoName $member.Field.Name }} pgtype.Point
+{{- else if and $member.Field.IsInterval $member.Field.IsNullableScalar }}
+var temp{{ toGoName $member.Field.Name }} *time.Duration
 {{- else if and (not $member.Field.IsPrimaryKey) (not $member.Field.IsAuditField) (not $member.Field.IsArray) $member.Field.IsDateLike }}
 var temp{{ toGoName $member.Field.Name }} pgtype.Date
 {{- else if and (not $member.Field.IsRequired) (not $member.Field.IsPrimaryKey) (not $member.Field.IsAuditField) (not $member.Field.IsArray) (eq $member.Field.GoType "string") }}
@@ -258,7 +277,7 @@ if err := {{ $member.Field.GenericJSONNullCheck (printf "result.%s" (toGoName $m
 	return nil, fmt.Errorf("failed to decode field {{ $member.Field.Name }}: %w", err)
 }
 {{- else if $member.Field.ScansElementPointers }}
-if err := copyListElements({{ printf "%q" $member.Field.Name }}, temp{{ toGoName $member.Field.Name }}, &result.{{ toGoName $member.Field.Name }}); err != nil {
+if err := {{ $member.Field.ListCopyCall (printf "temp%s" (toGoName $member.Field.Name)) (printf "&result.%s" (toGoName $member.Field.Name)) }}; err != nil {
 	return nil, fmt.Errorf("failed to decode field {{ $member.Field.Name }}: %w", err)
 }
 {{- else if $member.Field.IsGeoPointList }}
@@ -275,6 +294,10 @@ if temp{{ toGoName $member.Field.Name }}.Valid {
 	result.{{ toGoName $member.Field.Name }} = {{ $member.Field.GoType }}{Lat: temp{{ toGoName $member.Field.Name }}.P.Y, Lon: temp{{ toGoName $member.Field.Name }}.P.X}
 	{{- end }}
 }
+{{- else if and $member.Field.IsInterval $member.Field.IsNullableScalar }}
+// An INTERVAL reads as a time.Duration: its microseconds, a day 24 hours
+// and a month 30 days. A NULL leaves it nil.
+result.{{ toGoName $member.Field.Name }} = (*{{ $member.Field.GoType }})(temp{{ toGoName $member.Field.Name }})
 {{- else if and (not $member.Field.IsPrimaryKey) (not $member.Field.IsAuditField) (not $member.Field.IsArray) $member.Field.IsDateLike }}
 if temp{{ toGoName $member.Field.Name }}.Valid {
 	{{- if $member.Field.IsNullableScalar }}
@@ -328,7 +351,7 @@ if err := {{ $member.Field.GenericJSONNullCheck (printf "entity.%s" (toGoName $m
 	return nil, fmt.Errorf("failed to decode field {{ $member.Field.Name }}: %w", err)
 }
 {{- else if $member.Field.ScansElementPointers }}
-if err := copyListElements({{ printf "%q" $member.Field.Name }}, temp{{ toGoName $member.Field.Name }}, &entity.{{ toGoName $member.Field.Name }}); err != nil {
+if err := {{ $member.Field.ListCopyCall (printf "temp%s" (toGoName $member.Field.Name)) (printf "&entity.%s" (toGoName $member.Field.Name)) }}; err != nil {
 	return nil, fmt.Errorf("failed to decode field {{ $member.Field.Name }}: %w", err)
 }
 {{- else if $member.Field.IsGeoPointList }}
@@ -345,6 +368,10 @@ if temp{{ toGoName $member.Field.Name }}.Valid {
 	entity.{{ toGoName $member.Field.Name }} = {{ $member.Field.GoType }}{Lat: temp{{ toGoName $member.Field.Name }}.P.Y, Lon: temp{{ toGoName $member.Field.Name }}.P.X}
 	{{- end }}
 }
+{{- else if and $member.Field.IsInterval $member.Field.IsNullableScalar }}
+// An INTERVAL reads as a time.Duration: its microseconds, a day 24 hours
+// and a month 30 days. A NULL leaves it nil.
+entity.{{ toGoName $member.Field.Name }} = (*{{ $member.Field.GoType }})(temp{{ toGoName $member.Field.Name }})
 {{- else if and (not $member.Field.IsPrimaryKey) (not $member.Field.IsAuditField) (not $member.Field.IsArray) $member.Field.IsDateLike }}
 if temp{{ toGoName $member.Field.Name }}.Valid {
 	{{- if $member.Field.IsNullableScalar }}
@@ -385,6 +412,8 @@ if temp{{ toGoName $member.Field.Name }} != nil {
 &temp{{ toGoName $member.Field.Name }},
 {{- else if $member.Field.IsGeoPoint }}
 &temp{{ toGoName $member.Field.Name }},
+{{- else if and $member.Field.IsInterval (not $member.Field.IsNullableScalar) }}
+(*time.Duration)(&result.{{ toGoName $member.Field.Name }}),
 {{- else if and (not $member.Field.IsPrimaryKey) (not $member.Field.IsAuditField) (not $member.Field.IsArray) $member.Field.IsDateLike }}
 &temp{{ toGoName $member.Field.Name }},
 {{- else if and (not $member.Field.IsRequired) (not $member.Field.IsPrimaryKey) (not $member.Field.IsAuditField) (not $member.Field.IsArray) }}
@@ -406,6 +435,8 @@ if temp{{ toGoName $member.Field.Name }} != nil {
 &temp{{ toGoName $member.Field.Name }},
 {{- else if $member.Field.IsGeoPoint }}
 &temp{{ toGoName $member.Field.Name }},
+{{- else if and $member.Field.IsInterval (not $member.Field.IsNullableScalar) }}
+(*time.Duration)(&entity.{{ toGoName $member.Field.Name }}),
 {{- else if and (not $member.Field.IsPrimaryKey) (not $member.Field.IsAuditField) (not $member.Field.IsArray) $member.Field.IsDateLike }}
 &temp{{ toGoName $member.Field.Name }},
 {{- else if and (not $member.Field.IsRequired) (not $member.Field.IsPrimaryKey) (not $member.Field.IsAuditField) (not $member.Field.IsArray) }}
@@ -420,11 +451,13 @@ if temp{{ toGoName $member.Field.Name }} != nil {
 {{- if $field.IsJSONField }}
 var temp{{ toGoName $field.Name }} []byte
 {{- else if $field.ScansElementPointers }}
-var temp{{ toGoName $field.Name }} []*{{ $field.GoType }}
+var temp{{ toGoName $field.Name }} []*{{ $field.ListElementScanType }}
 {{- else if $field.IsGeoPointList }}
 var temp{{ toGoName $field.Name }} []pgtype.Point
 {{- else if $field.IsGeoPoint }}
 var temp{{ toGoName $field.Name }} pgtype.Point
+{{- else if and $field.IsInterval $field.IsNullableScalar }}
+var temp{{ toGoName $field.Name }} *time.Duration
 {{- else if and (not $field.IsPrimaryKey) (not $field.IsAuditField) (not $field.IsArray) $field.IsDateLike }}
 var temp{{ toGoName $field.Name }} pgtype.Date
 {{- else if and (not $field.IsRequired) (not $field.IsPrimaryKey) (not $field.IsAuditField) (not $field.IsArray) (eq $field.GoType "string") }}
@@ -457,6 +490,10 @@ case "{{ $field.DBName }}":
 	{{- else if $field.IsGeoPoint }}
 	scanDest[i] = &temp{{ toGoName $field.Name }}
 	selected{{ toGoName $field.Name }} = true
+	{{- else if and $field.IsInterval (not $field.IsNullableScalar) }}
+	// An INTERVAL reads as a time.Duration: its microseconds, a day 24 hours
+	// and a month 30 days.
+	scanDest[i] = (*time.Duration)(&result.{{ toGoName $field.Name }})
 	{{- else if and (not $field.IsPrimaryKey) (not $field.IsAuditField) (not $field.IsArray) $field.IsDateLike }}
 	scanDest[i] = &temp{{ toGoName $field.Name }}
 	selected{{ toGoName $field.Name }} = true
@@ -490,7 +527,7 @@ if err := {{ $field.GenericJSONNullCheck (printf "result.%s" (toGoName $field.Na
 	jsonFieldDecodeErr = fmt.Errorf("failed to decode field {{ $field.Name }}: %w", err)
 }
 {{- else if $field.ScansElementPointers }}
-if err := copyListElements({{ printf "%q" $field.Name }}, temp{{ toGoName $field.Name }}, &result.{{ toGoName $field.Name }}); err != nil {
+if err := {{ $field.ListCopyCall (printf "temp%s" (toGoName $field.Name)) (printf "&result.%s" (toGoName $field.Name)) }}; err != nil {
 	jsonFieldDecodeErr = fmt.Errorf("failed to decode field {{ $field.Name }}: %w", err)
 }
 {{- else if $field.IsGeoPointList }}
@@ -506,6 +543,12 @@ if selected{{ toGoName $field.Name }} && temp{{ toGoName $field.Name }}.Valid {
 	{{- else }}
 	result.{{ toGoName $field.Name }} = {{ $field.GoType }}{Lat: temp{{ toGoName $field.Name }}.P.Y, Lon: temp{{ toGoName $field.Name }}.P.X}
 	{{- end }}
+}
+{{- else if and $field.IsInterval $field.IsNullableScalar }}
+if selected{{ toGoName $field.Name }} {
+	// An INTERVAL reads as a time.Duration: its microseconds, a day 24
+	// hours and a month 30 days. A NULL leaves it nil.
+	result.{{ toGoName $field.Name }} = (*{{ $field.GoType }})(temp{{ toGoName $field.Name }})
 }
 {{- else if and (not $field.IsPrimaryKey) (not $field.IsAuditField) (not $field.IsArray) $field.IsDateLike }}
 if selected{{ toGoName $field.Name }} && temp{{ toGoName $field.Name }}.Valid {
@@ -2083,6 +2126,12 @@ func (r *{{ .Name }}) CreateOne(ctx context.Context, input *types.{{ .TypeName }
 	values = append(values, {{ template "geoPoint" (printf "input.%s" (toGoName .Name)) }})
 	{{- else if .IsGeoPointList }}
 	values = append(values, {{ .GeoPointListValue (printf "input.%s" (toGoName .Name)) }})
+	{{- else if .IsInterval }}
+	// An INTERVAL goes as its microseconds, which pgx encodes from a
+	// time.Duration, sign and all.
+	values = append(values, time.Duration(input.{{ toGoName .Name }}))
+	{{- else if .IsIntervalList }}
+	values = append(values, intervalList(input.{{ toGoName .Name }}))
 	{{- else if .EnumDefault }}
 	// An unset enum takes its schema default; "" is never a member.
 	if input.{{ toGoName .Name }} == "" {
@@ -2122,6 +2171,12 @@ func (r *{{ .Name }}) CreateOne(ctx context.Context, input *types.{{ .TypeName }
 			values = append(values, {{ template "geoPoint" (printf "input.%s" (toGoName .Name)) }})
 			{{- else if .IsGeoPointList }}
 			values = append(values, {{ .GeoPointListValue (printf "input.%s" (toGoName .Name)) }})
+			{{- else if and .IsInterval .DerefValue }}
+			values = append(values, time.Duration(*input.{{ toGoName .Name }}))
+			{{- else if .IsInterval }}
+			values = append(values, time.Duration(input.{{ toGoName .Name }}))
+			{{- else if .IsIntervalList }}
+			values = append(values, intervalList(input.{{ toGoName .Name }}))
 			{{- else if .DerefValue }}
 			// Dereference pointer for database value (nullable complex types, enums, and scalars are pointers)
 			values = append(values, *input.{{ toGoName .Name }})
@@ -2291,6 +2346,12 @@ func (r *{{ .Name }}) CreateMany(ctx context.Context, inputs []*types.{{ .TypeNa
 			cell.value = {{ template "geoPoint" (printf "input.%s" (toGoName .Name)) }}
 			{{- else if .IsGeoPointList }}
 			cell.value = {{ .GeoPointListValue (printf "input.%s" (toGoName .Name)) }}
+			{{- else if .IsInterval }}
+			// An INTERVAL goes as its microseconds, which pgx encodes from a
+			// time.Duration, sign and all.
+			cell.value = time.Duration(input.{{ toGoName .Name }})
+			{{- else if .IsIntervalList }}
+			cell.value = intervalList(input.{{ toGoName .Name }})
 			{{- else if .EnumDefault }}
 			// An unset enum takes its schema default; "" is never a member.
 			cell.value = input.{{ toGoName .Name }}
@@ -2329,6 +2390,12 @@ func (r *{{ .Name }}) CreateMany(ctx context.Context, inputs []*types.{{ .TypeNa
 				cell.value = {{ template "geoPoint" (printf "input.%s" (toGoName .Name)) }}
 				{{- else if .IsGeoPointList }}
 				cell.value = {{ .GeoPointListValue (printf "input.%s" (toGoName .Name)) }}
+				{{- else if and .IsInterval .DerefValue }}
+				cell.value = time.Duration(*input.{{ toGoName .Name }})
+				{{- else if .IsInterval }}
+				cell.value = time.Duration(input.{{ toGoName .Name }})
+				{{- else if .IsIntervalList }}
+				cell.value = intervalList(input.{{ toGoName .Name }})
 				{{- else if .DerefValue }}
 				// Dereference pointer for database value (nullable complex types, enums, and scalars are pointers)
 				cell.value = *input.{{ toGoName .Name }}
@@ -2521,6 +2588,12 @@ func (r *{{ .Name }}) updateOne(ctx context.Context, id {{ .PrimaryKeyType }}, u
 		values = append(values, {{ template "geoPoint" (printf "update.%s" (toGoName .Name)) }})
 		{{- else if .IsGeoPointList }}
 		values = append(values, {{ .GeoPointListValue (printf "*update.%s" (toGoName .Name)) }})
+		{{- else if .IsInterval }}
+		// An INTERVAL goes as its microseconds, which pgx encodes from a
+		// time.Duration, sign and all.
+		values = append(values, time.Duration(*update.{{ toGoName .Name }}))
+		{{- else if .IsIntervalList }}
+		values = append(values, intervalList(*update.{{ toGoName .Name }}))
 		{{- else }}
 		values = append(values, *update.{{ toGoName .Name }})
 		{{- end }}
@@ -2701,6 +2774,12 @@ func (r *{{ .Name }}) UpdateMany(ctx context.Context, filter *{{ .TypeName }}Fil
 		values = append(values, {{ template "geoPoint" (printf "update.%s" (toGoName .Name)) }})
 		{{- else if .IsGeoPointList }}
 		values = append(values, {{ .GeoPointListValue (printf "*update.%s" (toGoName .Name)) }})
+		{{- else if .IsInterval }}
+		// An INTERVAL goes as its microseconds, which pgx encodes from a
+		// time.Duration, sign and all.
+		values = append(values, time.Duration(*update.{{ toGoName .Name }}))
+		{{- else if .IsIntervalList }}
+		values = append(values, intervalList(*update.{{ toGoName .Name }}))
 		{{- else }}
 		values = append(values, *update.{{ toGoName .Name }})
 		{{- end }}

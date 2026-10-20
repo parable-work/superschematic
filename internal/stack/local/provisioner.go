@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -40,6 +41,16 @@ var inheritedVariables = []string{
 	"LANG", "LC_ALL", "LC_CTYPE", "TZ", "SYSTEMROOT",
 	"SSL_CERT_FILE", "SSL_CERT_DIR", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY",
 }
+
+// otelPrefix begins the names of OpenTelemetry's variables, which a server,
+// job or worker process inherits too (D67): trace export is off unless the
+// developer's shell names an OTLP endpoint, and then every deployable sends
+// its spans there. OTEL_SERVICE_NAME is left out, since one value would name
+// every deployable alike over the name its entrypoint gives it.
+const otelPrefix = "OTEL_"
+
+// otelServiceName is the one OpenTelemetry variable no process inherits.
+const otelServiceName = "OTEL_SERVICE_NAME"
 
 // Provisioner is the local provisioner (docs/stack-model.md, section 8.3).
 // It applies a local environment's graph to the machine, a step of the
@@ -955,7 +966,7 @@ func (p *Provisioner) startServers(ctx context.Context, req registry.ProvisionRe
 			return err
 		}
 		p.printf("build %s: go build %s", s.Deployable, s.Module)
-		if _, err := p.runner().Run(ctx, Command{Path: tools[s.Language], Args: []string{"build", "-o", binary, "."}, Dir: module, Env: buildEnv()}); err != nil {
+		if _, err := p.runner().Run(ctx, Command{Path: tools[s.Language], Args: []string{"build", "-o", binary, "."}, Dir: module, Env: buildEnv(req)}); err != nil {
 			return fmt.Errorf("local: build server %s: %w", s.Deployable, err)
 		}
 		builds = append(builds, built{server: s, cmd: Command{Path: binary, Dir: module, Env: env}})
@@ -1183,8 +1194,9 @@ func (p *Provisioner) runOutputs(req registry.ProvisionRequest, prog *Program) (
 // list it, is off. The build writes no go.sum, so the module's own go.mod
 // and go.sum may change: -mod=mod replaces any -mod in GOFLAGS. Only the
 // server module's files change, never the implementation packages it
-// requires.
-func buildEnv() []string {
+// requires. The request's BuildEnv comes last, so it wins: the CGO_LDFLAGS
+// that point cgo's linker at the release's static archives (D47, amended).
+func buildEnv(req registry.ProvisionRequest) []string {
 	var flags []string
 	for _, flag := range strings.Fields(os.Getenv("GOFLAGS")) {
 		if !strings.HasPrefix(flag, "-mod=") {
@@ -1192,7 +1204,11 @@ func buildEnv() []string {
 		}
 	}
 	flags = append(flags, "-mod=mod")
-	return append(os.Environ(), "GOWORK=off", "GOFLAGS="+strings.Join(flags, " "))
+	env := append(os.Environ(), "GOWORK=off", "GOFLAGS="+strings.Join(flags, " "))
+	for _, name := range slices.Sorted(maps.Keys(req.BuildEnv)) {
+		env = append(env, name+"="+req.BuildEnv[name])
+	}
+	return env
 }
 
 // waitReady probes a server's readiness path until it answers 200. A
@@ -1375,9 +1391,9 @@ func serverEnv(s *Server, secrets, params map[string]string, outputs map[string]
 }
 
 // processEnviron is the environment of a server or a job process before
-// any variable the platform sets itself: the variables it inherits, and
-// each of its env entries, a secret read from secrets and a value with its
-// references resolved.
+// any variable the platform sets itself: the variables it inherits,
+// OpenTelemetry's among them, and each of its env entries, a secret read
+// from secrets and a value with its references resolved.
 func processEnviron(entries []EnvVar, secrets, params map[string]string, outputs map[string]map[string]any) ([]string, error) {
 	var env []string
 	for _, name := range inheritedVariables {
@@ -1385,6 +1401,14 @@ func processEnviron(entries []EnvVar, secrets, params map[string]string, outputs
 			env = append(env, name+"="+value)
 		}
 	}
+	var otel []string
+	for _, kv := range os.Environ() {
+		if name, _, _ := strings.Cut(kv, "="); strings.HasPrefix(name, otelPrefix) && name != otelServiceName {
+			otel = append(otel, kv)
+		}
+	}
+	slices.Sort(otel)
+	env = append(env, otel...)
 	for _, v := range entries {
 		if v.Secret != "" {
 			env = append(env, v.Name+"="+secrets[v.Secret])
