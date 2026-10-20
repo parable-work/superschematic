@@ -1420,10 +1420,11 @@ run's own token reaches the zone. `stack init --cloudflare-account <id>`
 writes the environment and `src/cloudflare-target.ts`.
 
 The target places TypeScript servers on Workers
-([Servers on Workers](#servers-on-workers)); its Cron, D1, R2 and site
+([Servers on Workers](#servers-on-workers)), which call each other
+through service bindings ([Calls between Workers](#calls-between-workers)),
+and buckets on R2 ([Buckets on R2](#buckets-on-r2)); its Cron, D1 and site
 platforms are not built yet, so an environment on it that holds a job, a
-database, a bucket or a site does not resolve. What every deploy goes
-through:
+database or a site does not resolve. What every deploy goes through:
 
 - **The token and the passphrase.** Every `stack` command reads the API
   token from `CLOUDFLARE_API_TOKEN` and the state's passphrase from
@@ -1465,7 +1466,10 @@ and creates or reads the Secrets Store. It is safe to run again:
    edits the account's Workers scripts, D1, R2, Secrets Store and account
    API tokens and the Workers routes and DNS of its zones, and
    `<stack>-planner`, which reads all of that and writes the objects of
-   the state bucket alone, since a preview takes the stack's lock;
+   the state bucket alone, since a preview takes the stack's lock. For an
+   environment with a bucket, it first checks that the account lists the
+   permission group each bucket edge's token holds, by the id Cloudflare
+   publishes;
 6. with `--github`, it sets each token and the passphrase as the
    repository's GitHub Actions secrets with `gh`, at the scopes the
    [generated CI](#generated-ci) reads them from, and creates the deploy
@@ -1527,6 +1531,63 @@ no argon2.
 `examples/acme-shop`'s `storefront-stack` runs the storefront this way:
 
 <Snippet file="schemas/services/storefront-stack/src/stack.schema.ts" />
+
+### Calls between Workers
+
+A server on Workers reaches a server it calls through a service binding,
+exposed or not, so an internal callee needs no route. The caller's
+`SHOP_PRICING_SERVICE` holds the callee's address, `https://<callee's
+Worker>`, the host the binding's requests carry; the binding, named after
+the field, to the callee's Worker; and a signed token, as the generic
+connector's: the binding admits the caller, and the token identifies it.
+Each edge has an Ed25519 key, a `tls` `PrivateKey` node in the deploy's
+state. Its private key reaches the caller as a secret text binding, and
+its public key goes into the callee's callers field, with the caller as
+its issuer and subject, the callee as the audience, EdDSA, and tokens that
+live at most 300 seconds. No runtime reads a service binding's
+`ctx.props`.
+
+The callee's Worker is in infrastructure, and the caller's version names
+it through the Worker node's output, so the callee exists before the
+caller binds it, and the rollout waves put the callee's version first.
+The caller's Worker depends on the callee's, so a destroy removes the
+caller, with its bindings, before the callee. A call between two APIs one
+server serves stays in process: `fetch.ts` hands it to the server's own
+app, with no binding and no credential.
+
+### Buckets on R2
+
+A bucket on the cloudflare target is a private R2 bucket of
+`cloudflare.r2`, `<stack>-<bucket>`, with a suffix per parameter in a
+member of a parameterized environment, which gets a bucket of its own.
+Its settings:
+
+| Setting | Default | |
+| --- | --- | --- |
+| `locationHint` | none | `wnam`, `enam`, `weur`, `eeur`, `apac` or `oc`: where R2 places the bucket |
+| `storageClass` | `Standard` | `InfrequentAccess` for new objects |
+| `deleteAfterDays` | none | a lifecycle rule deletes each object that many days after it was written |
+
+There is no `jurisdiction`: a jurisdiction's bucket is reached at another
+S3 host, which the R2 credential does not carry yet, and no `versioning`,
+which R2 lacks.
+
+Each server that lists the bucket gets an `r2_bucket` binding named after
+its field, `SHOP_MEDIA_BUCKET`, through which it puts, gets, deletes and
+lists objects, and an account token of its own, minted by the edge, that
+holds Workers R2 Storage Bucket Item Write on that bucket's objects alone.
+The token's id and value reach the server as `_R2_ACCESS_KEY_ID` and
+`_R2_TOKEN`, the value as a secret text binding, and the runtime's
+`signedUrl` presigns S3 URLs at
+`https://<accountId>.r2.cloudflarestorage.com/<bucket>/<object>` with
+them. The rule `buckets-never-public` refuses an r2.dev managed domain or
+a custom domain on a bucket.
+
+`stack destroy` of a member of a parameterized environment empties its
+buckets first, since Cloudflare deletes only an empty bucket. Any other
+environment's bucket keeps its objects, and its destroy fails on one that
+holds some. `stack dev` keeps the bucket on the storage emulator, through
+the same `Bucket` interface.
 
 ## Generated CI
 

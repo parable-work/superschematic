@@ -6,10 +6,11 @@ D64). It registers the DNS platform `cloudflare`, which writes an
 environment's domain records into a Cloudflare zone, whatever target runs
 the environment's servers, and the target `cloudflare`, which runs an
 environment on one Cloudflare account. The target's values, its state in
-R2, its secrets in the Secrets Store, its bootstrap, its CI identity, and
-its Workers platform, which runs TypeScript servers as Workers from the
-bundles it keeps in R2, are built; its Cron, D1, R2 and site platforms
-come next, in this module.
+R2, its secrets in the Secrets Store, its bootstrap, its CI identity, its
+Workers platform, which runs TypeScript servers as Workers from the
+bundles it keeps in R2 and joins them through service bindings, and its R2
+platform for buckets are built; its Cron, D1 and site platforms come
+next, in this module.
 
 It is a Go module of its own, as `extensions/gcp` and `extensions/pulumi`
 are, and registers through the public `registry` package alone (D10).
@@ -115,6 +116,8 @@ export abstract class Staging {}
 | `ci.go` | the CI identity, `cloudflare-api-token`, naming the GitHub secrets each job reads |
 | `workers.go`, `names.go` | the `cloudflare.workers` platform: a TypeScript server as a Worker, its version and its deployment, its config as bindings, its custom domain; names suffixed per member and refused over 63 characters |
 | `bundles.go` | the bundle store: each bundle's files in the state bucket under their digest, and back |
+| `calls.go` | `cloudflare.workers-workers`, the connector of a call between Workers: a service binding and a signed token with the edge's key |
+| `r2.go` | the `cloudflare.r2` platform, `cloudflare.workers-r2`, the connector of a bucket edge, `buckets-never-public`, and `PreDestroy`, which empties a member's buckets |
 | `policy.go` | `domain-on-cloudflare` and `nothing-public-unless-exposed` |
 
 Every command reads the token from `CLOUDFLARE_API_TOKEN` and the state's
@@ -164,6 +167,57 @@ The bundle store keeps a bundle's files in `superschematic-state` under
 SHA-256 and mode as metadata and a marker written last, and fetches them
 back, checked, for a plan, a `--bundle` rollback or a `--no-build` deploy.
 
+## Calls between Workers
+
+`cloudflare.workers-workers` realizes an http edge from a Worker to a
+Worker (section 18.10). It returns the edge's key, the generic
+connector's `tls:index/privateKey:PrivateKey` node
+`<caller>.calls.<callee>.key` (D63), whose type the core registers, and
+derives:
+
+```json
+{
+  "url": "https://shop-pricing",
+  "binding": { "name": "SHOP_PRICING_SERVICE", "worker": { "$output": { "resource": "shop-pricing.worker", "name": "name" } } },
+  "credential": {
+    "source": "signed-token", "issuer": "shop-storefront", "audience": "shop-pricing",
+    "key": { "$output": { "resource": "shop-storefront.calls.shop-pricing.key", "name": "privateKeyPemPkcs8" } }
+  }
+}
+```
+
+The platform writes the `service` binding the value names, and the key as
+a `secret_text` binding. The callee's callers field gets the caller as an
+issuer with the key's `publicKeyPem`. The caller's `worker` node depends
+on the callee's, so a destroy removes the caller first, and the waves
+roll the callee out first. A call between two APIs one server serves
+derives `{"url": "https://<server>"}` alone and stays in process.
+
+## Buckets on R2
+
+`cloudflare.r2` lowers a bucket to `<bucket>.bucket`, an
+`r2Bucket` named `<stack>-<bucket>` with a suffix per parameter, and with
+`deleteAfterDays` to `<bucket>.lifecycle`, an `r2BucketLifecycle` whose
+rule deletes each object that many days after it was written.
+
+| Setting | Type | |
+| --- | --- | --- |
+| `locationHint` | `wnam`, `enam`, `weur`, `eeur`, `apac`, `oc` | the bucket's `location` |
+| `storageClass` | `Standard`, `InfrequentAccess` | the class of new objects |
+| `deleteAfterDays` | integer, at least 1 | the lifecycle rule |
+
+`cloudflare.workers-r2` realizes a bucket edge from a Worker: it mints
+`<caller>.r2.<bucket>.token`, an `accountToken` whose one policy allows
+Workers R2 Storage Bucket Item Write (`R2ObjectsWriteGroup`, the id
+Cloudflare publishes, which bootstrap checks against the account's list)
+on `com.cloudflare.edge.r2.bucket.<account>_default_<bucket>`, and derives
+`{name, binding, r2: {account, accessKeyId, token}}`, the bucket's name,
+the `r2_bucket` binding's name, and the token's `id` and `value`, the
+value a `secret_text` binding. `buckets-never-public` refuses an
+`r2ManagedDomain` or an `r2CustomDomain` on a Bucket service's bucket.
+The target's `PreDestroy` empties each bucket of a member of a
+parameterized environment through `Cloud`'s S3 calls before its destroy.
+
 ## Linking it
 
 A distribution links the extension beside its target and the pulumi
@@ -186,9 +240,11 @@ cli.New(cli.Config{Name: "superschematic"},
 
 `schemas/pulumi-cloudflare.json` pins pulumi-cloudflare 6.22.0: the
 digest of each upstream file and the types the DNS platform and the
-target emit: the DNS record, the account token of bootstrap's graph, and
-a Worker's `worker`, `workerVersion`, `workersDeployment` and
-`workersCustomDomain`.
+target emit: the DNS record, the account token of bootstrap's graph and
+of a bucket edge, a Worker's `worker`, `workerVersion`,
+`workersDeployment` and `workersCustomDomain`, and a bucket's `r2Bucket`
+and `r2BucketLifecycle`. A call's key node is the core's `tls` type,
+which the generic connector pins.
 `schemas/` holds one file per type, with its Terraform name and renames
 (section 6.4), and the DNS platform and the target register each as the
 JSON Schema of its type's properties, so resolution checks every node
@@ -209,10 +265,14 @@ a pin at another version.
 
 `go test ./...` resolves the `stack/stacktest` shop stack with its domains
 on Cloudflare, DNS-only in Staging and Preview and proxied in Production,
-the Workers fixture `workers-stack` in Staging, Production and Preview, and
-acme-shop's `storefront-stack`, against the golden files under
-`testdata/golden/stack`, each node checked against its pinned type; deploys
-the storefront with the bundle store over the fake `Cloud`; and checks the
+the Workers fixture `workers-stack` and the calls fixture `calls-stack`, a
+storefront Worker calling an internal pricing Worker and listing a bucket,
+in Staging, Production and Preview, and acme-shop's `storefront-stack`,
+against the golden files under `testdata/golden/stack`, each node checked
+against its pinned type; deploys the storefront with the bundle store over
+the fake `Cloud`, and a member of `calls-stack`'s Preview, whose destroy
+empties its bucket first; holds the HTTP runtime's workerd `calls`
+fixture to `calls-stack`'s Staging bindings; and checks the
 bootstrap graph (`testdata/golden/bootstrap`) and a cloudflare
 environment's workflow (`testdata/golden/ci`, through actionlint when it is
 installed). Bootstrap, the stores and the CI identity run against a fake

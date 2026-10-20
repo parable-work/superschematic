@@ -6710,6 +6710,48 @@ KiB, `superscalar_wasm_bg.wasm` 2.1 MiB) and runs it under the runtime's
 pinned workerd, where a tester Worker puts two teas in a cart through a
 service binding. No call has reached Cloudflare.
 
+### D64, amended: a binding names its callee by the callee's node, a call within one Worker stays in process, and a bucket's token names its permission group by the id Cloudflare publishes
+
+Building the connector of calls between Workers and the R2 platform met
+questions section 18 left open: how a destroy removes a callee that
+another Worker binds, which Cloudflare refuses while the binding stands;
+how a server on Workers calls an API it serves itself with no loopback;
+how a token minted in the graph names a permission group when only
+bootstrap lists the account's groups; what a bucket's jurisdiction
+needs; and how a member's bucket is emptied when the provider has no
+`forceDestroy` for R2.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The connector `cloudflare.workers-workers` derives the binding's `worker` as the output `name` of the callee's `worker` node, and the caller's `worker` node depends on each Worker its service bindings name. The key is the generic connector's `tls` node, whose type the core registers; the `stack` package exports its algorithm, outputs, lifetime and ID, and the extension pins no `tls` type. | The callee's name as a string, which leaves the graph no edge, so a destroy could delete the callee before the caller, and Cloudflare refuses that while a binding names it. Deleting with `force`, which deletes the bindings that name the Worker with it. A `tls` pin in the extension beside the core's, two pins of one provider (D63). |
+| A call between two APIs one server serves derives the server's own address alone, with no binding and no credential, and `fetch.ts` builds that client with a fetch that hands each request to the server's own app, which the build sets once every router is mounted. | A service binding of the Worker to itself, a second invocation and a subrequest for a call that needs neither. Refusing the call on Workers, which the other targets serve on loopback. |
+| The bucket edge's token names Workers R2 Storage Bucket Item Write by the id Cloudflare publishes, the same in every account (`R2ObjectsWriteGroup`). Bootstrap, which lists the account's groups, refuses an environment with a bucket edge when the account does not list that id under that name. | Listing the groups when resolving, a call resolution never makes. A value bootstrap records beside `accountId`, a constant in every environment's values. Granting the deployer's account-wide R2 permission, which reaches every bucket. |
+| A bucket on R2 takes `locationHint`, `storageClass` and `deleteAfterDays`, and no `jurisdiction`. | A jurisdiction, whose bucket is reached at `<account>.<jurisdiction>.r2.cloudflarestorage.com`: the R2 credential would need a member for it in three runtimes and the parity vectors, for a setting no example needs. A jurisdiction without that member, whose signed URLs would name the wrong host. |
+| `TargetSpec.PreDestroy` lists and deletes every object of each bucket of a member of a parameterized environment, through `Cloud`'s S3 calls with the run's token, before the provisioner destroys the member; a bucket that is gone is empty. A plain environment's bucket keeps its objects, and its destroy fails on one that holds some, as gcp's does. | Emptying every environment's buckets, which deletes what a lasting environment kept. A provider option, which `r2Bucket` does not have. |
+| A bucket name R2 refuses, outside 3 to 63 lowercase letters, digits and hyphens, or under a parameter 63 before its value, and the name of the state bucket, are refused as unrealizable. | Leaving them to the deploy, which would fail after the build, or, for the state bucket, take it over. |
+
+Status: built, proven offline. `extensions/cloudflare`'s calls fixture,
+`calls-stack`, resolves a storefront Worker calling an internal pricing
+Worker and listing a bucket in Staging, Production and Preview against
+golden files, each node checked against its pin; the tests read the
+key, the endpoint, the bindings, the callers field, the dependencies and
+the waves, a call in process, the bucket, its lifecycle and its token,
+the refusals, Dev on the storage emulator, `buckets-never-public`,
+bootstrap's check of the permission group, and `PreDestroy` over the fake
+`Cloud` and through `stack.Destroy` after a deploy of a Preview member.
+`extensions/pulumi` renders the fixture's Preview. servergen writes the
+in-process client into `fetch.ts`. The HTTP runtime's workerd harness
+runs the fixture's two Workers with the bindings its Staging gives them,
+which the extension's tests hold to the golden file: the storefront's call
+through the service binding with a token signed by the edge's key is
+accepted, one with no credential and one signed by another key are
+refused 401, a call in process answers, and an object goes into an R2
+stand-in and gets a signed PUT URL. No call has reached Cloudflare. A live
+run must check that a destroy removes the caller before the callee, that
+the deployer may mint the bucket edge's token and that the token reaches
+the bucket's objects and nothing else, and a presigned PUT and GET
+against R2.
+
 ## D65. A Rust API runs jobs and workers, its workers claim queues through a descriptor its types carry, and each output root builds against a mirror of its implementations
 
 D57 gave a Rust API a server and left out its jobs and workers: the

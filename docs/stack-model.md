@@ -4534,7 +4534,7 @@ declare module "@superschematic/stack" {
       database: { locationHint?: "wnam" | "enam" | "weur" | "eeur" | "apac" | "oc"; jurisdiction?: "eu" | "fedramp" };
       job: { cpuMs?: number; logs?: boolean };
       site: {};
-      bucket: { locationHint?: string; jurisdiction?: string; storageClass?: "Standard" | "InfrequentAccess"; deleteAfterDays?: number };
+      bucket: { locationHint?: "wnam" | "enam" | "weur" | "eeur" | "apac" | "oc"; storageClass?: "Standard" | "InfrequentAccess"; deleteAfterDays?: number };
     };
   }
 }
@@ -4551,10 +4551,10 @@ There is no `worker` key: resolution refuses the kind on this target.
 | database | A `d1Database` per hosted DB schema, `<stack>-<db>`, with a suffix under a parameter, and `sqlite` dialect. `locationHint` and `jurisdiction` become `primaryLocationHint` and `jurisdiction`. |
 | sql edge | The value is `d1: { binding: "<FIELD>", database: <uuid output> }`. The platform writes `{type: "d1", name: <binding>, id: <database>}`, and the binding is the grant. |
 | migration | The runner on the deploying machine, against `d1://<accountId>/<uuid>`, with the run's token (section 18.6). |
-| http edge | A service binding `{type: "service", name: <binding>, service: <callee's Worker>}`, and D37's signed token with the edge's key. The value is `{url: "https://<callee's Worker>", binding: {name, worker}, credential: {source: signed-token, issuer, audience, key}}`, and the callee's callers field gets the edge's issuer. |
+| http edge | A service binding `{type: "service", name: <binding>, service: <callee's Worker>}`, and D37's signed token with the edge's key, the generic connector's `tls:index/privateKey:PrivateKey` node `<caller>.calls.<callee>.key` (D63), in infrastructure. The value is `{url: "https://<callee's Worker>", binding: {name, worker}, credential: {source: signed-token, issuer, audience, key}}`: the binding's name is the derived field's, its worker the output `name` of the callee's `worker` node, the issuer the caller's deployable, the audience the callee's, and the key the node's `privateKeyPemPkcs8`, a secret member. The callee's callers field gets the edge's issuer: the caller, the node's `publicKeyPem`, EdDSA, at most 300 seconds. A call between two APIs one server serves derives the server's own address alone (section 18.10). |
 | internal server | No workers.dev, no custom domain and no route: only a service binding reaches it. |
-| bucket | An `r2Bucket`, `<stack>-<bucket>`, with a suffix under a parameter. `deleteAfterDays` becomes an `r2BucketLifecycle`. |
-| bucket edge | An `r2_bucket` binding named after the field, and an `accountToken` scoped to the bucket's objects. The value is `{name, binding, r2: {account, accessKeyId: <token id>, token: <token value, secret>}}`. |
+| bucket | An `r2Bucket` (`<bucket>.bucket`, in infrastructure), `<stack>-<bucket>`, with a suffix under a parameter, its `location` the settings' `locationHint` and its `storageClass` theirs. `deleteAfterDays` becomes an `r2BucketLifecycle` (`<bucket>.lifecycle`) whose one rule deletes each object that many days after it was written. Its address is the node's output `name`. A name R2 refuses, outside 3 to 63 lowercase letters, digits and hyphens, and the state bucket's, are refused as unrealizable. |
+| bucket edge | An `r2_bucket` binding named after the field, and an `accountToken` (`<caller>.r2.<bucket>.token`, in infrastructure), `<stack>-<caller>-<bucket>` with a suffix under a parameter, whose one policy allows Workers R2 Storage Bucket Item Write on `com.cloudflare.edge.r2.bucket.<account>_default_<bucket>`: the bucket's objects alone. The value is `{name, binding, r2: {account, accessKeyId: <token id>, token: <token value, secret>}}`. |
 | site | A Worker per site, whose version holds the site's files as `assets.directory` `artifacts/<site>/{site-digest}`, a fixed script module, an `assets` binding, and `SITE_CONFIG`, a `plain_text` binding composed from the site's bindings. |
 | site edge | The server's public address goes in the site's config, and the site's origin goes in the server's CORS field (section 8.10). |
 | job | A Worker per job, whose version runs the job's bundle, `scheduled.ts`, under a `workersCronTrigger` on the job's schedule in UTC. A job with no schedule has a Worker and no trigger. |
@@ -4564,9 +4564,13 @@ There is no `worker` key: resolution refuses the kind on this target.
 
 A Worker reaches a callee through its binding, exposed or not, so no
 caller waits for the exposure step. A call between two APIs that one
-server serves stays in process. The `worker` node is in infrastructure,
-so a callee exists before any caller's version binds to it, and the waves
-(section 5.3) put each callee's version first.
+server serves stays in process: `fetch.ts` hands it to the server's own
+app. The `worker` node is in infrastructure, so a callee exists before
+any caller's version binds to it, and the waves (section 5.3) put each
+callee's version first. The caller's `worker` node depends on each
+Worker its service bindings name, since Cloudflare refuses to delete a
+Worker another Worker's binding names: a destroy removes the caller,
+with its bindings, first.
 
 ### 18.3 State, bootstrap and CI
 
@@ -4922,8 +4926,30 @@ has no identity to sign with. D54 refused credentials in the field only
 because gcp's workload identity makes them unnecessary. The token member
 is flagged secret, so it reaches the Worker as a `secret_text` binding.
 `buckets-never-public` refuses an `r2ManagedDomain` or an `r2CustomDomain`
-on a Bucket service's bucket. A browser's PUT to a signed URL needs the
+on a Bucket service's bucket, whether it names the bucket by the node's
+output or by its name. A browser's PUT to a signed URL needs the
 bucket's CORS; that gap is shared with gcp and lands for both later.
+
+The `cloudflare.r2` platform (D64, amended):
+- **Settings** are `locationHint`, the region R2 places the bucket in
+  when it creates it, `storageClass`, `Standard` or `InfrequentAccess`
+  for new objects, and `deleteAfterDays`, as gcp's. There is no
+  `jurisdiction`: a jurisdiction's bucket is reached at
+  `<account>.<jurisdiction>.r2.cloudflarestorage.com`, which the R2
+  credential does not name. There is no `versioning`, which R2 lacks.
+- **The token's permission group** is Workers R2 Storage Bucket Item
+  Write, `2efd5506f9c8494dacb1fa10a3e7d5b6`, the id Cloudflare publishes
+  for every account. Resolution calls nothing, so the connector names the
+  id; bootstrap, which lists the account's groups, refuses an
+  environment with a bucket edge when the account does not list that id
+  under that name. The deployer creates the token with its Account API
+  Tokens Write.
+- **A destroy.** The provider deletes only an empty bucket. The target's
+  `PreDestroy` lists and deletes every object of each of a parameterized
+  member's own buckets through R2's S3 API with the run's token before
+  the provisioner destroys the member; a bucket that is gone is empty.
+  Any other environment's bucket keeps its objects, and its destroy
+  fails on one that holds some, as gcp's does.
 
 ### 18.8 Sites on Workers static assets
 
@@ -4981,6 +5007,19 @@ in Pulumi's state, encrypted with the passphrase, and never in the
 program. This settles section 9.9's Workers question: callers sign
 key-pair tokens, and no runtime reads `ctx.props`.
 
+The connector is `cloudflare.workers-workers`, between two Workers. The
+core registers the key node's type with the generic connector, so the
+extension pins no `tls` type, and a distribution pins the provider for
+the provisioner as it does for the generic connector
+(`stack.GenericKeyProviderVersion`). Each edge has its own key, which two
+edges from one caller to two APIs of one callee share, as the generic
+connector's do. `fetch.ts` builds each client over the binding its
+endpoint names (`serviceFetch`) with the credential's token source
+(`serviceCredentialFor`). A call to an API the server serves itself has
+no binding to name: its endpoint is the server's own address with no
+credential, and `fetch.ts` hands each request to the app it has built,
+as a loopback call does on the other targets.
+
 ### 18.11 DNS and exposure
 
 Exposure is a `workersCustomDomain` for `<name>.<domain>`, in the exposure
@@ -5001,8 +5040,10 @@ The pin grows by `worker`, `workerVersion`, `workersDeployment`,
 `workersCustomDomain`, `workersCronTrigger`, `d1Database`, `r2Bucket`,
 `r2BucketLifecycle` and `accountToken`, and later `hyperdriveConfig`,
 written by `go run ./internal/tools/providerschemas` in
-`extensions/cloudflare`. `accountToken` is pinned, for bootstrap's graph;
-each platform pins its own types as it comes. pulumi-cloudflare's bridge
+`extensions/cloudflare`. `accountToken` is pinned, for bootstrap's graph
+and the bucket edges' tokens; each platform pins its own types as it
+comes, and the R2 platform has pinned `r2Bucket` and `r2BucketLifecycle`.
+pulumi-cloudflare's bridge
 metadata lists a single nested attribute's list fields with no element,
 which `pintool` reads, so the token's `condition.requestIp.ins` pins as
 Terraform's `in`. The `tls` provider's pin comes with the generic
@@ -5030,7 +5071,10 @@ runtime tests run fixture bundles under the `workerd` binary.
   not exposed, or for no deployable, a Worker with workers.dev on, a
   `workersCustomDomain` or a `workersRoute`; and all three for a job's
   Worker. A site is always exposed.
-- **`buckets-never-public`** is in section 18.7.
+- **`buckets-never-public`** refuses an r2.dev managed domain
+  (`r2ManagedDomain`) or a custom domain (`r2CustomDomain`) on a Bucket
+  service's bucket, for any deployable: a bucket is never exposed
+  (section 18.7).
 - **`domain-on-cloudflare`** is in section 18.11.
 
 ### 18.15 Not built
@@ -5043,11 +5087,15 @@ runtime tests run fixture bundles under the `workerd` binary.
 - Rate limits shared across isolates; Workers' `ratelimit` binding is a
   candidate store.
 - `immutable` caching for a site's hashed files.
+- A bucket under a jurisdiction, whose S3 host the R2 credential would
+  need to name, and a bucket's CORS (section 18.7).
 
 Built so far: the target's values, state, secrets, bootstrap and CI
 identity, and the Workers platform for TypeScript servers, its bundle
-store in R2, `fetch.ts` and `bundle.ts`, and the CI's bundle check, all
-proven offline (D64, amended). No Worker has deployed.
+store in R2, `fetch.ts` and `bundle.ts`, and the CI's bundle check; calls
+between Workers through service bindings, and buckets on R2 with their
+tokens, their policy and the emptying of a member's buckets before its
+destroy; all proven offline (D64, amended). No Worker has deployed.
 
 Milestone 7's second target is done when acme-shop's storefront has run
 live on Workers (workers.dev, then a domain, through the SDK, with a
