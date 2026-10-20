@@ -6,12 +6,14 @@
 //	superschematic-migrate status --service NAME [--model] [--database-url URL]
 //	superschematic-migrate adopt --model model.json [--database-url URL]
 //	superschematic-migrate job --job job.json|gs://bucket/job.json
+//	superschematic-migrate queue --queue queue.json [--database-url URL]
 //	superschematic-migrate version
 //
 // A d1:// database URL reads the API token from CLOUDFLARE_API_TOKEN. A job
 // document runs a phase of several plans and gives the servers that
 // connect their privileges, on Cloud SQL through the Cloud SQL Go
-// connector.
+// connector. A queue document lists, retries or drops a queue's dead
+// messages on Postgres.
 // Exit codes: 0 done, 1 refused or failed, 2 usage.
 package main
 
@@ -46,6 +48,7 @@ const usage = `usage:
   superschematic-migrate status --service NAME [--model] [--database-url URL]
   superschematic-migrate adopt --model model.json [--database-url URL]
   superschematic-migrate job --job job.json|gs://bucket/job.json
+  superschematic-migrate queue --queue queue.json [--database-url URL]
   superschematic-migrate version
 
 --database-url defaults to $DATABASE_URL. A postgres:// or postgresql://
@@ -60,6 +63,10 @@ databases are on one Cloud SQL instance, reached through the Cloud SQL Go
 connector with IAM database authentication, or each at its URL. A gs://
 document is read with application default credentials, or from
 $STORAGE_EMULATOR_HOST when it is set.
+
+queue runs a queue document, which superschematic stack queue writes: it
+lists a queue's dead messages, makes them ready again or deletes them, on
+a Postgres database, and prints what it did as JSON.
 `
 
 func main() {
@@ -104,6 +111,8 @@ func runWith(ctx context.Context, args []string, o options) int {
 		err = adopt(ctx, args[1:], o)
 	case "job":
 		err = job(ctx, args[1:], o)
+	case "queue":
+		err = queue(ctx, args[1:], o)
 	case "help", "-h", "-help", "--help":
 		_, _ = fmt.Fprint(o.stdout, usage)
 		return exitOK

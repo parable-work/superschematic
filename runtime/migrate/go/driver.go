@@ -48,9 +48,11 @@ type TxOptions struct {
 }
 
 // Conn runs statements on a driver's connection. Arguments are strings and
-// int64s. Scan destinations are *string and *int64, and the runner's
-// queries return no NULL. A statement with no arguments may hold several
-// statements, as a plan's dollar-quoted function body does.
+// int64s, and, on Postgres, a []string a statement takes as a text array (a
+// queue document's IDs, RunQueue). Scan destinations are *string and
+// *int64, and the runner's queries return no NULL. A statement with no
+// arguments may hold several statements, as a plan's dollar-quoted function
+// body does.
 type Conn interface {
 	// Exec runs a statement.
 	Exec(ctx context.Context, sql string, args ...any) error

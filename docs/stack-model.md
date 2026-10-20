@@ -2899,13 +2899,34 @@ export abstract class FulfilOrders {}
   or role: `run.googleapis.com` is on for the Cloud Run types, `deployer`'s
   `roles/run.admin` manages worker pools, and `planner`'s `roles/viewer`
   reads them.
+- **Dead messages.** A dead message stays in the table, with its last
+  error, for an operator: `superschematic stack queue dead|retry|drop
+  <environment> <db>.<Queue>` (section 11.1) lists the dead messages,
+  the oldest death first up to `--limit`, with their total, each with its
+  ID, attempts, last error, time of death (its `updated_at`, which
+  nothing changes once it is dead) and columns; `retry` makes the IDs
+  named, or every dead message with `--all`, ready, due now, with no
+  attempts and no claim, its last error kept; and `drop` deletes them,
+  `--all` taking `--yes`. A retry or a drop that names a message that is
+  not dead changes none and says what each such ID is. The statements are
+  `sqlutil.PostgresQueueOperatorStatements`, beside the claims', each
+  taking IDs as one text-array parameter. The compiler holds no driver
+  (D27), so the command writes them into a queue document
+  (`internal/queueops`) that the migration runner runs,
+  `superschematic-migrate queue`, in one transaction, and prints its
+  result as JSON. On the local target the runner reaches the database at
+  the URL the environment resolves, on the Postgres container `stack dev`
+  runs; the command refuses a queue on another dialect, and an
+  environment on any other target, whose databases it does not reach yet.
 
 Not built:
 
 - A `POINT` or `INTERVAL` column in a TypeScript queue's message.
 - Claims on SQLite and D1, whose write transaction would claim.
-- Removing `done` messages, which stay in the table, and an operator's
-  command to read and retry dead ones.
+- Removing `done` messages, which stay in the table.
+- `stack queue` on a cloud environment: on gcp, the queue document run as
+  an execution of the migration job, which reaches Cloud SQL, with its
+  result read back from Cloud Logging as a failed migration's error is.
 - A backoff that grows with each attempt.
 
 The engine's work-queue behaviors (D16) stay the engine's. A stack does
@@ -3705,10 +3726,12 @@ request adds an edge and grants `run.invoker`".
 ### 11.1 Commands
 
 The core adds a `stack` command group: `init`, `bootstrap`, `secrets set`,
-`dev`, `plan`, `build`, `deploy`, `destroy`, `outputs` and `run`. Targets
-and provisioners plug into it; they add no commands of their own. `stack
-dev` runs a local environment (section 8.3), and `stack run` runs a job
-once on demand, locally or in the cloud (section 8.7).
+`dev`, `plan`, `build`, `deploy`, `destroy`, `outputs`, `run` and `queue`.
+Targets and provisioners plug into it; they add no commands of their own.
+`stack dev` runs a local environment (section 8.3), `stack run` runs a job
+once on demand, locally or in the cloud (section 8.7), and `stack queue`
+lists, retries and drops a queue's dead messages, locally for now (section
+8.8), in `cli/stack_queue.go`.
 
 `stack init [<services-root>]` starts a stack in a tree that already has
 API services (D59), in `cli/stack_init.go` over `internal/stackinit`. It

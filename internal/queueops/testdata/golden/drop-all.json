@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "service": "fixture-queue-db",
+  "queue": "OrderPlaced",
+  "operation": "drop",
+  "all": true,
+  "statements": {
+    "dead": "SELECT q.id::text, q.attempts::bigint, COALESCE(q.last_error, ''),\n  to_char(q.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"'),\n  (to_jsonb(q) - ARRAY['id', 'state', 'attempts', 'due_at', 'claim_expires_at', 'claim_token', 'last_error', 'created_at', 'updated_at']::text[])::text,\n  count(*) OVER ()\nFROM order_placed_queue AS q\nWHERE q.state = 'dead'\nORDER BY q.updated_at, q.id\nLIMIT $1",
+    "states": "SELECT q.id::text, q.state FROM order_placed_queue AS q WHERE q.id = ANY($1::text[]::uuid[])",
+    "retry": "UPDATE order_placed_queue SET state = 'ready', attempts = 0, due_at = now(), claim_token = NULL, claim_expires_at = NULL, updated_at = now()\nWHERE state = 'dead' AND id = ANY($1::text[]::uuid[])\nRETURNING id::text",
+    "retryAll": "UPDATE order_placed_queue SET state = 'ready', attempts = 0, due_at = now(), claim_token = NULL, claim_expires_at = NULL, updated_at = now()\nWHERE state = 'dead'\nRETURNING id::text",
+    "drop": "DELETE FROM order_placed_queue\nWHERE state = 'dead' AND id = ANY($1::text[]::uuid[])\nRETURNING id::text",
+    "dropAll": "DELETE FROM order_placed_queue\nWHERE state = 'dead'\nRETURNING id::text"
+  }
+}
