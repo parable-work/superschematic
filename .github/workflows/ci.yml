@@ -1162,10 +1162,9 @@ jobs:
       - name: Install Rust toolchain
         # The three archives, the addon and the Rust servers are built with
         # this one toolchain (tools.env says why); the Rust entrypoint test
-        # runs clippy and rustfmt on the servers it builds, and the version
-        # graph's TypeScript package builds for wasm32.
+        # runs clippy and rustfmt on the servers it builds.
         run: |
-          rustup toolchain install "$RUST_VERSION" --profile minimal --target wasm32-unknown-unknown --component clippy --component rustfmt
+          rustup toolchain install "$RUST_VERSION" --profile minimal --component clippy --component rustfmt
           rustup default "$RUST_VERSION"
 
       - name: Cache Rust dependencies
@@ -1181,14 +1180,12 @@ jobs:
           scripts/versiongraph-archive.sh
           scripts/engine-archive.sh
 
-      - name: Build the schema and http runtimes, the version graph's package, and the engine's package and addon
-        # The engine's package links the runtimes' dist/ into its
-        # node_modules; the addon is the one a release ships, without the
-        # test addon's bridge.
+      - name: Build the http runtime, and the engine's package and addon
+        # The engine's package links the http runtime's dist/ into its
+        # node_modules; the addon is the core's as a release ships it
+        # (runtime/engine/rust/addon), without the test addon's bridge.
         run: |
-          (cd runtime/schema/typescript && bun install --frozen-lockfile && bun run build)
           (cd runtime/http/typescript && bun install --frozen-lockfile && bun run build)
-          (cd runtime/versiongraph/typescript && bun install --frozen-lockfile && bun run build)
           (cd runtime/engine/typescript && bun install --frozen-lockfile && bun run build && ../../../scripts/engine-napi.sh)
 
       - name: Start Postgres

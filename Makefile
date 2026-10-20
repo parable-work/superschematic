@@ -306,8 +306,7 @@ engine-go: engine-archive
 # database a failure rather than a skip.
 ENGINE_SERVER_TESTS := ^(TestEngineEntrypointServes|TestTheEngineReachesCloudSQLThroughASocket|TestEngineProjectArchiveServes|TestRustEngineEntrypointServes|TestTypeScriptEngineEntrypointServes|TestEngineServersAnswerOneScriptAlike)$$
 engine-servers: versiongraph engine-archive
-	cd runtime/schema/typescript && bun install --frozen-lockfile && bun run build
-	cd runtime/versiongraph/typescript && bun install --frozen-lockfile && bun run build
+	cd runtime/http/typescript && bun install --frozen-lockfile && bun run build
 	cd runtime/engine/typescript && bun install --frozen-lockfile && bun run build
 	scripts/engine-napi.sh
 	go test -count=1 -timeout 80m -run '$(ENGINE_SERVER_TESTS)' ./internal/generator/servergen/
