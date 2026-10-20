@@ -313,7 +313,10 @@ async fn sign_up(cx: &Cx, Form(form): Form<SignupInputForm>) -> topcoat::Result<
     };
     Ok(view! {
         (StatusCode::UNPROCESSABLE_ENTITY)
-        <form method="post">signup_input_fields(form: form, errors: errors)</form>
+        <form method="post">
+            signup_input_fields(form: form, errors: errors)
+            <button type="submit">"Sign up"</button>
+        </form>
     })
 }
 ```
@@ -374,7 +377,10 @@ async fn cancel(cx: &Cx, Form(form): Form<OrderCancelOrderArgsForm>) -> topcoat:
     };
     Ok(view! {
         (refused.status)
-        <form method="post">order_cancel_order_args_fields(form: form, errors: refused.errors)</form>
+        <form method="post">
+            order_cancel_order_args_fields(form: form, errors: refused.errors)
+            <button type="submit">"Cancel the order"</button>
+        </form>
     })
 }
 
@@ -493,13 +499,31 @@ A form whose input holds a list as rows has submit buttons named
 `_action`: `add:lines` after a list's rows, unless it holds its limit
 (its `listMax`, or `MAX_ROWS`), and `remove:lines[1]` in each row,
 unless the list holds no more than its `listMin`. They carry
-`formnovalidate`, so a row can be added before the others are valid, and
-the component renders a hidden submit button ahead of them, which Enter
-presses. The form holds the button pressed in `row_action`.
-`apply_action()`, on the input form and on an argument form that embeds
-it, applies it, numbering the rows after a removed one again with their
-values as sent, and is true when a row button submitted the form: the
-page renders the form again, 200, without calling the operation.
+`formnovalidate`, so a row can be added before the others are valid. A
+row's own list is named under the row: a room's notes add with
+`add:rooms[0].notes` and remove with `remove:rooms[0].notes[1]`. The form
+holds the button pressed in `row_action`. `apply_action()`, on the input
+form and on an argument form that embeds it, applies it, numbering the
+rows after a removed one again with their values as sent, and is true
+when a row button submitted the form: the page renders the form again,
+200, without calling the operation.
+
+Enter in a text field presses a form's default button, its first submit
+control in tree order, which must submit the form as such. So the
+component renders a hidden submit button,
+`<button type="submit" class="ss-submit" hidden>`, ahead of every row
+button, and Enter submits the form with no `_action`. A page puts its own
+submit button after the component, inside the one `<form>` around it: a
+form nests no other form, which the HTML parser would drop, and no
+control names its form with `form=`, so tree order is the whole rule. The
+extension's tests hold every page they render to it without a browser:
+`testdata/enter.rs` checks that each form's first submit control has no
+`name`, `formaction`, `formmethod`, `formenctype`, `formtarget`,
+`formnovalidate` or `disabled`, and `TestRowButtonsFollowTheDefaultButton`
+reads every golden's components for the hidden button's place without
+cargo. An app's own tests, with `http` among their dev-dependencies, can
+hold its pages to the rule too: `#[path = ".../enter.rs"] mod enter;`,
+then `enter::check_page(uri, &headers, &body)` on each answer.
 
 ```rust
 #[page(POST "/book")]
@@ -518,7 +542,10 @@ async fn book(cx: &Cx, Form(form): Form<BookingInputForm>) -> topcoat::Result<im
     };
     Ok(view! {
         (status)
-        <form method="post">booking_input_fields(form: form, errors: errors)</form>
+        <form method="post">
+            booking_input_fields(form: form, errors: errors)
+            <button type="submit">"Book"</button>
+        </form>
     })
 }
 ```

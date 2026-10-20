@@ -198,7 +198,14 @@ or renders the form again with each error at its control:
 A page answers with one view, so the row action and a refusal set the
 status, and both render the same `place_order_page` component. The
 buttons skip the browser's checks (`formnovalidate`), so a row can be
-added before the others are valid, and Enter still submits the form.
+added before the others are valid, and a list within a row has buttons
+of its own, named under the row. Enter in a text field presses a form's
+first submit button, so the component renders a hidden one ahead of
+every row button, which submits the form with no `_action`, and the page
+puts its own button after the component, in the one `<form>` around it.
+The extension's tests check every page they render for that order
+without a browser, through `extensions/topcoat/testdata/enter.rs`, which
+an app's tests can include too.
 
 The page answers a refusal with its status, through a `Refusal` of
 `forms`, the status and the errors the form renders again with:

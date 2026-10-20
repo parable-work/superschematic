@@ -988,7 +988,7 @@ impl BookingInputForm {
             return false;
         };
         match key.as_str() {
-            "rooms" => act_on_rows(&mut self.rooms, rest, add, Bounds { min: 1, max: 3 }, RoomRequestForm::new, no_rows),
+            "rooms" => act_on_rows(&mut self.rooms, rest, add, Bounds { min: 1, max: 3 }, RoomRequestForm::new, RoomRequestForm::act),
             "backupCodes" => act_on_rows(&mut self.backup_codes, rest, add, Bounds { min: 0, max: MAX_ROWS }, || None, no_rows),
             _ => false,
         }
@@ -1211,6 +1211,7 @@ pub struct RoomRequestForm {
     pub room_id: Option<String>,
     pub adults: Option<String>,
     pub extras: Vec<String>,
+    pub notes: Vec<Option<String>>,
 }
 
 impl RoomRequestForm {
@@ -1222,6 +1223,7 @@ impl RoomRequestForm {
             room_id: None,
             adults: None,
             extras: Vec::new(),
+            notes: Vec::new(),
         }
     }
 
@@ -1231,6 +1233,7 @@ impl RoomRequestForm {
             room_id: posted.get("roomId").text(),
             adults: posted.get("adults").text(),
             extras: posted.get("extras").values(false),
+            notes: posted.get("notes").rows(2).map(Posted::text).collect(),
         }
     }
 
@@ -1241,6 +1244,14 @@ impl RoomRequestForm {
         put(&mut json, errors, "roomId", &format!("{at}roomId"), text(self.room_id.as_deref()));
         put(&mut json, errors, "adults", &format!("{at}adults"), integer(self.adults.as_deref()));
         put_list(&mut json, "extras", self.extras.iter().map(|value| Value::from(value.as_str())).collect(), false);
+        let rows: Vec<Value> = self
+            .notes
+            .iter()
+            .enumerate()
+            .map(|(index, value)| row(errors, &format!("{at}notes[{index}]"), text(value.as_deref())))
+            .collect();
+        within(errors, &format!("{at}notes"), rows.len(), 2);
+        put_list(&mut json, "notes", rows, false);
         json
     }
 
@@ -1253,8 +1264,21 @@ impl RoomRequestForm {
                 "roomId" => rest.is_empty(),
                 "adults" => rest.is_empty(),
                 "extras" => shows_all(rest),
+                "notes" => shows_row(rest),
                 _ => false,
             },
+            _ => false,
+        }
+    }
+
+    /// Applies a row action at `path`: adds a row to the list there, or
+    /// removes the row there, within the list's bounds. True when it did.
+    fn act(&mut self, path: &[Segment], add: bool) -> bool {
+        let [Segment::Key(key), rest @ ..] = path else {
+            return false;
+        };
+        match key.as_str() {
+            "notes" => act_on_rows(&mut self.notes, rest, add, Bounds { min: 0, max: 2 }, || None, no_rows),
             _ => false,
         }
     }
@@ -1533,6 +1557,33 @@ pub async fn booking_input_fields(
                         <label class="ss-choice"><input type="checkbox" name=(&name) value="wifi" checked=(checked(&row0.extras, "wifi"))>"Wifi"</label>
                         <label class="ss-choice"><input type="checkbox" name=(&name) value="breakfast" checked=(checked(&row0.extras, "breakfast"))>"Breakfast"</label>
                         <label class="ss-choice"><input type="checkbox" name=(&name) value="late_checkout" checked=(checked(&row0.extras, "late_checkout"))>"Late checkout"</label>
+                    </fieldset>
+                    <fieldset class="ss-list" data-field="notes">
+                        let list = format!("rooms[{i0}].notes");
+                        <legend>"Notes"</legend>
+                        for message in errors.of(&list) {
+                            <p class="field-error">(message)</p>
+                        }
+                        #[key(i1)]
+                        for (i1, row1) in row0.notes.iter().enumerate() {
+                            <div class="field ss-row">
+                                let name = format!("rooms[{i0}].notes[{i1}]");
+                                let id = format!("booking-input-rooms-{i0}-notes-{i1}");
+                                let label = format!("Notes {}", i1 + 1);
+                                <label for=(&id)>(&label)</label>
+                                match choices.of(&name, "rooms.notes") {
+                                    Some(options) => choice_select(id: &id, name: &name, required: true, invalid: errors.invalid(&name), options: choice_options(options, row1.as_deref())),
+                                    None => <input id=(&id) name=(&name) type="text" required=(true) value=(row1.clone()) aria-invalid=(errors.invalid(&name))>,
+                                }
+                                <button type="submit" class="ss-remove" name="_action" value=(format!("remove:{name}")) formnovalidate=(true) aria-label=(format!("Remove {label}"))>"Remove"</button>
+                                for message in errors.of(&name) {
+                                    <p class="field-error">(message)</p>
+                                }
+                            </div>
+                        }
+                        if row0.notes.len() < 2 {
+                            <button type="submit" class="ss-add" name="_action" value=(format!("add:{list}")) formnovalidate=(true)>"Add"</button>
+                        }
                     </fieldset>
                     if form.rooms.len() > 1 {
                         <button type="submit" class="ss-remove" name="_action" value=(format!("remove:{row}")) formnovalidate=(true) aria-label=(format!("Remove {label}"))>"Remove"</button>

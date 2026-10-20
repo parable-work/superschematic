@@ -341,8 +341,10 @@ func TestACrateWithoutCallersBuilds(t *testing.T) {
 // valid post books with the input's JSON; a refused field, nested or in a
 // row, renders at its control with the values as sent and the secret
 // blank; row buttons add and remove rows within the list's bounds without
-// calling the operation; and the app's choices render a select. A note's
-// unbounded text is a textarea by its multiline hint. Its AccountKey,
+// calling the operation, a room's notes rows within its row; and the
+// app's choices render a select. A note's unbounded text is a textarea by
+// its multiline hint. Enter in each form presses its default button, the
+// hidden one ahead of every row button (enterHelper). Its AccountKey,
 // whose fields are a secret one and a @uiHidden one, is an empty record
 // that clippy passes with warnings denied.
 func TestFormsServeATopcoatApp(t *testing.T) {
@@ -576,9 +578,9 @@ func TestProceduresKeepTheirRoutesRules(t *testing.T) {
 }
 
 // cargoTestCrate builds service's crates with the Topcoat crate on, adds
-// test as tests/app.rs of the Topcoat crate, with devDeps beside the
-// dev-dependencies every test has, and runs cargo clippy with warnings
-// denied, then cargo test, on it.
+// test as tests/app.rs of the Topcoat crate, beside tests/support/enter.rs
+// (enterHelper), with devDeps beside the dev-dependencies every test has,
+// and runs cargo clippy with warnings denied, then cargo test, on it.
 func cargoTestCrate(t *testing.T, service, test string, devDeps ...string) {
 	t.Helper()
 	var options crateOptions
@@ -590,11 +592,12 @@ func cargoTestCrate(t *testing.T, service, test string, devDeps ...string) {
 
 // crateOptions are what a test of the Topcoat crate adds to its build: the
 // crate's features, which clippy and cargo test turn on, lines of the
-// manifest's [dev-dependencies], files of tests/ beside app.rs, the
-// config's outputs when they are not outputsOf the service's, the
-// service's directory when it is a test's own copy of the fixture, and the
-// dependencies whose Rust types crates its crates build against, each
-// built into the same output root first, as build --with-deps builds them.
+// manifest's [dev-dependencies], files of tests/ beside app.rs and
+// support/enter.rs, by slash path, the config's outputs when they are not
+// outputsOf the service's, the service's directory when it is a test's
+// own copy of the fixture, and the dependencies whose Rust types crates
+// its crates build against, each built into the same output root first,
+// as build --with-deps builds them.
 type crateOptions struct {
 	features        []string
 	devDependencies string
@@ -614,6 +617,12 @@ func outputsOf(service string) map[string]any {
 	}
 	return rustOutputs()
 }
+
+// enterHelper is where every test of a Topcoat crate finds
+// testdata/enter.rs, the HTML implicit-submission rule (D44, amended),
+// under tests/: its app.rs declares `#[path = "support/enter.rs"] mod
+// enter;` and holds every HTML page it reads to the rule.
+const enterHelper = "support/enter.rs"
 
 // cargoTestCrateWith is cargoTestCrate with options.
 func cargoTestCrateWith(t *testing.T, service, test string, options crateOptions) {
@@ -663,8 +672,20 @@ tokio = { version = "1.52.2", features = ["macros", "rt-multi-thread"] }
 	if err := os.WriteFile(filepath.Join(dir, "tests", "app.rs"), []byte(test), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	enter, err := os.ReadFile(filepath.Join("testdata", "enter.rs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{enterHelper: string(enter)}
 	for name, content := range options.files {
-		if err := os.WriteFile(filepath.Join(dir, "tests", name), []byte(content), 0o644); err != nil {
+		files[name] = content
+	}
+	for name, content := range files {
+		path := filepath.Join(dir, "tests", filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -753,6 +774,9 @@ use schemas_fixture_api_topcoat::{operations, PageAuthenticator, RouterBuilderFi
 use topcoat::context::Cx;
 use topcoat::router::{page, to_bytes, Body, Router, RouterBuilderDiscoverExt, StatusCode};
 use topcoat::view::{view, View};
+
+#[path = "support/enter.rs"]
+mod enter;
 
 // The API's own authenticator, for requests to the mounted JSON API.
 struct NoRequests;
@@ -905,9 +929,11 @@ fn app(caller: Option<Principal>) -> Router {
 async fn send(router: &Router, method: &str, uri: &str) -> (StatusCode, String) {
     let request = http::Request::builder().method(method).uri(uri).body(Body::empty()).unwrap();
     let response = router.handle(request).await;
-    let status = response.status();
+    let (status, headers) = (response.status(), response.headers().clone());
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    (status, String::from_utf8(bytes.to_vec()).unwrap())
+    let body = String::from_utf8(bytes.to_vec()).unwrap();
+    enter::check_page(uri, &headers, &body);
+    (status, body)
 }
 
 #[tokio::test]
@@ -1013,6 +1039,9 @@ use topcoat::context::Cx;
 use topcoat::router::{page, to_bytes, Body, Router, StatusCode};
 use topcoat::view::{view, View};
 
+#[path = "support/enter.rs"]
+mod enter;
+
 struct Grids;
 
 fn grid() -> types::GridView {
@@ -1057,8 +1086,10 @@ async fn a_page_calls_an_operation_that_needs_no_caller() {
     let request = http::Request::builder().uri("/grid").body(Body::empty()).unwrap();
     let response = router.handle(request).await;
     assert_eq!(response.status(), StatusCode::OK);
-    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    assert!(String::from_utf8(body.to_vec()).unwrap().contains("<p>a,b</p>"));
+    let headers = response.headers().clone();
+    let body = String::from_utf8(to_bytes(response.into_body(), usize::MAX).await.unwrap().to_vec()).unwrap();
+    enter::check_page("/grid", &headers, &body);
+    assert!(body.contains("<p>a,b</p>"));
 }
 
 #[test]
@@ -1092,6 +1123,9 @@ use topcoat::router::content::Form;
 use topcoat::router::error::see_other;
 use topcoat::router::{header, page, to_bytes, Body, Router, StatusCode};
 use topcoat::view::{view, View};
+
+#[path = "support/enter.rs"]
+mod enter;
 
 const GARDEN: &str = "8d1f6c9e-0000-4000-8000-000000000001";
 const ATTIC: &str = "8d1f6c9e-0000-4000-8000-000000000002";
@@ -1155,7 +1189,7 @@ fn uuid(text: &str) -> types::IdentityUUID {
 
 #[page("/signup")]
 async fn signup_form() -> topcoat::Result<impl View> {
-    Ok(view! { <form method="post">signup_input_fields()</form> })
+    Ok(view! { <form method="post">signup_input_fields()<button type="submit">"Sign up"</button></form> })
 }
 
 #[page(POST "/signup")]
@@ -1169,7 +1203,7 @@ async fn sign_up(cx: &Cx, Form(form): Form<SignupInputForm>) -> topcoat::Result<
     };
     Ok(view! {
         (StatusCode::UNPROCESSABLE_ENTITY)
-        <form method="post">signup_input_fields(form: form, errors: errors)</form>
+        <form method="post">signup_input_fields(form: form, errors: errors)<button type="submit">"Sign up"</button></form>
     })
 }
 
@@ -1272,10 +1306,13 @@ fn app(bookings: Bookings) -> Router {
 }
 
 async fn send_to(router: &Router, request: http::Request<Body>) -> (StatusCode, http::HeaderMap, String) {
+    let uri = request.uri().to_string();
     let response = router.handle(request).await;
     let (status, headers) = (response.status(), response.headers().clone());
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    (status, headers, String::from_utf8(bytes.to_vec()).unwrap())
+    let html = String::from_utf8(bytes.to_vec()).unwrap();
+    enter::check_page(&uri, &headers, &html);
+    (status, headers, html)
 }
 
 async fn send(request: http::Request<Body>) -> (StatusCode, http::HeaderMap, String) {
@@ -1598,7 +1635,7 @@ async fn row_buttons_add_and_remove_rows_within_the_lists_bounds() {
     assert!(!html.contains("aria-invalid"), "a row button renders no errors: {html}");
     assert!(!html.contains("4321"), "{html}");
     // At listMax there is no add button, and adding adds nothing.
-    assert!(!html.contains("add:rooms"), "{html}");
+    assert!(!html.contains(r#"value="add:rooms""#), "{html}");
     let three = booking_with(&[("rooms[2]", ""), ("rooms[2].roomId", BOOKED), ("rooms[2].adults", "3"), ("_action", "add:rooms")]);
     let (status, _, html, calls) = book_with(&three).await;
     assert_eq!((status, calls.len()), (StatusCode::OK, 0), "{html}");
@@ -1865,6 +1902,75 @@ async fn multiline_text_is_a_textarea_whatever_its_bound() {
     assert!(html.contains(r#"name="tags[0]""#), "{html}");
 }
 
+#[tokio::test]
+async fn rows_within_rows_add_and_remove_at_their_names() {
+    // A room's notes are rows within the room's row: adding one keeps the
+    // rooms as sent, calls nothing, and names the note under its room.
+    let (status, _, html, calls) = book_with(&booking_with(&[("_action", "add:rooms[0].notes")])).await;
+    assert_eq!((status, calls.len()), (StatusCode::OK, 0), "{html}");
+    assert!(html.contains(r#"<label for="booking-input-rooms-0-notes-0">Notes 1</label><input id="booking-input-rooms-0-notes-0" name="rooms[0].notes[0]" type="text" required="">"#), "{html}");
+    assert!(html.contains(r#"value="remove:rooms[0].notes[0]" formnovalidate="" aria-label="Remove Notes 1""#), "{html}");
+    assert!(html.contains(r#"value="add:rooms[0].notes" formnovalidate="">Add</button>"#), "{html}");
+    assert!(!html.contains("rooms[1].notes[0]"), "{html}");
+    // The room's own remove button, after its notes, keeps the room's label.
+    assert!(html.contains(r#"value="remove:rooms[0]" formnovalidate="" aria-label="Remove Room 1""#), "{html}");
+    assert!(control(&html, "rooms[1].roomId").contains(&format!(r#"value="{ATTIC}""#)), "{html}");
+
+    // At its listMax of two a room's notes take no more, and its add button
+    // goes; the other room's notes are its own.
+    let two = booking_with(&[("rooms[0].notes[0]", "Quiet"), ("rooms[0].notes[1]", "Late"), ("_action", "add:rooms[0].notes")]);
+    let (status, _, html, _) = book_with(&two).await;
+    assert_eq!(status, StatusCode::OK, "{html}");
+    assert!(!html.contains("rooms[0].notes[2]") && !html.contains("add:rooms[0].notes"), "{html}");
+    assert!(html.contains(r#"value="add:rooms[1].notes""#), "{html}");
+
+    // Removing the first note numbers the second as the first.
+    let removed = booking_with(&[("rooms[0].notes[0]", "Quiet"), ("rooms[0].notes[1]", "Late"), ("_action", "remove:rooms[0].notes[0]")]);
+    let (status, _, html, calls) = book_with(&removed).await;
+    assert_eq!((status, calls.len()), (StatusCode::OK, 0), "{html}");
+    assert!(html.contains(r#"name="rooms[0].notes[0]" type="text" required="" value="Late""#), "{html}");
+    assert!(!html.contains("rooms[0].notes[1]") && !html.contains("Quiet"), "{html}");
+
+    // A booking books with each room's notes, and a blank note is refused at
+    // its row.
+    let (status, _, html, calls) = book_with(&booking_with(&[("rooms[1].notes[0]", "Quiet please")])).await;
+    assert_eq!(status, StatusCode::SEE_OTHER, "{html}");
+    assert_eq!(serde_json::to_value(&calls[0].rooms).unwrap()[1]["notes"], json!(["Quiet please"]));
+    assert!(serde_json::to_value(&calls[0].rooms).unwrap()[0].get("notes").is_none());
+    let (status, _, html, calls) = book_with(&booking_with(&[("rooms[1].notes[0]", "")])).await;
+    assert_eq!((status, calls.len()), (StatusCode::UNPROCESSABLE_ENTITY, 0), "{html}");
+    let note = control(&html, "rooms[1].notes[0]");
+    assert!(note.contains(r#"aria-invalid="true""#) && note.contains(r#"<p class="field-error">"#), "{note}");
+}
+
+/// Enter in a text field presses a form's first submit control, which must
+/// submit the form without an _action: the hidden default ahead of every
+/// row button, on a new booking, after a room and a room's note are
+/// added, on a refused booking with rows, and on the argument forms that
+/// embed a note's tag rows.
+#[tokio::test]
+async fn enter_presses_the_default_button() {
+    const DEFAULT: &str = r#"<button type="submit" class="ss-submit" hidden=""></button>"#;
+    let mut pages = Vec::new();
+    pages.push(("/book", get("/book").await.2));
+    pages.push(("/book add:rooms", book_with(&booking_with(&[("_action", "add:rooms")])).await.2));
+    let notes = booking_with(&[("rooms[0].notes[0]", "Quiet"), ("_action", "add:rooms[1].notes")]);
+    pages.push(("/book add:rooms[1].notes", book_with(&notes).await.2));
+    let (status, _, refused, _) = book_with(&booking_with(&[("guest.name", "A"), ("rooms[0].notes[0]", "")])).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+    pages.push(("/book refused", refused));
+    pages.push(("/annotate", get("/annotate").await.2));
+    let tags = encode(&[("id", ACCOUNT), ("text", "Hi"), ("tags[0]", "a"), ("_action", "add:tags")]);
+    pages.push(("/annotate add:tags", send(post_request("/annotate", &tags)).await.2));
+    pages.push(("/draft add:tags", send(post_request("/draft", &tags)).await.2));
+    for (page, html) in &pages {
+        enter::assert_enter_submits(page, html);
+        let default = html.find(DEFAULT).unwrap_or_else(|| panic!("{page}: no default button in {html}"));
+        let row = html.find(r#"name="_action""#).unwrap_or_else(|| panic!("{page}: no row button in {html}"));
+        assert!(default < row, "{page}: a row button is ahead of the default: {html}");
+    }
+}
+
 #[test]
 fn a_record_whose_fields_are_all_left_out_is_empty() {
     let key = types::AccountKey { key: "sk_123".to_string(), hint: Some("sk_".to_string()) };
@@ -1883,6 +1989,9 @@ use schemas_fixture_views_api_topcoat::views::{
 use serde_json::json;
 use topcoat::router::{page, to_bytes, Body, Router, StatusCode};
 use topcoat::view::{view, View};
+
+#[path = "support/enter.rs"]
+mod enter;
 
 // An order as the API sends it, its hidden field included.
 fn order(reference: &str, status: &str, bill_to: bool) -> OrderViewRecord {
@@ -1986,8 +2095,11 @@ async fn render(uri: &str) -> String {
         .build();
     let response = router.handle(http::Request::builder().uri(uri).body(Body::empty()).unwrap()).await;
     assert_eq!(response.status(), StatusCode::OK);
+    let headers = response.headers().clone();
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    String::from_utf8(body.to_vec()).unwrap()
+    let html = String::from_utf8(body.to_vec()).unwrap();
+    enter::check_page(uri, &headers, &html);
+    html
 }
 
 fn assert_has(html: &str, wants: &[&str]) {
@@ -2155,6 +2267,9 @@ use topcoat::context::Cx;
 use topcoat::router::{header, page, to_bytes, Body, RemoteAddr, Router, RouterBuilderDiscoverExt, StatusCode};
 use topcoat::view::{view, View};
 
+#[path = "support/enter.rs"]
+mod enter;
+
 struct NoRequests;
 
 #[async_trait]
@@ -2276,7 +2391,9 @@ async fn post_as(
     let response = router.handle(request.body(Body::from(body)).unwrap()).await;
     let (status, headers) = (response.status(), response.headers().clone());
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    (status, headers, String::from_utf8(bytes.to_vec()).unwrap())
+    let body = String::from_utf8(bytes.to_vec()).unwrap();
+    enter::check_page(uri, &headers, &body);
+    (status, headers, body)
 }
 
 // The webhook keeps its guard, and the @requireService operation its
@@ -2422,6 +2539,9 @@ use topcoat::context::Cx;
 use topcoat::router::{page, to_bytes, Body, OriginPolicy, Router, RouterBuilderDiscoverExt, StatusCode};
 use topcoat::view::{view, View};
 
+#[path = "support/enter.rs"]
+mod enter;
+
 const CONFIG: &str = r#"{"password": {"argon2": {"memoryKiB": 64, "iterations": 1, "parallelism": 1}}}"#;
 const PASSWORD: &str = "correct horse";
 
@@ -2513,15 +2633,12 @@ async fn send(router: &Router, method: &str, uri: &str, headers: &[(&str, &str)]
     }
     let body = body.map_or_else(Body::empty, |body| Body::from(body.to_string()));
     let response = router.handle(request.body(body).unwrap()).await;
-    let status = response.status();
-    let cookies = response
-        .headers()
-        .get_all("set-cookie")
-        .iter()
-        .map(|value| value.to_str().unwrap().to_string())
-        .collect();
+    let (status, response_headers) = (response.status(), response.headers().clone());
+    let cookies = response_headers.get_all("set-cookie").iter().map(|value| value.to_str().unwrap().to_string()).collect();
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    Reply { status, cookies, body: String::from_utf8(bytes.to_vec()).unwrap() }
+    let body = String::from_utf8(bytes.to_vec()).unwrap();
+    enter::check_page(uri, &response_headers, &body);
+    Reply { status, cookies, body }
 }
 
 // Signs in through the mounted JSON API with a cookie session, and answers

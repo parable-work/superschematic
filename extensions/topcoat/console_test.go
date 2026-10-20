@@ -765,6 +765,9 @@ use topcoat::router::request::parts;
 use topcoat::router::{header, page, to_bytes, Body, Router, RouterBuilderDiscoverExt, StatusCode};
 use topcoat::view::{view, View};
 
+#[path = "support/enter.rs"]
+mod enter;
+
 const ANVIL: &str = "8d1f6c9e-0000-4000-8000-000000000001";
 const BUCKET: &str = "8d1f6c9e-0000-4000-8000-000000000002";
 const CRATE: &str = "8d1f6c9e-0000-4000-8000-000000000003";
@@ -1018,6 +1021,7 @@ async fn app_new_order(cx: &Cx) -> topcoat::Result<impl View> {
     Ok(view! {
         <form method="post">
             order_input_fields(form: OrderInputForm::new(), errors: FormErrors::default(), choices: choices)
+            <button type="submit">"Place the order"</button>
         </form>
     })
 }
@@ -1053,9 +1057,11 @@ async fn send(router: &Router, method: &str, uri: &str, caller: &str, content_ty
         request = request.header(header::CONTENT_TYPE, content_type);
     }
     let response = router.handle(request.body(Body::from(body)).unwrap()).await;
-    let status = response.status();
+    let (status, headers) = (response.status(), response.headers().clone());
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    Answer { status, html: String::from_utf8(bytes.to_vec()).unwrap() }
+    let html = String::from_utf8(bytes.to_vec()).unwrap();
+    enter::check_page(uri, &headers, &html);
+    Answer { status, html }
 }
 
 async fn get(router: &Router, uri: &str, caller: &str) -> Answer {
@@ -1332,7 +1338,9 @@ async fn a_live_list_pages_in_place() {
     request = request.header(header::CONTENT_TYPE, "application/json").header("x-topcoat-identity", identity);
     let response = app.handle(request.body(Body::from(body.to_string())).unwrap()).await;
     assert_eq!(response.status(), StatusCode::OK);
+    let headers = response.headers().clone();
     let html = String::from_utf8(to_bytes(response.into_body(), usize::MAX).await.unwrap().to_vec()).unwrap();
+    enter::check_page("/console/_live/orders", &headers, &html);
     assert_eq!(numbers(&html), ["A-3", "A-4"], "{html}");
     // A refused cursor is the shard's 400 too.
     let refused = shard(&app, "/console/_live/orders", "clerk", serde_json::json!({"args": ["cursor=e30", "/console/orders"]})).await;
@@ -1605,7 +1613,9 @@ async fn a_live_list_goes_back_and_sets_its_size_in_place() {
     request = request.header(header::CONTENT_TYPE, "application/json").header("x-topcoat-identity", identity);
     let response = app.handle(request.body(Body::from(body.to_string())).unwrap()).await;
     assert_eq!(response.status(), StatusCode::OK);
+    let headers = response.headers().clone();
     let html = String::from_utf8(to_bytes(response.into_body(), usize::MAX).await.unwrap().to_vec()).unwrap();
+    enter::check_page("/console/_live/orders", &headers, &html);
     assert_eq!(numbers(&html), ["A-1", "A-2", "A-3", "A-4", "A-5"], "{html}");
     assert!(link(&html, "first").is_none() && link(&html, "prev").is_none(), "{html}");
     assert!(size_form(&html).contains(r#"<option value="5" selected="">5</option>"#), "{html}");
@@ -1685,6 +1695,9 @@ use schemas_fixture_console_api_topcoat::pages::Settings;
 use schemas_fixture_console_api_topcoat::{PageAuthenticator, RouterBuilderFixtureConsoleApiExt};
 use topcoat::context::Cx;
 use topcoat::router::{header, to_bytes, Body, Router, RouterBuilderDiscoverExt, StatusCode};
+
+#[path = "support/enter.rs"]
+mod enter;
 
 const ANVIL: &str = "8d1f6c9e-0000-4000-8000-000000000001";
 const BUCKET: &str = "8d1f6c9e-0000-4000-8000-000000000002";
@@ -1797,9 +1810,11 @@ async fn send(router: &Router, method: &str, uri: &str, body: &str) -> (StatusCo
         request = request.header(header::CONTENT_TYPE, "application/x-www-form-urlencoded");
     }
     let response = router.handle(request.body(Body::from(body.to_owned())).unwrap()).await;
-    let status = response.status();
+    let (status, headers) = (response.status(), response.headers().clone());
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    (status, String::from_utf8(bytes.to_vec()).unwrap())
+    let html = String::from_utf8(bytes.to_vec()).unwrap();
+    enter::check_page(uri, &headers, &html);
+    (status, html)
 }
 
 #[tokio::test]

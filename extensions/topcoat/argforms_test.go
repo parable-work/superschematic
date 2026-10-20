@@ -30,8 +30,9 @@ const argsService = "fixture-args-api"
 // at its control; an action's checkbox is false when not checked,
 // whatever its default; an optional input is absent when none of its
 // fields is sent; a form that embeds its input's form parses both; a map
-// argument is JSON text; the app's choices make an argument a select; and
-// a query of more pairs than a form reads is refused.
+// argument is JSON text; the app's choices make an argument a select; a
+// query of more pairs than a form reads is refused; and Enter in each form
+// its pages render presses the form's default button (enterHelper).
 func TestArgumentFormsServeATopcoatApp(t *testing.T) {
 	cargoTestCrate(t, argsService, argsAppTest)
 }
@@ -137,6 +138,9 @@ use topcoat::router::content::Form;
 use topcoat::router::{header, page, to_bytes, Body, Router, StatusCode};
 use topcoat::view::{view, View};
 
+#[path = "support/enter.rs"]
+mod enter;
+
 const ORDER: &str = "8d1f6c9e-0000-4000-8000-000000000001";
 const PRODUCT: &str = "8d1f6c9e-0000-4000-8000-000000000002";
 
@@ -207,7 +211,7 @@ impl ProductReviewsImplementation for Shop {
 #[page("/cancel")]
 async fn cancel_page() -> topcoat::Result<impl View> {
     Ok(view! {
-        <form method=(OrderCancelOrderArgsForm::METHOD)>order_cancel_order_args_fields(form: OrderCancelOrderArgsForm::new(ORDER))</form>
+        <form method=(OrderCancelOrderArgsForm::METHOD)>order_cancel_order_args_fields(form: OrderCancelOrderArgsForm::new(ORDER))<button type="submit">"Send"</button></form>
     })
 }
 
@@ -222,7 +226,7 @@ async fn cancel(cx: &Cx, Form(form): Form<OrderCancelOrderArgsForm>) -> topcoat:
         if let Some(note) = note {
             <p class="done">(note)</p>
         }
-        <form method="post">order_cancel_order_args_fields(form: form, errors: errors)</form>
+        <form method="post">order_cancel_order_args_fields(form: form, errors: errors)<button type="submit">"Send"</button></form>
     })
 }
 
@@ -231,13 +235,13 @@ async fn cancel(cx: &Cx, Form(form): Form<OrderCancelOrderArgsForm>) -> topcoat:
 async fn cancel_choices_page() -> topcoat::Result<impl View> {
     let choices = Choices::new().with("reason", [("Found it cheaper", "I found it cheaper"), ("Too slow", "It is too slow")]);
     Ok(view! {
-        <form method="post">order_cancel_order_args_fields(form: OrderCancelOrderArgsForm::new(ORDER), choices: choices)</form>
+        <form method="post">order_cancel_order_args_fields(form: OrderCancelOrderArgsForm::new(ORDER), choices: choices)<button type="submit">"Send"</button></form>
     })
 }
 
 #[page("/hold")]
 async fn hold_page() -> topcoat::Result<impl View> {
-    Ok(view! { <form method="post">order_hold_order_args_fields(form: OrderHoldOrderArgsForm::new(ORDER))</form> })
+    Ok(view! { <form method="post">order_hold_order_args_fields(form: OrderHoldOrderArgsForm::new(ORDER))<button type="submit">"Send"</button></form> })
 }
 
 #[page(POST "/hold")]
@@ -251,7 +255,7 @@ async fn hold(cx: &Cx, Form(form): Form<OrderHoldOrderArgsForm>) -> topcoat::Res
         if let Some(note) = note {
             <p class="done">(note)</p>
         }
-        <form method="post">order_hold_order_args_fields(form: form, errors: errors)</form>
+        <form method="post">order_hold_order_args_fields(form: form, errors: errors)<button type="submit">"Send"</button></form>
     })
 }
 
@@ -266,7 +270,7 @@ async fn add_note(cx: &Cx, Form(form): Form<OrderNoteOrderArgsForm>) -> topcoat:
         if let Some(note) = note {
             <p class="done">(note)</p>
         }
-        <form method="post">order_note_order_args_fields(form: form, errors: errors)</form>
+        <form method="post">order_note_order_args_fields(form: form, errors: errors)<button type="submit">"Send"</button></form>
     })
 }
 
@@ -281,7 +285,7 @@ async fn tag(cx: &Cx, Form(form): Form<OrderTagOrderArgsForm>) -> topcoat::Resul
         if let Some(note) = note {
             <p class="done">(note)</p>
         }
-        <form method="post">order_tag_order_args_fields(form: form, errors: errors)</form>
+        <form method="post">order_tag_order_args_fields(form: form, errors: errors)<button type="submit">"Send"</button></form>
     })
 }
 
@@ -293,7 +297,7 @@ async fn orders(cx: &Cx, Form(filter): Form<OrderListOrdersArgsForm>) -> topcoat
     };
     Ok(view! {
         (status)
-        <form method=(OrderListOrdersArgsForm::METHOD)>order_list_orders_args_fields(form: filter, errors: errors)</form>
+        <form method=(OrderListOrdersArgsForm::METHOD)>order_list_orders_args_fields(form: filter, errors: errors)<button type="submit">"Send"</button></form>
         for order in orders {
             <p class="order">(format!("{:?} {}", order.status, order.note.unwrap_or_default()))</p>
         }
@@ -303,12 +307,12 @@ async fn orders(cx: &Cx, Form(filter): Form<OrderListOrdersArgsForm>) -> topcoat
 #[page("/filter")]
 async fn filter_page(cx: &Cx) -> topcoat::Result<impl View> {
     let filter = OrderListOrdersArgsForm::from_query(cx)?;
-    Ok(view! { <form method="get">order_list_orders_args_fields(form: filter)</form> })
+    Ok(view! { <form method="get">order_list_orders_args_fields(form: filter)<button type="submit">"Send"</button></form> })
 }
 
 #[page("/filter/new")]
 async fn new_filter_page() -> topcoat::Result<impl View> {
-    Ok(view! { <form method="get">order_list_orders_args_fields(form: OrderListOrdersArgsForm::new())</form> })
+    Ok(view! { <form method="get">order_list_orders_args_fields(form: OrderListOrdersArgsForm::new())<button type="submit">"Send"</button></form> })
 }
 
 #[page(POST "/review")]
@@ -322,14 +326,14 @@ async fn review(cx: &Cx, Form(form): Form<ProductReviewsWriteReviewArgsForm>) ->
         if let Some(title) = title {
             <p class="done">(title)</p>
         }
-        <form method="post">product_reviews_write_review_args_fields(form: form, errors: errors)</form>
+        <form method="post">product_reviews_write_review_args_fields(form: form, errors: errors)<button type="submit">"Send"</button></form>
     })
 }
 
 #[page("/review")]
 async fn review_page() -> topcoat::Result<impl View> {
     Ok(view! {
-        <form method="post">product_reviews_write_review_args_fields(form: ProductReviewsWriteReviewArgsForm::new(PRODUCT))</form>
+        <form method="post">product_reviews_write_review_args_fields(form: ProductReviewsWriteReviewArgsForm::new(PRODUCT))<button type="submit">"Send"</button></form>
     })
 }
 
@@ -352,10 +356,13 @@ fn app() -> Router {
 }
 
 async fn send(request: http::Request<Body>) -> (StatusCode, String) {
+    let uri = request.uri().to_string();
     let response = app().handle(request).await;
-    let status = response.status();
+    let (status, headers) = (response.status(), response.headers().clone());
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    (status, String::from_utf8(bytes.to_vec()).unwrap())
+    let html = String::from_utf8(bytes.to_vec()).unwrap();
+    enter::check_page(&uri, &headers, &html);
+    (status, html)
 }
 
 async fn get(uri: &str) -> (StatusCode, String) {

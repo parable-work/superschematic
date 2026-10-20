@@ -51,7 +51,8 @@ func livePagesOutputs() map[string]any {
 // never a document; a document's comments are a collection under it,
 // which no PUT or DELETE of theirs, nor the DELETE of its cover, turns
 // into a form; and a document starts from an optional input that its
-// edit page requires.
+// edit page requires. Enter in each form a page renders presses its
+// default button (enterHelper).
 func TestPagesServeATopcoatApp(t *testing.T) {
 	cargoTestCrate(t, pagesService, pagesAppTest)
 }
@@ -410,6 +411,9 @@ use topcoat::context::Cx;
 use topcoat::router::request::parts;
 use topcoat::router::{header, to_bytes, Body, Router, RouterBuilderDiscoverExt, StatusCode};
 
+#[path = "support/enter.rs"]
+mod enter;
+
 const APOLLO: &str = "8d1f6c9e-0000-4000-8000-000000000001";
 const GEMINI: &str = "8d1f6c9e-0000-4000-8000-000000000002";
 const ROCKET: &str = "8d1f6c9e-0000-4000-8000-000000000101";
@@ -749,10 +753,12 @@ async fn send(router: &Router, method: &str, uri: &str, caller: &str, body: &str
         request = request.header(header::CONTENT_TYPE, "application/x-www-form-urlencoded");
     }
     let response = router.handle(request.body(Body::from(body.to_owned())).unwrap()).await;
-    let status = response.status();
-    let location = response.headers().get(header::LOCATION).map(|value| value.to_str().unwrap().to_owned());
+    let (status, headers) = (response.status(), response.headers().clone());
+    let location = headers.get(header::LOCATION).map(|value| value.to_str().unwrap().to_owned());
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    Answer { status, html: String::from_utf8(bytes.to_vec()).unwrap(), location }
+    let html = String::from_utf8(bytes.to_vec()).unwrap();
+    enter::check_page(uri, &headers, &html);
+    Answer { status, html, location }
 }
 
 async fn get(router: &Router, uri: &str, caller: &str) -> Answer {
@@ -1196,9 +1202,11 @@ async fn shard(router: &Router, uri: &str, caller: &str, body: serde_json::Value
         request = request.header("x-topcoat-identity", identity);
     }
     let response = router.handle(request.body(Body::from(body.to_string())).unwrap()).await;
-    let status = response.status();
+    let (status, headers) = (response.status(), response.headers().clone());
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    Answer { status, html: String::from_utf8(bytes.to_vec()).unwrap(), location: None }
+    let html = String::from_utf8(bytes.to_vec()).unwrap();
+    enter::check_page(uri, &headers, &html);
+    Answer { status, html, location: None }
 }
 
 // The text of html between the first start and the end after it.
@@ -1395,6 +1403,9 @@ use schemas_fixture_args_api_topcoat::api::{
 use schemas_fixture_args_api_topcoat::RouterBuilderFixtureArgsApiExt;
 use topcoat::router::{header, to_bytes, Body, Router, RouterBuilderDiscoverExt, StatusCode};
 
+#[path = "support/enter.rs"]
+mod enter;
+
 const ORDER: &str = "8d1f6c9e-0000-4000-8000-000000000001";
 const PRODUCT: &str = "8d1f6c9e-0000-4000-8000-000000000002";
 
@@ -1458,10 +1469,12 @@ async fn send(method: &str, uri: &str, body: &str) -> (StatusCode, String, Optio
         .body(Body::from(body.to_owned()))
         .unwrap();
     let response = app().handle(request).await;
-    let status = response.status();
-    let location = response.headers().get(header::LOCATION).map(|value| value.to_str().unwrap().to_owned());
+    let (status, headers) = (response.status(), response.headers().clone());
+    let location = headers.get(header::LOCATION).map(|value| value.to_str().unwrap().to_owned());
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    (status, String::from_utf8(bytes.to_vec()).unwrap(), location)
+    let html = String::from_utf8(bytes.to_vec()).unwrap();
+    enter::check_page(uri, &headers, &html);
+    (status, html, location)
 }
 
 #[tokio::test]
@@ -1541,6 +1554,9 @@ use schemas_fixture_controls_api_topcoat::api::{
 use schemas_fixture_controls_api_topcoat::{PageAuthenticator, RouterBuilderFixtureControlsApiExt};
 use topcoat::context::Cx;
 use topcoat::router::{header, to_bytes, Body, Router, RouterBuilderDiscoverExt, StatusCode};
+
+#[path = "support/enter.rs"]
+mod enter;
 
 struct NoRequests;
 
@@ -1658,7 +1674,9 @@ async fn send(router: &Router, method: &str, uri: &str, content_type: &str, body
     let status = response.status();
     let headers = response.headers().clone();
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    Answer { status, headers, html: String::from_utf8(bytes.to_vec()).unwrap() }
+    let html = String::from_utf8(bytes.to_vec()).unwrap();
+    enter::check_page(uri, &headers, &html);
+    Answer { status, headers, html }
 }
 
 async fn get(router: &Router, uri: &str) -> Answer {

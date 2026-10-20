@@ -2,6 +2,8 @@ package topcoat
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -268,6 +270,49 @@ func TestAMemberIsLabeledByItsTitle(t *testing.T) {
 	}
 	if got := st.Fields[0].New(); got != `Some("on_hold".to_owned())` {
 		t.Errorf("a titled default is its serialized value: %s", got)
+	}
+}
+
+// TestRowButtonsFollowTheDefaultButton reads every golden's forms.rs, as
+// cargo never does, for the order Enter depends on (D44, amended): in each
+// component whose view holds a row button (name="_action"), the first
+// button is the hidden default, which submits the form without an
+// _action. testdata/enter.rs holds every page the cargo tests render to
+// the whole rule.
+func TestRowButtonsFollowTheDefaultButton(t *testing.T) {
+	const defaultButton = `<button type="submit" class="ss-submit" hidden=(true)></button>`
+	goldens, err := filepath.Glob(filepath.Join("testdata", "golden", "*", "src", "forms.rs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(goldens) == 0 {
+		t.Fatal("no golden forms.rs")
+	}
+	checked := 0
+	for _, golden := range goldens {
+		data, err := os.ReadFile(golden)
+		if err != nil {
+			t.Fatal(err)
+		}
+		components := strings.Split(string(data), "\n#[component]\n")
+		for _, component := range components[1:] {
+			// The component's function ends at the first closing brace in
+			// the file's first column.
+			component, _, _ = strings.Cut(component, "\n}\n")
+			name, _, _ := strings.Cut(strings.TrimPrefix(component, "pub async fn "), "(")
+			if !strings.Contains(component, `name="_action"`) {
+				continue
+			}
+			checked++
+			first := strings.Index(component, "<button")
+			if !strings.HasPrefix(component[first:], defaultButton) {
+				line, _, _ := strings.Cut(component[first:], "\n")
+				t.Errorf("%s: %s's first button is %s, not the default %s", golden, name, line, defaultButton)
+			}
+		}
+	}
+	if checked == 0 {
+		t.Error("no golden component holds a row button")
 	}
 }
 
