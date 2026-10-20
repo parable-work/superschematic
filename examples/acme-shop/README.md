@@ -22,10 +22,16 @@ kind, decorators and auth provider.
 | `schemas/services/shop-web` | Site: the shop's static site, which calls `shop-api` from the browser (D55) |
 | `schemas/services/shop-stack` | Stack: deploys `shop-api` and `shop-orders`, each on a Go server, `shop-stock`, on a Rust server cargo builds, and `shop-storefront`, on a TypeScript server Bun runs, each on an entrypoint the build writes, `shop-orders`' Go worker and job and `shop-stock`'s Rust ones, and the site `shop-web`; its `Dev` environment runs on the `local` target, `ShipOrders` every minute and `OrderRestocks` only on demand |
 | `schemas/services/storefront-stack` | Stack: deploys `shop-storefront` alone, exposed: on Bun in `Dev`, on the `local` target, and in `Staging` as a Cloudflare Worker at workers.dev, on the `cloudflare` target with the docs' placeholder account (D64), whose build adds the Workers entrypoint `fetch.ts` and `bundle.ts` beside the server's `main.ts`; `src/cloudflare-target.ts` types the target's values and settings |
+| `schemas/services/shop-wishlist-db` | DB: a shopper's wishlist, one row per shopper and product with their note, built for SQLite first and Postgres, so the API over it gets D1's interface (D64) |
+| `schemas/services/shop-wishlist` | API over `shop-wishlist-db`, served in TypeScript: read a shopper's wishlist, keep a product with a note, drop one; no user model, since an identity store over SQLite is not built |
+| `schemas/services/wishlist-stack` | Stack: deploys `shop-wishlist` alone, exposed: on Bun over a SQLite file in `Dev`, on the `local` target with no container, and in `Staging` as a Cloudflare Worker over a D1 database, on the `cloudflare` target with the docs' placeholder account (D64) |
 | `go/` | the Go module and its tests, which sign in through `shop-api`'s login, call each API through the Go SDK, run every language's client against `shop-orders`, served in Go and in Rust, and run the stack with `stack dev` |
 | `go/shop-api`, `go/shop-orders` | each API's implementation over the generated ORM, at the naming file's `[implementation_paths]` default, `go/{service}`: `New(deps)`, which the generated entrypoints call, and `shop-orders`' `NewJobs(deps)` and `NewWorkers(deps)`, which its job's and its worker's do. No package authenticates a caller: both servers do it with the identity runtime |
 | `rust-impl/shop-stock` | `shop-stock`'s implementation, at the `[implementation_paths]` `rust` template the naming file sets, `rust-impl/{service}`, since the default, `rust/{service}`, would put it inside the client crate in `rust/`: `create(deps)`, which the generated entrypoint calls, reading and writing `shop-db`'s `stock_level` table with tokio-postgres over the pool its `Deps` holds, as there is no Rust ORM, and enqueueing `StockLow` with the HTTP runtime's queue client; and `create_workers(deps)` and `create_jobs(deps)`, which its worker's and its job's entrypoints call, filing and ordering `restock_request` rows |
 | `typescript/shop-storefront` | `shop-storefront`'s implementation, at the naming file's `[implementation_paths]` default, `typescript/{service}`: `create(deps)` and `authenticate(deps)`, which the generated entrypoint calls; its tests call it through the TypeScript SDK |
+| `typescript/shop-wishlist` | `shop-wishlist`'s implementation: `create(deps)`, whose statements run on `Deps.db`, a `SqlDatabase`, alike over the SQLite file `stack dev` opens and the Worker's D1 binding |
+| `testdata/wishlist-v2` | the wishlist's second version, a schemas root of its own and an implementation: a quantity in place of the note ([The wishlist, on SQLite and on D1](#the-wishlist-on-sqlite-and-on-d1)) |
+| `scripts/workerd` | what `scripts/check.sh` runs the Workers bundles with under workerd: the storefront's, and the wishlist's with `d1-binding.js`, a stand-in for its d1 binding |
 | `typescript/clients` | a `shop-orders` client and type tests; like the implementation, a member of `schemas/dist`'s Bun workspace |
 | `web/shop-web` | `shop-web`'s code, at the naming file's `[implementation_paths]` default, `web/{service}`: a page and a script that list `shop-api`'s products, bundled with `bun build`; the build writes its typed browser config, `config.generated.ts`, which reads `shop-api`'s address from the config each environment serves |
 | `python/` | a `shop-orders` client and type tests |
@@ -144,6 +150,57 @@ run also rewrites the `shopper` and `staff` roles to the permissions they
 grant now, so a `shop.db` made before staff held `orders.any`, whose
 `shopper` role grants all of `orders` and so every customer's orders,
 needs only the app started on it again.
+
+### The wishlist, on SQLite and on D1
+
+`wishlist-stack` deploys `shop-wishlist`, a TypeScript API over
+`shop-wishlist-db`, which lists `sqlite` first, so the API's `Deps.db` is
+a `SqlDatabase`, D1's interface (D64).
+`superschematic stack dev schemas/services/wishlist-stack` runs its `Dev`
+with Bun and `superschematic-migrate` alone, and no Docker: the database
+is the SQLite file
+`schemas/.superschematic/local/wishlist-stack/Dev/databases/shop_wishlist_db.sqlite`,
+which `stack dev` creates and migrates with `shop-wishlist-db`'s SQLite
+plan, and `--remove-data` removes.
+
+Its `Staging` runs the same implementation as a Worker over a D1
+database, `wishlist-stack-shop-wishlist-db`, on the docs' placeholder
+account. No test calls Cloudflare. To run it on an account of yours, with
+what section 18.6 of `docs/stack-model.md` lists in the shell (the API
+token, the state's passphrase, `superschematic-migrate`, the Pulumi CLI
+and Bun), from this directory:
+
+1. put the account's id in `Staging`'s `accountId`, in
+   `schemas/services/wishlist-stack/src/stack.schema.ts`, and run
+   `superschematic stack bootstrap Staging --stack schemas/services/wishlist-stack`,
+   which records the account's workers.dev subdomain in place of `acme`;
+2. `superschematic stack deploy Staging --stack schemas/services/wishlist-stack`
+   creates the D1 database, migrates it from your machine and rolls the
+   Worker out at `https://shop-wishlist.<subdomain>.workers.dev`. Keep a
+   tea with `curl -X PUT -H 'content-type: application/json' -d
+   '{"note":"for the mornings"}' https://shop-wishlist.<subdomain>.workers.dev/api/wishlists/ada/items/green-tea`;
+3. deploy the second version: copy `testdata/wishlist-v2/schemas/services/*`
+   over `schemas/services/` and
+   `testdata/wishlist-v2/typescript/shop-wishlist/index.ts` over
+   `typescript/shop-wishlist/index.ts`. Its plan adds `quantity`, nullable,
+   in expand, before the rollout, where the first version's Worker keeps
+   inserting rows without it, and drops `note` in contract, after the
+   rollout, once only the second version runs. The deploy stops on that
+   drop's hazards until you acknowledge them:
+   `superschematic stack deploy Staging --stack schemas/services/wishlist-stack --allow destructive:table/wishlist_item/column/note --allow blocking:table/wishlist_item/column/note`.
+   The tea the first version kept reads back with a quantity of one;
+4. `--bundle shop-wishlist=sha256:<digest>` on `stack deploy` rolls the
+   Worker back to a bundle an earlier deploy published, with no build. The
+   database stays at the second version's model, and the first version's
+   statements name `note`, so roll back only to a bundle of the second
+   version once its contract phase has run;
+5. `superschematic stack destroy Staging --stack schemas/services/wishlist-stack`
+   removes the Worker and the D1 database.
+
+`scripts/check.sh` proves what it can without an account: the second
+version builds and its implementation type-checks, its plan has those two
+steps and hazards, and on a SQLite file both implementations run between
+the phases, and the second after contract (`scripts/wishlist-v2.ts`).
 
 ## Check it
 
