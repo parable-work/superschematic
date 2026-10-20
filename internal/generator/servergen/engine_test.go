@@ -438,7 +438,9 @@ func startBackground(t *testing.T, binary string, env ...string) *started {
 	}
 	s := &started{cmd: cmd, out: out}
 	t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
-	deadline := time.Now().Add(20 * time.Second)
+	// A minute: on a loaded machine a freshly linked binary is slow to
+	// start, and the engine opens before the runner starts.
+	deadline := time.Now().Add(time.Minute)
 	for !strings.Contains(out.String(), `"msg":"runner started"`) {
 		if time.Now().After(deadline) {
 			t.Fatalf("%s did not start its runner:\n%s", binary, out.String())
