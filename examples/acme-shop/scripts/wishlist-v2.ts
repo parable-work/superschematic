@@ -35,8 +35,11 @@ function expect(what: string, got: unknown, want: unknown): void {
     failures.push(`${what}: got ${JSON.stringify(got)}, want ${JSON.stringify(want)}`);
   }
 }
-const notes = (view: any) => view.items.map((item: any) => [item.sku, item.note]);
-const quantities = (view: any) => view.items.map((item: any) => [item.sku, item.quantity]);
+// Each wishlist's items by SKU: the implementations list them by when they
+// were added, and rows this script adds within one millisecond tie.
+const bySku = (view: any) => [...view.items].sort((a: any, b: any) => a.sku.localeCompare(b.sku));
+const notes = (view: any) => bySku(view).map((item: any) => [item.sku, item.note]);
+const quantities = (view: any) => bySku(view).map((item: any) => [item.sku, item.quantity]);
 
 switch (point) {
   case 'first':
@@ -56,13 +59,13 @@ switch (point) {
     await v2.keepItem({ shopper, sku: 'green-tea', input: { quantity: 2 } });
     expect('the first version reads', notes(await v1.getWishlist({ shopper })), [
       ['green-tea', 'for the mornings'],
-      ['oolong', 'a gift'],
       ['matcha', null],
+      ['oolong', 'a gift'],
     ]);
     expect('the second version reads', quantities(await v2.getWishlist({ shopper })), [
       ['green-tea', 2],
-      ['oolong', 1],
       ['matcha', 3],
+      ['oolong', 1],
     ]);
     break;
   }
