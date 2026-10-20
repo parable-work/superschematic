@@ -367,6 +367,13 @@ class ShapeNamespace:
             raise SDKError(f"SDK contract error: expected response data to be a list of lists of {output_type_name}")
         return [self._coerce_response(row, output_type_name, True, f"data[{index}]") for index, row in enumerate(raw)]
 
+    def _coerce_map_response(self, raw: Any, output_type_name: str, is_array: bool) -> Any:
+        """Coerce a map response value by value, as _coerce_response coerces
+        a response of the value's list levels."""
+        if not isinstance(raw, dict):
+            return raw
+        return {key: self._coerce_response(value, output_type_name, is_array) for key, value in raw.items()}
+
     def _validate_query_param_constraints(
         self,
         value: Any,
@@ -427,6 +434,32 @@ class ShapeNamespace:
 
         if field_errors:
             raise ValidationError({field_name: field_errors})
+    def find_shape(self, name: str, timeout_seconds: float | None = None, extra_headers: Mapping[str, str] | None = None) -> Shape | None:
+        path = f"/api/shape-search/{path_segment(name)}"
+        query_params: dict[str, Any] | None = None
+        response = self._client.request(
+            method="GET",
+            path=path,
+            body=None,
+            query_params=query_params,
+            requires_auth=False,
+            timeout_seconds=timeout_seconds,
+            extra_headers=extra_headers,
+        )
+        return self._coerce_response(response, "Shape", False)
+    def find_shapes(self, timeout_seconds: float | None = None, extra_headers: Mapping[str, str] | None = None) -> list[Shape] | None:
+        path = "/api/shape-search"
+        query_params: dict[str, Any] | None = None
+        response = self._client.request(
+            method="GET",
+            path=path,
+            body=None,
+            query_params=query_params,
+            requires_auth=False,
+            timeout_seconds=timeout_seconds,
+            extra_headers=extra_headers,
+        )
+        return self._coerce_response(response, "Shape", True)
     def get_drawing(self, id: str, timeout_seconds: float | None = None, extra_headers: Mapping[str, str] | None = None) -> Drawing:
         path = f"/api/drawings/{path_segment(id)}"
         query_params: dict[str, Any] | None = None
@@ -523,6 +556,19 @@ class ShapeNamespace:
             if page.next == cursor:
                 raise SDKError("page_shapes returned the cursor it was sent")
             cursor = page.next
+    def shape_groups(self, timeout_seconds: float | None = None, extra_headers: Mapping[str, str] | None = None) -> dict[str, list[Shape]]:
+        path = "/api/shape-groups"
+        query_params: dict[str, Any] | None = None
+        response = self._client.request(
+            method="GET",
+            path=path,
+            body=None,
+            query_params=query_params,
+            requires_auth=False,
+            timeout_seconds=timeout_seconds,
+            extra_headers=extra_headers,
+        )
+        return self._coerce_map_response(response, "Shape", True)
     def shape_rows(self, timeout_seconds: float | None = None, extra_headers: Mapping[str, str] | None = None) -> list[list[Shape]]:
         path = "/api/shapes/rows"
         query_params: dict[str, Any] | None = None
@@ -536,3 +582,16 @@ class ShapeNamespace:
             extra_headers=extra_headers,
         )
         return self._coerce_list_of_lists_response(response, "Shape")
+    def shapes_by_name(self, timeout_seconds: float | None = None, extra_headers: Mapping[str, str] | None = None) -> dict[str, Shape]:
+        path = "/api/shape-index"
+        query_params: dict[str, Any] | None = None
+        response = self._client.request(
+            method="GET",
+            path=path,
+            body=None,
+            query_params=query_params,
+            requires_auth=False,
+            timeout_seconds=timeout_seconds,
+            extra_headers=extra_headers,
+        )
+        return self._coerce_map_response(response, "Shape", False)

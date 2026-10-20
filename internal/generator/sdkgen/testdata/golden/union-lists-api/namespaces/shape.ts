@@ -67,6 +67,53 @@ export class ShapeNamespace {
   }
 
   /**
+   * The shapes in named groups, a map of lists
+   * (Record<string, Shape[]>).
+   * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
+   * @returns Map of arrays of Shape
+   * @throws {ValidationError} if input validation fails
+   * @throws {ApiError} if the API request fails
+   */
+  public async shapeGroups(
+    signal?: any,
+    ...extraArgs: any[]
+  ): Promise<Record<string, Shape[]>> {
+    // Make GET request
+    const result = await this.client.get<Record<string, Shape[]>>(
+      `/api/shape-groups`,
+      { ...toRequestOptions(signal) }
+    );
+    return result !== null && typeof result === 'object'
+      ? Object.fromEntries(
+          Object.entries(result).map(([key, value]) => [key, Array.isArray(value) ? value.map(parseShapeFromJSON) : value])
+        )
+      : result;
+  }
+
+  /**
+   * Every shape by its name, a map (Record<string, Shape>).
+   * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
+   * @returns Map of Shape
+   * @throws {ValidationError} if input validation fails
+   * @throws {ApiError} if the API request fails
+   */
+  public async shapesByName(
+    signal?: any,
+    ...extraArgs: any[]
+  ): Promise<Record<string, Shape>> {
+    // Make GET request
+    const result = await this.client.get<Record<string, Shape>>(
+      `/api/shape-index`,
+      { ...toRequestOptions(signal) }
+    );
+    return result !== null && typeof result === 'object'
+      ? Object.fromEntries(
+          Object.entries(result).map(([key, value]) => [key, parseShapeFromJSON(value)])
+        )
+      : result;
+  }
+
+  /**
    * Every shape, a page at a time.
    * @param params - Optional query parameters, with the page: cursor, the next of the page before, absent for the first page, and limit, 1 to 5, 2 when absent
    * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
@@ -125,6 +172,48 @@ export class ShapeNamespace {
     return pageItems('ShapeQueries.pageShapes', params?.cursor, (cursor) =>
       this.pageShapes({ ...params, cursor }, signal)
     );
+  }
+
+  /**
+   * The shapes found, or null when the search found none
+   * (Nullable<Shape[]>).
+   * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
+   * @returns Array of Shape, or null
+   * @throws {ValidationError} if input validation fails
+   * @throws {ApiError} if the API request fails
+   */
+  public async findShapes(
+    signal?: any,
+    ...extraArgs: any[]
+  ): Promise<Shape[] | null> {
+    // Make GET request
+    const result = await this.client.get<Shape[] | null>(
+      `/api/shape-search`,
+      { ...toRequestOptions(signal) }
+    );
+    return Array.isArray(result) ? result.map(parseShapeFromJSON) : result;
+  }
+
+  /**
+   * The shape with a name, or null when no shape has it
+   * (Nullable<Shape>).
+   * @param name - name parameter
+   * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
+   * @returns Shape, or null
+   * @throws {ValidationError} if input validation fails
+   * @throws {ApiError} if the API request fails
+   */
+  public async findShape(
+    name: string,
+    signal?: any,
+    ...extraArgs: any[]
+  ): Promise<Shape | null> {
+    // Make GET request
+    const result = await this.client.get<Shape | null>(
+      `/api/shape-search/${encodeURIComponent(name)}`,
+      { ...toRequestOptions(signal) }
+    );
+    return result === null ? null : parseShapeFromJSON(result);
   }
 
   /**
