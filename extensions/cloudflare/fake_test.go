@@ -43,6 +43,7 @@ type fakeCloud struct {
 	secrets   map[string]map[string]*fakeSecret // store, then name
 	buckets   map[string]bool
 	objects   map[string][]byte // bucket/key
+	d1        map[string]string // name, then uuid
 	nextID    int
 }
 
@@ -93,6 +94,7 @@ func newFakeCloud() *fakeCloud {
 		secrets:   map[string]map[string]*fakeSecret{},
 		buckets:   map[string]bool{},
 		objects:   map[string][]byte{},
+		d1:        map[string]string{},
 	}
 }
 
@@ -249,6 +251,19 @@ func (c *fakeCloud) ListObjects(_ context.Context, account, bucket, prefix strin
 	}
 	slices.Sort(keys)
 	return keys, c.checkAccount(account)
+}
+
+func (c *fakeCloud) D1Database(_ context.Context, account, name string) (string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if err := c.checkAccount(account); err != nil {
+		return "", err
+	}
+	uuid, ok := c.d1[name]
+	if !ok {
+		return "", fmt.Errorf("fake: no D1 database %s: %w", name, fs.ErrNotExist)
+	}
+	return uuid, nil
 }
 
 // fakeGitHub is the repository's Actions secrets in memory; unready makes

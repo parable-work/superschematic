@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"time"
 
 	ir "github.com/parable-work/superschematic/ir"
@@ -87,6 +88,11 @@ type Extension struct {
 	// from; nil is crypto/rand.
 	Now  func() time.Time
 	Rand io.Reader
+
+	// Exec runs the migration runner, superschematic-migrate, on the
+	// deploying machine (migrations.go). Nil runs the command; tests pass
+	// a fake.
+	Exec func(cmd *exec.Cmd) error
 }
 
 // Name is the extension's name.
@@ -131,19 +137,20 @@ func (e Extension) Register(r *registry.Registry) error {
 		Policies: []registry.PolicyRule{
 			{Name: PolicyDomainOnCloudflare, Check: checkDomainOnCloudflare},
 		},
-		State:     stateStore{ext: e},
-		Secrets:   secretStore{ext: e},
-		Bootstrap: bootstrapper{ext: e},
-		CI:        ciIdentities{},
+		State:      stateStore{ext: e},
+		Secrets:    secretStore{ext: e},
+		Bootstrap:  bootstrapper{ext: e},
+		Migrations: migrationRunner{ext: e},
+		CI:         ciIdentities{},
 	})
 }
 
 // platforms are the target's platforms, one per deployable kind it
 // places; the target names each for its kind. Each gets the extension
-// and the provider when it registers. None yet: Workers, Cron, D1, R2
-// and sites come next (section 18.2).
+// and the provider when it registers: D1 for databases (d1.go); Workers,
+// Cron, R2 and sites come next (section 18.2).
 func (e Extension) platforms() []registry.PlatformSpec {
-	return nil
+	return []registry.PlatformSpec{d1Platform()}
 }
 
 // getenv reads the shell's environment.

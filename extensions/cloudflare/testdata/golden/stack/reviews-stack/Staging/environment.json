@@ -1,0 +1,96 @@
+{
+  "version": 1,
+  "stack": "reviews-stack",
+  "environment": "Staging",
+  "target": "cloudflare",
+  "provisioner": "pulumi",
+  "values": {
+    "accountId": "0123456789abcdef0123456789abcdef"
+  },
+  "deployables": [
+    {
+      "name": "Archive",
+      "kind": "database",
+      "declared": true,
+      "platform": "cloudflare.d1",
+      "services": [
+        {
+          "name": "notes-db",
+          "kind": "DB"
+        }
+      ],
+      "dialect": "sqlite",
+      "resourceName": "reviews-stack-archive"
+    },
+    {
+      "name": "reviews-db",
+      "kind": "database",
+      "platform": "cloudflare.d1",
+      "services": [
+        {
+          "name": "reviews-db",
+          "kind": "DB"
+        }
+      ],
+      "dialect": "sqlite",
+      "settings": {
+        "locationHint": "enam"
+      },
+      "resourceName": "reviews-stack-reviews-db"
+    }
+  ],
+  "resources": {
+    "resources": [
+      {
+        "id": "Archive.d1.notes-db",
+        "type": "cloudflare:index/d1Database:D1Database",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "name": "reviews-stack-notes-db"
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "Archive"
+        ]
+      },
+      {
+        "id": "reviews-db.d1.reviews-db",
+        "type": "cloudflare:index/d1Database:D1Database",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "name": "reviews-stack-reviews-db",
+          "primaryLocationHint": "enam"
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "reviews-db"
+        ]
+      }
+    ]
+  },
+  "deployOrder": [
+    {
+      "step": "infrastructure",
+      "resources": [
+        "Archive.d1.notes-db",
+        "reviews-db.d1.reviews-db"
+      ]
+    },
+    {
+      "step": "migrate",
+      "migration": "expand",
+      "deployables": [
+        "Archive",
+        "reviews-db"
+      ]
+    },
+    {
+      "step": "migrate",
+      "migration": "contract",
+      "deployables": [
+        "Archive",
+        "reviews-db"
+      ]
+    }
+  ]
+}

@@ -15,6 +15,7 @@
   ],
   "types": [
     "cloudflare:index/accountToken:AccountToken",
+    "cloudflare:index/d1Database:D1Database",
     "cloudflare:index/dnsRecord:DnsRecord"
   ]
 }
