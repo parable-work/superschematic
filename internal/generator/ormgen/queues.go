@@ -30,11 +30,14 @@ type Queue struct {
 	TableName       string
 	QuotedTableName string
 
-	// Retries, BackoffSeconds and LeaseSeconds are the queue's arguments
-	// with their defaults (registry.QueueSettingsOf).
-	Retries        int
-	BackoffSeconds int
-	LeaseSeconds   int
+	// Retries, BackoffSeconds, MaxBackoffSeconds, LeaseSeconds and
+	// RetainSeconds are the queue's arguments with their defaults
+	// (registry.QueueSettingsOf).
+	Retries           int
+	BackoffSeconds    int
+	MaxBackoffSeconds int
+	LeaseSeconds      int
+	RetainSeconds     int
 
 	// Fields are the message's fields, in declaration order, each the
 	// column of its name.
@@ -57,13 +60,15 @@ func queuesOf(schema *ir.Schema, scalars map[string]scalarLookup, unionNames, en
 		settings := registry.QueueSettingsOf(td.Queue)
 		table := codegen.ToSnakeCase(td.Name) + ir.QueueTableSuffix
 		q := Queue{
-			Name:            td.Name,
-			DocLines:        docLines(codegen.DocText(td.Description, td.Comment)),
-			TableName:       table,
-			QuotedTableName: sqlutil.QuoteIdentifier(table),
-			Retries:         settings.Retries,
-			BackoffSeconds:  settings.BackoffSeconds,
-			LeaseSeconds:    settings.LeaseSeconds,
+			Name:              td.Name,
+			DocLines:          docLines(codegen.DocText(td.Description, td.Comment)),
+			TableName:         table,
+			QuotedTableName:   sqlutil.QuoteIdentifier(table),
+			Retries:           settings.Retries,
+			BackoffSeconds:    settings.BackoffSeconds,
+			MaxBackoffSeconds: settings.MaxBackoffSeconds,
+			LeaseSeconds:      settings.LeaseSeconds,
+			RetainSeconds:     settings.RetainSeconds,
 		}
 		for _, f := range td.Fields {
 			if f == nil {
@@ -85,7 +90,7 @@ func queuesOf(schema *ir.Schema, scalars map[string]scalarLookup, unionNames, en
 		for i, f := range q.Fields {
 			columns[i] = f.QuotedDBName
 		}
-		q.Statements = sqlutil.PostgresQueueStatements(q.QuotedTableName, columns)
+		q.Statements = sqlutil.PostgresQueueStatements(q.QuotedTableName, columns, q.RetainSeconds > 0)
 		queues = append(queues, q)
 	}
 	return queues, nil

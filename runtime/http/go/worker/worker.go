@@ -14,6 +14,13 @@
 // then cancels them and releases their messages, which are due again at
 // once for another worker, and returns.
 //
+// Beside the claims, Run prunes the queue (D68): when it starts and every
+// five minutes after, it deletes the done messages older than the queue's
+// retention, a batch at a time until a batch is short, and logs how many.
+// Every instance of every worker of the queue prunes, which is safe: each
+// batch skips the rows another holds, and a row deleted once is gone. It
+// never deletes a dead message.
+//
 // The package knows no database: the ORM's claims are the functions of
 // Queue, so the loop is the same for every queue and every dialect.
 package worker
@@ -50,8 +57,18 @@ const (
 	// from the idle wait.
 	maxBackoff = 30 * time.Second
 
-	// opTimeout bounds each complete, fail, extend and release, which run
-	// on a context of their own, so a stopping worker still records them.
+	// DefaultPruneEvery is how often a worker prunes its queue's done
+	// messages, after the prune it starts with.
+	DefaultPruneEvery = 5 * time.Minute
+
+	// PruneBatch is how many done messages one prune statement deletes at
+	// most, so no statement holds its locks for long; a prune runs another
+	// while one deletes a whole batch.
+	PruneBatch = 1000
+
+	// opTimeout bounds each complete, fail, extend, release and prune
+	// batch, which run on a context of their own, so a stopping worker
+	// still records them.
 	opTimeout = 5 * time.Second
 
 	// maxCause caps the error a failed message records.
@@ -69,7 +86,7 @@ type Message struct {
 }
 
 // Queue is the queue a worker claims from, as the ORM of its database
-// claims (D53). Every function is required.
+// claims (D53). Every function is required but Prune.
 type Queue struct {
 	// Name names the queue in the log.
 	Name string
@@ -93,6 +110,10 @@ type Queue struct {
 
 	// Release gives a claimed message back, due at once.
 	Release func(ctx context.Context, id, token string) error
+
+	// Prune deletes up to limit messages done for the queue's retention,
+	// and returns how many it deleted. Nil prunes nothing.
+	Prune func(ctx context.Context, limit int) (int, error)
 }
 
 // Options are how Run runs.
@@ -109,6 +130,10 @@ type Options struct {
 	// Idle is how long Run waits to claim again after a claim found
 	// nothing; zero is DefaultIdle.
 	Idle time.Duration
+
+	// PruneEvery is how often Run prunes the queue after the prune it
+	// starts with; zero is DefaultPruneEvery.
+	PruneEvery time.Duration
 
 	// Logger logs each message's outcome; nil logs nothing.
 	Logger *zap.Logger
@@ -149,6 +174,9 @@ func Run(ctx context.Context, q Queue, opts Options) error {
 	if opts.Idle <= 0 {
 		opts.Idle = DefaultIdle
 	}
+	if opts.PruneEvery <= 0 {
+		opts.PruneEvery = DefaultPruneEvery
+	}
 	logger := opts.Logger
 	if logger == nil {
 		logger = zap.NewNop()
@@ -159,8 +187,15 @@ func Run(ctx context.Context, q Queue, opts Options) error {
 	// cancels it only once the grace is over.
 	w.handlers, w.cancelHandlers = context.WithCancel(context.WithoutCancel(ctx))
 	defer w.cancelHandlers()
+	pruned := make(chan struct{})
+	go func() {
+		defer close(pruned)
+		w.pruneLoop(ctx)
+	}()
 	w.claimLoop(ctx)
-	return w.stop()
+	err := w.stop()
+	<-pruned
+	return err
 }
 
 // loop is one Run.
@@ -218,6 +253,47 @@ func (w *loop) claimLoop(ctx context.Context) {
 			w.start(msg)
 		}
 		if len(msgs) < free && !w.idle(ctx) {
+			return
+		}
+	}
+}
+
+// pruneLoop prunes the queue at once, then every PruneEvery, until ctx
+// ends.
+func (w *loop) pruneLoop(ctx context.Context) {
+	if w.q.Prune == nil {
+		return
+	}
+	for {
+		w.prune(ctx)
+		if !sleep(ctx, w.opts.PruneEvery) {
+			return
+		}
+	}
+}
+
+// prune deletes the queue's done messages past its retention, a batch at a
+// time until a batch is short, and logs how many it deleted. A failed batch
+// ends the prune, which the next tries again.
+func (w *loop) prune(ctx context.Context) {
+	pruned := 0
+	defer func() {
+		if pruned > 0 {
+			w.logger.Info("done messages pruned", zap.Int("pruned", pruned))
+		}
+	}()
+	for ctx.Err() == nil {
+		batchCtx, cancel := context.WithTimeout(ctx, opTimeout)
+		n, err := w.q.Prune(batchCtx, PruneBatch)
+		cancel()
+		if err != nil {
+			if ctx.Err() == nil {
+				w.logger.Warn("pruning the done messages failed", zap.Int("pruned", pruned), zap.Error(err))
+			}
+			return
+		}
+		pruned += n
+		if n < PruneBatch {
 			return
 		}
 	}

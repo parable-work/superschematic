@@ -2,20 +2,21 @@
 
 //! The queues of the `fixture-queue-db` database (D53, D65; docs/stack-model.md,
 //! section 8.8), as the HTTP runtime's queue client runs them: a descriptor
-//! per @queue class, as JSON, with its table, its retries, backoff and lease,
-//! the column each field of its message writes, and its statements on
-//! Postgres, which the Go ORM and the TypeScript queue client run too, so a
-//! message one language enqueues another claims alike.
+//! per @queue class, as JSON, with its table, its retries, backoff, maximum
+//! backoff, lease and retention, the column each field of its message writes,
+//! and its statements on Postgres, which the Go ORM and the TypeScript queue
+//! client run too, so a message one language enqueues another claims alike.
 //!
 //! Parse a descriptor with the runtime's `queue::QueueDefinition::parse`,
 //! enqueue a message in the transaction whose writes caused it, and claim,
-//! complete, fail, extend and release messages with its `PostgresQueue`.
-//! Delivery is at least once.
+//! complete, fail, extend, release and prune messages with its
+//! `PostgresQueue`. Delivery is at least once.
 
 /// The queue of `OrderPlaced` messages, whose descriptor this is.
 ///
-/// A message whose handler fails is due again after 60s, and is dead
-/// after 3 such retries; a claim holds it for 120s unless extended.
+/// A message whose handler fails is due again after 60s, doubled for
+/// each attempt before, up to 200s, and is dead after 3 such retries; a
+/// claim holds it for 120s unless extended. A done message stays 3600s.
 ///
 /// Placed when an order is: the worker that fulfils orders handles it.
 pub const ORDER_PLACED_QUEUE: &str = r#"{
@@ -23,7 +24,9 @@ pub const ORDER_PLACED_QUEUE: &str = r#"{
   "table": "order_placed_queue",
   "retries": 3,
   "backoffSeconds": 60,
+  "maxBackoffSeconds": 200,
   "leaseSeconds": 120,
+  "retainSeconds": 3600,
   "fields": [
     {
       "name": "orderId",
@@ -62,16 +65,18 @@ pub const ORDER_PLACED_QUEUE: &str = r#"{
     "expire": "UPDATE order_placed_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,\n  last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()\nWHERE state = 'claimed' AND claim_expires_at <= now() AND attempts > $1",
     "claim": "WITH due AS (\n  SELECT id FROM order_placed_queue\n  WHERE (state = 'ready' AND due_at <= now()) OR (state = 'claimed' AND claim_expires_at <= now())\n  ORDER BY due_at, id\n  LIMIT $1\n  FOR UPDATE SKIP LOCKED\n)\nUPDATE order_placed_queue AS q SET state = 'claimed', attempts = q.attempts + 1, claim_token = gen_random_uuid(),\n  claim_expires_at = now() + make_interval(secs => $2), updated_at = now()\nFROM due WHERE q.id = due.id\nRETURNING q.id::text, q.claim_token::text, q.attempts, q.order_id, q.placed_at, q.priority, q.quantity, q.note, q.ship_to, q.tags",
     "complete": "UPDATE order_placed_queue SET state = 'done', claim_token = NULL, claim_expires_at = NULL, updated_at = now()\nWHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'",
-    "fail": "UPDATE order_placed_queue SET\n  state = CASE WHEN attempts > $3 THEN 'dead' ELSE 'ready' END,\n  due_at = CASE WHEN attempts > $3 THEN due_at ELSE now() + make_interval(secs => $4) END,\n  last_error = $5, claim_token = NULL, claim_expires_at = NULL, updated_at = now()\nWHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'\nRETURNING state",
+    "fail": "UPDATE order_placed_queue SET\n  state = CASE WHEN attempts > $3 THEN 'dead' ELSE 'ready' END,\n  due_at = CASE WHEN attempts > $3 THEN due_at ELSE now() + make_interval(secs => LEAST($4 * power(2, LEAST(attempts - 1, 40)), $6)) END,\n  last_error = $5, claim_token = NULL, claim_expires_at = NULL, updated_at = now()\nWHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'\nRETURNING state",
     "extend": "UPDATE order_placed_queue SET claim_expires_at = now() + make_interval(secs => $3), updated_at = now()\nWHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'",
-    "release": "UPDATE order_placed_queue SET state = 'ready', attempts = GREATEST(attempts - 1, 0), claim_token = NULL, claim_expires_at = NULL, updated_at = now()\nWHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'"
+    "release": "UPDATE order_placed_queue SET state = 'ready', attempts = GREATEST(attempts - 1, 0), claim_token = NULL, claim_expires_at = NULL, updated_at = now()\nWHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'",
+    "prune": "DELETE FROM order_placed_queue WHERE id IN (\n  SELECT id FROM order_placed_queue\n  WHERE state = 'done' AND updated_at <= now() - make_interval(secs => $1)\n  ORDER BY updated_at\n  LIMIT $2\n  FOR UPDATE SKIP LOCKED\n)"
   }
 }"#;
 
 /// The queue of `Ping` messages, whose descriptor this is.
 ///
-/// A message whose handler fails is due again after 30s, and is dead
-/// after 5 such retries; a claim holds it for 60s unless extended.
+/// A message whose handler fails is due again after 30s, doubled for
+/// each attempt before, up to 3600s, and is dead after 5 such retries; a
+/// claim holds it for 60s unless extended. A done message is deleted as it completes.
 ///
 /// Sent when nobody asked for anything in particular.
 pub const PING_QUEUE: &str = r#"{
@@ -79,7 +84,9 @@ pub const PING_QUEUE: &str = r#"{
   "table": "ping_queue",
   "retries": 5,
   "backoffSeconds": 30,
+  "maxBackoffSeconds": 3600,
   "leaseSeconds": 60,
+  "retainSeconds": 0,
   "fields": [
     {
       "name": "sentAt",
@@ -90,9 +97,10 @@ pub const PING_QUEUE: &str = r#"{
     "insert": "INSERT INTO ping_queue",
     "expire": "UPDATE ping_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,\n  last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()\nWHERE state = 'claimed' AND claim_expires_at <= now() AND attempts > $1",
     "claim": "WITH due AS (\n  SELECT id FROM ping_queue\n  WHERE (state = 'ready' AND due_at <= now()) OR (state = 'claimed' AND claim_expires_at <= now())\n  ORDER BY due_at, id\n  LIMIT $1\n  FOR UPDATE SKIP LOCKED\n)\nUPDATE ping_queue AS q SET state = 'claimed', attempts = q.attempts + 1, claim_token = gen_random_uuid(),\n  claim_expires_at = now() + make_interval(secs => $2), updated_at = now()\nFROM due WHERE q.id = due.id\nRETURNING q.id::text, q.claim_token::text, q.attempts, q.sent_at",
-    "complete": "UPDATE ping_queue SET state = 'done', claim_token = NULL, claim_expires_at = NULL, updated_at = now()\nWHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'",
-    "fail": "UPDATE ping_queue SET\n  state = CASE WHEN attempts > $3 THEN 'dead' ELSE 'ready' END,\n  due_at = CASE WHEN attempts > $3 THEN due_at ELSE now() + make_interval(secs => $4) END,\n  last_error = $5, claim_token = NULL, claim_expires_at = NULL, updated_at = now()\nWHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'\nRETURNING state",
+    "complete": "DELETE FROM ping_queue\nWHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'",
+    "fail": "UPDATE ping_queue SET\n  state = CASE WHEN attempts > $3 THEN 'dead' ELSE 'ready' END,\n  due_at = CASE WHEN attempts > $3 THEN due_at ELSE now() + make_interval(secs => LEAST($4 * power(2, LEAST(attempts - 1, 40)), $6)) END,\n  last_error = $5, claim_token = NULL, claim_expires_at = NULL, updated_at = now()\nWHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'\nRETURNING state",
     "extend": "UPDATE ping_queue SET claim_expires_at = now() + make_interval(secs => $3), updated_at = now()\nWHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'",
-    "release": "UPDATE ping_queue SET state = 'ready', attempts = GREATEST(attempts - 1, 0), claim_token = NULL, claim_expires_at = NULL, updated_at = now()\nWHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'"
+    "release": "UPDATE ping_queue SET state = 'ready', attempts = GREATEST(attempts - 1, 0), claim_token = NULL, claim_expires_at = NULL, updated_at = now()\nWHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'",
+    "prune": "DELETE FROM ping_queue WHERE id IN (\n  SELECT id FROM ping_queue\n  WHERE state = 'done' AND updated_at <= now() - make_interval(secs => $1)\n  ORDER BY updated_at\n  LIMIT $2\n  FOR UPDATE SKIP LOCKED\n)"
   }
 }"#;

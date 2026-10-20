@@ -5,7 +5,9 @@
 //! the fixture-queue-db schema, and reads the descriptors of its queues
 //! from `order_placed.json` and `ping.json`, tsgen's golden `queues.ts`
 //! for the same schema as JSON, which a Rust types crate's `queues.rs`
-//! holds. The worker loop runs over the same queues at the end.
+//! holds: `OrderPlaced`'s backoff doubles from a minute up to 200 s and
+//! keeps a done message an hour, and `Ping` keeps none. The worker loop
+//! runs over the same queues at the end.
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;
@@ -472,6 +474,113 @@ async fn a_failed_message_is_due_after_its_backoff_until_its_retries_are_spent()
     db.close().await;
 }
 
+/// Seconds from now until a message is due.
+async fn due_in(db: &Db, id: &str) -> f64 {
+    db.pool
+        .get()
+        .await
+        .unwrap()
+        .query_one(
+            "SELECT extract(epoch FROM due_at - now())::float8 FROM order_placed_queue WHERE id = $1::text::uuid",
+            &[&id],
+        )
+        .await
+        .unwrap()
+        .get(0)
+}
+
+#[tokio::test]
+async fn each_failure_doubles_the_backoff_up_to_the_maximum() {
+    let Some(db) = Db::open().await else { return };
+    let orders = queue::<OrderPlaced>(&db, order_placed());
+    assert_eq!(
+        (
+            orders.definition().backoff(),
+            orders.definition().max_backoff()
+        ),
+        (Duration::from_secs(60), Duration::from_secs(200))
+    );
+    db.enqueue(orders.definition(), &an_order(1)).await;
+    // Attempt 1 waits the backoff, 2 twice it, and 3 the maximum, under
+    // four times it.
+    for (attempt, wait) in [(1, 60.0), (2, 120.0), (3, 200.0)] {
+        db.execute("UPDATE order_placed_queue SET due_at = now() WHERE state = 'ready'")
+            .await;
+        let claim = orders.claim(1, LEASE).await.unwrap().remove(0);
+        assert_eq!(claim.attempt, attempt);
+        assert!(!orders.fail(&claim.id, &claim.token, "later").await.unwrap());
+        let left = due_in(&db, &claim.id).await;
+        assert!(
+            (wait - 5.0..=wait).contains(&left),
+            "attempt {attempt} is due in {left}s, want about {wait}s"
+        );
+    }
+    db.close().await;
+}
+
+/// Marks a message done `age` ago, as a complete that long ago left it.
+async fn done_ago(db: &Db, table: &str, id: &str, age: &str) {
+    db.pool
+        .get()
+        .await
+        .unwrap()
+        .execute(
+            &format!("UPDATE {table} SET state = 'done', claim_token = NULL, claim_expires_at = NULL, updated_at = now() - $2::text::interval WHERE id = $1::text::uuid"),
+            &[&id, &age],
+        )
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn a_prune_deletes_a_batch_of_messages_done_past_the_retention_and_no_dead_one() {
+    let Some(db) = Db::open().await else { return };
+    let orders = queue::<OrderPlaced>(&db, order_placed());
+    assert_eq!(orders.definition().retain(), Duration::from_secs(3600));
+    for n in 0..5 {
+        db.enqueue(orders.definition(), &an_order(n)).await;
+    }
+    let claims = orders.claim(5, LEASE).await.unwrap();
+    let ids: Vec<&str> = claims.iter().map(|c| c.id.as_str()).collect();
+    // Three done past the hour's retention, one within it, one dead long
+    // since.
+    for id in &ids[..3] {
+        done_ago(&db, "order_placed_queue", id, "2 hours").await;
+    }
+    orders.complete(ids[3], &claims[3].token).await.unwrap();
+    db.execute(&format!(
+        "UPDATE order_placed_queue SET state = 'dead', updated_at = now() - interval '30 days' WHERE id = '{}'",
+        ids[4]
+    ))
+    .await;
+    assert_eq!(orders.prune(0).await.unwrap(), 0);
+    assert_eq!(orders.prune(2).await.unwrap(), 2, "a batch of two");
+    assert_eq!(orders.prune(2).await.unwrap(), 1, "the third");
+    assert_eq!(orders.prune(2).await.unwrap(), 0);
+    db.until("order_placed_queue", "true", 2).await;
+    assert_eq!(db.row("order_placed_queue", ids[3]).await.0, "done");
+    assert_eq!(db.row("order_placed_queue", ids[4]).await.0, "dead");
+    db.close().await;
+}
+
+#[tokio::test]
+async fn a_queue_that_keeps_no_done_message_deletes_it_as_it_completes() {
+    let Some(db) = Db::open().await else { return };
+    let pings = queue::<Ping>(&db, ping());
+    assert_eq!(pings.definition().retain(), Duration::ZERO);
+    db.enqueue(pings.definition(), &Ping { sent_at: None })
+        .await;
+    let claim = pings.claim(1, LEASE).await.unwrap().remove(0);
+    pings.complete(&claim.id, &claim.token).await.unwrap();
+    db.until("ping_queue", "true", 0).await;
+    assert!(pings
+        .complete(&claim.id, &claim.token)
+        .await
+        .unwrap_err()
+        .is_claim_lost());
+    db.close().await;
+}
+
 #[tokio::test]
 async fn an_expired_claim_is_claimed_again_and_the_first_token_is_lost() {
     let Some(db) = Db::open().await else { return };
@@ -691,6 +800,7 @@ fn quick(concurrency: usize, grace: Duration) -> Options {
         concurrency,
         grace,
         idle: Duration::from_millis(50),
+        ..Options::default()
     }
 }
 
@@ -812,6 +922,37 @@ async fn a_long_handler_keeps_its_message_by_extending_its_claim() {
     assert_eq!(
         db.row("order_placed_queue", &id).await,
         ("done".into(), 1, None)
+    );
+    db.close().await;
+}
+
+#[tokio::test]
+async fn a_worker_prunes_the_done_messages_past_the_retention_as_it_starts() {
+    let Some(db) = Db::open().await else { return };
+    let def = order_placed();
+    for n in 0..3 {
+        db.enqueue(&def, &an_order(n)).await;
+    }
+    let orders = queue::<OrderPlaced>(&db, def.clone());
+    let claims = orders.claim(3, LEASE).await.unwrap();
+    for claim in &claims[..2] {
+        done_ago(&db, "order_placed_queue", &claim.id, "1 day").await;
+    }
+    done_ago(&db, "order_placed_queue", &claims[2].id, "1 minute").await;
+    let shutdown = Shutdown::new();
+    let run = tokio::spawn(run_worker(
+        queue::<OrderPlaced>(&db, def),
+        |_order: OrderPlaced| async { Ok::<(), BoxError>(()) },
+        quick(1, Duration::from_secs(1)),
+        shutdown.clone(),
+    ));
+    db.until("order_placed_queue", "true", 1).await;
+    shutdown.cancel();
+    run.await.unwrap().unwrap();
+    assert_eq!(
+        db.row("order_placed_queue", &claims[2].id).await.0,
+        "done",
+        "within the retention"
     );
     db.close().await;
 }

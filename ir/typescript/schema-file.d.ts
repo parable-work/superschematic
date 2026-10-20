@@ -444,6 +444,8 @@ export interface PruneReference {
 export interface QueueDef {
   backoff?: string;
   lease?: string;
+  maxBackoff?: string;
+  retain?: string;
   retries?: number;
 }
 

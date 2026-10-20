@@ -12,13 +12,16 @@ come from. This module runs them over pg, and is part of the package's
 
 enqueue writes a message in the caller's transaction, so it commits with
 the writes that caused it, or not at all. postgresQueue claims, completes,
-fails, extends and releases messages for a worker: a claim takes up to n
-messages that are ready and due, or claimed past their claim's expiry,
+fails, extends, releases and prunes messages for a worker: a claim takes up
+to n messages that are ready and due, or claimed past their claim's expiry,
 with FOR UPDATE SKIP LOCKED, gives each a new claim token and one more
 attempt, and first marks dead each message whose last attempt's claim
-expired. Each change but the claim refuses a token that no longer claims
-the message with ClaimLostError. Delivery is at least once, and times are
-the database's clock.
+expired. Each change but the claim and the prune refuses a token that no
+longer claims the message with ClaimLostError. A failed message waits the
+backoff, doubled for each attempt before it and capped at the maximum
+backoff (D68), and a prune deletes a batch of the messages done for the
+queue's retention, never a dead one. Delivery is at least once, and times
+are the database's clock.
 
 A claimed row's values reach the message as the TypeScript types hold
 them: a timestamp a Date, a date its YYYY-MM-DD text, a 64-bit integer a
@@ -43,7 +46,8 @@ export interface QueueField {
  * A queue's statements on Postgres: insert begins an enqueue; expire marks
  * dead each message whose last attempt's claim expired ($1 the retries);
  * claim claims up to $1 due messages for $2 seconds; complete, fail, extend
- * and release change message $1 while token $2 claims it.
+ * and release change message $1 while token $2 claims it; prune deletes up
+ * to $2 messages done $1 seconds ago or more.
  */
 export interface QueueStatements {
   readonly insert: string;
@@ -53,6 +57,7 @@ export interface QueueStatements {
   readonly fail: string;
   readonly extend: string;
   readonly release: string;
+  readonly prune: string;
 }
 
 /** A queue of a database, whose messages are M, as its types package's ./queues entry exports it. */
@@ -63,10 +68,14 @@ export interface QueueDefinition<M> {
   readonly table: string;
   /** How many times a message whose handler fails is handled again before it is dead. */
   readonly retries: number;
-  /** How long a failed message waits before it is due again. */
+  /** How long a message that failed once waits before it is due again; each failure after doubles it. */
   readonly backoffSeconds: number;
+  /** The longest a failed message waits, however many times it failed. */
+  readonly maxBackoffSeconds: number;
   /** How long a claim holds a message unless its worker extends it. */
   readonly leaseSeconds: number;
+  /** How long a done message stays before a prune deletes it; 0 deletes it as it completes. */
+  readonly retainSeconds: number;
   /** The message's fields, in the order a claim returns their columns. */
   readonly fields: readonly QueueField[];
   readonly statements: QueueStatements;
@@ -123,14 +132,21 @@ export interface PostgresQueue<M> {
   complete(id: string, token: string): Promise<void>;
   /**
    * Records cause on the message id, which token claims, and makes it due
-   * again after the backoff, or dead when its retries are spent. Resolves
-   * to whether the message is dead.
+   * again after the backoff, doubled for each attempt before and capped at
+   * the maximum backoff, or dead when its retries are spent. Resolves to
+   * whether the message is dead.
    */
   fail(id: string, token: string, cause: string): Promise<boolean>;
   /** Holds the message id, which token claims, for leaseSeconds from now, the queue's lease unless given. */
   extend(id: string, token: string, leaseSeconds?: number): Promise<void>;
   /** Gives the message id, which token claims, back, due at once, its attempt not counted. */
   release(id: string, token: string): Promise<void>;
+  /**
+   * Deletes up to limit messages done for the queue's retention or longer,
+   * the oldest first, and resolves to how many it deleted. It never deletes
+   * a dead message.
+   */
+  prune(limit: number): Promise<number>;
 }
 
 /** What a message's member is, unset: absent or null. An enum with a default is also unset when empty, as in Go. */
@@ -200,7 +216,10 @@ export function postgresQueue<M>(pool: QueueQueryable, queue: QueueDefinition<M>
     async fail(id, token, cause) {
       let rows: unknown[];
       try {
-        ({ rows } = await pool.query({ text: queue.statements.fail, values: [id, token, queue.retries, queue.backoffSeconds, cause] }));
+        ({ rows } = await pool.query({
+          text: queue.statements.fail,
+          values: [id, token, queue.retries, queue.backoffSeconds, cause, queue.maxBackoffSeconds],
+        }));
       } catch (error) {
         throw new Error(`fail message ${id} on ${queue.table}: ${errorMessage(error)}`, { cause: error });
       }
@@ -210,6 +229,15 @@ export function postgresQueue<M>(pool: QueueQueryable, queue: QueueDefinition<M>
     },
     extend: (id, token, leaseSeconds = queue.leaseSeconds) => update('extend', queue.statements.extend, id, token, [leaseSeconds]),
     release: (id, token) => update('release', queue.statements.release, id, token),
+    async prune(limit) {
+      if (limit <= 0) return 0;
+      try {
+        const { rowCount } = await pool.query({ text: queue.statements.prune, values: [queue.retainSeconds, limit] });
+        return rowCount ?? 0;
+      } catch (error) {
+        throw new Error(`prune ${queue.table}: ${errorMessage(error)}`, { cause: error });
+      }
+    },
   };
 }
 

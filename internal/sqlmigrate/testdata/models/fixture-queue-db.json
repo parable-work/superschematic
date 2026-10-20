@@ -134,6 +134,14 @@
           "method": "BTREE",
           "name": "idx_order_placed_queue_due_at",
           "where": "state = 'ready'"
+        },
+        {
+          "columns": [
+            "updated_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_order_placed_queue_updated_at",
+          "where": "state = 'done'"
         }
       ],
       "kind": "entity",
@@ -217,6 +225,14 @@
           "method": "BTREE",
           "name": "idx_ping_queue_due_at",
           "where": "state = 'ready'"
+        },
+        {
+          "columns": [
+            "updated_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_ping_queue_updated_at",
+          "where": "state = 'done'"
         }
       ],
       "kind": "entity",

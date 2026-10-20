@@ -13,9 +13,10 @@
 // time: 2 unless it says otherwise. It extends each message's claim
 // while the method runs, completes the message when the method returns nil,
 // fails it when the method returns an error or panics, and logs each
-// outcome. On SIGTERM or SIGINT it claims no more, lets the running methods
-// finish for 8s, cancels the rest and gives their messages back, and
-// exits 0.
+// outcome. As it starts and every five minutes it prunes the queue's done
+// messages past their retention. On SIGTERM or SIGINT it claims no more, lets
+// the running methods finish for 8s, cancels the rest and gives their
+// messages back, and exits 0.
 //
 // The API's implementation is the package at the naming file's
 // [implementation_paths] go template (section 8.5): example.com/schemas/implementation/shop-orders
@@ -139,6 +140,7 @@ func run(logger *zap.Logger) error {
 		Complete: queue.Complete,
 		Fail:     queue.Fail,
 		Release:  queue.Release,
+		Prune:    queue.Prune,
 	}, worker.Options{Concurrency: concurrency, Grace: 8 * time.Second, Logger: logger})
 }
 

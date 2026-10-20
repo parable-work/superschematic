@@ -14,9 +14,11 @@
 // WORKER_CONCURRENCY, which the platform sets, says how many it handles at a
 // time: {{ .Worker.Concurrency }} unless it says otherwise. It extends each message's claim
 // while the method runs, completes the message when the method resolves,
-// fails it when the method rejects, and logs each outcome. On SIGTERM or
-// SIGINT it claims no more, lets the running methods finish for {{ .Worker.GraceSeconds }}s, aborts
-// the rest and gives their messages back, and exits 0.
+// fails it when the method rejects, and logs each outcome. As it starts and
+// every five minutes it prunes the queue's done messages past their
+// retention. On SIGTERM or SIGINT it claims no more, lets the running methods
+// finish for {{ .Worker.GraceSeconds }}s, aborts the rest and gives their messages back, and
+// exits 0.
 //
 // The API's implementation is the package at the naming file's
 // [implementation_paths] typescript template (section 8.6):
@@ -70,6 +72,7 @@ async function run(signal: AbortSignal, pools: { end(): Promise<void> }[]): Prom
       complete: (id, token) => queue.complete(id, token),
       fail: (id, token, cause) => queue.fail(id, token, cause),
       release: (id, token) => queue.release(id, token),
+      prune: limit => queue.prune(limit),
     },
     { signal, concurrency, graceMs: GRACE_MS, logger }
   );

@@ -2821,10 +2821,16 @@ export abstract class FulfilOrders {}
   class of a DB schema, whose fields are the message's. Every argument is
   optional: `retries`, how many times a message whose handler fails is
   handled again before it is dead, five unless set; `backoff`, how long a
-  failed message waits before it is due again, thirty seconds unless set;
-  and `lease`, how long a claim holds a message unless its worker extends
-  it, a minute unless set. Both durations are whole seconds as Go writes
-  them (`90s`, `5m`). The class stays a type, the message, with the role
+  message that failed once waits before it is due again, thirty seconds
+  unless set; `maxBackoff`, the longest a failed message waits as each
+  failure doubles the wait (D68), the backoff or more, an hour unless set
+  or the backoff when that is longer; `lease`, how long a claim holds a
+  message unless its worker extends it, a minute unless set; and
+  `retain`, how long a done message stays before a worker removes it, a
+  week unless set, where `0s` keeps none. Every duration is whole seconds
+  as Go writes them (`90s`, `5m`, `168h`), and `retain` alone may be zero;
+  verification refuses a `maxBackoff` under the backoff, in every form.
+  The class stays a type, the message, with the role
   `EmbeddedStruct`, so every language's types declare it, and the IR
   records the queue on it (`ir.TypeDef.Queue`, `ir.QueueDef`), which the
   data forms write as `queue:` beside the fields. A message's fields are
@@ -2839,9 +2845,12 @@ export abstract class FulfilOrders {}
   `state` (`ready`, `claimed`, `done` or `dead`), `attempts`, `due_at`,
   `claim_expires_at`, `claim_token`, `last_error`, `created_at` and
   `updated_at` (`ir.QueueColumns`). A partial index serves each half of a
-  claim: `due_at` where the state is ready, `claim_expires_at` where it is
-  claimed. The migration plan (D27) carries the table as any table, in
-  every dialect the service lists, the SQLite model included.
+  claim, `due_at` where the state is ready and `claim_expires_at` where it
+  is claimed, and a third the prune, `updated_at` where it is done:
+  nothing changes a done message, so its `updated_at` is when it was done,
+  and the table needs no column of its own for it. The migration plan
+  (D27) carries the table as any table, in every dialect the service
+  lists, the SQLite model included.
 - **Enqueue.** The DB's Go ORM writes `queues.go` with a typed
   `Enqueue<Queue>(ctx, tx, msg)` per queue, which takes the caller's
   `TxInterface`: the message commits with the writes that caused it, or
@@ -2875,12 +2884,17 @@ export abstract class FulfilOrders {}
   takes up to n messages that are ready and due, or claimed past their
   claim's expiry, with `FOR UPDATE SKIP LOCKED`, gives each a new claim
   token (`gen_random_uuid()`) and one more attempt, and returns each with
-  its typed message; `Complete` marks one done; `Fail` records the error
-  and makes it due again after the backoff, or dead once its retries are
-  spent; `Extend` holds a claim longer; `Release` gives one back, due at
-  once, without counting the attempt. Each takes the message's ID and its
-  claim's token and returns `ErrClaimLost` when another claim took the
-  message since. A message whose last attempt's claim expired is dead, so
+  its typed message; `Complete` marks one done, or deletes it when the
+  queue's `retain` is zero; `Fail` records the error and makes it due
+  again after `backoff × 2^(attempt−1)`, capped at `maxBackoff`, computed
+  in the statement from the row's attempts so every language agrees, or
+  dead once its retries are spent; `Extend` holds a claim longer;
+  `Release` gives one back, due at once, without counting the attempt.
+  Each takes the message's ID and its claim's token and returns
+  `ErrClaimLost` when another claim took the message since. `Prune(ctx,
+  limit)` deletes up to `limit` messages done for the retention or longer,
+  the oldest first, with `FOR UPDATE SKIP LOCKED`, and returns how many;
+  it never deletes a dead message, which waits for an operator. A message whose last attempt's claim expired is dead, so
   a message that kills its worker every time stops coming back. Times are
   the database's clock. Delivery is at least once, and handlers are
   idempotent. The Go ORM runs on Postgres alone, and so does the
@@ -2944,6 +2958,14 @@ export abstract class FulfilOrders {}
     returns an error or panics; logs each outcome; and waits a second
     after a claim that found nothing, and longer, up to thirty seconds,
     after one that failed;
+  - prunes the queue as it starts and every five minutes after
+    (`worker.DefaultPruneEvery`): it runs the ORM's `Prune` with batches
+    of a thousand (`worker.PruneBatch`), each with five seconds to answer,
+    until a batch is short, and logs `done messages pruned` with `pruned`,
+    or `pruning the done messages failed` with `pruned` and `error`, which
+    the next prune tries again. Every instance of every worker of the
+    queue prunes; a batch skips the rows another holds, and a row deleted
+    once is gone, so they need no coordination;
   - on SIGTERM or SIGINT claims no more, lets the running methods finish
     within the grace, then cancels them, releases their messages and
     exits 0.
@@ -2954,8 +2976,9 @@ export abstract class FulfilOrders {}
   `createWorkers` and runs
   `runWorker` (`@superschematic/http-runtime/worker`), the twin of
   `worker.Run`, over `postgresQueue`'s claims, with the concurrency
-  `workerConcurrency` reads from `WORKER_CONCURRENCY`. Each method gets a
-  signal that aborts when the grace is over. JavaScript cannot stop a
+  `workerConcurrency` reads from `WORKER_CONCURRENCY`, and prunes as Go's
+  does through `postgresQueue`'s `prune`. Each method gets a signal that
+  aborts when the grace is over. JavaScript cannot stop a
   method that ignores it: its message is released all the same, and its
   outcome, when it comes, is logged and changes nothing, since the process
   exits once the loop stops.
@@ -2969,7 +2992,7 @@ export abstract class FulfilOrders {}
   through the API crate), and runs the HTTP runtime's `worker::run_worker`,
   Go's loop ported, over a `queue::PostgresQueue` of it, with the
   concurrency `worker::concurrency_from_env` reads from
-  `WORKER_CONCURRENCY` and the resolved grace. It logs `worker started`
+  `WORKER_CONCURRENCY` and the resolved grace, pruning as Go's does. It logs `worker started`
   with the API, the class, the queue and the concurrency, and the loop's
   lines, which name the worker as `worker`, and `Shutdown` logs `shutting
   down` on SIGTERM, a line the Go and TypeScript workers do not write.
@@ -3020,11 +3043,9 @@ Not built:
 
 - A `POINT` or `INTERVAL` column in a TypeScript queue's message.
 - Claims on SQLite and D1, whose write transaction would claim.
-- Removing `done` messages, which stay in the table.
 - `stack queue` on a cloud environment: on gcp, the queue document run as
   an execution of the migration job, which reaches Cloud SQL, with its
   result read back from Cloud Logging as a failed migration's error is.
-- A backoff that grows with each attempt.
 
 The engine's work-queue behaviors (D16) stay the engine's. A stack does
 not deploy the engine, whose single SQLite writer Cloud Run cannot keep.
