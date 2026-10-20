@@ -35,22 +35,32 @@
 //! (D61, amended): a search box, a "Find" button and a select of the items
 //! the box's text finds, the first page of the search, the value held
 //! among them by its label. `<form>_choices` gives each picker its `Pick`:
-//! a filter's every picker searches its text, a post's only the one whose
-//! "Find" it pressed (`find:<control>`), and the rest list the first page.
-//! One listing a distinct text, at most `MAX_LOOKUP_CALLS` texts a target
-//! a render, and the values held named through the lookup, as a record's
-//! are. A picker is a shard, `<target>_pick`, at
+//! every picker searches the text its box holds, a filter's as its query
+//! sends it and a post's as it posts it, so the box always says what its
+//! select lists. One listing a distinct text, and at most
+//! `MAX_LOOKUP_CALLS` distinct texts a request through one options
+//! operation, every picker of every form and target counted together; a
+//! text past them lists the first page with `TOO_MANY_SEARCHES`, but the
+//! picker whose "Find" a post pressed (`find:<control>`) is searched past
+//! them. The values held are named through the lookup, as a record's are.
+//! A picker is a shard, `<target>_pick`, at
 //! `/_superschematic/{{ .SchemaName }}/_pick/<target>`: with Topcoat's runtime
-//! it renders again as the reader types, and without it "Find" submits
-//! the form. The shard meets its options operation's rate limit and
-//! timeout, as a page that calls it does.
+//! it renders again as the reader types and each time the reader presses
+//! "Find", and without it "Find" submits the form. The shard meets its
+//! options operation's rate limit and timeout, as a page that calls it
+//! does.
 {{- end }}
 
 {{ $crate := . }}
 {{- with .References -}}
 {{ if or .Records .Trails .Picking -}}
 use std::collections::BTreeSet;
-{{- if .PickControlled }}
+{{- if and .Picking .PickControlled }}
+use std::sync::{Arc, Mutex, PoisonError};
+use std::time::Duration;
+{{- else if .Picking }}
+use std::sync::{Mutex, PoisonError};
+{{- else if .PickControlled }}
 use std::sync::Arc;
 use std::time::Duration;
 {{- end }}
@@ -97,14 +107,39 @@ use topcoat::view::{View, view};
 
 /// The most calls one target's lookup makes for one `<record>_labels`
 /// call, which names the values of the records it is given; a value past
-/// them shows as it is.{{ if .Picking }} A form's pickers of one target search at most
-/// this many texts a render (D61, amended).{{ end }}
+/// them shows as it is.{{ if .Picking }} A request's pickers search at most this many
+/// distinct texts through one options operation (D61, amended).{{ end }}
 pub const MAX_LOOKUP_CALLS: usize = 10;
 {{- if .Picking }}
 
-/// What a picker past a render's `MAX_LOOKUP_CALLS` searches says, beside
+/// What a picker past a request's `MAX_LOOKUP_CALLS` searches says, beside
 /// the first page it lists.
 const TOO_MANY_SEARCHES: &str = "Too many searches at once; search this one again";
+
+/// The distinct texts a request's pickers searched through one options
+/// operation (D61, amended), which its `<operation>_searched` keeps for the
+/// request: at most `MAX_LOOKUP_CALLS`, past which only a pressed "Find"'s
+/// text is searched.
+#[derive(Debug, Default)]
+struct Searched(Mutex<BTreeSet<String>>);
+
+impl Searched {
+    /// Whether a picker searches `text`: one the request searched already,
+    /// one of its first `MAX_LOOKUP_CALLS` distinct texts, or the text of
+    /// the picker whose "Find" the reader pressed, `pressed`, which counts
+    /// but is searched past them.
+    fn admits(&self, text: &str, pressed: bool) -> bool {
+        let mut searched = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        if searched.contains(text) {
+            return true;
+        }
+        if searched.len() >= MAX_LOOKUP_CALLS && !pressed {
+            return false;
+        }
+        searched.insert(text.to_owned());
+        true
+    }
+}
 {{- end }}
 {{- if .Records }}
 
@@ -303,6 +338,12 @@ async fn {{ .Search.Fn }}(cx: &Cx, text: &str) -> Option<Result<Listed, String>>
         Err(_) => None,
     }
 }
+
+{{ doc (printf "The distinct texts the request's pickers searched through %s, every target's and every form's, kept for the request (`#[memoize]`), so one `MAX_LOOKUP_CALLS` caps them all (D61, amended)." .Operation) }}
+#[memoize]
+fn {{ .Search.Searched }}(cx: &Cx) -> Searched {
+    Searched::default()
+}
 {{- end }}
 {{- end }}
 {{- range .Lookups }}
@@ -375,16 +416,12 @@ async fn {{ .Base }}_target_labels(cx: &Cx, values: &BTreeSet<String>) -> Vec<Ch
 {{- end }}
 {{- if $m.UsesPick . }}
 
-{{ doc (printf "The picks of controls that refer to %s (D61, amended), one per `(value, text, search)` wanted: when `search`, the items `text` finds through %s's `%s`, else the first page of them all; the first `MAX_LOOKUP_CALLS` distinct texts are searched, one listing each, and a text past them lists the first page with `TOO_MANY_SEARCHES`. The value held is always an option, named by its %s through `%s_target_labels`, which names every value no match holds at once. None for each when the caller may not list the items or the call fails." .Target .Options.Operation .Options.Search.Arg (or (and .Label (printf "%s" .Label)) "value") .Base) }}
+{{ doc (printf "The picks of controls that refer to %s (D61, amended), one per `(value, text, pressed)` wanted: the items `text` finds through %s's `%s`, the first page of them all for an empty one, one listing a distinct text. The request searches at most `MAX_LOOKUP_CALLS` distinct texts through it, counted by `%s` for every picker it lists; a text past them lists the first page with `TOO_MANY_SEARCHES`, unless `pressed` says its \"Find\" is the one the reader pressed. The value held is always an option, named by its %s through `%s_target_labels`, which names every value no match holds at once. None for each when the caller may not list the items or the call fails." .Target .Options.Operation .Options.Search.Arg .Options.Search.Searched (or (and .Label (printf "%s" .Label)) "value") .Base) }}
 async fn {{ .Base }}_target_picks(cx: &Cx, wanted: &[(String, String, bool)]) -> Vec<Option<Pick>> {
-    let mut searched: Vec<&str> = Vec::new();
+    let searched = {{ .Options.Search.Searched }}(cx);
     let mut found = Vec::with_capacity(wanted.len());
-    for (_, text, search) in wanted {
-        let text = if *search { text.as_str() } else { "" };
-        let capped = !text.is_empty() && !searched.contains(&text) && searched.len() >= MAX_LOOKUP_CALLS;
-        if !text.is_empty() && !capped && !searched.contains(&text) {
-            searched.push(text);
-        }
+    for (_, text, pressed) in wanted {
+        let capped = !text.is_empty() && !searched.admits(text, *pressed);
         found.push(match {{ .Options.Search.Fn }}(cx, if capped { "" } else { text }).await {
             None => None,
             Some(Ok(listed)) => Some((choices_of(&listed.items, {{ rustString .Value }}, {{ .LabelExpr }}), listed.more, capped.then(|| TOO_MANY_SEARCHES.to_owned()))),
@@ -416,7 +453,7 @@ async fn {{ .Base }}_target_picks(cx: &Cx, wanted: &[(String, String, bool)]) ->
         .collect()
 }
 
-{{ doc (printf "The picker of a control that refers to %s (D61, amended): a search box of `pick`'s text, a \"Find\" button and a select of its options, the value held selected, a note when more match and the search's refusal. A shard: when the app loads Topcoat's runtime, the box's text renders it again as the reader types, through `%s_target_picks`, the value the select holds kept; without the runtime it renders in place, and \"Find\" submits its form. A caller who may not list the items gets the plain control and the value." .Target .Base) }}
+{{ doc (printf "The picker of a control that refers to %s (D61, amended): a search box of `pick`'s text, a \"Find\" button and a select of its options, the value held selected, a note when more match and the search's refusal. A shard: when the app loads Topcoat's runtime, it renders again through `%s_target_picks`, the value the select holds kept, as the reader types and each time the reader presses \"Find\", the text unchanged too, so a pick past the request's `MAX_LOOKUP_CALLS` searches; without the runtime it renders in place, and \"Find\" submits its form. A caller who may not list the items gets the plain control and the value." .Target .Base) }}
 #[shard({{ rustString (.PickPath $crate.SchemaName) }})]
 pub async fn {{ .Base }}_pick(cx: &Cx, control: PickControl, pick: Pick) -> topcoat::Result<impl View> {
     let typed = pick.text.clone();
@@ -425,9 +462,14 @@ pub async fn {{ .Base }}_pick(cx: &Cx, control: PickControl, pick: Pick) -> topc
     let value = signal(cx, move || held);
     // The reader typed, so the shard searches what the box holds.
     let searched = signal(cx, || false);
+    // How many times the reader pressed "Find": tracked, so each press
+    // renders the shard again and searches the box's text, the same text
+    // too.
+    let presses = signal(cx, || 0_u32);
     let typed = text.get();
+    let pressed = presses.get() > 0;
     let held = value.get_untracked();
-    let pick = if searched.get_untracked() {
+    let pick = if pressed || searched.get_untracked() {
         {{ .Base }}_target_picks(cx, &[(held.clone(), typed.clone(), true)]).await.pop().flatten()
     } else {
         Some(pick)
@@ -446,12 +488,12 @@ pub async fn {{ .Base }}_pick(cx: &Cx, control: PickControl, pick: Pick) -> topc
                     if control.post {
                         <button type="submit" name="_action" value=(find) formnovalidate=(true) @click=$(|e: Event| {
                             e.prevent_default();
-                            searched.set(true)
+                            presses.increment()
                         })>"Find"</button>
                     } else {
                         <button type="submit" formnovalidate=(true) @click=$(|e: Event| {
                             e.prevent_default();
-                            searched.set(true)
+                            presses.increment()
                         })>"Find"</button>
                     }
                     <select id=(control.id.clone()) name=(control.name.clone()) required=(control.required) aria-invalid=(invalid) @change=$(|e: Event| value.set(e.target.value))>
@@ -486,7 +528,7 @@ pub(crate) async fn {{ .Base }}_target_label(cx: &Cx, value: &str) -> Option<Str
 {{- range .Forms }}
 {{- $form := . }}
 
-{{ doc (printf "The options of each control of `%s` that refers to an item, by its path, under `choices`, the app's, which win where they name the control: %s.%s" .Form .SitesText (or (and .Picks (printf " A picker's control has its pick by its name, from `form`: %s, the values held among them (D61, amended). A control keeps its own when the caller may not list the items, and one that does not pick when more follow than a page holds." (or (and .Get "the items each picker's text finds") "the items the text of the picker whose \"Find\" the post pressed finds, and the first page for the others"))) " A control keeps its own when the caller may not list the items, or more follow than a page holds.")) }}
+{{ doc (printf "The options of each control of `%s` that refers to an item, by its path, under `choices`, the app's, which win where they name the control: %s.%s" .Form .SitesText (or (and .Picks (printf " A picker's control has its pick by its name, from `form`: the items its text finds, %s, the values held among them (D61, amended). A control keeps its own when the caller may not list the items, and one that does not pick when more follow than a page holds." (or (and .Get "as the query sends it") "as the post sends it, the text of the picker whose \"Find\" it pressed searched past the request's `MAX_LOOKUP_CALLS`"))) " A control keeps its own when the caller may not list the items, or more follow than a page holds.")) }}
 pub async fn {{ .Fn }}(cx: &Cx, form: &{{ .Form }}, choices: Choices) -> Choices {
 {{- if not .Picks }}
     let _ = form;
@@ -510,7 +552,7 @@ pub async fn {{ .Fn }}(cx: &Cx, form: &{{ .Form }}, choices: Choices) -> Choices
 {{- end }}
         let wanted: Vec<(String, String, bool)> = controls
             .iter()
-            .map(|(name, value)| (value.clone().unwrap_or_default(), form.finds.text(name).to_owned(), {{ if $form.Get }}true{{ else }}form.finds.pressed(name){{ end }}))
+            .map(|(name, value)| (value.clone().unwrap_or_default(), form.finds.text(name).to_owned(), {{ if $form.Get }}false{{ else }}form.finds.pressed(name){{ end }}))
             .collect();
         for ((name, _), pick) in controls.into_iter().zip({{ .Source.Base }}_target_picks(cx, &wanted).await) {
             if let Some(pick) = pick {

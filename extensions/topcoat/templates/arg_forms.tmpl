@@ -258,10 +258,12 @@ impl {{ .Name }} {
 {{- if .Acts }}
 {{- if and .InputActs .Picks }}
 
-    /// Applies the button that submitted the form to its input
-    /// (`{{ .Input.Struct.Name }}::apply_action`), a picker's "Find", an argument's or the
-    /// input's, recorded as pressed (D61, amended): true when one did, and
-    /// the page renders the form again without calling the operation.
+    /// Applies the button that submitted the form to its input, as
+    /// `{{ .Input.Struct.Name }}::apply_action` does, a picker's "Find", an argument's or
+    /// the input's, recorded as pressed (D61, amended){{ if and .Input.Struct.Picks .Input.Struct.Rows }}, and a removed
+    /// row's texts dropped, those of the rows after it numbered again{{ end }}: true
+    /// when one did, and the page renders the form again without calling
+    /// the operation.
 {{- else if .InputActs }}
 
     /// Applies the row button that submitted the form to its input's rows
@@ -271,12 +273,29 @@ impl {{ .Name }} {
 {{- end }}
 {{- if .InputActs }}
     pub fn apply_action(&mut self) -> bool {
-{{- if .Picks }}
+{{- if and .Picks .Input.Struct.Picks }}
+        let Some(action) = self.input.row_action.take() else {
+            return false;
+        };
+        if let Some(name) = action.strip_prefix("find:") {
+            self.finds.pressed = Some(name.to_owned());
+        }
+{{- if .Input.Struct.Rows }}
+        if let Some(removed) = self.input.apply(&action) {
+            self.finds.removed(&removed);
+        }
+{{- else }}
+        self.input.apply(&action);
+{{- end }}
+        true
+{{- else if .Picks }}
         if let Some(name) = self.input.row_action.as_deref().and_then(|action| action.strip_prefix("find:")) {
             self.finds.pressed = Some(name.to_owned());
         }
-{{- end }}
         self.input.apply_action()
+{{- else }}
+        self.input.apply_action()
+{{- end }}
     }
 {{- else }}
 

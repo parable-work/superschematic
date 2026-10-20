@@ -70,12 +70,10 @@ type crate struct {
 	// Pages are the pages of each resource the operations describe, nil
 	// unless outputs.topcoat.pages turns them on (pages.go).
 	Pages *pagesModel
-	// Hosted are the crates of the API dependencies one app hosts beside
-	// the service (D61, amended), by service, which a reference whose
-	// options operation is the dependency's calls in-process; hostedNot
-	// why each other API dependency has none.
-	Hosted    map[string]*hostedCrate
-	hostedNot map[string]string
+	// hosting gives the crates of the API dependencies one app hosts
+	// beside the service (D61, amended), each read the first time a
+	// reference's options operation is the dependency's.
+	hosting *hosting
 	// noCalls is why each operation without an in-process call has none.
 	noCalls map[*ir.FieldDef]string
 }
@@ -89,6 +87,10 @@ type hostedCrate struct {
 	Crate   string // schemas-fixture-console-suppliers-api-topcoat
 	Ident   string // schemas_fixture_console_suppliers_api_topcoat
 	Path    string // ../fixture-console-suppliers-api
+	// Identity reports that its API authenticates with the identity
+	// runtime (D50), so its crate declares the identity-* features, which
+	// the referring crate's forward to it when it declares them too.
+	Identity bool
 	// calls are its in-process calls by operation, noCall why each other
 	// operation has none.
 	calls  map[*ir.FieldDef]declared
@@ -102,80 +104,153 @@ type hostedCrate struct {
 // Cargo.toml depends on.
 func (c *crate) UsedHosted() []*hostedCrate {
 	var out []*hostedCrate
-	for _, service := range sortedKeys(c.Hosted) {
-		if h := c.Hosted[service]; h.used {
+	if c.hosting == nil {
+		return out
+	}
+	for _, service := range sortedKeys(c.hosting.crates) {
+		if h := c.hosting.crates[service]; h != nil && h.used {
 			out = append(out, h)
 		}
 	}
 	return out
 }
 
-// hostedCrates are the crates of the service's API dependencies that one
+// IdentityHosted are the hosted crates a reference calls whose API
+// authenticates with the identity runtime, when the crate's does too: its
+// identity-* features turn theirs on, so one feature picks the store of
+// every crate the app's pages call.
+func (c *crate) IdentityHosted() []*hostedCrate {
+	if !c.Identity {
+		return nil
+	}
+	var out []*hostedCrate
+	for _, h := range c.UsedHosted() {
+		if h.Identity {
+			out = append(out, h)
+		}
+	}
+	return out
+}
+
+// hosting resolves the crates of the service's API dependencies that one
 // app hosts beside it (D61, amended), by service: each one the table lists
 // beside the service, whose API server is Rust and whose Topcoat crate the
-// build wrote before the service's, as build --with-deps and build-all
-// do. Each other API dependency has the reason the build log gives.
-func hostedCrates(c registry.GenerateContext, table Table) (map[string]*hostedCrate, map[string]string, error) {
-	hosted, not := map[string]*hostedCrate{}, map[string]string{}
-	self := c.Config.Name
-	for _, dep := range c.Config.Dependencies {
-		if dep.Kind != ir.SchemaKindAPI {
-			continue
-		}
-		if !slices.Contains(table.Services, dep.Name) || !slices.Contains(table.Services, self) {
-			not[dep.Name] = fmt.Sprintf("[extension.topcoat] services does not list %s beside %s, so no app hosts both", dep.Name, self)
-			continue
-		}
-		api, err := registry.RustAPIOfService(c, dep.Name)
-		if err != nil {
-			return nil, nil, fmt.Errorf("topcoat: the API of %s, a dependency of %s: %w", dep.Name, self, err)
-		}
-		if api == nil {
-			not[dep.Name] = dep.Name + "'s API server is not Rust, so it has no crate"
-			continue
-		}
-		dir := Dir(c.Options.OutputRoot, dep.Name)
-		if _, err := os.Stat(filepath.Join(dir, "Cargo.toml")); err != nil {
-			not[dep.Name] = dep.Name + "'s Topcoat crate is not in the output root, which a build of it first writes (build --with-deps)"
-			continue
-		}
-		schema, err := c.LoadDependency(dep.Name)
-		if err != nil {
-			return nil, nil, fmt.Errorf("topcoat: load dependency %s: %w", dep.Name, err)
-		}
-		rel, err := filepath.Rel(Dir(c.Options.OutputRoot, self), dir)
-		if err != nil {
-			return nil, nil, fmt.Errorf("topcoat: path to the Topcoat crate of %s: %w", dep.Name, err)
-		}
-		h := &hostedCrate{
-			Service: dep.Name,
-			Crate:   c.Options.Naming.RustCratePrefix + dep.Name + "-topcoat",
-			Path:    filepath.ToSlash(rel),
-			calls:   map[*ir.FieldDef]declared{},
-			noCall:  map[*ir.FieldDef]string{},
-		}
-		h.Ident = strings.ReplaceAll(h.Crate, "-", "_")
-		for _, endpoint := range api.AllEndpoints() {
-			if endpoint.Manual {
-				continue
-			}
-			op, err := schemaSet{schema}.operation(endpoint)
-			if err != nil {
-				return nil, nil, err
-			}
-			reason := noCall(endpoint, op)
-			if reason == "" && requiresService(endpoint) {
-				reason = "its route admits only a service caller (@requireService)"
-			}
-			if reason != "" {
-				h.noCall[op] = reason
-				continue
-			}
-			h.calls[op] = declared{endpoint, op}
-		}
-		hosted[dep.Name] = h
+// build wrote before the service's, as build --with-deps and build-all do.
+// A dependency is read only when a reference's options operation is its
+// own, and once: one that no reference calls costs nothing and fails
+// nothing, and one that cannot be hosted, its API unreadable among the
+// reasons, leaves the reference out with the reason in the build log.
+type hosting struct {
+	c     registry.GenerateContext
+	table Table
+	// crates are the dependencies read so far, nil for one that has no
+	// hosted crate, and not why.
+	crates map[string]*hostedCrate
+	not    map[string]string
+}
+
+func newHosting(c registry.GenerateContext, table Table) *hosting {
+	return &hosting{c: c, table: table, crates: map[string]*hostedCrate{}, not: map[string]string{}}
+}
+
+// crate is the hosted crate of service, an API dependency, read the first
+// time it is asked for; nil, with why, when it has none.
+func (h *hosting) crate(service string) (*hostedCrate, string) {
+	if crate, read := h.crates[service]; read {
+		return crate, h.not[service]
 	}
-	return hosted, not, nil
+	crate, reason := h.read(service)
+	h.crates[service], h.not[service] = crate, reason
+	return crate, reason
+}
+
+// read builds the hosted crate of service, or gives why it has none.
+func (h *hosting) read(service string) (*hostedCrate, string) {
+	c := h.c
+	self := c.Config.Name
+	isAPI := false
+	for _, dep := range c.Config.Dependencies {
+		isAPI = isAPI || dep.Name == service && dep.Kind == ir.SchemaKindAPI
+	}
+	switch {
+	case !isAPI:
+		return nil, fmt.Sprintf("%s is not an API dependency of %s", service, self)
+	case !slices.Contains(h.table.Services, service) || !slices.Contains(h.table.Services, self):
+		return nil, fmt.Sprintf("[extension.topcoat] services does not list %s beside %s, so no app hosts both", service, self)
+	}
+	api, err := registry.RustAPIOfService(c, service)
+	if err != nil {
+		return nil, fmt.Sprintf("%s's Rust API could not be read: %v", service, err)
+	}
+	if api == nil {
+		return nil, noRustAPI(c, service)
+	}
+	dir := Dir(c.Options.OutputRoot, service)
+	if _, err := os.Stat(filepath.Join(dir, "Cargo.toml")); err != nil {
+		return nil, service + "'s Topcoat crate is not in the output root, which a build of it first writes (build --with-deps)"
+	}
+	schema, err := c.LoadDependency(service)
+	if err != nil {
+		return nil, fmt.Sprintf("%s's schema could not be read: %v", service, err)
+	}
+	rel, err := filepath.Rel(Dir(c.Options.OutputRoot, self), dir)
+	if err != nil {
+		return nil, fmt.Sprintf("the path to %s's Topcoat crate: %v", service, err)
+	}
+	crate := &hostedCrate{
+		Service:  service,
+		Crate:    c.Options.Naming.RustCratePrefix + service + "-topcoat",
+		Path:     filepath.ToSlash(rel),
+		Identity: api.Identity != nil,
+		calls:    map[*ir.FieldDef]declared{},
+		noCall:   map[*ir.FieldDef]string{},
+	}
+	crate.Ident = strings.ReplaceAll(crate.Crate, "-", "_")
+	for _, endpoint := range api.AllEndpoints() {
+		if endpoint.Manual {
+			continue
+		}
+		op, err := schemaSet{schema}.operation(endpoint)
+		if err != nil {
+			return nil, fmt.Sprintf("%s's Rust API does not match its schema: %v", service, err)
+		}
+		reason := noCall(endpoint, op)
+		if reason == "" && requiresService(endpoint) {
+			reason = "its route admits only a service caller (@requireService)"
+		}
+		if reason != "" {
+			crate.noCall[op] = reason
+			continue
+		}
+		crate.calls[op] = declared{endpoint, op}
+	}
+	return crate, ""
+}
+
+// noRustAPI is why registry.RustAPIOfService gave service, an API
+// dependency, no Rust API crate: its config generates no API server, its
+// server is not Rust, or its schema declares no operations.
+func noRustAPI(c registry.GenerateContext, service string) string {
+	var outputs *registry.Outputs
+	cfg, err := c.Options.LoadDependencyConfig(service)
+	if err == nil {
+		outputs, err = registry.ParseOutputs(cfg.Outputs, c.Registry)
+	}
+	if err != nil {
+		return fmt.Sprintf("%s's config could not be read: %v", service, err)
+	}
+	return noRustAPIOf(service, outputs)
+}
+
+// noRustAPIOf is noRustAPI's reason, from the dependency's outputs.
+func noRustAPIOf(service string, outputs *registry.Outputs) string {
+	switch {
+	case !outputs.APIEnabled():
+		return service + "'s config generates no API server, so it has no crate"
+	case outputs.API.Language != registry.APILanguageRust:
+		return service + "'s API server is not Rust, so it has no crate"
+	}
+	return service + " declares no operations, so its API crate has none to call"
 }
 
 // operation is one operation of the service, from the API crate's own
@@ -350,9 +425,7 @@ func newCrate(c registry.GenerateContext, api *registry.RustAPI, cfg Config, tab
 	if err != nil {
 		return nil, err
 	}
-	if out.Hosted, out.hostedNot, err = hostedCrates(c, table); err != nil {
-		return nil, err
-	}
+	out.hosting = newHosting(c, table)
 	// The operations a page calls in-process, and of those the ones browser
 	// code calls through a procedure.
 	var inProcess, fromBrowser []declared
@@ -550,9 +623,10 @@ func (c *crate) HasChoices() bool { return c.HasForms() || len(c.Views) > 0 }
 // "rows" for writing an input form; "first", "values", "postedText" and
 // "postedRows" for reading a post, and "maxRows" when a list's limit is
 // MAX_ROWS; "args", "argsSingle", "argsList", "argsInput" and "query" for
-// argument forms; "noRows", "choosable"; and what a rendered control
-// needs ("checked", "localDateTime", "showsAll", "showsRow",
-// "showsRows").
+// argument forms; "noRows", "choosable"; "picks" for a search picker's
+// form, and "pickRows" for one with rows, whose removal numbers the
+// pickers' texts again; and what a rendered control needs ("checked",
+// "localDateTime", "showsAll", "showsRow", "showsRows").
 func (c *crate) FormsUse(item string) bool {
 	return c.formUses()[item]
 }
@@ -563,6 +637,7 @@ func (c *crate) formUses() map[string]bool {
 	for _, f := range c.Forms {
 		uses["choosable"] = uses["choosable"] || f.Choosable
 		uses["picks"] = uses["picks"] || f.Picks
+		uses["pickRows"] = uses["pickRows"] || f.Picks && f.Struct.Rows
 	}
 	for _, st := range c.FormStructs {
 		if st.Rows {
@@ -596,6 +671,7 @@ func (c *crate) formUses() map[string]bool {
 	for _, f := range c.ArgForms {
 		uses["args"], uses["choosable"] = true, uses["choosable"] || f.Choosable
 		uses["picks"] = uses["picks"] || f.Picks
+		uses["pickRows"] = uses["pickRows"] || f.Picks && f.Input != nil && f.Input.Struct.Picks && f.Input.Struct.Rows
 		uses["query"] = uses["query"] || f.IsGet()
 		uses["argsInput"] = uses["argsInput"] || f.Input != nil
 		if f.Paged {
@@ -808,18 +884,7 @@ func (c *crate) write(dir string) error {
 	if c.Pages != nil {
 		files = append(files, struct{ template, path string }{"pages.tmpl", filepath.Join("src", "pages.rs")})
 	}
-	funcs := template.FuncMap{
-		"rustString":   rustString,
-		"escapeBraces": escapeBraces,
-		"join":         strings.Join,
-		"doc":          doc,
-		"doc4":         doc4,
-		"lowerFirst":   lowerFirst,
-	}
-	for name, fn := range pageFuncs {
-		funcs[name] = fn
-	}
-	tmpl, err := template.New("topcoat").Funcs(funcs).ParseFS(templates, "templates/*.tmpl")
+	tmpl, err := parseTemplates()
 	if err != nil {
 		return err
 	}
@@ -843,6 +908,23 @@ func (c *crate) write(dir string) error {
 		}
 	}
 	return nil
+}
+
+// parseTemplates parses the crate's templates with the functions they
+// call.
+func parseTemplates() (*template.Template, error) {
+	funcs := template.FuncMap{
+		"rustString":   rustString,
+		"escapeBraces": escapeBraces,
+		"join":         strings.Join,
+		"doc":          doc,
+		"doc4":         doc4,
+		"lowerFirst":   lowerFirst,
+	}
+	for name, fn := range pageFuncs {
+		funcs[name] = fn
+	}
+	return template.New("topcoat").Funcs(funcs).ParseFS(templates, "templates/*.tmpl")
 }
 
 // pascalCase is a service name as a Rust type name: shop-orders is

@@ -25,10 +25,12 @@
 //! picker (D61, amended): a search box named `_find.<control>`, a "Find"
 //! button and a select of what the box's text finds, its pick, which the
 //! form's choices give it (`references`). The form holds every box's text
-//! in `finds`. A post's "Find" is a row button, `_action=find:<control>`,
-//! which `apply_action` records as pressed, so the page renders the form
-//! again with what that text finds; a filter's sends its query. Ahead of
-//! every "Find" a hidden submit button is what Enter presses.
+//! in `finds`, and each picker lists what its text finds. A post's "Find"
+//! is a row button, `_action=find:<control>`, which `apply_action` records
+//! as pressed, so the page renders the form again, that text searched
+//! first; a filter's sends its query. A removed row's texts go with it, and
+//! the rows after it keep theirs, numbered again. Ahead of every "Find" a
+//! hidden submit button is what Enter presses.
 {{- end }}
 
 use std::collections::BTreeMap;
@@ -331,7 +333,7 @@ impl Finds {
     }
 
     /// Whether a post's "Find" was the one of the picker named `name`, so
-    /// it searches its text.
+    /// its text is searched past the request's `MAX_LOOKUP_CALLS`.
     pub fn pressed(&self, name: &str) -> bool {
         self.pressed.as_deref() == Some(name)
     }
@@ -343,7 +345,59 @@ impl Finds {
         texts_under(posted, String::new(), &mut texts);
         Self { texts, pressed: None }
     }
+{{- if .FormsUse "pickRows" }}
+
+    /// Numbers the texts again after a row button removed the row at
+    /// `path`, as `act` numbers the rows: the row's own texts go with it,
+    /// and those of each row after it move up one, so a picker keeps its
+    /// row's text.
+    fn removed(&mut self, path: &[Segment]) {
+        let Some((&Segment::Index(gone), list)) = path.split_last() else {
+            return;
+        };
+        for (name, text) in std::mem::take(&mut self.texts) {
+            let Some(mut steps) = segments(&name).filter(|steps| steps.starts_with(list)) else {
+                self.texts.insert(name, text);
+                continue;
+            };
+            match steps.get(list.len()) {
+                Some(&Segment::Index(index)) if index == gone => {}
+                Some(&Segment::Index(index)) if index > gone => {
+                    steps[list.len()] = Segment::Index(index - 1);
+                    self.texts.insert(name_of(&steps), text);
+                }
+                _ => {
+                    self.texts.insert(name, text);
+                }
+            }
+        }
+    }
+{{- end }}
 }
+{{- if .FormsUse "pickRows" }}
+
+/// A control's name from its steps, as `segments` reads one:
+/// `rooms[0].roomId`.
+fn name_of(steps: &[Segment]) -> String {
+    let mut name = String::new();
+    for step in steps {
+        match step {
+            Segment::Key(key) => {
+                if !name.is_empty() {
+                    name.push('.');
+                }
+                name.push_str(key);
+            }
+            Segment::Index(index) => {
+                name.push('[');
+                name.push_str(&index.to_string());
+                name.push(']');
+            }
+        }
+    }
+    name
+}
+{{- end }}
 
 /// The last text posted at each name under `posted`, `at` the name so far.
 fn texts_under(posted: &Posted, at: String, out: &mut BTreeMap<String, String>) {
@@ -1017,11 +1071,12 @@ impl {{ .Name }} {
     /// Applies the button that submitted the form, `row_action`: `add:` and
     /// a list's name adds a row to it unless it holds its listMax, and
     /// `remove:` and a row's name removes the row unless its list holds no
-    /// more than its listMin; the other rows keep their values, numbered
-    /// again. `find:` and a picker's name records its "Find" as pressed (D61,
-    /// amended). True when a row button or a "Find" submitted the form,
-    /// whether or not the list's bounds let it act: the page renders the
-    /// form again and does not call the operation.
+    /// more than its listMin; the other rows keep their values and their
+    /// pickers' texts, numbered again. `find:` and a picker's name records
+    /// its "Find" as pressed (D61, amended). True when a row button or a
+    /// "Find" submitted the form, whether or not the list's bounds let it
+    /// act: the page renders the form again and does not call the
+    /// operation.
 {{- else if .Rows }}
 
     /// Applies the row button that submitted the form, `row_action`: `add:`
@@ -1043,12 +1098,46 @@ impl {{ .Name }} {
             return false;
         };
 {{- if .Picks }}
+        self.apply(&action);
+        true
+    }
+{{- if .Rows }}
+
+    /// Applies `action`, the `_action` of the button that submitted the
+    /// form: a "Find", recorded as pressed, or a row button's, within its
+    /// list's bounds, the texts in `finds` numbered again as the rows are.
+    /// The path of the row it removed, if it removed one, by which an
+    /// argument form that embeds the input numbers its own texts.
+{{- else }}
+
+    /// Applies `action`, the `_action` of the button that submitted the
+    /// form: a "Find", recorded as pressed. None, since it removes no row.
+{{- end }}
+    fn apply(&mut self, action: &str) -> Option<Vec<Segment>> {
+{{- if .Rows }}
         if let Some(name) = action.strip_prefix("find:") {
             self.finds.pressed = Some(name.to_owned());
-            return true;
+            return None;
         }
+        let (add, name) = match action.split_once(':') {
+            Some(("add", name)) => (true, name),
+            Some(("remove", name)) => (false, name),
+            _ => return None,
+        };
+        let path = segments(name)?;
+        if !self.act(&path, add) || add {
+            return None;
+        }
+        self.finds.removed(&path);
+        Some(path)
+{{- else }}
+        if let Some(name) = action.strip_prefix("find:") {
+            self.finds.pressed = Some(name.to_owned());
+        }
+        None
 {{- end }}
-{{- if .Rows }}
+    }
+{{- else }}
         let (add, name) = match action.split_once(':') {
             Some(("add", name)) => (true, name),
             Some(("remove", name)) => (false, name),
@@ -1057,9 +1146,9 @@ impl {{ .Name }} {
         if let Some(path) = segments(name) {
             self.act(&path, add);
         }
-{{- end }}
         true
     }
+{{- end }}
 {{- end }}
 {{- end }}
 

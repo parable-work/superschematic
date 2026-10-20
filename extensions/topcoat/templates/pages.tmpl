@@ -418,10 +418,10 @@ fn admitted_limit<'a>(sent: Option<&'a str>, page: &runtime::page::PageSpec) -> 
 {{- if .Pages.Uses "sorting" }}
 
 /// The sort sent, as the query sent it, when the route admits it, as its
-/// router reads a sort (`PageSpec::query`, D60 amended); none for one it
-/// refuses, an empty one, its defaultSort, or a list that does not sort. A
-/// link and a form keep only an admitted sort, since a refused one would
-/// refuse each page they lead to.
+/// router reads a sort (`PageSpec::query`, D60 amended), its defaultSort
+/// sent among them; none for one it refuses, an empty one, none sent, or a
+/// list that does not sort. A link and a form keep only an admitted sort,
+/// since a refused one would refuse each page they lead to.
 fn admitted_sort<'a>(sent: Option<&'a str>, page: &runtime::page::PageSpec) -> Option<&'a str> {
     let spec = page.sort()?;
     let sort = sent.filter(|sort| !sort.is_empty())?;

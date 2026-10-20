@@ -82,11 +82,14 @@ func (o *refOptions) PageRequest() string {
 
 // refSearch is an options operation's search argument (SearchQuery, D62),
 // which makes a reference to its target a picker (D61, amended): one call
-// per distinct text, kept for the request, of the first page.
+// per distinct text, kept for the request, of the first page, and at most
+// MAX_LOOKUP_CALLS texts a request, which Searched counts for every picker
+// whose options it is.
 type refSearch struct {
-	Fn    string // product_list_products_search
-	Arg   string // q
-	Field string // q, its Args field
+	Fn       string // product_list_products_search
+	Searched string // product_list_products_searched
+	Arg      string // q
+	Field    string // q, its Args field
 	// Others are the Args fields the call leaves out.
 	Others []string
 	// Attrs are the search box's attributes from the argument's rules, as
@@ -568,16 +571,15 @@ func (m *referencesModel) UsesLookup(l *refLookup) bool {
 // refers to an item.
 func referencesOf(c *crate, schemas schemaSet, inProcess []declared, trails []trailStep, logf func(format string, args ...any)) (*referencesModel, error) {
 	b := &refBuilder{
-		schemas:   schemas,
-		calls:     map[*ir.FieldDef]declared{},
-		sources:   map[string]*refSource{},
-		options:   map[*ir.FieldDef]*refOptions{},
-		lookups:   map[string]*refLookup{},
-		hosted:    c.Hosted,
-		hostedNot: c.hostedNot,
-		logged:    map[string]bool{},
-		logf:      logf,
-		m:         &referencesModel{},
+		schemas: schemas,
+		calls:   map[*ir.FieldDef]declared{},
+		sources: map[string]*refSource{},
+		options: map[*ir.FieldDef]*refOptions{},
+		lookups: map[string]*refLookup{},
+		hosting: c.hosting,
+		logged:  map[string]bool{},
+		logf:    logf,
+		m:       &referencesModel{},
 	}
 	b.dependencies = map[string]*ir.Schema{}
 	for _, dep := range schemas[1:] {
@@ -714,17 +716,16 @@ type refBuilder struct {
 	// of each operation without one.
 	calls  map[*ir.FieldDef]declared
 	noCall map[*ir.FieldDef]string
-	// hosted are the crates of the API dependencies one app hosts beside
-	// the service, whose calls a reference to a dependency's options makes
-	// (D61, amended); hostedNot why each other API dependency has none.
-	hosted    map[string]*hostedCrate
-	hostedNot map[string]string
-	sources   map[string]*refSource
-	options   map[*ir.FieldDef]*refOptions
-	lookups   map[string]*refLookup
-	logged    map[string]bool
-	logf      func(format string, args ...any)
-	m         *referencesModel
+	// hosting gives the crates of the API dependencies one app hosts
+	// beside the service, whose calls a reference to a dependency's options
+	// makes (D61, amended), or why one has none.
+	hosting *hosting
+	sources map[string]*refSource
+	options map[*ir.FieldDef]*refOptions
+	lookups map[string]*refLookup
+	logged  map[string]bool
+	logf    func(format string, args ...any)
+	m       *referencesModel
 }
 
 // log writes a reference's reason once.
@@ -858,8 +859,9 @@ func (b *refBuilder) source(holder string, ref *ir.ReferenceDef) *refSource {
 		// The options of an API dependency's type are its own operation's
 		// (D61, amended), which its crate calls, when one app hosts both.
 		options = service + "'s " + options
-		if hosted = b.hosted[service]; hosted == nil {
-			b.log("  - topcoat: %s refers to %s, whose options operation %s has no in-process call: %s\n", holder, targetName(resolved), options, b.hostedNot[service])
+		var why string
+		if hosted, why = b.hosting.crate(service); hosted == nil {
+			b.log("  - topcoat: %s refers to %s, whose options operation %s has no in-process call: %s\n", holder, targetName(resolved), options, why)
 			return nil
 		}
 		calls, noCalls = hosted.calls, hosted.noCall
@@ -949,7 +951,7 @@ func (b *refBuilder) optionsOf(d declared, search *ir.ArgumentDef, hosted *hoste
 			if param.Name != search.Name {
 				continue
 			}
-			o.Search = &refSearch{Fn: stem + "_search", Arg: search.Name, Field: param.Field}
+			o.Search = &refSearch{Fn: stem + "_search", Searched: stem + "_searched", Arg: search.Name, Field: param.Field}
 			o.Search.Attrs = b.schemas.argField(search, param, "query", true).Attrs
 			for _, other := range e.QueryArgs {
 				if other.Name != search.Name {

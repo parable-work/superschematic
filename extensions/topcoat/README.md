@@ -250,7 +250,16 @@ refers to](#what-a-value-refers-to)) calls the dependency's crate
 in-process: the service's crate depends on it, `path = "../<dependency>"`,
 and calls `<crate>::operations::<operation>`, by the dependency's rules
 and under its setup. The dependency's crate must be built first, as
-`build --with-deps` and `build-all` build it.
+`build --with-deps` and `build-all` build it. The extension reads a
+dependency's Rust API only when a reference's options are its operation,
+so a dependency no reference calls is never read and fails no build. A
+reference whose dependency cannot be hosted is left out, with the reason
+in the build log: the table does not list both, the dependency's config
+generates no API server, its server is not Rust, its config or its API
+cannot be read, or its crate is not built. When the service's API and the
+dependency's both authenticate with the identity runtime, the crate's
+`identity-postgres` and `identity-sqlite` features turn on the hosted
+crate's too ([Users and sessions](#users-and-sessions)).
 
 ## Users and sessions
 
@@ -276,7 +285,8 @@ cookie is cleared on the page's response. Topcoat's own origin policy
 runs first, for pages and the mounted API alike, so an origin the identity
 config trusts must also be one the app's `OriginPolicy` trusts. The
 crate's `identity-postgres` and `identity-sqlite` features turn on the API
-crate's.
+crate's, and those of each hosted crate a reference calls whose API has
+them ([Several services in one app](#several-services-in-one-app)).
 
 An API that serves no login route of its own, as `shop-orders`, whose
 users sign in through another API's, signs a user in from a page: the
@@ -579,13 +589,14 @@ row's own list is named under the row: a room's notes add with
 `add:rooms[0].notes` and remove with `remove:rooms[0].notes[1]`. The form
 holds the button pressed in `row_action`. `apply_action()`, on the input
 form and on an argument form that embeds it, applies it, numbering the
-rows after a removed one again with their values as sent, and is true
-when a row button submitted the form: the page renders the form again,
-200, without calling the operation. A search picker's "Find" in a posted
-form is a row button too, `find:lines[0].productId` ([A search
-picker](#a-search-picker)): `apply_action()` records it as pressed in the
-form's `finds` and is true, and the page renders the form again, its
-values as sent and that picker's text searched.
+rows after a removed one again with their values and their pickers'
+texts as sent, and is true when a row button submitted the form: the
+page renders the form again, 200, without calling the operation. A
+search picker's "Find" in a posted form is a row button too,
+`find:lines[0].productId` ([A search picker](#a-search-picker)):
+`apply_action()` records it as pressed in the form's `finds` and is true,
+and the page renders the form again, its values as sent and each
+picker's text searched, the pressed one's past the cap.
 
 Enter in a text field presses a form's default button, its first submit
 control in tree order, which must submit the form as such. So the
@@ -1103,17 +1114,21 @@ value is. The control keeps its label, and the select its id and name.
 `<form>_choices(cx, form, choices)` gives each picker its `Pick`
 (`crate::choices::Pick`) in `Choices`, by its control's name
 (`Choices::with_pick`, `Choices::pick`): each distinct text is one
-listing, kept for the request, and a render searches at most
-`MAX_LOOKUP_CALLS` texts a target, past which a picker lists the first
-page and says to search again; the values the form holds are named
-through the lookup in one batch. The form holds every box's text in
-`finds` (`Finds::text`). A filter's pickers each search their text: its
-"Find" sends its query, `_find.productId=anvil`, and the page renders the
-matches beside the list. A post searches only the text of the "Find" it
-pressed, `_action=find:<control>` ([Rows without
-JavaScript](#rows-without-javascript)), and the other pickers keep their
-boxes' texts over the first page. A text the search argument's rules
-refuse shows the route's message and no matches. The app's `Choices`
+listing, kept for the request, and a request searches at most
+`MAX_LOOKUP_CALLS` distinct texts through one options operation, every
+picker of every form and target that it lists counted together
+(`<operation>_searched`). A picker past them lists the first page and
+says to search again. The values the form holds are named through the
+lookup in one batch. The form holds every box's text in `finds`
+(`Finds::text`), and every picker searches its box's text, so the box
+always says what its select lists. A filter's "Find" sends its query,
+`_find.productId=anvil`, and the page renders the matches beside the
+list. A post's "Find", `_action=find:<control>` ([Rows without
+JavaScript](#rows-without-javascript)), renders the form again with every
+text searched, its own past the cap, and so does a row button's post or
+a refused one: a box that held `bel` when the reader added a line still
+lists what `bel` finds. A text the search argument's rules refuse shows
+the route's message and no matches. The app's `Choices`
 still win: a control they name is a select of theirs, with no picker and
 no call. A caller the options operation refuses gets the plain control
 and the value. A query list argument, whose controls share its name,
@@ -1125,7 +1140,10 @@ Each picker is a shard of its source, `references::<target>_pick`, at
 place and "Find" submits the form. With it, the box's `input` event sets
 the shard's text, and the runtime renders the picker again with what the
 text finds, through `<target>_target_picks`, the value the select holds
-kept, while Topcoat keeps the focused box's text. The shard calls the
+kept, while Topcoat keeps the focused box's text. "Find" counts its
+presses in a signal the shard reads tracked, so each press renders it
+again and searches the box's text, the same text too: a picker that a
+post rendered past the cap searches when the reader presses it. The shard calls the
 options operation in-process as the page's caller, and meets its rate
 limit and timeout through a layer on its path (`references::route_controls`),
 whose limiter is the operation's one in the app's registry.
