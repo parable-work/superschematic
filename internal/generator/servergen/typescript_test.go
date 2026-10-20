@@ -77,7 +77,7 @@ func loadTypeScriptFixture(t *testing.T) fixture {
 		t.Fatal(err)
 	}
 	f := fixture{reg: reg, schemas: map[string]*ir.Schema{}, configs: map[string]*schemaconfig.SchemaConfig{}}
-	for _, name := range append(slices.Clone(tsOrder), tsCloudStack, tsMergedStack, tsWorkersStack, tsSite, tsReports, tsCronStack) {
+	for _, name := range append(slices.Clone(tsOrder), tsCloudStack, tsMergedStack, tsWorkersStack, tsSite, tsReports, tsCronStack, tsCheckout, tsTillStack) {
 		schema, cfg, err := loader.LoadServiceWithConfig(filepath.Join(tsServicesRoot, name), loader.WithRegistry(reg))
 		if err != nil {
 			t.Fatalf("load %s: %v", name, err)

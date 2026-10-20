@@ -378,3 +378,144 @@ func TestTypeScriptWorkersEntrypointCallsInProcess(t *testing.T) {
 		t.Errorf("fetch.ts does not call shop-pricing in process:\n%s", alone)
 	}
 }
+
+// tsTillStack is the fixture's stack whose server tsTillServer serves
+// tsCheckout and ts-pricing on stacktest's fake bundle platform, as
+// Cloudflare Workers (D64): tsCheckout calls ts-pricing, whose quotes admit
+// only calling services, so the call stays in process and carries the
+// server's loopback credential (docs/stack-model.md, sections 9.9 and
+// 18.2).
+const (
+	tsTillStack  = "ts-till-stack"
+	tsTillServer = "Till"
+	tsCheckout   = "ts-checkout"
+)
+
+// tsCheckoutImplementation answers a checkout with ts-pricing's quote,
+// which it asks for with the client in its Deps.
+const tsCheckoutImplementation = `import type { Constructor } from '@schemas/ts-checkout-api';
+
+export const create: Constructor = deps => ({
+  checkouts: {
+    async getCheckout({ sku }, ctx) {
+      const quote = await deps.tsPricing.quotes.getQuote(sku, { forward: ctx });
+      return { sku, cents: quote.cents };
+    },
+  },
+});
+`
+
+// TestTypeScriptWorkersCallAnAPIItServesWithItsLoopbackKey: Till, on
+// Workers, serves ts-checkout and ts-pricing, whose quotes admit only
+// calling services. Its fetch.ts generates the loopback key within the
+// isolate's build, as main.ts does, and the client of ts-pricing, which
+// stays in process, sends its credential when the endpoint carries none:
+// the transport is the isolate's own app, so the token never leaves it,
+// whatever host the endpoint names. ts-pricing's router accepts the key
+// beside its callers field. The package type-checks and its bundle passes
+// bundle.ts --check, and under workerd a checkout reaches the quote while
+// a quote asked for from outside with no credential, or with a token
+// Till's key did not sign, is 401 (D64, D37 amended; docs/stack-model.md,
+// sections 9.9 and 18.2).
+func TestTypeScriptWorkersCallAnAPIItServesWithItsLoopbackKey(t *testing.T) {
+	repoRoot, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	paths := tsFakePaths(repoRoot)
+	if !testing.Short() {
+		paths = testpaths.Local(t)
+	}
+	f := loadTypeScriptFixture(t)
+	f.build(t, repoRoot, paths, "ts-pricing", tsCheckout, tsTillStack)
+	out := filepath.Join(repoRoot, "schemas", "dist")
+	pkg := servergen.ServerDir(out, tsTillStack, tsTillServer)
+	fetch, err := os.ReadFile(filepath.Join(pkg, servergen.TypeScriptFetchFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"loopbackServiceAuth, type Loopback",
+		"  const loopback = await loopbackServiceAuth('Till', ['ts-checkout', 'ts-pricing']);\n",
+		"const tsPricingClient = newTsPricingClient(tsCheckoutConfig.TS_PRICING_SERVICE, loopback);",
+		"function newTsPricingClient(endpoint: Service, loopback: Loopback): tsPricingSdk.TsPricingSDK {",
+		"    fetch: inProcess,\n    serviceCredential: serviceCredentialFor(endpoint.credential) ?? loopback.credential,\n",
+		"authenticateService: serviceAuthenticator(loopback.accept(tsPricingConfig.TS_PRICING_CALLERS))",
+	} {
+		if !strings.Contains(string(fetch), want) {
+			t.Errorf("fetch.ts does not hold %q:\n%s", want, fetch)
+		}
+	}
+	if strings.Index(string(fetch), "const loopback =") > strings.Index(string(fetch), "const tsPricingClient =") {
+		t.Errorf("fetch.ts builds the client before the loopback key:\n%s", fetch)
+	}
+	if testing.Short() {
+		return
+	}
+
+	bun, err := exec.LookPath("bun")
+	if err != nil {
+		testpaths.RequireOrSkipTS(t, fmt.Sprintf("bun not available: %v", err))
+	}
+	installTypeScriptRuntime(t, bun, paths)
+	if _, err := os.Stat(filepath.Join(paths.ScalarTypeScript, "dist", "workerd", "superscalar_wasm_bg.wasm")); err != nil {
+		testpaths.RequireOrSkipTS(t, fmt.Sprintf("superscalar's workerd build is not built (scripts/superscalar-dep.sh builds it): %v", err))
+	}
+	names := naming.Default()
+	for service, code := range map[string]string{"ts-pricing": tsPricingImplementation, tsCheckout: tsCheckoutImplementation} {
+		if err := os.WriteFile(filepath.Join(names.TypeScriptImplementationDir(repoRoot, service), "index.ts"), []byte(code), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	run := func(dir, name string, args ...string) string {
+		t.Helper()
+		cmd := exec.Command(name, args...)
+		cmd.Dir = dir
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("%s %s in %s: %v\n%s", name, strings.Join(args, " "), dir, err, output)
+		}
+		return string(output)
+	}
+	install := exec.Command(bun, "install")
+	install.Dir = out
+	if output, err := install.CombinedOutput(); err != nil {
+		testpaths.RequireOrSkipTS(t, fmt.Sprintf("bun install failed at the output root (likely offline): %v\n%s", err, output))
+	}
+	tsc := filepath.Join(paths.HTTPRuntimeTypeScript, "node_modules", ".bin", "tsc")
+	for _, dir := range []string{names.TypeScriptImplementationDir(repoRoot, tsCheckout), pkg} {
+		run(dir, tsc, "--noEmit", "-p", "tsconfig.json")
+	}
+	if output := run(pkg, bun, "bundle.ts", "--check"); !strings.Contains(output, "bundle (checked): main.js") {
+		t.Errorf("bundle.ts --check printed %s", output)
+	}
+
+	workerd := filepath.Join(paths.HTTPRuntimeTypeScript, "test", "workerd", "node_modules", ".bin", "workerd")
+	if _, err := os.Stat(workerd); err != nil {
+		testpaths.RequireOrSkipTS(t, "workerd is not installed: run bun install --frozen-lockfile in runtime/http/typescript/test/workerd")
+		return
+	}
+	dir := t.TempDir()
+	run(pkg, bun, "bundle.ts", dir)
+	for _, file := range []string{"till.capnp", "tester.js"} {
+		data, err := os.ReadFile(filepath.Join("testdata", "workerd", "till-loopback", file))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, file), data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	output := run(dir, workerd, "test", "till.capnp")
+	if testing.Verbose() {
+		t.Logf("workerd test till.capnp:\n%s", output)
+	}
+	for _, want := range []string{
+		"Till under workerd: the in-process call carried the loopback credential",
+		`"msg":"quoted","stack":"ts-till-stack","server":"Till","api":"ts-pricing","sku":"tea","caller":"Till"}`,
+	} {
+		if !strings.Contains(output, want) {
+			t.Errorf("workerd's output does not hold %s:\n%s", want, output)
+		}
+	}
+}

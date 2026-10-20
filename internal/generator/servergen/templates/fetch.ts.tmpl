@@ -96,12 +96,13 @@ async function build(): Promise<Handle> {
 {{- end }}
 {{- end }}
 {{- end }}
+{{- template "ts-loopback" . }}
 {{- if .Clients }}
 
   // One client per API called, shared by every API that calls it, which
   // reaches its callee through the service binding its endpoint names.
 {{- range .Clients }}
-  const {{ .Var }} = {{ .Constructor }}({{ .From }});
+  const {{ .Var }} = {{ .Constructor }}({{ .From }}{{ if .Loopback }}, {{ $.Loopback.Var }}{{ end }});
 {{- end }}
 {{- end }}
 {{- if .Buckets }}
@@ -254,7 +255,27 @@ const inProcess = (async (input: RequestInfo | URL, init?: RequestInit) => {
 }) as typeof fetch;
 {{- end }}
 {{- range .Clients }}
-{{- if .InProcess }}
+{{- if and .InProcess .Loopback }}
+
+/**
+ * Builds the client of {{ .Service }}, which the server serves itself: each call
+ * stays in process, handed to the server's own app, with no binding
+ * (docs/stack-model.md, section 18.2). No connector gives the call a
+ * credential, and {{ .Service }} has a service clause, so the client sends the
+ * server's loopback credential when its endpoint carries none (section 9.9):
+ * the transport is the isolate's own app, so the token never leaves the
+ * isolate, whatever host the endpoint names. The end user travels per call:
+ * an implementation passes { forward: ctx } with each call it makes for a
+ * request.
+ */
+function {{ .Constructor }}(endpoint: Service, {{ $.Loopback.Var }}: Loopback): {{ .Module }}.{{ .Class }} {
+  return new {{ .Module }}.{{ .Class }}({
+    baseUrl: endpoint.url,
+    fetch: inProcess,
+    serviceCredential: serviceCredentialFor(endpoint.credential) ?? {{ $.Loopback.Var }}.credential,
+  });
+}
+{{- else if .InProcess }}
 
 /**
  * Builds the client of {{ .Service }}, which the server serves itself: each call

@@ -105,6 +105,14 @@ const (
 	JobLiteConnector  = "fake.job-lite"
 	CronD1Connector   = "fake.cron-lite"
 
+	// BundleHTTPConnector connects a server on BundlePlatform to an API it
+	// serves itself, as a call within one Worker stays in process (D64,
+	// docs/stack-model.md, section 18.2): its value is the deployable's name as
+	// an https URL, with no binding and no credential. It refuses a call to
+	// another server, which a Worker makes through a service binding the
+	// fake platform does not model.
+	BundleHTTPConnector = "fake.bundle-bundle"
+
 	// FakeIssuer is the issuer of the fake target's service credentials,
 	// which a callee's callers field names.
 	FakeIssuer = "https://issuer.fake.test"
@@ -340,6 +348,7 @@ func (e *Extension) Register(r *registry.Registry) error {
 		{Name: BundleD1Connector, Extension: Name, Edge: ir.EdgeSQL, From: BundlePlatform, To: LitePlatform, Connect: connectD1},
 		{Name: JobLiteConnector, Extension: Name, Edge: ir.EdgeSQL, From: JobPlatform, To: LitePlatform, Connect: connectLite},
 		{Name: CronD1Connector, Extension: Name, Edge: ir.EdgeSQL, From: CronPlatform, To: LitePlatform, Connect: connectD1},
+		{Name: BundleHTTPConnector, Extension: Name, Edge: ir.EdgeHTTP, From: BundlePlatform, To: BundlePlatform, Connect: connectBundleHTTP},
 	} {
 		if err := r.RegisterConnector(spec); err != nil {
 			return err
@@ -879,6 +888,18 @@ func connectSQL(ctx registry.ConnectorContext) (registry.Connected, error) {
 // its account's email. A server that calls an API it serves itself
 // reaches it over loopback and needs no grant; the server signs that call
 // with its own loopback key (docs/stack-model.md, section 9.9).
+// connectBundleHTTP derives the in-process endpoint of an API a server on
+// BundlePlatform serves itself (BundleHTTPConnector).
+func connectBundleHTTP(ctx registry.ConnectorContext) (registry.Connected, error) {
+	if ctx.From.Name != ctx.To.Name {
+		return registry.Connected{}, fmt.Errorf("%s calls %s on another server, which the fake bundle platform does not bind", ctx.From.Name, ctx.Edge.Service.Name)
+	}
+	// The deployable.s name as its address, as Cloudflare.s is the
+	// Worker's: the script's url output would make the script depend on
+	// itself.
+	return registry.Connected{Value: ir.ServiceEndpoint{URL: "https://" + ctx.To.Name}}, nil
+}
+
 func connectHTTP(ctx registry.ConnectorContext) (registry.Connected, error) {
 	if ctx.From.Name == ctx.To.Name {
 		return registry.Connected{Value: ir.ServiceEndpoint{URL: "http://127.0.0.1:8080"}}, nil
