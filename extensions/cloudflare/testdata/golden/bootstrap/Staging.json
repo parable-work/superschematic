@@ -101,7 +101,7 @@
               "effect": "allow",
               "permissionGroups": [
                 {
-                  "id": "ab2ba301faacb41a3759947a850a6aea"
+                  "id": "2efd5506f9c8494dacb1fa10a3e7d5b6"
                 }
               ],
               "resources": "{\"com.cloudflare.edge.r2.bucket.0123456789abcdef0123456789abcdef_default_superschematic-state\":\"*\"}"
