@@ -43,8 +43,8 @@ fn number_of<'a, T: ToString>(choices: &'a Choices, field: &str, value: T) -> (O
     }
 }
 
-/// Labels a value of `Shade`: its member's name in words. A value the
-/// enum does not declare is its own label.
+/// Labels a value of `Shade`: its member's title, else its name in
+/// words. A value the enum does not declare is its own label.
 pub fn shade_label(value: &str) -> &str {
     match value {
         "light" => "Light",

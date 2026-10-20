@@ -134,6 +134,18 @@ func skipTrivia(text string, pos int) int {
 // with comment markers stripped. It returns "" when the node has no attached
 // comment. Comments are IR metadata and round-trip through all formats.
 func leadingComment(node *astNode) string {
+	var lines []string
+	for _, raw := range strings.Split(leadingTrivia(node), "\n") {
+		if s, ok := commentLine(strings.TrimSpace(raw)); ok {
+			lines = append(lines, s)
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// leadingTrivia is the text between a node's start and its first token:
+// the whitespace and comments that precede it.
+func leadingTrivia(node *astNode) string {
 	file := getSourceFileOfNode(node)
 	if file == nil {
 		return ""
@@ -144,35 +156,33 @@ func leadingComment(node *astNode) string {
 	if end > len(text) {
 		end = len(text)
 	}
-	trivia := text[start:end]
+	return text[start:end]
+}
 
-	var lines []string
-	for _, raw := range strings.Split(trivia, "\n") {
-		line := strings.TrimSpace(raw)
-		switch {
-		case strings.HasPrefix(line, "//"):
-			lines = append(lines, strings.TrimSpace(strings.TrimPrefix(line, "//")))
-		case strings.HasPrefix(line, "/**"):
-			line = strings.TrimPrefix(line, "/**")
-			line = strings.TrimSuffix(line, "*/")
-			if s := strings.TrimSpace(line); s != "" {
-				lines = append(lines, s)
-			}
-		case strings.HasPrefix(line, "/*"):
-			line = strings.TrimPrefix(line, "/*")
-			line = strings.TrimSuffix(line, "*/")
-			if s := strings.TrimSpace(line); s != "" {
-				lines = append(lines, s)
-			}
-		case strings.HasPrefix(line, "*/"):
-			// closing line of a block comment
-		case strings.HasPrefix(line, "*"):
-			// The last line of a block comment may carry text before "*/".
-			line = strings.TrimSuffix(strings.TrimPrefix(line, "*"), "*/")
-			if s := strings.TrimSpace(line); s != "" {
-				lines = append(lines, s)
-			}
-		}
+// commentLine strips one trimmed line of leading trivia of its comment
+// markers, and reports whether the line adds a line to the comment.
+func commentLine(line string) (string, bool) {
+	switch {
+	case strings.HasPrefix(line, "//"):
+		return strings.TrimSpace(strings.TrimPrefix(line, "//")), true
+	case strings.HasPrefix(line, "/**"):
+		line = strings.TrimPrefix(line, "/**")
+		line = strings.TrimSuffix(line, "*/")
+		s := strings.TrimSpace(line)
+		return s, s != ""
+	case strings.HasPrefix(line, "/*"):
+		line = strings.TrimPrefix(line, "/*")
+		line = strings.TrimSuffix(line, "*/")
+		s := strings.TrimSpace(line)
+		return s, s != ""
+	case strings.HasPrefix(line, "*/"):
+		// closing line of a block comment
+		return "", false
+	case strings.HasPrefix(line, "*"):
+		// The last line of a block comment may carry text before "*/".
+		line = strings.TrimSuffix(strings.TrimPrefix(line, "*"), "*/")
+		s := strings.TrimSpace(line)
+		return s, s != ""
 	}
-	return strings.Join(lines, "\n")
+	return "", false
 }

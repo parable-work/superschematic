@@ -106,6 +106,7 @@ dependencies = [
  "http",
  "rusqlite",
  "serde",
+ "serde_json",
  "tokio",
  "topcoat",
 ]

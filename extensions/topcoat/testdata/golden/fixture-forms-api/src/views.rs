@@ -174,8 +174,8 @@ fn digits(bytes: &[u8]) -> Option<u32> {
         .then(|| bytes.iter().fold(0, |number, digit| number * 10 + u32::from(digit - b'0')))
 }
 
-/// Labels a value of `Amenity`: its member's name in words. A value the
-/// enum does not declare is its own label.
+/// Labels a value of `Amenity`: its member's title, else its name in
+/// words. A value the enum does not declare is its own label.
 pub fn amenity_label(value: &str) -> &str {
     match value {
         "wifi" => "Wifi",
@@ -185,8 +185,8 @@ pub fn amenity_label(value: &str) -> &str {
     }
 }
 
-/// Labels a value of `Plan`: its member's name in words. A value the
-/// enum does not declare is its own label.
+/// Labels a value of `Plan`: its member's title, else its name in
+/// words. A value the enum does not declare is its own label.
 pub fn plan_label(value: &str) -> &str {
     match value {
         "free" => "Free",
@@ -917,6 +917,21 @@ pub async fn room_request_detail(record: RoomRequestRecord, #[default] choices: 
                         }
                     </dd>
                 </div>
+                <div data-field="notes">
+                    <dt>"Notes"</dt>
+                    <dd>
+                        match record.notes {
+                            Some(value) => {
+                                <ul class="ss-list">
+                                    for item in value {
+                                        <li>(text_of(&choices, "notes", &item))</li>
+                                    }
+                                </ul>
+                            },
+                            None => "",
+                        }
+                    </dd>
+                </div>
             </dl>
         </div>
     })
@@ -940,6 +955,7 @@ pub async fn room_request_table(
                     <th scope="col" data-field="roomId">"Room"</th>
                     <th scope="col" data-field="adults">"Adults"</th>
                     <th scope="col" data-field="extras">"Extras"</th>
+                    <th scope="col" data-field="notes">"Notes"</th>
                 </tr>
             </thead>
             <tbody>
@@ -967,6 +983,18 @@ pub async fn room_request_table(
                                     <ul class="ss-list">
                                         for item in value {
                                             <li><data value=(&item)>(amenity_label(&item))</data></li>
+                                        }
+                                    </ul>
+                                },
+                                None => "",
+                            }
+                        </td>
+                        <td data-field="notes">
+                            match row.notes {
+                                Some(value) => {
+                                    <ul class="ss-list">
+                                        for item in value {
+                                            <li>(text_of(&choices, "notes", &item))</li>
                                         }
                                     </ul>
                                 },

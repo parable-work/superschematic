@@ -341,10 +341,12 @@ fn heading(status: StatusCode) -> &'static str {
     }
 }
 
-/// A link of the nav and the index: a resource's list.
+/// A link of the nav and the index: a resource's list, and the icon its
+/// type's display names, which the app's stylesheet draws.
 struct Link {
     href: &'static str,
     label: &'static str,
+    icon: Option<&'static str>,
 }
 
 /// The resources no item holds whose list the caller may use (`can_*`),
@@ -355,17 +357,17 @@ struct Link {
 async fn listed(cx: &Cx) -> (Vec<Link>, bool) {
     let mut links = Vec::new();
     let mut signed_out = false;
-    let link = Link { href: "/console/documents", label: "Documents" };
+    let link = Link { href: "/console/documents", label: "Documents", icon: None };
     admit(operations::can_document_list_documents(cx).await.map_err(|err| err.status), link, &mut links, &mut signed_out);
-    let link = Link { href: "/console/documents/drafts", label: "Drafts" };
+    let link = Link { href: "/console/documents/drafts", label: "Drafts", icon: None };
     admit(operations::can_document_list_drafts(cx).await.map_err(|err| err.status), link, &mut links, &mut signed_out);
-    let link = Link { href: "/console/members", label: "Members" };
+    let link = Link { href: "/console/members", label: "Members", icon: None };
     admit(operations::can_member_list_members(cx).await.map_err(|err| err.status), link, &mut links, &mut signed_out);
-    let link = Link { href: "/console/projects", label: "Projects" };
+    let link = Link { href: "/console/projects", label: "Projects", icon: Some("folder") };
     admit(operations::can_project_list_projects(cx).await.map_err(|err| err.status), link, &mut links, &mut signed_out);
-    let link = Link { href: "/console/projects/archived", label: "Archived" };
+    let link = Link { href: "/console/projects/archived", label: "Archived", icon: Some("folder") };
     admit(operations::can_project_list_archived_projects(cx).await.map_err(|err| err.status), link, &mut links, &mut signed_out);
-    let link = Link { href: "/console/shelves", label: "Shelves" };
+    let link = Link { href: "/console/shelves", label: "Shelves", icon: None };
     admit(operations::can_shelf_list_shelves(cx).await.map_err(|err| err.status), link, &mut links, &mut signed_out);
     (links, signed_out)
 }
@@ -663,7 +665,7 @@ pub async fn pages_layout(cx: &Cx, slot: Slot<'_>) -> topcoat::Result<impl View>
     // current one on its own pages.
     let at = |href: &str| path.strip_prefix(href).is_some_and(|rest| rest.is_empty() || rest.starts_with('/'));
     let under = links.iter().map(|link| link.href).filter(|href| at(href)).max_by_key(|href| href.len());
-    let nav: Vec<(&'static str, &'static str, Option<&'static str>)> = links
+    let nav: Vec<(&'static str, &'static str, Option<&'static str>, Option<&'static str>)> = links
         .iter()
         .map(|link| {
             let current = match under {
@@ -671,7 +673,7 @@ pub async fn pages_layout(cx: &Cx, slot: Slot<'_>) -> topcoat::Result<impl View>
                 Some(href) if href == link.href => Some("true"),
                 _ => None,
             };
-            (link.href, link.label, current)
+            (link.href, link.label, link.icon, current)
         })
         .collect();
     let mut crumbs = trail(&path, &title);
@@ -690,8 +692,13 @@ pub async fn pages_layout(cx: &Cx, slot: Slot<'_>) -> topcoat::Result<impl View>
             if !nav.is_empty() {
                 <nav class="ss-nav" aria-label="Resources">
                     <ul>
-                        for (href, label, current) in nav {
-                            <li><a href=(href) aria-current=(current)>(label)</a></li>
+                        for (href, label, icon, current) in nav {
+                            <li><a href=(href) aria-current=(current)>
+                                if let Some(icon) = icon {
+                                    <span class="ss-icon" data-icon=(icon) aria-hidden="true"></span>
+                                }
+                                (label)
+                            </a></li>
                         }
                     </ul>
                 </nav>
@@ -728,7 +735,12 @@ pub async fn pages_index_page(cx: &Cx) -> topcoat::Result<impl View> {
         } else {
             <ul class="ss-index">
                 for link in links {
-                    <li><a href=(link.href)>(link.label)</a></li>
+                    <li><a href=(link.href)>
+                        if let Some(icon) = link.icon {
+                            <span class="ss-icon" data-icon=(icon) aria-hidden="true"></span>
+                        }
+                        (link.label)
+                    </a></li>
                 }
             </ul>
         }

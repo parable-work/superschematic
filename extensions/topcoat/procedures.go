@@ -38,15 +38,18 @@ type procedure struct {
 }
 
 // routeControls are an operation's route's @rateLimit requests per minute,
-// @bodyLimit megabytes and @timeout seconds, 0 without the directive.
+// @bodyLimit megabytes and @timeout seconds, 0 without the directive, and
+// Const, the API crate's OperationInfo constant of the operation, whose
+// limiter the app's registry holds (D44, amended).
 type routeControls struct {
 	RateLimit int
 	BodyLimit int
 	Timeout   int
+	Const     string
 }
 
 func controlsOf(e registry.RustEndpoint) routeControls {
-	return routeControls{RateLimit: e.RateLimit, BodyLimit: e.BodyLimit, Timeout: e.Timeout}
+	return routeControls{RateLimit: e.RateLimit, BodyLimit: e.BodyLimit, Timeout: e.Timeout, Const: e.ConstName()}
 }
 
 // HasControls reports whether the route has a traffic control, so a layer
@@ -56,12 +59,14 @@ func (p routeControls) HasControls() bool {
 }
 
 // ControlCalls are the builder calls of the route's controls, in the
-// order a request meets them on the route: the rate limit, the body limit,
-// then the timeout.
+// order a request meets them on the route: the rate limit, the
+// operation's limiter in the app's registry (`limits`), which its route
+// and every procedure and page that calls it share; the body limit; then
+// the timeout.
 func (p routeControls) ControlCalls() []string {
 	var calls []string
 	if p.RateLimit > 0 {
-		calls = append(calls, fmt.Sprintf(".rate_limit(%d)", p.RateLimit))
+		calls = append(calls, fmt.Sprintf(".rate_limiter(limits.of(&crate::api::operations::%s))", p.Const))
 	}
 	if p.BodyLimit > 0 {
 		calls = append(calls, fmt.Sprintf(".body_limit_megabytes(%d)", p.BodyLimit))

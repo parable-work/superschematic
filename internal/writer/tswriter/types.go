@@ -6,11 +6,14 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	ir "github.com/parable-work/superschematic/ir"
 )
 
-// emitEnum renders an exported string enum.
+// emitEnum renders an exported string enum, a member's title as a JSDoc
+// @title tag after its comment (D48, amended).
 func (e *emitter) emitEnum(def *ir.EnumDef) {
 	if def.Description != "" {
 		e.failf("enum %s: descriptions have no TypeScript authoring form", def.Name)
@@ -22,7 +25,16 @@ func (e *emitter) emitEnum(def *ir.EnumDef) {
 		if v.Description != "" {
 			e.failf("enum %s.%s: descriptions have no TypeScript authoring form", def.Name, v.Name)
 		}
+		if holdsTitleTag(v.Comment) {
+			e.failf("enum %s.%s: a comment that holds @title has no TypeScript authoring form: the reader reads the tag only as the member's title", def.Name, v.Name)
+		}
 		e.comment("  ", v.Comment)
+		if v.Title != "" {
+			// Validation holds a title to one line without "*/", so the
+			// tag's comment holds it. It goes after the comment, so a
+			// reread keeps the comment's lines in order.
+			fmt.Fprintf(&e.body, "  /** @title %s */\n", v.Title)
+		}
 		serialized := v.SerializedAs
 		if serialized == "" {
 			serialized = v.Name
@@ -34,6 +46,35 @@ func (e *emitter) emitEnum(def *ir.EnumDef) {
 		e.body.WriteString("\n")
 	}
 	e.body.WriteString("}\n")
+}
+
+// holdsTitleTag reports whether a member's comment holds the @title tag,
+// which the TypeScript reader refuses anywhere in a member's comments but
+// as the tag the writer writes (tsreader.titleAt): "@title" with no
+// identifier character or "@" before it, and no identifier character or
+// "-" after it. "@titles" and "a@title" are comment text.
+func holdsTitleTag(comment string) bool {
+	const tag = "@title"
+	for from := 0; ; {
+		i := strings.Index(comment[from:], tag)
+		if i < 0 {
+			return false
+		}
+		i += from
+		before, _ := utf8.DecodeLastRuneInString(comment[:i])
+		after, _ := utf8.DecodeRuneInString(comment[i+len(tag):])
+		if (i == 0 || !tagNameRune(before) && before != '@') &&
+			(i+len(tag) == len(comment) || !tagNameRune(after) && after != '-') {
+			return true
+		}
+		from = i + 1
+	}
+}
+
+// tagNameRune reports whether r may continue a JavaScript identifier, as
+// far as a JSDoc tag's name is concerned.
+func tagNameRune(r rune) bool {
+	return r == '_' || r == '$' || unicode.IsLetter(r) || unicode.IsDigit(r)
 }
 
 // emitType renders one type definition: an abstract class for table, view,
@@ -259,6 +300,7 @@ func displayArgs(d *ir.TypeDisplay) string {
 	text("plural", d.Plural)
 	text("titleField", d.TitleField)
 	text("createLabel", d.CreateLabel)
+	text("icon", d.Icon)
 	if len(d.SummaryFields) > 0 {
 		names := make([]string, len(d.SummaryFields))
 		for i, name := range d.SummaryFields {
@@ -499,6 +541,9 @@ func (e *emitter) fieldDecorators(fd *ir.FieldDef) []string {
 	if fd.Icon != "" {
 		out = append(out, e.useAs("@superschematic/schema", "icon", "schemaIcon")+fmt.Sprintf("(%s)", quote(fd.Icon)))
 	}
+	if fd.Display != nil && fd.Display.Multiline != nil {
+		out = append(out, e.use("display")+fmt.Sprintf("({ multiline: %t })", *fd.Display.Multiline))
+	}
 	if fd.Key {
 		out = append(out, e.use("key"))
 	}
@@ -535,6 +580,9 @@ func (e *emitter) checkStructField(fd *ir.FieldDef, owner string) {
 	rest.TypeRef = ir.TypeRef{}
 	rest.Required = false
 	rest.Title, rest.Purpose, rest.Icon = "", "", ""
+	if rest.Display != nil && rest.Display.Multiline != nil {
+		rest.Display = nil
+	}
 	rest.Default = nil
 	rest.ValidateMin, rest.ValidateMax = nil, nil
 	rest.ValidateUploadMaxBytes = nil

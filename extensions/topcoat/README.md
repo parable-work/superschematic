@@ -8,7 +8,11 @@ beside the API crate, at `<out>/topcoat/<service>`, and is named
 
 - mounts the service's JSON API in the app's router, at `/api/{*rest}`,
   giving its routes the client's address as Topcoat reads it, by which
-  their rate limits count clients;
+  their rate limits count clients, and their limiters from the app's one
+  registry, which the procedures and the pages share, so a client has one
+  budget per operation through its route, its procedure and the pages
+  ([Route controls](#route-controls)); an in-process call, the app's own
+  or a service's, meets no traffic control;
 - calls each operation in-process, from a page, a shard or a procedure, by
   its route's rules: the caller admitted as the route admits it (401, 403),
   the arguments checked as the router checks them (the same 400), then the
@@ -16,7 +20,10 @@ beside the API crate, at `<out>/topcoat/<service>`, and is named
   route does something first that a call cannot has no call: a webhook
   (`@webhook`, `@hmacVerified`), which a third party calls and whose route
   checks its signature, and an operation the service mounts itself
-  (`@manualRouteRegistration`);
+  (`@manualRouteRegistration`). An operation only a service may call
+  (`@requireService`) has no end user's call: `operations::as_service`
+  calls it, and every operation with a service clause, as a service the
+  app names ([Calling as a service](#calling-as-a-service));
 - offers a guard per operation, `can_<operation>`, which admits the caller
   alone, and whose doc says why an operation has no call;
 - mirrors each type an operation a page calls returns, and the types it
@@ -165,6 +172,29 @@ match assets {
 
 `shop_orders` takes the API's `Implementations`, the same value the JSON
 API serves, and a `PageAuthenticator` when an operation needs a caller.
+It makes one registry of the operations' rate limiters, which the JSON
+API's routes, the procedures and the pages take theirs from, and keeps it
+in the app context as `Setup.rate_limits`: an app that mounts the API's
+router again (`RouterOptions { rate_limits: setup.rate_limits.clone(), ..
+}`), or a page of another crate that calls an operation
+(`setup.rate_limits.of(&api::operations::ORDER_PLACE_ORDER)`), shares the
+operation's budget by taking from it too. The page counts its client by
+the crate's `client_key(cx)`, the key the routes, the procedures and the
+pages count by, so the client is one client on every way in:
+
+```rust
+use acme_shop_orders_topcoat::{api, client_key, Setup};
+use topcoat::context::app_context;
+
+let setup: &Setup = app_context(cx);
+// None for an operation without a @rateLimit.
+if let Some(limiter) = setup.rate_limits.of(&api::operations::ORDER_PLACE_ORDER)
+    && let Err(retry_after) = limiter.take(&client_key(cx))
+{
+    // The client's budget is spent: answer 429 with Retry-After.
+}
+```
+
 `console_settings()` is the [pages](#pages)' `pages::Settings`, since
 acme's `superschematic.toml` turns shop-orders' console on, with its lists
 live (`pages_live`). Its root layout, `#[layout("/")] document`, gives
@@ -298,7 +328,14 @@ name, beside its input's fields. It is labeled by the field's `@docs`
 title, else by its name in words, in which a number that ends a word is
 a word of its own (`line1` is "Line 1", `addressLine2` "Address line 2")
 unless an acronym or a single letter holds it (`awsS3Bucket` is "Aws S3
-bucket").
+bucket"). An enum's member, a select's option or a checkbox's label, is
+labeled by its title (`/** @title Held for a stock check */` in
+TypeScript, `title` in the data forms, [D48](../../docs/DECISIONS.md)),
+else by its name in words: `OnHold` is "On hold". When two members of an
+enum the crate labels take one label, ignoring case, such as `OnHold` and
+`Paused` titled "On hold", the build log says so, and a `@title` tells
+them apart: `topcoat: enum Status: members OnHold and Paused share the
+label "On hold", so a select offers it twice; a @title tells them apart`.
 
 ### Input forms
 
@@ -336,7 +373,10 @@ async fn sign_up(cx: &Cx, Form(form): Form<SignupInputForm>) -> topcoat::Result<
     };
     Ok(view! {
         (StatusCode::UNPROCESSABLE_ENTITY)
-        <form method="post">signup_input_fields(form: form, errors: errors)</form>
+        <form method="post">
+            signup_input_fields(form: form, errors: errors)
+            <button type="submit">"Sign up"</button>
+        </form>
     })
 }
 ```
@@ -397,7 +437,10 @@ async fn cancel(cx: &Cx, Form(form): Form<OrderCancelOrderArgsForm>) -> topcoat:
     };
     Ok(view! {
         (refused.status)
-        <form method="post">order_cancel_order_args_fields(form: form, errors: refused.errors)</form>
+        <form method="post">
+            order_cancel_order_args_fields(form: form, errors: refused.errors)
+            <button type="submit">"Cancel the order"</button>
+        </form>
     })
 }
 
@@ -462,12 +505,20 @@ attributes its rules give it:
   (`step="any"`), so a held value with seconds is not refused;
 - `type="password"` for a `@secret` field, never rendered with its value:
   a form holds what a reader types, though a record leaves the field out;
-- a `<textarea>` for long text, a text field or argument whose
+- a `<textarea rows="6">` for long text, a text field or argument whose
   `maxLength`, its own or its scalar's, is **500** or more: a reason, a
-  review's body, not a name or a title. It takes `minlength` and
-  `maxlength`, but no `pattern`, which `parse` checks, and a newline after
-  its start tag, which a browser drops, so a value that starts with one
-  renders as sent;
+  review's body, not a name or a title. A field's multiline hint,
+  `@display({ multiline })` ([D48](../../docs/DECISIONS.md)), overrides
+  that rule either way: `true` makes text a textarea without a bound or
+  under 500, a note, and `false` keeps it one line at any bound, a code.
+  The hint applies where the control would be text: an email, URL,
+  phone, date or time control keeps its type, and the build log says so
+  (`topcoat: Account.email: @display multiline is ignored: its control is
+  an email input`). An argument takes no decorator, so it keeps the 500
+  rule; an argument form's input fields follow their own hints. A
+  textarea takes `minlength` and `maxlength`, but no `pattern`, which
+  `parse` checks, and a newline after its start tag, which a browser
+  drops, so a value that starts with one renders as sent;
 - a `<textarea>` of JSON text, "(JSON)" in its label, for a value no
   control holds: a union, any JSON value, a map, a list of lists, an
   argument's object or list of booleans, or a type that nests the type
@@ -508,13 +559,38 @@ A form whose input holds a list as rows has submit buttons named
 `_action`: `add:lines` after a list's rows, unless it holds its limit
 (its `listMax`, or `MAX_ROWS`), and `remove:lines[1]` in each row,
 unless the list holds no more than its `listMin`. They carry
-`formnovalidate`, so a row can be added before the others are valid, and
-the component renders a hidden submit button ahead of them, which Enter
-presses. The form holds the button pressed in `row_action`.
-`apply_action()`, on the input form and on an argument form that embeds
-it, applies it, numbering the rows after a removed one again with their
-values as sent, and is true when a row button submitted the form: the
-page renders the form again, 200, without calling the operation.
+`formnovalidate`, so a row can be added before the others are valid. A
+row's own list is named under the row: a room's notes add with
+`add:rooms[0].notes` and remove with `remove:rooms[0].notes[1]`. The form
+holds the button pressed in `row_action`. `apply_action()`, on the input
+form and on an argument form that embeds it, applies it, numbering the
+rows after a removed one again with their values as sent, and is true
+when a row button submitted the form: the page renders the form again,
+200, without calling the operation.
+
+Enter in a text field presses a form's default button, its first submit
+control in tree order, which must submit the form as such. So the
+component renders a hidden submit button,
+`<button type="submit" class="ss-submit" hidden>`, ahead of every row
+button, and Enter submits the form with no `_action`. A page puts its own
+submit button after the component, inside the one `<form>` around it: a
+form nests no other form, which the HTML parser would drop, and no
+control names its form with `form=`, so tree order is the whole rule. The
+extension's tests hold every page they render to it without a browser:
+`testdata/enter.rs` checks that each form's first submit control has no
+`name`, `formaction`, `formmethod`, `formenctype`, `formtarget`,
+`formnovalidate` or `disabled`, and no `<fieldset disabled>` around it
+outside that fieldset's first `<legend>`. It reads a `<template>`'s
+contents as a fragment of their own, out of the page's forms, held to the
+same rule. `TestRowButtonsFollowTheDefaultButton` reads every golden's
+components for the hidden button's place without cargo. The file ships
+with neither the extension nor the crate it writes, so an app's own
+tests, with `http` among their dev-dependencies, hold its pages to the
+rule by copying it from the superschematic repository
+(`extensions/topcoat/testdata/enter.rs`) into their `tests/support/`,
+declaring `#[path = "support/enter.rs"] mod enter;`, then calling
+`enter::check_page(uri, &headers, &body)` on each answer. acme's tests
+read the repository's copy by its path.
 
 ```rust
 #[page(POST "/book")]
@@ -533,7 +609,10 @@ async fn book(cx: &Cx, Form(form): Form<BookingInputForm>) -> topcoat::Result<im
     };
     Ok(view! {
         (status)
-        <form method="post">booking_input_fields(form: form, errors: errors)</form>
+        <form method="post">
+            booking_input_fields(form: form, errors: errors)
+            <button type="submit">"Book"</button>
+        </form>
     })
 }
 ```
@@ -610,9 +689,8 @@ so it exists only where a browser's request can meet the route's rules:
   not, and an operation the service mounts itself.
 - An operation whose route admits only a service caller
   (`@requireService`, [D37](../../docs/DECISIONS.md)) has none, since a
-  browser holds no service credential. Its in-process call stays and
-  applies the end-user step alone; whether it should refuse is still
-  open.
+  browser holds no service credential. Nor has it an end user's call:
+  only a service's ([Calling as a service](#calling-as-a-service)).
   An `@allowService` operation keeps its procedure, since its route
   admits an end user too.
 
@@ -620,6 +698,63 @@ The doc of the operation's call, or of its guard, says why, and so does
 the build log. The result of an operation without a call gets no record,
 and its input no form. A type that only a left-out procedure's arguments
 name gets no record either.
+
+### Calling as a service
+
+An operation with a service clause, `@requireService` or `@allowService`
+([D37](../../docs/DECISIONS.md)), is called as a service through
+`operations::as_service(&caller)`. The caller is the runtime's
+`ServiceCaller`, the record the route hands an implementation for a
+verified credential, which the app names itself:
+`ServiceCaller::in_process(deployable, serves)`, `serves` the APIs it acts
+for. Nothing in one process presents or verifies a credential, and the
+process's own code is trusted, so the rule makes the call deliberate; it
+does not stop an attack.
+
+- **`as_service(&caller).<ns>_<op>(cx, args)`** runs the route's service
+  step: 403 `service_forbidden` when the route's `from` lists none of the
+  APIs the caller serves. Where the route still asks for an end user, it
+  takes the page's caller, from the `PageAuthenticator`, as the end user
+  the service forwards (401, 403). A listed caller of an `@allowService`
+  operation stands in for the end user; one its `from` does not list goes
+  on to the end-user step, as the route sends it on. Then `Args::check`
+  and the implementation run, the caller in `ctx.service_caller` as the
+  route hands it.
+- **`as_service(&caller).can_<ns>_<op>(cx)`** admits the caller alone.
+- A `@requireService` operation has **no end user's call**, so a page
+  cannot call it for a reader, by accident or not, and the compiler says
+  so. Its guard, `can_<ns>_<op>(cx)`, answers 401 `service_unauthorized`,
+  as the route refuses a request without a service credential. Its
+  argument form has **`submit_as(cx, &caller)`** in place of `submit(cx)`.
+  One without an in-process call, a manual one say, keeps that guard
+  alone: `as_service` has neither its call nor its guard.
+  An `@allowService` operation keeps its end user's call, its procedure
+  and its pages, which call it as the end user, never as a service.
+
+An app that hosts a stock API's crate, whose `reserveStock` admits only
+`@requireService({ from: [shop-orders] })`, reserves as the orders service
+it acts for, forwarding the signed-in reader:
+
+```rust
+#[page(POST "/stock/{id}/reserve")]
+async fn reserve(cx: &Cx, Form(form): Form<StockReserveStockArgsForm>) -> topcoat::Result<impl View> {
+    let orders = ServiceCaller::in_process("shop-app", ["shop-orders"]);
+    let form = StockReserveStockArgsForm { id: Some(path_param::<Id>(cx)?.to_string()), ..form };
+    let refused = match form.submit_as(cx, &orders).await {
+        Ok(_) => return Err(see_other("/stock").into()),
+        Err(refused) => refused,
+    };
+    Ok(view! {
+        (refused.status)
+        <p>"Not reserved"</p>
+    })
+}
+```
+
+Call one only where the page acts as that service: the call carries the
+service's authority, not the reader's. The console and the procedures
+never call as a service, and a call as a service applies no traffic
+controls, as no in-process call does.
 
 ### Route controls
 
@@ -630,12 +765,17 @@ refusal as the route does, as a `ProblemRecord`: 429 `too_many_requests`
 `<service>(...)` puts a `ProcedureControls` layer on the path of each
 such procedure:
 
-- **Rate limit.** The procedure has its own limiter at the route's rate,
-  which counts each client by its IP address as Topcoat reads it
-  (`client_ip`: the peer's, or the one a trusted proxy names). The JSON
-  API's route keeps its own, so a client gets the rate on each, as it
-  would on two replicas; `<service>(...)` gives the JSON API's routes the
-  same address, so both count the same clients.
+- **Rate limit.** The procedure takes the operation's limiter from the
+  app's registry, `Setup.rate_limits`, the one the JSON API's route and
+  the [pages](#route-controls-of-the-pages) take too
+  ([D44](../../docs/DECISIONS.md)). It counts each client by its IP
+  address as Topcoat reads it (`client_ip`: the peer's, or the one a
+  trusted proxy names), and `<service>(...)` gives the JSON API's routes
+  the same address, so a client has one budget per operation through all
+  three, and the clients without an address share one. Another process
+  that serves the API, such as a stack's server beside the app, keeps a
+  registry of its own: a limiter lives in process memory, so replicas
+  share no budget.
 - **Body limit.** The procedure's request body is read up to the limit
   before its arguments are decoded, and Topcoat's own limit is raised to
   it for that procedure.
@@ -683,7 +823,7 @@ in words. A value renders by its field's type:
 | The type's field | Renders as |
 | --- | --- |
 | A string, a UUID, a number | its text, or the label the app's `choices` give it |
-| An enum | `<data value="on_hold">On hold</data>`: the member's name in words, which `<enum>_label` gives |
+| An enum | `<data value="on_hold">On hold</data>`: the member's title, else its name in words, which `<enum>_label` gives |
 | `Temporal.DateTime` | `<time datetime="2026-10-09T15:30:00+01:00">9 Oct 2026, 14:30 UTC</time>`: in UTC, to the minute |
 | `Temporal.Date` | `<time datetime="2026-10-09">9 Oct 2026</time>` |
 | `Temporal.Time` | `<time datetime="14:30:15">14:30</time>`: to the minute |
@@ -1060,6 +1200,27 @@ calls ask: the nav's guards are permission checks of one caller. The
 index at the prefix lists the same resources. The markup is semantic HTML
 with `ss-` classes and ships no styles.
 
+A link of the nav and the index starts with its resource's icon when the
+list's element type, else the detail's, declares one with
+`@display({ icon })` ([D48](../../docs/DECISIONS.md)): an empty span the
+app's stylesheet draws, before the label.
+
+```html
+<li><a href="/console/orders"><span class="ss-icon" data-icon="receipt" aria-hidden="true"></span>Orders</a></li>
+```
+
+The crate ships no icon set: the name is the app's to draw, with a mask
+per name, say.
+
+```css
+.ss-icon { display: inline-block; width: 1em; height: 1em; background: currentColor;
+           mask: center / contain no-repeat; }
+.ss-icon[data-icon="receipt"] { mask-image: url(/icons/receipt.svg); }
+```
+
+A link whose type declares no icon has no span, and a crate whose
+resources declare none renders the nav as it did before icons.
+
 ### Mounting them
 
 The pages, the layout and the index are `#[page]`s and a `#[layout]`,
@@ -1137,11 +1298,14 @@ it is registered at:
   the step's item, and the item's own page, edit, delete and actions. A
   shard renders no trail.
 
-The rate limit is the operation's own limiter for the pages, at its
-route's rate, which every page and shard that calls the operation shares,
-and counts each client by its IP address as Topcoat reads it
-(`client_ip`), as a procedure's does; the JSON API's route and the
-procedure keep theirs, as replicas would. A page that meets several
+The rate limit is the operation's limiter in the app's registry,
+`Setup.rate_limits`, which every page and shard that calls the operation
+takes from, and so do its JSON API route and its procedure: a client has
+one budget per operation through all of them, counted by its IP address
+as Topcoat reads it (`client_ip`). A reference's options operation is
+counted with its route too, so a client who reloads a page holding a
+reference spends that listing's API budget, and a busy console can leave
+the client none for the JSON API's listing. A page that meets several
 operations' controls is counted by each limiter, its own operation's
 first, and the tightest timeout covers it; the body limit is its own
 operation's, since no other call carries the body. The body is read up

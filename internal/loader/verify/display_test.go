@@ -122,3 +122,78 @@ func TestDisplaysVerify(t *testing.T) {
 		})
 	}
 }
+
+// D48, amended: a field's @display multiline is for a field that holds
+// text, or a list of text, and is not secret, in every form.
+func TestFieldDisplaysVerify(t *testing.T) {
+	reg := registry.New(naming.Naming{})
+	yes, no := true, false
+	const prefix = "src/ticket.schema.json: type Ticket: field "
+	for _, test := range []struct {
+		name      string
+		field     string
+		multiline *bool
+		want      []string
+	}{
+		{"a string", "title", &yes, nil},
+		{"a string on one line", "title", &no, nil},
+		{"a scalar whose values are strings", "owner", &yes, nil},
+		{"a list of text", "tags", &yes, nil},
+		{"a field that is hidden", "internal", &yes, nil},
+		{"a map", "labels", &yes, []string{prefix + "labels takes @display multiline, which is for text, but it is a map of string"}},
+		{"a number", "points", &no, []string{prefix + "points takes @display multiline, which is for text, but it is Generic.Int64"}},
+		{"any JSON", "payload", &yes, []string{prefix + "payload takes @display multiline, which is for text, but it is Generic.JSON"}},
+		{"an array scalar", "vector", &yes, []string{prefix + "vector takes @display multiline, which is for text, but it is Embedding.Vector"}},
+		{"a secret", "token", &yes, []string{prefix + "token takes @display multiline, but it is secret, a password input"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			schema := displaySchema(func(td *ir.TypeDef) {
+				for _, f := range td.Fields {
+					if f.Name == test.field {
+						f.Display = &ir.FieldDisplay{Multiline: test.multiline}
+					}
+				}
+			})
+			var got []string
+			for _, d := range Run(schema, Input{Registry: reg}).Errors {
+				got = append(got, d.Error())
+			}
+			if strings.Join(got, "\n") != strings.Join(test.want, "\n") {
+				t.Fatalf("errors:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(test.want, "\n"))
+			}
+		})
+	}
+
+	// An input type's fields are held to the same rule.
+	schema := displaySchema(nil)
+	schema.Inputs["LoginInput"] = &ir.TypeDef{Name: "LoginInput", Owner: "src/login.schema.json", Role: ir.RoleAPIInput, Fields: []*ir.FieldDef{
+		{Name: "password", TypeRef: ir.TypeRef{Name: "string"}, Secret: true, Display: &ir.FieldDisplay{Multiline: &yes}},
+	}}
+	var got []string
+	for _, d := range Run(schema, Input{Registry: reg}).Errors {
+		got = append(got, d.Error())
+	}
+	if want := "src/login.schema.json: type LoginInput: field password takes @display multiline, but it is secret, a password input"; strings.Join(got, "\n") != want {
+		t.Fatalf("errors:\n%s\nwant:\n%s", strings.Join(got, "\n"), want)
+	}
+
+	// So are a configurable trait's config fields, which Schema.Validate
+	// holds to a field display's shape.
+	schema = displaySchema(nil)
+	schema.Types["Auditable"] = &ir.TypeDef{Name: "Auditable", Owner: "src/auditable.schema.json", Role: ir.RoleTrait, TraitConfig: &ir.TraitConfigSchema{Fields: []*ir.FieldDef{
+		{Name: "note", TypeRef: ir.TypeRef{Name: "string"}, Display: &ir.FieldDisplay{Multiline: &yes}},
+		{Name: "level", TypeRef: ir.TypeRef{Name: "Generic.Int64"}, Display: &ir.FieldDisplay{Multiline: &yes}},
+		{Name: "secret", TypeRef: ir.TypeRef{Name: "string"}, Secret: true, Display: &ir.FieldDisplay{Multiline: &no}},
+	}}}
+	got = nil
+	for _, d := range Run(schema, Input{Registry: reg}).Errors {
+		got = append(got, d.Error())
+	}
+	want := []string{
+		"src/auditable.schema.json: type Auditable: trait config field level takes @display multiline, which is for text, but it is Generic.Int64",
+		"src/auditable.schema.json: type Auditable: trait config field secret takes @display multiline, but it is secret, a password input",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("errors:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}

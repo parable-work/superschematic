@@ -54,6 +54,7 @@
         "plural": "Tickets",
         "titleField": "title",
         "createLabel": "New ticket",
+        "icon": "ticket",
         "summaryFields": [
           "Workflow.status",
           "assignee"
@@ -117,9 +118,37 @@
         },
         {
           "name": "body",
+          "display": {
+            "multiline": true
+          },
           "typeRef": {
             "name": "string"
           }
+        }
+      ]
+    }
+  },
+  "enums": {
+    "Priority": {
+      "name": "Priority",
+      "owner": "tickets",
+      "comment": "How soon a ticket needs an answer.",
+      "values": [
+        {
+          "name": "Low",
+          "serializedAs": "low"
+        },
+        {
+          "name": "High",
+          "title": "Needs attention",
+          "comment": "Within the week.",
+          "serializedAs": "high"
+        },
+        {
+          "name": "Urgent",
+          "title": "Drop everything",
+          "comment": "Drop everything else.",
+          "serializedAs": "urgent"
         }
       ]
     }

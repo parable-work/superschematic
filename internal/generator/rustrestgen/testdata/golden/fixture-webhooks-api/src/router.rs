@@ -54,6 +54,10 @@ pub struct RouterState {
 /// limit, the body limit, the permission check of a route that needs a
 /// caller, then the timeout around the handler.
 ///
+/// A @rateLimit route's limiter is its operation's in a `RateLimits`
+/// registry (D44, amended): `build_router` makes one of its own, and
+/// `build_router_with` takes `options.rate_limits`.
+///
 /// An @hmacVerified operation's route runs its provider's verifier first.
 ///
 /// # Panics
@@ -68,7 +72,10 @@ pub fn build_router(implementations: Implementations) -> Router {
 /// `GET /api/openapi.json` with its RapiDoc page at `GET /api/docs` unless
 /// `options.serve_openapi` is off, stating `options.openapi_version` and
 /// `options.openapi_base_url` as the generated Go server states its
-/// `Config`'s.
+/// `Config`'s. The @rateLimit routes take their operations'
+/// limiters from `options.rate_limits`, so the routers built with one
+/// registry, or a router and a Topcoat app's procedures and pages, count a
+/// client against one budget.
 ///
 /// # Panics
 ///
@@ -106,6 +113,7 @@ fn mount(
     if let Err(message) = implementations.validate_implementations() {
         panic!("{message}");
     }
+    let limits = options.rate_limits.clone();
     let state = Arc::new(RouterState { implementations });
     let mut router: Router<Arc<RouterState>> = Router::new();
     router = router.route("/api/events/{id}", get(handle_event_get_event));
@@ -120,7 +128,7 @@ fn mount(
         ),
     );
     let route = RouteControls::new()
-        .rate_limit(1)
+        .rate_limiter(limits.of(&crate::operations::WEBHOOK_RECEIVE_STRIPE_EVENT))
         .apply(post(handle_webhook_receive_stripe_event));
     router = router.route(
         "/api/webhooks/stripe",

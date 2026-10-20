@@ -69,6 +69,7 @@ type enumLabel struct {
 	Name    string // OrderStatus
 	Func    string // order_status_label
 	Options []formOption
+	enum    *ir.EnumDef
 }
 
 // detailIndent and cellIndent are where a field's entry and cell sit in
@@ -383,6 +384,7 @@ func (b *viewBuilder) element(name string) valueShape {
 				Name:    enum.Name,
 				Func:    strings.TrimPrefix(registry.RustIdentifier(enum.Name, "enum"), "r#") + "_label",
 				Options: enumOptions(enum),
+				enum:    enum,
 			}
 			b.enums[enum.Name] = label
 		}

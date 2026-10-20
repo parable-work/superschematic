@@ -2,7 +2,11 @@
 //! route middlewares and the TypeScript runtime's `mountOperation` apply
 //! them. A request meets them in this order, the cheap refusals first:
 //!
-//! 1. `@rateLimit`: 429 `too_many_requests` with `Retry-After`.
+//! 1. `@rateLimit`: 429 `too_many_requests` with `Retry-After`. A
+//!    generated router takes the route's limiter from its options'
+//!    [`crate::RateLimits`], so every router and surface that shares the
+//!    registry counts a client against the operation's one budget (D44,
+//!    amended).
 //! 2. `@bodyLimit`: 413 `payload_too_large`, before the body is read when
 //!    `Content-Length` declares it too large, and once it passes the limit
 //!    otherwise.
@@ -13,7 +17,9 @@
 //!    a request without a caller (401 `service_unauthorized`) or with one
 //!    its `from` does not list (403 `service_forbidden`); `@allowService`
 //!    admits a listed caller and skips step 4. The caller reaches the
-//!    handler as a [`ServiceCaller`] request extension.
+//!    handler as a [`ServiceCaller`] request extension. An in-process call
+//!    meets the same rule through `OperationInfo::admit_service` (D37,
+//!    amended).
 //! 4. The permission check of a route that needs an end user (`@auth`,
 //!    `@requirePermission`, `@requireOwnership`, an `Authenticated` set):
 //!    401 `unauthorized` without a caller, 403 `forbidden` when the
@@ -26,9 +32,10 @@
 //! generated `webhook_verified` wraps a route [`RouteControls::apply`]
 //! returned. Each refusal is the problem of [`error_response`].
 
+use crate::service_auth::service_step;
 use crate::{
     error_response, ApiError, Authenticator, Principal, RateLimiter, ServiceAuthenticator,
-    ServiceCaller,
+    ServiceCaller, ServiceMode,
 };
 use axum::body::Body;
 use axum::extract::{DefaultBodyLimit, Request};
@@ -73,21 +80,31 @@ struct ServiceRule {
     from: Arc<[String]>,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum ServiceMode {
-    Require,
-    Allow,
-}
-
 impl RouteControls {
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// `@rateLimit({ requestsPerMinute })`: this route's own limiter.
+    /// `@rateLimit({ requestsPerMinute })`: a limiter of this route's own,
+    /// for a manual route the service mounts itself. A generated router
+    /// takes the operation's limiter from a registry instead
+    /// ([`RouteControls::rate_limiter`]).
     #[must_use]
     pub fn rate_limit(mut self, requests_per_minute: u32) -> Self {
         self.rate_limit = Some(Arc::new(RateLimiter::per_minute(requests_per_minute)));
+        self
+    }
+
+    /// The route's `@rateLimit` as its operation's limiter in a shared
+    /// registry ([`crate::RateLimits::of`]), so every route and surface
+    /// holding the same limiter counts a client against one budget (D44,
+    /// amended). `None` leaves the route without a rate limit, or with the
+    /// one it has.
+    #[must_use]
+    pub fn rate_limiter(mut self, limiter: Option<Arc<RateLimiter>>) -> Self {
+        if limiter.is_some() {
+            self.rate_limit = limiter;
+        }
         self
     }
 
@@ -319,22 +336,14 @@ impl Gate {
 impl ServiceRule {
     /// Whether the rule admits the request on the caller alone (`Ok(true)`:
     /// skip the end-user step), sends it on to the end-user step
-    /// (`Ok(false)`), or refuses it.
+    /// (`Ok(false)`), or refuses it: the runtime's one service rule, which
+    /// an in-process call's `OperationInfo::admit_service` applies too.
     fn admit(
         &self,
         caller: Option<&ServiceCaller>,
         has_user_clause: bool,
     ) -> Result<bool, ApiError> {
-        let listed = caller.is_some_and(|caller| caller.is_listed(&self.from));
-        match (self.mode, caller) {
-            (ServiceMode::Allow, _) if listed => Ok(true),
-            (ServiceMode::Allow, _) if has_user_clause => Ok(false),
-            (_, None) => Err(ApiError::service_unauthorized(
-                "Service credential required",
-            )),
-            (_, Some(_)) if !listed => Err(ApiError::service_forbidden("Service not permitted")),
-            (_, Some(_)) => Ok(false),
-        }
+        service_step(self.mode, &self.from, caller, has_user_clause)
     }
 }
 
@@ -509,6 +518,61 @@ mod tests {
         );
         assert_eq!(retry_after.as_deref(), Some("30"));
         assert_eq!(log.lock().unwrap().len(), 2);
+    }
+
+    // Two routes that take one operation's limiter from one registry count a
+    // client against one budget (D44, amended); a route from another
+    // registry has its own, and an operation without a rate limit none.
+    #[tokio::test]
+    async fn routes_built_from_one_registry_share_a_budget() {
+        const LIST: crate::OperationInfo = crate::OperationInfo {
+            namespace: "orders",
+            name: "listOrders",
+            method: "POST",
+            path: "/op",
+            requires_auth: false,
+            permissions: &[],
+            require_ownership: false,
+            manual: false,
+            rate_limit: Some(2),
+            service: None,
+        };
+        let log = Log::default();
+        let limits = crate::RateLimits::new();
+        let routed = |limits: &crate::RateLimits, operation| {
+            app(
+                RouteControls::new().rate_limiter(limits.of(operation)),
+                &log,
+            )
+        };
+        let first = routed(&limits, &LIST);
+        let second = routed(&limits.clone(), &LIST);
+        assert_eq!(send(&first, None, "").await.0, StatusCode::OK);
+        assert_eq!(send(&second, None, "").await.0, StatusCode::OK);
+        let (status, retry_after, _) = send(&first, None, "").await;
+        assert_eq!(
+            (status, retry_after.as_deref()),
+            (StatusCode::TOO_MANY_REQUESTS, Some("30"))
+        );
+        assert_eq!(
+            send(&second, None, "").await.0,
+            StatusCode::TOO_MANY_REQUESTS
+        );
+
+        let apart = routed(&crate::RateLimits::new(), &LIST);
+        assert_eq!(send(&apart, None, "").await.0, StatusCode::OK);
+        let open = crate::OperationInfo {
+            rate_limit: None,
+            ..LIST
+        };
+        let unlimited = routed(&limits, &open);
+        for _ in 0..5 {
+            assert_eq!(send(&unlimited, None, "").await.0, StatusCode::OK);
+        }
+        // None leaves a route's own limiter in place.
+        let own = app(RouteControls::new().rate_limit(1).rate_limiter(None), &log);
+        assert_eq!(send(&own, None, "").await.0, StatusCode::OK);
+        assert_eq!(send(&own, None, "").await.0, StatusCode::TOO_MANY_REQUESTS);
     }
 
     #[tokio::test]

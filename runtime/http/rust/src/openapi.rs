@@ -7,6 +7,8 @@ use axum::routing::get;
 use axum::Router;
 use serde_json::{json, Map, Value};
 
+use crate::RateLimits;
+
 /// The `info.version` a served document states when the service sets none,
 /// the generated Go server's default.
 pub const DEFAULT_OPENAPI_VERSION: &str = "1.0.0";
@@ -15,7 +17,12 @@ pub const DEFAULT_OPENAPI_VERSION: &str = "1.0.0";
 /// generated Go server's default.
 pub const DEFAULT_OPENAPI_BASE_URL: &str = "http://localhost:8080";
 
-/// What a generated server's `build_router_with` mounts beside its routes.
+/// What a generated server's `build_router_with` mounts beside its routes,
+/// and the rate limiters its routes take.
+///
+/// Two options are equal when their fields are and they share one
+/// registry: `RateLimits` compares by identity, so a clone of an options
+/// value is equal to it, while two `RouterOptions::default()` are not.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RouterOptions {
     /// Serve the OpenAPI document at `GET /api/openapi.json` and its RapiDoc
@@ -25,6 +32,11 @@ pub struct RouterOptions {
     pub openapi_version: String,
     /// The URL of the one server the served document lists.
     pub openapi_base_url: String,
+    /// The registry each `@rateLimit` route takes its operation's limiter
+    /// from (D44, amended). A new one by default, so a router counts its
+    /// clients alone; routers built from one registry, or from clones of
+    /// one `RouterOptions`, share each operation's budget.
+    pub rate_limits: RateLimits,
 }
 
 impl Default for RouterOptions {
@@ -33,6 +45,7 @@ impl Default for RouterOptions {
             serve_openapi: true,
             openapi_version: DEFAULT_OPENAPI_VERSION.to_owned(),
             openapi_base_url: DEFAULT_OPENAPI_BASE_URL.to_owned(),
+            rate_limits: RateLimits::new(),
         }
     }
 }
@@ -172,6 +185,25 @@ mod tests {
         let without_info: Value =
             serde_json::from_str(&openapi_document(r#"{"info":7}"#, "1.0.0", "x")).unwrap();
         assert_eq!(without_info["info"], json!({"version": "1.0.0"}));
+    }
+
+    #[test]
+    fn options_are_equal_when_they_share_their_registry() {
+        let options = RouterOptions::default();
+        assert_eq!(options, options.clone());
+        assert_ne!(RouterOptions::default(), RouterOptions::default());
+        let shared = RouterOptions {
+            serve_openapi: false,
+            ..options.clone()
+        };
+        assert_ne!(options, shared, "the fields still count");
+        assert_eq!(
+            options,
+            RouterOptions {
+                serve_openapi: true,
+                ..shared
+            }
+        );
     }
 
     #[test]

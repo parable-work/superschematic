@@ -263,8 +263,9 @@ export function documentsDocument(): Record<string, unknown> {
  * loads with no extension linked (fixture-display-json, which
  * `superschematic format --to=json` wrote from its TypeScript twin): its
  * Ticket type composes Workflow and Comments and declares @display over
- * its fields, its states and its transitions, and its fields' titles and
- * icons.
+ * its fields, its states and its transitions, with an icon, and its
+ * fields' titles, icons and multiline hint; its Priority enum's members
+ * take titles.
  */
 export function ticketsDocument(): Record<string, unknown> {
   return JSON.parse(

@@ -1,6 +1,8 @@
 package topcoat
 
 import (
+	"maps"
+	"slices"
 	"strings"
 	"unicode"
 
@@ -8,8 +10,8 @@ import (
 )
 
 // The label rule a form and a display component share: a field is labeled
-// by its @docs title, else its name in words; an enum's member by its name
-// in words.
+// by its @docs title, else its name in words; an enum's member by its
+// title, else its name in words (D44, amended).
 
 // labelOf is a field's label: its @docs title, or its name in words.
 func labelOf(field *ir.FieldDef) string {
@@ -20,7 +22,9 @@ func labelOf(field *ir.FieldDef) string {
 }
 
 // enumOptions is each member of enum: the value its JSON holds and its
-// label, the member's name in words.
+// label, the member's title, else its name in words. A form's select and
+// checkbox group, a filter's, and the label a display component shows
+// for a value all take their labels from it.
 func enumOptions(enum *ir.EnumDef) []formOption {
 	options := make([]formOption, 0, len(enum.Values))
 	for _, value := range enum.Values {
@@ -28,9 +32,54 @@ func enumOptions(enum *ir.EnumDef) []formOption {
 		if serialized == "" {
 			serialized = value.Name
 		}
-		options = append(options, formOption{Value: serialized, Label: humanize(value.Name)})
+		label := value.Title
+		if label == "" {
+			label = humanize(value.Name)
+		}
+		options = append(options, formOption{Value: serialized, Label: label})
 	}
 	return options
+}
+
+// warnSharedLabels logs each enum the crate labels, in a form, an argument
+// form or filter, or a display component, two of whose members take one
+// label, ignoring case: a select offers the label twice, and a table
+// cannot tell the members apart. The IR refuses two members one title,
+// but not a title that is another member's name in words, nor two names
+// in the same words ({OnHold, Paused /** @title On hold */}). It is a
+// warning: the crate builds, and a @title on either member tells them
+// apart.
+func warnSharedLabels(c *crate, logf func(format string, args ...any)) {
+	enums := map[string]*ir.EnumDef{}
+	for _, st := range c.FormStructs {
+		for _, f := range st.Fields {
+			if f.enum != nil {
+				enums[f.enum.Name] = f.enum
+			}
+		}
+	}
+	for _, form := range c.ArgForms {
+		for _, f := range form.Fields {
+			if f.enum != nil {
+				enums[f.enum.Name] = f.enum
+			}
+		}
+	}
+	for _, label := range c.EnumLabels {
+		if label.enum != nil {
+			enums[label.enum.Name] = label.enum
+		}
+	}
+	for _, name := range slices.Sorted(maps.Keys(enums)) {
+		enum := enums[name]
+		options := enumOptions(enum)
+		for i, option := range options {
+			if j := slices.IndexFunc(options[:i], func(o formOption) bool { return strings.EqualFold(o.Label, option.Label) }); j >= 0 {
+				logf("  - topcoat: enum %s: members %s and %s share the label %q, so a select offers it twice; a @title tells them apart\n",
+					name, enum.Values[j].Name, enum.Values[i].Name, options[j].Label)
+			}
+		}
+	}
 }
 
 // humanize is a camelCase or PascalCase name in words, the first
