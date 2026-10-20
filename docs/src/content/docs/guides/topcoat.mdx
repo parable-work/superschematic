@@ -381,7 +381,9 @@ its text a textarea whatever its `maxLength`, a note without a bound,
 and `@display({ multiline: false })` keeps it one line at any bound. The
 hint applies only where the control would be text: an email, URL, phone,
 date or time keeps its control, and the build log says it ignored the
-hint. An argument takes no decorator, so it keeps the 500 rule. A number
+hint. An argument takes no decorator, so it keeps the 500 rule. A
+review's body says `@display({ multiline: true })`, which its
+`maxLength` of 5000 would decide alone. A number
 field holding a whole number reads any a browser sends, `1e1` and `2.0`
 too. A `@secret` field is `type="password"` and is never rendered with
 its value, so a refused form asks for it again. A record leaves the
@@ -511,8 +513,11 @@ A field is labeled as its form field is: its `@docs` title, else its name
 in words. A value renders by its type:
 
 - an enum's value is its member's title, else its name in words, in a
-  `<data>` element whose `value` is the one the API sends;
-  `<enum>_label` gives the same label for a page's own markup;
+  `<data>` element whose `value` is the one the API sends: shop-db titles
+  `OrderStatus.Fulfilled` with `/** @title Picked and packed */`, so a
+  fulfilled order reads "Picked and packed" in the tables and the
+  filters, and a placed one "Placed". `<enum>_label` gives the same label
+  for a page's own markup;
 - a date, a time or a date-time is a `<time>` element whose `datetime`
   is the value the API sends and whose text a reader reads, the same for
   every reader: "9 Oct 2026", "14:30", and a date-time in UTC to the
@@ -652,7 +657,8 @@ A layout at the prefix puts each page in `<main>`, after a nav of the
 resources the caller may list, the current one marked with
 `aria-current`, each after its type's icon when its `@display` names one
 (`<span class="ss-icon" data-icon="receipt" aria-hidden="true">`, which
-the app's stylesheet draws, since the crate ships no icon set), and a
+the app's stylesheet draws, since the crate ships no icon set: acme's
+`ProductView` and `OrderView` name `package` and `receipt`), and a
 breadcrumb trail from the index to the page, an
 item by its title where its type declares one. Else an item is named by
 the label of what its route's value refers to, when every operation whose

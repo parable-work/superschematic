@@ -29,7 +29,14 @@
 //! script alone, as a bundle would serve it; the console's lists render
 //! again in place through their shards, for a filter, a page and a search,
 //! the runtime renders a page again as its GET, and without the runtime the
-//! pages load no script and the lists are GET forms.
+//! pages load no script and the lists are GET forms. The console's nav and
+//! index start the orders' and the products' links with their types'
+//! icons, and an order's status reads by its member's title, "Picked and
+//! packed", in the filters and the tables. placeOrder's rate limit is one
+//! budget per client across the JSON API, its procedure and the console's
+//! new-order post. Enter in any form of any page the tests render presses
+//! the form's default button, which submits it as such
+//! (extensions/topcoat/testdata/enter.rs).
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -41,14 +48,22 @@ use acme_shop_orders_server::{SHOPPER_PERMISSIONS, Shop, add_shopper, add_staff,
 use acme_shop_orders_topcoat::api::runtime::identity::{NewUser, Service, hash_password};
 use acme_shop_orders_topcoat::api::runtime::{Principal, RequestContext};
 use acme_shop_orders_topcoat::api::{ProductReviewsImplementation, ProductReviewsWriteReviewArgs, types};
-use acme_shop_orders_topcoat::procedures::{OrderListOrdersArgsRecord, call_order_list_orders};
-use acme_shop_orders_topcoat::records::OrderViewPageRecord;
+use acme_shop_orders_topcoat::procedures::{OrderListOrdersArgsRecord, OrderPlaceOrderArgsRecord, call_order_list_orders};
+use acme_shop_orders_topcoat::records::{OrderViewPageRecord, PlaceOrderInputRecord, PlaceOrderLineRecord, ShippingAddressRecord};
+use acme_shop_orders_topcoat::views::order_status_label;
 use acme_shop_topcoat::{CATALOG, PRODUCT, Product, add_people, app, product, shop_in_memory, stock_sqlite};
 use topcoat::asset::{AssetConfig, Manifest};
 use topcoat::context::Cx;
 use topcoat::router::request::parts;
 use topcoat::router::{Body, Router, StatusCode, header, page, to_bytes};
+use topcoat::runtime::{Arguments, Surrogated};
 use topcoat::view::{View, view};
+
+/// HTML's implicit-submission rule, which the extension's own tests hold
+/// their pages to: Enter in each form's text field presses its default
+/// button, so `respond` checks every page the app answers with.
+#[path = "../../../../extensions/topcoat/testdata/enter.rs"]
+mod enter;
 
 /// The app's identity config at a low password cost, so a test hashes
 /// fast.
@@ -243,14 +258,20 @@ async fn call_api(router: &Router, method: &str, uri: &str, cookie: &str, json: 
 }
 
 async fn respond(router: &Router, request: http::Request<Body>) -> Response {
+    let uri = request.uri().to_string();
     let response = router.handle(request).await;
-    let header_text = |name| response.headers().get(name).map(|value: &http::HeaderValue| value.to_str().unwrap().to_owned());
+    let headers = response.headers().clone();
+    let header_text = |name| headers.get(name).map(|value: &http::HeaderValue| value.to_str().unwrap().to_owned());
     let location = header_text(header::LOCATION);
     // The session cookie, as the browser sends it back: name=value.
     let cookie = header_text(header::SET_COOKIE).map(|set| set.split(';').next().unwrap().to_owned());
     let status = response.status();
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    Response { status, location, cookie, body: String::from_utf8(bytes.to_vec()).unwrap() }
+    let body = String::from_utf8(bytes.to_vec()).unwrap();
+    // Every HTML page's forms submit as such when Enter is pressed; the
+    // JSON API's and the procedures' answers are left alone.
+    enter::check_page(&uri, &headers, &body);
+    Response { status, location, cookie, body }
 }
 
 /// Signs the demo shopper in: the session cookie, as the browser sends it
@@ -335,7 +356,8 @@ async fn the_reviews_page_renders_the_form_from_the_input_rules() {
     assert!(page.body.contains("No reviews yet."), "{}", page.body);
     assert!(page.body.contains(r#"name="rating" type="number" required="" step="any" min="1" max="5""#), "{}", page.body);
     assert!(page.body.contains(r#"name="title" type="text" required="" minlength="1" maxlength="120""#), "{}", page.body);
-    // A body of up to 5000 characters is long text, a textarea.
+    // The body's multiline hint makes it a textarea, as its maxLength of
+    // 5000 would without one.
     assert!(page.body.contains("<textarea id=\"write-review-input-body\" name=\"body\" rows=\"6\" required=\"\" maxlength=\"5000\">\n</textarea>"), "{}", page.body);
 }
 
@@ -587,6 +609,8 @@ async fn orders_are_filtered_by_the_get_form() {
     assert_eq!(page.status, StatusCode::OK);
     assert!(page.body.contains(r#"<input type="checkbox" name="statuses" value="cancelled" checked="">"#), "{}", page.body);
     assert!(page.body.contains(r#"<input type="checkbox" name="statuses" value="placed">"#), "{}", page.body);
+    // A member is labeled by its title, else by its name in words.
+    assert!(page.body.contains(r#"<input type="checkbox" name="statuses" value="fulfilled">Picked and packed</label>"#), "{}", page.body);
     assert!(page.body.contains(&format!(r#"<a href="{cancelled}">"#)), "{}", page.body);
     assert!(!page.body.contains(&placed), "{}", page.body);
     let none = send(&router, "GET", "/orders?statuses=shipped", Some(&cookie), None).await;
@@ -769,6 +793,18 @@ async fn a_sqlite_shop_outlives_the_app() {
     let console = send(&router, "GET", "/console/orders", Some(&cookie), None).await;
     assert_eq!(console.status, StatusCode::OK, "{}", console.body);
     assert!(console.body.contains(&format!(r#"<a href="/console{order}">"#)), "{}", console.body);
+    // The stack's worker fulfils a placed order; here the file's row says
+    // so. The console's table and its filter label the status by its
+    // member's title, as `order_status_label` does.
+    let fulfilled = rusqlite::Connection::open(&path)
+        .unwrap()
+        .execute(r#"UPDATE "order" SET status = 'fulfilled' WHERE status = 'placed'"#, [])
+        .unwrap();
+    assert_eq!(fulfilled, 1);
+    let console = send(&router, "GET", "/console/orders", Some(&cookie), None).await;
+    assert!(console.body.contains(r#"<td data-field="status"><data value="fulfilled">Picked and packed</data></td>"#), "{}", console.body);
+    assert!(console.body.contains(r#"value="fulfilled">Picked and packed</label>"#), "{}", console.body);
+    assert_eq!((order_status_label("fulfilled"), order_status_label("placed")), ("Picked and packed", "Placed"));
 
     // review's search_text, the VIRTUAL column shop-db's @searchField gives
     // it on SQLite, joins its title and body.
@@ -792,8 +828,11 @@ async fn the_console_shows_what_the_shopper_may_list() {
     let index = send(&router, "GET", "/console", None, None).await;
     assert_eq!(index.status, StatusCode::OK);
     assert!(index.body.contains(r#"<header class="ss-header"><a href="/console">Acme shop console</a></header>"#), "{}", index.body);
-    assert!(index.body.contains(r#"<nav class="ss-nav" aria-label="Resources"><ul><li><a href="/console/products">Products</a></li></ul></nav>"#), "{}", index.body);
-    assert!(index.body.contains(r#"<ul class="ss-index"><li><a href="/console/products">Products</a></li></ul>"#), "{}", index.body);
+    // Each link starts with its type's icon, which the app's stylesheet
+    // draws.
+    let products = r#"<li><a href="/console/products"><span class="ss-icon" data-icon="package" aria-hidden="true"></span>Products</a></li>"#;
+    assert!(index.body.contains(&format!(r#"<nav class="ss-nav" aria-label="Resources"><ul>{products}</ul></nav>"#)), "{}", index.body);
+    assert!(index.body.contains(&format!(r#"<ul class="ss-index">{products}</ul>"#)), "{}", index.body);
     assert!(index.body.contains(r#"<a class="ss-sign-in" href="/sign-in?next=%2Fconsole">Sign in</a>"#), "{}", index.body);
     let orders = send(&router, "GET", "/console/orders", None, None).await;
     assert_eq!(orders.status, StatusCode::UNAUTHORIZED);
@@ -804,7 +843,7 @@ async fn the_console_shows_what_the_shopper_may_list() {
     // Signed in, the nav and the index list the orders too.
     let cookie = signed_in.cookie.expect("the session cookie");
     let index = send(&router, "GET", "/console", Some(&cookie), None).await;
-    let links = r#"<li><a href="/console/orders">Orders</a></li><li><a href="/console/products">Products</a></li>"#;
+    let links = format!(r#"<li><a href="/console/orders"><span class="ss-icon" data-icon="receipt" aria-hidden="true"></span>Orders</a></li>{products}"#);
     assert!(index.body.contains(&format!(r#"<nav class="ss-nav" aria-label="Resources"><ul>{links}</ul></nav>"#)), "{}", index.body);
     assert!(index.body.contains(&format!(r#"<ul class="ss-index">{links}</ul>"#)), "{}", index.body);
     assert!(!index.body.contains("ss-sign-in"), "{}", index.body);
@@ -891,6 +930,85 @@ async fn the_console_places_an_order_with_the_catalogs_products() {
     let signed_out = send(&router, "POST", "/console/orders/new", None, Some(&order_form("2"))).await;
     assert_eq!(signed_out.status, StatusCode::UNAUTHORIZED, "{}", signed_out.body);
     assert!(signed_out.body.contains(r#"href="/sign-in?next=%2Fconsole%2Forders%2Fnew""#), "{}", signed_out.body);
+}
+
+/// The place-order procedure's path, which browser code posts its
+/// arguments to.
+const PLACE_ORDER_PROCEDURE: &str = "/_superschematic/shop-orders/order/place-order";
+
+/// Calls a procedure as the browser runtime does, its arguments in their
+/// JSON array, as the shopper whose session `cookie` holds.
+async fn call_procedure<T: Surrogated>(router: &Router, path: &str, cookie: &str, args: T) -> Response
+where
+    T::Surrogate: serde::Serialize,
+{
+    let json = serde_json::to_string(&Arguments((args.into_surrogate(),))).unwrap();
+    let request = http::Request::builder()
+        .method("POST")
+        .uri(path)
+        .header(header::COOKIE, cookie)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(json))
+        .unwrap();
+    respond(router, request).await
+}
+
+/// placeOrder's arguments as browser code builds them: two of the
+/// catalog's anvils to the demo address.
+fn place_order_args() -> OrderPlaceOrderArgsRecord {
+    OrderPlaceOrderArgsRecord {
+        input: PlaceOrderInputRecord {
+            lines: vec![PlaceOrderLineRecord { product_id: PRODUCT.to_owned(), quantity: 2.0 }],
+            shipping_address: ShippingAddressRecord {
+                recipient: "Ada Lovelace".to_owned(),
+                line1: "1 Analytical Way".to_owned(),
+                line2: None,
+                city: "London".to_owned(),
+                postcode: "N1 9GU".to_owned(),
+                country: "GB".to_owned(),
+                phone: None,
+            },
+        },
+    }
+}
+
+#[tokio::test]
+async fn place_orders_rate_limit_is_one_budget_across_the_api_its_procedure_and_the_console() {
+    // placeOrder's 60 a minute is one budget per client, which the JSON
+    // API's route, its procedure and the console's new-order post share
+    // (D44, amended): 20 orders through each spend it, and the next post
+    // through each is refused with 429, the route's problem, the
+    // procedure's ProblemRecord and the console's refusal. A client
+    // without an address is one client on all three. The bucket refills at
+    // one a second, and the 60 posts take far less, so none comes back
+    // before the refusals.
+    let router = shop().await;
+    let cookie = sign_in(&router).await;
+    let json = format!(
+        r#"{{"lines":[{{"productId":"{PRODUCT}","quantity":2}}],"shippingAddress":{{"recipient":"Ada Lovelace","line1":"1 Analytical Way","city":"London","postcode":"N1 9GU","country":"GB"}}}}"#
+    );
+    for n in 0..20 {
+        let placed = call_api(&router, "POST", "/api/orders", &cookie, &json).await;
+        assert!(placed.status.is_success(), "API order {n}: {}: {}", placed.status, placed.body);
+    }
+    for n in 0..20 {
+        let placed = call_procedure(&router, PLACE_ORDER_PROCEDURE, &cookie, place_order_args()).await;
+        assert!(placed.status.is_success() && placed.body.contains(r#""ok""#), "procedure order {n}: {}: {}", placed.status, placed.body);
+    }
+    for n in 0..20 {
+        let placed = send(&router, "POST", "/console/orders/new", Some(&cookie), Some(&order_form("2"))).await;
+        assert_eq!(placed.status, StatusCode::SEE_OTHER, "console order {n}: {}", placed.body);
+    }
+    let api = call_api(&router, "POST", "/api/orders", &cookie, &json).await;
+    assert_eq!(api.status, StatusCode::TOO_MANY_REQUESTS, "{}", api.body);
+    let procedure = call_procedure(&router, PLACE_ORDER_PROCEDURE, &cookie, place_order_args()).await;
+    assert!(procedure.body.contains(r#""code":"too_many_requests""#), "{}: {}", procedure.status, procedure.body);
+    let console = send(&router, "POST", "/console/orders/new", Some(&cookie), Some(&order_form("2"))).await;
+    assert_eq!(console.status, StatusCode::TOO_MANY_REQUESTS, "{}", console.body);
+
+    // The app's own new-order page calls placeOrder in-process, which no
+    // traffic control meets, so it still places an order.
+    place_order(&router, &cookie).await;
 }
 
 #[tokio::test]
