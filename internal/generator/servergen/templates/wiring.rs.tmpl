@@ -53,14 +53,26 @@ fn open_bucket(
 /// `RequestOptions::forward(ctx.bearer_token())` with each call it makes
 /// for a request.
 {{- end }}
-fn {{ .Constructor }}(endpoint: &Service) -> Result<{{ .Alias }}::{{ .Client }}, Failure> {
+{{- if .Loopback }}
+///
+/// {{ .Service }} is an API the server serves itself, which no connector gives a
+/// credential, so to a loopback endpoint without one the client sends the
+/// server's loopback credential (section 9.9).
+{{- end }}
+{{ .Signature }}
     let service_credential = match &endpoint.credential {
         Some(credential) => Some({{ .Alias }}::ServiceCredential {
             token: stackconfig::credential_source(credential)
                 .map_err(|err| format!("client of {{ .Service }}: {err}"))?,
             headers: credential.header_names(),
         }),
+{{- if .Loopback }}
+        None => {{ .Loopback }}
+            .credential_for(&endpoint.url)
+            .map(|(token, headers)| {{ .Alias }}::ServiceCredential { token, headers }),
+{{- else }}
         None => None,
+{{- end }}
     };
     {{ .Alias }}::{{ .Client }}::new({{ .Alias }}::ClientConfig {
         base_url: endpoint.url.clone(),

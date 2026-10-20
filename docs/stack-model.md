@@ -1434,7 +1434,8 @@ inside the VPC. Cloud Run counts a request from a VPC as internal, which
 an internal server's ingress requires and a server behind a load balancer
 accepts, so no caller waits on a load balancer the exposure step applies
 last. A call to an API the same server serves stays on loopback, with no
-grant and no credential.
+grant and no credential from the connector; the server signs it with its
+own loopback key (section 9.2).
 
 Each exposed server gets a load balancer of its own, and so does each
 site. A platform lowers one deployable, so it cannot write the host rules
@@ -3357,6 +3358,22 @@ object's index; and a whole number is its decimal
 that is no member, and the generated entrypoint builds the API's
 `serviceauth.Verifier` from it (section 8.1).
 
+Outside a stack, a deployment sets the field itself, so the API's
+`values-schema.json`, in every server language, lists it: `<API>_ISSUERS`
+as a property, each issuer's, key's and caller's member as a pattern
+property under its index (`^SHOP_API_CALLERS_ISSUERS_(0|[1-9][0-9]*)_AUDIENCE$`),
+each with the shape the readers take (a count with an optional sign, a
+comma-separated list whose entries are not blank, the algorithms RS256,
+ES256 and EdDSA, a member that must not be empty), and an
+`x-superschematic.envVars` entry with `callersOf`, the API, `variables`
+and `variablePatterns`. `additionalProperties` stays false, so a values
+file that sets a member the readers do not know fails the schema as it
+fails the server. A schema cannot say which indexes a count admits; the
+readers refuse a member past its list's length. The API's other fields a
+server reads beside its settings and edges, the CORS field and the
+identity config field (D55, D50), are optional, with safe defaults when
+unset, and are not listed yet.
+
 Every Cloud Run service lists its full resource name as a custom
 audience, and a caller asks the metadata server for a token for it. The
 service's `run.app` URL is an output of the service, which its own
@@ -3436,6 +3453,53 @@ per edge into the gitignored local file, and the callee's callers field
 references its public key, so a local stack runs the code path a deployed
 one does.
 
+**A call within one server.** When an API's implementation calls another
+API the same server serves, the call goes through the callee's SDK client
+to the server's own loopback address, and the connector gives it no
+credential: no edge between two deployables carries it, and the callee's
+callers field lists no entry for it. So the server makes its own. The
+generated Go, TypeScript and Rust entrypoints of such a server, one with a
+client of an API it serves whose operations have a service clause:
+
+- generate an Ed25519 key pair when the server starts, which only its
+  process holds: Go `serviceauth.NewLoopback`, TypeScript
+  `loopbackServiceAuth`, Rust `Loopback::generate`;
+- have each such client sign the generic connector's token with it (the
+  same header and claims, five minutes long, signed again with a minute
+  left), whose `iss`, `sub` and `aud` are the server's deployable, and send
+  it in `Service-Authorization` when the endpoint carries no credential of
+  its own and its URL is a loopback URL: `127.0.0.0/8`, `[::1]` or
+  `localhost`, read literally by one rule in the three runtimes;
+- add the key to the callers field of each API the server serves with a
+  service clause, as one more issuer, before the standard authenticator is
+  built from it: the server's deployable as issuer and audience, the key's
+  public half, EdDSA, 300 seconds at most, and one caller, the server
+  itself, serving every API it serves (`Accept`, `accept`, `accept`). A
+  field that already names an issuer, or an alias, of the server's name is
+  refused at start, since no connector writes one.
+
+So the caller of such a call is the server, as a caller on another server
+is that server, and a `from` that lists any API the server serves admits
+it, which is the rule resolution's check applies (section 9.3). The
+verifier is the one every issuer goes through, so expiry, the audience,
+the `kid` and the signature are checked as for an edge's token, and the
+`loopback` section of the parity vectors (section 9.8) holds the issuer,
+the token and the URL rule to one answer in the three runtimes.
+
+Nothing outside the process can sign as the server: the private key is
+never written, logged or configured, and a token that names the server
+with another key, or the key's `kid` with another signature, is 401
+`service_unauthorized`. A key lives as long as its process, so a token an
+earlier process or another instance of the server signed does not verify
+either: the call goes to the instance that signed it, on loopback. The
+token is a bearer token for its five minutes, which is why it goes only to
+a loopback URL: an endpoint that names another host, which may not be
+this process, gets no credential, as before. A call from an API to an API
+on another server is unchanged, with the edge's credential, and a job or a
+worker, a deployable of its own, calls its API's server with its edge's.
+A Workers server builds its key the same way, since the runtime's key and
+signing use WebCrypto alone.
+
 Not taken:
 
 - Trusting the claims Cloud Run passes on in `X-Serverless-Authorization`.
@@ -3467,6 +3531,21 @@ Not taken:
   `from`, a route lists every server with a `calls` edge to its API, and a
   server whose edge reaches one API of the callee would pass a route of
   another.
+- For a call within one server: leaving such calls out of the service
+  step, or out of a route's clause, which would admit anything that
+  reaches the server on loopback as any API it serves, a sidecar or a
+  forwarded port included. Running the callee in process, skipping HTTP:
+  only the Rust crate has an in-process path (D43), and it applies the
+  end-user step alone, while the Go and TypeScript SDK clients a server's
+  `Deps` holds are HTTP clients. A key per environment, which a connector
+  would generate and the secret store hold, for a credential no other
+  process needs. A token naming the calling API rather than the server:
+  `from` names servers by the APIs they serve, so it would refuse a call
+  between two APIs of one server that the same call between two servers
+  passes, and that resolution's check passes, and an implementation's
+  APIs share one process, which is no boundary between them. A credential
+  source the connector names in the endpoint, which a hand-set endpoint
+  could point at another host.
 - The callee's `run.app` URL as the audience on Cloud Run, an output of
   the callee's own service.
 - The caller's unique id in `sub` on Cloud Run, which D37 first chose. It
@@ -3563,7 +3642,9 @@ C can forward an end user when an API it serves has an operation with a
 user clause. So an edge fails when every operation of the callee lists
 other services or needs an end user the caller does not have: "orders
 calls shop-api, but no shop-api operation admits orders"
-(`unreachable-edge`). A handle in `from` that names a service the stack
+(`unreachable-edge`). A call between two APIs one server serves is checked
+the same way, with C the server itself, which is the caller its loopback
+credential names (section 9.2): what the check counts, the server admits. A handle in `from` that names a service the stack
 does not deploy, or deploys without an edge, is not an error: an API is
 written once and deployed in many stacks.
 
@@ -3730,7 +3811,12 @@ for two, which D30 rejected.
   credential holds it, a private JWK's JSON or a PKCS#8 PEM, and the
   token's header, `kid` included, and claims but `jti`, which each runtime
   signs and verifies against the SubjectPublicKeyInfo PEM read as a JWK;
-  and keys the source refuses, such as a P-256 key's PKCS#8.
+  and keys the source refuses, such as a P-256 key's PKCS#8;
+- in `loopback`, a server's loopback key built from a fixed seed (section
+  9.2): the issuer it adds to a callers field, the token it signs, the
+  verdicts on that token at the clock's limits and on tokens another key
+  signed under the server's name, the fields the issuer cannot be added
+  to, and which URLs the credential goes to.
 
 The cases cover each row of section 9.3's table; expiry, a token not yet
 valid, the wrong audience and the wrong issuer; an unknown `kid`, `alg:
@@ -3764,6 +3850,20 @@ The callers field has its own tests:
 - `stackconfig.LoadCallers` reads the variables into a verifier config
   that admits a token signed with the edge's key, and servergen's golden
   and compiled tests cover `serviceauth.go`;
+- envgen's `TestTheCallersFieldsSchemaIsWhatTheReadersRead` holds
+  `values-schema.json`'s listing of the field to what the readers take in
+  `stackconfig_parity.json` and to what `ir.DerivedVariables` writes, and
+  servergen's `TestAServiceClauseAdmitsItsCallers` starts shop-api from a
+  values file written by hand and checked against it, outside a stack;
+- each language's servergen serve test runs a server of two APIs, one
+  calling the other's operation that only a service may call, at the
+  loopback URL a connector derives, through a proxy that keeps the token:
+  the call is admitted as the server; from outside, no credential and a
+  token signed with another key, current or expired, are 401; and the
+  call's token is 401 at a second process of the same server
+  (`TestAServerCallsAnAPIItServesWithItsLoopbackKey`, and the merged
+  servers of `TestTypeScriptEntrypointCompilesAndServes` and
+  `TestRustEntrypointCompilesAndServes`);
 - `cli`'s `TestStackDevVerifiesServiceCallers` runs three Go servers with
   `stack dev`: the caller's call is admitted with its end user forwarded,
   a request with no credential, from a server with no edge, or for
@@ -3789,15 +3889,13 @@ The callers field has its own tests:
   HTTP clients do not trust. Until the Kubernetes platform lands, a
   deployment passes a key fetcher or HTTP client that trusts it; the
   platform may add a CA to the callee config instead.
-- A call between two APIs one server serves stays on loopback and carries
-  no service credential, so a `@requireService` operation the other API
-  calls refuses it with 401, though resolution's check (section 9.3)
-  counts the call as admitted. The call could carry a token the server
-  signs for itself, or the check could leave such calls out.
-- The callers field of a server outside a stack. `values-schema.json`
-  does not list it, since its variables depend on the environment's
-  edges, so a deployment that sets its own config writes the variables by
-  hand.
+- A call between two APIs one server serves, settled since: it carries a
+  token the server signs with a loopback key only its process holds, which
+  the server's own authenticator accepts as the server (section 9.2).
+- The callers field of a server outside a stack, settled since:
+  `values-schema.json` lists its variables and their shapes (section 9.2).
+  The CORS and identity config fields, which a server reads too but
+  which default safely when unset, are not listed; listing them is open.
 
 ## 10. Validation and simulation
 

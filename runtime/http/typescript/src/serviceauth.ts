@@ -581,6 +581,15 @@ export function ed25519Pkcs8FromPem(text: string): Uint8Array<ArrayBuffer> {
   return der;
 }
 
+/** The PKCS#8 DER of the Ed25519 private key whose 32-byte seed is seed, for WebCrypto's pkcs8 import. */
+export function ed25519Pkcs8FromSeed(seed: Uint8Array): Uint8Array<ArrayBuffer> {
+  if (seed.length !== 32) throw new Error('an Ed25519 seed is 32 bytes');
+  const der = new Uint8Array(ED25519_PKCS8_PREFIX.length + 32);
+  der.set(ED25519_PKCS8_PREFIX);
+  der.set(seed, ED25519_PKCS8_PREFIX.length);
+  return der;
+}
+
 /** A JWS header or payload: a JSON object, or undefined. */
 function jsonSegment(segment: string): Record<string, unknown> | undefined {
   const bytes = base64urlDecode(segment);

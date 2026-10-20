@@ -590,7 +590,7 @@ func (r run) generateTypeScriptAPI() error {
 		}
 	}
 
-	if envOutput == nil || (envOutput.TypeName == "" && len(envOutput.Derived) == 0) {
+	if envOutput == nil || (envOutput.TypeName == "" && len(envOutput.Derived) == 0 && envOutput.ListedCallersField == "") {
 		return nil
 	}
 	if err := envgen.WriteValuesSchema(envOutput, dir); err != nil {
@@ -917,7 +917,17 @@ func (r run) generateGoAPI() error {
 		return fmt.Errorf("generator: api for %s: %w", r.Config.Name, err)
 	}
 	if err := r.measure("output.api.write", func() error {
-		return apigen.WriteAPIWithProfile(output, dir, r.Options.Profile, r.Options.SkipFormat, codegenProfilePrefixes("output.api")...)
+		if err := apigen.WriteAPIWithProfile(output, dir, r.Options.Profile, r.Options.SkipFormat, codegenProfilePrefixes("output.api")...); err != nil {
+			return err
+		}
+		// An API whose only configuration is its callers field has no
+		// EnvConfig, since its entrypoint reads the field itself; its
+		// values-schema.json lists the field, which a deployment outside a
+		// stack sets.
+		if output.EnvConfig == nil && r.Schema.HasServiceCallers() {
+			return envgen.WriteValuesSchema(envgen.CallersValues(r.Config.Name), dir)
+		}
+		return nil
 	}); err != nil {
 		return fmt.Errorf("generator: api for %s: %w", r.Config.Name, err)
 	}

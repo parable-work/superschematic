@@ -100,7 +100,8 @@ func TestCallersMergeByIssuer(t *testing.T) {
 // TestCallersWithoutAnEdge: an API with a service clause that no other
 // server calls gets a callers field with no issuers, so its server starts
 // and refuses every service credential. A call within one server adds no
-// caller: it stays on loopback and carries no credential.
+// caller: it stays on loopback, with the server's own loopback credential,
+// which the field does not list (section 9.9).
 func TestCallersWithoutAnEdge(t *testing.T) {
 	env := mustResolve(t, assemble(t), stacktest.Shop(), stacktest.AllowServiceShop(), "Staging")
 	b := callersOf(env, "Orders", "shop-orders")

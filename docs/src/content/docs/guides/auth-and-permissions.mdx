@@ -338,8 +338,30 @@ authenticator. On the `local` target, each caller signs with an Ed25519
 key pair `stack dev` makes for its edge, so `shop-stock`'s server admits
 `shop-orders`' and refuses a shopper's session sent without it, 401
 `service_unauthorized`, as `TestStackDevRunsTheShop` checks. Outside a
-stack, you supply the config yourself. A deployment whose credential the
-config cannot express passes its own authenticator in the same place.
+stack, you set the callers field yourself, one variable per member as
+the stack would: `api/<service>/values-schema.json` lists its variables,
+`SHOP_STOCK_CALLERS_ISSUERS` and each issuer's members under its index
+(`SHOP_STOCK_CALLERS_ISSUERS_0_AUDIENCE`, `_KEYS_0_PEM`,
+`_CALLERS_0_SERVES`), with the shape each takes, so a values file can be
+checked against it before the server refuses it. With
+`SHOP_STOCK_CALLERS_ISSUERS=0` the server starts and refuses every
+service credential. A deployment whose credential the config cannot
+express passes its own authenticator in the same place.
+
+A call between two APIs one server serves stays on the server's own
+loopback address, and no connector gives it a credential. So the server
+makes its own: when it starts, it generates an Ed25519 key pair that only
+its process holds, its client of an API it serves signs the same token an
+edge's key does with it, naming the server as issuer, subject and
+audience, and the authenticator of each API it serves with a service
+clause accepts that key beside the callers field, as the server, serving
+every API it serves. So a `from` that lists any API the server serves
+admits the call, as it admits a caller on another server that serves one.
+The token goes only to a loopback URL, and a token another process signed
+does not verify. The generated entrypoints do this for you; by hand it is
+Go `serviceauth.NewLoopback`, TypeScript `loopbackServiceAuth` and Rust
+`Loopback::generate`, each with an `Accept` (`accept`) for the callers
+field and a credential for the client.
 
 On a Go API that is neither `public` nor over the user model, an `@auth`
 route checks nothing ([above](#turn-it-on-the-user-model)), so an

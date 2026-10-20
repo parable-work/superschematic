@@ -285,7 +285,10 @@ templates, `{SERVICE}_DATABASE`, `{SERVICE}_SERVICE` and
 loader refuses an `@envVars` field named after a derived field, or after
 one plus an underscore. `values-schema.json` lists each derived field
 under `x-superschematic.envVars` with `derived`, `service` and
-`variables`. The TypeScript API package's `loadEnvConfig()` and the
+`variables`, and the callers field of an API with `@requireService` or
+`@allowService` with `callersOf`, `variables` and `variablePatterns`,
+whose patterns are its `patternProperties`: a deployment outside a stack
+sets it ([Service callers](/superschematic/guides/auth-and-permissions/#service-callers)). The TypeScript API package's `loadEnvConfig()` and the
 Rust API crate's `config::load_env_config()` read them too, through the
 HTTP runtimes' readers.
 
@@ -1291,7 +1294,7 @@ and the [generated CI](#generated-ci) signs in with.
 | database | a Cloud SQL for Postgres instance (Enterprise edition, IAM database authentication on, connections only through a Cloud SQL connector) and a database per hosted DB schema |
 | bucket | a Cloud Storage bucket `<project>-<stack>-<bucket>` in the region, with uniform bucket-level access and public access prevention enforced |
 | sql edge | `roles/cloudsql.client` and `roles/cloudsql.instanceUser` for the server's or job's account, held to the instance by an IAM condition, and an IAM database user. The derived value is the Cloud SQL connection, with no password, which a Rust server dials over the socket the service mounts at `/cloudsql` |
-| http edge | `roles/run.invoker` on the callee for the caller's account. The derived value is the callee's `run.app` URL with a Google ID token for it as the service credential, sent in `Service-Authorization` and, to an internal callee, also in `X-Serverless-Authorization`. A call to an API the same server serves stays on loopback |
+| http edge | `roles/run.invoker` on the callee for the caller's account. The derived value is the callee's `run.app` URL with a Google ID token for it as the service credential, sent in `Service-Authorization` and, to an internal callee, also in `X-Serverless-Authorization`. A call to an API the same server serves stays on loopback, with the server's own loopback credential ([Service callers](/superschematic/guides/auth-and-permissions/#service-callers)) |
 | bucket edge | `roles/storage.objectUser` on the bucket and `roles/iam.serviceAccountTokenCreator` on its own account for the server's, job's or worker's account, so it signs URLs as itself, in Go, TypeScript or Rust. The derived value is the bucket's name |
 | internal server | internal ingress only, with Cloud Run's invoker check on |
 | calling server or job | Direct VPC egress through the environment's network: a VPC, a subnet with Private Google Access, a router and Cloud NAT |

@@ -1,7 +1,13 @@
-# A Rust API with no database, no calls and no settings, which
-# rs-merged-stack's server Warehouse serves beside rs-pricing (D57).
+# A Rust API with no database and no settings, which rs-merged-stack's
+# server Warehouse serves beside rs-pricing (D57). It calls rs-pricing,
+# which Warehouse serves too, so the call stays within Warehouse, on its own
+# loopback address, with Warehouse's loopback credential, which rs-pricing,
+# admitting only calling services, accepts (docs/stack-model.md, section
+# 9.9).
 name: rs-catalog
 kind: API
+calls:
+  - { name: rs-pricing, kind: API }
 outputs:
   types:
     rust: { enabled: true }

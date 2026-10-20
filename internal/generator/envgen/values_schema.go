@@ -36,8 +36,11 @@ type valuesSchema struct {
 	Type                 string                      `json:"type"`
 	AdditionalProperties bool                        `json:"additionalProperties"`
 	Properties           map[string]valuesSchemaProp `json:"properties"`
-	Required             []string                    `json:"required,omitempty"`
-	XSuperschematic      valuesSchemaExtension       `json:"x-superschematic"`
+	// PatternProperties are the variables named by a pattern: the members
+	// of a callers field's issuers, keys and callers, under their indexes.
+	PatternProperties map[string]valuesSchemaProp `json:"patternProperties,omitempty"`
+	Required          []string                    `json:"required,omitempty"`
+	XSuperschematic   valuesSchemaExtension       `json:"x-superschematic"`
 }
 
 // valuesSchemaProp is a single property in the JSON Schema "properties" map.
@@ -45,6 +48,11 @@ type valuesSchemaProp struct {
 	Type        string `json:"type"`
 	Description string `json:"description,omitempty"`
 	Default     any    `json:"default,omitempty"`
+	// Pattern and MinLength constrain a string, as a callers field's
+	// variables are: a count, a list, an algorithm list, a member that
+	// must not be empty.
+	Pattern   string `json:"pattern,omitempty"`
+	MinLength int    `json:"minLength,omitempty"`
 }
 
 // valuesSchemaExtension is the x-superschematic vendor extension, carrying the
@@ -84,6 +92,15 @@ type valuesSchemaEnvVar struct {
 	// Variables are the environment variables a derived field is read
 	// from, one per member its value can have.
 	Variables []string `json:"variables,omitempty"`
+	// CallersOf names the API whose callers field this is (D37;
+	// docs/stack-model.md, section 9.2): in a stack the http edges to the
+	// API derive it, and outside one a deployment sets it. Its variables
+	// are VariablePatterns' beside Variables, a list being a variable of
+	// its length and each entry's members under its index.
+	CallersOf string `json:"callersOf,omitempty"`
+	// VariablePatterns are the patterns of the variables of a field whose
+	// lists make their names, the keys of the schema's patternProperties.
+	VariablePatterns []string `json:"variablePatterns,omitempty"`
 }
 
 // BuildValuesSchema converts a ConfigOutput into the on-disk values-schema
@@ -147,6 +164,29 @@ func BuildValuesSchema(output *ConfigOutput) *valuesSchema {
 		})
 	}
 
+	var patterns map[string]valuesSchemaProp
+	if field := output.ListedCallersField; field != "" {
+		patterns = map[string]valuesSchemaProp{}
+		entry := valuesSchemaEnvVar{
+			Name:        field,
+			IRType:      "ServiceAuth",
+			Primitive:   "object",
+			Required:    true,
+			CallersOf:   output.SchemaName,
+			Description: fmt.Sprintf("The callers field of %s: the issuers whose service credentials its server accepts, and the callers each vouches for, which a @requireService or @allowService operation checks. In a stack the http edges to %s derive it; outside one, set it. A list is a variable holding its length and each entry's members under its index; no issuers refuses every service credential.", output.SchemaName, output.SchemaName),
+		}
+		for _, v := range callersVariables(field) {
+			if v.pattern == "" {
+				properties[v.name] = v.prop
+				entry.Variables = append(entry.Variables, v.name)
+				continue
+			}
+			patterns[v.pattern] = v.prop
+			entry.VariablePatterns = append(entry.VariablePatterns, v.pattern)
+		}
+		envVars = append(envVars, entry)
+	}
+
 	// An API with derived fields and no @envVars type has only EnvConfig.
 	title := output.TypeName
 	if title == "" {
@@ -165,6 +205,7 @@ func BuildValuesSchema(output *ConfigOutput) *valuesSchema {
 		Type:                 "object",
 		AdditionalProperties: false,
 		Properties:           properties,
+		PatternProperties:    patterns,
 		Required:             required,
 		XSuperschematic: valuesSchemaExtension{
 			SchemaName: output.SchemaName,
@@ -172,6 +213,73 @@ func BuildValuesSchema(output *ConfigOutput) *valuesSchema {
 			EnvVars:    envVars,
 		},
 	}
+}
+
+// The shapes of a callers field's values, as stackconfig.LoadCallers,
+// loadCallers and load_callers read them (runtime/http/testdata/
+// stackconfig_parity.json): a count is an integer with an optional sign,
+// whose range the reader checks; a list is comma-separated, each entry
+// something besides spaces; algorithms are a list of RS256, ES256 and
+// EdDSA; an index is a decimal without leading zeros, as the readers write
+// the names they read.
+const (
+	callersCount      = `^[+-]?[0-9]+$`
+	callersList       = `^[^,]*[^,\s][^,]*(,[^,]*[^,\s][^,]*)*$`
+	callersOptional   = `^$|` + callersList
+	callersAlgorithms = `^\s*(RS256|ES256|EdDSA)\s*(,\s*(RS256|ES256|EdDSA)\s*)*$`
+	callersIndex      = `(0|[1-9][0-9]*)`
+)
+
+// callersVariable is a variable of a callers field: its name, or the
+// pattern its name matches, and the shape of its value.
+type callersVariable struct {
+	name    string
+	pattern string
+	prop    valuesSchemaProp
+}
+
+// callersVariables are the variables of the callers field named field,
+// as ir.DerivedVariables writes an ir.ServiceAuth and the HTTP runtimes
+// read it: the number of issuers, then each issuer's members under its
+// index i, each of its keys' under j and each of its callers' under k.
+// Every other variable under the field's name is refused by the readers,
+// and by the schema, whose additionalProperties is false.
+func callersVariables(field string) []callersVariable {
+	issuer := "^" + field + "_ISSUERS_" + callersIndex + "_"
+	member := func(suffix string, prop valuesSchemaProp) callersVariable {
+		return callersVariable{pattern: issuer + suffix + "$", prop: prop}
+	}
+	text := func(description string, minLength int) valuesSchemaProp {
+		return valuesSchemaProp{Type: "string", Description: description, MinLength: minLength}
+	}
+	shaped := func(description, pattern string) valuesSchemaProp {
+		return valuesSchemaProp{Type: "string", Description: description, Pattern: pattern}
+	}
+	return []callersVariable{
+		{name: field + "_ISSUERS", prop: shaped("The number of issuers of the callers field "+field+", from 0 to 1000; 0 refuses every service credential.", callersCount)},
+		member("ISSUER", text("The iss an issuer writes.", 1)),
+		member("ISSUER_ALIASES", shaped("Other iss values of the issuer, comma-separated, such as Google's accounts.google.com.", callersOptional)),
+		member("AUDIENCE", text("The aud a token of the issuer must hold: this server.", 1)),
+		member("ALGORITHMS", shaped("The algorithms the issuer signs with, comma-separated: RS256, ES256 or EdDSA.", callersAlgorithms)),
+		member("JWKS_URL", text("Where the issuer publishes its keys; an issuer has it or KEYS, not both.", 0)),
+		member("KEYS", shaped("The number of the issuer's keys, at least 1, when it lists them rather than JWKS_URL.", callersCount)),
+		member("KEYS_"+callersIndex+"_JWK", text("A key of the issuer: a public JWK's JSON, with its kid. A key has JWK or PEM, not both.", 0)),
+		member("KEYS_"+callersIndex+"_PEM", text("A key of the issuer: an Ed25519 public key's SubjectPublicKeyInfo PEM, whose kid is its RFC 7638 thumbprint (D63). A key has JWK or PEM, not both.", 0)),
+		member("SUBJECT_CLAIM", text("The claim that names the caller; sub when unset.", 0)),
+		member("MAX_LIFETIME_SECONDS", shaped("The longest a token of the issuer may live, from its iat to its exp, in whole seconds above 0.", callersCount)),
+		member("CALLERS", shaped("The number of the issuer's callers, at least 1.", callersCount)),
+		member("CALLERS_"+callersIndex+"_SUBJECT", text("The subject claim's value that names a caller.", 1)),
+		member("CALLERS_"+callersIndex+"_DEPLOYABLE", text("The deployable a caller is.", 1)),
+		member("CALLERS_"+callersIndex+"_SERVES", shaped("The APIs a caller serves, comma-separated, which an operation's from is checked against.", callersList)),
+	}
+}
+
+// CallersValues is the values-schema.json output of an API whose only
+// configuration is its callers field: a Go API with a service clause and
+// no @envVars type, database, call or bucket, whose EnvConfig the build
+// does not write, since its entrypoint reads the field itself.
+func CallersValues(schemaName string) *ConfigOutput {
+	return &ConfigOutput{SchemaName: schemaName, Fields: []ConfigField{}, ListedCallersField: ir.CallersField(schemaName)}
 }
 
 // derivedNoun names what a derived field holds.

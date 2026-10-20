@@ -406,7 +406,11 @@ runtimes read too
 ([Service callers](/superschematic/guides/auth-and-permissions/#service-callers)).
 Every route of such a crate runs the service step after the body limit
 and before the end-user check, and the handler puts the caller on
-`ctx.service_caller`.
+`ctx.service_caller`. A stack's server that serves such an API and calls
+it from another API it serves generates a loopback key at start,
+`Loopback::generate`, whose token its client of that API sends to the
+server's own loopback URL, and builds the authenticator over
+`loopback.accept(callers)`, which admits the server itself.
 A service listed by an `@allowService` operation stands in for the end
 user, so there `ctx.principal` may be `None`. The refusals are 401
 `service_unauthorized`, 403 `service_forbidden` and 503
@@ -498,7 +502,7 @@ one line each.
 | `<db>_database` | `stackconfig::Database` | the API's database, its `authDb` or its one DB dependency |
 | `<api>_service` | `stackconfig::Service` | each API it `calls` |
 | `<bucket>_bucket` | `stackconfig::Bucket` | each bucket it lists in `buckets` (D54) |
-| `<api>_callers` | `ServiceAuthConfig` | an API with `@requireService` or `@allowService` |
+| `<api>_callers` | `ServiceAuthConfig` | an API with `@requireService` or `@allowService`; `values-schema.json` lists its variables, which a deployment outside a stack sets |
 | `<api>_cors` | `stackconfig::Cors` | every API: the origins of the sites that call it, none where no site does |
 | `<api>_identity` | `identity::Config` | an API over the user model, parsed from `<API>_IDENTITY`'s JSON, the runtime's defaults when it is unset |
 
