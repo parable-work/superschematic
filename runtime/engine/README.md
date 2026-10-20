@@ -4496,12 +4496,20 @@ let app = Router::new().merge(routes).fallback_service(api_router);
   which cannot start inside another and panics if asked to. The router
   keeps to this for the calls and pulls it makes, and lets its engine go
   on a thread of its own when it drops on the runtime.
-- **Timeouts, rate limits and CORS** are the host's layers. A timeout on
-  the time to a response's head (tower-http's `TimeoutLayer`, the HTTP
-  runtime's `@timeout`) covers the engine call and leaves a stream open,
-  since a stream's head goes out at once. The call runs on to its end on
-  its blocking thread, so a write whose client got the timeout may still
-  commit. A layer that bounds a response's body, or how long it may go
+- **The host's timeout.** `Options::timeout` bounds every route but the
+  event stream's and MCP's, whose responses last as long as their
+  clients, as `enginehttp.Options.Timeout` and `engineApp`'s
+  `timeoutSeconds` do: a request that takes longer, from its body's read
+  through the caller to the engine's call, is 504 `gateway_timeout`, the
+  HTTP runtimes' problem (`"title": "Gateway Timeout"`, `"detail":
+  "Gateway Timeout"`). None unless set; a generated Rust server sets the
+  server's 30 seconds. The call runs on to its end on its blocking
+  thread, so a write whose client got the timeout may still commit.
+- **Rate limits and CORS** are the host's layers, and so is any other
+  timeout. A timeout on the time to a response's head (tower-http's
+  `TimeoutLayer`, the HTTP runtime's `@timeout`) covers the engine call
+  and leaves a stream open, since a stream's head goes out at once. A
+  layer that bounds a response's body, or how long it may go
   quiet, would end a stream: it must leave out the requests whose route
   `route_of_request(prefix, &request)` names with `stream` (the event
   stream) or `mcp` (the MCP endpoint) set, as `api::routes()` lists them.
