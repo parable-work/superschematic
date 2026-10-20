@@ -748,7 +748,7 @@ func TestErrorWithDetails_EmptyCode(t *testing.T) {
 func TestAnswersAreNoStore(t *testing.T) {
 	for name, write := range map[string]func(http.ResponseWriter){
 		"envelope": func(w http.ResponseWriter) {
-			JSONEnvelope(w, http.StatusOK, map[string]any{"token": "t"}, testMeta(), nil)
+			JSONEnvelope(w, http.StatusOK, map[string]any{"token": "t"}, testMeta())
 		},
 		"problem": func(w http.ResponseWriter) {
 			Error(w, http.StatusUnauthorized, "Authentication required", "unauthorized")
