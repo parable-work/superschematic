@@ -588,7 +588,7 @@ func PhysicalRelPath(outputDir, target string) (string, error) {
 		}
 		common = parent
 	}
-	up, err := filepath.Rel(physicalPath(absOutput), physicalPath(common))
+	up, err := filepath.Rel(PhysicalPath(absOutput), PhysicalPath(common))
 	if err != nil {
 		return "", fmt.Errorf("relate %s to %s: %w", common, outputDir, err)
 	}
@@ -599,9 +599,10 @@ func PhysicalRelPath(outputDir, target string) (string, error) {
 	return filepath.ToSlash(filepath.Join(up, down)), nil
 }
 
-// physicalPath is path with the symbolic links of its deepest existing
-// ancestor resolved, and the rest as it is.
-func physicalPath(path string) string {
+// PhysicalPath is path with the symbolic links of its deepest existing
+// ancestor resolved, and the rest as it is: two paths name one directory,
+// whether or not it exists yet, when their physical paths are equal.
+func PhysicalPath(path string) string {
 	rest := ""
 	for dir := path; ; dir = filepath.Dir(dir) {
 		if resolved, err := filepath.EvalSymlinks(dir); err == nil {

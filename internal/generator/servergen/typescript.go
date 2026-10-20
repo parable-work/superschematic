@@ -112,6 +112,14 @@ type TypeScriptInput struct {
 	// OutputRoot is the root of the Bun workspace the package joins.
 	OutputRoot string
 
+	// DefaultOutputRoot is the output root whose Bun workspace the
+	// project's own packages are members of, the implementations among
+	// them (tsgen.DefaultOutputRoot). Under any other output root the
+	// server builds against mirrors of the implementations its APIs serve,
+	// which the build copies under the root's impl/ (D65; tsmirror.go).
+	// Empty takes OutputRoot as the default.
+	DefaultOutputRoot string
+
 	// APIs are the APIs the server serves, sorted by service.
 	APIs []TypeScriptAPIInput
 
@@ -198,6 +206,11 @@ type TypeScriptServer struct {
 	// NoDocker says why.
 	Docker   *TypeScriptDocker
 	NoDocker string
+
+	// Mirrors are the mirrors of the served APIs' implementations under
+	// the output root, which the server builds against outside the default
+	// output root (D65), one per API; none in the default one.
+	Mirrors []*TypeScriptMirror
 }
 
 // TypeScriptWorker is the worker a TypeScript worker's entrypoint runs
@@ -616,6 +629,21 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 	}
 	slices.Sort(s.CloudSQL)
 	s.planPackage()
+	if in.DefaultOutputRoot != "" && !tsgen.SamePath(in.OutputRoot, in.DefaultOutputRoot) {
+		// The image holds each mirror whole in place of its package.
+		dirs := maps.Clone(in.PackageDirs)
+		for _, a := range in.APIs {
+			m, err := planTypeScriptMirror(in.OutputRoot, in.DefaultOutputRoot, a)
+			if err != nil {
+				return nil, err
+			}
+			s.Mirrors = append(s.Mirrors, m)
+			if dirs != nil {
+				dirs[a.Implementation.Package] = m.Dir
+			}
+		}
+		in.PackageDirs = dirs
+	}
 	dir, err := filepath.Abs(in.Dir)
 	if err != nil {
 		return nil, err
@@ -797,13 +825,19 @@ func planTypeScriptDocker(in TypeScriptInput, s *TypeScriptServer, dir string) (
 	// built before the stack. The server runs the packages it imports,
 	// whole: every types package, whichever the generated packages it
 	// imports reach, and each API package, SDK and implementation it
-	// depends on.
-	if in.ImplementationRoot == "" {
-		return nil, "no repository root to find the implementations under", nil
-	}
-	implementations, ok := rel(filepath.Join(in.ImplementationRoot, filepath.FromSlash(in.Naming.OrDefault().TypeScriptImplementationGlob())))
-	if !ok {
-		return nil, outside("the TypeScript implementations at", in.Naming.OrDefault().TypeScriptImplementationGlob()), nil
+	// depends on. Outside the default output root the implementations are
+	// the root's mirrors, its members under impl/ (D65), and no
+	// implementation's own directory goes in.
+	var implementations string
+	if len(s.Mirrors) > 0 {
+		implementations = d.Workspace + "/" + MirrorRoot + "/*"
+	} else {
+		if in.ImplementationRoot == "" {
+			return nil, "no repository root to find the implementations under", nil
+		}
+		if implementations, ok = rel(filepath.Join(in.ImplementationRoot, filepath.FromSlash(in.Naming.OrDefault().TypeScriptImplementationGlob()))); !ok {
+			return nil, outside("the TypeScript implementations at", in.Naming.OrDefault().TypeScriptImplementationGlob()), nil
+		}
 	}
 	d.Include = []string{
 		d.Workspace + "/package.json",

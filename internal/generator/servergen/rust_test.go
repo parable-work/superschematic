@@ -117,7 +117,7 @@ func rustGenerated(repoRoot string) map[string]string {
 		}
 	}
 	for _, service := range []string{"rs-catalog", "rs-pricing", "rs-stock"} {
-		files[filepath.Join(servergen.RustMirrorRoot, service, servergen.RustManifestFile)] = filepath.Join(servergen.RustMirrorDir(out, service), servergen.RustManifestFile)
+		files[filepath.Join(servergen.MirrorRoot, service, servergen.RustManifestFile)] = filepath.Join(servergen.MirrorDir(out, service), servergen.RustManifestFile)
 	}
 	return files
 }
@@ -1186,7 +1186,7 @@ func TestRustServersBuildInAnyOutputRoot(t *testing.T) {
 		if got := lockfile(out); got != lock {
 			t.Errorf("another build changed %s's lockfile:\n%s", out, got)
 		}
-		mirrored, err := os.ReadFile(filepath.Join(servergen.RustMirrorDir(out, "rs-pricing"), "src", "lib.rs"))
+		mirrored, err := os.ReadFile(filepath.Join(servergen.MirrorDir(out, "rs-pricing"), "src", "lib.rs"))
 		if err != nil || !strings.HasSuffix(string(mirrored), changed) {
 			t.Errorf("the change to rs-pricing did not reach %s's mirror: %v", out, err)
 		}
@@ -1201,7 +1201,7 @@ func TestRustServersBuildInAnyOutputRoot(t *testing.T) {
 			generated++
 			under := out
 			if strings.HasSuffix(crate[1], "-implementation") {
-				under = filepath.Join(out, servergen.RustMirrorRoot)
+				under = filepath.Join(out, servergen.MirrorRoot)
 			}
 			if rel, err := filepath.Rel(under, crate[2]); err != nil || strings.HasPrefix(rel, "..") {
 				t.Errorf("%s's workspace builds %s from %s, outside %s", out, crate[1], crate[2], under)
