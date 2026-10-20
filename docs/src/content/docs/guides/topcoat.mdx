@@ -457,22 +457,28 @@ with the search's rules' attributes, a "Find" button, and the select of
 the first page of the items the box's text finds, at the listing's
 `defaultLimit`, with a note when more match. The value held is always an
 option, named through the lookup. `<form>_choices` reads the texts from
-the form it is given, which holds them in `finds`: a filter's every
-picker searches its text, and a post only the one whose "Find" it
-pressed. Each distinct text is one listing a request, and a render
-searches at most ten texts a target. A filter's "Find" sends its query,
-so the matches show beside the list. A post's posts the form with
-`_action=find:<control>`, as a row button does, and the page renders the
-form again as sent, 200, without the operation; the hidden submit ahead
-of every "Find" is still the one Enter presses. A text the search refuses
-shows the route's message. The app's choices win, with no picker and no
-call, and a caller the listing refuses gets the plain control.
+the form it is given, which holds them in `finds`, and every picker
+searches its text, so its box always says what its select lists. Each
+distinct text is one listing a request, and a request searches at most
+ten distinct texts through one listing operation, every picker it lists
+counted together; a picker past them lists the first page and says to
+search again. A filter's "Find" sends its query, so the matches show
+beside the list. A post's posts the form with `_action=find:<control>`,
+as a row button does, and the page renders the form again as sent, 200,
+without the operation, that picker's text searched past the ten; the
+hidden submit ahead of every "Find" is still the one Enter presses. A row
+button's post and a refused one render each picker's text searched too,
+and a removed line's text goes with it. A text the search refuses shows
+the route's message. The app's choices win, with no picker and no call,
+and a caller the listing refuses gets the plain control.
 
 Each picker is a Topcoat shard, at
 `/_superschematic/<service>/_pick/<target>`. Without Topcoat's runtime it
-renders in place. With it, the picker renders again as the reader types,
-the value the select holds kept, and its requests meet the listing's
-rate limit and timeout, as a page that calls it does.
+renders in place. With it, the picker renders again as the reader types
+and each time the reader presses "Find", the same text too, the value the
+select holds kept, and its requests meet the listing's rate limit and
+timeout, as a page that calls it does: past the limit, the shard answers
+the route's 429 with `Retry-After`.
 
 A target that an API dependency declares
 ([Options from an API dependency](/superschematic/reference/references-and-search/#options-from-an-api-dependency))
@@ -482,7 +488,12 @@ dependency's. One app that hosts both, by the table
 dependency's crate for its items, under its rules and its setup, and a
 page that does meets the dependency's rate limit. Otherwise the reference
 is left out, and the build log gives the reason: the table does not list
-both, the dependency's server is not Rust, or its crate is not built.
+both, the dependency's config generates no API server, its server is not
+Rust, its config or its API cannot be read, or its crate is not built.
+The extension reads a dependency's API only for a reference that calls
+it, so a dependency no reference calls fails no build. When both APIs
+authenticate with the identity runtime, the crate's `identity-*` features
+turn on the dependency's crate's too.
 
 ## Records
 
