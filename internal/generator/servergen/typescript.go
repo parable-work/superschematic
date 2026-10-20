@@ -180,6 +180,13 @@ type TypeScriptServer struct {
 	Databases []*TypeScriptDatabase
 	Clients   []*TypeScriptClient
 
+	// Loopback is the server's loopback key, nil without one: a server
+	// has one when it calls an API it serves itself whose operations have a
+	// service clause (docs/stack-model.md, section 9.9). The shared wiring's
+	// ts-loopback builds it, and each such client and service authenticator
+	// takes it.
+	Loopback *Loopback
+
 	// Buckets are the buckets main.ts opens once, for every API that lists
 	// it. With one, the package depends on GCS's Node client (D54).
 	Buckets []*TypeScriptBucket
@@ -274,8 +281,11 @@ type TypeScriptAPI struct {
 	IdentityField string
 
 	// Callers is its callers field, which serviceAuthenticator reads, when
-	// an operation has a service clause (D37).
-	Callers string
+	// an operation has a service clause (D37), and Loopback the variable of
+	// the server's loopback key, which that authenticator accepts beside
+	// the field, when the server has one (section 9.9).
+	Callers  string
+	Loopback string
 
 	// CORS is the variable of the origins its CORS field lists, which
 	// loadCors reads, and CORSField that field, when a site of the stack
@@ -351,6 +361,11 @@ type TypeScriptClient struct {
 	// From is the expression that reads the callee's endpoint from the
 	// first calling API's config.
 	From string
+
+	// Loopback is true when the callee is an API the server serves itself
+	// whose operations have a service clause: the client then sends the
+	// server's loopback credential when its endpoint carries none.
+	Loopback bool
 }
 
 // TypeScriptDocker is a TypeScript server's Dockerfile plan. Paths are
@@ -397,7 +412,7 @@ var tsReserved = []string{
 	"parseIdentityConfigJSON", "postgresIdentityStore", "IdentityConfig", "identityConfig",
 	"loadCors", "corsHandler", "corsMethods", "matchOperations", "handle",
 	"run", "jobs", "workers", "queue", "stop", "signal", "started", "concurrency", "pools",
-	"postgresQueue", "runWorker", "workerConcurrency",
+	"postgresQueue", "runWorker", "workerConcurrency", "loopbackServiceAuth", "Loopback",
 }
 
 // PlanTypeScript plans the entrypoint of one TypeScript server. It refuses
@@ -615,6 +630,7 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 		s.APIs = append(s.APIs, api)
 	}
 	slices.Sort(s.CloudSQL)
+	s.planLoopback(taken)
 	s.planPackage()
 	dir, err := filepath.Abs(in.Dir)
 	if err != nil {
@@ -625,6 +641,36 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 		return nil, err
 	}
 	return s, nil
+}
+
+// planLoopback gives a server that calls an API it serves itself, whose
+// operations have a service clause, its loopback key, marks each such
+// client to send it, and has each API with a callers field accept it
+// (docs/stack-model.md, section 9.9). A job or a worker has none: an API
+// it calls is served by another deployable, whose connector gives the call
+// its credential.
+func (s *TypeScriptServer) planLoopback(taken names) {
+	if s.Background() {
+		return
+	}
+	serves := make([]string, len(s.APIs))
+	guarded := map[string]bool{}
+	for i, a := range s.APIs {
+		serves[i] = a.Service
+		guarded[a.Service] = a.Callers != ""
+	}
+	for _, c := range s.Clients {
+		c.Loopback = guarded[c.Service]
+	}
+	if !slices.ContainsFunc(s.Clients, func(c *TypeScriptClient) bool { return c.Loopback }) {
+		return
+	}
+	s.Loopback = &Loopback{Var: taken.take("loopback"), Serves: serves}
+	for _, a := range s.APIs {
+		if a.Callers != "" {
+			a.Loopback = s.Loopback.Var
+		}
+	}
 }
 
 // RouterOptions are the members of the options main.ts builds the API's
@@ -639,7 +685,10 @@ func (a *TypeScriptAPI) RouterOptions() []string {
 	if a.Identity != "" {
 		out = append(out, "identity: "+a.Identity)
 	}
-	if a.Callers != "" {
+	switch {
+	case a.Callers != "" && a.Loopback != "":
+		out = append(out, "authenticateService: serviceAuthenticator("+a.Loopback+".accept("+a.Config+"."+a.Callers+"))")
+	case a.Callers != "":
 		out = append(out, "authenticateService: serviceAuthenticator("+a.Config+"."+a.Callers+")")
 	}
 	if a.ManualRoutes != "" {
@@ -669,6 +718,9 @@ func (s *TypeScriptServer) RuntimeImports() []string {
 	}
 	if len(s.Clients) > 0 {
 		out = append(out, "serviceCredentialFor")
+	}
+	if s.Loopback != nil {
+		out = append(out, "loopbackServiceAuth", "type Loopback")
 	}
 	if s.AnyCORS() {
 		out = append(out, "corsHandler", "corsMethods", "loadCors", "matchOperations")

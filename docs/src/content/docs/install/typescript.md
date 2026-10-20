@@ -332,7 +332,14 @@ SDKs of the APIs called, a `main.ts` that builds each implementation from
 its `Deps` with `create(deps)` and `authenticate(deps)`, and the handlers
 of its manual routes with `createManualRoutes(deps)`, which it hands the
 router as `manualRoutes`, mounts each router on one Hono app and serves
-it with `Bun.serve` beside `/healthz` and `/readyz`, and a Dockerfile.
+it with `Bun.serve` beside `/healthz` and `/readyz`, and a Dockerfile. A
+server that serves an API with `@requireService` or `@allowService` and
+calls it from another API it serves awaits `loopbackServiceAuth(...)` at
+start, a key only its process holds: its client of that API sends the
+key's token to the server's own loopback URL, and the API's
+`serviceAuthenticator` takes the callers field with the key accepted
+(`loopback.accept(config.callers)`), which admits the server itself
+([Service callers](/superschematic/guides/auth-and-permissions/#service-callers)).
 `superschematic stack dev` runs it with `bun main.ts` after one `bun
 install` in `schemas/dist`. Each job and worker of the API gets a package
 of its own beside it, whose `main.ts` builds the same `Deps` and runs the

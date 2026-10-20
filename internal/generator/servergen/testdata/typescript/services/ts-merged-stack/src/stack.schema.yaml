@@ -1,0 +1,28 @@
+# One declared TypeScript server, Counter, serves ts-shop and ts-pricing, so
+# ts-shop's calls of ts-pricing stay within it, on its own loopback address,
+# with Counter's loopback credential, which ts-pricing, admitting only
+# calling services, accepts (docs/stack-model.md, section 9.9). Its one
+# environment, Local, runs on the local target.
+kind: Stack
+types:
+  Shop:
+    name: Shop
+    role: EmbeddedStruct
+    stack:
+      deploy:
+        - { name: ts-shop, kind: API }
+        - { name: ts-pricing, kind: API }
+      expose:
+        - deployable: Counter
+  Counter:
+    name: Counter
+    role: EmbeddedStruct
+    server:
+      serves:
+        - { name: ts-pricing, kind: API }
+        - { name: ts-shop, kind: API }
+  Local:
+    name: Local
+    role: EmbeddedStruct
+    environment:
+      target: local

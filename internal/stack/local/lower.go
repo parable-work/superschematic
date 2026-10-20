@@ -753,7 +753,9 @@ func connectSQL(ctx registry.ConnectorContext) (registry.Connected, error) {
 // and live at most SignedTokenLifetime seconds.
 //
 // A server that calls an API it serves itself reaches it on its own
-// loopback URL, with no key and no credential, as on every target.
+// loopback URL with no edge key, as on every target: the server signs the
+// call with a loopback key of its own, which only its process holds
+// (docs/stack-model.md, section 9.9).
 func connectHTTP(ctx registry.ConnectorContext) (registry.Connected, error) {
 	from, to := ctx.From, ctx.To
 	if from.Name == to.Name {

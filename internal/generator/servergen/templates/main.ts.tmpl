@@ -126,11 +126,12 @@ async function main(): Promise<void> {
 {{- end }}
 {{- end }}
 {{- end }}
+{{- template "ts-loopback" . }}
 {{- if .Clients }}
 
   // One client per API called, shared by every API that calls it.
 {{- range .Clients }}
-  const {{ .Var }} = {{ .Constructor }}({{ .From }});
+  const {{ .Var }} = {{ .Constructor }}({{ .From }}{{ if .Loopback }}, {{ $.Loopback.Var }}{{ end }});
 {{- end }}
 {{- end }}
 {{- if .Buckets }}

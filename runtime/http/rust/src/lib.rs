@@ -26,6 +26,7 @@ mod http_client;
 pub mod identity;
 mod jws;
 mod jwt;
+mod loopback;
 // A stack server's JSON-line log (D57), with the `logging` feature.
 #[cfg(feature = "logging")]
 pub mod logging;
@@ -74,6 +75,7 @@ pub use http_client::HttpFetcher;
 pub use identity::IdentityAuthenticator;
 pub use jws::{ed25519_public_jwk_from_pem, is_pem, JwsAlgorithm};
 pub use jwt::{JwtServiceAuthenticator, KeyFetcher};
+pub use loopback::{is_loopback_url, Loopback, LOOPBACK_LIFETIME_SECONDS};
 pub use openapi::{
     openapi_document, openapi_router, rapidoc_html, RouterOptions, DEFAULT_OPENAPI_BASE_URL,
     DEFAULT_OPENAPI_VERSION,

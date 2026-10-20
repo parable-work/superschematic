@@ -824,7 +824,8 @@ func connectSQL(ctx registry.ConnectorContext) (registry.Connected, error) {
 // callers field can hold, as it could not hold an output of the callee's
 // own service. The callee gets FakeIssuer, whose tokens name the caller by
 // its account's email. A server that calls an API it serves itself
-// reaches it over loopback, needs no grant and sends no credential.
+// reaches it over loopback and needs no grant; the server signs that call
+// with its own loopback key (docs/stack-model.md, section 9.9).
 func connectHTTP(ctx registry.ConnectorContext) (registry.Connected, error) {
 	if ctx.From.Name == ctx.To.Name {
 		return registry.Connected{Value: ir.ServiceEndpoint{URL: "http://127.0.0.1:8080"}}, nil

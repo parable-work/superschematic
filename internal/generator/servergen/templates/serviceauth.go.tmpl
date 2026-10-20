@@ -25,10 +25,12 @@ var callersFields = map[string]string{
 // serviceAuthenticator is the service authenticator of api, an API whose
 // operations have a service clause: a serviceauth.Verifier over its
 // callers field, which admits exactly the servers the environment's edges
-// to api name. In an environment where no other server calls api the
-// field has no issuers, and the server refuses every service credential:
+// to api name{{ if .Loopback }}, and over the server's loopback key, which admits the
+// server itself, as its calls between the APIs it serves sign with it
+// (section 9.9){{ end }}. In an environment where no other server calls api the
+// field has no issuers, and the server refuses every {{ if .Loopback }}other {{ end }}service credential:
 // a route that requires a service answers 401 service_unauthorized.
-func serviceAuthenticator(api string) (serviceauth.Authenticator, error) {
+func serviceAuthenticator(api string{{ if .Loopback }}, {{ .Loopback.Var }} *serviceauth.Loopback{{ end }}) (serviceauth.Authenticator, error) {
 	field, ok := callersFields[api]
 	if !ok {
 		return nil, fmt.Errorf("%s has no callers field", api)
@@ -37,6 +39,12 @@ func serviceAuthenticator(api string) (serviceauth.Authenticator, error) {
 	if err != nil {
 		return nil, err
 	}
+{{- if .Loopback }}
+	cfg, err = {{ .Loopback.Var }}.Accept(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", field, err)
+	}
+{{- end }}
 	verifier, err := serviceauth.New(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", field, err)

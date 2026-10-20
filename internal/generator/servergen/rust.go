@@ -188,6 +188,11 @@ type RustServer struct {
 	Databases []*RustDatabase
 	Clients   []*RustClient
 
+	// Loopback is the server's loopback key, nil without one: a server
+	// has one when it calls an API it serves itself whose operations have a
+	// service clause (docs/stack-model.md, section 9.9).
+	Loopback *Loopback
+
 	// Buckets are the buckets main.rs opens once, for every API that lists
 	// them (D54).
 	Buckets []*RustBucket
@@ -362,6 +367,12 @@ type RustClient struct {
 	// From is the expression that reads the callee's endpoint from the
 	// first calling API's config.
 	From string
+
+	// Loopback is the variable of the server's loopback key when the
+	// callee is an API the server serves itself whose operations have a
+	// service clause: the client then sends the server's loopback
+	// credential when its endpoint carries none. Empty otherwise.
+	Loopback string
 }
 
 // RustDocker is a Rust server's Dockerfile plan. Paths are relative to the
@@ -395,6 +406,7 @@ var rustReserved = []string{
 	"api", "apis", "request", "router", "endpoint", "credential", "service_credential", "err",
 	"jobs", "workers", "worker", "queue", "shutdown", "started", "definition", "concurrency", "options",
 	"handle", "message", "bucket", "gcs", "open_bucket", "field", "service", "connection",
+	"token", "headers",
 }
 
 // rustNames hands out snake_case identifiers no other declaration of
@@ -643,6 +655,7 @@ func PlanRust(in RustInput) (*RustServer, error) {
 		}
 		s.APIs = append(s.APIs, api)
 	}
+	s.planLoopback(taken)
 	for _, a := range in.APIs {
 		if a.Implementation.Dir == "" {
 			continue
@@ -665,6 +678,79 @@ func PlanRust(in RustInput) (*RustServer, error) {
 		return nil, err
 	}
 	return s, nil
+}
+
+// planLoopback gives a server that calls an API it serves itself, whose
+// operations have a service clause, its loopback key, and has each such
+// client send it (docs/stack-model.md, section 9.9). A job or a worker has
+// none: an API it calls is served by another deployable, whose connector
+// gives the call its credential.
+func (s *RustServer) planLoopback(taken rustNames) {
+	if s.Background() {
+		return
+	}
+	serves := make([]string, len(s.APIs))
+	guarded := map[string]bool{}
+	for i, a := range s.APIs {
+		serves[i] = a.Service
+		guarded[a.Service] = a.ServiceAuthenticator != ""
+	}
+	if !slices.ContainsFunc(s.Clients, func(c *RustClient) bool { return guarded[c.Service] }) {
+		return
+	}
+	s.Loopback = &Loopback{Var: taken.take("loopback"), Serves: serves}
+	for _, c := range s.Clients {
+		if guarded[c.Service] {
+			c.Loopback = s.Loopback.Var
+		}
+	}
+}
+
+// LoopbackLet is main.rs's statement that generates the server's loopback
+// key, as rustfmt lays it out.
+func (s *RustServer) LoopbackLet() string {
+	serves := make([]string, len(s.Loopback.Serves))
+	for i, api := range s.Loopback.Serves {
+		serves[i] = rustString(api)
+	}
+	return rustLet(s.Loopback.Var, "Loopback::generate("+rustString(s.Name)+", ["+strings.Join(serves, ", ")+"])", `map_err(|err| format!("loopback key: {err}"))?`)
+}
+
+// ServiceAuthenticatorLet is main.rs's statement that builds the API's
+// service authenticator over its callers field, and the server's loopback
+// key when it has one, as rustfmt lays it out.
+func (a *RustAPI) ServiceAuthenticatorLet(loopback *Loopback) string {
+	failure := `map_err(|err| format!("service authenticator of ` + a.Service + `: {err}"))?`
+	if loopback == nil {
+		return rustLet(a.ServiceAuthenticator, "JwtServiceAuthenticator::new("+a.Config+"."+a.Callers+".clone())", failure)
+	}
+	return rustLet(a.ServiceAuthenticator, loopback.Var, "accept("+a.Config+"."+a.Callers+".clone())", "and_then(JwtServiceAuthenticator::new)", failure)
+}
+
+// Signature is the first line, or lines, of the client's constructor, as
+// rustfmt lays them out: its parameters on the line when it fits, and each
+// on a line of its own otherwise. A client without the loopback key keeps
+// its one line.
+func (c *RustClient) Signature() string {
+	params := []string{"endpoint: &Service"}
+	if c.Loopback != "" {
+		params = append(params, c.Loopback+": &Loopback")
+	}
+	ret := ") -> Result<" + c.Alias + "::" + c.Client + ", Failure> {"
+	if line := "fn " + c.Constructor + "(" + strings.Join(params, ", ") + ret; len(line) <= rustWidth || c.Loopback == "" {
+		return line
+	}
+	return "fn " + c.Constructor + "(\n    " + strings.Join(params, ",\n    ") + ",\n" + ret
+}
+
+// ClientLet is main.rs's statement that builds the client, as rustfmt lays
+// it out.
+func (c *RustClient) ClientLet() string {
+	args := []string{"&" + c.From}
+	if c.Loopback != "" {
+		args = append(args, "&"+c.Loopback)
+	}
+	return rustLetCall(c.Var, c.Constructor, "?", args...)
 }
 
 // planManifest plans Cargo.toml's dependencies: axum, serde_json and tokio
@@ -965,6 +1051,9 @@ func (s *RustServer) RuntimeUses() []string {
 	}
 	if s.AnyServiceAuth() {
 		root = append(root, "JwtServiceAuthenticator")
+	}
+	if s.Loopback != nil {
+		root = append(root, "Loopback")
 	}
 	if s.Dispatches() {
 		root = append(root, "OperationInfo")

@@ -136,11 +136,19 @@ async fn run() -> Result<(), Failure> {
 {{- end }}
 {{- end }}
 {{- end }}
+{{- if .Loopback }}
+
+    // The server's own credential for its calls between the APIs it
+    // serves, which reach it on loopback: a key only this process holds,
+    // which each client of such an API signs with and each API with a
+    // service clause accepts (docs/stack-model.md, section 9.9).
+{{ .LoopbackLet }}
+{{- end }}
 {{- if .Clients }}
 
     // One client per API called, shared by every API that calls it.
 {{- range .Clients }}
-{{ rustLetCall .Var .Constructor "?" (printf "&%s" .From) }}
+{{ .ClientLet }}
 {{- end }}
 {{- end }}
 {{- if .Buckets }}
@@ -187,8 +195,9 @@ async fn run() -> Result<(), Failure> {
 {{- end }}
 {{- if .ServiceAuthenticator }}
     // It verifies a calling service's credential against its callers
-    // field (section 9.2).
-{{ rustLet .ServiceAuthenticator (printf "JwtServiceAuthenticator::new(%s.%s.clone())" .Config .Callers) (printf "map_err(|err| format!(\"service authenticator of %s: {err}\"))?" .Service) }}
+    // field (section 9.2){{ if $.Loopback }}, and the server's own against its loopback key
+    // (section 9.9){{ end }}.
+{{ .ServiceAuthenticatorLet $.Loopback }}
 {{- end }}
 {{ .ImplementationsLet }}
 {{- if .Webhooks }}

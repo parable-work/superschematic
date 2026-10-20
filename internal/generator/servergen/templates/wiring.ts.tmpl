@@ -82,6 +82,17 @@ async function connect(service: string, field: string, db: Database): Promise<Po
 }
 {{- end }}
 
+{{- define "ts-loopback" }}
+{{- if .Loopback }}
+
+  // The server's own credential for its calls between the APIs it serves,
+  // which reach it on loopback: a key only this process holds, which each
+  // client of such an API signs with and each API with a service clause
+  // accepts (docs/stack-model.md, section 9.9).
+  const {{ .Loopback.Var }} = await loopbackServiceAuth({{ tsQuote .Name }}, [{{ range $i, $api := .Loopback.Serves }}{{ if $i }}, {{ end }}{{ tsQuote $api }}{{ end }}]);
+{{- end }}
+{{- end }}
+
 {{- define "ts-clients" -}}
 {{- range .Clients }}
 
@@ -97,10 +108,25 @@ async function connect(service: string, field: string, db: Database): Promise<Po
  * Authorization here, where the Go entrypoint wraps its handler in
  * CaptureAuthorization (section 9.4).
 {{- end }}
+{{- if .Loopback }}
+ *
+ * {{ .Service }} is an API the server serves itself, which no connector gives a
+ * credential, so to a loopback endpoint without one the client sends the
+ * server's loopback credential (section 9.9).
+{{- end }}
  */
+{{- if .Loopback }}
+function {{ .Constructor }}(endpoint: Service, {{ $.Loopback.Var }}: Loopback): {{ .Module }}.{{ .Class }} {
+  return new {{ .Module }}.{{ .Class }}({
+    baseUrl: endpoint.url,
+    serviceCredential: serviceCredentialFor(endpoint.credential) ?? {{ $.Loopback.Var }}.credentialFor(endpoint.url),
+  });
+}
+{{- else }}
 function {{ .Constructor }}(endpoint: Service): {{ .Module }}.{{ .Class }} {
   return new {{ .Module }}.{{ .Class }}({ baseUrl: endpoint.url, serviceCredential: serviceCredentialFor(endpoint.credential) });
 }
+{{- end }}
 {{- end }}
 {{- end }}
 

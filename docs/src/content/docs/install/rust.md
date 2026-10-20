@@ -406,7 +406,11 @@ runtimes read too
 ([Service callers](/superschematic/guides/auth-and-permissions/#service-callers)).
 Every route of such a crate runs the service step after the body limit
 and before the end-user check, and the handler puts the caller on
-`ctx.service_caller`.
+`ctx.service_caller`. A stack's server that serves such an API and calls
+it from another API it serves generates a loopback key at start,
+`Loopback::generate`, whose token its client of that API sends to the
+server's own loopback URL, and builds the authenticator over
+`loopback.accept(callers)`, which admits the server itself.
 A service listed by an `@allowService` operation stands in for the end
 user, so there `ctx.principal` may be `None`. The refusals are 401
 `service_unauthorized`, 403 `service_forbidden` and 503
