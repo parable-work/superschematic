@@ -22,7 +22,7 @@ export type {
   Wrapped,
 } from "./wrappers";
 export { display } from "./display";
-export type { DisplayConfig, DisplayState, DisplayTone } from "./display";
+export type { DisplayConfig, DisplayState, DisplayTone, FieldDisplayConfig } from "./display";
 export { behavior } from "./behavior";
 export type {
   ApprovalsConfig,

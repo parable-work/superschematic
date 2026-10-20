@@ -248,6 +248,9 @@ func (w *walker) resolveTypeReference(node *astNode) (*typeInfo, *SchemaError) {
 	return info, nil
 }
 
+// recordExternalEnum records a dependency's enum a local field uses, its
+// members' titles read as walkEnum reads them, so a dependent's IR keeps
+// them.
 func (w *walker) recordExternalEnum(id symbolIdentity) {
 	if id.decl == nil || id.decl.Kind != kindEnumDeclaration {
 		return
@@ -269,7 +272,11 @@ func (w *walker) recordExternalEnum(id symbolIdentity) {
 	for _, node := range enum.Members.Nodes {
 		member := node.AsEnumMember()
 		valueName := node.Name().Text()
-		value := ir.EnumValueDef{Name: valueName, Comment: leadingComment(node)}
+		value := ir.EnumValueDef{Name: valueName}
+		var err error
+		if value.Title, value.Comment, err = memberTitle(node); err != nil {
+			w.addErr(errorAtNode(node, "enum %s member %s: %v", id.name, valueName, err))
+		}
 		if member.Initializer != nil {
 			if member.Initializer.Kind != kindStringLiteral {
 				w.addErr(errorAtNode(

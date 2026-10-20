@@ -1313,7 +1313,8 @@ func (w *walker) resolveDetached(decl *astNode) []*ir.FieldDef {
 }
 
 // walkEnum converts an exported enum declaration into an EnumDef. Only
-// string-valued enums are schema enums.
+// string-valued enums are schema enums. A member's JSDoc @title is its
+// title (memberTitle).
 func (w *walker) walkEnum(node *astNode) {
 	enum := node.AsEnumDeclaration()
 	name := node.Name().Text()
@@ -1325,7 +1326,11 @@ func (w *walker) walkEnum(node *astNode) {
 	for _, m := range enum.Members.Nodes {
 		member := m.AsEnumMember()
 		valueName := m.Name().Text()
-		value := ir.EnumValueDef{Name: valueName, Comment: leadingComment(m)}
+		value := ir.EnumValueDef{Name: valueName}
+		var err error
+		if value.Title, value.Comment, err = memberTitle(m); err != nil {
+			w.addErr(errorAtNode(m, "enum %s member %s: %v", name, valueName, err))
+		}
 		if member.Initializer != nil {
 			if member.Initializer.Kind != kindStringLiteral {
 				w.addErr(errorAtNode(m, "enum values must be string literals"))

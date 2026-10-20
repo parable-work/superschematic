@@ -152,7 +152,8 @@ func TestDisplayLoadsIntoIR(t *testing.T) {
 }
 
 // TestInvalidDisplayIsALocatedSchemaError: an argument @display's schema
-// refuses fails the load with a diagnostic at the decorator.
+// refuses fails the load with a diagnostic at the decorator, and so does a
+// field's second @display (D48, amended).
 func TestInvalidDisplayIsALocatedSchemaError(t *testing.T) {
 	_, _, err := LoadService(filepath.Join("testdata", "services", "broken-display"))
 	if err == nil {
@@ -160,6 +161,9 @@ func TestInvalidDisplayIsALocatedSchemaError(t *testing.T) {
 	}
 	msg := err.Error()
 	if !strings.Contains(msg, "@display argument: ") || !strings.Contains(msg, "items at 0 and 1 are equal") {
+		t.Fatalf("unexpected error: %s", msg)
+	}
+	if !strings.Contains(msg, "field text has more than one @display decorator") {
 		t.Fatalf("unexpected error: %s", msg)
 	}
 	if !regexp.MustCompile(`broken\.schema\.ts:\d+:\d+:`).MatchString(msg) {

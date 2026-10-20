@@ -10,9 +10,9 @@ import (
 
 // TypeDisplay is what a UI, or an agent, reads to render the instances of
 // a type, declared with @display (D48): what to call one and many, which
-// field is an instance's title, what a create button says, which fields
-// summarize it in a list, and how to label its Workflow's states and
-// transitions. It adds no field, operation or storage, and no generator
+// field is an instance's title, what a create button says, the glyph shown
+// beside its name, which fields summarize it in a list, and how to label
+// its Workflow's states and transitions. It adds no field, operation or storage, and no generator
 // renders it. The data forms write it as the decorator's argument.
 type TypeDisplay struct {
 	// Noun names one instance: "Ticket".
@@ -28,6 +28,11 @@ type TypeDisplay struct {
 	// CreateLabel is what a button that creates an instance says: "New
 	// ticket".
 	CreateLabel string `json:"createLabel,omitempty" yaml:"createLabel,omitempty"`
+
+	// Icon names the glyph a UI shows beside the type's name, as a field's
+	// and an operation's @icon do (D48, amended): "receipt". The core
+	// accepts any name; an icon set is an extension's check.
+	Icon string `json:"icon,omitempty" yaml:"icon,omitempty"`
 
 	// SummaryFields name the fields that summarize an instance in a list,
 	// in order: the type's own fields, or fields its behaviors add.
@@ -84,7 +89,8 @@ var DisplayStateName = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]*$`)
 
 // ValidateTypeDisplay checks a display's shape, as the JSON Schema of
 // @display's argument does, for IR built without a frontend, and returns
-// the first problem: at least one member, every text non-blank, each
+// the first problem: at least one member, every text non-blank, an icon
+// unpadded, each
 // summary field named once, a state name per states key with a known tone
 // and at least one member, and a state name per transitions key, each
 // holding at least one transition. Whether
@@ -94,7 +100,7 @@ func ValidateTypeDisplay(d *TypeDisplay) error {
 	if d == nil {
 		return nil
 	}
-	if d.Noun == "" && d.Plural == "" && d.TitleField == "" && d.CreateLabel == "" &&
+	if d.Noun == "" && d.Plural == "" && d.TitleField == "" && d.CreateLabel == "" && d.Icon == "" &&
 		len(d.SummaryFields) == 0 && len(d.States) == 0 && len(d.Transitions) == 0 {
 		return errors.New("display declares nothing")
 	}
@@ -108,6 +114,13 @@ func ValidateTypeDisplay(d *TypeDisplay) error {
 	text("plural", d.Plural)
 	text("titleField", d.TitleField)
 	text("createLabel", d.CreateLabel)
+	if d.Icon != "" {
+		if strings.TrimSpace(d.Icon) == "" {
+			errs = append(errs, errors.New("display icon must be non-blank"))
+		} else if strings.TrimSpace(d.Icon) != d.Icon {
+			errs = append(errs, errors.New("display icon must not contain surrounding whitespace"))
+		}
+	}
 	if d.SummaryFields != nil && len(d.SummaryFields) == 0 {
 		errs = append(errs, errors.New("display summaryFields must list a field"))
 	}
@@ -150,6 +163,31 @@ func ValidateTypeDisplay(d *TypeDisplay) error {
 	}
 	if len(errs) > 0 {
 		return errs[0]
+	}
+	return nil
+}
+
+// FieldDisplay is how a UI renders a field's control, declared with
+// @display on the field (D48, amended). The data forms write it under the
+// field's display. It adds no storage or validation, and no generator
+// renders it.
+type FieldDisplay struct {
+	// Multiline asks for a control that holds several lines when true, and
+	// one line when false, whatever the field's maxLength; nil leaves it to
+	// the UI.
+	Multiline *bool `json:"multiline,omitempty" yaml:"multiline,omitempty"`
+}
+
+// ValidateFieldDisplay checks a field display's shape, as the JSON Schema
+// of a field's @display argument does, for IR built without a frontend: it
+// must declare something. Whether the field holds text is the loader's
+// check, which reads the field's type.
+func ValidateFieldDisplay(d *FieldDisplay) error {
+	if d == nil {
+		return nil
+	}
+	if d.Multiline == nil {
+		return errors.New("display declares nothing")
 	}
 	return nil
 }
