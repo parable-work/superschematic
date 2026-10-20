@@ -59,7 +59,14 @@ impl ServiceCaller {
 
     /// Whether a route's `from` lists this caller: `from` is empty, or the
     /// caller serves one of its APIs.
-    pub fn is_listed(&self, from: &[impl AsRef<str>]) -> bool {
+    pub fn is_listed(&self, from: &[String]) -> bool {
+        self.listed_in(from)
+    }
+
+    /// `is_listed` over any list of names: a route's `from` as
+    /// `RouteControls` holds it (`String`s), or as an `OperationInfo`
+    /// states it (`&'static str`s).
+    fn listed_in(&self, from: &[impl AsRef<str>]) -> bool {
         from.is_empty()
             || self
                 .serves
@@ -81,7 +88,7 @@ pub(crate) fn service_step(
     caller: Option<&ServiceCaller>,
     has_user_clause: bool,
 ) -> Result<bool, ApiError> {
-    let listed = caller.is_some_and(|caller| caller.is_listed(from));
+    let listed = caller.is_some_and(|caller| caller.listed_in(from));
     match (mode, caller) {
         (ServiceMode::Allow, _) if listed => Ok(true),
         (ServiceMode::Allow, _) if has_user_clause => Ok(false),
@@ -238,12 +245,14 @@ mod tests {
     #[test]
     fn a_caller_is_listed_when_from_is_empty_or_names_an_api_it_serves() {
         let caller = ServiceCaller::new("orders", ["shop-orders", "shop-admin"], "sa-1");
-        assert!(caller.is_listed(&[] as &[&str]));
+        assert!(caller.is_listed(&[]));
         assert!(caller.is_listed(&["shop-admin".to_string()]));
         assert!(!caller.is_listed(&["shop-stock".to_string()]));
         assert!(!ServiceCaller::new("job", Vec::<String>::new(), "s").is_listed(&["a".to_string()]));
-        // A route's from in an OperationInfo is a static list.
-        assert!(caller.is_listed(&["shop-stock", "shop-orders"]));
+        // A route's from in an OperationInfo is a static list, which the
+        // service step reads alike.
+        assert!(caller.listed_in(&["shop-stock", "shop-orders"]));
+        assert!(!caller.listed_in(&["shop-stock"]));
     }
 
     #[test]
@@ -253,6 +262,6 @@ mod tests {
             caller,
             ServiceCaller::new("app", ["shop-orders"], String::new())
         );
-        assert!(caller.is_listed(&["shop-orders"]));
+        assert!(caller.is_listed(&["shop-orders".to_string()]));
     }
 }

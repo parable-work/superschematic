@@ -115,18 +115,27 @@ impl RateLimiter {
     }
 }
 
-/// The key of an operation's limiter: its namespace, its name and its
-/// rate.
-type LimiterKey = (&'static str, &'static str, u32);
+/// The key of an operation's limiter: its route's method and path, its
+/// namespace, its name and its rate.
+type LimiterKey = (&'static str, &'static str, &'static str, &'static str, u32);
 
-/// The rate limiters of one API's operations, one per operation with a
+/// The rate limiters of one app's operations, one per operation with a
 /// `@rateLimit`, made the first time anything asks for it (D44, amended).
 /// A clone shares them, so every way into an operation that holds the same
 /// registry counts a client against one budget: the routers built from one
 /// `RouterOptions`, and a Topcoat app's procedures and pages.
 ///
-/// Two registries are equal when they are the same registry, so
-/// `RouterOptions` compares as before.
+/// A registry is meant for one app's operations. It keys a limiter by the
+/// operation's route (its method and path), its namespace, its name and
+/// its rate, so two APIs' operations of one name on different routes keep
+/// their own limiters; two whose routes, names and rates all match would
+/// share one, so an app that serves two such APIs gives each a registry.
+///
+/// Two registries are equal when they are the same registry, a clone of
+/// it: equality is identity, never the limiters' contents. `RouterOptions`
+/// keeps its `PartialEq` and `Eq` by it, so two options are equal only
+/// when they share their registry, and `RouterOptions::default()` is not
+/// equal to another `RouterOptions::default()`.
 #[derive(Clone, Default)]
 pub struct RateLimits {
     limiters: Arc<Mutex<HashMap<LimiterKey, Arc<RateLimiter>>>>,
@@ -146,7 +155,13 @@ impl RateLimits {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         let limiter = limiters
-            .entry((operation.namespace, operation.name, rate))
+            .entry((
+                operation.method,
+                operation.path,
+                operation.namespace,
+                operation.name,
+                rate,
+            ))
             .or_insert_with(|| Arc::new(RateLimiter::per_minute(rate)));
         Some(Arc::clone(limiter))
     }
@@ -251,6 +266,32 @@ mod tests {
             ..PLACE_ORDER
         };
         assert!(!Arc::ptr_eq(&first, &limits.of(&faster).unwrap()));
+        assert_eq!(format!("{limits:?}"), "RateLimits { limiters: 3 }");
+    }
+
+    #[test]
+    fn two_operations_of_one_name_on_different_routes_have_their_own_limiters() {
+        // Two APIs' orders.placeOrder, one under each API's path, in one
+        // registry: each route keeps its own budget.
+        let limits = RateLimits::new();
+        let other_api = OperationInfo {
+            path: "/api/wholesale/orders",
+            ..PLACE_ORDER
+        };
+        let shop = limits.of(&PLACE_ORDER).unwrap();
+        let wholesale = limits.of(&other_api).unwrap();
+        assert!(!Arc::ptr_eq(&shop, &wholesale));
+        assert_eq!(shop.take("a"), Ok(()));
+        assert_eq!(shop.take("a"), Ok(()));
+        assert!(shop.take("a").is_err());
+        assert_eq!(wholesale.take("a"), Ok(()), "the other route's budget");
+
+        // Nor does another method on the same path share it.
+        let put = OperationInfo {
+            method: "PUT",
+            ..PLACE_ORDER
+        };
+        assert!(!Arc::ptr_eq(&shop, &limits.of(&put).unwrap()));
         assert_eq!(format!("{limits:?}"), "RateLimits { limiters: 3 }");
     }
 

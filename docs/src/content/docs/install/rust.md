@@ -500,6 +500,14 @@ let internal = build_router_with(implementations, options);
 let get_product = limits.of(&PRODUCT_GET_PRODUCT);
 ```
 
+A registry is meant for one app's operations. It keys each limiter by
+the operation's method, path, namespace, name and rate, so two APIs'
+operations of one name on different routes keep their own budgets; an
+app that serves two APIs whose operations match on all of those gives
+each API a registry of its own. Options compare their registry by
+identity: a clone is equal to its original, and two
+`RouterOptions::default()` are not equal.
+
 A schema with an `@envVars` class (see
 [Modeling types](/superschematic/guides/modeling-types/)) also gets the
 crate's `config` module, whose `load_config()` reads the class's
