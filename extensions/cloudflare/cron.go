@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	ir "github.com/parable-work/superschematic/ir"
@@ -126,15 +127,16 @@ func isUTC(zone string) bool {
 	return zone == "" || slices.Contains(utcZones, zone)
 }
 
-// seconds writes a whole number of seconds as Go writes a duration: 10m0s
-// as 10m, 1h30m0s as 1h30m.
+// seconds writes a whole number of seconds as a job's timeout is written,
+// Go's duration without its zero units: 10m0s as 10m, 2h0m0s as 2h,
+// 1h30m0s as 1h30m, and 90s as 1m30s.
 func seconds(n int) string {
 	s := (time.Duration(n) * time.Second).String()
-	if len(s) > 2 && s[len(s)-2:] == "0s" && s != "0s" {
-		s = s[:len(s)-2]
+	if strings.HasSuffix(s, "m0s") {
+		s = strings.TrimSuffix(s, "0s")
 	}
-	if len(s) > 2 && s[len(s)-2:] == "0m" && s[len(s)-3] == 'h' {
-		s = s[:len(s)-2]
+	if strings.HasSuffix(s, "h0m") {
+		s = strings.TrimSuffix(s, "0m")
 	}
 	return s
 }
