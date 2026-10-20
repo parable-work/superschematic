@@ -5130,7 +5130,7 @@ The runtime's `./r2` entry implements D54's `Bucket`:
   stream is read whole before it is put, since R2 takes a stream only
   when it knows its length, and a delete asks for the object's head
   first, since R2's delete answers alike whether or not it was there.
-- **`signUrl`** presigns a V4 query-string URL for
+- **`signedUrl`** presigns a V4 query-string URL for
   `https://<account>.r2.cloudflarestorage.com/<bucket>/<object>` with
   WebCrypto HMAC, for at most seven days. The access key is the edge's
   token id, and the secret is the hex SHA-256 of the token's value, which
@@ -5400,4 +5400,4 @@ Milestone 7's second target is done when acme-shop's storefront has run
 live on Workers (workers.dev, then a domain, through the SDK, with a
 rollback and a destroy), and a D1-backed TypeScript API, acme-shop's
 `wishlist-stack`, has run live (expand, rollout, contract). Buckets,
-sites and cron jobs follow as breadth.
+sites and cron jobs, built beside them, have not run live either.

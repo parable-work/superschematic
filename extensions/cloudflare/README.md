@@ -288,6 +288,8 @@ cli.New(cli.Config{Name: "superschematic"},
 	pulumi.Extension{ProviderVersions: map[string]string{
 		"gcp":              gcp.ProviderVersion,
 		cloudflare.Package: cloudflare.ProviderVersion,
+		// The generic connector's key node (D63), each call's key.
+		stack.GenericKeyPackage: stack.GenericKeyProviderVersion,
 	}},
 )
 ```

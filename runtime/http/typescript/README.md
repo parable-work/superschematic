@@ -399,10 +399,11 @@ against a fake-gcs-server that `SUPERSCHEMATIC_TEST_GCS_EMULATOR` names.
 
 ## On Cloudflare Workers
 
-A TypeScript server, job or site some environment places on the
-`cloudflare` target runs as a Worker (D64, section 18 of
-`docs/stack-model.md`). Its generated `fetch.ts` builds what `main.ts`
-builds on Bun from these:
+A TypeScript server or job some environment places on the `cloudflare`
+target runs as a Worker (D64, section 18 of `docs/stack-model.md`). A
+server's generated `fetch.ts`, and a job's `scheduled.ts`, build what
+`main.ts` builds on Bun from these. A site's Worker runs a script the
+target embeds, and none of this package:
 
 - `stackEnvOf(env)` turns the Worker's env into the string map the readers
   above take: each `plain_text` and `secret_text` binding, a literal, a
