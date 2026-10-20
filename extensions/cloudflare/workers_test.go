@@ -437,10 +437,10 @@ func TestWorkersRefusals(t *testing.T) {
 	})
 }
 
-// TestPolicyNothingPublic: a Worker with workers.dev on, a custom domain
-// and a route are refused for a deployable that is not exposed, a job's
-// or none at all, and pass for an exposed server; the Workers fixture
-// passes.
+// TestPolicyNothingPublic: a Worker with workers.dev on, with preview URLs
+// on, or with no subdomain, a custom domain and a route are refused for a
+// deployable that is not exposed, a job's or none at all, and pass for an
+// exposed server; the Workers fixture passes.
 func TestPolicyNothingPublic(t *testing.T) {
 	target := newFixture(t).target(t)
 	check := target.Policies[slices.IndexFunc(target.Policies, func(r registry.PolicyRule) bool { return r.Name == cloudflare.PolicyNothingPublic })].Check
@@ -453,7 +453,9 @@ func TestPolicyNothingPublic(t *testing.T) {
 	}
 	env.Deployables = append(env.Deployables, &ir.ResolvedDeployable{Name: "nightly", Kind: ir.DeployableJob, Exposed: true})
 	for _, res := range []*ir.Resource{
-		{ID: "shop-pricing.open", Type: cloudflare.TypeWorker, Owners: []string{"shop-pricing"}, Properties: map[string]any{"subdomain": map[string]any{"enabled": true}}},
+		{ID: "shop-pricing.open", Type: cloudflare.TypeWorker, Owners: []string{"shop-pricing"}, Properties: map[string]any{"subdomain": map[string]any{"enabled": true, "previewsEnabled": false}}},
+		{ID: "shop-pricing.previews", Type: cloudflare.TypeWorker, Owners: []string{"shop-pricing"}, Properties: map[string]any{"subdomain": map[string]any{"enabled": false, "previewsEnabled": true}}},
+		{ID: "shop-pricing.bare", Type: cloudflare.TypeWorker, Owners: []string{"shop-pricing"}, Properties: map[string]any{}},
 		{ID: "shop-pricing.domain", Type: cloudflare.TypeWorkersCustomDomain, Owners: []string{"shop-pricing"}},
 		{ID: "nightly.route", Type: cloudflare.TypeWorkersRoute, Owners: []string{"nightly"}},
 		{ID: "stray.domain", Type: cloudflare.TypeWorkersCustomDomain},
@@ -463,6 +465,8 @@ func TestPolicyNothingPublic(t *testing.T) {
 	got := strings.Join(check(env), "\n")
 	for _, want := range []string{
 		"Worker shop-pricing.open has workers.dev on for shop-pricing, which is not exposed",
+		"Worker shop-pricing.previews has preview URLs on for shop-pricing, which is not exposed",
+		"Worker shop-pricing.bare sets no subdomain for shop-pricing, which is not exposed",
 		"custom domain shop-pricing.domain reaches a Worker for shop-pricing, which is not exposed",
 		"route nightly.route reaches a Worker for nightly, which is not exposed",
 		"custom domain stray.domain reaches a Worker for no deployable, which is not exposed",
@@ -471,8 +475,8 @@ func TestPolicyNothingPublic(t *testing.T) {
 			t.Errorf("the policy does not say %q:\n%s", want, got)
 		}
 	}
-	if strings.Count(got, "\n") != 3 {
-		t.Errorf("the policy found more than the four:\n%s", got)
+	if strings.Count(got, "\n") != 5 {
+		t.Errorf("the policy found more than the six:\n%s", got)
 	}
 }
 

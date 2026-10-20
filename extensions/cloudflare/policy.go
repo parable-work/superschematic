@@ -34,10 +34,12 @@ func checkDomainOnCloudflare(env *ir.ResolvedEnvironment) []string {
 
 // checkNothingPublic refuses whatever reaches a Worker from the internet on
 // behalf of a deployable that is not exposed, or of no deployable at all
-// (section 18.14): a Worker with workers.dev on, a custom domain, or a
-// route. Only a service binding reaches an internal server. A job is never
-// exposed, so none of the three may reach its Worker; a site always is
-// (D55).
+// (section 18.14): a Worker that does not turn workers.dev off, or its
+// preview URLs, which reach each version at workers.dev, or that sets no
+// subdomain at all, which leaves both to Cloudflare's defaults; a custom
+// domain; or a route. Only a service binding reaches an internal server. A
+// job is never exposed, so none of these may reach its Worker; a site
+// always is (D55).
 func checkNothingPublic(env *ir.ResolvedEnvironment) []string {
 	exposed := func(res *ir.Resource) bool {
 		return slices.ContainsFunc(res.Owners, func(owner string) bool {
@@ -56,8 +58,16 @@ func checkNothingPublic(env *ir.ResolvedEnvironment) []string {
 		}
 		switch res.Type {
 		case TypeWorker:
-			if subdomain, _ := res.Properties["subdomain"].(map[string]any); subdomain["enabled"] == true {
+			subdomain, ok := res.Properties["subdomain"].(map[string]any)
+			if !ok {
+				out = append(out, fmt.Sprintf("Worker %s sets no subdomain for %s, which is not exposed, and leaves workers.dev and its preview URLs to Cloudflare's defaults", res.ID, owners))
+				continue
+			}
+			if subdomain["enabled"] != false {
 				out = append(out, fmt.Sprintf("Worker %s has workers.dev on for %s, which is not exposed", res.ID, owners))
+			}
+			if subdomain["previewsEnabled"] != false {
+				out = append(out, fmt.Sprintf("Worker %s has preview URLs on for %s, which is not exposed, and each reaches a version at workers.dev", res.ID, owners))
 			}
 		case TypeWorkersCustomDomain:
 			out = append(out, fmt.Sprintf("custom domain %s reaches a Worker for %s, which is not exposed", res.ID, owners))
