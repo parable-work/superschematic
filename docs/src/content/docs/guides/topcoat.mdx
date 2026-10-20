@@ -873,6 +873,17 @@ shows the commands). `Review`'s search fields give the SQLite table its
 `search_text` column, `VIRTUAL`, without the trigram index Postgres
 builds.
 
+An order stores its total, `totalCents`, so the orders table sorts by
+it. `shop-db`'s plan adds `total_cents` as a required column with no
+default and no backfill: a schema's `Default` fills in the decoders'
+value, not the column's, and a backfill is a migration written by hand.
+So a database that already holds orders cannot take the column, in
+SQLite or in Postgres; the step fails on its first order. Delete a
+`shop.db` made before it and plan it anew. Purge a `Dev` environment
+made before it with `superschematic stack dev --remove-data` once, which
+removes its containers and their data as it stops, after the failed
+migration too, then run `stack dev` again.
+
 ## Test the app
 
 `Router::handle` drives the app as a browser would. The acme app's tests
