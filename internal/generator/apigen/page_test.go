@@ -112,6 +112,50 @@ func TestPagedEndpoints(t *testing.T) {
 	}
 }
 
+// TestASortTheLoaderRefusesIsAGeneratorError: IR built without the loader
+// holds a sort argument to its rules in apigen too (D60, amended): an
+// optional query parameter, the operation's one, of a @paginated operation
+// whose defaultSort is one of the sort's values.
+func TestASortTheLoaderRefusesIsAGeneratorError(t *testing.T) {
+	for name, edit := range map[string]func(op *ir.FieldDef, sort *ir.ArgumentDef){
+		"a required sort":                  func(_ *ir.FieldDef, sort *ir.ArgumentDef) { sort.Required = true },
+		"a sort that is no query":          func(_ *ir.FieldDef, sort *ir.ArgumentDef) { sort.IsQuery = false },
+		"a sort without a defaultSort":     func(op *ir.FieldDef, _ *ir.ArgumentDef) { op.Page.DefaultSort = "" },
+		"a defaultSort of another field":   func(op *ir.FieldDef, _ *ir.ArgumentDef) { op.Page.DefaultSort = "-inStock" },
+		"a defaultSort of no sort's value": func(op *ir.FieldDef, _ *ir.ArgumentDef) { op.Page.DefaultSort = "--name" },
+		"a second sort": func(op *ir.FieldDef, sort *ir.ArgumentDef) {
+			second := *sort
+			second.Name = "order"
+			op.Arguments = append([]*ir.ArgumentDef{&second}, op.Arguments...)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			schema := loadPagedAPI(t)
+			var listItems *ir.FieldDef
+			for _, set := range schema.OperationSets {
+				for _, op := range set.Operations {
+					if op.Name == "listItems" {
+						listItems = op
+					}
+				}
+			}
+			if listItems == nil || ir.SortArgument(listItems) == nil {
+				t.Fatal("fixture-paged-api's listItems has no sort")
+			}
+			edit(listItems, ir.SortArgument(listItems))
+			_, err := apigen.Generate(schema, apigen.Options{
+				Provider:    sessionauth.Provider{},
+				SchemaName:  "fixture-paged-api",
+				ModulePath:  "example.com/schemas/api/fixture-paged-api",
+				TypesModule: "example.com/schemas/types/go/fixture-paged-api",
+			})
+			if err == nil || !strings.Contains(err.Error(), "a sort argument is the one optional query parameter of a @paginated operation whose defaultSort is one of its values") {
+				t.Fatalf("Generate = %v, want the sort's refusal", err)
+			}
+		})
+	}
+}
+
 // TestPagedOpenAPIGolden pins the OpenAPI document of fixture-paged-api: a
 // paged operation's cursor and limit follow its own query parameters, with
 // their bounds, and its data is the page, {items, next}, written inline.
