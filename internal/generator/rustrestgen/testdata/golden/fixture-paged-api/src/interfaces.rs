@@ -31,6 +31,11 @@ pub struct CatalogListItemsArgs {
     /// the limit's default filled in. `PageRequest::first(limit)` asks for
     /// the first page and `PageRequest::after(next, limit)` for the one
     /// after a page's `next`.
+    /// Its `sort` is the `sort` query parameter (D60, amended): name, sku,
+    /// descending after a `-`, `name` when the request sends none;
+    /// ties break by id. The implementation reads it `Some`, its default
+    /// filled in, and its cursor its own key's: the router unbinds the
+    /// cursor from the sort and binds the page's `next` to it.
     pub page: runtime::page::PageRequest,
 }
 
@@ -62,8 +67,8 @@ pub trait CatalogImplementation: Send + Sync + 'static {
     /// The items, two to a page unless the caller asks for up to five, by
     ///
     /// It pages (D60): read up to `args.page.limit + 1` items after
-    /// `args.page.cursor` (`Cursor::decode`) in the operation's order, and
-    /// return `Page::from_rows`.
+    /// `args.page.cursor` (`Cursor::decode`) in `args.page.sort`'s order,
+    /// ties broken by id (D60, amended), and return `Page::from_rows`.
     async fn list_items(&self, ctx: RequestContext, args: CatalogListItemsArgs) -> Result<runtime::page::Page<types::ItemView>, ApiError>;
     /// One item.
     async fn get_item(&self, ctx: RequestContext, args: CatalogGetItemArgs) -> Result<types::ItemView, ApiError>;

@@ -111,11 +111,30 @@ type PageInfo struct {
 	// ItemRustType is the Rust type of the page's items, the element of the
 	// list the operation declares: types::ItemView, or String.
 	ItemRustType string
+	// Sort is the operation's sort argument (D60, amended), nil for a page
+	// without one. PAGE is then sorted by it: the router's decode reads the
+	// request with PageSpec::query and unbinds it with PageSpec::unbind, so
+	// the implementation's args.page holds the sort, its default filled
+	// in, and its own cursor; the handler binds the page's next to the
+	// sort with Page::bind. An in-process caller (D43) checks its Args,
+	// unbinds and binds the same way. The sort is not one of the Args'
+	// query fields.
+	Sort *apigen.PageSort
 }
 
-// SpecExpr is the PageSpec of the route's limits.
+// SpecExpr is the PageSpec of the route's limits, and its sort:
+// PageSpec::new(2, 5).sorted(SortSpec::new("sort", &["name", "sku"],
+// "name")).
 func (p PageInfo) SpecExpr() string {
-	return fmt.Sprintf("PageSpec::new(%d, %d)", p.DefaultLimit, p.MaxLimit)
+	spec := fmt.Sprintf("PageSpec::new(%d, %d)", p.DefaultLimit, p.MaxLimit)
+	if p.Sort == nil {
+		return spec
+	}
+	fields := make([]string, len(p.Sort.Fields))
+	for i, field := range p.Sort.Fields {
+		fields[i] = rustString(field)
+	}
+	return fmt.Sprintf("%s.sorted(SortSpec::new(%s, &[%s], %s))", spec, rustString(p.Sort.Param), strings.Join(fields, ", "), rustString(p.Sort.Default))
 }
 
 // IdentityConst is the identity runtime's constant naming the user model's
@@ -356,6 +375,17 @@ type APIOutput struct {
 // names the runtime's PageSpec, and the interfaces its page module.
 func (o *APIOutput) HasPages() bool {
 	return pages(o.Endpoints)
+}
+
+// HasSortedPages reports whether a mounted operation's page sorts (D60,
+// amended): the router then names the runtime's SortSpec.
+func (o *APIOutput) HasSortedPages() bool {
+	for _, endpoint := range o.Endpoints {
+		if endpoint.Page != nil && endpoint.Page.Sort != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // pages reports whether one of endpoints pages.
