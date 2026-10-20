@@ -260,8 +260,9 @@ its `operationId`
 ([In the documents](/superschematic/reference/references-and-search/#in-the-documents)).
 
 A sorted page's sort argument (`SortBy`, D60 amended) is an optional
-string whose `enum` lists its values, each field and then each field
-after `-`, as the OpenAPI document's does. Its description names the
+string whose `enum` lists its values, each field followed by that field
+after `-` (`name`, `-name`, `sku`, `-sku`), as the OpenAPI document's
+does. Its description names the
 values and the default, and the tool's description asks for the same
 sort with each `next`, since a cursor holds the sort it was returned
 under:
@@ -458,11 +459,13 @@ A `Parameters` key may not be empty, repeat, or reuse `type`,
 `additionalProperties`, `properties`, `required`, the scalar key, the
 reference key, the search key or the sort key, and no two of the scalar,
 reference, search and sort keys may be the same. None of those four may
-be a JSON Schema keyword that a property is written with: `type`,
-`description`, `format`, `pattern`, `enum`, `minLength`, `maxLength`,
-`minimum`, `maximum`, `minItems`, `maxItems`, `items`, `properties`,
-`required`, `oneOf`, `additionalProperties`, `$ref`, `allOf`, `anyOf` or
-`nullable`. A hook
+be a JSON Schema keyword that a property is written with or that JSON
+Schema reads on one: `type`, `description`, `format`, `pattern`, `enum`,
+`minLength`, `maxLength`, `minimum`, `maximum`, `minItems`, `maxItems`,
+`items`, `properties`, `required`, `oneOf`, `additionalProperties`,
+`$ref`, `allOf`, `anyOf`, `nullable`, `default`, `const`, `title`,
+`examples`, `deprecated`, `readOnly`, `writeOnly`, `$id`, `$schema`,
+`not`, `if`, `then` or `else`. A hook
 that adds or removes tools fails the build, as does a hook error, which
 names the hook. The `ir` wire types spell the default keys: a
 distribution that renames them decodes its documents with its own
