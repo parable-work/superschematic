@@ -800,6 +800,7 @@ fn quick(concurrency: usize, grace: Duration) -> Options {
         concurrency,
         grace,
         idle: Duration::from_millis(50),
+        ..Options::default()
     }
 }
 
@@ -921,6 +922,37 @@ async fn a_long_handler_keeps_its_message_by_extending_its_claim() {
     assert_eq!(
         db.row("order_placed_queue", &id).await,
         ("done".into(), 1, None)
+    );
+    db.close().await;
+}
+
+#[tokio::test]
+async fn a_worker_prunes_the_done_messages_past_the_retention_as_it_starts() {
+    let Some(db) = Db::open().await else { return };
+    let def = order_placed();
+    for n in 0..3 {
+        db.enqueue(&def, &an_order(n)).await;
+    }
+    let orders = queue::<OrderPlaced>(&db, def.clone());
+    let claims = orders.claim(3, LEASE).await.unwrap();
+    for claim in &claims[..2] {
+        done_ago(&db, "order_placed_queue", &claim.id, "1 day").await;
+    }
+    done_ago(&db, "order_placed_queue", &claims[2].id, "1 minute").await;
+    let shutdown = Shutdown::new();
+    let run = tokio::spawn(run_worker(
+        queue::<OrderPlaced>(&db, def),
+        |_order: OrderPlaced| async { Ok::<(), BoxError>(()) },
+        quick(1, Duration::from_secs(1)),
+        shutdown.clone(),
+    ));
+    db.until("order_placed_queue", "true", 1).await;
+    shutdown.cancel();
+    run.await.unwrap().unwrap();
+    assert_eq!(
+        db.row("order_placed_queue", &claims[2].id).await.0,
+        "done",
+        "within the retention"
     );
     db.close().await;
 }

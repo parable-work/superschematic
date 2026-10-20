@@ -271,6 +271,108 @@ func TestRunBacksOffAFailedClaim(t *testing.T) {
 	}
 }
 
+// pruner is a queue's Prune in memory: each call takes the next of its
+// answers, a count or an error, and answers 0 once they run out.
+type pruner struct {
+	mu      sync.Mutex
+	answers []any
+	limits  []int
+}
+
+func (p *pruner) prune(_ context.Context, limit int) (int, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.limits = append(p.limits, limit)
+	if len(p.answers) == 0 {
+		return 0, nil
+	}
+	answer := p.answers[0]
+	p.answers = p.answers[1:]
+	if err, ok := answer.(error); ok {
+		return 0, err
+	}
+	return answer.(int), nil
+}
+
+func (p *pruner) calls() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return len(p.limits)
+}
+
+// TestRunPrunesWhenItStartsAndThenEveryPeriod: Run prunes as it starts,
+// a batch at a time while a batch is whole, logging the total once, then
+// again every PruneEvery; a failed prune is logged, and the next one runs
+// all the same (D68).
+func TestRunPrunesWhenItStartsAndThenEveryPeriod(t *testing.T) {
+	p := &pruner{answers: []any{PruneBatch, PruneBatch, 7, errors.New("the database is down"), 3}}
+	q := newFake().queue(time.Minute)
+	q.Prune = p.prune
+	core, logs := observer.New(zap.InfoLevel)
+	ctx, cancel := context.WithCancel(context.Background())
+	stopped := make(chan error, 1)
+	go func() {
+		stopped <- Run(ctx, q, Options{Idle: 5 * time.Millisecond, PruneEvery: 20 * time.Millisecond, Logger: zap.New(core)})
+	}()
+	waitFor(t, "three prunes", func() bool { return p.calls() >= 6 })
+	cancel()
+	if err := <-stopped; err != nil {
+		t.Fatalf("Run = %v", err)
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for i, limit := range p.limits {
+		if limit != PruneBatch {
+			t.Fatalf("prune %d asked for %d messages, want a batch of %d", i, limit, PruneBatch)
+		}
+	}
+	var pruned []any
+	for _, entry := range logs.FilterMessage("done messages pruned").All() {
+		pruned = append(pruned, entry.ContextMap()["pruned"])
+		if entry.ContextMap()["queue"] != "Fake" {
+			t.Errorf("the prune's line names no queue: %v", entry.ContextMap())
+		}
+	}
+	if fmt.Sprint(pruned) != fmt.Sprint([]any{int64(2*PruneBatch + 7), int64(3)}) {
+		t.Errorf("logged %v pruned, want the first prune's batches together, then the third's", pruned)
+	}
+	failed := logs.FilterMessage("pruning the done messages failed").All()
+	if len(failed) != 1 || failed[0].ContextMap()["error"] != "the database is down" {
+		t.Errorf("logged %d failed prunes, %v, want the second", len(failed), failed)
+	}
+}
+
+// TestRunStopsPruningWhenItStops: a stopping worker cancels its prune,
+// logs no failure for it, and returns.
+func TestRunStopsPruningWhenItStops(t *testing.T) {
+	started := make(chan struct{})
+	q := newFake().queue(time.Minute)
+	q.Prune = func(ctx context.Context, _ int) (int, error) {
+		close(started)
+		<-ctx.Done()
+		return 0, ctx.Err()
+	}
+	core, logs := observer.New(zap.InfoLevel)
+	ctx, cancel := context.WithCancel(context.Background())
+	stopped := make(chan error, 1)
+	go func() {
+		stopped <- Run(ctx, q, Options{Idle: 5 * time.Millisecond, Logger: zap.New(core)})
+	}()
+	<-started
+	cancel()
+	select {
+	case err := <-stopped:
+		if err != nil {
+			t.Fatalf("Run = %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run did not stop while its prune ran")
+	}
+	if n := logs.FilterMessage("pruning the done messages failed").Len(); n != 0 {
+		t.Errorf("logged %d failed prunes for a prune the stop cancelled", n)
+	}
+}
+
 // TestConcurrency reads the environment's concurrency, or the default.
 func TestConcurrency(t *testing.T) {
 	t.Setenv(ConcurrencyVariable, "")

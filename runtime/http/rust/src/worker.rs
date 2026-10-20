@@ -25,6 +25,13 @@
 //! releases their messages, which are due again at once for another worker,
 //! and returns.
 //!
+//! Beside the claims, it prunes the queue (D68): when it starts and every
+//! five minutes after, it deletes the done messages older than the queue's
+//! retention, [`PRUNE_BATCH`] at a time until a batch is short, and logs how
+//! many. Every instance of every worker of the queue prunes, which is safe:
+//! each batch skips the rows another holds, and a row deleted once is gone.
+//! It never deletes a dead message.
+//!
 //! The loop knows no database: it claims through a [`WorkerQueue`], which
 //! [`PostgresQueue`](crate::queue::PostgresQueue) implements, so its tests
 //! run over a queue in memory.
@@ -32,8 +39,9 @@
 //! It logs through `tracing`, in a span carrying `queue`, with the fields
 //! and messages of Go's and TypeScript's loops: `message`, `attempt`,
 //! `took` (seconds) and `error` on each outcome, `retryIn` (seconds) on a
-//! failed claim, and `running`, `grace`, `released` and `unfinished` as it
-//! stops. The `logging` module writes them as JSON lines.
+//! failed claim, `pruned` on a prune, and `running`, `grace`, `released` and
+//! `unfinished` as it stops. The `logging` module writes them as JSON
+//! lines.
 
 use std::any::Any;
 use std::collections::HashMap;
@@ -70,12 +78,21 @@ pub const DEFAULT_GRACE: Duration = Duration::from_secs(8);
 /// messages than it had slots for.
 pub const DEFAULT_IDLE: Duration = Duration::from_secs(1);
 
+/// How often a worker prunes its queue's done messages, after the prune it
+/// starts with.
+pub const DEFAULT_PRUNE_EVERY: Duration = Duration::from_secs(5 * 60);
+
+/// How many done messages one prune statement deletes at most, so no
+/// statement holds its locks for long; a prune runs another while one
+/// deletes a whole batch.
+pub const PRUNE_BATCH: usize = 1000;
+
 /// The longest wait after a claim that failed, which doubles from the idle
 /// wait.
 const MAX_BACKOFF: Duration = Duration::from_secs(30);
 
-/// How long each claim, extension, completion, failure and release may
-/// take, so a stopping worker still records them.
+/// How long each claim, extension, completion, failure, release and prune
+/// batch may take, so a stopping worker still records them.
 const OP_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// The longest cause a failed message records, in characters.
@@ -93,6 +110,9 @@ pub struct Options {
     /// How long to wait after a claim that found fewer messages than it had
     /// slots for; [`DEFAULT_IDLE`] by default.
     pub idle: Duration,
+    /// How often to prune the queue after the prune the worker starts with;
+    /// [`DEFAULT_PRUNE_EVERY`] by default.
+    pub prune_every: Duration,
 }
 
 impl Default for Options {
@@ -101,6 +121,7 @@ impl Default for Options {
             concurrency: 1,
             grace: DEFAULT_GRACE,
             idle: DEFAULT_IDLE,
+            prune_every: DEFAULT_PRUNE_EVERY,
         }
     }
 }
@@ -120,6 +141,11 @@ impl Options {
                 defaults.idle
             } else {
                 self.idle
+            },
+            prune_every: if self.prune_every.is_zero() {
+                defaults.prune_every
+            } else {
+                self.prune_every
             },
         }
     }
@@ -198,6 +224,13 @@ pub trait WorkerQueue: Send + Sync + 'static {
 
     /// Gives a claimed message back, due at once.
     async fn release(&self, id: &str, token: &str) -> Result<(), QueueError>;
+
+    /// Deletes up to `limit` messages done for the queue's retention, and
+    /// returns how many it deleted. A queue that does not implement it
+    /// prunes nothing.
+    async fn prune(&self, _limit: usize) -> Result<u64, QueueError> {
+        Ok(0)
+    }
 }
 
 #[async_trait]
@@ -230,6 +263,10 @@ impl<M: DeserializeOwned + Send + 'static> WorkerQueue for PostgresQueue<M> {
 
     async fn release(&self, id: &str, token: &str) -> Result<(), QueueError> {
         PostgresQueue::release(self, id, token).await
+    }
+
+    async fn prune(&self, limit: usize) -> Result<u64, QueueError> {
+        PostgresQueue::prune(self, limit).await
     }
 }
 
@@ -271,7 +308,7 @@ where
         span: span.clone(),
     });
     async {
-        worker.claim_loop(&shutdown).await;
+        tokio::join!(worker.claim_loop(&shutdown), worker.prune_loop(&shutdown));
         worker.stop().await;
     }
     .instrument(span)
@@ -356,6 +393,45 @@ where
             if found < free && !sleep(shutdown, self.options.idle).await {
                 return;
             }
+        }
+    }
+
+    /// Prunes the queue at once, then every `prune_every`, until `shutdown`
+    /// is cancelled.
+    async fn prune_loop(&self, shutdown: &Shutdown) {
+        loop {
+            self.prune(shutdown).await;
+            if !sleep(shutdown, self.options.prune_every).await {
+                return;
+            }
+        }
+    }
+
+    /// Deletes the queue's done messages past its retention, a batch at a
+    /// time until a batch is short, and logs how many it deleted. A failed
+    /// batch ends the prune, which the next tries again.
+    async fn prune(&self, shutdown: &Shutdown) {
+        let mut pruned: u64 = 0;
+        loop {
+            let batch = tokio::select! {
+                () = shutdown.cancelled() => break,
+                batch = timed(self.queue.prune(PRUNE_BATCH)) => batch,
+            };
+            match batch {
+                Ok(n) => {
+                    pruned += n;
+                    if n < PRUNE_BATCH as u64 {
+                        break;
+                    }
+                }
+                Err(err) => {
+                    tracing::warn!(pruned, error = %err, "pruning the done messages failed");
+                    break;
+                }
+            }
+        }
+        if pruned > 0 {
+            tracing::info!(pruned, "done messages pruned");
         }
     }
 
