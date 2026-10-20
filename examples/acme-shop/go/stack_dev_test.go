@@ -759,7 +759,8 @@ func TestStackDevRunsTheShop(t *testing.T) {
 	// run built, and its Cargo target directory is the first run's, so
 	// cargo compiles the crates the root generates and reuses every other.
 	// It mirrors typescript/shop-storefront into impl/shop-storefront too,
-	// and its Bun workspace lists the mirror in place of the project's
+	// and the site web/shop-web into impl/shop-web, where the site builds,
+	// and its Bun workspace lists the mirrors in place of the project's
 	// packages, so its install leaves their node_modules as the first
 	// run's install linked them, to outputRoot (D65, amended).
 	links := projectLinks(t, outputRoot)
@@ -770,6 +771,8 @@ func TestStackDevRunsTheShop(t *testing.T) {
 		filepath.Join(otherRoot, "impl", "shop-stock", "src", "lib.rs"):      filepath.Join("..", "rust-impl", "shop-stock", "src", "lib.rs"),
 		filepath.Join(otherRoot, "impl", "shop-storefront", "index.ts"):      filepath.Join("..", "typescript", "shop-storefront", "index.ts"),
 		filepath.Join(otherRoot, "impl", "shop-storefront", "tsconfig.json"): filepath.Join("..", "typescript", "shop-storefront", "tsconfig.json"),
+		filepath.Join(otherRoot, "impl", "shop-web", "index.html"):           filepath.Join("..", "web", "shop-web", "index.html"),
+		filepath.Join(otherRoot, "impl", "shop-web", "config.generated.ts"):  filepath.Join("..", "web", "shop-web", "config.generated.ts"),
 	} {
 		mirrored, err := os.ReadFile(mirror)
 		if err != nil {
@@ -781,6 +784,14 @@ func TestStackDevRunsTheShop(t *testing.T) {
 	}
 	if status := get(t, againEnv.servers["shop-storefront"]+"/readyz"); status != http.StatusOK {
 		t.Fatalf("shop-storefront built in %s answered GET /readyz %d", otherRoot, status)
+	}
+	// shop-web built in its mirror, which its file server serves, and not
+	// in the project's package.
+	if _, err := os.Stat(filepath.Join(otherRoot, "impl", "shop-web", "dist", "index.html")); err != nil {
+		t.Fatalf("shop-web's build in %s wrote no page into its mirror: %v", otherRoot, err)
+	}
+	if status := get(t, againEnv.site+"/"); status != http.StatusOK {
+		t.Fatalf("shop-web built in %s answered GET / %d", otherRoot, status)
 	}
 	if got := projectLinks(t, outputRoot); !maps.Equal(got, links) {
 		t.Fatalf("stack dev --out %s relinked the project's TypeScript packages:\n%v\nwas\n%v", otherRoot, got, links)

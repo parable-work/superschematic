@@ -2241,8 +2241,8 @@ as they are, with no build step (D51). The pieces mirror Go's:
   where every command writes without `--out`: an install links each
   member's `node_modules` into the root that installs it, so a second
   root that listed them would take their links over. Any other output
-  root lists the implementations' mirrors, `impl/*`, in their place
-  (below). Where
+  root lists the mirrors of the implementations and the sites, `impl/*`,
+  in their place (below). Where
   `[paths]` names a checkout of superscalar, the HTTP runtime or the
   version-graph runtime, the root's `overrides` point every dependency on
   it at the checkout with a `file:` path from the root; a member's own
@@ -2315,9 +2315,16 @@ as they are, with no build step (D51). The pieces mirror Go's:
   server, job or worker package under the output root depends on, and,
   in the default root, every copy. A change to the package reaches another
   root's servers with that root's next build of the stack, which `stack
-  dev` runs first. A site is copied into no root: it is no member of
-  another root's workspace, and its build there runs in its own package
-  against the default root's install.
+  dev` runs first. A site's build into another root copies its package
+  the same way, to `<output-root>/impl/<site>/`, with a notice that names
+  it a site, and a build of a stack there keeps the copy of each site the
+  project has a package for (D65, amended). Wherever a site builds, `stack
+  dev`, a deploy or `stack build`, it builds in the copy when the output
+  root's workspace lists `impl/*`, after that root's install, against the
+  root's own SDKs, and in its own package otherwise; a root that lists the
+  copies and holds none of the site stops the build. A `build-all --cache`
+  into another root builds each site every time, since its inputs do not
+  cover the copy.
 - **Entrypoint.** The `server` generator writes
   `<output-root>/server/<stack>/<server>/` for a TypeScript server in the
   pass that writes the Go ones (section 8.1): `package.json`

@@ -322,10 +322,42 @@ func (r run) writeTypeScriptMirrors(servers []*servergen.TypeScriptServer) error
 }
 
 // pruneTypeScriptMirrors removes the TypeScript mirrors under the output
-// root no server, job or worker package depends on, or, in the default
-// output root, which holds none, every one.
+// root no server, job or worker package depends on, but the mirrors of the
+// project's sites, which their own builds write (generateSite), or, in the
+// default output root, which holds none, every one.
 func (r run) pruneTypeScriptMirrors() error {
-	return servergen.PruneTypeScriptMirrors(r.Options.OutputRoot, tsgen.Mirrored(r.Options.OutputRoot, r.Options.SchemasRoot))
+	sites, err := r.sitePackages()
+	if err != nil {
+		return err
+	}
+	return servergen.PruneTypeScriptMirrors(r.Options.OutputRoot, tsgen.Mirrored(r.Options.OutputRoot, r.Options.SchemasRoot), sites)
+}
+
+// sitePackages returns the names of the project's site packages: each
+// package.json at the naming file's [implementation_paths] site template
+// under the repository root (D55).
+func (r run) sitePackages() ([]string, error) {
+	if r.Options.RepositoryRoot == "" {
+		return nil, nil
+	}
+	manifests, err := filepath.Glob(filepath.Join(r.Options.RepositoryRoot, filepath.FromSlash(r.Options.Naming.SiteImplementationGlob()), servergen.TypeScriptPackageFile))
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	for _, file := range manifests {
+		data, err := os.ReadFile(file)
+		if err != nil {
+			return nil, err
+		}
+		var pkg struct {
+			Name string `json:"name"`
+		}
+		if json.Unmarshal(data, &pkg) == nil && pkg.Name != "" {
+			names = append(names, pkg.Name)
+		}
+	}
+	return names, nil
 }
 
 // writeRustWorkspace writes the output root's Cargo workspace for the

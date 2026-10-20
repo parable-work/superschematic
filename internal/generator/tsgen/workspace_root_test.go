@@ -402,3 +402,42 @@ func TestWorkspaceInstallsFromAnyPackage(t *testing.T) {
 		t.Fatalf("%s does not type-check against its installed sibling: %v\n%s", consumer.name, err, out)
 	}
 }
+
+// TestSiteDir (D55; D65, amended): a site builds in its package where the
+// output root's workspace lists the project's packages, the default root's
+// and one with no workspace root, and in its mirror under impl/ where the
+// workspace lists the mirrors; a mirrored root without the site's mirror is
+// refused.
+func TestSiteDir(t *testing.T) {
+	repo := testpaths.TempDir(t)
+	names := naming.Naming{NpmScope: "@acme"}
+	def := filepath.Join(repo, "schemas", "dist")
+	other := filepath.Join(repo, "other")
+	for _, w := range []WorkspaceRoot{
+		{OutputRoot: def, RepositoryRoot: repo, Naming: names},
+		{OutputRoot: other, RepositoryRoot: repo, Mirrored: true, Naming: names},
+	} {
+		if err := w.Write(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	project := filepath.Join(repo, "web", "shop-web")
+	for root, want := range map[string]string{def: project, filepath.Join(repo, "none"): project} {
+		if got, err := SiteDir(root, repo, "shop-web", "web/shop-web"); err != nil || got != project {
+			t.Errorf("SiteDir in %s = %s, %v; want %s", root, got, err, want)
+		}
+	}
+	if _, err := SiteDir(other, repo, "shop-web", "web/shop-web"); err == nil || !strings.Contains(err.Error(), "holds no mirror of shop-web") {
+		t.Errorf("SiteDir in a mirrored root without the site's mirror = %v", err)
+	}
+	mirror := filepath.Join(other, MirrorRoot, "shop-web")
+	if err := os.MkdirAll(mirror, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(mirror, "package.json"), []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := SiteDir(other, repo, "shop-web", "web/shop-web"); err != nil || got != mirror {
+		t.Errorf("SiteDir in a mirrored root = %s, %v; want %s", got, err, mirror)
+	}
+}

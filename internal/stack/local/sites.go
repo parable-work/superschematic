@@ -15,15 +15,18 @@ import (
 	"strings"
 	"time"
 
+	"github.com/parable-work/superschematic/internal/generator/tsgen"
 	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
 // The local target's sites (D55; docs/stack-model.md, section 8.3). A
-// site's node names its package under the output root, the script that
-// builds it and the directory the build writes. At its rollout wave, once
-// the servers it calls are ready, the provisioner installs the Bun
-// workspace, runs the build once, and serves the directory from a file
+// site's node names its package under the repository root, the script
+// that builds it and the directory the build writes. At its rollout wave,
+// once the servers it calls are ready, the provisioner installs the Bun
+// workspace, runs the build once, in the package, or in an output root
+// other than the default one in the site's mirror there (tsgen.SiteDir,
+// D65, amended), and serves the directory from a file
 // server of its own on loopback: each file as it is, the site's config at
 // ir.SiteConfigPath, and the single-page fallback for a path that names no
 // file. The config and every HTML file are served uncached, so a reload
@@ -111,7 +114,10 @@ func (p *Provisioner) startSites(ctx context.Context, req registry.ProvisionRequ
 	}
 	k := key(req.Environment)
 	for _, s := range sites {
-		dir := filepath.Join(req.RepositoryRoot, filepath.FromSlash(s.Dir))
+		dir, err := tsgen.SiteDir(req.OutputRoot, req.RepositoryRoot, s.Deployable, s.Dir)
+		if err != nil {
+			return fmt.Errorf("local: %w", err)
+		}
 		if info, err := os.Stat(filepath.Join(dir, "package.json")); err != nil || info.IsDir() {
 			return fmt.Errorf("local: site %s: no package at %s; the site's build scaffolds it (docs/stack-model.md, section 8.10)", s.Deployable, dir)
 		}

@@ -36,9 +36,10 @@ import (
 // install links each member's node_modules into the root that installs it,
 // so a second root that listed them would take their links over, and leave
 // them dangling once it was gone. Any other output root lists the mirrors
-// the stack's build copies the implementations into, `impl/*` (D65;
-// servergen's tsmirror.go), and no package of the project's: its servers,
-// jobs and workers build against its own mirrors, as its Rust ones do. A
+// the stack's build copies the implementations into, and each site's build
+// its package, `impl/*` (D65; servergen's tsmirror.go), and no package of
+// the project's: its servers, jobs and workers build against its own
+// mirrors, as its Rust ones do, and its sites build in theirs (SiteDir). A
 // mirror keeps its package's name, so a server's package.json names the
 // implementation alike in every root, and Bun, which refuses two members of
 // one name, finds one.
@@ -112,6 +113,50 @@ func Mirrored(outputRoot, schemasRoot string) bool {
 		return false
 	}
 	return !SamePath(outputRoot, def)
+}
+
+// ListsMirrors reports whether the Bun workspace whose root is at
+// outputRoot lists the mirrors under impl/ in place of the project's
+// packages: the workspace of an output root other than the default one
+// (Mirrored). An output root with no workspace root lists none.
+func ListsMirrors(outputRoot string) (bool, error) {
+	data, err := os.ReadFile(filepath.Join(outputRoot, "package.json"))
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	var manifest struct {
+		Workspaces []string `json:"workspaces"`
+	}
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		return false, fmt.Errorf("the workspace root %s: %w", filepath.Join(outputRoot, "package.json"), err)
+	}
+	return slices.Contains(manifest.Workspaces, MirrorRoot+"/*"), nil
+}
+
+// SiteDir is the directory the site named site, whose package is at dir,
+// slash-separated and relative to repositoryRoot, builds in, after an
+// install of the Bun workspace at outputRoot (D55; D65, amended): the
+// package itself, a member of the default output root's workspace, or,
+// where outputRoot's workspace lists the mirrors in its place
+// (ListsMirrors), the site's mirror there, `impl/<site>/`, which the
+// site's build into that output root wrote. It refuses a mirrored output
+// root that holds no mirror of the site.
+func SiteDir(outputRoot, repositoryRoot, site, dir string) (string, error) {
+	mirrored, err := ListsMirrors(outputRoot)
+	if err != nil {
+		return "", err
+	}
+	if !mirrored {
+		return filepath.Join(repositoryRoot, filepath.FromSlash(dir)), nil
+	}
+	mirror := filepath.Join(outputRoot, MirrorRoot, site)
+	if _, err := os.Stat(filepath.Join(mirror, "package.json")); err != nil {
+		return "", fmt.Errorf("site %s: the output root %s builds its sites from their mirrors, and holds no mirror of %s at %s; build the site into it (build-all --out, or the stack's build)", site, outputRoot, site, mirror)
+	}
+	return mirror, nil
 }
 
 // SamePath reports whether a and b name one directory, whether or not it

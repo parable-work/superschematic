@@ -796,7 +796,8 @@ Under the output root, `schemas/dist` by default, the build writes:
   ([Rust servers](#rust-servers));
 - `impl/<service>/`, a copy of each implementation a Rust server builds
   against ([Rust servers](#rust-servers)), and, in an output root other
-  than `schemas/dist`, of each one a TypeScript server builds against
+  than `schemas/dist`, of each one a TypeScript server builds against and
+  of each site, which builds there
   ([The generated server](#the-generated-server)).
 
 The build also scaffolds each implementation a TypeScript server serves
@@ -924,9 +925,10 @@ the order, once with `stack run` and once on the schedule, and sees
 `OrderRestocks`, run with `stack run`, order the restock request.
 Then it runs `stack dev` and the job once more, into an output root of
 its own (`--out`), where `shop-stock`'s server, worker and job build
-against that root's mirror of `rust-impl/shop-stock`, and the storefront
-against its copy of `typescript/shop-storefront`, while the example's
-packages keep the links `schemas/dist`'s install made. `PlaceOrder`
+against that root's mirror of `rust-impl/shop-stock`, the storefront
+against its copy of `typescript/shop-storefront`, and `shop-web` in its
+copy of `web/shop-web`, while the example's packages keep the links
+`schemas/dist`'s install made. `PlaceOrder`
 reserves the
 stock through the client of `shop-stock` its `Deps` holds, which sends
 `shop-orders`' credential and forwards the shopper of the request its
@@ -1161,8 +1163,9 @@ package's files but `node_modules`, `.git`, a lockfile beside its
 `package.json`, and what its `.gitignore` files leave out, and a build
 rewrites only the files that changed. Edit the package, not the copy: the
 next build into that root, which `stack dev` runs, brings the copy up to
-date. A site is not copied: its build in another output root runs in its
-own package, against `schemas/dist`'s install.
+date. A site is copied the same way, to `<output-root>/impl/<site>/`, and
+builds there, against that root's install, so its `dist` is the copy's and
+your package's is left as it is.
 
 Commit the workspace's lockfile, `schemas/dist/bun.lock`, which `bun
 install` in `schemas/dist` writes, so the image, the

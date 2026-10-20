@@ -7754,7 +7754,8 @@ each with `--frozen-lockfile`, type-checks and serves from each, and finds
 the project's links unmoved, and fails without the mirror; the TypeScript
 Dockerfile test builds and serves an image from another root.
 `TestStackDevRunsTheShop` no longer reinstalls the shop after its run into
-an output root of its own. Not built: mirrors of sites.
+an output root of its own. Mirrors of sites: the amendment below that
+names them.
 
 The rule is reversible until the first release.
 
@@ -7832,5 +7833,33 @@ Not built:
   open.
 - Scaling a worker with its queue's depth.
 - Claims on SQLite and D1.
+
+The rule is reversible until the first release.
+
+### D65, amended: a site in another output root builds in a mirror of its package
+
+The amendment above mirrored the TypeScript implementations into every
+output root but the default one, and left the sites out: in another root a
+site was no member of the workspace, so `stack dev --out`, a deploy from
+`--out` and `stack build` ran its build in the project's package, against
+`node_modules` the default root's install linked, which the other root's
+install never brought up to date and a fresh clone did not have.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A site's build into an output root other than the default one copies its package into `<output-root>/impl/<site>/` as an implementation's mirror is copied: the same files, `package.json` with its `"//"` notice, which names it the mirror of a site, and its dependencies on paths re-based. The root's workspace already lists `impl/*`, so its install links the mirror and leaves the package's `node_modules`. | The site as a member of every root's workspace, which Bun refuses beside the default root's, and which would relink the package. A mirror the stack's build writes, which a build of the site alone, as `build-all` runs it, would not bring up to date. |
+| Wherever a site builds, the local provisioner, the deploy and `stack build`, it builds in its mirror when the output root's `package.json` lists `impl/*`, and in its package otherwise (`tsgen.SiteDir`); a root that lists the mirrors and holds none of the site stops with an error that says to build the site into it. The output it serves is the mirror's. | Telling the default root from the schemas root, which the provisioner's request does not carry. Falling back to the package, which would build against another root's install without saying so. |
+| A stack's build keeps the mirror of each site the project has a package for at its `[implementation_paths] site` template, which no server depends on, and removes it once the package is gone; the default root holds no mirror, a site's included. `build-all --cache` into another root builds each site every time, since the cache's inputs do not cover the mirror. | Pruning site mirrors by the stacks that deploy them, which a build of one stack does not know of the others. |
+
+Status: built. servergen's `TestASiteMirrorHoldsThePackage` and
+`TestPruneTypeScriptMirrors` hold the copy and its pruning, tsgen's
+`TestSiteDir` and stackdeploy's `TestBuildBuildsASiteInItsMirror` the
+choice of directory. `TestTypeScriptServersBuildInAnyOutputRoot` now
+builds the fixture's site `ts-web` too: in each of two other roots it
+builds in the mirror, the stacks' builds keep it, its page is the
+mirror's, and the links under `web/` stay as the default root's install
+made them. `TestStackDevRunsTheShop` checks that `stack dev --out` serves
+`shop-web` from its mirror. The generated CI builds each site in the
+default root, as before.
 
 The rule is reversible until the first release.
