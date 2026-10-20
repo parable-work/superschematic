@@ -1,0 +1,18 @@
+# One TypeScript server, ts-notes, on a sqlite-first database, and its job.
+# Its one environment, Local, runs on the local target, which keeps the
+# database in a SQLite file and derives a sqlite: URL for it (D64).
+kind: Stack
+types:
+  Notes:
+    name: Notes
+    role: EmbeddedStruct
+    stack:
+      deploy:
+        - { name: ts-notes, kind: API }
+      expose:
+        - service: { name: ts-notes, kind: API }
+  Local:
+    name: Local
+    role: EmbeddedStruct
+    environment:
+      target: local

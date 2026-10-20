@@ -18,9 +18,12 @@
 // {{ $api.ImplPackage }}{{ if $api.ImplDir }}, at {{ $api.ImplDir }}{{ end }}
 
 import { {{ join .RuntimeImports ", " }} } from '{{ .Naming.HTTPRuntimeNpmPackage }}';
-{{- if .Databases }}
+{{- if .PostgresDatabases }}
 import { connectPostgres } from '{{ .Naming.HTTPRuntimeNpmPackage }}/postgres';
 import type { Pool } from 'pg';
+{{- end }}
+{{- if .SQLiteDatabases }}
+import { openSqlite, sqliteFile, type SqliteDatabase } from '{{ .Naming.HTTPRuntimeNpmPackage }}/sqlite';
 {{- end }}
 {{- if .Buckets }}
 import { openBucket } from '{{ .Naming.HTTPRuntimeNpmPackage }}/gcs';
@@ -52,9 +55,13 @@ async function run(signal: AbortSignal, pools: { end(): Promise<void> }[]): Prom
 {{ template "ts-configure" . }}
 
 {{ template "ts-construct" . }}
-{{- if .Databases }}
+{{- if .PostgresDatabases }}
 
 {{ template "ts-connect" . }}
+{{- end }}
+{{- if .SQLiteDatabases }}
+
+{{ template "ts-open-sqlite" . }}
 {{- end }}
 {{- template "ts-clients" . }}
 

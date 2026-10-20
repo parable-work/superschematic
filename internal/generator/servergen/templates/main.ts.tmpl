@@ -31,9 +31,13 @@ import { errorHandler, notFoundHandler } from '{{ .Naming.HTTPRuntimeNpmPackage 
 {{- if .Identity }}
 import { parseIdentityConfigJSON, postgresIdentityStore, type IdentityConfig } from '{{ .Naming.HTTPRuntimeNpmPackage }}/identity';
 {{- end }}
-{{- if .Databases }}
+{{- if .PostgresDatabases }}
 import { connectPostgres, ping } from '{{ .Naming.HTTPRuntimeNpmPackage }}/postgres';
 import type { Pool } from 'pg';
+{{- end }}
+{{- if .SQLiteDatabases }}
+import { ping as pingSqlDatabase } from '{{ .Naming.HTTPRuntimeNpmPackage }}/d1';
+import { openSqlite, sqliteFile, type SqliteDatabase } from '{{ .Naming.HTTPRuntimeNpmPackage }}/sqlite';
 {{- end }}
 {{- if .Buckets }}
 import { openBucket } from '{{ .Naming.HTTPRuntimeNpmPackage }}/gcs';
@@ -80,7 +84,15 @@ interface BunRuntime {
 }
 
 const logger = createLogger({ stack: {{ tsQuote .Stack }}, server: {{ tsQuote .Name }} });
-{{- if .Databases }}
+{{- if .SQLiteDatabases }}
+
+/** A database /readyz pings and the shutdown closes, by its service. */
+interface Dependency {
+  readonly name: string;
+  ping(): Promise<void>;
+  close(): Promise<void>;
+}
+{{- else if .Databases }}
 
 /** A database /readyz pings, by its service. */
 interface Dependency {
@@ -104,7 +116,35 @@ async function main(): Promise<void> {
   const {{ .CORS }} = configure({{ tsQuote .Service }}, () => loadCors({{ tsQuote .CORSField }}));
 {{- end }}
 {{- end }}
-{{- if .Databases }}
+{{- if .SQLiteDatabases }}
+{{- if .PostgresDatabases }}
+
+  // One connection per database, shared by every API on it: a pool, which
+  // connects when it is first used, so the server starts while its database
+  // is not up yet and /readyz reports it, or for a database whose DB service
+  // lists sqlite first the SQLite file its URL names, opened now (D64).
+{{- else }}
+
+  // One SQLite file per database, shared by every API on it, the file its
+  // URL names, opened now: its DB service lists sqlite first (D64).
+{{- end }}
+{{- range .Databases }}
+{{- if .SQLite }}
+  const {{ .Var }} = openDatabase({{ tsQuote .Service }}, {{ tsQuote .Field }}, {{ .From }});
+{{- else }}
+  const {{ .Var }} = await connect({{ tsQuote .Service }}, {{ tsQuote .Field }}, {{ .From }});
+{{- end }}
+{{- end }}
+  const dependencies: readonly Dependency[] = [
+{{- range .Databases }}
+{{- if .SQLite }}
+    { name: {{ tsQuote .Service }}, ping: () => pingSqlDatabase({{ .Var }}, READINESS_TIMEOUT_MS), close: async () => {{ .Var }}.close() },
+{{- else }}
+    { name: {{ tsQuote .Service }}, ping: () => ping({{ .Var }}, READINESS_TIMEOUT_MS), close: () => {{ .Var }}.end() },
+{{- end }}
+{{- end }}
+  ];
+{{- else if .Databases }}
 
   // One pool per database, shared by every API on it. A pool connects when
   // it is first used, so the server starts while its database is not up yet
@@ -150,7 +190,7 @@ async function main(): Promise<void> {
 {{- if .Databases }}
     const failed = await Promise.all(
       dependencies.map(dependency =>
-        ping(dependency.pool, READINESS_TIMEOUT_MS).then(
+        {{ if .SQLiteDatabases }}dependency.ping(){{ else }}ping(dependency.pool, READINESS_TIMEOUT_MS){{ end }}.then(
           () => undefined,
           (error: unknown) => {
             logger.warn('not ready', { dependency: dependency.name, error });
@@ -234,7 +274,7 @@ async function main(): Promise<void> {
     stopping = true;
     draining = true;
     logger.info('shutting down', { signal });
-    drain(server{{ if .Databases }}, dependencies.map(dependency => dependency.pool){{ end }}).then(
+    drain(server{{ if .SQLiteDatabases }}, dependencies{{ else if .Databases }}, dependencies.map(dependency => dependency.pool){{ end }}).then(
       () => {
         logger.info('stopped');
         process.exit(0);
@@ -283,18 +323,22 @@ function identityConfig(field: string): IdentityConfig | undefined {
 {{- end }}
 
 {{ template "ts-construct" . }}
-{{- if .Databases }}
+{{- if .PostgresDatabases }}
 
 {{ template "ts-connect" . }}
+{{- end }}
+{{- if .SQLiteDatabases }}
+
+{{ template "ts-open-sqlite" . }}
 {{- end }}
 {{- template "ts-clients" . }}
 
 /**
  * Stops taking requests and gives those in flight SHUTDOWN_TIMEOUT_MS to
- * finish, then closes the connections still open.{{ if .Databases }} It ends the pools last.{{ end }}
+ * finish, then closes the connections still open.{{ if .SQLiteDatabases }} It closes the databases last.{{ else if .Databases }} It ends the pools last.{{ end }}
  * It rejects when requests were still in flight.
  */
-async function drain(server: BunServer{{ if .Databases }}, pools: readonly Pool[]{{ end }}): Promise<void> {
+async function drain(server: BunServer{{ if .SQLiteDatabases }}, databases: readonly Dependency[]{{ else if .Databases }}, pools: readonly Pool[]{{ end }}): Promise<void> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timedOut = new Promise<boolean>(resolve => {
     timer = setTimeout(() => resolve(true), SHUTDOWN_TIMEOUT_MS);
@@ -302,7 +346,9 @@ async function drain(server: BunServer{{ if .Databases }}, pools: readonly Pool[
   const late = await Promise.race([server.stop().then(() => false), timedOut]);
   clearTimeout(timer);
   if (late) await server.stop(true);
-{{- if .Databases }}
+{{- if .SQLiteDatabases }}
+  await Promise.allSettled(databases.map(database => database.close()));
+{{- else if .Databases }}
   await Promise.allSettled(pools.map(pool => pool.end()));
 {{- end }}
   if (late) throw new Error(`requests were still in flight ${SHUTDOWN_TIMEOUT_MS} ms after the signal`);

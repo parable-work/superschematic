@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PING_TIMEOUT_MS, isSqlDatabase, ping, type SqlDatabase } from './d1';
-import { openSqlite, type SqliteDatabase } from './sqlite';
+import { openSqlite, sqliteFile, type SqliteDatabase } from './sqlite';
 
 /*
 SqlDatabase over bun:sqlite (D64): what stack dev opens a sqlite-first
@@ -116,6 +116,34 @@ describe('openSqlite', () => {
     db.close();
     await expect(db.prepare('SELECT 1').first()).rejects.toThrow('is closed');
     await expect(db.exec('SELECT 1')).rejects.toThrow('is closed');
+  });
+});
+
+describe('sqliteFile', () => {
+  test('reads the file a sqlite: URL names, as the migration runner does', () => {
+    expect(sqliteFile('sqlite:/tmp/shop.sqlite')).toBe('/tmp/shop.sqlite');
+    expect(sqliteFile('sqlite:///tmp/shop.sqlite')).toBe('/tmp/shop.sqlite');
+    expect(sqliteFile('sqlite://shop.sqlite')).toBe('shop.sqlite');
+    expect(sqliteFile('SQLITE:shop.sqlite')).toBe('shop.sqlite');
+  });
+
+  test('refuses any other URL, naming its scheme alone', () => {
+    expect(() => sqliteFile('postgres://shop:secret@127.0.0.1/shop')).toThrow(
+      "the database's URL is a postgres: URL; a sqlite-first database's is sqlite:<path>"
+    );
+    expect(() => sqliteFile('postgres://shop:secret@127.0.0.1/shop')).not.toThrow('secret');
+    expect(() => sqliteFile('sqlite:shop.sqlite?mode=ro')).toThrow('a sqlite: URL with a query or no path');
+    expect(() => sqliteFile('sqlite:')).toThrow('a sqlite: URL with a query or no path');
+    expect(() => sqliteFile('/tmp/shop.sqlite')).toThrow('is no URL');
+  });
+
+  test('names a file openSqlite opens', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'sqlite-test-'));
+    dirs.push(dir);
+    const db = openSqlite(sqliteFile(`sqlite:${join(dir, 'shop.sqlite')}`));
+    opened.push(db);
+    await ping(db);
+    expect(db.path).toBe(join(dir, 'shop.sqlite'));
   });
 });
 

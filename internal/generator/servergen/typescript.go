@@ -26,7 +26,9 @@ import (
 // root's Bun workspace, and a Dockerfile. Bun runs main.ts as it is, as it
 // runs every generated package, so nothing is built. main.ts does what the
 // Go entrypoint's main does: it loads each API's config, opens one pg Pool
-// per database, builds one SDK client per API called, builds each API's
+// per database, or for a database whose DB service lists sqlite first the
+// SQLite file its sqlite: URL names (D64), builds one SDK client per API
+// called, builds each API's
 // implementation from its Deps and mounts every API's router on one Hono
 // app beside /healthz and /readyz. An API whose authDb has a User table
 // authenticates with the identity runtime (D50), as on a Go server: main.ts
@@ -316,11 +318,17 @@ type TypeScriptBucket struct {
 	From string
 }
 
-// TypeScriptDatabase is a database the server opens one pool to, for every
-// API on it.
+// TypeScriptDatabase is a database the server opens once, for every API on
+// it: a pg Pool, or for a database whose DB service lists sqlite first the
+// SQLite file its sqlite: URL names (D64).
 type TypeScriptDatabase struct {
 	Service string
 	Var     string
+
+	// SQLite is true for a database whose DB service lists sqlite first:
+	// the entrypoint opens it with openSqlite, and Deps.db is a
+	// SqlDatabase.
+	SQLite bool
 
 	// Field is the derived config field the connection is read from, and
 	// From the expression that reads it from the first API's config.
@@ -398,6 +406,7 @@ var tsReserved = []string{
 	"loadCors", "corsHandler", "corsMethods", "matchOperations", "handle",
 	"run", "jobs", "workers", "queue", "stop", "signal", "started", "concurrency", "pools",
 	"postgresQueue", "runWorker", "workerConcurrency",
+	"openSqlite", "sqliteFile", "SqliteDatabase", "pingSqlDatabase", "openDatabase", "DatabaseConnection",
 }
 
 // PlanTypeScript plans the entrypoint of one TypeScript server. It refuses
@@ -540,9 +549,14 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 				if !ok || api.Config == "" {
 					return nil, fmt.Errorf("stack %s: %s %s serves %s, whose config has no field for its database %s", in.Stack, s.Kind, in.Server, o.SchemaName, db)
 				}
+				suffix := "Pool"
+				if o.DepsSQLite() {
+					suffix = "Sqlite"
+				}
 				d = &TypeScriptDatabase{
 					Service: db,
-					Var:     taken.take(varStem(db) + "Pool"),
+					Var:     taken.take(varStem(db) + suffix),
+					SQLite:  o.DepsSQLite(),
 					Field:   key,
 					From:    api.Config + "." + key,
 				}
@@ -558,12 +572,18 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 			if api.Database == nil {
 				return nil, fmt.Errorf("stack %s: worker %s of %s opens no pool on %s, whose queue it claims", in.Stack, in.Server, o.SchemaName, o.Deps.Database)
 			}
+			if api.Database.SQLite {
+				return nil, fmt.Errorf("stack %s: worker %s of %s claims queue %s of %s, whose DB service lists sqlite first; a worker claims on Postgres, the one dialect the TypeScript queue client claims on (D53, D64)", in.Stack, in.Server, o.SchemaName, s.Worker.Queue, o.Deps.Database)
+			}
 			s.Worker.Database = api.Database
 		}
 		if o.Identity != nil && !background {
 			d := api.Database
 			if d == nil || d.Service != o.Identity.AuthDB {
 				return nil, fmt.Errorf("stack %s: server %s serves %s, which authenticates with the identity runtime over %s, its authDb, and opens no pool on it to build its identity store over", in.Stack, in.Server, o.SchemaName, o.Identity.AuthDB)
+			}
+			if d.SQLite {
+				return nil, fmt.Errorf("stack %s: server %s serves %s, which authenticates with the identity runtime over %s, its authDb, whose DB service lists sqlite first; a TypeScript server's identity store runs on Postgres, and one over SQLite is not built (D50, D64)", in.Stack, in.Server, o.SchemaName, o.Identity.AuthDB)
 			}
 			if d.Store == "" {
 				stem := varStem(d.Service)
@@ -673,11 +693,38 @@ func (s *TypeScriptServer) RuntimeImports() []string {
 	if s.AnyCORS() {
 		out = append(out, "corsHandler", "corsMethods", "loadCors", "matchOperations")
 	}
-	if len(s.Databases) > 0 {
+	if len(s.PostgresDatabases()) > 0 {
 		out = append(out, "type Database")
+	}
+	if len(s.SQLiteDatabases()) > 0 {
+		out = append(out, "type DatabaseConnection")
 	}
 	if len(s.Clients) > 0 {
 		out = append(out, "type Service")
+	}
+	return out
+}
+
+// PostgresDatabases are the databases the entrypoint opens a pg Pool on.
+func (s *TypeScriptServer) PostgresDatabases() []*TypeScriptDatabase {
+	var out []*TypeScriptDatabase
+	for _, d := range s.Databases {
+		if !d.SQLite {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+// SQLiteDatabases are the databases whose DB services list sqlite first,
+// which the entrypoint opens with openSqlite (D64). With one, each
+// database /readyz pings is a ping and a close rather than a pool.
+func (s *TypeScriptServer) SQLiteDatabases() []*TypeScriptDatabase {
+	var out []*TypeScriptDatabase
+	for _, d := range s.Databases {
+		if d.SQLite {
+			out = append(out, d)
+		}
 	}
 	return out
 }
@@ -714,7 +761,7 @@ func (s *TypeScriptServer) planPackage() {
 		"@types/node": tsrestgen.NodeTypesVersion,
 		"typescript":  tsrestgen.TypeScriptVersion,
 	}
-	if len(s.Databases) > 0 {
+	if len(s.PostgresDatabases()) > 0 {
 		deps["pg"] = pgVersion
 		dev["@types/pg"] = tsrestgen.PGTypesVersion
 	}
