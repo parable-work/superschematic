@@ -1,9 +1,11 @@
 package ir
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
+	"unicode/utf8"
 )
 
 // EnumDef is a format-agnostic representation of an enumeration type.
@@ -51,12 +53,23 @@ type EnumValueDef struct {
 	SerializedAs string `json:"serializedAs,omitempty" yaml:"serializedAs,omitempty"`
 }
 
+// EnumTitlePattern is the rule of an enum member's title (D48, amended),
+// as the schema-file JSON Schema writes it, beside "not": {"pattern":
+// "\\*/"}: no ASCII control character (U+0000 to U+001F and U+007F, a
+// tab included), no U+2028 or U+2029, which TypeScript reads as line
+// terminators, and no space at either end. Its classes are explicit, with
+// no \s or ".", so Go's RE2, an ECMAScript engine such as Ajv's and the
+// Rust regex crate read it alike; U+2028 and U+2029 stand in it as
+// themselves, which the JSON Schema's encoder escapes. validateMemberTitle
+// holds the IR to the same rule.
+const EnumTitlePattern = `^[^\x00-\x1f\x7f` + "\u2028\u2029" + ` ]([^\x00-\x1f\x7f` + "\u2028\u2029" + `]*[^\x00-\x1f\x7f` + "\u2028\u2029" + ` ])?$`
+
 // validateEnums holds every enum member's title to the rules of D48,
-// amended, in every authoring form: non-blank, with no surrounding
-// whitespace, on one line (no line terminator TypeScript reads either), and
-// without "*/", so a TypeScript JSDoc comment can hold it; and, ignoring
-// case, unlike every other member's title in the enum, so a select's
-// options can be told apart.
+// amended, in every authoring form (EnumTitlePattern, and no "*/", so a
+// TypeScript JSDoc comment can hold it), and, ignoring case, unlike every
+// other member's title in the enum, so a select's options can be told
+// apart. The JSON Schema cannot say the last: Schema.Validate, which the
+// loader runs on every form, holds it.
 func (s *Schema) validateEnums() []error {
 	var errs []error
 	for _, name := range sortedStringMapKeys(s.Enums) {
@@ -83,17 +96,30 @@ func (s *Schema) validateEnums() []error {
 	return errs
 }
 
-// validateMemberTitle checks one enum member's non-empty title.
+// titleNever reports whether r may not stand anywhere in a member's
+// title: an ASCII control character, U+2028 or U+2029.
+func titleNever(r rune) bool {
+	return r < 0x20 || r == 0x7f || r == '\u2028' || r == '\u2029'
+}
+
+// validateMemberTitle checks one enum member's non-empty title against
+// EnumTitlePattern and "*/", with a message for each way it fails.
 func validateMemberTitle(title string) error {
+	if strings.TrimFunc(title, func(r rune) bool { return r == ' ' || titleNever(r) }) == "" {
+		return errors.New("title must be non-blank")
+	}
+	first, _ := utf8.DecodeRuneInString(title)
+	last, _ := utf8.DecodeLastRuneInString(title)
+	control := strings.IndexFunc(title, titleNever)
 	switch {
-	case strings.TrimSpace(title) == "":
-		return fmt.Errorf("title must be non-blank")
-	case strings.TrimSpace(title) != title:
-		return fmt.Errorf("title must not contain surrounding whitespace")
+	case first == ' ' || first == '\t' || last == ' ' || last == '\t':
+		return errors.New("title must not contain surrounding whitespace")
 	case strings.ContainsAny(title, "\r\n\u2028\u2029"):
-		return fmt.Errorf("title must be one line")
+		return errors.New("title must be one line")
+	case control >= 0:
+		return fmt.Errorf("title must not contain the control character %U", title[control])
 	case strings.Contains(title, "*/"):
-		return fmt.Errorf("title must not contain */")
+		return errors.New("title must not contain */")
 	}
 	return nil
 }

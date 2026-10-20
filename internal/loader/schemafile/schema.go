@@ -103,6 +103,10 @@ func generateDefinition(reg *registry.Registry) ([]byte, error) {
 		return nil, err
 	}
 
+	if err := constrainEnumTitles(defs); err != nil {
+		return nil, err
+	}
+
 	if err := closeExtensionSlots(defs, reg); err != nil {
 		return nil, err
 	}
@@ -184,6 +188,27 @@ func constrainProperty(defs map[string]any, defName, property string, values []s
 		enum[i] = v
 	}
 	prop["enum"] = enum
+	return nil
+}
+
+// constrainEnumTitles holds an enum member's title to its rule (D48,
+// amended): ir.EnumTitlePattern, whose classes are explicit so Go, Ajv
+// and Rust read it alike, and no "*/", the rule Schema.Validate holds the
+// IR to. That two members of an enum take two titles, ignoring case, a
+// JSON Schema cannot say: Schema.Validate, which the loader runs on every
+// form, holds it.
+func constrainEnumTitles(defs map[string]any) error {
+	props, err := propertiesOf(defs, "EnumValueDef")
+	if err != nil {
+		return err
+	}
+	title, ok := props["title"].(map[string]any)
+	if !ok {
+		return fmt.Errorf("$defs/EnumValueDef has no title")
+	}
+	title["description"] = "The member's reader-facing label: no ASCII control character, U+2028 or U+2029, no space at either end, and no */."
+	title["pattern"] = ir.EnumTitlePattern
+	title["not"] = map[string]any{"pattern": `\*/`}
 	return nil
 }
 

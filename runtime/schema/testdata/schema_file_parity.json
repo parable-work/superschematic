@@ -1095,14 +1095,56 @@
       "registry": "core",
       "input": "{\"name\": \"Ticket\", \"role\": \"EmbeddedStruct\", \"display\": {\"icon\": \" \"}}",
       "accept": false,
-      "error": "a blank display icon: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/display/icon': ' ' does not match pattern '^\\\\S(.*\\\\S)?$'"
+      "error": "a blank display icon: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/display/icon': ' ' does not match pattern '^[A-Za-z0-9][A-Za-z0-9._:/-]*$'"
     },
     {
       "name": "a padded display icon",
       "registry": "core",
       "input": "{\"name\": \"Ticket\", \"role\": \"EmbeddedStruct\", \"display\": {\"icon\": \"ticket \"}}",
       "accept": false,
-      "error": "a padded display icon: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/display/icon': 'ticket ' does not match pattern '^\\\\S(.*\\\\S)?$'"
+      "error": "a padded display icon: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/display/icon': 'ticket ' does not match pattern '^[A-Za-z0-9][A-Za-z0-9._:/-]*$'"
+    },
+    {
+      "name": "a display icon with a set's prefix",
+      "registry": "core",
+      "input": "{\"name\": \"Ticket\", \"role\": \"EmbeddedStruct\", \"display\": {\"icon\": \"mdi:file-document/outline_2.svg\"}}",
+      "accept": true,
+      "canonical": "{\"types\":{\"Ticket\":{\"display\":{\"icon\":\"mdi:file-document/outline_2.svg\"},\"name\":\"Ticket\",\"role\":\"EmbeddedStruct\"}}}"
+    },
+    {
+      "name": "a display icon with a carriage return",
+      "registry": "core",
+      "input": "{\"name\": \"Ticket\", \"role\": \"EmbeddedStruct\", \"display\": {\"icon\": \"a\\rb\"}}",
+      "accept": false,
+      "error": "a display icon with a carriage return: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/display/icon': 'a\\rb' does not match pattern '^[A-Za-z0-9][A-Za-z0-9._:/-]*$'"
+    },
+    {
+      "name": "a display icon with a line separator",
+      "registry": "core",
+      "input": "{\"name\": \"Ticket\", \"role\": \"EmbeddedStruct\", \"display\": {\"icon\": \"a\\u2028b\"}}",
+      "accept": false,
+      "error": "a display icon with a line separator: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/display/icon': 'a\\u2028b' does not match pattern '^[A-Za-z0-9][A-Za-z0-9._:/-]*$'"
+    },
+    {
+      "name": "a display icon after a byte order mark",
+      "registry": "core",
+      "input": "{\"name\": \"Ticket\", \"role\": \"EmbeddedStruct\", \"display\": {\"icon\": \"\\ufeffx\"}}",
+      "accept": false,
+      "error": "a display icon after a byte order mark: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/display/icon': '\\ufeffx' does not match pattern '^[A-Za-z0-9][A-Za-z0-9._:/-]*$'"
+    },
+    {
+      "name": "a display icon padded with a no-break space",
+      "registry": "core",
+      "input": "{\"name\": \"Ticket\", \"role\": \"EmbeddedStruct\", \"display\": {\"icon\": \"ticket\\u00a0\"}}",
+      "accept": false,
+      "error": "a display icon padded with a no-break space: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/display/icon': 'ticket\\u00a0' does not match pattern '^[A-Za-z0-9][A-Za-z0-9._:/-]*$'"
+    },
+    {
+      "name": "a display icon of two words",
+      "registry": "core",
+      "input": "{\"name\": \"Ticket\", \"role\": \"EmbeddedStruct\", \"display\": {\"icon\": \"a b\"}}",
+      "accept": false,
+      "error": "a display icon of two words: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/display/icon': 'a b' does not match pattern '^[A-Za-z0-9][A-Za-z0-9._:/-]*$'"
     },
     {
       "name": "a field display",
@@ -1152,6 +1194,90 @@
       "input": "{\"kind\": \"Enum\", \"name\": \"OrderStatus\", \"values\": [{\"name\": \"OnHold\", \"title\": 1}]}",
       "accept": false,
       "error": "an enum member title that is not a string: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/EnumFile'\n- at '/values/0/title': got number, want string"
+    },
+    {
+      "name": "an enum member title of any text on one line",
+      "registry": "core",
+      "input": "{\"kind\": \"Enum\", \"name\": \"OrderStatus\", \"values\": [{\"name\": \"OnHold\", \"title\": \"Held\\u00a0for a stock check: 2\\u20133 days \\u2014 \\u00e9t\\u00e9 / *ok*\"}]}",
+      "accept": true,
+      "canonical": "{\"enums\":{\"OrderStatus\":{\"name\":\"OrderStatus\",\"values\":[{\"name\":\"OnHold\",\"title\":\"Held for a stock check: 2–3 days — été / *ok*\"}]}}}"
+    },
+    {
+      "name": "an empty enum member title",
+      "registry": "core",
+      "input": "{\"kind\": \"Enum\", \"name\": \"OrderStatus\", \"values\": [{\"name\": \"OnHold\", \"title\": \"\"}]}",
+      "accept": false,
+      "error": "an empty enum member title: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/EnumFile'\n- at '/values/0/title': '' does not match pattern '^[^\\\\x00-\\\\x1f\\\\x7f\\u2028\\u2029 ]([^\\\\x00-\\\\x1f\\\\x7f\\u2028\\u2029]*[^\\\\x00-\\\\x1f\\\\x7f\\u2028\\u2029 ])?$'"
+    },
+    {
+      "name": "a blank enum member title",
+      "registry": "core",
+      "input": "{\"kind\": \"Enum\", \"name\": \"OrderStatus\", \"values\": [{\"name\": \"OnHold\", \"title\": \" \"}]}",
+      "accept": false,
+      "error": "a blank enum member title: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/EnumFile'\n- at '/values/0/title': ' ' does not match pattern '^[^\\\\x00-\\\\x1f\\\\x7f\\u2028\\u2029 ]([^\\\\x00-\\\\x1f\\\\x7f\\u2028\\u2029]*[^\\\\x00-\\\\x1f\\\\x7f\\u2028\\u2029 ])?$'"
+    },
+    {
+      "name": "a padded enum member title",
+      "registry": "core",
+      "input": "{\"kind\": \"Enum\", \"name\": \"OrderStatus\", \"values\": [{\"name\": \"OnHold\", \"title\": \"Held \"}]}",
+      "accept": false,
+      "error": "a padded enum member title: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/EnumFile'\n- at '/values/0/title': 'Held ' does not match pattern '^[^\\\\x00-\\\\x1f\\\\x7f\\u2028\\u2029 ]([^\\\\x00-\\\\x1f\\\\x7f\\u2028\\u2029]*[^\\\\x00-\\\\x1f\\\\x7f\\u2028\\u2029 ])?$'"
+    },
+    {
+      "name": "an enum member title with a carriage return",
+      "registry": "core",
+      "input": "{\"kind\": \"Enum\", \"name\": \"OrderStatus\", \"values\": [{\"name\": \"OnHold\", \"title\": \"a\\rb\"}]}",
+      "accept": false,
+      "error": "an enum member title with a carriage return: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/EnumFile'\n- at '/values/0/title': 'a\\rb' does not match pattern '^[^\\\\x00-\\\\x1f\\\\x7f\\u2028\\u2029 ]([^\\\\x00-\\\\x1f\\\\x7f\\u2028\\u2029]*[^\\\\x00-\\\\x1f\\\\x7f\\u2028\\u2029 ])?$'"
+    },
+    {
+      "name": "an enum member title with a line feed",
+      "registry": "core",
+      "input": "{\"kind\": \"Enum\", \"name\": \"OrderStatus\", \"values\": [{\"name\": \"OnHold\", \"title\": \"a\\nb\"}]}",
+      "accept": false,
+      "error": "an enum member title with a line feed: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/EnumFile'\n- at '/values/0/title': 'a\\nb' does not match pattern '^[^\\\\x00-\\\\x1f\\\\x7f\\u2028\\u2029 ]([^\\\\x00-\\\\x1f\\\\x7f\\u2028\\u2029]*[^\\\\x00-\\\\x1f\\\\x7f\\u2028\\u2029 ])?$'"
+    },
+    {
+      "name": "an enum member title with a line separator",
+      "registry": "core",
+      "input": "{\"kind\": \"Enum\", \"name\": \"OrderStatus\", \"values\": [{\"name\": \"OnHold\", \"title\": \"a\\u2028b\"}]}",
+      "accept": false,
+      "error": "an enum member title with a line separator: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/EnumFile'\n- at '/values/0/title': 'a\\u2028b' does not match pattern '^[^\\\\x00-\\\\x1f\\\\x7f\\u2028\\u2029 ]([^\\\\x00-\\\\x1f\\\\x7f\\u2028\\u2029]*[^\\\\x00-\\\\x1f\\\\x7f\\u2028\\u2029 ])?$'"
+    },
+    {
+      "name": "an enum member title with a paragraph separator",
+      "registry": "core",
+      "input": "{\"kind\": \"Enum\", \"name\": \"OrderStatus\", \"values\": [{\"name\": \"OnHold\", \"title\": \"a\\u2029b\"}]}",
+      "accept": false,
+      "error": "an enum member title with a paragraph separator: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/EnumFile'\n- at '/values/0/title': 'a\\u2029b' does not match pattern '^[^\\\\x00-\\\\x1f\\\\x7f\\u2028\\u2029 ]([^\\\\x00-\\\\x1f\\\\x7f\\u2028\\u2029]*[^\\\\x00-\\\\x1f\\\\x7f\\u2028\\u2029 ])?$'"
+    },
+    {
+      "name": "an enum member title with a tab",
+      "registry": "core",
+      "input": "{\"kind\": \"Enum\", \"name\": \"OrderStatus\", \"values\": [{\"name\": \"OnHold\", \"title\": \"a\\tb\"}]}",
+      "accept": false,
+      "error": "an enum member title with a tab: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/EnumFile'\n- at '/values/0/title': 'a\\tb' does not match pattern '^[^\\\\x00-\\\\x1f\\\\x7f\\u2028\\u2029 ]([^\\\\x00-\\\\x1f\\\\x7f\\u2028\\u2029]*[^\\\\x00-\\\\x1f\\\\x7f\\u2028\\u2029 ])?$'"
+    },
+    {
+      "name": "an enum member title with a DEL",
+      "registry": "core",
+      "input": "{\"kind\": \"Enum\", \"name\": \"OrderStatus\", \"values\": [{\"name\": \"OnHold\", \"title\": \"a\\u007fb\"}]}",
+      "accept": false,
+      "error": "an enum member title with a DEL: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/EnumFile'\n- at '/values/0/title': 'a\\x7fb' does not match pattern '^[^\\\\x00-\\\\x1f\\\\x7f\\u2028\\u2029 ]([^\\\\x00-\\\\x1f\\\\x7f\\u2028\\u2029]*[^\\\\x00-\\\\x1f\\\\x7f\\u2028\\u2029 ])?$'"
+    },
+    {
+      "name": "an enum member title with a comment's end",
+      "registry": "core",
+      "input": "{\"kind\": \"Enum\", \"name\": \"OrderStatus\", \"values\": [{\"name\": \"OnHold\", \"title\": \"a */ b\"}]}",
+      "accept": false,
+      "error": "an enum member title with a comment's end: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/EnumFile'\n- at '/values/0/title': 'not' failed"
+    },
+    {
+      "name": "an enum member title that ends a comment",
+      "registry": "core",
+      "input": "{\"kind\": \"Enum\", \"name\": \"OrderStatus\", \"values\": [{\"name\": \"OnHold\", \"title\": \"*/\"}]}",
+      "accept": false,
+      "error": "an enum member title that ends a comment: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/EnumFile'\n- at '/values/0/title': 'not' failed"
     },
     {
       "name": "file display.schema.json",
