@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "stack": "lite-stack",
+  "environment": "Dev",
+  "sqliteDatabases": [
+    {
+      "id": "notes-db.database.notes-db",
+      "name": "notes_db",
+      "service": "notes-db",
+      "file": "databases/notes_db.sqlite"
+    }
+  ],
+  "migrations": [
+    {
+      "database": "notes-db",
+      "service": "notes-db",
+      "resource": "notes-db.database.notes-db",
+      "dialect": "sqlite",
+      "file": "databases/notes_db.sqlite",
+      "model": "models/notes-db.json",
+      "plan": "migrations/notes-db.plan.json"
+    }
+  ],
+  "servers": [
+    {
+      "id": "notes.process",
+      "deployable": "notes",
+      "name": "notes",
+      "wave": 1,
+      "language": "typescript",
+      "module": "server/lite-stack/notes",
+      "port": 20397,
+      "url": "http://127.0.0.1:20397",
+      "readiness": "/readyz",
+      "env": [
+        {
+          "name": "NOTES_DB_DATABASE_URL",
+          "value": {
+            "$output": {
+              "resource": "notes-db.database.notes-db",
+              "name": "url"
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "jobs": [
+    {
+      "id": "notes-prune-notes.job",
+      "deployable": "notes-prune-notes",
+      "name": "notes-prune-notes",
+      "wave": 1,
+      "language": "typescript",
+      "module": "server/lite-stack/notes-prune-notes",
+      "api": "notes",
+      "job": "PruneNotes",
+      "schedule": "0 3 * * *",
+      "timeZone": "UTC",
+      "timeoutSeconds": 60,
+      "env": [
+        {
+          "name": "NOTES_DB_DATABASE_URL",
+          "value": {
+            "$output": {
+              "resource": "notes-db.database.notes-db",
+              "name": "url"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,229 @@
+{
+  "version": 1,
+  "stack": "lite-stack",
+  "environment": "Dev",
+  "target": "local",
+  "provisioner": "local",
+  "deployables": [
+    {
+      "name": "notes",
+      "kind": "server",
+      "platform": "local.process",
+      "services": [
+        {
+          "name": "notes",
+          "kind": "API"
+        }
+      ],
+      "language": "TYPESCRIPT",
+      "artifact": "image",
+      "exposed": true,
+      "resourceName": "notes",
+      "address": "http://127.0.0.1:20397",
+      "publicAddress": "http://127.0.0.1:20397",
+      "bindings": [
+        {
+          "field": "NOTES_DB_DATABASE",
+          "source": "derived",
+          "value": {
+            "url": {
+              "$output": {
+                "resource": "notes-db.database.notes-db",
+                "name": "url"
+              }
+            }
+          },
+          "edge": "sql:notes->notes-db"
+        }
+      ]
+    },
+    {
+      "name": "notes-db",
+      "kind": "database",
+      "platform": "local.sqlite",
+      "services": [
+        {
+          "name": "notes-db",
+          "kind": "DB"
+        }
+      ],
+      "dialect": "sqlite",
+      "resourceName": "notes-db"
+    },
+    {
+      "name": "notes-prune-notes",
+      "kind": "job",
+      "platform": "local.job",
+      "services": [
+        {
+          "name": "notes",
+          "kind": "API"
+        }
+      ],
+      "language": "TYPESCRIPT",
+      "artifact": "image",
+      "job": {
+        "api": "notes",
+        "name": "PruneNotes",
+        "schedule": "0 3 * * *",
+        "timeZone": "UTC",
+        "timeoutSeconds": 60
+      },
+      "resourceName": "notes-prune-notes",
+      "bindings": [
+        {
+          "field": "NOTES_DB_DATABASE",
+          "source": "derived",
+          "value": {
+            "url": {
+              "$output": {
+                "resource": "notes-db.database.notes-db",
+                "name": "url"
+              }
+            }
+          },
+          "edge": "sql:notes-prune-notes->notes-db"
+        }
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "id": "sql:notes->notes-db",
+      "kind": "sql",
+      "from": "notes",
+      "to": "notes-db",
+      "service": {
+        "name": "notes-db",
+        "kind": "DB"
+      },
+      "connector": "local.process-sqlite",
+      "field": "NOTES_DB_DATABASE"
+    },
+    {
+      "id": "sql:notes-prune-notes->notes-db",
+      "kind": "sql",
+      "from": "notes-prune-notes",
+      "to": "notes-db",
+      "service": {
+        "name": "notes-db",
+        "kind": "DB"
+      },
+      "connector": "local.job-sqlite",
+      "field": "NOTES_DB_DATABASE"
+    }
+  ],
+  "resources": {
+    "resources": [
+      {
+        "id": "notes-db.database.notes-db",
+        "type": "local:sqlite/database:Database",
+        "properties": {
+          "file": "databases/notes_db.sqlite",
+          "name": "notes_db",
+          "service": "notes-db"
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "notes-db"
+        ]
+      },
+      {
+        "id": "notes-prune-notes.job",
+        "type": "local:process/job:Job",
+        "properties": {
+          "api": "notes",
+          "env": [
+            {
+              "name": "NOTES_DB_DATABASE_URL",
+              "value": {
+                "$output": {
+                  "resource": "notes-db.database.notes-db",
+                  "name": "url"
+                }
+              }
+            }
+          ],
+          "job": "PruneNotes",
+          "language": "typescript",
+          "module": "server/lite-stack/notes-prune-notes",
+          "name": "notes-prune-notes",
+          "retries": 0,
+          "schedule": "0 3 * * *",
+          "timeZone": "UTC",
+          "timeoutSeconds": 60
+        },
+        "dependsOn": [
+          "notes-db.database.notes-db"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "notes-prune-notes"
+        ]
+      },
+      {
+        "id": "notes.process",
+        "type": "local:process/process:Process",
+        "properties": {
+          "env": [
+            {
+              "name": "NOTES_DB_DATABASE_URL",
+              "value": {
+                "$output": {
+                  "resource": "notes-db.database.notes-db",
+                  "name": "url"
+                }
+              }
+            }
+          ],
+          "language": "typescript",
+          "module": "server/lite-stack/notes",
+          "name": "notes",
+          "port": 20397,
+          "readiness": "/readyz"
+        },
+        "dependsOn": [
+          "notes-db.database.notes-db"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "notes"
+        ]
+      }
+    ]
+  },
+  "deployOrder": [
+    {
+      "step": "infrastructure",
+      "resources": [
+        "notes-db.database.notes-db"
+      ]
+    },
+    {
+      "step": "migrate",
+      "migration": "expand",
+      "deployables": [
+        "notes-db"
+      ]
+    },
+    {
+      "step": "rollout",
+      "wave": 1,
+      "deployables": [
+        "notes",
+        "notes-prune-notes"
+      ],
+      "resources": [
+        "notes-prune-notes.job",
+        "notes.process"
+      ]
+    },
+    {
+      "step": "migrate",
+      "migration": "contract",
+      "deployables": [
+        "notes-db"
+      ]
+    }
+  ]
+}

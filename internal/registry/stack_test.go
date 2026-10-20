@@ -377,6 +377,8 @@ func TestRegisterTargetRejects(t *testing.T) {
 		{"no name", func(s *TargetSpec) { s.Name = "" }, "has no name"},
 		{"unknown kind", func(s *TargetSpec) { s.Platforms["queue"] = "fake.queue" }, `deployable kind "queue"`},
 		{"empty platform", func(s *TargetSpec) { s.Platforms[ir.DeployableServer] = "" }, "empty platform for server"},
+		{"database platform of an unknown dialect", func(s *TargetSpec) { s.DatabasePlatforms = map[string]string{"mysql": "fake.my"} }, `database platform for dialect "mysql" (want postgres or sqlite)`},
+		{"empty database platform", func(s *TargetSpec) { s.DatabasePlatforms = map[string]string{SQLDialectSQLite: ""} }, "empty database platform for sqlite"},
 		{"bad values schema", func(s *TargetSpec) { s.Values = json.RawMessage(`{"required": 1}`) }, "Values"},
 		{"bad resource type schema", func(s *TargetSpec) {
 			s.ResourceTypes = map[string]json.RawMessage{"fake:x/y:Z": json.RawMessage(`{"type": 1}`)}

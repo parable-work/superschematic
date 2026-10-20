@@ -308,6 +308,13 @@ func newFixtureWith(t *testing.T, s *ir.Stack, services []stack.Service, envName
 	if err := prov.Render(env, dir); err != nil {
 		t.Fatal(err)
 	}
+	// The port of a server of the shop, or 0 for a stack without it.
+	port := func(name string) int {
+		if d := env.Deployable(name); d != nil {
+			return local.ServerPort(senv, *d)
+		}
+		return 0
+	}
 	return &fixture{
 		env:         env,
 		req:         registry.ProvisionRequest{Environment: env, Dir: dir, OutputRoot: outputRoot, Backend: local.StateBackend(stateDir)},
@@ -318,8 +325,8 @@ func newFixtureWith(t *testing.T, s *ir.Stack, services []stack.Service, envName
 		checkout:    checkout,
 		pgPort:      local.PostgresPort(senv),
 		stPort:      local.StoragePort(senv),
-		apiPort:     local.ServerPort(senv, *env.Deployable("shop-api")),
-		ordPort:     local.ServerPort(senv, *env.Deployable("Orders")),
+		apiPort:     port("shop-api"),
+		ordPort:     port("Orders"),
 		pgName:      local.ContainerName(env.Stack, env.Environment, checkout),
 		stName:      local.StorageContainerName(env.Stack, env.Environment, checkout),
 	}

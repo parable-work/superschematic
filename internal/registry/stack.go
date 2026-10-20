@@ -270,6 +270,14 @@ type TargetSpec struct {
 	// this target.
 	Platforms map[ir.DeployableKind]string
 
+	// DatabasePlatforms names, by SQL dialect, the platform a database
+	// deployable goes on when no settings platform places it and every DB
+	// service it hosts lists that dialect first: the local target keeps a
+	// sqlite-first database in a SQLite file (D64). A database whose DB
+	// services list another dialect first, or disagree, goes on
+	// Platforms' database platform.
+	DatabasePlatforms map[string]string
+
 	// Values is the JSON Schema of an environment's values for this target
 	// (`project` and `region` for gcp). Nil accepts no values.
 	Values json.RawMessage
@@ -780,6 +788,18 @@ func (r *Registry) RegisterTarget(spec TargetSpec) error {
 		platforms[kind] = platform
 	}
 	spec.Platforms = platforms
+	databases := make(map[string]string, len(spec.DatabasePlatforms))
+	for _, dialect := range slices.Sorted(maps.Keys(spec.DatabasePlatforms)) {
+		platform := spec.DatabasePlatforms[dialect]
+		if !slices.Contains(SQLDialectNames, dialect) {
+			return fmt.Errorf("registry: target %q names a database platform for dialect %q (want %s)", spec.Name, dialect, strings.Join(SQLDialectNames, " or "))
+		}
+		if platform == "" {
+			return fmt.Errorf("registry: target %q names an empty database platform for %s", spec.Name, dialect)
+		}
+		databases[dialect] = platform
+	}
+	spec.DatabasePlatforms = databases
 	if len(spec.Values) > 0 {
 		compiled, err := compileSchema(spec.Values, "superschematic://targets/"+spec.Name+"/values.json")
 		if err != nil {
