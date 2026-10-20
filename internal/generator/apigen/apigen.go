@@ -11,6 +11,7 @@ package apigen
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -1042,8 +1043,9 @@ func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *
 		if arg.Sort != nil {
 			// The loader refuses any other sort (D60, amended); a generator
 			// holds IR built without it to the same.
-			if !arg.IsQuery || arg.Required || op.Page == nil || op.Page.DefaultSort == "" || ir.SortArgument(op) != arg {
-				return nil, fmt.Errorf("apigen: operation %s.%s argument %s: a sort argument is the one optional query parameter of a @paginated operation with a defaultSort", namespace, op.Name, arg.Name)
+			if !arg.IsQuery || arg.Required || op.Page == nil || op.Page.DefaultSort == "" || ir.SortArgument(op) != arg ||
+				!slices.Contains(ir.SortValues(arg.Sort), op.Page.DefaultSort) {
+				return nil, fmt.Errorf("apigen: operation %s.%s argument %s: a sort argument is the one optional query parameter of a @paginated operation whose defaultSort is one of its values", namespace, op.Name, arg.Name)
 			}
 			param.Sort = &SortParam{Fields: arg.Sort, Values: ir.SortValues(arg.Sort), Default: op.Page.DefaultSort}
 		}

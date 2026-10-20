@@ -94,14 +94,24 @@ It serves `http://127.0.0.1:3000`, each page linking to the others:
   a filter, a search, a header, a page's links and its size render the
   list again in place.
 
-`shop-orders`' lists sort by an argument, `sort` (`SortBy`, D60
-amended): the orders by `placedAt`, the default, or `totalCents`, the
-products by `name`, the default, or `priceCents`, and a product's reviews
-by `createdAt`, the default, or `rating`, each ascending or, after a `-`,
+`shop-orders`' lists sort by an argument, `sort` (`SortBy`, D60 amended):
+the orders by `placedAt`, the default, or `totalCents`, the products by
+`name`, the default, or `priceCents`, and a product's reviews by
+`createdAt`, the default, or `rating`, each ascending or, after a `-`,
 descending, ties broken by id. An order stores its total when it is
-placed, so its table orders by it. The Go implementation reads each page
-through the ORM's `FindPage`, and the Rust one sorts in memory and over
-SQLite; a cursor holds the sort it was returned under, and one sent with
+placed, so its table orders by it. `shop-db`'s migration plan adds
+`total_cents` as a required column with no default and no backfill: a
+schema's `Default` fills in the decoders' value, not the column's, and a
+backfill is a migration written by hand, which `stack dev` does not run.
+So a database that already holds orders cannot take the column; the step
+fails on its first order. Purge a `Dev` environment made before it: run
+`superschematic stack dev --remove-data` once, which removes its
+containers and their data as it stops, after the failed migration too,
+then run `stack dev` again. A `shop.db` made before it is deleted and
+planned anew ([The Topcoat app on SQLite](#the-topcoat-app-on-sqlite)).
+The Go implementation reads each page through the ORM's `FindPage`, and
+the Rust one sorts in memory and over SQLite; a cursor holds the id of
+the page's last row and the sort it was returned under, and one sent with
 another sort is refused with 400. `listProducts` also takes a search,
 `q`, which finds products by their names, so the order forms' product
 controls are pickers.
@@ -181,7 +191,9 @@ file, unless an earlier run added them, as a shop's own flows would. Each
 run also rewrites the `shopper` and `staff` roles to the permissions they
 grant now, so a `shop.db` made before staff held `orders.any`, whose
 `shopper` role grants all of `orders` and so every customer's orders,
-needs only the app started on it again.
+needs only the app started on it again. A `shop.db` that holds orders
+from before an order stored its total does not migrate (`total_cents` has
+no default to give them): delete it and apply the plan to a new file.
 
 ## Check it
 

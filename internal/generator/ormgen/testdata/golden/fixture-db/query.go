@@ -137,8 +137,11 @@ type ArrayStringFilter struct {
 }
 
 // ErrPageKey is FindPage's error for an After that holds no primary key, or
-// a sort field other than its sort's: the key of a page in another order,
-// which names no row of this one (D60, amended).
+// whose row no longer exists in an order by a sort field, which reads the
+// row's value from the table (D60, amended). A key of another order is not
+// one: a key is a row's primary key alone, the same in every order, so a
+// cursor of another sort is refused before the ORM reads it, by the router
+// that binds a cursor to its sort.
 var ErrPageKey = errors.New("orm: the page key names no row of its sort")
 
 // ========================================
@@ -331,83 +334,29 @@ func ParseTenantSort(text string) (TenantSort, error) {
 	return TenantSort{}, fmt.Errorf("orm: Tenant sorts by id, createdAt, name, slug, email and seatCount, not %q", text)
 }
 
-// TenantPageKey is the position of a Tenant row in a FindPage order: its
-// sort field's value and its id, as a cursor holds them,
-// {"createdAt": ..., "id": ...}. A key holds one sort field, and none
-// in an order by id.
+// TenantPageKey is the position of a Tenant row in a FindPage order: the
+// row's id, as a cursor holds it, {"id": ...}. FindPage reads the row's
+// value of its sort field from the table, so a key is the same in every order
+// and its length is the id's, whatever the row holds (D60, amended).
 type TenantPageKey struct {
-	CreatedAt *types.TemporalDateTime `json:"createdAt,omitempty"`
-	Name      *types.IdentityName     `json:"name,omitempty"`
-	Slug      *types.IdentitySlug     `json:"slug,omitempty"`
-	Email     *string                 `json:"email,omitempty"`
-	SeatCount *float64                `json:"seatCount,omitempty"`
-	Id        types.IdentityUUID      `json:"id"`
+	Id types.IdentityUUID `json:"id"`
 }
 
-// args are the key's values in an order by field, as the repository writes
-// their columns: its sort field's, then its id, or its id alone in
-// an order by id. A key without its id, or with a sort field other
-// than field, is ErrPageKey.
-func (k *TenantPageKey) args(field TenantSortField) ([]any, error) {
+// arg is the key's id as the repository writes its column. A key without
+// one is ErrPageKey.
+func (k *TenantPageKey) arg() (any, error) {
 	var zeroKey types.IdentityUUID
 	if k.Id == zeroKey {
 		return nil, fmt.Errorf("%w: the Tenant key holds no id", ErrPageKey)
 	}
-	var held []string
-	var value any
-	if k.CreatedAt != nil {
-		held = append(held, "createdAt")
-		value = time.Time(*k.CreatedAt)
-	}
-	if k.Name != nil {
-		held = append(held, "name")
-		value = *k.Name
-	}
-	if k.Slug != nil {
-		held = append(held, "slug")
-		value = *k.Slug
-	}
-	if k.Email != nil {
-		held = append(held, "email")
-		value = *k.Email
-	}
-	if k.SeatCount != nil {
-		held = append(held, "seatCount")
-		value = *k.SeatCount
-	}
-	key := k.Id.ToUUID()
-	if field == TenantSortById && len(held) == 0 {
-		return []any{key}, nil
-	}
-	if len(held) == 1 && held[0] == string(field) {
-		return []any{value, key}, nil
-	}
-	return nil, fmt.Errorf("%w: a page of Tenant rows by %s, a key of %s", ErrPageKey, field, strings.Join(append(held, "id"), " and "))
+	return k.Id.ToUUID(), nil
 }
 
-// tenantPageKeyOf is row's key in an order by field: its value of
-// field and its id.
-func tenantPageKeyOf(row *types.Tenant, field TenantSortField) *TenantPageKey {
+// tenantPageKeyOf is row's key: its id.
+func tenantPageKeyOf(row *types.Tenant) *TenantPageKey {
 	key := &TenantPageKey{}
 	if row.Id != nil {
 		key.Id = *row.Id
-	}
-	switch field {
-	case TenantSortByCreatedAt:
-		value := row.CreatedAt
-		key.CreatedAt = &value
-	case TenantSortByName:
-		value := row.Name
-		key.Name = &value
-	case TenantSortBySlug:
-		value := row.Slug
-		key.Slug = &value
-	case TenantSortByEmail:
-		value := row.Email
-		key.Email = &value
-	case TenantSortBySeatCount:
-		value := row.SeatCount
-		key.SeatCount = &value
 	}
 	return key
 }
@@ -415,7 +364,7 @@ func tenantPageKeyOf(row *types.Tenant, field TenantSortField) *TenantPageKey {
 // TenantPageOptions are FindPage's options.
 type TenantPageOptions struct {
 	// Fields specifies which fields to select, as FindMany's do; zero is an
-	// error. A page reads its sort's column and the id too, which Next holds.
+	// error. A page reads the id too, which Next holds.
 	Fields TenantFields
 	// Sort is the order the rows are read in.
 	Sort TenantSort
@@ -597,51 +546,29 @@ func ParseTenantUserSort(text string) (TenantUserSort, error) {
 	return TenantUserSort{}, fmt.Errorf("orm: TenantUser sorts by id and createdAt, not %q", text)
 }
 
-// TenantUserPageKey is the position of a TenantUser row in a FindPage order: its
-// sort field's value and its id, as a cursor holds them,
-// {"createdAt": ..., "id": ...}. A key holds one sort field, and none
-// in an order by id.
+// TenantUserPageKey is the position of a TenantUser row in a FindPage order: the
+// row's id, as a cursor holds it, {"id": ...}. FindPage reads the row's
+// value of its sort field from the table, so a key is the same in every order
+// and its length is the id's, whatever the row holds (D60, amended).
 type TenantUserPageKey struct {
-	CreatedAt *types.TemporalDateTime `json:"createdAt,omitempty"`
-	Id        types.IdentityUUID      `json:"id"`
+	Id types.IdentityUUID `json:"id"`
 }
 
-// args are the key's values in an order by field, as the repository writes
-// their columns: its sort field's, then its id, or its id alone in
-// an order by id. A key without its id, or with a sort field other
-// than field, is ErrPageKey.
-func (k *TenantUserPageKey) args(field TenantUserSortField) ([]any, error) {
+// arg is the key's id as the repository writes its column. A key without
+// one is ErrPageKey.
+func (k *TenantUserPageKey) arg() (any, error) {
 	var zeroKey types.IdentityUUID
 	if k.Id == zeroKey {
 		return nil, fmt.Errorf("%w: the TenantUser key holds no id", ErrPageKey)
 	}
-	var held []string
-	var value any
-	if k.CreatedAt != nil {
-		held = append(held, "createdAt")
-		value = time.Time(*k.CreatedAt)
-	}
-	key := k.Id.ToUUID()
-	if field == TenantUserSortById && len(held) == 0 {
-		return []any{key}, nil
-	}
-	if len(held) == 1 && held[0] == string(field) {
-		return []any{value, key}, nil
-	}
-	return nil, fmt.Errorf("%w: a page of TenantUser rows by %s, a key of %s", ErrPageKey, field, strings.Join(append(held, "id"), " and "))
+	return k.Id.ToUUID(), nil
 }
 
-// tenantUserPageKeyOf is row's key in an order by field: its value of
-// field and its id.
-func tenantUserPageKeyOf(row *types.TenantUser, field TenantUserSortField) *TenantUserPageKey {
+// tenantUserPageKeyOf is row's key: its id.
+func tenantUserPageKeyOf(row *types.TenantUser) *TenantUserPageKey {
 	key := &TenantUserPageKey{}
 	if row.Id != nil {
 		key.Id = *row.Id
-	}
-	switch field {
-	case TenantUserSortByCreatedAt:
-		value := row.CreatedAt
-		key.CreatedAt = &value
 	}
 	return key
 }
@@ -649,7 +576,7 @@ func tenantUserPageKeyOf(row *types.TenantUser, field TenantUserSortField) *Tena
 // TenantUserPageOptions are FindPage's options.
 type TenantUserPageOptions struct {
 	// Fields specifies which fields to select, as FindMany's do; zero is an
-	// error. A page reads its sort's column and the id too, which Next holds.
+	// error. A page reads the id too, which Next holds.
 	Fields TenantUserFields
 	// Sort is the order the rows are read in.
 	Sort TenantUserSort

@@ -138,15 +138,18 @@ func ToolName(namespace, operation string) string {
 var reservedToolParameterKeys = []string{"type", "additionalProperties", "properties", "required"}
 
 // reservedToolPropertyKeys are the JSON Schema keywords a tool argument's
-// property is written with (toolsutil.JSONSchemaProperty), and those a
-// schema's property holds elsewhere ($ref, allOf, anyOf, nullable). The
-// scalar, reference, search and sort keys cannot be one: the property would
-// carry the keyword twice, or a vendor value where JSON Schema reads its
-// own.
+// property is written with (toolsutil.JSONSchemaProperty), those a
+// schema's property holds elsewhere ($ref, allOf, anyOf, nullable), and the
+// others JSON Schema reads on a property: its annotations (default, title,
+// examples, deprecated, readOnly, writeOnly), its identity ($id, $schema)
+// and its other rules (const, not, if, then, else). The scalar,
+// reference, search and sort keys cannot be one: the property would carry
+// the keyword twice, or a vendor value where JSON Schema reads its own.
 var reservedToolPropertyKeys = []string{
-	"$ref", "additionalProperties", "allOf", "anyOf", "description", "enum", "format", "items",
-	"maxItems", "maxLength", "maximum", "minItems", "minLength", "minimum", "nullable", "oneOf",
-	"pattern", "properties", "required", "type",
+	"$id", "$ref", "$schema", "additionalProperties", "allOf", "anyOf", "const", "default",
+	"deprecated", "description", "else", "enum", "examples", "format", "if", "items",
+	"maxItems", "maxLength", "maximum", "minItems", "minLength", "minimum", "not", "nullable",
+	"oneOf", "pattern", "properties", "readOnly", "required", "then", "title", "type", "writeOnly",
 }
 
 // ResolveToolKeys returns the vendor keys the tool documents are written

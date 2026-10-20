@@ -137,8 +137,11 @@ type ArrayStringFilter struct {
 }
 
 // ErrPageKey is FindPage's error for an After that holds no primary key, or
-// a sort field other than its sort's: the key of a page in another order,
-// which names no row of this one (D60, amended).
+// whose row no longer exists in an order by a sort field, which reads the
+// row's value from the table (D60, amended). A key of another order is not
+// one: a key is a row's primary key alone, the same in every order, so a
+// cursor of another sort is refused before the ORM reads it, by the router
+// that binds a cursor to its sort.
 var ErrPageKey = errors.New("orm: the page key names no row of its sort")
 
 // ========================================
@@ -309,51 +312,26 @@ func Parse{{ $typeName }}Sort(text string) ({{ $typeName }}Sort, error) {
 	return {{ $typeName }}Sort{}, fmt.Errorf("orm: {{ $typeName }} sorts by {{ .SortFieldList }}, not %q", text)
 }
 
-// {{ $typeName }}PageKey is the position of a {{ $typeName }} row in a FindPage order: its
-// sort field's value and its {{ $pk.Name }}, as a cursor holds them,
-// {"{{ .SortExample }}": ..., "{{ $pk.Name }}": ...}. A key holds one sort field, and none
-// in an order by {{ $pk.Name }}.
+// {{ $typeName }}PageKey is the position of a {{ $typeName }} row in a FindPage order: the
+// row's {{ $pk.Name }}, as a cursor holds it, {"{{ $pk.Name }}": ...}. FindPage reads the row's
+// value of its sort field from the table, so a key is the same in every order
+// and its length is the {{ $pk.Name }}'s, whatever the row holds (D60, amended).
 type {{ $typeName }}PageKey struct {
-	{{- range .SortFields }}
-	{{- if not .IsPrimaryKey }}
-	{{ toGoName .Name }} *{{ .GoType }} `json:"{{ .Name }},omitempty"`
-	{{- end }}
-	{{- end }}
 	{{ toGoName $pk.Name }} {{ $pk.GoType }} `json:"{{ $pk.Name }}"`
 }
 
-// args are the key's values in an order by field, as the repository writes
-// their columns: its sort field's, then its {{ $pk.Name }}, or its {{ $pk.Name }} alone in
-// an order by {{ $pk.Name }}. A key without its {{ $pk.Name }}, or with a sort field other
-// than field, is ErrPageKey.
-func (k *{{ $typeName }}PageKey) args(field {{ $typeName }}SortField) ([]any, error) {
+// arg is the key's {{ $pk.Name }} as the repository writes its column. A key without
+// one is ErrPageKey.
+func (k *{{ $typeName }}PageKey) arg() (any, error) {
 	var zeroKey {{ $pk.GoType }}
 	if k.{{ toGoName $pk.Name }} == zeroKey {
 		return nil, fmt.Errorf("%w: the {{ $typeName }} key holds no {{ $pk.Name }}", ErrPageKey)
 	}
-	var held []string
-	var value any
-	{{- range .SortFields }}
-	{{- if not .IsPrimaryKey }}
-	if k.{{ toGoName .Name }} != nil {
-		held = append(held, "{{ .Name }}")
-		value = {{ .SortArg (printf "k.%s" (toGoName .Name)) true }}
-	}
-	{{- end }}
-	{{- end }}
-	key := {{ $pk.SortArg (printf "k.%s" (toGoName $pk.Name)) false }}
-	if field == {{ $typeName }}SortBy{{ toGoName $pk.Name }} && len(held) == 0 {
-		return []any{key}, nil
-	}
-	if len(held) == 1 && held[0] == string(field) {
-		return []any{value, key}, nil
-	}
-	return nil, fmt.Errorf("%w: a page of {{ $typeName }} rows by %s, a key of %s", ErrPageKey, field, strings.Join(append(held, "{{ $pk.Name }}"), " and "))
+	return {{ $pk.KeyArg (printf "k.%s" (toGoName $pk.Name)) }}, nil
 }
 
-// {{ lowerFirst $typeName }}PageKeyOf is row's key in an order by field: its value of
-// field and its {{ $pk.Name }}.
-func {{ lowerFirst $typeName }}PageKeyOf(row *types.{{ $typeName }}, field {{ $typeName }}SortField) *{{ $typeName }}PageKey {
+// {{ lowerFirst $typeName }}PageKeyOf is row's key: its {{ $pk.Name }}.
+func {{ lowerFirst $typeName }}PageKeyOf(row *types.{{ $typeName }}) *{{ $typeName }}PageKey {
 	key := &{{ $typeName }}PageKey{}
 	{{- if $pk.GoPointer }}
 	if row.{{ toGoName $pk.Name }} != nil {
@@ -362,31 +340,13 @@ func {{ lowerFirst $typeName }}PageKeyOf(row *types.{{ $typeName }}, field {{ $t
 	{{- else }}
 	key.{{ toGoName $pk.Name }} = row.{{ toGoName $pk.Name }}
 	{{- end }}
-	{{- if gt (len .SortFields) 1 }}
-	switch field {
-	{{- range .SortFields }}
-	{{- if not .IsPrimaryKey }}
-	case {{ $typeName }}SortBy{{ toGoName .Name }}:
-		{{- if .GoPointer }}
-		if row.{{ toGoName .Name }} != nil {
-			value := *row.{{ toGoName .Name }}
-			key.{{ toGoName .Name }} = &value
-		}
-		{{- else }}
-		value := row.{{ toGoName .Name }}
-		key.{{ toGoName .Name }} = &value
-		{{- end }}
-	{{- end }}
-	{{- end }}
-	}
-	{{- end }}
 	return key
 }
 
 // {{ $typeName }}PageOptions are FindPage's options.
 type {{ $typeName }}PageOptions struct {
 	// Fields specifies which fields to select, as FindMany's do; zero is an
-	// error. A page reads its sort's column and the {{ $pk.Name }} too, which Next holds.
+	// error. A page reads the {{ $pk.Name }} too, which Next holds.
 	Fields {{ $typeName }}Fields
 	// Sort is the order the rows are read in.
 	Sort {{ $typeName }}Sort

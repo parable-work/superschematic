@@ -7125,22 +7125,25 @@ then the rows by their ids.
 |----------|------------------------|
 | A type wrapper, `SortBy<Item, Fields>` from `@superschematic/api`, marks an argument of a `@paginated` operation as its order. The argument is an optional query parameter. Its value is a field that `Fields` names, ascending, or the field after a `-`, descending: `sort: SortBy<OrderView, ["placedAt", "totalCents"]>` takes `placedAt`, `-placedAt`, `totalCents` and `-totalCents`. `Item` is the operation's item type, and `Fields` are its fields by their JSON names. It writes `sort: [placedAt, totalCents]` on the `ArgumentDef`, after `search`, with `isQuery` and without `required`. IR without it is the same bytes. An operation takes one. | Several fields at once (`-placedAt,id`), which multiplies the keyset's comparisons and the console's headers. An operation decorator that lists the fields, which would choose the query parameter's name for the author. A sort on a list without `@paginated`, whose order no cursor holds: it can follow when a list needs it. |
 | `@paginated({ defaultSort })` is the order of a request that sends none. It is one of the sort argument's values. An operation with a `SortBy` argument needs it, and one without is refused it. It writes `OperationPage.DefaultSort`, JSON `defaultSort`, after `maxLimit`. | The first field ascending, a default no one wrote. A `Default<…>` on the argument, which a search argument is refused and which the router, not the implementation, applies. |
-| Ties break by the item's `id`, in the field's direction, so the order is total and a page's condition is one row comparison: `(placed_at, id) > ($1, $2)`, or `<` descending. The loader refuses each of these, in every form: `SortBy` without `@paginated`; a second `SortBy`; one that is required, has a default, or is not a query parameter; a field `Item` does not declare, a field named twice, and a field that holds a list, a map, an object, a union, an enum or a boolean, or is `Nullable` or `Secret`; an `Item` without a required `id` of one value; `defaultSort` without `SortBy`; `SortBy` without `defaultSort`; and a `defaultSort` that is not one of its values. It warns of a field that is `@virtual` on an item sourced from a table (`@source`): no column holds it, so the table cannot order by it. | Ids ascending under a descending field, which makes each page's condition an OR of two comparisons. Nulls first or last, which each store spells its own way. |
-| Each runtime reads the sort with the page, beside `cursor` and `limit`. Go's `paging.Parse`, TypeScript's `readPage` and Rust's `PageSpec::query` read the sort argument's parameter. An absent or empty one is `defaultSort`, and the first value counts. Any other value is the 400 an enum query parameter gets, at the parameter: `Invalid query parameter sort: expected one of placedAt, -placedAt, totalCents, -totalCents`. The refusals come in this order: the cursor's alphabet and length, the limit, the sort, then the cursor's sort. The implementation takes the sort in its page request: Go's `page.Sort` (`paging.Sort{Field, Desc}`), TypeScript's `args.page.sort` (`{field, desc}`), and Rust's `args.page.sort` (`Some(Sort)`). It never takes the sort as an argument of its own. An operation without a sort argument has no sort, and its request is D60's. | The sort as its own argument as well, which the router fills and binds: the implementation could read it apart from the page it asks for. |
-| A sorted operation's cursor names its sort. The cursor is the unpadded base64url of `{"sort":"-placedAt","key":K}`, exactly those bytes, where `K` is the key's compact JSON as the implementation encoded it. The router binds the page's `next` after the implementation returns it, and unbinds a sent cursor before it calls the implementation. An implementation therefore encodes and decodes its own key as D60 says, and its keys do not change. A cursor bound to another sort is the 400 `cursor is not one this sort returned`, with reason `returned under another sort`, at `cursor`. A cursor bound to no sort is D60's 400. A `next` whose bound cursor would be longer than 1024 characters is the implementation's error, a 500. The Rust in-process call (D43) unbinds and binds as the router does, so a cursor from the JSON API pages the console, and one from the console pages the JSON API. An unsorted operation's cursor is D60's. | The sort inside the implementation's key, which each implementation would check itself, or not. A fingerprint of the sort, which can only be compared, not read back. Binding the filters too, which D60 declined. |
+| Ties break by the item's `id`, in the field's direction, so the order is total and a page's condition is one row comparison: `(placed_at, id) > ($1, $2)`, or `<` descending. The loader refuses each of these, in every form: `SortBy` without `@paginated`; a second `SortBy`; one that is required, has a default, or is not a query parameter; a field `Item` does not declare, a field named twice, and a field that holds a list, a map, an object, a union, an enum or a boolean, or is `Nullable` or `Secret`; an `Item` without a required `id` of one value; `defaultSort` without `SortBy`; `SortBy` without `defaultSort`; and a `defaultSort` that is not one of its values. A `SortBy` that is also a `SearchQuery`, refers to a type (`RefersTo`) or carries a `Validate` rule is refused too: its values are its fields, which the sort checks itself. It warns of a field that is `@virtual` on an item sourced from a table (`@source`): no column holds it, so the table cannot order by it. It warns of a text field without a `maxLength`, its own or its scalar's: an implementation's own page key may hold the value, and a long one can pass the cursor's 1024 characters. | Ids ascending under a descending field, which makes each page's condition an OR of two comparisons. Nulls first or last, which each store spells its own way. |
+| Each runtime reads the sort with the page, beside `cursor` and `limit`. Go's `paging.Parse`, TypeScript's `readPage` and Rust's `PageSpec::query` read the sort argument's parameter, and the first value counts. Go and TypeScript read an absent or empty one as `defaultSort`. Rust's `PageSpec::query` reads it as `None`, the request as sent, and `PageSpec::unbind`, which gives the implementation its request, fills in `defaultSort`. Any other value is the 400 an enum query parameter gets, at the parameter: `Invalid query parameter sort: expected one of placedAt, -placedAt, totalCents, -totalCents`. The refusals come in this order: the cursor's alphabet and length, the limit, the sort, then the cursor's sort. The implementation takes the sort in its page request: Go's `page.Sort` (`paging.Sort{Field, Desc}`), TypeScript's `args.page.sort` (`{field, desc}`), and Rust's `args.page.sort` (`Some(Sort)`). It never takes the sort as an argument of its own. An operation without a sort argument has no sort, and its request is D60's. | The sort as its own argument as well, which the router fills and binds: the implementation could read it apart from the page it asks for. |
+| A sorted operation's cursor names its sort. The cursor is the unpadded base64url of `{"sort":"-placedAt","key":K}`, exactly those bytes, where `K` is the key's compact JSON as the implementation encoded it. The router binds the page's `next` after the implementation returns it, and unbinds a sent cursor before it calls the implementation. An implementation therefore encodes and decodes its own key as D60 says, and its keys do not change. A cursor bound to another sort is the 400 `cursor is not one this sort returned`, with reason `returned under another sort`, at `cursor`. The envelope is the only check of a cursor's sort: the Go ORM's key, and acme's Rust keys, are a row's id alone, the same in every order, so an implementation cannot tell a key of another sort from one of its own. A cursor bound to no sort is D60's 400. A `next` whose bound cursor would be longer than 1024 characters is the implementation's error, a 500. The Rust in-process call (D43) unbinds and binds as the router does, so a cursor from the JSON API pages the console, and one from the console pages the JSON API. An unsorted operation's cursor is D60's. | The sort inside the implementation's key, which each implementation would check itself, or not. A fingerprint of the sort, which can only be compared, not read back. Binding the filters too, which D60 declined. |
 | `runtime/http/testdata/page_parity.json` gains `reads` with a sort, `bindings` (a key's cursor and a sort, the bound cursor, and back), `refusedBindings` (another sort, no envelope, a broken envelope) and `unbindable` (a bound cursor longer than 1024 characters). The Go runtime's test writes them, and the TypeScript and Rust runtimes read them. | A second vector file, for one reader. |
-| The OpenAPI document gives the sort argument's parameter `{"type": "string", "enum": [...], "default": "<defaultSort>"}` and the vendor key `x-superschematic-sort: true` (`registry.OpenAPISortKey`). A tool's parameters give its property the same `enum`, a sentence that names the default, and the key, which a `ToolHook` renames through `ToolKeys.Sort`. A sorted tool's page sentence asks for the same sort with each `next`. Every SDK passes the sort as the optional query argument it is: Go's `Sort *string` on the query struct, TypeScript's `params.sort`, Python's `sort=` and Rust's `sort: Option<String>`. `<operation>All` sends it with every page. | Each SDK checking the value before it sends it, a second list of the values that each SDK would carry. A generated enum type per sort, in seven generators. |
-| Each Go ORM repository gains `FindPage(ctx, filter, *<T>PageOptions) (*<T>Page, error)`. It runs one query: the filter's conditions; the soft-delete condition unless `IncludeDeleted`; the keyset comparison after `After`; `ORDER BY` the sort's column, then the primary key, both in the sort's direction; and `LIMIT Limit + 1`. It answers up to `Limit` rows and `Next`, the key of the last row kept when more rows followed. It runs no count. `<T>Sort{Field, Desc}` orders by one of the table's sortable columns, named by its field (`placedAt`). A sortable column holds one value of text, a number or a time, `createdAt` and `updatedAt` among them; it is not null, an enum, a boolean, JSON or a point. `Parse<T>Sort("-placedAt")` reads the text of a page request's sort and refuses any other. `<T>PageKey` holds the sort field's value and the primary key under their field names (`{"placedAt": …, "id": …}`). An `After` that holds another field, or no id, is `ErrPageKey`. | `After` on `FindOptions`, which would run `FindMany`'s count for every page. Offsets, which D60 declined. Importing the runtime's `paging`, which the ORM, a database package, does not (D62, amended). Taking the sort as text, which a typo would turn into SQL. |
-| acme's lists sort as follows. `listOrders` sorts by `placedAt` or `totalCents`, and `Order` gains a stored `totalCents`, written when the order is placed, so `OrderView.totalCents` reads a column and is no longer `@virtual`. `listProducts` sorts by `name` or `priceCents`, and `listReviews` by `createdAt` or `rating`. Each `defaultSort` is today's order: `placedAt`, `name` and `createdAt`. The Go implementation reads each list through `FindPage`, and `pages.go`'s key query goes. The Rust implementation sorts in memory and over SQLite. | Sorting orders by a total the implementation computes, which no keyset over the table can order by. |
+| The OpenAPI document gives the sort argument's parameter `{"type": "string", "enum": [...], "default": "<defaultSort>"}` and the vendor key `x-superschematic-sort: true` (`registry.OpenAPISortKey`). A tool's parameters give its property the same `enum`, a sentence that names the default, and the key, which a `ToolHook` renames through `ToolKeys.Sort`. A sorted tool's page sentence asks for the same sort with each `next`. Every SDK passes the sort as the optional query argument it is: Go's `Sort *string` on the query struct, TypeScript's `params.sort`, Python's `sort=` and Rust's `sort: Option<String>`. `<operation>All` sends it with every page. Python's paged methods take `sort`, `cursor` and `limit` by keyword alone, after a `*` that follows the operation's own optional query arguments, so a list that gains a sort keeps its callers' positional arguments. | Python's paging arguments by position, where a sort added before `cursor` would take a caller's cursor as the sort. | Each SDK checking the value before it sends it, a second list of the values that each SDK would carry. A generated enum type per sort, in seven generators. |
+| Each Go ORM repository gains `FindPage(ctx, filter, *<T>PageOptions) (*<T>Page, error)`. It runs one query: the filter's conditions; the soft-delete condition unless `IncludeDeleted`; the keyset comparison after `After`; `ORDER BY` the sort's column, then the primary key, both in the sort's direction; and `LIMIT Limit + 1`. It answers up to `Limit` rows and `Next`, the key of the last row kept when more rows followed. It runs no count. `<T>Sort{Field, Desc}` orders by one of the table's sortable columns, named by its field (`placedAt`). A sortable column is the primary key, or a required column of the table's own that holds one value of text, a number or a time, `createdAt` among them and `updatedAt` when it is required. It is not nullable, an enum, a boolean, JSON, a list, a map, a union, a point or `@secret`, and not a relation's key, an audit actor (`createdBy`, `updatedBy`, `deletedBy`) or internal metadata such as `_version`. `Parse<T>Sort("-placedAt")` reads the text of a page request's sort and refuses any other. `<T>PageKey` holds the primary key alone, under its field name (`{"id": …}`), in every order. The keyset reads the key's row for its value of the sort's column: `(placed_at, id) > ((SELECT placed_at FROM "order" AS page_key WHERE page_key.id = $1), $1)`, `<` descending. The subquery has no soft-delete condition and no filter, so a row deleted or changed since the page before still places the next one. An `After` without an id, or whose row no longer exists in an order by a sort field, is `ErrPageKey`; the query finds no row after it, and `FindPage` then asks whether the row exists. A key of another order is not one `FindPage` can tell apart; the router refuses its cursor first. | `After` on `FindOptions`, which would run `FindMany`'s count for every page. Offsets, which D60 declined. Importing the runtime's `paging`, which the ORM, a database package, does not (D62, amended). Taking the sort as text, which a typo would turn into SQL. A key that holds the sort field's value too, as the ORM's first did: a long text, some 240 CJK characters, pushes the bound cursor past 1024 characters, and every reader paging past that row gets a 500. |
+| acme's lists sort as follows. `listOrders` sorts by `placedAt` or `totalCents`, and `Order` gains a stored `totalCents`, written when the order is placed, so `OrderView.totalCents` reads a column and is no longer `@virtual`. `listProducts` sorts by `name` or `priceCents`, and `listReviews` by `createdAt` or `rating`. Each `defaultSort` is today's order: `placedAt`, `name` and `createdAt`. The Go implementation reads each list through `FindPage`, and `pages.go`'s key query goes. The Rust implementation sorts in memory and over SQLite, by a key of the row's id alone, as the ORM's: the in-memory store finds the row among those it keeps, and SQLite reads the row's value of the column. A cursor whose row is gone is the 400 of a cursor the implementation cannot read. `Order.totalCents` is required with no default: a migration plan has no backfill and `Default` is the decoders' alone, so a `Dev` environment or a SQLite file holding orders from before it is purged rather than migrated. | Sorting orders by a total the implementation computes, which no keyset over the table can order by. A SQL default of 0, which would read every earlier order's total as 0, and which the schema has no way to write: `Default` fills in a decoder's value, not a column's. |
 
 Status: the core is built. `SortBy` and `defaultSort` read and write in
 all three forms, and the loader refuses each case above, in every form,
-with its own message, and warns of a `@virtual` field. The tests are
-ir's `TestSortValues`, `TestParseSort`, `TestSortArgument` and
-`TestSortValue`, the reader's `TestSortByLoads` and `TestSortByRefusals`,
-verify's `TestSortsNeedAPagedList`, `TestASortByAVirtualFieldWarns` and
-`TestASortOfADependencysItem`, the loader's
-`TestSortsAreCheckedInTheDataForms`, and the writer's
+with its own message, and warns of a `@virtual` field and of text
+without a `maxLength`. The tests are ir's `TestSortValues`,
+`TestParseSort`, `TestSortArgument` and `TestSortValue`, the reader's
+`TestSortByLoads` and `TestSortByRefusals`, verify's
+`TestSortsNeedAPagedList` (a search, a reference and each `Validate`
+rule among its cases), `TestASortByAVirtualFieldWarns`,
+`TestASortByUnboundedTextWarns` and `TestASortOfADependencysItem`, the
+loader's `TestPageVerifyFindingsReachTheTypeScriptAuthor` and
+`TestSortsAreCheckedInTheDataForms`, in YAML and JSON, and the writer's
 `TestTSWriterEmitsPaginated`. The runtimes and the servers are built.
 Go's `paging`, TypeScript's `page.ts` and Rust's `page` module read the
 sort with the page, bind and unbind a cursor by its bytes, and run the new
@@ -7152,32 +7155,45 @@ envelope is broken is D60's refused cursor, whatever sort it names; only a
 whole envelope of another sort is the sort's 400. The Go, TypeScript and
 Rust servers hand the sort to the implementation in its page alone, bind
 its next, and give the OpenAPI parameter its `enum`, `default` and
-`x-superschematic-sort`. Their tests are apigen's `TestPagedEndpoints`,
-`TestPagedOpenAPIGolden` and `TestPagedRoutesServePages`
-(`TestListItemsSortsThePage`); tsrestgen's `TestGeneratePagedShape` and
-`TestGeneratedPagedRouter`; and rustrestgen's
-`TestPagedListServesAPageAtATime`, over HTTP and through an in-process
-call, and `TestTheRustServerRendersPages`.
+`x-superschematic-sort`. apigen refuses IR built without the loader whose sort argument breaks
+the rules, its `defaultSort` not one of the sort's values among them.
+Their tests are apigen's `TestPagedEndpoints`,
+`TestASortTheLoaderRefusesIsAGeneratorError`, `TestPagedOpenAPIGolden`
+and `TestPagedRoutesServePages` (`TestListItemsSortsThePage`);
+tsrestgen's `TestGeneratePagedShape` and `TestGeneratedPagedRouter`;
+rustrestgen's `TestPagedListServesAPageAtATime`, over HTTP and through
+an in-process call; and `internal/generator`'s
+`TestTheRustServerRendersPages` (`rust_page_test.go`).
 
 The tool documents and the SDKs are built. A tool's sort property is a
 string of the sort's values, described with `PageSortDescription` and a
 sentence that names the values and the default, and marked
 `x-superschematic-sort` (`registry.DefaultToolSortKey`). A tool hook
 renames the mark through `ToolKeys.Sort`, which the hook may not make a
-JSON Schema keyword, a parameter key or another vendor key. A sorted
-tool's description asks for the same sort with each `next`, and
+JSON Schema keyword, a parameter key or another vendor key. The keywords
+include those JSON Schema reads on a property beyond the ones the
+property is written with: `default`, `const`, `title`, `examples`,
+`deprecated`, `readOnly`, `writeOnly`, `$id`, `$schema`, `not`, `if`,
+`then` and `else` (apigen's `TestToolPropertyKeysAreNoJSONSchemaKeyword`).
+A sorted tool's description asks for the same sort with each `next`, and
 `tools/index.ts` types the sort as the union of its values. The four
-SDKs send the sort from the query arguments they already read, with no
-change to a method's template, and each `<operation>All` sends it with
-every page. Only a sorted tool's `inputSchemaDigest` changes.
+SDKs send the sort from the query arguments they already read, and each
+`<operation>All` sends it with every page. Python's paged methods take
+`sort`, `cursor` and `limit` by keyword alone (pysdkgen's
+`TestPagedMethodsTakeCursorAndLimit` and `TestPagedSDKImportsAndRuns`).
+A sorted tool's `inputSchemaDigest` changes, and so does that of every
+tool whose reference's options search (D61, amended).
 
 The ORM is built. Each Go ORM repository has `FindPage`, `<T>SortField`
 and its `<T>SortBy<Field>` constants, `<T>Sort`, `Parse<T>Sort`,
 `<T>PageKey`, `<T>PageOptions` and `<T>Page`, and the package
 `ErrPageKey`. A sort field is the key, first, or a required column whose
 type `ir.SortValue` takes, the rule of an API's sort field, that is not
-JSON, an enum, a boolean, a point, internal metadata or an audit actor,
-and not `@secret`, whose value a cursor would carry. `FindPage` takes its
+JSON, an enum, a boolean, a point, a relation's key, internal metadata
+such as `_version` or an audit actor, and not `@secret`, which a page's
+order would show; a nullable `updatedAt` is none. A key is the row's
+primary key alone, and the keyset reads the key's row for its value of
+the sort's column, deleted or not. `FindPage` takes its
 column only from the generated `<t>SortColumns`, and shares
 `FindMany`'s execute, scan and hydrate code, which moved into
 `findRows`. The tests are ormgen's `TestGenerateFindPage` and
@@ -7185,11 +7201,13 @@ column only from the generated `<t>SortColumns`, and shares
 which pages fixture-db's tenants by text, citext, a number and a time
 both ways across pages whose keys go through JSON, breaks ties by id,
 puts a filter and a search beside the keyset, hides a soft-deleted
-member and keeps it with `IncludeDeleted`, hydrates a `hasMany`, reads in
-a transaction, and refuses keys of another sort and sort fields of no
-column; and `TestGeneratedFindPageKeysOnPostgres`, which binds an
-integer, a number, a date, a UUID and a key not named id as their
-columns' types.
+member and keeps it with `IncludeDeleted`, places a page after a deleted
+member's key and after a row the filter no longer finds, places a page of
+one order after a key of another, hydrates a `hasMany`, reads in a
+transaction, and refuses a key without an id, a key whose row is gone
+and sort fields of no column; and `TestGeneratedFindPageKeysOnPostgres`,
+which orders by an integer, a number, a date, a UUID and a key not named
+id as their columns' types.
 
 acme is built. `Order` stores `totalCents`, written when the order is
 placed, and `OrderView.totalCents` is no longer `@virtual`;
@@ -7197,11 +7215,12 @@ placed, and `OrderView.totalCents` is no longer `@virtual`;
 three lists take `sort`. The Go implementation reads each page through
 `FindPage`, and `pages.go`'s key query is gone. The Rust implementation
 sorts in memory, and over SQLite by a column of each list's own, by a key
-of the sort field's value as JSON of its kind and the id; SQLite binds the
-cursor's value as the column's type. The tests are `rust-server`'s
-`tests/shop.rs`, in memory and over SQLite (`products_page_by_price`,
-`orders_page_by_total` and `reviews_page_by_rating`, a cursor of another
-kind refused among them); the four clients against the Go and the Rust
+of the row's id alone, as the ORM's; SQLite reads the row's value of the
+column, so it compares as the column's type. The tests are
+`rust-server`'s `tests/shop.rs`, in memory and over SQLite
+(`products_page_by_price`, `orders_page_by_total` and
+`reviews_page_by_rating`: a key of a page by name places a page by
+price, and a cursor of no row the list holds is refused); the four clients against the Go and the Rust
 server, which page the products by price, list every order by total and
 see a cursor of another sort refused with 400; `TestStackDevRunsTheShop`,
 over Postgres, which pages the catalog by price both ways and searches it
@@ -7261,7 +7280,10 @@ of the tool documents gains `search`, the options operation's search
 argument, and `service`, the API dependency whose operation the options
 are; `options` then gives that operation's operationId, or its tool
 name, as the dependency's own documents do. `ir.ToolSchemaReference`
-decodes both, and `tools/index.ts` types them.
+decodes both, and `tools/index.ts` types them. A tool's
+`inputSchemaDigest` hashes its reference values, so the digest of every
+tool with a reference whose options search changes, as a sorted tool's
+does (D60, amended); D60, amended, first said only a sorted tool's did.
 
 Topcoat is built: the picker, whose form holds its texts in `finds` and
 whose post's "Find" is `_action=find:<control>` after the hidden submit;

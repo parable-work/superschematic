@@ -39,11 +39,11 @@ var BoardQuotedFields = map[string]string{
 }
 
 // boardSortColumns are the columns of Board's sort fields, by
-// field: the name FindPage selects, and the column as its ORDER BY and its
-// keyset condition write it. They are the only text of a sort that reaches
-// its SQL (D60, amended).
-var boardSortColumns = map[BoardSortField]struct{ name, sql string }{
-	BoardSortById: {"id", `board.id`},
+// field, as FindPage's ORDER BY and keyset write them: qualified by the table,
+// and by page_key, the alias of the subquery that reads the key's row. They
+// are the only text of a sort that reaches its SQL (D60, amended).
+var boardSortColumns = map[BoardSortField]struct{ sql, key string }{
+	BoardSortById: {`board.id`, `page_key.id`},
 }
 
 // buildBoardOrderByClause builds an ORDER BY clause for Board.
@@ -716,8 +716,13 @@ func (r *BoardRepository) findRows(ctx context.Context, method, query string, ar
 // FindPage reads a page of the Board rows filter finds (D60, amended), in
 // opts.Sort's order, ties broken by id in the same direction: up to
 // opts.Limit rows after opts.After, and Next when more follow. It runs one
-// query of opts.Limit + 1 rows and no count. An After that holds a field
-// other than opts.Sort's, or no id, is ErrPageKey.
+// query of opts.Limit + 1 rows and no count. A key is a row's id alone:
+// in an order by a sort field, the query reads the key's row for its value,
+// soft-deleted or not and whatever the filter, so a row the filter no longer
+// finds still places the page. An After that holds no id, or whose row
+// no longer exists in an order by a sort field, is ErrPageKey. A key of another
+// order cannot be told from one of this order: the router refuses a cursor
+// of another sort before FindPage reads it.
 func (r *BoardRepository) FindPage(ctx context.Context, filter *BoardFilter, opts *BoardPageOptions) (*BoardPage, error) {
 	if opts == nil || opts.Fields.IsZero() {
 		return nil, fmt.Errorf("fields must be specified in PageOptions for performance")
@@ -737,14 +742,13 @@ func (r *BoardRepository) FindPage(ctx context.Context, filter *BoardFilter, opt
 	if !ok {
 		return nil, fmt.Errorf("orm: Board sorts by id, not %q", string(field))
 	}
+	byKey := field == BoardSortById
 
-	// Next is the key of the page's last row, so the page reads its sort's
-	// column and its primary key whatever Fields selects.
+	// Next is the key of the page's last row, so the page reads its primary
+	// key whatever Fields selects.
 	fieldStrings := boardFieldStrings(opts.Fields)
-	for _, name := range []string{column.name, "id"} {
-		if !containsString(fieldStrings, name) {
-			fieldStrings = append(fieldStrings, name)
-		}
+	if !containsString(fieldStrings, "id") {
+		fieldStrings = append(fieldStrings, "id")
 	}
 	if err := validateFields(fieldStrings, BoardAllowedFields); err != nil {
 		return nil, err
@@ -758,20 +762,22 @@ func (r *BoardRepository) FindPage(ctx context.Context, filter *BoardFilter, opt
 	if opts.Sort.Desc {
 		comparison, direction = "<", "DESC"
 	}
+	var key any
 	if opts.After != nil {
-		values, err := opts.After.args(field)
-		if err != nil {
+		var err error
+		if key, err = opts.After.arg(); err != nil {
 			return nil, err
 		}
-		placeholders := make([]string, len(values))
-		for i, value := range values {
-			args = append(args, value)
-			placeholders[i] = fmt.Sprintf("$%d", len(args))
-		}
-		if len(values) == 1 {
-			conditions = append(conditions, fmt.Sprintf("%s %s %s", column.sql, comparison, placeholders[0]))
+		args = append(args, key)
+		placeholder := fmt.Sprintf("$%d", len(args))
+		if byKey {
+			conditions = append(conditions, fmt.Sprintf(`board.id %s %s`, comparison, placeholder))
 		} else {
-			conditions = append(conditions, fmt.Sprintf(`(%s, board.id) %s (%s)`, column.sql, comparison, strings.Join(placeholders, ", ")))
+			// The key's row gives the sort field's value: no deleted_at
+			// condition and no filter, so a row soft-deleted or changed
+			// since the page before still places this one.
+			conditions = append(conditions, fmt.Sprintf(`(%s, board.id) %s ((SELECT %s FROM board AS page_key WHERE page_key.id = %s), %s)`,
+				column.sql, comparison, column.key, placeholder, placeholder))
 		}
 	}
 	whereClause := ""
@@ -779,7 +785,7 @@ func (r *BoardRepository) FindPage(ctx context.Context, filter *BoardFilter, opt
 		whereClause = " WHERE " + strings.Join(conditions, " AND ")
 	}
 	orderByClause := fmt.Sprintf(" ORDER BY %s %s", column.sql, direction)
-	if field != BoardSortById {
+	if !byKey {
 		orderByClause += fmt.Sprintf(`, board.id %s`, direction)
 	}
 	query := fmt.Sprintf(`SELECT %s FROM board%s%s LIMIT %d`, selectFields, whereClause, orderByClause, limit+1)
@@ -788,12 +794,40 @@ func (r *BoardRepository) FindPage(ctx context.Context, filter *BoardFilter, opt
 	if err != nil {
 		return nil, err
 	}
+	if len(rows) == 0 && opts.After != nil && !byKey {
+		// A key whose row no longer exists places no row: its value is
+		// null, which no row comes after. Only then is the page empty
+		// without being the last.
+		if err := r.pageKeyExists(ctx, key); err != nil {
+			return nil, err
+		}
+	}
 	page := &BoardPage{Rows: rows}
 	if len(rows) > limit {
 		page.Rows = rows[:limit]
-		page.Next = boardPageKeyOf(page.Rows[limit-1], field)
+		page.Next = boardPageKeyOf(page.Rows[limit-1])
 	}
 	return page, nil
+}
+
+// pageKeyExists is nil when the table holds a row whose primary key is key,
+// soft-deleted or not, and ErrPageKey when it holds none.
+func (r *BoardRepository) pageKeyExists(ctx context.Context, key any) error {
+	query := `SELECT EXISTS (SELECT 1 FROM board WHERE board.id = $1)`
+	var row pgx.Row
+	if r.tx != nil {
+		row = r.tx.QueryRow(ctx, query, key)
+	} else {
+		row = r.db.pool.QueryRow(ctx, query, key)
+	}
+	var exists bool
+	if err := row.Scan(&exists); err != nil {
+		return fmt.Errorf("failed to read the page key's row: %w", err)
+	}
+	if !exists {
+		return fmt.Errorf("%w: no Board row has the key's id", ErrPageKey)
+	}
+	return nil
 }
 
 // CreateOne inserts a new Board record

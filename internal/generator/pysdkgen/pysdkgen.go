@@ -191,6 +191,11 @@ type QueryParam struct {
 	// the route reads it: a paged operation's cursor (D60), which an empty
 	// one would otherwise send for the first page.
 	EmptyIsAbsent bool
+
+	// Paging marks a paged operation's sort (D60, amended), cursor and
+	// limit, which its method takes by keyword alone, after its own query
+	// parameters: a list that gains a sort keeps its callers' arguments.
+	Paging bool
 }
 
 // ScalarArg represents a scalar input argument for an endpoint.
@@ -264,6 +269,10 @@ type MethodParam struct {
 	// <method>_all passes on by keyword.
 	Name        string
 	Declaration string
+
+	// KeywordsFollow marks the first keyword-only parameter: the method
+	// writes * before it.
+	KeywordsFollow bool
 }
 
 var errToolUnavailable = errors.New("required tool unavailable")
@@ -494,6 +503,7 @@ func convertEndpoint(endpoint apigen.EndpointInfo, isScopedNS bool, scopeParamOr
 			ValidateListMin:   param.ValidateListMin,
 			ValidateListMax:   param.ValidateListMax,
 			ValidatePattern:   param.ValidatePattern,
+			Paging:            param.Sort != nil,
 		})
 	}
 	if endpoint.Page != nil {
@@ -648,11 +658,12 @@ func setPageType(namespace *NamespaceInfo) {
 }
 
 // pageQueryParams are a paged operation's two query parameters (D60),
-// after its own and as optional as they are: cursor, the next of the page
-// before, and limit, the most items the page holds. Each is checked before
-// the request by the bounds the route reads it with, so a cursor or limit
-// the route would refuse fails at its name; the route reads an empty
-// cursor as none, so an empty one is left out, the first page.
+// after its own and as optional as they are, and by keyword alone, as its
+// sort is: cursor, the next of the page before, and limit, the most items
+// the page holds. Each is checked before the request by the bounds the
+// route reads it with, so a cursor or limit the route would refuse fails
+// at its name; the route reads an empty cursor as none, so an empty one is
+// left out, the first page.
 func pageQueryParams(page *apigen.PageInfo) []QueryParam {
 	maxLength := ir.PageCursorMaxLength
 	minLimit, maxLimit := 1.0, float64(page.MaxLimit)
@@ -664,6 +675,7 @@ func pageQueryParams(page *apigen.PageInfo) []QueryParam {
 			ValidateMaxLength: &maxLength,
 			ValidatePattern:   ir.PageCursorPattern,
 			EmptyIsAbsent:     true,
+			Paging:            true,
 		},
 		{
 			Name:        apigen.PageLimitParam,
@@ -671,6 +683,7 @@ func pageQueryParams(page *apigen.PageInfo) []QueryParam {
 			PyType:      "int",
 			ValidateMin: &minLimit,
 			ValidateMax: &maxLimit,
+			Paging:      true,
 		},
 	}
 }
@@ -762,14 +775,21 @@ func buildMethodParams(
 		methodParams = append(methodParams, MethodParam{Name: arg.PyName, Declaration: declaration})
 	}
 
-	for _, param := range queryParams {
-		if param.Required {
-			continue
+	// A paged operation's sort, cursor and limit follow its own optional
+	// query parameters, by keyword alone (D60, amended).
+	keywords := false
+	for _, paging := range []bool{false, true} {
+		for _, param := range queryParams {
+			if param.Required || param.Paging != paging {
+				continue
+			}
+			methodParams = append(methodParams, MethodParam{
+				Name:           param.PyName,
+				Declaration:    fmt.Sprintf("%s: %s | None = None", param.PyName, param.PyType),
+				KeywordsFollow: paging && !keywords,
+			})
+			keywords = keywords || paging
 		}
-		methodParams = append(methodParams, MethodParam{
-			Name:        param.PyName,
-			Declaration: fmt.Sprintf("%s: %s | None = None", param.PyName, param.PyType),
-		})
 	}
 
 	if isFilterable {

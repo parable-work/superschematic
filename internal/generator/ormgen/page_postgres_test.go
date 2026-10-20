@@ -15,10 +15,13 @@ import (
 // descending, across pages whose keys go through JSON as a cursor holds
 // them; ties of one seatCount break by id in the sort's direction; a field
 // filter and a search sit beside the keyset; a soft-deleted member is left
-// out of every page and kept with IncludeDeleted; a page hydrates a hasMany
-// relation as FindMany does, and reads in a transaction. A key of another
-// sort, of two fields or without an id is ErrPageKey, and a sort field the
-// table has no column for is refused before any SQL runs.
+// out of every page and kept with IncludeDeleted, and its key still places
+// a page; a page hydrates a hasMany relation as FindMany does, and reads in
+// a transaction. A key is the row's id alone: its row gives its value in
+// any order, a row the filter no longer finds among them. A key without an
+// id, or whose row no longer exists in an order by a sort field, is
+// ErrPageKey, and a sort field the table has no column for is refused
+// before any SQL runs.
 func TestGeneratedFindPageOnPostgres(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping compile check in -short mode")
@@ -214,14 +217,13 @@ func TestFindPageOnPostgres(t *testing.T) {` + strings.Replace(pageTestSetup, "P
 		}
 	}
 
-	// A key holds its sort field and the id under their schema names, and
-	// a time to its microsecond.
+	// A key is the row's id alone, under its schema name, in every order.
 	first, err := db.Tenant.FindPage(ctx, nil, &TenantPageOptions{Fields: TenantFields{}.All(), Sort: TenantSort{Field: TenantSortByName}, Limit: 2})
 	if err != nil {
 		t.Fatalf("the first page by name: %v", err)
 	}
 	// The id is in the UUID's JSON form, base62.
-	if cursor, _ := json.Marshal(first.Next); string(cursor) != ` + "`" + `{"name":"Bellows","id":"4"}` + "`" + ` || first.Next.Id.ToUUID().String() != "00000000-0000-0000-0000-000000000004" {
+	if cursor, _ := json.Marshal(first.Next); string(cursor) != ` + "`" + `{"id":"4"}` + "`" + ` || first.Next.Id.ToUUID().String() != "00000000-0000-0000-0000-000000000004" {
 		t.Errorf("the key after the first page by name = %s", cursor)
 	}
 	anvil := *first.Rows[0].Id
@@ -229,38 +231,88 @@ func TestFindPageOnPostgres(t *testing.T) {` + strings.Replace(pageTestSetup, "P
 	if err != nil {
 		t.Fatalf("the first page by createdAt: %v", err)
 	}
-	if byTime.Next == nil || byTime.Next.CreatedAt == nil || !time.Time(*byTime.Next.CreatedAt).Equal(created(1)) || byTime.Next.Name != nil {
-		t.Errorf("the key after the first page by createdAt = %+v, want createdAt %s alone", byTime.Next, created(1))
+	if cursor, _ := json.Marshal(byTime.Next); string(cursor) != ` + "`" + `{"id":"1"}` + "`" + ` {
+		t.Errorf("the key after the first page by createdAt = %s, want Easel's id", cursor)
 	}
 
-	// A key of another sort, of two fields or of none, or without an id,
-	// names no row of the page's order.
-	seats := 5.0
-	twoFields := *first.Next
-	twoFields.SeatCount = &seats
-	noField := TenantPageKey{Id: first.Next.Id}
-	noID := *first.Next
-	noID.Id = types.IdentityUUID{}
+	// pageAfter is the names of the page of tenants filter finds after
+	// key in sort's order, and its error.
+	pageAfter := func(filter *TenantFilter, sort TenantSort, key *TenantPageKey) (string, error) {
+		t.Helper()
+		page, err := db.Tenant.FindPage(ctx, filter, &TenantPageOptions{Fields: TenantFields{Name: true}, Sort: sort, After: key, Limit: 10})
+		if err != nil {
+			return "", err
+		}
+		return names(page.Rows), nil
+	}
+
+	// The key's row gives its value in the page's order, so a key of a
+	// page by name places a page by seatCount after Bellows' 20 seats,
+	// and one by createdAt after Bellows' day.
 	for _, tc := range []struct {
-		name  string
-		sort  TenantSort
-		after *TenantPageKey
+		name string
+		sort TenantSort
+		want string
 	}{
-		{"a key by name in an order by seatCount", TenantSort{Field: TenantSortBySeatCount}, first.Next},
-		{"a key by name in an order by id", TenantSort{Desc: true}, first.Next},
-		{"a key of two fields", TenantSort{Field: TenantSortByName}, &twoFields},
-		{"a key of the id alone in an order by name", TenantSort{Field: TenantSortByName}, &noField},
-		{"a key without an id", TenantSort{Field: TenantSortByName}, &noID},
+		{"by seatCount, descending", TenantSort{Field: TenantSortBySeatCount, Desc: true}, "Chisel Anvil Drill Easel"},
+		{"by createdAt", TenantSort{Field: TenantSortByCreatedAt}, "Anvil"},
+		{"by id", TenantSort{}, "Chisel"},
 	} {
-		_, err := db.Tenant.FindPage(ctx, nil, &TenantPageOptions{Fields: TenantFields{Name: true}, Sort: tc.sort, After: tc.after, Limit: 2})
-		if !errors.Is(err, ErrPageKey) {
+		if got, err := pageAfter(nil, tc.sort, first.Next); err != nil || got != tc.want {
+			t.Errorf("%s after Bellows' key = %q, %v; want %q", tc.name, got, err, tc.want)
+		}
+	}
+
+	// A row the filter no longer finds still places the page: Drill, the
+	// last of a page of five seats by name descending, leaves the filter
+	// before the next page is read.
+	fiveSeats := &TenantFilter{SeatCount: &FloatFilter{Eq: number(5)}}
+	byNameDown := TenantSort{Field: TenantSortByName, Desc: true}
+	page, err := db.Tenant.FindPage(ctx, fiveSeats, &TenantPageOptions{Fields: TenantFields{Name: true}, Sort: byNameDown, Limit: 2})
+	if err != nil || names(page.Rows) != "Easel Drill" || page.Next == nil {
+		t.Fatalf("the first page of five seats by name, descending = %v, %v", page, err)
+	}
+	if _, err := pool.Exec(ctx, "UPDATE tenant SET seat_count = 6 WHERE name = 'Drill'"); err != nil {
+		t.Fatalf("update Drill: %v", err)
+	}
+	if got, err := pageAfter(fiveSeats, byNameDown, page.Next); err != nil || got != "Anvil" {
+		t.Errorf("the page after Drill, which has six seats now = %q, %v; want Anvil", got, err)
+	}
+	if _, err := pool.Exec(ctx, "UPDATE tenant SET seat_count = 5 WHERE name = 'Drill'"); err != nil {
+		t.Fatalf("restore Drill: %v", err)
+	}
+
+	// A key without an id, or whose row no longer exists, places no page
+	// in an order by a sort field. In an order by id, the id alone places
+	// it.
+	gone := TenantPageKey{}
+	if err := json.Unmarshal([]byte(` + "`" + `{"id":"9"}` + "`" + `), &gone); err != nil || gone.Id.ToUUID().String() != "00000000-0000-0000-0000-000000000009" {
+		t.Fatalf("the key of a tenant that never was = %+v, %v", gone, err)
+	}
+	noID := TenantPageKey{}
+	for _, tc := range []struct {
+		name   string
+		filter *TenantFilter
+		sort   TenantSort
+		key    *TenantPageKey
+	}{
+		{"a key without an id, by name", nil, TenantSort{Field: TenantSortByName}, &noID},
+		{"a key without an id, by id", nil, TenantSort{}, &noID},
+		{"a key of no row, by name", nil, TenantSort{Field: TenantSortByName}, &gone},
+		{"a key of no row, by seatCount, descending", nil, TenantSort{Field: TenantSortBySeatCount, Desc: true}, &gone},
+		{"a key of no row, with a filter", fiveSeats, TenantSort{Field: TenantSortByCreatedAt}, &gone},
+	} {
+		if _, err := pageAfter(tc.filter, tc.sort, tc.key); !errors.Is(err, ErrPageKey) {
 			t.Errorf("%s: FindPage = %v, want ErrPageKey", tc.name, err)
 		}
 	}
-	// The id's own key is the id alone.
-	byID, err := db.Tenant.FindPage(ctx, nil, &TenantPageOptions{Fields: TenantFields{Name: true}, After: &noField, Limit: 1})
-	if err != nil || names(byID.Rows) != "Chisel" {
-		t.Errorf("the page by id after Bellows' id = %v, %v; want Chisel", byID, err)
+	if got, err := pageAfter(nil, TenantSort{Desc: true}, &gone); err != nil || got != "Chisel Bellows Anvil Drill Easel" {
+		t.Errorf("the page by id, descending, after an id of no row = %q, %v; want every tenant", got, err)
+	}
+	// A key of the last row is an empty page, not ErrPageKey.
+	last := TenantPageKey{Id: anvil}
+	if got, err := pageAfter(nil, TenantSort{Field: TenantSortByName, Desc: true}, &last); err != nil || got != "" {
+		t.Errorf("the page after Anvil by name, descending = %q, %v; want an empty page", got, err)
 	}
 
 	// A sort is a field of the table's, never SQL: another text is refused
@@ -344,6 +396,21 @@ func TestFindPageOnPostgres(t *testing.T) {` + strings.Replace(pageTestSetup, "P
 	if got := members(false, true); got != "Ann Bo Cy" {
 		t.Errorf("the members with the deleted = %s, want Ann Bo Cy", got)
 	}
+	// A soft-deleted member's key still places a page that leaves it out.
+	withDeleted, err := db.TenantUser.FindPage(ctx, nil, &TenantUserPageOptions{
+		Fields: TenantUserFields{DisplayName: true}, Sort: TenantUserSort{Field: TenantUserSortByCreatedAt},
+		Limit: 2, IncludeDeleted: true,
+	})
+	if err != nil || withDeleted.Next == nil || withDeleted.Rows[1].DisplayName != "Bo" {
+		t.Fatalf("the first two members with the deleted = %+v, %v", withDeleted, err)
+	}
+	afterBo, err := db.TenantUser.FindPage(ctx, nil, &TenantUserPageOptions{
+		Fields: TenantUserFields{DisplayName: true}, Sort: TenantUserSort{Field: TenantUserSortByCreatedAt},
+		After: withDeleted.Next, Limit: 2,
+	})
+	if err != nil || len(afterBo.Rows) != 1 || afterBo.Rows[0].DisplayName != "Cy" || afterBo.Next != nil {
+		t.Errorf("the members after Bo, who is deleted = %+v, %v; want Cy", afterBo, err)
+	}
 
 	// A page hydrates a hasMany relation as FindMany does, here with a
 	// filter, and reads in a transaction as on the pool.
@@ -356,7 +423,7 @@ func TestFindPageOnPostgres(t *testing.T) {` + strings.Replace(pageTestSetup, "P
 		if err != nil {
 			return err
 		}
-		if names(page.Rows) != "Anvil" || page.Next == nil || page.Next.Name == nil || *page.Next.Name != "Anvil" {
+		if names(page.Rows) != "Anvil" || page.Next == nil || page.Next.Id != anvil {
 			return fmt.Errorf("the first page of five seats = %s, next %+v; want Anvil and its key", names(page.Rows), page.Next)
 		}
 		var users []string

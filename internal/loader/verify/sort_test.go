@@ -138,6 +138,21 @@ func TestSortsNeedAPagedList(t *testing.T) {
 			[]string{"Orders.listOrders: sort argument sort needs @paginated's defaultSort, the order of a request that sends none"}},
 		{"a defaultSort without a sort", func(op *ir.FieldDef, _ *ir.ArgumentDef, _ *ir.TypeDef) { op.Arguments = op.Arguments[:1] },
 			[]string{"Orders.listOrders: @paginated defaultSort placedAt orders a sort argument, and the operation declares none (SortBy)"}},
+		{"a search", func(_ *ir.FieldDef, s *ir.ArgumentDef, _ *ir.TypeDef) { s.Search = true },
+			[]string{"Orders.listOrders: sort argument sort is also a search (SearchQuery); a page's order and its search are two arguments"}},
+		{"a reference", func(_ *ir.FieldDef, s *ir.ArgumentDef, _ *ir.TypeDef) {
+			s.References = &ir.ReferenceDef{Type: "OrderView"}
+		},
+			[]string{"Orders.listOrders: sort argument sort refers to OrderView (RefersTo); a sort's value names a field of its item"}},
+		{"a Validate rule", func(_ *ir.FieldDef, s *ir.ArgumentDef, _ *ir.TypeDef) { s.ValidatePattern = "^placedAt$" },
+			[]string{"Orders.listOrders: sort argument sort has Validate's pattern; a sort's values are its fields, which the sort checks itself"}},
+		{"every Validate rule", func(_ *ir.FieldDef, s *ir.ArgumentDef, _ *ir.TypeDef) {
+			n, x := 1, 2.0
+			s.ValidateMin, s.ValidateMax = &x, &x
+			s.ValidateMinLength, s.ValidateMaxLength = &n, &n
+			s.ValidateListMin, s.ValidateListMax = &n, &n
+			s.ValidatePattern = ".*"
+		}, []string{"Orders.listOrders: sort argument sort has Validate's min, max, minLength, maxLength, listMin, listMax, pattern; a sort's values are its fields, which the sort checks itself"}},
 		{"a defaultSort of another field", func(op *ir.FieldDef, _ *ir.ArgumentDef, _ *ir.TypeDef) { op.Page.DefaultSort = "-number" },
 			[]string{"Orders.listOrders: @paginated defaultSort -number is not one of sort's values: placedAt, -placedAt, totalCents, -totalCents"}},
 	} {
@@ -170,6 +185,50 @@ func TestASortByAVirtualFieldWarns(t *testing.T) {
 	}), Input{})
 	if len(errs) != 0 || len(warnings) != 0 {
 		t.Fatalf("an item without @source: errors %q, warnings %q", errs, warnings)
+	}
+}
+
+// TestASortByUnboundedTextWarns: a sort field of text that no maxLength
+// bounds is a warning, since an implementation's own page key may hold its
+// value and a cursor holds at most 1024 characters (D60, amended): the
+// string primitive, or a scalar the catalog stores as TEXT or CITEXT,
+// without Validate's maxLength or the scalar's. A text of a bounded
+// length, a time, a UUID and a number are not.
+func TestASortByUnboundedTextWarns(t *testing.T) {
+	warning := func(field string) []string {
+		return []string{"Orders.listOrders: sort argument sort names OrderView." + field + ", text without a maxLength: a page key that holds its value, as an implementation's own may, can pass the cursor's limit of 1024 characters with a long one"}
+	}
+	eighty := 80
+	for _, tc := range []struct {
+		name  string
+		field *ir.FieldDef
+		want  []string
+	}{
+		{"the string primitive", &ir.FieldDef{Name: "title", TypeRef: ir.TypeRef{Name: "string"}, Required: true}, warning("title")},
+		{"the string primitive with a maxLength", &ir.FieldDef{Name: "title", TypeRef: ir.TypeRef{Name: "string"}, Required: true, ValidateMaxLength: &eighty}, nil},
+		{"a TEXT scalar", &ir.FieldDef{Name: "title", TypeRef: ir.TypeRef{Name: "Text.Markdown"}, Required: true}, warning("title")},
+		{"a TEXT scalar with a maxLength", &ir.FieldDef{Name: "title", TypeRef: ir.TypeRef{Name: "Text.Markdown"}, Required: true, ValidateMaxLength: &eighty}, nil},
+		{"a CITEXT scalar of a maxLength", &ir.FieldDef{Name: "title", TypeRef: ir.TypeRef{Name: "Contact.Email"}, Required: true}, nil},
+		{"a VARCHAR scalar", &ir.FieldDef{Name: "title", TypeRef: ir.TypeRef{Name: "Identity.Name"}, Required: true}, nil},
+		{"a time", &ir.FieldDef{Name: "title", TypeRef: ir.TypeRef{Name: "Temporal.DateTime"}, Required: true}, nil},
+		{"a UUID", &ir.FieldDef{Name: "title", TypeRef: ir.TypeRef{Name: "Identity.UUID"}, Required: true}, nil},
+		{"an integer", &ir.FieldDef{Name: "title", TypeRef: ir.TypeRef{Name: "integer"}, Required: true}, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			schema := sortSchema(func(_ *ir.FieldDef, s *ir.ArgumentDef, item *ir.TypeDef) {
+				item.Fields = append(item.Fields, tc.field)
+				s.Sort = []string{"placedAt", "title"}
+			})
+			schema.Scalars["Text.Markdown"] = &ir.ScalarDef{Name: "Text.Markdown", LanguagePrimitive: ir.LanguageString, TypeMappings: map[string]string{"sql": "TEXT", "json_schema": "string"}}
+			schema.Scalars["Contact.Email"] = &ir.ScalarDef{Name: "Contact.Email", LanguagePrimitive: ir.LanguageString, MaxLength: 255, TypeMappings: map[string]string{"sql": "CITEXT", "json_schema": "string"}}
+			schema.Scalars["Identity.Name"] = &ir.ScalarDef{Name: "Identity.Name", LanguagePrimitive: ir.LanguageString, MaxLength: 80, TypeMappings: map[string]string{"sql": "VARCHAR(80)", "json_schema": "string"}}
+			schema.Scalars["Temporal.DateTime"].TypeMappings = map[string]string{"sql": "TIMESTAMPTZ", "json_schema": "string"}
+			schema.Scalars["Identity.UUID"].TypeMappings = map[string]string{"sql": "UUID", "json_schema": "string"}
+			errs, warnings := sortFindings(schema, Input{})
+			if len(errs) != 0 || !reflect.DeepEqual(warnings, tc.want) {
+				t.Fatalf("errors %q, warnings %q; want the warnings %q", errs, warnings, tc.want)
+			}
+		})
 	}
 }
 

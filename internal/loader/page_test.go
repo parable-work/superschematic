@@ -1,18 +1,22 @@
 package loader
 
 import (
+	"encoding/json"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	ir "github.com/parable-work/superschematic/ir"
+	"gopkg.in/yaml.v3"
 )
 
 // TestPageVerifyFindingsReachTheTypeScriptAuthor: the loader holds a
 // @paginated operation of a TypeScript service to the page's rules (D60):
 // a GET returning a list, no argument named as a page parameter, and no
 // operation named as its SDK iterator; and a SortBy to a page, an item
-// with an id, and a defaultSort to a SortBy (D60, amended).
+// with an id, a defaultSort to a SortBy, and no RefersTo or Validate rule
+// on a SortBy (D60, amended). A SearchQuery of a SortBy is TypeScript's
+// own error, since a SortBy may be null and a SearchQuery's text is not.
 func TestPageVerifyFindingsReachTheTypeScriptAuthor(t *testing.T) {
 	_, err := LoadService(filepath.Join("tsreader", "testdata", "services", "broken-paged-api"))
 	if err == nil {
@@ -27,6 +31,8 @@ func TestPageVerifyFindingsReachTheTypeScriptAuthor(t *testing.T) {
 		"Catalog.sortedItems: sort argument sort orders a page, and the operation has no @paginated",
 		"Catalog.sortedItems: a sort breaks ties by id, and Item declares no id",
 		"Catalog.orderedItems: @paginated defaultSort name orders a sort argument, and the operation declares none (SortBy)",
+		"Catalog.referredTools: sort argument sort refers to Tool (RefersTo); a sort's value names a field of its item",
+		"Catalog.validatedTools: sort argument sort has Validate's maxLength; a sort's values are its fields, which the sort checks itself",
 	} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("error missing %q:\n%s", want, msg)
@@ -60,8 +66,9 @@ operationSets:
 }
 
 // TestSortsAreCheckedInTheDataForms: a data form's sort argument meets the
-// rules the TypeScript form's SortBy does (D60, amended): its page, its
-// item's fields and its page's defaultSort.
+// rules the TypeScript form's SortBy does (D60, amended), in YAML and in
+// JSON: its page, its item's fields, its page's defaultSort, and no search,
+// reference or Validate rule of its own.
 func TestSortsAreCheckedInTheDataForms(t *testing.T) {
 	schema := func(arguments, page string) string {
 		return `name: catalog
@@ -108,17 +115,39 @@ operationSets:
 			"Catalog.listItems: @paginated defaultSort -id is not one of sort's values: name, -name"},
 		{"a sort without a defaultSort", sort("[name]"), "        page: {}",
 			"Catalog.listItems: sort argument sort needs @paginated's defaultSort, the order of a request that sends none"},
+		{"a sort that is a search", sort("[name]") + "            search: true\n", "        page: { defaultSort: name }",
+			"Catalog.listItems: sort argument sort is also a search (SearchQuery); a page's order and its search are two arguments"},
+		{"a sort that refers to the items", sort("[name]") + "            references: { type: ItemView, options: listItems }\n", "        page: { defaultSort: name }",
+			"Catalog.listItems: sort argument sort refers to ItemView (RefersTo); a sort's value names a field of its item"},
+		{"a sort with Validate rules", sort("[name]") + "            validateMaxLength: 5\n            validatePattern: \"^-?name$\"\n", "        page: { defaultSort: name }",
+			"Catalog.listItems: sort argument sort has Validate's maxLength, pattern; a sort's values are its fields, which the sort checks itself"},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			dir := writeService(t, map[string]string{
-				"schema.config.yaml":      "name: catalog\nkind: API\noutputs: {}\n",
-				"src/catalog.schema.yaml": schema(tc.arguments, tc.page),
+		// Each form reads the same schema: YAML as written, and JSON
+		// converted from it.
+		for _, form := range []string{"yaml", "json"} {
+			t.Run(tc.name+" in "+form, func(t *testing.T) {
+				source := schema(tc.arguments, tc.page)
+				if form == "json" {
+					var doc any
+					if err := yaml.Unmarshal([]byte(source), &doc); err != nil {
+						t.Fatalf("read the YAML: %v", err)
+					}
+					data, err := json.Marshal(doc)
+					if err != nil {
+						t.Fatalf("write the JSON: %v", err)
+					}
+					source = string(data)
+				}
+				dir := writeService(t, map[string]string{
+					"schema.config.yaml":         "name: catalog\nkind: API\noutputs: {}\n",
+					"src/catalog.schema." + form: source,
+				})
+				_, err := LoadService(dir)
+				if err == nil || !strings.Contains(err.Error(), tc.want) {
+					t.Fatalf("LoadService = %v, want %q", err, tc.want)
+				}
 			})
-			_, err := LoadService(dir)
-			if err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("LoadService = %v, want %q", err, tc.want)
-			}
-		})
+		}
 	}
 
 	dir := writeService(t, map[string]string{
