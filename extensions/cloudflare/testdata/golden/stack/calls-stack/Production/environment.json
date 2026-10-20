@@ -30,7 +30,7 @@
       "settings": {
         "storageClass": "InfrequentAccess"
       },
-      "resourceName": "calls-stack-shop-media",
+      "resourceName": "calls-stack-production-shop-media",
       "address": {
         "$output": {
           "resource": "shop-media.bucket",
@@ -50,8 +50,8 @@
       ],
       "language": "TYPESCRIPT",
       "artifact": "bundle",
-      "resourceName": "shop-pricing",
-      "address": "https://shop-pricing",
+      "resourceName": "calls-stack-production-shop-pricing",
+      "address": "https://calls-stack-production-shop-pricing",
       "bindings": [
         {
           "field": "SHOP_PRICING_CALLERS",
@@ -119,8 +119,8 @@
       "language": "TYPESCRIPT",
       "artifact": "bundle",
       "exposed": true,
-      "resourceName": "shop-storefront",
-      "address": "https://shop-storefront",
+      "resourceName": "calls-stack-production-shop-storefront",
+      "address": "https://calls-stack-production-shop-storefront",
       "publicAddress": "https://shop-storefront.acme.dev",
       "bindings": [
         {
@@ -182,7 +182,7 @@
               },
               "source": "signed-token"
             },
-            "url": "https://shop-pricing"
+            "url": "https://calls-stack-production-shop-pricing"
           },
           "edge": "http:shop-storefront->shop-pricing"
         }
@@ -222,7 +222,7 @@
         "type": "cloudflare:index/r2Bucket:R2Bucket",
         "properties": {
           "accountId": "0123456789abcdef0123456789abcdef",
-          "name": "calls-stack-shop-media",
+          "name": "calls-stack-production-shop-media",
           "storageClass": "InfrequentAccess"
         },
         "phase": "infrastructure",
@@ -373,7 +373,7 @@
         "type": "cloudflare:index/worker:Worker",
         "properties": {
           "accountId": "0123456789abcdef0123456789abcdef",
-          "name": "shop-pricing",
+          "name": "calls-stack-production-shop-pricing",
           "observability": {
             "enabled": true,
             "logs": {
@@ -461,7 +461,7 @@
         "type": "cloudflare:index/accountToken:AccountToken",
         "properties": {
           "accountId": "0123456789abcdef0123456789abcdef",
-          "name": "calls-stack-shop-storefront-shop-media",
+          "name": "calls-stack-production-shop-storefront-shop-media",
           "policies": [
             {
               "effect": "allow",
@@ -606,7 +606,7 @@
             },
             {
               "name": "SHOP_PRICING_SERVICE_URL",
-              "text": "https://shop-pricing",
+              "text": "https://calls-stack-production-shop-pricing",
               "type": "plain_text"
             }
           ],
@@ -656,7 +656,7 @@
         "type": "cloudflare:index/worker:Worker",
         "properties": {
           "accountId": "0123456789abcdef0123456789abcdef",
-          "name": "shop-storefront",
+          "name": "calls-stack-production-shop-storefront",
           "observability": {
             "enabled": true,
             "logs": {

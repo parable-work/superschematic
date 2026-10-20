@@ -21,12 +21,12 @@ import (
 )
 
 // TestJobNodes reads SweepCarts' Worker in Staging: a Worker of its own,
-// named after the job's deployable, in infrastructure, with workers.dev
-// off, since a job is never exposed, and Workers Logs on; a version that
-// holds the job's bundle, the CPU limit its settings give and its API's
-// config as bindings; a deployment of all traffic to it; and a Cron
-// Trigger on the Worker, on the job's schedule, once the deployment is
-// there.
+// named after the stack, the environment and the job's deployable, in
+// infrastructure, with workers.dev off, since a job is never exposed, and
+// Workers Logs on; a version that holds the job's bundle, the CPU limit
+// its settings give and its API's config as bindings; a deployment of all
+// traffic to it; and a Cron Trigger on the Worker, on the job's schedule,
+// once the deployment is there.
 func TestJobNodes(t *testing.T) {
 	reg := assemble(t)
 	env := resolveWeb(t, reg, "Staging")
@@ -34,11 +34,11 @@ func TestJobNodes(t *testing.T) {
 	if job == nil || job.Kind != ir.DeployableJob || job.Platform != cloudflare.Cron || job.Artifact != ir.ArtifactBundle {
 		t.Fatalf("the job is placed as %+v", job)
 	}
-	if job.Address != nil || job.PublicAddress != nil || job.ResourceName != sweepCartsJob {
+	if job.Address != nil || job.PublicAddress != nil || job.ResourceName != "web-stack-staging-"+sweepCartsJob {
 		t.Errorf("the job's names are %v, %v and %v", job.ResourceName, job.Address, job.PublicAddress)
 	}
 	worker := node(t, env, sweepCartsJob+".worker")
-	if worker.Phase != ir.PhaseInfrastructure || worker.Properties["name"] != sweepCartsJob {
+	if worker.Phase != ir.PhaseInfrastructure || worker.Properties["name"] != "web-stack-staging-"+sweepCartsJob {
 		t.Errorf("the Worker is %s with %v", worker.Phase, worker.Properties)
 	}
 	if got := jsonOf(t, worker.Properties["subdomain"]) + jsonOf(t, worker.Properties["observability"]); got != `{"enabled":false,"previewsEnabled":false}{"enabled":true,"logs":{"enabled":true,"invocationLogs":true}}` {
@@ -100,7 +100,7 @@ func TestJobSchedules(t *testing.T) {
 	}
 
 	preview := resolveWeb(t, reg, "Preview")
-	if got := jsonOf(t, preview.Deployable(sweepCartsJob).ResourceName); got != `{"$concat":["shop-storefront-sweep-carts-pr",{"$parameter":"pr"}]}` {
+	if got := jsonOf(t, preview.Deployable(sweepCartsJob).ResourceName); got != `{"$concat":["web-stack-preview-shop-storefront-sweep-carts-pr",{"$parameter":"pr"}]}` {
 		t.Errorf("the member's Worker is named %s", got)
 	}
 	node(t, preview, sweepCartsJob+".worker")
@@ -168,6 +168,7 @@ func TestJobRefusals(t *testing.T) {
 		s.Environments[0].Settings = nil
 		_, errs := resolveOver(t, reg, s, withJob(func(j *ir.Job) { j.Name = long }), "Staging")
 		refusedWith(t, errs, stack.CodeUnrealizable, "the Worker of job shop-storefront-"+ir.Kebab(long)+" would be named")
+		refusedWith(t, errs, stack.CodeUnrealizable, "shorten the job's name, the longest")
 	})
 	t.Run("a Go job", func(t *testing.T) {
 		s := webStack()

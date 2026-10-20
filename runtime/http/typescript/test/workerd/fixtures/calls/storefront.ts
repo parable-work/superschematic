@@ -73,7 +73,7 @@ const server = perIsolate(async (): Promise<Handle> => {
     return c.json(await quote(c.req.param('sku'), await bearer(await forged(false))));
   });
   app.get('/self', async c => {
-    const answer = await inProcess('https://shop-storefront/healthz');
+    const answer = await inProcess('https://calls-stack-staging-shop-storefront/healthz');
     return c.json({ status: answer.status, body: await answer.json() });
   });
   app.put('/images/:name', async c => {
@@ -107,7 +107,7 @@ const handler = {
       if (JSON.stringify(got) !== JSON.stringify(want)) failures.push(`${what}: got ${JSON.stringify(got)}, want ${JSON.stringify(want)}`);
     };
     const get = async (path: string, init?: RequestInit) => {
-      const answer = await handler.fetch(new Request(`https://shop-storefront${path}`, init));
+      const answer = await handler.fetch(new Request(`https://calls-stack-staging-shop-storefront${path}`, init));
       expect(`${path} status`, answer.status, 200);
       return answer.json();
     };
@@ -125,7 +125,7 @@ const handler = {
       read: 'a tea',
       contentType: 'image/png',
       listed: ['images/tea.png'],
-      url: 'https://0123456789abcdef0123456789abcdef.r2.cloudflarestorage.com/calls-stack-shop-media/images/tea.png',
+      url: 'https://0123456789abcdef0123456789abcdef.r2.cloudflarestorage.com/calls-stack-staging-shop-media/images/tea.png',
       credential: '8f2b4d6e0a1c3e5f7b9d1f3a5c7e9b0d/20261020/auto/s3/aws4_request',
       expires: '600',
       signature: 64,

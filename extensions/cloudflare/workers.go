@@ -11,7 +11,8 @@ import (
 )
 
 // The Workers platform (section 18.2, D64): a TypeScript server is a
-// Cloudflare Worker named after the deployable, which runs the bundle its
+// Cloudflare Worker named after its stack, its environment and the
+// deployable (names.go), which runs the bundle its
 // package's bundle.ts writes (section 18.5). A Worker is three nodes:
 //
 //   - the `worker`, in infrastructure, so a callee exists before any
@@ -26,7 +27,7 @@ import (
 //   - a `workersDeployment` sending all traffic to that version.
 //
 // An exposed server under a domain gets a `workersCustomDomain` for
-// `<name>.<domain>` in the exposure step, whose record and certificate
+// `<label>.<domain>` in the exposure step, whose record and certificate
 // Cloudflare writes: the platform returns no DNS records (section 18.11).
 
 // Workers runs TypeScript servers as Cloudflare Workers.
@@ -106,10 +107,18 @@ func workersPlatform() registry.PlatformSpec {
 	}
 }
 
-// workerName names a deployable's Worker after it: `shop-api`, or
-// `shop-api-pr123` under a parameter.
+// workerName names a deployable's Worker after its stack, its environment
+// and itself, `acme-shop-staging-shop-api`, or
+// `acme-shop-preview-shop-api-pr123` under a parameter (names.go): one
+// account may hold several stacks and environments.
 func workerName(ctx registry.PlatformContext) any {
-	return suffixed(ctx.Environment, kebab(ctx.Deployable.Name), "-")
+	return accountName(ctx.Environment, ctx.Deployable.Name)
+}
+
+// workerNameParts are what a Worker's name joins, which a refusal of a
+// long one names.
+func workerNameParts(env registry.StackEnvironment, d ir.ResolvedDeployable, what string) []namePart {
+	return partsOf(env, what, d.Name)
 }
 
 // workerAddress is how an edge reaches a Worker: through a service
@@ -120,8 +129,9 @@ func workerAddress(ctx registry.PlatformContext) any {
 }
 
 // workerPublicAddress is where a browser reaches an exposed Worker: under
-// a domain, `https://<name>.<domain>`, its custom domain; without one,
-// `https://<name>.<workersSubdomain>.workers.dev`. An environment whose
+// a domain, `https://<label>.<domain>`, its custom domain, the label the
+// deployable's name (hostLabel); without one,
+// `https://<name>.<workersSubdomain>.workers.dev`, the Worker's name. An environment whose
 // values record no workersSubdomain gives it none, and lowerServer refuses
 // it. A Worker that is not exposed has none.
 func workerPublicAddress(ctx registry.PlatformContext) any {
@@ -130,7 +140,7 @@ func workerPublicAddress(ctx registry.PlatformContext) any {
 		return nil
 	}
 	if domain := ctx.Environment.Domain; domain != "" {
-		return join("https://", d.ResourceName, ".", domain)
+		return join("https://", hostLabel(ctx.Environment, d.Name), ".", domain)
 	}
 	v := targetValuesOf(ctx.Environment.Values)
 	if v.workersSubdomain == "" {
@@ -148,7 +158,7 @@ func lowerServer(ctx registry.PlatformContext) (registry.Lowered, error) {
 	d := ctx.Deployable
 	env := ctx.Environment
 	v := targetValuesOf(env.Values)
-	if err := checkWorkerName("the Worker of server "+d.Name, d.ResourceName, "the deployable"); err != nil {
+	if err := checkWorkerName("the Worker of server "+d.Name, d.ResourceName, workerNameParts(env, d, "the deployable")); err != nil {
 		return registry.Lowered{}, err
 	}
 	workersDev := d.Exposed && env.Domain == ""
@@ -164,7 +174,7 @@ func lowerServer(ctx registry.PlatformContext) (registry.Lowered, error) {
 	// destroy removes it, with its bindings, first (calls.go).
 	out.Resources[0].DependsOn = bindingDependencies(d)
 	if d.Exposed && env.Domain != "" {
-		out.Resources = append(out.Resources, customDomain(d, v, env.Domain))
+		out.Resources = append(out.Resources, customDomain(d, v, env))
 	}
 	return out, nil
 }
@@ -208,14 +218,14 @@ func workerNodes(d ir.ResolvedDeployable, v accountValues, workersDev, logs bool
 	}
 }
 
-// customDomain is an exposed Worker's custom domain, `<name>.<domain>`, in
-// the exposure step (section 18.11). Cloudflare finds the zone by the
-// hostname within the account, writes its record and issues its
-// certificate.
-func customDomain(d ir.ResolvedDeployable, v accountValues, domain string) *ir.Resource {
+// customDomain is an exposed Worker's custom domain, `<label>.<domain>`
+// under the environment's domain (hostLabel), in the exposure step
+// (section 18.11). Cloudflare finds the zone by the hostname within the
+// account, writes its record and issues its certificate.
+func customDomain(d ir.ResolvedDeployable, v accountValues, env registry.StackEnvironment) *ir.Resource {
 	return &ir.Resource{ID: domainID(d.Name), Type: TypeWorkersCustomDomain, Phase: ir.PhaseExposure, Properties: map[string]any{
 		"accountId": v.accountID,
-		"hostname":  join(d.ResourceName, ".", domain),
+		"hostname":  join(hostLabel(env, d.Name), ".", env.Domain),
 		"service":   ir.Output{Resource: workerID(d.Name), Name: "name"},
 	}}
 }

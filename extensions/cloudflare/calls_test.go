@@ -152,7 +152,7 @@ func TestWorkersCallWorkers(t *testing.T) {
 	want := `{"binding":{"name":"SHOP_PRICING_SERVICE","worker":{"$output":{"resource":"shop-pricing.worker","name":"name"}}},` +
 		`"credential":{"audience":"shop-pricing","issuer":"shop-storefront",` +
 		`"key":{"$output":{"resource":"shop-storefront.calls.shop-pricing.key","name":"privateKeyPemPkcs8"}},"source":"signed-token"},` +
-		`"url":"https://shop-pricing"}`
+		`"url":"https://calls-stack-staging-shop-pricing"}`
 	if got := derivedValue(t, env, "shop-storefront", "SHOP_PRICING_SERVICE"); got != want {
 		t.Errorf("the storefront's endpoint is\n%s, want\n%s", got, want)
 	}
@@ -160,7 +160,7 @@ func TestWorkersCallWorkers(t *testing.T) {
 	bindings := bindingsOf(t, node(t, env, "shop-storefront.version"))
 	for name, want := range map[string]string{
 		"SHOP_PRICING_SERVICE":                     `{"name":"SHOP_PRICING_SERVICE","service":{"$output":{"resource":"shop-pricing.worker","name":"name"}},"type":"service"}`,
-		"SHOP_PRICING_SERVICE_URL":                 `{"name":"SHOP_PRICING_SERVICE_URL","text":"https://shop-pricing","type":"plain_text"}`,
+		"SHOP_PRICING_SERVICE_URL":                 `{"name":"SHOP_PRICING_SERVICE_URL","text":"https://calls-stack-staging-shop-pricing","type":"plain_text"}`,
 		"SHOP_PRICING_SERVICE_BINDING_NAME":        `{"name":"SHOP_PRICING_SERVICE_BINDING_NAME","text":"SHOP_PRICING_SERVICE","type":"plain_text"}`,
 		"SHOP_PRICING_SERVICE_BINDING_WORKER":      `{"name":"SHOP_PRICING_SERVICE_BINDING_WORKER","text":{"$output":{"resource":"shop-pricing.worker","name":"name"}},"type":"plain_text"}`,
 		"SHOP_PRICING_SERVICE_CREDENTIAL_SOURCE":   `{"name":"SHOP_PRICING_SERVICE_CREDENTIAL_SOURCE","text":"signed-token","type":"plain_text"}`,
@@ -244,11 +244,11 @@ func TestWorkersCallUnderAParameter(t *testing.T) {
 	want := `{"binding":{"name":"SHOP_PRICING_SERVICE","worker":{"$output":{"resource":"shop-pricing.worker","name":"name"}}},` +
 		`"credential":{"audience":"shop-pricing","issuer":"shop-storefront",` +
 		`"key":{"$output":{"resource":"shop-storefront.calls.shop-pricing.key","name":"privateKeyPemPkcs8"}},"source":"signed-token"},` +
-		`"url":{"$concat":["https://shop-pricing-pr",{"$parameter":"pr"}]}}`
+		`"url":{"$concat":["https://calls-stack-preview-shop-pricing-pr",{"$parameter":"pr"}]}}`
 	if got := derivedValue(t, env, "shop-storefront", "SHOP_PRICING_SERVICE"); got != want {
 		t.Errorf("the member's endpoint is\n%s, want\n%s", got, want)
 	}
-	if got := jsonOf(t, node(t, env, "shop-pricing.worker").Properties["name"]); got != `{"$concat":["shop-pricing-pr",{"$parameter":"pr"}]}` {
+	if got := jsonOf(t, node(t, env, "shop-pricing.worker").Properties["name"]); got != `{"$concat":["calls-stack-preview-shop-pricing-pr",{"$parameter":"pr"}]}` {
 		t.Errorf("the member's pricing Worker is named %s", got)
 	}
 }
@@ -265,7 +265,7 @@ func TestWorkersCallInProcess(t *testing.T) {
 	if errs != nil {
 		t.Fatal(errs)
 	}
-	if got := derivedValue(t, env, "edge", "SHOP_PRICING_SERVICE"); got != `{"url":"https://edge"}` {
+	if got := derivedValue(t, env, "edge", "SHOP_PRICING_SERVICE"); got != `{"url":"https://calls-stack-staging-edge"}` {
 		t.Errorf("the in-process endpoint is %s", got)
 	}
 	for _, res := range env.Resources.Resources {

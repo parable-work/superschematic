@@ -45,7 +45,6 @@ type fakeCloud struct {
 	buckets   map[string]bool
 	objects   map[string][]byte            // bucket/key
 	meta      map[string]map[string]string // bucket/key
-	d1        map[string]string            // name, then uuid
 	nextID    int
 }
 
@@ -104,7 +103,6 @@ func newFakeCloud() *fakeCloud {
 		buckets:   map[string]bool{},
 		objects:   map[string][]byte{},
 		meta:      map[string]map[string]string{},
-		d1:        map[string]string{},
 	}
 }
 
@@ -241,6 +239,20 @@ func (c *fakeCloud) PutObject(_ context.Context, account, bucket, key string, da
 	return c.checkAccount(account)
 }
 
+func (c *fakeCloud) CreateObject(_ context.Context, account, bucket, key string, data []byte) (bool, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.buckets[bucket] {
+		return false, fmt.Errorf("fake: no bucket %s", bucket)
+	}
+	if _, ok := c.objects[bucket+"/"+key]; ok {
+		return false, c.checkAccount(account)
+	}
+	c.objects[bucket+"/"+key] = slices.Clone(data)
+	c.record("create %s/%s", bucket, key)
+	return true, c.checkAccount(account)
+}
+
 func (c *fakeCloud) DeleteObject(_ context.Context, account, bucket, key string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -263,19 +275,6 @@ func (c *fakeCloud) ListObjects(_ context.Context, account, bucket, prefix strin
 	}
 	slices.Sort(keys)
 	return keys, c.checkAccount(account)
-}
-
-func (c *fakeCloud) D1Database(_ context.Context, account, name string) (string, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if err := c.checkAccount(account); err != nil {
-		return "", err
-	}
-	uuid, ok := c.d1[name]
-	if !ok {
-		return "", fmt.Errorf("fake: no D1 database %s: %w", name, fs.ErrNotExist)
-	}
-	return uuid, nil
 }
 
 // fakeGitHub is the repository's Actions secrets in memory; unready makes
@@ -402,8 +401,9 @@ type fixture struct {
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
 	f := &fixture{cloud: newFakeCloud(), gh: newFakeGitHub(), prov: &fakeProvisioner{}, shell: shell{cloudflare.TokenEnv: engineerToken}}
-	// The randomness: a passphrase's 32 bytes, then a check's salt.
-	f.random = strings.NewReader(strings.Repeat("\x01", 32) + strings.Repeat("\x02", 32) + strings.Repeat("\x03", 64))
+	// The randomness: the state's passphrase's 32 bytes, then its check's
+	// salt; then the bootstrap's passphrase's, then its check's salt.
+	f.random = strings.NewReader(strings.Repeat("\x01", 32) + strings.Repeat("\x02", 32) + strings.Repeat("\x03", 32) + strings.Repeat("\x04", 32) + strings.Repeat("\x05", 64))
 	ext := cloudflare.Extension{Cloud: f.cloud, GitHub: f.gh, Getenv: f.shell.getenv, Rand: f.random}
 	reg, err := registry.Assemble(registry.DefaultNaming(), &stacktest.Extension{}, ext, pulumiStub{prov: f.prov})
 	if err != nil {

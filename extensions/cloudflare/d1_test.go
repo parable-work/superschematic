@@ -80,7 +80,7 @@ func d1Stack() *ir.Stack {
 
 // TestD1Golden resolves the D1 fixture in each environment and checks its
 // environment.json against the golden file: a d1Database per hosted DB
-// schema, named <stack>-<db> with the parameter's value appended in
+// schema, named <stack>-<env>-<db> with the parameter's value appended in
 // Preview, in sqlite, with the settings' location hint or jurisdiction.
 // Resolution validated each node against the pinned d1Database.
 func TestD1Golden(t *testing.T) {
@@ -203,10 +203,17 @@ func TestD1Refusals(t *testing.T) {
 	}
 }
 
-// TestD1Name: a D1 database is named after its stack and its DB schema.
+// TestD1Name: a D1 database is named after its stack, its environment and
+// its DB schema, in kebab case with single hyphens.
 func TestD1Name(t *testing.T) {
-	if got := cloudflare.D1Name("AcmeReviews", "reviews-db"); got != "acme-reviews-reviews-db" {
-		t.Errorf("D1Name = %q", got)
+	for _, tc := range []struct{ stack, env, service, want string }{
+		{"AcmeReviews", "Staging", "reviews-db", "acme-reviews-staging-reviews-db"},
+		{"acme_reviews", "StagingEu", "reviews_db", "acme-reviews-staging-eu-reviews-db"},
+		{"acme--reviews-", "Prod2", "reviews-db", "acme-reviews-prod2-reviews-db"},
+	} {
+		if got := cloudflare.D1Name(tc.stack, tc.env, tc.service); got != tc.want {
+			t.Errorf("D1Name(%s, %s, %s) = %q, want %q", tc.stack, tc.env, tc.service, got, tc.want)
+		}
 	}
 }
 

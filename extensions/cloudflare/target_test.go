@@ -142,10 +142,11 @@ func TestPolicyDomainOnCloudflare(t *testing.T) {
 	}
 }
 
-// TestCIIdentity: a plain environment's deploy job reads the token and the
-// passphrase from the GitHub environment of its name, its plan job and a
-// parameterized environment's preview job from repository secrets
-// suffixed with the environment's name (section 18.3).
+// TestCIIdentity: a plain environment's deploy job reads the deployer's
+// token and the passphrase from the GitHub environment of its name, its
+// plan job the planner's and a parameterized environment's preview job the
+// preview's from repository secrets; each name ends with the stack's name
+// and the environment's (section 18.3).
 func TestCIIdentity(t *testing.T) {
 	ci := newFixture(t).target(t).CI
 	identity := func(token, passphrase, environment string) *registry.CIIdentity {
@@ -161,9 +162,9 @@ func TestCIIdentity(t *testing.T) {
 		role registry.CIRole
 		want *registry.CIIdentity
 	}{
-		{staging(), registry.CIPlanner, identity("CLOUDFLARE_PLANNER_TOKEN_STAGING", "PULUMI_CONFIG_PASSPHRASE_STAGING", "")},
-		{staging(), registry.CIDeployer, identity("CLOUDFLARE_API_TOKEN", "PULUMI_CONFIG_PASSPHRASE", "Staging")},
-		{preview, registry.CIDeployer, identity("CLOUDFLARE_PREVIEW_TOKEN_PREVIEW_EU", "PULUMI_CONFIG_PASSPHRASE_PREVIEW_EU", "")},
+		{staging(), registry.CIPlanner, identity("CLOUDFLARE_PLANNER_TOKEN_EDGE_STACK_STAGING", "PULUMI_CONFIG_PASSPHRASE_EDGE_STACK_STAGING", "")},
+		{staging(), registry.CIDeployer, identity("CLOUDFLARE_DEPLOYER_TOKEN_EDGE_STACK_STAGING", "PULUMI_CONFIG_PASSPHRASE_EDGE_STACK_STAGING", "Staging")},
+		{preview, registry.CIDeployer, identity("CLOUDFLARE_PREVIEW_TOKEN_EDGE_STACK_PREVIEW_EU", "PULUMI_CONFIG_PASSPHRASE_EDGE_STACK_PREVIEW_EU", "")},
 		{cloudflareEnv("Staging", nil), registry.CIDeployer, nil},
 	} {
 		if got := ci.Identity(tc.env, tc.role); !reflect.DeepEqual(got, tc.want) {

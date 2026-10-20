@@ -29,7 +29,7 @@
       },
       "resourceName": {
         "$concat": [
-          "calls-stack-shop-media-pr",
+          "calls-stack-preview-shop-media-pr",
           {
             "$parameter": "pr"
           }
@@ -56,7 +56,7 @@
       "artifact": "bundle",
       "resourceName": {
         "$concat": [
-          "shop-pricing-pr",
+          "calls-stack-preview-shop-pricing-pr",
           {
             "$parameter": "pr"
           }
@@ -64,7 +64,7 @@
       },
       "address": {
         "$concat": [
-          "https://shop-pricing-pr",
+          "https://calls-stack-preview-shop-pricing-pr",
           {
             "$parameter": "pr"
           }
@@ -139,7 +139,7 @@
       "exposed": true,
       "resourceName": {
         "$concat": [
-          "shop-storefront-pr",
+          "calls-stack-preview-shop-storefront-pr",
           {
             "$parameter": "pr"
           }
@@ -147,7 +147,7 @@
       },
       "address": {
         "$concat": [
-          "https://shop-storefront-pr",
+          "https://calls-stack-preview-shop-storefront-pr",
           {
             "$parameter": "pr"
           }
@@ -155,7 +155,7 @@
       },
       "publicAddress": {
         "$concat": [
-          "https://shop-storefront-pr",
+          "https://calls-stack-preview-shop-storefront-pr",
           {
             "$parameter": "pr"
           },
@@ -224,7 +224,7 @@
             },
             "url": {
               "$concat": [
-                "https://shop-pricing-pr",
+                "https://calls-stack-preview-shop-pricing-pr",
                 {
                   "$parameter": "pr"
                 }
@@ -275,7 +275,7 @@
           "location": "weur",
           "name": {
             "$concat": [
-              "calls-stack-shop-media-pr",
+              "calls-stack-preview-shop-media-pr",
               {
                 "$parameter": "pr"
               }
@@ -467,7 +467,7 @@
           "accountId": "0123456789abcdef0123456789abcdef",
           "name": {
             "$concat": [
-              "shop-pricing-pr",
+              "calls-stack-preview-shop-pricing-pr",
               {
                 "$parameter": "pr"
               }
@@ -541,7 +541,7 @@
           "accountId": "0123456789abcdef0123456789abcdef",
           "name": {
             "$concat": [
-              "calls-stack-shop-storefront-shop-media-pr",
+              "calls-stack-preview-shop-storefront-shop-media-pr",
               {
                 "$parameter": "pr"
               }
@@ -693,7 +693,7 @@
               "name": "SHOP_PRICING_SERVICE_URL",
               "text": {
                 "$concat": [
-                  "https://shop-pricing-pr",
+                  "https://calls-stack-preview-shop-pricing-pr",
                   {
                     "$parameter": "pr"
                   }
@@ -750,7 +750,7 @@
           "accountId": "0123456789abcdef0123456789abcdef",
           "name": {
             "$concat": [
-              "shop-storefront-pr",
+              "calls-stack-preview-shop-storefront-pr",
               {
                 "$parameter": "pr"
               }

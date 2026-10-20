@@ -23,7 +23,8 @@ import (
 // the state store and the deploy keep in R2. NewCloud returns the one over
 // Cloudflare's REST API and R2's S3 API, with an API token; tests pass a
 // fake. Every call is idempotent but CreateSecretsStore and CreateSecret,
-// which their callers make only after they found none.
+// which their callers make only after they found none, and CreateObject,
+// which writes only the first time.
 type Cloud interface {
 	// VerifyToken checks the token the Cloud calls with: an account token
 	// of account, else a user token. It returns the token's id, which is
@@ -63,16 +64,16 @@ type Cloud interface {
 	// PutObject replaces an object, with metadata, which may be nil.
 	PutObject(ctx context.Context, account, bucket, key string, data []byte, metadata map[string]string) error
 
+	// CreateObject writes an object only if the key holds none, a PUT
+	// with `If-None-Match: *`: created is false, with no error, when one
+	// was there, which a write at the same time may have put.
+	CreateObject(ctx context.Context, account, bucket, key string, data []byte) (created bool, err error)
+
 	// DeleteObject deletes an object; a missing one is not an error.
 	DeleteObject(ctx context.Context, account, bucket, key string) error
 
 	// ListObjects returns the keys of the objects under prefix, sorted.
 	ListObjects(ctx context.Context, account, bucket, prefix string) ([]string, error)
-
-	// D1Database returns the uuid of the account's D1 database named
-	// name, which the migration runner's d1:// URL names, or an error that
-	// wraps fs.ErrNotExist when the account has none.
-	D1Database(ctx context.Context, account, name string) (string, error)
 }
 
 // Token is an API token as Cloudflare verifies it.
@@ -334,30 +335,6 @@ func (c *restCloud) UpdateSecret(ctx context.Context, account, store, id string,
 	return err
 }
 
-// d1Database is a D1 database as the API lists it.
-type d1Database struct {
-	UUID string `json:"uuid"`
-	Name string `json:"name"`
-}
-
-func (c *restCloud) D1Database(ctx context.Context, account, name string) (string, error) {
-	// The list's name filter may match more than the name, so the name is
-	// matched here too.
-	dbs, err := list[d1Database](ctx, c, "/accounts/"+url.PathEscape(account)+"/d1/database", url.Values{"name": {name}})
-	if err != nil {
-		return "", err
-	}
-	for _, db := range dbs {
-		if db.Name == name {
-			if db.UUID == "" {
-				return "", fmt.Errorf("cloudflare: D1 database %s is listed with no uuid", name)
-			}
-			return db.UUID, nil
-		}
-	}
-	return "", fmt.Errorf("cloudflare: account %s has no D1 database %s: %w", account, name, fs.ErrNotExist)
-}
-
 func (c *restCloud) EnsureBucket(ctx context.Context, account, bucket string) (bool, error) {
 	path := "/accounts/" + url.PathEscape(account) + "/r2/buckets"
 	_, err := c.call(ctx, http.MethodGet, path+"/"+url.PathEscape(bucket), nil, nil)
@@ -469,6 +446,25 @@ func (c *restCloud) PutObject(ctx context.Context, account, bucket, key string, 
 	}
 	_, _, err := c.s3(ctx, account, http.MethodPut, bucket, key, nil, data, header)
 	return err
+}
+
+func (c *restCloud) CreateObject(ctx context.Context, account, bucket, key string, data []byte) (bool, error) {
+	header := http.Header{}
+	header.Set("Content-Type", "application/octet-stream")
+	header.Set("If-None-Match", "*")
+	if data == nil {
+		data = []byte{}
+	}
+	resp, _, err := c.s3(ctx, account, http.MethodPut, bucket, key, nil, data, header)
+	if resp != nil && (resp.StatusCode == http.StatusPreconditionFailed || resp.StatusCode == http.StatusConflict) {
+		// 412: the key holds an object. 409: another conditional write
+		// to the key is in flight, which R2 lets win.
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func (c *restCloud) DeleteObject(ctx context.Context, account, bucket, key string) error {

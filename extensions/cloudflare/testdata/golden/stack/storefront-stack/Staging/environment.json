@@ -22,9 +22,9 @@
       "language": "TYPESCRIPT",
       "artifact": "bundle",
       "exposed": true,
-      "resourceName": "shop-storefront",
-      "address": "https://shop-storefront",
-      "publicAddress": "https://shop-storefront.acme.workers.dev"
+      "resourceName": "storefront-stack-staging-shop-storefront",
+      "address": "https://storefront-stack-staging-shop-storefront",
+      "publicAddress": "https://storefront-stack-staging-shop-storefront.acme.workers.dev"
     }
   ],
   "resources": {
@@ -109,7 +109,7 @@
         "type": "cloudflare:index/worker:Worker",
         "properties": {
           "accountId": "0123456789abcdef0123456789abcdef",
-          "name": "shop-storefront",
+          "name": "storefront-stack-staging-shop-storefront",
           "observability": {
             "enabled": true,
             "logs": {

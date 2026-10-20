@@ -17,7 +17,7 @@ import (
 
 // Buckets on R2 (docs/stack-model.md, sections 18.2 and 18.7, D54, D64): a
 // Bucket service is a private R2 bucket in the environment's account, named
-// after the stack and the bucket. R2 makes a bucket public only through an
+// after the stack, the environment and the bucket (names.go). R2 makes a bucket public only through an
 // r2.dev managed domain or a custom domain, which no platform emits and
 // buckets-never-public refuses. A Worker reaches a bucket through an
 // r2_bucket binding, and presigns S3 URLs for its objects with an account
@@ -103,20 +103,21 @@ func r2Platform() registry.PlatformSpec {
 	}
 }
 
-// R2BucketName names a Bucket service's bucket of a stack, `<stack>-<bucket>`
-// in kebab case (`acme-shop-shop-media`), since a bucket's name is unique
-// in its account, which may hold several stacks. A member of a
+// R2BucketName names a Bucket service's bucket of an environment of a
+// stack, `<stack>-<env>-<bucket>` in kebab case
+// (`acme-shop-staging-shop-media`), since a bucket's name is unique in its
+// account, which may hold several stacks and environments. A member of a
 // parameterized environment appends each parameter's name and value
 // (bucketName).
-func R2BucketName(stack, bucket string) string {
-	return kebab(stack) + "-" + kebab(bucket)
+func R2BucketName(stack, environment, bucket string) string {
+	return AccountName(stack, environment, bucket)
 }
 
 // bucketName is R2BucketName with each parameter's name and value
 // appended, so each member of a preview gets a bucket of its own:
-// `acme-shop-shop-media-pr123` when pr is 123.
+// `acme-shop-preview-shop-media-pr123` when pr is 123.
 func bucketName(ctx registry.PlatformContext) any {
-	return suffixed(ctx.Environment, R2BucketName(ctx.Environment.Stack, ctx.Deployable.Name), "-")
+	return accountName(ctx.Environment, ctx.Deployable.Name)
 }
 
 // bucketID and lifecycleID are the IDs of a bucket deployable's nodes.
@@ -146,7 +147,7 @@ var bucketNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*[a-z0-9]$`)
 func lowerBucket(ctx registry.PlatformContext) (registry.Lowered, error) {
 	d := ctx.Deployable
 	v := targetValuesOf(ctx.Environment.Values)
-	if err := checkBucketName(d.Name, d.ResourceName); err != nil {
+	if err := checkBucketName(d.Name, d.ResourceName, partsOf(ctx.Environment, "the Bucket service", d.Name)); err != nil {
 		return registry.Lowered{}, err
 	}
 	props := map[string]any{
@@ -206,23 +207,24 @@ func wholeNumber(v any) (int64, bool) {
 // checkBucketName refuses, as unrealizable, a bucket name R2 does not
 // take: outside 3 to 63 characters, or under a parameter one that leaves no
 // room for the value; with a character other than a lowercase letter, a
-// digit or a hyphen, or a hyphen at an end; or the name of the state
-// bucket, which bootstrap makes in every account.
-func checkBucketName(bucket string, name any) error {
-	rename := "the stack or the Bucket service"
+// digit or a hyphen, or a hyphen at an end; or the name of a bucket
+// bootstrap makes in every account. parts are what the name joins.
+func checkBucketName(bucket string, name any, parts []namePart) error {
 	n, refs := literalLength(name)
 	switch {
-	case !refs && (n < minBucketName || n > maxBucketName):
-		return registry.Unrealizable("the R2 bucket of %s would be named %q, %d characters, and R2 takes a name of %d to %d; give %s another name", bucket, name, n, minBucketName, maxBucketName, rename)
+	case !refs && n > maxBucketName:
+		return registry.Unrealizable("the R2 bucket of %s would be named %q, %d characters, and R2 takes a name of %d to %d: %s", bucket, name, n, minBucketName, maxBucketName, shorten(parts))
+	case !refs && n < minBucketName:
+		return registry.Unrealizable("the R2 bucket of %s would be named %q, %d characters, and R2 takes a name of %d to %d; give the Bucket service a longer name", bucket, name, n, minBucketName, maxBucketName)
 	case refs && n >= maxBucketName:
-		return registry.Unrealizable("the R2 bucket of %s would be named with %d characters before its parameter values, and R2 takes a name of at most %d; give %s a shorter name", bucket, n, maxBucketName, rename)
+		return registry.Unrealizable("the R2 bucket of %s would be named with %d characters before its parameter values, and R2 takes a name of at most %d: %s", bucket, n, maxBucketName, shorten(parts))
 	}
 	literal := literalText(name)
 	if !bucketNamePattern.MatchString(literal) {
-		return registry.Unrealizable("the R2 bucket of %s would be named %q, and R2 takes lowercase letters, digits and hyphens, a letter or a digit at each end; give %s another name", bucket, literal, rename)
+		return registry.Unrealizable("the R2 bucket of %s would be named %q, and R2 takes lowercase letters, digits and hyphens, a letter or a digit at each end; give the stack, the environment or the Bucket service another name", bucket, literal)
 	}
-	if literal == StateBucket {
-		return registry.Unrealizable("the R2 bucket of %s would be named %s, the bucket bootstrap keeps the account's state in; give %s another name", bucket, StateBucket, rename)
+	if literal == StateBucket || literal == BootstrapBucket {
+		return registry.Unrealizable("the R2 bucket of %s would be named %s, a bucket bootstrap keeps an account's state in; give the stack, the environment or the Bucket service another name", bucket, literal)
 	}
 	return nil
 }
@@ -258,8 +260,8 @@ func bucketTokenID(from, bucket string) string { return from + ".r2." + bucket +
 // value of an account token the edge mints, flagged secret, which reaches
 // the Worker as a secret_text binding. The token allows Workers R2 Storage
 // Bucket Item Write on that bucket alone, under its name,
-// `<stack>-<caller>-<bucket>` with the member's parameters: read and write
-// of the bucket's objects, and nothing of the bucket or any other.
+// `<stack>-<env>-<caller>-<bucket>` with the member's parameters: read and
+// write of the bucket's objects, and nothing of the bucket or any other.
 func connectR2(ctx registry.ConnectorContext) (registry.Connected, error) {
 	from, to := ctx.From, ctx.To
 	v := targetValuesOf(ctx.Environment.Values)
@@ -272,7 +274,7 @@ func connectR2(ctx registry.ConnectorContext) (registry.Connected, error) {
 			Phase: ir.PhaseInfrastructure,
 			Properties: map[string]any{
 				"accountId": v.accountID,
-				"name":      suffixed(ctx.Environment, kebab(ctx.Environment.Stack)+"-"+kebab(from.Name)+"-"+kebab(to.Name), "-"),
+				"name":      accountName(ctx.Environment, from.Name, to.Name),
 				"policies": []any{map[string]any{
 					"effect":           "allow",
 					"permissionGroups": []any{map[string]any{"id": R2ObjectsWriteGroup}},

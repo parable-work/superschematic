@@ -394,14 +394,16 @@ schema changes in that property alone; for a JSON or YAML schema it
 prints the property to add.
 
 On cloudflare it verifies the token in CLOUDFLARE_API_TOKEN, creates the R2
-bucket that holds the state, generates the state's passphrase on the first
-run and prints it once, or checks the one in PULUMI_CONFIG_PASSPHRASE,
-finds or creates the account's Secrets Store, and applies the deployer and
-planner account tokens. With --github it sets the tokens and the
-passphrase as the repository's GitHub Actions secrets through gh, at the
-scopes the generated workflow reads them from; without gh, it prints the
-commands to run and each token once. It records workersSubdomain and
-secretsStoreId beside accountId.
+buckets that hold the state and bootstrap's own state, generates each one's
+passphrase on the first run and prints it once, or checks the ones in
+PULUMI_CONFIG_PASSPHRASE and SUPERSCHEMATIC_BOOTSTRAP_PASSPHRASE, finds or
+creates the account's Secrets Store, and applies the deployer, planner and
+preview account tokens. With --github it sets the tokens the
+environment's jobs read and the state's passphrase as the repository's
+GitHub Actions secrets through gh, at the scopes the generated workflow
+reads them from; without gh, it prints the commands to run and each token
+once. No CI job gets the bootstrap's passphrase. It records
+workersSubdomain and secretsStoreId beside accountId.
 
 Last, it asks for each credential that has no value, without echoing it.`,
 		Args: cobra.ExactArgs(1),

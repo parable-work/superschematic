@@ -234,7 +234,7 @@ func TestWorkerNodes(t *testing.T) {
 	if store.Artifact != ir.ArtifactBundle || store.Platform != cloudflare.Workers {
 		t.Fatalf("the storefront is placed as %+v", store)
 	}
-	if store.PublicAddress != "https://shop-storefront.acme.workers.dev" || store.Address != "https://shop-storefront" {
+	if store.PublicAddress != "https://workers-stack-staging-shop-storefront.acme.workers.dev" || store.Address != "https://workers-stack-staging-shop-storefront" {
 		t.Errorf("the storefront's addresses are %v and %v", store.PublicAddress, store.Address)
 	}
 	if pricing := env.Deployable("shop-pricing"); pricing.PublicAddress != nil {
@@ -354,10 +354,10 @@ func TestWorkerExposure(t *testing.T) {
 	if errs != nil {
 		t.Fatal(errs)
 	}
-	if got := jsonOf(t, preview.Deployable("shop-storefront").ResourceName); got != `{"$concat":["shop-storefront-pr",{"$parameter":"pr"}]}` {
+	if got := jsonOf(t, preview.Deployable("shop-storefront").ResourceName); got != `{"$concat":["workers-stack-preview-shop-storefront-pr",{"$parameter":"pr"}]}` {
 		t.Errorf("the member's Worker is named %s", got)
 	}
-	if got := jsonOf(t, preview.Deployable("shop-storefront").PublicAddress); got != `{"$concat":["https://shop-storefront-pr",{"$parameter":"pr"},".acme.workers.dev"]}` {
+	if got := jsonOf(t, preview.Deployable("shop-storefront").PublicAddress); got != `{"$concat":["https://workers-stack-preview-shop-storefront-pr",{"$parameter":"pr"},".acme.workers.dev"]}` {
 		t.Errorf("the member's public address is %s", got)
 	}
 }
@@ -389,16 +389,17 @@ func TestWorkersRefusals(t *testing.T) {
 		s.Deployables = []*ir.DeployableDecl{{Name: long, Kind: ir.DeployableServer, Serves: []ir.ServiceRef{stacktest.ShopStorefront}}}
 		s.Expose = []ir.DeployableRef{{Deployable: long}}
 		_, errs := resolveOver(t, reg, s, stacktest.AcmeShop(), "Staging")
-		refusedWith(t, errs, stack.CodeUnrealizable, "the Worker of server "+long+" would be named \""+long+"\", 65 characters, and a Worker's name is at most 63")
+		refusedWith(t, errs, stack.CodeUnrealizable, "the Worker of server "+long+" would be named \"storefront-stack-staging-"+long+"\", 90 characters, and a Worker's name is at most 63, one DNS label under workers.dev: "+
+			"it joins stack's \"storefront-stack\" (16), environment's \"staging\" (7), deployable's \""+long+"\" (65) with hyphens; shorten the deployable's name, the longest")
 	})
 	t.Run("a name under a parameter", func(t *testing.T) {
 		s := workersStack()
-		name := strings.Repeat("s", 60)
+		name := strings.Repeat("s", 40)
 		s.Deployables = []*ir.DeployableDecl{{Name: name, Kind: ir.DeployableServer, Serves: []ir.ServiceRef{shopPricing}}}
 		_, errs := resolveOver(t, reg, s, workersServices(), "Preview")
-		refusedWith(t, errs, stack.CodeUnrealizable, "would be named with 63 characters before its parameter values")
+		refusedWith(t, errs, stack.CodeUnrealizable, "would be named with 65 characters before its parameter values")
 		if _, errs := resolveOver(t, reg, s, workersServices(), "Staging"); errs != nil {
-			t.Errorf("a 60-character name without a parameter: %v", errs)
+			t.Errorf("a 40-character name, 62 with the stack and the environment, without a parameter: %v", errs)
 		}
 	})
 	t.Run("an API over the user model", func(t *testing.T) {
@@ -436,10 +437,10 @@ func TestWorkersRefusals(t *testing.T) {
 	})
 }
 
-// TestPolicyNothingPublic: a Worker with workers.dev on, a custom domain
-// and a route are refused for a deployable that is not exposed, a job's
-// or none at all, and pass for an exposed server; the Workers fixture
-// passes.
+// TestPolicyNothingPublic: a Worker with workers.dev on, with preview URLs
+// on, or with no subdomain, a custom domain and a route are refused for a
+// deployable that is not exposed, a job's or none at all, and pass for an
+// exposed server; the Workers fixture passes.
 func TestPolicyNothingPublic(t *testing.T) {
 	target := newFixture(t).target(t)
 	check := target.Policies[slices.IndexFunc(target.Policies, func(r registry.PolicyRule) bool { return r.Name == cloudflare.PolicyNothingPublic })].Check
@@ -452,7 +453,9 @@ func TestPolicyNothingPublic(t *testing.T) {
 	}
 	env.Deployables = append(env.Deployables, &ir.ResolvedDeployable{Name: "nightly", Kind: ir.DeployableJob, Exposed: true})
 	for _, res := range []*ir.Resource{
-		{ID: "shop-pricing.open", Type: cloudflare.TypeWorker, Owners: []string{"shop-pricing"}, Properties: map[string]any{"subdomain": map[string]any{"enabled": true}}},
+		{ID: "shop-pricing.open", Type: cloudflare.TypeWorker, Owners: []string{"shop-pricing"}, Properties: map[string]any{"subdomain": map[string]any{"enabled": true, "previewsEnabled": false}}},
+		{ID: "shop-pricing.previews", Type: cloudflare.TypeWorker, Owners: []string{"shop-pricing"}, Properties: map[string]any{"subdomain": map[string]any{"enabled": false, "previewsEnabled": true}}},
+		{ID: "shop-pricing.bare", Type: cloudflare.TypeWorker, Owners: []string{"shop-pricing"}, Properties: map[string]any{}},
 		{ID: "shop-pricing.domain", Type: cloudflare.TypeWorkersCustomDomain, Owners: []string{"shop-pricing"}},
 		{ID: "nightly.route", Type: cloudflare.TypeWorkersRoute, Owners: []string{"nightly"}},
 		{ID: "stray.domain", Type: cloudflare.TypeWorkersCustomDomain},
@@ -462,6 +465,8 @@ func TestPolicyNothingPublic(t *testing.T) {
 	got := strings.Join(check(env), "\n")
 	for _, want := range []string{
 		"Worker shop-pricing.open has workers.dev on for shop-pricing, which is not exposed",
+		"Worker shop-pricing.previews has preview URLs on for shop-pricing, which is not exposed",
+		"Worker shop-pricing.bare sets no subdomain for shop-pricing, which is not exposed",
 		"custom domain shop-pricing.domain reaches a Worker for shop-pricing, which is not exposed",
 		"route nightly.route reaches a Worker for nightly, which is not exposed",
 		"custom domain stray.domain reaches a Worker for no deployable, which is not exposed",
@@ -470,8 +475,8 @@ func TestPolicyNothingPublic(t *testing.T) {
 			t.Errorf("the policy does not say %q:\n%s", want, got)
 		}
 	}
-	if strings.Count(got, "\n") != 3 {
-		t.Errorf("the policy found more than the four:\n%s", got)
+	if strings.Count(got, "\n") != 5 {
+		t.Errorf("the policy found more than the six:\n%s", got)
 	}
 }
 

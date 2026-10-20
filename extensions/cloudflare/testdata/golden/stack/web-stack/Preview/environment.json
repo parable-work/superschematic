@@ -28,7 +28,7 @@
       "exposed": true,
       "resourceName": {
         "$concat": [
-          "shop-storefront-pr",
+          "web-stack-preview-shop-storefront-pr",
           {
             "$parameter": "pr"
           }
@@ -36,7 +36,7 @@
       },
       "address": {
         "$concat": [
-          "https://shop-storefront-pr",
+          "https://web-stack-preview-shop-storefront-pr",
           {
             "$parameter": "pr"
           }
@@ -44,7 +44,7 @@
       },
       "publicAddress": {
         "$concat": [
-          "https://shop-storefront-pr",
+          "https://web-stack-preview-shop-storefront-pr",
           {
             "$parameter": "pr"
           },
@@ -65,7 +65,7 @@
             "origins": [
               {
                 "$concat": [
-                  "https://storefront-web-pr",
+                  "https://web-stack-preview-storefront-web-pr",
                   {
                     "$parameter": "pr"
                   },
@@ -105,7 +105,7 @@
       },
       "resourceName": {
         "$concat": [
-          "shop-storefront-sweep-carts-pr",
+          "web-stack-preview-shop-storefront-sweep-carts-pr",
           {
             "$parameter": "pr"
           }
@@ -145,7 +145,7 @@
       "exposed": true,
       "resourceName": {
         "$concat": [
-          "storefront-web-pr",
+          "web-stack-preview-storefront-web-pr",
           {
             "$parameter": "pr"
           }
@@ -153,7 +153,7 @@
       },
       "address": {
         "$concat": [
-          "https://storefront-web-pr",
+          "https://web-stack-preview-storefront-web-pr",
           {
             "$parameter": "pr"
           },
@@ -162,7 +162,7 @@
       },
       "publicAddress": {
         "$concat": [
-          "https://storefront-web-pr",
+          "https://web-stack-preview-storefront-web-pr",
           {
             "$parameter": "pr"
           },
@@ -176,7 +176,7 @@
           "value": {
             "url": {
               "$concat": [
-                "https://shop-storefront-pr",
+                "https://web-stack-preview-shop-storefront-pr",
                 {
                   "$parameter": "pr"
                 },
@@ -300,7 +300,7 @@
           "accountId": "0123456789abcdef0123456789abcdef",
           "name": {
             "$concat": [
-              "shop-storefront-sweep-carts-pr",
+              "web-stack-preview-shop-storefront-sweep-carts-pr",
               {
                 "$parameter": "pr"
               }
@@ -371,7 +371,7 @@
               "name": "SHOP_STOREFRONT_CORS_ORIGINS",
               "text": {
                 "$concat": [
-                  "https://storefront-web-pr",
+                  "https://web-stack-preview-storefront-web-pr",
                   {
                     "$parameter": "pr"
                   },
@@ -425,7 +425,7 @@
           "accountId": "0123456789abcdef0123456789abcdef",
           "name": {
             "$concat": [
-              "shop-storefront-pr",
+              "web-stack-preview-shop-storefront-pr",
               {
                 "$parameter": "pr"
               }
@@ -505,7 +505,7 @@
               "name": "SITE_CONFIG",
               "text": {
                 "$concat": [
-                  "{\"apis\":{\"shop-storefront\":{\"url\":\"https://shop-storefront-pr",
+                  "{\"apis\":{\"shop-storefront\":{\"url\":\"https://web-stack-preview-shop-storefront-pr",
                   {
                     "$parameter": "pr"
                   },
@@ -551,7 +551,7 @@
           "accountId": "0123456789abcdef0123456789abcdef",
           "name": {
             "$concat": [
-              "storefront-web-pr",
+              "web-stack-preview-storefront-web-pr",
               {
                 "$parameter": "pr"
               }

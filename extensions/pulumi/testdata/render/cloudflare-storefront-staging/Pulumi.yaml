@@ -53,7 +53,7 @@ resources:
     type: cloudflare:index/worker:Worker
     properties:
       accountId: 0123456789abcdef0123456789abcdef
-      name: shop-storefront
+      name: storefront-stack-staging-shop-storefront
       observability:
         enabled: true
         logs:

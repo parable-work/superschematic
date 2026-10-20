@@ -12,13 +12,19 @@ import (
 // cloudflare environment (section 18.1), and of the generated CI's jobs.
 const (
 	// TokenEnv holds the API token every call to Cloudflare carries: the
-	// engineer's, or the deployer's or the planner's in CI. The provider
-	// reads it there too, so no node carries it.
+	// engineer's, or the deployer's, the planner's or the preview's in CI.
+	// The provider reads it there too, so no node carries it.
 	TokenEnv = "CLOUDFLARE_API_TOKEN"
 
 	// PassphraseEnv holds the passphrase that encrypts the secrets in
 	// Pulumi's state, which bootstrap generates and whoever deploys keeps.
 	PassphraseEnv = "PULUMI_CONFIG_PASSPHRASE"
+
+	// BootstrapPassphraseEnv holds the passphrase that encrypts the
+	// secrets of bootstrap's own state in BootstrapBucket, the CI's tokens,
+	// which bootstrap generates on an account's first run and only the
+	// person who bootstraps keeps: no CI job holds it.
+	BootstrapPassphraseEnv = "SUPERSCHEMATIC_BOOTSTRAP_PASSPHRASE"
 )
 
 // targetValues is the schema of an environment's cloudflare values
@@ -66,12 +72,20 @@ func envValues(env *ir.ResolvedEnvironment) (accountValues, error) {
 
 // The state's layout in R2 (section 18.3). One bucket per account holds
 // Pulumi's state for every stack in it, under `.pulumi/`, and what the
-// deploy keeps, under StatePrefix.
+// deploy keeps, under StatePrefix; another holds bootstrap's own state.
 const (
 	// StateBucket is the R2 bucket that holds the state: Pulumi's, the
 	// deploy manifests, the passphrase's check, and the bundles' and sites'
 	// files.
 	StateBucket = "superschematic-state"
+
+	// BootstrapBucket is the R2 bucket that holds bootstrap's own Pulumi
+	// state, whose secrets are the CI's tokens, and its passphrase's
+	// check, apart from StateBucket: the planner's token, which writes
+	// StateBucket's objects, reaches nothing in it, and its secrets are
+	// encrypted with BootstrapPassphraseEnv's passphrase, which no CI job
+	// holds.
+	BootstrapBucket = "superschematic-bootstrap"
 
 	// StatePrefix is where superschematic's own objects sit in the bucket.
 	StatePrefix = "superschematic/"
@@ -90,9 +104,11 @@ const (
 	BundlePrefix = StatePrefix + "bundles/"
 	SitePrefix   = StatePrefix + "sites/"
 
-	// PassphraseCheck is the object that checks a passphrase: a random
-	// salt and its HMAC under the passphrase, which bootstrap writes on its
-	// first run.
+	// PassphraseCheck is the object, in StateBucket and in
+	// BootstrapBucket, that checks the passphrase of the state the bucket
+	// holds: a key PBKDF2-SHA256 derives from the passphrase, with its
+	// salt and its iteration count, which bootstrap writes on the
+	// account's first run.
 	PassphraseCheck = StatePrefix + "passphrase-check"
 )
 
@@ -104,12 +120,18 @@ func R2Endpoint(account string) string {
 // StateURL is the Pulumi backend URL of the state bucket at an S3
 // endpoint: R2Endpoint's, or a stand-in's in tests. R2 takes region auto
 // and path-style addressing; the credentials come from StateBackend.Env.
-func StateURL(endpoint string) string {
+func StateURL(endpoint string) string { return bucketURL(StateBucket, endpoint) }
+
+// BootstrapURL is the Pulumi backend URL of the bootstrap bucket at an S3
+// endpoint, as StateURL is the state bucket's.
+func BootstrapURL(endpoint string) string { return bucketURL(BootstrapBucket, endpoint) }
+
+func bucketURL(bucket, endpoint string) string {
 	q := url.Values{}
 	q.Set("endpoint", endpoint)
 	q.Set("region", "auto")
 	q.Set("use_path_style", "true")
-	return "s3://" + StateBucket + "?" + q.Encode()
+	return "s3://" + bucket + "?" + q.Encode()
 }
 
 // kebab lowercases a name and joins its words with hyphens: Orders is

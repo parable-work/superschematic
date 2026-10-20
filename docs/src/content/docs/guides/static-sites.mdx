@@ -240,7 +240,7 @@ needs no deploy first: the state bucket is bootstrap's.
 | Environment | The site's address |
 | --- | --- |
 | with a `domain` | `https://<site>.<domain>` (`https://shop-web.staging.acme.dev`), a custom domain whose record and certificate Cloudflare writes in the account's zone |
-| without one | `https://<site>.<workersSubdomain>.workers.dev`, under the account's workers.dev subdomain, which `stack bootstrap` records |
+| without one | `https://<stack>-<env>-<site>.<workersSubdomain>.workers.dev`, the site's Worker's name (`https://acme-shop-staging-shop-web.acme.workers.dev`), under the account's workers.dev subdomain, which `stack bootstrap` records |
 
 The config is not a file of the publish: the Worker's version holds it,
 each API's public address composed from names, so it changes with the

@@ -39,22 +39,29 @@ type runnerCall struct {
 	plans map[string]string
 }
 
-// migrateFixture is the extension over a fake Cloudflare holding the D1
-// fixture's databases, with a shell naming the runner and a stand-in that
-// records each run; fail makes the stand-in's runs fail.
+// migrateFixture is the extension over a fake Cloudflare, with a shell
+// naming the runner and a stand-in that records each run; fail makes the
+// stand-in's runs fail. outputs are what each environment's applied graph
+// outputs for its D1 database's node, by environment.
 type migrateFixture struct {
-	cloud *fakeCloud
-	shell shell
-	calls []runnerCall
-	fail  error
-	reg   *registry.Registry
+	cloud   *fakeCloud
+	shell   shell
+	calls   []runnerCall
+	fail    error
+	reg     *registry.Registry
+	outputs map[string]map[string]any
 }
+
+// d1Node is the node of reviews-db's D1 database in the D1 fixture.
+const d1Node = "reviews-db.d1.reviews-db"
 
 func newMigrateFixture(t *testing.T) *migrateFixture {
 	t.Helper()
 	f := &migrateFixture{cloud: newFakeCloud(), shell: shell{cloudflare.TokenEnv: "the-deployers-token", cloudflare.MigrateEnv: runnerPath}}
-	f.cloud.d1["reviews-stack-reviews-db"] = reviewsUUID
-	f.cloud.d1["reviews-stack-reviews-db-pr7"] = reviewsPrUUID
+	f.outputs = map[string]map[string]any{
+		"Staging": {"uuid": reviewsUUID, "id": reviewsUUID},
+		"Preview": {"uuid": reviewsPrUUID, "id": reviewsPrUUID},
+	}
 	ext := cloudflare.Extension{Cloud: f.cloud, Getenv: f.shell.getenv, Exec: func(cmd *exec.Cmd) error {
 		call := runnerCall{args: slices.Clone(cmd.Args), plans: map[string]string{}}
 		for _, kv := range cmd.Env {
@@ -104,7 +111,14 @@ func (f *migrateFixture) request(t *testing.T, env string, params map[string]str
 		Database: "reviews-db",
 		Phase:    phase,
 		Plans:    plans,
-		Log:      new(bytes.Buffer),
+		Outputs: func(context.Context) (map[string]map[string]any, error) {
+			out := map[string]map[string]any{"reviews.worker": {"id": "reviews", "name": "reviews-stack-" + strings.ToLower(env) + "-reviews"}}
+			if o := f.outputs[env]; o != nil {
+				out[d1Node] = o
+			}
+			return out, nil
+		},
+		Log: new(bytes.Buffer),
 	}
 }
 
@@ -120,8 +134,8 @@ func (f *migrateFixture) runner(t *testing.T) registry.MigrationRunner {
 // plan is a stand-in plan document of reviews-db.
 const plan = `{"version":1,"service":"reviews-db","dialect":"sqlite","steps":[]}`
 
-// TestMigrateRunsTheRunnerAgainstD1: a phase with steps finds reviews-db's
-// D1 database by its name, and runs superschematic-migrate job, from
+// TestMigrateRunsTheRunnerAgainstD1: a phase with steps reads the uuid of
+// reviews-db's D1 database from its node's outputs, and runs superschematic-migrate job, from
 // where SUPERSCHEMATIC_MIGRATE says, with the run's token, on a job
 // document whose database is d1://<account>/<uuid> with no privileges and
 // whose plan is beside it. The runner's output reaches the deploy's log,
@@ -158,7 +172,7 @@ func TestMigrateRunsTheRunnerAgainstD1(t *testing.T) {
 		t.Errorf("the job's directory is left behind: %v", err)
 	}
 	log := req.Log.(*bytes.Buffer).String()
-	for _, want := range []string{"reviews-db: 2 expand steps on D1 database reviews-stack-reviews-db (" + reviewsUUID + ")", "service reviews-db: applied 2 steps"} {
+	for _, want := range []string{"reviews-db: 2 expand steps on D1 database reviews-stack-staging-reviews-db (" + reviewsUUID + ")", "service reviews-db: applied 2 steps"} {
 		if !strings.Contains(log, want) {
 			t.Errorf("the log lacks %q:\n%s", want, log)
 		}
@@ -166,7 +180,7 @@ func TestMigrateRunsTheRunnerAgainstD1(t *testing.T) {
 }
 
 // TestMigrateAPreviewMember: a member of Preview migrates its own D1
-// database, named with its parameter's value.
+// database, whose uuid its own graph's outputs hold.
 func TestMigrateAPreviewMember(t *testing.T) {
 	f := newMigrateFixture(t)
 	req := f.request(t, "Preview", map[string]string{"pr": "7"}, ir.MigrationContract, registry.MigrationPlan{Service: "reviews-db", Plan: json.RawMessage(plan), Steps: 1})
@@ -196,15 +210,38 @@ func TestMigrateAPhaseWithNoSteps(t *testing.T) {
 	}
 }
 
+// TestMigrateReadsTheNodesID: a database no Worker binds has no `uuid`
+// among the outputs, since no binding references it, and the runner reads
+// its node's `id`, which the provider sets to the same uuid and the
+// program exports for every node.
+func TestMigrateReadsTheNodesID(t *testing.T) {
+	f := newMigrateFixture(t)
+	f.outputs["Staging"] = map[string]any{"id": reviewsUUID}
+	req := f.request(t, "Staging", nil, ir.MigrationExpand, registry.MigrationPlan{Service: "reviews-db", Plan: json.RawMessage(plan), Steps: 1})
+	if err := f.runner(t).Migrate(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	if db := f.calls[0].job["databases"].([]any)[0].(map[string]any); db["databaseUrl"] != "d1://"+accountID+"/"+reviewsUUID {
+		t.Errorf("the job document = %v", f.calls[0].job)
+	}
+}
+
 // TestMigrateRefusals: the runner refuses a run with no token, with no
-// runner, with no D1 database of the name its node gives, and fails when
-// the runner fails, naming the phase and the database.
+// runner, with no outputs, and with no uuid among its D1 database node's
+// outputs, and fails when the runner fails, naming the phase and the
+// database.
 func TestMigrateRefusals(t *testing.T) {
 	steps := registry.MigrationPlan{Service: "reviews-db", Plan: json.RawMessage(plan), Steps: 1}
 	for name, tc := range map[string]struct {
-		edit func(*migrateFixture)
-		want string
+		edit      func(*migrateFixture)
+		noOutputs bool
+		want      string
 	}{
+		"no outputs": {
+			edit:      func(*migrateFixture) {},
+			noOutputs: true,
+			want:      "cloudflare: migrate reviews-db: the deploy reads the runner no outputs",
+		},
 		"no token": {
 			edit: func(f *migrateFixture) { delete(f.shell, cloudflare.TokenEnv) },
 			want: "cloudflare: set CLOUDFLARE_API_TOKEN",
@@ -214,8 +251,8 @@ func TestMigrateRefusals(t *testing.T) {
 			want: "superschematic-migrate is not on PATH, and SUPERSCHEMATIC_MIGRATE names no runner",
 		},
 		"no database": {
-			edit: func(f *migrateFixture) { delete(f.cloud.d1, "reviews-stack-reviews-db") },
-			want: "cloudflare: migrate reviews-db: account " + accountID + " has no D1 database reviews-stack-reviews-db, which the infrastructure step creates",
+			edit: func(f *migrateFixture) { delete(f.outputs, "Staging") },
+			want: "cloudflare: migrate reviews-db: the outputs of Staging hold no uuid of node " + d1Node + ", D1 database reviews-stack-staging-reviews-db, which the infrastructure step creates",
 		},
 		"the runner fails": {
 			edit: func(f *migrateFixture) { f.fail = errors.New("exit status 1") },
@@ -226,7 +263,11 @@ func TestMigrateRefusals(t *testing.T) {
 			t.Setenv("PATH", t.TempDir())
 			f := newMigrateFixture(t)
 			tc.edit(f)
-			err := f.runner(t).Migrate(context.Background(), f.request(t, "Staging", nil, ir.MigrationExpand, steps))
+			req := f.request(t, "Staging", nil, ir.MigrationExpand, steps)
+			if tc.noOutputs {
+				req.Outputs = nil
+			}
+			err := f.runner(t).Migrate(context.Background(), req)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("Migrate = %v, want it to say %q", err, tc.want)
 			}

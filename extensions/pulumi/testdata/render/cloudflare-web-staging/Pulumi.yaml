@@ -73,7 +73,7 @@ resources:
     type: cloudflare:index/worker:Worker
     properties:
       accountId: 0123456789abcdef0123456789abcdef
-      name: shop-storefront-sweep-carts
+      name: web-stack-staging-shop-storefront-sweep-carts
       observability:
         enabled: true
         logs:
@@ -111,7 +111,7 @@ resources:
           text: "30"
           type: plain_text
         - name: SHOP_STOREFRONT_CORS_ORIGINS
-          text: https://storefront-web.acme.workers.dev
+          text: https://web-stack-staging-storefront-web.acme.workers.dev
           type: plain_text
       compatibilityDate: "2026-09-15"
       mainModule: main.js
@@ -139,7 +139,7 @@ resources:
     type: cloudflare:index/worker:Worker
     properties:
       accountId: 0123456789abcdef0123456789abcdef
-      name: shop-storefront
+      name: web-stack-staging-shop-storefront
       observability:
         enabled: true
         logs:
@@ -183,7 +183,7 @@ resources:
         - name: ASSETS
           type: assets
         - name: SITE_CONFIG
-          text: '{"apis":{"shop-storefront":{"url":"https://shop-storefront.acme.workers.dev"}}}'
+          text: '{"apis":{"shop-storefront":{"url":"https://web-stack-staging-shop-storefront.acme.workers.dev"}}}'
           type: plain_text
         - name: SITE_FALLBACK
           text: index.html
@@ -205,7 +205,7 @@ resources:
     type: cloudflare:index/worker:Worker
     properties:
       accountId: 0123456789abcdef0123456789abcdef
-      name: storefront-web
+      name: web-stack-staging-storefront-web
       observability:
         enabled: true
         logs:

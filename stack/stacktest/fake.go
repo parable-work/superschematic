@@ -144,7 +144,9 @@ const (
 // log; Register creates each one that is nil. Tools are the command-line
 // tools the fake provisioner declares, which a generated CI job installs;
 // nil declares none. NoJobRunner registers the target with no job runner,
-// as a target that runs no job on demand.
+// as a target that runs no job on demand. PrivilegelessMigrations
+// registers Migrations as a runner whose databases have no roles, as the
+// cloudflare target's on D1 (registry.PrivilegelessMigrations).
 type Extension struct {
 	Provisioner *FakeProvisioner
 	State       *FakeState
@@ -159,6 +161,8 @@ type Extension struct {
 	PreDestroy  *FakePreDestroy
 	Tools       []registry.CLITool
 	NoJobRunner bool
+
+	PrivilegelessMigrations bool
 }
 
 // Name is the extension's name.
@@ -209,6 +213,10 @@ func (e *Extension) Register(r *registry.Registry) error {
 	var jobs registry.JobRunner = e.Jobs
 	if e.NoJobRunner {
 		jobs = nil
+	}
+	var migrations registry.MigrationRunner = e.Migrations
+	if e.PrivilegelessMigrations {
+		migrations = privilegelessMigrations{e.Migrations}
 	}
 	server := func(name string, languages ...string) registry.PlatformSpec {
 		return registry.PlatformSpec{
@@ -373,7 +381,7 @@ func (e *Extension) Register(r *registry.Registry) error {
 		State:      e.State,
 		Secrets:    e.Secrets,
 		Bootstrap:  e.Bootstrap,
-		Migrations: e.Migrations,
+		Migrations: migrations,
 		Builder:    e.Builder,
 		CI:         e.CI,
 		Jobs:       jobs,

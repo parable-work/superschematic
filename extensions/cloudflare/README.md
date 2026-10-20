@@ -110,24 +110,27 @@ export abstract class Staging {}
 
 | File | |
 | --- | --- |
-| `cloudflare.go`, `target.go` | the registration, the values, the state's layout in R2 (`StateBucket`, `StateURL`) |
+| `cloudflare.go`, `target.go` | the registration, the values, the state's layout in R2 (`StateBucket`, `StateURL`, and bootstrap's own `BootstrapBucket`, `BootstrapURL`) |
 | `cloud.go`, `sigv4.go` | `Cloud`, what the target calls on Cloudflare outside the provisioner, over the REST API and R2's S3 API with plain `net/http` and SigV4; tests pass a fake |
-| `state.go` | the state store: Pulumi's S3 backend on R2, the passphrase secrets provider, and the manifests with a history copy |
+| `state.go` | the state store: Pulumi's S3 backend on R2, with no AWS setup of the shell's, the passphrase secrets provider, and the manifests with a history copy |
 | `secrets.go` | the secret store over the Secrets Store, `<Stack>-<Environment>-<Type>-<FIELD>` |
-| `bootstrap.go`, `github.go` | bootstrap: the state bucket, the passphrase and its check, the Secrets Store, the deployer and planner account tokens, and `--github` through `gh` |
-| `ci.go` | the CI identity, `cloudflare-api-token`, naming the GitHub secrets each job reads |
-| `workers.go`, `names.go` | the `cloudflare.workers` platform: a TypeScript server as a Worker, its version and its deployment, its config as bindings, its custom domain; names suffixed per member and refused over 63 characters |
+| `bootstrap.go`, `github.go` | bootstrap: the state and bootstrap buckets, their passphrases and each one's PBKDF2 check, written once, the Secrets Store, the deployer, planner and preview account tokens, kept in the bootstrap bucket, and `--github` through `gh` |
+| `ci.go` | the CI identity, `cloudflare-api-token`, naming the GitHub secrets each job reads, `<NAME>_<STACK>_<ENV>` |
+| `names.go` | every name in the account, `<stack>-<env>-<name>` (`AccountName`), suffixed per member, and the refusal of a Worker name over 63 characters, naming the part to shorten |
+| `workers.go` | the `cloudflare.workers` platform: a TypeScript server as a Worker, its version and its deployment, its config as bindings, its custom domain |
 | `bundles.go` | the bundle store: each bundle's files in the state bucket under their digest, and back |
 | `calls.go` | `cloudflare.workers-workers`, the connector of a call between Workers: a service binding and a signed token with the edge's key |
 | `r2.go` | the `cloudflare.r2` platform, `cloudflare.workers-r2`, the connector of a bucket edge, `buckets-never-public`, and `PreDestroy`, which empties a member's buckets |
-| `d1.go` | the `cloudflare.d1` platform: a `d1Database` per hosted DB schema, `<stack>-<db>` with a suffix per parameter, in `sqlite`, with `locationHint` or `jurisdiction`; and `cloudflare.workers-d1`, the connector of a sql edge, a d1 binding |
-| `migrations.go` | the migration runner: `superschematic-migrate job` on the deploying machine, against `d1://<accountId>/<uuid>`, each uuid looked up by name |
+| `d1.go` | the `cloudflare.d1` platform: a `d1Database` per hosted DB schema, `<stack>-<env>-<db>` with a suffix per parameter, in `sqlite`, with `locationHint` or `jurisdiction`; and `cloudflare.workers-d1`, the connector of a sql edge, a d1 binding |
+| `migrations.go` | the migration runner: `superschematic-migrate job` on the deploying machine, against `d1://<accountId>/<uuid>`, each uuid read from the applied graph's outputs (`MigrationRequest.Outputs`); a deploy that only changes which servers connect needs no runner (`PrivilegelessMigrations`) |
 | `cron.go` | the `cloudflare.cron` platform: a TypeScript job as a Worker and its Cron Trigger, in UTC, within Cloudflare's 15 minutes for a scheduled run; and `cloudflare.cron-workers`, `cloudflare.cron-r2` and `cloudflare.cron-d1`, a job's edges through the server's connectors |
 | `sites.go`, `site.js` | the `cloudflare.sites` platform: a site as a Worker with static assets and the script it embeds; the `cloudflare.site-workers` connector; and the site store, each build's files in the state bucket under their digest, and back |
-| `policy.go` | `domain-on-cloudflare` and `nothing-public-unless-exposed` |
+| `policy.go` | `domain-on-cloudflare` and `nothing-public-unless-exposed`, which also refuses an internal Worker's preview URLs and a Worker with no `subdomain` |
 
 Every command reads the token from `CLOUDFLARE_API_TOKEN` and the state's
-passphrase from `PULUMI_CONFIG_PASSPHRASE`. On the cloudflare target the
+passphrase from `PULUMI_CONFIG_PASSPHRASE`; `stack bootstrap` also reads
+its own state's passphrase from `SUPERSCHEMATIC_BOOTSTRAP_PASSPHRASE`,
+which no CI job holds. On the cloudflare target the
 DNS platform names no credential: the run's token carries the zone.
 
 ## Servers on Workers
@@ -136,7 +139,7 @@ DNS platform names no credential: the run's token carries the zone.
 (D64, section 18.5 of the design). It lowers a server to:
 
 - `<server>.worker`, a `cloudflare:index/worker:Worker` in infrastructure
-  named after the deployable, with Workers Logs on unless `logs: false`,
+  named `<stack>-<env>-<server>`, with Workers Logs on unless `logs: false`,
   workers.dev on only for an exposed server without a domain, previews off;
 - `<server>.version`, a `workerVersion` per rollout: `main.js`,
   `main.js.map` and `superscalar_wasm_bg.wasm`, each a `contentFile` under the
@@ -202,7 +205,7 @@ derives `{"url": "https://<server>"}` alone and stays in process.
 ## Buckets on R2
 
 `cloudflare.r2` lowers a bucket to `<bucket>.bucket`, an
-`r2Bucket` named `<stack>-<bucket>` with a suffix per parameter, and with
+`r2Bucket` named `<stack>-<env>-<bucket>` with a suffix per parameter, and with
 `deleteAfterDays` to `<bucket>.lifecycle`, an `r2BucketLifecycle` whose
 rule deletes each object that many days after it was written.
 
@@ -213,7 +216,8 @@ rule deletes each object that many days after it was written.
 | `deleteAfterDays` | integer, at least 1 | the lifecycle rule |
 
 `cloudflare.workers-r2` realizes a bucket edge from a Worker: it mints
-`<caller>.r2.<bucket>.token`, an `accountToken` whose one policy allows
+`<caller>.r2.<bucket>.token`, an `accountToken` named
+`<stack>-<env>-<caller>-<bucket>` whose one policy allows
 Workers R2 Storage Bucket Item Write (`R2ObjectsWriteGroup`, the id
 Cloudflare publishes, which bootstrap checks against the account's list)
 on `com.cloudflare.edge.r2.bucket.<account>_default_<bucket>`, and derives

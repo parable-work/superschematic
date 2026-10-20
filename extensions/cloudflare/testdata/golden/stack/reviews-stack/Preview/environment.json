@@ -27,7 +27,7 @@
       "dialect": "sqlite",
       "resourceName": {
         "$concat": [
-          "reviews-stack-archive-pr",
+          "reviews-stack-preview-archive-pr",
           {
             "$parameter": "pr"
           }
@@ -49,7 +49,7 @@
       "exposed": true,
       "resourceName": {
         "$concat": [
-          "reviews-pr",
+          "reviews-stack-preview-reviews-pr",
           {
             "$parameter": "pr"
           }
@@ -57,7 +57,7 @@
       },
       "address": {
         "$concat": [
-          "https://reviews-pr",
+          "https://reviews-stack-preview-reviews-pr",
           {
             "$parameter": "pr"
           }
@@ -65,7 +65,7 @@
       },
       "publicAddress": {
         "$concat": [
-          "https://reviews-pr",
+          "https://reviews-stack-preview-reviews-pr",
           {
             "$parameter": "pr"
           },
@@ -107,7 +107,7 @@
       },
       "resourceName": {
         "$concat": [
-          "reviews-stack-reviews-db-pr",
+          "reviews-stack-preview-reviews-db-pr",
           {
             "$parameter": "pr"
           }
@@ -141,7 +141,7 @@
           "accountId": "0123456789abcdef0123456789abcdef",
           "name": {
             "$concat": [
-              "reviews-stack-notes-db-pr",
+              "reviews-stack-preview-notes-db-pr",
               {
                 "$parameter": "pr"
               }
@@ -160,7 +160,7 @@
           "accountId": "0123456789abcdef0123456789abcdef",
           "name": {
             "$concat": [
-              "reviews-stack-reviews-db-pr",
+              "reviews-stack-preview-reviews-db-pr",
               {
                 "$parameter": "pr"
               }
@@ -283,7 +283,7 @@
           "accountId": "0123456789abcdef0123456789abcdef",
           "name": {
             "$concat": [
-              "reviews-pr",
+              "reviews-stack-preview-reviews-pr",
               {
                 "$parameter": "pr"
               }

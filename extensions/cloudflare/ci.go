@@ -10,7 +10,8 @@ import (
 // GitHub Actions secret, whose names the fields `token` and `passphrase`
 // give; `environment`, when set, names the GitHub environment that holds
 // them, else the repository does. The core's GitHub Actions renderer reads
-// both into the job's env, with no action (section 18.3, D64). It is the
+// both into the env of the steps that run the stack's commands, with no
+// action (section 18.3, D64). It is the
 // first CI identity that is a long-lived secret: Cloudflare offers no
 // federation.
 const CIIdentityKind = "cloudflare-api-token"
@@ -24,21 +25,26 @@ type ciSecrets struct {
 	environment string
 }
 
-// ciSecretsOf names the secrets a job reads (section 18.3): a plain
-// environment's deploy job reads CLOUDFLARE_API_TOKEN and
-// PULUMI_CONFIG_PASSPHRASE from the GitHub environment of its name, whose
-// reviewers approve it; its plan job reads repository secrets suffixed with
-// the environment's name, as a parameterized environment's preview job
-// does, since a pull request's job runs in no GitHub environment.
+// ciSecretsOf names the secrets a job reads (section 18.3), each name
+// ending with the stack's name and the environment's, in upper case with
+// their words joined by underscores, so two stacks of one repository, on
+// one account or two, never set each other's: a plain environment's deploy
+// job reads CLOUDFLARE_DEPLOYER_TOKEN_<STACK>_<ENV> and
+// PULUMI_CONFIG_PASSPHRASE_<STACK>_<ENV> from the GitHub environment of its
+// name, whose reviewers approve it; its plan job reads the planner's token
+// and the passphrase as repository secrets, as a parameterized
+// environment's preview job reads the preview's, since a pull request's
+// job runs in no GitHub environment.
 func ciSecretsOf(env *ir.ResolvedEnvironment, role registry.CIRole) ciSecrets {
-	suffix := "_" + screaming(env.Environment)
+	suffix := "_" + screaming(env.Stack) + "_" + screaming(env.Environment)
+	passphrase := PassphraseEnv + suffix
 	switch {
 	case role == registry.CIPlanner:
-		return ciSecrets{token: "CLOUDFLARE_PLANNER_TOKEN" + suffix, passphrase: PassphraseEnv + suffix}
+		return ciSecrets{token: "CLOUDFLARE_PLANNER_TOKEN" + suffix, passphrase: passphrase}
 	case len(env.Parameters) > 0:
-		return ciSecrets{token: "CLOUDFLARE_PREVIEW_TOKEN" + suffix, passphrase: PassphraseEnv + suffix}
+		return ciSecrets{token: "CLOUDFLARE_PREVIEW_TOKEN" + suffix, passphrase: passphrase}
 	}
-	return ciSecrets{token: TokenEnv, passphrase: PassphraseEnv, environment: env.Environment}
+	return ciSecrets{token: "CLOUDFLARE_DEPLOYER_TOKEN" + suffix, passphrase: passphrase, environment: env.Environment}
 }
 
 // ciIdentities is the cloudflare target's CI seam.

@@ -12,9 +12,9 @@ import (
 )
 
 // The Cron platform (section 18.9, D52, D64): a TypeScript job is a
-// Cloudflare Worker of its own, named after the deployable, which runs the
-// bundle its package's bundle.ts writes from the generated scheduled.ts
-// (section 18.5). Its Worker is the three nodes a server's is (workerNodes),
+// Cloudflare Worker of its own, named as a server's is (workerName),
+// which runs the bundle its package's bundle.ts writes from the generated
+// scheduled.ts (section 18.5). Its Worker is the three nodes a server's is (workerNodes),
 // with workers.dev off, since a job is never exposed, and its version holds
 // the bundle and the job's config as bindings (bundleVersion). A schedule
 // the environment runs is a Cron Trigger on the Worker, in UTC. A job with
@@ -99,7 +99,7 @@ func lowerJob(ctx registry.PlatformContext) (registry.Lowered, error) {
 	if run == nil {
 		return registry.Lowered{}, fmt.Errorf("job %s has no run", d.Name)
 	}
-	if err := checkWorkerName("the Worker of job "+d.Name, d.ResourceName, "the job's class or its API"); err != nil {
+	if err := checkWorkerName("the Worker of job "+d.Name, d.ResourceName, workerNameParts(env, d, "the job")); err != nil {
 		return registry.Lowered{}, err
 	}
 	if run.Schedule != "" && !isUTC(run.TimeZone) {

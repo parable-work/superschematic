@@ -89,9 +89,6 @@ jobs:
     concurrency:
       group: workers-stack-plan-Staging-${{ github.event.pull_request.number }}
       cancel-in-progress: false
-    env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_PLANNER_TOKEN_STAGING }}
-      PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE_STAGING }}
     steps:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -118,6 +115,9 @@ jobs:
         with:
           pulumi-version: "3.259.0"
       - name: Plan Staging
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_PLANNER_TOKEN_WORKERS_STACK_STAGING }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE_WORKERS_STACK_STAGING }}
         run: superschematic stack plan Staging --stack schemas/services/workers-stack
 
   plan-production:
@@ -128,9 +128,6 @@ jobs:
     concurrency:
       group: workers-stack-plan-Production-${{ github.event.pull_request.number }}
       cancel-in-progress: false
-    env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_PLANNER_TOKEN_PRODUCTION }}
-      PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE_PRODUCTION }}
     steps:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -157,6 +154,9 @@ jobs:
         with:
           pulumi-version: "3.259.0"
       - name: Plan Production
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_PLANNER_TOKEN_WORKERS_STACK_PRODUCTION }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE_WORKERS_STACK_PRODUCTION }}
         run: superschematic stack plan Production --stack schemas/services/workers-stack
 
   preview-preview:
@@ -167,9 +167,6 @@ jobs:
     concurrency:
       group: workers-stack-Preview-${{ github.event.pull_request.number }}
       cancel-in-progress: false
-    env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_PREVIEW_TOKEN_PREVIEW }}
-      PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE_PREVIEW }}
     steps:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -210,9 +207,15 @@ jobs:
           }
       - name: Deploy Preview for the pull request
         if: github.event.action != 'closed'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_PREVIEW_TOKEN_WORKERS_STACK_PREVIEW }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE_WORKERS_STACK_PREVIEW }}
         run: superschematic stack deploy Preview --stack schemas/services/workers-stack --param pr=${{ github.event.pull_request.number }}
       - name: Destroy Preview for the pull request
         if: github.event.action == 'closed'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_PREVIEW_TOKEN_WORKERS_STACK_PREVIEW }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE_WORKERS_STACK_PREVIEW }}
         run: superschematic stack destroy Preview --stack schemas/services/workers-stack --param pr=${{ github.event.pull_request.number }} --yes
 
   deploy-staging:
@@ -224,9 +227,6 @@ jobs:
     concurrency:
       group: workers-stack-Staging
       cancel-in-progress: false
-    env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
     steps:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -264,6 +264,9 @@ jobs:
             echo "::error file=schemas/dist/bun.lock::schemas/dist/bun.lock does not match the packages the build wrote; build every service, run bun install in schemas/dist and commit schemas/dist/bun.lock" && exit 1
           }
       - name: Deploy Staging
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_DEPLOYER_TOKEN_WORKERS_STACK_STAGING }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE_WORKERS_STACK_STAGING }}
         run: superschematic stack deploy Staging --stack schemas/services/workers-stack
 
   deploy-production:
@@ -275,9 +278,6 @@ jobs:
     concurrency:
       group: workers-stack-Production
       cancel-in-progress: false
-    env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
     steps:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -315,4 +315,7 @@ jobs:
             echo "::error file=schemas/dist/bun.lock::schemas/dist/bun.lock does not match the packages the build wrote; build every service, run bun install in schemas/dist and commit schemas/dist/bun.lock" && exit 1
           }
       - name: Deploy Production
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_DEPLOYER_TOKEN_WORKERS_STACK_PRODUCTION }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE_WORKERS_STACK_PRODUCTION }}
         run: superschematic stack deploy Production --stack schemas/services/workers-stack

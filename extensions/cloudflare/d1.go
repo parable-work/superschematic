@@ -59,19 +59,20 @@ func d1Platform() registry.PlatformSpec {
 	}
 }
 
-// D1Name names the D1 database of a DB schema of a stack: the stack's
-// name, a hyphen and the schema's, in kebab case (`acme-shop-reviews-db`).
-// A member of a parameterized environment appends each parameter's name
-// and value (d1Name).
-func D1Name(stack, service string) string {
-	return kebab(stack) + "-" + kebab(service)
+// D1Name names the D1 database of a DB schema of an environment of a
+// stack: the stack's name, the environment's and the schema's, in kebab
+// case (`acme-shop-staging-reviews-db`), since one account may hold
+// several stacks and environments (names.go). A member of a parameterized
+// environment appends each parameter's name and value (d1Name).
+func D1Name(stack, environment, service string) string {
+	return AccountName(stack, environment, service)
 }
 
 // d1Name is D1Name with each parameter's name and value appended, so each
 // member of a preview gets databases of its own:
-// `acme-shop-reviews-db-pr123` when pr is 123.
+// `acme-shop-preview-reviews-db-pr123` when pr is 123.
 func d1Name(env registry.StackEnvironment, service string) any {
-	return suffixed(env, D1Name(env.Stack, service), "-")
+	return accountName(env, service)
 }
 
 // d1ID is the ID of the D1 database node of a DB schema a database

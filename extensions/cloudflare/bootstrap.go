@@ -2,8 +2,9 @@ package cloudflare
 
 import (
 	"context"
-	"crypto/hmac"
+	"crypto/pbkdf2"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -22,20 +23,27 @@ import (
 // the engineer's token, in TokenEnv, and is safe to run again:
 //
 //  1. it verifies the token, an account token of the environment's
-//     account or a user token;
-//  2. it creates StateBucket directly, since Pulumi needs it first;
-//  3. it generates the state's passphrase, 32 random bytes it prints once,
-//     or checks the one in PassphraseEnv against PassphraseCheck, a salt
-//     and an HMAC of it under the passphrase, which its first run writes;
+//     account or a user token, and refuses an account whose bootstrap
+//     state an earlier release kept in StateBucket (legacyBootstrapState);
+//  2. it creates StateBucket and BootstrapBucket directly, since Pulumi
+//     needs them first;
+//  3. it generates each bucket's passphrase, 32 random bytes it prints
+//     once, or checks the one in the shell against the bucket's
+//     PassphraseCheck, a key PBKDF2-SHA256 derives from it, which its
+//     first run writes with a conditional write: the state's, in
+//     PassphraseEnv, which CI holds, and bootstrap's own, in
+//     BootstrapPassphraseEnv, which no CI job holds;
 //  4. it finds the account's Secrets Store, or creates it;
 //  5. it applies the bootstrap graph in Pulumi project `<stack>-bootstrap`,
-//     a stack per account: the `<stack>-deployer` and `<stack>-planner`
-//     account tokens, with the permission groups' ids read from the API
-//     first, which also checks the group a bucket edge's token names by its
-//     published id (checkBucketTokenGroup);
-//  6. with --github, it sets each token and the passphrase as the
-//     repository's Actions secrets through gh, at the scopes the CI seam
-//     names; without gh, it prints the commands and each token once;
+//     a stack per account, kept in BootstrapBucket: the `<stack>-deployer`,
+//     `<stack>-planner` and `<stack>-preview` account tokens, with the
+//     permission groups' ids read from the API first, which also checks
+//     the group a bucket edge's token names by its published id
+//     (checkBucketTokenGroup);
+//  6. with --github, it sets each token the environment's CI jobs read and
+//     the state's passphrase as the repository's Actions secrets through
+//     gh, at the scopes the CI seam names; without gh, it prints the
+//     commands and each token once;
 //  7. it returns secretsStoreId and workersSubdomain, which the core
 //     records beside accountId (D47).
 
@@ -72,34 +80,57 @@ var reachScopes = map[string]string{
 	reachState:   "com.cloudflare.edge.r2.bucket",
 }
 
-// The two tokens' policies (section 18.3). The deployer edits the account's
-// Workers scripts, D1, R2, Secrets Store and account tokens, since a bucket
-// edge mints a token (section 18.7), and the Workers routes and DNS of the
-// account's zones; so it can grant itself more, as gcp's deployer can. The
-// planner reads all of that, and writes the objects of the state bucket
-// alone, since a preview takes the stack's lock. Both reach every zone of
-// the account: the graph is one per account, and the environments of one
-// account may hold their domains in different zones.
+// The three tokens' policies (section 18.3). The deployer edits the
+// account's Workers scripts, D1, R2, Secrets Store and account tokens,
+// since a bucket edge mints a token (section 18.7), and the Workers routes
+// and DNS of the account's zones; so it can grant itself more, as gcp's
+// deployer can. The planner reads the Workers scripts, D1, the Secrets
+// Store's names and the account's tokens, and writes the objects of the
+// state bucket alone, since a preview takes the stack's lock: it holds no
+// account-wide R2 group, whose read reaches every bucket's objects,
+// BootstrapBucket's among them. The preview deploys and destroys a
+// parameterized environment's members: it edits Workers scripts, D1, R2,
+// whose buckets a member makes, and account tokens, which a member's bucket
+// edge mints, and the zones' Workers routes and DNS, and reads the Secrets
+// Store, whose values a member's Workers bind and only `stack secrets set`
+// writes; revoking it leaves the deployer's and the planner's working. All
+// three reach every zone of the account: the graph is one per account, and
+// the environments of one account may hold their domains in different
+// zones.
 var (
 	deployerPolicies = []tokenPolicy{
 		{reachAccount, []string{"Workers Scripts Write", "D1 Write", "Workers R2 Storage Write", "Secrets Store Write", "Account API Tokens Write"}},
 		{reachZones, []string{"Workers Routes Write", "DNS Write"}},
 	}
 	plannerPolicies = []tokenPolicy{
-		{reachAccount, []string{"Workers Scripts Read", "D1 Read", "Workers R2 Storage Read", "Secrets Store Read", "Account API Tokens Read"}},
+		{reachAccount, []string{"Workers Scripts Read", "D1 Read", "Secrets Store Read", "Account API Tokens Read"}},
 		{reachZones, []string{"Workers Routes Read", "DNS Read"}},
 		{reachState, []string{"Workers R2 Storage Bucket Item Write"}},
 	}
+	previewPolicies = []tokenPolicy{
+		{reachAccount, []string{"Workers Scripts Write", "D1 Write", "Workers R2 Storage Write", "Secrets Store Read", "Account API Tokens Write"}},
+		{reachZones, []string{"Workers Routes Write", "DNS Write"}},
+	}
 )
 
-// The bootstrap graph's nodes: the CI's two tokens.
+// The bootstrap graph's nodes: the CI's three tokens.
 const (
 	deployerNode = "deployer"
 	plannerNode  = "planner"
+	previewNode  = "preview"
 )
 
+// bootstrapTokens are the graph's tokens, each with its policies, in the
+// order they are applied and printed.
+var bootstrapTokens = []struct {
+	id       string
+	policies []tokenPolicy
+}{{deployerNode, deployerPolicies}, {plannerNode, plannerPolicies}, {previewNode, previewPolicies}}
+
 // tokenName is the name of one of the stack's CI tokens:
-// `<stack>-deployer`, `<stack>-planner`.
+// `<stack>-deployer`, `<stack>-planner`, `<stack>-preview`. A token is the
+// stack's in its account, not an environment's, so the name holds no
+// environment.
 func tokenName(stack, role string) string { return kebab(stack) + "-" + role }
 
 // reachResources is a token policy's resources, the JSON object the
@@ -147,33 +178,31 @@ func groupID(groups []PermissionGroup, name, scope string) (string, error) {
 // BootstrapEnvironment returns the bootstrap graph of env's account as an
 // environment the provisioner applies in one step: stack `<Stack>Bootstrap`,
 // Pulumi project `<stack>-bootstrap`, environment the account's id, one
-// Pulumi stack per account. groups are the permission groups the API
-// lists, whose ids the tokens' policies name.
+// Pulumi stack per account, kept in BootstrapBucket. groups are the
+// permission groups the API lists, whose ids the tokens' policies name.
 func BootstrapEnvironment(env *ir.ResolvedEnvironment, groups []PermissionGroup) (*ir.ResolvedEnvironment, error) {
 	v, err := envValues(env)
 	if err != nil {
 		return nil, err
 	}
 	var nodes []*ir.Resource
-	for _, role := range []struct {
-		id       string
-		policies []tokenPolicy
-	}{{deployerNode, deployerPolicies}, {plannerNode, plannerPolicies}} {
+	var ids []string
+	for _, role := range bootstrapTokens {
 		var policies []any
 		for _, p := range role.policies {
 			resources, err := reachResources(p.reach, v.accountID)
 			if err != nil {
 				return nil, err
 			}
-			var ids []any
+			var groupIDs []any
 			for _, name := range p.groups {
 				id, err := groupID(groups, name, reachScopes[p.reach])
 				if err != nil {
 					return nil, err
 				}
-				ids = append(ids, map[string]any{"id": id})
+				groupIDs = append(groupIDs, map[string]any{"id": id})
 			}
-			policies = append(policies, map[string]any{"effect": "allow", "permissionGroups": ids, "resources": resources})
+			policies = append(policies, map[string]any{"effect": "allow", "permissionGroups": groupIDs, "resources": resources})
 		}
 		nodes = append(nodes, &ir.Resource{
 			ID:     role.id,
@@ -186,6 +215,7 @@ func BootstrapEnvironment(env *ir.ResolvedEnvironment, groups []PermissionGroup)
 				"policies":  policies,
 			},
 		})
+		ids = append(ids, role.id)
 	}
 	return &ir.ResolvedEnvironment{
 		Version:     ir.ResolvedEnvironmentVersion,
@@ -196,7 +226,7 @@ func BootstrapEnvironment(env *ir.ResolvedEnvironment, groups []PermissionGroup)
 		Values:      map[string]any{"accountId": v.accountID},
 		Deployables: []*ir.ResolvedDeployable{},
 		Resources:   &ir.ResourceGraph{Resources: nodes},
-		DeployOrder: []*ir.DeployStep{{Step: ir.StepInfrastructure, Resources: []string{deployerNode, plannerNode}}},
+		DeployOrder: []*ir.DeployStep{{Step: ir.StepInfrastructure, Resources: ids}},
 	}, nil
 }
 
@@ -244,15 +274,25 @@ func (b bootstrapper) Bootstrap(ctx context.Context, req registry.BootstrapReque
 	}
 	logf("token %s: active, %s", tok.ID, kind)
 
-	// 2. The state bucket.
-	created, err := cloud.EnsureBucket(ctx, account, StateBucket)
+	// 2. The buckets. An earlier release kept the bootstrap's state in the
+	// state bucket, where the planner's token reaches it.
+	for _, bucket := range []string{StateBucket, BootstrapBucket} {
+		created, err := cloud.EnsureBucket(ctx, account, bucket)
+		if err != nil {
+			return nil, err
+		}
+		logf("bucket %s: %s", bucket, createdOrKept(created))
+	}
+	if err := legacyBootstrapState(ctx, cloud, account, env.Stack); err != nil {
+		return nil, err
+	}
+
+	// 3. The passphrases: the state's, then the bootstrap's own.
+	passphrase, err := b.passphrase(ctx, cloud, account, statePassphrase, logf, req.Reveal)
 	if err != nil {
 		return nil, err
 	}
-	logf("state bucket %s: %s", StateBucket, createdOrKept(created))
-
-	// 3. The passphrase.
-	passphrase, err := b.passphrase(ctx, cloud, account, logf, req.Reveal)
+	bootstrapPassphrase, err := b.passphrase(ctx, cloud, account, bootstrapStatePassphrase, logf, req.Reveal)
 	if err != nil {
 		return nil, err
 	}
@@ -263,7 +303,8 @@ func (b bootstrapper) Bootstrap(ctx context.Context, req registry.BootstrapReque
 		return nil, err
 	}
 
-	// 5. The bootstrap graph.
+	// 5. The bootstrap graph, in the bootstrap bucket under the
+	// bootstrap's own passphrase.
 	groups, err := cloud.PermissionGroups(ctx, account)
 	if err != nil {
 		return nil, err
@@ -279,8 +320,8 @@ func (b bootstrapper) Bootstrap(ctx context.Context, req registry.BootstrapReque
 	if err := req.Provisioner.Render(graph, dir); err != nil {
 		return nil, err
 	}
-	run := registry.ProvisionRequest{Environment: graph, Dir: dir, Backend: stateBackend(account, tok.ID, token, passphrase)}
-	logf("apply the bootstrap graph: tokens %s and %s", tokenName(env.Stack, deployerNode), tokenName(env.Stack, plannerNode))
+	run := registry.ProvisionRequest{Environment: graph, Dir: dir, Backend: bootstrapBackend(account, tok.ID, token, bootstrapPassphrase)}
+	logf("apply the bootstrap graph in %s: tokens %s, %s and %s", BootstrapBucket, tokenName(env.Stack, deployerNode), tokenName(env.Stack, plannerNode), tokenName(env.Stack, previewNode))
 	if err := req.Provisioner.Apply(ctx, run, *graph.DeployOrder[0]); err != nil {
 		return nil, err
 	}
@@ -292,7 +333,7 @@ func (b bootstrapper) Bootstrap(ctx context.Context, req registry.BootstrapReque
 			return nil, err
 		}
 	} else {
-		logf("the CI's tokens are in the bootstrap's state; stack bootstrap %s --github sets them, and the passphrase, as the repository's Actions secrets", env.Environment)
+		logf("the CI's tokens are in the bootstrap's state; stack bootstrap %s --github sets them, and the state's passphrase, as the repository's Actions secrets", env.Environment)
 	}
 
 	// 7. The values to record.
@@ -310,45 +351,157 @@ func (b bootstrapper) Bootstrap(ctx context.Context, req registry.BootstrapReque
 	return &registry.BootstrapResult{Values: values}, nil
 }
 
-// passphraseCheck is the content of PassphraseCheck: a random salt and its
-// HMAC-SHA256 under the passphrase, each in hex.
+// bootstrapBackend is the backend of the bootstrap graph's state: the
+// bootstrap bucket, reached with a token's S3 credentials, its secrets
+// encrypted with the bootstrap's own passphrase, which the provisioner
+// reads from PassphraseEnv.
+func bootstrapBackend(account, tokenID, token, passphrase string) registry.StateBackend {
+	return registry.StateBackend{
+		URL:             BootstrapURL(R2Endpoint(account)),
+		SecretsProvider: passphraseProvider,
+		Env:             s3Env(tokenID, token, map[string]string{PassphraseEnv: passphrase}),
+	}
+}
+
+// pulumiStacks is where Pulumi's S3 backend keeps a project's stacks,
+// `.pulumi/stacks/<project>/<stack>.json`, which its history, backups and
+// locks sit beside under `.pulumi/`.
+const pulumiStacks = ".pulumi/stacks/"
+
+// bootstrapProject is the Pulumi project of a stack's bootstrap graph, as
+// the provisioner names the graph's stack, `<Stack>Bootstrap`.
+func bootstrapProject(stack string) string { return kebab(stack + "Bootstrap") }
+
+// legacyBootstrapState refuses an account whose bootstrap state for stack
+// sits in StateBucket, where an earlier release kept it: the planner's
+// token wrote that bucket's objects and CI held the passphrase of its
+// secrets, so whoever held the planner's token could read the deployer's.
+// Bootstrap moves nothing: the tokens it holds are to be revoked, and a
+// bootstrap after the cleanup mints new ones in BootstrapBucket.
+func legacyBootstrapState(ctx context.Context, cloud Cloud, account, stack string) error {
+	project := bootstrapProject(stack)
+	keys, err := cloud.ListObjects(ctx, account, StateBucket, pulumiStacks+project+"/")
+	if err != nil || len(keys) == 0 {
+		return err
+	}
+	return fmt.Errorf("cloudflare: account %s keeps stack %s's bootstrap state in %s (%s), where an earlier release put it and where the planner's token reaches it; "+
+		"this release keeps it in %s, which no CI job can decrypt. The tokens that state holds were readable with the planner's: "+
+		"delete %s, %s and %s in the dashboard (Manage Account, Account API Tokens); delete every object of %s under .pulumi/stacks/%s/, .pulumi/history/%s/, .pulumi/backups/%s/ and .pulumi/locks/ that names %s; "+
+		"then run stack bootstrap again, which mints new tokens there, and with --github sets them",
+		account, stack, StateBucket, strings.Join(keys, ", "), BootstrapBucket,
+		tokenName(stack, deployerNode), tokenName(stack, plannerNode), tokenName(stack, previewNode),
+		StateBucket, project, project, project, project)
+}
+
+// passphraseKind is a passphrase bootstrap keeps a check of: the state's,
+// which CI holds, and the bootstrap's own, which no CI job holds.
+type passphraseKind struct {
+	// env is the shell's variable that holds it, and bucket the bucket
+	// whose state it encrypts and whose PassphraseCheck checks it.
+	env, bucket string
+
+	// what names the state it encrypts, and keep where the person keeps
+	// it, as the reveal says.
+	what, keep string
+}
+
+var (
+	statePassphrase = passphraseKind{
+		env: PassphraseEnv, bucket: StateBucket, what: "state",
+		keep: "Keep it in your password manager, and set it in the shell that runs the\nstack commands. stack bootstrap --github stores it in CI's secrets.",
+	}
+	bootstrapStatePassphrase = passphraseKind{
+		env: BootstrapPassphraseEnv, bucket: BootstrapBucket, what: "bootstrap's state",
+		keep: "Keep it in your password manager, and set it in the shell that runs\nstack bootstrap. It encrypts the CI's tokens in the bootstrap's own state,\nand no CI job holds it.",
+	}
+)
+
+// The passphrase check (PassphraseCheck): a key PBKDF2-SHA256 derives from
+// the passphrase over a random salt, with its iteration count, each
+// written beside it. It is stretched so that a reader of the object, the
+// deployer's or the preview's token for BootstrapBucket's, the planner's
+// for StateBucket's, cannot cheaply try passphrases against it.
 type passphraseCheck struct {
-	Salt string `json:"salt"`
-	HMAC string `json:"hmac"`
+	KDF        string `json:"kdf"`
+	Iterations int    `json:"iterations"`
+	Salt       string `json:"salt"`
+	Key        string `json:"key"`
 }
 
-func checkMAC(passphrase string, salt []byte) []byte {
-	mac := hmac.New(sha256.New, []byte(passphrase))
-	mac.Write(salt)
-	return mac.Sum(nil)
+const (
+	checkKDF = "pbkdf2-sha256"
+
+	// checkIterations is the iteration count a check is written with, the
+	// count OWASP recommends for PBKDF2-HMAC-SHA256; a check is read with
+	// its own, within minCheckIterations and maxCheckIterations.
+	checkIterations    = 600_000
+	minCheckIterations = 100_000
+	maxCheckIterations = 10_000_000
+
+	checkSaltBytes = 32
+	checkKeyBytes  = 32
+)
+
+// newCheck writes passphrase's check over salt.
+func newCheck(passphrase string, salt []byte) ([]byte, error) {
+	key, err := pbkdf2.Key(sha256.New, passphrase, salt, checkIterations, checkKeyBytes)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(passphraseCheck{KDF: checkKDF, Iterations: checkIterations, Salt: hex.EncodeToString(salt), Key: hex.EncodeToString(key)})
 }
 
-// passphrase returns the state's passphrase. With a check in the bucket it
-// checks the shell's passphrase against it, and refuses a missing or wrong
-// one. Without, this is the account's first bootstrap: it takes the shell's
-// passphrase, or generates one, writes its check, and only then prints a
-// generated one, once, to reveal.
-func (b bootstrapper) passphrase(ctx context.Context, cloud Cloud, account string, logf func(string, ...any), reveal io.Writer) (string, error) {
-	given := b.ext.getenv(PassphraseEnv)
-	data, _, err := cloud.GetObject(ctx, account, StateBucket, PassphraseCheck)
+// matchesCheck reports whether passphrase is the one data checks, and
+// refuses data that is no check this release reads.
+func matchesCheck(data []byte, passphrase string, kind passphraseKind) (bool, error) {
+	var check passphraseCheck
+	bad := func(why string) error {
+		return fmt.Errorf("cloudflare: %s in %s is no passphrase check this release reads (%s); if an earlier release wrote it, delete it and run stack bootstrap again with %s set to the passphrase, which writes it anew", PassphraseCheck, kind.bucket, why, kind.env)
+	}
+	if err := json.Unmarshal(data, &check); err != nil {
+		return false, bad(err.Error())
+	}
+	salt, saltErr := hex.DecodeString(check.Salt)
+	want, keyErr := hex.DecodeString(check.Key)
+	switch {
+	case check.KDF != checkKDF:
+		return false, bad(fmt.Sprintf("kdf %q, not %s", check.KDF, checkKDF))
+	case check.Iterations < minCheckIterations || check.Iterations > maxCheckIterations:
+		return false, bad(fmt.Sprintf("%d iterations, not %d to %d", check.Iterations, minCheckIterations, maxCheckIterations))
+	case saltErr != nil || keyErr != nil || len(salt) == 0 || len(want) == 0:
+		return false, bad("its salt or its key is not hex")
+	}
+	got, err := pbkdf2.Key(sha256.New, passphrase, salt, check.Iterations, len(want))
+	if err != nil {
+		return false, err
+	}
+	return subtle.ConstantTimeCompare(got, want) == 1, nil
+}
+
+// passphrase returns the passphrase of kind. With a check in its bucket it
+// checks the shell's against it, and refuses a missing or wrong one.
+// Without, this is the account's first bootstrap: it takes the shell's
+// passphrase, or generates one, unless the bucket holds Pulumi state
+// already, which a new passphrase would not decrypt; it writes the check
+// only if none was written meanwhile, reads the check back, and refuses
+// one another bootstrap wrote at the same time for another passphrase.
+// Only then does it print a generated passphrase, once, to reveal.
+func (b bootstrapper) passphrase(ctx context.Context, cloud Cloud, account string, kind passphraseKind, logf func(string, ...any), reveal io.Writer) (string, error) {
+	given := b.ext.getenv(kind.env)
+	data, _, err := cloud.GetObject(ctx, account, kind.bucket, PassphraseCheck)
 	switch {
 	case err == nil:
-		var check passphraseCheck
-		if err := json.Unmarshal(data, &check); err != nil {
-			return "", fmt.Errorf("cloudflare: %s in %s is not a passphrase check: %w", PassphraseCheck, StateBucket, err)
-		}
-		salt, saltErr := hex.DecodeString(check.Salt)
-		want, macErr := hex.DecodeString(check.HMAC)
-		if saltErr != nil || macErr != nil || len(salt) == 0 {
-			return "", fmt.Errorf("cloudflare: %s in %s is not a passphrase check", PassphraseCheck, StateBucket)
-		}
 		if given == "" {
-			return "", fmt.Errorf("cloudflare: account %s's state has a passphrase, which its first bootstrap printed; set %s to it", account, PassphraseEnv)
+			return "", fmt.Errorf("cloudflare: account %s's %s has a passphrase, which its first bootstrap printed; set %s to it", account, kind.what, kind.env)
 		}
-		if !hmac.Equal(checkMAC(given, salt), want) {
-			return "", fmt.Errorf("cloudflare: %s is not the passphrase of account %s's state, which its first bootstrap printed", PassphraseEnv, account)
+		ok, err := matchesCheck(data, given, kind)
+		if err != nil {
+			return "", err
 		}
-		logf("passphrase: %s matches the state's check", PassphraseEnv)
+		if !ok {
+			return "", fmt.Errorf("cloudflare: %s is not the passphrase of account %s's %s, which its first bootstrap printed", kind.env, account, kind.what)
+		}
+		logf("passphrase of the %s: %s matches the check in %s", kind.what, kind.env, kind.bucket)
 		return given, nil
 	case !errors.Is(err, fs.ErrNotExist):
 		return "", err
@@ -356,7 +509,14 @@ func (b bootstrapper) passphrase(ctx context.Context, cloud Cloud, account strin
 	passphrase := given
 	if passphrase == "" {
 		if reveal == nil {
-			return "", fmt.Errorf("cloudflare: bootstrap generates the state's passphrase and prints it once, and has nowhere to print it; set %s to a passphrase of your own", PassphraseEnv)
+			return "", fmt.Errorf("cloudflare: bootstrap generates the passphrase of account %s's %s and prints it once, and has nowhere to print it; set %s to a passphrase of your own", account, kind.what, kind.env)
+		}
+		stacks, err := cloud.ListObjects(ctx, account, kind.bucket, pulumiStacks)
+		if err != nil {
+			return "", err
+		}
+		if len(stacks) > 0 {
+			return "", fmt.Errorf("cloudflare: %s holds Pulumi state and no %s, so bootstrap would generate a passphrase that does not decrypt it; set %s to the passphrase the state was written with, and bootstrap writes its check", kind.bucket, PassphraseCheck, kind.env)
 		}
 		raw := make([]byte, passphraseBytes)
 		if err := b.ext.random(raw); err != nil {
@@ -364,31 +524,47 @@ func (b bootstrapper) passphrase(ctx context.Context, cloud Cloud, account strin
 		}
 		passphrase = hex.EncodeToString(raw)
 	}
-	salt := make([]byte, 32)
+	salt := make([]byte, checkSaltBytes)
 	if err := b.ext.random(salt); err != nil {
 		return "", err
 	}
-	check, err := json.Marshal(passphraseCheck{Salt: hex.EncodeToString(salt), HMAC: hex.EncodeToString(checkMAC(passphrase, salt))})
+	check, err := newCheck(passphrase, salt)
 	if err != nil {
 		return "", err
 	}
-	if err := cloud.PutObject(ctx, account, StateBucket, PassphraseCheck, check, nil); err != nil {
+	created, err := cloud.CreateObject(ctx, account, kind.bucket, PassphraseCheck, check)
+	if err != nil {
 		return "", err
 	}
+	back, _, err := cloud.GetObject(ctx, account, kind.bucket, PassphraseCheck)
+	if err != nil {
+		return "", fmt.Errorf("cloudflare: read back %s in %s: %w", PassphraseCheck, kind.bucket, err)
+	}
+	ok, err := matchesCheck(back, passphrase, kind)
+	if err != nil {
+		return "", err
+	}
+	switch {
+	case !ok && !created:
+		return "", fmt.Errorf("cloudflare: another bootstrap of account %s wrote the check of its %s's passphrase in %s at the same time, for another passphrase; run stack bootstrap again with %s set to the passphrase that bootstrap printed", account, kind.what, kind.bucket, kind.env)
+	case !ok:
+		return "", fmt.Errorf("cloudflare: %s in %s does not check the passphrase bootstrap wrote it for", PassphraseCheck, kind.bucket)
+	case !created:
+		logf("passphrase of the %s: another bootstrap wrote the same check in %s", kind.what, kind.bucket)
+	}
 	if given != "" {
-		logf("passphrase: %s, checked from now on by %s", PassphraseEnv, PassphraseCheck)
+		logf("passphrase of the %s: %s, checked from now on by %s in %s", kind.what, kind.env, PassphraseCheck, kind.bucket)
 		return passphrase, nil
 	}
-	logf("passphrase: generated, and printed once")
-	_, err = fmt.Fprintf(reveal, `The passphrase of account %s's state, shown this once:
+	logf("passphrase of the %s: generated, and printed once", kind.what)
+	_, err = fmt.Fprintf(reveal, `The passphrase of account %s's %s, shown this once:
 
   %s=%s
 
-Keep it in your password manager, and set it in the shell that runs the
-stack commands. stack bootstrap --github stores it in CI's secrets. The
-state cannot be read without it.
+%s
+The %s cannot be read without it.
 
-`, account, PassphraseEnv, passphrase)
+`, account, kind.what, kind.env, passphrase, kind.keep, kind.what)
 	return passphrase, err
 }
 
@@ -441,56 +617,66 @@ func (b bootstrapper) secretsStore(ctx context.Context, cloud Cloud, v accountVa
 type ciSecret struct {
 	name, environment string
 
-	// role is the token's role, deployer or planner, or empty for the
-	// passphrase.
-	role string
+	// token is the bootstrap graph's token the secret holds, deployer,
+	// planner or preview, or empty for the state's passphrase.
+	token string
 }
 
 // ciSecretsFor are the secrets the generated workflow reads for env: a
-// plain environment's planner and deployer, a parameterized one's deployer
-// alone, since a member is only previewed.
+// plain environment's plan job's, the planner's token, and its deploy
+// job's, the deployer's; a parameterized one's preview job's alone, the
+// preview's token, since a member is only previewed. Each comes with the
+// state's passphrase.
 func ciSecretsFor(env *ir.ResolvedEnvironment) []ciSecret {
-	roles := []registry.CIRole{registry.CIPlanner, registry.CIDeployer}
+	type job struct {
+		role  registry.CIRole
+		token string
+	}
+	jobs := []job{{registry.CIPlanner, plannerNode}, {registry.CIDeployer, deployerNode}}
 	if len(env.Parameters) > 0 {
-		roles = roles[1:]
+		jobs = []job{{registry.CIDeployer, previewNode}}
 	}
 	var out []ciSecret
-	for _, role := range roles {
-		s := ciSecretsOf(env, role)
+	for _, j := range jobs {
+		s := ciSecretsOf(env, j.role)
 		out = append(out,
-			ciSecret{name: s.token, environment: s.environment, role: string(role)},
+			ciSecret{name: s.token, environment: s.environment, token: j.token},
 			ciSecret{name: s.passphrase, environment: s.environment},
 		)
 	}
 	return out
 }
 
-// storeCI reads the CI's tokens from the bootstrap graph's state and sets
-// them and the passphrase as the repository's Actions secrets through
-// GitHub. When it cannot, it prints the commands and each token once.
+// storeCI reads the tokens env's CI jobs read from the bootstrap graph's
+// state and sets them and the state's passphrase as the repository's
+// Actions secrets through GitHub. When it cannot, it prints the commands
+// and each token once. The bootstrap's own passphrase is never set.
 func (b bootstrapper) storeCI(ctx context.Context, req registry.BootstrapRequest, run registry.ProvisionRequest, passphrase string, logf func(string, ...any)) error {
 	reader, ok := req.Provisioner.(registry.SecretOutputReader)
 	if !ok {
 		return fmt.Errorf("cloudflare: --github reads the CI's tokens from the bootstrap's state, and provisioner %s reads no secret output", req.Environment.Provisioner)
 	}
+	secrets := ciSecretsFor(req.Environment)
 	tokens := map[string]string{}
-	for _, role := range []string{deployerNode, plannerNode} {
-		value, err := reader.SecretOutput(ctx, run, ir.Output{Resource: role, Name: "value"})
+	for _, s := range secrets {
+		if s.token == "" || tokens[s.token] != "" {
+			continue
+		}
+		value, err := reader.SecretOutput(ctx, run, ir.Output{Resource: s.token, Name: "value"})
 		if err != nil {
 			return err
 		}
 		if value == "" {
-			return fmt.Errorf("cloudflare: token %s has no value in the bootstrap's state", tokenName(req.Environment.Stack, role))
+			return fmt.Errorf("cloudflare: token %s has no value in the bootstrap's state", tokenName(req.Environment.Stack, s.token))
 		}
-		tokens[role] = value
+		tokens[s.token] = value
 	}
 	value := func(s ciSecret) []byte {
-		if s.role == "" {
+		if s.token == "" {
 			return []byte(passphrase)
 		}
-		return []byte(tokens[s.role])
+		return []byte(tokens[s.token])
 	}
-	secrets := ciSecretsFor(req.Environment)
 	gh := b.ext.github()
 	if err := gh.Ready(ctx); err != nil {
 		return b.printCI(req, secrets, tokens, err, logf)
@@ -526,17 +712,17 @@ func (b bootstrapper) printCI(req registry.BootstrapRequest, secrets []ciSecret,
 	logf("%v: printing the commands that set the CI's secrets", why)
 	var text strings.Builder
 	fmt.Fprintf(&text, "%v.\nSet the generated workflow's secrets yourself: each command below reads the\nvalue from its standard input. Each token is shown this once.\n", why)
-	for _, role := range []string{deployerNode, plannerNode} {
+	for _, role := range bootstrapTokens {
 		var cmds []string
 		for _, s := range secrets {
-			if s.role == role {
+			if s.token == role.id {
 				cmds = append(cmds, "gh "+strings.Join(setSecretArgs(req.Repository, s.environment, s.name), " "))
 			}
 		}
 		if len(cmds) == 0 {
 			continue
 		}
-		fmt.Fprintf(&text, "\nThe %s token, %s:\n\n  %s\n\n", role, tokenName(req.Environment.Stack, role), tokens[role])
+		fmt.Fprintf(&text, "\nThe %s token, %s:\n\n  %s\n\n", role.id, tokenName(req.Environment.Stack, role.id), tokens[role.id])
 		for _, cmd := range cmds {
 			fmt.Fprintf(&text, "  %s\n", cmd)
 		}
@@ -544,7 +730,7 @@ func (b bootstrapper) printCI(req registry.BootstrapRequest, secrets []ciSecret,
 	fmt.Fprintf(&text, "\nThe state's passphrase, the one in %s:\n\n", PassphraseEnv)
 	var envs []string
 	for _, s := range secrets {
-		if s.role == "" {
+		if s.token == "" {
 			fmt.Fprintf(&text, "  gh %s\n", strings.Join(setSecretArgs(req.Repository, s.environment, s.name), " "))
 		}
 		if s.environment != "" && !slices.Contains(envs, s.environment) {

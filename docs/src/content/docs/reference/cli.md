@@ -802,20 +802,23 @@ and Workload Identity Federation for the GitHub repository, and creates
 the secret of each platform credential the environment needs.
 
 On cloudflare it runs with your token in `CLOUDFLARE_API_TOKEN`, once per
-account: it verifies the token, creates the R2 bucket
-`superschematic-state` that holds the state, finds or creates the
-account's Secrets Store, and applies the `<stack>-deployer` and
-`<stack>-planner` account tokens. On the account's first bootstrap it
-generates the passphrase that encrypts the state's secrets and prints it
-once, on standard output; keep it in your password manager and set it in
-`PULUMI_CONFIG_PASSPHRASE` for every later command. A later run checks
-the passphrase in the shell and refuses another. With `--github` it sets
-the tokens and the passphrase as the repository's GitHub Actions secrets
-through `gh`, at the scopes the [generated
-workflow](/superschematic/guides/stacks/#generated-ci) reads them from,
-creating the deploy job's GitHub environment when it is missing; without
-`gh` on PATH, signed in, it prints the `gh secret set` commands and each
-token once instead.
+account: it verifies the token, creates the R2 buckets
+`superschematic-state`, which holds the state, and
+`superschematic-bootstrap`, which holds bootstrap's own state, finds or
+creates the account's Secrets Store, and applies the `<stack>-deployer`,
+`<stack>-planner` and `<stack>-preview` account tokens. On the account's
+first bootstrap it generates two passphrases and prints each once, on
+standard output: the state's, which you set in `PULUMI_CONFIG_PASSPHRASE`
+for every later command, and bootstrap's own, which you set in
+`SUPERSCHEMATIC_BOOTSTRAP_PASSPHRASE` for every later bootstrap and which
+no CI job holds. Keep both in your password manager. A later run checks
+each passphrase in the shell and refuses another. With `--github` it sets
+the tokens the environment's jobs read and the state's passphrase as the
+repository's GitHub Actions secrets through `gh`, at the scopes the
+[generated workflow](/superschematic/guides/stacks/#generated-ci) reads
+them from, creating the deploy job's GitHub environment when it is
+missing; without `gh` on PATH, signed in, it prints the `gh secret set`
+commands and each token once instead.
 
 Then it records in the stack's schema the values only the cloud knows: on
 gcp, the project's number, as `projectNumber` in the gcp values of the

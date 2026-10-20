@@ -194,6 +194,10 @@ type (
 	// job that deploys a database installs the runner (D64).
 	DeployingMachineMigrations = registry.DeployingMachineMigrations
 
+	// A target's MigrationRunner that is a PrivilegelessMigrations grants
+	// no roles, so a deploy prepares it only for steps to migrate (D64).
+	PrivilegelessMigrations = registry.PrivilegelessMigrations
+
 	// A target's SitePublisher puts a site's files and its config for a
 	// run where the site's platform serves them (SitePublishRequest, D55).
 	SitePublisher      = registry.SitePublisher

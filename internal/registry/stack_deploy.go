@@ -238,6 +238,14 @@ type MigrationRequest struct {
 	// Plans are the plans to run, in service order.
 	Plans []MigrationPlan
 
+	// Outputs reads the applied graph's outputs, by node ID and output
+	// name, as the provisioner's Outputs reads them after the steps before
+	// this one: a runner that reaches a database by an id its node
+	// outputs, as the cloudflare target's reaches a D1 database by its
+	// uuid (D64), reads it here rather than looking the database up by
+	// name. The deploy sets it; a runner that reads no output ignores it.
+	Outputs func(ctx context.Context) (map[string]map[string]any, error)
+
 	// Log receives progress.
 	Log io.Writer
 }
@@ -258,6 +266,17 @@ type MigrationRunner interface {
 type DeployingMachineMigrations interface {
 	MigrationRunner
 	MigratesOnTheDeployingMachine()
+}
+
+// PrivilegelessMigrations is a MigrationRunner whose databases have no
+// roles, so the plan of a phase without steps, which the deploy hands the
+// runner when the servers that connect changed, has nothing to grant: the
+// cloudflare target's, on D1 (D64). The deploy prepares such a runner
+// (MigrationPreparer) only for a run with steps to migrate or a phase
+// left pending, not for a change of the servers that connect alone.
+type PrivilegelessMigrations interface {
+	MigrationRunner
+	GrantsNoPrivileges()
 }
 
 // MigrationPreparer is a MigrationRunner that readies, before a deploy

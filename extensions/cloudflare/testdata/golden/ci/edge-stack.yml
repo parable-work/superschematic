@@ -62,9 +62,6 @@ jobs:
     concurrency:
       group: edge-stack-plan-Staging-${{ github.event.pull_request.number }}
       cancel-in-progress: false
-    env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_PLANNER_TOKEN_STAGING }}
-      PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE_STAGING }}
     steps:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -91,6 +88,9 @@ jobs:
         with:
           pulumi-version: "3.259.0"
       - name: Plan Staging
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_PLANNER_TOKEN_EDGE_STACK_STAGING }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE_EDGE_STACK_STAGING }}
         run: superschematic stack plan Staging --stack schemas/services/edge-stack
 
   preview-preview:
@@ -101,9 +101,6 @@ jobs:
     concurrency:
       group: edge-stack-Preview-${{ github.event.pull_request.number }}
       cancel-in-progress: false
-    env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_PREVIEW_TOKEN_PREVIEW }}
-      PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE_PREVIEW }}
     steps:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -134,9 +131,15 @@ jobs:
         run: superschematic build-all schemas/services
       - name: Deploy Preview for the pull request
         if: github.event.action != 'closed'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_PREVIEW_TOKEN_EDGE_STACK_PREVIEW }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE_EDGE_STACK_PREVIEW }}
         run: superschematic stack deploy Preview --stack schemas/services/edge-stack --param pr=${{ github.event.pull_request.number }}
       - name: Destroy Preview for the pull request
         if: github.event.action == 'closed'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_PREVIEW_TOKEN_EDGE_STACK_PREVIEW }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE_EDGE_STACK_PREVIEW }}
         run: superschematic stack destroy Preview --stack schemas/services/edge-stack --param pr=${{ github.event.pull_request.number }} --yes
 
   deploy-staging:
@@ -148,9 +151,6 @@ jobs:
     concurrency:
       group: edge-stack-Staging
       cancel-in-progress: false
-    env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
     steps:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -179,4 +179,7 @@ jobs:
       - name: Build the services
         run: superschematic build-all schemas/services
       - name: Deploy Staging
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_DEPLOYER_TOKEN_EDGE_STACK_STAGING }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE_EDGE_STACK_STAGING }}
         run: superschematic stack deploy Staging --stack schemas/services/edge-stack

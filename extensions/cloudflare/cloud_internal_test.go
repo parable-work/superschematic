@@ -75,9 +75,7 @@ type fakeAPI struct {
 	values    map[string]string            // secret id
 	objects   map[string][]byte
 	meta      map[string]http.Header
-	// d1 holds each D1 database's uuid by its name.
-	d1    map[string]string
-	calls []string
+	calls     []string
 }
 
 func (f *fakeAPI) reply(w http.ResponseWriter, status int, result any, info map[string]int) {
@@ -151,17 +149,6 @@ func (f *fakeAPI) rest(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		f.reply(w, http.StatusOK, map[string]string{}, nil)
-	case r.Method == http.MethodGet && path == acct+"/d1/database":
-		// D1 lists the databases whose names hold the filter, with a
-		// result_info that counts them and gives no total_pages.
-		var out []map[string]string
-		for name, uuid := range f.d1 {
-			if strings.Contains(name, r.URL.Query().Get("name")) {
-				out = append(out, map[string]string{"uuid": uuid, "name": name, "version": "production"})
-			}
-		}
-		sort.Slice(out, func(i, j int) bool { return out[i]["name"] < out[j]["name"] })
-		f.reply(w, http.StatusOK, out, map[string]int{"page": 1, "per_page": 100, "count": len(out), "total_count": len(out)})
 	case r.Method == http.MethodPost && path == acct+"/r2/buckets":
 		var req struct{ Name string }
 		_ = json.Unmarshal(body, &req)
@@ -265,6 +252,11 @@ func (f *fakeAPI) s3(w http.ResponseWriter, r *http.Request) {
 		}
 		_, _ = w.Write(data)
 	case r.Method == http.MethodPut:
+		if _, ok := f.objects[bucket+"/"+key]; ok && r.Header.Get("If-None-Match") == "*" {
+			w.WriteHeader(http.StatusPreconditionFailed)
+			_, _ = io.WriteString(w, "<Error><Code>PreconditionFailed</Code><Message>At least one of the pre-conditions you specified did not hold</Message></Error>")
+			return
+		}
 		f.objects[bucket+"/"+key] = body
 		meta := http.Header{}
 		for k, v := range r.Header {
@@ -330,7 +322,7 @@ func newTestCloud(t *testing.T) (*restCloud, *fakeAPI) {
 	api := &fakeAPI{
 		t: t, token: "tok-value", subdomain: "acme",
 		buckets: map[string]bool{}, secrets: map[string]map[string]Secret{}, values: map[string]string{},
-		objects: map[string][]byte{}, meta: map[string]http.Header{}, d1: map[string]string{},
+		objects: map[string][]byte{}, meta: map[string]http.Header{},
 	}
 	srv := httptest.NewServer(api)
 	t.Cleanup(srv.Close)
@@ -407,34 +399,10 @@ func TestCloudREST(t *testing.T) {
 	}
 }
 
-// TestCloudD1Database: a D1 database's uuid is found by its exact name,
-// though the API's name filter also lists the databases whose names hold
-// it, and a name the account has none of wraps fs.ErrNotExist.
-func TestCloudD1Database(t *testing.T) {
-	c, api := newTestCloud(t)
-	ctx := context.Background()
-	api.d1["acme-reviews-stack-reviews-db"] = "4b3f0a5e-2d1c-4e8f-9a7b-6c5d4e3f2a1b"
-	api.d1["acme-reviews-stack-reviews-db-pr7"] = "0e9d8c7b-6a5f-4e3d-2c1b-0a9f8e7d6c5b"
-	for name, want := range map[string]string{
-		"acme-reviews-stack-reviews-db":     "4b3f0a5e-2d1c-4e8f-9a7b-6c5d4e3f2a1b",
-		"acme-reviews-stack-reviews-db-pr7": "0e9d8c7b-6a5f-4e3d-2c1b-0a9f8e7d6c5b",
-	} {
-		if got, err := c.D1Database(ctx, accountOf, name); got != want || err != nil {
-			t.Errorf("D1Database(%s) = %q, %v; want %s", name, got, err, want)
-		}
-	}
-	if _, err := c.D1Database(ctx, accountOf, "acme-reviews-stack"); !errors.Is(err, fs.ErrNotExist) {
-		t.Errorf("D1Database of a name the account lacks = %v, want fs.ErrNotExist", err)
-	}
-	if !slices.Contains(api.calls, "GET /client/v4/accounts/"+accountOf+"/d1/database") {
-		t.Errorf("no list call among %v", api.calls)
-	}
-}
-
 // TestCloudS3 covers the object calls over R2's S3 API, path-style and
 // signed with the token's S3 credentials: a put with metadata, a get that
 // returns it, a missing object, a list across pages, a delete of a present
-// and of a missing object.
+// and of a missing object, and a conditional write that finds an object.
 func TestCloudS3(t *testing.T) {
 	c, api := newTestCloud(t)
 	ctx := context.Background()
@@ -459,6 +427,17 @@ func TestCloudS3(t *testing.T) {
 		if err := c.DeleteObject(ctx, accountOf, "superschematic-state", "superschematic/other"); err != nil {
 			t.Errorf("DeleteObject: %v", err)
 		}
+	}
+	// A conditional write puts the first object at a key, signed with its
+	// If-None-Match header, and puts nothing the second time.
+	for i, want := range []bool{true, false} {
+		created, err := c.CreateObject(ctx, accountOf, "superschematic-state", "superschematic/passphrase-check", []byte(fmt.Sprintf("write %d", i)))
+		if err != nil || created != want {
+			t.Errorf("CreateObject %d = %v, %v; want %v", i, created, err, want)
+		}
+	}
+	if data, _, err := c.GetObject(ctx, accountOf, "superschematic-state", "superschematic/passphrase-check"); err != nil || string(data) != "write 0" {
+		t.Errorf("after two conditional writes the object holds %q, %v", data, err)
 	}
 	if _, _, err := c.GetObject(ctx, accountOf, "missing-bucket", "x"); err == nil || !strings.Contains(err.Error(), "NoSuchBucket") {
 		t.Errorf("GetObject of a missing bucket: %v", err)
