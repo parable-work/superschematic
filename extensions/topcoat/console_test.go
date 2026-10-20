@@ -920,8 +920,10 @@ func suppliersOutputs() map[string]any {
 // lookup-free labels and its picker's search; the crate depends on it; and
 // a page and the picker's shard that call listSuppliers meet its rate
 // limit, its limiter taken from the dependency's setup. With one listed,
-// with the dependency's server in Go, and with its crate not built first,
-// the reference is left out, and the build log gives the reason.
+// with the dependency's config generating no API server, with its server
+// in Go, with its config unreadable, and with its crate not built first,
+// the reference is left out, and the build log gives the reason; the
+// build does not fail.
 func TestAReferenceToAnotherAPIsOptions(t *testing.T) {
 	dir := hostedCopy(t)
 	names, err := registry.ParseNaming([]byte("[extension.topcoat]\n"+bothServices), "superschematic.toml")
@@ -993,6 +995,7 @@ func TestAReferenceToAnotherAPIsOptions(t *testing.T) {
 	goServer := rustOutputs()
 	goServer["api"] = map[string]any{"enabled": true, "language": "GO"}
 	goServer["types"] = map[string]any{"go": map[string]any{"enabled": true}}
+	noServer := map[string]any{"types": map[string]any{"rust": map[string]any{"enabled": true}}}
 	for _, tc := range []struct {
 		name, table string
 		depOutputs  map[string]map[string]any
@@ -1000,19 +1003,53 @@ func TestAReferenceToAnotherAPIsOptions(t *testing.T) {
 		want        string
 	}{
 		{"one listed", "services = [\"fixture-console-api\"]\n", nil, true,
-			"[extension.topcoat] services does not list fixture-console-suppliers-api beside fixture-console-api, so no app hosts both"},
+			"[extension.topcoat] services does not list fixture-console-suppliers-api beside fixture-console-api, so no app hosts both\n"},
+		{"no API server", bothServices, map[string]map[string]any{suppliersService: noServer}, true,
+			"fixture-console-suppliers-api's config generates no API server, so it has no crate\n"},
 		{"a Go server", bothServices, map[string]map[string]any{suppliersService: goServer}, true,
-			"fixture-console-suppliers-api's API server is not Rust, so it has no crate"},
+			"fixture-console-suppliers-api's API server is not Rust, so it has no crate\n"},
+		{"an unreadable config", bothServices, map[string]map[string]any{suppliersService: {"nope": true}}, true,
+			"fixture-console-suppliers-api's Rust API could not be read: schema config for fixture-console-suppliers-api: outputs block has unknown key \"nope\""},
 		{"no crate built", bothServices, depOutputs, false,
-			"fixture-console-suppliers-api's Topcoat crate is not in the output root, which a build of it first writes (build --with-deps)"},
+			"fixture-console-suppliers-api's Topcoat crate is not in the output root, which a build of it first writes (build --with-deps)\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			log := reason(t, tc.table, tc.depOutputs, tc.buildDep)
-			want := "  - topcoat: Product.supplierId refers to fixture-console-suppliers-api.Supplier, whose options operation fixture-console-suppliers-api's SupplierQueries.listSuppliers has no in-process call: " + tc.want + "\n"
+			want := "  - topcoat: Product.supplierId refers to fixture-console-suppliers-api.Supplier, whose options operation fixture-console-suppliers-api's SupplierQueries.listSuppliers has no in-process call: " + tc.want
 			if !strings.Contains(log, want) {
 				t.Errorf("the build log lacks %q:\n%s", want, log)
 			}
 		})
+	}
+}
+
+// TestAnUncalledDependencyIsNotRead builds the copy of fixture-console-api
+// whose Supplier is fixture-console-suppliers-api's but whose options are
+// its own listSuppliers, with the table listing both and the dependency's
+// config unreadable: no reference calls the dependency's crate, so the
+// extension never reads its API, and the build neither fails nor logs it
+// (D61, amended). The copy whose options are the dependency's then gives
+// its reason and builds.
+func TestAnUncalledDependencyIsNotRead(t *testing.T) {
+	names, err := registry.ParseNaming([]byte("[extension.topcoat]\n"+bothServices), "superschematic.toml")
+	if err != nil {
+		t.Fatalf("ParseNaming: %v", err)
+	}
+	broken := map[string]map[string]any{suppliersService: {"nope": true}}
+	var log strings.Builder
+	dir := suppliersCopy(t, productForm)
+	if _, err := buildIn(t, buildSpec{names: names, dir: dir, root: testpaths.TempDir(t), outputs: livePagesOutputs(), log: &log, depOutputs: broken}); err != nil {
+		t.Fatalf("build: %v\n%s", err, log.String())
+	}
+	if strings.Contains(log.String(), "could not be read") || strings.Contains(log.String(), "fixture-console-suppliers-api's SupplierQueries") {
+		t.Errorf("the build log reads a dependency no reference calls:\n%s", log.String())
+	}
+	log.Reset()
+	if _, err := buildIn(t, buildSpec{names: names, dir: hostedCopy(t), root: testpaths.TempDir(t), outputs: livePagesOutputs(), log: &log, depOutputs: broken}); err != nil {
+		t.Fatalf("build of the hosted copy: %v\n%s", err, log.String())
+	}
+	if !strings.Contains(log.String(), "fixture-console-suppliers-api's Rust API could not be read") {
+		t.Errorf("the build log lacks the hosted reference's reason:\n%s", log.String())
 	}
 }
 

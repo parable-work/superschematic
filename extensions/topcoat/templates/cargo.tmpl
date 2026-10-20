@@ -8,10 +8,11 @@ description = "Topcoat pages, guards and records over the {{ .SchemaName }} API"
 license = "UNLICENSED"
 {{- if .Identity }}
 
-# The identity store's SQL client (D50), the API crate's features.
+# The identity store's SQL client (D50), the API crate's features{{ if .IdentityHosted }}, and
+# those of each hosted crate a reference calls whose API has one too{{ end }}.
 [features]
-identity-postgres = ["{{ .APICrate }}/identity-postgres"]
-identity-sqlite = ["{{ .APICrate }}/identity-sqlite"]
+identity-postgres = ["{{ .APICrate }}/identity-postgres"{{ range .IdentityHosted }}, "{{ .Crate }}/identity-postgres"{{ end }}]
+identity-sqlite = ["{{ .APICrate }}/identity-sqlite"{{ range .IdentityHosted }}, "{{ .Crate }}/identity-sqlite"{{ end }}]
 {{- end }}
 
 [dependencies]
