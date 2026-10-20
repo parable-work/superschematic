@@ -6710,6 +6710,50 @@ KiB, `superscalar_wasm_bg.wasm` 2.1 MiB) and runs it under the runtime's
 pinned workerd, where a tester Worker puts two teas in a cart through a
 service binding. No call has reached Cloudflare.
 
+### D64, amended: a site's Worker answers its config path first and a directory with its index, and a job's tries run within one Cron Trigger run of at most 15 minutes
+
+Building the site and Cron platforms met questions sections 18.8 and 18.9
+left open: what a site's Worker does with `/`, which `htmlHandling:
+"none"` matches to no file; whether a build's file at the config's path
+hides the config; how the script reaches the version; where a job's
+timeout and retries come from on a platform that runs no process per
+try; what Cloudflare's limit for a scheduled run is; and when a time zone
+other than UTC is refused.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The site script answers a path that names no file with its directory's `index.html` first, which it asks the assets binding for, then the fallback, then 404, as `stack dev`'s file server does. | `htmlHandling: "auto-trailing-slash"`, Cloudflare's default, which redirects `/about.html` to `/about` and `/index.html` to `/`, where `stack dev` and gcp serve the file. Leaving `/` to the fallback, which a site without one answers 404. |
+| The version's assets run the script first for `/__superschematic/*` (`runWorkerFirst`), so the config's path is the script's even when a build holds a file there, as `stack dev` answers it first. | Refusing a build with a file under `__superschematic/`, a rule only this target would have. Letting the file win, so the site reads a config of its build's in every environment. |
+| The script, `site.js`, is the version's one module, inline as `contentBase64`: the bytes the extension embeds, the same in every release. | A `contentFile` beside the program, which the deploy places only for a bundle or a site's files, under a digest the core checks; the script is neither. Putting it among the site's files, which would change their digest and make it an asset. |
+| `scheduled.ts` runs every try of a firing within that one run, each building `Deps` anew and bounded by the job's timeout, a signal that aborts and a try that fails when it does. The timeout and retries are the `@job`'s, the same in every environment, so the build writes them into `scheduled.ts`; it fills them from the service's `@job`, since `stack.Jobs` resolves no environment. A try that times out cannot be stopped, and its method may run on beside the next. | Cloudflare's own retries, which a Cron Trigger does not offer. The timeout and retries as bindings, a value per environment for what no environment changes. |
+| Cloudflare stops a Cron Trigger's run after 15 minutes of wall time, on both plans (the Duration table of the Workers limits, read on 2026-10-20): `MaxScheduledRunSeconds`. The platform refuses, as unrealizable, a job whose timeout times its tries exceeds it; CPU time is limited apart, by `cpuMs`. | The CPU limit, 30 seconds by default and 15 minutes for a schedule of an hour or more, which bounds work, not waiting, and which a job's timeout does not measure. |
+| A time zone other than UTC (or `Etc/UTC`) is refused only for a schedule the environment runs: a member of a preview that runs none, or an environment that turns it off, resolves. | Refusing the `@job`'s time zone wherever it is placed, which stops a preview that runs no schedule. |
+| A job whose API opens a database is refused by the server generator, until `scheduled.ts` opens D1 as `fetch.ts` does, saying so. `stacktest` gains `fake.cron`, a bundle platform for jobs, on which the generator's tests place one. | Admitting it with `Deps.db` unset, which fails on the first query. |
+| The core's `stack.PinSites` is public beside `PinBundles`, so a provisioner's tests render a site's program pinned as a deploy pins it. | |
+
+Status: built, proven offline. `extensions/cloudflare` resolves a web
+fixture, a server, its job and a site calling it, in Staging, Production
+and Preview against golden files, each node checked against its pin,
+`workersCronTrigger` among them at 6.22.0; refuses a time zone, a timeout
+over the limit, a long name, a Go job and a site without a public
+address; checks `nothing-public-unless-exposed` on a job's Worker;
+publishes and fetches a site's files over the fake `Cloud`, deploys the
+site and fetches its files back with `--no-build`; refuses `stack run`;
+renders the workflow; and runs `site.js` under the runtime's pinned
+workerd beside a stand-in for the assets: the config uncached, a
+directory's index, the fallback at 200, 404 without one, 405 for a POST.
+`extensions/pulumi` renders the fixture's program with the site's files
+and both bundles pinned. servergen writes `scheduled.ts` for a job on
+`fake.cron` against golden files, type-checks and bundles it, and runs
+the bundle under workerd, where a tester fires four Workers' `scheduled`
+handlers as a Cron Trigger fires them: one succeeds, one on its retry,
+and one whose tries fail and one whose tries outlive the timeout throw,
+each try logged. The CI's go job installs the pinned workerd. A job whose
+API calls another, opens a database or lists a bucket does not resolve
+yet: those connectors from `cloudflare.cron` come with the
+Workers-to-Workers, D1 and R2 connectors. No call has reached
+Cloudflare.
+
 ## D65. A Rust API runs jobs and workers, its workers claim queues through a descriptor its types carry, and each output root builds against a mirror of its implementations
 
 D57 gave a Rust API a server and left out its jobs and workers: the

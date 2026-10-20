@@ -6,9 +6,11 @@ D64). It registers the DNS platform `cloudflare`, which writes an
 environment's domain records into a Cloudflare zone, whatever target runs
 the environment's servers, and the target `cloudflare`, which runs an
 environment on one Cloudflare account. The target's values, its state in
-R2, its secrets in the Secrets Store, its bootstrap, its CI identity, and
-its Workers platform, which runs TypeScript servers as Workers from the
-bundles it keeps in R2, are built; its Cron, D1, R2 and site platforms
+R2, its secrets in the Secrets Store, its bootstrap, its CI identity, its
+Workers platform, which runs TypeScript servers as Workers from the
+bundles it keeps in R2, its Cron platform, which runs TypeScript jobs as
+Workers under Cron Triggers, and its site platform, which serves sites as
+Workers with static assets kept in R2, are built; its D1 and R2 platforms
 come next, in this module.
 
 It is a Go module of its own, as `extensions/gcp` and `extensions/pulumi`
@@ -115,6 +117,8 @@ export abstract class Staging {}
 | `ci.go` | the CI identity, `cloudflare-api-token`, naming the GitHub secrets each job reads |
 | `workers.go`, `names.go` | the `cloudflare.workers` platform: a TypeScript server as a Worker, its version and its deployment, its config as bindings, its custom domain; names suffixed per member and refused over 63 characters |
 | `bundles.go` | the bundle store: each bundle's files in the state bucket under their digest, and back |
+| `cron.go` | the `cloudflare.cron` platform: a TypeScript job as a Worker and its Cron Trigger, in UTC, within Cloudflare's 15 minutes for a scheduled run |
+| `sites.go`, `site.js` | the `cloudflare.sites` platform: a site as a Worker with static assets and the script it embeds; the `cloudflare.site-workers` connector; and the site store, each build's files in the state bucket under their digest, and back |
 | `policy.go` | `domain-on-cloudflare` and `nothing-public-unless-exposed` |
 
 Every command reads the token from `CLOUDFLARE_API_TOKEN` and the state's
@@ -164,6 +168,49 @@ The bundle store keeps a bundle's files in `superschematic-state` under
 SHA-256 and mode as metadata and a marker written last, and fetches them
 back, checked, for a plan, a `--bundle` rollback or a `--no-build` deploy.
 
+## Jobs on Cron Triggers
+
+`cloudflare.cron` places a TypeScript job, its artifact a bundle built
+from the generated `scheduled.ts` (section 18.9 of the design). It lowers
+a job to its Worker's three nodes, as a server's, with workers.dev off,
+and for a schedule the environment runs:
+
+- `<job>.schedule`, a `cloudflare:index/workersCronTrigger:WorkersCronTrigger`
+  on the Worker's name with the job's schedule, after the deployment.
+
+| Setting | Type | |
+| --- | --- | --- |
+| `logs` | boolean | Workers Logs, on by default |
+| `cpuMs` | integer, 1 to 300000 | `limits.cpuMs` |
+
+It refuses, as unrealizable, a job in another language, a Worker name
+over 63 characters, a schedule in a time zone other than UTC, and a
+timeout times tries over `MaxScheduledRunSeconds`, 15 minutes, since
+`scheduled.ts` runs every try of a firing within one run. The target has
+no `Jobs` seam, so `stack run` refuses it.
+
+## Sites on Workers
+
+`cloudflare.sites` places a site (section 18.8 of the design). It lowers
+a site to its Worker's three nodes, workers.dev on without a domain,
+whose version holds:
+
+- `assets`, the directory `artifacts/<site>/{site-digest}`, which the
+  deploy pins and fills, with `htmlHandling` and `notFoundHandling`
+  `none` and the script first under `/__superschematic/`;
+- `site.js` as its one module, inline: `SiteScript`, the bytes the
+  extension embeds;
+- the bindings `ASSETS`, `SITE_CONFIG`, the JSON of section 8.10 with each
+  API's public address, a string or a concatenation with the
+  environment's parameters, and `SITE_FALLBACK` when the site has one;
+
+and under a domain `<site>.domain`, a `workersCustomDomain` for
+`<site>.<domain>`. `cloudflare.site-workers` gives a site edge to a
+server on Workers the server's public address. The site store keeps a
+build's files under `superschematic/sites/<stack>/<site>/<hex>/` as the
+bundle store keeps a bundle's, writes no config, and fetches them back
+for the deploy to place.
+
 ## Linking it
 
 A distribution links the extension beside its target and the pulumi
@@ -187,8 +234,8 @@ cli.New(cli.Config{Name: "superschematic"},
 `schemas/pulumi-cloudflare.json` pins pulumi-cloudflare 6.22.0: the
 digest of each upstream file and the types the DNS platform and the
 target emit: the DNS record, the account token of bootstrap's graph, and
-a Worker's `worker`, `workerVersion`, `workersDeployment` and
-`workersCustomDomain`.
+a Worker's `worker`, `workerVersion`, `workersDeployment`,
+`workersCustomDomain` and `workersCronTrigger`.
 `schemas/` holds one file per type, with its Terraform name and renames
 (section 6.4), and the DNS platform and the target register each as the
 JSON Schema of its type's properties, so resolution checks every node
@@ -209,13 +256,19 @@ a pin at another version.
 
 `go test ./...` resolves the `stack/stacktest` shop stack with its domains
 on Cloudflare, DNS-only in Staging and Preview and proxied in Production,
-the Workers fixture `workers-stack` in Staging, Production and Preview, and
+the Workers fixture `workers-stack` and the web fixture `web-stack`, a
+server, its job and a site, in Staging, Production and Preview, and
 acme-shop's `storefront-stack`, against the golden files under
 `testdata/golden/stack`, each node checked against its pinned type; deploys
-the storefront with the bundle store over the fake `Cloud`; and checks the
-bootstrap graph (`testdata/golden/bootstrap`) and a cloudflare
-environment's workflow (`testdata/golden/ci`, through actionlint when it is
-installed). Bootstrap, the stores and the CI identity run against a fake
+the storefront with the bundle store, and the web fixture's site with the
+site store, over the fake `Cloud`; and checks the bootstrap graph
+(`testdata/golden/bootstrap`) and the workflows of cloudflare environments
+(`testdata/golden/ci`, through actionlint when it is installed).
+`TestSiteScriptUnderWorkerd` runs `site.js` under the HTTP runtime's
+pinned workerd (`testdata/workerd/site`), which
+`bun install --frozen-lockfile` in `runtime/http/typescript/test/workerd`
+installs; it skips without it, unless `SUPERSCHEMATIC_REQUIRE_TS_CHECKS`
+is set. Bootstrap, the stores and the CI identity run against a fake
 `Cloud`, `gh` and provisioner, and `Cloud` itself against a local stand-in
 for the REST and S3 APIs. Run it with `-update` to rewrite the golden
 files, and review the diff. No test calls Cloudflare.

@@ -2,6 +2,8 @@ package cloudflare_test
 
 import (
 	"bytes"
+	"context"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -182,6 +184,22 @@ func TestJobRefusals(t *testing.T) {
 		_, errs := resolveOver(t, reg, s, webServices(), "Staging")
 		refusedWith(t, errs, stack.CodeInvalidSettings, "settings of "+sweepCartsJob+" on platform cloudflare.cron")
 	})
+}
+
+// TestStackRunRefusesTheTarget: the target builds no Jobs seam, so `stack
+// run` refuses a job on it before it reads any state (section 18.15).
+func TestStackRunRefusesTheTarget(t *testing.T) {
+	f := newFixture(t)
+	err := stack.RunJob(context.Background(), stack.RunJobOptions{
+		Options: stack.Options{Registry: f.reg, Run: webRun(t, f), Dir: t.TempDir(), Log: io.Discard},
+		Job:     sweepCartsJob,
+	})
+	if err == nil || !strings.Contains(err.Error(), "target cloudflare runs no job on demand, so `stack run` does not run job "+sweepCartsJob+" of environment Staging") {
+		t.Errorf("stack run = %v", err)
+	}
+	if changes := f.cloud.Changes(); len(changes) != 0 {
+		t.Errorf("stack run changed %q", changes)
+	}
 }
 
 // TestPolicyNothingPublicOnAJob: the web fixture passes; a job's Worker

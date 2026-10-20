@@ -4522,8 +4522,8 @@ export abstract class Staging {}
 `stack init --cloudflare-account <id>` writes the environment and
 `src/cloudflare-target.ts` with the target's types, as it writes gcp's
 (D59). At a terminal, init asks for a cloudflare environment and its
-account when no gcp one is added. The values and server lines are the ones
-built; the other settings lines come with their platforms:
+account when no gcp one is added. The values, server, job and site lines
+are the ones built; the other settings lines come with their platforms:
 
 ```ts
 declare module "@superschematic/stack" {
@@ -4555,9 +4555,9 @@ There is no `worker` key: resolution refuses the kind on this target.
 | internal server | No workers.dev, no custom domain and no route: only a service binding reaches it. |
 | bucket | An `r2Bucket`, `<stack>-<bucket>`, with a suffix under a parameter. `deleteAfterDays` becomes an `r2BucketLifecycle`. |
 | bucket edge | An `r2_bucket` binding named after the field, and an `accountToken` scoped to the bucket's objects. The value is `{name, binding, r2: {account, accessKeyId: <token id>, token: <token value, secret>}}`. |
-| site | A Worker per site, whose version holds the site's files as `assets.directory` `artifacts/<site>/{site-digest}`, a fixed script module, an `assets` binding, and `SITE_CONFIG`, a `plain_text` binding composed from the site's bindings. |
-| site edge | The server's public address goes in the site's config, and the site's origin goes in the server's CORS field (section 8.10). |
-| job | A Worker per job, whose version runs the job's bundle, `scheduled.ts`, under a `workersCronTrigger` on the job's schedule in UTC. A job with no schedule has a Worker and no trigger. |
+| site | A Worker of `cloudflare.sites` per site, named as a server's is, workers.dev on without a domain, whose version holds the site's files as `assets.directory` `artifacts/<site>/{site-digest}` with `htmlHandling` and `notFoundHandling` `none` and `runWorkerFirst: ["/__superschematic/*"]`; the script the extension embeds, `site.js`, as its one module, inline (`contentBase64`); an `assets` binding, `ASSETS`; `SITE_CONFIG`, a `plain_text` binding composed from the site's bindings; and `SITE_FALLBACK` when it has one (section 18.8). Its address and public address are both `https://<name>.<domain>`, or `https://<name>.<workersSubdomain>.workers.dev`. |
+| site edge | `cloudflare.site-workers` derives the server's public address, which goes in the site's config, and the core puts the site's origin in the server's CORS field (section 8.10). |
+| job | A Worker of `cloudflare.cron` per job, named after the deployable, workers.dev off, whose version runs the job's bundle, built from `scheduled.ts`, with `limits.cpuMs` from `cpuMs`, under a `workersCronTrigger` (`<job>.schedule`) on the job's schedule in UTC once the deployment is there. A job with no schedule has a Worker and no trigger. TypeScript only; a schedule in another time zone, and a timeout times tries over 15 minutes, are refused as unrealizable (section 18.9). |
 | secret | A Secrets Store secret `<Stack>-<Environment>-<Type>-<FIELD>`, written by `stack secrets set`. A member of a parameterized environment reads its environment's. |
 | exposure | A `workersCustomDomain` (`<deployable>.domain`) for `<name>.<domain>`, in the exposure step; Cloudflare writes its DNS record and certificate. Without a domain, the public address is `https://<name>.<workersSubdomain>.workers.dev`, and an environment that exposes a server without a domain and records no `workersSubdomain` is refused, saying to run bootstrap. |
 | parameter | Names are suffixed with the parameter's value. Each member gets its own D1 database and R2 bucket, and the target's `DestroyPreparer` (`TargetSpec.PreDestroy`) empties the bucket before the member's destroy. Secrets are the environment's. |
@@ -4796,7 +4796,9 @@ The package also holds `workers.d.ts`, which declares the
 ambient module only from a file with no import, and its `tsconfig.json`
 type-checks `fetch.ts` with it. Until the D1 platform lands, the server
 generator refuses a server on a bundle platform whose APIs open a
-database, and a job or a worker on one.
+database, and a job whose API opens one; it refuses a worker on one
+always. A job's package gets `scheduled.ts` in place of `fetch.ts`
+(section 18.9).
 
 **`fetch.ts`** (generated) imports `env` from `cloudflare:workers`, which
 `workers.d.ts` declares, and its helpers from the runtime's `./workers`
@@ -4927,46 +4929,96 @@ bucket's CORS; that gap is shared with gcp and lands for both later.
 
 ### 18.8 Sites on Workers static assets
 
-A site's Worker serves the build's files as static assets. Its version
-holds:
+The `cloudflare.sites` platform gives each site a Worker named after the
+deployable (`workerNodes`), which serves the build's files as static
+assets. Its version holds:
 - `assets.directory` set to `artifacts/<site>/{site-digest}`, pinned and
   placed as a bundle's files are;
-- `assets.config` with `htmlHandling: "none"` and
-  `notFoundHandling: "none"`;
+- `assets.config` with `htmlHandling: "none"`, so a path names a file
+  exactly, `notFoundHandling: "none"`, so a path that names no file runs
+  the script, and `runWorkerFirst: ["/__superschematic/*"]`, so the
+  config's path is the script's even when a build holds a file there, as
+  `stack dev`'s file server answers it first;
 - an `assets` binding, `ASSETS`;
 - `SITE_CONFIG`, a `plain_text` binding with the JSON of section 8.10,
-  whose values are each API's public address, composed on this target from
-  names alone;
-- `SITE_FALLBACK` when set;
-- a script module the extension embeds, the same bytes in every release.
+  `{"apis":{"<API>":{"url":"<public address>"}}}`, whose values are each
+  API's public address, composed on this target from names alone: a
+  string, or a concatenation with the environment's parameters, whose
+  values are safe in a JSON string;
+- `SITE_FALLBACK`, the fallback's path in the build, when set;
+- `site.js`, a script module the extension embeds, the same bytes in
+  every release, inline as the module's `contentBase64`: a few hundred
+  bytes need no placement beside the program.
 
-Cloudflare runs the script only when no file matches. It answers
-`/__superschematic/config.json` with `no-store`, and any other path with
-the fallback's bytes at 200, or 404 without a fallback. The `Sites`
-seam's `Publish` keeps the files in R2 under their digest, and its `Fetch`
-places them for the provider; it writes no config, since the graph carries
-it. Files are served with Cloudflare's asset caching, which revalidates
-each by its ETag; D55's year-long `immutable` for content-hashed names is
-not given here.
+Cloudflare runs the script only when no file matches, and first under
+`/__superschematic/`. For a GET or a HEAD it answers
+`/__superschematic/config.json` with `SITE_CONFIG`, `application/json`
+and `no-store`; a directory with its `index.html`, which it asks `ASSETS`
+for, since `htmlHandling: "none"` serves `/` nothing; and any other path
+with the fallback's bytes and headers at 200, or 404 without a fallback.
+Any other method gets 405. The runtime's pinned workerd runs it, beside a
+stand-in for the assets, in `extensions/cloudflare`'s tests.
+
+The `Sites` seam (`siteStore`) keeps a build's files in the state bucket
+under `superschematic/sites/<stack>/<site>/<hex>/`, each with its SHA-256
+and mode and a marker written last, as the bundle store keeps a bundle's,
+and puts nothing for a digest whose marker is there. As an
+`ArtifactFetcher` it writes them back, checked, so the deploy places
+them beside the program for a plan, a `--site` rollback or a `--no-build`
+deploy; a deploy that built them places them from the build. It writes
+no config, since the graph carries it. A site is always exposed: under a
+domain at a `workersCustomDomain`, `<site>.<domain>`, in the exposure
+step, and otherwise at workers.dev, which needs bootstrap's
+`workersSubdomain`; its public address is its origin in the CORS field of
+each API it calls. Files are served with Cloudflare's asset caching,
+which revalidates each by its ETag; D55's year-long `immutable` for
+content-hashed names is not given here.
 
 ### 18.9 Jobs on Cron Triggers
 
-The `cloudflare.cron` platform gives each job a Worker named after the
-deployable, running `scheduled.ts`. `scheduled.ts` builds `Deps` as a
-server's does, with no identity, callers or CORS. Its `scheduled`
-handler:
-- calls `createJobs(deps)`, then the job's method with a signal that
-  aborts at the job's timeout;
-- logs `job started`, then `job done` or `job failed` with how long it
-  took;
-- runs the method again up to its retries, as `stack dev` does;
-- throws after the last failure, so Cloudflare records the run as failed.
+The `cloudflare.cron` platform gives each TypeScript job a Worker named
+after the deployable (`workerNodes`, workers.dev off, Workers Logs on
+unless `logs: false`), whose version runs the job's bundle
+(`bundleVersion`), and, for a schedule the environment runs, a
+`workersCronTrigger`, `<job>.schedule`, on the Worker once its deployment
+is there. A job with no schedule, or one its environment turns off, or a
+member of a parameterized environment that turns none on, has the Worker
+and no trigger.
 
-A schedule runs in UTC, so a job with another `timeZone` is refused, since
-daylight saving moves an offset. A job whose timeout times its tries
-exceeds Cloudflare's limit for a scheduled run is refused. `cpuMs` sets
-`limits.cpuMs`. Cloudflare starts a run at each firing, as Cloud Run does.
-No `Jobs` seam is built for this target, so `stack run` refuses it.
+The server generator writes `scheduled.ts`, `bundle.ts` and
+`workers.d.ts` in the job's package beside `main.ts`, which `stack dev`
+still runs; `bundle.ts` bundles `scheduled.ts` as it bundles a server's
+`fetch.ts`. `scheduled.ts` reads its API's config from the string
+bindings at module scope, unless the config has a `Secret<T>` field, so a
+refused config fails the upload. Its `scheduled` handler runs up to one
+try and one per retry, one after the other, as `stack dev` does. Each try:
+- builds `Deps` as a server's `fetch.ts` does, with no identity, callers
+  or CORS: the config, through `loadBackgroundEnvConfig` where the API has
+  a callers field, its secrets awaited once per isolate, a client per
+  callee through its service binding and a handle per bucket over its R2
+  binding;
+- calls `createJobs(deps)`, then the job's method with a signal that
+  aborts at the job's timeout, and fails when the signal aborts first;
+- logs `job started`, with the cron and the try, then `job done` or
+  `job failed` with how long it took.
+
+It throws after the last failure, so Cloudflare records the run as
+failed. The timeout and the retries are the `@job`'s, the same in every
+environment, so the build writes them into `scheduled.ts`. A try that
+times out cannot be stopped: its method may run on beside the next try,
+until the run ends.
+
+A schedule runs in UTC, so a job with another `timeZone` and a schedule
+is refused, since daylight saving moves an offset. Cloudflare stops a
+Cron Trigger's run after 15 minutes of wall time on both plans
+(`MaxScheduledRunSeconds`, from the Duration table of the Workers limits,
+read on 2026-10-20), and every try runs within that one run, so a job
+whose timeout times its tries exceeds 15 minutes is refused: ten minutes,
+the default timeout, leaves no room for a retry. CPU time is limited
+apart, 30 seconds by default, and `cpuMs` raises `limits.cpuMs` to 5
+minutes. Cloudflare starts a run at each firing, as Cloud Run does. No
+`Jobs` seam is built for this target, so `stack run` refuses it before
+it reads any state.
 
 ### 18.10 Service auth on Workers
 
@@ -5029,7 +5081,8 @@ runtime tests run fixture bundles under the `workerd` binary.
 - **`nothing-public-unless-exposed`** refuses, for a deployable that is
   not exposed, or for no deployable, a Worker with workers.dev on, a
   `workersCustomDomain` or a `workersRoute`; and all three for a job's
-  Worker. A site is always exposed.
+  Worker, even one marked exposed. A site is always exposed, so its
+  Worker's workers.dev and custom domain pass.
 - **`buckets-never-public`** is in section 18.7.
 - **`domain-on-cloudflare`** is in section 18.11.
 
@@ -5043,11 +5096,17 @@ runtime tests run fixture bundles under the `workerd` binary.
 - Rate limits shared across isolates; Workers' `ratelimit` binding is a
   candidate store.
 - `immutable` caching for a site's hashed files.
+- A database in `scheduled.ts`: the server generator refuses a job on
+  Cron Triggers whose API opens one until its D1 wiring comes, and the
+  connectors from `cloudflare.cron` to a callee, a database or a bucket
+  come with the Workers-to-Workers, D1 and R2 connectors.
 
 Built so far: the target's values, state, secrets, bootstrap and CI
-identity, and the Workers platform for TypeScript servers, its bundle
-store in R2, `fetch.ts` and `bundle.ts`, and the CI's bundle check, all
-proven offline (D64, amended). No Worker has deployed.
+identity; the Workers platform for TypeScript servers, its bundle store
+in R2, `fetch.ts` and `bundle.ts`, and the CI's bundle check; the Cron
+platform for TypeScript jobs and `scheduled.ts`; and the site platform,
+its embedded script and its site store in R2, all proven offline (D64,
+amended). No Worker has deployed.
 
 Milestone 7's second target is done when acme-shop's storefront has run
 live on Workers (workers.dev, then a domain, through the SDK, with a

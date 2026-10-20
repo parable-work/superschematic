@@ -5,9 +5,10 @@
 // `cloudflare`, which runs an environment on one Cloudflare account: its
 // state in an R2 bucket, its secrets in the account's Secrets Store, a
 // bootstrap that makes both and the CI's account tokens, the generated
-// CI's sign-in with those tokens, TypeScript servers as Workers, and the
-// R2 store of the bundles they run. Its D1, R2, site and cron platforms
-// come next, in this module.
+// CI's sign-in with those tokens, TypeScript servers as Workers, the R2
+// store of the bundles they run, TypeScript jobs as Workers under Cron
+// Triggers, and sites as Workers with static assets, whose files it keeps
+// in R2. Its D1 and R2 platforms come next, in this module.
 //
 // It registers through the public registry package alone, as any
 // extension does (D10), in a Go module of its own (D1). Its platforms are
