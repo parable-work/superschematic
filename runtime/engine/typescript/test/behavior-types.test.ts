@@ -10,18 +10,8 @@
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
 
-import {
-  BehaviorConfigError,
-  BehaviorError,
-  IncompatibleChangeError,
-  SchemaDocumentError,
-  defineBehavior,
-  type ConfigType,
-  type ConfigTypes,
-  type Engine,
-  type FrozenJSON,
-  type ValidationIssue,
-} from '../dist/index.js';
+import { BehaviorError, IncompatibleChangeError, SchemaDocumentError, type Engine, type ValidationIssue } from '../dist/index.js';
+import { BehaviorConfigError, defineBehavior, type ConfigType, type ConfigTypes, type FrozenJSON } from '../dist/testing/index.js';
 import { openMetaSchema } from './behavior-fixtures.ts';
 import { alice, cleanup, clone, drivers, openTestEngine, schemaDocument, thrown } from './helpers.ts';
 import { testHooks } from './recorder.ts';

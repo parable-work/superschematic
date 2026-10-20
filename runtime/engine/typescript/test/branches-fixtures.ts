@@ -2,17 +2,9 @@
 // roots, with steps ordered by position, ingredients under a step and at
 // most one cover; an engine on a file the test can read itself; and the
 // calls a test makes on an instance.
-import {
-  allowAll,
-  openDriver,
-  type DriverName,
-  type Engine,
-  type EngineOptions,
-  type Principal,
-  type Row,
-  type SqlValue,
-} from '../dist/index.js';
-import { alice, clone, freshPath, openEngine, schemaDocument, track } from './helpers.ts';
+import { allowAll, type Engine, type Principal, type Row, type SqlValue } from '../dist/index.js';
+import { openConnection } from '../dist/native/sqlite.js';
+import { alice, clone, freshPath, openEngine, schemaDocument, track, type DriverName, type TestEngineOptions } from './helpers.ts';
 
 /** The Branches config of the Recipe document. */
 export const recipeConfig = {
@@ -79,15 +71,15 @@ export interface Opened {
 }
 
 /** openBranches opens an engine on a fresh file, with a reader of the file beside it; the test cleans both up. */
-export function openBranches(driver: DriverName, options: Partial<EngineOptions> = {}): Opened {
+export function openBranches(driver: DriverName, options: Partial<TestEngineOptions> = {}): Opened {
   const path = freshPath();
   const engine = track(openEngine({ path, policy: allowAll, driver, ...options }));
-  let reader: ReturnType<typeof openDriver> | undefined;
+  let reader: ReturnType<typeof openConnection> | undefined;
   return {
     engine,
     all(sql, params = []) {
       if (reader === undefined) {
-        reader = track(openDriver(path, driver));
+        reader = track(openConnection(path));
       }
       return reader.all(sql, params);
     },

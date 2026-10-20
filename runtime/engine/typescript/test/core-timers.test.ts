@@ -18,17 +18,16 @@ import {
   EngineError,
   SchemaDocumentError,
   behaviorField,
-  defineBehavior,
   type AccessPolicy,
   type Engine,
   type EngineEvent,
-  type EngineOptions,
   type OperationChange,
   type Principal,
   type ToolGuidance,
 } from '../dist/index.js';
+import { defineBehavior } from '../dist/testing/index.js';
 import { openMetaSchema } from './behavior-fixtures.ts';
-import { alice, cleanup, drivers, openTestEngine, schemaDocument, thrown } from './helpers.ts';
+import { alice, cleanup, drivers, openTestEngine, schemaDocument, thrown, type TestEngineOptions } from './helpers.ts';
 import { testClock, type TestClock } from './runner-fixtures.ts';
 
 afterEach(cleanup);
@@ -123,7 +122,7 @@ for (const driver of drivers) {
   // opened opens an engine on a test clock at T0 with the runner, and the
   // Ticket schema, and lets the runner find the fire schedule, which runs
   // an interval later.
-  function opened(timers: unknown, extra: Behavior[] = [], options: Partial<EngineOptions> & { workflow?: unknown } = {}) {
+  function opened(timers: unknown, extra: Behavior[] = [], options: Partial<TestEngineOptions> & { workflow?: unknown } = {}) {
     const { workflow, ...rest } = options;
     const clock = testClock(T0);
     const engine = openTestEngine({ driver, clock, runner: { principal: runner }, metaSchema: openMetaSchema(), behaviors: [bounce, hold], ...rest });

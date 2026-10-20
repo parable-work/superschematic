@@ -7,9 +7,10 @@ import { afterEach, describe, test } from 'node:test';
 
 import { hasAnyPermission } from '@superschematic/http-runtime';
 
-import { BehaviorError, BehaviorVetoError, defineBehavior, servicePrincipal, type Engine, type EngineOptions, type Principal } from '../dist/index.js';
+import { BehaviorError, BehaviorVetoError, servicePrincipal, type Engine, type Principal } from '../dist/index.js';
+import { defineBehavior } from '../dist/testing/index.js';
 import { openMetaSchema, publishItem } from './behavior-fixtures.ts';
-import { alice, cleanup, drivers, openTestEngine, thrown } from './helpers.ts';
+import { alice, cleanup, drivers, openTestEngine, thrown, type TestEngineOptions } from './helpers.ts';
 
 afterEach(cleanup);
 
@@ -54,7 +55,7 @@ function holding(...permissions: string[]): Principal {
 }
 
 for (const driver of drivers) {
-  function open(options: Partial<EngineOptions> = {}): Engine {
+  function open(options: Partial<TestEngineOptions> = {}): Engine {
     const engine = openTestEngine({ driver, metaSchema: openMetaSchema(), behaviors: [gate], ...options });
     publishItem(engine, [{ name: 'test.Gate', config: { permission: 'orders.approve' } }]);
     return engine;

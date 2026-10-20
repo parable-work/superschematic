@@ -1,0 +1,101 @@
+/*
+A behavior's declaration: the JSON document the compiler registers
+(registry.BehaviorSpec, section 3.16 of docs/extension-model.md), which
+engine.behaviors.declaration returns and a schema's composed behaviors
+carry. An operation's paramsSchema sets `additionalProperties: false`, so
+its parameters are exactly the ones it declares. A name is
+`<extension>.<Name>`, or a bare `<Name>` for a core behavior; each veto
+code is lowercase snake case.
+*/
+
+/** A behavior's declaration, as its JSON file holds it. */
+export interface BehaviorDeclaration {
+  /** Bare (`StateMachine`) for a core behavior, `<extension>.<Name>` for an extension's. */
+  readonly name: string;
+  readonly description?: string;
+  /** The JSON Schema of the config a type gives it; absent, it takes none. */
+  readonly configSchema?: JSONSchema;
+  /**
+   * The JSON Schema of the parameters a create gives it for the new
+   * instance, which its initialize gets: an object schema whose
+   * additionalProperties is false or a schema. Absent, a create gives it
+   * none.
+   */
+  readonly createParamsSchema?: JSONSchema;
+  /** Behaviors a type that lists this one must also list. */
+  readonly requires?: readonly string[];
+  /** Behaviors a type that lists this one may not list. */
+  readonly conflicts?: readonly string[];
+  /** The fields it adds to the instance type. */
+  readonly fields?: readonly BehaviorFieldDeclaration[];
+  /** The operations it adds beside create, get, list, update and delete. */
+  readonly operations?: readonly BehaviorOperationDeclaration[];
+  /**
+   * The JSON Schema of the entry a caller sends for it in the
+   * preconditions of an update, a delete or an operation, which its guard
+   * gets as the request's precondition: an object schema with
+   * `additionalProperties: false`. Absent, it takes none.
+   */
+  readonly preconditionSchema?: JSONSchema;
+  /** The codes its vetoes carry; a veto with a code it does not list is a BehaviorError. */
+  readonly vetoes?: readonly BehaviorVetoDeclaration[];
+}
+
+/** One code a behavior's vetoes carry. */
+export interface BehaviorVetoDeclaration {
+  /** Lowercase snake case, at most 64 characters. */
+  readonly code: string;
+  readonly description?: string;
+}
+
+export interface BehaviorFieldDeclaration {
+  readonly name: string;
+  readonly description?: string;
+  /**
+   * True for a field that can move without an event of its own instance:
+   * computed at a read from other instances, the clock or the config. No
+   * event records such a move, so Reactions' changes refuses one (D56).
+   */
+  readonly volatile?: boolean;
+}
+
+export interface BehaviorOperationDeclaration {
+  /** camelCase. */
+  readonly name: string;
+  readonly description?: string;
+  /** An object schema with `additionalProperties: false`. */
+  readonly paramsSchema: JSONSchema;
+  readonly resultSchema: JSONSchema;
+  /** True for an operation that changes stored state. */
+  readonly writes?: boolean;
+  /**
+   * What it runs on: `instance` (or absent), one instance a call names by
+   * id; `schema`, the schema as a whole, with no instance. A string, as a
+   * JSON module types it; checkDeclaration refuses any other value.
+   */
+  readonly scope?: string;
+  /** The MCP invocation policy of its tool (D11); absent for the policy's default. */
+  readonly invocationPolicy?: string;
+}
+
+/** What an operation runs on. */
+export type OperationScope = 'instance' | 'schema';
+
+/** The scopes an operation declares. */
+export const OPERATION_SCOPES: readonly OperationScope[] = ['instance', 'schema'];
+
+/** A JSON Schema: an object, or true or false. */
+export type JSONSchema = boolean | { readonly [key: string]: unknown };
+
+/** A behavior name the engine takes. */
+export const BEHAVIOR_NAME = /^(?:[A-Za-z][A-Za-z0-9_-]*\.)?[A-Z][A-Za-z0-9]*$/;
+
+/**
+ * The operations the engine serves on a schema itself, which no behavior
+ * may declare: every schema has create, get, list, update and delete, and
+ * one whose instance type has a unique field lookup.
+ */
+export const BUILTIN_OPERATIONS: readonly string[] = ['create', 'get', 'list', 'update', 'delete', 'lookup'];
+
+/** A veto code: lowercase snake case, at most 64 characters. */
+export const VETO_CODE = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/;

@@ -18,7 +18,8 @@
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
 
-import { EngineError, defineBehavior, type Principal } from '../dist/index.js';
+import { EngineError, type Principal } from '../dist/index.js';
+import { defineBehavior } from '../dist/testing/index.js';
 import {
   alice,
   cleanup,

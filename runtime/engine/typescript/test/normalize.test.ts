@@ -9,7 +9,8 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { afterEach, describe, test } from 'node:test';
 
-import { InstanceValidationError, UniqueConflictError, canonicalJSON, defineBehavior, type Engine, type FrozenJSON } from '../dist/index.js';
+import { InstanceValidationError, UniqueConflictError, canonicalJSON, type Engine } from '../dist/index.js';
+import { defineBehavior, type FrozenJSON } from '../dist/testing/index.js';
 import { openMetaSchema } from './behavior-fixtures.ts';
 import { alice, cleanup, drivers, openTestEngine, schemaDocument, thrown } from './helpers.ts';
 

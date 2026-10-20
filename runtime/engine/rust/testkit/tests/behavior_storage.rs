@@ -8,8 +8,9 @@
 //! variable set, on Postgres. The storage crate's tests hold the checker
 //! to every statement form; these hold the engine to what it hands the
 //! checker: the call's mode, namespace, schema, columns and policy. The
-//! query plan the TypeScript test reads by wrapping the storage is not
-//! portable; a migration that returns a promise has no Rust counterpart.
+//! query plan the TypeScript test read by wrapping the storage is read
+//! here through the behavior's own `sql.explain`, on both databases; a
+//! migration that returns a promise has no Rust counterpart.
 
 mod support;
 
@@ -514,7 +515,8 @@ static QUEUE: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
             {"name": "relation", "paramsSchema": {"type": "object", "additionalProperties": false}, "resultSchema": {"type": "string"}},
             {"name": "read", "paramsSchema": sql_params(), "resultSchema": true},
             {"name": "write", "paramsSchema": sql_params(), "resultSchema": true, "writes": true},
-            {"name": "select", "scope": "schema", "paramsSchema": sql_params(), "resultSchema": true}
+            {"name": "select", "scope": "schema", "paramsSchema": sql_params(), "resultSchema": true},
+            {"name": "explain", "scope": "schema", "paramsSchema": sql_params(), "resultSchema": true}
         ]
     })
     .to_string()
@@ -582,10 +584,16 @@ impl Behavior for Queue {
                     Ok(json!(cx.sql().run(sql, &values_of(params))?.changes))
                 }),
             ],
-            schema_operations: vec![("select", |_, cx, params| {
-                let sql = fill(&cx.sql(), sql_of(params))?;
-                Ok(rows_json(&cx.sql().all(sql, &values_of(params))?))
-            })],
+            schema_operations: vec![
+                ("select", |_, cx, params| {
+                    let sql = fill(&cx.sql(), sql_of(params))?;
+                    Ok(rows_json(&cx.sql().all(sql, &values_of(params))?))
+                }),
+                ("explain", |_, cx, params| {
+                    let sql = fill(&cx.sql(), sql_of(params))?;
+                    Ok(json!(cx.sql().explain(sql, &values_of(params))?))
+                }),
+            ],
             fields: vec![("ahead", |_, view| {
                 let relation = view.sql().instances()?;
                 let row = view.sql().get(
@@ -1232,6 +1240,108 @@ fn a_migrations_index_leads_with_the_namespace_and_schema() {
                 "bhv_test_queue__holder",
                 "bhv_test_queue__rank"
             ]
+        );
+    }
+}
+
+// plan is the plan the database makes for a statement test.Queue runs
+// over the relation, its lines joined.
+fn plan(engine: &Engine, sql: &str, values: Value) -> String {
+    let lines = engine
+        .instances()
+        .invoke_schema(
+            &alice(),
+            "Item",
+            "explain",
+            &json!({"sql": sql, "values": values}),
+            None,
+        )
+        .unwrap();
+    lines
+        .as_array()
+        .expect("the plan's lines")
+        .iter()
+        .filter_map(Value::as_str)
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+#[test]
+fn a_filter_on_its_columns_across_the_relation_reads_its_migrations_indexes() {
+    for target in targets("a_filter_on_its_columns_reads_its_indexes") {
+        let engine = ranked(&target, |_| {});
+        // More instances, ranked 0 with no holder, than a scan of the table
+        // is the cheaper plan for, with Postgres's statistics on them, so
+        // its planner weighs the indexes as it would a deployment's.
+        for n in 0..300 {
+            let id = format!("x{n}");
+            engine
+                .instances()
+                .create(
+                    &alice(),
+                    "Item",
+                    &json!({"title": "Filler"}),
+                    CreateOptions {
+                        id: Some(&id),
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+        }
+        if engine.dialect() == Dialect::Postgres {
+            engine
+                .db()
+                .write(superschematic_engine::storage::Lock::Catalog, |tx| {
+                    tx.exec("ANALYZE engine_instances")
+                })
+                .unwrap();
+        }
+        let by_holder = plan(
+            &engine,
+            "SELECT id FROM {instances} WHERE holder = ? AND rank > ? ORDER BY rank",
+            json!(["w1", 0]),
+        );
+        let by_rank = plan(
+            &engine,
+            "SELECT id FROM {instances} WHERE rank > ?",
+            json!([1]),
+        );
+        let joined = plan(
+            &engine,
+            "SELECT a.id FROM {instances} a JOIN {instances} b ON b.rank = a.rank WHERE a.rank > ?",
+            json!([1]),
+        );
+        match engine.dialect() {
+            Dialect::Sqlite => {
+                assert!(
+                    by_holder.contains("SEARCH engine_instances USING INDEX bhv_test_queue___index_by_holder (namespace=? AND schema=? AND bhv_test_queue__holder=? AND bhv_test_queue__rank>?)"),
+                    "{by_holder}"
+                );
+                assert!(
+                    by_rank.contains("INDEX bhv_test_queue___index_by_rank (namespace=? AND schema=? AND bhv_test_queue__rank>?)"),
+                    "{by_rank}"
+                );
+                // The relation folds into the statement, as a view does.
+                assert!(!joined.contains("MATERIALIZE"), "{joined}");
+            }
+            Dialect::Postgres => {
+                assert!(
+                    by_holder.contains("bhv_test_queue___index_by_holder")
+                        && by_holder.contains("Index Cond"),
+                    "{by_holder}"
+                );
+                assert!(
+                    by_rank.contains("bhv_test_queue___index_by_rank")
+                        && by_rank.contains("Index Cond"),
+                    "{by_rank}"
+                );
+                assert!(!joined.contains("CTE Scan"), "{joined}");
+            }
+        }
+        // The plan asks read as the statement would, and runs nothing.
+        assert_eq!(
+            select(&engine, "SELECT COUNT(*) AS n FROM {instances}", json!([])),
+            json!([{"n": 303}])
         );
     }
 }

@@ -54,6 +54,7 @@ export const ENGINE_ERROR_STATUS: Readonly<Record<EngineErrorCode, number>> = {
   invalid_schema: 422,
   invalid_instance: 422,
   unavailable: 503,
+  busy: 503,
 };
 
 /**

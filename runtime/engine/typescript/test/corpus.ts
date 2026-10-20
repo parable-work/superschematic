@@ -41,6 +41,9 @@ async function record(corpus: CorpusFiles): Promise<string> {
   // A test runner's own variables would make the child report to this one.
   delete env.NODE_TEST_CONTEXT;
   delete env.UPDATE_ENGINE_CORPUS;
+  // The corpus is SQLite's: a backends test records its Postgres pass too
+  // when the variable names a database.
+  delete env.ENGINE_TEST_PG_URL;
   const files = [...corpus.scenarios, ...corpus.http].map((file) => `test/${file}.test.ts`);
   const output: string[] = [];
   const code = await new Promise<number | null>((resolve, reject) => {

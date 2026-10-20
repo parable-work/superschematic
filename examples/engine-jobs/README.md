@@ -34,9 +34,10 @@ From the repository root, after `make setup`:
 examples/engine-jobs/scripts/check.sh
 ```
 
-It builds the schema runtime, the HTTP runtime, the version graph (which
-needs cargo and the `wasm32-unknown-unknown` target), the engine and the
-work-queue package, links them into `node_modules`, type-checks the
+It builds the HTTP runtime, the engine and the work-queue package, and the
+engine's Node-API addon with cargo when the engine has none
+(`scripts/engine-napi.sh`: the engine and the work-queue behaviors are
+Rust, D58, which the package loads), links them into `node_modules`, type-checks the
 example, and runs `test/jobs.test.ts` with `node --test` and with
 `bun test`, each serving the example on a free port. The `typescript` job
 in `.github/workflows/ci.yml` runs it after the work-queue package's own
@@ -122,9 +123,12 @@ test sets them to 20 milliseconds.
 `@superschematic/http-runtime`, `hono`, `@hono/node-server`, TypeScript
 and the Node.js types from the engine's `node_modules`. The work-queue
 package's build links the same engine into its own `node_modules`, so the
-behaviors the server registers run in the engine it opens: a second copy
-would bring classes the engine does not recognize. Once the packages are
-published, a project declares `@superschematic/engine`,
-`@superschematic/engine-workqueue`, the four packages the engine README
-("Runtimes") names, `hono` for the `./http` entry point, and a server for
-the app, such as `@hono/node-server`.
+package's types and its worker's client are the engine's. The work-queue
+behaviors themselves are Rust, in the engine's addon, which the server
+names (`workQueueBehaviors`, the seven names). Once the packages are
+published, a project declares `@superschematic/engine`, whose prebuilt
+addon for its platform npm installs as an optional dependency
+(`@superschematic/engine-<target>`), `@superschematic/engine-workqueue`,
+the HTTP runtime and superscalar the engine README ("Runtimes") names,
+`hono` for the `./http` entry point, and a server for the app, such as
+`@hono/node-server`.

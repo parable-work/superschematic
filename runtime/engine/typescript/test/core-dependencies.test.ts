@@ -14,15 +14,14 @@ import {
   IncompatibleChangeError,
   OperationParamsError,
   SchemaDocumentError,
-  defineBehavior,
   type AccessPolicy,
   type AccessRequest,
   type Engine,
-  type EngineOptions,
   type Principal,
 } from '../dist/index.js';
+import { defineBehavior } from '../dist/testing/index.js';
 import { openMetaSchema } from './behavior-fixtures.ts';
-import { alice, cleanup, drivers, openTestEngine, schemaDocument, thrown } from './helpers.ts';
+import { alice, cleanup, drivers, openTestEngine, schemaDocument, thrown, type TestEngineOptions } from './helpers.ts';
 import { reader } from './reach-fixtures.ts';
 
 afterEach(cleanup);
@@ -91,12 +90,12 @@ function recording(rules: (request: AccessRequest) => boolean): AccessPolicy {
 }
 
 for (const driver of drivers) {
-  function open(options: Partial<EngineOptions> = {}): Engine {
+  function open(options: Partial<TestEngineOptions> = {}): Engine {
     return openTestEngine({ driver, ...options });
   }
 
   // Tasks t1, t2 and t3 in todo, and milestone m1, active.
-  function world(options: Partial<EngineOptions> = {}, dependencies?: Record<string, unknown>): Engine {
+  function world(options: Partial<TestEngineOptions> = {}, dependencies?: Record<string, unknown>): Engine {
     const engine = open(options);
     publish(engine, schema('Milestone', [{ name: 'Workflow', config: milestoneFlow }]));
     publish(engine, schema('Note', []));

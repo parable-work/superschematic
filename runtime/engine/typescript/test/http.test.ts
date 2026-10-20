@@ -9,10 +9,21 @@ import { afterEach, describe, test } from 'node:test';
 import { HttpProblem, serviceForbidden, serviceUnauthorized, type Authenticator, type ServiceAuthenticator } from '@superschematic/http-runtime';
 import { Hono } from 'hono';
 
-import { BehaviorError, OperationParamsError, type AccessPolicy, type AccessRequest, type Engine, type EngineOptions } from '../dist/index.js';
+import { BehaviorError, EngineError, OperationParamsError, type AccessPolicy, type AccessRequest, type Engine } from '../dist/index.js';
 import { ENGINE_ERROR_STATUS, MERGE_PATCH_MEDIA_TYPE, engineApp, engineProblem, type EngineHttpOptions } from '../dist/http/index.js';
 import { counter, flag, hold, itemDocument, openMetaSchema, testBehaviors } from './behavior-fixtures.ts';
-import { alice, cleanup, clone, freshPath, openTestEngine, orderDocument, schemaDocument, stepsDocument, thrown } from './helpers.ts';
+import {
+  alice,
+  cleanup,
+  clone,
+  freshPath,
+  openTestEngine,
+  orderDocument,
+  schemaDocument,
+  stepsDocument,
+  thrown,
+  type TestEngineOptions,
+} from './helpers.ts';
 import { appFor, recordedApp, servedApp } from './recorder.ts';
 
 afterEach(cleanup);
@@ -47,7 +58,7 @@ interface Served {
   app: Hono;
 }
 
-function serve(options: EngineHttpOptions = {}, engineOptions: Partial<EngineOptions> = {}): Served {
+function serve(options: EngineHttpOptions = {}, engineOptions: Partial<TestEngineOptions> = {}): Served {
   const engine = openTestEngine({ policy, namespaces: NAMESPACES, ...engineOptions });
   return { engine, app: servedApp(engineApp, engine, { authenticate, ...options }) };
 }
@@ -335,6 +346,12 @@ describe('instances', () => {
 });
 
 describe('refusals', () => {
+  test("busy, the engine's refusal of a call that waited past the busy timeout, answers 503 with its code", () => {
+    const problem = engineProblem(new EngineError('busy', 'the database is busy'));
+    assert.equal(problem?.status, 503);
+    assert.equal(problem?.code, 'busy');
+  });
+
   test('every engine error code answers its status with the code as the problem code', async () => {
     // Gadget composes test.Counter, published by an engine that has it; the
     // served engine has only test.Flag, so Gadget is unavailable to it.
@@ -379,7 +396,16 @@ describe('refusals', () => {
       ['cursor_expired', () => call(app, 'GET', '/namespaces/default/events?after=1')],
       ['value_too_large', () => post(ORDERS, { data: { title: 'x'.repeat(2_000) } })],
     ];
-    assert.deepEqual(cases.map(([code]) => code).sort(), Object.keys(ENGINE_ERROR_STATUS).sort(), 'a case per engine error code');
+    // busy needs another writer to hold the database's lock past the busy
+    // timeout, which the Rust engine's tests make (testkit's
+    // replicas_failures.rs); the test after this one maps it.
+    assert.deepEqual(
+      cases.map(([code]) => code).sort(),
+      Object.keys(ENGINE_ERROR_STATUS)
+        .filter((code) => code !== 'busy')
+        .sort(),
+      'a case per engine error code'
+    );
     for (const [code, request, details] of cases) {
       const body = await problem(request(), ENGINE_ERROR_STATUS[code as keyof typeof ENGINE_ERROR_STATUS]);
       assert.equal(body.code, code);

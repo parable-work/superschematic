@@ -7,15 +7,8 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, test } from 'node:test';
 
-import {
-  EngineError,
-  allowAll,
-  type AccessRequest,
-  type Engine,
-  type EngineEvent,
-  type FrozenJSON,
-  type SubscriptionStatus,
-} from '../dist/index.js';
+import { EngineError, allowAll, type AccessRequest, type Engine, type EngineEvent, type SubscriptionStatus } from '../dist/index.js';
+import type { FrozenJSON } from '../dist/testing/index.js';
 import { openMetaSchema } from './behavior-fixtures.ts';
 import { alice, cleanup, drivers, freshPath, openEngine, thrown, track } from './helpers.ts';
 import {

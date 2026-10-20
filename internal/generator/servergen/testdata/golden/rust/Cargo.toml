@@ -20,4 +20,4 @@ members = [
 # The generated crates under the output root build on their own too, and
 # the mirrors are path dependencies, whose dev-dependencies the lockfile
 # leaves out.
-exclude = ["api", "impl", "sdk", "types"]
+exclude = ["api", "engine", "impl", "sdk", "types"]

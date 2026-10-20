@@ -24,15 +24,16 @@ const engineFixtureInstances = `[
 ]`
 
 // TestEngineDocumentLoadsInTheEngine builds the engine fixture as build
-// does and loads its engine document into today's TypeScript engine,
-// @superschematic/engine, as a server will (D58): testdata/engine-document/
-// load.ts opens an engine with the document's meta-schema, tool options and
-// namespace, defines and publishes every schema-file document and creates
-// an instance of each engine type. The engine package must be built
-// (runtime/engine/typescript: bun install --frozen-lockfile && bun run
-// build, after runtime/schema, runtime/http and runtime/versiongraph's
-// TypeScript); without it, or without bun, the gate skips, or fails under
-// SUPERSCHEMATIC_REQUIRE_TS_CHECKS=1.
+// does and loads its engine document into the engine through
+// @superschematic/engine, the Rust engine's Node-API addon, as a TypeScript
+// server will (D58): testdata/engine-document/load.ts opens an engine with
+// the document's meta-schema, tool options and namespace, defines and
+// publishes every schema-file document and creates an instance of each
+// engine type. The engine package must be built (runtime/engine/typescript:
+// bun install --frozen-lockfile && bun run build, after runtime/http's
+// TypeScript) with its addon (scripts/engine-napi.sh, which writes it into
+// the package's native/); without them, or without bun, the gate skips, or
+// fails under SUPERSCHEMATIC_REQUIRE_TS_CHECKS=1.
 //
 // It also type-checks the fixture's TypeScript types package, whose
 // engine.ts exports the document as engineDocument.
@@ -47,6 +48,9 @@ func TestEngineDocumentLoadsInTheEngine(t *testing.T) {
 	engineDir := filepath.Join(testpaths.RepoRoot(t), "runtime", "engine", "typescript")
 	if _, err := os.Stat(filepath.Join(engineDir, "dist", "index.js")); err != nil {
 		testpaths.RequireOrSkipTS(t, fmt.Sprintf("@superschematic/engine is not built (bun install --frozen-lockfile && bun run build in %s): %v", engineDir, err))
+	}
+	if addons, _ := filepath.Glob(filepath.Join(engineDir, "native", "superschematic-engine.*.node")); len(addons) == 0 {
+		testpaths.RequireOrSkipTS(t, fmt.Sprintf("@superschematic/engine has no addon in %s (scripts/engine-napi.sh builds it)", filepath.Join(engineDir, "native")))
 	}
 
 	schema, cfg, err := loader.LoadServiceWithConfig(engineFixtureDir)

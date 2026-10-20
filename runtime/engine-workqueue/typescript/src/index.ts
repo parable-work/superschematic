@@ -1,40 +1,57 @@
 /*
-@superschematic/engine-workqueue: the implementations of the core's
-work-queue behaviors for @superschematic/engine (D16). The core declares
-them (internal/registry/behaviors in the repository), so every binary's
-meta-schema admits a schema that composes them, but the engine runs them
-only once a deployment registers them: pass workQueueBehaviors, or the
-ones it uses, as the engine's behaviors option. Each implementation
-imports its declaration's copy from declarations/, which `superschematic
-behaviors --package @superschematic/engine-workqueue` writes and CI
-checks. They reach the engine only through the plug-in interface an
-extension's behavior uses. See runtime/engine-workqueue/README.md.
+@superschematic/engine-workqueue: claimable work for @superschematic/engine
+(D16). The core declares the work queue's behaviors, Lease, Assignment,
+Queue, Presence, Blueprint, Budget and Retries (internal/registry/behaviors
+in the repository), so every binary's meta-schema admits a schema that
+composes them, but an engine runs them only once a deployment names them:
+pass workQueueBehaviors, or the names of the ones it uses, as the engine's
+behaviors option. They are Rust (runtime/engine-workqueue/rust, D58),
+which the engine's addon is built with and registers by name. This
+package holds their names, their configs' and records' types and their
+constants, and ./worker, the loop that claims and runs work over the
+engine's HTTP API. See runtime/engine-workqueue/README.md.
 */
 
-import type { AnyBehaviorImplementation } from '@superschematic/engine';
+export { DEFAULT_TTL_MS } from './defaults.js';
+export { DEFAULT_MAX_CANDIDATES, DEFAULT_SWEEP_MS, EXCLUDED, MAX_STEPS, MAX_SWEEP } from './types.js';
+export type {
+  AssignmentConfig,
+  AttemptRecord,
+  BlueprintConfig,
+  BlueprintRecord,
+  BlueprintStep,
+  BlueprintWhen,
+  BudgetConfig,
+  BudgetMeter,
+  BudgetTransition,
+  ClaimRecord,
+  DirectiveRecord,
+  ExpiryReason,
+  LeaseConfig,
+  LeaseDirectOn,
+  LeaseEnd,
+  LeaseRecord,
+  LeaseTransition,
+  MeterRecord,
+  Overrun,
+  PresenceConfig,
+  PresenceRecord,
+  PresenceTransition,
+  QueueConfig,
+  ReserveCheck,
+  RetriesConfig,
+  RetriesRecord,
+  RetryClass,
+  ScopeRead,
+  ScopeValue,
+} from './types.js';
 
-import { assignment } from './assignment.js';
-import { blueprint } from './blueprint.js';
-import { budget } from './budget.js';
-import { lease } from './lease.js';
-import { presence } from './presence.js';
-import { queue } from './queue.js';
-import { retries } from './retries.js';
+/** The name of each behavior this package ships. */
+export type WorkQueueBehavior = 'Lease' | 'Assignment' | 'Queue' | 'Presence' | 'Blueprint' | 'Budget' | 'Retries';
 
-export { assignment } from './assignment.js';
-export type { AssignmentConfig } from './assignment.js';
-export { budget } from './budget.js';
-export type { BudgetConfig, BudgetMeter, BudgetTransition, MeterRecord, Overrun, ReserveCheck, ScopeRead, ScopeValue } from './budget.js';
-export { DEFAULT_SWEEP_MS, DEFAULT_TTL_MS, MAX_SWEEP, lease } from './lease.js';
-export type { DirectiveRecord, ExpiryReason, LeaseConfig, LeaseEnd, LeaseRecord, LeaseTransition } from './lease.js';
-export { presence } from './presence.js';
-export type { PresenceConfig, PresenceRecord, PresenceTransition } from './presence.js';
-export { DEFAULT_MAX_CANDIDATES, EXCLUDED, queue } from './queue.js';
-export type { ClaimRecord, QueueConfig } from './queue.js';
-export { retries } from './retries.js';
-export type { AttemptRecord, RetriesConfig, RetriesRecord, RetryClass } from './retries.js';
-export { MAX_STEPS, blueprint } from './blueprint.js';
-export type { BlueprintConfig, BlueprintRecord, BlueprintStep, BlueprintWhen } from './blueprint.js';
-
-/** Every behavior this package implements, in the order a deployment registers them. */
-export const workQueueBehaviors: readonly AnyBehaviorImplementation[] = Object.freeze([lease, assignment, queue, presence, blueprint, budget, retries]);
+/**
+ * Every behavior this package ships, by name, in the order a deployment
+ * registers them: the engine's behaviors option takes them as they are
+ * (`openEngine({ ..., behaviors: workQueueBehaviors })`).
+ */
+export const workQueueBehaviors: readonly WorkQueueBehavior[] = Object.freeze(['Lease', 'Assignment', 'Queue', 'Presence', 'Blueprint', 'Budget', 'Retries']);

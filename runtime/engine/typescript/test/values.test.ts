@@ -23,18 +23,28 @@ import {
   ValueTooLargeError,
   allowAll,
   canonicalJSON,
-  defineBehavior,
   type AccessPolicy,
   type Engine,
   type EngineEvent,
-  type EngineOptions,
-  type FrozenJSON,
   type Principal,
-  type ValueDriver,
 } from '../dist/index.js';
+import { defineBehavior, type FrozenJSON } from '../dist/testing/index.js';
 import { engineApp } from '../dist/http/index.js';
 import { counter, openMetaSchema } from './behavior-fixtures.ts';
-import { alice, cleanup, clone, drivers, freshPath, openEngine, openTestEngine, schemaDocument, stepsDocument, thrown, track } from './helpers.ts';
+import {
+  alice,
+  cleanup,
+  clone,
+  drivers,
+  freshPath,
+  openEngine,
+  openTestEngine,
+  schemaDocument,
+  stepsDocument,
+  thrown,
+  track,
+  type TestEngineOptions,
+} from './helpers.ts';
 import { ledger, probe, resetProbe, runnerPrincipal } from './runner-fixtures.ts';
 
 afterEach((t) => {
@@ -218,7 +228,7 @@ const REVISIONS = { name: 'Revisions', config: { review: { permission: 'steps.re
 const SEARCH = { name: 'Search', config: { fields: ['title', 'body'] } };
 const reviewer: Principal = { subject: 'rae', permissions: ['steps.review'] };
 
-function open(driver: (typeof drivers)[number], options: Partial<EngineOptions> = {}): Engine {
+function open(driver: (typeof drivers)[number], options: Partial<TestEngineOptions> = {}): Engine {
   return openTestEngine({
     driver,
     metaSchema: openMetaSchema(),
@@ -258,32 +268,6 @@ function holders(engine: Engine, value: unknown): string[][] {
 
 function events(engine: Engine, id: string): EngineEvent[] {
   return engine.events.read(alice, { schema: 'Step', instanceId: id }).events;
-}
-
-/** A value driver over a Map that counts its calls, outside the engine's transactions, as a driver over other storage is. */
-class MapDriver implements ValueDriver {
-  readonly transactional = false;
-  readonly values = new Map<string, string>();
-  reads = 0;
-  writes = 0;
-  removes = 0;
-
-  read(hash: string): string | undefined {
-    this.reads += 1;
-    return this.values.get(hash);
-  }
-
-  write(hash: string, json: string): void {
-    this.writes += 1;
-    if (!this.values.has(hash)) {
-      this.values.set(hash, json);
-    }
-  }
-
-  remove(hash: string): void {
-    this.removes += 1;
-    this.values.delete(hash);
-  }
 }
 
 for (const driver of drivers) {
@@ -567,40 +551,29 @@ for (const driver of drivers) {
       );
     });
 
-    test('a write that leaves the large field alone neither rewrites nor loads it: an operation that writes only its columns, as a heartbeat does', () => {
-      const values = new MapDriver();
-      const engine = open(driver, { values: { driver: values, cacheBytes: 0 } });
+    test("a write that leaves the large field alone neither rewrites nor stores it again, on the engine's own driver: an operation that writes only its columns, as a heartbeat does", () => {
+      const engine = open(driver, { values: { cacheBytes: 0 } });
       publish(engine, steps([{ name: 'test.Counter' }]));
       const result = verify(60);
       engine.instances.create(alice, 'Step', { title: 'Check', kind: 'verify', result }, { id: 's1' });
       const stored = rowOf(engine, 's1');
-      assert.deepEqual([values.reads, values.writes], [0, 1]);
+      assert.deepEqual(payloads(engine), [hashOf(result)]);
 
       for (let beat = 0; beat < 3; beat += 1) {
         engine.instances.invoke(alice, 'Step', 's1', 'increment');
       }
       assert.deepEqual(rowOf(engine, 's1'), stored);
-      assert.deepEqual([values.reads, values.writes], [0, 1]);
-      // An update of another field reuses the ref: nothing is hashed or written again.
+      // An update of another field reuses the ref.
       engine.instances.update(alice, 'Step', 's1', { title: 'Renamed' });
       assert.deepEqual(rowOf(engine, 's1').data.result, refOf(result));
-      assert.equal(values.writes, 1);
+      assert.deepEqual(payloads(engine), [hashOf(result)]);
       const got = engine.instances.get(alice, 'Step', 's1');
       assert.equal(got?.behaviors['test.Counter']?.count, 3);
       assert.deepEqual(got?.data.result, result);
     });
 
-    test('the engine keeps the values it read last in memory, up to cacheBytes', () => {
-      const values = new MapDriver();
-      const engine = open(driver, { values: { driver: values } });
-      publish(engine, steps());
-      engine.instances.create(alice, 'Step', { title: 'Check', kind: 'verify', result: verify(60) }, { id: 's1' });
-      engine.instances.get(alice, 'Step', 's1');
-      engine.instances.get(alice, 'Step', 's1');
-      engine.instances.list(alice, 'Step');
-      assert.equal(values.reads, 1);
-    });
-
+    // Rust twin: a_write_that_leaves_the_large_field_alone_neither_hashes_nor_rewrites_it.
+    // Rust twin: the_engine_keeps_the_values_it_read_last_in_memory_up_to_cache_bytes.
     test('a value is read by its hash only through a schema of the namespace the caller may read that references it', () => {
       const policy: AccessPolicy = ({ principal, action, namespace, schema }) =>
         principal.subject === 'alice' || (principal.subject === 'reader' && action === 'read' && namespace === 'default' && schema === 'Step') || (principal.subject === 'stranger' && schema === 'Other');
@@ -729,46 +702,35 @@ for (const driver of drivers) {
       assert.deepEqual(payloads(engine), [x, y, z].map(hashOf).sort());
     });
 
-    test('a driver outside the transaction gets a value removed only after the commit that dropped its last holder, and none a rollback left', () => {
-      const values = new MapDriver();
-      const engine = open(driver, { values: { driver: values } });
+    test("a rolled-back write leaves the engine's own driver as it was: the value it dropped stays, and the one it stowed goes", () => {
+      const engine = open(driver);
       publish(engine, steps([{ name: 'test.Shelf' }]));
       const [x, y] = [verify(60, 'x'), verify(60, 'y')];
       engine.instances.invokeSchema(alice, 'Step', 'keep', { key: 'a', doc: x });
-      // The failed keep stowed y and dropped x, then rolled back: x stays,
-      // and y, which the driver wrote and nothing holds, goes at the end of
-      // the transaction.
       assert.throws(() => engine.instances.invokeSchema(alice, 'Step', 'keep', { key: 'a', doc: y, fail: true }));
-      assert.deepEqual([...values.values.keys()], [hashOf(x)]);
-      assert.equal(values.removes, 1);
+      assert.deepEqual(payloads(engine), [hashOf(x)]);
       assert.deepEqual(engine.instances.invokeSchema(alice, 'Step', 'take', { key: 'a' }), x);
       engine.instances.invokeSchema(alice, 'Step', 'keep', { key: 'a', doc: y });
-      assert.deepEqual([...values.values.keys()], [hashOf(y)]);
-      assert.equal(values.removes, 2);
+      assert.deepEqual(payloads(engine), [hashOf(y)]);
     });
 
-    test('values.sweep removes what a crash left in a driver that lists its hashes, and refuses a driver that does not', () => {
-      const values = new MapDriver();
-      const listing = Object.assign(values, {
-        list: (after: string, limit: number) => [...values.values.keys()].filter((hash) => hash > after).sort().slice(0, limit),
-      });
-      const engine = open(driver, { values: { driver: listing } });
+    // Rust twin: a_driver_outside_the_transaction_keeps_no_value_a_rolled_back_write_wrote.
+    test("values.sweep removes what a crash left in the engine's own driver, which lists its hashes", () => {
+      const engine = open(driver);
       publish(engine, steps([{ name: 'test.Shelf' }]));
       const x = verify(60, 'x');
       engine.instances.invokeSchema(alice, 'Step', 'keep', { key: 'a', doc: x });
-      // A value a crash left between the driver's write and the end of its
-      // transaction: stored, held by nothing.
-      values.values.set('0'.repeat(64), '"left behind"');
-      assert.deepEqual(engine.values.sweep(), { removed: 1 });
-      assert.deepEqual([...values.values.keys()], [hashOf(x)]);
       assert.deepEqual(engine.values.sweep(), { removed: 0 });
-      // The default driver lists its hashes too, and leaves none behind.
-      const plain = open(driver);
-      assert.deepEqual(plain.values.sweep(), { removed: 0 });
-      const unlisted = open(driver, { values: { driver: new MapDriver() } });
-      assert.throws(() => unlisted.values.sweep(), /needs a driver that lists its hashes/);
+      // A value a crash left behind: stored, held by nothing.
+      engine.storage.run('INSERT INTO engine_payloads (hash, value, bytes) VALUES (?, ?, ?)', ['0'.repeat(64), '"left behind"', 13]);
+      assert.deepEqual(payloads(engine), ['0'.repeat(64), hashOf(x)]);
+      assert.deepEqual(engine.values.sweep(), { removed: 1 });
+      assert.deepEqual(payloads(engine), [hashOf(x)]);
+      assert.deepEqual(engine.values.sweep(), { removed: 0 });
+      assert.deepEqual(engine.instances.invokeSchema(alice, 'Step', 'take', { key: 'a' }), x);
     });
 
+    // Rust twin: the_sweep_removes_what_a_crash_left_in_a_driver_that_lists_its_hashes_and_refuses_a_driver_that_does_not.
     test('a value longer than values.maxBytes is refused with value_too_large, where it would be stored', () => {
       assert.throws(() => open(driver, { values: { thresholdBytes: 2048, maxBytes: 1024 } }), /values.maxBytes is an integer of at least values.thresholdBytes \(2048\)/);
       const engine = open(driver, { values: { thresholdBytes: 1024, maxBytes: 4096 } });

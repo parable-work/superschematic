@@ -11,15 +11,14 @@ import {
   EngineError,
   OperationParamsError,
   SchemaDocumentError,
-  defineBehavior,
   type AccessPolicy,
   type Engine,
-  type EngineOptions,
   type Principal,
   type SearchHit,
 } from '../dist/index.js';
+import { defineBehavior } from '../dist/testing/index.js';
 import { openMetaSchema } from './behavior-fixtures.ts';
-import { alice, cleanup, drivers, openTestEngine, schemaDocument, thrown } from './helpers.ts';
+import { alice, cleanup, drivers, openTestEngine, schemaDocument, thrown, type TestEngineOptions } from './helpers.ts';
 
 afterEach(cleanup);
 
@@ -88,12 +87,12 @@ const tripwire = defineBehavior({
 });
 
 for (const driver of drivers) {
-  function open(options: Partial<EngineOptions> = {}): Engine {
+  function open(options: Partial<TestEngineOptions> = {}): Engine {
     return openTestEngine({ driver, ...options });
   }
 
   // n1 and n2 mention a walnut desk, n1 in its title.
-  function desks(options: Partial<EngineOptions> = {}, behaviors: Behaviors = [SEARCH]): Engine {
+  function desks(options: Partial<TestEngineOptions> = {}, behaviors: Behaviors = [SEARCH]): Engine {
     const engine = open(options);
     publish(engine, notes(behaviors));
     engine.instances.create(alice, 'Note', { title: 'Walnut desk', body: 'A desk of solid wood.' }, { id: 'n1' });

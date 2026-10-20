@@ -623,6 +623,63 @@ fn a_nested_transaction_on_one_thread_is_refused_and_a_read_does_not_write() {
 }
 
 #[test]
+fn a_host_transaction_holds_every_transaction_inside_it_as_a_savepoint() {
+    for target in targets("a_host_transaction_holds") {
+        let db = target.open();
+        notes(&db);
+        let notifier = Arc::clone(db.notifier());
+        let start = notifier.epoch();
+        // Inside a hold, a write and a read are savepoints of it: what the
+        // writes leave commits with the hold, and nothing notifies before.
+        db.hold(|tx| {
+            assert!(db.holding());
+            assert!(db.in_transaction());
+            tx.run("INSERT INTO notes VALUES (?)", params!["n1"])?;
+            write(&db, |tx| {
+                tx.run("INSERT INTO notes VALUES (?)", params!["n2"])?;
+                tx.notify("default")
+            })?;
+            assert_eq!(
+                ids(&db),
+                ["n1", "n2"],
+                "a read inside sees the hold's writes"
+            );
+            // A write inside that fails rolls back alone.
+            let refused = write(&db, |tx| -> Result<()> {
+                tx.run("INSERT INTO notes VALUES (?)", params!["n3"])?;
+                Err(Error::Value {
+                    message: "refused".into(),
+                })
+            });
+            assert!(refused.is_err());
+            // A hold inside a hold is a savepoint of it.
+            db.hold(|tx| tx.run("INSERT INTO notes VALUES (?)", params!["n4"]))?;
+            assert_eq!(
+                notifier.epoch(),
+                start,
+                "nothing notifies before the hold commits"
+            );
+            Ok::<_, Error>(())
+        })
+        .unwrap();
+        assert!(!db.holding());
+        assert!(notifier.epoch() > start);
+        assert_eq!(ids(&db), ["n1", "n2", "n4"]);
+        // A hold that fails rolls back everything inside it.
+        let failed = db.hold(|_| -> Result<()> {
+            write(&db, |tx| {
+                tx.run("INSERT INTO notes VALUES (?)", params!["n5"])
+            })?;
+            Err(Error::Value {
+                message: "the host gives up".into(),
+            })
+        });
+        assert!(failed.is_err());
+        assert_eq!(ids(&db), ["n1", "n2", "n4"]);
+    }
+}
+
+#[test]
 fn the_notifier_wakes_a_waiter_when_a_write_that_notified_commits() {
     for target in targets("the_notifier_wakes_a_waiter") {
         let db = target.open_listening();

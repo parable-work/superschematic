@@ -7,8 +7,9 @@
 // bun load.ts <engine package dir> <engine document> <instances>
 //
 // The engine package is runtime/engine/typescript, built (bun install
-// --frozen-lockfile && bun run build); its dist/ resolves the packages it
-// needs from its own node_modules. The instances file is a JSON list of
+// --frozen-lockfile && bun run build) with its addon in native/
+// (scripts/engine-napi.sh); its dist/ resolves the packages it needs from
+// its own node_modules. The instances file is a JSON list of
 // { schema, id, data, behaviors? }, created in order, so an instance a
 // link names comes first.
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
@@ -40,7 +41,7 @@ const engineModule = await import(pathToFileURL(join(packageDir, 'dist', 'index.
 const doc = JSON.parse(readFileSync(documentPath, 'utf8')) as EngineDocument;
 const instances = JSON.parse(readFileSync(instancesPath, 'utf8')) as Instance[];
 
-// Only the core engine's behaviors run without a registration of their own.
+// Only the core's behaviors run without a name in the options of their own.
 const others = doc.behaviors.filter((behavior) => behavior.package !== '@superschematic/engine');
 if (others.length > 0) {
   throw new Error(`the document composes behaviors this harness does not register: ${others.map((b) => b.name).join(', ')}`);

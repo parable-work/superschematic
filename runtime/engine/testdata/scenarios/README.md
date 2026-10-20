@@ -1,9 +1,14 @@
 # Engine scenarios
 
-What the TypeScript engine (`runtime/engine/typescript`, `@superschematic/engine`)
-did, recorded as data, so a second implementation of the engine (D58: the Rust
-engine, its napi and C ABI bindings, and the servers that link it) can replay
-it and hold itself to the same answers. Each file is the recording of one test
+What the engine did, recorded as data, so every binding of it (D58: the Rust
+engine itself, its napi and C ABI bindings, and the servers that link it) can
+replay it and hold itself to the same answers. The corpus was first recorded
+from the TypeScript engine (`runtime/engine/typescript` before the cutover,
+milestone 14), which the Rust engine was held to; since the cutover
+`@superschematic/engine` is the Rust engine through its Node-API addon, and
+the corpus is recorded from it, through the package's suite on the test
+addon (`scripts/engine-napi.sh --js-behaviors`), whose bridge runs the
+behaviors the tests write in TypeScript. Each file is the recording of one test
 file of the engine's suite, or, as `workqueue-<file>.json`, of the work
 queue's (below); each scenario in it is one test, the calls the
 test made on the engines it opened and what each call returned or threw.
@@ -18,13 +23,15 @@ records the curated files below again, under Node.js, and fails when a
 committed file is not what the recorder writes:
 
 ```
+scripts/engine-napi.sh --js-behaviors
 cd runtime/engine/typescript && bun run build
 UPDATE_ENGINE_CORPUS=1 node --test test/corpus.test.ts   # rewrite scenarios/ and http/; review the diff
 ENGINE_RECORD=/tmp/corpus node --test 'test/*.test.ts'   # record every test file, curated or not
 ```
 
-The recording is Node.js's: on Bun most tests run once per SQLite adapter, and
-the recorder names neither adapter.
+The recording is Node.js's. A test's name carries `(node)`, the SQLite
+module the TypeScript engine ran it on, which the engine, with a SQLite of
+its own, keeps as the name of its one run.
 
 ## Which tests
 
@@ -108,8 +115,9 @@ A replayer reads them as it reads the engine's, with these differences:
 - Marked `js`: one scenario of `workqueue-filters` (`args`,
   `storage.transaction`), which creates more jobs than one scan reads in a
   transaction of the file (its four-job scenarios create them one by one, so
-  they replay); one of `workqueue-lease` (`options`, `values.driver`), on a
-  value store of the test's.
+  they replay). The test of `workqueue-lease` over a value driver of the
+  test's went with the TypeScript engine, whose alone a driver written in
+  TypeScript was; its twin over the engine's own driver is recorded.
 - `dialect: "sqlite"`: three scenarios of `workqueue-queue` make a copy of
   Queue's stale with `storage.run`, besides the one of `workqueue-filters`.
   The `storage` reads in other scenarios (steps marked `dialect: "sqlite"`)
@@ -156,7 +164,7 @@ reference itself.
 | `name` | The test's full name (`describe > test`), as `node:test` gives it. Names need not be unique: a test written in a loop records once per pass. |
 | `behaviors` | The behaviors the schemas it defines compose, by name, sorted; absent when none. |
 | `testBehaviors` | The behaviors the test defined in TypeScript (`test/behavior-fixtures.ts`, `test/runner-fixtures.ts`, `test/reach-fixtures.ts` and the tests' own `defineBehavior` calls) that its answers depend on: one a schema composes or a step registers, or every one the engine registered when a step reads the registered behaviors (`tools.listBehaviors`, `tools.describeBehavior`, `behaviors.names`, `behaviors.has`, `behaviors.declaration`). Sorted; absent when none. A replayer that has not implemented each one skips the scenario; one that has implements each as it acts with none of its hooks set (`js` below). |
-| `js` | Why only the TypeScript engine can replay it, sorted; absent when nothing stops another (below). |
+| `js` | Why only the recording's own host, `@superschematic/engine`'s suite with the functions and behaviors its tests wrote in TypeScript, can replay it, sorted; absent when nothing stops another (below). |
 | `dialect` | `"sqlite"` for a scenario that writes the file with SQL of its own (`storage.run`, `storage.exec`, `storage.transaction`): a replayer on Postgres skips it. |
 | `principals` | The principals the scenario acts as, by name. |
 | `steps` | Its steps, in the order the test made them. |
@@ -218,9 +226,9 @@ recorder to this.
 | `clock` | For a fixed clock that read several times during the step (a test clock that counts up each time it is read): the times, in order. A replayer's clock returns them in order, then the last. |
 | `ids` | For an engine opened with `ids`: the ids the engine drew during the step, in order. A replayer's id source returns them in order. |
 | `dialect` | `"sqlite"` for a step whose answer is SQLite's: a call of Search's `search` or `similar` operations, the search across schemas (`search`), or a tool call of one, which rank with FTS5's bm25; and a read through the file's own SQL (`storage.get`, `storage.all`). On Postgres, a replayer makes the call but does not compare its answer, and skips a `storage` read. |
-| `js` | `true` for a step only the TypeScript engine can run. |
+| `js` | `true` for a step only the recording's own host can run. |
 
-The methods a step calls are the components' of `Engine` (`typescript/src/engine.ts`):
+The methods a step calls are the components' of `Engine` (`typescript/src/native/engine.ts`):
 `namespaces`, `schemas`, `instances`, `events`, `tools`, `values`, `runner`,
 `behaviors` (`register`, `has`, `names` and `declaration`) and `storage` (`exec`,
 `run`, `get`, `all` and `transaction`, each `dialect: "sqlite"`). A call the
@@ -281,8 +289,12 @@ order gets the same ids and hashes; one that does not still binds the
 symbols, but a hash computed over an id it drew differently will differ.
 
 **Times.** An engine opened without a clock reads the wall clock, but never
-the same millisecond twice: each reading is `max(Date.now(), last + 1)`. So
-two readings are two instants, and an instant that appears twice in a
+the same millisecond twice: the recorder opens it on the engine's strict
+clock, each reading `max(now, last + 1)`, every write reading its own, as a
+replayer opens one. Across a scenario's engines the recorder keeps the
+readings apart as one clock would: a step on another engine than the last
+waits until the wall clock is past every instant the scenario has shown.
+So two readings are two instants, and an instant that appears twice in a
 scenario is one reading, which the symbols keep. In a scenario that read the
 wall clock, a number is written `{{time:N}}` when it is an integer in the
 wall clock's span, from a day before its first reading in the scenario to
@@ -326,7 +338,7 @@ A member whose value is `undefined` is left out, as JSON writes it. A
 ## Replaying
 
 1. Resolve `shared` references.
-2. Skip a scenario with `js` (unless the replayer is the TypeScript engine), a
+2. Skip a scenario with `js` (unless the replayer is the recording's own host), a
    `testBehaviors` behavior it lacks, or, on Postgres, `dialect: "sqlite"`.
 3. For each step in order: `open` opens an engine on a fresh file per
    `{{dir:N}}` (and reopens it for a path already opened), with the options

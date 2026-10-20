@@ -9,11 +9,10 @@ import {
   standsIn,
   type AccessPolicy,
   type AccessRequest,
-  type DriverName,
   type Engine,
   type Principal,
 } from '../dist/index.js';
-import { alice, cleanup, drivers, freshPath, openEngine, openTestEngine, orderDocument, schemaDocument, thrown } from './helpers.ts';
+import { alice, cleanup, drivers, freshPath, openEngine, openTestEngine, orderDocument, schemaDocument, thrown, type DriverName } from './helpers.ts';
 
 afterEach(cleanup);
 
