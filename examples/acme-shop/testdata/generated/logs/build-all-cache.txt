@@ -7,4 +7,7 @@
   OK: shop-stack (up to date)
   OK: shop-storefront (up to date)
   OK: shop-web (up to date)
+  OK: shop-wishlist-db (up to date)
+  OK: shop-wishlist (up to date)
   OK: storefront-stack (up to date)
+  OK: wishlist-stack (up to date)

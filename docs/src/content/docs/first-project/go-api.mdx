@@ -158,8 +158,12 @@ that runs it ([Start a stack](/superschematic/guides/stacks/#start-a-stack)).
 With Docker running, Bun and cargo installed for the storefront's and
 `shop-stock`'s servers, and the migration runner, `superschematic-migrate`,
 on your `PATH` (see [the runner](/superschematic/reference/migrations/#the-runner)),
-run it from `examples/acme-shop`, naming the stack, since the example
-holds a second one, `storefront-stack`:
+run it from `examples/acme-shop`, once every service is built
+(`superschematic build-all schemas/services`, which
+[Build the tree](/superschematic/first-project/build-the-tree/) explains),
+since the stack's TypeScript packages share one workspace with the
+example's others. Name the stack, since the example holds two others,
+`storefront-stack` and `wishlist-stack`:
 
 ```sh
 superschematic stack dev schemas/services/shop-stack

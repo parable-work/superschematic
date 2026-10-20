@@ -53,7 +53,11 @@ worker `FulfilOrders`, which fulfils each order as it is placed, its job
 `ShipOrders` every minute, `shop-stock`'s Rust worker `ReorderStock`,
 which files a restock request for each product an order runs low, its
 Rust job `OrderRestocks`, and the site `shop-web`, built once and
-served on its own port with its config. It needs Docker, Go, Bun, cargo
+served on its own port with its config. Run `superschematic build-all
+schemas/services` once first: the output root's Bun workspace takes in
+every package under `typescript/` and `web/`, and
+`typescript/shop-wishlist` needs `shop-wishlist`'s packages, which
+`shop-stack` does not build. It needs Docker, Go, Bun, cargo
 and the migration runner,
 `superschematic-migrate`, on `PATH`; it derives every connection string,
 URL, port and service credential, and Ctrl-C stops it. While it runs,
