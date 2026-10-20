@@ -255,9 +255,10 @@ type tsEngineDocker struct {
 	Crates     []string
 
 	// Project is the project's engine crate, empty for the core's addon;
-	// ProjectCrates the extensions' crates it reaches by path; Addon the
-	// .node file its napi member builds, which the image keeps at
-	// AddonPath and names with SUPERSCHEMATIC_ENGINE_ADDON.
+	// ProjectCrates the extensions' crates it reaches by path; ProjectLib
+	// the shared library cargo builds from its napi member, and Addon the
+	// .node file the image keeps it as, at AddonPath, which
+	// SUPERSCHEMATIC_ENGINE_ADDON names.
 	Project       string
 	ProjectCrates []string
 	ProjectLib    string

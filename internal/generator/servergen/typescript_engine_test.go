@@ -24,10 +24,10 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/servergen"
 	"github.com/parable-work/superschematic/internal/loader"
 	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
+	"github.com/parable-work/superschematic/internal/registry"
 	"github.com/parable-work/superschematic/internal/stackdeploy"
 	"github.com/parable-work/superschematic/internal/testpaths"
 	ir "github.com/parable-work/superschematic/ir"
-	"github.com/parable-work/superschematic/internal/registry"
 	publicregistry "github.com/parable-work/superschematic/registry"
 	"github.com/parable-work/superschematic/stack/stacktest"
 )
