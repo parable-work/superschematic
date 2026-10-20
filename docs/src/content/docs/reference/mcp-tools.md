@@ -222,13 +222,14 @@ reference's `options` names its tool so), `operationId`, `title`, `mcp`
   optional query parameter is left out instead. A property of a schema
   scalar names it under `x-superschematic-scalar`. A property whose value
   refers to an item gives the reference under
-  `x-superschematic-reference`, and the search argument's property says
-  `"x-superschematic-search": true` (see below).
+  `x-superschematic-reference`, the search argument's property says
+  `"x-superschematic-search": true`, and a sorted page's sort argument
+  says `"x-superschematic-sort": true` (see below).
 - `inputSchemaDigest` is `sha256:` and the hex SHA-256 of `parameters` as
   the generator encodes it (vendor keys first, then `additionalProperties`,
   `type`, `properties`, `required`; in each property its scalar,
-  reference and search keys first, in that order), so a change to the
-  arguments changes the digest.
+  reference, search and sort keys first, in that order), so a change to
+  the arguments changes the digest.
 
 A path or query argument, a body argument or a field of the input type,
 at any depth, that holds a reference (D61), as `RefersTo` writes it or as
@@ -237,24 +238,48 @@ a relation's key derives it, gives the reference resolved:
 ```json
 "productId": {
   "x-superschematic-scalar": "Identity.UUID",
-  "x-superschematic-reference": {"target": "ProductView", "options": "catalog.listProducts", "value": "id", "label": "name", "lookup": "ids"},
+  "x-superschematic-reference": {"target": "ProductView", "options": "catalog.listProducts", "value": "id", "label": "name", "lookup": "ids", "search": "q"},
   "type": "string"
 },
 "q": {"x-superschematic-search": true, "type": "string", "maxLength": 100}
 ```
 
 `target` is the type's name and `options` the tool name of the operation
-that lists it. `value` and `label` are the target's keys, and `lookup` is
-the options operation's argument that narrows its list to given values;
-`label` and `lookup` are absent when there is none. On a list the key sits
-on the list's property, and each item refers. The search argument's
-property (`SearchQuery`, D62) says `"x-superschematic-search": true`. The
-OpenAPI document gives the same keys, with the target as its component
-and the options operation by its `operationId`
+that lists it. `value` and `label` are the target's keys, `lookup` is the
+options operation's argument that narrows its list to given values, and
+`search` its search argument, which a picker fills with the text a reader
+types (D61, amended); each is absent when there is none. When none of the
+API's own operations lists the target and an API dependency's does
+(D61, amended; D66), `service` names that dependency, and `options` its
+tool, as the dependency's own documents name it; `service` is absent for
+the API's own options. On a list the key sits on the list's property, and
+each item refers. The search argument's property (`SearchQuery`, D62)
+says `"x-superschematic-search": true`. The OpenAPI document gives the
+same keys, with the target as its component and the options operation by
+its `operationId`
 ([In the documents](/superschematic/reference/references-and-search/#in-the-documents)).
-`tools/index.ts` types each key on its `JSONSchemaProperty` when a tool
-holds one. `inputSchemaDigest` changes only for the tools whose arguments
-hold a reference or a search.
+
+A sorted page's sort argument (`SortBy`, D60 amended) is an optional
+string whose `enum` lists its values, each field and then each field
+after `-`, as the OpenAPI document's does. Its description names the
+values and the default, and the tool's description asks for the same
+sort with each `next`, since a cursor holds the sort it was returned
+under:
+
+```json
+"sort": {
+  "x-superschematic-sort": true,
+  "type": "string",
+  "description": "The order of the page: a field, or - and a field for descending; ties break by id. A cursor holds the sort it was returned under. One of `name`, `-name`, `sku` or `-sku`; `name` when left out.",
+  "enum": ["name", "-name", "sku", "-sku"]
+}
+```
+
+The tool binds it to the query, as any query argument, and `invokeTool`
+passes it to the method's query object; `tools/index.ts` types the
+parameter as the union of its values, and each vendor key on its
+`JSONSchemaProperty` when a tool holds one. `inputSchemaDigest` changes
+only for the tools whose arguments hold a reference, a search or a sort.
 
 `ir.ToolManifest` (in the `ir` module) is the Go type of this document and
 `ir.ToolBindingManifest` of `tools/mcp-binding.json`. A test in the SDK
@@ -425,17 +450,19 @@ SDK language reads what they leave.
 | `Scalar` | `x-superschematic-scalar` | the key of a property's scalar name; empty leaves it out |
 | `Reference` | `x-superschematic-reference` | the key of a property's resolved reference (D61), after the scalar key in the digest input; empty leaves it out |
 | `Search` | `x-superschematic-search` | the key, `true`, of the search argument's property (D62), after the reference key in the digest input; empty leaves it out |
+| `Sort` | `x-superschematic-sort` | the key, `true`, of a sorted page's sort argument's property (D60, amended), after the search key in the digest input; empty leaves it out, and the property keeps its `enum` |
 | `Guidance` | `superschematic/operation-guidance` | the `_meta` key of a visible tool's guidance; empty leaves it out |
 | `Parameters` | none | key/value pairs at the root of every argument schema: first in the digest input, after `additionalProperties` in the documents, and as literal types in `tools/index.ts` |
 
 A `Parameters` key may not be empty, repeat, or reuse `type`,
 `additionalProperties`, `properties`, `required`, the scalar key, the
-reference key or the search key, and no two of the scalar, reference and
-search keys may be the same. None of those three may be a JSON Schema
-keyword that a property is written with: `type`, `description`, `format`,
-`pattern`, `enum`, `minLength`, `maxLength`, `minimum`, `maximum`,
-`minItems`, `maxItems`, `items`, `properties`, `required`, `oneOf`,
-`additionalProperties`, `$ref`, `allOf`, `anyOf` or `nullable`. A hook
+reference key, the search key or the sort key, and no two of the scalar,
+reference, search and sort keys may be the same. None of those four may
+be a JSON Schema keyword that a property is written with: `type`,
+`description`, `format`, `pattern`, `enum`, `minLength`, `maxLength`,
+`minimum`, `maximum`, `minItems`, `maxItems`, `items`, `properties`,
+`required`, `oneOf`, `additionalProperties`, `$ref`, `allOf`, `anyOf` or
+`nullable`. A hook
 that adds or removes tools fails the build, as does a hook error, which
 names the hook. The `ir` wire types spell the default keys: a
 distribution that renames them decodes its documents with its own

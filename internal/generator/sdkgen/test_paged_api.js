@@ -30,9 +30,26 @@ function positionOf(cursor) {
   return JSON.parse(Buffer.from(cursor, "base64url").toString("utf8"));
 }
 
+// The sorts listItems offers (D60, amended), and the order of the names'
+// positions under each: the skus sort as the names do.
+const sorts = {
+  name: [1, 2, 3, 4, 5],
+  "-name": [5, 4, 3, 2, 1],
+  sku: [1, 2, 3, 4, 5],
+  "-sku": [5, 4, 3, 2, 1],
+};
+
+// sortedCursorOf is the cursor after the item at index (1-based) of a
+// sorted page, which names its sort as a router binds it.
+function sortedCursorOf(sort, index) {
+  return Buffer.from(JSON.stringify({ sort, key: index })).toString("base64url");
+}
+
 // The server pages names, as items, and tags. state.repeat makes a page's
 // next the cursor it was asked with; state.refuse is a cursor it answers
-// with the 400 of a cursor no page returned.
+// with the 400 of a cursor no page returned. A request to /api/items that
+// sends a sort reads that order, refuses a sort it does not offer and a
+// cursor of another sort, and binds its next to the sort.
 const state = { requests: [], repeat: false, refuse: "" };
 
 const server = Bun.serve({
@@ -62,13 +79,35 @@ const server = Bun.serve({
         );
       }
     }
+    const sort = url.pathname === "/api/items" ? url.searchParams.get("sort") : null;
+    if (sort !== null && !(sort in sorts)) {
+      return Response.json(
+        { status: 400, code: "bad_request", detail: "Invalid query parameter sort: expected one of name, -name, sku, -sku" },
+        { status: 400 }
+      );
+    }
     const cursor = url.searchParams.get("cursor");
     let after = 0;
     if (cursor !== null) {
+      let bound = sort === null;
       try {
-        after = positionOf(cursor);
+        const key = positionOf(cursor);
+        if (sort === null) {
+          after = key;
+        } else if (key !== null && typeof key === "object") {
+          bound = key.sort === sort;
+          after = key.key;
+        } else {
+          after = NaN;
+        }
       } catch {
         after = NaN;
+      }
+      if (!bound) {
+        return Response.json(
+          { status: 400, code: "bad_request", detail: "cursor is not one this sort returned" },
+          { status: 400 }
+        );
       }
       if (!Number.isInteger(after) || cursor === state.refuse) {
         return Response.json(
@@ -77,8 +116,10 @@ const server = Bun.serve({
         );
       }
     }
+    const order = sorts[sort ?? "name"];
     const items = [];
-    for (let position = after + 1; position <= count && items.length < limit; position++) {
+    for (let index = after + 1; index <= count && items.length < limit; index++) {
+      const position = isTags ? index : order[index - 1];
       items.push(
         isTags
           ? tags[position - 1]
@@ -90,7 +131,8 @@ const server = Bun.serve({
             }
       );
     }
-    let next = after + items.length < count ? cursorOf(after + items.length) : null;
+    const last = after + items.length;
+    let next = last < count ? (sort === null ? cursorOf(last) : sortedCursorOf(sort, last)) : null;
     if (state.repeat && cursor !== null) {
       next = cursor;
     }
@@ -289,6 +331,82 @@ describe("TypeScript SDK paged lists", () => {
         ["limit", "4"],
         ["cursor", cursorOf(4)],
         ["maker", "acme"],
+      ],
+    ]);
+  });
+
+  test("listItemsAll sends the sort with every page", async () => {
+    const client = sdk();
+    expect(await collect(client.catalog.listItemsAll({ sort: "-name", limit: 2 }))).toEqual([...names].reverse());
+    expect(queries()).toEqual([
+      [
+        ["sort", "-name"],
+        ["limit", "2"],
+      ],
+      [
+        ["sort", "-name"],
+        ["limit", "2"],
+        ["cursor", sortedCursorOf("-name", 2)],
+      ],
+      [
+        ["sort", "-name"],
+        ["limit", "2"],
+        ["cursor", sortedCursorOf("-name", 4)],
+      ],
+    ]);
+  });
+
+  test("a sort is sent as it is, and the server refuses one it does not offer", async () => {
+    const client = sdk();
+    const page = await client.catalog.listItems({ sort: "-sku", limit: 1 });
+    expect(page.items.map((item) => item.name)).toEqual(["easel"]);
+    let failure;
+    try {
+      await client.catalog.listItems({ sort: "price" });
+    } catch (err) {
+      failure = err;
+    }
+    expect(failure).toBeInstanceOf(ApiError);
+    expect(failure.statusCode).toBe(400);
+    expect(failure.message).toBe("Invalid query parameter sort: expected one of name, -name, sku, -sku");
+
+    // A cursor of one sort sent with another is the server's 400.
+    failure = undefined;
+    try {
+      await client.catalog.listItems({ sort: "name", cursor: page.next });
+    } catch (err) {
+      failure = err;
+    }
+    expect(failure?.statusCode).toBe(400);
+    expect(failure?.message).toBe("cursor is not one this sort returned");
+    expect(queries()).toEqual([
+      [
+        ["sort", "-sku"],
+        ["limit", "1"],
+      ],
+      [["sort", "price"]],
+      [
+        ["sort", "name"],
+        ["cursor", sortedCursorOf("-sku", 1)],
+      ],
+    ]);
+  });
+
+  test("invokeTool passes the sort", async () => {
+    const client = sdk();
+    const page = await invokeTool(client, "catalog.listItems", { sort: "-name", limit: 2 });
+    expect(page.items.map((item) => item.name)).toEqual(["easel", "drum"]);
+    const next = await invokeTool(client, "catalog.listItems", { sort: "-name", cursor: page.next, limit: 2 });
+    expect(next.items.map((item) => item.name)).toEqual(["crate", "bucket"]);
+    expect(queries()).toEqual([
+      [
+        ["sort", "-name"],
+        ["limit", "2"],
+      ],
+      [
+        ["sort", "-name"],
+        ["cursor", sortedCursorOf("-name", 2)],
+        ["limit", "2"],
       ],
     ]);
   });

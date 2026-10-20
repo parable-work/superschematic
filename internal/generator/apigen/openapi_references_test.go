@@ -69,16 +69,18 @@ func TestRefsOpenAPIGolden(t *testing.T) {
 }
 
 // TestRefsOpenAPIPlacesEachKey reads the placements the golden pins, so a
-// regenerated golden that drops one fails here.
+// regenerated golden that drops one fails here. listItems, the items'
+// options, searches by q, so each reference to an item names it (D61,
+// amended); the options are the API's own, so none names a service.
 func TestRefsOpenAPIPlacesEachKey(t *testing.T) {
 	doc := decodeOpenAPI(t, generateRefsAPI(t).OpenAPISpecRaw)
 	byID := map[string]any{
 		"target": "#/components/schemas/ItemView", "options": "CatalogListItemsHandler",
-		"value": "id", "label": "name", "lookup": "ids",
+		"value": "id", "label": "name", "lookup": "ids", "search": "q",
 	}
 	bySku := map[string]any{
 		"target": "#/components/schemas/ItemView", "options": "CatalogListItemsHandler",
-		"value": "sku", "label": "name",
+		"value": "sku", "label": "name", "search": "q",
 	}
 	schemas := doc["components"].(map[string]any)["schemas"].(map[string]any)
 	property := func(component, name string) map[string]any {
@@ -346,6 +348,86 @@ func TestAComponentTwoDependenciesDeclareIsTheImportedOne(t *testing.T) {
 		if item[apigen.OpenAPIReferenceKey] == nil {
 			t.Fatalf("run %d: ShelfView.itemId has no reference key: %v", run, item)
 		}
+	}
+}
+
+// TestAReferenceToADependencysOptionsNamesItsService: an API's input
+// refers to ShelfView, which its API dependency shelves-api declares and
+// lists, and none of the API's own operations lists (D61, amended; D66).
+// The documents' reference names the dependency as its service, its
+// options by the dependency's operationId and tool name, and the search
+// and lookup of that operation. A reference whose options are the API's
+// own names no service.
+func TestAReferenceToADependencysOptionsNamesItsService(t *testing.T) {
+	uuid := &ir.ScalarDef{Name: "Identity.UUID", LanguagePrimitive: ir.LanguageString, TypeMappings: map[string]string{"go": "string"}}
+	shelves := ir.NewSchema("shelves-api", ir.SchemaKindAPI)
+	shelves.Scalars["Identity.UUID"] = uuid
+	shelves.Types["ShelfView"] = &ir.TypeDef{Name: "ShelfView", Role: ir.RoleAPIView, Display: &ir.TypeDisplay{TitleField: "title"}, Fields: []*ir.FieldDef{
+		{Name: "id", TypeRef: ir.TypeRef{Name: "Identity.UUID"}, Required: true},
+		{Name: "title", TypeRef: ir.TypeRef{Name: "string"}, Required: true},
+	}}
+	shelves.OperationSets = []*ir.OperationSet{{Name: "ShelfQueries", Operations: []*ir.FieldDef{
+		{Name: "list_shelves", HTTPMethod: "GET", RestPath: "shelves", TypeRef: ir.TypeRef{Name: "ShelfView", IsArray: true}, Required: true, Arguments: []*ir.ArgumentDef{
+			{Name: "q", TypeRef: ir.TypeRef{Name: "string"}, IsQuery: true, Search: true},
+			{Name: "ids", TypeRef: ir.TypeRef{Name: "Identity.UUID", IsArray: true}, IsQuery: true, References: &ir.ReferenceDef{Type: "ShelfView"}},
+		}},
+	}}}
+
+	api := ir.NewSchema("shop", ir.SchemaKindAPI)
+	api.Scalars["Identity.UUID"] = uuid
+	api.Imports = []ir.Import{{Package: "@schemas/shelves-api", Types: []string{"ShelfView"}}}
+	api.Types["ItemView"] = &ir.TypeDef{Name: "ItemView", Role: ir.RoleAPIView, Fields: []*ir.FieldDef{
+		{Name: "id", TypeRef: ir.TypeRef{Name: "Identity.UUID"}, Required: true},
+	}}
+	api.Types["PlaceInput"] = &ir.TypeDef{Name: "PlaceInput", Role: ir.RoleAPIInput, Fields: []*ir.FieldDef{
+		{Name: "shelfId", TypeRef: ir.TypeRef{Name: "Identity.UUID"}, Required: true, References: &ir.ReferenceDef{Type: "ShelfView"}},
+		{Name: "itemId", TypeRef: ir.TypeRef{Name: "Identity.UUID"}, Required: true, References: &ir.ReferenceDef{Type: "ItemView"}},
+	}}
+	api.OperationSets = []*ir.OperationSet{{Name: "Catalog", Operations: []*ir.FieldDef{
+		{Name: "listItems", HTTPMethod: "GET", RestPath: "items", TypeRef: ir.TypeRef{Name: "ItemView", IsArray: true}, Required: true},
+		{Name: "place", HTTPMethod: "POST", RestPath: "places", TypeRef: ir.TypeRef{Name: "string"}, Required: true, Arguments: []*ir.ArgumentDef{
+			{Name: "input", TypeRef: ir.TypeRef{Name: "PlaceInput"}, Required: true},
+		}},
+	}}}
+	output, err := apigen.Generate(api, apigen.Options{
+		Provider:     sessionauth.Provider{},
+		SchemaName:   "shop",
+		ModulePath:   "example.com/schemas/api/shop",
+		TypesModule:  "example.com/schemas/types/go/shop",
+		Dependencies: map[string]*ir.Schema{"shelves-api": shelves},
+		Clock:        codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)),
+	})
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+
+	doc := decodeOpenAPI(t, output.OpenAPISpecRaw)
+	properties := doc["components"].(map[string]any)["schemas"].(map[string]any)["PlaceInput"].(map[string]any)["properties"].(map[string]any)
+	for name, want := range map[string]map[string]any{
+		"shelfId": {
+			"target": "#/components/schemas/ShelfView", "options": "ShelfListShelvesHandler", "service": "shelves-api",
+			"value": "id", "label": "title", "lookup": "ids", "search": "q",
+		},
+		"itemId": {"target": "#/components/schemas/ItemView", "options": "CatalogListItemsHandler", "value": "id"},
+	} {
+		if got := properties[name].(map[string]any)[apigen.OpenAPIReferenceKey]; !reflect.DeepEqual(got, any(want)) {
+			t.Errorf("PlaceInput.%s: %s = %v, want %v", name, apigen.OpenAPIReferenceKey, got, want)
+		}
+	}
+
+	tools := map[string]*apigen.Reference{}
+	for _, field := range output.TypeFields["PlaceInput"] {
+		tools[field.Name] = field.Reference
+	}
+	wantShelf := &apigen.Reference{
+		Target: "ShelfView", OptionsOperationID: "ShelfListShelvesHandler", OptionsTool: "shelf.listShelves",
+		Value: "id", Label: "title", Lookup: "ids", Search: "q", Service: "shelves-api",
+	}
+	if got := tools["shelfId"]; !reflect.DeepEqual(got, wantShelf) {
+		t.Errorf("the tools read shelfId's reference as %+v, want %+v", got, wantShelf)
+	}
+	if got := tools["itemId"]; got == nil || got.Service != "" || got.OptionsTool != "catalog.listItems" {
+		t.Errorf("the tools read itemId's reference as %+v, want the API's own catalog.listItems", got)
 	}
 }
 

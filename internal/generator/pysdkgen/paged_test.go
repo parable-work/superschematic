@@ -54,7 +54,9 @@ func generatePagedSDK(t *testing.T, apiOutput *apigen.APIOutput) *SDKOutput {
 // TestPagedMethodsTakeCursorAndLimit: a paged operation's method takes
 // cursor and limit after its own query parameters, both optional, checked
 // by the bounds the route reads them with, returns Page[T] and has a
-// <method>_all beside it; an operation that does not page is unchanged.
+// <method>_all beside it; an operation that does not page is unchanged. A
+// sorted page's sort (D60, amended) is one of its own query parameters,
+// an optional str, before cursor and limit.
 func TestPagedMethodsTakeCursorAndLimit(t *testing.T) {
 	_, apiOutput := loadPagedAPI(t)
 	sdkOutput := generatePagedSDK(t, apiOutput)
@@ -80,7 +82,7 @@ func TestPagedMethodsTakeCursorAndLimit(t *testing.T) {
 	}{
 		{
 			"list_items", "Page[ItemView]", "ItemView",
-			[]string{"ids", "in_stock", "cursor", "limit", "timeout_seconds", "extra_headers"}, 5,
+			[]string{"ids", "in_stock", "sort", "cursor", "limit", "timeout_seconds", "extra_headers"}, 5,
 		},
 		{"list_tags", "Page[str]", "str", []string{"cursor", "limit", "timeout_seconds", "extra_headers"}, 100},
 	} {
@@ -120,6 +122,9 @@ func TestPagedMethodsTakeCursorAndLimit(t *testing.T) {
 			t.Errorf("%s limit = %+v", tc.method, limit)
 		}
 	}
+	if !hasMethodParam(endpoints["list_items"], "sort: str | None = None") {
+		t.Errorf("list_items has no parameter sort: str | None = None")
+	}
 
 	for _, method := range []string{"get_item", "place_basket"} {
 		endpoint := endpoints[method]
@@ -148,9 +153,10 @@ func TestWriteSDKGoldenPaged(t *testing.T) {
 // and pages held to page_parity.json: the first page, the next asked with
 // cursor and limit, the last page's null next, the iterator asking for each
 // page only when its items are reached, an error raised where the
-// iteration reaches it, a repeated cursor ending it, and a cursor or limit
-// the route would refuse failing before any request. The probe needs
-// pydantic and skips without it.
+// iteration reaches it, a repeated cursor ending it, a sort sent with every
+// page the iterator asks for (D60, amended), and a cursor or limit the
+// route would refuse failing before any request. The probe needs pydantic
+// and skips without it.
 func TestPagedSDKImportsAndRuns(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping compile check in -short mode")
@@ -271,13 +277,19 @@ class Handler(BaseHTTPRequestHandler):
         cursor = query.get("cursor", [None])[0]
         if url.path == "/api/items":
             limit = int(query.get("limit", ["2"])[0])
+            # A sort orders the items by its field, ties by id, either way.
+            order = ITEMS
+            sort = query.get("sort", [None])[0]
+            if sort is not None:
+                field = sort.removeprefix("-")
+                order = sorted(ITEMS, key=lambda item: (item[field], item["id"]), reverse=sort.startswith("-"))
             start = 0
             if cursor is not None:
                 try:
-                    start = [item["id"] for item in ITEMS].index(decode_cursor(cursor)["id"]) + 1
+                    start = [item["id"] for item in order].index(decode_cursor(cursor)["id"]) + 1
                 except Exception:
                     return self.answer(refused[NOT_JSON]["status"], {"type": "about:blank", "title": "Bad Request", **refused[NOT_JSON]})
-            page = from_rows(ITEMS[start : start + limit + 1], limit, lambda item: {"id": item["id"]})
+            page = from_rows(order[start : start + limit + 1], limit, lambda item: {"id": item["id"]})
             if stub["next_override"] is not None:
                 page["next"] = stub["next_override"]
             if stub["drop_next"]:
@@ -354,6 +366,16 @@ assert [query for _, query in requests[before:]] == [
 
 # It starts from the cursor it is given.
 assert names_of(catalog.list_items_all(cursor=second.next)) == NAMES[4:]
+
+# A sort is sent with every page the iterator asks for (D60, amended), as
+# the str it is.
+before = len(requests)
+assert names_of(catalog.list_items_all(sort="-name", limit=2)) == NAMES[::-1]
+assert [query for _, query in requests[before:]] == [
+    {"sort": ["-name"], "limit": ["2"]},
+    {"sort": ["-name"], "limit": ["2"], "cursor": [encode_cursor({"id": ITEMS[3]["id"]})]},
+    {"sort": ["-name"], "limit": ["2"], "cursor": [encode_cursor({"id": ITEMS[1]["id"]})]},
+], requests[before:]
 assert [str(item) for item in catalog.list_tags().items] == ["blue", "green"]
 
 # An error raises where the iteration reaches it, after the items before it.

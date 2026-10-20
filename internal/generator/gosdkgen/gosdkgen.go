@@ -98,6 +98,9 @@ type SDKOutput struct {
 	// (@paginated, D60); runtime/runtime.go then carries PageRequest, Page
 	// and AllItems, and namespaces/validation.go pageLimitErrors.
 	HasPagedEndpoints bool
+	// HasSortedEndpoints reports whether a paged endpoint takes a sort
+	// (SortBy, D60 amended), which the README's paged lists then name.
+	HasSortedEndpoints bool
 }
 
 // ModuleReplace describes a go.mod replace directive needed by generated SDK modules.
@@ -390,6 +393,7 @@ func Generate(apiOutput *apigen.APIOutput, modulePath, packageName string, clock
 		}
 		if converted.Page != nil {
 			output.HasPagedEndpoints = true
+			output.HasSortedEndpoints = output.HasSortedEndpoints || converted.Page.Sort != nil
 		}
 		ns.Endpoints = append(ns.Endpoints, converted)
 	}

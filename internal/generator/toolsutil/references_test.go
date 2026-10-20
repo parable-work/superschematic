@@ -22,7 +22,8 @@ import (
 // objects in a list (basket lines' itemId), a field with every member
 // said (giftSku), a query list (ids, the lookup, on the list) and a path
 // argument (getItem's itemId). The search argument, q, says
-// x-superschematic-search (D62). Regenerate with:
+// x-superschematic-search (D62), and each reference to an item names it as
+// its options' search (D61, amended). Regenerate with:
 // go test ./internal/generator/toolsutil -run TestToolSchemasGoldenRefs -update
 func TestToolSchemasGoldenRefs(t *testing.T) {
 	const fixture = "fixture-refs-api"
@@ -44,8 +45,8 @@ func TestToolSchemasGoldenRefs(t *testing.T) {
 		byName[tool.Name] = tool
 	}
 	list, get, place := byName["catalog.listItems"], byName["catalog.getItem"], byName["catalog.placeBasket"]
-	byID := &ir.ToolSchemaReference{Target: "ItemView", Options: "catalog.listItems", Value: "id", Label: "name", Lookup: "ids"}
-	bySku := &ir.ToolSchemaReference{Target: "ItemView", Options: "catalog.listItems", Value: "sku", Label: "name"}
+	byID := &ir.ToolSchemaReference{Target: "ItemView", Options: "catalog.listItems", Value: "id", Label: "name", Lookup: "ids", Search: "q"}
+	bySku := &ir.ToolSchemaReference{Target: "ItemView", Options: "catalog.listItems", Value: "sku", Label: "name", Search: "q"}
 	for _, check := range []struct {
 		where string
 		got   *ir.ToolSchemaReference
@@ -69,8 +70,8 @@ func TestToolSchemasGoldenRefs(t *testing.T) {
 }
 
 // TestAPropertyKeyIsNoKeywordAPropertyIsWrittenWith: a tool hook cannot
-// rename the scalar, reference or search key to a keyword a property is
-// written with, any of JSONSchemaProperty's keys, which the property
+// rename the scalar, reference, search or sort key to a keyword a property
+// is written with, any of JSONSchemaProperty's keys, which the property
 // would then carry twice.
 func TestAPropertyKeyIsNoKeywordAPropertyIsWrittenWith(t *testing.T) {
 	var keywords []string
@@ -93,6 +94,7 @@ func TestAPropertyKeyIsNoKeywordAPropertyIsWrittenWith(t *testing.T) {
 			{"scalar", func(k *apigen.ToolKeys) { k.Scalar = keyword }},
 			{"reference", func(k *apigen.ToolKeys) { k.Reference = keyword }},
 			{"search", func(k *apigen.ToolKeys) { k.Search = keyword }},
+			{"sort", func(k *apigen.ToolKeys) { k.Sort = keyword }},
 		} {
 			_, err := apigen.ResolveToolKeys(schema, []apigen.ToolHook{{Name: "rename", Edit: func(_ *ir.Schema, tools *apigen.ToolSet) error {
 				key.set(&tools.Keys)

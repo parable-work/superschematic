@@ -33,7 +33,7 @@
       "path": "/api/items",
       "handle": "",
       "title": "",
-      "description": "The items, two to a page unless the caller asks for up to five, by\ntheir ids or their stock. Pages: pass the result's `next` back as `cursor` for the next page; `next` is null after the last.",
+      "description": "The items, two to a page unless the caller asks for up to five, by\ntheir ids or their stock, in order of their names unless the caller\nsorts them by name or sku, either way. Pages: pass the result's `next` back as `cursor`, with the same `sort`, for the next page; `next` is null after the last.",
       "icon": null,
       "hidden": true,
       "hiddenReason": "",
@@ -45,7 +45,7 @@
       "audience": "",
       "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
       "replay": null,
-      "inputSchemaDigest": "sha256:083fbe6911e32676d7a73662fbbd63a2f56da9d98cb03b6441967ba090d1f885",
+      "inputSchemaDigest": "sha256:29f4e1a9208a47999644619895b7fadb40f7ace3a9397f642fcb7556525390c9",
       "bindingStatus": "ready"
     },
     {

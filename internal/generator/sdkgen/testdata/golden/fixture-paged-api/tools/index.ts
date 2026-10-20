@@ -18,6 +18,7 @@ export interface CatalogListItemsParams {
   ids?: string[];
   inStock?: boolean;
   limit?: number;
+  sort?: 'name' | '-name' | 'sku' | '-sku';
 }
 
 export interface CatalogGetItemParams {
@@ -93,6 +94,7 @@ export interface ToolDefinition {
  */
 export interface JSONSchemaProperty {
   'x-superschematic-scalar'?: string;
+  'x-superschematic-sort'?: boolean;
   additionalProperties?: boolean | JSONSchemaProperty;
   type: string | string[];
   format?: string;
@@ -215,13 +217,14 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     requiredPermissions: [],
     replay: null,
     description: `The items, two to a page unless the caller asks for up to five, by
-their ids or their stock. Pages: pass the result's \`next\` back as \`cursor\` for the next page; \`next\` is null after the last.`,
+their ids or their stock, in order of their names unless the caller
+sorts them by name or sku, either way. Pages: pass the result's \`next\` back as \`cursor\`, with the same \`sort\`, for the next page; \`next\` is null after the last.`,
     namespace: 'catalog',
     methodName: 'listItems',
     requiresAuth: false,
     isScoped: false,
     bindingStatus: 'ready',
-    inputSchemaDigest: 'sha256:083fbe6911e32676d7a73662fbbd63a2f56da9d98cb03b6441967ba090d1f885',
+    inputSchemaDigest: 'sha256:29f4e1a9208a47999644619895b7fadb40f7ace3a9397f642fcb7556525390c9',
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -230,6 +233,7 @@ their ids or their stock. Pages: pass the result's \`next\` back as \`cursor\` f
         ids: {"description":"Array of Identity.UUID values","items":{"description":"UUID v4 with automatic base62 encoding for client-facing APIs","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},"maxItems":5,"type":"array"},
         inStock: {"description":"A boolean value (true or false)","type":"boolean"},
         limit: {"description":"The most items the page holds: 1 to 5, 2 when absent.","maximum":5,"minimum":1,"type":"integer"},
+        sort: {"description":"The order of the page: a field, or - and a field for descending; ties break by id. A cursor holds the sort it was returned under. One of `name`, `-name`, `sku` or `-sku`; `name` when left out.","enum":["name","-name","sku","-sku"],"type":"string","x-superschematic-sort":true},
       }
     },
     returns: {
@@ -333,7 +337,8 @@ export const openAIFunctions: OpenAIFunction[] = [
   {
     name: 'catalog.listItems',
     description: `The items, two to a page unless the caller asks for up to five, by
-their ids or their stock. Pages: pass the result's \`next\` back as \`cursor\` for the next page; \`next\` is null after the last.`,
+their ids or their stock, in order of their names unless the caller
+sorts them by name or sku, either way. Pages: pass the result's \`next\` back as \`cursor\`, with the same \`sort\`, for the next page; \`next\` is null after the last.`,
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -342,6 +347,7 @@ their ids or their stock. Pages: pass the result's \`next\` back as \`cursor\` f
         ids: {"description":"Array of Identity.UUID values","items":{"description":"UUID v4 with automatic base62 encoding for client-facing APIs","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},"maxItems":5,"type":"array"},
         inStock: {"description":"A boolean value (true or false)","type":"boolean"},
         limit: {"description":"The most items the page holds: 1 to 5, 2 when absent.","maximum":5,"minimum":1,"type":"integer"},
+        sort: {"description":"The order of the page: a field, or - and a field for descending; ties break by id. A cursor holds the sort it was returned under. One of `name`, `-name`, `sku` or `-sku`; `name` when left out.","enum":["name","-name","sku","-sku"],"type":"string","x-superschematic-sort":true},
       }
     }
   },
@@ -391,7 +397,8 @@ export const anthropicTools: AnthropicTool[] = [
   {
     name: 'catalog.listItems',
     description: `The items, two to a page unless the caller asks for up to five, by
-their ids or their stock. Pages: pass the result's \`next\` back as \`cursor\` for the next page; \`next\` is null after the last.`,
+their ids or their stock, in order of their names unless the caller
+sorts them by name or sku, either way. Pages: pass the result's \`next\` back as \`cursor\`, with the same \`sort\`, for the next page; \`next\` is null after the last.`,
     input_schema: {
       type: 'object',
       additionalProperties: false,
@@ -400,6 +407,7 @@ their ids or their stock. Pages: pass the result's \`next\` back as \`cursor\` f
         ids: {"description":"Array of Identity.UUID values","items":{"description":"UUID v4 with automatic base62 encoding for client-facing APIs","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},"maxItems":5,"type":"array"},
         inStock: {"description":"A boolean value (true or false)","type":"boolean"},
         limit: {"description":"The most items the page holds: 1 to 5, 2 when absent.","maximum":5,"minimum":1,"type":"integer"},
+        sort: {"description":"The order of the page: a field, or - and a field for descending; ties break by id. A cursor holds the sort it was returned under. One of `name`, `-name`, `sku` or `-sku`; `name` when left out.","enum":["name","-name","sku","-sku"],"type":"string","x-superschematic-sort":true},
       }
     }
   },
@@ -465,7 +473,7 @@ export async function invokeTool<T extends ToolName>(
     case CATALOG_PLACE_BASKET:
       return sdk.catalog.placeBasket({ lines: (params as CatalogPlaceBasketParams).lines });
     case CATALOG_LIST_ITEMS:
-      return sdk.catalog.listItems({ ids: (params as CatalogListItemsParams).ids, inStock: (params as CatalogListItemsParams).inStock, cursor: (params as CatalogListItemsParams).cursor, limit: (params as CatalogListItemsParams).limit });
+      return sdk.catalog.listItems({ ids: (params as CatalogListItemsParams).ids, inStock: (params as CatalogListItemsParams).inStock, sort: (params as CatalogListItemsParams).sort, cursor: (params as CatalogListItemsParams).cursor, limit: (params as CatalogListItemsParams).limit });
     case CATALOG_GET_ITEM:
       return sdk.catalog.getItem((params as CatalogGetItemParams).itemId);
     case CATALOG_LIST_TAGS:
