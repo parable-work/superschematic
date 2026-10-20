@@ -35,8 +35,11 @@ type argForm struct {
 	Input *argInput
 	// Paged marks a @paginated operation's form (D60): it holds the page
 	// asked for, `cursor` and `limit`, as the query sends them, renders no
-	// control for either, and reads them by the route's rules.
+	// control for either, and reads them by the route's rules. Sort is a
+	// sorted one's sort (D60, amended), which it holds the same way, nil
+	// for an unsorted one.
 	Paged bool
+	Sort  *argSort
 	// ServiceOnly marks the form of an operation whose route admits only a
 	// service caller (@requireService): it has `submit_as(cx, service)`,
 	// which calls it through operations::as_service, in place of
@@ -48,6 +51,14 @@ type argForm struct {
 	Choosable bool
 	UsesForm  bool
 	Body      string
+}
+
+// argSort is the sort of a sorted operation's form (D60, amended): the
+// query parameter its SortBy argument names, and the form's field, which
+// holds it as sent.
+type argSort struct {
+	Param string // sort
+	Field string // sort
 }
 
 // argInput is the input form an argument form embeds.
@@ -216,6 +227,9 @@ func (s schemaSet) argForm(e registry.RustEndpoint, op *ir.FieldDef, inputs map[
 		// The form of a @requireService operation submits as a service.
 		ServiceOnly: o.ServiceOnly,
 	}
+	if e.Page != nil && e.Page.Sort != nil {
+		f.Sort = &argSort{Param: e.Page.Sort.Param, Field: registry.RustIdentifier(e.Page.Sort.Param, "sort")}
+	}
 	// The input's fields and the arguments share the form's names.
 	names := map[string]string{}
 	if input := e.Input; input != nil {
@@ -227,6 +241,11 @@ func (s schemaSet) argForm(e registry.RustEndpoint, op *ir.FieldDef, inputs map[
 		f.Input = &argInput{Struct: st, Optional: !input.Required}
 		for _, field := range st.Fields {
 			names[field.JSONName] = "its input's field " + field.JSONName
+		}
+		if f.Sort != nil {
+			if other, taken := names[f.Sort.Param]; taken {
+				return argForm{}, fmt.Sprintf("its sort, %s, and %s share a form field's name", f.Sort.Param, other), nil
+			}
 		}
 		if st.Rows {
 			names[rowActionName] = "the name of its input's row buttons"

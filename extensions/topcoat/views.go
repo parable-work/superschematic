@@ -44,7 +44,18 @@ type view struct {
 	// cell has none: the type's noun and the row's id. It is empty when
 	// that cell always has text.
 	UntitledLet string
+	// SortFields are the columns whose headers sort a list the pages show
+	// in the table (D44, amended), by their JSON names; none when no
+	// sorted list does, and the table takes no `Sorted`.
+	SortFields map[string]bool
 }
+
+// Sorted reports whether a sorted list's page shows the table, so it
+// takes the headers' `Sorted`.
+func (v view) Sorted() bool { return len(v.SortFields) > 0 }
+
+// Sorts reports whether the header of the column of field sorts a list.
+func (v view) Sorts(field string) bool { return v.SortFields[field] }
 
 // viewField is one field of a record as its components render it.
 type viewField struct {
@@ -631,6 +642,17 @@ func (c *crate) ViewsUse(fn string) bool {
 func (c *crate) ViewsLabel() bool {
 	for _, v := range c.Views {
 		if v.LabelLet != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// SortedTables reports whether a table takes the headers' `Sorted`, so
+// views.rs declares it.
+func (c *crate) SortedTables() bool {
+	for _, v := range c.Views {
+		if v.Sorted() {
 			return true
 		}
 	}

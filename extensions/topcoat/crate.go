@@ -97,8 +97,12 @@ type operation struct {
 	// calls through operations::as_service.
 	ServiceOnly bool
 	AsService   bool
-	// Paged marks a @paginated operation (D60), whose call returns a page.
-	Paged bool
+	// Paged marks a @paginated operation (D60), whose call returns a page;
+	// Sorted one with a SortBy argument (D60, amended), whose call unbinds
+	// the cursor from the sort before the implementation reads it and binds
+	// the page's next to it after, as the router does.
+	Paged  bool
+	Sorted bool
 	// NoCall is why the operation has no in-process call, and so no
 	// procedure; NoProcedure why one with a call has no procedure. Each is
 	// a reason (noCall, noProcedure), empty when the operation has the
@@ -124,6 +128,7 @@ func operationOf(e registry.RustEndpoint) operation {
 		ServiceOnly:  requiresService(e),
 		AsService:    e.ServiceCallers != nil,
 		Paged:        e.Page != nil,
+		Sorted:       e.Page != nil && e.Page.Sort != nil,
 	}
 	if e.HasArgs() {
 		op.ArgsName = e.ArgsName
@@ -369,6 +374,17 @@ func (c *crate) RecordsUseTypes() bool {
 func (c *crate) Paged() bool {
 	for _, o := range slices.Concat(c.Operations, c.ServiceCalls) {
 		if o.Paged {
+			return true
+		}
+	}
+	return false
+}
+
+// Sorted reports whether an operation with an in-process call sorts (D60,
+// amended), so operations.rs says how its call unbinds and binds the page.
+func (c *crate) Sorted() bool {
+	for _, o := range slices.Concat(c.Operations, c.ServiceCalls) {
+		if o.Sorted {
 			return true
 		}
 	}

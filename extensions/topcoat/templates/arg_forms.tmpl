@@ -19,6 +19,13 @@ pub struct {{ .Name }} {
     pub cursor: Option<String>,
     pub limit: Option<String>,
 {{- end }}
+{{- with .Sort }}
+    /// The order the page is asked for in (D60, amended), the `{{ .Param }}` query
+    /// parameter as sent, which `page` reads by the route's rules: none for
+    /// its defaultSort. No control renders it; a sorted list's headers set
+    /// it.
+    pub {{ .Field }}: Option<String>,
+{{- end }}
 {{- with .Input }}
     pub input: {{ .Struct.Name }},
 {{- end }}
@@ -45,6 +52,9 @@ impl {{ .Name }} {
             cursor: None,
             limit: None,
 {{- end }}
+{{- with .Sort }}
+            {{ .Field }}: None,
+{{- end }}
 {{- with .Input }}
             input: {{ .Struct.Name }}::new(),
 {{- end }}
@@ -66,6 +76,9 @@ impl {{ .Name }} {
 {{- if .Paged }}
             cursor: posted.get("cursor").first(),
             limit: posted.get("limit").first(),
+{{- end }}
+{{- with .Sort }}
+            {{ .Field }}: posted.get({{ rustString .Param }}).first(),
 {{- end }}
 {{- with .Input }}
             input: {{ .Struct.Name }}::from_post(&posted),
@@ -145,23 +158,41 @@ impl {{ .Name }} {
         Ok(args)
     }
 {{- if .Paged }}
+{{- if .Sort }}
+
+    /// The page the form asks for, its `cursor`, `limit` and `{{ .Sort.Param }}` read by
+    /// the route's rules (`PageSpec::query`, D60, amended): an absent cursor
+    /// is the first page, an absent limit the route's default and an absent
+    /// sort its defaultSort, which the call fills in, and a refusal is the
+    /// router's 400 at the first it refuses. The cursor is still bound to
+    /// its sort; the in-process call unbinds it.
+{{- else }}
 
     /// The page the form asks for, its `cursor` and `limit` read by the
     /// route's rules (`PageSpec::query`, D60): an absent cursor is the first
     /// page and an absent limit the route's default, and a refusal is the
     /// router's 400 at either.
+{{- end }}
     pub fn page(&self) -> Result<runtime::page::PageRequest, ApiError> {
-        let pairs = [("cursor", &self.cursor), ("limit", &self.limit)]
+        let pairs = [("cursor", &self.cursor), ("limit", &self.limit){{ with .Sort }}, ({{ rustString .Param }}, &self.{{ .Field }}){{ end }}]
             .into_iter()
             .filter_map(|(name, value)| value.clone().map(|value| (name.to_owned(), value)))
             .collect();
         crate::api::{{ .ArgsName }}::PAGE.query(&QueryValues::new(pairs))
     }
+{{- if .Sort }}
+
+    /// The pairs the form holds as a query sends them, in control order:
+    /// each argument's values as sent, then the sort and `limit` when sent,
+    /// never `cursor`. A page links the next page and the first with them,
+    /// so each keeps the filter, the order and the limit.
+{{- else }}
 
     /// The pairs the form holds as a query sends them, in control order:
     /// each argument's values as sent, then `limit` when sent, never
     /// `cursor`. A page links the next page and the first with them, so each
     /// keeps the filter and the limit.
+{{- end }}
     pub fn query_pairs(&self) -> Vec<(String, String)> {
         let mut pairs = Vec::new();
 {{- range .QueryFields }}
@@ -172,6 +203,11 @@ impl {{ .Name }} {
             pairs.push(({{ rustString .JSONName }}.to_owned(), value.clone()));
         }
 {{- end }}
+{{- end }}
+{{- with .Sort }}
+        if let Some(sort) = &self.{{ .Field }} {
+            pairs.push(({{ rustString .Param }}.to_owned(), sort.clone()));
+        }
 {{- end }}
         if let Some(limit) = &self.limit {
             pairs.push(("limit".to_owned(), limit.clone()));

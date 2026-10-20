@@ -274,7 +274,8 @@ where
 /// The arguments of {{ .Namespace }}.{{ .Name }}, as browser code builds them.
 {{- if .Paged }}
 /// The page asked for is `cursor`, a page's `next`, none for the first,
-/// and `limit`, none for the route's default (D60).
+/// and `limit`, none for the route's default (D60){{ if .Sort }}, and `{{ .Sort }}`, the
+/// order, none for the route's defaultSort (D60, amended){{ end }}.
 {{- end }}
 #[record]
 #[derive(Debug, Clone, PartialEq)]
@@ -286,19 +287,29 @@ pub struct {{ .ArgsRecord }} {
     pub cursor: Option<String>,
     pub limit: Option<i64>,
 {{- end }}
+{{- if .Sort }}
+    pub {{ .Sort }}: Option<String>,
+{{- end }}
 }
 
 impl {{ .ArgsRecord }} {
     /// The operation's arguments: each field's JSON, as a request carries
     /// it, decoded into its Rust type{{ if .Paged }}, and the page asked for,
-    /// held to the route's limits as the router reads `cursor` and `limit`{{ end }}.
+    /// held to the route's limits as the router reads `cursor` and `limit`{{ if .Sort }}
+    /// and the sort{{ end }}{{ end }}.
     pub fn to_args(&self) -> Result<crate::api::{{ .ArgsName }}, ProblemRecord> {
         Ok(crate::api::{{ .ArgsName }} {
 {{- range .Args }}
             {{ .Field }}: {{ .Decode }},
 {{- end }}
 {{- if .Paged }}
+{{- if .Sort }}
+            page: crate::api::{{ .ArgsName }}::PAGE
+                .sorted_request(self.cursor.as_deref(), self.limit, self.{{ .Sort }}.as_deref())
+                .map_err(ProblemRecord::from)?,
+{{- else }}
             page: crate::api::{{ .ArgsName }}::PAGE.request(self.cursor.as_deref(), self.limit).map_err(ProblemRecord::from)?,
+{{- end }}
 {{- end }}
         })
     }

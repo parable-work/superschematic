@@ -1002,6 +1002,11 @@ pub struct OrderListOrdersArgsForm {
     /// them, and `page` reads them by the route's rules.
     pub cursor: Option<String>,
     pub limit: Option<String>,
+    /// The order the page is asked for in (D60, amended), the `sort` query
+    /// parameter as sent, which `page` reads by the route's rules: none for
+    /// its defaultSort. No control renders it; a sorted list's headers set
+    /// it.
+    pub sort: Option<String>,
     /// The browser sent more than `MAX_PAIRS` pairs, past which the form
     /// read none: `parse` refuses it with the form's error.
     pub overflow: bool,
@@ -1019,6 +1024,7 @@ impl OrderListOrdersArgsForm {
             product_id: None,
             cursor: None,
             limit: None,
+            sort: None,
             overflow: false,
         }
     }
@@ -1034,6 +1040,7 @@ impl OrderListOrdersArgsForm {
             product_id: posted.get("productId").first(),
             cursor: posted.get("cursor").first(),
             limit: posted.get("limit").first(),
+            sort: posted.get("sort").first(),
             overflow: posted.overflow,
         }
     }
@@ -1087,12 +1094,14 @@ impl OrderListOrdersArgsForm {
         Ok(args)
     }
 
-    /// The page the form asks for, its `cursor` and `limit` read by the
-    /// route's rules (`PageSpec::query`, D60): an absent cursor is the first
-    /// page and an absent limit the route's default, and a refusal is the
-    /// router's 400 at either.
+    /// The page the form asks for, its `cursor`, `limit` and `sort` read by
+    /// the route's rules (`PageSpec::query`, D60, amended): an absent cursor
+    /// is the first page, an absent limit the route's default and an absent
+    /// sort its defaultSort, which the call fills in, and a refusal is the
+    /// router's 400 at the first it refuses. The cursor is still bound to
+    /// its sort; the in-process call unbinds it.
     pub fn page(&self) -> Result<runtime::page::PageRequest, ApiError> {
-        let pairs = [("cursor", &self.cursor), ("limit", &self.limit)]
+        let pairs = [("cursor", &self.cursor), ("limit", &self.limit), ("sort", &self.sort)]
             .into_iter()
             .filter_map(|(name, value)| value.clone().map(|value| (name.to_owned(), value)))
             .collect();
@@ -1100,9 +1109,9 @@ impl OrderListOrdersArgsForm {
     }
 
     /// The pairs the form holds as a query sends them, in control order:
-    /// each argument's values as sent, then `limit` when sent, never
-    /// `cursor`. A page links the next page and the first with them, so each
-    /// keeps the filter and the limit.
+    /// each argument's values as sent, then the sort and `limit` when sent,
+    /// never `cursor`. A page links the next page and the first with them,
+    /// so each keeps the filter, the order and the limit.
     pub fn query_pairs(&self) -> Vec<(String, String)> {
         let mut pairs = Vec::new();
         if let Some(value) = &self.q {
@@ -1111,6 +1120,9 @@ impl OrderListOrdersArgsForm {
         pairs.extend(self.statuses.iter().map(|value| ("statuses".to_owned(), value.clone())));
         if let Some(value) = &self.product_id {
             pairs.push(("productId".to_owned(), value.clone()));
+        }
+        if let Some(sort) = &self.sort {
+            pairs.push(("sort".to_owned(), sort.clone()));
         }
         if let Some(limit) = &self.limit {
             pairs.push(("limit".to_owned(), limit.clone()));
@@ -1209,6 +1221,11 @@ pub struct ProductListProductsArgsForm {
     /// them, and `page` reads them by the route's rules.
     pub cursor: Option<String>,
     pub limit: Option<String>,
+    /// The order the page is asked for in (D60, amended), the `sort` query
+    /// parameter as sent, which `page` reads by the route's rules: none for
+    /// its defaultSort. No control renders it; a sorted list's headers set
+    /// it.
+    pub sort: Option<String>,
     /// The browser sent more than `MAX_PAIRS` pairs, past which the form
     /// read none: `parse` refuses it with the form's error.
     pub overflow: bool,
@@ -1225,6 +1242,7 @@ impl ProductListProductsArgsForm {
             ids: Vec::new(),
             cursor: None,
             limit: None,
+            sort: None,
             overflow: false,
         }
     }
@@ -1239,6 +1257,7 @@ impl ProductListProductsArgsForm {
             ids: posted.get("ids").values(true),
             cursor: posted.get("cursor").first(),
             limit: posted.get("limit").first(),
+            sort: posted.get("sort").first(),
             overflow: posted.overflow,
         }
     }
@@ -1287,12 +1306,14 @@ impl ProductListProductsArgsForm {
         Ok(args)
     }
 
-    /// The page the form asks for, its `cursor` and `limit` read by the
-    /// route's rules (`PageSpec::query`, D60): an absent cursor is the first
-    /// page and an absent limit the route's default, and a refusal is the
-    /// router's 400 at either.
+    /// The page the form asks for, its `cursor`, `limit` and `sort` read by
+    /// the route's rules (`PageSpec::query`, D60, amended): an absent cursor
+    /// is the first page, an absent limit the route's default and an absent
+    /// sort its defaultSort, which the call fills in, and a refusal is the
+    /// router's 400 at the first it refuses. The cursor is still bound to
+    /// its sort; the in-process call unbinds it.
     pub fn page(&self) -> Result<runtime::page::PageRequest, ApiError> {
-        let pairs = [("cursor", &self.cursor), ("limit", &self.limit)]
+        let pairs = [("cursor", &self.cursor), ("limit", &self.limit), ("sort", &self.sort)]
             .into_iter()
             .filter_map(|(name, value)| value.clone().map(|value| (name.to_owned(), value)))
             .collect();
@@ -1300,15 +1321,18 @@ impl ProductListProductsArgsForm {
     }
 
     /// The pairs the form holds as a query sends them, in control order:
-    /// each argument's values as sent, then `limit` when sent, never
-    /// `cursor`. A page links the next page and the first with them, so each
-    /// keeps the filter and the limit.
+    /// each argument's values as sent, then the sort and `limit` when sent,
+    /// never `cursor`. A page links the next page and the first with them,
+    /// so each keeps the filter, the order and the limit.
     pub fn query_pairs(&self) -> Vec<(String, String)> {
         let mut pairs = Vec::new();
         if let Some(value) = &self.q {
             pairs.push(("q".to_owned(), value.clone()));
         }
         pairs.extend(self.ids.iter().map(|value| ("ids".to_owned(), value.clone())));
+        if let Some(sort) = &self.sort {
+            pairs.push(("sort".to_owned(), sort.clone()));
+        }
         if let Some(limit) = &self.limit {
             pairs.push(("limit".to_owned(), limit.clone()));
         }
@@ -1405,6 +1429,11 @@ pub struct ReviewListReviewsArgsForm {
     /// them, and `page` reads them by the route's rules.
     pub cursor: Option<String>,
     pub limit: Option<String>,
+    /// The order the page is asked for in (D60, amended), the `sort` query
+    /// parameter as sent, which `page` reads by the route's rules: none for
+    /// its defaultSort. No control renders it; a sorted list's headers set
+    /// it.
+    pub sort: Option<String>,
     /// The browser sent more than `MAX_PAIRS` pairs, past which the form
     /// read none: `parse` refuses it with the form's error.
     pub overflow: bool,
@@ -1423,6 +1452,7 @@ impl ReviewListReviewsArgsForm {
             min_rating: None,
             cursor: None,
             limit: None,
+            sort: None,
             overflow: false,
         }
     }
@@ -1438,6 +1468,7 @@ impl ReviewListReviewsArgsForm {
             min_rating: posted.get("minRating").first(),
             cursor: posted.get("cursor").first(),
             limit: posted.get("limit").first(),
+            sort: posted.get("sort").first(),
             overflow: posted.overflow,
         }
     }
@@ -1491,12 +1522,14 @@ impl ReviewListReviewsArgsForm {
         Ok(args)
     }
 
-    /// The page the form asks for, its `cursor` and `limit` read by the
-    /// route's rules (`PageSpec::query`, D60): an absent cursor is the first
-    /// page and an absent limit the route's default, and a refusal is the
-    /// router's 400 at either.
+    /// The page the form asks for, its `cursor`, `limit` and `sort` read by
+    /// the route's rules (`PageSpec::query`, D60, amended): an absent cursor
+    /// is the first page, an absent limit the route's default and an absent
+    /// sort its defaultSort, which the call fills in, and a refusal is the
+    /// router's 400 at the first it refuses. The cursor is still bound to
+    /// its sort; the in-process call unbinds it.
     pub fn page(&self) -> Result<runtime::page::PageRequest, ApiError> {
-        let pairs = [("cursor", &self.cursor), ("limit", &self.limit)]
+        let pairs = [("cursor", &self.cursor), ("limit", &self.limit), ("sort", &self.sort)]
             .into_iter()
             .filter_map(|(name, value)| value.clone().map(|value| (name.to_owned(), value)))
             .collect();
@@ -1504,9 +1537,9 @@ impl ReviewListReviewsArgsForm {
     }
 
     /// The pairs the form holds as a query sends them, in control order:
-    /// each argument's values as sent, then `limit` when sent, never
-    /// `cursor`. A page links the next page and the first with them, so each
-    /// keeps the filter and the limit.
+    /// each argument's values as sent, then the sort and `limit` when sent,
+    /// never `cursor`. A page links the next page and the first with them,
+    /// so each keeps the filter, the order and the limit.
     pub fn query_pairs(&self) -> Vec<(String, String)> {
         let mut pairs = Vec::new();
         if let Some(value) = &self.q {
@@ -1514,6 +1547,9 @@ impl ReviewListReviewsArgsForm {
         }
         if let Some(value) = &self.min_rating {
             pairs.push(("minRating".to_owned(), value.clone()));
+        }
+        if let Some(sort) = &self.sort {
+            pairs.push(("sort".to_owned(), sort.clone()));
         }
         if let Some(limit) = &self.limit {
             pairs.push(("limit".to_owned(), limit.clone()));

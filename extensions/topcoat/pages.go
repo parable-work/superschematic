@@ -199,6 +199,12 @@ type pageResource struct {
 	Prev       bool
 	Sizes      []int
 	SizesConst string
+	// Sort is a sorted list's sort (D60, amended), its argument form's,
+	// and SortColumns its table's columns that are its sort fields, whose
+	// headers sort it (D44, amended), in the table's order; nil and none
+	// for a list without a sort.
+	Sort        *argSort
+	SortColumns []string
 	// ColParams are the route parameters of the collection, its
 	// ancestors' items'; ItemParams those and Item, an item's.
 	ColParams  []string
@@ -503,6 +509,21 @@ func pagesOf(c *crate, schemas schemaSet, site *pageSite, prefix, title string, 
 	for _, root := range roots {
 		if err := b.resource(root, nil); err != nil {
 			return nil, err
+		}
+	}
+	// A table a sorted list shows takes the headers' Sorted, its sortable
+	// columns those of every such list.
+	for _, r := range m.Resources {
+		for i := range c.Views {
+			if len(r.SortColumns) == 0 || c.Views[i].Record != r.RowRecord {
+				continue
+			}
+			if c.Views[i].SortFields == nil {
+				c.Views[i].SortFields = map[string]bool{}
+			}
+			for _, column := range r.SortColumns {
+				c.Views[i].SortFields[column] = true
+			}
 		}
 	}
 	if len(m.Resources) == 0 {
@@ -817,6 +838,43 @@ func (b *pageBuilder) pager(r *pageResource) {
 	}
 }
 
+// sorting sets a sorted list's sort and the columns of its table, v,
+// whose headers sort it (D44, amended): each sort field the table shows,
+// in the table's order. A sort field the table shows no column of is
+// sorted only by the query, which the build log says.
+func (b *pageBuilder) sorting(r *pageResource, v view) {
+	e := r.List.c.d.endpoint
+	if e.Page.Sort == nil || r.List.ArgForm == nil || r.List.ArgForm.Sort == nil {
+		return
+	}
+	r.Sort = r.List.ArgForm.Sort
+	shown := map[string]bool{}
+	for _, column := range v.Columns {
+		shown[column.JSONName] = true
+		if slices.Contains(e.Page.Sort.Fields, column.JSONName) {
+			r.SortColumns = append(r.SortColumns, column.JSONName)
+		}
+	}
+	for _, field := range e.Page.Sort.Fields {
+		if !shown[field] {
+			b.logf("  - topcoat: %s sorts by %s, which its table shows no column of\n", r.Name, field)
+		}
+	}
+	b.m.use("sorting")
+	if len(r.SortColumns) > 0 {
+		b.m.importName("views", "Sorted")
+	}
+}
+
+// SortColumnsExpr is the Rust slice of the list's sortable columns.
+func (r *pageResource) SortColumnsExpr() string {
+	columns := make([]string, len(r.SortColumns))
+	for i, column := range r.SortColumns {
+		columns[i] = rustString(column)
+	}
+	return "&[" + strings.Join(columns, ", ") + "]"
+}
+
 // pageSizes are the sizes a paged list's size form offers whatever the
 // query sends, in order and each once: the route's defaultLimit and
 // maxLimit, and each of pageSizeSteps below maxLimit. The page adds the
@@ -960,6 +1018,7 @@ func (b *pageBuilder) fill(r *pageResource) error {
 		if r.List.Paged {
 			r.BaseExpr = r.Ident + "_href(" + pass(r.ColParams, "&") + ").unwrap_or_default()"
 			b.pager(r)
+			b.sorting(r, v)
 		}
 	}
 	if r.Detail != nil {

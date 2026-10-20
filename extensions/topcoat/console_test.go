@@ -52,7 +52,13 @@ const consoleService = "fixture-console-api"
 // products, a list under a supplier that no operation reads, name the
 // supplier in the trail through what their route's supplierId refers to,
 // or by its id past listSuppliers' first page or to a caller who may not
-// list suppliers.
+// list suppliers. A sorted list's headers (D44, amended) link each sort
+// field's column, its own order reversed and any other's ascending, mark
+// the column of the order with aria-sort, start again at the first page
+// without a history, and set a live list's shard's query; the filter, the
+// size form, the pager and a procedure keep the sort, a refused sort and
+// a cursor of another sort are the route's 400, and a section's table has
+// no header links.
 func TestTheConsolePagesPicksAndSearches(t *testing.T) {
 	cargoTestCrate(t, consoleService, consoleAppTest)
 }
@@ -85,26 +91,32 @@ func TestReferencesBuildWithFormsOrViewsAlone(t *testing.T) {
 }
 
 // TestAPagedOperationIsItsPageEverywhere reads the crate of
-// fixture-console-api: a paged operation's call names the runtime, its
-// page is a page record, its procedure takes cursor and limit, its
-// argument form holds the page, even for a list without a filter, reads
-// it by the route's rules and links its pages by its query pairs, the
-// search argument first; and the core's fixture-paged-api, whose tags are
-// a page of strings.
+// fixture-console-api: a paged operation's call names the runtime, a
+// sorted one's unbinds its cursor and binds its next (D60, amended), its
+// page is a page record, its procedure takes cursor and limit, and a
+// sorted one's its sort, its argument form holds the page, the sort among
+// it, even for a list without a filter, reads it by the route's rules and
+// links its pages by its query pairs, the search argument first; and the
+// core's fixture-paged-api, whose tags are a page of strings and whose
+// items sort.
 func TestAPagedOperationIsItsPageEverywhere(t *testing.T) {
 	files, _ := readCrate(t, registry.DefaultNaming(), consoleService, livePagesOutputs())
 	for file, wants := range map[string][]string{
 		"operations.rs": {
 			"use crate::api::runtime;",
-			"pub async fn order_list_orders(cx: &Cx, args: crate::api::OrderListOrdersArgs) -> Result<runtime::page::Page<types::Order>, ApiError> {",
+			"pub async fn order_list_orders(cx: &Cx, mut args: crate::api::OrderListOrdersArgs) -> Result<runtime::page::Page<types::Order>, ApiError> {",
+			"    args.check()?;\n    // The cursor names the sort it was returned under (D60, amended).\n    args.page = crate::api::OrderListOrdersArgs::PAGE.unbind(args.page)?;\n    let request = args.page.clone();\n",
+			"        .await?\n        .bind(&request)\n}",
+			"pub async fn supplier_list_suppliers(cx: &Cx, args: crate::api::SupplierListSuppliersArgs) -> Result<runtime::page::Page<types::Supplier>, ApiError> {",
 		},
 		"records.rs": {
 			"pub struct OrderPageRecord {\n    pub items: Vec<OrderRecord>,\n    pub next: Option<String>,\n}",
 			"impl From<&runtime::page::Page<types::Order>> for OrderPageRecord {",
 		},
 		"procedures.rs": {
-			"    pub cursor: Option<String>,\n    pub limit: Option<i64>,\n}",
-			"page: crate::api::OrderListOrdersArgs::PAGE.request(self.cursor.as_deref(), self.limit).map_err(ProblemRecord::from)?,",
+			"    pub cursor: Option<String>,\n    pub limit: Option<i64>,\n    pub sort: Option<String>,\n}",
+			".sorted_request(self.cursor.as_deref(), self.limit, self.sort.as_deref())",
+			"page: crate::api::SupplierListSuppliersArgs::PAGE.request(self.cursor.as_deref(), self.limit).map_err(ProblemRecord::from)?,",
 			"-> topcoat::Result<Result<OrderPageRecord, ProblemRecord>> {",
 			"pub struct SupplierListSuppliersArgsRecord {\n    pub cursor: Option<String>,\n    pub limit: Option<i64>,\n}",
 		},
@@ -112,6 +124,9 @@ func TestAPagedOperationIsItsPageEverywhere(t *testing.T) {
 			"pub struct OrderListOrdersArgsForm {\n    pub q: Option<String>,\n    pub statuses: Vec<String>,\n    pub product_id: Option<String>,\n",
 			"pub struct SupplierListSuppliersArgsForm {\n    /// The page asked for (D60)",
 			"crate::api::OrderListOrdersArgs::PAGE.query(&QueryValues::new(pairs))",
+			`let pairs = [("cursor", &self.cursor), ("limit", &self.limit), ("sort", &self.sort)]`,
+			"            sort: posted.get(\"sort\").first(),\n",
+			"        if let Some(sort) = &self.sort {\n            pairs.push((\"sort\".to_owned(), sort.clone()));\n        }\n        if let Some(limit) = &self.limit {",
 			"pub fn query_pairs(&self) -> Vec<(String, String)> {",
 			"self.page().map_err(|err| Refusal::from_api(&err))?;",
 			`<label for="order-list-orders-q">"Search"</label>`,
@@ -144,6 +159,77 @@ func TestAPagedOperationIsItsPageEverywhere(t *testing.T) {
 	}
 	if !strings.Contains(paged["forms.rs"], "pub struct CatalogListTagsArgsForm {") {
 		t.Error("fixture-paged-api's tags, a page with no other argument, have no argument form")
+	}
+	if !strings.Contains(paged["operations.rs"], "args.page = crate::api::CatalogListItemsArgs::PAGE.unbind(args.page)?;") {
+		t.Error("fixture-paged-api's sorted items' call does not unbind its cursor")
+	}
+}
+
+// TestTheHeadersSortAList reads fixture-console-api's crate: a sorted
+// list's table takes Sorted, whose header links set aria-sort on the
+// column the rows are in order of and data-ss-sort on each link, and a
+// live list's links set its shard's query; the list computes them from
+// its query pairs, the filter keeps the sort as a hidden input, and a
+// section's rows take none (D44, amended).
+func TestTheHeadersSortAList(t *testing.T) {
+	files, _ := readCrate(t, registry.DefaultNaming(), consoleService, livePagesOutputs())
+	for file, wants := range map[string][]string{
+		"views.rs": {
+			"pub struct Sorted {",
+			"pub live: Option<Signal<String>>,",
+			`<th scope="col" data-field="number" aria-sort=(sorted.aria("number"))>`,
+			`Some(live) => <a href=(href.clone()) data-ss-sort="number" @click=$(|e: Event| {`,
+			`None => <a href=(href) data-ss-sort="number">"Number"</a>,`,
+			`<th scope="col" data-field="status">"Status"</th>`,
+			"    #[default] sorted: Sorted,\n) -> topcoat::Result<impl View> {",
+		},
+		"pages.rs": {
+			"fn sort_query(pairs: &[(String, String)], param: &str, value: &str) -> String {",
+			`let sorted = sorting(&pairs, &crate::api::ProductListProductsArgs::PAGE, filter.sort.as_deref(), &["name", "sku"], &base, Some(query.clone()));`,
+			`<input type="hidden" name="sort" value=(sort)>`,
+			"Ok(items) => products_rows(items: items, sorted: sorted),",
+			"items: Vec<types::Product>, #[default] sorted: Sorted) -> topcoat::Result<impl View> {",
+			"Some(Ok(items)) => products_reviews_rows(items: items),",
+		},
+	} {
+		for _, want := range wants {
+			if !strings.Contains(files[file], want) {
+				t.Errorf("%s lacks %q", file, want)
+			}
+		}
+	}
+	if strings.Contains(files["views.rs"], `data-field="supplier"`) || strings.Contains(files["views.rs"], `data-ss-sort="supplierId"`) {
+		t.Error("views.rs sorts by a column no list sorts by")
+	}
+	// Without live lists, a header's link loads the page.
+	static, _ := readCrate(t, registry.DefaultNaming(), consoleService, pagesOutputs())
+	if !strings.Contains(static["views.rs"], `Some((href, _)) => <a href=(href) data-ss-sort="number">"Number"</a>,`) || strings.Contains(static["views.rs"], "Signal") {
+		t.Error("views.rs without live lists sets a signal from its headers")
+	}
+}
+
+// TestASortFieldWithoutAColumnIsLogged builds fixture-console-api with
+// listOrders sorted by id too, which its table shows no column of: the
+// build log names it, and its headers sort by number alone (D44,
+// amended).
+func TestASortFieldWithoutAColumnIsLogged(t *testing.T) {
+	dir := consoleCopy(t, func(schema string) string {
+		return strings.Replace(schema, "            sort: [number]\n", "            sort: [number, id]\n", 1)
+	})
+	root := testpaths.TempDir(t)
+	var log strings.Builder
+	if _, err := buildDir(t, registry.DefaultNaming(), dir, root, livePagesOutputs(), &log); err != nil {
+		t.Fatalf("build: %v\n%s", err, log.String())
+	}
+	if want := "  - topcoat: orders sorts by id, which its table shows no column of\n"; !strings.Contains(log.String(), want) {
+		t.Errorf("the build log lacks %q:\n%s", want, log.String())
+	}
+	data, err := os.ReadFile(filepath.Join(topcoat.Dir(root, consoleService), "src", "pages.rs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `filter.sort.as_deref(), &["number"], &base`) {
+		t.Error("the orders' headers sort by a field their table does not show")
 	}
 }
 
@@ -745,7 +831,7 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use http::request::Parts;
-use schemas_fixture_console_api_topcoat::api::runtime::page::{Cursor, Page};
+use schemas_fixture_console_api_topcoat::api::runtime::page::{Cursor, Page, PageRequest, Sort};
 use schemas_fixture_console_api_topcoat::api::runtime::search;
 use schemas_fixture_console_api_topcoat::api::runtime::{ApiError, Authenticator, Principal, RequestContext};
 use schemas_fixture_console_api_topcoat::api::{
@@ -853,13 +939,29 @@ impl Store {
 // one more: what an implementation reads, which Page::from_rows keeps.
 fn page_of<T, K: serde::Serialize + serde::de::DeserializeOwned + Ord>(
     mut rows: Vec<T>,
-    page: &schemas_fixture_console_api_topcoat::api::runtime::page::PageRequest,
+    page: &PageRequest,
     key: impl Fn(&T) -> K,
 ) -> Result<Page<T>, ApiError> {
     let after: Option<K> = page.cursor.as_ref().map(Cursor::decode).transpose()?;
     rows.sort_by_key(|row| key(row));
     rows.retain(|row| after.as_ref().is_none_or(|after| key(row) > *after));
     Page::from_rows(rows, page.limit, key)
+}
+
+// The rows of a sorted list (D60, amended) after the cursor, in the page's
+// order: the sort's field's text, then the row's id, either way, as key
+// gives them. The call fills the default sort in and hands the
+// implementation its own cursor, which a bound one would not decode as.
+fn sorted_page<T>(mut rows: Vec<T>, page: &PageRequest, key: impl Fn(&T, &str) -> (String, String)) -> Result<Page<T>, ApiError> {
+    let sort = page.sort.clone().expect("the call fills the default sort in");
+    let field = sort.field().to_owned();
+    let after: Option<(String, String)> = page.cursor.as_ref().map(Cursor::decode).transpose()?;
+    rows.sort_by_key(|row| key(row, &field));
+    if sort.desc() {
+        rows.reverse();
+    }
+    rows.retain(|row| after.as_ref().is_none_or(|after| if sort.desc() { key(row, &field) < *after } else { key(row, &field) > *after }));
+    Page::from_rows(rows, page.limit, |row| key(row, &field))
 }
 
 struct Shop(Arc<Store>);
@@ -884,7 +986,7 @@ impl ProductImplementation for Shop {
             .filter(|product| search::matches(&product.name, &terms))
             .cloned()
             .collect();
-        page_of(rows, &args.page, |product| (product.name.clone(), wire(&product.id)))
+        sorted_page(rows, &args.page, |product, field| (if field == "sku" { product.sku.clone() } else { product.name.clone() }, wire(&product.id)))
     }
     async fn get_product(&self, _ctx: RequestContext, args: ProductGetProductArgs) -> Result<types::Product, ApiError> {
         let products = self.0.products.lock().unwrap();
@@ -904,7 +1006,7 @@ impl ReviewImplementation for Shop {
             .filter(|review| args.min_rating.is_none_or(|least| review.rating >= least))
             .cloned()
             .collect();
-        page_of(rows, &args.page, |review| review.id.clone())
+        sorted_page(rows, &args.page, |review, field| (if field == "rating" { format!("{:08.2}", review.rating) } else { review.title.clone() }, review.id.clone()))
     }
 }
 
@@ -944,7 +1046,17 @@ impl OrderImplementation for Shop {
             .filter(|order| search::matches(&format!("{} {}", order.number, order.note.as_deref().unwrap_or_default()), &terms))
             .cloned()
             .collect();
-        page_of(rows, &args.page, |order| order.number.clone())
+        // The orders sort by their numbers, which no two share, either way:
+        // the key is the number alone.
+        let desc = args.page.sort.as_ref().is_some_and(|sort| sort.desc());
+        let mut page = PageRequest { sort: None, ..args.page };
+        if desc {
+            let after: Option<String> = page.cursor.take().map(|cursor| cursor.decode()).transpose()?;
+            let mut rows: Vec<types::Order> = rows.into_iter().filter(|order| after.as_ref().is_none_or(|after| order.number < *after)).collect();
+            rows.sort_by(|a, b| b.number.cmp(&a.number));
+            return Page::from_rows(rows, page.limit, |order| order.number.clone());
+        }
+        page_of(rows, &page, |order| order.number.clone())
     }
     async fn place_order(&self, _ctx: RequestContext, args: OrderPlaceOrderArgs) -> Result<types::Order, ApiError> {
         let mut orders = self.0.orders.lock().unwrap();
@@ -1032,7 +1144,8 @@ async fn app_orders_procedure(cx: &Cx) -> topcoat::Result<impl View> {
     let query = parts(cx).uri.query().unwrap_or_default().to_owned();
     let cursor = query.strip_prefix("cursor=").map(str::to_owned);
     let limit = query.strip_prefix("limit=").map_or(Some(3), |limit| limit.parse().ok());
-    let args = OrderListOrdersArgsRecord { statuses: None, product_id: None, q: None, cursor, limit };
+    let sort = query.strip_prefix("sort=").map(str::to_owned);
+    let args = OrderListOrdersArgsRecord { statuses: None, product_id: None, q: None, cursor, limit, sort };
     let said = match procedures::call_order_list_orders(cx, args).await {
         Ok(OrderPageRecord { items, next }) => {
             let numbers: Vec<String> = items.into_iter().map(|order| order.number).collect();
@@ -1360,6 +1473,12 @@ async fn a_procedure_answers_a_page_record() {
     assert_eq!(between(&forged.html, r#"<p id="said">"#, "</p>"), "400 cursor is not one this operation returned");
     let past = get(&app, "/app/orders-procedure?limit=9", "clerk").await;
     assert_eq!(between(&past.html, r#"<p id="said">"#, "</p>"), "400 Invalid query parameter limit: must be at most 5");
+    // The record's sort orders the page, and a sort the route does not
+    // offer is its 400 (D60, amended).
+    let reversed = get(&app, "/app/orders-procedure?sort=-number", "clerk").await;
+    assert_eq!(between(&reversed.html, r#"<p id="said">"#, "</p>").split_once(" next=").unwrap().0, "A-5,A-4,A-3");
+    let refused = get(&app, "/app/orders-procedure?sort=status", "clerk").await;
+    assert_eq!(between(&refused.html, r#"<p id="said">"#, "</p>"), "400 Invalid query parameter sort: expected one of number, -number");
 }
 
 #[tokio::test]
@@ -1445,10 +1564,11 @@ async fn the_pager_goes_back_a_page_by_its_history() {
 #[tokio::test]
 async fn a_history_past_its_bound_or_its_rule_has_no_previous_page() {
     let app = app(&seven_orders());
-    // A cursor of 1024 characters, the most a route reads, after A-1, and
-    // entries of 1024 characters, which are cursors by the rule though no
-    // page returned them.
-    let long = Cursor::encode(&format!("A-1{}", "x".repeat(763))).unwrap();
+    // A cursor of 1024 characters, the most a route reads, after A-1 and
+    // bound to the orders' default sort (D60, amended), and entries of 1024
+    // characters, which are cursors by the rule though no page returned
+    // them.
+    let long = Cursor::encode(&format!("A-1{}", "x".repeat(739))).unwrap().bind(&Sort::parse("number").unwrap()).unwrap();
     assert_eq!(long.as_str().len(), 1024);
     let long = long.as_str().to_owned();
     let entry = "A".repeat(1024);
@@ -1674,6 +1794,125 @@ async fn a_list_at_page_pages_beside_the_pagers_helpers() {
     let second = get(&app, &next, "clerk").await;
     assert!(second.html.contains("Terms") && !second.html.contains("About us"), "{}", second.html);
     assert_eq!(link(&second.html, "first").as_deref(), Some("/console/page"), "{}", second.html);
+}
+
+// The header cell of a table's column, from its start tag to its end.
+fn header<'a>(html: &'a str, field: &str) -> &'a str {
+    between(html, &format!(r#"<th scope="col" data-field="{field}""#), "</th>")
+}
+
+// The href of a header's sort link, unescaped, or none.
+fn sort_link(html: &str, field: &str) -> Option<String> {
+    let cell = header(html, field);
+    cell.contains("<a href=").then(|| between(cell, r#"<a href=""#, "\"").replace("&amp;", "&"))
+}
+
+// The names of the products a page's table shows, in order.
+fn names(html: &str) -> Vec<String> {
+    html.split(r#"<th scope="row" data-field="name">"#)
+        .skip(1)
+        .map(|cell| {
+            let cell = cell.split("</th>").next().unwrap();
+            cell.rsplit_once("\">").map_or(cell, |(_, text)| text).trim_end_matches("</a>").to_owned()
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn the_headers_sort_the_list() {
+    let app = app(&Store::new());
+    // The column of the default order says so, and its link reverses it;
+    // the other sort field's sorts by it ascending; a column that is no
+    // sort field keeps its label.
+    let list = get(&app, "/console/products", "clerk").await;
+    assert_eq!(list.status, StatusCode::OK, "{}", list.html);
+    assert_eq!(names(&list.html), ["Anvil", "Bucket"], "{}", list.html);
+    assert!(header(&list.html, "name").contains(r#"aria-sort="ascending""#), "{}", list.html);
+    assert!(header(&list.html, "name").contains(r#"data-ss-sort="name""#), "{}", list.html);
+    assert_eq!(sort_link(&list.html, "name").as_deref(), Some("/console/products?sort=-name"));
+    assert!(!header(&list.html, "sku").contains("aria-sort"), "{}", list.html);
+    assert_eq!(sort_link(&list.html, "sku").as_deref(), Some("/console/products?sort=sku"));
+    assert_eq!(sort_link(&list.html, "supplierId"), None, "{}", list.html);
+    assert!(!header(&list.html, "supplierId").contains("aria-sort"), "{}", list.html);
+
+    // The reversed order: its column descends, its link sorts ascending,
+    // and the pages after it keep the order.
+    let reversed = get(&app, "/console/products?sort=-name", "clerk").await;
+    assert_eq!(names(&reversed.html), ["Drum", "Crate"], "{}", reversed.html);
+    assert!(header(&reversed.html, "name").contains(r#"aria-sort="descending""#), "{}", reversed.html);
+    assert_eq!(sort_link(&reversed.html, "name").as_deref(), Some("/console/products?sort=name"));
+    let next = link(&reversed.html, "next").unwrap();
+    assert!(next.starts_with("/console/products?sort=-name&cursor="), "{next}");
+    let second = get(&app, &next, "clerk").await;
+    assert_eq!(second.status, StatusCode::OK, "{}", second.html);
+    assert_eq!(names(&second.html), ["Bucket", "Anvil"], "{}", second.html);
+    assert_eq!(link(&second.html, "first").as_deref(), Some("/console/products?sort=-name"), "{}", second.html);
+    // A header's link starts again at the first page: no cursor, no back.
+    let resort = sort_link(&second.html, "sku").unwrap();
+    assert_eq!(resort, "/console/products?sort=sku", "{}", second.html);
+    assert_eq!(names(&get(&app, &resort, "clerk").await.html), ["Anvil", "Bucket"]);
+
+    // The filter holds the sort as a hidden input, and the size form and
+    // the pager keep it, beside the search and the limit.
+    let searched = get(&app, "/console/products?q=r&sort=-sku&limit=1", "clerk").await;
+    assert_eq!(names(&searched.html), ["Drum"], "{}", searched.html);
+    let filter = between(&searched.html, r#"<form method="get" class="ss-filter""#, "</form>");
+    assert!(filter.contains(r#"<input type="hidden" name="sort" value="-sku"><input type="hidden" name="limit" value="1">"#), "{filter}");
+    assert!(size_form(&searched.html).contains(r#"<input type="hidden" name="sort" value="-sku">"#), "{}", searched.html);
+    let next = link(&searched.html, "next").unwrap();
+    assert!(next.starts_with("/console/products?q=r&sort=-sku&limit=1&cursor="), "{next}");
+    assert_eq!(sort_link(&searched.html, "name").as_deref(), Some("/console/products?q=r&sort=name&limit=1"));
+
+    // A sort the route does not offer is its 400, the form's own message,
+    // and no link or form keeps it.
+    let refused = get(&app, "/console/products?sort=price&limit=1", "clerk").await;
+    assert_eq!(refused.status, StatusCode::BAD_REQUEST, "{}", refused.html);
+    assert!(refused.html.contains(r#"<p class="form-error">sort: expected one of name, -name, sku, -sku</p>"#), "{}", refused.html);
+    let filter = between(&refused.html, r#"<form method="get" class="ss-filter""#, "</form>");
+    assert!(!filter.contains(r#"name="sort""#), "{filter}");
+    // A cursor returned under another sort is the route's 400 too.
+    let cursor = param(&next, "cursor").unwrap();
+    let other = get(&app, &format!("/console/products?sort=name&cursor={cursor}"), "clerk").await;
+    assert_eq!(other.status, StatusCode::BAD_REQUEST, "{}", other.html);
+    assert!(other.html.contains(r#"<p class="form-error">cursor: returned under another sort</p>"#), "{}", other.html);
+
+    // A list under an item sorts by its own headers, by a number among
+    // them; the item's page shows its first page with none.
+    let anvil = wire(&uuid(ANVIL));
+    let reviews = get(&app, &format!("/console/products/{anvil}/reviews?sort=-rating"), "clerk").await;
+    assert_eq!(reviews.status, StatusCode::OK, "{}", reviews.html);
+    assert!(header(&reviews.html, "rating").contains(r#"aria-sort="descending""#), "{}", reviews.html);
+    assert_eq!(sort_link(&reviews.html, "title"), Some(format!("/console/products/{anvil}/reviews?sort=title")));
+    let ratings: Vec<&str> = reviews.html.split(r#"<td data-field="rating">"#).skip(1).map(|cell| cell.split('<').next().unwrap()).collect();
+    assert_eq!(ratings, ["5", "4"], "{}", reviews.html);
+    let item = get(&app, &format!("/console/products/{anvil}"), "clerk").await;
+    let section = between(&item.html, r#"<section class="ss-section" data-resource="reviews">"#, "</section>");
+    assert!(!section.contains("data-ss-sort") && !section.contains("aria-sort"), "{section}");
+}
+
+#[tokio::test]
+async fn a_live_list_sorts_in_place() {
+    let app = app(&Store::new());
+    let list = get(&app, "/console/products", "clerk").await;
+    // A header's link sets the shard's query and the address bar.
+    let cell = header(&list.html, "sku");
+    assert!(cell.contains("data-topcoat-on:click=") && cell.contains("history.replaceState"), "{cell}");
+    // The shard renders the order its signal's query sets, under its
+    // identity, the headers following it.
+    let identity = between(&list.html, r#"::topcoat::shard::start("/console/_live/products", ""#, "\"");
+    let signal = between(&list.html, "::topcoat::signal({&quot;t&quot;:&quot;signal&quot;,&quot;id&quot;:&quot;", "&quot;");
+    let body = serde_json::json!({"args": ["", "/console/products"], "signals": {signal: "sort=-sku"}});
+    let mut request = http::Request::builder().method("POST").uri("/console/_live/products").header("x-caller", "clerk");
+    request = request.header(header::CONTENT_TYPE, "application/json").header("x-topcoat-identity", identity);
+    let response = app.handle(request.body(Body::from(body.to_string())).unwrap()).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let headers = response.headers().clone();
+    let html = String::from_utf8(to_bytes(response.into_body(), usize::MAX).await.unwrap().to_vec()).unwrap();
+    enter::check_page("/console/_live/products", &headers, &html);
+    assert_eq!(names(&html), ["Drum", "Crate"], "{html}");
+    assert!(header(&html, "sku").contains(r#"aria-sort="descending""#), "{html}");
+    assert!(!header(&html, "name").contains("aria-sort"), "{html}");
+    assert_eq!(sort_link(&html, "sku").as_deref(), Some("/console/products?sort=sku"), "{html}");
 }
 `
 

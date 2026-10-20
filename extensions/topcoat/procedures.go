@@ -25,8 +25,10 @@ type procedure struct {
 	Args       []procedureArg
 	// Paged marks a @paginated operation (D60): its arguments record takes
 	// the page asked for, `cursor` and `limit`, and its result is its page
-	// record.
+	// record. Sort is the record's field of a sorted one's sort (D60,
+	// amended), named as its argument, empty for an unsorted one.
 	Paged bool
+	Sort  string
 	// Output is the result's record type, "()" without a result, and
 	// ReadOutput the expression that reads it from the result's JSON
 	// (`json`).
@@ -128,6 +130,9 @@ func proceduresOf(records *recordBuilder, ops []declared, service string) ([]pro
 			}
 			p.Paged = true
 			p.Output, p.ReadOutput = page.Name, page.Name+"::from_wire(&json)"
+			if sort := endpoint.Page.Sort; sort != nil {
+				p.Sort = recordFieldName(registry.RustIdentifier(sort.Param, "sort"))
+			}
 		case endpoint.OutputRustType != "()":
 			s, err := records.fieldShape(op.TypeRef, false)
 			if err != nil {
@@ -155,10 +160,7 @@ func (b *recordBuilder) procedureArgs(endpoint registry.RustEndpoint, op *ir.Fie
 		if err != nil {
 			return err
 		}
-		recordField := field
-		if reservedFields[strings.TrimPrefix(field, "r#")] {
-			recordField = strings.TrimPrefix(field, "r#") + "_"
-		}
+		recordField := recordFieldName(field)
 		out = append(out, procedureArg{Field: field, RecordField: recordField, Name: name, Type: s.rustType, Optional: optional, Put: s.put})
 		return nil
 	}
@@ -179,6 +181,15 @@ func (b *recordBuilder) procedureArgs(endpoint registry.RustEndpoint, op *ir.Fie
 		}
 	}
 	return out, nil
+}
+
+// recordFieldName is a record's field for the Args field field: the same,
+// unless a record reserves the name, which takes a trailing underscore.
+func recordFieldName(field string) string {
+	if reservedFields[strings.TrimPrefix(field, "r#")] {
+		return strings.TrimPrefix(field, "r#") + "_"
+	}
+	return field
 }
 
 // operation is the service's operation endpoint serves: the one of its
