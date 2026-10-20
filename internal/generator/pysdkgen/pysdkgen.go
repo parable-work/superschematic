@@ -81,6 +81,10 @@ type NamespaceInfo struct {
 	// helper of the namespace class.
 	HasListOfListsArgs        bool
 	HasListOfListsModelOutput bool
+	// HasMapModelOutput gates the _coerce_map_response helper, for a map
+	// response of a model or a union (EndpointInfo.OutputIsMap): it reads
+	// each value at data[key], and data that is not a map raises SDKError.
+	HasMapModelOutput bool
 	// HasMapArgs gates the _validate_map_argument helper, for a map body
 	// argument (ScalarArg.IsMap).
 	HasMapArgs bool
@@ -148,6 +152,9 @@ type EndpointInfo struct {
 	// OutputIsArrayOfArrays marks a T[][] response; OutputIsArray is also
 	// set.
 	OutputIsArrayOfArrays bool
+	// OutputIsMap marks a map response (dict[str, T], or, with
+	// OutputIsArray, dict[str, list[T]]), coerced value by value.
+	OutputIsMap bool
 
 	// OutputIsUnion marks a response of a union (apigen.APIOutput.TypeUnions),
 	// OutputModelName, which the SDK reads as the member the union's alias
@@ -403,6 +410,9 @@ func Generate(apiOutput *apigen.APIOutput, packageName, typesPackage string, clo
 		if converted.OutputIsArrayOfArrays && converted.OutputModelName != "" {
 			namespace.HasListOfListsModelOutput = true
 		}
+		if converted.OutputIsMap && converted.OutputModelName != "" {
+			namespace.HasMapModelOutput = true
+		}
 		if converted.Paged {
 			namespace.HasPagedEndpoints = true
 			output.HasPagedEndpoints = true
@@ -626,6 +636,7 @@ func convertEndpoint(endpoint apigen.EndpointInfo, isScopedNS bool, scopeParamOr
 		MethodParams:         buildMethodParams(pathParams, endpoint.HasInput, endpoint.InputType, scalarArgs, queryParams, hasFileUpload, hasRequiredFileField, toPythonClassName(endpoint.Name)+"Files", hasEncryptedBody, endpoint.Filterable),
 
 		OutputIsArrayOfArrays: endpoint.OutputIsArrayOfArrays,
+		OutputIsMap:           endpoint.OutputIsMap,
 	}
 
 	if converted.OutputTypeHint == "" {
@@ -885,14 +896,27 @@ func outputIsJSONValue(endpoint apigen.EndpointInfo) bool {
 }
 
 // pythonOutputType is the Python type hint of the endpoint's response, in
-// its list levels. A JSON-valued scalar is the types package's alias of it
-// (pythonJSONType), as an argument of it is: the response is the JSON
+// its list levels, in a dict[str, ...] for a map, and with "| None" when the
+// response may be null. A JSON-valued scalar is the types package's alias
+// of it (pythonJSONType), as an argument of it is: the response is the JSON
 // value as decoded, which no model coerces.
 func pythonOutputType(endpoint apigen.EndpointInfo) string {
+	var hint string
 	if outputIsJSONValue(endpoint) {
-		return pythonListType(pythonJSONType(endpoint.OutputType), endpoint.OutputArrayDepth())
+		hint = pythonListType(pythonJSONType(endpoint.OutputType), endpoint.OutputArrayDepth())
+	} else {
+		hint = mapIRTypeToPythonTypeRef(endpoint.OutputType, endpoint.OutputArrayDepth())
 	}
-	return mapIRTypeToPythonTypeRef(endpoint.OutputType, endpoint.OutputArrayDepth())
+	if hint == "" {
+		return ""
+	}
+	if endpoint.OutputIsMap {
+		hint = "dict[str, " + hint + "]"
+	}
+	if endpoint.OutputNullable {
+		hint += " | None"
+	}
+	return hint
 }
 
 // mapIRTypeToPython maps a schema type name to a Python type by name

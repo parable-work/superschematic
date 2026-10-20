@@ -249,8 +249,8 @@ as `Authorization: Bearer <token>`. Each namespace is a camelCase field,
 and operation sets that share a namespace share it: `ProductQueries` and
 `ProductMutations` are both `sdk.product`.
 
-A response is read as its type, at each list level and in each item of a
-page. An object type or a union the schema declares goes through the
+A response is read as its type, at each list level, in each value of a
+map and in each item of a page. An object type or a union the schema declares goes through the
 types package's `parse<Name>FromJSON`, so a date-time field is a `Date`, a
 union is the member its parser picks, and a `@strictJSON` type is checked.
 A value its parser refuses rejects the call with the types package's
@@ -286,6 +286,12 @@ array is `type` at `name[key]`, and each value or element runs the types
 package's validator for `T` there, an object type's fields at
 `name[key].field`. Every failure is thrown at once in one
 `ValidationError`.
+
+A method resolves to the response's type: `T[]` for a list,
+`Record<string, T>` for a map (`Record<string, T[]>` for a map of lists),
+and `T | null` for a `Nullable<T>`, which resolves to `null` when the
+server answers null. An object type's or a union's values in a map are
+decoded one by one, as a list's elements are.
 
 ## Serve a generated API
 

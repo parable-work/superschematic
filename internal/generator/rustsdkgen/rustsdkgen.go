@@ -697,7 +697,7 @@ func convertEndpoint(ep apigen.EndpointInfo, isScopedNS bool, scopeParamName str
 		InputType:              qualifyType(ep.InputType),
 		InputSchemaName:        ep.InputType,
 		OutputType:             ep.OutputType,
-		OutputRustType:         outputType(ep.OutputType, ep.OutputArrayDepth()),
+		OutputRustType:         outputType(ep.OutputType, ep.OutputArrayDepth(), ep.OutputIsMap, ep.OutputNullable),
 		HasInput:               ep.HasInput,
 		RequiresAuth:           ep.RequiresAuth,
 		PathParams:             pathParams,
@@ -721,7 +721,7 @@ func convertEndpoint(ep apigen.EndpointInfo, isScopedNS bool, scopeParamName str
 	}
 	if ep.Page != nil {
 		converted.Page = ep.Page
-		converted.PageItemRustType = outputType(ep.OutputType, ep.OutputArrayDepth()-1)
+		converted.PageItemRustType = outputType(ep.OutputType, ep.OutputArrayDepth()-1, false, false)
 		converted.OutputRustType = "runtime::Page<" + converted.PageItemRustType + ">"
 		converted.AllMethodName = converted.MethodName + "_all"
 		converted.QueryDerivesDefault = !hasRequiredQueryParams
@@ -776,7 +776,9 @@ func listAllPagination(
 	if ep.Page != nil {
 		return false, 0
 	}
-	if !ep.OutputIsArray || ep.HasInput || ep.HasFileUpload || ep.Filterable || ep.Encrypted {
+	// It gathers the pages into one Vec, which a map or a list that may be
+	// null (an Option) is not.
+	if !ep.OutputIsArray || ep.OutputIsMap || ep.OutputNullable || ep.HasInput || ep.HasFileUpload || ep.Filterable || ep.Encrypted {
 		return false, 0
 	}
 	if len(pathParams) > 0 || len(pathQueryBindings) > 0 || len(scalarArgs) > 0 || hasRequiredQueryParams {
@@ -810,13 +812,21 @@ func listAllPagination(
 }
 
 // outputType is the Rust type of a response: the qualified output type in
-// arrayDepth Vec levels.
-func outputType(typeName string, arrayDepth int) string {
+// arrayDepth Vec levels, in a HashMap of String keys when isMap, as a map
+// argument is, and in an Option when nullable, None for null.
+func outputType(typeName string, arrayDepth int, isMap, nullable bool) string {
 	base := qualifyType(typeName)
 	if base == "" {
 		base = "serde_json::Value"
 	}
-	return rustListType(base, arrayDepth)
+	rustType := rustListType(base, arrayDepth)
+	if isMap {
+		rustType = "std::collections::HashMap<String, " + rustType + ">"
+	}
+	if nullable {
+		rustType = "Option<" + rustType + ">"
+	}
+	return rustType
 }
 
 // rustListType wraps a Rust element type in depth Vec levels: "T",

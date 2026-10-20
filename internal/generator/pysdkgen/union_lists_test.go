@@ -1,9 +1,9 @@
 package pysdkgen
 
 import (
+	"fmt"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"testing"
 
 	"github.com/parable-work/superschematic/internal/generator/apigen"
@@ -13,131 +13,58 @@ import (
 	ir "github.com/parable-work/superschematic/ir"
 )
 
-// loadUnionListsAPI loads union-lists-api (sdktest.LoadUnionListsService),
-// the union Shape as a list, a list of lists and one value, with
-// addUnionReadOperations' operations beside them.
+// loadUnionListsAPI loads union-lists-api (sdktest.LoadUnionListsService)
+// with sdktest.AddCircleOperations: the union Shape and the object Circle
+// as maps, maps of lists and responses that may be null, among others.
+// union_models_test.go's loadUnionModelsAPI adds a page, a model with union
+// fields and a discriminated union instead.
 func loadUnionListsAPI(t *testing.T) (*ir.Schema, *apigen.APIOutput) {
 	t.Helper()
 	schema, err := sdktest.LoadUnionListsService()
 	if err != nil {
 		t.Fatalf("load %s: %v", sdktest.UnionListsService, err)
 	}
-	addUnionReadOperations(schema)
-	apiOutput, err := apigen.Generate(schema, apigen.Options{
-		Provider:   sessionauth.Provider{},
-		SchemaName: sdktest.UnionListsService,
-		Clock:      nestedArraysClock,
-	})
+	if err := sdktest.AddCircleOperations(schema); err != nil {
+		t.Fatal(err)
+	}
+	apiOutput, err := apigen.Generate(schema, apigen.Options{Provider: sessionauth.Provider{}, SchemaName: sdktest.UnionListsService, Clock: nestedArraysClock})
 	if err != nil {
 		t.Fatalf("apigen.Generate: %v", err)
 	}
 	return schema, apiOutput
 }
 
-// addUnionReadOperations adds the other places a union reaches a Python
-// caller to union-lists-api's ShapeQueries: pageShapes, a page of Shape
-// (two to a page, at most five); getDrawing, a Drawing whose fields hold a
-// Shape and a list of them; and getMarker, one Marker, a union of Pin and
-// Flag, which every member's kind discriminates. The edit stays here, so
-// the Go, TypeScript and Rust goldens of the fixture do not change.
-func addUnionReadOperations(schema *ir.Schema) {
-	pin, flag := "pin", "flag"
-	marker := func(name string, kind *string) *ir.TypeDef {
-		return &ir.TypeDef{
-			Name: name,
-			Role: ir.RoleAPIView,
-			Fields: []*ir.FieldDef{
-				{Name: "kind", TypeRef: ir.TypeRef{Name: "string"}, Required: true, InternalMetadata: true, Default: kind},
-				{Name: "label", TypeRef: ir.TypeRef{Name: "string"}, Required: true},
-			},
-		}
-	}
-	schema.Types["Pin"] = marker("Pin", &pin)
-	schema.Types["Flag"] = marker("Flag", &flag)
-	schema.Unions["Marker"] = &ir.UnionDef{Name: "Marker", Types: []string{"Pin", "Flag"}}
-	schema.Types["Drawing"] = &ir.TypeDef{
-		Name: "Drawing",
-		Role: ir.RoleAPIView,
-		Fields: []*ir.FieldDef{
-			{Name: "title", TypeRef: ir.TypeRef{Name: "string"}, Required: true},
-			{Name: "shape", TypeRef: ir.TypeRef{Name: "Shape"}, Required: true},
-			{Name: "shapes", TypeRef: ir.TypeRef{Name: "Shape", IsArray: true}, Required: true},
-		},
-	}
-	byID := func(name, comment string, output ir.TypeRef, path string) *ir.FieldDef {
-		return &ir.FieldDef{
-			Name:       name,
-			Comment:    comment,
-			TypeRef:    output,
-			Required:   true,
-			Arguments:  []*ir.ArgumentDef{{Name: "id", TypeRef: ir.TypeRef{Name: "string"}, Required: true}},
-			HTTPMethod: "GET",
-			RestPath:   path,
-		}
-	}
-	for _, set := range schema.OperationSets {
-		if set.Name != "ShapeQueries" {
-			continue
-		}
-		set.Operations = append(set.Operations,
-			&ir.FieldDef{
-				Name:       "pageShapes",
-				Comment:    "Every shape, a page at a time.",
-				TypeRef:    ir.TypeRef{Name: "Shape", IsArray: true},
-				Required:   true,
-				HTTPMethod: "GET",
-				RestPath:   "shape-pages",
-				Page:       &ir.OperationPage{DefaultLimit: 2, MaxLimit: 5},
-			},
-			byID("getDrawing", "One drawing, by its id.", ir.TypeRef{Name: "Drawing"}, "drawings/{id}"),
-			byID("getMarker", "One marker, by its id.", ir.TypeRef{Name: "Marker"}, "markers/{id}"),
-		)
-	}
-}
-
-func generateUnionListsSDK(t *testing.T, apiOutput *apigen.APIOutput) *SDKOutput {
-	t.Helper()
+// TestUnionListsSDKOutputTypeHints: a map response is a dict of str keys
+// to the output at its list levels, and one that may be null adds | None.
+func TestUnionListsSDKOutputTypeHints(t *testing.T) {
+	_, apiOutput := loadUnionListsAPI(t)
 	sdkOutput, err := Generate(apiOutput, "", "", nestedArraysClock)
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
-	return sdkOutput
-}
-
-// TestUnionOutputsAreMarked: every operation that answers with a union, in
-// a list, a list of lists, a page or alone, is OutputIsUnion, and the
-// namespace lists those unions; a model whose fields hold the union is not
-// one, since its from_dict_non_strict reads them.
-func TestUnionOutputsAreMarked(t *testing.T) {
-	_, apiOutput := loadUnionListsAPI(t)
-	sdkOutput := generateUnionListsSDK(t, apiOutput)
-	if len(sdkOutput.Namespaces) != 1 {
-		t.Fatalf("namespaces = %+v", sdkOutput.Namespaces)
+	want := map[string]string{
+		"list_shapes":     "list[Shape]",
+		"shape_rows":      "list[list[Shape]]",
+		"get_shape":       "Shape",
+		"shapes_by_name":  "dict[str, Shape]",
+		"shape_groups":    "dict[str, list[Shape]]",
+		"find_shape":      "Shape | None",
+		"find_shapes":     "list[Shape] | None",
+		"circles_by_name": "dict[str, Circle]",
+		"circle_groups":   "dict[str, list[Circle]]",
+		"find_circle":     "Circle | None",
 	}
-	namespace := sdkOutput.Namespaces[0]
-	if want := []string{"Marker", "Shape"}; !slices.Equal(namespace.UnionOutputTypes, want) {
-		t.Errorf("UnionOutputTypes = %v, want %v", namespace.UnionOutputTypes, want)
-	}
-	want := map[string]struct {
-		union bool
-		model string
-	}{
-		"list_shapes": {true, "Shape"},
-		"shape_rows":  {true, "Shape"},
-		"get_shape":   {true, "Shape"},
-		"page_shapes": {true, "Shape"},
-		"get_marker":  {true, "Marker"},
-		"get_drawing": {false, "Drawing"},
-	}
-	for _, endpoint := range namespace.Endpoints {
-		w, ok := want[endpoint.MethodName]
-		if !ok {
-			t.Errorf("unexpected endpoint %s", endpoint.MethodName)
-			continue
-		}
-		delete(want, endpoint.MethodName)
-		if endpoint.OutputIsUnion != w.union || endpoint.OutputModelName != w.model {
-			t.Errorf("%s = (union %v, %q), want (%v, %q)", endpoint.MethodName, endpoint.OutputIsUnion, endpoint.OutputModelName, w.union, w.model)
+	for _, ns := range sdkOutput.Namespaces {
+		for _, ep := range ns.Endpoints {
+			w, ok := want[ep.MethodName]
+			if !ok {
+				t.Errorf("unexpected endpoint %s", ep.MethodName)
+				continue
+			}
+			delete(want, ep.MethodName)
+			if ep.OutputTypeHint != w {
+				t.Errorf("%s returns %s, want %s", ep.MethodName, ep.OutputTypeHint, w)
+			}
 		}
 	}
 	if len(want) > 0 {
@@ -145,27 +72,16 @@ func TestUnionOutputsAreMarked(t *testing.T) {
 	}
 }
 
-// TestWriteSDKGoldenUnionLists pins every file of the Python SDK for
-// union-lists-api with addUnionReadOperations' operations. Regenerate with:
-// go test ./internal/generator/pysdkgen -run TestWriteSDKGoldenUnionLists -update
-func TestWriteSDKGoldenUnionLists(t *testing.T) {
-	_, apiOutput := loadUnionListsAPI(t)
-	outDir := t.TempDir()
-	if err := WriteSDK(generateUnionListsSDK(t, apiOutput), outDir); err != nil {
-		t.Fatalf("WriteSDK: %v", err)
-	}
-	compareGoldenTree(t, outDir, filepath.Join("testdata", "golden", sdktest.UnionListsService))
-}
-
-// TestUnionListsSDKImportsAndRuns writes the Python types package and the
-// Python SDK of union-lists-api, byte-compiles both, and runs
-// unionListsProbe against a local server: a list, a list of lists, one
-// value and a page of the union come back as its member models, the
-// discriminated Marker as the member its kind names, and a model's union
-// fields as members; a value no member reads, or data that is not the list
-// it should be, raises SDKError at its path. The probe needs pydantic and
-// skips without it.
-func TestUnionListsSDKImportsAndRuns(t *testing.T) {
+// TestUnionListsSDKReadsMapsAndNulls writes the Python types package and
+// the Python SDK of union-lists-api with sdktest.AddCircleOperations,
+// byte-compiles both, and runs unionListsProbe against a local HTTP
+// server: a map and a map of lists keep their keys, a Circle in one is
+// coerced to the model value by value, and a Shape to its member model, as
+// a list's elements are, and a response that may be null is its model or
+// member, or None for null. A value that neither reads, or data that is not
+// the map it should be, raises SDKError at its key (data[b],
+// data[mixed][1]). The probe needs pydantic and skips without it.
+func TestUnionListsSDKReadsMapsAndNulls(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping compile check in -short mode")
 	}
@@ -174,7 +90,6 @@ func TestUnionListsSDKImportsAndRuns(t *testing.T) {
 		t.Skipf("no compatible python: %v", err)
 	}
 	schema, apiOutput := loadUnionListsAPI(t)
-
 	root := t.TempDir()
 	typesDir := filepath.Join(root, "types")
 	sdkDir := filepath.Join(root, "sdk")
@@ -185,14 +100,13 @@ func TestUnionListsSDKImportsAndRuns(t *testing.T) {
 	if err := pygen.WriteTypes(typesOutput, typesDir); err != nil {
 		t.Fatalf("pygen.WriteTypes: %v", err)
 	}
-	sdkOutput := generateUnionListsSDK(t, apiOutput)
+	sdkOutput, err := Generate(apiOutput, "", "", nestedArraysClock)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
 	if err := WriteSDK(sdkOutput, sdkDir); err != nil {
 		t.Fatalf("WriteSDK: %v", err)
 	}
-	if sdkOutput.TypesPackage != typesOutput.PythonModuleName {
-		t.Fatalf("SDK types package %q, types module %q", sdkOutput.TypesPackage, typesOutput.PythonModuleName)
-	}
-
 	compile := exec.Command(python, "-m", "compileall", "-q", root)
 	if out, err := compile.CombinedOutput(); err != nil {
 		t.Fatalf("generated packages do not byte-compile: %v\n%s", err, out)
@@ -200,52 +114,46 @@ func TestUnionListsSDKImportsAndRuns(t *testing.T) {
 	if err := exec.Command(python, "-c", "import pydantic").Run(); err != nil {
 		t.Skip("pydantic not available; skipping the Python SDK probe")
 	}
-	probe := exec.Command(python, "-c", unionListsProbe,
-		typesDir, sdkDir, sdkOutput.PackageName, sdkOutput.SDKClassName, typesOutput.PythonModuleName)
+	probe := exec.Command(python, "-c", fmt.Sprintf(unionListsProbe, typesDir, sdkDir, sdkOutput.PackageName, sdkOutput.SDKClassName, sdkOutput.TypesPackage))
 	if out, err := probe.CombinedOutput(); err != nil {
 		t.Fatalf("Python SDK probe failed: %v\n%s", err, out)
 	}
 }
 
-// unionListsProbe takes the types and SDK directories, the SDK package and
-// class and the types package as arguments. Its server answers each path
-// with the data in answers, in the success envelope.
+// unionListsProbe is formatted with the types and SDK directories, the SDK
+// package, the SDK class and the types package. A value of the union is
+// checked to be its member model, then compared as plain data.
 const unionListsProbe = `
 import json
 import sys
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from urllib.parse import parse_qs, urlsplit
 
-types_dir, sdk_dir, sdk_name, sdk_class, types_name = sys.argv[1:]
-sys.path.insert(0, types_dir)
-sys.path.insert(0, sdk_dir)
-sdk_package = __import__(sdk_name)
-types_package = __import__(types_name)
-ClientConfig = sdk_package.ClientConfig
-Page = sdk_package.Page
+sys.path.insert(0, %[1]q)
+sys.path.insert(0, %[2]q)
+sdk_package = __import__(%[3]q)
+SDK = getattr(sdk_package, %[4]q)
+types = __import__(%[5]q)
 SDKError = sdk_package.SDKError
-Circle = types_package.Circle
-Square = types_package.Square
-Drawing = types_package.Drawing
-Flag = types_package.Flag
 
 circle = {"radius": 1}
 square = {"side": 2}
-# Neither Circle nor Square reads a string or a triangle.
-triangle = {"sides": 3}
-answers = {}
-requests = []
+answers = {
+    "/api/shape-index": {"a": circle, "b": square},
+    "/api/shape-groups": {"round": [circle], "mixed": [square, circle], "none": []},
+    "/api/shape-search/c-1": circle,
+    "/api/shape-search/none": None,
+    "/api/shape-search": None,
+    "/api/circle-index": {"a": circle},
+    "/api/circle-groups": {"round": [circle, circle], "none": []},
+    "/api/circle-search/c-1": circle,
+    "/api/circle-search/none": None,
+}
 
 
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
-        url = urlsplit(self.path)
-        requests.append((url.path, parse_qs(url.query)))
-        data = answers[url.path]
-        if callable(data):
-            data = data(parse_qs(url.query))
-        body = json.dumps({"data": data, "meta": {"requestId": "req-1"}}).encode()
+        body = json.dumps({"data": answers[self.path], "meta": {"requestId": "req-1"}}).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
@@ -256,20 +164,14 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
 
-server = HTTPServer(("127.0.0.1", 0), Handler)
-threading.Thread(target=server.serve_forever, daemon=True).start()
-SDK = getattr(sdk_package, sdk_class)
-shape = SDK(ClientConfig(base_url="http://127.0.0.1:%d" % server.server_address[1])).shape
-
-
-def described(value):
+def plain(value):
+    if isinstance(value, dict):
+        return {key: plain(item) for key, item in value.items()}
     if isinstance(value, list):
-        return [described(item) for item in value]
-    if type(value) is Circle:
-        return ("circle", value.radius)
-    if type(value) is Square:
-        return ("square", value.side)
-    raise AssertionError(f"{value!r} is not a Circle or a Square")
+        return [plain(item) for item in value]
+    if hasattr(value, "model_dump"):
+        return value.model_dump()
+    return value
 
 
 def refused(call, message):
@@ -281,55 +183,65 @@ def refused(call, message):
         raise AssertionError(f"expected an SDKError with {message!r}")
 
 
-# A list, a list of lists and one value of the union are its members.
-answers["/api/shapes"] = [circle, square]
-answers["/api/shapes/rows"] = [[circle], [square, circle], []]
-answers["/api/shapes/s-1"] = square
-assert described(shape.list_shapes()) == [("circle", 1), ("square", 2)]
-assert described(shape.shape_rows()) == [[("circle", 1)], [("square", 2), ("circle", 1)], []]
-assert described(shape.get_shape("s-1")) == ("square", 2)
+server = HTTPServer(("127.0.0.1", 0), Handler)
+threading.Thread(target=server.serve_forever, daemon=True).start()
+sdk = SDK(sdk_package.ClientConfig(base_url="http://127.0.0.1:%%d" %% server.server_address[1]))
 
-# A page's items are members, and so is every item <method>_all yields.
-answers["/api/shape-pages"] = lambda query: (
-    {"items": [square], "next": None} if query.get("cursor") == ["Mg"] else {"items": [circle, square], "next": "Mg"}
-)
-page = shape.page_shapes(limit=2)
-assert type(page) is Page and page.next == "Mg", page
-assert described(page.items) == [("circle", 1), ("square", 2)]
-assert described(list(shape.page_shapes_all(limit=2))) == [("circle", 1), ("square", 2), ("square", 2)]
+# A map and a map of lists of the union keep their keys, and each value or
+# element is the member model the union picks.
+shapes = sdk.shape.shapes_by_name()
+assert isinstance(shapes, dict) and sorted(shapes) == ["a", "b"], shapes
+assert type(shapes["a"]) is types.Circle and type(shapes["b"]) is types.Square, shapes
+assert plain(shapes) == {"a": circle, "b": square}, shapes
+groups = sdk.shape.shape_groups()
+assert isinstance(groups, dict) and sorted(groups) == ["mixed", "none", "round"], groups
+assert [type(item) for item in groups["round"]] == [types.Circle], groups
+assert [type(item) for item in groups["mixed"]] == [types.Square, types.Circle], groups
+assert plain(groups) == {"round": [circle], "mixed": [square, circle], "none": []}, groups
 
-# A model's union fields are members.
-answers["/api/drawings/d-1"] = {"title": "two", "shape": circle, "shapes": [square, circle]}
-drawing = shape.get_drawing("d-1")
-assert type(drawing) is Drawing and drawing.title == "two", drawing
-assert described(drawing.shape) == ("circle", 1)
-assert described(drawing.shapes) == [("square", 2), ("circle", 1)]
+# A response of the union that may be null is its member, or None for null.
+found_shape = sdk.shape.find_shape("c-1")
+assert type(found_shape) is types.Circle and plain(found_shape) == circle, found_shape
+assert sdk.shape.find_shape("none") is None
+assert sdk.shape.find_shapes() is None
+answers["/api/shape-search"] = [square, circle]
+found_shapes = sdk.shape.find_shapes()
+assert [type(item) for item in found_shapes] == [types.Square, types.Circle], found_shapes
 
-# A discriminated union is the member its kind names.
-answers["/api/markers/m-1"] = {"kind": "flag", "label": "finish"}
-marker = shape.get_marker("m-1")
-assert type(marker) is Flag and marker.kind == "flag" and marker.label == "finish", marker
+# A Circle in a map or a map of lists is coerced to the model value by value.
+circles = sdk.shape.circles_by_name()
+assert isinstance(circles, dict) and isinstance(circles["a"], types.Circle), circles
+assert circles["a"].radius == 1, circles
+circle_groups = sdk.shape.circle_groups()
+assert isinstance(circle_groups, dict) and sorted(circle_groups) == ["none", "round"], circle_groups
+assert all(isinstance(item, types.Circle) for item in circle_groups["round"]), circle_groups
+assert len(circle_groups["round"]) == 2 and circle_groups["none"] == [], circle_groups
+found = sdk.shape.find_circle("c-1")
+assert isinstance(found, types.Circle) and found.radius == 1, found
+assert sdk.shape.find_circle("none") is None
 
-# A value no member reads raises SDKError at its path.
-answers["/api/shapes"] = [circle, "triangle"]
-refused(shape.list_shapes, "response data[1] is not a valid Shape")
-answers["/api/shapes/rows"] = [[circle], [square, triangle]]
-refused(shape.shape_rows, "response data[1][1] is not a valid Shape")
-answers["/api/shapes/s-1"] = triangle
-refused(lambda: shape.get_shape("s-1"), "response data is not a valid Shape")
-answers["/api/shape-pages"] = {"items": [circle, triangle], "next": None}
-refused(shape.page_shapes, "response data.items[1] is not a valid Shape")
-answers["/api/markers/m-1"] = {"kind": "star", "label": "finish"}
-refused(lambda: shape.get_marker("m-1"), "response data is not a valid Marker")
-answers["/api/drawings/d-1"] = {"title": "two", "shape": circle, "shapes": [triangle]}
-refused(lambda: shape.get_drawing("d-1"), "response data is not a valid Drawing")
+# A map value that no member or model reads raises SDKError at its key, as
+# a list's element does at its index, and so does one that may be null.
+answers["/api/shape-index"] = {"a": circle, "b": "triangle"}
+refused(sdk.shape.shapes_by_name, "response data[b] is not a valid Shape")
+answers["/api/shape-groups"] = {"round": [circle], "mixed": [square, {"sides": 3}]}
+refused(sdk.shape.shape_groups, "response data[mixed][1] is not a valid Shape")
+answers["/api/circle-index"] = {"a": {"radius": "wide"}}
+refused(sdk.shape.circles_by_name, "response data[a] is not a valid Circle")
+answers["/api/shape-search/c-1"] = {"sides": 3}
+refused(lambda: sdk.shape.find_shape("c-1"), "response data is not a valid Shape")
+answers["/api/circle-search/c-1"] = {"radius": "wide"}
+refused(lambda: sdk.shape.find_circle("c-1"), "response data is not a valid Circle")
 
-# Data that is not the list it should be raises SDKError too.
-answers["/api/shapes"] = circle
-refused(shape.list_shapes, "expected response data to be a list of Shape")
-answers["/api/shapes/rows"] = [circle]
-refused(shape.shape_rows, "expected response data[0] to be a list of Shape")
-answers["/api/shapes/rows"] = circle
-refused(shape.shape_rows, "expected response data to be a list of lists of Shape")
+# Data that is not the map, or a map value that is not the list, it should
+# be raises SDKError too.
+answers["/api/shape-index"] = [circle, square]
+refused(sdk.shape.shapes_by_name, "expected response data to be a map of Shape")
+answers["/api/shape-groups"] = [[circle]]
+refused(sdk.shape.shape_groups, "expected response data to be a map of lists of Shape")
+answers["/api/shape-groups"] = {"round": circle}
+refused(sdk.shape.shape_groups, "expected response data[round] to be a list of Shape")
+answers["/api/circle-groups"] = {"round": [circle, "wide"]}
+refused(sdk.shape.circle_groups, "response data[round][1] is not a valid Circle")
 server.shutdown()
 `
