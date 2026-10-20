@@ -265,6 +265,13 @@ jobs:
             --command "CREATE EXTENSION IF NOT EXISTS citext WITH SCHEMA public" \
             --command "CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public"
 
+      - name: Install the runtime's pinned workerd
+        # The cloudflare extension runs the script of a site's Worker, and
+        # servergen a job's bundled scheduled.ts, under the workerd the
+        # HTTP runtime's harness pins (D64).
+        working-directory: runtime/http/typescript/test/workerd
+        run: bun install --frozen-lockfile
+
       - name: Install the pulumi CLI
         # extensions/pulumi drives it, and its integration test runs it
         # against a file:// backend with the random provider, which needs no

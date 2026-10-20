@@ -70,6 +70,11 @@ func TestRenderGoldens(t *testing.T) {
 		// (D64).
 		{name: "cloudflare-storefront-staging", env: storefrontEnvironment,
 			versions: map[string]string{cloudflare.Package: cloudflare.ProviderVersion}},
+		// A server, a job under its Cron Trigger and a site on static
+		// assets, the site's files and the bundles pinned as a deploy pins
+		// them (D64).
+		{name: "cloudflare-web-staging", env: webEnvironment,
+			versions: map[string]string{cloudflare.Package: cloudflare.ProviderVersion}},
 		{name: "demo-shared", env: func(*testing.T) *ir.ResolvedEnvironment { return sharedEnvironment() },
 			versions: map[string]string{"random": randomVersion}},
 		{name: "demo-preview", env: func(*testing.T) *ir.ResolvedEnvironment { return previewEnvironment(8, true) },

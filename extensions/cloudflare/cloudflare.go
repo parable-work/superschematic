@@ -127,6 +127,12 @@ func (e Extension) Register(r *registry.Registry) error {
 		}
 		platforms[spec.Kind] = spec.Name
 	}
+	for _, spec := range connectors() {
+		spec.Extension = Name
+		if err := r.RegisterConnector(spec); err != nil {
+			return err
+		}
+	}
 	return r.RegisterTarget(registry.TargetSpec{
 		Name:          Target,
 		Extension:     Name,
@@ -143,16 +149,27 @@ func (e Extension) Register(r *registry.Registry) error {
 		Secrets:   secretStore{ext: e},
 		Bootstrap: bootstrapper{ext: e},
 		Bundles:   bundleStore{ext: e},
+		Sites:     siteStore{ext: e},
 		CI:        ciIdentities{},
 	})
 }
 
 // platforms are the target's platforms, one per deployable kind it
 // places; the target names each for its kind. Each gets the extension
-// and the provider when it registers: Workers for servers (workers.go);
-// Cron, D1, R2 and sites come next (section 18.2).
+// and the provider when it registers: Workers for servers (workers.go),
+// Cron for jobs (cron.go) and sites (sites.go); D1 and R2 come next
+// (section 18.2).
 func (e Extension) platforms() []registry.PlatformSpec {
-	return []registry.PlatformSpec{workersPlatform()}
+	return []registry.PlatformSpec{workersPlatform(), cronPlatform(), sitesPlatform()}
+}
+
+// connectors are the target's connectors, each between two of its
+// platforms; each gets the extension when it registers: a site's edge to
+// a server on Workers (sites.go).
+func connectors() []registry.ConnectorSpec {
+	return []registry.ConnectorSpec{
+		{Name: SiteConnector, Edge: ir.EdgeSite, From: Sites, To: Workers, Connect: connectSite},
+	}
 }
 
 // getenv reads the shell's environment.
