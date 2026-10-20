@@ -502,7 +502,7 @@ one line each.
 | `<db>_database` | `stackconfig::Database` | the API's database, its `authDb` or its one DB dependency |
 | `<api>_service` | `stackconfig::Service` | each API it `calls` |
 | `<bucket>_bucket` | `stackconfig::Bucket` | each bucket it lists in `buckets` (D54) |
-| `<api>_callers` | `ServiceAuthConfig` | an API with `@requireService` or `@allowService` |
+| `<api>_callers` | `ServiceAuthConfig` | an API with `@requireService` or `@allowService`; `values-schema.json` lists its variables, which a deployment outside a stack sets |
 | `<api>_cors` | `stackconfig::Cors` | every API: the origins of the sites that call it, none where no site does |
 | `<api>_identity` | `identity::Config` | an API over the user model, parsed from `<API>_IDENTITY`'s JSON, the runtime's defaults when it is unset |
 

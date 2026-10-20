@@ -285,7 +285,10 @@ templates, `{SERVICE}_DATABASE`, `{SERVICE}_SERVICE` and
 loader refuses an `@envVars` field named after a derived field, or after
 one plus an underscore. `values-schema.json` lists each derived field
 under `x-superschematic.envVars` with `derived`, `service` and
-`variables`. The TypeScript API package's `loadEnvConfig()` and the
+`variables`, and the callers field of an API with `@requireService` or
+`@allowService` with `callersOf`, `variables` and `variablePatterns`,
+whose patterns are its `patternProperties`: a deployment outside a stack
+sets it ([Service callers](/superschematic/guides/auth-and-permissions/#service-callers)). The TypeScript API package's `loadEnvConfig()` and the
 Rust API crate's `config::load_env_config()` read them too, through the
 HTTP runtimes' readers.
 

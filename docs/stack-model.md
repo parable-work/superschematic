@@ -3241,6 +3241,22 @@ object's index; and a whole number is its decimal
 that is no member, and the generated entrypoint builds the API's
 `serviceauth.Verifier` from it (section 8.1).
 
+Outside a stack, a deployment sets the field itself, so the API's
+`values-schema.json`, in every server language, lists it: `<API>_ISSUERS`
+as a property, each issuer's, key's and caller's member as a pattern
+property under its index (`^SHOP_API_CALLERS_ISSUERS_(0|[1-9][0-9]*)_AUDIENCE$`),
+each with the shape the readers take (a count with an optional sign, a
+comma-separated list whose entries are not blank, the algorithms RS256,
+ES256 and EdDSA, a member that must not be empty), and an
+`x-superschematic.envVars` entry with `callersOf`, the API, `variables`
+and `variablePatterns`. `additionalProperties` stays false, so a values
+file that sets a member the readers do not know fails the schema as it
+fails the server. A schema cannot say which indexes a count admits; the
+readers refuse a member past its list's length. The API's other fields a
+server reads beside its settings and edges, the CORS field and the
+identity config field (D55, D50), are optional, with safe defaults when
+unset, and are not listed yet.
+
 Every Cloud Run service lists its full resource name as a custom
 audience, and a caller asks the metadata server for a token for it. The
 service's `run.app` URL is an output of the service, which its own
@@ -3717,6 +3733,11 @@ The callers field has its own tests:
 - `stackconfig.LoadCallers` reads the variables into a verifier config
   that admits a token signed with the edge's key, and servergen's golden
   and compiled tests cover `serviceauth.go`;
+- envgen's `TestTheCallersFieldsSchemaIsWhatTheReadersRead` holds
+  `values-schema.json`'s listing of the field to what the readers take in
+  `stackconfig_parity.json` and to what `ir.DerivedVariables` writes, and
+  servergen's `TestAServiceClauseAdmitsItsCallers` starts shop-api from a
+  values file written by hand and checked against it, outside a stack;
 - each language's servergen serve test runs a server of two APIs, one
   calling the other's operation that only a service may call, at the
   loopback URL a connector derives, through a proxy that keeps the token:
@@ -3754,10 +3775,10 @@ The callers field has its own tests:
 - A call between two APIs one server serves, settled since: it carries a
   token the server signs with a loopback key only its process holds, which
   the server's own authenticator accepts as the server (section 9.2).
-- The callers field of a server outside a stack. `values-schema.json`
-  does not list it, since its variables depend on the environment's
-  edges, so a deployment that sets its own config writes the variables by
-  hand.
+- The callers field of a server outside a stack, settled since:
+  `values-schema.json` lists its variables and their shapes (section 9.2).
+  The CORS and identity config fields, which a server reads too but
+  which default safely when unset, are not listed; listing them is open.
 
 ## 10. Validation and simulation
 

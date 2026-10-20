@@ -338,8 +338,15 @@ authenticator. On the `local` target, each caller signs with an Ed25519
 key pair `stack dev` makes for its edge, so `shop-stock`'s server admits
 `shop-orders`' and refuses a shopper's session sent without it, 401
 `service_unauthorized`, as `TestStackDevRunsTheShop` checks. Outside a
-stack, you supply the config yourself. A deployment whose credential the
-config cannot express passes its own authenticator in the same place.
+stack, you set the callers field yourself, one variable per member as
+the stack would: `api/<service>/values-schema.json` lists its variables,
+`SHOP_STOCK_CALLERS_ISSUERS` and each issuer's members under its index
+(`SHOP_STOCK_CALLERS_ISSUERS_0_AUDIENCE`, `_KEYS_0_PEM`,
+`_CALLERS_0_SERVES`), with the shape each takes, so a values file can be
+checked against it before the server refuses it. With
+`SHOP_STOCK_CALLERS_ISSUERS=0` the server starts and refuses every
+service credential. A deployment whose credential the config cannot
+express passes its own authenticator in the same place.
 
 A call between two APIs one server serves stays on the server's own
 loopback address, and no connector gives it a credential. So the server

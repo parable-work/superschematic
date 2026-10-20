@@ -305,8 +305,10 @@ and `WorkersConstructor`, the type of its `createWorkers`.
 the HTTP runtime's `loadDatabase`, `loadService` and `loadCallers`: a
 `Database` per database, a `Service` per `calls` entry and, for an API
 with `@requireService` or `@allowService`, its callers field
-(`SHOP_API_CALLERS`), what its `serviceAuthenticator` checks. It throws a
-`StackConfigError` that names every variable missing or invalid.
+(`SHOP_API_CALLERS`), what its `serviceAuthenticator` checks, whose
+variables `values-schema.json` lists for a deployment outside a stack. It
+throws a `StackConfigError` that names every variable missing or
+invalid.
 
 The implementation is a package of its own at the naming file's
 [`[implementation_paths]`](/superschematic/reference/naming/#implementation_pathstypescript)

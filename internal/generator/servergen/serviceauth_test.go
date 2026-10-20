@@ -3,8 +3,11 @@ package servergen_test
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"io"
 	"net/http"
@@ -14,6 +17,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -158,6 +162,11 @@ func callersVariables(t *testing.T, public ed25519.PublicKey, kid string) []stri
 // end-user step, whose scaffolded auth middleware refuses it. With no
 // issuers, as where no server calls shop-api, every service credential is
 // refused.
+//
+// Outside a stack, a values file a deployment writes by hand, checked
+// against shop-api's values-schema.json, sets the field: its issuer with
+// an Ed25519 key's PEM is admitted, and a variable the schema does not
+// declare is refused by the schema and stops the server.
 func TestAServiceClauseAdmitsItsCallers(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping compile check in -short mode")
@@ -203,6 +212,126 @@ func TestAServiceClauseAdmitsItsCallers(t *testing.T) {
 	nobody := start(t, binary, ir.CallersField("shop-api")+"_ISSUERS=0", database)
 	nobody.sendWith(t, http.MethodPut, rename, body, map[string]string{"Service-Authorization": "Bearer " + signEdgeToken(t, private, "storefront-key", "Storefront", "shop-api")}, http.StatusUnauthorized, "service_unauthorized")
 	nobody.stop(t)
+
+	schema := readValuesSchema(t, filepath.Join(repoRoot, "schemas", "dist", "api", "shop-api", "values-schema.json"))
+	spki, err := x509.MarshalPKIXPublicKey(public)
+	if err != nil {
+		t.Fatal(err)
+	}
+	values := map[string]string{
+		"SHOP_API_CALLERS_ISSUERS":                        "1",
+		"SHOP_API_CALLERS_ISSUERS_0_ISSUER":               "https://storefront.example",
+		"SHOP_API_CALLERS_ISSUERS_0_AUDIENCE":             "https://shop-api.example",
+		"SHOP_API_CALLERS_ISSUERS_0_ALGORITHMS":           "EdDSA",
+		"SHOP_API_CALLERS_ISSUERS_0_KEYS":                 "1",
+		"SHOP_API_CALLERS_ISSUERS_0_KEYS_0_PEM":           string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: spki})),
+		"SHOP_API_CALLERS_ISSUERS_0_MAX_LIFETIME_SECONDS": "300",
+		"SHOP_API_CALLERS_ISSUERS_0_CALLERS":              "1",
+		"SHOP_API_CALLERS_ISSUERS_0_CALLERS_0_SUBJECT":    "storefront",
+		"SHOP_API_CALLERS_ISSUERS_0_CALLERS_0_DEPLOYABLE": "Storefront",
+		"SHOP_API_CALLERS_ISSUERS_0_CALLERS_0_SERVES":     "shop-orders, shop-reviews",
+		"SHOP_DB_DATABASE_URL":                            strings.TrimPrefix(database, "SHOP_DB_DATABASE_URL="),
+	}
+	if problems := schema.check(values); len(problems) > 0 {
+		t.Fatalf("shop-api's values-schema.json refuses the values file:\n%s", strings.Join(problems, "\n"))
+	}
+	var env []string
+	for name, value := range values {
+		env = append(env, name+"="+value)
+	}
+	kid := ed25519Thumbprint(public)
+	token := func(issuer, subject, audience string) string {
+		return signToken(t, private, kid, issuer, subject, audience, time.Now())
+	}
+	outside := start(t, binary, env...)
+	outside.sendWith(t, http.MethodPut, rename, body, map[string]string{"Service-Authorization": "Bearer " + token("https://storefront.example", "storefront", "https://shop-api.example")}, http.StatusNotImplemented, "Product.RenameProduct")
+	outside.sendWith(t, http.MethodPut, rename, body, map[string]string{"Service-Authorization": "Bearer " + token("https://storefront.example", "storefront", "shop-api")}, http.StatusUnauthorized, "service_unauthorized")
+	outside.stop(t)
+
+	misspelt := "SHOP_API_CALLERS_ISSUERS_0_AUDIENCES"
+	if problems := schema.check(map[string]string{misspelt: "https://shop-api.example"}); len(problems) == 0 {
+		t.Errorf("shop-api's values-schema.json declares %s", misspelt)
+	}
+	cmd = exec.Command(binary)
+	cmd.Env = append(append(os.Environ(), env...), misspelt+"=https://shop-api.example", "PORT="+freePort(t))
+	if out, err := cmd.CombinedOutput(); err == nil || !strings.Contains(string(out), misspelt+" is no member of the callers field SHOP_API_CALLERS") {
+		t.Errorf("shop-api with %s = %v, want it to stop naming the variable:\n%s", misspelt, err, out)
+	}
+}
+
+// valuesSchema is the part of a values-schema.json a values file is
+// checked against.
+type valuesSchema struct {
+	AdditionalProperties bool                   `json:"additionalProperties"`
+	Properties           map[string]valuesShape `json:"properties"`
+	PatternProperties    map[string]valuesShape `json:"patternProperties"`
+	XSuperschematic      struct {
+		EnvVars []struct {
+			Name      string `json:"name"`
+			CallersOf string `json:"callersOf"`
+		} `json:"envVars"`
+	} `json:"x-superschematic"`
+}
+
+type valuesShape struct {
+	Type      string `json:"type"`
+	Pattern   string `json:"pattern"`
+	MinLength int    `json:"minLength"`
+}
+
+// readValuesSchema reads the values-schema.json at path, which must list
+// the callers field of shop-api.
+func readValuesSchema(t *testing.T, path string) valuesSchema {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var schema valuesSchema
+	if err := json.Unmarshal(data, &schema); err != nil {
+		t.Fatal(err)
+	}
+	listed := false
+	for _, v := range schema.XSuperschematic.EnvVars {
+		listed = listed || (v.Name == ir.CallersField("shop-api") && v.CallersOf == "shop-api")
+	}
+	if !listed {
+		t.Fatalf("%s lists no callers field of shop-api:\n%s", path, data)
+	}
+	return schema
+}
+
+// check checks a values file against the schema as JSON Schema reads its
+// properties and patternProperties, and returns the problems.
+func (s valuesSchema) check(values map[string]string) []string {
+	var problems []string
+	for name, value := range values {
+		var shapes []valuesShape
+		if shape, ok := s.Properties[name]; ok {
+			shapes = append(shapes, shape)
+		}
+		for pattern, shape := range s.PatternProperties {
+			if regexp.MustCompile(pattern).MatchString(name) {
+				shapes = append(shapes, shape)
+			}
+		}
+		if len(shapes) == 0 && !s.AdditionalProperties {
+			problems = append(problems, name+" is not declared")
+		}
+		for _, shape := range shapes {
+			if shape.Type != "string" || len(value) < shape.MinLength || (shape.Pattern != "" && !regexp.MustCompile(shape.Pattern).MatchString(value)) {
+				problems = append(problems, fmt.Sprintf("%s=%q is not %+v", name, value, shape))
+			}
+		}
+	}
+	return problems
+}
+
+// ed25519Thumbprint is the RFC 7638 thumbprint of an Ed25519 public key:
+// the kid a callers field gives a key's PEM (D63).
+func ed25519Thumbprint(public ed25519.PublicKey) string {
+	sum := sha256.Sum256([]byte(`{"crv":"Ed25519","kty":"OKP","x":"` + base64.RawURLEncoding.EncodeToString(public) + `"}`))
+	return base64.RawURLEncoding.EncodeToString(sum[:])
 }
 
 // signToken is a token like signEdgeToken's, with its issuer, subject

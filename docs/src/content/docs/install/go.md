@@ -309,7 +309,9 @@ routes, and a schema with an `@requireService` or `@allowService` clause
 adds `Config.ServiceAuthenticator`, a `serviceauth.Authenticator` from the
 HTTP runtime, which `Config.Validate` requires. A handler reads the
 calling service with `serviceauth.CallerFromContext(ctx)`. In a stack,
-`main.go` builds it from the API's callers field. A server that serves an
+`main.go` builds it from the API's callers field, whose variables the
+API's `values-schema.json` lists for a deployment outside a stack, even
+for an API with no other configuration. A server that serves an
 API with a clause and calls it from another API it serves also generates
 a loopback key at start, `serviceauth.NewLoopback`, whose token its client
 of that API sends to the server's own loopback URL, and which the
