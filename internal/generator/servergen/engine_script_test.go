@@ -984,6 +984,8 @@ type scriptSymbols struct {
 	values   map[string]map[string]string
 }
 
+// symbol is the symbol of kind that stands for value: the one it took at
+// its first appearance, or the next of its kind.
 func (s *scriptSymbols) symbol(kind, value string) string {
 	if s.values == nil {
 		s.values = map[string]map[string]string{}
