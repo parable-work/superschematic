@@ -7004,9 +7004,24 @@ ir's `TestSortValues`, `TestParseSort`, `TestSortArgument` and
 verify's `TestSortsNeedAPagedList`, `TestASortByAVirtualFieldWarns` and
 `TestASortOfADependencysItem`, the loader's
 `TestSortsAreCheckedInTheDataForms`, and the writer's
-`TestTSWriterEmitsPaginated`. The runtimes, the servers, the documents,
-the SDKs, the ORM and acme are designed and not yet built. The tests are
-these:
+`TestTSWriterEmitsPaginated`. The runtimes and the servers are built.
+Go's `paging`, TypeScript's `page.ts` and Rust's `page` module read the
+sort with the page, bind and unbind a cursor by its bytes, and run the new
+vectors: Go's `TestParityVectors` and `TestBindAndUnbind`, TypeScript's
+`page-parity.test.ts`, and Rust's `tests/page_parity.rs` with `page.rs`'s
+`check_refuses_a_sort_the_spec_does_not_offer` and
+`an_in_process_call_unbinds_and_binds_as_the_router_does`. A cursor whose
+envelope is broken is D60's refused cursor, whatever sort it names; only a
+whole envelope of another sort is the sort's 400. The Go, TypeScript and
+Rust servers hand the sort to the implementation in its page alone, bind
+its next, and give the OpenAPI parameter its `enum`, `default` and
+`x-superschematic-sort`. Their tests are apigen's `TestPagedEndpoints`,
+`TestPagedOpenAPIGolden` and `TestPagedRoutesServePages`
+(`TestListItemsSortsThePage`); tsrestgen's `TestGeneratePagedShape` and
+`TestGeneratedPagedRouter`; and rustrestgen's
+`TestPagedListServesAPageAtATime`, over HTTP and through an in-process
+call, and `TestTheRustServerRendersPages`. The documents, the SDKs, the
+ORM and acme are designed and not yet built. The tests are these:
 
 - ir's `TestOperationPage_KeyPositionOmissionAndRoundTrip` (with `defaultSort`), `TestSortValue` and `TestParseSort`; the reader's `sort_by_test.go`; and `fixture-paged-api`, whose `listItems` gains `sort: SortBy<ItemView, ["name", "sku"]>` with `defaultSort: "name"`. Its TypeScript, JSON and YAML forms load to one IR and round-trip through `format`.
 - verify's `TestSortsNeedAPagedList`, one case for each message, and `TestASortByAVirtualFieldWarns`.

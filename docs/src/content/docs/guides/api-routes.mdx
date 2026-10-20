@@ -211,6 +211,46 @@ crate's call, procedure and argument form take the page too, and its
 console links a list's next and first pages
 ([A paged list and a search box](/superschematic/guides/topcoat/#a-paged-list-and-a-search-box)).
 
+A paged list sorts by an argument declared `SortBy<Item, Fields>` (D60,
+amended), with `@paginated`'s `defaultSort` the order of a request that
+sends none:
+
+```ts
+@rest(HttpMethod.GET, "items")
+@paginated({ defaultLimit: 20, maxLimit: 100, defaultSort: "name" })
+listItems(
+  inStock: QueryParam<Nullable<boolean>>,
+  sort: SortBy<ItemView, ["name", "sku"]>
+): ItemView[] {
+  throw new Error("schema declaration only");
+}
+```
+
+The argument is an optional query parameter. Its value is a field that
+`Fields` names, ascending, or the field after a `-`, descending: `name`,
+`-name`, `sku` and `-sku` here. Ties break by `id` in the same direction.
+An absent or empty sort is `defaultSort`, and the first value counts. Any
+other value is the 400 an enum parameter gets, `Invalid query parameter
+sort: expected one of name, -name, sku, -sku`. The router refuses a cursor's
+text first, then the limit, then the sort, then a cursor of another sort.
+
+The implementation takes the sort only in its page request, its default
+filled in: Go's `page.Sort` (`paging.Sort{Field, Desc}`), TypeScript's
+`args.page.sort` (`{field, desc}`), and Rust's `args.page.sort`
+(`Some(Sort)`). Its keys are its own, as an unsorted list's are. The
+router binds the page's `next` to the sort, as the unpadded base64url of
+exactly `{"sort":"-name","key":K}`, `K` the key's JSON, and unbinds a
+cursor sent back before the implementation reads it. A cursor returned
+under one sort and sent with another is the 400 `cursor is not one this
+sort returned`, at `cursor`. Go's `paging.Read` unbinds, and `paging.Bind`
+binds; TypeScript's `readPage` and `bindPage` do the same. Rust's router
+reads the request with `PageSpec::query`, unbinds it with
+`PageSpec::unbind` and binds the next with `Page::bind`, and an in-process
+call does the same, so a cursor from the JSON API pages an in-process
+call and back. The OpenAPI parameter is a string with the values as its
+`enum`, `defaultSort` as its `default`, and `x-superschematic-sort: true`.
+Each SDK sends the sort as the optional query argument it is.
+
 `shop-orders` pages its orders, a product's reviews and its catalog. Its Go
 implementation reads a page of orders in two steps: the keys of up to
 `limit + 1` of the caller's orders (every customer's for staff) after the
