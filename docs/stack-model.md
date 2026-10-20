@@ -4441,8 +4441,8 @@ The GitHub workflow:
 - A `deploy` or `preview` job of an environment with a site sets up Bun,
   at `tools.env`'s release, even in a project whose schemas root installs
   with npm, and installs the output root's workspace from its lockfile
-  after the build, since `stack deploy` builds the site on the runner
-  after a frozen install. A `plan` job does neither: `stack plan` builds
+  after the build and before it signs in, since `stack deploy` builds
+  the site on the runner after a frozen install. A `plan` job does neither: `stack plan` builds
   no site. Jobs, workers and buckets need nothing more of the workflow:
   the deploy builds a job's or a worker's image through the target's
   builder, as a server's, and a bucket, a job's schedule and a worker
@@ -4463,7 +4463,21 @@ project's number, `projectNumber` (section 7.1), which bootstrap records.
 An environment without it has no cloud jobs, and the workflow names the
 bootstrap to run. `google-github-actions/auth` signs in, and its
 credentials file gives superschematic and Pulumi application default
-credentials. The cloud jobs install the provisioner's tools: the Pulumi
+credentials. The action exports the file's path and the project to every
+later step of the job, so a cloud job signs in last, right before its
+stack commands: the schemas root's install, the build, the Rust setup and
+the frozen install of the output root's workspace, which run the pull
+request's lockfiles and their packages' scripts, run with no credentials,
+as they do in `check`, which shows none of them needs Google Cloud (D47,
+amended). Two exposures remain, and the job is the boundary for both.
+The job's `id-token: write` lets any of its steps ask GitHub for an
+identity token, which the pool exchanges for the account's, since the
+pool admits any workflow of the repository as either account. And the
+stack commands run the project's TypeScript with the credentials: its
+sidecar documents, the workspace's install and each site's build. A
+fork's pull request has no cloud job, and a pull request from the
+repository runs the workflow it carries, which its author could change
+anyway. The cloud jobs install the provisioner's tools: the Pulumi
 provisioner declares the `pulumi` CLI at the release of the Pulumi SDK it
 is built with. A job that installs Bun installs `tools.env`'s release, the
 one a TypeScript server's image runs on, and a job that installs an npm

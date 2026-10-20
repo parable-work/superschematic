@@ -1579,6 +1579,13 @@ Identity Federation, through the pool `stack bootstrap` creates for the
 GitHub repository of the git remote, as `<stack>-planner` or
 `<stack>-deployer`, with `google-github-actions/auth`, whose credentials
 file gives superschematic and Pulumi application default credentials.
+A job signs in last, right before its `stack` command: its installs and
+builds, which run the pull request's lockfiles and their packages'
+install scripts, run before any credential is on the runner, as they do
+in `check`. The job can still ask GitHub for an identity token from any
+step, and the `stack` command runs your TypeScript (its documents and
+each site's build) with the credentials, so treat a pull request from
+the repository as able to act as the job's account.
 The provider's name holds the project's number, `projectNumber` in the
 environment's `gcp` values, which bootstrap records and you may enter by
 hand. An environment that extends another inherits it. Until it is set,

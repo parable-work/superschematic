@@ -177,11 +177,6 @@ jobs:
         uses: pulumi/actions@8e5e406f4007fca908480587cb9893c07090f58d # v7.0.0
         with:
           pulumi-version: "3.259.0"
-      - name: Sign in to Google Cloud as deployer
-        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
-        with:
-          workload_identity_provider: projects/123456789012/locations/global/workloadIdentityPools/shop-github/providers/github
-          service_account: shop-deployer@acme-staging.iam.gserviceaccount.com
       - name: Build the services
         if: github.event.action != 'closed'
         run: superschematic build-all schemas/services
@@ -195,6 +190,11 @@ jobs:
           bun install --frozen-lockfile || {
             echo "::error file=schemas/dist/bun.lock::schemas/dist/bun.lock does not match the packages the build wrote; build every service, run bun install in schemas/dist and commit schemas/dist/bun.lock" && exit 1
           }
+      - name: Sign in to Google Cloud as deployer
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: projects/123456789012/locations/global/workloadIdentityPools/shop-github/providers/github
+          service_account: shop-deployer@acme-staging.iam.gserviceaccount.com
       - name: Deploy Preview for the pull request
         if: github.event.action != 'closed'
         run: superschematic stack deploy Preview --stack schemas/services/Shop --param pr=${{ github.event.pull_request.number }}
@@ -239,11 +239,6 @@ jobs:
         uses: pulumi/actions@8e5e406f4007fca908480587cb9893c07090f58d # v7.0.0
         with:
           pulumi-version: "3.259.0"
-      - name: Sign in to Google Cloud as deployer
-        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
-        with:
-          workload_identity_provider: projects/123456789012/locations/global/workloadIdentityPools/shop-github/providers/github
-          service_account: shop-deployer@acme-staging.iam.gserviceaccount.com
       - name: Build the services
         run: superschematic build-all schemas/services
       - name: Install the TypeScript workspace from schemas/dist/bun.lock
@@ -255,5 +250,10 @@ jobs:
           bun install --frozen-lockfile || {
             echo "::error file=schemas/dist/bun.lock::schemas/dist/bun.lock does not match the packages the build wrote; build every service, run bun install in schemas/dist and commit schemas/dist/bun.lock" && exit 1
           }
+      - name: Sign in to Google Cloud as deployer
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: projects/123456789012/locations/global/workloadIdentityPools/shop-github/providers/github
+          service_account: shop-deployer@acme-staging.iam.gserviceaccount.com
       - name: Deploy Staging
         run: superschematic stack deploy Staging --stack schemas/services/Shop
