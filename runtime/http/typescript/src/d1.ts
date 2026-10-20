@@ -12,11 +12,23 @@ statement's placeholders are ? and ?N, which D1 and SQLite both read. D1
 has no interactive transaction: batch is the only way to make several
 statements atomic, and an implementation that needs one writes it so.
 
+Values convert as D1 converts them, on both. bind takes a string, a number,
+a boolean (stored as 1 or 0), null, or bytes (an ArrayBuffer or a view of
+one), and throws D1's error, D1_TYPE_ERROR: Type 'undefined' not supported
+for value 'undefined', for undefined or any other value: an optional field
+binds as `value ?? null`. A row reads back a BLOB as an Array of its bytes,
+not a Uint8Array (new Uint8Array(row.image) makes one), a boolean as 1 or
+0, and an INTEGER as a number.
+
 This is the package's ./d1 entry. It imports nothing, from node: or
 elsewhere, so a Worker bundles it.
 */
 
-/** A value a statement binds: what D1 and SQLite store. A boolean binds as 1 or 0. */
+/**
+ * A value a statement binds: what D1 and SQLite store. A boolean binds as 1
+ * or 0, and bytes as a BLOB, which a row reads back as an Array of numbers.
+ * bind throws D1_TYPE_ERROR for undefined.
+ */
 export type SqlValue = string | number | boolean | null | ArrayBuffer | Uint8Array;
 
 /** What a statement's run reports beside its rows, as D1 reports it. */
@@ -48,7 +60,7 @@ export interface SqlExecResult {
 
 /** A prepared statement: bind returns the statement with its values bound. */
 export interface SqlPreparedStatement {
-  /** The statement with values bound to its placeholders, in order: ? takes the next, ?N the Nth. */
+  /** The statement with values bound to its placeholders, in order: ? takes the next, ?N the Nth. Throws D1_TYPE_ERROR for undefined. */
   bind(...values: SqlValue[]): SqlPreparedStatement;
   /** The first row, or null when there is none. */
   first<T = Record<string, unknown>>(): Promise<T | null>;

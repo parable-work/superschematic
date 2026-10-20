@@ -19,10 +19,11 @@ and D54 in `docs/DECISIONS.md` records the decision.
 | Built | Not built yet |
 | --- | --- |
 | the `Bucket` kind, `buckets` in an API's config, and the `bucket` deployable and edge | |
-| `Deps` gains a bucket per listed bucket, in Go, TypeScript and Rust, implemented over GCS | a bucket on another provider |
+| `Deps` gains a bucket per listed bucket, in Go, TypeScript and Rust, implemented over GCS, and in TypeScript over an R2 binding on Workers | a bucket on another provider from Go or Rust |
 | signed URLs to upload or download an object directly | |
 | `stack dev` runs fake-gcs-server with a bucket per Bucket service | |
 | on gcp, a private Cloud Storage bucket per Bucket service, with its grants | |
+| on cloudflare, a private R2 bucket per Bucket service, with a token of its own per edge ([buckets on R2](/superschematic/guides/stacks/#buckets-on-r2)) | a bucket's CORS, which a browser's upload to a signed URL needs, on either target |
 
 ## Declare a bucket
 

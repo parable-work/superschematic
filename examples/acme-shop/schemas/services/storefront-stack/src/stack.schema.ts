@@ -11,7 +11,7 @@ import { environment, stack } from "@superschematic/stack";
 })
 export abstract class Storefront {}
 
-// This machine: `superschematic stack dev --stack schemas/services/storefront-stack`
+// This machine: `superschematic stack dev schemas/services/storefront-stack`
 // runs the storefront's main.ts on Bun, as shop-stack's Dev does.
 @environment({
   target: "local"

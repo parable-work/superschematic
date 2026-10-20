@@ -170,7 +170,9 @@ flag, each API its servers serve whose implementation is missing, with a
 server some environment places on Cloudflare Workers also gets `fetch.ts`,
 its Workers entrypoint, `bundle.ts`, which a deploy runs as `bun bundle.ts
 <dir>` and `bun bundle.ts --check` runs into a temporary directory, and
-`workers.d.ts`, beside the `main.ts` that `stack dev` runs (D64). A build never
+`workers.d.ts`, beside the `main.ts` that `stack dev` runs (D64); a
+TypeScript job there gets `scheduled.ts`, its Cron Trigger entrypoint, in
+place of `fetch.ts`. A build never
 removes the output root's `bun.lock`, the lockfile of its Bun workspace,
 which the project commits. When git ignores it, the build of a stack with
 a TypeScript server prints one line naming the rule and saying to ignore

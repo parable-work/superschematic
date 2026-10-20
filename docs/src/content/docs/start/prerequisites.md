@@ -51,7 +51,7 @@ make build
 
 `make build` writes the CLI to `bin/superschematic`: the core with the
 official extensions linked, the gcp target, the Cloudflare DNS platform
-and the Pulumi provisioner.
+and target, and the Pulumi provisioner.
 Check it:
 
 ```sh

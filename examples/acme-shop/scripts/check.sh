@@ -39,7 +39,8 @@
 #      wishlist bundle for Workers with bun bundle.ts --check, the
 #      storefront's bundle runs under workerd, which puts two teas in a
 #      cart, the wishlist's runs there over a stand-in of its D1 binding,
-#      which keeps and drops teas, and the site builds, its
+#      with the bindings, by name and kind, that wishlist-stack's Staging
+#      gives its Worker, and keeps and drops teas, and the site builds, its
 #      bundle carrying shop-api's SDK and superscalar's browser build and
 #      nothing from node:, all of them one Bun workspace, which installs
 #      frozen to
@@ -311,6 +312,29 @@ cp "$WORKERD_RUN/bundle/main.js" "$WORKERD_RUN/bundle/superscalar_wasm_bg.wasm" 
 # keeps teas, changes a note, drops one and reads the wishlist back.
 echo "    schemas/dist/server/wishlist-stack/shop-wishlist: bun bundle.ts --check"
 (cd "$DIST/server/wishlist-stack/shop-wishlist" && bun bundle.ts --check)
+# scripts/workerd/wishlist.capnp writes the wishlist Worker's bindings by
+# hand, so they are held to those of the Worker version wishlist-stack's
+# Staging resolves to, by name and kind: a plain_text or secret_text
+# binding is a text binding there, and a d1 binding the wrapped stand-in.
+# Resource names, such as the database's, are not compared.
+echo "    scripts/workerd/wishlist.capnp: the bindings wishlist-stack's Staging gives the wishlist"
+WISHLIST_WANT="$(jq -r '
+  [.resources.resources[] | select(.id == "shop-wishlist.version")] as $v
+  | if ($v | length) != 1 then error("no single node shop-wishlist.version") else $v[0] end
+  | .properties.bindings[]
+  | .name + " " + ({plain_text: "text", secret_text: "text", d1: "wrapped", r2_bucket: "wrapped", service: "service"}[.type] // ("unrecognized:" + .type))
+' "$DIST/stack/wishlist-stack/Staging/environment.json" | sort)"
+WISHLIST_GOT="$(sed -n '/^const wishlist :Workerd.Worker = (/,/^);/p' "$SCRIPT_DIR/workerd/wishlist.capnp" |
+  grep -oE '\(name = "[^"]+", (text|wrapped|service) =' | sed -E 's/^\(name = "([^"]+)", ([a-z]+) =$/\1 \2/' | sort)"
+if [[ -z "$WISHLIST_WANT" || "$WISHLIST_WANT" != "$WISHLIST_GOT" ]]; then
+  {
+    echo "scripts/workerd/wishlist.capnp's wishlist Worker has the bindings"
+    echo "$WISHLIST_GOT"
+    echo "but wishlist-stack's Staging gives shop-wishlist.version"
+    echo "$WISHLIST_WANT"
+  } >&2
+  exit 1
+fi
 echo "    schemas/dist/server/wishlist-stack/shop-wishlist: the bundle under workerd, over a D1 stand-in"
 WISHLIST_RUN="$OUT/workerd-wishlist"
 mkdir -p "$WISHLIST_RUN"

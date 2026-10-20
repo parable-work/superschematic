@@ -328,7 +328,8 @@ rollback, a `--no-build` deploy, `stack plan` and `stack destroy`, checks
 it against the digest and places it beside the program. A
 `SitePublisher` that is an `ArtifactFetcher` has each site's files placed
 there too, at `artifacts/<site>/<hex>/`, for a provider that uploads them
-from the program; gcp's is not one. The gcp target fills all seven: its migrations run
+from the program; gcp's is not one. The gcp target fills each but
+`Bundles` and `PreDestroy`: its migrations run
 each phase as an execution of the stack's Cloud Run job, which runs
 `superschematic-migrate` on Cloud SQL (`gcp.Extension{Migrations: ...}`
 takes a runner of your own instead), its builder builds each changed
@@ -339,8 +340,13 @@ from Cloud Logging (D52). Each operation works on a
 `registry.Run`: the resolved environment and the values of its
 parameters.
 
-The cloudflare target fills `State`, `Secrets`, `Bootstrap` and `CI` so
-far (D64). Its state store's `Backend` hands each run, in
+The cloudflare target fills each but `Builder`, since its servers, jobs
+and sites ship as bundles and files rather than images, and `Jobs`, so
+`stack run` refuses its environments (D64). Its bundle and site
+publishers keep files in R2 by their digest and are `ArtifactFetcher`s,
+its `PreDestroy` empties each bucket of a parameterized member, and its
+migration runner runs `superschematic-migrate` on the deploying machine
+against each D1 database. Its state store's `Backend` hands each run, in
 `StateBackend.Env`, the S3 credentials of the shell's token and the
 passphrase of its secrets provider, and refuses a run without either
 before the provisioner starts. Its secret store's `Get` refuses, since
@@ -571,6 +577,7 @@ cli.New(cli.Config{Name: "my-schematic"},
 )
 ```
 
-The installed `superschematic` links `gcp.Extension{}` and the pulumi
-provisioner pinned to the gcp provider, and not the Cloudflare extension:
-a binary that uses Cloudflare DNS links it, as above.
+The installed `superschematic` links `gcp.Extension{}`,
+`cloudflare.Extension{}` and the pulumi provisioner pinned to both
+providers and to the generic connector's key provider
+(`stack.GenericKeyProviderVersion`).

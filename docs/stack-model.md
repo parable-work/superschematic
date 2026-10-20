@@ -5116,7 +5116,10 @@ database with `./d1`'s `ping`, the shutdown closes it, and the server's
 package depends on `pg` only for a Postgres database. Placeholders are `?` and
 `?N`, which both read. D1 has no interactive transaction, and `batch` is
 atomic. `openSqlite` keeps D1's behaviors that an implementation could
-come to rely on: foreign keys on, a boolean bound as 1 or 0, `batch` in
+come to rely on: foreign keys on, a boolean bound as 1 or 0, `bind`
+throwing D1's `D1_TYPE_ERROR` for `undefined` (which `bun:sqlite` would
+bind as NULL) or any other value D1 refuses, a BLOB read back as an
+`Array` of its bytes rather than `bun:sqlite`'s `Uint8Array`, `batch` in
 one transaction, `exec` running a script one line per statement, and
 each run's `changes`, `last_row_id` and duration in its `meta`. `ping`,
 in the same `./d1` entry, answers `/readyz`, and `connectPostgres`
@@ -5203,7 +5206,7 @@ The runtime's `./r2` entry implements D54's `Bucket`:
   stream is read whole before it is put, since R2 takes a stream only
   when it knows its length, and a delete asks for the object's head
   first, since R2's delete answers alike whether or not it was there.
-- **`signUrl`** presigns a V4 query-string URL for
+- **`signedUrl`** presigns a V4 query-string URL for
   `https://<account>.r2.cloudflarestorage.com/<bucket>/<object>` with
   WebCrypto HMAC, for at most seven days. The access key is the edge's
   token id, and the secret is the hex SHA-256 of the token's value, which
@@ -5477,4 +5480,4 @@ Milestone 7's second target is done when acme-shop's storefront has run
 live on Workers (workers.dev, then a domain, through the SDK, with a
 rollback and a destroy), and a D1-backed TypeScript API, acme-shop's
 `wishlist-stack`, has run live (expand, rollout, contract). Buckets,
-sites and cron jobs follow as breadth.
+sites and cron jobs, built beside them, have not run live either.

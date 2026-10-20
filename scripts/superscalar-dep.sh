@@ -140,6 +140,14 @@ if [ ! -f "$TS/dist/esm/validation.js" ] || [ ! -f "$TS/dist/workerd/backend.js"
     echo "and add the target with rustup target add wasm32-unknown-unknown --toolchain $RUSTUP_TOOLCHAIN" >&2
     exit 1
   fi
+  # The browser and workerd builds' glue depends on the wasm-pack release,
+  # so another version on PATH is refused as the Makefile's setup target
+  # refuses it, rather than building a different glue than CI's.
+  if [ "$(wasm-pack --version 2>/dev/null)" != "wasm-pack $wasm_pack_version" ]; then
+    echo "superscalar-dep: $(wasm-pack --version 2>/dev/null || echo 'wasm-pack') is on PATH, but tools.env pins $wasm_pack_version; install it with" >&2
+    echo "  cargo install wasm-pack --version $wasm_pack_version --locked" >&2
+    exit 1
+  fi
   (
     cd "$TS"
     bun install --frozen-lockfile >/dev/null 2>&1 || bun install >/dev/null

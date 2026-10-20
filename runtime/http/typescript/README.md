@@ -399,10 +399,11 @@ against a fake-gcs-server that `SUPERSCHEMATIC_TEST_GCS_EMULATOR` names.
 
 ## On Cloudflare Workers
 
-A TypeScript server, job or site some environment places on the
-`cloudflare` target runs as a Worker (D64, section 18 of
-`docs/stack-model.md`). Its generated `fetch.ts` builds what `main.ts`
-builds on Bun from these:
+A TypeScript server or job some environment places on the `cloudflare`
+target runs as a Worker (D64, section 18 of `docs/stack-model.md`). A
+server's generated `fetch.ts`, and a job's `scheduled.ts`, build what
+`main.ts` builds on Bun from these. A site's Worker runs a script the
+target embeds, and none of this package:
 
 - `stackEnvOf(env)` turns the Worker's env into the string map the readers
   above take: each `plain_text` and `secret_text` binding, a literal, a
@@ -431,7 +432,9 @@ runs a script one line per statement. Placeholders are `?` and `?N`.
 `ping(db)` resolves when `SELECT 1` answers within two seconds, as
 `/readyz` asks. A D1 binding is one; `openSqlite(path)`, from `./sqlite`,
 gives one over `bun:sqlite` for `stack dev`, with foreign keys on, a
-boolean bound as 1 or 0, `batch` in one transaction and each run's
+boolean bound as 1 or 0, `bind` throwing D1's `D1_TYPE_ERROR` for
+`undefined` (bind an optional field as `value ?? null`), a BLOB read back
+as an `Array` of its bytes, `batch` in one transaction and each run's
 `changes`, `last_row_id` and duration in its `meta`, as D1 reports them.
 `connectPostgres` refuses a D1 connection. Under `stack dev` the local
 target derives a sqlite-first database's connection as a `sqlite:` URL to
