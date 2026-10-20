@@ -213,15 +213,42 @@ func TestTypeScriptCronEntrypointWiring(t *testing.T) {
 	}
 }
 
-// TestTypeScriptCronRefusals: a job on Workers whose API opens a database
-// is refused, since scheduled.ts opens none yet, and a worker on a bundle
-// platform is refused, since a worker claims on Postgres (D64).
+// TestTypeScriptCronD1: a job on Workers whose API's database lists sqlite
+// first opens it through the d1 binding its connection names, as a
+// server's fetch.ts does, and hands it to Deps as db (D64).
+func TestTypeScriptCronD1(t *testing.T) {
+	scheduled := writeScheduled(t, cronInput(t, func(o *tsrestgen.APIOutput, c *envgen.ConfigOutput) {
+		o.Deps.Database = "shop-db"
+		o.Deps.Dialect = tsrestgen.SQLiteDialect
+		c.Derived = append(c.Derived, envgen.DerivedField{Key: "SHOP_DB_DATABASE", Kind: ir.EdgeSQL, Service: "shop-db"})
+	}))
+	for _, want := range []string{
+		"import { createLogger, serviceCredentialFor, type DatabaseConnection, type Service } from '@superschematic/http-runtime';",
+		"import type { SqlDatabase } from '@superschematic/http-runtime/d1';",
+		"const shopDbDatabase = d1Database('SHOP_DB_DATABASE', shopApiConfig.SHOP_DB_DATABASE);",
+		"    db: shopDbDatabase,",
+		"function d1Database(field: string, db: DatabaseConnection): SqlDatabase {",
+		"return binding(env, db.d1.binding, 'd1');",
+	} {
+		if !strings.Contains(scheduled, want) {
+			t.Errorf("scheduled.ts does not hold %q:\n%s", want, scheduled)
+		}
+	}
+	if strings.Contains(scheduled, "ping") {
+		t.Errorf("scheduled.ts pings its database, which a job serves no /readyz for:\n%s", scheduled)
+	}
+}
+
+// TestTypeScriptCronRefusals: a job on Workers whose API's database lists
+// postgres first is refused, since a Worker reaches a database through D1
+// alone, and a worker on a bundle platform is refused, since a worker
+// claims on Postgres (D64).
 func TestTypeScriptCronRefusals(t *testing.T) {
 	in := cronInput(t, func(o *tsrestgen.APIOutput, c *envgen.ConfigOutput) {
 		o.Deps.Database = "shop-db"
 		c.Derived = append(c.Derived, envgen.DerivedField{Key: "SHOP_DB_DATABASE", Kind: ir.EdgeSQL, Service: "shop-db"})
 	})
-	want := "stack edge-stack: job shop-api-reindex of shop-api, whose database is shop-db, runs on Cloudflare's Cron Triggers in an environment, which reaches a database through D1 alone; scheduled.ts opens no database yet"
+	want := "stack edge-stack: job shop-api-reindex of shop-api, whose database shop-db lists postgres first, runs on Cloudflare's Cron Triggers in an environment, which reaches a database through a D1 binding alone"
 	if _, err := servergen.PlanTypeScript(in); err == nil || !strings.Contains(err.Error(), want) {
 		t.Errorf("PlanTypeScript = %v, want it to say %q", err, want)
 	}

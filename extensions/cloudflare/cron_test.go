@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -184,6 +185,73 @@ func TestJobRefusals(t *testing.T) {
 		_, errs := resolveOver(t, reg, s, webServices(), "Staging")
 		refusedWith(t, errs, stack.CodeInvalidSettings, "settings of "+sweepCartsJob+" on platform cloudflare.cron")
 	})
+}
+
+// TestJobEdges: a job's edges are its API's, through the server's
+// connectors from Cron. In the calls fixture with a job on shop-storefront,
+// the job calls shop-pricing through a service binding with a key of its
+// own, which the pricing API's callers field admits as a caller that
+// serves shop-storefront; it reaches shop-media through an r2_bucket
+// binding and a token of its own; and its Worker depends on the pricing
+// Worker, so a destroy removes it first. In the D1 fixture with a job on
+// reviews, the job binds reviews-db's D1 database.
+func TestJobEdges(t *testing.T) {
+	reg := assemble(t)
+	services := callsServices()
+	for i := range services {
+		if services[i].Name == "shop-storefront" {
+			services[i].Jobs = []ir.Job{sweepCarts}
+		}
+	}
+	env, errs := resolveOver(t, reg, callsStack(), services, "Staging")
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	for id, connector := range map[string]string{
+		ir.EdgeID(ir.EdgeHTTP, sweepCartsJob, "shop-pricing"): cloudflare.CronHTTPConnector,
+		ir.EdgeID(ir.EdgeBucket, sweepCartsJob, "shop-media"): cloudflare.CronR2Connector,
+	} {
+		i := slices.IndexFunc(env.Edges, func(e *ir.Edge) bool { return e.ID == id })
+		if i < 0 || env.Edges[i].Connector != connector {
+			t.Errorf("edge %s is not through %s", id, connector)
+		}
+	}
+	bindings := bindingsOf(t, node(t, env, sweepCartsJob+".version"))
+	for name, want := range map[string]string{
+		"SHOP_PRICING_SERVICE":                `{"name":"SHOP_PRICING_SERVICE","service":{"$output":{"resource":"shop-pricing.worker","name":"name"}},"type":"service"}`,
+		"SHOP_PRICING_SERVICE_CREDENTIAL_KEY": `{"name":"SHOP_PRICING_SERVICE_CREDENTIAL_KEY","text":{"$output":{"resource":"` + sweepCartsJob + `.calls.shop-pricing.key","name":"privateKeyPemPkcs8"}},"type":"secret_text"}`,
+		"SHOP_MEDIA_BUCKET":                   `{"bucketName":{"$output":{"resource":"shop-media.bucket","name":"name"}},"name":"SHOP_MEDIA_BUCKET","type":"r2_bucket"}`,
+		"SHOP_MEDIA_BUCKET_R2_TOKEN":          `{"name":"SHOP_MEDIA_BUCKET_R2_TOKEN","text":{"$output":{"resource":"` + sweepCartsJob + `.r2.shop-media.token","name":"value"}},"type":"secret_text"}`,
+	} {
+		if bindings[name] != want {
+			t.Errorf("the job's binding %s is\n%s, want\n%s", name, bindings[name], want)
+		}
+	}
+	callers := bindingsOf(t, node(t, env, "shop-pricing.version"))
+	if got := callers["SHOP_PRICING_CALLERS_ISSUERS"]; !strings.Contains(got, `"text":"2"`) {
+		t.Errorf("the pricing API admits %s issuers, want the server's and the job's", got)
+	}
+	if !slices.ContainsFunc(slices.Collect(maps.Values(callers)), func(b string) bool { return strings.Contains(b, `"text":"`+sweepCartsJob+`"`) }) {
+		t.Errorf("the pricing API's callers field does not name the job:\n%v", callers)
+	}
+	if deps := node(t, env, sweepCartsJob+".worker").DependsOn; !slices.Contains(deps, "shop-pricing.worker") {
+		t.Errorf("the job's Worker depends on %v, not on the pricing Worker", deps)
+	}
+
+	d1 := d1Services()
+	for i := range d1 {
+		if d1[i].Name == "reviews" {
+			d1[i].Jobs = []ir.Job{{Name: "CompactReviews", Schedule: "0 5 * * *", Timeout: "2m"}}
+		}
+	}
+	reviews, errs := resolveOver(t, reg, d1Stack(), d1, "Staging")
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	got := bindingsOf(t, node(t, reviews, "reviews-compact-reviews.version"))["REVIEWS_DB_DATABASE"]
+	if want := `{"id":{"$output":{"resource":"reviews-db.d1.reviews-db","name":"uuid"}},"name":"REVIEWS_DB_DATABASE","type":"d1"}`; got != want {
+		t.Errorf("the job's D1 binding is %s, want %s", got, want)
+	}
 }
 
 // TestStackRunRefusesTheTarget: the target builds no Jobs seam, so `stack

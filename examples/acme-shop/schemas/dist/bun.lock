@@ -37,6 +37,19 @@
         "typescript": "5.9.3",
       },
     },
+    "../../typescript/shop-wishlist": {
+      "name": "@acme/shop-wishlist-implementation",
+      "version": "0.0.0",
+      "dependencies": {
+        "@acme/shop-wishlist-api": "workspace:*",
+        "@acme/shop-wishlist-types": "workspace:*",
+        "@superschematic/http-runtime": "*",
+      },
+      "devDependencies": {
+        "@types/node": "22.19.9",
+        "typescript": "5.9.3",
+      },
+    },
     "../../web/shop-web": {
       "name": "@acme/shop-web-site",
       "version": "0.0.0",
@@ -58,6 +71,20 @@
       },
       "peerDependencies": {
         "@acme/shop-storefront-types": "*",
+        "@superschematic/http-runtime": "*",
+        "hono": "4.13.8",
+      },
+    },
+    "api/shop-wishlist": {
+      "name": "@acme/shop-wishlist-api",
+      "version": "1.0.0",
+      "devDependencies": {
+        "@types/node": "22.19.9",
+        "hono": "4.13.8",
+        "typescript": "5.9.3",
+      },
+      "peerDependencies": {
+        "@acme/shop-wishlist-types": "*",
         "@superschematic/http-runtime": "*",
         "hono": "4.13.8",
       },
@@ -135,6 +162,20 @@
         "typescript": "5.9.3",
       },
     },
+    "server/wishlist-stack/shop-wishlist": {
+      "name": "@acme/wishlist-stack-shop-wishlist-server",
+      "version": "0.0.0",
+      "dependencies": {
+        "@acme/shop-wishlist-api": "workspace:*",
+        "@acme/shop-wishlist-implementation": "workspace:*",
+        "@superschematic/http-runtime": "*",
+        "hono": "4.13.8",
+      },
+      "devDependencies": {
+        "@types/node": "22.19.9",
+        "typescript": "5.9.3",
+      },
+    },
     "types/typescript/shop-api": {
       "name": "@acme/shop-api-types",
       "version": "1.0.0",
@@ -197,6 +238,30 @@
         "typescript": "5.9.3",
       },
     },
+    "types/typescript/shop-wishlist": {
+      "name": "@acme/shop-wishlist-types",
+      "version": "1.0.0",
+      "dependencies": {
+        "js-yaml": "4.1.1",
+        "superscalar": "file:../../../../../../../third_party/superscalar/bindings/typescript",
+      },
+      "devDependencies": {
+        "@types/js-yaml": "4.0.9",
+        "typescript": "5.9.3",
+      },
+    },
+    "types/typescript/shop-wishlist-db": {
+      "name": "@acme/shop-wishlist-db-types",
+      "version": "1.0.0",
+      "dependencies": {
+        "js-yaml": "4.1.1",
+        "superscalar": "file:../../../../../../../third_party/superscalar/bindings/typescript",
+      },
+      "devDependencies": {
+        "@types/js-yaml": "4.0.9",
+        "typescript": "5.9.3",
+      },
+    },
   },
   "overrides": {
     "@superschematic/http-runtime": "file:../../../../runtime/http/typescript",
@@ -229,7 +294,17 @@
 
     "@acme/shop-web-site": ["@acme/shop-web-site@workspace:../../web/shop-web"],
 
+    "@acme/shop-wishlist-api": ["@acme/shop-wishlist-api@workspace:api/shop-wishlist"],
+
+    "@acme/shop-wishlist-db-types": ["@acme/shop-wishlist-db-types@workspace:types/typescript/shop-wishlist-db"],
+
+    "@acme/shop-wishlist-implementation": ["@acme/shop-wishlist-implementation@workspace:../../typescript/shop-wishlist"],
+
+    "@acme/shop-wishlist-types": ["@acme/shop-wishlist-types@workspace:types/typescript/shop-wishlist"],
+
     "@acme/storefront-stack-shop-storefront-server": ["@acme/storefront-stack-shop-storefront-server@workspace:server/storefront-stack/shop-storefront"],
+
+    "@acme/wishlist-stack-shop-wishlist-server": ["@acme/wishlist-stack-shop-wishlist-server@workspace:server/wishlist-stack/shop-wishlist"],
 
     "@emnapi/core": ["@emnapi/core@1.9.2", "", { "dependencies": { "@emnapi/wasi-threads": "1.2.1", "tslib": "^2.4.0" } }, "sha512-UC+ZhH3XtczQYfOlu3lNEkdW/p4dsJ1r/bP7H8+rhao3TTTMO1ATq/4DdIi23XuGoFY+Cz0JmCbdVl0hz9jZcA=="],
 
@@ -835,9 +910,25 @@
 
     "@acme/shop-storefront-types/superscalar": ["superscalar@file:../../../../third_party/superscalar/bindings/typescript", { "devDependencies": { "@napi-rs/cli": "^3.10.8", "@types/node": "^26.6.5", "typescript": "^7.0.2" } }],
 
+    "@acme/shop-wishlist-api/@superschematic/http-runtime": ["@superschematic/http-runtime@file:../../../../runtime/http/typescript", { "devDependencies": { "@google-cloud/cloud-sql-connector": "1.12.0", "@google-cloud/storage": "8.3.0", "@hono/node-server": "2.1.1", "@types/node": "22.19.9", "@types/pg": "8.23.1", "hono": "4.13.8", "pg": "8.23.0", "typescript": "5.9.3" }, "peerDependencies": { "@google-cloud/cloud-sql-connector": ">=1.12.0", "@google-cloud/storage": ">=8.0.0", "@hono/node-server": "2.1.1", "hono": "4.13.8", "pg": ">=8.11.0" }, "optionalPeers": ["@google-cloud/cloud-sql-connector", "@google-cloud/storage", "@hono/node-server", "pg"] }],
+
+    "@acme/shop-wishlist-api/@types/node": ["@types/node@22.19.9", "", { "dependencies": { "undici-types": "~6.21.0" } }, "sha512-PD03/U8g1F9T9MI+1OBisaIARhSzeidsUjQaf51fOxrfjeiKN9bLVO06lHuHYjxdnqLWJijJHfqXPSJri2EM2A=="],
+
+    "@acme/shop-wishlist-db-types/superscalar": ["superscalar@file:../../../../third_party/superscalar/bindings/typescript", { "devDependencies": { "@napi-rs/cli": "^3.10.8", "@types/node": "^26.6.5", "typescript": "^7.0.2" } }],
+
+    "@acme/shop-wishlist-implementation/@superschematic/http-runtime": ["@superschematic/http-runtime@file:../../../../runtime/http/typescript", { "devDependencies": { "@google-cloud/cloud-sql-connector": "1.12.0", "@google-cloud/storage": "8.3.0", "@hono/node-server": "2.1.1", "@types/node": "22.19.9", "@types/pg": "8.23.1", "hono": "4.13.8", "pg": "8.23.0", "typescript": "5.9.3" }, "peerDependencies": { "@google-cloud/cloud-sql-connector": ">=1.12.0", "@google-cloud/storage": ">=8.0.0", "@hono/node-server": "2.1.1", "hono": "4.13.8", "pg": ">=8.11.0" }, "optionalPeers": ["@google-cloud/cloud-sql-connector", "@google-cloud/storage", "@hono/node-server", "pg"] }],
+
+    "@acme/shop-wishlist-implementation/@types/node": ["@types/node@22.19.9", "", { "dependencies": { "undici-types": "~6.21.0" } }, "sha512-PD03/U8g1F9T9MI+1OBisaIARhSzeidsUjQaf51fOxrfjeiKN9bLVO06lHuHYjxdnqLWJijJHfqXPSJri2EM2A=="],
+
+    "@acme/shop-wishlist-types/superscalar": ["superscalar@file:../../../../third_party/superscalar/bindings/typescript", { "devDependencies": { "@napi-rs/cli": "^3.10.8", "@types/node": "^26.6.5", "typescript": "^7.0.2" } }],
+
     "@acme/storefront-stack-shop-storefront-server/@superschematic/http-runtime": ["@superschematic/http-runtime@file:../../../../runtime/http/typescript", { "devDependencies": { "@google-cloud/cloud-sql-connector": "1.12.0", "@google-cloud/storage": "8.3.0", "@hono/node-server": "2.1.1", "@types/node": "22.19.9", "@types/pg": "8.23.1", "hono": "4.13.8", "pg": "8.23.0", "typescript": "5.9.3" }, "peerDependencies": { "@google-cloud/cloud-sql-connector": ">=1.12.0", "@google-cloud/storage": ">=8.0.0", "@hono/node-server": "2.1.1", "hono": "4.13.8", "pg": ">=8.11.0" }, "optionalPeers": ["@google-cloud/cloud-sql-connector", "@google-cloud/storage", "@hono/node-server", "pg"] }],
 
     "@acme/storefront-stack-shop-storefront-server/@types/node": ["@types/node@22.19.9", "", { "dependencies": { "undici-types": "~6.21.0" } }, "sha512-PD03/U8g1F9T9MI+1OBisaIARhSzeidsUjQaf51fOxrfjeiKN9bLVO06lHuHYjxdnqLWJijJHfqXPSJri2EM2A=="],
+
+    "@acme/wishlist-stack-shop-wishlist-server/@superschematic/http-runtime": ["@superschematic/http-runtime@file:../../../../runtime/http/typescript", { "devDependencies": { "@google-cloud/cloud-sql-connector": "1.12.0", "@google-cloud/storage": "8.3.0", "@hono/node-server": "2.1.1", "@types/node": "22.19.9", "@types/pg": "8.23.1", "hono": "4.13.8", "pg": "8.23.0", "typescript": "5.9.3" }, "peerDependencies": { "@google-cloud/cloud-sql-connector": ">=1.12.0", "@google-cloud/storage": ">=8.0.0", "@hono/node-server": "2.1.1", "hono": "4.13.8", "pg": ">=8.11.0" }, "optionalPeers": ["@google-cloud/cloud-sql-connector", "@google-cloud/storage", "@hono/node-server", "pg"] }],
+
+    "@acme/wishlist-stack-shop-wishlist-server/@types/node": ["@types/node@22.19.9", "", { "dependencies": { "undici-types": "~6.21.0" } }, "sha512-PD03/U8g1F9T9MI+1OBisaIARhSzeidsUjQaf51fOxrfjeiKN9bLVO06lHuHYjxdnqLWJijJHfqXPSJri2EM2A=="],
 
     "@google-cloud/storage/gaxios": ["gaxios@7.3.1", "", { "dependencies": { "extend": "^3.0.2", "https-proxy-agent": "^7.0.1", "node-fetch": "^3.3.2" } }, "sha512-kB3rzJV7d9juLZh8/56QTXCwQfxyhdOMdyYk1HdQKFtF8TJTDTZQJtixWIwXdE9Jji91mC41DUNpjleo4L4eAQ=="],
 
@@ -909,6 +1000,14 @@
 
     "@acme/shop-storefront-types/superscalar/typescript": ["typescript@7.0.2", "", { "optionalDependencies": { "@typescript/typescript-aix-ppc64": "7.0.2", "@typescript/typescript-darwin-arm64": "7.0.2", "@typescript/typescript-darwin-x64": "7.0.2", "@typescript/typescript-freebsd-arm64": "7.0.2", "@typescript/typescript-freebsd-x64": "7.0.2", "@typescript/typescript-linux-arm": "7.0.2", "@typescript/typescript-linux-arm64": "7.0.2", "@typescript/typescript-linux-loong64": "7.0.2", "@typescript/typescript-linux-mips64el": "7.0.2", "@typescript/typescript-linux-ppc64": "7.0.2", "@typescript/typescript-linux-riscv64": "7.0.2", "@typescript/typescript-linux-s390x": "7.0.2", "@typescript/typescript-linux-x64": "7.0.2", "@typescript/typescript-netbsd-arm64": "7.0.2", "@typescript/typescript-netbsd-x64": "7.0.2", "@typescript/typescript-openbsd-arm64": "7.0.2", "@typescript/typescript-openbsd-x64": "7.0.2", "@typescript/typescript-sunos-x64": "7.0.2", "@typescript/typescript-win32-arm64": "7.0.2", "@typescript/typescript-win32-x64": "7.0.2" }, "bin": { "tsc": "bin/tsc" } }, "sha512-8FYau96o3NKOhbjKi/qNvG/W5jhzxkbdm5sj9AbZ/5T5sWqn3hJgLfGx27sRKZWTvyzCP8dLRBTf5tBTSRVUNA=="],
 
+    "@acme/shop-wishlist-db-types/superscalar/@types/node": ["@types/node@26.6.5", "", { "dependencies": { "undici-types": "~8.9.0" } }, "sha512-uMzsv9stDdofIZBx4UGh4Z9ZgXnGC9seRDscilBcTHAeOFk67MZg/k9bWVfO+bk4qZmG+l52hRnLwUiH2LnJTg=="],
+
+    "@acme/shop-wishlist-db-types/superscalar/typescript": ["typescript@7.0.2", "", { "optionalDependencies": { "@typescript/typescript-aix-ppc64": "7.0.2", "@typescript/typescript-darwin-arm64": "7.0.2", "@typescript/typescript-darwin-x64": "7.0.2", "@typescript/typescript-freebsd-arm64": "7.0.2", "@typescript/typescript-freebsd-x64": "7.0.2", "@typescript/typescript-linux-arm": "7.0.2", "@typescript/typescript-linux-arm64": "7.0.2", "@typescript/typescript-linux-loong64": "7.0.2", "@typescript/typescript-linux-mips64el": "7.0.2", "@typescript/typescript-linux-ppc64": "7.0.2", "@typescript/typescript-linux-riscv64": "7.0.2", "@typescript/typescript-linux-s390x": "7.0.2", "@typescript/typescript-linux-x64": "7.0.2", "@typescript/typescript-netbsd-arm64": "7.0.2", "@typescript/typescript-netbsd-x64": "7.0.2", "@typescript/typescript-openbsd-arm64": "7.0.2", "@typescript/typescript-openbsd-x64": "7.0.2", "@typescript/typescript-sunos-x64": "7.0.2", "@typescript/typescript-win32-arm64": "7.0.2", "@typescript/typescript-win32-x64": "7.0.2" }, "bin": { "tsc": "bin/tsc" } }, "sha512-8FYau96o3NKOhbjKi/qNvG/W5jhzxkbdm5sj9AbZ/5T5sWqn3hJgLfGx27sRKZWTvyzCP8dLRBTf5tBTSRVUNA=="],
+
+    "@acme/shop-wishlist-types/superscalar/@types/node": ["@types/node@26.6.5", "", { "dependencies": { "undici-types": "~8.9.0" } }, "sha512-uMzsv9stDdofIZBx4UGh4Z9ZgXnGC9seRDscilBcTHAeOFk67MZg/k9bWVfO+bk4qZmG+l52hRnLwUiH2LnJTg=="],
+
+    "@acme/shop-wishlist-types/superscalar/typescript": ["typescript@7.0.2", "", { "optionalDependencies": { "@typescript/typescript-aix-ppc64": "7.0.2", "@typescript/typescript-darwin-arm64": "7.0.2", "@typescript/typescript-darwin-x64": "7.0.2", "@typescript/typescript-freebsd-arm64": "7.0.2", "@typescript/typescript-freebsd-x64": "7.0.2", "@typescript/typescript-linux-arm": "7.0.2", "@typescript/typescript-linux-arm64": "7.0.2", "@typescript/typescript-linux-loong64": "7.0.2", "@typescript/typescript-linux-mips64el": "7.0.2", "@typescript/typescript-linux-ppc64": "7.0.2", "@typescript/typescript-linux-riscv64": "7.0.2", "@typescript/typescript-linux-s390x": "7.0.2", "@typescript/typescript-linux-x64": "7.0.2", "@typescript/typescript-netbsd-arm64": "7.0.2", "@typescript/typescript-netbsd-x64": "7.0.2", "@typescript/typescript-openbsd-arm64": "7.0.2", "@typescript/typescript-openbsd-x64": "7.0.2", "@typescript/typescript-sunos-x64": "7.0.2", "@typescript/typescript-win32-arm64": "7.0.2", "@typescript/typescript-win32-x64": "7.0.2" }, "bin": { "tsc": "bin/tsc" } }, "sha512-8FYau96o3NKOhbjKi/qNvG/W5jhzxkbdm5sj9AbZ/5T5sWqn3hJgLfGx27sRKZWTvyzCP8dLRBTf5tBTSRVUNA=="],
+
     "@isaacs/cliui/string-width/emoji-regex": ["emoji-regex@9.2.2", "", {}, "sha512-L18DaJsXSUk2+42pv8mLs5jJT2hqFkFE4j21wOmgbUqsZ2hL72NsUU785g9RXgo3s0ZNgVl42TiHp3ZtOv/Vyg=="],
 
     "@isaacs/cliui/strip-ansi/ansi-regex": ["ansi-regex@6.4.0", "", {}, "sha512-KzTVk2tCWAHtYrvvvaP8bJKJq2pVinhLcGEQdtLIYPbmNGNyYe8QwNaTUYQp2J7/vIsUKt5QCqAfUkYyG9DkOw=="],
@@ -946,6 +1045,10 @@
     "@acme/shop-orders-types/superscalar/@types/node/undici-types": ["undici-types@8.9.0", "", {}, "sha512-KTDyRTYX8sWmKXAikPHHSyc63CRPETMctyjKFupcC6OBLXT3xsN0e9aF7m+mIXutFWpUXuedtowG7iLOzp0kQg=="],
 
     "@acme/shop-storefront-types/superscalar/@types/node/undici-types": ["undici-types@8.9.0", "", {}, "sha512-KTDyRTYX8sWmKXAikPHHSyc63CRPETMctyjKFupcC6OBLXT3xsN0e9aF7m+mIXutFWpUXuedtowG7iLOzp0kQg=="],
+
+    "@acme/shop-wishlist-db-types/superscalar/@types/node/undici-types": ["undici-types@8.9.0", "", {}, "sha512-KTDyRTYX8sWmKXAikPHHSyc63CRPETMctyjKFupcC6OBLXT3xsN0e9aF7m+mIXutFWpUXuedtowG7iLOzp0kQg=="],
+
+    "@acme/shop-wishlist-types/superscalar/@types/node/undici-types": ["undici-types@8.9.0", "", {}, "sha512-KTDyRTYX8sWmKXAikPHHSyc63CRPETMctyjKFupcC6OBLXT3xsN0e9aF7m+mIXutFWpUXuedtowG7iLOzp0kQg=="],
 
     "google-gax/google-auth-library/gcp-metadata/gaxios": ["gaxios@7.1.3", "", { "dependencies": { "extend": "^3.0.2", "https-proxy-agent": "^7.0.1", "node-fetch": "^3.3.2", "rimraf": "^5.0.1" } }, "sha512-YGGyuEdVIjqxkxVH1pUTMY/XtmmsApXrCVv5EU25iX6inEPbV+VakJfLealkBtJN69AQmh1eGOdCl9Sm1UP6XQ=="],
   }

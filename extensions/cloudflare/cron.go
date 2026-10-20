@@ -29,6 +29,17 @@ import (
 // Cron runs TypeScript jobs as Cloudflare Workers under Cron Triggers.
 const Cron = "cloudflare.cron"
 
+// A job's edges are its API's (D52): its calls to a server on Workers, its
+// buckets on R2 and its database on D1. Their connectors are a server's,
+// whose values read nothing of the caller's platform (connectWorkers,
+// connectR2, connectD1): a job calls through a service binding, since it
+// has no app of its own to call in process.
+const (
+	CronHTTPConnector = "cloudflare.cron-workers"
+	CronR2Connector   = "cloudflare.cron-r2"
+	CronD1Connector   = "cloudflare.cron-d1"
+)
+
 // TypeWorkersCronTrigger is a Worker's Cron Triggers, pinned in schemas/
 // at ProviderVersion.
 const TypeWorkersCronTrigger = "cloudflare:index/workersCronTrigger:WorkersCronTrigger"
@@ -107,6 +118,9 @@ func lowerJob(ctx registry.PlatformContext) (registry.Lowered, error) {
 		return registry.Lowered{}, err
 	}
 	out := registry.Lowered{Resources: workerNodes(d, v, false, settingBool(d.Settings, "logs", true), version)}
+	// The Worker waits for each Worker its service bindings name, so a
+	// destroy removes it, with its bindings, first (calls.go).
+	out.Resources[0].DependsOn = bindingDependencies(d)
 	if run.Schedule != "" {
 		out.Resources = append(out.Resources, &ir.Resource{
 			ID:        scheduleID(d.Name),

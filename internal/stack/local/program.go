@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"strings"
 
+	"github.com/parable-work/superschematic/internal/sqlmigrate"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -58,6 +60,10 @@ type Program struct {
 
 	// Databases are the databases on the containers, sorted by ID.
 	Databases []*Database `json:"databases,omitempty"`
+
+	// SQLiteDatabases are the SQLite files of the sqlite-first databases,
+	// under the environment's state directory, sorted by ID (D64).
+	SQLiteDatabases []*SQLiteDatabase `json:"sqliteDatabases,omitempty"`
 
 	// Buckets are the buckets on the storage emulator's container, sorted
 	// by ID (D54).
@@ -126,6 +132,22 @@ type Database struct {
 	URL       string `json:"url"`
 }
 
+// SQLiteDatabase is a SQLite database node: the file of a hosted DB schema
+// whose DB service lists sqlite first, at File under the environment's
+// state directory (D64). Its URL is that file's sqlite: URL, which the
+// provisioner derives from the state directory.
+type SQLiteDatabase struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Service string `json:"service"`
+	File    string `json:"file"`
+}
+
+// path is the file's absolute path under the state directory dir.
+func (db *SQLiteDatabase) path(dir string) string {
+	return filepath.Join(dir, filepath.FromSlash(db.File))
+}
+
 // KeyPair is a key pair node: the Ed25519 key the caller signs its service
 // credential with, and whose public half the callee accepts.
 type KeyPair struct {
@@ -142,9 +164,22 @@ type Migration struct {
 	Database string `json:"database"`
 	Service  string `json:"service"`
 	Resource string `json:"resource"`
-	URL      string `json:"url"`
-	Model    string `json:"model"`
-	Plan     string `json:"plan"`
+	// URL is a Postgres database's connection string. A SQLite database's
+	// is its file's under the state directory, File, which the provisioner
+	// resolves, and Dialect is sqlite (D64).
+	URL     string `json:"url,omitempty"`
+	Dialect string `json:"dialect,omitempty"`
+	File    string `json:"file,omitempty"`
+	Model   string `json:"model"`
+	Plan    string `json:"plan"`
+}
+
+// dialect is the migration's dialect: postgres unless it says sqlite.
+func (m *Migration) dialect() sqlmigrate.Dialect {
+	if m.Dialect != "" {
+		return sqlmigrate.Dialect(m.Dialect)
+	}
+	return sqlmigrate.Postgres
 }
 
 // Server is a process node: the server's entrypoint, started with its
@@ -258,6 +293,11 @@ func ProgramOf(env *ir.ResolvedEnvironment) (*Program, error) {
 			if d, err = databaseOf(res); err == nil {
 				prog.Databases = append(prog.Databases, d)
 			}
+		case TypeSQLiteDatabase:
+			var d *SQLiteDatabase
+			if d, err = sqliteDatabaseOf(res); err == nil {
+				prog.SQLiteDatabases = append(prog.SQLiteDatabases, d)
+			}
 		case TypeBucket:
 			var b *Bucket
 			if b, err = bucketOf(res); err == nil {
@@ -314,6 +354,18 @@ func ProgramOf(env *ir.ResolvedEnvironment) (*Program, error) {
 					return nil, fmt.Errorf("local: a migrate step names %s, which the environment does not hold", name)
 				}
 				for _, svc := range d.Services {
+					if lite := prog.sqliteDatabase(databaseID(name, svc.Name)); lite != nil {
+						prog.Migrations = append(prog.Migrations, &Migration{
+							Database: name,
+							Service:  svc.Name,
+							Resource: lite.ID,
+							Dialect:  string(sqlmigrate.SQLite),
+							File:     lite.File,
+							Model:    filepath.ToSlash(filepath.Join(ModelsDir, svc.Name+".json")),
+							Plan:     filepath.ToSlash(filepath.Join(MigrationsDir, svc.Name+".plan.json")),
+						})
+						continue
+					}
 					db := prog.database(databaseID(name, svc.Name))
 					if db == nil {
 						return nil, fmt.Errorf("local: database %s hosts %s, but the environment holds no node %s", name, svc.Name, databaseID(name, svc.Name))
@@ -387,6 +439,15 @@ func (p *Program) bucket(id string) *Bucket {
 	for _, b := range p.Buckets {
 		if b.ID == id {
 			return b
+		}
+	}
+	return nil
+}
+
+func (p *Program) sqliteDatabase(id string) *SQLiteDatabase {
+	for _, db := range p.SQLiteDatabases {
+		if db.ID == id {
+			return db
 		}
 	}
 	return nil
@@ -545,6 +606,23 @@ func databaseOf(res *ir.Resource) (*Database, error) {
 		return nil, fmt.Errorf("its container is not a container's output")
 	}
 	d.Container = container.Resource
+	return d, nil
+}
+
+func sqliteDatabaseOf(res *ir.Resource) (*SQLiteDatabase, error) {
+	d := &SQLiteDatabase{ID: res.ID}
+	var ok bool
+	if d.Name, ok = res.Properties["name"].(string); !ok || d.Name == "" {
+		return nil, fmt.Errorf("its name is not a string")
+	}
+	if d.Service, ok = res.Properties["service"].(string); !ok || d.Service == "" {
+		return nil, fmt.Errorf("its service is not a string")
+	}
+	// The file stays under the state directory: a relative path that
+	// climbs out of it would reach the rest of the machine.
+	if d.File, ok = res.Properties["file"].(string); !ok || d.File == "" || path.IsAbs(d.File) || path.Clean(d.File) != d.File || strings.HasPrefix(d.File, "../") {
+		return nil, fmt.Errorf("its file is not a path under the state directory")
+	}
 	return d, nil
 }
 

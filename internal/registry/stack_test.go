@@ -388,6 +388,8 @@ func TestRegisterTargetRejects(t *testing.T) {
 		{"no name", func(s *TargetSpec) { s.Name = "" }, "has no name"},
 		{"unknown kind", func(s *TargetSpec) { s.Platforms["queue"] = "fake.queue" }, `deployable kind "queue"`},
 		{"empty platform", func(s *TargetSpec) { s.Platforms[ir.DeployableServer] = "" }, "empty platform for server"},
+		{"database platform of an unknown dialect", func(s *TargetSpec) { s.DatabasePlatforms = map[string]string{"mysql": "fake.my"} }, `database platform for dialect "mysql" (want postgres or sqlite)`},
+		{"empty database platform", func(s *TargetSpec) { s.DatabasePlatforms = map[string]string{SQLDialectSQLite: ""} }, "empty database platform for sqlite"},
 		{"bad values schema", func(s *TargetSpec) { s.Values = json.RawMessage(`{"required": 1}`) }, "Values"},
 		{"bad resource type schema", func(s *TargetSpec) {
 			s.ResourceTypes = map[string]json.RawMessage{"fake:x/y:Z": json.RawMessage(`{"type": 1}`)}
@@ -462,6 +464,22 @@ func TestRegisterTargetRejects(t *testing.T) {
 	t.Run("platform of another kind", func(t *testing.T) {
 		err := finalize(t, func(_ *Registry, s *TargetSpec) { s.Platforms[ir.DeployableDatabase] = "fake.run" })
 		if err == nil || !strings.Contains(err.Error(), `names platform "fake.run" for database, but it is a server platform`) {
+			t.Fatalf("Finalize = %v", err)
+		}
+	})
+	t.Run("unknown database platform", func(t *testing.T) {
+		err := finalize(t, func(_ *Registry, s *TargetSpec) {
+			s.DatabasePlatforms = map[string]string{SQLDialectSQLite: "fake.lite"}
+		})
+		if err == nil || !strings.Contains(err.Error(), `target "fake" names database platform "fake.lite" for sqlite, which is not registered`) {
+			t.Fatalf("Finalize = %v", err)
+		}
+	})
+	t.Run("database platform of another dialect", func(t *testing.T) {
+		err := finalize(t, func(_ *Registry, s *TargetSpec) {
+			s.DatabasePlatforms = map[string]string{SQLDialectSQLite: "fake.sql"}
+		})
+		if err == nil || !strings.Contains(err.Error(), `names platform "fake.sql" for sqlite databases, but it is a database platform of dialects [postgres]`) {
 			t.Fatalf("Finalize = %v", err)
 		}
 	})

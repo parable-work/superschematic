@@ -5,10 +5,11 @@
 // `cloudflare`, which runs an environment on one Cloudflare account: its
 // state in an R2 bucket, its secrets in the account's Secrets Store, a
 // bootstrap that makes both and the CI's account tokens, the generated
-// CI's sign-in with those tokens, TypeScript servers as Workers, the R2
-// store of the bundles they run, TypeScript jobs as Workers under Cron
-// Triggers, and sites as Workers with static assets, whose files it keeps
-// in R2. Its D1 and R2 platforms come next, in this module.
+// CI's sign-in with those tokens, TypeScript servers as Workers that call
+// each other through service bindings, the R2 store of the bundles they
+// run, buckets on R2, databases on D1 with their migrations from the
+// deploying machine, TypeScript jobs as Workers under Cron Triggers, and
+// sites as Workers with static assets, whose files it keeps in R2.
 //
 // It registers through the public registry package alone, as any
 // extension does (D10), in a Go module of its own (D1). Its platforms are
@@ -26,6 +27,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"time"
 
 	ir "github.com/parable-work/superschematic/ir"
@@ -94,16 +96,22 @@ type Extension struct {
 	// from; nil is crypto/rand.
 	Now  func() time.Time
 	Rand io.Reader
+
+	// Exec runs the migration runner, superschematic-migrate, on the
+	// deploying machine (migrations.go). Nil runs the command; tests pass
+	// a fake.
+	Exec func(cmd *exec.Cmd) error
 }
 
 // Name is the extension's name.
 func (Extension) Name() string { return Name }
 
 // Register adds the Cloudflare DNS platform and the cloudflare target,
-// with the pinned schema of every type they and bootstrap emit, and the
-// target's deploy seams: the state in R2, the Secrets Store, bootstrap,
-// the bundles in R2, and the generated CI's sign-in with an account token
-// (D64).
+// its platforms and connectors, with the pinned schema of every type they
+// and bootstrap emit, and the target's deploy seams: the state in R2, the
+// Secrets Store, bootstrap, the bundles in R2, the emptying of a member's
+// buckets before its destroy, D1's migration runner, and the generated
+// CI's sign-in with an account token (D64).
 func (e Extension) Register(r *registry.Registry) error {
 	types, err := schemas.ResourceTypes(ProviderVersion)
 	if err != nil {
@@ -145,30 +153,42 @@ func (e Extension) Register(r *registry.Registry) error {
 		Policies: []registry.PolicyRule{
 			{Name: PolicyDomainOnCloudflare, Check: checkDomainOnCloudflare},
 			{Name: PolicyNothingPublic, Check: checkNothingPublic},
+			{Name: PolicyBucketsNeverPublic, Check: checkBucketsNeverPublic},
 		},
-		State:     stateStore{ext: e},
-		Secrets:   secretStore{ext: e},
-		Bootstrap: bootstrapper{ext: e},
-		Bundles:   bundleStore{ext: e},
-		Sites:     siteStore{ext: e},
-		CI:        ciIdentities{},
+		State:      stateStore{ext: e},
+		Secrets:    secretStore{ext: e},
+		Bootstrap:  bootstrapper{ext: e},
+		Bundles:    bundleStore{ext: e},
+		Sites:      siteStore{ext: e},
+		PreDestroy: destroyPreparer{ext: e},
+		Migrations: migrationRunner{ext: e},
+		CI:         ciIdentities{},
 	})
 }
 
 // platforms are the target's platforms, one per deployable kind it
 // places; the target names each for its kind. Each gets the extension
 // and the provider when it registers: Workers for servers (workers.go),
-// Cron for jobs (cron.go) and sites (sites.go); D1 and R2 come next
-// (section 18.2).
+// R2 for buckets (r2.go), D1 for databases (d1.go), Cron for jobs
+// (cron.go) and sites (sites.go) (section 18.2).
 func (e Extension) platforms() []registry.PlatformSpec {
-	return []registry.PlatformSpec{workersPlatform(), cronPlatform(), sitesPlatform()}
+	return []registry.PlatformSpec{workersPlatform(), r2Platform(), d1Platform(), cronPlatform(), sitesPlatform()}
 }
 
 // connectors are the target's connectors, each between two of its
-// platforms; each gets the extension when it registers: a site's edge to
-// a server on Workers (sites.go).
+// platforms; each gets the extension when it registers: a Worker's calls
+// to another Worker (calls.go), its edges to a bucket (r2.go) and its sql
+// edges to a D1 database (d1.go), a job's the same from Cron, whose
+// connectors read nothing of the caller's platform (cron.go), and a site's
+// edge to a server on Workers (sites.go).
 func connectors() []registry.ConnectorSpec {
 	return []registry.ConnectorSpec{
+		{Name: WorkersHTTPConnector, Edge: ir.EdgeHTTP, From: Workers, To: Workers, Connect: connectWorkers},
+		{Name: WorkersR2Connector, Edge: ir.EdgeBucket, From: Workers, To: R2, Connect: connectR2},
+		{Name: D1Connector, Edge: ir.EdgeSQL, From: Workers, To: D1Platform, Connect: connectD1},
+		{Name: CronHTTPConnector, Edge: ir.EdgeHTTP, From: Cron, To: Workers, Connect: connectWorkers},
+		{Name: CronR2Connector, Edge: ir.EdgeBucket, From: Cron, To: R2, Connect: connectR2},
+		{Name: CronD1Connector, Edge: ir.EdgeSQL, From: Cron, To: D1Platform, Connect: connectD1},
 		{Name: SiteConnector, Edge: ir.EdgeSite, From: Sites, To: Workers, Connect: connectSite},
 	}
 }

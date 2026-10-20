@@ -297,6 +297,14 @@ type TargetSpec struct {
 	// this target.
 	Platforms map[ir.DeployableKind]string
 
+	// DatabasePlatforms names, by SQL dialect, the platform a database
+	// deployable goes on when no settings platform places it and every DB
+	// service it hosts lists that dialect first: the local target keeps a
+	// sqlite-first database in a SQLite file (D64). A database whose DB
+	// services list another dialect first, or disagree, goes on
+	// Platforms' database platform.
+	DatabasePlatforms map[string]string
+
 	// Values is the JSON Schema of an environment's values for this target
 	// (`project` and `region` for gcp). Nil accepts no values.
 	Values json.RawMessage
@@ -815,6 +823,18 @@ func (r *Registry) RegisterTarget(spec TargetSpec) error {
 		platforms[kind] = platform
 	}
 	spec.Platforms = platforms
+	databases := make(map[string]string, len(spec.DatabasePlatforms))
+	for _, dialect := range slices.Sorted(maps.Keys(spec.DatabasePlatforms)) {
+		platform := spec.DatabasePlatforms[dialect]
+		if !slices.Contains(SQLDialectNames, dialect) {
+			return fmt.Errorf("registry: target %q names a database platform for dialect %q (want %s)", spec.Name, dialect, strings.Join(SQLDialectNames, " or "))
+		}
+		if platform == "" {
+			return fmt.Errorf("registry: target %q names an empty database platform for %s", spec.Name, dialect)
+		}
+		databases[dialect] = platform
+	}
+	spec.DatabasePlatforms = databases
 	if len(spec.Values) > 0 {
 		compiled, err := compileSchema(spec.Values, "superschematic://targets/"+spec.Name+"/values.json")
 		if err != nil {
@@ -953,7 +973,8 @@ func (r *Registry) RegisterProvisioner(spec ProvisionerSpec) error {
 // checkStackReferences is Finalize's part for the stack specs: every
 // connector but a generic one, which names no platform, joins registered
 // platforms of the kinds its edge joins, every platform a target names is
-// registered and of the kind it places, and the DNS platform and
+// registered and of the kind it places, each database platform it names
+// for a dialect runs that dialect, and the DNS platform and
 // provisioner a target names, when it names one, are registered.
 func (r *Registry) checkStackReferences() error {
 	for _, name := range keysOf(r.stack.connectors) {
@@ -1006,6 +1027,16 @@ func (r *Registry) checkStackReferences() error {
 			}
 			if platform.Kind != kind {
 				return fmt.Errorf("registry: target %q names platform %q for %s, but it is a %s platform", name, platformName, kind, platform.Kind)
+			}
+		}
+		for _, dialect := range keysOf(spec.DatabasePlatforms) {
+			platformName := spec.DatabasePlatforms[dialect]
+			platform, ok := r.stack.platforms[platformName]
+			if !ok {
+				return fmt.Errorf("registry: target %q names database platform %q for %s, which is not registered (registered platforms: %v)", name, platformName, dialect, keysOf(r.stack.platforms))
+			}
+			if platform.Kind != ir.DeployableDatabase || !slices.Contains(platform.Dialects, dialect) {
+				return fmt.Errorf("registry: target %q names platform %q for %s databases, but it is a %s platform of dialects %v", name, platformName, dialect, platform.Kind, platform.Dialects)
 			}
 		}
 		if spec.DNS != "" {

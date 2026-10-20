@@ -242,6 +242,7 @@ func (r *resolver) resolve() *ir.ResolvedEnvironment {
 	}
 	r.nameDeployables()
 	r.deriveEdges()
+	r.checkDatabaseDialects()
 	r.orderRollout()
 	r.bindConfig()
 	if r.failed() {
@@ -869,6 +870,11 @@ func (r *resolver) place() {
 				continue // resolveTarget reported it
 			}
 			platformName = r.target.Platforms[res.Kind]
+			if res.Kind == ir.DeployableDatabase {
+				if p := r.target.DatabasePlatforms[r.firstDialectOf(res)]; p != "" {
+					platformName = p
+				}
+			}
 			if platformName == "" {
 				r.fail(CodeUnrealizable, "%s %s: target %s has no platform for a %s; place it with a settings platform", res.Kind, name, r.target.Name, res.Kind)
 				continue
@@ -973,6 +979,30 @@ func (r *resolver) serverLanguage(res *ir.ResolvedDeployable) (string, bool) {
 		return lang, true
 	}
 	return "", true
+}
+
+// firstDialect is the dialect a DB service lists first in its
+// outputs.sql.dialects, postgres when it lists none: what a TypeScript
+// API's Deps.db is typed by (D64).
+func firstDialect(svc *Service) string {
+	if svc == nil || len(svc.Dialects) == 0 {
+		return registry.SQLDialectPostgres
+	}
+	return svc.Dialects[0]
+}
+
+// firstDialectOf is the dialect every DB service a database hosts lists
+// first, or "" when they disagree.
+func (r *resolver) firstDialectOf(res *ir.ResolvedDeployable) string {
+	first := ""
+	for _, ref := range res.Services {
+		dialect := firstDialect(r.services[ref.Name])
+		if first != "" && dialect != first {
+			return ""
+		}
+		first = dialect
+	}
+	return first
 }
 
 func (r *resolver) placeDatabase(d *deployable) {

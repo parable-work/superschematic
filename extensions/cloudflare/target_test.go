@@ -19,23 +19,24 @@ import (
 // TestTarget: the extension registers the target beside its DNS platform,
 // which is the target's default, with the pulumi provisioner, the pinned
 // account token type and every deploy seam built so far; it places a
-// server on Workers, a job on Cron and a site on Workers' static assets,
-// and runs no job on demand.
+// server on Workers, a bucket on R2, a database on D1, a job on Cron and a
+// site on Workers' static assets, and runs no job on demand.
 func TestTarget(t *testing.T) {
 	target := newFixture(t).target(t)
 	if target.DNS != cloudflare.DNS || target.Provisioner != "pulumi" {
 		t.Errorf("target DNS %q, provisioner %q", target.DNS, target.Provisioner)
 	}
-	for kind, platform := range map[ir.DeployableKind]string{
-		ir.DeployableServer: cloudflare.Workers,
-		ir.DeployableJob:    cloudflare.Cron,
-		ir.DeployableSite:   cloudflare.Sites,
-	} {
-		if target.Platforms[kind] != platform {
-			t.Errorf("the target places a %s on %q, want %s", kind, target.Platforms[kind], platform)
-		}
+	if want := map[ir.DeployableKind]string{
+		ir.DeployableServer:   cloudflare.Workers,
+		ir.DeployableBucket:   cloudflare.R2,
+		ir.DeployableDatabase: cloudflare.D1Platform,
+		ir.DeployableJob:      cloudflare.Cron,
+		ir.DeployableSite:     cloudflare.Sites,
+	}; !reflect.DeepEqual(target.Platforms, want) {
+		t.Errorf("the target places %v, want %v", target.Platforms, want)
 	}
-	if target.State == nil || target.Secrets == nil || target.Bootstrap == nil || target.CI == nil || target.Bundles == nil || target.Sites == nil {
+	if target.State == nil || target.Secrets == nil || target.Bootstrap == nil || target.CI == nil || target.Bundles == nil ||
+		target.PreDestroy == nil || target.Migrations == nil || target.Sites == nil {
 		t.Errorf("the target lacks a seam: %+v", target)
 	}
 	if _, ok := target.Bundles.(registry.ArtifactFetcher); !ok {
@@ -51,7 +52,7 @@ func TestTarget(t *testing.T) {
 	for _, rule := range target.Policies {
 		rules = append(rules, rule.Name)
 	}
-	if !reflect.DeepEqual(rules, []string{cloudflare.PolicyDomainOnCloudflare, cloudflare.PolicyNothingPublic}) {
+	if !reflect.DeepEqual(rules, []string{cloudflare.PolicyDomainOnCloudflare, cloudflare.PolicyNothingPublic, cloudflare.PolicyBucketsNeverPublic}) {
 		t.Errorf("policies = %v", rules)
 	}
 	reg := newFixture(t).reg

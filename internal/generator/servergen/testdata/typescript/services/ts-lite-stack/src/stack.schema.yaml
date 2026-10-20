@@ -1,0 +1,33 @@
+# One TypeScript server, ts-notes, on a sqlite-first database, and its job.
+# Local runs on the local target, which keeps the database in a SQLite file
+# and derives a sqlite: URL for it; Edge, on stacktest's fake target,
+# places the server on the fake bundle platform, as Cloudflare Workers, and
+# the database on the fake SQLite platform, as D1, whose connector derives
+# a D1 binding (D64). The server's package gets fetch.ts and bundle.ts
+# beside main.ts.
+kind: Stack
+types:
+  Notes:
+    name: Notes
+    role: EmbeddedStruct
+    stack:
+      deploy:
+        - { name: ts-notes, kind: API }
+      expose:
+        - service: { name: ts-notes, kind: API }
+  Local:
+    name: Local
+    role: EmbeddedStruct
+    environment:
+      target: local
+  Edge:
+    name: Edge
+    role: EmbeddedStruct
+    environment:
+      target: fake
+      values: { project: acme-edge, region: us-east1 }
+      settings:
+        - of: { service: { name: ts-notes, kind: API } }
+          platform: fake.bundle
+        - of: { service: { name: ts-notes-db, kind: DB } }
+          platform: fake.lite

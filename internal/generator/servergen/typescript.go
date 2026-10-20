@@ -26,7 +26,9 @@ import (
 // root's Bun workspace, and a Dockerfile. Bun runs main.ts as it is, as it
 // runs every generated package, so nothing is built. main.ts does what the
 // Go entrypoint's main does: it loads each API's config, opens one pg Pool
-// per database, builds one SDK client per API called, builds each API's
+// per database, or for a database whose DB service lists sqlite first the
+// SQLite file its sqlite: URL names (D64), builds one SDK client per API
+// called, builds each API's
 // implementation from its Deps and mounts every API's router on one Hono
 // app beside /healthz and /readyz. An API whose authDb has a User table
 // authenticates with the identity runtime (D50), as on a Go server: main.ts
@@ -352,11 +354,17 @@ type TypeScriptBucket struct {
 	Field string
 }
 
-// TypeScriptDatabase is a database the server opens one pool to, for every
-// API on it.
+// TypeScriptDatabase is a database the server opens once, for every API on
+// it: a pg Pool, or for a database whose DB service lists sqlite first the
+// SQLite file its sqlite: URL names (D64).
 type TypeScriptDatabase struct {
 	Service string
 	Var     string
+
+	// SQLite is true for a database whose DB service lists sqlite first:
+	// the entrypoint opens it with openSqlite, and Deps.db is a
+	// SqlDatabase.
+	SQLite bool
 
 	// Field is the derived config field the connection is read from, and
 	// From the expression that reads it from the first API's config.
@@ -388,6 +396,12 @@ type TypeScriptClient struct {
 	// first calling API's config, and Field the config field it reads.
 	From  string
 	Field string
+
+	// InProcess is set on a server on Workers for a callee the server
+	// serves itself: fetch.ts hands the client's requests to its own app,
+	// since the call stays in process and its endpoint names no binding
+	// (D64, section 18.2).
+	InProcess bool
 }
 
 // TypeScriptDocker is a TypeScript server's Dockerfile plan. Paths are
@@ -435,6 +449,8 @@ var tsReserved = []string{
 	"loadCors", "corsHandler", "corsMethods", "matchOperations", "handle",
 	"run", "jobs", "workers", "queue", "stop", "signal", "started", "concurrency", "pools",
 	"postgresQueue", "runWorker", "workerConcurrency",
+	"openSqlite", "sqliteFile", "SqliteDatabase", "pingSqlDatabase", "openDatabase", "DatabaseConnection",
+	"d1Database", "SqlDatabase", "unavailable",
 	// fetch.ts's, the Workers entrypoint's (D64).
 	"env", "build", "perIsolate", "requestIP", "stackEnvOf", "stackEnvWithSecrets", "binding", "serviceFetch",
 	"openR2Bucket", "bindingName", "values", "bindings", "Handle",
@@ -598,11 +614,11 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 		if o.HasServiceCallers && !background && (api.Callers == "" || api.Config == "") {
 			return nil, fmt.Errorf("stack %s: server %s serves %s, whose operations have a service clause, and whose config has no callers field", in.Stack, in.Server, o.SchemaName)
 		}
-		if db := o.Deps.Database; db != "" && s.Workers && s.Job != nil {
-			return nil, fmt.Errorf("stack %s: job %s of %s, whose database is %s, runs on Cloudflare's Cron Triggers in an environment, which reaches a database through D1 alone; scheduled.ts opens no database yet (D64)", in.Stack, in.Server, o.SchemaName, db)
+		if db := o.Deps.Database; db != "" && s.Workers && !o.DepsSQLite() && s.Job != nil {
+			return nil, fmt.Errorf("stack %s: job %s of %s, whose database %s lists postgres first, runs on Cloudflare's Cron Triggers in an environment, which reaches a database through a D1 binding alone; list sqlite first in %s's outputs.sql.dialects, so Deps.db is a SqlDatabase (D64)", in.Stack, in.Server, o.SchemaName, db, db)
 		}
-		if db := o.Deps.Database; db != "" && s.Workers {
-			return nil, fmt.Errorf("stack %s: server %s serves %s, whose database is %s, and an environment places the server on Cloudflare Workers, which reaches a database through D1 alone; the Workers entrypoint opens no database yet (D64)", in.Stack, in.Server, o.SchemaName, db)
+		if db := o.Deps.Database; db != "" && s.Workers && !o.DepsSQLite() {
+			return nil, fmt.Errorf("stack %s: server %s serves %s, whose database %s lists postgres first, and an environment places the server on Cloudflare Workers, which reaches a database through a D1 binding alone; list sqlite first in %s's outputs.sql.dialects, so Deps.db is a SqlDatabase (D64)", in.Stack, in.Server, o.SchemaName, db, db)
 		}
 		if db := o.Deps.Database; db != "" {
 			d := databases[db]
@@ -611,9 +627,14 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 				if !ok || api.Config == "" {
 					return nil, fmt.Errorf("stack %s: %s %s serves %s, whose config has no field for its database %s", in.Stack, s.Kind, in.Server, o.SchemaName, db)
 				}
+				suffix := "Pool"
+				if o.DepsSQLite() {
+					suffix = "Database"
+				}
 				d = &TypeScriptDatabase{
 					Service: db,
-					Var:     taken.take(varStem(db) + "Pool"),
+					Var:     taken.take(varStem(db) + suffix),
+					SQLite:  o.DepsSQLite(),
 					Field:   key,
 					From:    api.Config + "." + key,
 				}
@@ -629,12 +650,18 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 			if api.Database == nil {
 				return nil, fmt.Errorf("stack %s: worker %s of %s opens no pool on %s, whose queue it claims", in.Stack, in.Server, o.SchemaName, o.Deps.Database)
 			}
+			if api.Database.SQLite {
+				return nil, fmt.Errorf("stack %s: worker %s of %s claims queue %s of %s, whose DB service lists sqlite first; a worker claims on Postgres, the one dialect the TypeScript queue client claims on (D53, D64)", in.Stack, in.Server, o.SchemaName, s.Worker.Queue, o.Deps.Database)
+			}
 			s.Worker.Database = api.Database
 		}
 		if o.Identity != nil && !background {
 			d := api.Database
 			if d == nil || d.Service != o.Identity.AuthDB {
 				return nil, fmt.Errorf("stack %s: server %s serves %s, which authenticates with the identity runtime over %s, its authDb, and opens no pool on it to build its identity store over", in.Stack, in.Server, o.SchemaName, o.Identity.AuthDB)
+			}
+			if d.SQLite {
+				return nil, fmt.Errorf("stack %s: server %s serves %s, which authenticates with the identity runtime over %s, its authDb, whose DB service lists sqlite first; a TypeScript server's identity store runs on Postgres, and one over SQLite is not built (D50, D64)", in.Stack, in.Server, o.SchemaName, o.Identity.AuthDB)
 			}
 			if d.Store == "" {
 				stem := varStem(d.Service)
@@ -652,7 +679,11 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 					return nil, fmt.Errorf("stack %s: %s %s serves %s, whose config has no field for %s, which it calls", in.Stack, s.Kind, in.Server, o.SchemaName, call.Service)
 				}
 				callee := varStem(call.Service)
+				served := slices.ContainsFunc(in.APIs, func(a TypeScriptAPIInput) bool { return a.Output.SchemaName == call.Service })
 				c = &TypeScriptClient{
+					// A job has no app of its own, so it calls through a
+					// service binding even an API it serves.
+					InProcess:   s.Workers && served && !background,
 					Service:     call.Service,
 					Var:         taken.take(callee + "Client"),
 					Constructor: taken.take("new" + strings.ToUpper(callee[:1]) + callee[1:] + "Client"),
@@ -746,11 +777,38 @@ func (s *TypeScriptServer) RuntimeImports() []string {
 	if s.AnyCORS() {
 		out = append(out, "corsHandler", "corsMethods", "loadCors", "matchOperations")
 	}
-	if len(s.Databases) > 0 {
+	if len(s.PostgresDatabases()) > 0 {
 		out = append(out, "type Database")
+	}
+	if len(s.SQLiteDatabases()) > 0 {
+		out = append(out, "type DatabaseConnection")
 	}
 	if len(s.Clients) > 0 {
 		out = append(out, "type Service")
+	}
+	return out
+}
+
+// PostgresDatabases are the databases the entrypoint opens a pg Pool on.
+func (s *TypeScriptServer) PostgresDatabases() []*TypeScriptDatabase {
+	var out []*TypeScriptDatabase
+	for _, d := range s.Databases {
+		if !d.SQLite {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+// SQLiteDatabases are the databases whose DB services list sqlite first,
+// which the entrypoint opens with openSqlite (D64). With one, each
+// database /readyz pings is a ping and a close rather than a pool.
+func (s *TypeScriptServer) SQLiteDatabases() []*TypeScriptDatabase {
+	var out []*TypeScriptDatabase
+	for _, d := range s.Databases {
+		if d.SQLite {
+			out = append(out, d)
+		}
 	}
 	return out
 }
@@ -787,22 +845,36 @@ func (s *TypeScriptServer) SecretBindings() []string {
 	return slices.Compact(out)
 }
 
+// BindsServices reports whether a client of a server on Workers reaches
+// its callee through a service binding: the callee is another server's.
+func (s *TypeScriptServer) BindsServices() bool {
+	return slices.ContainsFunc(s.Clients, func(c *TypeScriptClient) bool { return !c.InProcess })
+}
+
+// CallsInProcess reports whether a client of a server on Workers calls an
+// API the server serves itself, which fetch.ts hands to its own app (D64,
+// section 18.2).
+func (s *TypeScriptServer) CallsInProcess() bool {
+	return slices.ContainsFunc(s.Clients, func(c *TypeScriptClient) bool { return c.InProcess })
+}
+
 // WorkersImports are the names fetch.ts imports from the HTTP runtime's
 // ./workers entry (D64): the per-isolate builder and the client's address
 // always; the readers of the string bindings, and of the secret ones when
 // a config has a Secret<T> field, when it reads a config; and the binding
 // lookup, with the transport through a service binding, when the server
-// calls another API or lists a bucket.
+// calls an API another server serves, lists a bucket or reaches a D1
+// database.
 func (s *TypeScriptServer) WorkersImports() []string {
 	var out []string
-	if len(s.Clients) > 0 || len(s.Buckets) > 0 {
+	if s.BindsServices() || len(s.Buckets) > 0 || len(s.SQLiteDatabases()) > 0 {
 		out = append(out, "binding")
 	}
 	if s.Job == nil {
 		// A job's scheduled.ts builds per run and serves no request.
 		out = append(out, "perIsolate", "requestIP")
 	}
-	if len(s.Clients) > 0 {
+	if s.BindsServices() {
 		out = append(out, "serviceFetch")
 	}
 	if s.ReadsBindings() {
@@ -846,7 +918,7 @@ func (s *TypeScriptServer) planPackage() {
 		"@types/node": tsrestgen.NodeTypesVersion,
 		"typescript":  tsrestgen.TypeScriptVersion,
 	}
-	if len(s.Databases) > 0 {
+	if len(s.PostgresDatabases()) > 0 {
 		deps["pg"] = pgVersion
 		dev["@types/pg"] = tsrestgen.PGTypesVersion
 	}

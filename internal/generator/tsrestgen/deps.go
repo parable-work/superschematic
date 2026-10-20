@@ -33,13 +33,20 @@ const (
 	NodeTypesVersion = "22.19.9"
 )
 
-// DepsInfo is what Deps holds beside the config and the logger: a pg Pool
-// for the API's database, an SDK client per API it calls, and a Bucket per
-// bucket it lists (D54).
+// DepsInfo is what Deps holds beside the config and the logger: the API's
+// database, a pg Pool or a SqlDatabase by its DB service's first dialect,
+// an SDK client per API it calls, and a Bucket per bucket it lists (D54).
 type DepsInfo struct {
-	// Database is the DB service whose pool Deps.db is: the API's authDb,
-	// or its one DB-kind dependency. Empty when the API has neither.
+	// Database is the DB service Deps.db reaches: the API's authDb, or its
+	// one DB-kind dependency. Empty when the API has neither.
 	Database string
+
+	// Dialect is the first dialect Database's outputs.sql.dialects lists,
+	// which types Deps.db (D64; docs/stack-model.md, section 18.6):
+	// postgres, or empty, a pg Pool; sqlite, the HTTP runtime's
+	// SqlDatabase, D1's interface, which a D1 binding gives a Worker and
+	// openSqlite gives a server under stack dev.
+	Dialect string
 
 	// Calls are the API's calls entries, in order.
 	Calls []DepsCall
@@ -79,6 +86,21 @@ type DepsCall struct {
 
 	// Client is the SDK's root client class.
 	Client string
+}
+
+// SQLiteDialect is outputs.sql.dialects' name of SQLite.
+const SQLiteDialect = "sqlite"
+
+// DepsPool reports whether Deps.db is a pg Pool: the API has a database
+// whose DB service lists postgres first.
+func (o *APIOutput) DepsPool() bool {
+	return o.Deps.Database != "" && !o.DepsSQLite()
+}
+
+// DepsSQLite reports whether Deps.db is a SqlDatabase: the API has a
+// database whose DB service lists sqlite first (D64).
+func (o *APIOutput) DepsSQLite() bool {
+	return o.Deps.Database != "" && o.Deps.Dialect == SQLiteDialect
 }
 
 // depsFields are the members every Deps may hold beside its clients and

@@ -169,3 +169,25 @@ class SqliteConnection implements SqliteDatabase {
 export function openSqlite(path: string, options: OpenSqliteOptions = {}): SqliteDatabase {
   return new SqliteConnection(path, options);
 }
+
+/** A sqlite: URL: sqlite:PATH, or sqlite://PATH. */
+const SQLITE_URL = /^sqlite:(?:\/\/)?([^?#]+)$/iu;
+
+/**
+ * The file a sqlite: URL names: sqlite:PATH and sqlite://PATH are PATH
+ * (sqlite:///tmp/shop.sqlite is /tmp/shop.sqlite), as the migration runner
+ * reads them. The local target derives a sqlite-first database's
+ * connection as such a URL, to a file under the environment's state
+ * directory (D64, section 18.13), and the generated entrypoint opens the
+ * file it names with openSqlite. Throws for any other URL, naming its
+ * scheme alone, since a connection string may hold a password.
+ */
+export function sqliteFile(url: string): string {
+  const match = SQLITE_URL.exec(url);
+  if (match === null) {
+    const scheme = /^([a-z][a-z0-9+.-]*):/iu.exec(url)?.[1];
+    const what = scheme === undefined ? 'no URL' : scheme.toLowerCase() === 'sqlite' ? 'a sqlite: URL with a query or no path' : `a ${scheme}: URL`;
+    throw new Error(`the database's URL is ${what}; a sqlite-first database's is sqlite:<path>`);
+  }
+  return match[1]!;
+}

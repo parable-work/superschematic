@@ -1,0 +1,22 @@
+{
+  "name": "@schemas/ts-lite-stack-ts-notes-prune-notes-server",
+  "version": "0.0.0",
+  "description": "Job ts-notes-prune-notes of stack ts-lite-stack, which superschematic writes on every build of the stack. DO NOT EDIT.",
+  "private": true,
+  "type": "module",
+  "main": "main.ts",
+  "scripts": {
+    "start": "bun main.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@schemas/ts-notes-api": "workspace:*",
+    "@schemas/ts-notes-implementation": "workspace:*",
+    "@superschematic/http-runtime": "*",
+    "hono": "4.13.8"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.9",
+    "typescript": "5.9.3"
+  }
+}

@@ -6710,6 +6710,82 @@ KiB, `superscalar_wasm_bg.wasm` 2.1 MiB) and runs it under the runtime's
 pinned workerd, where a tester Worker puts two teas in a cart through a
 service binding. No call has reached Cloudflare.
 
+### D64, amended: a binding names its callee by the callee's node, a call within one Worker stays in process, and a bucket's token names its permission group by the id Cloudflare publishes
+
+Building the connector of calls between Workers and the R2 platform met
+questions section 18 left open: how a destroy removes a callee that
+another Worker binds, which Cloudflare refuses while the binding stands;
+how a server on Workers calls an API it serves itself with no loopback;
+how a token minted in the graph names a permission group when only
+bootstrap lists the account's groups; what a bucket's jurisdiction
+needs; and how a member's bucket is emptied when the provider has no
+`forceDestroy` for R2.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The connector `cloudflare.workers-workers` derives the binding's `worker` as the output `name` of the callee's `worker` node, and the caller's `worker` node depends on each Worker its service bindings name. The key is the generic connector's `tls` node, whose type the core registers; the `stack` package exports its algorithm, outputs, lifetime and ID, and the extension pins no `tls` type. | The callee's name as a string, which leaves the graph no edge, so a destroy could delete the callee before the caller, and Cloudflare refuses that while a binding names it. Deleting with `force`, which deletes the bindings that name the Worker with it. A `tls` pin in the extension beside the core's, two pins of one provider (D63). |
+| A call between two APIs one server serves derives the server's own address alone, with no binding and no credential, and `fetch.ts` builds that client with a fetch that hands each request to the server's own app, which the build sets once every router is mounted. | A service binding of the Worker to itself, a second invocation and a subrequest for a call that needs neither. Refusing the call on Workers, which the other targets serve on loopback. |
+| The bucket edge's token names Workers R2 Storage Bucket Item Write by the id Cloudflare publishes, the same in every account (`R2ObjectsWriteGroup`). Bootstrap, which lists the account's groups, refuses an environment with a bucket edge when the account does not list that id under that name. | Listing the groups when resolving, a call resolution never makes. A value bootstrap records beside `accountId`, a constant in every environment's values. Granting the deployer's account-wide R2 permission, which reaches every bucket. |
+| A bucket on R2 takes `locationHint`, `storageClass` and `deleteAfterDays`, and no `jurisdiction`. | A jurisdiction, whose bucket is reached at `<account>.<jurisdiction>.r2.cloudflarestorage.com`: the R2 credential would need a member for it in three runtimes and the parity vectors, for a setting no example needs. A jurisdiction without that member, whose signed URLs would name the wrong host. |
+| `TargetSpec.PreDestroy` lists and deletes every object of each bucket of a member of a parameterized environment, through `Cloud`'s S3 calls with the run's token, before the provisioner destroys the member; a bucket that is gone is empty. A plain environment's bucket keeps its objects, and its destroy fails on one that holds some, as gcp's does. | Emptying every environment's buckets, which deletes what a lasting environment kept. A provider option, which `r2Bucket` does not have. |
+| A bucket name R2 refuses, outside 3 to 63 lowercase letters, digits and hyphens, or under a parameter 63 before its value, and the name of the state bucket, are refused as unrealizable. | Leaving them to the deploy, which would fail after the build, or, for the state bucket, take it over. |
+
+Status: built, proven offline. `extensions/cloudflare`'s calls fixture,
+`calls-stack`, resolves a storefront Worker calling an internal pricing
+Worker and listing a bucket in Staging, Production and Preview against
+golden files, each node checked against its pin; the tests read the
+key, the endpoint, the bindings, the callers field, the dependencies and
+the waves, a call in process, the bucket, its lifecycle and its token,
+the refusals, Dev on the storage emulator, `buckets-never-public`,
+bootstrap's check of the permission group, and `PreDestroy` over the fake
+`Cloud` and through `stack.Destroy` after a deploy of a Preview member.
+`extensions/pulumi` renders the fixture's Preview. servergen writes the
+in-process client into `fetch.ts`. The HTTP runtime's workerd harness
+runs the fixture's two Workers with the bindings its Staging gives them,
+which the extension's tests hold to the golden file: the storefront's call
+through the service binding with a token signed by the edge's key is
+accepted, one with no credential and one signed by another key are
+refused 401, a call in process answers, and an object goes into an R2
+stand-in and gets a signed PUT URL. No call has reached Cloudflare. A live
+run must check that a destroy removes the caller before the callee, that
+the deployer may mint the bucket edge's token and that the token reaches
+the bucket's objects and nothing else, and a presigned PUT and GET
+against R2.
+
+### D64, amended: a target names a database platform per dialect, a sqlite-first database is a SQLite file under stack dev, and D1 migrates from the deploying machine
+
+Building D1 met questions section 18 left open: how a local environment
+places a sqlite-first database when its target names one database
+platform, what URL the local target derives for a SQLite file and where
+the file lives, what a Go or Rust API does on one, how D1 names a
+database per hosted schema and per member, and how a CI job that deploys
+D1 finds the runner.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A target may name a database platform per SQL dialect, `TargetSpec.DatabasePlatforms`. A database that no settings platform places, and whose hosted DB services all list one dialect first, goes on that dialect's platform; any other on the kind's. `RegisterTarget` refuses an unknown dialect, `Finalize` a platform that does not run the dialect it is named for. The local target names `local.sqlite` for `sqlite`. | `local.postgres` running both dialects, with resolution preferring the services' first dialect over the platform's order: a sqlite database on a platform named for Postgres, and a rule that changes what "in order of preference" means for every platform. A settings `platform` in every local environment, which every sqlite-first stack would repeat. |
+| `local.sqlite` lowers a hosted DB schema to `databases/<database>.sqlite` under the environment's state directory, beside its secrets and keys, and derives `url` as a reference to the node's `url` output, `sqlite:<absolute path>`, which the provisioner resolves. The runner and the runtime's `sqliteFile` read the same form. The file is created readable by its owner alone; Destroy keeps it and Purge removes it. | The path in `environment.json`, which would hold one machine's state directory. The output root, which a build empties. `file:` URIs, which `bun:sqlite` does not read and a query would make ambiguous. |
+| Resolution refuses a Go or Rust server, job or worker whose database resolves to `sqlite`, beside the TypeScript rule: the Go ORM and the Rust pool reach Postgres alone. A TypeScript API over the user model is refused on a sqlite-first database wherever it runs. | Letting a Go server start on a `sqlite:` URL and fail. |
+| The generator types the TypeScript database field as `DatabaseConnection` for a sqlite-first database and keeps `Database` otherwise; `main.ts` and a job's open the file with `openSqlite(sqliteFile(url))`, refusing a D1 binding and a Cloud SQL configuration by the variable's name, and a Postgres-only server's output stays as it was. | `DatabaseConnection` for every database, which would change every Postgres API's config and entrypoint for a case only Workers read. |
+| A D1 database is `<stack>-<db>` per hosted DB schema, with each parameter's name and value appended, the node `<database>.d1.<db>`. `jurisdiction` takes `eu`, `fedramp` and `us`, as the provider documents, and a database that sets it with `locationHint` is refused, since D1 ignores the hint under a jurisdiction. | One D1 database per deployable, which two DB schemas could not share. Accepting both settings and letting Cloudflare drop one. |
+| The runner writes its job document and plans to a temporary directory on the deploying machine and removes it, looks each uuid up by name (`GET /accounts/{id}/d1/database?name=`, matched exactly), and runs no job for a phase without steps. `PrepareMigrations` refuses a run without the runner or a token before the deploy changes anything. | Recording each uuid in the schema, as bootstrap records values, which a parameterized member's database could not hold. Keeping the job document in R2, which no one reads after the run. |
+| A `MigrationRunner` that runs on the deploying machine is a `registry.DeployingMachineMigrations`; `CIEnvironment.Migrate` is set for an environment on such a target that holds a database, and the github renderer installs `superschematic-migrate` from the release, its own tarball, checked against `SHA256SUMS`, in each deploy and preview job. | Putting the runner in the CLI's tarball, which would ship the database drivers to every user of the CLI (D27). |
+| acme-shop proves it with a stack of its own, `wishlist-stack`: `shop-wishlist`, a TypeScript API with no user model, over `shop-wishlist-db`, which lists `sqlite` first, on Bun over a SQLite file in `Dev` and on Workers over D1 in `Staging`, on the placeholder account. Its check runs the Worker's bundle under workerd with an in-memory stand-in for the d1 binding, and `testdata/wishlist-v2` is a second version whose plan adds a column in expand and drops one in contract, which both implementations run across on a SQLite file. | A database for `storefront-stack`'s storefront, whose carts live per isolate by design. Adding the wishlist to `shop-stack`, whose environment is Postgres-first and needs Docker. A Durable Object's SQLite as workerd's D1, which needs storage on disk and kept `workerd test` from ending. |
+
+Status: built and proven offline: the resolution rules in `internal/stack`;
+`local.sqlite` against a fake machine and, with Bun and the runner built
+from the checkout, for real; the generator's goldens and, with the
+TypeScript checks, a sqlite-first server and job that type-check and keep
+notes in a SQLite file, and whose `fetch.ts` takes a D1 binding and
+bundles for workerd; `cloudflare.d1`'s goldens against the pin, with a
+Worker's `d1` binding through `cloudflare.workers-d1`; the runner
+against a fake account and a stand-in runner; the CI's install in a
+golden workflow; a job document of the runner's form against the fake
+D1; and acme-shop's `wishlist-stack`, whose `Dev` runs under `stack dev`
+in `TestStackDevRunsTheWishlist`, whose bundle runs under workerd over the
+stand-in, and whose second version migrates a SQLite file across both
+phases. No call has reached Cloudflare, and `TestRealD1` has not run.
+
 ### D64, amended: a site's Worker answers its config path first and a directory with its index, and a job's tries run within one Cron Trigger run of at most 15 minutes
 
 Building the site and Cron platforms met questions sections 18.8 and 18.9
@@ -6728,7 +6804,8 @@ other than UTC is refused.
 | `scheduled.ts` runs every try of a firing within that one run, each building `Deps` anew and bounded by the job's timeout, a signal that aborts and a try that fails when it does. The timeout and retries are the `@job`'s, the same in every environment, so the build writes them into `scheduled.ts`; it fills them from the service's `@job`, since `stack.Jobs` resolves no environment. A try that times out cannot be stopped, and its method may run on beside the next. | Cloudflare's own retries, which a Cron Trigger does not offer. The timeout and retries as bindings, a value per environment for what no environment changes. |
 | Cloudflare stops a Cron Trigger's run after 15 minutes of wall time, on both plans (the Duration table of the Workers limits, read on 2026-10-20): `MaxScheduledRunSeconds`. The platform refuses, as unrealizable, a job whose timeout times its tries exceeds it; CPU time is limited apart, by `cpuMs`. | The CPU limit, 30 seconds by default and 15 minutes for a schedule of an hour or more, which bounds work, not waiting, and which a job's timeout does not measure. |
 | A time zone other than UTC (or `Etc/UTC`) is refused only for a schedule the environment runs: a member of a preview that runs none, or an environment that turns it off, resolves. | Refusing the `@job`'s time zone wherever it is placed, which stops a preview that runs no schedule. |
-| A job whose API opens a database is refused by the server generator, until `scheduled.ts` opens D1 as `fetch.ts` does, saying so. `stacktest` gains `fake.cron`, a bundle platform for jobs, on which the generator's tests place one. | Admitting it with `Deps.db` unset, which fails on the first query. |
+| A job's edges are its API's, through `cloudflare.cron-workers`, `cloudflare.cron-r2` and `cloudflare.cron-d1`, which register the server's connect functions, whose values read nothing of the caller's platform: a job gets a key of its own per callee, which the callee's callers field admits, and a token of its own per bucket. A job calls even an API its server's other API serves through a service binding, since it has no app to call in process, and its `worker` node depends on each Worker it binds, as a server's does. `scheduled.ts` opens a sqlite-first database through its d1 binding as `fetch.ts` does; the server generator refuses a job whose database lists postgres first. | Connect functions of the job's own, which would restate the server's. |
+| `stacktest` gains `fake.cron`, a bundle platform for jobs, on which the generator's tests place one. | |
 | The core's `stack.PinSites` is public beside `PinBundles`, so a provisioner's tests render a site's program pinned as a deploy pins it. | |
 
 Status: built, proven offline. `extensions/cloudflare` resolves a web
@@ -6748,11 +6825,11 @@ and both bundles pinned. servergen writes `scheduled.ts` for a job on
 the bundle under workerd, where a tester fires four Workers' `scheduled`
 handlers as a Cron Trigger fires them: one succeeds, one on its retry,
 and one whose tries fail and one whose tries outlive the timeout throw,
-each try logged. The CI's go job installs the pinned workerd. A job whose
-API calls another, opens a database or lists a bucket does not resolve
-yet: those connectors from `cloudflare.cron` come with the
-Workers-to-Workers, D1 and R2 connectors. No call has reached
-Cloudflare.
+each try logged. A job of the calls fixture binds its callee and its
+bucket with a key and a token of its own, and one of the D1 fixture its
+database, and servergen's `scheduled.ts` opens a sqlite-first database
+through its d1 binding. The CI's go job installs the pinned workerd. No
+call has reached Cloudflare.
 
 ## D65. A Rust API runs jobs and workers, its workers claim queues through a descriptor its types carry, and each output root builds against a mirror of its implementations
 

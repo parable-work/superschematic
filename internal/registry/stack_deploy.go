@@ -250,6 +250,16 @@ type MigrationRunner interface {
 	Migrate(ctx context.Context, req MigrationRequest) error
 }
 
+// DeployingMachineMigrations is a MigrationRunner that runs
+// superschematic-migrate on the deploying machine rather than as a job on
+// the target: the cloudflare target's, against D1's REST API (D64). A
+// generated CI job that deploys an environment with a database then
+// installs the runner beside superschematic (CIEnvironment.Migrate).
+type DeployingMachineMigrations interface {
+	MigrationRunner
+	MigratesOnTheDeployingMachine()
+}
+
 // MigrationPreparer is a MigrationRunner that readies, before a deploy
 // changes anything, what each phase it runs will need, and refuses a run
 // it could not migrate: on gcp, the runner's image, which it finds, or

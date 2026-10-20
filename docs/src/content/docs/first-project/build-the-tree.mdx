@@ -25,10 +25,12 @@ summary lines.
 
 The order comes from the configs: `shop-api`, `shop-orders` and
 `shop-stock` name `shop-db` as their `authDb`, `shop-orders` calls
-`shop-stock`, and `shop-storefront` lists `shop-common` in its
-`dependencies`, so each builds after the service it needs. The stack,
-`shop-stack`, builds after the APIs it deploys: its build resolves its
-environments and writes each server's entrypoint. Every
+`shop-stock`, `shop-storefront` lists `shop-common` in its
+`dependencies` and `shop-wishlist` lists `shop-wishlist-db`, so each
+builds after the service it needs. Each stack, `shop-stack`,
+`storefront-stack` and `wishlist-stack`, builds after the APIs it
+deploys: its build resolves its environments and writes each server's
+entrypoint. Every
 service loads through one TypeScript program, which is faster than a build
 per service.
 `--parallel` builds services that do not depend on each other at the same
@@ -71,16 +73,16 @@ superschematic build-all --cache schemas/services
 <Snippet file="testdata/generated/logs/build-all-cache.txt" />
 
 After `rm -rf schemas/dist`, the same command restores each service but
-three:
+five:
 
 <Snippet file="testdata/generated/logs/build-all-restore.txt" />
 
 A key covers the services a schema names in its decorators' arguments,
-which its build records under `schemas/dist`: the stack names the APIs it
-deploys, and `shop-stock`'s `@requireService` names `shop-orders`. With
-that record gone, both build once more, and so does `shop-orders`, whose
-key covers that of `shop-stock`, the API it calls. The cache keeps each
-result.
+which its build records under `schemas/dist`: each stack names the APIs
+it deploys, and `shop-stock`'s `@requireService` names `shop-orders`.
+With that record gone, the three stacks and `shop-stock` build once more,
+and so does `shop-orders`, whose key covers that of `shop-stock`, the API
+it calls. The cache keeps each result.
 
 The cache lives in your XDG cache directory; `--cache-root`, `SUPERSCHEMATIC_BUILD_CACHE_DIR` or
 `[cache] root` in the naming file move it. Because the key covers the
@@ -93,7 +95,8 @@ and revision, so the key survives a commit that changes no Go code.
 project like this one:
 
 1. `build-all` with the installed binary, which links the cloudflare
-   target that the example's `storefront-stack` names;
+   target that the example's `storefront-stack` and `wishlist-stack`
+   name;
 2. `go build` and `go vet` on every generated Go module;
 3. `tsc` on the generated TypeScript router and SDKs, an import of the
    generated Python packages, and a Rust build against the generated Rust

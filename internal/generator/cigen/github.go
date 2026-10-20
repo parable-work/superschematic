@@ -519,6 +519,10 @@ func (g github) deploy(env registry.CIEnvironment, after string) (job, error) {
 // tools, and the sign-in as role, a step last, or the job's env.
 func (g github) cloudSetup(env registry.CIEnvironment, role registry.CIRole) ([]step, signedIn, error) {
 	steps := []step{g.checkout(), g.install()}
+	if role == registry.CIDeployer && env.Migrate {
+		// The target migrates from the deploying machine (D64).
+		steps = append(steps, g.installMigrate())
+	}
 	steps = append(steps, g.packages()...)
 	if role == registry.CIDeployer && buildsWithBun(env) && g.req.Stack.PackageManager != registry.PackageManagerBun {
 		steps = append(steps, setupBun())
@@ -562,6 +566,36 @@ func (g github) install() step {
 		run: strings.Join([]string{
 			"set -euo pipefail",
 			`dir="$RUNNER_TEMP/superschematic"`,
+			`mkdir -p "$dir"`,
+			"release=" + strings.TrimSuffix(release.DownloadURL(v, ""), "/"),
+			fmt.Sprintf(`curl -fsSL -o "$dir/%[1]s.tar.gz" "$release/%[1]s.tar.gz"`, dist),
+			`curl -fsSL -o "$dir/SHA256SUMS" "$release/SHA256SUMS"`,
+			`(cd "$dir" && sha256sum --check --ignore-missing SHA256SUMS)`,
+			fmt.Sprintf(`tar -xzf "$dir/%s.tar.gz" -C "$dir"`, dist),
+			fmt.Sprintf(`echo "$dir/%s" >> "$GITHUB_PATH"`, dist),
+		}, "\n"),
+	}
+}
+
+// installMigrate downloads the release's migration runner,
+// superschematic-migrate, a tarball of its own beside the CLI's, checks
+// it against the release's SHA256SUMS and puts it on PATH, where a target
+// that migrates from the deploying machine finds it (D64). A checkout
+// build is no release, so its step fails, as install's does.
+func (g github) installMigrate() step {
+	v := g.req.Version
+	if v == "" {
+		return step{
+			name: "Install superschematic-migrate",
+			run:  `echo "A superschematic built from a checkout generated this workflow, and it names no release of superschematic-migrate to install; generate this workflow again with a released superschematic" && exit 1`,
+		}
+	}
+	dist := fmt.Sprintf("superschematic-migrate_%s_linux-x64", v)
+	return step{
+		name: "Install superschematic-migrate " + v,
+		run: strings.Join([]string{
+			"set -euo pipefail",
+			`dir="$RUNNER_TEMP/superschematic-migrate"`,
 			`mkdir -p "$dir"`,
 			"release=" + strings.TrimSuffix(release.DownloadURL(v, ""), "/"),
 			fmt.Sprintf(`curl -fsSL -o "$dir/%[1]s.tar.gz" "$release/%[1]s.tar.gz"`, dist),

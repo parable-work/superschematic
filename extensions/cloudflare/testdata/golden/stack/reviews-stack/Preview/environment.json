@@ -1,0 +1,348 @@
+{
+  "version": 1,
+  "stack": "reviews-stack",
+  "environment": "Preview",
+  "extends": "Staging",
+  "target": "cloudflare",
+  "provisioner": "pulumi",
+  "values": {
+    "accountId": "0123456789abcdef0123456789abcdef",
+    "workersSubdomain": "acme"
+  },
+  "parameters": [
+    "pr"
+  ],
+  "deployables": [
+    {
+      "name": "Archive",
+      "kind": "database",
+      "declared": true,
+      "platform": "cloudflare.d1",
+      "services": [
+        {
+          "name": "notes-db",
+          "kind": "DB"
+        }
+      ],
+      "dialect": "sqlite",
+      "resourceName": {
+        "$concat": [
+          "reviews-stack-archive-pr",
+          {
+            "$parameter": "pr"
+          }
+        ]
+      }
+    },
+    {
+      "name": "reviews",
+      "kind": "server",
+      "platform": "cloudflare.workers",
+      "services": [
+        {
+          "name": "reviews",
+          "kind": "API"
+        }
+      ],
+      "language": "TYPESCRIPT",
+      "artifact": "bundle",
+      "exposed": true,
+      "resourceName": {
+        "$concat": [
+          "reviews-pr",
+          {
+            "$parameter": "pr"
+          }
+        ]
+      },
+      "address": {
+        "$concat": [
+          "https://reviews-pr",
+          {
+            "$parameter": "pr"
+          }
+        ]
+      },
+      "publicAddress": {
+        "$concat": [
+          "https://reviews-pr",
+          {
+            "$parameter": "pr"
+          },
+          ".acme.workers.dev"
+        ]
+      },
+      "bindings": [
+        {
+          "field": "REVIEWS_DB_DATABASE",
+          "source": "derived",
+          "value": {
+            "d1": {
+              "binding": "REVIEWS_DB_DATABASE",
+              "database": {
+                "$output": {
+                  "resource": "reviews-db.d1.reviews-db",
+                  "name": "uuid"
+                }
+              }
+            }
+          },
+          "edge": "sql:reviews->reviews-db"
+        }
+      ]
+    },
+    {
+      "name": "reviews-db",
+      "kind": "database",
+      "platform": "cloudflare.d1",
+      "services": [
+        {
+          "name": "reviews-db",
+          "kind": "DB"
+        }
+      ],
+      "dialect": "sqlite",
+      "settings": {
+        "locationHint": "enam"
+      },
+      "resourceName": {
+        "$concat": [
+          "reviews-stack-reviews-db-pr",
+          {
+            "$parameter": "pr"
+          }
+        ]
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "sql:reviews->reviews-db",
+      "kind": "sql",
+      "from": "reviews",
+      "to": "reviews-db",
+      "service": {
+        "name": "reviews-db",
+        "kind": "DB"
+      },
+      "connector": "cloudflare.workers-d1",
+      "field": "REVIEWS_DB_DATABASE"
+    }
+  ],
+  "resources": {
+    "parameters": [
+      "pr"
+    ],
+    "resources": [
+      {
+        "id": "Archive.d1.notes-db",
+        "type": "cloudflare:index/d1Database:D1Database",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "name": {
+            "$concat": [
+              "reviews-stack-notes-db-pr",
+              {
+                "$parameter": "pr"
+              }
+            ]
+          }
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "Archive"
+        ]
+      },
+      {
+        "id": "reviews-db.d1.reviews-db",
+        "type": "cloudflare:index/d1Database:D1Database",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "name": {
+            "$concat": [
+              "reviews-stack-reviews-db-pr",
+              {
+                "$parameter": "pr"
+              }
+            ]
+          },
+          "primaryLocationHint": "enam"
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "reviews-db"
+        ]
+      },
+      {
+        "id": "reviews.deployment",
+        "type": "cloudflare:index/workersDeployment:WorkersDeployment",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "scriptName": {
+            "$output": {
+              "resource": "reviews.worker",
+              "name": "name"
+            }
+          },
+          "strategy": "percentage",
+          "versions": [
+            {
+              "percentage": 100,
+              "versionId": {
+                "$output": {
+                  "resource": "reviews.version",
+                  "name": "id"
+                }
+              }
+            }
+          ]
+        },
+        "dependsOn": [
+          "reviews.version",
+          "reviews.worker"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "reviews"
+        ]
+      },
+      {
+        "id": "reviews.version",
+        "type": "cloudflare:index/workerVersion:WorkerVersion",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "bindings": [
+            {
+              "id": {
+                "$output": {
+                  "resource": "reviews-db.d1.reviews-db",
+                  "name": "uuid"
+                }
+              },
+              "name": "REVIEWS_DB_DATABASE",
+              "type": "d1"
+            },
+            {
+              "name": "REVIEWS_DB_DATABASE_D1_BINDING",
+              "text": "REVIEWS_DB_DATABASE",
+              "type": "plain_text"
+            },
+            {
+              "name": "REVIEWS_DB_DATABASE_D1_DATABASE",
+              "text": {
+                "$output": {
+                  "resource": "reviews-db.d1.reviews-db",
+                  "name": "uuid"
+                }
+              },
+              "type": "plain_text"
+            }
+          ],
+          "compatibilityDate": "2026-09-15",
+          "mainModule": "main.js",
+          "modules": [
+            {
+              "contentFile": "artifacts/reviews/{bundle-digest}/main.js",
+              "contentSha256": "{bundle-sha256:main.js}",
+              "contentType": "application/javascript+module",
+              "name": "main.js"
+            },
+            {
+              "contentFile": "artifacts/reviews/{bundle-digest}/main.js.map",
+              "contentSha256": "{bundle-sha256:main.js.map}",
+              "contentType": "application/source-map",
+              "name": "main.js.map"
+            },
+            {
+              "contentFile": "artifacts/reviews/{bundle-digest}/superscalar_wasm_bg.wasm",
+              "contentSha256": "{bundle-sha256:superscalar_wasm_bg.wasm}",
+              "contentType": "application/wasm",
+              "name": "superscalar_wasm_bg.wasm"
+            }
+          ],
+          "workerId": {
+            "$output": {
+              "resource": "reviews.worker",
+              "name": "id"
+            }
+          }
+        },
+        "dependsOn": [
+          "reviews-db.d1.reviews-db",
+          "reviews.worker"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "reviews"
+        ]
+      },
+      {
+        "id": "reviews.worker",
+        "type": "cloudflare:index/worker:Worker",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "name": {
+            "$concat": [
+              "reviews-pr",
+              {
+                "$parameter": "pr"
+              }
+            ]
+          },
+          "observability": {
+            "enabled": true,
+            "logs": {
+              "enabled": true,
+              "invocationLogs": true
+            }
+          },
+          "subdomain": {
+            "enabled": true,
+            "previewsEnabled": false
+          }
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "reviews"
+        ]
+      }
+    ]
+  },
+  "deployOrder": [
+    {
+      "step": "infrastructure",
+      "resources": [
+        "Archive.d1.notes-db",
+        "reviews-db.d1.reviews-db",
+        "reviews.worker"
+      ]
+    },
+    {
+      "step": "migrate",
+      "migration": "expand",
+      "deployables": [
+        "Archive",
+        "reviews-db"
+      ]
+    },
+    {
+      "step": "rollout",
+      "wave": 1,
+      "deployables": [
+        "reviews"
+      ],
+      "resources": [
+        "reviews.deployment",
+        "reviews.version"
+      ]
+    },
+    {
+      "step": "migrate",
+      "migration": "contract",
+      "deployables": [
+        "Archive",
+        "reviews-db"
+      ]
+    }
+  ]
+}

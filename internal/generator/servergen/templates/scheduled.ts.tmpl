@@ -32,6 +32,9 @@ import { {{ join .WorkersImports ", " }} } from '{{ .Naming.HTTPRuntimeNpmPackag
 {{- if .Buckets }}
 import { openR2Bucket } from '{{ .Naming.HTTPRuntimeNpmPackage }}/r2';
 {{- end }}
+{{- if .SQLiteDatabases }}
+import type { SqlDatabase } from '{{ .Naming.HTTPRuntimeNpmPackage }}/d1';
+{{- end }}
 import * as {{ $api.Module }} from '{{ $api.Package }}';
 import * as {{ $api.Impl }} from '{{ $api.ImplPackage }}';
 {{- range .Clients }}
@@ -92,6 +95,14 @@ async function build() {
   const {{ .Var }} = openR2Bucket(binding(env, bindingName({{ tsQuote .Field }}, {{ .From }}.binding), 'r2'), {{ .From }});
 {{- end }}
 {{- end }}
+{{- if .SQLiteDatabases }}
+
+  // The API's D1 database, through the d1 binding its connection names
+  // (D64). The binding is the grant: D1 has no roles.
+{{- range .SQLiteDatabases }}
+  const {{ .Var }} = d1Database({{ tsQuote .Field }}, {{ .From }});
+{{- end }}
+{{- end }}
 
   // {{ $api.Service }}: its jobs, built from its Deps.
   {{ template "ts-deps" $api }}
@@ -143,6 +154,22 @@ function untilAborted(work: Promise<void>, signal: AbortSignal): Promise<void> {
 {{ template "ts-configure" . }}
 
 {{ template "ts-construct" . }}
+{{- if .SQLiteDatabases }}
+
+/**
+ * The D1 database of the database field named field: the d1 binding its
+ * value names, which the Worker's platform writes beside the field's
+ * variables (D64). A connection string or a Cloud SQL configuration is
+ * refused: a Worker reaches its database through a D1 binding alone.
+ */
+function d1Database(field: string, db: DatabaseConnection): SqlDatabase {
+  if (!('d1' in db)) {
+    const what = 'url' in db ? 'a connection string' : 'a Cloud SQL connector configuration';
+    throw new Error(`${field} is ${what}, and a Worker reaches its database through a D1 binding alone: set ${field}_D1_BINDING and ${field}_D1_DATABASE`);
+  }
+  return binding(env, db.d1.binding, 'd1');
+}
+{{- end }}
 {{- if or .Clients .Buckets }}
 
 /**

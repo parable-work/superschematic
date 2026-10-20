@@ -35,6 +35,9 @@ import { {{ join .WorkersImports ", " }} } from '{{ .Naming.HTTPRuntimeNpmPackag
 {{- if .Buckets }}
 import { openR2Bucket } from '{{ .Naming.HTTPRuntimeNpmPackage }}/r2';
 {{- end }}
+{{- if .SQLiteDatabases }}
+import { ping, type SqlDatabase } from '{{ .Naming.HTTPRuntimeNpmPackage }}/d1';
+{{- end }}
 {{- range .APIs }}
 import * as {{ .Module }} from '{{ .Package }}';
 import * as {{ .Impl }} from '{{ .ImplPackage }}';
@@ -47,6 +50,15 @@ import * as {{ .Module }} from '{{ .Package }}';
 type Handle = (request: Request) => Response | Promise<Response>;
 
 const logger = createLogger({ stack: {{ tsQuote .Stack }}, server: {{ tsQuote .Name }} });
+{{- if .CallsInProcess }}
+
+/**
+ * The server's own app, once the isolate has built it: a call to an API the
+ * server serves itself stays in process (section 18.2), so its client hands
+ * each request here rather than to a binding.
+ */
+let self: Handle | undefined;
+{{- end }}
 {{- if .APIsWithConfig }}
 
 // Each API's config as Cloudflare loads the version, from the string
@@ -100,11 +112,37 @@ async function build(): Promise<Handle> {
   const {{ .Var }} = openR2Bucket(binding(env, bindingName({{ tsQuote .Field }}, {{ .From }}.binding), 'r2'), {{ .From }});
 {{- end }}
 {{- end }}
-{{- if or .ReadsBindings .Clients .Buckets }}
+{{- if .SQLiteDatabases }}
+
+  // One D1 database per database, shared by every API on it, through the
+  // d1 binding its connection names (D64). The binding is the grant: D1
+  // has no roles, so the Worker reads and writes all of the database.
+{{- range .SQLiteDatabases }}
+  const {{ .Var }} = d1Database({{ tsQuote .Field }}, {{ .From }});
+{{- end }}
+{{- end }}
+{{- if or .ReadsBindings .Clients .Buckets .SQLiteDatabases }}
 {{ end }}
   const app = new Hono();
   app.get('/healthz', c => c.json({ status: 'ok' }));
+{{- if .SQLiteDatabases }}
+  // Ready while each D1 database answers SELECT 1 within two seconds.
+  app.get('/readyz', async c => {
+    const unavailable: string[] = [];
+    await Promise.all([
+{{- range .SQLiteDatabases }}
+      ping({{ .Var }}).catch((error: unknown) => {
+        logger.warn('not ready', { dependency: {{ tsQuote .Service }}, error });
+        unavailable.push({{ tsQuote .Service }});
+      }),
+{{- end }}
+    ]);
+    if (unavailable.length > 0) return c.json({ status: 'unavailable', unavailable }, 503);
+    return c.json({ status: 'ready' });
+  });
+{{- else }}
   app.get('/readyz', c => c.json({ status: 'ready' }));
+{{- end }}
 {{- range .APIs }}
 
   // {{ .Service }}: its implementation, built from its Deps, and its routes.
@@ -122,6 +160,9 @@ async function build(): Promise<Handle> {
 {{- end }}
   app.notFound(notFoundHandler());
   app.onError(errorHandler());
+{{- if .CallsInProcess }}
+  self = request => app.fetch(request, { requestIP });
+{{- end }}
 {{- if .AnyCORS }}
 
   // A site's browser calls an API here from the site's origin: each API a
@@ -170,7 +211,23 @@ export default {
 {{ template "ts-configure" . }}
 
 {{ template "ts-construct" . }}
-{{- if or .Clients .Buckets }}
+{{- if .SQLiteDatabases }}
+
+/**
+ * The D1 database of the database field named field: the d1 binding its
+ * value names, which the Worker's platform writes beside the field's
+ * variables (D64). A connection string or a Cloud SQL configuration is
+ * refused: a Worker reaches its database through a D1 binding alone.
+ */
+function d1Database(field: string, db: DatabaseConnection): SqlDatabase {
+  if (!('d1' in db)) {
+    const what = 'url' in db ? 'a connection string' : 'a Cloud SQL connector configuration';
+    throw new Error(`${field} is ${what}, and a Worker reaches its database through a D1 binding alone: set ${field}_D1_BINDING and ${field}_D1_DATABASE`);
+  }
+  return binding(env, db.d1.binding, 'd1');
+}
+{{- end }}
+{{- if or .BindsServices .Buckets }}
 
 /**
  * The name of the binding a derived field's value gives, which the Worker's
@@ -184,7 +241,36 @@ function bindingName(field: string, name: string | undefined): string {
   return name;
 }
 {{- end }}
+{{- if .CallsInProcess }}
+
+/**
+ * A fetch that hands each request to the server's own app: the transport of
+ * the client of an API the server serves itself, whose call stays in
+ * process (section 18.2).
+ */
+const inProcess = (async (input: RequestInfo | URL, init?: RequestInit) => {
+  if (self === undefined) throw new Error('the server called an API it serves before the isolate built it');
+  return self(new Request(input, init));
+}) as typeof fetch;
+{{- end }}
 {{- range .Clients }}
+{{- if .InProcess }}
+
+/**
+ * Builds the client of {{ .Service }}, which the server serves itself: each call
+ * stays in process, handed to the server's own app, with no binding and no
+ * service credential (docs/stack-model.md, section 18.2). The end user
+ * travels per call: an implementation passes { forward: ctx } with each call
+ * it makes for a request.
+ */
+function {{ .Constructor }}(endpoint: Service): {{ .Module }}.{{ .Class }} {
+  return new {{ .Module }}.{{ .Class }}({
+    baseUrl: endpoint.url,
+    fetch: inProcess,
+    serviceCredential: serviceCredentialFor(endpoint.credential),
+  });
+}
+{{- else }}
 
 /**
  * Builds the client of {{ .Service }}, which the server reaches through the service
@@ -200,4 +286,5 @@ function {{ .Constructor }}(endpoint: Service): {{ .Module }}.{{ .Class }} {
     serviceCredential: serviceCredentialFor(endpoint.credential),
   });
 }
+{{- end }}
 {{- end }}

@@ -148,6 +148,70 @@ func TestJob(t *testing.T) {
 	}
 }
 
+// TestJobOnD1 runs a job document as the cloudflare target writes one on
+// the deploying machine (D64; docs/stack-model.md, section 18.6): a
+// database at its d1:// URL with no privileges, its plan beside the
+// document, run against the fake D1's REST API with the token in
+// CLOUDFLARE_API_TOKEN, expand and then contract. A job that asks D1 for
+// privileges is refused, since D1 has no roles.
+func TestJobOnD1(t *testing.T) {
+	dbURL := testdb.NewD1(t)
+	dir := t.TempDir()
+	plan, err := os.ReadFile(fixturePath(migrate.SQLite, "01-create"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "plans"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "plans", "shop-0123456789abcdef.json"), plan, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run := func(phase migrate.Phase, privileges *migrate.Privileges) invocation {
+		t.Helper()
+		doc, err := json.Marshal(&migrate.Job{Version: migrate.JobVersion, Phase: phase, Databases: []*migrate.JobDatabase{{
+			Service: "shop", DatabaseURL: dbURL, Plan: "plans/shop-0123456789abcdef.json", Privileges: privileges,
+		}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(dir, "job.json")
+		if err := os.WriteFile(path, doc, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		var stdout, stderr bytes.Buffer
+		o := options{
+			stdout: &stdout,
+			stderr: &stderr,
+			getenv: func(key string) string {
+				if key == "CLOUDFLARE_API_TOKEN" {
+					return testdb.D1Token
+				}
+				return ""
+			},
+			waits: []time.Duration{time.Millisecond},
+			d1:    testdb.D1Options(t, dbURL),
+		}
+		code := runWith(context.Background(), []string{"job", "--job", path}, o)
+		t.Logf("superschematic-migrate job (%s): exit %d\n%s%s", phase, code, stdout.String(), stderr.String())
+		return invocation{code: code, stdout: stdout.String(), stderr: stderr.String()}
+	}
+	run(migrate.Expand, nil).expect(t, exitOK, "applied: service shop is at model")
+	// The next version, whose plan has contract steps: expand, then
+	// contract after the rollout.
+	evolve, err := os.ReadFile(fixturePath(migrate.SQLite, "evolve-fk-on"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "plans", "shop-0123456789abcdef.json"), evolve, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run(migrate.Expand, nil).expect(t, exitOK, "expand is done")
+	run(migrate.Contract, nil).expect(t, exitOK, "applied: service shop is at model")
+	invoke(t, nil, "status", "--service", "shop", "--database-url", dbURL).expect(t, exitOK, "shop")
+	run(migrate.Expand, &migrate.Privileges{ReadWrite: []string{"reviews"}}).expect(t, exitFailed, "gives no privileges; leave privileges out of the job")
+}
+
 // TestJobRefusals: a malformed job document is refused before it runs.
 func TestJobRefusals(t *testing.T) {
 	invoke(t, nil, "job").expect(t, exitUsage, "job needs --job")
