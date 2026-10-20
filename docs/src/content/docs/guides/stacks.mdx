@@ -1592,6 +1592,22 @@ D1. To check it against a real database, make a scratch one and run
 `SUPERSCHEMATIC_MIGRATE_TEST_D1_URL=d1://<account id>/<database uuid>` and
 a `CLOUDFLARE_API_TOKEN` that may edit D1.
 
+`examples/acme-shop`'s `wishlist-stack` runs a D1-backed API this way:
+`shop-wishlist`, a TypeScript API over `shop-wishlist-db`, which lists
+`sqlite` first and holds a shopper's kept products:
+
+<Snippet file="schemas/services/wishlist-stack/src/stack.schema.ts" />
+
+`superschematic stack dev schemas/services/wishlist-stack` runs its `Dev`
+with no Docker, over a SQLite file it creates and migrates, and the
+implementation in `typescript/shop-wishlist` runs the same statements
+there that it runs on D1 in `Staging`. The example's check runs the
+Worker's bundle under workerd with a stand-in for its d1 binding, since
+workerd runs no D1. `testdata/wishlist-v2` is the wishlist's second
+version, whose plan adds a column in expand and drops one in contract;
+the example's README walks through deploying both versions to an account
+of your own, and rolling back.
+
 ## Generated CI
 
 A stack opts in to a generated CI workflow in its config, under the name

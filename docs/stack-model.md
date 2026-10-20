@@ -4922,7 +4922,9 @@ Resolution refuses (`unrealizable`), on each sql edge:
 - a Go or Rust one whose database resolves to `sqlite`, since the Go ORM
   and the Rust pool reach Postgres alone.
 
-acme-shop's `shop-db` lists `postgres` first, so nothing of it changes. An
+acme-shop's `shop-db` lists `postgres` first, so nothing of it changes;
+its `shop-wishlist-db` lists `sqlite` first, for `wishlist-stack`'s
+`shop-wishlist`, on a SQLite file in `Dev` and on D1 in `Staging`. An
 identity store over SQLite is not built, so a TypeScript API over the user
 model whose database lists sqlite first is refused wherever it runs (D50),
 and a worker's queue on SQLite is refused already (section 8.8). The
@@ -5135,7 +5137,11 @@ runtime tests run fixture bundles under the `workerd` binary.
   an identity store over SQLite for a TypeScript API.
 - A D1 deploy that has reached Cloudflare: the platform, the runner and
   the D1 driver are proven against the pins, a fake account and the fake
-  D1, and `TestRealD1` has not run yet.
+  D1, and `TestRealD1` has not run yet. acme-shop's `wishlist-stack` is
+  the API that run is for: its `Dev` runs under `stack dev`, its bundle
+  under workerd over a stand-in of the d1 binding, and its second
+  version, `testdata/wishlist-v2`, migrates a SQLite file across both
+  phases; its README lists the live run's steps.
 - Engine types on Workers, whose binding is a Node-API addon (D58).
 - Rate limits shared across isolates; Workers' `ratelimit` binding is a
   candidate store.
@@ -5148,6 +5154,6 @@ proven offline (D64, amended). No Worker has deployed.
 
 Milestone 7's second target is done when acme-shop's storefront has run
 live on Workers (workers.dev, then a domain, through the SDK, with a
-rollback and a destroy), and a D1-backed TypeScript API has run live
-(expand, rollout, contract). Buckets, sites and cron jobs follow as
+rollback and a destroy), and a D1-backed TypeScript API, acme-shop's
+`wishlist-stack`, has run live (expand, rollout, contract). Buckets, sites and cron jobs follow as
 breadth.

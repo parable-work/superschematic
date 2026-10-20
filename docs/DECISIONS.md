@@ -6728,6 +6728,7 @@ D1 finds the runner.
 | A D1 database is `<stack>-<db>` per hosted DB schema, with each parameter's name and value appended, the node `<database>.d1.<db>`. `jurisdiction` takes `eu`, `fedramp` and `us`, as the provider documents, and a database that sets it with `locationHint` is refused, since D1 ignores the hint under a jurisdiction. | One D1 database per deployable, which two DB schemas could not share. Accepting both settings and letting Cloudflare drop one. |
 | The runner writes its job document and plans to a temporary directory on the deploying machine and removes it, looks each uuid up by name (`GET /accounts/{id}/d1/database?name=`, matched exactly), and runs no job for a phase without steps. `PrepareMigrations` refuses a run without the runner or a token before the deploy changes anything. | Recording each uuid in the schema, as bootstrap records values, which a parameterized member's database could not hold. Keeping the job document in R2, which no one reads after the run. |
 | A `MigrationRunner` that runs on the deploying machine is a `registry.DeployingMachineMigrations`; `CIEnvironment.Migrate` is set for an environment on such a target that holds a database, and the github renderer installs `superschematic-migrate` from the release, its own tarball, checked against `SHA256SUMS`, in each deploy and preview job. | Putting the runner in the CLI's tarball, which would ship the database drivers to every user of the CLI (D27). |
+| acme-shop proves it with a stack of its own, `wishlist-stack`: `shop-wishlist`, a TypeScript API with no user model, over `shop-wishlist-db`, which lists `sqlite` first, on Bun over a SQLite file in `Dev` and on Workers over D1 in `Staging`, on the placeholder account. Its check runs the Worker's bundle under workerd with an in-memory stand-in for the d1 binding, and `testdata/wishlist-v2` is a second version whose plan adds a column in expand and drops one in contract, which both implementations run across on a SQLite file. | A database for `storefront-stack`'s storefront, whose carts live per isolate by design. Adding the wishlist to `shop-stack`, whose environment is Postgres-first and needs Docker. A Durable Object's SQLite as workerd's D1, which needs storage on disk and kept `workerd test` from ending. |
 
 Status: built and proven offline: the resolution rules in `internal/stack`;
 `local.sqlite` against a fake machine and, with Bun and the runner built
@@ -6737,8 +6738,11 @@ notes in a SQLite file, and whose `fetch.ts` takes a D1 binding and
 bundles for workerd; `cloudflare.d1`'s goldens against the pin, with a
 Worker's `d1` binding through `cloudflare.workers-d1`; the runner
 against a fake account and a stand-in runner; the CI's install in a
-golden workflow; and a job document of the runner's form against the fake
-D1. No call has reached Cloudflare, and `TestRealD1` has not run.
+golden workflow; a job document of the runner's form against the fake
+D1; and acme-shop's `wishlist-stack`, whose `Dev` runs under `stack dev`
+in `TestStackDevRunsTheWishlist`, whose bundle runs under workerd over the
+stand-in, and whose second version migrates a SQLite file across both
+phases. No call has reached Cloudflare, and `TestRealD1` has not run.
 
 ## D65. A Rust API runs jobs and workers, its workers claim queues through a descriptor its types carry, and each output root builds against a mirror of its implementations
 
