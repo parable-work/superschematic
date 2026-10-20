@@ -6994,12 +6994,12 @@ shared: `RouteControls::rate_limit` builds it inside the router each time
 | The limiter belongs to the operation, not to a route. A procedure or a page meets it whether or not a router was built for the operation. A route whose operation has neither, such as a webhook, a `@requireService` operation or a manual one, meets it alone. Each surface still answers the refusal its own way: the route with its 429 problem, the procedure with a `ProblemRecord`, the pages with their refusal section. Each carries the shared bucket's `Retry-After`. Another process that serves the API, such as a stack's server beside the app, has a registry of its own: a limiter is kept in process memory (D29), so replicas share no budget. | Refusing a crate whose app does not mount the JSON API: no app can, since `<service>(...)` mounts it. |
 | A page that meets several operations' controls still takes from each limiter in turn, its own first. A page its own limiter admits and a reference's limiter refuses has spent its own token, as before. A reference's options operation is now counted with its route and its procedure, so a client who reloads a page holding a reference spends that operation's API budget too. | Exempting the references' limiters from the sharing, which would leave the listing a second budget through the console. |
 
-Status: built in the Rust runtime and rustrestgen; the Topcoat crate's
-side and acme's test are designed, not built. The tests are these:
+Status: built in the Rust runtime, rustrestgen and the Topcoat crate;
+acme's test is designed, not built. The tests are these:
 
 - The runtime's `ratelimit` tests: an operation has one limiter in a registry, a clone shares it, an operation without a rate limit has none, and a new registry shares nothing. `controls` tests that two routes built from one registry share a budget, that one from another registry has its own, and that `rate_limiter(None)` leaves a route's own limiter in place.
 - rustrestgen: the `router.rs` goldens of fixture-api, fixture-user-routes-api and fixture-webhooks-api, and every `operations.rs` golden (`rate_limit`). `TestRouteControlsAPICrateBuildsAndRoutes` builds fixture-api's router twice from one `RouterOptions`: 30 requests through each spend a client's 60, so the next through either is 429 while another client's is 200, and two routers built apart each have their own budget.
-- Topcoat: on `fixture-controls-api`'s list of orders, at two a minute, one request through `/api/orders` and one through its procedure leave the console's list page 429 for that client and 200 for another. A Go test reads the goldens: `RateLimits::new()` once in `lib.rs`, and no `RateLimiter::per_minute` in `procedures.rs` or `pages.rs`.
+- Topcoat, built: `TestPagesKeepTheirRoutesControls` on `fixture-controls-api`'s list of orders, at two a minute: one request through `/api/orders` and one through its procedure leave the console's list page 429 for that client and 200 for another, and the route and the procedure 429 too. `TestTheSetupSharesOneRegistry` reads the goldens: `RateLimits::new()` once in `lib.rs`, the JSON API mounted with it, and no `RateLimiter::per_minute` in `procedures.rs` or `pages.rs`. `TestWhatHasNoProcedure` and `TestATrailStepMeetsItsOptionsControls` find each procedure's and page's rate limit taken from the registry.
 - acme: at `placeOrder`'s 60 a minute, 20 posts through `/api/orders`, 20 through its procedure and 20 through the console's new-order page leave the next post through each 429.
 
 The rule is reversible until the first release.
@@ -7028,13 +7028,13 @@ This settles the in-process question the first amendment left open. A
 call between two APIs that one server serves goes over HTTP, and is
 section 9.9's question in `docs/stack-model.md`, not this one's.
 
-Status: built in the Rust runtime and rustrestgen; the Topcoat crate's
-side is designed, not built. The tests are these:
+Status: built in the Rust runtime, rustrestgen and the Topcoat crate.
+The tests are these:
 
 - The runtime's `operation` tests: a `@requireService` operation refuses `admit`, with and without a user clause. A listed caller is admitted and an unlisted one refused 403, and an empty `from` lists any caller. A listed caller of an `@allowService` operation stands in for the end user, and an unlisted one goes on to the end-user step. The context of a service caller's call names the caller. A grid of 72 calls, over mode, `from`, caller, user clause and end user, gives an in-process call the status and code a `RouteControls` route answers. `service_auth` tests that `ServiceCaller::in_process` names a caller with an empty subject.
 - rustrestgen: every `operations.rs` golden (`service`), and in `TestServiceAuthAPICrateBuildsAndRoutes`, `an_in_process_call_needs_its_service_caller`: `admit` refuses each `@requireService` operation 401; a listed caller is admitted, with the end user it forwards, and the implementation reads both; an unlisted one is refused 403; and a listed caller of an `@allowService` operation stands in for the end user.
-- Topcoat: `fixture-controls-api` gains `reserveStock`, a `@requireService` operation with a `from` and a user clause. A Go test finds no end-user call of a `@requireService` operation in `operations.rs`, an `AsService` method for each operation with a clause, and `submit_as` in place of `submit`. Its cargo test sees these:
-  - an end user refused 401 `service_unauthorized`;
+- Topcoat, built: `fixture-controls-api` gains `reserveStock`, a `@requireService` operation with a `from` and a user clause. `TestAServiceOnlyOperationIsCalledAsAService` finds no end-user call of a `@requireService` operation in `operations.rs`, an `AsService` call and guard for each operation with a clause, and `submit_as` in place of `submit`. `TestProceduresKeepTheirRoutesRules`'s cargo test sees these:
+  - an end user refused 401 `service_unauthorized`, signed in or not;
   - a listed caller admitted, with the page's caller forwarded;
   - an unlisted caller refused 403;
   - a signed-out page refused 401;

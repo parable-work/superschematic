@@ -4,6 +4,10 @@
 //! mounts the JSON API at `/api`, its routes given the client's address,
 //! and keeps the implementations for the in-process calls of `operations`,
 //! which pages, shards and procedures make by each route's rules.
+//! It makes one registry of the operations' rate limiters
+//! (`Setup.rate_limits`), which the JSON API's routes take theirs from,
+//! and every procedure and page that meets a route's rate limit too, so a
+//! client has one budget per operation however it calls it.
 //! `records` mirrors each type a call in `operations` returns as a record a
 //! page can hand the browser; the result of an operation without a call, a
 //! webhook's, has none.
@@ -31,8 +35,8 @@ pub mod views;
 /// `types`.
 pub use schemas_fixture_forms_api_api as api;
 
-use api::runtime::ClientIp;
-use api::{build_router, Implementations};
+use api::runtime::{ClientIp, RateLimits};
+use api::{build_router_with, Implementations, RouterOptions};
 use topcoat::context::Cx;
 use topcoat::router::request::{client_ip, parts};
 use topcoat::router::tower::TowerRoute;
@@ -41,12 +45,21 @@ use topcoat::router::{Body, Layer, LayerFuture, Next, Path, RouterBuilder};
 /// What `fixture_forms_api` keeps in the app context for the in-process calls.
 pub struct Setup {
     pub implementations: Implementations,
+    /// The app's one limiter per rate-limited operation (D44, amended),
+    /// which the mounted JSON API's routes take theirs from, and so do the
+    /// procedures and the pages that meet a route's rate limit. An app that
+    /// builds the API's router again, or another crate's page that calls an
+    /// operation, shares the operation's budget by taking from it too:
+    /// `RouterOptions { rate_limits: setup.rate_limits.clone(), .. }`, or
+    /// `setup.rate_limits.of(&api::operations::<OPERATION>)`.
+    pub rate_limits: RateLimits,
 }
 
 /// Adds the fixture-forms-api API to a Topcoat app.
 pub trait RouterBuilderFixtureFormsApiExt {
-    /// Mounts the JSON API (`build_router`) at `/api/{*rest}`, its routes
-    /// given the client's address (`ClientAddress`), and keeps
+    /// Mounts the JSON API (`build_router_with`) at `/api/{*rest}`, its
+    /// routes given the client's address (`ClientAddress`) and their rate
+    /// limiters from a new registry, `Setup.rate_limits`, and keeps
     /// `implementations` for the in-process calls of
     /// `operations`.
     #[must_use]
@@ -55,10 +68,15 @@ pub trait RouterBuilderFixtureFormsApiExt {
 
 impl RouterBuilderFixtureFormsApiExt for RouterBuilder {
     fn fixture_forms_api(self, implementations: Implementations) -> Self {
-        let api = build_router(implementations.clone());
+        let rate_limits = RateLimits::new();
+        let api = build_router_with(
+            implementations.clone(),
+            RouterOptions { rate_limits: rate_limits.clone(), ..RouterOptions::default() },
+        );
         self
             .app_context(Setup {
                 implementations,
+                rate_limits,
             })
             .route(TowerRoute::any("/api/{*rest}", api))
             .layer(ClientAddress)
@@ -68,11 +86,11 @@ impl RouterBuilderFixtureFormsApiExt for RouterBuilder {
 /// Gives each request to the JSON API the client's address as Topcoat
 /// reads it (`client_ip`: the peer's, or the one a proxy the app trusts
 /// names), as the runtime's `ClientIp`, by which a route's rate limit
-/// counts clients, as a procedure's does. A request through Topcoat
-/// carries neither `ClientIp` nor the `ConnectInfo` the runtime falls back
-/// to, so without it every client of a route would share one budget. An
-/// address Topcoat does not know is left out, and the runtime's fallback
-/// stands.
+/// counts clients, as a procedure's and a page's do. A request through
+/// Topcoat carries neither `ClientIp` nor the `ConnectInfo` the runtime
+/// falls back to, so without it every client of a route would share one
+/// budget. An address Topcoat does not know is left out, and the
+/// runtime's fallback, `unknown`, stands.
 struct ClientAddress;
 
 impl Layer for ClientAddress {

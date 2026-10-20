@@ -179,16 +179,24 @@ impl {{ .Name }} {
         pairs
     }
 {{- end }}
-
+{{ if .ServiceOnly }}
+    {{ doc4 (printf "Parses the form, then calls the operation in-process as `service`, a service this process acts for (`operations::as_service(service).%s`): its route admits only a service caller (@requireService), so the form has no `submit` (D37, amended). Call it only where the page acts as that service, never just because a reader sent the form: the call carries the service's authority, and the page's caller is the end user it forwards when the route asks for one. A refusal is the status a page answers with and the errors it renders the form again with: 422 and `parse`'s errors, or the route's status (401, 403, 404, 409, ...) and the operation's errors (`Refusal::from_api`)." .Call) }}
+    pub async fn submit_as(&self, cx: &Cx, service: &crate::api::runtime::ServiceCaller) -> Result<{{ .Output }}, Refusal> {
+{{- else }}
     {{ doc4 (printf "Parses the form, then calls the operation in-process (`operations::%s`). A refusal is the status a page answers with and the errors it renders the form again with: 422 and `parse`'s errors, or the route's status (401, 403, 404, 409, ...) and the operation's errors (`Refusal::from_api`)." .Call) }}
     pub async fn submit(&self, cx: &Cx) -> Result<{{ .Output }}, Refusal> {
+{{- end }}
 {{- if .Paged }}
         // A cursor or a limit the route refuses is its 400, as the router
         // answers it.
         self.page().map_err(|err| Refusal::from_api(&err))?;
 {{- end }}
         let args = self.parse()?;
+{{- if .ServiceOnly }}
+        operations::as_service(service).{{ .Call }}(cx, args).await.map_err(|err| Refusal::from_api(&err))
+{{- else }}
         operations::{{ .Call }}(cx, args).await.map_err(|err| Refusal::from_api(&err))
+{{- end }}
     }
 {{- if .Rows }}
 
