@@ -9,6 +9,7 @@ import (
 	"path"
 	"regexp"
 	"strings"
+	"time"
 
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -74,7 +75,10 @@ func (r Run) Name() string {
 // StateStore keeps a target's deploy state (section 11.2): where its
 // provisioner keeps each environment's state, and each run's deploy
 // manifest. The target's bootstrap creates what the store reads (section
-// 7.3): a GCS bucket and a KMS key on gcp.
+// 7.3): a GCS bucket and a KMS key on gcp. A store that is also a
+// StateLocker keeps each run's deploy lock beside its manifest; with one
+// that is not, nothing keeps two deploys of a run apart beyond the
+// provisioner's own lock on each of its updates.
 type StateStore interface {
 	// Backend returns where the provisioner keeps env's state.
 	Backend(ctx context.Context, env *ir.ResolvedEnvironment) (StateBackend, error)
@@ -94,6 +98,102 @@ type StateStore interface {
 // ErrNoManifest is what a StateStore's ReadManifest wraps for a run that
 // was never deployed.
 var ErrNoManifest = errors.New("no deploy manifest")
+
+// StateLocker is a StateStore that keeps a deploy lock per run beside the
+// run's manifest (D46, amended): `stack deploy` and `stack destroy` take it
+// before they read the manifest and release it when they end, whether they
+// succeed or fail, so two of them never run on one run at once. The lock
+// is held, not leased: it has no expiry, and only its holder's release or
+// a person's `stack unlock` removes it. On gcp it is an object in the
+// state bucket, written only where none is (`ifGenerationMatch=0`).
+//
+// Each method is atomic where the store is: Lock writes only where no lock
+// is, and Unlock removes only the lock it names, so a deploy whose lock a
+// person removed does not release the lock of the deploy that took it
+// next. A run of a parameterized environment has a lock of its own, as it
+// has a manifest of its own.
+type StateLocker interface {
+	// Lock takes the run's lock: where no lock is, it writes lock and
+	// returns nil; where one is, it changes nothing and returns a
+	// *LockHeldError holding that lock.
+	Lock(ctx context.Context, run Run, lock DeployLock) error
+
+	// ReadLock returns the run's lock, or nil when none is held.
+	ReadLock(ctx context.Context, run Run) (*DeployLock, error)
+
+	// Unlock removes the run's lock when its ID is id. A run with no lock
+	// is not an error; one whose lock has another ID keeps it, and Unlock
+	// returns a *LockHeldError holding that lock.
+	Unlock(ctx context.Context, run Run, id string) error
+}
+
+// DeployLock is the lock a deploy or a destroy of a run holds while it
+// runs: who took it, where and when, so the deploy it refuses can say so,
+// and a person can tell whether the one that holds it still runs.
+type DeployLock struct {
+	// ID names this hold of the lock, a random token: the holder releases
+	// the lock only while it carries this ID.
+	ID string `json:"id"`
+
+	// Run names the run the lock keeps (Run.Name), and Operation what holds
+	// it: `deploy` or `destroy`.
+	Run       string `json:"run"`
+	Operation string `json:"operation"`
+
+	// Holder is who took the lock: the user, or the actor of the CI run.
+	// Host is the machine it runs on and PID its process.
+	Holder string `json:"holder"`
+	Host   string `json:"host"`
+	PID    int    `json:"pid,omitempty"`
+
+	// CI is the URL of the CI run that holds the lock, when one does.
+	CI string `json:"ci,omitempty"`
+
+	// Time is when the lock was taken, in UTC.
+	Time time.Time `json:"time"`
+}
+
+// String describes who holds the lock and since when:
+// `a deploy by ana on ana-laptop (pid 4242) since 2026-10-19T12:00:00Z`.
+func (l DeployLock) String() string {
+	var b strings.Builder
+	op := l.Operation
+	if op == "" {
+		op = "deploy"
+	}
+	fmt.Fprintf(&b, "a %s", op)
+	if l.Holder != "" {
+		fmt.Fprintf(&b, " by %s", l.Holder)
+	}
+	if l.Host != "" {
+		fmt.Fprintf(&b, " on %s", l.Host)
+	}
+	if l.PID > 0 {
+		fmt.Fprintf(&b, " (pid %d)", l.PID)
+	}
+	if l.CI != "" {
+		fmt.Fprintf(&b, " in CI run %s", l.CI)
+	}
+	if !l.Time.IsZero() {
+		fmt.Fprintf(&b, " since %s", l.Time.UTC().Format(time.RFC3339))
+	}
+	return b.String()
+}
+
+// ErrLockHeld is what a LockHeldError wraps.
+var ErrLockHeld = errors.New("the deploy lock is held")
+
+// LockHeldError is a StateLocker's refusal of a run's lock that another
+// holds, with that lock.
+type LockHeldError struct {
+	Lock DeployLock
+}
+
+func (e *LockHeldError) Error() string {
+	return fmt.Sprintf("the deploy lock of %s is held by %s", e.Lock.Run, e.Lock)
+}
+
+func (e *LockHeldError) Unwrap() error { return ErrLockHeld }
 
 // SecretStore keeps the values of an environment's secrets, keyed by an
 // ID: an application secret's StackSecret ID, its declaring type and field

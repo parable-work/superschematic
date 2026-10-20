@@ -412,7 +412,8 @@ export abstract class Preview extends Staging {}
 - **`settings`** sets values per deployable. `of` is a service handle or
   an `@server` or `@database` class. `platform` places the deployable on
   another platform than the target's, and every key but `of`, `job`,
-  `platform`, `env`, `schedule`, `timeZone` and `enabled` is a platform
+  `worker`, `platform`, `env`, `schedule`, `timeZone`, `enabled`,
+  `onDeploy`, `instances` and `concurrency` is a platform
   setting, which the loader checks against that platform's settings
   schema. `env` binds the server's `@envVars` fields, each to a literal
   or to `{ parameter }`, a parameter of the environment that the deploy
@@ -426,6 +427,9 @@ export abstract class Preview extends Staging {}
   merge over the `extends` chain as a server's do. A schedule runs unless
   the settings turn it off, except in a parameterized environment, whose
   members run none unless their settings turn it on (section 8.7).
+  `onDeploy: true` runs the job once on every deploy, after the rollout
+  and before the contract phase (D52, amended); unlike a schedule, a
+  member inherits it, and `onDeploy: false` turns it off.
 - **A worker's settings** name the worker beside its API's handle: `{ of:
   ShopOrders, worker: "FulfilOrders", instances: 3, concurrency: 8,
   enabled: false }` (D53). `instances` is how many run, one unless set,
@@ -703,9 +707,12 @@ The order comes from the graph:
 3. servers, jobs and workers, callees before callers, so a new caller
    never meets an old callee (a job or a worker calls what its API calls,
    and nothing calls either);
-4. the migrations' `contract` steps, once no server of the previous
+4. the jobs that run on every deploy, once each, now that every server of
+   the new version runs (D52, amended): a jobs step that holds no
+   resources;
+5. the migrations' `contract` steps, once no server of the previous
    version runs (D27);
-5. exposure.
+6. exposure.
 
 The provisioner applies in that order (section 6.5).
 
@@ -1821,7 +1828,8 @@ runs an environment on the `local` target (`internal/stack/local`):
 2. It reads the environment the build resolved: `--environment`, or the
    stack's one environment on the local target.
 3. It applies the deploy order (section 5.3) through the local provisioner,
-   then stays in the foreground until Ctrl-C or until a server or a worker
+   whose jobs step runs each job that runs on every deploy once, then
+   stays in the foreground until Ctrl-C or until a server or a worker
    exits, running each job on its schedule meanwhile (section 8.7). The
    summary it prints names each server's and each site's URL, when each
    job runs, and the queue each worker handles (section 8.8).
@@ -1838,7 +1846,7 @@ runs an environment on the `local` target (`internal/stack/local`):
 | bucket | one fake-gcs-server container per environment and checkout beside Postgres's, `superschematic-<stack>-<environment>-<checkout>-storage`, from `fsouza/fake-gcs-server:1.56.1` unless the `storageImage` value names another, on plain HTTP and publishing its port on 127.0.0.1 only. It keeps its objects in the container's filesystem. A bucket per Bucket service, named after it (`shop-media`), which the provisioner creates through the emulator's JSON API (D54) |
 | migration | each run plans with `sqlmigrate` from the model the database recorded (`superschematic-migrate status --model`) to the schema's model, and applies the plan with `superschematic-migrate`, expand and contract back to back, since no server of the previous version runs. The runner is on `PATH`, or where `SUPERSCHEMATIC_MIGRATE` says |
 | server | a Go process built with `go build` (with `-mod=mod`) from its entrypoint module at `<output-root>/server/<stack>/<server>` (section 8.1); a TypeScript one, `bun main.ts` in its entrypoint package at the same place, after one `bun install` at the output root, the root of the Bun workspace (section 8.6); or a Rust one, built with `cargo build --release --locked` in its crate at the same place and run from `target/release/<binary>`, the binary its `Cargo.toml` names (D57). Its environment is its bindings, a derived field as one variable per member (section 3.4), and `PORT`, with nothing of the shell's but `PATH`, `HOME` and a few like them. It is ready once it answers `/readyz`, and each of its lines is printed with its name in front |
-| job | a process built and run as a server in its language is, from its entrypoint at `<output-root>/server/<stack>/<job>`: a Go binary, `bun main.ts` for TypeScript, or for Rust the binary its crate's `Cargo.toml` names, built with `cargo build --release --locked` into the target directory the environment's Rust servers share (D65). It has a server's environment and no `PORT`. It runs on its schedule, in its time zone, while `stack dev` waits, and once with `superschematic stack run <environment> <job>`, each line of a run's output with its name in front. `jobs/<job>.lock` in the environment's state directory keeps a schedule's runs and `stack run`'s apart (section 8.7) |
+| job | a process built and run as a server in its language is, from its entrypoint at `<output-root>/server/<stack>/<job>`: a Go binary, `bun main.ts` for TypeScript, or for Rust the binary its crate's `Cargo.toml` names, built with `cargo build --release --locked` into the target directory the environment's Rust servers share (D65). It has a server's environment and no `PORT`. It runs on its schedule, in its time zone, while `stack dev` waits, once after the rollout when its settings say `onDeploy`, and once with `superschematic stack run <environment> <job>`, each line of a run's output with its name in front. `jobs/<job>.lock` in the environment's state directory keeps a schedule's runs and `stack run`'s apart (section 8.7) |
 | worker | a process built and run as a server in its language is, Go, TypeScript or Rust (D65), from its entrypoint at `<output-root>/server/<stack>/<worker>`, started in its rollout wave with the servers: the same `local:process/process:Process` node with no port, `kind: worker` and a readiness of `started`, so it is ready once it runs. Its environment is a server's with no `PORT` and with `WORKER_CONCURRENCY`, the concurrency the environment gives it. One process runs whatever its `instances`, none when the environment turns it off; each line is printed with its name in front, and its exit stops the environment, as a server's does (section 8.8) |
 | site | built once, `bun run <build>` in its package at the naming file's `[implementation_paths] site` template after the workspace's install, then served from a file server of the provisioner's own on `http://127.0.0.1:<port>`: each file of its output, its config at `/__superschematic/config.json` with each API it calls at its loopback URL, and its fallback for a path that names no file. HTML files and the config are served `no-cache` and `no-store`, so a reload sees a rebuilt site (D55) |
 | sql edge | `postgres://postgres@127.0.0.1:<port>/<database>?sslmode=disable` |
@@ -2636,7 +2644,33 @@ export abstract class ShipOrders {}
   on a schedule a job does not have is refused. Resolution records what
   runs on the job's deployable (`ir.ResolvedJob`): its API and class, the
   schedule it runs on in the environment, empty for none, the time zone,
-  the timeout in seconds and the retries.
+  the timeout in seconds, the retries, and whether it runs on every
+  deploy.
+- **On every deploy.** `{ of: ShopOrders, job: "BackfillTotals",
+  onDeploy: true }` runs a job once on every deploy of the environment
+  (D52, amended), whether or not it has a schedule: a backfill that fills
+  what the new version's servers write, a cache to warm, reference rows
+  to bring up to date. Resolution puts each such job in a jobs step of
+  the deploy order (section 5.3) after the last rollout wave, so every
+  server of the new version runs, and before the contract phase, so the
+  job may still read what the contract drops, and the contract's
+  tightenings, a column made `NOT NULL` among them, hold only after it.
+  The deploy runs each job through the target's `JobRunner`, as `stack
+  run` does, with the image the rollout gave it, waits for the run, its
+  retries included, and fails at the jobs step when its last try fails,
+  with that try's error: the contract does not run, the manifest records
+  the failure and the model between the phases, as for a failed rollout
+  (section 11.2), and the next deploy runs the job again. Every deploy
+  runs it, a deploy that changes nothing included, so it must be
+  idempotent. The setting merges over the `extends` chain as any setting
+  does, so a member of a parameterized environment inherits it, unlike a
+  schedule, and `onDeploy: false` turns it off; a server's or a worker's
+  `onDeploy` is refused. A target with no `JobRunner`, or a job whose
+  artifact is a bundle (D64), has its deploy refused before any step.
+  `stack plan` lists the jobs a deploy runs. `stack dev` runs each one
+  once the environment is up, after the last rollout wave, waits for it,
+  logs its end, and, as with every run of a job, a failure never stops
+  the environment; a run of it from `stack run` makes it skip that run.
 - **Running locally.** The local target lowers a job to a
   `local:process/job:Job` node, and `stack dev` builds its binary in its
   rollout wave, as it builds a server's, or, for a TypeScript job, installs
@@ -2695,12 +2729,24 @@ export abstract class ShipOrders {}
     schedule, and gives `deployer` Cloud Scheduler's admin role (section
     7.3). The migration job gives a job's IAM database user its privileges
     as it gives a server's (section 8.4).
-  - The Cloud Run job resource can also start an execution when it is
-    created or updated (`runExecutionToken`, `startExecutionToken` in the
-    pinned schema), which a job that runs on every deploy could use.
+  - A job that runs on every deploy runs as an execution of its Cloud Run
+    job in the deploy's jobs step, through the job runner `stack run`
+    uses: the Cloud Run job as the rollout left it, with no override,
+    after checking that it runs the image the rollout pinned, and the
+    last try's error read from Cloud Logging when it fails. Its graph is
+    the one it has without the setting. The Cloud Run job resource can
+    start an execution itself when it is created or updated
+    (`runExecutionToken`, `startExecutionToken` in the pinned schema),
+    and the deploy does not use it: the execution would start in the
+    job's own rollout wave, before the servers of later waves run; the
+    graph would need a token that changes on every deploy, which no
+    schema gives it, so every plan would update the job; Pulumi's update
+    would wait on Cloud Run's readiness and report Cloud Run's account
+    of a failure, not the job's error; and a failed execution would leave
+    the job's node failed in the provisioner's state, where the next
+    deploy, with the same token, would not run it again.
 
-Workers, which run until stopped, handle queues (section 8.8). A job that
-runs on every deploy is not built.
+Workers, which run until stopped, handle queues (section 8.8).
 
 ### 8.8 Queues and workers
 
@@ -3726,12 +3772,12 @@ request adds an edge and grants `run.invoker`".
 ### 11.1 Commands
 
 The core adds a `stack` command group: `init`, `bootstrap`, `secrets set`,
-`dev`, `plan`, `build`, `deploy`, `destroy`, `outputs`, `run` and `queue`.
-Targets and provisioners plug into it; they add no commands of their own.
-`stack dev` runs a local environment (section 8.3), `stack run` runs a job
-once on demand, locally or in the cloud (section 8.7), and `stack queue`
-lists, retries and drops a queue's dead messages, locally for now (section
-8.8), in `cli/stack_queue.go`.
+`dev`, `plan`, `build`, `deploy`, `destroy`, `outputs`, `run`, `queue` and
+`unlock`. Targets and provisioners plug into it; they add no commands of
+their own. `stack dev` runs a local environment (section 8.3), `stack run`
+runs a job once on demand, locally or in the cloud (section 8.7), and
+`stack queue` lists, retries and drops a queue's dead messages, locally for
+now (section 8.8), in `cli/stack_queue.go`.
 
 `stack init [<services-root>]` starts a stack in a tree that already has
 API services (D59), in `cli/stack_init.go` over `internal/stackinit`. It
@@ -3794,12 +3840,13 @@ and reads the `environment.json` the build writes, it resolves the
 environment as the `stack` generator does, without a build, so `plan`
 never reads a stale one. The provisioner's program goes to
 `<schemas-root>/dist/program/<stack>/<environment>`, or `--program-dir`.
-`plan`, `build`, `deploy`, `bootstrap`, `destroy` and `outputs` refuse a
-local environment, which `stack dev` runs, `secrets set` writes its
-`secrets.env`, and `run` runs a job against it. A command
+`plan`, `build`, `deploy`, `bootstrap`, `destroy`, `outputs` and `unlock`
+refuse a local environment, which `stack dev` runs, `secrets set` writes
+its `secrets.env`, and `run` runs a job against it. A command
 that works on one run of a parameterized environment takes each
 parameter's value as `--param pr=123`. `bootstrap`, `secrets set`,
-`plan`, `build`, `deploy`, `destroy`, `outputs` and `run` are built, in
+`plan`, `build`, `deploy`, `destroy`, `outputs`, `run` and `unlock` are
+built, in
 `cli/stack_deploy.go` and `cli/stack_run.go` over `internal/stackdeploy`,
 whose public face is in `stack`; the reference page "CLI" lists their
 flags. `build` builds the images a deploy would build (section 11.2) and
@@ -3808,7 +3855,9 @@ manifest. A target plugs into them, and into the generated CI, through
 seven seams on its `TargetSpec` (D45, D46, D47, D52):
 
 - `State`, a state store: the provisioner's state backend for an
-  environment, and each run's deploy manifest;
+  environment, and each run's deploy manifest. A store that is also a
+  `StateLocker` keeps each run's deploy lock beside its manifest (section
+  11.2): on gcp an object of the state bucket;
 - `Secrets`, a secret store: set, exists and list, keyed by a secret's
   identity (section 4.2) or a credential's secret name;
 - `Bootstrap`, the bootstrap of section 7.3;
@@ -3881,11 +3930,15 @@ file.
    returning once the platform reports its servers ready: Cloud Run's provider waits for
    the revision's `Ready` condition, which the startup probe on `/readyz`
    holds back until the server's databases answer (section 7.2);
-8. runs the plan's `contract` steps (`--phase contract`), the drops and
+8. runs each job the environment runs on every deploy, once, through the
+   target's job runner, and waits for it, its retries included; a job
+   whose last try fails stops the deploy here, before the contract
+   (section 8.7, D52, amended);
+9. runs the plan's `contract` steps (`--phase contract`), the drops and
    tightenings that the previous version's servers could not survive, once
    none of them runs;
-9. applies exposure;
-10. writes a deploy manifest to the state bucket after every step and at
+10. applies exposure;
+11. writes a deploy manifest to the state bucket after every step and at
     the end: the resolved environment, the IR digest of each service, the
     image of each server and job with the digest of the build context the
     deploy built it from, the digest of each site's files, the bundle of
@@ -3919,7 +3972,8 @@ depend on what the manifest records, and the graph is a pure function of
 the schemas, so a migration is not a node.
 
 A rollout that fails runs no `contract` step, so the previous version's
-servers keep working on the expanded schema. The runner records that
+servers keep working on the expanded schema, and neither does a deploy
+whose job of the jobs step fails, which the next deploy runs again. The runner records that
 schema as the database's model, and the manifest records it too. The next
 deploy plans from it: its plan supersedes the pending `contract`, and any
 drop still wanted is in its own `contract` (D27, amended). A migration
@@ -3936,6 +3990,48 @@ the starting point for a rollback. The manifest records where the last
 deploy got to: `deploying` while it runs, then `deployed`, or `failed` with
 the step and the error. The bucket keeps every version of it.
 
+Two deploys of one run must not overlap: each plans its migrations and
+its images from the manifest the other replaces, and each step's
+targeted update is the provisioner's to lock, not the deploy's whole
+order. So `stack deploy` and `stack destroy` take the run's deploy lock
+before they read the manifest, and release it when they end, whether
+they succeed, fail or are interrupted; Ctrl-C stops the step under way,
+records the failure and releases the lock, and a second Ctrl-C ends the
+process (D46, amended). A second deploy or destroy of the run while one
+holds it fails at once, naming the holder, the host, the process, the CI
+run when there is one, and when it took the lock:
+
+```text
+the deploy lock of Staging is held by a deploy by ana on ana-laptop (pid 4242) since 2026-10-19T09:00:00Z, 12m3s ago;
+wait for it to end, or, when it no longer runs, remove its lock with `superschematic stack unlock Staging`
+```
+
+The lock is held, not leased: it has no expiry, and only its holder's
+release or `stack unlock` removes it. A lease that expired while its
+holder was paused (a laptop asleep, a CI runner preempted, a dropped
+connection) would let a second deploy start beside the first, which
+would go on writing the provisioner's state, the migrations and the
+manifest, and none of those writes could check a fencing token. A deploy
+whose process is killed leaves its lock; `stack unlock <environment>`
+shows it and asks for the run's name, or takes `--yes`, and removes that
+lock and no other, so a lock another deploy took meanwhile stays. Each
+run has its own lock, as it has its own manifest: members of a
+parameterized environment deploy side by side. A deploy holds the lock
+by an ID of its own and releases only that ID, so one whose lock a person
+removed while it ran leaves the next deploy's lock in place, and says
+the two may have run at once. `stack plan` takes no lock, since the
+`planner` account writes nothing, and says when a deploy holds one.
+
+The lock is the target's: its state store keeps it when it is a
+`registry.StateLocker` (`Lock`, `ReadLock` and `Unlock`, each atomic in
+the store). On gcp it is the object
+`superschematic/locks/<stack>/<run>.json` in the state bucket, holding the
+lock's JSON, created with `ifGenerationMatch=0`, so Cloud Storage creates
+it for one writer only, and deleted with `ifGenerationMatch` at the
+generation that holds the deploy's ID. `deployer` writes it with the
+object admin role it holds on the bucket. A target whose store keeps no
+lock deploys without one, and the deploy says so.
+
 `stack plan <environment>` runs the provisioner's `Plan` over the program
 with the images pinned, plans each database's migration the same way, and
 prints both, with the secrets that have no value, the servers and jobs
@@ -3944,6 +4040,8 @@ changes nothing, so the read-only `planner` account runs it. `stack
 destroy` removes a run's resources and its manifest, and `stack outputs`
 prints the run's outputs file, or writes it with `--out`, which the
 bindings generator reads (section 6.6).
+
+`stack plan` also lists the jobs a deploy runs on every deploy.
 
 `stack plan` builds nothing: it plans each server and job at the image
 `--image` names or the manifest records, and lists one with neither among
@@ -4220,11 +4318,14 @@ whatever the deploy decides is affected, and needs no list of its own.
    that runs `superschematic-migrate job` on Cloud SQL and owns the
    servers' privileges (section 8.4, D46), and `stackdeploy.CredentialsOf`
    reading the credentials a DNS platform resolves into
-   `dns.credentials`. So has the generated CI of section 11.3 (D47).
-   Next: a deploy lock beyond the provisioner's and the runner's.
+   `dns.credentials`. So has the generated CI of section 11.3 (D47),
+   and the deploy lock that keeps two deploys of a run apart, a
+   `StateLocker` on the target's state store, on gcp an object of the
+   state bucket (section 11.2, D46, amended).
 8. **CLI.** The `stack` command group. Landed: `stack dev` (section 8.3),
    which runs Go, TypeScript and Rust servers, and `bootstrap`, `secrets
-   set`, `plan`, `deploy`, `destroy` and `outputs` (section 11).
+   set`, `plan`, `deploy`, `destroy`, `outputs` and `unlock` (section
+   11).
 
 ## 13. Module layout
 
@@ -4372,9 +4473,9 @@ model, or retired, when it lands.
    deploys, the hazard gate and the deploy manifest. Built (D45, D46):
    each deploy plans its databases' migrations, gates their hazards,
    records the manifest, and on gcp runs each phase as the migration
-   job. Milestone 3's run applied an expand phase on Cloud SQL; no
-   contract phase has run there, and a deploy lock beyond the
-   provisioner's and the runner's is not built.
+   job, holding the run's deploy lock throughout (section 11.2).
+   Milestone 3's run applied an expand phase on Cloud SQL; no contract
+   phase has run there, nor has the lock.
 6. **CI generation and parameterized environments.** Built (D47). A
    stack's `outputs.ci` writes its GitHub Actions workflow (section
    11.3), which checks with no credentials, plans each cloud environment

@@ -63,7 +63,10 @@ var inheritedVariables = []string{
 //     servers, whose main.ts Bun runs as it is (D51); it starts
 //     each server with its environment (its literals, its secrets from the
 //     environment's secrets file, its derived variables, and PORT), and
-//     waits until it answers ReadinessPath.
+//     waits until it answers ReadinessPath;
+//   - jobs: it runs once each job that runs on every deploy, which its
+//     rollout wave built, now that every server runs, and waits for it
+//     (D52, amended); a failed run is logged and stops nothing.
 //
 // Each process's output reaches Out a line at a time, prefixed with its
 // name. The processes run until Destroy, which stops them and the
@@ -306,6 +309,9 @@ func (p *Provisioner) Apply(ctx context.Context, req registry.ProvisionRequest, 
 	prog, err := p.program(req)
 	if err != nil {
 		return err
+	}
+	if step.Step == ir.StepJobs {
+		return p.runDeployJobs(ctx, req, step.Deployables)
 	}
 	if step.Step == ir.StepMigrate {
 		if step.Migration == ir.MigrationContract {

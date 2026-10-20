@@ -182,6 +182,14 @@ type (
 	// step (D46).
 	MigrationPreparer = registry.MigrationPreparer
 
+	// A target's StateStore that is a StateLocker keeps each run's
+	// DeployLock beside its manifest, which a deploy and a destroy hold
+	// while they run; a lock another holds is refused with a
+	// LockHeldError, which wraps ErrLockHeld (D46, amended).
+	StateLocker   = registry.StateLocker
+	DeployLock    = registry.DeployLock
+	LockHeldError = registry.LockHeldError
+
 	// A target's SitePublisher puts a site's files and its config for a
 	// run where the site's platform serves them (SitePublishRequest, D55).
 	SitePublisher      = registry.SitePublisher
@@ -284,10 +292,12 @@ const (
 
 // ErrNoManifest is what a StateStore's ReadManifest wraps for a run that
 // was never deployed; ErrSecretNotCreated is what a SecretStore's Set
-// wraps when the secret's storage does not exist yet.
+// wraps when the secret's storage does not exist yet; ErrLockHeld is what
+// a LockHeldError wraps.
 var (
 	ErrNoManifest       = registry.ErrNoManifest
 	ErrSecretNotCreated = registry.ErrSecretNotCreated
+	ErrLockHeld         = registry.ErrLockHeld
 )
 
 // DefaultToolInvocationPolicy returns the core's invocation policy:

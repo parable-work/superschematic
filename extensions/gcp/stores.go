@@ -2,6 +2,7 @@ package gcp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -26,8 +27,10 @@ const (
 	stateKeyRing = "superschematic"
 	stateKey     = "pulumi-state"
 
-	// manifestPrefix is where the deploy manifests sit in the bucket.
+	// manifestPrefix is where the deploy manifests sit in the bucket, and
+	// lockPrefix where each run's deploy lock does (D46, amended).
 	manifestPrefix = "superschematic/manifests/"
+	lockPrefix     = "superschematic/locks/"
 
 	// stateRetentionDays is how long the state bucket keeps a build
 	// context, a migration job document or a plan (stateLifecycle).
@@ -124,6 +127,114 @@ func (s stateStore) DeleteManifest(ctx context.Context, run registry.Run) error 
 		return err
 	}
 	return s.ext.cloud().DeleteObject(ctx, stateBucket(v.project), manifestObject(run))
+}
+
+// The deploy lock of a run (D46, amended) is an object of the state
+// bucket, superschematic/locks/<stack>/<run>.json, holding the lock's JSON:
+// its ID, the run, the operation, the holder, the host, the process and
+// when it was taken. Lock writes it with ifGenerationMatch=0, so Cloud
+// Storage creates it for one writer only; Unlock deletes it with
+// ifGenerationMatch at the generation it read, after checking the ID, so
+// it removes only the lock it named. The bucket keeps versions, so each
+// lock a deploy held stays readable as a noncurrent version; the
+// precondition reads the live one. `deployer` writes and deletes it with
+// the object admin role it holds on the bucket already.
+
+// lockAttempts bounds Lock and Unlock when the lock changes hands between
+// their read and their write.
+const lockAttempts = 3
+
+// lockObject is where a run's deploy lock sits in the bucket.
+func lockObject(run registry.Run) string {
+	return lockPrefix + kebab(run.Environment.Stack) + "/" + run.Name() + ".json"
+}
+
+var _ registry.StateLocker = stateStore{}
+
+func (s stateStore) Lock(ctx context.Context, run registry.Run, lock registry.DeployLock) error {
+	v, err := envValues(run.Environment)
+	if err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(lock, "", "  ")
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+	bucket, object := stateBucket(v.project), lockObject(run)
+	cloud := s.ext.cloud()
+	for range lockAttempts {
+		err := cloud.CreateObject(ctx, bucket, object, data)
+		if !errors.Is(err, fs.ErrExist) {
+			return err
+		}
+		held, _, err := readLock(ctx, cloud, bucket, object)
+		if err != nil {
+			return err
+		}
+		if held != nil {
+			return &registry.LockHeldError{Lock: *held}
+		}
+		// Released between the write and the read: take it again.
+	}
+	return fmt.Errorf("gcp: the deploy lock of %s changed hands %d times while this deploy took it; deploy again", run.Name(), lockAttempts)
+}
+
+func (s stateStore) ReadLock(ctx context.Context, run registry.Run) (*registry.DeployLock, error) {
+	v, err := envValues(run.Environment)
+	if err != nil {
+		return nil, err
+	}
+	held, _, err := readLock(ctx, s.ext.cloud(), stateBucket(v.project), lockObject(run))
+	return held, err
+}
+
+func (s stateStore) Unlock(ctx context.Context, run registry.Run, id string) error {
+	v, err := envValues(run.Environment)
+	if err != nil {
+		return err
+	}
+	bucket, object := stateBucket(v.project), lockObject(run)
+	cloud := s.ext.cloud()
+	for range lockAttempts {
+		held, generation, err := readLock(ctx, cloud, bucket, object)
+		switch {
+		case err != nil:
+			return err
+		case held == nil:
+			return nil
+		case held.ID != id:
+			return &registry.LockHeldError{Lock: *held}
+		}
+		deleted, err := cloud.DeleteObjectGeneration(ctx, bucket, object, generation)
+		if err != nil || deleted {
+			return err
+		}
+		// Another version went live between the read and the delete: read
+		// it again.
+	}
+	return fmt.Errorf("gcp: the deploy lock of %s changed %d times while it was released; run `stack unlock` to remove it", run.Name(), lockAttempts)
+}
+
+// readLock reads a lock object: the lock and its generation, or nil when
+// none is live. An object that holds no lock is refused with how to remove
+// it by hand.
+func readLock(ctx context.Context, cloud Cloud, bucket, object string) (*registry.DeployLock, int64, error) {
+	data, generation, err := cloud.ReadObjectGeneration(ctx, bucket, object)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, 0, nil
+	}
+	if err != nil {
+		return nil, 0, err
+	}
+	var held registry.DeployLock
+	if err := json.Unmarshal(data, &held); err != nil || held.ID == "" {
+		if err == nil {
+			err = errors.New("it has no id")
+		}
+		return nil, 0, fmt.Errorf("gcp: gs://%s/%s holds no deploy lock superschematic reads (%v); once no deploy runs, delete it with `gcloud storage rm gs://%s/%s`", bucket, object, err, bucket, object)
+	}
+	return &held, generation, nil
 }
 
 // secretStore keeps secret values in Secret Manager, in the environment's

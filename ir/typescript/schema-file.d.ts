@@ -91,6 +91,7 @@ export interface DeployableSettings {
   env?: { [key: string]: EnvValue };
   instances?: number;
   of: DeployableRef;
+  onDeploy?: boolean;
   platform?: string;
   schedule?: string;
   timeZone?: string;

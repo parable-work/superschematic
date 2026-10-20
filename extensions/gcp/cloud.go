@@ -48,7 +48,8 @@ import (
 // the secret values `stack secrets set` and bootstrap write, and the deploy
 // manifests. NewCloud returns the one over Google Cloud's client
 // libraries, which authenticate with application default credentials;
-// tests pass a fake. Every call is idempotent.
+// tests pass a fake. Every call is idempotent but CreateObject, which
+// refuses an object that it wrote before.
 type Cloud interface {
 	// EnableServices enables APIs (`run.googleapis.com`) on a project.
 	EnableServices(ctx context.Context, project string, services []string) error
@@ -81,6 +82,23 @@ type Cloud interface {
 
 	// DeleteObject deletes an object; a missing one is not an error.
 	DeleteObject(ctx context.Context, bucket, object string) error
+
+	// CreateObject writes an object only where none is live, with the
+	// precondition ifGenerationMatch=0, which Cloud Storage checks in the
+	// write itself: of two writers, one creates it. It returns an error
+	// that wraps fs.ErrExist, and writes nothing, when one is live. The
+	// deploy lock is such an object (D46, amended).
+	CreateObject(ctx context.Context, bucket, object string, data []byte) error
+
+	// ReadObjectGeneration returns an object's content and the generation
+	// of its live version, or an error that wraps fs.ErrNotExist.
+	ReadObjectGeneration(ctx context.Context, bucket, object string) (data []byte, generation int64, err error)
+
+	// DeleteObjectGeneration deletes an object while generation is its
+	// live version, with the precondition ifGenerationMatch, and reports
+	// whether it did: false when the object is gone, or another
+	// generation is live.
+	DeleteObjectGeneration(ctx context.Context, bucket, object string, generation int64) (deleted bool, err error)
 
 	// WriteSiteObject replaces an object of a site's bucket, which the
 	// site's load balancer serves with contentType and cacheControl
@@ -518,6 +536,72 @@ func (c *googleCloud) DeleteObject(ctx context.Context, bucket, object string) e
 		return fmt.Errorf("gcp: delete gs://%s/%s: %w", bucket, object, err)
 	}
 	return nil
+}
+
+func (c *googleCloud) CreateObject(ctx context.Context, bucket, object string, data []byte) error {
+	if err := c.clients(ctx); err != nil {
+		return err
+	}
+	w := c.storage.Bucket(bucket).Object(object).If(storage.Conditions{DoesNotExist: true}).NewWriter(ctx)
+	w.ContentType = contentType(object)
+	_, err := w.Write(data)
+	if cerr := w.Close(); err == nil {
+		err = cerr
+	}
+	switch {
+	case preconditionFailed(err):
+		return fmt.Errorf("gs://%s/%s: %w", bucket, object, fs.ErrExist)
+	case err != nil:
+		return fmt.Errorf("gcp: create gs://%s/%s: %w", bucket, object, err)
+	}
+	return nil
+}
+
+func (c *googleCloud) ReadObjectGeneration(ctx context.Context, bucket, object string) ([]byte, int64, error) {
+	if err := c.clients(ctx); err != nil {
+		return nil, 0, err
+	}
+	r, err := c.storage.Bucket(bucket).Object(object).NewReader(ctx)
+	if errors.Is(err, storage.ErrObjectNotExist) {
+		return nil, 0, fmt.Errorf("gs://%s/%s: %w", bucket, object, fs.ErrNotExist)
+	}
+	if err != nil {
+		return nil, 0, fmt.Errorf("gcp: read gs://%s/%s: %w", bucket, object, err)
+	}
+	defer func() { _ = r.Close() }()
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return nil, 0, fmt.Errorf("gcp: read gs://%s/%s: %w", bucket, object, err)
+	}
+	return data, r.Attrs.Generation, nil
+}
+
+func (c *googleCloud) DeleteObjectGeneration(ctx context.Context, bucket, object string, generation int64) (bool, error) {
+	if err := c.clients(ctx); err != nil {
+		return false, err
+	}
+	err := c.storage.Bucket(bucket).Object(object).If(storage.Conditions{GenerationMatch: generation}).Delete(ctx)
+	switch {
+	case errors.Is(err, storage.ErrObjectNotExist), preconditionFailed(err):
+		return false, nil
+	case err != nil:
+		return false, fmt.Errorf("gcp: delete gs://%s/%s: %w", bucket, object, err)
+	}
+	return true, nil
+}
+
+// preconditionFailed reports whether err is Cloud Storage's refusal of a
+// write or a delete whose generation precondition did not hold: 412 over
+// the JSON API, FAILED_PRECONDITION over gRPC.
+func preconditionFailed(err error) bool {
+	if err == nil {
+		return false
+	}
+	var gerr *googleapi.Error
+	if errors.As(err, &gerr) {
+		return gerr.Code == http.StatusPreconditionFailed
+	}
+	return status.Code(err) == codes.FailedPrecondition
 }
 
 func (c *googleCloud) EnsureSecret(ctx context.Context, project, secret string) (bool, error) {
