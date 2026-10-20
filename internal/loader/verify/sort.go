@@ -11,7 +11,8 @@ import (
 // in every form:
 //
 //   - an operation takes one, on a @paginated operation, as an optional
-//     query parameter of text without a default;
+//     query parameter of text without a default, which is no search, refers
+//     to nothing and has no Validate rules: its values are its fields;
 //   - it names at least one field, each once, of the operation's item, the
 //     element of its result, found as ir.LookupScopes finds a type so that
 //     a dependency's item works (D66);
@@ -23,7 +24,10 @@ import (
 //
 // A field that is @virtual on an item sourced from a table is a warning:
 // no column holds it, so the table cannot order by it, though an
-// implementation that sorts in memory can. A dependency's item reads from
+// implementation that sorts in memory can. A field of text without a
+// maxLength is a warning too: the ORM's page key is the row's id, but an
+// implementation's own key may hold the value, and a cursor holds at most
+// 1024 characters. A dependency's item reads from
 // Input.DependencySchemas; one the loader did not read is not checked
 // field by field.
 func checkSorts(schema *ir.Schema, in Input, r *Result) {
@@ -73,6 +77,15 @@ func checkSort(schema *ir.Schema, in Input, owner string, op *ir.FieldDef, r *Re
 	}
 	if len(sort.Sort) == 0 {
 		r.errorf("", "%s: sort argument %s names no field", owner, sort.Name)
+	}
+	if sort.Search {
+		r.errorf("", "%s: sort argument %s is also a search (SearchQuery); a page's order and its search are two arguments", owner, sort.Name)
+	}
+	if sort.References != nil {
+		r.errorf("", "%s: sort argument %s refers to %s (RefersTo); a sort's value names a field of its item", owner, sort.Name, sort.References.Type)
+	}
+	if rules := validateRules(sort); len(rules) > 0 {
+		r.errorf("", "%s: sort argument %s has Validate's %s; a sort's values are its fields, which the sort checks itself", owner, sort.Name, strings.Join(rules, ", "))
 	}
 
 	itemName := op.TypeRef.Name
@@ -127,6 +140,8 @@ func checkSortFields(schema *ir.Schema, owner string, sort *ir.ArgumentDef, item
 			r.errorf("", "%s: sort argument %s names %s.%s, which is Nullable; a page's order has no place for a null", owner, sort.Name, item.Name, field.Name)
 		case field.Secret:
 			r.errorf("", "%s: sort argument %s names %s.%s, which is Secret; a page's order would show it", owner, sort.Name, item.Name, field.Name)
+		case unboundedText(schema, itemSchema, field):
+			r.warnf("", "%s: sort argument %s names %s.%s, text without a maxLength: a page key that holds its value, as an implementation's own may, can pass the cursor's limit of 1024 characters with a long one", owner, sort.Name, item.Name, field.Name)
 		}
 		if field.Virtual && item.Source != nil {
 			r.warnf("", "%s: sort argument %s names %s.%s, which is @virtual: no column of %s holds it, so the table cannot order by it", owner, sort.Name, item.Name, field.Name, item.Source.Target)
@@ -142,6 +157,61 @@ func checkSortFields(schema *ir.Schema, owner string, sort *ir.ArgumentDef, item
 		}
 		r.errorf("", "%s: a sort breaks ties by id, and %s.id holds %s; it must be one required value", owner, item.Name, label)
 	}
+}
+
+// validateRules names the Validate rules an argument declares, in the
+// order Validate's config lists them.
+func validateRules(arg *ir.ArgumentDef) []string {
+	var rules []string
+	for _, rule := range []struct {
+		name string
+		set  bool
+	}{
+		{"min", arg.ValidateMin != nil},
+		{"max", arg.ValidateMax != nil},
+		{"minLength", arg.ValidateMinLength != nil},
+		{"maxLength", arg.ValidateMaxLength != nil},
+		{"listMin", arg.ValidateListMin != nil},
+		{"listMax", arg.ValidateListMax != nil},
+		{"pattern", arg.ValidatePattern != ""},
+	} {
+		if rule.set {
+			rules = append(rules, rule.name)
+		}
+	}
+	return rules
+}
+
+// unboundedText reports whether a sort field holds text whose length
+// nothing bounds: the string primitive, or a text scalar (ir.TextValue)
+// the catalog stores as TEXT or CITEXT, without a maxLength of the field's
+// (Validate) or of its scalar's. A time, a date and a UUID are text of a
+// bounded length, as their SQL types say. The ORM's page key is the row's id
+// alone, but an implementation's own key may hold the sort field's value
+// (D60, amended). The field's scalar is read from itemSchema, then from
+// schema.
+func unboundedText(schema, itemSchema *ir.Schema, field *ir.FieldDef) bool {
+	if field.ValidateMaxLength != nil || field.TypeRef.IsArray || field.TypeRef.IsMap {
+		return false
+	}
+	if field.TypeRef.Name == "string" {
+		return true
+	}
+	for _, in := range []*ir.Schema{itemSchema, schema} {
+		if in == nil || in.Scalars[field.TypeRef.Name] == nil {
+			continue
+		}
+		scalar := in.Scalars[field.TypeRef.Name]
+		if !ir.TextValue(in, field.TypeRef) || scalar.MaxLength > 0 {
+			return false
+		}
+		switch strings.ToUpper(strings.TrimSpace(scalar.TypeMappings["sql"])) {
+		case "TEXT", "CITEXT":
+			return true
+		}
+		return false
+	}
+	return false
 }
 
 // sortItem finds the object type an operation lists, by its name, as
