@@ -790,8 +790,6 @@ on which no queue is claimed, and an environment on any target but
 | `--all` | off | `retry` and `drop`: every dead message, in place of IDs |
 | `--yes` | off | `drop`: confirm `--all` |
 
-## `stack bootstrap`, `secrets set`, `plan`, `build`, `deploy`, `destroy` and `outputs`
-
 ## `stack bootstrap`, `secrets set`, `plan`, `build`, `deploy`, `destroy`, `outputs` and `unlock`
 
 The cloud half of the `stack` group bootstraps, plans, builds, deploys and
