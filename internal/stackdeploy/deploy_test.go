@@ -342,7 +342,9 @@ func TestDeployPreparesAPrivilegelessRunnerForSteps(t *testing.T) {
 	}
 	calls := f.calls(n)
 	outputs := slices.Index(calls, "outputs Staging")
-	migrate := slices.IndexFunc(calls, func(c string) bool { return strings.HasPrefix(c, "migrate expand shop-db: ") && strings.Contains(c, "no steps") })
+	migrate := slices.IndexFunc(calls, func(c string) bool {
+		return strings.HasPrefix(c, "migrate expand shop-db: ") && strings.Contains(c, "no steps")
+	})
 	if outputs < 0 || migrate < 0 || outputs > migrate {
 		t.Errorf("the deploy ran:\n%s\nwant the expand phase with no steps, after it read the outputs", strings.Join(calls, "\n"))
 	}
