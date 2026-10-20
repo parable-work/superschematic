@@ -70,7 +70,8 @@ func TestTypeScriptWorkersEntrypointGolden(t *testing.T) {
 // TestTypeScriptWorkersRefusals: a server some environment places on
 // Workers whose APIs open a database or authenticate with the identity
 // runtime is refused, saying why, since its Workers entrypoint builds
-// neither yet; a job's entrypoint on Workers is the cron platform's (D64).
+// neither yet, and so is a job on Cron Triggers whose API opens a
+// database (D64).
 func TestTypeScriptWorkersRefusals(t *testing.T) {
 	input := func(edit func(*tsrestgen.APIOutput, *envgen.ConfigOutput)) servergen.TypeScriptInput {
 		output := &tsrestgen.APIOutput{
@@ -111,7 +112,10 @@ func TestTypeScriptWorkersRefusals(t *testing.T) {
 		{"the identity runtime", func(o *tsrestgen.APIOutput, _ *envgen.ConfigOutput) {
 			o.Identity = &tsrestgen.IdentityInfo{AuthDB: "shop-db"}
 		}, false, "server shop-api serves shop-api, which authenticates with the identity runtime over the user model (D50), and an environment places the server on Cloudflare Workers, where the identity runtime does not run"},
-		{"a job", none, true, "job shop-api runs on a platform whose artifact is a bundle, and a Workers entrypoint is built for a server alone"},
+		{"a job's database", func(o *tsrestgen.APIOutput, c *envgen.ConfigOutput) {
+			o.Deps.Database = "shop-db"
+			c.Derived = []envgen.DerivedField{{Key: "SHOP_DB_DATABASE", Kind: ir.EdgeSQL, Service: "shop-db"}}
+		}, true, "job shop-api of shop-api, whose database is shop-db, runs on Cloudflare's Cron Triggers in an environment, which reaches a database through D1 alone"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			in := input(tc.edit)

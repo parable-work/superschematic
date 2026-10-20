@@ -83,6 +83,11 @@ const (
 	// No connector reaches it.
 	BundlePlatform = "fake.bundle"
 
+	// CronPlatform runs TypeScript jobs whose artifact is a bundle, as
+	// Cloudflare's Cron Triggers run a job's Worker (D64): the same script
+	// as BundlePlatform's, for a job. No connector reaches from it.
+	CronPlatform = "fake.cron"
+
 	// WorkerSQLConnector, WorkerHTTPConnector and WorkerBucketConnector
 	// connect a worker, whose edges are its API's, as a job's connectors
 	// do.
@@ -242,6 +247,16 @@ func (e *Extension) Register(r *registry.Registry) error {
 				return ir.Output{Resource: ctx.Deployable.Name + ".script", Name: "url"}
 			},
 			Lower: lowerBundle,
+		},
+		{
+			Name:      CronPlatform,
+			Extension: Name,
+			Kind:      ir.DeployableJob,
+			Languages: []string{registry.APILanguageTypeScript},
+			Artifact:  ir.ArtifactBundle,
+			NameOf:    serverName,
+			AddressOf: func(registry.PlatformContext) any { return nil },
+			Lower:     lowerBundle,
 		},
 		database(SQLPlatform, registry.SQLDialectPostgres),
 		database(LitePlatform, registry.SQLDialectSQLite),
@@ -546,11 +561,11 @@ func lowerServer(ctx registry.PlatformContext) (registry.Lowered, error) {
 	return out, nil
 }
 
-// lowerBundle lowers a server on the bundle platform (D64) to an account
-// and the secrets it reads, as a server's, and a script that runs its
-// bundle: each file BundleFiles names, read from the program's artifacts
-// under the bundle's digest with its SHA-256, which the deploy pins, and
-// the server's environment.
+// lowerBundle lowers a server on the bundle platform, or a job on the cron
+// platform (D64), to an account and the secrets it reads, as a server's,
+// and a script that runs its bundle: each file BundleFiles names, read
+// from the program's artifacts under the bundle's digest with its
+// SHA-256, which the deploy pins, and the deployable's environment.
 func lowerBundle(ctx registry.PlatformContext) (registry.Lowered, error) {
 	d := ctx.Deployable
 	out, member, env, err := lowerAccount(ctx)
