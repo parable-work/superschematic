@@ -78,6 +78,8 @@ engine_behaviors_rust = "../../runtime/engine/rust/behaviors"
 engine_workqueue_rust = "../../runtime/engine-workqueue/rust"
 engine_abi_rust = "../../runtime/engine/rust/abi"
 engine_napi_rust = "../../runtime/engine/rust/napi"
+engine_go = "../../runtime/engine/go"
+engine_typescript = "../../runtime/engine/typescript"
 versiongraph_python = "../../runtime/versiongraph/python"
 
 # build-all writes the dependency graph of the generated packages to
