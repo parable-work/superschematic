@@ -53,6 +53,21 @@ jobs:
         run: bun install --frozen-lockfile
       - name: Build the services
         run: superschematic build-all schemas/services
+      - name: Install the TypeScript workspace from schemas/dist/bun.lock
+        working-directory: schemas/dist
+        run: |
+          if [ ! -f bun.lock ]; then
+            echo "::error file=schemas/dist/bun.lock::schemas/dist/bun.lock is not committed; build every service, run bun install in schemas/dist and commit schemas/dist/bun.lock" && exit 1
+          fi
+          bun install --frozen-lockfile || {
+            echo "::error file=schemas/dist/bun.lock::schemas/dist/bun.lock does not match the packages the build wrote; build every service, run bun install in schemas/dist and commit schemas/dist/bun.lock" && exit 1
+          }
+      - name: Type-check server reviews
+        working-directory: schemas/dist/server/reviews-stack/reviews
+        run: bun x --no-install tsc --noEmit -p tsconfig.json
+      - name: Bundle server reviews for Workers
+        working-directory: schemas/dist/server/reviews-stack/reviews
+        run: bun bundle.ts --check
 
   plan-staging:
     name: plan Staging
@@ -143,6 +158,16 @@ jobs:
       - name: Build the services
         if: github.event.action != 'closed'
         run: superschematic build-all schemas/services
+      - name: Install the TypeScript workspace from schemas/dist/bun.lock
+        if: github.event.action != 'closed'
+        working-directory: schemas/dist
+        run: |
+          if [ ! -f bun.lock ]; then
+            echo "::error file=schemas/dist/bun.lock::schemas/dist/bun.lock is not committed; build every service, run bun install in schemas/dist and commit schemas/dist/bun.lock" && exit 1
+          fi
+          bun install --frozen-lockfile || {
+            echo "::error file=schemas/dist/bun.lock::schemas/dist/bun.lock does not match the packages the build wrote; build every service, run bun install in schemas/dist and commit schemas/dist/bun.lock" && exit 1
+          }
       - name: Deploy Preview for the pull request
         if: github.event.action != 'closed'
         run: superschematic stack deploy Preview --stack schemas/services/reviews-stack --param pr=${{ github.event.pull_request.number }}
@@ -200,5 +225,14 @@ jobs:
           pulumi-version: "3.259.0"
       - name: Build the services
         run: superschematic build-all schemas/services
+      - name: Install the TypeScript workspace from schemas/dist/bun.lock
+        working-directory: schemas/dist
+        run: |
+          if [ ! -f bun.lock ]; then
+            echo "::error file=schemas/dist/bun.lock::schemas/dist/bun.lock is not committed; build every service, run bun install in schemas/dist and commit schemas/dist/bun.lock" && exit 1
+          fi
+          bun install --frozen-lockfile || {
+            echo "::error file=schemas/dist/bun.lock::schemas/dist/bun.lock does not match the packages the build wrote; build every service, run bun install in schemas/dist and commit schemas/dist/bun.lock" && exit 1
+          }
       - name: Deploy Staging
         run: superschematic stack deploy Staging --stack schemas/services/reviews-stack

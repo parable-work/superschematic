@@ -4561,7 +4561,7 @@ There is no `worker` key: resolution refuses the kind on this target.
 | server | A `cloudflare:index/worker:Worker` named after the deployable (`<deployable>.worker`), in infrastructure, with Workers Logs on unless `logs: false` (`observability.enabled` and `observability.logs`), workers.dev on only for an exposed server without a domain, and previews off (`subdomain.enabled`, `subdomain.previewsEnabled`). Each rollout makes a `workerVersion` (`<deployable>.version`, on the worker's `id`) and a `workersDeployment` (`<deployable>.deployment`) sending 100% of traffic to it. The version holds the server's bundle (`main.js`, `application/javascript+module`; `main.js.map`, `application/source-map`; and `superscalar_wasm_bg.wasm`, `application/wasm`, the name superscalar's `workerd` build imports it by; each a `contentFile` under `artifacts/<server>/{bundle-digest}/` with its pinned `contentSha256`), `mainModule: main.js`, the compatibility date the extension pins (`cloudflare.CompatibilityDate`, 2026-09-15) unless set, `limits.cpuMs` and `placement.mode` from the settings, and the server's config as bindings. Its address is `https://<name>`, the host a service binding's requests carry. TypeScript only, and no API over the user model; a name over 63 characters, or under a parameter 63 before the parameter's value, is refused as unrealizable. |
 | config | Each literal, parameter and derived variable is a `plain_text` binding named as the variable. A derived member flagged secret is a `secret_text` binding referencing the output that holds it. A `Secret<T>` field is a `secrets_store_secret` binding named after the field, with the environment's `secretsStoreId` and its secret's `SecretName`; without a `secretsStoreId` the server is refused, saying to run bootstrap. A D1 database, an R2 bucket or a callee Worker is a binding named after the derived field, which the value names: `d1: {binding, database}` a `d1` binding of the database's id, `binding: {name, worker}` a `service` binding to the Worker, and a bucket's `binding`, a name, an `r2_bucket` binding of the bucket its `name` names. Bindings are sorted by name, and two of one name are refused. |
 | database | A `d1Database` per hosted DB schema, `<stack>-<db>`, with a suffix under a parameter, and `sqlite` dialect: the node `<database>.d1.<db>`, in infrastructure. `locationHint` and `jurisdiction` become `primaryLocationHint` and `jurisdiction`; D1 ignores the hint under a jurisdiction, so both together are refused. |
-| sql edge | The value is `d1: { binding: "<FIELD>", database: <uuid output> }`. The platform writes `{type: "d1", name: <binding>, id: <database>}`, and the binding is the grant. |
+| sql edge | `cloudflare.workers-d1` derives `d1: { binding: "<FIELD>", database: <uuid output> }`, the uuid an output of the database's node. The platform writes `{type: "d1", name: <binding>, id: <database>}` beside the field's two `plain_text` variables, and the binding is the grant: D1 has no roles, so a Worker bound to a database reads and writes all of it, and the edge has no node. |
 | migration | The runner on the deploying machine, against `d1://<accountId>/<uuid>`, each uuid looked up by its database's name, with the run's token and no privileges (section 18.6). |
 | http edge | A service binding `{type: "service", name: <binding>, service: <callee's Worker>}`, and D37's signed token with the edge's key. The value is `{url: "https://<callee's Worker>", binding: {name, worker}, credential: {source: signed-token, issuer, audience, key}}`, and the callee's callers field gets the edge's issuer. |
 | internal server | No workers.dev, no custom domain and no route: only a service binding reaches it. |
@@ -4893,7 +4893,13 @@ sqlite-first database, since a Worker reads it as a D1 binding, and
 `Database` otherwise.
 
 A D1 binding provides `SqlDatabase` on Workers, and `openSqlite(path)` over
-`bun:sqlite` provides it under `stack dev`. The generated `main.ts`, and a
+`bun:sqlite` provides it under `stack dev`. A server's `fetch.ts` takes
+each sqlite-first database with `d1Database`: the d1 binding its field's
+`d1.binding` names, through `binding(env, name, 'd1')`, refusing a
+connection string or a Cloud SQL configuration, which a Worker cannot
+reach; `/readyz` pings each with `./d1`'s `ping`. The generator refuses a
+Workers server whose API's database lists postgres first, which no D1
+binding reaches. The generated `main.ts`, and a
 job's, open a sqlite-first database with `openDatabase`: it reads the
 field's `url`, a `sqlite:` URL, takes the file's path from it with
 `sqliteFile` (`./sqlite`), and opens it at once. It refuses a D1 binding,

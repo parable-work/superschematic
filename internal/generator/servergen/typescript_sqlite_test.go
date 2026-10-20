@@ -51,8 +51,8 @@ func loadTypeScriptSQLiteFixture(t *testing.T) fixture {
 
 // tsLiteGenerated lists the files of the sqlite-first fixture the
 // goldens hold, by their path under tsGoldenRoot: ts-notes' deps.ts,
-// config.ts and package.json, and the server's and the job's main.ts and
-// package.json.
+// config.ts and package.json, the server's and the job's main.ts and
+// package.json, and the server's fetch.ts, its Workers entrypoint (D64).
 func tsLiteGenerated(repoRoot string) map[string]string {
 	out := filepath.Join(repoRoot, "schemas", "dist")
 	files := map[string]string{}
@@ -64,6 +64,7 @@ func tsLiteGenerated(repoRoot string) map[string]string {
 			files[filepath.Join("server", "ts-lite-stack", server, file)] = filepath.Join(servergen.ServerDir(out, "ts-lite-stack", server), file)
 		}
 	}
+	files[filepath.Join("server", "ts-lite-stack", "ts-notes", servergen.TypeScriptFetchFile)] = filepath.Join(servergen.ServerDir(out, "ts-lite-stack", "ts-notes"), servergen.TypeScriptFetchFile)
 	return files
 }
 
@@ -73,6 +74,9 @@ func tsLiteGenerated(repoRoot string) map[string]string {
 // pg. The server's main.ts opens the SQLite file its sqlite: URL names
 // with openSqlite, /readyz pings it with ./d1's ping, the shutdown closes
 // it, and its package depends on no pg; the job's main.ts opens it too.
+// Edge places the server on the fake bundle platform and the database on
+// the fake SQLite one, so its fetch.ts takes Deps.db from the d1 binding
+// its connection names and /readyz pings it (D64).
 // Regenerate with:
 //
 //	go test ./internal/generator/servergen -run TestTypeScriptSQLiteEntrypointGolden -update
@@ -213,8 +217,19 @@ func TestTypeScriptSQLiteEntrypointCompilesAndServes(t *testing.T) {
 	}
 	serverDir := servergen.ServerDir(out, "ts-lite-stack", "ts-notes")
 	jobDir := servergen.ServerDir(out, "ts-lite-stack", tsPruneNotes)
+	// The server's tsconfig.json takes fetch.ts in too: Edge places it on
+	// the fake bundle platform, as Workers (D64).
 	for _, dir := range []string{impl, serverDir, jobDir} {
 		check(dir)
+	}
+	if _, err := os.Stat(filepath.Join(paths.ScalarTypeScript, "dist", "workerd", "superscalar_wasm_bg.wasm")); err == nil {
+		bundle := exec.Command(bun, "bundle.ts", "--check")
+		bundle.Dir = serverDir
+		if output, err := bundle.CombinedOutput(); err != nil || !strings.Contains(string(output), "bundle (checked): main.js") {
+			t.Errorf("bun bundle.ts --check of ts-notes, whose Deps.db is a D1 binding on Workers = %v:\n%s", err, output)
+		}
+	} else {
+		testpaths.RequireOrSkipTS(t, fmt.Sprintf("superscalar's workerd build is not built (scripts/superscalar-dep.sh builds it): %v", err))
 	}
 
 	file := filepath.Join(t.TempDir(), "notes_db.sqlite")

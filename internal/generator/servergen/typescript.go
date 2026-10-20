@@ -436,6 +436,7 @@ var tsReserved = []string{
 	"run", "jobs", "workers", "queue", "stop", "signal", "started", "concurrency", "pools",
 	"postgresQueue", "runWorker", "workerConcurrency",
 	"openSqlite", "sqliteFile", "SqliteDatabase", "pingSqlDatabase", "openDatabase", "DatabaseConnection",
+	"d1Database", "SqlDatabase", "unavailable",
 	// fetch.ts's, the Workers entrypoint's (D64).
 	"env", "build", "perIsolate", "requestIP", "stackEnvOf", "stackEnvWithSecrets", "binding", "serviceFetch",
 	"openR2Bucket", "bindingName", "values", "bindings", "Handle",
@@ -592,8 +593,8 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 		if o.HasServiceCallers && !background && (api.Callers == "" || api.Config == "") {
 			return nil, fmt.Errorf("stack %s: server %s serves %s, whose operations have a service clause, and whose config has no callers field", in.Stack, in.Server, o.SchemaName)
 		}
-		if db := o.Deps.Database; db != "" && s.Workers {
-			return nil, fmt.Errorf("stack %s: server %s serves %s, whose database is %s, and an environment places the server on Cloudflare Workers, which reaches a database through D1 alone; the Workers entrypoint opens no database yet (D64)", in.Stack, in.Server, o.SchemaName, db)
+		if db := o.Deps.Database; db != "" && s.Workers && !o.DepsSQLite() {
+			return nil, fmt.Errorf("stack %s: server %s serves %s, whose database %s lists postgres first, and an environment places the server on Cloudflare Workers, which reaches a database through a D1 binding alone; list sqlite first in %s's outputs.sql.dialects, so Deps.db is a SqlDatabase (D64)", in.Stack, in.Server, o.SchemaName, db, db)
 		}
 		if db := o.Deps.Database; db != "" {
 			d := databases[db]
@@ -604,7 +605,7 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 				}
 				suffix := "Pool"
 				if o.DepsSQLite() {
-					suffix = "Sqlite"
+					suffix = "Database"
 				}
 				d = &TypeScriptDatabase{
 					Service: db,
@@ -816,10 +817,10 @@ func (s *TypeScriptServer) SecretBindings() []string {
 // always; the readers of the string bindings, and of the secret ones when
 // a config has a Secret<T> field, when it reads a config; and the binding
 // lookup, with the transport through a service binding, when the server
-// calls another API or lists a bucket.
+// calls another API or lists a bucket, or reaches a D1 database.
 func (s *TypeScriptServer) WorkersImports() []string {
 	var out []string
-	if len(s.Clients) > 0 || len(s.Buckets) > 0 {
+	if len(s.Clients) > 0 || len(s.Buckets) > 0 || len(s.SQLiteDatabases()) > 0 {
 		out = append(out, "binding")
 	}
 	out = append(out, "perIsolate", "requestIP")

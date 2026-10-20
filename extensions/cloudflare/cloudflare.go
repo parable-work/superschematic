@@ -134,6 +134,13 @@ func (e Extension) Register(r *registry.Registry) error {
 		}
 		platforms[spec.Kind] = spec.Name
 	}
+	// The sql edges to D1 (d1.go).
+	for _, spec := range d1Connectors() {
+		spec.Extension = Name
+		if err := r.RegisterConnector(spec); err != nil {
+			return err
+		}
+	}
 	return r.RegisterTarget(registry.TargetSpec{
 		Name:          Target,
 		Extension:     Name,

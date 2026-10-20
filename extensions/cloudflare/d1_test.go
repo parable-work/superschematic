@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -18,11 +19,13 @@ import (
 
 // The D1 platform (docs/stack-model.md, sections 18.2 and 18.6, D64).
 
-// The DB services of the D1 fixture: reviews-db and notes-db list sqlite
-// first, and ledger-db lists postgres alone.
+// The services of the D1 fixture: reviews, a TypeScript API on
+// reviews-db; reviews-db and notes-db list sqlite first, and ledger-db
+// lists postgres alone.
 var (
-	reviewsDB = ir.ServiceRef{Name: "reviews-db", Kind: ir.SchemaKindDB}
-	notesDB   = ir.ServiceRef{Name: "notes-db", Kind: ir.SchemaKindDB}
+	reviewsAPI = ir.ServiceRef{Name: "reviews", Kind: ir.SchemaKindAPI}
+	reviewsDB  = ir.ServiceRef{Name: "reviews-db", Kind: ir.SchemaKindDB}
+	notesDB    = ir.ServiceRef{Name: "notes-db", Kind: ir.SchemaKindDB}
 )
 
 func d1Services() []stack.Service {
@@ -30,18 +33,25 @@ func d1Services() []stack.Service {
 		{Name: "reviews-db", Kind: ir.SchemaKindDB, Dialects: []string{"sqlite", "postgres"}},
 		{Name: "notes-db", Kind: ir.SchemaKindDB, Dialects: []string{"sqlite", "postgres"}},
 		{Name: "ledger-db", Kind: ir.SchemaKindDB},
+		{
+			Name: "reviews", Kind: ir.SchemaKindAPI, Language: registry.APILanguageTypeScript,
+			Dependencies: []ir.ServiceRef{reviewsDB},
+			Operations:   []stack.Operation{{Name: "Reviews.listReviews"}, {Name: "Reviews.writeReview"}},
+		},
 	}
 }
 
-// d1Stack deploys reviews-db, and a database Archive hosting notes-db, on
-// the cloudflare target: Staging places reviews-db's primary in eastern
-// North America, Production keeps both in the EU, and Preview extends
-// Staging with a parameter, so each member gets databases of its own.
+// d1Stack deploys reviews, on Workers and exposed at workers.dev, on
+// reviews-db, and a database Archive hosting notes-db, on the cloudflare
+// target: Staging places reviews-db's primary in eastern North America,
+// Production keeps both in the EU, and Preview extends Staging with a
+// parameter, so each member gets a Worker and databases of its own.
 func d1Stack() *ir.Stack {
 	of := func(ref ir.ServiceRef) ir.DeployableRef { return ir.DeployableRef{Service: &ref} }
 	return &ir.Stack{
 		Name:   "reviews-stack",
-		Deploy: []ir.ServiceRef{reviewsDB},
+		Deploy: []ir.ServiceRef{reviewsAPI, reviewsDB},
+		Expose: []ir.DeployableRef{of(reviewsAPI)},
 		Deployables: []*ir.DeployableDecl{{
 			Name:  "Archive",
 			Kind:  ir.DeployableDatabase,
@@ -51,13 +61,13 @@ func d1Stack() *ir.Stack {
 			{
 				Name:     "Staging",
 				Target:   cloudflare.Target,
-				Values:   map[string]any{"accountId": accountID},
+				Values:   map[string]any{"accountId": accountID, "workersSubdomain": "acme"},
 				Settings: []*ir.DeployableSettings{{Of: of(reviewsDB), Values: map[string]any{"locationHint": "enam"}}},
 			},
 			{
 				Name:   "Production",
 				Target: cloudflare.Target,
-				Values: map[string]any{"accountId": accountID},
+				Values: map[string]any{"accountId": accountID, "workersSubdomain": "acme"},
 				Settings: []*ir.DeployableSettings{
 					{Of: of(reviewsDB), Values: map[string]any{"jurisdiction": "eu"}},
 					{Of: ir.DeployableRef{Deployable: "Archive"}, Values: map[string]any{"jurisdiction": "eu"}},
@@ -108,6 +118,49 @@ func TestD1Golden(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestAWorkerBindsItsD1Database: the sql edge from reviews' Worker to
+// reviews-db goes through cloudflare.workers-d1, which derives
+// `d1: {binding, database}`, the binding named after the field and the
+// database the uuid output of its node; the Worker's version holds a d1
+// binding of that name and id, and the variables the runtime's
+// loadDatabase reads as plain text (section 18.2). No other binding or
+// node grants the Worker the database: D1 has no roles.
+func TestAWorkerBindsItsD1Database(t *testing.T) {
+	reg := assemble(t)
+	env, err := stack.Resolve(reg, stack.Input{Stack: d1Stack(), Services: d1Services(), Environment: "Staging"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var edge *ir.Edge
+	for _, e := range env.Edges {
+		if e.ID == ir.EdgeID(ir.EdgeSQL, "reviews", "reviews-db") {
+			edge = e
+		}
+	}
+	if edge == nil || edge.Connector != cloudflare.D1Connector || edge.Field != "REVIEWS_DB_DATABASE" {
+		t.Fatalf("the sql edge = %+v, want it through %s filling REVIEWS_DB_DATABASE", edge, cloudflare.D1Connector)
+	}
+	version := env.Resources.Resource("reviews.version")
+	if version == nil {
+		t.Fatal("reviews has no Worker version")
+	}
+	uuid := ir.Output{Resource: "reviews-db.d1.reviews-db", Name: "uuid"}
+	want := map[string]map[string]any{
+		"REVIEWS_DB_DATABASE":             {"type": "d1", "name": "REVIEWS_DB_DATABASE", "id": uuid},
+		"REVIEWS_DB_DATABASE_D1_BINDING":  {"type": "plain_text", "name": "REVIEWS_DB_DATABASE_D1_BINDING", "text": "REVIEWS_DB_DATABASE"},
+		"REVIEWS_DB_DATABASE_D1_DATABASE": {"type": "plain_text", "name": "REVIEWS_DB_DATABASE_D1_DATABASE", "text": uuid},
+	}
+	bindings, _ := version.Properties["bindings"].([]any)
+	got := map[string]map[string]any{}
+	for _, b := range bindings {
+		m := b.(map[string]any)
+		got[m["name"].(string)] = m
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("the version's bindings = %v, want %v", got, want)
 	}
 }
 

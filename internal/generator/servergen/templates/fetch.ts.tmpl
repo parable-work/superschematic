@@ -35,6 +35,9 @@ import { {{ join .WorkersImports ", " }} } from '{{ .Naming.HTTPRuntimeNpmPackag
 {{- if .Buckets }}
 import { openR2Bucket } from '{{ .Naming.HTTPRuntimeNpmPackage }}/r2';
 {{- end }}
+{{- if .SQLiteDatabases }}
+import { ping, type SqlDatabase } from '{{ .Naming.HTTPRuntimeNpmPackage }}/d1';
+{{- end }}
 {{- range .APIs }}
 import * as {{ .Module }} from '{{ .Package }}';
 import * as {{ .Impl }} from '{{ .ImplPackage }}';
@@ -100,11 +103,37 @@ async function build(): Promise<Handle> {
   const {{ .Var }} = openR2Bucket(binding(env, bindingName({{ tsQuote .Field }}, {{ .From }}.binding), 'r2'), {{ .From }});
 {{- end }}
 {{- end }}
-{{- if or .ReadsBindings .Clients .Buckets }}
+{{- if .SQLiteDatabases }}
+
+  // One D1 database per database, shared by every API on it, through the
+  // d1 binding its connection names (D64). The binding is the grant: D1
+  // has no roles, so the Worker reads and writes all of the database.
+{{- range .SQLiteDatabases }}
+  const {{ .Var }} = d1Database({{ tsQuote .Field }}, {{ .From }});
+{{- end }}
+{{- end }}
+{{- if or .ReadsBindings .Clients .Buckets .SQLiteDatabases }}
 {{ end }}
   const app = new Hono();
   app.get('/healthz', c => c.json({ status: 'ok' }));
+{{- if .SQLiteDatabases }}
+  // Ready while each D1 database answers SELECT 1 within two seconds.
+  app.get('/readyz', async c => {
+    const unavailable: string[] = [];
+    await Promise.all([
+{{- range .SQLiteDatabases }}
+      ping({{ .Var }}).catch((error: unknown) => {
+        logger.warn('not ready', { dependency: {{ tsQuote .Service }}, error });
+        unavailable.push({{ tsQuote .Service }});
+      }),
+{{- end }}
+    ]);
+    if (unavailable.length > 0) return c.json({ status: 'unavailable', unavailable }, 503);
+    return c.json({ status: 'ready' });
+  });
+{{- else }}
   app.get('/readyz', c => c.json({ status: 'ready' }));
+{{- end }}
 {{- range .APIs }}
 
   // {{ .Service }}: its implementation, built from its Deps, and its routes.
@@ -170,6 +199,22 @@ export default {
 {{ template "ts-configure" . }}
 
 {{ template "ts-construct" . }}
+{{- if .SQLiteDatabases }}
+
+/**
+ * The D1 database of the database field named field: the d1 binding its
+ * value names, which the Worker's platform writes beside the field's
+ * variables (D64). A connection string or a Cloud SQL configuration is
+ * refused: a Worker reaches its database through a D1 binding alone.
+ */
+function d1Database(field: string, db: DatabaseConnection): SqlDatabase {
+  if (!('d1' in db)) {
+    const what = 'url' in db ? 'a connection string' : 'a Cloud SQL connector configuration';
+    throw new Error(`${field} is ${what}, and a Worker reaches its database through a D1 binding alone: set ${field}_D1_BINDING and ${field}_D1_DATABASE`);
+  }
+  return binding(env, db.d1.binding, 'd1');
+}
+{{- end }}
 {{- if or .Clients .Buckets }}
 
 /**

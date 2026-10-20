@@ -70,9 +70,9 @@ async function main(): Promise<void> {
 
   // One SQLite file per database, shared by every API on it, the file its
   // URL names, opened now: its DB service lists sqlite first (D64).
-  const tsNotesDbSqlite = openDatabase('ts-notes-db', 'TS_NOTES_DB_DATABASE', tsNotesConfig.TS_NOTES_DB_DATABASE);
+  const tsNotesDbDatabase = openDatabase('ts-notes-db', 'TS_NOTES_DB_DATABASE', tsNotesConfig.TS_NOTES_DB_DATABASE);
   const dependencies: readonly Dependency[] = [
-    { name: 'ts-notes-db', ping: () => pingSqlDatabase(tsNotesDbSqlite, READINESS_TIMEOUT_MS), close: async () => tsNotesDbSqlite.close() },
+    { name: 'ts-notes-db', ping: () => pingSqlDatabase(tsNotesDbDatabase, READINESS_TIMEOUT_MS), close: async () => tsNotesDbDatabase.close() },
   ];
 
   const app = new Hono();
@@ -99,7 +99,7 @@ async function main(): Promise<void> {
   // ts-notes: its implementation, built from its Deps, and its routes.
   const tsNotesDeps: tsNotesApi.Deps = {
     config: tsNotesConfig,
-    db: tsNotesDbSqlite,
+    db: tsNotesDbDatabase,
     logger: logger.child({ api: 'ts-notes' }),
   };
   const tsNotesImplementations = await construct('ts-notes', 'implementation', () => tsNotesImpl.create(tsNotesDeps));

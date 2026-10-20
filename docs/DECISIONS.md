@@ -6733,8 +6733,10 @@ Status: built and proven offline: the resolution rules in `internal/stack`;
 `local.sqlite` against a fake machine and, with Bun and the runner built
 from the checkout, for real; the generator's goldens and, with the
 TypeScript checks, a sqlite-first server and job that type-check and keep
-notes in a SQLite file; `cloudflare.d1`'s goldens against the pin; the
-runner against a fake account and a stand-in runner; the CI's install in a
+notes in a SQLite file, and whose `fetch.ts` takes a D1 binding and
+bundles for workerd; `cloudflare.d1`'s goldens against the pin, with a
+Worker's `d1` binding through `cloudflare.workers-d1`; the runner
+against a fake account and a stand-in runner; the CI's install in a
 golden workflow; and a job document of the runner's form against the fake
 D1. No call has reached Cloudflare, and `TestRealD1` has not run.
 

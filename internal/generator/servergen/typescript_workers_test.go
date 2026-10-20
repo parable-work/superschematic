@@ -68,9 +68,10 @@ func TestTypeScriptWorkersEntrypointGolden(t *testing.T) {
 }
 
 // TestTypeScriptWorkersRefusals: a server some environment places on
-// Workers whose APIs open a database or authenticate with the identity
-// runtime is refused, saying why, since its Workers entrypoint builds
-// neither yet; a job's entrypoint on Workers is the cron platform's (D64).
+// Workers whose API's database lists postgres first, which a Worker reaches
+// through no D1 binding, or which authenticates with the identity runtime
+// is refused, saying why; a job's entrypoint on Workers is the cron
+// platform's (D64).
 func TestTypeScriptWorkersRefusals(t *testing.T) {
 	input := func(edit func(*tsrestgen.APIOutput, *envgen.ConfigOutput)) servergen.TypeScriptInput {
 		output := &tsrestgen.APIOutput{
@@ -104,10 +105,10 @@ func TestTypeScriptWorkersRefusals(t *testing.T) {
 		job  bool
 		want string
 	}{
-		{"a database", func(o *tsrestgen.APIOutput, c *envgen.ConfigOutput) {
+		{"a Postgres database", func(o *tsrestgen.APIOutput, c *envgen.ConfigOutput) {
 			o.Deps.Database = "shop-db"
 			c.Derived = []envgen.DerivedField{{Key: "SHOP_DB_DATABASE", Kind: ir.EdgeSQL, Service: "shop-db"}}
-		}, false, "server shop-api serves shop-api, whose database is shop-db, and an environment places the server on Cloudflare Workers, which reaches a database through D1 alone"},
+		}, false, "server shop-api serves shop-api, whose database shop-db lists postgres first, and an environment places the server on Cloudflare Workers, which reaches a database through a D1 binding alone"},
 		{"the identity runtime", func(o *tsrestgen.APIOutput, _ *envgen.ConfigOutput) {
 			o.Identity = &tsrestgen.IdentityInfo{AuthDB: "shop-db"}
 		}, false, "server shop-api serves shop-api, which authenticates with the identity runtime over the user model (D50), and an environment places the server on Cloudflare Workers, where the identity runtime does not run"},

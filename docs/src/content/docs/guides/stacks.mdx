@@ -1564,7 +1564,10 @@ The API's `Deps.db` is then the HTTP runtime's `SqlDatabase`, D1's
 interface: `prepare(sql).bind(...).first()`, `all()`, `run()` and
 `raw()`, `batch([...])`, which runs its statements in one transaction,
 and `exec(script)`. Placeholders are `?` and `?N`. D1 has no interactive
-transaction, so write what must be atomic as one `batch`. The same code
+transaction, so write what must be atomic as one `batch`. On Workers the
+server's `fetch.ts` takes it from the Worker's d1 binding, which the sql
+edge's connector derives as `{type: "d1", name: "REVIEWS_DB_DATABASE",
+id: <the database's uuid>}`, and `/readyz` pings it. The same code
 runs under `stack dev`, where the database is a SQLite file under the
 environment's state directory, `databases/<database>.sqlite`, and the
 server opens the `sqlite:` URL its edge derives with the runtime's

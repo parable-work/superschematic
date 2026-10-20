@@ -41,7 +41,7 @@ const (
 
 	// EdgePlatform runs only TypeScript servers and LitePlatform only
 	// SQLite databases, as Cloudflare's Workers and D1 do (section 6.8).
-	// No fake connector reaches either; a deployable of another provider
+	// No fake connector reaches EdgePlatform; a deployable of another provider
 	// reaches an exposed server on EdgePlatform through the generic
 	// connector, and one on EdgePlatform calls an exposed server of
 	// another provider the same way (D63).
@@ -89,6 +89,14 @@ const (
 	WorkerSQLConnector    = "fake.worker-sql"
 	WorkerHTTPConnector   = "fake.worker-run"
 	WorkerBucketConnector = "fake.worker-storage"
+
+	// BundleD1Connector connects a server on BundlePlatform to a database on
+	// LitePlatform as a Worker reaches D1 (D64): through a binding named
+	// after the field, of the database's id. JobLiteConnector connects a job
+	// to one with a sqlite: URL, as the local target derives one for a
+	// SQLite file.
+	BundleD1Connector = "fake.bundle-lite"
+	JobLiteConnector  = "fake.job-lite"
 
 	// FakeIssuer is the issuer of the fake target's service credentials,
 	// which a callee's callers field names.
@@ -304,6 +312,8 @@ func (e *Extension) Register(r *registry.Registry) error {
 		{Name: WorkerSQLConnector, Extension: Name, Edge: ir.EdgeSQL, From: WorkerPlatform, To: SQLPlatform, Connect: connectSQL},
 		{Name: WorkerHTTPConnector, Extension: Name, Edge: ir.EdgeHTTP, From: WorkerPlatform, To: RunPlatform, Connect: connectHTTP},
 		{Name: WorkerBucketConnector, Extension: Name, Edge: ir.EdgeBucket, From: WorkerPlatform, To: BucketPlatform, Connect: connectBucket},
+		{Name: BundleD1Connector, Extension: Name, Edge: ir.EdgeSQL, From: BundlePlatform, To: LitePlatform, Connect: connectD1},
+		{Name: JobLiteConnector, Extension: Name, Edge: ir.EdgeSQL, From: JobPlatform, To: LitePlatform, Connect: connectLite},
 	} {
 		if err := r.RegisterConnector(spec); err != nil {
 			return err
@@ -794,6 +804,23 @@ func lowerDatabase(ctx registry.PlatformContext) (registry.Lowered, error) {
 		})
 	}
 	return out, nil
+}
+
+// connectD1 derives the binding a server on the bundle platform reaches
+// its SQLite database through, as a Worker reaches D1 (D64): the binding
+// named after the field, of the schema's database's id. The binding is the
+// grant, so the edge has no resource.
+func connectD1(ctx registry.ConnectorContext) (registry.Connected, error) {
+	return registry.Connected{Value: ir.DatabaseConnection{D1: &ir.D1Connection{
+		Binding:  ctx.Edge.Field,
+		Database: ir.Output{Resource: ctx.To.Name + ".database." + ctx.Edge.Service.Name, Name: "id"},
+	}}}, nil
+}
+
+// connectLite derives a sqlite: URL of the schema's database, as the local
+// target derives one for a SQLite file (D64).
+func connectLite(ctx registry.ConnectorContext) (registry.Connected, error) {
+	return registry.Connected{Value: ir.DatabaseConnection{URL: "sqlite:/data/" + snake(ctx.Edge.Service.Name) + ".sqlite"}}, nil
 }
 
 // connectSQL grants the server's account the client role on the instance

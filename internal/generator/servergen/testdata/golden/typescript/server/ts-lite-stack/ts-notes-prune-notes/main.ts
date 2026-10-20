@@ -33,13 +33,13 @@ async function run(signal: AbortSignal, pools: { end(): Promise<void> }[]): Prom
 
   // One SQLite file per database, the file its URL names: its DB service
   // lists sqlite first (D64).
-  const tsNotesDbSqlite = openDatabase('ts-notes-db', 'TS_NOTES_DB_DATABASE', tsNotesConfig.TS_NOTES_DB_DATABASE);
-  pools.push({ end: async () => tsNotesDbSqlite.close() });
+  const tsNotesDbDatabase = openDatabase('ts-notes-db', 'TS_NOTES_DB_DATABASE', tsNotesConfig.TS_NOTES_DB_DATABASE);
+  pools.push({ end: async () => tsNotesDbDatabase.close() });
 
   // ts-notes: its jobs, built from its Deps.
   const tsNotesDeps: tsNotesApi.Deps = {
     config: tsNotesConfig,
-    db: tsNotesDbSqlite,
+    db: tsNotesDbDatabase,
     logger: logger.child({ api: 'ts-notes' }),
   };
   const jobs = await construct('ts-notes', 'jobs', () => tsNotesImpl.createJobs(tsNotesDeps));
