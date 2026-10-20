@@ -223,6 +223,6 @@ func TestRunnerRefusals(t *testing.T) {
 		s, services := runnerShop()
 		settingsFor(s.Environment("Staging"), stacktest.Of(stacktest.ShopDB)).Enabled = new(bool)
 		_, errs := resolve(t, reg, s, services, "Staging")
-		mustFail(t, errs, stack.CodeInvalidSettings, "sets a schedule, a time zone or enabled on database shop-db")
+		mustFail(t, errs, stack.CodeInvalidSettings, "sets a schedule, a time zone, enabled or onDeploy on database shop-db")
 	})
 }
