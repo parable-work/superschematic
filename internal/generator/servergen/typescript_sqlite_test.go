@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/parable-work/superschematic/internal/generator/apigen"
+	"github.com/parable-work/superschematic/internal/generator/envgen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/generator/servergen"
 	"github.com/parable-work/superschematic/internal/generator/tsrestgen"
@@ -87,6 +89,48 @@ func TestTypeScriptSQLiteEntrypointGolden(t *testing.T) {
 		if strings.Contains(string(data), "'pg'") || strings.Contains(string(data), `"pg"`) || strings.Contains(string(data), "connectPostgres") {
 			t.Errorf("%s reaches Postgres, though ts-notes-db lists sqlite first:\n%s", rel, data)
 		}
+	}
+}
+
+// TestTypeScriptPlanRefusesWhatSQLiteCannotRun: a stack whose environments
+// resolve refuses these first; the plan of an entrypoint refuses them too,
+// since its code could not reach the database: an identity store over a
+// sqlite-first authDb, which no TypeScript store runs on (D50), and a
+// worker whose queue's database lists sqlite first, since a worker claims
+// on Postgres (D53).
+func TestTypeScriptPlanRefusesWhatSQLiteCannotRun(t *testing.T) {
+	input := func(output *tsrestgen.APIOutput, worker *servergen.WorkerInput) servergen.TypeScriptInput {
+		return servergen.TypeScriptInput{
+			Stack:  "notes-stack",
+			Server: "notes",
+			Dir:    t.TempDir(),
+			APIs: []servergen.TypeScriptAPIInput{{
+				Output: output,
+				Routes: &apigen.APIOutput{SchemaName: "notes"},
+				Config: &envgen.ConfigOutput{SchemaName: "notes", Derived: []envgen.DerivedField{
+					{Key: "NOTES_DB_DATABASE", Kind: ir.EdgeSQL, Service: "notes-db", From: "authDb", Dialect: "sqlite"},
+				}},
+				Implementation: servergen.TypeScriptImplementation{Package: "@schemas/notes-implementation"},
+			}},
+			Worker: worker,
+		}
+	}
+	deps := tsrestgen.DepsInfo{Database: "notes-db", Dialect: "sqlite", DatabaseTypesPackage: "@schemas/notes-db-types"}
+	identity := &tsrestgen.APIOutput{
+		SchemaName: "notes", PackageName: "@schemas/notes-api", HasEnvConfig: true, Deps: deps,
+		Identity: &tsrestgen.IdentityInfo{AuthDB: "notes-db", DescriptorModule: "@schemas/notes-db-types/identity"},
+	}
+	_, err := servergen.PlanTypeScript(input(identity, nil))
+	if want := "server notes serves notes, which authenticates with the identity runtime over notes-db, its authDb, whose DB service lists sqlite first; a TypeScript server's identity store runs on Postgres, and one over SQLite is not built (D50, D64)"; err == nil || !strings.Contains(err.Error(), want) {
+		t.Errorf("PlanTypeScript of an identity API on SQLite = %v, want %q", err, want)
+	}
+	worker := &tsrestgen.APIOutput{
+		SchemaName: "notes", PackageName: "@schemas/notes-api", HasEnvConfig: true, Deps: deps,
+		Workers: []tsrestgen.WorkerInfo{{Name: "IndexNotes", Method: "indexNotes", Queue: "NoteWritten", Concurrency: 1}},
+	}
+	_, err = servergen.PlanTypeScript(input(worker, &servergen.WorkerInput{Name: "IndexNotes"}))
+	if want := "worker notes of notes claims queue NoteWritten of notes-db, whose DB service lists sqlite first; a worker claims on Postgres, the one dialect the TypeScript queue client claims on (D53, D64)"; err == nil || !strings.Contains(err.Error(), want) {
+		t.Errorf("PlanTypeScript of a worker on SQLite = %v, want %q", err, want)
 	}
 }
 
