@@ -8244,3 +8244,23 @@ write fails with Cloud Storage's 403, which the command reports. No grant
 has been applied on Google Cloud.
 
 The rule is reversible until the first release.
+
+### D30, amended: the reference deploy and platform extensions are retired
+
+`extensions/deploy` registered a sidecar, `deploy.values.yaml`, that mapped
+a schema's `@envVars` fields to a Kubernetes env list for a Helm chart.
+`extensions/platform` registered a `Platform` kind that grouped services by
+name, with a decorator, a verify rule and a catalog generator. Both came
+with the bootstrap as worked examples, neither was linked into the
+installed binary, and section 13 of `docs/stack-model.md` planned to
+rewrite them over the stack model or retire them once it landed. It has:
+a stack sets each server's `@envVars` from its environments and derives
+the connection strings the values file made a person write, and the gcp
+target, the Cloudflare DNS platform and the Pulumi provisioner deploy for
+real.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Delete both packages and their docs pages, and redirect the pages' old URLs. The extending guide teaches a document with `examples/acme-schematic`'s `catalog.config.yaml`, a kind with `NoSentinel` and `Verify` with the core Stack kind, and a deploy target with `extensions/gcp`, `extensions/cloudflare` and `extensions/pulumi`. `internal/loader/verify`'s alias test, which imported `extensions/platform`, registers a test-local grouping kind instead. | Rewriting `deploy` over the stack model, as a Helm target nothing yet needs; keeping both as examples, which taught a second way to write deployment values and gave "platform" a meaning the stack model's platforms contradict |
+
+Status: retired. The rule is reversible until the first release.
