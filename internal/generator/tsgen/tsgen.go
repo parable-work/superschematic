@@ -185,13 +185,11 @@ type UnionMemberInfo struct {
 	// discriminator, or "".
 	DiscriminatorValue string
 
-	// Fields, Tags and Required are the member's shape
-	// (codegen.UnionShapes), set for a union without discriminator
-	// dispatch: its JSON field names, the values it fixes for fields it
-	// shares with other members, and the fields a payload must hold.
-	Fields   []string
-	Tags     []codegen.UnionTag
-	Required []string
+	// Fields and Tags are the member's shape (codegen.UnionShapes), set for
+	// a union without discriminator dispatch: its JSON field names, and the
+	// values it fixes for fields it shares with other members.
+	Fields []string
+	Tags   []codegen.UnionTag
 
 	// Module is where the member's parse<Member>FromJSON and
 	// parse<Member>JsonNonStrict are imported from,
@@ -242,10 +240,13 @@ type ModuleOutput struct {
 	TypeImports         []TypeImport
 	PackageDependencies []PackageDependency
 	Unions              []UnionInfo
-	Enums               []codegen.EnumInfo
-	CompositeDefaults   []CompositeDefaultInfo
-	Timestamp           string
-	HasVersionedTypes   bool
+	// UnionReads is the predicate the unions pick their members by, nil
+	// without a union.
+	UnionReads        *UnionReads
+	Enums             []codegen.EnumInfo
+	CompositeDefaults []CompositeDefaultInfo
+	Timestamp         string
+	HasVersionedTypes bool
 
 	// HasEnvConfig is true when the schema declares an @envVars class. envgen
 	// then writes the env loader, config.ts, into the package, and
@@ -494,6 +495,13 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 	if err := annotateUnionMembers(output.Unions, append(append([]codegen.TypeInfo{}, objectTypes...), inputTypes...), output.ImportedTypes, opts.Dependencies, enumLookup); err != nil {
 		return nil, err
 	}
+	if len(output.Unions) > 0 {
+		model, err := codegen.BuildReadModel(schema, opts.Dependencies)
+		if err != nil {
+			return nil, err
+		}
+		output.UnionReads = buildUnionReads(model, output.Scalars)
+	}
 
 	if output.VersionGraphs, err = versionGraphs(schema); err != nil {
 		return nil, err
@@ -630,7 +638,6 @@ func annotateUnionMembers(unions []UnionInfo, types []codegen.TypeInfo, imported
 		for i, shape := range codegen.UnionShapes(members, enumLookup) {
 			union.Members[i].Fields = shape.Fields
 			union.Members[i].Tags = shape.Tags
-			union.Members[i].Required = shape.Required
 		}
 	}
 	return nil
@@ -651,12 +658,11 @@ func dependencyTypeFields(name string, dependencies map[string]*ir.Schema) []cod
 				continue
 			}
 			fields = append(fields, codegen.FieldInfo{
-				Name:     field.Name,
-				Type:     field.TypeRef.Name,
-				IsArray:  field.TypeRef.IsArray,
-				IsMap:    field.TypeRef.IsMap,
-				Required: field.Required,
-				Default:  field.Default,
+				Name:    field.Name,
+				Type:    field.TypeRef.Name,
+				IsArray: field.TypeRef.IsArray,
+				IsMap:   field.TypeRef.IsMap,
+				Default: field.Default,
 			})
 		}
 		return fields

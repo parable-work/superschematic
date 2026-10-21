@@ -6,6 +6,9 @@ import type { {{join .UnionNames ", "}} } from '../types';
 {{- range .UnionMemberImports}}
 import { {{range $i, $name := .Names}}{{if $i}}, {{end}}parse{{$name}}FromJSON, parse{{$name}}JsonNonStrict{{end}} } from '{{.Module}}';
 {{- end}}
+{{- range .UnionReads.ScalarImports}}
+import { {{join .Names ", "}} } from '{{.Module}}';
+{{- end}}
 
 /**
  * A union member as the union reads it: its parse<Member>FromJSON, which
@@ -22,23 +25,214 @@ type UnionMember = readonly [parse: (input: unknown) => unknown, check: (input: 
  */
 const UNION_MISMATCH = 'does not match the declared type';
 
+/** One field of a type, as the structural predicate reads it. */
+interface ReadField {
+  readonly name: string;
+  readonly required: boolean;
+  readonly depth: number;
+  readonly map: boolean;
+  readonly kind: string;
+  readonly values?: readonly string[];
+  readonly json?: string;
+  readonly scalar?: (value: unknown) => boolean;
+  readonly ref?: string;
+}
+
+/** One union, as the structural predicate picks its member. */
+interface ReadUnion {
+  readonly discriminator?: string;
+  readonly members: readonly {
+    readonly type: string;
+    readonly tag?: string;
+    readonly fields?: readonly string[];
+    readonly tags?: readonly (readonly [string, string])[];
+  }[];
+}
+
+/**
+ * The object types the unions reach, as the structural predicate reads them
+ * (codegen.ReadModel, D31 amended): Go, Rust and Python hold the same table.
+ */
+const READ_TYPES: Readonly<Record<string, { readonly strict: boolean; readonly fields: readonly ReadField[] }>> = {{.UnionReads.TypesSource}};
+
+/** The unions the predicate picks members of. */
+const READ_UNIONS: Readonly<Record<string, ReadUnion>> = {{.UnionReads.UnionsSource}};
+
+/** isJSONObject reports whether value is a JSON object, not null or an array. */
+function isJSONObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** readsJSON reports whether value has a scalar's JSON kind. */
+function readsJSON(kind: string | undefined, value: unknown): boolean {
+  switch (kind) {
+    case 'string':
+      return typeof value === 'string';
+    case 'number':
+      return typeof value === 'number' && Number.isFinite(value);
+    case 'integer':
+      return typeof value === 'number' && Number.isInteger(value);
+    case 'boolean':
+      return typeof value === 'boolean';
+    case 'jsonObject':
+      return isJSONObject(value);
+    case 'jsonArray':
+      return Array.isArray(value);
+    default:
+      return true;
+  }
+}
+
+/** readsValue reports whether one value, not null, has the field's kind. */
+function readsValue(field: ReadField, value: unknown): boolean {
+  switch (field.kind) {
+    case 'string':
+      return typeof value === 'string';
+    case 'number':
+      return typeof value === 'number' && Number.isFinite(value);
+    case 'boolean':
+      return typeof value === 'boolean';
+    case 'enum':
+      return typeof value === 'string' && (field.values ?? []).includes(value);
+    case 'scalar':
+      return field.scalar ? field.scalar(value) : readsJSON(field.json, value);
+    case 'object':
+      return readsType(field.ref ?? '', value);
+    case 'union':
+      return isJSONObject(value) && pickUnionMember(field.ref ?? '', value) >= 0;
+    default:
+      return true;
+  }
+}
+
+/** readsLevels reports whether value holds depth list levels of the field's values, no element null. */
+function readsLevels(field: ReadField, value: unknown, depth: number): boolean {
+  if (depth === 0) {
+    return readsValue(field, value);
+  }
+  return Array.isArray(value) && value.every((item) => item !== null && item !== undefined && readsLevels(field, item, depth - 1));
+}
+
+/**
+ * readsType is the structural predicate: whether value decodes under the
+ * type's types. It is a JSON object; a @strictJSON type's holds no key the
+ * type does not declare; each required field is present and not null; and
+ * each field present and not null has its kind at every list level and in
+ * every map value, none of which is null. A field's own rules take no part.
+ */
+function readsType(name: string, value: unknown): boolean {
+  const type = READ_TYPES[name];
+  if (!isJSONObject(value)) {
+    return false;
+  }
+  if (type === undefined) {
+    return true;
+  }
+  if (type.strict && !Object.keys(value).every((key) => type.fields.some((field) => field.name === key))) {
+    return false;
+  }
+  return type.fields.every((field) => {
+    const fieldValue = value[field.name];
+    if (fieldValue === undefined || fieldValue === null) {
+      return !field.required;
+    }
+    if (!field.map) {
+      return readsLevels(field, fieldValue, field.depth);
+    }
+    return (
+      isJSONObject(fieldValue) &&
+      Object.values(fieldValue).every((entry) => entry !== null && entry !== undefined && readsLevels(field, entry, field.depth))
+    );
+  });
+}
+
+/**
+ * pickUnionMember returns the index of the member of union name that
+ * payload is, or -1. A discriminated union's only candidate is the member
+ * its discriminator names. Any other union's candidates are the members
+ * whose fields include every payload key and whose tag values the payload
+ * does not contradict, then, when none of those reads it, the members whose
+ * tags the payload allows. The first candidate that reads the payload
+ * (readsType) is the member, as the Go, Rust and Python unions pick it.
+ */
+function pickUnionMember(name: string, payload: Record<string, unknown>): number {
+  if (scopedPicks === undefined) {
+    return pickUncached(name, payload);
+  }
+  let picks = scopedPicks.get(payload);
+  if (picks === undefined) {
+    picks = new Map();
+    scopedPicks.set(payload, picks);
+  }
+  let index = picks.get(name);
+  if (index === undefined) {
+    index = pickUncached(name, payload);
+    picks.set(name, index);
+  }
+  return index;
+}
+
+/**
+ * The members picked during one call of a union's parser or validator, by
+ * payload and union, so the call picks each payload's member once, though
+ * an enclosing union's predicate and the member's own read it again. It
+ * lives for the call alone: a caller may change its value between calls.
+ */
+let scopedPicks: WeakMap<object, Map<string, number>> | undefined;
+
+/** withPicks runs one parse or validate call with its own picks. */
+function withPicks<T>(run: () => T): T {
+  if (scopedPicks !== undefined) {
+    return run();
+  }
+  scopedPicks = new WeakMap();
+  try {
+    return run();
+  } finally {
+    scopedPicks = undefined;
+  }
+}
+
+function pickUncached(name: string, payload: Record<string, unknown>): number {
+  const union = READ_UNIONS[name];
+  if (union === undefined) {
+    return -1;
+  }
+  if (union.discriminator !== undefined) {
+    const tag = payload[union.discriminator];
+    const index = union.members.findIndex((member) => member.tag === tag);
+    return index >= 0 && readsType(union.members[index].type, payload) ? index : -1;
+  }
+  const keys = Object.keys(payload);
+  const tagsAllow = (tags: readonly (readonly [string, string])[] = []) =>
+    tags.every(([field, value]) => !Object.prototype.hasOwnProperty.call(payload, field) || payload[field] === value);
+  for (const [index, member] of union.members.entries()) {
+    if (keys.every((key) => (member.fields ?? []).includes(key)) && tagsAllow(member.tags) && readsType(member.type, payload)) {
+      return index;
+    }
+  }
+  // No member declares every payload key and reads it: tolerate the unknown keys.
+  for (const [index, member] of union.members.entries()) {
+    if (tagsAllow(member.tags) && readsType(member.type, payload)) {
+      return index;
+    }
+  }
+  return -1;
+}
+
 /**
  * unionPayload returns a union's JSON value as an object, or undefined for
  * any other JSON value: a member is picked by its keys.
  */
 function unionPayload(input: unknown): Record<string, unknown> | undefined {
-  if (typeof input !== 'object' || input === null || Array.isArray(input)) {
-    return undefined;
-  }
-  return input as Record<string, unknown>;
+  return isJSONObject(input) ? input : undefined;
 }
 
 /**
  * checkUnionMember runs a member's parse<Member>JsonNonStrict on a copy of
  * the payload, so the defaults it fills in do not reach the payload, and
  * returns true when the member's rules accept it, the field errors it
- * finds, or undefined when it refuses the payload without any (not an
- * object).
+ * finds, or undefined when it refuses the payload without any.
  */
 function checkUnionMember(member: UnionMember, payload: Record<string, unknown>): ValidationResult | undefined {
   try {
@@ -53,117 +247,23 @@ function checkUnionMember(member: UnionMember, payload: Record<string, unknown>)
     throw error;
   }
 }
-{{- if .HasShapeDispatchedUnions}}
-
-/**
- * unionPayloadKeysWithin reports whether every payload key is one of fields.
- */
-function unionPayloadKeysWithin(payload: Record<string, unknown>, fields: readonly string[]): boolean {
-  return Object.keys(payload).every((key) => fields.includes(key));
-}
-
-/**
- * unionPayloadTagsAllow takes [field, value] pairs and reports whether the
- * payload leaves each field absent or sets it to that string value.
- */
-function unionPayloadTagsAllow(payload: Record<string, unknown>, tags: readonly (readonly [string, string])[]): boolean {
-  return tags.every(([field, value]) => !Object.prototype.hasOwnProperty.call(payload, field) || payload[field] === value);
-}
-
-/**
- * The checks of a member's validator that say a value is not the member's
- * at all, as the Go and Rust decoders refuse it: a value of another JSON
- * type, a key a @strictJSON member does not declare, and a null list
- * element. A broken rule does not: the member is picked, and its rule
- * refuses it.
- */
-const UNION_SHAPE_CHECKS = new Set(['type', 'unknown']);
-
-/**
- * unionMemberReads reports whether a member reads the payload, as the Go
- * and Rust decoders would decode it into the member: the payload holds a
- * value other than null for each of required, the member's required fields
- * without a default, and its validator finds no value the member's
- * decoder refuses (UNION_SHAPE_CHECKS, or a null list element).
- */
-function unionMemberReads(member: UnionMember, payload: Record<string, unknown>, required: readonly string[]): boolean {
-  if (!required.every((field) => payload[field] !== undefined && payload[field] !== null)) {
-    return false;
-  }
-  const checked = checkUnionMember(member, payload);
-  if (checked === undefined) {
-    return false;
-  }
-  if (checked === true) {
-    return true;
-  }
-  return !Object.entries(checked).some(
-    ([path, errors]) =>
-      Array.isArray(errors) &&
-      errors.some((error) => UNION_SHAPE_CHECKS.has(error.validator) || (error.validator === 'required' && path.endsWith(']')))
-  );
-}
-{{- end}}
 {{range .Unions}}
-/**
-{{- if .DispatchByDiscriminator}}
- * The member a {{.Name}} payload is: its discriminator, {{.Discriminator}},
- * names it, as the Go and Rust decoders read it. undefined when the
- * discriminator is absent, not a string or names no member.
-{{- else}}
- * The member a {{.Name}} payload is, as the Go and Rust decoders pick it:
- * the first member whose fields include every payload key, whose tag values
- * the payload does not contradict and which reads the payload
- * (unionMemberReads); when none does, the first member whose tags the
- * payload allows and which reads it. undefined when no member reads it.
-{{- end}}
- */
-function pick{{.Name}}Member(payload: Record<string, unknown>): UnionMember | undefined {
-{{- if .DispatchByDiscriminator}}
-  switch (payload[{{jsonString .Discriminator}}]) {
+/** {{.Name}}'s members, in the order READ_UNIONS lists them. */
+const {{.Name}}Members: readonly UnionMember[] = [
 {{- range .Members}}
-    case {{jsonString .DiscriminatorValue}}:
-      return [parse{{.Name}}FromJSON, parse{{.Name}}JsonNonStrict];
+  [parse{{.Name}}FromJSON, parse{{.Name}}JsonNonStrict],
 {{- end}}
-  }
-  return undefined;
-{{- else}}
-{{- range .Members}}
-  if (
-    unionPayloadKeysWithin(payload, [{{range $i, $f := .Fields}}{{if $i}}, {{end}}{{jsonString $f}}{{end}}]) &&
-    unionPayloadTagsAllow(payload, [{{range $i, $tag := .Tags}}{{if $i}}, {{end}}[{{jsonString $tag.Field}}, {{jsonString $tag.Value}}]{{end}}]) &&
-    unionMemberReads([parse{{.Name}}FromJSON, parse{{.Name}}JsonNonStrict], payload, [{{range $i, $f := .Required}}{{if $i}}, {{end}}{{jsonString $f}}{{end}}])
-  ) {
-    return [parse{{.Name}}FromJSON, parse{{.Name}}JsonNonStrict];
-  }
-{{- end}}
-  // No member declares every payload key: tolerate the unknown keys.
-{{- range .Members}}
-  if (
-    unionPayloadTagsAllow(payload, [{{range $i, $tag := .Tags}}{{if $i}}, {{end}}[{{jsonString $tag.Field}}, {{jsonString $tag.Value}}]{{end}}]) &&
-    unionMemberReads([parse{{.Name}}FromJSON, parse{{.Name}}JsonNonStrict], payload, [{{range $i, $f := .Required}}{{if $i}}, {{end}}{{jsonString $f}}{{end}}])
-  ) {
-    return [parse{{.Name}}FromJSON, parse{{.Name}}JsonNonStrict];
-  }
-{{- end}}
-  return undefined;
-{{- end}}
-}
+];
 
 /**
-{{- if .DispatchByDiscriminator}}
- * Parses a {{.Name}} from JSON wire format into runtime types. Its
- * discriminator, {{.Discriminator}}, names the member, which the member's
- * parse<Member>FromJSON reads, as the Go and Rust decoders read it.
-{{- else}}
  * Parses a {{.Name}} from JSON wire format into runtime types: the member
- * pick{{.Name}}Member picks, as the Go and Rust decoders pick it, read by
- * the member's parse<Member>FromJSON.
-{{- end}}
- * A value that is not an object, or that no member reads, throws ParseError
- * with the reason `does not match the declared type`, which the Go and
- * Rust decoders refuse it with; its message says why. null and undefined
- * are returned as they are, as a type's parser returns them.
+ * {{if .DispatchByDiscriminator}}its discriminator, {{.Discriminator}}, names{{else}}the payload's keys and tags pick{{end}}, when the payload decodes
+ * under the member's types (pickUnionMember), read by the member's
+ * parse<Member>FromJSON. A value that is not an object, or that no member
+ * reads, throws ParseError with the reason `does not match the declared
+ * type`, which the Go and Rust decoders refuse it with; its message says
+ * why. null and undefined are returned as they are, as a type's parser
+ * returns them.
  */
 export function parse{{.Name}}FromJSON(input: unknown): {{.Name}} {
   if (input === null || input === undefined) {
@@ -173,24 +273,24 @@ export function parse{{.Name}}FromJSON(input: unknown): {{.Name}} {
   if (payload === undefined) {
     throw new ParseError('parse{{.Name}} expects an object input', UNION_MISMATCH);
   }
-  const member = pick{{.Name}}Member(payload);
-  if (member === undefined) {
+  const index = withPicks(() => pickUnionMember({{jsonString .Name}}, payload));
+  if (index < 0) {
 {{- if .DispatchByDiscriminator}}
     const discriminator = payload[{{jsonString .Discriminator}}];
     const stated = discriminator === undefined ? 'absent' : JSON.stringify(discriminator);
     throw new ParseError(
-      {{jsonString (print "parse" .Name ": discriminator " .Discriminator " is ")}} + stated + {{jsonString (print ", not one of " .DiscriminatorValueList)}},
+      {{jsonString (print "parse" .Name ": no member of " .Name " reads the payload, whose " .Discriminator " is ")}} + stated + {{jsonString (print " (one of " .DiscriminatorValueList ")")}},
       UNION_MISMATCH
     );
 {{- else}}
     throw new ParseError('parse{{.Name}}: no member of {{.Name}} reads the payload', UNION_MISMATCH);
 {{- end}}
   }
-  return member[0]({ ...payload }) as {{.Name}};
+  return {{.Name}}Members[index][0]({ ...payload }) as {{.Name}};
 }
 
 /**
- * Validates a {{.Name}} as the member it is: the member pick{{.Name}}Member
+ * Validates a {{.Name}} as the member it is: the member pickUnionMember
  * picks, with its defaults filled in, by its own validator, so its errors
  * are at the member's paths, as the Go wrapper's Validate reports them. A
  * value that is not an object, or that no member reads, is the parser's to
@@ -202,11 +302,10 @@ export function validate{{.Name}}(value: {{.Name}} | null | undefined): Validati
   if (payload === undefined) {
     return true;
   }
-  const member = pick{{.Name}}Member(payload);
-  if (member === undefined) {
-    return true;
-  }
-  return checkUnionMember(member, payload) ?? true;
+  return withPicks(() => {
+    const index = pickUnionMember({{jsonString .Name}}, payload);
+    return index < 0 ? true : (checkUnionMember({{.Name}}Members[index], payload) ?? true);
+  });
 }
 
 /**

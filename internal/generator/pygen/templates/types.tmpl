@@ -15,7 +15,7 @@ from datetime import datetime
 {{- end}}
 import json
 import re
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError as PydanticValidationError{{if .HasVersionedTypes}}, BeforeValidator{{end}}{{if anyKeptNullJSONFields .Types}}, SerializationInfo, SerializerFunctionWrapHandler, model_serializer{{end}}
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError as PydanticValidationError{{if .HasUnionFieldReads}}, field_validator{{end}}{{if .HasVersionedTypes}}, BeforeValidator{{end}}{{if anyKeptNullJSONFields .Types}}, SerializationInfo, SerializerFunctionWrapHandler, model_serializer{{end}}
 
 {{if gt (len .Scalars) 0 -}}
 from .scalars import (
@@ -300,6 +300,19 @@ class {{.Name}}(BaseModel):
     {{- $default := pythonFieldDefault .}}
     {{.TargetName}}: {{if or (not .Required) .IsRelation}}Optional[{{end}}{{.TargetType}}{{if or (not .Required) .IsRelation}}]{{end}} = Field({{if $default}}default={{$default}}{{else if and .Required (not .IsRelation)}}...{{else}}default=None{{end}}, alias="{{.Name}}", serialization_alias="{{.Name}}")
     {{end}}
+{{- range .Fields}}
+{{- if $.ReadsUnion .}}
+
+    @field_validator("{{.TargetName}}", mode="before")
+    @classmethod
+    def _read_{{.TargetName}}_union(cls, value: Any) -> Any:
+        """Read {{.Name}} as the member of {{.Type}} the structural predicate
+        picks (D31, amended), as the Go, TypeScript and Rust unions pick it."""
+        from .unions import read_union_field
+
+        return read_union_field("{{.Type}}", value, {{if .IsArrayOfArrays}}2{{else if .IsArray}}1{{else}}0{{end}}, {{if .IsMap}}True{{else}}False{{end}})
+{{- end}}
+{{- end}}
 {{- with keptNullJSONFields .}}
 
     @model_serializer(mode="wrap")

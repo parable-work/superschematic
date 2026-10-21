@@ -217,9 +217,14 @@ func TestUnionParsersRendering(t *testing.T) {
 			"export function parseShapeFromJSON(input: unknown): Shape {",
 			"export function validateShape(value: Shape | null | undefined): ValidationResult {",
 			"export function parseShapeJson(input: unknown): unknown {",
-			`unionPayloadKeysWithin(payload, ["radius", "drawnAt"]) &&`,
-			// A member reads the payload only when it holds radius.
-			`unionMemberReads([parseCircleFromJSON, parseCircleJsonNonStrict], payload, ["radius"])`,
+			// The structural predicate's tables: Circle requires radius, a
+			// number, and its drawnAt is held to its scalar's validator.
+			`"Circle": {`,
+			`{ name: "radius", required: true, depth: 0, map: false, kind: "number" }`,
+			`{ name: "drawnAt", required: false, depth: 0, map: false, kind: "scalar", json: "string", scalar: (value: unknown) => validateTemporalDateTime(value as never)[0] }`,
+			`"Shape": {`,
+			`{ type: "Circle", fields: ["radius", "drawnAt"], tags: [] }`,
+			"const index = withPicks(() => pickUnionMember(\"Shape\", payload));",
 			"throw new ParseError('parseShape: no member of Shape reads the payload', UNION_MISMATCH);",
 		}},
 		{read(cases[1]), "validators/unions.ts", []string{
@@ -228,11 +233,13 @@ func TestUnionParsersRendering(t *testing.T) {
 			"import { parseCircleFromJSON, parseCircleJsonNonStrict, parseSquareFromJSON, parseSquareJsonNonStrict } from '" + shapesPackage + "/validators';",
 			"import { parseStampFromJSON, parseStampJsonNonStrict } from './types/stamp';",
 			// Marker dispatches by its discriminator.
-			`switch (payload["kind"]) {`,
-			`case "flag":` + "\n      return [parseFlagFromJSON, parseFlagJsonNonStrict];",
-			`"parseMarker: discriminator kind is " + stated + ", not one of \"pin\", \"flag\"",`,
+			`discriminator: "kind",`,
+			`{ type: "Flag", tag: "flag" },`,
+			`"parseMarker: no member of Marker reads the payload, whose kind is " + stated + " (one of \"pin\", \"flag\")",`,
 			// Contact's members differ by a tag.
-			`unionPayloadTagsAllow(payload, [["kind", "sms"]])`,
+			`{ type: "Sms", fields: ["kind", "address"], tags: [["kind", "sms"]] },`,
+			// The imported members' tables come from the dependency's IR.
+			`"Square": {`,
 		}},
 		{read(cases[1]), "validators/types/drawing.ts", []string{
 			"import type { Drawing, Shape, Figure, Marker, Contact } from '../../types';",

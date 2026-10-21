@@ -113,13 +113,16 @@ describe('a discriminated union reads the member its discriminator names', () =>
     expect(parseMarkerFromJSON({ kind: 'pin', label: 'here' })).toEqual({ kind: 'pin', label: 'here' });
   });
 
-  test('a @strictJSON member refuses an unknown key and a missing required field', () => {
-    const unknown = refusal(() => parseMarkerFromJSON({ kind: 'pin', label: 'here', note: 'x' }));
-    expect(unknown.reason).toBe('unknown fields: note');
-    const missing = refusal(() => parseMarkerFromJSON({ kind: 'pin' }));
-    expect(missing.reason).toBe('validation failed');
-    expect(missing.errors).toEqual({ label: [{ validator: 'required', message: 'required field' }] });
-    expect(validateMarker({ kind: 'pin' } as any)).toEqual({ label: [{ validator: 'required', message: 'required field' }] });
+  test('a member its discriminator names is still picked only when it reads the payload', () => {
+    // A key a @strictJSON member does not declare, a missing required
+    // field and a value of another kind: the member does not read it, so
+    // the union refuses it as Go and Rust do, and leaves it to the parser.
+    for (const payload of [{ kind: 'pin', label: 'here', note: 'x' }, { kind: 'pin' }, { kind: 'pin', label: 7 }]) {
+      const refused = refusal(() => parseMarkerFromJSON(payload));
+      expect(refused.reason).toBe(mismatch);
+      expect(refused.message).toBe('parseMarker: no member of Marker reads the payload, whose kind is "pin" (one of "pin", "flag")');
+      expect(validateMarker(payload as any)).toBe(true);
+    }
     expect(validateMarker({ kind: 'flag', raisedAt: when } as any)).toBe(true);
   });
 
@@ -129,7 +132,7 @@ describe('a discriminated union reads the member its discriminator names', () =>
       expect(validateMarker(payload as any)).toBe(true);
     }
     expect(refusal(() => parseMarkerFromJSON({ kind: 'star' })).message).toBe(
-      'parseMarker: discriminator kind is "star", not one of "pin", "flag"'
+      'parseMarker: no member of Marker reads the payload, whose kind is "star" (one of "pin", "flag")'
     );
   });
 });
@@ -174,7 +177,7 @@ describe("a model's parser reads every union field through the union", () => {
     const error = refusal(() => parseDrawingFromJSON({ shape: { side: 1 }, figures: [], contacts: [{ kind: 'fax', address: '555' }] }));
     expect(error.reason).toBe(mismatch);
     expect(refusal(() => parseDrawingFromJSON({ shape: { side: 1 }, figures: [], marker: { kind: 'pin', label: 'x', note: 'y' } })).reason).toBe(
-      'unknown fields: note'
+      mismatch
     );
   });
 });
@@ -195,6 +198,7 @@ describe("a model's validator validates every union field as its member", () => 
       rows: [[], [long]],
       byName: { a: long },
       listsByName: { b: [long] },
+      // A Pin without its label is no Pin: the parser refuses it.
       marker: { kind: 'pin' },
     } as any);
     expect(errors).toEqual({
@@ -203,7 +207,6 @@ describe("a model's validator validates every union field as its member", () => 
       'rows[1][0]': { text: maxLength },
       'byName.a': { text: maxLength },
       'listsByName.b[0]': { text: maxLength },
-      marker: { label: [{ validator: 'required', message: 'required field' }] },
     });
   });
 

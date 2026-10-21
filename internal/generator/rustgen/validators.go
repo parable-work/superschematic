@@ -58,6 +58,10 @@ type ValidatorsInfo struct {
 	Types   []TypeValidator
 	Unions  []UnionValidator
 
+	// ReadSource is the structural predicate's tables and interpreter
+	// (renderRustReads), "" without a union.
+	ReadSource string
+
 	// CallsCore is true when a scalar validator asks the scalar core for
 	// its verdict (coerce_lenient), ParsesCore when one runs a scalar's
 	// parse and ValidatesJSON when one hands the core a value's JSON text;
@@ -242,8 +246,11 @@ type validatorInputs struct {
 	// validators module.
 	unions         []UnionInfo
 	importedUnions map[string]string
-	enumLookup     codegen.EnumLookup
-	naming         naming.Naming
+	// readModel is the structural predicate the unions pick their members
+	// by (D31, amended), nil without a union.
+	readModel  *codegen.ReadModel
+	enumLookup codegen.EnumLookup
+	naming     naming.Naming
 }
 
 // buildValidators builds the validators of every scalar the schema uses,
@@ -291,6 +298,14 @@ func buildValidators(in validatorInputs) *ValidatorsInfo {
 		}
 		info.Unions = append(info.Unions, uv)
 		unionFns[u.Name] = uv.Fn
+	}
+
+	if in.readModel != nil {
+		fns := make(map[string]string, len(scalarFns))
+		for name, fn := range scalarFns {
+			fns[name] = fn
+		}
+		info.ReadSource = renderRustReads(in.readModel, fns)
 	}
 
 	for _, t := range in.types {

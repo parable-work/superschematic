@@ -129,23 +129,24 @@ func TestValidation(t *testing.T) {
  input := decode(t, "{\"trigger\":" + valid + ",\"triggers\":[" + existing + "],\"byName\":{\"a\":" + valid + "},\"optional\":null}")
  if errors := input.Validate(); errors.HasErrors() { t.Fatalf("complete input refused: %v", errors) }
 
- // The reported payload: the new-message member decodes, but its message
- // omits the idempotency key and the required mentions array.
- input = decode(t, "{\"trigger\":{\"kind\":\"new_message\",\"message\":{}},\"triggers\":[],\"byName\":{}}")
- errors := input.Validate()
- nested := errors.GetNestedErrors("trigger").GetNestedErrors("message")
- if len(nested.GetFieldErrors("idempotencyKey")) == 0 || len(nested.GetFieldErrors("mentions")) == 0 { t.Fatalf("incomplete member accepted: %v", errors) }
+ // The reported payload: a new message that omits the idempotency key and
+ // the required mentions array does not decode under the member's types,
+ // so no member reads it, as serde refuses it for the Rust member.
+ var refused StartUnionInput
+ if err := json.Unmarshal([]byte("{\"trigger\":{\"kind\":\"new_message\",\"message\":{}},\"triggers\":[],\"byName\":{}}"), &refused); err == nil { t.Fatal("incomplete member accepted") }
+ for _, payload := range []string{
+  "{\"trigger\":" + valid + ",\"triggers\":[" + valid + ",{\"message\":{}}],\"byName\":{}}",
+  "{\"trigger\":" + valid + ",\"triggers\":[],\"byName\":{\"bad\":{\"message\":{}}}}",
+  "{\"trigger\":" + valid + ",\"triggers\":[],\"byName\":{},\"optional\":{\"message\":{}}}",
+ } {
+  if err := json.Unmarshal([]byte(payload), &refused); err == nil { t.Fatalf("incomplete member accepted in %s", payload) }
+ }
 
  input = decode(t, "{}")
- errors = input.Validate()
+ errors := input.Validate()
  for _, field := range []string{"trigger", "triggers", "byName"} {
   if len(errors.GetFieldErrors(field)) == 0 { t.Fatalf("absent required union %s accepted: %v", field, errors) }
  }
-
- input = decode(t, "{\"trigger\":" + valid + ",\"triggers\":[" + valid + ",{\"message\":{}}],\"byName\":{\"bad\":{\"message\":{}}},\"optional\":{\"message\":{}}}")
- errors = input.Validate()
- expect(t, errors, "triggers[1]", "byName[bad]", "optional")
- if len(errors.GetNestedErrors("triggers[0]")) != 0 { t.Fatalf("valid element reported: %v", errors) }
 
  // Members held by pointer validate too; a nil element is not a member.
  input.Trigger = &NewMessageUnionTrigger{}

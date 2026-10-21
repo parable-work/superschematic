@@ -179,9 +179,9 @@ fn members_with_different_fields_are_told_apart() {
 #[test]
 fn a_payload_that_is_not_an_object_is_refused() {
     let err = serde_json::from_str::<PieceRef>(r#"["pane","p"]"#).unwrap_err();
-    assert!(err.to_string().contains("PieceRef requires a JSON object"), "{err}");
+    assert!(err.to_string().contains("no member of PieceRef reads the payload"), "{err}");
     let err = serde_json::from_str::<PieceRef>(r#"{"other":1}"#).unwrap_err();
-    assert!(err.to_string().contains("did not match any variant of untagged enum PieceRef"), "{err}");
+    assert!(err.to_string().contains("no member of PieceRef reads the payload"), "{err}");
 }
 
 #[test]

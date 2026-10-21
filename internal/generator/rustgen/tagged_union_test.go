@@ -80,7 +80,7 @@ fn tagged_union_with_a_float_decodes_and_round_trips() {
 #[test]
 fn tagged_union_rejects_a_missing_or_unknown_tag() {
     let missing = serde_json::from_str::<Payment>(r#"{"iban":"x","amount":1}"#).unwrap_err();
-    assert!(missing.to_string().contains("discriminator kind"), "{missing}");
+    assert!(missing.to_string().contains("whose kind is null"), "{missing}");
     let unknown = serde_json::from_str::<Payment>(r#"{"kind":"cash"}"#).unwrap_err();
     assert!(unknown.to_string().contains("\"cash\""), "{unknown}");
 }
