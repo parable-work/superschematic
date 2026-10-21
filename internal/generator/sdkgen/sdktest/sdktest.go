@@ -3,9 +3,13 @@
 package sdktest
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
+	"strings"
 
 	"github.com/parable-work/superschematic/internal/loader"
 	ir "github.com/parable-work/superschematic/ir"
@@ -58,14 +62,141 @@ const UnionListsService = "union-lists-api"
 // ShapeQueries.shapesByName (a map of it), ShapeQueries.shapeGroups (a map
 // of lists of it), ShapeQueries.findShape (one of it that may be null) and
 // ShapeQueries.findShapes (a list of it that may be null). An SDK decodes
-// each element through the union. It is local to the SDK generator tests,
-// so no other generator's goldens read it.
+// each element through the union. ShapeMutations sends unions:
+// drawShape (Shape) and pay (Payment, Card | Invoice, which kind
+// discriminates) as the whole body argument, and checkout as fields of its
+// input, Checkout; UnionRequestsPath holds the requests they answer. It is
+// local to the SDK and server generator tests, so no other generator's
+// goldens read it.
 func LoadUnionListsService() (*ir.Schema, error) {
 	_, file, _, ok := runtime.Caller(0)
 	if !ok {
 		return nil, fmt.Errorf("locate package sdktest")
 	}
 	return loader.LoadService(filepath.Join(filepath.Dir(file), "testdata", UnionListsService))
+}
+
+// UnionRequestsPath is the path of union_requests.json, the requests every
+// generated server and SDK runs against union-lists-api's ShapeMutations;
+// its comment states what each member asserts.
+func UnionRequestsPath() (string, error) {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		return "", fmt.Errorf("locate package sdktest")
+	}
+	return filepath.Join(filepath.Dir(file), "testdata", UnionListsService, "union_requests.json"), nil
+}
+
+// UnionRequest is one request of union_requests.json.
+type UnionRequest struct {
+	Name      string          `json:"name"`
+	Operation string          `json:"operation"`
+	Path      string          `json:"path"`
+	Body      json.RawMessage `json:"body"`
+	Status    int             `json:"status"`
+	Data      json.RawMessage `json:"data,omitempty"`
+	Input     bool            `json:"input,omitempty"`
+	Reason    string          `json:"reason,omitempty"`
+	Parameter string          `json:"parameter,omitempty"`
+	Errors    FieldErrors     `json:"errors,omitempty"`
+	SDK       json.RawMessage `json:"sdk"`
+}
+
+// FieldErrors are field errors as union_requests.json compares them: each
+// path to the rules it breaks, sorted.
+type FieldErrors map[string][]string
+
+// SDKSends reports whether an SDK sends the request's body as it is; when
+// not, SDKErrors are the field errors its validation error holds.
+func (r UnionRequest) SDKSends() bool {
+	return string(r.SDK) == `"sends"`
+}
+
+// SDKErrors are the field errors an SDK refuses the request's arguments
+// with, or nil when it sends them.
+func (r UnionRequest) SDKErrors() (FieldErrors, error) {
+	if r.SDKSends() {
+		return nil, nil
+	}
+	var refusal struct {
+		Errors FieldErrors `json:"errors"`
+	}
+	if err := json.Unmarshal(r.SDK, &refusal); err != nil {
+		return nil, fmt.Errorf("request %q: sdk: %w", r.Name, err)
+	}
+	return refusal.Errors, nil
+}
+
+// LoadUnionRequests reads union_requests.json.
+func LoadUnionRequests() ([]UnionRequest, error) {
+	path, err := UnionRequestsPath()
+	if err != nil {
+		return nil, err
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var file struct {
+		Requests []UnionRequest `json:"requests"`
+	}
+	if err := json.Unmarshal(data, &file); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	return file.Requests, nil
+}
+
+// FlattenFieldErrors reads a problem's or a validation error's field errors,
+// as superscalar's ValidationErrors marshal them, into FieldErrors: a
+// path's list of {validator, message} becomes its sorted validators, and a
+// nested object's errors sit at the dotted path (payment.number,
+// shapes[1].radius).
+func FlattenFieldErrors(raw json.RawMessage) (FieldErrors, error) {
+	flat := FieldErrors{}
+	if len(raw) == 0 || string(raw) == "null" {
+		return flat, nil
+	}
+	var walk func(prefix string, value json.RawMessage) error
+	walk = func(prefix string, value json.RawMessage) error {
+		var list []struct {
+			Validator string `json:"validator"`
+		}
+		if err := json.Unmarshal(value, &list); err == nil {
+			for _, item := range list {
+				flat[prefix] = append(flat[prefix], item.Validator)
+			}
+			sort.Strings(flat[prefix])
+			return nil
+		}
+		var nested map[string]json.RawMessage
+		if err := json.Unmarshal(value, &nested); err != nil {
+			return fmt.Errorf("field errors at %q: %w", prefix, err)
+		}
+		for key, inner := range nested {
+			path := key
+			if prefix != "" {
+				path = prefix + "." + key
+			}
+			if err := walk(path, inner); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if err := walk("", raw); err != nil {
+		return nil, err
+	}
+	return flat, nil
+}
+
+// String writes the errors one path a line, sorted, for a test's message.
+func (f FieldErrors) String() string {
+	paths := make([]string, 0, len(f))
+	for path, rules := range f {
+		paths = append(paths, path+": "+strings.Join(rules, ", "))
+	}
+	sort.Strings(paths)
+	return strings.Join(paths, "; ")
 }
 
 // AddCircleOperations adds three operations on Circle, an object type, to
@@ -262,4 +393,119 @@ func AddEntriesOperation(schema *ir.Schema) error {
 		return nil
 	}
 	return fmt.Errorf("schema %s has no Catalog operation set", schema.Name)
+}
+
+// UnionResponse is what a server answered one request of
+// union_requests.json, as a server test's harness records it: the
+// request's name, the status and the body.
+type UnionResponse struct {
+	Name   string          `json:"name"`
+	Status int             `json:"status"`
+	Body   json.RawMessage `json:"body"`
+}
+
+// BodyMismatchDetail is the detail every generated server answers a refused
+// input body with.
+const BodyMismatchDetail = "Request body does not match the declared input"
+
+// CheckUnionResponses holds what a server answered the requests of
+// union_requests.json (responses, read from the file its harness wrote) to
+// each request's expectations, and returns one message per difference.
+func CheckUnionResponses(requests []UnionRequest, responsesFile string) ([]string, error) {
+	data, err := os.ReadFile(responsesFile)
+	if err != nil {
+		return nil, err
+	}
+	var responses []UnionResponse
+	if err := json.Unmarshal(data, &responses); err != nil {
+		return nil, fmt.Errorf("%s: %w", responsesFile, err)
+	}
+	byName := make(map[string]UnionResponse, len(responses))
+	for _, response := range responses {
+		byName[response.Name] = response
+	}
+	var problems []string
+	for _, request := range requests {
+		response, ok := byName[request.Name]
+		if !ok {
+			problems = append(problems, fmt.Sprintf("%s: no response", request.Name))
+			continue
+		}
+		for _, problem := range checkUnionResponse(request, response) {
+			problems = append(problems, fmt.Sprintf("%s: %s (body %s)", request.Name, problem, response.Body))
+		}
+	}
+	return problems, nil
+}
+
+// checkUnionResponse compares one response with its request's
+// expectations.
+func checkUnionResponse(request UnionRequest, response UnionResponse) []string {
+	if response.Status != request.Status {
+		return []string{fmt.Sprintf("status %d, want %d", response.Status, request.Status)}
+	}
+	var body struct {
+		Data    json.RawMessage `json:"data"`
+		Detail  string          `json:"detail"`
+		Errors  json.RawMessage `json:"errors"`
+		Details struct {
+			Reason    string `json:"reason"`
+			Parameter string `json:"parameter"`
+		} `json:"details"`
+	}
+	if err := json.Unmarshal(response.Body, &body); err != nil {
+		return []string{fmt.Sprintf("body: %v", err)}
+	}
+	if request.Status == 200 {
+		var got, want any
+		if err := json.Unmarshal(body.Data, &got); err != nil {
+			return []string{fmt.Sprintf("data: %v", err)}
+		}
+		if err := json.Unmarshal(request.Data, &want); err != nil {
+			return []string{fmt.Sprintf("want data: %v", err)}
+		}
+		if fmt.Sprint(got) != fmt.Sprint(want) {
+			return []string{fmt.Sprintf("data %v, want %v", got, want)}
+		}
+		return nil
+	}
+	errors, err := FlattenFieldErrors(body.Errors)
+	if err != nil {
+		return []string{err.Error()}
+	}
+	var problems []string
+	if request.Input {
+		if body.Detail != BodyMismatchDetail {
+			problems = append(problems, fmt.Sprintf("detail %q, want %q", body.Detail, BodyMismatchDetail))
+		}
+		if body.Details.Reason != request.Reason {
+			problems = append(problems, fmt.Sprintf("reason %q, want %q", body.Details.Reason, request.Reason))
+		}
+		want := request.Errors
+		if want == nil {
+			want = FieldErrors{}
+		}
+		if errors.String() != want.String() {
+			problems = append(problems, fmt.Sprintf("errors %s, want %s", errors, want))
+		}
+		return problems
+	}
+	// A body argument's refusal: the TypeScript and Rust routers name the
+	// argument in details.parameter, and the Go route names its errors
+	// under the argument's path.
+	if body.Details.Parameter != "" {
+		if body.Details.Parameter != request.Parameter {
+			problems = append(problems, fmt.Sprintf("parameter %q, want %q", body.Details.Parameter, request.Parameter))
+		}
+		return problems
+	}
+	if len(errors) == 0 {
+		return []string{fmt.Sprintf("no parameter and no errors, want the refusal of %s", request.Parameter)}
+	}
+	for path := range errors {
+		if path != request.Parameter && !strings.HasPrefix(path, request.Parameter+".") && !strings.HasPrefix(path, request.Parameter+"[") {
+			problems = append(problems, fmt.Sprintf("error at %q, want one under %s", path, request.Parameter))
+		}
+	}
+	return problems
 }

@@ -53,6 +53,9 @@ func TestUnionListsSDKOutputTypeHints(t *testing.T) {
 		"circles_by_name": "dict[str, Circle]",
 		"circle_groups":   "dict[str, list[Circle]]",
 		"find_circle":     "Circle | None",
+		"draw_shape":      "Shape",
+		"pay":             "str",
+		"checkout":        "str",
 	}
 	for _, ns := range sdkOutput.Namespaces {
 		for _, ep := range ns.Endpoints {

@@ -24,6 +24,9 @@ _TYPES_PACKAGE_RESOLVED = False
 # one through a pydantic TypeAdapter of the alias, made once per union.
 _UNION_OUTPUT_TYPES = frozenset({"Marker", "Shape"})
 _UNION_ADAPTERS: dict[str, Any] = {}
+# The unions this namespace's arguments hold. _validate_scalar_argument
+# reads one as the member the union picks and checks the member's rules.
+_UNION_ARGUMENT_TYPES = frozenset({"Payment", "Shape"})
 
 
 def _load_types_package() -> Any | None:
@@ -58,8 +61,10 @@ def _union_reader(type_name: str, union_type: Any) -> Any | None:
     return lambda value: adapter.validate_python(value, strict=False)
 if TYPE_CHECKING:
     from schemas_types_union_lists_api import (
+        Checkout,
         Drawing,
         Marker,
+        Payment,
         Shape,
     )
 class ShapeNamespace:
@@ -309,6 +314,35 @@ class ShapeNamespace:
         items = self._coerce_response(raw["items"], item_type_name, True, "data.items")
         return Page(items=items, next=next_cursor)
 
+    def _validate_union_argument(self, value: Any, union_type: Any, field_name: str) -> Any:
+        """Read one value of a union argument as the member the union picks
+        and return it as it is sent, by wire name.
+
+        It reads the value in lax mode, as a union response is read, so a
+        dict is the member its discriminator names, or else the member it
+        fits; a value no member reads raises ValidationError under
+        field_name. The member's rules are then checked by its validate_all,
+        each error under field_name (payment.number), as the route reports
+        them.
+        """
+        try:
+            from pydantic import TypeAdapter
+        except ModuleNotFoundError:
+            return value
+        try:
+            member = TypeAdapter(union_type).validate_python(value, strict=False)
+        except Exception as err:
+            raise ValidationError(
+                {
+                    self._join_path(field_name, key): errors
+                    for key, errors in self._build_validation_errors(err, default_field="").items()
+                },
+            ) from err
+        rule_errors = self._rule_errors(member, field_name)
+        if rule_errors:
+            raise ValidationError(rule_errors)
+        return self._client.to_dict(member)
+
     def _validate_scalar_argument(self, value: Any, scalar_type_name: str, field_name: str) -> Any:
         """Validate one value of an argument and return it as it is sent.
 
@@ -328,6 +362,8 @@ class ShapeNamespace:
         scalar_type = self._resolve_validation_type(scalar_type_name)
         if scalar_type is None:
             return value
+        if scalar_type_name in _UNION_ARGUMENT_TYPES:
+            return self._validate_union_argument(value, scalar_type, field_name)
 
         from_dict_non_strict = getattr(scalar_type, "from_dict_non_strict", None)
         if callable(from_dict_non_strict) and isinstance(value, (dict, scalar_type)):
@@ -439,6 +475,44 @@ class ShapeNamespace:
 
         if field_errors:
             raise ValidationError({field_name: field_errors})
+    def checkout(self, input_data: Checkout, timeout_seconds: float | None = None, extra_headers: Mapping[str, str] | None = None) -> str:
+        path = "/api/checkout"
+        if input_data is None:
+            raise ValidationError(
+                {"": [{"validator": "required", "message": "input is required"}]},
+            )
+        validated_input_data = self._validate_input_model(input_data, "Checkout")
+        query_params: dict[str, Any] | None = None
+        payload: Any = self._client.to_dict(validated_input_data)
+        response = self._client.request(
+            method="POST",
+            path=path,
+            body=payload,
+            query_params=query_params,
+            requires_auth=False,
+            timeout_seconds=timeout_seconds,
+            extra_headers=extra_headers,
+        )
+        return self._coerce_response(response, "", False)
+    def draw_shape(self, shape: Shape, timeout_seconds: float | None = None, extra_headers: Mapping[str, str] | None = None) -> Shape:
+        path = "/api/shapes"
+        query_params: dict[str, Any] | None = None
+        payload: dict[str, Any] = {}
+        payload["shape"] = self._validate_scalar_argument(
+            shape,
+            "Shape",
+            "shape",
+        )
+        response = self._client.request(
+            method="POST",
+            path=path,
+            body=payload,
+            query_params=query_params,
+            requires_auth=False,
+            timeout_seconds=timeout_seconds,
+            extra_headers=extra_headers,
+        )
+        return self._coerce_response(response, "Shape", False)
     def find_shape(self, name: str, timeout_seconds: float | None = None, extra_headers: Mapping[str, str] | None = None) -> Shape | None:
         path = f"/api/shape-search/{path_segment(name)}"
         query_params: dict[str, Any] | None = None
@@ -561,6 +635,25 @@ class ShapeNamespace:
             if page.next == cursor:
                 raise SDKError("page_shapes returned the cursor it was sent")
             cursor = page.next
+    def pay(self, payment: Payment, timeout_seconds: float | None = None, extra_headers: Mapping[str, str] | None = None) -> str:
+        path = "/api/payments"
+        query_params: dict[str, Any] | None = None
+        payload: dict[str, Any] = {}
+        payload["payment"] = self._validate_scalar_argument(
+            payment,
+            "Payment",
+            "payment",
+        )
+        response = self._client.request(
+            method="POST",
+            path=path,
+            body=payload,
+            query_params=query_params,
+            requires_auth=False,
+            timeout_seconds=timeout_seconds,
+            extra_headers=extra_headers,
+        )
+        return self._coerce_response(response, "", False)
     def shape_groups(self, timeout_seconds: float | None = None, extra_headers: Mapping[str, str] | None = None) -> dict[str, list[Shape]]:
         path = "/api/shape-groups"
         query_params: dict[str, Any] | None = None

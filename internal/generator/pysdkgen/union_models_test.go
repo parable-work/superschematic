@@ -121,6 +121,9 @@ func TestUnionOutputsAreMarked(t *testing.T) {
 	if want := []string{"Marker", "Shape"}; !slices.Equal(namespace.UnionOutputTypes, want) {
 		t.Errorf("UnionOutputTypes = %v, want %v", namespace.UnionOutputTypes, want)
 	}
+	if want := []string{"Payment", "Shape"}; !slices.Equal(namespace.UnionArgumentTypes, want) {
+		t.Errorf("UnionArgumentTypes = %v, want %v", namespace.UnionArgumentTypes, want)
+	}
 	want := map[string]struct {
 		union bool
 		model string
@@ -135,6 +138,9 @@ func TestUnionOutputsAreMarked(t *testing.T) {
 		"page_shapes":    {true, "Shape"},
 		"get_marker":     {true, "Marker"},
 		"get_drawing":    {false, "Drawing"},
+		"draw_shape":     {true, "Shape"},
+		"pay":            {false, ""},
+		"checkout":       {false, ""},
 	}
 	for _, endpoint := range namespace.Endpoints {
 		w, ok := want[endpoint.MethodName]

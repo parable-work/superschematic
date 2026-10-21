@@ -174,6 +174,9 @@ func TestUnionListsSDKOutputTypes(t *testing.T) {
 		"pageShapes":    "Page<Shape>",
 		"getDrawing":    "Drawing",
 		"getMarker":     "Marker",
+		"drawShape":     "Shape",
+		"pay":           "string",
+		"checkout":      "string",
 	}
 	for _, ns := range sdkOutput.Namespaces {
 		for _, ep := range ns.Endpoints {
@@ -200,8 +203,11 @@ func TestUnionListsSDKOutputTypes(t *testing.T) {
 // fields, reach the caller as their members, with a member's date-time
 // field a Date, as do a map and a map of lists of Circle, parsed value by
 // value; a response that may be null is null when the server answers null;
-// and a @strictJSON member the payload breaks is refused with the types
-// package's ParseError.
+// a @strictJSON member the payload breaks is refused with the types
+// package's ParseError; and union_requests.json's arguments
+// (sdktest.UnionRequestsPath) are sent as they are, or refused before
+// sending with the member's errors at the argument's paths, as the
+// requests' sdk says.
 func TestUnionListsSDKCompilesAndRuns(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping compile check in -short mode")
@@ -227,8 +233,12 @@ func TestUnionListsSDKCompilesAndRuns(t *testing.T) {
 	if !ok {
 		t.Fatal("resolve current test file path")
 	}
+	requestsPath, err := sdktest.UnionRequestsPath()
+	if err != nil {
+		t.Fatal(err)
+	}
 	run := exec.Command(bunPath, "test", filepath.Join(filepath.Dir(currentFile), "test_union_lists.js"))
-	run.Env = append(os.Environ(), "SDK_DIR="+sdkDir)
+	run.Env = append(os.Environ(), "SDK_DIR="+sdkDir, "UNION_REQUESTS="+requestsPath)
 	if out, err := run.CombinedOutput(); err != nil {
 		t.Fatalf("test_union_lists.js failed: %v\n%s", err, out)
 	}

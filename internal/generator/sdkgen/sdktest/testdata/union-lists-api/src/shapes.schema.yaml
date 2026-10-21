@@ -4,6 +4,13 @@
 # An SDK decodes each element through the union; the Go SDK through
 # types.ShapeWrapper, since a union is an interface that encoding/json
 # cannot fill. The SDK tests load it through sdktest.LoadUnionListsService.
+#
+# Shape, which picks its member by shape, and Payment (Card | Invoice),
+# which its kind discriminates, are also sent: as a whole body argument
+# (ShapeMutations.drawShape, ShapeMutations.pay) and as fields of an input
+# (ShapeMutations.checkout's Checkout). Each member has a rule of its own,
+# which a server and an SDK check on the member the union picks. The
+# requests of union_requests.json run against them.
 name: union-lists-api
 kind: API
 types:
@@ -15,6 +22,7 @@ types:
       - name: radius
         typeRef: { name: number }
         required: true
+        validateMin: 0
   # A square, by its side.
   Square:
     name: Square
@@ -23,11 +31,53 @@ types:
       - name: side
         typeRef: { name: number }
         required: true
+  # A payment by card. Its kind names it among Payment's members.
+  Card:
+    name: Card
+    role: APIInput
+    fields:
+      - name: kind
+        typeRef: { name: string }
+        required: true
+        internalMetadata: true
+        default: card
+      - name: number
+        typeRef: { name: string }
+        required: true
+        validatePattern: "^[0-9]{12,19}$"
+  # A payment on account, by the invoice's reference.
+  Invoice:
+    name: Invoice
+    role: APIInput
+    fields:
+      - name: kind
+        typeRef: { name: string }
+        required: true
+        internalMetadata: true
+        default: invoice
+      - name: reference
+        typeRef: { name: string }
+        required: true
+        validateMinLength: 3
+  # An order of shapes, paid for: a model whose fields hold the unions.
+  Checkout:
+    name: Checkout
+    role: APIInput
+    fields:
+      - name: payment
+        typeRef: { name: Payment }
+        required: true
+      - name: shapes
+        typeRef: { name: Shape, isArray: true }
 unions:
   # A circle or a square.
   Shape:
     name: Shape
     types: [Circle, Square]
+  # A card or an invoice, which kind names.
+  Payment:
+    name: Payment
+    types: [Card, Invoice]
 operationSets:
   - name: ShapeQueries
     operations:
@@ -83,3 +133,36 @@ operationSets:
         typeRef: { name: Shape, isArray: true }
         httpMethod: GET
         restPath: "shape-search"
+  - name: ShapeMutations
+    operations:
+      # Draws one shape, the whole body argument, and answers it.
+      - name: drawShape
+        typeRef: { name: Shape }
+        required: true
+        httpMethod: POST
+        restPath: "shapes"
+        arguments:
+          - name: shape
+            typeRef: { name: Shape }
+            required: true
+      # Takes a payment, the whole body argument, and answers its kind.
+      - name: pay
+        typeRef: { name: string }
+        required: true
+        httpMethod: POST
+        restPath: "payments"
+        arguments:
+          - name: payment
+            typeRef: { name: Payment }
+            required: true
+      # Checks out an order, whose input holds a payment and shapes, and
+      # answers the payment's kind.
+      - name: checkout
+        typeRef: { name: string }
+        required: true
+        httpMethod: POST
+        restPath: "checkout"
+        arguments:
+          - name: input
+            typeRef: { name: Checkout }
+            required: true
