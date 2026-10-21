@@ -17,23 +17,28 @@ import (
 
 // emitScript stands in for tsc: it writes a package's files into the
 // directory after --outDir slowly, index.js last, as a compiler that takes
-// a while does.
+// a while does. Each build's files differ from the last's (the stamp), so
+// every build moves every file in; EMIT_STAMP fixes the stamp.
 const emitScript = `
 const { mkdirSync, writeFileSync } = require("node:fs");
 const { join } = require("node:path");
 const out = process.argv[process.argv.indexOf("--outDir") + 1];
+const stamp = process.env.EMIT_STAMP || process.pid + "-" + Date.now();
 const pause = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 mkdirSync(join(out, "sub"), { recursive: true });
 for (let i = 0; i < 20; i++) {
-  writeFileSync(join(out, "sub", "m" + i + ".js"), "export const m = " + i + ";\n");
+  writeFileSync(join(out, "sub", "m" + i + ".js"), "export const m = " + i + "; // " + stamp + "\n");
   pause(2);
 }
-writeFileSync(join(out, "index.js"), "export * from './sub/m0.js';\n");
+writeFileSync(join(out, "index.js"), "export * from './sub/m0.js'; // " + stamp + "\n");
 `
 
 // TestBuildDistNeverLeavesDistMissing runs two builds of a package at once,
-// over and over, through scripts/build-dist.mjs while a reader polls for
-// its dist/ files, and finds them every time. The same harness on the
+// over and over, through scripts/build-dist.mjs, each build's files
+// differing from the last's, while a reader polls for its dist/ files, and
+// finds them every time. (It shows no file goes missing; a reader can still
+// see one build's file beside another's, which build-dist.mjs's header
+// states.) The same harness on the
 // build packages ran before (rm -rf dist, then compile into it) catches the
 // reader finding them missing, so the reader would see a window if there
 // were one.
@@ -47,7 +52,10 @@ func TestBuildDistNeverLeavesDistMissing(t *testing.T) {
 	}
 	buildDist := filepath.Join(RepoRoot(t), "scripts", "build-dist.mjs")
 
-	race := func(t *testing.T, build func(dir string) *exec.Cmd) (misses int64) {
+	// race runs the builds and the reader; failures are the builds' own
+	// failures, which the old build has when two run at once (one removes
+	// dist/ under the other's compiler).
+	race := func(t *testing.T, failures bool, build func(dir string) *exec.Cmd) (misses int64) {
 		t.Helper()
 		dir := t.TempDir()
 		if err := os.WriteFile(filepath.Join(dir, "emit.cjs"), []byte(emitScript), 0o644); err != nil {
@@ -79,7 +87,7 @@ func TestBuildDistNeverLeavesDistMissing(t *testing.T) {
 			go func() {
 				defer wg.Done()
 				for range 8 {
-					if out, err := build(dir).CombinedOutput(); err != nil {
+					if out, err := build(dir).CombinedOutput(); err != nil && !failures {
 						errs <- fmt.Errorf("%v\n%s", err, out)
 						return
 					}
@@ -115,7 +123,7 @@ func TestBuildDistNeverLeavesDistMissing(t *testing.T) {
 	}
 
 	t.Run("build-dist", func(t *testing.T) {
-		misses := race(t, func(dir string) *exec.Cmd {
+		misses := race(t, false, func(dir string) *exec.Cmd {
 			cmd := exec.Command(node, buildDist, node, "emit.cjs")
 			cmd.Dir = dir
 			return cmd
@@ -125,7 +133,7 @@ func TestBuildDistNeverLeavesDistMissing(t *testing.T) {
 		}
 	})
 	t.Run("rm-then-compile control", func(t *testing.T) {
-		misses := race(t, func(dir string) *exec.Cmd {
+		misses := race(t, true, func(dir string) *exec.Cmd {
 			cmd := exec.Command("sh", "-c", `rm -rf dist && "$0" emit.cjs --outDir dist`, node)
 			cmd.Dir = dir
 			return cmd
@@ -177,14 +185,69 @@ func TestBuildDistKeepsDistOnFailure(t *testing.T) {
 	}
 }
 
+// TestBuildDistLeavesAnIdenticalRebuildAlone: a rebuild with the same
+// output leaves dist/'s files as they were, modification times included, so
+// a reader sees no change and BuildTypeScriptPackage's stamp stays current;
+// and a build sweeps a staging directory a killed build left over an hour
+// ago, but not a younger one, which may be another build's.
+func TestBuildDistLeavesAnIdenticalRebuildAlone(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		RequireOrSkipTS(t, fmt.Sprintf("node not available: %v", err))
+	}
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "emit.cjs"), emitScript)
+	build := func() {
+		t.Helper()
+		cmd := exec.Command(node, filepath.Join(RepoRoot(t), "scripts", "build-dist.mjs"), node, "emit.cjs")
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(), "EMIT_STAMP=fixed")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("build-dist: %v\n%s", err, out)
+		}
+	}
+	build()
+	before, err := distDigest(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := filepath.Join(dir, ".dist-build-1-1")
+	young := filepath.Join(dir, ".dist-build-2-2")
+	writeFile(t, filepath.Join(old, "index.js"), "killed\n")
+	writeFile(t, filepath.Join(young, "index.js"), "running\n")
+	hoursAgo := time.Now().Add(-2 * time.Hour)
+	if err := os.Chtimes(old, hoursAgo, hoursAgo); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(20 * time.Millisecond)
+	build()
+	after, err := distDigest(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before != after {
+		t.Error("an identical rebuild changed dist/'s files or their modification times")
+	}
+	if _, err := os.Stat(old); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("the build left a staging directory from two hours ago: %v", err)
+	}
+	if _, err := os.Stat(young); err != nil {
+		t.Errorf("the build swept a young staging directory: %v", err)
+	}
+}
+
 const (
 	buildOnceDirEnv = "SUPERSCHEMATIC_TEST_BUILD_ONCE_DIR"
 	buildOnceLogEnv = "SUPERSCHEMATIC_TEST_BUILD_ONCE_LOG"
+	buildOnceDepEnv = "SUPERSCHEMATIC_TEST_BUILD_ONCE_DEP"
 )
 
 // TestBuildOnceHelperProcess is the test process TestBuildOnceAcrossProcesses
 // starts several of at once: it builds the package in buildOnceDirEnv
-// through buildOnce, logging when its build starts and ends.
+// through buildOnce, logging when its build starts and ends. The build
+// copies buildOnceDepEnv's dist/ in, as the engine's copies the HTTP
+// runtime's, and links node_modules/linked, as link-local-deps links
+// superscalar.
 func TestBuildOnceHelperProcess(t *testing.T) {
 	dir := os.Getenv(buildOnceDirEnv)
 	if dir == "" {
@@ -198,8 +261,17 @@ func TestBuildOnceHelperProcess(t *testing.T) {
 		defer f.Close()
 		fmt.Fprintf(f, "%s %d\n", s, os.Getpid())
 	}
-	_, err := buildOnce(dir, func() error {
+	in := buildInputs{tools: "bun 1 node 1", copies: []string{os.Getenv(buildOnceDepEnv)}}
+	_, err := buildOnce(dir, in, func() error {
 		logLine("start")
+		link := filepath.Join(dir, "node_modules", "linked")
+		if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
+			return err
+		}
+		_ = os.Remove(link)
+		if err := os.Symlink(filepath.Join("..", "linked-target"), link); err != nil {
+			return err
+		}
 		// The old build: dist/ gone while it runs.
 		if err := os.RemoveAll(filepath.Join(dir, "dist")); err != nil {
 			return err
@@ -221,16 +293,23 @@ func TestBuildOnceHelperProcess(t *testing.T) {
 
 // TestBuildOnceAcrossProcesses starts four test processes at once that each
 // build one package through buildOnce: one builds it while the others wait
-// on its lock, then find it current and build nothing. Changing a source
-// file, or another build rewriting dist/, makes the next round build once
-// more.
+// on its lock, then find it current and build nothing. Each of these makes
+// the next round build once more: a source file changing, the script the
+// build script names outside the package changing, another build
+// rewriting dist/, a bun install dropping a symlink the build made, and the
+// package whose dist/ the build copies being rebuilt.
 func TestBuildOnceAcrossProcesses(t *testing.T) {
 	if testing.Short() {
 		t.Skip("-short: starts test processes")
 	}
-	dir := t.TempDir()
-	writeFile(t, filepath.Join(dir, "package.json"), `{"name": "fixture"}`+"\n")
+	root := t.TempDir()
+	dir := filepath.Join(root, "pkg")
+	dep := filepath.Join(root, "dep")
+	writeFile(t, filepath.Join(dir, "package.json"), `{"name": "fixture", "scripts": {"build": "node ../tool.mjs tsc"}}`+"\n")
 	writeFile(t, filepath.Join(dir, "src", "index.ts"), "export const a = 1;\n")
+	writeFile(t, filepath.Join(dir, "linked-target", "package.json"), "{}\n")
+	writeFile(t, filepath.Join(root, "tool.mjs"), "// one\n")
+	writeFile(t, filepath.Join(dep, "dist", "index.js"), "dep\n")
 	logPath := filepath.Join(t.TempDir(), "builds.log")
 
 	round := func(t *testing.T) []string {
@@ -243,7 +322,7 @@ func TestBuildOnceAcrossProcesses(t *testing.T) {
 			go func() {
 				defer wg.Done()
 				cmd := exec.Command(os.Args[0], "-test.run=^TestBuildOnceHelperProcess$", "-test.count=1")
-				cmd.Env = append(os.Environ(), buildOnceDirEnv+"="+dir, buildOnceLogEnv+"="+logPath)
+				cmd.Env = append(os.Environ(), buildOnceDirEnv+"="+dir, buildOnceLogEnv+"="+logPath, buildOnceDepEnv+"="+dep)
 				if out, err := cmd.CombinedOutput(); err != nil {
 					errs <- fmt.Errorf("%v\n%s", err, out)
 				}
@@ -285,6 +364,27 @@ func TestBuildOnceAcrossProcesses(t *testing.T) {
 		t.Fatal(err)
 	}
 	builtOnce(t, "after dist/ changed", round(t))
+	if log := round(t); len(log) != 0 {
+		t.Fatalf("a round with nothing changed built: %q", log)
+	}
+
+	writeFile(t, filepath.Join(root, "tool.mjs"), "// two\n")
+	builtOnce(t, "after the build script's tool changed", round(t))
+
+	// A bun install that dropped link-local-deps' symlink.
+	if err := os.Remove(filepath.Join(dir, "node_modules", "linked")); err != nil {
+		t.Fatal(err)
+	}
+	builtOnce(t, "after the symlink went", round(t))
+	if _, err := os.Stat(filepath.Join(dir, "node_modules", "linked", "package.json")); err != nil {
+		t.Fatalf("the rebuild did not link it again: %v", err)
+	}
+
+	// The copied package rebuilt.
+	if err := os.Chtimes(filepath.Join(dep, "dist", "index.js"), later.Add(time.Second), later.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	builtOnce(t, "after the copied package was rebuilt", round(t))
 	if log := round(t); len(log) != 0 {
 		t.Fatalf("a round with nothing changed built: %q", log)
 	}

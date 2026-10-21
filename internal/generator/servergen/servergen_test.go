@@ -1432,7 +1432,9 @@ func TestTelemetryPackagesMatchTheRuntime(t *testing.T) {
 }
 
 // copyTree copies the directory src to dst, leaving out build products:
-// target and node_modules directories, and skip, a directory under src.
+// target and node_modules directories, a runtime build's staging
+// directories (.dist-build-*, scripts/build-dist.mjs), whose files move out
+// while another process builds, and skip, a directory under src.
 func copyTree(t *testing.T, src, dst string, skip ...string) {
 	t.Helper()
 	err := filepath.WalkDir(src, func(path string, d os.DirEntry, err error) error {
@@ -1444,7 +1446,7 @@ func copyTree(t *testing.T, src, dst string, skip ...string) {
 			return err
 		}
 		if d.IsDir() {
-			if d.Name() == "target" || d.Name() == "node_modules" || slices.Contains(skip, filepath.ToSlash(rel)) {
+			if d.Name() == "target" || d.Name() == "node_modules" || strings.HasPrefix(d.Name(), ".dist-build-") || slices.Contains(skip, filepath.ToSlash(rel)) {
 				return filepath.SkipDir
 			}
 			return os.MkdirAll(filepath.Join(dst, rel), 0o755)
