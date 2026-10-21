@@ -162,9 +162,9 @@ func inputsDigest(dir string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		fmt.Fprintf(h, "%s\x00", filepath.ToSlash(rel))
+		_, _ = fmt.Fprintf(h, "%s\x00", filepath.ToSlash(rel))
 		_, err = io.Copy(h, f)
-		f.Close()
+		_ = f.Close()
 		if err != nil {
 			return "", err
 		}

@@ -24,7 +24,7 @@ func lockDir(dir string) (func(), error) {
 		}
 	}
 	if err != nil {
-		f.Close()
+		_ = f.Close()
 		return nil, fmt.Errorf("lock %s for %s: %w", path, dir, err)
 	}
 	return func() {
