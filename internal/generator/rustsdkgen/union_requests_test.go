@@ -21,9 +21,9 @@ import (
 // calls ShapeMutations with the arguments of union_requests.json's
 // requests (sdktest.UnionRequestsPath), decoded into their Rust types,
 // against a local server that records what it is sent. A request whose
-// arguments the Rust types cannot hold (a value no member reads) is
-// skipped; the requests say only those whose sdk is "sends" and whose
-// status is 400 may be. Every other one is sent as the request's body, or
+// arguments the Rust types cannot hold (a value no member reads, a string
+// an enum lacks) is skipped; the requests say which may be
+// (UnionRequest.TypedMaySkip). Every other one is sent as the request's body, or
 // refused before sending with the member's errors at the argument's paths,
 // as its sdk says: the types crate's validate_<union> checks a union
 // argument and an input's union field.
@@ -108,7 +108,7 @@ tokio = { version = "1", features = ["macros", "rt"] }
 		case !ok:
 			t.Errorf("%s: no outcome", request.Name)
 		case outcome.Skipped:
-			if !request.SDKSends() || request.Status != 400 {
+			if !request.TypedMaySkip() {
 				t.Errorf("%s: the Rust types cannot hold its arguments", request.Name)
 			}
 		case request.SDKSends():

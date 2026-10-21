@@ -101,6 +101,18 @@ type UnionRequest struct {
 	At        string          `json:"at,omitempty"`
 	Errors    FieldErrors     `json:"errors,omitempty"`
 	SDK       json.RawMessage `json:"sdk"`
+	// TypedSkips says the Go and Rust SDKs' types cannot hold the
+	// request's arguments, a string an enum lacks among them, so their
+	// harnesses may skip it.
+	TypedSkips bool `json:"typedSkips,omitempty"`
+}
+
+// TypedMaySkip reports whether a typed SDK's harness may skip the request,
+// whose arguments its types cannot hold: a value no member reads, which
+// only a request whose sdk is "sends" and whose status is 400 holds, or a
+// string an enum lacks (TypedSkips).
+func (r UnionRequest) TypedMaySkip() bool {
+	return r.TypedSkips || (r.SDKSends() && r.Status == 400)
 }
 
 // FieldErrors are field errors as union_requests.json compares them: each

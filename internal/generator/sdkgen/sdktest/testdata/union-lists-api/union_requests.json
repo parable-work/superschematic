@@ -1,5 +1,5 @@
 {
-  "comment": "The requests every generated server and SDK runs against union-lists-api's ShapeMutations (sdktest.LoadUnionRequests). drawShape takes Shape, a union its members' keys, tags and types pick, as its body argument shape; drawShapes, shapeGrid and shapesByKey take it in a list, a list of lists and a map; pay takes Payment, a union its kind discriminates, as its body argument payment; checkout takes Checkout, an input whose payment holds a Payment and whose shapes hold Shapes; probe takes Probe, an input whose fields hold unions whose members tell the structural predicate's rules apart (D31, amended). A server answers status. A 200's data is what the implementation answers: drawShape the shape it received, pay the payment's kind, checkout the payment's kind, a colon and the number of shapes, the list, grid and map operations the number of shapes, and probe ok. A 400 is refused before the implementation runs. With input, it is the refusal of the input body every server answers: detail \"Request body does not match the declared input\", details.reason reason, and the field errors errors, each path to the rules it breaks, sorted, with a nested object's errors at the dotted path (payment.number); none means the problem has none. Without input, it is the refusal of the body argument parameter, as each server refuses an object argument: the TypeScript and Rust routers answer details.parameter parameter, details.reason reason and, inside a list or map, details.path at; the Go route answers the field errors errors, the argument's own type error or its member's errors under the value's path. sdk is what an SDK does with the body's arguments before it sends them: \"sends\" sends the body as it is, and an object refuses the call with the SDK's validation error, its field errors as errors are. A typed SDK (Go, Rust, Python) cannot hold a value no member reads, and may skip or refuse the requests whose sdk is \"sends\" and whose status is 400.",
+  "comment": "The requests every generated server and SDK runs against union-lists-api's ShapeMutations (sdktest.LoadUnionRequests). drawShape takes Shape, a union its members' keys, tags and types pick, as its body argument shape; drawShapes, shapeGrid and shapesByKey take it in a list, a list of lists and a map; pay takes Payment, a union its kind discriminates, as its body argument payment; checkout takes Checkout, an input whose payment holds a Payment and whose shapes hold Shapes; probe takes Probe, an input whose fields hold unions whose members tell the structural predicate's rules apart, and an enum, a list of it, a nested object holding it, a duration and a list of them outside any union (D31, amended). A server answers status. A 200's data is what the implementation answers: drawShape the shape it received, pay the payment's kind, checkout the payment's kind, a colon and the number of shapes, the list, grid and map operations the number of shapes, and probe ok. A 400 is refused before the implementation runs. With input, it is the refusal of the input body every server answers: detail \"Request body does not match the declared input\", details.reason reason, and the field errors errors, each path to the rules it breaks, sorted, with a nested object's errors at the dotted path (payment.number); none means the problem has none. Without input, it is the refusal of the body argument parameter, as each server refuses an object argument: the TypeScript and Rust routers answer details.parameter parameter, details.reason reason and, inside a list or map, details.path at; the Go route answers the field errors errors, the argument's own type error or its member's errors under the value's path. sdk is what an SDK does with the body's arguments before it sends them: \"sends\" sends the body as it is, and an object refuses the call with the SDK's validation error, its field errors as errors are. A typed SDK (Go, Rust, Python) cannot hold a value no member reads, and may skip or refuse the requests whose sdk is \"sends\" and whose status is 400; nor can the Go and Rust SDKs hold a string an enum lacks, and they may skip the requests whose typedSkips is true.",
   "requests": [
     {
       "name": "a circle",
@@ -933,6 +933,250 @@
       "status": 200,
       "data": "ok",
       "sdk": "sends"
+    },
+    {
+      "name": "a status, a list of them and a ticket's, outside any union",
+      "operation": "probe",
+      "path": "/api/probe",
+      "body": {
+        "status": "open",
+        "statuses": [
+          "open",
+          "closed"
+        ],
+        "ticket": {
+          "status": "closed"
+        }
+      },
+      "status": 200,
+      "data": "ok",
+      "sdk": "sends"
+    },
+    {
+      "name": "a status the enum lacks, outside any union",
+      "operation": "probe",
+      "path": "/api/probe",
+      "body": {
+        "status": "bogus"
+      },
+      "status": 400,
+      "input": true,
+      "reason": "validation failed",
+      "errors": {
+        "status": [
+          "enum"
+        ]
+      },
+      "sdk": {
+        "errors": {
+          "status": [
+            "enum"
+          ]
+        }
+      },
+      "typedSkips": true
+    },
+    {
+      "name": "a status the enum lacks in a list",
+      "operation": "probe",
+      "path": "/api/probe",
+      "body": {
+        "statuses": [
+          "open",
+          "Closed"
+        ]
+      },
+      "status": 400,
+      "input": true,
+      "reason": "validation failed",
+      "errors": {
+        "statuses[1]": [
+          "enum"
+        ]
+      },
+      "sdk": {
+        "errors": {
+          "statuses[1]": [
+            "enum"
+          ]
+        }
+      },
+      "typedSkips": true
+    },
+    {
+      "name": "a ticket whose status the enum lacks",
+      "operation": "probe",
+      "path": "/api/probe",
+      "body": {
+        "ticket": {
+          "status": "bogus"
+        }
+      },
+      "status": 400,
+      "input": true,
+      "reason": "validation failed",
+      "errors": {
+        "ticket.status": [
+          "enum"
+        ]
+      },
+      "sdk": {
+        "errors": {
+          "ticket.status": [
+            "enum"
+          ]
+        }
+      },
+      "typedSkips": true
+    },
+    {
+      "name": "a status the enum lacks beside a duration the pattern refuses",
+      "operation": "probe",
+      "path": "/api/probe",
+      "body": {
+        "status": "bogus",
+        "wait": "+1s"
+      },
+      "status": 400,
+      "input": true,
+      "reason": "validation failed",
+      "errors": {
+        "status": [
+          "enum"
+        ],
+        "wait": [
+          "pattern"
+        ]
+      },
+      "sdk": {
+        "errors": {
+          "status": [
+            "enum"
+          ],
+          "wait": [
+            "pattern"
+          ]
+        }
+      },
+      "typedSkips": true
+    },
+    {
+      "name": "durations",
+      "operation": "probe",
+      "path": "/api/probe",
+      "body": {
+        "wait": "1h30m",
+        "waits": [
+          "1.5s",
+          "500ms",
+          "1µs"
+        ]
+      },
+      "status": 200,
+      "data": "ok",
+      "sdk": "sends"
+    },
+    {
+      "name": "a duration with a sign, which the pattern refuses",
+      "operation": "probe",
+      "path": "/api/probe",
+      "body": {
+        "wait": "+1s"
+      },
+      "status": 400,
+      "input": true,
+      "reason": "validation failed",
+      "errors": {
+        "wait": [
+          "pattern"
+        ]
+      },
+      "sdk": {
+        "errors": {
+          "wait": [
+            "pattern"
+          ]
+        }
+      }
+    },
+    {
+      "name": "a duration with space around it, which the pattern refuses",
+      "operation": "probe",
+      "path": "/api/probe",
+      "body": {
+        "wait": " 1s"
+      },
+      "status": 400,
+      "input": true,
+      "reason": "validation failed",
+      "errors": {
+        "wait": [
+          "pattern"
+        ]
+      },
+      "sdk": {
+        "errors": {
+          "wait": [
+            "pattern"
+          ]
+        }
+      }
+    },
+    {
+      "name": "durations the pattern refuses in a list",
+      "operation": "probe",
+      "path": "/api/probe",
+      "body": {
+        "waits": [
+          "1s",
+          "-1s",
+          "1d"
+        ]
+      },
+      "status": 400,
+      "input": true,
+      "reason": "validation failed",
+      "errors": {
+        "waits[1]": [
+          "pattern"
+        ],
+        "waits[2]": [
+          "pattern"
+        ]
+      },
+      "sdk": {
+        "errors": {
+          "waits[1]": [
+            "pattern"
+          ],
+          "waits[2]": [
+            "pattern"
+          ]
+        }
+      }
+    },
+    {
+      "name": "a duration longer than its maxLength",
+      "operation": "probe",
+      "path": "/api/probe",
+      "body": {
+        "wait": "1h1h1h1h1h1h1h1h1h1h1h1h1h1h1h1h1h"
+      },
+      "status": 400,
+      "input": true,
+      "reason": "validation failed",
+      "errors": {
+        "wait": [
+          "maxLength"
+        ]
+      },
+      "sdk": {
+        "errors": {
+          "wait": [
+            "maxLength"
+          ]
+        }
+      }
     }
   ]
 }
