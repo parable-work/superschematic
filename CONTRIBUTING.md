@@ -248,6 +248,36 @@ regenerated, not edited. Change the generator or the pin, run
 `go run ./internal/tools/schemafiletypes`, review the diff by eye, and
 commit it. CI fails on catalog or schema-file drift.
 
+### Shared build outputs
+
+`go test ./...` runs each package's tests in a process of its own, in
+parallel, and they share this checkout's built runtime packages: the HTTP
+runtime's and the engine's `dist/`, their `node_modules`, and the engine's
+addon in `runtime/engine/typescript/native/`. A test that needs the HTTP
+runtime built calls `testpaths.BuildHTTPRuntime` (or, for another package,
+`testpaths.BuildTypeScriptPackage`). It holds a lock on the package that
+every test process takes (`flock` on a file in the temporary directory),
+and skips the build when the package's sources, manifest and lock file are
+what its last build there read and its `dist/` is still what that build
+wrote. So the first test to need it builds it, the others wait for it, and
+none rebuilds it under another's feet. A test never runs `bun install` or
+`bun run build` in a runtime package itself, and never builds the engine's
+package or addon in place: it checks they are built and skips, or fails
+under `SUPERSCHEMATIC_REQUIRE_TS_CHECKS=1`, as `requireEngineTypeScript`
+does, and builds a project's addon into a directory of its own
+(`scripts/engine-napi.sh --crate <dir> --out <dir>`).
+
+The builds themselves never leave a reader without the files either. The
+HTTP runtime's and the engine's `bun run build` compile through
+`scripts/build-dist.mjs`, which writes into a staging directory and then
+renames each file into `dist/`, so `make ts`, CI or a build in another
+terminal never leaves `dist/` missing while a test reads it; it can leave
+one build's files beside another's for a moment, which is why the tests
+still build through the lock. `scripts/engine-napi.sh` likewise renames the
+new addon over the old one in `native/`. `internal/testpaths`'s
+`TestBuildDistNeverLeavesDistMissing` and `TestBuildOnceAcrossProcesses`
+show both.
+
 ### Names come from the naming file
 
 Nothing in a generator or template hardcodes a module path, npm scope,
