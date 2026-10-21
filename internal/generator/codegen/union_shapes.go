@@ -9,11 +9,6 @@ type UnionShape struct {
 	// Tags lists the values the member fixes for fields it shares with
 	// other members.
 	Tags []UnionTag
-
-	// Required lists the member's required fields without a default, in
-	// declaration order: a payload that lacks one, or holds null for it, is
-	// not the member's, as serde refuses it for the Rust member.
-	Required []string
 }
 
 // UnionTag is a value a member fixes for a field it shares with other
@@ -33,8 +28,8 @@ type UnionTag struct {
 // take every payload. The Go and Rust union decoders instead take the first
 // member whose Fields include every payload key and whose Tags the payload
 // does not contradict. When no member declares every key, they take the
-// first member whose Tags the payload allows. Either way the payload holds
-// each of the member's Required fields.
+// first member whose Tags the payload allows. Either way the member must
+// also read the payload (ReadModel, D31 amended).
 //
 // Members with identical fields differ only by a tag: a field that at least
 // two members declare, each with a distinct string or enum default. A field
@@ -68,9 +63,6 @@ func UnionShapes(members [][]FieldInfo, enumLookup EnumLookup) []UnionShape {
 	for i, fields := range members {
 		for _, field := range fields {
 			shapes[i].Fields = append(shapes[i].Fields, field.Name)
-			if field.Required && field.Default == nil {
-				shapes[i].Required = append(shapes[i].Required, field.Name)
-			}
 			if tags[field.Name] {
 				shapes[i].Tags = append(shapes[i].Tags, UnionTag{Field: field.Name, Value: *field.Default})
 			}
