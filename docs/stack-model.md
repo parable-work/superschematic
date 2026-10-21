@@ -2036,6 +2036,27 @@ fetches the archives as `stack dev` does and prints `export
 CGO_LDFLAGS=...` for a POSIX shell to evaluate, or with the variable's
 name its value alone (D47, amended).
 
+A Go or TypeScript server, job, worker or engine runner on an engine
+database that composes the work queue's or an extension's behavior opens
+the engine built from the project's engine crate, `<out>/engine/rust/<db>`
+(D58), and its entrypoint holds `engine-project.json`, which names the
+crate, the member it takes, `ffi` for Go and `napi` for TypeScript, and
+the engine workspace's lock file. Before it builds or starts the
+entrypoint, the local provisioner builds that member with `cargo build
+--release` into the program's Cargo target directory, the Rust
+deployables' (section 8.6), on `tools.env`'s Rust release unless
+`RUSTUP_TOOLCHAIN` is set, the crate's lock file seeded from the engine
+workspace's when it has none, and copies what cargo built into
+`engine/<db>/<member>/<digest>/` under the program directory, named for
+its SHA-256 so a changed archive relinks a Go binary. A Go build's
+`CGO_LDFLAGS` search the archive's directory first, before the release's
+archives, which hold the core's under the same name; a TypeScript
+process's environment names the addon with `SUPERSCHEMATIC_ENGINE_ADDON`.
+Nothing is set by hand. A Rust entrypoint depends on the crate and builds
+it with its own. A crate that depends on the engine's crates by version,
+as a build with no `[paths]` engine keys writes it, is refused: no
+registry serves them, and a release ships none (D58, amended).
+
 Policy rules refuse what a local environment cannot hold: a domain
 (`local-no-domain`), parameters (`local-no-parameters`), and two listeners
 on one port (`local-distinct-ports`), which names each container by its
@@ -4595,6 +4616,15 @@ The GitHub workflow:
     `<schemas-root>/dist/engine/rust/<db>/ffi`, staging it as
     `libsuperschematic_engine.a`, and compiles the module with it searched
     before the release's.
+  - For a stack whose naming file's `[paths]` engine keys name a
+    superschematic checkout in the repository (D58, amended), `check`
+    stands up the superscalar checkout the engine's crates reach by path
+    (`scripts/superscalar-dep.sh --checkout` in it) before the build when
+    it builds a project's engine archive or type-checks a TypeScript
+    entrypoint, seeds a project's engine crate's lock file from the engine
+    workspace's, and, before the workspace's install, builds the `dist/` of
+    the checkout's superscalar binding, HTTP runtime and engine packages,
+    which the workspace takes in place of the published ones.
   - For a stack with a TypeScript server, job, worker or engine runner,
     `check` then installs the output root's Bun workspace from the
     lockfile the project commits (section 8.6), `bun install

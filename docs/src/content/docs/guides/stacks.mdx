@@ -1031,6 +1031,17 @@ pointing at them, after any you set; `stack run` does the same.
 `eval "$(superschematic env)"` sets the same `CGO_LDFLAGS` for a `go
 build` you run yourself ([`env`](/superschematic/reference/cli/#env-variable)).
 
+A server, job, worker or engine runner on an engine database whose types
+compose the work queue's behaviors or an extension's opens the engine
+built from the project's engine crate, which the database's build writes
+under `dist/engine/rust/<db>`. `stack dev` builds it with cargo first, the
+static archive for a Go one, which the Go build links in the core's place,
+and the Node-API addon for a TypeScript one, which its process loads
+through `SUPERSCHEMATIC_ENGINE_ADDON`; you set neither. It keeps cargo's
+work in the program's directory, so a later run rebuilds only what
+changed. The crate builds against a checkout's engine crates, which the
+naming file's `[paths]` engine keys name, since a release ships none yet.
+
 Each checkout of the repository runs an environment with containers and
 ports of its own, so two worktrees run `stack dev` on one stack at once.
 The containers are named after the stack, the environment and the

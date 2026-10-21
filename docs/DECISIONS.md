@@ -5661,10 +5661,11 @@ engine over the behavior's transaction in place of the TypeScript
 `SyncEngine`; and D47's archives. D57 gives a Rust server the entrypoint
 the engine mounts in.
 
-Status: built, the cutover (milestone 14) and the generated servers
-that mount the engine (milestones 18 to 20, the amendment below)
-included; what is not built yet is the amendment's status's last
-paragraph. `runtime/engine/rust` holds the workspace;
+Status: built, the cutover (milestone 14), the generated servers
+that mount the engine (milestones 18 to 20, the amendment below) and
+the project's engine on the local target and in the generated CI (the
+amendment on the local target's project engine) included; what is not
+built yet is the first amendment's status's last paragraph. `runtime/engine/rust` holds the workspace;
 `superschematic-engine-storage`: both databases' transactions, savepoints
 and writer locks, the write counter, the migration ledger with the
 engine's migrations for each, a behavior's storage and SQL checker, and
@@ -6155,18 +6156,19 @@ have no timeout, which no transcript shows, and the TypeScript runtime's
 1 MiB body limit on the engine's body routes, which the script's bodies
 stay under.
 
-Not built yet: a project's engine archive and addon for the local
-target, which builds a Go server with the environment's `CGO_LDFLAGS`
-and runs a TypeScript one on the checkout's core addon, and for a
-release's image, which gets no Dockerfile; a timeout on a Rust server's
+Not built yet: a project's engine crate built against a release, with
+no `[paths]` engine keys, since a release ships no engine crate (the
+amendment on the local target's project engine says what it lacks), so a
+release's image of a server on it gets no Dockerfile and `stack dev`
+refuses it; a timeout on a Rust server's
 engine routes, which the Go and TypeScript servers' have; a retention
 policy for the event log, which the runner keeps whole, and retention
-settings on the runner's element; the generated CI's type-check of a
-TypeScript entrypoint against an engine package that `[paths]
-engine_typescript` names, which needs the package's `dist/` in the CI
-checkout; an image test of a TypeScript server on the project's addon;
+settings on the runner's element;
 and a live run: no server has run on Cloud Run against Cloud SQL, nor has
-the migration job readied an engine's schema there.
+the migration job readied an engine's schema there. The local target's
+project engine, the generated CI against an engine checkout and the
+image test of a TypeScript server on a project's addon are built (the
+amendment on the local target's project engine).
 
 ### D52, amended: a TypeScript API's jobs run on Bun from packages of their own, with a signal for Go's context
 
@@ -7768,5 +7770,61 @@ Not built:
   open.
 - Scaling a worker with its queue's depth.
 - Claims on SQLite and D1.
+
+The rule is reversible until the first release.
+
+### D58, amended: the local target builds the project's engine crate, the generated CI builds against an engine checkout, and a release ships no engine crate
+
+The first amendment left three uses of a project's engine crate (13a) to
+the person. `stack dev` built a Go server, job, worker or runner on an
+engine database that composes the work queue's or an extension's
+behavior with the shell's `CGO_LDFLAGS`, so it linked the core's archive
+and its deploy failed, and ran a TypeScript one on the checkout's core
+addon, which runs no extension's behavior, with no way to name another:
+a process inherits no `SUPERSCHEMATIC_ENGINE_ADDON` of the shell's. The
+generated CI's `check` built a project's archive from engine crates that
+reach a superscalar checkout git does not hold, and type-checked
+TypeScript entrypoints against an engine package with no `dist/`. And no
+image test ran a TypeScript server on a project's addon.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A Go or TypeScript entrypoint whose engine is built from the project's engine crate holds `engine-project.json` (`projectengine.LinkFile`), which the server generator writes beside `main.go` or `main.ts`: the database, the crate and the member the entrypoint takes, `ffi` for Go and `napi` for TypeScript, relative to the entrypoint, and the engine workspace's lock file when a `[paths]` key names the engine's checkout. A Rust entrypoint depends on the crate and has none. | The crate in the resolved environment, which resolution, shared by every target, cannot know: the generator decides it. Deriving it in the provisioner from a deployable's sql edges and the crates under the output root, a second copy of the generator's rule for which database is an API's engine database and which needs a crate. A setting in the stack, which the person would keep in step with the schemas. |
+| Before it builds or starts such an entrypoint, the local provisioner builds the member with `cargo build --release` into the program's Cargo target directory, the Rust deployables' (D57), which the program keeps between runs: on `tools.env`'s Rust release unless `RUSTUP_TOOLCHAIN` is set, since a Go binary links the archive beside superscalar's and the version graph's, and with macOS 11 as the deployment target, as `scripts/engine-archive.sh` builds. A crate with no lock file starts from the engine workspace's, as the image's engine stage does. It reads what it built from cargo's JSON messages and copies it into `engine/<db>/<member>/<digest>/` under the program directory, named for the first 16 hex digits of its SHA-256. A Go build's `CGO_LDFLAGS` then search the archive's directory first, before the request's `BuildEnv` (the release's archives, which hold the core's under the same name) or the shell's; a TypeScript process's environment names the addon with `SUPERSCHEMATIC_ENGINE_ADDON`. | The checkout's `scripts/engine-archive.sh` and `scripts/engine-napi.sh`, which a project's machine may not have and the second of which installs the napi CLI. One staging path, which Go's build cache, keyed on the flags' text and not the archive's bytes, would not relink when the archive changes. The archive in `BuildEnv`, which every `go build` of the environment takes, so a server on another database would link one project's archive. The crate's own `target/` under the output root, beside its sources, which the Rust deployables' target directory already holds the shared dependencies of. |
+| A crate that depends on the engine's crates by version, as a build with no `[paths]` engine keys writes it, is refused before cargo runs, and the refusal names the keys to set. | Letting cargo fail with `no matching package named superschematic-engine`, which names no fix. |
+| When the naming file's `[paths]` engine keys name a superschematic checkout in the repository and some environment runs an engine, the CI request names it (`CIStack.EngineCheckout`), and `check` builds as `make setup` does on a developer's machine: it stands up the checkout's superscalar checkout (`scripts/superscalar-dep.sh --checkout` there) before the build when it builds a project's engine archive or type-checks a TypeScript deployable, seeds a project crate's lock file from the engine workspace's, and before the workspace's install builds the `dist/` of the checkout's superscalar binding, HTTP runtime and engine packages, which the workspace takes in place of the published ones. | Committing the packages' `dist/`, build output in git. Type-checking against their sources, which their exports do not name. Building the core's engine archive from the checkout for every Go deployable too: the release's archive keeps standing in for the checkout's, as superscalar's and the version graph's do (D47, amended), and only a project's crate, which no release builds, is built. |
+| A release changes nothing: it ships no engine crate. The engine's workspace is `publish = false` at `0.0.0`, the release publishes only the schema runtime's and the HTTP runtime's crates, and the engine's crates reach the schema IR's crate, the version graph's engine and core, and superscalar's core by path, none of them published, superscalar's having no release at all. So a project with no `[paths]` engine keys still gets no image of a server on such a database, and `stack dev` refuses it. To build one, a release would ship the engine's crates, `superschematic-engine-storage`, `-engine`, `-engine-behaviors`, `-engine-workqueue`, `-engine-abi` and `-engine-napi`, with `superschematic-schema-ir`, the version graph's two and superscalar's core, at the release's version (crates.io, or a sources tarball the CLI pins as it pins the archives), and `projectengine` would name that version. | Shipping them now, a release change of its own, to be decided with superscalar's first release. |
+
+Status: built. `TestTheProjectsEngineBuildsForItsEntrypoints` applies a
+local environment with a Go server and a TypeScript server whose modules
+name a crate: cargo builds each member once into the program's target
+directory, on `tools.env`'s Rust; the Go server's build searches the
+staged archive's directory before the request's `CGO_LDFLAGS`, and the
+TypeScript server's process names the staged addon; the lock file is
+seeded; every other build and process is as before.
+`TestAnEngineCrateByVersionIsRefused` refuses a crate by version before
+cargo runs, and `TestARebuiltEngineCrateRelinks` builds a rebuilt archive
+from a directory of its own, the earlier one removed.
+`TestAReleaseImageRefusesAProjectsEngine` builds queue-db's services as a
+release with no `[paths]`: the crate depends on the engine by version,
+queue-api gets no Dockerfile and the build says what a release lacks. `TestEngineProjectArchiveGolden` and
+`TestATypeScriptEntrypointLoadsTheProjectsEngineAddon` hold the link
+files the generator writes. `TestStackDevBuildsTheProjectsEngine` runs
+`stack dev` for real on a stack whose engine database's Product composes
+acme.Rating, with a Go, a Rust and a TypeScript server and the Go runner,
+and no `CGO_LDFLAGS` or `SUPERSCHEMATIC_ENGINE_ADDON` of its own: the Go
+server and the runner open the project's archive, the TypeScript server
+the project's addon and the Rust server the crate, each deploys the
+document, which only an engine with acme.Rating accepts, and answers
+`/readyz`. `TestAnEngineCheckoutInCheck` holds `check`'s steps for an
+engine checkout, in order, and none without one; `TestEngineCheckout`
+finds the checkout from each key.
+`TestTheTypeScriptEngineProjectDockerfileBuildsAnImageThatServes` builds
+desk-ts-api's image with desk-db's Account composing acme.Rating: its
+engine stage builds the project crate's `napi` member, the image serves
+as the core's does, and Bun in the container loads the addon
+`SUPERSCHEMATIC_ENGINE_ADDON` names, which reports the project's crate.
+No generated workflow has run on GitHub's runners against an engine
+checkout.
 
 The rule is reversible until the first release.

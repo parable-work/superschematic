@@ -568,7 +568,8 @@ addon from the Cargo workspace beside the package (`../rust`), with the
 crates it reaches by path at their places in the same checkout, and the
 `./server` entry's `dist/`; on an engine database that composes an
 extension's behavior it builds the project's engine crate's `napi`
-member instead and names it with `SUPERSCHEMATIC_ENGINE_ADDON`. Unset,
+member instead and names it with `SUPERSCHEMATIC_ENGINE_ADDON`, as
+`stack dev` builds it and names it for the server's process. Unset,
 such a server gets no Dockerfile, and the install fetches the package
 from the registry.
 
