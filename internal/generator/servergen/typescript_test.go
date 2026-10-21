@@ -476,22 +476,12 @@ func bunServerOn(t *testing.T, port, bun, dir string, env ...string) *started {
 
 // installTypeScriptRuntime builds the HTTP runtime's dist/, which the
 // workspace's root overrides the package with, and checks superscalar's
-// binding is built.
+// binding is built: through testpaths.BuildHTTPRuntime, which other test
+// processes reading or building the runtime wait on (CONTRIBUTING.md,
+// "Shared build outputs").
 func installTypeScriptRuntime(t *testing.T, bun string, paths naming.LocalPaths) {
 	t.Helper()
-	if _, err := os.Stat(filepath.Join(paths.ScalarTypeScript, "dist")); err != nil {
-		testpaths.RequireOrSkipTS(t, fmt.Sprintf("superscalar TypeScript binding not built: %v", err))
-	}
-	install := exec.Command(bun, "install", "--frozen-lockfile")
-	install.Dir = paths.HTTPRuntimeTypeScript
-	if out, err := install.CombinedOutput(); err != nil {
-		testpaths.RequireOrSkipTS(t, fmt.Sprintf("bun install failed for the http runtime (likely offline): %v\n%s", err, out))
-	}
-	build := exec.Command(bun, "run", "build")
-	build.Dir = paths.HTTPRuntimeTypeScript
-	if out, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build the http runtime: %v\n%s", err, out)
-	}
+	testpaths.BuildHTTPRuntime(t, bun, paths)
 }
 
 // TestTypeScriptEntrypointCompilesAndServes: each TypeScript server's

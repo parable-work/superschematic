@@ -94,18 +94,9 @@ func TestQueueParityOfGoTypeScriptAndRustOnPostgres(t *testing.T) {
 		testpaths.RequireOrSkipTS(t, fmt.Sprintf("cargo not available for the Rust side: %v", err))
 	}
 	paths := testpaths.Local(t)
-	if _, err := os.Stat(filepath.Join(paths.ScalarTypeScript, "dist")); err != nil {
-		testpaths.RequireOrSkipTS(t, fmt.Sprintf("superscalar TypeScript binding not built: %v", err))
-	}
 	// The HTTP runtime's dist/, which the workspace's root overrides the
 	// package with, built as the TypeScript generators' tests build it.
-	for _, step := range [][]string{{"install", "--frozen-lockfile"}, {"run", "build"}} {
-		cmd := exec.Command(bun, step...)
-		cmd.Dir = paths.HTTPRuntimeTypeScript
-		if out, err := cmd.CombinedOutput(); err != nil {
-			testpaths.RequireOrSkipTS(t, fmt.Sprintf("bun %s in the HTTP runtime (likely offline): %v\n%s", strings.Join(step, " "), err, out))
-		}
-	}
+	testpaths.BuildHTTPRuntime(t, bun, paths)
 	schema := queueSchema(t)
 	clock := codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC))
 	root, err := filepath.EvalSymlinks(t.TempDir())
