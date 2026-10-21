@@ -133,6 +133,13 @@ type CIEnvironment struct {
 
 	// Tools are the command-line tools the environment's provisioner runs.
 	Tools []CLITool
+
+	// Migrate is whether a job that deploys the environment runs the
+	// migration runner itself: the environment holds a database, and its
+	// target's runner runs on the deploying machine
+	// (DeployingMachineMigrations), so the job installs
+	// superschematic-migrate (D64).
+	Migrate bool
 }
 
 // Identity returns the environment's identity for role.
@@ -266,6 +273,15 @@ func (r *Registry) CIEnvironment(env *ir.ResolvedEnvironment) CIEnvironment {
 		out.HasSeam = true
 		out.Planner = target.CI.Identity(env, CIPlanner)
 		out.Deployer = target.CI.Identity(env, CIDeployer)
+	}
+	if target, ok := r.stack.targets[env.Target]; ok {
+		if _, local := target.Migrations.(DeployingMachineMigrations); local {
+			for _, d := range env.Deployables {
+				if d.Kind == ir.DeployableDatabase {
+					out.Migrate = true
+				}
+			}
+		}
 	}
 	if provisioner, ok := r.stack.provisioners[env.Provisioner]; ok {
 		out.Tools = append([]CLITool(nil), provisioner.Tools...)

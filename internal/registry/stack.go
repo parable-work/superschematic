@@ -79,6 +79,24 @@ type Lowered struct {
 	Records []*ir.DNSRecord
 }
 
+// UnrealizableError is a platform's refusal of a deployable it cannot
+// realize, such as a name its provider refuses (D64). A Lower that returns
+// one, made with Unrealizable, has resolution report the deployable as
+// unrealizable, as it reports a language its platform does not run, rather
+// than as a failed lowering.
+type UnrealizableError struct {
+	// Reason says what the platform cannot realize, and what to change.
+	Reason string
+}
+
+func (e *UnrealizableError) Error() string { return e.Reason }
+
+// Unrealizable returns an UnrealizableError whose reason is the format
+// applied to args.
+func Unrealizable(format string, args ...any) error {
+	return &UnrealizableError{Reason: fmt.Sprintf(format, args...)}
+}
+
 // PlatformSpec realizes one deployable kind on one runtime: Cloud Run
 // servers, Cloud SQL databases, local processes (section 6.1).
 type PlatformSpec struct {
@@ -133,6 +151,15 @@ type PlatformSpec struct {
 	// server runs with the identity runtime's defaults. Only a server
 	// platform declares one: a job builds no identity service.
 	IdentityConfig string
+
+	// NoIdentity, when set, says why a server on this platform cannot
+	// serve an API over the user model, which authenticates with the
+	// identity runtime (D50): resolution refuses such a server as
+	// unrealizable, giving the reason. The cloudflare.workers platform sets
+	// it, since the TypeScript identity runtime hashes passwords with
+	// node:crypto's argon2, which Workers lacks (D64). Only a server
+	// platform sets it, and not beside IdentityConfig.
+	NoIdentity string
 
 	// NameOf returns the deployable's name in the environment, a string or
 	// a value that references the environment's parameters.
@@ -271,6 +298,14 @@ type TargetSpec struct {
 	// kind may be missing; resolution then refuses a deployable of it on
 	// this target.
 	Platforms map[ir.DeployableKind]string
+
+	// DatabasePlatforms names, by SQL dialect, the platform a database
+	// deployable goes on when no settings platform places it and every DB
+	// service it hosts lists that dialect first: the local target keeps a
+	// sqlite-first database in a SQLite file (D64). A database whose DB
+	// services list another dialect first, or disagree, goes on
+	// Platforms' database platform.
+	DatabasePlatforms map[string]string
 
 	// Values is the JSON Schema of an environment's values for this target
 	// (`project` and `region` for gcp). Nil accepts no values.
@@ -519,6 +554,18 @@ type Provisioner interface {
 	Outputs(ctx context.Context, req ProvisionRequest) (map[string]map[string]any, error)
 }
 
+// SecretOutputReader is a Provisioner that also reads the value of a secret
+// output of an applied node, which Outputs leaves out: a bootstrap hands
+// the person, or the CI's secret store, a credential its own graph made,
+// such as the cloudflare target's account tokens (D64). The deploy never
+// calls it, since no binding and no manifest holds a secret.
+type SecretOutputReader interface {
+	// SecretOutput returns the string value of one top-level output of a
+	// node of req's environment, applied, or an error when the node or the
+	// output is missing or the value is not a string.
+	SecretOutput(ctx context.Context, req ProvisionRequest, out ir.Output) (string, error)
+}
+
 // ProvisionerSpec registers a provisioner.
 type ProvisionerSpec struct {
 	// Name is the registry key (`pulumi`).
@@ -664,6 +711,14 @@ func (r *Registry) RegisterPlatform(spec PlatformSpec) error {
 			return fmt.Errorf("registry: platform %q IdentityConfig is not a JSON object: %v", spec.Name, err)
 		}
 	}
+	if spec.NoIdentity != "" {
+		if spec.Kind != ir.DeployableServer {
+			return fmt.Errorf("registry: %s platform %q says why it runs no identity runtime; only a server platform serves an API over the user model", spec.Kind, spec.Name)
+		}
+		if spec.IdentityConfig != "" {
+			return fmt.Errorf("registry: platform %q declares an identity config and says it runs no identity runtime", spec.Name)
+		}
+	}
 	if len(spec.Settings) > 0 {
 		compiled, err := compileSchema(spec.Settings, "superschematic://platforms/"+spec.Name+"/settings.json")
 		if err != nil {
@@ -777,6 +832,18 @@ func (r *Registry) RegisterTarget(spec TargetSpec) error {
 		platforms[kind] = platform
 	}
 	spec.Platforms = platforms
+	databases := make(map[string]string, len(spec.DatabasePlatforms))
+	for _, dialect := range slices.Sorted(maps.Keys(spec.DatabasePlatforms)) {
+		platform := spec.DatabasePlatforms[dialect]
+		if !slices.Contains(SQLDialectNames, dialect) {
+			return fmt.Errorf("registry: target %q names a database platform for dialect %q (want %s)", spec.Name, dialect, strings.Join(SQLDialectNames, " or "))
+		}
+		if platform == "" {
+			return fmt.Errorf("registry: target %q names an empty database platform for %s", spec.Name, dialect)
+		}
+		databases[dialect] = platform
+	}
+	spec.DatabasePlatforms = databases
 	if len(spec.Values) > 0 {
 		compiled, err := compileSchema(spec.Values, "superschematic://targets/"+spec.Name+"/values.json")
 		if err != nil {
@@ -915,7 +982,8 @@ func (r *Registry) RegisterProvisioner(spec ProvisionerSpec) error {
 // checkStackReferences is Finalize's part for the stack specs: every
 // connector but a generic one, which names no platform, joins registered
 // platforms of the kinds its edge joins, every platform a target names is
-// registered and of the kind it places, and the DNS platform and
+// registered and of the kind it places, each database platform it names
+// for a dialect runs that dialect, and the DNS platform and
 // provisioner a target names, when it names one, are registered.
 func (r *Registry) checkStackReferences() error {
 	for _, name := range keysOf(r.stack.connectors) {
@@ -972,6 +1040,16 @@ func (r *Registry) checkStackReferences() error {
 			}
 			if platform.Kind != kind {
 				return fmt.Errorf("registry: target %q names platform %q for %s, but it is a %s platform", name, platformName, kind, platform.Kind)
+			}
+		}
+		for _, dialect := range keysOf(spec.DatabasePlatforms) {
+			platformName := spec.DatabasePlatforms[dialect]
+			platform, ok := r.stack.platforms[platformName]
+			if !ok {
+				return fmt.Errorf("registry: target %q names database platform %q for %s, which is not registered (registered platforms: %v)", name, platformName, dialect, keysOf(r.stack.platforms))
+			}
+			if platform.Kind != ir.DeployableDatabase || !slices.Contains(platform.Dialects, dialect) {
+				return fmt.Errorf("registry: target %q names platform %q for %s databases, but it is a %s platform of dialects %v", name, platformName, dialect, platform.Kind, platform.Dialects)
 			}
 		}
 		if spec.DNS != "" {

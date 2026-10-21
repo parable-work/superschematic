@@ -30,6 +30,14 @@
 //!
 //! A service's credential becomes the token source its client sends with
 //! [`credential_source`].
+//!
+//! The members a Worker alone reads (D64) are refused, with a message that
+//! says so: a database's D1 binding (`<field>_D1_BINDING`,
+//! `<field>_D1_DATABASE`), a service's binding (`<field>_BINDING_NAME`,
+//! `<field>_BINDING_WORKER`), and a bucket's R2 binding and credential
+//! (`<field>_BINDING`, `<field>_R2_ACCOUNT`, `<field>_R2_ACCESS_KEY_ID`,
+//! `<field>_R2_TOKEN`). The TypeScript runtime reads them for its Workers
+//! entry, as Go's refuses them.
 
 mod callers;
 mod cors;
@@ -314,7 +322,8 @@ pub(crate) fn quote(value: &str) -> String {
 
 /// Reads the database field named `field` from the environment:
 /// `<field>_URL`, or the three `<field>_CLOUD_SQL_` variables. Refuses
-/// neither, both, and only some of the three.
+/// neither, both, and only some of the three, and a D1 binding, which only
+/// a Worker reads.
 pub fn load_database(field: &str) -> Result<Database, StackConfigError> {
     read_database(field, &process_vars(field)?)
 }
@@ -327,7 +336,35 @@ pub fn load_database_from(
     read_database(field, vars)
 }
 
+/// Refuses the variables of members only a Worker reads (D64), naming each
+/// that is set and what they encode, as Go's `workerOnly` does.
+fn worker_only(vars: &impl Vars, what: &str, names: &[String]) -> Result<(), StackConfigError> {
+    let set: Vec<&str> = names
+        .iter()
+        .filter(|name| !vars.get(name).is_empty())
+        .map(String::as_str)
+        .collect();
+    match set.as_slice() {
+        [] => Ok(()),
+        [one] => Err(StackConfigError::one(format!(
+            "environment variable {one} is set: only a Worker reads {what} (D64)"
+        ))),
+        many => Err(StackConfigError::one(format!(
+            "environment variables {} are set: only a Worker reads {what} (D64)",
+            many.join(", ")
+        ))),
+    }
+}
+
 fn read_database(field: &str, vars: &impl Vars) -> Result<Database, StackConfigError> {
+    worker_only(
+        vars,
+        "a D1 binding",
+        &[
+            format!("{field}_D1_BINDING"),
+            format!("{field}_D1_DATABASE"),
+        ],
+    )?;
     let url = vars.get(&format!("{field}_URL"));
     let cloud = [
         format!("{field}_CLOUD_SQL_INSTANCE"),
@@ -393,6 +430,14 @@ pub fn load_service_from(
 }
 
 fn read_service(field: &str, vars: &impl Vars) -> Result<Service, StackConfigError> {
+    worker_only(
+        vars,
+        "a service binding",
+        &[
+            format!("{field}_BINDING_NAME"),
+            format!("{field}_BINDING_WORKER"),
+        ],
+    )?;
     let url = vars.get(&format!("{field}_URL"));
     if url.is_empty() {
         return Err(StackConfigError::one(format!(
@@ -501,6 +546,16 @@ pub fn load_bucket_from(
 }
 
 fn read_bucket(field: &str, vars: &impl Vars) -> Result<Bucket, StackConfigError> {
+    worker_only(
+        vars,
+        "an R2 binding",
+        &[
+            format!("{field}_BINDING"),
+            format!("{field}_R2_ACCOUNT"),
+            format!("{field}_R2_ACCESS_KEY_ID"),
+            format!("{field}_R2_TOKEN"),
+        ],
+    )?;
     let name = vars.get(&format!("{field}_NAME"));
     let endpoint = vars.get(&format!("{field}_ENDPOINT"));
     let mut problems = Vec::new();

@@ -283,7 +283,9 @@ func newStackDevCmd(a *app) *cobra.Command {
 		Long: `Dev builds the stack service and every service it reaches, each with its
 dependencies, then runs the stack's environment on the local target
 (docs/stack-model.md, section 8.3): a Postgres container with a database per
-DB schema, each migrated to the schema's model with superschematic-migrate;
+DB schema, each migrated to the schema's model with superschematic-migrate,
+or for a DB schema that lists sqlite first a SQLite file under the
+environment's state directory, migrated the same way (section 18.13);
 a fake-gcs-server container with a bucket per Bucket service the stack
 reaches, when it reaches one (section 8.9); and each server built from its
 entrypoint module at
@@ -298,8 +300,9 @@ first fetches the static archives it ships for this machine into the
 user's cache, and the Go builds take CGO_LDFLAGS pointing at them, after
 any set; superschematic env prints the same for a go build by hand. Dev stays in the foreground until Ctrl-C, then
 stops the servers and the containers, which keep their data for the next
-run: the databases, and the buckets' objects. --remove-data removes the
-containers and their data instead.
+run: the databases, and the buckets' objects, as the SQLite files stay.
+--remove-data removes the containers and their data, and the SQLite
+files, instead.
 
 Each checkout of the repository runs the environment in containers of its
 own, named for a hash of its state directory, on ports shifted by it, so
@@ -333,7 +336,7 @@ Examples:
 	cmd.Flags().StringVarP(&flags.environment, "environment", "e", "", "the environment to run (default the stack's one environment on the local target)")
 	cmd.Flags().StringVar(&flags.out, "out", "", "output root for generated artifacts (default <schemas-root>/dist)")
 	cmd.Flags().StringVar(&flags.namingPath, "naming", "", "naming config file (default <stack-service-dir>/../../superschematic.toml)")
-	cmd.Flags().BoolVar(&flags.removeData, "remove-data", false, "on exit, remove this checkout's containers of the environment and their data, the Postgres databases and the buckets' objects, instead of stopping them")
+	cmd.Flags().BoolVar(&flags.removeData, "remove-data", false, "on exit, remove this checkout's containers of the environment and their data, the Postgres databases and the buckets' objects, and the SQLite files, instead of stopping them")
 	// The flag's name before the storage emulator's container joined
 	// Postgres's (D54): it removes both.
 	cmd.Flags().BoolVar(&flags.removeData, "remove-database", false, "")
@@ -544,6 +547,11 @@ func printLocalSummary(w io.Writer, env *ir.ResolvedEnvironment, stateDir string
 		switch res.Type {
 		case local.TypeDatabase:
 			lines = append(lines, fmt.Sprintf("  database %-24s %v", res.Properties["service"], res.Properties["url"]))
+		case local.TypeSQLiteDatabase:
+			// A sqlite-first database's file, under the state directory (D64).
+			if file, ok := res.Properties["file"].(string); ok {
+				lines = append(lines, fmt.Sprintf("  database %-24s %s", res.Properties["service"], local.SQLiteURL(filepath.Join(stateDir, filepath.FromSlash(file)))))
+			}
 		case local.TypeBucket:
 			lines = append(lines, fmt.Sprintf("  bucket   %-24s %v/%v", res.Properties["service"], res.Properties["endpoint"], res.Properties["name"]))
 		}

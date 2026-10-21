@@ -3,6 +3,7 @@ package stack
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"slices"
@@ -40,7 +41,12 @@ func (r *resolver) lower(out *ir.ResolvedEnvironment) {
 		d := r.deployables[name]
 		ctx := registry.PlatformContext{Environment: r.stackEnvironment(), Deployable: cloneDeployable(d.res)}
 		lowered, err := d.platform.Lower(ctx)
-		if err != nil {
+		var unrealizable *registry.UnrealizableError
+		switch {
+		case errors.As(err, &unrealizable):
+			r.fail(CodeUnrealizable, "%s %s: platform %s cannot realize it: %v", d.res.Kind, name, d.platform.Name, err)
+			continue
+		case err != nil:
 			r.fail(CodeLowering, "platform %s lowering %s: %v", d.platform.Name, name, err)
 			continue
 		}

@@ -74,6 +74,24 @@ const (
 	GenericKeyType            = generic.TypeKeyPair
 )
 
+// The generic connector's edge key, which a target's own connector may
+// reuse for a signed-token edge, as the cloudflare target's Workers
+// connector does (D64): the key node's algorithm, its outputs that hold
+// the private key's PKCS#8 PEM and the public key's SubjectPublicKeyInfo
+// PEM, and the longest a token signed with it lives, in seconds. The
+// core registers the key node's type, so a target need not pin it.
+const (
+	GenericKeyAlgorithm        = generic.KeyAlgorithm
+	GenericKeyPrivateOutput    = generic.PrivateKeyOutput
+	GenericKeyPublicOutput     = generic.PublicKeyOutput
+	GenericSignedTokenLifetime = generic.SignedTokenLifetime
+)
+
+// GenericKeyPairID is the ID of the key node of the http edges from caller
+// to callee, `<caller>.calls.<callee>.key`; see
+// internal/stack/generic.KeyPairID.
+func GenericKeyPairID(caller, callee string) string { return generic.KeyPairID(caller, callee) }
+
 // OperationsOf reads an API service's operations for Service.Operations;
 // see internal/stack.OperationsOf.
 func OperationsOf(schema *ir.Schema) []Operation { return stack.OperationsOf(schema) }

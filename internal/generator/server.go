@@ -43,7 +43,10 @@ const serverGenerator = "server"
 // changes the servers, the jobs or the workers, but the entrypoint of a Go
 // or TypeScript one that some environment connects to a database on Cloud
 // SQL links the Cloud SQL connector, or depends on the Node one; a Rust
-// one reaches Cloud SQL through its runtime alone. It plans every
+// one reaches Cloud SQL through its runtime alone. A TypeScript server
+// that some environment places on a platform whose artifact is a bundle,
+// Cloudflare Workers, gets fetch.ts and bundle.ts beside main.ts (D64).
+// It plans every
 // entrypoint before it writes anything, so one it refuses leaves the last
 // build's entrypoints and every implementation as they were. A build
 // without a repository root writes none: the implementations live under it.
@@ -64,10 +67,11 @@ func (r run) generateServers() error {
 	if err != nil {
 		return err
 	}
-	cloudSQL, err := cloudSQLDatabases(r.GenerateContext, st, services)
+	facts, err := environmentFacts(r.GenerateContext, st, services)
 	if err != nil {
 		return err
 	}
+	cloudSQL := facts.cloudSQL
 	// The APIs a site of the stack calls, whose servers answer CORS for
 	// the sites' origins (D55).
 	cors := map[string]bool{}
@@ -103,7 +107,7 @@ func (r run) generateServers() error {
 				scaffolding[sc.output.SchemaName] = true
 			}
 		case APILanguageTypeScript:
-			server, scaffolds, err := r.planTypeScriptServer(st.Name, s, cloudSQL[s.Name], cors)
+			server, scaffolds, err := r.planTypeScriptServer(st.Name, s, cloudSQL[s.Name], cors, facts.bundles[s.Name])
 			if err != nil {
 				return err
 			}
@@ -144,7 +148,8 @@ func (r run) generateServers() error {
 			}
 			plans = append(plans, planned{server: job})
 		case APILanguageTypeScript:
-			job, _, err := r.planTypeScriptServer(st.Name, j, cloudSQL[j.Name], nil)
+			withJobRun(j, services)
+			job, _, err := r.planTypeScriptServer(st.Name, j, cloudSQL[j.Name], nil, facts.bundles[j.Name])
 			if err != nil {
 				return err
 			}
@@ -206,7 +211,7 @@ func (r run) generateServers() error {
 			if err := r.checkTypeScriptQueue(st.Name, w, services); err != nil {
 				return err
 			}
-			worker, _, err := r.planTypeScriptServer(st.Name, w, cloudSQL[w.Name], nil)
+			worker, _, err := r.planTypeScriptServer(st.Name, w, cloudSQL[w.Name], nil, facts.bundles[w.Name])
 			if err != nil {
 				return err
 			}
@@ -724,6 +729,32 @@ func (r run) checkRustManualRoutes(stackName string, output *rustrestgen.APIOutp
 		stackName, output.SchemaName, dir, rustrestgen.ManualRoutesFunc, rustrestgen.ImplementationLib, rustrestgen.ManualRoutesFunc, strings.Join(methods, "\n"), crate)
 }
 
+// withJobRun fills in the timeout and the retries of job j, which its @job
+// gives in every environment, where stack.Jobs, which resolves no
+// environment, leaves them unset: a TypeScript job's scheduled.ts runs its
+// tries itself, on Cron Triggers (D64).
+func withJobRun(j *ir.ResolvedDeployable, services []stack.Service) {
+	if j.Job == nil {
+		return
+	}
+	for _, svc := range services {
+		if svc.Name != j.Job.API {
+			continue
+		}
+		for _, job := range svc.Jobs {
+			if job.Name != j.Job.Name {
+				continue
+			}
+			j.Job.TimeoutSeconds = ir.DefaultJobTimeoutSeconds
+			if job.Timeout != "" {
+				// CheckJob refused a timeout that is no whole number of seconds.
+				j.Job.TimeoutSeconds, _ = registry.TimeoutSeconds(job.Timeout)
+			}
+			j.Job.Retries = job.Retries
+		}
+	}
+}
+
 // workerDatabase is the database whose queue the worker w claims: the one
 // resolution gives it, or else its API's, its authDb or its one DB
 // dependency. Empty when the API connects to none.
@@ -910,9 +941,11 @@ func (r run) planEntrypoint(stackName string, s *ir.ResolvedDeployable, cloudSQL
 // that API's own build writes it, its EnvConfig, and where each
 // implementation lives, at the naming file's [implementation_paths]
 // typescript template. cloudSQL are the DB services some environment
-// connects it to on Cloud SQL. It returns the APIs whose implementation is
-// missing, which the caller scaffolds.
-func (r run) planTypeScriptServer(stackName string, s *ir.ResolvedDeployable, cloudSQL []string, cors map[string]bool) (*servergen.TypeScriptServer, []*tsrestgen.APIOutput, error) {
+// connects it to on Cloud SQL; bundle is true when some environment places
+// it on a platform whose artifact is a bundle, Cloudflare Workers, whose
+// package then gets fetch.ts and bundle.ts (D64). It returns the APIs
+// whose implementation is missing, which the caller scaffolds.
+func (r run) planTypeScriptServer(stackName string, s *ir.ResolvedDeployable, cloudSQL []string, cors map[string]bool, bundle bool) (*servergen.TypeScriptServer, []*tsrestgen.APIOutput, error) {
 	out := r.Options.OutputRoot
 	in := servergen.TypeScriptInput{
 		Stack:              stackName,
@@ -926,9 +959,12 @@ func (r run) planTypeScriptServer(stackName string, s *ir.ResolvedDeployable, cl
 		PackageDirs:        map[string]string{},
 		Paths:              r.Options.Paths,
 		CloudSQL:           cloudSQL,
+		Workers:            bundle,
 	}
 	if s.Job != nil {
-		in.Job = &servergen.JobInput{Name: s.Job.Name}
+		// A job's timeout and retries are its @job's in every environment;
+		// scheduled.ts runs its tries itself (D64).
+		in.Job = &servergen.JobInput{Name: s.Job.Name, TimeoutSeconds: s.Job.TimeoutSeconds, Retries: s.Job.Retries}
 	}
 	if s.Worker != nil {
 		in.Worker = &servergen.WorkerInput{Name: s.Worker.Name, GraceSeconds: s.Worker.GraceSeconds}
@@ -1124,37 +1160,53 @@ func (r run) checkIdentityDescriptor(stackName, server string, output *tsrestgen
 	return nil
 }
 
-// cloudSQLDatabases resolves every environment of the stack and returns, by
-// server, the DB services, sorted, that some environment's sql edge
-// connects the server to with a Cloud SQL connector configuration. The
-// entrypoint of such a server links the Cloud SQL connector, and no other
-// does (docs/stack-model.md, section 8.1). The stack generator runs first
-// and resolves the same environments, so a build whose environment does
-// not resolve stops at its error before this runs.
-func cloudSQLDatabases(c registry.GenerateContext, st *ir.Stack, services []stack.Service) (map[string][]string, error) {
+// stackFacts are what the entrypoints of a stack's servers, jobs and
+// workers depend on across its environments, which no one environment
+// says.
+type stackFacts struct {
+	// cloudSQL holds, by deployable, the DB services, sorted, that some
+	// environment's sql edge connects it to with a Cloud SQL connector
+	// configuration. The entrypoint of such a server links the Cloud SQL
+	// connector, and no other does (docs/stack-model.md, section 8.1).
+	cloudSQL map[string][]string
+
+	// bundles holds the deployables some environment places on a platform
+	// whose artifact is a bundle (D64): a TypeScript server's package then
+	// holds fetch.ts and bundle.ts.
+	bundles map[string]bool
+}
+
+// environmentFacts resolves every environment of the stack and reads its
+// stackFacts. The stack generator runs first and resolves the same
+// environments, so a build whose environment does not resolve stops at
+// its error before this runs.
+func environmentFacts(c registry.GenerateContext, st *ir.Stack, services []stack.Service) (stackFacts, error) {
 	envs, err := stackgen.Resolve(c, st, services)
 	if err != nil {
-		return nil, err
+		return stackFacts{}, err
 	}
-	out := map[string][]string{}
+	out := stackFacts{cloudSQL: map[string][]string{}, bundles: map[string]bool{}}
 	for _, env := range envs {
 		edges := map[string]*ir.Edge{}
 		for _, e := range env.Edges {
 			edges[e.ID] = e
 		}
 		for _, d := range env.Deployables {
+			if d.HasBundle() {
+				out.bundles[d.Name] = true
+			}
 			for _, b := range d.Bindings {
 				e := edges[b.Edge]
 				if b.Source != ir.BindingDerived || e == nil || e.Kind != ir.EdgeSQL || !derivesCloudSQL(b.Value) {
 					continue
 				}
-				if !slices.Contains(out[d.Name], e.Service.Name) {
-					out[d.Name] = append(out[d.Name], e.Service.Name)
+				if !slices.Contains(out.cloudSQL[d.Name], e.Service.Name) {
+					out.cloudSQL[d.Name] = append(out.cloudSQL[d.Name], e.Service.Name)
 				}
 			}
 		}
 	}
-	for _, dbs := range out {
+	for _, dbs := range out.cloudSQL {
 		slices.Sort(dbs)
 	}
 	return out, nil

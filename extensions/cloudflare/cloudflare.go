@@ -1,23 +1,36 @@
 // Package cloudflare is the Cloudflare extension of the stack model
-// (docs/stack-model.md, sections 6.8 and 6.9). In v1 it registers one DNS
-// platform, `cloudflare`, which writes an environment's domain records
-// into a Cloudflare zone, beside whatever target runs its compute: the gcp
-// target's servers with their records on Cloudflare is the first mix of
-// providers. Workers and D1 platforms come later, in this module.
+// (docs/stack-model.md, sections 6.9 and 18, D64). It registers the DNS
+// platform `cloudflare`, which writes an environment's domain records into
+// a Cloudflare zone beside whatever target runs its compute, and the target
+// `cloudflare`, which runs an environment on one Cloudflare account: its
+// state in an R2 bucket, its secrets in the account's Secrets Store, a
+// bootstrap that makes both and the CI's account tokens, the generated
+// CI's sign-in with those tokens, TypeScript servers as Workers that call
+// each other through service bindings, the R2 store of the bundles they
+// run, buckets on R2, databases on D1 with their migrations from the
+// deploying machine, TypeScript jobs as Workers under Cron Triggers, and
+// sites as Workers with static assets, whose files it keeps in R2.
 //
 // It registers through the public registry package alone, as any
-// extension does (D10), in a Go module of its own (D1). The DNS platform
-// is a pure function to resource graph nodes typed by the Pulumi
-// `cloudflare` provider, whose schemas the extension pins and registers
-// with the platform (package schemas), so resolution checks every node
-// offline. The provisioner that applies them is `pulumi`, another
-// extension, given ProviderVersion for the `cloudflare` package.
+// extension does (D10), in a Go module of its own (D1). Its platforms are
+// pure functions to resource graph nodes typed by the Pulumi `cloudflare`
+// provider, whose schemas the extension pins and registers (package
+// schemas), so resolution checks every node offline. The provisioner that
+// applies them is `pulumi`, another extension, given ProviderVersion for
+// the `cloudflare` package. What it calls on Cloudflare directly, outside
+// the provisioner, goes through Cloud, over the REST API and R2's S3 API.
 package cloudflare
 
 import (
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"time"
 
+	ir "github.com/parable-work/superschematic/ir"
 	"github.com/parable-work/superschematic/registry"
 
 	"github.com/parable-work/superschematic/extensions/cloudflare/schemas"
@@ -28,8 +41,29 @@ const (
 	// Name is the extension's name.
 	Name = "cloudflare"
 
-	// DNS writes an environment's records into a Cloudflare zone.
+	// DNS writes an environment's records into a Cloudflare zone. It is
+	// the target's default DNS platform.
 	DNS = "cloudflare"
+
+	// Target is the target's name.
+	Target = "cloudflare"
+
+	// Provider is the provider each platform of the target runs on (D63).
+	Provider = "cloudflare"
+
+	// Provisioner is the provisioner the target names. The pulumi
+	// extension registers it.
+	Provisioner = "pulumi"
+
+	// PolicyDomainOnCloudflare refuses an environment whose domain is not
+	// on the cloudflare DNS platform: Cloudflare writes a custom domain's
+	// record and certificate only in a zone of the account (section 18.11).
+	PolicyDomainOnCloudflare = "domain-on-cloudflare"
+
+	// PolicyNothingPublic refuses a Worker reached from the internet, at
+	// workers.dev, a custom domain or a route, on behalf of a deployable
+	// that is not exposed (section 18.14).
+	PolicyNothingPublic = "nothing-public-unless-exposed"
 )
 
 // Package is the Pulumi package the extension's resource types belong to,
@@ -41,25 +75,146 @@ const Package = "cloudflare"
 // provider at this version, so what resolution validated is what applies.
 const ProviderVersion = "6.22.0"
 
-// Extension is the Cloudflare extension.
-type Extension struct{}
+// Extension is the Cloudflare extension. Its zero value is the one a
+// distribution links; tests set its fields.
+type Extension struct {
+	// Cloud is what the target's bootstrap, state store and secret store
+	// call on Cloudflare. Nil uses NewCloud's, over the REST and S3 APIs,
+	// with the token in CLOUDFLARE_API_TOKEN; tests pass a fake.
+	Cloud Cloud
+
+	// GitHub sets the generated CI's secrets for bootstrap's --github.
+	// Nil runs the gh CLI; tests pass a fake.
+	GitHub GitHub
+
+	// Getenv reads the shell's environment: TokenEnv and PassphraseEnv.
+	// Nil is os.Getenv.
+	Getenv func(string) string
+
+	// Now is the clock a manifest's history copy is named by; nil is
+	// time.Now. Rand is where a passphrase's and a check's random bytes come
+	// from; nil is crypto/rand.
+	Now  func() time.Time
+	Rand io.Reader
+
+	// Exec runs the migration runner, superschematic-migrate, on the
+	// deploying machine (migrations.go). Nil runs the command; tests pass
+	// a fake.
+	Exec func(cmd *exec.Cmd) error
+}
 
 // Name is the extension's name.
 func (Extension) Name() string { return Name }
 
-// Register adds the Cloudflare DNS platform with the pinned schema of the
-// record type it emits and the API token its provider reads.
-func (Extension) Register(r *registry.Registry) error {
+// Register adds the Cloudflare DNS platform and the cloudflare target,
+// its platforms and connectors, with the pinned schema of every type they
+// and bootstrap emit, and the target's deploy seams: the state in R2, the
+// Secrets Store, bootstrap, the bundles in R2, the emptying of a member's
+// buckets before its destroy, D1's migration runner, and the generated
+// CI's sign-in with an account token (D64).
+func (e Extension) Register(r *registry.Registry) error {
 	types, err := schemas.ResourceTypes(ProviderVersion)
 	if err != nil {
 		return fmt.Errorf("cloudflare: %w", err)
 	}
-	return r.RegisterDNSPlatform(registry.DNSPlatformSpec{
+	if err := r.RegisterDNSPlatform(registry.DNSPlatformSpec{
 		Name:          DNS,
 		Extension:     Name,
 		Values:        json.RawMessage(dnsValues),
 		Lower:         lowerRecords,
 		ResourceTypes: types,
 		Credentials:   credentials,
+	}); err != nil {
+		return err
+	}
+	platforms := map[ir.DeployableKind]string{}
+	for _, spec := range e.platforms() {
+		spec.Extension = Name
+		spec.Provider = Provider
+		if err := r.RegisterPlatform(spec); err != nil {
+			return err
+		}
+		platforms[spec.Kind] = spec.Name
+	}
+	for _, spec := range connectors() {
+		spec.Extension = Name
+		if err := r.RegisterConnector(spec); err != nil {
+			return err
+		}
+	}
+	return r.RegisterTarget(registry.TargetSpec{
+		Name:          Target,
+		Extension:     Name,
+		Platforms:     platforms,
+		Values:        json.RawMessage(targetValues),
+		DNS:           DNS,
+		Provisioner:   Provisioner,
+		ResourceTypes: types,
+		Policies: []registry.PolicyRule{
+			{Name: PolicyDomainOnCloudflare, Check: checkDomainOnCloudflare},
+			{Name: PolicyNothingPublic, Check: checkNothingPublic},
+			{Name: PolicyBucketsNeverPublic, Check: checkBucketsNeverPublic},
+		},
+		State:      stateStore{ext: e},
+		Secrets:    secretStore{ext: e},
+		Bootstrap:  bootstrapper{ext: e},
+		Bundles:    bundleStore{ext: e},
+		Sites:      siteStore{ext: e},
+		PreDestroy: destroyPreparer{ext: e},
+		Migrations: migrationRunner{ext: e},
+		CI:         ciIdentities{},
 	})
+}
+
+// platforms are the target's platforms, one per deployable kind it
+// places; the target names each for its kind. Each gets the extension
+// and the provider when it registers: Workers for servers (workers.go),
+// R2 for buckets (r2.go), D1 for databases (d1.go), Cron for jobs
+// (cron.go) and sites (sites.go) (section 18.2).
+func (e Extension) platforms() []registry.PlatformSpec {
+	return []registry.PlatformSpec{workersPlatform(), r2Platform(), d1Platform(), cronPlatform(), sitesPlatform()}
+}
+
+// connectors are the target's connectors, each between two of its
+// platforms; each gets the extension when it registers: a Worker's calls
+// to another Worker (calls.go), its edges to a bucket (r2.go) and its sql
+// edges to a D1 database (d1.go), a job's the same from Cron, whose
+// connectors read nothing of the caller's platform (cron.go), and a site's
+// edge to a server on Workers (sites.go).
+func connectors() []registry.ConnectorSpec {
+	return []registry.ConnectorSpec{
+		{Name: WorkersHTTPConnector, Edge: ir.EdgeHTTP, From: Workers, To: Workers, Connect: connectWorkers},
+		{Name: WorkersR2Connector, Edge: ir.EdgeBucket, From: Workers, To: R2, Connect: connectR2},
+		{Name: D1Connector, Edge: ir.EdgeSQL, From: Workers, To: D1Platform, Connect: connectD1},
+		{Name: CronHTTPConnector, Edge: ir.EdgeHTTP, From: Cron, To: Workers, Connect: connectWorkers},
+		{Name: CronR2Connector, Edge: ir.EdgeBucket, From: Cron, To: R2, Connect: connectR2},
+		{Name: CronD1Connector, Edge: ir.EdgeSQL, From: Cron, To: D1Platform, Connect: connectD1},
+		{Name: SiteConnector, Edge: ir.EdgeSite, From: Sites, To: Workers, Connect: connectSite},
+	}
+}
+
+// getenv reads the shell's environment.
+func (e Extension) getenv(key string) string {
+	if e.Getenv != nil {
+		return e.Getenv(key)
+	}
+	return os.Getenv(key)
+}
+
+// now is the extension's clock.
+func (e Extension) now() time.Time {
+	if e.Now != nil {
+		return e.Now()
+	}
+	return time.Now()
+}
+
+// random fills b with random bytes.
+func (e Extension) random(b []byte) error {
+	src := e.Rand
+	if src == nil {
+		src = rand.Reader
+	}
+	_, err := io.ReadFull(src, b)
+	return err
 }

@@ -514,6 +514,59 @@ func databaseID(deployable, service string) string {
 	return deployable + ".database." + service
 }
 
+// SQLiteDir is the directory, under the environment's state directory,
+// that holds the SQLite file of each sqlite-first database (D64).
+const SQLiteDir = "databases"
+
+// SQLiteFile returns the file of a hosted DB schema's SQLite database,
+// relative to the environment's state directory:
+// `databases/<database>.sqlite`, the database named as on Postgres
+// (DatabaseName).
+func SQLiteFile(service string) string {
+	return path.Join(SQLiteDir, DatabaseName(service)+".sqlite")
+}
+
+// SQLiteURL returns the URL of the SQLite file at file, an absolute path:
+// `sqlite:<file>`, which the migration runner and the TypeScript runtime's
+// sqliteFile both read as the path.
+func SQLiteURL(file string) string {
+	return "sqlite:" + filepath.ToSlash(file)
+}
+
+// lowerSQLite lowers a database deployable whose DB services list sqlite
+// first to a SQLite file per hosted DB schema under the environment's
+// state directory (D64; docs/stack-model.md, section 18.13). No container
+// runs it: the provisioner creates the file, the migration runner migrates
+// it from the SQLite plan, and the server opens it with openSqlite. The
+// node's url output is the file's sqlite: URL, which only the provisioner
+// knows, since the state directory is the machine's.
+func lowerSQLite(ctx registry.PlatformContext) (registry.Lowered, error) {
+	d := ctx.Deployable
+	var out registry.Lowered
+	for _, svc := range d.Services {
+		out.Resources = append(out.Resources, &ir.Resource{
+			ID:   databaseID(d.Name, svc.Name),
+			Type: TypeSQLiteDatabase,
+			Properties: map[string]any{
+				"name":    DatabaseName(svc.Name),
+				"service": svc.Name,
+				"file":    SQLiteFile(svc.Name),
+			},
+		})
+	}
+	return out, nil
+}
+
+// connectSQLite derives the sqlite: URL of the edge's database's file, a
+// reference to its node's url output, which the provisioner resolves when
+// it starts the server. The edge needs no resource: a file checks no
+// caller.
+func connectSQLite(ctx registry.ConnectorContext) (registry.Connected, error) {
+	return registry.Connected{Value: ir.DatabaseConnection{
+		URL: ir.Output{Resource: databaseID(ctx.To.Name, ctx.Edge.Service.Name), Name: "url"},
+	}}, nil
+}
+
 // processID is the ID of a server's process node.
 func processID(deployable string) string { return deployable + ".process" }
 

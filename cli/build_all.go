@@ -363,8 +363,10 @@ func hookServices(services []buildplan.Service) []registry.BuildAllService {
 // rooted at the output root (tsgen.WorkspaceRoot, D51) when any service
 // has a TypeScript package. The TypeScript generators write it beside the
 // package they build; a service restored from the cache or found up to
-// date brings back only its own package, so build-all writes it once every
-// service is in place, before the dependency graph reads the output root.
+// date brings back only its own package, and the implementations the root
+// leaves out depend on every package on disk (D51, amended), so build-all
+// writes it once every service is in place, before the dependency graph
+// reads the output root.
 func writeTypeScriptWorkspaceRoot(outputRoot, schemasRoot string, services []buildplan.Service, n naming.Naming) error {
 	repoRoot := filepath.Dir(schemasRoot)
 	for _, service := range services {

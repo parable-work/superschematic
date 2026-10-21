@@ -20,8 +20,8 @@ import (
 // reference (Output, Parameter, Concat) that resolves to one.
 
 // DatabaseConnection is what a sql edge's connector derives: how a server
-// reaches the database of an API it serves. Exactly one of URL and
-// CloudSQL is set.
+// reaches the database of an API it serves. Exactly one of URL, CloudSQL
+// and D1 is set.
 type DatabaseConnection struct {
 	// URL is a connection string, such as
 	// `postgres://user:password@host:5432/shop_db?sslmode=require`.
@@ -30,6 +30,24 @@ type DatabaseConnection struct {
 	// CloudSQL is a Cloud SQL connector configuration, which connects with
 	// IAM database authentication and so has no password (section 7.4).
 	CloudSQL *CloudSQLConnection `json:"cloudSql,omitempty"`
+
+	// D1 is a D1 database a Worker reaches through a binding (D64, section
+	// 18.6). Only the TypeScript runtime's Workers entry reads it; the Go
+	// and Rust readers refuse it.
+	D1 *D1Connection `json:"d1,omitempty"`
+}
+
+// D1Connection is a D1 database bound to a Worker (D64). The binding is
+// the grant: D1 has no roles, and a Worker bound to a database reads and
+// writes all of it.
+type D1Connection struct {
+	// Binding is the name of the Worker's `d1` binding, which the platform
+	// writes and the Workers entry takes from its env: the derived field's
+	// name (`SHOP_DB_DATABASE`).
+	Binding any `json:"binding"`
+
+	// Database is the D1 database's uuid, an output of its node.
+	Database any `json:"database"`
 }
 
 // CloudSQLConnection is a Cloud SQL connector configuration.
@@ -45,9 +63,11 @@ type CloudSQLConnection struct {
 }
 
 // BucketConnection is what a bucket edge's connector derives: how a server
-// or a job reaches a bucket an API of it lists (D54). It holds no
-// credential: on gcp the workload's own account reaches the bucket, and the
-// local target's emulator checks none.
+// or a job reaches a bucket an API of it lists (D54). On gcp and on the
+// local target it holds no credential: the workload's own account reaches
+// the bucket, and the emulator checks none. On Workers it holds the
+// binding that reaches the bucket and an R2 credential that signs URLs for
+// it, since a Worker has no identity to sign with (D64, section 18.7).
 type BucketConnection struct {
 	// Name is the bucket's name with its provider: on gcp the GCS bucket's
 	// name, which is unique across every project.
@@ -57,6 +77,45 @@ type BucketConnection struct {
 	// API in its place, such as the local target's fake-gcs-server
 	// (`http://127.0.0.1:24443`). Unset reaches the provider itself.
 	Endpoint any `json:"endpoint,omitempty"`
+
+	// Binding is the name of a Worker's `r2_bucket` binding to the bucket,
+	// the derived field's name (`SHOP_MEDIA_BUCKET`), which the Workers
+	// entry takes from its env (D64). Only the TypeScript runtime's Workers
+	// entry reads it; the Go and Rust readers refuse it.
+	Binding any `json:"binding,omitempty"`
+
+	// R2 is the credential with which a Worker presigns S3 URLs for the
+	// bucket's objects. It needs Binding.
+	R2 *R2Credential `json:"r2,omitempty"`
+}
+
+// R2Credential is a per-edge account token scoped to one bucket's objects
+// (D64, section 18.7): R2's S3 API takes the token's id as the access key
+// and the hex SHA-256 of its value as the secret.
+type R2Credential struct {
+	// Account is the Cloudflare account's id, which names the S3 endpoint
+	// `https://<account>.r2.cloudflarestorage.com`.
+	Account any `json:"account"`
+
+	// AccessKeyID is the token's id.
+	AccessKeyID any `json:"accessKeyId"`
+
+	// Token is the token's value. It is a secret member
+	// (SecretDerivedMember): a connector derives it as a reference to an
+	// output, and the platform sets its variable as a secret binding.
+	Token any `json:"token"`
+}
+
+// ServiceBinding is a Workers service binding through which a Worker
+// reaches the callee's Worker (D64, section 18.10): the binding admits the
+// caller, and the credential's signed token identifies it.
+type ServiceBinding struct {
+	// Name is the binding's name in the caller's env: the derived field's
+	// name (`SHOP_API_SERVICE`).
+	Name any `json:"name"`
+
+	// Worker is the callee's Worker, the script the binding names.
+	Worker any `json:"worker"`
 }
 
 // ServiceEndpoint is what an http edge's connector derives: how a server
@@ -64,6 +123,11 @@ type BucketConnection struct {
 type ServiceEndpoint struct {
 	// URL is the callee's base URL.
 	URL any `json:"url"`
+
+	// Binding is the service binding a Worker calls the callee through,
+	// with URL the address its requests carry (D64). Only the TypeScript
+	// runtime's Workers entry reads it; the Go and Rust readers refuse it.
+	Binding *ServiceBinding `json:"binding,omitempty"`
 
 	// Credential is the source of the service credential the caller sends
 	// (section 9.2). Without one the caller sends no service credential.
@@ -128,6 +192,8 @@ type ServiceCredential struct {
 // CheckDerivedValue checks a derived value against the contract of an
 // edge of kind: a DatabaseConnection for sql, a ServiceEndpoint for http,
 // a SiteEndpoint for site (D55), a BucketConnection for bucket (D54).
+// The members a Worker alone reads (D64) are among them: a database's d1,
+// a service's binding, and a bucket's binding and r2.
 // v is the typed value or its JSON form; a member the contract does not
 // have is refused. The error names the offending member.
 func CheckDerivedValue(kind EdgeKind, v any) error {
@@ -149,53 +215,92 @@ func CheckDerivedValue(kind EdgeKind, v any) error {
 }
 
 func checkBucketConnection(v any) error {
-	m, err := members(v, "a bucket connection", "name", "endpoint")
+	m, err := members(v, "a bucket connection", "name", "endpoint", "binding", "r2")
 	if err != nil {
 		return err
 	}
 	if err := requiredString(m, "", "name"); err != nil {
 		return err
 	}
-	if endpoint, ok := m["endpoint"]; ok {
-		return stringMember("endpoint", endpoint)
+	endpoint, hasEndpoint := m["endpoint"]
+	if hasEndpoint {
+		if err := stringMember("endpoint", endpoint); err != nil {
+			return err
+		}
+	}
+	binding, hasBinding := m["binding"]
+	if hasBinding {
+		if hasEndpoint {
+			return errors.New("a bucket connection sets endpoint or binding, not both: an emulator serves the bucket, or a Worker's binding reaches it")
+		}
+		if err := stringMember("binding", binding); err != nil {
+			return err
+		}
+	}
+	r2, hasR2 := m["r2"]
+	if !hasR2 {
+		return nil
+	}
+	if !hasBinding {
+		return errors.New("a bucket connection with r2 sets binding: the credential signs URLs for the bucket the Worker's binding reaches")
+	}
+	return requiredStrings(r2, "r2", "account", "accessKeyId", "token")
+}
+
+// requiredStrings checks an object member at path whose members are each a
+// string, all of them required.
+func requiredStrings(v any, path string, names ...string) error {
+	m, err := members(v, path, names...)
+	if err != nil {
+		return err
+	}
+	for _, name := range names {
+		if err := requiredString(m, path+".", name); err != nil {
+			return err
+		}
 	}
 	return nil
 }
 
 func checkDatabaseConnection(v any) error {
-	m, err := members(v, "a database connection", "url", "cloudSql")
+	m, err := members(v, "a database connection", "url", "cloudSql", "d1")
 	if err != nil {
 		return err
 	}
-	url, hasURL := m["url"]
-	cloud, hasCloud := m["cloudSql"]
-	switch {
-	case hasURL && hasCloud:
-		return errors.New("a database connection sets url or cloudSql, not both")
-	case hasURL:
-		return stringMember("url", url)
-	case hasCloud:
-		c, err := members(cloud, "cloudSql", "instance", "database", "user")
-		if err != nil {
-			return err
+	var forms []string
+	for _, form := range []string{"url", "cloudSql", "d1"} {
+		if _, ok := m[form]; ok {
+			forms = append(forms, form)
 		}
-		for _, name := range []string{"instance", "database", "user"} {
-			if err := requiredString(c, "cloudSql.", name); err != nil {
-				return err
-			}
-		}
-		return nil
 	}
-	return errors.New("a database connection sets url or cloudSql")
+	switch len(forms) {
+	case 0:
+		return errors.New("a database connection sets url, cloudSql or d1")
+	case 1:
+	default:
+		return fmt.Errorf("a database connection sets one of url, cloudSql and d1, not %s", strings.Join(forms, " and "))
+	}
+	switch forms[0] {
+	case "url":
+		return stringMember("url", m["url"])
+	case "cloudSql":
+		return requiredStrings(m["cloudSql"], "cloudSql", "instance", "database", "user")
+	}
+	return requiredStrings(m["d1"], "d1", "binding", "database")
 }
 
 func checkServiceEndpoint(v any) error {
-	m, err := members(v, "a service endpoint", "url", "credential")
+	m, err := members(v, "a service endpoint", "url", "binding", "credential")
 	if err != nil {
 		return err
 	}
 	if err := requiredString(m, "", "url"); err != nil {
 		return err
+	}
+	if binding, ok := m["binding"]; ok {
+		if err := requiredStrings(binding, "binding", "name", "worker"); err != nil {
+			return err
+		}
 	}
 	cred, ok := m["credential"]
 	if !ok {
@@ -353,11 +458,12 @@ type DerivedVariable struct {
 
 // secretDerivedMembers are the members of a derived value that hold a
 // secret, by their paths as DerivedMembers names them.
-var secretDerivedMembers = []string{"credential.key"}
+var secretDerivedMembers = []string{"credential.key", "r2.token"}
 
 // SecretDerivedMember reports whether the member of a derived value at
 // path, dotted as DerivedMembers names it, holds a secret: a signed-token
-// credential's private key, the one today (section 3.4). A connector
+// credential's private key, and an R2 credential's token (D64) (section
+// 3.4). A connector
 // derives a secret member as a reference to an output, never a literal,
 // so environment.json never holds it, and a platform sets its variable
 // from its secret store (DerivedVariable.Secret).
@@ -692,13 +798,13 @@ func (s *Schema) DerivedConfigFields(names DerivedFieldNames) []DerivedConfigFie
 func DerivedMembers(kind EdgeKind) []string {
 	switch kind {
 	case EdgeSQL:
-		return []string{"url", "cloudSql.instance", "cloudSql.database", "cloudSql.user"}
+		return []string{"url", "cloudSql.instance", "cloudSql.database", "cloudSql.user", "d1.binding", "d1.database"}
 	case EdgeHTTP:
-		return []string{"url", "credential.source", "credential.audience", "credential.tokenFile", "credential.issuer", "credential.key", "credential.headers"}
+		return []string{"url", "binding.name", "binding.worker", "credential.source", "credential.audience", "credential.tokenFile", "credential.issuer", "credential.key", "credential.headers"}
 	case EdgeSite:
 		return []string{"url"}
 	case EdgeBucket:
-		return []string{"name", "endpoint"}
+		return []string{"name", "endpoint", "binding", "r2.account", "r2.accessKeyId", "r2.token"}
 	}
 	return nil
 }

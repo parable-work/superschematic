@@ -134,6 +134,17 @@ type DerivedField struct {
 	// Variables are the environment variables the field may be read from,
 	// one per member of its value.
 	Variables []string
+	// Dialect is a database field's DB service's first dialect, empty for
+	// postgres (Options.DatabaseDialect).
+	Dialect string
+}
+
+// SQLite reports whether the field is a database field whose DB service
+// lists sqlite first (D64): the TypeScript EnvConfig types it as a
+// DatabaseConnection, a sqlite: URL under stack dev and a D1 binding on
+// Workers.
+func (f DerivedField) SQLite() bool {
+	return f.Kind == ir.EdgeSQL && f.Dialect == "sqlite"
 }
 
 // RuntimeType is the field's type in the Go HTTP runtime's stackconfig
@@ -243,6 +254,12 @@ type Options struct {
 	// (IdentityField, D57), for an API whose server authenticates with the
 	// identity runtime. The output then exists for such an API.
 	Identity bool
+
+	// DatabaseDialect is the first dialect the DB service of the API's
+	// database lists, which the database field's Dialect records: a
+	// sqlite-first database's TypeScript field is a DatabaseConnection,
+	// which a Worker reads as a D1 binding (D64). Empty is postgres.
+	DatabaseDialect string
 }
 
 // Generate generates configuration code from an IR schema with @envVars directive.
@@ -269,6 +286,11 @@ func GenerateWithOptions(schema *ir.Schema, opts Options) (*ConfigOutput, error)
 		var err error
 		if derived, err = derivedFields(schema, envVarsType, names); err != nil {
 			return nil, err
+		}
+		for i := range derived {
+			if derived[i].Kind == ir.EdgeSQL {
+				derived[i].Dialect = opts.DatabaseDialect
+			}
 		}
 	}
 	// The fields of the API's own that a stack sets, beside the edges'.

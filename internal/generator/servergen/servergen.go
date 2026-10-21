@@ -220,6 +220,13 @@ type Input struct {
 type JobInput struct {
 	// Name is the job's @job class.
 	Name string
+
+	// TimeoutSeconds bounds one try and Retries is how many times a failed
+	// try is run again, as its @job says: a TypeScript job's scheduled.ts
+	// runs its tries itself, within one Cron Trigger's run (D64). Zero
+	// TimeoutSeconds is ir.DefaultJobTimeoutSeconds.
+	TimeoutSeconds int
+	Retries        int
 }
 
 // WorkerInput is the worker a worker's entrypoint runs.
@@ -336,10 +343,15 @@ type Loopback struct {
 }
 
 // Job is the job a job's entrypoint runs: its @job class and the method of
-// the API's Jobs interface that runs it.
+// the API's Jobs interface that runs it. A TypeScript job on Workers also
+// reads the timeout of a try, and how many tries a run makes, from it
+// (scheduled.ts, D64).
 type Job struct {
 	Name   string
 	Method string
+
+	TimeoutSeconds int
+	Tries          int
 }
 
 // Worker is the worker a worker's entrypoint runs (D53): its @worker class,

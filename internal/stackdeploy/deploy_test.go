@@ -313,6 +313,43 @@ func TestDeployPreparesTheMigrationRunner(t *testing.T) {
 	}
 }
 
+// TestDeployPreparesAPrivilegelessRunnerForSteps: a runner whose databases
+// have no roles, as D1's (D64), is readied only for a phase with steps: a
+// worker that joins shop-db's connections runs its expand phase with no
+// steps through it, which needs neither the runner nor a token there, so
+// the deploy does not ask. Each phase reads the applied graph's outputs
+// through the request.
+func TestDeployPreparesAPrivilegelessRunnerForSteps(t *testing.T) {
+	f := newFixtureOf(t, &stacktest.Extension{PrivilegelessMigrations: true, Migrations: &stacktest.FakeMigrations{ReadOutputs: true}})
+	env := f.env(t, "Staging")
+	f.ready(t, env)
+	ctx := context.Background()
+	if _, err := stackdeploy.Deploy(ctx, deployOptions(f, t, env, nil, &planner{to: 1}, images(1))); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"Staging"}; !slices.Equal(f.ext.Migrations.Prepared, want) {
+		t.Fatalf("a deploy with steps readied the runner for %v, want %v", f.ext.Migrations.Prepared, want)
+	}
+	n := len(f.ext.Provisioner.Calls())
+	with := f.workerEnv(t, "Staging")
+	imgs := images(2)
+	imgs[stacktest.FulfilOrdersWorker] = stacktest.FulfilOrdersWorker + "@" + digest(2)
+	if _, err := stackdeploy.Deploy(ctx, deployOptions(f, t, with, nil, &planner{to: 1}, imgs)); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.ext.Migrations.Prepared) != 1 {
+		t.Errorf("a deploy whose connecting servers alone changed readied the runner: %v", f.ext.Migrations.Prepared)
+	}
+	calls := f.calls(n)
+	outputs := slices.Index(calls, "outputs Staging")
+	migrate := slices.IndexFunc(calls, func(c string) bool {
+		return strings.HasPrefix(c, "migrate expand shop-db: ") && strings.Contains(c, "no steps")
+	})
+	if outputs < 0 || migrate < 0 || outputs > migrate {
+		t.Errorf("the deploy ran:\n%s\nwant the expand phase with no steps, after it read the outputs", strings.Join(calls, "\n"))
+	}
+}
+
 // TestDeploySecrets: the deploy applies the infrastructure, which creates
 // a secret's storage, then needs a value for every secret: it fails
 // without a terminal and asks on one.

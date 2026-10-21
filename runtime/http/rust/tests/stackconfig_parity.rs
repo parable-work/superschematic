@@ -46,6 +46,10 @@ struct Vector {
     edits: HashMap<String, Option<String>>,
     want: Value,
     refusals: Option<Vec<String>>,
+    /// Go's and Rust's refusal of a member only a Worker reads (D64), in
+    /// place of `want` and `refusals`, which are TypeScript's.
+    #[serde(default, rename = "workerOnly")]
+    worker_only: Option<Vec<String>>,
 }
 
 /// The environment a vector's reader reads: its variables with its edits
@@ -150,7 +154,10 @@ fn the_shared_stackconfig_vectors() {
     for vector in &file.vectors {
         let env = env_of(vector);
         let got = read(vector, &env);
-        let failure = match (&vector.refusals, got) {
+        // Rust reads no member only a Worker reads (D64): such a vector's
+        // refusal is its workerOnly.
+        let refusals = vector.worker_only.as_ref().or(vector.refusals.as_ref());
+        let failure = match (refusals, got) {
             (_, Err(None)) => Some(format!(
                 "names the reader {:?}, which the harness does not know",
                 vector.reader
@@ -181,7 +188,7 @@ fn the_shared_stackconfig_vectors() {
                         lines.join("\n    "),
                         refusals.join("\n    ")
                     ))
-                } else if !vector.want.is_null() {
+                } else if vector.worker_only.is_none() && !vector.want.is_null() {
                     Some("a refusal's want is not null".to_string())
                 } else {
                     None

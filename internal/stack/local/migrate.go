@@ -47,10 +47,24 @@ func targetModel(req registry.ProvisionRequest, m *Migration) (*sqlmigrate.Model
 	if err != nil {
 		return nil, fmt.Errorf("local: migrate %s: %s: %w", m.Service, path, err)
 	}
-	if model.Service != m.Service || model.Dialect != sqlmigrate.Postgres {
+	if model.Service != m.Service || model.Dialect != m.dialect() {
 		return nil, fmt.Errorf("local: migrate %s: %s is the %s model of %s", m.Service, path, model.Dialect, model.Service)
 	}
 	return model, nil
+}
+
+// databaseURL is the URL the runner reaches the migration's database at: a
+// Postgres database's connection string, or a SQLite file's sqlite: URL
+// under the environment's state directory (D64).
+func databaseURL(req registry.ProvisionRequest, m *Migration) (string, error) {
+	if m.File == "" {
+		return m.URL, nil
+	}
+	dir, err := stateDirOf(req.Backend)
+	if err != nil {
+		return "", fmt.Errorf("local: migrate %s, a SQLite database under the state directory, but %w", m.Service, err)
+	}
+	return SQLiteURL(filepath.Join(dir, filepath.FromSlash(m.File))), nil
 }
 
 func decodeModel(data []byte) (*sqlmigrate.Model, error) {
@@ -68,8 +82,8 @@ func decodeModel(data []byte) (*sqlmigrate.Model, error) {
 
 // appliedModel asks the runner for the model the database recorded; nil is
 // none, an empty database.
-func (p *Provisioner) appliedModel(ctx context.Context, runner string, m *Migration) (*sqlmigrate.Model, error) {
-	out, err := p.runner().Run(ctx, Command{Path: runner, Args: []string{"status", "--service", m.Service, "--model", "--database-url", m.URL}})
+func (p *Provisioner) appliedModel(ctx context.Context, runner, url string, m *Migration) (*sqlmigrate.Model, error) {
+	out, err := p.runner().Run(ctx, Command{Path: runner, Args: []string{"status", "--service", m.Service, "--model", "--database-url", url}})
 	if err != nil {
 		if stderrContains(err, noAppliedModel) {
 			return nil, nil
@@ -94,7 +108,11 @@ func (p *Provisioner) migrationPending(ctx context.Context, req registry.Provisi
 	if err != nil {
 		return false, err
 	}
-	from, err := p.appliedModel(ctx, runner, m)
+	url, err := databaseURL(req, m)
+	if err != nil {
+		return false, err
+	}
+	from, err := p.appliedModel(ctx, runner, url, m)
 	if err != nil || from == nil {
 		return true, err
 	}
@@ -121,7 +139,11 @@ func (p *Provisioner) migrate(ctx context.Context, req registry.ProvisionRequest
 	if err != nil {
 		return err
 	}
-	from, err := p.appliedModel(ctx, runner, m)
+	url, err := databaseURL(req, m)
+	if err != nil {
+		return err
+	}
+	from, err := p.appliedModel(ctx, runner, url, m)
 	if err != nil {
 		return err
 	}
@@ -168,7 +190,7 @@ func (p *Provisioner) migrate(ctx context.Context, req registry.ProvisionRequest
 	defer output.Flush()
 	if _, err := p.runner().Run(ctx, Command{
 		Path:   runner,
-		Args:   []string{"apply", "--plan", path, "--phase", "all", "--database-url", m.URL},
+		Args:   []string{"apply", "--plan", path, "--phase", "all", "--database-url", url},
 		Stdout: output,
 		Stderr: output,
 	}); err != nil {

@@ -1,0 +1,42 @@
+name: ts-notes
+kind: API
+types:
+  NoteView:
+    name: NoteView
+    role: APIView
+    fields:
+      - name: id
+        typeRef: { name: string }
+        required: true
+      - name: text
+        typeRef: { name: string }
+        required: true
+operationSets:
+  - name: Notes
+    operations:
+      - name: getNote
+        typeRef: { name: NoteView }
+        required: true
+        httpMethod: GET
+        restPath: notes/{id}
+        arguments:
+          - name: id
+            typeRef: { name: string }
+            required: true
+      - name: putNote
+        typeRef: { name: NoteView }
+        required: true
+        httpMethod: PUT
+        restPath: notes/{id}
+        arguments:
+          - name: id
+            typeRef: { name: string }
+            required: true
+          - name: text
+            typeRef: { name: string }
+            required: true
+# A job builds ts-notes' Deps as its server does, the SQLite file included.
+jobs:
+  - name: PruneNotes
+    schedule: "0 3 * * *"
+    timeout: 1m

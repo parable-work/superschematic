@@ -204,6 +204,11 @@ type FakeMigrations struct {
 	// first step, and PrepareFail is the error to return when it does.
 	Prepared    []string
 	PrepareFail error
+
+	// ReadOutputs makes each phase read the applied graph's outputs
+	// through the request, as a runner that reaches a database by its
+	// node's output does (D64), and fail when the deploy gives none.
+	ReadOutputs bool
 }
 
 var (
@@ -219,7 +224,15 @@ func (m *FakeMigrations) PrepareMigrations(_ context.Context, run registry.Run, 
 
 // Migrate records the phase and the plans' services, and the servers of
 // a plan with no steps in the phase.
-func (m *FakeMigrations) Migrate(_ context.Context, req registry.MigrationRequest) error {
+func (m *FakeMigrations) Migrate(ctx context.Context, req registry.MigrationRequest) error {
+	if m.ReadOutputs {
+		if req.Outputs == nil {
+			return fmt.Errorf("the deploy gives the %s phase on %s no outputs", req.Phase, req.Database)
+		}
+		if _, err := req.Outputs(ctx); err != nil {
+			return err
+		}
+	}
 	var services []string
 	for _, plan := range req.Plans {
 		if plan.Steps == 0 {
@@ -234,6 +247,14 @@ func (m *FakeMigrations) Migrate(_ context.Context, req registry.MigrationReques
 	}
 	return m.Fail[string(req.Phase)+" "+req.Database]
 }
+
+// privilegelessMigrations is the fake runner as one whose databases have
+// no roles, which Extension.PrivilegelessMigrations registers.
+type privilegelessMigrations struct{ *FakeMigrations }
+
+var _ registry.PrivilegelessMigrations = privilegelessMigrations{}
+
+func (privilegelessMigrations) GrantsNoPrivileges() {}
 
 // FakeBuilder is an image builder that builds nothing: it records each
 // build in the provisioner's call log, keeps the entries of each context
@@ -609,8 +630,9 @@ type FakeBootstrap struct {
 
 var _ registry.Bootstrapper = (*FakeBootstrap)(nil)
 
-// Bootstrap records the environment, the repository and the credentials'
-// secrets, keeps the request in Requests, and returns Values.
+// Bootstrap records the environment, the repository, the credentials'
+// secrets and, when it was asked to store the CI's secrets, `github`,
+// keeps the request in Requests, and returns Values.
 func (b *FakeBootstrap) Bootstrap(_ context.Context, req registry.BootstrapRequest) (*registry.BootstrapResult, error) {
 	b.Requests = append(b.Requests, req)
 	var secrets []string
@@ -618,7 +640,11 @@ func (b *FakeBootstrap) Bootstrap(_ context.Context, req registry.BootstrapReque
 		secrets = append(secrets, c.Secret)
 	}
 	if b.log != nil {
-		b.log.Record("bootstrap %s: repository %s, credentials %s", req.Environment.Environment, req.Repository, strings.Join(secrets, ", "))
+		github := ""
+		if req.GitHub {
+			github = ", github"
+		}
+		b.log.Record("bootstrap %s: repository %s, credentials %s%s", req.Environment.Environment, req.Repository, strings.Join(secrets, ", "), github)
 	}
 	if len(b.Values) == 0 {
 		return nil, nil

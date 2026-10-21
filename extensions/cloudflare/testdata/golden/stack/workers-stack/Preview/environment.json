@@ -1,0 +1,384 @@
+{
+  "version": 1,
+  "stack": "workers-stack",
+  "environment": "Preview",
+  "extends": "Staging",
+  "target": "cloudflare",
+  "provisioner": "pulumi",
+  "values": {
+    "accountId": "0123456789abcdef0123456789abcdef",
+    "secretsStoreId": "5ec0000000000000000000000000000a",
+    "workersSubdomain": "acme"
+  },
+  "parameters": [
+    "pr"
+  ],
+  "deployables": [
+    {
+      "name": "shop-pricing",
+      "kind": "server",
+      "platform": "cloudflare.workers",
+      "services": [
+        {
+          "name": "shop-pricing",
+          "kind": "API"
+        }
+      ],
+      "language": "TYPESCRIPT",
+      "artifact": "bundle",
+      "resourceName": {
+        "$concat": [
+          "workers-stack-preview-shop-pricing-pr",
+          {
+            "$parameter": "pr"
+          }
+        ]
+      },
+      "address": {
+        "$concat": [
+          "https://workers-stack-preview-shop-pricing-pr",
+          {
+            "$parameter": "pr"
+          }
+        ]
+      }
+    },
+    {
+      "name": "shop-storefront",
+      "kind": "server",
+      "platform": "cloudflare.workers",
+      "services": [
+        {
+          "name": "shop-storefront",
+          "kind": "API"
+        }
+      ],
+      "language": "TYPESCRIPT",
+      "artifact": "bundle",
+      "exposed": true,
+      "settings": {
+        "cpuMs": 50,
+        "placement": "smart"
+      },
+      "resourceName": {
+        "$concat": [
+          "workers-stack-preview-shop-storefront-pr",
+          {
+            "$parameter": "pr"
+          }
+        ]
+      },
+      "address": {
+        "$concat": [
+          "https://workers-stack-preview-shop-storefront-pr",
+          {
+            "$parameter": "pr"
+          }
+        ]
+      },
+      "publicAddress": {
+        "$concat": [
+          "https://workers-stack-preview-shop-storefront-pr",
+          {
+            "$parameter": "pr"
+          },
+          ".acme.workers.dev"
+        ]
+      },
+      "bindings": [
+        {
+          "field": "LOG_LEVEL",
+          "source": "literal",
+          "value": "info",
+          "default": true
+        },
+        {
+          "field": "PAYMENTS_KEY",
+          "source": "secret",
+          "secret": "StorefrontConfig.PAYMENTS_KEY"
+        },
+        {
+          "field": "PREVIEW_ID",
+          "source": "parameter",
+          "parameter": "pr"
+        }
+      ]
+    }
+  ],
+  "secrets": [
+    {
+      "id": "StorefrontConfig.PAYMENTS_KEY",
+      "type": "StorefrontConfig",
+      "field": "PAYMENTS_KEY",
+      "readers": [
+        "shop-storefront"
+      ]
+    }
+  ],
+  "resources": {
+    "parameters": [
+      "pr"
+    ],
+    "resources": [
+      {
+        "id": "shop-pricing.deployment",
+        "type": "cloudflare:index/workersDeployment:WorkersDeployment",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "scriptName": {
+            "$output": {
+              "resource": "shop-pricing.worker",
+              "name": "name"
+            }
+          },
+          "strategy": "percentage",
+          "versions": [
+            {
+              "percentage": 100,
+              "versionId": {
+                "$output": {
+                  "resource": "shop-pricing.version",
+                  "name": "id"
+                }
+              }
+            }
+          ]
+        },
+        "dependsOn": [
+          "shop-pricing.version",
+          "shop-pricing.worker"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "shop-pricing"
+        ]
+      },
+      {
+        "id": "shop-pricing.version",
+        "type": "cloudflare:index/workerVersion:WorkerVersion",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "compatibilityDate": "2026-09-15",
+          "mainModule": "main.js",
+          "modules": [
+            {
+              "contentFile": "artifacts/shop-pricing/{bundle-digest}/main.js",
+              "contentSha256": "{bundle-sha256:main.js}",
+              "contentType": "application/javascript+module",
+              "name": "main.js"
+            },
+            {
+              "contentFile": "artifacts/shop-pricing/{bundle-digest}/main.js.map",
+              "contentSha256": "{bundle-sha256:main.js.map}",
+              "contentType": "application/source-map",
+              "name": "main.js.map"
+            },
+            {
+              "contentFile": "artifacts/shop-pricing/{bundle-digest}/superscalar_wasm_bg.wasm",
+              "contentSha256": "{bundle-sha256:superscalar_wasm_bg.wasm}",
+              "contentType": "application/wasm",
+              "name": "superscalar_wasm_bg.wasm"
+            }
+          ],
+          "workerId": {
+            "$output": {
+              "resource": "shop-pricing.worker",
+              "name": "id"
+            }
+          }
+        },
+        "dependsOn": [
+          "shop-pricing.worker"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "shop-pricing"
+        ]
+      },
+      {
+        "id": "shop-pricing.worker",
+        "type": "cloudflare:index/worker:Worker",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "name": {
+            "$concat": [
+              "workers-stack-preview-shop-pricing-pr",
+              {
+                "$parameter": "pr"
+              }
+            ]
+          },
+          "observability": {
+            "enabled": true,
+            "logs": {
+              "enabled": true,
+              "invocationLogs": true
+            }
+          },
+          "subdomain": {
+            "enabled": false,
+            "previewsEnabled": false
+          }
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "shop-pricing"
+        ]
+      },
+      {
+        "id": "shop-storefront.deployment",
+        "type": "cloudflare:index/workersDeployment:WorkersDeployment",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "scriptName": {
+            "$output": {
+              "resource": "shop-storefront.worker",
+              "name": "name"
+            }
+          },
+          "strategy": "percentage",
+          "versions": [
+            {
+              "percentage": 100,
+              "versionId": {
+                "$output": {
+                  "resource": "shop-storefront.version",
+                  "name": "id"
+                }
+              }
+            }
+          ]
+        },
+        "dependsOn": [
+          "shop-storefront.version",
+          "shop-storefront.worker"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "shop-storefront"
+        ]
+      },
+      {
+        "id": "shop-storefront.version",
+        "type": "cloudflare:index/workerVersion:WorkerVersion",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "bindings": [
+            {
+              "name": "LOG_LEVEL",
+              "text": "info",
+              "type": "plain_text"
+            },
+            {
+              "name": "PAYMENTS_KEY",
+              "secretName": "workers-stack-Preview-StorefrontConfig-PAYMENTS_KEY",
+              "storeId": "5ec0000000000000000000000000000a",
+              "type": "secrets_store_secret"
+            },
+            {
+              "name": "PREVIEW_ID",
+              "text": {
+                "$parameter": "pr"
+              },
+              "type": "plain_text"
+            }
+          ],
+          "compatibilityDate": "2026-09-15",
+          "limits": {
+            "cpuMs": 50
+          },
+          "mainModule": "main.js",
+          "modules": [
+            {
+              "contentFile": "artifacts/shop-storefront/{bundle-digest}/main.js",
+              "contentSha256": "{bundle-sha256:main.js}",
+              "contentType": "application/javascript+module",
+              "name": "main.js"
+            },
+            {
+              "contentFile": "artifacts/shop-storefront/{bundle-digest}/main.js.map",
+              "contentSha256": "{bundle-sha256:main.js.map}",
+              "contentType": "application/source-map",
+              "name": "main.js.map"
+            },
+            {
+              "contentFile": "artifacts/shop-storefront/{bundle-digest}/superscalar_wasm_bg.wasm",
+              "contentSha256": "{bundle-sha256:superscalar_wasm_bg.wasm}",
+              "contentType": "application/wasm",
+              "name": "superscalar_wasm_bg.wasm"
+            }
+          ],
+          "placement": {
+            "mode": "smart"
+          },
+          "workerId": {
+            "$output": {
+              "resource": "shop-storefront.worker",
+              "name": "id"
+            }
+          }
+        },
+        "dependsOn": [
+          "shop-storefront.worker"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "shop-storefront"
+        ]
+      },
+      {
+        "id": "shop-storefront.worker",
+        "type": "cloudflare:index/worker:Worker",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "name": {
+            "$concat": [
+              "workers-stack-preview-shop-storefront-pr",
+              {
+                "$parameter": "pr"
+              }
+            ]
+          },
+          "observability": {
+            "enabled": true,
+            "logs": {
+              "enabled": true,
+              "invocationLogs": true
+            }
+          },
+          "subdomain": {
+            "enabled": true,
+            "previewsEnabled": false
+          }
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "shop-storefront"
+        ]
+      }
+    ]
+  },
+  "deployOrder": [
+    {
+      "step": "infrastructure",
+      "resources": [
+        "shop-pricing.worker",
+        "shop-storefront.worker"
+      ]
+    },
+    {
+      "step": "rollout",
+      "wave": 1,
+      "deployables": [
+        "shop-pricing",
+        "shop-storefront"
+      ],
+      "resources": [
+        "shop-pricing.deployment",
+        "shop-pricing.version",
+        "shop-storefront.deployment",
+        "shop-storefront.version"
+      ]
+    }
+  ]
+}

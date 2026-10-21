@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/parable-work/superschematic/internal/generator/tsgen"
 	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -163,12 +164,30 @@ func (src *Sources) run() RunCommand {
 // install runs one frozen install of the Bun workspace at the output root,
 // the first time a site or a bundle builds in the operation, what naming
 // the first (D51, amended).
+//
+// An output root built for one stack holds a partial workspace, whose
+// root leaves out the implementations and sites whose generated packages
+// it lacks (tsgen.WorkspaceRoot). Bun takes a lockfile that pins more
+// members than the manifest names for one that changes, which a frozen
+// install refuses, so that install runs with --no-save instead: it
+// installs the versions the lockfile pins and leaves the lockfile as it
+// is. Only an output root every service is built into, as the generated
+// CI builds it, checks the lockfile is current.
 func (s *session) install(ctx context.Context, src *Sources, what string) error {
 	if s.installed {
 		return nil
 	}
-	s.logf("install the TypeScript workspace: bun install --frozen-lockfile in %s", src.OutputRoot)
-	if err := src.run()(ctx, src.OutputRoot, s.log, "bun", "install", "--frozen-lockfile"); err != nil {
+	mode := "--frozen-lockfile"
+	leftOut, err := tsgen.WorkspaceLeftOut(src.OutputRoot)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("install the TypeScript workspace: %w", err)
+	}
+	if len(leftOut) > 0 {
+		mode = "--no-save"
+		s.logf("the TypeScript workspace leaves out %s, whose packages %s lacks: its install keeps the lockfile as it is, and does not check it is current", strings.Join(leftOut, ", "), src.OutputRoot)
+	}
+	s.logf("install the TypeScript workspace: bun install %s in %s", mode, src.OutputRoot)
+	if err := src.run()(ctx, src.OutputRoot, s.log, "bun", "install", mode); err != nil {
 		return fmt.Errorf("install the TypeScript workspace, whose lockfile the %s's build installs from (D51, amended): %w", what, err)
 	}
 	s.installed = true

@@ -55,7 +55,7 @@
     "{{ . }}": "*",
 {{- end }}
     "{{ .RuntimePackage }}": "*",
-{{- if .Deps.Database }}
+{{- if .DepsPool }}
     "hono": "{{ .HonoVersion }}",
     "pg": "{{ .PGPeerRange }}"
 {{- else }}
@@ -64,7 +64,7 @@
   },
   "devDependencies": {
     "@types/node": "{{ .NodeTypesVersion }}",
-{{- if .Deps.Database }}
+{{- if .DepsPool }}
     "@types/pg": "{{ .PGTypesVersion }}",
 {{- end }}
     "hono": "{{ .HonoVersion }}",

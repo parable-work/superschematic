@@ -39,7 +39,7 @@ func (t *terminal) Secret(prompt string) ([]byte, error) {
 // the provisioner in CLOUDFLARE_API_TOKEN, and never logs it.
 func TestBootstrapAndDeployReadTheToken(t *testing.T) {
 	ext := &stacktest.Extension{}
-	reg, err := registry.Assemble(registry.DefaultNaming(), ext, cloudflare.Extension{})
+	reg, err := registry.Assemble(registry.DefaultNaming(), ext, cloudflare.Extension{}, pulumiStub{})
 	if err != nil {
 		t.Fatal(err)
 	}

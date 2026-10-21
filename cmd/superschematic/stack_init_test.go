@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -13,6 +14,10 @@ import (
 // initFixture is stackinit's tree with no stack: two APIs, one of them
 // internal, their database and a site.
 const initFixture = "../../internal/stackinit/testdata/tree"
+
+// wishlistServices are acme-shop's wishlist-stack and the services only it
+// deploys.
+var wishlistServices = []string{"shop-wishlist", "shop-wishlist-db", "wishlist-stack"}
 
 // copyTree copies the directory src to dst.
 func copyTree(t *testing.T, src, dst string) {
@@ -131,6 +136,11 @@ func TestStackInitWritesAGcpEnvironment(t *testing.T) {
 // Dev and on gcp, and deploys and exposes what shop-stack does: every API
 // and the site, each API an end user calls. When acme's stack changes what
 // it deploys or exposes on purpose, change the line this compares.
+//
+// The copy leaves out wishlistServices, which wishlist-stack deploys on
+// Cloudflare and shop-stack does not: init deploys every API of the tree,
+// and gcp cannot place shop-wishlist, a TypeScript server over a database
+// that lists sqlite first (D64).
 func TestStackInitOverAcmeShop(t *testing.T) {
 	repoRoot, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
@@ -139,7 +149,16 @@ func TestStackInitOverAcmeShop(t *testing.T) {
 	acme := filepath.Join(repoRoot, "examples", "acme-shop", "schemas")
 	project := t.TempDir()
 	schemasRoot := filepath.Join(project, "schemas")
-	copyTree(t, filepath.Join(acme, "services"), filepath.Join(schemasRoot, "services"))
+	services, err := os.ReadDir(filepath.Join(acme, "services"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, svc := range services {
+		if !svc.IsDir() || slices.Contains(wishlistServices, svc.Name()) {
+			continue
+		}
+		copyTree(t, filepath.Join(acme, "services", svc.Name()), filepath.Join(schemasRoot, "services", svc.Name()))
+	}
 	for _, name := range []string{"superschematic.toml", "tsconfig.base.json"} {
 		data, err := os.ReadFile(filepath.Join(acme, name))
 		if err != nil {

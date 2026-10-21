@@ -2,6 +2,7 @@ package generator
 
 import (
 	"github.com/parable-work/superschematic/internal/generator/sitegen"
+	"github.com/parable-work/superschematic/internal/registry"
 )
 
 // generateSite writes a Site service's typed browser config into its
@@ -15,7 +16,7 @@ func (r run) generateSite() error {
 		r.Skip(sitegen.Name)
 		return nil
 	}
-	site, err := sitegen.Of(r.Schema, r.Options.Naming)
+	site, err := sitegen.Of(r.Schema, r.Options.Naming, r.siteSDKs)
 	if err != nil {
 		return err
 	}
@@ -32,4 +33,23 @@ func (r run) generateSite() error {
 	}
 	r.Done(sitegen.Name, dir)
 	return nil
+}
+
+// siteSDKs reports whether the config of an API the site calls generates
+// a TypeScript SDK, of which the site's config hands out a client (D55,
+// amended). An API whose config the build cannot read is taken to have
+// one, as a TypeScript server's Deps take it (typeScriptDeps).
+func (r run) siteSDKs(service string) bool {
+	if r.Options.DependencyConfig == nil {
+		return true
+	}
+	cfg, ok := r.Options.DependencyConfig(service)
+	if !ok {
+		return true
+	}
+	outputs, err := registry.ParseOutputs(cfg.Outputs, r.Registry)
+	if err != nil {
+		return true
+	}
+	return outputs.SDKEnabled(LangTypeScript)
 }

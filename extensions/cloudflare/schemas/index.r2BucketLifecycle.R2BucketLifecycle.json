@@ -1,0 +1,162 @@
+{
+  "token": "cloudflare:index/r2BucketLifecycle:R2BucketLifecycle",
+  "terraform": {
+    "type": "cloudflare_r2_bucket_lifecycle",
+    "renames": {
+      "accountId": "account_id",
+      "bucketName": "bucket_name",
+      "rules.abortMultipartUploadsTransition": "abort_multipart_uploads_transition",
+      "rules.abortMultipartUploadsTransition.condition.maxAge": "max_age",
+      "rules.deleteObjectsTransition": "delete_objects_transition",
+      "rules.deleteObjectsTransition.condition.maxAge": "max_age",
+      "rules.storageClassTransitions": "storage_class_transitions",
+      "rules.storageClassTransitions.condition.maxAge": "max_age",
+      "rules.storageClassTransitions.storageClass": "storage_class"
+    }
+  },
+  "inputProperties": {
+    "accountId": {
+      "type": "string"
+    },
+    "bucketName": {
+      "type": "string"
+    },
+    "jurisdiction": {
+      "type": "string"
+    },
+    "rules": {
+      "type": "array",
+      "items": {
+        "$ref": "#/types/cloudflare:index/R2BucketLifecycleRule:R2BucketLifecycleRule"
+      }
+    }
+  },
+  "requiredInputs": [
+    "accountId",
+    "bucketName"
+  ],
+  "types": {
+    "cloudflare:index/R2BucketLifecycleRule:R2BucketLifecycleRule": {
+      "type": "object",
+      "properties": {
+        "abortMultipartUploadsTransition": {
+          "$ref": "#/types/cloudflare:index/R2BucketLifecycleRuleAbortMultipartUploadsTransition:R2BucketLifecycleRuleAbortMultipartUploadsTransition"
+        },
+        "conditions": {
+          "$ref": "#/types/cloudflare:index/R2BucketLifecycleRuleConditions:R2BucketLifecycleRuleConditions"
+        },
+        "deleteObjectsTransition": {
+          "$ref": "#/types/cloudflare:index/R2BucketLifecycleRuleDeleteObjectsTransition:R2BucketLifecycleRuleDeleteObjectsTransition"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "storageClassTransitions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/cloudflare:index/R2BucketLifecycleRuleStorageClassTransition:R2BucketLifecycleRuleStorageClassTransition"
+          }
+        }
+      },
+      "required": [
+        "conditions",
+        "enabled",
+        "id"
+      ]
+    },
+    "cloudflare:index/R2BucketLifecycleRuleAbortMultipartUploadsTransition:R2BucketLifecycleRuleAbortMultipartUploadsTransition": {
+      "type": "object",
+      "properties": {
+        "condition": {
+          "$ref": "#/types/cloudflare:index/R2BucketLifecycleRuleAbortMultipartUploadsTransitionCondition:R2BucketLifecycleRuleAbortMultipartUploadsTransitionCondition"
+        }
+      }
+    },
+    "cloudflare:index/R2BucketLifecycleRuleAbortMultipartUploadsTransitionCondition:R2BucketLifecycleRuleAbortMultipartUploadsTransitionCondition": {
+      "type": "object",
+      "properties": {
+        "maxAge": {
+          "type": "integer"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "maxAge",
+        "type"
+      ]
+    },
+    "cloudflare:index/R2BucketLifecycleRuleConditions:R2BucketLifecycleRuleConditions": {
+      "type": "object",
+      "properties": {
+        "prefix": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "prefix"
+      ]
+    },
+    "cloudflare:index/R2BucketLifecycleRuleDeleteObjectsTransition:R2BucketLifecycleRuleDeleteObjectsTransition": {
+      "type": "object",
+      "properties": {
+        "condition": {
+          "$ref": "#/types/cloudflare:index/R2BucketLifecycleRuleDeleteObjectsTransitionCondition:R2BucketLifecycleRuleDeleteObjectsTransitionCondition"
+        }
+      }
+    },
+    "cloudflare:index/R2BucketLifecycleRuleDeleteObjectsTransitionCondition:R2BucketLifecycleRuleDeleteObjectsTransitionCondition": {
+      "type": "object",
+      "properties": {
+        "date": {
+          "type": "string"
+        },
+        "maxAge": {
+          "type": "integer"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ]
+    },
+    "cloudflare:index/R2BucketLifecycleRuleStorageClassTransition:R2BucketLifecycleRuleStorageClassTransition": {
+      "type": "object",
+      "properties": {
+        "condition": {
+          "$ref": "#/types/cloudflare:index/R2BucketLifecycleRuleStorageClassTransitionCondition:R2BucketLifecycleRuleStorageClassTransitionCondition"
+        },
+        "storageClass": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "condition",
+        "storageClass"
+      ]
+    },
+    "cloudflare:index/R2BucketLifecycleRuleStorageClassTransitionCondition:R2BucketLifecycleRuleStorageClassTransitionCondition": {
+      "type": "object",
+      "properties": {
+        "date": {
+          "type": "string"
+        },
+        "maxAge": {
+          "type": "integer"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ]
+    }
+  }
+}

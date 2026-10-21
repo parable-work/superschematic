@@ -1,0 +1,25 @@
+# Naming file of the wishlist's second version, a schemas root of its own
+# beside the example's (scripts/check.sh plans and builds it). The keys
+# are the example's, schemas/superschematic.toml, so the generated
+# packages keep their names; the runtime paths are relative to this
+# root's parent, testdata/wishlist-v2, so they climb two levels further.
+go_module_root = "example.com/acme"
+npm_scope = "@acme"
+python_types_module_prefix = "acme_types_"
+python_sdk_module_prefix = "acme_"
+python_sdk_module_suffix = "_sdk"
+rust_crate_prefix = "acme-"
+package_author = "acme"
+
+[paths]
+scalar_go = "../../../../third_party/superscalar/go"
+scalar_typescript = "../../../../third_party/superscalar/bindings/typescript"
+scalar_rust = "../../../../third_party/superscalar/crates/core"
+schema_ir = "../../../../ir"
+schema_runtime_go = "../../../../runtime/schema/go"
+schema_runtime_rust = "../../../../runtime/schema/rust"
+http_runtime_go = "../../../../runtime/http/go"
+http_runtime_rust = "../../../../runtime/http/rust"
+http_runtime_typescript = "../../../../runtime/http/typescript"
+versiongraph_go = "../../../../runtime/versiongraph/go"
+build_context = "../../../.."

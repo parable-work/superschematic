@@ -1,0 +1,50 @@
+{
+  "token": "cloudflare:index/workersCronTrigger:WorkersCronTrigger",
+  "terraform": {
+    "type": "cloudflare_workers_cron_trigger",
+    "renames": {
+      "accountId": "account_id",
+      "schedules.createdOn": "created_on",
+      "schedules.modifiedOn": "modified_on",
+      "scriptName": "script_name"
+    }
+  },
+  "inputProperties": {
+    "accountId": {
+      "type": "string"
+    },
+    "schedules": {
+      "type": "array",
+      "items": {
+        "$ref": "#/types/cloudflare:index/WorkersCronTriggerSchedule:WorkersCronTriggerSchedule"
+      }
+    },
+    "scriptName": {
+      "type": "string"
+    }
+  },
+  "requiredInputs": [
+    "accountId",
+    "schedules",
+    "scriptName"
+  ],
+  "types": {
+    "cloudflare:index/WorkersCronTriggerSchedule:WorkersCronTriggerSchedule": {
+      "type": "object",
+      "properties": {
+        "createdOn": {
+          "type": "string"
+        },
+        "cron": {
+          "type": "string"
+        },
+        "modifiedOn": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "cron"
+      ]
+    }
+  }
+}
