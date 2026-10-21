@@ -401,7 +401,9 @@ more keys of the database's `outputs.engine` say how:
 
 The engine's routes take the server's 30-second timeout, a 504
 `gateway_timeout` past it, in each language, but the event stream and
-MCP, whose responses last as long as their clients.
+MCP, whose responses last as long as their clients. A write answered 504
+may still have committed, so a client reads it back before it tries
+again.
 
 The engine's runner, which runs reactions, schedules and Timers'
 deadlines, is a deployable of its own, `<db>-engine-runner`, one instance
