@@ -5,6 +5,7 @@ package types
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"gopkg.in/yaml.v3"
 	"reflect"
@@ -186,10 +187,10 @@ func mapFromYAMLValue(data []byte) (map[string]any, error) {
 
 // durationDecode is what a type's UnmarshalJSON found in the text of its
 // duration fields (Temporal.Duration) that their Go values cannot show, by
-// JSON key: a text the scalar's rules refuse decodes to 0s, and Validate
-// reports the rules it broke. Validate reports an entry only while its
-// field still holds the value decoded, so a field set after decoding is
-// checked as set.
+// JSON key: a text the scalar's rules refuse keeps the value Go's own
+// duration parser reads from it, and Validate reports the rules it broke.
+// Validate reports an entry only while its field still holds the value
+// decoded, so a field set after decoding is checked as set.
 type durationDecode map[string]durationEntry
 
 type durationEntry struct {
@@ -208,10 +209,13 @@ type durationError struct {
 // value, is read as every validator reads it. check, the scalar's own rules
 // and the scalar core's verdict on the text, accepts it and returns the
 // core's canonical text, which Go's duration parser reads exactly: on the
-// text itself, Go's parser would accept "+1s", which the scalar's pattern
-// refuses, and read "1.5ns" as 1ns, where the core rounds to 2ns. A text
-// check refuses decodes to 0s and is recorded in *decoded for Validate. Any
-// other JSON value is encoding/json's to decode or refuse.
+// text itself, Go's parser reads "1.5ns" as 1ns, where the core rounds to
+// 2ns. A text check refuses is recorded in *decoded for Validate and keeps
+// the value Go's parser reads from it, so a negative duration Go wrote
+// ("-1h2m0s"), which the scalar's pattern refuses, reads back as itself; a
+// text Go's parser refuses too (" 1s", "1d") is a decode error, as it was.
+// Any other JSON value is encoding/json's to decode or refuse. An error
+// names the field.
 func decodeDurationField(decoded **durationDecode, name string, raw json.RawMessage, target any, check func(string) (string, []ValidationError)) error {
 	if len(raw) == 0 {
 		return nil
@@ -219,10 +223,10 @@ func decodeDurationField(decoded **durationDecode, name string, raw json.RawMess
 	var failures []durationError
 	canonical, err := canonicalDurations(raw, name, check, &failures)
 	if err != nil {
-		return err
+		return durationFieldError(name, err)
 	}
 	if err := json.Unmarshal(canonical, target); err != nil {
-		return err
+		return durationFieldError(name, err)
 	}
 	if len(failures) == 0 {
 		return nil
@@ -238,9 +242,24 @@ func decodeDurationField(decoded **durationDecode, name string, raw json.RawMess
 	return nil
 }
 
+// durationFieldError names the field name in err: a
+// *json.UnmarshalTypeError's Field, which encoding/json completes with the
+// path of the struct holding it, and any other error's message.
+func durationFieldError(name string, err error) error {
+	var typeErr *json.UnmarshalTypeError
+	if errors.As(err, &typeErr) {
+		field := name
+		if typeErr.Field != "" {
+			field += "." + typeErr.Field
+		}
+		return &json.UnmarshalTypeError{Value: typeErr.Value, Type: typeErr.Type, Offset: typeErr.Offset, Field: field}
+	}
+	return fmt.Errorf("decode %s: %w", name, err)
+}
+
 // canonicalDurations returns raw with each duration text in it, at path,
-// replaced by the canonical text check returns, or by "0s" when check
-// refuses it, which it appends to failures. A list's elements are at
+// replaced by the canonical text check returns. A text check refuses is
+// kept as it is, for Go's parser, and appended to failures. A list's elements are at
 // path[i] and a map's values at path[key]; null and values of other JSON
 // types are kept.
 func canonicalDurations(raw json.RawMessage, path string, check func(string) (string, []ValidationError), failures *[]durationError) (json.RawMessage, error) {
@@ -257,7 +276,7 @@ func canonicalDurations(raw json.RawMessage, path string, check func(string) (st
 		canonical, broken := check(text)
 		if len(broken) > 0 {
 			*failures = append(*failures, durationError{path: path, errors: broken})
-			return json.RawMessage(`"0s"`), nil
+			return trimmed, nil
 		}
 		return json.Marshal(canonical)
 	case '[':

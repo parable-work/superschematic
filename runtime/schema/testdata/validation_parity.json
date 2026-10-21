@@ -1580,12 +1580,9 @@
         ],
         "wait": "+1s",
         "waits": [
-          " 1s",
-          "-1s",
+          "-1h2m0s",
           "0",
-          "1d",
-          ".5s",
-          "1s "
+          ".5s"
         ]
       },
       "want": {
@@ -1600,14 +1597,34 @@
         ],
         "waits[2]": [
           "pattern"
+        ]
+      }
+    },
+    {
+      "name": "duration_bad_format_go_cannot_parse",
+      "type": "ParityMatrix",
+      "payload": {
+        "reqScalarList": [
+          "https://a.test"
         ],
-        "waits[3]": [
+        "reqStr": "ok",
+        "reqList": [
+          "a"
+        ],
+        "waits": [
+          " 1s",
+          "1d",
+          "1s "
+        ]
+      },
+      "want": {
+        "waits[0]": [
           "pattern"
         ],
-        "waits[4]": [
+        "waits[1]": [
           "pattern"
         ],
-        "waits[5]": [
+        "waits[2]": [
           "pattern"
         ]
       }

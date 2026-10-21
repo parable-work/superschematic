@@ -142,10 +142,11 @@ func TestDecodeRefusal(t *testing.T) {
 	body := `{"name": "long", "stage": "nope", "steps": ["done", "x"], "byName": {"a": "y"}, "next": "z",
 		"owner": {"stage": "q"}, "extra": {"k": {"stage": "w"}}, "parts": [{"name": "toolong", "stage": "draft"}]}`
 	var input task
-	if err := json.Unmarshal([]byte(body), &input); err == nil {
+	decodeErr := json.Unmarshal([]byte(body), &input)
+	if decodeErr == nil {
 		t.Fatal("the test's decoder took an unknown stage")
 	}
-	refusal := DecodeRefusal(json.RawMessage(body), &input)
+	refusal := DecodeRefusal(json.RawMessage(body), &input, decodeErr)
 	if refusal.Detail != BodyMismatch || refusal.Reason != "validation failed" {
 		t.Fatalf("refusal = %+v", refusal)
 	}
@@ -162,13 +163,13 @@ func TestDecodeRefusal(t *testing.T) {
 	if got := flatten("", refusal.Errors); !reflect.DeepEqual(got, want) {
 		t.Fatalf("errors = %v, want %v", got, want)
 	}
-	for _, other := range []string{`{"stage": 3}`, `{"stage": "nope", "name": 5}`, `{"name": "ok"`} {
-		refusal := DecodeRefusal(json.RawMessage(other), &input)
+	for _, other := range []string{`{"stage": 3}`, `{"stage": "nope", "name": 5}`, `{"name": "ok"`, `{"name": 5, "stage": "nope"}`} {
+		refusal := DecodeRefusal(json.RawMessage(other), &input, json.Unmarshal([]byte(other), new(task)))
 		if refusal.Reason != "does not match the declared type" || refusal.Errors != nil {
 			t.Errorf("%s: refusal = %+v", other, refusal)
 		}
 	}
-	if !strings.HasPrefix(DecodeRefusal(json.RawMessage(`{}`), nil).Reason, "does not match") {
+	if !strings.HasPrefix(DecodeRefusal(json.RawMessage(`{}`), nil, decodeErr).Reason, "does not match") {
 		t.Fatal("a nil target is a mismatch")
 	}
 }

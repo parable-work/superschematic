@@ -168,7 +168,7 @@ func createGridSaveGridHandler(impl GridImplementation) gohttp.HandlerFunc {
 			// A string an enum lacks, which its decoder refuses, is "enum"
 			// at its path beside the type's other rules, as every server
 			// answers it.
-			RespondInputRefusal(w, r, bodyargs.DecodeRefusal(rawInput, &input))
+			RespondInputRefusal(w, r, bodyargs.DecodeRefusal(rawInput, &input, err))
 			return
 		}
 

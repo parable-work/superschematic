@@ -19,9 +19,10 @@ import (
 // superscalar Go binding, and runs a test inside it. A duration's text is
 // read as every validator reads it (D31, amended): a text the scalar's own
 // rules and core accept decodes to the core's canonical value, and one they
-// refuse decodes to no value and is reported by Validate at its path, by
-// the rule it breaks, where Go's own duration parser would read "+1s" and
-// refuse " 1s". An enum's decoder refuses a string the enum lacks.
+// refuse keeps the value Go's own parser reads from it and is reported by
+// Validate at its path, by the rule it breaks; a text Go's parser refuses
+// too is a decode error that names the field. A negative duration Go writes
+// reads back as itself. An enum's decoder refuses a string the enum lacks.
 func TestGeneratedDurationsReadTheirText(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping generated-module build in -short mode")
@@ -167,12 +168,10 @@ func TestDurationTexts(t *testing.T) {
 	}{
 		{"every shape valid", ` + "`" + `{"wait": "1h30m", "delay": "1.5ns", "steps": ["1µs", "500ms"], "grid": [["1s"], []], "named": {"a": "2m"}}` + "`" + `, map[string][]string{}},
 		{"a sign, which the pattern refuses", ` + "`" + `{"wait": "+1s"}` + "`" + `, map[string][]string{"wait": {"pattern"}}},
-		{"space around, which the pattern refuses", ` + "`" + `{"wait": " 1s"}` + "`" + `, map[string][]string{"wait": {"pattern"}}},
 		{"negative", ` + "`" + `{"wait": "1s", "delay": "-1s"}` + "`" + `, map[string][]string{"delay": {"pattern"}}},
 		{"no unit", ` + "`" + `{"wait": "0"}` + "`" + `, map[string][]string{"wait": {"pattern"}}},
 		{"too long", ` + "`" + `{"wait": "1h1h1h1h1h1h1h1h1h1h1h1h1h1h1h1h1h"}` + "`" + `, map[string][]string{"wait": {"maxLength"}}},
-		{"beyond the core's range", ` + "`" + `{"wait": "99999999999999999999h"}` + "`" + `, map[string][]string{"wait": {"parse"}}},
-		{"in a list, a list of lists and a map", ` + "`" + `{"wait": "1s", "steps": ["1s", "1 s"], "grid": [["1s", ".5s"]], "named": {"a": "1s", "b": "1d"}}` + "`" + `,
+		{"in a list, a list of lists and a map", ` + "`" + `{"wait": "1s", "steps": ["1s", "+1s"], "grid": [["1s", ".5s"]], "named": {"a": "1s", "b": "0"}}` + "`" + `,
 			map[string][]string{"steps[1]": {"pattern"}, "grid[0][1]": {"pattern"}, "named[b]": {"pattern"}}},
 	}
 	for _, tc := range cases {
@@ -212,17 +211,69 @@ func TestADurationOfAnotherJSONTypeIsRefused(t *testing.T) {
 	}
 }
 
+// A text Go's parser refuses too is a decode error that names the field,
+// as is a number and an amount beyond what a time.Duration holds.
+func TestATextGoCannotParseIsADecodeError(t *testing.T) {
+	for _, payload := range []string{
+		` + "`" + `{"wait": " 1s"}` + "`" + `,
+		` + "`" + `{"wait": "1s", "steps": ["1s", "1d"]}` + "`" + `,
+		` + "`" + `{"wait": "99999999999999999999h"}` + "`" + `,
+		` + "`" + `{"wait": "2562047h1h"}` + "`" + `,
+		` + "`" + `{"wait": 5}` + "`" + `,
+	} {
+		var timer Timer
+		err := json.Unmarshal([]byte(payload), &timer)
+		if err == nil {
+			t.Errorf("%s decoded", payload)
+			continue
+		}
+		if !strings.Contains(err.Error(), "wait") && !strings.Contains(err.Error(), "steps") {
+			t.Errorf("%s: %v names no field", payload, err)
+		}
+	}
+}
+
+// A negative duration, which Go writes and the ORM stores but the scalar's
+// pattern refuses, reads back as the value written, and Validate reports
+// the pattern.
+func TestANegativeDurationRoundTrips(t *testing.T) {
+	delay := TemporalDuration(-time.Microsecond)
+	written := Timer{Wait: TemporalDuration(-(time.Hour + 2*time.Minute)), Delay: &delay, Steps: []TemporalDuration{TemporalDuration(-time.Second)}}
+	data, err := json.Marshal(&written)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), ` + "`" + `"wait":"-1h2m0s"` + "`" + `) {
+		t.Fatalf("Go wrote %s", data)
+	}
+	var read Timer
+	if err := json.Unmarshal(data, &read); err != nil {
+		t.Fatalf("decode %s: %v", data, err)
+	}
+	if read.Wait != written.Wait || read.Delay == nil || *read.Delay != delay || !reflect.DeepEqual(read.Steps, written.Steps) {
+		t.Fatalf("read %+v from %s, want %+v", read, data, written)
+	}
+	got := map[string][]string{}
+	flatten("", read.Validate(), got)
+	if want := map[string][]string{"wait": {"pattern"}, "delay": {"pattern"}, "steps[0]": {"pattern"}}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("Validate = %v, want %v", got, want)
+	}
+}
+
 func TestADurationReportFollowsTheField(t *testing.T) {
 	var timer Timer
 	if err := json.Unmarshal([]byte(` + "`" + `{"wait": "+1s"}` + "`" + `), &timer); err != nil {
 		t.Fatal(err)
 	}
-	timer.Wait = TemporalDuration(time.Second)
+	if time.Duration(timer.Wait) != time.Second {
+		t.Fatalf("+1s decoded as %v; it keeps the value Go's parser reads", time.Duration(timer.Wait))
+	}
+	timer.Wait = TemporalDuration(2 * time.Second)
 	if errs := timer.Validate(); errs.HasErrors() {
 		t.Fatalf("a field set after decoding is checked as set: %v", errs)
 	}
 	var input TimerInput
-	if err := json.Unmarshal([]byte(` + "`" + `{"delay": "1 s"}` + "`" + `), &input); err != nil {
+	if err := json.Unmarshal([]byte(` + "`" + `{"delay": "+1s"}` + "`" + `), &input); err != nil {
 		t.Fatal(err)
 	}
 	got := map[string][]string{}
