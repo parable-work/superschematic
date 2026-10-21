@@ -224,13 +224,14 @@ func (b *builder) page(ep apigen.EndpointInfo, info *EndpointInfo) error {
 
 // param resolves the kind, the Rust type and the ParamSpec of one argument
 // from apigen's parse flags. A body argument arrives as a JSON value, so its
-// type may also be an object type, alone, in a list, in a list of lists or
-// as a map value; the router prepares each value with the generated
-// prepare_<type> of the type. A body argument of a JSON-valued scalar
-// (Generic.JSON) is taken as the JSON value it is. param fails for a body
-// argument of any other type that is not a scalar or an enum: a union has
-// no prepare_<type>. A scalar-typed argument carries the scalar's own
-// lengths, pattern and range, which the router checks on every value.
+// type may also be an object type or a union, alone, in a list, in a list
+// of lists or as a map value; the router prepares each value with the
+// generated prepare_<type> of the type, which for a union validates the
+// member it picks, and serde decodes it. A body argument of a JSON-valued
+// scalar (Generic.JSON) is taken as the JSON value it is. param fails for
+// a body argument of any other type the schema and its dependencies do
+// not declare. A scalar-typed argument carries the scalar's own lengths,
+// pattern and range, which the router checks on every value.
 func (b *builder) param(p apigen.Param, place paramPlace, prefix string) (ParamInfo, error) {
 	info := ParamInfo{
 		Name:  p.Name,
@@ -475,12 +476,28 @@ func (b *builder) validatorsOf(name string) (string, bool) {
 	if typeDef := b.schema.Types[name]; typeDef != nil {
 		return "types::validators", hasValidators(typeDef)
 	}
+	if union := b.schema.Unions[name]; union != nil {
+		// rustgen validates a union whose members its crate, or a
+		// dependency's, generates with validators.
+		for _, member := range union.Types {
+			if _, ok := b.validatorsOf(member); !ok {
+				return "", false
+			}
+		}
+		return "types::validators", true
+	}
 	for _, depName := range b.depNames {
 		dep := b.deps[depName]
-		if dep == nil || dep.Types[name] == nil {
+		if dep == nil || (dep.Types[name] == nil && dep.Unions[name] == nil) {
 			continue
 		}
-		if !hasValidators(dep.Types[name]) {
+		if union := dep.Unions[name]; union != nil {
+			for _, member := range union.Types {
+				if dep.Types[member] == nil || !hasValidators(dep.Types[member]) {
+					return "", false
+				}
+			}
+		} else if !hasValidators(dep.Types[name]) {
 			return "", false
 		}
 		crate := b.naming.RustTypesCrate(depName)

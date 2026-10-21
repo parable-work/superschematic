@@ -37,6 +37,14 @@ type BodyArg struct {
 	// that object or array, not its JSON text, and an SDK sends it as that
 	// value.
 	StructuredJSON string
+	// UnionWrapper is the types package's <Union>Wrapper for an argument
+	// whose type is a union, alone or in a list or a map, and "" otherwise.
+	// A union is an interface encoding/json cannot fill, so the route
+	// decodes each value into the wrapper, which picks the member as the
+	// types package's decoders do and validates it, the member's errors
+	// nested under the value's path, and hands the implementation the
+	// member it holds.
+	UnionWrapper string
 }
 
 // ChecksJSON reports whether the route checks each value of the argument
@@ -105,6 +113,10 @@ func (m *typeMapper) bodyArgs(args []Param) []BodyArg {
 			options = append(options, scalarRuleOptions(scalarDef, kind)...)
 		}
 		options = append(options, argRuleOptions(arg, kind)...)
+		var wrapper string
+		if m.isUnion(arg.Type) {
+			wrapper = arg.GoType + "Wrapper"
+		}
 		out = append(out, BodyArg{
 			Param:          arg,
 			Kind:           kind,
@@ -112,6 +124,7 @@ func (m *typeMapper) bodyArgs(args []Param) []BodyArg {
 			KeepNull:       keepNull,
 			AnyJSON:        anyJSON,
 			StructuredJSON: scalarDef.StructuredJSONType(),
+			UnionWrapper:   wrapper,
 		})
 	}
 	return out
@@ -120,8 +133,8 @@ func (m *typeMapper) bodyArgs(args []Param) []BodyArg {
 // bodyArgKind is the JSON type of each value of arg. A builtin, and a
 // scalar the route decodes as a Go number or boolean, follow their Go
 // type; any other scalar follows its JSON Schema type, so Generic.JSON
-// ("any") takes any JSON value. An enum is a string, an object type an
-// object, and anything else (a union) is left to its Go decoder.
+// ("any") takes any JSON value. An enum is a string, and an object type
+// and a union an object.
 func (m *typeMapper) bodyArgKind(arg Param) string {
 	switch {
 	case arg.IsInt:
@@ -165,7 +178,26 @@ func (m *typeMapper) bodyArgKind(arg Param) string {
 	if _, ok := m.findTypeDef(arg.Type); ok {
 		return "Object"
 	}
+	if m.isUnion(arg.Type) {
+		return "Object"
+	}
 	return "Any"
+}
+
+// isUnion reports whether name is a union of the schema or a dependency.
+func (m *typeMapper) isUnion(name string) bool {
+	if _, ok := m.schema.Unions[name]; ok {
+		return true
+	}
+	for _, dep := range m.dependencies {
+		if dep == nil {
+			continue
+		}
+		if _, ok := dep.Unions[name]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 // isEnum reports whether name is an enum of the schema or a dependency.

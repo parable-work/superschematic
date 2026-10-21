@@ -173,35 +173,6 @@ func TestGenerateNestedArraysElementKinds(t *testing.T) {
 	}
 }
 
-// TestGenerateRefusesNestedArraysWithoutParser: a list of lists whose
-// element has no generated parser (a union) is refused with the argument
-// named, never rendered as a string list.
-func TestGenerateRefusesNestedArraysWithoutParser(t *testing.T) {
-	schema := loadNestedArraysAPI(t)
-	schema.Unions["Mark"] = &ir.UnionDef{Name: "Mark", Types: []string{"Point", "GridView"}}
-	for _, set := range schema.OperationSets {
-		if set.Name != "GridMutations" {
-			continue
-		}
-		set.Operations = append(set.Operations, &ir.FieldDef{
-			Name:       "mark",
-			TypeRef:    ir.TypeRef{Name: "GridView"},
-			Arguments:  []*ir.ArgumentDef{{Name: "marks", TypeRef: nestedList("Mark"), Required: true}},
-			HTTPMethod: "PUT",
-			RestPath:   "grids/marks",
-		})
-	}
-	endpoints, err := apigen.Generate(schema, apigen.Options{Provider: sessionauth.Provider{}, SchemaName: nestedArraysAPI, Clock: fixedClock})
-	if err != nil {
-		t.Fatalf("apigen.Generate: %v", err)
-	}
-	_, err = Generate(schema, endpoints, Options{SchemaName: nestedArraysAPI})
-	want := "tsrestgen does not support arrays of arrays yet (grid.mark(marks)): element type Mark is not a scalar, enum or object type"
-	if err == nil || err.Error() != want {
-		t.Fatalf("error = %v, want %q", err, want)
-	}
-}
-
 // TestGeneratedNestedArraysRouter type-checks the generated package for
 // fixture-nested-arrays-api (with grid.paint) and drives it under bun over
 // HTTP: nested bodies round-trip, a null inner list and a bad element are

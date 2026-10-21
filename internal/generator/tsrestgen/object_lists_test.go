@@ -120,21 +120,56 @@ func TestGenerateObjectBodyArgument(t *testing.T) {
 	}
 }
 
-// TestGenerateRefusesBodyArgumentsWithoutParser: a body argument whose type
-// has no generated strict decoder (a union), alone or as a list element, is
-// refused with the argument named, never rendered as a string.
-func TestGenerateRefusesBodyArgumentsWithoutParser(t *testing.T) {
+// TestGenerateUnionBodyArguments: a body argument whose type is a union,
+// alone, as a list element or as a list of lists' element, is an object
+// the union's parse<Union>Json checks by the member's rules and its
+// parse<Union>FromJSON reads, as an object argument is.
+func TestGenerateUnionBodyArguments(t *testing.T) {
+	const parse = "parse: (value: unknown) => parseMarkFromJSON(parseMarkJson(value))"
+	for _, tc := range []struct {
+		name   string
+		ref    ir.TypeRef
+		tsType string
+		spec   string
+	}{
+		{"value", ir.TypeRef{Name: "Mark"}, "Mark", "{ name: 'marks', kind: 'object', required: true, " + parse + " }"},
+		{"list", ir.TypeRef{Name: "Mark", IsArray: true}, "Mark[]", "{ name: 'marks', kind: 'object', required: true, isArray: true, " + parse + " }"},
+		{"list of lists", ir.TypeRef{Name: "Mark", IsArray: true, IsArrayOfArrays: true}, "Mark[][]", "{ name: 'marks', kind: 'object', required: true, isArray: true, isArrayOfArrays: true, " + parse + " }"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			schema := loadObjectListsAPI(t)
+			schema.Unions["Mark"] = &ir.UnionDef{Name: "Mark", Types: []string{"Point"}}
+			addDrawingOperation(t, schema, &ir.FieldDef{
+				Name:      "mark",
+				TypeRef:   ir.TypeRef{Name: "Point"},
+				Arguments: []*ir.ArgumentDef{{Name: "marks", TypeRef: tc.ref, Required: true}},
+				RestPath:  "drawings/marks",
+			})
+			mark := endpointsByName(generateFixture(t, objectListsFixture(t, schema)))["mark"]
+			if len(mark.BodyParams) != 1 {
+				t.Fatalf("mark body params = %+v", mark.BodyParams)
+			}
+			if got := mark.BodyParams[0]; got.TSType != tc.tsType || got.SpecLiteral != tc.spec {
+				t.Errorf("marks = %s %s, want %s %s", got.TSType, got.SpecLiteral, tc.tsType, tc.spec)
+			}
+		})
+	}
+}
+
+// TestGenerateRefusesUndeclaredBodyArguments: a body argument whose type
+// the schema and its dependencies do not declare, alone or as a list
+// element, is refused with the argument named, never rendered as a string.
+func TestGenerateRefusesUndeclaredBodyArguments(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		ref  ir.TypeRef
 		want string
 	}{
-		{"list", ir.TypeRef{Name: "Mark", IsArray: true}, "tsrestgen cannot decode body argument drawing.mark(marks): element type Mark is not a scalar, enum or object type"},
-		{"value", ir.TypeRef{Name: "Mark"}, "tsrestgen cannot decode body argument drawing.mark(marks): type Mark is not a scalar, enum or object type"},
+		{"list", ir.TypeRef{Name: "Mark", IsArray: true}, "tsrestgen cannot decode body argument drawing.mark(marks): element type Mark is not a scalar, enum, object type or union"},
+		{"value", ir.TypeRef{Name: "Mark"}, "tsrestgen cannot decode body argument drawing.mark(marks): type Mark is not a scalar, enum, object type or union"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			schema := loadObjectListsAPI(t)
-			schema.Unions["Mark"] = &ir.UnionDef{Name: "Mark", Types: []string{"Point"}}
 			addDrawingOperation(t, schema, &ir.FieldDef{
 				Name:      "mark",
 				TypeRef:   ir.TypeRef{Name: "Point"},
