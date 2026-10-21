@@ -15,8 +15,11 @@
 # The prepare job runs, with no credentials, all the project code the cloud
 # jobs need: the build, the installs, the sites' and bundles' builds and the
 # sidecar documents (superschematic stack prepare). A cloud job takes what
-# it made, and runs no build, no Bun and no package's script after it signs
-# in or anywhere else.
+# it made: it runs no build, no package's script and no sidecar document,
+# and its only package manager run, the schemas root's install with
+# --ignore-scripts, which the loader reads the types of, is on a Bun or
+# Node.js downloaded from its release, never restored from a cache another
+# job could write.
 #
 # Environments with no job:
 # - Dev is on the local target: superschematic stack dev runs it.
@@ -71,6 +74,7 @@ jobs:
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: "1.4.2"
+          no-cache: "true"
       - name: Install the schemas root's packages
         working-directory: schemas
         run: bun install --frozen-lockfile
@@ -123,6 +127,7 @@ jobs:
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: "1.4.2"
+          no-cache: "true"
       - name: Install the schemas root's packages
         working-directory: schemas
         run: bun install --frozen-lockfile
@@ -151,6 +156,7 @@ jobs:
           name: prepared
           path: ${{ runner.temp }}/prepared
           if-no-files-found: error
+          retention-days: "1"
 
   plan-beta:
     name: plan Beta
@@ -181,6 +187,7 @@ jobs:
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: "1.4.2"
+          no-cache: "true"
       - name: Install the schemas root's packages, running none of their scripts
         working-directory: schemas
         run: bun install --frozen-lockfile --ignore-scripts
@@ -230,6 +237,7 @@ jobs:
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: "1.4.2"
+          no-cache: "true"
       - name: Install the schemas root's packages, running none of their scripts
         working-directory: schemas
         run: bun install --frozen-lockfile --ignore-scripts
@@ -279,6 +287,7 @@ jobs:
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: "1.4.2"
+          no-cache: "true"
       - name: Install the schemas root's packages, running none of their scripts
         working-directory: schemas
         run: bun install --frozen-lockfile --ignore-scripts
@@ -333,6 +342,7 @@ jobs:
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: "1.4.2"
+          no-cache: "true"
       - name: Install the schemas root's packages, running none of their scripts
         working-directory: schemas
         run: bun install --frozen-lockfile --ignore-scripts
@@ -383,6 +393,7 @@ jobs:
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: "1.4.2"
+          no-cache: "true"
       - name: Install the schemas root's packages, running none of their scripts
         working-directory: schemas
         run: bun install --frozen-lockfile --ignore-scripts

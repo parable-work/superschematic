@@ -4640,16 +4640,35 @@ environment, or with `--no-build` for a deploy that builds, is refused.
 Every child process a `stack` command or the document harness starts to
 run project code, the harness, the workspace's install, a site's build
 and a bundle's, gets an allowlisted environment (`internal/childenv`):
-the path, home, user, shell, temporary directories, locale, terminal,
-`CI`, proxies and certificates, `XDG_*`, Bun's install and cache
-directories and `NODE_ENV`. `SUPERSCHEMATIC_CHILD_ENV` names more, a
-private registry's token say, but never a credential's: no `GOOGLE_*`,
-`CLOUDSDK_*`, `CLOUDFLARE_*`, `PULUMI_*`, `AWS_*`, `AZURE_*`, `ARM_*` or
-`ACTIONS_*` variable, no `GITHUB_TOKEN`, `GH_TOKEN` or passphrase. A
-credentials file on disk, gcloud's application default credentials, stays
-readable to a child; on a developer's machine, `stack prepare` in a shell
-that holds no credentials and `stack deploy --prepared` keep the
-project's code away from them too.
+the path, user, shell, temporary directories, locale, terminal, `CI`,
+proxies and certificates, the cache directories, Bun's install directory
+and `NODE_ENV`, matched in any case on Windows. `SUPERSCHEMATIC_CHILD_ENV`
+names more, a private registry's token say, but never a credential's: no
+`GOOGLE_*`, `CLOUDSDK_*`, `GCLOUD_*`, `GCP_*`, `CLOUDFLARE_*`, `CF_*`,
+`WRANGLER_*`, `PULUMI_*`, `AWS_*`, `AZURE_*`, `ARM_*` or `ACTIONS_*`
+variable, no `GITHUB_TOKEN`, `GH_TOKEN`, `SSH_AUTH_SOCK`,
+`DOCKER_AUTH_CONFIG`, `KUBECONFIG`, `VAULT_TOKEN`, passphrase or
+superschematic token. The child's home, and the configuration and data
+directories under it, are a scratch directory of its own, while
+`XDG_CACHE_HOME` and Bun's install cache stay the user's; naming `HOME`
+in `SUPERSCHEMATIC_CHILD_ENV` keeps the user's home, for a registry
+configured only in `~/.npmrc`. That is all it protects: a credential in
+the environment, or under the home the child is given. A child runs as
+the user, and a credentials file under the user's real home, gcloud's,
+Pulumi's, wrangler's, npm's, Docker's or AWS's, stays readable to one
+that names its path. The boundary is running the project's code where
+no credential is: `stack prepare` first, before signing in or in a shell
+that holds none, then `stack deploy --prepared`, as the generated CI
+does.
+
+A prepared directory's digests are checked against the `prepared.json`
+the same prepare wrote, which catches corruption, not forgery: code that
+runs in the prepare can change what it makes, and so what the deploy
+applies, within what the IR allows, though never reach the deploy's
+credentials. Its integrity rests on its provenance. `prepared.json`
+records the commit and the CI run (`GITHUB_SHA`, `GITHUB_RUN_ID`), and a
+stack command in CI refuses a directory of another commit or run; the
+pull request's plan and the hazard gate review what it deploys.
 
 ### 11.2 Deploy
 
@@ -4951,10 +4970,14 @@ The GitHub workflow:
   from the branch, the deploys.
 - Every cloud job downloads `prepared`, installs the schemas root's
   packages with `--ignore-scripts`, which the loader reads the types of,
-  and passes `--prepared` to its stack commands. It runs no build, no Bun
-  and no package's script: `prepare` set up Bun, at `tools.env`'s
-  release even in a project whose schemas root installs with npm, built
-  each site and bundle, and wrote each image's build context. Jobs,
+  and passes `--prepared` to its stack commands. It runs no build, no
+  sidecar document and no package's script, and sets up Bun or Node.js
+  for the scriptless install with no Actions cache (setup-bun's
+  `no-cache`, setup-node's `package-manager-cache: false`), which a job
+  that runs the dependencies could write. `prepare` set up Bun, at
+  `tools.env`'s release even in a project whose schemas root installs
+  with npm, built each site and bundle, and wrote each image's build
+  context. Jobs,
   workers and buckets need nothing more of the workflow: the deploy
   builds a job's or a worker's image through the target's builder, from
   its prepared context, as a server's, and a bucket, a job's schedule and
@@ -4991,7 +5014,11 @@ for an identity token, so a cloud job runs no project code at all (D47,
 amended): its steps are the checkout, superschematic's releases, the
 package manager's set-up, the schemas root's install with no scripts, the
 provisioner's tools, the download of `prepared`, the sign-in, last, and
-the stack commands, which start no Bun, install or build. The pull
+the stack commands, which start no Bun, install or build. Its Bun or
+Node.js is downloaded from its release, never restored from the Actions
+cache, and only superschematic's release installs write `$GITHUB_PATH`
+or `$GITHUB_ENV`, which persist to the later steps. The artifact is kept
+one day. The pull
 request's lockfiles, their packages' scripts, the build, each site's and
 bundle's build and the sidecar documents run in `prepare`, which holds
 no identity token and no secret. `TestCloudJobsSignInLast` holds every

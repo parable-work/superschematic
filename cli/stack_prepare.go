@@ -113,6 +113,7 @@ else is refused. Run superschematic build-all first.`,
 				Sources:      src,
 				Documents:    documents(),
 				Dir:          dir,
+				Provenance:   stackdeploy.CIProvenance(),
 				Log:          cmd.ErrOrStderr(),
 			})
 			if err != nil {

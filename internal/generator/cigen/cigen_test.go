@@ -1045,10 +1045,15 @@ func TestBundlesInTheWorkflow(t *testing.T) {
 // job's steps are the checkout, superschematic's releases, the package
 // managers' set-up, the schemas root's install with no scripts, the
 // provisioner's tools, the download of what prepare made, the sign-in,
-// and last the stack commands, each with --prepared. So no step of the job
-// asks for an identity token with the project's code, no child finds the
-// credentials file or the environment google-github-actions/auth leaves,
-// and only the stack commands read a secret (D47, amended; D64).
+// and last the stack commands, each with --prepared. No tool it runs comes
+// from the Actions cache, which check's and prepare's dependencies can
+// write: setup-bun downloads Bun every time, and setup-node restores no
+// package manager's cache. Only superschematic's release installs write
+// $GITHUB_PATH or $GITHUB_ENV, which persist to the later steps. So no
+// step of the job asks for an identity token with the project's code, no
+// child finds the credentials file or the environment
+// google-github-actions/auth leaves, and only the stack commands read a
+// secret (D47, amended; D64).
 func TestCloudJobsSignInLast(t *testing.T) {
 	goldens, err := filepath.Glob("testdata/golden/*.yml")
 	if err != nil || len(goldens) == 0 {
@@ -1108,6 +1113,24 @@ func TestCloudJobsSignInLast(t *testing.T) {
 				}
 				if !strings.Contains(string(j.Needs), "prepare") {
 					t.Errorf("%s: %s, a cloud job, needs %q, not prepare", path, id, j.Needs)
+				}
+				for _, s := range j.Steps {
+					switch {
+					case strings.HasPrefix(s.Uses, "oven-sh/setup-bun@") && s.With["no-cache"] != "true":
+						t.Errorf("%s: %s sets up Bun from the Actions cache: %v", path, id, s.With)
+					case strings.HasPrefix(s.Uses, "actions/setup-node@") && (s.With["package-manager-cache"] != "false" || s.With["cache"] != ""):
+						t.Errorf("%s: %s sets up Node.js with a package manager's cache: %v", path, id, s.With)
+					case strings.HasPrefix(s.Uses, "actions/cache"):
+						t.Errorf("%s: %s restores the Actions cache", path, id)
+					case (strings.Contains(s.Run, "GITHUB_PATH") || strings.Contains(s.Run, "GITHUB_ENV")) && !strings.HasPrefix(s.Name, "Install superschematic"):
+						t.Errorf("%s: %s, %s writes the environment of the later steps", path, id, s.Name)
+					}
+				}
+			}
+			if id == "prepare" {
+				upload := j.Steps[len(j.Steps)-1]
+				if !strings.HasPrefix(upload.Uses, "actions/upload-artifact@") || upload.With["retention-days"] != "1" {
+					t.Errorf("%s: prepare uploads with %+v, not for a day", path, upload)
 				}
 			}
 			if id == "prepare" && (j.Permissions["id-token"] != "" || len(j.Env) > 0 || slices.ContainsFunc(j.Steps, func(s parsedStep) bool { return len(s.Env) > 0 })) {

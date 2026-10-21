@@ -1556,11 +1556,15 @@ the install of `schemas/dist`'s workspace, each site's build and each
 bundle's. Each of those processes gets an environment with no
 credential in it, so an install script cannot read
 `GOOGLE_APPLICATION_CREDENTIALS`, `CLOUDFLARE_API_TOKEN` or
-`PULUMI_CONFIG_PASSPHRASE`; to hand one a variable it needs, such as a
-private registry's token, list its name in `SUPERSCHEMATIC_CHILD_ENV`.
-gcloud's credentials file stays readable on disk to any process you run.
-To keep your project's code away from your credentials altogether, run
-it first in a shell that holds none, then deploy what it made:
+`PULUMI_CONFIG_PASSPHRASE`, and a scratch home of its own, so a script
+looking under `~` finds no gcloud, Pulumi, wrangler or npm credentials;
+to hand one a variable it needs, such as a private registry's token,
+list its name in `SUPERSCHEMATIC_CHILD_ENV` (list `HOME` to keep your
+home, for a registry set up only in `~/.npmrc`). That stops a script
+that reads the usual variables and places, not one that opens a file
+under your real home by its path: every process you run can. To keep
+your project's code away from your credentials, run it first, before
+you sign in or in a shell that holds none, then deploy what it made:
 
 ```sh
 superschematic stack prepare Staging          # no credentials needed
@@ -2094,7 +2098,10 @@ The workflow:
   `workflow_dispatch` runs the same on demand from the branch.
 - Every cloud job downloads `prepared`, installs the schemas root's
   packages with `--ignore-scripts`, and runs its `stack` command with
-  `--prepared`: it runs no build, no Bun and no package's script.
+  `--prepared`: it runs no build, no sidecar document and no package's
+  script, on a Bun or Node.js downloaded from its release rather than
+  restored from the Actions cache, which `check` and `prepare` could
+  write.
   `prepare` set up Bun, even when the schemas root installs with npm, and
   built the sites and bundles. Jobs, workers and buckets need nothing
   more: the deploy builds a job's or a worker's image on the target from

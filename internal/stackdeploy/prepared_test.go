@@ -1,8 +1,11 @@
 package stackdeploy_test
 
 import (
+	"archive/tar"
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"os"
@@ -278,6 +281,84 @@ func TestPrepareThenDeployABundle(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join(program, ir.ArtifactsDir, stacktest.StorefrontServer, strings.TrimPrefix(bundle.Digest, "sha256:"), "main.js"))
 	if err != nil || string(data) != v1 {
 		t.Errorf("the placed main.js holds %q: %v", data, err)
+	}
+}
+
+// TestPreparedProvenance: in CI a stack command refuses a directory
+// prepared at another commit or in another run, or outside CI; outside CI
+// it checks nothing.
+func TestPreparedProvenance(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := stackdeploy.Prepare(context.Background(), stackdeploy.PrepareOptions{
+		Stack: "shop-stack", Dir: dir, Provenance: stackdeploy.Provenance{Commit: "abc", Run: "7"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	p, err := stackdeploy.ReadPrepared(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		current stackdeploy.Provenance
+		ok      bool
+	}{
+		{stackdeploy.Provenance{}, true},
+		{stackdeploy.Provenance{Commit: "abc", Run: "7"}, true},
+		{stackdeploy.Provenance{Commit: "def", Run: "7"}, false},
+		{stackdeploy.Provenance{Commit: "abc", Run: "8"}, false},
+	} {
+		if err := p.CheckProvenance(tc.current); (err == nil) != tc.ok {
+			t.Errorf("CheckProvenance(%+v) = %v", tc.current, err)
+		}
+	}
+	p.Provenance = stackdeploy.Provenance{}
+	if err := p.CheckProvenance(stackdeploy.Provenance{Commit: "abc"}); err == nil {
+		t.Error("CI took a directory prepared outside CI")
+	}
+}
+
+// TestUntarRefusesPathsOutOfTheDirectory: a prepared archive's entry with
+// a backslash, an absolute path or a way up is refused before anything is
+// written outside the directory.
+func TestUntarRefusesPathsOutOfTheDirectory(t *testing.T) {
+	for _, name := range []string{`..\escape`, "/etc/passwd", "../escape", "a/../../escape", `dir\file`} {
+		var buf bytes.Buffer
+		tw := tar.NewWriter(&buf)
+		if err := tw.WriteHeader(&tar.Header{Name: name, Typeflag: tar.TypeReg, Mode: 0o644, Size: 1}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tw.Write([]byte("x")); err != nil {
+			t.Fatal(err)
+		}
+		if err := tw.Close(); err != nil {
+			t.Fatal(err)
+		}
+		sum := sha256.Sum256(buf.Bytes())
+		dir := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(dir, "sites"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "sites", "web.tar"), buf.Bytes(), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		digest := "sha256:" + hex.EncodeToString(sum[:])
+		manifest := `{"stack": "shop-stack", "environments": ["Staging"], "built": true, "sites": {"shop-web": {"archive": "sites/web.tar", "digest": "` + digest + `", "files": 1, "size": 1}}}`
+		if err := os.WriteFile(filepath.Join(dir, stackdeploy.PreparedFile), []byte(manifest), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		f := newFixture(t)
+		env := f.siteEnv(t, "Staging")
+		f.ready(t, env)
+		p, err := stackdeploy.ReadPrepared(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = stackdeploy.Deploy(context.Background(), stackdeploy.DeployOptions{
+			Options: f.options(t, env, nil), Images: images(1), Sources: &stackdeploy.Sources{Prepared: p, Run: noProjectCode(t)}, Planner: (&planner{to: 1}).plan, Now: fixedNow,
+		})
+		if err == nil || !strings.Contains(err.Error(), "is not a path in the archive") {
+			t.Errorf("an entry %q = %v", name, err)
+		}
 	}
 }
 

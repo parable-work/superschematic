@@ -176,6 +176,9 @@ func openDeployContext(cmd *cobra.Command, a *app, flags *stackFlags, environmen
 		if c.prepared, err = stackdeploy.ReadPrepared(flags.prepared); err != nil {
 			return fail(err)
 		}
+		if err := c.prepared.CheckProvenance(stackdeploy.CIProvenance()); err != nil {
+			return fail(err)
+		}
 		version.replay(c.prepared, p.repositoryRoot())
 	}
 	schema, cfg, st, services, err := version.stack(p)
