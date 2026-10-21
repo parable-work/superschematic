@@ -312,12 +312,14 @@ engine-go: engine-archive
 # Generated servers over the engine (D58), as CI's engine-servers job runs
 # them: servergen's engine entrypoint tests and the script three servers,
 # Go, Rust and TypeScript, answer alike over one engine database
-# (TestEngineServersAnswerOneScriptAlike), over the engine's archive, its
-# package and its Node-API addon, which this builds. They run offline, and
+# (TestEngineServersAnswerOneScriptAlike), and the commerce fixture's
+# servers in each language (TestCommerceEngineEntrypointServes*, D70), over
+# the engine's archive, its package and its Node-API addon, which this
+# builds. They run offline, and
 # on the Postgres SUPERSCHEMATIC_IDENTITY_TEST_DATABASE_URL names when it is
 # set; SUPERSCHEMATIC_REQUIRE_ENGINE_SERVERS=1 makes a missing toolchain or
 # database a failure rather than a skip.
-ENGINE_SERVER_TESTS := ^(TestEngineEntrypointServes|TestTheEngineReachesCloudSQLThroughASocket|TestEngineProjectArchiveServes|TestRustEngineEntrypointServes|TestTypeScriptEngineEntrypointServes|TestTypeScriptEngineProjectAddonServes|TestEngineServersAnswerOneScriptAlike)$$
+ENGINE_SERVER_TESTS := ^(TestEngineEntrypointServes|TestTheEngineReachesCloudSQLThroughASocket|TestEngineProjectArchiveServes|TestRustEngineEntrypointServes|TestTypeScriptEngineEntrypointServes|TestTypeScriptEngineProjectAddonServes|TestEngineServersAnswerOneScriptAlike|TestCommerceEngineEntrypointServes|TestCommerceEngineEntrypointServesRust|TestCommerceEngineEntrypointServesTypeScript)$$
 engine-servers: versiongraph engine-archive
 	cd runtime/http/typescript && bun install --frozen-lockfile && bun run build
 	cd runtime/engine/typescript && bun install --frozen-lockfile && bun run build
