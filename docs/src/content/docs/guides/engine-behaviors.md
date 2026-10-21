@@ -20,13 +20,16 @@ which CI runs on Node.js and Bun.
 
 ## Every behavior at a glance
 
-The core declares twenty-two behaviors, so every binary's meta-schema
+The core declares twenty-six behaviors, so every binary's meta-schema
 admits a schema that composes them. The engine implements fifteen itself
-and registers them when it opens. The other seven are claimable work, the
-work queue's Rust behaviors, which the engine's addon is built with; the
+and registers them when it opens. Seven are claimable work, the work
+queue's Rust behaviors, which the engine's addon is built with; the
 engine refuses a schema that composes one until a deployment names them
 in the engine's `behaviors` option (`workQueueBehaviors`, from
-`@superschematic/engine-workqueue`).
+`@superschematic/engine-workqueue`). The last four, `Stock`, `Calendar`,
+`Holds` and `Payments`, are commerce (D70): the core declares them with
+the package `@superschematic/engine-commerce`, and no engine runs them
+yet.
 
 | Behavior | What it adds | Requires | Covered in |
 | --- | --- | --- | --- |
@@ -46,6 +49,7 @@ in the engine's `behaviors` option (`workQueueBehaviors`, from
 | `Numbering` | a number a person reads, `INV-2026-0042`, set at the create from a count per schema, per scope target and per year, that a list filters on | | [Numbering](#numbering) |
 | `Timers` | named deadlines from the create, an entry into a state or a date-time field, which the runner fires once due, moving the status | `Workflow` for a deadline that names a state | [Timers](#timers) |
 | `Lease`, `Assignment`, `Queue`, `Presence`, `Blueprint`, `Budget`, `Retries` | claimable work: leases, claims, worker heartbeats, stamped children, budgets and retries | varies | [Work queues](/superschematic/guides/work-queues/) |
+| `Stock`, `Calendar`, `Holds`, `Payments` | commerce: units a supply counts, time it opens, a claim's holds on either through the supply contract, and what a claim owes and how a provider settles it (declared, not yet run) | `Workflow` for `Holds` | [D70](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md) |
 
 A running engine lists the behaviors it runs, an extension's included,
 at `GET /behaviors`, and returns one's declaration at

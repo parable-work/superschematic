@@ -1585,7 +1585,8 @@ lists the behaviors it declares; the core's lists the core's own
 `Rollups`, `Search`, `Reactions`, `Constants`, `Variants`, `Branches`,
 `Timers`, `StateRules`, `Numbering` and `Approvals`, and the work-queue
 package's `Lease`, `Assignment`, `Queue`, `Presence`, `Blueprint`,
-`Budget` and `Retries`), so its loader refuses any other.
+`Budget` and `Retries`, and the commerce package's `Stock`, `Calendar`,
+`Holds` and `Payments`, D70), so its loader refuses any other.
 
 ### The implementation
 
