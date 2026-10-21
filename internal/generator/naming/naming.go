@@ -430,12 +430,14 @@ type PathsConfig struct {
 	// postgres and axum features, to mount the engine's routes, and the
 	// project's engine crate depends on (projectengine).
 	EngineRust string `toml:"engine_rust"`
-	// EngineBehaviorsRust and EngineWorkQueueRust hold the Rust crates of
-	// the core's behaviors and the work queue's (D58),
-	// superschematic-engine-behaviors and superschematic-engine-workqueue,
+	// EngineBehaviorsRust, EngineWorkQueueRust and EngineCommerceRust hold
+	// the Rust crates of the core's behaviors, the work queue's (D58) and
+	// the commerce behaviors' (D70), superschematic-engine-behaviors,
+	// superschematic-engine-workqueue and superschematic-engine-commerce,
 	// which the project's engine crate depends on beside EngineRust.
 	EngineBehaviorsRust string `toml:"engine_behaviors_rust"`
 	EngineWorkQueueRust string `toml:"engine_workqueue_rust"`
+	EngineCommerceRust  string `toml:"engine_commerce_rust"`
 	// EngineABIRust holds the engine's C ABI as a library,
 	// superschematic-engine-abi (D58), whose export_engine_c_abi! the
 	// project's engine crate's ffi member expands: the archive a Go server
@@ -500,6 +502,7 @@ type LocalPaths struct {
 	EngineRust             string
 	EngineBehaviorsRust    string
 	EngineWorkQueueRust    string
+	EngineCommerceRust     string
 	EngineABIRust          string
 	EngineNapiRust         string
 	EngineGo               string
@@ -533,6 +536,7 @@ func (n Naming) LocalPaths(repoRoot string) LocalPaths {
 		EngineRust:             resolve(n.Paths.EngineRust),
 		EngineBehaviorsRust:    resolve(n.Paths.EngineBehaviorsRust),
 		EngineWorkQueueRust:    resolve(n.Paths.EngineWorkQueueRust),
+		EngineCommerceRust:     resolve(n.Paths.EngineCommerceRust),
 		EngineABIRust:          resolve(n.Paths.EngineABIRust),
 		EngineNapiRust:         resolve(n.Paths.EngineNapiRust),
 		EngineGo:               resolve(n.Paths.EngineGo),
@@ -572,6 +576,7 @@ func (p PathsConfig) checkRelative() error {
 		{"engine_rust", p.EngineRust},
 		{"engine_behaviors_rust", p.EngineBehaviorsRust},
 		{"engine_workqueue_rust", p.EngineWorkQueueRust},
+		{"engine_commerce_rust", p.EngineCommerceRust},
 		{"engine_abi_rust", p.EngineABIRust},
 		{"engine_napi_rust", p.EngineNapiRust},
 		{"engine_go", p.EngineGo},

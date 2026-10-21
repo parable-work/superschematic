@@ -12,6 +12,7 @@
 //! - `desk.Triage` (extension desk)
 //! - the work queue's (`Lease`, `Assignment`, `Queue`, `Presence`,
 //!   `Blueprint`, `Budget`, `Retries`)
+//! - the commerce ones (`Stock`, `Calendar`, `Holds`, `Payments`)
 
 use schemas_shop_engine as project;
 

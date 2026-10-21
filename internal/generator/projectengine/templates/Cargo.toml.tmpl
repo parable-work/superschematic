@@ -2,12 +2,14 @@
 #
 # The engine of the {{ .Schema }} schema (D58), with every behavior the
 # schema's types compose compiled in: the core's behaviors{{ if .WorkQueue }},
-# the work queue's{{ end }}{{ if .Extensions }},
+# the work queue's{{ end }}{{ if .Commerce }},
+# the commerce ones{{ end }}{{ if .Extensions }},
 # and each extension's, from the crate its registration names{{ end }}.
 # superschematic writes it on every build of the schema while its types
-# compose a behavior of the work queue or of an extension, which the core's
-# engine archive leaves out; a host that opens the engine on the schema
-# depends on it and passes behaviors() and tools() in its options.
+# compose a behavior of the work queue, of the commerce package or of an
+# extension, which the core's engine archive leaves out; a host that opens
+# the engine on the schema depends on it and passes behaviors() and tools()
+# in its options.
 [package]
 name = {{ quote .Name }}
 version = "0.0.0"
@@ -51,6 +53,9 @@ serde_json = { version = "1.0.149", features = ["arbitrary_precision", "preserve
 {{ .Behaviors.Crate }} = {{ .Behaviors.Spec }}
 {{- if .WorkQueue }}
 {{ .WorkQueue.Crate }} = {{ .WorkQueue.Spec }}
+{{- end }}
+{{- if .Commerce }}
+{{ .Commerce.Crate }} = {{ .Commerce.Spec }}
 {{- end }}
 {{- range .Extensions }}
 # {{ range $i, $b := .Behaviors }}{{ if $i }}, {{ end }}{{ $b.Name }}{{ end }}

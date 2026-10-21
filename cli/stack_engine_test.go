@@ -229,6 +229,7 @@ func TestStackDevBuildsTheProjectsEngine(t *testing.T) {
 		{"engine_rust", paths.EngineRust},
 		{"engine_behaviors_rust", paths.EngineBehaviorsRust},
 		{"engine_workqueue_rust", paths.EngineWorkQueueRust},
+		{"engine_commerce_rust", paths.EngineCommerceRust},
 		{"engine_abi_rust", paths.EngineABIRust},
 		{"engine_napi_rust", paths.EngineNapiRust},
 	} {

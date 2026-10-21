@@ -25,7 +25,8 @@ import (
 // and the service caller the API's service authenticator verifies (D37); a
 // runner's starts the engine's runner. The engine runs the behaviors of the
 // core (superschematic-engine-behaviors) or, when the database composes the
-// work queue's or an extension's, of the project's engine crate.
+// work queue's, a commerce one or an extension's, of the project's engine
+// crate.
 
 // RustEngineFile is the module of a Rust entrypoint that opens its engines.
 const RustEngineFile = "src/engine.rs"

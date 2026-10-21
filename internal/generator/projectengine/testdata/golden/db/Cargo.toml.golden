@@ -3,11 +3,13 @@
 # The engine of the shop schema (D58), with every behavior the
 # schema's types compose compiled in: the core's behaviors,
 # the work queue's,
+# the commerce ones,
 # and each extension's, from the crate its registration names.
 # superschematic writes it on every build of the schema while its types
-# compose a behavior of the work queue or of an extension, which the core's
-# engine archive leaves out; a host that opens the engine on the schema
-# depends on it and passes behaviors() and tools() in its options.
+# compose a behavior of the work queue, of the commerce package or of an
+# extension, which the core's engine archive leaves out; a host that opens
+# the engine on the schema depends on it and passes behaviors() and tools()
+# in its options.
 [package]
 name = "schemas-shop-engine"
 version = "0.0.0"
@@ -40,8 +42,8 @@ strip = "symbols"
 # them. A host that needs one turns the default off and names it.
 [features]
 default = ["sqlite", "postgres"]
-sqlite = ["superschematic-engine/sqlite", "superschematic-engine-behaviors/sqlite", "superschematic-engine-workqueue/sqlite"]
-postgres = ["superschematic-engine/postgres", "superschematic-engine-behaviors/postgres", "superschematic-engine-workqueue/postgres"]
+sqlite = ["superschematic-engine/sqlite", "superschematic-engine-behaviors/sqlite", "superschematic-engine-workqueue/sqlite", "superschematic-engine-commerce/sqlite"]
+postgres = ["superschematic-engine/postgres", "superschematic-engine-behaviors/postgres", "superschematic-engine-workqueue/postgres", "superschematic-engine-commerce/postgres"]
 
 [dependencies]
 # The engine's JSON features (D58): a number keeps its text, an object its
@@ -50,6 +52,7 @@ serde_json = { version = "1.0.149", features = ["arbitrary_precision", "preserve
 superschematic-engine = { path = "../../../../../runtime/engine/rust/engine", default-features = false }
 superschematic-engine-behaviors = { path = "../../../../../runtime/engine/rust/behaviors", default-features = false }
 superschematic-engine-workqueue = { path = "../../../../../runtime/engine-workqueue/rust", default-features = false }
+superschematic-engine-commerce = { path = "../../../../../runtime/engine-commerce/rust", default-features = false }
 # acme.Flag, acme.Rating
 acme-behaviors = { path = "../../../../../crates/behaviors" }
 # desk.Triage

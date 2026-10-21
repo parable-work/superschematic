@@ -1666,8 +1666,8 @@ func (r run) planTypeScriptRunner(stackName string, rn *ir.ResolvedDeployable, c
 // loads, when e composes an extension's behavior, which the core's addon
 // does not run (D58): the crate's napi member builds an addon over its
 // behaviors(), which the entrypoint loads in the core's place. The core's
-// addon carries the work queue's behaviors, so a database that composes
-// those alone needs none. what names the entrypoint and what it opens the
+// addon carries the work queue's behaviors and the commerce ones (D70), so
+// a database that composes those alone needs none. what names the entrypoint and what it opens the
 // engine for, who the entrypoint, in the errors: of an extension's
 // behavior whose registration names no Rust crate, or one the project
 // does not hold, which no engine runs; and of a second project, since a
@@ -1692,7 +1692,8 @@ func (r run) typeScriptEngineProject(what, who string, e *apigen.EngineInfo, lin
 
 // addonExtensionBehaviors are the behaviors an engine database composes
 // that an extension declares, by name: what the core's Node-API addon,
-// which runs the core's and the work queue's, does not (D58).
+// which runs the core's, the work queue's and the commerce ones, does not
+// (D58, D70).
 func addonExtensionBehaviors(e *apigen.EngineInfo) []string {
 	var out []string
 	for _, b := range e.Behaviors {
