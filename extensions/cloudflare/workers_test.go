@@ -383,6 +383,15 @@ func TestWorkersRefusals(t *testing.T) {
 		_, errs := resolveOver(t, reg, s, services, "Staging")
 		refusedWith(t, errs, stack.CodeUnrealizable, "server shop-api is a GO server, and platform cloudflare.workers runs only TYPESCRIPT")
 	})
+	t.Run("a queue worker", func(t *testing.T) {
+		// D64, amended: the refusal says why and where a worker runs.
+		s := storefrontStack()
+		s.Deploy = []ir.ServiceRef{stacktest.ShopOrders}
+		s.Expose = nil
+		_, errs := resolveOver(t, reg, s, stacktest.AcmeShop(), "Staging")
+		refusedWith(t, errs, stack.CodeUnrealizable, "worker shop-orders-fulfil-orders: target cloudflare places no worker: a queue worker claims its queue's messages from Postgres in a loop that lasts as long as its process (D53), "+
+			"and a Worker runs only per request or per firing and reaches no Postgres; run the stack's workers in an environment on the gcp target, whose gcp.cloudrunworker runs them, or under stack dev on the local target")
+	})
 	t.Run("a name over 63 characters", func(t *testing.T) {
 		s := storefrontStack()
 		long := strings.Repeat("storefront", 6) + "-edge"

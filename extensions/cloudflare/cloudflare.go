@@ -147,6 +147,7 @@ func (e Extension) Register(r *registry.Registry) error {
 		Name:          Target,
 		Extension:     Name,
 		Platforms:     platforms,
+		Unplaced:      map[ir.DeployableKind]string{ir.DeployableWorker: noWorkers},
 		Values:        json.RawMessage(targetValues),
 		DNS:           DNS,
 		Provisioner:   Provisioner,
@@ -167,6 +168,11 @@ func (e Extension) Register(r *registry.Registry) error {
 		CI:         ciIdentities{},
 	})
 }
+
+// noWorkers is why the target places no queue worker (D53 amended, D64),
+// which resolution says when it refuses one.
+const noWorkers = "a queue worker claims its queue's messages from Postgres in a loop that lasts as long as its process (D53), and a Worker runs only per request or per firing and reaches no Postgres; " +
+	"run the stack's workers in an environment on the gcp target, whose gcp.cloudrunworker runs them, or under stack dev on the local target"
 
 // platforms are the target's platforms, one per deployable kind it
 // places; the target names each for its kind. Each gets the extension
