@@ -8908,3 +8908,23 @@ test that `Finance.Currency` refuses `ABC`, skip until `superscalar.pin`
 carries the scalar. Nothing runs them yet: the crate, the behaviors, the
 plumbing, acme-shop and the cross-language proof follow. The names and
 rules are reversible until the first release.
+
+The plumbing is built. The project's engine crate depends on
+`superschematic-engine-commerce` when a type composes a commerce
+behavior, at `[paths] engine_commerce_rust`, which the local target's
+check of a crate by version, the release's refusal and the naming
+reference name; a Go server links its archive, a Rust server its
+`behaviors()`, and a TypeScript server names the four on the core's
+addon, whose release check now opens them. `outputs.engine.tools.invocation`
+reaches every entrypoint through the engine document, and the engine and
+its TypeScript facade take `<Behavior>.<operation>` in `tools.invocation`
+(`a_behavior_operation_takes_the_invocation_policy_the_tool_options_give_it`,
+`TestBuildCarriesTheDeploymentsInvocationPolicies`). `behaviortypes`
+narrows the four, and `runtime/engine/typescript/test/generated/commerce.ts`
+is their client. servergen's `shop-commerce-db` fixture, with an API in
+Go, Rust and TypeScript, builds and serves offline in all three
+(`TestCommerceEngineEntrypointServes`, `…Rust`, `…TypeScript`); on
+Postgres each deploys the document and answers one script, the MCP
+tools' policies included, once the crate registers all four behaviors,
+and skips that half until then. The client parity corpus and the
+`@superschematic/engine-commerce` npm package wait for the behaviors.
