@@ -8026,3 +8026,44 @@ Not built:
 - Claims on SQLite and D1.
 
 The rule is reversible until the first release.
+
+### D47, amended: a cloud job signs in after its installs and builds
+
+The plan, preview and deploy jobs signed in to Google Cloud right after
+their setup, and the preview and deploy jobs then built the services and
+installed the output root's workspace with `bun install
+--frozen-lockfile`. `google-github-actions/auth` writes a credentials file
+into the workspace and exports `GOOGLE_APPLICATION_CREDENTIALS`, the
+gcloud credential override and the project to every later step, so the
+install of a pull request's lockfile, and every script its packages run,
+found the deployer's credentials ready to use, as a credential stealer
+looks for them.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A cloud job signs in last, right before its stack commands. The checkout, superschematic, the schemas root's install, Bun, the provisioner's tools, the build, the Rust setup and the workspace's frozen install come first, with no credentials, as they run in `check`, which shows none of them needs Google Cloud; the stack commands alone, which reach Cloud Build, Artifact Registry, the state bucket and Pulumi, run after the sign-in. `TestCloudJobsSignInLast` holds every golden's cloud jobs to it. | An access token in place of the credentials file (`create_credentials_file: false`, `token_format: access_token`) passed to the stack command's step alone: the token lasts an hour, which a deploy that builds images and waits on Cloud SQL can outlive, while the file refreshes; superschematic's Google clients and Pulumi's state backend read application default credentials and would each need the token; and the step's children inherit the token's variable as they inherit the file's path. A job that builds with no `id-token` and hands its output to one that signs in, which needs `stack deploy` to take a site's files built elsewhere, and still runs the project's TypeScript in the job that signs in. |
+
+Two exposures remain, and the job is the boundary for both. GitHub
+grants `id-token: write` to a whole job, so any step can ask for an
+identity token and exchange it at the pool, whose bindings admit any
+workflow of the repository as either account. And `stack plan`, `deploy`
+and `destroy` run the project's TypeScript with the credentials: the
+loader runs its sidecar documents with Bun, and a deploy installs the
+workspace again and builds each site. A fork's pull request has no cloud
+job, and a pull request from the repository runs the workflow it
+carries, which its author could change anyway, so the order guards the
+credentials against the code a pull request's dependencies bring, not
+against its author.
+
+Status: built. The cigen goldens and gcp's `ci/Shop.yml` sign in after
+the builds; actionlint passes on them. No generated workflow has run on
+GitHub Actions.
+
+Not built:
+- Bindings scoped by claim: the deployer of an environment without
+  parameters admitting only a push to the branch in its GitHub
+  environment, so a pull request's job cannot act as it.
+- A deploy that runs the project's TypeScript with no credentials in its
+  environment.
+
+The rule is reversible until the first release.

@@ -54,7 +54,10 @@ var (
 // Identity Federation through the provider bootstrap creates, as the
 // role's service account. google-github-actions/auth signs in with it and
 // writes a credentials file, which gives superschematic and Pulumi
-// application default credentials.
+// application default credentials, and exports its path and the project
+// to every later step of the job: so the job signs in after its installs
+// and builds, which run the pull request's lockfile and scripts, and
+// right before its stack commands (cloudSetup).
 const gcpWorkloadIdentity = "gcp-workload-identity"
 
 // pulumiTool is the pulumi provisioner's CLI, which pulumi/actions
@@ -457,7 +460,7 @@ func (g github) typeScriptWorkspace() step {
 // as planner: levels 5 and 6.
 func (g github) plan(env registry.CIEnvironment) (job, error) {
 	e := env.Environment
-	steps, err := g.cloudSetup(env, registry.CIPlanner)
+	steps, err := g.cloudSetup(env, registry.CIPlanner, nil)
 	if err != nil {
 		return job{}, err
 	}
@@ -478,20 +481,16 @@ func (g github) plan(env registry.CIEnvironment) (job, error) {
 // destroys it when the pull request closes: level 7.
 func (g github) preview(env registry.CIEnvironment) (job, error) {
 	e := env.Environment
-	steps, err := g.cloudSetup(env, registry.CIDeployer)
+	var builds []step
+	for _, s := range g.builds(env) {
+		s.cond = notClosed
+		builds = append(builds, s)
+	}
+	steps, err := g.cloudSetup(env, registry.CIDeployer, builds)
 	if err != nil {
 		return job{}, err
 	}
 	param := "--param " + e.Parameters[0] + "=" + prNumber
-	for _, s := range g.buildSteps() {
-		s.cond = notClosed
-		steps = append(steps, s)
-	}
-	if hasSite(env) {
-		workspace := g.typeScriptWorkspace()
-		workspace.cond = notClosed
-		steps = append(steps, workspace)
-	}
 	steps = append(steps,
 		step{name: "Deploy " + e.Environment + " for the pull request", cond: notClosed, run: g.stackCommand("deploy", e.Environment, param)},
 		step{name: "Destroy " + e.Environment + " for the pull request", cond: closed, run: g.stackCommand("destroy", e.Environment, param, "--yes")},
@@ -513,13 +512,9 @@ func (g github) preview(env registry.CIEnvironment) (job, error) {
 // after the job before it.
 func (g github) deploy(env registry.CIEnvironment, after string) (job, error) {
 	e := env.Environment
-	steps, err := g.cloudSetup(env, registry.CIDeployer)
+	steps, err := g.cloudSetup(env, registry.CIDeployer, g.builds(env))
 	if err != nil {
 		return job{}, err
-	}
-	steps = append(steps, g.buildSteps()...)
-	if hasSite(env) {
-		steps = append(steps, g.typeScriptWorkspace())
 	}
 	steps = append(steps, step{name: "Deploy " + e.Environment, run: g.stackCommand("deploy", e.Environment)})
 	return job{
@@ -534,11 +529,14 @@ func (g github) deploy(env registry.CIEnvironment, after string) (job, error) {
 	}, nil
 }
 
-// cloudSetup is the steps a cloud job takes before its command: the
+// cloudSetup is the steps a cloud job takes before its commands: the
 // checkout, superschematic, the schemas root's packages, Bun for a
-// deployer of an environment with a site, the provisioner's tools, and
-// the sign-in as role.
-func (g github) cloudSetup(env registry.CIEnvironment, role registry.CIRole) ([]step, error) {
+// deployer of an environment with a site, the provisioner's tools, the
+// job's builds, and last the sign-in as role. Every step before the
+// sign-in runs with no credentials, as check does: the installs, which
+// run the lockfiles and scripts of the pull request, and the builds. Only
+// the stack commands after it read the credentials the sign-in leaves.
+func (g github) cloudSetup(env registry.CIEnvironment, role registry.CIRole, builds []step) ([]step, error) {
 	steps := []step{g.checkout(), g.install()}
 	steps = append(steps, g.packages()...)
 	if role == registry.CIDeployer && hasSite(env) && g.req.Stack.PackageManager != registry.PackageManagerBun {
@@ -551,6 +549,7 @@ func (g github) cloudSetup(env registry.CIEnvironment, role registry.CIRole) ([]
 		}
 		steps = append(steps, s)
 	}
+	steps = append(steps, builds...)
 	s, err := signIn(env.Identity(role), role)
 	if err != nil {
 		return nil, fmt.Errorf("environment %s: %w", env.Environment.Environment, err)
@@ -689,6 +688,18 @@ func (g github) buildSteps() []step {
 		return []step{g.build()}
 	}
 	return []step{setupRust(), g.build()}
+}
+
+// builds are the steps a deploy or preview job of env takes before it
+// signs in: the build, and the frozen install of the output root's
+// workspace for an environment with a site, which stack deploy builds on
+// the runner from it (D55).
+func (g github) builds(env registry.CIEnvironment) []step {
+	steps := g.buildSteps()
+	if hasSite(env) {
+		steps = append(steps, g.typeScriptWorkspace())
+	}
+	return steps
 }
 
 // stackCommand is one of the stack commands on the stack, which the job
