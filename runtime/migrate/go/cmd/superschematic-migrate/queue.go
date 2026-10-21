@@ -181,10 +181,10 @@ func (w storageWriter) WriteResult(ctx context.Context, ref string, data []byte)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-	switch {
-	case resp.StatusCode == http.StatusOK:
+	switch resp.StatusCode {
+	case http.StatusOK:
 		return nil
-	case resp.StatusCode == http.StatusPreconditionFailed:
+	case http.StatusPreconditionFailed:
 		return fmt.Errorf("write the result to %s: %w", ref, fs.ErrExist)
 	}
 	msg := strings.TrimSpace(string(body))
