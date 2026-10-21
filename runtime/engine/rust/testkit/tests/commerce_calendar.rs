@@ -437,7 +437,17 @@ fn a_hold_meets_the_rules_in_their_order_through_the_contract() {
                 "{booking} took nothing"
             );
         }
+    }
+}
 
+#[test]
+fn a_claim_holds_commits_and_releases_time_through_the_contract() {
+    for target in targets("calendar_contract") {
+        let engine = open(&target);
+        create(&engine, "Chair", "c1", json!({"title": "By the window"}));
+        let refused = |booking: &str, start: i64, end: i64| {
+            vetoed(book(&engine, booking, "Chair", "c1", start, end))
+        };
         // b1 holds 10:00 to 11:00 on Tuesday; 11:00 is inside its ten
         // minutes after, 11:15 is not.
         assert_eq!(
@@ -1041,7 +1051,14 @@ fn find_availability_holds_to_its_window_its_limit_and_the_rules() {
         );
         let over = refusal(find(&engine, "Chair", with(json!({"limit": 501}))));
         assert_eq!(over.code(), EngineErrorCode::InvalidArgument);
+    }
+}
 
+#[test]
+fn find_availability_stops_at_the_horizon_500_slots_and_100_instances() {
+    for target in targets("calendar_find_caps") {
+        let engine = open(&target);
+        create(&engine, "Chair", "c1", json!({}));
         // The horizon: nothing past 60 days from now.
         let far = find(
             &engine,

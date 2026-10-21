@@ -8940,7 +8940,7 @@ elapsed time. Where the build settled what this entry left open:
 
 `commerce_calendar.rs` in testkit, the core-calendar suite, runs it
 through the contract and testkit's Holds stand-in on SQLite and Postgres:
-eleven cases, among them the daylight-saving Sundays of Europe/London,
+thirteen cases, among them the daylight-saving Sundays of Europe/London,
 America/New_York and Australia/Lord_Howe held to Python's zoneinfo
 instants, a sweep held to a minute-scan model, and two engines racing
 eight threads for two places. The TypeScript suite and the recorded
