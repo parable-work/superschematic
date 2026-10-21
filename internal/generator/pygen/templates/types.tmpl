@@ -377,6 +377,13 @@ class {{.Name}}(BaseModel):
                     TypeAdapter({{.TargetType}}).validate_python(self.{{.TargetName}})
                 except PydanticValidationError as e:
                     errors.add_field_error("{{snakeCase .Name}}", "invalid", str(e))
+        {{- else if .IsUnion}}
+        # A union's members are models: pydantic picked and read the member
+        # when the model was built, and its rules are checked below. The
+        # union's name is unions.py's, which this module cannot name.
+        if self.{{.TargetName}} is not None:
+            pass
+{{template "ruleChecks" .}}
         {{- else}}
         if self.{{.TargetName}} is not None{{if isStructuredJSONRoot .}} and self.{{.TargetName}} != ""{{end}}:
             {{- if isList .}}

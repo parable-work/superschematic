@@ -191,7 +191,25 @@ impl {{.Namespace.StructName}} {
 {{- if .HasInput}}
         let input_value = serde_json::to_value(&input)?;
         runtime::validate_input("{{.InputSchemaName}}", &input_value)?;
+{{- if .InputUnionFields}}
+        // The input's union fields are validated as the members the unions pick.
+        let mut union_failures = Vec::new();
+{{- range .InputUnionFields}}
+        runtime::collect_union_errors("{{.Name}}", input_value.get("{{.Name}}"), {{.ArrayDepth}}, types::validators::{{.Validator}}, &mut union_failures)?;
+{{- end}}
+        runtime::refuse_union_failures(union_failures)?;
+{{- end}}
 
+{{- end}}
+{{- if .HasUnionArgs}}
+        // The union arguments are validated as the members the unions pick.
+        let mut union_failures = Vec::new();
+{{- range .ScalarArgs}}
+{{- if .UnionValidator}}
+        runtime::collect_union_errors("{{.Name}}", Some(&serde_json::to_value(&input.{{.RustName}})?), {{.ArrayDepth}}, types::validators::{{.UnionValidator}}, &mut union_failures)?;
+{{- end}}
+{{- end}}
+        runtime::refuse_union_failures(union_failures)?;
 {{- end}}
 {{- if .HasScalarArgs}}
 {{- range .ScalarArgs}}

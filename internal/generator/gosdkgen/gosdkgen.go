@@ -83,6 +83,10 @@ type SDKOutput struct {
 	// primitive); namespaces/validation.go then carries the
 	// validateListElement helper those checks call.
 	ValidatesListElements bool
+	// ValidatesUnionArgs reports whether an endpoint takes an argument
+	// whose type is a union, alone or in a list (ScalarArg.UnionWrapper);
+	// namespaces/validation.go then carries appendUnionValidationErrors.
+	ValidatesUnionArgs bool
 	// HasQueryLists reports whether an endpoint takes a list query
 	// parameter; runtime/runtime.go then carries AddQueryList.
 	HasQueryLists bool
@@ -295,6 +299,18 @@ type ScalarArg struct {
 	// IsGoPrimitive, each value or list element runs its own validation at
 	// name[key] or name[key][i].
 	IsMap bool
+
+	// UnionWrapper is the types package's <Union>Wrapper when the
+	// argument's type is a union, alone or in a list or a map, and ""
+	// otherwise; WriteSDK sets it from the types module. A union is an
+	// interface with no Validate of its own, so each value is validated
+	// through the wrapper, as the member it holds, its errors nested under
+	// the value's path, as the route reports them.
+	UnionWrapper string
+
+	// typeName is the argument's schema type, which WriteSDK looks up
+	// among the types module's unions.
+	typeName string
 }
 
 // ValidatesMapValues reports whether the argument is a map whose values the
@@ -536,6 +552,7 @@ func convertEndpoint(ep apigen.EndpointInfo, isScopedNS bool, scopeParamName str
 			IsArrayOfArrays:   arg.IsArrayOfArrays,
 			IsGoPrimitive:     arg.IsGoPrimitive(),
 			IsMap:             arg.IsMap,
+			typeName:          normalizeTypeName(arg.Type),
 		})
 	}
 
@@ -719,6 +736,15 @@ func WriteSDKWithToolsProfiled(output *SDKOutput, apiOutput *apigen.APIOutput, o
 			for namespaceIndex := range output.Namespaces {
 				for endpointIndex := range output.Namespaces[namespaceIndex].Endpoints {
 					endpoint := &output.Namespaces[namespaceIndex].Endpoints[endpointIndex]
+					for argIndex := range endpoint.ScalarArgs {
+						arg := &endpoint.ScalarArgs[argIndex]
+						if _, ok := unionTypes[arg.typeName]; ok {
+							arg.UnionWrapper = "types." + arg.typeName + "Wrapper"
+							if !arg.IsMap && !arg.IsArrayOfArrays {
+								output.ValidatesUnionArgs = true
+							}
+						}
+					}
 					outputType := normalizeTypeName(endpoint.OutputType)
 					if _, ok := unionTypes[outputType]; !ok {
 						continue
@@ -978,6 +1004,15 @@ func collectReplacesFromDir(dir, sdkOutputDir string, seen map[string]struct{}) 
 func customTemplateFuncs() template.FuncMap {
 	return template.FuncMap{
 		"join": strings.Join,
+		// elementRef is what validateListElement takes for one element of
+		// an argument's list or map, expr: a pointer to it, so an object
+		// type's Validate qualifies, or a union element in its wrapper.
+		"elementRef": func(arg ScalarArg, expr string) string {
+			if arg.UnionWrapper != "" {
+				return "&" + arg.UnionWrapper + "{Value: " + expr + "}"
+			}
+			return "&" + expr
+		},
 		"docLine": func(value, fallback string) string {
 			normalized := strings.Join(strings.Fields(strings.TrimSpace(value)), " ")
 			if normalized == "" {
@@ -1163,7 +1198,7 @@ func namespaceImportFlags(ns NamespaceInfo) (needsFmt, needsURL, needsRuntime, n
 			needsTypes = true
 		}
 		for _, arg := range ep.ScalarArgs {
-			if arg.IsArrayOfArrays || arg.ValidatesMapValues() {
+			if arg.IsArrayOfArrays || arg.ValidatesMapValues() || (arg.UnionWrapper != "" && arg.IsArray) {
 				// The inner-list and map value checks name the index or
 				// the key: fmt.Sprintf.
 				needsFmt = true

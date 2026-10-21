@@ -40,6 +40,9 @@ type NamespaceInfo struct {
 	// for a map of an object type (ScalarArg.ValueIsObject).
 	HasMapArgs       bool
 	HasObjectMapArgs bool
+	// HasUnionArgs gates the validateUnionArgument helper, for an argument
+	// whose type is a union (ScalarArg.IsUnion).
+	HasUnionArgs bool
 	// HasPagedEndpoints reports whether an endpoint pages its list (D60);
 	// the namespace then imports the SDK's Page, as PageType, and
 	// pageItems.
@@ -106,6 +109,12 @@ type ScalarArg struct {
 	// a value of a scalar or an enum runs, would report them as one error at
 	// name[key].
 	ValueIsObject bool
+	// IsUnion marks an argument whose type is a union, alone, in a list or
+	// a map. Each value runs the types package's validate<Union>, which
+	// validates the member the union picks, its errors nested under the
+	// value's path (name, name[i], name[key]) as the route reports them. A
+	// value no member reads is sent as it is, for the route to refuse.
+	IsUnion bool
 }
 
 // FileUploadField represents a file upload field in an endpoint's input for TypeScript SDK
@@ -287,7 +296,7 @@ func Generate(apiOutput *apigen.APIOutput, parseableTypes map[string]bool, clock
 		}
 
 		// Convert endpoint to SDK format
-		sdkEndpoint := convertEndpoint(endpoint, parseableTypes)
+		sdkEndpoint := convertEndpoint(endpoint, parseableTypes, apiOutput.TypeUnions)
 		namespaceMap[ns].Endpoints = append(namespaceMap[ns].Endpoints, sdkEndpoint)
 
 		// Track unique imports for this namespace
@@ -315,12 +324,18 @@ func Generate(apiOutput *apigen.APIOutput, parseableTypes map[string]bool, clock
 			importsMap[ns]["newValidationErrors"] = true
 			importsMap[ns]["setFieldErrors"] = true
 			for _, arg := range sdkEndpoint.ScalarArgs {
-				if arg.IsMap {
+				if arg.IsMap && !arg.IsUnion {
 					namespaceMap[ns].HasMapArgs = true
 					importsMap[ns]["ValidationErrors"] = true
 				}
 				if arg.ValueIsObject {
 					namespaceMap[ns].HasObjectMapArgs = true
+				}
+				if arg.IsUnion {
+					namespaceMap[ns].HasUnionArgs = true
+					importsMap[ns]["ValidationErrors"] = true
+					importsMap[ns]["ValidationResult"] = true
+					importsMap[ns]["addNestedErrors"] = true
 				}
 				// Bare language primitives have no generated type alias or
 				// validators in the types package; only named scalars import.
@@ -336,7 +351,7 @@ func Generate(apiOutput *apigen.APIOutput, parseableTypes map[string]bool, clock
 				// regardless of whether the argument itself is required or
 				// optional; a map of an object type runs validateX on each value.
 				switch {
-				case arg.ValueIsObject:
+				case arg.ValueIsObject || arg.IsUnion:
 					importsMap[ns]["validate"+scalarSymbol] = true
 				case arg.IsArray || arg.IsMap || arg.Required:
 					importsMap[ns]["validate"+scalarSymbol+"Required"] = true
@@ -415,7 +430,7 @@ func Generate(apiOutput *apigen.APIOutput, parseableTypes map[string]bool, clock
 }
 
 // convertEndpoint converts apigen endpoint to SDK endpoint.
-func convertEndpoint(ep apigen.EndpointInfo, parseableTypes map[string]bool) EndpointInfo {
+func convertEndpoint(ep apigen.EndpointInfo, parseableTypes map[string]bool, unions map[string]apigen.ToolUnionInfo) EndpointInfo {
 	tsPath := convertPathToTS(ep.Path, ep.PathParams)
 
 	tsPathParams := make([]PathParam, len(ep.PathParams))
@@ -485,7 +500,8 @@ func convertEndpoint(ep apigen.EndpointInfo, parseableTypes map[string]bool) End
 	// each of its types (parseableTypes).
 	scalarArgs := make([]ScalarArg, len(ep.ScalarArgs))
 	for i, arg := range ep.ScalarArgs {
-		scalarArgs[i] = ScalarArg{ScalarArg: arg, ValueIsObject: arg.IsMap && parseableTypes[arg.Type]}
+		_, isUnion := unions[arg.Type]
+		scalarArgs[i] = ScalarArg{ScalarArg: arg, ValueIsObject: arg.IsMap && parseableTypes[arg.Type] && !isUnion, IsUnion: isUnion}
 	}
 
 	return EndpointInfo{
@@ -900,6 +916,7 @@ func isSDKValueImport(name string) bool {
 	return strings.HasPrefix(name, "parse") ||
 		strings.HasPrefix(name, "validate") ||
 		name == "newValidationErrors" ||
+		name == "addNestedErrors" ||
 		name == "setFieldErrors"
 }
 
