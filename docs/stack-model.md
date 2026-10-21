@@ -5565,8 +5565,12 @@ The package also holds `workers.d.ts`, which declares the
 ambient module only from a file with no import, and its `tsconfig.json`
 type-checks `fetch.ts` with it. The server generator refuses a server or
 a job on a bundle platform whose database lists postgres first, which a
-Worker reaches through no D1 binding, and a worker on one always. A
-job's package gets `scheduled.ts` in place of `fetch.ts` (section 18.9).
+Worker reaches through no D1 binding, and a worker on one always. It
+also refuses, and resolution refuses first as unrealizable, a server or
+a job on a bundle platform whose API connects to an engine database: its
+entrypoint would open the engine (D58), a Node-API addon, which a
+Worker's isolate cannot load. A job's package gets `scheduled.ts` in
+place of `fetch.ts` (section 18.9).
 
 **`fetch.ts`** (generated) imports `env` from `cloudflare:workers`, which
 `workers.d.ts` declares, and its helpers from the runtime's `./workers`
@@ -6007,7 +6011,9 @@ runtime tests run fixture bundles under the `workerd` binary.
   under workerd over a stand-in of the d1 binding, and its second
   version, `testdata/wishlist-v2`, migrates a SQLite file across both
   phases; its README lists the live run's steps.
-- Engine types on Workers, whose binding is a Node-API addon (D58).
+- Engine types on Workers, whose binding is a Node-API addon (D58):
+  resolution refuses a server or a job on Workers over an engine
+  database, and a runner has no platform there.
 - Rate limits shared across isolates; Workers' `ratelimit` binding is a
   candidate store.
 - `immutable` caching for a site's hashed files.

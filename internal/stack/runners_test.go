@@ -161,6 +161,28 @@ func TestRunnerRefusals(t *testing.T) {
 		_, errs := resolve(t, reg, s, services, "Staging")
 		mustFail(t, errs, stack.CodeUnrealizable, "runner shop-db-engine-runner runs the engine of shop-db, which environment Staging places on shop-db, a sqlite database; a runner of its own runs on Postgres")
 	})
+	t.Run("a server on a bundle platform over an engine database", func(t *testing.T) {
+		// shop-storefront on fake.bundle connects to shop-db, an engine
+		// database on SQLite, as a Worker reaches D1 (D64): the bundle
+		// cannot load the engine's native addon.
+		s, services := runnerShop()
+		s = stacktest.WithBundle(s)
+		storefront := service(services, "shop-storefront")
+		storefront.Dependencies = append(storefront.Dependencies, stacktest.ShopDB)
+		service(services, "shop-db").Dialects = []string{registry.SQLDialectSQLite}
+		settingsFor(s.Environment("Staging"), stacktest.Of(stacktest.ShopDB)).Platform = stacktest.LitePlatform
+		_, errs := resolve(t, reg, s, services, "Staging")
+		mustFail(t, errs, stack.CodeUnrealizable, "server shop-storefront serves shop-storefront, which connects to shop-db, an engine database whose engine its entrypoint opens (D58), and platform fake.bundle builds a bundle, which cannot load the engine: it is a native addon, the Rust engine through Node-API; place shop-storefront on a platform that builds an image")
+
+		// The same server on an image resolves past it.
+		s, services = runnerShop()
+		s.Deploy = append(s.Deploy, stacktest.ShopStorefront)
+		storefront = service(services, "shop-storefront")
+		storefront.Dependencies = append(storefront.Dependencies, stacktest.ShopDB)
+		if _, errs := resolve(t, reg, s, services, "Staging"); errs != nil && len(errs.Of(stack.CodeUnrealizable)) > 0 {
+			t.Errorf("shop-storefront on an image over the engine database is refused: %v", errs)
+		}
+	})
 	t.Run("a runner named like another deployable", func(t *testing.T) {
 		s, services := runnerShop()
 		s.Deployables = append(s.Deployables, &ir.DeployableDecl{Name: shopRunner, Kind: ir.DeployableServer, Serves: []ir.ServiceRef{{Name: "shop-orders", Kind: ir.SchemaKindAPI}}})

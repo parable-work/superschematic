@@ -951,6 +951,31 @@ func (r *resolver) placeServer(d *deployable) {
 			}
 		}
 	}
+	if d.res.Artifact == ir.ArtifactBundle {
+		r.refuseEngineInBundle(d)
+	}
+}
+
+// refuseEngineInBundle refuses a server or a job on a platform whose
+// artifact is a bundle (D64) when an API of it connects to an engine
+// database: the entrypoint opens the engine on it (D58), and the engine
+// is a native addon, the Rust engine through Node-API, which a bundle,
+// run in an isolate with no native code, cannot load.
+func (r *resolver) refuseEngineInBundle(d *deployable) {
+	for _, served := range d.res.Services {
+		svc := r.services[served.Name]
+		if svc == nil || svc.Kind != ir.SchemaKindAPI {
+			continue
+		}
+		db, ok := r.connectsQuietly(svc)
+		if !ok {
+			continue
+		}
+		if engine := r.services[db]; engine != nil && engine.Engine {
+			r.fail(CodeUnrealizable, "%s %s serves %s, which connects to %s, an engine database whose engine its entrypoint opens (D58), and platform %s builds a bundle, which cannot load the engine: it is a native addon, the Rust engine through Node-API; place %s on a platform that builds an image",
+				d.res.Kind, d.res.Name, svc.Name, db, d.platform.Name, d.res.Name)
+		}
+	}
 }
 
 // unbuiltDeployables names, by kind and then language, the decision that

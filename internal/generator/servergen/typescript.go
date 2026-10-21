@@ -713,6 +713,9 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 		if o.HasServiceCallers && !background && (api.Callers == "" || api.Config == "") {
 			return nil, fmt.Errorf("stack %s: server %s serves %s, whose operations have a service clause, and whose config has no callers field", in.Stack, in.Server, o.SchemaName)
 		}
+		if a.Routes != nil && a.Routes.Engine != nil && s.Workers {
+			return nil, fmt.Errorf("stack %s: %s %s serves %s, whose database %s is an engine database whose engine the entrypoint opens (D58), and an environment places the %s on a platform whose artifact is a bundle, Cloudflare Workers, which cannot load the engine: it is a native addon, the Rust engine through Node-API (D64); place the %s on a platform that builds an image", in.Stack, s.Kind, in.Server, o.SchemaName, a.Routes.Engine.Database, s.Kind, s.Kind)
+		}
 		if db := o.Deps.Database; db != "" && s.Workers && !o.DepsSQLite() && s.Job != nil {
 			return nil, fmt.Errorf("stack %s: job %s of %s, whose database %s lists postgres first, runs on Cloudflare's Cron Triggers in an environment, which reaches a database through a D1 binding alone; list sqlite first in %s's outputs.sql.dialects, so Deps.db is a SqlDatabase (D64)", in.Stack, in.Server, o.SchemaName, db, db)
 		}
@@ -821,6 +824,11 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 			api.Buckets = append(api.Buckets, TypeScriptBucketUse{Field: b.Field, Bucket: h})
 		}
 		s.APIs = append(s.APIs, api)
+	}
+	if lite := s.SQLiteDatabases(); len(s.Engines) > 0 && len(lite) > 0 {
+		// main.ts opens an engine on a Postgres URL, beside its pools, and
+		// a SQLite file's connection is no pool (D58, D64).
+		return nil, fmt.Errorf("stack %s: %s %s opens the engine of %s (D58), and its database %s lists sqlite first; a TypeScript entrypoint that opens an engine opens it and its other databases on Postgres alone", in.Stack, s.Kind, in.Server, s.Engines[0].Service, lite[0].Service)
 	}
 	slices.Sort(s.CloudSQL)
 	s.planLoopback(taken)

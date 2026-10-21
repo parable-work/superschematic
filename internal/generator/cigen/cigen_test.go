@@ -1010,17 +1010,23 @@ func TestBundlesInTheWorkflow(t *testing.T) {
 	}
 }
 
-// TestCloudJobsSignInLast: every cloud job of every golden workflow signs
-// in after its installs and builds, which run the pull request's
-// lockfiles and scripts, so none of them finds the credentials file or
-// the environment google-github-actions/auth leaves for the later steps;
-// only the stack commands run after it.
+// TestCloudJobsSignInLast: every cloud job of every golden workflow, the
+// gcp ones here and the cloudflare target's, takes its credentials after
+// its installs and builds, which run the pull request's lockfiles and
+// scripts, so none of them finds the credentials file or the environment
+// google-github-actions/auth leaves for the later steps, or a secret:
+// only the stack commands run after the sign-in, and only they read a
+// secret (D47, amended; D64).
 func TestCloudJobsSignInLast(t *testing.T) {
 	goldens, err := filepath.Glob("testdata/golden/*.yml")
 	if err != nil || len(goldens) == 0 {
 		t.Fatalf("no golden workflows: %v", err)
 	}
-	for _, path := range goldens {
+	cloudflare, err := filepath.Glob("../../../extensions/cloudflare/testdata/golden/ci/*.yml")
+	if err != nil || len(cloudflare) == 0 {
+		t.Fatalf("no cloudflare golden workflows: %v", err)
+	}
+	for _, path := range append(goldens, cloudflare...) {
 		w := parseWorkflow(t, readFile(t, path))
 		for _, id := range w.order {
 			j := w.jobs[id]
@@ -1028,16 +1034,32 @@ func TestCloudJobsSignInLast(t *testing.T) {
 			if (at >= 0) != (j.Permissions["id-token"] == "write") {
 				t.Errorf("%s: %s signs in at step %d with permissions %v", path, id, at, j.Permissions)
 			}
-			if at < 0 {
-				continue
+			if at >= 0 {
+				commands := j.Steps[at+1:]
+				if len(commands) == 0 {
+					t.Errorf("%s: %s signs in and runs nothing after", path, id)
+				}
+				for _, s := range commands {
+					if !strings.HasPrefix(s.Run, "superschematic stack ") {
+						t.Errorf("%s: %s runs %q after it signs in, which only a stack command does", path, id, s.Name)
+					}
+				}
 			}
-			commands := j.Steps[at+1:]
-			if len(commands) == 0 {
-				t.Errorf("%s: %s signs in and runs nothing after", path, id)
+			for k, v := range j.Env {
+				if strings.Contains(v, "secrets.") {
+					t.Errorf("%s: %s gives every step the secret %s", path, id, k)
+				}
 			}
-			for _, s := range commands {
-				if !strings.HasPrefix(s.Run, "superschematic stack ") {
-					t.Errorf("%s: %s runs %q after it signs in, which only a stack command does", path, id, s.Name)
+			for _, s := range j.Steps {
+				for k, v := range s.Env {
+					if strings.Contains(v, "secrets.") && !strings.HasPrefix(s.Run, "superschematic stack ") {
+						t.Errorf("%s: %s, %s reads the secret %s, which only a stack command does", path, id, s.Name, k)
+					}
+				}
+				for k, v := range s.With {
+					if strings.Contains(v, "secrets.") {
+						t.Errorf("%s: %s, %s hands the secret %s to an action", path, id, s.Name, k)
+					}
 				}
 			}
 		}

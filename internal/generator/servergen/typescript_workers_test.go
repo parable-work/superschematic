@@ -71,7 +71,9 @@ func TestTypeScriptWorkersEntrypointGolden(t *testing.T) {
 // Workers whose API's database lists postgres first, which a Worker reaches
 // through no D1 binding, or which authenticates with the identity runtime
 // is refused, saying why, and so is a job on Cron Triggers whose API's
-// database lists postgres first (D64).
+// database lists postgres first (D64), and a server or a job whose API's
+// database is an engine database, whose engine is a native addon no
+// Worker loads (D58), whatever dialect it lists first.
 func TestTypeScriptWorkersRefusals(t *testing.T) {
 	input := func(edit func(*tsrestgen.APIOutput, *envgen.ConfigOutput)) servergen.TypeScriptInput {
 		output := &tsrestgen.APIOutput{
@@ -99,29 +101,95 @@ func TestTypeScriptWorkersRefusals(t *testing.T) {
 	if s, err := servergen.PlanTypeScript(input(none)); err != nil || !s.Workers {
 		t.Fatalf("a server on Workers = %+v, %v", s, err)
 	}
+	// A database that lists sqlite first, which a Worker reaches through
+	// its D1 binding.
+	sqliteDB := func(o *tsrestgen.APIOutput, c *envgen.ConfigOutput) {
+		o.Deps.Database = "shop-db"
+		o.Deps.Dialect = "sqlite"
+		c.Derived = []envgen.DerivedField{{Key: "SHOP_DB_DATABASE", Kind: ir.EdgeSQL, Service: "shop-db"}}
+	}
+	if s, err := servergen.PlanTypeScript(input(sqliteDB)); err != nil || len(s.SQLiteDatabases()) != 1 {
+		t.Fatalf("a server on Workers over a D1 database = %+v, %v", s, err)
+	}
 	for _, tc := range []struct {
-		name string
-		edit func(*tsrestgen.APIOutput, *envgen.ConfigOutput)
-		job  bool
-		want string
+		name   string
+		edit   func(*tsrestgen.APIOutput, *envgen.ConfigOutput)
+		job    bool
+		want   string
+		engine bool
 	}{
 		{"a Postgres database", func(o *tsrestgen.APIOutput, c *envgen.ConfigOutput) {
 			o.Deps.Database = "shop-db"
 			c.Derived = []envgen.DerivedField{{Key: "SHOP_DB_DATABASE", Kind: ir.EdgeSQL, Service: "shop-db"}}
-		}, false, "server shop-api serves shop-api, whose database shop-db lists postgres first, and an environment places the server on Cloudflare Workers, which reaches a database through a D1 binding alone"},
+		}, false, "server shop-api serves shop-api, whose database shop-db lists postgres first, and an environment places the server on Cloudflare Workers, which reaches a database through a D1 binding alone", false},
 		{"the identity runtime", func(o *tsrestgen.APIOutput, _ *envgen.ConfigOutput) {
 			o.Identity = &tsrestgen.IdentityInfo{AuthDB: "shop-db"}
-		}, false, "server shop-api serves shop-api, which authenticates with the identity runtime over the user model (D50), and an environment places the server on Cloudflare Workers, where the identity runtime does not run"},
+		}, false, "server shop-api serves shop-api, which authenticates with the identity runtime over the user model (D50), and an environment places the server on Cloudflare Workers, where the identity runtime does not run", false},
 		{"a job's Postgres database", func(o *tsrestgen.APIOutput, c *envgen.ConfigOutput) {
 			o.Deps.Database = "shop-db"
 			c.Derived = []envgen.DerivedField{{Key: "SHOP_DB_DATABASE", Kind: ir.EdgeSQL, Service: "shop-db"}}
-		}, true, "job shop-api of shop-api, whose database shop-db lists postgres first, runs on Cloudflare's Cron Triggers in an environment, which reaches a database through a D1 binding alone"},
+		}, true, "job shop-api of shop-api, whose database shop-db lists postgres first, runs on Cloudflare's Cron Triggers in an environment, which reaches a database through a D1 binding alone", false},
+		{"an engine database", sqliteDB, false, "server shop-api serves shop-api, whose database shop-db is an engine database whose engine the entrypoint opens (D58), and an environment places the server on a platform whose artifact is a bundle, Cloudflare Workers, which cannot load the engine: it is a native addon, the Rust engine through Node-API (D64); place the server on a platform that builds an image", true},
+		{"a job's engine database", sqliteDB, true, "job shop-api serves shop-api, whose database shop-db is an engine database whose engine the entrypoint opens (D58), and an environment places the job on a platform whose artifact is a bundle", true},
+		{"an engine database that lists postgres first", func(o *tsrestgen.APIOutput, c *envgen.ConfigOutput) {
+			o.Deps.Database = "shop-db"
+			c.Derived = []envgen.DerivedField{{Key: "SHOP_DB_DATABASE", Kind: ir.EdgeSQL, Service: "shop-db"}}
+		}, false, "server shop-api serves shop-api, whose database shop-db is an engine database whose engine the entrypoint opens (D58)", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			in := input(tc.edit)
 			if tc.job {
 				in.Job = &servergen.JobInput{Name: "Reindex"}
 			}
+			if tc.engine {
+				in.APIs[0].Routes.Engine = &apigen.EngineInfo{Database: "shop-db", Namespace: "shop_db", Mount: "/engine/shop-db"}
+			}
+			if _, err := servergen.PlanTypeScript(in); err == nil || !strings.Contains(err.Error(), "stack edge-stack: "+tc.want) {
+				t.Fatalf("PlanTypeScript = %v, want it to say %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// TestTypeScriptEngineOnSQLiteRefused: a TypeScript entrypoint opens an
+// engine on Postgres, beside its pools, so a server on Bun is refused,
+// saying so, when its API's engine database lists sqlite first, and when
+// another API it serves connects to a database that lists sqlite first,
+// whose file main.ts would open beside the engine (D58, D64).
+func TestTypeScriptEngineOnSQLiteRefused(t *testing.T) {
+	api := func(name, db, dialect string, engine bool) servergen.TypeScriptAPIInput {
+		routes := &apigen.APIOutput{SchemaName: name}
+		if engine {
+			routes.Engine = &apigen.EngineInfo{Database: db, Namespace: strings.ReplaceAll(db, "-", "_"), Mount: "/engine/" + db}
+		}
+		field := strings.ToUpper(strings.ReplaceAll(db, "-", "_")) + "_DATABASE"
+		return servergen.TypeScriptAPIInput{
+			Output: &tsrestgen.APIOutput{
+				SchemaName:   name,
+				PackageName:  "@schemas/" + name + "-api",
+				HasEnvConfig: true,
+				Deps:         tsrestgen.DepsInfo{Database: db, Dialect: dialect},
+			},
+			Routes: routes,
+			Config: &envgen.ConfigOutput{
+				SchemaName: name,
+				Derived:    []envgen.DerivedField{{Key: field, Kind: ir.EdgeSQL, Service: db}},
+			},
+			Implementation: servergen.TypeScriptImplementation{Package: "@schemas/" + name + "-implementation"},
+		}
+	}
+	for _, tc := range []struct {
+		name string
+		apis []servergen.TypeScriptAPIInput
+		want string
+	}{
+		{"its engine database", []servergen.TypeScriptAPIInput{api("shop-api", "shop-db", "sqlite", true)},
+			"server shop-api serves shop-api, whose engine database shop-db lists sqlite first; a TypeScript entrypoint opens the engine on Postgres"},
+		{"another API's database", []servergen.TypeScriptAPIInput{api("shop-api", "shop-db", "postgres", true), api("shop-notes", "notes-db", "sqlite", false)},
+			"server shop-api opens the engine of shop-db (D58), and its database notes-db lists sqlite first; a TypeScript entrypoint that opens an engine opens it and its other databases on Postgres alone"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			in := servergen.TypeScriptInput{Stack: "edge-stack", Server: "shop-api", Dir: t.TempDir(), APIs: tc.apis}
 			if _, err := servergen.PlanTypeScript(in); err == nil || !strings.Contains(err.Error(), "stack edge-stack: "+tc.want) {
 				t.Fatalf("PlanTypeScript = %v, want it to say %q", err, tc.want)
 			}
