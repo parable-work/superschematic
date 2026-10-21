@@ -26,6 +26,10 @@ serde_json = { version = "1.0.149", features = ["arbitrary_precision", "preserve
 # engine: these behaviors reach it as any extension's do, and an
 # extension's supply uses the supply module the same way.
 superschematic-engine = { path = "../../engine/rust/engine", default-features = false }
+# superscalar's core, by the path the schema reader links it from: the
+# Finance.Currency check of a currency code (the `currency` module), the
+# scalar's own, read at run time so a pin without the scalar still builds.
+superscalar = { path = "../../../third_party/superscalar/crates/core", default-features = false }
 
 [lints]
 workspace = true
