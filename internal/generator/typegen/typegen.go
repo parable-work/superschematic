@@ -169,10 +169,12 @@ type UnionMemberInfo struct {
 	Name               string
 	DiscriminatorValue string
 
-	// Fields and Tags are set only for shape-dispatched unions; see
-	// annotateShapeDispatch. Fields lists the member's JSON field names.
-	Fields []string
-	Tags   []codegen.UnionTag
+	// Fields, Tags and Required are set only for shape-dispatched unions;
+	// see annotateShapeDispatch. Fields lists the member's JSON field
+	// names, and Required those a payload must hold for the member.
+	Fields   []string
+	Tags     []codegen.UnionTag
+	Required []string
 }
 
 // TypePairField describes how to convert one field from input to output type.
@@ -837,6 +839,7 @@ func annotateShapeDispatch(unions []UnionInfo, types []codegen.TypeInfo, enumLoo
 		for i, shape := range codegen.UnionShapes(members, enumLookup) {
 			union.Members[i].Fields = shape.Fields
 			union.Members[i].Tags = shape.Tags
+			union.Members[i].Required = shape.Required
 		}
 	}
 	return shapeDispatched, nil

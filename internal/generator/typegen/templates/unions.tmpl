@@ -63,6 +63,9 @@ func (w {{.Name}}Wrapper) Validate() ValidationErrors {
 // whose fields include every payload key and whose tag values the payload
 // does not contradict. When no member declares every key, it tolerates the
 // unknown keys and picks the first member whose tags the payload allows.
+// Either way the payload holds each required field the member gives no
+// default, which the member's decoder would read as its zero value, as the
+// Rust member's serde refuses its absence.
 {{end}}func (w *{{.Name}}Wrapper) UnmarshalJSON(data []byte) error {
 	var payload map[string]any
 	if err := json.Unmarshal(data, &payload); err != nil {
@@ -96,7 +99,7 @@ func (w {{.Name}}Wrapper) Validate() ValidationErrors {
 	}
 	{{else}}{{range .Members}}
 	// Try {{.Name}}
-	if unionPayloadKeysWithin(payload{{range .Fields}}, {{printf "%q" .}}{{end}}) && unionPayloadTagsAllow(payload{{range .Tags}}, {{printf "%q" .Field}}, {{printf "%q" .Value}}{{end}}) {
+	if unionPayloadKeysWithin(payload{{range .Fields}}, {{printf "%q" .}}{{end}}) && unionPayloadTagsAllow(payload{{range .Tags}}, {{printf "%q" .Field}}, {{printf "%q" .Value}}{{end}}) && unionPayloadHolds(payload{{range .Required}}, {{printf "%q" .}}{{end}}) {
 		var member {{.Name}}
 		if err := member.FromMapStrict(payload); err == nil {
 			w.Value = member
@@ -104,7 +107,7 @@ func (w {{.Name}}Wrapper) Validate() ValidationErrors {
 		}
 	}
 	{{end}}{{range .Members}}
-	if unionPayloadTagsAllow(payload{{range .Tags}}, {{printf "%q" .Field}}, {{printf "%q" .Value}}{{end}}) {
+	if unionPayloadTagsAllow(payload{{range .Tags}}, {{printf "%q" .Field}}, {{printf "%q" .Value}}{{end}}) && unionPayloadHolds(payload{{range .Required}}, {{printf "%q" .}}{{end}}) {
 		var member {{.Name}}
 		if err := member.FromMapStrict(payload); err == nil {
 			w.Value = member
@@ -130,6 +133,17 @@ func unionPayloadKeysWithin(payload map[string]any, fields ...string) bool {
 			}
 		}
 		if !known {
+			return false
+		}
+	}
+	return true
+}
+
+// unionPayloadHolds reports whether the payload holds a value other than
+// null for each of fields.
+func unionPayloadHolds(payload map[string]any, fields ...string) bool {
+	for _, field := range fields {
+		if payload[field] == nil {
 			return false
 		}
 	}
