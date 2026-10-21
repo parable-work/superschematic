@@ -347,8 +347,9 @@ exports that does nothing at run time, so the author gets completion and
 
 A document is an input that does not belong in a schema file: a sidecar
 next to `schema.config.*` that the loader reads and stores on the schema.
-Deployment values are the usual case; `extensions/deploy` is a
-document-only extension.
+A region table or anything a different team edits is the usual case;
+acme's `catalog.config.yaml` is one. With `Kinds` nil, a document may be
+an extension's only registration.
 
 | Field | Meaning |
 | --- | --- |
@@ -1803,7 +1804,7 @@ that way. Two scripts check it, and the `acme` job in
   smoke, checks the new payload reached the IR, and fails if any path
   outside `examples/acme-schematic/` changed.
 
-Inside the core module, four extensions test the seams against the real
+Inside the core module, two extensions test the seams against the real
 loader, generators and resolver:
 
 - `internal/registry/registrytest` is an in-tree fixture extension with a
@@ -1819,13 +1820,13 @@ loader, generators and resolver:
   connectors, DNS platform and provisioner, through the public packages
   alone, and resolves a stack over the acme-shop services into golden
   `environment.json` files (`docs/stack-model.md`, section 6.7).
-- `extensions/deploy` registers a document and nothing else. Its test loads
-  `testdata/services/example` and compares the generated values files byte
-  for byte. See the [deploy guide](https://parable-work.github.io/superschematic/guides/deploy/).
-- `extensions/platform` registers a kind with `NoSentinel`, a `Verify` rule,
-  a type decorator and a generator. Its tests load a TypeScript fixture, a
-  YAML twin and a fixture that must fail verify. See the
-  [platform guide](https://parable-work.github.io/superschematic/guides/platform/).
+
+`extensions/deploy` and `extensions/platform`, a document-only extension
+and a grouping kind, were retired once the stack targets replaced them
+(D30, amended: the reference deploy and platform extensions are retired).
+The core Stack kind sets `NoSentinel` and a `Verify` rule, and
+`internal/loader/verify` registers a test-local kind whose decorator
+package other kinds cannot import.
 
 ## 11. Known gaps
 

@@ -4678,8 +4678,8 @@ Not taken:
   between processes, and section 2 of `docs/extension-model.md` rules out
   loading code at run time. Revisit it only if third parties need to ship
   a target without rebuilding the binary.
-`extensions/deploy` and `extensions/platform` are rewritten over the stack
-model, or retired, when it lands.
+`extensions/deploy` and `extensions/platform` are retired (D30, amended):
+the stack targets replaced them.
 
 ## 14. Milestones
 

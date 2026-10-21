@@ -291,9 +291,9 @@ the variables (types, defaults and which are required), with an
 `x-superschematic.envVars` list that also says which are enums, scalars
 and secrets. An API's lists the fields its edges derive too, and, with a
 service clause, its callers field, whose indexed variables are
-`patternProperties`. Deployment tooling can check a values file against it; the
-[deploy extension](/superschematic/extending/deploy/) is one that maps
-the same fields to Helm values.
+`patternProperties`. Deployment tooling can check a values file against it.
+A [stack](/superschematic/guides/stacks/) sets the same variables from
+each environment's settings and its servers' edges.
 
 ### Derived fields
 

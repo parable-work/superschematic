@@ -18,7 +18,7 @@ export enum SchemaKind {
 }
 
 /**
- * The name of a kind an extension registers ("Platform"). The authoring
+ * The name of a kind an extension registers ("Catalog"). The authoring
  * packages cannot see the registry, so the name is any string here; superschematic
  * checks it against the registered kinds when it loads the config.
  */
