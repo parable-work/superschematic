@@ -211,7 +211,10 @@ func lowerWorkload(ctx registry.PlatformContext) (registry.Lowered, workload, er
 		"accountId":   d.ResourceName,
 		"displayName": fmt.Sprintf("%s %s %s %s", env.Stack, env.Name, d.Kind, d.Name),
 	}})
-	telemetry := telemetryOf(env, d)
+	telemetry, err := telemetryOf(env, d)
+	if err != nil {
+		return registry.Lowered{}, workload{}, err
+	}
 	if telemetry != nil && telemetry.cloudTrace() {
 		add(&ir.Resource{ID: d.Name + ".trace-agent", Type: TypeProjectIAMMember, Phase: ir.PhaseInfrastructure, Properties: map[string]any{
 			"project": v.project,

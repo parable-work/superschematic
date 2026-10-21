@@ -1317,7 +1317,12 @@ values are `project` and `region`, which are required, `production`,
 and the [generated CI](#generated-ci) signs in with, and `telemetry`,
 which sends every server's, job's and worker's traces to Cloud Trace, or
 to a collector its `endpoint` names
-([Traces](/superschematic/guides/traces/#on-google-cloud)).
+([Traces](/superschematic/guides/traces/#on-google-cloud)). Only an
+account whose deployable exports to Cloud Trace holds the Cloud Trace
+agent role: the next deploy removes it from every other, so code of your
+own that calls Cloud Trace directly turns its deployable's `telemetry`
+on. `stack bootstrap` enables the Telemetry and Cloud Trace APIs for
+every environment with Cloud Run.
 
 | Stack concept | On gcp |
 | --- | --- |

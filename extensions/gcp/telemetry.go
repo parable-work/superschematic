@@ -66,27 +66,33 @@ type telemetrySettings struct {
 	sampled     bool
 }
 
-// cloudTrace reports whether the endpoint is Google's, which takes the
-// account's access token, and so needs the trace agent role.
+// cloudTrace reports whether the endpoint is Google's, an https URL under
+// googleapis.com, to which the runtimes send the account's access token,
+// and so needs the trace agent role.
 func (t telemetrySettings) cloudTrace() bool {
 	u, err := url.Parse(t.endpoint)
-	if err != nil {
-		return false
-	}
-	host := strings.ToLower(u.Hostname())
+	return err == nil && u.Scheme == "https" && googleHost(u.Hostname())
+}
+
+// googleHost reports whether host is googleapis.com or under it, the hosts
+// the runtimes send the account's access token to.
+func googleHost(host string) bool {
+	host = strings.ToLower(host)
 	return host == "googleapis.com" || strings.HasSuffix(host, ".googleapis.com")
 }
 
 // telemetryOf returns how the deployable d of env exports its traces, or
-// nil when it does not.
-func telemetryOf(env registry.StackEnvironment, d ir.ResolvedDeployable) *telemetrySettings {
+// nil when it does not. It refuses an http endpoint under googleapis.com,
+// where the runtimes, which send the account's token over https alone,
+// would send none and Google would refuse the spans.
+func telemetryOf(env registry.StackEnvironment, d ir.ResolvedDeployable) (*telemetrySettings, error) {
 	envTelemetry, envOn := env.Values["telemetry"].(map[string]any)
 	on := envOn
 	if setting, ok := d.Settings["telemetry"].(bool); ok {
 		on = setting
 	}
 	if !on {
-		return nil
+		return nil, nil
 	}
 	t := &telemetrySettings{endpoint: CloudTraceEndpoint}
 	if endpoint, ok := envTelemetry["endpoint"].(string); ok && endpoint != "" {
@@ -95,7 +101,10 @@ func telemetryOf(env registry.StackEnvironment, d ir.ResolvedDeployable) *teleme
 	if ratio, ok := envTelemetry["sampleRatio"].(float64); ok {
 		t.sampleRatio, t.sampled = ratio, true
 	}
-	return t
+	if u, err := url.Parse(t.endpoint); err == nil && u.Scheme != "https" && googleHost(u.Hostname()) {
+		return nil, fmt.Errorf("telemetry endpoint %s: Google's OTLP endpoint takes https alone, over which each runtime sends the account's access token; use https://%s", t.endpoint, u.Host)
+	}
+	return t, nil
 }
 
 // telemetryEnv returns the container's environment variables for t, and

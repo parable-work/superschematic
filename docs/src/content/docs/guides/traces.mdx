@@ -135,11 +135,19 @@ Each deployable that exports gets `OTEL_EXPORTER_OTLP_ENDPOINT`,
 `deployment.environment.name`, `gcp.project_id`, `cloud.provider`,
 `cloud.region` and `service.version`, its image by digest. To Cloud
 Trace, its account gets the Cloud Trace agent role, and each runtime
-sends the account's access token, which it asks the metadata server for
-and fetches again before it expires; no headers variable could carry a
-token that expires within the hour. `stack bootstrap` enables the
-Telemetry and Cloud Trace APIs for an environment that exports there, so
-run it again after you turn telemetry on. To a collector, no role is
-granted and no token is sent; the deployable reaches the collector as it
-reaches the internet, or through the environment's VPC when it calls
-another server.
+sends the account's access token over https, which it asks the metadata
+server for and fetches again before it expires; no headers variable
+could carry a token that expires within the hour. An `http://` endpoint
+under `googleapis.com` is refused. `stack bootstrap` enables the
+Telemetry and Cloud Trace APIs for every environment with Cloud Run, so
+a project bootstrapped before this release runs `stack bootstrap` once
+more. To a collector, no role is granted and no token is sent; the
+deployable reaches the collector as it reaches the internet, or through
+the environment's VPC when it calls another server.
+
+Before this release every Cloud Run service, job and worker pool's
+account held the Cloud Trace agent role. Now only a deployable that
+exports to Cloud Trace holds it, and the next deploy of an existing
+environment removes it from the others. If your own code calls Cloud
+Trace directly, turn `telemetry` on for its deployable, or grant the role
+yourself.

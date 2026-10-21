@@ -12,7 +12,7 @@
 //!   only awaits.
 //! - `OTEL_EXPORTER_OTLP_HEADERS`, `OTEL_EXPORTER_OTLP_TIMEOUT` and their
 //!   per-signal forms reach the exporter, which reads them itself.
-//! - An endpoint under `googleapis.com`, Cloud Trace's OTLP endpoint, gets
+//! - An `https` endpoint under `googleapis.com`, Cloud Trace's OTLP endpoint, gets
 //!   the access token of the workload's account from the metadata server
 //!   on each export (`GCE_METADATA_HOST` when set, else
 //!   `metadata.google.internal`), held until five minutes before it
@@ -438,13 +438,14 @@ fn read_propagators(
 }
 
 /// Whether export to `endpoint` sends the access token of the workload's
-/// account (D67, amended): whether its host is `googleapis.com` or under
-/// it, and neither `OTEL_EXPORTER_OTLP_TRACES_HEADERS` nor
+/// account (D67, amended): whether it is an `https` URL, so the token never
+/// goes in the clear, whose host is `googleapis.com` or under it, and neither `OTEL_EXPORTER_OTLP_TRACES_HEADERS` nor
 /// `OTEL_EXPORTER_OTLP_HEADERS` names an `authorization` header.
 fn google_auth(endpoint: &str, env: &dyn Fn(&str) -> Option<String>) -> bool {
     let Some(host) = endpoint
         .parse::<http::Uri>()
         .ok()
+        .filter(|uri| uri.scheme_str() == Some("https"))
         .and_then(|uri| uri.host().map(str::to_ascii_lowercase))
     else {
         return false;
@@ -876,8 +877,8 @@ mod tests {
     use super::*;
     use std::sync::atomic::AtomicU32;
 
-    /// Export sends the account's access token to an endpoint under
-    /// `googleapis.com` alone, and not when a headers variable names an
+    /// Export sends the account's access token to an `https` endpoint under
+    /// `googleapis.com` alone, never over `http`, and not when a headers variable names an
     /// `authorization` header of its own (D67, amended).
     #[test]
     fn google_auth_goes_to_google_alone() {
@@ -891,6 +892,8 @@ mod tests {
             ("http://collector.internal:4318", false),
             ("https://notgoogleapis.com", false),
             ("https://googleapis.com.example.com", false),
+            ("http://telemetry.googleapis.com", false),
+            ("http://telemetry.googleapis.com:443/v1/traces", false),
         ] {
             assert_eq!(google_auth(endpoint, &none), want, "{endpoint}");
         }

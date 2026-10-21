@@ -14,8 +14,9 @@ import (
 )
 
 // TestGoogleAuthGoesToGoogleAlone (D67, amended): export sends the
-// account's access token to an endpoint under googleapis.com alone, and
-// not when a headers variable names an authorization header of its own.
+// account's access token to an https endpoint under googleapis.com alone,
+// never over http, and not when a headers variable names an authorization
+// header of its own.
 func TestGoogleAuthGoesToGoogleAlone(t *testing.T) {
 	env := func(vars map[string]string) func(string) string {
 		return func(name string) string { return vars[name] }
@@ -30,6 +31,8 @@ func TestGoogleAuthGoesToGoogleAlone(t *testing.T) {
 		"http://collector.internal:4318":                    false,
 		"https://notgoogleapis.com":                         false,
 		"https://googleapis.com.example.com":                false,
+		"http://telemetry.googleapis.com":                   false,
+		"http://telemetry.googleapis.com:443/v1/traces":     false,
 	} {
 		assert.Equal(t, want, googleAuth(endpoint, none), endpoint)
 	}
@@ -42,10 +45,12 @@ func TestGoogleAuthGoesToGoogleAlone(t *testing.T) {
 	assert.True(t, googleAuth("https://telemetry.googleapis.com", env(map[string]string{HeadersVariable: "x-goog-user-project=p"})))
 }
 
-// TestGoogleTokenTransport (D67, amended): each request goes with the
-// metadata server's access token, asked for with Metadata-Flavor: Google,
-// held until five minutes before it expires and then fetched again; a
-// metadata server that fails fails the export, which sends nothing.
+// TestGoogleTokenTransport (D67, amended): each request to the endpoint's
+// host over https goes with the metadata server's access token, asked for
+// with Metadata-Flavor: Google, held until five minutes before it expires
+// and then fetched again; a metadata server that fails fails the export,
+// which sends nothing. A request to another host, as a redirect makes, or
+// to the endpoint's host over http, goes with no token.
 func TestGoogleTokenTransport(t *testing.T) {
 	var fetched atomic.Int32
 	var failing atomic.Bool
@@ -62,14 +67,28 @@ func TestGoogleTokenTransport(t *testing.T) {
 		_, _ = fmt.Fprintf(w, `{"access_token":"token-%d","expires_in":3599,"token_type":"Bearer"}`, n)
 	}))
 	defer metadata.Close()
-	var got []string
-	collector := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+	var got, elsewhere []string
+	other := httptest.NewTLSServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		elsewhere = append(elsewhere, r.Header.Get("Authorization"))
+	}))
+	defer other.Close()
+	collector := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/moved" {
+			http.Redirect(w, r, other.URL+"/v1/traces", http.StatusTemporaryRedirect)
+			return
+		}
 		got = append(got, r.Header.Get("Authorization"))
 	}))
 	defer collector.Close()
+	plain := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		elsewhere = append(elsewhere, r.Header.Get("Authorization"))
+	}))
+	defer plain.Close()
 
 	now := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
-	transport := newGoogleTokenTransport(nil, strings.TrimPrefix(metadata.URL, "http://"))
+	// One test server's client trusts every httptest TLS server's
+	// certificate, the same one.
+	transport := newGoogleTokenTransport(collector.Client().Transport, strings.TrimPrefix(collector.URL, "https://"), strings.TrimPrefix(metadata.URL, "http://"))
 	transport.now = func() time.Time { return now }
 	client := &http.Client{Transport: transport}
 	post := func() error {
@@ -87,9 +106,18 @@ func TestGoogleTokenTransport(t *testing.T) {
 	require.NoError(t, post())
 	assert.Equal(t, []string{"Bearer token-1", "Bearer token-1", "Bearer token-1", "Bearer token-2"}, got)
 
+	resp, err := client.Post(collector.URL+"/moved", "application/x-protobuf", strings.NewReader("spans"))
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+	resp, err = client.Post(plain.URL+"/v1/traces", "application/x-protobuf", strings.NewReader("spans"))
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+	assert.Equal(t, []string{"", ""}, elsewhere, "a redirect to another host, and a request over http, carry no token")
+	assert.Len(t, got, 4)
+
 	failing.Store(true)
 	now = now.Add(time.Hour)
-	err := post()
+	err = post()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "the metadata server answered 500")
 	assert.Len(t, got, 4, "an export without a token sends nothing")
@@ -99,7 +127,20 @@ func TestGoogleTokenTransport(t *testing.T) {
 // metadata server, as Google's client libraries read it.
 func TestGCEMetadataHostNamesTheMetadataServer(t *testing.T) {
 	t.Setenv(metadataHostVariable, "127.0.0.1:8089")
-	assert.Equal(t, "http://127.0.0.1:8089"+googleTokenPath, newGoogleTokenTransport(nil, "").tokenURL)
+	assert.Equal(t, "http://127.0.0.1:8089"+googleTokenPath, newGoogleTokenTransport(nil, "", "").tokenURL)
 	t.Setenv(metadataHostVariable, "")
-	assert.Equal(t, "http://metadata.google.internal"+googleTokenPath, newGoogleTokenTransport(nil, "").tokenURL)
+	assert.Equal(t, "http://metadata.google.internal"+googleTokenPath, newGoogleTokenTransport(nil, "", "").tokenURL)
+}
+
+// TestGoogleExportTimeout: the client that sends Google's token takes its
+// timeout from the traces timeout variable, else the general one, in
+// milliseconds, else ten seconds.
+func TestGoogleExportTimeout(t *testing.T) {
+	env := func(vars map[string]string) func(string) string {
+		return func(name string) string { return vars[name] }
+	}
+	assert.Equal(t, 10*time.Second, exportTimeoutOf(env(nil)))
+	assert.Equal(t, 2500*time.Millisecond, exportTimeoutOf(env(map[string]string{TimeoutVariable: "2500"})))
+	assert.Equal(t, 300*time.Millisecond, exportTimeoutOf(env(map[string]string{TimeoutVariable: "2500", TracesTimeoutVariable: "300"})))
+	assert.Equal(t, 10*time.Second, exportTimeoutOf(env(map[string]string{TimeoutVariable: "soon"})))
 }

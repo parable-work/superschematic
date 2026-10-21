@@ -162,8 +162,9 @@ func TestTelemetryOfOneDeployable(t *testing.T) {
 }
 
 // TestTelemetryRefuses (D67, amended): resolution refuses an endpoint that
-// is no http or https URL, a sample ratio outside 0 to 1, and a
-// deployable's telemetry that is not a boolean.
+// is no http or https URL, a sample ratio outside 0 to 1, a member it does
+// not know, Google's endpoint over http, over which no runtime sends the
+// account's token, and a deployable's telemetry that is not a boolean.
 func TestTelemetryRefuses(t *testing.T) {
 	reg := assemble(t)
 	for _, c := range []struct {
@@ -176,6 +177,9 @@ func TestTelemetryRefuses(t *testing.T) {
 		}, "telemetry"},
 		{"ratio", func(e *ir.Environment) { e.Values["telemetry"] = map[string]any{"sampleRatio": 1.5} }, "telemetry"},
 		{"unknown", func(e *ir.Environment) { e.Values["telemetry"] = map[string]any{"headers": "a=b"} }, "telemetry"},
+		{"google over http", func(e *ir.Environment) {
+			e.Values["telemetry"] = map[string]any{"endpoint": "http://telemetry.googleapis.com"}
+		}, "Google's OTLP endpoint takes https alone"},
 		{"setting", func(e *ir.Environment) { ordersSettings(e).Values = map[string]any{"telemetry": "on"} }, "telemetry"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -190,11 +194,12 @@ func TestTelemetryRefuses(t *testing.T) {
 }
 
 // TestBootstrapEnablesTheTraceAPIs (D67, amended): the bootstrap of an
-// environment that exports to Cloud Trace enables the Telemetry API, whose
-// OTLP endpoint takes the spans, and Cloud Trace; one that exports nothing
-// enables neither.
+// environment with Cloud Run enables the Telemetry API, whose OTLP
+// endpoint takes the spans, and Cloud Trace, whether it exports there, as
+// Production does, or not, as Staging, whose project another environment
+// may export from: bootstrap sees its own environment alone.
 func TestBootstrapEnablesTheTraceAPIs(t *testing.T) {
-	for env, want := range map[string]bool{"Production": true, "Staging": false} {
+	for _, env := range []string{"Production", "Staging"} {
 		f := newDeployFixture(t, false)
 		resolved := resolve(t, f.reg, shop(), stacktest.AcmeShop(), env)
 		target, _ := f.reg.Target(gcp.Target)
@@ -205,8 +210,8 @@ func TestBootstrapEnablesTheTraceAPIs(t *testing.T) {
 		}
 		changes := f.cloud.Changes()
 		for _, api := range []string{"enable telemetry.googleapis.com", "enable cloudtrace.googleapis.com"} {
-			if slices.Contains(changes, api) != want {
-				t.Errorf("%s's bootstrap: %s is %v, want %v", env, api, !want, want)
+			if !slices.Contains(changes, api) {
+				t.Errorf("%s's bootstrap did not %s", env, api)
 			}
 		}
 	}

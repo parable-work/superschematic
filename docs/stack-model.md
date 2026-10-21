@@ -1481,10 +1481,10 @@ again: each step creates what is missing and leaves the rest.
    Federation, Secret Manager, and Cloud Run, Cloud SQL, Compute Engine,
    Certificate Manager, Cloud DNS and Cloud Scheduler as the graph's
    resource types need them, Cloud Run with any database for its migration
-   job, Cloud Scheduler for a job's schedule (D52), and the Telemetry and
-   Cloud Trace APIs where a deployable exports its traces to Cloud Trace
-   (section 8.11), so turning that on in an environment bootstrapped
-   before needs `stack bootstrap` again. An API
+   job, Cloud Scheduler for a job's schedule (D52), and, with Cloud Run,
+   the Telemetry and Cloud Trace APIs, which a deployable that exports to
+   Cloud Trace uses (section 8.11), whether or not this environment
+   exports, since another in the same project may. An API
    enabled moments ago can refuse calls as one the project has not
    enabled, so each later step retries such a refusal for up to five
    minutes.
@@ -3435,15 +3435,19 @@ container:
 
 Cloud Trace's endpoint takes an OAuth access token, which expires within
 the hour, so no fixed `OTEL_EXPORTER_OTLP_HEADERS` carries it. Each
-runtime sends one itself to an endpoint whose host is `googleapis.com` or
-under it, unless a headers variable names an `authorization` header: the
+runtime sends one itself to an `https` endpoint whose host is
+`googleapis.com` or under it, and to that host alone, unless a headers
+variable names an `authorization` header: the
 access token of the workload's own account, from the metadata server
 (`GCE_METADATA_HOST` when set), fetched again five minutes before it
 expires. A deployable that exports to Cloud Trace gets the Cloud Trace
 agent role on the project for its account, which holds
 `telemetry.traces.write`; one that exports to a collector gets no role,
 and reaches the collector as it reaches the internet, or through the VPC
-when it calls another server. Metrics and logs are not exported.
+when it calls another server. An account that does not export holds no
+trace role, so code that calls Cloud Trace itself turns its deployable's
+`telemetry` on. An `http` endpoint under `googleapis.com` is refused.
+Metrics and logs are not exported.
 
 
 ## 9. End-user auth and service auth

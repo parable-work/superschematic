@@ -260,7 +260,7 @@ describe('startTelemetry', () => {
 });
 
 describe("Google's OTLP endpoint (D67, amended)", () => {
-  test('an endpoint under googleapis.com alone gets the access token, unless a headers variable names authorization', () => {
+  test('an https endpoint under googleapis.com alone gets the access token, never over http, unless a headers variable names authorization', () => {
     const cases: Array<[string, boolean]> = [
       ['https://telemetry.googleapis.com', true],
       ['https://telemetry.googleapis.com:443/v1/traces', true],
@@ -270,6 +270,8 @@ describe("Google's OTLP endpoint (D67, amended)", () => {
       ['http://collector.internal:4318', false],
       ['https://notgoogleapis.com', false],
       ['https://googleapis.com.example.com', false],
+      ['http://telemetry.googleapis.com', false],
+      ['http://telemetry.googleapis.com:443/v1/traces', false],
     ];
     for (const [endpoint, want] of cases) expect([endpoint, googleAuth(endpoint, {})]).toEqual([endpoint, want]);
     expect(googleAuth('https://telemetry.googleapis.com', { OTEL_EXPORTER_OTLP_HEADERS: 'Authorization=Bearer%20abc' })).toBe(false);

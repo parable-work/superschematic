@@ -9,10 +9,12 @@
 //     and Transport return what they wrap.
 //   - OTEL_EXPORTER_OTLP_HEADERS, OTEL_EXPORTER_OTLP_TIMEOUT and their
 //     per-signal forms reach the exporter, which reads them itself.
-//   - An endpoint under googleapis.com, Cloud Trace's OTLP endpoint, gets
-//     the access token of the workload's account from the metadata server
-//     on each export, unless a headers variable names an authorization
-//     header (google.go).
+//   - An https endpoint under googleapis.com, Cloud Trace's OTLP endpoint,
+//     gets the access token of the workload's account from the metadata
+//     server on each export, unless a headers variable names an
+//     authorization header (google.go). Its client reads the timeout
+//     variables but not OTEL_EXPORTER_OTLP_CERTIFICATE or the client
+//     certificate and key, which Google's endpoint has no use for.
 //   - OTEL_EXPORTER_OTLP_PROTOCOL, and its traces form, may only name
 //     http/protobuf, the one protocol the runtime exports over.
 //   - OTEL_SERVICE_NAME and OTEL_RESOURCE_ATTRIBUTES override the defaults
@@ -91,9 +93,10 @@ const JobAttribute = "superschematic.job"
 // spans still buffered to reach the collector.
 const flushTimeout = 5 * time.Second
 
-// exportTimeout bounds one export through the client that sends Google's
-// access token (google.go), as the exporter's own client's default does.
-const exportTimeout = 10 * time.Second
+// defaultExportTimeout bounds one export through the client that sends
+// Google's access token (google.go) when no timeout variable says, as the
+// exporter's own client's default does.
+const defaultExportTimeout = 10 * time.Second
 
 // scope is the instrumentation scope of the spans the package makes
 // itself.
@@ -152,8 +155,8 @@ func Start(ctx context.Context, d Defaults) (stop func(), err error) {
 	google := googleAuth(cfg.endpoint, os.Getenv)
 	if google {
 		options = append(options, otlptracehttp.WithHTTPClient(&http.Client{
-			Transport: newGoogleTokenTransport(nil, ""),
-			Timeout:   exportTimeout,
+			Transport: newGoogleTokenTransport(nil, endpointHost(cfg.endpoint), ""),
+			Timeout:   exportTimeoutOf(os.Getenv),
 		}))
 	}
 	exporter, err := otlptracehttp.New(ctx, options...)

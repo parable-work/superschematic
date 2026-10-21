@@ -12,7 +12,7 @@ OpenTelemetry's own environment variables:
   through.
 - OTEL_EXPORTER_OTLP_HEADERS, OTEL_EXPORTER_OTLP_TIMEOUT and their
   per-signal forms reach the exporter, which reads them itself.
-- An endpoint under googleapis.com, Cloud Trace's OTLP endpoint, gets the
+- An https endpoint under googleapis.com, Cloud Trace's OTLP endpoint, gets the
   access token of the workload's account from the metadata server on each
   export (GCE_METADATA_HOST when set, else metadata.google.internal),
   unless a headers variable names an authorization header (D67, amended).
@@ -321,14 +321,16 @@ function routeOf(c: HonoContext): string | undefined {
 
 /**
  * Whether export to endpoint sends the access token of the workload's
- * account (D67, amended): whether its host is googleapis.com or under it,
- * and neither OTEL_EXPORTER_OTLP_TRACES_HEADERS nor
+ * account (D67, amended): whether it is an https URL, so the token never
+ * goes in the clear, whose host is googleapis.com or under it, and neither OTEL_EXPORTER_OTLP_TRACES_HEADERS nor
  * OTEL_EXPORTER_OTLP_HEADERS names an authorization header.
  */
 export function googleAuth(endpoint: string, env: Readonly<Record<string, string | undefined>>): boolean {
   let host: string;
   try {
-    host = new URL(endpoint).hostname.toLowerCase();
+    const url = new URL(endpoint);
+    if (url.protocol !== 'https:') return false;
+    host = url.hostname.toLowerCase();
   } catch {
     return false;
   }
