@@ -584,6 +584,31 @@
         ]
       },
       {
+        "id": "migrator.queue-results",
+        "type": "gcp:storage/bucketIAMMember:BucketIAMMember",
+        "properties": {
+          "bucket": "acme-prod-superschematic-state",
+          "condition": {
+            "expression": "resource.name.startsWith(\"projects/_/buckets/acme-prod-superschematic-state/objects/superschematic/queue/shop/\")",
+            "title": "Objects under superschematic/queue/shop/"
+          },
+          "member": {
+            "$output": {
+              "resource": "migrator",
+              "name": "member"
+            }
+          },
+          "role": "roles/storage.objectCreator"
+        },
+        "dependsOn": [
+          "migrator"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "bootstrap"
+        ]
+      },
+      {
         "id": "migrator.role.cloudsql-client",
         "type": "gcp:projects/iAMMember:IAMMember",
         "properties": {
@@ -870,6 +895,7 @@
         "github",
         "github.provider",
         "migrator",
+        "migrator.queue-results",
         "migrator.role.cloudsql-client",
         "migrator.role.cloudsql-instanceUser",
         "migrator.state",

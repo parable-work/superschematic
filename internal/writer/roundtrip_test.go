@@ -409,6 +409,36 @@ func TestTSWriterEmitsTemporalFormatDecorator(t *testing.T) {
 	}
 }
 
+// TestTSWriterRoundTripsUIControl: a field's @uiControl hint is written as the
+// decorator and read back into the same IR.
+func TestTSWriterRoundTripsUIControl(t *testing.T) {
+	schema := ir.NewSchema("fixture-general", ir.SchemaKindGeneral)
+	schema.Types["Settings"] = &ir.TypeDef{
+		Name:  "Settings",
+		Owner: "src/settings.schema.ts",
+		Role:  ir.RoleEmbeddedStruct,
+		Fields: []*ir.FieldDef{{
+			Name: "level", TypeRef: ir.TypeRef{Name: "number"}, Required: true,
+			UIControl: "slider",
+		}},
+	}
+
+	dir := t.TempDir()
+	if _, err := WriteService(schema, FormatTS, dir); err != nil {
+		t.Fatalf("WriteService: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(dir, "src", "settings.schema.ts"))
+	if err != nil {
+		t.Fatalf("reading TS output: %v", err)
+	}
+	if !strings.Contains(string(got), `@uiControl("slider")`) {
+		t.Fatalf("TS output missing @uiControl:\n%s", got)
+	}
+	if got, want := normalizeIR(t, writeAndReload(t, schema, FormatTS)), normalizeIR(t, schema); got != want {
+		t.Fatalf("IR changed after a TS round trip\nwant:\n%s\ngot:\n%s", want, got)
+	}
+}
+
 // TestTSWriterEmitsMultiPinVersionedDecorator: a table pinned by more than one
 // referencing table emits the array form. One pin keeps the object form so
 // existing schema files round-trip byte-identical.

@@ -156,6 +156,41 @@ The schema runtimes carry the three fields. The TypeScript runtime's
 `purpose` and `icon` from the IR; the Python runtime's `parse_schema` reads
 the legacy keys into `FieldDef.title`, `purpose` and `icon`.
 
+### `@uiControl` on a field
+
+From `@superschematic/schema`, `@uiControl(control)` names the control a
+schema form draws for the field, in place of the one it picks from the
+field's type and `Validate` limits. It writes `FieldDef.uiControl`; empty
+means the form picks.
+
+```ts
+import { uiControl, type Validate } from "@superschematic/schema";
+
+export abstract class ReportSettings {
+  @uiControl("radio")
+  day: Weekday;
+
+  @uiControl("slider")
+  level: Validate<Generic.Int64, { min: 1; max: 10 }>;
+}
+```
+
+| Control | For |
+| --- | --- |
+| `slider`, `number-field` | a number; a slider needs a finite minimum and maximum |
+| `switch`, `segmented`, `radio`, `select`, `combobox` | an enum; a switch needs two values that read as on and off |
+| `checkboxes`, `combobox` | an array of an enum |
+| `input`, `textarea` | a string |
+
+The `UIControl` type refuses another value in a `.schema.ts` file, and
+`ir.ValidateUIControl` refuses it in every form, the JSON and YAML forms
+included (`invalid field @uiControl: unknown control "dial"; ...`). It
+appears at most once on a field. A form ignores a control that does not
+fit the field and picks its own. Like a placeholder it is a form hint: no
+generated type, validator or wire format changes, and of the schema
+runtimes only the TypeScript runtime's `parseSchemaIR` carries it, to
+`FieldDef.uiControl`.
+
 ### `@display({ multiline })` on a field
 
 `@display` from `@superschematic/schema` also goes on a field, where it

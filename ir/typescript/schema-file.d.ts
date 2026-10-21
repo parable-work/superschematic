@@ -219,6 +219,7 @@ export interface FieldDef {
   temporalFormat?: string;
   title?: string;
   typeRef: TypeRef;
+  uiControl?: string;
   uiHidden?: boolean;
   unique?: boolean;
   validateListMax?: number;

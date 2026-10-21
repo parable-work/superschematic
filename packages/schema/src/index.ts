@@ -8,10 +8,11 @@ export {
   source,
   strictJSON,
   temporalFormat,
+  uiControl,
   uiHidden,
   virtual,
 } from "./decorators";
-export type { TemporalWireFormat } from "./decorators";
+export type { TemporalWireFormat, UIControl } from "./decorators";
 export type {
   Default,
   Nullable,

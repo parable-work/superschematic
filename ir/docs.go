@@ -289,8 +289,8 @@ func checkOptionalText(name, value string) error {
 // validateDocs checks the documentation metadata of every field and
 // operation: each operation's @docs, @mcp and @icon, that @docs and @mcp
 // records sit on operations only, that a visible @mcp tool also has @docs,
-// that a field's title, purpose and icon are not blank, and that a field
-// display declares something and sits on a field, not an operation (D48,
+// that a field's title, purpose and icon are not blank, that its @uiControl
+// is one of UIControls, and that a field display declares something and sits on a field, not an operation (D48,
 // amended). An argument (ArgumentDef) has no display to carry. It runs for
 // every authoring form, so a data-form file is held to what the TypeScript
 // decorators enforce.
@@ -314,6 +314,11 @@ func (s *Schema) validateDocs() []error {
 			} {
 				if text.value != "" && strings.TrimSpace(text.value) == "" {
 					errs = append(errs, fmt.Errorf("%s.%s %s must be non-empty when provided", owner, f.Name, text.name))
+				}
+			}
+			if f.UIControl != "" {
+				if err := ValidateUIControl(f.UIControl); err != nil {
+					errs = append(errs, fmt.Errorf("%s.%s has an invalid @uiControl: %w", owner, f.Name, err))
 				}
 			}
 			if err := ValidateFieldDisplay(f.Display); err != nil {

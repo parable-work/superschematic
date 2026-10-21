@@ -459,6 +459,11 @@ type FieldDef struct {
 	// UIHidden marks this field as hidden in UI schema renderers (@uiHidden).
 	UIHidden bool `json:"uiHidden,omitempty" yaml:"uiHidden,omitempty"`
 
+	// UIControl names the control a schema form draws for the field in place
+	// of the one it picks (@uiControl). Empty means the form picks. One of
+	// UIControls.
+	UIControl string `json:"uiControl,omitempty" yaml:"uiControl,omitempty"`
+
 	// InternalMetadata marks this field as internal codegen/dispatch metadata
 	// (for example, a discriminator on a union variant) rather than
 	// user-facing data (@internalMetadata).
