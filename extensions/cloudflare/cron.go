@@ -16,15 +16,20 @@ import (
 // which runs the bundle its package's bundle.ts writes from the generated
 // scheduled.ts (section 18.5). Its Worker is the three nodes a server's is (workerNodes),
 // with workers.dev off, since a job is never exposed, and its version holds
-// the bundle and the job's config as bindings (bundleVersion). A schedule
-// the environment runs is a Cron Trigger on the Worker, in UTC. A job with
-// no schedule has its Worker and no trigger: nothing runs it, since no Jobs
-// seam is built for this target and `stack run` refuses it.
+// the bundle, the job's config as bindings (bundleVersion) and the bundle's
+// digest (BundleBinding). A schedule the environment runs is a Cron Trigger
+// on the Worker, in UTC. Every job's Worker is also a Workflow,
+// `<job>.workflow`, of the class scheduled.ts exports (WorkflowClass), named
+// as the Worker is: the target's job runner (jobs.go) starts an instance of
+// it through Cloudflare's API to run the job once, for `stack run` and for a
+// job that runs on every deploy (D52, amended; D64, amended). A job with no
+// schedule has its Worker, its Workflow and no trigger.
 //
 // scheduled.ts runs the job's tries within one invocation, as `stack dev`
 // runs them one after the other, each bounded by the job's timeout, so the
 // tries of one firing must fit within Cloudflare's limit on a scheduled
-// run's duration (MaxScheduledRunSeconds).
+// run's duration (MaxScheduledRunSeconds). The Workflow runs the same tries
+// within one step.
 
 // Cron runs TypeScript jobs as Cloudflare Workers under Cron Triggers.
 const Cron = "cloudflare.cron"
@@ -40,9 +45,23 @@ const (
 	CronD1Connector   = "cloudflare.cron-d1"
 )
 
-// TypeWorkersCronTrigger is a Worker's Cron Triggers, pinned in schemas/
-// at ProviderVersion.
-const TypeWorkersCronTrigger = "cloudflare:index/workersCronTrigger:WorkersCronTrigger"
+// TypeWorkersCronTrigger is a Worker's Cron Triggers, and TypeWorkflow a
+// Workflow of a Worker's class, pinned in schemas/ at ProviderVersion.
+const (
+	TypeWorkersCronTrigger = "cloudflare:index/workersCronTrigger:WorkersCronTrigger"
+	TypeWorkflow           = "cloudflare:index/workflow:Workflow"
+)
+
+// WorkflowClass is the class scheduled.ts exports, a WorkflowEntrypoint
+// whose run runs the job's tries within one step, as a Cron Trigger's
+// firing runs them: the class every job's Workflow names.
+const WorkflowClass = ir.JobRunClass
+
+// BundleBinding is the plain_text binding a job's version holds the
+// digest of its bundle in, `{bundle-digest}`, which the deploy pins: the
+// Workflow compares it with the digest the job runner asks for, so a run
+// never runs another bundle than the one the manifest records.
+const BundleBinding = ir.BundleDigestVariable
 
 // MaxScheduledRunSeconds is the longest a Cron Trigger's run of a Worker
 // lasts, wall-clock, on both plans: 15 minutes, by the Duration table of
@@ -82,8 +101,10 @@ func cronPlatform() registry.PlatformSpec {
 	}
 }
 
-// scheduleID is the ID of a job's Cron Trigger node.
+// scheduleID is the ID of a job's Cron Trigger node, and workflowID of its
+// Workflow's.
 func scheduleID(deployable string) string { return deployable + ".schedule" }
+func workflowID(deployable string) string { return deployable + ".workflow" }
 
 // lowerJob lowers a job to its Worker's three nodes, workers.dev off, whose
 // version runs its bundle, and for a schedule the environment runs, a Cron
@@ -117,10 +138,27 @@ func lowerJob(ctx registry.PlatformContext) (registry.Lowered, error) {
 	if err != nil {
 		return registry.Lowered{}, err
 	}
+	if err := addBinding(version, map[string]any{"type": bindingPlainText, "name": BundleBinding, "text": ir.BundleDigestToken}); err != nil {
+		return registry.Lowered{}, fmt.Errorf("job %s: %w", d.Name, err)
+	}
 	out := registry.Lowered{Resources: workerNodes(d, v, false, settingBool(d.Settings, "logs", true), version)}
 	// The Worker waits for each Worker its service bindings name, so a
 	// destroy removes it, with its bindings, first (calls.go).
 	out.Resources[0].DependsOn = bindingDependencies(d)
+	// The Workflow through which the job runner runs the job once, of the
+	// class the deployment's version exports, so it waits for the
+	// deployment.
+	out.Resources = append(out.Resources, &ir.Resource{
+		ID:        workflowID(d.Name),
+		Type:      TypeWorkflow,
+		DependsOn: []string{deploymentID(d.Name)},
+		Properties: map[string]any{
+			"accountId":    v.accountID,
+			"workflowName": d.ResourceName,
+			"scriptName":   ir.Output{Resource: workerID(d.Name), Name: "name"},
+			"className":    WorkflowClass,
+		},
+	})
 	if run.Schedule != "" {
 		out.Resources = append(out.Resources, &ir.Resource{
 			ID:        scheduleID(d.Name),
@@ -153,4 +191,19 @@ func seconds(n int) string {
 		s = strings.TrimSuffix(s, "0m")
 	}
 	return s
+}
+
+// addBinding adds a binding to a version's, keeping them sorted by name,
+// and refuses one whose name a binding holds already.
+func addBinding(version map[string]any, binding map[string]any) error {
+	bindings, _ := version["bindings"].([]any)
+	name := binding["name"].(string)
+	i, found := slices.BinarySearchFunc(bindings, name, func(b any, name string) int {
+		return strings.Compare(b.(map[string]any)["name"].(string), name)
+	})
+	if found {
+		return fmt.Errorf("a binding of its config is named %s, which the platform's own binding takes", name)
+	}
+	version["bindings"] = slices.Insert(bindings, i, any(binding))
+	return nil
 }

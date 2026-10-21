@@ -74,7 +74,47 @@ type Cloud interface {
 
 	// ListObjects returns the keys of the objects under prefix, sorted.
 	ListObjects(ctx context.Context, account, bucket, prefix string) ([]string, error)
+
+	// CreateWorkflowInstance starts an instance of a Workflow with params
+	// as its event's payload, and returns the instance's id. A Workflow
+	// that does not exist is an error that wraps fs.ErrNotExist.
+	CreateWorkflowInstance(ctx context.Context, account, workflow string, params any) (string, error)
+
+	// WorkflowInstance returns an instance's status and, once it has
+	// failed, its error.
+	WorkflowInstance(ctx context.Context, account, workflow, id string) (*WorkflowInstance, error)
 }
+
+// WorkflowInstance is a Workflow instance as Cloudflare reports it.
+type WorkflowInstance struct {
+	// Status is queued, running, paused, waiting, waitingForPause,
+	// errored, terminated or complete, among others.
+	Status string `json:"status"`
+
+	// Error is what the instance failed with: the message and the name of
+	// the error its run threw.
+	Error *struct {
+		Name    string `json:"name"`
+		Message string `json:"message"`
+	} `json:"error,omitempty"`
+}
+
+// Done reports whether the instance has ended: complete, errored or
+// terminated.
+func (w *WorkflowInstance) Done() bool {
+	switch w.Status {
+	case WorkflowComplete, WorkflowErrored, WorkflowTerminated:
+		return true
+	}
+	return false
+}
+
+// The statuses of a Workflow instance that has ended.
+const (
+	WorkflowComplete   = "complete"
+	WorkflowErrored    = "errored"
+	WorkflowTerminated = "terminated"
+)
 
 // Token is an API token as Cloudflare verifies it.
 type Token struct {
@@ -323,6 +363,40 @@ func (c *restCloud) WorkersSubdomain(ctx context.Context, account string) (strin
 		return "", nil
 	}
 	return result.Subdomain, err
+}
+
+func (c *restCloud) workflowPath(account, workflow string) string {
+	return "/accounts/" + url.PathEscape(account) + "/workflows/" + url.PathEscape(workflow) + "/instances"
+}
+
+func (c *restCloud) CreateWorkflowInstance(ctx context.Context, account, workflow string, params any) (string, error) {
+	data, err := json.Marshal(params)
+	if err != nil {
+		return "", err
+	}
+	// The API takes the event's payload as JSON within a string.
+	var result struct {
+		ID string `json:"id"`
+	}
+	_, err = c.call(ctx, http.MethodPost, c.workflowPath(account, workflow), map[string]string{"params": string(data)}, &result)
+	if notFound(err) {
+		return "", fmt.Errorf("%w: %w", err, fs.ErrNotExist)
+	}
+	if err != nil {
+		return "", err
+	}
+	if result.ID == "" {
+		return "", fmt.Errorf("cloudflare: an instance of Workflow %s was created with no id", workflow)
+	}
+	return result.ID, nil
+}
+
+func (c *restCloud) WorkflowInstance(ctx context.Context, account, workflow, id string) (*WorkflowInstance, error) {
+	var instance WorkflowInstance
+	if _, err := c.call(ctx, http.MethodGet, c.workflowPath(account, workflow)+"/"+url.PathEscape(id)+"?simple=true", nil, &instance); err != nil {
+		return nil, err
+	}
+	return &instance, nil
 }
 
 func (c *restCloud) PermissionGroups(ctx context.Context, account string) ([]PermissionGroup, error) {

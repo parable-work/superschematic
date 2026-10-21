@@ -1,0 +1,90 @@
+{
+  "token": "cloudflare:index/workflow:Workflow",
+  "terraform": {
+    "type": "cloudflare_workflow",
+    "renames": {
+      "accountId": "account_id",
+      "className": "class_name",
+      "defaultRetention": "default_retention",
+      "defaultRetention.errorRetention": "error_retention",
+      "defaultRetention.successRetention": "success_retention",
+      "scriptName": "script_name",
+      "workflowName": "workflow_name"
+    }
+  },
+  "inputProperties": {
+    "accountId": {
+      "type": "string"
+    },
+    "className": {
+      "type": "string"
+    },
+    "concurrency": {
+      "$ref": "#/types/cloudflare:index/WorkflowConcurrency:WorkflowConcurrency"
+    },
+    "defaultRetention": {
+      "$ref": "#/types/cloudflare:index/WorkflowDefaultRetention:WorkflowDefaultRetention"
+    },
+    "limits": {
+      "$ref": "#/types/cloudflare:index/WorkflowLimits:WorkflowLimits"
+    },
+    "schedules": {
+      "type": "array",
+      "items": {
+        "$ref": "#/types/cloudflare:index/WorkflowSchedule:WorkflowSchedule"
+      }
+    },
+    "scriptName": {
+      "type": "string"
+    },
+    "workflowName": {
+      "type": "string"
+    }
+  },
+  "requiredInputs": [
+    "accountId",
+    "className",
+    "scriptName",
+    "workflowName"
+  ],
+  "types": {
+    "cloudflare:index/WorkflowConcurrency:WorkflowConcurrency": {
+      "type": "object",
+      "properties": {
+        "limit": {
+          "type": "integer"
+        }
+      }
+    },
+    "cloudflare:index/WorkflowDefaultRetention:WorkflowDefaultRetention": {
+      "type": "object",
+      "properties": {
+        "errorRetention": {
+          "$ref": "pulumi.json#/Any"
+        },
+        "successRetention": {
+          "$ref": "pulumi.json#/Any"
+        }
+      }
+    },
+    "cloudflare:index/WorkflowLimits:WorkflowLimits": {
+      "type": "object",
+      "properties": {
+        "steps": {
+          "type": "integer"
+        }
+      }
+    },
+    "cloudflare:index/WorkflowSchedule:WorkflowSchedule": {
+      "type": "object",
+      "properties": {
+        "cron": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "cron"
+      ]
+    }
+  }
+}

@@ -1020,6 +1020,12 @@ func (s *TypeScriptServer) BundleEntry() string {
 	return TypeScriptFetchFile
 }
 
+// WorkflowClass is the class a job's scheduled.ts exports, which the
+// cloudflare target's job runner starts an instance of, and BundleBinding
+// the binding it reads its bundle's digest from (D64, amended).
+func (s *TypeScriptServer) WorkflowClass() string { return ir.JobRunClass }
+func (s *TypeScriptServer) BundleBinding() string { return ir.BundleDigestVariable }
+
 // APIsWithConfig reports whether an API of the server has an EnvConfig,
 // which fetch.ts reads from the Worker's bindings (D64).
 func (s *TypeScriptServer) APIsWithConfig() bool {

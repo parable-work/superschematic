@@ -19,11 +19,18 @@
 // with how long the try took, and throws after the last failure, so
 // Cloudflare records the run as failed.
 //
+// The Worker also exports JobRun, the class of the job's Workflow, through
+// which the cloudflare target runs the job once, for stack run and on a
+// deploy (D52 and D64, amended): an instance whose payload names the
+// bundle the deploy manifest records runs the same tries within one step,
+// once the Worker's SUPERSCHEMATIC_BUNDLE binding shows it runs that bundle,
+// and fails with the error a firing throws.
+//
 // The API's implementation is the package at the naming file's
 // [implementation_paths] typescript template (section 8.6):
 // @schemas/ts-reports-implementation, at typescript/ts-reports
 
-import { env } from 'cloudflare:workers';
+import { env, WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from 'cloudflare:workers';
 import { createLogger } from '@superschematic/http-runtime';
 import { stackEnvOf, stackEnvWithSecrets } from '@superschematic/http-runtime/workers';
 import * as tsReportsApi from '@schemas/ts-reports-api';
@@ -67,28 +74,62 @@ async function tryOnce(signal: AbortSignal): Promise<void> {
   await untilAborted(jobs.compileReports(signal), signal);
 }
 
+/**
+ * Runs the job's tries, one after the other, until one succeeds; throws
+ * after the last failure. fields say what started the run, on each line.
+ */
+async function runTries(fields: Readonly<Record<string, unknown>>): Promise<void> {
+  let failure: unknown;
+  for (let attempt = 1; attempt <= TRIES; attempt++) {
+    const started = Date.now();
+    const deadline = new AbortController();
+    const timer = setTimeout(() => deadline.abort(new Error(`timed out after ${TIMEOUT_MS / 1000}s, the job's timeout`)), TIMEOUT_MS);
+    logger.info('job started', { api: 'ts-reports', class: 'CompileReports', ...fields, try: attempt, tries: TRIES });
+    try {
+      await tryOnce(deadline.signal);
+      logger.info('job done', { took: (Date.now() - started) / 1000, try: attempt });
+      return;
+    } catch (error) {
+      failure = error;
+      logger.error('job failed', { took: (Date.now() - started) / 1000, try: attempt, tries: TRIES, error });
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  throw new Error(`job ts-reports-compile-reports failed on each of its ${TRIES} tries: ${failure instanceof Error ? failure.message : String(failure)}`, { cause: failure });
+}
+
 export default {
   async scheduled(controller: ScheduledController): Promise<void> {
-    let failure: unknown;
-    for (let attempt = 1; attempt <= TRIES; attempt++) {
-      const started = Date.now();
-      const deadline = new AbortController();
-      const timer = setTimeout(() => deadline.abort(new Error(`timed out after ${TIMEOUT_MS / 1000}s, the job's timeout`)), TIMEOUT_MS);
-      logger.info('job started', { api: 'ts-reports', class: 'CompileReports', cron: controller.cron, try: attempt, tries: TRIES });
-      try {
-        await tryOnce(deadline.signal);
-        logger.info('job done', { took: (Date.now() - started) / 1000, try: attempt });
-        return;
-      } catch (error) {
-        failure = error;
-        logger.error('job failed', { took: (Date.now() - started) / 1000, try: attempt, tries: TRIES, error });
-      } finally {
-        clearTimeout(timer);
-      }
-    }
-    throw new Error(`job ts-reports-compile-reports failed on each of its ${TRIES} tries: ${failure instanceof Error ? failure.message : String(failure)}`, { cause: failure });
+    await runTries({ cron: controller.cron });
   },
 };
+
+/** What the job runner starts an instance of the Workflow with. */
+interface RunPayload {
+  /** The hex digest of the bundle the deploy manifest records. */
+  readonly bundle?: string;
+}
+
+/**
+ * The job's Workflow (D64, amended): each instance runs the job's tries
+ * within one step, which retries nothing itself and may take as long as
+ * every try with a minute to spare, once the Worker shows it runs the
+ * bundle the instance names.
+ */
+export class JobRun extends WorkflowEntrypoint<unknown, RunPayload | string> {
+  async run(event: Readonly<WorkflowEvent<RunPayload | string>>, step: WorkflowStep): Promise<string> {
+    const payload: RunPayload = typeof event.payload === 'string' ? (JSON.parse(event.payload) as RunPayload) : event.payload;
+    const running = env['SUPERSCHEMATIC_BUNDLE'];
+    if (payload.bundle && running !== payload.bundle) {
+      throw new Error(
+        `job ts-reports-compile-reports runs bundle ${typeof running === 'string' ? running : 'unknown'}, but the last deploy rolled out ${payload.bundle}: a deploy may be under way, or the Worker changed outside one; deploy it, then run the job`
+      );
+    }
+    await step.do('run', { retries: { limit: 0, delay: 0 }, timeout: TIMEOUT_MS * TRIES + 60_000 }, () => runTries({ instance: event.instanceId }));
+    return 'done';
+  }
+}
 
 /** Settles as work settles, or rejects with signal's reason when it aborts first. */
 function untilAborted(work: Promise<void>, signal: AbortSignal): Promise<void> {

@@ -110,8 +110,9 @@ func (Extension) Name() string { return Name }
 // its platforms and connectors, with the pinned schema of every type they
 // and bootstrap emit, and the target's deploy seams: the state in R2, the
 // Secrets Store, bootstrap, the bundles in R2, the emptying of a member's
-// buckets before its destroy, D1's migration runner, and the generated
-// CI's sign-in with an account token (D64).
+// buckets before its destroy, D1's migration runner, the job runner over
+// each job's Workflow, and the generated CI's sign-in with an account token
+// (D64).
 func (e Extension) Register(r *registry.Registry) error {
 	types, err := schemas.ResourceTypes(ProviderVersion)
 	if err != nil {
@@ -162,6 +163,7 @@ func (e Extension) Register(r *registry.Registry) error {
 		Sites:      siteStore{ext: e},
 		PreDestroy: destroyPreparer{ext: e},
 		Migrations: migrationRunner{ext: e},
+		Jobs:       jobRunner{ext: e},
 		CI:         ciIdentities{},
 	})
 }

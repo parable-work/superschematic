@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -46,6 +47,18 @@ type fakeCloud struct {
 	objects   map[string][]byte            // bucket/key
 	meta      map[string]map[string]string // bucket/key
 	nextID    int
+
+	// workflows are the account's Workflows, each with how an instance
+	// whose payload is the one given ends; instances are those started.
+	workflows map[string]func(payload map[string]string) cloudflare.WorkflowInstance
+	instances map[string]*fakeInstance
+}
+
+// fakeInstance is a Workflow instance: running at its first read, then
+// ended as its Workflow says.
+type fakeInstance struct {
+	reads int
+	ended cloudflare.WorkflowInstance
 }
 
 type fakeSecret struct {
@@ -103,7 +116,49 @@ func newFakeCloud() *fakeCloud {
 		buckets:   map[string]bool{},
 		objects:   map[string][]byte{},
 		meta:      map[string]map[string]string{},
+		workflows: map[string]func(map[string]string) cloudflare.WorkflowInstance{},
+		instances: map[string]*fakeInstance{},
 	}
+}
+
+func (c *fakeCloud) CreateWorkflowInstance(_ context.Context, account, workflow string, params any) (string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if err := c.checkAccount(account); err != nil {
+		return "", err
+	}
+	run := c.workflows[workflow]
+	if run == nil {
+		return "", fmt.Errorf("fake: no Workflow %s: %w", workflow, fs.ErrNotExist)
+	}
+	data, err := json.Marshal(params)
+	if err != nil {
+		return "", err
+	}
+	var payload map[string]string
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return "", err
+	}
+	c.nextID++
+	id := fmt.Sprintf("instance-%d", c.nextID)
+	c.instances[workflow+"/"+id] = &fakeInstance{ended: run(payload)}
+	c.record("run workflow %s: %s", workflow, data)
+	return id, nil
+}
+
+func (c *fakeCloud) WorkflowInstance(_ context.Context, account, workflow, id string) (*cloudflare.WorkflowInstance, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	instance := c.instances[workflow+"/"+id]
+	if instance == nil {
+		return nil, fmt.Errorf("fake: no instance %s of Workflow %s", id, workflow)
+	}
+	instance.reads++
+	if instance.reads == 1 {
+		return &cloudflare.WorkflowInstance{Status: "running"}, c.checkAccount(account)
+	}
+	ended := instance.ended
+	return &ended, c.checkAccount(account)
 }
 
 func (c *fakeCloud) record(format string, args ...any) {

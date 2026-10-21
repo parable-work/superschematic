@@ -4,9 +4,12 @@
 # WebAssembly module, with the bindings the cloudflare.cron platform gives
 # its version: REPORT_FAILURES as text, how many tries fail before one
 # succeeds, and REPORT_TOKEN as a Secrets Store secret, here a wrapped
-# stand-in (standins.js). The tester (tester.js) fires each Worker's
+# stand-in (standins.js), and SUPERSCHEMATIC_BUNDLE, the digest of the
+# bundle the deploy pins. The tester (tester.js) fires each Worker's
 # scheduled handler through a service binding, as its Cron Trigger fires
-# it. TestTypeScriptCronEntrypointRunsUnderWorkerd copies the bundle,
+# it, and runs the job's Workflow, JobRun, through a binding to that
+# entrypoint, as Cloudflare's Workflows engine calls its run with an event
+# and a step (D64, amended). TestTypeScriptCronEntrypointRunsUnderWorkerd copies the bundle,
 # tester.js and standins.js beside this file and runs `workerd test`.
 using Workerd = import "/workerd/workerd.capnp";
 
@@ -30,6 +33,7 @@ const ok :Workerd.Worker = (
   ],
   bindings = [
     (name = "REPORT_FAILURES", text = "0"),
+    (name = "SUPERSCHEMATIC_BUNDLE", text = "b7b7b7"),
     (name = "REPORT_TOKEN", wrapped = (moduleName = "superschematic-fixture:standins", entrypoint = "secret", innerBindings = [(name = "value", text = "rt_test")])),
   ],
   compatibilityDate = "2026-09-15",
@@ -42,6 +46,7 @@ const flaky :Workerd.Worker = (
   ],
   bindings = [
     (name = "REPORT_FAILURES", text = "1"),
+    (name = "SUPERSCHEMATIC_BUNDLE", text = "b7b7b7"),
     (name = "REPORT_TOKEN", wrapped = (moduleName = "superschematic-fixture:standins", entrypoint = "secret", innerBindings = [(name = "value", text = "rt_test")])),
   ],
   compatibilityDate = "2026-09-15",
@@ -54,6 +59,7 @@ const broken :Workerd.Worker = (
   ],
   bindings = [
     (name = "REPORT_FAILURES", text = "2"),
+    (name = "SUPERSCHEMATIC_BUNDLE", text = "b7b7b7"),
     (name = "REPORT_TOKEN", wrapped = (moduleName = "superschematic-fixture:standins", entrypoint = "secret", innerBindings = [(name = "value", text = "rt_test")])),
   ],
   compatibilityDate = "2026-09-15",
@@ -66,6 +72,7 @@ const hung :Workerd.Worker = (
   ],
   bindings = [
     (name = "REPORT_FAILURES", text = "hang"),
+    (name = "SUPERSCHEMATIC_BUNDLE", text = "b7b7b7"),
     (name = "REPORT_TOKEN", wrapped = (moduleName = "superschematic-fixture:standins", entrypoint = "secret", innerBindings = [(name = "value", text = "rt_test")])),
   ],
   compatibilityDate = "2026-09-15",
@@ -78,6 +85,8 @@ const tester :Workerd.Worker = (
     (name = "FLAKY", service = "flaky"),
     (name = "BROKEN", service = "broken"),
     (name = "HUNG", service = "hung"),
+    (name = "OK_RUN", service = (name = "ok", entrypoint = "JobRun")),
+    (name = "HUNG_RUN", service = (name = "hung", entrypoint = "JobRun")),
   ],
   compatibilityDate = "2026-09-15",
 );
