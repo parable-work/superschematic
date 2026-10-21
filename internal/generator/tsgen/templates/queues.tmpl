@@ -12,10 +12,21 @@ Enqueue a message in the transaction whose writes caused it with enqueue,
 and claim, complete, fail, extend, release and prune messages with
 postgresQueue, both from the runtime's ./postgres entry. Delivery is at
 least once.
+{{- if .QueuesOnSQLite}}
+
+On SQLite each definition carries its statements there too: add
+enqueueStatement's statement to the batch whose writes caused the message,
+and claim with sqliteQueue, both from the runtime's ./sqlite entry, or its
+./d1 entry on Workers (D53, amended).
+{{- end}}
 {{- range .LeftOutQueues}}
 
 Queue {{.Name}} is left out: {{.Unsupported}}.
 {{- end}}
+{{- range .WrittenQueues}}{{if .SQLiteUnsupported}}
+
+Queue {{.Name}} has no statements on SQLite: its {{.SQLiteUnsupported}}.
+{{- end}}{{end}}
 */
 {{- if .WrittenQueues}}
 
@@ -38,6 +49,12 @@ export interface QueueField {
   readonly point?: boolean;
   /** The column is an INTERVAL, which a duration's text writes as its whole microseconds. */
   readonly interval?: boolean;
+  /** The column, or each element of its list, holds a UUID, its lowercase hyphenated text on SQLite. */
+  readonly uuid?: boolean;
+  /** The column, or each element of its list, holds a timestamp, RFC 3339 in UTC on SQLite. */
+  readonly timestamp?: boolean;
+  /** The column, or each element of its list, holds a boolean, 1 or 0 in a column on SQLite. */
+  readonly boolean?: boolean;
 }
 
 /**
@@ -45,7 +62,8 @@ export interface QueueField {
  * dead each message whose last attempt's claim expired ($1 the retries);
  * claim claims up to $1 due messages for $2 seconds; complete, fail, extend
  * and release change message $1 while token $2 claims it; prune deletes up
- * to $2 messages done $1 seconds ago or more.
+ * to $2 messages done $1 seconds ago or more. Its statements on SQLite take
+ * the same parameters, numbered ?1, ?2.
  */
 export interface QueueStatements {
   readonly insert: string;
@@ -77,6 +95,8 @@ export interface QueueDefinition<M> {
   /** The message's fields, in the order a claim returns their columns. */
   readonly fields: readonly QueueField[];
   readonly statements: QueueStatements;
+  /** Its statements on SQLite, for a database whose DB service lists the sqlite dialect. */
+  readonly sqliteStatements?: QueueStatements;
   /** The type of the queue's messages, which no definition sets. */
   readonly message?: M;
 }
@@ -106,7 +126,7 @@ export const {{.Const}}: QueueDefinition<{{.Name}}> = {
   retainSeconds: {{.RetainSeconds}},
   fields: [
 {{- range .Fields}}
-    { name: {{jsonString .Name}}, column: {{jsonString .Column}}{{if .JSON}}, json: true{{end}}{{if .List}}, list: true{{end}}{{if .Default}}, default: {{jsonString .Default}}{{end}}{{if .Point}}, point: true{{end}}{{if .Interval}}, interval: true{{end}} },
+    { name: {{jsonString .Name}}, column: {{jsonString .Column}}{{if .JSON}}, json: true{{end}}{{if .List}}, list: true{{end}}{{if .Default}}, default: {{jsonString .Default}}{{end}}{{if .Point}}, point: true{{end}}{{if .Interval}}, interval: true{{end}}{{if .UUID}}, uuid: true{{end}}{{if .Timestamp}}, timestamp: true{{end}}{{if .Boolean}}, boolean: true{{end}} },
 {{- end}}
   ],
   statements: {
@@ -114,5 +134,12 @@ export const {{.Const}}: QueueDefinition<{{.Name}}> = {
     {{.Name}}: {{tsTemplateLiteral .SQL}},
 {{- end}}
   },
+{{- with .SQLiteStatements}}
+  sqliteStatements: {
+{{- range .All}}
+    {{.Name}}: {{tsTemplateLiteral .SQL}},
+{{- end}}
+  },
+{{- end}}
 };
 {{- end}}

@@ -92,6 +92,7 @@ export interface DeployableSettings {
   enabled?: boolean;
   env?: { [key: string]: EnvValue };
   instances?: number;
+  maxInstances?: number;
   of: DeployableRef;
   onDeploy?: boolean;
   platform?: string;

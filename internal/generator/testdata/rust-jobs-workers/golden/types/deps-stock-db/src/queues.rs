@@ -66,7 +66,8 @@ pub const STOCK_LOW_QUEUE: &str = r#"{
   "fields": [
     {
       "name": "productId",
-      "column": "product_id"
+      "column": "product_id",
+      "uuid": true
     },
     {
       "name": "level",

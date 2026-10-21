@@ -87,6 +87,16 @@ func WriteORMWithProfile(output *ORMOutput, outputDir string, prof *profile.Prof
 	} else if err := os.Remove(queuesFile); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to remove queues.go: %w", err)
 	}
+	// queues_sqlite.go claims the queues on SQLite for a database that
+	// lists the sqlite dialect (D53, amended); any other has none.
+	sqliteQueuesFile := filepath.Join(outputDir, "queues_sqlite.go")
+	if len(output.SQLiteQueues()) > 0 {
+		if err := generateFile(generator, "queues_sqlite.tmpl", sqliteQueuesFile, output); err != nil {
+			return fmt.Errorf("failed to write queues_sqlite.go: %w", err)
+		}
+	} else if err := os.Remove(sqliteQueuesFile); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to remove queues_sqlite.go: %w", err)
+	}
 	// search.go writes the words of a filter's SearchText and their LIKE
 	// patterns (D62, amended); a schema without search fields has none, so a
 	// file an earlier build wrote goes.

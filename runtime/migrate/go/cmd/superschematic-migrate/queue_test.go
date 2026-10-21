@@ -203,7 +203,7 @@ func TestQueueOnPostgres(t *testing.T) {
 func TestQueueRefuses(t *testing.T) {
 	doc := queueDocument(t, "dead")
 	invoke(t, nil, "queue", "--queue", doc, "--database-url", testdb.NewSQLite(t)).
-		expect(t, exitFailed, "queue OrderPlaced of fixture-queue-db: a queue's messages are claimed on Postgres alone, and the database URL selects sqlite")
+		expect(t, exitFailed, "queue OrderPlaced of fixture-queue-db: a queue's dead messages are read, retried and dropped on Postgres alone, and the database URL selects sqlite")
 	invoke(t, nil, "queue", "--database-url", "postgres://localhost/x").expect(t, exitUsage, "queue needs --queue")
 	invoke(t, nil, "queue", "--queue", doc).expect(t, exitUsage, "no database: pass --database-url or set DATABASE_URL")
 	invoke(t, nil, "queue", "--queue", doc, "--database-url", "postgres://localhost/x", "--cloud-sql", "acme:us-east1:db").

@@ -175,7 +175,7 @@ func TestStackQueueRefuses(t *testing.T) {
 		"no queue":      {[]string{"dead", "Dev", "qops-db.Nudge"}, "qops-db declares no queue Nudge (the stack's queues: qops-db.Reminder)"},
 		"an API":        {[]string{"dead", "Dev", "qops-api.Reminder"}, "stack qops-stack reaches no DB service qops-api"},
 		"environment":   {[]string{"dead", "Prod", "qops-db.Reminder"}, "stack qops-stack has no environment Prod"},
-		"on SQLite":     {[]string{"lite", "dead", "Lite", "qops-db.Reminder"}, "environment Lite places qops-db on database qops-db, a sqlite database; a queue's messages are claimed on Postgres alone, and so are its dead ones read, retried and dropped (D53, amended)"},
+		"on SQLite":     {[]string{"lite", "dead", "Lite", "qops-db.Reminder"}, "environment Lite places qops-db on database qops-db, a sqlite database; stack queue reads, retries and drops a queue's dead messages on Postgres alone, and on SQLite it is not built (D68)"},
 		"not deployed":  {[]string{"retry", "Staging", "qops-db.Reminder", "--all"}, "Staging was never deployed, so its database qops-db holds no queue yet; deploy it first"},
 		"timeout":       {[]string{"dead", "Dev", "qops-db.Reminder", "--timeout", "0s"}, "--timeout 0s: wait for some time"},
 		"no ids":        {[]string{"retry", "Dev", "qops-db.Reminder"}, "name the IDs of the dead messages to retry, as stack queue dead lists them, or pass --all"},

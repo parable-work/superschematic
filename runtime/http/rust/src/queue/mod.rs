@@ -31,23 +31,43 @@
 //! field with a schema default writes that default, as the Go ORM writes
 //! them; a NULL column leaves its member out of the message.
 
+#[cfg(feature = "postgres")]
 mod codec;
+mod duration;
+#[cfg(feature = "sqlite")]
+mod sqlite;
 
+#[cfg(feature = "postgres")]
 use std::borrow::Cow;
 use std::fmt;
+#[cfg(feature = "postgres")]
 use std::marker::PhantomData;
+#[cfg(feature = "postgres")]
 use std::sync::Arc;
 use std::time::Duration;
 
+#[cfg(feature = "postgres")]
 use deadpool_postgres::GenericClient;
+#[cfg(feature = "postgres")]
 use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
+use serde::Deserialize;
+#[cfg(feature = "postgres")]
+use serde::Serialize;
+#[cfg(feature = "postgres")]
+use serde_json::Map;
+use serde_json::Value;
+#[cfg(feature = "postgres")]
 use tokio_postgres::types::ToSql;
+#[cfg(feature = "postgres")]
 use tokio_postgres::Row;
 
-use crate::postgres::{chain, Pool};
+use crate::error::chain;
+#[cfg(feature = "postgres")]
+use crate::postgres::Pool;
+#[cfg(feature = "postgres")]
 use codec::{is_json, param_text, Column, Text};
+#[cfg(feature = "sqlite")]
+pub use sqlite::{enqueue_sqlite, SqliteQueue};
 
 /// What a refused change says of a token that no longer claims its
 /// message, as Go's `ErrClaimLost` and TypeScript's `ClaimLostError` say it.
@@ -123,6 +143,19 @@ pub struct QueueField {
     /// client writes and reads it by the column's type.
     #[serde(default)]
     pub interval: bool,
+    /// The column, or each element of its list, holds a UUID: on SQLite
+    /// its lowercase hyphenated text, which the Postgres client reads by
+    /// the column's type.
+    #[serde(default)]
+    pub uuid: bool,
+    /// The column, or each element of its list, holds a timestamp: on
+    /// SQLite RFC 3339 in UTC.
+    #[serde(default)]
+    pub timestamp: bool,
+    /// The column, or each element of its list, holds a boolean: on SQLite
+    /// 1 or 0 in a column, true or false in a list.
+    #[serde(default)]
+    pub boolean: bool,
 }
 
 /// A queue's statements on Postgres, TypeScript's `QueueStatements`:
@@ -130,7 +163,8 @@ pub struct QueueField {
 /// attempt's claim expired (`$1` the retries); `claim` claims up to `$1` due
 /// messages for `$2` seconds; `complete`, `fail`, `extend` and `release`
 /// change message `$1` while token `$2` claims it; `prune` deletes up to
-/// `$2` messages done `$1` seconds ago or more.
+/// `$2` messages done `$1` seconds ago or more. Its statements on SQLite
+/// take the same parameters, numbered `?1`, `?2` (D53, amended).
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 pub struct QueueStatements {
     pub insert: String,
@@ -168,6 +202,10 @@ pub struct QueueDefinition {
     /// The message's fields, in the order a claim returns their columns.
     pub fields: Vec<QueueField>,
     pub statements: QueueStatements,
+    /// Its statements on SQLite, for a database whose DB service lists the
+    /// sqlite dialect, which [`SqliteQueue`] runs.
+    #[serde(default)]
+    pub sqlite_statements: Option<QueueStatements>,
 }
 
 impl QueueDefinition {
@@ -213,20 +251,25 @@ impl QueueDefinition {
                 return refuse(format!("field {i} lacks its name or its column"));
             }
         }
-        let s = &self.statements;
-        let statements = [
-            ("insert", &s.insert),
-            ("expire", &s.expire),
-            ("claim", &s.claim),
-            ("complete", &s.complete),
-            ("fail", &s.fail),
-            ("extend", &s.extend),
-            ("release", &s.release),
-            ("prune", &s.prune),
-        ];
-        for (name, sql) in statements {
-            if sql.trim().is_empty() {
-                return refuse(format!("its {name} statement is empty"));
+        for (dialect, s) in [
+            ("", Some(&self.statements)),
+            ("SQLite ", self.sqlite_statements.as_ref()),
+        ] {
+            let Some(s) = s else { continue };
+            let statements = [
+                ("insert", &s.insert),
+                ("expire", &s.expire),
+                ("claim", &s.claim),
+                ("complete", &s.complete),
+                ("fail", &s.fail),
+                ("extend", &s.extend),
+                ("release", &s.release),
+                ("prune", &s.prune),
+            ];
+            for (name, sql) in statements {
+                if sql.trim().is_empty() {
+                    return refuse(format!("its {dialect}{name} statement is empty"));
+                }
             }
         }
         Ok(())
@@ -273,6 +316,7 @@ fn unset(value: Option<&Value>, field: &QueueField) -> bool {
     }
 }
 
+#[cfg(feature = "postgres")]
 /// Writes `message` into `queue` in the transaction `client` runs, the
 /// caller's: the message is due once the transaction commits, and never if
 /// it rolls back. `client` is a deadpool `Transaction` (or a pool's
@@ -354,6 +398,7 @@ where
     Ok(())
 }
 
+#[cfg(feature = "postgres")]
 /// The claims of a queue over a pool, which a worker makes, its messages
 /// read as `M`. Each runs the descriptor's statement on a connection of the
 /// pool, prepared once per connection.
@@ -363,6 +408,7 @@ pub struct PostgresQueue<M> {
     message: PhantomData<fn() -> M>,
 }
 
+#[cfg(feature = "postgres")]
 impl<M> Clone for PostgresQueue<M> {
     fn clone(&self) -> Self {
         Self {
@@ -373,6 +419,7 @@ impl<M> Clone for PostgresQueue<M> {
     }
 }
 
+#[cfg(feature = "postgres")]
 impl<M> fmt::Debug for PostgresQueue<M> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("PostgresQueue")
@@ -382,6 +429,7 @@ impl<M> fmt::Debug for PostgresQueue<M> {
     }
 }
 
+#[cfg(feature = "postgres")]
 impl<M: DeserializeOwned> PostgresQueue<M> {
     /// The claims of the queue `definition` describes, over `pool`.
     pub fn new(pool: Pool, definition: QueueDefinition) -> Self {
@@ -658,6 +706,9 @@ mod tests {
                     default: None,
                     point: false,
                     interval: false,
+                    uuid: false,
+                    timestamp: false,
+                    boolean: false,
                 },
                 QueueField {
                     name: "priority".into(),
@@ -667,6 +718,9 @@ mod tests {
                     default: Some("low".into()),
                     point: false,
                     interval: false,
+                    uuid: false,
+                    timestamp: false,
+                    boolean: false,
                 },
                 QueueField {
                     name: "shipTo".into(),
@@ -676,6 +730,9 @@ mod tests {
                     default: None,
                     point: false,
                     interval: false,
+                    uuid: false,
+                    timestamp: false,
+                    boolean: false,
                 },
                 QueueField {
                     name: "tags".into(),
@@ -685,6 +742,9 @@ mod tests {
                     default: None,
                     point: false,
                     interval: false,
+                    uuid: false,
+                    timestamp: false,
+                    boolean: false,
                 },
                 QueueField {
                     name: "dropAt".into(),
@@ -694,6 +754,9 @@ mod tests {
                     default: None,
                     point: true,
                     interval: false,
+                    uuid: false,
+                    timestamp: false,
+                    boolean: false,
                 },
                 QueueField {
                     name: "wait".into(),
@@ -703,6 +766,9 @@ mod tests {
                     default: None,
                     point: false,
                     interval: true,
+                    uuid: false,
+                    timestamp: false,
+                    boolean: false,
                 },
             ]
         );

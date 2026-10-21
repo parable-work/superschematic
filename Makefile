@@ -240,7 +240,10 @@ rust:
 		&& cargo clippy --all-targets --features gcs,postgres,logging -- -D warnings \
 		&& cargo clippy --all-targets --features otel -- -D warnings && cargo test --features otel \
 		&& cargo clippy --all-targets --features postgres,otel -- -D warnings \
-		&& cargo test --features postgres,otel
+		&& cargo test --features postgres,otel \
+		&& cargo clippy --all-targets --features sqlite -- -D warnings && cargo test --features sqlite \
+		&& cargo clippy --all-targets --features postgres,sqlite,logging -- -D warnings \
+		&& cargo test --features postgres,sqlite,logging
 	cd runtime/schema/rust && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test \
 		&& cargo test --features serde_json/arbitrary_precision,serde_json/preserve_order
 	cd runtime/schema/rust-ir && cargo fmt --check && cargo clippy --all-targets -- -D warnings \

@@ -50,6 +50,11 @@ type QueueInfo struct {
 	// value the Rust queue client cannot write and read back yet. Empty
 	// for a queue it writes.
 	Unsupported string
+
+	// SQLiteUnsupported says why the descriptor has no statements on
+	// SQLite in a database that lists the sqlite dialect, as queues.ts
+	// says it. Empty otherwise.
+	SQLiteUnsupported string
 }
 
 // QueueDescriptor is a queue's descriptor (D65): the members of the
@@ -77,6 +82,10 @@ type QueueDescriptor struct {
 
 	// Statements are the queue's statements on Postgres, the Go ORM's.
 	Statements QueueStatements `json:"statements"`
+
+	// SQLiteStatements are its statements on SQLite, for a database whose
+	// DB service lists the sqlite dialect, as queues.ts carries them.
+	SQLiteStatements *QueueStatements `json:"sqliteStatements,omitempty"`
 }
 
 // QueueField is a field of a queue's message and its column.
@@ -102,6 +111,13 @@ type QueueField struct {
 	// client writes and reads each by the column's type.
 	Point    bool `json:"point,omitempty"`
 	Interval bool `json:"interval,omitempty"`
+
+	// UUID, Timestamp and Boolean mark a column, or each element of a
+	// list, that holds a UUID, a timestamp or a boolean, which the client
+	// converts on SQLite, as queues.ts marks them.
+	UUID      bool `json:"uuid,omitempty"`
+	Timestamp bool `json:"timestamp,omitempty"`
+	Boolean   bool `json:"boolean,omitempty"`
 }
 
 // QueueStatements are a queue's statements on Postgres
@@ -151,8 +167,10 @@ func QueueConst(name string) string {
 }
 
 // RustQueues reads the queues of schema, sorted by name, each with what
-// queues.rs writes or why it leaves the queue out.
-func RustQueues(schema *ir.Schema) ([]QueueInfo, error) {
+// queues.rs writes or why it leaves the queue out. sqlite is whether the DB
+// service lists the sqlite dialect, whose statements each descriptor then
+// carries beside Postgres's (D53, amended).
+func RustQueues(schema *ir.Schema, sqlite bool) ([]QueueInfo, error) {
 	sqlTypes := sqlutil.ScalarSQLTypes(schema)
 	var queues []QueueInfo
 	for _, td := range schema.Queues() {
@@ -184,10 +202,21 @@ func RustQueues(schema *ir.Schema) ([]QueueInfo, error) {
 			if unsupported != "" && q.Unsupported == "" {
 				q.Unsupported = fmt.Sprintf("field %s %s", f.Name, unsupported)
 			}
+			if !field.JSON && q.SQLiteUnsupported == "" {
+				if refusal := sqlutil.SQLiteQueueRefusal(sqlTypes[f.TypeRef.Name]); refusal != "" {
+					q.SQLiteUnsupported = fmt.Sprintf("field %s %s", f.Name, refusal)
+				}
+			}
 			q.Descriptor.Fields = append(q.Descriptor.Fields, field)
 			columns = append(columns, field.Column)
 		}
 		q.Descriptor.Statements = queueStatements(sqlutil.PostgresQueueStatements(q.Descriptor.Table, columns, q.Descriptor.RetainSeconds > 0))
+		if !sqlite {
+			q.SQLiteUnsupported = ""
+		} else if q.SQLiteUnsupported == "" {
+			statements := queueStatements(sqlutil.SQLiteQueueStatements(q.Descriptor.Table, columns, q.Descriptor.RetainSeconds > 0))
+			q.Descriptor.SQLiteStatements = &statements
+		}
 		if q.Unsupported == "" {
 			text, err := q.Descriptor.JSON()
 			if err != nil {
@@ -229,6 +258,12 @@ func queueField(schema *ir.Schema, f *ir.FieldDef, sqlTypes map[string]string) (
 	}
 	field.Point = !field.JSON && !field.List && sqlType == "POINT"
 	field.Interval = !field.JSON && !field.List && sqlType == "INTERVAL"
+	if !field.JSON {
+		kind := sqlutil.QueueKindOf(sqlType)
+		field.UUID = kind == sqlutil.QueueKindUUID
+		field.Timestamp = kind == sqlutil.QueueKindTimestamp
+		field.Boolean = kind == sqlutil.QueueKindBoolean
+	}
 	if enum := schema.Enums[ref.Name]; enum != nil && f.Required && !ref.IsArray && !ref.IsMap && f.Default != nil {
 		field.Default = *f.Default
 	}
@@ -258,6 +293,17 @@ func (o *ModuleOutput) WrittenQueues() []QueueInfo {
 		}
 	}
 	return out
+}
+
+// QueuesOnSQLite reports whether a descriptor queues.rs writes carries
+// its statements on SQLite.
+func (o *ModuleOutput) QueuesOnSQLite() bool {
+	for _, q := range o.WrittenQueues() {
+		if q.Descriptor.SQLiteStatements != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // LeftOutQueues are the queues queues.rs leaves out, each with why.

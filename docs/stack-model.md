@@ -3266,11 +3266,46 @@ export abstract class FulfilOrders {}
   it never deletes a dead message, which waits for an operator. A message whose last attempt's claim expired is dead, so
   a message that kills its worker every time stops coming back. Times are
   the database's clock. Delivery is at least once, and handlers are
-  idempotent. The Go ORM runs on Postgres alone, and so does the
-  TypeScript client, so the claims do too:
-  resolution refuses a worker whose queue's database the environment
-  places on a platform of another dialect, SQLite or D1, which no runtime
-  claims on yet.
+  idempotent. A database the environment places on SQLite claims as the
+  next item says; resolution refuses a worker whose queue's database is
+  of another dialect, or on a platform that says no worker claims there
+  (`PlatformSpec.NoQueueClaims`), as `cloudflare.d1` does.
+- **On SQLite.** A DB service that lists the sqlite dialect carries each
+  queue's statements on SQLite beside Postgres's (D53, amended):
+  `sqlutil.SQLiteQueueStatements` writes them, with the same parameters by
+  number (`?1`, `?2`), states, attempts, lease, backoff and retention.
+  SQLite has one writer at a time and no `FOR UPDATE SKIP LOCKED`, and
+  needs none: each statement is one `UPDATE` or `DELETE`, which takes the
+  write lock before it reads a row, and a claim is one `UPDATE ... WHERE id
+  IN (the due messages, oldest first, up to ?1) ... RETURNING`, so two
+  workers that claim at once take different messages. Times are text in
+  RFC 3339, UTC, to the millisecond, the form the SQLite model's default
+  writes, so they compare as text; the backoff doubles with a shift, since
+  SQLite's `power()` is optional. A message crosses through its JSON form,
+  each field as its definition marks it: a JSON value or a list as JSON
+  text, a UUID (`uuid`) as its lowercase hyphenated text, a timestamp
+  (`timestamp`) in RFC 3339 in UTC with its fraction kept, a boolean
+  (`boolean`) as 1 or 0, and a duration as its canonical text. A location
+  has no storage on SQLite, so a queue that holds one has no statements
+  there, and a `BYTEA` field none yet. `queues.ts` carries them as
+  `sqliteStatements`, `queues.rs` as the same member, and the Go ORM
+  writes `queues_sqlite.go`, whose `Enqueue<Queue>SQLite(ctx, tx, msg)`
+  takes a `*sql.Tx` and whose `New<Queue>SQLiteQueue(db)` claims over a
+  `*sql.DB` of any driver. The TypeScript runtime's `./sqlite` and `./d1`
+  entries export `enqueueStatement(db, queue, msg)`, the statement a
+  caller adds to the batch whose writes caused the message, since a
+  `SqlDatabase` has no interactive transaction, and `sqliteQueue(db,
+  queue)`, the claims over one. The Rust runtime's `sqlite` feature adds
+  `queue::enqueue_sqlite`, through a rusqlite connection or transaction,
+  and `queue::SqliteQueue`, which the worker loop runs as it runs a
+  `PostgresQueue`. On the local target a TypeScript worker of a
+  sqlite-first database claims on the environment's SQLite file
+  (`local.worker-sqlite`), beside the server that enqueues, each process
+  with a connection of its own that waits five seconds for the other's
+  write lock. A Go or Rust worker there is refused with its server, since
+  their `Deps` reach Postgres alone (D64); their clients are proven by the
+  parity test. D1 claims nothing: it is reached through a Worker's binding
+  alone, and Workers runs no claim loop.
 - **Workers.** `@worker` comes from `@superschematic/api` and goes on a
   class of an API schema that holds nothing: `queue`, the `@queue` class,
   required, imported from the API's database; `concurrency`, how many
@@ -3307,7 +3342,10 @@ export abstract class FulfilOrders {}
   typed through the handle's fourth type argument (section 4.3), beside
   the platform's settings. `instances` is how many run, one unless set;
   `concurrency` replaces the decorator's; and `enabled: false` runs none,
-  and its queue's messages wait. A member of a parameterized environment
+  and its queue's messages wait. `maxInstances` is the most a target may
+  run as the queue's depth grows, `instances` then the fewest (D53,
+  amended); no target scales a worker yet, so gcp refuses a range, and
+  local runs one process whatever it says. A member of a parameterized environment
   runs one instance unless its settings say otherwise. Resolution records
   what runs on the deployable (`ir.ResolvedWorker`): its API and class,
   its queue and the database that holds it, the instances, the
@@ -3379,7 +3417,10 @@ export abstract class FulfilOrders {}
   of its own (section 7.2).
   It scales manually to the worker's instances, and to zero when the
   environment turns the worker off, which keeps the pool and its pinned
-  image. Its account connects as a server's does, and the migration job
+  image. A worker pool has no autoscaling of its own: a range of
+  instances, `maxInstances` over `instances`, is refused, since the scaler
+  that would read the queue's depth and set the pool's count is designed
+  and not built (D53, amended). Its account connects as a server's does, and the migration job
   grants its IAM database user read and write privileges, since the
   deploy's migration plan lists every deployable with a sql edge to the
   DB service. A grace of ten seconds or more is refused, since Cloud Run
@@ -6148,7 +6189,9 @@ runtime tests run fixture bundles under the `workerd` binary.
 ### 18.15 Not built
 
 - `stack run` on this target.
-- Queue workers, since D53 amended keeps claims on Postgres.
+- Queue workers: Workers runs no claim loop, so `cloudflare.d1` refuses
+  a worker of a queue on it (D53, amended). A Worker or a Cron job
+  enqueues on D1 with `enqueueStatement` in its batch.
 - Hyperdrive to Cloud SQL, and any mixing of targets in one environment.
 - An identity API on Workers, whose argon2 is `node:crypto`'s (D50), and
   an identity store over SQLite for a TypeScript API.

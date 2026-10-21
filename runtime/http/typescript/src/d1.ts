@@ -20,9 +20,16 @@ binds as `value ?? null`. A row reads back a BLOB as an Array of its bytes,
 not a Uint8Array (new Uint8Array(row.image) makes one), a boolean as 1 or
 0, and an INTEGER as a number.
 
-This is the package's ./d1 entry. It imports nothing, from node: or
-elsewhere, so a Worker bundles it.
+This is the package's ./d1 entry. It imports nothing from node: or a
+driver, so a Worker bundles it. It exports the queue client on SQLite
+(queue-sqlite.ts, D53, amended), which runs over a SqlDatabase alone:
+enqueueStatement, whose statement a Worker adds to the batch whose writes
+caused the message, and sqliteQueue's claims.
 */
+
+export { ClaimLostError } from './queue-core.js';
+export type { Queue, QueueClaim, QueueDefinition, QueueField, QueueStatements } from './queue-core.js';
+export { enqueueSqlite, enqueueStatement, sqliteQueue } from './queue-sqlite.js';
 
 /**
  * A value a statement binds: what D1 and SQLite store. A boolean binds as 1

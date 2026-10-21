@@ -2319,6 +2319,9 @@
         "instances": {
           "type": "integer"
         },
+        "maxInstances": {
+          "type": "integer"
+        },
         "of": {
           "$ref": "#/$defs/DeployableRef"
         },

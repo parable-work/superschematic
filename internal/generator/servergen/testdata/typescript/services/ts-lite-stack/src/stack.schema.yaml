@@ -1,4 +1,5 @@
-# One TypeScript server, ts-notes, on a sqlite-first database, and its job.
+# One TypeScript server, ts-notes, on a sqlite-first database, its job and
+# its worker, which claims on the database (D53, amended).
 # Local runs on the local target, which keeps the database in a SQLite file
 # and derives a sqlite: URL for it; Edge, on stacktest's fake target,
 # places the server on the fake bundle platform, as Cloudflare Workers, its

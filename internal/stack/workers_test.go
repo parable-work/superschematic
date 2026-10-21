@@ -80,11 +80,23 @@ func TestWorkerInstances(t *testing.T) {
 		t.Errorf("Preview runs %d instances, %d at a time; want one, with Staging's 8", preview.Worker.Instances, preview.Worker.Concurrency)
 	}
 
+	// A range: Production's three instances the fewest and ten the most
+	// (D53, amended); turned off, it runs none and no range.
+	s, _ = workerShop()
+	settingsFor(s.Environment("Production"), stacktest.WorkerOf(stacktest.ShopOrders, "FulfilOrders")).MaxInstances = intp(10)
+	if production := run(s, "Production"); production.Worker.Instances != 3 || production.Worker.MaxInstances != 10 {
+		t.Errorf("Production runs %d to %d instances, want 3 to 10", production.Worker.Instances, production.Worker.MaxInstances)
+	}
+	if staging := run(s, "Staging"); staging.Worker.MaxInstances != 0 {
+		t.Errorf("Staging runs up to %d instances, want a fixed count", staging.Worker.MaxInstances)
+	}
+
 	off := false
 	s, _ = workerShop()
 	settingsFor(s.Environment("Production"), stacktest.WorkerOf(stacktest.ShopOrders, "FulfilOrders")).Enabled = &off
-	if production := run(s, "Production"); production.Worker.Instances != 0 {
-		t.Errorf("Production turned off runs %d instances, want none", production.Worker.Instances)
+	settingsFor(s.Environment("Production"), stacktest.WorkerOf(stacktest.ShopOrders, "FulfilOrders")).MaxInstances = intp(10)
+	if production := run(s, "Production"); production.Worker.Instances != 0 || production.Worker.MaxInstances != 0 {
+		t.Errorf("Production turned off runs %d to %d instances, want none", production.Worker.Instances, production.Worker.MaxInstances)
 	}
 }
 
@@ -154,6 +166,24 @@ func TestWorkerRefusals(t *testing.T) {
 		_, errs := resolve(t, reg, s, services, "Staging")
 		mustFail(t, errs, stack.CodeInvalidSettings, "sets a schedule or a time zone on worker shop-orders-fulfil-orders, which runs until it is stopped")
 	})
+	t.Run("a maximum under the instances", func(t *testing.T) {
+		s, services := workerShop()
+		settingsFor(s.Environment("Production"), fulfil).MaxInstances = intp(2)
+		_, errs := resolve(t, reg, s, services, "Production")
+		mustFail(t, errs, stack.CodeInvalidSettings, "worker shop-orders-fulfil-orders may run up to 2 instances (maxInstances), under its 3 (instances), the fewest it runs")
+	})
+	t.Run("a maximum of none", func(t *testing.T) {
+		s, services := workerShop()
+		settingsFor(s.Environment("Staging"), fulfil).MaxInstances = intp(0)
+		_, errs := resolve(t, reg, s, services, "Staging")
+		mustFail(t, errs, stack.CodeInvalidSettings, "maxInstances is 0; it is one or more")
+	})
+	t.Run("a maximum on a server", func(t *testing.T) {
+		s, services := workerShop()
+		settingsFor(s.Environment("Staging"), stacktest.Of(stacktest.ShopAPI)).MaxInstances = intp(2)
+		_, errs := resolve(t, reg, s, services, "Staging")
+		mustFail(t, errs, stack.CodeInvalidSettings, "sets instances or concurrency on server shop-api; only a worker takes them")
+	})
 	t.Run("a concurrency of none", func(t *testing.T) {
 		s, services := workerShop()
 		settingsFor(s.Environment("Staging"), fulfil).Concurrency = intp(0)
@@ -173,20 +203,20 @@ func TestWorkerRefusals(t *testing.T) {
 		_, errs := resolve(t, reg, s, services, "Staging")
 		mustFail(t, errs, stack.CodeInvalidStack, "worker FulfilOrders of shop-orders handles queue OrderPlaced, and shop-orders connects to no database")
 	})
-	t.Run("a queue on SQLite", func(t *testing.T) {
+	t.Run("a Go worker's queue on SQLite", func(t *testing.T) {
 		s, services := workerShop()
 		service(services, "shop-db").Dialects = []string{registry.SQLDialectSQLite}
 		settingsFor(s.Environment("Staging"), stacktest.Of(stacktest.ShopDB)).Platform = stacktest.LitePlatform
 		_, errs := resolve(t, reg, s, services, "Staging")
-		mustFail(t, errs, stack.CodeUnrealizable, "worker shop-orders-fulfil-orders claims the messages of queue OrderPlaced of shop-db, which environment Staging places on shop-db, a sqlite database; a worker claims on Postgres")
+		mustFail(t, errs, stack.CodeUnrealizable, "worker shop-orders-fulfil-orders is a GO worker on shop-db, and environment Staging places shop-db on shop-db, a sqlite database; a Go or Rust API's Deps reach Postgres alone")
 	})
-	t.Run("a Rust worker's queue on SQLite", func(t *testing.T) {
+	t.Run("a queue on a platform where no worker claims", func(t *testing.T) {
 		s, services := workerShop()
-		service(services, "shop-orders").Language = registry.APILanguageRust
+		service(services, "shop-orders").Language = registry.APILanguageTypeScript
 		service(services, "shop-db").Dialects = []string{registry.SQLDialectSQLite}
-		settingsFor(s.Environment("Staging"), stacktest.Of(stacktest.ShopDB)).Platform = stacktest.LitePlatform
-		_, errs := resolve(t, reg, s, services, "Staging")
-		mustFail(t, errs, stack.CodeUnrealizable, "worker shop-orders-fulfil-orders claims the messages of queue OrderPlaced of shop-db, which environment Staging places on shop-db, a sqlite database; a worker claims on Postgres, the one dialect the Go ORM and the TypeScript and Rust queue clients claim on (D53, D65)")
+		settingsFor(s.Environment("Staging"), stacktest.Of(stacktest.ShopDB)).Platform = noClaimsPlatform
+		_, errs := resolve(t, assemble(t, noClaimsTarget{}), s, services, "Staging")
+		mustFail(t, errs, stack.CodeUnrealizable, "worker shop-orders-fulfil-orders claims the messages of queue OrderPlaced of shop-db, which environment Staging places on shop-db, a sqlite database on platform noclaims.d1, where no worker claims: it is reached through a binding alone (D53, amended)")
 	})
 	t.Run("a worker named like another deployable", func(t *testing.T) {
 		s, services := workerShop()
@@ -214,3 +244,23 @@ func TestWorkerRefusals(t *testing.T) {
 }
 
 func intp(n int) *int { return &n }
+
+// noClaimsPlatform is a database platform where no worker claims, as
+// cloudflare.d1 is (D53, amended).
+const noClaimsPlatform = "noclaims.d1"
+
+// noClaimsTarget registers noClaimsPlatform.
+type noClaimsTarget struct{}
+
+func (noClaimsTarget) Name() string { return "noclaims" }
+
+func (noClaimsTarget) Register(r *registry.Registry) error {
+	return r.RegisterPlatform(registry.PlatformSpec{
+		Name: noClaimsPlatform, Provider: "noclaims", Kind: ir.DeployableDatabase,
+		Dialects:      []string{registry.SQLDialectSQLite},
+		NoQueueClaims: "it is reached through a binding alone",
+		NameOf:        func(ctx registry.PlatformContext) any { return ctx.Deployable.Name },
+		AddressOf:     func(registry.PlatformContext) any { return nil },
+		Lower:         func(registry.PlatformContext) (registry.Lowered, error) { return registry.Lowered{}, nil },
+	})
+}

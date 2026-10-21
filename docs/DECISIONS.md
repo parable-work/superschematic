@@ -5109,7 +5109,7 @@ Status: built, as narrowed below.
 
 The claims run on Postgres alone, since the Go ORM does: resolution
 refuses a worker whose queue's database an environment places on SQLite
-or D1.
+or D1. The last D53 amendment claims on SQLite too.
 
 acme-shop's `shop-db` declares `OrderPlaced`, which `PlaceOrder` enqueues
 in its transaction, and `shop-orders`' worker `FulfilOrders` fulfils the
@@ -5130,8 +5130,9 @@ D68 builds a backoff that grows with each attempt, the removal of done
 messages, and an operator's command to read, retry and drop dead ones.
 
 Not built:
-- claims on SQLite and D1, in a write transaction (the amendment below);
-- scaling a worker with its queue's depth.
+- claims on D1, which no platform of Workers runs a claim loop for;
+- scaling a worker with its queue's depth, which the last D53 amendment
+  designs.
 
 The rule is reversible until the first release.
 
@@ -6501,7 +6502,8 @@ SQLite gets a queue's table and its migrations, but no claim.
 |----------|------------------------|
 | A queue's table is written in every dialect, and resolution refuses a worker whose queue's database the environment places on any platform but Postgres (`unrealizable`). The claim on SQLite (a write transaction) and on D1 lands with an ORM for those dialects. | Claims through raw SQL beside the ORM for SQLite, which would split a queue's code across two layers. Refusing `@queue` in a SQLite DB service, which would keep its table out of migrations the service can already run. |
 
-Status: built in #336.
+Status: built in #336. The last D53 amendment lifts the refusal for a
+SQLite file, with statements the clients carry beside Postgres's.
 
 ### D53, amended: a queue's message holds a location and a duration, as a `POINT` and an `INTERVAL` of whole microseconds, in every language, and the Go ORM's tables hold a duration the same way
 
@@ -8352,7 +8354,8 @@ command.
 Not built:
 - `stack queue` on a cloud target other than gcp.
 - Scaling a worker with its queue's depth.
-- Claims on SQLite and D1.
+- Claims on D1. Those on SQLite are D53's last amendment.
+- `stack queue` on SQLite, whose dead messages it refuses to read.
 
 The rule is reversible until the first release.
 
@@ -8849,5 +8852,87 @@ schema check breaks by the message the check gives (`invalid format` is
 route's rules on its text, as before, but still decoded by Go's parser,
 so its value rounds a fraction of a nanosecond down; an object argument
 holding one reads it as its type's decoder does.
+
+The rule is reversible until the first release.
+
+### D53, amended: a queue's messages are claimed on SQLite too, each claim one statement under SQLite's single writer, and a worker's instance range is a setting no target scales yet
+
+D53 named SQLite and D1 as a queue's backings and claimed on Postgres
+alone, waiting for an ORM per dialect. The TypeScript server already runs
+over a SQLite file under `stack dev` (D64), so its worker could not, and
+the Go and Rust clients had no SQLite statements to share. And a worker
+pool on gcp runs a fixed instance count, whatever its queue's depth.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| One function, `sqlutil.SQLiteQueueStatements`, writes a queue's statements on SQLite with Postgres's names, parameters (numbered `?1`, `?2`) and semantics: the lease, the attempts, the doubling backoff capped at `maxBackoff`, the dead messages and the retention. Each is one `UPDATE` or `DELETE`, which takes SQLite's write lock before it reads a row, so no `FOR UPDATE SKIP LOCKED` is needed: a claim is one `UPDATE ... WHERE id IN (the due messages, oldest first, LIMIT ?1) ... RETURNING`, and two workers that claim at once take different messages. A claim's token is the SQLite model's UUID expression, per row. Times are RFC 3339 in UTC to the millisecond, the form the SQLite model's `CURRENT_TIMESTAMP` writes, so they compare as text; the backoff doubles with a shift, since `power()` is an optional SQLite extension, and a product past 2^63 becomes a REAL rather than an overflow. | `BEGIN IMMEDIATE` around a `SELECT` and an `UPDATE`, two round trips a D1-style `SqlDatabase` cannot hold in one transaction. `UPDATE ... LIMIT`, a compile option most builds lack. Times as Julian days or epoch numbers, which would differ from every other timestamp column of the SQLite model. |
+| A DB service that lists the sqlite dialect carries them beside Postgres's: `sqliteStatements` in `queues.ts` and in the descriptor `queues.rs` holds, and the Go ORM's `queues_sqlite.go`. A queue whose message holds a value SQLite has no storage for, a location, or a `BYTEA`, which the three clients' messages hold in no one form, has none, saying why. | Statements for every database, which would put SQLite in the output of a Postgres-only service. |
+| On SQLite a message crosses through its JSON form in every language, each field as its definition marks it: `uuid` its lowercase hyphenated text (a Rust type's base62 and Go's converted), `timestamp` RFC 3339 in UTC with its fraction kept, `boolean` 1 or 0 in a column and true or false in a list, a duration its canonical text, a JSON value or a list its JSON text. The marks are written for every queue, as `point` and `interval` are, and a test holds `queues.ts`'s to the Go ORM's. The Go ORM's SQLite queue marshals the message with the types' own JSON, so it needs no scan per field. | Converting by each column's declared type, which SQLite's `TEXT` and `INTEGER` do not tell apart for a UUID, a timestamp or a boolean. Generated code per field in Go, as on Postgres, a second classification of every field. |
+| The clients: the Go ORM's `Enqueue<Queue>SQLite(ctx, tx, msg)` over a `*sql.Tx` and `New<Queue>SQLiteQueue(db)` over a `*sql.DB` of any driver, the ORM importing none; the TypeScript runtime's `enqueueStatement(db, queue, msg)`, the statement a caller adds to the batch whose writes caused the message, since a `SqlDatabase` has no interactive transaction, and `sqliteQueue(db, queue)`, from `./sqlite` and from `./d1`, so a Worker bundles them; the Rust runtime's `sqlite` feature, `enqueue_sqlite` through a rusqlite connection or transaction and `SqliteQueue`, on tokio's blocking pool, which the worker loop runs as a `PostgresQueue`. | A transaction callback in TypeScript, which D1 cannot run. A SQLite pool in the Go ORM's `Database`, which every Go server would then open. |
+| Resolution lets a worker claim on a SQLite file: the local target connects one through `local.worker-sqlite`, and a TypeScript worker's `main.ts` opens the file and runs `sqliteQueue`. Each process has a connection of its own, which waits five seconds for another's write lock. A Go or Rust worker there stays refused, with its server, since D64's rule keeps their `Deps` on Postgres. A database platform may say why no worker claims on it (`PlatformSpec.NoQueueClaims`), which resolution gives as an unrealizable worker's reason: `cloudflare.d1` does, since D1 is reached through a Worker's binding alone and Workers runs no claim loop. | Lifting the refusal for every SQLite-dialect platform, which would leave a D1 worker to fail at its first claim. A Go worker's `Deps` on SQLite, which needs the Go ORM's tables there too. |
+| A worker's settings take `maxInstances`, the most instances a target may run as its queue's depth grows, `instances` then the fewest, refused under it; `enabled: false` runs none. No target scales a worker yet: gcp refuses a range, local runs one process, and the fake target ignores it. | No setting until a scaler exists, which would leave the range undesigned. |
+
+A scaler, designed and not built. Cloud Run worker pools have no
+autoscaling: the Admin API's `WorkerPoolScaling` documents
+`manualInstanceCount` alone, and Google's answer is CREMA, a separate
+Cloud Run service running KEDA's scalers that sets the pool's count. So a
+scaler is ours to run:
+
+- *Where it runs.* A Cloud Scheduler job per environment, every minute,
+  runs an execution of the migration job (D68, amended) with a `scale`
+  command: it already reaches every database as the migrator, needs no
+  new image, and works for a pool at zero instances, which nothing inside
+  the pool could wake. A loop inside each worker, behind an advisory lock,
+  needs a running instance, so no minimum of zero, and gives the worker's
+  own account the right to change its pool.
+- *What it decides.* Per scaled worker: depth = ready and due messages
+  plus live claims; desired = ⌈depth ÷ concurrency⌉, clamped to
+  [`instances`, `maxInstances`]. It scales up at once, and down only after
+  desired stayed below the current count for a cool-down of five minutes,
+  one step at a time, so a burst does not flap the pool; the last change's
+  time lives in a row of a scaler table the migration plan keeps.
+- *IAM.* The migrator's account gets `run.workerPools.get` and
+  `run.workerPools.update` on each scaled pool alone (a
+  `WorkerPoolIamMember` with a custom role). `update` is the narrowest
+  permission that sets a count, and it also lets the holder change the
+  pool's image and environment: whoever holds the migrator's credentials
+  could then run code as the worker's account. That is the cost the
+  design must accept or narrow, by a scaler account of its own that holds
+  nothing else.
+- *Deploys.* The deploy writes `instances` as the count; Pulumi would put
+  back the scaler's count at each deploy unless the graph says to ignore
+  the field, and the IR has no `ignoreChanges` yet.
+- *Cost safety.* `maxInstances` is the hard ceiling, refused without
+  `instances` under it; the scheduler costs one job execution a minute per
+  environment.
+
+It is not built because three of its parts are not sound yet: the IAM
+grant, which would let the migrator's identity redeploy the worker; the
+Pulumi field that the next deploy would reset; and a minute's scheduled
+job per environment, a running cost for every stack with a range, where
+the fakes would prove only the arithmetic. The setting is built so a stack
+can state its range, and gcp says why it cannot run one.
+
+Status: built. `TestQueueParityOfGoTypeScriptAndRustOnSQLite` runs the
+parity cases on SQLite, each in a file of its own, the Go ORM through
+modernc.org/sqlite, TypeScript through bun:sqlite and Rust through
+rusqlite, each side a process: every case but `LocationsAndDurationsAgree`,
+which SQLite cannot hold. `TestQueueParityOfGoTypeScriptAndRustOnPostgres`
+runs the same refactored cases on Postgres. tsgen's
+`TestQueuesWriteWhatTheGoORMWrites` holds `queues.ts`'s SQLite statements
+and marks to the Go ORM's, and rustgen's
+`TestQueuesDescribeWhatTypeScriptWrites` `queues.rs`'s to `queues.ts`'s.
+The runtimes' `queue-sqlite.test.ts` and `tests/queue_sqlite.rs` run the
+clients on a file opened twice, the Rust worker loop among them. servergen's
+`TestTypeScriptSQLiteEntrypointCompilesAndServes` gives ts-notes a queue
+and a worker: the server enqueues in the batch that writes a note, and the
+worker, under Bun on the same file, handles two messages, fails one until
+it is dead, and exits 0 on SIGTERM. Resolution's tests cover a TypeScript
+worker on a local SQLite file (`TestSQLiteWorkerGolden`), a Go one refused,
+a platform that says no worker claims, and `maxInstances`; gcp's
+`TestWorkerRefusals` refuses a range.
+
+Not built: claims on D1; `stack queue` on SQLite; the scaler above. No
+worker has claimed on SQLite outside the tests.
 
 The rule is reversible until the first release.

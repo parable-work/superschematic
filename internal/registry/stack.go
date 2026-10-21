@@ -161,6 +161,14 @@ type PlatformSpec struct {
 	// platform sets it, and not beside IdentityConfig.
 	NoIdentity string
 
+	// NoQueueClaims, when set, says why no worker claims the messages of a
+	// queue on a database this platform places (D53, amended): resolution
+	// refuses such a worker as unrealizable, giving the reason. The
+	// cloudflare.d1 platform sets it, since a D1 database is reached through
+	// a Worker's binding alone and no platform of Workers runs a worker's
+	// claim loop. Only a database platform sets it.
+	NoQueueClaims string
+
 	// NameOf returns the deployable's name in the environment, a string or
 	// a value that references the environment's parameters.
 	NameOf func(PlatformContext) any
@@ -723,6 +731,9 @@ func (r *Registry) RegisterPlatform(spec PlatformSpec) error {
 		if spec.IdentityConfig != "" {
 			return fmt.Errorf("registry: platform %q declares an identity config and says it runs no identity runtime", spec.Name)
 		}
+	}
+	if spec.NoQueueClaims != "" && spec.Kind != ir.DeployableDatabase {
+		return fmt.Errorf("registry: %s platform %q says why no worker claims a queue on it; only a database platform places a queue", spec.Kind, spec.Name)
 	}
 	if len(spec.Settings) > 0 {
 		compiled, err := compileSchema(spec.Settings, "superschematic://platforms/"+spec.Name+"/settings.json")
