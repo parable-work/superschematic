@@ -10,6 +10,7 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/generator/projectengine"
 	"github.com/parable-work/superschematic/internal/release"
 )
 
@@ -344,6 +345,9 @@ func PlanRunner(in RunnerInput) (*Server, error) {
 	if err := s.planModule(input, dir); err != nil {
 		return nil, err
 	}
+	if s.EngineLink, err = engineLink(in.EngineProject, dir, projectengine.FFIDir, in.EngineGo); err != nil {
+		return nil, err
+	}
 	s.Docker, s.NoDocker, err = planDocker(input, dir)
 	if err != nil {
 		return nil, err
@@ -374,4 +378,25 @@ func writeEngine(s *Server, dir string) error {
 		return fmt.Errorf("servergen: %s %s: %w", s.Kind, s.Name, err)
 	}
 	return nil
+}
+
+// engineLink is the projectengine.Link of an entrypoint at dir whose engine
+// is built from project, the project's engine crate, nil when project is
+// nil: member is the crate's member the entrypoint takes, and beside, a
+// [paths] key naming the engine's Go binding or npm package, puts the
+// engine's Cargo workspace, whose lock file the crate starts from, at
+// ../rust, as the image's engine stage takes it.
+func engineLink(project *EngineProject, dir, member, beside string) (*projectengine.Link, error) {
+	if project == nil {
+		return nil, nil
+	}
+	var lockfile string
+	if beside != "" {
+		lockfile = filepath.Join(filepath.Dir(beside), "rust", "Cargo.lock")
+	}
+	l, err := projectengine.LinkOf(dir, project.Database, project.Dir, member, lockfile)
+	if err != nil {
+		return nil, err
+	}
+	return &l, nil
 }

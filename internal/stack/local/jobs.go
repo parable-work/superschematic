@@ -105,6 +105,11 @@ func (p *Provisioner) buildJob(ctx context.Context, req registry.ProvisionReques
 	if err != nil {
 		return nil, err
 	}
+	engine, err := p.projectEngine(ctx, req, module, "job", j.Deployable)
+	if err != nil {
+		return nil, err
+	}
+	env = engine.processEnv(env)
 	if j.Language == LanguageTypeScript {
 		bun, err := p.lookPath("bun")
 		if err != nil {
@@ -139,7 +144,7 @@ func (p *Provisioner) buildJob(ctx context.Context, req registry.ProvisionReques
 		return nil, err
 	}
 	p.printf("build %s: go build %s", j.Deployable, j.Module)
-	if _, err := p.runner().Run(ctx, Command{Path: goTool, Args: []string{"build", "-o", binary, "."}, Dir: module, Env: buildEnv(req)}); err != nil {
+	if _, err := p.runner().Run(ctx, Command{Path: goTool, Args: []string{"build", "-o", binary, "."}, Dir: module, Env: engine.buildEnv(req)}); err != nil {
 		return nil, fmt.Errorf("local: build job %s: %w", j.Deployable, err)
 	}
 	return &builtJob{job: j, binary: binary, module: module, env: env}, nil
