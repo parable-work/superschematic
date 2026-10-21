@@ -330,7 +330,9 @@ step's statement follows on the lines after it.
 ## Queues
 
 ```
-superschematic-migrate queue --queue queue.json [--database-url URL]
+superschematic-migrate queue --queue queue.json|gs://bucket/queue.json
+    [--database-url URL | --cloud-sql INSTANCE --cloud-sql-user USER --database NAME]
+    [--result result.json|gs://bucket/result.json]
 ```
 
 Runs a queue document: one operator's operation on the dead messages of a
@@ -371,6 +373,19 @@ the queue). The runner prints what it did as one JSON object:
 `total` counts every dead message, `diedAt` is RFC 3339 in UTC to the
 second, and `message` holds the message's columns by their names. Exit
 codes are the job's.
+
+On gcp, `stack queue` runs it as an execution of the stack's migration
+job (D68, amended): `--cloud-sql` names the instance, which the runner
+reaches through the Cloud SQL Go connector as the IAM database user
+`--cloud-sql-user`, as a job document's databases are reached, and
+`--database` the database on it. `--result` writes the JSON object to
+that Cloud Storage object, or file, in place of stdout, and prints only
+where it went: a listing holds the messages' columns, which may hold
+personal data, and a job's stdout and stderr go to Cloud Logging. The
+object is written with `ifGenerationMatch=0`, so the runner needs only
+`storage.objects.create`, and an object that exists already is refused;
+a file is created with mode 0600 and must not exist. An error, on stderr,
+names no message's columns.
 
 ## Layout
 
