@@ -602,13 +602,17 @@ type FakeBootstrap struct {
 	// values such as gcp's project number (D47), which the fake target's
 	// values take as `projectNumber`, beside `project`.
 	Values []registry.BootstrapValue
+
+	// Requests are the requests each bootstrap was given, in order.
+	Requests []registry.BootstrapRequest
 }
 
 var _ registry.Bootstrapper = (*FakeBootstrap)(nil)
 
 // Bootstrap records the environment, the repository and the credentials'
-// secrets, and returns Values.
+// secrets, keeps the request in Requests, and returns Values.
 func (b *FakeBootstrap) Bootstrap(_ context.Context, req registry.BootstrapRequest) (*registry.BootstrapResult, error) {
+	b.Requests = append(b.Requests, req)
 	var secrets []string
 	for _, c := range req.Credentials {
 		secrets = append(secrets, c.Secret)

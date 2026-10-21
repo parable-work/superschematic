@@ -113,7 +113,7 @@
         ]
       },
       {
-        "id": "deployer.github",
+        "id": "deployer.github.environment.staging",
         "type": "gcp:serviceaccount/iAMMember:IAMMember",
         "properties": {
           "member": {
@@ -125,7 +125,40 @@
                   "name": "name"
                 }
               },
-              "/attribute.repository/acme/shop"
+              "/attribute.deploy_environment/Staging"
+            ]
+          },
+          "role": "roles/iam.workloadIdentityUser",
+          "serviceAccountId": {
+            "$output": {
+              "resource": "deployer",
+              "name": "name"
+            }
+          }
+        },
+        "dependsOn": [
+          "deployer",
+          "github"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "bootstrap"
+        ]
+      },
+      {
+        "id": "deployer.github.pull-request",
+        "type": "gcp:serviceaccount/iAMMember:IAMMember",
+        "properties": {
+          "member": {
+            "$concat": [
+              "principalSet://iam.googleapis.com/",
+              {
+                "$output": {
+                  "resource": "github",
+                  "name": "name"
+                }
+              },
+              "/attribute.event_name/pull_request"
             ]
           },
           "role": "roles/iam.workloadIdentityUser",
@@ -543,6 +576,8 @@
         "properties": {
           "attributeCondition": "assertion.repository == 'acme/shop'",
           "attributeMapping": {
+            "attribute.deploy_environment": "(assertion.event_name == 'push' || assertion.event_name == 'workflow_dispatch') && assertion.ref == 'refs/heads/main' ? assertion.sub.extract(':environment:{environment}') : ''",
+            "attribute.event_name": "assertion.event_name",
             "attribute.ref": "assertion.ref",
             "attribute.repository": "assertion.repository",
             "google.subject": "assertion.sub"
@@ -662,7 +697,7 @@
         ]
       },
       {
-        "id": "planner.github",
+        "id": "planner.github.pull-request",
         "type": "gcp:serviceaccount/iAMMember:IAMMember",
         "properties": {
           "member": {
@@ -674,7 +709,7 @@
                   "name": "name"
                 }
               },
-              "/attribute.repository/acme/shop"
+              "/attribute.event_name/pull_request"
             ]
           },
           "role": "roles/iam.workloadIdentityUser",
@@ -846,7 +881,8 @@
         "builder.role.logging-logWriter",
         "builder.state",
         "deployer",
-        "deployer.github",
+        "deployer.github.environment.staging",
+        "deployer.github.pull-request",
         "deployer.role.artifactregistry-writer",
         "deployer.role.certificatemanager-owner",
         "deployer.role.cloudbuild-builds-editor",
@@ -872,7 +908,7 @@
         "migrator.role.cloudsql-instanceUser",
         "migrator.state",
         "planner",
-        "planner.github",
+        "planner.github.pull-request",
         "planner.role.iam-securityReviewer",
         "planner.role.secretmanager-viewer",
         "planner.role.serviceusage-serviceUsageConsumer",

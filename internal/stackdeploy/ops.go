@@ -379,6 +379,13 @@ type BootstrapOptions struct {
 	// the git remote (`acme/shop`).
 	Repository string
 
+	// Branch is the branch the generated CI deploys from, and
+	// Environments the stack's environments on the environment's target,
+	// resolved, which the target's bootstrap scopes the CI's identities
+	// by (registry.BootstrapRequest, D69).
+	Branch       string
+	Environments []*ir.ResolvedEnvironment
+
 	// Prompter asks for each credential of the environment that has no
 	// value.
 	Prompter Prompter
@@ -414,12 +421,14 @@ func Bootstrap(ctx context.Context, o BootstrapOptions) ([]RecordedValue, error)
 		}
 		s.logf("bootstrap target %s for environment %s", s.target.Name, s.env.Environment)
 		result, err := s.target.Bootstrap.Bootstrap(ctx, registry.BootstrapRequest{
-			Environment: s.env,
-			Repository:  o.Repository,
-			Credentials: creds,
-			Provisioner: s.prov,
-			Dir:         s.dir,
-			Log:         s.log,
+			Environment:  s.env,
+			Repository:   o.Repository,
+			Branch:       o.Branch,
+			Environments: o.Environments,
+			Credentials:  creds,
+			Provisioner:  s.prov,
+			Dir:          s.dir,
+			Log:          s.log,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("bootstrap %s: %w", s.env.Environment, err)
