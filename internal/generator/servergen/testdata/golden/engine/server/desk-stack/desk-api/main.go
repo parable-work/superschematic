@@ -119,7 +119,7 @@ func run(logger *zap.Logger) error {
 	// database in the background, as the pool connects when first used, so
 	// /readyz reports it until it opens and deploys the database's engine
 	// document.
-	deskDbEngine, err := openEngine(ctx, logger, "desk-db", "DESK_DB_DATABASE", deskApiConfig.DeskDbDatabase, deskdbtypes.EngineDocument, `"permission"`, nil, deployEngine)
+	deskDbEngine, err := openEngine(ctx, logger, "desk-db", "DESK_DB_DATABASE", deskApiConfig.DeskDbDatabase, deskdbtypes.EngineDocument, `"permission"`, `{"maxAgeMs":2592000000}`, nil, deployEngine)
 	if err != nil {
 		return fmt.Errorf("engine of desk-db: %w", err)
 	}

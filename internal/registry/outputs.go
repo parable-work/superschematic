@@ -127,6 +127,13 @@ type EngineOutputConfig struct {
 	// engine reads it: "permission" (a caller holding <Type>.<action>),
 	// "allowAll", or {"rules": [...]}. Empty is "permission".
 	Policy json.RawMessage `json:"policy,omitempty"`
+
+	// Retention is how long the engine's event log keeps events, as the
+	// engine reads it: {maxAgeMs?, maxEvents?, maxHoldMs?, everyMs?,
+	// batchSize?}, an age, a count or both. Every entrypoint that opens the
+	// engine on the database opens it with it, and the database's runner
+	// prunes the log. Empty keeps every event.
+	Retention json.RawMessage `json:"retention,omitempty"`
 }
 
 // DefaultEnginePolicy is the access policy a server opens the engine with
@@ -392,6 +399,19 @@ func (o *Outputs) EnginePolicy() json.RawMessage {
 	var compact bytes.Buffer
 	if err := json.Compact(&compact, o.Engine.Policy); err != nil {
 		return o.Engine.Policy
+	}
+	return compact.Bytes()
+}
+
+// EngineRetention returns outputs.engine.retention as compact JSON, nil
+// when unset: the log keeps every event.
+func (o *Outputs) EngineRetention() json.RawMessage {
+	if o == nil || o.Engine == nil || len(o.Engine.Retention) == 0 {
+		return nil
+	}
+	var compact bytes.Buffer
+	if err := json.Compact(&compact, o.Engine.Retention); err != nil {
+		return o.Engine.Retention
 	}
 	return compact.Bytes()
 }

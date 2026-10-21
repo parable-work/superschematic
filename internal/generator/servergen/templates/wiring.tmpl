@@ -97,7 +97,7 @@ exactly as a server does.
 	// /readyz reports it until it opens and deploys the database's engine
 	// document.
 {{- end }}
-	{{ .Engine.Var }}, err := openEngine(ctx, logger, {{ quote .Service }}, {{ quote .Field }}, {{ .From }}, {{ .Types }}.EngineDocument, {{ .Engine.PolicyLiteral }}, nil, {{ if $.Background }}nil{{ else }}deployEngine{{ end }})
+	{{ .Engine.Var }}, err := openEngine(ctx, logger, {{ quote .Service }}, {{ quote .Field }}, {{ .From }}, {{ .Types }}.EngineDocument, {{ .Engine.PolicyLiteral }}, {{ .Engine.RetentionLiteral }}, nil, {{ if $.Background }}nil{{ else }}deployEngine{{ end }})
 	if err != nil {
 		return fmt.Errorf("engine of {{ .Service }}: %w", err)
 	}

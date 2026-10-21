@@ -364,7 +364,7 @@ TypeScript an `EngineBackground` of `@superschematic/engine/server`, whose
 through the engine's Node-API addon and mounting `engineApp` and
 `engineMcp` on its Hono app; in Rust a
 `superschematic_engine::background::Background`, whose `wait().await`
-does, an engine to call off the async threads (`spawn_blocking`). Two
+does, an engine to call off the async threads (`spawn_blocking`). Three
 more keys of the database's `outputs.engine` say how:
 
 ```json
@@ -373,7 +373,8 @@ more keys of the database's `outputs.engine` say how:
     "engine": {
       "namespace": "support",
       "mount": "/engine/support",
-      "policy": "permission"
+      "policy": "permission",
+      "retention": { "maxAgeMs": 2592000000 }
     }
   }
 }
@@ -388,12 +389,29 @@ more keys of the database's `outputs.engine` say how:
   `Ticket.define`, `Ticket.publish`), the permissions the API's
   `permissions.json` then lists; `"allowAll"`, for tests and local use; or
   `{ "rules": [...] }`, the engine's ordered rules.
+- **`retention`** is how long the event log keeps events, as the engine's
+  `retention` option reads it (see the runner below): `maxAgeMs`,
+  `maxEvents` or both, and `maxHoldMs`, `everyMs` and `batchSize`, each
+  an integer in the engine's range, which the build checks. Unset, the
+  log keeps every event. Every server, job, worker and runner on the
+  database opens the engine with it, and the runner alone prunes. A
+  client that resumes a read or an event stream from a cursor the runner
+  pruned past gets 410 `cursor_expired`, with the floor and the head to
+  start again from.
+
+The engine's routes take the server's 30-second timeout, a 504
+`gateway_timeout` past it, in each language, but the event stream and
+MCP, whose responses last as long as their clients.
 
 The engine's runner, which runs reactions, schedules and Timers'
 deadlines, is a deployable of its own, `<db>-engine-runner`, one instance
 in the language of the first API on the database: a Cloud Run worker pool
 on gcp, a process of its own under `stack dev`. It acts as its deployable's
-name, holding each engine type's name as a permission.
+name, holding each engine type's name as a permission, and with
+`retention` it prunes the log, while it holds the runner's lock, never
+past an event a reaction has yet to handle. A live event stream holds
+nothing: one whose client stops reading for longer than retention keeps
+ends, and its reconnect gets the 410.
 
 Several APIs may share an engine database, each served in its own
 language. Their servers share the engine: each deploys the same document,

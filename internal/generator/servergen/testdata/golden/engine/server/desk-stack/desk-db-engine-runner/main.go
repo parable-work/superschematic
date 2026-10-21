@@ -61,7 +61,7 @@ func run(logger *zap.Logger) error {
 		Subject:     "desk-db-engine-runner",
 		Permissions: []string{"Account", "Ticket"},
 	}
-	deskDbEngine, err := openEngine(ctx, logger, "desk-db", "DESK_DB_DATABASE", deskDb, deskdbtypes.EngineDocument, `"permission"`, principal, startRunner)
+	deskDbEngine, err := openEngine(ctx, logger, "desk-db", "DESK_DB_DATABASE", deskDb, deskdbtypes.EngineDocument, `"permission"`, `{"maxAgeMs":2592000000}`, principal, startRunner)
 	if err != nil {
 		return fmt.Errorf("engine of desk-db: %w", err)
 	}

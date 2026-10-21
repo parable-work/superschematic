@@ -72,8 +72,10 @@ constant too
 `outputs.engine.namespace` names the engine namespace its documents live
 in, the service's name unless set; `outputs.engine.mount` where a Go
 server of an API on the database mounts the engine's routes,
-`/engine/<service>` unless set; and `outputs.engine.policy` the access
-policy it opens the engine with, `permission` unless set
+`/engine/<service>` unless set; `outputs.engine.policy` the access
+policy it opens the engine with, `permission` unless set; and
+`outputs.engine.retention` how long the event log keeps events, which the
+database's runner prunes, every event unless set
 ([In a generated server](/superschematic/guides/engine-behaviors/#in-a-generated-server)).
 When a type of a DB or General schema
 composes an extension's behavior whose registration names a Rust crate,

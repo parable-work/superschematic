@@ -59,6 +59,7 @@ async fn run() -> Result<(), Failure> {
         &desk_db_database,
         desk_db_types::ENGINE_DOCUMENT,
         r#""permission""#,
+        Some(r#"{"maxAgeMs":2592000000}"#),
     )?;
     shutdown.cancelled().await;
     tracing::info!("shutting down");

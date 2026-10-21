@@ -49,7 +49,7 @@ async function run(signal: AbortSignal, pools: { end(): Promise<void> }[], engin
   // The engine of desk-db, an engine database (D58), for the API's Deps:
   // opened on the same database in the background, retrying until it
   // answers. It deploys nothing, which the servers do.
-  const deskDbEngine = await openEngine('desk-db', 'DESK_DB_DATABASE', deskTsApiConfig.DESK_DB_DATABASE, deskDbEngineDocument, 'permission');
+  const deskDbEngine = await openEngine('desk-db', 'DESK_DB_DATABASE', deskTsApiConfig.DESK_DB_DATABASE, deskDbEngineDocument, 'permission', { retention: {"maxAgeMs":2592000000} });
   engines.push(deskDbEngine);
 
   // desk-ts-api: its jobs, built from its Deps.
@@ -173,8 +173,10 @@ interface OpenedEngine {
  * engine types compose beside the core's, which the engine's addon carries
  * and registers by name after the core's: the work queue's, in the core's
  * addon, and an extension's, in the project's engine addon, which
- * SUPERSCHEMATIC_ENGINE_ADDON names. runner, for an engine's runner, is the
- * principal its reactions and schedules act as. setup runs on the engine
+ * SUPERSCHEMATIC_ENGINE_ADDON names. retention is the event log's, which
+ * only a started runner prunes, while it holds the runner's lock; none
+ * keeps every event. runner, for an engine's runner, is the principal its
+ * reactions and schedules act as. setup runs on the engine
  * once it opens; none sets nothing up. Each attempt that fails is logged
  * with the wait before the next.
  */
@@ -184,7 +186,7 @@ async function openEngine(
   db: Database,
   document: EngineDocumentOf,
   policy: EngineOptions['policy'],
-  options: { readonly behaviors?: readonly string[]; readonly runner?: Principal; readonly setup?: EngineSetup } = {}
+  options: { readonly behaviors?: readonly string[]; readonly retention?: EngineOptions['retention']; readonly runner?: Principal; readonly setup?: EngineSetup } = {}
 ): Promise<OpenedEngine> {
   const { url, release } = await engineURL(field, db);
   const log = logger.child({ engine: service, namespace: document.namespace });
@@ -197,6 +199,7 @@ async function openEngine(
       metaSchema: document.metaSchema,
       tools: document.tools,
       ...(options.behaviors !== undefined ? { behaviors: options.behaviors } : {}),
+      ...(options.retention !== undefined ? { retention: options.retention } : {}),
       ...(options.runner !== undefined ? { runner: { principal: options.runner } } : {}),
     },
     {

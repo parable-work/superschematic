@@ -137,6 +137,36 @@ export type EngineOutputConfig = {
    * The access policy the servers open the engine with: "permission", which allows an action on a type to a caller holding <Type>.<action> (Ticket.read, Ticket.write, Ticket.define, Ticket.publish); "allowAll", for tests and local use; or ordered rules, the first that matches a question deciding it. Unset is "permission".
    */
   readonly policy?: EnginePolicy;
+  /**
+   * How long the engine's event log keeps events: an age, a count or both, as the engine reads them. Every server, job, worker and runner on this database opens the engine with it, and the database's runner prunes the log, never past an event a reaction has yet to handle. Unset keeps every event.
+   */
+  readonly retention?: EngineRetention;
+};
+
+/**
+ * The event log's retention (D58): maxAgeMs, maxEvents or both; an event goes when either lets it go. A stream or read that resumes from a cursor retention has pruned past is 410 cursor_expired.
+ */
+export type EngineRetention = {
+  /**
+   * Events older than this many milliseconds, by when they were written, are pruned: an integer from 1.
+   */
+  readonly maxAgeMs?: number;
+  /**
+   * A namespace's events past its newest this many are pruned: an integer from 1.
+   */
+  readonly maxEvents?: number;
+  /**
+   * The longest a reaction that does not advance (halted, in an archived namespace, or whose behavior the engine no longer runs) holds events retention lets go, in milliseconds. Unset, it holds them until it advances.
+   */
+  readonly maxHoldMs?: number;
+  /**
+   * How often the runner prunes, in milliseconds: an integer from 1000. Unset is 60000.
+   */
+  readonly everyMs?: number;
+  /**
+   * Events pruned in one transaction: an integer from 1 to 10000. Unset is 1000.
+   */
+  readonly batchSize?: number;
 };
 
 /**
