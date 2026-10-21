@@ -531,7 +531,7 @@ func TestDeployShopOnGCP(t *testing.T) {
 	for _, call := range f.prov.Calls() {
 		steps = append(steps, strings.SplitN(call, ":", 2)[0])
 	}
-	want := []string{"render 56 nodes", "apply infrastructure", "migrate expand shop-db", "apply rollout 1", "apply rollout 2", "migrate contract shop-db", "apply exposure"}
+	want := []string{"render 52 nodes", "apply infrastructure", "migrate expand shop-db", "apply rollout 1", "apply rollout 2", "migrate contract shop-db", "apply exposure"}
 	if !slices.Equal(steps, want) {
 		t.Errorf("ran %q, want %q", steps, want)
 	}

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { trace } from '@opentelemetry/api';
 import { Hono } from 'hono';
 import { startReceiver, type ReceivedSpan, type Receiver } from './otlp.testing.js';
-import { startTelemetry, type Telemetry } from './telemetry.js';
+import { googleAuth, googleAuthHeaders, startTelemetry, type Telemetry } from './telemetry.js';
 
 // The variables a test sets, cleared before each so the developer's shell
 // does not turn export on or change it.
@@ -256,5 +256,82 @@ describe('startTelemetry', () => {
     await t.shutdown();
     expect(traceparent).toBeNull();
     expect(receiver!.spans).toHaveLength(0);
+  });
+});
+
+describe("Google's OTLP endpoint (D67, amended)", () => {
+  test('an https endpoint under googleapis.com alone gets the access token, never over http, unless a headers variable names authorization', () => {
+    const cases: Array<[string, boolean]> = [
+      ['https://telemetry.googleapis.com', true],
+      ['https://telemetry.googleapis.com:443/v1/traces', true],
+      ['https://TELEMETRY.GOOGLEAPIS.COM', true],
+      ['https://telemetry.us-central1.rep.googleapis.com/', true],
+      ['https://googleapis.com', true],
+      ['http://collector.internal:4318', false],
+      ['https://notgoogleapis.com', false],
+      ['https://googleapis.com.example.com', false],
+      ['http://telemetry.googleapis.com', false],
+      ['http://telemetry.googleapis.com:443/v1/traces', false],
+    ];
+    for (const [endpoint, want] of cases) expect([endpoint, googleAuth(endpoint, {})]).toEqual([endpoint, want]);
+    expect(googleAuth('https://telemetry.googleapis.com', { OTEL_EXPORTER_OTLP_HEADERS: 'Authorization=Bearer%20abc' })).toBe(false);
+    expect(googleAuth('https://telemetry.googleapis.com', { OTEL_EXPORTER_OTLP_TRACES_HEADERS: 'x-a=1, authorization = Basic%20x' })).toBe(false);
+    expect(googleAuth('https://telemetry.googleapis.com', { OTEL_EXPORTER_OTLP_HEADERS: 'x-goog-user-project=p' })).toBe(true);
+  });
+
+  test('each export carries the metadata server’s access token, held until five minutes before it expires', async () => {
+    let now = Date.UTC(2026, 9, 20, 12);
+    let fetched = 0;
+    let failing = false;
+    const asked: string[] = [];
+    const headers = googleAuthHeaders({
+      metadataHost: 'metadata.test',
+      now: () => now,
+      fetch: async (url, init) => {
+        asked.push(`${url} ${init.headers['metadata-flavor']}`);
+        if (failing) return new Response('no account', { status: 500 });
+        fetched += 1;
+        return Response.json({ access_token: `token-${fetched}`, expires_in: 3599, token_type: 'Bearer' });
+      },
+    });
+    expect(await headers()).toEqual({ Authorization: 'Bearer token-1' });
+    expect(await headers()).toEqual({ Authorization: 'Bearer token-1' });
+    now += 54 * 60_000;
+    expect(await headers()).toEqual({ Authorization: 'Bearer token-1' });
+    now += 60_000;
+    expect(await headers()).toEqual({ Authorization: 'Bearer token-2' });
+    expect(asked).toEqual(Array(2).fill('http://metadata.test/computeMetadata/v1/instance/service-accounts/default/token Google'));
+    failing = true;
+    now += 60 * 60_000;
+    expect(await headers()).toEqual({});
+  });
+
+  test('an export to the endpoint sends the token', async () => {
+    const metadata = Bun.serve({
+      port: 0,
+      fetch: req =>
+        new URL(req.url).pathname === '/computeMetadata/v1/instance/service-accounts/default/token' && req.headers.get('metadata-flavor') === 'Google'
+          ? Response.json({ access_token: 'the-token', expires_in: 3599 })
+          : new Response('no', { status: 404 }),
+    });
+    const authorizations: Array<string | null> = [];
+    const collector = Bun.serve({
+      port: 0,
+      fetch: req => {
+        authorizations.push(req.headers.get('authorization'));
+        return new Response(null, { status: 200 });
+      },
+    });
+    try {
+      const { OTLPTraceExporter } = await import('@opentelemetry/exporter-trace-otlp-proto');
+      const exporter = new OTLPTraceExporter({ url: `http://127.0.0.1:${collector.port}/v1/traces`, headers: googleAuthHeaders({ metadataHost: `127.0.0.1:${metadata.port}` }) });
+      const done = await new Promise<number>(resolve => exporter.export([], result => resolve(result.code)));
+      expect(done).toBe(0);
+      await exporter.shutdown();
+      expect(authorizations).toEqual(['Bearer the-token']);
+    } finally {
+      metadata.stop(true);
+      collector.stop(true);
+    }
   });
 });

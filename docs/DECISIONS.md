@@ -7621,15 +7621,8 @@ Status: built.
   its span before it exits.
 
 Not built:
-- Export on gcp. A target would need to set the variables for each Cloud
-  Run service, job and worker pool, from a value of the environment, and a
-  place to send to: an OpenTelemetry Collector as a sidecar container,
-  with Google's exporter and the Cloud Trace agent role each workload's
-  account has (section 7.2), or Google's OTLP endpoint,
-  `telemetry.googleapis.com`, whose OAuth token expires, so a static
-  `OTEL_EXPORTER_OTLP_HEADERS` cannot carry it. The target would set
-  `deployment.environment.name` and the image digest in
-  `OTEL_RESOURCE_ATTRIBUTES` too.
+- Export on gcp: built by the amendment at the end of this file that
+  names it (`### D67, amended`).
 - The cloudflare target's Workers build, which does not import
   `./telemetry`.
 - Metrics and logs, as above.
@@ -7951,7 +7944,8 @@ each with `--frozen-lockfile`, type-checks and serves from each, and finds
 the project's links unmoved, and fails without the mirror; the TypeScript
 Dockerfile test builds and serves an image from another root.
 `TestStackDevRunsTheShop` no longer reinstalls the shop after its run into
-an output root of its own. Not built: mirrors of sites.
+an output root of its own. Mirrors of sites: the amendment below that
+names them.
 
 The rule is reversible until the first release.
 
@@ -8121,5 +8115,75 @@ decoder tests refuse a payload no member reads. The pygen `validate_all` of
 a model with an optional list of a union no longer names the union, which
 `types.py` cannot import. The `internal/generator/parity` matrix has no
 union field yet.
+
+The rule is reversible until the first release.
+
+### D65, amended: a site in another output root builds in a mirror of its package
+
+The amendment above mirrored the TypeScript implementations into every
+output root but the default one, and left the sites out: in another root a
+site was no member of the workspace, so `stack dev --out`, a deploy from
+`--out` and `stack build` ran its build in the project's package, against
+`node_modules` the default root's install linked, which the other root's
+install never brought up to date and a fresh clone did not have.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A site's build into an output root other than the default one copies its package into `<output-root>/impl/<site>/` as an implementation's mirror is copied: the same files, `package.json` with its `"//"` notice, which names it the mirror of a site, and its dependencies on paths re-based. The root's workspace already lists `impl/*`, so its install links the mirror and leaves the package's `node_modules`. | The site as a member of every root's workspace, which Bun refuses beside the default root's, and which would relink the package. A mirror the stack's build writes, which a build of the site alone, as `build-all` runs it, would not bring up to date. |
+| Wherever a site builds, the local provisioner, the deploy and `stack build`, it builds in its mirror when the output root's `package.json` lists `impl/*`, and in its package otherwise (`tsgen.SiteDir`); a root that lists the mirrors and holds none of the site stops with an error that says to build the site into it. The output it serves is the mirror's. | Telling the default root from the schemas root, which the provisioner's request does not carry. Falling back to the package, which would build against another root's install without saying so. |
+| A stack's build keeps the mirror of each site the project has a package for at its `[implementation_paths] site` template, which no server depends on, and removes it once the package is gone; the default root holds no mirror, a site's included. `build-all --cache` into another root builds each site every time, since the cache's inputs do not cover the mirror. | Pruning site mirrors by the stacks that deploy them, which a build of one stack does not know of the others. |
+
+Status: built. servergen's `TestASiteMirrorHoldsThePackage` and
+`TestPruneTypeScriptMirrors` hold the copy and its pruning, tsgen's
+`TestSiteDir` and stackdeploy's `TestBuildBuildsASiteInItsMirror` the
+choice of directory. `TestTypeScriptServersBuildInAnyOutputRoot` now
+builds the fixture's site `ts-web` too: in each of two other roots it
+builds in the mirror, the stacks' builds keep it, its page is the
+mirror's, and the links under `web/` stay as the default root's install
+made them. `TestStackDevRunsTheShop` checks that `stack dev --out` serves
+`shop-web` from its mirror. The generated CI builds each site in the
+default root, as before.
+
+The rule is reversible until the first release.
+
+### D67, amended: a gcp environment's telemetry turns export on, to Cloud Trace with the account's own token or to a collector
+
+D67 left export on gcp unbuilt: nothing set the OTEL variables on a Cloud
+Run service, job or worker pool, every workload's account held the Cloud
+Trace agent role for nothing, and Cloud Trace's OTLP endpoint,
+`telemetry.googleapis.com`, takes an OAuth access token that expires
+within the hour, which no fixed `OTEL_EXPORTER_OTLP_HEADERS` carries.
+Google's own guidance has an application configure its exporter with its
+Application Default Credentials. None of the three runtimes' exporters
+does that without new code: Go's `otlptracehttp` takes static headers or
+an `http.Client`, TypeScript's `exporter-trace-otlp-proto` a headers
+function, and Rust's `opentelemetry-otlp` the `HttpClient` it is given, so
+each needs a token source of its own.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The gcp target's environment values take `telemetry`, an object whose presence turns export on for every server, job and worker: `{}` exports to Cloud Trace's OTLP endpoint, `https://telemetry.googleapis.com`; `endpoint` names an OTLP/HTTP collector's base URL instead; `sampleRatio`, 0 to 1, samples that share of the traces that start in a deployable. A server's, job's or worker's settings take `telemetry: true` or `false`, which turns its own export on, to the environment's endpoint or Cloud Trace's, or off. | A boolean alone, with no way to reach a collector or sample. A value on each deployable alone, which every environment would repeat. Headers in the setting, which would put a collector's credential into `environment.json`; a collector that needs one waits for a secret binding of its own. |
+| A deployable that exports gets `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME` set to its name, the entrypoint's default made explicit, and `OTEL_RESOURCE_ATTRIBUTES`: `deployment.environment.name` (a preview member's with its parameters), `gcp.project_id`, which Cloud Trace's endpoint reads the spans' project from, `cloud.provider`, `cloud.region`, and `service.version`, the image. The image is a part of its own in the value's concatenation, so the deploy pins it to its digest there as it pins the container's (`PinImages` now pins a concatenation's part equal to the repository, and no part that only begins with it). A sample ratio sets `OTEL_TRACES_SAMPLER=parentbased_traceidratio` and its argument. A binding of one of those names is refused. | `service.version` left out, which D67 asked a target for. The digest by a token of its own, a third pinning path. |
+| Each runtime sends the account's access token to an `https` endpoint whose host is `googleapis.com` or under it, never over `http`, unless `OTEL_EXPORTER_OTLP_HEADERS` or its traces form names an `authorization` header: from the metadata server (`GCE_METADATA_HOST` when set, else `metadata.google.internal`), held until five minutes before it expires. Go wraps the exporter's `http.Client` transport (`telemetry/google.go`), which adds the token only to a request for the endpoint's own host over `https`, so a redirect elsewhere carries none, and whose client takes `OTEL_EXPORTER_OTLP_TIMEOUT` and its traces form but no `OTEL_EXPORTER_OTLP_CERTIFICATE` or client certificate, which Google's endpoint has no use for; TypeScript gives the exporter a headers function over `googleAccessTokenSource`, and Rust's export client adds the header itself. An export without a token fails as any other, and TypeScript, whose headers function may not throw, logs the failure and sends none. The rule is the host, so no new variable joins OpenTelemetry's. | A variable of our own that asks for the token, beside the standard ones D67 limits the configuration to. An OpenTelemetry Collector as a sidecar of every service, job and worker pool, with Google's exporter: a second container to configure, start and pay for in each, and a worker pool's and a job's sidecars behave differently from a service's. Google's client libraries for Application Default Credentials, three dependencies for one metadata request. |
+| A deployable that exports to Cloud Trace gets `roles/cloudtrace.agent` on the project for its account, which holds `telemetry.traces.write`, and only then; one that exports to a collector, or not at all, holds no trace role, so the next deploy of an existing environment removes the role from every account that does not export: code of a project's own that calls Cloud Trace directly turns `telemetry` on for its deployable, or grants the role itself. `stack bootstrap` enables the Telemetry and Cloud Trace APIs for every environment with Cloud Run, whether it exports or not: bootstrap sees only the environment it runs for, and another in the same project may export, while enabling an API grants nothing, the role does. A project bootstrapped before this amendment runs bootstrap once more for the Telemetry API. An `http` endpoint under `googleapis.com` is refused, since no runtime sends the token over it. | The role for every account, as before, whether or not anything exports. The APIs only for an environment whose graph grants the role, which leaves a project whose bootstrapped environment does not export, and another does, without the Telemetry API, so exports fail while the deploy succeeds. Every environment of the stack in the bootstrap's request, a change to the bootstrap seam for two API names. `roles/telemetry.tracesWriter`, Google's newer role for the endpoint alone, which a project's existing grants and Organization Policy are less likely to name; either holds the permission. |
+| The local target is unchanged: `stack dev` hands on the shell's OTEL variables (D67). | A collector `stack dev` starts, which D67 declined. |
+
+Status: built. gcp's `TestTelemetryTurnsExportOn`,
+`TestTelemetryToACollector`, `TestTelemetryOfOneDeployable`,
+`TestTelemetryRefuses` and `TestBootstrapEnablesTheTraceAPIs`, and the
+Production golden, which exports a quarter of its traces but from
+ShipOrders, hold the lowering; every other golden loses the trace agent
+role. An engine database's runner (D58) lowers through the same workload
+as a worker, so it takes the setting and loses the role as well. stackdeploy's `TestPinImagesPinsAPartOfAConcatenation` holds the
+pin. Go's `TestGoogleAuthGoesToGoogleAlone`, `TestGoogleTokenTransport` (a redirect to another host and a request over http carry no token) and `TestGoogleExportTimeout`,
+TypeScript's `Google's OTLP endpoint` tests, one of which exports through
+the real exporter, and Rust's `telemetry::tests` hold the host rule, the
+token, its cache and its refusal. Nothing has run on Google Cloud: the
+first live check is that Cloud Trace takes the spans of each runtime with
+the account's token and `gcp.project_id`, and that a worker pool's and a
+job's metadata server give the token as a service's does.
+
+Not built: headers for a collector, from a secret; a collector the target
+runs; metrics and logs (D67).
 
 The rule is reversible until the first release.

@@ -209,7 +209,7 @@ func runBuildAll(cmd *cobra.Command, a *app, flags *buildAllFlags, servicesRootA
 			if stackNeedsImplementationScaffold(task.service, services, repoRoot, activeNaming, reg) {
 				continue
 			}
-			if siteNeedsConfig(task.service, repoRoot, activeNaming) {
+			if siteNeedsConfig(task.service, repoRoot, activeNaming) || siteNeedsMirror(task.service, outputRoot, schemasRoot) {
 				continue
 			}
 			ok, action := resolveBuildAllTask(task, cacheRoot, repoRoot, cmd.ErrOrStderr())
@@ -604,6 +604,14 @@ func siteNeedsConfig(service buildplan.Service, repoRoot string, names naming.Na
 	}
 	_, err := os.Stat(filepath.Join(names.SiteImplementationDir(repoRoot, service.Name), sitegen.ConfigFile))
 	return err != nil
+}
+
+// siteNeedsMirror reports whether service is a site and outputRoot is not
+// the default one: the site's build there brings its mirror up to date with
+// its package, which the cache's inputs do not cover, so it builds on
+// every run (D65, amended).
+func siteNeedsMirror(service buildplan.Service, outputRoot, schemasRoot string) bool {
+	return service.Config.Kind == ir.SchemaKindSite && tsgen.Mirrored(outputRoot, schemasRoot)
 }
 
 // stackNeedsImplementationScaffold reports whether service is a stack

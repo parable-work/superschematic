@@ -64,9 +64,14 @@ var apiServices = []string{
 
 // graphServices are the APIs a resource type's module needs. A database
 // needs Cloud Run too, for its migration job, and a job's schedule Cloud
-// Scheduler (D52).
+// Scheduler (D52). A Cloud Run graph gets the Telemetry API, whose OTLP
+// endpoint takes the spans, and Cloud Trace, which keeps them, whether or
+// not this environment exports to Cloud Trace (D67, amended): another
+// environment in the same project may, and bootstrap sees only its own.
+// Enabling an API grants nothing; the trace agent role, which only an
+// exporting deployable's account holds, is what admits a writer.
 var graphServices = map[string][]string{
-	"gcp:cloudrunv2/":         {"run.googleapis.com", "cloudtrace.googleapis.com"},
+	"gcp:cloudrunv2/":         {"run.googleapis.com", "cloudtrace.googleapis.com", "telemetry.googleapis.com"},
 	"gcp:cloudscheduler/":     {"cloudscheduler.googleapis.com"},
 	"gcp:sql/":                {"sqladmin.googleapis.com", "run.googleapis.com"},
 	"gcp:compute/":            {"compute.googleapis.com"},

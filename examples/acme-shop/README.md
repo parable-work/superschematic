@@ -247,8 +247,9 @@ sees `shop-stock`'s Rust worker file the product's restock request and
 its Rust job, run with `stack run`, order it, and then runs `stack dev`
 and the job once more, into an output root of its own, where
 `shop-stock`'s server, worker and job build against that root's mirror of
-`rust-impl/shop-stock`, and the storefront against its copy of
-`typescript/shop-storefront`, while the packages under `typescript/` and
+`rust-impl/shop-stock`, the storefront against its copy of
+`typescript/shop-storefront`, and `shop-web` in its copy of
+`web/shop-web`, while the packages under `typescript/` and
 `web/` keep the links `schemas/dist`'s install made. The
 clients take the shopper's bearer token as their second argument, from a
 sign-in through `shop-api`'s login. For the Rust server, `shop-api` serves

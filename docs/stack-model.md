@@ -1413,6 +1413,12 @@ bucket (D57).
   writes into the managed zone that holds the domain. The zone is named
   after the domain with its dots as hyphens unless `zone` names it, and
   lives in the environment's project unless `project` names another;
+- `telemetry`, which is optional and turns trace export on for every
+  server, job and worker (section 8.11, D67, amended): `{}` exports to
+  Cloud Trace, `endpoint` names an OTLP/HTTP collector instead, and
+  `sampleRatio` samples that share of the traces that start in a
+  deployable. A server's, job's or worker's `telemetry: false` or `true`
+  turns its own export off or on;
 - secret values, through `stack secrets set`.
 
 Bootstrap reads the GitHub repository from the git remote.
@@ -1422,12 +1428,12 @@ Bootstrap reads the GitHub repository from the git remote.
 | Stack concept | gcp |
 | --- | --- |
 | database | a Cloud SQL Postgres instance with IAM database authentication on, which refuses a connection that does not come through a Cloud SQL connector, and a database per hosted schema; a migration job |
-| server | a Cloud Run service with its own service account, which holds the Cloud Trace agent role; the config in environment variables, a derived field as one variable per member of its value; CPU allocated only while an instance handles a request, unless `cpuAlwaysAllocated` keeps it (section 7.5); a startup probe on the entrypoint's `GET /readyz` (section 8.1), every 5 seconds for up to two minutes, so an instance takes traffic once its databases answer, and a liveness probe on `GET /healthz`, every 15 seconds, which restarts an instance after three misses in a row |
-| job | a Cloud Run job (`gcp.cloudrunjob`) named after the deployable, for a job in Go, TypeScript or Rust (D65), with its own service account, which holds the Cloud Trace agent role, and the config, secrets, Cloud SQL volume and VPC egress a server of its API takes; one task, which runs the image to its end, with the job's timeout for each try and the job's retries, at most the 10 Cloud Run allows (D52) |
+| server | a Cloud Run service with its own service account, which holds the Cloud Trace agent role when the server exports its traces to Cloud Trace (section 8.11); the config in environment variables, a derived field as one variable per member of its value; CPU allocated only while an instance handles a request, unless `cpuAlwaysAllocated` keeps it (section 7.5); a startup probe on the entrypoint's `GET /readyz` (section 8.1), every 5 seconds for up to two minutes, so an instance takes traffic once its databases answer, and a liveness probe on `GET /healthz`, every 15 seconds, which restarts an instance after three misses in a row |
+| job | a Cloud Run job (`gcp.cloudrunjob`) named after the deployable, for a job in Go, TypeScript or Rust (D65), with its own service account, which holds the Cloud Trace agent role when the job exports its traces to Cloud Trace, and the config, secrets, Cloud SQL volume and VPC egress a server of its API takes; one task, which runs the image to its end, with the job's timeout for each try and the job's retries, at most the 10 Cloud Run allows (D52) |
 | schedule | for a job whose environment runs a schedule, a Cloud Scheduler job named as the job is, in the environment's region, on the job's cron in its time zone, which POSTs to the Cloud Run Admin API's `jobs/<job>:run` with an OAuth token for the job's own account; that account holds `roles/run.invoker` on that job alone, which grants it `run.jobs.run`. A job whose schedule is off has neither, and runs only on demand |
 | bucket | a Cloud Storage bucket (`gcp.storage`, D54) named `<project>-<stack>-<bucket>`, since a bucket's name is global, in the environment's region, with uniform bucket-level access, so IAM alone admits a reader, and public access prevention enforced; versioned when the settings say so (section 7.5). Only a member of a parameterized environment sets `forceDestroy`: its bucket is its own, which its destroy empties, where any other bucket keeps its objects and a destroy fails on it |
-| worker | a Cloud Run worker pool (`gcp.cloudrunworker`) named after the deployable, for a worker in Go, TypeScript or Rust (D65), with its own service account, which holds the Cloud Trace agent role, and the config, secrets, Cloud SQL volume and VPC egress a server of its API takes; no port, no URL and no IAM of its own, since nothing calls it; manual scaling to the worker's instances, zero when the environment turns it off, so the pool and its pinned image stay; `WORKER_CONCURRENCY` set to its concurrency; `cpu`, one or more, and `memory` (D53). A worker whose grace is ten seconds or more is refused, since Cloud Run kills an instance ten seconds after SIGTERM |
-| runner | a Cloud Run worker pool (`gcp.cloudrunrunner`) named after the deployable, an engine database's runner (D58), in its API's language, with its own service account and its database's Cloud SQL connection as its one config; one instance under manual scaling, which runs the engine's runner while it holds the runner's lock, since a Cloud Run service's instance has CPU only while it serves. Its database user is its own, a member of the role that owns the engine's schema, as each server's, job's and worker's on the database is (section 8.4, D58). A settings element that turns it off (`{ of: ShopDb, runner: true, enabled: false }`) leaves the pool no instance |
+| worker | a Cloud Run worker pool (`gcp.cloudrunworker`) named after the deployable, for a worker in Go, TypeScript or Rust (D65), with its own service account, which holds the Cloud Trace agent role when the worker exports its traces to Cloud Trace, and the config, secrets, Cloud SQL volume and VPC egress a server of its API takes; no port, no URL and no IAM of its own, since nothing calls it; manual scaling to the worker's instances, zero when the environment turns it off, so the pool and its pinned image stay; `WORKER_CONCURRENCY` set to its concurrency; `cpu`, one or more, and `memory` (D53). A worker whose grace is ten seconds or more is refused, since Cloud Run kills an instance ten seconds after SIGTERM |
+| runner | a Cloud Run worker pool (`gcp.cloudrunrunner`) named after the deployable, an engine database's runner (D58), in its API's language, with its own service account, which holds the Cloud Trace agent role when the runner exports its traces to Cloud Trace, and its database's Cloud SQL connection as its one config; one instance under manual scaling, which runs the engine's runner while it holds the runner's lock, since a Cloud Run service's instance has CPU only while it serves. Its database user is its own, a member of the role that owns the engine's schema, as each server's, job's and worker's on the database is (section 8.4, D58). A settings element that turns it off (`{ of: ShopDb, runner: true, enabled: false }`) leaves the pool no instance |
 | sql edge | `roles/cloudsql.client` and `roles/cloudsql.instanceUser` for the server's, the job's or the worker's account, held to the edge's instance by an IAM condition; an IAM database user, which the migration job gives read and write privileges; the Cloud SQL connection, which the connector derives (instance connection name, database, IAM user) and the service, the job or the worker pool mounts at `/cloudsql`. The same for a Rust server, job or worker, which dials the mount's socket as the IAM user (section 7.4, D57, D65) |
 | http edge | `roles/run.invoker` on the callee for the caller's account; the callee's `run.app` URL in the caller's config, with a Google ID token for the callee's custom audience, its full resource name `//run.googleapis.com/projects/<project>/locations/<region>/services/<service>`, as the service credential, since the service's own callers field cannot reference its URL; every service lists its resource name in `customAudiences`. The callee's callers field gets Google's issuer and keys, and the caller's service account by its email (section 9.2): a job's, as a caller that serves its API |
 | bucket edge | `roles/storage.objectUser` on the bucket alone for the server's, the job's or the worker's account, which reads, writes, lists and deletes its objects and changes nothing of the bucket, and `roles/iam.serviceAccountTokenCreator` for that account on itself, which IAM's `signBlob` asks of an account that signs a URL as itself; the bucket's name, which the connector derives, with no credential, since the client takes the workload's own from the metadata server. A Rust server's, job's or worker's edge lowers as a Go one's: its runtime's `gcs` asks the metadata server for the token and signs through `signBlob` (D54) |
@@ -1486,7 +1492,10 @@ again: each step creates what is missing and leaves the rest.
    Federation, Secret Manager, and Cloud Run, Cloud SQL, Compute Engine,
    Certificate Manager, Cloud DNS and Cloud Scheduler as the graph's
    resource types need them, Cloud Run with any database for its migration
-   job, and Cloud Scheduler for a job's schedule (D52). An API
+   job, Cloud Scheduler for a job's schedule (D52), and, with Cloud Run,
+   the Telemetry and Cloud Trace APIs, which a deployable that exports to
+   Cloud Trace uses (section 8.11), whether or not this environment
+   exports, since another in the same project may. An API
    enabled moments ago can refuse calls as one the project has not
    enabled, so each later step retries such a refusal for up to five
    minutes.
@@ -1617,10 +1626,9 @@ The target sets defaults that `settings` can override:
 - a bucket with object versioning off (`versioning`) and no lifecycle
   rule, unless `deleteAfterDays` deletes each object that many days after
   it was written (D54);
-- logs to Cloud Logging. Each account may write to Cloud Trace, but no
-  entrypoint exports traces there yet: each exports over OTLP when its
-  environment names a collector (section 8.11, D67), and the gcp target
-  does not set one.
+- logs to Cloud Logging, and no trace export unless the environment's
+  `telemetry` or the deployable's turns it on (section 8.11, D67,
+  amended).
 
 Cloud Run allocates a service's CPU only while it handles a request, and
 bills its instances for that time and their starts and stops, unless the
@@ -2354,8 +2362,8 @@ as they are, with no build step (D51). The pieces mirror Go's:
   where every command writes without `--out`: an install links each
   member's `node_modules` into the root that installs it, so a second
   root that listed them would take their links over. Any other output
-  root lists the implementations' mirrors, `impl/*`, in their place
-  (below). Where
+  root lists the mirrors of the implementations and the sites, `impl/*`,
+  in their place (below). Where
   `[paths]` names a checkout of superscalar, the HTTP runtime or the
   version-graph runtime, or the behavior engine (D58), the root's
   `overrides` point every dependency on it at the checkout with a `file:`
@@ -2432,9 +2440,16 @@ as they are, with no build step (D51). The pieces mirror Go's:
   server, job or worker package under the output root depends on, and,
   in the default root, every copy. A change to the package reaches another
   root's servers with that root's next build of the stack, which `stack
-  dev` runs first. A site is copied into no root: it is no member of
-  another root's workspace, and its build there runs in its own package
-  against the default root's install.
+  dev` runs first. A site's build into another root copies its package
+  the same way, to `<output-root>/impl/<site>/`, with a notice that names
+  it a site, and a build of a stack there keeps the copy of each site the
+  project has a package for (D65, amended). Wherever a site builds, `stack
+  dev`, a deploy or `stack build`, it builds in the copy when the output
+  root's workspace lists `impl/*`, after that root's install, against the
+  root's own SDKs, and in its own package otherwise; a root that lists the
+  copies and holds none of the site stops the build. A `build-all --cache`
+  into another root builds each site every time, since its inputs do not
+  cover the copy.
 - **Entrypoint.** The `server` generator writes
   `<output-root>/server/<stack>/<server>/` for a TypeScript server in the
   pass that writes the Go ones (section 8.1): `package.json`
@@ -3601,9 +3616,40 @@ once it drains, a job after its run, and a worker after its grace.
 `stack dev` and `stack run` give each process the `OTEL_` variables of the
 developer's shell but `OTEL_SERVICE_NAME`, which would name every
 deployable alike, so a shell that points at a collector traces the whole
-environment (section 8.3). The gcp target sets none of them: an
-environment's `env` settings bind `@envVars` fields alone, and a gcp
-deployable exports nothing yet. D67 records what the target would need.
+environment (section 8.3).
+
+On gcp an environment's `telemetry` value turns export on for each
+server, job and worker, and a deployable's `telemetry` setting turns its
+own off or on (section 7.1, D67, amended). The target sets on its
+container:
+
+- `OTEL_EXPORTER_OTLP_ENDPOINT`: Cloud Trace's OTLP endpoint,
+  `https://telemetry.googleapis.com`, unless `telemetry.endpoint` names a
+  collector's;
+- `OTEL_SERVICE_NAME`: the deployable's name, as the entrypoint's default
+  is;
+- `OTEL_RESOURCE_ATTRIBUTES`: `deployment.environment.name`, the
+  environment, a preview member's name with its parameters;
+  `gcp.project_id`, which Cloud Trace reads the spans' project from;
+  `cloud.provider` and `cloud.region`; and `service.version`, the image,
+  which the deploy pins to its digest as it pins the container's;
+- with `telemetry.sampleRatio`, `OTEL_TRACES_SAMPLER=parentbased_traceidratio`
+  and the ratio as its argument.
+
+Cloud Trace's endpoint takes an OAuth access token, which expires within
+the hour, so no fixed `OTEL_EXPORTER_OTLP_HEADERS` carries it. Each
+runtime sends one itself to an `https` endpoint whose host is
+`googleapis.com` or under it, and to that host alone, unless a headers
+variable names an `authorization` header: the
+access token of the workload's own account, from the metadata server
+(`GCE_METADATA_HOST` when set), fetched again five minutes before it
+expires. A deployable that exports to Cloud Trace gets the Cloud Trace
+agent role on the project for its account, which holds
+`telemetry.traces.write`; one that exports to a collector gets no role,
+and reaches the collector as it reaches the internet, or through the VPC
+when it calls another server. An account that does not export holds no
+trace role, so code that calls Cloud Trace itself turns its deployable's
+`telemetry` on. An `http` endpoint under `googleapis.com` is refused.
 Metrics and logs are not exported.
 
 

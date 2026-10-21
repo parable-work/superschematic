@@ -52,7 +52,7 @@ func TestJobPlatform(t *testing.T) {
 	}
 	if got := strings.Join(ownedBy(env, shipOrders), ", "); got != "network, network.nat, network.router, network.subnet, secret.PaymentsSecrets.STRIPE_KEY, "+
 		shipOrders+".account, "+shipOrders+".job, "+shipOrders+".reads.PaymentsSecrets.STRIPE_KEY, "+
-		shipOrders+".schedule, "+shipOrders+".schedule-invoker, "+shipOrders+".trace-agent" {
+		shipOrders+".schedule, "+shipOrders+".schedule-invoker" {
 		t.Errorf("the job lowers to %s", got)
 	}
 	for _, e := range env.Edges {
@@ -361,7 +361,7 @@ func TestDeployRunsTheJobOnEveryDeploy(t *testing.T) {
 	for _, call := range f.prov.Calls() {
 		order = append(order, strings.SplitN(call, ":", 2)[0])
 	}
-	want := []string{"render 56 nodes", "apply infrastructure", "migrate expand shop-db", "apply rollout 1", "apply rollout 2",
+	want := []string{"render 52 nodes", "apply infrastructure", "migrate expand shop-db", "apply rollout 1", "apply rollout 2",
 		"cloud run " + shipOrders, "migrate contract shop-db", "apply exposure"}
 	if !slices.Equal(order, want) {
 		t.Errorf("the deploy ran %q, want %q", order, want)

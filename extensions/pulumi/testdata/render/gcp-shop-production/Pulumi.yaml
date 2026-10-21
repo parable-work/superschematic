@@ -126,6 +126,16 @@ resources:
                   secretKeyRef:
                     secret: ${secret-PaymentsSecrets-STRIPE_KEY.secretId}
                     version: latest
+              - name: OTEL_EXPORTER_OTLP_ENDPOINT
+                value: https://telemetry.googleapis.com
+              - name: OTEL_SERVICE_NAME
+                value: Orders
+              - name: OTEL_RESOURCE_ATTRIBUTES
+                value: deployment.environment.name=Production,gcp.project_id=acme-prod,cloud.provider=gcp,cloud.region=us-east1,service.version=us-east1-docker.pkg.dev/acme-prod/shop/orders
+              - name: OTEL_TRACES_SAMPLER
+                value: parentbased_traceidratio
+              - name: OTEL_TRACES_SAMPLER_ARG
+                value: "0.25"
             image: us-east1-docker.pkg.dev/acme-prod/shop/orders
             livenessProbe:
               failureThreshold: 3
@@ -536,6 +546,16 @@ resources:
                   secretKeyRef:
                     secret: ${secret-PaymentsSecrets-STRIPE_KEY.secretId}
                     version: latest
+              - name: OTEL_EXPORTER_OTLP_ENDPOINT
+                value: https://telemetry.googleapis.com
+              - name: OTEL_SERVICE_NAME
+                value: shop-api
+              - name: OTEL_RESOURCE_ATTRIBUTES
+                value: deployment.environment.name=Production,gcp.project_id=acme-prod,cloud.provider=gcp,cloud.region=us-east1,service.version=us-east1-docker.pkg.dev/acme-prod/shop/shop-api
+              - name: OTEL_TRACES_SAMPLER
+                value: parentbased_traceidratio
+              - name: OTEL_TRACES_SAMPLER_ARG
+                value: "0.25"
             image: us-east1-docker.pkg.dev/acme-prod/shop/shop-api
             livenessProbe:
               failureThreshold: 3
@@ -827,6 +847,16 @@ resources:
                   secretKeyRef:
                     secret: ${secret-PaymentsSecrets-STRIPE_KEY.secretId}
                     version: latest
+              - name: OTEL_EXPORTER_OTLP_ENDPOINT
+                value: https://telemetry.googleapis.com
+              - name: OTEL_SERVICE_NAME
+                value: shop-orders-fulfil-orders
+              - name: OTEL_RESOURCE_ATTRIBUTES
+                value: deployment.environment.name=Production,gcp.project_id=acme-prod,cloud.provider=gcp,cloud.region=us-east1,service.version=us-east1-docker.pkg.dev/acme-prod/shop/shop-orders-fulfil-orders
+              - name: OTEL_TRACES_SAMPLER
+                value: parentbased_traceidratio
+              - name: OTEL_TRACES_SAMPLER_ARG
+                value: "0.25"
               - name: WORKER_CONCURRENCY
                 value: "4"
             image: us-east1-docker.pkg.dev/acme-prod/shop/shop-orders-fulfil-orders
@@ -1044,18 +1074,6 @@ resources:
       dependsOn:
         - ${shop-orders-ship-orders-account}
         - ${shop-orders-ship-orders-job}
-      version: 9.37.1
-  # phase infrastructure; owners shop-orders-ship-orders
-  shop-orders-ship-orders-trace-agent:
-    name: shop-orders-ship-orders.trace-agent
-    type: gcp:projects/iAMMember:IAMMember
-    properties:
-      member: ${shop-orders-ship-orders-account.member}
-      project: acme-prod
-      role: roles/cloudtrace.agent
-    options:
-      dependsOn:
-        - ${shop-orders-ship-orders-account}
       version: 9.37.1
   # phase infrastructure; owners shop-web
   shop-web-address:
@@ -1330,7 +1348,6 @@ outputs:
   shop-orders-ship-orders.run-invoker.shop-api.id: ${shop-orders-ship-orders-run-invoker-shop-api.id}
   shop-orders-ship-orders.schedule-invoker.id: ${shop-orders-ship-orders-schedule-invoker.id}
   shop-orders-ship-orders.schedule.id: ${shop-orders-ship-orders-schedule.id}
-  shop-orders-ship-orders.trace-agent.id: ${shop-orders-ship-orders-trace-agent.id}
   shop-web.address.address: ${shop-web-address.address}
   shop-web.address.id: ${shop-web-address.id}
   shop-web.anchor.id: ${shop-web-anchor.id}

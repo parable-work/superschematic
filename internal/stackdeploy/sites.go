@@ -18,13 +18,16 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/parable-work/superschematic/internal/generator/tsgen"
 	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
 // A deploy publishes each site's files (docs/stack-model.md, section 8.10,
 // D55). It builds the site, `bun run <build>` in its package after one
-// frozen install of the Bun workspace, and digests the directory the build
+// frozen install of the Bun workspace, or, from an output root other than
+// the default one, in the site's mirror there (tsgen.SiteDir, D65,
+// amended), and digests the directory the build
 // wrote as it digests a build context: every file in path order, at the
 // epoch, owned by root. The target's SitePublisher puts the files under
 // that digest unless they are there already, and writes the site's config
@@ -310,7 +313,10 @@ func (s *session) planSites(ctx context.Context, prev *Manifest, given map[strin
 		if err := s.install(ctx, src, "site"); err != nil {
 			return nil, err
 		}
-		dir := filepath.Join(src.ImplementationRoot, filepath.FromSlash(d.Site.Dir))
+		dir, err := tsgen.SiteDir(src.OutputRoot, src.ImplementationRoot, d.Name, d.Site.Dir)
+		if err != nil {
+			return nil, err
+		}
 		s.logf("site %s: bun run %s in %s", d.Name, d.Site.Build, dir)
 		if err := src.run()(ctx, dir, s.log, "bun", "run", d.Site.Build); err != nil {
 			return nil, fmt.Errorf("build site %s: %w", d.Name, err)
