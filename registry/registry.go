@@ -192,6 +192,11 @@ type (
 	DeployLock    = registry.DeployLock
 	LockHeldError = registry.LockHeldError
 
+	// A target's QueueRunner runs an operator's operation on a queue's
+	// dead messages in a deployed run (QueueRequest, D68, amended).
+	QueueRunner  = registry.QueueRunner
+	QueueRequest = registry.QueueRequest
+
 	// A target's SitePublisher puts a site's files and its config for a
 	// run where the site's platform serves them (SitePublishRequest, D55).
 	SitePublisher      = registry.SitePublisher

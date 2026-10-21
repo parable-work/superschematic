@@ -15,8 +15,8 @@ import (
 // internal/stackdeploy.
 type (
 	// Options is what every operation reads; DeployOptions, PlanOptions,
-	// BuildOptions, BootstrapOptions, SecretsOptions, RunJobOptions and
-	// UnlockOptions add each one's own.
+	// BuildOptions, BootstrapOptions, SecretsOptions, RunJobOptions,
+	// RunQueueOptions and UnlockOptions add each one's own.
 	Options          = stackdeploy.Options
 	DeployOptions    = stackdeploy.DeployOptions
 	PlanOptions      = stackdeploy.PlanOptions
@@ -24,6 +24,7 @@ type (
 	BootstrapOptions = stackdeploy.BootstrapOptions
 	SecretsOptions   = stackdeploy.SecretsOptions
 	RunJobOptions    = stackdeploy.RunJobOptions
+	RunQueueOptions  = stackdeploy.RunQueueOptions
 	UnlockOptions    = stackdeploy.UnlockOptions
 
 	// Sources says where a stack's build wrote each server's and job's
@@ -131,6 +132,13 @@ func Outputs(ctx context.Context, o Options) (*RunOutputs, error) { return stack
 // RunJob runs a deployed job once on demand (D52); see
 // internal/stackdeploy.RunJob.
 func RunJob(ctx context.Context, o RunJobOptions) error { return stackdeploy.RunJob(ctx, o) }
+
+// RunQueue runs an operation on a queue's dead messages in a deployed
+// run, and returns the runner's result (D68, amended); see
+// internal/stackdeploy.RunQueue.
+func RunQueue(ctx context.Context, o RunQueueOptions) ([]byte, error) {
+	return stackdeploy.RunQueue(ctx, o)
+}
 
 // Unlock removes a run's deploy lock, which a deploy whose process died
 // leaves (D46, amended); see internal/stackdeploy.Unlock.

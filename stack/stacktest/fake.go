@@ -129,7 +129,8 @@ const (
 // log; Register creates each one that is nil. Tools are the command-line
 // tools the fake provisioner declares, which a generated CI job installs;
 // nil declares none. NoJobRunner registers the target with no job runner,
-// as a target that runs no job on demand.
+// as a target that runs no job on demand, and NoQueueRunner with no queue
+// runner, as a target whose databases `stack queue` does not reach.
 type Extension struct {
 	Provisioner *FakeProvisioner
 	State       *FakeState
@@ -139,11 +140,14 @@ type Extension struct {
 	Builder     *FakeBuilder
 	CI          *FakeCI
 	Jobs        *FakeJobs
+	Queues      *FakeQueues
 	Sites       *FakeSites
 	Bundles     *FakeBundles
 	PreDestroy  *FakePreDestroy
 	Tools       []registry.CLITool
 	NoJobRunner bool
+
+	NoQueueRunner bool
 }
 
 // Name is the extension's name.
@@ -175,6 +179,9 @@ func (e *Extension) Register(r *registry.Registry) error {
 	if e.Jobs == nil {
 		e.Jobs = &FakeJobs{}
 	}
+	if e.Queues == nil {
+		e.Queues = &FakeQueues{}
+	}
 	if e.Sites == nil {
 		e.Sites = &FakeSites{}
 	}
@@ -188,12 +195,17 @@ func (e *Extension) Register(r *registry.Registry) error {
 	e.Bootstrap.log = e.Provisioner
 	e.Builder.log = e.Provisioner
 	e.Jobs.log = e.Provisioner
+	e.Queues.log = e.Provisioner
 	e.Sites.log = e.Provisioner
 	e.Bundles.log = e.Provisioner
 	e.PreDestroy.log = e.Provisioner
 	var jobs registry.JobRunner = e.Jobs
 	if e.NoJobRunner {
 		jobs = nil
+	}
+	var queues registry.QueueRunner = e.Queues
+	if e.NoQueueRunner {
+		queues = nil
 	}
 	server := func(name string, languages ...string) registry.PlatformSpec {
 		return registry.PlatformSpec{
@@ -349,6 +361,7 @@ func (e *Extension) Register(r *registry.Registry) error {
 		Builder:    e.Builder,
 		CI:         e.CI,
 		Jobs:       jobs,
+		Queues:     queues,
 		Sites:      e.Sites,
 		Bundles:    e.Bundles,
 		PreDestroy: e.PreDestroy,
