@@ -2061,13 +2061,17 @@ deployables' (section 8.6), on `tools.env`'s Rust release unless
 `RUSTUP_TOOLCHAIN` is set, the crate's lock file seeded from the engine
 workspace's when it has none, and copies what cargo built into
 `engine/<db>/<member>/<digest>/` under the program directory, named for
-its SHA-256 so a changed archive relinks a Go binary. A Go build's
+its SHA-256 so a changed archive relinks a Go binary, under the member's
+lock file, which a `stack run` staging at once waits on. `stack dev`
+removes what earlier runs staged but the digest used last before its own,
+which a process may still name; `stack run` removes nothing. A Go build's
 `CGO_LDFLAGS` search the archive's directory first, before the release's
 archives, which hold the core's under the same name; a TypeScript
 process's environment names the addon with `SUPERSCHEMATIC_ENGINE_ADDON`.
 Nothing is set by hand. A Rust entrypoint depends on the crate and builds
-it with its own. A crate that depends on the engine's crates by version,
-as a build with no `[paths]` engine keys writes it, is refused: no
+it with its own. A crate that depends on one of the engine's crates by
+version, as a build with that crate's `[paths]` key unset writes it, is
+refused, naming the key: no
 registry serves them, and a release ships none (D58, amended).
 
 Policy rules refuse what a local environment cannot hold: a domain
@@ -4697,9 +4701,10 @@ The GitHub workflow:
     (`scripts/superscalar-dep.sh --checkout` in it) before the build when
     it builds a project's engine archive or type-checks a TypeScript
     entrypoint, seeds a project's engine crate's lock file from the engine
-    workspace's, and, before the workspace's install, builds the `dist/` of
-    the checkout's superscalar binding, HTTP runtime and engine packages,
-    which the workspace takes in place of the published ones.
+    workspace's, and, when `[paths] engine_typescript` names the
+    checkout's engine package, before the workspace's install builds the
+    `dist/` of the checkout's superscalar binding, HTTP runtime and engine
+    packages, which the workspace takes in place of the published ones.
   - For a stack with a TypeScript server, job, worker or engine runner,
     `check` then installs the output root's Bun workspace from the
     lockfile the project commits (section 8.6), `bun install
