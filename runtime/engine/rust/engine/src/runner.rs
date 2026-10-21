@@ -822,7 +822,15 @@ impl<'e> Runner<'e> {
             *lease = None;
         }
         *lease = self.engine.db.try_lease(&["runner"])?;
-        Ok(lease.is_some())
+        if lease.is_none() {
+            return Ok(false);
+        }
+        // Another process's runner may have pruned while this one held no
+        // lease: retention counts each namespace again.
+        if let Some(retention) = &self.core().retention {
+            retention.forget_counts();
+        }
+        Ok(true)
     }
 
     /// Runs retention now, to the end: every namespace's events that
@@ -1251,9 +1259,19 @@ impl<'e> Runner<'e> {
                 saved.insert(key.id(), row);
             }
             let mut holds: Vec<(String, Hold)> = Vec::new();
+            // A behavior this engine does not run, whose subscription has
+            // not run either (one a newer release composes, while this
+            // release's runner holds the lease in a rolling deploy), holds
+            // at its start when max_hold_ms bounds how long; with no bound
+            // it holds nothing, since no runner may ever run it.
+            let bounded = self
+                .core()
+                .retention
+                .as_ref()
+                .is_some_and(|retention| retention.options.max_hold_ms.is_some());
             for holder in &discovery.holders {
                 let row = saved.get(&holder.key.id());
-                if holder.unregistered && row.is_none() {
+                if holder.unregistered && row.is_none() && !bounded {
                     continue;
                 }
                 let current = match row {
