@@ -1,0 +1,504 @@
+{
+  "name": "Holds",
+  "description": "Holds supply for a claim, such as a checkout, a booking or a rental, while its Workflow waits, and lets it go or keeps it as the claim moves. The config names the holds: a link to one supply, or an own list field whose elements each name one, with the units or the time each item asks. When the claim is created into, or moves into, a takeOn state, Holds asks each supply's checkHold and refuses the move with unavailable, listing every item that does not fit; otherwise it holds every item in the same transaction, all or none, through the supply contract's holdFor. Entering a commitOn state commits what is held, a releaseOn state releases it, and a returnOn state returns committed units, whichever operation moved the status: a transition, a Timers deadline, a Lease expiry or a Reactions rule. A hold expires by a Timers deadline that moves the claim into a releaseOn state; Holds has no expiry and no release of its own. While the claim holds, the fields a hold reads do not change. The claim keeps the unit price each supply held an item at, and their total. Deleting the claim releases what it holds. Requires Workflow.",
+  "configSchema": {
+    "additionalProperties": false,
+    "properties": {
+      "commitOn": {
+        "description": "The states whose entry commits what is held; a move into one while an item is not held is refused.",
+        "items": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "minItems": 1,
+        "type": "array",
+        "uniqueItems": true
+      },
+      "holds": {
+        "additionalProperties": {
+          "additionalProperties": false,
+          "allOf": [
+            {
+              "oneOf": [
+                {
+                  "required": [
+                    "link"
+                  ]
+                },
+                {
+                  "required": [
+                    "each",
+                    "schema"
+                  ]
+                }
+              ]
+            },
+            {
+              "oneOf": [
+                {
+                  "required": [
+                    "quantity"
+                  ]
+                },
+                {
+                  "required": [
+                    "interval"
+                  ]
+                }
+              ]
+            }
+          ],
+          "properties": {
+            "each": {
+              "additionalProperties": false,
+              "description": "An own list field of the type whose elements each name a supply of schema: one item per element.",
+              "properties": {
+                "field": {
+                  "description": "An own list field of the type, by JSON key: one item per element.",
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "target": {
+                  "description": "The field of each element, by JSON key, that holds the supply's id.",
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "field",
+                "target"
+              ],
+              "type": "object"
+            },
+            "interval": {
+              "additionalProperties": false,
+              "description": "Timed supply: the time each item asks, from start to end, or to durationMs after start. start and end are date-time fields of the list's element for an each hold, own fields of the type for a link hold.",
+              "oneOf": [
+                {
+                  "required": [
+                    "end"
+                  ]
+                },
+                {
+                  "required": [
+                    "durationMs"
+                  ]
+                }
+              ],
+              "properties": {
+                "durationMs": {
+                  "description": "How long it lasts, in milliseconds.",
+                  "minimum": 60000,
+                  "type": "integer"
+                },
+                "end": {
+                  "description": "The date-time field it ends at, by JSON key.",
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "start": {
+                  "description": "The date-time field the interval starts at, by JSON key.",
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "start"
+              ],
+              "type": "object"
+            },
+            "link": {
+              "description": "A single-valued link of the type's Links config whose target is the supply: one item.",
+              "pattern": "^[a-z][A-Za-z0-9]{0,63}$",
+              "type": "string"
+            },
+            "quantity": {
+              "description": "Counted supply: the units each item asks, a count or a field ({ field }), an integer field of the list's element for an each hold, an own field of the type for a link hold.",
+              "oneOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "field": {
+                      "description": "The field, by JSON key.",
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "field"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            "schema": {
+              "description": "The supply's schema, for an each hold: it composes a supply, such as Stock or Calendar.",
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "description": "The holds, by name: camelCase, at most 64 characters.",
+        "maxProperties": 16,
+        "minProperties": 1,
+        "propertyNames": {
+          "pattern": "^[a-z][A-Za-z0-9]{0,63}$"
+        },
+        "type": "object"
+      },
+      "maxItems": {
+        "description": "The most items the claim's holds may ask together; 100 when absent.",
+        "maximum": 1000,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "releaseOn": {
+        "description": "The states whose entry releases what is held, such as a hold's expiry or a cancellation.",
+        "items": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "minItems": 1,
+        "type": "array",
+        "uniqueItems": true
+      },
+      "returnOn": {
+        "description": "The states whose entry returns the units of counted supply the claim committed.",
+        "items": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "minItems": 1,
+        "type": "array",
+        "uniqueItems": true
+      },
+      "takeOn": {
+        "description": "The states of the type's Workflow whose entry takes the holds, and the create into one of them; the create alone when absent.",
+        "items": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "minItems": 1,
+        "type": "array",
+        "uniqueItems": true
+      }
+    },
+    "required": [
+      "holds"
+    ],
+    "type": "object"
+  },
+  "requires": [
+    "Workflow"
+  ],
+  "fields": [
+    {
+      "name": "items",
+      "description": "Each item the claim's holds ask, in hold and item order: { hold, item, schema, id, quantity or startMs and endMs, state, unitPrice?, currency? }, the supply it names, what it asks, its state (pending, held, committed, released, returned), and the unit price the supply held it at. An item's state only advances."
+    },
+    {
+      "name": "state",
+      "description": "The least advanced state of the items: none before any is asked, then pending, held, committed, released or returned. A rule hears it turn committed."
+    },
+    {
+      "name": "total",
+      "description": "The sum of the items' unit prices times their quantities, as { amount, currency }, when every item has a price in one currency; null otherwise."
+    }
+  ],
+  "operations": [
+    {
+      "name": "retakeHolds",
+      "description": "Takes the holds again while the claim is in a takeOn state and an item is not held, after a supply refused it or what the items ask was changed: refused with unavailable as a move into the state is, and holds every item or none.",
+      "paramsSchema": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      },
+      "resultSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "currency": {
+                  "type": "string"
+                },
+                "endMs": {
+                  "description": "When it ends.",
+                  "type": "integer"
+                },
+                "hold": {
+                  "description": "The hold's name in the config.",
+                  "type": "string"
+                },
+                "id": {
+                  "description": "The supply's id.",
+                  "type": "string"
+                },
+                "item": {
+                  "description": "The item's index in its hold.",
+                  "type": "integer"
+                },
+                "quantity": {
+                  "description": "The units it asks, of counted supply.",
+                  "type": "integer"
+                },
+                "schema": {
+                  "description": "The supply's schema.",
+                  "type": "string"
+                },
+                "startMs": {
+                  "description": "When the time it asks starts, of timed supply.",
+                  "type": "integer"
+                },
+                "state": {
+                  "enum": [
+                    "pending",
+                    "held",
+                    "committed",
+                    "released",
+                    "returned"
+                  ],
+                  "type": "string"
+                },
+                "unitPrice": {
+                  "description": "The unit price the supply held it at, in the currency's minor units.",
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "hold",
+                "item",
+                "schema",
+                "id",
+                "state"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "state": {
+            "enum": [
+              "none",
+              "pending",
+              "held",
+              "committed",
+              "released",
+              "returned"
+            ],
+            "type": "string"
+          },
+          "total": {
+            "description": "The sum of the items' prices, when every item has one in one currency; null otherwise.",
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "amount": {
+                    "type": "integer"
+                  },
+                  "currency": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "amount",
+                  "currency"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "state",
+          "total"
+        ],
+        "type": "object"
+      },
+      "writes": true
+    },
+    {
+      "name": "listHolds",
+      "description": "Lists the claim's items, as Holds.items has them, with each supply's answer to checkHold for an item still pending.",
+      "paramsSchema": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      },
+      "resultSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "check": {
+                  "additionalProperties": false,
+                  "description": "For a pending item: the supply's checkHold answer now.",
+                  "properties": {
+                    "code": {
+                      "description": "When it would not: the code holdFor would veto with.",
+                      "type": "string"
+                    },
+                    "details": {
+                      "description": "When it would not: the veto's details.",
+                      "type": "object"
+                    },
+                    "fits": {
+                      "description": "Whether holdFor would hold the item now.",
+                      "type": "boolean"
+                    },
+                    "reason": {
+                      "description": "When it would not: why.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "fits"
+                  ],
+                  "type": "object"
+                },
+                "currency": {
+                  "type": "string"
+                },
+                "endMs": {
+                  "description": "When it ends.",
+                  "type": "integer"
+                },
+                "hold": {
+                  "description": "The hold's name in the config.",
+                  "type": "string"
+                },
+                "id": {
+                  "description": "The supply's id.",
+                  "type": "string"
+                },
+                "item": {
+                  "description": "The item's index in its hold.",
+                  "type": "integer"
+                },
+                "quantity": {
+                  "description": "The units it asks, of counted supply.",
+                  "type": "integer"
+                },
+                "schema": {
+                  "description": "The supply's schema.",
+                  "type": "string"
+                },
+                "startMs": {
+                  "description": "When the time it asks starts, of timed supply.",
+                  "type": "integer"
+                },
+                "state": {
+                  "enum": [
+                    "pending",
+                    "held",
+                    "committed",
+                    "released",
+                    "returned"
+                  ],
+                  "type": "string"
+                },
+                "unitPrice": {
+                  "description": "The unit price the supply held it at, in the currency's minor units.",
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "hold",
+                "item",
+                "schema",
+                "id",
+                "state"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "state": {
+            "enum": [
+              "none",
+              "pending",
+              "held",
+              "committed",
+              "released",
+              "returned"
+            ],
+            "type": "string"
+          },
+          "total": {
+            "description": "The sum of the items' prices, when every item has one in one currency; null otherwise.",
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "amount": {
+                    "type": "integer"
+                  },
+                  "currency": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "amount",
+                  "currency"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "state",
+          "total"
+        ],
+        "type": "object"
+      }
+    }
+  ],
+  "vetoes": [
+    {
+      "code": "unavailable",
+      "description": "A create or a move into a takeOn state, or retakeHolds, while an item does not fit its supply (details.items: each item that does not fit, with the supply's code, reason and details)."
+    },
+    {
+      "code": "holds_missing",
+      "description": "A move into a commitOn state while an item is not held."
+    },
+    {
+      "code": "held_fields",
+      "description": "An update, while the claim holds, of a field a hold reads: the list, an element's target, quantity or interval fields, or the link (details: the fields)."
+    },
+    {
+      "code": "committed",
+      "description": "The delete of a claim that holds committed items, on a type with no returnOn state."
+    },
+    {
+      "code": "too_many_items",
+      "description": "Holds that ask more items together than the config's maxItems."
+    },
+    {
+      "code": "not_taking",
+      "description": "retakeHolds while the claim is in no takeOn state, or holds every item."
+    },
+    {
+      "code": "no_supply",
+      "description": "An item whose supply does not exist, or whose schema composes no supply."
+    }
+  ]
+}

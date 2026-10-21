@@ -1100,8 +1100,11 @@ registers with no extension: `Workflow`, `Comments`, `Revisions`,
 `Variants`, `Branches`, `Timers`, `StateRules`, `Numbering` and
 `Approvals`. It declares the work-queue behaviors the optional
 `@superschematic/engine-workqueue` package implements the same way:
-`Lease`, `Assignment`, `Queue`, `Presence`, `Blueprint`, `Budget` and `Retries`. Each spec names its package
-(`registry.EnginePackage` or `registry.WorkQueuePackage`). Every binary
+`Lease`, `Assignment`, `Queue`, `Presence`, `Blueprint`, `Budget` and `Retries`,
+and the commerce behaviors the optional `@superschematic/engine-commerce`
+package implements (D70): `Stock`, `Calendar`, `Holds` and `Payments`.
+Each spec names its package (`registry.EnginePackage`,
+`registry.WorkQueuePackage` or `registry.CommercePackage`). Every binary
 therefore accepts a schema that composes them, the schema-file JSON
 Schema lists them, and `BehaviorConfigs` in `@superschematic/schema`
 types their configs. None names an invocation policy, since a
@@ -1259,9 +1262,11 @@ the core binary, each into the Rust crate that implements it (D58): `make
 behaviors` writes the engine's `runtime/engine/rust/behaviors/declarations`
 with `--package @superschematic/engine` and the work queue's
 `runtime/engine-workqueue/rust/declarations` with `--package
-@superschematic/engine-workqueue`, so each crate carries only the
+@superschematic/engine-workqueue` and the commerce crate's
+`runtime/engine-commerce/rust/declarations` with `--package
+@superschematic/engine-commerce`, so each crate carries only the
 declarations it implements, and `make behaviors-check`, part of `make
-test` and CI's go job, fails on a stale copy in either. The copy is canonical, not the source bytes:
+test` and CI's go job, fails on a stale copy in any of them. The copy is canonical, not the source bytes:
 the declaration's keys in `BehaviorDeclaration`'s order, each JSON
 Schema's object keys sorted (`createParamsSchema` and `preconditionSchema`
 included), two-space

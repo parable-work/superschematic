@@ -160,22 +160,26 @@ generic-schemas:
 generic-schemas-check:
 	go run ./internal/tools/providerschemas -check
 
-# The engine's behaviors crate and the work queue's crate (D58) implement
-# the core's behaviors over a copy of each declaration
-# (internal/registry/behaviors), which the core with no extension linked
+# The engine's behaviors crate, the work queue's crate (D58) and the
+# commerce crate (D70) implement the core's behaviors over a copy of each
+# declaration (internal/registry/behaviors), which the core with no
+# extension linked
 # writes into the crate that implements it, by the npm package that ships
 # it (--package): each behavior embeds its copy with include_str!. CI fails
 # when a committed copy differs.
 ENGINE_RUST_DECLARATIONS := runtime/engine/rust/behaviors/declarations
 WORKQUEUE_RUST_DECLARATIONS := runtime/engine-workqueue/rust/declarations
+COMMERCE_RUST_DECLARATIONS := runtime/engine-commerce/rust/declarations
 
 behaviors:
 	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/engine --out $(ENGINE_RUST_DECLARATIONS)
 	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/engine-workqueue --out $(WORKQUEUE_RUST_DECLARATIONS)
+	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/engine-commerce --out $(COMMERCE_RUST_DECLARATIONS)
 
 behaviors-check:
 	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/engine --out $(ENGINE_RUST_DECLARATIONS) --check
 	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/engine-workqueue --out $(WORKQUEUE_RUST_DECLARATIONS) --check
+	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/engine-commerce --out $(COMMERCE_RUST_DECLARATIONS) --check
 
 ts:
 	cd packages && bun install --frozen-lockfile && bun run typecheck && bun test
@@ -442,12 +446,14 @@ docs:
 # fixture-cross-instance-json, fixture-rollups-json, fixture-search-json,
 # fixture-reactions-json, fixture-variants-json, fixture-branches-json,
 # fixture-staterules-json, fixture-numbering-json, fixture-approvals-json,
-# fixture-timers-json and fixture-workqueue-json, whose types compose the
-# core's behaviors (D10): --emit-ir carries all twenty-two and json-schema
-# admits them. The engine runs the first eleven documents with its own
-# behaviors in runtime/engine/typescript/test/core-behaviors.test.ts, and
-# the work-queue package runs the last in
-# runtime/engine-workqueue/typescript/test/package.test.ts. It builds
+# fixture-timers-json, fixture-workqueue-json and fixture-commerce-json,
+# whose types compose the core's behaviors (D10): --emit-ir carries all
+# twenty-six and json-schema admits them. The engine runs the first eleven
+# documents with its own behaviors in
+# runtime/engine/typescript/test/core-behaviors.test.ts, and the
+# work-queue package runs fixture-workqueue-json in
+# runtime/engine-workqueue/typescript/test/package.test.ts; the commerce
+# package's behaviors (D70) are declared and not yet built. It builds
 # fixture-behaviors-json, a General schema, and fixture-engine-db-json,
 # whose engine types the sql generator leaves out and whose engine
 # document the build writes (D58).
@@ -485,8 +491,11 @@ cli-smoke: $(CORE_BIN)
 		>>/tmp/superschematic-cli-smoke/behaviors-ir.json
 	@$(CORE_BIN) build internal/loader/testdata/services/fixture-workqueue-json --emit-ir --out /tmp/superschematic-cli-smoke \
 		>>/tmp/superschematic-cli-smoke/behaviors-ir.json
+	@$(CORE_BIN) build internal/loader/testdata/services/fixture-commerce-json --emit-ir --out /tmp/superschematic-cli-smoke \
+		>>/tmp/superschematic-cli-smoke/behaviors-ir.json
 	@$(CORE_BIN) json-schema >/tmp/superschematic-cli-smoke/schema-file.json
-	@for b in Workflow Comments Revisions Dependencies Links Rollups Search Reactions Constants Variants Branches StateRules Approvals Numbering Timers Lease Assignment Queue Presence Blueprint Budget Retries; do \
+	@for b in Workflow Comments Revisions Dependencies Links Rollups Search Reactions Constants Variants Branches StateRules Approvals Numbering Timers \
+		Lease Assignment Queue Presence Blueprint Budget Retries Stock Calendar Holds Payments; do \
 		grep -q "\"name\": \"$$b\"" /tmp/superschematic-cli-smoke/behaviors-ir.json && grep -q "\"const\": \"$$b\"" /tmp/superschematic-cli-smoke/schema-file.json \
 			|| { echo "cli-smoke: the core binary does not carry behavior $$b"; exit 1; }; done
 

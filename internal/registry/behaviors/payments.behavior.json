@@ -1,0 +1,426 @@
+{
+  "name": "Payments",
+  "description": "Keeps what the instance owes and how it is paid: a checkout, an order, a booking's deposit, an invoice, or a refund of one. The amount due comes from an own integer field or from Holds.total, in a currency. The engine never calls a payment provider: openPayment records an attempt and an action, an adapter outside the engine reads the actions waiting for its provider through listPaymentActions, calls the provider with each action's id as its idempotency key, and reports what happened, and every provider event, through recordPaymentEvent, which applies each event once and moves an attempt only forward. capturePayment, voidPayment and refundPayment record actions too. require holds a move into a state until the instance is authorized or paid, voidOn states void its open attempts, and no move leaves a state while an attempt is processing, so an expiry does not let go of what is being paid for. A refund that needs sign-off is an instance of its own, whose Payments names the instance it refunds (refundOf): entering an issueOn state asks that instance's refundFor, and the provider's answer comes back through settleRefundFor. Payments stores no card data and no raw provider event.",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["amount", "record"],
+    "properties": {
+      "amount": {
+        "description": "What the instance owes: an own integer field of the type, in the currency's minor units ({ field }), or the claim's Holds.total ({ holds: true }), which carries its currency.",
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["field"],
+            "properties": {
+              "field": {"description": "An own integer field of the type, by JSON key, such as a Finance.Money field.", "type": "string", "minLength": 1}
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["holds"],
+            "properties": {"holds": {"description": "The type's Holds.total.", "const": true}}
+          }
+        ]
+      },
+      "currency": {
+        "description": "The currency of an amount from a field: an ISO 4217 code, or an own Finance.Currency field of the type ({ field }) that holds one. Holds.total carries its own.",
+        "oneOf": [
+          {"description": "An ISO 4217 code; the engine checks it is one.", "type": "string", "pattern": "^[A-Z]{3}$"},
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["field"],
+            "properties": {"field": {"description": "An own Finance.Currency field of the type, by JSON key.", "type": "string", "minLength": 1}}
+          }
+        ]
+      },
+      "capture": {
+        "description": "automatic: a provider captures what it authorizes. manual: captureOn states capture it. automatic when absent.",
+        "type": "string",
+        "enum": ["automatic", "manual"]
+      },
+      "captureOn": {
+        "description": "With capture manual, the states whose entry captures what is authorized.",
+        "type": "array",
+        "minItems": 1,
+        "uniqueItems": true,
+        "items": {"type": "string", "minLength": 1}
+      },
+      "require": {
+        "description": "Per state of the type's Workflow, what a move into it waits for: authorized, every amount due authorized or paid; paid, every amount due captured.",
+        "type": "object",
+        "minProperties": 1,
+        "propertyNames": {"minLength": 1},
+        "additionalProperties": {"type": "string", "enum": ["authorized", "paid"]}
+      },
+      "voidOn": {
+        "description": "The states whose entry cancels the open attempts and voids the authorized ones.",
+        "type": "array",
+        "minItems": 1,
+        "uniqueItems": true,
+        "items": {"type": "string", "minLength": 1}
+      },
+      "afterRelease": {
+        "description": "What becomes of money captured while the instance is in a voidOn state, such as a payment reported after a hold expired: refund records a refund of it; keep leaves it for an operator. keep when absent.",
+        "type": "string",
+        "enum": ["refund", "keep"]
+      },
+      "refunds": {
+        "description": "Who refunds directly; nobody, but a refund instance, when absent.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["permission"],
+        "properties": {"permission": {"description": "The permission refundPayment needs.", "type": "string", "minLength": 1}}
+      },
+      "record": {
+        "description": "Who reports what providers did: the adapter's principal.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["permission"],
+        "properties": {"permission": {"description": "The permission recordPaymentEvent needs: the adapter's service holds it.", "type": "string", "minLength": 1}}
+      },
+      "refundOf": {
+        "description": "Makes the instance a refund of the instance a link names: its amount is refunded from that instance's payments.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["link"],
+        "properties": {
+          "link": {
+            "description": "A required, single-valued link of the type's Links config to the instance refunded, which composes Payments.",
+            "type": "string",
+            "pattern": "^[a-z][A-Za-z0-9]{0,63}$"
+          }
+        }
+      },
+      "issueOn": {
+        "description": "With refundOf, the states whose entry asks the linked instance to refund the amount.",
+        "type": "array",
+        "minItems": 1,
+        "uniqueItems": true,
+        "items": {"type": "string", "minLength": 1}
+      }
+    },
+    "allOf": [
+      {"if": {"required": ["amount"], "properties": {"amount": {"required": ["field"]}}}, "then": {"required": ["currency"]}},
+      {"if": {"required": ["refundOf"]}, "then": {"required": ["issueOn"]}},
+      {"if": {"required": ["issueOn"]}, "then": {"required": ["refundOf"]}},
+      {"if": {"required": ["captureOn"]}, "then": {"required": ["capture"], "properties": {"capture": {"const": "manual"}}}}
+    ]
+  },
+  "fields": [
+    {"name": "due", "description": "What the instance owes, in the currency's minor units. It does not change while an attempt is open."},
+    {"name": "authorized", "description": "What the provider has authorized and not voided or captured."},
+    {"name": "captured", "description": "What the provider has captured."},
+    {"name": "refunded", "description": "What the provider has refunded."},
+    {"name": "outstanding", "description": "due less captured, never below 0."},
+    {"name": "currency", "description": "The ISO 4217 code of every amount."},
+    {
+      "name": "state",
+      "description": "unpaid, pending (an attempt is open), authorized, paid, partiallyRefunded or refunded. A rule hears it turn paid."
+    },
+    {
+      "name": "attempts",
+      "description": "The last twenty attempts, newest first: { attempt, provider, providerRef?, amount, currency, status, authorized?, captured?, brand?, last4?, openedAt, updatedAt }."
+    }
+  ],
+  "operations": [
+    {
+      "name": "openPayment",
+      "description": "Opens a payment attempt for what is outstanding at a provider, and records the action that creates it there, for the provider's adapter; returns the attempt and its amount. The same idempotencyKey returns the same attempt. While an attempt is open, the amount due does not change.",
+      "paramsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["provider", "idempotencyKey"],
+        "properties": {
+          "provider": {
+            "description": "The provider's name, as the adapter that serves it knows it, such as stripe.",
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+          },
+          "idempotencyKey": {
+            "description": "The caller's key: a repeat with the same key returns what the first call did.",
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._:-]{1,255}$"
+          },
+          "returnUrl": {"description": "Where the provider sends the payer back to, when it does.", "type": "string", "format": "uri", "maxLength": 2048}
+        }
+      },
+      "resultSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["attempt", "provider", "amount", "currency", "status"],
+        "properties": {
+          "attempt": {"description": "The attempt's id: the idempotency key the adapter sends the provider.", "type": "string"},
+          "provider": {"type": "string"},
+          "amount": {"type": "integer"},
+          "currency": {"type": "string"},
+          "status": {"type": "string", "enum": ["open", "requiresAction", "processing", "authorized", "captured", "failed", "cancelled"]}
+        }
+      },
+      "writes": true
+    },
+    {
+      "name": "recordPaymentEvent",
+      "description": "Records what a provider did, as its adapter reports it: an attempt's progress, authorization, capture, failure or cancellation, or a refund's outcome. Needs the config's record permission. Each (provider, eventId) applies once, and a repeat changes and writes nothing. An attempt's status only moves forward, so an event that arrives late is recorded and changes nothing.",
+      "paramsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["provider", "eventId", "kind", "amount", "currency", "at"],
+        "properties": {
+          "provider": {
+            "description": "The provider's name, as the adapter that serves it knows it, such as stripe.",
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+          },
+          "eventId": {"description": "The provider's id of the event.", "type": "string", "pattern": "^[A-Za-z0-9._:-]{1,255}$"},
+          "attempt": {"description": "The attempt's id.", "type": "string", "minLength": 1, "maxLength": 255},
+          "providerRef": {"description": "The provider's id of the payment.", "type": "string", "pattern": "^[A-Za-z0-9_-]{1,255}$"},
+          "refund": {"description": "For a refund's outcome: the refund's id.", "type": "string", "minLength": 1, "maxLength": 255},
+          "kind": {
+            "description": "What happened.",
+            "type": "string",
+            "enum": ["requiresAction", "processing", "authorized", "captured", "failed", "cancelled", "refunded", "refundFailed"]
+          },
+          "amount": {"description": "In the currency's minor units.", "type": "integer", "minimum": 0, "maximum": 9007199254740991},
+          "currency": {"description": "An ISO 4217 code; the engine checks it is one.", "type": "string", "pattern": "^[A-Z]{3}$"},
+          "at": {"description": "When the provider says it happened, in epoch milliseconds.", "type": "integer"},
+          "brand": {"description": "A card's brand, for display.", "type": "string", "pattern": "^[a-z][a-z0-9_]{0,31}$"},
+          "last4": {"description": "A card's last four digits, for display.", "type": "string", "pattern": "^[0-9]{4}$"},
+          "metadata": {
+            "description": "At most ten string pairs the adapter keeps with the event.",
+            "type": "object",
+            "maxProperties": 10,
+            "propertyNames": {"pattern": "^[A-Za-z][A-Za-z0-9_]{0,39}$"},
+            "additionalProperties": {"type": "string", "maxLength": 500}
+          }
+        }
+      },
+      "resultSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["applied", "attempt", "state"],
+        "properties": {
+          "applied": {"description": "Whether the event moved anything; false for a repeat or a late event.", "type": "boolean"},
+          "attempt": {"description": "The attempt's status after it, when it names one.", "type": ["object", "null"]},
+          "state": {"description": "Payments.state after it.", "type": "string"}
+        }
+      },
+      "writes": true
+    },
+    {
+      "name": "capturePayment",
+      "description": "Records the action that captures an authorized attempt, all of it or an amount, for the provider's adapter.",
+      "paramsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["attempt"],
+        "properties": {
+          "attempt": {"description": "The attempt's id.", "type": "string", "minLength": 1, "maxLength": 255},
+          "amount": {"description": "In the currency's minor units.", "type": "integer", "minimum": 1, "maximum": 9007199254740991}
+        }
+      },
+      "resultSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["action", "kind", "attempt", "amount", "currency"],
+        "properties": {
+          "action": {"description": "The action's id: the idempotency key the adapter sends the provider.", "type": "string"},
+          "kind": {"type": "string", "enum": ["create", "capture", "void", "refund"]},
+          "attempt": {"type": "string"},
+          "amount": {"type": "integer"},
+          "currency": {"type": "string"}
+        }
+      },
+      "writes": true
+    },
+    {
+      "name": "voidPayment",
+      "description": "Records the action that cancels an open attempt or voids an authorized one, for the provider's adapter.",
+      "paramsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["attempt"],
+        "properties": {"attempt": {"description": "The attempt's id.", "type": "string", "minLength": 1, "maxLength": 255}}
+      },
+      "resultSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["action", "kind", "attempt", "amount", "currency"],
+        "properties": {
+          "action": {"description": "The action's id: the idempotency key the adapter sends the provider.", "type": "string"},
+          "kind": {"type": "string", "enum": ["create", "capture", "void", "refund"]},
+          "attempt": {"type": "string"},
+          "amount": {"type": "integer"},
+          "currency": {"type": "string"}
+        }
+      },
+      "writes": true
+    },
+    {
+      "name": "refundPayment",
+      "description": "Records a refund of an amount of what is captured and the action that asks the provider for it. Needs the config's refunds permission. Refused above what is captured, less what is refunded and what refunds already ask. The same idempotencyKey returns the same refund.",
+      "paramsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["amount", "reason", "idempotencyKey"],
+        "properties": {
+          "amount": {"description": "In the currency's minor units.", "type": "integer", "minimum": 1, "maximum": 9007199254740991},
+          "reason": {"description": "Why, for the record.", "type": "string", "minLength": 1, "maxLength": 500},
+          "idempotencyKey": {
+            "description": "The caller's key: a repeat with the same key returns what the first call did.",
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._:-]{1,255}$"
+          }
+        }
+      },
+      "resultSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["refund", "action", "amount", "currency", "status"],
+        "properties": {
+          "refund": {"description": "The refund's id.", "type": "string"},
+          "action": {"description": "The action's id: the idempotency key the adapter sends the provider.", "type": "string"},
+          "amount": {"type": "integer"},
+          "currency": {"type": "string"},
+          "status": {"type": "string", "enum": ["requested", "sent", "succeeded", "failed"]}
+        }
+      },
+      "writes": true
+    },
+    {
+      "name": "listPaymentActions",
+      "description": "Lists the actions waiting for a provider across the schema's instances, oldest first, one page at a time: what its adapter is to do. An action stops waiting when an event for it is recorded.",
+      "scope": "schema",
+      "paramsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["provider"],
+        "properties": {
+          "provider": {
+            "description": "The provider's name, as the adapter that serves it knows it, such as stripe.",
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+          },
+          "limit": {"description": "At most this many; 50 when absent.", "type": "integer", "minimum": 1, "maximum": 500},
+          "cursor": {"description": "The next of the previous page.", "type": "string"}
+        }
+      },
+      "resultSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["items", "next"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["action", "kind", "attempt", "amount", "currency", "id", "at"],
+              "properties": {
+                "id": {"description": "The instance.", "type": "string"},
+                "action": {"description": "The action's id: the idempotency key the adapter sends the provider.", "type": "string"},
+                "kind": {"type": "string", "enum": ["create", "capture", "void", "refund"]},
+                "attempt": {"type": "string"},
+                "amount": {"type": "integer"},
+                "currency": {"type": "string"},
+                "providerRef": {"type": "string"},
+                "refund": {"type": "string"},
+                "returnUrl": {"type": "string"},
+                "at": {"description": "When it was recorded, in epoch milliseconds.", "type": "integer"}
+              }
+            }
+          },
+          "next": {"description": "The cursor of the next page; null after the last.", "type": ["string", "null"]}
+        }
+      }
+    },
+    {
+      "name": "refundFor",
+      "description": "Records a refund that a refund instance asks of this one: its Payments' refundOf link must point here, and the amount must be refundable. The refund instance's Payments invokes it as the instance enters an issueOn state; the same idempotencyKey returns the same refund.",
+      "paramsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["refund", "amount", "idempotencyKey"],
+        "properties": {
+          "refund": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["schema", "id"],
+            "properties": {"schema": {"type": "string", "minLength": 1}, "id": {"type": "string", "minLength": 1}},
+            "description": "The refund instance: its schema and id."
+          },
+          "amount": {"description": "In the currency's minor units.", "type": "integer", "minimum": 1, "maximum": 9007199254740991},
+          "idempotencyKey": {
+            "description": "The caller's key: a repeat with the same key returns what the first call did.",
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._:-]{1,255}$"
+          }
+        }
+      },
+      "resultSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["refund", "action", "amount", "currency"],
+        "properties": {
+          "refund": {"description": "The refund's id here.", "type": "string"},
+          "action": {"type": "string"},
+          "amount": {"type": "integer"},
+          "currency": {"type": "string"}
+        }
+      },
+      "writes": true
+    },
+    {
+      "name": "settleRefundFor",
+      "description": "Records on a refund instance the outcome of the refund it asked of the instance it refunds: that instance's Payments invokes it when the provider's refund event is reported there, and refuses a caller that is not that instance.",
+      "paramsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["of", "refund", "status", "amount"],
+        "properties": {
+          "of": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["schema", "id"],
+            "properties": {"schema": {"type": "string", "minLength": 1}, "id": {"type": "string", "minLength": 1}},
+            "description": "The instance refunded: its schema and id."
+          },
+          "refund": {"description": "The refund's id there.", "type": "string", "minLength": 1, "maxLength": 255},
+          "status": {"type": "string", "enum": ["succeeded", "failed"]},
+          "amount": {"description": "In the currency's minor units.", "type": "integer", "minimum": 0, "maximum": 9007199254740991}
+        }
+      },
+      "resultSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["state"],
+        "properties": {"state": {"description": "Payments.state after it.", "type": "string"}}
+      },
+      "writes": true
+    }
+  ],
+  "vetoes": [
+    {"code": "nothing_due", "description": "openPayment while nothing is outstanding."},
+    {"code": "amount_locked", "description": "A change of what is due, its field or the holds it is the total of, while an attempt is open."},
+    {"code": "currency_mismatch", "description": "An amount in another currency than the instance's."},
+    {"code": "over_capture", "description": "A capture past what is authorized."},
+    {
+      "code": "exceeds_refundable",
+      "description": "A refund above what is captured, less what is refunded and what refunds already ask (details: refundable)."
+    },
+    {"code": "unpaid", "description": "A move into a state require holds for paid, while not everything due is captured."},
+    {"code": "unauthorized", "description": "A move into a state require holds for authorized, while not everything due is authorized or captured."},
+    {"code": "payment_in_progress", "description": "A move out of the instance's state, or a release, while an attempt is processing."},
+    {"code": "no_attempt", "description": "An attempt, a provider reference or a refund the instance does not have."},
+    {
+      "code": "not_linked",
+      "description": "refundFor from an instance whose refundOf link does not point here, or settleRefundFor from one that is not the instance refunded."
+    },
+    {"code": "key_reused", "description": "An idempotencyKey used before with other parameters."},
+    {"code": "attempt_closed", "description": "capturePayment or voidPayment of an attempt that is not authorized, or not open, as the action needs."},
+    {"code": "not_configured", "description": "refundPayment on a type whose config names no refunds permission."}
+  ]
+}

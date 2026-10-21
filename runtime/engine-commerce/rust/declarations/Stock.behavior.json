@@ -1,0 +1,861 @@
+{
+  "name": "Stock",
+  "description": "Counts units of what the instance stands for: a product's inventory, a ticket type, a coupon's redemptions. Stock keeps the units on hand and the units claims hold, and every change of the count on hand is a movement with a reason, the claim it was for and who made it. A claim takes units only through the supply contract's operations, which Holds invokes by name: holdFor holds what an item of the claim asks, commitFor takes held units out of what is on hand (they are sold), releaseFor frees them, and returnFor puts committed units back. Each checks the claim's own Holds.items, so no caller holds or frees units by calling one directly, and each is idempotent. A hold that does not fit what is available is refused, unless the config allows backorder. A caller with the config's permission receives, adjusts and counts stock. With a price, holdFor returns the unit price and its currency, and the claim keeps the price each item was held at. An instance is not deleted while it holds units for a claim. Stock and Calendar declare the same contract operations, so a type composes one of them.",
+  "configSchema": {
+    "additionalProperties": false,
+    "properties": {
+      "backorder": {
+        "description": "Whether a hold may take more than is available, leaving available below 0; false when absent.",
+        "type": "boolean"
+      },
+      "lowAt": {
+        "description": "Stock.low is true while available is at or below this: a count, or an own integer field of the type ({ field }) that holds one, while it holds one. Stock.low is false when absent.",
+        "oneOf": [
+          {
+            "minimum": 0,
+            "type": "integer"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "field": {
+                "description": "An own integer field of the type, by JSON key.",
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "field"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "maxPerHold": {
+        "description": "The most units one item of a claim may hold; no limit when absent.",
+        "minimum": 1,
+        "type": "integer"
+      },
+      "permission": {
+        "description": "The permission a caller needs to receive, adjust and count stock; a count below what claims hold needs its .override.",
+        "minLength": 1,
+        "type": "string"
+      },
+      "price": {
+        "additionalProperties": false,
+        "description": "The unit price holdFor returns and Holds keeps on each item, so a line keeps the price it was held at: an own integer field of the type and its currency. No price when absent.",
+        "properties": {
+          "currency": {
+            "description": "The price's currency: an ISO 4217 code, or an own Finance.Currency field of the type ({ field }) that holds one.",
+            "oneOf": [
+              {
+                "description": "An ISO 4217 code; the engine checks it is one.",
+                "pattern": "^[A-Z]{3}$",
+                "type": "string"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "field": {
+                    "description": "An own Finance.Currency field of the type, by JSON key.",
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "field"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "field": {
+            "description": "An own integer field of the type, by JSON key, holding the unit price in the currency's minor units, such as a Finance.Money field.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "field",
+          "currency"
+        ],
+        "type": "object"
+      }
+    },
+    "required": [
+      "permission"
+    ],
+    "type": "object"
+  },
+  "conflicts": [
+    "Calendar"
+  ],
+  "fields": [
+    {
+      "name": "onHand",
+      "description": "The units on hand: received, adjusted and counted, less what claims committed, plus what they returned. Always the sum of the instance's movements."
+    },
+    {
+      "name": "held",
+      "description": "The units claims hold and have neither committed nor released."
+    },
+    {
+      "name": "available",
+      "description": "onHand less held: what a new hold can take. Never below 0 unless the config allows backorder."
+    },
+    {
+      "name": "low",
+      "description": "Whether available is at or below the config's lowAt; false without one. A list filters on it, so where Stock.low is true lists what to reorder.",
+      "volatile": true
+    }
+  ],
+  "operations": [
+    {
+      "name": "receiveStock",
+      "description": "Adds units that arrived to what is on hand, with a reason and an optional reference, such as a delivery note's. Needs the config's permission.",
+      "paramsSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "quantity": {
+            "description": "How many units arrived.",
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "reason": {
+            "description": "Why, for the record.",
+            "maxLength": 500,
+            "minLength": 1,
+            "type": "string"
+          },
+          "reference": {
+            "description": "What the units came with, such as a delivery note's number.",
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "quantity",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "resultSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "available": {
+            "description": "Stock.available after the call.",
+            "type": "integer"
+          },
+          "held": {
+            "description": "Stock.held after the call.",
+            "type": "integer"
+          },
+          "movement": {
+            "description": "The sequence number of the movement the call recorded, per instance; null when it changed nothing.",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "onHand": {
+            "description": "Stock.onHand after the call.",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "onHand",
+          "held",
+          "available",
+          "movement"
+        ],
+        "type": "object"
+      },
+      "writes": true
+    },
+    {
+      "name": "adjustStock",
+      "description": "Adds a delta, positive or negative, to what is on hand, with a reason: damage, loss, a correction. Needs the config's permission. Refused when it leaves fewer on hand than claims hold, unless the config allows backorder.",
+      "paramsSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "delta": {
+            "description": "The units to add; negative to take away. 0 changes nothing.",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "reason": {
+            "description": "Why, for the record.",
+            "maxLength": 500,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "delta",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "resultSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "available": {
+            "description": "Stock.available after the call.",
+            "type": "integer"
+          },
+          "held": {
+            "description": "Stock.held after the call.",
+            "type": "integer"
+          },
+          "movement": {
+            "description": "The sequence number of the movement the call recorded, per instance; null when it changed nothing.",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "onHand": {
+            "description": "Stock.onHand after the call.",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "onHand",
+          "held",
+          "available",
+          "movement"
+        ],
+        "type": "object"
+      },
+      "writes": true
+    },
+    {
+      "name": "countStock",
+      "description": "Sets what is on hand to a count, with a reason, recording the difference as a movement; a count equal to what is on hand records nothing. Needs the config's permission, and its .override for a count below what claims hold.",
+      "paramsSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "onHand": {
+            "description": "The units counted.",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "reason": {
+            "description": "Why, for the record.",
+            "maxLength": 500,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "onHand",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "resultSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "available": {
+            "description": "Stock.available after the call.",
+            "type": "integer"
+          },
+          "held": {
+            "description": "Stock.held after the call.",
+            "type": "integer"
+          },
+          "movement": {
+            "description": "The sequence number of the movement the call recorded, per instance; null when it changed nothing.",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "onHand": {
+            "description": "Stock.onHand after the call.",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "onHand",
+          "held",
+          "available",
+          "movement"
+        ],
+        "type": "object"
+      },
+      "writes": true
+    },
+    {
+      "name": "holdFor",
+      "description": "Holds what an item of a claim's Holds asks, for that claim, once the claim's item is held. Refused when it does not fit, and for an item the claim does not hold.",
+      "paramsSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "hold": {
+            "description": "The hold's name in the claim's Holds config.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "holder": {
+            "additionalProperties": false,
+            "description": "The claim the call is for: its schema and id.",
+            "properties": {
+              "id": {
+                "description": "The claim's id.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "schema": {
+                "description": "The claim's schema.",
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "schema",
+              "id"
+            ],
+            "type": "object"
+          },
+          "item": {
+            "description": "The item's index in its hold: its element's in an each hold's list, 0 for a link hold.",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "quantity": {
+            "description": "How many units the item asks.",
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "holder",
+          "hold",
+          "item",
+          "quantity"
+        ],
+        "type": "object"
+      },
+      "resultSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "changed": {
+            "description": "Whether the call moved the record; false for a call made again.",
+            "type": "boolean"
+          },
+          "currency": {
+            "description": "The unit price's currency.",
+            "type": "string"
+          },
+          "state": {
+            "description": "The item's state in this supply's record after the call.",
+            "enum": [
+              "held",
+              "committed",
+              "released",
+              "returned"
+            ],
+            "type": "string"
+          },
+          "unitPrice": {
+            "description": "The unit price the item was held at, in the currency's minor units, when the supply names one.",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "state",
+          "changed"
+        ],
+        "type": "object"
+      },
+      "writes": true
+    },
+    {
+      "name": "commitFor",
+      "description": "Makes what an item of a claim holds the claim's for good, once the claim's item is committed.",
+      "paramsSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "hold": {
+            "description": "The hold's name in the claim's Holds config.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "holder": {
+            "additionalProperties": false,
+            "description": "The claim the call is for: its schema and id.",
+            "properties": {
+              "id": {
+                "description": "The claim's id.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "schema": {
+                "description": "The claim's schema.",
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "schema",
+              "id"
+            ],
+            "type": "object"
+          },
+          "item": {
+            "description": "The item's index in its hold: its element's in an each hold's list, 0 for a link hold.",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "quantity": {
+            "description": "How many units the item asks.",
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "holder",
+          "hold",
+          "item",
+          "quantity"
+        ],
+        "type": "object"
+      },
+      "resultSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "changed": {
+            "description": "Whether the call moved the record; false for a call made again.",
+            "type": "boolean"
+          },
+          "currency": {
+            "description": "The unit price's currency.",
+            "type": "string"
+          },
+          "state": {
+            "description": "The item's state in this supply's record after the call.",
+            "enum": [
+              "held",
+              "committed",
+              "released",
+              "returned"
+            ],
+            "type": "string"
+          },
+          "unitPrice": {
+            "description": "The unit price the item was held at, in the currency's minor units, when the supply names one.",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "state",
+          "changed"
+        ],
+        "type": "object"
+      },
+      "writes": true
+    },
+    {
+      "name": "releaseFor",
+      "description": "Frees what an item of a claim holds, once the claim's item is released.",
+      "paramsSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "hold": {
+            "description": "The hold's name in the claim's Holds config.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "holder": {
+            "additionalProperties": false,
+            "description": "The claim the call is for: its schema and id.",
+            "properties": {
+              "id": {
+                "description": "The claim's id.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "schema": {
+                "description": "The claim's schema.",
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "schema",
+              "id"
+            ],
+            "type": "object"
+          },
+          "item": {
+            "description": "The item's index in its hold: its element's in an each hold's list, 0 for a link hold.",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "quantity": {
+            "description": "How many units the item asks.",
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "holder",
+          "hold",
+          "item",
+          "quantity"
+        ],
+        "type": "object"
+      },
+      "resultSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "changed": {
+            "description": "Whether the call moved the record; false for a call made again.",
+            "type": "boolean"
+          },
+          "currency": {
+            "description": "The unit price's currency.",
+            "type": "string"
+          },
+          "state": {
+            "description": "The item's state in this supply's record after the call.",
+            "enum": [
+              "held",
+              "committed",
+              "released",
+              "returned"
+            ],
+            "type": "string"
+          },
+          "unitPrice": {
+            "description": "The unit price the item was held at, in the currency's minor units, when the supply names one.",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "state",
+          "changed"
+        ],
+        "type": "object"
+      },
+      "writes": true
+    },
+    {
+      "name": "returnFor",
+      "description": "Takes back units an item of a claim committed, once the claim's item is returned.",
+      "paramsSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "hold": {
+            "description": "The hold's name in the claim's Holds config.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "holder": {
+            "additionalProperties": false,
+            "description": "The claim the call is for: its schema and id.",
+            "properties": {
+              "id": {
+                "description": "The claim's id.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "schema": {
+                "description": "The claim's schema.",
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "schema",
+              "id"
+            ],
+            "type": "object"
+          },
+          "item": {
+            "description": "The item's index in its hold: its element's in an each hold's list, 0 for a link hold.",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "quantity": {
+            "description": "How many units the item asks.",
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "holder",
+          "hold",
+          "item",
+          "quantity"
+        ],
+        "type": "object"
+      },
+      "resultSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "changed": {
+            "description": "Whether the call moved the record; false for a call made again.",
+            "type": "boolean"
+          },
+          "currency": {
+            "description": "The unit price's currency.",
+            "type": "string"
+          },
+          "state": {
+            "description": "The item's state in this supply's record after the call.",
+            "enum": [
+              "held",
+              "committed",
+              "released",
+              "returned"
+            ],
+            "type": "string"
+          },
+          "unitPrice": {
+            "description": "The unit price the item was held at, in the currency's minor units, when the supply names one.",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "state",
+          "changed"
+        ],
+        "type": "object"
+      },
+      "writes": true
+    },
+    {
+      "name": "checkHold",
+      "description": "Answers whether holdFor would hold what an item asks now, and when not, why.",
+      "paramsSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "hold": {
+            "description": "The hold's name in the claim's Holds config.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "holder": {
+            "additionalProperties": false,
+            "description": "The claim the call is for: its schema and id.",
+            "properties": {
+              "id": {
+                "description": "The claim's id.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "schema": {
+                "description": "The claim's schema.",
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "schema",
+              "id"
+            ],
+            "type": "object"
+          },
+          "item": {
+            "description": "The item's index in its hold: its element's in an each hold's list, 0 for a link hold.",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "quantity": {
+            "description": "How many units the item asks.",
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "holder",
+          "hold",
+          "item",
+          "quantity"
+        ],
+        "type": "object"
+      },
+      "resultSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "description": "When it would not: the code holdFor would veto with.",
+            "type": "string"
+          },
+          "details": {
+            "description": "When it would not: the veto's details.",
+            "type": "object"
+          },
+          "fits": {
+            "description": "Whether holdFor would hold the item now.",
+            "type": "boolean"
+          },
+          "reason": {
+            "description": "When it would not: why.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "fits"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "listStockMovements",
+      "description": "Lists the instance's movements, newest first, one page at a time: each change of what is on hand, by kind, with its delta, reason, the claim and item it was for, who made it and when.",
+      "paramsSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "cursor": {
+            "description": "The next of the previous page.",
+            "type": "string"
+          },
+          "limit": {
+            "description": "At most this many; 50 when absent.",
+            "maximum": 500,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "resultSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "actor": {
+                  "description": "The subject of the principal whose call moved it.",
+                  "type": "string"
+                },
+                "at": {
+                  "description": "When, in epoch milliseconds.",
+                  "type": "integer"
+                },
+                "delta": {
+                  "description": "The units it added; negative for units taken away.",
+                  "type": "integer"
+                },
+                "hold": {
+                  "description": "The claim's hold.",
+                  "type": "string"
+                },
+                "holder": {
+                  "additionalProperties": false,
+                  "description": "The claim a commit or a return was for.",
+                  "properties": {
+                    "id": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "schema": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "schema",
+                    "id"
+                  ],
+                  "type": "object"
+                },
+                "item": {
+                  "description": "The item's index in its hold.",
+                  "type": "integer"
+                },
+                "kind": {
+                  "description": "What moved the count: receive, adjust and count by a caller with the permission, commit by a claim's commitFor, return by its returnFor.",
+                  "enum": [
+                    "receive",
+                    "adjust",
+                    "count",
+                    "commit",
+                    "return"
+                  ],
+                  "type": "string"
+                },
+                "onHand": {
+                  "description": "What was on hand after it.",
+                  "type": "integer"
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "reference": {
+                  "type": "string"
+                },
+                "seq": {
+                  "description": "The movement's sequence number, per instance, from 1.",
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "seq",
+                "kind",
+                "delta",
+                "onHand",
+                "actor",
+                "at"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "next": {
+            "description": "The cursor of the next page; null after the last.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "next"
+        ],
+        "type": "object"
+      }
+    }
+  ],
+  "vetoes": [
+    {
+      "code": "not_requested",
+      "description": "The claim the call names does not ask it: it has no such item for this supply, the item asks otherwise, or it is not in the state the call needs; or this supply's record of the item does not move that way."
+    },
+    {
+      "code": "unavailable",
+      "description": "What the item asks does not fit what this supply has free (details: supply, hold, item, asked, and available or conflict)."
+    },
+    {
+      "code": "held",
+      "description": "A supply is not deleted while it holds anything for a claim."
+    },
+    {
+      "code": "over_max",
+      "description": "holdFor of more units than the config's maxPerHold lets one item hold (details: asked, max)."
+    },
+    {
+      "code": "below_held",
+      "description": "An adjustment or a count that leaves fewer units on hand than claims hold, by a caller without the permission's .override for a count (details: onHand, held)."
+    }
+  ]
+}

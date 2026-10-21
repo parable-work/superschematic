@@ -10,9 +10,9 @@ import (
 )
 
 // behaviorRegistry registers test behaviors under core names, as the
-// registry allows for the core: Stock takes a required config, adds a field
-// and an operation; Audit requires Stock; Clearance conflicts with Stock;
-// Shelved adds Stock's field; Recount adds Stock's operation.
+// registry allows for the core: Pallet takes a required config, adds a field
+// and an operation; Audit requires Pallet; Clearance conflicts with Pallet;
+// Shelved adds Pallet's field; Recount adds Pallet's operation.
 func behaviorRegistry(t *testing.T) *registry.Registry {
 	t.Helper()
 	reg := registry.New(naming.Naming{})
@@ -20,10 +20,10 @@ func behaviorRegistry(t *testing.T) *registry.Registry {
 		return `{"name":"` + name + `","paramsSchema":{"type":"object","additionalProperties":false},"resultSchema":{"type":"object"}}`
 	}
 	for _, decl := range []string{
-		`{"name":"Stock","configSchema":{"type":"object","required":["aisles"],"properties":{"aisles":{"type":"integer","minimum":1}}},` +
+		`{"name":"Pallet","configSchema":{"type":"object","required":["aisles"],"properties":{"aisles":{"type":"integer","minimum":1}}},` +
 			`"fields":[{"name":"onHand"}],"operations":[` + op("restock") + `]}`,
-		`{"name":"Audit","requires":["Stock"],"fields":[{"name":"auditedAt"}],"operations":[` + op("audit") + `]}`,
-		`{"name":"Clearance","conflicts":["Stock"],"fields":[{"name":"markdown"}]}`,
+		`{"name":"Audit","requires":["Pallet"],"fields":[{"name":"auditedAt"}],"operations":[` + op("audit") + `]}`,
+		`{"name":"Clearance","conflicts":["Pallet"],"fields":[{"name":"markdown"}]}`,
 		`{"name":"Shelved","fields":[{"name":"onHand"},{"name":"shelf"}]}`,
 		`{"name":"Recount","operations":[` + op("restock") + `]}`,
 	} {
@@ -50,7 +50,7 @@ func behaviorSchema(refs ...ir.BehaviorRef) *ir.Schema {
 }
 
 func stock(config string) ir.BehaviorRef {
-	return ir.BehaviorRef{Name: "Stock", Config: json.RawMessage(config)}
+	return ir.BehaviorRef{Name: "Pallet", Config: json.RawMessage(config)}
 }
 
 func TestBehaviorsVerify(t *testing.T) {
@@ -63,23 +63,23 @@ func TestBehaviorsVerify(t *testing.T) {
 		{"accepted", []ir.BehaviorRef{stock(`{"aisles":2}`), {Name: "Audit"}}, nil},
 		{"requirement listed first", []ir.BehaviorRef{{Name: "Audit"}, stock(`{"aisles":2}`)}, nil},
 		{"unknown", []ir.BehaviorRef{{Name: "Ghost"}},
-			[]string{`src/item.schema.json: type Item: behavior "Ghost" is not a registered behavior (registered: Approvals, Assignment, Audit, Blueprint, Branches, Budget, Clearance, Comments, Constants, Dependencies, Lease, Links, Numbering, Presence, Queue, Reactions, Recount, Retries, Revisions, Rollups, Search, Shelved, StateRules, Stock, Timers, Variants, Workflow)`}},
+			[]string{`src/item.schema.json: type Item: behavior "Ghost" is not a registered behavior (registered: Approvals, Assignment, Audit, Blueprint, Branches, Budget, Calendar, Clearance, Comments, Constants, Dependencies, Holds, Lease, Links, Numbering, Pallet, Payments, Presence, Queue, Reactions, Recount, Retries, Revisions, Rollups, Search, Shelved, StateRules, Stock, Timers, Variants, Workflow)`}},
 		{"config rejected", []ir.BehaviorRef{stock(`{"aisles":0}`)},
-			[]string{"src/item.schema.json: type Item: behavior Stock config: "}},
-		{"config missing", []ir.BehaviorRef{{Name: "Stock"}},
-			[]string{"src/item.schema.json: type Item: behavior Stock config: "}},
+			[]string{"src/item.schema.json: type Item: behavior Pallet config: "}},
+		{"config missing", []ir.BehaviorRef{{Name: "Pallet"}},
+			[]string{"src/item.schema.json: type Item: behavior Pallet config: "}},
 		{"config on a behavior without one", []ir.BehaviorRef{stock(`{"aisles":2}`), {Name: "Audit", Config: json.RawMessage(`{"often":true}`)}},
 			[]string{"src/item.schema.json: type Item: behavior Audit takes no config"}},
 		{"listed twice", []ir.BehaviorRef{stock(`{"aisles":2}`), stock(`{"aisles":3}`)},
-			[]string{"src/item.schema.json: type Item lists behavior Stock twice"}},
+			[]string{"src/item.schema.json: type Item lists behavior Pallet twice"}},
 		{"missing requirement", []ir.BehaviorRef{{Name: "Audit"}},
-			[]string{"src/item.schema.json: type Item: behavior Audit requires behavior Stock, which the type does not list"}},
+			[]string{"src/item.schema.json: type Item: behavior Audit requires behavior Pallet, which the type does not list"}},
 		{"conflict", []ir.BehaviorRef{stock(`{"aisles":2}`), {Name: "Clearance"}},
-			[]string{"src/item.schema.json: type Item: behavior Clearance conflicts with behavior Stock, which the type also lists"}},
+			[]string{"src/item.schema.json: type Item: behavior Clearance conflicts with behavior Pallet, which the type also lists"}},
 		{"field named like the type's own", []ir.BehaviorRef{{Name: "Shelved"}}, nil},
 		{"field named like another behavior's", []ir.BehaviorRef{stock(`{"aisles":2}`), {Name: "Shelved"}}, nil},
 		{"operation collides", []ir.BehaviorRef{stock(`{"aisles":2}`), {Name: "Recount"}},
-			[]string{"src/item.schema.json: type Item: behaviors Stock and Recount both add operation restock"}},
+			[]string{"src/item.schema.json: type Item: behaviors Pallet and Recount both add operation restock"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			r := Run(behaviorSchema(test.refs...), Input{Registry: reg})
@@ -130,8 +130,8 @@ func TestBehaviorsVerifyWithTheCore(t *testing.T) {
 		t.Fatalf("errors = %v, want none", got)
 	}
 
-	r = Run(behaviorSchema(ir.BehaviorRef{Name: "Stock"}), Input{Registry: core})
-	if want := `type Item: behavior "Stock" is not a registered behavior (registered: Approvals, Assignment, Blueprint, Branches, Budget, Comments, Constants, Dependencies, Lease, Links, Numbering, Presence, Queue, Reactions, Retries, Revisions, Rollups, Search, StateRules, Timers, Variants, Workflow)`; !hasError(r, want) {
+	r = Run(behaviorSchema(ir.BehaviorRef{Name: "Pallet"}), Input{Registry: core})
+	if want := `type Item: behavior "Pallet" is not a registered behavior (registered: Approvals, Assignment, Blueprint, Branches, Budget, Calendar, Comments, Constants, Dependencies, Holds, Lease, Links, Numbering, Payments, Presence, Queue, Reactions, Retries, Revisions, Rollups, Search, StateRules, Stock, Timers, Variants, Workflow)`; !hasError(r, want) {
 		t.Fatalf("errors = %v, want %q", errorStrings(r), want)
 	}
 
