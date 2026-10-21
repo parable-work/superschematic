@@ -122,15 +122,22 @@ reads as `Some(Value::Null)` and is written back as `null`, and an absent
 key is `None`, which is left out
 ([null in an optional Generic.JSON](/superschematic/reference/json-scalars/#null-in-an-optional-genericjson)).
 
-A union is an enum with one variant per member. When every member marks
-the same field `@internalMetadata`, serde reads that field as the enum's
-tag. Otherwise the enum is untagged and decodes by shape, as the Go types
-do: the first member whose fields include every payload key wins, unless
-the payload contradicts one of the member's tags, a field that two or more
-members declare with distinct string or enum defaults. When no member
-declares every key, the first member whose tags the payload allows wins.
-Either way the payload must be a JSON object, and serde refuses a member
-whose required field it lacks.
+A union is an enum with one variant per member. Its `Deserialize` picks
+the member every language picks, by one structural predicate
+(`validators::pick_union_member`), and serde decodes the payload once as
+that member. When every member marks the same field `@internalMetadata`,
+that field's value names the only candidate. Otherwise the candidates are
+the members whose fields include every payload key and whose tags the
+payload does not contradict, a tag being a field that two or more members
+declare with distinct string or enum defaults; when none of them reads the
+payload, the members whose tags the payload allows. The first candidate
+that reads the payload is the member. A member reads it when the payload is an object, a `@strictJSON` member's holds no key the
+member does not declare, each required field without a default is present
+and not null, and each field present has its JSON kind at every list level
+and in every map value, none of them null: an enum's value is one of its
+values, a scalar's passes the scalar's validator (a UUID, a date, a
+date-time), a nested object is one its type reads and an inner union one
+some member reads. A field's own rules (a `min`, a `pattern`) take no part.
 
 ### Validate
 

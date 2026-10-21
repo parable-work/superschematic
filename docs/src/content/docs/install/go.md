@@ -174,19 +174,24 @@ type it is a `*GenericJSON`: `nil` when the key is absent, and a pointer to
 also leave `nil`. Encoding writes the pointer back as `null` and leaves out
 a `nil` one. `To<Type>` carries an input's null over as the pointer.
 
-A union field decodes through its `<Union>Wrapper`. When every member
-marks the same field `@internalMetadata`, the wrapper picks the member by
-that field's value. Otherwise it picks by shape, because a member's decoder
-ignores keys the member does not declare: the first member whose fields
-include every payload key wins, unless the payload contradicts one of the
-member's tags. A tag is a field that two or more members declare with
-distinct string or enum defaults, such as
-`kind: Default<TriggerKind, TriggerKind.NewMessage>`. When no member
-declares every key, the wrapper tolerates the unknown keys and takes the
-first member whose tags the payload allows. Either way the payload must
-hold each required field the member gives no default, not null, which the
-member's decoder would read as its zero value, as the Rust and TypeScript
-decoders require it; a payload no member reads is an error. `Validate`
+A union field decodes through its `<Union>Wrapper`, which picks the member
+every language picks, by one structural predicate (`unionPickMember` in
+`unions.go`). When every member marks the same field `@internalMetadata`,
+that field's value names the only candidate. Otherwise the candidates are
+the members whose fields include every payload key and whose tags the
+payload does not contradict; a tag is a field that two or more members
+declare with distinct string or enum defaults, such as
+`kind: Default<TriggerKind, TriggerKind.NewMessage>`. When none of them
+reads the payload, the candidates are the members whose tags the payload
+allows, unknown keys tolerated. The first candidate that reads the
+payload is the member, decoded once. A member reads it when the payload is an object, a `@strictJSON` member's holds no key the
+member does not declare, each required field without a default is present
+and not null, and each field present has its JSON kind at every list level
+and in every map value, none of them null: an enum's value is one of its
+values, a scalar's passes the scalar's validator (a UUID, a date, a
+date-time), a nested object is one its type reads and an inner union one
+some member reads. A field's own rules (a `min`, a `pattern`) take no part.
+A payload no member reads is an error. `Validate`
 checks the member a union field holds, so a member without its required
 fields fails, and so does an absent required union or a nil union element
 of a list or map.

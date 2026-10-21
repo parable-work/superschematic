@@ -186,23 +186,27 @@ Every object type and every union also gets `parse<Name>FromJSON`, which
 reads a value as it arrives on the wire into its runtime types: a
 date-time field becomes a `Date`, a nested object or union field runs its
 own parser, and a `@strictJSON` type runs `parse<Type>Json`'s checks. A
-union's parser picks the member the Go and Rust types pick. When every
-member marks the same field `@internalMetadata`, that field's value names
-the member. Otherwise it picks by shape: the first member whose fields
-include every payload key wins, unless the payload contradicts one of the
-member's tags, a field that two or more members declare with distinct
-string or enum defaults; when no member declares every key, the first
-member whose tags the payload allows wins. Either way a member wins only
-when it reads the payload as the Go and Rust decoders would: the payload
-holds each required field the member gives no default, not null, no value
-has another JSON type than the member's field, and a `@strictJSON` member
-sees no key it does not declare. A broken rule of the member's own (a
-`min`, a `pattern`) does not pass it over: the member is picked, and its
-parser refuses it with `validation failed`. A value that is not an object,
-an absent, non-string or unknown discriminator, and a payload no member
-reads throw `ParseError` with `does not match the declared type`, the
-reason the Go and Rust decoders give, and a message that says which;
-`null` and `undefined` are returned as they are.
+union's parser picks the member every language picks, by one structural
+predicate the generator writes for Go, TypeScript, Rust and Python alike.
+When every member marks the same field `@internalMetadata`, that field's
+value names the only candidate. Otherwise the candidates are the members
+whose fields include every payload key and whose tags the payload does
+not contradict, a tag being a field that two or more members declare with
+distinct string or enum defaults; when none of them reads the payload,
+the members whose tags the payload allows. The first candidate that reads
+the payload is the member. A member reads it when the payload is an object, a `@strictJSON` member's holds no key the
+member does not declare, each required field without a default is present
+and not null, and each field present has its JSON kind at every list level
+and in every map value, none of them null: an enum's value is one of its
+values, a scalar's passes the scalar's validator (a UUID, a date, a
+date-time), a nested object is one its type reads and an inner union one
+some member reads. A field's own rules (a `min`, a `pattern`) take no part: a member
+that breaks one is picked, and its parser refuses it with `validation
+failed`. A value that is not an object, or that no member reads (an
+unknown discriminator included), throws `ParseError` with `does not match
+the declared type`, the reason the Go and Rust decoders give, and a
+message that says which; `null` and `undefined` are returned as they
+are.
 
 A union also gets `validate<Union>`, which validates the member its parser
 picks by the member's own validator, with the member's defaults filled in,

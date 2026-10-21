@@ -173,8 +173,11 @@ list level, in each value of a map and in each item of a page. A model is
 read with `from_dict_non_strict`. A union is read as the member its alias
 picks: by the discriminator when every member marks the same field
 `@internalMetadata`, and otherwise the member the payload fits best, by
-pydantic's smart union matching. A union field of a model is read the
-same way. An enum stays the string the API sent.
+pydantic's smart union matching. An enum stays the string the API sent.
+A union field of a model, and a union argument, are read as the member
+the types package's `unions.pick_union_member` picks, the structural
+predicate every language picks by (see the Go, TypeScript and Rust
+pages), so nothing is coerced: `{"radius": "1"}` is no circle.
 A value its type cannot read, or data that is not the list or map the
 operation returns, raises `SDKError` naming where it is in the response
 (`data[1]`, `data[a]` for a map's key `a`, `data.items[0]`), with
