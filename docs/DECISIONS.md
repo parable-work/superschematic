@@ -3170,7 +3170,9 @@ unchanged.
 Status: built. A union field is no longer checked for presence alone: it
 is validated as the member the union picks, in Rust and TypeScript as in
 Go, and every language picks the member by one structural predicate (D31,
-amended: a union picks its member by one structural predicate).
+amended: a union picks its member by one structural predicate). A Go enum
+refuses a string it lacks and a Go duration reads its text as every
+validator does (D31, amended: a Go enum refuses a string it lacks).
 
 The rule is reversible until the first release.
 ## D32. The version graph on SQLite, and a behavior that hosts one
@@ -8494,7 +8496,8 @@ A decoder may still refuse, after the pick, a value the predicate reads:
 Go's decoder of `Temporal.Duration` reads Go's own duration text, which the
 scalar's validator does not. Such a value is a decoder's divergence, as
 D14's `decodeRejects` lists them, not a pick's. A Go enum takes any string
-outside a union, which no pick depends on. A map's key path is `field.key`
+outside a union, which no pick depends on. (Both closed below: a Go enum
+refuses a string it lacks.) A map's key path is `field.key`
 in the TypeScript and Rust validators and `field[key]` in Go's, as for an
 object in a map; the Python SDK names an argument by its Python name.
 
@@ -8784,3 +8787,67 @@ lease as it should, not a delay in the handover. The test now ends the
 holder's new session too until the other takes the lease
 (`hand_over`), and held in 20 runs of 20 beside a release build, the
 first taking its lease again in two of them.
+
+### D31, amended: a Go enum refuses a string it lacks, and a Go duration reads its text as every validator does
+
+The amendment above left two Go decoders apart from every other language.
+A generated Go enum had no `UnmarshalJSON`, so a request body, a model
+field, a response an SDK read or a queue message decoded any string into
+it: only a caller that ran `Validate` learned it was no member, where
+serde refuses it at decode, TypeScript in validation and pydantic at
+parse. And a `Temporal.Duration` field, a `time.Duration`, decoded through
+superscalar's `UnmarshalJSON`, which reads the text with Go's own
+duration parser and never with the scalar's rules: it took `+1s`, `.5s`
+and `0`, which the scalar's pattern refuses, and refused ` 1s` and `1s `
+with a decode error, where every validator reports `pattern`; and since
+`Validate` could see only the decoded value, it checked the pattern and
+the length on Go's rendering of it (`1s` for `+1s`). Go's parser also
+reads a fraction of a nanosecond down (`1.5ns` is 1ns) where the core
+rounds it (2ns). No other scalar's Go decoder disagrees with its
+validator in the parity matrix: superscalar's other decoders read through
+the core.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A generated Go enum has `UnmarshalJSON`. A string the enum lacks, `""` and another case of a value included, and a value that is not a string, are refused with the `*json.UnmarshalTypeError` `encoding/json` gives a value of the wrong JSON type, its `Value` `string "purple"` or the JSON kind and its `Type` the enum, which `encoding/json` completes with the struct field's path. null leaves the value as it was, as for a string. A Go client or server that relied on an unknown value decoding, from a request, a stored JSON column, a queue message or a response, now gets the decode error. | An error of a type of our own, which no caller of `encoding/json` expects and which `encoding/json` would not name the field in. A lenient decode and `Validate` alone, as before, which a caller that skips `Validate` (an SDK reading a response, the ORM reading a JSON column) never ran. `UnmarshalText`, which no generated route, query decoder or YAML reader calls on an enum: query and path values are cast and checked by `ValidateRequired`, and YAML goes through JSON. |
+| A Go route answers an input body whose decoder refused a string an enum lacks as the TypeScript and Rust servers answer it, which validate the body before they decode it: `validation failed`, with `enum` ("invalid enum value") at each such string's path, a list's element, a map's value, a nested object's field and an `InputField` included, beside the errors the input type's `Validate` finds in the rest. `bodyargs.DecodeRefusal` reads the body again with each such string replaced by the enum's first value, walking the JSON beside the Go type (a generated object type, which lists its keys; a list; a string-keyed map; an `InputField`), and does not walk a union, whose pick refuses such a member first. Any other body the decoder refuses, a value of the wrong JSON type among them, is `does not match the declared type`, as before. A body argument is read the same way: a string an enum lacks is `enum`, where its decoder's refusal would have made it `pattern`, and an object argument has `enum` at the string's path beside its other errors. A query value is cast and checked as before, `enum` at its name. | `does not match the declared type`, as the Go route answers a value of the wrong JSON type, which every server answered `validation failed` with `enum` before. The enum's errors alone, which drop the body's other broken rules that the TypeScript and Rust servers report beside them. |
+| A Go type's `UnmarshalJSON` reads each `Temporal.Duration` field's text itself, alone, in a list, a list of lists and a map (`decodeDurationField`): `check<Symbol>Text` checks the text by the scalar's own length and pattern, each one it breaks, and when they accept it by the scalar core, whose canonical text Go's parser then reads exactly. A text they refuse decodes to 0s and is recorded, as a JSON-object scalar's core failures are, and `Validate` reports it at its path while the field still holds the value decoded. The union pick checks a duration's text with the same function, and `Parse<Symbol>` parses the core's canonical text. A text the rules and the core accept whose amount a `time.Duration` cannot hold, beyond about 292 years (`2562047h1h`), is still refused at decode, the one value Go cannot hold. | superscalar's `UnmarshalJSON` running the scalar's rules and writing the core's canonical text, a change to the pinned superscalar for a check this repository's validators already make on the text. A string-backed Go type for a duration, which would break the alias every module shares with superscalar and the ORM's `INTERVAL` columns. Refusing such a text at decode, which a Go route would answer `does not match the declared type` where every other server answers the rule. |
+| Encoding is unchanged: Go writes a duration as Go renders it (`1.5ms`, `1µs`), which every validator accepts and which reads back as the same value, while TypeScript and Rust echo the text they were sent. | Writing the core's canonical text (`1500us`), which needs superscalar's `MarshalJSON`. |
+| A Python enum's reader refuses a string the enum lacks with a pydantic error of type `enum` where it raised the enum's `ValueError` (`value_error`), so the Python SDK names it `enum`, as every other SDK does, where it said `invalid`. | |
+
+The parity matrix holds `Temporal.Duration` alone and in a list: a text
+in each unit (`µs` included), a sign, space around it, a bare number, a
+unit the scalar lacks and a fraction without its integer part
+(`pattern`), a text too long (`maxLength`), an amount the core refuses
+(core-only, `parse`) and a number (`type`); the generated validators of
+every language and the three runtimes agree on each. The bad enum vectors
+list Go among the decoders that refuse them, as Python is listed, and a
+member's value in another case is one more. union-lists-api's `Probe`
+holds a `Status`, a list of them, a `Ticket` whose status is one, a
+duration and a list of them outside any union, and `union_requests.json`
+asks every server and SDK about them: a status the enum lacks, alone, in
+a list, in a nested object and beside a duration the pattern refuses, is
+`validation failed` with `enum` at its path from the Go, TypeScript and
+Rust servers, and the TypeScript and Python SDKs refuse it with the same
+errors; the Go and Rust SDKs cannot hold it and skip those requests
+(`typedSkips`). A duration with a sign, space around it, a unit the
+scalar lacks or too long is refused by its rule by every server and SDK.
+
+Status: built. typegen's `TestGeneratedDurationsReadTheirText` holds the
+duration decode, the canonical value, the report following the field, a
+later decode clearing an earlier one's report, and the enum's refusal and
+its `*json.UnmarshalTypeError`; the nested-arrays module tests decode an
+unknown enum element as a refusal. bodyargs' `TestDecodeRefusal`,
+`TestAnEnumStringArgumentItsDecoderRefusesIsEnum` and
+`TestAnObjectArgumentWithAnUnknownEnum` hold the route's answers.
+`TestGeneratedValidatorParity`, the runtime suites,
+`TestUnionListsGoAPI`, `TestRustRouterAnswersUnionRequests`,
+`TestGeneratedRouterAnswersUnionRequests` and the four SDKs' union tests
+run the new vectors; the Rust SDK's harness names the rule its input
+schema check breaks by the message the check gives (`invalid format` is
+`pattern`). A Go body argument that is a duration is checked by the
+route's rules on its text, as before, but still decoded by Go's parser,
+so its value rounds a fraction of a nanosecond down; an object argument
+holding one reads it as its type's decoder does.
+
+The rule is reversible until the first release.

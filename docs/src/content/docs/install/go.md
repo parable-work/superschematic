@@ -206,7 +206,22 @@ slice in schema declaration order. It is a method, so it also works through
 the alias a module that imports the enum declares: `Stage("").Values()`
 returns the same list in both modules. It matches Rust's `ALL`,
 TypeScript's `Object.values`, and iterating a Python enum. `IsValid()`
-checks membership.
+checks membership. Decoding refuses a string the enum lacks, and a value
+that is not a string, as every other language's decoder does: with the
+`*json.UnmarshalTypeError` `encoding/json` gives a value of the wrong JSON
+type, which names the field (`json: cannot unmarshal string "purple" into
+Go struct field Alias.shade of type types.Shade`). null leaves the value
+as it was.
+
+A `Temporal.Duration` field holds a `time.Duration`, but is read from its
+text as every validator reads it: the scalar's pattern and length, then
+the scalar core, check the text, and a text they accept is the core's
+value (`1.5ns` is 2ns, as the core rounds it). A text they refuse (`+1s`,
+` 1s`, `1d`) decodes to 0s, and `Validate` reports it at its path by the
+rule it breaks, as the TypeScript and Rust validators do; Go's own
+duration parser would read `+1s` and refuse ` 1s`. A value set in Go is
+checked as set. A duration beyond what a `time.Duration` holds, about 292
+years (`2562047h1h`), is refused when it decodes.
 
 ## Serve a generated API
 
@@ -258,7 +273,9 @@ from the query string (below). In the body:
 - The scalar's own lengths, pattern and range, then the argument's own
   constraints, apply to a value and to every element; a value that fails
   is one error named by the rule it breaks (`minLength`, `maxLength`,
-  `pattern`, `min`, `max`). An enum value outside the enum is `enum`.
+  `pattern`, `min`, `max`). An enum value outside the enum is `enum`, which
+  its decoder refuses, and so is one in an object argument, at its path
+  beside the object's other errors.
 
 An implementation returns a list as `[]T`, a map (`Record<string, T>`) as
 `map[string]T` (`map[string][]T` for a map of lists) and any other result
@@ -292,8 +309,14 @@ valid JSON". A body the type refuses is "Request body does not match the
 declared input": `details.reason` says why (`expected an object`,
 `unknown fields: coupon`, `validation failed`, `does not match the
 declared type`), and `errors` holds each field's errors by path. A
-top-level key the type does not declare is refused, `unknown` at its
-key:
+string an enum lacks, which the enum's decoder refuses, is `validation
+failed` with `enum` at its path beside the other rules the body breaks, as
+the TypeScript and Rust servers, which validate before they decode, answer
+it: the route reads the body again with each such string replaced by one
+of the enum's values (`bodyargs.DecodeRefusal`). Any other body the type's
+decoder refuses, a value of the wrong JSON type among them, is `does not
+match the declared type`. A top-level key the type does not declare is
+refused, `unknown` at its key:
 
 ```json
 {

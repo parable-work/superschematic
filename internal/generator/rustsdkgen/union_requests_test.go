@@ -21,9 +21,9 @@ import (
 // calls ShapeMutations with the arguments of union_requests.json's
 // requests (sdktest.UnionRequestsPath), decoded into their Rust types,
 // against a local server that records what it is sent. A request whose
-// arguments the Rust types cannot hold (a value no member reads) is
-// skipped; the requests say only those whose sdk is "sends" and whose
-// status is 400 may be. Every other one is sent as the request's body, or
+// arguments the Rust types cannot hold (a value no member reads, a string
+// an enum lacks) is skipped; the requests say which may be
+// (UnionRequest.TypedMaySkip). Every other one is sent as the request's body, or
 // refused before sending with the member's errors at the argument's paths,
 // as its sdk says: the types crate's validate_<union> checks a union
 // argument and an input's union field.
@@ -108,7 +108,7 @@ tokio = { version = "1", features = ["macros", "rt"] }
 		case !ok:
 			t.Errorf("%s: no outcome", request.Name)
 		case outcome.Skipped:
-			if !request.SDKSends() || request.Status != 400 {
+			if !request.TypedMaySkip() {
 				t.Errorf("%s: the Rust types cannot hold its arguments", request.Name)
 			}
 		case request.SDKSends():
@@ -136,7 +136,10 @@ tokio = { version = "1", features = ["macros", "rt"] }
 }
 
 // refusalErrors reads the field errors of the SDK's refusal,
-// "input validation failed: path: rule; path: rule", as FieldErrors.
+// "input validation failed: path: rule; path: rule", as FieldErrors. A
+// union's member names each rule it breaks; the input's own schema check
+// says what is wrong at input.<path> ("invalid format", "must be at most
+// 32 characters"), which schemaRule names as the rule.
 func refusalErrors(message string) sdktest.FieldErrors {
 	errors := sdktest.FieldErrors{}
 	failures, ok := strings.CutPrefix(message, "invalid sdk configuration: input validation failed: ")
@@ -145,9 +148,40 @@ func refusalErrors(message string) sdktest.FieldErrors {
 	}
 	for _, failure := range strings.Split(failures, "; ") {
 		path, rule, _ := strings.Cut(failure, ": ")
+		if inner, ok := strings.CutPrefix(path, "input."); ok {
+			path, rule = inner, schemaRule(rule)
+		}
 		errors[path] = append(errors[path], rule)
 	}
 	return errors
+}
+
+// schemaRule names the rule a failure of the Rust SDK's input schema check
+// breaks, by the message it gives.
+func schemaRule(message string) string {
+	switch {
+	case message == "invalid format":
+		return "pattern"
+	case message == "required field":
+		return "required"
+	case message == "value must match one of the allowed enum values":
+		return "enum"
+	case strings.HasPrefix(message, "expected "):
+		return "type"
+	case strings.HasPrefix(message, "must be at least ") && strings.HasSuffix(message, " characters"):
+		return "minLength"
+	case strings.HasPrefix(message, "must be at most ") && strings.HasSuffix(message, " characters"):
+		return "maxLength"
+	case strings.HasPrefix(message, "must contain at least "):
+		return "listMin"
+	case strings.HasPrefix(message, "must contain at most "):
+		return "listMax"
+	case strings.HasPrefix(message, "must be at least "):
+		return "min"
+	case strings.HasPrefix(message, "must be at most "):
+		return "max"
+	}
+	return message
 }
 
 // unionRequestsSDKTest is tests/union_requests.rs of the generated SDK

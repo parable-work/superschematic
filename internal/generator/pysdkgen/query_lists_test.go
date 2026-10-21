@@ -306,7 +306,7 @@ refused(
 refused(lambda: posts.count_posts([ID_A], shades=[Shade.Light]), {"shades": "listMin"})
 refused(
     lambda: posts.count_posts([ID_A], shades=[Shade.Light, Shade.Dark, Shade.Light, "dim"]),
-    {"shades": "listMax", "shades[3]": "invalid"},
+    {"shades": "listMax", "shades[3]": "enum"},
 )
 refused(lambda: posts.count_posts([ID_A], ranks=[0, 5, 101, "7"]), {"ranks[0]": "min", "ranks[2]": "max", "ranks[3]": "type"})
 refused(

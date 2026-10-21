@@ -135,6 +135,54 @@ func (o *ModuleOutput) HasJSONObjectFields() bool {
 	return false
 }
 
+// DurationFields returns the fields of t that hold a duration scalar's
+// text (isDurationTextField), in field order. UnmarshalJSON reads each
+// through the scalar's rules and the scalar core (decodeDurationField);
+// Validate reports a text the rules refused.
+func (t TypeInfo) DurationFields() []FieldInfo {
+	var fields []FieldInfo
+	for _, field := range t.Fields {
+		if isDurationTextField(field) {
+			fields = append(fields, field)
+		}
+	}
+	return fields
+}
+
+// HasDurationFields reports whether any type in types.go has a field
+// DurationFields returns, so the file carries decodeDurationField.
+func (o *ModuleOutput) HasDurationFields() bool {
+	return len(o.DurationTextChecks()) > 0
+}
+
+// DurationTextCheck is one check<Symbol>Text function in types.go: a
+// duration scalar's own rules and the scalar core's verdict, on the text.
+type DurationTextCheck struct {
+	Symbol string
+	Name   string
+	Rules  []codegen.ValidationRule
+}
+
+// DurationTextChecks returns one DurationTextCheck per duration scalar a
+// field of types.go holds, in symbol order.
+func (o *ModuleOutput) DurationTextChecks() []DurationTextCheck {
+	bySymbol := map[string]DurationTextCheck{}
+	for _, typeInfo := range o.Types {
+		for _, field := range typeInfo.DurationFields() {
+			symbol := scalarSymbol(field)
+			if _, seen := bySymbol[symbol]; !seen {
+				bySymbol[symbol] = DurationTextCheck{Symbol: symbol, Name: field.ScalarInfo.Name, Rules: field.ScalarRules}
+			}
+		}
+	}
+	checks := make([]DurationTextCheck, 0, len(bySymbol))
+	for _, check := range bySymbol {
+		checks = append(checks, check)
+	}
+	sort.Slice(checks, func(i, j int) bool { return checks[i].Symbol < checks[j].Symbol })
+	return checks
+}
+
 // HasKeptNullJSONFields reports whether any type in types.go has a field
 // KeptNullJSONFields returns, so the file carries nullJSONMembers.
 func (o *ModuleOutput) HasKeptNullJSONFields() bool {

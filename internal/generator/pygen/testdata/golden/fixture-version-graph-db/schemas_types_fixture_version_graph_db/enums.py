@@ -7,7 +7,8 @@ This module defines enumeration types using Python's Enum class.
 """
 
 from enum import Enum
-from pydantic_core import core_schema
+
+from pydantic_core import PydanticCustomError, core_schema
 
 class RecipeEntityKind(str, Enum):
     """
@@ -29,9 +30,21 @@ class RecipeEntityKind(str, Enum):
     @classmethod
     def __get_pydantic_core_schema__(cls, source_type, handler):
         return core_schema.no_info_before_validator_function(
-            cls,
+            cls._read,
             handler(source_type),
         )
+
+    @classmethod
+    def _read(cls, value):
+        """Read a string as the member it names. A string the enum lacks is
+        refused as "enum", as every other language's decoder refuses it;
+        any other value is left to the enum's schema."""
+        if isinstance(value, str) and not isinstance(value, cls):
+            try:
+                return cls(value)
+            except ValueError:
+                raise PydanticCustomError("enum", "'{value}' is not a valid RecipeEntityKind", {"value": value}) from None
+        return value
 
     def __str__(self) -> str:
         """Return the string value of the enum."""
@@ -51,9 +64,21 @@ class RecipePatchOperation(str, Enum):
     @classmethod
     def __get_pydantic_core_schema__(cls, source_type, handler):
         return core_schema.no_info_before_validator_function(
-            cls,
+            cls._read,
             handler(source_type),
         )
+
+    @classmethod
+    def _read(cls, value):
+        """Read a string as the member it names. A string the enum lacks is
+        refused as "enum", as every other language's decoder refuses it;
+        any other value is left to the enum's schema."""
+        if isinstance(value, str) and not isinstance(value, cls):
+            try:
+                return cls(value)
+            except ValueError:
+                raise PydanticCustomError("enum", "'{value}' is not a valid RecipePatchOperation", {"value": value}) from None
+        return value
 
     def __str__(self) -> str:
         """Return the string value of the enum."""
@@ -73,9 +98,21 @@ class Verdict(str, Enum):
     @classmethod
     def __get_pydantic_core_schema__(cls, source_type, handler):
         return core_schema.no_info_before_validator_function(
-            cls,
+            cls._read,
             handler(source_type),
         )
+
+    @classmethod
+    def _read(cls, value):
+        """Read a string as the member it names. A string the enum lacks is
+        refused as "enum", as every other language's decoder refuses it;
+        any other value is left to the enum's schema."""
+        if isinstance(value, str) and not isinstance(value, cls):
+            try:
+                return cls(value)
+            except ValueError:
+                raise PydanticCustomError("enum", "'{value}' is not a valid Verdict", {"value": value}) from None
+        return value
 
     def __str__(self) -> str:
         """Return the string value of the enum."""

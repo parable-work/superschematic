@@ -176,6 +176,25 @@
           "typescript": "JSDate"
         },
         "hasCustomParse": true
+      },
+      "Temporal.Duration": {
+        "name": "Temporal.Duration",
+        "description": "Duration for timeouts and intervals",
+        "languagePrimitive": "string",
+        "primitive": "String",
+        "typeMappings": {
+          "go": "TemporalDuration",
+          "json_schema": "string",
+          "python": "str",
+          "rust": "String",
+          "sql": "INTERVAL",
+          "typescript": "string"
+        },
+        "maxLength": 32,
+        "pattern": "^(\\d+(\\.\\d+)?(ns|us|µs|ms|s|m|h))+$",
+        "hasCustomNormalize": true,
+        "hasCustomValidate": true,
+        "hasCustomParse": true
       }
     },
     "types": {
@@ -505,6 +524,19 @@
             "name": "whens",
             "typeRef": {
               "name": "Temporal.DateTime",
+              "isArray": true
+            }
+          },
+          {
+            "name": "wait",
+            "typeRef": {
+              "name": "Temporal.Duration"
+            }
+          },
+          {
+            "name": "waits",
+            "typeRef": {
+              "name": "Temporal.Duration",
               "isArray": true
             }
           }
@@ -1492,6 +1524,158 @@
       "want": {
         "shade": [
           "enum"
+        ]
+      }
+    },
+    {
+      "name": "enum_value_not_a_member",
+      "type": "ParityMatrix",
+      "payload": {
+        "reqScalarList": [
+          "https://a.test"
+        ],
+        "reqStr": "ok",
+        "reqList": [
+          "a"
+        ],
+        "shade": "Dark"
+      },
+      "want": {
+        "shade": [
+          "enum"
+        ]
+      }
+    },
+    {
+      "name": "duration_valid",
+      "type": "ParityMatrix",
+      "payload": {
+        "reqScalarList": [
+          "https://a.test"
+        ],
+        "reqStr": "ok",
+        "reqList": [
+          "a"
+        ],
+        "wait": "1h30m",
+        "waits": [
+          "1.5s",
+          "500ms",
+          "1\u00b5s",
+          "2562047h"
+        ]
+      },
+      "want": {}
+    },
+    {
+      "name": "duration_bad_format",
+      "type": "ParityMatrix",
+      "payload": {
+        "reqScalarList": [
+          "https://a.test"
+        ],
+        "reqStr": "ok",
+        "reqList": [
+          "a"
+        ],
+        "wait": "+1s",
+        "waits": [
+          " 1s",
+          "-1s",
+          "0",
+          "1d",
+          ".5s",
+          "1s "
+        ]
+      },
+      "want": {
+        "wait": [
+          "pattern"
+        ],
+        "waits[0]": [
+          "pattern"
+        ],
+        "waits[1]": [
+          "pattern"
+        ],
+        "waits[2]": [
+          "pattern"
+        ],
+        "waits[3]": [
+          "pattern"
+        ],
+        "waits[4]": [
+          "pattern"
+        ],
+        "waits[5]": [
+          "pattern"
+        ]
+      }
+    },
+    {
+      "name": "duration_too_long",
+      "type": "ParityMatrix",
+      "payload": {
+        "reqScalarList": [
+          "https://a.test"
+        ],
+        "reqStr": "ok",
+        "reqList": [
+          "a"
+        ],
+        "wait": "1h1h1h1h1h1h1h1h1h1h1h1h1h1h1h1h1h"
+      },
+      "want": {
+        "wait": [
+          "maxLength"
+        ]
+      }
+    },
+    {
+      "name": "duration_beyond_the_core",
+      "type": "ParityMatrix",
+      "payload": {
+        "reqScalarList": [
+          "https://a.test"
+        ],
+        "reqStr": "ok",
+        "reqList": [
+          "a"
+        ],
+        "wait": "99999999999999999999h"
+      },
+      "want": {
+        "wait": [
+          "parse"
+        ]
+      },
+      "core": [
+        "wait"
+      ]
+    },
+    {
+      "name": "duration_wrong_type",
+      "type": "ParityMatrix",
+      "payload": {
+        "reqScalarList": [
+          "https://a.test"
+        ],
+        "reqStr": "ok",
+        "reqList": [
+          "a"
+        ],
+        "wait": 5,
+        "waits": [
+          "1s",
+          2
+        ]
+      },
+      "want": {
+        "wait": [
+          "type"
+        ],
+        "waits[1]": [
+          "type"
         ]
       }
     },

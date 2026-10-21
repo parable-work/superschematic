@@ -158,7 +158,12 @@ var TemporalDurationPattern = scalars.TemporalDurationPattern
 
 // ParseTemporalDuration parses a string and returns a Temporal.Duration scalar.
 func ParseTemporalDuration(s string) (TemporalDuration, error) {
-	parsed, err := scalars.ParseDuration(s)
+	canonical, err := scalars.Parse("Temporal.Duration", s)
+	if err != nil {
+		var zero TemporalDuration
+		return zero, err
+	}
+	parsed, err := scalars.ParseDuration(canonical)
 	if err != nil {
 		var zero TemporalDuration
 		return zero, err

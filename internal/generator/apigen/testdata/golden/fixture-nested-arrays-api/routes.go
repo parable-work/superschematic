@@ -165,7 +165,10 @@ func createGridSaveGridHandler(impl GridImplementation) gohttp.HandlerFunc {
 			return
 		}
 		if err := json.Unmarshal(rawInput, &input); err != nil {
-			RespondInputRefusal(w, r, bodyargs.Mismatch("does not match the declared type", nil))
+			// A string an enum lacks, which its decoder refuses, is "enum"
+			// at its path beside the type's other rules, as every server
+			// answers it.
+			RespondInputRefusal(w, r, bodyargs.DecodeRefusal(rawInput, &input))
 			return
 		}
 
