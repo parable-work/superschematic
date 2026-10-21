@@ -31,6 +31,15 @@ var (
 		"examples/engine-jobs/schemas/jobs.schema.json",
 		"examples/engine-jobs/schemas/workers.schema.json",
 	}
+	// commerceSchemas compose the commerce behaviors (D70), in the order
+	// an engine defines them: Checkout holds Inventory and CollectionPoint,
+	// and Refund links Checkout.
+	commerceSchemas = []string{
+		"internal/generator/engineclientgen/testdata/commerce/Inventory.schema.json",
+		"internal/generator/engineclientgen/testdata/commerce/CollectionPoint.schema.json",
+		"internal/generator/engineclientgen/testdata/commerce/Checkout.schema.json",
+		"internal/generator/engineclientgen/testdata/commerce/Refund.schema.json",
+	}
 	// fixtureSchemas are in the order an engine defines them: Project's
 	// Rollups reads Task's Links when it is defined.
 	fixtureSchemas = []string{
@@ -50,6 +59,7 @@ var goldens = []struct {
 	{"examples/engine-notes/src/notes.client.ts", notesSchemas},
 	{"runtime/engine/typescript/test/generated/notes.ts", notesSchemas},
 	{"runtime/engine/typescript/test/generated/jobs.ts", jobsSchemas},
+	{"runtime/engine/typescript/test/generated/commerce.ts", commerceSchemas},
 	{"runtime/engine/typescript/test/generated/fixture.ts", fixtureSchemas},
 }
 
