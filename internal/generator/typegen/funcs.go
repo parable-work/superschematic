@@ -93,6 +93,15 @@ func isJSONObjectField(field FieldInfo) bool {
 		field.ScalarInfo.Traits.StructuredJSON == ir.JSONSchemaObjectType
 }
 
+// isDurationTextField reports whether field holds a duration scalar whose
+// JSON is text and whose Go value is a time.Duration (Temporal.Duration).
+// The Go value cannot show the text the scalar's rules check, so
+// UnmarshalJSON checks each text itself (decodeDurationField).
+func isDurationTextField(field FieldInfo) bool {
+	return field.IsScalar && !field.IsUnion && field.ScalarInfo != nil &&
+		field.ScalarInfo.Traits.IsDurationLike && field.ScalarInfo.Primitive == ir.LanguageString
+}
+
 // jsonObjectFieldLiteral is the jsonObjectField literal a type's
 // UnmarshalJSON hands decodeJSONObjects for field.
 func jsonObjectFieldLiteral(field FieldInfo) string {
@@ -352,6 +361,7 @@ func templateFuncs() template.FuncMap {
 		"requiredAnyJSONField":        requiredAnyJSONField,
 		"requiredStructuredJSONField": requiredStructuredJSONField,
 		"jsonObjectFieldLiteral":      jsonObjectFieldLiteral,
+		"scalarSymbol":                scalarSymbol,
 		"isGeneratedType":             isGeneratedType,
 		"nestedList":                  newNestedList,
 		"autoFilledField":             autoFilledField,

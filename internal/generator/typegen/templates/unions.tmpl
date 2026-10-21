@@ -133,6 +133,18 @@ var unionReadTypes = {{.UnionReads.TypesSource}}
 // unionReadUnions are the unions the predicate picks members of.
 var unionReadUnions = {{.UnionReads.UnionsSource}}
 {{range .UnionReads.ScalarChecks}}
+{{- if .Text}}
+// {{.Func}} reports whether value is a {{.Symbol}} text the scalar's rules
+// and core accept, as UnmarshalJSON reads one.
+func {{.Func}}(raw any) bool {
+	text, ok := raw.(string)
+	if !ok {
+		return false
+	}
+	_, broken := {{.Text}}(text)
+	return len(broken) == 0
+}
+{{- else}}
 // {{.Func}} reports whether value decodes as a {{.Symbol}}{{if .Validate}} its validator passes{{end}}.
 func {{.Func}}(raw any) bool {
 	var value {{.Symbol}}
@@ -146,6 +158,7 @@ func {{.Func}}(raw any) bool {
 	return true
 	{{- end}}
 }
+{{- end}}
 {{end}}
 // unionDecodesAs reports whether value, a decoded JSON value, decodes into
 // target.
