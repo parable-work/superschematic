@@ -380,6 +380,20 @@ reject with `ClaimLostError` once the token no longer claims it; and
 `SUPERSCHEMATIC_HTTP_RUNTIME_TEST_DATABASE_URL` names, and skips without
 one.
 
+On SQLite (D53, amended) a definition of a database that lists the sqlite
+dialect also carries `sqliteStatements`, and the `./sqlite` and `./d1`
+entries run them over a `SqlDatabase`, which `queue-sqlite.ts` alone
+imports, so a Worker bundles it: `enqueueStatement(db, queue, msg)` is the
+statement that writes a message, which the caller adds to the batch whose
+writes caused it, since a `SqlDatabase` has no interactive transaction
+(`enqueueSqlite` runs it alone); and `sqliteQueue(db, queue)` returns the
+same claims as `postgresQueue`, each one statement under SQLite's single
+writer. A field crosses as its definition marks it: a UUID lowercase, a
+timestamp in RFC 3339 in UTC with its fraction kept (read back as a
+`Date`), a boolean 1 or 0, a duration its canonical text, a JSON value or
+a list its JSON text. `src/queue-sqlite.test.ts` runs them on a file
+opened twice, as a server and a worker would.
+
 `runWorker(queue, { signal, concurrency, graceMs, logger })`, from
 `@superschematic/http-runtime/worker`, is the twin of the Go runtime's
 `worker.Run`: it claims for its free slots, runs each message's handler
