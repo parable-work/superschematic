@@ -185,13 +185,16 @@ type UnionMemberInfo struct {
 	// discriminator, or "".
 	DiscriminatorValue string
 
-	// Fields and Tags are the member's shape (codegen.UnionShapes), set for
-	// a union without discriminator dispatch: its JSON field names, and the
-	// values it fixes for fields it shares with other members.
-	Fields []string
-	Tags   []codegen.UnionTag
+	// Fields, Tags and Required are the member's shape
+	// (codegen.UnionShapes), set for a union without discriminator
+	// dispatch: its JSON field names, the values it fixes for fields it
+	// shares with other members, and the fields a payload must hold.
+	Fields   []string
+	Tags     []codegen.UnionTag
+	Required []string
 
-	// Module is where the member's parse<Member>FromJSON is imported from,
+	// Module is where the member's parse<Member>FromJSON and
+	// parse<Member>JsonNonStrict are imported from,
 	// relative to validators/unions.ts: its own file in this package, or a
 	// dependency package's validators.
 	Module string
@@ -627,6 +630,7 @@ func annotateUnionMembers(unions []UnionInfo, types []codegen.TypeInfo, imported
 		for i, shape := range codegen.UnionShapes(members, enumLookup) {
 			union.Members[i].Fields = shape.Fields
 			union.Members[i].Tags = shape.Tags
+			union.Members[i].Required = shape.Required
 		}
 	}
 	return nil
@@ -647,11 +651,12 @@ func dependencyTypeFields(name string, dependencies map[string]*ir.Schema) []cod
 				continue
 			}
 			fields = append(fields, codegen.FieldInfo{
-				Name:    field.Name,
-				Type:    field.TypeRef.Name,
-				IsArray: field.TypeRef.IsArray,
-				IsMap:   field.TypeRef.IsMap,
-				Default: field.Default,
+				Name:     field.Name,
+				Type:     field.TypeRef.Name,
+				IsArray:  field.TypeRef.IsArray,
+				IsMap:    field.TypeRef.IsMap,
+				Required: field.Required,
+				Default:  field.Default,
 			})
 		}
 		return fields
