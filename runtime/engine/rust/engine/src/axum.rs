@@ -208,10 +208,12 @@ pub struct Options {
     /// When set, how long a request to any route but the event stream's
     /// and MCP's may take, from the router's first step to its answer:
     /// past it the router answers 504 `gateway_timeout`, as the HTTP
-    /// runtimes' `@timeout` answers, and drops the request's future. An
-    /// engine call already on the blocking pool runs to its end there, its
-    /// answer let go, as a Go handler past `enginehttp`'s timeout does.
-    /// None unless set.
+    /// runtimes' `@timeout` answers, and drops the request's future. A call
+    /// still waiting for a thread of the blocking pool then never starts;
+    /// one already running there runs to its end, its answer let go, as a
+    /// Go handler past `enginehttp`'s timeout does, so a write answered 504
+    /// may have committed, and a client reads before it tries again. None
+    /// unless set.
     pub timeout: Option<Duration>,
 }
 
@@ -549,18 +551,23 @@ async fn serve(mount: Arc<Mount>, request: AxumRequest) -> AxumResponse {
                 request_id.clone(),
                 prefix,
                 path,
+                Instant::now().checked_add(limit),
             );
             match tokio::time::timeout(limit, served).await {
                 Ok(response) => response,
                 Err(_) => answer(timed_out(&request_id), &mount),
             }
         }
-        None => serve_route(mount, parts, body, route, request_id, prefix, path).await,
+        None => serve_route(mount, parts, body, route, request_id, prefix, path, None).await,
     }
 }
 
 // serve_route serves a request one of the router's routes takes: its body
-// under the limit, its caller, then the engine on the blocking pool.
+// under the limit, its caller, then the engine on the blocking pool. A call
+// still waiting for a blocking thread at the deadline, which the host's
+// timeout has answered, never starts, as a Go call waiting for its slot
+// past its context's deadline never does.
+#[allow(clippy::too_many_arguments)]
 async fn serve_route(
     mount: Arc<Mount>,
     parts: Parts,
@@ -569,6 +576,7 @@ async fn serve_route(
     request_id: String,
     prefix: String,
     path: String,
+    deadline: Option<Instant>,
 ) -> AxumResponse {
     let body = if route.takes_body() {
         if declared_length(&parts.headers).is_some_and(|length| length > mount.body_limit as u64) {
@@ -601,9 +609,13 @@ async fn serve_route(
         request_id: request_id.clone(),
     };
     let worker = Arc::clone(&mount);
-    let served =
-        tokio::task::spawn_blocking(move || api::handle(&worker.engine, &worker.api, &request))
-            .await;
+    let served = tokio::task::spawn_blocking(move || {
+        if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+            return timed_out(&request.request_id);
+        }
+        api::handle(&worker.engine, &worker.api, &request)
+    })
+    .await;
     match served {
         Ok(response) => answer(response, &mount),
         // A panic the engine's own boundary did not catch.

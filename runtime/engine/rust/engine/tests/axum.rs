@@ -4,7 +4,8 @@
 //! the caller from the host's function, from one that awaits, from the
 //! request's extensions and as a refusal, the body limit and MCP's own
 //! cap, the host's timeout on every route but the event stream's and
-//! MCP's, a method the path does not take, an event stream as a body that
+//! MCP's (a call still queued for a blocking thread at it never runs), a
+//! method the path does not take, an event stream as a body that
 //! pulls frames, wakes for a commit, beats and ends at shutdown, and the
 //! same stream over a TCP listener, which a client that goes away, or a
 //! shutdown, lets the server drain.
@@ -485,6 +486,52 @@ fn a_route_past_the_hosts_timeout_is_504_but_the_event_stream_and_mcp_run_on() {
                 let (status, _, body) = send(&routes, get("/namespaces")).await;
                 assert_eq!(status, StatusCode::OK, "{body}");
             }
+        });
+    }
+}
+
+#[test]
+fn a_call_still_waiting_for_a_blocking_thread_at_its_timeout_never_runs() {
+    for target in targets("axum_timeout_queued") {
+        let engine = engine(&target);
+        // One blocking thread, which a host's own work then holds.
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .max_blocking_threads(1)
+            .enable_all()
+            .build()
+            .expect("a runtime");
+        runtime.block_on(async {
+            let timed = router(
+                Arc::clone(&engine),
+                Options::default()
+                    .callers(bearer)
+                    .timeout(Duration::from_millis(100)),
+            )
+            .unwrap();
+            let untimed = router(Arc::clone(&engine), Options::default().callers(bearer)).unwrap();
+            define(&untimed, "").await;
+            let busy =
+                tokio::task::spawn_blocking(|| std::thread::sleep(Duration::from_millis(600)));
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            let (status, _, body) = send(
+                &timed,
+                post(
+                    "/namespaces/default/schemas/Order/instances",
+                    &json!({"id": "queued", "data": {"title": "queued"}}),
+                ),
+            )
+            .await;
+            assert_eq!(status, StatusCode::GATEWAY_TIMEOUT, "{body}");
+            busy.await.unwrap();
+            // The pool is free again, and the call that waited past its
+            // deadline wrote nothing.
+            let (status, _, body) = send(
+                &untimed,
+                get("/namespaces/default/schemas/Order/instances/queued"),
+            )
+            .await;
+            assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
         });
     }
 }
