@@ -150,7 +150,11 @@ pydantic checks its types and required fields, then `validate_all` checks
 the schema's rules (`listMin`, `minLength`, `min`, `pattern`, ...) on the
 input and on every object it holds. A failure raises `ValidationError`,
 whose `errors` maps each path (`lines`, `lines[0].quantity`) to its rule
-and message, as the Go and TypeScript SDKs report them.
+and message, as the Go and TypeScript SDKs report them. A union field's
+member is checked the same way, at `payment.number`. A union argument is
+read as the member the union picks, as a union response is read, and its
+member's rules checked, at `shape.radius`; one no member reads raises
+`ValidationError` before the request.
 
 A response outside 2xx raises `APIError`, whose message is the problem's
 `detail` and which carries the `status_code`, the problem's `code` and the

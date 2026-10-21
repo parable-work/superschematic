@@ -3167,6 +3167,10 @@ subtest needs cargo and the superscalar checkout. Every Rust types crate
 gains `validators.rs` and the runtime dependency; its other files are
 unchanged.
 
+Status: built. A union field is no longer checked for presence alone: it
+is validated as the member the union picks, in Rust and TypeScript as in
+Go (D31, amended: a union is validated as the member it picks).
+
 The rule is reversible until the first release.
 ## D32. The version graph on SQLite, and a behavior that hosts one
 
@@ -7832,5 +7836,46 @@ Not built:
   open.
 - Scaling a worker with its queue's depth.
 - Claims on SQLite and D1.
+
+The rule is reversible until the first release.
+
+### D31, amended: a union is validated as the member it picks, in every validator, server and SDK, and is a body argument of every server
+
+D31 left a union to its decoders: the TypeScript and Rust validators
+checked a union field for presence alone, so neither the TypeScript nor the
+Rust server held a member to its own rules, a `min` or a `pattern`, which
+the Go types' `Validate` did. The TypeScript server refused an operation
+whose body argument is a union, and the Go route took one, but decoded it
+into the union's interface, which `encoding/json` cannot fill, so it
+refused every request. The TypeScript SDK had no validator to run on a
+union argument, and its build failed. And the pick differed: the Go
+wrapper's tolerant pass took a payload that lacked a member's required
+fields as that member, its numbers zero, where serde refused it.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A union picks the same member in every language: by the discriminator when every member gives it a value, else by shape, and either way only a member that reads the payload as its decoder would. The payload holds each required field the member gives no default, not null (`codegen.UnionShape.Required`); no value has another JSON type than the member's field; a `@strictJSON` member sees no key it does not declare. The Go wrapper adds the required fields to its conditions, the Rust union is serde's as before, and TypeScript's parser asks the member's validator for a `type` or `unknown` error or a null element. A rule the member breaks does not pass it over. | Picking by rules too, so a circle with a negative radius reads as a square, or as nothing, and its error names no field. The Go wrapper's zero values, which read `{"edges": 3}` as a circle of radius 0. |
+| A union is validated as the member it picks: TypeScript's `validate<Union>`, Rust's `validate_<union>` and the Go wrapper's `Validate` run the member's own validator, with its defaults filled in, its errors at the member's paths. A type's validator validates each union field so, the member's errors nested under the field's path at each list level and key (`payment.number`, `shapes[1].radius`). A value that is not an object, or that no member reads, validates: the parser or the decoder refuses it, as Go's decoder refuses it before `Validate` runs. | A `type` error at the field for such a value, which would make the TypeScript and Rust servers answer `validation failed` where Go answers `does not match the declared type`. Validating every member and reporting the closest, which names rules of a member the value is not. |
+| A union value no member reads is refused with the reason every decoder gives, `does not match the declared type`: TypeScript's `parse<Union>FromJSON` throws `ParseError` with it for a value that is not an object, an unknown discriminator and a payload no member reads, the message saying which. So an input whose union field no member reads answers the same 400 from every server. | The reasons TypeScript's parser had (`expected an object`, `unknown discriminator`, `no matching member`), which the TypeScript server alone answered. |
+| A body argument whose type is a union, alone, in a list or in a map, is an object argument in every server. Go decodes each value into the union's `<Union>Wrapper` (`bodyargs.Unwrap<Decoder>` hands the implementation the members), whose `Validate` nests the member's errors under the argument's path. TypeScript checks it with `parse<Union>Json`, a new check that runs `validate<Union>`, and reads it with `parse<Union>FromJSON`. Rust prepares it with `prepare_<union>` and serde decodes it. Each refuses a value as it refuses an object argument: Go with the member's field errors, TypeScript and Rust with `does not match the declared type` at the argument. | Refusing the operation in TypeScript, as before. A problem shape of its own for a union argument, which an object argument's would then differ from. |
+| An SDK validates a union argument, and an input's union field, before the request, as the member it holds, the member's errors at the argument's paths: TypeScript runs `validate<Union>` (and an input's `validate<Type>`), Go the `<Union>Wrapper`'s `Validate`, Rust the types crate's `validate_<union>`, Python the member pydantic picks and its `validate_all`. A value no member reads is sent by the TypeScript SDK, for the route to refuse; the typed SDKs cannot hold one, except Python's, which refuses it. A union argument is sent as JSON, as an input is. | Leaving a union argument to the route, which costs a request for an error the SDK can name. A JSON Schema `oneOf` in the Rust SDK's input schemas, a second pick that could differ from serde's. |
+| `union_requests.json` (`internal/generator/sdkgen/sdktest/testdata/union-lists-api`) holds the requests against union-lists-api's `ShapeMutations`: a body argument of a union picked by shape (`drawShape`) and of a discriminated one (`pay`), and an input whose fields hold both (`checkout`), each with a valid member, an unknown discriminator or a shape no member reads, and a member that breaks its own rule. Each server's harness sends them and records the answers, which `sdktest.CheckUnionResponses` holds to one expected column; each SDK's harness calls the operations with their arguments and records what it sent or the errors it refused them with. | Vectors in `internal/generator/parity`, which hold the types' validators to one another but not the servers' answers or the SDKs' refusals. |
+
+A union in a map, or in a list of lists, as a body argument or an input
+field, is validated by the Go and TypeScript SDKs; the Rust and Python
+SDKs leave it to the route. A map's key path is `field.key` in the
+TypeScript and Rust validators and `field[key]` in Go's, as for an object
+in a map.
+
+Status: built. `TestUnionListsGoAPI`, `TestRustRouterAnswersUnionRequests`
+and `TestGeneratedRouterAnswersUnionRequests` run `union_requests.json`
+against the Go, Rust and TypeScript servers, and `TestUnionArgumentsGoSDK`,
+`TestUnionArgumentsRustSDK`, `TestUnionArgumentsPythonSDK` and
+`test_union_lists.js` against the Go, Rust, Python and TypeScript SDKs;
+every one agrees with the expected column. `TestUnionParsersBehavior`
+covers `validate<Union>` and a model's union fields at each list level and
+key. The pygen `validate_all` of a model with an optional list of a union
+no longer names the union, which `types.py` cannot import. The
+`internal/generator/parity` matrix has no union field yet.
 
 The rule is reversible until the first release.
