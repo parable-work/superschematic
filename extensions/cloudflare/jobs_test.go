@@ -68,6 +68,21 @@ func TestJobWorkflowNode(t *testing.T) {
 	if _, ok := bindingsOf(t, node(t, env, "shop-storefront.version"))[cloudflare.BundleBinding]; ok {
 		t.Error("a server's version holds the bundle binding")
 	}
+	// The Workflow's name is the Worker's, which holds the stack and the
+	// environment, so no other stack's or environment's Workflow in the
+	// account takes it (Cloudflare's PUT of a Workflow is an upsert).
+	if workflow.Properties["workflowName"] != node(t, env, sweepCartsJob+".worker").Properties["name"] {
+		t.Errorf("the Workflow is named %v, not as its Worker", workflow.Properties["workflowName"])
+	}
+	s := webStack()
+	s.Name = "other-stack"
+	other, errs := resolveOver(t, reg, s, webServices(), "Staging")
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	if got := node(t, other, sweepCartsJob+".workflow").Properties["workflowName"]; got == workflow.Properties["workflowName"] {
+		t.Errorf("two stacks' Workflows in one account are both named %v", got)
+	}
 	preview := resolveWeb(t, reg, "Preview")
 	if got := jsonOf(t, node(t, preview, sweepCartsJob+".workflow").Properties["workflowName"]); got != `{"$concat":["web-stack-preview-shop-storefront-sweep-carts-pr",{"$parameter":"pr"}]}` {
 		t.Errorf("the member's Workflow is named %s", got)
@@ -242,5 +257,51 @@ func TestDeployRunsAJobOnCron(t *testing.T) {
 	}
 	if m.Status != stack.StatusFailed || m.Step != "jobs" {
 		t.Errorf("the manifest records %s at %s", m.Status, m.Step)
+	}
+}
+
+// TestJobRunnerGivesUpAndTerminates (D64, amended): the runner waits at
+// most every try's timeout, a minute and the queue's slack; an instance
+// still queued at the deadline, one that stays paused, and one whose run
+// is cancelled are terminated through the API, and the error says so.
+func TestJobRunnerGivesUpAndTerminates(t *testing.T) {
+	cloudflare.SetWorkflowPoll(t, time.Millisecond)
+	if got, want := cloudflare.WorkflowDeadline(&ir.ResolvedJob{TimeoutSeconds: 120, Retries: 2}), 6*time.Minute+time.Minute+5*time.Minute; got != want {
+		t.Errorf("the deadline of three tries of two minutes is %s, want %s", got, want)
+	}
+	if got, want := cloudflare.WorkflowDeadline(nil), 10*time.Minute+time.Minute+5*time.Minute; got != want {
+		t.Errorf("the deadline of a job with the default timeout is %s, want %s", got, want)
+	}
+	for _, tc := range []struct {
+		name, status, want string
+		deadline           time.Duration
+		cancel             bool
+	}{
+		{"queued past the deadline", "queued", "the instance did not end within 50ms", 50 * time.Millisecond, false},
+		{"paused", "paused", "the instance stayed paused for 3 reads", time.Hour, false},
+		{"cancelled", "running", "the run was cancelled (context canceled)", time.Hour, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cloudflare.SetWorkflowDeadline(t, tc.deadline, 3)
+			f := newFixture(t)
+			f.cloud.workflows[sweepCartsWorkflow] = func(map[string]string) cloudflare.WorkflowInstance {
+				return cloudflare.WorkflowInstance{Status: tc.status}
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if tc.cancel {
+				go func() {
+					time.Sleep(20 * time.Millisecond)
+					cancel()
+				}()
+			}
+			err := f.target(t).Jobs.RunJob(ctx, registry.JobRunRequest{Run: webRun(t, f), Job: sweepCartsJob, Bundle: bundleDigest})
+			if err == nil || !strings.Contains(err.Error(), tc.want) || !strings.HasSuffix(err.Error(), "instance instance-1 of Workflow "+sweepCartsWorkflow+" is terminated") {
+				t.Errorf("RunJob = %v, want %q and the instance terminated", err, tc.want)
+			}
+			if !slices.Contains(f.cloud.Changes(), "terminate workflow "+sweepCartsWorkflow+" instance instance-1") {
+				t.Errorf("the runner changed %q, terminating nothing", f.cloud.Changes())
+			}
+		})
 	}
 }

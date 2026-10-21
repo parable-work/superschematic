@@ -5,10 +5,11 @@
 // throws, as Cloudflare records a failed run; and hung's two each outlive
 // the job's two-second timeout, so the run throws too. Then it runs the
 // job's Workflow as Cloudflare's engine runs an instance (D64, amended):
-// ok's for the bundle its Worker runs completes, its tries within one step
-// that retries nothing, the payload as an object or as JSON; one for
-// another bundle fails before the step; and hung's fails with the error its
-// last try threw, its timeout.
+// ok's for the bundle its Worker runs completes, the bundle checked in a
+// step of its own, then its tries within one step that retries nothing,
+// the payload as an object or as JSON; one for another bundle, and one
+// that names none, fail in the check's step for good, before the tries;
+// and hung's fails with the error its last try threw, its timeout.
 
 import { RpcTarget } from 'cloudflare:workers';
 
@@ -21,8 +22,17 @@ const BUNDLE = 'b7b7b7';
 class Step extends RpcTarget {
   calls = [];
   async do(name, config, callback) {
-    this.calls.push({ name, config });
-    return await callback();
+    const call = { name, config };
+    this.calls.push(call);
+    try {
+      const result = await callback();
+      if (result !== undefined) call.result = result;
+      return result;
+    } catch (error) {
+      // What the engine reads to give up at once: the error's name.
+      call.error = error.name;
+      throw error;
+    }
   }
 }
 
@@ -60,20 +70,28 @@ export default {
       try {
         const result = await env.OK_RUN.run(event(payload), step);
         const calls = JSON.stringify(step.calls);
-        if (result !== 'done' || calls !== '[{"name":"run","config":{"retries":{"limit":0,"delay":0},"timeout":64000}}]') {
+        const want = '[{"name":"check the bundle","config":{"retries":{"limit":0,"delay":0}},"result":"b7b7b7"},{"name":"run","config":{"retries":{"limit":0,"delay":0},"timeout":64000}}]';
+        if (result !== 'done' || calls !== want) {
           failures.push(`ok's Workflow returned ${result} with steps ${calls}`);
         }
       } catch (error) {
         failures.push(`ok's Workflow failed for ${typeof payload}: ${error}`);
       }
     }
-    const other = new Step();
-    try {
-      await env.OK_RUN.run(event({ bundle: 'c0ffee' }), other);
-      failures.push("ok's Workflow ran another bundle");
-    } catch (error) {
-      const want = 'job ts-reports-compile-reports runs bundle b7b7b7, but the last deploy rolled out c0ffee';
-      if (!String(error).includes(want) || other.calls.length > 0) failures.push(`ok's Workflow for another bundle failed with ${error} after ${other.calls.length} steps, want ${want} before any`);
+    for (const [payload, want] of [
+      [{ bundle: 'c0ffee' }, 'job ts-reports-compile-reports runs bundle b7b7b7, but the last deploy rolled out c0ffee'],
+      [{}, 'job ts-reports-compile-reports: the instance names no bundle'],
+    ]) {
+      const other = new Step();
+      try {
+        await env.OK_RUN.run(event(payload), other);
+        failures.push(`ok's Workflow ran with payload ${JSON.stringify(payload)}`);
+      } catch (error) {
+        const steps = JSON.stringify(other.calls.map(c => [c.name, c.error]));
+        if (!String(error).includes(want) || steps !== '[["check the bundle","NonRetryableError"]]') {
+          failures.push(`ok's Workflow for ${JSON.stringify(payload)} failed with ${error} after steps ${steps}, want ${want} in the check's step alone, for good`);
+        }
+      }
     }
     try {
       await env.HUNG_RUN.run(event({ bundle: BUNDLE }), new Step());
@@ -83,6 +101,6 @@ export default {
       if (!String(error).includes(want)) failures.push(`hung's Workflow failed with ${error}, want ${want}`);
     }
     if (failures.length > 0) throw new Error(`the job under workerd:\n${failures.join('\n')}`);
-    console.log('the job under workerd: ok, flaky after a retry, broken and hung failed; its Workflow ran ok, refused another bundle and failed hung');
+    console.log('the job under workerd: ok, flaky after a retry, broken and hung failed; its Workflow ran ok, refused another bundle and none, and failed hung');
   },
 };

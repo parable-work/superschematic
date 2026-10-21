@@ -178,6 +178,9 @@ func TestTypeScriptCronEntrypointWiring(t *testing.T) {
 		// The job's Workflow (D64, amended).
 		"export class JobRun extends WorkflowEntrypoint<unknown, RunPayload | string> {",
 		"const running = env['SUPERSCHEMATIC_BUNDLE'];",
+		"import { NonRetryableError } from 'cloudflare:workflows';",
+		"await step.do('check the bundle', { retries: { limit: 0, delay: 0 } }, async () => {",
+		"throw new NonRetryableError(",
 		"await step.do('run', { retries: { limit: 0, delay: 0 }, timeout: TIMEOUT_MS * TRIES + 60_000 }, async () => {",
 		"await runTries({ instance: event.instanceId });",
 		"logger.info('job done', { took: (Date.now() - started) / 1000, try: attempt });",
@@ -313,8 +316,9 @@ export const createJobs: JobsConstructor = deps => ({
 // tries outlive the job's timeout, which throw, each try logged (D64); and
 // its Workflow, JobRun, runs as Cloudflare's engine runs an instance,
 // through a binding to the entrypoint: it runs the tries within one step
-// for the bundle its Worker runs, refuses another bundle before any step,
-// and throws the last try's error (D64, amended).
+// for the bundle its Worker runs, after a step that checks the bundle,
+// which refuses another bundle and none for good, and throws the last
+// try's error (D64, amended).
 func TestTypeScriptCronEntrypointCompilesAndBundles(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping compile check in -short mode")
@@ -401,7 +405,7 @@ func TestTypeScriptCronEntrypointCompilesAndBundles(t *testing.T) {
 		t.Logf("workerd test cron.capnp:\n%s", output)
 	}
 	for _, want := range []string{
-		"the job under workerd: ok, flaky after a retry, broken and hung failed; its Workflow ran ok, refused another bundle and failed hung",
+		"the job under workerd: ok, flaky after a retry, broken and hung failed; its Workflow ran ok, refused another bundle and none, and failed hung",
 		`"msg":"job started","stack":"ts-cron-stack","job":"ts-reports-compile-reports","api":"ts-reports","class":"CompileReports","cron":"0 4 * * *","try":2,"tries":2}`,
 		`"msg":"job done"`,
 		`"msg":"job failed"`,
