@@ -196,6 +196,12 @@ type ConfigField struct {
 	ScalarPrimitive string
 	// ScalarKind distinguishes integral, floating-point, and other numeric scalars.
 	ScalarKind string
+	// ScalarIntegerLike marks a scalar whose Go type is an integer, such as
+	// Temporal.Seconds or Network.Port. The types module declares an optional
+	// field of such a scalar as a pointer only when it has no default (see
+	// codegen.GoOptionalIntegerScalarIsPointer); with a default it is a value
+	// and the loader assigns the parsed value.
+	ScalarIntegerLike bool
 	// EnumValues are the valid values for enum types.
 	EnumValues []string
 	// Description is the field doc text from the schema.
@@ -483,6 +489,7 @@ func extractConfigFieldIR(field *ir.FieldDef, schema *ir.Schema, enumMap map[str
 	if isScalar {
 		configField.ScalarPrimitive = scalarConfig.LanguagePrimitive
 		configField.ScalarKind = scalarConfig.Primitive
+		configField.ScalarIntegerLike = scalarConfig.IntegerLike
 	}
 
 	goType, err := mapConfigGoType(typeName, isEnum, isScalar, scalarConfig)
@@ -510,6 +517,7 @@ type scalarInfo struct {
 	LanguagePrimitive string
 	GoType            string
 	Primitive         string
+	IntegerLike       bool
 }
 
 // buildEnumMapIR creates a map of enum types to their values from codegen.EnumInfo.
@@ -604,6 +612,7 @@ func buildScalarMapIR(schema *ir.Schema) map[string]scalarInfo {
 			LanguagePrimitive: string(scalarDef.LanguagePrimitive),
 			GoType:            "string",
 			Primitive:         scalarDef.Primitive,
+			IntegerLike:       codegen.BuildScalarTraits(scalarDef, codegen.BuildScalarTokens(name), "").IsIntegerLike,
 		}
 
 		if info.LanguagePrimitive == "" {
@@ -796,11 +805,18 @@ func templateFuncs() template.FuncMap {
 	}
 }
 
+// assignsPointer reports whether the types module declares the field as a
+// pointer, so the loader assigns the address of the parsed value. An optional
+// integer-like scalar with a default is a value type there, as typegen
+// declares it.
 func assignsPointer(field ConfigField) bool {
 	if field.Required {
 		return false
 	}
-	return field.IsEnum || field.IsScalar || isNamedConfigField(field)
+	if field.IsScalar {
+		return !field.ScalarIntegerLike || !field.HasDefault
+	}
+	return field.IsEnum || isNamedConfigField(field)
 }
 
 func isNamedConfigField(field ConfigField) bool {
@@ -861,9 +877,10 @@ func buildLoaderExpr(field ConfigField) string {
 		return fmt.Sprintf("enumOrDefault(%s, %s, %s)", keyLiteral, allowedLiteral, defaultLiteral)
 	}
 
-	// Handle scalar fields - they use their primitive type's loader.
+	// A scalar field reads the raw string, which the loader passes to the
+	// scalar's own Parse function, a number scalar included.
 	if field.IsScalar {
-		return buildPrimitiveLoaderExpr(languagePrimitiveLoaderName(field.ScalarPrimitive), field)
+		return buildPrimitiveLoaderExpr("String", field)
 	}
 
 	// Handle basic types.
