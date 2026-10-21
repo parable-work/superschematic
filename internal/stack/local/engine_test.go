@@ -176,3 +176,60 @@ func TestAnEngineCrateByVersionIsRefused(t *testing.T) {
 		}
 	}
 }
+
+// TestARebuiltEngineCrateRelinks: applied again after the archive changed,
+// shop-api builds against a directory of the new archive's own, which
+// changes the flags Go's build cache keys the link on, and the earlier
+// archive's directory is gone.
+func TestARebuiltEngineCrateRelinks(t *testing.T) {
+	f := newFixture(t, "Dev")
+	crate, messages := engineCrate(t, f, "shop-db", `{ path = "../engine", default-features = false }`)
+	link(t, f, "shop-api", crate, projectengine.FFIDir, "")
+	rules := func() []rule {
+		return []rule{
+			{prefix: inspectPrefix, stderr: "Error response from daemon: No such container: " + f.pgName},
+			{prefix: migrateStatus, stderr: "superschematic-migrate: service shop-db has no applied model"},
+			{prefix: "/bin/cargo build", out: messages[projectengine.FFIDir]},
+		}
+	}
+	flags := func() string {
+		t.Helper()
+		got := ""
+		for _, cmd := range f.runner.commands {
+			if strings.HasSuffix(cmd.Path, "/go") && filepath.Base(cmd.Dir) == "shop-api" {
+				got = envValue(cmd.Env, "CGO_LDFLAGS")
+			}
+		}
+		dir, _, _ := strings.Cut(strings.TrimPrefix(got, "-L"), " ")
+		return dir
+	}
+	f.runner.rules = rules()
+	if err := f.applyAll(t); err != nil {
+		t.Fatalf("%v\n%s", err, f.out)
+	}
+	first := flags()
+	var built string
+	for _, line := range strings.Split(messages[projectengine.FFIDir], "\n") {
+		var m struct{ Filenames []string }
+		if json.Unmarshal([]byte(line), &m) == nil && len(m.Filenames) > 0 {
+			built = m.Filenames[0]
+		}
+	}
+	if err := os.WriteFile(built, []byte("the archive, rebuilt"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f.runner.rules = rules()
+	if err := f.applyAll(t); err != nil {
+		t.Fatalf("%v\n%s", err, f.out)
+	}
+	second := flags()
+	if first == "" || second == "" || first == second {
+		t.Fatalf("shop-api built against %q, then %q, want two directories", first, second)
+	}
+	if _, err := os.Stat(first); !os.IsNotExist(err) {
+		t.Errorf("the earlier archive's directory %s is left: %v", first, err)
+	}
+	if data, err := os.ReadFile(filepath.Join(second, "libsuperschematic_engine.a")); err != nil || string(data) != "the archive, rebuilt" {
+		t.Errorf("the staged archive is %q (%v), want the rebuilt one", data, err)
+	}
+}
