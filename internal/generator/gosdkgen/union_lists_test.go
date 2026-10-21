@@ -80,9 +80,15 @@ func TestUnionListsDecodeThroughTheirWrappers(t *testing.T) {
 		"ShapeGroups":  {"map[string][]types.Shape", "map[string][]types.ShapeWrapper"},
 		"FindShape":    {"types.Shape", "*types.ShapeWrapper"},
 		"FindShapes":   {"[]types.Shape", "[]types.ShapeWrapper"},
+		"DrawShape":    {"types.Shape", "types.ShapeWrapper"},
 	}
 	for _, ns := range sdkOutput.Namespaces {
 		for _, ep := range ns.Endpoints {
+			switch ep.MethodName {
+			case "Pay", "Checkout", "DrawShapes", "ShapeGrid", "ShapesByKey", "Probe":
+				// They answer a string; union_requests_test.go sends them.
+				continue
+			}
 			w, ok := want[ep.MethodName]
 			if !ok {
 				t.Errorf("unexpected endpoint %s", ep.MethodName)

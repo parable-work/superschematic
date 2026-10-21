@@ -251,6 +251,49 @@ func TestBuildUploadsASite(t *testing.T) {
 	}
 }
 
+// TestBuildBuildsASiteInItsMirror (D65, amended): from an output root
+// other than the default one, whose Bun workspace lists the mirrors under
+// impl/, a site builds in its mirror there, which the site's build into
+// that root wrote, after the root's install, and its package is left as it
+// is; without the mirror, the build stops.
+func TestBuildBuildsASiteInItsMirror(t *testing.T) {
+	f := newFixture(t)
+	env := f.siteEnv(t, "Staging")
+	src := newSiteSources(t)
+	sources := src.sources()
+	sources.OutputRoot = filepath.Join(src.root, "out")
+	if err := os.MkdirAll(sources.OutputRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sources.OutputRoot, "package.json"), []byte(`{"name": "w", "workspaces": ["api/*", "impl/*"]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	build := func() error {
+		_, err := stackdeploy.Build(context.Background(), stackdeploy.BuildOptions{Options: f.options(t, env, nil), Sources: *sources, Deployables: []string{"shop-web"}})
+		return err
+	}
+	if err := build(); err == nil || !strings.Contains(err.Error(), "holds no mirror of shop-web") {
+		t.Fatalf("a build without the site's mirror = %v", err)
+	}
+	mirror := filepath.Join(sources.OutputRoot, "impl", "shop-web")
+	if err := os.MkdirAll(mirror, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(mirror, "package.json"), []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	src.ran = nil
+	if err := build(); err != nil {
+		t.Fatalf("build: %v\n%s", err, f.log)
+	}
+	if got, want := strings.Join(src.ran, "\n"), "out: bun install --frozen-lockfile\nout/impl/shop-web: bun run build"; got != want {
+		t.Errorf("the build ran\n%s\nwant\n%s", got, want)
+	}
+	if _, err := os.Stat(filepath.Join(src.root, "web", "shop-web", "dist")); !os.IsNotExist(err) {
+		t.Errorf("the build wrote into the site's package: %v", err)
+	}
+}
+
 // TestDigestSite: the digest is the files', whatever their times, and a
 // site's output holds files and no link.
 func TestDigestSite(t *testing.T) {

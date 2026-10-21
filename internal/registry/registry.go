@@ -652,8 +652,8 @@ func (r *Registry) IsAuthoringPackage(pkg string) bool {
 // is restricted to other kinds offers a schema of this kind nothing it may
 // use, so verify rejects the import the way it rejects
 // KindSpec.ForbiddenPackages. This is how a grouping kind's authoring
-// package (@superschematic/platform) stays out of DB, API and General schemas without
-// those kinds naming it.
+// package stays out of DB, API and General schemas without those kinds
+// naming it.
 func (r *Registry) PackageAllowsKind(pkg string, kind string) bool {
 	declared := false
 	for _, spec := range r.decorators {

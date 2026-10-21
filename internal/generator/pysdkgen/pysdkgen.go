@@ -118,6 +118,12 @@ type NamespaceInfo struct {
 	// a union has no from_dict_non_strict, so _coerce_response reads one
 	// through a pydantic TypeAdapter of it.
 	UnionOutputTypes []string
+	// UnionArgumentTypes are the unions the namespace's arguments hold,
+	// alone or in a list or a map, sorted. They gate
+	// _UNION_ARGUMENT_TYPES and _validate_union_argument: a union argument
+	// is read as the member the union picks, as a union response is, and
+	// checked by the member's rules.
+	UnionArgumentTypes []string
 }
 
 // EndpointInfo represents a single API endpoint for the Python SDK.
@@ -333,6 +339,7 @@ func Generate(apiOutput *apigen.APIOutput, packageName, typesPackage string, clo
 	importsByNamespace := make(map[string]map[string]struct{})
 	jsonTypesByNamespace := make(map[string]map[string]struct{})
 	unionsByNamespace := make(map[string]map[string]struct{})
+	unionArgsByNamespace := make(map[string]map[string]struct{})
 
 	for _, endpoint := range apiOutput.Endpoints {
 		if endpoint.IsWebhook {
@@ -357,6 +364,7 @@ func Generate(apiOutput *apigen.APIOutput, packageName, typesPackage string, clo
 			importsByNamespace[namespaceName] = make(map[string]struct{})
 			jsonTypesByNamespace[namespaceName] = make(map[string]struct{})
 			unionsByNamespace[namespaceName] = make(map[string]struct{})
+			unionArgsByNamespace[namespaceName] = make(map[string]struct{})
 		}
 
 		if endpoint.IsScopedEndpoint {
@@ -390,6 +398,11 @@ func Generate(apiOutput *apigen.APIOutput, packageName, typesPackage string, clo
 		if endpoint.Filterable {
 			namespace.HasFilterableEndpoints = true
 			output.HasFilterableEndpoints = true
+		}
+		for _, arg := range endpoint.ScalarArgs {
+			if _, isUnion := apiOutput.TypeUnions[arg.Type]; isUnion {
+				unionArgsByNamespace[namespaceName][arg.Type] = struct{}{}
+			}
 		}
 		for _, arg := range converted.ScalarArgs {
 			if arg.IsArrayOfArrays {
@@ -444,6 +457,11 @@ func Generate(apiOutput *apigen.APIOutput, packageName, typesPackage string, clo
 	for name, unions := range unionsByNamespace {
 		if len(unions) > 0 {
 			namespaceMap[name].UnionOutputTypes = sortedKeys(unions)
+		}
+	}
+	for name, unions := range unionArgsByNamespace {
+		if len(unions) > 0 {
+			namespaceMap[name].UnionArgumentTypes = sortedKeys(unions)
 		}
 	}
 

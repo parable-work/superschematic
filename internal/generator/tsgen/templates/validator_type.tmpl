@@ -29,7 +29,7 @@ import { parse{{.Symbol}} as parse{{.Symbol}}FromLib } from '{{$.Naming.ScalarNp
 import { parse{{.Name}}FromJSON, validate{{.Name}}{{if $.Type.StrictJSON}}Required{{end}} } from '{{.Module}}';
 {{end}}
 {{range .ParserUnionImports}}
-import { {{range $i, $name := .Names}}{{if $i}}, {{end}}parse{{$name}}FromJSON{{end}} } from '{{.Module}}';
+import { {{range $i, $name := .Names}}{{if $i}}, {{end}}parse{{$name}}FromJSON, validate{{$name}}{{end}} } from '{{.Module}}';
 {{end}}
 
 /**
@@ -133,6 +133,51 @@ export function validate{{.Type.Name}}(value: {{.Type.Name}} | null | undefined)
     }
     {{else}}
     validateNested(value.{{.TSName}}, "{{.TSName}}");
+    {{end}}
+  }
+  {{end}}
+  {{if and (not .IsScalar) .IsUnion}}
+  {
+    // A union value is validated as the member the union picks
+    // (validate{{.Type}}), its errors under the value's path, as the Go
+    // wrapper's Validate reports them. null is left to the field's presence
+    // checks, and a value no member reads to parse{{.Type}}FromJSON, as the
+    // Go and Rust decoders refuse it.
+    const validateUnion = (member: unknown, path: string) => {
+      if (member === null || member === undefined) {
+        return;
+      }
+      const memberErrors = validate{{.Type}}(member as {{.Type}});
+      if (memberErrors !== true) {
+        addNestedErrors(errors, path, memberErrors);
+      }
+    };
+    {{if .IsMap}}
+    if (value.{{.TSName}} !== null && value.{{.TSName}} !== undefined && typeof value.{{.TSName}} === 'object' && !Array.isArray(value.{{.TSName}})) {
+      for (const [key, member] of Object.entries(value.{{.TSName}})) {
+        {{if .IsArray}}
+        if (Array.isArray(member)) {
+          member.forEach((item, index) => validateUnion(item, `{{.TSName}}.${key}[${index}]`));
+        }
+        {{else}}
+        validateUnion(member, `{{.TSName}}.${key}`);
+        {{end}}
+      }
+    }
+    {{else if .IsArrayOfArrays}}
+    if (Array.isArray(value.{{.TSName}})) {
+      value.{{.TSName}}.forEach((row, rowIndex) => {
+        if (Array.isArray(row)) {
+          row.forEach((item, index) => validateUnion(item, `{{.TSName}}[${rowIndex}][${index}]`));
+        }
+      });
+    }
+    {{else if .IsArray}}
+    if (Array.isArray(value.{{.TSName}})) {
+      value.{{.TSName}}.forEach((item, index) => validateUnion(item, `{{.TSName}}[${index}]`));
+    }
+    {{else}}
+    validateUnion(value.{{.TSName}}, "{{.TSName}}");
     {{end}}
   }
   {{end}}

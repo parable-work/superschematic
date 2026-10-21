@@ -37,11 +37,14 @@ type TypeScriptEngine struct {
 	DocumentModule  string
 	DocumentPackage string
 
-	// Namespace, Mount and Policy are what apigen.EngineInfo holds of it;
-	// Policy is the access policy's JSON, which main.ts writes as it is.
+	// Namespace, Mount, Policy and Retention are what apigen.EngineInfo
+	// holds of it; Policy is the access policy's JSON, which main.ts
+	// writes as it is, and Retention the event log's, empty when it keeps
+	// every event.
 	Namespace string
 	Mount     string
 	Policy    string
+	Retention string
 
 	// Types are the engine types, sorted, which the runner's principal
 	// holds as its permissions.
@@ -84,10 +87,13 @@ func (e *TypeScriptEngine) PolicyLiteral() string {
 }
 
 // OpenOptions are the options main.ts opens the engine with beside its
-// document and policy, members (setup, runner) and the work queue's
-// behaviors it composes, as the call's last argument with its comma; empty
-// when there are none.
+// document and policy, members (setup, runner), the work queue's
+// behaviors it composes and the event log's retention, as the call's last
+// argument with its comma; empty when there are none.
 func (e *TypeScriptEngine) OpenOptions(members ...string) string {
+	if e.Retention != "" {
+		members = append([]string{"retention: " + e.Retention}, members...)
+	}
 	if len(e.Behaviors) > 0 {
 		quoted := make([]string, len(e.Behaviors))
 		for i, b := range e.Behaviors {
@@ -174,6 +180,7 @@ func (s *TypeScriptServer) newTypeScriptEngine(d *TypeScriptDatabase, info *apig
 		Namespace:       info.Namespace,
 		Mount:           info.Mount,
 		Policy:          string(info.Policy),
+		Retention:       string(info.Retention),
 		Types:           slices.Clone(info.Types),
 		Database:        d,
 	}

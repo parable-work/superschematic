@@ -3167,6 +3167,11 @@ subtest needs cargo and the superscalar checkout. Every Rust types crate
 gains `validators.rs` and the runtime dependency; its other files are
 unchanged.
 
+Status: built. A union field is no longer checked for presence alone: it
+is validated as the member the union picks, in Rust and TypeScript as in
+Go, and every language picks the member by one structural predicate (D31,
+amended: a union picks its member by one structural predicate).
+
 The rule is reversible until the first release.
 ## D32. The version graph on SQLite, and a behavior that hosts one
 
@@ -5663,10 +5668,11 @@ engine over the behavior's transaction in place of the TypeScript
 `SyncEngine`; and D47's archives. D57 gives a Rust server the entrypoint
 the engine mounts in.
 
-Status: built, the cutover (milestone 14) and the generated servers
-that mount the engine (milestones 18 to 20, the amendment below)
-included; what is not built yet is the amendment's status's last
-paragraph. `runtime/engine/rust` holds the workspace;
+Status: built, the cutover (milestone 14), the generated servers
+that mount the engine (milestones 18 to 20, the amendment below) and
+the project's engine on the local target and in the generated CI (the
+amendment on the local target's project engine) included; what is not
+built yet is the first amendment's status's last paragraph. `runtime/engine/rust` holds the workspace;
 `superschematic-engine-storage`: both databases' transactions, savepoints
 and writer locks, the write counter, the migration ledger with the
 engine's migrations for each, a behavior's storage and SQL checker, and
@@ -6152,23 +6158,23 @@ microsecond (Rust) and the nanosecond, trailing zeros dropped (Go). A
 request with no credential, which the TypeScript runtime refuses before
 the engine, answers as the engine does. CI's `engine-servers` job runs it
 with the engine entrypoint tests in the full tier, on Postgres
-(`make engine-servers`). Not proved by it: a Rust server's engine routes
-have no timeout, which no transcript shows, and the TypeScript runtime's
+(`make engine-servers`). Not proved by it: the TypeScript runtime's
 1 MiB body limit on the engine's body routes, which the script's bodies
-stay under.
+stay under, and the engine routes' timeout, which no step of it can hold
+the engine past (a Rust server's, which had none, is the amendment
+below's).
 
-Not built yet: a project's engine archive and addon for the local
-target, which builds a Go server with the environment's `CGO_LDFLAGS`
-and runs a TypeScript one on the checkout's core addon, and for a
-release's image, which gets no Dockerfile; a timeout on a Rust server's
-engine routes, which the Go and TypeScript servers' have; a retention
-policy for the event log, which the runner keeps whole, and retention
-settings on the runner's element; the generated CI's type-check of a
-TypeScript entrypoint against an engine package that `[paths]
-engine_typescript` names, which needs the package's `dist/` in the CI
-checkout; an image test of a TypeScript server on the project's addon;
-and a live run: no server has run on Cloud Run against Cloud SQL, nor has
-the migration job readied an engine's schema there.
+Not built yet: a project's engine crate built against a release, with
+no `[paths]` engine keys, since a release ships no engine crate (the
+amendment on the local target's project engine says what it lacks), so a
+release's image of a server on it gets no Dockerfile and `stack dev`
+refuses it; and a live run: no server has run on Cloud Run against Cloud
+SQL, nor has the migration job readied an engine's schema there. The
+local target's project engine, the generated CI against an engine
+checkout and the image test of a TypeScript server on a project's addon
+are built (the amendment on the local target's project engine), as are a
+Rust server's engine route timeout and the event log's retention (the
+amendment on them).
 
 ### D52, amended: a TypeScript API's jobs run on Bun from packages of their own, with a signal for Go's context
 
@@ -7860,15 +7866,8 @@ Status: built.
   its span before it exits.
 
 Not built:
-- Export on gcp. A target would need to set the variables for each Cloud
-  Run service, job and worker pool, from a value of the environment, and a
-  place to send to: an OpenTelemetry Collector as a sidecar container,
-  with Google's exporter and the Cloud Trace agent role each workload's
-  account has (section 7.2), or Google's OTLP endpoint,
-  `telemetry.googleapis.com`, whose OAuth token expires, so a static
-  `OTEL_EXPORTER_OTLP_HEADERS` cannot carry it. The target would set
-  `deployment.environment.name` and the image digest in
-  `OTEL_RESOURCE_ATTRIBUTES` too.
+- Export on gcp: built by the amendment at the end of this file that
+  names it (`### D67, amended`).
 - The cloudflare target's Workers build, which does not import
   `./telemetry`.
 - Metrics and logs, as above.
@@ -8278,7 +8277,8 @@ each with `--frozen-lockfile`, type-checks and serves from each, and finds
 the project's links unmoved, and fails without the mirror; the TypeScript
 Dockerfile test builds and serves an image from another root.
 `TestStackDevRunsTheShop` no longer reinstalls the shop after its run into
-an output root of its own. Not built: mirrors of sites.
+an output root of its own. Mirrors of sites: the amendment below that
+names them.
 
 The rule is reversible until the first release.
 
@@ -8345,15 +8345,10 @@ failed or hung prune and a `0s` retention. The migration runner's
 `TestStackQueueRefuses` and `TestStackQueueOnALocalEnvironment` drive the
 command.
 
+`stack queue` on gcp is built (D68, amended, below).
+
 Not built:
-- `stack queue` on a cloud environment. On gcp the document would run as
-  an execution of the migration job, which reaches Cloud SQL through its
-  dialer, behind a target seam, with its result read back. Reading it
-  from Cloud Logging, as a failed migration's error is, would write the
-  dead messages' bodies, which may hold personal data, into logs every
-  holder of Logs Viewer reads; a result object in the state bucket needs
-  a write path the migrator does not have (D46, amended). Which way is
-  open.
+- `stack queue` on a cloud target other than gcp.
 - Scaling a worker with its queue's depth.
 - Claims on SQLite and D1.
 
@@ -8466,3 +8461,326 @@ request of the repository, in every project with a plan job; it reads
 every resource and IAM policy, and no secret value.
 
 The rule is reversible until the first release.
+
+### D31, amended: a union picks its member by one structural predicate, is validated as that member, in every validator, server and SDK, and is a body argument of every server
+
+D31 left a union to its decoders: the TypeScript and Rust validators
+checked a union field for presence alone, so neither the TypeScript nor the
+Rust server held a member to its own rules, a `min` or a `pattern`, which
+the Go types' `Validate` did. The TypeScript server refused an operation
+whose body argument is a union, and the Go route took one, but decoded it
+into the union's interface, which `encoding/json` cannot fill, so it
+refused every request. The TypeScript SDK had no validator to run on a
+union argument, and its build failed. And each language picked a member
+its own way: the Go wrapper by its lenient decoders, which read an unknown
+enum value or a nested object without its required fields; Rust by serde,
+which refuses them; TypeScript by its parsers, which read nearly anything;
+Python by pydantic's smart union, which coerces `"1"` to `1.0` and breaks
+ties of tagged members by order. So one payload was a member in one
+server and no member, or another member, in the next.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A member reads a payload exactly when the payload decodes under the member's types, as serde decodes it for the Rust member: it is a JSON object, a `@strictJSON` member's holds no key the member does not declare, each required field is present and not null, and each field present and not null has its JSON kind at every list level and in every map value, none of which is null. An enum's value is one of its values; a scalar's passes the scalar's own validator, its format (a UUID, a date, a date-time); a nested object is one its type reads; an inner union is one some member reads. A required field is one that has no `@default`, is not `@autoGenerated` and is not a versioned table's `_version`, which the decoders fill in; a required `Generic.JSON` is not null. A field's own rules (`Validate<>`: lengths, patterns, ranges) take no part. | Each language's decoder deciding, which disagree (above). Picking by rules too, so a circle with a negative radius reads as a square, or as nothing, and its error names no field. Serde's leniency where it is more lenient (a null `Generic.JSON`, an absent version), which no other language can follow. |
+| The predicate is defined once, in codegen (`codegen.ReadModel`): the object types and unions the schema's unions reach, a dependency's included, with each field's kind, enum values, scalar and requiredness. Each generator writes it as a table beside one interpreter: Go's `unionPickMember` in `unions.go`, TypeScript's `pickUnionMember` in `validators/unions.ts`, Rust's `pick_union_member` in `validators.rs`, Python's `pick_union_member` in `unions.py`. A scalar's format is the scalar's validator in that language, held alike by the D14 parity corpus; a scalar the package does not generate is held to its JSON kind. | A predicate written by hand per language, which drifts. Each language's own decoder or validator, whose refusals differ in kind (Go's lenient enums, TypeScript's rule errors). |
+| Every pick runs it. A discriminated union's only candidate is the member its discriminator names, which must read the payload; any other union's candidates are the members whose fields include every payload key and whose tags the payload does not contradict, then the members whose tags allow it, and the first that reads the payload is the member. The Go wrapper, Rust's `Deserialize` and `validate_<union>`, TypeScript's `parse<Union>FromJSON` and `validate<Union>`, and Python's models and SDK pick so, then decode or read the payload once as that member. TypeScript picks a payload once per parse or validate call. | A discriminated member picked by its tag alone, which TypeScript validated (`validation failed`) and Go refused (`does not match the declared type`) for one payload. Trying each member's decoder in turn, which clones the payload per member and repeats at each nesting level. |
+| A union is validated as the member it picks: TypeScript's `validate<Union>`, Rust's `validate_<union>` and the Go wrapper's `Validate` run the member's own validator, with its defaults filled in, its errors at the member's paths. A type's validator validates each union field so, the member's errors nested under the field's path at each list level and key (`payment.number`, `shapes[1].radius`). A value that is not an object, or that no member reads, validates: the parser or the decoder refuses it, as Go's decoder refuses it before `Validate` runs. | A `type` error at the field for such a value, which would make the TypeScript and Rust servers answer `validation failed` where Go answers `does not match the declared type`. |
+| A union value no member reads is refused with the reason every decoder gives, `does not match the declared type`: TypeScript's `parse<Union>FromJSON` throws `ParseError` with it for a value that is not an object, an unknown discriminator, a known one whose member does not read the payload (a `@strictJSON` member's unknown key included) and a payload no member reads, the message saying which. So an input whose union field no member reads answers the same 400 from every server. This changes `ParseError.reason` for a TypeScript caller that matched `expected an object`, `unknown discriminator`, `no matching member` or a member's `unknown fields: …`. | The reasons TypeScript's parser had, which the TypeScript server alone answered. |
+| A body argument whose type is a union, alone, in a list, in a list of lists or in a map, is an object argument in every server. Go decodes each value into the union's `<Union>Wrapper` (`bodyargs.Unwrap<Decoder>` hands the implementation the members), whose `Validate` nests the member's errors under the value's path. TypeScript checks it with `parse<Union>Json` and reads it with `parse<Union>FromJSON`; Rust prepares it with `prepare_<union>`, which refuses a value no member reads, and serde decodes it. Each refuses a value as it refuses an object argument: Go with field errors (a `type` at the value's path, or the member's errors under it), TypeScript and Rust with `does not match the declared type` at `details.parameter` and, in a list or map, `details.path`. | Refusing the operation in TypeScript, as before. A problem shape of its own for a union argument, which an object argument's would then differ from. |
+| An SDK validates a union argument, and an input's union field, before the request, as the member it holds, the member's errors at the argument's paths: TypeScript runs `validate<Union>` (and an input's `validate<Type>`); Go the `<Union>Wrapper`'s `Validate`, a nil member in a list or map `required` and an optional union whose pointer holds none absent; Rust the types crate's `validate_<union>`, in a list, a list of lists or a map too; Python reads a dict as the member `pick_union_member` picks, without coercion, and runs its `validate_all`, and its models read their union fields so. A value no member reads is sent by the TypeScript SDK, for the route to refuse; the typed SDKs cannot hold one, and Python's refuses it. | Leaving a union argument to the route, which costs a request for an error the SDK can name. pydantic's smart union, which coerces and breaks ties by order. |
+| `union_requests.json` (`internal/generator/sdkgen/sdktest/testdata/union-lists-api`) holds 47 requests against union-lists-api's `ShapeMutations`: a union picked by shape and a discriminated one as a body argument, in a list, a list of lists and a map, and as input fields; `Probe`'s unions tell each rule of the predicate apart (an enum value its member lacks, a malformed UUID, a nested object without its required field, an inner union no member reads, a value of another kind in a `@strictJSON` member, tags, a superset member, the unknown-key pass, a null optional and a defaulted field, a missing required field, the only candidate). Each server's harness records its answers, which `sdktest.CheckUnionResponses` holds to the expected status, data, reason, path and rules; each SDK's harness calls the operations and records what it sent, or the errors it refused them with. | Vectors in `internal/generator/parity`, which hold the types' validators to one another but not the servers' answers or the SDKs' refusals. |
+
+A decoder may still refuse, after the pick, a value the predicate reads:
+Go's decoder of `Temporal.Duration` reads Go's own duration text, which the
+scalar's validator does not. Such a value is a decoder's divergence, as
+D14's `decodeRejects` lists them, not a pick's. A Go enum takes any string
+outside a union, which no pick depends on. A map's key path is `field.key`
+in the TypeScript and Rust validators and `field[key]` in Go's, as for an
+object in a map; the Python SDK names an argument by its Python name.
+
+Status: built. `TestUnionListsGoAPI`, `TestRustRouterAnswersUnionRequests`
+and `TestGeneratedRouterAnswersUnionRequests` run `union_requests.json`
+against the Go, Rust and TypeScript servers, and `TestUnionArgumentsGoSDK`,
+`TestUnionArgumentsRustSDK`, `TestUnionArgumentsPythonSDK` and
+`test_union_lists.js` against the Go, Rust, Python and TypeScript SDKs;
+every one agrees with the expected column. `TestReadModelHoldsWhatAMemberMustDecode`
+holds the model, `TestUnionParsersBehavior` covers `validate<Union>` and a
+model's union fields at each list level and key, and the Go and Rust union
+decoder tests refuse a payload no member reads. The pygen `validate_all` of
+a model with an optional list of a union no longer names the union, which
+`types.py` cannot import. The `internal/generator/parity` matrix has no
+union field yet.
+
+The rule is reversible until the first release.
+
+### D65, amended: a site in another output root builds in a mirror of its package
+
+The amendment above mirrored the TypeScript implementations into every
+output root but the default one, and left the sites out: in another root a
+site was no member of the workspace, so `stack dev --out`, a deploy from
+`--out` and `stack build` ran its build in the project's package, against
+`node_modules` the default root's install linked, which the other root's
+install never brought up to date and a fresh clone did not have.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A site's build into an output root other than the default one copies its package into `<output-root>/impl/<site>/` as an implementation's mirror is copied: the same files, `package.json` with its `"//"` notice, which names it the mirror of a site, and its dependencies on paths re-based. The root's workspace already lists `impl/*`, so its install links the mirror and leaves the package's `node_modules`. | The site as a member of every root's workspace, which Bun refuses beside the default root's, and which would relink the package. A mirror the stack's build writes, which a build of the site alone, as `build-all` runs it, would not bring up to date. |
+| Wherever a site builds, the local provisioner, the deploy and `stack build`, it builds in its mirror when the output root's `package.json` lists `impl/*`, and in its package otherwise (`tsgen.SiteDir`); a root that lists the mirrors and holds none of the site stops with an error that says to build the site into it. The output it serves is the mirror's. | Telling the default root from the schemas root, which the provisioner's request does not carry. Falling back to the package, which would build against another root's install without saying so. |
+| A stack's build keeps the mirror of each site the project has a package for at its `[implementation_paths] site` template, which no server depends on, and removes it once the package is gone; the default root holds no mirror, a site's included. `build-all --cache` into another root builds each site every time, since the cache's inputs do not cover the mirror. | Pruning site mirrors by the stacks that deploy them, which a build of one stack does not know of the others. |
+
+Status: built. servergen's `TestASiteMirrorHoldsThePackage` and
+`TestPruneTypeScriptMirrors` hold the copy and its pruning, tsgen's
+`TestSiteDir` and stackdeploy's `TestBuildBuildsASiteInItsMirror` the
+choice of directory. `TestTypeScriptServersBuildInAnyOutputRoot` now
+builds the fixture's site `ts-web` too: in each of two other roots it
+builds in the mirror, the stacks' builds keep it, its page is the
+mirror's, and the links under `web/` stay as the default root's install
+made them. `TestStackDevRunsTheShop` checks that `stack dev --out` serves
+`shop-web` from its mirror. The generated CI builds each site in the
+default root, as before.
+
+The rule is reversible until the first release.
+
+### D67, amended: a gcp environment's telemetry turns export on, to Cloud Trace with the account's own token or to a collector
+
+D67 left export on gcp unbuilt: nothing set the OTEL variables on a Cloud
+Run service, job or worker pool, every workload's account held the Cloud
+Trace agent role for nothing, and Cloud Trace's OTLP endpoint,
+`telemetry.googleapis.com`, takes an OAuth access token that expires
+within the hour, which no fixed `OTEL_EXPORTER_OTLP_HEADERS` carries.
+Google's own guidance has an application configure its exporter with its
+Application Default Credentials. None of the three runtimes' exporters
+does that without new code: Go's `otlptracehttp` takes static headers or
+an `http.Client`, TypeScript's `exporter-trace-otlp-proto` a headers
+function, and Rust's `opentelemetry-otlp` the `HttpClient` it is given, so
+each needs a token source of its own.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The gcp target's environment values take `telemetry`, an object whose presence turns export on for every server, job and worker: `{}` exports to Cloud Trace's OTLP endpoint, `https://telemetry.googleapis.com`; `endpoint` names an OTLP/HTTP collector's base URL instead; `sampleRatio`, 0 to 1, samples that share of the traces that start in a deployable. A server's, job's or worker's settings take `telemetry: true` or `false`, which turns its own export on, to the environment's endpoint or Cloud Trace's, or off. | A boolean alone, with no way to reach a collector or sample. A value on each deployable alone, which every environment would repeat. Headers in the setting, which would put a collector's credential into `environment.json`; a collector that needs one waits for a secret binding of its own. |
+| A deployable that exports gets `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME` set to its name, the entrypoint's default made explicit, and `OTEL_RESOURCE_ATTRIBUTES`: `deployment.environment.name` (a preview member's with its parameters), `gcp.project_id`, which Cloud Trace's endpoint reads the spans' project from, `cloud.provider`, `cloud.region`, and `service.version`, the image. The image is a part of its own in the value's concatenation, so the deploy pins it to its digest there as it pins the container's (`PinImages` now pins a concatenation's part equal to the repository, and no part that only begins with it). A sample ratio sets `OTEL_TRACES_SAMPLER=parentbased_traceidratio` and its argument. A binding of one of those names is refused. | `service.version` left out, which D67 asked a target for. The digest by a token of its own, a third pinning path. |
+| Each runtime sends the account's access token to an `https` endpoint whose host is `googleapis.com` or under it, never over `http`, unless `OTEL_EXPORTER_OTLP_HEADERS` or its traces form names an `authorization` header: from the metadata server (`GCE_METADATA_HOST` when set, else `metadata.google.internal`), held until five minutes before it expires. Go wraps the exporter's `http.Client` transport (`telemetry/google.go`), which adds the token only to a request for the endpoint's own host over `https`, so a redirect elsewhere carries none, and whose client takes `OTEL_EXPORTER_OTLP_TIMEOUT` and its traces form but no `OTEL_EXPORTER_OTLP_CERTIFICATE` or client certificate, which Google's endpoint has no use for; TypeScript gives the exporter a headers function over `googleAccessTokenSource`, and Rust's export client adds the header itself. An export without a token fails as any other, and TypeScript, whose headers function may not throw, logs the failure and sends none. The rule is the host, so no new variable joins OpenTelemetry's. | A variable of our own that asks for the token, beside the standard ones D67 limits the configuration to. An OpenTelemetry Collector as a sidecar of every service, job and worker pool, with Google's exporter: a second container to configure, start and pay for in each, and a worker pool's and a job's sidecars behave differently from a service's. Google's client libraries for Application Default Credentials, three dependencies for one metadata request. |
+| A deployable that exports to Cloud Trace gets `roles/cloudtrace.agent` on the project for its account, which holds `telemetry.traces.write`, and only then; one that exports to a collector, or not at all, holds no trace role, so the next deploy of an existing environment removes the role from every account that does not export: code of a project's own that calls Cloud Trace directly turns `telemetry` on for its deployable, or grants the role itself. `stack bootstrap` enables the Telemetry and Cloud Trace APIs for every environment with Cloud Run, whether it exports or not: bootstrap sees only the environment it runs for, and another in the same project may export, while enabling an API grants nothing, the role does. A project bootstrapped before this amendment runs bootstrap once more for the Telemetry API. An `http` endpoint under `googleapis.com` is refused, since no runtime sends the token over it. | The role for every account, as before, whether or not anything exports. The APIs only for an environment whose graph grants the role, which leaves a project whose bootstrapped environment does not export, and another does, without the Telemetry API, so exports fail while the deploy succeeds. Every environment of the stack in the bootstrap's request, a change to the bootstrap seam for two API names. `roles/telemetry.tracesWriter`, Google's newer role for the endpoint alone, which a project's existing grants and Organization Policy are less likely to name; either holds the permission. |
+| The local target is unchanged: `stack dev` hands on the shell's OTEL variables (D67). | A collector `stack dev` starts, which D67 declined. |
+
+Status: built. gcp's `TestTelemetryTurnsExportOn`,
+`TestTelemetryToACollector`, `TestTelemetryOfOneDeployable`,
+`TestTelemetryRefuses` and `TestBootstrapEnablesTheTraceAPIs`, and the
+Production golden, which exports a quarter of its traces but from
+ShipOrders, hold the lowering; every other golden loses the trace agent
+role. An engine database's runner (D58) lowers through the same workload
+as a worker, so it takes the setting and loses the role as well. stackdeploy's `TestPinImagesPinsAPartOfAConcatenation` holds the
+pin. Go's `TestGoogleAuthGoesToGoogleAlone`, `TestGoogleTokenTransport` (a redirect to another host and a request over http carry no token) and `TestGoogleExportTimeout`,
+TypeScript's `Google's OTLP endpoint` tests, one of which exports through
+the real exporter, and Rust's `telemetry::tests` hold the host rule, the
+token, its cache and its refusal. Nothing has run on Google Cloud: the
+first live check is that Cloud Trace takes the spans of each runtime with
+the account's token and `gcp.project_id`, and that a worker pool's and a
+job's metadata server give the token as a service's does.
+
+Not built: headers for a collector, from a secret; a collector the target
+runs; metrics and logs (D67).
+
+The rule is reversible until the first release.
+
+### D68, amended: `stack queue` runs on gcp as an execution of the migration job, and its result comes back through the state bucket
+
+D68 left `stack queue` on a cloud environment open: the runner could
+reach Cloud SQL as the migration job does, but its result, the dead
+messages' columns among it, had no way back but Cloud Logging, where
+every holder of Logs Viewer reads it. The result now comes back as an
+object in the state bucket, which no log holds.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A seam on `TargetSpec`, `Queues` (`registry.QueueRunner`, `RunQueue(ctx, QueueRequest) ([]byte, error)`): a run, the database deployable, the DB service and the queue document; it returns the runner's result. `stackdeploy.RunQueue` refuses a target with none and a run never deployed. The CLI keeps the local target's path through its provisioner, and takes `--param` and `--timeout` (30 minutes). | An optional interface of the `MigrationRunner`, which a test target cannot leave out without a wrapper and a reader cannot find on the spec. A command per target. |
+| On gcp one execution of the stack's migration job, `<stack>-migrate`, as the migrator: the document is written under the run's migration documents, `superschematic/migrations/<stack>/<run>/queue/<id>.json`, which the migrator reads already, and the job runs `superschematic-migrate queue --cloud-sql <instance> --cloud-sql-user <migrator> --database <name> --result gs://<state>/superschematic/queue/<stack>/<run>/<id>.json`. `<id>` is 128 bits from `crypto/rand`, so no one names a run's object before it exists. | A job of its own, a second image and account to keep in step with the migration job's. The Cloud Run Tasks API or the execution's logs, which carry no output but stderr. |
+| The queue operation never changes the job: it runs it as the last deploy left it, and refuses a stack with no job yet. The job is shared by every run of the stack in the project, and a deploy updates its image between its `EnsureJob` and its `RunJob` under its own run's lock alone, so an operation that set the job to its CLI's release could put that runner under a deploy's migration phase. A job an older release left, whose runner lacks `--cloud-sql` or `--result`, fails with a usage error before it reads anything, and the command says to deploy with this release. | Updating the job to the CLI's release under the run's deploy lock: the lock is per run, and a Preview member's deploy updates the same job. Refusing while any deploy holds a lock, which reads every run's lock and still races a deploy that takes one after the check. |
+| The runner gains `--cloud-sql`, `--cloud-sql-user` and `--database`, which reach Cloud SQL as a job document's databases do, and `--result`: it writes its JSON there, a Cloud Storage object with `ifGenerationMatch=0` or a file created with mode 0600, either only where none is, and prints one line naming where. Before the operation runs it reserves the place: an empty marker object, `<object>.reserved`, written the same way, or the file's creation. A runner that may not write there, as on a project not bootstrapped again, fails saying the queue was not changed, and the command says to run `stack bootstrap`. A write that fails after a retry or a drop committed says the operation was applied and that `stack queue dead` shows the queue as it is. Its stdout and stderr hold no message: an error names IDs, never columns. | Fields of the queue document, which the compiler writes and would then carry the target's instance. A result document the runner reads its location from, which an unreadable document could not report. |
+| The CLI reads the object once and deletes its generation, and the marker's, for good: the bucket keeps versions, and a delete of the live object alone would leave it noncurrent (`Cloud.DeleteObjectVersion`). A failed execution reports the runner's error from Cloud Logging, as a failed migration does; one that succeeded and wrote nothing says so; a wait that failed, a timeout among them, says the execution may still write its result. A delete that fails is a line in the log, and the result still comes back. | Failing a read whose delete failed, which loses the operator's answer and leaves the object anyway. |
+| Bootstrap gives the state bucket a second lifecycle rule, which deletes what is under `superschematic/queue/` a day after it was written, live and noncurrent alike, and the command sets it too before it runs, reading the lifecycle again, up to five times, when another writer changed the bucket in between (`ErrBucketChanged`), so a project bootstrapped earlier has it before any result is written. A result a crashed command never read is gone within a day or so. | A rule of hours, which Cloud Storage's lifecycle does not have: its age is in days, applied once a day. Relying on the command's delete alone. |
+
+Status: built. The runner's `TestQueueWritesItsResult` runs golden
+documents with `--result` through a fake writer and to a file: a refused
+reservation leaves the dead message dead, a write that fails after a
+retry says it was applied, a refused operation removes its file, and
+stdout and stderr hold none of a message's columns or error;
+`TestQueueOnCloudSQL` reads the document from and writes the marker and
+the result to a fake Cloud Storage, only where no object is, over a
+dialer of the local Postgres. gcp's `TestQueueOperationOnGCP` deploys
+Staging on the fake cloud and runs a listing through `stack.RunQueue`,
+and a Preview member's through the seam; `TestQueueOperationFailsOnGCP`
+covers a failed execution, no result, a failed wait, a failed delete and
+a bucket with no rule; `TestQueueOperationLeavesTheJob` runs the job a
+deploy left without changing it, refuses a stack with no job, and
+reports an older runner and a missing grant; and
+`TestQueueOperationRereadsTheLifecycle` the lifecycle's conflicts. `internal/stackdeploy`'s `TestRunQueue` and `cli`'s
+`TestStackQueueOnACloudEnvironment` drive the seam on the fake target. No
+queue operation has run on Google Cloud. Cloud Storage's soft delete,
+seven days by default on a bucket that sets none, keeps a deleted result
+restorable by a holder of `storage.objects.restore`, an admin, for that
+long; the state bucket sets no soft delete policy of its own.
+
+The rule is reversible until the first release.
+
+### D46, amended: the migrator creates the results of queue operations in the state bucket
+
+D46's amendment that reads a failed job's error from Cloud Logging
+declined a result document the runner writes beside the job document: it
+gave the migrator a write path, which every runner image before it
+refused, for structure the error did not need. A queue listing does need
+it: its result holds the dead messages' columns, which must not go to
+Cloud Logging (D68, amended).
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Bootstrap gives the migrator `roles/storage.objectCreator` on the state bucket, on the condition that the object's name begins `superschematic/queue/<stack>/`: it creates objects there and nothing else, reads none, and replaces none, since a write over an object needs delete and the runner writes with `ifGenerationMatch=0`. It is a node of the bootstrap graph, `migrator.queue-results`, beside its read of the migration documents. | `roles/storage.objectUser` or `objectAdmin`, which read and delete too. A grant over all of `superschematic/queue/`, which lets one stack's migrator write another's results. |
+| It is acceptable now because what it writes is bounded and what it could harm is not there: the only objects under the prefix are results, each named by 128 random bits the runner is handed, which a run reads once and deletes, and which the bucket's lifecycle deletes after a day. A migrator that wrote there unasked could at most make a run report a result it did not produce, which needs the migrator's own credentials, and those already let it change the databases. The migration job's error still comes from Cloud Logging: the write path serves queue results alone. | Keeping the migrator read-only, and the queue result in Cloud Logging, which puts personal data where Logs Viewer reads it. |
+
+Status: built. gcp's bootstrap golden holds the grant, and
+`TestStateBucketLifecycle` the second rule. A project bootstrapped before
+this needs `stack bootstrap` again for the grant; without it the runner's
+write fails with Cloud Storage's 403, which the command reports. No grant
+has been applied on Google Cloud.
+
+The rule is reversible until the first release.
+
+### D30, amended: the reference deploy and platform extensions are retired
+
+`extensions/deploy` registered a sidecar, `deploy.values.yaml`, that mapped
+a schema's `@envVars` fields to a Kubernetes env list for a Helm chart.
+`extensions/platform` registered a `Platform` kind that grouped services by
+name, with a decorator, a verify rule and a catalog generator. Both came
+with the bootstrap as worked examples, neither was linked into the
+installed binary, and section 13 of `docs/stack-model.md` planned to
+rewrite them over the stack model or retire them once it landed. It has:
+a stack sets each server's `@envVars` from its environments and derives
+the connection strings the values file made a person write, and the gcp
+target, the Cloudflare DNS platform and the Pulumi provisioner deploy for
+real.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Delete both packages and their docs pages, and redirect the pages' old URLs. The extending guide teaches a document with `examples/acme-schematic`'s `catalog.config.yaml`, a kind with `NoSentinel` and `Verify` with the core Stack kind, and a deploy target with `extensions/gcp`, `extensions/cloudflare` and `extensions/pulumi`. `internal/loader/verify`'s alias test, which imported `extensions/platform`, registers a test-local grouping kind instead. | Rewriting `deploy` over the stack model, as a Helm target nothing yet needs; keeping both as examples, which taught a second way to write deployment values and gave "platform" a meaning the stack model's platforms contradict |
+
+Status: retired. The rule is reversible until the first release.
+
+### D58, amended: the local target builds the project's engine crate, the generated CI builds against an engine checkout, and a release ships no engine crate
+
+The first amendment left three uses of a project's engine crate (13a) to
+the person. `stack dev` built a Go server, job, worker or runner on an
+engine database that composes the work queue's or an extension's
+behavior with the shell's `CGO_LDFLAGS`, so it linked the core's archive
+and its deploy failed, and ran a TypeScript one on the checkout's core
+addon, which runs no extension's behavior, with no way to name another:
+a process inherits no `SUPERSCHEMATIC_ENGINE_ADDON` of the shell's. The
+generated CI's `check` built a project's archive from engine crates that
+reach a superscalar checkout git does not hold, and type-checked
+TypeScript entrypoints against an engine package with no `dist/`. And no
+image test ran a TypeScript server on a project's addon.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A Go or TypeScript entrypoint whose engine is built from the project's engine crate holds `engine-project.json` (`projectengine.LinkFile`), which the server generator writes beside `main.go` or `main.ts`: the database, the crate and the member the entrypoint takes, `ffi` for Go and `napi` for TypeScript, relative to the entrypoint, and the engine workspace's lock file when a `[paths]` key names the engine's checkout. A Rust entrypoint depends on the crate and has none. | The crate in the resolved environment, which resolution, shared by every target, cannot know: the generator decides it. Deriving it in the provisioner from a deployable's sql edges and the crates under the output root, a second copy of the generator's rule for which database is an API's engine database and which needs a crate. A setting in the stack, which the person would keep in step with the schemas. |
+| Before it builds or starts such an entrypoint, the local provisioner builds the member with `cargo build --release` into the program's Cargo target directory, the Rust deployables' (D57), which the program keeps between runs: on `tools.env`'s Rust release unless `RUSTUP_TOOLCHAIN` is set, since a Go binary links the archive beside superscalar's and the version graph's, and with macOS 11 as the deployment target, as `scripts/engine-archive.sh` builds. A crate with no lock file starts from the engine workspace's, as the image's engine stage does. It reads what it built from cargo's JSON messages and copies it into `engine/<db>/<member>/<digest>/` under the program directory, named for the first 16 hex digits of its SHA-256, under the member's lock file, so `stack dev` and a `stack run` in another process that stage at once wait for each other; the copy is a uniquely named file renamed into place. `stack dev`'s rollout then removes the digests but its own and the one used last before it, which a job it scheduled or a `stack run` may still name; `stack run` removes none. A Go build's `CGO_LDFLAGS` then search the archive's directory first, before the request's `BuildEnv` (the release's archives, which hold the core's under the same name) or the shell's; a TypeScript process's environment names the addon with `SUPERSCHEMATIC_ENGINE_ADDON`. | The checkout's `scripts/engine-archive.sh` and `scripts/engine-napi.sh`, which a project's machine may not have and the second of which installs the napi CLI. One staging path, which Go's build cache, keyed on the flags' text and not the archive's bytes, would not relink when the archive changes. Pruning in every stage, `stack run`'s included, which would remove the addon a live `stack dev`'s scheduled jobs name. The archive in `BuildEnv`, which every `go build` of the environment takes, so a server on another database would link one project's archive. The crate's own `target/` under the output root, beside its sources, which the Rust deployables' target directory already holds the shared dependencies of. |
+| A crate whose library or the member it builds depends on one of the engine's crates by version, as a build with that crate's `[paths]` key unset writes it, is refused before cargo runs, and the refusal names each such crate's key. The lock file a crate starts from is the engine workspace's that any of `engine_rust`, `engine_go` or `engine_typescript` locates. | Letting cargo fail with `no matching package named superschematic-engine`, which names no fix. |
+| When the naming file's `[paths]` engine keys name a superschematic checkout in the repository and some environment runs an engine, the CI request names it (`CIStack.EngineCheckout`), and `check` builds as `make setup` does on a developer's machine: it stands up the checkout's superscalar checkout (`scripts/superscalar-dep.sh --checkout` there) before the build when it builds a project's engine archive or type-checks a TypeScript deployable, seeds a project crate's lock file from the engine workspace's, and, when `[paths] engine_typescript` names the checkout's engine package, before the workspace's install builds the `dist/` of the checkout's superscalar binding, HTTP runtime and engine packages, which the workspace then takes in place of the published ones. | Committing the packages' `dist/`, build output in git. Type-checking against their sources, which their exports do not name. Building the core's engine archive from the checkout for every Go deployable too: the release's archive keeps standing in for the checkout's, as superscalar's and the version graph's do (D47, amended), and only a project's crate, which no release builds, is built. |
+| A release changes nothing: it ships no engine crate. The engine's workspace is `publish = false` at `0.0.0`, the release publishes only the schema runtime's and the HTTP runtime's crates, and the engine's crates reach the schema IR's crate, the version graph's engine and core, and superscalar's core by path, none of them published, superscalar's having no release at all. So a project with no `[paths]` engine keys still gets no image of a server on such a database, and `stack dev` refuses it. To build one, a release would ship the engine's crates, `superschematic-engine-storage`, `-engine`, `-engine-behaviors`, `-engine-workqueue`, `-engine-abi` and `-engine-napi`, with `superschematic-schema-ir`, the version graph's two and superscalar's core, at the release's version (crates.io, or a sources tarball the CLI pins as it pins the archives), and `projectengine` would name that version. | Shipping them now, a release change of its own, to be decided with superscalar's first release. |
+
+Status: built. `TestTheProjectsEngineBuildsForItsEntrypoints` applies a
+local environment with a Go server and a TypeScript server whose modules
+name a crate: cargo builds each member once into the program's target
+directory, on `tools.env`'s Rust; the Go server's build searches the
+staged archive's directory before the request's `CGO_LDFLAGS`, and the
+TypeScript server's process names the staged addon; the lock file is
+seeded; every other build and process is as before.
+`TestAnEngineCrateByVersionIsRefused` refuses a crate by version before
+cargo runs, and `TestAPartlySetEngineCrateIsRefused` one whose `ffi`
+member takes the C ABI's crate by version, naming `engine_abi_rust`.
+`TestARebuiltEngineCrateRelinks` builds each rebuilt archive from a
+directory of its own, keeps the one used last before it and removes older
+ones; `TestStageKeepsWhatAProcessMayName` holds `stack run`'s stage to
+removing nothing, and `TestStageAtOnce` stages one member from sixteen
+goroutines at once, pruning and not, with every stage whole.
+`TestEngineLockfile` finds the lock file from each key.
+`TestAReleaseImageRefusesAProjectsEngine` builds queue-db's services as a
+release with no `[paths]`: the crate depends on the engine by version,
+queue-api gets no Dockerfile and the build says what a release lacks. `TestEngineProjectArchiveGolden` and
+`TestATypeScriptEntrypointLoadsTheProjectsEngineAddon` hold the link
+files the generator writes. `TestStackDevBuildsTheProjectsEngine` runs
+`stack dev` for real on a stack whose engine database's Product composes
+acme.Rating, with a Go, a Rust and a TypeScript server and the Go runner,
+and no `CGO_LDFLAGS` or `SUPERSCHEMATIC_ENGINE_ADDON` of its own: the Go
+server and the runner open the project's archive, the TypeScript server
+the project's addon and the Rust server the crate, each deploys the
+document, which only an engine with acme.Rating accepts, and answers
+`/readyz`. `TestAnEngineCheckoutInCheck` holds `check`'s steps for an
+engine checkout, in order, no TypeScript packages for a checkout found
+from `engine_go` alone, and none without one; `TestEngineCheckout`
+finds the checkout from each key.
+`TestTheTypeScriptEngineProjectDockerfileBuildsAnImageThatServes` builds
+desk-ts-api's image with desk-db's Account composing acme.Rating: its
+engine stage builds the project crate's `napi` member, the image serves
+as the core's does, and Bun in the container loads the addon
+`SUPERSCHEMATIC_ENGINE_ADDON` names, which reports the project's crate.
+No generated workflow has run on GitHub's runners against an engine
+checkout.
+
+The rule is reversible until the first release.
+
+### D58, amended: a Rust server's engine routes time out as the others' do, and the event log's retention is the engine database's setting, which its runner prunes
+
+The generated servers mount the engine (the amendment above) with two
+gaps: a Rust server's engine routes had no timeout, where a Go and a
+TypeScript server's take the server's 30 seconds; and the event log grew
+for good in a stack, since nothing opened the engine with retention, which
+the engine has had since D16 (amended) and its Rust port.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The axum router takes the host's timeout, `axum::Options::timeout`, as `enginehttp.Options.Timeout` and `engineApp`'s `timeoutSeconds` do: every route but the event stream's and MCP's (a `Route` whose `stream` or `mcp` is set), whose responses last as long as their clients, answers 504 `gateway_timeout` once the request, from the body's read through the caller to the engine's call, has taken longer. The answer is the HTTP runtimes' problem, `{"type": "about:blank", "title": "Gateway Timeout", "status": 504, "detail": "Gateway Timeout", "code": "gateway_timeout", "requestId"}`, `no-store`. A call still waiting for a blocking thread at the deadline never starts, as a Go call waiting for its slot past its context's deadline never does; one already running runs to its end and its answer is let go, as a Go handler past its timeout runs on, so a write answered 504 may have committed, and a client reads it back before it tries again. A generated Rust server's `engine.rs` sets it to the server's 30 seconds (`ENGINE_TIMEOUT`). | A tower `TimeoutLayer` around the router, which a host would have to keep off the stream and MCP by itself, and whose answer is not the runtimes' problem; leaving a Rust server's engine routes unbounded |
+| Retention is `outputs.engine.retention` in the engine database's config, beside `mount` and `policy`: the engine's own `RetentionOptions` as JSON, `{maxAgeMs?, maxEvents?, maxHoldMs?, everyMs?, batchSize?}`, an age, a count or both, every member an integer in the engine's range. The build checks it as the engine does, so that no entrypoint opens an engine that refuses it and retries for good; `apigen.EngineInfo.Retention` carries it, and every Go, TypeScript and Rust server, job, worker and runner opens the engine on the database with it. | The runner's settings element, per environment, which the servers, the jobs and the workers would not see, and whose settings are a platform's; durations as text (`30d`), a second notion of what the engine reads; a setting per namespace, when one database's engine types live in one namespace |
+| Retention is off unless set, as the engine's own option is. The log is the instances' history: what a client reads back, what a reaction's `before()` folds, a record of who changed what. Pruning it deletes data no deployment chose to lose, and a default would delete it on the first runner pass after an upgrade. | A default age, say 30 days, which bounds the log for a deployment that never thinks of it, at the cost of the history of one that does not expect to lose it |
+| Only the runner prunes, in the process that holds the runner's lease: the started runner prunes at its first pass and every `everyMs` after, a batch of `batchSize` events per transaction under the namespace's writer lock, on Postgres only while its process holds the lease and on SQLite in the one process that writes the file. The lease alone does not make it safe: when a lease's session ends under a pass, the next holder's pass may overlap it for a moment. So a batch is written only from the floor it was chosen at, read again under the namespace's lock (one another process's pruning overtook is chosen again from the floor it left), the floor never moves back (`GREATEST`/`MAX` in its upsert), and a runner counts a namespace's events again when it takes the lease and whenever the floor is not the one it counted from, so a runner that regains the lease never prunes past `maxEvents` on a count another's pruning made stale. In a stack that is the database's runner deployable; a server, a job and a worker open the engine with the same retention and never start the runner, so they never prune. A runner turned off prunes nothing until it is on again. `Runner::prune`, which a host may call, needs no lease, and no generated entrypoint calls it. | Every server instance pruning, which retention's per-process count and the lease were not built for; a prune job on a schedule, a deployable more, when the runner already holds the one lease a database has |
+| What an event is still needed for: a reaction that has yet to handle it. A namespace's hold is the cursor of its least advanced subscription, active, retrying, halted, archived or whose behavior the engine no longer runs, and retention prunes none of the namespace's events after it (`maxHoldMs`, when set, bounds a subscription that does not advance). A behavior the pruning runner does not run whose subscription has not run, one a newer release composes while an older release's runner holds the lease in a rolling deploy, holds from its start when `maxHoldMs` bounds it, and holds nothing without the bound, since no runner may ever run it; past the bound, or with none, the newer runner halts it with `cursor_expired` rather than skip what was pruned, and `resume` with skip moves it on. A schedule, Timers' deadlines among them, needs no event: it reads its own rows. A live event stream holds nothing: one caught up reads each event as its commit wakes it, and one that falls behind the floor, a client that stopped reading for longer than retention keeps, ends. | Holding the log for open streams, which on Postgres needs each server instance to record its streams' cursors in the database, a write per stream at every heartbeat, and a crashed instance's rows bounded by a timeout, as `maxHoldMs` bounds a stuck subscription; a client that went away holds no stream to keep anything for anyway |
+| A read or a stream from a cursor retention pruned past is the engine's stale cursor today: 410 `cursor_expired`, `details: {after, floor, head}`, a stream's resume from its `Last-Event-ID` included, and a stream retention passes while it is open ends, so its reconnect gets the 410. A client that can take the gap reads on from `floor`; one that cannot starts again from `head`. | A reset event on the stream, which every `EventSource` client would have to learn, and which a JSON read could not carry |
+
+Status: built. The axum router's timeout and its exemptions are
+`tests/axum.rs`'s
+`a_route_past_the_hosts_timeout_is_504_but_the_event_stream_and_mcp_run_on`
+and `a_call_still_waiting_for_a_blocking_thread_at_its_timeout_never_runs`,
+on SQLite and Postgres, and the generated Rust server's `engine.rs` sets
+it (the servergen goldens). The HTTP corpus cannot hold a timeout case: a
+step's answer is the engine's, and no step can hold the engine past a
+host's timeout while the next waits. `TestEngineRetentionSetting` holds
+the build's check of `outputs.engine.retention`; desk-db, the servergen
+fixture, keeps 30 days, so every engine golden carries it into the Go,
+TypeScript and Rust server, job and runner, and the entrypoint tests open
+the engine with it. `retention.rs`'s
+`a_stream_the_started_runner_prunes_past_ends_and_its_resume_is_410_cursor_expired`
+prunes with the started runner past a stream on SQLite and Postgres, and
+`replicas_runner.rs`'s
+`only_the_runner_that_holds_the_lease_prunes_and_a_stream_it_prunes_past_resumes_to_410`
+runs two engines with retention on one Postgres database: the lease
+holder prunes, the other does not, a stream the other serves ends and its
+resume is 410, and once the holder stops, the other takes the lease and
+prunes. Two passes overlapping at a handover are held by
+`a_prune_another_runner_overtook_never_moves_the_floor_back_nor_counts_twice`
+(a batch chosen from floor 0 waits on the namespace's lock while another
+pruning moves the floor past it: the floor stays, nothing is counted
+twice, and a read from the gap is `cursor_expired`) and
+`a_runner_that_takes_the_lease_again_counts_again_and_keeps_max_events`
+(prunes by two engines in turn, outside the lease and through it, never
+leave fewer than `maxEvents`); both failed before the fix, the floor
+moving back and the count leaving one event of four.
+`a_behavior_this_engine_does_not_run_holds_at_its_start_for_max_hold_ms_before_it_has_run`
+holds the rolling deploy's hold.
+
+`replicas_runner.rs`'s handover test failed under heavy load (2 runs in
+20 beside a release build) waiting for the second runner to take the
+lease: the first's own runner took it again with a new session, woken by
+the notices of its own last commits, which is one runner holding the
+lease as it should, not a delay in the handover. The test now ends the
+holder's new session too until the other takes the lease
+(`hand_over`), and held in 20 runs of 20 beside a release build, the
+first taking its lease again in two of them.

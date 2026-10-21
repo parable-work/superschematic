@@ -69,9 +69,14 @@ var apiServices = []string{
 
 // graphServices are the APIs a resource type's module needs. A database
 // needs Cloud Run too, for its migration job, and a job's schedule Cloud
-// Scheduler (D52).
+// Scheduler (D52). A Cloud Run graph gets the Telemetry API, whose OTLP
+// endpoint takes the spans, and Cloud Trace, which keeps them, whether or
+// not this environment exports to Cloud Trace (D67, amended): another
+// environment in the same project may, and bootstrap sees only its own.
+// Enabling an API grants nothing; the trace agent role, which only an
+// exporting deployable's account holds, is what admits a writer.
 var graphServices = map[string][]string{
-	"gcp:cloudrunv2/":         {"run.googleapis.com", "cloudtrace.googleapis.com"},
+	"gcp:cloudrunv2/":         {"run.googleapis.com", "cloudtrace.googleapis.com", "telemetry.googleapis.com"},
 	"gcp:cloudscheduler/":     {"cloudscheduler.googleapis.com"},
 	"gcp:sql/":                {"sqladmin.googleapis.com", "run.googleapis.com"},
 	"gcp:compute/":            {"compute.googleapis.com"},
@@ -154,7 +159,9 @@ var (
 
 	// migratorRoles let `migrator`, which the migration job runs as, reach
 	// a Cloud SQL instance through the connector and log in to it with
-	// IAM. It reads only the job documents and plans in the state bucket.
+	// IAM. It reads only the job documents and plans in the state bucket,
+	// and creates only the results of its stack's queue operations
+	// (queueResultPrefix, D68, amended).
 	migratorRoles = []string{"roles/cloudsql.client", "roles/cloudsql.instanceUser"}
 
 	// stateReaders are the prefixes of the state bucket the accounts that
@@ -373,6 +380,19 @@ func BootstrapEnvironment(env *ir.ResolvedEnvironment, ci GitHubCI) (*ir.Resolve
 			},
 		})
 	}
+	// The migrator writes a queue operation's result, and nothing else:
+	// it may create objects under its stack's results, and neither read
+	// nor replace them, since a replace needs delete (D68, amended).
+	results := queueResultPrefix(env.Stack)
+	add("migrator.queue-results", TypeBucketIAMMember, map[string]any{
+		"bucket": stateBucket(v.project),
+		"role":   "roles/storage.objectCreator",
+		"member": ir.Output{Resource: "migrator", Name: "member"},
+		"condition": map[string]any{
+			"title":      "Objects under " + results,
+			"expression": fmt.Sprintf(`resource.name.startsWith("projects/_/buckets/%s/objects/%s")`, stateBucket(v.project), results),
+		},
+	})
 	add("builder.repository", TypeRepositoryIAMMember, map[string]any{
 		"project":    v.project,
 		"location":   v.region,
@@ -461,20 +481,25 @@ func (b bootstrapper) Bootstrap(ctx context.Context, req registry.BootstrapReque
 		return nil, err
 	}
 	logf("state bucket gs://%s: %s", bucket, createdOrKept(created))
-	rule := stateLifecycle()
-	var changed bool
-	err = retry("the state bucket's lifecycle", func() (err error) {
-		changed, err = cloud.EnsureLifecycleRule(ctx, bucket, rule)
-		return err
-	})
-	if err != nil {
-		return nil, err
+	for _, rule := range []LifecycleRule{stateLifecycle(), queueLifecycle()} {
+		var changed bool
+		err = retry("the state bucket's lifecycle", func() (err error) {
+			changed, err = cloud.EnsureLifecycleRule(ctx, bucket, rule)
+			return err
+		})
+		if err != nil {
+			return nil, err
+		}
+		what := "kept"
+		if changed {
+			what = "set"
+		}
+		after := fmt.Sprintf("%d days", rule.AgeDays)
+		if rule.AgeDays == 1 {
+			after = "a day"
+		}
+		logf("state bucket lifecycle, which deletes what is under %s after %s: %s", strings.Join(rule.Prefixes, " and "), after, what)
 	}
-	what := "kept"
-	if changed {
-		what = "set"
-	}
-	logf("state bucket lifecycle, which deletes what is under %s after %d days: %s", strings.Join(rule.Prefixes, " and "), rule.AgeDays, what)
 	err = retry("the state key", func() (err error) {
 		created, err = cloud.EnsureKey(ctx, v.project, v.region, stateKeyRing, stateKey)
 		return err

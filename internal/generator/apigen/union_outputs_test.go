@@ -3,18 +3,24 @@ package apigen_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/parable-work/superschematic/internal/generator/sdkgen/sdktest"
 )
 
-// TestUnionOutputsAPIServesMaps generates the Go types module and the Go API
-// module of union-lists-api (sdktest.LoadUnionListsService) and runs
-// unionOutputsAPIServerTest in the API module: an implementation returns a
+// TestUnionListsGoAPI generates the Go types module and the Go API module
+// of union-lists-api (sdktest.LoadUnionListsService) and runs two tests in
+// the API module. unionOutputsAPIServerTest: an implementation returns a
 // map and a map of lists of the union Shape, which the routes send as JSON
 // objects of its members, a nil map as {}, and a nil Nullable<Shape> as
-// null.
-func TestUnionOutputsAPIServesMaps(t *testing.T) {
+// null. unionRequestsAPIServerTest sends union_requests.json's requests
+// (sdktest.UnionRequestsPath) to the routes and records what they answer,
+// which sdktest.CheckUnionResponses holds to the requests' expectations: a
+// union body argument decodes through its wrapper, which picks the member
+// and validates it, and an input's union fields are validated as their
+// members.
+func TestUnionListsGoAPI(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping compile check in -short mode")
 	}
@@ -22,11 +28,34 @@ func TestUnionOutputsAPIServesMaps(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load %s: %v", sdktest.UnionListsService, err)
 	}
-	apiDir := writeGoAPIModule(t, schema, sdktest.UnionListsService)
-	if err := os.WriteFile(filepath.Join(apiDir, "union_outputs_server_test.go"), []byte(unionOutputsAPIServerTest), 0o644); err != nil {
+	requests, err := sdktest.LoadUnionRequests()
+	if err != nil {
 		t.Fatal(err)
 	}
+	requestsPath, err := sdktest.UnionRequestsPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	apiDir := writeGoAPIModule(t, schema, sdktest.UnionListsService)
+	for name, source := range map[string]string{
+		"union_outputs_server_test.go":  unionOutputsAPIServerTest,
+		"union_requests_server_test.go": unionRequestsAPIServerTest,
+	} {
+		if err := os.WriteFile(filepath.Join(apiDir, name), []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	responses := filepath.Join(t.TempDir(), "responses.json")
+	t.Setenv("UNION_REQUESTS", requestsPath)
+	t.Setenv("UNION_RESPONSES", responses)
 	runGoAPIModule(t, apiDir)
+	problems, err := sdktest.CheckUnionResponses(requests, responses)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(problems) > 0 {
+		t.Fatalf("the Go routes answered union_requests.json otherwise:\n%s", strings.Join(problems, "\n"))
+	}
 }
 
 // unionOutputsAPIServerTest runs in the generated API module. Its
@@ -97,6 +126,34 @@ func (s shapes) FindShapes(context.Context) ([]types.Shape, error) {
 	return []types.Shape{types.Square{Side: 2}}, nil
 }
 
+func (s shapes) DrawShape(_ context.Context, shape types.Shape) (*types.Shape, error) {
+	return &shape, nil
+}
+
+func (s shapes) Pay(context.Context, types.Payment) (*string, error) {
+	return nil, nil
+}
+
+func (s shapes) Checkout(context.Context, *types.Checkout) (*string, error) {
+	return nil, nil
+}
+
+func (s shapes) DrawShapes(context.Context, []types.Shape) (*string, error) {
+	return nil, nil
+}
+
+func (s shapes) ShapeGrid(context.Context, [][]types.Shape) (*string, error) {
+	return nil, nil
+}
+
+func (s shapes) ShapesByKey(context.Context, map[string]types.Shape) (*string, error) {
+	return nil, nil
+}
+
+func (s shapes) Probe(context.Context, *types.Probe) (*string, error) {
+	return nil, nil
+}
+
 // data serves impl, sends GET path and returns the envelope's data.
 func data(t *testing.T, impl shapes, path string) any {
 	t.Helper()
@@ -164,6 +221,132 @@ func TestANilNullableShapeIsNull(t *testing.T) {
 	}
 	if got := data(t, shapes{}, "/api/shape-search/c-1"); !reflect.DeepEqual(got, decode(t, ` + "`" + `{"radius": 1}` + "`" + `)) {
 		t.Fatalf("shape-search/c-1 = %#v", got)
+	}
+}
+`
+
+// unionRequestsAPIServerTest runs in the generated API module. Its
+// implementation answers drawShape with the shape it received, pay with
+// the payment's kind, checkout with the payment's kind, a colon and the
+// number of shapes, the list, grid and map operations with the number of
+// shapes, and probe with ok. It sends each request of $UNION_REQUESTS and writes
+// what the routes answered to $UNION_RESPONSES.
+const unionRequestsAPIServerTest = `package unionlistsapi_test
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"testing"
+
+	"github.com/go-chi/chi/v5"
+	"go.uber.org/zap"
+
+	api "example.com/schemas/api/union-lists-api"
+	types "example.com/schemas/types/go/union-lists-api"
+)
+
+type unionRequests struct{ shapes }
+
+func kindOf(payment types.Payment) string {
+	switch member := payment.(type) {
+	case types.Card:
+		return member.Kind
+	case types.Invoice:
+		return member.Kind
+	}
+	return fmt.Sprintf("%T", payment)
+}
+
+func (unionRequests) Pay(_ context.Context, payment types.Payment) (*string, error) {
+	kind := kindOf(payment)
+	return &kind, nil
+}
+
+func (unionRequests) Checkout(_ context.Context, input *types.Checkout) (*string, error) {
+	answer := fmt.Sprintf("%s:%d", kindOf(input.Payment), len(input.Shapes.Value))
+	return &answer, nil
+}
+
+func count(n int) (*string, error) {
+	answer := fmt.Sprint(n)
+	return &answer, nil
+}
+
+func (unionRequests) DrawShapes(_ context.Context, shapes []types.Shape) (*string, error) {
+	return count(len(shapes))
+}
+
+func (unionRequests) ShapeGrid(_ context.Context, rows [][]types.Shape) (*string, error) {
+	n := 0
+	for _, row := range rows {
+		n += len(row)
+	}
+	return count(n)
+}
+
+func (unionRequests) ShapesByKey(_ context.Context, byKey map[string]types.Shape) (*string, error) {
+	return count(len(byKey))
+}
+
+func (unionRequests) Probe(context.Context, *types.Probe) (*string, error) {
+	answer := "ok"
+	return &answer, nil
+}
+
+func TestUnionRequests(t *testing.T) {
+	data, err := os.ReadFile(os.Getenv("UNION_REQUESTS"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var file struct {
+		Requests []struct {
+			Name string          ` + "`json:\"name\"`" + `
+			Path string          ` + "`json:\"path\"`" + `
+			Body json.RawMessage ` + "`json:\"body\"`" + `
+		} ` + "`json:\"requests\"`" + `
+	}
+	if err := json.Unmarshal(data, &file); err != nil {
+		t.Fatal(err)
+	}
+	router := chi.NewRouter()
+	if err := api.RegisterRoutes(router, api.Config{
+		Logger:          zap.NewNop(),
+		Implementations: api.Implementations{Shape: unionRequests{}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(router)
+	defer server.Close()
+	type response struct {
+		Name   string          ` + "`json:\"name\"`" + `
+		Status int             ` + "`json:\"status\"`" + `
+		Body   json.RawMessage ` + "`json:\"body\"`" + `
+	}
+	var responses []response
+	for _, request := range file.Requests {
+		resp, err := http.Post(server.URL+request.Path, "application/json", bytes.NewReader(request.Body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		responses = append(responses, response{Name: request.Name, Status: resp.StatusCode, Body: body})
+	}
+	out, err := json.Marshal(responses)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(os.Getenv("UNION_RESPONSES"), out, 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
 `

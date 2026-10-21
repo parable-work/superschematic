@@ -307,6 +307,52 @@ func RunJob(ctx context.Context, o RunJobOptions) error {
 	return s.target.Jobs.RunJob(ctx, registry.JobRunRequest{Run: s.run, Job: o.Job, Image: image, Log: s.log})
 }
 
+// RunQueueOptions is one operation on a queue's dead messages in a
+// deployed run.
+type RunQueueOptions struct {
+	Options
+
+	// Database is the database deployable that hosts Service, the DB
+	// service that declares the queue.
+	Database string
+	Service  string
+
+	// Document is the queue document internal/queueops writes.
+	Document []byte
+}
+
+// RunQueue runs a queue document on the database of a deployed run
+// through its target's queue runner (`superschematic stack queue`,
+// docs/stack-model.md, section 8.8, D68, amended), and returns the
+// runner's result. It refuses a target with no queue runner and a run
+// that was never deployed. It writes nothing of the result to the log:
+// a listing holds the dead messages' bodies.
+func RunQueue(ctx context.Context, o RunQueueOptions) ([]byte, error) {
+	s, err := open(o.Options)
+	if err != nil {
+		return nil, err
+	}
+	if s.target.Queues == nil {
+		return nil, fmt.Errorf("target %s runs no queue operation, so `stack queue` does not reach the databases of environment %s", s.target.Name, s.env.Environment)
+	}
+	if err := s.requireDeploy(); err != nil {
+		return nil, err
+	}
+	prev, err := readManifest(ctx, s.target.State, s.run)
+	if err != nil {
+		return nil, err
+	}
+	if prev == nil {
+		return nil, fmt.Errorf("%s was never deployed, so its database %s holds no queue yet; deploy it first", s.run.Name(), o.Database)
+	}
+	req := registry.QueueRequest{Run: s.run, Database: o.Database, Service: o.Service, Document: o.Document, Log: s.log}
+	if err := req.Check(); err != nil {
+		return nil, err
+	}
+	s.logf("run a queue operation on %s, in database %s of %s", o.Service, o.Database, s.run.Name())
+	return s.target.Queues.RunQueue(ctx, req)
+}
+
 // deployedRequest is the provisioner's request over the environment with
 // the images, the sites' files and the bundles the manifest records
 // pinned, so the program it renders is the one the last deploy applied.

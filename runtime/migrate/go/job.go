@@ -48,6 +48,18 @@ type CloudSQLConnection struct {
 	User string `json:"user"`
 }
 
+// Check refuses an instance that is not a connection name, and a user
+// that is not an IAM database user.
+func (c CloudSQLConnection) Check() error {
+	if !cloudSQLInstancePattern.MatchString(c.Instance) {
+		return fmt.Errorf("the Cloud SQL instance %q is not a connection name, project:region:instance", c.Instance)
+	}
+	if c.User == "" || strings.HasSuffix(c.User, ".gserviceaccount.com") {
+		return fmt.Errorf("the Cloud SQL user %q: want the IAM database user, a service account's email without .gserviceaccount.com", c.User)
+	}
+	return nil
+}
+
 // JobDatabase is one DB service's database in a job.
 type JobDatabase struct {
 	// Service is the DB service.
@@ -142,11 +154,8 @@ func ReadJob(doc []byte) (*Job, error) {
 		return nil, fmt.Errorf("job document: phase %q is not expand, contract or all", job.Phase)
 	}
 	if c := job.CloudSQL; c != nil {
-		if !cloudSQLInstancePattern.MatchString(c.Instance) {
-			return nil, fmt.Errorf("job document: Cloud SQL instance %q is not a connection name, project:region:instance", c.Instance)
-		}
-		if c.User == "" || strings.HasSuffix(c.User, ".gserviceaccount.com") {
-			return nil, fmt.Errorf("job document: Cloud SQL user %q: want the IAM database user, a service account's email without .gserviceaccount.com", c.User)
+		if err := c.Check(); err != nil {
+			return nil, fmt.Errorf("job document: %w", err)
 		}
 	}
 	if len(job.Databases) == 0 {

@@ -22,6 +22,7 @@ import (
 	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
+	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/generator/stackgen"
 	"github.com/parable-work/superschematic/internal/registry"
 	"github.com/parable-work/superschematic/internal/release"
@@ -220,9 +221,11 @@ func stackOf(c registry.GenerateContext, name string, envs []*ir.ResolvedEnviron
 	if implementationRoot, err = filepath.Abs(implementationRoot); err != nil {
 		return registry.CIStack{}, err
 	}
+	runsEngine := false
 	for _, env := range envs {
 		for _, d := range env.Deployables {
 			if d.Kind == ir.DeployableRunner && d.Runner != nil {
+				runsEngine = true
 				if _, ok := out.EngineArchives[d.Runner.Database]; ok || !projectEngine(c, d.Runner.Database) {
 					continue
 				}
@@ -264,7 +267,34 @@ func stackOf(c registry.GenerateContext, name string, envs []*ir.ResolvedEnviron
 			}
 		}
 	}
+	if runsEngine {
+		if checkout := engineCheckout(c.Options.Paths); checkout != "" {
+			if dir, err := rel("the engine's checkout", checkout); err == nil {
+				out.EngineCheckout = dir
+				out.EngineCheckoutTypeScript = c.Options.Paths.EngineTypeScript != "" &&
+					engineCheckout(naming.LocalPaths{EngineTypeScript: c.Options.Paths.EngineTypeScript}) == checkout
+			} else {
+				c.Logf("  - %s CI of stack %s builds nothing of the engine's checkout: %v\n", Name, name, err)
+			}
+		}
+	}
 	return out, nil
+}
+
+// engineCheckout is the root of the superschematic checkout the [paths]
+// engine keys name (D58), empty when none does: the engine's Go binding
+// and npm package lie at runtime/engine/go and runtime/engine/typescript
+// in it, and its crate at runtime/engine/rust/engine.
+func engineCheckout(paths naming.LocalPaths) string {
+	switch {
+	case paths.EngineGo != "":
+		return filepath.Dir(filepath.Dir(filepath.Dir(paths.EngineGo)))
+	case paths.EngineTypeScript != "":
+		return filepath.Dir(filepath.Dir(filepath.Dir(paths.EngineTypeScript)))
+	case paths.EngineRust != "":
+		return filepath.Dir(filepath.Dir(filepath.Dir(filepath.Dir(paths.EngineRust))))
+	}
+	return ""
 }
 
 // projectEngine reports whether the engine of the engine database db

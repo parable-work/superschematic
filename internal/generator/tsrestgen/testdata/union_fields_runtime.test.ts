@@ -3,10 +3,13 @@ Runtime check of the generated router for object-lists-api with
 drawing.annotate (run by TestGeneratedUnionFieldsRouter with API_DIR set to
 the materialized package). Annotation's note and notes hold Note, a union of
 the @strictJSON Pin and of Flag, which kind discriminates. The router parses
-the input with parse<Input>Json and parse<Input>FromJSON, which reads each
-Note through parseNoteFromJSON: a Flag's raisedAt reaches the implementation
-as a Date, and a Pin the body breaks, or a kind no member has, answers the
-400 of an input the parser refuses and never reaches it.
+the input with parse<Input>Json, whose validator validates each Note as its
+member, and parse<Input>FromJSON, which reads each Note through
+parseNoteFromJSON: a Flag's raisedAt reaches the implementation as a Date.
+A Pin with a key it does not declare or without its label, a kind no
+member has, and a Note that is not an object answer the 400 of a value no
+member reads, as the Go and Rust servers answer it; none reaches the
+implementation.
 */
 import { describe, expect, test } from 'bun:test';
 import { Hono } from 'hono';
@@ -74,13 +77,18 @@ describe('generated router reads an input union field through its parser', () =>
     expect(input.notes![1].raisedAt).toBeInstanceOf(Date);
   });
 
-  test('a @strictJSON Pin with a key it does not declare is refused', async () => {
-    expect(await refused({ note: { kind: 'pin', label: 'here', note: 'x' } })).toMatchObject({ location: 'body', reason: 'unknown fields: note' });
-    expect(await refused({ note: { kind: 'flag', raisedAt: when }, notes: [{ kind: 'pin' }] })).toMatchObject({ location: 'body', reason: 'validation failed' });
+  test('a @strictJSON Pin with a key it does not declare, or without its label, is no Pin', async () => {
+    // Neither decodes under Pin's types, so no member reads it, as the Go
+    // and Rust servers refuse it.
+    expect(await refused({ note: { kind: 'pin', label: 'here', note: 'x' } })).toMatchObject({ location: 'body', reason: 'does not match the declared type' });
+    expect(await refused({ note: { kind: 'flag', raisedAt: when }, notes: [{ kind: 'pin' }] })).toMatchObject({
+      location: 'body',
+      reason: 'does not match the declared type',
+    });
   });
 
   test('a kind no member has, or a note that is not an object, is refused', async () => {
-    expect(await refused({ note: { kind: 'star' } })).toMatchObject({ location: 'body', reason: 'unknown discriminator' });
-    expect(await refused({ note: 'flag' })).toMatchObject({ location: 'body', reason: 'expected an object' });
+    expect(await refused({ note: { kind: 'star' } })).toMatchObject({ location: 'body', reason: 'does not match the declared type' });
+    expect(await refused({ note: 'flag' })).toMatchObject({ location: 'body', reason: 'does not match the declared type' });
   });
 });

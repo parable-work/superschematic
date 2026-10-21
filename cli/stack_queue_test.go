@@ -2,7 +2,9 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -18,6 +20,8 @@ import (
 	"github.com/parable-work/superschematic/internal/loader"
 	"github.com/parable-work/superschematic/internal/queueops"
 	"github.com/parable-work/superschematic/internal/stack/local"
+	"github.com/parable-work/superschematic/internal/stackdeploy"
+	ir "github.com/parable-work/superschematic/ir"
 	"github.com/parable-work/superschematic/registry"
 	"github.com/parable-work/superschematic/stack/stacktest"
 )
@@ -131,26 +135,34 @@ types:
 // fake target linked, and returns what it printed.
 func runQueue(t *testing.T, stackDir string, args ...string) (string, error) {
 	t.Helper()
+	stdout, stderr, err := runQueueWith(t, &stacktest.Extension{}, stackDir, args...)
+	return stdout + stderr, err
+}
+
+// runQueueWith runs `stack queue` as runQueue does, with ext linked, and
+// returns its stdout and its stderr apart.
+func runQueueWith(t *testing.T, ext *stacktest.Extension, stackDir string, args ...string) (string, string, error) {
+	t.Helper()
 	if args[0] == "lite" {
 		stackDir, args = filepath.Join(filepath.Dir(stackDir), "qlite-stack"), args[1:]
 	}
 	var stdout, stderr bytes.Buffer
-	root := New(Config{}, []registry.Extension{&stacktest.Extension{}}...)
+	root := New(Config{}, []registry.Extension{ext}...)
 	root.SetOut(&stdout)
 	root.SetErr(&stderr)
 	root.SetIn(strings.NewReader(""))
 	root.SetArgs(append(append([]string{"stack", "queue"}, args...), "--stack", stackDir))
 	err := root.Execute()
-	return stdout.String() + stderr.String(), err
+	return stdout.String(), stderr.String(), err
 }
 
 // TestStackQueueRefuses refuses, before it runs anything, a queue named
 // otherwise than <db>.<Queue>, a DB service the stack does not reach and a
 // queue its DB service does not declare, an environment that places the
-// queue's database on SQLite, one on a target other than local, and a
-// retry or a drop that names no ID and no --all, or both, an ID that is no
-// UUID, a drop of every message without --yes, a limit under one and a
-// format other than text or json.
+// queue's database on SQLite, a run on a cloud target that was never
+// deployed, and a retry or a drop that names no ID and no --all, or both,
+// an ID that is no UUID, a drop of every message without --yes, a limit
+// under one, a timeout of none and a format other than text or json.
 func TestStackQueueRefuses(t *testing.T) {
 	stackDir := qopsTree(t, 5432, 5433)
 	id := "3f2c8a10-5b1e-4c7a-9d2e-8f6b4a1c0e93"
@@ -164,7 +176,8 @@ func TestStackQueueRefuses(t *testing.T) {
 		"an API":        {[]string{"dead", "Dev", "qops-api.Reminder"}, "stack qops-stack reaches no DB service qops-api"},
 		"environment":   {[]string{"dead", "Prod", "qops-db.Reminder"}, "stack qops-stack has no environment Prod"},
 		"on SQLite":     {[]string{"lite", "dead", "Lite", "qops-db.Reminder"}, "environment Lite places qops-db on database qops-db, a sqlite database; a queue's messages are claimed on Postgres alone, and so are its dead ones read, retried and dropped (D53, amended)"},
-		"not local":     {[]string{"retry", "Staging", "qops-db.Reminder", "--all"}, "environment Staging is on the fake target, whose databases stack queue does not reach yet: it runs on the local target alone, against the Postgres stack dev runs. Reaching a cloud database, through the migration runner's job as a deploy's migrations reach it, is not built"},
+		"not deployed":  {[]string{"retry", "Staging", "qops-db.Reminder", "--all"}, "Staging was never deployed, so its database qops-db holds no queue yet; deploy it first"},
+		"timeout":       {[]string{"dead", "Dev", "qops-db.Reminder", "--timeout", "0s"}, "--timeout 0s: wait for some time"},
 		"no ids":        {[]string{"retry", "Dev", "qops-db.Reminder"}, "name the IDs of the dead messages to retry, as stack queue dead lists them, or pass --all"},
 		"ids and all":   {[]string{"drop", "Dev", "qops-db.Reminder", id, "--all", "--yes"}, "drop --all drops every dead message; name no ID with it"},
 		"bad id":        {[]string{"retry", "Dev", "qops-db.Reminder", "42"}, `"42" is not a message's ID`},
@@ -179,6 +192,49 @@ func TestStackQueueRefuses(t *testing.T) {
 			assert.Contains(t, err.Error(), tc.want)
 		})
 	}
+}
+
+// TestStackQueueOnACloudEnvironment runs the queue commands over a
+// deployed run on the fake target, whose queue runner returns the result
+// a test gives it: the command hands the runner the queue document of the
+// database that hosts the queue's DB service, prints its result as the
+// local target's is printed, and writes no message to stderr. It surfaces
+// the runner's error, and a target with no queue runner is refused.
+func TestStackQueueOnACloudEnvironment(t *testing.T) {
+	stackDir := qopsTree(t, 5432, 5433)
+	const first = "00000000-0000-4000-8000-0000000000a1"
+	ext := &stacktest.Extension{State: &stacktest.FakeState{}, Queues: &stacktest.FakeQueues{Results: map[string][]byte{
+		"dead": []byte(`{"version": 1, "service": "qops-db", "queue": "Reminder", "operation": "dead", "total": 1, "messages": [
+  {"id": "` + first + `", "attempts": 3, "lastError": "the cart is gone", "diedAt": "2026-10-20T09:00:00Z", "message": {"cart": "c-1", "note": "a private note"}}]}`),
+	}}}
+	manifest, err := json.Marshal(map[string]any{"version": stackdeploy.ManifestVersion, "stack": "qops-stack", "run": "Staging"})
+	require.NoError(t, err)
+	staging := registry.Run{Environment: &ir.ResolvedEnvironment{Stack: "qops-stack", Environment: "Staging"}}
+	require.NoError(t, ext.State.WriteManifest(context.Background(), staging, manifest))
+
+	stdout, stderr, err := runQueueWith(t, ext, stackDir, "dead", "Staging", "qops-db.Reminder", "--limit", "5")
+	require.NoError(t, err, stdout+stderr)
+	assert.Equal(t, "Queue qops-db.Reminder of Staging: 1 dead message, the oldest death first.\n\n"+first+
+		"\n  attempts:   3\n  died at:    2026-10-20T09:00:00Z\n  last error: the cart is gone\n  message:    {\"cart\":\"c-1\",\"note\":\"a private note\"}\n", stdout)
+	assert.Equal(t, "run a queue operation on qops-db, in database qops-db of Staging\n", stderr)
+	want, err := queueops.Document(queueops.Request{Service: "qops-db", Queue: "Reminder", Operation: queueops.Dead, Limit: 5})
+	require.NoError(t, err)
+	docs := ext.Queues.Documents()
+	require.Len(t, docs, 1)
+	assert.Equal(t, string(want), string(docs[0]))
+
+	stdout, _, err = runQueueWith(t, ext, stackDir, "retry", "Staging", "qops-db.Reminder", "--all", "--format", "json")
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"version": 1, "service": "qops-db", "queue": "Reminder", "operation": "retry", "ids": []}`, stdout)
+	assert.Contains(t, ext.Provisioner.Calls(), "queue qops-db: qops-db.Reminder retry")
+
+	ext.Queues.Fail = errors.New("gcp: the queue operation failed in job qops-migrate: superschematic-migrate: queue Reminder of qops-db: 1 of the 1 message(s) named are not dead")
+	_, _, err = runQueueWith(t, ext, stackDir, "drop", "Staging", "qops-db.Reminder", first)
+	require.EqualError(t, err, ext.Queues.Fail.Error())
+
+	none := &stacktest.Extension{State: ext.State, NoQueueRunner: true}
+	_, _, err = runQueueWith(t, none, stackDir, "dead", "Staging", "qops-db.Reminder")
+	require.EqualError(t, err, "target fake runs no queue operation, so `stack queue` does not reach the databases of environment Staging")
 }
 
 // TestStackQueueOnALocalEnvironment runs the queue commands over the local

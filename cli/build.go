@@ -110,7 +110,7 @@ Examples:
 // the data-form config states the kind directly; for the TypeScript form,
 // schema.config.ts names the kind either as a SchemaKind enum member (the
 // core kinds) or, for a kind the enum does not list, as a string literal
-// (`kind: "Platform"`), so a textual scan for `SchemaKind.<Kind>` or the
+// (`kind: "Catalog"`), so a textual scan for `SchemaKind.<Kind>` or the
 // quoted name covers valid configs. A false positive only triggers an extra
 // idempotent sentinel pass.
 func targetImportsSiblingSentinels(servicePath string, reg *registry.Registry) bool {

@@ -113,7 +113,7 @@ func TestStackInitWritesAGcpEnvironment(t *testing.T) {
 	}
 	for _, want := range []string{
 		"declare module \"@superschematic/stack\" {\n  interface Targets {\n    gcp: {\n",
-		"      values: { project: string; projectNumber?: string; region: string; production?: boolean };\n",
+		"      values: { project: string; projectNumber?: string; region: string; production?: boolean; telemetry?: { endpoint?: string; sampleRatio?: number } };\n",
 		"      server: { minInstances?: number; ",
 		"      database: { tier?: string; highAvailability?: boolean; version?: \"POSTGRES_15\" | ",
 	} {

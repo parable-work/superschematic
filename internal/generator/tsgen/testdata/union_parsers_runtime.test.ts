@@ -1,11 +1,14 @@
 /*
-Runtime check of the union parsers of the union-parsers types package (run by
-TestUnionParsersBehavior inside the package). Figure picks its member by its
-keys, Marker by its discriminator, and Contact by a tag between two
-@strictJSON members; each member is read by its own parser, so a date-time
-field is a Date and a @strictJSON member is checked. Drawing's parser reads
-each union field the same way: a field, a list, a list of lists, a map and a
-map of lists, and Shape, a union the shapes package declares.
+Runtime check of the union parsers and validators of the union-parsers types
+package (run by TestUnionParsersBehavior inside the package). Figure picks
+its member by its keys and the fields each member requires, Marker by its
+discriminator, and Contact by a tag between two @strictJSON members; each
+member is read by its own parser, so a date-time field is a Date and a
+@strictJSON member is checked. A member's broken rule does not pass it over:
+validate<Union> reports it at the member's paths. Drawing's parser and
+validator read each union field the same way: a field, a list, a list of
+lists, a map and a map of lists, and Shape, a union the shapes package
+declares.
 */
 import { describe, expect, test } from 'bun:test';
 import {
@@ -14,7 +17,13 @@ import {
   parseDrawingFromJSON,
   parseFigureFromJSON,
   parseMarkerFromJSON,
+  validateDrawing,
+  validateFigure,
+  validateMarker,
 } from './index';
+
+/** The reason every union refusal carries, as the Go and Rust decoders refuse it. */
+const mismatch = 'does not match the declared type';
 
 const when = '2026-01-02T03:04:05Z';
 
@@ -47,8 +56,32 @@ describe('a union without a discriminator picks the member that declares every k
   test('null and undefined are returned as they are, and any other non-object is refused', () => {
     expect(parseFigureFromJSON(null)).toBeNull();
     expect(parseFigureFromJSON(undefined)).toBeUndefined();
-    expect(refusal(() => parseFigureFromJSON('circle')).reason).toBe('expected an object');
-    expect(refusal(() => parseFigureFromJSON([{ side: 2 }])).reason).toBe('expected an object');
+    expect(refusal(() => parseFigureFromJSON('circle')).reason).toBe(mismatch);
+    expect(refusal(() => parseFigureFromJSON([{ side: 2 }])).reason).toBe(mismatch);
+  });
+
+  test('a payload that lacks every member\'s required fields matches no member', () => {
+    const edges = refusal(() => parseFigureFromJSON({ edges: 3 }));
+    expect(edges.reason).toBe(mismatch);
+    expect(edges.message).toBe('parseFigure: no member of Figure reads the payload');
+    // A value of another JSON type is not the member's either.
+    expect(refusal(() => parseFigureFromJSON({ radius: 'big' })).reason).toBe(mismatch);
+  });
+
+  test("a member that breaks a rule of its own is still picked, and its rule refuses it", () => {
+    const long = refusal(() => parseFigureFromJSON({ text: 'too long a text', at: when }));
+    expect(long.reason).toBe('validation failed');
+    expect(long.errors).toEqual({ text: [{ validator: 'maxLength', message: expect.any(String) }] });
+    expect(validateFigure({ text: 'too long a text', at: when } as any)).toEqual({
+      text: [{ validator: 'maxLength', message: expect.any(String) }],
+    });
+    expect(validateFigure({ text: 'paid', at: when } as any)).toBe(true);
+  });
+
+  test('validate leaves a value no member reads to the parser', () => {
+    expect(validateFigure({ edges: 3 } as any)).toBe(true);
+    expect(validateFigure('circle' as any)).toBe(true);
+    expect(validateFigure(null)).toBe(true);
   });
 });
 
@@ -66,9 +99,9 @@ describe('a tag tells apart members with the same fields', () => {
 
   test('a tag no member fixes, or a key a @strictJSON member refuses, matches no member', () => {
     const fax = refusal(() => parseContactFromJSON({ kind: 'fax', address: '555' }));
-    expect(fax.reason).toBe('no matching member');
+    expect(fax.reason).toBe(mismatch);
     const extra = refusal(() => parseContactFromJSON({ kind: 'sms', address: '555', note: 'x' }));
-    expect(extra.reason).toBe('no matching member');
+    expect(extra.reason).toBe(mismatch);
   });
 });
 
@@ -80,20 +113,26 @@ describe('a discriminated union reads the member its discriminator names', () =>
     expect(parseMarkerFromJSON({ kind: 'pin', label: 'here' })).toEqual({ kind: 'pin', label: 'here' });
   });
 
-  test('a @strictJSON member refuses an unknown key and a missing required field', () => {
-    const unknown = refusal(() => parseMarkerFromJSON({ kind: 'pin', label: 'here', note: 'x' }));
-    expect(unknown.reason).toBe('unknown fields: note');
-    const missing = refusal(() => parseMarkerFromJSON({ kind: 'pin' }));
-    expect(missing.reason).toBe('validation failed');
-    expect(missing.errors).toEqual({ label: [{ validator: 'required', message: 'required field' }] });
+  test('a member its discriminator names is still picked only when it reads the payload', () => {
+    // A key a @strictJSON member does not declare, a missing required
+    // field and a value of another kind: the member does not read it, so
+    // the union refuses it as Go and Rust do, and leaves it to the parser.
+    for (const payload of [{ kind: 'pin', label: 'here', note: 'x' }, { kind: 'pin' }, { kind: 'pin', label: 7 }]) {
+      const refused = refusal(() => parseMarkerFromJSON(payload));
+      expect(refused.reason).toBe(mismatch);
+      expect(refused.message).toBe('parseMarker: no member of Marker reads the payload, whose kind is "pin" (one of "pin", "flag")');
+      expect(validateMarker(payload as any)).toBe(true);
+    }
+    expect(validateMarker({ kind: 'flag', raisedAt: when } as any)).toBe(true);
   });
 
   test('an absent, non-string or unknown discriminator is refused', () => {
     for (const payload of [{}, { kind: 1 }, { kind: 'star' }]) {
-      expect(refusal(() => parseMarkerFromJSON(payload)).reason).toBe('unknown discriminator');
+      expect(refusal(() => parseMarkerFromJSON(payload)).reason).toBe(mismatch);
+      expect(validateMarker(payload as any)).toBe(true);
     }
     expect(refusal(() => parseMarkerFromJSON({ kind: 'star' })).message).toBe(
-      'parseMarker: discriminator kind is "star", not one of "pin", "flag"'
+      'parseMarker: no member of Marker reads the payload, whose kind is "star" (one of "pin", "flag")'
     );
   });
 });
@@ -136,9 +175,43 @@ describe("a model's parser reads every union field through the union", () => {
 
   test('a union value no member reads refuses the model', () => {
     const error = refusal(() => parseDrawingFromJSON({ shape: { side: 1 }, figures: [], contacts: [{ kind: 'fax', address: '555' }] }));
-    expect(error.reason).toBe('no matching member');
+    expect(error.reason).toBe(mismatch);
     expect(refusal(() => parseDrawingFromJSON({ shape: { side: 1 }, figures: [], marker: { kind: 'pin', label: 'x', note: 'y' } })).reason).toBe(
-      'unknown fields: note'
+      mismatch
     );
+  });
+});
+
+describe("a model's validator validates every union field as its member", () => {
+  const long = { text: 'too long a text', at: when };
+  const maxLength = [{ validator: 'maxLength', message: expect.any(String) }];
+
+  test('a valid drawing validates', () => {
+    expect(validateDrawing({ shape: { side: 1 }, figures: [{ text: 'paid', at: when }] } as any)).toBe(true);
+  });
+
+  test("a member's errors sit under the field's path, at each list level and key", () => {
+    const errors = validateDrawing({
+      shape: { side: 1 },
+      figure: long,
+      figures: [{ side: 2 }, long],
+      rows: [[], [long]],
+      byName: { a: long },
+      listsByName: { b: [long] },
+      // A Pin without its label is no Pin: the parser refuses it.
+      marker: { kind: 'pin' },
+    } as any);
+    expect(errors).toEqual({
+      figure: { text: maxLength },
+      'figures[1]': { text: maxLength },
+      'rows[1][0]': { text: maxLength },
+      'byName.a': { text: maxLength },
+      'listsByName.b[0]': { text: maxLength },
+    });
+  });
+
+  test('a missing required union field is required, and a value no member reads is left to the parser', () => {
+    expect(validateDrawing({ figures: [] } as any)).toEqual({ shape: [{ validator: 'required', message: 'required field' }] });
+    expect(validateDrawing({ shape: { edges: 3 }, figures: [], marker: { kind: 'star' } } as any)).toBe(true);
   });
 });

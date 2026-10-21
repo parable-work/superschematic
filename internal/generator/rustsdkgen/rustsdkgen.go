@@ -4,6 +4,7 @@ package rustsdkgen
 import (
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -53,6 +54,11 @@ type SDKOutput struct {
 	// src/runtime.rs then carries Page and Pager, and src/lib.rs exports
 	// them.
 	HasPagedEndpoints bool
+	// ChecksUnions reports whether an argument or an input field holds a
+	// union the types crate validates (ScalarArg.UnionValidator,
+	// EndpointInfo.InputUnionFields); src/runtime.rs then carries
+	// check_union_value.
+	ChecksUnions bool
 }
 
 // NamespaceInfo represents a namespace with its endpoints.
@@ -104,6 +110,11 @@ type EndpointInfo struct {
 	// ValidatesMapValues reports whether a map argument's values are
 	// validated (ScalarArg.ValueSchema), every failure reported at once.
 	ValidatesMapValues bool
+	// InputUnionFields are the input type's fields that hold a union the
+	// types crate validates; WriteSDKWithTools sets them.
+	InputUnionFields []InputUnionField
+
+	inputFields []apigen.Param
 	// Page is a paged operation's @paginated (D60), nil for every other.
 	// Its method takes cursor and limit, the last fields of its query
 	// struct, and returns runtime::Page<PageItemRustType>, OutputRustType;
@@ -203,6 +214,27 @@ type ScalarArg struct {
 	// API's OpenAPI document. It is "" when the document has none.
 	IsMap       bool
 	ValueSchema string
+	// UnionValidator is the types crate's validate_<union> when the
+	// argument's type is a union it validates, alone, in a list or in a
+	// map, and ""
+	// otherwise; WriteSDKWithTools sets it from the types crate's
+	// validators.rs. The argument is validated as the member the union
+	// picks, its errors at the argument's paths, as the route reports them.
+	UnionValidator string
+	// ArrayDepth is the argument's list levels: 0, 1 or 2.
+	ArrayDepth int
+
+	typeName string
+}
+
+// InputUnionField is a field of an operation's input type that holds a
+// union the types crate validates: its value, at each list level, is
+// validated as the member the union picks, its errors at the field's paths.
+type InputUnionField struct {
+	Name       string
+	Validator  string
+	ArrayDepth int
+	IsMap      bool
 }
 
 // NeedsRegex reports whether this namespace emits Regex-based validation.
@@ -671,6 +703,8 @@ func convertEndpoint(ep apigen.EndpointInfo, isScopedNS bool, scopeParamName str
 			ValidatePattern:   arg.ValidatePattern,
 			IsMap:             arg.IsMap,
 			ValueSchema:       valueSchema,
+			ArrayDepth:        arg.ArrayDepth(),
+			typeName:          arg.Type,
 		})
 	}
 
@@ -705,6 +739,7 @@ func convertEndpoint(ep apigen.EndpointInfo, isScopedNS bool, scopeParamName str
 		ScalarArgs:             scalarArgs,
 		HasScalarArgs:          len(scalarArgs) > 0,
 		ValidatesMapValues:     validatesMapValues,
+		inputFields:            ep.InputTypeFields,
 		ScalarInputStructName:  methodPrefix + "Input",
 		QueryStructName:        methodPrefix + "QueryParams",
 		HasQueryParams:         len(queryParams) > 0,
@@ -905,6 +940,9 @@ func WriteSDKWithTools(output *SDKOutput, apiOutput *apigen.APIOutput, outputDir
 	}
 
 	output.TypesDependencyPath = rustapigen.ResolveTypesDependencyPath(outputDir, typesDir)
+	if err := annotateUnionValidators(output, apiOutput, typesDir); err != nil {
+		return err
+	}
 
 	files := []struct {
 		templateName string
@@ -1143,6 +1181,70 @@ func FormatSDK(outputDir string) error {
 func CompileSDK(outputDir string) error {
 	if err := codegen.RunTool(outputDir, "cargo", "check"); err != nil {
 		return fmt.Errorf("rust sdk compilation failed: %w", err)
+	}
+	return nil
+}
+
+// HasUnionArgs reports whether an argument holds a union the types crate
+// validates (ScalarArg.UnionValidator).
+func (e EndpointInfo) HasUnionArgs() bool {
+	for _, arg := range e.ScalarArgs {
+		if arg.UnionValidator != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// unionValidatorPattern finds the union validators of a types crate's
+// validators.rs: pub fn validate_<union>(value: &Value) -> ValidationErrors.
+var unionValidatorPattern = regexp.MustCompile(`(?m)^pub fn (validate_[a-z0-9_]+)\(value: &Value\) -> ValidationErrors \{`)
+
+// annotateUnionValidators sets the validator of each argument and input
+// field whose type is a union (apiOutput.TypeUnions) that the types crate
+// in typesDir validates, read from its validators.rs. A types crate
+// without one, or a union it does not validate, leaves them unchecked.
+func annotateUnionValidators(output *SDKOutput, apiOutput *apigen.APIOutput, typesDir string) error {
+	if apiOutput == nil || len(apiOutput.TypeUnions) == 0 || typesDir == "" {
+		return nil
+	}
+	source, err := os.ReadFile(filepath.Join(typesDir, "src", "validators.rs"))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read the types crate's validators: %w", err)
+	}
+	validators := map[string]bool{}
+	for _, match := range unionValidatorPattern.FindAllStringSubmatch(string(source), -1) {
+		validators[match[1]] = true
+	}
+	validatorOf := func(typeName string) string {
+		if _, ok := apiOutput.TypeUnions[typeName]; !ok {
+			return ""
+		}
+		if fn := "validate_" + codegen.ToSnakeCase(typeName); validators[fn] {
+			return fn
+		}
+		return ""
+	}
+	for n := range output.Namespaces {
+		for e := range output.Namespaces[n].Endpoints {
+			endpoint := &output.Namespaces[n].Endpoints[e]
+			for a := range endpoint.ScalarArgs {
+				arg := &endpoint.ScalarArgs[a]
+				if arg.UnionValidator = validatorOf(arg.typeName); arg.UnionValidator != "" {
+					output.ChecksUnions = true
+				}
+			}
+			endpoint.InputUnionFields = nil
+			for _, field := range endpoint.inputFields {
+				if fn := validatorOf(field.Type); fn != "" {
+					endpoint.InputUnionFields = append(endpoint.InputUnionFields, InputUnionField{Name: field.Name, Validator: fn, ArrayDepth: field.ArrayDepth(), IsMap: field.IsMap})
+					output.ChecksUnions = true
+				}
+			}
+		}
 	}
 	return nil
 }

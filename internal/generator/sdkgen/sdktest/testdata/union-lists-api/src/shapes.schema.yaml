@@ -4,8 +4,26 @@
 # An SDK decodes each element through the union; the Go SDK through
 # types.ShapeWrapper, since a union is an interface that encoding/json
 # cannot fill. The SDK tests load it through sdktest.LoadUnionListsService.
+#
+# Shape, which picks its member by shape, and Payment (Card | Invoice),
+# which its kind discriminates, are also sent: as a whole body argument
+# (ShapeMutations.drawShape, ShapeMutations.pay), in a list, a list of lists
+# and a map (drawShapes, shapeGrid, shapesByKey), and as fields of an input
+# (ShapeMutations.checkout's Checkout). Each member has a rule of its own,
+# which a server and an SDK check on the member the union picks. Probe holds
+# unions whose members tell the structural predicate's rules apart (D31,
+# amended): an unknown enum value, a malformed UUID, a nested object
+# without its required field, an inner union no member reads, a value of
+# another kind in a @strictJSON member, tags, and a member whose fields
+# are a superset of another's. The requests of union_requests.json run
+# against them.
 name: union-lists-api
 kind: API
+scalars:
+  # A UUID.
+  Identity.UUID:
+    name: Identity.UUID
+    languagePrimitive: string
 types:
   # A circle, by its radius.
   Circle:
@@ -15,6 +33,7 @@ types:
       - name: radius
         typeRef: { name: number }
         required: true
+        validateMin: 0
   # A square, by its side.
   Square:
     name: Square
@@ -23,11 +42,257 @@ types:
       - name: side
         typeRef: { name: number }
         required: true
+  # A payment by card. Its kind names it among Payment's members.
+  Card:
+    name: Card
+    role: APIInput
+    fields:
+      - name: kind
+        typeRef: { name: string }
+        required: true
+        internalMetadata: true
+        default: card
+      - name: number
+        typeRef: { name: string }
+        required: true
+        validatePattern: "^[0-9]{12,19}$"
+  # A payment on account, by the invoice's reference.
+  Invoice:
+    name: Invoice
+    role: APIInput
+    fields:
+      - name: kind
+        typeRef: { name: string }
+        required: true
+        internalMetadata: true
+        default: invoice
+      - name: reference
+        typeRef: { name: string }
+        required: true
+        validateMinLength: 3
+      # A note for the invoice, which may be null.
+      - name: note
+        typeRef: { name: string }
+  # An order of shapes, paid for: a model whose fields hold the unions.
+  Checkout:
+    name: Checkout
+    role: APIInput
+    fields:
+      - name: payment
+        typeRef: { name: Payment }
+        required: true
+      - name: shapes
+        typeRef: { name: Shape, isArray: true }
+  # EnumCase's first member: a status of the enum.
+  EnumA:
+    name: EnumA
+    role: APIInput
+    fields:
+      - name: status
+        typeRef: { name: Status }
+        required: true
+  # EnumCase's second member: any status text that starts with z.
+  EnumB:
+    name: EnumB
+    role: APIInput
+    fields:
+      - name: status
+        typeRef: { name: string }
+        required: true
+        validatePattern: "^z"
+  # UuidCase's first member: an id that is a UUID.
+  ById:
+    name: ById
+    role: APIInput
+    fields:
+      - name: id
+        typeRef: { name: Identity.UUID }
+        required: true
+  # UuidCase's second member: an id that is a slug starting with z.
+  BySlug:
+    name: BySlug
+    role: APIInput
+    fields:
+      - name: id
+        typeRef: { name: string }
+        required: true
+        validatePattern: "^z"
+  # A street address, whose street is required.
+  Address:
+    name: Address
+    role: APIInput
+    fields:
+      - name: street
+        typeRef: { name: string }
+        required: true
+  # A spot, whose label, when it has one, is one character.
+  Spot:
+    name: Spot
+    role: APIInput
+    fields:
+      - name: label
+        typeRef: { name: string }
+        validateMaxLength: 1
+  # NestedCase's first member: a place that is an address.
+  Located:
+    name: Located
+    role: APIInput
+    fields:
+      - name: place
+        typeRef: { name: Address }
+        required: true
+  # NestedCase's second member: a place that is a spot.
+  Placed:
+    name: Placed
+    role: APIInput
+    fields:
+      - name: place
+        typeRef: { name: Spot }
+        required: true
+  # InnerCase's first member: a shape that is a Shape, an inner union.
+  Holder:
+    name: Holder
+    role: APIInput
+    fields:
+      - name: shape
+        typeRef: { name: Shape }
+        required: true
+  # InnerCase's second member: a shape that is a spot.
+  Loose:
+    name: Loose
+    role: APIInput
+    fields:
+      - name: shape
+        typeRef: { name: Spot }
+        required: true
+  # StrictCase's first member, @strictJSON: an inner spot.
+  StrictA:
+    name: StrictA
+    role: APIInput
+    strictJSON: true
+    fields:
+      - name: inner
+        typeRef: { name: Spot }
+        required: true
+  # StrictCase's second member: inner text that starts with z.
+  LooseB:
+    name: LooseB
+    role: APIInput
+    fields:
+      - name: inner
+        typeRef: { name: string }
+        required: true
+        validatePattern: "^z"
+  # TagCase's first member, which its kind's default, email, tags.
+  Email:
+    name: Email
+    role: APIInput
+    fields:
+      - name: kind
+        typeRef: { name: string }
+        required: true
+        default: email
+      - name: address
+        typeRef: { name: string }
+        required: true
+  # TagCase's second member, tagged sms, whose address is digits.
+  Sms:
+    name: Sms
+    role: APIInput
+    fields:
+      - name: kind
+        typeRef: { name: string }
+        required: true
+        default: sms
+      - name: address
+        typeRef: { name: string }
+        required: true
+        validatePattern: "^[0-9]+$"
+  # Superset's first member.
+  Small:
+    name: Small
+    role: APIInput
+    fields:
+      - name: a
+        typeRef: { name: string }
+        required: true
+  # Superset's second member, whose fields are Small's and b.
+  Big:
+    name: Big
+    role: APIInput
+    fields:
+      - name: a
+        typeRef: { name: string }
+        required: true
+      - name: b
+        typeRef: { name: string }
+        required: true
+        validatePattern: "^z"
+  # The probes, one union a field, each request setting one.
+  Probe:
+    name: Probe
+    role: APIInput
+    fields:
+      - name: enumCase
+        typeRef: { name: EnumCase }
+      - name: uuidCase
+        typeRef: { name: UuidCase }
+      - name: nestedCase
+        typeRef: { name: NestedCase }
+      - name: innerCase
+        typeRef: { name: InnerCase }
+      - name: strictCase
+        typeRef: { name: StrictCase }
+      - name: tagCase
+        typeRef: { name: TagCase }
+      - name: superset
+        typeRef: { name: Superset }
+enums:
+  # A status.
+  Status:
+    name: Status
+    values:
+      - name: Open
+        serializedAs: open
+      - name: Closed
+        serializedAs: closed
 unions:
+  # An enum status or a z text.
+  EnumCase:
+    name: EnumCase
+    types: [EnumA, EnumB]
+  # A UUID or a z slug.
+  UuidCase:
+    name: UuidCase
+    types: [ById, BySlug]
+  # An address or a spot.
+  NestedCase:
+    name: NestedCase
+    types: [Located, Placed]
+  # A shape or a spot.
+  InnerCase:
+    name: InnerCase
+    types: [Holder, Loose]
+  # A strict spot holder or a z text.
+  StrictCase:
+    name: StrictCase
+    types: [StrictA, LooseB]
+  # An email or an sms, which kind tags.
+  TagCase:
+    name: TagCase
+    types: [Email, Sms]
+  # Small or its superset Big.
+  Superset:
+    name: Superset
+    types: [Small, Big]
   # A circle or a square.
   Shape:
     name: Shape
     types: [Circle, Square]
+  # A card or an invoice, which kind names.
+  Payment:
+    name: Payment
+    types: [Card, Invoice]
 operationSets:
   - name: ShapeQueries
     operations:
@@ -83,3 +348,77 @@ operationSets:
         typeRef: { name: Shape, isArray: true }
         httpMethod: GET
         restPath: "shape-search"
+  - name: ShapeMutations
+    operations:
+      # Draws one shape, the whole body argument, and answers it.
+      - name: drawShape
+        typeRef: { name: Shape }
+        required: true
+        httpMethod: POST
+        restPath: "shapes"
+        arguments:
+          - name: shape
+            typeRef: { name: Shape }
+            required: true
+      # Takes a payment, the whole body argument, and answers its kind.
+      - name: pay
+        typeRef: { name: string }
+        required: true
+        httpMethod: POST
+        restPath: "payments"
+        arguments:
+          - name: payment
+            typeRef: { name: Payment }
+            required: true
+      # Checks out an order, whose input holds a payment and shapes, and
+      # answers the payment's kind.
+      - name: checkout
+        typeRef: { name: string }
+        required: true
+        httpMethod: POST
+        restPath: "checkout"
+        arguments:
+          - name: input
+            typeRef: { name: Checkout }
+            required: true
+      # Draws shapes, a list body argument, and answers how many.
+      - name: drawShapes
+        typeRef: { name: string }
+        required: true
+        httpMethod: POST
+        restPath: "shapes/batch"
+        arguments:
+          - name: shapes
+            typeRef: { name: Shape, isArray: true }
+            required: true
+      # Draws rows of shapes, a list of lists body argument, and answers
+      # how many.
+      - name: shapeGrid
+        typeRef: { name: string }
+        required: true
+        httpMethod: POST
+        restPath: "shapes/grid"
+        arguments:
+          - name: rows
+            typeRef: { name: Shape, isArray: true, isArrayOfArrays: true }
+            required: true
+      # Draws named shapes, a map body argument, and answers how many.
+      - name: shapesByKey
+        typeRef: { name: string }
+        required: true
+        httpMethod: POST
+        restPath: "shapes/named"
+        arguments:
+          - name: byKey
+            typeRef: { name: Shape, isMap: true }
+            required: true
+      # Reads one probe, whose input holds the probe unions, and answers ok.
+      - name: probe
+        typeRef: { name: string }
+        required: true
+        httpMethod: POST
+        restPath: "probe"
+        arguments:
+          - name: input
+            typeRef: { name: Probe }
+            required: true

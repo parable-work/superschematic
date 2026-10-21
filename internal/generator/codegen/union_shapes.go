@@ -28,7 +28,8 @@ type UnionTag struct {
 // take every payload. The Go and Rust union decoders instead take the first
 // member whose Fields include every payload key and whose Tags the payload
 // does not contradict. When no member declares every key, they take the
-// first member whose Tags the payload allows.
+// first member whose Tags the payload allows. Either way the member must
+// also read the payload (ReadModel, D31 amended).
 //
 // Members with identical fields differ only by a tag: a field that at least
 // two members declare, each with a distinct string or enum default. A field

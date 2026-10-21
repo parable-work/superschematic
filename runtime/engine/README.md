@@ -1142,7 +1142,7 @@ engine.events.floor('default'); // the earliest cursor a read of default may sta
 | --- | --- | --- |
 | `maxAgeMs` | none | an event older than this, by its `at` and the engine's clock, goes |
 | `maxEvents` | none | a namespace's events past its newest this many go, so each namespace keeps about this many |
-| `maxHoldMs` | none | the longest a subscription that does not advance (halted, in an archived namespace, or whose behavior the engine no longer runs) holds the log: it keeps no event older than this that age or count lets go |
+| `maxHoldMs` | none | the longest a subscription that does not advance (halted, in an archived namespace, or whose behavior the engine does not run) holds the log: it keeps no event older than this that age or count lets go; with it, a behavior the engine does not run holds from where it starts before it has run |
 | `everyMs` | 60000 | how often the started runner prunes, at least 1000 |
 | `batchSize` | 1000 | events pruned in one transaction, after which the runner yields, at most 10000 |
 
@@ -1151,13 +1151,19 @@ when either lets it go. `openEngine` refuses anything else (`TypeError`).
 A namespace's count is its own: one busy namespace never pushes a quiet
 one's events out. The runner counts a namespace's events once, at its
 first pass, and after that only what was appended since, so a pass reads
-what is new, not the whole log.
+what is new, not the whole log; it counts again when it takes the
+runner's lease, and when the namespace's floor is not the one it counted
+from, since another process's runner pruned meanwhile.
 
 - **A namespace at a time, oldest first.** Retention prunes each
   namespace's events apart, from its oldest, and stops at the first
   event it keeps, so what is gone is always a run of cursors. A
   namespace's floor (`engine_log_floors`) is the last cursor pruned of
-  its events: every event of the namespace at or before it is gone. A
+  its events: every event of the namespace at or before it is gone. It
+  never moves back: a batch is written only from the floor it was chosen
+  at, read again under the namespace's lock, so when two runners' passes
+  overlap for a moment at a lease's handover, the one another overtook
+  chooses its batch again rather than prune an event twice. A
   namespace no longer configured keeps its events until they are pruned
   too.
 - **Never past an event a subscription has yet to handle.** A
@@ -1167,7 +1173,10 @@ what is new, not the whole log.
   before it has run, whether it is active, retrying, halted or in an
   archived namespace, but not one whose `watches` turns its reactions off
   (`Lease` without `directOn`), which starts at the publish that turns
-  them on; and one whose behavior is not registered, once it has run. Retention prunes none of the namespace's events after it, and
+  them on; and one whose behavior is not registered, once it has run,
+  or, with `maxHoldMs`, from where it starts before it has run (a
+  behavior a newer release composes, while an older release's runner
+  holds the lease). Retention prunes none of the namespace's events after it, and
   holds no other namespace's. So a halted subscription holds its
   namespace's log, and `status()` shows by whom, in what state, and since
   when ("Status" under "The runner"), until it is resumed.
@@ -4496,12 +4505,22 @@ let app = Router::new().merge(routes).fallback_service(api_router);
   which cannot start inside another and panics if asked to. The router
   keeps to this for the calls and pulls it makes, and lets its engine go
   on a thread of its own when it drops on the runtime.
-- **Timeouts, rate limits and CORS** are the host's layers. A timeout on
-  the time to a response's head (tower-http's `TimeoutLayer`, the HTTP
-  runtime's `@timeout`) covers the engine call and leaves a stream open,
-  since a stream's head goes out at once. The call runs on to its end on
-  its blocking thread, so a write whose client got the timeout may still
-  commit. A layer that bounds a response's body, or how long it may go
+- **The host's timeout.** `Options::timeout` bounds every route but the
+  event stream's and MCP's, whose responses last as long as their
+  clients, as `enginehttp.Options.Timeout` and `engineApp`'s
+  `timeoutSeconds` do: a request that takes longer, from its body's read
+  through the caller to the engine's call, is 504 `gateway_timeout`, the
+  HTTP runtimes' problem (`"title": "Gateway Timeout"`, `"detail":
+  "Gateway Timeout"`). None unless set; a generated Rust server sets the
+  server's 30 seconds. A call still waiting for a blocking thread at the
+  deadline never starts; one already running runs on to its end, so a
+  write whose client got the timeout may still commit, and the client
+  reads it back before it tries again.
+- **Rate limits and CORS** are the host's layers, and so is any other
+  timeout. A timeout on the time to a response's head (tower-http's
+  `TimeoutLayer`, the HTTP runtime's `@timeout`) covers the engine call
+  and leaves a stream open, since a stream's head goes out at once. A
+  layer that bounds a response's body, or how long it may go
   quiet, would end a stream: it must leave out the requests whose route
   `route_of_request(prefix, &request)` names with `stream` (the event
   stream) or `mcp` (the MCP endpoint) set, as `api::routes()` lists them.

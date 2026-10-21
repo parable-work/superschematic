@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -325,6 +326,66 @@ func (j *FakeJobs) RunJob(_ context.Context, req registry.JobRunRequest) error {
 		j.log.Record("run job %s: %s", req.Job, req.Image)
 	}
 	return j.Fail[req.Job]
+}
+
+// FakeQueues is a queue runner that reaches no database (D68, amended):
+// it records each operation in the provisioner's call log, `queue
+// <database>: <service>.<queue> <operation>`, keeps each document it was
+// handed, and returns the result Results holds for the operation, else
+// one that found no dead message, or Fail.
+type FakeQueues struct {
+	log *FakeProvisioner
+
+	mu sync.Mutex
+
+	// Results holds the result to return for an operation (`dead`), and
+	// Fail the error to return for every one.
+	Results map[string][]byte
+	Fail    error
+
+	documents [][]byte
+}
+
+var _ registry.QueueRunner = (*FakeQueues)(nil)
+
+// RunQueue records the operation and returns its result.
+func (q *FakeQueues) RunQueue(_ context.Context, req registry.QueueRequest) ([]byte, error) {
+	if err := req.Check(); err != nil {
+		return nil, err
+	}
+	var doc struct {
+		Version   int    `json:"version"`
+		Service   string `json:"service"`
+		Queue     string `json:"queue"`
+		Operation string `json:"operation"`
+	}
+	if err := json.Unmarshal(req.Document, &doc); err != nil {
+		return nil, fmt.Errorf("the queue document: %w", err)
+	}
+	q.mu.Lock()
+	q.documents = append(q.documents, slices.Clone(req.Document))
+	q.mu.Unlock()
+	if q.log != nil {
+		q.log.Record("queue %s: %s.%s %s", req.Database, doc.Service, doc.Queue, doc.Operation)
+	}
+	if q.Fail != nil {
+		return nil, q.Fail
+	}
+	if result, ok := q.Results[doc.Operation]; ok {
+		return slices.Clone(result), nil
+	}
+	head := fmt.Sprintf(`{"version": %d, "service": %q, "queue": %q, "operation": %q, `, doc.Version, doc.Service, doc.Queue, doc.Operation)
+	if doc.Operation == "dead" {
+		return []byte(head + `"total": 0, "messages": []}` + "\n"), nil
+	}
+	return []byte(head + `"ids": []}` + "\n"), nil
+}
+
+// Documents returns the documents the runner was handed, in order.
+func (q *FakeQueues) Documents() [][]byte {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return slices.Clone(q.documents)
 }
 
 // FakeSites is a site publisher in memory (D55): it records each publish

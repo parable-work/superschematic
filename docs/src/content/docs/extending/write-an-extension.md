@@ -167,7 +167,10 @@ the file with `unknown kind "Catalog"`.
 
 `KindSpec.Verify` runs after load. `KindSpec.NoSentinel` skips the
 `service.generated.ts` file when the kind is not something other services
-import. See [platform](/superschematic/extending/platform/) for both.
+import. The core's Stack kind registers through the same `KindSpec` and
+sets both (`internal/registry/core_stack.go`): its `Verify` checks that
+every class declares exactly one of `@stack`, `@server`, `@database` and
+`@environment`, and no service imports a stack, so it gets no sentinel.
 
 ## A generator
 
@@ -229,7 +232,10 @@ r.RegisterDecorator(registry.DecoratorSpec{
 - `Packages` names the npm package the decorator is imported from.
   Registering a decorator from it makes that package an authoring package.
 - `Target` is the node it may sit on (type, field, operation set,
-  operation). `Kinds` restricts it to schema kinds.
+  operation). `Kinds` restricts it to schema kinds. A schema whose kind
+  no decorator of a package allows cannot import that package: verify
+  rejects the import, so a kind's own authoring package stays out of the
+  others without their naming it.
 - `Args` is the JSON Schema of the argument list. Both frontends validate
   a use against it before `Apply` runs.
 - `Apply` writes into the node's open `Extensions` slot under the
@@ -447,8 +453,13 @@ r.RegisterDocument(registry.DocumentSpec{
   the document depends on, for `build-all`'s change detection.
 - `Generate` receives the raw document alongside the `GenerateContext`.
 
-The [deploy](/superschematic/extending/deploy/) extension is a document with
-no new kind.
+A document with `Kinds` left nil may sit next to any schema, so an
+extension can be a document and nothing else. `Schema` checks the file's
+shape at load time; a check that needs the schema too, such as every key
+naming a field of the `@envVars` class, belongs in `Generate`, which
+receives both. For deployment values, a [stack](/superschematic/guides/stacks/)
+already sets each server's `@envVars` from its environments' settings
+and derives its connection strings, so a document need not restate them.
 
 ## A build-all hook
 
@@ -952,6 +963,11 @@ engine from that crate its own way
   `scripts/engine-napi.sh --crate <crate>/napi --out <dir>`, which prints
   the file it wrote, and name that file with the engine option `addon`
   or, for every engine the process opens, `SUPERSCHEMATIC_ENGINE_ADDON`.
+
+A generated server does this itself: a stack's Dockerfile builds the
+member its language takes in its engine stage, and `stack dev` builds it
+before it builds or starts the server, so the commands above are for a
+host you write by hand.
 
 The host runs your behavior beside the core's: a Rust host passes the
 set of both, as the engine crate's `behaviors()` is, and a TypeScript

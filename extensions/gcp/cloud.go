@@ -66,7 +66,9 @@ type Cloud interface {
 	// EnsureLifecycleRule gives a bucket rule unless it has it already: it
 	// puts rule in place of the bucket's rules that delete objects under
 	// the same prefixes, or after its rules when none does, and keeps the
-	// bucket's other rules. It reports whether it changed the bucket.
+	// bucket's other rules. It reports whether it changed the bucket. It
+	// returns an error that wraps ErrBucketChanged, and changes nothing,
+	// when another writer changed the bucket after it read the rules.
 	EnsureLifecycleRule(ctx context.Context, bucket string, rule LifecycleRule) (changed bool, err error)
 
 	// EnsureKey creates a key ring and a symmetric encryption key in it,
@@ -99,6 +101,13 @@ type Cloud interface {
 	// whether it did: false when the object is gone, or another
 	// generation is live.
 	DeleteObjectGeneration(ctx context.Context, bucket, object string, generation int64) (deleted bool, err error)
+
+	// DeleteObjectVersion deletes one version of an object, the
+	// generation given, for good: in a bucket that keeps versions, as the
+	// state bucket does, a delete of the live object alone would keep it
+	// as a noncurrent version. A missing one is not an error. A queue
+	// operation's result is deleted so (D68, amended).
+	DeleteObjectVersion(ctx context.Context, bucket, object string, generation int64) error
 
 	// WriteSiteObject replaces an object of a site's bucket, which the
 	// site's load balancer serves with contentType and cacheControl
@@ -379,11 +388,18 @@ func (c *googleCloud) EnsureLifecycleRule(ctx context.Context, bucket string, ru
 	// to the configuration it was read from.
 	_, err = handle.If(storage.BucketConditions{MetagenerationMatch: attrs.MetaGeneration}).
 		Update(ctx, storage.BucketAttrsToUpdate{Lifecycle: &storage.Lifecycle{Rules: rules}})
+	if preconditionFailed(err) {
+		return false, fmt.Errorf("gcp: set the lifecycle of bucket %s: %w", bucket, ErrBucketChanged)
+	}
 	if err != nil {
 		return false, fmt.Errorf("gcp: set the lifecycle of bucket %s: %w", bucket, err)
 	}
 	return true, nil
 }
+
+// ErrBucketChanged is what EnsureLifecycleRule wraps when another writer
+// changed the bucket between its read of the lifecycle and its write.
+var ErrBucketChanged = errors.New("another writer changed the bucket's configuration; read it again")
 
 // withLifecycleRule returns rules with rule in place of the first rule
 // that deletes objects under the same prefixes, in any order, and with no
@@ -588,6 +604,17 @@ func (c *googleCloud) DeleteObjectGeneration(ctx context.Context, bucket, object
 		return false, fmt.Errorf("gcp: delete gs://%s/%s: %w", bucket, object, err)
 	}
 	return true, nil
+}
+
+func (c *googleCloud) DeleteObjectVersion(ctx context.Context, bucket, object string, generation int64) error {
+	if err := c.clients(ctx); err != nil {
+		return err
+	}
+	err := c.storage.Bucket(bucket).Object(object).Generation(generation).Delete(ctx)
+	if err != nil && !errors.Is(err, storage.ErrObjectNotExist) {
+		return fmt.Errorf("gcp: delete gs://%s/%s#%d: %w", bucket, object, generation, err)
+	}
+	return nil
 }
 
 // preconditionFailed reports whether err is Cloud Storage's refusal of a

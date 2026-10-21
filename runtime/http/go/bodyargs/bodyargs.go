@@ -675,3 +675,62 @@ func formatBound(v float64) string {
 	}
 	return strconv.FormatFloat(v, 'g', -1, 64)
 }
+
+// The Unwrap functions turn the values a decoder read into a union's
+// wrapper (the generated <Union>Wrapper, which picks and validates the
+// member) into the members they hold, at the same list levels and keys,
+// for a route whose argument is a union. A nil list or map stays nil.
+
+// UnwrapValue returns the member a single value's wrapper holds.
+func UnwrapValue[W, T any](wrapped W, unwrap func(W) T) T {
+	return unwrap(wrapped)
+}
+
+// UnwrapList returns the members a list's wrappers hold.
+func UnwrapList[W, T any](wrapped []W, unwrap func(W) T) []T {
+	if wrapped == nil {
+		return nil
+	}
+	values := make([]T, len(wrapped))
+	for i, w := range wrapped {
+		values[i] = unwrap(w)
+	}
+	return values
+}
+
+// UnwrapListOfLists returns the members a list of lists' wrappers hold.
+func UnwrapListOfLists[W, T any](wrapped [][]W, unwrap func(W) T) [][]T {
+	if wrapped == nil {
+		return nil
+	}
+	values := make([][]T, len(wrapped))
+	for i, row := range wrapped {
+		values[i] = UnwrapList(row, unwrap)
+	}
+	return values
+}
+
+// UnwrapMap returns the members a map's wrappers hold, under their keys.
+func UnwrapMap[W, T any](wrapped map[string]W, unwrap func(W) T) map[string]T {
+	if wrapped == nil {
+		return nil
+	}
+	values := make(map[string]T, len(wrapped))
+	for key, w := range wrapped {
+		values[key] = unwrap(w)
+	}
+	return values
+}
+
+// UnwrapMapOfLists returns the members a map of lists' wrappers hold,
+// under their keys.
+func UnwrapMapOfLists[W, T any](wrapped map[string][]W, unwrap func(W) T) map[string][]T {
+	if wrapped == nil {
+		return nil
+	}
+	values := make(map[string][]T, len(wrapped))
+	for key, list := range wrapped {
+		values[key] = UnwrapList(list, unwrap)
+	}
+	return values
+}

@@ -232,18 +232,6 @@ resources:
         - ${shop-db-database-shop-db}
         - ${shop-db-instance}
       version: 9.37.1
-  # phase infrastructure; owners Orders
-  Orders-trace-agent:
-    name: Orders.trace-agent
-    type: gcp:projects/iAMMember:IAMMember
-    properties:
-      member: ${Orders-account.member}
-      project: acme-staging
-      role: roles/cloudtrace.agent
-    options:
-      dependsOn:
-        - ${Orders-account}
-      version: 9.37.1
   # phase exposure; owners dns
   dns-shop-api-a:
     name: dns.shop-api.a
@@ -707,18 +695,6 @@ resources:
         - ${shop-api-account}
         - ${shop-media-bucket}
       version: 9.37.1
-  # phase infrastructure; owners shop-api
-  shop-api-trace-agent:
-    name: shop-api.trace-agent
-    type: gcp:projects/iAMMember:IAMMember
-    properties:
-      member: ${shop-api-account.member}
-      project: acme-staging
-      role: roles/cloudtrace.agent
-    options:
-      dependsOn:
-        - ${shop-api-account}
-      version: 9.37.1
   # phase exposure; owners shop-api
   shop-api-url-map:
     name: shop-api.url-map
@@ -1052,18 +1028,6 @@ resources:
       secretId: MixedShop-Staging-shop-orders-ship-orders-SHOP_PRICING_SERVICE_CREDENTIAL_KEY
     options:
       version: 9.37.1
-  # phase infrastructure; owners shop-orders-ship-orders
-  shop-orders-ship-orders-trace-agent:
-    name: shop-orders-ship-orders.trace-agent
-    type: gcp:projects/iAMMember:IAMMember
-    properties:
-      member: ${shop-orders-ship-orders-account.member}
-      project: acme-staging
-      role: roles/cloudtrace.agent
-    options:
-      dependsOn:
-        - ${shop-orders-ship-orders-account}
-      version: 9.37.1
   # phase infrastructure; owners shop-pricing
   shop-pricing-account:
     name: shop-pricing.account
@@ -1234,7 +1198,6 @@ outputs:
   Orders.secret.SHOP_PRICING_SERVICE_CREDENTIAL_KEY.secretId: ${Orders-secret-SHOP_PRICING_SERVICE_CREDENTIAL_KEY.secretId}
   Orders.service.id: ${Orders-service.id}
   Orders.service.uri: ${Orders-service.uri}
-  Orders.trace-agent.id: ${Orders-trace-agent.id}
   dns.shop-api.a.id: ${dns-shop-api-a.id}
   dns.shop-api.cname.id: ${dns-shop-api-cname.id}
   dns.shop-pricing.cname.id: ${dns-shop-pricing-cname.id}
@@ -1273,7 +1236,6 @@ outputs:
   shop-api.service.uri: ${shop-api-service.uri}
   shop-api.sign-as-self.id: ${shop-api-sign-as-self.id}
   shop-api.storage.shop-media.id: ${shop-api-storage-shop-media.id}
-  shop-api.trace-agent.id: ${shop-api-trace-agent.id}
   shop-api.url-map.id: ${shop-api-url-map.id}
   shop-db.database.shop-db.id: ${shop-db-database-shop-db.id}
   shop-db.database.shop-db.name: ${shop-db-database-shop-db.name}
@@ -1302,7 +1264,6 @@ outputs:
   shop-orders-ship-orders.secret-version.SHOP_PRICING_SERVICE_CREDENTIAL_KEY.version: ${shop-orders-ship-orders-secret-version-SHOP_PRICING_SERVICE_CREDENTIAL_KEY.version}
   shop-orders-ship-orders.secret.SHOP_PRICING_SERVICE_CREDENTIAL_KEY.id: ${shop-orders-ship-orders-secret-SHOP_PRICING_SERVICE_CREDENTIAL_KEY.id}
   shop-orders-ship-orders.secret.SHOP_PRICING_SERVICE_CREDENTIAL_KEY.secretId: ${shop-orders-ship-orders-secret-SHOP_PRICING_SERVICE_CREDENTIAL_KEY.secretId}
-  shop-orders-ship-orders.trace-agent.id: ${shop-orders-ship-orders-trace-agent.id}
   shop-pricing.account.email: ${shop-pricing-account.email}
   shop-pricing.account.id: ${shop-pricing-account.id}
   shop-pricing.route.id: ${shop-pricing-route.id}

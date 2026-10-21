@@ -33,6 +33,9 @@
 //! blocking pool, and lets go of its database off the async threads.
 
 use std::sync::Arc;
+{{- if .MountsEngines }}
+use std::time::Duration;
+{{- end }}
 {{ if .MountsEngines }}
 use axum::http::request::Parts;
 use axum::Router;
@@ -62,6 +65,14 @@ use tokio::sync::watch;
 {{- end }}
 
 use crate::Failure;
+{{- if .MountsEngines }}
+
+/// How long a request to an engine's routes may take, but its event
+/// stream's and its MCP endpoint's, whose responses last as long as their
+/// clients: past it the route answers 504 gateway_timeout, as a Go or a
+/// TypeScript server's engine routes do.
+const ENGINE_TIMEOUT: Duration = Duration::from_secs(30);
+{{- end }}
 {{- if .Runner }}
 
 /// The principal the engine's runner acts as: the runner's deployable,
@@ -113,8 +124,10 @@ impl Document {
 
 /// Opens, in the background, the engine of the engine database `service`
 /// on the database the field named `field` holds, `database`, with
-/// `document`, its ENGINE_DOCUMENT, and the access policy `policy`, as
-/// JSON: a connection string as it is, or a Cloud SQL instance over the
+/// `document`, its ENGINE_DOCUMENT, the access policy `policy`, as JSON,
+/// and the event log's `retention`, as JSON, none when the log keeps every
+/// event, which only a started runner prunes, while it holds the runner's
+/// lock: a connection string as it is, or a Cloud SQL instance over the
 /// socket Cloud Run mounts for it, an access token from the metadata server
 /// as each new connection's password.
 {{- if .Runner }} Once it opens, it starts the engine's
@@ -129,6 +142,7 @@ pub fn open(
     database: &Database,
     document: &str,
     policy: &str,
+    retention: Option<&str>,
 ) -> Result<Background, Failure> {
     let document = Arc::new(Document::parse(service, document)?);
     let connection = postgres::sync_connection(database)
@@ -136,7 +150,7 @@ pub fn open(
     let connection = Arc::new(connection);
     let policy: Value = serde_json::from_str(policy)
         .map_err(|err| format!("the access policy of the engine of {service}: {err}"))?;
-    let config = json!({
+    let mut config = json!({
         "postgres": { "url": connection.url },
         "policy": policy,
         "namespaces": { "names": [document.namespace] },
@@ -146,6 +160,11 @@ pub fn open(
         "runner": { "principal": { "subject": RUNNER, "permissions": PERMISSIONS } },
 {{- end }}
     });
+    if let Some(retention) = retention {
+        config["retention"] = serde_json::from_str(retention).map_err(|err| {
+            format!("the event log's retention of the engine of {service}: {err}")
+        })?;
+    }
     let options = move || -> superschematic_engine::Result<EngineOptions> {
         let mut options = EngineOptions::from_json(&config)?;
         options.behaviors = {{ .EngineBehaviors }};
@@ -229,7 +248,10 @@ pub fn routes(
 {{- if .EngineIdentity }}
     let trusted = callers.users.as_ref().map(|users| users.cors());
 {{- end }}
-    let options = Options::new(mount).callers(callers).done(streams.clone());
+    let options = Options::new(mount)
+        .callers(callers)
+        .done(streams.clone())
+        .timeout(ENGINE_TIMEOUT);
     let routes = background_router(engine.clone(), options)
         .map_err(|err| format!("the engine's routes at {mount}: {err}"))?;
 {{- if .EngineIdentity }}

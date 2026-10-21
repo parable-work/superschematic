@@ -12,6 +12,10 @@ OpenTelemetry's own environment variables:
   through.
 - OTEL_EXPORTER_OTLP_HEADERS, OTEL_EXPORTER_OTLP_TIMEOUT and their
   per-signal forms reach the exporter, which reads them itself.
+- An https endpoint under googleapis.com, Cloud Trace's OTLP endpoint, gets the
+  access token of the workload's account from the metadata server on each
+  export (GCE_METADATA_HOST when set, else metadata.google.internal),
+  unless a headers variable names an authorization header (D67, amended).
 - OTEL_EXPORTER_OTLP_PROTOCOL, and its traces form, may only name
   http/protobuf, the one protocol the runtime exports over.
 - OTEL_SERVICE_NAME and OTEL_RESOURCE_ATTRIBUTES override the defaults the
@@ -61,6 +65,7 @@ import {
 } from '@opentelemetry/sdk-trace';
 import type { Context as HonoContext, MiddlewareHandler } from 'hono';
 import { matchedRoutes } from 'hono/route';
+import { googleAccessTokenSource, type GoogleIdTokenSourceOptions } from './credentials.js';
 import type { Logger } from './logger.js';
 
 /** The one OTLP protocol the runtime exports over. */
@@ -157,16 +162,17 @@ export function startTelemetry(defaults: TelemetryDefaults): Telemetry {
   const resource = defaultResource()
     .merge(resourceFromAttributes(attributes))
     .merge(detectResources({ detectors: [envDetector] }));
+  const google = googleAuth(config.endpoint, process.env);
   const provider = new TracerProvider({
     resource,
     sampler: config.sampler,
-    spanProcessors: [new BatchSpanProcessor({ exporter: new OTLPTraceExporter() })],
+    spanProcessors: [new BatchSpanProcessor({ exporter: new OTLPTraceExporter(google ? { headers: googleAuthHeaders({}, logger) } : {}) })],
   });
   const contextManager = new AsyncLocalStorageContextManager().enable();
   context.setGlobalContextManager(contextManager);
   propagation.setGlobalPropagator(config.propagator);
   trace.setGlobalTracerProvider(provider);
-  logger?.info('exporting traces', { endpoint: config.endpoint, protocol: OTLP_PROTOCOL });
+  logger?.info('exporting traces', { endpoint: config.endpoint, protocol: OTLP_PROTOCOL, googleAuth: google });
   const tracer = () => trace.getTracer(SCOPE);
   const baseFetch = globalThis.fetch.bind(globalThis);
   let stopped = false;
@@ -311,6 +317,54 @@ function routeOf(c: HonoContext): string | undefined {
   }
   if (!route || route.method === 'ALL') return undefined;
   return route.path.replace(/:([^/{}?]+)(\{[^/]*\})?\??/gu, '{$1}');
+}
+
+/**
+ * Whether export to endpoint sends the access token of the workload's
+ * account (D67, amended): whether it is an https URL, so the token never
+ * goes in the clear, whose host is googleapis.com or under it, and neither OTEL_EXPORTER_OTLP_TRACES_HEADERS nor
+ * OTEL_EXPORTER_OTLP_HEADERS names an authorization header.
+ */
+export function googleAuth(endpoint: string, env: Readonly<Record<string, string | undefined>>): boolean {
+  let host: string;
+  try {
+    const url = new URL(endpoint);
+    if (url.protocol !== 'https:') return false;
+    host = url.hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+  if (host !== 'googleapis.com' && !host.endsWith('.googleapis.com')) return false;
+  for (const name of ['OTEL_EXPORTER_OTLP_TRACES_HEADERS', 'OTEL_EXPORTER_OTLP_HEADERS']) {
+    for (const pair of (env[name] ?? '').split(',')) {
+      let key = pair.split('=')[0]?.trim() ?? '';
+      try {
+        key = decodeURIComponent(key);
+      } catch {
+        // A key that does not decode is no authorization header.
+      }
+      if (key.toLowerCase() === 'authorization') return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * The exporter's headers for Google's OTLP endpoint: Authorization with
+ * the account's access token. The exporter may not be thrown at, so a
+ * token the metadata server does not give is logged, and the export goes
+ * without one, which the endpoint refuses and the SDK reports.
+ */
+export function googleAuthHeaders(options: GoogleIdTokenSourceOptions, logger?: Logger): () => Promise<Record<string, string>> {
+  const token = googleAccessTokenSource(options);
+  return async (): Promise<Record<string, string>> => {
+    try {
+      return { Authorization: `Bearer ${await token(false)}` };
+    } catch (error) {
+      logger?.warn('telemetry', { error: `the access token for the OTLP endpoint: ${error instanceof Error ? error.message : String(error)}` });
+      return {};
+    }
+  };
 }
 
 interface Config {

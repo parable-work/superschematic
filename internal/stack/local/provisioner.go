@@ -1010,11 +1010,15 @@ func (p *Provisioner) startServers(ctx context.Context, req registry.ProvisionRe
 		if err != nil {
 			return fmt.Errorf("local: server %s: %w", s.Deployable, err)
 		}
+		engine, err := p.projectEngine(ctx, req, module, s.what(), s.Deployable, true)
+		if err != nil {
+			return err
+		}
 		if s.Language == LanguageTypeScript {
 			if err := p.installWorkspace(ctx, req.OutputRoot, tools[s.Language]); err != nil {
 				return err
 			}
-			builds = append(builds, built{server: s, cmd: Command{Path: tools[s.Language], Args: []string{TypeScriptEntrypoint}, Dir: module, Env: env}})
+			builds = append(builds, built{server: s, cmd: Command{Path: tools[s.Language], Args: []string{TypeScriptEntrypoint}, Dir: module, Env: engine.processEnv(env)}})
 			continue
 		}
 		if s.Language == LanguageRust {
@@ -1035,7 +1039,7 @@ func (p *Provisioner) startServers(ctx context.Context, req registry.ProvisionRe
 			return err
 		}
 		p.printf("build %s: go build %s", s.Deployable, s.Module)
-		if _, err := p.runner().Run(ctx, Command{Path: tools[s.Language], Args: []string{"build", "-o", binary, "."}, Dir: module, Env: buildEnv(req)}); err != nil {
+		if _, err := p.runner().Run(ctx, Command{Path: tools[s.Language], Args: []string{"build", "-o", binary, "."}, Dir: module, Env: engine.buildEnv(req)}); err != nil {
 			return fmt.Errorf("local: build server %s: %w", s.Deployable, err)
 		}
 		builds = append(builds, built{server: s, cmd: Command{Path: binary, Dir: module, Env: env}})

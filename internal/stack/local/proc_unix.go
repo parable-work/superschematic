@@ -32,6 +32,17 @@ func tryLock(f *os.File) (bool, error) {
 	return err == nil, err
 }
 
+// lockFile takes an exclusive lock on f, waiting for another process that
+// holds it; closing f releases it.
+func lockFile(f *os.File) error {
+	for {
+		err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX)
+		if !errors.Is(err, syscall.EINTR) {
+			return err
+		}
+	}
+}
+
 func signalGroup(cmd *exec.Cmd, sig syscall.Signal) error {
 	if cmd.Process == nil {
 		return nil

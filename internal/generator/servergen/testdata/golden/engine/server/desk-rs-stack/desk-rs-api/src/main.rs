@@ -148,6 +148,7 @@ async fn run() -> Result<(), Failure> {
         &desk_rs_api_config.desk_db_database,
         desk_db_types::ENGINE_DOCUMENT,
         r#""permission""#,
+        Some(r#"{"maxAgeMs":2592000000}"#),
     )?;
 
     // Moved to true as the server shuts down, which ends every event

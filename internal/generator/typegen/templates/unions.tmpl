@@ -5,6 +5,10 @@ package {{.PackageName}}
 import (
 	"encoding/json"
 	"fmt"
+{{- if .UnionReads}}
+	"math"
+	"slices"
+{{- end}}
 )
 
 {{range .Unions}}
@@ -49,21 +53,18 @@ func (w {{.Name}}Wrapper) Validate() ValidationErrors {
 	return NewValidationErrors()
 }
 
-// UnmarshalJSON unmarshals the union type.
-//
-{{if $dispatchByDiscriminator}}// This union has a discriminator field {{printf "%q" $discriminator}} with a known
-// literal value per member. The wrapper reads the discriminator value from the
-// payload and dispatches to exactly one member's strict decoder. This avoids
-// the field-shape ambiguity that arises when one member is a structural subset
-// of another (a payload would otherwise match an earlier member's lenient
-// decoder if its extra fields were silently ignored).
-{{else}}// This union has no member-keyed discriminator dispatch. A member's decoder
-// ignores keys it does not declare, so trying each decoder in turn would let
-// the first member accept every payload. The wrapper picks the first member
-// whose fields include every payload key and whose tag values the payload
-// does not contradict. When no member declares every key, it tolerates the
-// unknown keys and picks the first member whose tags the payload allows.
-{{end}}func (w *{{.Name}}Wrapper) UnmarshalJSON(data []byte) error {
+// UnmarshalJSON unmarshals the union type. It picks the member the
+// structural predicate picks (unionPickMember, D31 amended), as the
+// TypeScript, Rust and Python unions pick it, and decodes the payload as
+// that member:
+{{if $dispatchByDiscriminator}}// the member its discriminator, {{printf "%q" $discriminator}}, names, when
+// the payload decodes under the member's types.
+{{else}}// the first member whose fields include every payload key, whose tag
+// values the payload does not contradict and under whose types the payload
+// decodes; when none does, the first member whose tags the payload allows
+// and under whose types it decodes.
+{{end}}// A payload no member reads is an error.
+func (w *{{.Name}}Wrapper) UnmarshalJSON(data []byte) error {
 	var payload map[string]any
 	if err := json.Unmarshal(data, &payload); err != nil {
 		return err
@@ -71,83 +72,262 @@ func (w {{.Name}}Wrapper) Validate() ValidationErrors {
 	if payload == nil {
 		return fmt.Errorf("decode {{.Name}} union: expected object payload")
 	}
-
-	{{if $dispatchByDiscriminator}}rawDiscriminator, ok := payload[{{printf "%q" $discriminator}}]
-	if !ok {
-		return fmt.Errorf("decode {{$unionName}} union: missing discriminator field %q", {{printf "%q" $discriminator}})
-	}
-	discriminator, ok := rawDiscriminator.(string)
-	if !ok {
-		return fmt.Errorf("decode {{$unionName}} union: discriminator field %q must be a string, got %T", {{printf "%q" $discriminator}}, rawDiscriminator)
-	}
-
-	switch discriminator {
-	{{range .Members}}case {{printf "%q" .DiscriminatorValue}}:
-		var member {{.Name}}
-		if err := member.FromMapStrict(payload); err != nil {
-			if err := member.FromMap(payload); err != nil {
-				return fmt.Errorf("decode {{$unionName}} union as {{.Name}}: %w", err)
-			}
+	switch unionPickMember({{printf "%q" .Name}}, payload) {
+	{{range $index, $member := .Members}}case {{$index}}:
+		var member {{$member.Name}}
+		if err := json.Unmarshal(data, &member); err != nil {
+			return fmt.Errorf("decode {{$unionName}} union as {{$member.Name}}: %w", err)
 		}
 		w.Value = member
 		return nil
-	{{end}}default:
-		return fmt.Errorf("decode {{$unionName}} union: unknown discriminator value %q", discriminator)
-	}
-	{{else}}{{range .Members}}
-	// Try {{.Name}}
-	if unionPayloadKeysWithin(payload{{range .Fields}}, {{printf "%q" .}}{{end}}) && unionPayloadTagsAllow(payload{{range .Tags}}, {{printf "%q" .Field}}, {{printf "%q" .Value}}{{end}}) {
-		var member {{.Name}}
-		if err := member.FromMapStrict(payload); err == nil {
-			w.Value = member
-			return nil
-		}
-	}
-	{{end}}{{range .Members}}
-	if unionPayloadTagsAllow(payload{{range .Tags}}, {{printf "%q" .Field}}, {{printf "%q" .Value}}{{end}}) {
-		var member {{.Name}}
-		if err := member.FromMapStrict(payload); err == nil {
-			w.Value = member
-			return nil
-		}
-	}
-	{{end}}
-
-	return fmt.Errorf("no matching type found for {{$unionName}} union")
-	{{end}}
+	{{end}}}
+	{{- if $dispatchByDiscriminator}}
+	return fmt.Errorf("decode {{$unionName}} union: no member reads the payload, whose %s is %v", {{printf "%q" $discriminator}}, payload[{{printf "%q" $discriminator}}])
+	{{- else}}
+	return fmt.Errorf("decode {{$unionName}} union: no member reads the payload")
+	{{- end}}
 }
 
 {{end}}
-{{- if .HasShapeDispatchedUnions}}
-// unionPayloadKeysWithin reports whether every payload key is one of fields.
-func unionPayloadKeysWithin(payload map[string]any, fields ...string) bool {
-	for key := range payload {
-		known := false
-		for _, field := range fields {
-			if key == field {
-				known = true
+{{- if .UnionReads}}
+// unionReadField is one field of a type as the structural predicate reads
+// it (codegen.ReadModel, D31 amended): the TypeScript, Rust and Python
+// unions hold the same table.
+type unionReadField struct {
+	name     string
+	required bool
+	depth    int
+	isMap    bool
+	kind     string
+	values   []string
+	json     string
+	scalar   func(any) bool
+	ref      string
+}
+
+// unionReadType is one object type of the predicate.
+type unionReadType struct {
+	strict bool
+	fields []unionReadField
+}
+
+// unionReadMember is one member of a union: its type, the discriminator
+// value that names it, and its shape.
+type unionReadMember struct {
+	typeName string
+	tag      string
+	fields   []string
+	tags     [][2]string
+}
+
+// unionReadUnion is one union of the predicate; discriminator is "" for a
+// union picked by its members' shapes.
+type unionReadUnion struct {
+	discriminator string
+	members       []unionReadMember
+}
+
+// unionReadTypes are the object types the unions reach.
+var unionReadTypes = {{.UnionReads.TypesSource}}
+
+// unionReadUnions are the unions the predicate picks members of.
+var unionReadUnions = {{.UnionReads.UnionsSource}}
+{{range .UnionReads.ScalarChecks}}
+// {{.Func}} reports whether value decodes as a {{.Symbol}}{{if .Validate}} its validator passes{{end}}.
+func {{.Func}}(raw any) bool {
+	var value {{.Symbol}}
+	if !unionDecodesAs(raw, &value) {
+		return false
+	}
+	{{- if .Validate}}
+	valid, _ := {{.Validate}}
+	return valid
+	{{- else}}
+	return true
+	{{- end}}
+}
+{{end}}
+// unionDecodesAs reports whether value, a decoded JSON value, decodes into
+// target.
+func unionDecodesAs(value any, target any) bool {
+	raw, err := json.Marshal(value)
+	return err == nil && json.Unmarshal(raw, target) == nil
+}
+
+// unionReadsJSON reports whether value has a scalar's JSON kind.
+func unionReadsJSON(kind string, value any) bool {
+	switch kind {
+	case "string":
+		_, ok := value.(string)
+		return ok
+	case "number":
+		_, ok := value.(float64)
+		return ok
+	case "integer":
+		number, ok := value.(float64)
+		return ok && number == math.Trunc(number)
+	case "boolean":
+		_, ok := value.(bool)
+		return ok
+	case "jsonObject":
+		_, ok := value.(map[string]any)
+		return ok
+	case "jsonArray":
+		_, ok := value.([]any)
+		return ok
+	}
+	return true
+}
+
+// unionReadsValue reports whether one value, not null, has the field's kind.
+func unionReadsValue(field unionReadField, value any) bool {
+	switch field.kind {
+	case "string":
+		_, ok := value.(string)
+		return ok
+	case "number":
+		_, ok := value.(float64)
+		return ok
+	case "boolean":
+		_, ok := value.(bool)
+		return ok
+	case "enum":
+		text, ok := value.(string)
+		return ok && slices.Contains(field.values, text)
+	case "scalar":
+		if field.scalar != nil {
+			return field.scalar(value)
+		}
+		return unionReadsJSON(field.json, value)
+	case "object":
+		return unionReadsType(field.ref, value)
+	case "union":
+		payload, ok := value.(map[string]any)
+		return ok && unionPickMember(field.ref, payload) >= 0
+	}
+	return true
+}
+
+// unionReadsLevels reports whether value holds depth list levels of the
+// field's values, no element null.
+func unionReadsLevels(field unionReadField, value any, depth int) bool {
+	if depth == 0 {
+		return unionReadsValue(field, value)
+	}
+	items, ok := value.([]any)
+	if !ok {
+		return false
+	}
+	for _, item := range items {
+		if item == nil || !unionReadsLevels(field, item, depth-1) {
+			return false
+		}
+	}
+	return true
+}
+
+// unionReadsType is the structural predicate: whether value decodes under
+// the type's types. It is a JSON object; a @strictJSON type's holds no key
+// the type does not declare; each required field is present and not null;
+// and each field present and not null has its kind at every list level and
+// in every map value, none of which is null. A field's own rules take no
+// part.
+func unionReadsType(name string, value any) bool {
+	payload, ok := value.(map[string]any)
+	if !ok {
+		return false
+	}
+	readType, known := unionReadTypes[name]
+	if !known {
+		return true
+	}
+	if readType.strict {
+		for key := range payload {
+			if !slices.ContainsFunc(readType.fields, func(field unionReadField) bool { return field.name == key }) {
+				return false
+			}
+		}
+	}
+	for _, field := range readType.fields {
+		fieldValue := payload[field.name]
+		if fieldValue == nil {
+			if field.required {
+				return false
+			}
+			continue
+		}
+		if !field.isMap {
+			if !unionReadsLevels(field, fieldValue, field.depth) {
+				return false
+			}
+			continue
+		}
+		entries, ok := fieldValue.(map[string]any)
+		if !ok {
+			return false
+		}
+		for _, entry := range entries {
+			if entry == nil || !unionReadsLevels(field, entry, field.depth) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// unionPickMember returns the index of the member of union name that
+// payload is, or -1. A discriminated union's only candidate is the member
+// its discriminator names. Any other union's candidates are the members
+// whose fields include every payload key and whose tag values the payload
+// does not contradict, then, when none of those reads it, the members whose
+// tags the payload allows. The first candidate that reads the payload
+// (unionReadsType) is the member.
+func unionPickMember(name string, payload map[string]any) int {
+	union, ok := unionReadUnions[name]
+	if !ok {
+		return -1
+	}
+	if union.discriminator != "" {
+		tag, _ := payload[union.discriminator].(string)
+		for index, member := range union.members {
+			if member.tag == tag {
+				if unionReadsType(member.typeName, payload) {
+					return index
+				}
+				return -1
+			}
+		}
+		return -1
+	}
+	tagsAllow := func(member unionReadMember) bool {
+		for _, tag := range member.tags {
+			if raw, present := payload[tag[0]]; present {
+				if text, isString := raw.(string); !isString || text != tag[1] {
+					return false
+				}
+			}
+		}
+		return true
+	}
+	for index, member := range union.members {
+		within := true
+		for key := range payload {
+			if !slices.Contains(member.fields, key) {
+				within = false
 				break
 			}
 		}
-		if !known {
-			return false
+		if within && tagsAllow(member) && unionReadsType(member.typeName, payload) {
+			return index
 		}
 	}
-	return true
-}
-
-// unionPayloadTagsAllow takes field, value pairs and reports whether the
-// payload leaves each field absent or sets it to that string value.
-func unionPayloadTagsAllow(payload map[string]any, tags ...string) bool {
-	for i := 0; i+1 < len(tags); i += 2 {
-		raw, ok := payload[tags[i]]
-		if !ok {
-			continue
-		}
-		if value, isString := raw.(string); !isString || value != tags[i+1] {
-			return false
+	// No member declares every payload key and reads it: tolerate the
+	// unknown keys.
+	for index, member := range union.members {
+		if tagsAllow(member) && unionReadsType(member.typeName, payload) {
+			return index
 		}
 	}
-	return true
+	return -1
 }
-{{end}}
+{{- end}}

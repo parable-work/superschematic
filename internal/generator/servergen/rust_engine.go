@@ -51,11 +51,13 @@ type RustEngine struct {
 	Service string
 	Var     string
 
-	// Namespace, Mount and Policy are what apigen.EngineInfo holds of it;
-	// Policy is the access policy's JSON.
+	// Namespace, Mount, Policy and Retention are what apigen.EngineInfo
+	// holds of it; Policy is the access policy's JSON, and Retention the
+	// event log's, empty when it keeps every event.
 	Namespace string
 	Mount     string
 	Policy    string
+	Retention string
 
 	// Types are the engine types, sorted: the runner's principal holds
 	// each as a permission.
@@ -92,13 +94,27 @@ func (e *RustEngine) PolicyLiteral() string {
 	return `r#"` + e.Policy + `"#`
 }
 
+// RetentionLiteral is the event log's retention as a Rust expression of
+// an Option<&str>: None when the log keeps every event, else its JSON as a
+// raw string literal, unless the JSON holds the raw string's end.
+func (e *RustEngine) RetentionLiteral() string {
+	switch {
+	case e.Retention == "":
+		return "None"
+	case strings.Contains(e.Retention, `"#`):
+		return "Some(" + rustString(e.Retention) + ")"
+	default:
+		return `Some(r#"` + e.Retention + `"#)`
+	}
+}
+
 // OpenLet is main.rs's statement that opens e in the background (engine.rs
 // sets up what the entrypoint's kind runs once it opens: a server deploys
 // the engine document, a runner starts the runner).
 func (s *RustServer) OpenLet(e *RustEngine) string {
 	return rustLetCall(e.Var, "engine::open", "?",
 		rustString(e.Service), rustString(e.Database.Field), "&"+e.Database.From,
-		e.TypesAlias+"::ENGINE_DOCUMENT", e.PolicyLiteral())
+		e.TypesAlias+"::ENGINE_DOCUMENT", e.PolicyLiteral(), e.RetentionLiteral())
 }
 
 // RoutesLet is main.rs's statement that builds the router of e's routes,
@@ -254,6 +270,7 @@ func (s *RustServer) newRustEngine(in RustInput, d *RustDatabase, info *apigen.E
 		Namespace:  info.Namespace,
 		Mount:      info.Mount,
 		Policy:     string(info.Policy),
+		Retention:  string(info.Retention),
 		Types:      slices.Clone(info.Types),
 		TypesCrate: s.Naming.RustTypesCrate(d.Service),
 		TypesAlias: taken.take(rustStem(d.Service) + "_types"),

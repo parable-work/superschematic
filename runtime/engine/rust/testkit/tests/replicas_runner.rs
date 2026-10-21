@@ -7,6 +7,9 @@
 //! under a pass that is under way: a reaction's cursor and a schedule's
 //! next run are read again under the namespace's lock, so a schedule
 //! fires once for one due time, and Timers fires each deadline once.
+//! Retention prunes on the runner that holds the lease alone, and an event
+//! stream another replica serves, which it prunes past, ends, its resume
+//! answered 410 `cursor_expired`.
 //!
 //! The lease is Postgres's: on SQLite one process writes the file and its
 //! runner always holds it, so these cases run on Postgres alone, when
@@ -21,15 +24,18 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 
 use replicas_support::{as_replica, replica_name, set_busy_timeout, wait_for, Admin, PATIENCE};
-use superschematic_engine::storage::{lock_key, Dialect, Lock};
+use superschematic_engine::api::{
+    handle, start_stream, ApiOptions, Body, Caller, Pull, Request, StreamOptions,
+};
+use superschematic_engine::storage::{lock_key, Dialect, Lock, SqlValue};
 use superschematic_engine::{
     BehaviorSet, Clock, CreateOptions, Engine, EngineErrorCode, EngineEvent, EngineOptions,
-    GetOptions, Principal, RunnerOptions,
+    EventsAfter, GetOptions, Principal, ReadEvents, RetentionOptions, RunnerOptions,
 };
 use superschematic_engine_testkit::behaviors::{Ledger, LedgerConfig};
 use support::{alice, code, publish, schema_document, targets, Target};
@@ -215,10 +221,10 @@ fn one_runner_runs_at_a_time_and_the_other_takes_over_when_it_stops_or_its_sessi
         }
         // The first's session ends, as its crash would: the second takes
         // the lease, and the first, finding its lease gone, stays idle.
-        assert!(admin.terminate_lock_holder(key), "the lease's session ends");
-        wait_for("the second takes the lease", || {
-            holder().as_deref() == Some(names[1].as_str())
-        });
+        let retaken = hand_over(&admin, key, &names[0], &names[1]);
+        if retaken > 0 {
+            eprintln!("the first took its lease again {retaken} times before the second");
+        }
         created(&first, 6, 12);
         wait_for("the second runner's notes", || all_handled(12));
         for n in 6..12 {
@@ -247,6 +253,41 @@ fn one_runner_runs_at_a_time_and_the_other_takes_over_when_it_stops_or_its_sessi
         assert!(!first.poisoned() && !second.poisoned());
         second.shutdown();
         first.shutdown();
+    }
+}
+
+/// Ends the session of `from`, the replica that holds the lease `key`,
+/// until `to` takes the lease. A runner whose lease's session ended tries
+/// the lease again at its next wake, as the other does every
+/// `lease_retry_ms`, and whichever tries first takes it: when the holder
+/// is still at work, or its listener wakes it for a notice of its own last
+/// commits, it is often its own runner that takes the lease again, with a
+/// new session, which is one runner holding the lease as it should, not a
+/// takeover. So each time `from` holds the lease again, its new session
+/// ends too, until `to` is the first to try. Returns how many times `from`
+/// took it again.
+fn hand_over(admin: &Admin, key: i64, from: &str, to: &str) -> usize {
+    let mut ended = admin.lock_holder(key).expect("a holder of the lease");
+    assert!(admin.terminate_lock_holder(key), "the lease's session ends");
+    let mut retaken = 0;
+    let deadline = Instant::now() + PATIENCE;
+    loop {
+        if let Some(pid) = admin.lock_holder(key) {
+            match admin.lock_holder_name(key).as_deref() {
+                Some(name) if name == to => return retaken,
+                Some(name) if name == from && pid != ended => {
+                    retaken += 1;
+                    ended = pid;
+                    admin.terminate_lock_holder(key);
+                }
+                _ => {}
+            }
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the lease passes from {from} to {to}: still not done, {from} took it again {retaken} times"
+        );
+        thread::sleep(Duration::from_millis(10));
     }
 }
 
@@ -455,6 +496,340 @@ fn timers_fires_each_deadline_once_across_a_handover_and_overlapping_passes() {
         let fired = fires(&second);
         assert_eq!(fired.len(), 5, "{fired:?}");
         assert!(fired.values().all(|&count| count == 1), "{fired:?}");
+    }
+}
+
+// pruned_at is when the engine's own runner last finished pruning, None
+// when it never has.
+fn pruned_at(engine: &Engine) -> Option<i64> {
+    engine
+        .runner()
+        .status()
+        .expect("status")
+        .retention
+        .expect("the engine has retention")
+        .previous
+}
+
+fn floor(engine: &Engine) -> i64 {
+    engine.events().floor(None).expect("the floor")
+}
+
+#[test]
+fn only_the_runner_that_holds_the_lease_prunes_and_a_stream_it_prunes_past_resumes_to_410() {
+    for target in targets("retention_on_the_lease") {
+        if target.dialect != Dialect::Postgres {
+            continue;
+        }
+        let admin = Admin::new(&target).expect("the administrator");
+        let key = lease_key(&target);
+        let names = [replica_name("first"), replica_name("second")];
+        // Both keep a namespace's newest two events and prune every second.
+        let [first, second] = [0, 1].map(|n| {
+            let mut options = replica_options(&target, BehaviorSet::new(), &names[n]);
+            options.retention = Some(RetentionOptions {
+                max_events: Some(2),
+                every_ms: Some(1_000),
+                ..RetentionOptions::default()
+            });
+            Engine::open(options).expect("open a replica").shared()
+        });
+        let document = schema_document(
+            "Order",
+            json!([{"name": "title", "typeRef": {"name": "string"}, "required": true}]),
+            json!({}),
+        );
+        publish(&second, &document, None);
+        // A stream the second serves, caught up at the head, which its
+        // client then stops reading.
+        let mut stream = start_stream(
+            &second,
+            &StreamOptions {
+                page_size: Some(1),
+                heartbeat_ms: Some(60_000),
+            },
+            &alice(),
+            &ReadEvents {
+                after: Some(EventsAfter::Head),
+                ..ReadEvents::default()
+            },
+        )
+        .expect("a stream");
+        let ready = second.events().head().expect("the head");
+        for n in 0..6 {
+            create_in(&second, "Order", None, &format!("o{n}"));
+        }
+        // Only the runner that holds the lease prunes: the first's.
+        first.runner().start().expect("start");
+        wait_for("the first takes the lease", || {
+            admin.lock_holder_name(key).as_deref() == Some(names[0].as_str())
+        });
+        second.runner().start().expect("start");
+        wait_for("the first prunes past the stream", || {
+            floor(&second) > ready
+        });
+        // The pass ends a step after the batch that moved the floor.
+        wait_for("the first's pass ends", || pruned_at(&first).is_some());
+        assert_eq!(pruned_at(&second), None, "the second waits for the lease");
+        let head = second.events().head().expect("the head");
+        assert_eq!(floor(&second), head - 2, "the newest two are kept");
+
+        // The stream retention passed ends, and its resume is 410
+        // cursor_expired, with the floor and the head to start again from.
+        let deadline = Instant::now() + PATIENCE;
+        loop {
+            match stream.next(Duration::from_millis(100)) {
+                Pull::End => break,
+                Pull::Data(bytes) => {
+                    let text = String::from_utf8(bytes).expect("UTF-8");
+                    assert!(
+                        text.starts_with(": open") || text.starts_with("event: ready"),
+                        "no event the runner pruned is sent: {text}"
+                    );
+                }
+                Pull::Pending => {}
+            }
+            assert!(Instant::now() < deadline, "the stream did not end");
+        }
+        let resumed = handle(
+            &second,
+            &ApiOptions::default(),
+            &Request {
+                method: "GET".to_owned(),
+                path: "/namespaces/default/events".to_owned(),
+                headers: vec![
+                    ("accept".to_owned(), "text/event-stream".to_owned()),
+                    ("last-event-id".to_owned(), ready.to_string()),
+                ],
+                caller: Caller {
+                    principal: Some(alice()),
+                    ..Caller::default()
+                },
+                request_id: "r1".to_owned(),
+                ..Request::default()
+            },
+        );
+        assert_eq!(resumed.status, 410);
+        assert!(!matches!(resumed.body, Body::Stream(_)));
+        let problem: Value = serde_json::from_slice(resumed.bytes()).expect("a problem");
+        assert_eq!(problem["code"], "cursor_expired", "{problem}");
+        assert_eq!(
+            problem["details"],
+            json!({"after": ready, "floor": head - 2, "head": head}),
+            "{problem}"
+        );
+
+        // The first stops: the second takes the lease and prunes from then.
+        first.runner().stop();
+        wait_for("the second takes the lease", || {
+            admin.lock_holder_name(key).as_deref() == Some(names[1].as_str())
+        });
+        for n in 6..9 {
+            create_in(&first, "Order", None, &format!("o{n}"));
+        }
+        let head = first.events().head().expect("the head");
+        wait_for("the second prunes", || floor(&first) == head - 2);
+        wait_for("the second's pass ends", || pruned_at(&second).is_some());
+        assert!(!first.poisoned() && !second.poisoned());
+        second.shutdown();
+        first.shutdown();
+    }
+}
+
+// events_kept is how many events of the default namespace the log holds.
+fn events_kept(admin: &Admin) -> i64 {
+    admin
+        .db()
+        .read(|tx| {
+            tx.get(
+                "SELECT COUNT(*) AS count FROM engine_events WHERE namespace = ?",
+                &[SqlValue::from("default")],
+            )
+        })
+        .expect("count the events")
+        .expect("a count")
+        .i64("count")
+        .expect("an integer")
+}
+
+// pruned_so_far is the count of events engine_log_floors says retention
+// pruned of the default namespace.
+fn pruned_so_far(admin: &Admin) -> i64 {
+    admin
+        .db()
+        .read(|tx| {
+            tx.get(
+                "SELECT pruned FROM engine_log_floors WHERE namespace = ?",
+                &[SqlValue::from("default")],
+            )
+        })
+        .expect("read the floor")
+        .map_or(0, |row| row.i64("pruned").expect("an integer"))
+}
+
+fn retention_replica(target: &Target, name: &str, retention: RetentionOptions) -> Arc<Engine> {
+    let mut options = replica_options(target, BehaviorSet::new(), name);
+    options.retention = Some(retention);
+    set_busy_timeout(&mut options, PATIENCE);
+    Engine::open(options).expect("open a replica").shared()
+}
+
+fn order_schema() -> Value {
+    schema_document(
+        "Order",
+        json!([{"name": "title", "typeRef": {"name": "string"}, "required": true}]),
+        json!({}),
+    )
+}
+
+#[test]
+fn a_prune_another_runner_overtook_never_moves_the_floor_back_nor_counts_twice() {
+    for target in targets("retention_overtaken") {
+        if target.dialect != Dialect::Postgres {
+            continue;
+        }
+        let admin = Admin::new(&target).expect("the administrator");
+        let names = [replica_name("first"), replica_name("second")];
+        let first = retention_replica(
+            &target,
+            &names[0],
+            RetentionOptions {
+                max_events: Some(3),
+                ..RetentionOptions::default()
+            },
+        );
+        publish(&first, &order_schema(), None);
+        for n in 0..10 {
+            create_in(&first, "Order", None, &format!("o{n}"));
+        }
+        let head = first.events().head().expect("the head");
+        let total = events_kept(&admin);
+        // The first's prune chooses its batch from floor 0, then waits for
+        // the namespace's lock, which a writer holds; inside it, another
+        // runner's prune moves the floor past that batch, keeping the newest
+        // two, as a pass of the next lease holder would at a handover.
+        let blocker = target.db();
+        let (release, released) = mpsc::channel::<()>();
+        let overtaken = head - 2;
+        thread::scope(|scope| {
+            let (held, holding) = mpsc::channel::<()>();
+            let block = scope.spawn(move || {
+                blocker.write(Lock::Namespace("default"), |tx| {
+                    held.send(()).expect("say the lock is held");
+                    let _ = released.recv_timeout(PATIENCE);
+                    tx.run(
+                        "INSERT INTO engine_log_floors (namespace, floor, publish_floor, pruned) VALUES (?, ?, 0, ?)",
+                        &[
+                            SqlValue::from("default"),
+                            SqlValue::Integer(overtaken),
+                            SqlValue::Integer(total - 2),
+                        ],
+                    )?;
+                    tx.run(
+                        "DELETE FROM engine_events WHERE namespace = ? AND cursor <= ?",
+                        &[SqlValue::from("default"), SqlValue::Integer(overtaken)],
+                    )?;
+                    Ok::<_, superschematic_engine::storage::Error>(())
+                })
+            });
+            holding.recv_timeout(PATIENCE).expect("the lock is held");
+            let pruning = scope.spawn(|| first.runner().prune());
+            wait_for("the first's prune waits on the lock", || {
+                admin.waiting(&names[0])
+            });
+            release.send(()).expect("let the lock go");
+            block
+                .join()
+                .expect("the blocker")
+                .expect("the blocker's write");
+            pruning.join().expect("the prune").expect("prune");
+        });
+        // The first chose its batch again from the floor it found: the
+        // newest two are already fewer than its three, so it pruned none.
+        assert_eq!(floor(&first), overtaken, "the floor never moves back");
+        assert_eq!(events_kept(&admin), 2);
+        assert_eq!(pruned_so_far(&admin), total - 2, "nothing counted twice");
+        // A resume from a cursor in what the other pruned is 410.
+        let gone = first
+            .events()
+            .read(
+                &alice(),
+                &ReadEvents {
+                    after: Some(EventsAfter::Cursor(overtaken - 1)),
+                    ..ReadEvents::default()
+                },
+            )
+            .expect_err("before the floor");
+        assert_eq!(code(Err::<(), _>(gone)), EngineErrorCode::CursorExpired);
+        first.shutdown();
+    }
+}
+
+#[test]
+fn a_runner_that_takes_the_lease_again_counts_again_and_keeps_max_events() {
+    for target in targets("retention_regained") {
+        if target.dialect != Dialect::Postgres {
+            continue;
+        }
+        let admin = Admin::new(&target).expect("the administrator");
+        let key = lease_key(&target);
+        let names = [replica_name("first"), replica_name("second")];
+        let retention = RetentionOptions {
+            max_events: Some(4),
+            every_ms: Some(1_000),
+            ..RetentionOptions::default()
+        };
+        let [first, second] =
+            [0, 1].map(|n| retention_replica(&target, &names[n], retention.clone()));
+        publish(&first, &order_schema(), None);
+        let created = std::cell::Cell::new(0);
+        let create = |engine: &Engine, many: usize| {
+            for _ in 0..many {
+                create_in(engine, "Order", None, &format!("o{}", created.get()));
+                created.set(created.get() + 1);
+            }
+        };
+        // Outside the lease: the first counts, the second prunes past what
+        // it counted, and the first, counting from a floor that moved,
+        // counts again.
+        create(&first, 6);
+        first.runner().prune().expect("prune");
+        assert_eq!(events_kept(&admin), 4);
+        create(&second, 3);
+        second.runner().prune().expect("prune");
+        assert_eq!(events_kept(&admin), 4);
+        create(&first, 1);
+        first.runner().prune().expect("prune");
+        assert_eq!(events_kept(&admin), 4, "never fewer than maxEvents");
+
+        // Through the lease: the first prunes, the second takes the lease
+        // and prunes, the first takes it again and prunes.
+        let takes = |engine: &Engine, name: &str| {
+            engine.runner().start().expect("start");
+            wait_for("the runner takes the lease", || {
+                admin.lock_holder_name(key).as_deref() == Some(name)
+            });
+        };
+        let settles = |what: &str| {
+            wait_for(what, || events_kept(&admin) <= 4);
+            assert_eq!(events_kept(&admin), 4, "{what}: never fewer than maxEvents");
+        };
+        create(&first, 5);
+        takes(&first, &names[0]);
+        settles("the first prunes");
+        first.runner().stop();
+        create(&second, 5);
+        takes(&second, &names[1]);
+        settles("the second prunes");
+        second.runner().stop();
+        create(&first, 2);
+        takes(&first, &names[0]);
+        settles("the first prunes again");
+        thread::sleep(Duration::from_millis(1_500));
+        assert_eq!(events_kept(&admin), 4, "another pass keeps them");
+        first.runner().stop();
+        second.shutdown();
+        first.shutdown();
     }
 }
 

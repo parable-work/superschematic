@@ -20,7 +20,7 @@ the design.
 | --- | --- |
 | traces over OTLP/HTTP in protobuf from every Go, TypeScript and Rust server, job and worker: a span per request, per call to another API, per job run and per worker message | metrics; logs over OTLP |
 | `stack dev` and `stack run` hand your shell's `OTEL_` variables to each process | a collector that `stack dev` starts for you |
-| | export on gcp, which sets no collector yet ([below](#on-google-cloud)) |
+| [on gcp](#on-google-cloud), an environment's `telemetry` exports to Cloud Trace, or to a collector, and a deployable's turns its own off or on | a collector on gcp that the target runs for you |
 
 ## Trace a stack on your machine
 
@@ -110,17 +110,44 @@ port, 4317.
 
 ## On Google Cloud
 
-The gcp target sets none of these variables yet, so a deployable on Cloud
-Run exports nothing. An environment's `env` settings bind an API's
-`@envVars` fields alone, and declaring OTEL variables as fields to set
-them puts a collector's address in the schemas. Each Cloud Run service,
-job and worker pool already runs as an account that holds the Cloud Trace
-agent role. What the target needs, and does not have yet:
+The gcp target sets the variables itself when the environment's
+`telemetry` value turns export on. `{}` sends every server's, job's and
+worker's traces to Cloud Trace:
 
-- a value of the environment that it sets as the OTEL variables on each
-  service, job and worker pool, with `deployment.environment.name` and the
-  image's digest in `OTEL_RESOURCE_ATTRIBUTES`;
-- somewhere to send: an OpenTelemetry Collector beside each container,
-  with Google's exporter, or Google's OTLP endpoint,
-  `telemetry.googleapis.com`, whose access token expires, so a fixed
-  `OTEL_EXPORTER_OTLP_HEADERS` cannot carry it.
+```ts
+@environment({
+  target: "gcp",
+  gcp: { project: "acme-prod", region: "us-east1", telemetry: { sampleRatio: 0.25 } },
+  settings: [{ of: ShopOrders, job: "ShipOrders", telemetry: false }]
+})
+export abstract class Production {}
+```
+
+| Setting | Does |
+| --- | --- |
+| `telemetry: {}` in the environment's gcp values | each server, job and worker exports to Cloud Trace's OTLP endpoint, `https://telemetry.googleapis.com` |
+| `telemetry.endpoint` | exports to an OTLP/HTTP collector at that base URL instead, such as `http://otel-collector.internal:4318` |
+| `telemetry.sampleRatio` | samples that share, 0 to 1, of the traces that start in a deployable (`parentbased_traceidratio`); every trace unless set |
+| `telemetry: false` or `true` in a deployable's settings | turns that server's, job's or worker's export off, or on in an environment without `telemetry`, to Cloud Trace |
+
+Each deployable that exports gets `OTEL_EXPORTER_OTLP_ENDPOINT`,
+`OTEL_SERVICE_NAME`, its name, and `OTEL_RESOURCE_ATTRIBUTES` with
+`deployment.environment.name`, `gcp.project_id`, `cloud.provider`,
+`cloud.region` and `service.version`, its image by digest. To Cloud
+Trace, its account gets the Cloud Trace agent role, and each runtime
+sends the account's access token over https, which it asks the metadata
+server for and fetches again before it expires; no headers variable
+could carry a token that expires within the hour. An `http://` endpoint
+under `googleapis.com` is refused. `stack bootstrap` enables the
+Telemetry and Cloud Trace APIs for every environment with Cloud Run, so
+a project bootstrapped before this release runs `stack bootstrap` once
+more. To a collector, no role is granted and no token is sent; the
+deployable reaches the collector as it reaches the internet, or through
+the environment's VPC when it calls another server.
+
+Before this release every Cloud Run service, job and worker pool's
+account held the Cloud Trace agent role. Now only a deployable that
+exports to Cloud Trace holds it, and the next deploy of an existing
+environment removes it from the others. If your own code calls Cloud
+Trace directly, turn `telemetry` on for its deployable, or grant the role
+yourself.

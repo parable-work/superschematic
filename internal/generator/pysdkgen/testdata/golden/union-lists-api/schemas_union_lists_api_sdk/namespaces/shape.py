@@ -24,6 +24,9 @@ _TYPES_PACKAGE_RESOLVED = False
 # one through a pydantic TypeAdapter of the alias, made once per union.
 _UNION_OUTPUT_TYPES = frozenset({"Marker", "Shape"})
 _UNION_ADAPTERS: dict[str, Any] = {}
+# The unions this namespace's arguments hold. _validate_scalar_argument
+# reads one as the member the union picks and checks the member's rules.
+_UNION_ARGUMENT_TYPES = frozenset({"Payment", "Shape"})
 
 
 def _load_types_package() -> Any | None:
@@ -44,10 +47,14 @@ def _union_reader(type_name: str, union_type: Any) -> Any | None:
     """Return the function that reads a value as the union union_type, or
     None without pydantic.
 
-    It validates in lax mode, as from_dict_non_strict reads a model, so the
-    value is the member the union picks: by its discriminator when it has
-    one (Field(discriminator=...)), else the member the value fits.
+    A dict is read as the member the types package's structural predicate
+    picks (unions.read_union_value, D31 amended), as the Go, TypeScript and
+    Rust unions pick it, without coercion. A types package without the
+    predicate reads it through the alias in lax mode.
     """
+    read_union_value = getattr(getattr(_load_types_package(), "unions", None), "read_union_value", None)
+    if callable(read_union_value):
+        return lambda value: read_union_value(type_name, value)
     adapter = _UNION_ADAPTERS.get(type_name)
     if adapter is None:
         try:
@@ -58,8 +65,11 @@ def _union_reader(type_name: str, union_type: Any) -> Any | None:
     return lambda value: adapter.validate_python(value, strict=False)
 if TYPE_CHECKING:
     from schemas_types_union_lists_api import (
+        Checkout,
         Drawing,
         Marker,
+        Payment,
+        Probe,
         Shape,
     )
 class ShapeNamespace:
@@ -254,7 +264,8 @@ class ShapeNamespace:
         model_validate to coerce stringified enum values. A model is read
         with the generated from_dict_non_strict helper instead, which is the
         type library's contract for parsing API payloads, and a union in
-        the same lax mode through its alias (_union_reader).
+        the member the types package's structural predicate picks
+        (_union_reader).
         """
         output_type = self._resolve_validation_type(type_name)
         if output_type is None:
@@ -309,6 +320,31 @@ class ShapeNamespace:
         items = self._coerce_response(raw["items"], item_type_name, True, "data.items")
         return Page(items=items, next=next_cursor)
 
+    def _validate_union_argument(self, value: Any, union_name: str, field_name: str) -> Any:
+        """Read one value of a union argument as the member the union picks
+        and return it as it is sent, by wire name.
+
+        A dict is read as the member the types package's structural
+        predicate picks (unions.read_union_value, D31 amended), as the Go,
+        TypeScript and Rust unions pick it, so nothing is coerced: a value
+        no member reads raises ValidationError at field_name. The member's
+        rules are then checked by its validate_all, each error under
+        field_name (payment.number), as the route reports them.
+        """
+        read_union_value = getattr(getattr(_load_types_package(), "unions", None), "read_union_value", None)
+        if not callable(read_union_value):
+            return value
+        try:
+            member = read_union_value(union_name, value)
+        except ValueError as err:
+            raise ValidationError(
+                {field_name: [{"validator": "type", "message": str(err)}]},
+            ) from err
+        rule_errors = self._rule_errors(member, field_name)
+        if rule_errors:
+            raise ValidationError(rule_errors)
+        return self._client.to_dict(member)
+
     def _validate_scalar_argument(self, value: Any, scalar_type_name: str, field_name: str) -> Any:
         """Validate one value of an argument and return it as it is sent.
 
@@ -328,6 +364,8 @@ class ShapeNamespace:
         scalar_type = self._resolve_validation_type(scalar_type_name)
         if scalar_type is None:
             return value
+        if scalar_type_name in _UNION_ARGUMENT_TYPES:
+            return self._validate_union_argument(value, scalar_type_name, field_name)
 
         from_dict_non_strict = getattr(scalar_type, "from_dict_non_strict", None)
         if callable(from_dict_non_strict) and isinstance(value, (dict, scalar_type)):
@@ -357,6 +395,84 @@ class ShapeNamespace:
         except Exception as err:
             validation_errors = self._build_validation_errors(err, default_field=field_name)
             raise ValidationError(validation_errors) from err
+
+    def _validate_list_of_lists_argument(self, value: Any, element_type_name: str, field_name: str) -> list[list[Any]]:
+        """Validate an array-of-arrays argument and return its rows of
+        validated elements, each as it is sent.
+
+        Each inner list must be a list (an empty one is valid): None is
+        required at field[i], and any other value a type error there. Each
+        element is validated as element_type_name at field[i][j], a field of
+        an element at field[i][j].name.
+        """
+        if not isinstance(value, (list, tuple)):
+            raise ValidationError(
+                {field_name: [{"validator": "type", "message": f"{field_name} must be a list of lists"}]},
+            )
+        rows: list[list[Any]] = []
+        for row_index, row in enumerate(value):
+            row_path = f"{field_name}[{row_index}]"
+            if row is None:
+                raise ValidationError(
+                    {row_path: [{"validator": "required", "message": f"{row_path} is required"}]},
+                )
+            if not isinstance(row, (list, tuple)):
+                raise ValidationError(
+                    {row_path: [{"validator": "type", "message": f"{row_path} must be a list"}]},
+                )
+            rows.append(
+                [
+                    self._validate_scalar_argument(item, element_type_name, f"{row_path}[{item_index}]")
+                    for item_index, item in enumerate(row)
+                ],
+            )
+        return rows
+
+    def _validate_map_argument(
+        self,
+        value: Any,
+        value_type_name: str,
+        field_name: str,
+        *,
+        of_lists: bool = False,
+    ) -> dict[str, Any]:
+        """Validate a map argument and return it as a dict of its validated
+        values, which is sent as a JSON object.
+
+        The map's keys must be strings. Each value is validated as
+        value_type_name at field[key]; for a map of lists (of_lists), each
+        value must be a list (an empty one is valid) whose elements are
+        validated at field[key][i]. A value or an element is never None,
+        and a failure inside one is reported under its path
+        (field[key].name). Every failure is raised at once.
+        """
+        if not isinstance(value, Mapping) or not all(isinstance(key, str) for key in value):
+            raise ValidationError(
+                {field_name: [{"validator": "type", "message": f"{field_name} must be a map with str keys"}]},
+            )
+        validation_errors: dict[str, list[dict[str, str]]] = {}
+
+        def validate(item: Any, path: str) -> Any:
+            try:
+                return self._validate_scalar_argument(item, value_type_name, path)
+            except ValidationError as err:
+                validation_errors.update(err.errors)
+                return None
+
+        validated: dict[str, Any] = {}
+        for key, entry in value.items():
+            entry_path = f"{field_name}[{key}]"
+            if not of_lists:
+                validated[key] = validate(entry, entry_path)
+            elif entry is None:
+                validation_errors[entry_path] = [{"validator": "required", "message": f"{entry_path} is required"}]
+            elif not isinstance(entry, (list, tuple)):
+                validation_errors[entry_path] = [{"validator": "type", "message": f"{entry_path} must be a list"}]
+            else:
+                validated[key] = [validate(item, f"{entry_path}[{index}]") for index, item in enumerate(entry)]
+        if validation_errors:
+            raise ValidationError(validation_errors)
+        return validated
 
     def _coerce_list_of_lists_response(self, raw: Any, output_type_name: str) -> Any:
         """Read an array-of-arrays response row by row, as _coerce_response
@@ -439,6 +555,66 @@ class ShapeNamespace:
 
         if field_errors:
             raise ValidationError({field_name: field_errors})
+    def checkout(self, input_data: Checkout, timeout_seconds: float | None = None, extra_headers: Mapping[str, str] | None = None) -> str:
+        path = "/api/checkout"
+        if input_data is None:
+            raise ValidationError(
+                {"": [{"validator": "required", "message": "input is required"}]},
+            )
+        validated_input_data = self._validate_input_model(input_data, "Checkout")
+        query_params: dict[str, Any] | None = None
+        payload: Any = self._client.to_dict(validated_input_data)
+        response = self._client.request(
+            method="POST",
+            path=path,
+            body=payload,
+            query_params=query_params,
+            requires_auth=False,
+            timeout_seconds=timeout_seconds,
+            extra_headers=extra_headers,
+        )
+        return self._coerce_response(response, "", False)
+    def draw_shape(self, shape: Shape, timeout_seconds: float | None = None, extra_headers: Mapping[str, str] | None = None) -> Shape:
+        path = "/api/shapes"
+        query_params: dict[str, Any] | None = None
+        payload: dict[str, Any] = {}
+        payload["shape"] = self._validate_scalar_argument(
+            shape,
+            "Shape",
+            "shape",
+        )
+        response = self._client.request(
+            method="POST",
+            path=path,
+            body=payload,
+            query_params=query_params,
+            requires_auth=False,
+            timeout_seconds=timeout_seconds,
+            extra_headers=extra_headers,
+        )
+        return self._coerce_response(response, "Shape", False)
+    def draw_shapes(self, shapes: list[Shape], timeout_seconds: float | None = None, extra_headers: Mapping[str, str] | None = None) -> str:
+        path = "/api/shapes/batch"
+        query_params: dict[str, Any] | None = None
+        payload: dict[str, Any] = {}
+        if shapes is None:
+            raise ValidationError(
+                {"shapes": [{"validator": "required", "message": "shapes is required"}]},
+            )
+        payload["shapes"] = [
+            self._validate_scalar_argument(_elem, "Shape", f"shapes[{_index}]")
+            for _index, _elem in enumerate(shapes)
+        ]
+        response = self._client.request(
+            method="POST",
+            path=path,
+            body=payload,
+            query_params=query_params,
+            requires_auth=False,
+            timeout_seconds=timeout_seconds,
+            extra_headers=extra_headers,
+        )
+        return self._coerce_response(response, "", False)
     def find_shape(self, name: str, timeout_seconds: float | None = None, extra_headers: Mapping[str, str] | None = None) -> Shape | None:
         path = f"/api/shape-search/{path_segment(name)}"
         query_params: dict[str, Any] | None = None
@@ -561,6 +737,63 @@ class ShapeNamespace:
             if page.next == cursor:
                 raise SDKError("page_shapes returned the cursor it was sent")
             cursor = page.next
+    def pay(self, payment: Payment, timeout_seconds: float | None = None, extra_headers: Mapping[str, str] | None = None) -> str:
+        path = "/api/payments"
+        query_params: dict[str, Any] | None = None
+        payload: dict[str, Any] = {}
+        payload["payment"] = self._validate_scalar_argument(
+            payment,
+            "Payment",
+            "payment",
+        )
+        response = self._client.request(
+            method="POST",
+            path=path,
+            body=payload,
+            query_params=query_params,
+            requires_auth=False,
+            timeout_seconds=timeout_seconds,
+            extra_headers=extra_headers,
+        )
+        return self._coerce_response(response, "", False)
+    def probe(self, input_data: Probe, timeout_seconds: float | None = None, extra_headers: Mapping[str, str] | None = None) -> str:
+        path = "/api/probe"
+        if input_data is None:
+            raise ValidationError(
+                {"": [{"validator": "required", "message": "input is required"}]},
+            )
+        validated_input_data = self._validate_input_model(input_data, "Probe")
+        query_params: dict[str, Any] | None = None
+        payload: Any = self._client.to_dict(validated_input_data)
+        response = self._client.request(
+            method="POST",
+            path=path,
+            body=payload,
+            query_params=query_params,
+            requires_auth=False,
+            timeout_seconds=timeout_seconds,
+            extra_headers=extra_headers,
+        )
+        return self._coerce_response(response, "", False)
+    def shape_grid(self, rows: list[list[Shape]], timeout_seconds: float | None = None, extra_headers: Mapping[str, str] | None = None) -> str:
+        path = "/api/shapes/grid"
+        query_params: dict[str, Any] | None = None
+        payload: dict[str, Any] = {}
+        if rows is None:
+            raise ValidationError(
+                {"rows": [{"validator": "required", "message": "rows is required"}]},
+            )
+        payload["rows"] = self._validate_list_of_lists_argument(rows, "Shape", "rows")
+        response = self._client.request(
+            method="POST",
+            path=path,
+            body=payload,
+            query_params=query_params,
+            requires_auth=False,
+            timeout_seconds=timeout_seconds,
+            extra_headers=extra_headers,
+        )
+        return self._coerce_response(response, "", False)
     def shape_groups(self, timeout_seconds: float | None = None, extra_headers: Mapping[str, str] | None = None) -> dict[str, list[Shape]]:
         path = "/api/shape-groups"
         query_params: dict[str, Any] | None = None
@@ -587,6 +820,25 @@ class ShapeNamespace:
             extra_headers=extra_headers,
         )
         return self._coerce_list_of_lists_response(response, "Shape")
+    def shapes_by_key(self, by_key: dict[str, Shape], timeout_seconds: float | None = None, extra_headers: Mapping[str, str] | None = None) -> str:
+        path = "/api/shapes/named"
+        query_params: dict[str, Any] | None = None
+        payload: dict[str, Any] = {}
+        if by_key is None:
+            raise ValidationError(
+                {"by_key": [{"validator": "required", "message": "byKey is required"}]},
+            )
+        payload["byKey"] = self._validate_map_argument(by_key, "Shape", "by_key")
+        response = self._client.request(
+            method="POST",
+            path=path,
+            body=payload,
+            query_params=query_params,
+            requires_auth=False,
+            timeout_seconds=timeout_seconds,
+            extra_headers=extra_headers,
+        )
+        return self._coerce_response(response, "", False)
     def shapes_by_name(self, timeout_seconds: float | None = None, extra_headers: Mapping[str, str] | None = None) -> dict[str, Shape]:
         path = "/api/shape-index"
         query_params: dict[str, Any] | None = None
