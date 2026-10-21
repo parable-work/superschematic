@@ -83,6 +83,10 @@ type Cloud interface {
 	// WorkflowInstance returns an instance's status and, once it has
 	// failed, its error.
 	WorkflowInstance(ctx context.Context, account, workflow, id string) (*WorkflowInstance, error)
+
+	// TerminateWorkflowInstance stops an instance; one that has ended
+	// already is not an error.
+	TerminateWorkflowInstance(ctx context.Context, account, workflow, id string) error
 }
 
 // WorkflowInstance is a Workflow instance as Cloudflare reports it.
@@ -397,6 +401,16 @@ func (c *restCloud) WorkflowInstance(ctx context.Context, account, workflow, id 
 		return nil, err
 	}
 	return &instance, nil
+}
+
+func (c *restCloud) TerminateWorkflowInstance(ctx context.Context, account, workflow, id string) error {
+	_, err := c.call(ctx, http.MethodPatch, c.workflowPath(account, workflow)+"/"+url.PathEscape(id)+"/status", map[string]string{"status": "terminate"}, nil)
+	var apiErr *APIError
+	if errors.As(err, &apiErr) && apiErr.Status == http.StatusConflict {
+		// The instance has ended: nothing runs to stop.
+		return nil
+	}
+	return err
 }
 
 func (c *restCloud) PermissionGroups(ctx context.Context, account string) ([]PermissionGroup, error) {

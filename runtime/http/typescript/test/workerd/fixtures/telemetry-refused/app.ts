@@ -28,7 +28,7 @@ const app = new Hono();
 app.use(telemetry.middleware());
 app.get('/healthz', c => c.json({ status: 'ok' }));
 app.get('/api/quotes/:sku', async c => {
-  const answer = await pricing(`https://tel-stack-staging-shop-pricing/api/prices/${c.req.param('sku')}`);
+  const answer = await pricing(`https://tel-stack-staging-shop-pricing/api/prices/${c.req.param('sku')}?coupon=secret`);
   return c.json({ sku: c.req.param('sku'), enabled: telemetry.enabled, pricing: await answer.json() });
 });
 

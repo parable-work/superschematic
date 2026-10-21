@@ -24,8 +24,9 @@
 // which the cloudflare target runs the job once, for stack run and on a
 // deploy (D52 and D64, amended): an instance whose payload names the
 // bundle the deploy manifest records runs the same tries within one step,
-// once the Worker's SUPERSCHEMATIC_BUNDLE binding shows it runs that bundle,
-// and fails with the error a firing throws.
+// once a step of its own has checked the Worker's SUPERSCHEMATIC_BUNDLE
+// binding shows it runs that bundle, and fails with the error a firing
+// throws. An instance that names no bundle, or another one, fails for good.
 //
 // Trace export is the runtime's ./workers-telemetry (D67, D64 amended): on
 // when the Worker's OTEL_ bindings name an endpoint, each try's run of the
@@ -37,6 +38,7 @@
 // @schemas/ts-notes-implementation, at typescript/ts-notes
 
 import { env, WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from 'cloudflare:workers';
+import { NonRetryableError } from 'cloudflare:workflows';
 import { createLogger, type DatabaseConnection } from '@superschematic/http-runtime';
 import { binding, stackEnvOf } from '@superschematic/http-runtime/workers';
 import { startWorkersTelemetry } from '@superschematic/http-runtime/workers-telemetry';
@@ -141,20 +143,30 @@ interface RunPayload {
 }
 
 /**
- * The job's Workflow (D64, amended): each instance runs the job's tries
- * within one step, which retries nothing itself and may take as long as
- * every try with a minute to spare, once the Worker shows it runs the
- * bundle the instance names.
+ * The job's Workflow (D64, amended). Each instance first checks, in a step
+ * of its own, that it names a bundle and that the Worker runs it, and fails
+ * for good when not; Cloudflare keeps a step's result, so an instance a
+ * deploy interrupts is not checked again against the next bundle. Then it
+ * runs the job's tries within one step, which retries nothing itself and
+ * may take as long as every try with a minute to spare.
  */
 export class JobRun extends WorkflowEntrypoint<unknown, RunPayload | string> {
   async run(event: Readonly<WorkflowEvent<RunPayload | string>>, step: WorkflowStep): Promise<string> {
     const payload: RunPayload = typeof event.payload === 'string' ? (JSON.parse(event.payload) as RunPayload) : event.payload;
-    const running = env['SUPERSCHEMATIC_BUNDLE'];
-    if (payload.bundle && running !== payload.bundle) {
-      throw new Error(
-        `job ts-notes-prune-notes runs bundle ${typeof running === 'string' ? running : 'unknown'}, but the last deploy rolled out ${payload.bundle}: a deploy may be under way, or the Worker changed outside one; deploy it, then run the job`
-      );
-    }
+    await step.do('check the bundle', { retries: { limit: 0, delay: 0 } }, async () => {
+      const running = env['SUPERSCHEMATIC_BUNDLE'];
+      if (!payload.bundle) {
+        throw new NonRetryableError(
+          `job ts-notes-prune-notes: the instance names no bundle; the cloudflare target's job runner starts one with the bundle the last deploy rolled out (stack run)`
+        );
+      }
+      if (running !== payload.bundle) {
+        throw new NonRetryableError(
+          `job ts-notes-prune-notes runs bundle ${typeof running === 'string' ? running : 'unknown'}, but the last deploy rolled out ${payload.bundle}: a deploy may be under way, or the Worker changed outside one; deploy it, then run the job`
+        );
+      }
+      return payload.bundle;
+    });
     await step.do('run', { retries: { limit: 0, delay: 0 }, timeout: TIMEOUT_MS * TRIES + 60_000 }, async () => {
       try {
         await runTries({ instance: event.instanceId });

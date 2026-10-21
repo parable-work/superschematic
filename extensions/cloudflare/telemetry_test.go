@@ -122,12 +122,16 @@ func TestTelemetryOfOneDeployable(t *testing.T) {
 	refusedWith(t, errs, stack.CodeLowering, "binding OTEL_SERVICE_NAME: the target sets OTEL_SERVICE_NAME itself")
 }
 
-// TestTelemetryValues: an endpoint that is no http or https URL, a ratio
-// above 1 and telemetry with no endpoint are refused.
+// TestTelemetryValues: an endpoint that is no https URL, or one with
+// userinfo or a query, or plain http but to loopback, a ratio above 1 and
+// telemetry with no endpoint are refused; http to loopback is taken.
 func TestTelemetryValues(t *testing.T) {
 	reg := assemble(t)
 	for name, telemetry := range map[string]map[string]any{
 		"no URL":      {"endpoint": "otel.acme.dev"},
+		"userinfo":    {"endpoint": "https://key:secret@otel.acme.dev"},
+		"plain http":  {"endpoint": "http://otel.acme.dev"},
+		"a query":     {"endpoint": "https://otel.acme.dev/v1?token=x"},
 		"a ratio":     {"endpoint": "https://otel.acme.dev", "sampleRatio": 2.0},
 		"no endpoint": {"sampleRatio": 0.5},
 	} {
@@ -139,6 +143,13 @@ func TestTelemetryValues(t *testing.T) {
 				t.Errorf("telemetry %v resolved: %v", telemetry, errs)
 			}
 		})
+	}
+	for _, endpoint := range []string{"http://localhost:4318", "http://127.0.0.1:4318/otlp", "https://otel.acme.dev:4318/otlp"} {
+		s := webStack()
+		s.Environments[0].Values = map[string]any{"accountId": accountID, "workersSubdomain": "acme", "telemetry": map[string]any{"endpoint": endpoint}}
+		if _, errs := resolveOver(t, reg, s, webServices(), "Staging"); errs != nil {
+			t.Errorf("endpoint %s: %v", endpoint, errs)
+		}
 	}
 	if got := cloudflare.WorkersCompatibilityFlags; !slices.Equal(got, []string{"nodejs_als"}) {
 		t.Errorf("WorkersCompatibilityFlags = %v", got)

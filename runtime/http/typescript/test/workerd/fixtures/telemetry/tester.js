@@ -5,7 +5,8 @@
 // bindings name; per request a server span named by its route, the child
 // of its incoming traceparent, and a client span, its child, whose context
 // the callee received, each request's spans in its own trace, which
-// AsyncLocalStorage keeps apart; no span for /healthz; the job's span; and
+// AsyncLocalStorage keeps apart, the client span's url.full without the
+// call's query; no span for /healthz; the job's span; and
 // the resource the defaults and OTEL_RESOURCE_ATTRIBUTES give. The app with
 // no OTEL bindings exports nothing.
 
@@ -48,7 +49,13 @@ export default {
       if (!server || server.name !== 'GET /api/quotes/{sku}' || server.parentSpanId !== PARENTS[i] || server.attributes['http.route'] !== '/api/quotes/{sku}') {
         failures.push(`trace ${trace}'s server span is ${JSON.stringify(server)}`);
       }
-      if (!client || !server || client.parentSpanId !== server.spanId || client.attributes['server.address'] !== 'tel-stack-staging-shop-pricing') {
+      if (
+        !client ||
+        !server ||
+        client.parentSpanId !== server.spanId ||
+        client.attributes['server.address'] !== 'tel-stack-staging-shop-pricing' ||
+        client.attributes['url.full'] !== `https://tel-stack-staging-shop-pricing/api/prices/sku-${i}`
+      ) {
         failures.push(`trace ${trace}'s client span is ${JSON.stringify(client)}`);
       }
       const sent = answers[i].pricing.traceparent;

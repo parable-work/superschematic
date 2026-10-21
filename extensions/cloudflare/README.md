@@ -109,7 +109,8 @@ export abstract class Staging {}
 ```
 
 `telemetry: { endpoint, sampleRatio? }` beside `accountId` turns trace
-export on for each server and job, to that OTLP/HTTP collector: each gets
+export on for each server and job, to that OTLP/HTTP collector, an
+`https` URL with no userinfo, query or fragment, or `http` to loopback: each gets
 `plain_text` bindings `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME`,
 `OTEL_RESOURCE_ATTRIBUTES` (the environment, `cloud.provider=cloudflare`,
 `cloud.platform=cloudflare_workers`, the account and
@@ -236,7 +237,7 @@ rule deletes each object that many days after it was written.
 | `locationHint` | `wnam`, `enam`, `weur`, `eeur`, `apac`, `oc` | the bucket's `location` |
 | `storageClass` | `Standard`, `InfrequentAccess` | the class of new objects |
 | `deleteAfterDays` | integer, at least 1 | the lifecycle rule |
-| `jurisdiction` | `eu`, `fedramp` | the bucket's and the lifecycle's `jurisdiction`; refused beside `locationHint` |
+| `jurisdiction` | `eu`, `fedramp` | the bucket's and the lifecycle's `jurisdiction`; refused beside `locationHint`; a change replaces the bucket, which R2 refuses while it holds objects |
 
 `cloudflare.workers-r2` realizes a bucket edge from a Worker: it mints
 `<caller>.r2.<bucket>.token`, an `accountToken` named
@@ -294,10 +295,18 @@ for a job with `onDeploy`: it starts an instance of the job's Workflow
 /accounts/<id>/workflows/<name>/instances`) with the run's token, its
 payload `{"bundle": "<hex>"}`, the bundle the deploy manifest records or
 the rollout pinned, and reads it (`Cloud.WorkflowInstance`) every two
-seconds until it ends. `JobRun` refuses a bundle other than its version's
-`SUPERSCHEMATIC_BUNDLE`, then runs the job's tries in one step; the runner
-returns the error an instance that errored threw, which names the last
-try's, and says to deploy when the Workflow is not there.
+seconds until it ends, at most every try's timeout, a minute and five
+minutes queued (`workflowDeadline`). `JobRun` checks, in a step of its
+own, that the payload names a bundle and that it is its version's
+`SUPERSCHEMATIC_BUNDLE`, failing for good (`NonRetryableError`) when not,
+then runs the job's tries in another step; the runner returns the error
+an instance that errored threw, which names the last try's, and says to
+deploy when the Workflow is not there. At its deadline, after 30 reads of
+a paused or unknown instance, after failed reads, and on cancel, it
+terminates the instance (`Cloud.TerminateWorkflowInstance`). A job's
+Workflow is named as its Worker, with the stack and the environment, and
+bootstrap's tokens hold the groups the Workflows API asks for
+(`WorkflowsWriteGroup`, `WorkflowsReadGroup`).
 
 ## Sites on Workers
 

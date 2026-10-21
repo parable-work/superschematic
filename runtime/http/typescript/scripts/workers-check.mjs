@@ -64,8 +64,12 @@ function check(file) {
       // module that imported the first is the one at fault.
       if (key.startsWith('node:')) continue;
       const input = key.startsWith('../') ? basename(key) : key;
-      for (const { path } of imports) {
-        if (path.startsWith('node:') && path !== ASYNC_HOOKS) problems.push(`${input} imports ${path}, which workerd has only under nodejs_compat`);
+      for (const { path, original } of imports) {
+        // Bun names a bare builtin by its node: name, and swaps a bare
+        // async_hooks, which no external pattern keeps, for an empty module.
+        if (path === ASYNC_HOOKS && original !== undefined && !original.startsWith('node:')) {
+          problems.push(`${input} imports ${original} without node:, which the bundle swaps for an empty module; import ${ASYNC_HOOKS}`);
+        } else if (path.startsWith('node:') && path !== ASYNC_HOOKS) problems.push(`${input} imports ${path}, which workerd has only under nodejs_compat`);
         else if (path.startsWith('bun:')) problems.push(`${input} imports ${path}, which only Bun has`);
         else if (path.endsWith('.wasm') && basename(path) !== SUPERSCALAR_WASM) {
           problems.push(`${input} imports the WebAssembly module ${path}; a Worker carries superscalar's alone`);

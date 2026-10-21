@@ -1828,7 +1828,7 @@ Its settings:
 | `locationHint` | none | `wnam`, `enam`, `weur`, `eeur`, `apac` or `oc`: where R2 places the bucket |
 | `storageClass` | `Standard` | `InfrequentAccess` for new objects |
 | `deleteAfterDays` | none | a lifecycle rule deletes each object that many days after it was written |
-| `jurisdiction` | none | `eu` or `fedramp`: where R2 keeps the bucket's data; refused beside `locationHint` |
+| `jurisdiction` | none | `eu` or `fedramp`: where R2 keeps the bucket's data; refused beside `locationHint`. Changing it replaces the bucket, which `stack plan` shows, and a bucket that holds objects stops the deploy, since R2 deletes only an empty one |
 
 There is no `versioning`, which R2 lacks.
 
@@ -1974,7 +1974,9 @@ that `scheduled.ts` exports. `stack run` and a job with `onDeploy: true`
 start an instance of it through Cloudflare's API with the run's token, its
 payload the digest of the bundle the deploy manifest records; the
 instance checks the Worker runs that bundle, then runs the job's tries in
-one step, as a firing does, and the command waits for it:
+one step, as a firing does, and the command waits for it, at most every
+try's timeout and a few minutes more, terminating the instance when it
+gives up or you press Ctrl-C:
 
 ```sh
 superschematic stack run Staging shop-storefront-sweep-carts

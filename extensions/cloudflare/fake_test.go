@@ -161,6 +161,20 @@ func (c *fakeCloud) WorkflowInstance(_ context.Context, account, workflow, id st
 	return &ended, c.checkAccount(account)
 }
 
+func (c *fakeCloud) TerminateWorkflowInstance(_ context.Context, account, workflow, id string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	instance := c.instances[workflow+"/"+id]
+	if instance == nil {
+		return fmt.Errorf("fake: no instance %s of Workflow %s", id, workflow)
+	}
+	if !instance.ended.Done() {
+		instance.ended = cloudflare.WorkflowInstance{Status: cloudflare.WorkflowTerminated}
+		c.record("terminate workflow %s instance %s", workflow, id)
+	}
+	return c.checkAccount(account)
+}
+
 func (c *fakeCloud) record(format string, args ...any) {
 	c.changes = append(c.changes, fmt.Sprintf(format, args...))
 }
